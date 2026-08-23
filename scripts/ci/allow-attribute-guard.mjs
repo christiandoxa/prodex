@@ -6,7 +6,7 @@ import { git } from "./guard-common.mjs";
 import { repoRoot } from "../npm/common.mjs";
 
 export const ALLOW_ATTRIBUTE_CAPS = Object.freeze({
-  dead_code: 1,
+  dead_code: 0,
   "unused_imports": 3,
   "clippy::large_enum_variant": 10,
   "clippy::result_large_err": 3,
@@ -77,12 +77,9 @@ export const ALLOW_ATTRIBUTE_LOCATION_KEYS = Object.freeze([
   "clippy::too_many_arguments|src/enterprise_serve.rs|fn deliver_live_config_publications(",
   "clippy::too_many_arguments|src/enterprise_serve.rs|fn spawn_live_config_publication_watcher(",
   "clippy::type_complexity|crates/prodex-bench-support/src/lib.rs|pub fn run_runtime_proxy_hot_path_case_suite<",
-  // ponytail: validation mode stays explicit while interactive login is temporarily absent.
-  "dead_code|crates/prodex-app/src/runtime_gemini_auth/code_assist.rs|Interactive,",
 ]);
 
-export const TEST_ONLY_DEAD_CODE_ALLOW_LOCATION_KEYS = Object.freeze([
-]);
+export const TEST_ONLY_DEAD_CODE_ALLOW_LOCATION_KEYS = Object.freeze([]);
 
 function parseArgs(argv) {
   const args = { json: false };

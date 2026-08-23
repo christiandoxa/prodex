@@ -8,9 +8,7 @@ use serde_json::{Value, json};
 use std::env;
 use std::time::{Duration, Instant};
 use validation::gemini_validation_from_load_response;
-pub(super) use validation::{
-    gemini_validation_error_message, gemini_validation_from_body, handle_gemini_validation,
-};
+pub(super) use validation::{gemini_validation_error_message, gemini_validation_from_body};
 
 mod validation;
 
@@ -57,13 +55,6 @@ struct GeminiCodeAssistOperationResponse {
     response: Option<GeminiCodeAssistOnboardResponse>,
 }
 
-#[derive(Debug, Clone, Copy)]
-pub(super) enum GeminiCodeAssistSetupMode {
-    #[allow(dead_code)]
-    Interactive,
-    NonInteractive,
-}
-
 #[derive(Debug, Clone)]
 pub(super) struct GeminiCodeAssistValidation {
     url: Option<String>,
@@ -84,37 +75,31 @@ pub(super) fn resolve_gemini_code_assist_project_with_endpoint(
     client: &Client,
     secret: &GeminiOAuthSecret,
     code_assist_endpoint: &str,
-    mode: GeminiCodeAssistSetupMode,
 ) -> Result<Option<String>> {
-    setup_gemini_code_assist_project_with_endpoint(client, secret, code_assist_endpoint, mode)
+    setup_gemini_code_assist_project_with_endpoint(client, secret, code_assist_endpoint)
 }
 
 fn setup_gemini_code_assist_project_with_endpoint(
     client: &Client,
     secret: &GeminiOAuthSecret,
     code_assist_endpoint: &str,
-    mode: GeminiCodeAssistSetupMode,
 ) -> Result<Option<String>> {
     let project_id = gemini_oauth_project_from_env();
-    let mut load_response = loop {
-        let value = request_gemini_code_assist_post(
-            client,
-            secret,
-            code_assist_endpoint,
-            "loadCodeAssist",
-            &json!({
-                "cloudaicompanionProject": project_id.as_deref(),
-                "metadata": gemini_code_assist_metadata(project_id.as_deref()),
-            }),
-        )?;
-        let load_response: GeminiLoadCodeAssistResponse = serde_json::from_value(value)
-            .context("failed to parse Gemini Code Assist setup response")?;
-        if let Some(validation) = gemini_validation_from_load_response(&load_response) {
-            handle_gemini_validation(&validation, mode)?;
-            continue;
-        }
-        break load_response;
-    };
+    let value = request_gemini_code_assist_post(
+        client,
+        secret,
+        code_assist_endpoint,
+        "loadCodeAssist",
+        &json!({
+            "cloudaicompanionProject": project_id.as_deref(),
+            "metadata": gemini_code_assist_metadata(project_id.as_deref()),
+        }),
+    )?;
+    let mut load_response: GeminiLoadCodeAssistResponse = serde_json::from_value(value)
+        .context("failed to parse Gemini Code Assist setup response")?;
+    if let Some(validation) = gemini_validation_from_load_response(&load_response) {
+        bail!("{}", gemini_validation_error_message(&validation));
+    }
 
     if let Some(project_id) = load_response
         .cloudaicompanion_project
@@ -469,13 +454,9 @@ mod tests {
             .timeout(Duration::from_secs(30))
             .build()
             .expect("client should build");
-        let project_id = resolve_gemini_code_assist_project_with_endpoint(
-            &client,
-            &secret,
-            &endpoint,
-            GeminiCodeAssistSetupMode::NonInteractive,
-        )
-        .expect("Code Assist setup should succeed");
+        let project_id =
+            resolve_gemini_code_assist_project_with_endpoint(&client, &secret, &endpoint)
+                .expect("Code Assist setup should succeed");
         handle.join().expect("setup test server should finish");
 
         assert_eq!(project_id.as_deref(), Some("created-project"));

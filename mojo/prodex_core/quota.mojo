@@ -143,6 +143,11 @@ def prodex_quota_gemini_bucket_batch(
                 )
                 if total_value >= remaining_value:
                     has_total = 1
+        elif amount_state == 0 and has_fraction == 1:
+            remaining_value = prodex_quota_round_f64(fraction * 100.0)
+            has_remaining = 1
+            total_value = 100
+            has_total = 1
         if has_fraction == 1:
             percent_value = prodex_quota_round_f64(fraction * 100.0)
             has_percent = 1

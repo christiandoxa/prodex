@@ -445,8 +445,8 @@ fn gemini_bucket_batch_preserves_normalized_presence_states() {
                 exhausted: false,
             },
             GeminiBucketNumericOutput {
-                remaining: None,
-                total: None,
+                remaining: Some(50),
+                total: Some(100),
                 remaining_percent: Some(50),
                 exhausted: false,
             },
@@ -469,10 +469,10 @@ fn gemini_bucket_batch_preserves_normalized_presence_states() {
                 exhausted: true,
             },
             GeminiBucketNumericOutput {
-                remaining: None,
-                total: None,
+                remaining: Some(0),
+                total: Some(100),
                 remaining_percent: Some(0),
-                exhausted: false,
+                exhausted: true,
             },
             GeminiBucketNumericOutput {
                 remaining: Some(50),

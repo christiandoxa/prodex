@@ -1,15 +1,5 @@
-use super::{GeminiCodeAssistSetupMode, GeminiCodeAssistValidation, GeminiLoadCodeAssistResponse};
-use anyhow::{Result, bail};
-use crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
-use ratatui::layout::{Constraint, Direction, Layout};
-use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
+use super::{GeminiCodeAssistValidation, GeminiLoadCodeAssistResponse};
 use serde_json::Value;
-use std::io::{self, IsTerminal};
-use terminal_ui::{
-    tui_border_style, tui_connected_footer_block, tui_connected_header_block, tui_hint_style,
-    tui_primary_style, tui_secondary_style, tui_success_style, tui_title_style,
-};
 
 pub(super) fn gemini_validation_from_load_response(
     response: &GeminiLoadCodeAssistResponse,
@@ -141,92 +131,6 @@ fn trusted_gemini_validation_url(value: &str) -> Option<String> {
         return None;
     }
     Some(url.to_string())
-}
-
-pub(in crate::runtime_gemini_auth) fn handle_gemini_validation(
-    validation: &GeminiCodeAssistValidation,
-    mode: GeminiCodeAssistSetupMode,
-) -> Result<()> {
-    if matches!(mode, GeminiCodeAssistSetupMode::NonInteractive) {
-        bail!("{}", gemini_validation_error_message(validation));
-    }
-    if !io::stdin().is_terminal() || !io::stderr().is_terminal() {
-        bail!("Gemini account validation requires an interactive terminal");
-    }
-    if let Some(url) = validation.url.as_deref() {
-        let _ = crate::dashboard::open_browser(url);
-    }
-    prompt_gemini_validation_tui(validation)?;
-    Ok(())
-}
-
-type GeminiValidationTui = terminal_ui::AlternateScreenTerminal<io::Stderr>;
-
-fn prompt_gemini_validation_tui(validation: &GeminiCodeAssistValidation) -> Result<()> {
-    let message = gemini_validation_error_message(validation);
-    let mut tui = GeminiValidationTui::stderr("Gemini validation TUI")?;
-    loop {
-        tui.terminal.draw(|frame| {
-            let chunks = Layout::default()
-                .direction(Direction::Vertical)
-                .constraints([
-                    Constraint::Length(3),
-                    Constraint::Min(5),
-                    Constraint::Length(3),
-                ])
-                .split(frame.area());
-            let header = Paragraph::new(Line::from(vec![
-                Span::styled("Gemini Account Validation", tui_title_style()),
-                Span::raw("  "),
-                Span::styled("action required", tui_hint_style()),
-            ]))
-            .block(tui_connected_header_block(tui_border_style()));
-            frame.render_widget(header, chunks[0]);
-
-            let mut lines = vec![
-                Line::from(Span::styled(message.clone(), tui_primary_style())),
-                Line::raw(""),
-            ];
-            if let Some(url) = validation.url.as_deref() {
-                lines.push(Line::from(vec![
-                    Span::styled("Open ", tui_secondary_style()),
-                    Span::styled(url.to_string(), tui_success_style()),
-                ]));
-            }
-            if let Some(url) = validation.learn_more_url.as_deref() {
-                lines.push(Line::from(vec![
-                    Span::styled("Learn ", tui_secondary_style()),
-                    Span::styled(url.to_string(), tui_success_style()),
-                ]));
-            }
-            let body = Paragraph::new(lines)
-                .block(
-                    Block::default()
-                        .borders(Borders::LEFT | Borders::RIGHT)
-                        .border_style(tui_border_style()),
-                )
-                .wrap(Wrap { trim: false });
-            frame.render_widget(body, chunks[1]);
-
-            let footer = Paragraph::new(Line::from(vec![
-                Span::styled("enter", tui_success_style()),
-                Span::raw(" continue after verification  "),
-                Span::styled("esc", tui_hint_style()),
-                Span::raw(" continue"),
-            ]))
-            .block(tui_connected_footer_block(tui_border_style()));
-            frame.render_widget(footer, chunks[2]);
-        })?;
-
-        if let Event::Key(key) = event::read()?
-            && key.kind == KeyEventKind::Press
-            && (matches!(key.code, KeyCode::Enter | KeyCode::Esc)
-                || (key.modifiers.contains(KeyModifiers::CONTROL)
-                    && matches!(key.code, KeyCode::Char('c') | KeyCode::Char('z'))))
-        {
-            return Ok(());
-        }
-    }
 }
 
 pub(in crate::runtime_gemini_auth) fn gemini_validation_error_message(
