@@ -1,5 +1,27 @@
 [
   {
+    "id": "audited-mojo-kiss-runtime-feature-0.414.0",
+    "requiredSubjects": [
+      "refactor: remove dead and pass-through helpers",
+      "refactor(mojo): split runtime decision kernels",
+      "refactor(mojo): introduce versioned provider ABI",
+      "refactor(workspace): merge runtime compatibility classifier",
+      "refactor(workspace): inline app proxy client config",
+      "refactor(workspace): fold app-only reports into app",
+      "ci: reduce root task interface",
+      "fix(runtime): normalize weighted inflight limits",
+      "fix(runtime): exhaust safe precommit candidates",
+      "chore(ci): record reviewed Mojo KISS refactor churn"
+    ],
+    "caps": {
+      "maxFiles": 131,
+      "maxBehaviorFiles": 100,
+      "maxLines": 5200,
+      "maxFileLines": 800
+    },
+    "reason": "Reviewed the bounded Mojo KISS campaign covering dead wrapper deletion, three proven single-owner crate folds, a smaller root task interface, cohesive Mojo kernel modules, the versioned provider flat-buffer ABI, and affinity-safe bounded precommit rotation; exact caps cover the audited commits and churn record while source, strict Mojo, runtime affinity, load, benchmark, compatibility, security, and release gates remain mandatory."
+  },
+  {
     "id": "audited-mojo-runtime-ci-feature-0.412.0",
     "requiredSubjects": [
       "fix(runtime): preserve remembered model on resume",
