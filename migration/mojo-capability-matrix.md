@@ -76,7 +76,7 @@ explicit `mojo-provider-constraints` feature for the provider-core owner.
 | Kernel | Boundary shape | Maximum / tags | Float or strings | Rust retained outside `MOJO` |
 | --- | --- | --- | --- | --- |
 | Optimistic candidate decision | Fixed scalar integers and normalized booleans | 15 result tags; route/source/quota tags | Rust owns strings and comparisons | Test oracle; Rust-only path |
-| Provider request constraints | Fixed scalar `UInt64`/`Int64` input and caller-owned outputs | Explicit policy/decision/feature/field tags; one evaluation | Rust owns JSON, catalog, provider adapters, and errors | Test oracle; Rust-only path |
+| Provider request constraints | Versioned 17/7-word input and 12/5-word output flat buffers | Exact counts plus explicit policy/decision/feature/field tags; one evaluation | Rust owns JSON, catalog, provider adapters, and errors | Test oracle; Rust-only path |
 | Smart Context rehydration | Parallel cost/required/availability arrays | 256 rows; four action tags | Rust owns artifact IDs, store lookup, and ordering | Test oracle; Rust-only path |
 | Quota main aggregation | Parallel presence/value arrays | 1,024 rows; presence flags | Rust owns decimal/floating conversion and reset acquisition | Test oracle; Rust-only path |
 | Runtime profile scheduling order | Parallel 16-field `Int64` rows and output indices | 256 rows; stable permutation | Rust owns clock/state/name collection; Mojo derives scaling, reserve bias, and hysteresis ordering | Test oracle; Rust-only path |

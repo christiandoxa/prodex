@@ -189,3 +189,13 @@ aggregation, provider constraints, Smart Context rehydration, runtime tuning, pr
 runtime-policy numeric validation, critical-signal arithmetic, and the existing runtime/routing
 modules. A module is reported active only when the shared archive is active and that module
 self-test passes. The shipped compiler requirement remains false.
+
+## 2026-08-23: Version provider constraints independently
+
+The unversioned provider constraint export exposed 39 positional ABI parameters. Mojo 1.0.0
+compiled and linked a C-struct layout probe on x86_64 Linux, but the local environment could not
+independently link and execute the same probe for the supported aarch64 Linux release target.
+The authoritative provider kernel therefore uses ABI v2 with exact, separate `Int64` and `UInt64`
+flat-buffer schemas. `prodex-mojo-core` owns all unsafe declarations and converts checked tags to
+typed Rust enums; count, version, tag, presence, and output-coherence failures fail closed. The
+shared routing ABI remains version 1.

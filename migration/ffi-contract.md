@@ -164,7 +164,6 @@ prodex_runtime_quota_profile_schedule_batch(..., count: Int64) -> Int64
 prodex_runtime_policy_validate_numeric(..., count: Int64) -> Int64
 prodex_context_signal_diff(..., seven counters) -> Int64
 prodex_smart_context_estimate_tokens_from_body_bytes(body_bytes: UInt64) -> UInt64
-prodex_routing_score_batch(..., count: Int64, weights...) -> Int64
 prodex_routing_plan_batch(..., count: Int64, required_capability_mask: Int64, weights...) -> Int64
 prodex_capability_match_batch(..., count: Int64, required_capability_mask: Int64) -> Int64
 prodex_smart_context_pressure_snapshot(..., output pointers...) -> Int64
@@ -173,6 +172,8 @@ prodex_runtime_candidate_plan_batch(..., count: Int64, route_kind: Int64) -> Int
 
 Existing routing and capability batches use parallel flat `Int64` arrays and accept at most 64
 records. The runtime candidate-plan batch uses the same layout and accepts at most 256 records.
+The routing-plan implementation retains its score sub-batch as an internal Mojo function; it is
+not a separately exported or Rust-callable ABI.
 A zero-length batch is valid and does not read or write per-record arrays;
 the scalar result pointers (`ordered_count`, `first_compatible`, and `first_incompatible`) still
 need one writable slot. Non-zero batches require every per-record pointer to reference at least
@@ -253,9 +254,11 @@ prodex_runtime_tuning_defaults(
     websocket_dns_worker_count: *mut Int64,
 ) -> Int64
 
-prodex_provider_constraints_evaluate(
-    normalized scalar/presence inputs,
-    caller-owned scalar/presence outputs,
+prodex_provider_constraints_evaluate_v2(
+    input_i64: *const Int64, input_i64_count: Int64,
+    input_u64: *const UInt64, input_u64_count: Int64,
+    output_i64: *mut Int64, output_i64_count: Int64,
+    output_u64: *mut UInt64, output_u64_count: Int64,
 ) -> Int64
 ```
 
@@ -280,9 +283,17 @@ and `OutputLimitClamped=11`. Feature tags follow Rust enum order (`Tools=0` thro
 `MaxTokens=2`. Unknown-context tags are `Allow=0`, `SafeWindow=1`, `Reject=2`; oversized-output
 tags are `Passthrough=0`, `Reject=1`, `ClampWithNotice=2`. Rust reconstructs warning-bit order.
 
-All new boundaries are additive and keep ABI version `1`. Rust owns every input/output buffer and
-validates status, presence flags, tags, bounds, and conversions. Invalid Mojo results return an
-error or fail an internal invariant; strict builds fail if current Mojo source cannot compile.
+Provider constraint ABI version `2` is independent of the shared routing ABI version. It requires
+exact field counts of 17/7 input `Int64`/`UInt64` words and 12/5 output words. Input word zero and
+output word zero carry the provider ABI version. Rust exposes typed enums rather than numeric tags;
+unknown tags, invalid presence/value pairs, wrong counts, reserved decision output, and version
+mismatch fail closed before a result reaches provider routing.
+
+The shared routing ABI remains version `1`; provider constraints deliberately replace their
+unversioned scalar ABI with the versioned buffer contract above. Rust owns every input/output
+buffer and validates status, presence flags, tags, bounds, and conversions. Invalid Mojo results
+return an error or fail an internal invariant; strict builds fail if current Mojo source cannot
+compile.
 
 ## Runtime candidate-plan and Smart Context pressure contracts
 
