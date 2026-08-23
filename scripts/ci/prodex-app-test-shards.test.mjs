@@ -198,7 +198,7 @@ test("CI consumes generated app shards and retains required safety gates", () =>
   assert.match(processGuard, /mozilla-actions\/sccache-action@/);
   assert.match(processGuard, /Swatinem\/rust-cache@/);
   assert.match(processGuard, /scripts\/ci\/static-guards-parallel\.mjs/);
-  assert.doesNotMatch(processGuard, /npm run docs:smart-context-evidence:check/);
+  assert.equal(processGuard.includes("node scripts/docs/smart-context-evidence.mjs --check"), false);
   assert.equal(
     processGuard.match(/if: matrix\.lane == 'static' \|\| matrix\.lane == 'enterprise-storage'/g)
       ?.length,
@@ -212,16 +212,16 @@ test("CI consumes generated app shards and retains required safety gates", () =>
   assert.match(smartContextEvidence, /dtolnay\/rust-toolchain@/);
   assert.match(smartContextEvidence, /mozilla-actions\/sccache-action@/);
   assert.match(smartContextEvidence, /Swatinem\/rust-cache@/);
-  assert.match(smartContextEvidence, /npm run docs:smart-context-evidence:check/);
+  assert.ok(smartContextEvidence.includes("node scripts/docs/smart-context-evidence.mjs --check"));
   const telemetry = workflow.match(/\n  ci-duration-telemetry:\n([\s\S]*)$/)?.[1];
   assert.match(telemetry, /- smart-context-evidence/);
   for (const [source, command] of [
-    [workflow, "npm run docs:lint"],
-    [staticGuards, "ci:secret-boundary-guard"],
-    [staticGuards, "ci:crate-boundary"],
-    [workflow, "npm run ci:deployment-security-guard"],
-    [workflow, "npm run ci:backup-restore-drill"],
-    [workflow, "npm run ci:storage-postgres-proof"],
+    [workflow, "node scripts/docs/lint-markdown.mjs && node scripts/docs/runtime-policy.mjs --self-test && node scripts/docs/runtime-policy.mjs --check"],
+    [staticGuards, "scripts/ci/secret-boundary-guard.mjs"],
+    [staticGuards, "scripts/ci/crate-boundary-guard.mjs"],
+    [workflow, "node scripts/ci/deployment-security-guard.mjs --self-test && node scripts/ci/deployment-security-guard.mjs"],
+    [workflow, "node scripts/ci/backup-restore-drill.mjs --self-test && node scripts/ci/backup-restore-drill.mjs"],
+    [workflow, "node scripts/ci/storage-postgres-proof.mjs --self-test && node scripts/ci/storage-postgres-proof.mjs"],
     [workflow, "redis_rate_limit_runtime"],
   ]) {
     assert.match(source, new RegExp(command.replace(/[.*+?^${}()|[\\]\\]/g, "\\$&")), `${command} missing`);

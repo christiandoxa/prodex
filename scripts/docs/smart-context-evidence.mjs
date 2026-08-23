@@ -115,10 +115,10 @@ if (write) {
   const checkedMarkdown = fs.readFileSync(markdownPath, "utf8");
   validateAllocationEvidence(checkedJson);
   if (normalizedReport(checkedJson) !== normalizedReport(report)) {
-    throw new Error("Smart Context replay JSON is stale; run npm run docs:smart-context-evidence");
+    throw new Error("Smart Context replay JSON is stale; run node scripts/docs/smart-context-evidence.mjs --write");
   }
   if (normalizedMarkdown(checkedMarkdown) !== normalizedMarkdown(renderMarkdown(report))) {
-    throw new Error("Smart Context replay Markdown is stale; run npm run docs:smart-context-evidence");
+    throw new Error("Smart Context replay Markdown is stale; run node scripts/docs/smart-context-evidence.mjs --write");
   }
   process.stdout.write("Smart Context evidence: ok\n");
 }

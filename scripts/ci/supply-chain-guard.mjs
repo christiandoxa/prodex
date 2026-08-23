@@ -94,7 +94,7 @@ export function validateProcessGuard(contents) {
   const job = workflowJob(contents, "process-guard");
   if (!job) return [".github/workflows/ci.yml: missing process-guard job"];
   const violations = [];
-  if (!job.includes('npm run ci:churn-hygiene:check -- --base "${before}" --head "${after}"')) {
+  if (!job.includes('node scripts/ci/churn-hygiene.mjs --check --base "${before}" --head "${after}"')) {
     violations.push(".github/workflows/ci.yml: process-guard must check the complete push range");
   }
   if (job.includes("for commit in") || job.includes("git rev-list --reverse")) {
@@ -688,7 +688,7 @@ function selfTest() {
       - run: |
           before="before"
           after="after"
-          npm run ci:churn-hygiene:check -- --base "\${before}" --head "\${after}"
+          node scripts/ci/churn-hygiene.mjs --check --base "\${before}" --head "\${after}"
 `;
   assert.deepEqual(validateProcessGuard(processJob), []);
   assert.equal(validateProcessGuard(`${processJob}          for commit in commits; do :; done\n`).length, 1);

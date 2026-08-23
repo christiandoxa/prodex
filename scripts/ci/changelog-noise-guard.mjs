@@ -46,7 +46,7 @@ function issueForChange(change) {
     subject: subject || "(no message provided)",
     files: change.files,
     message:
-      "CHANGELOG.md is generated release metadata; let npm run release:run render it in the release commit",
+      "CHANGELOG.md is generated release metadata; let npm run release render it in the release commit",
   };
 }
 

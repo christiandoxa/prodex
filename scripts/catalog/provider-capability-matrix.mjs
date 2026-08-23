@@ -214,7 +214,7 @@ if (write) {
 } else {
   const current = readFileSync(outPath, "utf8");
   if (current !== next) {
-    console.error("provider capability matrix is stale; run npm run docs:provider-capabilities");
+    console.error("provider capability matrix is stale; run node scripts/catalog/provider-capability-matrix.mjs --write");
     process.exitCode = 1;
   }
 }

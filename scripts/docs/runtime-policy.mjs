@@ -423,7 +423,7 @@ async function checkDocs(generatedTable) {
       `${path.relative(
         repoRoot,
         docsPath,
-      )} Runtime Proxy Keys table is stale; run npm run docs:runtime-policy`,
+      )} Runtime Proxy Keys table is stale; run node scripts/docs/runtime-policy.mjs --write`,
     );
   }
   errors.push(

@@ -282,7 +282,7 @@ jobs:
           package-manager-cache: false
 
       - name: Lint markdown docs
-        run: npm run docs:lint
+        run: node scripts/docs/lint-markdown.mjs && node scripts/docs/runtime-policy.mjs --self-test && node scripts/docs/runtime-policy.mjs --check
 
   observability-alerts:
     name: Prometheus alert rule tests
@@ -475,7 +475,7 @@ jobs:
 
       - name: Test Windows installer
         if: ${{ always() && !cancelled() && matrix.suite == 'root-0' }}
-        run: npm run installer:test
+        run: node --test scripts/install.test.mjs
 
   windows-prodex-app:
     name: Windows prodex-app tests (${{ matrix.label }})
@@ -681,7 +681,7 @@ jobs:
           cache-bin: false
 
       - name: Check generated Smart Context evidence
-        run: npm run docs:smart-context-evidence:check
+        run: node scripts/docs/smart-context-evidence.mjs --check
 
   process-guard:
     name: Process guard (${{ matrix.lane }})
@@ -737,7 +737,7 @@ jobs:
         run: |
           set -euo pipefail
           if [ "${{ github.event_name }}" = "pull_request" ]; then
-            npm run ci:churn-hygiene:check -- --base "${{ github.event.pull_request.base.sha }}" --head "${{ github.event.pull_request.head.sha }}"
+            node scripts/ci/churn-hygiene.mjs --check --base "${{ github.event.pull_request.base.sha }}" --head "${{ github.event.pull_request.head.sha }}"
             exit 0
           fi
 
@@ -747,9 +747,9 @@ jobs:
              [ "${before}" != "0000000000000000000000000000000000000000" ] &&
              git rev-parse --verify --quiet "${before}^{commit}" >/dev/null &&
              git rev-parse --verify --quiet "${after}^{commit}" >/dev/null; then
-            npm run ci:churn-hygiene:check -- --base "${before}" --head "${after}"
+            node scripts/ci/churn-hygiene.mjs --check --base "${before}" --head "${after}"
           else
-            npm run ci:churn-hygiene:check
+            node scripts/ci/churn-hygiene.mjs --check
           fi
 
       - name: Enforce release hygiene
@@ -762,7 +762,7 @@ jobs:
           if [ "${{ github.event_name }}" = "pull_request" ]; then
             base="${{ github.event.pull_request.base.sha }}"
             head="${{ github.event.pull_request.head.sha }}"
-            npm run ci:release-hygiene -- --base "${base}" --head "${head}"
+            node scripts/ci/release-hygiene.mjs --base "${base}" --head "${head}"
             exit 0
           fi
 
@@ -772,9 +772,9 @@ jobs:
              [ "${before}" != "0000000000000000000000000000000000000000" ] &&
              git rev-parse --verify --quiet "${before}^{commit}" >/dev/null &&
              git rev-parse --verify --quiet "${after}^{commit}" >/dev/null; then
-            npm run ci:release-hygiene -- --base "${before}" --head "${after}"
+            node scripts/ci/release-hygiene.mjs --base "${before}" --head "${after}"
           else
-            npm run ci:release-hygiene
+            node scripts/ci/release-hygiene.mjs
           fi
 
       - name: Run independent static guards in parallel
@@ -786,39 +786,39 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          npm run ci:enterprise-docs-guard
-          npm run ci:enterprise-id-boundary-guard
-          npm run ci:enterprise-binaries-guard
-          npm run ci:application-boundary-guard
-          npm run ci:production-boundary-guard
-          npm run ci:auth-boundary-guard
+          node scripts/ci/enterprise-docs-guard.mjs --self-test && node scripts/ci/enterprise-docs-guard.mjs
+          node scripts/ci/enterprise-id-boundary-guard.mjs --self-test && node scripts/ci/enterprise-id-boundary-guard.mjs
+          node scripts/ci/enterprise-binaries-guard.mjs --self-test && node scripts/ci/enterprise-binaries-guard.mjs
+          node scripts/ci/application-boundary-guard.mjs --self-test && node scripts/ci/application-boundary-guard.mjs
+          node scripts/ci/production-boundary-guard.mjs --self-test && node scripts/ci/production-boundary-guard.mjs
+          node scripts/ci/auth-boundary-guard.mjs --self-test && node scripts/ci/auth-boundary-guard.mjs
 
       - name: Enforce enterprise storage boundary guards
         if: matrix.lane == 'enterprise-storage'
         shell: bash
         run: |
           set -euo pipefail
-          npm run ci:config-boundary-guard
-          npm run ci:control-plane-boundary-guard
-          npm run ci:observability-boundary-guard
-          npm run ci:provider-spi-boundary-guard
-          npm run ci:storage-boundary-guard
-          npm run ci:storage-postgres-boundary-guard
+          node scripts/ci/config-boundary-guard.mjs --self-test && node scripts/ci/config-boundary-guard.mjs
+          node scripts/ci/control-plane-boundary-guard.mjs --self-test && node scripts/ci/control-plane-boundary-guard.mjs
+          node scripts/ci/observability-boundary-guard.mjs --self-test && node scripts/ci/observability-boundary-guard.mjs
+          node scripts/ci/provider-spi-boundary-guard.mjs --self-test && node scripts/ci/provider-spi-boundary-guard.mjs
+          node scripts/ci/storage-boundary-guard.mjs --self-test && node scripts/ci/storage-boundary-guard.mjs
+          node scripts/ci/storage-postgres-boundary-guard.mjs --self-test && node scripts/ci/storage-postgres-boundary-guard.mjs
 
       - name: Enforce enterprise edge boundary guards
         if: matrix.lane == 'enterprise-edge'
         shell: bash
         run: |
           set -euo pipefail
-          npm run ci:storage-redis-boundary-guard
-          npm run ci:storage-sqlite-boundary-guard
-          npm run ci:gateway-core-boundary-guard
-          npm run ci:gateway-http-boundary-guard
-          npm run ci:deployment-security-guard
+          node scripts/ci/storage-redis-boundary-guard.mjs --self-test && node scripts/ci/storage-redis-boundary-guard.mjs
+          node scripts/ci/storage-sqlite-boundary-guard.mjs --self-test && node scripts/ci/storage-sqlite-boundary-guard.mjs
+          node scripts/ci/gateway-core-boundary-guard.mjs --self-test && node scripts/ci/gateway-core-boundary-guard.mjs
+          node scripts/ci/gateway-http-boundary-guard.mjs --self-test && node scripts/ci/gateway-http-boundary-guard.mjs
+          node scripts/ci/deployment-security-guard.mjs --self-test && node scripts/ci/deployment-security-guard.mjs
 
       - name: Enforce dependency duplicate budget
         if: matrix.lane == 'static'
-        run: npm run ci:dependency-duplicates
+        run: node scripts/ci/dependency-duplicate-guard.mjs
 
       - name: Run all Node.js tests
         if: matrix.lane == 'node'
@@ -907,10 +907,10 @@ jobs:
         run: sudo apt-get update && sudo apt-get install --yes postgresql-client
 
       - name: Run PostgreSQL accounting concurrency proof
-        run: npm run ci:storage-postgres-proof
+        run: node scripts/ci/storage-postgres-proof.mjs --self-test && node scripts/ci/storage-postgres-proof.mjs
 
       - name: Run PostgreSQL backup and restore drill
-        run: npm run ci:backup-restore-drill
+        run: node scripts/ci/backup-restore-drill.mjs --self-test && node scripts/ci/backup-restore-drill.mjs
 
       - name: Upload redacted backup and restore evidence
         if: always()
@@ -936,7 +936,7 @@ jobs:
           package-manager-cache: false
 
       - name: Run offline upstream compat replay gate
-        run: npm run compat:offline-gate
+        run: node scripts/compat/check-upstream-baseline.mjs && node scripts/compat/capture-replay-fixture-tests.mjs
 
   rust-quality:
     name: SonarQube Rust quality gate
@@ -1273,9 +1273,9 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          npm run changelog:ci-check
+          node scripts/npm/changelog.mjs --ci-check
           npm run npm:sync-version
-          npm run ci:generated-metadata-clean
+          node scripts/ci/generated-metadata-clean.mjs
 
   npm-package-smoke:
     needs: changes
@@ -1332,7 +1332,7 @@ jobs:
           package-manager-cache: false
 
       - name: Test standalone installer
-        run: npm run installer:test
+        run: node --test scripts/install.test.mjs
 
   auto-rotate:
     needs: changes
@@ -1651,7 +1651,7 @@ jobs:
         run: cargo build --locked --features allocation-bench-support --bin prodex
 
       - name: Run runtime proxy load smoke
-        run: npm run ci:runtime-load-smoke -- --mode proxy --prodex target/debug/prodex
+        run: node tests/load/mock-upstream.mjs --self-test && node tests/load/runtime-proxy-load.mjs --self-test && node scripts/ci/runtime-load-smoke.mjs --mode proxy --prodex target/debug/prodex
 
   runtime-stress:
     name: Runtime stress (${{ matrix.label }})
@@ -1698,14 +1698,14 @@ jobs:
             echo "artifact_dir=${RUNTIME_STRESS_ARTIFACT_DIR}"
             echo "runtime_log_dir=${PRODEX_RUNTIME_LOG_DIR}"
             echo "started_at=$(date -u +%FT%TZ)"
-            echo "command=npm run ci:runtime-stress -- --suite ${{ matrix.suite }} --shard-index ${{ matrix.shard }} --shard-count ${{ matrix.shard_count }}"
+            echo "command=node scripts/ci/runtime-stress.mjs --suite ${{ matrix.suite }} --shard-index ${{ matrix.shard }} --shard-count ${{ matrix.shard_count }}"
           } > "${RUNTIME_STRESS_ARTIFACT_DIR}/metadata.txt"
 
       - name: Run runtime stress ${{ matrix.label }}
         shell: bash
         run: |
           set -euo pipefail
-          npm run ci:runtime-stress -- \
+          node scripts/ci/runtime-stress.mjs \
             --suite "${{ matrix.suite }}" \
             --shard-index "${{ matrix.shard }}" \
             --shard-count "${{ matrix.shard_count }}" \

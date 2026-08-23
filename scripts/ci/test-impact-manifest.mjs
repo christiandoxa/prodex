@@ -60,7 +60,6 @@ export const CAPTURE_REPLAY_FIXTURE_TESTS_PATH =
 export const WATCH_UPSTREAM_FIXTURE_TESTS_PATH =
   "scripts/compat/watch-upstream-fixture-tests.mjs";
 export const UPSTREAM_COMPAT_SCRIPT_PATHS = manifestValue("upstreamCompatScriptPaths");
-export const PACKAGE_SCRIPT_ALIASES = manifestValue("packageScriptAliases");
 export const PATH_GROUPS = manifestValue("pathGroups");
 export const PATH_GROUP_NAMES = deepFreeze(
   Object.fromEntries(Object.keys(PATH_GROUPS).map((name) => [name, name])),

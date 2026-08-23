@@ -3,25 +3,30 @@
 import { parsePositiveInteger, runStepsParallel } from "./main-internal-test-runner.mjs";
 
 const steps = [
-  ["rust-size", "ci:size-guard"],
-  ["rust-allow", "ci:allow-guard"],
-  ["mojo-no-fallback", "ci:mojo-no-fallback-guard"],
-  ["optional-tools", "ci:optional-tools-guard"],
-  ["smart-context", "ci:smart-context-guard"],
-  ["full-test-shards", "ci:full-test-shards"],
-  ["provider-capabilities", "docs:provider-capabilities:check"],
-  ["runtime-manifest", "ci:runtime-manifest"],
-  ["runtime-hotpath", "ci:runtime-hotpath-guard"],
-  ["super-wildcard", "ci:super-wildcard-guard"],
-  ["env-mutation", "ci:env-mutation-guard"],
-  ["secret-boundary", "ci:secret-boundary-guard"],
-  ["supply-chain", "ci:supply-chain-guard"],
-  ["crate-boundary", "ci:crate-boundary"],
-  ["domain-boundary", "ci:domain-boundary-guard"],
-].map(([label, script]) => ({
+  ["rust-size", "scripts/ci/size-guard.mjs"],
+  ["rust-allow", "scripts/ci/allow-attribute-guard.mjs"],
+  ["mojo-no-fallback-self-test", "scripts/ci/mojo-no-fallback-guard.mjs", "--self-test"],
+  ["mojo-no-fallback", "scripts/ci/mojo-no-fallback-guard.mjs"],
+  ["optional-tools", "scripts/ci/optional-tools-guard.mjs", "--self-test"],
+  ["smart-context", "scripts/ci/smart-context-guard.mjs", "--self-test"],
+  ["full-test-shards", "scripts/ci/prodex-app-test-shards.mjs", "--check"],
+  ["provider-subprocess", "--test", "scripts/lib/checked-subprocess.test.mjs"],
+  ["provider-capabilities", "scripts/catalog/provider-capability-matrix.mjs"],
+  ["runtime-manifest", "scripts/ci/runtime-test-manifest-guard.mjs"],
+  ["runtime-hotpath-self-test", "scripts/ci/runtime-hotpath-guard.mjs", "--self-test"],
+  ["runtime-hotpath", "scripts/ci/runtime-hotpath-guard.mjs"],
+  ["super-wildcard", "scripts/ci/super-wildcard-guard.mjs"],
+  ["env-mutation", "scripts/ci/env-mutation-guard.mjs"],
+  ["secret-boundary", "scripts/ci/secret-boundary-guard.mjs", "--self-test"],
+  ["supply-chain", "scripts/ci/supply-chain-guard.mjs", "--self-test"],
+  ["crate-boundary-self-test", "scripts/ci/crate-boundary-guard.mjs", "--self-test"],
+  ["crate-boundary", "scripts/ci/crate-boundary-guard.mjs"],
+  ["domain-boundary-self-test", "scripts/ci/domain-boundary-guard.mjs", "--self-test"],
+  ["domain-boundary", "scripts/ci/domain-boundary-guard.mjs"],
+].map(([label, ...args]) => ({
   label: `static-guard:${label}`,
-  command: "npm",
-  args: ["run", script],
+  command: "node",
+  args,
 }));
 
 const jobs = parsePositiveInteger(process.env.PRODEX_STATIC_GUARD_JOBS || "6", "PRODEX_STATIC_GUARD_JOBS");

@@ -189,5 +189,6 @@ test("preflight runs clippy across the locked workspace", () => {
 test("preflight dry-run prints storage postgres proof step when enabled", async () => {
   const { stdout } = await execFileAsync(process.execPath, [SCRIPT_PATH, "--dry-run", "--storage-postgres-proof"]);
 
-  assert.match(stdout, /storage-postgres-proof: npm run ci:storage-postgres-proof/);
+  assert.ok(stdout.includes("storage-postgres-proof-self-test: node scripts/ci/storage-postgres-proof.mjs --self-test"));
+  assert.ok(stdout.includes("storage-postgres-proof: node scripts/ci/storage-postgres-proof.mjs"));
 });

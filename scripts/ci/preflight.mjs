@@ -95,7 +95,7 @@ function printHelp() {
       "  - release hygiene, Rust size/allow/super-wildcard guards, crate boundaries, runtime hot-path, churn hygiene, manifest-owned version sync",
       "  - docs lint, upstream baseline, runtime manifest, fmt, cargo check",
       "  - cargo clippy --locked --workspace --all-targets --all-features -- -D warnings",
-      "  - npm run test:fast -- --tests-only --no-prebuild",
+      "  - node scripts/ci/test-fast.mjs --tests-only --no-prebuild",
       "",
       "Churn hygiene fails locally and in CI by default. Use --churn-report-only or PRODEX_PREFLIGHT_CHURN_REPORT_ONLY=1 for exploratory dry runs.",
       "",
@@ -103,7 +103,7 @@ function printHelp() {
       "  --jobs <n>        set test:fast child process parallelism",
       "  --serial          also run npm run test:serial -- --suite all",
       "  --no-tests        skip test:fast; useful when only checking metadata/clippy",
-      "  --storage-postgres-proof  also run npm run ci:storage-postgres-proof (or set PRODEX_PREFLIGHT_STORAGE_POSTGRES_PROOF=1)",
+      "  --storage-postgres-proof  also run node scripts/ci/storage-postgres-proof.mjs --self-test && node scripts/ci/storage-postgres-proof.mjs (or set PRODEX_PREFLIGHT_STORAGE_POSTGRES_PROOF=1)",
       "  --churn-check        fail when churn hygiene thresholds are exceeded; default unless report-only env is set",
       "  --churn-report-only  force churn hygiene report-only mode",
       "  --no-churn-check     deprecated alias for --churn-report-only",
@@ -382,9 +382,14 @@ export function preflightSteps(args) {
 
   if (args.storagePostgresProof) {
     steps.push({
+      label: "storage-postgres-proof-self-test",
+      command: "node",
+      args: ["scripts/ci/storage-postgres-proof.mjs", "--self-test"],
+    });
+    steps.push({
       label: "storage-postgres-proof",
-      command: "npm",
-      args: ["run", "ci:storage-postgres-proof"],
+      command: "node",
+      args: ["scripts/ci/storage-postgres-proof.mjs"],
     });
   }
 
