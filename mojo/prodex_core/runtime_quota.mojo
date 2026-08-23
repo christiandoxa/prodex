@@ -179,11 +179,15 @@ def runtime_profile_schedule_less(
     if left_value != right_value:
         return left_value > right_value
 
-    for field in range(10, 14):
+    for field in range(10, 13):
         left_value = runtime_profile_schedule_field(fields, left, Int64(field))
         right_value = runtime_profile_schedule_field(fields, right, Int64(field))
         if left_value != right_value:
             return left_value < right_value
+    left_value = runtime_profile_schedule_field(fields, left, 13)
+    right_value = runtime_profile_schedule_field(fields, right, 13)
+    if left_value != right_value:
+        return left_value > right_value
     left_value = runtime_profile_schedule_field(fields, left, 15)
     right_value = runtime_profile_schedule_field(fields, right, 15)
     if left_value != right_value:
@@ -210,7 +214,7 @@ def prodex_runtime_quota_profile_schedule_batch(
         var scale_value = runtime_profile_schedule_field(fields, index, 2)
         var weekly_remaining_value = runtime_profile_schedule_field(fields, index, 3)
         var five_hour_remaining_value = runtime_profile_schedule_field(fields, index, 4)
-        var reserve_bias_value = runtime_profile_schedule_field(fields, index, 5)
+        var windows_complete = runtime_profile_schedule_field(fields, index, 5)
         var weekly_weight_value = runtime_profile_schedule_field(fields, index, 6)
         var provider_priority = runtime_profile_schedule_field(fields, index, 7)
         var in_selection_cooldown = runtime_profile_schedule_field(fields, index, 8)
@@ -218,9 +222,11 @@ def prodex_runtime_quota_profile_schedule_batch(
         var preferred = runtime_profile_schedule_field(fields, index, 13)
         var affinity_preferred = runtime_profile_schedule_field(fields, index, 14)
         var order_index = runtime_profile_schedule_field(fields, index, 15)
-        if weekly_value < 0 or five_hour_value < 0 or scale_value < 0 or reserve_bias_value < 0 or weekly_weight_value < 0:
+        if weekly_value < 0 or five_hour_value < 0 or scale_value < 0 or weekly_weight_value < 0:
             return 2
         if weekly_remaining_value < 0 or weekly_remaining_value > 100 or five_hour_remaining_value < 0 or five_hour_remaining_value > 100:
+            return 2
+        if windows_complete < 0 or windows_complete > 1:
             return 2
         if provider_priority < 0 or in_selection_cooldown < 0 or in_selection_cooldown > 1:
             return 2
@@ -230,6 +236,14 @@ def prodex_runtime_quota_profile_schedule_batch(
         var weekly_scaled = runtime_quota_scale_pressure(weekly_value, scale_value)
         var five_hour_scaled = runtime_quota_scale_pressure(five_hour_value, scale_value)
         var weighted_weekly = runtime_quota_saturating_mul(weekly_scaled, weekly_weight_value)
+        var reserve_bias_value = INT64_MAX / 4
+        if windows_complete == 1 and weekly_remaining_value != 0 and five_hour_remaining_value != 0:
+            if weekly_remaining_value <= 10 or five_hour_remaining_value <= 5:
+                reserve_bias_value = 1_000_000
+            elif weekly_remaining_value <= 20 or five_hour_remaining_value <= 10:
+                reserve_bias_value = 250_000
+            else:
+                reserve_bias_value = 0
         var total = runtime_quota_saturating_add(reserve_bias_value, weighted_weekly)
         total = runtime_quota_saturating_add(total, five_hour_scaled)
         total_pressure[unsafe_offset=index] = total

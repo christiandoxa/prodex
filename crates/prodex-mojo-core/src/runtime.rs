@@ -8,7 +8,7 @@ pub struct ProfileScoreInput {
     pub scale_bps: i64,
     pub weekly_remaining: i64,
     pub five_hour_remaining: i64,
-    pub reserve_bias: i64,
+    pub windows_complete: bool,
     pub weekly_weight: i64,
 }
 
@@ -155,7 +155,6 @@ pub fn profile_schedule_batch(
                 || score.weekly_remaining > 100
                 || score.five_hour_remaining < 0
                 || score.five_hour_remaining > 100
-                || score.reserve_bias < 0
                 || score.weekly_weight < 0
                 || input.provider_priority < 0
                 || !(0..=1).contains(&input.quota_source)
@@ -173,7 +172,7 @@ pub fn profile_schedule_batch(
             input.score.scale_bps,
             input.score.weekly_remaining,
             input.score.five_hour_remaining,
-            input.score.reserve_bias,
+            i64::from(input.score.windows_complete),
             input.score.weekly_weight,
             input.provider_priority,
             i64::from(input.in_selection_cooldown),
@@ -249,7 +248,7 @@ pub fn profile_schedule_self_test() -> bool {
                 scale_bps: 10_000,
                 weekly_remaining: 90,
                 five_hour_remaining: 90,
-                reserve_bias: 0,
+                windows_complete: true,
                 weekly_weight: 10,
             },
             provider_priority: 0,
@@ -269,7 +268,7 @@ pub fn profile_schedule_self_test() -> bool {
                 scale_bps: 10_000,
                 weekly_remaining: 80,
                 five_hour_remaining: 80,
-                reserve_bias: 0,
+                windows_complete: true,
                 weekly_weight: 10,
             },
             provider_priority: 1,

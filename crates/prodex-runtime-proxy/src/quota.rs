@@ -10,12 +10,6 @@ use crate::{
 #[path = "mojo.rs"]
 pub(crate) mod mojo;
 
-#[cfg(feature = "mojo")]
-#[path = "profile_schedule.rs"]
-mod profile_schedule;
-#[cfg(feature = "mojo")]
-pub use self::profile_schedule::*;
-
 pub type RuntimeProxyQuotaPressureSortKey = (
     RuntimeSelectionQuotaPressureBand,
     i64,
@@ -70,17 +64,6 @@ pub struct RuntimeProxyQuotaScore {
     pub five_hour_remaining: i64,
     pub weekly_reset_at: i64,
     pub five_hour_reset_at: i64,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct RuntimeProxyQuotaProfileScoreInput {
-    pub weekly_pressure: i64,
-    pub five_hour_pressure: i64,
-    pub scale_bps: i64,
-    pub weekly_remaining: i64,
-    pub five_hour_remaining: i64,
-    pub reserve_bias: i64,
-    pub weekly_weight: i64,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

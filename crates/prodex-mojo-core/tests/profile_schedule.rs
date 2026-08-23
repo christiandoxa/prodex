@@ -5,7 +5,7 @@ use prodex_mojo_core::runtime::{ProfileScheduleInput, ProfileScoreInput, profile
 fn input(
     order_index: i64,
     provider_priority: i64,
-    total_inputs: (i64, i64, i64, i64, i64, i64, i64),
+    total_inputs: (i64, i64, i64, i64, i64, bool, i64),
     state: (bool, i64, i64, i64, i64, bool, bool),
 ) -> ProfileScheduleInput {
     let (
@@ -14,7 +14,7 @@ fn input(
         scale_bps,
         weekly_remaining,
         five_hour_remaining,
-        reserve_bias,
+        windows_complete,
         weekly_weight,
     ) = total_inputs;
     let (
@@ -33,7 +33,7 @@ fn input(
             scale_bps,
             weekly_remaining,
             five_hour_remaining,
-            reserve_bias,
+            windows_complete,
             weekly_weight,
         },
         provider_priority,
@@ -60,10 +60,20 @@ fn score(input: &ProfileScheduleInput) -> (i64, i64, i64, i64) {
     };
     let weekly = scale(input.score.weekly_pressure);
     let five_hour = scale(input.score.five_hour_pressure);
+    let reserve_bias = if !input.score.windows_complete
+        || input.score.weekly_remaining == 0
+        || input.score.five_hour_remaining == 0
+    {
+        i64::MAX / 4
+    } else if input.score.weekly_remaining <= 10 || input.score.five_hour_remaining <= 5 {
+        1_000_000
+    } else if input.score.weekly_remaining <= 20 || input.score.five_hour_remaining <= 10 {
+        250_000
+    } else {
+        0
+    };
     (
-        input
-            .score
-            .reserve_bias
+        reserve_bias
             .saturating_add(weekly.saturating_mul(input.score.weekly_weight))
             .saturating_add(five_hour),
         weekly,
@@ -174,31 +184,31 @@ fn profile_schedule_matches_rust_oracle_and_handles_boundaries() {
         input(
             0,
             0,
-            (100, 0, 10_000, 90, 90, 0, 10),
+            (100, 0, 10_000, 90, 90, true, 10),
             (true, 100, 30, 40, 0, false, false),
         ),
         input(
             1,
             0,
-            (105, 0, 10_000, 80, 80, 0, 10),
+            (105, 0, 10_000, 80, 80, true, 10),
             (false, 90, 20, 30, 1, true, true),
         ),
         input(
             2,
             0,
-            (110, 0, 10_000, 70, 70, 0, 10),
+            (110, 0, 10_000, 70, 70, true, 10),
             (false, 80, 10, 20, 0, false, false),
         ),
         input(
             3,
             1,
-            (1, 1, 20_000, 100, 100, 0, 8),
+            (1, 1, 20_000, 100, 100, true, 8),
             (false, i64::MIN, i64::MAX, i64::MAX, 0, false, false),
         ),
         input(
             4,
             2,
-            (i64::MAX - 1, 0, 20_000, 50, 50, 0, 1),
+            (i64::MAX - 1, 0, 20_000, 50, 50, false, 1),
             (false, i64::MIN, i64::MAX, i64::MAX, 1, false, false),
         ),
     ];
@@ -207,4 +217,52 @@ fn profile_schedule_matches_rust_oracle_and_handles_boundaries() {
     assert_eq!(actual, expected);
 
     assert_eq!(profile_schedule_batch(&[]).unwrap(), Vec::<usize>::new());
+
+    let boundary = |order_index, weekly_remaining, five_hour_remaining, windows_complete| {
+        input(
+            order_index,
+            0,
+            (
+                0,
+                0,
+                10_000,
+                weekly_remaining,
+                five_hour_remaining,
+                windows_complete,
+                10,
+            ),
+            (false, i64::MIN, 10, 10, 0, false, false),
+        )
+    };
+    let boundaries = [
+        boundary(0, 90, 90, true),
+        boundary(1, 20, 10, true),
+        boundary(2, 10, 5, true),
+        boundary(3, 0, 90, true),
+        boundary(4, 90, 90, false),
+    ];
+    assert_eq!(
+        profile_schedule_batch(&boundaries).expect("valid pressure boundaries"),
+        [0, 1, 2, 4, 3]
+    );
+}
+
+#[test]
+fn profile_schedule_prefers_preferred_candidate_on_tie() {
+    let candidates = [
+        input(
+            0,
+            0,
+            (100, 100, 10_000, 90, 90, true, 10),
+            (false, 0, 10, 10, 0, false, false),
+        ),
+        input(
+            0,
+            0,
+            (100, 100, 10_000, 90, 90, true, 10),
+            (false, 0, 10, 10, 0, true, false),
+        ),
+    ];
+
+    assert_eq!(profile_schedule_batch(&candidates).unwrap(), [1, 0]);
 }
