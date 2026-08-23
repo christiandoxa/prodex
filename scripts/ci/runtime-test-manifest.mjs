@@ -297,6 +297,29 @@ export const RUNTIME_CI_WORKFLOW_SHARDS = [
     ],
   },
   {
+    suite: "runtime-backend-parser",
+    label: "runtime backend parser",
+    filters: [
+      {
+        id: "runtime-backend-parser",
+        filter: "main_internal_tests::runtime_proxy_backend::request_parsing::",
+        label: "request-parsing",
+      },
+    ],
+  },
+  {
+    suite: "continuation-http-precommit-transport",
+    label: "continuation http precommit transport",
+    filters: [
+      {
+        id: "continuation-http-precommit-transport",
+        filter:
+          "main_internal_tests::runtime_proxy_continuations::http_followups::runtime_proxy_http_precommit_transport_",
+        label: "precommit-transport",
+      },
+    ],
+  },
+  {
     suite: "continuation-http-followups-affinity",
     label: "continuation http followups affinity",
     filters: [

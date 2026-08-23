@@ -51,10 +51,18 @@ pub(crate) fn runtime_transport_failure_kind_from_reqwest(
     if err.is_timeout() {
         return Some(RuntimeTransportFailureKind::ReadTimeout);
     }
-    std::error::Error::source(err)
-        .and_then(|source| source.downcast_ref::<io::Error>())
-        .and_then(runtime_transport_failure_kind_from_io_error)
-        .or_else(|| runtime_transport_failure_kind_from_message(&err.to_string()))
+    let mut source = std::error::Error::source(err);
+    while let Some(cause) = source {
+        if let Some(kind) = cause
+            .downcast_ref::<io::Error>()
+            .and_then(runtime_transport_failure_kind_from_io_error)
+            .or_else(|| runtime_transport_failure_kind_from_message(&cause.to_string()))
+        {
+            return Some(kind);
+        }
+        source = cause.source();
+    }
+    runtime_transport_failure_kind_from_message(&err.to_string())
 }
 
 pub(crate) fn runtime_transport_failure_kind_from_ws(
@@ -110,6 +118,9 @@ pub(crate) fn runtime_reqwest_error_kind(err: &reqwest::Error) -> io::ErrorKind 
         Some(RuntimeTransportFailureKind::ConnectionAborted) => io::ErrorKind::ConnectionAborted,
         Some(RuntimeTransportFailureKind::BrokenPipe) => io::ErrorKind::BrokenPipe,
         Some(RuntimeTransportFailureKind::UnexpectedEof) => io::ErrorKind::UnexpectedEof,
+        Some(RuntimeTransportFailureKind::UpstreamClosedBeforeCommit) => {
+            io::ErrorKind::UnexpectedEof
+        }
         _ => io::ErrorKind::Other,
     }
 }

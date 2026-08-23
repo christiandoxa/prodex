@@ -1,4 +1,145 @@
 #[test]
+fn runtime_proxy_http_precommit_transport_rotates_fresh_request() {
+    let fixture = start_runtime_continuation_fixture(
+        RuntimeProxyBackend::start_http_reset_before_first_byte(),
+        "main",
+        &["main", "second"],
+        &[],
+        Vec::new(),
+    );
+
+    let response = fixture.post_json(
+        "backend-api/codex/responses",
+        serde_json::json!({
+            "model": "gpt-5.4",
+            "input": [{
+                "type": "message",
+                "role": "user",
+                "content": "continue after the first upstream disconnects",
+            }],
+        }),
+    );
+
+    assert_eq!(response.status().as_u16(), 200);
+    let body = response.text().expect("responses body should decode");
+    assert!(body.contains("\"id\":\"resp-second\""), "{body}");
+    assert_eq!(
+        fixture.backend.responses_accounts(),
+        vec!["main-account".to_string(), "second-account".to_string()]
+    );
+    let log = fixture.wait_for_log(|log| {
+        log.contains("responses_transport_failure profile=main")
+            && log.contains("committed profile=second")
+    });
+    assert!(log.contains("hard_affinity=false"), "{log}");
+}
+
+#[test]
+fn runtime_proxy_http_precommit_transport_rotates_fresh_sse_close() {
+    let fixture = start_runtime_continuation_fixture(
+        RuntimeProxyBackend::start_http_reset_after_headers(),
+        "main",
+        &["main", "second"],
+        &[],
+        Vec::new(),
+    );
+
+    let response = fixture.post_json(
+        "backend-api/codex/responses",
+        serde_json::json!({
+            "model": "gpt-5.4",
+            "input": [{
+                "type": "message",
+                "role": "user",
+                "content": "continue after the first SSE closes before output",
+            }],
+        }),
+    );
+
+    assert_eq!(response.status().as_u16(), 200);
+    let body = response.text().expect("responses body should decode");
+    assert!(body.contains("\"id\":\"resp-second\""), "{body}");
+    assert_eq!(
+        fixture.backend.responses_accounts(),
+        vec!["main-account".to_string(), "second-account".to_string()]
+    );
+    let log = fixture.wait_for_log(|log| {
+        log.contains("responses_transport_failure profile=main")
+            && log.contains("stage=responses_sse_lookahead")
+            && log.contains("committed profile=second")
+    });
+    assert!(log.contains("hard_affinity=false"), "{log}");
+}
+
+#[test]
+fn runtime_proxy_http_precommit_transport_returns_503_after_pool_exhaustion() {
+    let fixture = start_runtime_continuation_fixture(
+        RuntimeProxyBackend::start_http_reset_before_first_byte(),
+        "main",
+        &["main"],
+        &[],
+        Vec::new(),
+    );
+
+    let response = fixture.post_json(
+        "backend-api/codex/responses",
+        serde_json::json!({
+            "model": "gpt-5.4",
+            "input": [{
+                "type": "message",
+                "role": "user",
+                "content": "fail only after every usable profile is tried",
+            }],
+        }),
+    );
+
+    assert_eq!(response.status().as_u16(), 503);
+    let body = response.text().expect("error body should decode");
+    assert!(body.contains("service_unavailable"), "{body}");
+    assert_eq!(
+        fixture.backend.responses_accounts(),
+        vec!["main-account".to_string()]
+    );
+}
+
+#[test]
+fn runtime_proxy_http_precommit_transport_keeps_previous_response_owner() {
+    let fixture = start_runtime_continuation_fixture(
+        RuntimeProxyBackend::start_http_reset_before_first_byte(),
+        "main",
+        &["main", "second"],
+        &[("resp-main", "main")],
+        Vec::new(),
+    );
+
+    let response = fixture.post_json(
+        "backend-api/codex/responses",
+        serde_json::json!({
+            "previous_response_id": "resp-main",
+            "input": [{
+                "type": "message",
+                "role": "user",
+                "content": "preserve the owning response chain",
+            }],
+        }),
+    );
+
+    assert_eq!(response.status().as_u16(), 503);
+    let body = response.text().expect("error body should decode");
+    assert!(body.contains("service_unavailable"), "{body}");
+    assert_eq!(
+        fixture.backend.responses_accounts(),
+        vec!["main-account".to_string()],
+        "hard previous-response affinity must not rotate to another profile"
+    );
+    let log = fixture.wait_for_log(|log| {
+        log.contains("responses_transport_failure profile=main")
+            && log.contains("hard_affinity=true")
+    });
+    assert!(log.contains("hard_affinity=true"), "{log}");
+}
+
+#[test]
 fn runtime_proxy_http_fresh_request_reaches_later_profile_after_usage_limit_chain() {
     let fixture = start_runtime_continuation_fixture(
         RuntimeProxyBackend::start_http_usage_limit_until_third(),
