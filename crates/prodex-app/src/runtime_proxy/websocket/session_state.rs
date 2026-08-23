@@ -3,7 +3,8 @@ use std::time::{Duration, Instant};
 
 use super::{
     RuntimeProfileInFlightGuard, RuntimeRotationProxyShared, RuntimeUpstreamWebSocket,
-    record_runtime_profile_inflight_acquire, runtime_profile_inflight_weight,
+    record_runtime_profile_inflight_acquire, runtime_profile_inflight_effective_hard_limit,
+    runtime_profile_inflight_weight,
 };
 
 #[derive(Default)]
@@ -132,8 +133,12 @@ pub(crate) fn try_acquire_runtime_profile_inflight_guard(
     hard_affinity: bool,
 ) -> Result<Option<RuntimeProfileInFlightGuard>> {
     let weight = runtime_profile_inflight_weight(context);
-    let hard_limit =
-        (!hard_affinity).then_some(shared.runtime_config.tuning.profile_inflight_hard_limit);
+    let hard_limit = (!hard_affinity).then(|| {
+        runtime_profile_inflight_effective_hard_limit(
+            context,
+            shared.runtime_config.tuning.profile_inflight_hard_limit,
+        )
+    });
     let Some(count) =
         shared
             .lane_admission

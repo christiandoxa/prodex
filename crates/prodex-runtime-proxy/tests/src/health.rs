@@ -18,6 +18,18 @@ fn route_health_keys_match_runtime_labels() {
 }
 
 #[test]
+fn weighted_inflight_hard_limit_always_admits_one_request() {
+    assert_eq!(
+        runtime_profile_inflight_effective_hard_limit("responses_http", 1),
+        2
+    );
+    assert_eq!(
+        runtime_profile_inflight_effective_hard_limit("standard_http", 1),
+        1
+    );
+}
+
+#[test]
 fn effective_scores_decay_saturating() {
     let entry = RuntimeProfileHealth {
         score: 4,

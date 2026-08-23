@@ -16,6 +16,13 @@ pub fn runtime_profile_inflight_weight(context: &str) -> usize {
     }
 }
 
+pub fn runtime_profile_inflight_effective_hard_limit(
+    context: &str,
+    configured_limit: usize,
+) -> usize {
+    configured_limit.max(runtime_profile_inflight_weight(context))
+}
+
 pub fn runtime_profile_inflight_soft_limit(
     route_kind: RuntimeRouteKind,
     pressure_mode: bool,
