@@ -119,18 +119,21 @@ fn precommit_budget_scales_to_profile_pool() {
     let (attempt_limit, budget) =
         runtime_proxy_precommit_budget_for_profile_count(false, false, profile_count);
 
-    assert_eq!(attempt_limit, profile_count);
+    assert_eq!(
+        attempt_limit,
+        profile_count * RUNTIME_PROXY_PRECOMMIT_ATTEMPTS_PER_PROFILE
+    );
     assert!(budget > base_budget);
     assert!(runtime_proxy_precommit_budget_exhausted_for_profile_count(
         Instant::now(),
-        profile_count,
+        attempt_limit,
         false,
         false,
         profile_count,
     ));
     assert!(!runtime_proxy_precommit_budget_exhausted_for_profile_count(
         Instant::now(),
-        profile_count - 1,
+        attempt_limit - 1,
         false,
         false,
         profile_count,
@@ -138,7 +141,7 @@ fn precommit_budget_scales_to_profile_pool() {
 }
 
 #[test]
-fn precommit_budget_attempt_limit_covers_profile_pool_matrix() {
+fn precommit_budget_attempt_limit_covers_one_bounded_retry_per_profile() {
     for continuation in [false, true] {
         for pressure_mode in [false, true] {
             let (base_attempt_limit, base_budget) =
@@ -155,15 +158,17 @@ fn precommit_budget_attempt_limit_covers_profile_pool_matrix() {
                     profile_count,
                 );
                 let effective_profile_count = profile_count.max(1);
+                let required_profile_attempts = effective_profile_count
+                    .saturating_mul(RUNTIME_PROXY_PRECOMMIT_ATTEMPTS_PER_PROFILE);
 
                 assert!(
-                    attempt_limit >= effective_profile_count,
+                    attempt_limit >= required_profile_attempts,
                     "continuation={continuation} pressure={pressure_mode} profile_count={profile_count}"
                 );
                 assert!(
                     !runtime_proxy_precommit_budget_exhausted_for_profile_count(
                         Instant::now(),
-                        effective_profile_count - 1,
+                        required_profile_attempts - 1,
                         continuation,
                         pressure_mode,
                         profile_count,
@@ -202,23 +207,23 @@ fn precommit_budget_keeps_base_limit_for_small_pool() {
 }
 
 #[test]
-fn precommit_elapsed_budget_does_not_cut_off_first_profile_pass() {
+fn precommit_elapsed_budget_remains_bounded_without_candidate_progress() {
     let profile_count = 2;
     let (_, budget) = runtime_proxy_precommit_budget_for_profile_count(false, false, profile_count);
     let expired = Instant::now()
         .checked_sub(budget + Duration::from_millis(1))
         .expect("expired instant");
 
-    assert!(!runtime_proxy_precommit_budget_exhausted_for_profile_count(
+    assert!(runtime_proxy_precommit_budget_exhausted_for_profile_count(
         expired,
-        profile_count - 1,
+        0,
         false,
         false,
         profile_count,
     ));
     assert!(runtime_proxy_precommit_budget_exhausted_for_profile_count(
         expired,
-        profile_count,
+        profile_count * RUNTIME_PROXY_PRECOMMIT_ATTEMPTS_PER_PROFILE,
         false,
         false,
         profile_count,

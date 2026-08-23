@@ -75,9 +75,10 @@ pub(in crate::runtime_proxy::standard) fn attempt_runtime_standard_request(
             }) {
                 Ok(response) => response,
                 Err(err) => {
-                    return handle_runtime_compact_upstream_error(
+                    return handle_runtime_standard_upstream_error(
                         shared,
                         profile_name,
+                        RuntimeRouteKind::Compact,
                         "compact_upstream_request",
                         err,
                     );
@@ -103,9 +104,10 @@ pub(in crate::runtime_proxy::standard) fn attempt_runtime_standard_request(
         ) {
             Ok(parts) => parts,
             Err(err) => {
-                return handle_runtime_compact_upstream_error(
+                return handle_runtime_standard_upstream_error(
                     shared,
                     profile_name,
+                    RuntimeRouteKind::Compact,
                     "compact_buffer_response",
                     err,
                 );
@@ -131,28 +133,6 @@ pub(in crate::runtime_proxy::standard) fn attempt_runtime_standard_request(
             parts,
         );
     }
-}
-
-fn handle_runtime_compact_upstream_error(
-    shared: &RuntimeRotationProxyShared,
-    profile_name: &str,
-    stage: &'static str,
-    err: anyhow::Error,
-) -> Result<RuntimeStandardAttempt> {
-    note_runtime_profile_transport_failure(
-        shared,
-        profile_name,
-        RuntimeRouteKind::Compact,
-        stage,
-        &err,
-    );
-    if is_runtime_proxy_transport_failure(&err) {
-        return Ok(RuntimeStandardAttempt::TransportFailed {
-            profile_name: profile_name.to_string(),
-            stage,
-        });
-    }
-    Err(err)
 }
 
 fn handle_runtime_compact_error_parts(

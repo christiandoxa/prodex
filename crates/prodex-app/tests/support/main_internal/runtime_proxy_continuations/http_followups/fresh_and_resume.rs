@@ -140,6 +140,33 @@ fn runtime_proxy_http_precommit_transport_keeps_previous_response_owner() {
 }
 
 #[test]
+fn runtime_proxy_http_precommit_transport_keeps_unbound_turn_state_on_current_profile() {
+    let fixture = start_runtime_continuation_fixture(
+        RuntimeProxyBackend::start_http_reset_before_first_byte(),
+        "main",
+        &["main", "second"],
+        &[],
+        Vec::new(),
+    );
+
+    let response = fixture.post_json_with_headers(
+        "backend-api/codex/responses",
+        &[runtime_continuation_header(
+            "x-codex-turn-state",
+            "turn-unbound",
+        )],
+        serde_json::json!({"input": []}),
+    );
+
+    assert_eq!(response.status().as_u16(), 503);
+    assert_eq!(
+        fixture.backend.responses_accounts(),
+        vec!["main-account".to_string()],
+        "an opaque turn-state token must never cross account identities"
+    );
+}
+
+#[test]
 fn runtime_proxy_http_fresh_request_reaches_later_profile_after_usage_limit_chain() {
     let fixture = start_runtime_continuation_fixture(
         RuntimeProxyBackend::start_http_usage_limit_until_third(),

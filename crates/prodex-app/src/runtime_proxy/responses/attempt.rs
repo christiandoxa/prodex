@@ -203,6 +203,7 @@ pub(crate) fn attempt_runtime_responses_request(
         has_continuation_context: request_previous_response_id.is_some()
             || request_session_id.is_some()
             || request_turn_state.is_some(),
+        hard_affinity,
         reprobe_context: "responses_precommit_reprobe",
     })?;
     if let RuntimePrecommitQuotaGateDecision::Block {

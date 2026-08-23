@@ -76,7 +76,7 @@ pub(in crate::runtime_proxy::standard) fn attempt_runtime_noncompact_standard_re
         let upstream_shared = shared.clone();
         let upstream_profile_name = profile_name.to_string();
         let response =
-            await_runtime_proxy_async_task(shared, "standard_upstream_request", async move {
+            match await_runtime_proxy_async_task(shared, "standard_upstream_request", async move {
                 send_runtime_proxy_upstream_request(
                     request_id,
                     &upstream_request,
@@ -86,16 +86,18 @@ pub(in crate::runtime_proxy::standard) fn attempt_runtime_noncompact_standard_re
                     upstream_auth,
                 )
                 .await
-            })
-            .inspect_err(|err| {
-                note_runtime_profile_transport_failure(
-                    shared,
-                    profile_name,
-                    RuntimeRouteKind::Standard,
-                    "standard_upstream_request",
-                    err,
-                );
-            })?;
+            }) {
+                Ok(response) => response,
+                Err(err) => {
+                    return handle_runtime_standard_upstream_error(
+                        shared,
+                        profile_name,
+                        RuntimeRouteKind::Standard,
+                        "standard_upstream_request",
+                        err,
+                    );
+                }
+            };
         if let Some(attempt) = handle_runtime_noncompact_response(
             RuntimeNoncompactResponseContext {
                 request_id,
@@ -135,12 +137,23 @@ fn handle_runtime_noncompact_response(
     } = context;
     if runtime_wham_usage_path(&request.path_and_query) {
         let status = response.status().as_u16();
-        let parts = buffer_runtime_noncompact_response(
+        let parts = match buffer_runtime_noncompact_response(
             shared,
-            profile_name,
             "standard_buffer_usage_response",
             response,
-        )?;
+        ) {
+            Ok(parts) => parts,
+            Err(err) => {
+                return handle_runtime_standard_upstream_error(
+                    shared,
+                    profile_name,
+                    RuntimeRouteKind::Standard,
+                    "standard_buffer_usage_response",
+                    err,
+                )
+                .map(Some);
+            }
+        };
         if runtime_noncompact_should_recover_auth(
             request_id,
             shared,
@@ -167,16 +180,19 @@ fn handle_runtime_noncompact_response(
             request_session_id,
             RuntimeRouteKind::Standard,
         )?;
-        let response = forward_runtime_standard_success_response(shared, request, response)
-            .inspect_err(|err| {
-                note_runtime_profile_transport_failure(
+        let response = match forward_runtime_standard_success_response(shared, request, response) {
+            Ok(response) => response,
+            Err(err) => {
+                return handle_runtime_standard_upstream_error(
                     shared,
                     profile_name,
                     RuntimeRouteKind::Standard,
                     "standard_forward_response",
                     err,
-                );
-            })?;
+                )
+                .map(Some);
+            }
+        };
         return Ok(Some(RuntimeStandardAttempt::Success {
             profile_name: profile_name.to_string(),
             response,
@@ -184,12 +200,20 @@ fn handle_runtime_noncompact_response(
     }
 
     let status = response.status().as_u16();
-    let parts = buffer_runtime_noncompact_response(
-        shared,
-        profile_name,
-        "standard_buffer_response",
-        response,
-    )?;
+    let parts =
+        match buffer_runtime_noncompact_response(shared, "standard_buffer_response", response) {
+            Ok(parts) => parts,
+            Err(err) => {
+                return handle_runtime_standard_upstream_error(
+                    shared,
+                    profile_name,
+                    RuntimeRouteKind::Standard,
+                    "standard_buffer_response",
+                    err,
+                )
+                .map(Some);
+            }
+        };
     if runtime_noncompact_should_recover_auth(
         request_id,
         shared,
@@ -212,7 +236,6 @@ fn handle_runtime_noncompact_response(
 
 fn buffer_runtime_noncompact_response(
     shared: &RuntimeRotationProxyShared,
-    profile_name: &str,
     stage: &'static str,
     response: reqwest::Response,
 ) -> Result<RuntimeHeapTrimmedBufferedResponseParts> {
@@ -221,15 +244,6 @@ fn buffer_runtime_noncompact_response(
         stage,
         buffer_runtime_proxy_async_response_parts(response, Vec::new()),
     )
-    .inspect_err(|err| {
-        note_runtime_profile_transport_failure(
-            shared,
-            profile_name,
-            RuntimeRouteKind::Standard,
-            stage,
-            err,
-        );
-    })
 }
 
 fn runtime_noncompact_should_recover_auth(

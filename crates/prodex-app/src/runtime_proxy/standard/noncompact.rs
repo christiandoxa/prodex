@@ -377,6 +377,7 @@ fn runtime_noncompact_candidate_saturated(
         selection_started_at: loop_state.selection_started_at,
         continuation,
         wait_affinity_owner,
+        selected_profile: Some(candidate_name),
     })? {
         return Ok(true);
     }

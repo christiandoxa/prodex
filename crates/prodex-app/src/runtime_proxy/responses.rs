@@ -110,11 +110,11 @@ pub(crate) fn proxy_runtime_responses_request(
         );
         request_turn_state = Some(turn_state);
     }
-    let turn_state_profile = request_turn_state
-        .as_deref()
-        .map(|value| runtime_turn_state_bound_profile(shared, value))
-        .transpose()?
-        .flatten();
+    let turn_state_profile = runtime_turn_state_affinity_profile(
+        shared,
+        request_turn_state.as_deref(),
+        bound_profile.as_deref(),
+    )?;
     let mut affinity_state = RuntimeResponsesAffinityState::new(
         bound_profile,
         trusted_previous_response_affinity,
@@ -305,6 +305,7 @@ fn runtime_responses_candidate_saturated(
         continuation: affinity_state
             .has_continuation_priority(context.previous_response_id, context.request_turn_state),
         wait_affinity_owner: affinity_state.wait_affinity_owner(),
+        selected_profile: Some(candidate_name),
     })? {
         return Ok(true);
     }
@@ -419,6 +420,7 @@ fn handle_runtime_responses_candidate_exhausted(
         continuation: affinity_state
             .has_continuation_priority(context.previous_response_id, context.request_turn_state),
         wait_affinity_owner: affinity_state.wait_affinity_owner(),
+        selected_profile: None,
     })? {
         return Ok(RuntimeResponsesLoopControl::Continue);
     }
