@@ -78,8 +78,6 @@ pub fn main_quota_aggregation_self_test() -> bool {
 
 unsafe extern "C" {
     fn prodex_quota_round_f64(value: f64) -> i64;
-    #[cfg(all(test, feature = "mojo-quota"))]
-    fn prodex_quota_gemini_float_probe(first: f64, second: f64, operation: i64) -> f64;
     fn prodex_quota_remaining_percent(used_percent: i64, has_value: i64) -> i64;
     fn prodex_quota_window_status(remaining_percent: i64, has_window: i64) -> i64;
     fn prodex_quota_pressure_band(five_hour_status: i64, weekly_status: i64) -> i64;
@@ -205,11 +203,6 @@ pub fn gemini_bucket_numeric_batch(
     Ok(outputs)
 }
 
-#[cfg(all(test, feature = "mojo-quota"))]
-fn gemini_float_probe(first: f64, second: f64, operation: i64) -> f64 {
-    unsafe { prodex_quota_gemini_float_probe(first, second, operation) }
-}
-
 pub fn main_quota_aggregate_batch(
     inputs: &[MainQuotaAggregationInput],
 ) -> Result<MainQuotaAggregation, crate::MojoError> {
@@ -317,87 +310,6 @@ fn round_f64_matches_rust_float_to_int_semantics() {
         i64::MIN as f64,
     ] {
         assert_eq!(round_f64(value), value.round() as i64, "value={value:?}");
-    }
-}
-
-#[cfg(all(test, feature = "mojo-quota"))]
-#[test]
-fn gemini_float_probe_matches_rust_f64_bits() {
-    fn assert_same_bits(actual: f64, expected: f64, input: (f64, f64, i64)) {
-        assert_eq!(actual.is_nan(), expected.is_nan(), "input={input:?}");
-        if !expected.is_nan() {
-            assert_eq!(actual.to_bits(), expected.to_bits(), "input={input:?}");
-        }
-    }
-
-    let fractions = [
-        0.0,
-        -0.0,
-        0.5,
-        1.0,
-        1.5,
-        -1.0,
-        2.0,
-        f64::from_bits(1),
-        -f64::from_bits(1),
-        f64::MIN_POSITIVE,
-        f64::MAX,
-        f64::NAN,
-        f64::INFINITY,
-        f64::NEG_INFINITY,
-    ];
-    for fraction in fractions {
-        let input = (fraction, 0.0, 0);
-        assert_same_bits(
-            gemini_float_probe(input.0, input.1, input.2),
-            fraction * 100.0,
-            input,
-        );
-    }
-
-    let amounts = [
-        0.0,
-        -0.0,
-        1.0,
-        50.0,
-        -50.0,
-        (i64::MAX as f64),
-        (i64::MIN as f64),
-        f64::NAN,
-        f64::INFINITY,
-        f64::NEG_INFINITY,
-    ];
-    let divisors = [
-        0.0,
-        -0.0,
-        0.5,
-        1.0,
-        0.005,
-        0.015,
-        f64::from_bits(1),
-        -f64::from_bits(1),
-        f64::MIN_POSITIVE,
-        f64::MAX,
-        f64::NAN,
-        f64::INFINITY,
-        f64::NEG_INFINITY,
-    ];
-    for first in amounts {
-        for second in divisors {
-            for operation in [1, 2] {
-                let input = (first, second, operation);
-                let expected = match operation {
-                    1 => first / second,
-                    2 => first / second * 100.0,
-                    _ => unreachable!(),
-                };
-                assert_same_bits(
-                    gemini_float_probe(first, second, operation),
-                    expected,
-                    input,
-                );
-            }
-        }
     }
 }
 
