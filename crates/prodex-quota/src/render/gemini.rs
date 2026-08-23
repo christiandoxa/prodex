@@ -1,12 +1,5 @@
 use super::*;
 
-#[cfg(not(feature = "mojo"))]
-#[derive(Debug, Clone, Copy)]
-struct GeminiBucketRemaining {
-    remaining: i64,
-    total: Option<i64>,
-}
-
 #[derive(Debug, Clone, Copy)]
 struct GeminiBucketNumeric {
     remaining: Option<i64>,
@@ -50,21 +43,7 @@ fn gemini_numeric_batch(buckets: &[GeminiQuotaBucket]) -> Vec<GeminiBucketNumeri
     }
 
     #[cfg(not(feature = "mojo"))]
-    buckets
-        .iter()
-        .map(|bucket| {
-            let remaining = gemini_bucket_remaining(bucket);
-            GeminiBucketNumeric {
-                remaining: remaining.map(|value| value.remaining),
-                total: remaining.and_then(|value| value.total),
-                remaining_percent: gemini_bucket_remaining_percent(bucket),
-                exhausted: bucket
-                    .remaining_fraction
-                    .is_some_and(|fraction| fraction <= 0.0)
-                    || remaining.is_some_and(|value| value.remaining <= 0),
-            }
-        })
-        .collect()
+    buckets.iter().map(gemini_bucket_numeric_rust).collect()
 }
 
 fn gemini_bucket_numeric(bucket: &GeminiQuotaBucket) -> GeminiBucketNumeric {
@@ -75,22 +54,43 @@ fn gemini_bucket_numeric(bucket: &GeminiQuotaBucket) -> GeminiBucketNumeric {
 }
 
 #[cfg(not(feature = "mojo"))]
-fn gemini_bucket_remaining(bucket: &GeminiQuotaBucket) -> Option<GeminiBucketRemaining> {
-    if let Some(raw_remaining) = bucket.remaining_amount.as_deref() {
-        let remaining = raw_remaining.trim().parse::<i64>().ok()?;
-        let total = bucket
-            .remaining_fraction
-            .filter(|fraction| *fraction > 0.0)
-            .map(|fraction| super::round_quota_float(remaining as f64 / fraction))
-            .filter(|total| *total >= remaining);
-        return Some(GeminiBucketRemaining { remaining, total });
-    }
+fn gemini_bucket_numeric_rust(bucket: &GeminiQuotaBucket) -> GeminiBucketNumeric {
+    let (remaining, total) = match bucket.remaining_amount.as_deref() {
+        Some(raw) => match raw.trim().parse::<i64>() {
+            Ok(remaining) => (
+                Some(remaining),
+                bucket
+                    .remaining_fraction
+                    .filter(|fraction| *fraction > 0.0)
+                    .map(|fraction| super::round_quota_float(remaining as f64 / fraction))
+                    .filter(|total| *total >= remaining),
+            ),
+            Err(_) => (None, None),
+        },
+        None => match bucket.remaining_fraction {
+            Some(fraction) => (Some(super::round_quota_float(fraction * 100.0)), Some(100)),
+            None => (None, None),
+        },
+    };
+    let remaining_percent = bucket
+        .remaining_fraction
+        .map(|fraction| super::round_quota_float(fraction * 100.0))
+        .or_else(|| {
+            let (Some(remaining), Some(total)) = (remaining, total) else {
+                return None;
+            };
+            (total > 0).then(|| super::round_quota_float(remaining as f64 / total as f64 * 100.0))
+        });
 
-    let fraction = bucket.remaining_fraction?;
-    Some(GeminiBucketRemaining {
-        remaining: super::round_quota_float(fraction * 100.0),
-        total: Some(100),
-    })
+    GeminiBucketNumeric {
+        remaining,
+        total,
+        remaining_percent,
+        exhausted: bucket
+            .remaining_fraction
+            .is_some_and(|fraction| fraction <= 0.0)
+            || remaining.is_some_and(|remaining| remaining <= 0),
+    }
 }
 
 fn gemini_bucket_label(bucket: &GeminiQuotaBucket) -> String {
@@ -109,21 +109,6 @@ fn gemini_bucket_label(bucket: &GeminiQuotaBucket) -> String {
                 .map(str::to_ascii_lowercase)
         })
         .unwrap_or_else(|| "gemini".to_string())
-}
-
-#[cfg(not(feature = "mojo"))]
-pub(super) fn gemini_bucket_remaining_percent(bucket: &GeminiQuotaBucket) -> Option<i64> {
-    if let Some(fraction) = bucket.remaining_fraction {
-        return Some(super::round_quota_float(fraction * 100.0));
-    }
-    let GeminiBucketRemaining {
-        remaining,
-        total: Some(total),
-    } = gemini_bucket_remaining(bucket)?
-    else {
-        return None;
-    };
-    (total > 0).then(|| super::round_quota_float(remaining as f64 / total as f64 * 100.0))
 }
 
 pub(super) fn gemini_main_remaining_percent(info: &GeminiQuotaInfo) -> Option<i64> {
