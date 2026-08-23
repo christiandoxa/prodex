@@ -687,9 +687,10 @@ async function pushRelease(args) {
   await runCommand("git", ["push", args.remote, `HEAD:${args.branch}`], args);
 }
 
-async function findWorkflowRun(repo, workflow, branch, headSha, args) {
+async function findWorkflowRun(repo, workflow, branch, event, headSha, args) {
   const query = new URLSearchParams({
     branch,
+    event,
     per_page: "20",
   });
   const data = await ghApi(`/repos/${repo}/actions/workflows/${workflow}/runs?${query.toString()}`, {
@@ -702,16 +703,16 @@ async function findWorkflowRun(repo, workflow, branch, headSha, args) {
   return data.workflow_runs?.find((run) => run.head_sha === headSha) ?? null;
 }
 
-async function waitForWorkflow({ repo, workflow, branch, headSha, timeoutMinutes, args }) {
+async function waitForWorkflow({ repo, workflow, branch, event, headSha, timeoutMinutes, args }) {
   if (args.dryRun) {
-    process.stdout.write(`dry-run: watch ${workflow} for ${headSha} on ${branch}\n`);
+    process.stdout.write(`dry-run: watch ${workflow} event=${event} for ${headSha} on ${branch}\n`);
     return;
   }
 
   const deadline = Date.now() + timeoutMinutes * 60_000;
   let lastStatus = "";
   while (Date.now() < deadline) {
-    const run = await findWorkflowRun(repo, workflow, branch, headSha, args);
+    const run = await findWorkflowRun(repo, workflow, branch, event, headSha, args);
     if (!run) {
       lastStatus = "not found yet";
     } else {
@@ -732,7 +733,14 @@ async function waitForWorkflow({ repo, workflow, branch, headSha, timeoutMinutes
 
 async function triggerPublish(repo, version, args) {
   const headSha = await currentHead();
-  const existing = await findWorkflowRun(repo, args.publishWorkflow, args.branch, headSha, args);
+  const existing = await findWorkflowRun(
+    repo,
+    args.publishWorkflow,
+    args.branch,
+    "workflow_dispatch",
+    headSha,
+    args,
+  );
   if (existing) {
     process.stdout.write(`trigger-publish: existing run for ${headSha}: ${existing.html_url}\n`);
     return;
@@ -791,6 +799,7 @@ async function runSelectedStep(step, version, repo, args) {
         repo,
         workflow: args.ciWorkflow,
         branch: args.branch,
+        event: "push",
         headSha: await currentHead(),
         timeoutMinutes: args.ciTimeoutMinutes,
         args,
@@ -806,6 +815,7 @@ async function runSelectedStep(step, version, repo, args) {
         repo,
         workflow: args.publishWorkflow,
         branch: args.branch,
+        event: "workflow_dispatch",
         headSha: await currentHead(),
         timeoutMinutes: args.publishTimeoutMinutes,
         args,

@@ -105,7 +105,7 @@ jobs:
           set -euo pipefail
           deadline=$((SECONDS + 30 * 60))
           while true; do
-            runs_json="$(gh run list --workflow ci.yml --limit 50 --json headSha,status,conclusion,url)"
+            runs_json="$(gh run list --workflow ci.yml --event push --limit 50 --json headSha,status,conclusion,url)"
             set +e
             result="$(
               RUNS_JSON="${runs_json}" python - <<'PY'
@@ -331,7 +331,11 @@ jobs:
           if [ "${{ matrix.use-cross }}" = "true" ]; then
             export CARGO_TARGET_DIR="${GITHUB_WORKSPACE}/target/native-test/${{ matrix.target }}"
           fi
-          if ! RUSTC_WRAPPER=sccache cargo test --release --locked --target "${{ matrix.target }}" -p prodex-app --all-features --lib 'runtime_desktop::tests::' -- --test-threads=1 2>&1 | tee "${test_log}"; then
+          feature_args=()
+          if [ "${{ matrix.mojo-release }}" = "true" ]; then
+            feature_args=(--features "${{ matrix.mojo-features }}")
+          fi
+          if ! RUSTC_WRAPPER=sccache cargo test --release --locked --target "${{ matrix.target }}" -p prodex-app "${feature_args[@]}" --lib 'runtime_desktop::tests::' -- --test-threads=1 2>&1 | tee "${test_log}"; then
             exit 1
           fi
           if grep -Fq 'running 0 tests' "${test_log}"; then
