@@ -48,9 +48,8 @@ const ALLOWED_RUNTIME_DEPENDENCIES = new Set([
   "prodex_storage_sqlite",
   "rusqlite",
   "serde_json",
-  "sha2",
 ]);
-const ALLOWED_RUNTIME_DEV_DEPENDENCIES = new Set();
+const ALLOWED_RUNTIME_DEV_DEPENDENCIES = new Set(["sha2"]);
 const FORBIDDEN_RUNTIME_SOURCE_PATTERNS = Object.freeze([
   { name: "environment", pattern: /\bstd\s*::\s*env\b/u },
   { name: "network", pattern: /\bstd\s*::\s*net\b/u },
@@ -220,6 +219,8 @@ prodex_storage = { workspace = true }
 prodex_storage_sqlite = { workspace = true }
 rusqlite = { workspace = true }
 serde_json = { workspace = true }
+
+[dev-dependencies]
 sha2 = { workspace = true }
 `;
   assertSelfTest(
