@@ -51,6 +51,45 @@ reason_code = "policy.allow"
 }
 
 #[test]
+fn governance_numeric_batch_maps_policy_and_session_failures_in_validation_order() {
+    let mut policy = parse_policy("version = 1");
+    policy.governance.policy_rules = (0..70)
+        .map(|index| crate::RuntimeGovernancePolicyRule {
+            id: format!("rule-{index}"),
+            condition: crate::RuntimeGovernancePolicyRuleCondition {
+                minimum_authentication_strength: Some(if index == 69 { 0 } else { 1 }),
+                ..Default::default()
+            },
+            effect: crate::RuntimeGovernancePolicyEffect::Allow,
+            obligations: Vec::new(),
+            reason_code: format!("policy.rule-{index}"),
+        })
+        .collect();
+    policy.governance.session.absolute_timeout_seconds = Some(299);
+
+    let error = validate_runtime_policy_file(&policy, Path::new("policy.toml"))
+        .expect_err("policy rule failures must precede session failures");
+    assert!(
+        error
+            .to_string()
+            .contains("authentication strength must be between 1 and 3"),
+        "{error:#}"
+    );
+
+    policy.governance.policy_rules[69]
+        .condition
+        .minimum_authentication_strength = Some(1);
+    let error = validate_runtime_policy_file(&policy, Path::new("policy.toml"))
+        .expect_err("session rules must be validated in the same numeric batch");
+    assert!(
+        error
+            .to_string()
+            .contains("absolute_timeout_seconds in policy.toml is outside the safe range"),
+        "{error:#}"
+    );
+}
+
+#[test]
 fn governance_policy_schema_rejects_unavailable_evidence_selectors() {
     for selector in [
         "action = \"use_tool\"",

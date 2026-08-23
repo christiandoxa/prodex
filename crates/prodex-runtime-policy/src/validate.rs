@@ -105,8 +105,16 @@ pub fn validate_runtime_governance_settings(
     validate_governance_authority_tenants(governance, path)?;
     validate_governance_artifact_verifiers(governance, path)?;
     validate_governance_inspection_patterns(governance, path)?;
-    validate_governance_policy_rules(governance, path)?;
-    governance_numeric::validate_governance_session(governance, path)?;
+    if governance.policy_rules.len() > MAX_GOVERNANCE_POLICY_RULES {
+        bail!(
+            "governance policy rule count exceeds {} in {}",
+            MAX_GOVERNANCE_POLICY_RULES,
+            path.display()
+        );
+    }
+    let numeric_failures = governance_numeric::governance_numeric_failures(governance)?;
+    validate_governance_policy_rules(governance, &numeric_failures.policy_rules, path)?;
+    governance_numeric::validate_governance_session(numeric_failures.session, path)?;
     if governance_is_enforcing(governance)
         && [
             governance.inspection,
@@ -314,24 +322,19 @@ fn validate_governance_authority_tenants(
 
 fn validate_governance_policy_rules(
     governance: &crate::types::RuntimePolicyGovernanceSettings,
+    numeric_failures: &[governance_numeric::GovernanceRuleNumericFailures],
     path: &Path,
 ) -> Result<()> {
-    if governance.policy_rules.len() > MAX_GOVERNANCE_POLICY_RULES {
-        bail!(
-            "governance policy rule count exceeds {} in {}",
-            MAX_GOVERNANCE_POLICY_RULES,
-            path.display()
-        );
-    }
     let mut identities = BTreeSet::new();
-    for rule in &governance.policy_rules {
-        validate_governance_policy_rule(rule, &mut identities, path)?;
+    for (rule, numeric_failures) in governance.policy_rules.iter().zip(numeric_failures) {
+        validate_governance_policy_rule(rule, numeric_failures, &mut identities, path)?;
     }
     Ok(())
 }
 
 fn validate_governance_policy_rule<'a>(
     rule: &'a RuntimeGovernancePolicyRule,
+    numeric_failures: &governance_numeric::GovernanceRuleNumericFailures,
     identities: &mut BTreeSet<&'a str>,
     path: &Path,
 ) -> Result<()> {
@@ -360,15 +363,12 @@ fn validate_governance_policy_rule<'a>(
             path.display()
         );
     }
-    governance_numeric::validate_governance_numeric_range(
-        rule.condition
-            .minimum_authentication_strength
-            .map(u64::from),
-        1,
-        3,
-        path,
-        "gateway governance policy authentication strength must be between 1 and 3",
-    )?;
+    if numeric_failures.condition {
+        bail!(
+            "gateway governance policy authentication strength must be between 1 and 3 in {}",
+            path.display()
+        );
+    }
     for selector in [
         rule.condition.team_id.as_deref(),
         rule.condition.project_id.as_deref(),
@@ -399,29 +399,28 @@ fn validate_governance_policy_rule<'a>(
             path.display()
         );
     }
-    for obligation in &rule.obligations {
-        validate_governance_policy_obligation(obligation, path)?;
+    for (obligation, numeric_failed) in rule.obligations.iter().zip(&numeric_failures.obligations) {
+        validate_governance_policy_obligation(obligation, *numeric_failed, path)?;
     }
     Ok(())
 }
 
 fn validate_governance_policy_obligation(
     obligation: &RuntimeGovernancePolicyObligation,
+    numeric_failed: bool,
     path: &Path,
 ) -> Result<()> {
-    let authentication_strength = match obligation {
-        RuntimeGovernancePolicyObligation::MinimumAuthenticationStrength { value } => {
-            Some(u64::from(*value))
-        }
-        _ => None,
-    };
-    governance_numeric::validate_governance_numeric_range(
-        authentication_strength,
-        1,
-        3,
-        path,
-        "gateway governance policy obligation authentication strength must be between 1 and 3",
-    )?;
+    if numeric_failed
+        && matches!(
+            obligation,
+            RuntimeGovernancePolicyObligation::MinimumAuthenticationStrength { .. }
+        )
+    {
+        bail!(
+            "gateway governance policy obligation authentication strength must be between 1 and 3 in {}",
+            path.display()
+        );
+    }
     let selector = match obligation {
         RuntimeGovernancePolicyObligation::AllowProvider { selector }
         | RuntimeGovernancePolicyObligation::DenyProvider { selector }
@@ -436,21 +435,12 @@ fn validate_governance_policy_obligation(
             path.display()
         );
     }
-    let bound = match obligation {
-        RuntimeGovernancePolicyObligation::MaxInputTokens { value }
-        | RuntimeGovernancePolicyObligation::MaxOutputTokens { value }
-        | RuntimeGovernancePolicyObligation::MaxContextTokens { value }
-        | RuntimeGovernancePolicyObligation::SessionIdleTimeoutSeconds { value }
-        | RuntimeGovernancePolicyObligation::SessionAbsoluteTimeoutSeconds { value } => {
-            Some(u64::from(*value))
-        }
-        _ => None,
-    };
-    governance_numeric::validate_governance_numeric_non_zero(
-        bound,
-        path,
-        "governance policy obligation bound must be non-zero",
-    )?;
+    if numeric_failed {
+        bail!(
+            "governance policy obligation bound must be non-zero in {}",
+            path.display()
+        );
+    }
     Ok(())
 }
 
