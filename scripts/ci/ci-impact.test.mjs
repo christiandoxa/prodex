@@ -32,6 +32,30 @@ const RUNTIME_HOTPATH_GUARD_SCRIPT_PATH = new URL(
   import.meta.url,
 ).pathname;
 
+test("root package exposes only the maintained developer interface", async () => {
+  const packageJson = JSON.parse(
+    await fs.readFile(new URL("../../package.json", import.meta.url), "utf8"),
+  );
+
+  assert.deepEqual(Object.keys(packageJson.scripts), [
+    "test",
+    "test:node",
+    "test:full",
+    "test:serial",
+    "test:changed",
+    "lint",
+    "docs",
+    "compat",
+    "bench",
+    "ci",
+    "release",
+    "release:prepare",
+    "release:cut",
+    "npm:sync-version",
+    "changelog",
+  ]);
+});
+
 test("normalizes changed paths", () => {
   assert.equal(normalizeChangedPath("./docs\\runtime-policy.md"), "docs/runtime-policy.md");
 });
@@ -239,22 +263,6 @@ test("changed-tests runs enterprise docs guard for governance evidence inputs", 
     const labels = (await buildSteps([filePath])).map((step) => step.label);
     assert.ok(labels.includes("enterprise-docs-guard"), filePath);
   }
-});
-
-test("changed-tests package alias check covers enterprise guard scripts", async () => {
-  const steps = await buildSteps(["package.json"]);
-  const packageAliasStep = steps.find((step) => step.label === "package:changed-aliases");
-  assert.ok(packageAliasStep);
-  const expectedAliases = JSON.parse(packageAliasStep.args[2]);
-
-  assert.equal(
-    expectedAliases["ci:deployment-security-guard"],
-    "node scripts/ci/deployment-security-guard.mjs --self-test && node scripts/ci/deployment-security-guard.mjs",
-  );
-  assert.equal(
-    expectedAliases["ci:gateway-http-boundary-guard"],
-    "node scripts/ci/gateway-http-boundary-guard.mjs --self-test && node scripts/ci/gateway-http-boundary-guard.mjs",
-  );
 });
 
 test("changed-tests runs runtime policy docs self-test and check together", async () => {

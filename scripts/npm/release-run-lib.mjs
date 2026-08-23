@@ -33,11 +33,11 @@ export const releaseSteps = [
 
 function usage() {
   return [
-    "Usage: npm run release:run -- [options]",
+    "Usage: npm run release -- [options]",
     "",
     "Mandatory idempotent release runner. It owns version bump, generated metadata, final changelog rendering, validation, commit, push, CI watch, publish dispatch, and verify.",
     "It never publishes to npm or crates.io; .github/workflows/standalone-release.yml creates the standalone GitHub Release.",
-    "Do not manually refresh CHANGELOG.md for release commits; release:run renders it with --release-version and validates it through release:prepare.",
+    "Do not manually refresh CHANGELOG.md for release commits; this command renders it with --release-version and validates it through release:prepare.",
     "",
     "Options:",
     "  --version <x.y.z>          bump Cargo.toml to this version before sync",
@@ -63,10 +63,10 @@ function usage() {
     `  ${releaseSteps.join(", ")}`,
     "",
     "Examples:",
-    "  npm run release:run -- --dry-run --version 0.93.0",
-    "  npm run release:run -- --resume --from watch-ci",
-    "  npm run release:run -- --only trigger-publish,watch-publish,verify --resume",
-    "  npm run release:cargo-plan",
+    "  npm run release -- --dry-run --version 0.93.0",
+    "  npm run release -- --resume --from watch-ci",
+    "  npm run release -- --only trigger-publish,watch-publish,verify --resume",
+    "  npm run release -- --cargo-publish plan",
   ].join("\n");
 }
 

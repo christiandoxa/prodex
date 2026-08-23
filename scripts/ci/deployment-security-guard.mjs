@@ -144,7 +144,7 @@ const REQUIRED_BACKUP_MARKERS = Object.freeze([
   ["## Audit and evidence", "audit evidence section"],
   ["/readyz", "restore readiness check"],
   ["cross-tenant", "tenant-isolation restore acceptance"],
-  ["npm run ci:backup-restore-drill", "automated PostgreSQL restore drill"],
+  ["node scripts/ci/backup-restore-drill.mjs --self-test && node scripts/ci/backup-restore-drill.mjs", "automated PostgreSQL restore drill"],
   ["target/backup-restore-drill/evidence.json", "redacted drill evidence path"],
   ["RPO", "recovery-point objective gate"],
   ["RTO", "recovery-time objective gate"],
@@ -1526,7 +1526,7 @@ port: 4100
 ## Audit and evidence
 /readyz
 cross-tenant
-npm run ci:backup-restore-drill
+node scripts/ci/backup-restore-drill.mjs --self-test && node scripts/ci/backup-restore-drill.mjs
 target/backup-restore-drill/evidence.json
 RPO
 RTO

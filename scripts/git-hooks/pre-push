@@ -8,4 +8,4 @@ fi
 # Let test fixtures discover their own repositories instead of inheriting this hook's Git paths.
 unset GIT_DIR GIT_WORK_TREE GIT_COMMON_DIR GIT_INDEX_FILE GIT_OBJECT_DIRECTORY GIT_ALTERNATE_OBJECT_DIRECTORIES
 
-npm run ci:prepush
+node scripts/ci/prepush.mjs

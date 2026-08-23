@@ -7,7 +7,6 @@ import { formatCommand, runStep, runStepsSerial } from "./main-internal-test-run
 import {
   CHANGELOG_TEST_PATH,
   CAPTURE_REPLAY_FIXTURE_TESTS_PATH,
-  PACKAGE_SCRIPT_ALIASES,
   PATH_GROUP_NAMES,
   RELEASE_RUN_TEST_PATH,
   UPSTREAM_COMPAT_SCRIPT_PATHS,
@@ -100,7 +99,7 @@ function printHelp() {
       "  - staged, unstaged, and untracked files by default",
       "",
       "Examples:",
-      "  npm run ci:changed -- --dry-run",
+      "  node scripts/ci/changed-tests.mjs --dry-run",
       "  npm run test:changed -- --base origin/main",
     ].join("\n") + "\n",
   );
@@ -413,18 +412,6 @@ export async function buildSteps(paths) {
       await addNodeCheckStep(steps, filePath);
     }
 
-    if (filePath === "package.json") {
-      addStep(steps, "package:changed-aliases", {
-        label: "package:changed-aliases",
-        command: "node",
-        args: [
-          "-e",
-          "const fs=require('node:fs'); const pkg=JSON.parse(fs.readFileSync('package.json','utf8')); const expected=JSON.parse(process.argv[1]); for (const [name, command] of Object.entries(expected)) { if (pkg.scripts?.[name] !== command) throw new Error(`${name} script mismatch`); }",
-          JSON.stringify(PACKAGE_SCRIPT_ALIASES),
-        ],
-      });
-    }
-
     if (isSizeGuardRelevantPath(filePath)) {
       addStep(steps, "size-guard", {
         label: "size-guard",
@@ -465,10 +452,15 @@ export async function buildSteps(paths) {
     }
 
     if (isGatewaySecurityRelevantPath(filePath)) {
-      addStep(steps, "gateway-security-smoke", {
-        label: "gateway-security-smoke",
-        command: "npm",
-        args: ["run", "ci:gateway-security-smoke"],
+      addStep(steps, "gateway-admin-auth", {
+        label: "gateway-admin-auth",
+        command: "cargo",
+        args: ["test", "--locked", "-q", "-p", "prodex-app", "--lib", "gateway_admin_auth", "--", "--test-threads=1"],
+      });
+      addStep(steps, "gateway-usage", {
+        label: "gateway-usage",
+        command: "cargo",
+        args: ["test", "--locked", "-q", "-p", "prodex-app", "--lib", "gateway_usage", "--", "--test-threads=1"],
       });
     }
 

@@ -174,14 +174,18 @@ async function checkBuiltInScrubSelfTest() {
 async function checkOfflineReplayGateWiring() {
   const packageJson = JSON.parse(await fs.readFile(path.join(repoRoot, "package.json"), "utf8"));
   assert.equal(
-    packageJson.scripts?.["compat:offline-gate"],
-    "npm run compat:check && npm run compat:replay-fixtures",
+    packageJson.scripts?.compat,
+    "node scripts/compat/check-upstream-baseline.mjs && node scripts/compat/capture-replay-fixture-tests.mjs",
   );
 
   const workflow = await fs.readFile(path.join(repoRoot, ".github/workflows/ci.yml"), "utf8");
   assert.match(workflow, /^\s{2}compat-replay-gate:\n/m);
   assert.match(workflow, /Run offline upstream compat replay gate/);
-  assert.match(workflow, /\bnpm run compat:offline-gate\b/);
+  assert.ok(
+    workflow.includes(
+      "node scripts/compat/check-upstream-baseline.mjs && node scripts/compat/capture-replay-fixture-tests.mjs",
+    ),
+  );
 }
 
 async function checkFixture(spec) {

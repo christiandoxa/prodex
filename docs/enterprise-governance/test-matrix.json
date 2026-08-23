@@ -34,7 +34,7 @@
     },
     {
       "id": "SEC-ID-002",
-      "test_command": "npm run ci:storage-postgres-proof",
+      "test_command": "node scripts/ci/storage-postgres-proof.mjs",
       "evidence_artifact": "evidence/enterprise-test-matrix/SEC-ID-002/",
       "owner": "prodex-storage",
       "phase": 5,
@@ -46,7 +46,7 @@
       "implementation_status": "tested",
       "evidence_required": "Multi-tenant API and PostgreSQL RLS suite using synthetic tenants.",
       "evidence": [
-        "npm run ci:storage-postgres-proof",
+        "node scripts/ci/storage-postgres-proof.mjs --self-test && node scripts/ci/storage-postgres-proof.mjs",
         "external: deployment PostgreSQL/RLS cross-tenant and governance lifecycle proof"
       ]
     },
@@ -399,7 +399,7 @@
       "evidence": [
         "audit_failure_rolls_back_activation_fail_closed",
         "external: SQLite and live PostgreSQL transactional fault evidence",
-        "npm run ci:storage-postgres-proof"
+        "node scripts/ci/storage-postgres-proof.mjs --self-test && node scripts/ci/storage-postgres-proof.mjs"
       ]
     },
     {
@@ -524,7 +524,7 @@
         "postgres_validation_migration_is_append_only_and_complete",
         "postgres_migrations_can_be_applied_twice_without_duplicate_rls_policies",
         "postgres_migrator_fails_closed_before_recording_constraint_validation",
-        "npm run ci:backup-restore-drill"
+        "node scripts/ci/backup-restore-drill.mjs --self-test && node scripts/ci/backup-restore-drill.mjs"
       ]
     },
     {
@@ -678,7 +678,7 @@
     },
     {
       "id": "SEC-PERF-001",
-      "test_command": "npm run ci:runtime-load-smoke",
+      "test_command": "node scripts/ci/runtime-load-smoke.mjs",
       "evidence_artifact": "evidence/enterprise-test-matrix/SEC-PERF-001/",
       "owner": "prodex-performance",
       "phase": 5,
@@ -691,8 +691,8 @@
       "evidence_required": "Criterion statistical samples plus bounded load and stress gates on the release candidate.",
       "evidence": [
         "cargo bench --locked --bench governance_hot_paths",
-        "npm run ci:runtime-load-smoke",
-        "npm run ci:runtime-stress",
+        "node tests/load/mock-upstream.mjs --self-test && node tests/load/runtime-proxy-load.mjs --self-test && node scripts/ci/runtime-load-smoke.mjs",
+        "node scripts/ci/runtime-stress.mjs",
         "external: bounded histogram, queue, admission, and cardinality acceptance evidence"
       ]
     }

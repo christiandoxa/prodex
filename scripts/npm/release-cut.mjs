@@ -73,7 +73,7 @@ function printHelp() {
     [
       "Usage: npm run release:cut -- --version <semver> [--dry-run] [--no-commit] [--no-verify]",
       "",
-      "Cuts a deterministic release in one command. Prefer npm run release:run for normal releases.",
+      "Cuts a deterministic release in one command. Prefer npm run release for normal releases.",
       "",
       "Pipeline:",
       "  - require a clean worktree",

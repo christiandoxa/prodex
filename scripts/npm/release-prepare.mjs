@@ -394,9 +394,9 @@ async function main() {
     changelogArgs.push("--release-version", args.releaseVersion);
   }
   await runStep("changelog", "node", changelogArgs, args);
-  await runStep("docs-lint", "npm", ["run", "docs:lint"], args);
+  await runStep("docs-lint", "npm", ["run", "docs"], args);
   await runStep("upstream-compat", "node", ["scripts/compat/check-upstream-baseline.mjs"], args);
-  await runStep("runtime-manifest", "npm", ["run", "ci:runtime-manifest"], args);
+  await runStep("runtime-manifest", "node", ["scripts/ci/runtime-test-manifest-guard.mjs"], args);
   await runStep("cargo-fmt", "cargo", ["fmt", "--check"], args);
   if (args.cargoTest) {
     await runStep("cargo-test-compile:all-targets", "cargo", [
