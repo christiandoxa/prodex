@@ -1,6 +1,7 @@
 //! Runtime proxy startup state audit.
 
 use super::*;
+use prodex_runtime_store::runtime_profile_transport_backoff_key_valid;
 
 pub(crate) fn audit_runtime_proxy_startup_state(shared: &RuntimeRotationProxyShared) {
     let Ok(mut runtime) = shared.runtime.lock() else {
