@@ -24,18 +24,17 @@ pub(crate) fn runtime_profile_inflight_count(
     shared.lane_admission.profile_inflight_count(profile_name)
 }
 
-pub(crate) fn runtime_profile_inflight_hard_limit_context(context: &str) -> usize {
-    runtime_profile_inflight_weight(context)
-}
-
 pub(crate) fn runtime_profile_inflight_hard_limited_for_context(
     shared: &RuntimeRotationProxyShared,
     profile_name: &str,
     context: &str,
 ) -> Result<bool> {
-    let hard_limit = shared.runtime_config.tuning.profile_inflight_hard_limit;
+    let hard_limit = runtime_profile_inflight_effective_hard_limit(
+        context,
+        shared.runtime_config.tuning.profile_inflight_hard_limit,
+    );
     Ok(runtime_profile_inflight_count(shared, profile_name)
-        .saturating_add(runtime_profile_inflight_hard_limit_context(context))
+        .saturating_add(runtime_profile_inflight_weight(context))
         > hard_limit)
 }
 
@@ -192,6 +191,13 @@ pub(crate) fn runtime_profile_inflight_sort_key(
 
 pub(crate) fn runtime_profile_inflight_weight(context: &str) -> usize {
     runtime_proxy_crate::runtime_profile_inflight_weight(context)
+}
+
+pub(crate) fn runtime_profile_inflight_effective_hard_limit(
+    context: &str,
+    configured_limit: usize,
+) -> usize {
+    runtime_proxy_crate::runtime_profile_inflight_effective_hard_limit(context, configured_limit)
 }
 
 pub(crate) fn runtime_route_kind_inflight_context(route_kind: RuntimeRouteKind) -> &'static str {

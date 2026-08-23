@@ -70,6 +70,34 @@ fn runtime_profile_inflight_hard_limit_uses_weighted_admission_cost() {
 }
 
 #[test]
+fn weighted_route_can_acquire_once_when_configured_hard_limit_is_one() {
+    let temp_dir = TestDir::isolated();
+    let mut shared = RuntimeProxyFixtureBuilder::new().build_shared(&temp_dir);
+    Arc::make_mut(&mut shared.runtime_config)
+        .tuning
+        .profile_inflight_hard_limit = 1;
+
+    assert!(
+        !runtime_profile_inflight_hard_limited_for_context(&shared, "main", "responses_http")
+            .expect("empty weighted route should remain admissible")
+    );
+    let guard = try_acquire_runtime_profile_inflight_guard(
+        &shared,
+        "main",
+        "responses_http",
+        false,
+    )
+    .expect("weighted admission should not fail")
+    .expect("the first weighted request should be admitted");
+    assert!(
+        runtime_profile_inflight_hard_limited_for_context(&shared, "main", "responses_http")
+            .expect("a second weighted request should be saturated")
+    );
+
+    drop(guard);
+}
+
+#[test]
 fn runtime_profile_inflight_limits_use_configured_overrides() {
     let _soft_guard = TestEnvVarGuard::set("PRODEX_RUNTIME_PROXY_PROFILE_INFLIGHT_SOFT_LIMIT", "9");
     let _hard_guard =

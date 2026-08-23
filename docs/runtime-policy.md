@@ -622,7 +622,7 @@ shared-state integration around those operations.
 | `runtime_proxy.websocket_active_limit` | `PRODEX_RUNTIME_PROXY_WEBSOCKET_ACTIVE_LIMIT` | `long_lived_worker_count` clamped to `2..global` | Lane cap for websocket transport. |
 | `runtime_proxy.standard_active_limit` | `PRODEX_RUNTIME_PROXY_STANDARD_ACTIVE_LIMIT` | `worker_count / 2` clamped to `2..8` | Lane cap for other unary proxy traffic. |
 | `runtime_proxy.profile_inflight_soft_limit` | `PRODEX_RUNTIME_PROXY_PROFILE_INFLIGHT_SOFT_LIMIT` | `4` | Fresh selection starts penalizing profiles above this in-flight count. |
-| `runtime_proxy.profile_inflight_hard_limit` | `PRODEX_RUNTIME_PROXY_PROFILE_INFLIGHT_HARD_LIMIT` | `8` | Fresh selection avoids profiles above this in-flight count; hard affinity still wins. |
+| `runtime_proxy.profile_inflight_hard_limit` | `PRODEX_RUNTIME_PROXY_PROFILE_INFLIGHT_HARD_LIMIT` | `8` | Fresh selection avoids profiles whose next weighted admission would exceed this count; a route always admits one request, and hard affinity still wins. |
 | `runtime_proxy.admission_wait_budget_ms` | `PRODEX_RUNTIME_PROXY_ADMISSION_WAIT_BUDGET_MS` | `750` | Normal wait budget for local admission pressure. |
 | `runtime_proxy.pressure_admission_wait_budget_ms` | `PRODEX_RUNTIME_PROXY_PRESSURE_ADMISSION_WAIT_BUDGET_MS` | `200` | Shorter admission wait budget when proxy is already under pressure. |
 | `runtime_proxy.long_lived_queue_wait_budget_ms` | `PRODEX_RUNTIME_PROXY_LONG_LIVED_QUEUE_WAIT_BUDGET_MS` | `750` | Normal wait budget for long-lived queue pressure. |
