@@ -1,7 +1,10 @@
 use super::*;
 
 pub(crate) fn read_http_request(stream: &mut TcpStream) -> Option<String> {
-    let _ = stream.set_read_timeout(Some(Duration::from_secs(1)));
+    stream.set_nonblocking(false).ok()?;
+    stream
+        .set_read_timeout(Some(Duration::from_secs(1)))
+        .ok()?;
     let mut buffer = [0_u8; 1024];
     let mut request = Vec::new();
 
@@ -49,6 +52,31 @@ pub(crate) fn read_http_request(stream: &mut TcpStream) -> Option<String> {
     }
 
     (!request.is_empty()).then(|| String::from_utf8_lossy(&request).into_owned())
+}
+
+#[test]
+fn read_http_request_waits_for_delayed_bytes_on_a_nonblocking_stream() {
+    let listener = TcpListener::bind("127.0.0.1:0").expect("listener");
+    let addr = listener.local_addr().expect("listener address");
+    let client = thread::spawn(move || {
+        let mut stream = TcpStream::connect(addr).expect("client connection");
+        thread::sleep(Duration::from_millis(50));
+        stream
+            .write_all(b"POST /test HTTP/1.1\r\nContent-Length: 2\r\n\r\nok")
+            .expect("request write");
+    });
+    let (mut stream, _) = listener.accept().expect("server connection");
+    stream
+        .set_nonblocking(true)
+        .expect("nonblocking test stream");
+
+    let request = read_http_request(&mut stream).expect("complete request");
+
+    client.join().expect("client thread");
+    assert_eq!(
+        request,
+        "POST /test HTTP/1.1\r\nContent-Length: 2\r\n\r\nok"
+    );
 }
 
 pub(crate) fn request_header(request: &str, header_name: &str) -> Option<String> {
