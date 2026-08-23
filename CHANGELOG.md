@@ -2,6 +2,16 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.413.0 - 2026-08-23
+
+### Runtime
+
+- Drain all positive runtime quota (`5a69440`)
+
+### CLI
+
+- Preserve fraction-only Gemini quota (`7523ce7`)
+
 ## 0.412.0 - 2026-08-23
 
 ### Runtime
@@ -26,35 +36,7 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 
 - Recover stale Codex continuations semantically (`7925ac6`)
 - Expand runtime decision kernels (`7a4b297`)
-
-### CLI
-
-- Align Codex provider semantics (`64e9b50`)
-
-### Misc
-
-- Keep fallback Clippy-clean (`fee7b8e`)
-- Preserve Codex 0.149 during migration (`965a5f4`)
-- Align Codex model and tool limits (`958df0d`)
-- Migrate provider routing decisions to Mojo core (`0b7f2b1`)
-
-## 0.410.1 - 2026-08-20
-
-### Runtime
-
 - Extend runtime and routing kernels (`ba7b2de`)
-
-### CLI
-
-- Support positional profile login (`256dea4`)
-- Consolidate quota bridge (`6187457`)
-- Expand quota core and enforce real CI parity (`99f7337`)
-- Add opt-in quota core bridge (`8986955`)
-
-## 0.410.0 - 2026-08-19
-
-### Runtime
-
 - Satisfy response recovery quality gate (`2b3d273`)
 - Unblock cross-platform release (`4aa8d04`)
 - Harden response chains across reconnects (`adb35b4`)
@@ -145,6 +127,11 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 
 ### CLI
 
+- Align Codex provider semantics (`64e9b50`)
+- Support positional profile login (`256dea4`)
+- Consolidate quota bridge (`6187457`)
+- Expand quota core and enforce real CI parity (`99f7337`)
+- Add opt-in quota core bridge (`8986955`)
 - Publish refresh result after heartbeat timeout (`236d88d`)
 - Align Kiro effort and persisted quota fallback (`88286e5`)
 - Preserve model and quota readiness across profiles (`554bc5a`)
@@ -261,6 +248,10 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 
 ### Misc
 
+- Keep fallback Clippy-clean (`fee7b8e`)
+- Preserve Codex 0.149 during migration (`965a5f4`)
+- Align Codex model and tool limits (`958df0d`)
+- Migrate provider routing decisions to Mojo core (`0b7f2b1`)
 - Persist model preferences by logical scope (`55b4c90`)
 - Revert "chore(release): release 0.408.9" (`0d2a48c`)
 - Revert "chore(release): release 0.408.9" (`237b17b`)
