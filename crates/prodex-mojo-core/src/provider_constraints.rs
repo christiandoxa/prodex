@@ -277,6 +277,17 @@ fn decode_optional_u64(present: i64, value: u64) -> Result<Option<u64>, crate::M
     }
 }
 
+fn decode_optional_tag<T>(present: i64, value: i64) -> Result<Option<T>, crate::MojoError>
+where
+    T: TryFrom<i64, Error = crate::MojoError>,
+{
+    match (decode_flag(present)?, value) {
+        (true, value) => T::try_from(value).map(Some),
+        (false, 0) => Ok(None),
+        (false, _) => Err(crate::MojoError::InvalidOutput),
+    }
+}
+
 fn decode_output(
     output_i64: &[i64; PROVIDER_CONSTRAINT_OUTPUT_I64_FIELD_COUNT],
     output_u64: &[u64; PROVIDER_CONSTRAINT_OUTPUT_U64_FIELD_COUNT],
@@ -291,13 +302,10 @@ fn decode_output(
     }
     let eligible = decode_flag(output_i64[OUTPUT_I64_ELIGIBLE])?;
 
-    let missing_feature = if decode_flag(output_i64[OUTPUT_I64_MISSING_FEATURE_PRESENT])? {
-        Some(Feature::try_from(output_i64[OUTPUT_I64_MISSING_FEATURE])?)
-    } else if output_i64[OUTPUT_I64_MISSING_FEATURE] == 0 {
-        None
-    } else {
-        return Err(crate::MojoError::InvalidOutput);
-    };
+    let missing_feature = decode_optional_tag(
+        output_i64[OUTPUT_I64_MISSING_FEATURE_PRESENT],
+        output_i64[OUTPUT_I64_MISSING_FEATURE],
+    )?;
     let adjusted_output_tokens = decode_optional_u64(
         output_i64[OUTPUT_I64_ADJUSTED_OUTPUT_PRESENT],
         output_u64[OUTPUT_U64_ADJUSTED_OUTPUT_TOKENS],
@@ -311,24 +319,14 @@ fn decode_output(
         output_u64[OUTPUT_U64_MAX_OUTPUT_TOKENS],
     )?;
 
-    let adjustment_field = if decode_flag(output_i64[OUTPUT_I64_ADJUSTMENT_FIELD_PRESENT])? {
-        Some(OutputLimitField::try_from(
-            output_i64[OUTPUT_I64_ADJUSTMENT_FIELD],
-        )?)
-    } else if output_i64[OUTPUT_I64_ADJUSTMENT_FIELD] == 0 {
-        None
-    } else {
-        return Err(crate::MojoError::InvalidOutput);
-    };
-    let adjustment_reason = if decode_flag(output_i64[OUTPUT_I64_ADJUSTMENT_REASON_PRESENT])? {
-        Some(Decision::try_from(
-            output_i64[OUTPUT_I64_ADJUSTMENT_REASON],
-        )?)
-    } else if output_i64[OUTPUT_I64_ADJUSTMENT_REASON] == 0 {
-        None
-    } else {
-        return Err(crate::MojoError::InvalidOutput);
-    };
+    let adjustment_field = decode_optional_tag(
+        output_i64[OUTPUT_I64_ADJUSTMENT_FIELD_PRESENT],
+        output_i64[OUTPUT_I64_ADJUSTMENT_FIELD],
+    )?;
+    let adjustment_reason = decode_optional_tag(
+        output_i64[OUTPUT_I64_ADJUSTMENT_REASON_PRESENT],
+        output_i64[OUTPUT_I64_ADJUSTMENT_REASON],
+    )?;
 
     let adjusted = adjusted_output_tokens.is_some();
     if adjusted != adjustment_field.is_some()
