@@ -9,8 +9,8 @@ short local runs, not release-performance claims.
 | --- | --- | --- |
 | Mojo compiler | `mojo --version` | `Mojo 1.0.0 (ed45d567)` |
 | Mojo object build | `mojo build mojo/prodex_core/quota.mojo --emit object --optimization-level=3 -o ...` | Pass; exported symbol present |
-| Rust linkage | `PRODEX_MOJO_REQUIRED=1 cargo test --locked -q -p prodex-quota --features mojo` | 53 tests pass, including strict activation and C-ABI smoke |
-| Runtime-proxy linkage | `PRODEX_MOJO_REQUIRED=1 cargo test --locked -q -p prodex-runtime-proxy --features mojo` | 406 tests plus 1 activation test pass, including route-pressure, profile-score, and byte-estimate parity |
+| Rust linkage | `PRODEX_MOJO_REQUIRED=1 cargo test --locked -q -p prodex-quota --features mojo` | 55 tests pass, including strict activation and C-ABI smoke |
+| Runtime-proxy linkage | `PRODEX_MOJO_REQUIRED=1 cargo test --locked -q -p prodex-runtime-proxy --features mojo` | 409 library tests plus 1 activation test pass, including route-pressure, profile-scheduling, and byte-estimate parity |
 | Linked binary | `PRODEX_MOJO_REQUIRED=1 cargo build --locked --features mojo-core --bin prodex` | `prodex --version` runs; no Mojo/Modular shared dependency in `ldd` |
 | Complete routing boundary | `cargo bench ... governance_routing_...` with 0, 1, and 64 candidates | Rust-only: representative `[707.19 ns 708.20 ns 709.51 ns]`; max `[6.7758 µs 6.7858 µs 6.7961 µs]`; circuit fallback `[715.63 ns 722.66 ns 730.67 ns]` |
 | Complete routing boundary with Mojo | `PRODEX_MOJO_REQUIRED=1 ... cargo bench --features mojo-routing ... governance_routing_...` | Representative `[1.4197 µs 1.4279 µs 1.4358 µs]`; max `[15.083 µs 15.105 µs 15.135 µs]`; circuit fallback `[1.4133 µs 1.4274 µs 1.4444 µs]` |
@@ -35,16 +35,17 @@ performance improvement is claimed.
 | Check | Command / observation | Result |
 | --- | --- | --- |
 | Shared strict build | `PRODEX_MOJO_REQUIRED=1 PRODEX_MOJO_VERSION=1.0.0 cargo build --locked --features mojo-core --bin prodex` | Pass when run; binary must report compiled-in Mojo, `compiler_required=false`, and a passing self-test |
-| Quota parity | `cargo test --locked -q -p prodex-quota --features mojo -- --test-threads=1` | 53 passed |
-| Runtime proxy parity | `PRODEX_MOJO_REQUIRED=1 PRODEX_MOJO_VERSION=1.0.0 cargo test --locked -q -p prodex-runtime-proxy --features mojo --lib -- --test-threads=1` | 406 passed; runtime candidate ordering and Smart Context pressure use the Mojo path |
-| Runtime generated parity | `PRODEX_MOJO_REQUIRED=1 ... cargo test --locked -p prodex-mojo-core --features mojo-core runtime::parity_tests -- --nocapture --test-threads=1` | 2 tests passed; 300 fixed-seed runtime candidate cases plus 300 pressure cases |
-| Mojo core strict suite | `PRODEX_MOJO_REQUIRED=1 PRODEX_MOJO_VERSION=1.0.0 cargo test --locked -q -p prodex-mojo-core --features mojo-core -- --test-threads=1` | 3 passed; shared archive and self-test pass |
+| Quota parity | `cargo test --locked -q -p prodex-quota --features mojo -- --test-threads=1` | 55 passed |
+| Runtime proxy parity | `PRODEX_MOJO_REQUIRED=1 PRODEX_MOJO_VERSION=1.0.0 cargo test --locked -q -p prodex-runtime-proxy --features mojo --lib -- --test-threads=1` | 409 passed; runtime candidate ordering and Smart Context pressure use the Mojo path |
+| Runtime parity | `PRODEX_MOJO_REQUIRED=1 ... cargo test --locked -p prodex-mojo-core --features mojo-core --test runtime_parity -- --test-threads=1` | Runtime candidate and pressure parity fixtures pass |
+| Profile scheduling parity | `PRODEX_MOJO_REQUIRED=1 ... cargo test --locked -p prodex-mojo-core --features mojo-core --test profile_schedule -- --test-threads=1` | Stable ordering and pressure-boundary fixtures pass |
+| Mojo core strict suite | `PRODEX_MOJO_REQUIRED=1 PRODEX_MOJO_VERSION=1.0.0 cargo test --locked -q -p prodex-mojo-core --features mojo-core -- --test-threads=1` | Shared archive and self-test pass |
 | Doctor module diagnostics | `PRODEX_MOJO_REQUIRED=1 ... cargo test --locked -q -p prodex-app --features mojo-core --lib app_commands::doctor -- --test-threads=1` | 10 passed; aggregate contract plus independent runtime modules |
 | Runtime quota parity | `cargo test --locked -q -p prodex-runtime-quota --features mojo -- --test-threads=1` | 17 passed |
 | Provider routing and capability strict suite | `PRODEX_MOJO_REQUIRED=1 PRODEX_MOJO_VERSION=1.0.0 cargo test --locked -q -p prodex-provider-spi --features mojo -- --test-threads=1` | 2 + 15 + 16 tests passed across 4 suites; provider score oracle, governed routing, and capability negotiation paths exercised |
 | Root `mojo-routing` feature wiring | `PRODEX_MOJO_REQUIRED=1 PRODEX_MOJO_VERSION=1.0.0 cargo check --locked -q --features mojo-routing --bin prodex` | Pass |
 | Optimized direct release | `cargo build --release --locked --target x86_64-unknown-linux-gnu --features mojo-core --bin prodex` | Host-link evidence is separate from the release artifact and must not be used as the GLIBC promotion result |
-| Target archive handoff | `PRODEX_MOJO_ARCHIVE=target/mojo-release/x86_64-unknown-linux-gnu/libprodex_mojo_core.a cross build --release ...` | Pass locally; final ELF requires at most `GLIBC_2.18`, has no dynamic Mojo dependency/RPATH, and executes the Mojo self-test without `mojo` |
+| Target archive handoff | `PRODEX_MOJO_ARCHIVE=target/mojo-release/x86_64-unknown-linux-gnu/libprodex_mojo_core.a cross build --release ...` | Pass locally; final ELF stays within the `GLIBC_2.23` release ceiling, has no dynamic Mojo dependency/RPATH, and executes the Mojo self-test without `mojo` |
 | Final binary dependencies | `ldd` / `readelf --dynamic` on optimized Mojo binary | Only libc/libm/libgcc/loader; no Mojo/Modular dependency or RPATH/RUNPATH observed |
 | Optimized binary size | `stat` on current stripped host/cross Linux artifacts | 49,681,016 bytes host link; 50,202,496 bytes GLIBC-compatible cross link |
 | Installer fixture | Local file-backed `install.sh` with no Mojo on `PATH` | Pass; manifest/checksum selection and Mojo self-test verified |

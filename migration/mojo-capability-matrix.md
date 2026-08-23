@@ -79,8 +79,8 @@ explicit `mojo-provider-constraints` feature for the provider-core owner.
 | Provider request constraints | Fixed scalar `UInt64`/`Int64` input and caller-owned outputs | Explicit policy/decision/feature/field tags; one evaluation | Rust owns JSON, catalog, provider adapters, and errors | Test oracle; Rust-only path |
 | Smart Context rehydration | Parallel cost/required/availability arrays | 256 rows; four action tags | Rust owns artifact IDs, store lookup, and ordering | Test oracle; Rust-only path |
 | Quota main aggregation | Parallel presence/value arrays | 1,024 rows; presence flags | Rust owns decimal/floating conversion and reset acquisition | Test oracle; Rust-only path |
-| Runtime profile scheduling order | Parallel 15-field `Int64` rows and output indices | 256 rows; stable permutation | Rust owns clock/state/name collection and hysteresis | Test oracle; Rust-only path |
-| Runtime policy numeric validation | Parallel `UInt64` values and rule tags | 64 rules; `NonZero=0`, `Range=1`, `LessOrEqual=2` | Rust owns config parsing, paths, security, and exact errors | Test oracle; Rust-only path |
+| Runtime profile scheduling order | Parallel 16-field `Int64` rows and output indices | 256 rows; stable permutation | Rust owns clock/state/name collection; Mojo derives scaling, reserve bias, and hysteresis ordering | Test oracle; Rust-only path |
+| Runtime policy numeric validation | Parallel `UInt64` inputs and caller-owned `Int64` failure flags | Section-sized batches; `NonZero=0`, `Range=1`, `LessOrEqual=2` | Rust owns config parsing, paths, security, and exact errors | Shared primitive evaluator for Rust-only targets |
 | Critical-signal loss/gain | Seven `Int64` counters per side and two output arrays | Seven fixed counters | Rust owns line classification, text matching, and range selection | Test oracle; Rust-only path |
 | Runtime tuning defaults | Seven caller-owned scalar outputs | Bounded integer clamps | Rust owns host/config parsing and overrides | Test oracle; Rust-only path |
 
@@ -92,7 +92,7 @@ The release matrix is intentionally stricter than object generation:
 
 | Target | Object probe | Final release status | Reason |
 | --- | --- | --- | --- |
-| `x86_64-unknown-linux-gnu` | Verified with target triple and `x86-64` CPU | `MOJO_RELEASE_SUPPORTED` | Cross-container final link passed with GLIBC_2.18 maximum, no dynamic Mojo dependency/RPATH, and clean execution without `mojo` |
+| `x86_64-unknown-linux-gnu` | Verified with target triple and `x86-64` CPU | `MOJO_RELEASE_SUPPORTED` | Cross-container final link passed with the GLIBC_2.23 release ceiling, no dynamic Mojo dependency/RPATH, and clean execution without `mojo` |
 | `aarch64-unknown-linux-gnu` | Verified object only | `RUST_RELEASE_ONLY` | Final archive/link/emulation evidence is not yet available |
 | `x86_64-apple-darwin`, `aarch64-apple-darwin` | Verified objects only | `RUST_RELEASE_ONLY` | Signing, release link, and clean-machine evidence are not yet available |
 | `*-pc-windows-msvc` | Verified objects only | `RUST_RELEASE_ONLY` | Native MSVC final link/runtime evidence is not yet available |

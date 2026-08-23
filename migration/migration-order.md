@@ -11,7 +11,8 @@
 7. Batched quota window-pair readiness port.
 8. Runtime route-specific quota pressure-band decision port.
 9. Shared `prodex-mojo-core` archive and target-aware build path.
-10. Runtime profile quota scoring batch with saturation parity.
+10. Runtime profile quota scoring batch with saturation parity, later absorbed by the scheduling
+    batch in item 25.
 11. Provider-independent numeric scoring batch after Rust hard eligibility.
 12. Smart Context byte-size token estimate.
 13. Strict release/installer metadata and compiled-in Linux artifact gate.
@@ -37,7 +38,8 @@
 24. Runtime policy numeric validation: one Mojo batch now owns active runtime-proxy numeric
     bounds and governance session range/relation checks; Rust retains security and exact errors.
 25. Runtime profile scheduling order: one Mojo index batch now owns normalized ready-profile
-    ordering; Rust retains clock/state reads, names, and preferred-profile hysteresis.
+    scoring, reserve bias, and ordering; Rust retains clock/state reads, names, and input
+    normalization.
 26. Critical-signal loss/gain arithmetic: Rust classifies lines and Mojo compares the seven
     normalized counters; Rust retains duplicate matching, range selection, and text handling.
 

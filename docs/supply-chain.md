@@ -86,7 +86,7 @@ across all targets, and imports that report into a job-local SonarQube Community
 Build instance. Its token is generated inside the ephemeral runner, masked,
 and revoked before the job exits; no Sonar repository secret or variable is
 required. The production report uses `cargo clippy --locked --workspace
---exclude prodex-bench-support --lib --bins --all-features
+--exclude prodex-bench-support --lib --bins
 --message-format=json -- -D warnings` and writes the ignored
 `target/sonar/clippy-report.json`.
 

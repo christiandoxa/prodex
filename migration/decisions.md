@@ -15,9 +15,9 @@ without inventing a domain model or exposing a Rust object graph.
 ## 2026-08-20: Feature is opt-in and component-scoped
 
 `prodex-quota/mojo` is disabled by default. A normal `cargo build` therefore stays
-independent of Mojo. When an opt-in build cannot find `mojo` or `ar` on `PATH`, Cargo
-emits a warning and uses Rust; explicitly configured tool failures and Mojo compile
-errors still fail clearly. Runtime diagnostics intentionally report
+independent of Mojo. An opt-in build requires `mojo` and `ar` on `PATH`, or an explicitly
+configured prebuilt archive; missing tools and Mojo compile errors fail the build instead
+of selecting a Rust implementation. Runtime diagnostics intentionally report
 `compiler_required=false`; `build_strict` reflects `PRODEX_MOJO_REQUIRED` and may be true
 only for the build gate. A shipped binary can therefore report `compiler_required=false`
 and `build_strict=true`.
@@ -71,8 +71,8 @@ Provider route capability negotiation uses a separate flat-buffer batch. Rust ma
 returns compatible flags, reason tags, and first compatible/incompatible indices. Malformed route
 tokens remain excluded from first-index selection.
 
-Runtime profile quota scoring and Smart Context byte estimation remain bounded numeric kernels.
-Tokenizer integration and candidate selection remain Rust.
+Runtime profile scheduling and Smart Context byte estimation are bounded Mojo kernels.
+Tokenizer integration and dormant Smart Context candidate selection remain Rust.
 
 ## 2026-08-20: Smart Context pressure is a production integer kernel
 
