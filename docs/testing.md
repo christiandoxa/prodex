@@ -19,7 +19,7 @@ Prodex test speed should come from process-level sharding first, not from making
 - `npm run ci:full-test-shards` validates the shared app-library shard manifest;
   `node scripts/ci/prodex-app-test-shards.mjs --dry-run` prints its commands
   without compiling or running tests.
-- Push/PR CI runs twenty-six generic `prodex-app` partitions. Dedicated parallel jobs
+- Push/PR CI runs nine generated generic `prodex-app` partitions. Dedicated parallel jobs
   own every `main_internal_tests::` and `profile_commands_internal_tests::`
   test, so the generic remainder excludes those namespaces instead of rerunning
   them. The weekly CI schedule skips those duplicate Ubuntu owners because the
@@ -130,8 +130,8 @@ target/debug/prodex doctor --runtime --json
 
 Strict Mojo builds fail if the compiler or archiver is missing, the checked-out Mojo source
 does not compile, or the static archive is missing. The authoritative `Real Mojo / parity` job is part of
-`.github/workflows/ci.yml`; it also runs
-the built `prodex --version` binary and checks the generated static archives.
+`.github/workflows/ci.yml`; it lints the all-feature workspace, runs the built `prodex --version`
+binary, and checks the generated static archives.
 
 ### Release and installer Mojo checks
 
@@ -198,7 +198,6 @@ npm run ci:gateway-core-boundary-guard
 npm run ci:gateway-http-boundary-guard
 npm run ci:deployment-security-guard
 npm run ci:churn-hygiene
-npm run release:run -- --version 0.x.y --dry-run
 npm run release:prepare
 npm run changelog:check
 npm run docs:lint
@@ -347,7 +346,7 @@ Use `npm run ci:churn-hygiene` for a lightweight churn gate. It fails on actiona
 
 Large structural extraction is allowed when the commit has a clear mechanical `refactor`, `test`, `chore`, or `ci` split/move/reshape subject, or when the message declares `Mechanical-only: yes` or `[mechanical-only]`. For staged/worktree checks before committing, pass `-- --message-file .git/COMMIT_EDITMSG` or `-- --message "refactor: split foo"` when validating a prepared message. If behavior changes are needed, put them in a separate smaller commit after the mechanical extraction.
 
-Use `npm run release:run -- --version <semver>` as the official release path. It can bump/sync/test/commit/push/watch CI/trigger publish/watch publish/verify in order, stores resume state under `target/release-run/state.json` by default, supports `-- --resume`, `-- --from <step>`, `-- --to <step>`, and `-- --only <steps>`, and never publishes to npm or crates.io; `.github/workflows/standalone-release.yml` creates the standalone GitHub Release only after an EICAR engine proof and a clean ClamAV scan of every final asset. Its sync/test path renders the final changelog with `--release-version` and validates generated release metadata before the release commit. Do not run `npm run changelog` after each small change just to commit updated notes; push-facing changelog checks intentionally defer generated changelog drift for non-release commits. Use `-- --dry-run` before mutating a real release.
+Use `npm run release:run -- --version <semver>` as the official release path. Its normal sequence can bump/sync/test/commit/push/watch CI/trigger publish/watch publish/verify in order, stores resume state under `target/release-run/state.json` by default, supports `-- --resume`, `-- --from <step>`, `-- --to <step>`, and `-- --only <steps>`, and does not publish to npm or crates.io; `.github/workflows/standalone-release.yml` creates the standalone GitHub Release only after an EICAR engine proof and a clean ClamAV scan of every final asset. The separate `--cargo-publish` helper is explicit CI plumbing, not part of that sequence. Its sync/test path renders the final changelog with `--release-version` and validates generated release metadata before the release commit. Do not run `npm run changelog` after each small change just to commit updated notes; push-facing changelog checks intentionally defer generated changelog drift for non-release commits. Use `-- --dry-run` before mutating a real release.
 
 Use `npm run ci:release-cut-fixtures` after changing low-level release-cut compatibility. `release:cut` remains as a deterministic backcompat helper covered by fixtures; normal human releases should use `release:run`.
 
