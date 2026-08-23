@@ -1,8 +1,8 @@
 use crate::runtime_proxy_log;
 use crate::runtime_state_shared::RuntimeRotationProxyShared;
 
-use prodex_runtime_capabilities::runtime_capability_log_safe_value;
-pub(super) use prodex_runtime_capabilities::{
+use runtime_proxy_crate::runtime_capability_log_safe_value;
+pub(super) use runtime_proxy_crate::{
     RuntimeRequestCompatibilitySurface, runtime_detect_request_compatibility_surface,
     runtime_detect_websocket_message_compatibility_surface,
 };

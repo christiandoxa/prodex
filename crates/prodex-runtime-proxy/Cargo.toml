@@ -27,6 +27,7 @@ prodex_provider_core = { workspace = true }
 prodex_runtime_tuning = { workspace = true }
 prodex_runtime_state = { workspace = true }
 redaction = { workspace = true }
+runtime_anthropic_crate = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 sha2 = { workspace = true }
