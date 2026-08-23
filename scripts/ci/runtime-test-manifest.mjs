@@ -863,26 +863,9 @@ function cargoFilterFor(testCase) {
   return testCase.name;
 }
 
-function runnableCaseFor(testCase) {
-  return {
-    label: testCase.label ?? testCase.name ?? testCase.id,
-    filter: cargoFilterFor(testCase),
-  };
-}
-
-function runnableCasesWithTag(tag) {
-  return casesWithTag(tag).map(runnableCaseFor);
-}
-
 export const RUNTIME_STRESS_SKIP_TESTS = testNamesWithTag(TAGS.stressSkip);
 export const RUNTIME_STRESS_SERIALIZED_TESTS = testNamesWithTag(TAGS.stressSerialized);
 export const RUNTIME_STRESS_CONTINUATION_TESTS = testNamesWithTag(TAGS.stressContinuation);
-
-export const RUNTIME_PARALLEL_SAFE_CASES = runnableCasesWithTag(TAGS.parallelSafe);
-export const RUNTIME_SERIAL_CASES = runnableCasesWithTag(TAGS.serial);
-export const RUNTIME_STRESS_CASES = runnableCasesWithTag(TAGS.stress);
-export const RUNTIME_ENV_CASES = runnableCasesWithTag(TAGS.env);
-export const RUNTIME_QUARANTINE_CASES = runnableCasesWithTag(TAGS.quarantine);
 
 export const RUNTIME_ENV_PARALLEL_CASES = casesWithTag(TAGS.envParallel).map((testCase) => ({
   label: testCase.label ?? testCase.name,

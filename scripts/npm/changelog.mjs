@@ -412,15 +412,6 @@ async function checkChangelog(expected) {
   process.stdout.write("changelog: ok\n");
 }
 
-function releaseHistory(contents) {
-  const lines = contents.trimEnd().split(/\r?\n/);
-  const start = lines.findIndex((line) => /^##\s+/.test(line) && !/\bUnreleased$/.test(line));
-  if (start < 0) {
-    return "";
-  }
-  return `${lines.slice(start).join("\n")}\n`;
-}
-
 async function ciCheckChangelog(expected) {
   const currentVersion = await readCargoVersion();
   const commit = await headCommit();
