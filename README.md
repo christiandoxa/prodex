@@ -178,29 +178,29 @@ Prodex Super keeps a deliberately small optional stack:
 - [Ponytail](https://github.com/DietrichGebert/ponytail) for minimal-implementation guidance.
 - [Presidio](https://github.com/data-privacy-stack/presidio) for opt-in PII redaction.
 
-Caveman is externally installed and validated; Smart Context is built into the Codex runtime proxy, not guaranteed for native opaque CLIs. Every default Codex-based `prodex s` or `prodex playwright` launch adds a pinned Playwright MCP server to its temporary overlay when Node.js 18+, `npx`, and the cached package pass validation. Prodex runs without every external tool above; missing tools are skipped instead of blocking Super. See [Optional Tools](docs/optional-tools.md) for pinned Caveman/Ponytail metadata, managed paths, validation, and strict launch behavior.
+Caveman is externally installed and validated; Smart Context is built into the Codex runtime proxy, not guaranteed for native opaque CLIs. Every default Codex-based `prodex s` or `prodex playwright` launch adds a pinned Playwright MCP server to its temporary overlay when Node.js 18+ and `npx` pass launch-time path validation. Prodex runs without every external tool above; missing tools are skipped instead of blocking Super. See [Optional Tools](docs/optional-tools.md) for pinned Caveman/Ponytail metadata, managed paths, validation, and strict launch behavior.
 
 <details>
 <summary>Install and verify the Super tools</summary>
 
-Caveman (Prodex-vetted `1.9.1` checkout):
+Caveman (Prodex-vetted `2.2.0` checkout):
 
 ```bash
 export PRODEX_OPTIMIZERS_HOME="${PRODEX_OPTIMIZERS_HOME:-${XDG_DATA_HOME:-$HOME/.local/share}/prodex-optimizers}"
 install -d "$PRODEX_OPTIMIZERS_HOME/caveman"
 git clone --no-checkout https://github.com/JuliusBrussee/caveman \
-  "$PRODEX_OPTIMIZERS_HOME/caveman/1.9.1"
-git -C "$PRODEX_OPTIMIZERS_HOME/caveman/1.9.1" config core.autocrlf false
-git -C "$PRODEX_OPTIMIZERS_HOME/caveman/1.9.1" checkout --detach \
-  0d95a81d35a9f2d123a5e9430d1cfc43d55f1bb0
-cat >"$PRODEX_OPTIMIZERS_HOME/caveman/1.9.1/prodex-tool.json" <<'JSON'
+  "$PRODEX_OPTIMIZERS_HOME/caveman/2.2.0"
+git -C "$PRODEX_OPTIMIZERS_HOME/caveman/2.2.0" config core.autocrlf false
+git -C "$PRODEX_OPTIMIZERS_HOME/caveman/2.2.0" checkout --detach \
+  9aa63945a349bef17206540650db48c30fafbdf2
+cat >"$PRODEX_OPTIMIZERS_HOME/caveman/2.2.0/prodex-tool.json" <<'JSON'
 {
   "schema_version": 1,
   "id": "caveman",
-  "version": "1.9.1",
+  "version": "2.2.0",
   "source": "https://github.com/JuliusBrussee/caveman",
-  "commit": "0d95a81d35a9f2d123a5e9430d1cfc43d55f1bb0",
-  "tree_sha256": "863d1a6965ed47f9e130312c8e943617e224cc08f8162296d7e06b8b63d54476"
+  "commit": "9aa63945a349bef17206540650db48c30fafbdf2",
+  "tree_sha256": "91b4549bf361b2aed5ff0d131062788a8c672a941efe9e3db41beecb24a4112a"
 }
 JSON
 
@@ -221,14 +221,14 @@ rtk gain
 prodex capability super-doctor
 ```
 
-Codebase Memory MCP:
+Codebase Memory MCP (current stable `0.10.8`):
 
 ```bash
 cbm_install_dir="$(mktemp -d)"
 trap 'rm -rf "$cbm_install_dir"' EXIT
 curl -fsSLo "$cbm_install_dir/install.sh" \
-  https://raw.githubusercontent.com/DeusData/codebase-memory-mcp/v0.9.1-rc.1/install.sh
-CBM_DOWNLOAD_URL=https://github.com/DeusData/codebase-memory-mcp/releases/download/v0.9.1-rc.1 \
+  https://raw.githubusercontent.com/DeusData/codebase-memory-mcp/v0.10.8/install.sh
+CBM_DOWNLOAD_URL=https://github.com/DeusData/codebase-memory-mcp/releases/download/v0.10.8 \
   bash "$cbm_install_dir/install.sh" --skip-config
 codebase-memory-mcp daemon status || true
 prodex capability super-doctor
@@ -242,13 +242,13 @@ heavy indexing work are skipped unless updated. Prodex leaves `CBM_CACHE_DIR` un
 sub-agent sessions join the account-wide canonical daemon; an explicit user override is inherited
 unchanged and must stay consistent across every CBM client.
 
-Playwright MCP (Prodex currently pins `@playwright/mcp@0.0.78`):
+Playwright MCP (Prodex currently pins `@playwright/mcp@0.0.79`):
 
 ```bash
 node --version
 npx --version
-npx -y @playwright/mcp@0.0.78 install-browser chrome
-npx -y @playwright/mcp@0.0.78 --version
+npx -y @playwright/mcp@0.0.79 install-browser chrome
+npx -y @playwright/mcp@0.0.79 --version
 prodex capability super-doctor
 prodex playwright --dry-run
 ```
@@ -257,24 +257,24 @@ The browser install command above installs the Chrome channel used by Prodex's d
 
 Prodex preserves inherited `[mcp_servers.playwright]` entries. Add a custom entry to the base profile's `config.toml` to change flags, use a persistent/headed browser, or set `enabled = false`; the temporary Super overlay will not replace it.
 
-Ponytail (Prodex-vetted `4.8.4` checkout):
+Ponytail (Prodex-vetted `4.9.0` checkout):
 
 ```bash
 export PRODEX_OPTIMIZERS_HOME="${PRODEX_OPTIMIZERS_HOME:-${XDG_DATA_HOME:-$HOME/.local/share}/prodex-optimizers}"
 install -d "$PRODEX_OPTIMIZERS_HOME/ponytail"
 git clone --no-checkout https://github.com/DietrichGebert/ponytail \
-  "$PRODEX_OPTIMIZERS_HOME/ponytail/4.8.4"
-git -C "$PRODEX_OPTIMIZERS_HOME/ponytail/4.8.4" config core.autocrlf false
-git -C "$PRODEX_OPTIMIZERS_HOME/ponytail/4.8.4" checkout --detach \
-  16f29800fd2681bdf24f3eb4ccffe38be3baec6b
-cat >"$PRODEX_OPTIMIZERS_HOME/ponytail/4.8.4/prodex-tool.json" <<'JSON'
+  "$PRODEX_OPTIMIZERS_HOME/ponytail/4.9.0"
+git -C "$PRODEX_OPTIMIZERS_HOME/ponytail/4.9.0" config core.autocrlf false
+git -C "$PRODEX_OPTIMIZERS_HOME/ponytail/4.9.0" checkout --detach \
+  0a4dd63ad4541f4f655c4108a295916f3c1d8fda
+cat >"$PRODEX_OPTIMIZERS_HOME/ponytail/4.9.0/prodex-tool.json" <<'JSON'
 {
   "schema_version": 1,
   "id": "ponytail",
-  "version": "4.8.4",
+  "version": "4.9.0",
   "source": "https://github.com/DietrichGebert/ponytail",
-  "commit": "16f29800fd2681bdf24f3eb4ccffe38be3baec6b",
-  "tree_sha256": "727ac132ab903b3abf46cabd3d8ee855984e83d6f8ef36665853604c9a5c2e7d"
+  "commit": "0a4dd63ad4541f4f655c4108a295916f3c1d8fda",
+  "tree_sha256": "88c6dfa10bc0a63385a8f3f01bc4a3e51963c8fd76a0ebc0426bd889f0705970"
 }
 JSON
 
@@ -752,7 +752,7 @@ either bridge option, it selects that provider's model.
 
 This is my daily mode. It enables validated tools that are installed and launches Codex with Super's approval, sandbox, hook-trust, and workspace-trust bypasses for that invocation.
 
-Playwright MCP is enabled by default in Super when its pinned package is already available through Node.js 18+ and `npx`; Prodex verifies that package offline and avoids downloading it during launch. Run the install and browser setup commands in [Optional tools](#optional-tools) first when needed. Codex Apps are disabled by default in Super; pass a later `-c features.apps=true` override when needed.
+Playwright MCP is enabled by default in Super when Node.js 18+ and `npx` pass launch-time path validation. Install the pinned package and browser with the commands in [Optional tools](#optional-tools), then use `prodex capability super-doctor` or `--require-tool playwright` for the full offline package probe. Codex Apps are disabled by default in Super; pass a later `-c features.apps=true` override when needed.
 
 Super also enables Smart Context Autopilot on the Codex/provider-bridge path;
 native opaque CLIs are not automatically rewritten.
