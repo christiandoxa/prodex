@@ -87,7 +87,7 @@ const runtimeProxyKeys = [
     policy: "runtime_proxy.profile_inflight_hard_limit",
     env: "PRODEX_RUNTIME_PROXY_PROFILE_INFLIGHT_HARD_LIMIT",
     defaultValue: "`8`",
-    meaning: "Fresh selection avoids profiles above this in-flight count; hard affinity still wins.",
+    meaning: "Fresh selection avoids profiles whose next weighted admission would exceed this count; a route always admits one request, and hard affinity still wins.",
   },
   {
     policy: "runtime_proxy.admission_wait_budget_ms",
