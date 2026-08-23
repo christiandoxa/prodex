@@ -9,9 +9,11 @@ pub(crate) use helpers::{
     clear_runtime_response_turn_state_lineage, runtime_previous_response_turn_state,
     schedule_runtime_binding_touch_save,
 };
+#[cfg(test)]
+pub(crate) use lookup::runtime_turn_state_bound_profile;
 pub(crate) use lookup::{
     runtime_request_hard_binding_owner, runtime_response_bound_profile,
-    runtime_session_bound_profile, runtime_turn_state_bound_profile,
+    runtime_session_bound_profile, runtime_turn_state_affinity_profile,
 };
 pub(crate) use release::{
     clear_runtime_dead_response_bindings, release_runtime_auth_failed_affinity,

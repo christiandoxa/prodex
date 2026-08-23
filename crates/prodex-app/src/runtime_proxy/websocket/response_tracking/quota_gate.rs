@@ -17,6 +17,7 @@ pub(super) struct RuntimeWebsocketPreSendQuotaGateRequest<'a> {
     pub(super) request_previous_response_id: Option<&'a str>,
     pub(super) request_session_id: Option<&'a str>,
     pub(super) request_turn_state: Option<&'a str>,
+    pub(super) hard_affinity: bool,
 }
 
 pub(super) fn runtime_websocket_pre_send_quota_gate(
@@ -30,6 +31,7 @@ pub(super) fn runtime_websocket_pre_send_quota_gate(
         request_previous_response_id,
         request_session_id,
         request_turn_state,
+        hard_affinity,
     } = request;
 
     let quota_gate = runtime_precommit_quota_gate(RuntimePrecommitQuotaGateRequest {
@@ -39,6 +41,7 @@ pub(super) fn runtime_websocket_pre_send_quota_gate(
         has_continuation_context: request_previous_response_id.is_some()
             || request_session_id.is_some()
             || request_turn_state.is_some(),
+        hard_affinity,
         reprobe_context: "websocket_precommit_reprobe",
     })?;
     if let RuntimePrecommitQuotaGateDecision::Block {

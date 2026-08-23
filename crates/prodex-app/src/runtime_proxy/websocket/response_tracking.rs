@@ -71,6 +71,7 @@ pub(crate) fn attempt_runtime_websocket_request_with_hard_affinity(
             request_previous_response_id,
             request_session_id,
             request_turn_state,
+            hard_affinity,
         })?
     {
         return Ok(attempt);

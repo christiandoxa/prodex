@@ -132,6 +132,30 @@ pub(crate) fn runtime_turn_state_bound_profile(
     Ok(profile_name)
 }
 
+pub(crate) fn runtime_turn_state_affinity_profile(
+    shared: &RuntimeRotationProxyShared,
+    turn_state: Option<&str>,
+    fallback_profile: Option<&str>,
+) -> Result<Option<String>> {
+    let Some(turn_state) = turn_state else {
+        return Ok(None);
+    };
+    if let Some(profile_name) = runtime_turn_state_bound_profile(shared, turn_state)? {
+        return Ok(Some(profile_name));
+    }
+    if let Some(profile_name) = fallback_profile {
+        return Ok(Some(profile_name.to_string()));
+    }
+    Ok(Some(
+        shared
+            .runtime
+            .lock()
+            .map_err(|_| anyhow::anyhow!("runtime auto-rotate state is poisoned"))?
+            .current_profile
+            .clone(),
+    ))
+}
+
 pub(crate) fn runtime_session_bound_profile(
     shared: &RuntimeRotationProxyShared,
     session_id: &str,

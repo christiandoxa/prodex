@@ -7,7 +7,7 @@ use super::super::{
     runtime_remaining_sync_probe_cold_start_profiles_for_route,
     runtime_request_previous_response_id, runtime_request_session_id, runtime_request_turn_state,
     runtime_response_bound_profile, runtime_session_bound_profile,
-    runtime_smart_context_model_name_from_body,
+    runtime_smart_context_model_name_from_body, runtime_turn_state_affinity_profile,
     select_runtime_response_candidate_for_route_with_request,
 };
 use super::attempt_runtime_standard_request;
@@ -69,6 +69,16 @@ pub(super) fn proxy_runtime_compact_request(
         request_turn_state.as_deref(),
         request_session_id.as_deref(),
     )?;
+    if compact_followup_profile.is_none() {
+        compact_followup_profile = runtime_turn_state_affinity_profile(
+            shared,
+            request_turn_state.as_deref(),
+            previous_response_profile
+                .as_deref()
+                .or(session_profile.as_deref()),
+        )?
+        .map(|profile_name| (profile_name, "turn_state"));
+    }
     logging::log_runtime_proxy_compact_followup_owner(
         request_id,
         shared,
@@ -153,7 +163,6 @@ pub(super) fn proxy_runtime_compact_request(
                 saw_inflight_saturation,
             );
         }
-        selection_attempts = selection_attempts.saturating_add(1);
         let Some(candidate_name) = select_runtime_response_candidate_for_route_with_request(
             shared,
             RuntimeResponseCandidateSelection {
@@ -231,6 +240,7 @@ pub(super) fn proxy_runtime_compact_request(
         if excluded_profiles.contains(&candidate_name) {
             continue;
         }
+        selection_attempts = selection_attempts.saturating_add(1);
         log_runtime_proxy_compact_candidate(
             request_id,
             shared,

@@ -33,20 +33,13 @@ pub(super) fn forward_runtime_compact_success_attempt(
     let response = match response_result {
         Ok(response) => response,
         Err(err) => {
-            note_runtime_profile_transport_failure(
+            return handle_runtime_standard_upstream_error(
                 shared,
                 profile_name,
                 RuntimeRouteKind::Compact,
                 "compact_forward_response",
-                &err,
+                err,
             );
-            if is_runtime_proxy_transport_failure(&err) {
-                return Ok(RuntimeStandardAttempt::TransportFailed {
-                    profile_name: profile_name.to_string(),
-                    stage: "compact_forward_response",
-                });
-            }
-            return Err(err);
         }
     };
     remember_runtime_session_id(

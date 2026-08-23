@@ -6,6 +6,8 @@ use crate::{
 };
 
 pub const RUNTIME_PROXY_PRECOMMIT_ATTEMPT_LIMIT: usize = if cfg!(test) { 4 } else { 12 };
+// Each profile may consume one bounded same-profile retry before rotation.
+const RUNTIME_PROXY_PRECOMMIT_ATTEMPTS_PER_PROFILE: usize = 2;
 pub const RUNTIME_PROXY_PRECOMMIT_BUDGET_MS: u64 = if cfg!(test) { 500 } else { 3_000 };
 pub const RUNTIME_PROXY_PRECOMMIT_CONTINUATION_ATTEMPT_LIMIT: usize =
     RUNTIME_PROXY_PRECOMMIT_ATTEMPT_LIMIT * 2;
@@ -66,7 +68,10 @@ pub fn runtime_proxy_precommit_budget_for_profile_count(
 ) -> (usize, Duration) {
     let (base_attempt_limit, base_budget) =
         runtime_proxy_precommit_budget(continuation, pressure_mode);
-    let attempt_limit = base_attempt_limit.max(profile_count.max(1));
+    let required_profile_attempts = profile_count
+        .max(1)
+        .saturating_mul(RUNTIME_PROXY_PRECOMMIT_ATTEMPTS_PER_PROFILE);
+    let attempt_limit = base_attempt_limit.max(required_profile_attempts);
     let base_attempt_limit = base_attempt_limit.max(1);
     let base_budget_ms = base_budget.as_millis();
     let scaled_budget_ms = base_budget_ms
@@ -101,9 +106,7 @@ pub fn runtime_proxy_precommit_budget_exhausted_for_profile_count(
         pressure_mode,
         profile_count,
     );
-    let first_pass_attempts = profile_count.max(1).min(attempt_limit);
-
-    attempts >= attempt_limit || (attempts >= first_pass_attempts && started_at.elapsed() >= budget)
+    attempts >= attempt_limit || started_at.elapsed() >= budget
 }
 
 pub fn runtime_websocket_error_payload_is_previous_response_not_found(

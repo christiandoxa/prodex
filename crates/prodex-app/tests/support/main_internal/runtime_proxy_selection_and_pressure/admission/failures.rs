@@ -2,9 +2,9 @@ use super::{
     Duration, ResponseProfileBinding, RuntimeProxyBackend, RuntimeProxyBackendFaultRoute,
     RuntimeProxyBackendFaultScript, RuntimeProxyBackendFaultStep, RuntimeProxyProfileHarness,
     RuntimeProxyMarkerGuard, RuntimeProxyProfileHarnessBuilder, RuntimeProxyRequest,
-    TestEnvVarGuard,
-    proxy_runtime_standard_request, quota_window_ready, read_runtime_proxy_test_log,
-    register_runtime_proxy_persistence_mode, runtime_usage_snapshot,
+    TestEnvVarGuard, closed_loopback_backend_base_url, proxy_runtime_standard_request,
+    quota_window_ready, read_runtime_proxy_test_log, register_runtime_proxy_persistence_mode,
+    runtime_usage_snapshot,
     tiny_http_response_status_and_body,
 };
 use chrono::Local;
@@ -39,6 +39,15 @@ fn compact_request(session_id: Option<&str>) -> RuntimeProxyRequest {
         headers,
         body: br#"{"input":[],"instructions":"compact"}"#.to_vec(),
     }
+}
+
+fn compact_request_with_turn_state(turn_state: &str) -> RuntimeProxyRequest {
+    let mut request = compact_request(None);
+    request.headers.push((
+        "x-codex-turn-state".to_string(),
+        turn_state.to_string(),
+    ));
+    request
 }
 
 fn bind_session(harness: &RuntimeProxyProfileHarness, session_id: &str, profile_name: &str) {
@@ -89,6 +98,41 @@ fn compact_request_with_previous_response(previous_response_id: &str) -> Runtime
         )
         .into_bytes(),
     }
+}
+
+#[test]
+fn fresh_noncompact_transport_failure_rotates_through_ready_profiles() {
+    let ready = runtime_usage_snapshot(
+        quota_window_ready(80, 3_600),
+        quota_window_ready(80, 86_400),
+    );
+    let harness = RuntimeProxyProfileHarnessBuilder::new()
+        .openai_profile("main", "main-account", Some("main@example.com"))
+        .openai_profile("second", "second-account", Some("second@example.com"))
+        .active_profile("main")
+        .current_profile("main")
+        .upstream_base_url(closed_loopback_backend_base_url())
+        .profile_usage_snapshot("main", ready.clone())
+        .profile_usage_snapshot("second", ready)
+        .build();
+    let request = RuntimeProxyRequest {
+        method: "GET".to_string(),
+        path_and_query: "/backend-api/status".to_string(),
+        headers: Vec::new(),
+        body: Vec::new(),
+    };
+
+    let response = proxy_runtime_standard_request(54, &request, harness.shared())
+        .expect("fresh transport failures should remain inside the rotation loop");
+    let (status, _) = tiny_http_response_status_and_body(response);
+    let log = read_runtime_proxy_test_log(&harness.shared().log_path);
+
+    assert_eq!(status, 503, "{log}");
+    assert!(
+        log.contains("standard_transport_failure profile=main")
+            && log.contains("standard_transport_failure profile=second"),
+        "every ready profile should receive a bounded precommit attempt: {log}"
+    );
 }
 
 #[test]
@@ -215,6 +259,75 @@ fn compact_transport_timeout_rotates_fresh_request_to_next_profile_once() {
     assert_eq!(
         log.matches("compact_committed profile=").count(),
         1,
+        "{log}"
+    );
+}
+
+#[test]
+fn compact_candidate_wait_without_selection_does_not_consume_an_attempt() {
+    let backend = RuntimeProxyBackend::start();
+    let harness = RuntimeProxyProfileHarnessBuilder::new()
+        .openai_profile("main", "main-account", Some("main@example.com"))
+        .openai_profile("second", "second-account", Some("second@example.com"))
+        .active_profile("main")
+        .current_profile("main")
+        .upstream_base_url(backend.base_url())
+        .build();
+    let shared = harness.shared();
+    let hard_limit = shared.runtime_config.tuning.profile_inflight_hard_limit;
+    shared
+        .lane_admission
+        .set_profile_inflight("main", hard_limit);
+    shared
+        .lane_admission
+        .set_profile_inflight("second", hard_limit);
+
+    let response = proxy_runtime_standard_request(53, &compact_request(None), shared)
+        .expect("saturated compact selection should fail locally");
+    let (status, _) = tiny_http_response_status_and_body(response);
+    let log = read_runtime_proxy_test_log(&shared.log_path);
+
+    assert_eq!(status, 503, "{log}");
+    let selected_candidates = log.matches("transport=http compact_candidate=").count();
+    assert!(
+        log.contains("compact_final_failure exit=candidate_exhausted")
+            && log.contains(&format!("attempts={selected_candidates} ")),
+        "only the selected saturated candidate may spend an attempt: {log}"
+    );
+    assert!(backend.responses_accounts().is_empty(), "{log}");
+}
+
+#[test]
+fn unbound_turn_state_compact_transport_failure_does_not_rotate() {
+    let _compact_timeout_guard =
+        TestEnvVarGuard::set("PRODEX_RUNTIME_PROXY_COMPACT_REQUEST_TIMEOUT_MS", "300");
+    let backend =
+        RuntimeProxyBackend::start_with_fault_script(RuntimeProxyBackendFaultScript::new([
+            RuntimeProxyBackendFaultStep::stalled_json(
+                RuntimeProxyBackendFaultRoute::Compact,
+                "main-account",
+                Duration::from_millis(400),
+            ),
+        ]));
+    let harness = two_ready_profiles(&backend);
+    let shared = harness.shared();
+
+    let response = proxy_runtime_standard_request(
+        52,
+        &compact_request_with_turn_state("turn-unbound"),
+        shared,
+    )
+    .expect("unbound turn-state transport failure should fail closed");
+    let (status, _) = tiny_http_response_status_and_body(response);
+    let log = read_runtime_proxy_test_log(&shared.log_path);
+
+    assert_eq!(status, 503, "{log}");
+    assert_eq!(
+        backend.responses_accounts(),
+        vec!["main-account".to_string()]
+    );
+    assert!(
+        log.contains("compact_final_failure exit=hard_affinity_transport_failure"),
         "{log}"
     );
 }

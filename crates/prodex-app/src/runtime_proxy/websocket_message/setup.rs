@@ -17,7 +17,7 @@ use super::super::{
     runtime_proxy_structured_log_message, runtime_quota_blocked_affinity_is_releasable,
     runtime_request_explicit_session_id, runtime_request_turn_state,
     runtime_response_bound_profile, runtime_smart_context_effective_websocket_prompt_cache_key,
-    runtime_smart_context_model_name_from_body, runtime_turn_state_bound_profile,
+    runtime_smart_context_model_name_from_body, runtime_turn_state_affinity_profile,
     runtime_websocket_request_requires_locked_previous_response_affinity,
     select_runtime_response_candidate_for_route_with_request,
     send_runtime_proxy_final_websocket_failure,
@@ -107,11 +107,11 @@ impl<'a> RuntimeWebsocketTextMessageFlow<'a> {
             );
             request_turn_state = Some(turn_state);
         }
-        let turn_state_profile = request_turn_state
-            .as_deref()
-            .map(|value| runtime_turn_state_bound_profile(shared, value))
-            .transpose()?
-            .flatten();
+        let turn_state_profile = runtime_turn_state_affinity_profile(
+            shared,
+            request_turn_state.as_deref(),
+            bound_profile.as_deref(),
+        )?;
         let mut flow = Self {
             session_id,
             request_id,

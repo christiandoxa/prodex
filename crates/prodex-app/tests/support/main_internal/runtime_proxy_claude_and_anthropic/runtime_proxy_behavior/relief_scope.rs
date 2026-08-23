@@ -248,10 +248,11 @@ fn runtime_proxy_wait_scopes_to_session_owner_relief() {
             route_kind: RuntimeRouteKind::Responses,
             selection_started_at: Instant::now(),
             continuation: true,
-            wait_affinity_owner: Some("main"),
+            wait_affinity_owner: None,
+            selected_profile: Some("main"),
         },)
-        .expect("owner-scoped wait should complete"),
-        "non-owner release should not count as useful relief"
+        .expect("selected-profile wait should complete"),
+        "another profile's release should not count as useful relief"
     );
 
     release

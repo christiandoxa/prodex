@@ -122,6 +122,7 @@ pub(crate) struct RuntimePrecommitQuotaGateRequest<'a> {
     pub(crate) profile_name: &'a str,
     pub(crate) route_kind: RuntimeRouteKind,
     pub(crate) has_continuation_context: bool,
+    pub(crate) hard_affinity: bool,
     pub(crate) reprobe_context: &'a str,
 }
 
@@ -142,6 +143,7 @@ pub(crate) fn runtime_precommit_quota_gate(
         profile_name,
         route_kind,
         has_continuation_context,
+        hard_affinity,
         reprobe_context,
     } = request;
 
@@ -155,7 +157,7 @@ pub(crate) fn runtime_precommit_quota_gate(
         runtime_proxy_responses_quota_critical_floor_percent(),
     ) {
         runtime_proxy_crate::RuntimeProxyPrecommitQuotaGateInitialDecision::Block { reason } => {
-            if !runtime_auto_redeem_precommit_reason_warrants_credit(reason) {
+            if !hard_affinity && !runtime_auto_redeem_precommit_reason_warrants_credit(reason) {
                 return Ok(RuntimePrecommitQuotaGateDecision::Block {
                     reason,
                     summary: initial_quota_summary,
@@ -218,6 +220,9 @@ pub(crate) fn runtime_precommit_quota_gate(
                 {
                     return Ok(RuntimePrecommitQuotaGateDecision::Proceed);
                 }
+            }
+            if hard_affinity {
+                return Ok(RuntimePrecommitQuotaGateDecision::Proceed);
             }
             return Ok(RuntimePrecommitQuotaGateDecision::Block {
                 reason,

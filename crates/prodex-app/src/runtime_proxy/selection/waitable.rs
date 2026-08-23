@@ -159,6 +159,7 @@ pub(crate) struct RuntimeInflightReliefWait<'a> {
     pub(crate) selection_started_at: Instant,
     pub(crate) continuation: bool,
     pub(crate) wait_affinity_owner: Option<&'a str>,
+    pub(crate) selected_profile: Option<&'a str>,
 }
 
 pub(crate) fn runtime_proxy_maybe_wait_for_interactive_inflight_relief(
@@ -173,6 +174,7 @@ pub(crate) fn runtime_proxy_maybe_wait_for_interactive_inflight_relief(
         selection_started_at,
         continuation,
         wait_affinity_owner,
+        selected_profile,
     } = wait;
 
     let pressure_mode = runtime_proxy_pressure_mode_active_for_route(shared, route_kind);
@@ -181,12 +183,15 @@ pub(crate) fn runtime_proxy_maybe_wait_for_interactive_inflight_relief(
     if wait_budget.is_zero() {
         return Ok(false);
     }
-    let waited_profiles = runtime_waitable_inflight_candidates_for_route(
+    let mut waited_profiles = runtime_waitable_inflight_candidates_for_route(
         shared,
         excluded_profiles,
         route_kind,
         wait_affinity_owner,
     )?;
+    if let Some(selected_profile) = selected_profile {
+        waited_profiles.retain(|profile| profile == selected_profile);
+    }
     if waited_profiles.is_empty() {
         return Ok(false);
     }
