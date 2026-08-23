@@ -3363,6 +3363,7 @@ name = "prodex-runtime-quota"
 version = "0.411.0"
 dependencies = [
  "chrono",
+ "prodex-mojo-core",
  "prodex-quota",
  "prodex-runtime-proxy",
  "prodex-runtime-state",

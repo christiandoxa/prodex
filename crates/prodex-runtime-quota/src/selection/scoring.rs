@@ -5,6 +5,10 @@ use super::{
     RUN_SELECTION_NEAR_OPTIMAL_BPS,
 };
 use chrono::Local;
+#[cfg(feature = "mojo")]
+use prodex_mojo_core::runtime::{
+    ProfileScheduleInput as MojoProfileScheduleInput, ProfileScoreInput as MojoProfileScoreInput,
+};
 pub use prodex_quota::required_main_window_snapshot_at;
 use prodex_quota::{
     RuntimeQuotaPressureBand, UsageResponse, scale_quota_pressure_for_plan,
@@ -12,10 +16,6 @@ use prodex_quota::{
 };
 use prodex_runtime_state::RuntimeRouteKind;
 use prodex_shared_types::{ReadyProfileCandidate, ReadyProfileScore, RuntimeQuotaSource};
-#[cfg(feature = "mojo")]
-use runtime_proxy_crate::{
-    RuntimeProxyQuotaProfileScheduleInput, RuntimeProxyQuotaProfileScoreInput,
-};
 use std::cmp::Reverse;
 
 pub fn schedule_ready_profile_candidates_with_view<S: ProfileSelectionRead>(
@@ -36,27 +36,16 @@ pub fn schedule_ready_profile_candidates_with_view<S: ProfileSelectionRead>(
             .map(|candidate| {
                 let weekly = required_main_window_snapshot_at(&candidate.usage, "weekly", now);
                 let five_hour = required_main_window_snapshot_at(&candidate.usage, "5h", now);
-                let score = RuntimeProxyQuotaProfileScoreInput {
+                let score = MojoProfileScoreInput {
                     weekly_pressure: weekly.map_or(i64::MAX, |window| window.pressure_score),
                     five_hour_pressure: five_hour.map_or(i64::MAX, |window| window.pressure_score),
                     scale_bps: usage_plan_capacity_pressure_scale_bps(&candidate.usage),
                     weekly_remaining: weekly.map_or(0, |window| window.remaining_percent),
                     five_hour_remaining: five_hour.map_or(0, |window| window.remaining_percent),
-                    reserve_bias: match runtime_quota_pressure_band_for_route_at(
-                        &candidate.usage,
-                        RuntimeRouteKind::Responses,
-                        now,
-                    ) {
-                        RuntimeQuotaPressureBand::Healthy => 0,
-                        RuntimeQuotaPressureBand::Thin => 250_000,
-                        RuntimeQuotaPressureBand::Critical => 1_000_000,
-                        RuntimeQuotaPressureBand::Exhausted | RuntimeQuotaPressureBand::Unknown => {
-                            i64::MAX / 4
-                        }
-                    },
+                    windows_complete: weekly.is_some() && five_hour.is_some(),
                     weekly_weight: 10,
                 };
-                RuntimeProxyQuotaProfileScheduleInput {
+                MojoProfileScheduleInput {
                     score,
                     provider_priority: i64::try_from(candidate.provider_priority)
                         .expect("profile priority fits ABI"),
@@ -82,7 +71,7 @@ pub fn schedule_ready_profile_candidates_with_view<S: ProfileSelectionRead>(
                 }
             })
             .collect::<Vec<_>>();
-        let order = runtime_proxy_crate::runtime_proxy_profile_schedule_batch(&inputs)
+        let order = prodex_mojo_core::runtime::profile_schedule_batch(&inputs)
             .expect("Mojo runtime profile schedule returned invalid output");
         let mut slots = candidates.into_iter().map(Some).collect::<Vec<_>>();
         order
