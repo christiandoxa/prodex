@@ -3,6 +3,7 @@ from std.memory import Pointer
 comptime INT64_MAX: Int64 = 9223372036854775807
 comptime INT64_MIN: Int64 = -9223372036854775808
 
+
 @export("prodex_quota_round_f64")
 def prodex_quota_round_f64(value: Float64) abi("C") -> Int64:
     if value != value:
@@ -15,22 +16,6 @@ def prodex_quota_round_f64(value: Float64) abi("C") -> Int64:
         return Int64(value + 0.5)
     return Int64(value - 0.5)
 
-# Test-only numeric probe for the Gemini conversion expressions. Keeping the
-# three expressions together makes the Rust parity test exercise the exact
-# operations used by the batch kernel below.
-@export("prodex_quota_gemini_float_probe")
-def prodex_quota_gemini_float_probe(
-    first: Float64,
-    second: Float64,
-    operation: Int64,
-) abi("C") -> Float64:
-    if operation == 0:
-        return first * 100.0
-    if operation == 1:
-        return first / second
-    if operation == 2:
-        return first / second * 100.0
-    return 0.0
 
 @export("prodex_quota_remaining_percent")
 def prodex_quota_remaining_percent(
@@ -44,6 +29,7 @@ def prodex_quota_remaining_percent(
     if used_percent > 100:
         return 0
     return 100 - used_percent
+
 
 @export("prodex_quota_window_status")
 def prodex_quota_window_status(
@@ -60,6 +46,7 @@ def prodex_quota_window_status(
         return 1
     return 0
 
+
 def prodex_quota_pressure_band_for_status(status: Int64) -> Int64:
     if status == 0:
         return 0
@@ -71,6 +58,7 @@ def prodex_quota_pressure_band_for_status(status: Int64) -> Int64:
         return 3
     return 4
 
+
 @export("prodex_quota_pressure_band")
 def prodex_quota_pressure_band(
     five_hour_status: Int64,
@@ -81,6 +69,7 @@ def prodex_quota_pressure_band(
     if five_hour_band > weekly_band:
         return five_hour_band
     return weekly_band
+
 
 @export("prodex_quota_window_pair_has_ready_limit")
 def prodex_quota_window_pair_has_ready_limit(
@@ -97,7 +86,9 @@ def prodex_quota_window_pair_has_ready_limit(
         return 0
     return 1
 
+
 comptime QUOTA_GEMINI_BUCKET_BATCH_MAX_COUNT: Int64 = 1_024
+
 
 @export("prodex_quota_gemini_bucket_batch")
 def prodex_quota_gemini_bucket_batch(
@@ -171,13 +162,17 @@ def prodex_quota_gemini_bucket_batch(
         exhausted[unsafe_offset=index] = exhausted_value
     return 0
 
+
 comptime QUOTA_MAIN_AGGREGATION_MAX_COUNT: Int64 = 1_024
+
+
 def quota_saturating_add(left: Int64, right: Int64) -> Int64:
     if right > 0 and left > INT64_MAX - right:
         return INT64_MAX
     if right < 0 and left < INT64_MIN - right:
         return INT64_MIN
     return left + right
+
 
 @export("prodex_quota_main_aggregate_batch")
 def prodex_quota_main_aggregate_batch(
@@ -201,7 +196,9 @@ def prodex_quota_main_aggregate_batch(
     for index in range(count):
         var has_remaining = remaining_present[unsafe_offset=index]
         var has_reset = reset_present[unsafe_offset=index]
-        if (has_remaining != 0 and has_remaining != 1) or (has_reset != 0 and has_reset != 1):
+        if (has_remaining != 0 and has_remaining != 1) or (
+            has_reset != 0 and has_reset != 1
+        ):
             return 2
         if has_remaining == 1:
             profile_count += 1
