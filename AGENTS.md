@@ -58,7 +58,9 @@ module in the owning crate.
 
 ## Before changing code
 
-- Find existing helpers, types, tests, and the owning boundary before writing new code.
+- Reuse existing helpers, types, modules, and test support before writing new code. Do not
+  duplicate behavior; add a new implementation only when reuse cannot preserve the owning
+  boundary or contract.
 - Trace callers and the end-to-end flow before changing shared logic; fix the shared root cause.
 - State material assumptions, then make the smallest behavior-preserving change. Avoid
   speculative abstractions, configurability, dependencies, and drive-by refactors.

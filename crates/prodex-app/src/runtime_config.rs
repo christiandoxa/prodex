@@ -72,7 +72,7 @@ pub(super) fn runtime_proxy_responses_quota_critical_floor_percent() -> i64 {
     return RuntimeConfig::compatibility_current().responses_quota_critical_floor_percent;
 
     #[cfg(not(test))]
-    2
+    1
 }
 
 static RUNTIME_RESPONSES_QUOTA_CRITICAL_FLOOR_PERCENT: AtomicI64 = AtomicI64::new(0);
