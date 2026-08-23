@@ -1,5 +1,7 @@
 use super::validate_gateway_exact_identifier;
-use crate::types::{RuntimePolicyFile, RuntimePolicyGatewayRouteAlias};
+use crate::types::{
+    RuntimePolicyFile, RuntimePolicyGatewayRouteAlias, RuntimePolicyGatewayRouteModelMetrics,
+};
 use crate::validate_helpers::{NumericRule, failed_numeric_rules, validate_gateway_route_strategy};
 use crate::validate_request_constraints::validate_gateway_request_constraints;
 use anyhow::{Context, Result, bail};
@@ -62,6 +64,36 @@ struct RoutingNumericFailures {
     route_metrics: Vec<Vec<Option<&'static str>>>,
 }
 
+fn append_route_metric_numeric_rules(
+    alias: usize,
+    metric: usize,
+    values: &RuntimePolicyGatewayRouteModelMetrics,
+    rules: &mut Vec<NumericRule>,
+    locations: &mut Vec<RoutingNumericLocation>,
+) {
+    for (name, value) in [
+        (
+            "input_cost_per_million_microusd",
+            values.input_cost_per_million_microusd,
+        ),
+        (
+            "output_cost_per_million_microusd",
+            values.output_cost_per_million_microusd,
+        ),
+        ("latency_ms", values.latency_ms),
+        ("rpm_limit", values.rpm_limit),
+        ("tpm_limit", values.tpm_limit),
+    ] {
+        let Some(value) = value else { continue };
+        rules.push(NumericRule::NonZero(value));
+        locations.push(RoutingNumericLocation::RouteMetric {
+            alias,
+            metric,
+            name,
+        });
+    }
+}
+
 fn gateway_routing_numeric_failures(policy: &RuntimePolicyFile) -> Result<RoutingNumericFailures> {
     let adaptive = &policy.gateway.adaptive_routing;
     let window_size = adaptive.window_size.unwrap_or(128) as u64;
@@ -105,28 +137,13 @@ fn gateway_routing_numeric_failures(policy: &RuntimePolicyFile) -> Result<Routin
     }
     for (alias_index, alias) in policy.gateway.route_aliases.iter().enumerate() {
         for (metric_index, metric) in alias.model_metrics.iter().enumerate() {
-            for (name, value) in [
-                (
-                    "input_cost_per_million_microusd",
-                    metric.input_cost_per_million_microusd,
-                ),
-                (
-                    "output_cost_per_million_microusd",
-                    metric.output_cost_per_million_microusd,
-                ),
-                ("latency_ms", metric.latency_ms),
-                ("rpm_limit", metric.rpm_limit),
-                ("tpm_limit", metric.tpm_limit),
-            ] {
-                if let Some(value) = value {
-                    rules.push(NumericRule::NonZero(value));
-                    locations.push(RoutingNumericLocation::RouteMetric {
-                        alias: alias_index,
-                        metric: metric_index,
-                        name,
-                    });
-                }
-            }
+            append_route_metric_numeric_rules(
+                alias_index,
+                metric_index,
+                metric,
+                &mut rules,
+                &mut locations,
+            );
         }
     }
 

@@ -1,4 +1,6 @@
-use crate::types::{RuntimeGovernancePolicyObligation, RuntimePolicyGovernanceSettings};
+use crate::types::{
+    RuntimeGovernancePolicyObligation, RuntimeGovernancePolicyRule, RuntimePolicyGovernanceSettings,
+};
 use crate::validate_helpers::{NumericRule, failed_numeric_rules};
 use anyhow::{Result, bail};
 use std::path::Path;
@@ -55,6 +57,53 @@ enum FailureLocation {
     Obligation { rule: usize, obligation: usize },
 }
 
+fn append_policy_rule_numeric_rules(
+    rule_index: usize,
+    rule: &RuntimeGovernancePolicyRule,
+    rules: &mut Vec<NumericRule>,
+    locations: &mut Vec<FailureLocation>,
+) {
+    if let Some(value) = rule.condition.minimum_authentication_strength {
+        rules.push(NumericRule::Range {
+            value: u64::from(value),
+            minimum: 1,
+            maximum: 3,
+        });
+        locations.push(FailureLocation::Condition(rule_index));
+    }
+    for (obligation_index, obligation) in rule
+        .obligations
+        .iter()
+        .take(super::MAX_POLICY_OBLIGATIONS)
+        .enumerate()
+    {
+        let numeric_rule = match obligation {
+            RuntimeGovernancePolicyObligation::MinimumAuthenticationStrength { value } => {
+                Some(NumericRule::Range {
+                    value: u64::from(*value),
+                    minimum: 1,
+                    maximum: 3,
+                })
+            }
+            RuntimeGovernancePolicyObligation::MaxInputTokens { value }
+            | RuntimeGovernancePolicyObligation::MaxOutputTokens { value }
+            | RuntimeGovernancePolicyObligation::MaxContextTokens { value }
+            | RuntimeGovernancePolicyObligation::SessionIdleTimeoutSeconds { value }
+            | RuntimeGovernancePolicyObligation::SessionAbsoluteTimeoutSeconds { value } => {
+                Some(NumericRule::NonZero(u64::from(*value)))
+            }
+            _ => None,
+        };
+        if let Some(numeric_rule) = numeric_rule {
+            rules.push(numeric_rule);
+            locations.push(FailureLocation::Obligation {
+                rule: rule_index,
+                obligation: obligation_index,
+            });
+        }
+    }
+}
+
 pub(super) fn governance_numeric_failures(
     governance: &RuntimePolicyGovernanceSettings,
 ) -> Result<GovernanceNumericFailures> {
@@ -70,45 +119,7 @@ pub(super) fn governance_numeric_failures(
     let mut locations = Vec::new();
 
     for (rule_index, rule) in governance.policy_rules.iter().enumerate() {
-        if let Some(value) = rule.condition.minimum_authentication_strength {
-            rules.push(NumericRule::Range {
-                value: u64::from(value),
-                minimum: 1,
-                maximum: 3,
-            });
-            locations.push(FailureLocation::Condition(rule_index));
-        }
-        for (obligation_index, obligation) in rule
-            .obligations
-            .iter()
-            .take(super::MAX_POLICY_OBLIGATIONS)
-            .enumerate()
-        {
-            let numeric_rule = match obligation {
-                RuntimeGovernancePolicyObligation::MinimumAuthenticationStrength { value } => {
-                    Some(NumericRule::Range {
-                        value: u64::from(*value),
-                        minimum: 1,
-                        maximum: 3,
-                    })
-                }
-                RuntimeGovernancePolicyObligation::MaxInputTokens { value }
-                | RuntimeGovernancePolicyObligation::MaxOutputTokens { value }
-                | RuntimeGovernancePolicyObligation::MaxContextTokens { value }
-                | RuntimeGovernancePolicyObligation::SessionIdleTimeoutSeconds { value }
-                | RuntimeGovernancePolicyObligation::SessionAbsoluteTimeoutSeconds { value } => {
-                    Some(NumericRule::NonZero(u64::from(*value)))
-                }
-                _ => None,
-            };
-            if let Some(numeric_rule) = numeric_rule {
-                rules.push(numeric_rule);
-                locations.push(FailureLocation::Obligation {
-                    rule: rule_index,
-                    obligation: obligation_index,
-                });
-            }
-        }
+        append_policy_rule_numeric_rules(rule_index, rule, &mut rules, &mut locations);
     }
 
     let session = &governance.session;
