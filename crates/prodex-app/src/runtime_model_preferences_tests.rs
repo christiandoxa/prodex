@@ -107,7 +107,7 @@ fn explicit_none_is_applied_when_catalog_advertises_it() {
 }
 
 #[test]
-fn older_process_exit_cannot_overwrite_newer_config_commit() {
+fn older_or_equal_timestamp_exit_cannot_overwrite_newer_config_commit() {
     let root = std::env::temp_dir().join(format!(
         "prodex-model-preferences-order-{}-{}",
         std::process::id(),
@@ -119,7 +119,7 @@ fn older_process_exit_cannot_overwrite_newer_config_commit() {
         provider: "provider".to_string(),
         catalog: "catalog".to_string(),
     };
-    for (model, selected_at) in [("new", 20), ("old", 10)] {
+    for (model, selected_at) in [("new", 20), ("old", 10), ("equal", 20)] {
         record_model_preference(
             &paths,
             LastModelSelection {
@@ -197,6 +197,62 @@ fn preference_lock_contention_is_bounded_and_preserves_committed_selection() {
             .unwrap()
             .model,
         "blocked"
+    );
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn pending_preferences_preserve_the_newest_selection_for_each_scope() {
+    let root = std::env::temp_dir().join(format!(
+        "prodex-model-preferences-pending-scopes-{}-{}",
+        std::process::id(),
+        now_nanos()
+    ));
+    fs::create_dir_all(&root).unwrap();
+    let paths = paths(&root);
+    let first = ModelPreferenceScope {
+        provider: "provider-a".to_string(),
+        catalog: "catalog-a".to_string(),
+    };
+    let second = ModelPreferenceScope {
+        provider: "provider-b".to_string(),
+        catalog: "catalog-b".to_string(),
+    };
+    for (scope, model, selected_at) in [
+        (first.clone(), "first-old", 10),
+        (second.clone(), "second", 20),
+        (first.clone(), "first-new", 30),
+        (first.clone(), "first-stale", 5),
+    ] {
+        save_pending_model_preference(
+            &paths,
+            &LastModelSelection {
+                scope,
+                model: model.to_string(),
+                reasoning_effort: Some("high".to_string()),
+                selected_at,
+                generation: 0,
+                source: "test".to_string(),
+            },
+        )
+        .unwrap();
+    }
+
+    flush_pending_model_preference(&paths).unwrap();
+
+    assert_eq!(
+        load_latest_model_preference(&paths, &first)
+            .unwrap()
+            .unwrap()
+            .model,
+        "first-new"
+    );
+    assert_eq!(
+        load_latest_model_preference(&paths, &second)
+            .unwrap()
+            .unwrap()
+            .model,
+        "second"
     );
     let _ = fs::remove_dir_all(root);
 }

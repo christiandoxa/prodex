@@ -59,8 +59,14 @@ pub(crate) fn resolve_runtime_optional_tool_plan(
 pub(crate) fn project_in_app_resume_model_settings(
     codex_home: &Path,
     codex_args: &mut Vec<std::ffi::OsString>,
+    profile_v2_name: Option<&str>,
     settings_to_project: [(&str, bool); 3],
 ) -> Result<()> {
+    // Named-profile values outrank config.toml. Preserve the CLI projection without mutating the
+    // user-authored profile; ordinary launches still localize the settings below.
+    if profile_v2_name.is_some() {
+        return Ok(());
+    }
     let mut projected_args = codex_args.clone();
     let mut settings = Vec::new();
     for (key, should_project) in settings_to_project {
@@ -141,6 +147,7 @@ pub(super) fn build_plan(
         crate::project_in_app_resume_model_settings(
             &overlay_home,
             &mut runtime_args,
+            strategy.profile_v2_name.as_deref(),
             [
                 ("model", preference_context.explicit_model.is_none()),
                 ("model_provider", strategy.model_provider_override.is_none()),
@@ -424,6 +431,7 @@ mod tests {
         crate::project_in_app_resume_model_settings(
             &plan.child.codex_home,
             &mut mixed_args,
+            None,
             [
                 ("model", false),
                 ("model_provider", false),

@@ -10,10 +10,21 @@ use super::{
 };
 use ratatui::style::Color;
 use std::fs;
+use std::path::Path;
 #[cfg(unix)]
 use std::process::Command;
 use std::time::{Duration, Instant};
 use std::time::{SystemTime, UNIX_EPOCH};
+
+fn app_paths(root: &Path) -> crate::AppPaths {
+    crate::AppPaths {
+        root: root.to_path_buf(),
+        state_file: root.join("state.json"),
+        managed_profiles_root: root.join("profiles"),
+        shared_codex_root: root.join("shared"),
+        legacy_shared_codex_root: root.join("legacy-shared"),
+    }
+}
 
 #[test]
 fn runtime_launch_dry_run_tui_text_keeps_report_content() {
@@ -86,6 +97,7 @@ fn dry_run_rejects_profile_url_secret_before_building_child_plan() {
     .unwrap();
 
     let error = profile_openai_compatible_dry_run_child(
+        &app_paths(&root),
         &root,
         RuntimeLaunchDryRunChild::Codex {
             codex_args: Vec::new(),
@@ -99,6 +111,118 @@ fn dry_run_rejects_profile_url_secret_before_building_child_plan() {
         "{error}"
     );
     assert!(!error.contains("secret-sentinel"), "{error}");
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn dry_run_reports_remembered_model_without_advancing_preference_state() {
+    let root = std::env::temp_dir().join(format!(
+        "prodex-dry-run-model-preference-{}-{}",
+        std::process::id(),
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos(),
+    ));
+    let home = root.join("home");
+    fs::create_dir_all(&home).unwrap();
+    let config = home.join("config.toml");
+    fs::write(
+        &config,
+        "model_provider = \"openai\"\nmodel = \"gpt-5.5\"\n",
+    )
+    .unwrap();
+    let paths = app_paths(&root);
+    let scope = crate::model_preference_scope(&home, &[]).unwrap();
+    let child = crate::ChildProcessPlan::new("codex".into(), home.clone());
+    let mut sync = crate::ModelPreferenceSync::start_with_scope(&paths, &child, scope).unwrap();
+    fs::write(
+        &config,
+        "model_provider = \"openai\"\nmodel = \"gpt-5.6-sol\"\nmodel_reasoning_effort = \"max\"\n",
+    )
+    .unwrap();
+    assert!(sync.finish().is_none());
+    fs::write(
+        &config,
+        "model_provider = \"openai\"\nmodel = \"gpt-5.5\"\n",
+    )
+    .unwrap();
+    let preference_path = root.join("model-preferences.json");
+    let before = fs::read(&preference_path).unwrap();
+
+    let child = profile_openai_compatible_dry_run_child(
+        &paths,
+        &home,
+        RuntimeLaunchDryRunChild::Caveman {
+            codex_args: Vec::new(),
+        },
+    )
+    .unwrap();
+    let RuntimeLaunchDryRunChild::Caveman { codex_args } = child else {
+        panic!("expected Caveman dry-run child");
+    };
+
+    assert_eq!(
+        crate::codex_cli_config_override_value(&codex_args, "model").as_deref(),
+        Some("gpt-5.6-sol")
+    );
+    assert_eq!(
+        crate::codex_cli_config_override_value(&codex_args, "model_reasoning_effort").as_deref(),
+        Some("max")
+    );
+    assert_eq!(fs::read(preference_path).unwrap(), before);
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn dry_run_builds_provider_preview_from_the_remembered_model() {
+    let root = std::env::temp_dir().join(format!(
+        "prodex-dry-run-provider-model-preference-{}-{}",
+        std::process::id(),
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos(),
+    ));
+    let home = root.join("home");
+    fs::create_dir_all(&home).unwrap();
+    let config = home.join("config.toml");
+    fs::write(&config, "model_provider = \"prodex-deepseek\"\n").unwrap();
+    let paths = app_paths(&root);
+    let provider_args = vec!["-c".into(), "model_provider=\"prodex-deepseek\"".into()];
+    let scope = crate::model_preference_scope(&home, &provider_args).unwrap();
+    let child =
+        crate::ChildProcessPlan::new("codex".into(), home.clone()).with_args(provider_args.clone());
+    let mut sync = crate::ModelPreferenceSync::start_with_scope(&paths, &child, scope).unwrap();
+    fs::write(
+        &config,
+        "model_provider = \"prodex-deepseek\"\nmodel = \"deepseek-v4-pro\"\nmodel_reasoning_effort = \"high\"\n",
+    )
+    .unwrap();
+    assert!(sync.finish().is_none());
+    fs::write(&config, "model_provider = \"prodex-deepseek\"\n").unwrap();
+
+    let child = profile_openai_compatible_dry_run_child(
+        &paths,
+        &home,
+        RuntimeLaunchDryRunChild::Caveman {
+            codex_args: provider_args,
+        },
+    )
+    .unwrap();
+    let RuntimeLaunchDryRunChild::Caveman { codex_args } = child else {
+        panic!("expected Caveman dry-run child");
+    };
+
+    assert_eq!(
+        crate::codex_cli_config_override_value(&codex_args, "model").as_deref(),
+        Some("deepseek-v4-pro")
+    );
+    assert_eq!(
+        crate::codex_cli_config_override_value(&codex_args, "model_reasoning_effort").as_deref(),
+        Some("high")
+    );
+    assert!(crate::codex_cli_config_override_value(&codex_args, "model_catalog_json").is_some());
     let _ = fs::remove_dir_all(root);
 }
 

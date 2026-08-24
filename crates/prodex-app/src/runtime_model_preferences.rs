@@ -11,7 +11,6 @@ const MODEL_PREFERENCE_FILE: &str = "model-preferences.json";
 const OPENAI_PROVIDER_ID: &str = "openai";
 const GOVERNED_OPENAI_TRANSPORT_PROVIDER_ID: &str = "prodex-openai-governed-http";
 const MODEL_PREFERENCE_LOCK_WAIT: Duration = Duration::from_millis(250);
-
 #[path = "runtime_model_preferences_lock.rs"]
 mod lock;
 #[path = "runtime_model_preferences_pending.rs"]
@@ -140,7 +139,22 @@ pub(crate) fn resolve_fresh_model_preference_context(
     codex_home: &Path,
     codex_args: &[std::ffi::OsString],
 ) -> Result<ModelPreferenceContext> {
-    if let Err(_error) = flush_pending_model_preference(paths) {
+    resolve_model_preference_context(paths, codex_home, codex_args, true)
+}
+pub(crate) fn resolve_fresh_model_preference_context_read_only(
+    paths: &AppPaths,
+    codex_home: &Path,
+    codex_args: &[std::ffi::OsString],
+) -> Result<ModelPreferenceContext> {
+    resolve_model_preference_context(paths, codex_home, codex_args, false)
+}
+fn resolve_model_preference_context(
+    paths: &AppPaths,
+    codex_home: &Path,
+    codex_args: &[std::ffi::OsString],
+    synchronize: bool,
+) -> Result<ModelPreferenceContext> {
+    if synchronize && let Err(_error) = flush_pending_model_preference(paths) {
         crate::print_launch_status(
             "pending model preference synchronization is unavailable; continuing",
         );
@@ -160,9 +174,10 @@ pub(crate) fn resolve_fresh_model_preference_context(
     }
     let remembered = match load_latest_model_preference(paths, &logical_scope) {
         Ok(Some(selection)) => Some(selection),
-        Ok(None) => {
+        Ok(None) if synchronize => {
             migrate_transport_model_preference(paths, codex_home, codex_args, &logical_scope)?
         }
+        Ok(None) => None,
         Err(_error) => {
             crate::print_launch_status(
                 "remembered model preference is unavailable; using normal Codex resolution",
@@ -170,12 +185,15 @@ pub(crate) fn resolve_fresh_model_preference_context(
             None
         }
     };
-    let remembered =
-        if remembered.is_none() && explicit_model.is_none() && explicit_effort.is_none() {
-            migrate_native_model_preference(paths, codex_home, codex_args, logical_scope.clone())?
-        } else {
-            remembered
-        };
+    let remembered = if synchronize
+        && remembered.is_none()
+        && explicit_model.is_none()
+        && explicit_effort.is_none()
+    {
+        migrate_native_model_preference(paths, codex_home, codex_args, logical_scope.clone())?
+    } else {
+        remembered
+    };
     Ok(ModelPreferenceContext {
         logical_scope,
         remembered,
@@ -526,7 +544,8 @@ fn record_model_preference(paths: &AppPaths, mut selection: LastModelSelection) 
         .selections
         .iter()
         .find(|existing| existing.scope == selection.scope)
-        && (existing.selected_at, existing.generation) > (selection.selected_at, generation)
+        && (existing.selected_at, existing.generation)
+            > (selection.selected_at, selection.generation)
     {
         return Ok(());
     }
