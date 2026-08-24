@@ -22,17 +22,6 @@ pub(crate) enum LogStreamItem {
     UpstreamPayload(UpstreamPayloadEvent),
 }
 
-pub(crate) fn read_new_runtime_log_events(
-    path: &Path,
-    state: &mut FollowedLog,
-    json: bool,
-) -> Result<()> {
-    for event in collect_new_runtime_log_stream_items(path, state)? {
-        print_log_stream_item(&event, json)?;
-    }
-    Ok(())
-}
-
 pub(crate) fn print_log_stream_item(event: &LogStreamItem, json: bool) -> Result<()> {
     if json {
         println!("{}", log_stream_item_json(event)?);
