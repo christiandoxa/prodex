@@ -1,6 +1,6 @@
 "use strict";
 
-const version = "0.149.0";
+const version = "0.149.1";
 
 module.exports = Object.freeze({
   version,

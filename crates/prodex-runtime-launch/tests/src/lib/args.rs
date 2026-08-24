@@ -141,6 +141,42 @@ fn runtime_proxy_passthrough_args_insert_local_provider_override_before_prompt()
 }
 
 #[test]
+fn runtime_proxy_child_args_keep_thread_source_and_its_value_adjacent() {
+    let args = runtime_proxy_codex_passthrough_args(
+        Some(RuntimeProxyCodexEndpoint {
+            listen_addr: "127.0.0.1:4455".parse().expect("socket addr"),
+            openai_mount_path: "/v1",
+            local_model_provider_id: Some("prodex-local"),
+            force_http_responses: false,
+            realtime_ws_base_url: None,
+            realtime_ws_model: None,
+        }),
+        &[
+            OsString::from("--thread-source"),
+            OsString::from("automated_review"),
+            OsString::from("exec"),
+            OsString::from("fork"),
+            OsString::from("thread-123"),
+            OsString::from("-"),
+        ],
+    );
+
+    assert_eq!(
+        scope_codex_exec_config_args(&args),
+        vec![
+            OsString::from("--thread-source"),
+            OsString::from("automated_review"),
+            OsString::from("exec"),
+            OsString::from("-c"),
+            OsString::from("model_providers.prodex-local.base_url=\"http://127.0.0.1:4455/v1\""),
+            OsString::from("fork"),
+            OsString::from("thread-123"),
+            OsString::from("-"),
+        ]
+    );
+}
+
+#[test]
 fn runtime_proxy_passthrough_args_force_governed_responses_to_http() {
     let args = runtime_proxy_codex_passthrough_args(
         Some(RuntimeProxyCodexEndpoint {
@@ -373,6 +409,22 @@ fn prepare_codex_launch_args_normalizes_resume_after_provider_config_overrides()
 }
 
 #[test]
+fn bare_resume_normalization_drops_thread_source_for_the_existing_thread() {
+    let session_id = "019c9e3d-45a0-7ad0-a6ee-b194ac2d44f9";
+    let (args, include_code_review) = prepare_codex_launch_args(
+        &[
+            OsString::from("--thread-source"),
+            OsString::from("should_not_override"),
+            OsString::from(session_id),
+        ],
+        false,
+    );
+
+    assert_eq!(args, [OsString::from("resume"), OsString::from(session_id)]);
+    assert!(!include_code_review);
+}
+
+#[test]
 fn codex_resume_session_id_extracts_normalized_resume_target() {
     let (args, _) = prepare_codex_launch_args(
         &[
@@ -408,6 +460,22 @@ fn codex_resume_session_id_extracts_explicit_exec_resume_target() {
 }
 
 #[test]
+fn codex_resume_detection_skips_thread_source_option_values() {
+    let session_id = "019c9e3d-45a0-7ad0-a6ee-b194ac2d44f9";
+    let args = [
+        OsString::from("exec"),
+        OsString::from("--thread-source"),
+        OsString::from("automated_review"),
+        OsString::from("resume"),
+        OsString::from(session_id),
+        OsString::from("continue"),
+    ];
+
+    assert!(codex_resume_requested(&args));
+    assert_eq!(codex_resume_session_id(&args), Some(session_id));
+}
+
+#[test]
 fn codex_resume_session_id_extracts_target_before_prompt() {
     let args = [
         OsString::from("resume"),
@@ -427,6 +495,30 @@ fn retarget_codex_tui_resume_args_preserves_global_options_and_replaces_prompt()
         &[
             OsString::from("--model"),
             OsString::from("gpt-5.6"),
+            OsString::from("initial prompt"),
+        ],
+        "019c9e3d-45a0-7ad0-a6ee-b194ac2d44f9",
+    );
+
+    assert_eq!(
+        args,
+        [
+            OsString::from("--model"),
+            OsString::from("gpt-5.6"),
+            OsString::from("resume"),
+            OsString::from("019c9e3d-45a0-7ad0-a6ee-b194ac2d44f9"),
+        ]
+    );
+}
+
+#[test]
+fn retarget_codex_tui_resume_args_omits_thread_source() {
+    let args = retarget_codex_tui_resume_args(
+        &[
+            OsString::from("--thread-source=automated_review"),
+            OsString::from("--model"),
+            OsString::from("gpt-5.6"),
+            OsString::from("exec"),
             OsString::from("initial prompt"),
         ],
         "019c9e3d-45a0-7ad0-a6ee-b194ac2d44f9",

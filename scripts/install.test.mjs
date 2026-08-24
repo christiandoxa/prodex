@@ -114,6 +114,18 @@ test("install.sh has valid POSIX shell syntax", { skip: process.platform === "wi
   assert.equal(result.code, 0, result.stderr);
 });
 
+test("Unix and Windows Codex migration pins stay synchronized", async () => {
+  const [unixInstaller, windowsInstaller] = await Promise.all([
+    fs.readFile(installerPath, "utf8"),
+    fs.readFile(windowsInstallerPath, "utf8"),
+  ]);
+  const unixVersion = unixInstaller.match(/^CODEX_NPM_VERSION="([^"]+)"$/m)?.[1];
+  const windowsVersion = windowsInstaller.match(/^\$CodexNpmVersion = "([^"]+)"$/m)?.[1];
+
+  assert.equal(unixVersion, windowsVersion);
+  assert.equal(unixVersion, openaiCodexDependencySpecifier);
+});
+
 test("install.ps1 verifies Windows release assets", async () => {
   const source = await fs.readFile(windowsInstallerPath, "utf8");
   assert.match(source, /prodex-\$Target\.exe/);

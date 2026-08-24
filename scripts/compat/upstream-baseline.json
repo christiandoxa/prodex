@@ -2,7 +2,7 @@
   "codex": {
     "compatibility": {
       "upstream_repository": "https://github.com/openai/codex",
-      "baseline_source": "openai/codex rust-v0.149.0 release",
+      "baseline_source": "openai/codex rust-v0.149.1 release",
       "guard_command": "node scripts/compat/check-upstream-baseline.mjs",
       "format_version": 2,
       "critical_files": [
@@ -85,20 +85,34 @@
           ]
         },
         {
+          "path": "codex-rs/core/src/compact_remote_v2.rs",
+          "reason": "Owns Codex's opt-in retained-image accounting and boundary truncation; Prodex tracks this contract but does not reimplement it.",
+          "required_contains": [
+            "Feature::CompactionImageBudget",
+            "RetainedImageBudget::Enabled",
+            "truncate_retained_messages",
+            "images::truncate_message_to_token_budget",
+            "remaining = 0"
+          ]
+        },
+        {
           "path": "codex-rs/core/src/turn_metadata.rs",
           "reason": "Owns turn metadata state conversion into CodexResponsesMetadata and extra responsesapi client metadata.",
           "required_contains": [
+            "detached_memory_responses_metadata",
             "request_kind",
             "window_id",
             "Turn",
             "Memory",
+            "CodexResponsesRequestKind::Memory",
             "CodexResponsesMetadata",
             "CodexResponsesRequestKind",
             "to_responses_metadata",
             "responses_metadata_template",
             "set_responsesapi_client_metadata",
             "ThreadSource",
-            "thread_source"
+            "thread_source",
+            "ThreadSource::MemoryConsolidation"
           ]
         },
         {
@@ -357,11 +371,15 @@
         },
         {
           "path": "codex-rs/features/src/lib.rs",
-          "reason": "Owns the upstream feature registry key for the opt-in auth system proxy feature exposed by Prodex as a Codex config override.",
+          "reason": "Owns upstream feature registry keys that Prodex passes as Codex config overrides, including system proxy handling and Codex-owned compaction image budgeting.",
           "required_contains": [
             "RespectSystemProxy",
             "respect_system_proxy",
-            "key: \"respect_system_proxy\""
+            "key: \"respect_system_proxy\"",
+            "CompactionImageBudget",
+            "compaction_image_budget",
+            "key: \"compaction_image_budget\"",
+            "default_enabled: false"
           ]
         },
         {
@@ -488,6 +506,37 @@
           ]
         },
         {
+          "path": "codex-rs/exec/src/cli.rs",
+          "reason": "Owns the global codex exec --thread-source SOURCE option that Prodex must preserve as an opaque option/value pair.",
+          "required_contains": [
+            "ThreadSource",
+            "long = \"thread-source\"",
+            "value_name = \"SOURCE\"",
+            "global = true",
+            "pub thread_source: Option<ThreadSource>"
+          ]
+        },
+        {
+          "path": "codex-rs/exec/src/lib.rs",
+          "reason": "Owns default-user thread classification plus propagation to newly started and forked threads without changing resumed thread metadata.",
+          "required_contains": [
+            "ThreadSource::User",
+            "ThreadForkParams",
+            "thread_start_params_from_config",
+            "thread_source: Some(thread_source.clone())"
+          ]
+        },
+        {
+          "path": "codex-rs/protocol/src/protocol.rs",
+          "reason": "Owns forward-compatible ThreadSource string parsing, including reserved user, subagent, and memory values plus arbitrary feature labels.",
+          "required_contains": [
+            "pub enum ThreadSource",
+            "Feature(String)",
+            "\"memory_consolidation\"",
+            "other => Ok(ThreadSource::Feature(other.to_string()))"
+          ]
+        },
+        {
           "path": "codex-rs/app-server/README.md",
           "reason": "Owns public app-server JSON-RPC lifecycle docs and generated-schema command surface.",
           "required_contains": [
@@ -541,6 +590,16 @@
             "JsonSchema",
             "ClientRequest",
             "ServerNotification"
+          ]
+        },
+        {
+          "path": "codex-rs/app-server-protocol/src/protocol/v2/thread.rs",
+          "reason": "Owns camelCase threadSource fields on thread/start and thread/fork; thread/resume intentionally has no source override field.",
+          "required_contains": [
+            "ThreadStartParams",
+            "ThreadForkParams",
+            "pub thread_source: Option<ThreadSource>",
+            "Optional client-supplied analytics source classification"
           ]
         },
         {
@@ -881,6 +940,19 @@
           ]
         },
         {
+          "id": "compact.image-budget-owned-by-codex",
+          "kind": "feature_gate",
+          "file": "codex-rs/core/src/compact_remote_v2.rs",
+          "reason": "Image-budget calculation and boundary truncation remain implemented by Codex; Prodex only preserves configuration and wire payloads.",
+          "file_contains_all": [
+            "Feature::CompactionImageBudget",
+            "RetainedImageBudget::Enabled",
+            "truncate_retained_messages",
+            "images::truncate_message_to_token_budget",
+            "remaining = 0"
+          ]
+        },
+        {
           "id": "compact.response-turn-state",
           "kind": "header_group",
           "file": "codex-rs/codex-api/src/endpoint/compact.rs",
@@ -913,6 +985,20 @@
             "to_responses_metadata",
             "ThreadSource",
             "thread_source"
+          ],
+          "expected_headers_all": [
+            "x-codex-turn-metadata"
+          ]
+        },
+        {
+          "id": "turn-metadata.memory-consolidation",
+          "kind": "metadata_group",
+          "reason": "Detached memory requests classify themselves as memory_consolidation in the same opaque metadata sent through the header and nested client_metadata.",
+          "file": "codex-rs/core/src/turn_metadata.rs",
+          "file_contains_all": [
+            "detached_memory_responses_metadata",
+            "CodexResponsesRequestKind::Memory",
+            "ThreadSource::MemoryConsolidation"
           ],
           "expected_headers_all": [
             "x-codex-turn-metadata"
@@ -1250,6 +1336,65 @@
           ]
         },
         {
+          "id": "features.compaction-image-budget",
+          "kind": "feature_gate",
+          "file": "codex-rs/features/src/lib.rs",
+          "reason": "The opt-in Boolean remains a Codex feature config key and is disabled unless the user enables it.",
+          "file_contains_all": [
+            "CompactionImageBudget",
+            "compaction_image_budget",
+            "key: \"compaction_image_budget\"",
+            "default_enabled: false"
+          ]
+        },
+        {
+          "id": "exec.thread-source",
+          "kind": "cli_contract",
+          "file": "codex-rs/exec/src/cli.rs",
+          "reason": "Prodex must treat --thread-source as a global option that consumes one opaque source value.",
+          "file_contains_all": [
+            "ThreadSource",
+            "long = \"thread-source\"",
+            "value_name = \"SOURCE\"",
+            "global = true",
+            "pub thread_source: Option<ThreadSource>"
+          ]
+        },
+        {
+          "id": "exec.thread-source-propagation",
+          "kind": "thread_lifecycle",
+          "file": "codex-rs/exec/src/lib.rs",
+          "reason": "Codex defaults new exec threads to user and supplies the requested source only to start and fork construction.",
+          "file_contains_all": [
+            "ThreadSource::User",
+            "ThreadForkParams",
+            "thread_start_params_from_config",
+            "thread_source: Some(thread_source.clone())"
+          ]
+        },
+        {
+          "id": "thread-source.forward-compatible-values",
+          "kind": "serialization_contract",
+          "file": "codex-rs/protocol/src/protocol.rs",
+          "reason": "Unknown thread-source strings are feature labels rather than values Prodex may reject through a closed enum.",
+          "file_contains_all": [
+            "pub enum ThreadSource",
+            "Feature(String)",
+            "other => Ok(ThreadSource::Feature(other.to_string()))"
+          ]
+        },
+        {
+          "id": "app-server.thread-source",
+          "kind": "jsonrpc_schema",
+          "file": "codex-rs/app-server-protocol/src/protocol/v2/thread.rs",
+          "reason": "JSON-RPC thread/start and thread/fork use optional string threadSource fields while resume preserves the stored source.",
+          "file_contains_all": [
+            "ThreadStartParams",
+            "ThreadForkParams",
+            "pub thread_source: Option<ThreadSource>"
+          ]
+        },
+        {
           "id": "app-server.schema-generation",
           "kind": "schema_generation",
           "file": "codex-rs/app-server/README.md",
@@ -1350,7 +1495,7 @@
           ]
         }
       ],
-      "tested_codex_release": "rust-v0.149.0",
+      "tested_codex_release": "rust-v0.149.1",
       "app_server_protocol": {
         "schema_command": "codex app-server generate-json-schema --out DIR",
         "schema_hash": null,
@@ -1369,18 +1514,13 @@
       }
     },
     "latestRelease": {
-      "tag_name": "rust-v0.149.0",
-      "name": "0.149.0",
-      "published_at": "2026-08-20T21:04:55Z",
-      "html_url": "https://github.com/openai/codex/releases/tag/rust-v0.149.0",
+      "tag_name": "rust-v0.149.1",
+      "name": "0.149.1",
+      "published_at": "2026-08-24T00:28:28Z",
+      "html_url": "https://github.com/openai/codex/releases/tag/rust-v0.149.1",
       "body_head": [
-        "## New Features",
-        "- Added an interactive `codex agents` dashboard for searching, starting, opening, renaming, and stopping tasks, with configurable shortcuts. (#39094, #39112, #39114, #39142)",
-        "- Added `/cd`, `/pwd`, and `/cwd` commands for managing the working directory in TUI sessions. (#38894)",
-        "- Added `codex queue` for sending messages to existing local or remote sessions. (#39092)",
-        "- Expanded Vim editing with character replacement and more change motions such as `cw`, `c$`, and `cc`. (#39661)",
-        "- `codex doctor` now diagnoses endpoint protection, network/proxy failures, desktop app state, and update connectivity. (#38827, #38918, #39060, #39074)",
-        "- SDK users can now pass exact CLI config overrides and select `max` or `ultra` reasoning effort. (#38817, #39662)"
+        "## Changelog",
+        "Full Changelog: https://github.com/openai/codex/compare/rust-v0.149.0...rust-v0.149.1"
       ]
     }
   },

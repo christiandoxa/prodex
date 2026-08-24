@@ -227,7 +227,7 @@ node scripts/ci/runtime-env-parallel.mjs --runs 2 --test-threads 4
 cargo test -q --workspace --all-features -- --test-threads=1
 ```
 
-To reproduce the two-turn Responses chain against real Codex 0.147, 0.148, and 0.149
+To reproduce the two-turn Responses chain against real Codex 0.147, 0.148, and 0.149.1
 binaries with one local provider, profile, model, WebSocket connection, and no
 rotation:
 
@@ -235,7 +235,7 @@ rotation:
 node scripts/compat/previous-response-reproducer.mjs -- \
   --codex-0147 /path/to/codex-0.147 \
   --codex-0148 /path/to/codex-0.148 \
-  --codex-0149 /path/to/codex-0.149
+  --codex-0149 /path/to/codex-0.149.1
 ```
 
 The deterministic upstream asserts that turn two sends the `response.id` from
@@ -378,7 +378,7 @@ Use `node scripts/compat/watch-upstream-fixture-tests.mjs` after changing upstre
 
 Use `node scripts/compat/capture-replay.mjs --input capture.jsonl --name codex_live_sample` to convert offline captured Codex or Claude traffic into scrubbed replay fixtures under `crates/prodex-app/tests/fixtures/compat_replay`. The tool does not capture traffic and never uses the network; it only normalizes local JSON, JSONL, or text input into a deterministic fixture.
 
-Codex 0.147 through 0.149 app-server replay fixtures live under
+Codex 0.147, 0.148, and 0.149.1 app-server replay fixtures live under
 crates/prodex-app/tests/fixtures/compat_replay/codex-0.147, codex-0.148, and
 codex-0.149.
 The main fixtures are sanitized protocol frames derived from the checked-out
@@ -386,7 +386,8 @@ upstream schemas and are byte-preserving in broker observation mode. The
 0.148 directory also contains `app-server-live-smoke.jsonl`, a redacted
 initialize/status/model-list capture from the locally checked-out Codex
 0.148.0 binary. The 0.149 fixture adds named `permissions`, queue delivery,
-agent activity, and `max`/`ultra` reasoning metadata. The fixture set covers
+agent activity, `max`/`ultra` reasoning metadata, and 0.149.1 free-form
+`threadSource` start/fork frames with a source-free resume. The fixture set covers
 thread queue/revert notifications, archive/restore, multiAgentVersion,
 pluginId, and packagedDefaults. Run the
 focused replay checks with:
@@ -398,7 +399,7 @@ focused replay checks with:
 The invalid-response regression matrix is deterministic and uses a local
 mock-upstream for HTTP and WebSocket. It verifies profile ownership, one-shot
 same-profile full-history recovery, no post-commit rotation, and no retry loop.
-The six live provider combinations (old/new Prodex x Codex 0.147/0.148/0.149) are
+The six live provider combinations (old/new Prodex x Codex 0.147/0.148/0.149.1) are
 not run in CI because they require credentials and incur provider cost; any
 live A/B run must use disposable homes and explicit authorization.
 

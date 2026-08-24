@@ -312,7 +312,7 @@ try {
   const results = [];
   results.push(await reproduce(args, upstream, args.codex0147, "0.147.0"));
   results.push(await reproduce(args, upstream, args.codex0148, "0.148.0"));
-  results.push(await reproduce(args, upstream, args.codex0149, "0.149.0"));
+  results.push(await reproduce(args, upstream, args.codex0149, "0.149.1"));
   process.stdout.write(`${JSON.stringify({ status: "passed", provider: "reproducer", profile: "repro", model: "mock-model", rotation: false, results }, null, 2)}\n`);
 } finally {
   await upstream.close();
