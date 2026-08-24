@@ -120,7 +120,7 @@ JavaScript clients can use `@christiandoxa/prodex-gateway-sdk` for `/v1/response
 <details>
 <summary>Provider behavior details (advanced)</summary>
 
-The auto-rotate proxy is intentionally conservative. It rotates only before a request or stream is committed, preserves `previous_response_id`, turn-state, and session affinity, and does not rotate mid-stream. Prodex does not auto-redeem reset credits by default. If you launch an OpenAI/Codex runtime path with `--auto-redeem`, Prodex may redeem one earned reset credit only when the weekly usage-limit window is exhausted, no other profile in the quota pool still has weekly quota remaining, and the weekly reset is not already imminent, then retries the same profile before rotating. It still does not redeem for merely critical/thin windows or 5h-only exhaustion. You can also run `prodex redeem <profile>` to send one explicit reset-credit consume request for a named OpenAI/Codex profile; the upstream backend decides whether that manual request applies, reports nothing-to-reset, or reports no-credit/already-redeemed. OpenAI/Codex remains the default quota-aware pool. Antigravity CLI, imported Copilot profiles, Anthropic OAuth profiles, DeepSeek API keys, local OpenAI-compatible URLs, and Bedrock/custom Codex providers have `prodex quota` views. Anthropic, DeepSeek, API-key Gemini, API-key Copilot, Antigravity CLI, local URLs, and Bedrock/custom Codex providers skip OpenAI quota preflight.
+The auto-rotate proxy is intentionally conservative. It rotates only before a request or stream is committed, preserves `previous_response_id`, turn-state, and session affinity, and does not rotate mid-stream. For fresh work, an explicit account-quota failure excludes that profile and continues through every remaining eligible profile before the final upstream quota response is exposed. Pre-commit transport exhaustion tries the same finite pool before returning local `503 service_unavailable`; generic `429` responses, hard-affinity continuations, and committed output are never replayed merely to hide an error. Prodex does not auto-redeem reset credits by default. If you launch an OpenAI/Codex runtime path with `--auto-redeem`, Prodex may redeem one earned reset credit only when the weekly usage-limit window is exhausted, no other profile in the quota pool still has weekly quota remaining, and the weekly reset is not already imminent, then retries the same profile before rotating. It still does not redeem for merely critical/thin windows or 5h-only exhaustion. You can also run `prodex redeem <profile>` to send one explicit reset-credit consume request for a named OpenAI/Codex profile; the upstream backend decides whether that manual request applies, reports nothing-to-reset, or reports no-credit/already-redeemed. OpenAI/Codex remains the default quota-aware pool. Antigravity CLI, imported Copilot profiles, Anthropic OAuth profiles, DeepSeek API keys, local OpenAI-compatible URLs, and Bedrock/custom Codex providers have `prodex quota` views. Anthropic, DeepSeek, API-key Gemini, API-key Copilot, Antigravity CLI, local URLs, and Bedrock/custom Codex providers skip OpenAI quota preflight.
 
 Runtime proxy design contract:
 
@@ -476,6 +476,17 @@ needed, model, catalog-backed or standard effort, and maximum active sub-agents.
 no skips every child screen. Explicit parent or child values skip their screens;
 non-TTY launches never open a TUI.
 
+The fresh main-agent picker uses the canonical provider registry and offers
+OpenAI, Anthropic Claude, GitHub Copilot, DeepSeek, Google Gemini, Kiro, and
+Prodex Local. `--provider`, `--url`, an explicit Codex `model_provider`
+override, or provider affinity on a resumed session intentionally skips or
+locks that picker. In particular, `-c 'model_provider="openai"'` explicitly
+selects OpenAI; omit it to choose interactively.
+
+Fresh dry runs report the same remembered provider-scoped model and reasoning
+effort as a live launch. Explicit launch values still win, while resumed
+threads keep their own persisted settings.
+
 The built-in concurrency default is 4. Presets are 4, 8, 16, and 32; custom
 values accept 1 through 64. This limits simultaneous child processes, not total
 tasks. When every exclusive lock slot is active, the launcher fails immediately
@@ -655,6 +666,30 @@ prodex run --current-time-reminder
 prodex run --current-time-reminder --current-time-reminder-interval 2
 prodex run --respect-system-proxy
 ```
+
+Codex 0.149.1 thread classification remains transparent passthrough. `--thread-source` accepts arbitrary upstream feature strings, applies to newly created and forked threads, and is never treated as a Prodex profile or routing signal:
+
+```bash
+prodex exec --thread-source automated_review "review this repository"
+prodex run exec --thread-source automated_review "review this repository"
+prodex caveman exec --thread-source automated_review "review this repository"
+prodex s --no-presidio --no-sub-agent exec --thread-source automated_review "review this repository"
+prodex exec fork THREAD_ID --thread-source automated_review "continue the review"
+```
+
+Prodex preserves the value and its position in Codex argv. It does not inject Codex's `user` default. Resume helpers omit the option so `prodex exec resume THREAD_ID` retains the thread's persisted source. The opt-in compaction feature uses the normal Codex configuration surface in every Codex-based mode:
+
+```bash
+prodex -c features.compaction_image_budget=true exec "review this repository"
+prodex run -c features.compaction_image_budget=true exec "review this repository"
+prodex caveman -c features.compaction_image_budget=true exec "review this repository"
+prodex s --no-presidio --no-sub-agent -c features.compaction_image_budget=true exec "review this repository"
+prodex s --provider gemini -c features.compaction_image_budget=true exec "review this repository"
+```
+
+Generated Prodex provider/default overrides precede passthrough arguments. Explicit user `-c` arguments retain their order, so a later explicit override wins; unspecified or false states add no Prodex compaction behavior. Codex owns retained-image accounting, image/label boundary atomicity, and the no-backfill rule. Prodex only preserves the configuration and `/responses/compact` image, label, audio, text, metadata, developer-message, and unknown JSON structures.
+
+Detached memory traffic carries `thread_source: "memory_consolidation"` in `x-codex-turn-metadata` and the matching nested `client_metadata` entry. Prodex preserves both opaquely, including unknown metadata fields and pre-commit retries. This classification is metadata, not a Prodex affinity, selection, rotation, quota, or governance mode. In the explicit JSON-RPC broker, upstream `threadSource` is an optional free-form string on `thread/start` and `thread/fork`; `thread/resume` receives no generated source.
 
 `--web-search` maps to Codex's top-level `web_search = "disabled" | "cached" | "indexed" | "live"` setting. In Super provider mode, an explicit `--web-search` is appended after the provider default, so it overrides the default bridge choice. Codex 0.148.0 allows compatible custom providers to use its standalone search endpoint; Prodex enables that capability automatically for the governed OpenAI-through-Prodex provider. Other custom providers must set `model_providers.<id>.supports_standalone_web_search = true` only when their endpoint implements that contract.
 
@@ -918,9 +953,9 @@ prodex claude --profile second -- -p --output-format json "show the latest diff"
 
 ## Harness modes
 
-A harness mode is model-facing request policy for a local provider bridge. Prodex supports `auto`,
-`native`, `minimal`, and the explicit evaluation-backed `evaluated` mode. The default `auto` still
-resolves conservatively to `native`, so existing launches remain unchanged.
+A harness mode is model-facing request policy for a local provider bridge. Prodex supports
+`native`, `minimal`, and the explicit evaluation-backed `evaluated` mode. Omitting `--harness`
+selects `native`, so existing launches remain unchanged.
 
 ```bash
 prodex s --provider anthropic --harness native
@@ -1064,7 +1099,7 @@ git diff | prodex context compact-output --kind git-diff
 |---|---|
 | `prodex info` | Shows provider route/quota shapes plus effective runtime tuning values after environment, policy, and default resolution. |
 | `prodex log` | Shows the latest session transcript text plus the latest runtime token event. |
-| `prodex log stream` | Follows session/runtime logs and prints assistant text and tool-call arguments once each item finishes streaming, plus token events. Add `--json` for JSON Lines events. |
+| `prodex log stream` | Follows session/runtime logs and prints assistant text and tool-call arguments once each item finishes streaming, plus token events. Add `--json` for JSON Lines events. Transient discovery/read failures during log creation, rotation, cleanup, or replacement skip one poll instead of ending the stream. |
 | `prodex log upstream` | Follows bounded, redacted backend-bound LLM payload snapshots after Prodex processing such as Presidio redaction and Smart Context rewriting. Add `--json` for JSON Lines payload events. Snapshots are capped at 64 KiB in the runtime log per payload. |
 | `prodex doctor --install` | Adds install and embedded asset checks to doctor output. |
 | `prodex doctor --runtime` | Runs runtime diagnostics. |
