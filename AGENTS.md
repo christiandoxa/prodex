@@ -198,11 +198,14 @@ Headers that may be skipped as transport-local:
 
 `prodex quota` is a Prodex-owned screen, not a Codex TUI path.
 
+All Prodex-owned screens should adapt to the current terminal width. Live views may also adapt
+to terminal height when hidden critical state is surfaced, and must keep the previous snapshot
+visible until the next snapshot is fully ready to render.
+
 - By default, `prodex quota` should refresh continuously every 5 seconds.
 - This default applies to both single-profile quota views and `prodex quota --all`.
 - `prodex quota --raw` should remain one-shot.
 - `prodex quota --once` is the explicit one-shot escape hatch for human-facing quota views.
-- During a live quota refresh, the previous snapshot should stay visible until the next snapshot is fully ready to render.
 - The live `prodex quota --all` view may truncate to the current terminal height, but it must preserve the existing sort order, show the top rows that fit, and surface how many profiles are hidden.
 - When changing quota behavior, keep integration tests and docs aligned so snapshot-style tests use `--once`.
 
@@ -294,6 +297,8 @@ files and a directory may have at most 9 near-limit production siblings.
 - Tracked examples and tests must use reserved domains (`example.com`), generic paths such as
   `/home/test-user`, synthetic profile names, and fake IDs/tokens. Never copy real emails,
   paths, overlay/session/attachment IDs, logs, auth data, credentials, or customer identifiers.
+  Intentional public ownership metadata and the maintainer identity configured for Git commits
+  are allowed; still scan every tracked diff for secrets and personal or operational data.
 - Never pipe a remote script into a shell. Pin external CI actions and downloaded tools to full
   immutable SHAs or explicit versions. Review dependency and lockfile changes; add no dependency
   when an existing crate or the standard library is sufficient.
@@ -316,6 +321,9 @@ files and a directory may have at most 9 near-limit production siblings.
   ports, broker state, and continuation state. Keep global-env/runtime/continuation cases in
   serialized process shards with `--test-threads=1`; prefer independent processes for parallel
   coverage. Keep runtime test manifests in sync with `node scripts/ci/runtime-test-manifest-guard.mjs`.
+- Runtime persistence changes require multi-process merge-safety coverage. Transport recovery
+  changes must distinguish quota backoff from transport backoff. Candidate-selection changes
+  must cover hard affinity, transport/health penalties, and bounded pre-commit exhaustion.
 - Live provider, credential-bearing, network, or cost-bearing tests require explicit
   authorization. Use deterministic fixtures or the offline compatibility gate by default.
 
@@ -338,6 +346,12 @@ unless explicitly platform-specific. Account for path and filesystem semantics, 
 and secure file handling, process identity/termination, terminal behavior, line endings, shell
 assumptions, and executable resolution. Use the native CI lanes when local validation cannot
 cover another OS.
+
+For proxy transport changes, compare the current upstream owners corresponding to
+`codex-rs/core/src/client.rs`, `codex-rs/core/src/compact_remote.rs`,
+`codex-rs/codex-api/src/sse/responses.rs`, and
+`codex-rs/codex-api/src/endpoint/responses_websocket.rs`; follow upstream moves rather than
+assuming those paths are permanent.
 
 ## Validation command matrix
 
@@ -378,6 +392,9 @@ For an authorized release, follow the repository release scripts and
 `.github/workflows/standalone-release.yml`: synchronize version metadata, lockfiles, tests, and
 docs as required by their guards. The default release path is GitHub/container artifacts, not
 npm or crates.io publication. Do not publish, tag, commit, or push without explicit authorization.
+On the `0.x` line, the normal release increment is the minor component unless the user requests
+another version. Use conventional commit subjects for authorized commits. The release workflow,
+not a manual Git command, owns the plain `0.x.y` tag and version-only GitHub Release title.
 
 ## Agent handoff
 
