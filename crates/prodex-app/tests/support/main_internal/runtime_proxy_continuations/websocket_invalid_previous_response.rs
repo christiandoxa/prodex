@@ -17,7 +17,7 @@ fn runtime_proxy_websocket_0_147_reconnect_invalid_previous_response_replays_ful
 #[test]
 fn runtime_proxy_websocket_0_149_reconnect_invalid_previous_response_replays_full_context() {
     assert_websocket_invalid_previous_response_replays_full_context(
-        "codex-tui/0.149.0 (Linux; x86_64)",
+        "codex-tui/0.149.1 (Linux; x86_64)",
     );
 }
 

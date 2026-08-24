@@ -8,6 +8,7 @@ const PRODEX_DRY_RUN_ARG: &str = "--dry-run";
 const CODEX_BYPASS_APPROVALS_AND_SANDBOX_ARG: &str = "--dangerously-bypass-approvals-and-sandbox";
 const CODEX_PROFILE_ARG: &str = "--profile";
 const CODEX_LEGACY_PROFILE_V2_ARG: &str = "--profile-v2";
+const CODEX_THREAD_SOURCE_ARG: &str = "--thread-source";
 const PRODEX_GOVERNED_HTTP_PROVIDER_ID: &str = "prodex-openai-governed-http";
 
 pub fn runtime_proxy_codex_passthrough_args(
@@ -126,7 +127,7 @@ pub fn normalize_run_codex_args(codex_args: &[OsString]) -> Vec<OsString> {
     }
 
     let mut normalized = Vec::with_capacity(codex_args.len() + 1);
-    normalized.extend(codex_args[..index].iter().cloned());
+    extend_without_codex_thread_source(&mut normalized, &codex_args[..index]);
     normalized.push(OsString::from("resume"));
     normalized.extend(codex_args[index..].iter().cloned());
     normalized
@@ -151,7 +152,8 @@ pub fn codex_resume_requested(codex_args: &[OsString]) -> bool {
 
 pub fn retarget_codex_tui_resume_args(codex_args: &[OsString], session_id: &str) -> Vec<OsString> {
     let command_index = first_codex_positional_arg_index(codex_args).unwrap_or(codex_args.len());
-    let mut args = codex_args[..command_index].to_vec();
+    let mut args = Vec::with_capacity(command_index + 2);
+    extend_without_codex_thread_source(&mut args, &codex_args[..command_index]);
     if args.last().is_some_and(|arg| arg == "--") {
         args.pop();
     }
@@ -230,7 +232,29 @@ fn codex_option_takes_separate_value(arg: &str) -> bool {
             | "-o"
             | "--output-last-message"
             | "--color"
+            | CODEX_THREAD_SOURCE_ARG
     )
+}
+
+fn extend_without_codex_thread_source(output: &mut Vec<OsString>, args: &[OsString]) {
+    let mut index = 0;
+    while index < args.len() {
+        let Some(arg) = args[index].to_str() else {
+            output.push(args[index].clone());
+            index += 1;
+            continue;
+        };
+        if arg == CODEX_THREAD_SOURCE_ARG {
+            index += 2;
+            continue;
+        }
+        if arg.starts_with("--thread-source=") {
+            index += 1;
+            continue;
+        }
+        output.push(args[index].clone());
+        index += 1;
+    }
 }
 
 fn codex_option_with_inline_value(arg: &str) -> bool {
