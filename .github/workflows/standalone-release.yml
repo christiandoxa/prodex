@@ -284,7 +284,12 @@ jobs:
           uv pip install --python .venv/bin/python "mojo==${MOJO_VERSION}"
           export PATH="${GITHUB_WORKSPACE}/.venv/bin:${PATH}"
           echo "${GITHUB_WORKSPACE}/.venv/bin" >> "${GITHUB_PATH}"
-          mojo --version
+          mojo_version="$(mojo --version)"
+          printf '%s\n' "${mojo_version}"
+          case "${mojo_version}" in
+            "Mojo ${MOJO_VERSION}"*) ;;
+            *) echo "unexpected Mojo version: ${mojo_version}" >&2; exit 1 ;;
+          esac
 
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
@@ -358,7 +363,7 @@ jobs:
           RUSTC_WRAPPER=sccache \
           cargo build --release --locked --target "${{ matrix.target }}" \
             -p prodex-mojo-core --features "${{ matrix.mojo-features }}"
-          archive="$(find "target/mojo-archive/${{ matrix.target }}/${{ matrix.target }}/release/build" -type f -name 'libprodex_mojo_core.a' -print -quit)"
+          archive="$(find "target/mojo-archive/${{ matrix.target }}/${{ matrix.target }}/release/build" -type f -name 'libprodex_mojo_core.a' -printf '%T@ %p\n' | sort -nr | head -n 1 | cut -d' ' -f2-)"
           test -s "${archive}"
           cp "${archive}" "${archive_dir}/libprodex_mojo_core.a"
 
@@ -399,12 +404,18 @@ jobs:
         run: |
           set -euo pipefail
           binary="target/${{ matrix.target }}/release/${{ matrix.binary-name }}"
-          archive="$(find "target/${{ matrix.target }}/release/build" -type f -name 'libprodex_mojo_core.a' -print -quit)"
+          archive="$(find "target/${{ matrix.target }}/release/build" -type f -name 'libprodex_mojo_core.a' -printf '%T@ %p\n' | sort -nr | head -n 1 | cut -d' ' -f2-)"
           test -s "${archive}"
           nm -g "${archive}" | grep -F 'prodex_quota_remaining_percent'
           nm -g "${archive}" | grep -F 'prodex_mojo_abi_version'
           nm -g "${archive}" | grep -F 'prodex_routing_plan_batch'
           nm -g "${archive}" | grep -F 'prodex_capability_match_batch'
+          nm -g "${archive}" | grep -F 'prodex_mojo_text_abi_version'
+          nm -g "${archive}" | grep -F 'prodex_context_prepare_signal_rows_v1'
+          if nm -u "${archive}" | grep -F 'KGEN_CompilerRT_'; then
+            echo "rich Mojo core unexpectedly requires the Mojo compiler runtime" >&2
+            exit 1
+          fi
           if readelf --dynamic "${binary}" | grep -Eiq 'lib(mojo|modular)|RPATH|RUNPATH'; then
             echo "Mojo release binary has an unexpected dynamic Mojo dependency or build path" >&2
             readelf --dynamic "${binary}" >&2
@@ -420,6 +431,7 @@ jobs:
           printf '%s\n' "${diagnostics}" | grep -F '"compiler_required": false'
           printf '%s\n' "${diagnostics}" | grep -F '"build_strict": true'
           printf '%s\n' "${diagnostics}" | grep -F '"self_test": "passed"'
+          printf '%s\n' "${diagnostics}" | grep -F '"context_text": true'
           clean_root="$(mktemp -d)"
           trap 'rm -rf "${clean_root}"' EXIT
           if PATH="/usr/bin:/bin" command -v mojo >/dev/null 2>&1; then

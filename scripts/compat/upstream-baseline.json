@@ -143,9 +143,9 @@
             "ThreadSource",
             "THREAD_SOURCE_KEY",
             "thread_source",
-            "CODE_MODE_TOOL_NAMES_KEY",
+            "LEGACY_CODE_MODE_TOOL_NAMES_KEY",
             "code_mode_tool_names",
-            "code_mode_tool_names: None"
+            "tool_namespaces_info: None"
           ]
         },
         {
@@ -214,7 +214,7 @@
         },
         {
           "path": "codex-rs/model-provider/src/amazon_bedrock/catalog.rs",
-          "reason": "Owns the Codex static Amazon Bedrock model catalog. Prodex launches Bedrock/custom providers directly, so compatibility tracking must preserve GPT-5.6 slugs, max reasoning effort, default-only service tiers, text-only web search, and multi-agent metadata.",
+          "reason": "Owns the Codex static Amazon Bedrock model catalog. Prodex launches Bedrock/custom providers directly, so compatibility tracking must preserve GPT-5.6 slugs, inherited reasoning metadata, default-only service tiers, text-only web search, and disabled Responses Lite/tool mode.",
           "required_contains": [
             "static_model_catalog",
             "normalize_bedrock_catalog",
@@ -222,13 +222,14 @@
             "AMAZON_BEDROCK_GPT_5_6_SOL_MODEL_ID",
             "AMAZON_BEDROCK_GPT_5_6_TERRA_MODEL_ID",
             "AMAZON_BEDROCK_GPT_5_6_LUNA_MODEL_ID",
-            "ReasoningEffort::Max",
-            "Maximum reasoning depth for the hardest problems",
+            "ReasoningEffort::Ultra",
+            ".retain(|level| level.effort != ReasoningEffort::Ultra)",
             "model.additional_speed_tiers.clear()",
             "model.service_tiers.clear()",
             "model.default_service_tier = None",
             "WebSearchToolType::Text",
-            "model.multi_agent_version"
+            "model.use_responses_lite = false",
+            "model.tool_mode = None"
           ]
         },
         {
@@ -1024,9 +1025,9 @@
             "ThreadSource",
             "THREAD_SOURCE_KEY",
             "thread_source",
-            "CODE_MODE_TOOL_NAMES_KEY",
+            "LEGACY_CODE_MODE_TOOL_NAMES_KEY",
             "code_mode_tool_names",
-            "code_mode_tool_names: None"
+            "tool_namespaces_info: None"
           ],
           "expected_headers_all": [
             "x-codex-turn-metadata"
@@ -1064,7 +1065,7 @@
           "id": "model-provider.bedrock-gpt-5-6-catalog",
           "kind": "provider_catalog",
           "file": "codex-rs/model-provider/src/amazon_bedrock/catalog.rs",
-          "reason": "Codex 0.142.3 adds GPT-5.6 Sol/Terra/Luna Bedrock models by copying GPT-5.5 config, adding max reasoning effort, and keeping Bedrock service tiers default-only.",
+          "reason": "Codex 0.149.1 builds GPT-5.6 Sol/Terra/Luna Bedrock models from bundled metadata, removes Ultra, disables Responses Lite/tool mode, and keeps Bedrock service tiers default-only.",
           "file_contains_all": [
             "static_model_catalog",
             "normalize_bedrock_catalog",
@@ -1072,13 +1073,14 @@
             "AMAZON_BEDROCK_GPT_5_6_SOL_MODEL_ID",
             "AMAZON_BEDROCK_GPT_5_6_TERRA_MODEL_ID",
             "AMAZON_BEDROCK_GPT_5_6_LUNA_MODEL_ID",
-            "ReasoningEffort::Max",
-            "Maximum reasoning depth for the hardest problems",
+            "ReasoningEffort::Ultra",
+            ".retain(|level| level.effort != ReasoningEffort::Ultra)",
             "model.additional_speed_tiers.clear()",
             "model.service_tiers.clear()",
             "model.default_service_tier = None",
             "WebSearchToolType::Text",
-            "model.multi_agent_version"
+            "model.use_responses_lite = false",
+            "model.tool_mode = None"
           ]
         },
         {
@@ -1526,16 +1528,16 @@
   },
   "claude": {
     "latestRelease": {
-      "tag_name": "v2.1.220",
-      "name": "v2.1.220",
-      "published_at": "2026-07-25T01:35:55Z",
-      "html_url": "https://github.com/anthropics/claude-code/releases/tag/v2.1.220"
+      "tag_name": "v2.1.241",
+      "name": "v2.1.241",
+      "published_at": "2026-08-23T00:52:16Z",
+      "html_url": "https://github.com/anthropics/claude-code/releases/tag/v2.1.241"
     },
     "docs": [
       {
         "url": "https://docs.anthropic.com/en/docs/claude-code/settings",
         "title": "Claude Code settings - Claude Code Docs",
-        "description": "Configure Claude Code with global and project-level settings, and environment variables.",
+        "description": "Change Claude Code settings, pick the scope a key belongs in, verify the change, and learn which value Claude Code uses when a key is set in several places.",
         "required_contains": [
           "settings.json",
           "CLAUDE.md",
@@ -1559,11 +1561,11 @@
       {
         "url": "https://docs.anthropic.com/en/docs/claude-code/github-actions",
         "title": "Claude Code GitHub Actions - Claude Code Docs",
-        "description": "Learn about integrating Claude Code into your development workflow with Claude Code GitHub Actions",
+        "description": "Run Claude Code in GitHub Actions workflows to respond to @claude mentions, automate tasks, and turn issues into pull requests",
         "required_contains": [
           "GitHub Actions",
           "workflow",
-          "development workflow",
+          "turn issues into pull requests",
           "integrate",
           "Claude Code"
         ]

@@ -1,10 +1,10 @@
 #![allow(unsafe_code)]
 
-//! Safe, stateless wrappers around the narrow Rust-to-Mojo C ABI.
+//! Safe, stateless wrappers around the Rust-to-Mojo C ABI.
 //!
-//! This crate is the only owner of unsafe FFI declarations. Callers exchange
-//! bounded integers and caller-owned slices; no Rust heap object or Mojo
-//! collection crosses the ABI.
+//! This crate owns every unsafe FFI declaration. Callers exchange fixed-width
+//! values plus bounded caller-owned byte, text, and output views; Rust and Mojo
+//! heap objects never cross the ABI.
 
 pub const MOJO_ACTIVE: bool = cfg!(prodex_mojo_active);
 pub const MOJO_REQUIRED: bool = cfg!(prodex_mojo_required);

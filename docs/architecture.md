@@ -62,6 +62,7 @@ prodex run / prodex caveman / prodex claude
 Hot path invariants:
 
 - Preserve hard affinity: `previous_response_id -> profile`, `x-codex-turn-state -> profile`, and session-scoped `session_id -> profile`.
+- An owner-bound WebSocket continuation may release affinity after a pre-commit usage limit only by asking Codex to replay full context; its delta request is never sent to another profile.
 - Rotate only before commit: before first accepted unary response, before first committed stream response, or before returning quota/overload to Codex.
 - Do not rotate mid-stream after model output starts.
 - Pass through upstream status/body/stream payloads unless the proxy failed before any upstream response existed.
@@ -162,7 +163,10 @@ Key crates:
 - `prodex-codex-config`: Codex config parsing helpers.
 - `prodex-optional-tools`: side-effect-free optional-tool discovery and validation plus temporary-overlay activation.
 - `prodex-housekeeping`: cleanup and duplicate-detection helpers.
-- `prodex-context`: context audit and compression helpers.
+- `prodex-context`: context audit and compression helpers. Rust owns filesystem/process
+  collection, ANSI/line normalization, Unicode trim compatibility, and diagnostic classifiers;
+  the Mojo-enabled build owns bounded UTF-8 duplicate grouping and critical-signal row planning
+  through `prodex-mojo-core`.
 
 ## Boundary Guard
 

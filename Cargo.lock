@@ -2971,6 +2971,7 @@ name = "prodex-context"
 version = "0.415.0"
 dependencies = [
  "anyhow",
+ "criterion",
  "libc",
  "prodex-mojo-core",
  "prodex-redaction",

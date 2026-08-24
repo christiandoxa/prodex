@@ -33,5 +33,12 @@ windows-sys = { version = "=0.61.2", features = [
     "Win32_System_IO",
 ] }
 
+[dev-dependencies]
+criterion = "0.8.2"
+
+[[bench]]
+name = "context_text_boundary"
+harness = false
+
 [lints]
 workspace = true

@@ -60,6 +60,17 @@ must receive only validated invocation plans, `SecretRef` credential references,
 and pre-commit retry decisions. It must not weaken continuation affinity or
 rotate after a stream is committed; no mid-stream rotation is allowed.
 
+### Rust-Mojo ABI Boundary
+
+Mojo receives only bounded deterministic inputs selected by safe Rust wrappers. Numeric buffers
+and non-secret diagnostic text views are caller-owned for one synchronous call; Mojo cannot
+retain them or return heap ownership. Text records carry explicit pointers and byte lengths,
+validate UTF-8 before `StringSlice` use, permit embedded nul bytes, and reject ABI, capacity,
+null/length, tag, and malformed-text errors. Prompts, credentials, auth/session values, cookies,
+secrets, and filesystem paths do not cross this text seam. Release builds pin and verify the Mojo
+compiler, compare ABI layouts, fail closed when the archive is absent, and reject an unexpected
+Mojo compiler-runtime dependency.
+
 ### Durable Storage Boundary
 
 PostgreSQL is the production source of truth for tenant-owned durable state,
@@ -101,6 +112,9 @@ paths.
 | Secret value leaks in domain, logs, environment, or projected paths | Credential compromise | `SecretRef` in domain, production rejection of CLI/environment credential sources, redacted secret material and provider debug output, canonical projected-root containment, private file modes, and log/error redaction |
 | Custom provider inherits ambient OpenAI authentication | OpenAI bearer or account ID disclosure to a non-OpenAI endpoint | Generated Prodex bridge providers require only an explicit local placeholder credential; real provider keys stay in the proxy process, unrelated custom providers remain Codex-owned, and child secret stripping is regression-tested |
 | Upstream provider error rewriting | Compatibility breakage and debugging loss | Pass-through upstream status/body/stream after upstream response exists |
+| Malformed or incompatible Rust-Mojo record | In-process crash, corruption, or incorrect deterministic plan | Versioned `repr(C)` DTOs, compile/runtime layout probes, bounded counts/capacities, safe Rust wrappers, explicit status tags, and no pointer retention |
+| Secret-bearing text enters experimental computation | Credential exposure through crashes, diagnostics, or memory dumps | Restrict the production text ABI to non-secret diagnostic lines; no content logging or persistence; explicit future threat review for prompts or secrets |
+| Heap-owning Mojo code changes release runtime | Hidden shared-library, GLIBC, or clean-machine regression | Inspect undefined symbols and final dependencies; reject `KGEN_CompilerRT_*`, RPATH/RUNPATH, or unapproved runtime bundles |
 | Mid-stream rotation | Broken transport semantics and affinity | Rotation only pre-commit; continuation bindings preserved |
 | High-cardinality telemetry labels | Metrics cardinality explosion | Telemetry attribute validation and bounded labels |
 | Failed runtime-policy reload evicts usable policy | Availability loss or hidden partial configuration | Validate before atomic cache replacement, propagate failure, withhold publication acknowledgement, and retry delivery |
@@ -133,6 +147,10 @@ is considered enterprise-ready:
   invalid refresh without evicting last-known-good state.
 - Revocation and pricing revision changes between planning and dispatch deny the
   stale route before provider invocation.
+- Rust-Mojo text calls reject malformed/truncated UTF-8, null with non-zero length,
+  incompatible versions, invalid counters, and undersized output buffers.
+- Rust-Mojo layout probes match size, alignment, and field offsets on each Mojo release target;
+  repeated and concurrent calls use disjoint buffers and return exact Rust-oracle results.
 
 ## Audit Requirements
 

@@ -108,3 +108,86 @@ fn assert_websocket_invalid_previous_response_replays_full_context(user_agent: &
         "the stale request must be observed after Prodex reconnects upstream: {log}"
     );
 }
+
+#[test]
+fn runtime_proxy_websocket_owned_quota_replays_on_ready_profile() {
+    let _test_guard = crate::acquire_test_runtime_lock();
+    let (_connect_timeout_guard, _progress_timeout_guard) =
+        ci_runtime_proxy_websocket_timeout_guards();
+    let fixture = start_runtime_continuation_fixture(
+        RuntimeProxyBackend::start_websocket_delayed_quota_after_prelude(),
+        "main",
+        &["main", "second"],
+        &[],
+        Vec::new(),
+    );
+    let headers = [runtime_continuation_header(
+        "session_id",
+        "session-quota-replay",
+    )];
+    let mut socket =
+        fixture.connect_websocket_with_headers("backend-api/prodex/responses", &headers);
+
+    send_runtime_websocket_json(
+        &mut socket,
+        serde_json::json!({
+            "input": [{"type": "message", "role": "user", "content": "turn one"}],
+        }),
+    );
+    let (_, first) = read_runtime_websocket_until(&mut socket, |text| {
+        text.contains("response.completed")
+    });
+    assert!(first.contains("resp-main"), "{first}");
+
+    send_runtime_websocket_json(
+        &mut socket,
+        serde_json::json!({
+            "previous_response_id": "resp-main",
+            "input": [{
+                "type": "custom_tool_call_output",
+                "call_id": "call-1",
+                "output": "done"
+            }],
+        }),
+    );
+    let (frames, retry) = read_runtime_websocket_until(&mut socket, |text| {
+        text.contains("previous_response_not_found")
+    });
+    assert!(retry.contains("previous_response_not_found"), "{retry}");
+    assert!(
+        frames.iter().all(|frame| !frame.contains("usage limit")),
+        "the exhausted owner must not leak a terminal usage-limit error while another profile is ready: {frames:?}"
+    );
+    let _ = socket.close(None);
+
+    let mut socket =
+        fixture.connect_websocket_with_headers("backend-api/prodex/responses", &headers);
+    send_runtime_websocket_json(
+        &mut socket,
+        serde_json::json!({
+            "input": [
+                {"type": "message", "role": "user", "content": "turn one"},
+                {"type": "message", "role": "assistant", "content": "turn one result"},
+                {"type": "message", "role": "user", "content": "continue"}
+            ],
+        }),
+    );
+    let (_, recovered) = read_runtime_websocket_until(&mut socket, |text| {
+        text.contains("response.completed")
+    });
+    let _ = socket.close(None);
+
+    assert!(recovered.contains("resp-second"), "{recovered}");
+    assert_eq!(
+        fixture.backend.responses_accounts(),
+        vec![
+            "main-account".to_string(),
+            "second-account".to_string()
+        ]
+    );
+    let log = fixture.wait_for_log(|log| {
+        log.contains("quota_blocked_full_context_retry_signal")
+            && log.contains("transport=websocket committed profile=second")
+    });
+    assert!(log.contains("affinity_released=true"), "{log}");
+}

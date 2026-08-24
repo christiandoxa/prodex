@@ -315,6 +315,9 @@ impl<'a> RuntimeWebsocketTextMessageFlow<'a> {
             &profile_name,
             self.request_requires_previous_response_affinity,
         ) {
+            if self.try_signal_quota_full_context_retry(&profile_name)? {
+                return Ok(RuntimeWebsocketMessageLoopAction::Finished);
+            }
             forward_runtime_proxy_websocket_error(&mut *self.local_socket, &payload)?;
             return Ok(RuntimeWebsocketMessageLoopAction::Finished);
         }
@@ -437,6 +440,9 @@ impl<'a> RuntimeWebsocketTextMessageFlow<'a> {
             &profile_name,
             self.request_requires_previous_response_affinity,
         ) {
+            if self.try_signal_quota_full_context_retry(&profile_name)? {
+                return Ok(RuntimeWebsocketMessageLoopAction::Finished);
+            }
             runtime_proxy_log(
                 self.shared,
                 format!(
@@ -465,6 +471,33 @@ impl<'a> RuntimeWebsocketTextMessageFlow<'a> {
         self.excluded_profiles.insert(profile_name);
         self.last_failure = Some((RuntimeUpstreamFailureResponse::Websocket(payload), true));
         Ok(RuntimeWebsocketMessageLoopAction::Continue)
+    }
+
+    fn try_signal_quota_full_context_retry(&mut self, profile_name: &str) -> Result<bool> {
+        if self.previous_response_id.is_none()
+            || self.request_session_id.is_none()
+            || self.bound_profile.as_deref() != Some(profile_name)
+            || !self.prepare_quota_fallback(profile_name)?
+        {
+            return Ok(false);
+        }
+
+        let released_affinity = self.release_quota_blocked_affinity(profile_name)?;
+        self.clear_profile_affinity(profile_name, true);
+        runtime_proxy_log(
+            self.shared,
+            format!(
+                "request={} websocket_session={} quota_blocked_full_context_retry_signal profile={} affinity_released={released_affinity}",
+                self.request_id, self.session_id, profile_name
+            ),
+        );
+        send_runtime_proxy_websocket_error(
+            &mut *self.local_socket,
+            400,
+            "previous_response_not_found",
+            "Previous response was not found. Retrying the full request.",
+        )?;
+        Ok(true)
     }
 
     fn prepare_quota_fallback(&mut self, profile_name: &str) -> Result<bool> {

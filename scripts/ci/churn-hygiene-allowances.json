@@ -1,5 +1,18 @@
 [
   {
+    "id": "audited-rich-mojo-quota-recovery-0.416.0",
+    "requiredSubjects": [
+      "feat: migrate context text and harden quota recovery"
+    ],
+    "caps": {
+      "maxFiles": 32,
+      "maxBehaviorFiles": 14,
+      "maxLines": 1850,
+      "maxFileLines": 484
+    },
+    "reason": "Reviewed the bounded 0.416.0 migration adding a versioned borrowed-text ABI, production context text grouping, strict Mojo parity and packaging evidence, Codex-owned full-context replay after an affinity owner's quota exhaustion, and disjoint CI shards; exact caps cover the audited feature while all source, runtime, compatibility, security, benchmark, and release gates remain mandatory."
+  },
+  {
     "id": "audited-mojo-kiss-runtime-feature-0.414.0",
     "requiredSubjects": [
       "refactor: remove dead and pass-through helpers",
