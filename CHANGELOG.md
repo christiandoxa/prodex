@@ -2,6 +2,21 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.415.0 - 2026-08-24
+
+### CLI
+
+- Resolve providers and persist model choices (`ae33046`)
+
+### Docs
+
+- Align compatibility and remove obsolete guidance (`3aa3f2a`)
+
+### Misc
+
+- Keep stream alive across transient file errors (`85ccf51`)
+- Support Codex 0.149.1 (`c85a85a`)
+
 ## 0.414.0 - 2026-08-23
 
 ### Runtime
@@ -26,34 +41,7 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 
 - Rotate precommit transport failures (`fff6e20`)
 - Drain all positive runtime quota (`5a69440`)
-
-### CLI
-
-- Tolerate slow heartbeat startup (`15d3f90`)
-- Preserve fraction-only Gemini quota (`7523ce7`)
-
-## 0.412.0 - 2026-08-23
-
-### Runtime
-
 - Preserve remembered model on resume (`d5a31c6`)
-
-### CLI
-
-- Make quota default detailed (`defbb4c`)
-
-### Docs
-
-- Refresh migration and validation contracts (`faeaa9d`)
-
-### Misc
-
-- Migrate production decision kernels (`489bb0e`)
-
-## 0.411.0 - 2026-08-21
-
-### Runtime
-
 - Recover stale Codex continuations semantically (`7925ac6`)
 - Expand runtime decision kernels (`7a4b297`)
 - Extend runtime and routing kernels (`ba7b2de`)
@@ -147,6 +135,9 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 
 ### CLI
 
+- Tolerate slow heartbeat startup (`15d3f90`)
+- Preserve fraction-only Gemini quota (`7523ce7`)
+- Make quota default detailed (`defbb4c`)
 - Align Codex provider semantics (`64e9b50`)
 - Support positional profile login (`256dea4`)
 - Consolidate quota bridge (`6187457`)
@@ -210,6 +201,7 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 
 ### Docs
 
+- Refresh migration and validation contracts (`faeaa9d`)
 - Show GitHub release downloads (`2db7a71`)
 - Record evidence-based audit discipline (`e129baa`)
 - Keep README installer on latest (`895a610`)
@@ -268,6 +260,7 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 
 ### Misc
 
+- Migrate production decision kernels (`489bb0e`)
 - Keep fallback Clippy-clean (`fee7b8e`)
 - Preserve Codex 0.149 during migration (`965a5f4`)
 - Align Codex model and tool limits (`958df0d`)
