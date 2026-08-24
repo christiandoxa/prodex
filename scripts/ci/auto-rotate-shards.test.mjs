@@ -10,6 +10,7 @@ const WINDOWS_TEST_SUITES = Object.freeze([
   "root-0",
   "root-1",
   "root-tests",
+  "installer",
 ]);
 
 function dryRun(...args) {
@@ -51,7 +52,7 @@ test("auto-rotate CI shard index must be in range", () => {
   assert.match(result.stderr, /--shard-index must be an integer between 0 and 1/);
 });
 
-test("Windows CI partitions all test ownership with one cache writer", () => {
+test("Windows CI partitions tests and installer work with one cache writer", () => {
   const workflow = readFileSync(".github/workflows/ci.yml", "utf8");
   const block = workflow.match(/\n  windows-workspace:\n([\s\S]*?)\n  windows-prodex-app:/)?.[1];
   assert.ok(block, "windows-workspace job missing");
@@ -60,7 +61,7 @@ test("Windows CI partitions all test ownership with one cache writer", () => {
   assert.deepEqual(suites, WINDOWS_TEST_SUITES);
   assert.equal(new Set(suites).size, WINDOWS_TEST_SUITES.length);
   assert.equal(block.match(/save_cache: true/g)?.length, 1);
-  assert.equal(block.match(/save_cache: false/g)?.length, 5);
+  assert.equal(block.match(/save_cache: false/g)?.length, 6);
   assert.match(block, /CARGO_INCREMENTAL: "0"/);
   assert.match(block, /CARGO_PROFILE_TEST_DEBUG: "0"/);
   assert.equal(block.match(/shell: bash/g)?.length, 4);
@@ -77,11 +78,11 @@ test("Windows CI partitions all test ownership with one cache writer", () => {
   assert.match(block, /Run Windows non-sharded root tests\n\s+if: matrix\.suite == 'root-tests'/);
   assert.match(
     block,
-    /Build Windows installer fixture binary\n\s+if: \$\{\{ always\(\) && !cancelled\(\) && matrix\.suite == 'root-0' \}\}/,
+    /Build Windows installer fixture binary\n\s+if: matrix\.suite == 'installer'/,
   );
   assert.match(
     block,
-    /Test Windows installer\n\s+if: \$\{\{ always\(\) && !cancelled\(\) && matrix\.suite == 'root-0' \}\}/,
+    /Test Windows installer\n\s+if: matrix\.suite == 'installer'/,
   );
   assert.match(block, /Prebuild Windows auto-rotate tests\n\s+if: matrix\.suite == 'root-0' \|\| matrix\.suite == 'root-1'/);
   assert.match(block, /Run Windows auto-rotate shard .*\n\s+if: matrix\.suite == 'root-0' \|\| matrix\.suite == 'root-1'/);

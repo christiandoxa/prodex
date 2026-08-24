@@ -116,7 +116,7 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
         with:
-          toolchain: 1.97.1
+          toolchain: 1.98.0
           components: rustfmt
 
       - name: Check formatting
@@ -144,7 +144,7 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
         with:
-          toolchain: 1.97.1
+          toolchain: 1.98.0
 
       - name: Install sccache
         uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
@@ -241,7 +241,7 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
         with:
-          toolchain: 1.97.1
+          toolchain: 1.98.0
 
       - name: Install pinned fuzz toolchain
         run: rustup toolchain install nightly-2026-07-11 --profile minimal
@@ -371,6 +371,9 @@ jobs:
           - suite: root-tests
             label: root non-sharded tests
             save_cache: false
+          - suite: installer
+            label: native installer
+            save_cache: false
 
     steps:
       - name: Check out repository
@@ -379,7 +382,7 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
         with:
-          toolchain: 1.97.1
+          toolchain: 1.98.0
 
       - name: Install sccache
         uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
@@ -391,7 +394,7 @@ jobs:
           save-if: ${{ matrix.save_cache }}
 
       - name: Install Node.js
-        if: matrix.suite == 'root-0' || matrix.suite == 'root-1'
+        if: matrix.suite == 'root-0' || matrix.suite == 'root-1' || matrix.suite == 'installer'
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
           node-version: 22
@@ -470,11 +473,11 @@ jobs:
         run: node scripts/ci/auto-rotate-shards.mjs --jobs 4 --shard-index ${{ matrix.auto_rotate_shard }} --shard-count 2 --timings --timings-json
 
       - name: Build Windows installer fixture binary
-        if: ${{ always() && !cancelled() && matrix.suite == 'root-0' }}
+        if: matrix.suite == 'installer'
         run: cargo build --locked --bin prodex
 
       - name: Test Windows installer
-        if: ${{ always() && !cancelled() && matrix.suite == 'root-0' }}
+        if: matrix.suite == 'installer'
         run: node --test scripts/install.test.mjs
 
   windows-prodex-app:
@@ -499,7 +502,7 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
         with:
-          toolchain: 1.97.1
+          toolchain: 1.98.0
 
       - name: Install sccache
         uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
@@ -575,7 +578,7 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
         with:
-          toolchain: 1.97.1
+          toolchain: 1.98.0
 
       - name: Install sccache
         uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
@@ -670,7 +673,7 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
         with:
-          toolchain: 1.97.1
+          toolchain: 1.98.0
 
       - name: Install sccache
         uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
@@ -718,7 +721,7 @@ jobs:
         if: matrix.lane == 'static' || matrix.lane == 'enterprise-storage'
         uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
         with:
-          toolchain: 1.97.1
+          toolchain: 1.98.0
 
       - name: Install sccache
         if: matrix.lane == 'static' || matrix.lane == 'enterprise-storage'
@@ -850,7 +853,7 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
         with:
-          toolchain: 1.97.1
+          toolchain: 1.98.0
 
       - name: Install sccache
         uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
@@ -895,7 +898,7 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
         with:
-          toolchain: 1.97.1
+          toolchain: 1.98.0
 
       - name: Install sccache
         uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
@@ -961,7 +964,7 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
         with:
-          toolchain: 1.97.1
+          toolchain: 1.98.0
           components: clippy
 
       - name: Install sccache
@@ -1155,7 +1158,7 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
         with:
-          toolchain: 1.97.1
+          toolchain: 1.98.0
 
       - name: Install sccache
         uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
@@ -1292,7 +1295,7 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
         with:
-          toolchain: 1.97.1
+          toolchain: 1.98.0
 
       - name: Install sccache
         uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
@@ -1349,7 +1352,7 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
         with:
-          toolchain: 1.97.1
+          toolchain: 1.98.0
 
       - name: Install sccache
         uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
@@ -1384,7 +1387,7 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
         with:
-          toolchain: 1.97.1
+          toolchain: 1.98.0
 
       - name: Install sccache
         uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
@@ -1446,7 +1449,7 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
         with:
-          toolchain: 1.97.1
+          toolchain: 1.98.0
 
       - name: Install sccache
         uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
@@ -1482,7 +1485,7 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
         with:
-          toolchain: 1.97.1
+          toolchain: 1.98.0
 
       - name: Install sccache
         uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
@@ -1515,7 +1518,7 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
         with:
-          toolchain: 1.97.1
+          toolchain: 1.98.0
 
       - name: Install sccache
         uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
@@ -1572,7 +1575,7 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
         with:
-          toolchain: 1.97.1
+          toolchain: 1.98.0
 
       - name: Install sccache
         uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
@@ -1603,7 +1606,7 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
         with:
-          toolchain: 1.97.1
+          toolchain: 1.98.0
 
       - name: Install sccache
         uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
@@ -1631,7 +1634,7 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
         with:
-          toolchain: 1.97.1
+          toolchain: 1.98.0
 
       - name: Install sccache
         uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
@@ -1676,7 +1679,7 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
         with:
-          toolchain: 1.97.1
+          toolchain: 1.98.0
 
       - name: Install sccache
         uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
@@ -1782,7 +1785,7 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
         with:
-          toolchain: 1.97.1
+          toolchain: 1.98.0
           components: clippy
 
       - name: Install sccache
@@ -1794,7 +1797,7 @@ jobs:
           cache-bin: false
 
       - name: Install pinned uv
-        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
         with:
           version: ${{ env.UV_VERSION }}
           enable-cache: false

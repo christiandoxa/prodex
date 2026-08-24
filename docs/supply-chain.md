@@ -2,7 +2,7 @@
 
 ## Rust support
 
-Prodex's minimum supported Rust version (MSRV) is **1.97.1**. The root
+Prodex's minimum supported Rust version (MSRV) is **1.98.0**. The root
 `Cargo.toml`, `rust-toolchain.toml`, CI, and the Docker builder use that exact
 release. The toolchain file also installs `clippy` and `rustfmt`, so local and
 CI checks use the same compiler components.
@@ -43,6 +43,7 @@ refs:
 | `actions/download-artifact` | `v8` | `3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c` |
 | `actions/attest-build-provenance` | `v4` | `4d101475d8b20a2381f78447822ac1eab6504dd8` |
 | `dtolnay/rust-toolchain` | `stable` | `4be7066ada62dd38de10e7b70166bc74ed198c30` |
+| `astral-sh/setup-uv` | `v10.0.1` | `20cfd1bf945f4377ade1205e4dbc17946fc9a30d` |
 | `Swatinem/rust-cache` | `v2` | `6323deb102c322ba6fcbdcafc7e3dddab59af2b6` |
 | `mozilla-actions/sccache-action` | `v0.0.11` | `fc920bf0ec8de6ee65d409111f7ec508035751ba` |
 | `SonarSource/sonarqube-scan-action` | `v8.2.1` | `22918119ff8e1ca75a623e15c8296b6ea4fbe28f` |
@@ -67,6 +68,7 @@ Primary pin sources:
 
 - [GitHub Actions repositories](https://github.com/actions)
 - [dtolnay/rust-toolchain](https://github.com/dtolnay/rust-toolchain)
+- [astral-sh/setup-uv](https://github.com/astral-sh/setup-uv)
 - [Swatinem/rust-cache](https://github.com/Swatinem/rust-cache)
 - [mozilla-actions/sccache-action](https://github.com/mozilla-actions/sccache-action)
 - [hugoalh/scan-virus-ghaction](https://github.com/hugoalh/scan-virus-ghaction)

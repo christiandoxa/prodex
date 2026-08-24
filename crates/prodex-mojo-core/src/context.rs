@@ -96,7 +96,9 @@ pub fn lost_line_ranges_batch(
                 .checked_mul(CRITICAL_SIGNAL_ROW_WIDTH)
                 .ok_or(crate::MojoError::InvalidInput)?
         || before_rows
-            .chunks_exact(CRITICAL_SIGNAL_ROW_WIDTH)
+            .as_chunks::<CRITICAL_SIGNAL_ROW_WIDTH>()
+            .0
+            .iter()
             .any(|row| row[0] < -1 || row[1..].iter().any(|value| *value < 0))
         || after_available.iter().any(|value| *value < 0)
     {
@@ -136,7 +138,7 @@ pub fn lost_line_ranges_batch(
         .and_then(|count| count.checked_mul(2))
         .ok_or(crate::MojoError::InvalidOutput)?;
     let mut ranges = Vec::with_capacity(output_len / 2);
-    for pair in output_ranges[..output_len].chunks_exact(2) {
+    for pair in output_ranges[..output_len].as_chunks::<2>().0 {
         let start = usize::try_from(pair[0]).map_err(|_| crate::MojoError::InvalidOutput)?;
         let end = usize::try_from(pair[1]).map_err(|_| crate::MojoError::InvalidOutput)?;
         if start == 0 || start > line_count || end < start || end > line_count {
