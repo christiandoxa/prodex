@@ -103,10 +103,8 @@ pub(crate) fn resolved_super_runtime_tool_args(args: SuperArgs, presidio: bool) 
 }
 
 pub(crate) fn resolve_super_dry_run_main_agent(args: &mut SuperArgs) -> Result<()> {
-    let Some(session_provider) = runtime_resume_provider_from_codex_args(&args.codex_args)? else {
-        return Ok(());
-    };
-    super::resolve_super_main_agent_with_prompt(args, false, Some(session_provider), |_, _| {
+    let session_provider = runtime_resume_provider_from_codex_args(&args.codex_args)?;
+    super::resolve_super_main_agent_with_prompt(args, false, session_provider, |_, _| {
         bail!("Super provider prompt is unavailable during dry-run")
     })
     .map(|_| ())

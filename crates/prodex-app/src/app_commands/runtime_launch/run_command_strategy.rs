@@ -152,6 +152,7 @@ impl RunCommandStrategy {
                 &prepared.codex_home
             },
             codex_args,
+            self.profile_v2_name.as_deref(),
             [
                 ("model", preference_context.explicit_model.is_none()),
                 (

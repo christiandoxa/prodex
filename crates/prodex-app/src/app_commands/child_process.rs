@@ -542,7 +542,8 @@ pub(crate) fn print_runtime_launch_dry_run(
         .as_ref()
         .and_then(|proxy| proxy.local_model_provider_id.as_deref())
         .is_some();
-    let child = profile_openai_compatible_dry_run_child(&prepared.codex_home, child)?;
+    let child =
+        profile_openai_compatible_dry_run_child(&prepared.paths, &prepared.codex_home, child)?;
     let child_args = match &child {
         RuntimeLaunchDryRunChild::Codex { codex_args }
         | RuntimeLaunchDryRunChild::Caveman { codex_args } => codex_args,
@@ -683,31 +684,42 @@ fn runtime_launch_dry_run_value_color(label: &str, value: &str) -> Color {
 }
 
 fn profile_openai_compatible_dry_run_child(
+    paths: &crate::AppPaths,
     codex_home: &Path,
     child: RuntimeLaunchDryRunChild,
 ) -> Result<RuntimeLaunchDryRunChild> {
     match child {
-        RuntimeLaunchDryRunChild::Codex { codex_args } => {
-            let codex_args =
-                runtime_launch_openai_spark_context_codex_args(codex_home, &codex_args)?;
-            let codex_args = profile_openai_compatible_codex_args(codex_home, &codex_args)?;
-            let codex_args = preview_local_provider_catalog_codex_args(codex_home, &codex_args)?;
-            let codex_args = preview_external_provider_catalog_codex_args(codex_home, &codex_args)?;
-            let codex_args = preview_deepseek_provider_codex_args(codex_home, &codex_args)?;
-            let codex_args = preview_gemini_provider_codex_args(codex_home, &codex_args)?;
-            Ok(RuntimeLaunchDryRunChild::Codex { codex_args })
-        }
-        RuntimeLaunchDryRunChild::Caveman { codex_args } => {
-            let codex_args =
-                runtime_launch_openai_spark_context_codex_args(codex_home, &codex_args)?;
-            let codex_args = profile_openai_compatible_codex_args(codex_home, &codex_args)?;
-            let codex_args = preview_local_provider_catalog_codex_args(codex_home, &codex_args)?;
-            let codex_args = preview_external_provider_catalog_codex_args(codex_home, &codex_args)?;
-            let codex_args = preview_deepseek_provider_codex_args(codex_home, &codex_args)?;
-            let codex_args = preview_gemini_provider_codex_args(codex_home, &codex_args)?;
-            Ok(RuntimeLaunchDryRunChild::Caveman { codex_args })
-        }
+        RuntimeLaunchDryRunChild::Codex { codex_args } => Ok(RuntimeLaunchDryRunChild::Codex {
+            codex_args: dry_run_model_preference_args(paths, codex_home, codex_args)?,
+        }),
+        RuntimeLaunchDryRunChild::Caveman { codex_args } => Ok(RuntimeLaunchDryRunChild::Caveman {
+            codex_args: dry_run_model_preference_args(paths, codex_home, codex_args)?,
+        }),
     }
+}
+
+fn dry_run_model_preference_args(
+    paths: &crate::AppPaths,
+    codex_home: &Path,
+    codex_args: Vec<OsString>,
+) -> Result<Vec<OsString>> {
+    let codex_args = runtime_launch_openai_spark_context_codex_args(codex_home, &codex_args)?;
+    let codex_args = profile_openai_compatible_codex_args(codex_home, &codex_args)?;
+    let preference =
+        crate::resolve_fresh_model_preference_context_read_only(paths, codex_home, &codex_args)?;
+    let codex_args = crate::apply_fresh_model_preference_selection(
+        codex_home,
+        codex_args,
+        &preference,
+        true,
+        true,
+    );
+    let codex_args = runtime_launch_openai_spark_context_codex_args(codex_home, &codex_args)?;
+    let codex_args = profile_openai_compatible_codex_args(codex_home, &codex_args)?;
+    let codex_args = preview_local_provider_catalog_codex_args(codex_home, &codex_args)?;
+    let codex_args = preview_external_provider_catalog_codex_args(codex_home, &codex_args)?;
+    let codex_args = preview_deepseek_provider_codex_args(codex_home, &codex_args)?;
+    preview_gemini_provider_codex_args(codex_home, &codex_args)
 }
 
 fn runtime_proxy_codex_endpoint<'a>(
