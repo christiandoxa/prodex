@@ -2,6 +2,12 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.416.0 - 2026-08-24
+
+### CLI
+
+- Migrate context text and harden quota recovery (`b4486b5`)
+
 ## 0.415.0 - 2026-08-24
 
 ### CLI
@@ -10,6 +16,7 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 
 ### Docs
 
+- Restore durable agent guidance (`762fbe1`)
 - Align compatibility and remove obsolete guidance (`3aa3f2a`)
 
 ### Misc
@@ -23,22 +30,6 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 
 - Exhaust safe precommit candidates (`2792d48`)
 - Normalize weighted inflight limits (`333b4ea`)
-
-### Docs
-
-- Sync weighted inflight policy (`e9b0731`)
-- Require repository-wide reuse first (`c5d6347`)
-- Document compact task interface (`4e4ef10`)
-- Record versioned Mojo ABI (`59adbba`)
-
-### Misc
-
-- Reuse optional ABI tag decoder (`d15b2c7`)
-
-## 0.413.0 - 2026-08-23
-
-### Runtime
-
 - Rotate precommit transport failures (`fff6e20`)
 - Drain all positive runtime quota (`5a69440`)
 - Preserve remembered model on resume (`d5a31c6`)
@@ -201,6 +192,10 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 
 ### Docs
 
+- Sync weighted inflight policy (`e9b0731`)
+- Require repository-wide reuse first (`c5d6347`)
+- Document compact task interface (`4e4ef10`)
+- Record versioned Mojo ABI (`59adbba`)
 - Refresh migration and validation contracts (`faeaa9d`)
 - Show GitHub release downloads (`2db7a71`)
 - Record evidence-based audit discipline (`e129baa`)
@@ -260,6 +255,7 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 
 ### Misc
 
+- Reuse optional ABI tag decoder (`d15b2c7`)
 - Migrate production decision kernels (`489bb0e`)
 - Keep fallback Clippy-clean (`fee7b8e`)
 - Preserve Codex 0.149 during migration (`965a5f4`)
