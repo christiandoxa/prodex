@@ -18,19 +18,21 @@ while Rust-only builds remain separately supported without that feature.
 | provider capability matching | `prodex-provider-spi::negotiate_provider_route_capability` | Flat well-formed flags and capability masks plus tagged outputs | Verified | Medium | None after Rust normalization | `MOVE_NOW` | Mojo returns compatibility and first-index facts; Rust owns route/model objects and diagnostics |
 | Smart Context byte estimate | `prodex-runtime-proxy::smart_context::token_accounting::smart_context_estimate_tokens_from_body_bytes` | `UInt64` bytes to saturated `UInt64` estimate | Verified | Low | None | `MOVE_NOW` | Text tokenization remains Rust |
 | `u64` checked/saturating arithmetic | `prodex-domain::accounting` | `UInt64` plus explicit overflow branches | Unverified | Low | None | `KEEP_RUST` | Generic accounting helper has no production Mojo seam; durable accounting remains Rust-owned |
-| small Rust structs | domain and quota models | Mojo `struct` with scalar fields | Documented, unverified here | Low/medium | None | `EXPERIMENT` | Do not expose these structs across FFI until layout is tested |
+| fixed-layout Rust structs | context text ABI DTOs | Mojo `struct` with pointer/native-length or fixed integer fields | Verified | Medium | None | `MOVE_NOW` for versioned DTOs | Rust static assertions and Mojo reflection/runtime layout probes are mandatory |
 | Rust enums / tagged decisions | domain and provider plans | Mojo enum-like tagged representation or explicit integer tag | Unverified | Medium | None | `EXPERIMENT` | Keep Rust enum authoritative at first |
-| `Vec` / `BTreeMap` collection algorithms | quota pool and routing helpers | Mojo `List` / `Dict` or flat buffers | Unverified | Medium | stdlib only | `EXPERIMENT` | Prefer one batch call, not per-element FFI |
+| `Vec` / `BTreeMap` collection algorithms | critical-signal duplicate grouping | Mojo `InlineArray` plus caller-owned bounded hash buffers | Verified | Medium | None | `MOVE_NOW` | One batch call; owning `List`/`Dict`/`Set` remain runtime-dependent experiments |
 | sorting and ranking | `prodex-runtime-proxy::selection_plan`, Smart Context | Mojo collections and comparator logic | Unverified | Medium/high | token/input adapters | `EXPERIMENT` | Candidate only after hard-affinity extraction |
-| `String` normalization | profile identity and policy helpers | Mojo `String` / string methods | Unverified | Low/medium | None | `EXPERIMENT` | Keep secrets and user-facing errors in Rust |
-| `Result`/error plans | domain/application plans | Explicit tagged output or scalar status | Unverified | Medium | None | `REFACTOR_THEN_MOVE` | No implicit panic/error crossing FFI |
+| borrowed UTF-8 comparison/grouping | `prodex-context::critical_signal_normalized_rows` | validated `StringSlice`, exact comparison, versioned string-view records | Verified | Medium | None | `MOVE_NOW` | Rust retains ANSI/line normalization, Unicode trim, secrets, and user-facing errors |
+| owning `String` normalization | future token/policy helpers | Mojo `String` / string methods | Verified with runtime dependency | Medium | compiler runtime bundle | `EXPERIMENT` | Current static release deliberately avoids heap-owning Mojo values |
+| `Result`/error plans | context text ABI | Explicit status plus structured capacity/result record | Verified | Medium | None | `MOVE_NOW` | Rust maps tags to `MojoError`; no heap error crosses FFI |
 | JSON/TOML parsing and serialization | config, provider, quota IO | Mojo APIs exist in ecosystem but not verified for Prodex | Low | High | schema/compatibility | `KEEP_RUST` | Serde/TOML remain the boundary oracle |
 | async/network/TLS/process/filesystem | app, gateway, runtime, storage | No clean equivalent used by this slice | High | High | mature Rust crates | `KEEP_RUST` | Do not recreate Tokio, Hyper, Reqwest, rustls, or OS APIs |
 
 ## Mapping rule
 
-Move a complete deterministic calculation, not a Rust method because its syntax looks
-portable. Inputs must be normalized by Rust, output must be a small explicit value, and
-captured vectors and invariants must remain as the compatibility contract after parity has
-survived normal, boundary, invalid, and extreme inputs. A separate Rust-only build may retain
-its implementation, but it is never a runtime fallback for `MOJO`.
+Move a complete deterministic calculation, not a Rust method because its syntax looks portable.
+Rust may pass validated text views and structured records when ownership and confidentiality are
+explicit; numeric pre-normalization is no longer universal. Captured vectors and invariants remain
+the compatibility contract after parity covers normal, Unicode, boundary, invalid, and extreme
+inputs. A separate Rust-only build may retain its implementation, but it is never a runtime
+fallback for `MOJO`.

@@ -125,9 +125,18 @@ PRODEX_MOJO_REQUIRED=1 PRODEX_MOJO_VERSION=1.0.0 \
   cargo test --locked -p prodex-runtime-quota --features mojo -- --test-threads=1
 PRODEX_MOJO_REQUIRED=1 PRODEX_MOJO_VERSION=1.0.0 \
   cargo test --locked -p prodex-provider-spi --features mojo -- --test-threads=1
+PRODEX_MOJO_REQUIRED=1 PRODEX_MOJO_VERSION=1.0.0 \
+  cargo test --locked -p prodex-context --features mojo -- --test-threads=1
+PRODEX_MOJO_REQUIRED=1 PRODEX_MOJO_VERSION=1.0.0 \
+  cargo test --locked -p prodex-mojo-core --features mojo-core -- --test-threads=1
 
 target/debug/prodex doctor --runtime --json
 ```
+
+The context/core strict suites execute real string-view records, Unicode and embedded-nul text,
+malformed/truncated UTF-8 rejection, output-capacity and ABI-version failures, exact Rust-oracle
+grouping, repeated calls, and concurrent calls. The release and Real Mojo jobs also reject an
+unexpected `KGEN_CompilerRT_*` archive dependency.
 
 Strict Mojo builds fail if the compiler or archiver is missing, the checked-out Mojo source
 does not compile, or the static archive is missing. The authoritative `Real Mojo / parity` job is part of
@@ -363,6 +372,11 @@ The default test-compile guard runs `cargo test --locked --workspace --all-targe
 Use `node scripts/ci/runtime-test-manifest-guard.mjs` after adding or renaming runtime proxy tests. New `main_internal_tests::runtime_proxy_` tests should normally get a targeted `RUNTIME_CI_TEST_CASES` entry; only add or rely on `RUNTIME_CI_BROAD_SHARD_FILTERS` when a broad CI shard intentionally owns that whole module or prefix. Broad shard filters must mirror the `label|filter` entries in the `main-internal-runtime-proxy` matrix in `.github/workflows/ci.yml` and must not match tests outside runtime CI ownership.
 
 When changing `prodex-context` audit, prose compression, or command-output context-saver helpers, run `cargo test -q -p prodex-context`. If the `prodex context compact-output` CLI surface changes, also run a focused CLI parse/handler test. The command-output helpers are pure and opt-in; they should not require runtime proxy tests unless a separate runtime integration changes.
+
+When changing the Mojo text ABI or critical-signal grouping, also run the Rust-only and strict
+Mojo variants of `cargo bench --locked -p prodex-context --bench context_text_boundary`. The
+checked harness covers 0, 1, 16, 64, 256, and 1,024 lines plus ASCII, Unicode, duplicate-heavy,
+long-line, and adversarial-prefix inputs. Keep corpus construction outside the timed section.
 
 When changing `prodex info` runtime tuning output, run the focused `cargo test -q runtime_tuning_snapshot_reports_effective_policy_and_env_values -- --test-threads=1` check so env, policy, and default-derived values stay aligned.
 

@@ -88,7 +88,7 @@ The policy entry points use explicit integer tags:
 | Lifetime | Values live only for the synchronous call. |
 | Thread safety | Function is stateless and reentrant; no global state. |
 | Errors | No error path exists for bounded integer arithmetic; invalid ranges are clamped exactly like Rust. |
-| Secrets | No secret, token, prompt, path, or user string crosses the boundary. |
+| Secrets | No secret, token, prompt, path, or credential-bearing string crosses the numeric boundary. The text boundary below is restricted to non-secret diagnostic lines. |
 
 ## Behavioral contract
 
@@ -163,6 +163,9 @@ prodex_mojo_abi_version() -> Int64
 prodex_runtime_quota_profile_schedule_batch(..., count: Int64) -> Int64
 prodex_runtime_policy_validate_numeric(..., count: Int64) -> Int64
 prodex_context_signal_diff(..., seven counters) -> Int64
+prodex_mojo_text_abi_version() -> Int64
+prodex_mojo_text_abi_layout(output: *mut UInt64, output_count: Int64) -> Int64
+prodex_context_prepare_signal_rows_v1(...string-view records and caller buffers...) -> Int64
 prodex_smart_context_estimate_tokens_from_body_bytes(body_bytes: UInt64) -> UInt64
 prodex_routing_plan_batch(..., count: Int64, required_capability_mask: Int64, weights...) -> Int64
 prodex_capability_match_batch(..., count: Int64, required_capability_mask: Int64) -> Int64
@@ -198,10 +201,70 @@ section-sized list of `NonZero=0`, `Range=1`, and `LessOrEqual=2` rules. Mojo wr
 failure flag per input rule; Rust validates the flags and maps failed indices to existing
 path-aware errors.
 
-The context signal-diff batch exchanges exactly seven non-negative `Int64` counters for each
-side and writes seven lost plus seven gained counters. Rust classifies lines and performs
-duplicate-line matching; Mojo owns only saturating loss/gain arithmetic. No text, path, or
-range object crosses the ABI.
+The legacy context signal-diff batch exchanges exactly seven non-negative `Int64` counters for
+each side and writes seven lost plus seven gained counters. The additive text ABI below now owns
+duplicate-line grouping and row-plan construction; Rust still strips terminal escapes,
+normalizes line endings, performs Unicode-compatible trimming, and classifies diagnostic lines.
+
+## Context text ABI version 1
+
+`prodex-context/mojo` passes actual non-secret UTF-8 line text through a language-neutral record:
+
+```c
+struct ProdexStringView {
+    const uint8_t *ptr;
+    size_t len;
+};
+
+struct ProdexBytesView {
+    const uint8_t *ptr;
+    size_t len;
+};
+```
+
+Rust declares the record with `#[repr(C)]`. Mojo represents the nullable pointer as
+`Optional[Pointer[UInt8]]` and the length as native `UInt`. On every supported 64-bit target the
+expected size/alignment is `16/8`, with offsets `0/8`. Rust compile-time assertions and
+`prodex_mojo_text_abi_layout` compare Rust and Mojo sizes, alignments, and field offsets at
+runtime before promotion tests pass. `ProdexBytesView` has the same proven layout but carries no
+UTF-8 promise; the production context operation uses `ProdexStringView` and validates it before
+text interpretation.
+
+The production call is one coarse-grained operation:
+
+```text
+prodex_context_prepare_signal_rows_v1(
+    abi_version,
+    before StringView records + seven counters per line,
+    after StringView records + seven counters per line,
+    caller-owned row/result/scratch buffers,
+) -> status
+```
+
+Mojo validates UTF-8 before constructing zero-copy `StringSlice` values. Validation rejects
+truncated sequences, overlong encodings, surrogate code points, and values above `U+10FFFF`;
+embedded nul bytes are ordinary data. Empty views may use null or non-null pointers. Non-empty
+views require a non-null pointer valid for exactly `len` readable bytes; no sentinel byte is read.
+Each length must fit `Int64`, each side is limited to 65,536 lines, unique keys are limited to
+65,536, and the open-addressed scratch table is at most 131,072 slots.
+
+Mojo uses `InlineArray[Int64, 7]` for typed line counters and caller-owned buffers for the bounded
+hash table. `String`, `List`, `Dict`, and `Set` do not appear in the production object because
+Mojo 1.0.0 links those heap-owning types to the compiler runtime. The final archive is checked for
+unexpected `KGEN_CompilerRT_*` references.
+
+`ContextTextRowsResult` is a `#[repr(C)]` nine-`Int64` result record. It reports ABI version,
+input counts, rows written, unique-key count, signal-line count, and required row/key/hash
+capacities. Statuses are `0=success`, `1=bounds or capacity`, `2=invalid pointer/text/counter`,
+`3=key-table exhausted`, and `4=ABI mismatch`. Capacity failures fill the required-capacity
+fields without reading line buffers; other failures may leave scratch/output buffers partially
+written, and Rust discards them.
+
+Rust owns every input, output, and scratch allocation. Inputs are immutable; mutable buffers must
+be disjoint from inputs and from each other. All memory remains valid for one synchronous call.
+Mojo neither retains pointers nor returns heap ownership, and the entry point is stateless and
+reentrant. Raw pointer validity beyond null/length consistency remains an unsafe-caller
+precondition; the public Rust wrapper accepts `&str` and constructs the records safely.
 
 For routing-plan ordering, Mojo compares eligible candidates by affinity descending, score
 descending, provider order ascending, then original candidate index ascending. Rust maps provider

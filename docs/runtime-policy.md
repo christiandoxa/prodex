@@ -576,6 +576,14 @@ On WebSocket, it adds the upstream retryable
 `previous_response_not_found` code so Codex reconstructs and sends its own
 complete prompt exactly once.
 
+The same Codex-owned replay is used when an owner-bound WebSocket continuation
+hits a pre-commit usage limit and another eligible profile exists. Prodex
+quarantines the exhausted owner, releases only that continuation's bindings,
+and returns `previous_response_not_found`; Codex then reconnects and resends the
+full request for normal ready-profile selection. Prodex never forwards the
+delta-only continuation to a different account. If no eligible profile remains,
+the original usage-limit response is preserved.
+
 On HTTP, at most one same-profile retry removes the stale id only when the
 session metadata, an owner-bound response id, and a reconstructable multi-item
 full-history input are all present. The original input, tool results, turn
@@ -607,6 +615,8 @@ shared-state integration around those operations.
 - Selection, admission, affinity, backoff, and first-chunk events must be structured in runtime logs.
 - Upstream HTTP/WebSocket connection reuse should be preserved where it does not change Codex semantics.
 - Secrets remain profile-isolated, redacted in diagnostics, and covered by audit events for Prodex-owned mutations.
+- Mojo-backed critical-signal grouping receives only synchronous non-secret diagnostic line views;
+  it does not log, persist, or retain text, and arbitrary prompts/auth payloads remain Rust-owned.
 
 <!-- BEGIN GENERATED RUNTIME_PROXY_KEYS -->
 | Policy key | Environment override | Default | Meaning |

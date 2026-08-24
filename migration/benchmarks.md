@@ -72,3 +72,46 @@ artifact normalization/store work, plan construction, and Rust-side execution ac
 The GLIBC result is intentionally recorded as a limitation of a directly linked host binary.
 Release CI compiles the Mojo target archive first and links the final Linux binary through the
 target cross toolchain; only that final artifact is eligible for publication.
+
+## 2026-08-24 context text boundary
+
+`context_text_boundary` measures the public lost-range operation, including Rust terminal/line
+normalization and classification, record conversion, one rich text FFI call, Mojo UTF-8
+validation/grouping, the existing Mojo range planner, and Rust result reconstruction. Both modes
+used the same local machine, 200 ms warm-up, 500 ms measurement, and 20 samples. Counts are lines
+per `before` and `after` input.
+
+| Lines per side | Rust-only midpoint | Mojo midpoint | Delta |
+| ---: | ---: | ---: | ---: |
+| 0 | 53.451 ns | 68.978 ns | +29.1% (early-return noise; no text call) |
+| 1 | 21.410 µs | 20.220 µs | -5.6% |
+| 16 | 493.10 µs | 462.08 µs | -6.3% |
+| 64 | 1.5197 ms | 1.4731 ms | -3.1% |
+| 256 | 5.6936 ms | 5.5198 ms | -3.1% |
+| 1,024 | 23.098 ms | 21.401 ms | -7.3% |
+
+At 64 lines per side, isolated shapes measured: ASCII `132.81/140.71 µs`, Unicode
+`167.88/174.56 µs`, duplicates `142.30/140.61 µs`, long 8 KiB lines `9.6640/10.467 ms`, and
+adversarial prefixes `2.0347/2.0087 ms` for Rust/Mojo. The long-line case is 8.3% slower and is
+the current worst observed tradeoff; mixed production-shaped batches improve by 3.1% through
+7.3% from 64 through 1,024 lines.
+
+The direct 64/63-line `prepare_signal_rows` wrapper, including Rust view/counter allocation, FFI,
+Mojo work, and Rust validation/reconstruction, measured `[10.360 µs 10.659 µs 11.007 µs]`.
+Rust normalization/classification of the two mixed 64-line inputs measured
+`[845.68 µs 859.75 µs 873.02 µs]`. The complete Mojo operation measured 1.4731 ms, so the
+direct rich boundary is about 0.7% of end-to-end time on this corpus. Mojo-internal time cannot be
+separated from the ABI call without adding production instrumentation and is not claimed.
+
+Commands:
+
+```bash
+cargo bench --locked -q -p prodex-context --bench context_text_boundary -- \
+  --noplot --warm-up-time 0.2 --measurement-time 0.5 --sample-size 20
+PRODEX_MOJO_REQUIRED=1 PRODEX_MOJO_VERSION=1.0.0 \
+  cargo bench --locked -q -p prodex-context --features mojo \
+  --bench context_text_boundary -- \
+  --noplot --warm-up-time 0.2 --measurement-time 0.5 --sample-size 20
+```
+
+These are local architecture measurements, not cross-machine release thresholds.

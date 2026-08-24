@@ -1,8 +1,8 @@
 # Rust-to-Mojo migration inventory
 
-Audit basis: workspace source as of 2026-08-21, `Cargo.toml`, maintained architecture
+Audit basis: workspace source as of 2026-08-24, baseline `762fbe12`, `Cargo.toml`, maintained architecture
 and testing contracts, the code knowledge graph, and direct source inspection. The
-workspace contains 58 Cargo packages. This inventory classifies ownership boundaries,
+workspace contains 59 Cargo packages. This inventory classifies ownership boundaries,
 not every generated fixture or test helper. Status `MOJO` means compiled Mojo is
 authoritative on the supported Mojo target: a feature-off Rust implementation is a
 separate Rust-only build or test oracle, never runtime fallback.
@@ -39,8 +39,8 @@ needed. `KEEP_RUST` means Rust currently owns the ecosystem or trust boundary.
 | `prodex-application::{data_plane,provider,governance,request_context}` | Side-effect-free application plans and ports | Pure plans | security/policy contracts | Critical | B | `REFACTOR_THEN_MOVE` | Move only isolated calculations after boundary tests |
 | `prodex-runtime-policy::validate*` | Semantic runtime policy validation | Pure validation over config | TOML/config models | High | B | `MOVE_NOW` for normalized numeric rules; `KEEP_RUST` for security/string validation | One bounded Mojo numeric batch validates active runtime-proxy bounds and governance session ranges; Rust preserves parsing, paths, exact errors, selectors, secrets, signatures, and policy gates |
 | `prodex-runtime-quota` | Runtime quota snapshots and adapter helpers | Mixed | runtime state, time | High | B | `MOVE_NOW` for normalized window summaries; `KEEP_RUST` for clocks/state/adapters | Active proxy summary classification now reuses compiled quota status/band kernels; runtime state and time remain Rust |
-| `prodex-context` | Context audit, noise filtering, aggregation | Mixed | filesystem/process output | Medium | B | `EXPERIMENT` | Ranking/dedup may move; collection of inputs stays Rust |
-| `prodex-context::critical_signal_self_check` | Compare normalized critical-signal counters | Pure after Rust line classification | None | Medium | A/B | `MOVE_NOW` for loss/gain arithmetic; `KEEP_RUST` for classifiers/ranges | One seven-counter Mojo call is active in compaction and Smart Context validation; strings, duplicate-line matching, and range mapping stay Rust |
+| `prodex-context` | Context audit, noise filtering, aggregation | Mixed | filesystem/process output | Medium | B | `MOVE_NOW` for critical-signal text grouping | Rust collects and classifies non-secret diagnostic lines; Mojo validates UTF-8, compares borrowed text, groups duplicates, and constructs bounded row plans |
+| `prodex-context::critical_signal_self_check` | Compare critical-signal text and counters | Pure after Rust terminal normalization/classification | None | Medium | A/B | `MOVE_NOW` for text grouping and loss/gain arithmetic; `KEEP_RUST` for classifiers | One text/record call plus the existing counter call are active in compaction and Smart Context validation; exact Rust grouping remains a test oracle |
 | `prodex-state`, `prodex-runtime-state` | Profile/runtime state models and snapshots | Models plus persistence-facing state | `serde`, state contracts | High | B | `KEEP_RUST` | Cross-process merge semantics and serialization remain Rust |
 | `prodex-runtime-store`, `prodex-session-store` | State/session persistence and merge | IO/stateful | filesystem, JSON | Critical | C | `KEEP_RUST` | Durable writes and affinity persistence are Rust-owned |
 | `prodex-gateway-core` | HTTP-neutral admission/routing contracts | Mostly pure | no transport | Critical | B | `REFACTOR_THEN_MOVE` | Only after gateway parity and security review |
@@ -64,9 +64,10 @@ scheduling now also have active Mojo batches. Provider routing now has a complet
 candidate-plan batch after Rust validation and normalization, plus a separate capability-mask
 batch. Runtime candidate ordering and Smart Context pressure accounting are now additional
 production Mojo kernels. Optimistic selection, provider constraints, Smart Context rehydration,
-quota aggregation, and runtime tuning defaults are now production Mojo kernels as well. The
+quota aggregation, runtime tuning defaults, and critical-signal UTF-8 duplicate grouping are now
+production Mojo components as well. The
 generic accounting and rate-limit helpers remain Rust-only because
 their actual production owners are durable storage and Redis/runtime admission. Mojo does not
 own policy, credentials, affinity, tenant ownership, transport, route construction, durable
-mutation, or user-facing errors. The dormant Smart Context candidate scorer/selector remains an
+mutation, secrets, or user-facing errors. The dormant Smart Context candidate scorer/selector remains an
 audit-only candidate until a non-test production caller exists.

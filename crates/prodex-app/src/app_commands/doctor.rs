@@ -277,6 +277,9 @@ fn mojo_core_json_value() -> serde_json::Value {
         let runtime_profile_order = runtime_quota;
         let runtime_policy_numeric = real_mojo && prodex_mojo_core::policy::self_test();
         let context_signal_diff = real_mojo && prodex_mojo_core::context::self_test();
+        let context_text = context_signal_diff
+            && prodex_mojo_core::context::text_abi_version().is_ok()
+            && prodex_mojo_core::context::text_abi_layout_matches();
         serde_json::json!({
             "feature_enabled": true,
             "active": prodex_mojo_core::MOJO_ACTIVE,
@@ -307,6 +310,7 @@ fn mojo_core_json_value() -> serde_json::Value {
                 "runtime_profile_order": runtime_profile_order,
                 "runtime_policy_numeric": runtime_policy_numeric,
                 "context_signal_diff": context_signal_diff,
+                "context_text": context_text,
                 "runtime_tuning": runtime_tuning,
             },
         })

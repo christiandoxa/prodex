@@ -1835,15 +1835,20 @@ jobs:
           PRODEX_MOJO_VERSION="${MOJO_VERSION}" cargo build --locked --features mojo-core --bin prodex
           test -x target/debug/prodex
           target/debug/prodex --version
-          mojo_archive="$(find target/debug/build -type f -name 'libprodex_mojo_core.a' -print -quit)"
+          mojo_archive="$(find target/debug/build -type f -name 'libprodex_mojo_core.a' -printf '%T@ %p\n' | sort -nr | head -n 1 | cut -d' ' -f2-)"
           test -s "${mojo_archive}"
           file "${mojo_archive}"
+          if nm -u "${mojo_archive}" | grep -F 'KGEN_CompilerRT_'; then
+            echo "rich Mojo core unexpectedly requires the Mojo compiler runtime" >&2
+            exit 1
+          fi
           diagnostics="$(PRODEX_HOME="${RUNNER_TEMP}/prodex-mojo-home" target/debug/prodex doctor --runtime --json)"
           printf '%s\n' "${diagnostics}" | grep -F '"implementation": "mojo-compiled-in"'
           printf '%s\n' "${diagnostics}" | grep -F '"fallback": false'
           printf '%s\n' "${diagnostics}" | grep -F '"compiler_required": false'
           printf '%s\n' "${diagnostics}" | grep -F '"build_strict": true'
           printf '%s\n' "${diagnostics}" | grep -F '"self_test": "passed"'
+          printf '%s\n' "${diagnostics}" | grep -F '"context_text": true'
 
       - name: Run quota Mojo smoke and parity tests
         run: cargo test --locked -q -p prodex-quota --features mojo -- --test-threads=1
@@ -1858,19 +1863,43 @@ jobs:
         run: cargo test --locked -q -p prodex-provider-spi --features mojo -- --test-threads=1
 
       - name: Run provider-constraint and tuning Mojo parity tests
+        shell: bash
         run: |
-          cargo test --locked -q -p prodex-provider-core --features mojo -- --test-threads=1
-          cargo test --locked -q -p prodex-runtime-tuning --features mojo -- --test-threads=1
+          set -uo pipefail
+          cargo test --locked -q -p prodex-provider-core --features mojo -- --test-threads=1 &
+          provider_pid=$!
+          cargo test --locked -q -p prodex-runtime-tuning --features mojo -- --test-threads=1 &
+          tuning_pid=$!
+          status=0
+          wait "${provider_pid}" || status=1
+          wait "${tuning_pid}" || status=1
+          exit "${status}"
 
       - name: Run context and runtime-policy Mojo parity tests
+        shell: bash
         run: |
-          cargo test --locked -q -p prodex-context --features mojo -- --test-threads=1
-          cargo test --locked -q -p prodex-runtime-policy --features mojo -- --test-threads=1
+          set -uo pipefail
+          cargo test --locked -q -p prodex-context --features mojo -- --test-threads=1 &
+          context_pid=$!
+          cargo test --locked -q -p prodex-runtime-policy --features mojo -- --test-threads=1 &
+          policy_pid=$!
+          status=0
+          wait "${context_pid}" || status=1
+          wait "${policy_pid}" || status=1
+          exit "${status}"
 
       - name: Run new Mojo production-path tests
+        shell: bash
         run: |
-          cargo test --locked -q -p prodex-app --features mojo-core --lib resolved_gateway_request_constraints -- --test-threads=1
-          cargo test --locked -q -p prodex-app --features mojo-core --lib smart_context_auto_rehydrate_plan_defers_over_budget_refs -- --test-threads=1
+          set -uo pipefail
+          cargo test --locked -q -p prodex-app --features mojo-core --lib resolved_gateway_request_constraints -- --test-threads=1 &
+          constraints_pid=$!
+          cargo test --locked -q -p prodex-app --features mojo-core --lib smart_context_auto_rehydrate_plan_defers_over_budget_refs -- --test-threads=1 &
+          rehydrate_pid=$!
+          status=0
+          wait "${constraints_pid}" || status=1
+          wait "${rehydrate_pid}" || status=1
+          exit "${status}"
 
       - name: Run Mojo core kernel tests
         run: cargo test --locked -q -p prodex-mojo-core --features mojo-core -- --test-threads=1

@@ -199,3 +199,27 @@ workflows and focused documentation invoke the existing `scripts/ci`, `scripts/d
 real commands and their negative self-tests rather than duplicating the same command map in
 `package.json` and the test-impact manifest. Validation implementations and workflow coverage are
 unchanged; only redundant aliases and alias-consistency machinery were removed.
+
+## 2026-08-24: Promote borrowed UTF-8 context grouping
+
+The first production rich-data seam is critical-signal duplicate grouping in `prodex-context`.
+Rust still strips ANSI escapes, normalizes command output, preserves Rust's Unicode trim
+semantics, and classifies diagnostic lines. It passes non-secret trimmed line views plus seven
+typed counters in one bounded call. Mojo validates UTF-8, constructs zero-copy `StringSlice`
+values, groups exact duplicate lines, and writes the row plan and structured capacity/result
+record into Rust-owned buffers. The Rust implementation remains a test oracle; Mojo-enabled
+builds do not fall back when the rich call fails.
+
+The text ABI is independently versioned at `1` and uses `#[repr(C)]` pointer-plus-native-length
+records. Rust compile-time assertions and a Mojo reflection export verify size, alignment, and
+field offsets. Empty and embedded-nul text is supported, no sentinel is read, pointers live for
+one synchronous call, and Mojo retains nothing. Secrets, prompts, credentials, paths, and auth
+metadata remain outside this seam.
+
+Mojo 1.0.0 locally compiled and ran owning `String`, `List`, `Dict`, `Set`, `Optional`, and
+`Variant` probes. Object inspection also proved that the heap-owning types require
+`libKGENCompilerRTShared.so` and support libraries whose observed GLIBC requirements exceed the
+current release ceilings. Production therefore uses `StringSlice`, `Optional[Pointer]`, and
+`InlineArray`; release CI rejects `KGEN_CompilerRT_*` references. A bundled Mojo runtime or
+standalone Mojo utility is not promoted until licensing, GLIBC, target packaging, signing, and
+clean-machine evidence all pass.

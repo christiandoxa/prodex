@@ -39,12 +39,17 @@
     scoring, reserve bias, and ordering; Rust retains clock/state reads, names, and input
     normalization.
 25. Critical-signal loss/gain arithmetic: Rust classifies lines and Mojo compares the seven
-    normalized counters; Rust retains duplicate matching, range selection, and text handling.
+    normalized counters; duplicate matching and text handling remained Rust-owned at this stage.
+26. Critical-signal UTF-8 grouping: Rust retains terminal normalization, Unicode-compatible trim,
+    and line classification; one versioned record call lets Mojo validate borrowed UTF-8,
+    compare `StringSlice` values, group duplicates, and construct caller-owned range rows using
+    `InlineArray` counters and a bounded scratch table.
 
 ## Next order
 
-1. Measure complete boundaries for the new provider, rehydration, quota, tuning, and optimistic
-   kernels including Rust normalization and reconstruction.
+1. Measure complete boundaries for provider, rehydration, quota, tuning, optimistic, and context
+   text components including Rust normalization and reconstruction; keep the checked context
+   benchmark sizes at 0, 1, 16, 64, 256, and 1,024 lines.
 2. Revisit the dormant Smart Context candidate scorer/selector only if a non-test production
    caller is restored; do not add an unused Mojo wrapper.
 3. Revisit remaining normalized policy numeric rules only after security and error contracts are

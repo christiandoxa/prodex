@@ -33,12 +33,12 @@ fn main() {
             .display()
     );
 
-    let required = !sources.is_empty() || mojo_required();
-    if required {
+    let strict = mojo_required();
+    if strict {
         println!("cargo:rustc-cfg=prodex_mojo_required");
     }
     if sources.is_empty() {
-        if required {
+        if strict {
             panic!(
                 "PRODEX_MOJO_REQUIRED is set but no Mojo subsystem feature is enabled; enable mojo-quota, mojo-runtime, or mojo-routing"
             );
@@ -59,7 +59,11 @@ fn main() {
         .unwrap_or_else(|_| "x86_64-unknown-linux-gnu".to_string());
     let target_cpu = env::var("PRODEX_MOJO_TARGET_CPU")
         .unwrap_or_else(|_| default_target_cpu(&target).to_string());
-    if let Ok(version) = env::var("PRODEX_MOJO_VERSION") {
+    let expected_version = env::var("PRODEX_MOJO_VERSION").ok();
+    if let Some(version) = expected_version.as_deref() {
+        if version.is_empty() {
+            panic!("PRODEX_MOJO_VERSION must not be empty");
+        }
         println!("cargo:rustc-env=PRODEX_MOJO_VERSION={version}");
     }
 
@@ -82,6 +86,10 @@ fn main() {
         return;
     }
 
+    if let Some(version) = expected_version.as_deref() {
+        verify_mojo_version(&mojo, version);
+    }
+
     for (index, source) in sources.iter().enumerate() {
         let source = manifest_dir.join(source);
         let object = out_dir.join(format!("prodex_mojo_core_{index}.o"));
@@ -90,6 +98,34 @@ fn main() {
     }
 
     emit_link(&out_dir);
+}
+
+fn verify_mojo_version(mojo: &OsString, expected: &str) {
+    let output = Command::new(mojo).arg("--version").output();
+    let output = match output {
+        Ok(output) if output.status.success() => output,
+        Err(error) if error.kind() == ErrorKind::NotFound => {
+            panic!(
+                "Mojo compiler was required but not found on PATH; install Mojo or set PRODEX_MOJO"
+            )
+        }
+        Ok(output) => panic!("Mojo compiler version check failed ({})", output.status),
+        Err(error) => panic!(
+            "failed to run Mojo compiler `{}`: {error}; fix PRODEX_MOJO or disable Mojo features",
+            mojo.to_string_lossy()
+        ),
+    };
+    let actual = String::from_utf8_lossy(&output.stdout);
+    if !actual
+        .trim()
+        .strip_prefix("Mojo ")
+        .is_some_and(|version| version == expected || version.starts_with(&format!("{expected} ")))
+    {
+        panic!(
+            "unexpected Mojo compiler version: expected {expected}, got {}",
+            actual.trim()
+        );
+    }
 }
 
 fn link_prebuilt_archive(
@@ -190,6 +226,7 @@ fn selected_sources() -> Vec<&'static str> {
         sources.push("../../mojo/prodex_core/smart_context.mojo");
         sources.push("../../mojo/prodex_core/policy_validation.mojo");
         sources.push("../../mojo/prodex_core/context.mojo");
+        sources.push("../../mojo/prodex_core/context_text.mojo");
     }
     if env::var_os("CARGO_FEATURE_MOJO_ROUTING").is_some()
         || env::var_os("CARGO_FEATURE_MOJO_CORE").is_some()
