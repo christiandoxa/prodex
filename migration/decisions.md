@@ -101,15 +101,6 @@ The candidate score/selection helpers under `prodex-runtime-proxy::smart_context
 have no non-test production caller in the current tree. They remain audit-only Rust code rather
 than gaining an unused Mojo wrapper. Revisit only when a real production call graph exists.
 
-## 2026-08-20: Provider constraints and optimistic selection were deferred
-
-Provider request constraints still combine provider parsing, catalog/schema handling, public error
-reconstruction, and numeric rules. The optimistic current-candidate decision also encodes ordered
-runtime predicates around auth, circuit, health, quota evidence, inflight limits, and affinity.
-Both remained Rust at that checkpoint until normalized contracts and exhaustive reason-order
-parity could be isolated; no shadow-only Mojo entry point was added. The 2026-08-21 promotion
-below supersedes this deferred state.
-
 ## 2026-08-20: Keep accounting and distributed rate limiting in Rust
 
 The generic domain `commit_reservation` and `evaluate_rate_limit` helpers were audited but not

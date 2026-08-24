@@ -11,36 +11,34 @@
 7. Batched quota window-pair readiness port.
 8. Runtime route-specific quota pressure-band decision port.
 9. Shared `prodex-mojo-core` archive and target-aware build path.
-10. Runtime profile quota scoring batch with saturation parity, later absorbed by the scheduling
-    batch in item 25.
-11. Provider-independent numeric scoring batch after Rust hard eligibility.
-12. Smart Context byte-size token estimate.
-13. Strict release/installer metadata and compiled-in Linux artifact gate.
-14. Complete governed provider routing-plan batch: Rust validation and policy normalization,
+10. Provider-independent numeric scoring batch after Rust hard eligibility.
+11. Smart Context byte-size token estimate.
+12. Strict release/installer metadata and compiled-in Linux artifact gate.
+13. Complete governed provider routing-plan batch: Rust validation and policy normalization,
     Mojo capability filtering, bounded score arithmetic, and stable eligible ordering.
-15. Provider route capability matching batch over well-formed flags and capability masks.
-16. Smart Context pressure snapshot: Rust token/risk normalization plus Mojo capacity,
+14. Provider route capability matching batch over well-formed flags and capability masks.
+15. Smart Context pressure snapshot: Rust token/risk normalization plus Mojo capacity,
     pressure-band, safety-floor, and confidence arithmetic.
-17. Runtime response candidate execution-plan ordering: Rust hard filtering and plan-model
+16. Runtime response candidate execution-plan ordering: Rust hard filtering and plan-model
     reconstruction plus one Mojo batch for ready/fallback ordering.
-18. Optimistic current-candidate decision: Rust string normalization plus one Mojo ordered
+17. Optimistic current-candidate decision: Rust string normalization plus one Mojo ordered
     predicate result, promoted after 5,000 exact precedence cases.
-19. Provider request constraint kernel: Rust JSON/catalog/provider normalization plus one Mojo
+18. Provider request constraint kernel: Rust JSON/catalog/provider normalization plus one Mojo
     decision covering capability, output-limit, context, reserve, warning, and saturation policy.
-20. Smart Context rehydration admission: Rust artifact identity collection and ordering plus
+19. Smart Context rehydration admission: Rust artifact identity collection and ordering plus
     one Mojo bounded budget/action batch.
-21. Quota main-pool aggregation: Rust report/model normalization plus one Mojo bounded numeric
+20. Quota main-pool aggregation: Rust report/model normalization plus one Mojo bounded numeric
     aggregation batch for Gemini/Copilot main quota rows.
-22. Runtime tuning default tuple: one Mojo normalized parallelism batch used by runtime config,
+21. Runtime tuning default tuple: one Mojo normalized parallelism batch used by runtime config,
     probe refresh, websocket worker, and async/log default callers.
-23. Runtime quota window summaries: active proxy observation/snapshot classification now reuses
+22. Runtime quota window summaries: active proxy observation/snapshot classification now reuses
     compiled quota status and pressure-band kernels; Rust retains clocks, state, and adapters.
-24. Runtime policy numeric validation: one Mojo batch now owns active runtime-proxy numeric
+23. Runtime policy numeric validation: one Mojo batch now owns active runtime-proxy numeric
     bounds and governance session range/relation checks; Rust retains security and exact errors.
-25. Runtime profile scheduling order: one Mojo index batch now owns normalized ready-profile
+24. Runtime profile scheduling order: one Mojo index batch now owns normalized ready-profile
     scoring, reserve bias, and ordering; Rust retains clock/state reads, names, and input
     normalization.
-26. Critical-signal loss/gain arithmetic: Rust classifies lines and Mojo compares the seven
+25. Critical-signal loss/gain arithmetic: Rust classifies lines and Mojo compares the seven
     normalized counters; Rust retains duplicate matching, range selection, and text handling.
 
 ## Next order

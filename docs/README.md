@@ -16,7 +16,6 @@ not retained here; Git history is the record for obsolete material.
 | [State model](state-model.md) | Affinity and persistence |
 | [Optional tools](optional-tools.md) | Discovery, validation, and activation |
 | [Smart Context](smart-context.md) | Safety, migration, and generated evidence |
-| [Provider capabilities](provider-capabilities.md) | Generated provider capability matrix |
 | [Provider conformance](provider-conformance.md) | Adapter contract |
 | [Harness modes](harness-modes.md) | Model-facing request policy |
 | [Super sub-agents](sub-agents.md) | Staged CLI contract, session boundaries, and local-process design |
