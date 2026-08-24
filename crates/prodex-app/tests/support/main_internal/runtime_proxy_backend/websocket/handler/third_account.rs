@@ -2,6 +2,7 @@ use super::*;
 
 pub(super) fn handle_third_account(
     websocket: &mut tungstenite::WebSocket<TcpStream>,
+    mode: RuntimeProxyBackendMode,
     previous_response_id: Option<&str>,
 ) -> BackendWebsocketAction {
     if runtime_proxy_backend_is_owned_continuation("third-account", previous_response_id) {
@@ -14,6 +15,22 @@ pub(super) fn handle_third_account(
 
     if previous_response_id.is_some() {
         events::send_previous_response_not_found(websocket, previous_response_id);
+        return BackendWebsocketAction::Continue;
+    }
+
+    if matches!(mode, RuntimeProxyBackendMode::WebsocketUsageLimitAll) {
+        events::send_backend_websocket_json(
+            websocket,
+            serde_json::json!({
+                "type": "error",
+                "status": 429,
+                "error": {
+                    "code": "insufficient_quota",
+                    "message": "third quota exhausted",
+                }
+            }),
+            "quota error should be sent",
+        );
         return BackendWebsocketAction::Continue;
     }
 

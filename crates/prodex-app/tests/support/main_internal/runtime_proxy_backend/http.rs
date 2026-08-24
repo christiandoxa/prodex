@@ -86,8 +86,9 @@ pub(super) fn handle_runtime_proxy_backend_request(
     }
 
     if path.ends_with("/backend-api/codex/responses")
-        && account_id == "main-account"
-        && matches!(mode, RuntimeProxyBackendMode::HttpOnlyResetBeforeFirstByte)
+        && (matches!(mode, RuntimeProxyBackendMode::HttpOnlyResetBeforeFirstByteAll)
+            || account_id == "main-account"
+                && matches!(mode, RuntimeProxyBackendMode::HttpOnlyResetBeforeFirstByte))
     {
         responses_accounts
             .lock()

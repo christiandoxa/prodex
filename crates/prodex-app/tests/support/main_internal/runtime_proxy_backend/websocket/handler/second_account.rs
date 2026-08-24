@@ -215,6 +215,21 @@ fn handle_fresh_second_account(
     request: &str,
     request_count: usize,
 ) -> BackendWebsocketAction {
+    if matches!(mode, RuntimeProxyBackendMode::WebsocketUsageLimitAll) {
+        events::send_backend_websocket_json(
+            websocket,
+            serde_json::json!({
+                "type": "error",
+                "status": 429,
+                "error": {
+                    "code": "insufficient_quota",
+                    "message": "second quota exhausted",
+                }
+            }),
+            "quota error should be sent",
+        );
+        return BackendWebsocketAction::Continue;
+    }
     let response_id = runtime_proxy_backend_initial_response_id_for_account("second-account")
         .expect("second-account response id should exist");
     if matches!(mode, RuntimeProxyBackendMode::WebsocketReuseSilentHang) && request_count == 2 {

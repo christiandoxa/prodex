@@ -19,7 +19,9 @@ pub(super) fn handle_backend_websocket_request(
             request_count,
             effective_turn_state,
         ),
-        "third-account" => third_account::handle_third_account(websocket, previous_response_id),
+        "third-account" => {
+            third_account::handle_third_account(websocket, mode, previous_response_id)
+        }
         _ => {
             events::send_backend_websocket_json(
                 websocket,

@@ -354,6 +354,12 @@ export const RUNTIME_CI_WORKFLOW_SHARDS = [
         label: "fresh-after-usage",
       },
       {
+        id: "continuation-http-quota-pool-exhaustion",
+        filter:
+          "main_internal_tests::runtime_proxy_continuations::http_followups::runtime_proxy_http_quota_tries_every_profile_before_final_429",
+        label: "quota-pool-exhaustion",
+      },
+      {
         id: "continuation-http-fresh-sse-preoutput-quota",
         filter:
           "main_internal_tests::runtime_proxy_continuations::http_followups::runtime_proxy_http_fresh_sse_quota_after_output_item_added_rotates_before_model_output",
@@ -402,6 +408,12 @@ export const RUNTIME_CI_WORKFLOW_SHARDS = [
         label: "resume-metadata",
       },
       {
+        id: "continuation-http-memory-consolidation-metadata",
+        filter:
+          "main_internal_tests::runtime_proxy_continuations::http_memory_metadata::runtime_proxy_http_memory_consolidation_metadata_survives_precommit_rotation",
+        label: "memory-consolidation-metadata",
+      },
+      {
         id: "continuation-http-journal-restart",
         filter:
           "main_internal_tests::runtime_proxy_continuations::http_followups::runtime_proxy_http_restart_recovers_previous_response_affinity_from_journal",
@@ -417,6 +429,12 @@ export const RUNTIME_CI_WORKFLOW_SHARDS = [
         id: "continuation-http-tool-compact",
         filter: "main_internal_tests::runtime_proxy_continuations::http_tool_and_compact::",
         label: "http-tool-and-compact",
+      },
+      {
+        id: "continuation-http-compact-transparency",
+        filter:
+          "main_internal_tests::runtime_proxy_continuations::http_compact_transparency::",
+        label: "http-compact-transparency",
       },
     ],
   },
