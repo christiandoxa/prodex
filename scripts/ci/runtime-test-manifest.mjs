@@ -459,6 +459,12 @@ export const RUNTIME_CI_WORKFLOW_SHARDS = [
         label: "websocket-precommit",
       },
       {
+        id: "continuation-websocket-pool-exhaustion",
+        filter:
+          "main_internal_tests::runtime_proxy_continuations::websocket_pool_exhaustion::",
+        label: "websocket-pool-exhaustion",
+      },
+      {
         id: "continuation-websocket-recovery",
         filter: "main_internal_tests::runtime_proxy_continuations::websocket_recovery::",
         label: "websocket-recovery",
