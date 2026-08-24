@@ -10,6 +10,9 @@ mod rehydrate_dedupe;
 #[path = "smart_context/prepare.rs"]
 mod prepare;
 
+#[path = "smart_context/metadata.rs"]
+mod metadata;
+
 #[path = "smart_context/tool_outputs/prepare_fallbacks.rs"]
 mod prepare_fallbacks;
 

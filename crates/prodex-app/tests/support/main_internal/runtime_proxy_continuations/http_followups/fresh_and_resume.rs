@@ -103,6 +103,81 @@ fn runtime_proxy_http_precommit_transport_returns_503_after_pool_exhaustion() {
 }
 
 #[test]
+fn runtime_proxy_http_precommit_transport_tries_every_profile_before_503() {
+    let fixture = start_runtime_continuation_fixture(
+        RuntimeProxyBackend::start_http_reset_before_first_byte_all(),
+        "main",
+        &["main", "second", "third"],
+        &[],
+        Vec::new(),
+    );
+
+    let response = fixture.post_json(
+        "backend-api/codex/responses",
+        serde_json::json!({
+            "model": "gpt-5.4",
+            "input": [{"role": "user", "content": "try every account before failing"}],
+        }),
+    );
+
+    assert_eq!(response.status().as_u16(), 503);
+    assert!(
+        response
+            .text()
+            .expect("error body should decode")
+            .contains("service_unavailable")
+    );
+    let accounts = fixture.backend.responses_accounts();
+    let mut sorted = accounts.clone();
+    sorted.sort();
+    assert_eq!(
+        sorted,
+        ["main-account", "second-account", "third-account"],
+        "every eligible account must receive exactly one pre-commit attempt: {accounts:?}"
+    );
+}
+
+#[test]
+fn runtime_proxy_http_quota_tries_every_profile_before_final_429() {
+    let backend = RuntimeProxyBackend::start_with_fault_script(RuntimeProxyBackendFaultScript::new(
+        ["main-account", "second-account", "third-account"].map(|account| {
+            RuntimeProxyBackendFaultStep::explicit_quota_429(
+                RuntimeProxyBackendFaultRoute::Responses,
+                account,
+            )
+        }),
+    ));
+    let fixture = start_runtime_continuation_fixture(
+        backend,
+        "main",
+        &["main", "second", "third"],
+        &[],
+        Vec::new(),
+    );
+
+    let response = fixture.post_json(
+        "backend-api/codex/responses",
+        serde_json::json!({
+            "model": "gpt-5.4",
+            "input": [{"role": "user", "content": "drain the eligible quota pool"}],
+        }),
+    );
+
+    assert_eq!(response.status().as_u16(), 429);
+    let body = response.text().expect("quota body should decode");
+    assert!(body.contains("insufficient_quota"), "{body}");
+    assert!(!body.contains("service_unavailable"), "{body}");
+    let accounts = fixture.backend.responses_accounts();
+    let mut sorted = accounts.clone();
+    sorted.sort();
+    assert_eq!(
+        sorted,
+        ["main-account", "second-account", "third-account"],
+        "every eligible account must be exhausted before quota is surfaced: {accounts:?}"
+    );
+}
+
+#[test]
 fn runtime_proxy_http_precommit_transport_keeps_previous_response_owner() {
     let fixture = start_runtime_continuation_fixture(
         RuntimeProxyBackend::start_http_reset_before_first_byte(),

@@ -42,6 +42,7 @@ pub(super) enum RuntimeProxyBackendMode {
     HttpOnlySlowStream,
     HttpOnlyStallAfterSeveralChunks,
     HttpOnlyResetBeforeFirstByte,
+    HttpOnlyResetBeforeFirstByteAll,
     HttpOnlyResetAfterHeaders,
     HttpOnlyPreviousResponseNeedsTurnState,
     HttpOnlyInvalidPreviousResponseId,
@@ -62,6 +63,7 @@ pub(super) enum RuntimeProxyBackendMode {
     HttpOnlyPreviousResponseToolContextMissing,
     HttpOnlyPlain429,
     Websocket,
+    WebsocketUsageLimitAll,
     WebsocketOverloaded,
     WebsocketDelayedQuotaAfterPrelude,
     WebsocketDelayedOverloadAfterPrelude,
@@ -117,6 +119,10 @@ impl RuntimeProxyBackend {
 
     pub(super) fn start_http_reset_before_first_byte() -> Self {
         Self::start_with_mode(RuntimeProxyBackendMode::HttpOnlyResetBeforeFirstByte)
+    }
+
+    pub(super) fn start_http_reset_before_first_byte_all() -> Self {
+        Self::start_with_mode(RuntimeProxyBackendMode::HttpOnlyResetBeforeFirstByteAll)
     }
 
     pub(super) fn start_http_reset_after_headers() -> Self {
@@ -199,6 +205,10 @@ impl RuntimeProxyBackend {
 
     pub(super) fn start_websocket() -> Self {
         Self::start_with_mode(RuntimeProxyBackendMode::Websocket)
+    }
+
+    pub(super) fn start_websocket_usage_limit_all() -> Self {
+        Self::start_with_mode(RuntimeProxyBackendMode::WebsocketUsageLimitAll)
     }
 
     pub(super) fn start_websocket_overloaded() -> Self {
@@ -342,6 +352,7 @@ impl RuntimeProxyBackend {
                         let websocket_enabled = matches!(
                             mode,
                             RuntimeProxyBackendMode::Websocket
+                                | RuntimeProxyBackendMode::WebsocketUsageLimitAll
                                 | RuntimeProxyBackendMode::WebsocketOverloaded
                                 | RuntimeProxyBackendMode::WebsocketDelayedQuotaAfterPrelude
                                 | RuntimeProxyBackendMode::WebsocketDelayedOverloadAfterPrelude
