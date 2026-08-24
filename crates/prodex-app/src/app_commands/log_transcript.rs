@@ -13,6 +13,7 @@ pub(crate) struct TranscriptEvent {
     pub(crate) text: String,
 }
 
+#[cfg(test)]
 pub(crate) fn read_new_transcript_events(path: &Path, state: &mut FollowedLog) -> Result<()> {
     for event in collect_new_transcript_events(path, state)? {
         print_transcript_event(&event)?;

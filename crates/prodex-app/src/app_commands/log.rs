@@ -8,7 +8,7 @@ use self::log_stream::log_stream_item_json;
 pub(crate) use self::log_stream::{
     LogStreamItem, collect_new_runtime_log_stream_items, latest_runtime_stream_payload_event,
     local_token_usage_event, print_log_stream_item, print_token_usage_event,
-    print_transcript_event, print_upstream_payload_event, read_new_runtime_log_events,
+    print_transcript_event, print_upstream_payload_event,
 };
 pub(crate) use self::log_transcript::{TranscriptEvent, transcript_events_from_session_line};
 #[cfg(test)]
@@ -48,6 +48,6 @@ mod tests;
 const LOG_SNAPSHOT_TAIL_BYTES: usize = 1024 * 1024;
 const SESSION_SNAPSHOT_TAIL_BYTES: usize = 2 * 1024 * 1024;
 
-pub(crate) use self::log_transcript::{
-    collect_new_transcript_events, latest_transcript_event, read_new_transcript_events,
-};
+#[cfg(test)]
+pub(crate) use self::log_transcript::read_new_transcript_events;
+pub(crate) use self::log_transcript::{collect_new_transcript_events, latest_transcript_event};
