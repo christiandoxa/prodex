@@ -150,6 +150,41 @@
     }
 
     #[test]
+    fn all_quota_watch_tui_shows_four_profiles_when_table_has_room() {
+        let reports = (0..4)
+            .map(|index| {
+                let mut report = test_openai_quota_report(test_openai_usage_with_windows(
+                    20,
+                    10,
+                    1_700_001_800,
+                ));
+                report.name = format!("profile-{index}");
+                report
+            })
+            .collect::<Vec<_>>();
+        let snapshot = AllQuotaWatchSnapshot::Reports {
+            updated: "2026-06-26 10:00:00 UTC".to_string(),
+            profile_count: reports.len(),
+            reports,
+        };
+
+        let frame = build_all_quota_watch_tui_frame(
+            &snapshot,
+            AllQuotaWatchLayout {
+                detail: true,
+                scroll_offset: 0,
+                sort: QuotaReportSort::Current,
+                provider_filter: QuotaProviderFilter::All,
+                provider_filter_locked: false,
+                total_width: 100,
+                max_lines: quota_watch_tui_table_lines(22, 5),
+            },
+        );
+
+        assert_eq!(frame.table.as_ref().expect("table").rows.len(), 4);
+    }
+
+    #[test]
     fn all_quota_watch_tui_detail_scroll_reaches_last_profiles() {
         let reports = (0..4)
             .map(|index| {

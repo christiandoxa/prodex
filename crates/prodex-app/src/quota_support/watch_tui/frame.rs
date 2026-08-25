@@ -525,7 +525,7 @@ pub(crate) fn quota_watch_tui_table_lines(
 ) -> Option<usize> {
     let body_inner = usize::from(terminal_height)
         .saturating_sub(3)
-        .saturating_sub(2);
+        .saturating_sub(1);
     let overview_height = overview_field_count.min(body_inner);
     Some(
         body_inner
