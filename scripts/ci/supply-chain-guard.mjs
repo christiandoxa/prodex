@@ -429,7 +429,7 @@ export function validateReleaseContainerPublication(contents) {
     "npm install --global --ignore-scripts @google/gemini-cli@0.53.0",
     "91a21bfa05cd7b58601cb83e0f1f187a9d0084726e5b824d4a4cf60306250908",
     "cd45508981a9baee5fb8f5e38495d315758cd7fea4a715b53a9f26c12544dc95",
-    "cde4f1702d3b1695f92b73d26888364e17bca476e17f0fd676484c951d36c125",
+    "3a68d3406cf674e17bed1733a4dcf37805e2e47d87417700007d7e1aa766a944",
     "VERSION=v1.0.77",
     "claude-install.sh\" 2.1.220",
   ]) {
