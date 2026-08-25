@@ -18,6 +18,7 @@ use crate::app_state::{AppStateIoExt, repair_missing_active_profile_and_save};
 use crate::load_runtime_usage_snapshots;
 
 const OPENAI_CODEX_SPARK_MODEL: &str = "gpt-5.3-codex-spark";
+const OPENAI_CODEX_SPARK_REASONING_EFFORT: &str = "xhigh";
 
 pub(crate) fn handle_ping(command: PingCommands) -> Result<()> {
     match command {
@@ -164,6 +165,14 @@ fn ping_openai_child_plan(
     if let Some(model) = model {
         args.push(OsString::from("--model"));
         args.push(OsString::from(model));
+        if model == OPENAI_CODEX_SPARK_MODEL {
+            args.extend([
+                OsString::from("-c"),
+                OsString::from(format!(
+                    "model_reasoning_effort={OPENAI_CODEX_SPARK_REASONING_EFFORT}"
+                )),
+            ]);
+        }
     }
     args.extend([OsString::from("exec"), OsString::from("ping")]);
     let (args, _) = prepare_codex_launch_args(&args, true);
@@ -203,6 +212,8 @@ mod tests {
                 OsString::from("model_context_window=128000"),
                 OsString::from("-c"),
                 OsString::from("model_auto_compact_token_limit=115200"),
+                OsString::from("-c"),
+                OsString::from("model_reasoning_effort=xhigh"),
                 OsString::from("ping")
             ]
         );
