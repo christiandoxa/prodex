@@ -2,6 +2,16 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.416.1 - 2026-08-25
+
+### CLI
+
+- Fit all profiles in TUI height (`8028f3d`)
+
+### Misc
+
+- Normalize Spark reasoning effort (`228918b`)
+
 ## 0.416.0 - 2026-08-24
 
 ### CLI
