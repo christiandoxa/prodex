@@ -192,6 +192,8 @@ fn ping_openai_sends_extra_spark_ping_when_profile_has_spark_limit() {
             "model_context_window=128000",
             "-c",
             "model_auto_compact_token_limit=115200",
+            "-c",
+            "model_reasoning_effort=xhigh",
             "ping",
         ]
     );
