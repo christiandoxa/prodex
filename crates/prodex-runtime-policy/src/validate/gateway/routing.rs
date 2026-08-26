@@ -1,10 +1,15 @@
+#[cfg(any(not(feature = "mojo"), test))]
 use super::validate_gateway_exact_identifier;
 use crate::types::{
     RuntimePolicyFile, RuntimePolicyGatewayRouteAlias, RuntimePolicyGatewayRouteModelMetrics,
 };
-use crate::validate_helpers::{NumericRule, failed_numeric_rules, validate_gateway_route_strategy};
+#[cfg(any(not(feature = "mojo"), test))]
+use crate::validate_helpers::validate_gateway_route_strategy;
+use crate::validate_helpers::{NumericRule, failed_numeric_rules};
 use crate::validate_request_constraints::validate_gateway_request_constraints;
-use anyhow::{Context, Result, bail};
+#[cfg(any(not(feature = "mojo"), test))]
+use anyhow::Context;
+use anyhow::{Result, bail};
 use std::path::Path;
 
 pub(super) fn validate_gateway_routing(policy: &RuntimePolicyFile, path: &Path) -> Result<()> {
@@ -200,7 +205,8 @@ fn validate_gateway_adaptive_numeric(
     }
 }
 
-fn validate_gateway_route_alias(
+#[cfg(any(not(feature = "mojo"), test))]
+fn validate_gateway_route_alias_rust(
     alias: &RuntimePolicyGatewayRouteAlias,
     index: usize,
     numeric_failures: &[Option<&'static str>],
@@ -235,4 +241,142 @@ fn validate_gateway_route_alias(
         }
     }
     Ok(())
+}
+
+#[cfg(not(feature = "mojo"))]
+fn validate_gateway_route_alias(
+    alias: &RuntimePolicyGatewayRouteAlias,
+    index: usize,
+    numeric_failures: &[Option<&'static str>],
+    path: &Path,
+) -> Result<()> {
+    validate_gateway_route_alias_rust(alias, index, numeric_failures, path)
+}
+
+#[cfg(feature = "mojo")]
+fn validate_gateway_route_alias(
+    alias: &RuntimePolicyGatewayRouteAlias,
+    index: usize,
+    numeric_failures: &[Option<&'static str>],
+    path: &Path,
+) -> Result<()> {
+    let field = format!("gateway.route_aliases[{index}]");
+    let models = alias.models.iter().map(String::as_str).collect::<Vec<_>>();
+    let metrics = alias
+        .model_metrics
+        .iter()
+        .map(|metric| metric.model.as_str())
+        .collect::<Vec<_>>();
+    if let Err(error) =
+        prodex_mojo_core::rich::validate_policy_alias(prodex_mojo_core::rich::PolicyAliasInput {
+            alias: &alias.alias,
+            models: &models,
+            strategy: alias.strategy.as_deref(),
+            metrics: &metrics,
+        })
+    {
+        match error {
+            prodex_mojo_core::MojoError::Structured(issue) => {
+                return Err(policy_alias_issue(issue, &field, path));
+            }
+            _ => {
+                bail!(
+                    "{field} in {} failed Mojo semantic validation",
+                    path.display()
+                );
+            }
+        }
+    }
+    for (metric_index, failure) in numeric_failures.iter().enumerate() {
+        if let Some(name) = failure {
+            bail!(
+                "{field}.model_metrics[{metric_index}].{name} in {} must be greater than 0",
+                path.display()
+            );
+        }
+    }
+    Ok(())
+}
+
+#[cfg(feature = "mojo")]
+fn policy_alias_issue(
+    issue: prodex_mojo_core::MojoIssue,
+    field: &str,
+    path: &Path,
+) -> anyhow::Error {
+    let index = usize::try_from(issue.object_index).ok();
+    match issue.field {
+        1 => anyhow::anyhow!(
+            "{field}.alias in {} must be non-empty without whitespace",
+            path.display()
+        ),
+        2 => match index {
+            Some(index) => anyhow::anyhow!(
+                "{field}.models[{index}] in {} must be non-empty without whitespace",
+                path.display()
+            ),
+            None => anyhow::anyhow!("{field}.models in {} cannot be empty", path.display()),
+        },
+        3 => anyhow::anyhow!("{field}.strategy in {} is invalid", path.display()),
+        4 => match index {
+            Some(index) => anyhow::anyhow!(
+                "{field}.model_metrics[{index}].model in {} must match one of {field}.models",
+                path.display()
+            ),
+            None => anyhow::anyhow!("{field}.model_metrics in {} is invalid", path.display()),
+        },
+        _ => anyhow::anyhow!(
+            "{field} in {} failed Mojo semantic validation",
+            path.display()
+        ),
+    }
+}
+
+#[cfg(all(test, feature = "mojo"))]
+#[test]
+fn rich_policy_alias_parser_matches_rust_oracle_for_generated_cases() {
+    let path = Path::new("policy.toml");
+    for case in 0..20_000 {
+        let kind = case % 5;
+        let mut alias = RuntimePolicyGatewayRouteAlias {
+            alias: format!("alias-{case}"),
+            models: vec![format!("model-{case}")],
+            strategy: None,
+            model_metrics: Vec::new(),
+        };
+        match kind {
+            0 => alias.models.clear(),
+            1 => alias.alias = format!(" alias-{case} "),
+            2 => alias.strategy = Some("magic".to_string()),
+            3 => alias
+                .model_metrics
+                .push(RuntimePolicyGatewayRouteModelMetrics {
+                    model: format!("other-{case}"),
+                    ..RuntimePolicyGatewayRouteModelMetrics::default()
+                }),
+            _ => {
+                alias.strategy = Some("ordered-fallback".to_string());
+                alias
+                    .model_metrics
+                    .push(RuntimePolicyGatewayRouteModelMetrics {
+                        model: format!("model-{case}"),
+                        ..RuntimePolicyGatewayRouteModelMetrics::default()
+                    });
+            }
+        }
+        let numeric_failures = vec![None; alias.model_metrics.len()];
+        let expected = validate_gateway_route_alias_rust(&alias, 0, &numeric_failures, path);
+        let actual = validate_gateway_route_alias(&alias, 0, &numeric_failures, path);
+        match (expected, actual) {
+            (Ok(()), Ok(())) => {}
+            (Err(expected), Err(actual)) => assert_eq!(
+                expected.to_string(),
+                actual.to_string(),
+                "policy parser case {case}"
+            ),
+            (expected, actual) => panic!(
+                "policy parser result mismatch for case {case}: expected={expected:?} actual={actual:?}"
+            ),
+        }
+    }
 }

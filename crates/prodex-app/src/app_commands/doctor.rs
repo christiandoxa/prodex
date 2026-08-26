@@ -277,6 +277,7 @@ fn mojo_core_json_value() -> serde_json::Value {
         let runtime_profile_order = runtime_quota;
         let runtime_policy_numeric = real_mojo && prodex_mojo_core::policy::self_test();
         let context_signal_diff = real_mojo && prodex_mojo_core::context::self_test();
+        let rich_domain = real_mojo && prodex_mojo_core::rich::rich_self_test();
         let context_text = context_signal_diff
             && prodex_mojo_core::context::text_abi_version().is_ok()
             && prodex_mojo_core::context::text_abi_layout_matches();
@@ -288,6 +289,13 @@ fn mojo_core_json_value() -> serde_json::Value {
             "build_strict": prodex_mojo_core::MOJO_REQUIRED,
             "version": prodex_mojo_core::MOJO_VERSION,
             "abi_version": prodex_mojo_core::routing::abi_version().ok(),
+            "rich_abi_version": if real_mojo {
+                Some(prodex_mojo_core::rich::RICH_ABI_VERSION)
+            } else {
+                None
+            },
+            "runtime_dependency_mode": "arena-static",
+            "mojo_packages": [],
             "implementation": if prodex_mojo_core::MOJO_ACTIVE {
                 "mojo-compiled-in"
             } else {
@@ -311,6 +319,11 @@ fn mojo_core_json_value() -> serde_json::Value {
                 "runtime_policy_numeric": runtime_policy_numeric,
                 "context_signal_diff": context_signal_diff,
                 "context_text": context_text,
+                "rich_domain": rich_domain,
+                "rich_context_parser": rich_domain,
+                "rich_policy_parser": rich_domain,
+                "rich_provider_routing": rich_domain,
+                "rich_context_planner": rich_domain,
                 "runtime_tuning": runtime_tuning,
             },
         })

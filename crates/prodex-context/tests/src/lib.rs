@@ -79,6 +79,10 @@ mod diagnostics;
 #[path = "lib/diagnostic_extra.rs"]
 mod diagnostic_extra;
 
+#[cfg(feature = "mojo")]
+#[path = "lib/mojo_rich.rs"]
+mod mojo_rich;
+
 #[path = "lib/git_noisy.rs"]
 mod git_noisy;
 

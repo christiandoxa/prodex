@@ -238,70 +238,55 @@ fn smart_context_auto_rehydrate_plan_mojo(
     let inputs = refs
         .iter()
         .map(|item| {
-            u64::try_from(item.token_cost)
-                .map(
-                    |token_cost| prodex_mojo_core::runtime::SmartContextRehydrateInput {
-                        token_cost,
-                        required: item.required,
-                        available: available.contains(&item.id),
-                    },
-                )
-                .map_err(|_| prodex_mojo_core::MojoError::InvalidInput)
+            Ok(prodex_mojo_core::rich::ContextPlanItem {
+                id: &item.id,
+                token_cost: item.token_cost,
+                required: item.required,
+            })
         })
         .collect::<Result<Vec<_>, _>>()?;
     let tier = match tier {
-        SmartContextTokenBudgetTier::Minimal => {
-            prodex_mojo_core::runtime::SMART_CONTEXT_REHYDRATE_MINIMAL_TIER
-        }
-        SmartContextTokenBudgetTier::Condensed => {
-            prodex_mojo_core::runtime::SMART_CONTEXT_REHYDRATE_CONDENSED_TIER
-        }
-        SmartContextTokenBudgetTier::Large => {
-            prodex_mojo_core::runtime::SMART_CONTEXT_REHYDRATE_LARGE_TIER
-        }
-        SmartContextTokenBudgetTier::Exact => {
-            prodex_mojo_core::runtime::SMART_CONTEXT_REHYDRATE_EXACT_TIER
-        }
+        SmartContextTokenBudgetTier::Minimal => 0,
+        SmartContextTokenBudgetTier::Condensed => 1,
+        SmartContextTokenBudgetTier::Large => 2,
+        SmartContextTokenBudgetTier::Exact => 3,
     };
-    let plan =
-        prodex_mojo_core::runtime::smart_context_rehydrate_plan_batch(&inputs, token_budget, tier)?;
-    let actions = refs
-        .iter()
-        .zip(plan.action_tags)
-        .map(|(item, tag)| {
-            Ok(match tag {
-                prodex_mojo_core::runtime::SMART_CONTEXT_REHYDRATE_ACTION_REHYDRATE => {
-                    SmartContextRehydrateAction::Rehydrate {
-                        id: item.id.clone(),
-                        token_cost: item.token_cost,
-                    }
-                }
-                prodex_mojo_core::runtime::SMART_CONTEXT_REHYDRATE_ACTION_MISSING => {
-                    SmartContextRehydrateAction::Defer {
-                        id: item.id.clone(),
-                        reason: SmartContextRehydrateDeferReason::MissingArtifact,
-                    }
-                }
-                prodex_mojo_core::runtime::SMART_CONTEXT_REHYDRATE_ACTION_MINIMAL => {
-                    SmartContextRehydrateAction::Defer {
-                        id: item.id.clone(),
-                        reason: SmartContextRehydrateDeferReason::MinimalBudgetTier,
-                    }
-                }
-                prodex_mojo_core::runtime::SMART_CONTEXT_REHYDRATE_ACTION_BUDGET => {
-                    SmartContextRehydrateAction::Defer {
-                        id: item.id.clone(),
-                        reason: SmartContextRehydrateDeferReason::TokenBudgetExceeded,
-                    }
-                }
+    let available = available.iter().map(String::as_str).collect::<Vec<_>>();
+    let plan = prodex_mojo_core::rich::plan_context_items(&inputs, &available, token_budget, tier)?;
+    let actions = plan
+        .actions
+        .into_iter()
+        .map(|action| {
+            let item = refs
+                .get(action.input_index)
+                .ok_or(prodex_mojo_core::MojoError::InvalidOutput)?;
+            if action.id != item.id || action.token_cost != item.token_cost {
+                return Err(prodex_mojo_core::MojoError::InvalidOutput);
+            }
+            Ok(match (action.action, action.reason) {
+                (1, 0) => SmartContextRehydrateAction::Rehydrate {
+                    id: item.id.clone(),
+                    token_cost: item.token_cost,
+                },
+                (0, 1) => SmartContextRehydrateAction::Defer {
+                    id: item.id.clone(),
+                    reason: SmartContextRehydrateDeferReason::MissingArtifact,
+                },
+                (0, 3) => SmartContextRehydrateAction::Defer {
+                    id: item.id.clone(),
+                    reason: SmartContextRehydrateDeferReason::MinimalBudgetTier,
+                },
+                (0, 2) => SmartContextRehydrateAction::Defer {
+                    id: item.id.clone(),
+                    reason: SmartContextRehydrateDeferReason::TokenBudgetExceeded,
+                },
                 _ => return Err(prodex_mojo_core::MojoError::InvalidOutput),
             })
         })
         .collect::<Result<Vec<_>, _>>()?;
     Ok(SmartContextRehydratePlan {
         actions,
-        used_tokens: usize::try_from(plan.used_tokens)
-            .map_err(|_| prodex_mojo_core::MojoError::InvalidOutput)?,
+        used_tokens: plan.used_tokens,
     })
 }
 

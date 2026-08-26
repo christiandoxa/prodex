@@ -482,15 +482,27 @@ impl Error for GovernedRoutingError {}
 pub fn plan_governed_provider_route(
     request: &GovernedRoutingRequest<'_>,
 ) -> Result<GovernedRoutingPlan, GovernedRoutingError> {
+    plan_governed_provider_route_with_model(request, None)
+}
+
+/// Plans a governed route while allowing Mojo to interpret the non-secret requested model.
+///
+/// The model is advisory semantic input only; tenant authorization, credentials, affinity, and
+/// transport remain owned by the surrounding Rust application boundary.
+pub fn plan_governed_provider_route_with_model(
+    request: &GovernedRoutingRequest<'_>,
+    requested_model: Option<&str>,
+) -> Result<GovernedRoutingPlan, GovernedRoutingError> {
     validate_request(request)?;
 
     #[cfg(feature = "mojo")]
     {
-        mojo_plan::plan_governed_provider_route_mojo(request)
+        mojo_plan::plan_governed_provider_route_mojo(request, requested_model)
     }
 
     #[cfg(not(feature = "mojo"))]
     {
+        let _ = requested_model;
         plan_governed_provider_route_rust(request)
     }
 }

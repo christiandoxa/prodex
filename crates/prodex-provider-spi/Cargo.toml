@@ -15,6 +15,7 @@ default = []
 mojo = [
     "dep:prodex_mojo_core",
     "prodex_mojo_core/mojo-routing",
+    "prodex_mojo_core/mojo-rich",
     "prodex_provider_core/mojo",
 ]
 

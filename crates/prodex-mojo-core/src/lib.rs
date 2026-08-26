@@ -15,6 +15,21 @@ pub enum MojoError {
     InvalidInput,
     InvalidOutput,
     AbiMismatch,
+    Capacity,
+    Structured(MojoIssue),
+}
+
+/// A deterministic semantic issue reported by a rich Mojo operation.
+#[repr(C)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct MojoIssue {
+    pub domain: i64,
+    pub kind: i64,
+    pub field: i64,
+    pub object_index: i64,
+    pub byte_offset: i64,
+    pub byte_length: i64,
+    pub expected: i64,
 }
 
 #[cfg(feature = "mojo-core")]
@@ -72,6 +87,7 @@ pub fn self_test() -> bool {
     let policy_validation_ok = policy::self_test();
     let context_ok = context::self_test();
     let tuning_defaults_ok = runtime_decisions::tuning_defaults_self_test();
+    let rich_ok = rich::rich_self_test();
     let checks = [
         routing_ok,
         capability_ok,
@@ -84,6 +100,7 @@ pub fn self_test() -> bool {
         policy_validation_ok,
         context_ok,
         tuning_defaults_ok,
+        rich_ok,
         routing::abi_version().is_ok(),
         quota,
         runtime::pressure_band_for_route(Some((4, 1)), None, 0).is_ok_and(|band| band == 2),
@@ -110,6 +127,8 @@ pub mod policy;
 pub mod provider_constraints;
 #[cfg(feature = "mojo-quota")]
 pub mod quota;
+#[cfg(feature = "mojo-rich")]
+pub mod rich;
 #[cfg(feature = "mojo-routing")]
 pub mod routing;
 #[cfg(feature = "mojo-runtime")]

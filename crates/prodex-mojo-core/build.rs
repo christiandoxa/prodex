@@ -26,6 +26,17 @@ fn main() {
             manifest_dir.join(source).display()
         );
     }
+    if sources.iter().any(|source| source.contains("rich_")) {
+        for source in [
+            "../../mojo/prodex_core/rich_types.mojo",
+            "../../mojo/prodex_core/rich_text.mojo",
+        ] {
+            println!(
+                "cargo:rerun-if-changed={}",
+                manifest_dir.join(source).display()
+            );
+        }
+    }
     println!(
         "cargo:rerun-if-changed={}",
         manifest_dir
@@ -40,7 +51,7 @@ fn main() {
     if sources.is_empty() {
         if strict {
             panic!(
-                "PRODEX_MOJO_REQUIRED is set but no Mojo subsystem feature is enabled; enable mojo-quota, mojo-runtime, or mojo-routing"
+                "PRODEX_MOJO_REQUIRED is set but no Mojo subsystem feature is enabled; enable a prodex-mojo-core Mojo feature"
             );
         }
         return;
@@ -227,6 +238,17 @@ fn selected_sources() -> Vec<&'static str> {
         sources.push("../../mojo/prodex_core/policy_validation.mojo");
         sources.push("../../mojo/prodex_core/context.mojo");
         sources.push("../../mojo/prodex_core/context_text.mojo");
+    }
+    if env::var_os("CARGO_FEATURE_MOJO_RICH").is_some()
+        || env::var_os("CARGO_FEATURE_MOJO_CORE").is_some()
+        || env::var_os("CARGO_FEATURE_MOJO_RUNTIME").is_some()
+    {
+        sources.push("../../mojo/prodex_core/rich_abi.mojo");
+        sources.push("../../mojo/prodex_core/rich_context_v2.mojo");
+        sources.push("../../mojo/prodex_core/rich_route.mojo");
+        sources.push("../../mojo/prodex_core/rich_policy.mojo");
+        sources.push("../../mojo/prodex_core/rich_fallback.mojo");
+        sources.push("../../mojo/prodex_core/rich_plan.mojo");
     }
     if env::var_os("CARGO_FEATURE_MOJO_ROUTING").is_some()
         || env::var_os("CARGO_FEATURE_MOJO_CORE").is_some()

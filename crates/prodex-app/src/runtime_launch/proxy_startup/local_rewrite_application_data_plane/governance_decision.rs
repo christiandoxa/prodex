@@ -9,14 +9,15 @@ use super::{
     PrincipalPolicyAttributes, QuotaContext, RequestId, RequestPolicyAttributes, RequestRisk,
     RuntimeGatewayApplicationDataPlaneError, RuntimeGatewayGovernanceDecision,
     RuntimeLocalRewriteProxyShared, RuntimeProxyRequest, TenantContext,
-    plan_application_governance, plan_governed_provider_route, runtime_gateway_execution_approval,
-    runtime_gateway_governance_error_code, runtime_gateway_governance_route,
-    runtime_gateway_governed_action, runtime_gateway_mandatory_governance_audit,
-    runtime_gateway_obligation_execution, runtime_gateway_provider_endpoint,
-    runtime_gateway_provider_runtime_snapshot, runtime_gateway_requested_capabilities,
-    runtime_gateway_requested_modalities, runtime_gateway_requested_tools,
-    runtime_gateway_unix_epoch_millis, runtime_provider_model_from_body, runtime_proxy_log,
-    runtime_proxy_log_field, runtime_proxy_structured_log_message,
+    plan_application_governance, plan_governed_provider_route_with_model,
+    runtime_gateway_execution_approval, runtime_gateway_governance_error_code,
+    runtime_gateway_governance_route, runtime_gateway_governed_action,
+    runtime_gateway_mandatory_governance_audit, runtime_gateway_obligation_execution,
+    runtime_gateway_provider_endpoint, runtime_gateway_provider_runtime_snapshot,
+    runtime_gateway_requested_capabilities, runtime_gateway_requested_modalities,
+    runtime_gateway_requested_tools, runtime_gateway_unix_epoch_millis,
+    runtime_provider_model_from_body, runtime_proxy_log, runtime_proxy_log_field,
+    runtime_proxy_structured_log_message,
 };
 
 mod context;

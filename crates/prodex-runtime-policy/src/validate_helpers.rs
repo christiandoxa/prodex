@@ -74,6 +74,7 @@ pub(crate) fn failed_numeric_rules(rules: &[NumericRule]) -> Result<Vec<usize>> 
     }
 }
 
+#[cfg(any(not(feature = "mojo"), test))]
 pub(crate) fn validate_gateway_route_strategy(value: &str) -> Result<()> {
     if value.is_empty() {
         bail!("strategy cannot be empty");

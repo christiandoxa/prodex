@@ -49,7 +49,7 @@ use prodex_provider_spi::{
     GovernedRoutingError, GovernedRoutingPlan, GovernedRoutingRequest,
     MAX_GOVERNED_ROUTING_FALLBACKS, ProviderInvocation, ProviderRetryCause, ProviderRetryDecision,
     ProviderRetryPolicy, ProviderRetryStage, ProviderRoute, ProviderRouteError, ProviderStreamMode,
-    plan_governed_provider_route,
+    plan_governed_provider_route_with_model,
 };
 use prodex_quota::RuntimeQuotaWindowStatus;
 use prodex_storage::{

@@ -15,6 +15,9 @@ const PROMOTED_FILES = [
   "crates/prodex-mojo-core/src/provider_constraints.rs",
   "crates/prodex-mojo-core/src/policy.rs",
   "crates/prodex-mojo-core/src/context.rs",
+  "crates/prodex-mojo-core/src/rich.rs",
+  "crates/prodex-mojo-core/src/rich/context_plan.rs",
+  "crates/prodex-mojo-core/src/rich/routing.rs",
   "crates/prodex-context/src/critical_signal.rs",
   "crates/prodex-context/src/lib/compression.rs",
   "crates/prodex-provider-core/src/constraints.rs",
@@ -39,6 +42,7 @@ const PROMOTED_FILES = [
   "crates/prodex-runtime-policy/src/validate_request_constraints.rs",
   "crates/prodex-runtime-tuning/src/lib.rs",
   "crates/prodex-runtime-tuning/src/mojo.rs",
+  "crates/prodex-provider-core/src/fallback/chains.rs",
 ];
 
 const FORBIDDEN_MARKERS = [

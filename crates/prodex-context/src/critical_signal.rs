@@ -76,7 +76,8 @@ impl CriticalSignalCounts {
         }
     }
 
-    fn add_assign(&mut self, other: Self) {
+    #[cfg(any(not(feature = "mojo"), test))]
+    pub(crate) fn add_assign(&mut self, other: Self) {
         self.errors = self.errors.saturating_add(other.errors);
         self.file_locations = self.file_locations.saturating_add(other.file_locations);
         self.diff_hunks = self.diff_hunks.saturating_add(other.diff_hunks);
@@ -151,14 +152,31 @@ impl Default for CriticalSignalLineRangeOptions {
 }
 
 pub fn count_critical_signals(input: &str) -> CriticalSignalCounts {
-    let normalized = normalize_command_output(input);
-    let mut counts = CriticalSignalCounts::default();
-
-    for line in command_lines(&normalized) {
-        counts.add_assign(critical_signal_counts_for_line(line));
+    #[cfg(feature = "mojo")]
+    {
+        let analysis = prodex_mojo_core::rich::analyze_context(input)
+            .expect("Mojo context analysis returned an invalid structured result");
+        CriticalSignalCounts {
+            errors: analysis.counts[0],
+            file_locations: analysis.counts[1],
+            diff_hunks: analysis.counts[2],
+            test_failures: analysis.counts[3],
+            exit_codes: analysis.counts[4],
+            stack_markers: analysis.counts[5],
+            rust_diagnostics: analysis.counts[6],
+        }
     }
+    #[cfg(not(feature = "mojo"))]
+    {
+        let normalized = normalize_command_output(input);
+        let mut counts = CriticalSignalCounts::default();
 
-    counts
+        for line in command_lines(&normalized) {
+            counts.add_assign(critical_signal_counts_for_line(line));
+        }
+
+        counts
+    }
 }
 
 pub fn critical_signal_self_check(before: &str, after: &str) -> CriticalSignalSelfCheck {
@@ -446,6 +464,11 @@ fn critical_signal_counts_for_line(line: &str) -> CriticalSignalCounts {
         counts.rust_diagnostics += 1;
     }
     counts
+}
+
+#[cfg(all(test, feature = "mojo"))]
+pub(crate) fn critical_signal_counts_for_line_for_test(line: &str) -> CriticalSignalCounts {
+    critical_signal_counts_for_line(line)
 }
 
 #[cfg(not(feature = "mojo"))]

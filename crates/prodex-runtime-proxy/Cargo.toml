@@ -16,6 +16,7 @@ mojo = [
     "dep:prodex_mojo_core",
     "prodex_mojo_core/mojo-quota",
     "prodex_mojo_core/mojo-runtime",
+    "prodex_mojo_core/mojo-rich",
     "prodex_provider_core/mojo",
 ]
 
