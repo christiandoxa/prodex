@@ -26,6 +26,22 @@ pub(super) fn validate_mcp_request_headers(
             .and_then(Value::as_str)
     };
     let header_version = request.header("MCP-Protocol-Version");
+    if let Some(response) = validate_protocol_version(message, header_version, body_version) {
+        return Some(response);
+    }
+    if let Some(response) =
+        validate_current_protocol_metadata(message, method, request, header_version, body_version)
+    {
+        return Some(response);
+    }
+    None
+}
+
+fn validate_protocol_version(
+    message: &Map<String, Value>,
+    header_version: Option<&str>,
+    body_version: Option<&str>,
+) -> Option<ExposeHttpResponse> {
     if let Some(version) = header_version.or(body_version)
         && !MCP_PROTOCOL_VERSIONS.contains(&version)
     {
@@ -48,6 +64,17 @@ pub(super) fn validate_mcp_request_headers(
             "protocol version header mismatch",
         ));
     }
+    None
+}
+
+fn validate_current_protocol_metadata(
+    message: &Map<String, Value>,
+    method: &str,
+    request: &ExposeHttpRequest,
+    header_version: Option<&str>,
+    body_version: Option<&str>,
+) -> Option<ExposeHttpResponse> {
+    let params = message.get("params").and_then(Value::as_object);
     let current = header_version == Some(MCP_CURRENT_PROTOCOL_VERSION)
         || body_version == Some(MCP_CURRENT_PROTOCOL_VERSION);
     if current {
