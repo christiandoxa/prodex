@@ -59,22 +59,6 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 
 ## 0.415.0 - 2026-08-24
 
-### CLI
-
-- Resolve providers and persist model choices (`ae33046`)
-
-### Docs
-
-- Restore durable agent guidance (`762fbe1`)
-- Align compatibility and remove obsolete guidance (`3aa3f2a`)
-
-### Misc
-
-- Keep stream alive across transient file errors (`85ccf51`)
-- Support Codex 0.149.1 (`c85a85a`)
-
-## 0.414.0 - 2026-08-23
-
 ### Runtime
 
 - Exhaust safe precommit candidates (`2792d48`)
@@ -175,6 +159,7 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 
 ### CLI
 
+- Resolve providers and persist model choices (`ae33046`)
 - Tolerate slow heartbeat startup (`15d3f90`)
 - Preserve fraction-only Gemini quota (`7523ce7`)
 - Make quota default detailed (`defbb4c`)
@@ -241,6 +226,8 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 
 ### Docs
 
+- Restore durable agent guidance (`762fbe1`)
+- Align compatibility and remove obsolete guidance (`3aa3f2a`)
 - Sync weighted inflight policy (`e9b0731`)
 - Require repository-wide reuse first (`c5d6347`)
 - Document compact task interface (`4e4ef10`)
@@ -304,6 +291,8 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 
 ### Misc
 
+- Keep stream alive across transient file errors (`85ccf51`)
+- Support Codex 0.149.1 (`c85a85a`)
 - Reuse optional ABI tag decoder (`d15b2c7`)
 - Migrate production decision kernels (`489bb0e`)
 - Keep fallback Clippy-clean (`fee7b8e`)
