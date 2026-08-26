@@ -1427,5 +1427,18 @@
       "maxFileLines": 500
     },
     "reason": "Reviewed the same bounded startup/shutdown implementation plus synchronized 0.408.11 release metadata; the release cap covers generated version, lockfile, changelog, and package metadata while the default churn thresholds remain unchanged."
+  },
+  {
+    "id": "chatgpt-mcp-parallel-super-0.417.0",
+    "requiredSubjects": [
+      "feat(super): expose MCP through a Quick Tunnel"
+    ],
+    "caps": {
+      "maxFiles": 55,
+      "maxBehaviorFiles": 42,
+      "maxLines": 7200,
+      "maxFileLines": 500
+    },
+    "reason": "Reviewed the cross-cutting ChatGPT MCP expose, interactive Super configuration, bounded run lifecycle, capability and public-route security, three-instance isolation, quota regression coverage, and measured CI parallelization with the locked workspace suite, strict Clippy, security/supply-chain guards, and deterministic fake-tunnel and runtime evidence. The narrow cap covers this 0.417.0 implementation range without skipping tests or changing the default churn thresholds."
   }
 ]
