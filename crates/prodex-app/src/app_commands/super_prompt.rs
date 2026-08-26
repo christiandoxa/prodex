@@ -2,9 +2,8 @@ use super::ResolvedMainAgentConfig;
 use crate::{
     AppPaths, AppState, AppStateIoExt, COPILOT_RUNTIME_MODEL_CATALOG_FILE, KIRO_MODEL_CATALOG_FILE,
     ProfileProvider, ResolvedSuperSubAgent, SUB_AGENT_RECURSION_MARKER, SubAgentRecursionPolicy,
-    canonical_sub_agent_efforts, canonical_sub_agent_model_choices, canonical_sub_agent_providers,
-    provider_display_name, resolve_super_launch_target, resolve_super_sub_agent_config,
-    sub_agent_recursion_policy,
+    canonical_sub_agent_providers, provider_display_name, resolve_super_launch_target,
+    resolve_super_sub_agent_config, sub_agent_recursion_policy,
 };
 use anyhow::{Result, bail};
 use crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
@@ -35,6 +34,21 @@ pub(super) fn prompt_super_main_agent_configuration(
     args: &SuperArgs,
     locked_provider: Option<prodex_provider_core::ProviderId>,
 ) -> Result<ResolvedMainAgentConfig> {
+    prompt_super_main_agent_configuration_with_options(args, locked_provider, false)
+}
+
+pub(super) fn prompt_super_main_agent_configuration_for_expose(
+    args: &SuperArgs,
+    locked_provider: Option<prodex_provider_core::ProviderId>,
+) -> Result<ResolvedMainAgentConfig> {
+    prompt_super_main_agent_configuration_with_options(args, locked_provider, true)
+}
+
+fn prompt_super_main_agent_configuration_with_options(
+    args: &SuperArgs,
+    locked_provider: Option<prodex_provider_core::ProviderId>,
+    prompt_model_and_effort: bool,
+) -> Result<ResolvedMainAgentConfig> {
     let providers = locked_provider.map_or_else(
         || {
             prodex_provider_core::provider_implementation_registry()
@@ -55,18 +69,36 @@ pub(super) fn prompt_super_main_agent_configuration(
             }
         })
         .collect::<Vec<_>>();
-    let provider = providers[prompt_super_choice("Main-agent provider", &choices, 0, false)?];
+    let selected_provider = locked_provider
+        .and_then(|provider| {
+            providers
+                .iter()
+                .position(|candidate| *candidate == provider)
+        })
+        .unwrap_or(0);
+    let provider =
+        providers[prompt_super_choice("Main-agent provider", &choices, selected_provider, false)?];
     let local_url = if provider == prodex_provider_core::ProviderId::Local {
-        Some(prompt_super_text(
-            "Main-agent local URL",
-            args.url.as_deref().unwrap_or("http://127.0.0.1:11434/v1"),
-        )?)
+        if prompt_model_and_effort && args.url.is_some() {
+            args.url.clone()
+        } else {
+            Some(prompt_super_text(
+                "Main-agent local URL",
+                args.url.as_deref().unwrap_or("http://127.0.0.1:11434/v1"),
+            )?)
+        }
     } else {
         None
     };
+    let (model, reasoning_effort) = super::super_main_prompt::resolve_main_model_and_effort(
+        args,
+        provider,
+        prompt_model_and_effort,
+    )?;
     Ok(ResolvedMainAgentConfig {
         provider,
-        model: args.local_model.clone(),
+        model,
+        reasoning_effort,
         local_url,
     })
 }
@@ -225,74 +257,21 @@ fn prompt_super_sub_agent_config(
                     )?);
                 }
                 SuperSubAgentPromptStep::Model => {
-                    let configured_models = configured_sub_agent_models(config.provider);
-                    let models = if configured_models.is_empty() {
-                        canonical_sub_agent_model_choices(config.provider, config.model.as_deref())
-                    } else {
-                        prodex_provider_core::resolve_provider_model_choices(
-                            config.provider,
-                            &configured_models,
-                            config.model.as_deref(),
-                        )
-                    };
-                    let choices = models
-                        .iter()
-                        .map(|choice| match choice {
-                            prodex_provider_core::ProviderModelChoice::ProviderDefault => {
-                                "provider default".to_string()
-                            }
-                            prodex_provider_core::ProviderModelChoice::Model(model) => {
-                                model.clone()
-                            }
-                            prodex_provider_core::ProviderModelChoice::Custom => {
-                                "custom model...".to_string()
-                            }
-                        })
-                        .collect::<Vec<_>>();
-                    let selected = config
-                        .model
-                        .as_ref()
-                        .and_then(|model| choices.iter().position(|choice| choice == model))
-                        .unwrap_or(0);
-                    let selected =
-                        prompt_super_choice("Sub-agent model", &choices, selected, false)?;
-                    match &models[selected] {
-                        prodex_provider_core::ProviderModelChoice::ProviderDefault => {
-                            config.model = None
-                        }
-                        prodex_provider_core::ProviderModelChoice::Model(model) => {
-                            config.model = Some(model.clone())
-                        }
-                        prodex_provider_core::ProviderModelChoice::Custom => {
-                            config.model = Some(prompt_super_text(
-                                "Custom sub-agent model",
-                                config.model.as_deref().unwrap_or_default(),
-                            )?)
-                        }
-                    }
+                    config.model = super::super_main_prompt::prompt_super_model(
+                        "Sub-agent model",
+                        config.provider,
+                        config.model.as_deref(),
+                        configured_sub_agent_models(config.provider),
+                    )?;
                 }
                 SuperSubAgentPromptStep::ReasoningEffort => {
-                    let mut efforts = vec![("provider default".to_string(), None)];
-                    efforts.extend(
-                        canonical_sub_agent_efforts(config.provider, config.model.as_deref())
-                            .into_iter()
-                            .map(|effort| (effort.as_str().to_string(), Some(effort))),
-                    );
-                    let choices = efforts
-                        .iter()
-                        .map(|(label, _)| label.clone())
-                        .collect::<Vec<_>>();
-                    let selected = efforts
-                        .iter()
-                        .position(|(_, effort)| *effort == config.model_reasoning_effort)
-                        .unwrap_or(0);
-                    config.model_reasoning_effort = efforts[prompt_super_choice(
-                        "Sub-agent reasoning effort",
-                        &choices,
-                        selected,
-                        false,
-                    )?]
-                    .1;
+                    config.model_reasoning_effort =
+                        super::super_main_prompt::prompt_super_reasoning_effort(
+                            "Sub-agent reasoning effort",
+                            config.provider,
+                            config.model.as_deref(),
+                            config.model_reasoning_effort,
+                        )?;
                 }
                 SuperSubAgentPromptStep::MaxConcurrency => {
                     config.max_concurrency = prompt_super_sub_agent_max_concurrency()?;
@@ -319,7 +298,9 @@ pub(super) fn run_super_sub_agent_prompt_steps(
     Ok(config)
 }
 
-fn configured_sub_agent_models(provider: prodex_provider_core::ProviderId) -> Vec<String> {
+pub(super) fn configured_sub_agent_models(
+    provider: prodex_provider_core::ProviderId,
+) -> Vec<String> {
     let catalog_file = match provider {
         prodex_provider_core::ProviderId::Copilot => COPILOT_RUNTIME_MODEL_CATALOG_FILE,
         prodex_provider_core::ProviderId::Kiro => KIRO_MODEL_CATALOG_FILE,
@@ -442,7 +423,7 @@ fn prompt_super_sub_agent_custom_concurrency() -> Result<Option<SubAgentMaxConcu
     )
 }
 
-fn prompt_super_choice(
+pub(super) fn prompt_super_choice(
     title: &str,
     choices: &[String],
     selected: usize,
@@ -578,7 +559,7 @@ pub(super) fn bounded_tui_text(value: &str, width: u16) -> String {
     fit_cell(value, usize::from(width).max(1))
 }
 
-fn prompt_super_text(title: &str, initial: &str) -> Result<String> {
+pub(super) fn prompt_super_text(title: &str, initial: &str) -> Result<String> {
     prompt_super_text_input(title, initial, false, |value| {
         (!value.trim().is_empty())
             .then(|| value.to_string())
