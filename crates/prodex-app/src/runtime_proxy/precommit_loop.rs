@@ -119,6 +119,7 @@ impl<F> RuntimePrecommitLoopState<F> {
             .map(|until| {
                 let now = chrono::Local::now().timestamp();
                 Duration::from_secs(u64::try_from(until.saturating_sub(now)).unwrap_or(0))
+                    .saturating_add(Duration::from_secs(1))
                     .min(recovery_budget)
             })
             .filter(|wait| !wait.is_zero())

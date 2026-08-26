@@ -138,6 +138,7 @@ impl<'a> RuntimeWebsocketTextMessageFlow<'a> {
                 .saturating_sub(recovery_started_at.elapsed());
         let wait =
             std::time::Duration::from_secs(u64::try_from(until.saturating_sub(now)).unwrap_or(0))
+                .saturating_add(std::time::Duration::from_secs(1))
                 .min(recovery_budget);
         if wait.is_zero() {
             return Ok(false);

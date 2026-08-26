@@ -210,17 +210,7 @@ fn run_runtime_compact_selection(
 
 impl RuntimeCompactSelectionContext<'_> {
     fn budget_action(&mut self) -> Result<Option<RuntimeCompactLoopAction>> {
-        let continuation = self.request_previous_response_id.is_some()
-            || self.request_turn_state.is_some()
-            || self.compact_followup_profile.is_some()
-            || self.session_profile.is_some();
-        if !runtime_proxy_precommit_budget_exhausted_for_route(
-            self.shared,
-            self.selection_started_at,
-            self.selection_attempts,
-            continuation,
-            self.pressure_mode,
-        )? {
+        if !self.budget_exhausted()? {
             return Ok(None);
         }
         runtime_proxy_log(
@@ -240,6 +230,49 @@ impl RuntimeCompactSelectionContext<'_> {
             "precommit_budget_exhausted",
             "precommit_budget_exhausted_fallback",
         )?)))
+    }
+
+    fn budget_exhausted(&self) -> Result<bool> {
+        let continuation = self.request_previous_response_id.is_some()
+            || self.request_turn_state.is_some()
+            || self.compact_followup_profile.is_some()
+            || self.session_profile.is_some();
+        let normal_budget_exhausted = runtime_proxy_precommit_budget_exhausted_for_route(
+            self.shared,
+            self.selection_started_at,
+            self.selection_attempts,
+            continuation,
+            self.pressure_mode,
+        )?;
+        if self.recovery_sweeps == 0 {
+            return Ok(normal_budget_exhausted);
+        }
+        let profile_count = self
+            .shared
+            .runtime
+            .lock()
+            .map_err(|_| anyhow::anyhow!("runtime auto-rotate state is poisoned"))?
+            .state
+            .profiles
+            .len()
+            .max(1);
+        let (attempt_limit, _) =
+            runtime_proxy_crate::runtime_proxy_precommit_budget_for_profile_count(
+                continuation,
+                self.pressure_mode,
+                profile_count,
+            );
+        Ok(self.selection_attempts >= attempt_limit || self.recovery_budget_exhausted())
+    }
+
+    fn recovery_budget_exhausted(&self) -> bool {
+        self.recovery_sweeps >= runtime_proxy_crate::RUNTIME_PROXY_PRECOMMIT_RECOVERY_SWEEP_LIMIT
+            || self.recovery_started_at.is_some_and(|started_at| {
+                started_at.elapsed()
+                    >= Duration::from_millis(
+                        runtime_proxy_crate::RUNTIME_PROXY_PRECOMMIT_RECOVERY_BUDGET_MS,
+                    )
+            })
     }
 
     fn next_action(&mut self) -> Result<RuntimeCompactLoopAction> {
@@ -622,6 +655,7 @@ fn wait_for_compact_overload_recovery(
         Duration::from_millis(runtime_proxy_crate::RUNTIME_PROXY_PRECOMMIT_RECOVERY_BUDGET_MS)
             .saturating_sub(recovery_started_at.elapsed());
     let wait = Duration::from_secs(u64::try_from(until.saturating_sub(now)).unwrap_or(0))
+        .saturating_add(Duration::from_secs(1))
         .min(remaining_budget);
     if wait.is_zero() {
         return Ok(false);
