@@ -250,6 +250,30 @@ fn fresh_responses_pass_through_generic_429_without_rotation() {
 }
 
 #[test]
+fn fresh_responses_do_not_rotate_invalid_requests() {
+    let backend = RuntimeProxyBackend::start_with_fault_script(RuntimeProxyBackendFaultScript::new([
+        RuntimeProxyBackendFaultStep::invalid_request(
+            RuntimeProxyBackendFaultRoute::Responses,
+            "main-account",
+        ),
+    ]));
+    let harness = ready_profiles(&backend);
+
+    let reply = proxy_runtime_responses_request(
+        112,
+        &responses_request(br#"{"input":[]}"#),
+        harness.shared(),
+    )
+    .expect("invalid request should be passed through");
+    let (status, body, profile) = consume_responses_reply(reply);
+
+    assert_eq!(status, 400, "{body}");
+    assert!(body.contains("invalid_request"), "{body}");
+    assert_eq!(profile, None);
+    assert_eq!(backend.responses_accounts(), ["main-account"]);
+}
+
+#[test]
 fn hard_continuation_keeps_quota_failure_on_bound_profile() {
     let backend =
         RuntimeProxyBackend::start_with_fault_script(RuntimeProxyBackendFaultScript::new([
