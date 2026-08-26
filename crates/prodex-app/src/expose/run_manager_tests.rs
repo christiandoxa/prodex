@@ -64,7 +64,8 @@ else:
 }
 
 fn wait_for_terminal(manager: &ExposeRunManager, run_id: &str) -> ExposeRunResult {
-    for _ in 0..200 {
+    let attempts = if cfg!(windows) { 1_000 } else { 200 };
+    for _ in 0..attempts {
         if let Some(result) = manager.result(run_id)
             && result.summary.state.terminal()
         {

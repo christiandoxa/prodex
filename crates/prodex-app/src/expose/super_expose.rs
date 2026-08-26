@@ -3,8 +3,8 @@ use super::mcp::{
     ExposeMcpEndpoint, expose_instance_id, expose_main_provider, mcp_public_url, verify_public_mcp,
 };
 use super::runtime::{
-    ExposeHttpServer, ExposePty, ExposeShared, expose_access_url, expose_public_host,
-    start_cloudflared_tunnel,
+    ExposeHttpServer, ExposePty, ExposeShared, cloudflared_command, expose_access_url,
+    expose_public_host, start_cloudflared_tunnel,
 };
 use super::session::{ExposeSessionStore, expose_random_token};
 use crate::ExposeArgs;
@@ -14,7 +14,6 @@ use std::collections::BTreeSet;
 use std::env;
 use std::io::{self, IsTerminal};
 use std::net::TcpListener;
-use std::process::Command;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -163,7 +162,7 @@ pub(super) fn handle_super_expose(mut args: ExposeArgs) -> anyhow::Result<()> {
 }
 
 pub(super) fn ensure_cloudflared_available() -> anyhow::Result<()> {
-    let mut command = Command::new("cloudflared");
+    let mut command = cloudflared_command();
     command.arg("--version");
     let output = crate::command_probe_output(&mut command, "cloudflared version probe");
     match output {
