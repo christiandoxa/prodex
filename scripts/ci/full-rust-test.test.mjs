@@ -17,12 +17,16 @@ test("full Rust runner includes the explicitly disabled prodex-app lib target", 
   assert.equal(result.status, 0, result.stderr);
   assert.match(
     result.stdout,
-    /prodex-app:all-lib-tests-serial: cargo test --locked -q -p prodex-app --lib -- --test-threads=1/,
+    /prodex-app:non-main-internal: cargo test --locked -q -p prodex-app --lib -- --test-threads=1 --skip main_internal_tests::/,
   );
-  assert.match(result.stdout, /dry-run: 4 parallel step\(s\), jobs=4/);
+  assert.match(
+    result.stdout,
+    /prodex-app:runtime-proxy-selection: cargo test --locked -q -p prodex-app --lib main_internal_tests::runtime_proxy_selection_and_pressure:: -- --test-threads=1/,
+  );
+  assert.match(result.stdout, /dry-run: 9 parallel step\(s\), jobs=4/);
   assert.match(result.stdout, /dry-run: 1 parallel step\(s\), jobs=4/);
   assert.ok(
-    result.stdout.indexOf("prodex-app:all-lib-tests-serial:") <
+    result.stdout.indexOf("prodex-app:runtime-proxy-selection:") <
       result.stdout.lastIndexOf("auto-rotate-shards:"),
     "auto-rotate should run after the heavy prodex-app partition",
   );
