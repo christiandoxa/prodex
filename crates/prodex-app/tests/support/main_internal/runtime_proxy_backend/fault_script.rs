@@ -56,6 +56,26 @@ impl RuntimeProxyBackendFaultStep {
         }
     }
 
+    pub(crate) fn invalid_request(route: RuntimeProxyBackendFaultRoute, account_id: &str) -> Self {
+        Self {
+            route,
+            account_id: Some(account_id.to_string()),
+            status_line: "HTTP/1.1 400 Bad Request",
+            content_type: "application/json",
+            body: serde_json::json!({
+                "error": {
+                    "type": "invalid_request_error",
+                    "code": "invalid_request",
+                    "message": "scripted invalid request"
+                }
+            })
+            .to_string(),
+            response_turn_state: None,
+            initial_body_stall: None,
+            chunk_delay: None,
+        }
+    }
+
     pub(crate) fn sse_quota(route: RuntimeProxyBackendFaultRoute, account_id: &str) -> Self {
         Self {
             route,
