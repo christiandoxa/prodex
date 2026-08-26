@@ -85,6 +85,20 @@ Optional-tool activation is limited to the temporary launch overlay. Version,
 source, commit, and digest metadata in each managed installation must match the
 release-vetted metadata compiled into Prodex.
 
+## Expose Instance State
+
+An expose process is intentionally process-local. It owns one captured initial
+workspace, one ephemeral capability digest, one MCP server identity, one
+Quick Tunnel child, one resolved Super configuration, one bounded run manager,
+and one set of child process groups. It does not persist the capability, run
+table, task text, event history, or active model/effort configuration.
+
+Multiple expose processes may share the authoritative `PRODEX_HOME` profile,
+quota, health, cooldown, auto-rotation, and durable model-preference state
+where the existing logical scope requires it. Merge-safe writers remain the
+only owners of that shared state. A later preference update must not mutate a
+running expose instance; per-run MCP overrides apply only to that run.
+
 ## Invariants
 
 - Profile auth isolation is stronger than convenience.

@@ -17,6 +17,44 @@ prove that a deployment has immutable retention, break-glass evidence, backup
 or disaster-recovery coverage, approved RPO/RTO, or complete native-provider
 fidelity; deployment acceptance remains environment-specific.
 
+## Personal ChatGPT expose boundary
+
+`prodex s expose` is a separate personal-development boundary from the
+enterprise gateway. It binds the local listener to loopback, captures one
+workspace as the Super process's initial directory, and places a fresh
+256-bit capability in one exact path segment:
+
+```text
+https://<random>.trycloudflare.com/pdx/v1/<capability>/mcp
+```
+
+The endpoint stores only a SHA-256 digest in memory and compares the incoming
+segment with the existing constant-time helper. Invalid or revoked paths return
+404, the public Host admits only the exact MCP route, and legacy browser routes
+are not available on the default public host. The capability is never persisted
+or placed in child arguments, child environment, telemetry, or routine logs.
+
+This is Ephemeral Capability Authentication, not OAuth, account linking, or
+identity authentication. Anyone with the complete URL can control the full
+Super capability granted by that process. ChatGPT stores the URL and Cloudflare
+carries the path, so URL disclosure is credential disclosure. The mode is
+short-lived and intended for personal development, not a public multi-user
+plugin or plugin-directory publication. Stopping the process revokes access;
+rerunning creates a new capability and Quick Tunnel hostname.
+
+Each expose process owns its workspace context, MCP identity, tunnel, run
+manager, bounded output buffers, capability digest, and child process groups.
+Separate processes may share the established Prodex profile/quota/health and
+preference persistence, but active expose configuration and run tables are
+not shared. The initial workspace is not claimed to be a stronger filesystem
+sandbox than the underlying local Super permission model.
+
+The MCP surface is deliberately lifecycle-oriented: `prodex_super_start`
+returns a run ID, and status/events/result/cancel/list operate on that explicit
+ID. It does not expose a raw shell MCP tool. Quick Tunnel mode uses bounded
+JSON responses over Streamable HTTP and no SSE dependency; readiness requires a
+public protocol probe and `tools/list` before the URL is printed.
+
 ## Assets
 
 - Tenant data and tenant-scoped configuration.

@@ -19,6 +19,7 @@ not retained here; Git history is the record for obsolete material.
 | [Provider conformance](provider-conformance.md) | Adapter contract |
 | [Harness modes](harness-modes.md) | Model-facing request policy |
 | [Super sub-agents](sub-agents.md) | Staged CLI contract, session boundaries, and local-process design |
+| [ChatGPT MCP expose](expose.md) | Ephemeral capability, Quick Tunnel, MCP, and parallel workspace contract |
 
 ## Security, Operations, and Release
 

@@ -33,6 +33,19 @@ Status meanings:
 | Broker secret persists in registry/backup/health | metadata/secret separation and non-secret health identity | registry/backup/health snapshots, rotation, native Windows gate | `crates/prodex-app/src/runtime_broker/registry/store.rs`; `.github/workflows/ci.yml` | pass on Unix and Windows |
 | Timing oracle in bearer comparison | one constant-time comparison helper | centralized caller inventory and functional tests | `crates/prodex-runtime-broker/src/admin.rs`; `crates/prodex-app/src/runtime_broker/admin.rs` | pass |
 
+## ChatGPT Expose Controls
+
+| Threat | Required control | Test/evidence | File(s) | Current status |
+| --- | --- | --- | --- | --- |
+| Public MCP route exposes browser shell | exact public Host plus exact capability path; browser routes return 404 | loopback/public route matrix and cross-host negatives | `crates/prodex-app/src/expose/mcp_tests.rs` | pass |
+| Expose capability is guessed or replayed | 32-byte OS CSPRNG token, unpadded URL-safe encoding, in-memory digest, constant-time comparison, process-local revocation | entropy, encoding, digest, wrong-token, shutdown, and redacted-Debug tests | `crates/prodex-app/src/expose/session.rs`; `crates/prodex-app/src/expose/tests.rs`; `crates/prodex-app/src/expose/mcp.rs` | pass |
+| Capability leaks through process or diagnostics | no capability in child argv/env, cloudflared argv/output, logs, errors, or Debug; initial URL is the sole intended display | child stdin/argv, cloudflared parser, redaction, error, and Debug sentinels | `crates/prodex-app/src/expose/run_manager.rs`; `crates/prodex-app/src/expose/runtime.rs`; `crates/prodex-app/src/expose/mcp.rs` | pass |
+| MCP transport is incompatible or streaming-dependent | Streamable HTTP POST, JSON response mode, protocol metadata/header validation, no long-lived GET/SSE, 202 notifications | server/discover/initialize, tools/list/call, malformed JSON, header, Accept, GET, and no-SSE tests | `crates/prodex-app/src/expose/mcp.rs`; `crates/prodex-app/src/expose/mcp_tests.rs` | pass |
+| Long-running call blocks or has unbounded state | explicit run IDs, bounded active/queued/retained runs, ring events/output, per-run cancellation | fake Super child success/failure, concurrent managers, truncation, and process-tree cancellation tests | `crates/prodex-app/src/expose/run_manager.rs`; `crates/prodex-app/src/expose/run_manager_tests.rs` | pass |
+| Parallel endpoint crosses workspace or run state | one captured workspace, process-local manager, separate port/tunnel/capability/child group | three-manager workspace sentinel, capability/run cross-use, output/cancellation/shutdown isolation tests | `crates/prodex-app/src/expose/mcp_tests.rs`; `crates/prodex-app/src/expose/run_manager_tests.rs` | pass |
+| Quick Tunnel is falsely advertised or leaks legacy routes | direct typed `cloudflared` argv, strict hostname validation, bounded readers, public MCP readiness probe, fail-closed tunnel exit | parser negatives, bounded/no-URL/early-exit fixtures, and public probe path | `crates/prodex-app/src/expose/runtime.rs`; `crates/prodex-app/src/expose/mcp/probe.rs` | pass in deterministic tests; live Cloudflare remains environment-dependent |
+| Full Super semantics fork at MCP boundary | MCP launches the normal Prodex executable with typed Super args and stdin task transport | child model/effort/URL/argv assertions and shared runtime launch path | `crates/prodex-app/src/expose/run_manager/child_args.rs`; `crates/prodex-app/src/app_commands` | pass |
+
 Invalid, disallowed-zero, and overflowing gateway OIDC timing environment values now prove
 aggregated fail-closed startup rejection; cache-header clamping remains covered only for untrusted
 HTTP metadata that can reach a valid typed runtime snapshot.
