@@ -1,4 +1,7 @@
+use super::super_expose::ensure_cloudflared_available;
 use super::*;
+use crate::{TestEnvVarGuard, test_temp_root, write_test_python_executable};
+use std::fs;
 use std::net::{Shutdown, SocketAddr};
 
 fn expose_test_tcp_pair() -> (TcpStream, TcpStream) {
@@ -31,6 +34,9 @@ fn expose_start_test_server(
         max_clients,
         tunnel: false,
         no_tunnel: false,
+        name: None,
+        invocation: prodex_cli::ExposeInvocation::Standalone,
+        super_args: None,
     };
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let listen_addr = listener.local_addr().unwrap();
@@ -41,6 +47,8 @@ fn expose_start_test_server(
             Instant::now(),
         )),
         allowed_hosts: Mutex::new(BTreeSet::from([listen_addr.to_string()])),
+        mcp_only_hosts: Mutex::new(BTreeSet::new()),
+        mcp: None,
         pty: ExposePty::spawn(&args).unwrap(),
         shutdown: Arc::new(AtomicBool::new(false)),
         active_clients: AtomicUsize::new(0),
@@ -94,6 +102,28 @@ fn expose_access_url_uses_one_time_fragment_without_path_or_query_secret() {
     assert_eq!(fragment, "bootstrap=bootstrap-capability");
     assert!(!request_target.contains("bootstrap-capability"));
     assert!(!url.contains("access_token"));
+}
+
+#[test]
+fn expose_capabilities_have_256_bits_without_padding_and_compare_constant_time() {
+    let first = expose_random_token().unwrap();
+    let second = expose_random_token().unwrap();
+    assert_eq!(first.len(), 43);
+    assert_ne!(first, second);
+    assert!(!first.contains('='));
+    assert!(
+        first
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_'))
+    );
+    assert!(expose_digest_eq(
+        &expose_token_digest(&first),
+        &expose_token_digest(&first)
+    ));
+    assert!(!expose_digest_eq(
+        &expose_token_digest(&first),
+        &expose_token_digest(&second)
+    ));
 }
 
 #[test]
@@ -499,6 +529,96 @@ fn cloudflared_url_parser_extracts_quick_tunnel_url() {
         expose_public_host("https://shell.trycloudflare.com"),
         Some("shell.trycloudflare.com".to_string())
     );
+    for invalid in [
+        "https://shell.trycloudflare.com.attacker.example",
+        "http://shell.trycloudflare.com",
+        "https://shell.trycloudflare.com:443",
+        "https://shell.trycloudflare.com/path",
+        "https://user@shell.trycloudflare.com",
+        "https://shell.trycloudflare.com?token=secret",
+        "https://shell.trycloudflare.com#fragment",
+        "https://世界.trycloudflare.com",
+    ] {
+        assert_eq!(expose_public_host(invalid), None, "accepted {invalid}");
+    }
+}
+
+#[test]
+fn cloudflared_reader_accepts_bounded_split_lines_and_flushes_eof() {
+    let (sender, receiver) = mpsc::sync_channel(1);
+    let reader = io::Cursor::new(
+        b"noise https://not-cloudflare.example\npartial https://split.trycloudflare.com".to_vec(),
+    );
+    let thread = expose_scan_cloudflared_output(reader, sender);
+    thread.join().unwrap();
+    assert_eq!(receiver.recv().unwrap(), "https://split.trycloudflare.com");
+    assert!(receiver.try_recv().is_err());
+}
+
+#[test]
+fn fake_cloudflared_is_version_checked_and_terminated_as_one_child() {
+    let root = test_temp_root().join(format!("prodex-cloudflared-{}", std::process::id()));
+    fs::create_dir_all(&root).unwrap();
+    let executable = write_test_python_executable(
+        &root,
+        "cloudflared",
+        r#"#!/usr/bin/env python3
+import sys
+import time
+
+if len(sys.argv) > 1 and sys.argv[1] == "--version":
+    print("cloudflared version 2026.1", flush=True)
+    raise SystemExit(0)
+print("unrelated https://evil.example", flush=True)
+print("https://fixture.trycloudflare.com", file=sys.stderr, flush=True)
+time.sleep(30)
+"#,
+    );
+    let path = std::env::join_paths(std::iter::once(root.clone()).chain(std::env::split_paths(
+        &std::env::var_os("PATH").unwrap_or_default(),
+    )))
+    .unwrap();
+    let _path = TestEnvVarGuard::set("PATH", &path.to_string_lossy());
+    ensure_cloudflared_available().unwrap();
+    let mut tunnel = start_cloudflared_tunnel("http://127.0.0.1:12345").unwrap();
+    assert_eq!(
+        tunnel.url.as_deref(),
+        Some("https://fixture.trycloudflare.com")
+    );
+    tunnel.shutdown();
+    assert!(tunnel.child.try_wait().unwrap().is_some());
+    assert!(!expose_find_trycloudflare_url("https://evil.example").is_some());
+    let _ = executable;
+}
+
+#[test]
+fn cloudflared_early_exit_is_detected_without_waiting_for_the_full_timeout() {
+    let root = test_temp_root().join(format!("prodex-cloudflared-early-{}", std::process::id()));
+    fs::create_dir_all(&root).unwrap();
+    write_test_python_executable(
+        &root,
+        "cloudflared",
+        r#"#!/usr/bin/env python3
+import sys
+
+if len(sys.argv) > 1 and sys.argv[1] == "--version":
+    print("cloudflared version 2026.1", flush=True)
+else:
+    print("startup failed", file=sys.stderr, flush=True)
+    raise SystemExit(1)
+"#,
+    );
+    let path = std::env::join_paths(std::iter::once(root.clone()).chain(std::env::split_paths(
+        &std::env::var_os("PATH").unwrap_or_default(),
+    )))
+    .unwrap();
+    let _path = TestEnvVarGuard::set("PATH", &path.to_string_lossy());
+    let started = Instant::now();
+    let mut tunnel = start_cloudflared_tunnel("http://127.0.0.1:12345").unwrap();
+    assert!(tunnel.url.is_none());
+    assert!(started.elapsed() < Duration::from_secs(2));
+    tunnel.shutdown();
+    let _ = fs::remove_dir_all(root);
 }
 
 #[test]
@@ -520,6 +640,9 @@ fn expose_pty_shutdown_terminates_and_joins_shell_threads() {
         max_clients: 1,
         tunnel: false,
         no_tunnel: false,
+        name: None,
+        invocation: prodex_cli::ExposeInvocation::Standalone,
+        super_args: None,
     };
     let pty = ExposePty::spawn(&args).unwrap();
     assert!(pty.running.load(Ordering::SeqCst));

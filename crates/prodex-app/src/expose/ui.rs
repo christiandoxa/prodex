@@ -16,6 +16,14 @@ pub(super) fn expose_json_response(
     expose_response(status, body, "application/json; charset=utf-8", cookie)
 }
 
+pub(super) fn expose_mcp_json_response(status: u16, body: &str) -> ExposeHttpResponse {
+    expose_response(status, body, "application/json", None)
+}
+
+pub(super) fn expose_mcp_empty_response(status: u16) -> ExposeHttpResponse {
+    expose_mcp_json_response(status, "")
+}
+
 pub(super) fn expose_html_response() -> ExposeHttpResponse {
     expose_response(200, expose_html(), "text/html; charset=utf-8", None)
 }
