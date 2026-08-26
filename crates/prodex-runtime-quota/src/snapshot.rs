@@ -1,4 +1,4 @@
-use crate::summary::{runtime_quota_precommit_guard_reason, runtime_quota_summary_from_proxy};
+use crate::summary::runtime_quota_summary_from_proxy;
 use crate::window::{
     runtime_quota_window_observation, runtime_quota_window_status_from_proxy,
     runtime_quota_window_status_to_proxy,
@@ -149,10 +149,11 @@ pub fn runtime_snapshot_blocks_same_request_cold_start_probe(
         route_kind,
         RuntimeRouteKind::Responses | RuntimeRouteKind::Websocket
     ) && runtime_usage_snapshot_is_usable(snapshot, now, stale_grace_seconds)
-        && runtime_quota_precommit_guard_reason(
-            runtime_quota_summary_from_usage_snapshot_at(snapshot, route_kind, now),
-            route_kind,
-            responses_critical_floor_percent,
-        )
-        .is_some()
+        && {
+            let summary = runtime_quota_summary_from_usage_snapshot_at(snapshot, route_kind, now);
+            let window = summary.five_hour;
+            matches!(window.status, RuntimeQuotaWindowStatus::Exhausted)
+                || (!matches!(window.status, RuntimeQuotaWindowStatus::Unknown)
+                    && window.remaining_percent < responses_critical_floor_percent.max(1))
+        }
 }
