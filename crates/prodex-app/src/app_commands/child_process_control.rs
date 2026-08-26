@@ -80,6 +80,35 @@ pub(crate) fn configure_child_process_group(_command: &mut Command, _private_pro
     }
 }
 
+/// Arrange for a directly owned child to receive a termination signal when this
+/// process dies unexpectedly on Linux. Other platforms retain their existing
+/// process-tree cleanup behavior.
+pub(crate) fn configure_child_parent_death(command: &mut Command) {
+    #[cfg(target_os = "linux")]
+    {
+        use std::os::unix::process::CommandExt;
+
+        let parent_pid = unsafe { libc::getpid() };
+        // SAFETY: the closure uses only async-signal-safe libc calls before exec.
+        unsafe {
+            command.pre_exec(move || {
+                if libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGTERM, 0, 0, 0) != 0 {
+                    return Err(io::Error::last_os_error());
+                }
+                if libc::getppid() != parent_pid {
+                    return Err(io::Error::new(
+                        io::ErrorKind::Interrupted,
+                        "parent exited before child startup",
+                    ));
+                }
+                Ok(())
+            });
+        }
+    }
+    #[cfg(not(target_os = "linux"))]
+    let _ = command;
+}
+
 pub(crate) fn terminate_child_process_group_best_effort(
     _child: &Child,
     _private_process_group: bool,

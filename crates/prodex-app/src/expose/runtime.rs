@@ -1,7 +1,18 @@
+use super::super_expose::{ensure_cloudflared_available, handle_super_expose};
 use super::*;
 use std::net::SocketAddr;
 
 pub(super) fn handle_expose(args: ExposeArgs) -> Result<()> {
+    if args.invocation == prodex_cli::ExposeInvocation::SuperAlias
+        && !args.tunnel
+        && !args.no_tunnel
+    {
+        return handle_super_expose(args);
+    }
+    handle_legacy_expose(args)
+}
+
+fn handle_legacy_expose(args: ExposeArgs) -> Result<()> {
     if args.no_tunnel {
         eprintln!("warning: --no-tunnel is deprecated; expose is loopback-only by default");
     }
@@ -23,6 +34,8 @@ pub(super) fn handle_expose(args: ExposeArgs) -> Result<()> {
         allowed_hosts: Mutex::new(BTreeSet::from([listen_addr
             .to_string()
             .to_ascii_lowercase()])),
+        mcp_only_hosts: Mutex::new(BTreeSet::new()),
+        mcp: None,
         pty,
         shutdown: Arc::clone(&shutdown),
         active_clients: AtomicUsize::new(0),
@@ -71,6 +84,9 @@ fn expose_start_tunnel(
             None,
             None,
         );
+    }
+    if let Err(err) = ensure_cloudflared_available() {
+        return (expose_tunnel_unavailable_status(&err), None, None);
     }
     match start_cloudflared_tunnel(&format!("http://{listen_addr}")) {
         Ok(tunnel) => {
@@ -162,6 +178,8 @@ pub(super) fn expose_tunnel_unavailable_status(err: &anyhow::Error) -> String {
 pub(super) struct ExposeShared {
     pub(super) sessions: Mutex<ExposeSessionStore>,
     pub(super) allowed_hosts: Mutex<BTreeSet<String>>,
+    pub(super) mcp_only_hosts: Mutex<BTreeSet<String>>,
+    pub(super) mcp: Option<Arc<ExposeMcpEndpoint>>,
     pub(super) pty: ExposePty,
     pub(super) shutdown: Arc<AtomicBool>,
     pub(super) active_clients: AtomicUsize,
@@ -172,10 +190,23 @@ pub(super) struct ExposeShared {
 }
 
 impl ExposeShared {
-    fn allow_host(&self, host: String) {
+    pub(super) fn allow_host(&self, host: String) {
         if let Ok(mut hosts) = self.allowed_hosts.lock() {
             hosts.insert(host.to_ascii_lowercase());
         }
+    }
+
+    pub(super) fn allow_mcp_only_host(&self, host: String) {
+        if let Ok(mut hosts) = self.mcp_only_hosts.lock() {
+            hosts.insert(host.to_ascii_lowercase());
+        }
+    }
+
+    pub(super) fn is_mcp_only_host(&self, host: &str) -> bool {
+        self.mcp_only_hosts
+            .lock()
+            .map(|hosts| hosts.contains(&host.to_ascii_lowercase()))
+            .unwrap_or(false)
     }
 }
 
@@ -201,9 +232,7 @@ impl ExposeHttpServer {
         }
         let shutdown = Arc::clone(&shared.shutdown);
         let accept_thread = thread::spawn(move || {
-            while shared.pty.running.load(Ordering::SeqCst)
-                && !shared.shutdown.load(Ordering::SeqCst)
-            {
+            while !shared.shutdown.load(Ordering::SeqCst) {
                 match listener.accept() {
                     Ok((stream, _peer)) => match request_tx.try_send(stream) {
                         Ok(()) => {}
@@ -331,6 +360,11 @@ pub(super) struct ExposePty {
 
 impl ExposePty {
     pub(super) fn spawn(args: &ExposeArgs) -> Result<Self> {
+        let cwd = env::current_dir().ok();
+        Self::spawn_in_cwd(args, cwd.as_deref())
+    }
+
+    pub(super) fn spawn_in_cwd(args: &ExposeArgs, cwd: Option<&std::path::Path>) -> Result<Self> {
         let pair = native_pty_system()
             .openpty(PtySize {
                 rows: args.rows.max(8),
@@ -341,7 +375,7 @@ impl ExposePty {
             .context("failed to open PTY")?;
         let mut command = expose_command_builder(args.command.as_deref());
         command.env("TERM", "xterm-256color");
-        if let Ok(cwd) = env::current_dir() {
+        if let Some(cwd) = cwd {
             command.cwd(cwd.as_os_str());
         }
         let mut child = pair
@@ -430,15 +464,30 @@ pub(super) fn expose_join_thread(thread: &Mutex<Option<JoinHandle<()>>>) {
 }
 
 pub(super) struct CloudflaredTunnel {
-    child: std::process::Child,
-    url: Option<String>,
+    pub(super) child: std::process::Child,
+    pub(super) url: Option<String>,
     reader_threads: Vec<JoinHandle<()>>,
 }
 
 impl CloudflaredTunnel {
+    pub(super) fn exited(&mut self) -> Option<std::process::ExitStatus> {
+        self.child.try_wait().ok().flatten()
+    }
+
     pub(super) fn shutdown(&mut self) {
         let _ = crate::terminate_child_process_tree(&mut self.child, true);
-        let _ = self.child.wait();
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while Instant::now() < deadline {
+            match self.child.try_wait() {
+                Ok(Some(_)) => break,
+                Ok(None) => thread::sleep(Duration::from_millis(20)),
+                Err(_) => break,
+            }
+        }
+        if self.child.try_wait().ok().flatten().is_none() {
+            let _ = self.child.kill();
+            let _ = self.child.wait();
+        }
         for thread in self.reader_threads.drain(..) {
             let _ = crate::join_thread_with_timeout(
                 thread,
@@ -459,11 +508,13 @@ pub(super) fn start_cloudflared_tunnel(local_url: &str) -> Result<CloudflaredTun
     let mut command = Command::new("cloudflared");
     command
         .args(["tunnel", "--protocol", "http2", "--url", local_url])
+        .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
     crate::configure_child_process_group(&mut command, true);
+    crate::configure_child_parent_death(&mut command);
     let mut child = command.spawn().context("failed to spawn cloudflared")?;
-    let (tx, rx) = channel();
+    let (tx, rx) = mpsc::sync_channel(4);
     let mut reader_threads = Vec::new();
     if let Some(stdout) = child.stdout.take() {
         reader_threads.push(expose_scan_cloudflared_output(stdout, tx.clone()));
@@ -471,7 +522,15 @@ pub(super) fn start_cloudflared_tunnel(local_url: &str) -> Result<CloudflaredTun
     if let Some(stderr) = child.stderr.take() {
         reader_threads.push(expose_scan_cloudflared_output(stderr, tx));
     }
-    let url = rx.recv_timeout(Duration::from_secs(12)).ok();
+    let deadline = Instant::now() + Duration::from_secs(12);
+    let url = loop {
+        if let Ok(url) = rx.recv_timeout(Duration::from_millis(100)) {
+            break Some(url);
+        }
+        if child.try_wait().ok().flatten().is_some() || Instant::now() >= deadline {
+            break None;
+        }
+    };
     Ok(CloudflaredTunnel {
         child,
         url,
@@ -479,35 +538,98 @@ pub(super) fn start_cloudflared_tunnel(local_url: &str) -> Result<CloudflaredTun
     })
 }
 
-pub(super) fn expose_scan_cloudflared_output<R>(reader: R, tx: Sender<String>) -> JoinHandle<()>
+pub(super) fn expose_scan_cloudflared_output<R>(
+    reader: R,
+    tx: mpsc::SyncSender<String>,
+) -> JoinHandle<()>
 where
     R: Read + Send + 'static,
 {
     thread::spawn(move || {
         let mut reader = io::BufReader::new(reader);
-        let mut line = String::new();
+        let mut bytes = [0_u8; 1024];
+        let mut line = Vec::with_capacity(EXPOSE_CLOUDFLARED_LINE_MAX_BYTES);
         loop {
-            line.clear();
-            match reader.read_line(&mut line) {
+            match reader.read(&mut bytes) {
                 Ok(0) => break,
-                Ok(_) => {
-                    if let Some(url) = expose_find_trycloudflare_url(&line) {
-                        let _ = tx.send(url);
+                Ok(size) => {
+                    for byte in &bytes[..size] {
+                        if line.len() < EXPOSE_CLOUDFLARED_LINE_MAX_BYTES {
+                            line.push(*byte);
+                        }
+                        if *byte == b'\n' {
+                            if let Ok(line) = std::str::from_utf8(&line)
+                                && let Some(url) = expose_find_trycloudflare_url(line)
+                            {
+                                let _ = tx.try_send(url);
+                            }
+                            line.clear();
+                        }
                     }
                 }
                 Err(_) => break,
             }
         }
+        if let Ok(line) = std::str::from_utf8(&line)
+            && let Some(url) = expose_find_trycloudflare_url(line)
+        {
+            let _ = tx.try_send(url);
+        }
     })
 }
 
 pub(super) fn expose_find_trycloudflare_url(line: &str) -> Option<String> {
-    line.split_whitespace()
-        .find(|part| part.starts_with("https://") && part.contains(".trycloudflare.com"))
-        .map(|part| part.trim_matches(|ch| ch == ',' || ch == ';').to_string())
+    line.split_whitespace().find_map(|part| {
+        let candidate = part.trim_matches(|ch| matches!(ch, ',' | ';' | '(' | ')' | '[' | ']'));
+        expose_public_host(candidate).map(|host| format!("https://{host}"))
+    })
 }
 
 pub(super) fn expose_public_host(url: &str) -> Option<String> {
-    let host = url.strip_prefix("https://")?.split('/').next()?;
-    expose_valid_host(host).then(|| host.to_ascii_lowercase())
+    if !url.is_ascii() {
+        return None;
+    }
+    let authority = url
+        .strip_prefix("https://")?
+        .split(['/', '?', '#'])
+        .next()?;
+    if authority.contains([':', '@']) {
+        return None;
+    }
+    let parsed = url::Url::parse(url).ok()?;
+    if parsed.scheme() != "https"
+        || !parsed.username().is_empty()
+        || parsed.password().is_some()
+        || parsed.port().is_some()
+        || parsed.query().is_some()
+        || parsed.fragment().is_some()
+        || !matches!(parsed.path(), "" | "/")
+    {
+        return None;
+    }
+    let host = parsed.host_str()?.to_ascii_lowercase();
+    (host.ends_with(".trycloudflare.com")
+        && host != "trycloudflare.com"
+        && expose_valid_dns_hostname(&host))
+    .then_some(host)
+}
+
+pub(super) fn expose_valid_dns_hostname(host: &str) -> bool {
+    host.is_ascii()
+        && host.len() <= 253
+        && host.split('.').all(|label| {
+            !label.is_empty()
+                && label.len() <= 63
+                && label
+                    .bytes()
+                    .next()
+                    .is_some_and(|byte| byte.is_ascii_alphanumeric())
+                && label
+                    .bytes()
+                    .last()
+                    .is_some_and(|byte| byte.is_ascii_alphanumeric())
+                && label
+                    .bytes()
+                    .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-')
+        })
 }
