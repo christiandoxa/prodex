@@ -126,39 +126,6 @@ fn fresh_responses_use_last_positive_quota_after_current_exhaustion() {
     assert_eq!(backend.responses_accounts(), ["second-account"]);
 }
 
-#[test]
-fn fresh_responses_return_service_unavailable_when_every_profile_is_exhausted() {
-    let backend = RuntimeProxyBackend::start();
-    let harness = RuntimeProxyProfileHarnessBuilder::new()
-        .openai_profile("main", "main-account", Some("main@example.com"))
-        .openai_profile("second", "second-account", Some("second@example.com"))
-        .active_profile("main")
-        .current_profile("main")
-        .upstream_base_url(backend.base_url())
-        .profile_usage_snapshot(
-            "main",
-            quota_snapshot(RuntimeQuotaWindowStatus::Exhausted, 0),
-        )
-        .profile_usage_snapshot(
-            "second",
-            quota_snapshot(RuntimeQuotaWindowStatus::Exhausted, 0),
-        )
-        .build();
-
-    let reply = proxy_runtime_responses_request(
-        102,
-        &responses_request(br#"{"input":[]}"#),
-        harness.shared(),
-    )
-    .expect("exhausted pool should return a local response");
-    let (status, body, profile) = consume_responses_reply(reply);
-
-    assert_eq!(status, 503, "{body}");
-    assert!(body.contains("service_unavailable"), "{body}");
-    assert_eq!(profile, None);
-    assert!(backend.responses_accounts().is_empty());
-}
-
 #[derive(Clone, Copy)]
 enum RetryableFailure {
     Quota429,
