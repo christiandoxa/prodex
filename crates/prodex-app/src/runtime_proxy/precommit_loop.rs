@@ -21,6 +21,7 @@ pub(super) struct RuntimePrecommitLoopState<F> {
     pub saw_inflight_saturation: bool,
     pub saw_overload_failure: bool,
     pub recovery_sweeps: usize,
+    pub recovery_started_at: Option<Instant>,
     pub last_failure: Option<(F, bool)>,
 }
 
@@ -33,6 +34,7 @@ impl<F> RuntimePrecommitLoopState<F> {
             saw_inflight_saturation: false,
             saw_overload_failure: false,
             recovery_sweeps: 0,
+            recovery_started_at: None,
             last_failure: None,
         }
     }
@@ -88,10 +90,12 @@ impl<F> RuntimePrecommitLoopState<F> {
 
     pub fn recovery_budget_exhausted(&self) -> bool {
         self.recovery_sweeps >= runtime_proxy_crate::RUNTIME_PROXY_PRECOMMIT_RECOVERY_SWEEP_LIMIT
-            || self.selection_started_at.elapsed()
-                >= Duration::from_millis(
-                    runtime_proxy_crate::RUNTIME_PROXY_PRECOMMIT_RECOVERY_BUDGET_MS,
-                )
+            || self.recovery_started_at.is_some_and(|started_at| {
+                started_at.elapsed()
+                    >= Duration::from_millis(
+                        runtime_proxy_crate::RUNTIME_PROXY_PRECOMMIT_RECOVERY_BUDGET_MS,
+                    )
+            })
     }
 
     pub fn record_recovery_sweep(&mut self) {
@@ -107,9 +111,10 @@ impl<F> RuntimePrecommitLoopState<F> {
         if !self.saw_overload_failure || self.recovery_budget_exhausted() {
             return Ok(false);
         }
+        let recovery_started_at = *self.recovery_started_at.get_or_insert_with(Instant::now);
         let recovery_budget =
             Duration::from_millis(runtime_proxy_crate::RUNTIME_PROXY_PRECOMMIT_RECOVERY_BUDGET_MS)
-                .saturating_sub(self.selection_started_at.elapsed());
+                .saturating_sub(recovery_started_at.elapsed());
         let Some(wait) = runtime_profile_recovery_wait_for_route(shared, route_kind, true)?
             .map(|until| {
                 let now = chrono::Local::now().timestamp();

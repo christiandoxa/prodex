@@ -198,6 +198,15 @@ fn run_runtime_noncompact_standard_loop(
                     loop_state.selection_started_at.elapsed().as_millis()
                 ),
             );
+            if session_profile.is_none()
+                && loop_state.maybe_wait_for_transient_recovery(
+                    request_id,
+                    shared,
+                    RuntimeRouteKind::Standard,
+                )?
+            {
+                continue;
+            }
             return Ok(runtime_proxy_final_retryable_http_failure_response(
                 loop_state.last_failure.take(),
                 loop_state.saw_inflight_saturation,

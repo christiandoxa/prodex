@@ -48,7 +48,7 @@ impl<'a> RuntimeWebsocketTextMessageFlow<'a> {
             }
 
             let Some(candidate_name) = self.select_candidate()? else {
-                match self.handle_candidate_exhausted(selection_started_at)? {
+                match self.handle_candidate_exhausted()? {
                     RuntimeWebsocketMessageLoopAction::Continue => continue,
                     RuntimeWebsocketMessageLoopAction::Finished => return Ok(()),
                 }
@@ -106,13 +106,15 @@ impl<'a> RuntimeWebsocketTextMessageFlow<'a> {
         Ok(selection_attempts >= attempt_limit
             || self.recovery_sweeps
                 >= runtime_proxy_crate::RUNTIME_PROXY_PRECOMMIT_RECOVERY_SWEEP_LIMIT
-            || selection_started_at.elapsed()
-                >= std::time::Duration::from_millis(
-                    runtime_proxy_crate::RUNTIME_PROXY_PRECOMMIT_RECOVERY_BUDGET_MS,
-                ))
+            || self.recovery_started_at.is_some_and(|started_at| {
+                started_at.elapsed()
+                    >= std::time::Duration::from_millis(
+                        runtime_proxy_crate::RUNTIME_PROXY_PRECOMMIT_RECOVERY_BUDGET_MS,
+                    )
+            }))
     }
 
-    fn wait_for_transient_recovery(&mut self, selection_started_at: Instant) -> Result<bool> {
+    fn wait_for_transient_recovery(&mut self) -> Result<bool> {
         if !self.saw_overload_failure
             || self.recovery_sweeps
                 >= runtime_proxy_crate::RUNTIME_PROXY_PRECOMMIT_RECOVERY_SWEEP_LIMIT
@@ -127,10 +129,13 @@ impl<'a> RuntimeWebsocketTextMessageFlow<'a> {
         else {
             return Ok(false);
         };
+        let recovery_started_at = *self
+            .recovery_started_at
+            .get_or_insert_with(std::time::Instant::now);
         let now = chrono::Local::now().timestamp();
         let recovery_budget =
             Duration::from_millis(runtime_proxy_crate::RUNTIME_PROXY_PRECOMMIT_RECOVERY_BUDGET_MS)
-                .saturating_sub(selection_started_at.elapsed());
+                .saturating_sub(recovery_started_at.elapsed());
         let wait =
             std::time::Duration::from_secs(u64::try_from(until.saturating_sub(now)).unwrap_or(0))
                 .min(recovery_budget);
@@ -214,7 +219,7 @@ impl<'a> RuntimeWebsocketTextMessageFlow<'a> {
             self.send_final_failure()?;
             return Ok(RuntimeWebsocketMessageLoopAction::Finished);
         }
-        if self.wait_for_transient_recovery(selection_started_at)? {
+        if self.wait_for_transient_recovery()? {
             return Ok(RuntimeWebsocketMessageLoopAction::Continue);
         }
         if let Some(action) = self.try_direct_current_profile_fallback(
@@ -228,7 +233,6 @@ impl<'a> RuntimeWebsocketTextMessageFlow<'a> {
 
     pub(super) fn handle_candidate_exhausted(
         &mut self,
-        selection_started_at: Instant,
     ) -> Result<RuntimeWebsocketMessageLoopAction> {
         runtime_proxy_log(
             self.shared,
@@ -250,7 +254,7 @@ impl<'a> RuntimeWebsocketTextMessageFlow<'a> {
             self.send_final_failure()?;
             return Ok(RuntimeWebsocketMessageLoopAction::Finished);
         }
-        if self.wait_for_transient_recovery(selection_started_at)? {
+        if self.wait_for_transient_recovery()? {
             return Ok(RuntimeWebsocketMessageLoopAction::Continue);
         }
         let remaining_cold_start_profiles =

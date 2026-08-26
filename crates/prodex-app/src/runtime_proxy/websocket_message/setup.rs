@@ -146,6 +146,7 @@ impl<'a> RuntimeWebsocketTextMessageFlow<'a> {
             saw_inflight_saturation: false,
             saw_overload_failure: false,
             recovery_sweeps: 0,
+            recovery_started_at: None,
             saw_previous_response_not_found: false,
             websocket_reuse_fresh_retry_profiles: BTreeSet::new(),
             websocket_reuse_fresh_retry_pending: false,
