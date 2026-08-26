@@ -32,6 +32,16 @@ const USERINFO_ALLOWLIST = new Map([
     },
   ],
 ]);
+const PATH_ALLOWLIST = new Map([
+  [
+    "crates/prodex-app/src/expose/mcp.rs",
+    {
+      match: '"{}/pdx/v1/{capability}',
+      maxHits: 1,
+      reason: "the one intentional initial ChatGPT capability URL constructor; the capability is already digest-only everywhere else",
+    },
+  ],
+]);
 const DOCUMENTED_SECRET_ARG = new RegExp(
   `^\\s*(?:\\$\\s*)?prodex\\b[^\\n]*--${SENSITIVE}(?:=|\\s+\\S)`,
   "gimu",
@@ -116,6 +126,7 @@ const TEST_PATH = /(?:^|\/)(?:tests?|fixtures?|[^/]+_tests?)(?:\/|$)|(?:^|\/)(?:
 
 // Compatibility debt only: new occurrences exhaust these per-file budgets and fail.
 const LEGACY_SECRET_FLAG_BUDGET = new Map([
+  ["crates/prodex-cli/src/lib.rs:api-key", 1],
   ["crates/prodex-cli/src/runtime_args.rs:api-key", 1],
   ["crates/prodex-cli/src/runtime_args.rs:auth-token", 1],
   ["crates/prodex-cli/src/runtime_args/launch_args.rs:api-key", 1],
@@ -163,6 +174,7 @@ export function validateFiles(files) {
 
   for (const { filePath, contents } of files) {
     let allowedUserinfoHits = 0;
+    let allowedPathHits = 0;
     LONG_OPTION.lastIndex = 0;
     for (const match of contents.matchAll(LONG_OPTION)) {
       recordFlag(filePath, contents, match.index, match[1]);
@@ -196,6 +208,16 @@ export function validateFiles(files) {
           allowedUserinfoHits < allowance.maxHits
         ) {
           allowedUserinfoHits += 1;
+          continue;
+        }
+        const pathAllowance = PATH_ALLOWLIST.get(filePath);
+        if (
+          pattern === PATH_CAPABILITY &&
+          pathAllowance &&
+          match[0] === pathAllowance.match &&
+          allowedPathHits < pathAllowance.maxHits
+        ) {
+          allowedPathHits += 1;
           continue;
         }
         pushViolation(violations, filePath, contents, match.index, kind);
@@ -323,6 +345,32 @@ function selfTest() {
     },
   ]);
   assert.equal(repeatedKiroUserinfo.length, 1, "Kiro URL userinfo allowance exceeded one hit");
+
+  const publicCapabilityPath = validateFiles([
+    {
+      filePath: "crates/prodex-app/src/expose/mcp.rs",
+      contents: 'format!("{}/pdx/v1/{capability}/mcp", origin)',
+    },
+  ]);
+  assert.deepEqual(
+    publicCapabilityPath,
+    [],
+    "initial expose capability URL should be narrowly allowlisted",
+  );
+  const repeatedPublicCapabilityPath = validateFiles([
+    {
+      filePath: "crates/prodex-app/src/expose/mcp.rs",
+      contents: [
+        'format!("{}/pdx/v1/{capability}/mcp", first)',
+        'format!("{}/pdx/v1/{capability}/mcp", second)',
+      ].join("\n"),
+    },
+  ]);
+  assert.equal(
+    repeatedPublicCapabilityPath.length,
+    1,
+    "public capability URL allowance exceeded one constructor",
+  );
 
   for (const [contents, expected] of [
     ['#[derive(Args)] struct Bad { #[arg(long = "secret")] pub secret: String }', "CLI flag"],

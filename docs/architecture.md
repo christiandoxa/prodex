@@ -46,6 +46,41 @@ Common command edit points:
 - Profile commands: `crates/prodex-app/src/profile_commands`, `prodex-profile-identity`, `prodex-profile-export`, `prodex-shared-codex-fs`.
 - Release metadata: root `Cargo.toml`, crate manifests, lockfile, npm manifests, and versioned docs snippets. Parent release flow wires those together; avoid touching release metadata unless assigned.
 
+## ChatGPT Expose Composition
+
+The ChatGPT convenience path is an additive composition around the existing
+browser expose subsystem:
+
+```text
+ChatGPT
+  -> Cloudflare Quick Tunnel
+  -> loopback HTTP listener
+  -> exact capability + public Host policy
+  -> Streamable HTTP JSON MCP adapter
+  -> process-local run manager
+  -> normal `prodex s exec -` child
+  -> shared Super/runtime/profile routing
+```
+
+`prodex s expose` binds the listener to `127.0.0.1:0`, captures one canonical
+initial workspace, configures Super before generating a capability, and starts
+one directly invoked `cloudflared tunnel --protocol http2 --url ...` child. The
+public default admits only `/pdx/v1/<capability>/mcp`; `prodex expose --tunnel`
+and `prodex s expose --tunnel` retain the explicit browser-terminal behavior.
+
+The MCP layer owns ingress validation, protocol schemas, bounded run lifecycle,
+and redacted status/events/results. It does not own model selection, provider
+routing, quota, auto-rotation, Codex continuation, optional tools, or account
+selection. A run task is delivered over stdin, not argv, and the child uses the
+same Super argument/runtime path as local execution.
+
+An expose process is the isolation unit for active state: capability digest,
+workspace, server identity, tunnel, run manager, event/output rings, and child
+process groups are not shared. Multiple processes may still share the existing
+merge-safe `PRODEX_HOME` profile/quota/health and durable-preference state. The
+MCP endpoint is intentionally not a filesystem sandbox beyond the underlying
+Super permission model; documentation must reflect that full-access caveat.
+
 ## Runtime Proxy Hot Path
 
 Runtime launch and proxy flow:

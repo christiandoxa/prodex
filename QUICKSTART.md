@@ -154,7 +154,48 @@ shell-free argument vector. Parent UUIDs are never inherited. See
 [Sub-agents](docs/sub-agents.md) for resume affinity, model catalogs,
 limit-reached behavior, instruction injection, dry-run output, and MVP limits.
 
-## 6. Select another provider
+## 6. Connect ChatGPT to Super
+
+From the workspace you want to expose:
+
+```bash
+prodex s expose
+```
+
+Interactive setup asks for the main agent, main model, model-aware reasoning
+effort, and optional sub-agent model/effort configuration before starting any
+listener or Cloudflare process. In a headless shell, use existing options such
+as `--model` and `-c 'model_reasoning_effort="max"'`; explicit values win and
+stdin is never read indefinitely.
+
+After public MCP readiness is verified, paste the printed URL into ChatGPT:
+
+```text
+Settings → Security and login → Developer mode → Plugins → + → Public MCP server URL
+```
+
+The URL ends in `/mcp` and contains a fresh ephemeral full-Super capability.
+Anyone with the full URL can control that expose process, so treat it as a
+credential. This is not OAuth and is for personal development only. No
+Cloudflare account or initialization is required, but `cloudflared` must be
+installed. Quick Tunnel mode uses JSON responses and run polling instead of
+SSE. Stop the process with Ctrl+C to revoke access.
+
+To use parallel workspaces, create separate worktrees and run one process in
+each; every process has its own port, hostname, capability, server identity,
+configuration, and run manager:
+
+```bash
+git worktree add ../feature-a -b feature/a
+git worktree add ../feature-b -b feature/b
+cd ../feature-a && prodex s expose --name feature-a
+cd ../feature-b && prodex s expose --name feature-b
+```
+
+See [ChatGPT MCP expose](docs/expose.md) for route isolation, tool lifecycle,
+workspace binding, and security limits.
+
+## 7. Select another provider
 
 Examples:
 

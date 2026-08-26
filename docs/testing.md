@@ -486,3 +486,26 @@ Use `node scripts/ci/test-fast.mjs --no-prebuild` when measuring cold parallel b
 Run `node scripts/ci/domain-boundary-guard.mjs --self-test && node scripts/ci/domain-boundary-guard.mjs` after changing `crates/prodex-domain/Cargo.toml` or moving security/accounting identifiers between crates. The guard keeps `prodex-domain` pure by rejecting HTTP, CLI, database, async-runtime, transport, filesystem/process/network, and provider/runtime dependencies and source imports; use `node scripts/ci/domain-boundary-guard.mjs --self-test` after changing the guard itself.
 
 Use `cargo test --locked -q -p prodex-app --lib gateway_admin_auth -- --test-threads=1 && cargo test --locked -q -p prodex-app --lib gateway_usage -- --test-threads=1` after touching gateway admin authentication, OIDC/JWKS admin auth, data-plane auth separation, or gateway usage/budget enforcement. It runs the focused `gateway_admin_auth` and `gateway_usage` `prodex-app` suites that cover missing/unknown role fallback, stale JWKS request-path behavior, admin-token rejection on inference routes, and gateway usage/accounting auth invariants.
+
+## ChatGPT expose
+
+Run the focused expose suites with isolated fake children:
+
+```bash
+cargo test --locked -q -p prodex-app --lib expose -- --test-threads=1
+cargo test --locked -q -p prodex-app --lib run_manager_tests -- --test-threads=1
+cargo test --locked -q -p prodex-app --lib expose_config_tests -- --test-threads=1
+cargo test --locked -q -p prodex-cli expose
+```
+
+These tests use no provider credentials or live Cloudflare. They cover the
+JSON-only Streamable HTTP route, capability and Host isolation, explicit run
+handles, secure stdin task transport, model/effort inheritance, bounded
+events/results, three concurrent workspaces, and child-tree cancellation.
+
+Live validation is separate and must be reported honestly: with an installed
+`cloudflared`, run `prodex s expose`, perform MCP `server/discover` or
+`initialize`, `tools/list`, and a safe local run through the public URL, then
+stop the process and confirm revocation. Interactive ChatGPT Developer Mode
+testing is optional environment evidence; MCP Inspector or an equivalent
+protocol client does not prove the ChatGPT UI path was executed.
