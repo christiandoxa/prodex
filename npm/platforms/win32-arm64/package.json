@@ -1,6 +1,6 @@
 {
   "name": "@christiandoxa/prodex-win32-arm64",
-  "version": "0.416.1",
+  "version": "0.416.2",
   "private": true,
   "description": "Native prodex binary for aarch64-pc-windows-msvc",
   "license": "Apache-2.0",
