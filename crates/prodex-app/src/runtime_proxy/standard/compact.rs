@@ -59,7 +59,7 @@ pub(super) fn proxy_runtime_compact_request(
         })
         .transpose()?
         .flatten();
-    let mut session_profile = request_session_id
+    let session_profile = request_session_id
         .as_deref()
         .map(|session_id| runtime_session_bound_profile(shared, session_id))
         .transpose()?
@@ -103,7 +103,7 @@ pub(super) fn proxy_runtime_compact_request(
     let pressure_mode =
         runtime_proxy_pressure_mode_active_for_route(shared, RuntimeRouteKind::Compact);
     let selection_started_at = Instant::now();
-    let mut selection_attempts = 0usize;
+    let selection_attempts = 0usize;
     if runtime_proxy_should_shed_fresh_compact_request(
         pressure_mode,
         initial_compact_affinity_profile,
@@ -116,218 +116,312 @@ pub(super) fn proxy_runtime_compact_request(
             pressure_mode,
         ));
     }
-    let mut excluded_profiles = BTreeSet::new();
-    let mut auto_redeemed_profiles = BTreeSet::new();
-    let mut conservative_overload_retried_profiles = BTreeSet::new();
-    let mut last_failure: Option<(tiny_http::ResponseBox, bool)> = None;
-    let mut saw_inflight_saturation = false;
-    let mut saw_transport_failure = false;
-    let mut saw_overload_failure = false;
-    let mut recovery_sweeps = 0usize;
-    let can_wait_for_overload_recovery = request_previous_response_id.is_none()
-        && request_turn_state.is_none()
-        && request_session_id.is_none();
+    let excluded_profiles = BTreeSet::new();
+    let auto_redeemed_profiles = BTreeSet::new();
+    let conservative_overload_retried_profiles = BTreeSet::new();
+    let last_failure: Option<(tiny_http::ResponseBox, bool)> = None;
+    let saw_inflight_saturation = false;
+    let saw_transport_failure = false;
+    run_runtime_compact_selection(RuntimeCompactSelectionContext {
+        request_id,
+        request,
+        shared,
+        request_model_name,
+        request_previous_response_id,
+        request_session_id,
+        request_turn_state,
+        previous_response_profile,
+        current_profile,
+        compact_followup_profile,
+        session_profile,
+        compact_owner_profile,
+        pressure_mode,
+        selection_started_at,
+        selection_attempts,
+        excluded_profiles,
+        auto_redeemed_profiles,
+        conservative_overload_retried_profiles,
+        last_failure,
+        saw_inflight_saturation,
+        saw_transport_failure,
+        saw_overload_failure: false,
+        recovery_sweeps: 0,
+    })
+}
 
+struct RuntimeCompactSelectionContext<'a> {
+    request_id: u64,
+    request: &'a RuntimeProxyRequest,
+    shared: &'a RuntimeRotationProxyShared,
+    request_model_name: Option<String>,
+    request_previous_response_id: Option<String>,
+    request_session_id: Option<String>,
+    request_turn_state: Option<String>,
+    previous_response_profile: Option<String>,
+    current_profile: String,
+    compact_followup_profile: Option<(String, &'static str)>,
+    session_profile: Option<String>,
+    compact_owner_profile: String,
+    pressure_mode: bool,
+    selection_started_at: Instant,
+    selection_attempts: usize,
+    excluded_profiles: BTreeSet<String>,
+    auto_redeemed_profiles: BTreeSet<String>,
+    conservative_overload_retried_profiles: BTreeSet<String>,
+    last_failure: Option<(tiny_http::ResponseBox, bool)>,
+    saw_inflight_saturation: bool,
+    saw_transport_failure: bool,
+    saw_overload_failure: bool,
+    recovery_sweeps: usize,
+}
+
+enum RuntimeCompactLoopAction {
+    Continue,
+    Attempt(String),
+    Return(tiny_http::ResponseBox),
+}
+
+fn run_runtime_compact_selection(
+    mut context: RuntimeCompactSelectionContext<'_>,
+) -> Result<tiny_http::ResponseBox> {
     loop {
-        if runtime_proxy_precommit_budget_exhausted_for_route(
-            shared,
-            selection_started_at,
-            selection_attempts,
-            request_previous_response_id.is_some()
-                || request_turn_state.is_some()
-                || compact_followup_profile.is_some()
-                || session_profile.is_some(),
-            pressure_mode,
-        )? {
-            runtime_proxy_log(
-                shared,
-                format!(
-                    "request={request_id} transport=http compact_precommit_budget_exhausted attempts={selection_attempts} elapsed_ms={} pressure_mode={pressure_mode}",
-                    selection_started_at.elapsed().as_millis()
-                ),
-            );
-            if can_wait_for_overload_recovery
-                && saw_overload_failure
-                && wait_for_compact_overload_recovery(
-                    request_id,
-                    shared,
-                    &mut excluded_profiles,
-                    &mut recovery_sweeps,
-                    selection_started_at,
-                )?
-            {
-                continue;
+        if let Some(action) = context.budget_action()? {
+            match action {
+                RuntimeCompactLoopAction::Continue => continue,
+                RuntimeCompactLoopAction::Attempt(_) => unreachable!(),
+                RuntimeCompactLoopAction::Return(response) => return Ok(response),
             }
-            return finish_runtime_proxy_compact_selection_exhausted(
-                RuntimeProxyCompactSelectionExhausted {
-                    request_id,
-                    request,
-                    shared,
-                    compact_owner_profile: &compact_owner_profile,
-                    previous_response_id: request_previous_response_id.as_deref(),
-                    previous_response_profile: previous_response_profile.as_deref(),
-                    strict_affinity_profile: compact_followup_profile
-                        .as_ref()
-                        .map(|(profile_name, _)| profile_name.as_str()),
-                    session_profile: session_profile.as_deref(),
-                    selection_attempts,
-                    selection_started_at,
-                    pressure_mode,
-                    exit: "precommit_budget_exhausted",
-                    fallback_exit: "precommit_budget_exhausted_fallback",
-                    saw_transport_failure,
-                },
-                last_failure,
-                saw_inflight_saturation,
-            );
         }
-        let Some(candidate_name) = select_runtime_response_candidate_for_route_with_request(
-            shared,
+        let action = context.next_action()?;
+        let RuntimeCompactLoopAction::Attempt(candidate_name) = action else {
+            return match action {
+                RuntimeCompactLoopAction::Continue => continue,
+                RuntimeCompactLoopAction::Return(response) => Ok(response),
+                RuntimeCompactLoopAction::Attempt(_) => unreachable!(),
+            };
+        };
+        if let Some(response) = context.attempt_candidate(candidate_name)? {
+            return Ok(response);
+        }
+    }
+}
+
+impl RuntimeCompactSelectionContext<'_> {
+    fn budget_action(&mut self) -> Result<Option<RuntimeCompactLoopAction>> {
+        let continuation = self.request_previous_response_id.is_some()
+            || self.request_turn_state.is_some()
+            || self.compact_followup_profile.is_some()
+            || self.session_profile.is_some();
+        if !runtime_proxy_precommit_budget_exhausted_for_route(
+            self.shared,
+            self.selection_started_at,
+            self.selection_attempts,
+            continuation,
+            self.pressure_mode,
+        )? {
+            return Ok(None);
+        }
+        runtime_proxy_log(
+            self.shared,
+            format!(
+                "request={} transport=http compact_precommit_budget_exhausted attempts={} elapsed_ms={} pressure_mode={}",
+                self.request_id,
+                self.selection_attempts,
+                self.selection_started_at.elapsed().as_millis(),
+                self.pressure_mode
+            ),
+        );
+        if self.can_wait_for_overload_recovery() && self.wait_for_overload_recovery()? {
+            return Ok(Some(RuntimeCompactLoopAction::Continue));
+        }
+        Ok(Some(RuntimeCompactLoopAction::Return(self.finish(
+            "precommit_budget_exhausted",
+            "precommit_budget_exhausted_fallback",
+        )?)))
+    }
+
+    fn next_action(&mut self) -> Result<RuntimeCompactLoopAction> {
+        let candidate = select_runtime_response_candidate_for_route_with_request(
+            self.shared,
             RuntimeResponseCandidateSelection {
-                strict_affinity_profile: compact_followup_profile
+                strict_affinity_profile: self
+                    .compact_followup_profile
                     .as_ref()
                     .map(|(profile_name, _)| profile_name.as_str()),
-                pinned_profile: previous_response_profile.as_deref(),
-                session_profile: session_profile.as_deref(),
-                discover_previous_response_owner: request_previous_response_id.is_some(),
-                previous_response_id: request_previous_response_id.as_deref(),
+                pinned_profile: self.previous_response_profile.as_deref(),
+                session_profile: self.session_profile.as_deref(),
+                discover_previous_response_owner: self.request_previous_response_id.is_some(),
+                previous_response_id: self.request_previous_response_id.as_deref(),
                 ..RuntimeResponseCandidateSelection::fresh(
-                    &excluded_profiles,
+                    &self.excluded_profiles,
                     RuntimeRouteKind::Compact,
                 )
             },
-            Some(request_id),
-            request_model_name.as_deref(),
-        )?
-        else {
+            Some(self.request_id),
+            self.request_model_name.as_deref(),
+        )?;
+        let Some(candidate) = candidate else {
+            return self.no_candidate_action();
+        };
+        if self.excluded_profiles.contains(&candidate) {
+            return Ok(RuntimeCompactLoopAction::Continue);
+        }
+        Ok(RuntimeCompactLoopAction::Attempt(candidate))
+    }
+
+    fn no_candidate_action(&mut self) -> Result<RuntimeCompactLoopAction> {
+        runtime_proxy_log(
+            self.shared,
+            format!(
+                "request={} transport=http compact_candidate_exhausted last_failure={}",
+                self.request_id,
+                if self.last_failure.is_some() {
+                    "http"
+                } else {
+                    "none"
+                }
+            ),
+        );
+        let remaining_cold_start_profiles =
+            runtime_remaining_sync_probe_cold_start_profiles_for_route(
+                self.shared,
+                &self.excluded_profiles,
+                RuntimeRouteKind::Compact,
+            )?;
+        if remaining_cold_start_profiles > 0 && self.is_fresh_request() {
             runtime_proxy_log(
-                shared,
+                self.shared,
                 format!(
-                    "request={request_id} transport=http compact_candidate_exhausted last_failure={}",
-                    if last_failure.is_some() {
-                        "http"
-                    } else {
-                        "none"
-                    }
+                    "request={} transport=http candidate_exhausted_continue route=compact remaining_cold_start_profiles={remaining_cold_start_profiles}",
+                    self.request_id
                 ),
             );
-            let remaining_cold_start_profiles =
-                runtime_remaining_sync_probe_cold_start_profiles_for_route(
-                    shared,
-                    &excluded_profiles,
-                    RuntimeRouteKind::Compact,
-                )?;
-            if remaining_cold_start_profiles > 0
-                && request_previous_response_id.is_none()
-                && request_turn_state.is_none()
-                && compact_followup_profile.is_none()
-                && session_profile.is_none()
-            {
-                runtime_proxy_log(
-                    shared,
-                    format!(
-                        "request={request_id} transport=http candidate_exhausted_continue route=compact remaining_cold_start_profiles={remaining_cold_start_profiles}"
-                    ),
-                );
-                runtime_proxy_probe_refresh_pause(shared, RuntimeRouteKind::Compact);
-                continue;
-            }
-            if can_wait_for_overload_recovery
-                && saw_overload_failure
-                && wait_for_compact_overload_recovery(
-                    request_id,
-                    shared,
-                    &mut excluded_profiles,
-                    &mut recovery_sweeps,
-                    selection_started_at,
-                )?
-            {
-                continue;
-            }
-            return finish_runtime_proxy_compact_selection_exhausted(
-                RuntimeProxyCompactSelectionExhausted {
-                    request_id,
-                    request,
-                    shared,
-                    compact_owner_profile: &compact_owner_profile,
-                    previous_response_id: request_previous_response_id.as_deref(),
-                    previous_response_profile: previous_response_profile.as_deref(),
-                    strict_affinity_profile: compact_followup_profile
-                        .as_ref()
-                        .map(|(profile_name, _)| profile_name.as_str()),
-                    session_profile: session_profile.as_deref(),
-                    selection_attempts,
-                    selection_started_at,
-                    pressure_mode,
-                    exit: "candidate_exhausted",
-                    fallback_exit: "candidate_exhausted_fallback",
-                    saw_transport_failure,
-                },
-                last_failure,
-                saw_inflight_saturation,
-            );
-        };
-        if excluded_profiles.contains(&candidate_name) {
-            continue;
+            runtime_proxy_probe_refresh_pause(self.shared, RuntimeRouteKind::Compact);
+            return Ok(RuntimeCompactLoopAction::Continue);
         }
-        selection_attempts = selection_attempts.saturating_add(1);
+        if self.can_wait_for_overload_recovery() && self.wait_for_overload_recovery()? {
+            return Ok(RuntimeCompactLoopAction::Continue);
+        }
+        Ok(RuntimeCompactLoopAction::Return(self.finish(
+            "candidate_exhausted",
+            "candidate_exhausted_fallback",
+        )?))
+    }
+
+    fn attempt_candidate(
+        &mut self,
+        candidate_name: String,
+    ) -> Result<Option<tiny_http::ResponseBox>> {
+        self.selection_attempts = self.selection_attempts.saturating_add(1);
         log_runtime_proxy_compact_candidate(
-            request_id,
-            shared,
+            self.request_id,
+            self.shared,
             &candidate_name,
-            excluded_profiles.len(),
+            self.excluded_profiles.len(),
         );
         let candidate_has_hard_affinity = runtime_compact_route_candidate_has_hard_affinity(
             &candidate_name,
-            &compact_followup_profile,
-            previous_response_profile.as_deref(),
-            session_profile.as_deref(),
+            &self.compact_followup_profile,
+            self.previous_response_profile.as_deref(),
+            self.session_profile.as_deref(),
         );
         if runtime_compact_candidate_inflight_saturated(
-            request_id,
-            shared,
+            self.request_id,
+            self.shared,
             &candidate_name,
             candidate_has_hard_affinity,
         )? {
-            excluded_profiles.insert(candidate_name);
-            saw_inflight_saturation = true;
-            continue;
+            self.excluded_profiles.insert(candidate_name);
+            self.saw_inflight_saturation = true;
+            return Ok(None);
         }
-
         let attempt = attempt_runtime_standard_request(
-            request_id,
-            request,
-            shared,
+            self.request_id,
+            self.request,
+            self.shared,
             &candidate_name,
             candidate_has_hard_affinity,
             candidate_has_hard_affinity,
         )?;
-        if let Some(response) = handle_runtime_compact_attempt(
+        handle_runtime_compact_attempt(
             RuntimeCompactAttemptContext {
-                request_id,
-                shared,
+                request_id: self.request_id,
+                shared: self.shared,
                 candidate_has_hard_affinity,
-                previous_response_profile: previous_response_profile.as_deref(),
-                request_session_id: request_session_id.as_deref(),
-                request_turn_state: request_turn_state.as_deref(),
-                current_profile: &current_profile,
-                compact_followup_profile: &mut compact_followup_profile,
-                session_profile: &mut session_profile,
-                auto_redeemed_profiles: &mut auto_redeemed_profiles,
-                conservative_overload_retried_profiles: &mut conservative_overload_retried_profiles,
-                excluded_profiles: &mut excluded_profiles,
-                last_failure: &mut last_failure,
-                selection_attempts,
-                selection_started_at,
-                pressure_mode,
-                saw_inflight_saturation: &mut saw_inflight_saturation,
-                saw_transport_failure: &mut saw_transport_failure,
-                saw_overload_failure: &mut saw_overload_failure,
+                previous_response_profile: self.previous_response_profile.as_deref(),
+                request_session_id: self.request_session_id.as_deref(),
+                request_turn_state: self.request_turn_state.as_deref(),
+                current_profile: &self.current_profile,
+                compact_followup_profile: &mut self.compact_followup_profile,
+                session_profile: &mut self.session_profile,
+                auto_redeemed_profiles: &mut self.auto_redeemed_profiles,
+                conservative_overload_retried_profiles: &mut self
+                    .conservative_overload_retried_profiles,
+                excluded_profiles: &mut self.excluded_profiles,
+                last_failure: &mut self.last_failure,
+                selection_attempts: self.selection_attempts,
+                selection_started_at: self.selection_started_at,
+                pressure_mode: self.pressure_mode,
+                saw_inflight_saturation: &mut self.saw_inflight_saturation,
+                saw_transport_failure: &mut self.saw_transport_failure,
+                saw_overload_failure: &mut self.saw_overload_failure,
             },
             attempt,
-        )? {
-            return Ok(response);
-        }
+        )
+    }
+
+    fn is_fresh_request(&self) -> bool {
+        self.request_previous_response_id.is_none()
+            && self.request_turn_state.is_none()
+            && self.compact_followup_profile.is_none()
+            && self.session_profile.is_none()
+    }
+
+    fn can_wait_for_overload_recovery(&self) -> bool {
+        self.request_previous_response_id.is_none()
+            && self.request_turn_state.is_none()
+            && self.request_session_id.is_none()
+            && self.saw_overload_failure
+    }
+
+    fn wait_for_overload_recovery(&mut self) -> Result<bool> {
+        wait_for_compact_overload_recovery(
+            self.request_id,
+            self.shared,
+            &mut self.excluded_profiles,
+            &mut self.recovery_sweeps,
+            self.selection_started_at,
+        )
+    }
+
+    fn finish(
+        &mut self,
+        exit: &'static str,
+        fallback_exit: &'static str,
+    ) -> Result<tiny_http::ResponseBox> {
+        finish_runtime_proxy_compact_selection_exhausted(
+            RuntimeProxyCompactSelectionExhausted {
+                request_id: self.request_id,
+                request: self.request,
+                shared: self.shared,
+                compact_owner_profile: &self.compact_owner_profile,
+                previous_response_id: self.request_previous_response_id.as_deref(),
+                previous_response_profile: self.previous_response_profile.as_deref(),
+                strict_affinity_profile: self
+                    .compact_followup_profile
+                    .as_ref()
+                    .map(|(profile_name, _)| profile_name.as_str()),
+                session_profile: self.session_profile.as_deref(),
+                selection_attempts: self.selection_attempts,
+                selection_started_at: self.selection_started_at,
+                pressure_mode: self.pressure_mode,
+                exit,
+                fallback_exit,
+                saw_transport_failure: self.saw_transport_failure,
+            },
+            self.last_failure.take(),
+            self.saw_inflight_saturation,
+        )
     }
 }
 
