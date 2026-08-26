@@ -98,6 +98,7 @@ pub(super) use runtime_proxy_crate::{
     runtime_noncompact_session_priority_profile,
     runtime_proxy_allows_direct_current_profile_fallback, runtime_proxy_has_continuation_priority,
     runtime_proxy_normalize_openai_path, runtime_proxy_precommit_budget,
+    runtime_proxy_precommit_budget_for_profile_count,
     runtime_record_previous_response_not_found_retry_state, runtime_wait_affinity_owner,
 };
 

@@ -227,15 +227,9 @@ def prodex_runtime_optimistic_current_candidate_decision(
             return OPTIMISTIC_CANDIDATE_STALE_PERSISTED_QUOTA
         return OPTIMISTIC_CANDIDATE_QUOTA_PROBE
 
-    if quota_band > 0 and not (
-        quota_band == 4 and has_alternative_quota_compatible_profile == 0
-    ):
-        if quota_band == 1:
-            return OPTIMISTIC_CANDIDATE_QUOTA_THIN
-        if quota_band == 2:
-            return OPTIMISTIC_CANDIDATE_QUOTA_CRITICAL
-        if quota_band == 3:
-            return OPTIMISTIC_CANDIDATE_QUOTA_EXHAUSTED
+    if quota_band == 3:
+        return OPTIMISTIC_CANDIDATE_QUOTA_EXHAUSTED
+    if quota_band == 4 and has_alternative_quota_compatible_profile == 1:
         return OPTIMISTIC_CANDIDATE_QUOTA_UNKNOWN
     if inflight_count >= inflight_soft_limit:
         return OPTIMISTIC_CANDIDATE_INFLIGHT

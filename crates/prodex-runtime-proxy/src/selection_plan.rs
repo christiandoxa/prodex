@@ -20,6 +20,53 @@ pub type RuntimeResponseQuotaPressureSortKey = (
     i64,
 );
 
+/// The selection-visible state of a profile for one route.
+///
+/// Quota pressure is intentionally not a state here: positive quota remains available and is
+/// ordered by pressure. Only authoritative exhaustion is hard-unusable.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum RuntimeProfileAvailabilityState {
+    Ready,
+    QuotaExhausted,
+    TransientBackoff,
+    AuthInvalid,
+    Unknown,
+}
+
+impl RuntimeProfileAvailabilityState {
+    pub fn is_hard_unusable(self) -> bool {
+        matches!(self, Self::QuotaExhausted | Self::AuthInvalid)
+    }
+
+    pub fn skip_reason(self) -> Option<&'static str> {
+        match self {
+            Self::Ready | Self::Unknown => None,
+            Self::QuotaExhausted => Some("quota_exhausted_before_send"),
+            Self::TransientBackoff => Some("selection_backoff"),
+            Self::AuthInvalid => Some("auth_failure_backoff"),
+        }
+    }
+}
+
+pub fn runtime_profile_availability_state(
+    auth_failure_active: bool,
+    in_selection_backoff: bool,
+    quota_summary: RuntimeSelectionQuotaSummary,
+    quota_guard_reason: Option<&'static str>,
+) -> RuntimeProfileAvailabilityState {
+    if auth_failure_active {
+        RuntimeProfileAvailabilityState::AuthInvalid
+    } else if quota_guard_reason.is_some() {
+        RuntimeProfileAvailabilityState::QuotaExhausted
+    } else if in_selection_backoff {
+        RuntimeProfileAvailabilityState::TransientBackoff
+    } else if quota_summary.route_band == RuntimeSelectionQuotaPressureBand::Unknown {
+        RuntimeProfileAvailabilityState::Unknown
+    } else {
+        RuntimeProfileAvailabilityState::Ready
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct RuntimeResponseCandidatePlanInput {
     pub name: String,
@@ -83,24 +130,27 @@ pub struct RuntimeResponsePlannedCandidate {
     pub provider_priority: usize,
     pub quota_sort_key: RuntimeResponseQuotaPressureSortKey,
     pub in_selection_backoff: bool,
+    pub availability: RuntimeProfileAvailabilityState,
     pub prompt_cache_affinity_sort_key: (u8, u64),
     pub jitter: u64,
 }
 
 impl RuntimeResponsePlannedCandidate {
     pub fn ready_skip_reason(&self) -> Option<&'static str> {
-        runtime_response_candidate_ready_skip_reason(
-            self.auth_failure_active,
-            self.quota_guard_reason,
-            self.inflight_soft_limited,
-        )
+        self.availability.skip_reason().or_else(|| {
+            self.inflight_soft_limited
+                .then_some(RuntimeRouteDecisionReasonKind::ProfileInflightSoftLimit.as_str())
+        })
     }
 
     pub fn fallback_skip_reason(&self) -> Option<&'static str> {
-        runtime_response_candidate_fallback_skip_reason(
-            self.auth_failure_active,
-            self.quota_guard_reason,
-        )
+        match self.availability {
+            RuntimeProfileAvailabilityState::AuthInvalid => Some("auth_failure_backoff"),
+            RuntimeProfileAvailabilityState::QuotaExhausted => Some("quota_exhausted_before_send"),
+            RuntimeProfileAvailabilityState::Ready
+            | RuntimeProfileAvailabilityState::TransientBackoff
+            | RuntimeProfileAvailabilityState::Unknown => None,
+        }
     }
 }
 
@@ -222,16 +272,16 @@ impl RuntimeOptimisticCurrentCandidatePredicate {
             Self::Availability => optimistic_current_availability_rejection(input),
             Self::QuotaEvidence => optimistic_current_quota_rejection(input),
             Self::QuotaBand => {
-                let unknown_allowed = input.quota_summary.route_band
+                let exhausted =
+                    input.quota_summary.route_band == RuntimeSelectionQuotaPressureBand::Exhausted;
+                let unknown = input.quota_summary.route_band
                     == RuntimeSelectionQuotaPressureBand::Unknown
-                    && !input.has_alternative_quota_compatible_profile;
-                (input.quota_summary.route_band > RuntimeSelectionQuotaPressureBand::Healthy
-                    && !unknown_allowed)
-                    .then_some(
-                        RuntimeOptimisticCurrentCandidateSkipReason::QuotaPressureBand(
-                            input.quota_summary.route_band,
-                        ),
-                    )
+                    && input.has_alternative_quota_compatible_profile;
+                (exhausted || unknown).then_some(
+                    RuntimeOptimisticCurrentCandidateSkipReason::QuotaPressureBand(
+                        input.quota_summary.route_band,
+                    ),
+                )
             }
             Self::Load => (input.inflight_count >= input.inflight_soft_limit)
                 .then_some(RuntimeOptimisticCurrentCandidateSkipReason::ProfileInflightSoftLimit),
@@ -521,6 +571,12 @@ pub fn build_runtime_response_candidate_execution_plan(
                 provider_priority: candidate.provider_priority,
                 quota_sort_key: candidate.quota_sort_key,
                 in_selection_backoff: candidate.in_selection_backoff,
+                availability: runtime_profile_availability_state(
+                    candidate.auth_failure_active,
+                    candidate.in_selection_backoff,
+                    candidate.quota_summary,
+                    quota_guard_reason,
+                ),
                 prompt_cache_affinity_sort_key: runtime_prompt_cache_affinity_sort_key_with_owner(
                     options.prompt_cache_key,
                     options.prompt_cache_owner_profile,

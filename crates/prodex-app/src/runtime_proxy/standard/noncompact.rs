@@ -317,6 +317,15 @@ fn runtime_noncompact_next_action(
         runtime_proxy_probe_refresh_pause(shared, RuntimeRouteKind::Standard);
         return Ok(RuntimePrecommitLoopAction::Continue);
     }
+    if !session_present
+        && loop_state.maybe_wait_for_transient_recovery(
+            request_id,
+            shared,
+            RuntimeRouteKind::Standard,
+        )?
+    {
+        return Ok(RuntimePrecommitLoopAction::Continue);
+    }
     Ok(RuntimePrecommitLoopAction::Return(
         runtime_proxy_final_retryable_http_failure_response(
             loop_state.last_failure.take(),
@@ -512,6 +521,9 @@ fn handle_runtime_noncompact_retryable(
             if overload { "overload" } else { "quota" }
         ),
     );
+    if overload {
+        loop_state.record_overload_failure();
+    }
     mark_runtime_profile_retry_backoff(shared, &profile_name)?;
     let released_affinity = if overload {
         let _ = bump_runtime_profile_health_score(

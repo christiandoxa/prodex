@@ -558,6 +558,7 @@ impl<'a> RuntimeWebsocketTextMessageFlow<'a> {
             ),
         );
         self.mark_overload_backoff(&profile_name)?;
+        self.saw_overload_failure = true;
         if !self.quota_blocked_affinity_is_releasable(
             &profile_name,
             self.request_requires_locked_previous_response_affinity(),

@@ -126,25 +126,32 @@ pub(crate) struct RuntimeResponsePlannedCandidate {
     pub(crate) backoff_sort_key: (usize, i64, i64, i64),
     pub(crate) quota_source: RuntimeQuotaSource,
     pub(crate) quota_summary: RuntimeQuotaSummary,
-    pub(crate) auth_failure_active: bool,
-    pub(crate) quota_guard_reason: Option<&'static str>,
     pub(crate) inflight_soft_limited: bool,
+    pub(crate) availability: runtime_proxy_crate::RuntimeProfileAvailabilityState,
 }
 
 impl RuntimeResponsePlannedCandidate {
     pub(crate) fn ready_skip_reason(&self) -> Option<&'static str> {
-        runtime_proxy_crate::runtime_response_candidate_ready_skip_reason(
-            self.auth_failure_active,
-            self.quota_guard_reason,
-            self.inflight_soft_limited,
-        )
+        self.availability.skip_reason().or_else(|| {
+            self.inflight_soft_limited.then_some(
+                runtime_proxy_crate::RuntimeRouteDecisionReasonKind::ProfileInflightSoftLimit
+                    .as_str(),
+            )
+        })
     }
 
     pub(crate) fn fallback_skip_reason(&self) -> Option<&'static str> {
-        runtime_proxy_crate::runtime_response_candidate_fallback_skip_reason(
-            self.auth_failure_active,
-            self.quota_guard_reason,
-        )
+        match self.availability {
+            runtime_proxy_crate::RuntimeProfileAvailabilityState::AuthInvalid => {
+                Some("auth_failure_backoff")
+            }
+            runtime_proxy_crate::RuntimeProfileAvailabilityState::QuotaExhausted => {
+                Some("quota_exhausted_before_send")
+            }
+            runtime_proxy_crate::RuntimeProfileAvailabilityState::Ready
+            | runtime_proxy_crate::RuntimeProfileAvailabilityState::TransientBackoff
+            | runtime_proxy_crate::RuntimeProfileAvailabilityState::Unknown => None,
+        }
     }
 }
 
@@ -330,9 +337,8 @@ fn runtime_response_planned_candidate_from_proxy(
         health_sort_key: candidate.health_sort_key,
         backoff_sort_key: candidate.backoff_sort_key,
         quota_source: prodex_runtime_quota::runtime_quota_source_from_proxy(candidate.quota_source),
-        auth_failure_active: candidate.auth_failure_active,
-        quota_guard_reason: candidate.quota_guard_reason,
         inflight_soft_limited: candidate.inflight_soft_limited,
+        availability: candidate.availability,
     }
 }
 

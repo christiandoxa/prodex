@@ -219,7 +219,7 @@ fn optimistic_current_candidate_skips_busy_profile() {
 }
 
 #[test]
-fn optimistic_current_candidate_skips_thin_long_lived_quota() {
+fn optimistic_current_candidate_keeps_positive_thin_quota_usable() {
     let temp_dir = TestDir::isolated();
     let main_home = temp_dir.path.join("homes/main");
     write_auth_json(&main_home.join("auth.json"), "main-account");
@@ -280,7 +280,7 @@ fn optimistic_current_candidate_skips_thin_long_lived_quota() {
     assert_eq!(
         runtime_proxy_optimistic_current_candidate(&shared, &BTreeSet::new())
             .expect("candidate lookup should succeed"),
-        None
+        Some("main".to_string())
     );
 }
 

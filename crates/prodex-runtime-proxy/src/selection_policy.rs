@@ -356,11 +356,11 @@ pub fn runtime_quota_precommit_floor_percent_for_route(
 
 pub fn runtime_quota_window_precommit_guard(
     window: RuntimeSelectionQuotaWindowSummary,
-    floor_percent: i64,
+    _floor_percent: i64,
 ) -> bool {
+    // A displayed percentage is rounded and is not authoritative exhaustion evidence. The
+    // upstream error response (or an exact zero snapshot) decides whether a request is blocked.
     matches!(window.status, RuntimeSelectionQuotaWindowStatus::Exhausted)
-        || (!matches!(window.status, RuntimeSelectionQuotaWindowStatus::Unknown)
-            && window.remaining_percent < floor_percent.max(1))
 }
 
 pub fn runtime_quota_precommit_guard_reason(
