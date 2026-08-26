@@ -144,6 +144,7 @@ impl<'a> RuntimeWebsocketTextMessageFlow<'a> {
             candidate_turn_state_retry_value: None,
             quota_last_chance_profile: None,
             saw_inflight_saturation: false,
+            saw_transport_failure: false,
             saw_overload_failure: false,
             recovery_sweeps: 0,
             recovery_started_at: None,

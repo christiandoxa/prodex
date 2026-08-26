@@ -291,6 +291,7 @@ impl<'a> RuntimeWebsocketTextMessageFlow<'a> {
                 self.request_id, self.session_id, profile_name, stage, via_suffix
             ),
         );
+        self.saw_transport_failure = true;
         self.excluded_profiles.insert(profile_name);
         self.last_failure = Some((
             RuntimeUpstreamFailureResponse::Websocket(RuntimeWebsocketErrorPayload::Text(
