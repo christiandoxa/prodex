@@ -355,6 +355,15 @@ fn handle_runtime_responses_budget_exhausted(
             ),
         ))));
     }
+    if affinity_state.wait_affinity_owner().is_none()
+        && loop_state.maybe_wait_for_transient_recovery(
+            context.request_id,
+            context.shared,
+            RuntimeRouteKind::Responses,
+        )?
+    {
+        return Ok(Some(RuntimeResponsesLoopControl::Continue));
+    }
     if let Some(action) = try_runtime_responses_direct_current_profile_fallback(
         RuntimeResponsesDirectCurrentFallback {
             request_id: context.request_id,

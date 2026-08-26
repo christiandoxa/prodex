@@ -146,6 +146,7 @@ pub(super) fn proxy_runtime_compact_request(
         saw_transport_failure,
         saw_overload_failure: false,
         recovery_sweeps: 0,
+        recovery_started_at: None,
     })
 }
 
@@ -173,6 +174,7 @@ struct RuntimeCompactSelectionContext<'a> {
     saw_transport_failure: bool,
     saw_overload_failure: bool,
     recovery_sweeps: usize,
+    recovery_started_at: Option<Instant>,
 }
 
 enum RuntimeCompactLoopAction {
@@ -390,7 +392,7 @@ impl RuntimeCompactSelectionContext<'_> {
             self.shared,
             &mut self.excluded_profiles,
             &mut self.recovery_sweeps,
-            self.selection_started_at,
+            &mut self.recovery_started_at,
         )
     }
 
@@ -589,13 +591,14 @@ fn wait_for_compact_overload_recovery(
     shared: &RuntimeRotationProxyShared,
     excluded_profiles: &mut BTreeSet<String>,
     recovery_sweeps: &mut usize,
-    selection_started_at: Instant,
+    recovery_started_at: &mut Option<Instant>,
 ) -> Result<bool> {
-    if *recovery_sweeps >= runtime_proxy_crate::RUNTIME_PROXY_PRECOMMIT_RECOVERY_SWEEP_LIMIT
-        || selection_started_at.elapsed()
-            >= Duration::from_millis(
-                runtime_proxy_crate::RUNTIME_PROXY_PRECOMMIT_RECOVERY_BUDGET_MS,
-            )
+    if *recovery_sweeps >= runtime_proxy_crate::RUNTIME_PROXY_PRECOMMIT_RECOVERY_SWEEP_LIMIT {
+        return Ok(false);
+    }
+    let recovery_started_at = *recovery_started_at.get_or_insert_with(Instant::now);
+    if recovery_started_at.elapsed()
+        >= Duration::from_millis(runtime_proxy_crate::RUNTIME_PROXY_PRECOMMIT_RECOVERY_BUDGET_MS)
     {
         return Ok(false);
     }
@@ -617,7 +620,7 @@ fn wait_for_compact_overload_recovery(
     let now = chrono::Local::now().timestamp();
     let remaining_budget =
         Duration::from_millis(runtime_proxy_crate::RUNTIME_PROXY_PRECOMMIT_RECOVERY_BUDGET_MS)
-            .saturating_sub(selection_started_at.elapsed());
+            .saturating_sub(recovery_started_at.elapsed());
     let wait = Duration::from_secs(u64::try_from(until.saturating_sub(now)).unwrap_or(0))
         .min(remaining_budget);
     if wait.is_zero() {
