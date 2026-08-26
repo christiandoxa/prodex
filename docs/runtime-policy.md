@@ -617,6 +617,10 @@ shared-state integration around those operations.
 - Secrets remain profile-isolated, redacted in diagnostics, and covered by audit events for Prodex-owned mutations.
 - Mojo-backed critical-signal grouping receives only synchronous non-secret diagnostic line views;
   it does not log, persist, or retain text, and arbitrary prompts/auth payloads remain Rust-owned.
+- Rich Mojo v2 also receives only bounded non-secret identifiers, capability labels, opaque artifact
+  references, and route-policy fields. It returns caller-owned structured records; its arena-backed
+  context, policy, routing, fallback, and rehydration planners never receive credentials, paths,
+  prompts, or provider wire payloads, and a Mojo-enabled error never triggers Rust recomputation.
 
 <!-- BEGIN GENERATED RUNTIME_PROXY_KEYS -->
 | Policy key | Environment override | Default | Meaning |

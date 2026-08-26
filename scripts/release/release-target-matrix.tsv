@@ -1,5 +1,5 @@
 # target	asset	implementation	mojo_version	mojo_features	runtime_bundle	minimum_glibc
-# `mojo-core` includes quota, runtime quota, Smart Context pressure, runtime candidate ordering, provider routing-plan, and capability-match kernels; `runtime_bundle=false` remains unchanged.
+# `mojo-core` includes quota/runtime kernels plus Rich ABI v2 context, policy, fallback, routing, and Smart Context planners; `runtime_bundle=false` remains unchanged.
 # Build strictness is separate from runtime requirements: strict builds use `PRODEX_MOJO_REQUIRED=1` (`build_strict=true`), while shipped binaries report `compiler_required=false` because Mojo is build-time only.
 x86_64-unknown-linux-gnu	prodex-x86_64-unknown-linux-gnu	mojo-compiled-in	1.0.0	mojo-core	false	GLIBC_2.23
 aarch64-unknown-linux-gnu	prodex-aarch64-unknown-linux-gnu	mojo-compiled-in	1.0.0	mojo-core	false	GLIBC_2.23

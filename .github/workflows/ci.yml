@@ -1838,6 +1838,12 @@ jobs:
           mojo_archive="$(find target/debug/build -type f -name 'libprodex_mojo_core.a' -printf '%T@ %p\n' | sort -nr | head -n 1 | cut -d' ' -f2-)"
           test -s "${mojo_archive}"
           file "${mojo_archive}"
+          nm -g "${mojo_archive}" | grep -F 'prodex_mojo_rich_abi_version'
+          nm -g "${mojo_archive}" | grep -F 'prodex_mojo_rich_context_analyze_v2'
+          nm -g "${mojo_archive}" | grep -F 'prodex_mojo_rich_route_plan_v2'
+          nm -g "${mojo_archive}" | grep -F 'prodex_mojo_rich_policy_alias_v2'
+          nm -g "${mojo_archive}" | grep -F 'prodex_mojo_rich_model_fallback_v2'
+          nm -g "${mojo_archive}" | grep -F 'prodex_mojo_rich_context_plan_v2'
           if nm -u "${mojo_archive}" | grep -F 'KGEN_CompilerRT_'; then
             echo "rich Mojo core unexpectedly requires the Mojo compiler runtime" >&2
             exit 1
@@ -1849,6 +1855,11 @@ jobs:
           printf '%s\n' "${diagnostics}" | grep -F '"build_strict": true'
           printf '%s\n' "${diagnostics}" | grep -F '"self_test": "passed"'
           printf '%s\n' "${diagnostics}" | grep -F '"context_text": true'
+          printf '%s\n' "${diagnostics}" | grep -F '"rich_abi_version": 2'
+          printf '%s\n' "${diagnostics}" | grep -F '"runtime_dependency_mode": "arena-static"'
+          printf '%s\n' "${diagnostics}" | grep -F '"rich_domain": true'
+          printf '%s\n' "${diagnostics}" | grep -F '"rich_context_parser": true'
+          printf '%s\n' "${diagnostics}" | grep -F '"rich_provider_routing": true'
 
       - name: Run quota Mojo smoke and parity tests
         run: cargo test --locked -q -p prodex-quota --features mojo -- --test-threads=1

@@ -168,6 +168,15 @@ Key crates:
   the Mojo-enabled build owns bounded UTF-8 duplicate grouping and critical-signal row planning
   through `prodex-mojo-core`.
 
+The rich Mojo core is an additive ABI v2 boundary for deterministic domain work. The active
+context, provider fallback, route-alias policy, provider-routing, and Smart Context planning
+paths pass bounded non-secret UTF-8 views and caller-owned record/output arenas to Mojo. Mojo
+constructs typed diagnostic, identifier, policy, route-candidate, and context-item values,
+performs normalization/parsing/grouping/ranking, and returns validated structured records. Rust
+retains the external Serde/TOML/JSON boundaries, tenant/security checks, credentials, IO,
+transport, persistence, and public presentation. A Mojo-enabled result error is hard failure;
+the feature-off Rust implementation is a separate target/oracle and never a runtime fallback.
+
 ## Boundary Guard
 
 Run:
