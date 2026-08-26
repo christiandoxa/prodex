@@ -9,8 +9,9 @@ use crate::{
     terminate_child_process_tree,
 };
 use std::io::{Read, Write};
-use std::process::{Child, Command, Stdio};
-use std::sync::atomic::Ordering;
+use std::process::{Child, ChildStderr, ChildStdout, Command, ExitStatus, Stdio};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
@@ -36,64 +37,17 @@ impl ExposeRunManager {
                 return;
             }
         };
-        let mut command = Command::new(executable);
-        command
-            .args(build_super_child_args(&job.args))
-            .current_dir(&self.inner.workspace_root)
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .env("PRODEX_EXPOSE_INSTANCE_ID", &self.inner.instance_id)
-            .env("PRODEX_EXPOSE_WORKSPACE_NAME", &self.inner.workspace_name);
-        if let Some((key, value)) = expose_api_key_env(&job.args) {
-            command.env(key, value);
-        }
-        configure_child_process_group(&mut command, true);
-        crate::configure_child_parent_death(&mut command);
-        let mut child = match command.spawn() {
-            Ok(child) => child,
-            Err(_) => {
-                self.finish_start_failed(&job.run_id);
-                return;
-            }
-        };
-        let mut stdin = child.stdin.take();
-        let stdout = child.stdout.take();
-        let stderr = child.stderr.take();
         let child_slot = record.1.clone();
-        if let Ok(mut slot) = child_slot.lock() {
-            *slot = Some(child);
-        }
-        if let Some(mut stdin) = stdin.take()
-            && (stdin.write_all(job.task.as_bytes()).is_err() || stdin.flush().is_err())
-            && let Ok(mut child) = child_slot.lock()
-            && let Some(child) = child.as_mut()
-        {
-            let _ = terminate_child_process_tree(child, true);
-        }
-        drop(stdin);
+        let Some((stdout, stderr)) = self.spawn_super_child(&job, &executable, &child_slot) else {
+            self.finish_start_failed(&job.run_id);
+            return;
+        };
         self.mark_running(&job.run_id);
         let readers = [
             stdout.map(|reader| self.spawn_output_reader(&job.run_id, reader, "stdout")),
             stderr.map(|reader| self.spawn_output_reader(&job.run_id, reader, "stderr")),
         ];
-        let mut status = loop {
-            if record.0.load(Ordering::SeqCst)
-                && let Ok(mut child) = child_slot.lock()
-                && let Some(child) = child.as_mut()
-            {
-                let _ = terminate_child_process_tree(child, true);
-            }
-            let polled = child_slot
-                .lock()
-                .ok()
-                .and_then(|mut child| child.as_mut().map(Child::try_wait));
-            match polled {
-                Some(Ok(Some(status))) => break Some(status),
-                Some(Ok(None)) => thread::sleep(Duration::from_millis(20)),
-                Some(Err(_)) | None => break None,
-            }
-        };
+        let mut status = self.wait_for_child(&record.0, &child_slot);
         if let Ok(mut child) = child_slot.lock() {
             if let Some(child) = child.as_mut()
                 && status.is_none()
@@ -112,6 +66,71 @@ impl ExposeRunManager {
             self.finish_process(&job.run_id, &status);
         } else {
             self.finish_start_failed(&job.run_id);
+        }
+    }
+
+    fn spawn_super_child(
+        &self,
+        job: &QueuedExposeRun,
+        executable: &std::path::Path,
+        child_slot: &Arc<Mutex<Option<Child>>>,
+    ) -> Option<(Option<ChildStdout>, Option<ChildStderr>)> {
+        let mut command = Command::new(executable);
+        command
+            .args(build_super_child_args(&job.args))
+            .current_dir(&self.inner.workspace_root)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .env("PRODEX_EXPOSE_INSTANCE_ID", &self.inner.instance_id)
+            .env("PRODEX_EXPOSE_WORKSPACE_NAME", &self.inner.workspace_name);
+        if let Some((key, value)) = expose_api_key_env(&job.args) {
+            command.env(key, value);
+        }
+        configure_child_process_group(&mut command, true);
+        crate::configure_child_parent_death(&mut command);
+        let mut child = command.spawn().ok()?;
+        let mut stdin = child.stdin.take();
+        let stdout = child.stdout.take();
+        let stderr = child.stderr.take();
+        let Ok(mut slot) = child_slot.lock() else {
+            let _ = terminate_child_process_tree(&mut child, true);
+            return None;
+        };
+        *slot = Some(child);
+        drop(slot);
+        if let Some(mut stdin) = stdin.take()
+            && (stdin.write_all(job.task.as_bytes()).is_err() || stdin.flush().is_err())
+            && let Ok(mut child) = child_slot.lock()
+            && let Some(child) = child.as_mut()
+        {
+            let _ = terminate_child_process_tree(child, true);
+        }
+        drop(stdin);
+        Some((stdout, stderr))
+    }
+
+    fn wait_for_child(
+        &self,
+        cancel: &Arc<AtomicBool>,
+        child_slot: &Arc<Mutex<Option<Child>>>,
+    ) -> Option<ExitStatus> {
+        loop {
+            if cancel.load(Ordering::SeqCst)
+                && let Ok(mut child) = child_slot.lock()
+                && let Some(child) = child.as_mut()
+            {
+                let _ = terminate_child_process_tree(child, true);
+            }
+            match child_slot
+                .lock()
+                .ok()
+                .and_then(|mut child| child.as_mut().map(Child::try_wait))
+            {
+                Some(Ok(Some(status))) => return Some(status),
+                Some(Ok(None)) => thread::sleep(Duration::from_millis(20)),
+                Some(Err(_)) | None => return None,
+            }
         }
     }
 

@@ -554,28 +554,32 @@ where
                 Ok(0) => break,
                 Ok(size) => {
                     for byte in &bytes[..size] {
-                        if line.len() < EXPOSE_CLOUDFLARED_LINE_MAX_BYTES {
-                            line.push(*byte);
-                        }
-                        if *byte == b'\n' {
-                            if let Ok(line) = std::str::from_utf8(&line)
-                                && let Some(url) = expose_find_trycloudflare_url(line)
-                            {
-                                let _ = tx.try_send(url);
-                            }
-                            line.clear();
-                        }
+                        expose_scan_cloudflared_byte(&mut line, *byte, &tx);
                     }
                 }
                 Err(_) => break,
             }
         }
-        if let Ok(line) = std::str::from_utf8(&line)
-            && let Some(url) = expose_find_trycloudflare_url(line)
-        {
-            let _ = tx.try_send(url);
-        }
+        expose_scan_cloudflared_line(&line, &tx);
     })
+}
+
+fn expose_scan_cloudflared_byte(line: &mut Vec<u8>, byte: u8, tx: &mpsc::SyncSender<String>) {
+    if line.len() < EXPOSE_CLOUDFLARED_LINE_MAX_BYTES {
+        line.push(byte);
+    }
+    if byte == b'\n' {
+        expose_scan_cloudflared_line(line, tx);
+        line.clear();
+    }
+}
+
+fn expose_scan_cloudflared_line(line: &[u8], tx: &mpsc::SyncSender<String>) {
+    if let Ok(line) = std::str::from_utf8(line)
+        && let Some(url) = expose_find_trycloudflare_url(line)
+    {
+        let _ = tx.try_send(url);
+    }
 }
 
 pub(super) fn expose_find_trycloudflare_url(line: &str) -> Option<String> {
