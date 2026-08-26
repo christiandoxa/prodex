@@ -12,6 +12,8 @@ mod doctor_summary;
 mod guards;
 #[path = "admission/helpers.rs"]
 mod helpers;
+#[path = "admission/rotation_matrix.rs"]
+mod rotation_matrix;
 #[path = "admission/pre_send.rs"]
 mod pre_send;
 #[path = "admission/pressure_budget.rs"]

@@ -156,6 +156,11 @@ export const RUNTIME_CI_WORKFLOW_SHARDS = [
         filter: `${ADMISSION_PREFIX}turn_state::`,
         label: "admission-turn-state",
       },
+      {
+        id: "admission-rotation-matrix",
+        filter: `${ADMISSION_PREFIX}rotation_matrix::`,
+        label: "admission-rotation-matrix",
+      },
     ],
   },
   {
@@ -388,6 +393,12 @@ export const RUNTIME_CI_WORKFLOW_SHARDS = [
         filter:
           "main_internal_tests::runtime_proxy_continuations::http_followups::runtime_proxy_http_transport_backoff_rotation_rebinds_soft_session",
         label: "transport-session-rotation",
+      },
+      {
+        id: "continuation-http-transient-recovery",
+        filter:
+          "main_internal_tests::runtime_proxy_continuations::http_followups::runtime_proxy_http_waits_for_transient_profiles_then_starts_a_new_sweep",
+        label: "transient-recovery",
       },
     ],
   },
