@@ -1,5 +1,18 @@
 [
   {
+    "id": "audited-rich-mojo-domain-core-0.416.1",
+    "requiredSubjects": [
+      "feat(mojo): migrate rich domain semantics"
+    ],
+    "caps": {
+      "maxFiles": 45,
+      "maxBehaviorFiles": 40,
+      "maxLines": 4500,
+      "maxFileLines": 500
+    },
+    "reason": "Reviewed the bounded rich Mojo domain migration: split arena-backed ABI/text helpers, context diagnostic parsing and grouping, policy alias validation, provider/model fallback parsing, object-level provider routing, and Smart Context planning. The exact subject and caps cover this one audited migration while all Mojo-required, parity, security, package, release, and no-fallback guards remain mandatory."
+  },
+  {
     "id": "audited-rich-mojo-quota-recovery-0.416.0",
     "requiredSubjects": [
       "feat: migrate context text and harden quota recovery"
