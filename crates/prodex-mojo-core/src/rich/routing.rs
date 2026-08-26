@@ -38,13 +38,8 @@ pub struct RoutePlan {
     pub selected_index: Option<usize>,
 }
 
-pub fn plan_routes(
-    inputs: &[RouteInput<'_>],
-    required_capabilities: &str,
-    weights: [i64; 7],
-) -> Result<RoutePlan, MojoError> {
-    ensure_rich_abi()?;
-    let rich_inputs = inputs
+fn ffi_route_inputs(inputs: &[RouteInput<'_>]) -> Vec<RichRouteInput> {
+    inputs
         .iter()
         .map(|input| RichRouteInput {
             provider: view(input.provider),
@@ -61,17 +56,112 @@ pub fn plan_routes(
             priority: input.priority,
             affinity: i64::from(input.affinity),
         })
-        .collect::<Vec<_>>();
-    let capacity = inputs.len().max(1);
-    let scratch_capacity = hash_capacity(capacity)?;
-    let output_capacity = inputs
+        .collect()
+}
+
+fn route_output_capacity(inputs: &[RouteInput<'_>]) -> Result<usize, MojoError> {
+    inputs
         .iter()
         .try_fold(0_usize, |total, input| {
             total
                 .checked_add(input.provider.len())
                 .and_then(|value| value.checked_add(input.model.len()))
         })
-        .ok_or(MojoError::InvalidInput)?;
+        .ok_or(MojoError::InvalidInput)
+}
+
+fn decode_route_candidates(
+    records: &[RichRouteRecord],
+    output: &[u8],
+    input_count: usize,
+) -> Result<Vec<RouteCandidate>, MojoError> {
+    let mut candidates = Vec::with_capacity(input_count);
+    for record in records {
+        let provider = std::str::from_utf8(slice(output, record.provider)?)
+            .map_err(|_| MojoError::InvalidOutput)?
+            .to_string();
+        let model = std::str::from_utf8(slice(output, record.model)?)
+            .map_err(|_| MojoError::InvalidOutput)?
+            .to_string();
+        let capability_mask =
+            u8::try_from(record.capability_mask).map_err(|_| MojoError::InvalidOutput)?;
+        let components = record.components;
+        if components.iter().any(|value| *value < 0 || *value > 10_000) || record.weighted_total < 0
+        {
+            return Err(MojoError::InvalidOutput);
+        }
+        let input_index =
+            usize::try_from(record.input_index).map_err(|_| MojoError::InvalidOutput)?;
+        let duplicate_of = if record.duplicate_of < 0 {
+            None
+        } else {
+            Some(usize::try_from(record.duplicate_of).map_err(|_| MojoError::InvalidOutput)?)
+        };
+        if input_index >= input_count
+            || duplicate_of.is_some_and(|index| index >= input_count || index >= input_index)
+        {
+            return Err(MojoError::InvalidOutput);
+        }
+        candidates.push(RouteCandidate {
+            provider,
+            model,
+            capability_mask,
+            eligible: record.eligible == 1,
+            reason: record.reason,
+            score: record.score,
+            components,
+            weighted_total: u64::try_from(record.weighted_total)
+                .map_err(|_| MojoError::InvalidOutput)?,
+            input_index,
+            duplicate_of,
+            provider_order: record.provider_order,
+        });
+    }
+    Ok(candidates)
+}
+
+fn decode_ordered_indices(
+    ordered: &[i64],
+    candidates: &[RouteCandidate],
+) -> Result<Vec<usize>, MojoError> {
+    let mut seen = vec![false; candidates.len()];
+    let mut indices = Vec::with_capacity(ordered.len());
+    for value in ordered {
+        let index = usize::try_from(*value).map_err(|_| MojoError::InvalidOutput)?;
+        if index >= candidates.len() || seen[index] || !candidates[index].eligible {
+            return Err(MojoError::InvalidOutput);
+        }
+        seen[index] = true;
+        indices.push(index);
+    }
+    Ok(indices)
+}
+
+fn decode_selected_index(
+    selected_index: i64,
+    ordered_indices: &[usize],
+) -> Result<Option<usize>, MojoError> {
+    if selected_index < 0 {
+        return Ok(None);
+    }
+    let index = usize::try_from(selected_index).map_err(|_| MojoError::InvalidOutput)?;
+    if ordered_indices.first() != Some(&index) {
+        return Err(MojoError::InvalidOutput);
+    }
+    Ok(Some(index))
+}
+
+pub fn plan_routes(
+    inputs: &[RouteInput<'_>],
+    required_capabilities: &str,
+    weights: [i64; 7],
+) -> Result<RoutePlan, MojoError> {
+    ensure_rich_abi()?;
+    let rich_inputs = ffi_route_inputs(inputs);
+    let input_count = inputs.len();
+    let capacity = inputs.len().max(1);
+    let scratch_capacity = hash_capacity(capacity)?;
+    let output_capacity = route_output_capacity(inputs)?;
     let mut records = vec![RichRouteRecord::default(); capacity];
     let mut ordered = vec![-1_i64; capacity];
     let mut output = vec![0_u8; output_capacity.max(1)];
@@ -81,12 +171,12 @@ pub fn plan_routes(
         prodex_mojo_rich_route_plan_v2(
             RICH_ABI_VERSION,
             rich_inputs.as_ptr(),
-            i64::try_from(inputs.len()).map_err(|_| MojoError::InvalidInput)?,
+            i64::try_from(input_count).map_err(|_| MojoError::InvalidInput)?,
             view(required_capabilities),
             records.as_mut_ptr(),
-            i64::try_from(inputs.len()).map_err(|_| MojoError::InvalidInput)?,
+            i64::try_from(input_count).map_err(|_| MojoError::InvalidInput)?,
             ordered.as_mut_ptr(),
-            i64::try_from(inputs.len()).map_err(|_| MojoError::InvalidInput)?,
+            i64::try_from(input_count).map_err(|_| MojoError::InvalidInput)?,
             output.as_mut_ptr(),
             i64::try_from(output_capacity).map_err(|_| MojoError::InvalidInput)?,
             hash_slots.as_mut_ptr(),
@@ -111,7 +201,7 @@ pub fn plan_routes(
         ));
     }
     if result.abi_version != RICH_ABI_VERSION
-        || result.candidates_written != inputs.len() as i64
+        || result.candidates_written != input_count as i64
         || result.ordered_written < 0
         || result.ordered_written as usize > inputs.len()
         || result.output_written < 0
@@ -120,67 +210,10 @@ pub fn plan_routes(
         return Err(MojoError::InvalidOutput);
     }
     let output = &output[..result.output_written as usize];
-    let mut candidates = Vec::with_capacity(inputs.len());
-    for record in &records[..inputs.len()] {
-        let provider = std::str::from_utf8(slice(output, record.provider)?)
-            .map_err(|_| MojoError::InvalidOutput)?
-            .to_string();
-        let model = std::str::from_utf8(slice(output, record.model)?)
-            .map_err(|_| MojoError::InvalidOutput)?
-            .to_string();
-        let capability_mask =
-            u8::try_from(record.capability_mask).map_err(|_| MojoError::InvalidOutput)?;
-        let components = record.components;
-        if components.iter().any(|value| *value < 0 || *value > 10_000) || record.weighted_total < 0
-        {
-            return Err(MojoError::InvalidOutput);
-        }
-        let input_index =
-            usize::try_from(record.input_index).map_err(|_| MojoError::InvalidOutput)?;
-        let duplicate_of = if record.duplicate_of < 0 {
-            None
-        } else {
-            Some(usize::try_from(record.duplicate_of).map_err(|_| MojoError::InvalidOutput)?)
-        };
-        if input_index >= inputs.len()
-            || duplicate_of.is_some_and(|index| index >= inputs.len() || index >= input_index)
-        {
-            return Err(MojoError::InvalidOutput);
-        }
-        candidates.push(RouteCandidate {
-            provider,
-            model,
-            capability_mask,
-            eligible: record.eligible == 1,
-            reason: record.reason,
-            score: record.score,
-            components,
-            weighted_total: u64::try_from(record.weighted_total)
-                .map_err(|_| MojoError::InvalidOutput)?,
-            input_index,
-            duplicate_of,
-            provider_order: record.provider_order,
-        });
-    }
-    let mut seen = vec![false; inputs.len()];
-    let mut ordered_indices = Vec::with_capacity(result.ordered_written as usize);
-    for value in &ordered[..result.ordered_written as usize] {
-        let index = usize::try_from(*value).map_err(|_| MojoError::InvalidOutput)?;
-        if index >= inputs.len() || seen[index] || !candidates[index].eligible {
-            return Err(MojoError::InvalidOutput);
-        }
-        seen[index] = true;
-        ordered_indices.push(index);
-    }
-    let selected_index = if result.selected_index < 0 {
-        None
-    } else {
-        let index = usize::try_from(result.selected_index).map_err(|_| MojoError::InvalidOutput)?;
-        (ordered_indices.first() == Some(&index)).then_some(index)
-    };
-    if ordered_indices.is_empty() && selected_index.is_some() {
-        return Err(MojoError::InvalidOutput);
-    }
+    let candidates = decode_route_candidates(&records[..input_count], output, input_count)?;
+    let ordered_indices =
+        decode_ordered_indices(&ordered[..result.ordered_written as usize], &candidates)?;
+    let selected_index = decode_selected_index(result.selected_index, &ordered_indices)?;
     Ok(RoutePlan {
         candidates,
         ordered_indices,
