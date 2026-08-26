@@ -224,9 +224,16 @@ function autoRotateStep(args) {
   };
 }
 
-function prodexAppStep() {
+const PRODEX_APP_RUNTIME_PROXY_SHARDS = Object.freeze([
+  ["backend", "main_internal_tests::runtime_proxy_backend::"],
+  ["claude", "main_internal_tests::runtime_proxy_claude_and_anthropic::"],
+  ["continuations", "main_internal_tests::runtime_proxy_continuations::"],
+  ["selection", "main_internal_tests::runtime_proxy_selection_and_pressure::"],
+]);
+
+function prodexAppLibStep(label, filter, extraArgs = []) {
   return {
-    label: "prodex-app:all-lib-tests-serial",
+    label,
     command: "cargo",
     args: [
       "test",
@@ -235,11 +242,27 @@ function prodexAppStep() {
       "-p",
       "prodex-app",
       "--lib",
+      ...(filter ? [filter] : []),
       "--",
       "--test-threads=1",
+      ...extraArgs,
     ],
     failOnZeroTests: true,
   };
+}
+
+function prodexAppSteps() {
+  const mainInternalProxySkips = PRODEX_APP_RUNTIME_PROXY_SHARDS.flatMap(([, filter]) => [
+    "--skip",
+    filter,
+  ]);
+  return [
+    prodexAppLibStep("prodex-app:non-main-internal", null, ["--skip", "main_internal_tests::"]),
+    prodexAppLibStep("prodex-app:main-internal-core", "main_internal_tests::", mainInternalProxySkips),
+    ...PRODEX_APP_RUNTIME_PROXY_SHARDS.map(([label, filter]) =>
+      prodexAppLibStep(`prodex-app:runtime-proxy-${label}`, filter),
+    ),
+  ];
 }
 
 async function main() {
@@ -259,7 +282,7 @@ async function main() {
     );
   }
 
-  const testPartitions = [...workspaceSteps(args), ...(args.prodexAppLib ? [prodexAppStep()] : [])];
+  const testPartitions = [...workspaceSteps(args), ...(args.prodexAppLib ? prodexAppSteps() : [])];
   if (!args.prodexAppLib) {
     testPartitions.push(autoRotateStep(args));
   }
