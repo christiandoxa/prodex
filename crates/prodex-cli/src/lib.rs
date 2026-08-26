@@ -42,6 +42,17 @@ pub struct Cli {
     pub command: Commands,
 }
 
+#[derive(Parser, Debug)]
+#[command(
+    name = "prodex expose",
+    bin_name = "prodex expose",
+    after_help = CLI_EXPOSE_AFTER_HELP
+)]
+struct SuperExposeCli {
+    #[command(flatten)]
+    args: runtime_args::SuperExposeArgs,
+}
+
 #[derive(Subcommand, Debug)]
 pub enum Commands {
     #[command(
@@ -176,7 +187,10 @@ pub enum Commands {
         after_help = CLI_SUPER_AFTER_HELP
     )]
     Super(SuperArgs),
-    #[command(about = "Expose a protected browser terminal through a Cloudflare quick tunnel.")]
+    #[command(
+        about = "Expose a protected browser terminal, or `prodex s expose` as a ChatGPT MCP endpoint.",
+        after_help = CLI_EXPOSE_AFTER_HELP
+    )]
     Expose(ExposeArgs),
     #[command(about = "Inspect the experimental JSON-RPC app-server broker contract.")]
     AppServerBroker(AppServerBrokerArgs),
@@ -266,8 +280,10 @@ where
     T: Into<OsString>,
 {
     let raw_args = args.into_iter().map(Into::into).collect::<Vec<_>>();
+    if let Some(command) = parse_super_expose_alias(&raw_args)? {
+        return Ok(command);
+    }
     let raw_args = rewrite_super_doctor_args(&raw_args);
-    let raw_args = rewrite_super_expose_args(&raw_args);
     let raw_args = rewrite_super_provider_alias_args(&raw_args);
     let parse_args = if should_default_cli_invocation_to_run(&raw_args) {
         rewrite_cli_args_as_run(&raw_args)
@@ -293,6 +309,100 @@ where
         args.detail = true;
     }
     Ok(command)
+}
+
+fn parse_super_expose_alias(
+    args: &[OsString],
+) -> std::result::Result<Option<Commands>, clap::Error> {
+    if !matches!(
+        args.get(1).and_then(|arg| arg.to_str()),
+        Some("s" | "super")
+    ) {
+        return Ok(None);
+    }
+
+    let Some(expose_index) = super_expose_index(args) else {
+        return Ok(None);
+    };
+
+    let mut rewritten = Vec::with_capacity(args.len().saturating_sub(2));
+    rewritten.push(
+        args.first()
+            .cloned()
+            .unwrap_or_else(|| OsString::from("prodex")),
+    );
+    rewritten.extend(args.iter().skip(2).take(expose_index - 2).cloned());
+    rewritten.extend(args.iter().skip(expose_index + 1).cloned());
+    let parsed = SuperExposeCli::try_parse_from(rewritten)?;
+    let mut super_args = parsed.args.super_args;
+    super_args
+        .extract_super_overrides_from_codex_args()
+        .map_err(|error| clap::Error::raw(clap::error::ErrorKind::InvalidValue, error))?;
+    let mut expose = parsed.args.expose;
+    expose.invocation = ExposeInvocation::SuperAlias;
+    expose.super_args = Some(super_args);
+    Ok(Some(Commands::Expose(expose)))
+}
+
+fn super_expose_index(args: &[OsString]) -> Option<usize> {
+    let mut index = 2;
+    while index < args.len() {
+        let value = args[index].to_str()?;
+        if value == "--" {
+            return None;
+        }
+        if value == "expose" {
+            return Some(index);
+        }
+        if super_option_takes_value(value) {
+            index += 2;
+        } else if value.starts_with('-') {
+            index += 1;
+        } else {
+            return None;
+        }
+    }
+    None
+}
+
+fn super_option_takes_value(value: &str) -> bool {
+    matches!(
+        value.split_once('=').map_or(value, |(name, _)| name),
+        "-c" | "--config"
+            | "-p"
+            | "--command"
+            | "--name"
+            | "--cols"
+            | "--rows"
+            | "--max-clients"
+            | "--profile"
+            | "--base-url"
+            | "--provider"
+            | "--harness"
+            | "--api-key"
+            | "--sub-agent-provider"
+            | "--sub-agent-model"
+            | "--sub-agent-model-reasoning-effort"
+            | "--sub-agent-url"
+            | "--sub-agent-max-concurrency"
+            | "--model"
+            | "--local-model"
+            | "--url"
+            | "--context-window"
+            | "--local-context-window"
+            | "--auto-compact-token-limit"
+            | "--local-auto-compact-token-limit"
+            | "--cli"
+            | "--tool"
+            | "--require-tool"
+            | "--web-search"
+            | "--rollout-budget-tokens"
+            | "--rollout-budget-reminders"
+            | "--rollout-budget-sampling-weight"
+            | "--rollout-budget-prefill-weight"
+            | "--current-time-reminder-interval"
+            | "--current-time-clock-source"
+    )
 }
 
 fn rewrite_positioned_super_alias(
@@ -415,30 +525,6 @@ fn rewrite_super_doctor_args(args: &[OsString]) -> Vec<OsString> {
     );
     rewritten.push(OsString::from("capability"));
     rewritten.push(OsString::from("super-doctor"));
-    rewritten.extend(args.iter().skip(3).cloned());
-    rewritten
-}
-
-fn rewrite_super_expose_args(args: &[OsString]) -> Vec<OsString> {
-    let Some(command) = args.get(1).and_then(|arg| arg.to_str()) else {
-        return args.to_vec();
-    };
-    if command != "s" && command != "super" {
-        return args.to_vec();
-    }
-    let Some(subcommand) = args.get(2).and_then(|arg| arg.to_str()) else {
-        return args.to_vec();
-    };
-    if subcommand != "expose" {
-        return args.to_vec();
-    }
-    let mut rewritten = Vec::with_capacity(args.len() - 1);
-    rewritten.push(
-        args.first()
-            .cloned()
-            .unwrap_or_else(|| OsString::from("prodex")),
-    );
-    rewritten.push(OsString::from("expose"));
     rewritten.extend(args.iter().skip(3).cloned());
     rewritten
 }

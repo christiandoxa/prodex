@@ -155,6 +155,9 @@ Examples:
   prodex super --sub-agent --sub-agent-model-reasoning-effort xhigh
   prodex super --sub-agent --sub-agent-max-concurrency 8
   prodex super --no-sub-agent
+  prodex s expose
+  prodex s expose --no-tunnel
+  prodex s expose --name api --model gpt-5.6-luna -c 'model_reasoning_effort=max'
   prodex super doctor
   prodex super doctor --json --strict
   prodex super exec \"review latest diff in super mode\"
@@ -188,7 +191,23 @@ Notes:
   Sub-agent provider names use canonical ProviderId values and default to openai; model ids are arbitrary nonempty strings.
   Sub-agent reasoning efforts are none, minimal, low, medium, high, xhigh, max, or ultra.
   Maximum active sub-agents defaults to 4; presets are 4, 8, 16, and 32, with custom values from 1 through 64.
-  Additional Codex args are appended unchanged after Prodex's generated options.";
+  Additional Codex args are appended unchanged after Prodex's generated options.
+  `prodex s expose` asks for the main agent, model, and model-aware reasoning effort in an interactive terminal before starting its ChatGPT endpoint. It then uses a loopback MCP server and a Cloudflare Quick Tunnel; cloudflared needs to be installed, but no Cloudflare account or init is required.
+  The expose URL is an ephemeral full-Super bearer capability. Anyone with the complete URL can control the configured workspace session; this is not OAuth or multi-user authentication. Use `--no-tunnel` for the existing local browser terminal.";
+pub const CLI_EXPOSE_AFTER_HELP: &str = "\
+Examples:
+  prodex expose
+  prodex expose --tunnel
+  prodex s expose
+  prodex s expose --no-tunnel
+  prodex s expose --name api --model gpt-5.6-luna -c 'model_reasoning_effort=max'
+
+Notes:
+  `prodex expose` remains the loopback browser terminal and only publishes when `--tunnel` is explicit.
+  Bare `prodex s expose` configures Super first, then starts a JSON-response MCP endpoint through a Cloudflare Quick Tunnel. Quick Tunnel mode does not use SSE.
+  `prodex s expose --tunnel` retains the explicit public browser-terminal behavior. `--no-tunnel` retains local-only compatibility.
+  Interactive expose freezes the selected main and optional sub-agent configuration for this process. Non-interactive expose uses explicit options, remembered preferences, and normal defaults without waiting for stdin.
+  The ChatGPT URL contains the only ephemeral capability. Treat URL disclosure as credential disclosure; stopping this process revokes it. This is not OAuth and is intended for personal development, not public plugin publication.";
 pub const CLI_DOCTOR_AFTER_HELP: &str = "\
 Examples:
   prodex doctor
