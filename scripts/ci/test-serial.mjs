@@ -10,6 +10,13 @@ import {
 } from "./main-internal-test-runner.mjs";
 
 const VALID_SUITES = new Set(["core", "runtime", "runtime-smoke", "stress", "all"]);
+// Keep background-worker state from crossing the same module boundaries used by CI.
+const MAIN_INTERNAL_RUNTIME_PROXY_SHARDS = Object.freeze([
+  ["backend", "main_internal_tests::runtime_proxy_backend::"],
+  ["claude", "main_internal_tests::runtime_proxy_claude_and_anthropic::"],
+  ["continuations", "main_internal_tests::runtime_proxy_continuations::"],
+  ["selection", "main_internal_tests::runtime_proxy_selection_and_pressure::"],
+]);
 
 function parseArgs(argv) {
   const args = {
@@ -110,9 +117,9 @@ function runtimeSteps(stressSkipTests, options) {
     cargoTestStep("serial:runtime-proxy-units", "runtime_proxy::", [], options),
     cargoTestStep("serial:runtime-broker-units", "runtime_broker::", [], options),
     cargoTestStep("serial:runtime-core-shared-units", "runtime_core_shared::", [], options),
-    cargoTestStep("serial:main-internal-runtime-proxy-broad", "main_internal_tests::runtime_proxy_", [
-      ...skipArgs(stressSkipTests),
-    ], options),
+    ...MAIN_INTERNAL_RUNTIME_PROXY_SHARDS.map(([label, filter]) =>
+      cargoTestStep(`serial:main-internal-runtime-proxy-${label}`, filter, skipArgs(stressSkipTests), options),
+    ),
   ];
 }
 
