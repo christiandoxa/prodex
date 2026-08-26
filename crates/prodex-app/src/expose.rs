@@ -64,6 +64,9 @@ pub(crate) fn handle_expose(args: ExposeArgs) -> Result<()> {
 #[path = "expose/mcp_tests.rs"]
 mod mcp_tests;
 #[cfg(test)]
+#[path = "expose/mcp_parallel_tests.rs"]
+mod mcp_parallel_tests;
+#[cfg(test)]
 #[path = "expose/run_manager_tests.rs"]
 mod run_manager_tests;
 #[cfg(test)]
