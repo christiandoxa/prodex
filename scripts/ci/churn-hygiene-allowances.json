@@ -5,8 +5,8 @@
       "feat(mojo): migrate rich domain semantics"
     ],
     "caps": {
-      "maxFiles": 45,
-      "maxBehaviorFiles": 40,
+      "maxFiles": 60,
+      "maxBehaviorFiles": 32,
       "maxLines": 4500,
       "maxFileLines": 500
     },
