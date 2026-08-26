@@ -73,7 +73,6 @@ pub(crate) fn handle_run(args: RunArgs) -> Result<()> {
         }
     }
 }
-
 pub(crate) fn resolved_super_runtime_tool_args(args: SuperArgs, presidio: bool) -> RuntimeToolArgs {
     let normalized = prodex_runtime_launch::normalize_run_codex_args(&args.codex_args);
     let is_resume = prodex_runtime_launch::codex_resume_requested(&normalized);
@@ -104,9 +103,13 @@ pub(crate) fn resolved_super_runtime_tool_args(args: SuperArgs, presidio: bool) 
 
 pub(crate) fn resolve_super_dry_run_main_agent(args: &mut SuperArgs) -> Result<()> {
     let session_provider = runtime_resume_provider_from_codex_args(&args.codex_args)?;
-    super::resolve_super_main_agent_with_prompt(args, false, session_provider, |_, _| {
-        bail!("Super provider prompt is unavailable during dry-run")
-    })
+    super::super_config::resolve_super_main_agent_with_prompt(
+        args,
+        false,
+        session_provider,
+        |_, _| bail!("Super provider prompt is unavailable during dry-run"),
+        super::SuperPromptOrder::PresidioFirst,
+    )
     .map(|_| ())
 }
 fn restore_resume_session_settings(

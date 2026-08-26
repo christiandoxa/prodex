@@ -8,6 +8,9 @@ mod cleanup;
 mod context;
 mod dashboard;
 mod doctor;
+mod expose_config;
+#[cfg(test)]
+mod expose_config_tests;
 mod gateway;
 mod gui;
 mod info;
@@ -29,6 +32,8 @@ mod selection;
 mod session;
 mod shared;
 mod status;
+mod super_config;
+mod super_main_prompt;
 mod super_prompt;
 
 pub(crate) use self::app_server_broker::*;
@@ -40,6 +45,7 @@ pub(crate) use self::cleanup::*;
 pub(crate) use self::context::*;
 pub(crate) use self::dashboard::*;
 pub(crate) use self::doctor::*;
+pub(crate) use self::expose_config::resolve_super_expose_configuration;
 pub(crate) use self::gateway::*;
 pub(crate) use self::gui::*;
 pub(crate) use self::info::*;
@@ -54,14 +60,8 @@ pub(crate) use self::selection::*;
 pub(crate) use self::session::*;
 pub(crate) use self::shared::*;
 pub(crate) use self::status::*;
+pub(crate) use self::super_config::ResolvedMainAgentConfig;
 pub(super) use self::super_prompt::prompt_super_presidio_opt_in;
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-struct ResolvedMainAgentConfig {
-    provider: prodex_provider_core::ProviderId,
-    model: Option<String>,
-    local_url: Option<String>,
-}
 
 pub(super) fn handle_super(mut args: SuperArgs) -> Result<()> {
     args.validate_urls().map_err(anyhow::Error::msg)?;
@@ -115,25 +115,63 @@ fn resolve_super_launch_decisions_with_prompts(
     ) -> Result<ResolvedMainAgentConfig>,
     prompt_sub_agent: impl FnOnce(&SuperArgs) -> Result<Option<SubAgentConfig>>,
 ) -> Result<(bool, ResolvedMainAgentConfig, Option<ResolvedSuperSubAgent>)> {
-    let use_presidio = if matches!(
-        args.cli,
-        Some(SuperCliAgent::Gemini | SuperCliAgent::Kiro | SuperCliAgent::Agy)
-    ) {
-        false
-    } else {
-        match args.presidio_preference() {
-            Some(use_presidio) => use_presidio,
-            None if interactive => prompt_presidio()?,
-            None => false,
-        }
-    };
-    let session_provider = resolve_session_provider(args)?;
-    let main_agent = resolve_super_main_agent_with_prompt(
+    resolve_super_launch_decisions_with_order(
         args,
         interactive,
-        session_provider,
+        SuperPromptOrder::PresidioFirst,
+        prompt_presidio,
+        resolve_session_provider,
         prompt_main_agent,
-    )?;
+        prompt_sub_agent,
+    )
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum SuperPromptOrder {
+    PresidioFirst,
+    MainAgentFirst,
+}
+
+pub(super) fn resolve_super_launch_decisions_with_order(
+    args: &mut SuperArgs,
+    interactive: bool,
+    order: SuperPromptOrder,
+    prompt_presidio: impl FnOnce() -> Result<bool>,
+    resolve_session_provider: impl FnOnce(
+        &SuperArgs,
+    ) -> Result<Option<prodex_provider_core::ProviderId>>,
+    prompt_main_agent: impl FnOnce(
+        &SuperArgs,
+        Option<prodex_provider_core::ProviderId>,
+    ) -> Result<ResolvedMainAgentConfig>,
+    prompt_sub_agent: impl FnOnce(&SuperArgs) -> Result<Option<SubAgentConfig>>,
+) -> Result<(bool, ResolvedMainAgentConfig, Option<ResolvedSuperSubAgent>)> {
+    let (use_presidio, main_agent) = match order {
+        SuperPromptOrder::PresidioFirst => {
+            let use_presidio = resolve_super_presidio_choice(args, interactive, prompt_presidio)?;
+            let session_provider = resolve_session_provider(args)?;
+            let main_agent = super_config::resolve_super_main_agent_with_prompt(
+                args,
+                interactive,
+                session_provider,
+                prompt_main_agent,
+                order,
+            )?;
+            (use_presidio, main_agent)
+        }
+        SuperPromptOrder::MainAgentFirst => {
+            let session_provider = resolve_session_provider(args)?;
+            let main_agent = super_config::resolve_super_main_agent_with_prompt(
+                args,
+                interactive,
+                session_provider,
+                prompt_main_agent,
+                order,
+            )?;
+            let use_presidio = resolve_super_presidio_choice(args, interactive, prompt_presidio)?;
+            (use_presidio, main_agent)
+        }
+    };
     let mut sub_agent =
         super_prompt::resolve_super_sub_agent_with_prompt(args, interactive, || {
             prompt_sub_agent(args)
@@ -144,156 +182,22 @@ fn resolve_super_launch_decisions_with_prompts(
     Ok((use_presidio, main_agent, sub_agent))
 }
 
-fn resolve_super_main_agent_with_prompt(
-    args: &mut SuperArgs,
-    interactive: bool,
-    session_provider: Option<prodex_provider_core::ProviderId>,
-    prompt: impl FnOnce(
-        &SuperArgs,
-        Option<prodex_provider_core::ProviderId>,
-    ) -> Result<ResolvedMainAgentConfig>,
-) -> Result<ResolvedMainAgentConfig> {
-    let explicit_super_provider = args
-        .url
-        .as_ref()
-        .map(|_| prodex_provider_core::ProviderId::Local)
-        .or(args.provider.map(SuperExternalProvider::provider_id))
-        .or(match args.cli {
-            Some(SuperCliAgent::Gemini | SuperCliAgent::Agy) => {
-                Some(prodex_provider_core::ProviderId::Gemini)
-            }
-            Some(SuperCliAgent::Copilot) => Some(prodex_provider_core::ProviderId::Copilot),
-            Some(SuperCliAgent::Kiro) => Some(prodex_provider_core::ProviderId::Kiro),
-            Some(SuperCliAgent::Codex) | None => None,
-        });
-    let explicit_codex_provider = codex_cli_config_override_value(
-        &args.codex_args,
-        "model_provider",
-    )
-    .map(|provider| {
-        prodex_provider_core::provider_implementation_registry()
-            .resolve_model_provider_id(&provider)
-            .ok_or_else(|| {
-                anyhow::anyhow!(
-                    "explicit Codex model_provider is unsupported by Prodex Super; use a canonical --provider, --url, or start a plain Codex launch"
-                )
-            })
-    })
-    .transpose()?;
-    if let (Some(super_provider), Some(codex_provider)) =
-        (explicit_super_provider, explicit_codex_provider)
-        && super_provider != codex_provider
-    {
-        bail!(
-            "conflicting main-agent provider inputs; remove either the Super provider option or the Codex model_provider override"
-        );
-    }
-    let explicit_provider = explicit_super_provider.or(explicit_codex_provider);
-    if let (Some(explicit), Some(bound)) = (explicit_provider, session_provider)
-        && explicit != bound
-    {
-        bail!(
-            "resumed session is bound to provider {}; remove the conflicting {} provider option or resume a matching session",
-            provider_display_name(bound),
-            provider_display_name(explicit)
-        );
-    }
-
-    let resolved = resolve_main_agent_config(
-        args,
-        interactive,
-        session_provider,
-        explicit_provider,
-        prompt,
-    )?;
-    apply_resolved_main_agent(args, &resolved)?;
-    Ok(resolved)
-}
-
-fn resolve_main_agent_config(
+fn resolve_super_presidio_choice(
     args: &SuperArgs,
     interactive: bool,
-    session_provider: Option<prodex_provider_core::ProviderId>,
-    explicit_provider: Option<prodex_provider_core::ProviderId>,
-    prompt: impl FnOnce(
-        &SuperArgs,
-        Option<prodex_provider_core::ProviderId>,
-    ) -> Result<ResolvedMainAgentConfig>,
-) -> Result<ResolvedMainAgentConfig> {
-    if let Some(provider) = session_provider {
-        if interactive && explicit_provider.is_none() {
-            let displayed = prompt(args, Some(provider))?;
-            if displayed.provider != provider {
-                bail!("resumed session provider display returned a conflicting provider");
-            }
-            Ok(displayed)
-        } else {
-            Ok(ResolvedMainAgentConfig {
-                provider,
-                model: args.local_model.clone(),
-                local_url: args.url.clone(),
-            })
-        }
-    } else if let Some(url) = args.url.clone() {
-        Ok(ResolvedMainAgentConfig {
-            provider: prodex_provider_core::ProviderId::Local,
-            model: args.local_model.clone(),
-            local_url: Some(url),
-        })
-    } else if let Some(provider) = args.provider {
-        Ok(ResolvedMainAgentConfig {
-            provider: provider.provider_id(),
-            model: args.local_model.clone(),
-            local_url: None,
-        })
-    } else if let Some(provider) = explicit_provider {
-        Ok(ResolvedMainAgentConfig {
-            provider,
-            model: args.local_model.clone(),
-            local_url: None,
-        })
-    } else if interactive {
-        prompt(args, None)
-    } else {
-        Ok(ResolvedMainAgentConfig {
-            provider: prodex_provider_core::ProviderId::OpenAi,
-            model: args.local_model.clone(),
-            local_url: None,
-        })
+    prompt: impl FnOnce() -> Result<bool>,
+) -> Result<bool> {
+    if matches!(
+        args.cli,
+        Some(SuperCliAgent::Gemini | SuperCliAgent::Kiro | SuperCliAgent::Agy)
+    ) {
+        return Ok(false);
     }
-}
-
-fn apply_resolved_main_agent(
-    args: &mut SuperArgs,
-    resolved: &ResolvedMainAgentConfig,
-) -> Result<()> {
-    match resolved.provider {
-        prodex_provider_core::ProviderId::OpenAi => {
-            if codex_cli_config_override_value(&args.codex_args, "model_provider").is_none() {
-                args.codex_args.splice(
-                    0..0,
-                    [
-                        OsString::from("-c"),
-                        OsString::from("model_provider=\"openai\""),
-                    ],
-                );
-            }
-        }
-        prodex_provider_core::ProviderId::Local => {
-            let url = resolved
-                .local_url
-                .as_deref()
-                .ok_or_else(|| anyhow::anyhow!("local main-agent provider requires --url"))?;
-            prodex_cli::parse_super_local_url(url).map_err(anyhow::Error::msg)?;
-            args.url = Some(url.to_string());
-        }
-        prodex_provider_core::ProviderId::Kiro
-            if args.cli == Some(SuperCliAgent::Kiro) && args.provider.is_none() => {}
-        provider => {
-            args.provider = SuperExternalProvider::from_provider_id(provider);
-        }
+    match args.presidio_preference() {
+        Some(use_presidio) => Ok(use_presidio),
+        None if interactive => prompt(),
+        None => Ok(false),
     }
-    Ok(())
 }
 
 #[cfg(test)]
@@ -313,7 +217,7 @@ mod sub_agent_prompt_tests {
     };
     use super::{
         ResolvedMainAgentConfig, SUB_AGENT_RECURSION_MARKER, codex_cli_config_override_value,
-        resolve_super_launch_decisions_with_prompts, resolve_super_sub_agent, runtime_launch,
+        resolve_super_launch_decisions_with_prompts, resolve_super_sub_agent,
     };
     use prodex_cli::{SubAgentConfig, SubAgentReasoningEffort, SuperLaunchTarget};
     use prodex_provider_core::ProviderId;
@@ -400,11 +304,11 @@ mod sub_agent_prompt_tests {
             |_, locked| {
                 assert_eq!(locked, None);
                 calls.borrow_mut().push("Main-agent provider");
-                Ok(ResolvedMainAgentConfig {
-                    provider: ProviderId::OpenAi,
-                    model: None,
-                    local_url: None,
-                })
+                Ok(ResolvedMainAgentConfig::without_effort(
+                    ProviderId::OpenAi,
+                    None,
+                    None,
+                ))
             },
             |_| {
                 calls.borrow_mut().push("Use sub-agents?");
@@ -467,11 +371,11 @@ mod sub_agent_prompt_tests {
             |_, locked| {
                 assert_eq!(locked, None);
                 disabled_calls.borrow_mut().push("Main-agent provider");
-                Ok(ResolvedMainAgentConfig {
-                    provider: ProviderId::OpenAi,
-                    model: None,
-                    local_url: None,
-                })
+                Ok(ResolvedMainAgentConfig::without_effort(
+                    ProviderId::OpenAi,
+                    None,
+                    None,
+                ))
             },
             |_| {
                 disabled_calls.borrow_mut().push("Use sub-agents?");
@@ -607,11 +511,11 @@ mod sub_agent_prompt_tests {
             |_, locked| {
                 assert_eq!(locked, None);
                 calls.borrow_mut().push("main-agent");
-                Ok(ResolvedMainAgentConfig {
-                    provider: ProviderId::OpenAi,
-                    model: None,
-                    local_url: None,
-                })
+                Ok(ResolvedMainAgentConfig::without_effort(
+                    ProviderId::OpenAi,
+                    None,
+                    None,
+                ))
             },
             |_| {
                 calls.borrow_mut().push("sub-agent");
@@ -663,11 +567,11 @@ mod sub_agent_prompt_tests {
             |_, locked| {
                 assert_eq!(locked, None);
                 calls.borrow_mut().push("main-agent");
-                Ok(ResolvedMainAgentConfig {
-                    provider: ProviderId::Kiro,
-                    model: None,
-                    local_url: None,
-                })
+                Ok(ResolvedMainAgentConfig::without_effort(
+                    ProviderId::Kiro,
+                    None,
+                    None,
+                ))
             },
             |_| {
                 calls.borrow_mut().push("sub-agent");
@@ -680,8 +584,7 @@ mod sub_agent_prompt_tests {
         assert!(!presidio);
         assert_eq!(main_agent.provider, ProviderId::Kiro);
         assert!(sub_agent.is_none());
-        let runtime_args = runtime_launch::resolved_super_runtime_tool_args(args, false);
-        assert!(codex_cli_config_override_value(&runtime_args.codex_args, "model").is_none());
+        assert!(codex_cli_config_override_value(&args.codex_args, "model").is_none());
     }
 
     #[test]
@@ -773,11 +676,11 @@ mod sub_agent_prompt_tests {
             |_| Ok(Some(ProviderId::Kiro)),
             |_, locked| {
                 assert_eq!(locked, Some(ProviderId::Kiro));
-                Ok(ResolvedMainAgentConfig {
-                    provider: ProviderId::Kiro,
-                    model: None,
-                    local_url: None,
-                })
+                Ok(ResolvedMainAgentConfig::without_effort(
+                    ProviderId::Kiro,
+                    None,
+                    None,
+                ))
             },
             |_| panic!("explicit --no-sub-agent must skip the prompt"),
         )
