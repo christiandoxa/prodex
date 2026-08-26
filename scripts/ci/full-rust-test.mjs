@@ -259,16 +259,26 @@ async function main() {
     );
   }
 
+  const testPartitions = [...workspaceSteps(args), ...(args.prodexAppLib ? [prodexAppStep()] : [])];
+  if (!args.prodexAppLib) {
+    testPartitions.push(autoRotateStep(args));
+  }
   completed.push(
-    ...(await runStepsParallel(
-      [...workspaceSteps(args), autoRotateStep(args), ...(args.prodexAppLib ? [prodexAppStep()] : [])],
-      {
+    ...(await runStepsParallel(testPartitions, {
+      dryRun: args.dryRun,
+      jobs: args.jobs,
+      timingSummary: timingSummary(args, "full-rust-test:test-partitions"),
+    })),
+  );
+  if (args.prodexAppLib) {
+    completed.push(
+      ...(await runStepsParallel([autoRotateStep(args)], {
         dryRun: args.dryRun,
         jobs: args.jobs,
-        timingSummary: timingSummary(args, "full-rust-test:test-partitions"),
-      },
-    )),
-  );
+        timingSummary: timingSummary(args, "full-rust-test:auto-rotate"),
+      })),
+    );
+  }
 
   if (args.timings && !args.dryRun) {
     process.stdout.write(
