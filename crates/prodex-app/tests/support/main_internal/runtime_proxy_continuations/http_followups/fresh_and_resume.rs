@@ -138,6 +138,64 @@ fn runtime_proxy_http_precommit_transport_tries_every_profile_before_503() {
 }
 
 #[test]
+fn runtime_proxy_http_waits_for_transient_profiles_then_starts_a_new_sweep() {
+    let backend = RuntimeProxyBackend::start_with_fault_script(
+        RuntimeProxyBackendFaultScript::new([
+            RuntimeProxyBackendFaultStep::overloaded_503(
+                RuntimeProxyBackendFaultRoute::Responses,
+                "main-account",
+            ),
+            RuntimeProxyBackendFaultStep::overloaded_503(
+                RuntimeProxyBackendFaultRoute::Responses,
+                "second-account",
+            ),
+            RuntimeProxyBackendFaultStep::success(
+                RuntimeProxyBackendFaultRoute::Responses,
+                "main-account",
+            ),
+        ]),
+    );
+    let fixture = start_runtime_continuation_fixture(
+        backend,
+        "main",
+        &["main", "second"],
+        &[],
+        Vec::new(),
+    );
+
+    let response = fixture.post_json(
+        "backend-api/codex/responses",
+        serde_json::json!({
+            "model": "gpt-5.4",
+            "input": [{"role": "user", "content": "recover after transient overloads"}],
+        }),
+    );
+
+    let response_status = response.status().as_u16();
+    let response_body = response.text().expect("response body should decode");
+    let debug_log = fixture.wait_for_log(|log| log.contains("request="));
+    assert_eq!(response_status, 200, "body={response_body} log={debug_log}");
+    assert!(
+        response_body.contains("\"id\":\"scripted-success\""),
+        "body={response_body} log={debug_log}"
+    );
+    assert_eq!(
+        fixture.backend.responses_accounts(),
+        vec![
+            "main-account".to_string(),
+            "second-account".to_string(),
+            "main-account".to_string(),
+        ]
+    );
+    let log = fixture.wait_for_log(|log| {
+        log.contains("rotation_waiting_for_recovery")
+            && log.contains("rotation_sweep_start")
+            && log.contains("committed profile=main")
+    });
+    assert!(log.contains("sweep=1"), "{log}");
+}
+
+#[test]
 fn runtime_proxy_http_quota_tries_every_profile_before_final_429() {
     let backend = RuntimeProxyBackend::start_with_fault_script(RuntimeProxyBackendFaultScript::new(
         ["main-account", "second-account", "third-account"].map(|account| {

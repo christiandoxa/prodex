@@ -24,6 +24,25 @@ pub(crate) struct RuntimeProxyBackendFaultStep {
 }
 
 impl RuntimeProxyBackendFaultStep {
+    pub(crate) fn success(route: RuntimeProxyBackendFaultRoute, account_id: &str) -> Self {
+        Self {
+            route,
+            account_id: Some(account_id.to_string()),
+            status_line: "HTTP/1.1 200 OK",
+            content_type: "application/json",
+            body: serde_json::json!({
+                "id": "scripted-success",
+                "object": "response",
+                "status": "completed",
+                "output": []
+            })
+            .to_string(),
+            response_turn_state: None,
+            initial_body_stall: None,
+            chunk_delay: None,
+        }
+    }
+
     pub(crate) fn unauthorized(route: RuntimeProxyBackendFaultRoute, account_id: &str) -> Self {
         Self {
             route,
@@ -67,6 +86,33 @@ impl RuntimeProxyBackendFaultStep {
                 "\r\n"
             )
             .to_string(),
+            response_turn_state: None,
+            initial_body_stall: None,
+            chunk_delay: None,
+        }
+    }
+
+    pub(crate) fn sse_success(
+        route: RuntimeProxyBackendFaultRoute,
+        account_id: &str,
+        response_id: &str,
+    ) -> Self {
+        Self {
+            route,
+            account_id: Some(account_id.to_string()),
+            status_line: "HTTP/1.1 200 OK",
+            content_type: "text/event-stream",
+            body: format!(
+                concat!(
+                    "event: response.created\r\n",
+                    "data: {{\"type\":\"response.created\",\"response\":{{\"id\":\"{}\"}}}}\r\n",
+                    "\r\n",
+                    "event: response.completed\r\n",
+                    "data: {{\"type\":\"response.completed\",\"response\":{{\"id\":\"{}\"}}}}\r\n",
+                    "\r\n"
+                ),
+                response_id, response_id
+            ),
             response_turn_state: None,
             initial_body_stall: None,
             chunk_delay: None,
