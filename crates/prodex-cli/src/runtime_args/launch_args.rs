@@ -360,6 +360,14 @@ pub enum SuperCliAgent {
     Agy,
 }
 
+#[derive(Args, Debug)]
+pub(crate) struct SuperExposeArgs {
+    #[command(flatten)]
+    pub(crate) expose: super::ExposeArgs,
+    #[command(flatten)]
+    pub(crate) super_args: SuperArgs,
+}
+
 pub(super) fn parse_harness_mode(
     value: &str,
 ) -> Result<prodex_provider_core::HarnessMode, prodex_provider_core::ParseHarnessModeError> {

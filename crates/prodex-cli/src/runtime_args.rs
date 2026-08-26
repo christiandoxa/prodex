@@ -13,6 +13,7 @@ mod optional_tools;
 mod super_tail_extract;
 #[path = "runtime_args/super_validation.rs"]
 mod super_validation;
+pub(crate) use launch_args::SuperExposeArgs;
 pub use launch_args::{ClaudeArgs, RunArgs, RuntimeToolArgs, SuperArgs, SuperCliAgent};
 use launch_args::{parse_harness_mode, parse_runtime_base_url};
 pub use optional_tools::runtime_tool_args_with_tool;
@@ -48,7 +49,7 @@ pub struct SubAgentExecArgs {
     pub task_file: PathBuf,
 }
 
-#[derive(Args, Debug)]
+#[derive(Args, Debug, Clone)]
 pub struct ExposeArgs {
     /// Shell command to run inside the exposed PTY. Defaults to $SHELL or sh.
     #[arg(long, value_name = "COMMAND")]
@@ -72,6 +73,22 @@ pub struct ExposeArgs {
     /// Deprecated compatibility alias; tunnel access is now disabled by default.
     #[arg(long, hide = true, conflicts_with = "tunnel")]
     pub no_tunnel: bool,
+    /// Suggested display name for the ChatGPT connection.
+    #[arg(long, value_name = "NAME")]
+    pub name: Option<String>,
+    /// Where this expose command was invoked from; set by CLI normalization.
+    #[arg(skip)]
+    pub invocation: ExposeInvocation,
+    /// Super configuration captured by the `prodex s expose` alias.
+    #[arg(skip)]
+    pub super_args: Option<SuperArgs>,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum ExposeInvocation {
+    #[default]
+    Standalone,
+    SuperAlias,
 }
 
 #[derive(Args, Debug)]
