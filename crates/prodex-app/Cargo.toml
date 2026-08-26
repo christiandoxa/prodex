@@ -117,6 +117,7 @@ sha2 = { workspace = true }
 terminal_ui = { workspace = true }
 prodex_update_notice = { workspace = true }
 uuid = { workspace = true }
+url = { workspace = true }
 zeroize = { workspace = true }
 tiny_http = { workspace = true }
 tokio = { workspace = true, features = ["io-std", "io-util", "net", "process", "sync"] }
@@ -125,6 +126,10 @@ tungstenite = { workspace = true, features = ["rustls-tls-native-roots", "url"] 
 jsonwebtoken = { version = "11.0.0", features = ["aws_lc_rs"] }
 
 [dev-dependencies]
+rmcp = { version = "=3.1.4", default-features = false, features = [
+    "client",
+    "transport-streamable-http-client-reqwest",
+] }
 zstd = { workspace = true }
 
 [target.'cfg(windows)'.dependencies]
