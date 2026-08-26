@@ -401,22 +401,21 @@ fn soft_affinity_allows_response_until_five_hour_quota_is_exhausted() {
 }
 
 #[test]
-fn response_critical_floor_blocks_below_configured_reserve() {
-    let mut summary = healthy_summary();
-    summary.five_hour = RuntimeSelectionQuotaWindowSummary {
-        status: RuntimeSelectionQuotaWindowStatus::Critical,
-        remaining_percent: 1,
-    };
-    summary.route_band = RuntimeSelectionQuotaPressureBand::Critical;
+fn response_floor_is_advisory_until_authoritative_exhaustion() {
+    for remaining_percent in [5, 2, 1] {
+        let mut summary = healthy_summary();
+        summary.five_hour = RuntimeSelectionQuotaWindowSummary {
+            status: RuntimeSelectionQuotaWindowStatus::Critical,
+            remaining_percent,
+        };
+        summary.route_band = RuntimeSelectionQuotaPressureBand::Critical;
 
-    assert_eq!(
-        runtime_quota_precommit_guard_reason(summary, RuntimeRouteKind::Responses, 2),
-        Some("quota_critical_floor_before_send")
-    );
-    assert_eq!(
-        runtime_quota_precommit_guard_reason(summary, RuntimeRouteKind::Compact, 2),
-        None
-    );
+        assert_eq!(
+            runtime_quota_precommit_guard_reason(summary, RuntimeRouteKind::Responses, 10),
+            None,
+            "positive remaining quota must remain usable at {remaining_percent}%"
+        );
+    }
 }
 
 #[test]

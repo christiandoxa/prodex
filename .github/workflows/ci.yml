@@ -1566,6 +1566,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
+      CARGO_PROFILE_BENCH_DEBUG: "0"
       RUSTC_WRAPPER: sccache
 
     steps:

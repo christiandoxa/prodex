@@ -410,6 +410,15 @@ fn handle_runtime_responses_candidate_exhausted(
             }
         ),
     );
+    if affinity_state.wait_affinity_owner().is_none()
+        && loop_state.maybe_wait_for_transient_recovery(
+            context.request_id,
+            context.shared,
+            RuntimeRouteKind::Responses,
+        )?
+    {
+        return Ok(RuntimeResponsesLoopControl::Continue);
+    }
     if runtime_proxy_maybe_wait_for_interactive_inflight_relief(RuntimeInflightReliefWait {
         request_id: context.request_id,
         request: context.request,
@@ -533,13 +542,16 @@ fn handle_runtime_responses_attempt(
         RuntimeResponsesAttempt::Overloaded {
             profile_name,
             response,
-        } => handle_runtime_responses_overloaded_attempt(
-            context,
-            affinity_state,
-            loop_state,
-            profile_name,
-            response,
-        ),
+        } => {
+            loop_state.record_overload_failure();
+            handle_runtime_responses_overloaded_attempt(
+                context,
+                affinity_state,
+                loop_state,
+                profile_name,
+                response,
+            )
+        }
         RuntimeResponsesAttempt::AuthFailed {
             profile_name,
             response,

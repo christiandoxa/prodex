@@ -367,6 +367,13 @@ fn dispatch_runtime_http_anthropic_request(
                     "anthropic_transport_failure",
                     format!("{err:#}"),
                 );
+                let _ = request.respond(build_runtime_proxy_response_from_parts(
+                    build_runtime_anthropic_error_parts(
+                        503,
+                        "service_unavailable",
+                        runtime_proxy_local_selection_failure_message(),
+                    ),
+                ));
                 return;
             }
             runtime_proxy_log_dispatch_error(
@@ -401,6 +408,12 @@ fn dispatch_runtime_http_responses_request(
                     "responses_transport_failure",
                     format!("{err:#}"),
                 );
+                let _ = request.respond(build_runtime_proxy_response_from_parts(
+                    build_runtime_proxy_text_response_parts(
+                        503,
+                        runtime_proxy_local_selection_failure_message(),
+                    ),
+                ));
                 return;
             }
             runtime_proxy_log_dispatch_error(
@@ -434,6 +447,10 @@ fn dispatch_runtime_http_standard_request(
                     "standard_transport_failure",
                     format!("{err:#}"),
                 );
+                let _ = request.respond(build_runtime_proxy_text_response(
+                    503,
+                    runtime_proxy_local_selection_failure_message(),
+                ));
                 return;
             }
             runtime_proxy_log_dispatch_error(

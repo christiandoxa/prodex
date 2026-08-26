@@ -1,18 +1,20 @@
 use super::super::{
-    RuntimeRouteKind, RuntimeSelectionTraceDirect, runtime_noncompact_session_priority_profile,
-    runtime_proxy_allows_direct_current_profile_fallback,
-    runtime_proxy_direct_current_fallback_profile, runtime_proxy_log,
+    RuntimeRouteKind, RuntimeSelectionTraceDirect, await_runtime_proxy_async_task,
+    clear_runtime_recovered_profiles, runtime_noncompact_session_priority_profile,
+    runtime_profile_recovery_wait_for_route, runtime_proxy_allows_direct_current_profile_fallback,
+    runtime_proxy_direct_current_fallback_profile, runtime_proxy_log, runtime_proxy_log_field,
     runtime_proxy_precommit_budget_exhausted_for_route,
-    runtime_proxy_pressure_mode_active_for_route, runtime_proxy_probe_refresh_pause,
-    runtime_remaining_sync_probe_cold_start_profiles_for_route, runtime_selection_trace_log_direct,
-    runtime_smart_context_model_name_from_body,
+    runtime_proxy_precommit_budget_for_profile_count, runtime_proxy_pressure_mode_active_for_route,
+    runtime_proxy_probe_refresh_pause, runtime_proxy_structured_log_message,
+    runtime_remaining_sync_probe_cold_start_profiles_for_route, runtime_route_kind_label,
+    runtime_selection_trace_log_direct, runtime_smart_context_model_name_from_body,
 };
 use super::{
     RuntimeWebsocketDirectCurrentFallbackReason, RuntimeWebsocketMessageLoopAction,
     RuntimeWebsocketTextMessageFlow,
 };
 use anyhow::Result;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 #[cfg(test)]
 use super::super::{
@@ -46,7 +48,7 @@ impl<'a> RuntimeWebsocketTextMessageFlow<'a> {
             }
 
             let Some(candidate_name) = self.select_candidate()? else {
-                match self.handle_candidate_exhausted()? {
+                match self.handle_candidate_exhausted(selection_started_at)? {
                     RuntimeWebsocketMessageLoopAction::Continue => continue,
                     RuntimeWebsocketMessageLoopAction::Finished => return Ok(()),
                 }
@@ -77,13 +79,111 @@ impl<'a> RuntimeWebsocketTextMessageFlow<'a> {
         if std::mem::take(&mut self.websocket_reuse_fresh_retry_pending) {
             return Ok(false);
         }
-        runtime_proxy_precommit_budget_exhausted_for_route(
+        let exhausted = runtime_proxy_precommit_budget_exhausted_for_route(
             self.shared,
             selection_started_at,
             selection_attempts,
             self.has_continuation_priority(),
             pressure_mode,
-        )
+        )?;
+        if self.recovery_sweeps == 0 {
+            return Ok(exhausted);
+        }
+        let profile_count = self
+            .shared
+            .runtime
+            .lock()
+            .map_err(|_| anyhow::anyhow!("runtime auto-rotate state is poisoned"))?
+            .state
+            .profiles
+            .len()
+            .max(1);
+        let (attempt_limit, _) = runtime_proxy_precommit_budget_for_profile_count(
+            self.has_continuation_priority(),
+            pressure_mode,
+            profile_count,
+        );
+        Ok(selection_attempts >= attempt_limit
+            || self.recovery_sweeps
+                >= runtime_proxy_crate::RUNTIME_PROXY_PRECOMMIT_RECOVERY_SWEEP_LIMIT
+            || selection_started_at.elapsed()
+                >= std::time::Duration::from_millis(
+                    runtime_proxy_crate::RUNTIME_PROXY_PRECOMMIT_RECOVERY_BUDGET_MS,
+                ))
+    }
+
+    fn wait_for_transient_recovery(&mut self, selection_started_at: Instant) -> Result<bool> {
+        if !self.saw_overload_failure
+            || self.recovery_sweeps
+                >= runtime_proxy_crate::RUNTIME_PROXY_PRECOMMIT_RECOVERY_SWEEP_LIMIT
+        {
+            return Ok(false);
+        }
+        let Some(until) = runtime_profile_recovery_wait_for_route(
+            self.shared,
+            RuntimeRouteKind::Websocket,
+            true,
+        )?
+        else {
+            return Ok(false);
+        };
+        let now = chrono::Local::now().timestamp();
+        let recovery_budget =
+            Duration::from_millis(runtime_proxy_crate::RUNTIME_PROXY_PRECOMMIT_RECOVERY_BUDGET_MS)
+                .saturating_sub(selection_started_at.elapsed());
+        let wait =
+            std::time::Duration::from_secs(u64::try_from(until.saturating_sub(now)).unwrap_or(0))
+                .min(recovery_budget);
+        if wait.is_zero() {
+            return Ok(false);
+        }
+        runtime_proxy_log(
+            self.shared,
+            runtime_proxy_structured_log_message(
+                "rotation_waiting_for_recovery",
+                [
+                    runtime_proxy_log_field("request", self.request_id.to_string()),
+                    runtime_proxy_log_field("websocket_session", self.session_id.to_string()),
+                    runtime_proxy_log_field(
+                        "route",
+                        runtime_route_kind_label(RuntimeRouteKind::Websocket),
+                    ),
+                    runtime_proxy_log_field("wait_ms", wait.as_millis().to_string()),
+                    runtime_proxy_log_field(
+                        "sweep",
+                        self.recovery_sweeps.saturating_add(1).to_string(),
+                    ),
+                ],
+            ),
+        );
+        await_runtime_proxy_async_task(self.shared, "profile_recovery_wait", async move {
+            tokio::time::sleep(wait).await;
+            Ok(())
+        })?;
+        let recovered = clear_runtime_recovered_profiles(
+            self.shared,
+            &mut self.excluded_profiles,
+            RuntimeRouteKind::Websocket,
+            true,
+        )?;
+        self.recovery_sweeps = self.recovery_sweeps.saturating_add(1);
+        runtime_proxy_log(
+            self.shared,
+            runtime_proxy_structured_log_message(
+                "rotation_sweep_start",
+                [
+                    runtime_proxy_log_field("request", self.request_id.to_string()),
+                    runtime_proxy_log_field("websocket_session", self.session_id.to_string()),
+                    runtime_proxy_log_field(
+                        "route",
+                        runtime_route_kind_label(RuntimeRouteKind::Websocket),
+                    ),
+                    runtime_proxy_log_field("recovered_profiles", recovered.to_string()),
+                    runtime_proxy_log_field("sweep", self.recovery_sweeps.to_string()),
+                ],
+            ),
+        );
+        Ok(recovered > 0)
     }
 
     pub(super) fn handle_precommit_budget_exhausted(
@@ -114,6 +214,9 @@ impl<'a> RuntimeWebsocketTextMessageFlow<'a> {
             self.send_final_failure()?;
             return Ok(RuntimeWebsocketMessageLoopAction::Finished);
         }
+        if self.wait_for_transient_recovery(selection_started_at)? {
+            return Ok(RuntimeWebsocketMessageLoopAction::Continue);
+        }
         if let Some(action) = self.try_direct_current_profile_fallback(
             RuntimeWebsocketDirectCurrentFallbackReason::PrecommitBudgetExhausted,
         )? {
@@ -125,6 +228,7 @@ impl<'a> RuntimeWebsocketTextMessageFlow<'a> {
 
     pub(super) fn handle_candidate_exhausted(
         &mut self,
+        selection_started_at: Instant,
     ) -> Result<RuntimeWebsocketMessageLoopAction> {
         runtime_proxy_log(
             self.shared,
@@ -145,6 +249,9 @@ impl<'a> RuntimeWebsocketTextMessageFlow<'a> {
             );
             self.send_final_failure()?;
             return Ok(RuntimeWebsocketMessageLoopAction::Finished);
+        }
+        if self.wait_for_transient_recovery(selection_started_at)? {
+            return Ok(RuntimeWebsocketMessageLoopAction::Continue);
         }
         let remaining_cold_start_profiles =
             runtime_remaining_sync_probe_cold_start_profiles_for_route(

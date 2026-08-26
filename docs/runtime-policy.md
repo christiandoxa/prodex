@@ -607,6 +607,11 @@ shared-state integration around those operations.
 - Prodex stays a scoped Codex gateway, not a general-purpose LLM SDK.
 - Profile selection must be visible through policy, `prodex info`, `prodex doctor`, and runtime logs.
 - Pre-commit retry and fallback paths must stay bounded per request.
+- Fresh requests that exhaust a sweep on retryable upstream overload wait asynchronously for
+  endpoint backoff to expire, then perform at most two recovery sweeps within the bounded
+  recovery budget. Pre-commit transport failures still rotate through the ready pool without
+  being converted into quota exhaustion; an exhausted transport pool keeps its bounded local
+  failure behavior.
 - Runtime hot paths must avoid broad disk reads, quota probes, or blocking state saves.
 - Quota, budget, transport, and local pressure signals must stay classified separately.
 - An available weekly quota window remains eligible when the 5-hour window is absent or unknown; explicit exhaustion still blocks selection.
@@ -662,11 +667,11 @@ shared-state integration around those operations.
 | `runtime_proxy.broker_health_connect_timeout_ms` | `PRODEX_RUNTIME_BROKER_HEALTH_CONNECT_TIMEOUT_MS` | `750` | Broker health check connect timeout. |
 | `runtime_proxy.broker_health_read_timeout_ms` | `PRODEX_RUNTIME_BROKER_HEALTH_READ_TIMEOUT_MS` | `1500` | Broker health check read timeout. |
 | `runtime_proxy.sync_probe_pressure_pause_ms` | `PRODEX_RUNTIME_PROXY_SYNC_PROBE_PRESSURE_PAUSE_MS` | `5` | Pause before synchronous probe work when local pressure is detected. |
-| `runtime_proxy.responses_critical_floor_percent` | `PRODEX_RUNTIME_PROXY_RESPONSES_CRITICAL_FLOOR_PERCENT` | `1` | Responses quota reserve floor; the default permits every positive remaining percentage, and valid values are `1..10`. |
+| `runtime_proxy.responses_critical_floor_percent` | `PRODEX_RUNTIME_PROXY_RESPONSES_CRITICAL_FLOOR_PERCENT` | `1` | Responses quota pressure classification hint for ordering/observability; positive remaining quota is never hard-blocked, and valid values are `1..10`. |
 | `runtime_proxy.startup_sync_probe_warm_limit` | `PRODEX_RUNTIME_STARTUP_SYNC_PROBE_WARM_LIMIT` | `1` | Startup synchronous quota probe warm-up limit, capped internally at `3`. |
 <!-- END GENERATED RUNTIME_PROXY_KEYS -->
 
-Positive integer values are required for numeric policy keys, except websocket overflow capacity keys, which may be `0`, and `responses_critical_floor_percent`, which must be between `1` and `10`.
+Positive integer values are required for numeric policy keys, except websocket overflow capacity keys, which may be `0`, and `responses_critical_floor_percent`, which must be between `1` and `10`. The Responses floor is advisory: only authoritative exhausted-window evidence blocks a pre-commit request.
 Some effective values are clamped after env or policy resolution to protect runtime bounds.
 
 ## Example

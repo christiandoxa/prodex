@@ -258,10 +258,36 @@ fn candidate_plan_fallback_keeps_full_non_excluded_pool_despite_fresh_penalties(
             .collect::<Vec<_>>(),
         vec!["backoff", "healthy", "unhealthy", "busy"]
     );
+    assert_eq!(plan.fallback_candidates[0].fallback_skip_reason(), None);
     assert!(
-        plan.fallback_candidates
+        plan.fallback_candidates[1..]
             .iter()
             .all(|candidate| candidate.fallback_skip_reason().is_none())
+    );
+}
+
+#[test]
+fn profile_availability_state_separates_hard_and_transient_unavailability() {
+    assert_eq!(
+        runtime_profile_availability_state(false, false, healthy_quota_summary(), None,),
+        RuntimeProfileAvailabilityState::Ready
+    );
+    assert_eq!(
+        runtime_profile_availability_state(
+            false,
+            false,
+            healthy_quota_summary(),
+            Some("quota_exhausted_before_send"),
+        ),
+        RuntimeProfileAvailabilityState::QuotaExhausted
+    );
+    assert_eq!(
+        runtime_profile_availability_state(false, true, healthy_quota_summary(), None,),
+        RuntimeProfileAvailabilityState::TransientBackoff
+    );
+    assert_eq!(
+        runtime_profile_availability_state(true, false, healthy_quota_summary(), None,),
+        RuntimeProfileAvailabilityState::AuthInvalid
     );
 }
 

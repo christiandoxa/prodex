@@ -248,7 +248,7 @@ const runtimeProxyKeys = [
     policy: "runtime_proxy.responses_critical_floor_percent",
     env: "PRODEX_RUNTIME_PROXY_RESPONSES_CRITICAL_FLOOR_PERCENT",
     defaultValue: "`1`",
-    meaning: "Responses quota reserve floor; the default permits every positive remaining percentage, and valid values are `1..10`.",
+    meaning: "Responses quota pressure classification hint for ordering/observability; positive remaining quota is never hard-blocked, and valid values are `1..10`.",
   },
   {
     policy: "runtime_proxy.startup_sync_probe_warm_limit",

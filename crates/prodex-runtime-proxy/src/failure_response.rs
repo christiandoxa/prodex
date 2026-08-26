@@ -15,6 +15,9 @@ pub const RUNTIME_PROXY_PRECOMMIT_CONTINUATION_BUDGET_MS: u64 =
     RUNTIME_PROXY_PRECOMMIT_BUDGET_MS * 4;
 pub const RUNTIME_PROXY_PRESSURE_PRECOMMIT_BUDGET_MS: u64 = if cfg!(test) { 150 } else { 800 };
 pub const RUNTIME_PROXY_PRESSURE_PRECOMMIT_ATTEMPT_LIMIT: usize = if cfg!(test) { 3 } else { 6 };
+/// Additional bounded time available after a sweep finds only transiently unavailable profiles.
+pub const RUNTIME_PROXY_PRECOMMIT_RECOVERY_BUDGET_MS: u64 = if cfg!(test) { 5_000 } else { 30_000 };
+pub const RUNTIME_PROXY_PRECOMMIT_RECOVERY_SWEEP_LIMIT: usize = 2;
 
 pub fn runtime_proxy_stale_continuation_message() -> &'static str {
     "Upstream no longer recognizes this conversation chain before output started. Retry from the last user message or restart the Codex turn; Prodex will not send a fresh request without the missing context."

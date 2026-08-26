@@ -1,10 +1,13 @@
 use super::{
     RUNTIME_PROFILE_RETRY_BACKOFF_SECONDS, RUNTIME_PROFILE_TRANSPORT_BACKOFF_MAX_SECONDS,
     RUNTIME_PROFILE_TRANSPORT_BACKOFF_SECONDS, RuntimeProfileBackoffs, RuntimeProfileHealth,
-    RuntimeRotationProxyShared, RuntimeRotationState,
-    runtime_profile_effective_health_score_from_map, runtime_profile_route_circuit_health_key,
-    runtime_proxy_log, runtime_route_kind_label,
-    runtime_soften_persisted_route_circuits_for_startup, schedule_runtime_state_save_from_runtime,
+    RuntimeRotationProxyShared, RuntimeRotationState, runtime_profile_auth_failure_active_from_map,
+    runtime_profile_cached_auth_summary_from_maps_for_selection,
+    runtime_profile_effective_health_score_from_map,
+    runtime_profile_quota_summary_for_route_from_state, runtime_profile_route_circuit_health_key,
+    runtime_profile_route_circuit_key, runtime_proxy_log, runtime_quota_precommit_guard_reason,
+    runtime_route_kind_label, runtime_soften_persisted_route_circuits_for_startup,
+    schedule_runtime_state_save_from_runtime,
 };
 use anyhow::Result;
 use chrono::Local;
@@ -13,11 +16,143 @@ use prodex_runtime_store::{
     runtime_profile_transport_backoff_key, runtime_profile_transport_backoff_until_from_map,
 };
 use runtime_proxy_crate::{runtime_proxy_log_field, runtime_proxy_structured_log_message};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 pub(crate) use prodex_runtime_store::{
     runtime_profile_backoff_sort_key, runtime_profile_name_in_selection_backoff,
 };
+
+pub(crate) fn runtime_profile_recovery_wait_for_route(
+    shared: &RuntimeRotationProxyShared,
+    route_kind: RuntimeRouteKind,
+    include_retry_backoff: bool,
+) -> Result<Option<i64>> {
+    let now = Local::now().timestamp();
+    let mut runtime = shared
+        .runtime
+        .lock()
+        .map_err(|_| anyhow::anyhow!("runtime auto-rotate state is poisoned"))?;
+    prune_runtime_profile_selection_backoff(&mut runtime, now);
+    let mut earliest: Option<i64> = None;
+    for profile_name in runtime.state.profiles.keys() {
+        let Some(auth) = runtime_profile_cached_auth_summary_from_maps_for_selection(
+            profile_name,
+            &runtime.profile_usage_auth,
+            &runtime.profile_probe_cache,
+        ) else {
+            continue;
+        };
+        if !auth.quota_compatible
+            || runtime_profile_auth_failure_active_from_map(
+                &runtime.profile_health,
+                profile_name,
+                now,
+            )
+        {
+            continue;
+        }
+        let (quota_summary, _) = runtime_profile_quota_summary_for_route_from_state(
+            &runtime,
+            profile_name,
+            route_kind,
+            now,
+        );
+        if runtime_quota_precommit_guard_reason(quota_summary, route_kind).is_some() {
+            continue;
+        }
+        let retry_until = include_retry_backoff
+            .then(|| {
+                runtime
+                    .profile_retry_backoff_until
+                    .get(profile_name)
+                    .copied()
+                    .filter(|until| *until > now)
+            })
+            .flatten();
+        let transport_until = runtime_profile_transport_backoff_until_from_map(
+            &runtime.profile_transport_backoff_until,
+            profile_name,
+            route_kind,
+            now,
+        );
+        let circuit_until = runtime
+            .profile_route_circuit_open_until
+            .get(&runtime_profile_route_circuit_key(profile_name, route_kind))
+            .copied()
+            .filter(|until| *until > now);
+        let recovery_at = [retry_until, transport_until, circuit_until]
+            .into_iter()
+            .flatten()
+            .max();
+        if recovery_at.is_some_and(|until| until > now) {
+            earliest = match (earliest, recovery_at) {
+                (Some(current), Some(next)) => Some(current.min(next)),
+                (None, Some(next)) => Some(next),
+                (current, None) => current,
+            };
+        }
+    }
+    Ok(earliest)
+}
+
+pub(crate) fn clear_runtime_recovered_profiles(
+    shared: &RuntimeRotationProxyShared,
+    excluded_profiles: &mut BTreeSet<String>,
+    route_kind: RuntimeRouteKind,
+    include_retry_backoff: bool,
+) -> Result<usize> {
+    let now = Local::now().timestamp();
+    let runtime = shared
+        .runtime
+        .lock()
+        .map_err(|_| anyhow::anyhow!("runtime auto-rotate state is poisoned"))?;
+    let before = excluded_profiles.len();
+    excluded_profiles.retain(|profile_name| {
+        let Some(auth) = runtime_profile_cached_auth_summary_from_maps_for_selection(
+            profile_name,
+            &runtime.profile_usage_auth,
+            &runtime.profile_probe_cache,
+        ) else {
+            return true;
+        };
+        if !auth.quota_compatible
+            || runtime_profile_auth_failure_active_from_map(
+                &runtime.profile_health,
+                profile_name,
+                now,
+            )
+        {
+            return true;
+        }
+        let (quota_summary, _) = runtime_profile_quota_summary_for_route_from_state(
+            &runtime,
+            profile_name,
+            route_kind,
+            now,
+        );
+        if runtime_quota_precommit_guard_reason(quota_summary, route_kind).is_some() {
+            return true;
+        }
+        let retry_active = include_retry_backoff
+            && runtime
+                .profile_retry_backoff_until
+                .get(profile_name)
+                .is_some_and(|until| *until > now);
+        let transport_active = runtime_profile_transport_backoff_until_from_map(
+            &runtime.profile_transport_backoff_until,
+            profile_name,
+            route_kind,
+            now,
+        )
+        .is_some();
+        let circuit_active = runtime
+            .profile_route_circuit_open_until
+            .get(&runtime_profile_route_circuit_key(profile_name, route_kind))
+            .is_some_and(|until| *until > now);
+        retry_active || transport_active || circuit_active
+    });
+    Ok(before.saturating_sub(excluded_profiles.len()))
+}
 
 pub(crate) fn prune_runtime_profile_retry_backoff(runtime: &mut RuntimeRotationState, now: i64) {
     runtime

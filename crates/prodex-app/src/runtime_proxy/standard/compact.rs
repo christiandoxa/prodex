@@ -1,6 +1,7 @@
 use super::super::{
-    RuntimeResponseCandidateSelection, runtime_compact_route_followup_bound_profile,
-    runtime_proxy_current_profile, runtime_proxy_log,
+    RuntimeResponseCandidateSelection, await_runtime_proxy_async_task,
+    clear_runtime_recovered_profiles, runtime_compact_route_followup_bound_profile,
+    runtime_profile_recovery_wait_for_route, runtime_proxy_current_profile, runtime_proxy_log,
     runtime_proxy_precommit_budget_exhausted_for_route,
     runtime_proxy_pressure_mode_active_for_route, runtime_proxy_probe_refresh_pause,
     runtime_proxy_should_shed_fresh_compact_request,
@@ -16,7 +17,7 @@ use crate::runtime_state_shared::{RuntimeRotationProxyShared, RuntimeRouteKind};
 use crate::shared_types::RuntimeProxyRequest;
 use anyhow::Result;
 use std::collections::BTreeSet;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 mod admission;
 mod affinity;
 mod auth;
@@ -121,6 +122,11 @@ pub(super) fn proxy_runtime_compact_request(
     let mut last_failure: Option<(tiny_http::ResponseBox, bool)> = None;
     let mut saw_inflight_saturation = false;
     let mut saw_transport_failure = false;
+    let mut saw_overload_failure = false;
+    let mut recovery_sweeps = 0usize;
+    let can_wait_for_overload_recovery = request_previous_response_id.is_none()
+        && request_turn_state.is_none()
+        && request_session_id.is_none();
 
     loop {
         if runtime_proxy_precommit_budget_exhausted_for_route(
@@ -140,6 +146,18 @@ pub(super) fn proxy_runtime_compact_request(
                     selection_started_at.elapsed().as_millis()
                 ),
             );
+            if can_wait_for_overload_recovery
+                && saw_overload_failure
+                && wait_for_compact_overload_recovery(
+                    request_id,
+                    shared,
+                    &mut excluded_profiles,
+                    &mut recovery_sweeps,
+                    selection_started_at,
+                )?
+            {
+                continue;
+            }
             return finish_runtime_proxy_compact_selection_exhausted(
                 RuntimeProxyCompactSelectionExhausted {
                     request_id,
@@ -212,6 +230,18 @@ pub(super) fn proxy_runtime_compact_request(
                     ),
                 );
                 runtime_proxy_probe_refresh_pause(shared, RuntimeRouteKind::Compact);
+                continue;
+            }
+            if can_wait_for_overload_recovery
+                && saw_overload_failure
+                && wait_for_compact_overload_recovery(
+                    request_id,
+                    shared,
+                    &mut excluded_profiles,
+                    &mut recovery_sweeps,
+                    selection_started_at,
+                )?
+            {
                 continue;
             }
             return finish_runtime_proxy_compact_selection_exhausted(
@@ -292,6 +322,7 @@ pub(super) fn proxy_runtime_compact_request(
                 pressure_mode,
                 saw_inflight_saturation: &mut saw_inflight_saturation,
                 saw_transport_failure: &mut saw_transport_failure,
+                saw_overload_failure: &mut saw_overload_failure,
             },
             attempt,
         )? {
@@ -319,6 +350,7 @@ struct RuntimeCompactAttemptContext<'a> {
     pressure_mode: bool,
     saw_inflight_saturation: &'a mut bool,
     saw_transport_failure: &'a mut bool,
+    saw_overload_failure: &'a mut bool,
 }
 
 fn handle_runtime_compact_attempt(
@@ -344,6 +376,7 @@ fn handle_runtime_compact_attempt(
         pressure_mode,
         saw_inflight_saturation,
         saw_transport_failure,
+        saw_overload_failure,
     } = context;
     match attempt {
         RuntimeStandardAttempt::Success {
@@ -387,33 +420,38 @@ fn handle_runtime_compact_attempt(
             profile_name,
             response,
             overload,
-        } => match handle_runtime_proxy_compact_retryable_failure(
-            RuntimeProxyCompactRetryableFailure {
-                request_id,
-                shared,
-                profile_name,
-                response,
-                overload,
-                previous_response_profile,
-                request_session_id,
-                request_turn_state,
-                current_profile,
-                compact_followup_profile,
-                session_profile,
-                auto_redeemed_profiles,
-                conservative_overload_retried_profiles,
-                excluded_profiles,
-                last_failure,
-                selection_attempts,
-                selection_started_at,
-                pressure_mode,
-                saw_inflight_saturation: *saw_inflight_saturation,
-                saw_transport_failure: *saw_transport_failure,
-            },
-        )? {
-            RuntimeCompactFailureFlow::Retry => Ok(None),
-            RuntimeCompactFailureFlow::Return(response) => Ok(Some(response)),
-        },
+        } => {
+            if overload {
+                *saw_overload_failure = true;
+            }
+            match handle_runtime_proxy_compact_retryable_failure(
+                RuntimeProxyCompactRetryableFailure {
+                    request_id,
+                    shared,
+                    profile_name,
+                    response,
+                    overload,
+                    previous_response_profile,
+                    request_session_id,
+                    request_turn_state,
+                    current_profile,
+                    compact_followup_profile,
+                    session_profile,
+                    auto_redeemed_profiles,
+                    conservative_overload_retried_profiles,
+                    excluded_profiles,
+                    last_failure,
+                    selection_attempts,
+                    selection_started_at,
+                    pressure_mode,
+                    saw_inflight_saturation: *saw_inflight_saturation,
+                    saw_transport_failure: *saw_transport_failure,
+                },
+            )? {
+                RuntimeCompactFailureFlow::Retry => Ok(None),
+                RuntimeCompactFailureFlow::Return(response) => Ok(Some(response)),
+            }
+        }
         RuntimeStandardAttempt::AuthFailed {
             profile_name,
             response,
@@ -450,4 +488,71 @@ fn handle_runtime_compact_attempt(
             Ok(None)
         }
     }
+}
+
+fn wait_for_compact_overload_recovery(
+    request_id: u64,
+    shared: &RuntimeRotationProxyShared,
+    excluded_profiles: &mut BTreeSet<String>,
+    recovery_sweeps: &mut usize,
+    selection_started_at: Instant,
+) -> Result<bool> {
+    if *recovery_sweeps >= runtime_proxy_crate::RUNTIME_PROXY_PRECOMMIT_RECOVERY_SWEEP_LIMIT
+        || selection_started_at.elapsed()
+            >= Duration::from_millis(
+                runtime_proxy_crate::RUNTIME_PROXY_PRECOMMIT_RECOVERY_BUDGET_MS,
+            )
+    {
+        return Ok(false);
+    }
+    let profile_count = shared
+        .runtime
+        .lock()
+        .map_err(|_| anyhow::anyhow!("runtime auto-rotate state is poisoned"))?
+        .state
+        .profiles
+        .len();
+    if profile_count < 2 {
+        return Ok(false);
+    }
+    let Some(until) =
+        runtime_profile_recovery_wait_for_route(shared, RuntimeRouteKind::Compact, true)?
+    else {
+        return Ok(false);
+    };
+    let now = chrono::Local::now().timestamp();
+    let remaining_budget =
+        Duration::from_millis(runtime_proxy_crate::RUNTIME_PROXY_PRECOMMIT_RECOVERY_BUDGET_MS)
+            .saturating_sub(selection_started_at.elapsed());
+    let wait = Duration::from_secs(u64::try_from(until.saturating_sub(now)).unwrap_or(0))
+        .min(remaining_budget);
+    if wait.is_zero() {
+        return Ok(false);
+    }
+    runtime_proxy_log(
+        shared,
+        format!(
+            "request={request_id} transport=http rotation_waiting_for_recovery route=compact wait_ms={} sweep={}",
+            wait.as_millis(),
+            recovery_sweeps.saturating_add(1)
+        ),
+    );
+    await_runtime_proxy_async_task(shared, "profile_recovery_wait", async move {
+        tokio::time::sleep(wait).await;
+        Ok(())
+    })?;
+    let recovered = clear_runtime_recovered_profiles(
+        shared,
+        excluded_profiles,
+        RuntimeRouteKind::Compact,
+        true,
+    )?;
+    *recovery_sweeps = recovery_sweeps.saturating_add(1);
+    runtime_proxy_log(
+        shared,
+        format!(
+            "request={request_id} transport=http rotation_sweep_start route=compact recovered_profiles={recovered} sweep={recovery_sweeps}"
+        ),
+    );
+    Ok(recovered > 0)
 }
