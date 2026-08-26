@@ -25,6 +25,12 @@ The promoted UTF-8 context component uses borrowed `StringSlice`, nullable point
 RPATH. `String`, `List`, `Dict`, and `Set` remain outside release artifacts until a bundled-runtime
 design can preserve the target GLIBC and clean-machine contracts.
 
+Rich ABI v2 is included in the same static Linux archive. It exports the context diagnostic,
+route-plan, policy-alias, model-fallback, and context-plan operations and uses only typed structs,
+borrowed views, offset slices, caller-owned output, and bounded scratch tables. No new release
+target is promoted: Linux keeps the existing GLIBC_2.23 ceiling and macOS/Windows remain
+Rust-only until their existing final-link/signing/clean-runtime evidence is available.
+
 For Mojo-enabled release rows:
 
 - `PRODEX_MOJO_REQUIRED=1` is mandatory;

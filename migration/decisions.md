@@ -223,3 +223,44 @@ current release ceilings. Production therefore uses `StringSlice`, `Optional[Poi
 `InlineArray`; release CI rejects `KGEN_CompilerRT_*` references. A bundled Mojo runtime or
 standalone Mojo utility is not promoted until licensing, GLIBC, target packaging, signing, and
 clean-machine evidence all pass.
+
+## 2026-08-26: Rich Mojo domain ownership supersedes normalization-only FFI
+
+The first-generation integer and `StringSlice` seams remain compatible contracts, but they no
+longer define the semantic boundary. Rich ABI v2 sends bounded non-secret text and record DTOs to
+Mojo. Mojo constructs `DiagnosticRecord`, `RouteCandidate`, `PolicyRule`, and `ContextItem`
+values, performs parsing/normalization, uses open-addressing arena tables for grouping and set
+membership, and returns caller-owned structured records. Rust maps those records into existing
+public types and retains IO, authorization, credentials, persistence, transport, and presentation.
+
+The active operations are context diagnostic analysis, provider/model fallback parsing, gateway
+route-alias validation, governed provider routing, and Smart Context rehydration planning. A Mojo
+error is a hard internal failure on a Mojo-enabled build; no Rust semantic recomputation is
+selected. The feature-off implementation remains a Rust-only target and differential oracle.
+
+## 2026-08-26: Arena-backed release strategy per subsystem
+
+Native `String`, `List`, `Dict`, and `Set` compile and run in a standalone Mojo capability probe,
+but the executable requires `libKGENCompilerRTShared.so`, AsyncRT/MSupport globals, a developer
+RUNPATH, and GLIBC 2.34 on the audit host. That fails the existing static archive and GLIBC
+deployment contract. Rich production code therefore uses borrowed `StringSlice`-compatible
+views, typed Mojo structs, bounded arrays, caller-owned byte arenas, and open-addressing tables.
+This is an intentional release decision, not a permanent rejection of future native runtime
+packaging.
+
+## 2026-08-26: Mojo ecosystem package gate
+
+The live catalog and pinned source checkouts were audited before local infrastructure was added.
+EmberJson is `REFERENCE_ONLY` because the current 0.3.4 checkout requires a newer development
+compiler and fails under pinned Mojo 1.0.0. ExtraMojo, mojo-regex, and ArgMojo compile selected
+source tests but have no approved reproducible Prodex artifact integration; they remain reference
+experiments. UUID is rejected for the pinned compiler/dependency state. No package is imported by
+the release core, so no package lock or build-time network dependency was added.
+
+## 2026-08-26: JSON boundaries remain Rust-owned
+
+The package review did not justify replacing Serde for provider protocols, Codex JSON-RPC,
+runtime-policy TOML, or persisted state. Rich v2 receives already bounded non-secret text/records
+after those external compatibility and security boundaries. EmberJson immutable-document and
+reflection experiments are deferred until its compiler compatibility, complete-document
+validation, package provenance, and cross-target artifact gates pass.

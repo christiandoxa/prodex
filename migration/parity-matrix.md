@@ -61,3 +61,19 @@ maintenance reason.
 | Quota pool aggregation | Yes | Yes, normalized quota render aggregation and 2,000-case differential suite | None; strict activation assertion | Ubuntu 24.04 x86_64 |
 | Smart Context rehydration | Yes | Yes, active Smart Context body-transform planner and 2,000-case differential suite | None; strict activation assertion | Ubuntu 24.04 x86_64 |
 | Runtime tuning defaults | Yes | Yes, runtime config/probe queue defaults and 2,000-case differential suite | None; strict activation assertion | Ubuntu 24.04 x86_64 |
+
+## Rich ABI v2 promotions (2026-08-26)
+
+These rows supersede the baseline's normalization-only boundary descriptions.
+
+| Component | Rust oracle | Mojo entry point | Inputs/outputs | Coverage | Status |
+| --- | --- | --- | --- | --- | --- |
+| Context diagnostic analysis | `critical_signal_counts_for_line` plus Rust normalized text | `prodex_mojo_rich_context_analyze_v2` | bounded UTF-8 text; grouped `DiagnosticRecord` table, counts, normalized output strings | existing context suite plus 10,000 generated Unicode/ANSI/CRLF cases | `MOJO` |
+| Provider/model fallback parser | `provider_model_fallback_chain_rust` | `prodex_mojo_rich_model_fallback_v2` | provider/model UTF-8 views; ordered deduped model records | 20,000 valid/invalid `combo:` and alias cases plus exact Gemini catalog aliases | `MOJO` |
+| Gateway route-alias policy parser | `validate_gateway_route_alias_rust` | `prodex_mojo_rich_policy_alias_v2` | alias, model list, optional strategy, metric list; normalized model records or issue fields | 20,000 generated valid/invalid grammar cases and existing policy suite | `MOJO` |
+| Governed provider route plan | `plan_governed_provider_route_rust` | `prodex_mojo_rich_route_plan_v2` | provider/model/capability text and bounded signals; candidate objects, score components, reasons, order | 10,000 generated candidate sets plus existing provider SPI suite | `MOJO` |
+| Smart Context rehydration plan | `smart_context_auto_rehydrate_plan_rust` | `prodex_mojo_rich_context_plan_v2` | opaque artifact-reference views, optional availability set, required/token fields; action graph | existing 2,000 generated cases and active app rehydration callers | `MOJO` |
+
+Each Rust wrapper validates version, status, counts, offsets, lengths, UTF-8, indices, tags,
+ordering, and duplicate invariants. The Rust implementations remain test-only or Rust-only-target
+oracles and are never selected after a Mojo-enabled error.

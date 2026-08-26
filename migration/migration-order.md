@@ -70,3 +70,20 @@ owned by the Redis/runtime adapters. Do not add a Mojo wrapper without a real pr
 - Do not add a Mojo call inside a hot loop; batch the entire dataset first.
 - Do not promote a component with parity gaps or an uncertain stream/affinity invariant;
   after promotion, a mismatch is a validation failure and never selects Rust.
+
+## Completed rich-domain wave (2026-08-26)
+
+27. Evaluated Mojo 1.0.0 owning collections, EmberJson, ExtraMojo, mojo-regex, ArgMojo, UUID,
+    and mojo-libc against the live package catalog and release artifact constraints.
+28. Added additive Rich ABI v2 with borrowed UTF-8 views, bounded record tables, offset slices,
+    caller-owned output/scratch arenas, object references by indices, and structured issues.
+29. Migrated the active context diagnostic pipeline from raw text to Mojo normalization,
+    classification, tokenization, grouping, and structured records.
+30. Migrated the active provider/model fallback-chain grammar, including `combo:` separators and
+    provider aliases, to a Mojo parser with ordered deduped model records.
+31. Migrated gateway route-alias semantic validation to Mojo policy/model objects and issue tags.
+32. Raised governed provider routing from integer-only inputs to Mojo provider/capability text,
+    candidate objects, deduplication, score components, stable ranking, and reason records.
+33. Raised Smart Context rehydration to a Mojo context-item set lookup and structured action plan.
+34. Promoted the rich consumers and self-tests in strict real-Mojo CI and release archive symbol
+    checks; native heap objects remain outside release artifacts.

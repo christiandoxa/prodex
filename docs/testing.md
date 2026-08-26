@@ -130,6 +130,11 @@ PRODEX_MOJO_REQUIRED=1 PRODEX_MOJO_VERSION=1.0.0 \
 PRODEX_MOJO_REQUIRED=1 PRODEX_MOJO_VERSION=1.0.0 \
   cargo test --locked -p prodex-mojo-core --features mojo-core -- --test-threads=1
 
+PRODEX_MOJO_REQUIRED=1 PRODEX_MOJO_VERSION=1.0.0 \
+  cargo test --locked -p prodex-provider-core --features mojo -- --test-threads=1
+PRODEX_MOJO_REQUIRED=1 PRODEX_MOJO_VERSION=1.0.0 \
+  cargo test --locked -p prodex-runtime-policy --features mojo -- --test-threads=1
+
 target/debug/prodex doctor --runtime --json
 ```
 
@@ -142,6 +147,19 @@ Strict Mojo builds fail if the compiler or archiver is missing, the checked-out 
 does not compile, or the static archive is missing. The authoritative `Real Mojo / parity` job is part of
 `.github/workflows/ci.yml`; it lints the all-feature workspace, runs the built `prodex --version`
 binary, and checks the generated static archives.
+
+The rich strict suites additionally execute the five production operations: context diagnostic
+analysis, provider/model fallback parsing, gateway route-alias validation, governed provider
+routing, and Smart Context rehydration planning. Their generated parity floors are 10,000 context
+cases, 20,000 fallback/parser cases, 20,000 policy cases, and 10,000 routing candidate sets.
+The Rust implementations remain differential oracles only. Rich ABI tests cover invalid UTF-8,
+null/zero-length views, null output pointers, capacity exhaustion, invalid tags/indices, and
+offset/result validation.
+
+The live package audit is recorded in `migration/mojo-ecosystem-evidence.md`. EmberJson,
+ExtraMojo, mojo-regex, ArgMojo, UUID, and mojo-libc are evaluated before any package adoption;
+the current release uses no third-party Mojo package and keeps the native owning collection probe
+outside release artifacts.
 
 ### Release and installer Mojo checks
 

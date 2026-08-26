@@ -439,3 +439,45 @@ describe different phases.
 No generated object or archive is committed. The final Linux release is verified for static
 Mojo dependencies, no build-path RPATH/RUNPATH, GLIBC policy, and execution without `mojo` on
 `PATH`.
+
+## Rich/domain ABI v2 (2026-08-26)
+
+Rich v2 is additive and does not overload text ABI v1. Its version entry point is
+`prodex_mojo_rich_abi_version`, returning `2`; its layout probe is
+`prodex_mojo_rich_abi_layout`. The current record family is:
+
+| Record | Purpose |
+| --- | --- |
+| `RichStringView` | borrowed UTF-8 bytes (`ptr`, `len`); null plus zero length is allowed |
+| `RichSlice` | offset/length into a caller-owned output byte arena |
+| `RichContextRecord` / `RichContextResult` | diagnostic group objects and counts/capacity/error metadata |
+| `RichRouteInput` / `RichRouteRecord` / `RichRouteResult` | provider/model/capability candidate graph and ordered decision |
+| `RichPolicyInput` / `RichPolicyModel` / `RichPolicyResult` | route-alias parser input, normalized model records, and issue metadata |
+| `RichPlanItem` / `RichPlanAction` / `RichPlanResult` | Smart Context item/action graph and budget result |
+
+Rich operations are coarse-grained: one context text, route candidate set, policy alias, fallback
+selector, or context-item set per call. Inputs are borrowed only for the synchronous call. Mojo
+does not retain Rust pointers, and Rust never receives a Mojo object pointer. Object relationships
+cross as indices and `RichSlice` offsets; generated strings are copied into a Rust-allocated byte
+arena and validated as UTF-8 before reconstruction.
+
+Status values are `0=ok`, `1=invalid boundary/input`, `2=invalid UTF-8`, `3=capacity`, and
+`4=ABI mismatch`. Semantic failures are returned in the operation result as structured domain,
+kind, field, object-index, byte-offset, and byte-length data and are mapped to `MojoIssue` by the
+safe Rust wrapper. Capacity is normal control flow; the result reports required record, scratch,
+and output sizes where the operation can determine them. Rust validates every status, version,
+count, offset, length, UTF-8 slice, object index, type/reason tag, uniqueness constraint, and
+ordering relation. Invalid output is a hard internal error on Mojo-enabled builds.
+
+The layout probe covers all v2 record sizes and alignments. Current x86_64 evidence is 16-byte
+string views/slices, 64-byte context records, 160-byte context results, 128-byte route inputs,
+160-byte route records, 80-byte route results, 64-byte policy inputs, 32-byte policy models,
+80-byte policy results, 32-byte plan items, 48-byte plan actions, and 72-byte plan results.
+The ABI is reentrant and has no process-global mutable state; callers must provide disjoint buffers
+for concurrent calls.
+
+Production v2 entry points are `prodex_mojo_rich_context_analyze_v2`,
+`prodex_mojo_rich_route_plan_v2`, `prodex_mojo_rich_policy_alias_v2`,
+`prodex_mojo_rich_model_fallback_v2`, and `prodex_mojo_rich_context_plan_v2`. The feature-off Rust
+implementation is a separate supported target and differential oracle, never a runtime fallback
+after a Mojo-enabled call fails.

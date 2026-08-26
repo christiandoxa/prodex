@@ -36,3 +36,18 @@ explicit; numeric pre-normalization is no longer universal. Captured vectors and
 the compatibility contract after parity covers normal, Unicode, boundary, invalid, and extreme
 inputs. A separate Rust-only build may retain its implementation, but it is never a runtime
 fallback for `MOJO`.
+
+## Rich equivalents promoted on 2026-08-26
+
+| Rust usage | Mojo domain equivalent | Boundary strategy | Status |
+| --- | --- | --- | --- |
+| `prodex-context` line classification/grouping | `DiagnosticRecord`, Unicode-aware scanner, bounded key table, `ContextAnalysis` | borrowed `RichStringView` plus output `RichSlice` arena | `MOJO` |
+| provider fallback aliases and `combo:` chains | `NormalizedIdentifier`, bounded model records, case-folded dedup set | provider/model text views plus ordered output records | `MOJO` |
+| gateway route-alias validation | `PolicyRule`, optional strategy view, metric relationship checks, `MojoIssue` | policy record table plus structured issue fields | `MOJO` |
+| governed provider routing | `RouteCandidate`, capability tokenization, score components, stable rank | non-secret provider/model/capability views plus route record graph | `MOJO` |
+| Smart Context rehydration | `ContextItem`, available-reference set, `ContextPlan` and action records | opaque artifact-reference views plus caller-owned output | `MOJO` |
+| JSON/TOML/provider wire parsing | no direct replacement | Serde and protocol adapters remain Rust | `RUST` |
+
+The release implementation uses arena-backed equivalents rather than owning `List`/`Dict`/`Set`.
+This keeps collection processing in Mojo while preserving the existing static archive, GLIBC, and
+clean-machine contracts.

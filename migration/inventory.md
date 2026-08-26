@@ -1,6 +1,6 @@
 # Rust-to-Mojo migration inventory
 
-Audit basis: workspace source as of 2026-08-24, baseline `762fbe12`, `Cargo.toml`, maintained architecture
+Audit basis: workspace source as of 2026-08-26, baseline `a66c4a54e0eb56229188f63616e05d0698085cb8`, `Cargo.toml`, maintained architecture
 and testing contracts, the code knowledge graph, and direct source inspection. The
 workspace contains 59 Cargo packages. This inventory classifies ownership boundaries,
 not every generated fixture or test helper. Status `MOJO` means compiled Mojo is
@@ -71,3 +71,21 @@ their actual production owners are durable storage and Redis/runtime admission. 
 own policy, credentials, affinity, tenant ownership, transport, route construction, durable
 mutation, secrets, or user-facing errors. The dormant Smart Context candidate scorer/selector remains an
 audit-only candidate until a non-test production caller exists.
+
+## Rich domain promotion on 2026-08-26
+
+These rows supersede the earlier normalization-only descriptions. They are active production
+callers under a Mojo-enabled build; a Mojo result error is a hard internal error and never causes
+Rust to recompute the semantic answer.
+
+| Operation | Mojo semantic ownership | Rust ownership | Consumer |
+| --- | --- | --- | --- |
+| `prodex-context::count_critical_signals` | UTF-8 validation, CR/LF handling, ANSI skipping, Unicode trimming, diagnostic classification, token counting, duplicate grouping, and context groups | command/process collection, public report mapping, and Rust-only oracle | `prodex-context` |
+| `prodex-provider-core::provider_model_fallback_chain` | `combo:` scanner, separators, optional/empty components, case-folded deduplication, provider aliases, and ordered model records | provider ID API and transport | `prodex-provider-core` |
+| `prodex-runtime-policy::validate_gateway_route_alias` | alias/model/strategy grammar, identifier validation, metric-to-model relationships, and structured issues | TOML/Serde, paths, numeric rules, secrets, and final errors | `prodex-runtime-policy` |
+| `prodex-provider-spi::plan_governed_provider_route` | provider/capability text normalization, capability interpretation, candidate objects, deduplication, score components, ranking, and reasons | hard tenant/policy/security filters, credentials, affinity, routes, and transport | `prodex-provider-spi` |
+| `prodex-runtime-proxy::smart_context_auto_rehydrate_plan` | opaque artifact-reference set lookup, context-item objects, budget admission, and action records | artifact acquisition, confidentiality boundary, ordering compatibility, and IO | `prodex-runtime-proxy` |
+
+The original scalar and text ABI rows remain historically accurate as the first migration wave.
+Rich ABI v2 is now the semantic boundary. JSON, TOML deserialization, credentials, prompts,
+filesystem paths, and provider wire payloads remain Rust-owned after the package/runtime review.

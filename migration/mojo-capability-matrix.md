@@ -131,3 +131,29 @@ installation state.
 does not need a Mojo compiler at runtime. `build_strict=true` records that its build used
 the strict Mojo feature path; a missing compiler, archiver, or required target archive fails the
 build. These fields must not be treated as synonyms.
+
+## Rich capability promotion (2026-08-26)
+
+This is the final matrix for the rich wave against baseline
+`a66c4a54e0eb56229188f63616e05d0698085cb8`.
+
+| Capability | Baseline | Final | Production? | Artifact impact |
+| --- | --- | --- | --- | --- |
+| StringSlice | MOJO | MOJO | Yes, borrowed UTF-8 context/domain views | Static; no new runtime library |
+| String | EXPERIMENT | EXPERIMENT | No; probe only | Probe links KGEN/AsyncRT/MSupport and a developer RUNPATH |
+| List | EXPERIMENT | EXPERIMENT | No; Rust adapter storage only | Same owning-runtime risk; not in release archive |
+| Dict | EXPERIMENT | EXPERIMENT | No; open-addressing tables used instead | No package/runtime impact |
+| Set | EXPERIMENT | EXPERIMENT | No; open-addressing tables used instead | No package/runtime impact |
+| Optional | verified forms | verified borrowed-pointer forms | Yes for optional ABI references and domain decisions | Pointer-sized ABI field; no owning allocation |
+| Variant | EXPERIMENT | EXPERIMENT | No; explicit bounded tags at ABI edge | Not linked into release core |
+| Domain structs | partial | PROMOTED | Yes: `DiagnosticRecord`, `RouteCandidate`, `PolicyRule`, `ContextItem`, `ContextPlan` | Plain Mojo record layout, statically linked |
+| Arena objects | none/partial | PROMOTED | Yes: offset slices, record arrays, object indices, scratch hash tables | Caller-owned buffers; no Mojo heap runtime |
+| Parser | Rust | MOJO | Yes: `combo:` fallback grammar and route-alias semantic grammar | New rich v2 exports only |
+| Structured errors | partial | MOJO | Yes: domain/kind/field/index/offset/length issue records | Fixed-width result fields |
+| Structured output strings | limited | MOJO | Yes: normalized keys, provider/model names, model chains, artifact IDs | Rust-owned output byte arenas |
+| JSON | Rust | KEEP_RUST | No; Serde remains external compatibility parser | No EmberJson dependency |
+
+Promotion evidence is executable: strict Rust callers run all five v2 operations, layout checks
+compare compiler-generated sizes/alignment, and the release archive checks all v2 symbols and
+rejects `KGEN_CompilerRT_*` references. Native heap and package-backed paths remain non-production
+until their full target and clean-machine gates pass.
