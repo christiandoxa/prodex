@@ -61,6 +61,15 @@ fn expose_start_test_server(
     (listen_addr, shared, server)
 }
 
+fn expose_test_cloudflared_script(root: &std::path::Path) -> TestEnvVarGuard {
+    let script = root.join(if cfg!(windows) {
+        "cloudflared.py"
+    } else {
+        "cloudflared"
+    });
+    TestEnvVarGuard::set("PRODEX_TEST_CLOUDFLARED_SCRIPT", &script.to_string_lossy())
+}
+
 fn expose_send_test_request(listen_addr: SocketAddr, request: &str) -> String {
     let mut stream = TcpStream::connect(listen_addr).unwrap();
     stream
@@ -574,6 +583,7 @@ print("https://fixture.trycloudflare.com", file=sys.stderr, flush=True)
 time.sleep(30)
 "#,
     );
+    let _script = expose_test_cloudflared_script(&root);
     let path = std::env::join_paths(std::iter::once(root.clone()).chain(std::env::split_paths(
         &std::env::var_os("PATH").unwrap_or_default(),
     )))
@@ -608,6 +618,7 @@ else:
     raise SystemExit(1)
 "#,
     );
+    let _script = expose_test_cloudflared_script(&root);
     let path = std::env::join_paths(std::iter::once(root.clone()).chain(std::env::split_paths(
         &std::env::var_os("PATH").unwrap_or_default(),
     )))

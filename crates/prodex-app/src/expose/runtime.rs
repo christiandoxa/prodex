@@ -469,6 +469,16 @@ pub(super) struct CloudflaredTunnel {
     reader_threads: Vec<JoinHandle<()>>,
 }
 
+pub(super) fn cloudflared_command() -> Command {
+    #[cfg(test)]
+    if let Some(script) = std::env::var_os("PRODEX_TEST_CLOUDFLARED_SCRIPT") {
+        let mut command = Command::new(if cfg!(windows) { "python" } else { "python3" });
+        command.arg(script);
+        return command;
+    }
+    Command::new("cloudflared")
+}
+
 impl CloudflaredTunnel {
     pub(super) fn exited(&mut self) -> Option<std::process::ExitStatus> {
         self.child.try_wait().ok().flatten()
@@ -505,7 +515,7 @@ impl Drop for CloudflaredTunnel {
 }
 
 pub(super) fn start_cloudflared_tunnel(local_url: &str) -> Result<CloudflaredTunnel> {
-    let mut command = Command::new("cloudflared");
+    let mut command = cloudflared_command();
     command
         .args(["tunnel", "--protocol", "http2", "--url", local_url])
         .stdin(Stdio::null())
