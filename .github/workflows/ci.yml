@@ -1862,17 +1862,33 @@ jobs:
           printf '%s\n' "${diagnostics}" | grep -F '"rich_context_parser": true'
           printf '%s\n' "${diagnostics}" | grep -F '"rich_provider_routing": true'
 
-      - name: Run quota Mojo smoke and parity tests
-        run: cargo test --locked -q -p prodex-quota --features mojo -- --test-threads=1
-
-      - name: Run runtime-proxy Mojo smoke and parity tests
-        run: cargo test --locked -q -p prodex-runtime-proxy --features mojo -- --test-threads=1
-
-      - name: Run runtime-quota Mojo smoke and parity tests
-        run: cargo test --locked -q -p prodex-runtime-quota --features mojo -- --test-threads=1
-
-      - name: Run provider-routing Mojo smoke and parity tests
-        run: cargo test --locked -q -p prodex-provider-spi --features mojo -- --test-threads=1
+      - name: Run independent Mojo package parity tests in parallel
+        shell: bash
+        run: |
+          set -uo pipefail
+          log_dir="${RUNNER_TEMP}/mojo-package-tests"
+          mkdir -p "${log_dir}"
+          pids=()
+          labels=()
+          run_test() {
+            local label="$1"
+            shift
+            labels+=("${label}")
+            "$@" >"${log_dir}/${label}.log" 2>&1 &
+            pids+=("$!")
+          }
+          run_test quota cargo test --locked -q -p prodex-quota --features mojo -- --test-threads=1
+          run_test runtime-proxy cargo test --locked -q -p prodex-runtime-proxy --features mojo -- --test-threads=1
+          run_test runtime-quota cargo test --locked -q -p prodex-runtime-quota --features mojo -- --test-threads=1
+          run_test provider-spi cargo test --locked -q -p prodex-provider-spi --features mojo -- --test-threads=1
+          status=0
+          for index in "${!pids[@]}"; do
+            if ! wait "${pids[index]}"; then
+              status=1
+            fi
+            cat "${log_dir}/${labels[index]}.log"
+          done
+          exit "${status}"
 
       - name: Run provider-constraint and tuning Mojo parity tests
         shell: bash
