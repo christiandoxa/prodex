@@ -245,9 +245,22 @@ impl RuntimeCompactSelectionContext<'_> {
             self.pressure_mode,
         )?;
         if self.recovery_sweeps == 0 {
+            if self.saw_transport_failure && self.selection_attempts < self.profile_count()? {
+                return Ok(false);
+            }
             return Ok(normal_budget_exhausted);
         }
-        let profile_count = self
+        let (attempt_limit, _) =
+            runtime_proxy_crate::runtime_proxy_precommit_budget_for_profile_count(
+                continuation,
+                self.pressure_mode,
+                self.profile_count()?,
+            );
+        Ok(self.selection_attempts >= attempt_limit || self.recovery_budget_exhausted())
+    }
+
+    fn profile_count(&self) -> Result<usize> {
+        Ok(self
             .shared
             .runtime
             .lock()
@@ -255,14 +268,7 @@ impl RuntimeCompactSelectionContext<'_> {
             .state
             .profiles
             .len()
-            .max(1);
-        let (attempt_limit, _) =
-            runtime_proxy_crate::runtime_proxy_precommit_budget_for_profile_count(
-                continuation,
-                self.pressure_mode,
-                profile_count,
-            );
-        Ok(self.selection_attempts >= attempt_limit || self.recovery_budget_exhausted())
+            .max(1))
     }
 
     fn recovery_budget_exhausted(&self) -> bool {

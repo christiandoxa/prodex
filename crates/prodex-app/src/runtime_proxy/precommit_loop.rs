@@ -19,6 +19,7 @@ pub(super) struct RuntimePrecommitLoopState<F> {
     pub selection_attempts: usize,
     pub excluded_profiles: BTreeSet<String>,
     pub saw_inflight_saturation: bool,
+    pub saw_transport_failure: bool,
     pub saw_overload_failure: bool,
     pub recovery_sweeps: usize,
     pub recovery_started_at: Option<Instant>,
@@ -32,6 +33,7 @@ impl<F> RuntimePrecommitLoopState<F> {
             selection_attempts: 0,
             excluded_profiles: BTreeSet::new(),
             saw_inflight_saturation: false,
+            saw_transport_failure: false,
             saw_overload_failure: false,
             recovery_sweeps: 0,
             recovery_started_at: None,
@@ -53,6 +55,10 @@ impl<F> RuntimePrecommitLoopState<F> {
             pressure_mode,
         )?;
         if self.recovery_sweeps == 0 {
+            if self.saw_transport_failure && self.selection_attempts < Self::profile_count(shared)?
+            {
+                return Ok(false);
+            }
             return Ok(normal_budget_exhausted);
         }
         let profile_count = Self::profile_count(shared)?;
@@ -82,6 +88,10 @@ impl<F> RuntimePrecommitLoopState<F> {
 
     pub fn record_inflight_saturation(&mut self) {
         self.saw_inflight_saturation = true;
+    }
+
+    pub fn record_transport_failure(&mut self) {
+        self.saw_transport_failure = true;
     }
 
     pub fn record_overload_failure(&mut self) {

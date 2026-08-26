@@ -87,6 +87,12 @@ impl<'a> RuntimeWebsocketTextMessageFlow<'a> {
             pressure_mode,
         )?;
         if self.recovery_sweeps == 0 {
+            if self.saw_transport_failure
+                && !self.has_continuation_priority()
+                && selection_attempts < self.profile_count()?
+            {
+                return Ok(false);
+            }
             return Ok(exhausted);
         }
         let profile_count = self
@@ -112,6 +118,18 @@ impl<'a> RuntimeWebsocketTextMessageFlow<'a> {
                         runtime_proxy_crate::RUNTIME_PROXY_PRECOMMIT_RECOVERY_BUDGET_MS,
                     )
             }))
+    }
+
+    fn profile_count(&self) -> Result<usize> {
+        Ok(self
+            .shared
+            .runtime
+            .lock()
+            .map_err(|_| anyhow::anyhow!("runtime auto-rotate state is poisoned"))?
+            .state
+            .profiles
+            .len()
+            .max(1))
     }
 
     fn wait_for_transient_recovery(&mut self) -> Result<bool> {
