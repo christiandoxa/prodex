@@ -115,28 +115,33 @@ fn snapshot_hold_preserves_active_exhaustion_until_reset() {
 
 #[test]
 fn precommit_block_reason_allows_positive_five_hour_until_exhausted() {
-    let summary = RuntimeProxyQuotaSummary {
-        five_hour: RuntimeProxyQuotaWindowSummary {
-            status: RuntimeSelectionQuotaWindowStatus::Critical,
-            remaining_percent: 2,
-            reset_at: 200,
-        },
-        weekly: RuntimeProxyQuotaWindowSummary {
-            status: RuntimeSelectionQuotaWindowStatus::Ready,
-            remaining_percent: 80,
-            reset_at: i64::MAX,
-        },
-        route_band: RuntimeSelectionQuotaPressureBand::Critical,
-    };
+    for remaining_percent in [5, 2, 1] {
+        let summary = RuntimeProxyQuotaSummary {
+            five_hour: RuntimeProxyQuotaWindowSummary {
+                status: RuntimeSelectionQuotaWindowStatus::Critical,
+                remaining_percent,
+                reset_at: 200,
+            },
+            weekly: RuntimeProxyQuotaWindowSummary {
+                status: RuntimeSelectionQuotaWindowStatus::Ready,
+                remaining_percent: 80,
+                reset_at: i64::MAX,
+            },
+            route_band: RuntimeSelectionQuotaPressureBand::Critical,
+        };
 
-    assert_eq!(
-        runtime_proxy_precommit_quota_block_reason(summary, RuntimeRouteKind::Responses, 2,),
-        None
-    );
-    assert_eq!(
-        runtime_proxy_precommit_quota_block_reason(summary, RuntimeRouteKind::Compact, 2),
-        None
-    );
+        assert!(crate::runtime_quota_window_usable_for_auto_rotate(
+            summary.five_hour.status
+        ));
+        assert_eq!(
+            runtime_proxy_precommit_quota_block_reason(summary, RuntimeRouteKind::Responses, 2,),
+            None
+        );
+        assert_eq!(
+            runtime_proxy_precommit_quota_block_reason(summary, RuntimeRouteKind::Compact, 2),
+            None
+        );
+    }
 }
 
 #[test]
