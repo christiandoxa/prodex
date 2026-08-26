@@ -10,11 +10,12 @@ import {
 test("full Rust runner includes the explicitly disabled prodex-app lib target", () => {
   const result = spawnSync(
     process.execPath,
-    ["scripts/ci/full-rust-test.mjs", "--dry-run", "--no-prebuild", "--jobs", "4"],
+    ["scripts/ci/full-rust-test.mjs", "--dry-run", "--jobs", "4"],
     { cwd: process.cwd(), encoding: "utf8" },
   );
 
   assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /prebuild:prodex-bin: cargo build --locked --bin prodex/);
   assert.match(
     result.stdout,
     /prodex-app:non-main-internal: cargo test --locked -q -p prodex-app --lib -- --test-threads=1 --skip main_internal_tests::/,
@@ -39,6 +40,11 @@ test("full Rust runner includes the explicitly disabled prodex-app lib target", 
   );
   assert.equal(platformResult.status, 0, platformResult.stderr);
   assert.doesNotMatch(platformResult.stdout, /prodex-app.*lib/);
+  assert.ok(
+    platformResult.stdout.indexOf("workspace:parallel-safe:") <
+      platformResult.stdout.lastIndexOf("auto-rotate-shards:"),
+    "auto-rotate should follow workspace tests when prodex-app lib is disabled",
+  );
 });
 
 test("full Rust runner locks every direct cargo test command", () => {

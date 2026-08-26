@@ -147,6 +147,11 @@ function prebuildSteps(args) {
         "--no-run",
       ],
     },
+    {
+      label: "prebuild:prodex-bin",
+      command: "cargo",
+      args: ["build", "--locked", "--bin", "prodex"],
+    },
     ...(args.prodexAppLib
       ? [
           {
@@ -283,9 +288,6 @@ async function main() {
   }
 
   const testPartitions = [...workspaceSteps(args), ...(args.prodexAppLib ? prodexAppSteps() : [])];
-  if (!args.prodexAppLib) {
-    testPartitions.push(autoRotateStep(args));
-  }
   completed.push(
     ...(await runStepsParallel(testPartitions, {
       dryRun: args.dryRun,
@@ -293,15 +295,13 @@ async function main() {
       timingSummary: timingSummary(args, "full-rust-test:test-partitions"),
     })),
   );
-  if (args.prodexAppLib) {
-    completed.push(
-      ...(await runStepsParallel([autoRotateStep(args)], {
-        dryRun: args.dryRun,
-        jobs: args.jobs,
-        timingSummary: timingSummary(args, "full-rust-test:auto-rotate"),
-      })),
-    );
-  }
+  completed.push(
+    ...(await runStepsParallel([autoRotateStep(args)], {
+      dryRun: args.dryRun,
+      jobs: args.jobs,
+      timingSummary: timingSummary(args, "full-rust-test:auto-rotate"),
+    })),
+  );
 
   if (args.timings && !args.dryRun) {
     process.stdout.write(
