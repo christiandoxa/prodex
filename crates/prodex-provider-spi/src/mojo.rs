@@ -1,5 +1,7 @@
+use super::GovernedProviderDescriptor;
 use super::GovernedRoutingWeights;
 use super::scoring::{MojoRoutingScore, NormalizedRoutingScoreInput};
+use prodex_domain::{CapabilitySet, ModelCapability};
 
 pub(super) struct MojoRoutingPlan {
     pub(super) eligible: Vec<bool>,
@@ -8,6 +10,7 @@ pub(super) struct MojoRoutingPlan {
     pub(super) ordered_indices: Vec<usize>,
 }
 
+#[cfg(test)]
 fn mojo_weights(weights: GovernedRoutingWeights) -> prodex_mojo_core::routing::ScoreWeights {
     prodex_mojo_core::routing::ScoreWeights {
         health: i64::from(weights.health),
@@ -20,6 +23,7 @@ fn mojo_weights(weights: GovernedRoutingWeights) -> prodex_mojo_core::routing::S
     }
 }
 
+#[cfg(test)]
 pub(super) fn plan_batch(
     inputs: &[NormalizedRoutingScoreInput],
     required_capability_mask: u8,
@@ -63,6 +67,111 @@ pub(super) fn plan_batch(
             .collect(),
         ordered_indices: plan.ordered_indices,
     })
+}
+
+pub(super) fn rich_plan_batch(
+    inputs: &[NormalizedRoutingScoreInput],
+    providers: &[GovernedProviderDescriptor],
+    requested_model: Option<&str>,
+    required_capabilities: &CapabilitySet,
+    weights: GovernedRoutingWeights,
+) -> Result<MojoRoutingPlan, prodex_mojo_core::MojoError> {
+    if inputs.len() != providers.len() {
+        return Err(prodex_mojo_core::MojoError::InvalidInput);
+    }
+    let capability_names = providers
+        .iter()
+        .map(|provider| capability_text(&provider.capabilities))
+        .collect::<Vec<_>>();
+    let required_text = capability_text(required_capabilities);
+    let rich_inputs = inputs
+        .iter()
+        .zip(providers)
+        .zip(&capability_names)
+        .map(
+            |((input, provider), capabilities)| prodex_mojo_core::rich::RouteInput {
+                provider: provider.provider.label(),
+                model: requested_model.unwrap_or_default(),
+                capabilities,
+                hard_eligible: input.hard_eligible,
+                health: input.health,
+                load: input.load,
+                quota_headroom: input.quota_present.then_some(input.quota_headroom),
+                cost: input.cost,
+                latency: input.latency,
+                risk: input.risk,
+                priority: input.priority,
+                affinity: input.affinity,
+            },
+        )
+        .collect::<Vec<_>>();
+    let plan = prodex_mojo_core::rich::plan_routes(
+        &rich_inputs,
+        &required_text,
+        [
+            i64::from(weights.health),
+            i64::from(weights.load),
+            i64::from(weights.cost),
+            i64::from(weights.latency),
+            i64::from(weights.risk),
+            i64::from(weights.priority),
+            i64::from(weights.affinity),
+        ],
+    )?;
+    let scores = plan
+        .candidates
+        .iter()
+        .map(|candidate| {
+            Ok(MojoRoutingScore {
+                components: candidate
+                    .components
+                    .map(|value| {
+                        u16::try_from(value).map_err(|_| prodex_mojo_core::MojoError::InvalidOutput)
+                    })
+                    .into_iter()
+                    .collect::<Result<Vec<_>, _>>()?
+                    .try_into()
+                    .map_err(|_| prodex_mojo_core::MojoError::InvalidOutput)?,
+                weighted_total: candidate.weighted_total,
+                score: u16::try_from(candidate.score)
+                    .map_err(|_| prodex_mojo_core::MojoError::InvalidOutput)?,
+            })
+        })
+        .collect::<Result<Vec<_>, prodex_mojo_core::MojoError>>()?;
+    Ok(MojoRoutingPlan {
+        eligible: plan
+            .candidates
+            .iter()
+            .map(|candidate| candidate.eligible)
+            .collect(),
+        reason_tags: plan
+            .candidates
+            .iter()
+            .map(|candidate| {
+                u8::try_from(candidate.reason)
+                    .map_err(|_| prodex_mojo_core::MojoError::InvalidOutput)
+            })
+            .collect::<Result<Vec<_>, _>>()?,
+        scores,
+        ordered_indices: plan.ordered_indices,
+    })
+}
+
+fn capability_text(capabilities: &CapabilitySet) -> String {
+    capabilities
+        .as_slice()
+        .iter()
+        .map(|capability| match capability {
+            ModelCapability::ResponsesApi => "responses_api",
+            ModelCapability::Streaming => "streaming",
+            ModelCapability::Tools => "tools",
+            ModelCapability::Vision => "vision",
+            ModelCapability::JsonMode => "json_mode",
+            ModelCapability::RemoteCompact => "remote_compact",
+            ModelCapability::WebSocket => "websocket",
+        })
+        .collect::<Vec<_>>()
+        .join(",")
 }
 
 #[cfg(all(test, feature = "mojo"))]
@@ -573,5 +682,55 @@ mod tests {
             capability.rejection_reasons(),
             &[super::super::GovernedHardFilterReason::CapabilityMissing]
         );
+    }
+
+    #[test]
+    fn rich_route_planner_matches_rust_oracle_for_10_000_candidate_sets() {
+        let tenant = TenantContext {
+            tenant_id: TenantId::new(),
+        };
+        let policy = policy();
+        let mut rng = FixedSeed(0x726f_7574_655f_6f72_u64);
+        for case in 0..10_000 {
+            let count = (rng.below(7) + 1) as usize;
+            let mut providers = Vec::with_capacity(count);
+            for index in 0..count {
+                let provider = PROVIDERS[(case + index) % PROVIDERS.len()];
+                let capabilities = capability_set(rng.below(128) as u8);
+                providers.push(descriptor(
+                    tenant,
+                    TenantContext {
+                        tenant_id: TenantId::new(),
+                    },
+                    provider,
+                    capabilities,
+                    signals(&mut rng, case % 11 == 0),
+                    rng.below(15) as usize,
+                ));
+            }
+            let required = capability_set(rng.below(128) as u8);
+            let affinity_provider =
+                (rng.below(4) != 0).then(|| PROVIDERS[rng.below(PROVIDERS.len() as u64) as usize]);
+            let registry = GovernedProviderRegistry {
+                revision: case as u64 + 1,
+                providers,
+            };
+            let request = GovernedRoutingRequest {
+                tenant,
+                classification: DataClassification::Restricted,
+                required_capabilities: &required,
+                policy: &policy,
+                registry: &registry,
+                score_revision: case as u64 + 1,
+                weights: weights(case),
+                affinity_provider,
+                max_fallbacks: 3,
+            };
+            assert_eq!(
+                plan_governed_provider_route(&request),
+                plan_governed_provider_route_rust(&request),
+                "rich route case {case}"
+            );
+        }
     }
 }

@@ -1,5 +1,6 @@
 //! Gemini model fallback aliases and Code Assist filtering.
 
+#[cfg(any(not(feature = "mojo"), test))]
 pub(super) fn provider_gemini_model_fallback_alias_chain(
     lower: &str,
 ) -> Option<&'static [&'static str]> {

@@ -1,8 +1,8 @@
 use super::*;
-use prodex_domain::ModelCapability;
 
 pub(super) fn plan_governed_provider_route_mojo(
     request: &GovernedRoutingRequest<'_>,
+    requested_model: Option<&str>,
 ) -> Result<GovernedRoutingPlan, GovernedRoutingError> {
     let inputs = request
         .registry
@@ -13,14 +13,14 @@ pub(super) fn plan_governed_provider_route_mojo(
                 provider_rejection_reasons_without_capability(provider, request).is_empty();
             let mut input = scoring::normalized_routing_score_input(provider, request);
             input.hard_eligible = hard_eligible;
-            input.capability_mask = capability_mask(&provider.capabilities);
-            input.provider_order = provider_order(provider.provider);
             input
         })
         .collect::<Vec<_>>();
-    let plan = mojo::plan_batch(
+    let plan = mojo::rich_plan_batch(
         &inputs,
-        capability_mask(request.required_capabilities),
+        &request.registry.providers,
+        requested_model,
+        request.required_capabilities,
         request.weights,
     )
     .map_err(|_| GovernedRoutingError::InvalidWeights)?;
@@ -152,32 +152,6 @@ fn candidate_evaluations_from_plan(
             }
         })
         .collect()
-}
-
-fn capability_mask(capabilities: &CapabilitySet) -> u8 {
-    capabilities.as_slice().iter().fold(0, |mask, capability| {
-        mask | match capability {
-            ModelCapability::ResponsesApi => 1 << 0,
-            ModelCapability::Streaming => 1 << 1,
-            ModelCapability::Tools => 1 << 2,
-            ModelCapability::Vision => 1 << 3,
-            ModelCapability::JsonMode => 1 << 4,
-            ModelCapability::RemoteCompact => 1 << 5,
-            ModelCapability::WebSocket => 1 << 6,
-        }
-    })
-}
-
-const fn provider_order(provider: ProviderId) -> i64 {
-    match provider {
-        ProviderId::OpenAi => 0,
-        ProviderId::Anthropic => 1,
-        ProviderId::Copilot => 2,
-        ProviderId::DeepSeek => 3,
-        ProviderId::Gemini => 4,
-        ProviderId::Kiro => 5,
-        ProviderId::Local => 6,
-    }
 }
 
 fn provider_rejection_reasons_without_capability(

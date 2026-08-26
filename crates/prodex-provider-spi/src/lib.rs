@@ -16,10 +16,10 @@ pub use governed_routing::{
     GovernedRoutingWeights, GovernedScoreBreakdown, GovernedScoreComponent,
     GovernedScoreComponentKind, MAX_GOVERNED_HARD_FILTER_REASONS, MAX_GOVERNED_PROVIDER_REGIONS,
     MAX_GOVERNED_ROUTING_CANDIDATES, MAX_GOVERNED_ROUTING_FALLBACKS, ROUTING_SCORE_SCALE,
-    plan_governed_provider_route, runtime_provider_binding_identity_from_secret_ref,
+    plan_governed_provider_route, plan_governed_provider_route_with_model,
+    runtime_provider_binding_identity_from_secret_ref,
 };
 pub use prodex_provider_core::RuntimeProviderBindingIdentity;
-
 use std::error::Error;
 use std::fmt;
 

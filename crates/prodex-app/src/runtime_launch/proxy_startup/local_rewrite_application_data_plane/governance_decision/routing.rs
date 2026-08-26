@@ -3,7 +3,7 @@ use super::{
     ApplicationGovernancePlan, AuditOutcome, GovernanceDecisionContext, GovernedRoutingError,
     GovernedRoutingPlan, GovernedRoutingRequest, MAX_GOVERNED_ROUTING_FALLBACKS, PolicyEffect,
     RuntimeGatewayApplicationDataPlaneError, RuntimeLocalRewriteProxyShared,
-    plan_governed_provider_route, runtime_gateway_governance_error_code,
+    plan_governed_provider_route_with_model, runtime_gateway_governance_error_code,
     runtime_gateway_provider_endpoint, runtime_gateway_provider_runtime_snapshot,
 };
 
@@ -29,17 +29,20 @@ pub(super) fn plan_provider_route(
     if approval_authorized {
         routing_policy.effect = PolicyEffect::Allow;
     }
-    match plan_governed_provider_route(&GovernedRoutingRequest {
-        tenant: context.tenant,
-        classification: governance.classification.classification(),
-        required_capabilities: &context.capabilities,
-        policy: &routing_policy,
-        registry: &registry,
-        score_revision: routing_scores.revision,
-        weights: routing_scores.weights,
-        affinity_provider: context.session_snapshot.affinity_provider,
-        max_fallbacks: MAX_GOVERNED_ROUTING_FALLBACKS,
-    }) {
+    match plan_governed_provider_route_with_model(
+        &GovernedRoutingRequest {
+            tenant: context.tenant,
+            classification: governance.classification.classification(),
+            required_capabilities: &context.capabilities,
+            policy: &routing_policy,
+            registry: &registry,
+            score_revision: routing_scores.revision,
+            weights: routing_scores.weights,
+            affinity_provider: context.session_snapshot.affinity_provider,
+            max_fallbacks: MAX_GOVERNED_ROUTING_FALLBACKS,
+        },
+        context.request_attributes.requested_model(),
+    ) {
         Ok(plan) => Ok(Some(plan)),
         Err(_error) if !enforcing => Ok(None),
         Err(error) => {
