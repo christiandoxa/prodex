@@ -37,6 +37,7 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 - Made `prodex update` version-aware and idempotent: it now skips asset download and replacement when the installed version is current and never automatically downgrades a newer local build.
 - Fixed log following across file replacement and truncation on Windows and Unix without replaying historical output.
 - Hardened `prodex s expose` readiness diagnostics and cleanup for local MCP initialization, Quick Tunnel routing, and public tool discovery.
+- Hardened dashboard startup checks for slower macOS environments while preserving endpoint and security behavior.
 
 ## Compatibility
 
