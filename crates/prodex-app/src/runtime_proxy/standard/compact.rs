@@ -245,7 +245,12 @@ impl RuntimeCompactSelectionContext<'_> {
             self.pressure_mode,
         )?;
         if self.recovery_sweeps == 0 {
-            if self.saw_transport_failure && self.selection_attempts < self.profile_count()? {
+            // Complete one bounded attempt/retry opportunity for every profile before the
+            // elapsed-time budget can route to the current-profile last chance.
+            let initial_sweep_attempt_limit = self
+                .profile_count()?
+                .saturating_mul(runtime_proxy_crate::RUNTIME_PROXY_PRECOMMIT_ATTEMPTS_PER_PROFILE);
+            if self.selection_attempts < initial_sweep_attempt_limit {
                 return Ok(false);
             }
             return Ok(normal_budget_exhausted);

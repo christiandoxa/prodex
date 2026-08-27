@@ -7,7 +7,7 @@ use crate::{
 
 pub const RUNTIME_PROXY_PRECOMMIT_ATTEMPT_LIMIT: usize = if cfg!(test) { 4 } else { 12 };
 // Each profile may consume one bounded same-profile retry before rotation.
-const RUNTIME_PROXY_PRECOMMIT_ATTEMPTS_PER_PROFILE: usize = 2;
+pub const RUNTIME_PROXY_PRECOMMIT_ATTEMPTS_PER_PROFILE: usize = 2;
 pub const RUNTIME_PROXY_PRECOMMIT_BUDGET_MS: u64 = if cfg!(test) { 1_000 } else { 3_000 };
 pub const RUNTIME_PROXY_PRECOMMIT_CONTINUATION_ATTEMPT_LIMIT: usize =
     RUNTIME_PROXY_PRECOMMIT_ATTEMPT_LIMIT * 2;
