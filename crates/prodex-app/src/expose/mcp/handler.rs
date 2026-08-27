@@ -130,7 +130,7 @@ impl ExposeMcpEndpoint {
                 406,
                 None,
                 -32600,
-                "accept must include application/json and text/event-stream",
+                "accept must include application/json",
             ));
             return;
         }
