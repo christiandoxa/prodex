@@ -89,6 +89,24 @@ test("changelog release-version renders pending version as final release section
     await writeFile(root, "Cargo.toml", '[package]\nname = "fixture"\nversion = "0.2.0"\nedition = "2024"\n');
     await writeFile(root, "src/lib.rs", "pub fn fixture() {}\npub fn launch_dry_run() {}\n");
     await commit(root, "feat(cli): add launch dry run");
+    await writeFile(
+      root,
+      "docs/release-notes/0.2.0.md",
+      [
+        "## New Features",
+        "",
+        "- Add a dry-run launch command.",
+        "",
+        "## Bug Fixes",
+        "",
+        "- Keep release metadata deterministic.",
+        "",
+        "## Changelog",
+        "",
+        "Full Changelog: [`0.1.0...0.2.0`](https://github.com/example/prodex/compare/0.1.0...0.2.0)",
+        "",
+      ].join("\n"),
+    );
 
     const { stdout } = await execFileAsync(process.execPath, [
       SCRIPT_PATH,
@@ -105,6 +123,8 @@ test("changelog release-version renders pending version as final release section
     assert.match(stdout, /^## 0\.2\.0 - \d{4}-\d{2}-\d{2}$/m);
     assert.doesNotMatch(stdout, /## 0\.2\.0 - Unreleased/);
     assert.match(stdout, /Add launch dry run/);
+    assert.match(stdout, /Keep release metadata deterministic/);
+    assert.match(stdout, /Full Changelog:/);
     assert.doesNotMatch(stdout, /## 0\.1\.0 - /);
   } finally {
     await fs.rm(root, { recursive: true, force: true });

@@ -664,6 +664,10 @@ async function commitRelease(version, args) {
       pathsToAdd.push(relativePath);
     }
   }
+  const versionedNotes = `docs/release-notes/${version}.md`;
+  if (await pathExists(path.join(repoRoot, versionedNotes))) {
+    pathsToAdd.push(versionedNotes);
+  }
   const cratesDir = path.join(repoRoot, "crates");
   for (const entry of await fs.readdir(cratesDir, { withFileTypes: true })) {
     const relativePath = `crates/${entry.name}/Cargo.toml`;
