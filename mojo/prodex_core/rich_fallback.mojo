@@ -18,7 +18,7 @@ from rich_types import (
 )
 
 
-comptime PRODEX_RICH_ABI_VERSION: Int64 = 2
+comptime PRODEX_RICH_ABI_VERSION: Int64 = 3
 comptime RICH_MAX_IDENTIFIER_BYTES: Int64 = 4_096
 comptime RICH_MAX_FALLBACK_MODELS: Int64 = 32
 comptime RICH_STATUS_OK: Int64 = 0
@@ -225,17 +225,19 @@ def prodex_mojo_rich_model_fallback_v2(
     abi_version: Int64,
     provider: ProdexRichStringView,
     model: ProdexRichStringView,
-    output_records_opt: Optional[Pointer[mut=True, ProdexRichFallbackRecord, MutUntrackedOrigin]],
+    output_records_address: UInt,
     record_capacity: Int64,
-    output_opt: Optional[Pointer[mut=True, UInt8, MutUntrackedOrigin]],
+    output_address: UInt,
     output_capacity: Int64,
-    hash_slots_opt: Optional[Pointer[mut=True, Int64, MutUntrackedOrigin]],
+    hash_slots_address: UInt,
     hash_capacity: Int64,
-    result: Optional[Pointer[mut=True, ProdexRichFallbackResult, MutUntrackedOrigin]],
+    result_address: UInt,
 ) abi("C") -> Int64:
-    if not result:
+    if result_address == 0:
         return RICH_STATUS_INVALID
-    var result_ptr = result.unsafe_value()
+    var result_ptr = Pointer[mut=True, ProdexRichFallbackResult, MutUntrackedOrigin](
+        unsafe_from_address=Int(result_address)
+    )
     result_ptr[].abi_version = PRODEX_RICH_ABI_VERSION
     result_ptr[].records_written = 0
     result_ptr[].required_records = 0
@@ -249,11 +251,17 @@ def prodex_mojo_rich_model_fallback_v2(
         return RICH_STATUS_ABI
     if record_capacity < 0 or record_capacity > RICH_MAX_FALLBACK_MODELS or not rich_view_valid(provider, RICH_MAX_IDENTIFIER_BYTES) or not rich_view_valid(model, RICH_MAX_IDENTIFIER_BYTES):
         return RICH_STATUS_INVALID
-    if not output_records_opt or not output_opt or not hash_slots_opt:
+    if output_records_address == 0 or output_address == 0 or hash_slots_address == 0:
         return RICH_STATUS_INVALID
-    var output_records = output_records_opt.unsafe_value()
-    var output = output_opt.unsafe_value()
-    var hash_slots = hash_slots_opt.unsafe_value()
+    var output_records = Pointer[mut=True, ProdexRichFallbackRecord, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_records_address)
+    )
+    var output = Pointer[mut=True, UInt8, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    var hash_slots = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(hash_slots_address)
+    )
     var required_hash = rich_required_hash_capacity(record_capacity)
     if hash_capacity != required_hash:
         return RICH_STATUS_CAPACITY

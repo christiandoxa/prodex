@@ -231,7 +231,7 @@ clean-machine evidence all pass.
 ## 2026-08-26: Rich Mojo domain ownership supersedes normalization-only FFI
 
 The first-generation integer and `StringSlice` seams remain compatible contracts, but they no
-longer define the semantic boundary. Rich ABI v2 sends bounded non-secret text and record DTOs to
+longer define the semantic boundary. Rich ABI v3 sends bounded non-secret text and record DTOs to
 Mojo. Mojo constructs `DiagnosticRecord`, `RouteCandidate`, `PolicyRule`, and `ContextItem`
 values, performs parsing/normalization, uses open-addressing arena tables for grouping and set
 membership, and returns caller-owned structured records. Rust maps those records into existing
@@ -266,7 +266,7 @@ network dependency was added.
 ## 2026-08-26: JSON boundaries remain Rust-owned
 
 The package review did not justify replacing Serde for provider protocols, Codex JSON-RPC,
-runtime-policy TOML, or persisted state. Rich v2 receives already bounded non-secret text/records
+runtime-policy TOML, or persisted state. Rich v3 receives already bounded non-secret text/records
 after those external compatibility and security boundaries. EmberJson immutable-document and
 reflection experiments are deferred until its compiler compatibility, complete-document
 validation, package provenance, and cross-target artifact gates pass.

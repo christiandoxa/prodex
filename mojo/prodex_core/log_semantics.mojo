@@ -3,7 +3,7 @@ from std.memory import Pointer
 from rich_text import rich_view_matches_literal, rich_view_prefix, rich_view_valid
 from rich_types import ProdexRichStringView
 
-comptime PRODEX_LOG_ABI_VERSION: Int64 = 1
+comptime PRODEX_LOG_ABI_VERSION: Int64 = 2
 comptime LOG_CATEGORY_NONE: Int64 = 0
 comptime LOG_CATEGORY_ROUTE: Int64 = 1
 comptime LOG_CATEGORY_QUOTA: Int64 = 2
@@ -58,20 +58,24 @@ def set_category(
     severity[] = level
 
 
-@export("prodex_mojo_log_classify_v1")
-def prodex_mojo_log_classify_v1(
+@export("prodex_mojo_log_classify_v2")
+def prodex_mojo_log_classify_v2(
     abi_version: Int64,
     event: ProdexRichStringView,
-    category_opt: Optional[Pointer[mut=True, Int64, MutUntrackedOrigin]],
-    severity_opt: Optional[Pointer[mut=True, Int64, MutUntrackedOrigin]],
+    category_address: UInt,
+    severity_address: UInt,
 ) abi("C") -> Int64:
-    if abi_version != PRODEX_LOG_ABI_VERSION or not category_opt or not severity_opt:
+    if abi_version != PRODEX_LOG_ABI_VERSION or category_address == 0 or severity_address == 0:
         return 1
     if not rich_view_valid(event, 128):
         return 2
 
-    var category = category_opt.unsafe_value()
-    var severity = severity_opt.unsafe_value()
+    var category = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(category_address)
+    )
+    var severity = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(severity_address)
+    )
     set_category(category, severity, LOG_CATEGORY_NONE, 0)
     if rich_view_matches_literal["request_captured"](event, False) or rich_view_matches_literal["compat_request_surface"](event, False):
         set_category(category, severity, LOG_CATEGORY_REQUEST, 1)

@@ -170,16 +170,16 @@ pub fn plan_routes(
     let status = unsafe {
         prodex_mojo_rich_route_plan_v2(
             RICH_ABI_VERSION,
-            rich_inputs.as_ptr(),
+            mojo_pointer_address(rich_inputs.as_ptr()),
             i64::try_from(input_count).map_err(|_| MojoError::InvalidInput)?,
             view(required_capabilities),
-            records.as_mut_ptr(),
+            mojo_pointer_address(records.as_mut_ptr()),
             i64::try_from(input_count).map_err(|_| MojoError::InvalidInput)?,
-            ordered.as_mut_ptr(),
+            mojo_pointer_address(ordered.as_mut_ptr()),
             i64::try_from(input_count).map_err(|_| MojoError::InvalidInput)?,
-            output.as_mut_ptr(),
+            mojo_pointer_address(output.as_mut_ptr()),
             i64::try_from(output_capacity).map_err(|_| MojoError::InvalidInput)?,
-            hash_slots.as_mut_ptr(),
+            mojo_pointer_address(hash_slots.as_mut_ptr()),
             i64::try_from(scratch_capacity).map_err(|_| MojoError::InvalidInput)?,
             weights[0],
             weights[1],
@@ -188,7 +188,7 @@ pub fn plan_routes(
             weights[4],
             weights[5],
             weights[6],
-            &mut result,
+            mojo_mut_pointer_address(&mut result),
         )
     };
     if status != 0 {

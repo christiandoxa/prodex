@@ -17,13 +17,13 @@ pub fn model_fallback_chain(provider: &str, model: &str) -> Result<Vec<String>, 
             RICH_ABI_VERSION,
             view(provider),
             view(model),
-            records.as_mut_ptr(),
+            mojo_pointer_address(records.as_mut_ptr()),
             i64::try_from(record_capacity).map_err(|_| MojoError::InvalidInput)?,
-            output.as_mut_ptr(),
+            mojo_pointer_address(output.as_mut_ptr()),
             i64::try_from(output.len()).map_err(|_| MojoError::InvalidInput)?,
-            hash_slots.as_mut_ptr(),
+            mojo_pointer_address(hash_slots.as_mut_ptr()),
             i64::try_from(scratch_capacity).map_err(|_| MojoError::InvalidInput)?,
-            &mut result,
+            mojo_mut_pointer_address(&mut result),
         )
     };
     if status != 0 {

@@ -17,7 +17,7 @@ from rich_types import (
 )
 
 
-comptime PRODEX_RICH_ABI_VERSION: Int64 = 2
+comptime PRODEX_RICH_ABI_VERSION: Int64 = 3
 comptime RICH_MAX_RECORDS: Int64 = 256
 comptime RICH_MAX_IDENTIFIER_BYTES: Int64 = 4_096
 comptime RICH_STATUS_OK: Int64 = 0
@@ -59,15 +59,17 @@ def policy_strategy_valid(view: ProdexRichStringView) -> Bool:
 def prodex_mojo_rich_policy_alias_v2(
     abi_version: Int64,
     input: ProdexRichPolicyInput,
-    output_models_opt: Optional[Pointer[mut=True, ProdexRichPolicyModel, MutUntrackedOrigin]],
+    output_models_address: UInt,
     model_capacity: Int64,
-    output_opt: Optional[Pointer[mut=True, UInt8, MutUntrackedOrigin]],
+    output_address: UInt,
     output_capacity: Int64,
-    result: Optional[Pointer[mut=True, ProdexRichPolicyResult, MutUntrackedOrigin]],
+    result_address: UInt,
 ) abi("C") -> Int64:
-    if not result:
+    if result_address == 0:
         return RICH_STATUS_INVALID
-    var result_ptr = result.unsafe_value()
+    var result_ptr = Pointer[mut=True, ProdexRichPolicyResult, MutUntrackedOrigin](
+        unsafe_from_address=Int(result_address)
+    )
     result_ptr[].abi_version = PRODEX_RICH_ABI_VERSION
     result_ptr[].models_written = 0
     result_ptr[].required_models = input.model_count
@@ -83,7 +85,7 @@ def prodex_mojo_rich_policy_alias_v2(
         return RICH_STATUS_ABI
     if input.model_count < 0 or input.model_count > RICH_MAX_RECORDS or input.metric_count < 0 or input.metric_count > RICH_MAX_RECORDS or model_capacity < input.model_count:
         return RICH_STATUS_INVALID
-    if not output_models_opt or not output_opt:
+    if output_models_address == 0 or output_address == 0:
         return RICH_STATUS_INVALID
     if not rich_view_valid(input.alias_view, RICH_MAX_IDENTIFIER_BYTES) or not rich_view_valid(input.strategy, RICH_MAX_IDENTIFIER_BYTES):
         policy_issue(result_ptr, RICH_ISSUE_INVALID_UTF8, RICH_FIELD_ALIAS, -1, 0, 0)
@@ -139,8 +141,12 @@ def prodex_mojo_rich_policy_alias_v2(
                 policy_issue(result_ptr, RICH_ISSUE_MODEL, RICH_FIELD_METRIC, metric_index, 0, Int64(metrics[unsafe_offset=metric_index].len))
                 return RICH_STATUS_OK
     var written: Int64 = 0
-    var output_models = output_models_opt.unsafe_value()
-    var output = output_opt.unsafe_value()
+    var output_models = Pointer[mut=True, ProdexRichPolicyModel, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_models_address)
+    )
+    var output = Pointer[mut=True, UInt8, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
     var models = input.models.unsafe_value()
     for index in range(input.model_count):
         if not rich_valid_identifier(models[unsafe_offset=index]):

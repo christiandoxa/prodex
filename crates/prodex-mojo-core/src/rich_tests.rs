@@ -1,6 +1,4 @@
 use super::*;
-use std::ptr;
-
 #[test]
 fn rich_domain_self_test_covers_structured_results() {
     assert!(rich_self_test());
@@ -20,13 +18,13 @@ fn rich_abi_rejects_null_views_and_reports_utf8_offsets() {
                 ptr: invalid.as_ptr(),
                 len: invalid.len(),
             },
-            records.as_mut_ptr(),
+            mojo_pointer_address(records.as_mut_ptr()),
             records.len() as i64,
-            ptr::null_mut(),
             0,
-            slots.as_mut_ptr(),
+            0,
+            mojo_pointer_address(slots.as_mut_ptr()),
             slots.len() as i64,
-            &mut result,
+            mojo_mut_pointer_address(&mut result),
         )
     };
     assert_eq!(status, RICH_STATUS_UTF8);
@@ -37,13 +35,13 @@ fn rich_abi_rejects_null_views_and_reports_utf8_offsets() {
         prodex_mojo_rich_context_analyze_v2(
             RICH_ABI_VERSION,
             RichStringView::default(),
-            ptr::null_mut(),
             0,
-            ptr::null_mut(),
             0,
-            slots.as_mut_ptr(),
+            0,
+            0,
+            mojo_pointer_address(slots.as_mut_ptr()),
             slots.len() as i64,
-            ptr::null_mut(),
+            0,
         )
     };
     assert_eq!(status, RICH_STATUS_INVALID);
@@ -74,13 +72,13 @@ fn rich_abi_malformed_utf8_and_capacity_are_bounded() {
                     ptr: bytes.as_ptr(),
                     len: bytes.len(),
                 },
-                records.as_mut_ptr(),
+                mojo_pointer_address(records.as_mut_ptr()),
                 records.len() as i64,
-                output.as_mut_ptr(),
+                mojo_pointer_address(output.as_mut_ptr()),
                 output.len() as i64,
-                slots.as_mut_ptr(),
+                mojo_pointer_address(slots.as_mut_ptr()),
                 slots.len() as i64,
-                &mut result,
+                mojo_mut_pointer_address(&mut result),
             )
         };
         assert_eq!(status, RICH_STATUS_UTF8, "malformed case {case}");
@@ -97,13 +95,13 @@ fn rich_abi_malformed_utf8_and_capacity_are_bounded() {
                 ptr: input.as_ptr(),
                 len: input.len(),
             },
-            ptr::null_mut(),
             0,
-            ptr::null_mut(),
             0,
-            ptr::null_mut(),
             0,
-            &mut result,
+            0,
+            0,
+            0,
+            mojo_mut_pointer_address(&mut result),
         )
     };
     assert_eq!(status, RICH_STATUS_CAPACITY);

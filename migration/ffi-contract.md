@@ -441,11 +441,11 @@ No generated object or archive is committed. The final Linux release is verified
 Mojo dependencies, no build-path RPATH/RUNPATH, GLIBC policy, and execution without `mojo` on
 `PATH`.
 
-## Log event classification ABI v1
+## Log event classification ABI v2
 
-`prodex_mojo_log_classify_v1` is a bounded, synchronous operation used by the shared runtime-log
+`prodex_mojo_log_classify_v2` is a bounded, synchronous operation used by the shared runtime-log
 renderer. Rust passes one non-secret UTF-8 event key and caller-owned `Int64` category and severity
-outputs. Mojo performs the event-key matching; Rust retains log-file IO, field extraction, secret
+outputs as fixed-width `UInt`/`u64` addresses (`0` is invalid). Mojo performs the event-key matching; Rust retains log-file IO, field extraction, secret
 redaction, and human/JSON rendering. Category and severity tags are validated before they reach a
 renderer. The export is stateless and reentrant, accepts keys up to 128 bytes, and returns an
 explicit ABI/input error rather than selecting a Rust production classifier when Mojo fails.
@@ -453,13 +453,13 @@ explicit ABI/input error rather than selecting a Rust production classifier when
 The category tags are `None=0`, `Route=1`, `Quota=2`, `Backoff=3`, `Http=4`, `Websocket=5`,
 `Stream=6`, `Smart=7`, `Compact=8`, `Error=9`, `Hook=10`, `Request=11`, `Model=12`, `Mcp=13`,
 `Agent=14`, `Tool=15`, `Retry=16`, `Health=17`, `Upstream=18`, `Response=19`, `Terminal=20`, and
-`Load=21`. Severity is `0` through `3`. ABI version `1` is independent of the rich v2 record
+`Load=21`. Severity is `0` through `3`. ABI version `2` is independent of the rich v3 record
 ABI. The Rust reference classifier is test-only on Mojo-enabled production paths.
 
-## Rich/domain ABI v2 (2026-08-26)
+## Rich/domain ABI v3 (2026-08-27)
 
-Rich v2 is additive and does not overload text ABI v1. Its version entry point is
-`prodex_mojo_rich_abi_version`, returning `2`; its layout probe is
+Rich v3 is additive and does not overload text ABI v1. Its version entry point is
+`prodex_mojo_rich_abi_version`, returning `3`; its layout probe is
 `prodex_mojo_rich_abi_layout`. The current record family is:
 
 | Record | Purpose |
@@ -477,6 +477,13 @@ does not retain Rust pointers, and Rust never receives a Mojo object pointer. Ob
 cross as indices and `RichSlice` offsets; generated strings are copied into a Rust-allocated byte
 arena and validated as UTF-8 before reconstruction.
 
+The v3 C entry points represent nullable caller-owned pointer arguments as fixed-width `UInt`/`u64`
+addresses, with `0` meaning null. Mojo validates each address before constructing its typed pointer.
+This keeps the language-neutral ABI one machine word per pointer on Windows as well as Unix targets;
+the previous `Optional[Pointer]` function-parameter representation was not portable across those C
+ABIs. The address form is internal to the Rust/Mojo boundary: no Rust or Mojo object layout crosses
+it, and the supported release targets are 64-bit.
+
 Status values are `0=ok`, `1=invalid boundary/input`, `2=invalid UTF-8`, `3=capacity`, and
 `4=ABI mismatch`. Semantic failures are returned in the operation result as structured domain,
 kind, field, object-index, byte-offset, and byte-length data and are mapped to `MojoIssue` by the
@@ -485,14 +492,14 @@ and output sizes where the operation can determine them. Rust validates every st
 count, offset, length, UTF-8 slice, object index, type/reason tag, uniqueness constraint, and
 ordering relation. Invalid output is a hard internal error on Mojo-enabled builds.
 
-The layout probe covers all v2 record sizes and alignments. Current x86_64 evidence is 16-byte
+The layout probe covers all v3 record sizes and alignments. Current x86_64 evidence is 16-byte
 string views/slices, 64-byte context records, 160-byte context results, 128-byte route inputs,
 160-byte route records, 80-byte route results, 64-byte policy inputs, 32-byte policy models,
 80-byte policy results, 32-byte plan items, 48-byte plan actions, and 72-byte plan results.
 The ABI is reentrant and has no process-global mutable state; callers must provide disjoint buffers
 for concurrent calls.
 
-Production v2 entry points are `prodex_mojo_rich_context_analyze_v2`,
+Production v3 entry points are `prodex_mojo_rich_context_analyze_v2`,
 `prodex_mojo_rich_route_plan_v2`, `prodex_mojo_rich_policy_alias_v2`,
 `prodex_mojo_rich_model_fallback_v2`, and `prodex_mojo_rich_context_plan_v2`. The feature-off Rust
 implementation is a separate supported target and differential oracle, never a runtime fallback
