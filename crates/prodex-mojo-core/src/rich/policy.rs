@@ -54,7 +54,7 @@ pub fn validate_policy_alias(input: PolicyAliasInput<'_>) -> Result<PolicyAliasP
     let status = unsafe {
         prodex_mojo_rich_policy_alias_v2(
             RICH_ABI_VERSION,
-            rich_input,
+            mojo_pointer_address(&rich_input),
             mojo_pointer_address(output_models.as_mut_ptr()),
             i64::try_from(input.models.len()).map_err(|_| MojoError::InvalidInput)?,
             mojo_pointer_address(output.as_mut_ptr()),

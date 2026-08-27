@@ -563,7 +563,7 @@ jobs:
           printf '%s\n' "${diagnostics}" | grep -F '"build_strict": true'
           printf '%s\n' "${diagnostics}" | grep -F '"self_test": "passed"'
           printf '%s\n' "${diagnostics}" | grep -F '"context_text": true'
-          printf '%s\n' "${diagnostics}" | grep -F '"rich_abi_version": 4'
+          printf '%s\n' "${diagnostics}" | grep -F '"rich_abi_version": 5'
           printf '%s\n' "${diagnostics}" | grep -F '"runtime_dependency_mode": "arena-static"'
           printf '%s\n' "${diagnostics}" | grep -F '"rich_domain": true'
           printf '%s\n' "${diagnostics}" | grep -F '"rich_context_parser": true'

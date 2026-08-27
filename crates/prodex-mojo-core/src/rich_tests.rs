@@ -11,13 +11,14 @@ fn rich_abi_rejects_null_views_and_reports_utf8_offsets() {
     let mut records = [RichContextRecord::default()];
     let mut slots = [-1_i64];
     let invalid = [0xff_u8];
+    let invalid_view = RichStringView {
+        ptr: mojo_pointer_address(invalid.as_ptr()),
+        len: invalid.len() as u64,
+    };
     let status = unsafe {
         prodex_mojo_rich_context_analyze_v2(
             RICH_ABI_VERSION,
-            RichStringView {
-                ptr: mojo_pointer_address(invalid.as_ptr()),
-                len: invalid.len() as u64,
-            },
+            mojo_pointer_address(&invalid_view),
             mojo_pointer_address(records.as_mut_ptr()),
             records.len() as i64,
             0,
@@ -31,10 +32,11 @@ fn rich_abi_rejects_null_views_and_reports_utf8_offsets() {
     assert_eq!(result.issue_kind, 6);
     assert_eq!(result.issue_offset, 0);
 
+    let empty_view = RichStringView::default();
     let status = unsafe {
         prodex_mojo_rich_context_analyze_v2(
             RICH_ABI_VERSION,
-            RichStringView::default(),
+            mojo_pointer_address(&empty_view),
             0,
             0,
             0,
@@ -65,13 +67,14 @@ fn rich_abi_malformed_utf8_and_capacity_are_bounded() {
         let mut records = [RichContextRecord::default()];
         let mut output = [0_u8; 8];
         let mut slots = [-1_i64; 2];
+        let input_view = RichStringView {
+            ptr: mojo_pointer_address(bytes.as_ptr()),
+            len: bytes.len() as u64,
+        };
         let status = unsafe {
             prodex_mojo_rich_context_analyze_v2(
                 RICH_ABI_VERSION,
-                RichStringView {
-                    ptr: mojo_pointer_address(bytes.as_ptr()),
-                    len: bytes.len() as u64,
-                },
+                mojo_pointer_address(&input_view),
                 mojo_pointer_address(records.as_mut_ptr()),
                 records.len() as i64,
                 mojo_pointer_address(output.as_mut_ptr()),
@@ -88,13 +91,14 @@ fn rich_abi_malformed_utf8_and_capacity_are_bounded() {
 
     let input = b"error: bounded";
     let mut result = RichContextResult::default();
+    let input_view = RichStringView {
+        ptr: mojo_pointer_address(input.as_ptr()),
+        len: input.len() as u64,
+    };
     let status = unsafe {
         prodex_mojo_rich_context_analyze_v2(
             RICH_ABI_VERSION,
-            RichStringView {
-                ptr: mojo_pointer_address(input.as_ptr()),
-                len: input.len() as u64,
-            },
+            mojo_pointer_address(&input_view),
             0,
             0,
             0,

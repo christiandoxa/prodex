@@ -16,7 +16,7 @@ from rich_types import (
 )
 
 
-comptime PRODEX_RICH_ABI_VERSION: Int64 = 4
+comptime PRODEX_RICH_ABI_VERSION: Int64 = 5
 comptime RICH_MAX_PLAN_ITEMS: Int64 = 256
 comptime RICH_MAX_IDENTIFIER_BYTES: Int64 = 4_096
 comptime RICH_STATUS_OK: Int64 = 0

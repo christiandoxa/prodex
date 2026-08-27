@@ -17,7 +17,7 @@ from rich_types import (
 )
 
 
-comptime PRODEX_RICH_ABI_VERSION: Int64 = 4
+comptime PRODEX_RICH_ABI_VERSION: Int64 = 5
 comptime RICH_CONTEXT_MAX_LINES: Int64 = 65_536
 comptime RICH_CONTEXT_MAX_TEXT_BYTES: Int64 = 1_048_576
 comptime RICH_CONTEXT_STATUS_OK: Int64 = 0
@@ -338,7 +338,7 @@ def context_hash_capacity(count: Int64) -> Int64:
 @export("prodex_mojo_rich_context_analyze_v2")
 def prodex_mojo_rich_context_analyze_v2(
     abi_version: Int64,
-    input: ProdexRichStringView,
+    input_address: UInt,
     output_records_address: UInt,
     record_capacity: Int64,
     output_address: UInt,
@@ -369,6 +369,12 @@ def prodex_mojo_rich_context_analyze_v2(
     if abi_version != PRODEX_RICH_ABI_VERSION:
         result[].issue_kind = RICH_CONTEXT_STATUS_ABI
         return RICH_CONTEXT_STATUS_ABI
+    if input_address == 0:
+        return RICH_CONTEXT_STATUS_INVALID
+    var input_ptr = Pointer[mut=False, ProdexRichStringView, ImmUntrackedOrigin](
+        unsafe_from_address=Int(input_address)
+    )
+    var input = input_ptr[].copy()
     if input.len > UInt(RICH_CONTEXT_MAX_TEXT_BYTES) or input.len > 0 and input.ptr == 0:
         result[].issue_kind = RICH_CONTEXT_ISSUE_INVALID_UTF8
         result[].issue_offset = 0
@@ -402,7 +408,7 @@ def prodex_mojo_rich_context_analyze_v2(
     )
     for index in range(hash_capacity):
         slots[unsafe_offset=index] = -1
-    var input_ptr = rich_view_ptr(input)
+    var input_bytes_ptr = rich_view_ptr(input)
     var length = Int64(input.len)
     var cursor: Int64 = 0
     var line_number: Int64 = 0
@@ -410,11 +416,11 @@ def prodex_mojo_rich_context_analyze_v2(
     var written: Int64 = 0
     while cursor < length and line_number < line_count:
         var end = cursor
-        while end < length and input_ptr[unsafe_offset=end] != 10 and input_ptr[unsafe_offset=end] != 13:
+        while end < length and input_bytes_ptr[unsafe_offset=end] != 10 and input_bytes_ptr[unsafe_offset=end] != 13:
             end += 1
         line_number += 1
         var before = written
-        var key = context_copy_line(input_ptr, cursor, end, output, output_capacity, Pointer(to=written))
+        var key = context_copy_line(input_bytes_ptr, cursor, end, output, output_capacity, Pointer(to=written))
         if key.len == 0:
             result[].noise_lines += 1
         else:
@@ -481,7 +487,7 @@ def prodex_mojo_rich_context_analyze_v2(
         if end == length:
             break
         cursor = end + 1
-        if input_ptr[unsafe_offset=end] == 13 and cursor < length and input_ptr[unsafe_offset=cursor] == 10:
+        if input_bytes_ptr[unsafe_offset=end] == 13 and cursor < length and input_bytes_ptr[unsafe_offset=cursor] == 10:
             cursor += 1
     result[].records_written = record_count
     result[].output_written = written

@@ -19,7 +19,7 @@ from rich_types import (
 )
 
 
-comptime PRODEX_RICH_ABI_VERSION: Int64 = 4
+comptime PRODEX_RICH_ABI_VERSION: Int64 = 5
 comptime RICH_MAX_IDENTIFIER_BYTES: Int64 = 4_096
 comptime RICH_MAX_FALLBACK_MODELS: Int64 = 32
 comptime RICH_STATUS_OK: Int64 = 0
@@ -223,8 +223,8 @@ def fallback_add_chain(
 @export("prodex_mojo_rich_model_fallback_v2")
 def prodex_mojo_rich_model_fallback_v2(
     abi_version: Int64,
-    provider: ProdexRichStringView,
-    model: ProdexRichStringView,
+    provider_address: UInt,
+    model_address: UInt,
     output_records_address: UInt,
     record_capacity: Int64,
     output_address: UInt,
@@ -249,6 +249,16 @@ def prodex_mojo_rich_model_fallback_v2(
     if abi_version != PRODEX_RICH_ABI_VERSION:
         result_ptr[].issue_kind = RICH_STATUS_ABI
         return RICH_STATUS_ABI
+    if provider_address == 0 or model_address == 0:
+        return RICH_STATUS_INVALID
+    var provider_ptr = Pointer[
+        mut=False, ProdexRichStringView, ImmUntrackedOrigin
+    ](unsafe_from_address=Int(provider_address))
+    var model_ptr = Pointer[
+        mut=False, ProdexRichStringView, ImmUntrackedOrigin
+    ](unsafe_from_address=Int(model_address))
+    var provider = provider_ptr[].copy()
+    var model = model_ptr[].copy()
     if record_capacity < 0 or record_capacity > RICH_MAX_FALLBACK_MODELS or not rich_view_valid(provider, RICH_MAX_IDENTIFIER_BYTES) or not rich_view_valid(model, RICH_MAX_IDENTIFIER_BYTES):
         return RICH_STATUS_INVALID
     if output_records_address == 0 or output_address == 0 or hash_slots_address == 0:

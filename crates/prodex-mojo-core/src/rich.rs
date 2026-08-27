@@ -7,9 +7,9 @@
 
 use crate::{MojoError, MojoIssue};
 
-// v4 uses fixed-width UInt64 addresses for every pointer crossing the rich C
-// ABI, including pointers nested in by-value records.
-pub const RICH_ABI_VERSION: i64 = 4;
+// v5 uses fixed-width UInt64 addresses for every pointer crossing the rich C
+// ABI, including all by-value record inputs.
+pub const RICH_ABI_VERSION: i64 = 5;
 
 const _: () = assert!(std::mem::size_of::<usize>() == std::mem::size_of::<u64>());
 
@@ -240,7 +240,7 @@ unsafe extern "C" {
     fn prodex_mojo_rich_abi_layout(output: *mut u64, output_count: i64) -> i64;
     fn prodex_mojo_rich_context_analyze_v2(
         abi_version: i64,
-        input: RichStringView,
+        input: u64,
         output_records: u64,
         record_capacity: i64,
         output: u64,
@@ -253,7 +253,7 @@ unsafe extern "C" {
         abi_version: i64,
         inputs: u64,
         input_count: i64,
-        required_capabilities: RichStringView,
+        required_capabilities: u64,
         output_records: u64,
         record_capacity: i64,
         ordered_indices: u64,
@@ -273,7 +273,7 @@ unsafe extern "C" {
     ) -> i64;
     fn prodex_mojo_rich_policy_alias_v2(
         abi_version: i64,
-        input: RichPolicyInput,
+        input: u64,
         output_models: u64,
         model_capacity: i64,
         output: u64,
@@ -282,8 +282,8 @@ unsafe extern "C" {
     ) -> i64;
     fn prodex_mojo_rich_model_fallback_v2(
         abi_version: i64,
-        provider: RichStringView,
-        model: RichStringView,
+        provider: u64,
+        model: u64,
         output_records: u64,
         record_capacity: i64,
         output: u64,
