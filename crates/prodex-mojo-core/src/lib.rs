@@ -48,50 +48,65 @@ pub fn self_test() -> bool {
         }};
     }
 
-    let quota = traced!("quota", quota::remaining_percent(Some(42)) == 58
-        && quota::window_status(5, true) == 2
-        && quota::pressure_band(1, 2) == 2
-        && quota::window_pair_has_ready_limit(Some(20), Some(30)));
-    let routing = traced!("routing", routing::routing_plan_batch(
-        &[routing::RoutingPlanInput {
-            hard_eligible: true,
-            capability_mask: 1,
-            provider_order: 0,
-            score: routing::ScoreInput {
+    let quota = traced!(
+        "quota",
+        quota::remaining_percent(Some(42)) == 58
+            && quota::window_status(5, true) == 2
+            && quota::pressure_band(1, 2) == 2
+            && quota::window_pair_has_ready_limit(Some(20), Some(30))
+    );
+    let routing = traced!(
+        "routing",
+        routing::routing_plan_batch(
+            &[routing::RoutingPlanInput {
+                hard_eligible: true,
+                capability_mask: 1,
+                provider_order: 0,
+                score: routing::ScoreInput {
+                    health: 10_000,
+                    load: 0,
+                    quota_headroom: 10_000,
+                    quota_present: true,
+                    cost: 0,
+                    latency: 0,
+                    risk: 0,
+                    priority: 10_000,
+                    affinity: true,
+                },
+            }],
+            1,
+            routing::ScoreWeights {
                 health: 10_000,
                 load: 0,
-                quota_headroom: 10_000,
-                quota_present: true,
                 cost: 0,
                 latency: 0,
                 risk: 0,
-                priority: 10_000,
-                affinity: true,
+                priority: 0,
+                affinity: 0,
             },
-        }],
-        1,
-        routing::ScoreWeights {
-            health: 10_000,
-            load: 0,
-            cost: 0,
-            latency: 0,
-            risk: 0,
-            priority: 0,
-            affinity: 0,
-        },
-    ));
-    let capability = traced!("capability", routing::capability_match_batch(&[true, true], &[1, 0], 1));
-    let routing_ok = traced!("routing_check", routing.is_ok_and(|plan| {
-        plan.eligible == [true]
-            && plan.reason_tags == [routing::ROUTING_REASON_ELIGIBLE]
-            && plan.ordered_indices == [0]
-            && plan.scores[0].score == 10_000
-    }));
-    let capability_ok = traced!("capability_check", capability.is_ok_and(|result| {
-        result.first_compatible == Some(0)
-            && result.first_incompatible == Some(1)
-            && result.compatible == [true, false]
-    }));
+        )
+    );
+    let capability = traced!(
+        "capability",
+        routing::capability_match_batch(&[true, true], &[1, 0], 1)
+    );
+    let routing_ok = traced!(
+        "routing_check",
+        routing.is_ok_and(|plan| {
+            plan.eligible == [true]
+                && plan.reason_tags == [routing::ROUTING_REASON_ELIGIBLE]
+                && plan.ordered_indices == [0]
+                && plan.scores[0].score == 10_000
+        })
+    );
+    let capability_ok = traced!(
+        "capability_check",
+        capability.is_ok_and(|result| {
+            result.first_compatible == Some(0)
+                && result.first_incompatible == Some(1)
+                && result.compatible == [true, false]
+        })
+    );
     let profile_schedule_ok = traced!("profile_schedule", runtime::profile_schedule_self_test());
     let candidate_plan_ok = traced!("candidate_plan", runtime::candidate_plan_self_test());
     let pressure_snapshot_ok = traced!(
@@ -106,7 +121,8 @@ pub fn self_test() -> bool {
         "quota_aggregation",
         quota::main_quota_aggregation_self_test()
     );
-    let provider_constraints_ok = traced!("provider_constraints", provider_constraints::self_test());
+    let provider_constraints_ok =
+        traced!("provider_constraints", provider_constraints::self_test());
     let policy_validation_ok = traced!("policy", policy::self_test());
     let context_ok = traced!("context", context::self_test());
     let tuning_defaults_ok = traced!(
