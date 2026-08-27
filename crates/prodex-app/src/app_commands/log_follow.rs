@@ -3,8 +3,6 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::io::{self, Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
-#[cfg(windows)]
-use std::time::SystemTime;
 use std::time::{Duration, Instant};
 
 const LOG_FOLLOW_READ_CHUNK_BYTES: usize = 1024 * 1024;
@@ -16,8 +14,6 @@ pub(crate) struct FollowedLog {
     pub(crate) pending: Vec<u8>,
     file: Option<fs::File>,
     file_identity: Option<FileIdentity>,
-    #[cfg(windows)]
-    path_modified: Option<SystemTime>,
 }
 
 impl FollowedLog {
@@ -149,14 +145,8 @@ pub(crate) fn collect_new_followed_lines(
     };
 
     #[cfg(windows)]
-    let mut path_file = {
-        let modified = path_metadata.modified().ok();
-        (state.file.is_none() || state.path_modified != modified)
-            .then(|| {
-                fs::File::open(path).with_context(|| format!("failed to open {}", path.display()))
-            })
-            .transpose()?
-    };
+    let mut path_file =
+        Some(fs::File::open(path).with_context(|| format!("failed to open {}", path.display()))?);
     #[cfg(not(windows))]
     let mut path_file = None;
 
@@ -179,11 +169,6 @@ pub(crate) fn collect_new_followed_lines(
             state.pending.clear();
         }
     }
-    #[cfg(windows)]
-    {
-        state.path_modified = path_metadata.modified().ok();
-    }
-
     let file_len = path_metadata.len();
     if file_len < state.offset {
         state.offset = 0;
