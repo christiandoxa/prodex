@@ -309,6 +309,11 @@ async function buildFixtures(fixtureRoot) {
   const normalPrepare = await commit(fixtureRoot, "chore(release): prepare 0.5.0");
   await appendFile(fixtureRoot, "CHANGELOG.md", "\nRelease marker.\n");
   const normalRelease = await commit(fixtureRoot, "chore(release): release 0.5.0");
+  await appendFile(fixtureRoot, "CHANGELOG.md", "\nGenerated history reconciliation.\n");
+  const generatedChangelogSync = await commit(
+    fixtureRoot,
+    "docs(changelog): sync generated release history",
+  );
 
   return [
     {
@@ -364,6 +369,12 @@ async function buildFixtures(fixtureRoot) {
       script: "changelog-noise-guard.mjs",
       args: ["--commit", changelogOnlyNoise],
       expectedExit: 1,
+    },
+    {
+      name: "generated post-release changelog sync passes noise guard",
+      script: "changelog-noise-guard.mjs",
+      args: ["--commit", generatedChangelogSync],
+      expectedExit: 0,
     },
     {
       name: "mixed non-release changelog edit fails noise guard",
