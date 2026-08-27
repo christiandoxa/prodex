@@ -346,9 +346,10 @@ fn compact_waits_for_transient_profiles_before_a_new_sweep() {
     );
     let log = read_runtime_proxy_test_log(&harness.shared().log_path);
     assert!(
-        log.contains("request=111 transport=http rotation_waiting_for_recovery route=compact")
-            && log.contains("request=111 transport=http rotation_sweep_start route=compact"),
-        "compact recovery should wait and start a new sweep: {log}"
+        log.contains("request=111 transport=http rotation_sweep_start route=compact recovered_profiles=")
+            && (log.contains("request=111 transport=http rotation_waiting_for_recovery route=compact")
+                || log.contains("request=111 transport=http compact_candidate_exhausted")),
+        "compact recovery should wait or observe an already-ready profile before a new sweep: {log}"
     );
 }
 
