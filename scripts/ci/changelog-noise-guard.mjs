@@ -7,6 +7,7 @@ import {
 } from "./release-guard-common.mjs";
 
 const CHANGELOG_PATH = "CHANGELOG.md";
+const GENERATED_CHANGELOG_SYNC_SUBJECT = "docs(changelog): sync generated release history";
 function printHelp() {
   process.stdout.write(
     [
@@ -33,12 +34,21 @@ function touchesChangelog(files) {
   return files.includes(CHANGELOG_PATH);
 }
 
+function isGeneratedChangelogSync(change, subject) {
+  return subject === GENERATED_CHANGELOG_SYNC_SUBJECT &&
+    change.files.length === 1 &&
+    change.files[0] === CHANGELOG_PATH;
+}
+
 function issueForChange(change) {
   const subject = messageSubject(change.message);
   if (!touchesChangelog(change.files)) {
     return null;
   }
-  if (subject && isReleaseLikeMessage(change.message)) {
+  if (
+    subject &&
+    (isReleaseLikeMessage(change.message) || isGeneratedChangelogSync(change, subject))
+  ) {
     return null;
   }
   return {
