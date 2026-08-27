@@ -231,7 +231,7 @@ clean-machine evidence all pass.
 ## 2026-08-26: Rich Mojo domain ownership supersedes normalization-only FFI
 
 The first-generation integer and `StringSlice` seams remain compatible contracts, but they no
-longer define the semantic boundary. Rich ABI v4 sends bounded non-secret text and record DTOs to
+longer define the semantic boundary. Rich ABI v5 sends bounded non-secret text and record DTOs to
 Mojo. Mojo constructs `DiagnosticRecord`, `RouteCandidate`, `PolicyRule`, and `ContextItem`
 values, performs parsing/normalization, uses open-addressing arena tables for grouping and set
 membership, and returns caller-owned structured records. Rust maps those records into existing

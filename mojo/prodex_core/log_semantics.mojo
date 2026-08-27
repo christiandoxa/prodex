@@ -3,7 +3,7 @@ from std.memory import Pointer
 from rich_text import rich_view_matches_literal, rich_view_prefix, rich_view_valid
 from rich_types import ProdexRichStringView, rich_view_ptr
 
-comptime PRODEX_LOG_ABI_VERSION: Int64 = 3
+comptime PRODEX_LOG_ABI_VERSION: Int64 = 4
 comptime LOG_CATEGORY_NONE: Int64 = 0
 comptime LOG_CATEGORY_ROUTE: Int64 = 1
 comptime LOG_CATEGORY_QUOTA: Int64 = 2
@@ -61,12 +61,16 @@ def set_category(
 @export("prodex_mojo_log_classify_v3")
 def prodex_mojo_log_classify_v3(
     abi_version: Int64,
-    event: ProdexRichStringView,
+    event_address: UInt,
     category_address: UInt,
     severity_address: UInt,
 ) abi("C") -> Int64:
-    if abi_version != PRODEX_LOG_ABI_VERSION or category_address == 0 or severity_address == 0:
+    if abi_version != PRODEX_LOG_ABI_VERSION or event_address == 0 or category_address == 0 or severity_address == 0:
         return 1
+    var event_ptr = Pointer[
+        mut=False, ProdexRichStringView, ImmUntrackedOrigin
+    ](unsafe_from_address=Int(event_address))
+    var event = event_ptr[].copy()
     if not rich_view_valid(event, 128):
         return 2
 

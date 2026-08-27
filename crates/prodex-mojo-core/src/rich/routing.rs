@@ -167,12 +167,13 @@ pub fn plan_routes(
     let mut output = vec![0_u8; output_capacity.max(1)];
     let mut hash_slots = vec![-1_i64; scratch_capacity];
     let mut result = RichRouteResult::default();
+    let required_capabilities_view = view(required_capabilities);
     let status = unsafe {
         prodex_mojo_rich_route_plan_v2(
             RICH_ABI_VERSION,
             mojo_pointer_address(rich_inputs.as_ptr()),
             i64::try_from(input_count).map_err(|_| MojoError::InvalidInput)?,
-            view(required_capabilities),
+            mojo_pointer_address(&required_capabilities_view),
             mojo_pointer_address(records.as_mut_ptr()),
             i64::try_from(input_count).map_err(|_| MojoError::InvalidInput)?,
             mojo_pointer_address(ordered.as_mut_ptr()),

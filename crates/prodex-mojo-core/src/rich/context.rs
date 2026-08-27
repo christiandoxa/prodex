@@ -36,10 +36,11 @@ pub fn analyze_context(input: &str) -> Result<ContextAnalysis, MojoError> {
     let mut output = vec![0_u8; input.len().max(1)];
     let mut hash_slots = vec![-1_i64; scratch_capacity];
     let mut result = RichContextResult::default();
+    let input_view = view(input);
     let status = unsafe {
         prodex_mojo_rich_context_analyze_v2(
             RICH_ABI_VERSION,
-            view(input),
+            mojo_pointer_address(&input_view),
             mojo_pointer_address(records.as_mut_ptr()),
             i64::try_from(line_capacity).map_err(|_| MojoError::InvalidInput)?,
             mojo_pointer_address(output.as_mut_ptr()),

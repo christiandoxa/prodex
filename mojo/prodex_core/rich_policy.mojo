@@ -17,7 +17,7 @@ from rich_types import (
 )
 
 
-comptime PRODEX_RICH_ABI_VERSION: Int64 = 4
+comptime PRODEX_RICH_ABI_VERSION: Int64 = 5
 comptime RICH_MAX_RECORDS: Int64 = 256
 comptime RICH_MAX_IDENTIFIER_BYTES: Int64 = 4_096
 comptime RICH_STATUS_OK: Int64 = 0
@@ -58,7 +58,7 @@ def policy_strategy_valid(view: ProdexRichStringView) -> Bool:
 @export("prodex_mojo_rich_policy_alias_v2")
 def prodex_mojo_rich_policy_alias_v2(
     abi_version: Int64,
-    input: ProdexRichPolicyInput,
+    input_address: UInt,
     output_models_address: UInt,
     model_capacity: Int64,
     output_address: UInt,
@@ -72,7 +72,7 @@ def prodex_mojo_rich_policy_alias_v2(
     )
     result_ptr[].abi_version = PRODEX_RICH_ABI_VERSION
     result_ptr[].models_written = 0
-    result_ptr[].required_models = input.model_count
+    result_ptr[].required_models = 0
     result_ptr[].output_written = 0
     result_ptr[].required_output = 0
     result_ptr[].issue_kind = 0
@@ -83,6 +83,13 @@ def prodex_mojo_rich_policy_alias_v2(
     if abi_version != PRODEX_RICH_ABI_VERSION:
         policy_issue(result_ptr, RICH_STATUS_ABI, 0, -1, -1, 0)
         return RICH_STATUS_ABI
+    if input_address == 0:
+        return RICH_STATUS_INVALID
+    var input_ptr = Pointer[
+        mut=False, ProdexRichPolicyInput, ImmUntrackedOrigin
+    ](unsafe_from_address=Int(input_address))
+    var input = input_ptr[].copy()
+    result_ptr[].required_models = input.model_count
     if input.model_count < 0 or input.model_count > RICH_MAX_RECORDS or input.metric_count < 0 or input.metric_count > RICH_MAX_RECORDS or model_capacity < input.model_count:
         return RICH_STATUS_INVALID
     if output_models_address == 0 or output_address == 0:

@@ -62,7 +62,7 @@ maintenance reason.
 | Smart Context rehydration | Yes | Yes, active Smart Context body-transform planner and 2,000-case differential suite | None; strict activation assertion | Ubuntu 24.04 x86_64 |
 | Runtime tuning defaults | Yes | Yes, runtime config/probe queue defaults and 2,000-case differential suite | None; strict activation assertion | Ubuntu 24.04 x86_64 |
 
-## Rich ABI v4 promotions (2026-08-28)
+## Rich ABI v5 promotions (2026-08-28)
 
 These rows supersede the baseline's normalization-only boundary descriptions.
 

@@ -12,11 +12,13 @@ pub fn model_fallback_chain(provider: &str, model: &str) -> Result<Vec<String>, 
     let mut output = vec![0_u8; output_capacity];
     let mut hash_slots = vec![-1_i64; scratch_capacity];
     let mut result = RichFallbackResult::default();
+    let provider_view = view(provider);
+    let model_view = view(model);
     let status = unsafe {
         prodex_mojo_rich_model_fallback_v2(
             RICH_ABI_VERSION,
-            view(provider),
-            view(model),
+            mojo_pointer_address(&provider_view),
+            mojo_pointer_address(&model_view),
             mojo_pointer_address(records.as_mut_ptr()),
             i64::try_from(record_capacity).map_err(|_| MojoError::InvalidInput)?,
             mojo_pointer_address(output.as_mut_ptr()),

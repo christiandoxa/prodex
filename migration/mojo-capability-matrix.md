@@ -149,12 +149,12 @@ This is the final matrix for the rich wave against baseline
 | Variant | EXPERIMENT | EXPERIMENT | No; explicit bounded tags at ABI edge | Not linked into release core |
 | Domain structs | partial | PROMOTED | Yes: `DiagnosticRecord`, `RouteCandidate`, `PolicyRule`, `ContextItem`, `ContextPlan` | Plain Mojo record layout, statically linked |
 | Arena objects | none/partial | PROMOTED | Yes: offset slices, record arrays, object indices, scratch hash tables | Caller-owned buffers; no Mojo heap runtime |
-| Parser | Rust | MOJO | Yes: `combo:` fallback grammar and route-alias semantic grammar | New rich v4 exports only |
+| Parser | Rust | MOJO | Yes: `combo:` fallback grammar and route-alias semantic grammar | New rich v5 exports only |
 | Structured errors | partial | MOJO | Yes: domain/kind/field/index/offset/length issue records | Fixed-width result fields |
 | Structured output strings | limited | MOJO | Yes: normalized keys, provider/model names, model chains, artifact IDs | Rust-owned output byte arenas |
 | JSON | Rust | KEEP_RUST | No; Serde remains external compatibility parser | No EmberJson dependency |
 
-Promotion evidence is executable: strict Rust callers run all five rich v4 operations plus the
+Promotion evidence is executable: strict Rust callers run all five rich v5 operations plus the
 log-classification export, layout checks
 compare compiler-generated sizes/alignment, and the release archive checks all v3 symbols and
 rejects `KGEN_CompilerRT_*` references. Native heap and package-backed paths remain non-production

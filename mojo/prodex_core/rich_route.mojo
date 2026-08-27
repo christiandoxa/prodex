@@ -21,7 +21,7 @@ from rich_types import (
 )
 
 
-comptime PRODEX_RICH_ABI_VERSION: Int64 = 4
+comptime PRODEX_RICH_ABI_VERSION: Int64 = 5
 comptime RICH_MAX_RECORDS: Int64 = 256
 comptime RICH_MAX_IDENTIFIER_BYTES: Int64 = 4_096
 comptime RICH_MAX_CAPABILITIES_BYTES: Int64 = 2_048
@@ -149,7 +149,7 @@ def prodex_mojo_rich_route_plan_v2(
     abi_version: Int64,
     inputs_address: UInt,
     input_count: Int64,
-    required_capabilities: ProdexRichStringView,
+    required_capabilities_address: UInt,
     output_records_address: UInt,
     record_capacity: Int64,
     ordered_indices_address: UInt,
@@ -185,6 +185,12 @@ def prodex_mojo_rich_route_plan_v2(
     if abi_version != PRODEX_RICH_ABI_VERSION:
         route_issue(result, RICH_STATUS_ABI, -1, 0)
         return RICH_STATUS_ABI
+    if required_capabilities_address == 0:
+        return RICH_STATUS_INVALID
+    var required_capabilities_ptr = Pointer[
+        mut=False, ProdexRichStringView, ImmUntrackedOrigin
+    ](unsafe_from_address=Int(required_capabilities_address))
+    var required_capabilities = required_capabilities_ptr[].copy()
     if input_count < 0 or input_count > RICH_MAX_RECORDS or record_capacity < input_count or ordered_capacity < input_count:
         result[].required_candidates = input_count
         return RICH_STATUS_INVALID

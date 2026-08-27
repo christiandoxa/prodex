@@ -1,6 +1,6 @@
 use crate::MojoError;
 
-const LOG_ABI_VERSION: i64 = 3;
+const LOG_ABI_VERSION: i64 = 4;
 
 const _: () = assert!(std::mem::size_of::<usize>() == std::mem::size_of::<u64>());
 
@@ -69,10 +69,15 @@ impl LogCategory {
 unsafe extern "C" {
     fn prodex_mojo_log_classify_v3(
         abi_version: i64,
-        event: LogStringView,
+        event: u64,
         category: u64,
         severity: u64,
     ) -> i64;
+}
+
+#[inline]
+fn pointer_address<T>(pointer: *const T) -> u64 {
+    pointer as usize as u64
 }
 
 #[inline]
@@ -83,13 +88,14 @@ fn mutable_pointer_address<T>(pointer: *mut T) -> u64 {
 pub fn classify_log_event(event: &str) -> Result<(LogCategory, i64), MojoError> {
     let mut category = -1_i64;
     let mut severity = -1_i64;
+    let event_view = LogStringView {
+        ptr: event.as_ptr() as usize as u64,
+        len: event.len() as u64,
+    };
     let status = unsafe {
         prodex_mojo_log_classify_v3(
             LOG_ABI_VERSION,
-            LogStringView {
-                ptr: event.as_ptr() as usize as u64,
-                len: event.len() as u64,
-            },
+            pointer_address(&event_view),
             mutable_pointer_address(&mut category),
             mutable_pointer_address(&mut severity),
         )
