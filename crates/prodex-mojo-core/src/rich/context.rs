@@ -24,7 +24,14 @@ pub struct ContextAnalysis {
 }
 
 pub fn analyze_context(input: &str) -> Result<ContextAnalysis, MojoError> {
+    let trace = std::env::var_os("PRODEX_MOJO_SELF_TEST_TRACE").is_some();
+    if trace {
+        eprintln!("Mojo rich context: ABI check start");
+    }
     ensure_rich_abi()?;
+    if trace {
+        eprintln!("Mojo rich context: ABI check returned");
+    }
     let line_capacity = input
         .bytes()
         .filter(|byte| matches!(byte, b'\n' | b'\r'))
@@ -36,6 +43,9 @@ pub fn analyze_context(input: &str) -> Result<ContextAnalysis, MojoError> {
     let mut output = vec![0_u8; input.len().max(1)];
     let mut hash_slots = vec![-1_i64; scratch_capacity];
     let mut result = RichContextResult::default();
+    if trace {
+        eprintln!("Mojo rich context: FFI call start");
+    }
     let status = unsafe {
         prodex_mojo_rich_context_analyze_v2(
             RICH_ABI_VERSION,
@@ -49,6 +59,9 @@ pub fn analyze_context(input: &str) -> Result<ContextAnalysis, MojoError> {
             &mut result,
         )
     };
+    if trace {
+        eprintln!("Mojo rich context: FFI call returned status={status}");
+    }
     if status != 0 {
         return Err(status_error(
             status,
