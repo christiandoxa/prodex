@@ -5,7 +5,7 @@ use crate::app_commands::log_tui::{
 use crate::app_commands::log_upstream_payload::{
     UpstreamPayloadEvent, render_upstream_payload_lines,
 };
-use crate::app_commands::{LogStreamItem, TranscriptEvent};
+use crate::app_commands::{LogStreamItem, TranscriptEvent, log_event_label};
 use crate::reports::InfoTokenUsageEvent;
 use ratatui::layout::{Constraint, Direction, Layout};
 use ratatui::style::{Color, Modifier, Style};
@@ -259,7 +259,7 @@ fn push_log_stream_item_lines(
                 Span::styled(event.timestamp.clone(), tui_muted_style()),
                 Span::raw(" "),
                 Span::styled(
-                    format!("stream {}", event.source),
+                    log_event_label(&event.source),
                     Style::default()
                         .fg(log_stream_source_color(&event.source))
                         .add_modifier(Modifier::BOLD),
@@ -278,7 +278,7 @@ fn push_log_stream_item_lines(
                 Span::styled(event.timestamp.clone(), tui_muted_style()),
                 Span::raw(" "),
                 Span::styled(
-                    "stream usage",
+                    "TOKENS",
                     Style::default()
                         .fg(Color::LightMagenta)
                         .add_modifier(Modifier::BOLD),
@@ -295,11 +295,11 @@ fn push_log_stream_item_lines(
                 Span::styled(event.source.clone(), tui_primary_style()),
             ]));
             lines.push(Line::from(vec![
-                Span::styled("sent ", tui_muted_style()),
+                Span::styled("input ", tui_muted_style()),
                 Span::styled(event.input_tokens.to_string(), tui_metric_style()),
-                Span::styled(" cached ", tui_muted_style()),
+                Span::styled(" cache ", tui_muted_style()),
                 Span::styled(event.cached_input_tokens.to_string(), tui_accent_style()),
-                Span::styled(" received ", tui_muted_style()),
+                Span::styled(" output ", tui_muted_style()),
                 Span::styled(event.output_tokens.to_string(), tui_metric_style()),
                 Span::styled(" reasoning ", tui_muted_style()),
                 Span::styled(event.reasoning_tokens.to_string(), tui_tool_style()),
@@ -314,7 +314,7 @@ fn push_log_stream_item_lines(
                 Span::styled(event.timestamp.clone(), tui_muted_style()),
                 Span::raw(" "),
                 Span::styled(
-                    "stream payload",
+                    "UPSTREAM",
                     Style::default()
                         .fg(Color::Yellow)
                         .add_modifier(Modifier::BOLD),
@@ -344,6 +344,15 @@ fn log_stream_source_color(source: &str) -> Color {
         "reasoning" => Color::Yellow,
         "turn-context" | "session-context" => Color::Blue,
         "prompt-engineering" => Color::LightBlue,
+        "request" | "route" | "model" => Color::Blue,
+        "quota" => Color::LightYellow,
+        "retry" | "backoff" => Color::Yellow,
+        "health" => Color::LightMagenta,
+        "upstream" | "response" => Color::Cyan,
+        "smart" => Color::LightBlue,
+        "compact" => Color::LightYellow,
+        "agent" | "mcp" | "tool" => Color::Magenta,
+        "load" | "terminal" | "error" => Color::Red,
         "tool-output" => Color::Magenta,
         source if source.starts_with("tool-call:") => Color::Magenta,
         _ => Color::Reset,

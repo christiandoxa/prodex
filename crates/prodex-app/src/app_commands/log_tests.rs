@@ -29,6 +29,7 @@ fn follows_only_complete_token_usage_lines() {
         .unwrap();
     read_new_token_usage_events(&path, &mut state, true).unwrap();
     assert!(state.pending.is_empty());
+    drop(state);
     fs::remove_dir_all(root).unwrap();
 }
 
@@ -127,6 +128,29 @@ fn parses_turn_context_reasoning_and_custom_tool_events() {
             timestamp: local_log_timestamp("2026-01-10T11:53:51.287Z"),
             source: "tool-output".to_string(),
             text: "{\"output\":\"Success\"}".to_string(),
+        }]
+    );
+}
+
+#[test]
+fn labels_mcp_and_sub_agent_events_without_logging_arguments() {
+    let mcp = r#"{"timestamp":"2026-07-01T13:00:00Z","type":"response_item","payload":{"type":"mcp_call","server_label":"workspace","tool_name":"search","arguments":{"query":"secret"},"status":"completed"}}"#;
+    let sub_agent = r#"{"timestamp":"2026-07-01T13:00:01Z","type":"event_msg","payload":{"type":"subagent_started","name":"reviewer","message":"started"}}"#;
+
+    assert_eq!(
+        transcript_events_from_session_line(mcp),
+        vec![TranscriptEvent {
+            timestamp: local_log_timestamp("2026-07-01T13:00:00Z"),
+            source: "mcp".to_string(),
+            text: "server=workspace tool=search status=completed".to_string(),
+        }]
+    );
+    assert_eq!(
+        transcript_events_from_session_line(sub_agent),
+        vec![TranscriptEvent {
+            timestamp: local_log_timestamp("2026-07-01T13:00:01Z"),
+            source: "agent".to_string(),
+            text: "name=reviewer status=started".to_string(),
         }]
     );
 }
@@ -399,7 +423,8 @@ fn collects_websocket_payload_and_usage_from_runtime_log() {
     )
     .unwrap();
 
-    let items = collect_new_runtime_log_stream_items(&path, &mut FollowedLog::default()).unwrap();
+    let items =
+        collect_new_runtime_log_stream_items(&path, &mut FollowedLog::default(), false).unwrap();
 
     assert_eq!(items.len(), 2);
     assert!(matches!(items[0], LogStreamItem::UpstreamPayload(_)));
@@ -426,7 +451,8 @@ fn collects_websocket_stream_payload_as_plain_tool_call_text() {
     )
     .unwrap();
 
-    let items = collect_new_runtime_log_stream_items(&path, &mut FollowedLog::default()).unwrap();
+    let items =
+        collect_new_runtime_log_stream_items(&path, &mut FollowedLog::default(), false).unwrap();
 
     assert_eq!(items.len(), 1);
     let LogStreamItem::Transcript(event) = &items[0] else {
@@ -440,8 +466,47 @@ fn collects_websocket_stream_payload_as_plain_tool_call_text() {
         .flat_map(|line| line.spans.iter())
         .map(|span| span.content.as_ref())
         .collect::<String>();
-    assert!(rendered.contains("stream tool-call:exec"));
+    assert!(rendered.contains("TOOL CALL"));
     assert!(rendered.contains("tools.web__run"));
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn human_stream_adds_correlated_operational_events_without_exposing_urls() {
+    let root = env::temp_dir().join(format!(
+        "prodex-log-operational-events-{}-{}",
+        std::process::id(),
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    fs::create_dir_all(&root).unwrap();
+    let path = root.join("runtime.log");
+    fs::write(
+        &path,
+        concat!(
+            "[2026-07-01 21:52:36.700 +07:00] selection_pick request=42 route=responses profile=main mode=ready quota_band=quota_healthy\n",
+            "[2026-07-01 21:52:36.701 +07:00] upstream_start request=42 transport=http profile=main method=POST url=https://example.test/v1/responses?token=URL_SECRET\n",
+            "[2026-07-01 21:52:36.702 +07:00] upstream_response request=42 transport=http profile=main status=200 elapsed_ms=12\n",
+        ),
+    )
+    .unwrap();
+
+    let items =
+        collect_new_runtime_log_stream_items(&path, &mut FollowedLog::default(), true).unwrap();
+    let rendered = log_stream_tui_text(&VecDeque::from(items), 20, 120)
+        .lines
+        .iter()
+        .flat_map(|line| line.spans.iter())
+        .map(|span| span.content.as_ref())
+        .collect::<String>();
+
+    assert!(rendered.contains("ROUTE"));
+    assert!(rendered.contains("UPSTREAM"));
+    assert!(rendered.contains("r002a"));
+    assert!(rendered.contains("/v1/responses"));
+    assert!(!rendered.contains("URL_SECRET"));
     fs::remove_dir_all(root).unwrap();
 }
 
@@ -502,5 +567,6 @@ fn follows_only_complete_transcript_lines() {
         .unwrap();
     read_new_transcript_events(&path, &mut state).unwrap();
     assert!(state.pending.is_empty());
+    drop(state);
     fs::remove_dir_all(root).unwrap();
 }
