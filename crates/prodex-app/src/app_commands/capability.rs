@@ -189,7 +189,7 @@ fn smart_context_super_status() -> SuperToolStatus {
 
 fn optional_tool_super_status(id: prodex_optional_tools::OptionalToolId) -> SuperToolStatus {
     let health = prodex_optional_tools::optional_tool_status(id);
-    let mut detail = health.detail;
+    let mut detail = health.detail.clone();
     if let Some(version) = &health.version {
         detail.push_str(&format!("; version={version}"));
     }
