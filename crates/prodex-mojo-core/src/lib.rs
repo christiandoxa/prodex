@@ -88,6 +88,7 @@ pub fn self_test() -> bool {
     let context_ok = context::self_test();
     let tuning_defaults_ok = runtime_decisions::tuning_defaults_self_test();
     let rich_ok = rich::rich_self_test();
+    let log_semantics_ok = log::self_test();
     let checks = [
         routing_ok,
         capability_ok,
@@ -101,6 +102,7 @@ pub fn self_test() -> bool {
         context_ok,
         tuning_defaults_ok,
         rich_ok,
+        log_semantics_ok,
         routing::abi_version().is_ok(),
         quota,
         runtime::pressure_band_for_route(Some((4, 1)), None, 0).is_ok_and(|band| band == 2),
@@ -121,6 +123,8 @@ fn compiled_core_self_test_passes() {
 
 #[cfg(feature = "mojo-runtime")]
 pub mod context;
+#[cfg(feature = "mojo-rich")]
+pub mod log;
 #[cfg(feature = "mojo-runtime")]
 pub mod policy;
 #[cfg(feature = "mojo-provider-constraints")]
