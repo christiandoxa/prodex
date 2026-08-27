@@ -776,7 +776,6 @@ jobs:
     runs-on: ubuntu-latest
     needs:
       - verify-ci
-      - build
     timeout-minutes: 45
     permissions:
       artifact-metadata: write
