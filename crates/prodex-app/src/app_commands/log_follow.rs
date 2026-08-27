@@ -1,7 +1,9 @@
 use anyhow::{Context, Result};
+use std::collections::BTreeMap;
 use std::fs;
 use std::io::{self, Read, Seek, SeekFrom};
-use std::path::Path;
+use std::path::{Path, PathBuf};
+use std::time::{Duration, Instant};
 
 const LOG_FOLLOW_READ_CHUNK_BYTES: usize = 1024 * 1024;
 const LOG_FOLLOW_PENDING_MAX_BYTES: usize = 1024 * 1024;
@@ -10,32 +12,162 @@ const LOG_FOLLOW_PENDING_MAX_BYTES: usize = 1024 * 1024;
 pub(crate) struct FollowedLog {
     pub(crate) offset: u64,
     pub(crate) pending: Vec<u8>,
+    file: Option<fs::File>,
+    file_identity: Option<FileIdentity>,
+}
+
+impl FollowedLog {
+    pub(crate) fn with_offset(offset: u64) -> Self {
+        Self {
+            offset,
+            ..Self::default()
+        }
+    }
+
+    pub(crate) fn at_end(path: &Path) -> Self {
+        Self::with_offset(
+            fs::metadata(path)
+                .map(|metadata| metadata.len())
+                .unwrap_or_default(),
+        )
+    }
+}
+
+pub(crate) struct FollowedLogPaths {
+    paths: Vec<PathBuf>,
+    refresh_interval: Duration,
+    last_refresh: Option<Instant>,
+}
+
+pub(crate) fn retain_followed_logs(
+    followed: &mut BTreeMap<PathBuf, FollowedLog>,
+    current_paths: &[PathBuf],
+) {
+    followed.retain(|path, _| current_paths.contains(path));
+}
+
+impl Default for FollowedLogPaths {
+    fn default() -> Self {
+        Self::new(Vec::new())
+    }
+}
+
+impl FollowedLogPaths {
+    pub(crate) fn new(paths: Vec<PathBuf>) -> Self {
+        Self::with_refresh_interval(paths, Duration::from_secs(2))
+    }
+
+    pub(crate) fn with_refresh_interval(paths: Vec<PathBuf>, refresh_interval: Duration) -> Self {
+        Self {
+            paths,
+            refresh_interval,
+            last_refresh: Some(Instant::now()),
+        }
+    }
+
+    pub(crate) fn refresh(&mut self, discover: impl FnOnce() -> Vec<PathBuf>) -> &[PathBuf] {
+        if self
+            .last_refresh
+            .is_none_or(|last_refresh| last_refresh.elapsed() >= self.refresh_interval)
+        {
+            self.paths = discover();
+            self.last_refresh = Some(Instant::now());
+        }
+        &self.paths
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct FileIdentity {
+    first: u64,
+    second: u64,
+}
+
+#[cfg(unix)]
+fn file_identity(metadata: &fs::Metadata) -> Option<FileIdentity> {
+    use std::os::unix::fs::MetadataExt;
+
+    Some(FileIdentity {
+        first: metadata.dev(),
+        second: metadata.ino(),
+    })
+}
+
+#[cfg(windows)]
+fn file_identity(metadata: &fs::Metadata) -> Option<FileIdentity> {
+    use std::os::windows::fs::MetadataExt;
+
+    Some(FileIdentity {
+        first: u64::from(metadata.volume_serial_number()),
+        second: metadata.file_index(),
+    })
+}
+
+#[cfg(not(any(unix, windows)))]
+fn file_identity(_metadata: &fs::Metadata) -> Option<FileIdentity> {
+    None
 }
 
 pub(crate) fn collect_new_followed_lines(
     path: &Path,
     state: &mut FollowedLog,
 ) -> Result<Vec<String>> {
-    let mut file = match fs::File::open(path) {
-        Ok(file) => file,
-        Err(err) if err.kind() == io::ErrorKind::NotFound => return Ok(Vec::new()),
-        Err(err) => return Err(err).with_context(|| format!("failed to open {}", path.display())),
+    let path_metadata = match fs::metadata(path) {
+        Ok(metadata) if metadata.is_file() => metadata,
+        Ok(_) => {
+            state.file = None;
+            state.file_identity = None;
+            return Ok(Vec::new());
+        }
+        Err(err) if err.kind() == io::ErrorKind::NotFound => {
+            state.file = None;
+            state.file_identity = None;
+            return Ok(Vec::new());
+        }
+        Err(err) => {
+            return Err(err).with_context(|| format!("failed to inspect {}", path.display()));
+        }
     };
-    let len = file.metadata()?.len();
-    if len < state.offset {
+
+    let replace_file = match file_identity(&path_metadata) {
+        Some(identity) => state.file_identity != Some(identity),
+        None => state.file.is_none(),
+    };
+    if replace_file {
+        let had_file = state.file.is_some();
+        state.file = Some(
+            fs::File::open(path).with_context(|| format!("failed to open {}", path.display()))?,
+        );
+        state.file_identity = file_identity(&path_metadata);
+        if had_file {
+            state.offset = 0;
+            state.pending.clear();
+        }
+    }
+
+    let file_len = path_metadata.len();
+    if file_len < state.offset {
         state.offset = 0;
         state.pending.clear();
     }
+    if file_len == state.offset {
+        return Ok(Vec::new());
+    }
+    let file = state
+        .file
+        .as_mut()
+        .context("followed log file was not opened")?;
     file.seek(SeekFrom::Start(state.offset))?;
-    let mut bytes = Vec::new();
-    file.take(LOG_FOLLOW_READ_CHUNK_BYTES as u64)
-        .read_to_end(&mut bytes)?;
-    state.offset = state.offset.saturating_add(bytes.len() as u64);
-    if bytes.is_empty() {
+    let pending_len = state.pending.len();
+    (&mut *file)
+        .take(LOG_FOLLOW_READ_CHUNK_BYTES as u64)
+        .read_to_end(&mut state.pending)?;
+    let bytes_read = state.pending.len().saturating_sub(pending_len);
+    state.offset = state.offset.saturating_add(bytes_read as u64);
+    if bytes_read == 0 {
         return Ok(Vec::new());
     }
 
-    state.pending.extend_from_slice(&bytes);
     let complete_len = state
         .pending
         .iter()
@@ -60,6 +192,35 @@ pub(crate) fn collect_new_followed_lines(
 mod tests {
     use super::*;
     use std::time::{SystemTime, UNIX_EPOCH};
+
+    #[test]
+    fn followed_paths_cache_discovery_until_reconciliation() {
+        let mut paths = FollowedLogPaths::with_refresh_interval(
+            vec![PathBuf::from("initial")],
+            Duration::from_secs(60),
+        );
+        let mut discoveries = 0;
+
+        assert_eq!(
+            paths.refresh(|| {
+                discoveries += 1;
+                vec![PathBuf::from("unexpected")]
+            }),
+            [PathBuf::from("initial")]
+        );
+        assert_eq!(discoveries, 0);
+    }
+
+    #[test]
+    fn followed_log_state_is_pruned_to_current_paths() {
+        let mut followed = BTreeMap::from([
+            (PathBuf::from("active"), FollowedLog::default()),
+            (PathBuf::from("rotated"), FollowedLog::default()),
+        ]);
+        retain_followed_logs(&mut followed, &[PathBuf::from("active")]);
+        assert_eq!(followed.len(), 1);
+        assert!(followed.contains_key(Path::new("active")));
+    }
 
     #[test]
     fn followed_log_bounds_partial_lines_and_preserves_split_utf8() {
@@ -102,6 +263,75 @@ mod tests {
         assert_eq!(lines.len(), 1);
         assert!(lines[0].ends_with('🌋'));
         assert!(!lines[0].contains('\u{fffd}'));
+        drop(state);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn followed_log_reopens_replaced_and_truncated_files_without_replaying_history() {
+        let root = std::env::temp_dir().join(format!(
+            "prodex-log-follow-rotation-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::create_dir_all(&root).unwrap();
+        let path = root.join("runtime.log");
+        fs::write(&path, "old\n").unwrap();
+        let mut state = FollowedLog::default();
+        assert_eq!(
+            collect_new_followed_lines(&path, &mut state).unwrap(),
+            ["old"]
+        );
+
+        fs::rename(&path, root.join("runtime.log.1")).unwrap();
+        fs::write(&path, "replacement\n").unwrap();
+        assert_eq!(
+            collect_new_followed_lines(&path, &mut state).unwrap(),
+            ["replacement"]
+        );
+
+        fs::write(&path, "x\n").unwrap();
+        assert_eq!(
+            collect_new_followed_lines(&path, &mut state).unwrap(),
+            ["x"]
+        );
+        drop(state);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn followed_log_reads_one_append_after_large_history() {
+        let root = std::env::temp_dir().join(format!(
+            "prodex-log-follow-history-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::create_dir_all(&root).unwrap();
+        let path = root.join("runtime.log");
+        let history = (0..10_000)
+            .map(|index| format!("history-{index}\n"))
+            .collect::<String>();
+        fs::write(&path, history).unwrap();
+        let mut state = FollowedLog::at_end(&path);
+
+        use std::io::Write;
+        fs::OpenOptions::new()
+            .append(true)
+            .open(&path)
+            .unwrap()
+            .write_all(b"history-10000\n")
+            .unwrap();
+        assert_eq!(
+            collect_new_followed_lines(&path, &mut state).unwrap(),
+            ["history-10000"]
+        );
+        drop(state);
         fs::remove_dir_all(root).unwrap();
     }
 }

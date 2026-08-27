@@ -1,4 +1,5 @@
 use chrono::{DateTime, Local};
+use std::borrow::Cow;
 
 pub(super) fn current_log_width() -> usize {
     terminal_ui::current_cli_width()
@@ -36,6 +37,89 @@ pub(super) fn render_log_block(
 pub(super) fn render_text_body(text: &str, width: usize) -> Vec<String> {
     let body_width = width.saturating_sub(4).max(20);
     terminal_ui::wrap_text(text, body_width)
+}
+
+pub(super) fn human_event_name(event: &str) -> Cow<'_, str> {
+    let name = match event {
+        "request_captured" => "received request",
+        "route_decision" => "route decided",
+        "selection_plan" => "route planned",
+        "selection_pick" => "profile picked",
+        "selection_keep_affinity" => "owner kept",
+        "selection_keep_current" => "current profile kept",
+        "selection_skip_current" => "profile skipped",
+        "selection_skip_affinity" => "affinity skipped",
+        "selection_skip_sync_probe" => "quota probe skipped",
+        "local_selection_blocked" => "route blocked",
+        "profile_commit" => "profile committed",
+        "route_affinity_recompute" => "affinity recomputed",
+        "route_affinity_recompute_result" => "affinity resolved",
+        "previous_response_owner" => "continuation owner",
+        "previous_response_not_found" => "continuation missing",
+        "previous_response_negative_cache" => "continuation cached missing",
+        "previous_response_fresh_fallback" => "fresh fallback",
+        "previous_response_fresh_fallback_blocked" => "fallback blocked",
+        "previous_response_turn_state_rehydrated" => "turn state restored",
+        "session_rotation_release_affinity" => "session affinity released",
+        "binding_prompt_cache" => "prompt cache bound",
+        "upgrade" | "upgraded" => "request upgraded",
+        "profile_quota_exhausted" | "quota_exhausted" => "quota exhausted",
+        "quota_blocked" => "quota blocked",
+        "quota_critical_floor_before_send" => "quota floor blocked",
+        "profile_quota_quarantine" => "quota quarantine",
+        "profile_probe_refresh_start" => "quota refresh started",
+        "profile_probe_refresh_ok" => "quota refreshed",
+        "upstream_usage_limit_passthrough" => "upstream limit passed through",
+        "upstream_overload_passthrough" => "upstream overload passed through",
+        "profile_retry_backoff" => "retry backoff",
+        "compact_retryable_failure" => "compaction retry",
+        "compact_overload_conservative_retry" => "compaction retry (overload)",
+        "profile_transport_backoff" => "transport backoff",
+        "rotation_waiting_for_recovery" => "waiting for recovery",
+        "profile_circuit_open" => "circuit open",
+        "profile_circuit_half_open_probe" => "circuit probe",
+        "profile_transport_failure" => "transport failed",
+        "profile_health" => "health penalty",
+        "profile_bad_pairing" => "affinity penalty",
+        "upstream_start" | "upstream_async_start" => "upstream request",
+        "upstream_response" | "upstream_async_response" => "upstream response",
+        "upstream_connect_start" => "upstream connecting",
+        "upstream_connect_ok" => "upstream connected",
+        "upstream_connect_error" => "upstream connect failed",
+        "first_upstream_chunk" => "first upstream chunk",
+        "first_local_chunk" => "first local chunk",
+        "stream_complete" => "stream complete",
+        "buffered_response_complete" => "response complete",
+        "terminal_event" => "terminal event",
+        "runtime_proxy_queue_overloaded" => "proxy queue full",
+        "runtime_proxy_active_limit_reached" => "proxy busy",
+        "runtime_proxy_lane_limit_reached" => "lane full",
+        "profile_inflight_saturated" => "profile busy",
+        "smart_context_autopilot" => "Smart Context",
+        "smart_context_prepare_error" => "Smart Context failed",
+        "smart_context_prepare_fallback" => "Smart Context fallback",
+        "smart_context_disabled" => "Smart Context disabled",
+        "local_rewrite_request_detail" => "provider request",
+        "local_rewrite_provider_model_fallback" => "model fallback",
+        "local_rewrite_provider_auth_failure" => "provider auth failed",
+        "upstream_read_error" => "upstream read failed",
+        "upstream_send_error" => "upstream send failed",
+        "upstream_stream_error" => "upstream stream failed",
+        "upstream_close_before_completed" => "upstream closed early",
+        "upstream_connection_closed" => "upstream disconnected",
+        "stream_read_error" => "stream read failed",
+        "local_writer_error" => "terminal write failed",
+        "invalid_previous_response_id" => "continuation invalid",
+        "session_error" => "session failed",
+        "local_connection_closed" => "local connection closed",
+        "profile_probe_refresh_error" => "quota refresh failed",
+        "smart_context_token_calibration_save_error" => "Smart Context calibration failed",
+        _ if event.contains("compact") || event.contains("compaction") => "compaction",
+        _ if event.contains("mcp") || event.starts_with("expose_") => "MCP",
+        _ if event.contains("sub_agent") || event.contains("subagent") => "sub-agent",
+        _ => return Cow::Owned(event.replace('_', " ")),
+    };
+    Cow::Borrowed(name)
 }
 
 fn parse_log_timestamp(timestamp: &str) -> Option<DateTime<chrono::FixedOffset>> {
