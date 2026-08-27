@@ -133,6 +133,28 @@ impl<F> RuntimePrecommitLoopState<F> {
         let recovery_budget =
             Duration::from_millis(runtime_proxy_crate::RUNTIME_PROXY_PRECOMMIT_RECOVERY_BUDGET_MS)
                 .saturating_sub(recovery_started_at.elapsed());
+        let recovered = clear_runtime_recovered_profiles(
+            shared,
+            &mut self.excluded_profiles,
+            route_kind,
+            true,
+        )?;
+        if recovered > 0 {
+            self.record_recovery_sweep();
+            runtime_proxy_log(
+                shared,
+                runtime_proxy_structured_log_message(
+                    "rotation_sweep_start",
+                    [
+                        runtime_proxy_log_field("request", request_id.to_string()),
+                        runtime_proxy_log_field("route", runtime_route_kind_label(route_kind)),
+                        runtime_proxy_log_field("recovered_profiles", recovered.to_string()),
+                        runtime_proxy_log_field("sweep", self.recovery_sweeps.to_string()),
+                    ],
+                ),
+            );
+            return Ok(true);
+        }
         let Some(wait) = runtime_profile_recovery_wait_for_route(shared, route_kind, true)?
             .map(|until| {
                 let now = chrono::Local::now().timestamp();
