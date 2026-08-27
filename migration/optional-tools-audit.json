@@ -1,0 +1,105 @@
+{
+  "schema_version": 1,
+  "audited_at": "2026-08-27T13:58:07Z",
+  "release": "0.418.0",
+  "tools": [
+    {
+      "id": "caveman",
+      "repository": "https://github.com/JuliusBrussee/caveman",
+      "latest_stable": "2.3.1",
+      "release": "v2.3.1",
+      "tag_object": "5e35b5c40f7730455689411a7c0001a36727e66d",
+      "commit": "b5ec6351396b643a17cbbec4a6eee8b3fb9dd782",
+      "git_tree": "8cfb4a22fe99b73a769f332fde09b7cb94e73bfc",
+      "prodex_tree_sha256": "6ae2fa37ef76e25e0dcad1188e8fce4e3afca54b25fe9e4dbe84812003d4472d",
+      "license": "MIT",
+      "runtime": "Node.js >=18; externally managed immutable checkout",
+      "platforms": ["linux", "macos", "windows"],
+      "decision": "ADOPT_PACKAGE",
+      "notes": "v2.3.1 fixes installer reference drift and retains the required plugin files."
+    },
+    {
+      "id": "rtk",
+      "repository": "https://github.com/rtk-ai/rtk",
+      "latest_stable": "0.46.0",
+      "release": "v0.46.0",
+      "commit": "8dae5a750fe307d1fee105a2ff4a9d1ca54ac791",
+      "git_tree": "303a0657e071234de79fc036fb547533ba6709c2",
+      "checksums_asset": "sha256:9d2e33bdf9c9dc8662079d5b9a1bbf716aa2e62e2ed6cc51cf4ae06d42498787",
+      "license": "Apache-2.0",
+      "runtime": "Externally managed executable; recommended, not latest-only",
+      "platforms": ["linux", "macos", "windows"],
+      "decision": "ADOPT_PACKAGE",
+      "notes": "Latest release audited for find, git, stream decoding, and Windows console behavior."
+    },
+    {
+      "id": "codebase-memory-mcp",
+      "repository": "https://github.com/DeusData/codebase-memory-mcp",
+      "latest_stable": "0.10.8",
+      "release": "v0.10.8",
+      "commit": "46ae198fc11cda80e817acbc5f5908d7c2de7032",
+      "git_tree": "01132faf9bb4acfbd260fcbc6f29638d005be0ee",
+      "assets": {
+        "linux-amd64-portable": "sha256:6eef49652bc0c7820f43114125044d40bf7f4d97c11b2592f6b0f6a307702325",
+        "linux-arm64-portable": "sha256:5697d986d9716c913163b4bff7b3a294287f3b843e993bc1ff71e78dcdc21781",
+        "darwin-amd64": "sha256:2b193085410af3801634a522f4b17dcd6699695e015a068393c87817c1d260d4",
+        "darwin-arm64": "sha256:9bd840dfb3ec7eaef4f310382057adaa5b0e904df883104d03ffcf39836afd07",
+        "windows-amd64": "sha256:b43ad982994c4d829670749e08d3b622a74bb20041fc0a7d02bef6113f81c34d",
+        "windows-arm64": "sha256:254b26e819f00bab7f430c5f809d37d22b07bb3eb6427e290e5a27ba5b8e983e"
+      },
+      "license": "MIT",
+      "runtime": "Portable release binary; shared daemon with lightweight stdio frontends",
+      "platforms": ["linux", "macos", "windows"],
+      "decision": "ADOPT_PACKAGE",
+      "notes": "Daemon-capable 0.9.1-rc.1 minimum remains for backward compatibility."
+    },
+    {
+      "id": "playwright-mcp",
+      "repository": "https://github.com/microsoft/playwright-mcp",
+      "latest_stable": "0.0.79",
+      "release": "v0.0.79",
+      "commit": "4c5077651542f68525a0b51e97bab2a32abc9290",
+      "git_tree": "c8c3606cfcc481d8ec9e4debff98009adbd7628d",
+      "npm": {
+        "package": "@playwright/mcp",
+        "version": "0.0.79",
+        "integrity": "sha512-VpqD4a3vFyGQMY9sh3UJiO6wjcurggkljKfAyCHL0QWGY5m6Ehr3MNsAAHPDHO//n13g0PCjpHatAOiulrqdZQ==",
+        "node": ">=18"
+      },
+      "license": "Apache-2.0",
+      "runtime": "Pinned npm package through npx; isolated browser profile",
+      "platforms": ["linux", "macos", "windows"],
+      "decision": "ADOPT_PACKAGE",
+      "notes": "Release adds WebP screenshots, codegen languages, settle delay, and browser reconnect fixes."
+    },
+    {
+      "id": "ponytail",
+      "repository": "https://github.com/DietrichGebert/ponytail",
+      "latest_stable": "4.9.0",
+      "release": "v4.9.0",
+      "commit": "0a4dd63ad4541f4f655c4108a295916f3c1d8fda",
+      "git_tree": "03efd1058432eeb575107bef0b239291f35284f9",
+      "prodex_tree_sha256": "88c6dfa10bc0a63385a8f3f01bc4a3e51963c8fd76a0ebc0426bd889f0705970",
+      "license": "MIT",
+      "runtime": "Node.js plugin; externally managed immutable checkout",
+      "platforms": ["linux", "macos", "windows"],
+      "decision": "ADOPT_PACKAGE",
+      "notes": "Latest stable release revalidated for Codex hooks, sub-agent scoping, and Windows behavior."
+    },
+    {
+      "id": "presidio",
+      "repository": "https://github.com/data-privacy-stack/presidio",
+      "latest_stable": "2.2.364",
+      "release": "2.2.364",
+      "images": {
+        "analyzer": "ghcr.io/data-privacy-stack/presidio-analyzer:2.2.364@sha256:ae8f6f111ac2f04e3fec552f7f80edd0dcbfa2dd69ee1b9e030475be31669885",
+        "anonymizer": "ghcr.io/data-privacy-stack/presidio-anonymizer:2.2.364@sha256:e567013893ebc80994e3799f6f55c86aa1f0b0fadb779571ab346f0ec45365c1"
+      },
+      "license": "MIT",
+      "runtime": "Opt-in Analyzer/Anonymizer containers; fail-closed redaction",
+      "platforms": ["linux", "macos", "windows"],
+      "decision": "ADOPT_PACKAGE",
+      "notes": "English service images do not imply Indonesian recognizer support."
+    }
+  ]
+}
