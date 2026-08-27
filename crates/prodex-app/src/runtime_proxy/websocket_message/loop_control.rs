@@ -133,7 +133,7 @@ impl<'a> RuntimeWebsocketTextMessageFlow<'a> {
     }
 
     fn wait_for_transient_recovery(&mut self) -> Result<bool> {
-        if !self.saw_overload_failure
+        if !(self.saw_overload_failure || self.saw_transport_failure)
             || self.recovery_sweeps
                 >= runtime_proxy_crate::RUNTIME_PROXY_PRECOMMIT_RECOVERY_SWEEP_LIMIT
         {

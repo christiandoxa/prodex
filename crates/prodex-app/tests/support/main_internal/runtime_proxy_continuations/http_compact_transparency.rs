@@ -14,12 +14,14 @@ fn runtime_proxy_http_compact_preserves_rich_codex_01491_payload_and_session_aff
         "request_kind": "compaction",
         "session_id": session_id,
         "thread_source": "automated_review",
+        "context_window_id": "ctx-compact-before",
         "future_metadata": {"preserve": true},
     })
     .to_string();
     let body = serde_json::json!({
         "model": "gpt-5.6-luna",
         "session_id": session_id,
+        "context_window_id": "ctx-compact-before",
         "instructions": "Compact without changing multimodal structures.",
         "input": [
             {
@@ -52,6 +54,7 @@ fn runtime_proxy_http_compact_preserves_rich_codex_01491_payload_and_session_aff
         ],
         "client_metadata": {
             "x-codex-turn-metadata": turn_metadata,
+            "context_window_id": "ctx-compact-before",
             "future_client_field": ["preserve", 1491],
         },
         "metadata": {"trace": "synthetic"},
@@ -79,6 +82,11 @@ fn runtime_proxy_http_compact_preserves_rich_codex_01491_payload_and_session_aff
     assert_eq!(
         headers[0].get("x-codex-turn-metadata").map(String::as_str),
         Some(turn_metadata.as_str())
+    );
+    assert_eq!(
+        serde_json::from_str::<serde_json::Value>(&fixture.backend.responses_bodies()[0])
+            .expect("compact body should remain JSON")["context_window_id"],
+        "ctx-compact-before"
     );
 }
 

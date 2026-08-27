@@ -34,7 +34,7 @@ pub(super) fn prompt_super_main_agent_configuration(
     args: &SuperArgs,
     locked_provider: Option<prodex_provider_core::ProviderId>,
 ) -> Result<ResolvedMainAgentConfig> {
-    prompt_super_main_agent_configuration_with_options(args, locked_provider, false)
+    prompt_super_main_agent_configuration_with_options(args, locked_provider, true)
 }
 
 pub(super) fn prompt_super_main_agent_configuration_for_expose(

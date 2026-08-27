@@ -64,7 +64,7 @@ ChatGPT
 
 `prodex s expose` binds the listener to `127.0.0.1:0`, captures one canonical
 initial workspace, configures Super before generating a capability, and starts
-one directly invoked `cloudflared tunnel --protocol http2 --url ...` child. The
+one directly invoked, user-config-isolated `cloudflared tunnel --url ...` child. The
 public default admits only `/pdx/v1/<capability>/mcp`; `prodex expose --tunnel`
 and `prodex s expose --tunnel` retain the explicit browser-terminal behavior.
 

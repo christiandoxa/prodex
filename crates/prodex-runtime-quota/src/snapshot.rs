@@ -143,7 +143,7 @@ pub fn runtime_snapshot_blocks_same_request_cold_start_probe(
     route_kind: RuntimeRouteKind,
     now: i64,
     stale_grace_seconds: i64,
-    responses_critical_floor_percent: i64,
+    _responses_critical_floor_percent: i64,
 ) -> bool {
     matches!(
         route_kind,
@@ -151,9 +151,9 @@ pub fn runtime_snapshot_blocks_same_request_cold_start_probe(
     ) && runtime_usage_snapshot_is_usable(snapshot, now, stale_grace_seconds)
         && {
             let summary = runtime_quota_summary_from_usage_snapshot_at(snapshot, route_kind, now);
-            let window = summary.five_hour;
-            matches!(window.status, RuntimeQuotaWindowStatus::Exhausted)
-                || (!matches!(window.status, RuntimeQuotaWindowStatus::Unknown)
-                    && window.remaining_percent < responses_critical_floor_percent.max(1))
+            matches!(
+                summary.five_hour.status,
+                RuntimeQuotaWindowStatus::Exhausted
+            )
         }
 }

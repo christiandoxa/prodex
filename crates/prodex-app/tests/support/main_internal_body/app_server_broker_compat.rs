@@ -69,6 +69,10 @@ fn codex_0147_through_0149_replay_fixtures_are_byte_preserving() {
             "0.149",
             include_str!("../../fixtures/compat_replay/codex-0.149/app-server.jsonl"),
         ),
+        (
+            "0.150.1",
+            include_str!("../../fixtures/compat_replay/codex-0.1501/app-server.jsonl"),
+        ),
     ] {
         let mut forwarded = Vec::new();
         let mut diagnostics = Vec::new();
@@ -85,6 +89,27 @@ fn codex_0147_through_0149_replay_fixtures_are_byte_preserving() {
             assert!(value.is_object(), "{version} replay frame must be an object");
         }
     }
+}
+
+#[test]
+fn codex_01501_event_stream_task_context_and_interrupt_frames_are_opaque() {
+    let fixture = include_str!("../../fixtures/compat_replay/codex-0.1501/app-server.jsonl");
+    let mut forwarded = Vec::new();
+    let mut diagnostics = Vec::new();
+    app_server_broker_write_stdio_passthrough_preview_stream(
+        std::io::Cursor::new(fixture.as_bytes()),
+        &mut forwarded,
+        &mut diagnostics,
+    )
+    .expect("Codex 0.150.1 frames should remain forward-compatible");
+
+    assert_eq!(forwarded, fixture.as_bytes());
+    assert!(fixture.contains("\"mcpServer/event/stream/start\""));
+    assert!(fixture.contains("\"mcpServer/event/stream/notification\""));
+    assert!(fixture.contains("\"mcpServer/event/stream/stop\""));
+    assert!(fixture.contains("task-01501-a"));
+    assert!(fixture.contains("\"turn/interrupt\""));
+    assert!(!String::from_utf8_lossy(&diagnostics).contains("HOOK_TRANSCRIPT_SECRET"));
 }
 
 #[test]

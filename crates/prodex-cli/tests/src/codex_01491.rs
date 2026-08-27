@@ -209,3 +209,63 @@ fn codex_01491_provider_defaults_precede_explicit_image_budget_overrides() {
             .starts_with("features.compaction_image_budget=")
     }));
 }
+
+#[test]
+fn codex_01501_unspecified_image_budget_leaves_the_upstream_default_owned_by_codex() {
+    for invocation in [
+        ["prodex", "exec", "review"].as_slice(),
+        ["prodex", "run", "exec", "review"].as_slice(),
+        ["prodex", "caveman", "exec", "review"].as_slice(),
+        [
+            "prodex",
+            "s",
+            "--no-presidio",
+            "--no-sub-agent",
+            "exec",
+            "review",
+        ]
+        .as_slice(),
+    ] {
+        assert!(
+            passthrough_args(invocation).iter().all(|arg| !arg
+                .to_string_lossy()
+                .starts_with("features.compaction_image_budget=")),
+            "Prodex must not inject an image-budget default: {invocation:?}"
+        );
+    }
+}
+
+#[test]
+fn codex_01501_explicit_image_budget_values_are_preserved() {
+    for value in ["true", "false"] {
+        let setting = format!("features.compaction_image_budget={value}");
+        let command = parse_cli_command_from([
+            "prodex",
+            "s",
+            "--no-presidio",
+            "--no-sub-agent",
+            "-c",
+            setting.as_str(),
+            "exec",
+            "review",
+        ])
+        .expect("explicit Codex feature setting should parse");
+        let Commands::Super(args) = command else {
+            panic!("expected Super command");
+        };
+        let rendered = args
+            .into_runtime_tool_args()
+            .codex_args
+            .into_iter()
+            .map(|arg| arg.to_string_lossy().into_owned())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            rendered
+                .iter()
+                .filter(|arg| arg.as_str() == setting)
+                .count(),
+            1,
+            "explicit image-budget setting must survive unchanged"
+        );
+    }
+}

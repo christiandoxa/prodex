@@ -288,7 +288,7 @@ fn full_history_fallback_preserves_context_and_session_metadata() {
         method: "POST".to_string(),
         path_and_query: "/backend-api/codex/responses".to_string(),
         headers: vec![("session_id".to_string(), "sess-1".to_string())],
-        body: br#"{"model":"gpt-5.6","reasoning":{"effort":"max"},"previous_response_id":"resp-old","input":[{"type":"message","role":"assistant","content":"earlier result"},{"type":"compaction","encrypted_content":"compact-context"},{"type":"message","role":"user","content":"continue"}],"client_metadata":{"turn_id":"turn-1"}}"#.to_vec(),
+        body: br#"{"model":"gpt-5.6","reasoning":{"effort":"max"},"previous_response_id":"resp-old","context_window_id":"ctx-before-compact","input":[{"type":"message","role":"assistant","content":"earlier result"},{"type":"compaction","encrypted_content":"compact-context"},{"type":"message","role":"user","content":"continue"}],"client_metadata":{"turn_id":"turn-1","context_window_id":"ctx-before-compact"}}"#.to_vec(),
     };
 
     let fallback = runtime_request_full_history_without_previous_response_id(&request)
@@ -303,6 +303,11 @@ fn full_history_fallback_preserves_context_and_session_metadata() {
     assert_eq!(value["model"], "gpt-5.6");
     assert_eq!(value["reasoning"]["effort"], "max");
     assert_eq!(value["client_metadata"]["turn_id"], "turn-1");
+    assert_eq!(value["context_window_id"], "ctx-before-compact");
+    assert_eq!(
+        value["client_metadata"]["context_window_id"],
+        "ctx-before-compact"
+    );
 }
 
 #[test]

@@ -12,6 +12,30 @@ pub(super) const MODELS: &[ProviderModelSpec] = &[
     model!(
         ProviderId::OpenAi,
         "openai",
+        "gpt-5.6-sol",
+        "GPT-5.6 Sol",
+        "GPT-5.6 coding model for ambitious agentic tasks.",
+        Some(OPENAI_GPT_5_6_CONTEXT_WINDOW_TOKENS),
+        None,
+        None,
+        OPENAI_ENDPOINTS,
+        ["sol"]
+    ),
+    model!(
+        ProviderId::OpenAi,
+        "openai",
+        "gpt-5.6-terra",
+        "GPT-5.6 Terra",
+        "GPT-5.6 coding model for everyday agentic tasks.",
+        Some(OPENAI_GPT_5_6_CONTEXT_WINDOW_TOKENS),
+        None,
+        None,
+        OPENAI_ENDPOINTS,
+        ["terra"]
+    ),
+    model!(
+        ProviderId::OpenAi,
+        "openai",
         "gpt-5.6-luna",
         "GPT-5.6 Luna",
         "GPT-5.6 coding model for clear, repeatable agentic tasks.",

@@ -7,6 +7,9 @@ pub(crate) fn runtime_remaining_sync_probe_cold_start_profiles_for_route(
 ) -> Result<usize> {
     let now = Local::now().timestamp();
     let profile_inflight = shared.lane_admission.profile_inflight_snapshot();
+    let pressure_mode = runtime_proxy_pressure_mode_active_for_route(shared, route_kind);
+    let inflight_soft_limit =
+        runtime_profile_inflight_soft_limit_for_shared(shared, route_kind, pressure_mode);
     let state = {
         let runtime = shared
             .runtime
@@ -15,37 +18,41 @@ pub(crate) fn runtime_remaining_sync_probe_cold_start_profiles_for_route(
         runtime_route_selection_catalog(&runtime, &profile_inflight, route_kind, now)
     };
 
-    Ok(active_profile_selection_order_with_view(
+    let mut count = 0;
+    for name in active_profile_selection_order_with_view(
         runtime_route_selection_view(&state),
         &state.current_profile,
-    )
-    .into_iter()
-    .filter(|name| !excluded_profiles.contains(name))
-    .filter(|name| {
-        state.entry(name).is_some_and(|entry| {
-            entry
-                .cached_auth_summary
-                .as_ref()
-                .is_none_or(|summary| summary.quota_compatible)
-                && entry.supports_codex_runtime()
-        })
-    })
-    .filter(|name| {
-        state
-            .entry(name)
-            .is_some_and(|entry| entry.cached_probe_entry.is_none())
-    })
-    .filter(|name| {
-        !state.entry(name).is_some_and(|entry| {
-            entry
+    ) {
+        if excluded_profiles.contains(&name) {
+            continue;
+        }
+        let Some(entry) = state.entry(&name) else {
+            continue;
+        };
+        if entry
+            .cached_auth_summary
+            .as_ref()
+            .is_some_and(|summary| !summary.quota_compatible)
+            || !entry.supports_codex_runtime()
+            || entry.cached_probe_entry.is_some()
+            || entry.inflight_count >= inflight_soft_limit
+            || runtime_profile_inflight_hard_limited_for_context(
+                shared,
+                &name,
+                runtime_route_kind_inflight_context(route_kind),
+            )?
+            || entry
                 .cached_usage_snapshot
                 .as_ref()
                 .is_some_and(|snapshot| {
                     runtime_snapshot_blocks_same_request_cold_start_probe(snapshot, route_kind, now)
                 })
-        })
-    })
-    .count())
+        {
+            continue;
+        }
+        count += 1;
+    }
+    Ok(count)
 }
 
 pub(crate) fn runtime_waitable_inflight_candidates_for_route(

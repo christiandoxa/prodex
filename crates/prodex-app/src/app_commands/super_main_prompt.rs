@@ -3,6 +3,14 @@ use crate::{
     AppPaths, canonical_sub_agent_efforts, canonical_sub_agent_model_choices,
     codex_cli_config_override_value,
 };
+#[path = "super_main_catalog.rs"]
+mod catalog;
+use catalog::{
+    first_main_catalog_model, main_model_choice_is_selectable, main_model_choices,
+    main_model_efforts, prompt_main_model,
+};
+#[cfg(test)]
+use catalog::{main_model_choices_from_catalog, openai_main_model_choices};
 use prodex_cli::{SubAgentReasoningEffort, SuperArgs, SuperExternalProvider};
 
 pub(super) fn resolve_main_model_and_effort(
@@ -16,17 +24,24 @@ pub(super) fn resolve_main_model_and_effort(
         .or_else(|| codex_cli_config_override_value(&args.codex_args, "model"));
     let explicit_effort =
         codex_cli_config_override_value(&args.codex_args, "model_reasoning_effort");
+    let remembered_model = explicit_model
+        .is_none()
+        .then(|| remembered_main_model(args, provider))
+        .flatten();
+    let model_choices = main_model_choices(provider, remembered_model.as_deref());
     let current_model = explicit_model
         .clone()
-        .or_else(|| remembered_main_model(args, provider))
+        .or_else(|| {
+            remembered_model.filter(|model| main_model_choice_is_selectable(&model_choices, model))
+        })
+        .or_else(|| {
+            (provider == prodex_provider_core::ProviderId::OpenAi)
+                .then(|| first_main_catalog_model(&model_choices))
+                .flatten()
+        })
         .or_else(|| default_main_model(provider));
     let model = if prompt_model_and_effort && explicit_model.is_none() {
-        prompt_super_model(
-            "Main-agent model",
-            provider,
-            current_model.as_deref(),
-            super_prompt::configured_sub_agent_models(provider),
-        )?
+        prompt_main_model("Main-agent model", provider, current_model.as_deref())?
     } else {
         current_model
     };
@@ -35,28 +50,46 @@ pub(super) fn resolve_main_model_and_effort(
         .then(|| remembered_main_effort(args, provider))
         .flatten();
     let reasoning_effort = if let Some(explicit_effort) = explicit_effort {
-        ensure_supported_effort(provider, model.as_deref(), &explicit_effort)?;
+        ensure_supported_main_effort(provider, model.as_deref(), &explicit_effort)?;
         Some(explicit_effort)
     } else if prompt_model_and_effort {
-        prompt_super_reasoning_effort(
+        prompt_main_reasoning_effort(
             "Main-agent reasoning effort",
             provider,
             model.as_deref(),
-            remembered_effort
-                .as_deref()
-                .filter(|effort| {
-                    effort.parse().ok().is_some_and(|effort| {
-                        canonical_sub_agent_efforts(provider, model.as_deref()).contains(&effort)
-                    })
-                })
-                .and_then(|value| value.parse().ok()),
+            remembered_effort.as_deref().filter(|effort| {
+                main_model_efforts(provider, model.as_deref())
+                    .iter()
+                    .any(|candidate| candidate.eq_ignore_ascii_case(effort))
+            }),
         )?
-        .map(|effort| effort.as_str().to_string())
+        .map(|effort| effort.to_string())
     } else {
-        remembered_effort
-            .filter(|effort| ensure_supported_effort(provider, model.as_deref(), effort).is_ok())
+        remembered_effort.filter(|effort| {
+            ensure_supported_main_effort(provider, model.as_deref(), effort).is_ok()
+        })
     };
     Ok((model, reasoning_effort))
+}
+
+fn ensure_supported_main_effort(
+    provider: prodex_provider_core::ProviderId,
+    model: Option<&str>,
+    effort: &str,
+) -> anyhow::Result<()> {
+    if provider != prodex_provider_core::ProviderId::OpenAi {
+        return ensure_supported_effort(provider, model, effort);
+    }
+    if main_model_efforts(provider, model)
+        .iter()
+        .any(|candidate| candidate.eq_ignore_ascii_case(effort))
+    {
+        Ok(())
+    } else {
+        Err(anyhow::anyhow!(
+            "reasoning effort is unsupported for the selected model"
+        ))
+    }
 }
 
 pub(super) fn ensure_supported_effort(
@@ -194,9 +227,49 @@ pub(super) fn prompt_super_reasoning_effort(
     model: Option<&str>,
     current: Option<SubAgentReasoningEffort>,
 ) -> anyhow::Result<Option<SubAgentReasoningEffort>> {
+    prompt_reasoning_effort(title, canonical_sub_agent_efforts(provider, model), current)
+}
+
+fn prompt_main_reasoning_effort(
+    title: &str,
+    provider: prodex_provider_core::ProviderId,
+    model: Option<&str>,
+    current: Option<&str>,
+) -> anyhow::Result<Option<String>> {
     let mut efforts = vec![("provider default".to_string(), None)];
     efforts.extend(
-        canonical_sub_agent_efforts(provider, model)
+        main_model_efforts(provider, model)
+            .into_iter()
+            .map(|effort| (effort.clone(), Some(effort))),
+    );
+    let choices = efforts
+        .iter()
+        .map(|(label, _)| label.clone())
+        .collect::<Vec<_>>();
+    let selected = efforts
+        .iter()
+        .position(|(_, effort)| {
+            effort
+                .as_deref()
+                .zip(current)
+                .is_some_and(|(candidate, current)| candidate.eq_ignore_ascii_case(current))
+        })
+        .unwrap_or(0);
+    Ok(
+        efforts[super_prompt::prompt_super_choice(title, &choices, selected, false)?]
+            .1
+            .clone(),
+    )
+}
+
+fn prompt_reasoning_effort(
+    title: &str,
+    supported: Vec<SubAgentReasoningEffort>,
+    current: Option<SubAgentReasoningEffort>,
+) -> anyhow::Result<Option<SubAgentReasoningEffort>> {
+    let mut efforts = vec![("provider default".to_string(), None)];
+    efforts.extend(
+        supported
             .into_iter()
             .map(|effort| (effort.as_str().to_string(), Some(effort))),
     );
@@ -209,4 +282,177 @@ pub(super) fn prompt_super_reasoning_effort(
         .position(|(_, effort)| *effort == current)
         .unwrap_or(0);
     Ok(efforts[super_prompt::prompt_super_choice(title, &choices, selected, false)?].1)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    fn catalog_model(
+        slug: &str,
+        display_name: &str,
+        priority: u64,
+        efforts: &[&str],
+    ) -> serde_json::Value {
+        json!({
+            "slug": slug,
+            "display_name": display_name,
+            "visibility": "list",
+            "supported_in_api": true,
+            "priority": priority,
+            "supported_reasoning_levels": efforts.iter().map(|effort| json!({"effort": effort})).collect::<Vec<_>>(),
+        })
+    }
+
+    #[test]
+    fn openai_main_picker_uses_top_level_catalog_and_model_efforts() {
+        let choices = main_model_choices_from_catalog(vec![
+            catalog_model("gpt-5.6-luna", "GPT-5.6 Luna", 3, &["low", "medium"]),
+            catalog_model("gpt-5.6-sol", "GPT-5.6 Sol", 1, &["low", "max", "ultra"]),
+            catalog_model("gpt-5.6-terra", "GPT-5.6 Terra", 2, &["medium", "high"]),
+            json!({"slug": "hidden", "visibility": "hide"}),
+            json!({"slug": "unsupported", "supported_in_api": false}),
+            catalog_model("GPT-5.6-SOL", "duplicate", 4, &["low"]),
+        ])
+        .unwrap();
+
+        let models = choices
+            .iter()
+            .filter_map(|choice| match &choice.choice {
+                prodex_provider_core::ProviderModelChoice::Model(model) => Some(model.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(models, ["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"]);
+        assert_eq!(choices[1].label, "GPT-5.6 Sol");
+        assert_eq!(
+            choices[1].efforts,
+            Some(vec![
+                "low".to_string(),
+                "max".to_string(),
+                "ultra".to_string()
+            ])
+        );
+        assert_eq!(
+            choices.last().map(|choice| choice.label.as_str()),
+            Some("custom model...")
+        );
+    }
+
+    #[test]
+    fn main_and_sub_agent_catalogs_remain_independent() {
+        let main = main_model_choices_from_catalog(vec![
+            catalog_model("gpt-5.6-sol", "GPT-5.6 Sol", 1, &["low"]),
+            catalog_model("gpt-5.6-terra", "GPT-5.6 Terra", 2, &["high"]),
+            catalog_model("gpt-5.6-luna", "GPT-5.6 Luna", 3, &["medium"]),
+        ])
+        .unwrap();
+        let mut sub_agent = Vec::new();
+        super_prompt::configured_sub_agent_model_ids(
+            &json!({"models": [{"slug": "gpt-5.6-sol"}, {"slug": "gpt-5.6-terra"}]}),
+            &mut sub_agent,
+            3,
+        );
+
+        assert!(main.iter().any(|choice| matches!(
+            &choice.choice,
+            prodex_provider_core::ProviderModelChoice::Model(model) if model == "gpt-5.6-luna"
+        )));
+        assert_eq!(sub_agent, ["gpt-5.6-sol", "gpt-5.6-terra"]);
+    }
+
+    #[test]
+    fn main_catalog_keeps_all_models_and_model_specific_efforts() {
+        let entries = (0..32)
+            .map(|index| {
+                let model = format!("fixture-model-{index:02}");
+                let efforts = if index == 31 {
+                    vec![
+                        "minimal",
+                        "low",
+                        "medium",
+                        "high",
+                        "xhigh",
+                        "max",
+                        "ultra",
+                        "future-depth",
+                    ]
+                } else {
+                    vec!["medium"]
+                };
+                catalog_model(&model, &model, index, &efforts)
+            })
+            .collect();
+        let choices = main_model_choices_from_catalog(entries).unwrap();
+        let models = choices
+            .iter()
+            .filter_map(|choice| match &choice.choice {
+                prodex_provider_core::ProviderModelChoice::Model(model) => Some(model.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+
+        assert_eq!(models.len(), 32);
+        assert_eq!(models.first(), Some(&"fixture-model-00"));
+        assert_eq!(models.get(5), Some(&"fixture-model-05"));
+        assert_eq!(models.last(), Some(&"fixture-model-31"));
+        assert_eq!(
+            choices[32].efforts,
+            Some(vec![
+                "minimal".to_string(),
+                "low".to_string(),
+                "medium".to_string(),
+                "high".to_string(),
+                "xhigh".to_string(),
+                "max".to_string(),
+                "ultra".to_string(),
+                "future-depth".to_string(),
+            ])
+        );
+    }
+
+    #[test]
+    fn openai_main_picker_reads_the_active_models_cache() {
+        let root =
+            crate::test_temp_root().join(format!("prodex-main-model-cache-{}", std::process::id()));
+        let codex_home = root.join("codex");
+        std::fs::create_dir_all(&codex_home).unwrap();
+        let _env_lock = crate::test_support::TestEnvVarGuard::lock();
+        let _prodex_home = crate::test_support::TestEnvVarGuard::set(
+            "PRODEX_HOME",
+            root.join("prodex").to_str().unwrap(),
+        );
+        let _codex_home = crate::test_support::TestEnvVarGuard::set(
+            "PRODEX_SHARED_CODEX_HOME",
+            codex_home.to_str().unwrap(),
+        );
+        std::fs::write(
+            codex_home.join("models_cache.json"),
+            json!({
+                "client_version": "0.150.1",
+                "models": [
+                    catalog_model("gpt-5.6-terra", "GPT-5.6 Terra", 2, &["high"]),
+                    catalog_model("gpt-5.6-sol", "GPT-5.6 Sol", 1, &["max"]),
+                    catalog_model("gpt-5.6-luna", "GPT-5.6 Luna", 3, &["medium"]),
+                ]
+            })
+            .to_string(),
+        )
+        .unwrap();
+
+        let choices = openai_main_model_choices().unwrap();
+        let models = choices
+            .iter()
+            .filter_map(|choice| match &choice.choice {
+                prodex_provider_core::ProviderModelChoice::Model(model) => Some(model.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(models, ["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"]);
+        drop(_codex_home);
+        drop(_prodex_home);
+        drop(_env_lock);
+        let _ = std::fs::remove_dir_all(root);
+    }
 }
