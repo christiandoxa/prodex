@@ -8,6 +8,23 @@ use std::{
 };
 
 fn main() {
+    emit_cargo_directives();
+    let sources = selected_sources();
+    let manifest_dir = PathBuf::from(env::var_os("CARGO_MANIFEST_DIR").unwrap());
+    emit_source_rerun_directives(&sources, &manifest_dir);
+    let strict = mojo_required();
+    if sources.is_empty() {
+        if strict {
+            panic!(
+                "PRODEX_MOJO_REQUIRED is set but no Mojo subsystem feature is enabled; enable a prodex-mojo-core Mojo feature"
+            );
+        }
+        return;
+    }
+    build_mojo_archive(sources, manifest_dir, strict);
+}
+
+fn emit_cargo_directives() {
     println!("cargo:rerun-if-env-changed=PRODEX_MOJO");
     println!("cargo:rerun-if-env-changed=PRODEX_MOJO_REQUIRED");
     println!("cargo:rerun-if-env-changed=AR");
@@ -17,10 +34,10 @@ fn main() {
     println!("cargo:rerun-if-env-changed=PRODEX_MOJO_VERSION");
     println!("cargo:rustc-check-cfg=cfg(prodex_mojo_active)");
     println!("cargo:rustc-check-cfg=cfg(prodex_mojo_required)");
+}
 
-    let sources = selected_sources();
-    let manifest_dir = PathBuf::from(env::var_os("CARGO_MANIFEST_DIR").unwrap());
-    for source in &sources {
+fn emit_source_rerun_directives(sources: &[&str], manifest_dir: &Path) {
+    for source in sources {
         println!(
             "cargo:rerun-if-changed={}",
             manifest_dir.join(source).display()
@@ -43,22 +60,13 @@ fn main() {
             .join("../../mojo/prodex_core/runtime_math.mojo")
             .display()
     );
+}
 
-    let strict = mojo_required();
+fn build_mojo_archive(sources: Vec<&'static str>, manifest_dir: PathBuf, strict: bool) {
     if strict {
         println!("cargo:rustc-cfg=prodex_mojo_required");
     }
-    if sources.is_empty() {
-        if strict {
-            panic!(
-                "PRODEX_MOJO_REQUIRED is set but no Mojo subsystem feature is enabled; enable a prodex-mojo-core Mojo feature"
-            );
-        }
-        return;
-    }
-
     let out_dir = PathBuf::from(env::var_os("OUT_DIR").unwrap());
-    let manifest_dir = PathBuf::from(env::var_os("CARGO_MANIFEST_DIR").unwrap());
     let mojo_override = env::var_os("PRODEX_MOJO");
     let mojo = mojo_override
         .clone()
