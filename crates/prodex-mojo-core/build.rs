@@ -58,18 +58,24 @@ fn main() {
     }
 
     let out_dir = PathBuf::from(env::var_os("OUT_DIR").unwrap());
-    let archive = out_dir.join("libprodex_mojo_core.a");
     let manifest_dir = PathBuf::from(env::var_os("CARGO_MANIFEST_DIR").unwrap());
     let mojo_override = env::var_os("PRODEX_MOJO");
     let mojo = mojo_override
         .clone()
         .unwrap_or_else(|| OsString::from("mojo"));
-    let ar = env::var_os("AR").unwrap_or_else(|| OsString::from("ar"));
     let target = env::var("PRODEX_MOJO_TARGET")
         .or_else(|_| env::var("TARGET"))
         .unwrap_or_else(|_| "x86_64-unknown-linux-gnu".to_string());
+    let ar = env::var_os("AR").unwrap_or_else(|| {
+        if target.ends_with("-msvc") {
+            OsString::from("llvm-lib")
+        } else {
+            OsString::from("ar")
+        }
+    });
     let target_cpu = env::var("PRODEX_MOJO_TARGET_CPU")
         .unwrap_or_else(|_| default_target_cpu(&target).to_string());
+    let archive = out_dir.join(archive_file_name(&target));
     let expected_version = env::var("PRODEX_MOJO_VERSION").ok();
     if let Some(version) = expected_version.as_deref() {
         if version.is_empty() {
@@ -93,6 +99,7 @@ fn main() {
             &manifest_dir,
             &archive,
             &out_dir,
+            &target,
         );
         return;
     }
@@ -105,10 +112,10 @@ fn main() {
         let source = manifest_dir.join(source);
         let object = out_dir.join(format!("prodex_mojo_core_{index}.o"));
         compile_mojo_source(&mojo, &target, &target_cpu, &source, &object);
-        archive_object(&ar, &archive, &object);
+        archive_object(&ar, &archive, &object, &target);
     }
 
-    emit_link(&out_dir);
+    emit_link(&out_dir, &target);
 }
 
 fn verify_mojo_version(mojo: &OsString, expected: &str) {
@@ -144,6 +151,7 @@ fn link_prebuilt_archive(
     manifest_dir: &Path,
     archive: &Path,
     out_dir: &Path,
+    target: &str,
 ) {
     let prebuilt_archive = resolve_archive_path(prebuilt_archive, manifest_dir);
     if !prebuilt_archive.is_file() {
@@ -162,7 +170,7 @@ fn link_prebuilt_archive(
         "cargo:warning=prodex-mojo-core linking prebuilt target archive {}",
         prebuilt_archive.display()
     );
-    emit_link(out_dir);
+    emit_link(out_dir, target);
 }
 
 fn compile_mojo_source(
@@ -194,12 +202,16 @@ fn compile_mojo_source(
     }
 }
 
-fn archive_object(ar: &OsString, archive: &Path, object: &Path) {
-    let status = Command::new(ar)
-        .args(["crus"])
-        .arg(archive)
-        .arg(object)
-        .status();
+fn archive_object(ar: &OsString, archive: &Path, object: &Path, target: &str) {
+    let mut command = Command::new(ar);
+    if target.ends_with("-msvc") {
+        command
+            .arg(format!("/out:{}", archive.display()))
+            .arg(object);
+    } else {
+        command.args(["crus"]).arg(archive).arg(object);
+    }
+    let status = command.status();
     match status {
         Ok(status) if status.success() => {}
         Err(error) if error.kind() == ErrorKind::NotFound => {
@@ -213,10 +225,18 @@ fn archive_object(ar: &OsString, archive: &Path, object: &Path) {
     }
 }
 
-fn emit_link(out_dir: &Path) {
+fn emit_link(out_dir: &Path, _target: &str) {
     println!("cargo:rustc-link-search=native={}", out_dir.display());
     println!("cargo:rustc-link-lib=static=prodex_mojo_core");
     println!("cargo:rustc-cfg=prodex_mojo_active");
+}
+
+fn archive_file_name(target: &str) -> &'static str {
+    if target.ends_with("-msvc") {
+        "prodex_mojo_core.lib"
+    } else {
+        "libprodex_mojo_core.a"
+    }
 }
 
 fn selected_sources() -> Vec<&'static str> {
@@ -249,6 +269,7 @@ fn selected_sources() -> Vec<&'static str> {
         sources.push("../../mojo/prodex_core/rich_policy.mojo");
         sources.push("../../mojo/prodex_core/rich_fallback.mojo");
         sources.push("../../mojo/prodex_core/rich_plan.mojo");
+        sources.push("../../mojo/prodex_core/log_semantics.mojo");
     }
     if env::var_os("CARGO_FEATURE_MOJO_ROUTING").is_some()
         || env::var_os("CARGO_FEATURE_MOJO_CORE").is_some()
