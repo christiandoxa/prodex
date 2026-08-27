@@ -6,6 +6,7 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 
 ### Runtime
 
+- Complete compact profile sweeps (`399ac74`)
 - Complete bounded profile sweep before timeout (`811f59f`)
 - Keep profile sweep budget platform-safe (`46a14ec`)
 - Retry profiles after transient backoff expiry (`e6ab33a`)
@@ -42,6 +43,7 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 - Fixed OpenAI main-agent selection so catalog-visible GPT-5.6 Sol and Terra models are not lost through sub-agent-specific filtering.
 - Made OpenAI profile rotation preserve usable near-zero quota and recover safe pre-commit requests across authoritative quota, temporary overload, and transport failures without replaying committed work.
 - Fixed bounded profile sweeps so a transient cooldown that expires between candidate passes is recovered before returning a terminal upstream failure.
+- Fixed compact recovery on slower platforms so the bounded candidate sweep completes before a current-profile last-chance attempt can run.
 - Made `prodex update` version-aware and idempotent: it now skips asset download and replacement when the installed version is current and never automatically downgrades a newer local build.
 - Fixed log following across file replacement and truncation on Windows and Unix without replaying historical output.
 - Hardened `prodex s expose` readiness diagnostics and cleanup for local MCP initialization, Quick Tunnel routing, and public tool discovery.
