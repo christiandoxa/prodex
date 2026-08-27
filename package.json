@@ -24,6 +24,7 @@
     "docs": "node scripts/docs/lint-markdown.mjs && node scripts/docs/runtime-policy.mjs --self-test && node scripts/docs/runtime-policy.mjs --check",
     "compat": "node scripts/compat/check-upstream-baseline.mjs && node scripts/compat/capture-replay-fixture-tests.mjs",
     "mojo:ownership": "node scripts/ci/mojo-ownership.mjs --check --json",
+    "optional-tools:freshness": "node scripts/ci/optional-tools-freshness.mjs --check",
     "bench": "cargo bench --locked --features bench-support",
     "ci": "node scripts/ci/preflight.mjs",
     "release": "node scripts/npm/release-run.mjs",

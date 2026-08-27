@@ -184,24 +184,24 @@ Caveman is externally installed and validated; Smart Context is built into the C
 <details>
 <summary>Install and verify the Super tools</summary>
 
-Caveman (Prodex-vetted `2.2.0` checkout):
+Caveman (Prodex-vetted `2.3.1` checkout):
 
 ```bash
 export PRODEX_OPTIMIZERS_HOME="${PRODEX_OPTIMIZERS_HOME:-${XDG_DATA_HOME:-$HOME/.local/share}/prodex-optimizers}"
 install -d "$PRODEX_OPTIMIZERS_HOME/caveman"
 git clone --no-checkout https://github.com/JuliusBrussee/caveman \
-  "$PRODEX_OPTIMIZERS_HOME/caveman/2.2.0"
-git -C "$PRODEX_OPTIMIZERS_HOME/caveman/2.2.0" config core.autocrlf false
-git -C "$PRODEX_OPTIMIZERS_HOME/caveman/2.2.0" checkout --detach \
-  9aa63945a349bef17206540650db48c30fafbdf2
-cat >"$PRODEX_OPTIMIZERS_HOME/caveman/2.2.0/prodex-tool.json" <<'JSON'
+  "$PRODEX_OPTIMIZERS_HOME/caveman/2.3.1"
+git -C "$PRODEX_OPTIMIZERS_HOME/caveman/2.3.1" config core.autocrlf false
+git -C "$PRODEX_OPTIMIZERS_HOME/caveman/2.3.1" checkout --detach \
+  b5ec6351396b643a17cbbec4a6eee8b3fb9dd782
+cat >"$PRODEX_OPTIMIZERS_HOME/caveman/2.3.1/prodex-tool.json" <<'JSON'
 {
   "schema_version": 1,
   "id": "caveman",
-  "version": "2.2.0",
+  "version": "2.3.1",
   "source": "https://github.com/JuliusBrussee/caveman",
-  "commit": "9aa63945a349bef17206540650db48c30fafbdf2",
-  "tree_sha256": "91b4549bf361b2aed5ff0d131062788a8c672a941efe9e3db41beecb24a4112a"
+  "commit": "b5ec6351396b643a17cbbec4a6eee8b3fb9dd782",
+  "tree_sha256": "6ae2fa37ef76e25e0dcad1188e8fce4e3afca54b25fe9e4dbe84812003d4472d"
 }
 JSON
 
@@ -211,7 +211,7 @@ prodex caveman --dry-run
 
 The target directory must not already exist. Prodex validates the commit metadata and complete tree digest before activating Caveman.
 
-RTK:
+RTK (latest stable `0.46.0`, externally managed):
 
 ```bash
 brew install rtk
@@ -222,7 +222,7 @@ rtk gain
 prodex capability super-doctor
 ```
 
-Codebase Memory MCP (current stable `0.10.8`):
+Codebase Memory MCP (latest stable `0.10.8`):
 
 ```bash
 cbm_install_dir="$(mktemp -d)"
@@ -243,7 +243,7 @@ heavy indexing work are skipped unless updated. Prodex leaves `CBM_CACHE_DIR` un
 sub-agent sessions join the account-wide canonical daemon; an explicit user override is inherited
 unchanged and must stay consistent across every CBM client.
 
-Playwright MCP (Prodex currently pins `@playwright/mcp@0.0.79`):
+Playwright MCP (latest stable, pinned `@playwright/mcp@0.0.79`):
 
 ```bash
 node --version

@@ -189,12 +189,20 @@ fn smart_context_super_status() -> SuperToolStatus {
 
 fn optional_tool_super_status(id: prodex_optional_tools::OptionalToolId) -> SuperToolStatus {
     let health = prodex_optional_tools::optional_tool_status(id);
+    let mut detail = health.detail;
+    if let Some(version) = &health.version {
+        detail.push_str(&format!("; version={version}"));
+    }
+    detail.push_str(&format!(
+        "; recommended={}",
+        prodex_optional_tools::optional_tool_recommended_version(id)
+    ));
     SuperToolStatus {
         name: id.as_str(),
         check: "optional-tool-registry",
         ready: health.status == prodex_optional_tools::ToolHealthStatus::Installed,
         status: optional_tool_health_status(&health),
-        detail: capability_redacted_detail(&health.detail),
+        detail: capability_redacted_detail(&detail),
     }
 }
 
@@ -661,6 +669,9 @@ fn probe_check_row(command: &'static str) -> (String, String) {
 }
 
 fn presidio_tool_status(paths: &AppPaths) -> SuperToolStatus {
+    let recommended = prodex_optional_tools::optional_tool_recommended_version(
+        prodex_optional_tools::OptionalToolId::Presidio,
+    );
     let config = match crate::presidio_runtime::runtime_presidio_redaction_config(paths) {
         Ok(config) => config,
         Err(err) => {
@@ -669,7 +680,7 @@ fn presidio_tool_status(paths: &AppPaths) -> SuperToolStatus {
                 check: "Presidio Analyzer/Anonymizer health",
                 ready: false,
                 status: "fail (config)".to_string(),
-                detail: capability_redacted_detail(&format!("{err:#}")),
+                detail: capability_redacted_detail(&format!("{err:#}; recommended={recommended}")),
             };
         }
     };
@@ -685,7 +696,7 @@ fn presidio_tool_status(paths: &AppPaths) -> SuperToolStatus {
                 check: "Presidio Analyzer/Anonymizer health",
                 ready: false,
                 status: "fail (http client)".to_string(),
-                detail: capability_redacted_detail(&err.to_string()),
+                detail: capability_redacted_detail(&format!("{err}; recommended={recommended}")),
             };
         }
     };
@@ -702,12 +713,13 @@ fn presidio_tool_status(paths: &AppPaths) -> SuperToolStatus {
             "fail".to_string()
         },
         detail: format!(
-            "analyzer={} {}; anonymizer={} {}; fail_mode={}",
+            "analyzer={} {}; anonymizer={} {}; fail_mode={}; recommended={}",
             config.analyzer_url,
             analyzer.1,
             config.anonymizer_url,
             anonymizer.1,
-            if config.fail_closed { "closed" } else { "open" }
+            if config.fail_closed { "closed" } else { "open" },
+            recommended,
         ),
     }
 }

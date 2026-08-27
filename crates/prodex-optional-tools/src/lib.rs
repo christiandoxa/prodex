@@ -31,15 +31,32 @@ pub use super_optimizers::{
 };
 
 pub const PRODEX_OPTIMIZERS_HOME_ENV: &str = "PRODEX_OPTIMIZERS_HOME";
-pub const CAVEMAN_VETTED_VERSION: &str = "2.2.0";
-pub const CAVEMAN_VETTED_COMMIT: &str = "9aa63945a349bef17206540650db48c30fafbdf2";
+pub const CAVEMAN_VETTED_VERSION: &str = "2.3.1";
+pub const CAVEMAN_VETTED_COMMIT: &str = "b5ec6351396b643a17cbbec4a6eee8b3fb9dd782";
 pub const CAVEMAN_VETTED_TREE_SHA256: &str =
-    "91b4549bf361b2aed5ff0d131062788a8c672a941efe9e3db41beecb24a4112a";
+    "6ae2fa37ef76e25e0dcad1188e8fce4e3afca54b25fe9e4dbe84812003d4472d";
 pub const PONYTAIL_VETTED_VERSION: &str = "4.9.0";
 pub const PONYTAIL_VETTED_COMMIT: &str = "0a4dd63ad4541f4f655c4108a295916f3c1d8fda";
 pub const PONYTAIL_VETTED_TREE_SHA256: &str =
     "88c6dfa10bc0a63385a8f3f01bc4a3e51963c8fd76a0ebc0426bd889f0705970";
 pub(crate) const PLAYWRIGHT_MCP_PACKAGE: &str = "@playwright/mcp@0.0.79";
+pub(crate) const RTK_RECOMMENDED_VERSION: &str = "0.46.0";
+pub(crate) const CODEBASE_MEMORY_RECOMMENDED_VERSION: &str = "0.10.8";
+pub(crate) const PRESIDIO_RECOMMENDED_VERSION: &str = "2.2.364";
+
+pub fn optional_tool_recommended_version(id: OptionalToolId) -> &'static str {
+    match id {
+        OptionalToolId::Caveman => CAVEMAN_VETTED_VERSION,
+        OptionalToolId::Rtk => RTK_RECOMMENDED_VERSION,
+        OptionalToolId::CodebaseMemoryMcp => CODEBASE_MEMORY_RECOMMENDED_VERSION,
+        OptionalToolId::PlaywrightMcp => PLAYWRIGHT_MCP_PACKAGE
+            .rsplit_once('@')
+            .map(|(_, version)| version)
+            .unwrap_or("unknown"),
+        OptionalToolId::Ponytail => PONYTAIL_VETTED_VERSION,
+        OptionalToolId::Presidio => PRESIDIO_RECOMMENDED_VERSION,
+    }
+}
 
 pub(crate) const RTK_MD: &str = "RTK.md";
 pub(crate) const SUPER_OPTIMIZERS_MD: &str = "SUPER_OPTIMIZERS.md";
