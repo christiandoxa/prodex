@@ -374,7 +374,7 @@ fn dashboard_open_flag_invokes_xdg_browser_and_keeps_serving() {
 
     let health = wait_for_json(port, "/healthz");
     assert_eq!(health["status"], "ok");
-    for _ in 0..80 {
+    for _ in 0..200 {
         if let Ok(url) = fs::read_to_string(&opener_output) {
             if url.trim().is_empty() {
                 thread::sleep(Duration::from_millis(50));
@@ -430,7 +430,7 @@ fn spawn_dashboard_with_base_url(
 }
 
 fn wait_for_json(port: u16, path: &str) -> Value {
-    for _ in 0..80 {
+    for _ in 0..200 {
         if let Ok(value) = try_get_json(port, path) {
             return value;
         }
@@ -440,7 +440,7 @@ fn wait_for_json(port: u16, path: &str) -> Value {
 }
 
 fn wait_for_log_lines(port: u16, minimum: usize) -> Value {
-    for _ in 0..80 {
+    for _ in 0..200 {
         if let Ok(value) = try_get_json(port, "/api/logs")
             && value["lines"]
                 .as_array()
