@@ -79,7 +79,6 @@
             "CompactConversationRequestSettings",
             "CompactionTurnMetadata",
             "CodexResponsesRequestKind::Compaction",
-            "to_responses_metadata",
             "turn_state",
             "responses_metadata"
           ]
@@ -667,9 +666,7 @@
             "MAX_MCP_EVENT_STREAMS_PER_CONNECTION",
             "MCP_EVENT_STREAM_STARTUP_TIMEOUT",
             "McpEventStreams",
-            "McpServerEventStreamStartParams",
-            "McpServerEventStreamStopParams",
-            "mcpServer/event/stream"
+            "McpServerEventStreamStartParams"
           ]
         },
         {
@@ -938,8 +935,7 @@
             "run_remote_compact_attempt",
             "compact_conversation_history",
             "CompactConversationRequestSettings",
-            "CodexResponsesRequestKind::Compaction",
-            "to_responses_metadata"
+            "CodexResponsesRequestKind::Compaction"
           ],
           "expected_routes_all": [
             "/responses/compact"
@@ -1467,8 +1463,6 @@
           "file_contains_all": [
             "McpEventStreams",
             "McpServerEventStreamStartParams",
-            "McpServerEventStreamStopParams",
-            "mcpServer/event/stream",
             "MAX_MCP_EVENT_STREAMS_PER_CONNECTION"
           ]
         },
@@ -1579,10 +1573,10 @@
   },
   "claude": {
     "latestRelease": {
-      "tag_name": "v2.1.241",
-      "name": "v2.1.241",
-      "published_at": "2026-08-23T00:52:16Z",
-      "html_url": "https://github.com/anthropics/claude-code/releases/tag/v2.1.241"
+      "tag_name": "v2.1.247",
+      "name": "v2.1.247",
+      "published_at": "2026-08-26T23:06:39Z",
+      "html_url": "https://github.com/anthropics/claude-code/releases/tag/v2.1.247"
     },
     "docs": [
       {

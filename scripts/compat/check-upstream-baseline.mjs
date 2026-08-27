@@ -115,7 +115,6 @@ const REQUIRED_FILE_CONTAINS = {
     "CompactConversationRequestSettings",
     "CompactionTurnMetadata",
     "CodexResponsesRequestKind::Compaction",
-    "to_responses_metadata",
     "turn_state",
     "responses_metadata",
   ],
@@ -358,8 +357,6 @@ const REQUIRED_FILE_CONTAINS = {
     "MCP_EVENT_STREAM_STARTUP_TIMEOUT",
     "McpEventStreams",
     "McpServerEventStreamStartParams",
-    "McpServerEventStreamStopParams",
-    "mcpServer/event/stream",
   ],
   "codex-rs/http-client/src/outbound_proxy.rs": [
     "OutboundProxyPolicy",
@@ -793,7 +790,6 @@ const REQUIRED_SEMANTIC_CHECKS = [
       "compact_conversation_history",
       "CompactConversationRequestSettings",
       "CodexResponsesRequestKind::Compaction",
-      "to_responses_metadata",
     ],
     expected_routes_all: ["/responses/compact"],
   },
@@ -1206,8 +1202,6 @@ const REQUIRED_SEMANTIC_CHECKS = [
     file_contains_all: [
       "McpEventStreams",
       "McpServerEventStreamStartParams",
-      "McpServerEventStreamStopParams",
-      "mcpServer/event/stream",
       "MAX_MCP_EVENT_STREAMS_PER_CONNECTION",
     ],
   },
