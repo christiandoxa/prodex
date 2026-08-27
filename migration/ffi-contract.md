@@ -441,9 +441,9 @@ No generated object or archive is committed. The final Linux release is verified
 Mojo dependencies, no build-path RPATH/RUNPATH, GLIBC policy, and execution without `mojo` on
 `PATH`.
 
-## Log event classification ABI v2
+## Log event classification ABI v3
 
-`prodex_mojo_log_classify_v2` is a bounded, synchronous operation used by the shared runtime-log
+`prodex_mojo_log_classify_v3` is a bounded, synchronous operation used by the shared runtime-log
 renderer. Rust passes one non-secret UTF-8 event key and caller-owned `Int64` category and severity
 outputs as fixed-width `UInt`/`u64` addresses (`0` is invalid). Mojo performs the event-key matching; Rust retains log-file IO, field extraction, secret
 redaction, and human/JSON rendering. Category and severity tags are validated before they reach a
@@ -453,13 +453,13 @@ explicit ABI/input error rather than selecting a Rust production classifier when
 The category tags are `None=0`, `Route=1`, `Quota=2`, `Backoff=3`, `Http=4`, `Websocket=5`,
 `Stream=6`, `Smart=7`, `Compact=8`, `Error=9`, `Hook=10`, `Request=11`, `Model=12`, `Mcp=13`,
 `Agent=14`, `Tool=15`, `Retry=16`, `Health=17`, `Upstream=18`, `Response=19`, `Terminal=20`, and
-`Load=21`. Severity is `0` through `3`. ABI version `2` is independent of the rich v3 record
+`Load=21`. Severity is `0` through `3`. ABI version `3` is independent of the rich v4 record
 ABI. The Rust reference classifier is test-only on Mojo-enabled production paths.
 
-## Rich/domain ABI v3 (2026-08-27)
+## Rich/domain ABI v4 (2026-08-28)
 
-Rich v3 is additive and does not overload text ABI v1. Its version entry point is
-`prodex_mojo_rich_abi_version`, returning `3`; its layout probe is
+Rich v4 is additive and does not overload text ABI v1. Its version entry point is
+`prodex_mojo_rich_abi_version`, returning `4`; its layout probe is
 `prodex_mojo_rich_abi_layout`. The current record family is:
 
 | Record | Purpose |
@@ -477,12 +477,12 @@ does not retain Rust pointers, and Rust never receives a Mojo object pointer. Ob
 cross as indices and `RichSlice` offsets; generated strings are copied into a Rust-allocated byte
 arena and validated as UTF-8 before reconstruction.
 
-The v3 C entry points represent nullable caller-owned pointer arguments as fixed-width `UInt`/`u64`
-addresses, with `0` meaning null. Mojo validates each address before constructing its typed pointer.
-This keeps the language-neutral ABI one machine word per pointer on Windows as well as Unix targets;
-the previous `Optional[Pointer]` function-parameter representation was not portable across those C
-ABIs. The address form is internal to the Rust/Mojo boundary: no Rust or Mojo object layout crosses
-it, and the supported release targets are 64-bit.
+The v4 C entry points represent every caller-owned pointer, including pointers nested in by-value
+records, as fixed-width `UInt`/`u64` addresses, with `0` meaning null. Mojo validates each address
+before constructing its typed pointer. This keeps the language-neutral ABI one machine word per
+pointer on Windows as well as Unix targets; the previous language-level nullable pointer fields
+were not portable in these C ABI records. The address form is internal to the Rust/Mojo boundary:
+no Rust or Mojo object layout crosses it, and the supported release targets are 64-bit.
 
 Status values are `0=ok`, `1=invalid boundary/input`, `2=invalid UTF-8`, `3=capacity`, and
 `4=ABI mismatch`. Semantic failures are returned in the operation result as structured domain,

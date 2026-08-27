@@ -15,8 +15,8 @@ fn rich_abi_rejects_null_views_and_reports_utf8_offsets() {
         prodex_mojo_rich_context_analyze_v2(
             RICH_ABI_VERSION,
             RichStringView {
-                ptr: invalid.as_ptr(),
-                len: invalid.len(),
+                ptr: mojo_pointer_address(invalid.as_ptr()),
+                len: invalid.len() as u64,
             },
             mojo_pointer_address(records.as_mut_ptr()),
             records.len() as i64,
@@ -69,8 +69,8 @@ fn rich_abi_malformed_utf8_and_capacity_are_bounded() {
             prodex_mojo_rich_context_analyze_v2(
                 RICH_ABI_VERSION,
                 RichStringView {
-                    ptr: bytes.as_ptr(),
-                    len: bytes.len(),
+                    ptr: mojo_pointer_address(bytes.as_ptr()),
+                    len: bytes.len() as u64,
                 },
                 mojo_pointer_address(records.as_mut_ptr()),
                 records.len() as i64,
@@ -92,8 +92,8 @@ fn rich_abi_malformed_utf8_and_capacity_are_bounded() {
         prodex_mojo_rich_context_analyze_v2(
             RICH_ABI_VERSION,
             RichStringView {
-                ptr: input.as_ptr(),
-                len: input.len(),
+                ptr: mojo_pointer_address(input.as_ptr()),
+                len: input.len() as u64,
             },
             0,
             0,

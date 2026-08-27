@@ -203,7 +203,7 @@ Key crates:
   the Mojo-enabled build owns bounded UTF-8 duplicate grouping and critical-signal row planning
   through `prodex-mojo-core`.
 
-The rich Mojo core is an additive ABI v3 boundary for deterministic domain work. The active
+The rich Mojo core is an additive ABI v4 boundary for deterministic domain work. The active
 context, provider fallback, route-alias policy, provider-routing, and Smart Context planning
 paths pass bounded non-secret UTF-8 views and caller-owned record/output arenas to Mojo. Mojo
 constructs typed diagnostic, identifier, policy, route-candidate, and context-item values,

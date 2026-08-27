@@ -3,8 +3,17 @@ from std.memory import Pointer
 
 @fieldwise_init
 struct ProdexRichStringView(Copyable):
-    var ptr: Optional[Pointer[mut=False, UInt8, ImmUntrackedOrigin]]
+    # Raw address is deliberate: this record is passed by value through C.
+    var ptr: UInt
     var len: UInt
+
+
+def rich_view_ptr(
+    view: ProdexRichStringView,
+) -> Pointer[mut=False, UInt8, ImmUntrackedOrigin]:
+    return Pointer[mut=False, UInt8, ImmUntrackedOrigin](
+        unsafe_from_address=Int(view.ptr)
+    )
 
 
 @fieldwise_init
@@ -103,10 +112,10 @@ struct ProdexRichRouteResult(Copyable):
 @fieldwise_init
 struct ProdexRichPolicyInput(Copyable):
     var alias_view: ProdexRichStringView
-    var models: Optional[Pointer[mut=False, ProdexRichStringView, ImmUntrackedOrigin]]
+    var models: UInt
     var model_count: Int64
     var strategy: ProdexRichStringView
-    var metrics: Optional[Pointer[mut=False, ProdexRichStringView, ImmUntrackedOrigin]]
+    var metrics: UInt
     var metric_count: Int64
 
 

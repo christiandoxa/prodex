@@ -75,7 +75,7 @@ owned by the Redis/runtime adapters. Do not add a Mojo wrapper without a real pr
 
 27. Evaluated Mojo 1.0.0 owning collections, EmberJson, ExtraMojo, mojo-regex, ArgMojo, UUID,
     and mojo-libc against the live package catalog and release artifact constraints.
-28. Added additive Rich ABI v3 with borrowed UTF-8 views, bounded record tables, offset slices,
+28. Added additive Rich ABI v4 with borrowed UTF-8 views, bounded record tables, offset slices,
     caller-owned output/scratch arenas, object references by indices, and structured issues.
 29. Migrated the active context diagnostic pipeline from raw text to Mojo normalization,
     classification, tokenization, grouping, and structured records.

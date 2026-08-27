@@ -15,10 +15,11 @@ from rich_types import (
     ProdexRichFallbackResult,
     ProdexRichSlice,
     ProdexRichStringView,
+    rich_view_ptr,
 )
 
 
-comptime PRODEX_RICH_ABI_VERSION: Int64 = 3
+comptime PRODEX_RICH_ABI_VERSION: Int64 = 4
 comptime RICH_MAX_IDENTIFIER_BYTES: Int64 = 4_096
 comptime RICH_MAX_FALLBACK_MODELS: Int64 = 32
 comptime RICH_STATUS_OK: Int64 = 0
@@ -90,7 +91,7 @@ def fallback_add_view_range(
     hash_slots: Pointer[mut=True, Int64, _],
     hash_capacity: Int64,
 ) -> Bool:
-    return fallback_add_bytes((view.ptr.unsafe_value() + start).as_imm(), end - start, 2, -1, output_records, record_count, output, output_capacity, written, hash_slots, hash_capacity)
+    return fallback_add_bytes((rich_view_ptr(view) + start).as_imm(), end - start, 2, -1, output_records, record_count, output, output_capacity, written, hash_slots, hash_capacity)
 
 
 def fallback_combo(
@@ -105,12 +106,12 @@ def fallback_combo(
     hash_slots: Pointer[mut=True, Int64, _],
     hash_capacity: Int64,
 ) -> Bool:
-    var ptr = view.ptr.unsafe_value()
+    var ptr = rich_view_ptr(view)
     var component_start = start
     var index = start
     while index <= end:
         if index == end or ptr[unsafe_offset=index] == 44 or ptr[unsafe_offset=index] == 59 or ptr[unsafe_offset=index] == 124 or ptr[unsafe_offset=index] == 62:
-            var component = ProdexRichStringView((ptr + component_start).as_imm(), UInt(index - component_start))
+            var component = ProdexRichStringView(view.ptr + UInt(component_start), UInt(index - component_start))
             var bounds = rich_trim_bounds(component)
             if bounds[1] > bounds[0] and not fallback_add_view_range(component, bounds[0], bounds[1], output_records, record_count, output, output_capacity, written, hash_slots, hash_capacity):
                 return False
@@ -120,7 +121,7 @@ def fallback_combo(
 
 
 def combo_has_component(view: ProdexRichStringView, start: Int64, end: Int64) -> Bool:
-    var ptr = view.ptr.unsafe_value()
+    var ptr = rich_view_ptr(view)
     var component_start = start
     var index = start
     while index <= end:
@@ -150,8 +151,7 @@ def fallback_add_chain(
     hash_capacity: Int64,
 ) -> Bool:
     var bounds = rich_trim_bounds(model)
-    var model_ptr = model.ptr.unsafe_value()
-    var trimmed_model = ProdexRichStringView((model_ptr + bounds[0]).as_imm(), UInt(bounds[1] - bounds[0]))
+    var trimmed_model = ProdexRichStringView(model.ptr + UInt(bounds[0]), UInt(bounds[1] - bounds[0]))
     if bounds[1] >= bounds[0] + 6 and rich_view_prefix["combo:"](trimmed_model, False) and combo_has_component(model, bounds[0] + 6, bounds[1]):
         return fallback_combo(model, bounds[0] + 6, bounds[1], output_records, record_count, output, output_capacity, written, hash_slots, hash_capacity)
     var empty_alias = rich_view_matches_literal[""](trimmed_model, True)

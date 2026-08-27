@@ -59,7 +59,7 @@ GLIBC requirement as high as 2.35. Prodex therefore uses zero-copy `StringSlice`
 | Object/shared library / C ABI | Yes | Static object, shared library, scalar, flat-buffer, string-view, and structured-record exports verified | Static object remains selected; heap-owning types require dynamic runtime | Rust `extern "C"` | `MOVE NOW` for verified kernels | `ffi-contract.md`; object/shared probes; release dependency audit |
 | SQLite / PostgreSQL / Redis | Yes | Not required by core | Rust drivers and persistence contracts | rusqlite/postgres/redis | `KEEP RUST` | Storage boundary |
 | Cryptography / keyring / OAuth | Yes | Not required by core | Security ecosystem | Rust crates | `KEEP RUST` | Auth boundary |
-| Terminal / logging | Yes | Event classification is production-verified; file watching, TUI, and redaction remain Rust | TUI/log redaction contracts | Crossterm/Ratatui/tracing | `MOJO` for bounded event classification; `KEEP RUST` for IO/rendering | `prodex_mojo_log_classify_v2` feeds the shared stream renderer |
+| Terminal / logging | Yes | Event classification is production-verified; file watching, TUI, and redaction remain Rust | TUI/log redaction contracts | Crossterm/Ratatui/tracing | `MOJO` for bounded event classification; `KEEP RUST` for IO/rendering | `prodex_mojo_log_classify_v3` feeds the shared stream renderer |
 
 ## Evidence links
 
@@ -149,12 +149,12 @@ This is the final matrix for the rich wave against baseline
 | Variant | EXPERIMENT | EXPERIMENT | No; explicit bounded tags at ABI edge | Not linked into release core |
 | Domain structs | partial | PROMOTED | Yes: `DiagnosticRecord`, `RouteCandidate`, `PolicyRule`, `ContextItem`, `ContextPlan` | Plain Mojo record layout, statically linked |
 | Arena objects | none/partial | PROMOTED | Yes: offset slices, record arrays, object indices, scratch hash tables | Caller-owned buffers; no Mojo heap runtime |
-| Parser | Rust | MOJO | Yes: `combo:` fallback grammar and route-alias semantic grammar | New rich v3 exports only |
+| Parser | Rust | MOJO | Yes: `combo:` fallback grammar and route-alias semantic grammar | New rich v4 exports only |
 | Structured errors | partial | MOJO | Yes: domain/kind/field/index/offset/length issue records | Fixed-width result fields |
 | Structured output strings | limited | MOJO | Yes: normalized keys, provider/model names, model chains, artifact IDs | Rust-owned output byte arenas |
 | JSON | Rust | KEEP_RUST | No; Serde remains external compatibility parser | No EmberJson dependency |
 
-Promotion evidence is executable: strict Rust callers run all five rich v3 operations plus the
+Promotion evidence is executable: strict Rust callers run all five rich v4 operations plus the
 log-classification export, layout checks
 compare compiler-generated sizes/alignment, and the release archive checks all v3 symbols and
 rejects `KGEN_CompilerRT_*` references. Native heap and package-backed paths remain non-production

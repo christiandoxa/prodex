@@ -51,7 +51,7 @@ needed. `KEEP_RUST` means Rust currently owns the ecosystem or trust boundary.
 | `prodex-authn`, `prodex-secret-store`, `prodex-presidio` | OAuth, credentials, redaction | Security/IO | crypto, browser, secret stores | Critical | C | `KEEP_RUST` | Secrets never cross the initial Mojo boundary |
 | `prodex-profile-*`, `prodex-shared-codex-fs`, `prodex-core` | Profile/path/filesystem operations | IO | filesystem, platform | High | C | `KEEP_RUST` | OS semantics and secret paths remain Rust-owned |
 | `prodex-runtime-{launch,broker,claude,anthropic,gemini-cli-compat}` | Child processes, runtime providers, broker | IO/async | subprocesses, provider CLIs | Critical | C | `KEEP_RUST` | Process lifecycle and provider compatibility stay Rust |
-| `prodex-runtime-{doctor,log,metrics,capabilities,tuning}` | Diagnostics, logs, metrics, policy tuning | Mixed | filesystem, time, terminal | High | B/C | `MOVE_NOW` for normalized tuning defaults and bounded log-event classification; `KEEP_RUST` for diagnostics/capabilities/formatting | `prodex_runtime_tuning_defaults` and `prodex_mojo_log_classify_v2` are active callers; environment parsing, file IO, redaction, and rendering stay Rust |
+| `prodex-runtime-{doctor,log,metrics,capabilities,tuning}` | Diagnostics, logs, metrics, policy tuning | Mixed | filesystem, time, terminal | High | B/C | `MOVE_NOW` for normalized tuning defaults and bounded log-event classification; `KEEP_RUST` for diagnostics/capabilities/formatting | `prodex_runtime_tuning_defaults` and `prodex_mojo_log_classify_v3` are active callers; environment parsing, file IO, redaction, and rendering stay Rust |
 | `prodex-terminal-ui`, `prodex-app::reports` | Generic terminal layout and app-owned report rendering | Pure rendering plus terminal | Crossterm/Ratatui | Medium | C | `KEEP_RUST` | Keep presentation and width behavior in Rust; the single-consumer report crate moved into its app owner |
 | `prodex-audit-log`, `prodex-observability`, `prodex-redaction` | Audit, telemetry, redaction | Mixed/security | hashing, serialization | Critical | C | `KEEP_RUST` | Preserve data-leak and audit guarantees |
 | `prodex-optional-tools`, `prodex-housekeeping`, `prodex-update-notice` | Local tooling, cleanup, update checks | IO | processes/filesystem/network | High | C | `KEEP_RUST` | No Mojo benefit over Rust stdlib/dependencies |
@@ -88,5 +88,5 @@ Rust to recompute the semantic answer.
 | `prodex-app::classify_runtime_log_event` | bounded event-key classification and severity mapping for operational log rendering | file IO, redaction, event-field extraction, and terminal/JSON rendering | `prodex-app` |
 
 The original scalar and text ABI rows remain historically accurate as the first migration wave.
-Rich ABI v3 is now the semantic boundary. JSON, TOML deserialization, credentials, prompts,
+Rich ABI v4 is now the semantic boundary. JSON, TOML deserialization, credentials, prompts,
 filesystem paths, and provider wire payloads remain Rust-owned after the package/runtime review.

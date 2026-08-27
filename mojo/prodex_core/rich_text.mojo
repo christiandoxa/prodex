@@ -3,6 +3,7 @@ from std.memory import Pointer
 from rich_types import (
     ProdexRichSlice,
     ProdexRichStringView,
+    rich_view_ptr,
 )
 
 
@@ -44,9 +45,9 @@ def rich_view_valid(view: ProdexRichStringView, maximum: Int64) -> Bool:
         return False
     if view.len == 0:
         return True
-    if not view.ptr:
+    if view.ptr == 0:
         return False
-    return rich_utf8_valid(view.ptr.unsafe_value(), Int64(view.len))
+    return rich_utf8_valid(rich_view_ptr(view), Int64(view.len))
 
 
 def rich_codepoint_width(value: UInt8) -> Int64:
@@ -82,7 +83,7 @@ def rich_trim_bounds(view: ProdexRichStringView) -> InlineArray[Int64, 2]:
     bounds[1] = end
     if end == 0:
         return bounds^
-    var ptr = view.ptr.unsafe_value()
+    var ptr = rich_view_ptr(view)
     var start: Int64 = 0
     while start < end:
         var width = rich_codepoint_width(ptr[unsafe_offset=start])
@@ -132,7 +133,7 @@ def rich_copy_trimmed(
     lowercase: Bool,
 ) -> ProdexRichSlice:
     var bounds = rich_trim_bounds(view)
-    return rich_copy_range(view.ptr.unsafe_value(), bounds[0], bounds[1], output, capacity, written, lowercase)
+    return rich_copy_range(rich_view_ptr(view), bounds[0], bounds[1], output, capacity, written, lowercase)
 
 
 def rich_view_matches_literal[literal: StaticString](
@@ -142,10 +143,10 @@ def rich_view_matches_literal[literal: StaticString](
         return False
     if literal.byte_length() == 0:
         return True
-    if not view.ptr:
+    if view.ptr == 0:
         return False
     var right = literal.unsafe_ptr()
-    var left = view.ptr.unsafe_value()
+    var left = rich_view_ptr(view)
     for index in range(Int64(view.len)):
         var value = left[unsafe_offset=index]
         if lowercase and value >= 65 and value <= 90:
@@ -160,10 +161,10 @@ def rich_view_prefix[literal: StaticString](
 ) -> Bool:
     if view.len < UInt(literal.byte_length()) or literal.byte_length() == 0:
         return literal.byte_length() == 0
-    if not view.ptr:
+    if view.ptr == 0:
         return False
     var right = literal.unsafe_ptr()
-    var left = view.ptr.unsafe_value()
+    var left = rich_view_ptr(view)
     for index in range(Int64(literal.byte_length())):
         var value = left[unsafe_offset=index]
         if lowercase and value >= 65 and value <= 90:
@@ -222,10 +223,10 @@ def rich_views_equal(left: ProdexRichStringView, right: ProdexRichStringView) ->
         return False
     if left.len == 0:
         return True
-    if not left.ptr or not right.ptr:
+    if left.ptr == 0 or right.ptr == 0:
         return False
-    var left_ptr = left.ptr.unsafe_value()
-    var right_ptr = right.ptr.unsafe_value()
+    var left_ptr = rich_view_ptr(left)
+    var right_ptr = rich_view_ptr(right)
     for index in range(Int64(left.len)):
         if left_ptr[unsafe_offset=index] != right_ptr[unsafe_offset=index]:
             return False
@@ -289,9 +290,9 @@ def rich_hash_pair(
 
 
 def rich_valid_identifier(view: ProdexRichStringView) -> Bool:
-    if view.len == 0 or not view.ptr:
+    if view.len == 0 or view.ptr == 0:
         return False
-    var ptr = view.ptr.unsafe_value()
+    var ptr = rich_view_ptr(view)
     var index: Int64 = 0
     while index < Int64(view.len):
         var width = rich_codepoint_width(ptr[unsafe_offset=index])
@@ -317,9 +318,9 @@ def rich_capability_token[literal: StaticString](
 
 
 def rich_capability_mask(view: ProdexRichStringView) -> Int64:
-    if view.len == 0 or not view.ptr:
+    if view.len == 0 or view.ptr == 0:
         return 0
-    var ptr = view.ptr.unsafe_value()
+    var ptr = rich_view_ptr(view)
     var length = Int64(view.len)
     var mask: Int64 = 0
     var start: Int64 = 0
