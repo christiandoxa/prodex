@@ -116,13 +116,15 @@ fn build_mojo_archive(sources: Vec<&'static str>, manifest_dir: PathBuf, strict:
         verify_mojo_version(&mojo, version);
     }
 
+    let mut objects = Vec::with_capacity(sources.len());
     for (index, source) in sources.iter().enumerate() {
         let source = manifest_dir.join(source);
         let object = out_dir.join(format!("prodex_mojo_core_{index}.o"));
         compile_mojo_source(&mojo, &target, &target_cpu, &source, &object);
-        archive_object(&ar, &archive, &object, &target);
+        objects.push(object);
     }
 
+    archive_objects(&ar, &archive, &objects, &target);
     emit_link(&out_dir, &target);
 }
 
@@ -210,14 +212,13 @@ fn compile_mojo_source(
     }
 }
 
-fn archive_object(ar: &OsString, archive: &Path, object: &Path, target: &str) {
+fn archive_objects(ar: &OsString, archive: &Path, objects: &[PathBuf], target: &str) {
     let mut command = Command::new(ar);
     if target.ends_with("-msvc") {
-        command
-            .arg(format!("/out:{}", archive.display()))
-            .arg(object);
+        command.arg(format!("/out:{}", archive.display()));
+        command.args(objects);
     } else {
-        command.args(["crus"]).arg(archive).arg(object);
+        command.args(["crus"]).arg(archive).args(objects);
     }
     let status = command.status();
     match status {
