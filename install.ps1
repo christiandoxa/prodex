@@ -22,7 +22,7 @@ $NonInteractive = $env:PRODEX_NON_INTERACTIVE -match "^(?i:1|true|yes)$"
 $Migrate = $env:PRODEX_MIGRATE -match "^(?i:1|true|yes)$"
 $NoPathUpdate = $env:PRODEX_NO_PATH_UPDATE -match "^(?i:1|true|yes)$"
 $RequireMojo = $env:PRODEX_INSTALL_REQUIRE_MOJO -match "^(?i:1|true|yes)$"
-$CodexNpmVersion = "0.149.1"
+$CodexNpmVersion = "0.150.1"
 
 function Write-Step {
     param([string]$Message)
@@ -372,10 +372,21 @@ try {
             throw "Prodex release manifest asset mismatch for $Target."
         }
         $Implementation = $row[2]
+        if ($Release -cne "latest" -and $ManifestVersion -cne $Release) {
+            throw "Release manifest version $ManifestVersion did not match requested release $Release."
+        }
         Write-Step "Release implementation: $Implementation"
     } else {
         $Implementation = "rust"
         Write-Step "Legacy release without Mojo capability metadata"
+    }
+    if ($Migrate -and $ManifestAvailable -and
+        (Test-Path -LiteralPath (Join-Path $BinDir "prodex.exe"))) {
+        $installedVersionBefore = Get-ProdexVersion -BinaryPath (Join-Path $BinDir "prodex.exe")
+        if ($installedVersionBefore -ceq $ManifestVersion) {
+            Write-Step "Prodex $ManifestVersion is already up to date."
+            return
+        }
     }
     $ExpectedDigest = Get-ExpectedDigest -ManifestPath $ChecksumsPath -AssetName $Asset
     Copy-Download -Source (Join-DownloadSource -Base $BaseUrl -Leaf $Asset) -Destination $DownloadPath

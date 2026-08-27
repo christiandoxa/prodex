@@ -10,7 +10,7 @@ RUNNING_EXE="${PRODEX_RUNNING_EXE:-}"
 BASE_URL_OVERRIDE="${PRODEX_RELEASE_BASE_URL:-}"
 NO_PATH_UPDATE="${PRODEX_NO_PATH_UPDATE:-false}"
 REQUIRE_MOJO="${PRODEX_INSTALL_REQUIRE_MOJO:-false}"
-CODEX_NPM_VERSION="0.149.1"
+CODEX_NPM_VERSION="0.150.1"
 
 if [ -n "${PRODEX_INSTALL_DIR:-}" ]; then
   BIN_DIR="$PRODEX_INSTALL_DIR"
@@ -319,6 +319,7 @@ trap 'exit 1' 1 2 15
 checksums_path="$tmp_dir/SHA256SUMS"
 manifest_path="$tmp_dir/release-manifest.tsv"
 download_path="$tmp_dir/$asset"
+manifest_version=""
 
 step "Downloading Prodex $RELEASE for $target"
 download_file "$base_url/SHA256SUMS" "$checksums_path"
@@ -362,6 +363,10 @@ if [ "$manifest_available" = "true" ]; then
     echo "Prodex release manifest asset mismatch for $target." >&2
     exit 1
   }
+  if [ "$RELEASE" != "latest" ] && [ "$manifest_version" != "$RELEASE" ]; then
+    echo "Release manifest version $manifest_version did not match requested release $RELEASE." >&2
+    exit 1
+  fi
   step "Release implementation: $implementation"
 else
   case "$RELEASE" in
@@ -381,6 +386,17 @@ else
       ;;
   esac
 fi
+case "$MIGRATE" in
+  1 | [Tt][Rr][Uu][Ee] | [Yy][Ee][Ss])
+    if [ -x "$BIN_PATH" ]; then
+      installed_version_before="$($BIN_PATH --version 2>/dev/null || true)"
+      if [ "$installed_version_before" = "prodex $manifest_version" ]; then
+        step "Prodex $manifest_version is already up to date."
+        exit 0
+      fi
+    fi
+    ;;
+esac
 expected_digest="$(awk -v asset="$asset" '$2 == asset && length($1) == 64 { print tolower($1); exit }' "$checksums_path")"
 if ! printf '%s\n' "$expected_digest" | grep -Eq '^[0-9a-f]{64}$'; then
   echo "Could not find a valid checksum for $asset." >&2

@@ -148,28 +148,30 @@ does not compile, or the static archive is missing. The authoritative `Real Mojo
 `.github/workflows/ci.yml`; it lints the all-feature workspace, runs the built `prodex --version`
 binary, and checks the generated static archives.
 
-The rich strict suites additionally execute the five production operations: context diagnostic
-analysis, provider/model fallback parsing, gateway route-alias validation, governed provider
-routing, and Smart Context rehydration planning. Their generated parity floors are 10,000 context
-cases, 20,000 fallback/parser cases, 20,000 policy cases, and 10,000 routing candidate sets.
+The rich strict suites additionally execute six production operations: context diagnostic analysis,
+provider/model fallback parsing, gateway route-alias validation, governed provider routing, Smart
+Context rehydration planning, and runtime log-event classification. Their generated parity floors
+are 10,000 context cases, 20,000 fallback/parser cases, 20,000 policy cases, and 10,000 routing
+candidate sets.
 The Rust implementations remain differential oracles only. Rich ABI tests cover invalid UTF-8,
 null/zero-length views, null output pointers, capacity exhaustion, invalid tags/indices, and
 offset/result validation.
 
-The live package audit is recorded in `migration/mojo-ecosystem-evidence.md`. EmberJson,
-ExtraMojo, mojo-regex, ArgMojo, UUID, and mojo-libc are evaluated before any package adoption;
-the current release uses no third-party Mojo package and keeps the native owning collection probe
+The live package audit is recorded in `migration/mojo-ecosystem-audit.json` with narrative evidence
+in `migration/mojo-ecosystem-evidence.md`. Mojo stdlib capabilities are audited first; EmberJson,
+ExtraMojo, mojo-regex, ArgMojo, UUID, and decimo are evaluated before any package adoption. The
+current release uses no third-party Mojo package and keeps the native owning collection probe
 outside release artifacts.
 
 ### Release and installer Mojo checks
 
-The `x86_64-unknown-linux-gnu` and `aarch64-unknown-linux-gnu` rows are configured as
-Mojo-enabled releases.
-The release workflow compiles a target archive with the pinned Mojo toolchain in an isolated
-Cargo target directory, links the final Rust binary through the target container with strict Mojo
-variables forwarded explicitly, checks dynamic dependencies and GLIBC baseline, and runs each
-final artifact with `mojo` absent from `PATH`. The ARM64 row runs through QEMU user emulation.
-Unsupported release rows remain Rust-only; see `migration/release-target-matrix.md`.
+Every release row is configured as a Mojo-enabled release. The release workflow compiles each
+target archive with the pinned Mojo toolchain on a Linux archive runner, downloads it into the
+native target job, links the final Rust binary with strict Mojo variables, checks target-specific
+dynamic dependencies, and runs the final artifact's Mojo doctor/self-test. Linux GLIBC and ARM64
+QEMU checks remain in their applicable lanes. Every published release row is Mojo-backed and
+fails closed when its target archive, ABI, or self-test is unavailable; see
+`migration/release-target-matrix.md`.
 
 Each non-cross native release row reuses its target-scoped Cargo artifacts between the
 desktop-launcher test and final binary build. Cargo fingerprints keep the all-feature test and
@@ -181,6 +183,12 @@ The published `release-manifest.tsv` is generated from the same target matrix an
 `SHA256SUMS`. `install.sh`, `install.ps1`, and `prodex update` select the release-approved
 implementation from that metadata and verify the staged binary's `doctor --runtime --json`
 implementation and deterministic Mojo self-test. They never install or invoke the Mojo compiler.
+
+`prodex update` resolves lightweight release metadata first and compares it with the running
+binary using SemVer. Equal versions return successfully without fetching an asset, creating a
+backup, replacing a binary, or restarting a process; a newer local version is not downgraded.
+Actual installation is protected by the shared update lock and rechecks the running executable
+after acquiring it.
 
 `PRODEX_INSTALL_REQUIRE_MOJO=1` is an optional strict installer mode; it rejects a
 release-approved Rust compatibility artifact rather than guessing or compiling locally. Native
@@ -410,9 +418,9 @@ Use `node scripts/compat/watch-upstream-fixture-tests.mjs` after changing upstre
 
 Use `node scripts/compat/capture-replay.mjs --input capture.jsonl --name codex_live_sample` to convert offline captured Codex or Claude traffic into scrubbed replay fixtures under `crates/prodex-app/tests/fixtures/compat_replay`. The tool does not capture traffic and never uses the network; it only normalizes local JSON, JSONL, or text input into a deterministic fixture.
 
-Codex 0.147, 0.148, and 0.149.1 app-server replay fixtures live under
+Codex 0.147, 0.148, 0.149.1, and 0.150.1 app-server replay fixtures live under
 crates/prodex-app/tests/fixtures/compat_replay/codex-0.147, codex-0.148, and
-codex-0.149.
+codex-0.149, and codex-0.1501.
 The main fixtures are sanitized protocol frames derived from the checked-out
 upstream schemas and are byte-preserving in broker observation mode. The
 0.148 directory also contains `app-server-live-smoke.jsonl`, a redacted

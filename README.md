@@ -696,7 +696,7 @@ prodex update --help
 prodex update
 ```
 
-`prodex update` downloads the latest checksum-verified GitHub Release binary on macOS, Linux, and Windows. Existing npm or legacy Cargo installations migrate to the standalone path. Update notices state that both legacy installation channels are unsupported and direct them to this command.
+`prodex update` checks the running version against the latest release before downloading anything. It is a no-op when already current, never automatically downgrades a newer local build, and downloads only a newer checksum-verified GitHub Release binary on macOS, Linux, and Windows. Existing npm or legacy Cargo installations migrate to the standalone path. Update notices state that both legacy installation channels are unsupported and direct them to this command.
 
 </details>
 
@@ -745,7 +745,7 @@ prodex run --current-time-reminder --current-time-reminder-interval 2
 prodex run --respect-system-proxy
 ```
 
-Codex 0.149.1 thread classification remains transparent passthrough. `--thread-source` accepts arbitrary upstream feature strings, applies to newly created and forked threads, and is never treated as a Prodex profile or routing signal:
+Codex `rust-v0.150.1` thread classification remains transparent passthrough. `--thread-source` accepts arbitrary upstream feature strings, applies to newly created and forked threads, and is never treated as a Prodex profile or routing signal:
 
 ```bash
 prodex exec --thread-source automated_review "review this repository"
@@ -755,7 +755,7 @@ prodex s --no-presidio --no-sub-agent exec --thread-source automated_review "rev
 prodex exec fork THREAD_ID --thread-source automated_review "continue the review"
 ```
 
-Prodex preserves the value and its position in Codex argv. It does not inject Codex's `user` default. Resume helpers omit the option so `prodex exec resume THREAD_ID` retains the thread's persisted source. The opt-in compaction feature uses the normal Codex configuration surface in every Codex-based mode:
+Prodex preserves the value and its position in Codex argv. It does not inject Codex's `user` default. Resume helpers omit the option so `prodex exec resume THREAD_ID` retains the thread's persisted source. Codex `rust-v0.150.1` enables retained-image budgeting during remote compaction by default; use the normal Codex configuration surface when an explicit override is needed:
 
 ```bash
 prodex -c features.compaction_image_budget=true exec "review this repository"
@@ -763,9 +763,10 @@ prodex run -c features.compaction_image_budget=true exec "review this repository
 prodex caveman -c features.compaction_image_budget=true exec "review this repository"
 prodex s --no-presidio --no-sub-agent -c features.compaction_image_budget=true exec "review this repository"
 prodex s --provider gemini -c features.compaction_image_budget=true exec "review this repository"
+prodex -c features.compaction_image_budget=false exec "review this repository"
 ```
 
-Generated Prodex provider/default overrides precede passthrough arguments. Explicit user `-c` arguments retain their order, so a later explicit override wins; unspecified or false states add no Prodex compaction behavior. Codex owns retained-image accounting, image/label boundary atomicity, and the no-backfill rule. Prodex only preserves the configuration and `/responses/compact` image, label, audio, text, metadata, developer-message, and unknown JSON structures.
+Generated Prodex provider/default overrides precede passthrough arguments. Explicit user `-c` arguments retain their order, so a later explicit override wins; unspecified state leaves the Codex 0.150.1 default enabled, while explicit `true` or `false` is preserved exactly. Codex owns retained-image accounting, image/label boundary atomicity, and the no-backfill rule. Prodex only preserves the configuration and `/responses/compact` image, label, audio, text, metadata, developer-message, and unknown JSON structures.
 
 Detached memory traffic carries `thread_source: "memory_consolidation"` in `x-codex-turn-metadata` and the matching nested `client_metadata` entry. Prodex preserves both opaquely, including unknown metadata fields and pre-commit retries. This classification is metadata, not a Prodex affinity, selection, rotation, quota, or governance mode. In the explicit JSON-RPC broker, upstream `threadSource` is an optional free-form string on `thread/start` and `thread/fork`; `thread/resume` receives no generated source.
 

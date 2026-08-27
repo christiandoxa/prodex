@@ -35,7 +35,10 @@ function run(command, args, options = {}) {
   });
 }
 
-async function fixture(t, { validChecksum = true, manifestImplementation = null, compilerRequired = false } = {}) {
+async function fixture(
+  t,
+  { validChecksum = true, manifestImplementation = null, compilerRequired = false, existingVersion = null } = {},
+) {
   const target = targetForHost();
   if (!target) {
     t.skip(`installer fixture unsupported on ${process.platform}`);
@@ -46,7 +49,16 @@ async function fixture(t, { validChecksum = true, manifestImplementation = null,
   const binDir = path.join(home, ".local", "bin");
   const fakeBin = path.join(root, "fake-bin");
   const managerLog = path.join(root, "manager.log");
+  const requests = [];
   await fs.mkdir(fakeBin, { recursive: true });
+  if (existingVersion !== null) {
+    await fs.mkdir(binDir, { recursive: true });
+    await fs.writeFile(
+      path.join(binDir, "prodex"),
+      `#!/bin/sh\nprintf 'prodex ${existingVersion}\\n'\n`,
+      { mode: 0o755 },
+    );
+  }
   const asset = `prodex-${target}`;
   const binary = Buffer.from(
     manifestImplementation === null
@@ -69,6 +81,7 @@ async function fixture(t, { validChecksum = true, manifestImplementation = null,
     : "0".repeat(64);
   const manifestDigest = manifest === null ? null : crypto.createHash("sha256").update(manifest).digest("hex");
   const server = http.createServer((request, response) => {
+    requests.push(request.url);
     if (request.url === "/release/SHA256SUMS") {
       response.end(`${digest}  ${asset}\n${manifestDigest ?? ""}${manifestDigest === null ? "" : `  release-manifest.tsv\n`}`);
     } else if (request.url === "/release/release-manifest.tsv" && manifest !== null) {
@@ -99,7 +112,7 @@ async function fixture(t, { validChecksum = true, manifestImplementation = null,
     TEST_MANAGER_LOG: managerLog,
     npm_package_name: "",
   };
-  return { root, binDir, fakeBin, managerLog, env };
+  return { root, binDir, fakeBin, managerLog, requests, asset, env };
 }
 
 async function runInstaller(fixtureState, extraEnv = {}) {
@@ -200,6 +213,16 @@ test("installer verifies and installs the host release binary", async (t) => {
   assert.equal(result.code, 0, result.stderr);
   const installed = path.join(state.binDir, "prodex");
   assert.equal((await run(installed, ["--version"])).stdout, `prodex ${version}\n`);
+});
+
+test("updater skips the same release before downloading its asset", async (t) => {
+  const state = await fixture(t, { manifestImplementation: "rust", existingVersion: version });
+  if (!state) return;
+  const result = await runInstaller(state, { PRODEX_MIGRATE: "1" });
+  assert.equal(result.code, 0, result.stderr);
+  assert.match(result.stdout, /already up to date/);
+  assert.equal(state.requests.filter((request) => request === `/release/${state.asset}`).length, 0);
+  assert.equal((await run(path.join(state.binDir, "prodex"), ["--version"])).stdout, `prodex ${version}\n`);
 });
 
 test("installer selects and verifies a compiled-in Mojo release from the manifest", async (t) => {

@@ -13,6 +13,13 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use terminal_ui::{print_wrapped_stderr, section_header};
 
+mod updater;
+
+pub use updater::{
+    ProdexUpdateDecision, acquire_prodex_update_lock, latest_prodex_version_for_update,
+    prodex_update_decision,
+};
+
 pub const UPDATE_CHECK_CACHE_TTL_SECONDS: i64 = 300;
 pub const UPDATE_CHECK_STALE_CURRENT_TTL_SECONDS: i64 = 300;
 const UPDATE_CHECK_HTTP_CONNECT_TIMEOUT_MS: u64 = if cfg!(test) { 200 } else { 800 };
@@ -576,6 +583,31 @@ mod tests {
         assert!(!version_is_newer("1.0.0-rc.1", "1.0.0"));
         assert!(!version_is_newer("1.invalid.0", "1.0.0"));
         assert!(!version_is_newer("1.0.0", "invalid"));
+    }
+
+    #[test]
+    fn update_decision_is_semver_aware_and_never_downgrades_automatically() {
+        assert_eq!(
+            prodex_update_decision("0.417.9", "0.418.0").unwrap(),
+            ProdexUpdateDecision::UpdateAvailable("0.418.0".to_string())
+        );
+        assert_eq!(
+            prodex_update_decision("0.418.0", "0.418.0").unwrap(),
+            ProdexUpdateDecision::UpToDate
+        );
+        assert_eq!(
+            prodex_update_decision("0.419.0-dev", "0.418.0").unwrap(),
+            ProdexUpdateDecision::LocalNewer("0.418.0".to_string())
+        );
+        assert_eq!(
+            prodex_update_decision("0.418.0-rc.1", "0.418.0").unwrap(),
+            ProdexUpdateDecision::UpdateAvailable("0.418.0".to_string())
+        );
+        assert_eq!(
+            prodex_update_decision("0.418.0+build-a", "0.418.0+build-b").unwrap(),
+            ProdexUpdateDecision::UpToDate
+        );
+        assert!(prodex_update_decision("0.418", "0.418.0").is_err());
     }
 
     #[test]
