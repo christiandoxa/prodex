@@ -180,12 +180,16 @@ async function pathExists(relativePath) {
   }
 }
 
-async function existingReleaseCommitPaths() {
+async function existingReleaseCommitPaths(version) {
   const paths = [];
   for (const relativePath of RELEASE_COMMIT_PATHS) {
     if (await pathExists(relativePath)) {
       paths.push(relativePath);
     }
+  }
+  const versionedNotes = `docs/release-notes/${version}.md`;
+  if (await pathExists(versionedNotes)) {
+    paths.push(versionedNotes);
   }
   return paths;
 }
@@ -314,7 +318,7 @@ async function releaseCut(args) {
     ]);
   }
 
-  await git(["add", "--", ...(await existingReleaseCommitPaths())]);
+  await git(["add", "--", ...(await existingReleaseCommitPaths(version))]);
   if (!(await hasStagedDiff())) {
     process.stdout.write(`release-cut: no metadata diff for ${version}\n`);
     return;

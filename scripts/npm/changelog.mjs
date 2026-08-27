@@ -7,6 +7,7 @@ import { readCargoVersion, repoRoot } from "./common.mjs";
 
 const execFileAsync = promisify(execFile);
 const changelogPath = path.join(repoRoot, "CHANGELOG.md");
+const releaseNotesDirectory = path.join(repoRoot, "docs", "release-notes");
 const defaultReleaseCount = 12;
 const versionTagPattern = /^v?\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/;
 
@@ -319,6 +320,43 @@ function appendReleasedVersion(lines, version, date, groups) {
   lines.push("- No grouped changes.", "");
 }
 
+async function curatedReleaseNotes(version) {
+  const notesPath = path.join(releaseNotesDirectory, version + ".md");
+  try {
+    const notes = (await fs.readFile(notesPath, "utf8")).trim();
+    const requiredSections = ["## New Features", "## Bug Fixes", "## Changelog"];
+    const positions = requiredSections.map((section) => notes.indexOf(section));
+    if (positions.some((position) => position < 0) || positions.some((position, index) => index > 0 && position <= positions[index - 1])) {
+      throw new Error(
+        path.relative(repoRoot, notesPath) +
+          " must contain " +
+          requiredSections.join(", "),
+      );
+    }
+    for (let index = 0; index < requiredSections.length; index += 1) {
+      const end = index + 1 < positions.length ? positions[index + 1] : notes.length;
+      if (!notes.slice(positions[index] + requiredSections[index].length, end).trim()) {
+        throw new Error(`${path.relative(repoRoot, notesPath)} has an empty ${requiredSections[index]} section`);
+      }
+    }
+    if (!notes.slice(positions[2]).includes("Full Changelog:")) {
+      throw new Error(`${path.relative(repoRoot, notesPath)} must include a Full Changelog link`);
+    }
+    return notes;
+  } catch (error) {
+    if (error?.code === "ENOENT") {
+      return null;
+    }
+    throw error;
+  }
+}
+
+function appendCuratedReleaseNotes(lines, notes) {
+  if (notes) {
+    lines.push(...notes.split(/\r?\n/), "");
+  }
+}
+
 async function renderChangelog({ releaseVersion, releases }) {
   const tags = await versionTags();
   const latestTag = tags.at(-1) ?? null;
@@ -349,6 +387,11 @@ async function renderChangelog({ releaseVersion, releases }) {
 
     if (pendingVersion && pendingReleaseCommit) {
       appendReleasedVersion(lines, pendingVersion, await headDate(), unreleasedGroups);
+      const notes = await curatedReleaseNotes(pendingVersion);
+      if (notes) {
+        lines.splice(lines.length - 1, 1);
+        appendCuratedReleaseNotes(lines, notes);
+      }
       pendingReleaseRendered = true;
     } else if (hasEntries(unreleasedGroups)) {
       lines.push(pendingVersion ? `## ${pendingVersion} - Unreleased` : "## Unreleased", "");
@@ -367,6 +410,16 @@ async function renderChangelog({ releaseVersion, releases }) {
     const date = await tagDate(tag);
 
     appendReleasedVersion(lines, tagVersion(tag), date, groups);
+    if (
+      tagVersion(tag) === currentVersion &&
+      isReleaseCommitForVersion(await headCommit(), currentVersion)
+    ) {
+      const notes = await curatedReleaseNotes(currentVersion);
+      if (notes) {
+        lines.splice(lines.length - 1, 1);
+        appendCuratedReleaseNotes(lines, notes);
+      }
+    }
   }
 
   return `${lines.join("\n").trimEnd()}\n`;
