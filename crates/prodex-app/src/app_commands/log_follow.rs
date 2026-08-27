@@ -3,6 +3,8 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::io::{self, Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
+#[cfg(windows)]
+use std::time::SystemTime;
 use std::time::{Duration, Instant};
 
 const LOG_FOLLOW_READ_CHUNK_BYTES: usize = 1024 * 1024;
@@ -14,6 +16,8 @@ pub(crate) struct FollowedLog {
     pub(crate) pending: Vec<u8>,
     file: Option<fs::File>,
     file_identity: Option<FileIdentity>,
+    #[cfg(windows)]
+    path_modified: Option<SystemTime>,
 }
 
 impl FollowedLog {
@@ -94,12 +98,27 @@ fn file_identity(metadata: &fs::Metadata) -> Option<FileIdentity> {
 }
 
 #[cfg(windows)]
-fn file_identity(metadata: &fs::Metadata) -> Option<FileIdentity> {
-    use std::os::windows::fs::MetadataExt;
+fn file_identity(file: &fs::File) -> Option<FileIdentity> {
+    use std::mem::MaybeUninit;
+    use std::os::windows::io::AsRawHandle;
+    use windows_sys::Win32::Storage::FileSystem::{
+        BY_HANDLE_FILE_INFORMATION, GetFileInformationByHandle,
+    };
 
-    Some(FileIdentity {
-        first: u64::from(metadata.volume_serial_number()),
-        second: metadata.file_index(),
+    let mut information = MaybeUninit::<BY_HANDLE_FILE_INFORMATION>::zeroed();
+    // SAFETY: `file` owns a live handle and `information` points to writable
+    // storage for the exact structure required by the Windows API.
+    let result = unsafe {
+        GetFileInformationByHandle(file.as_raw_handle().cast(), information.as_mut_ptr())
+    };
+    (result != 0).then(|| {
+        // SAFETY: the successful API call initialized the complete structure.
+        let information = unsafe { information.assume_init() };
+        FileIdentity {
+            first: u64::from(information.dwVolumeSerialNumber),
+            second: (u64::from(information.nFileIndexHigh) << 32)
+                | u64::from(information.nFileIndexLow),
+        }
     })
 }
 
@@ -129,20 +148,40 @@ pub(crate) fn collect_new_followed_lines(
         }
     };
 
-    let replace_file = match file_identity(&path_metadata) {
+    #[cfg(windows)]
+    let mut path_file = {
+        let modified = path_metadata.modified().ok();
+        (state.file.is_none() || state.path_modified != modified)
+            .then(|| {
+                fs::File::open(path).with_context(|| format!("failed to open {}", path.display()))
+            })
+            .transpose()?
+    };
+    #[cfg(not(windows))]
+    let mut path_file = None;
+
+    #[cfg(windows)]
+    let path_identity = path_file.as_ref().and_then(file_identity);
+    #[cfg(not(windows))]
+    let path_identity = file_identity(&path_metadata);
+    let replace_file = match path_identity {
         Some(identity) => state.file_identity != Some(identity),
         None => state.file.is_none(),
     };
     if replace_file {
         let had_file = state.file.is_some();
-        state.file = Some(
+        state.file = Some(path_file.take().unwrap_or(
             fs::File::open(path).with_context(|| format!("failed to open {}", path.display()))?,
-        );
-        state.file_identity = file_identity(&path_metadata);
+        ));
+        state.file_identity = path_identity;
         if had_file {
             state.offset = 0;
             state.pending.clear();
         }
+    }
+    #[cfg(windows)]
+    {
+        state.path_modified = path_metadata.modified().ok();
     }
 
     let file_len = path_metadata.len();
