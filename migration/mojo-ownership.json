@@ -1,0 +1,91 @@
+{
+  "schema_version": 1,
+  "baseline_sha": "a66c4a54e0eb56229188f63616e05d0698085cb8",
+  "release_target": "0.418.0",
+  "minimum_percent": 10,
+  "target_percent": 20,
+  "baseline_optional_sources": [
+    "mojo/prodex_core/log_semantics.mojo",
+    "mojo/prodex_core/rich_abi.mojo",
+    "mojo/prodex_core/rich_context_v2.mojo",
+    "mojo/prodex_core/rich_fallback.mojo",
+    "mojo/prodex_core/rich_plan.mojo",
+    "mojo/prodex_core/rich_policy.mojo",
+    "mojo/prodex_core/rich_route.mojo",
+    "mojo/prodex_core/rich_text.mojo",
+    "mojo/prodex_core/rich_types.mojo"
+  ],
+  "rust_deterministic_sources": [
+    "crates/prodex-context/src/critical_signal.rs",
+    "crates/prodex-provider-core/src/constraints.rs",
+    "crates/prodex-provider-core/src/fallback/chains.rs",
+    "crates/prodex-provider-spi/src/governed_routing.rs",
+    "crates/prodex-quota/src/render.rs",
+    "crates/prodex-runtime-policy/src/validate/gateway/routing.rs",
+    "crates/prodex-runtime-proxy/src/selection_plan.rs",
+    "crates/prodex-runtime-proxy/src/smart_context/token_accounting.rs",
+    "crates/prodex-runtime-quota/src/selection/scoring.rs",
+    "crates/prodex-runtime-tuning/src/lib.rs"
+  ],
+  "mojo_deterministic_sources": [
+    "mojo/prodex_core/candidate_decision.mojo",
+    "mojo/prodex_core/context.mojo",
+    "mojo/prodex_core/context_text.mojo",
+    "mojo/prodex_core/log_semantics.mojo",
+    "mojo/prodex_core/policy_validation.mojo",
+    "mojo/prodex_core/profile_schedule.mojo",
+    "mojo/prodex_core/provider_constraints.mojo",
+    "mojo/prodex_core/quota.mojo",
+    "mojo/prodex_core/quota_pressure.mojo",
+    "mojo/prodex_core/rich_context_v2.mojo",
+    "mojo/prodex_core/rich_fallback.mojo",
+    "mojo/prodex_core/rich_plan.mojo",
+    "mojo/prodex_core/rich_policy.mojo",
+    "mojo/prodex_core/rich_route.mojo",
+    "mojo/prodex_core/rich_text.mojo",
+    "mojo/prodex_core/rich_types.mojo",
+    "mojo/prodex_core/runtime_math.mojo",
+    "mojo/prodex_core/routing_score.mojo",
+    "mojo/prodex_core/smart_context.mojo",
+    "mojo/prodex_core/smart_context_rehydrate.mojo",
+    "mojo/prodex_core/runtime_tuning.mojo"
+  ],
+  "authoritative_operations": [
+    {
+      "name": "critical_signal_text_grouping",
+      "domain": "text/collections",
+      "mojo_entry": "prodex_mojo_rich_context_analyze_v2",
+      "consumer": "prodex-context"
+    },
+    {
+      "name": "provider_model_fallback_parser",
+      "domain": "parsing/strings",
+      "mojo_entry": "prodex_mojo_rich_model_fallback_v2",
+      "consumer": "prodex-provider-core"
+    },
+    {
+      "name": "gateway_route_alias_policy",
+      "domain": "parsing/policy",
+      "mojo_entry": "prodex_mojo_rich_policy_alias_v2",
+      "consumer": "prodex-runtime-policy"
+    },
+    {
+      "name": "governed_provider_route_plan",
+      "domain": "routing/collections",
+      "mojo_entry": "prodex_mojo_rich_route_plan_v2",
+      "consumer": "prodex-provider-spi"
+    },
+    {
+      "name": "smart_context_rehydration_plan",
+      "domain": "objects/planning",
+      "mojo_entry": "prodex_mojo_rich_context_plan_v2",
+      "consumer": "prodex-runtime-proxy"
+    },
+    {
+      "name": "log_event_classification",
+      "domain": "strings/observability",
+      "mojo_entry": "prodex_mojo_log_classify_v1",
+      "consumer": "prodex-app"
+    }
+  ]
+}

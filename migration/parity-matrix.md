@@ -73,6 +73,7 @@ These rows supersede the baseline's normalization-only boundary descriptions.
 | Gateway route-alias policy parser | `validate_gateway_route_alias_rust` | `prodex_mojo_rich_policy_alias_v2` | alias, model list, optional strategy, metric list; normalized model records or issue fields | 20,000 generated valid/invalid grammar cases and existing policy suite | `MOJO` |
 | Governed provider route plan | `plan_governed_provider_route_rust` | `prodex_mojo_rich_route_plan_v2` | provider/model/capability text and bounded signals; candidate objects, score components, reasons, order | 10,000 generated candidate sets plus existing provider SPI suite | `MOJO` |
 | Smart Context rehydration plan | `smart_context_auto_rehydrate_plan_rust` | `prodex_mojo_rich_context_plan_v2` | opaque artifact-reference views, optional availability set, required/token fields; action graph | existing 2,000 generated cases and active app rehydration callers | `MOJO` |
+| Runtime log event classification | Rust log-key classifier (test oracle) | `prodex_mojo_log_classify_v1` | bounded UTF-8 event key | category and severity tags used by the shared log renderer | classifier self-test, operational log rendering tests, and Mojo-enabled app log suite | `MOJO` |
 
 Each Rust wrapper validates version, status, counts, offsets, lengths, UTF-8, indices, tags,
 ordering, and duplicate invariants. The Rust implementations remain test-only or Rust-only-target

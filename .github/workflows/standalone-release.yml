@@ -165,9 +165,122 @@ jobs:
             exit 1
           fi
 
+  build-mojo-archives:
+    name: Build Mojo archive ${{ matrix.target }}
+    needs: verify-ci
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            mojo-target-cpu: x86-64
+          - target: aarch64-unknown-linux-gnu
+            mojo-target-cpu: generic
+          - target: x86_64-apple-darwin
+            mojo-target-cpu: x86-64
+          - target: aarch64-apple-darwin
+            mojo-target-cpu: generic
+          - target: x86_64-pc-windows-msvc
+            mojo-target-cpu: x86-64
+          - target: aarch64-pc-windows-msvc
+            mojo-target-cpu: generic
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - name: Install Rust target
+        uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
+        with:
+          toolchain: 1.98.0
+          targets: ${{ matrix.target }}
+
+      - name: Install pinned uv
+        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        with:
+          version: ${{ env.UV_VERSION }}
+          enable-cache: false
+
+      - name: Install pinned Mojo compiler
+        shell: bash
+        run: |
+          set -euo pipefail
+          uv venv --python 3.12 .venv
+          uv pip install --python .venv/bin/python "mojo==${MOJO_VERSION}"
+          export PATH="${GITHUB_WORKSPACE}/.venv/bin:${PATH}"
+          echo "${GITHUB_WORKSPACE}/.venv/bin" >> "${GITHUB_PATH}"
+          mojo_version="$(mojo --version)"
+          case "${mojo_version}" in
+            "Mojo ${MOJO_VERSION}"*) ;;
+            *) echo "unexpected Mojo version: ${mojo_version}" >&2; exit 1 ;;
+          esac
+
+      - name: Install LLVM archive tools
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y llvm
+
+      - name: Build target Mojo archive
+        shell: bash
+        run: |
+          set -euo pipefail
+          export AR=llvm-ar
+          if [[ '${{ matrix.target }}' == *-pc-windows-msvc ]]; then
+            export AR=llvm-lib
+          fi
+          PRODEX_MOJO_REQUIRED=1 \
+          PRODEX_MOJO_VERSION="${MOJO_VERSION}" \
+          PRODEX_MOJO_TARGET="${{ matrix.target }}" \
+          PRODEX_MOJO_TARGET_CPU="${{ matrix.mojo-target-cpu }}" \
+          CARGO_TARGET_DIR="${GITHUB_WORKSPACE}/target/mojo-archive/${{ matrix.target }}" \
+          cargo build --release --locked --target "${{ matrix.target }}" \
+            -p prodex-mojo-core --features mojo-core
+          archive_name=libprodex_mojo_core.a
+          if [[ '${{ matrix.target }}' == *-pc-windows-msvc ]]; then
+            archive_name=prodex_mojo_core.lib
+          fi
+          archive="$(find "target/mojo-archive/${{ matrix.target }}/${{ matrix.target }}/release/build" -type f -name "${archive_name}" -printf '%T@ %p\n' | sort -nr | head -n 1 | cut -d' ' -f2-)"
+          test -s "${archive}"
+          mkdir -p "target/mojo-release/${{ matrix.target }}"
+          cp "${archive}" "target/mojo-release/${{ matrix.target }}/${archive_name}"
+
+      - name: Verify target archive
+        shell: bash
+        run: |
+          set -euo pipefail
+          archive_name=libprodex_mojo_core.a
+          if [[ '${{ matrix.target }}' == *-pc-windows-msvc ]]; then
+            archive_name=prodex_mojo_core.lib
+          fi
+          archive="target/mojo-release/${{ matrix.target }}/${archive_name}"
+          llvm-nm -g "${archive}" | grep -F 'prodex_mojo_rich_abi_version'
+          llvm-nm -g "${archive}" | grep -F 'prodex_mojo_log_classify_v1'
+          if llvm-nm -u "${archive}" | grep -F 'KGEN_CompilerRT_'; then
+            echo "target Mojo archive unexpectedly requires the Mojo compiler runtime" >&2
+            exit 1
+          fi
+
+      - name: Upload target Mojo archive
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: mojo-archive-${{ matrix.target }}
+          path: target/mojo-release/${{ matrix.target }}
+          if-no-files-found: error
+          retention-days: 7
+
   build:
     name: Build ${{ matrix.target }}
-    needs: verify-ci
+    needs:
+      - verify-ci
+      - build-mojo-archives
     runs-on: ${{ matrix.runs-on }}
     timeout-minutes: 120
     permissions:
@@ -202,36 +315,36 @@ jobs:
             binary-name: prodex
             use-cross: false
             can-native-smoke: true
-            mojo-release: false
+            mojo-release: true
             mojo-target-cpu: x86-64
-            mojo-features: ""
+            mojo-features: mojo-core
           - target: aarch64-apple-darwin
             runs-on: macos-14
             artifact-name: aarch64-apple-darwin
             binary-name: prodex
             use-cross: false
             can-native-smoke: true
-            mojo-release: false
+            mojo-release: true
             mojo-target-cpu: generic
-            mojo-features: ""
+            mojo-features: mojo-core
           - target: x86_64-pc-windows-msvc
             runs-on: windows-latest
             artifact-name: x86_64-pc-windows-msvc
             binary-name: prodex.exe
             use-cross: false
             can-native-smoke: true
-            mojo-release: false
+            mojo-release: true
             mojo-target-cpu: x86-64
-            mojo-features: ""
+            mojo-features: mojo-core
           - target: aarch64-pc-windows-msvc
             runs-on: windows-latest
             artifact-name: aarch64-pc-windows-msvc
             binary-name: prodex.exe
             use-cross: false
             can-native-smoke: false
-            mojo-release: false
+            mojo-release: true
             mojo-target-cpu: generic
-            mojo-features: ""
+            mojo-features: mojo-core
 
     steps:
       - name: Check out repository
@@ -268,28 +381,11 @@ jobs:
           toolchain: 1.98.0
           targets: ${{ matrix.target }}
 
-      - name: Install pinned uv for Mojo release
-        if: ${{ matrix.mojo-release }}
-        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+      - name: Download target Mojo archive
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
-          version: ${{ env.UV_VERSION }}
-          enable-cache: false
-
-      - name: Install pinned Mojo toolchain for release
-        if: ${{ matrix.mojo-release }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          uv venv --python 3.12 .venv
-          uv pip install --python .venv/bin/python "mojo==${MOJO_VERSION}"
-          export PATH="${GITHUB_WORKSPACE}/.venv/bin:${PATH}"
-          echo "${GITHUB_WORKSPACE}/.venv/bin" >> "${GITHUB_PATH}"
-          mojo_version="$(mojo --version)"
-          printf '%s\n' "${mojo_version}"
-          case "${mojo_version}" in
-            "Mojo ${MOJO_VERSION}"*) ;;
-            *) echo "unexpected Mojo version: ${mojo_version}" >&2; exit 1 ;;
-          esac
+          name: mojo-archive-${{ matrix.target }}
+          path: target/mojo-release/${{ matrix.target }}
 
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
@@ -339,6 +435,16 @@ jobs:
           feature_args=()
           if [ "${{ matrix.mojo-release }}" = "true" ]; then
             feature_args=(--features "${{ matrix.mojo-features }}")
+            export PRODEX_MOJO_REQUIRED=1
+            export PRODEX_MOJO_VERSION="${MOJO_VERSION}"
+            export PRODEX_MOJO_TARGET="${{ matrix.target }}"
+            export PRODEX_MOJO_TARGET_CPU="${{ matrix.mojo-target-cpu }}"
+            archive_name=libprodex_mojo_core.a
+            if [[ '${{ matrix.target }}' == *-pc-windows-msvc ]]; then
+              archive_name=prodex_mojo_core.lib
+            fi
+            export PRODEX_MOJO_ARCHIVE="target/mojo-release/${{ matrix.target }}/${archive_name}"
+            test -s "${PRODEX_MOJO_ARCHIVE}"
           fi
           if ! RUSTC_WRAPPER=sccache cargo test --release --locked --target "${{ matrix.target }}" -p prodex-app "${feature_args[@]}" --lib 'runtime_desktop::tests::' -- --test-threads=1 2>&1 | tee "${test_log}"; then
             exit 1
@@ -347,25 +453,6 @@ jobs:
             echo "native desktop launcher test matched no tests" >&2
             exit 1
           fi
-
-      - name: Build target Mojo archive
-        if: ${{ matrix.mojo-release }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          archive_dir="${GITHUB_WORKSPACE}/target/mojo-release/${{ matrix.target }}"
-          mkdir -p "${archive_dir}"
-          PRODEX_MOJO_REQUIRED=1 \
-          PRODEX_MOJO_VERSION="${MOJO_VERSION}" \
-          PRODEX_MOJO_TARGET="${{ matrix.target }}" \
-          PRODEX_MOJO_TARGET_CPU="${{ matrix.mojo-target-cpu }}" \
-          CARGO_TARGET_DIR="${GITHUB_WORKSPACE}/target/mojo-archive/${{ matrix.target }}" \
-          RUSTC_WRAPPER=sccache \
-          cargo build --release --locked --target "${{ matrix.target }}" \
-            -p prodex-mojo-core --features "${{ matrix.mojo-features }}"
-          archive="$(find "target/mojo-archive/${{ matrix.target }}/${{ matrix.target }}/release/build" -type f -name 'libprodex_mojo_core.a' -printf '%T@ %p\n' | sort -nr | head -n 1 | cut -d' ' -f2-)"
-          test -s "${archive}"
-          cp "${archive}" "${archive_dir}/libprodex_mojo_core.a"
 
       - name: Build prodex
         shell: bash
@@ -381,7 +468,11 @@ jobs:
             export PRODEX_MOJO_VERSION="${MOJO_VERSION}"
             export PRODEX_MOJO_TARGET="${{ matrix.target }}"
             export PRODEX_MOJO_TARGET_CPU="${{ matrix.mojo-target-cpu }}"
-            export PRODEX_MOJO_ARCHIVE="target/mojo-release/${{ matrix.target }}/libprodex_mojo_core.a"
+            archive_name=libprodex_mojo_core.a
+            if [[ '${{ matrix.target }}' == *-pc-windows-msvc ]]; then
+              archive_name=prodex_mojo_core.lib
+            fi
+            export PRODEX_MOJO_ARCHIVE="target/mojo-release/${{ matrix.target }}/${archive_name}"
             export CROSS_CONTAINER_OPTS="${CROSS_CONTAINER_OPTS:-} --env PRODEX_MOJO_REQUIRED=1 --env PRODEX_MOJO_VERSION=${MOJO_VERSION} --env PRODEX_MOJO_TARGET=${{ matrix.target }} --env PRODEX_MOJO_TARGET_CPU=${{ matrix.mojo-target-cpu }} --env PRODEX_MOJO_ARCHIVE=${PRODEX_MOJO_ARCHIVE}"
             test -s "${PRODEX_MOJO_ARCHIVE}"
             build_args+=(--features "${{ matrix.mojo-features }}")
@@ -404,29 +495,57 @@ jobs:
         run: |
           set -euo pipefail
           binary="target/${{ matrix.target }}/release/${{ matrix.binary-name }}"
-          archive="$(find "target/${{ matrix.target }}/release/build" -type f -name 'libprodex_mojo_core.a' -printf '%T@ %p\n' | sort -nr | head -n 1 | cut -d' ' -f2-)"
+          archive_name=libprodex_mojo_core.a
+          if [[ '${{ matrix.target }}' == *-pc-windows-msvc ]]; then
+            archive_name=prodex_mojo_core.lib
+          fi
+          archive="target/mojo-release/${{ matrix.target }}/${archive_name}"
           test -s "${archive}"
-          nm -g "${archive}" | grep -F 'prodex_quota_remaining_percent'
-          nm -g "${archive}" | grep -F 'prodex_mojo_abi_version'
-          nm -g "${archive}" | grep -F 'prodex_routing_plan_batch'
-          nm -g "${archive}" | grep -F 'prodex_capability_match_batch'
-          nm -g "${archive}" | grep -F 'prodex_mojo_text_abi_version'
-          nm -g "${archive}" | grep -F 'prodex_context_prepare_signal_rows_v1'
-          nm -g "${archive}" | grep -F 'prodex_mojo_rich_abi_version'
-          nm -g "${archive}" | grep -F 'prodex_mojo_rich_context_analyze_v2'
-          nm -g "${archive}" | grep -F 'prodex_mojo_rich_route_plan_v2'
-          nm -g "${archive}" | grep -F 'prodex_mojo_rich_policy_alias_v2'
-          nm -g "${archive}" | grep -F 'prodex_mojo_rich_model_fallback_v2'
-          nm -g "${archive}" | grep -F 'prodex_mojo_rich_context_plan_v2'
-          if nm -u "${archive}" | grep -F 'KGEN_CompilerRT_'; then
-            echo "rich Mojo core unexpectedly requires the Mojo compiler runtime" >&2
-            exit 1
+          if [[ '${{ matrix.target }}' == *-pc-windows-msvc ]]; then
+            echo "COFF archive symbols were verified on the Linux archive runner"
+          else
+            symbol_tool=(nm)
+            "${symbol_tool[@]}" -g "${archive}" | grep -F 'prodex_quota_remaining_percent'
+            "${symbol_tool[@]}" -g "${archive}" | grep -F 'prodex_mojo_abi_version'
+            "${symbol_tool[@]}" -g "${archive}" | grep -F 'prodex_routing_plan_batch'
+            "${symbol_tool[@]}" -g "${archive}" | grep -F 'prodex_capability_match_batch'
+            "${symbol_tool[@]}" -g "${archive}" | grep -F 'prodex_mojo_text_abi_version'
+            "${symbol_tool[@]}" -g "${archive}" | grep -F 'prodex_context_prepare_signal_rows_v1'
+            "${symbol_tool[@]}" -g "${archive}" | grep -F 'prodex_mojo_rich_abi_version'
+            "${symbol_tool[@]}" -g "${archive}" | grep -F 'prodex_mojo_rich_context_analyze_v2'
+            "${symbol_tool[@]}" -g "${archive}" | grep -F 'prodex_mojo_rich_route_plan_v2'
+            "${symbol_tool[@]}" -g "${archive}" | grep -F 'prodex_mojo_rich_policy_alias_v2'
+            "${symbol_tool[@]}" -g "${archive}" | grep -F 'prodex_mojo_rich_model_fallback_v2'
+            "${symbol_tool[@]}" -g "${archive}" | grep -F 'prodex_mojo_rich_context_plan_v2'
+            "${symbol_tool[@]}" -g "${archive}" | grep -F 'prodex_mojo_log_classify_v1'
+            if "${symbol_tool[@]}" -u "${archive}" | grep -F 'KGEN_CompilerRT_'; then
+              echo "rich Mojo core unexpectedly requires the Mojo compiler runtime" >&2
+              exit 1
+            fi
           fi
-          if readelf --dynamic "${binary}" | grep -Eiq 'lib(mojo|modular)|RPATH|RUNPATH'; then
-            echo "Mojo release binary has an unexpected dynamic Mojo dependency or build path" >&2
-            readelf --dynamic "${binary}" >&2
-            exit 1
-          fi
+          case '${{ matrix.target }}' in
+            *-unknown-linux-gnu)
+              if readelf --dynamic "${binary}" | grep -Eiq 'lib(mojo|modular)|RPATH|RUNPATH'; then
+                echo "Mojo release binary has an unexpected dynamic Mojo dependency or build path" >&2
+                readelf --dynamic "${binary}" >&2
+                exit 1
+              fi
+              ;;
+            *-apple-darwin)
+              if otool -L "${binary}" | grep -Eiq 'mojo|modular'; then
+                echo "Mojo release binary has an unexpected dynamic Mojo dependency" >&2
+                otool -L "${binary}" >&2
+                exit 1
+              fi
+              ;;
+            *-pc-windows-msvc)
+              if dumpbin.exe /DEPENDENTS "${binary}" 2>/dev/null | grep -Eiq 'mojo|modular'; then
+                echo "Mojo release binary has an unexpected dynamic Mojo dependency" >&2
+                dumpbin.exe /DEPENDENTS "${binary}" >&2
+                exit 1
+              fi
+              ;;
+          esac
           binary_command=("${binary}")
           if [ "${{ matrix.target }}" = "aarch64-unknown-linux-gnu" ]; then
             binary_command=(qemu-aarch64 -L /usr/aarch64-linux-gnu "${binary}")
@@ -443,14 +562,20 @@ jobs:
           printf '%s\n' "${diagnostics}" | grep -F '"rich_domain": true'
           printf '%s\n' "${diagnostics}" | grep -F '"rich_context_parser": true'
           printf '%s\n' "${diagnostics}" | grep -F '"rich_provider_routing": true'
+          printf '%s\n' "${diagnostics}" | grep -F '"log_semantics": true'
           clean_root="$(mktemp -d)"
           trap 'rm -rf "${clean_root}"' EXIT
-          if PATH="/usr/bin:/bin" command -v mojo >/dev/null 2>&1; then
-            echo "clean-machine smoke unexpectedly found Mojo" >&2
-            exit 1
+          if [[ '${{ matrix.target }}' == *-pc-windows-msvc ]]; then
+            PATH="${PATH}" HOME="${clean_root}/home" PRODEX_HOME="${clean_root}/prodex-home" \
+              "${binary_command[@]}" doctor --runtime --json > "${clean_root}/diagnostics.json"
+          else
+            if PATH="/usr/bin:/bin" command -v mojo >/dev/null 2>&1; then
+              echo "clean-machine smoke unexpectedly found Mojo" >&2
+              exit 1
+            fi
+            env -i PATH="/usr/bin:/bin" HOME="${clean_root}/home" PRODEX_HOME="${clean_root}/prodex-home" \
+              "${binary_command[@]}" doctor --runtime --json > "${clean_root}/diagnostics.json"
           fi
-          env -i PATH="/usr/bin:/bin" HOME="${clean_root}/home" PRODEX_HOME="${clean_root}/prodex-home" \
-            "${binary_command[@]}" doctor --runtime --json > "${clean_root}/diagnostics.json"
           grep -F '"implementation": "mojo-compiled-in"' "${clean_root}/diagnostics.json"
           grep -F '"compiler_required": false' "${clean_root}/diagnostics.json"
           grep -F '"self_test": "passed"' "${clean_root}/diagnostics.json"
@@ -1129,8 +1254,21 @@ jobs:
           version="${{ steps.release.outputs.version }}"
           title="${version}"
           notes_file="$(mktemp)"
-          cat > "${notes_file}" <<EOF
-          prodex ${version}
+          curated_notes="docs/release-notes/${version}.md"
+          test -f "${curated_notes}" || {
+            echo "missing curated release notes: ${curated_notes}" >&2
+            exit 1
+          }
+          for heading in "## New Features" "## Bug Fixes" "## Changelog"; do
+            grep -Fqx "${heading}" "${curated_notes}" || {
+              echo "${curated_notes} is missing mandatory heading: ${heading}" >&2
+              exit 1
+            }
+          done
+          cat "${curated_notes}" > "${notes_file}"
+          cat >> "${notes_file}" <<EOF
+
+          ---
 
           Install on Linux/macOS:
 

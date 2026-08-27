@@ -176,8 +176,11 @@ test("release hygiene does not inherit an unavailable Rust compiler wrapper", ()
 
 test("release Mojo install activates the compiler in its current step", () => {
   const workflow = readFileSync(".github/workflows/standalone-release.yml", "utf8");
-  const installStep = workflow.match(
-    /- name: Install pinned Mojo toolchain for release([\s\S]*?)- name: Cache Rust dependencies/,
+  const mojoJob = workflow.match(
+    /\n  build-mojo-archives:[\s\S]*?\n  build:\n/,
+  )?.[0];
+  const installStep = mojoJob?.match(
+    /- name: Install pinned Mojo compiler([\s\S]*?)- name: Install LLVM archive tools/,
   )?.[1];
 
   assert.ok(installStep, "release Mojo install step missing");
@@ -196,7 +199,7 @@ test("release validates the Kiro pin before build fan-out", () => {
   assert.ok(build, "release build job missing");
   assert.match(verifyCi, /Verify pinned Kiro CLI release/);
   assert.match(verifyCi, /manifest_version[\s\S]*KIRO_CLI_VERSION/);
-  assert.match(build, /needs: verify-ci/);
+  assert.match(build, /needs:\s*[\s\S]*?- verify-ci/);
 });
 
 test("runtime proxy matrix is generated before fan-out without a runner barrier", () => {

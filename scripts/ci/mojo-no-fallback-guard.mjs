@@ -17,6 +17,7 @@ const PROMOTED_FILES = [
   "crates/prodex-mojo-core/src/context.rs",
   "crates/prodex-mojo-core/src/rich.rs",
   "crates/prodex-mojo-core/src/rich/context_plan.rs",
+  "crates/prodex-mojo-core/src/log.rs",
   "crates/prodex-mojo-core/src/rich/routing.rs",
   "crates/prodex-context/src/critical_signal.rs",
   "crates/prodex-context/src/lib/compression.rs",

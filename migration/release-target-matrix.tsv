@@ -3,7 +3,7 @@
 # Build strictness is separate from runtime requirements: strict builds use `PRODEX_MOJO_REQUIRED=1` (`build_strict=true`), while shipped binaries report `compiler_required=false` because Mojo is build-time only.
 x86_64-unknown-linux-gnu	prodex-x86_64-unknown-linux-gnu	mojo-compiled-in	1.0.0	mojo-core	false	GLIBC_2.23
 aarch64-unknown-linux-gnu	prodex-aarch64-unknown-linux-gnu	mojo-compiled-in	1.0.0	mojo-core	false	GLIBC_2.23
-x86_64-apple-darwin	prodex-x86_64-apple-darwin	rust			false	-
-aarch64-apple-darwin	prodex-aarch64-apple-darwin	rust			false	-
-x86_64-pc-windows-msvc	prodex-x86_64-pc-windows-msvc.exe	rust			false	-
-aarch64-pc-windows-msvc	prodex-aarch64-pc-windows-msvc.exe	rust			false	-
+x86_64-apple-darwin	prodex-x86_64-apple-darwin	mojo-compiled-in	1.0.0	mojo-core	false	-
+aarch64-apple-darwin	prodex-aarch64-apple-darwin	mojo-compiled-in	1.0.0	mojo-core	false	-
+x86_64-pc-windows-msvc	prodex-x86_64-pc-windows-msvc.exe	mojo-compiled-in	1.0.0	mojo-core	false	-
+aarch64-pc-windows-msvc	prodex-aarch64-pc-windows-msvc.exe	mojo-compiled-in	1.0.0	mojo-core	false	-

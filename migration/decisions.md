@@ -109,25 +109,29 @@ limiting is owned by Redis/runtime adapters. Adding an unused scalar wrapper wou
 zero-unused-Mojo rule. Accounting-budget enforcement, SLO classification, and float-heavy
 context ranking remain Rust until a real production seam and exact parity contract exist.
 
-## 2026-08-20: Linux Mojo release is fail-closed
+## 2026-08-20: Linux Mojo release is fail-closed (superseded for 0.418.0)
 
 The release matrix enables compiled-in Mojo for `x86_64-unknown-linux-gnu` and, after the
 2026-08-23 promotion, `aarch64-unknown-linux-gnu`. Mojo is compiled into a target archive in an
 isolated Cargo target directory, then the final Rust binary is linked through the existing cross
 container with the archive path and strict Mojo variables explicitly forwarded. This prevents
 host build-script binaries or host GLIBC from defining the deployment baseline. The ARM64 row
-also runs the final artifact and self-test through QEMU. Other platforms remain Rust-only until
-final-link, runtime, signing, and clean-machine evidence exists. A compiled-in binary must report
+also runs the final artifact and self-test through QEMU. At that time, other platforms remained
+Rust-only until final-link, runtime, signing, and clean-machine evidence existed. A compiled-in binary must report
 `compiler_required=false` at runtime; the release build must report `build_strict=true` under
 `PRODEX_MOJO_REQUIRED=1`.
 
-## 2026-08-20: Release metadata drives installation
+The old platform split is superseded by the `0.418.0` target matrix: all published rows now
+receive a cross-compiled Mojo archive and must pass native link, doctor, and self-test checks.
+
+## 2026-08-20: Release metadata drives installation (platform wording superseded for 0.418.0)
 
 Release CI renders `release-manifest.tsv` and JSON from one target matrix and covers the metadata
 with `SHA256SUMS`. `install.sh` and `install.ps1` select by target and verify the staged binary's
 own `doctor --runtime --json` implementation and Mojo self-test. They never inspect or install a
-user Mojo compiler. WSL naturally uses the Linux shell installer; native Windows remains a
-Rust-compatible artifact while its target is not release-approved for Mojo.
+user Mojo compiler. WSL naturally uses the Linux shell installer; native Windows was a
+Rust-compatible artifact while its target was not release-approved for Mojo. The `0.418.0`
+release matrix now requires Mojo-backed artifacts for every published target.
 
 ## 2026-08-21: Promote ordered optimistic candidate selection
 
@@ -248,14 +252,16 @@ views, typed Mojo structs, bounded arrays, caller-owned byte arenas, and open-ad
 This is an intentional release decision, not a permanent rejection of future native runtime
 packaging.
 
-## 2026-08-26: Mojo ecosystem package gate
+## 2026-08-27: Mojo ecosystem package gate
 
 The live catalog and pinned source checkouts were audited before local infrastructure was added.
-EmberJson is `REFERENCE_ONLY` because the current 0.3.4 checkout requires a newer development
-compiler and fails under pinned Mojo 1.0.0. ExtraMojo, mojo-regex, and ArgMojo compile selected
-source tests but have no approved reproducible Prodex artifact integration; they remain reference
-experiments. UUID is rejected for the pinned compiler/dependency state. No package is imported by
-the release core, so no package lock or build-time network dependency was added.
+The exact decisions and source revisions are recorded in `migration/mojo-ecosystem-audit.json`.
+EmberJson is `REJECT_COMPILER` because its current 0.3.4 checkout fails under pinned Mojo 1.0.0.
+ExtraMojo is `REJECT_RUNTIME` because its selected source links the owning Mojo runtime, and
+mojo-regex is `REJECT_PLATFORM` because it has no Windows release evidence. UUID is
+`REJECT_COMPILER`; decimo and argmojo are `NOT_RELEVANT` to the current Prodex production seams.
+No community package is imported by the release core, so no floating package lock or build-time
+network dependency was added.
 
 ## 2026-08-26: JSON boundaries remain Rust-owned
 

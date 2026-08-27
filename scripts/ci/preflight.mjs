@@ -134,6 +134,16 @@ export function preflightSteps(args) {
       args: ["scripts/ci/size-guard.mjs"],
     },
     {
+      label: "mojo-ownership",
+      command: "node",
+      args: ["scripts/ci/mojo-ownership.mjs", "--check"],
+    },
+    {
+      label: "mojo-no-fallback",
+      command: "node",
+      args: ["scripts/ci/mojo-no-fallback-guard.mjs"],
+    },
+    {
       label: "allow-attribute-guard",
       command: "node",
       args: ["scripts/ci/allow-attribute-guard.mjs"],

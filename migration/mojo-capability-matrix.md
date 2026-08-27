@@ -59,7 +59,7 @@ GLIBC requirement as high as 2.35. Prodex therefore uses zero-copy `StringSlice`
 | Object/shared library / C ABI | Yes | Static object, shared library, scalar, flat-buffer, string-view, and structured-record exports verified | Static object remains selected; heap-owning types require dynamic runtime | Rust `extern "C"` | `MOVE NOW` for verified kernels | `ffi-contract.md`; object/shared probes; release dependency audit |
 | SQLite / PostgreSQL / Redis | Yes | Not required by core | Rust drivers and persistence contracts | rusqlite/postgres/redis | `KEEP RUST` | Storage boundary |
 | Cryptography / keyring / OAuth | Yes | Not required by core | Security ecosystem | Rust crates | `KEEP RUST` | Auth boundary |
-| Terminal / logging | Yes | Not required by core | TUI/log redaction contracts | Crossterm/Ratatui/tracing | `KEEP RUST` | Observability rules |
+| Terminal / logging | Yes | Event classification is production-verified; file watching, TUI, and redaction remain Rust | TUI/log redaction contracts | Crossterm/Ratatui/tracing | `MOJO` for bounded event classification; `KEEP RUST` for IO/rendering | `prodex_mojo_log_classify_v1` feeds the shared stream renderer |
 
 ## Evidence links
 
@@ -84,7 +84,8 @@ the Mojo feature and does not satisfy this evidence contract.
 ## Shared core and release evidence
 
 The current production feature set is `mojo-core`, composed of `mojo-quota`, `mojo-runtime`,
-and `mojo-routing`. It compiles the quota, runtime, Smart Context, and routing sources into one
+and `mojo-routing`. It compiles the quota, runtime, Smart Context, routing, and bounded log
+classification sources into one
 static archive. Real Mojo CI executes quota, runtime quota, Smart Context byte estimation and
 pressure snapshot, runtime candidate ordering, profile scheduling order, context signal
 arithmetic, provider score/routing-plan batching, and provider capability matching through their
@@ -116,8 +117,8 @@ The release matrix is intentionally stricter than object generation:
 | --- | --- | --- | --- |
 | `x86_64-unknown-linux-gnu` | Verified with target triple and `x86-64` CPU | `MOJO_RELEASE_SUPPORTED` | Cross-container final link passed with the GLIBC_2.23 release ceiling, no dynamic Mojo dependency/RPATH, and clean execution without `mojo` |
 | `aarch64-unknown-linux-gnu` | Verified object and archive | `MOJO_RELEASE_SUPPORTED` | Final cross link, GLIBC_2.23 ceiling, dependency audit, QEMU execution, clean runtime, and Mojo self-test pass |
-| `x86_64-apple-darwin`, `aarch64-apple-darwin` | Verified objects only | `RUST_RELEASE_ONLY` | Signing, release link, and clean-machine evidence are not yet available |
-| `*-pc-windows-msvc` | Verified objects only | `RUST_RELEASE_ONLY` | Native MSVC final link/runtime evidence is not yet available |
+| `x86_64-apple-darwin`, `aarch64-apple-darwin` | Cross-target objects plus native release link/runtime gate | `MOJO_RELEASE_SUPPORTED` | The release workflow builds the archive on Linux and requires native macOS doctor/self-test evidence |
+| `*-pc-windows-msvc` | Cross-target COFF objects plus native release link/runtime gate | `MOJO_RELEASE_SUPPORTED` | The release workflow builds the archive on Linux and requires native MSVC doctor/self-test evidence |
 
 `PRODEX_MOJO_REQUIRED=1` is mandatory for Real Mojo CI and Mojo-enabled release jobs. The
 release job must not downgrade a configured Mojo target to Rust. Installer metadata is rendered
@@ -153,7 +154,8 @@ This is the final matrix for the rich wave against baseline
 | Structured output strings | limited | MOJO | Yes: normalized keys, provider/model names, model chains, artifact IDs | Rust-owned output byte arenas |
 | JSON | Rust | KEEP_RUST | No; Serde remains external compatibility parser | No EmberJson dependency |
 
-Promotion evidence is executable: strict Rust callers run all five v2 operations, layout checks
+Promotion evidence is executable: strict Rust callers run all five rich v2 operations plus the
+log-classification export, layout checks
 compare compiler-generated sizes/alignment, and the release archive checks all v2 symbols and
 rejects `KGEN_CompilerRT_*` references. Native heap and package-backed paths remain non-production
 until their full target and clean-machine gates pass.

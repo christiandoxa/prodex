@@ -105,10 +105,10 @@ An absent window is `Unknown`. The pressure band is the maximum mapped band of t
 five-hour and weekly statuses. Window-pair readiness is false when both values are
 missing or either present value is at least `100`.
 
-Rust-only release targets retain their separately compiled implementation. Mojo is opt-in
-because Cargo builds must remain usable on supported targets without a Mojo toolchain. Once
-a Mojo feature is enabled, a missing compiler, archiver, or prebuilt archive fails the build;
-there is no feature-enabled Rust fallback.
+Development-only Rust builds may omit the Mojo feature. Every target advertised by the
+`0.418.0` release matrix is Mojo-backed; its build receives a target archive and fails when the
+archive, compiler-produced ABI, or self-test is unavailable. There is no release-target Rust
+fallback after a Mojo failure.
 
 ## Build contract
 
@@ -116,7 +116,8 @@ there is no feature-enabled Rust fallback.
 
 1. runs only when a `prodex-mojo-core` feature is enabled;
 2. invokes the current `mojo build --emit object --optimization-level=3` for each selected source;
-3. archives the objects as one `libprodex_mojo_core.a`;
+3. archives the objects as one target-native static library (`libprodex_mojo_core.a` on Unix or
+   `prodex_mojo_core.lib` on MSVC);
 4. forwards that static archive to final Cargo link targets;
 5. accepts `PRODEX_MOJO`, `AR`, and `PRODEX_MOJO_ARCHIVE` only as local build overrides;
 6. emits `prodex_mojo_active` only after the current source archive is ready;
@@ -124,10 +125,10 @@ there is no feature-enabled Rust fallback.
    prebuilt archive, or failed build is a hard error;
 8. never downloads tools or invokes network access.
 
-Generated objects and archives are never committed. Release cross-linking builds a target
-archive outside the final Cargo output directory, then sets `PRODEX_MOJO_ARCHIVE` so the Rust
-target linker consumes that exact archive. Other target rows remain Rust-only until final-link,
-runtime, and deployment evidence exists.
+Generated objects and archives are never committed. Release cross-linking builds each target
+archive outside the final Cargo output directory, then sets `PRODEX_MOJO_ARCHIVE` so the native
+target linker consumes that exact archive. The release workflow performs the archive build on a
+pinned Linux host and performs final linking and runtime checks on each native target runner.
 
 Rust-only builds omit Mojo features. Once a Mojo feature is enabled, the compiler and archive
 are mandatory; a missing tool fails the build and invalid Mojo output fails the call without
@@ -439,6 +440,21 @@ describe different phases.
 No generated object or archive is committed. The final Linux release is verified for static
 Mojo dependencies, no build-path RPATH/RUNPATH, GLIBC policy, and execution without `mojo` on
 `PATH`.
+
+## Log event classification ABI v1
+
+`prodex_mojo_log_classify_v1` is a bounded, synchronous operation used by the shared runtime-log
+renderer. Rust passes one non-secret UTF-8 event key and caller-owned `Int64` category and severity
+outputs. Mojo performs the event-key matching; Rust retains log-file IO, field extraction, secret
+redaction, and human/JSON rendering. Category and severity tags are validated before they reach a
+renderer. The export is stateless and reentrant, accepts keys up to 128 bytes, and returns an
+explicit ABI/input error rather than selecting a Rust production classifier when Mojo fails.
+
+The category tags are `None=0`, `Route=1`, `Quota=2`, `Backoff=3`, `Http=4`, `Websocket=5`,
+`Stream=6`, `Smart=7`, `Compact=8`, `Error=9`, `Hook=10`, `Request=11`, `Model=12`, `Mcp=13`,
+`Agent=14`, `Tool=15`, `Retry=16`, `Health=17`, `Upstream=18`, `Response=19`, `Terminal=20`, and
+`Load=21`. Severity is `0` through `3`. ABI version `1` is independent of the rich v2 record
+ABI. The Rust reference classifier is test-only on Mojo-enabled production paths.
 
 ## Rich/domain ABI v2 (2026-08-26)
 

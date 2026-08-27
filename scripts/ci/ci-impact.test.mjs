@@ -46,6 +46,7 @@ test("root package exposes only the maintained developer interface", async () =>
     "lint",
     "docs",
     "compat",
+    "mojo:ownership",
     "bench",
     "ci",
     "release",
