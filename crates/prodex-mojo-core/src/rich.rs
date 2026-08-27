@@ -411,17 +411,9 @@ fn ensure_rich_abi() -> Result<(), MojoError> {
 }
 
 pub fn rich_self_test() -> bool {
-    let trace = std::env::var_os("PRODEX_MOJO_SELF_TEST_TRACE").is_some();
-    if trace {
-        eprintln!("Mojo rich self-test start: context");
-    }
     let context = analyze_context(" error: 火\r\nnoise\nerror: 火\n").is_ok_and(|value| {
         value.counts[0] == 2 && value.groups.len() == 1 && value.groups[0].duplicate_count == 1
     });
-    if trace {
-        eprintln!("Mojo rich self-test result: context={context}");
-        eprintln!("Mojo rich self-test start: routes");
-    }
     let routes = plan_routes(
         &[RouteInput {
             provider: " OpenAI ",
@@ -441,10 +433,6 @@ pub fn rich_self_test() -> bool {
         [10_000, 0, 0, 0, 0, 0, 0],
     )
     .is_ok_and(|value| value.selected_index == Some(0) && value.candidates[0].provider == "openai");
-    if trace {
-        eprintln!("Mojo rich self-test result: routes={routes}");
-        eprintln!("Mojo rich self-test start: policy");
-    }
     let policy = validate_policy_alias(PolicyAliasInput {
         alias: "prodex",
         models: &["gpt-5"],
@@ -452,16 +440,8 @@ pub fn rich_self_test() -> bool {
         metrics: &["gpt-5"],
     })
     .is_ok_and(|value| value.models[0].metric_match == Some(0));
-    if trace {
-        eprintln!("Mojo rich self-test result: policy={policy}");
-        eprintln!("Mojo rich self-test start: fallback");
-    }
     let fallback = model_fallback_chain("copilot", " codex ")
         .is_ok_and(|value| value == ["gpt-5.3-codex", "gpt-5.1-codex", "gpt-4o"]);
-    if trace {
-        eprintln!("Mojo rich self-test result: fallback={fallback}");
-        eprintln!("Mojo rich self-test start: context_plan");
-    }
     let context_plan = plan_context_items(
         &[ContextPlanItem {
             id: "psc:example#L1-L2",
@@ -473,16 +453,7 @@ pub fn rich_self_test() -> bool {
         3,
     )
     .is_ok_and(|value| value.actions[0].action == 1 && value.used_tokens == 3);
-    if trace {
-        eprintln!("Mojo rich self-test result: context_plan={context_plan}");
-    }
-    let result = context && routes && policy && fallback && context_plan;
-    if !result && std::env::var_os("PRODEX_MOJO_SELF_TEST_TRACE").is_some() {
-        eprintln!(
-            "Mojo rich self-test: context={context} routes={routes} policy={policy} fallback={fallback} context_plan={context_plan}"
-        );
-    }
-    result
+    context && routes && policy && fallback && context_plan
 }
 
 #[cfg(test)]
