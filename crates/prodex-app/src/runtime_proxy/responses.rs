@@ -595,7 +595,7 @@ fn handle_runtime_responses_attempt(
             if hard_affinity {
                 return Ok(Some(runtime_responses_local_selection_failure_reply()));
             }
-            loop_state.record_transport_failure();
+            loop_state.record_transport_failure_at(stage);
             loop_state.excluded_profiles.insert(profile_name);
             Ok(None)
         }

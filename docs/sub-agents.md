@@ -37,7 +37,11 @@ The canonical provider registry currently exposes:
 
 Provider model pickers use the checked-in canonical catalog without requiring a network request. They include provider default, built-in models in recommendation order, configured/current models when present, and a custom-model entry. Lists scroll on short terminals. A nonempty custom model ID is preserved exactly even when it is absent from the catalog.
 
-OpenAI includes `gpt-5.6-luna`; its catalog metadata includes the `max` reasoning effort.
+The main-agent OpenAI picker consumes the current top-level Codex catalog, including
+catalog-visible `gpt-5.6-sol`, `gpt-5.6-terra`, and `gpt-5.6-luna` when the active
+catalog exposes them. Prodex child selection remains a separate child-provider catalog;
+it is not inferred from a truncated native task-tool description. Effort options are
+resolved from the selected model's catalog metadata.
 
 ## Resume and affinity
 

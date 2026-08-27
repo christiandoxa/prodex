@@ -2,7 +2,7 @@
   "codex": {
     "compatibility": {
       "upstream_repository": "https://github.com/openai/codex",
-      "baseline_source": "openai/codex rust-v0.149.1 release",
+      "baseline_source": "openai/codex rust-v0.150.1 release",
       "guard_command": "node scripts/compat/check-upstream-baseline.mjs",
       "format_version": 2,
       "critical_files": [
@@ -380,7 +380,7 @@
             "CompactionImageBudget",
             "compaction_image_budget",
             "key: \"compaction_image_budget\"",
-            "default_enabled: false"
+            "default_enabled: true"
           ]
         },
         {
@@ -594,6 +594,17 @@
           ]
         },
         {
+          "path": "codex-rs/app-server-protocol/src/protocol/v2/mcp.rs",
+          "reason": "Owns the Codex 0.150.0 MCP event-stream request, stop, notification, and bounded JSON payload schemas.",
+          "required_contains": [
+            "McpServerEventStreamStartParams",
+            "McpServerEventStreamStopParams",
+            "McpServerEventNotification",
+            "McpServerEventStreamNotification",
+            "subscription_id"
+          ]
+        },
+        {
           "path": "codex-rs/app-server-protocol/src/protocol/v2/thread.rs",
           "reason": "Owns camelCase threadSource fields on thread/start and thread/fork; thread/resume intentionally has no source override field.",
           "required_contains": [
@@ -647,6 +658,18 @@
             "turn/start",
             "TurnStatus::InProgress",
             "ThreadSettingsBuildParams"
+          ]
+        },
+        {
+          "path": "codex-rs/app-server/src/request_processors/mcp_event_stream.rs",
+          "reason": "Owns MCP event-stream connection/thread subscription limits, startup, stop, reconnect, and cleanup semantics.",
+          "required_contains": [
+            "MAX_MCP_EVENT_STREAMS_PER_CONNECTION",
+            "MCP_EVENT_STREAM_STARTUP_TIMEOUT",
+            "McpEventStreams",
+            "McpServerEventStreamStartParams",
+            "McpServerEventStreamStopParams",
+            "mcpServer/event/stream"
           ]
         },
         {
@@ -1341,12 +1364,12 @@
           "id": "features.compaction-image-budget",
           "kind": "feature_gate",
           "file": "codex-rs/features/src/lib.rs",
-          "reason": "The opt-in Boolean remains a Codex feature config key and is disabled unless the user enables it.",
+          "reason": "The Boolean remains a Codex feature config key; Codex 0.150.1 enables retained-image budgeting by default unless the user disables it.",
           "file_contains_all": [
             "CompactionImageBudget",
             "compaction_image_budget",
             "key: \"compaction_image_budget\"",
-            "default_enabled: false"
+            "default_enabled: true"
           ]
         },
         {
@@ -1437,6 +1460,19 @@
           ]
         },
         {
+          "id": "app-server.mcp-event-stream",
+          "kind": "experimental_jsonrpc_methods",
+          "file": "codex-rs/app-server/src/request_processors/mcp_event_stream.rs",
+          "reason": "Codex 0.150.0 ties MCP event subscriptions to the connection and thread; Prodex must pass these requests and notifications without globalizing them.",
+          "file_contains_all": [
+            "McpEventStreams",
+            "McpServerEventStreamStartParams",
+            "McpServerEventStreamStopParams",
+            "mcpServer/event/stream",
+            "MAX_MCP_EVENT_STREAMS_PER_CONNECTION"
+          ]
+        },
+        {
           "id": "app-server.permission-profile-removal",
           "kind": "jsonrpc_validation",
           "file": "codex-rs/app-server/src/message_processor.rs",
@@ -1497,7 +1533,20 @@
           ]
         }
       ],
-      "tested_codex_release": "rust-v0.149.1",
+      "tested_codex_release": "rust-v0.150.1",
+      "patch_deltas": [
+        {
+          "from": "rust-v0.150.0",
+          "to": "rust-v0.150.1",
+          "upstream_pr": "#41003",
+          "backport_of": "#40994",
+          "runtime_changes": [
+            "compaction_image_budget is stable and enabled by default for remote compaction"
+          ],
+          "prodex_action": "Preserve the feature setting, compaction payload, and response metadata; do not implement image budgeting or pruning in Prodex.",
+          "ci_only_changes": "The remaining patch-branch changes are upstream CI and test corrections with no Prodex runtime action."
+        }
+      ],
       "app_server_protocol": {
         "schema_command": "codex app-server generate-json-schema --out DIR",
         "schema_hash": null,
@@ -1511,18 +1560,20 @@
           "thread/queue/add",
           "thread/queue/changed",
           "turn/start",
-          "turn/cancel"
+          "turn/cancel",
+          "mcpServer/event/stream/start",
+          "mcpServer/event/stream/stop"
         ]
       }
     },
     "latestRelease": {
-      "tag_name": "rust-v0.149.1",
-      "name": "0.149.1",
-      "published_at": "2026-08-24T00:28:28Z",
-      "html_url": "https://github.com/openai/codex/releases/tag/rust-v0.149.1",
+      "tag_name": "rust-v0.150.1",
+      "name": "0.150.1",
+      "published_at": "2026-08-27T01:56:54Z",
+      "html_url": "https://github.com/openai/codex/releases/tag/rust-v0.150.1",
       "body_head": [
         "## Changelog",
-        "Full Changelog: https://github.com/openai/codex/compare/rust-v0.149.0...rust-v0.149.1"
+        "Full Changelog: https://github.com/openai/codex/compare/rust-v0.150.0...rust-v0.150.1"
       ]
     }
   },

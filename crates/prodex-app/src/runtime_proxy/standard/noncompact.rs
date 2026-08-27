@@ -493,7 +493,7 @@ fn handle_runtime_noncompact_attempt(
                     runtime_proxy_local_selection_failure_message(),
                 )));
             }
-            loop_state.record_transport_failure();
+            loop_state.record_transport_failure_at(stage);
             loop_state.excluded_profiles.insert(profile_name);
             Ok(None)
         }

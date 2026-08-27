@@ -20,6 +20,7 @@ pub(super) struct RuntimePrecommitLoopState<F> {
     pub excluded_profiles: BTreeSet<String>,
     pub saw_inflight_saturation: bool,
     pub saw_transport_failure: bool,
+    pub saw_transport_recovery_candidate: bool,
     pub saw_overload_failure: bool,
     pub recovery_sweeps: usize,
     pub recovery_started_at: Option<Instant>,
@@ -34,6 +35,7 @@ impl<F> RuntimePrecommitLoopState<F> {
             excluded_profiles: BTreeSet::new(),
             saw_inflight_saturation: false,
             saw_transport_failure: false,
+            saw_transport_recovery_candidate: false,
             saw_overload_failure: false,
             recovery_sweeps: 0,
             recovery_started_at: None,
@@ -90,12 +92,18 @@ impl<F> RuntimePrecommitLoopState<F> {
         self.saw_inflight_saturation = true;
     }
 
-    pub fn record_transport_failure(&mut self) {
+    pub fn record_transport_failure_at(&mut self, stage: &str) {
         self.saw_transport_failure = true;
+        self.saw_transport_recovery_candidate =
+            !stage.contains("upstream_request") && !stage.contains("connect");
     }
 
     pub fn record_overload_failure(&mut self) {
         self.saw_overload_failure = true;
+    }
+
+    fn saw_transient_failure(&self) -> bool {
+        self.saw_overload_failure || self.saw_transport_recovery_candidate
     }
 
     pub fn recovery_budget_exhausted(&self) -> bool {
@@ -118,7 +126,7 @@ impl<F> RuntimePrecommitLoopState<F> {
         shared: &RuntimeRotationProxyShared,
         route_kind: RuntimeRouteKind,
     ) -> Result<bool> {
-        if !self.saw_overload_failure || self.recovery_budget_exhausted() {
+        if !self.saw_transient_failure() || self.recovery_budget_exhausted() {
             return Ok(false);
         }
         let recovery_started_at = *self.recovery_started_at.get_or_insert_with(Instant::now);
@@ -182,6 +190,15 @@ impl<F> RuntimePrecommitLoopState<F> {
 #[cfg(test)]
 mod tests {
     use super::RuntimePrecommitLoopState;
+
+    #[test]
+    fn transport_failures_are_recoverable_transient_failures() {
+        let mut state = RuntimePrecommitLoopState::<()>::new();
+
+        assert!(!state.saw_transient_failure());
+        state.record_transport_failure_at("response_body");
+        assert!(state.saw_transient_failure());
+    }
 
     #[test]
     fn attempts_share_one_elapsed_budget() {

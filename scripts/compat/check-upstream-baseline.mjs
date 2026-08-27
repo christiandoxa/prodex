@@ -44,11 +44,13 @@ const REQUIRED_CRITICAL_FILES = [
   "codex-rs/app-server-protocol/src/export.rs",
   "codex-rs/app-server-protocol/src/rpc.rs",
   "codex-rs/app-server-protocol/src/protocol/common.rs",
+  "codex-rs/app-server-protocol/src/protocol/v2/mcp.rs",
   "codex-rs/app-server-protocol/src/protocol/v2/thread.rs",
   "codex-rs/app-server/src/message_processor.rs",
   "codex-rs/app-server/src/request_processors/initialize_processor.rs",
   "codex-rs/app-server/src/request_processors/thread_processor.rs",
   "codex-rs/app-server/src/request_processors/turn_processor.rs",
+  "codex-rs/app-server/src/request_processors/mcp_event_stream.rs",
   "codex-rs/app-server/src/request_serialization.rs",
 ];
 
@@ -342,7 +344,22 @@ const REQUIRED_FILE_CONTAINS = {
     "CompactionImageBudget",
     "compaction_image_budget",
     "key: \"compaction_image_budget\"",
-    "default_enabled: false",
+    "default_enabled: true",
+  ],
+  "codex-rs/app-server-protocol/src/protocol/v2/mcp.rs": [
+    "McpServerEventStreamStartParams",
+    "McpServerEventStreamStopParams",
+    "McpServerEventNotification",
+    "McpServerEventStreamNotification",
+    "subscription_id",
+  ],
+  "codex-rs/app-server/src/request_processors/mcp_event_stream.rs": [
+    "MAX_MCP_EVENT_STREAMS_PER_CONNECTION",
+    "MCP_EVENT_STREAM_STARTUP_TIMEOUT",
+    "McpEventStreams",
+    "McpServerEventStreamStartParams",
+    "McpServerEventStreamStopParams",
+    "mcpServer/event/stream",
   ],
   "codex-rs/http-client/src/outbound_proxy.rs": [
     "OutboundProxyPolicy",
@@ -597,6 +614,8 @@ const REQUIRED_APP_SERVER_METHODS = [
   "thread/queue/changed",
   "turn/start",
   "turn/cancel",
+  "mcpServer/event/stream/start",
+  "mcpServer/event/stream/stop",
 ];
 
 const REQUIRED_STREAM_EVENTS = [
@@ -1107,7 +1126,7 @@ const REQUIRED_SEMANTIC_CHECKS = [
       "CompactionImageBudget",
       "compaction_image_budget",
       "key: \"compaction_image_budget\"",
-      "default_enabled: false",
+      "default_enabled: true",
     ],
   },
   {
@@ -1178,6 +1197,18 @@ const REQUIRED_SEMANTIC_CHECKS = [
       "ThreadStarted => \"thread/started\"",
       "ThreadQueueChanged => \"thread/queue/changed\"",
       "TurnStarted => \"turn/started\"",
+    ],
+  },
+  {
+    id: "app-server.mcp-event-stream",
+    kind: "experimental_jsonrpc_methods",
+    file: "codex-rs/app-server/src/request_processors/mcp_event_stream.rs",
+    file_contains_all: [
+      "McpEventStreams",
+      "McpServerEventStreamStartParams",
+      "McpServerEventStreamStopParams",
+      "mcpServer/event/stream",
+      "MAX_MCP_EVENT_STREAMS_PER_CONNECTION",
     ],
   },
   {

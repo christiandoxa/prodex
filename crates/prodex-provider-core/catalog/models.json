@@ -2,6 +2,90 @@
   {
     "provider": "openai",
     "owned_by": "openai",
+    "id": "gpt-5.6-sol",
+    "display_name": "GPT-5.6 Sol",
+    "description": "GPT-5.6 coding model for ambitious agentic tasks.",
+    "context_window_tokens": 872000,
+    "max_output_tokens": 128000,
+    "supported_reasoning_efforts": [
+      "low",
+      "medium",
+      "high",
+      "xhigh",
+      "max",
+      "ultra"
+    ],
+    "default_reasoning_effort": "low",
+    "input_cost_per_million_microusd": null,
+    "output_cost_per_million_microusd": null,
+    "supported_endpoints": [
+      "responses",
+      "responses/compact",
+      "chat-completions",
+      "models",
+      "embeddings",
+      "images",
+      "audio",
+      "batches"
+    ],
+    "aliases": [
+      "sol"
+    ],
+    "feature_flags": {
+      "tools": true,
+      "json_schema": true,
+      "vision": false,
+      "audio": false,
+      "web_search": true,
+      "reasoning": true
+    },
+    "pricing_known": false
+  },
+  {
+    "provider": "openai",
+    "owned_by": "openai",
+    "id": "gpt-5.6-terra",
+    "display_name": "GPT-5.6 Terra",
+    "description": "GPT-5.6 coding model for everyday agentic tasks.",
+    "context_window_tokens": 872000,
+    "max_output_tokens": 128000,
+    "supported_reasoning_efforts": [
+      "low",
+      "medium",
+      "high",
+      "xhigh",
+      "max",
+      "ultra"
+    ],
+    "default_reasoning_effort": "medium",
+    "input_cost_per_million_microusd": null,
+    "output_cost_per_million_microusd": null,
+    "supported_endpoints": [
+      "responses",
+      "responses/compact",
+      "chat-completions",
+      "models",
+      "embeddings",
+      "images",
+      "audio",
+      "batches"
+    ],
+    "aliases": [
+      "terra"
+    ],
+    "feature_flags": {
+      "tools": true,
+      "json_schema": true,
+      "vision": false,
+      "audio": false,
+      "web_search": true,
+      "reasoning": true
+    },
+    "pricing_known": false
+  },
+  {
+    "provider": "openai",
+    "owned_by": "openai",
     "id": "gpt-5.6-luna",
     "display_name": "GPT-5.6 Luna",
     "description": "GPT-5.6 coding model for clear, repeatable agentic tasks.",
