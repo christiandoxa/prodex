@@ -651,6 +651,22 @@ fn wait_for_compact_overload_recovery(
     if profile_count < 2 {
         return Ok(false);
     }
+    let recovered = clear_runtime_recovered_profiles(
+        shared,
+        excluded_profiles,
+        RuntimeRouteKind::Compact,
+        true,
+    )?;
+    if recovered > 0 {
+        *recovery_sweeps = recovery_sweeps.saturating_add(1);
+        runtime_proxy_log(
+            shared,
+            format!(
+                "request={request_id} transport=http rotation_sweep_start route=compact recovered_profiles={recovered} sweep={recovery_sweeps}"
+            ),
+        );
+        return Ok(true);
+    }
     let Some(until) =
         runtime_profile_recovery_wait_for_route(shared, RuntimeRouteKind::Compact, true)?
     else {

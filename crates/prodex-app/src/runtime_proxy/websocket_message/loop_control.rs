@@ -139,6 +139,32 @@ impl<'a> RuntimeWebsocketTextMessageFlow<'a> {
         {
             return Ok(false);
         }
+        let recovered = clear_runtime_recovered_profiles(
+            self.shared,
+            &mut self.excluded_profiles,
+            RuntimeRouteKind::Websocket,
+            true,
+        )?;
+        if recovered > 0 {
+            self.recovery_sweeps = self.recovery_sweeps.saturating_add(1);
+            runtime_proxy_log(
+                self.shared,
+                runtime_proxy_structured_log_message(
+                    "rotation_sweep_start",
+                    [
+                        runtime_proxy_log_field("request", self.request_id.to_string()),
+                        runtime_proxy_log_field("websocket_session", self.session_id.to_string()),
+                        runtime_proxy_log_field(
+                            "route",
+                            runtime_route_kind_label(RuntimeRouteKind::Websocket),
+                        ),
+                        runtime_proxy_log_field("recovered_profiles", recovered.to_string()),
+                        runtime_proxy_log_field("sweep", self.recovery_sweeps.to_string()),
+                    ],
+                ),
+            );
+            return Ok(true);
+        }
         let Some(until) = runtime_profile_recovery_wait_for_route(
             self.shared,
             RuntimeRouteKind::Websocket,
