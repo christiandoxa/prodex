@@ -17,6 +17,7 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 
 ### Misc
 
+- Preserve all Windows archive objects (`1e6668c`)
 - Detect Windows log replacement reliably (`2ec28fb`)
 - Use stable Windows file identity API (`25ba645`)
 - Publish curated release notes (`ef6fa03`)
@@ -44,6 +45,7 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 - Updated the supported Codex baseline to `rust-v0.150.1`, including the retained-image compaction budget default, `context_window_id`, MCP event streaming, task references, Interrupt hooks, executor MCP authentication, and required MCP-server behavior. Prodex preserves these settings, payloads, and metadata; Codex owns compaction budgeting and image trimming.
 - Official release targets now require compiled-in Mojo domain operations and fail closed on missing artifacts, ABI mismatch, or self-test failure; Rust remains the system, transport, credential, persistence, and security boundary.
 - Release validation pins the current stable Kiro CLI toolchain used by the cross-platform provider smoke matrix.
+- Windows Mojo release archives now retain every compiled domain object, including the rich ABI and log exports required by the final linked artifact.
 
 ## Security
 
@@ -81,6 +83,7 @@ Full Changelog: [`0.417.0...0.418.0`](https://github.com/christiandoxa/prodex/co
 - `2759d343` — test: accept immediate recovery sweep
 - `46a14ec3` — fix: keep profile sweep budget platform-safe
 - `811f59fa` — fix: complete bounded profile sweep before timeout
+- `1e6668ce` — fix: preserve all Windows archive objects
 
 ## 0.417.0 - 2026-08-27
 
