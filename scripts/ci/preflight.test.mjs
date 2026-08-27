@@ -41,6 +41,13 @@ test("preflight runs runtime hotpath guard self-test before scanning workspace",
   assert.ok(labels.indexOf("runtime-hotpath-guard") > labels.indexOf("runtime-hotpath-guard-self-test"));
 });
 
+test("preflight enforces Mojo ownership and no-fallback guards", () => {
+  const labels = preflightSteps(parseArgs(["node", "preflight.mjs"])).map((step) => step.label);
+
+  assert.ok(labels.includes("mojo-ownership"));
+  assert.ok(labels.includes("mojo-no-fallback"));
+});
+
 test("preflight runs config boundary guard self-test before scanning workspace", () => {
   const labels = preflightSteps(parseArgs(["node", "preflight.mjs"])).map((step) => step.label);
 

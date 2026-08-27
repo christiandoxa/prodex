@@ -7,6 +7,7 @@ const steps = [
   ["rust-allow", "scripts/ci/allow-attribute-guard.mjs"],
   ["mojo-no-fallback-self-test", "scripts/ci/mojo-no-fallback-guard.mjs", "--self-test"],
   ["mojo-no-fallback", "scripts/ci/mojo-no-fallback-guard.mjs"],
+  ["mojo-ownership", "scripts/ci/mojo-ownership.mjs", "--check"],
   ["optional-tools", "scripts/ci/optional-tools-guard.mjs", "--self-test"],
   ["smart-context", "scripts/ci/smart-context-guard.mjs", "--self-test"],
   ["full-test-shards", "scripts/ci/prodex-app-test-shards.mjs", "--check"],

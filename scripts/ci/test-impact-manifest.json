@@ -39,6 +39,7 @@
     "Cargo.lock",
     "fuzz/Cargo.lock",
     "CHANGELOG.md",
+    "docs/release-notes/*.md",
     "crates/*/Cargo.toml",
     "package-lock.json",
     "npm/package-lock.json",
