@@ -2,6 +2,72 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.418.0 - 2026-08-27
+
+### Runtime
+
+- Upgrade Codex compatibility and model catalogs (`0fde6b3`)
+
+### Claude
+
+- Harden ChatGPT MCP expose readiness (`4805e3d`)
+
+### Misc
+
+- Detect Windows log replacement reliably (`2ec28fb`)
+- Use stable Windows file identity API (`25ba645`)
+- Publish curated release notes (`ef6fa03`)
+- Enrich Prodex log views (`7cae05f`)
+- Make log following incremental (`64456e7`)
+- Add Mojo operational log classification (`f7316db`)
+- Make prodex update version-aware (`29bf2bd`)
+## New Features
+
+- Added complete, role-aware model and reasoning-effort selection for the main agent and Prodex-owned sub-agents, including dynamic OpenAI catalog entries and future effort identifiers.
+- Added correlated operational insight to `prodex log stream` and request/transformation summaries to `prodex log upstream`, while keeping JSON Lines output machine-readable.
+
+## Bug Fixes
+
+- Fixed OpenAI main-agent selection so catalog-visible GPT-5.6 Sol and Terra models are not lost through sub-agent-specific filtering.
+- Made OpenAI profile rotation preserve usable near-zero quota and recover safe pre-commit requests across authoritative quota, temporary overload, and transport failures without replaying committed work.
+- Made `prodex update` version-aware and idempotent: it now skips asset download and replacement when the installed version is current and never automatically downgrades a newer local build.
+- Fixed log following across file replacement and truncation on Windows and Unix without replaying historical output.
+- Hardened `prodex s expose` readiness diagnostics and cleanup for local MCP initialization, Quick Tunnel routing, and public tool discovery.
+
+## Compatibility
+
+- Updated the supported Codex baseline to `rust-v0.150.1`, including the retained-image compaction budget default, `context_window_id`, MCP event streaming, task references, Interrupt hooks, executor MCP authentication, and required MCP-server behavior. Prodex preserves these settings, payloads, and metadata; Codex owns compaction budgeting and image trimming.
+- Official release targets now require compiled-in Mojo domain operations and fail closed on missing artifacts, ABI mismatch, or self-test failure; Rust remains the system, transport, credential, persistence, and security boundary.
+
+## Security
+
+- Isolated ephemeral Quick Tunnel configuration and kept capability URLs, credentials, authorization headers, cookies, and profile authentication material out of diagnostics, MCP responses, and release artifacts.
+
+## Documentation
+
+- Updated Codex compatibility, model-catalog ownership, expose/MCP, Mojo migration, ecosystem-audit, and operational-log guidance.
+
+## Performance
+
+- Reduced steady-state log-following work by using bounded incremental reads, cached path discovery, file-identity rotation handling, and incremental record processing instead of repeated historical scans.
+
+## Changelog
+
+Full Changelog: [`0.417.0...0.418.0`](https://github.com/christiandoxa/prodex/compare/0.417.0...0.418.0)
+
+- `29bf2bd4` — fix: make prodex update version-aware
+- `0fde6b36` — feat: upgrade Codex compatibility and model catalogs
+- `f7316dbb` — feat: add Mojo operational log classification
+- `64456e74` — perf: make log following incremental
+- `7cae05fd` — feat: enrich Prodex log views
+- `4805e3d5` — feat: harden ChatGPT MCP expose readiness
+- `2ec15eec` — build: enforce Mojo-backed release artifacts
+- `ef6fa033` — feat: publish curated release notes
+- `73f9adff` — ci: allow audited 0.418.0 migration range
+- `25ba645b` — fix: use stable Windows file identity API
+- `2ec28fbe` — fix: detect Windows log replacement reliably
+- `270a446c` — fix: keep Mojo build script within quality limits
+
 ## 0.417.0 - 2026-08-27
 
 ### CLI
@@ -58,6 +124,22 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 - Migrate context text and harden quota recovery (`b4486b5`)
 
 ## 0.415.0 - 2026-08-24
+
+### CLI
+
+- Resolve providers and persist model choices (`ae33046`)
+
+### Docs
+
+- Restore durable agent guidance (`762fbe1`)
+- Align compatibility and remove obsolete guidance (`3aa3f2a`)
+
+### Misc
+
+- Keep stream alive across transient file errors (`85ccf51`)
+- Support Codex 0.149.1 (`c85a85a`)
+
+## 0.414.0 - 2026-08-23
 
 ### Runtime
 
@@ -159,7 +241,6 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 
 ### CLI
 
-- Resolve providers and persist model choices (`ae33046`)
 - Tolerate slow heartbeat startup (`15d3f90`)
 - Preserve fraction-only Gemini quota (`7523ce7`)
 - Make quota default detailed (`defbb4c`)
@@ -226,8 +307,6 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 
 ### Docs
 
-- Restore durable agent guidance (`762fbe1`)
-- Align compatibility and remove obsolete guidance (`3aa3f2a`)
 - Sync weighted inflight policy (`e9b0731`)
 - Require repository-wide reuse first (`c5d6347`)
 - Document compact task interface (`4e4ef10`)
@@ -291,8 +370,6 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 
 ### Misc
 
-- Keep stream alive across transient file errors (`85ccf51`)
-- Support Codex 0.149.1 (`c85a85a`)
 - Reuse optional ABI tag decoder (`d15b2c7`)
 - Migrate production decision kernels (`489bb0e`)
 - Keep fallback Clippy-clean (`fee7b8e`)
