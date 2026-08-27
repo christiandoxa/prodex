@@ -330,15 +330,15 @@ fn runtime_proxy_http_fresh_request_reaches_later_profile_after_usage_limit_chai
         "fresh requests should rotate past usage-limit accounts"
     );
     let body = response.text().expect("responses body should decode");
+    let responses_accounts = fixture.backend.responses_accounts();
     assert!(
         body.contains("\"id\":\"resp-third\""),
-        "healthy later profile should complete the request: {body}"
+        "healthy later profile should complete the request: {body}; accounts={responses_accounts:?}"
     );
     assert!(
         !body.contains("usage limit") && !body.contains("service_unavailable"),
         "retryable usage-limit failures must not leak once a later profile succeeds: {body}"
     );
-    let responses_accounts = fixture.backend.responses_accounts();
     assert_eq!(
         responses_accounts.first().map(String::as_str),
         Some("fifth-account"),
