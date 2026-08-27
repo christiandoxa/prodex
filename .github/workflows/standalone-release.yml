@@ -295,6 +295,7 @@ jobs:
             binary-name: prodex
             use-cross: true
             can-native-smoke: true
+            can-mojo-runtime-smoke: true
             max-glibc: GLIBC_2.23
             mojo-release: true
             mojo-target-cpu: x86-64
@@ -305,6 +306,7 @@ jobs:
             binary-name: prodex
             use-cross: true
             can-native-smoke: false
+            can-mojo-runtime-smoke: true
             max-glibc: GLIBC_2.23
             mojo-release: true
             mojo-target-cpu: generic
@@ -315,6 +317,7 @@ jobs:
             binary-name: prodex
             use-cross: false
             can-native-smoke: true
+            can-mojo-runtime-smoke: true
             mojo-release: true
             mojo-target-cpu: x86-64
             mojo-features: mojo-core
@@ -324,6 +327,7 @@ jobs:
             binary-name: prodex
             use-cross: false
             can-native-smoke: true
+            can-mojo-runtime-smoke: true
             mojo-release: true
             mojo-target-cpu: generic
             mojo-features: mojo-core
@@ -333,6 +337,7 @@ jobs:
             binary-name: prodex.exe
             use-cross: false
             can-native-smoke: true
+            can-mojo-runtime-smoke: true
             mojo-release: true
             mojo-target-cpu: x86-64
             mojo-features: mojo-core
@@ -342,6 +347,7 @@ jobs:
             binary-name: prodex.exe
             use-cross: false
             can-native-smoke: false
+            can-mojo-runtime-smoke: false
             mojo-release: true
             mojo-target-cpu: generic
             mojo-features: mojo-core
@@ -490,7 +496,7 @@ jobs:
           done
 
       - name: Verify compiled-in Mojo release
-        if: ${{ matrix.mojo-release }}
+        if: ${{ matrix.mojo-release && matrix.can-mojo-runtime-smoke }}
         shell: bash
         run: |
           set -euo pipefail
@@ -579,6 +585,15 @@ jobs:
           grep -F '"implementation": "mojo-compiled-in"' "${clean_root}/diagnostics.json"
           grep -F '"compiler_required": false' "${clean_root}/diagnostics.json"
           grep -F '"self_test": "passed"' "${clean_root}/diagnostics.json"
+
+      - name: Verify non-native Mojo release artifact
+        if: ${{ matrix.mojo-release && !matrix.can-mojo-runtime-smoke }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          binary="target/${{ matrix.target }}/release/${{ matrix.binary-name }}"
+          test -s "${binary}"
+          echo "${{ matrix.target }} is compile/link verified; runtime smoke requires a native runner"
 
       - name: Verify Linux GLIBC baseline
         if: ${{ contains(matrix.target, 'unknown-linux-gnu') }}
