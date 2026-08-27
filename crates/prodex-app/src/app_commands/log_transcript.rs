@@ -46,12 +46,12 @@ pub(crate) fn local_transcript_event(mut event: TranscriptEvent) -> TranscriptEv
 }
 
 pub(crate) fn latest_transcript_event() -> Result<Option<TranscriptEvent>> {
-    let mut latest = None;
     for path in recent_session_log_paths()? {
         let tail = match read_runtime_log_tail(&path, SESSION_SNAPSHOT_TAIL_BYTES) {
             Ok(tail) => tail,
             Err(_) => continue,
         };
+        let mut latest = None;
         for line in String::from_utf8_lossy(&tail).lines() {
             for event in transcript_events_from_session_line(line) {
                 let event = local_transcript_event(event);
@@ -63,8 +63,11 @@ pub(crate) fn latest_transcript_event() -> Result<Option<TranscriptEvent>> {
                 }
             }
         }
+        if latest.is_some() {
+            return Ok(latest);
+        }
     }
-    Ok(latest)
+    Ok(None)
 }
 
 pub(crate) fn transcript_events_from_session_line(line: &str) -> Vec<TranscriptEvent> {
@@ -152,6 +155,13 @@ fn event_msg_transcript_event(
     payload: &serde_json::Value,
 ) -> Option<TranscriptEvent> {
     let event_type = payload.get("type").and_then(serde_json::Value::as_str)?;
+    if event_type.contains("mcp")
+        || event_type.contains("subagent")
+        || event_type.contains("sub_agent")
+        || event_type.contains("tool_call")
+    {
+        return protocol_operation_transcript_event(timestamp, payload, event_type);
+    }
     let text_field = match event_type {
         "agent_reasoning" => "text",
         _ => "message",
@@ -276,9 +286,84 @@ fn response_item_transcript_event(
             source: "reasoning".to_string(),
             text,
         }),
+        item_type
+            if item_type.contains("mcp")
+                || item_type.contains("subagent")
+                || item_type.contains("sub_agent")
+                || matches!(
+                    item_type,
+                    "computer_call"
+                        | "computer_call_output"
+                        | "web_search_call"
+                        | "file_search_call"
+                        | "code_interpreter_call"
+                ) =>
+        {
+            protocol_operation_transcript_event(timestamp, payload, item_type)
+        }
         _ => None,
     }
     .filter(|event| !event.text.trim().is_empty())
+}
+
+fn protocol_operation_transcript_event(
+    timestamp: String,
+    payload: &serde_json::Value,
+    event_type: &str,
+) -> Option<TranscriptEvent> {
+    let source = if event_type.contains("mcp") {
+        "mcp"
+    } else if event_type.contains("subagent") || event_type.contains("sub_agent") {
+        "agent"
+    } else {
+        "tool"
+    };
+    let mut details = Vec::new();
+    for (keys, label) in [
+        (&["server", "server_label", "server_name"][..], "server"),
+        (&["tool", "tool_name"][..], "tool"),
+        (&["name"][..], "name"),
+        (&["status"][..], "status"),
+        (&["phase"][..], "phase"),
+    ] {
+        if let Some(value) = keys.iter().find_map(|key| {
+            payload
+                .get(*key)
+                .and_then(serde_json::Value::as_str)
+                .and_then(transcript_safe_operation_value)
+        }) {
+            details.push(format!("{label}={value}"));
+        }
+    }
+    if !details.iter().any(|detail| detail.starts_with("status="))
+        && let Some(status) = event_type
+            .strip_prefix("subagent_")
+            .or_else(|| event_type.strip_prefix("sub_agent_"))
+    {
+        details.push(format!("status={status}"));
+    }
+    let text = if details.is_empty() {
+        event_type.replace('_', " ")
+    } else {
+        details.join(" ")
+    };
+    Some(TranscriptEvent {
+        timestamp,
+        source: source.to_string(),
+        text,
+    })
+}
+
+fn transcript_safe_operation_value(value: &str) -> Option<String> {
+    let value = redaction::redaction_redact_secret_like_text(value);
+    if value.trim().is_empty() || value.chars().any(char::is_control) {
+        return None;
+    }
+    let mut bounded = value.chars().take(192).collect::<String>();
+    if value.chars().nth(192).is_some() {
+        bounded.push('…');
+    }
+    Some(bounded)
 }
 
 fn transcript_text_from_reasoning(payload: &serde_json::Value) -> Option<String> {

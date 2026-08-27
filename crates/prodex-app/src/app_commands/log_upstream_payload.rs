@@ -21,6 +21,9 @@ pub(crate) struct UpstreamPayloadEvent {
 }
 
 pub(crate) fn upstream_payload_event_from_runtime_line(line: &str) -> Option<UpstreamPayloadEvent> {
+    if !line.contains("upstream_payload") {
+        return None;
+    }
     let parsed = parse_runtime_log_line(line)?;
     if parsed.event.as_deref() != Some("upstream_payload") {
         return None;
@@ -196,7 +199,7 @@ fn append_payload_summary(
     object: &serde_json::Map<String, Value>,
     width: usize,
 ) {
-    let summary = [
+    let mut summary = [
         "model",
         "stream",
         "store",
@@ -212,9 +215,71 @@ fn append_payload_summary(
             .map(|value| format!("{key}={value}"))
     })
     .collect::<Vec<_>>();
+    if let Some(effort) = object
+        .get("reasoning")
+        .and_then(Value::as_object)
+        .and_then(|reasoning| reasoning.get("effort"))
+        .and_then(Value::as_str)
+    {
+        summary.push(format!("effort={effort}"));
+    }
+    if let Some(input) = object.get("input").and_then(Value::as_array) {
+        let images = input
+            .iter()
+            .filter(|item| input_item_contains_type(item, "input_image"))
+            .count();
+        let audio = input
+            .iter()
+            .filter(|item| input_item_contains_type(item, "input_audio"))
+            .count();
+        summary.push(format!("input_items={}", input.len()));
+        if images > 0 {
+            summary.push(format!("images={images}"));
+        }
+        if audio > 0 {
+            summary.push(format!("audio={audio}"));
+        }
+    }
+    if let Some(tools) = object.get("tools").and_then(Value::as_array) {
+        summary.push(format!("tools={}", tools.len()));
+    }
+    if object.get("previous_response_id").is_some() {
+        summary.push("continuation=previous_response".to_string());
+    }
+    if object.get("compaction").is_some()
+        || object
+            .get("input")
+            .and_then(Value::as_array)
+            .is_some_and(|items| {
+                items.iter().any(|item| {
+                    item.get("type")
+                        .and_then(Value::as_str)
+                        .is_some_and(|item_type| item_type == "compaction")
+                })
+            })
+    {
+        summary.push("compaction=yes".to_string());
+    }
     if !summary.is_empty() {
         push_wrapped_line(lines, &summary.join(" "), width);
     }
+}
+
+fn input_item_contains_type(value: &Value, expected: &str) -> bool {
+    value
+        .get("type")
+        .and_then(Value::as_str)
+        .is_some_and(|item_type| item_type == expected)
+        || value
+            .get("content")
+            .and_then(Value::as_array)
+            .is_some_and(|content| {
+                content.iter().any(|item| {
+                    item.get("type")
+                        .and_then(Value::as_str)
+                        .is_some_and(|item_type| item_type == expected)
+                })
+            })
 }
 
 fn append_payload_metadata(
@@ -229,15 +294,19 @@ fn append_payload_metadata(
         "session_id",
         "thread_id",
         "turn_id",
+        "context_window_id",
         "x-codex-window-id",
         "x-codex-installation-id",
     ]
     .into_iter()
     .filter_map(|key| {
-        metadata
-            .get(key)
-            .and_then(Value::as_str)
-            .map(|value| format!("{key}={value}"))
+        metadata.get(key).and_then(Value::as_str).map(|value| {
+            if key == "context_window_id" {
+                format!("ctx={}", short_identifier(value))
+            } else {
+                format!("{key}={value}")
+            }
+        })
     })
     .collect::<Vec<_>>();
     if !fields.is_empty() {
@@ -247,6 +316,10 @@ fn append_payload_metadata(
             width,
         );
     }
+}
+
+fn short_identifier(value: &str) -> &str {
+    value.get(..4).unwrap_or(value)
 }
 
 fn render_input_value(lines: &mut Vec<String>, input: &Value, width: usize) {
