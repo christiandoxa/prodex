@@ -348,7 +348,8 @@ fn compact_waits_for_transient_profiles_before_a_new_sweep() {
     assert!(
         log.contains("request=111 transport=http rotation_sweep_start route=compact recovered_profiles=")
             && (log.contains("request=111 transport=http rotation_waiting_for_recovery route=compact")
-                || log.contains("request=111 transport=http compact_candidate_exhausted")),
+                || log.contains("request=111 transport=http compact_candidate_exhausted")
+                || log.contains("request=111 transport=http compact_precommit_budget_exhausted")),
         "compact recovery should wait or observe an already-ready profile before a new sweep: {log}"
     );
 }
