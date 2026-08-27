@@ -15,8 +15,15 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 
 - Harden ChatGPT MCP expose readiness (`4805e3d`)
 
+### Docs
+
+- Record final freshness audit (`dc9d715`)
+
 ### Misc
 
+- Use portable rich C ABI pointers (`864d251`)
+- Retain health while enriching tool status (`ccc7d57`)
+- Refresh stable tool matrix (`7be2dc7`)
 - Preserve all Windows archive objects (`1e6668c`)
 - Detect Windows log replacement reliably (`2ec28fb`)
 - Use stable Windows file identity API (`25ba645`)
@@ -44,6 +51,8 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 
 - Updated the supported Codex baseline to `rust-v0.150.1`, including the retained-image compaction budget default, `context_window_id`, MCP event streaming, task references, Interrupt hooks, executor MCP authentication, and required MCP-server behavior. Prodex preserves these settings, payloads, and metadata; Codex owns compaction budgeting and image trimming.
 - Official release targets now require compiled-in Mojo domain operations and fail closed on missing artifacts, ABI mismatch, or self-test failure; Rust remains the system, transport, credential, persistence, and security boundary.
+- Rich Mojo ABI v3 now uses fixed-width pointer-address arguments across its C boundary, preserving the same authoritative domain operations on Windows without a Rust runtime fallback.
+- Revalidated the complete latest-stable Optional Tools matrix at release cut: Caveman 2.3.1, RTK 0.46.0, Codebase Memory MCP 0.10.8, Playwright MCP 0.0.79, Ponytail 4.9.0, and Presidio 2.2.364 with immutable pins/digests where applicable.
 - Release validation pins the current stable Kiro CLI toolchain used by the cross-platform provider smoke matrix.
 - Windows Mojo release archives now retain every compiled domain object, including the rich ABI and log exports required by the final linked artifact.
 - Windows ARM64 release validation now distinguishes strict cross-architecture archive/link evidence from executable runtime smoke, which requires a native ARM64 runner.
@@ -61,11 +70,15 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 - Reduced steady-state log-following work by using bounded incremental reads, cached path discovery, file-identity rotation handling, and incremental record processing instead of repeated historical scans.
 - Reduced CI Rust test-build overhead by using debug-free development/test profiles across the full release matrix without dropping test lanes.
 - Added CI duration telemetry so future shard and queue regressions remain visible without affecting test execution.
+- Preserved the measured CI critical-path reduction while adding the final cross-platform Mojo ABI validation; no platform lane or security gate was removed.
 
 ## Changelog
 
 Full Changelog: [`0.417.0...0.418.0`](https://github.com/christiandoxa/prodex/compare/0.417.0...0.418.0)
 
+- `864d251b` — fix: use portable rich C ABI pointers
+- `dc9d7158` — docs: record final freshness audit
+- `7be2dc72` — feat: refresh stable tool matrix
 - `29bf2bd4` — fix: make prodex update version-aware
 - `0fde6b36` — feat: upgrade Codex compatibility and model catalogs
 - `f7316dbb` — feat: add Mojo operational log classification
@@ -138,6 +151,28 @@ Full Changelog: [`0.417.0...0.418.0`](https://github.com/christiandoxa/prodex/co
 - Normalize Spark reasoning effort (`228918b`)
 
 ## 0.416.0 - 2026-08-24
+
+### CLI
+
+- Migrate context text and harden quota recovery (`b4486b5`)
+
+## 0.415.0 - 2026-08-24
+
+### CLI
+
+- Resolve providers and persist model choices (`ae33046`)
+
+### Docs
+
+- Restore durable agent guidance (`762fbe1`)
+- Align compatibility and remove obsolete guidance (`3aa3f2a`)
+
+### Misc
+
+- Keep stream alive across transient file errors (`85ccf51`)
+- Support Codex 0.149.1 (`c85a85a`)
+
+## 0.414.0 - 2026-08-23
 
 ### Runtime
 
@@ -239,8 +274,6 @@ Full Changelog: [`0.417.0...0.418.0`](https://github.com/christiandoxa/prodex/co
 
 ### CLI
 
-- Migrate context text and harden quota recovery (`b4486b5`)
-- Resolve providers and persist model choices (`ae33046`)
 - Tolerate slow heartbeat startup (`15d3f90`)
 - Preserve fraction-only Gemini quota (`7523ce7`)
 - Make quota default detailed (`defbb4c`)
@@ -307,8 +340,6 @@ Full Changelog: [`0.417.0...0.418.0`](https://github.com/christiandoxa/prodex/co
 
 ### Docs
 
-- Restore durable agent guidance (`762fbe1`)
-- Align compatibility and remove obsolete guidance (`3aa3f2a`)
 - Sync weighted inflight policy (`e9b0731`)
 - Require repository-wide reuse first (`c5d6347`)
 - Document compact task interface (`4e4ef10`)
@@ -372,8 +403,6 @@ Full Changelog: [`0.417.0...0.418.0`](https://github.com/christiandoxa/prodex/co
 
 ### Misc
 
-- Keep stream alive across transient file errors (`85ccf51`)
-- Support Codex 0.149.1 (`c85a85a`)
 - Reuse optional ABI tag decoder (`d15b2c7`)
 - Migrate production decision kernels (`489bb0e`)
 - Keep fallback Clippy-clean (`fee7b8e`)
