@@ -1440,5 +1440,25 @@
       "maxFileLines": 500
     },
     "reason": "Reviewed the cross-cutting ChatGPT MCP expose, interactive Super configuration, bounded run lifecycle, capability and public-route security, three-instance isolation, quota regression coverage, and measured CI parallelization with the locked workspace suite, strict Clippy, security/supply-chain guards, and deterministic fake-tunnel and runtime evidence. The narrow cap covers this 0.417.0 implementation range without skipping tests or changing the default churn thresholds."
+  },
+  {
+    "id": "prodex-0.418.0-complete-migration",
+    "requiredSubjects": [
+      "fix: make prodex update version-aware",
+      "feat: upgrade Codex compatibility and model catalogs",
+      "feat: add Mojo operational log classification",
+      "perf: make log following incremental",
+      "feat: enrich Prodex log views",
+      "feat: harden ChatGPT MCP expose readiness",
+      "build: enforce Mojo-backed release artifacts",
+      "feat: publish curated release notes"
+    ],
+    "caps": {
+      "maxFiles": 100,
+      "maxBehaviorFiles": 78,
+      "maxLines": 6500,
+      "maxFileLines": 600
+    },
+    "reason": "Reviewed the complete 0.418.0 Codex 0.150.1 compatibility, model catalogs, Mojo authority, incremental and enriched observability, expose readiness, updater idempotency, release tooling, and cross-platform artifact range. The exact subject set and bounded cap preserve every default guard and require the full audited migration to be present."
   }
 ]
