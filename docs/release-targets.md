@@ -25,7 +25,7 @@ The promoted UTF-8 context component uses borrowed `StringSlice`, nullable point
 RPATH. `String`, `List`, `Dict`, and `Set` remain outside release artifacts until a bundled-runtime
 design can preserve the target GLIBC and clean-machine contracts.
 
-Rich ABI v3 is included in the same static archive for every release target. It exports the
+Rich ABI v4 is included in the same static archive for every release target. It exports the
 context diagnostic, route-plan, policy-alias, model-fallback, context-plan, and log-semantics
 operations and uses only typed structs, borrowed views, offset slices, caller-owned output, and
 bounded scratch tables. The pinned Linux build host cross-compiles target archives; native

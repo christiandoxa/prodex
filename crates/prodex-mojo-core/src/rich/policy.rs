@@ -45,10 +45,10 @@ pub fn validate_policy_alias(input: PolicyAliasInput<'_>) -> Result<PolicyAliasP
     let mut result = RichPolicyResult::default();
     let rich_input = RichPolicyInput {
         alias_view: view(input.alias),
-        models: models.as_ptr(),
+        models: mojo_pointer_address(models.as_ptr()),
         model_count: i64::try_from(models.len()).map_err(|_| MojoError::InvalidInput)?,
         strategy: input.strategy.map(view).unwrap_or_default(),
-        metrics: metrics.as_ptr(),
+        metrics: mojo_pointer_address(metrics.as_ptr()),
         metric_count: i64::try_from(metrics.len()).map_err(|_| MojoError::InvalidInput)?,
     };
     let status = unsafe {

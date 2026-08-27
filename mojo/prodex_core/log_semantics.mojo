@@ -1,9 +1,9 @@
 from std.memory import Pointer
 
 from rich_text import rich_view_matches_literal, rich_view_prefix, rich_view_valid
-from rich_types import ProdexRichStringView
+from rich_types import ProdexRichStringView, rich_view_ptr
 
-comptime PRODEX_LOG_ABI_VERSION: Int64 = 2
+comptime PRODEX_LOG_ABI_VERSION: Int64 = 3
 comptime LOG_CATEGORY_NONE: Int64 = 0
 comptime LOG_CATEGORY_ROUTE: Int64 = 1
 comptime LOG_CATEGORY_QUOTA: Int64 = 2
@@ -34,9 +34,9 @@ def log_view_contains[literal: StaticString](
     var needle: Int64 = Int64(literal.byte_length())
     if needle == 0:
         return True
-    if view.len < UInt(needle) or not view.ptr:
+    if view.len < UInt(needle) or view.ptr == 0:
         return False
-    var ptr = view.ptr.unsafe_value()
+    var ptr = rich_view_ptr(view)
     for start in range(Int64(view.len) - needle + 1):
         var matched = True
         for index in range(needle):
@@ -58,8 +58,8 @@ def set_category(
     severity[] = level
 
 
-@export("prodex_mojo_log_classify_v2")
-def prodex_mojo_log_classify_v2(
+@export("prodex_mojo_log_classify_v3")
+def prodex_mojo_log_classify_v3(
     abi_version: Int64,
     event: ProdexRichStringView,
     category_address: UInt,

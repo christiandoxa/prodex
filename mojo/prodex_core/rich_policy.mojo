@@ -17,7 +17,7 @@ from rich_types import (
 )
 
 
-comptime PRODEX_RICH_ABI_VERSION: Int64 = 3
+comptime PRODEX_RICH_ABI_VERSION: Int64 = 4
 comptime RICH_MAX_RECORDS: Int64 = 256
 comptime RICH_MAX_IDENTIFIER_BYTES: Int64 = 4_096
 comptime RICH_STATUS_OK: Int64 = 0
@@ -93,7 +93,9 @@ def prodex_mojo_rich_policy_alias_v2(
     if input.model_count > 0:
         if not input.models:
             return RICH_STATUS_INVALID
-        var models = input.models.unsafe_value()
+        var models = Pointer[mut=False, ProdexRichStringView, ImmUntrackedOrigin](
+            unsafe_from_address=Int(input.models)
+        )
         for index in range(input.model_count):
             if not rich_view_valid(models[unsafe_offset=index], RICH_MAX_IDENTIFIER_BYTES):
                 policy_issue(result_ptr, RICH_ISSUE_INVALID_UTF8, RICH_FIELD_MODELS, index, 0, Int64(models[unsafe_offset=index].len))
@@ -102,7 +104,9 @@ def prodex_mojo_rich_policy_alias_v2(
     if input.metric_count > 0:
         if not input.metrics:
             return RICH_STATUS_INVALID
-        var metrics = input.metrics.unsafe_value()
+        var metrics = Pointer[mut=False, ProdexRichStringView, ImmUntrackedOrigin](
+            unsafe_from_address=Int(input.metrics)
+        )
         for index in range(input.metric_count):
             if not rich_view_valid(metrics[unsafe_offset=index], RICH_MAX_IDENTIFIER_BYTES):
                 policy_issue(result_ptr, RICH_ISSUE_INVALID_UTF8, RICH_FIELD_METRIC, index, 0, Int64(metrics[unsafe_offset=index].len))
@@ -129,8 +133,12 @@ def prodex_mojo_rich_policy_alias_v2(
             policy_issue(result_ptr, RICH_ISSUE_STRATEGY, RICH_FIELD_STRATEGY, -1, 0, Int64(input.strategy.len))
             return RICH_STATUS_OK
     if input.metric_count > 0:
-        var metrics = input.metrics.unsafe_value()
-        var models = input.models.unsafe_value()
+        var metrics = Pointer[mut=False, ProdexRichStringView, ImmUntrackedOrigin](
+            unsafe_from_address=Int(input.metrics)
+        )
+        var models = Pointer[mut=False, ProdexRichStringView, ImmUntrackedOrigin](
+            unsafe_from_address=Int(input.models)
+        )
         for metric_index in range(input.metric_count):
             var matched = False
             for model_index in range(input.model_count):
@@ -147,7 +155,9 @@ def prodex_mojo_rich_policy_alias_v2(
     var output = Pointer[mut=True, UInt8, MutUntrackedOrigin](
         unsafe_from_address=Int(output_address)
     )
-    var models = input.models.unsafe_value()
+    var models = Pointer[mut=False, ProdexRichStringView, ImmUntrackedOrigin](
+        unsafe_from_address=Int(input.models)
+    )
     for index in range(input.model_count):
         if not rich_valid_identifier(models[unsafe_offset=index]):
             policy_issue(result_ptr, RICH_ISSUE_EMPTY, RICH_FIELD_MODELS, index, 0, Int64(models[unsafe_offset=index].len))
@@ -157,7 +167,9 @@ def prodex_mojo_rich_policy_alias_v2(
             return RICH_STATUS_CAPACITY
         var rule = PolicyRule(ProdexRichSlice(0, 0), slice.copy(), -1)
         if input.metric_count > 0:
-            var metrics = input.metrics.unsafe_value()
+            var metrics = Pointer[mut=False, ProdexRichStringView, ImmUntrackedOrigin](
+                unsafe_from_address=Int(input.metrics)
+            )
             for metric_index in range(input.metric_count):
                 if rich_views_equal(metrics[unsafe_offset=metric_index], models[unsafe_offset=index]):
                     rule.metric_match = metric_index

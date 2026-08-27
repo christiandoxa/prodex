@@ -7,9 +7,9 @@
 
 use crate::{MojoError, MojoIssue};
 
-// v3 uses fixed-width UInt64 address arguments for nullable C ABI pointers.
-// Mojo Optional[Pointer] is not a portable C ABI representation on Windows.
-pub const RICH_ABI_VERSION: i64 = 3;
+// v4 uses fixed-width UInt64 addresses for every pointer crossing the rich C
+// ABI, including pointers nested in by-value records.
+pub const RICH_ABI_VERSION: i64 = 4;
 
 const _: () = assert!(std::mem::size_of::<usize>() == std::mem::size_of::<u64>());
 
@@ -31,8 +31,8 @@ const RICH_STATUS_ABI: i64 = 4;
 #[repr(C)]
 #[derive(Debug, Clone, Copy, Default)]
 struct RichStringView {
-    ptr: *const u8,
-    len: usize,
+    ptr: u64,
+    len: u64,
 }
 
 #[repr(C)]
@@ -127,10 +127,10 @@ struct RichRouteResult {
 #[derive(Debug, Clone, Copy, Default)]
 struct RichPolicyInput {
     alias_view: RichStringView,
-    models: *const RichStringView,
+    models: u64,
     model_count: i64,
     strategy: RichStringView,
-    metrics: *const RichStringView,
+    metrics: u64,
     metric_count: i64,
 }
 
@@ -212,6 +212,8 @@ struct RichPlanResult {
 
 const _: () = {
     assert!(std::mem::size_of::<RichStringView>() == 16);
+    assert!(std::mem::offset_of!(RichStringView, ptr) == 0);
+    assert!(std::mem::offset_of!(RichStringView, len) == 8);
     assert!(std::mem::size_of::<RichSlice>() == 16);
     assert!(std::mem::size_of::<RichContextRecord>() == 64);
     assert!(std::mem::size_of::<RichContextResult>() == 160);
@@ -219,6 +221,11 @@ const _: () = {
     assert!(std::mem::size_of::<RichRouteRecord>() == 160);
     assert!(std::mem::size_of::<RichRouteResult>() == 80);
     assert!(std::mem::size_of::<RichPolicyInput>() == 64);
+    assert!(std::mem::offset_of!(RichPolicyInput, models) == 16);
+    assert!(std::mem::offset_of!(RichPolicyInput, model_count) == 24);
+    assert!(std::mem::offset_of!(RichPolicyInput, strategy) == 32);
+    assert!(std::mem::offset_of!(RichPolicyInput, metrics) == 48);
+    assert!(std::mem::offset_of!(RichPolicyInput, metric_count) == 56);
     assert!(std::mem::size_of::<RichPolicyModel>() == 32);
     assert!(std::mem::size_of::<RichPolicyResult>() == 80);
     assert!(std::mem::size_of::<RichPlanItem>() == 32);
@@ -317,8 +324,8 @@ static RICH_ABI_READY: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
 
 fn view(value: &str) -> RichStringView {
     RichStringView {
-        ptr: value.as_ptr(),
-        len: value.len(),
+        ptr: mojo_pointer_address(value.as_ptr()),
+        len: value.len() as u64,
     }
 }
 

@@ -13,10 +13,11 @@ from rich_types import (
     ProdexRichContextResult,
     ProdexRichSlice,
     ProdexRichStringView,
+    rich_view_ptr,
 )
 
 
-comptime PRODEX_RICH_ABI_VERSION: Int64 = 3
+comptime PRODEX_RICH_ABI_VERSION: Int64 = 4
 comptime RICH_CONTEXT_MAX_LINES: Int64 = 65_536
 comptime RICH_CONTEXT_MAX_TEXT_BYTES: Int64 = 1_048_576
 comptime RICH_CONTEXT_STATUS_OK: Int64 = 0
@@ -116,7 +117,7 @@ def context_has_content(
 def context_last_line(view: ProdexRichStringView) -> Int64:
     if view.len == 0:
         return 0
-    var ptr = view.ptr.unsafe_value()
+    var ptr = rich_view_ptr(view)
     var length = Int64(view.len)
     var cursor: Int64 = 0
     var line_number: Int64 = 0
@@ -368,14 +369,14 @@ def prodex_mojo_rich_context_analyze_v2(
     if abi_version != PRODEX_RICH_ABI_VERSION:
         result[].issue_kind = RICH_CONTEXT_STATUS_ABI
         return RICH_CONTEXT_STATUS_ABI
-    if input.len > UInt(RICH_CONTEXT_MAX_TEXT_BYTES) or input.len > 0 and not input.ptr:
+    if input.len > UInt(RICH_CONTEXT_MAX_TEXT_BYTES) or input.len > 0 and input.ptr == 0:
         result[].issue_kind = RICH_CONTEXT_ISSUE_INVALID_UTF8
         result[].issue_offset = 0
         result[].issue_length = 1
         return RICH_CONTEXT_STATUS_UTF8
-    if input.len > 0 and context_utf8_error(input.ptr.unsafe_value(), Int64(input.len)) >= 0:
+    if input.len > 0 and context_utf8_error(rich_view_ptr(input), Int64(input.len)) >= 0:
         result[].issue_kind = RICH_CONTEXT_ISSUE_INVALID_UTF8
-        result[].issue_offset = context_utf8_error(input.ptr.unsafe_value(), Int64(input.len))
+        result[].issue_offset = context_utf8_error(rich_view_ptr(input), Int64(input.len))
         result[].issue_length = 1
         return RICH_CONTEXT_STATUS_UTF8
     var line_count = context_last_line(input)
@@ -401,7 +402,7 @@ def prodex_mojo_rich_context_analyze_v2(
     )
     for index in range(hash_capacity):
         slots[unsafe_offset=index] = -1
-    var input_ptr = input.ptr.unsafe_value()
+    var input_ptr = rich_view_ptr(input)
     var length = Int64(input.len)
     var cursor: Int64 = 0
     var line_number: Int64 = 0

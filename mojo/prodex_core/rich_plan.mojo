@@ -12,10 +12,11 @@ from rich_types import (
     ProdexRichPlanItem,
     ProdexRichPlanResult,
     ProdexRichStringView,
+    rich_view_ptr,
 )
 
 
-comptime PRODEX_RICH_ABI_VERSION: Int64 = 3
+comptime PRODEX_RICH_ABI_VERSION: Int64 = 4
 comptime RICH_MAX_PLAN_ITEMS: Int64 = 256
 comptime RICH_MAX_IDENTIFIER_BYTES: Int64 = 4_096
 comptime RICH_STATUS_OK: Int64 = 0
@@ -30,7 +31,7 @@ def plan_available_contains(
     slot_count: Int64,
 ) -> Bool:
     var hash: UInt64 = UInt64(view.len) * 1099511628211
-    var ptr = view.ptr.unsafe_value()
+    var ptr = rich_view_ptr(view)
     for index in range(Int64(view.len)):
         hash = (hash ^ UInt64(ptr[unsafe_offset=index])) * 1099511628211
     var slot = Int64(hash % UInt64(slot_count))
@@ -40,7 +41,7 @@ def plan_available_contains(
             return False
         var other = available[unsafe_offset=existing].copy()
         if other.len == view.len:
-            var other_ptr = other.ptr.unsafe_value()
+            var other_ptr = rich_view_ptr(other)
             var equal = True
             for index in range(Int64(view.len)):
                 if ptr[unsafe_offset=index] != other_ptr[unsafe_offset=index]:
@@ -121,7 +122,7 @@ def prodex_mojo_rich_context_plan_v2(
         hash_slots[unsafe_offset=index] = -1
     for index in range(available_count):
         var item = available[unsafe_offset=index].copy()
-        var ptr = item.ptr.unsafe_value()
+        var ptr = rich_view_ptr(item)
         var hash: UInt64 = UInt64(item.len) * 1099511628211
         for byte_index in range(Int64(item.len)):
             hash = (hash ^ UInt64(ptr[unsafe_offset=byte_index])) * 1099511628211
@@ -154,7 +155,7 @@ def prodex_mojo_rich_context_plan_v2(
             action = 1
             reason = 0
             plan.used_tokens += item.token_cost
-        var slice = rich_copy_range(item.id.ptr.unsafe_value(), 0, Int64(item.id.len), output, output_capacity, Pointer(to=written), False)
+        var slice = rich_copy_range(rich_view_ptr(item.id), 0, Int64(item.id.len), output, output_capacity, Pointer(to=written), False)
         if slice.len < 0:
             return RICH_STATUS_CAPACITY
         output_actions[unsafe_offset=index].id = slice.copy()

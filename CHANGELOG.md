@@ -2,7 +2,7 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
-## 0.418.0 - 2026-08-27
+## 0.418.0 - 2026-08-28
 
 ### Runtime
 
@@ -18,10 +18,12 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 
 ### Docs
 
+- Refresh release-cut audit (`d48d7d0`)
 - Record final freshness audit (`dc9d715`)
 
 ### Misc
 
+- Align upstream baseline and yanked dependency (`afb4a90`)
 - Use portable rich C ABI pointers (`864d251`)
 - Retain health while enriching tool status (`ccc7d57`)
 - Refresh stable tool matrix (`7be2dc7`)
@@ -53,7 +55,7 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 
 - Updated the supported Codex baseline to `rust-v0.150.1`, including the retained-image compaction budget default, `context_window_id`, MCP event streaming, task references, Interrupt hooks, executor MCP authentication, and required MCP-server behavior. Prodex preserves these settings, payloads, and metadata; Codex owns compaction budgeting and image trimming.
 - Official release targets now require compiled-in Mojo domain operations and fail closed on missing artifacts, ABI mismatch, or self-test failure; Rust remains the system, transport, credential, persistence, and security boundary.
-- Rich Mojo ABI v3 now uses fixed-width pointer-address arguments across its C boundary, preserving the same authoritative domain operations on Windows without a Rust runtime fallback.
+- Rich Mojo ABI v4 now uses fixed-width pointer-address fields across its C boundary, including by-value records, preserving the same authoritative domain operations on Windows without a Rust runtime fallback.
 - Revalidated the complete latest-stable Optional Tools matrix at release cut: Caveman 2.3.1, RTK 0.46.0, Codebase Memory MCP 0.10.8, Playwright MCP 0.0.79, Ponytail 4.9.0, and Presidio 2.2.364 with immutable pins/digests where applicable.
 - Release validation pins the current stable Kiro CLI toolchain used by the cross-platform provider smoke matrix.
 - Windows Mojo release archives now retain every compiled domain object, including the rich ABI and log exports required by the final linked artifact.

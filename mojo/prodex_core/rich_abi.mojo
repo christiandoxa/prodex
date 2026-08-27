@@ -21,7 +21,7 @@ from rich_types import (
 )
 
 
-comptime PRODEX_RICH_ABI_VERSION: Int64 = 3
+comptime PRODEX_RICH_ABI_VERSION: Int64 = 4
 
 
 @export("prodex_mojo_rich_abi_version")
