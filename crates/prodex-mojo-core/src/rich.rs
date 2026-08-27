@@ -446,7 +446,13 @@ pub fn rich_self_test() -> bool {
         3,
     )
     .is_ok_and(|value| value.actions[0].action == 1 && value.used_tokens == 3);
-    context && routes && policy && fallback && context_plan
+    let result = context && routes && policy && fallback && context_plan;
+    if !result && std::env::var_os("PRODEX_MOJO_SELF_TEST_TRACE").is_some() {
+        eprintln!(
+            "Mojo rich self-test: context={context} routes={routes} policy={policy} fallback={fallback} context_plan={context_plan}"
+        );
+    }
+    result
 }
 
 #[cfg(test)]

@@ -556,7 +556,7 @@ jobs:
           if [ "${{ matrix.target }}" = "aarch64-unknown-linux-gnu" ]; then
             binary_command=(qemu-aarch64 -L /usr/aarch64-linux-gnu "${binary}")
           fi
-          diagnostics="$(PRODEX_HOME="${RUNNER_TEMP}/prodex-mojo-release-home" "${binary_command[@]}" doctor --runtime --json)"
+          diagnostics="$(PRODEX_MOJO_SELF_TEST_TRACE=1 PRODEX_HOME="${RUNNER_TEMP}/prodex-mojo-release-home" "${binary_command[@]}" doctor --runtime --json)"
           printf '%s\n' "${diagnostics}" | grep -F '"implementation": "mojo-compiled-in"'
           printf '%s\n' "${diagnostics}" | grep -F '"fallback": false'
           printf '%s\n' "${diagnostics}" | grep -F '"compiler_required": false'
