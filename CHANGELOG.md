@@ -43,6 +43,7 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 
 - Updated the supported Codex baseline to `rust-v0.150.1`, including the retained-image compaction budget default, `context_window_id`, MCP event streaming, task references, Interrupt hooks, executor MCP authentication, and required MCP-server behavior. Prodex preserves these settings, payloads, and metadata; Codex owns compaction budgeting and image trimming.
 - Official release targets now require compiled-in Mojo domain operations and fail closed on missing artifacts, ABI mismatch, or self-test failure; Rust remains the system, transport, credential, persistence, and security boundary.
+- Release validation pins the current stable Kiro CLI toolchain used by the cross-platform provider smoke matrix.
 
 ## Security
 
