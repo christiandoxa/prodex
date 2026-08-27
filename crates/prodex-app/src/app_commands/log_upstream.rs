@@ -1,5 +1,5 @@
 use super::collect_recent_runtime_log_paths;
-use super::log::{FollowedLog, collect_new_followed_lines};
+use super::log::{FollowedLog, FollowedLogPaths, collect_new_followed_lines, retain_followed_logs};
 use super::log_format::{current_log_width, render_log_block};
 use super::log_tui::{
     LogTuiHeaderDetail, LogTuiInput, LogTuiState, LogTuiTerminal, contains_ignore_ascii_case,
@@ -18,7 +18,6 @@ use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
 use std::collections::{BTreeMap, VecDeque};
 #[cfg(test)]
 use std::env;
-use std::fs;
 use std::io::{self, IsTerminal, Write};
 use std::path::{Path, PathBuf};
 use std::thread;
@@ -35,7 +34,11 @@ const LOG_SNAPSHOT_TAIL_BYTES: usize = 1024 * 1024;
 const UPSTREAM_TUI_EVENT_LIMIT: usize = 100;
 
 pub(super) fn stream_upstream_payload_events(json: bool) -> Result<()> {
-    if !json && io::stdout().is_terminal() && io::stdin().is_terminal() {
+    if !json
+        && !super::no_color_requested()
+        && io::stdout().is_terminal()
+        && io::stdin().is_terminal()
+    {
         return stream_upstream_payload_events_tui();
     }
 
@@ -45,24 +48,21 @@ pub(super) fn stream_upstream_payload_events(json: bool) -> Result<()> {
         eprintln!("Waiting for processed upstream payload events...");
     }
 
-    let mut followed_runtime_logs = BTreeMap::<PathBuf, FollowedLog>::new();
-    for path in prodex_runtime_log_paths_in_dir(&runtime_proxy_log_dir()) {
-        let offset = fs::metadata(&path)
-            .map(|metadata| metadata.len())
-            .unwrap_or(0);
-        followed_runtime_logs.insert(
-            path,
-            FollowedLog {
-                offset,
-                pending: Vec::new(),
-            },
-        );
-    }
+    let mut runtime_paths =
+        FollowedLogPaths::new(prodex_runtime_log_paths_in_dir(&runtime_proxy_log_dir()));
+    let mut followed_runtime_logs = followed_logs(
+        runtime_paths.refresh(|| prodex_runtime_log_paths_in_dir(&runtime_proxy_log_dir())),
+    );
 
     loop {
-        for path in prodex_runtime_log_paths_in_dir(&runtime_proxy_log_dir()) {
-            let state = followed_runtime_logs.entry(path.clone()).or_default();
-            for event in collect_new_upstream_payload_events(&path, state)? {
+        let current_runtime_paths =
+            runtime_paths.refresh(|| prodex_runtime_log_paths_in_dir(&runtime_proxy_log_dir()));
+        retain_followed_logs(&mut followed_runtime_logs, current_runtime_paths);
+        for path in current_runtime_paths {
+            let state = followed_runtime_logs
+                .entry(path.clone())
+                .or_insert_with(|| FollowedLog::at_end(path));
+            for event in collect_new_upstream_payload_events(path, state)? {
                 print_upstream_payload_event(&event, json)?;
             }
         }
@@ -82,24 +82,21 @@ fn stream_upstream_payload_events_tui() -> Result<()> {
     let mut header_refresh_at =
         log_tui_header_next_refresh_at(header_detail.as_ref(), Instant::now());
 
-    let mut followed_runtime_logs = BTreeMap::<PathBuf, FollowedLog>::new();
-    for path in prodex_runtime_log_paths_in_dir(&runtime_proxy_log_dir()) {
-        let offset = fs::metadata(&path)
-            .map(|metadata| metadata.len())
-            .unwrap_or(0);
-        followed_runtime_logs.insert(
-            path,
-            FollowedLog {
-                offset,
-                pending: Vec::new(),
-            },
-        );
-    }
+    let mut runtime_paths =
+        FollowedLogPaths::new(prodex_runtime_log_paths_in_dir(&runtime_proxy_log_dir()));
+    let mut followed_runtime_logs = followed_logs(
+        runtime_paths.refresh(|| prodex_runtime_log_paths_in_dir(&runtime_proxy_log_dir())),
+    );
 
     loop {
-        for path in prodex_runtime_log_paths_in_dir(&runtime_proxy_log_dir()) {
-            let state = followed_runtime_logs.entry(path.clone()).or_default();
-            for event in collect_new_upstream_payload_events(&path, state)? {
+        let current_runtime_paths =
+            runtime_paths.refresh(|| prodex_runtime_log_paths_in_dir(&runtime_proxy_log_dir()));
+        retain_followed_logs(&mut followed_runtime_logs, current_runtime_paths);
+        for path in current_runtime_paths {
+            let state = followed_runtime_logs
+                .entry(path.clone())
+                .or_insert_with(|| FollowedLog::at_end(path));
+            for event in collect_new_upstream_payload_events(path, state)? {
                 push_upstream_payload_event(&mut events, event);
             }
         }
@@ -121,6 +118,13 @@ fn stream_upstream_payload_events_tui() -> Result<()> {
             return Ok(());
         }
     }
+}
+
+fn followed_logs(paths: &[PathBuf]) -> BTreeMap<PathBuf, FollowedLog> {
+    paths
+        .iter()
+        .map(|path| (path.clone(), FollowedLog::at_end(path)))
+        .collect()
 }
 
 fn push_upstream_payload_event(
@@ -167,9 +171,17 @@ pub(crate) fn print_upstream_payload_event(event: &UpstreamPayloadEvent, json: b
             ("bytes", event.bytes.to_string()),
             ("logged", event.logged_bytes.to_string()),
             ("truncated", event.truncated.to_string()),
+            (
+                "snapshot",
+                if event.truncated {
+                    "truncated at configured cap".to_string()
+                } else {
+                    "complete".to_string()
+                },
+            ),
         ];
         let body = render_upstream_payload_lines(&event.payload, width);
-        for line in render_log_block(&event.timestamp, "upstream payload", &meta, &body, width) {
+        for line in render_log_block(&event.timestamp, "UPSTREAM", &meta, &body, width) {
             println!("{line}");
         }
     }
@@ -278,7 +290,7 @@ fn upstream_payload_tui_text(
         lines.push(Line::from(vec![
             Span::styled(event.timestamp.clone(), tui_secondary_style()),
             Span::raw(" "),
-            Span::styled("upstream payload", tui_title_style()),
+            Span::styled("UPSTREAM", tui_title_style()),
         ]));
         lines.push(Line::from(vec![
             Span::styled("profile=", tui_secondary_style()),
@@ -310,6 +322,12 @@ fn upstream_payload_tui_text(
                 },
             ),
         ]));
+        if event.truncated {
+            lines.push(Line::styled(
+                "snapshot truncated at configured cap",
+                tui_hint_style(),
+            ));
+        }
         for line in render_upstream_payload_lines(&event.payload, width) {
             lines.push(Line::raw(line));
         }
@@ -375,12 +393,13 @@ pub(crate) fn latest_upstream_payload_event() -> Option<UpstreamPayloadEvent> {
 mod tests {
     use super::{
         FollowedLog, SystemTime, UNIX_EPOCH, UpstreamPayloadEvent,
-        collect_new_upstream_payload_events, env, fs, upstream_payload_tui_text,
+        collect_new_upstream_payload_events, env, upstream_payload_tui_text,
     };
     use crate::app_commands::log_upstream_payload::BASE64_STANDARD;
     use base64::Engine;
     use ratatui::text::Text;
     use std::collections::VecDeque;
+    use std::fs;
     use std::io::Write;
 
     fn rendered(text: Text<'static>) -> String {
@@ -429,6 +448,7 @@ mod tests {
         let events = collect_new_upstream_payload_events(&path, &mut state).unwrap();
         assert_eq!(events.len(), 1);
         assert!(state.pending.is_empty());
+        drop(state);
         fs::remove_dir_all(root).unwrap();
     }
 

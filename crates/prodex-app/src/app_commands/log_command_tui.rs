@@ -2,11 +2,11 @@ pub(super) use self::render::log_snapshot_items;
 #[cfg(test)]
 pub(super) use self::render::log_stream_tui_text;
 use super::{
-    FollowedLog, LOG_SNAPSHOT_TAIL_BYTES, LogStreamItem, TranscriptEvent,
-    collect_new_runtime_log_stream_items, collect_new_transcript_events,
-    latest_runtime_stream_payload_event, latest_transcript_event, local_token_usage_event,
-    print_log_stream_item, print_token_usage_event, print_transcript_event,
-    print_upstream_payload_event, recent_session_log_paths,
+    FollowedLog, FollowedLogPaths, LOG_SNAPSHOT_TAIL_BYTES, LogStreamItem, TranscriptEvent,
+    collect_new_runtime_log_stream_items, collect_new_transcript_events, latest_transcript_event,
+    local_token_usage_event, print_log_stream_item, print_token_usage_event,
+    print_transcript_event, print_upstream_payload_event, recent_session_log_paths,
+    retain_followed_logs,
 };
 use crate::app_commands::collect_recent_runtime_log_paths;
 use crate::app_commands::log_tui::{
@@ -17,13 +17,13 @@ use crate::app_commands::log_upstream::{
     latest_upstream_payload_event, stream_upstream_payload_events,
 };
 use crate::app_commands::log_upstream_payload::UpstreamPayloadEvent;
+use crate::app_commands::log_upstream_payload::upstream_payload_event_from_runtime_line;
 use crate::reports::{InfoTokenUsageEvent, info_token_usage_event_from_line};
 use crate::{LogArgs, LogMode, prodex_runtime_log_paths_in_dir, runtime_proxy_log_dir};
 use anyhow::{Context, Result};
 use crossterm::event::{self, Event, KeyEventKind};
 use prodex_runtime_doctor::read_runtime_log_tail;
 use std::collections::{BTreeMap, VecDeque};
-use std::fs;
 use std::io::{self, IsTerminal};
 use std::path::PathBuf;
 use std::thread;
@@ -33,6 +33,7 @@ use std::time::{Duration, Instant};
 mod render;
 
 const LOG_STREAM_POLL_INTERVAL: Duration = Duration::from_millis(250);
+const SESSION_PATH_RECONCILE_INTERVAL: Duration = Duration::from_secs(10);
 const LOG_TUI_EVENT_LIMIT: usize = 200;
 
 pub(crate) fn handle_log(args: LogArgs) -> Result<()> {
@@ -86,15 +87,32 @@ fn latest_token_usage_event() -> Option<InfoTokenUsageEvent> {
 }
 
 fn stream_token_usage_events(json: bool) -> Result<()> {
-    if !json && io::stdout().is_terminal() && io::stdin().is_terminal() {
+    if !json
+        && !super::no_color_requested()
+        && io::stdout().is_terminal()
+        && io::stdin().is_terminal()
+    {
         return stream_token_usage_events_tui();
     }
 
     print_initial_token_usage_events(json)?;
-    let mut followed_runtime_logs =
-        followed_logs(prodex_runtime_log_paths_in_dir(&runtime_proxy_log_dir()));
-    let mut followed_session_logs = followed_logs(stream_session_log_paths());
-    follow_token_usage_events(json, &mut followed_runtime_logs, &mut followed_session_logs)
+    let mut runtime_paths =
+        FollowedLogPaths::new(prodex_runtime_log_paths_in_dir(&runtime_proxy_log_dir()));
+    let mut session_paths = FollowedLogPaths::with_refresh_interval(
+        stream_session_log_paths(),
+        SESSION_PATH_RECONCILE_INTERVAL,
+    );
+    let mut followed_runtime_logs = followed_logs(
+        runtime_paths.refresh(|| prodex_runtime_log_paths_in_dir(&runtime_proxy_log_dir())),
+    );
+    let mut followed_session_logs = followed_logs(session_paths.refresh(stream_session_log_paths));
+    follow_token_usage_events(
+        json,
+        &mut followed_runtime_logs,
+        &mut followed_session_logs,
+        &mut runtime_paths,
+        &mut session_paths,
+    )
 }
 
 fn stream_token_usage_events_tui() -> Result<()> {
@@ -106,15 +124,24 @@ fn stream_token_usage_events_tui() -> Result<()> {
     let mut header_refresh_at =
         log_tui_header_next_refresh_at(header_detail.as_ref(), Instant::now());
 
-    let mut followed_runtime_logs =
-        followed_logs(prodex_runtime_log_paths_in_dir(&runtime_proxy_log_dir()));
-    let mut followed_session_logs = followed_logs(stream_session_log_paths());
+    let mut runtime_paths =
+        FollowedLogPaths::new(prodex_runtime_log_paths_in_dir(&runtime_proxy_log_dir()));
+    let mut session_paths = FollowedLogPaths::with_refresh_interval(
+        stream_session_log_paths(),
+        SESSION_PATH_RECONCILE_INTERVAL,
+    );
+    let mut followed_runtime_logs = followed_logs(
+        runtime_paths.refresh(|| prodex_runtime_log_paths_in_dir(&runtime_proxy_log_dir())),
+    );
+    let mut followed_session_logs = followed_logs(session_paths.refresh(stream_session_log_paths));
 
     loop {
         collect_log_stream_items(
             &mut items,
             &mut followed_runtime_logs,
             &mut followed_session_logs,
+            &mut runtime_paths,
+            &mut session_paths,
         )?;
         update_log_stream_header(
             &items,
@@ -145,39 +172,32 @@ fn print_initial_token_usage_events(json: bool) -> Result<()> {
     Ok(())
 }
 
-fn followed_logs(paths: impl IntoIterator<Item = PathBuf>) -> BTreeMap<PathBuf, FollowedLog> {
+fn followed_logs(paths: &[PathBuf]) -> BTreeMap<PathBuf, FollowedLog> {
     paths
-        .into_iter()
-        .map(|path| {
-            let offset = fs::metadata(&path)
-                .map(|metadata| metadata.len())
-                .unwrap_or(0);
-            (
-                path,
-                FollowedLog {
-                    offset,
-                    ..Default::default()
-                },
-            )
-        })
+        .iter()
+        .map(|path| (path.clone(), FollowedLog::at_end(path)))
         .collect()
 }
 
-fn stream_best_effort<T>(result: Result<Vec<T>>) -> Vec<T> {
-    result.unwrap_or_default()
-}
-
 fn stream_session_log_paths() -> Vec<PathBuf> {
-    stream_best_effort(recent_session_log_paths())
+    recent_session_log_paths().unwrap_or_default()
 }
 
 fn follow_token_usage_events(
     json: bool,
     followed_runtime_logs: &mut BTreeMap<PathBuf, FollowedLog>,
     followed_session_logs: &mut BTreeMap<PathBuf, FollowedLog>,
+    runtime_paths: &mut FollowedLogPaths,
+    session_paths: &mut FollowedLogPaths,
 ) -> Result<()> {
     loop {
-        read_token_usage_events_tick(json, followed_runtime_logs, followed_session_logs)?;
+        read_token_usage_events_tick(
+            json,
+            followed_runtime_logs,
+            followed_session_logs,
+            runtime_paths,
+            session_paths,
+        )?;
         thread::sleep(LOG_STREAM_POLL_INTERVAL);
     }
 }
@@ -186,16 +206,27 @@ fn read_token_usage_events_tick(
     json: bool,
     followed_runtime_logs: &mut BTreeMap<PathBuf, FollowedLog>,
     followed_session_logs: &mut BTreeMap<PathBuf, FollowedLog>,
+    runtime_paths: &mut FollowedLogPaths,
+    session_paths: &mut FollowedLogPaths,
 ) -> Result<()> {
-    for path in prodex_runtime_log_paths_in_dir(&runtime_proxy_log_dir()) {
-        let state = followed_runtime_logs.entry(path.clone()).or_default();
-        for event in stream_best_effort(collect_new_runtime_log_stream_items(&path, state)) {
+    let current_runtime_paths =
+        runtime_paths.refresh(|| prodex_runtime_log_paths_in_dir(&runtime_proxy_log_dir()));
+    retain_followed_logs(followed_runtime_logs, current_runtime_paths);
+    for path in current_runtime_paths {
+        let state = followed_runtime_logs
+            .entry(path.clone())
+            .or_insert_with(|| FollowedLog::at_end(path));
+        for event in collect_new_runtime_log_stream_items(path, state, true)? {
             print_log_stream_item(&event, json)?;
         }
     }
-    for path in stream_session_log_paths() {
-        let state = followed_session_logs.entry(path.clone()).or_default();
-        for event in stream_best_effort(collect_new_transcript_events(&path, state)) {
+    let current_session_paths = session_paths.refresh(stream_session_log_paths);
+    retain_followed_logs(followed_session_logs, current_session_paths);
+    for path in current_session_paths {
+        let state = followed_session_logs
+            .entry(path.clone())
+            .or_insert_with(|| FollowedLog::at_end(path));
+        for event in collect_new_transcript_events(path, state)? {
             if json {
                 print_log_stream_item(&LogStreamItem::Transcript(event), true)?;
             } else {
@@ -211,32 +242,87 @@ fn initial_log_stream_items() -> Result<VecDeque<LogStreamItem>> {
     if let Ok(Some(event)) = latest_transcript_event() {
         push_log_stream_item(&mut items, LogStreamItem::Transcript(event));
     }
-    if let Some(event) = latest_runtime_stream_payload_event() {
+    let (stream, upstream, token_usage) = latest_runtime_snapshot_events();
+    if let Some(event) = stream {
         push_log_stream_item(&mut items, LogStreamItem::Transcript(event));
     }
-    if let Some(event) = latest_upstream_payload_event() {
+    if let Some(event) = upstream {
         push_log_stream_item(&mut items, LogStreamItem::UpstreamPayload(event));
     }
-    if let Some(event) = latest_token_usage_event() {
+    if let Some(event) = token_usage {
         push_log_stream_item(&mut items, LogStreamItem::TokenUsage(event));
     }
     Ok(items)
+}
+
+fn latest_runtime_snapshot_events() -> (
+    Option<TranscriptEvent>,
+    Option<UpstreamPayloadEvent>,
+    Option<InfoTokenUsageEvent>,
+) {
+    let mut latest_stream = None;
+    let mut latest_upstream = None;
+    let mut latest_token_usage = None;
+    for path in collect_recent_runtime_log_paths(32) {
+        let Ok(tail) = read_runtime_log_tail(&path, LOG_SNAPSHOT_TAIL_BYTES) else {
+            continue;
+        };
+        for line in String::from_utf8_lossy(&tail).lines() {
+            if let Some(event) = super::log_stream::stream_payload_event_from_runtime_line(line)
+                && latest_stream
+                    .as_ref()
+                    .is_none_or(|current: &TranscriptEvent| event.timestamp >= current.timestamp)
+            {
+                latest_stream = Some(event);
+            }
+            if let Some(event) = upstream_payload_event_from_runtime_line(line)
+                && latest_upstream
+                    .as_ref()
+                    .is_none_or(|current: &UpstreamPayloadEvent| {
+                        event.timestamp >= current.timestamp
+                    })
+            {
+                latest_upstream = Some(event);
+            }
+            if let Some(event) = info_token_usage_event_from_line(line).map(local_token_usage_event)
+                && latest_token_usage
+                    .as_ref()
+                    .is_none_or(|current: &InfoTokenUsageEvent| {
+                        event.timestamp >= current.timestamp
+                    })
+            {
+                latest_token_usage = Some(event);
+            }
+        }
+    }
+    (latest_stream, latest_upstream, latest_token_usage)
 }
 
 fn collect_log_stream_items(
     items: &mut VecDeque<LogStreamItem>,
     followed_runtime_logs: &mut BTreeMap<PathBuf, FollowedLog>,
     followed_session_logs: &mut BTreeMap<PathBuf, FollowedLog>,
+    runtime_paths: &mut FollowedLogPaths,
+    session_paths: &mut FollowedLogPaths,
 ) -> Result<()> {
-    for path in prodex_runtime_log_paths_in_dir(&runtime_proxy_log_dir()) {
-        let state = followed_runtime_logs.entry(path.clone()).or_default();
-        for event in stream_best_effort(collect_new_runtime_log_stream_items(&path, state)) {
+    let current_runtime_paths =
+        runtime_paths.refresh(|| prodex_runtime_log_paths_in_dir(&runtime_proxy_log_dir()));
+    retain_followed_logs(followed_runtime_logs, current_runtime_paths);
+    for path in current_runtime_paths {
+        let state = followed_runtime_logs
+            .entry(path.clone())
+            .or_insert_with(|| FollowedLog::at_end(path));
+        for event in collect_new_runtime_log_stream_items(path, state, true)? {
             push_log_stream_item(items, event);
         }
     }
-    for path in stream_session_log_paths() {
-        let state = followed_session_logs.entry(path.clone()).or_default();
-        for event in stream_best_effort(collect_new_transcript_events(&path, state)) {
+    let current_session_paths = session_paths.refresh(stream_session_log_paths);
+    retain_followed_logs(followed_session_logs, current_session_paths);
+    for path in current_session_paths {
+        let state = followed_session_logs
+            .entry(path.clone())
+            .or_insert_with(|| FollowedLog::at_end(path));
+        for event in collect_new_transcript_events(path, state)? {
             push_log_stream_item(items, LogStreamItem::Transcript(event));
         }
     }
@@ -273,7 +359,8 @@ fn print_log_snapshot(
     upstream_payload: Option<&UpstreamPayloadEvent>,
     token_usage: Option<&InfoTokenUsageEvent>,
 ) -> Result<()> {
-    if io::stdout().is_terminal()
+    if !super::no_color_requested()
+        && io::stdout().is_terminal()
         && let Some(mut terminal) = crate::try_inline_stdout_terminal(
             render::log_snapshot_tui_height(transcript, upstream_payload, token_usage),
         )
@@ -354,15 +441,6 @@ mod tests {
     }
 
     #[test]
-    fn transient_log_discovery_and_read_errors_do_not_end_streaming() {
-        let paths = stream_best_effort::<PathBuf>(Err(anyhow::anyhow!("transient discovery")));
-        let events = stream_best_effort::<LogStreamItem>(Err(anyhow::anyhow!("transient read")));
-
-        assert!(paths.is_empty());
-        assert!(events.is_empty());
-    }
-
-    #[test]
     fn stream_tick_survives_temporarily_unreadable_session_root() {
         let _runtime_lock = crate::acquire_test_runtime_lock();
         let root = std::env::temp_dir().join(format!(
@@ -385,8 +463,17 @@ mod tests {
         );
 
         assert!(initial_log_stream_items().is_ok());
+        let mut runtime_paths = FollowedLogPaths::default();
+        let mut session_paths = FollowedLogPaths::default();
         assert!(
-            read_token_usage_events_tick(true, &mut BTreeMap::new(), &mut BTreeMap::new()).is_ok()
+            read_token_usage_events_tick(
+                true,
+                &mut BTreeMap::new(),
+                &mut BTreeMap::new(),
+                &mut runtime_paths,
+                &mut session_paths,
+            )
+            .is_ok()
         );
         let _ = std::fs::remove_dir_all(root);
     }

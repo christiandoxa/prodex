@@ -11,15 +11,20 @@ pub(crate) fn recent_session_log_paths() -> Result<Vec<PathBuf>> {
     let sessions_root = AppPaths::discover()?.shared_codex_root.join("sessions");
     let mut paths = Vec::new();
     collect_session_log_paths(&sessions_root, &mut paths)?;
-    paths.sort_by(|left, right| {
-        let left_modified = path_modified_key(left);
-        let right_modified = path_modified_key(right);
+    let mut paths = paths
+        .into_iter()
+        .map(|path| {
+            let modified = path_modified_key(&path);
+            (modified, path)
+        })
+        .collect::<Vec<_>>();
+    paths.sort_by(|(left_modified, left), (right_modified, right)| {
         right_modified
-            .cmp(&left_modified)
+            .cmp(left_modified)
             .then_with(|| left.cmp(right))
     });
     paths.truncate(SESSION_FOLLOW_LIMIT);
-    Ok(paths)
+    Ok(paths.into_iter().map(|(_, path)| path).collect())
 }
 
 fn collect_session_log_paths(root: &Path, paths: &mut Vec<PathBuf>) -> Result<()> {
