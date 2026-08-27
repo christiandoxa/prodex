@@ -48,6 +48,12 @@ pub fn self_test() -> bool {
         }};
     }
 
+    if trace {
+        eprintln!("Mojo self-test start: rich_preflight");
+        let rich_preflight = rich::rich_self_test();
+        eprintln!("Mojo self-test returned: rich_preflight={rich_preflight}");
+    }
+
     let quota = traced!(
         "quota",
         quota::remaining_percent(Some(42)) == 58
