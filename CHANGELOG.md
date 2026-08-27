@@ -6,6 +6,9 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 
 ### Runtime
 
+- Complete bounded profile sweep before timeout (`811f59f`)
+- Keep profile sweep budget platform-safe (`46a14ec`)
+- Retry profiles after transient backoff expiry (`e6ab33a`)
 - Upgrade Codex compatibility and model catalogs (`0fde6b3`)
 
 ### Claude
@@ -30,6 +33,7 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 
 - Fixed OpenAI main-agent selection so catalog-visible GPT-5.6 Sol and Terra models are not lost through sub-agent-specific filtering.
 - Made OpenAI profile rotation preserve usable near-zero quota and recover safe pre-commit requests across authoritative quota, temporary overload, and transport failures without replaying committed work.
+- Fixed bounded profile sweeps so a transient cooldown that expires between candidate passes is recovered before returning a terminal upstream failure.
 - Made `prodex update` version-aware and idempotent: it now skips asset download and replacement when the installed version is current and never automatically downgrades a newer local build.
 - Fixed log following across file replacement and truncation on Windows and Unix without replaying historical output.
 - Hardened `prodex s expose` readiness diagnostics and cleanup for local MCP initialization, Quick Tunnel routing, and public tool discovery.
@@ -50,6 +54,7 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 ## Performance
 
 - Reduced steady-state log-following work by using bounded incremental reads, cached path discovery, file-identity rotation handling, and incremental record processing instead of repeated historical scans.
+- Reduced CI Rust test-build overhead by using debug-free development/test profiles across the full release matrix without dropping test lanes.
 
 ## Changelog
 
@@ -67,6 +72,12 @@ Full Changelog: [`0.417.0...0.418.0`](https://github.com/christiandoxa/prodex/co
 - `25ba645b` — fix: use stable Windows file identity API
 - `2ec28fbe` — fix: detect Windows log replacement reliably
 - `270a446c` — fix: keep Mojo build script within quality limits
+- `e6ab33a1` — fix: retry profiles after transient backoff expiry
+- `965aebfb` — ci: reduce test debug overhead and release serialization
+- `8b67d426` — fix: retain release container safety barrier
+- `2759d343` — test: accept immediate recovery sweep
+- `46a14ec3` — fix: keep profile sweep budget platform-safe
+- `811f59fa` — fix: complete bounded profile sweep before timeout
 
 ## 0.417.0 - 2026-08-27
 
