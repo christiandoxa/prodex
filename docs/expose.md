@@ -3,8 +3,8 @@
 `prodex s expose` is a personal-development frontend for the real Prodex Super
 runtime. It captures the current working directory, resolves the Super
 configuration, starts the existing loopback expose listener, adds a focused
-Streamable HTTP MCP route, starts `cloudflared tunnel --protocol http2 --url
-http://127.0.0.1:<port>`, validates the reported Quick Tunnel hostname, and
+Streamable HTTP MCP route, starts an isolated `cloudflared tunnel --config <private-temp-config>
+--url http://127.0.0.1:<port>` invocation, validates the reported Quick Tunnel hostname, and
 probes the public endpoint before printing its URL.
 
 ## Modes
@@ -33,8 +33,9 @@ Interactive setup runs before capability generation or process startup:
 5. existing sub-agent provider/model/effort configuration when enabled;
 6. resolved configuration summary.
 
-The main and sub-agent model/effort choices use the same provider catalog,
-effort metadata, validation, and picker implementation. Remembered preferences
+The main and sub-agent model/effort choices use shared selection logic but
+role-specific catalogs: the main agent uses the provider/Codex top-level catalog,
+while Prodex-owned children use their child-provider catalog. Remembered preferences
 seed a new interactive instance but remain editable. A running instance freezes
 its confirmed configuration. A per-run MCP model or effort override applies only
 to that run; null inherits the frozen instance default. Non-TTY execution does
@@ -126,8 +127,9 @@ Git conflicts.
 
 ## Cloudflare lifecycle
 
-`cloudflared` is detected with `cloudflared --version` before Quick Tunnel
-startup. Prodex invokes it directly with typed arguments, bounds output readers,
+`cloudflared` is detected with `cloudflared --version` and its tunnel help before Quick Tunnel
+startup. Prodex invokes it directly with typed arguments, isolates it from any default user
+configuration, and bounds output readers,
 accepts only strict HTTPS `*.trycloudflare.com` hostnames, adds that exact Host
 to the MCP-only route policy, and waits for a public MCP probe. The probe checks
 modern `server/discover` where available (or legacy `initialize`) and then

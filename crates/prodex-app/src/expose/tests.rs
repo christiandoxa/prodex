@@ -578,6 +578,9 @@ import time
 if len(sys.argv) > 1 and sys.argv[1] == "--version":
     print("cloudflared version 2026.1", flush=True)
     raise SystemExit(0)
+if len(sys.argv) > 2 and sys.argv[1] == "tunnel" and sys.argv[2] == "--help":
+    print("--config --url", flush=True)
+    raise SystemExit(0)
 print("unrelated https://evil.example", flush=True)
 print("https://fixture.trycloudflare.com", file=sys.stderr, flush=True)
 time.sleep(30)
@@ -613,6 +616,9 @@ import sys
 
 if len(sys.argv) > 1 and sys.argv[1] == "--version":
     print("cloudflared version 2026.1", flush=True)
+elif len(sys.argv) > 2 and sys.argv[1] == "tunnel" and sys.argv[2] == "--help":
+    print("--config --url", flush=True)
+    raise SystemExit(0)
 else:
     print("startup failed", file=sys.stderr, flush=True)
     raise SystemExit(1)
@@ -630,6 +636,54 @@ else:
     assert!(started.elapsed() < Duration::from_secs(2));
     tunnel.shutdown();
     let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn quick_tunnel_ignores_existing_cloudflared_config_and_cleans_private_config() {
+    let root = test_temp_root().join(format!("prodex-cloudflared-config-{}", std::process::id()));
+    let home = root.join("home");
+    let user_config = home.join(".cloudflared/config.yaml");
+    fs::create_dir_all(user_config.parent().unwrap()).unwrap();
+    fs::write(
+        &user_config,
+        "tunnel: named-tunnel\ncredentials-file: secret.json\n",
+    )
+    .unwrap();
+    let script = write_test_python_executable(
+        &root,
+        "cloudflared",
+        r#"#!/usr/bin/env python3
+import sys
+import time
+
+if len(sys.argv) > 1 and sys.argv[1] == "--version":
+    print("cloudflared version 2026.1", flush=True)
+elif len(sys.argv) > 2 and sys.argv[1] == "tunnel" and sys.argv[2] == "--help":
+    print("--config --url", flush=True)
+else:
+    print("https://isolated.trycloudflare.com", flush=True)
+    time.sleep(30)
+"#,
+    );
+    let _env_lock = TestEnvVarGuard::lock();
+    let _home = TestEnvVarGuard::set_home(&home);
+    let _script = TestEnvVarGuard::set("PRODEX_TEST_CLOUDFLARED_SCRIPT", &script.to_string_lossy());
+    let path = std::env::join_paths(std::iter::once(root.clone()).chain(std::env::split_paths(
+        &std::env::var_os("PATH").unwrap_or_default(),
+    )))
+    .unwrap();
+    let _path = TestEnvVarGuard::set("PATH", &path.to_string_lossy());
+
+    let mut tunnel = start_cloudflared_tunnel("http://127.0.0.1:12345").unwrap();
+    let isolated_config = tunnel.config_path().to_path_buf();
+    assert!(!isolated_config.starts_with(home.join(".cloudflared")));
+    assert!(isolated_config.exists());
+    assert_eq!(
+        fs::read_to_string(&user_config).unwrap(),
+        "tunnel: named-tunnel\ncredentials-file: secret.json\n"
+    );
+    tunnel.shutdown();
+    assert!(!isolated_config.exists());
 }
 
 #[test]

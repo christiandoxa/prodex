@@ -267,7 +267,8 @@ fn mcp_json_protocol_and_public_route_isolation_are_enforced() {
             body.len()
         ),
     );
-    assert!(json_only.starts_with("HTTP/1.1 406"));
+    assert!(json_only.starts_with("HTTP/1.1 200"));
+    assert!(!json_only.contains("text/event-stream"));
 
     let notification = expose_mcp_request(
         listen_addr,

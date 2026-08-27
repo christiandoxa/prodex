@@ -1,6 +1,9 @@
 use super::super_expose::{ensure_cloudflared_available, handle_super_expose};
 use super::*;
+use std::fs::OpenOptions;
 use std::net::SocketAddr;
+#[cfg(unix)]
+use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
 
 pub(super) fn handle_expose(args: ExposeArgs) -> Result<()> {
     if args.invocation == prodex_cli::ExposeInvocation::SuperAlias
@@ -467,6 +470,63 @@ pub(super) struct CloudflaredTunnel {
     pub(super) child: std::process::Child,
     pub(super) url: Option<String>,
     reader_threads: Vec<JoinHandle<()>>,
+    config: CloudflaredConfigIsolation,
+    pub(super) startup_timed_out: bool,
+}
+
+struct CloudflaredConfigIsolation {
+    directory: std::path::PathBuf,
+    path: std::path::PathBuf,
+}
+
+impl CloudflaredConfigIsolation {
+    fn create() -> Result<Self> {
+        let directory = (0..16)
+            .map(|attempt| {
+                std::env::temp_dir().join(format!(
+                    "prodex-cloudflared-{}-{attempt}",
+                    std::process::id()
+                ))
+            })
+            .find(|directory| std::fs::create_dir(directory).is_ok())
+            .context("failed to create private cloudflared config directory")?;
+        #[cfg(unix)]
+        std::fs::set_permissions(&directory, std::fs::Permissions::from_mode(0o700))?;
+        let path = directory.join("config.yaml");
+        let mut options = OpenOptions::new();
+        options.write(true).create_new(true);
+        #[cfg(unix)]
+        options.mode(0o600);
+        if let Err(error) = options.open(&path) {
+            let _ = std::fs::remove_dir(&directory);
+            return Err(error).context("failed to create private cloudflared config");
+        }
+        let metadata = match std::fs::symlink_metadata(&path) {
+            Ok(metadata) => metadata,
+            Err(error) => {
+                let _ = std::fs::remove_file(&path);
+                let _ = std::fs::remove_dir(&directory);
+                return Err(error).context("failed to inspect private cloudflared config");
+            }
+        };
+        if !metadata.file_type().is_file() {
+            let _ = std::fs::remove_file(&path);
+            let _ = std::fs::remove_dir(&directory);
+            anyhow::bail!("private cloudflared config is not a regular file");
+        }
+        Ok(Self { directory, path })
+    }
+
+    fn cleanup(&self) {
+        let _ = std::fs::remove_file(&self.path);
+        let _ = std::fs::remove_dir(&self.directory);
+    }
+}
+
+impl Drop for CloudflaredConfigIsolation {
+    fn drop(&mut self) {
+        self.cleanup();
+    }
 }
 
 pub(super) fn cloudflared_command() -> Command {
@@ -480,6 +540,11 @@ pub(super) fn cloudflared_command() -> Command {
 }
 
 impl CloudflaredTunnel {
+    #[cfg(test)]
+    pub(super) fn config_path(&self) -> &std::path::Path {
+        &self.config.path
+    }
+
     pub(super) fn exited(&mut self) -> Option<std::process::ExitStatus> {
         self.child.try_wait().ok().flatten()
     }
@@ -505,6 +570,7 @@ impl CloudflaredTunnel {
                 "cloudflared output reader",
             );
         }
+        self.config.cleanup();
     }
 }
 
@@ -515,12 +581,33 @@ impl Drop for CloudflaredTunnel {
 }
 
 pub(super) fn start_cloudflared_tunnel(local_url: &str) -> Result<CloudflaredTunnel> {
+    let config = CloudflaredConfigIsolation::create()?;
     let mut command = cloudflared_command();
     command
-        .args(["tunnel", "--protocol", "http2", "--url", local_url])
+        .args([
+            "--config",
+            config
+                .path
+                .to_str()
+                .context("cloudflared config path is not UTF-8")?,
+            "tunnel",
+            "--no-autoupdate",
+            "--url",
+            local_url,
+        ])
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
+    for variable in [
+        "TUNNEL_CONFIG",
+        "TUNNEL_ORIGIN_CERT",
+        "TUNNEL_CRED_FILE",
+        "TUNNEL_HOSTNAME",
+        "TUNNEL_NAME",
+        "TUNNEL_TOKEN",
+    ] {
+        command.env_remove(variable);
+    }
     crate::configure_child_process_group(&mut command, true);
     crate::configure_child_parent_death(&mut command);
     let mut child = command.spawn().context("failed to spawn cloudflared")?;
@@ -533,11 +620,16 @@ pub(super) fn start_cloudflared_tunnel(local_url: &str) -> Result<CloudflaredTun
         reader_threads.push(expose_scan_cloudflared_output(stderr, tx));
     }
     let deadline = Instant::now() + Duration::from_secs(12);
+    let mut startup_timed_out = false;
     let url = loop {
         if let Ok(url) = rx.recv_timeout(Duration::from_millis(100)) {
             break Some(url);
         }
-        if child.try_wait().ok().flatten().is_some() || Instant::now() >= deadline {
+        if child.try_wait().ok().flatten().is_some() {
+            break None;
+        }
+        if Instant::now() >= deadline {
+            startup_timed_out = true;
             break None;
         }
     };
@@ -545,6 +637,8 @@ pub(super) fn start_cloudflared_tunnel(local_url: &str) -> Result<CloudflaredTun
         child,
         url,
         reader_threads,
+        config,
+        startup_timed_out,
     })
 }
 

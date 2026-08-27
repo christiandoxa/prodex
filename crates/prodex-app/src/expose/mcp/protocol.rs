@@ -222,15 +222,12 @@ pub(super) fn mcp_accept_allowed(value: Option<&str>) -> bool {
         return false;
     };
     let mut json = false;
-    let mut event_stream = false;
     for media in value.split(',').filter_map(|part| part.split(';').next()) {
-        match media.trim().to_ascii_lowercase().as_str() {
-            "application/json" => json = true,
-            "text/event-stream" => event_stream = true,
-            _ => {}
+        if media.trim().eq_ignore_ascii_case("application/json") {
+            json = true;
         }
     }
-    json && event_stream
+    json
 }
 
 pub(super) fn request_id(message: &Map<String, Value>) -> Option<Value> {

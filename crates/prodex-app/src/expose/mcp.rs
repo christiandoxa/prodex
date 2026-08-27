@@ -12,7 +12,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 mod probe;
-pub(super) use probe::verify_public_mcp;
+pub(super) use probe::{verify_local_mcp, verify_public_mcp};
 mod handler;
 mod protocol;
 mod tools;
@@ -30,7 +30,7 @@ const MCP_PROTOCOL_VERSIONS: [&str; 5] = [
 ];
 const MCP_RATE_LIMIT: usize = 120;
 const MCP_RATE_WINDOW: Duration = Duration::from_secs(1);
-const MCP_PUBLIC_READY_TIMEOUT: Duration = Duration::from_secs(20);
+const MCP_PUBLIC_READY_TIMEOUT: Duration = Duration::from_secs(45);
 const MCP_PUBLIC_READY_STEP: Duration = Duration::from_millis(250);
 const MCP_MAX_TASK_BYTES: usize = 64 * 1024;
 const MCP_MAX_JSON_NESTING: usize = 64;

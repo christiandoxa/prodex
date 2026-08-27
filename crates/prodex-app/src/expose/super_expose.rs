@@ -1,6 +1,7 @@
 use super::EXPOSE_MAX_CLIENTS_LIMIT;
 use super::mcp::{
-    ExposeMcpEndpoint, expose_instance_id, expose_main_provider, mcp_public_url, verify_public_mcp,
+    ExposeMcpEndpoint, expose_instance_id, expose_main_provider, mcp_public_url, verify_local_mcp,
+    verify_public_mcp,
 };
 use super::runtime::{
     ExposeHttpServer, ExposePty, ExposeShared, cloudflared_command, expose_access_url,
@@ -8,6 +9,7 @@ use super::runtime::{
 };
 use super::session::{ExposeSessionStore, expose_random_token};
 use crate::ExposeArgs;
+use crate::print_launch_status;
 use anyhow::{Context, bail};
 use prodex_cli::SuperArgs;
 use std::collections::BTreeSet;
@@ -80,6 +82,15 @@ pub(super) fn handle_super_expose(mut args: ExposeArgs) -> anyhow::Result<()> {
     });
     let mut http = ExposeHttpServer::start(listener, Arc::clone(&shared))
         .context("failed to start expose HTTP server")?;
+    print_launch_status("starting Prodex Super Remote...");
+    print_launch_status("waiting for local MCP server...");
+    let local_mcp_url = mcp_public_url(&format!("http://{listen_addr}"), &capability);
+    if let Err(error) = verify_local_mcp(&local_mcp_url) {
+        cleanup_super_expose(&shared, &mcp, &mut http, None);
+        return Err(error);
+    }
+    print_launch_status("Local MCP server ready.");
+    drop(local_mcp_url);
     let local_url = zeroize::Zeroizing::new(expose_access_url(
         &format!("http://{listen_addr}"),
         &bootstrap,
@@ -87,44 +98,41 @@ pub(super) fn handle_super_expose(mut args: ExposeArgs) -> anyhow::Result<()> {
     let mut tunnel = match start_cloudflared_tunnel(&format!("http://{listen_addr}")) {
         Ok(tunnel) => tunnel,
         Err(error) => {
-            shared.shutdown.store(true, Ordering::SeqCst);
-            http.shutdown();
+            cleanup_super_expose(&shared, &mcp, &mut http, None);
             return Err(error);
         }
     };
+    if tunnel.url.is_none() {
+        let error = cloudflared_start_failure(&mut tunnel);
+        cleanup_super_expose(&shared, &mcp, &mut http, Some(&mut tunnel));
+        return Err(error);
+    }
+    print_launch_status("Cloudflare Quick Tunnel allocated.");
     let tunnel_origin = match tunnel.url.as_deref() {
         Some(url) => url.to_string(),
         None => {
-            tunnel.shutdown();
-            shared.shutdown.store(true, Ordering::SeqCst);
-            http.shutdown();
-            bail!("cloudflared did not report a Quick Tunnel hostname")
+            let error = cloudflared_start_failure(&mut tunnel);
+            cleanup_super_expose(&shared, &mcp, &mut http, Some(&mut tunnel));
+            return Err(error);
         }
     };
     let Some(public_host) = expose_public_host(&tunnel_origin) else {
-        tunnel.shutdown();
-        shared.shutdown.store(true, Ordering::SeqCst);
-        http.shutdown();
-        bail!("cloudflared reported an invalid Quick Tunnel hostname")
+        let error = anyhow::anyhow!("Cloudflare Quick Tunnel reported an invalid hostname");
+        cleanup_super_expose(&shared, &mcp, &mut http, Some(&mut tunnel));
+        return Err(error);
     };
     shared.allow_host(public_host.clone());
     shared.allow_mcp_only_host(public_host);
     let public_url = mcp_public_url(&tunnel_origin, &capability);
+    print_launch_status("waiting for public MCP readiness...");
     if let Err(error) = verify_public_mcp(&public_url) {
-        tunnel.shutdown();
-        shared.shutdown.store(true, Ordering::SeqCst);
-        mcp.run_manager.shutdown();
-        shared.pty.shutdown();
-        http.shutdown();
+        cleanup_super_expose(&shared, &mcp, &mut http, Some(&mut tunnel));
         return Err(error);
     }
+    print_launch_status("Public MCP endpoint ready.");
     #[cfg(unix)]
     if crate::InteractiveSigintGuard::count() > 0 {
-        shared.shutdown.store(true, Ordering::SeqCst);
-        mcp.run_manager.shutdown();
-        tunnel.shutdown();
-        shared.pty.shutdown();
-        http.shutdown();
+        cleanup_super_expose(&shared, &mcp, &mut http, Some(&mut tunnel));
         return Ok(());
     }
     print_super_expose_status(
@@ -150,15 +158,43 @@ pub(super) fn handle_super_expose(mut args: ExposeArgs) -> anyhow::Result<()> {
         }
         thread::sleep(Duration::from_millis(250));
     }
-    shared.shutdown.store(true, Ordering::SeqCst);
-    mcp.run_manager.shutdown();
-    tunnel.shutdown();
-    shared.pty.shutdown();
-    http.shutdown();
+    cleanup_super_expose(&shared, &mcp, &mut http, Some(&mut tunnel));
     if tunnel_lost {
-        bail!("cloudflared exited; public access is unavailable; rerun `prodex s expose`")
+        bail!("Cloudflare Quick Tunnel exited after readiness; public access is unavailable")
     }
     Ok(())
+}
+
+fn cleanup_super_expose(
+    shared: &ExposeShared,
+    mcp: &ExposeMcpEndpoint,
+    http: &mut ExposeHttpServer,
+    tunnel: Option<&mut super::runtime::CloudflaredTunnel>,
+) {
+    shared.shutdown.store(true, Ordering::SeqCst);
+    mcp.run_manager.shutdown();
+    if let Some(tunnel) = tunnel {
+        tunnel.shutdown();
+    }
+    shared.pty.shutdown();
+    http.shutdown();
+}
+
+fn cloudflared_start_failure(tunnel: &mut super::runtime::CloudflaredTunnel) -> anyhow::Error {
+    if let Some(status) = tunnel.exited() {
+        return anyhow::anyhow!(
+            "Cloudflare Quick Tunnel exited before obtaining a public hostname (status {})",
+            status
+                .code()
+                .map_or_else(|| "signal".to_string(), |code| code.to_string())
+        );
+    }
+    if tunnel.startup_timed_out {
+        return anyhow::anyhow!(
+            "Cloudflare Quick Tunnel did not allocate a public hostname within 12 seconds; check outbound Cloudflare connectivity"
+        );
+    }
+    anyhow::anyhow!("Cloudflare Quick Tunnel did not report a public hostname")
 }
 
 pub(super) fn ensure_cloudflared_available() -> anyhow::Result<()> {
@@ -166,14 +202,44 @@ pub(super) fn ensure_cloudflared_available() -> anyhow::Result<()> {
     command.arg("--version");
     let output = crate::command_probe_output(&mut command, "cloudflared version probe");
     match output {
-        Ok(output) if output.status.success() => Ok(()),
+        Ok(output) if output.status.success() && cloudflared_version_is_parseable(&output) => {}
         Ok(_) => bail!(
-            "cloudflared --version failed; install cloudflared (no account or init is required)"
+            "cloudflared --version failed or reported an unsupported version; install a current cloudflared (no account or init is required)"
         ),
         Err(_) => bail!(
             "cloudflared is required for Quick Tunnel mode; install it from https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/ (no account or init is required)"
         ),
     }
+    let mut help = cloudflared_command();
+    help.args(["tunnel", "--help"]);
+    let help = crate::command_probe_output(&mut help, "cloudflared Quick Tunnel capability probe")
+        .context("cloudflared Quick Tunnel capability probe failed; upgrade cloudflared")?;
+    let help = String::from_utf8_lossy(&help.stdout);
+    if !help.contains("--config") || !help.contains("--url") {
+        bail!(
+            "installed cloudflared does not support isolated Quick Tunnel configuration; upgrade cloudflared"
+        );
+    }
+    Ok(())
+}
+
+fn cloudflared_version_is_parseable(output: &std::process::Output) -> bool {
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    [stdout.as_ref(), stderr.as_ref()].into_iter().any(|text| {
+        text.split_whitespace().any(|token| {
+            let token = token.trim_matches(|character: char| {
+                !character.is_ascii_alphanumeric() && character != '.'
+            });
+            let token = token.strip_prefix('v').unwrap_or(token);
+            let token = token.split(['-', '+']).next().unwrap_or_default();
+            let parts = token.split('.').collect::<Vec<_>>();
+            parts.len() >= 2
+                && parts
+                    .iter()
+                    .all(|part| !part.is_empty() && part.bytes().all(|byte| byte.is_ascii_digit()))
+        })
+    })
 }
 
 fn expose_display_name(
