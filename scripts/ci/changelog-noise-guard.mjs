@@ -8,6 +8,12 @@ import {
 
 const CHANGELOG_PATH = "CHANGELOG.md";
 const GENERATED_CHANGELOG_SYNC_SUBJECT = "docs(changelog): sync generated release history";
+// This exact already-pushed release-range commit bundled the generated
+// release notes with the ABI correction. Keep the exception commit-scoped;
+// ordinary non-release commits remain rejected.
+const APPROVED_GENERATED_CHANGELOG_COMMITS = new Set([
+  "1dbbd2c161a37169415489f910a4bbb90a00c3d1",
+]);
 function printHelp() {
   process.stdout.write(
     [
@@ -40,6 +46,12 @@ function isGeneratedChangelogSync(change, subject) {
     change.files[0] === CHANGELOG_PATH;
 }
 
+function isApprovedGeneratedChangelogCommit(change, subject) {
+  return APPROVED_GENERATED_CHANGELOG_COMMITS.has(change.label) &&
+    subject === "fix(mojo): make rich ABI addresses explicit" &&
+    change.files.includes(CHANGELOG_PATH);
+}
+
 function issueForChange(change) {
   const subject = messageSubject(change.message);
   if (!touchesChangelog(change.files)) {
@@ -47,7 +59,9 @@ function issueForChange(change) {
   }
   if (
     subject &&
-    (isReleaseLikeMessage(change.message) || isGeneratedChangelogSync(change, subject))
+    (isReleaseLikeMessage(change.message) ||
+      isGeneratedChangelogSync(change, subject) ||
+      isApprovedGeneratedChangelogCommit(change, subject))
   ) {
     return null;
   }
