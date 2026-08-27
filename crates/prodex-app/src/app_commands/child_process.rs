@@ -6,9 +6,9 @@ use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
 use std::collections::BTreeSet;
 use std::ffi::OsString;
 use std::fs::{self, File};
-use std::io::{self, IsTerminal, Write};
+use std::io::{self, IsTerminal};
 use std::path::{Path, PathBuf};
-use std::process::{Child, Command, ExitStatus, Stdio};
+use std::process::{Child, Command, ExitStatus};
 use std::thread;
 use std::time::{Duration, Instant};
 use terminal_ui::{
@@ -17,12 +17,12 @@ use terminal_ui::{
 };
 
 use crate::{
-    ChildProcessPlan, ProdexUpdateArgs, RuntimeLaunchRequest, RuntimeProxyEndpoint,
-    RuntimeToolArgs, SUPER_LOCAL_PROVIDER_ID, codex_bin, codex_cli_config_override_value,
-    codex_cli_profile_v2_name, preview_deepseek_provider_codex_args,
-    preview_external_provider_catalog_codex_args, preview_gemini_provider_codex_args,
-    preview_local_provider_catalog_codex_args, profile_openai_compatible_codex_args,
-    resolve_runtime_optional_tool_plan, runtime_launch_cli_gemini_thinking_budget_tokens,
+    ChildProcessPlan, RuntimeLaunchRequest, RuntimeProxyEndpoint, RuntimeToolArgs,
+    SUPER_LOCAL_PROVIDER_ID, codex_bin, codex_cli_config_override_value, codex_cli_profile_v2_name,
+    preview_deepseek_provider_codex_args, preview_external_provider_catalog_codex_args,
+    preview_gemini_provider_codex_args, preview_local_provider_catalog_codex_args,
+    profile_openai_compatible_codex_args, resolve_runtime_optional_tool_plan,
+    runtime_launch_cli_gemini_thinking_budget_tokens,
     runtime_launch_cli_model_context_window_tokens, runtime_launch_openai_spark_context_codex_args,
     trusted_workspace_codex_args, validate_credential_free_http_url,
 };
@@ -353,75 +353,6 @@ fn repair_codex_arg0_permissions_best_effort(path: &Path) {
 
 #[cfg(not(unix))]
 fn repair_codex_arg0_permissions_best_effort(_path: &Path) {}
-
-#[cfg(unix)]
-pub(crate) fn handle_prodex_update(_args: ProdexUpdateArgs) -> Result<()> {
-    let running_exe = std::env::current_exe().context("failed to locate current prodex binary")?;
-    let mut child = Command::new("sh")
-        .arg("-s")
-        .arg("--")
-        .env("PRODEX_RUNNING_EXE", running_exe)
-        .env("PRODEX_MIGRATE", "1")
-        .env("PRODEX_NON_INTERACTIVE", "1")
-        .stdin(Stdio::piped())
-        .spawn()
-        .context("failed to start the embedded Prodex installer with sh")?;
-    child
-        .stdin
-        .take()
-        .context("failed to open Prodex installer stdin")?
-        .write_all(include_bytes!("../../../../install.sh"))
-        .context("failed to send the embedded Prodex installer to sh")?;
-    let status = child
-        .wait()
-        .context("failed to wait for Prodex installer")?;
-    if status.success() {
-        Ok(())
-    } else {
-        anyhow::bail!("Prodex installer exited with {status}")
-    }
-}
-
-#[cfg(windows)]
-pub(crate) fn handle_prodex_update(_args: ProdexUpdateArgs) -> Result<()> {
-    let running_exe = std::env::current_exe().context("failed to locate current prodex binary")?;
-    let mut child = Command::new("powershell.exe")
-        .args([
-            "-NoLogo",
-            "-NoProfile",
-            "-ExecutionPolicy",
-            "Bypass",
-            "-Command",
-            "-",
-        ])
-        .env("PRODEX_RUNNING_EXE", running_exe)
-        .env("PRODEX_MIGRATE", "1")
-        .env("PRODEX_NON_INTERACTIVE", "1")
-        .stdin(Stdio::piped())
-        .spawn()
-        .context("failed to start the embedded Prodex installer with PowerShell")?;
-    child
-        .stdin
-        .take()
-        .context("failed to open Prodex installer stdin")?
-        .write_all(include_bytes!("../../../../install.ps1"))
-        .context("failed to send the embedded Prodex installer to PowerShell")?;
-    let status = child
-        .wait()
-        .context("failed to wait for Prodex installer")?;
-    if status.success() {
-        Ok(())
-    } else {
-        anyhow::bail!("Prodex installer exited with {status}")
-    }
-}
-
-#[cfg(not(any(unix, windows)))]
-pub(crate) fn handle_prodex_update(_args: ProdexUpdateArgs) -> Result<()> {
-    anyhow::bail!(
-        "prodex update supports macOS, Linux, and Windows; download a binary from https://github.com/christiandoxa/prodex/releases/latest"
-    )
-}
 
 pub(crate) fn child_exit_code(status: &ExitStatus) -> i32 {
     status

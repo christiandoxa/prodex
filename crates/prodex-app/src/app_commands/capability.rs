@@ -4,7 +4,7 @@ use crate::{
 };
 use anyhow::{Context, Result, bail};
 use crossterm::terminal;
-use prodex_cli::{CapabilityCommands, CapabilityListArgs, SetupArgs, SuperDoctorArgs};
+use prodex_cli::{CapabilityCommands, CapabilityListArgs, SetupArgs};
 use prodex_core::AppPaths;
 use ratatui::layout::{Constraint, Direction, Layout};
 use ratatui::style::{Color, Modifier, Style};
@@ -63,7 +63,7 @@ fn capability_failed_status(err: &anyhow::Error) -> String {
 pub(crate) fn handle_capability(command: CapabilityCommands) -> Result<()> {
     match command {
         CapabilityCommands::List(args) => handle_capability_list(args),
-        CapabilityCommands::SuperDoctor(args) => handle_super_doctor(args),
+        CapabilityCommands::SuperDoctor(args) => super::super_doctor::handle_super_doctor(args),
     }
 }
 
@@ -137,11 +137,11 @@ pub(crate) fn collect_install_check_rows(paths: &AppPaths) -> Vec<(String, Strin
 
 #[derive(Debug, Clone, serde::Serialize)]
 pub(crate) struct SuperToolStatus {
-    name: &'static str,
-    check: &'static str,
-    ready: bool,
-    status: String,
-    detail: String,
+    pub(crate) name: &'static str,
+    pub(crate) check: &'static str,
+    pub(crate) ready: bool,
+    pub(crate) status: String,
+    pub(crate) detail: String,
 }
 
 pub(crate) fn collect_super_tool_statuses(
@@ -216,41 +216,6 @@ fn optional_tool_health_status(health: &prodex_optional_tools::ToolHealth) -> St
         fields.push(format!("digest={digest}"));
     }
     capability_redacted_detail(&fields.join(", "))
-}
-
-fn handle_super_doctor(args: SuperDoctorArgs) -> Result<()> {
-    let paths = AppPaths::discover()?;
-    let statuses = collect_super_tool_statuses(&paths, args.presidio);
-    let ready = statuses.iter().all(|status| status.ready);
-
-    if args.json {
-        let value = serde_json::json!({
-            "ready": ready,
-            "strict": args.strict,
-            "presidio_checked": args.presidio,
-            "tools": statuses,
-        });
-        print_stdout_line(
-            &serde_json::to_string_pretty(&value)
-                .context("failed to serialize Super doctor report")?,
-        )?;
-    } else {
-        let fields = statuses
-            .iter()
-            .map(|status| {
-                (
-                    status.name.to_string(),
-                    format!("{}; {}; {}", status.status, status.check, status.detail),
-                )
-            })
-            .collect::<Vec<_>>();
-        print_capability_panel("Super Doctor", &fields)?;
-    }
-
-    if args.strict && !ready {
-        bail!("Super optimizer doctor found unavailable tools");
-    }
-    Ok(())
 }
 
 pub(crate) fn handle_setup(args: SetupArgs) -> Result<()> {
@@ -405,7 +370,7 @@ fn ensure_optional_tool_installed(health: &prodex_optional_tools::ToolHealth) ->
     }
 }
 
-fn print_capability_panel(title: &str, fields: &[(String, String)]) -> Result<()> {
+pub(crate) fn print_capability_panel(title: &str, fields: &[(String, String)]) -> Result<()> {
     print_capability_panels(&[CapabilityPanel {
         title: title.to_string(),
         fields: fields.to_vec(),
