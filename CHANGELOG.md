@@ -23,6 +23,9 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 
 ### Misc
 
+- Remove diagnostic self-test tracing (`f175fd9`)
+- Pass rich inputs by address (`86105bb`)
+- Make rich ABI addresses explicit (`1dbbd2c`)
 - Align upstream baseline and yanked dependency (`afb4a90`)
 - Use portable rich C ABI pointers (`864d251`)
 - Retain health while enriching tool status (`ccc7d57`)
@@ -55,7 +58,7 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 
 - Updated the supported Codex baseline to `rust-v0.150.1`, including the retained-image compaction budget default, `context_window_id`, MCP event streaming, task references, Interrupt hooks, executor MCP authentication, and required MCP-server behavior. Prodex preserves these settings, payloads, and metadata; Codex owns compaction budgeting and image trimming.
 - Official release targets now require compiled-in Mojo domain operations and fail closed on missing artifacts, ABI mismatch, or self-test failure; Rust remains the system, transport, credential, persistence, and security boundary.
-- Rich Mojo ABI v4 now uses fixed-width pointer-address fields across its C boundary, including by-value records, preserving the same authoritative domain operations on Windows without a Rust runtime fallback.
+- Rich Mojo ABI v5 now uses fixed-width pointer-address inputs across its C boundary, passing input records by address to avoid platform-specific C ABI lowering differences without a Rust runtime fallback.
 - Revalidated the complete latest-stable Optional Tools matrix at release cut: Caveman 2.3.1, RTK 0.46.0, Codebase Memory MCP 0.10.8, Playwright MCP 0.0.79, Ponytail 4.9.0, and Presidio 2.2.364 with immutable pins/digests where applicable.
 - Release validation pins the current stable Kiro CLI toolchain used by the cross-platform provider smoke matrix.
 - Windows Mojo release archives now retain every compiled domain object, including the rich ABI and log exports required by the final linked artifact.
