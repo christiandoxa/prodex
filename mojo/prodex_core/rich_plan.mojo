@@ -15,7 +15,7 @@ from rich_types import (
 )
 
 
-comptime PRODEX_RICH_ABI_VERSION: Int64 = 2
+comptime PRODEX_RICH_ABI_VERSION: Int64 = 3
 comptime RICH_MAX_PLAN_ITEMS: Int64 = 256
 comptime RICH_MAX_IDENTIFIER_BYTES: Int64 = 4_096
 comptime RICH_STATUS_OK: Int64 = 0
@@ -57,23 +57,25 @@ def plan_available_contains(
 @export("prodex_mojo_rich_context_plan_v2")
 def prodex_mojo_rich_context_plan_v2(
     abi_version: Int64,
-    items_opt: Optional[Pointer[mut=False, ProdexRichPlanItem, ImmUntrackedOrigin]],
+    items_address: UInt,
     item_count: Int64,
-    available_opt: Optional[Pointer[mut=False, ProdexRichStringView, ImmUntrackedOrigin]],
+    available_address: UInt,
     available_count: Int64,
     token_budget: Int64,
     tier: Int64,
-    output_actions_opt: Optional[Pointer[mut=True, ProdexRichPlanAction, MutUntrackedOrigin]],
+    output_actions_address: UInt,
     action_capacity: Int64,
-    output_opt: Optional[Pointer[mut=True, UInt8, MutUntrackedOrigin]],
+    output_address: UInt,
     output_capacity: Int64,
-    hash_slots_opt: Optional[Pointer[mut=True, Int64, MutUntrackedOrigin]],
+    hash_slots_address: UInt,
     hash_capacity: Int64,
-    result: Optional[Pointer[mut=True, ProdexRichPlanResult, MutUntrackedOrigin]],
+    result_address: UInt,
 ) abi("C") -> Int64:
-    if not result:
+    if result_address == 0:
         return RICH_STATUS_INVALID
-    var result_ptr = result.unsafe_value()
+    var result_ptr = Pointer[mut=True, ProdexRichPlanResult, MutUntrackedOrigin](
+        unsafe_from_address=Int(result_address)
+    )
     result_ptr[].abi_version = PRODEX_RICH_ABI_VERSION
     result_ptr[].actions_written = 0
     result_ptr[].required_actions = item_count
@@ -85,13 +87,23 @@ def prodex_mojo_rich_context_plan_v2(
     result_ptr[].issue_length = 0
     if abi_version != PRODEX_RICH_ABI_VERSION or item_count < 0 or item_count > RICH_MAX_PLAN_ITEMS or available_count < 0 or available_count > RICH_MAX_PLAN_ITEMS or action_capacity < item_count or token_budget < 0 or tier < 0 or tier > 3:
         return RICH_STATUS_INVALID
-    if not items_opt or not available_opt or not output_actions_opt or not output_opt or not hash_slots_opt:
+    if items_address == 0 or available_address == 0 or output_actions_address == 0 or output_address == 0 or hash_slots_address == 0:
         return RICH_STATUS_INVALID
-    var items = items_opt.unsafe_value()
-    var available = available_opt.unsafe_value()
-    var output_actions = output_actions_opt.unsafe_value()
-    var output = output_opt.unsafe_value()
-    var hash_slots = hash_slots_opt.unsafe_value()
+    var items = Pointer[mut=False, ProdexRichPlanItem, ImmUntrackedOrigin](
+        unsafe_from_address=Int(items_address)
+    )
+    var available = Pointer[mut=False, ProdexRichStringView, ImmUntrackedOrigin](
+        unsafe_from_address=Int(available_address)
+    )
+    var output_actions = Pointer[mut=True, ProdexRichPlanAction, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_actions_address)
+    )
+    var output = Pointer[mut=True, UInt8, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    var hash_slots = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(hash_slots_address)
+    )
     var required_output: Int64 = 0
     for index in range(item_count):
         var item = items[unsafe_offset=index].copy()

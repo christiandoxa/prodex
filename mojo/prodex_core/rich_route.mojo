@@ -21,7 +21,7 @@ from rich_types import (
 )
 
 
-comptime PRODEX_RICH_ABI_VERSION: Int64 = 2
+comptime PRODEX_RICH_ABI_VERSION: Int64 = 3
 comptime RICH_MAX_RECORDS: Int64 = 256
 comptime RICH_MAX_IDENTIFIER_BYTES: Int64 = 4_096
 comptime RICH_MAX_CAPABILITIES_BYTES: Int64 = 2_048
@@ -147,16 +147,16 @@ def route_better(
 @export("prodex_mojo_rich_route_plan_v2")
 def prodex_mojo_rich_route_plan_v2(
     abi_version: Int64,
-    inputs_opt: Optional[Pointer[mut=False, ProdexRichRouteInput, ImmUntrackedOrigin]],
+    inputs_address: UInt,
     input_count: Int64,
     required_capabilities: ProdexRichStringView,
-    output_records_opt: Optional[Pointer[mut=True, ProdexRichRouteRecord, MutUntrackedOrigin]],
+    output_records_address: UInt,
     record_capacity: Int64,
-    ordered_indices_opt: Optional[Pointer[mut=True, Int64, MutUntrackedOrigin]],
+    ordered_indices_address: UInt,
     ordered_capacity: Int64,
-    output_opt: Optional[Pointer[mut=True, UInt8, MutUntrackedOrigin]],
+    output_address: UInt,
     output_capacity: Int64,
-    hash_slots_opt: Optional[Pointer[mut=True, Int64, MutUntrackedOrigin]],
+    hash_slots_address: UInt,
     hash_capacity: Int64,
     health_weight: Int64,
     load_weight: Int64,
@@ -165,11 +165,13 @@ def prodex_mojo_rich_route_plan_v2(
     risk_weight: Int64,
     priority_weight: Int64,
     affinity_weight: Int64,
-    result_opt: Optional[Pointer[mut=True, ProdexRichRouteResult, MutUntrackedOrigin]],
+    result_address: UInt,
 ) abi("C") -> Int64:
-    if not result_opt:
+    if result_address == 0:
         return RICH_STATUS_INVALID
-    var result = result_opt.unsafe_value()
+    var result = Pointer[mut=True, ProdexRichRouteResult, MutUntrackedOrigin](
+        unsafe_from_address=Int(result_address)
+    )
     result[].abi_version = PRODEX_RICH_ABI_VERSION
     result[].candidates_written = 0
     result[].required_candidates = 0
@@ -204,13 +206,23 @@ def prodex_mojo_rich_route_plan_v2(
         return RICH_STATUS_INVALID
     if input_count == 0:
         return RICH_STATUS_OK
-    if not inputs_opt or not output_records_opt or not ordered_indices_opt or not output_opt or not hash_slots_opt:
+    if inputs_address == 0 or output_records_address == 0 or ordered_indices_address == 0 or output_address == 0 or hash_slots_address == 0:
         return RICH_STATUS_INVALID
-    var inputs = inputs_opt.unsafe_value()
-    var output_records = output_records_opt.unsafe_value()
-    var ordered_indices = ordered_indices_opt.unsafe_value()
-    var output = output_opt.unsafe_value()
-    var hash_slots = hash_slots_opt.unsafe_value()
+    var inputs = Pointer[mut=False, ProdexRichRouteInput, ImmUntrackedOrigin](
+        unsafe_from_address=Int(inputs_address)
+    )
+    var output_records = Pointer[mut=True, ProdexRichRouteRecord, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_records_address)
+    )
+    var ordered_indices = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(ordered_indices_address)
+    )
+    var output = Pointer[mut=True, UInt8, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    var hash_slots = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(hash_slots_address)
+    )
     var required_output: Int64 = 0
     for index in range(input_count):
         var item = inputs[unsafe_offset=index].copy()

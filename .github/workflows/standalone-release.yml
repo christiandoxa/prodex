@@ -262,7 +262,7 @@ jobs:
           fi
           archive="target/mojo-release/${{ matrix.target }}/${archive_name}"
           llvm-nm -g "${archive}" | grep -F 'prodex_mojo_rich_abi_version'
-          llvm-nm -g "${archive}" | grep -F 'prodex_mojo_log_classify_v1'
+          llvm-nm -g "${archive}" | grep -F 'prodex_mojo_log_classify_v2'
           if llvm-nm -u "${archive}" | grep -F 'KGEN_CompilerRT_'; then
             echo "target Mojo archive unexpectedly requires the Mojo compiler runtime" >&2
             exit 1
@@ -523,7 +523,7 @@ jobs:
             "${symbol_tool[@]}" -g "${archive}" | grep -F 'prodex_mojo_rich_policy_alias_v2'
             "${symbol_tool[@]}" -g "${archive}" | grep -F 'prodex_mojo_rich_model_fallback_v2'
             "${symbol_tool[@]}" -g "${archive}" | grep -F 'prodex_mojo_rich_context_plan_v2'
-            "${symbol_tool[@]}" -g "${archive}" | grep -F 'prodex_mojo_log_classify_v1'
+            "${symbol_tool[@]}" -g "${archive}" | grep -F 'prodex_mojo_log_classify_v2'
             if "${symbol_tool[@]}" -u "${archive}" | grep -F 'KGEN_CompilerRT_'; then
               echo "rich Mojo core unexpectedly requires the Mojo compiler runtime" >&2
               exit 1
@@ -556,14 +556,14 @@ jobs:
           if [ "${{ matrix.target }}" = "aarch64-unknown-linux-gnu" ]; then
             binary_command=(qemu-aarch64 -L /usr/aarch64-linux-gnu "${binary}")
           fi
-          diagnostics="$(PRODEX_MOJO_SELF_TEST_TRACE=1 PRODEX_HOME="${RUNNER_TEMP}/prodex-mojo-release-home" "${binary_command[@]}" doctor --runtime --json)"
+          diagnostics="$(PRODEX_HOME="${RUNNER_TEMP}/prodex-mojo-release-home" "${binary_command[@]}" doctor --runtime --json)"
           printf '%s\n' "${diagnostics}" | grep -F '"implementation": "mojo-compiled-in"'
           printf '%s\n' "${diagnostics}" | grep -F '"fallback": false'
           printf '%s\n' "${diagnostics}" | grep -F '"compiler_required": false'
           printf '%s\n' "${diagnostics}" | grep -F '"build_strict": true'
           printf '%s\n' "${diagnostics}" | grep -F '"self_test": "passed"'
           printf '%s\n' "${diagnostics}" | grep -F '"context_text": true'
-          printf '%s\n' "${diagnostics}" | grep -F '"rich_abi_version": 2'
+          printf '%s\n' "${diagnostics}" | grep -F '"rich_abi_version": 3'
           printf '%s\n' "${diagnostics}" | grep -F '"runtime_dependency_mode": "arena-static"'
           printf '%s\n' "${diagnostics}" | grep -F '"rich_domain": true'
           printf '%s\n' "${diagnostics}" | grep -F '"rich_context_parser": true'

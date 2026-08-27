@@ -109,7 +109,7 @@ secrets, and filesystem paths do not cross this text seam. Release builds pin an
 compiler, compare ABI layouts, fail closed when the archive is absent, and reject an unexpected
 Mojo compiler-runtime dependency.
 
-Rich ABI v2 extends this boundary without changing text ABI v1. It carries only bounded,
+Rich ABI v3 extends this boundary without changing text ABI v1. It carries only bounded,
 non-secret UTF-8 views and fixed-layout record tables. Mojo's domain objects and collection
 algorithms use caller-owned output/scratch arenas and offset/index relationships; no package-owned
 or Mojo-owned object crosses into Rust. Rust validates every rich result's ABI version, status,

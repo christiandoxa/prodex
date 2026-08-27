@@ -55,19 +55,19 @@ pub fn plan_context_items(
     let status = unsafe {
         prodex_mojo_rich_context_plan_v2(
             RICH_ABI_VERSION,
-            rich_items.as_ptr(),
+            mojo_pointer_address(rich_items.as_ptr()),
             i64::try_from(items.len()).map_err(|_| MojoError::InvalidInput)?,
-            rich_available.as_ptr(),
+            mojo_pointer_address(rich_available.as_ptr()),
             i64::try_from(available.len()).map_err(|_| MojoError::InvalidInput)?,
             i64::try_from(token_budget).map_err(|_| MojoError::InvalidInput)?,
             tier,
-            actions.as_mut_ptr(),
+            mojo_pointer_address(actions.as_mut_ptr()),
             i64::try_from(items.len()).map_err(|_| MojoError::InvalidInput)?,
-            output.as_mut_ptr(),
+            mojo_pointer_address(output.as_mut_ptr()),
             i64::try_from(output_capacity).map_err(|_| MojoError::InvalidInput)?,
-            hash_slots.as_mut_ptr(),
+            mojo_pointer_address(hash_slots.as_mut_ptr()),
             i64::try_from(scratch_capacity).map_err(|_| MojoError::InvalidInput)?,
-            &mut result,
+            mojo_mut_pointer_address(&mut result),
         )
     };
     if status != 0 {

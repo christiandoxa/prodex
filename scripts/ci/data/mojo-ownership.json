@@ -84,7 +84,7 @@
     {
       "name": "log_event_classification",
       "domain": "strings/observability",
-      "mojo_entry": "prodex_mojo_log_classify_v1",
+      "mojo_entry": "prodex_mojo_log_classify_v2",
       "consumer": "prodex-app"
     }
   ]

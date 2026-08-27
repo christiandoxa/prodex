@@ -7,7 +7,11 @@
 
 use crate::{MojoError, MojoIssue};
 
-pub const RICH_ABI_VERSION: i64 = 2;
+// v3 uses fixed-width UInt64 address arguments for nullable C ABI pointers.
+// Mojo Optional[Pointer] is not a portable C ABI representation on Windows.
+pub const RICH_ABI_VERSION: i64 = 3;
+
+const _: () = assert!(std::mem::size_of::<usize>() == std::mem::size_of::<u64>());
 
 mod routing;
 pub use routing::{RouteCandidate, RouteInput, RoutePlan, plan_routes};
@@ -222,32 +226,34 @@ const _: () = {
     assert!(std::mem::size_of::<RichPlanResult>() == 72);
 };
 
+// Exported Mojo functions receive caller-owned pointer addresses as u64. The
+// Mojo side validates zero before reconstructing a typed pointer.
 unsafe extern "C" {
     fn prodex_mojo_rich_abi_version() -> i64;
     fn prodex_mojo_rich_abi_layout(output: *mut u64, output_count: i64) -> i64;
     fn prodex_mojo_rich_context_analyze_v2(
         abi_version: i64,
         input: RichStringView,
-        output_records: *mut RichContextRecord,
+        output_records: u64,
         record_capacity: i64,
-        output: *mut u8,
+        output: u64,
         output_capacity: i64,
-        hash_slots: *mut i64,
+        hash_slots: u64,
         hash_capacity: i64,
-        result: *mut RichContextResult,
+        result: u64,
     ) -> i64;
     fn prodex_mojo_rich_route_plan_v2(
         abi_version: i64,
-        inputs: *const RichRouteInput,
+        inputs: u64,
         input_count: i64,
         required_capabilities: RichStringView,
-        output_records: *mut RichRouteRecord,
+        output_records: u64,
         record_capacity: i64,
-        ordered_indices: *mut i64,
+        ordered_indices: u64,
         ordered_capacity: i64,
-        output: *mut u8,
+        output: u64,
         output_capacity: i64,
-        hash_slots: *mut i64,
+        hash_slots: u64,
         hash_capacity: i64,
         health_weight: i64,
         load_weight: i64,
@@ -256,45 +262,55 @@ unsafe extern "C" {
         risk_weight: i64,
         priority_weight: i64,
         affinity_weight: i64,
-        result: *mut RichRouteResult,
+        result: u64,
     ) -> i64;
     fn prodex_mojo_rich_policy_alias_v2(
         abi_version: i64,
         input: RichPolicyInput,
-        output_models: *mut RichPolicyModel,
+        output_models: u64,
         model_capacity: i64,
-        output: *mut u8,
+        output: u64,
         output_capacity: i64,
-        result: *mut RichPolicyResult,
+        result: u64,
     ) -> i64;
     fn prodex_mojo_rich_model_fallback_v2(
         abi_version: i64,
         provider: RichStringView,
         model: RichStringView,
-        output_records: *mut RichFallbackRecord,
+        output_records: u64,
         record_capacity: i64,
-        output: *mut u8,
+        output: u64,
         output_capacity: i64,
-        hash_slots: *mut i64,
+        hash_slots: u64,
         hash_capacity: i64,
-        result: *mut RichFallbackResult,
+        result: u64,
     ) -> i64;
     fn prodex_mojo_rich_context_plan_v2(
         abi_version: i64,
-        items: *const RichPlanItem,
+        items: u64,
         item_count: i64,
-        available: *const RichStringView,
+        available: u64,
         available_count: i64,
         token_budget: i64,
         tier: i64,
-        output_actions: *mut RichPlanAction,
+        output_actions: u64,
         action_capacity: i64,
-        output: *mut u8,
+        output: u64,
         output_capacity: i64,
-        hash_slots: *mut i64,
+        hash_slots: u64,
         hash_capacity: i64,
-        result: *mut RichPlanResult,
+        result: u64,
     ) -> i64;
+}
+
+#[inline]
+fn mojo_pointer_address<T>(pointer: *const T) -> u64 {
+    pointer as usize as u64
+}
+
+#[inline]
+fn mojo_mut_pointer_address<T>(pointer: *mut T) -> u64 {
+    pointer as usize as u64
 }
 
 static RICH_ABI_READY: std::sync::OnceLock<bool> = std::sync::OnceLock::new();

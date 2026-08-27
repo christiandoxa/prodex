@@ -55,11 +55,11 @@ pub fn validate_policy_alias(input: PolicyAliasInput<'_>) -> Result<PolicyAliasP
         prodex_mojo_rich_policy_alias_v2(
             RICH_ABI_VERSION,
             rich_input,
-            output_models.as_mut_ptr(),
+            mojo_pointer_address(output_models.as_mut_ptr()),
             i64::try_from(input.models.len()).map_err(|_| MojoError::InvalidInput)?,
-            output.as_mut_ptr(),
+            mojo_pointer_address(output.as_mut_ptr()),
             i64::try_from(output.len()).map_err(|_| MojoError::InvalidInput)?,
-            &mut result,
+            mojo_mut_pointer_address(&mut result),
         )
     };
     if status != 0 {

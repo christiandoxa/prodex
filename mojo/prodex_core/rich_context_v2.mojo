@@ -16,7 +16,7 @@ from rich_types import (
 )
 
 
-comptime PRODEX_RICH_ABI_VERSION: Int64 = 2
+comptime PRODEX_RICH_ABI_VERSION: Int64 = 3
 comptime RICH_CONTEXT_MAX_LINES: Int64 = 65_536
 comptime RICH_CONTEXT_MAX_TEXT_BYTES: Int64 = 1_048_576
 comptime RICH_CONTEXT_STATUS_OK: Int64 = 0
@@ -338,17 +338,19 @@ def context_hash_capacity(count: Int64) -> Int64:
 def prodex_mojo_rich_context_analyze_v2(
     abi_version: Int64,
     input: ProdexRichStringView,
-    output_records_opt: Optional[Pointer[mut=True, ProdexRichContextRecord, MutUntrackedOrigin]],
+    output_records_address: UInt,
     record_capacity: Int64,
-    output_opt: Optional[Pointer[mut=True, UInt8, MutUntrackedOrigin]],
+    output_address: UInt,
     output_capacity: Int64,
-    hash_slots_opt: Optional[Pointer[mut=True, Int64, MutUntrackedOrigin]],
+    hash_slots_address: UInt,
     hash_capacity: Int64,
-    result_opt: Optional[Pointer[mut=True, ProdexRichContextResult, MutUntrackedOrigin]],
+    result_address: UInt,
 ) abi("C") -> Int64:
-    if not result_opt:
+    if result_address == 0:
         return RICH_CONTEXT_STATUS_INVALID
-    var result = result_opt.unsafe_value()
+    var result = Pointer[mut=True, ProdexRichContextResult, MutUntrackedOrigin](
+        unsafe_from_address=Int(result_address)
+    )
     result[].abi_version = PRODEX_RICH_ABI_VERSION
     result[].line_count = 0
     result[].records_written = 0
@@ -386,11 +388,17 @@ def prodex_mojo_rich_context_analyze_v2(
         return RICH_CONTEXT_STATUS_CAPACITY
     if line_count == 0:
         return RICH_CONTEXT_STATUS_OK
-    if not output_records_opt or not output_opt or not hash_slots_opt:
+    if output_records_address == 0 or output_address == 0 or hash_slots_address == 0:
         return RICH_CONTEXT_STATUS_INVALID
-    var records = output_records_opt.unsafe_value()
-    var output = output_opt.unsafe_value()
-    var slots = hash_slots_opt.unsafe_value()
+    var records = Pointer[mut=True, ProdexRichContextRecord, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_records_address)
+    )
+    var output = Pointer[mut=True, UInt8, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    var slots = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(hash_slots_address)
+    )
     for index in range(hash_capacity):
         slots[unsafe_offset=index] = -1
     var input_ptr = input.ptr.unsafe_value()
