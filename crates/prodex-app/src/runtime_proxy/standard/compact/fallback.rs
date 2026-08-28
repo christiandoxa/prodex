@@ -147,6 +147,19 @@ fn attempt_runtime_compact_owner_fallback(
             );
             Ok(response)
         }
+        RuntimeStandardAttempt::ProfileUnavailable {
+            profile_name,
+            response,
+        } => {
+            log_runtime_proxy_compact_fallback_failure(
+                &exhausted,
+                "profile_unavailable",
+                last_failure_kind,
+                saw_inflight_saturation,
+                &profile_name,
+            );
+            Ok(response)
+        }
         RuntimeStandardAttempt::AuthFailed {
             profile_name,
             response,
