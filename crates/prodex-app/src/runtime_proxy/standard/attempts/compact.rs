@@ -148,11 +148,15 @@ fn handle_runtime_compact_error_parts(
         &parts.body,
         runtime_proxy_crate::RuntimeHttpErrorPhase::PreCommit,
     );
-    let retryable_quota =
-        error_policy.action == runtime_proxy_crate::RuntimeHttpErrorAction::RotateProfile;
+    let retryable_quota = error_policy.action
+        == runtime_proxy_crate::RuntimeHttpErrorAction::RotateProfile
+        && error_policy.class == runtime_proxy_crate::RuntimeHttpErrorClass::Quota;
     let token_invalidated = runtime_proxy_body_indicates_token_invalidated(&parts.body);
-    let retryable_overload =
-        error_policy.action == runtime_proxy_crate::RuntimeHttpErrorAction::RetryProfile;
+    let retryable_overload = error_policy.action
+        == runtime_proxy_crate::RuntimeHttpErrorAction::RetryProfile
+        || (error_policy.action == runtime_proxy_crate::RuntimeHttpErrorAction::RotateProfile
+            && error_policy.class
+                == runtime_proxy_crate::RuntimeHttpErrorClass::ProfileUnavailable);
     if matches!(status, 402 | 403 | 429) && !retryable_quota {
         runtime_proxy_log(
             shared,

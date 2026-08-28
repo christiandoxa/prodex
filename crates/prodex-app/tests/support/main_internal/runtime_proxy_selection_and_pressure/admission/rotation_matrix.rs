@@ -192,6 +192,40 @@ fn fresh_responses_rotate_each_retryable_failure_class_once() {
 }
 
 #[test]
+fn fresh_responses_rotate_profile_unavailable_without_quota_quarantine() {
+    let backend =
+        RuntimeProxyBackend::start_with_fault_script(RuntimeProxyBackendFaultScript::new([
+            RuntimeProxyBackendFaultStep::profile_unavailable(
+                RuntimeProxyBackendFaultRoute::Responses,
+                "main-account",
+            ),
+        ]));
+    let harness = ready_profiles(&backend);
+
+    let reply = proxy_runtime_responses_request(
+        113,
+        &responses_request(br#"{"input":[]}"#),
+        harness.shared(),
+    )
+    .expect("profile-unavailable response should rotate to the next profile");
+    let (status, body, profile) = consume_responses_reply(reply);
+
+    assert_eq!(status, 200, "{body}");
+    assert_eq!(profile.as_deref(), Some("second"));
+    assert_eq!(backend.responses_accounts(), ["main-account", "second-account"]);
+
+    let runtime = harness.shared().runtime.lock().expect("runtime lock");
+    let main_snapshot = runtime
+        .profile_usage_snapshots
+        .get("main")
+        .expect("main profile quota snapshot");
+    assert_eq!(main_snapshot.five_hour_status, RuntimeQuotaWindowStatus::Ready);
+    assert_eq!(main_snapshot.five_hour_remaining_percent, 80);
+    assert_eq!(main_snapshot.weekly_status, RuntimeQuotaWindowStatus::Ready);
+    assert_eq!(main_snapshot.weekly_remaining_percent, 80);
+}
+
+#[test]
 fn fresh_responses_pass_through_generic_429_without_rotation() {
     let backend =
         RuntimeProxyBackend::start_with_fault_script(RuntimeProxyBackendFaultScript::new([
@@ -305,6 +339,36 @@ fn compact_explicit_quota_rotates_to_next_profile() {
         backend.responses_accounts(),
         ["main-account", "second-account"]
     );
+}
+
+#[test]
+fn compact_profile_unavailable_rotates_without_quota_quarantine() {
+    let backend =
+        RuntimeProxyBackend::start_with_fault_script(RuntimeProxyBackendFaultScript::new([
+            RuntimeProxyBackendFaultStep::profile_unavailable(
+                RuntimeProxyBackendFaultRoute::Compact,
+                "main-account",
+            ),
+        ]));
+    let harness = ready_profiles(&backend);
+
+    let response = proxy_runtime_standard_request(107, &compact_request(), harness.shared())
+        .expect("profile-unavailable response should rotate to the next profile");
+    let (status, body) = tiny_http_response_status_and_body(response);
+
+    assert_eq!(status, 200, "{body}");
+    assert!(body.contains("output"), "{body}");
+    assert_eq!(backend.responses_accounts(), ["main-account", "second-account"]);
+
+    let runtime = harness.shared().runtime.lock().expect("runtime lock");
+    let main_snapshot = runtime
+        .profile_usage_snapshots
+        .get("main")
+        .expect("main profile quota snapshot");
+    assert_eq!(main_snapshot.five_hour_status, RuntimeQuotaWindowStatus::Ready);
+    assert_eq!(main_snapshot.five_hour_remaining_percent, 80);
+    assert_eq!(main_snapshot.weekly_status, RuntimeQuotaWindowStatus::Ready);
+    assert_eq!(main_snapshot.weekly_remaining_percent, 80);
 }
 
 #[test]

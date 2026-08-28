@@ -5,7 +5,8 @@ use super::{
     runtime_response_event_type_from_value,
 };
 use crate::{
-    RuntimeHttpErrorAction, RuntimeHttpErrorPhase, runtime_stream_error_policy_from_value,
+    RuntimeHttpErrorAction, RuntimeHttpErrorClass, RuntimeHttpErrorPhase,
+    runtime_stream_error_policy_from_value,
 };
 
 const RUNTIME_SSE_INVALID_DATA_MARKER: &str = "\u{0}prodex-invalid-sse-data";
@@ -237,13 +238,14 @@ struct RuntimeSseInspectionState {
 
 impl RuntimeSseInspectionState {
     fn observe(&mut self, event: RuntimeParsedSseEvent) -> Option<RuntimeSseInspectionProgress> {
-        if event.quota_blocked {
+        let committed = self.saw_commit_ready_event;
+        if !committed && event.quota_blocked {
             return Some(RuntimeSseInspectionProgress::QuotaBlocked);
         }
-        if event.overloaded {
+        if !committed && event.overloaded {
             return Some(RuntimeSseInspectionProgress::Overloaded);
         }
-        if event.previous_response_not_found {
+        if !committed && event.previous_response_not_found {
             return Some(RuntimeSseInspectionProgress::PreviousResponseNotFound);
         }
         self.response_ids.extend(event.response_ids);
@@ -307,8 +309,11 @@ pub fn parse_runtime_sse_event(data_lines: &[String]) -> RuntimeParsedSseEvent {
     let error_policy =
         runtime_stream_error_policy_from_value(&value, RuntimeHttpErrorPhase::PreCommit);
     RuntimeParsedSseEvent {
-        quota_blocked: error_policy.action == RuntimeHttpErrorAction::RotateProfile,
-        overloaded: error_policy.action == RuntimeHttpErrorAction::RetryProfile,
+        quota_blocked: error_policy.action == RuntimeHttpErrorAction::RotateProfile
+            && error_policy.class == RuntimeHttpErrorClass::Quota,
+        overloaded: error_policy.action == RuntimeHttpErrorAction::RetryProfile
+            || (error_policy.action == RuntimeHttpErrorAction::RotateProfile
+                && error_policy.class == RuntimeHttpErrorClass::ProfileUnavailable),
         previous_response_not_found: extract_runtime_proxy_previous_response_message_from_value(
             &value,
         )

@@ -216,6 +216,28 @@ impl RuntimeProxyBackendFaultStep {
         }
     }
 
+    pub(crate) fn profile_unavailable(
+        route: RuntimeProxyBackendFaultRoute,
+        account_id: &str,
+    ) -> Self {
+        Self {
+            route,
+            account_id: Some(account_id.to_string()),
+            status_line: "HTTP/1.1 403 Forbidden",
+            content_type: "application/json",
+            body: serde_json::json!({
+                "detail": {
+                    "code": "deactivated_workspace",
+                    "message": "scripted profile unavailable"
+                }
+            })
+            .to_string(),
+            response_turn_state: None,
+            initial_body_stall: None,
+            chunk_delay: None,
+        }
+    }
+
     pub(crate) fn overloaded_503(route: RuntimeProxyBackendFaultRoute, account_id: &str) -> Self {
         Self {
             route,

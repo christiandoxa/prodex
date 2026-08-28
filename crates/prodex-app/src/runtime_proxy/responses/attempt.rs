@@ -508,13 +508,18 @@ fn handle_runtime_responses_non_success(
             response,
         }));
     }
-    if error_policy.action == runtime_proxy_crate::RuntimeHttpErrorAction::RotateProfile {
+    if error_policy.action == runtime_proxy_crate::RuntimeHttpErrorAction::RotateProfile
+        && error_policy.class == runtime_proxy_crate::RuntimeHttpErrorClass::Quota
+    {
         return Ok(Some(RuntimeResponsesAttempt::QuotaBlocked {
             profile_name: profile_name.to_string(),
             response,
         }));
     }
-    if error_policy.action == runtime_proxy_crate::RuntimeHttpErrorAction::RetryProfile {
+    if error_policy.action == runtime_proxy_crate::RuntimeHttpErrorAction::RetryProfile
+        || (error_policy.action == runtime_proxy_crate::RuntimeHttpErrorAction::RotateProfile
+            && error_policy.class == runtime_proxy_crate::RuntimeHttpErrorClass::ProfileUnavailable)
+    {
         return Ok(Some(RuntimeResponsesAttempt::Overloaded {
             profile_name: profile_name.to_string(),
             response,
