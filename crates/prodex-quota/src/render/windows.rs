@@ -59,14 +59,22 @@ pub fn usage_has_spark_limit(usage: &UsageResponse) -> bool {
     usage
         .additional_rate_limits
         .iter()
-        .any(additional_rate_limit_is_spark)
+        .any(crate::capacity::additional_rate_limit_is_spark)
 }
 
 /// Checks only explicit backend admission state plus the bucket's own windows.
 pub fn additional_rate_limit_is_usable(additional: &AdditionalRateLimit) -> bool {
-    additional.allowed != Some(false)
-        && additional.limit_reached != Some(true)
-        && window_pair_has_ready_limit(&additional.rate_limit)
+    #[cfg(feature = "mojo")]
+    {
+        crate::capacity::classify_additional_rate_limit_is_usable(additional)
+    }
+
+    #[cfg(not(feature = "mojo"))]
+    {
+        additional.allowed != Some(false)
+            && additional.limit_reached != Some(true)
+            && window_pair_has_ready_limit(&additional.rate_limit)
+    }
 }
 
 pub fn spark_window_snapshots_at(
@@ -76,7 +84,7 @@ pub fn spark_window_snapshots_at(
     let rate_limit = &usage
         .additional_rate_limits
         .iter()
-        .find(|additional| additional_rate_limit_is_spark(additional))?
+        .find(|additional| crate::capacity::additional_rate_limit_is_spark(additional))?
         .rate_limit;
     Some((
         required_window_snapshot_at(rate_limit, "5h", now)?,
@@ -88,22 +96,9 @@ pub fn spark_window_snapshot(usage: &UsageResponse, label: &str) -> Option<MainW
     let pair = &usage
         .additional_rate_limits
         .iter()
-        .find(|additional| additional_rate_limit_is_spark(additional))?
+        .find(|additional| crate::capacity::additional_rate_limit_is_spark(additional))?
         .rate_limit;
     required_window_snapshot_at(pair, label, Local::now().timestamp())
-}
-
-fn additional_rate_limit_is_spark(additional: &AdditionalRateLimit) -> bool {
-    [
-        additional.limit_name.as_deref(),
-        additional.metered_feature.as_deref(),
-    ]
-    .into_iter()
-    .flatten()
-    .any(|value| {
-        let normalized = value.to_ascii_lowercase();
-        normalized.contains("spark") || normalized.contains("bengalfox")
-    })
 }
 
 pub fn window_pair_has_ready_limit(pair: &WindowPair) -> bool {
@@ -133,45 +128,73 @@ pub fn window_pair_has_ready_limit(pair: &WindowPair) -> bool {
 }
 
 pub fn openai_quota_runtime_window_pair(usage: &UsageResponse) -> Option<&WindowPair> {
-    if usage
-        .rate_limit
-        .as_ref()
-        .is_some_and(window_pair_has_ready_limit)
+    #[cfg(feature = "mojo")]
     {
-        return usage.rate_limit.as_ref();
+        let candidates = crate::capacity::quota_capacity_candidates_for_usage_at(
+            usage,
+            prodex_runtime_state::RuntimeRouteKind::Standard,
+            Local::now().timestamp(),
+        )
+        .expect("Mojo quota capacity classification failed");
+        candidates
+            .iter()
+            .find(|candidate| candidate.output.routing_eligible)
+            .map(|candidate| candidate.pair)
+            .or_else(|| {
+                candidates
+                    .iter()
+                    .find(|candidate| {
+                        candidate.output.lane == prodex_mojo_core::quota::QUOTA_CAPACITY_LANE_MAIN
+                    })
+                    .map(|candidate| candidate.pair)
+            })
     }
 
-    let spark = usage
-        .additional_rate_limits
-        .iter()
-        .find(|additional| {
-            additional_rate_limit_is_spark(additional)
-                && additional_rate_limit_is_usable(additional)
-        })
-        .map(|additional| &additional.rate_limit);
-    if spark.is_some_and(window_pair_has_ready_limit) {
-        return spark;
-    }
+    #[cfg(not(feature = "mojo"))]
+    {
+        if usage
+            .rate_limit
+            .as_ref()
+            .is_some_and(window_pair_has_ready_limit)
+        {
+            return usage.rate_limit.as_ref();
+        }
 
-    usage.rate_limit.as_ref().or(spark)
+        let spark = usage
+            .additional_rate_limits
+            .iter()
+            .find(|additional| {
+                crate::capacity::additional_rate_limit_is_spark(additional)
+                    && additional_rate_limit_is_usable(additional)
+            })
+            .map(|additional| &additional.rate_limit);
+        if spark.is_some_and(window_pair_has_ready_limit) {
+            return spark;
+        }
+
+        usage.rate_limit.as_ref().or(spark)
+    }
 }
 
 pub fn openai_quota_has_ready_limit(usage: &UsageResponse) -> bool {
+    #[cfg(feature = "mojo")]
+    {
+        crate::capacity::quota_capacity_candidates_for_usage_at(
+            usage,
+            prodex_runtime_state::RuntimeRouteKind::Standard,
+            Local::now().timestamp(),
+        )
+        .expect("Mojo quota capacity classification failed")
+        .iter()
+        .any(|candidate| candidate.output.routing_eligible)
+    }
+
+    #[cfg(not(feature = "mojo"))]
     openai_quota_runtime_window_pair(usage).is_some_and(window_pair_has_ready_limit)
 }
 
 fn openai_quota_has_ready_runtime_limit(usage: &UsageResponse) -> bool {
-    if usage
-        .rate_limit
-        .as_ref()
-        .is_some_and(window_pair_has_ready_limit)
-    {
-        return true;
-    }
-
-    usage.additional_rate_limits.iter().any(|additional| {
-        additional_rate_limit_is_spark(additional) && additional_rate_limit_is_usable(additional)
-    })
+    openai_quota_has_ready_limit(usage)
 }
 
 pub fn quota_window_summary(usage: &UsageResponse, label: &str) -> RuntimeQuotaWindowSummary {

@@ -1,4 +1,5 @@
 mod auth;
+mod capacity;
 mod models;
 #[cfg(feature = "mojo")]
 mod mojo;
