@@ -1,11 +1,10 @@
 use super::*;
 #[cfg(any(not(feature = "mojo"), test))]
 use crate::smart_context::smart_context_token_budget_tier_from_accounting;
+#[cfg(any(not(feature = "mojo"), test))]
 use crate::smart_context::{
     SmartContextExactnessDecision, SmartContextExactnessGuard, SmartContextObservedTokenAccounting,
     SmartContextTokenAccountingRisk, SmartContextTokenBudgetTier, non_empty,
-    smart_context_relaxed_inline_budget, smart_context_relaxed_rehydrate_budget,
-    smart_context_tightened_inline_budget, smart_context_tightened_rehydrate_budget,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -270,41 +269,6 @@ fn smart_context_budget_policy_reasons(
         reasons.push(SmartContextBudgetPolicyReason::UnsafeAccounting);
     }
     reasons
-}
-
-pub fn smart_context_apply_rewrite_budget_decision(
-    mut policy: SmartContextAdaptiveBudgetPolicy,
-    decision: SmartContextRewriteBudgetDecision,
-    available_context_tokens: Option<u64>,
-) -> SmartContextAdaptiveBudgetPolicy {
-    if policy.mode == SmartContextBudgetMode::ExactPassThrough {
-        return policy;
-    }
-
-    match decision {
-        SmartContextRewriteBudgetDecision::NoChange => {}
-        SmartContextRewriteBudgetDecision::Relax => {
-            policy.max_inline_tool_output_bytes = smart_context_relaxed_inline_budget(
-                policy.tier,
-                policy.max_inline_tool_output_bytes,
-            );
-            policy.max_inline_bytes = policy.max_inline_tool_output_bytes;
-            policy.max_rehydrate_tokens =
-                smart_context_relaxed_rehydrate_budget(policy.max_rehydrate_tokens);
-        }
-        SmartContextRewriteBudgetDecision::Tighten => {
-            policy.max_inline_tool_output_bytes =
-                smart_context_tightened_inline_budget(policy.max_inline_tool_output_bytes);
-            policy.max_inline_bytes = policy.max_inline_tool_output_bytes;
-            policy.max_rehydrate_tokens =
-                smart_context_tightened_rehydrate_budget(policy.max_rehydrate_tokens);
-        }
-    }
-
-    if let Some(available) = available_context_tokens {
-        policy.max_rehydrate_tokens = policy.max_rehydrate_tokens.min(available);
-    }
-    policy
 }
 
 #[cfg(all(test, feature = "mojo"))]

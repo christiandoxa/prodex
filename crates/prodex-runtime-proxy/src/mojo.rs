@@ -161,13 +161,18 @@ pub(crate) fn runtime_response_candidate_plan_batch(
     let mut fields = Vec::with_capacity(
         candidates.len() * prodex_mojo_core::runtime::RUNTIME_CANDIDATE_PLAN_FIELD_COUNT,
     );
-    for candidate in candidates {
-        let prompt_cache_affinity_sort_key =
-            crate::runtime_prompt_cache_affinity_sort_key_with_owner(
-                options.prompt_cache_key,
-                options.prompt_cache_owner_profile,
-                &candidate.name,
-            );
+    let profiles = candidates
+        .iter()
+        .map(|candidate| candidate.name.as_str())
+        .collect::<Vec<_>>();
+    let prompt_cache_affinity = crate::runtime_prompt_cache_affinity_batch(
+        options.prompt_cache_key,
+        options.prompt_cache_owner_profile,
+        &profiles,
+    )
+    .expect("Mojo prompt-cache affinity batch returned invalid output");
+    for (candidate, prompt_cache_affinity_sort_key) in candidates.iter().zip(prompt_cache_affinity)
+    {
         let push_usize = |fields: &mut Vec<i64>, value: usize| {
             fields
                 .push(i64::try_from(value).map_err(|_| prodex_mojo_core::MojoError::InvalidInput)?);
@@ -200,6 +205,14 @@ pub(crate) fn runtime_response_candidate_plan_batch(
         fields.push(candidate.backoff_sort_key.1);
         fields.push(candidate.backoff_sort_key.2);
         fields.push(candidate.backoff_sort_key.3);
+        fields.push(i64::from(candidate.auth_failure_active));
+        fields.push(match candidate.quota_summary.five_hour.status {
+            crate::RuntimeSelectionQuotaWindowStatus::Ready => 0,
+            crate::RuntimeSelectionQuotaWindowStatus::Thin => 1,
+            crate::RuntimeSelectionQuotaWindowStatus::Critical => 2,
+            crate::RuntimeSelectionQuotaWindowStatus::Exhausted => 3,
+            crate::RuntimeSelectionQuotaWindowStatus::Unknown => 4,
+        });
     }
     let route_kind = match options.route_kind {
         RuntimeRouteKind::Responses => 0,
@@ -207,7 +220,14 @@ pub(crate) fn runtime_response_candidate_plan_batch(
         RuntimeRouteKind::Websocket => 2,
         RuntimeRouteKind::Standard => 3,
     };
-    prodex_mojo_core::runtime::runtime_candidate_plan_batch(&fields, route_kind)
+    let excluded = vec![0_i64; candidates.len()];
+    prodex_mojo_core::runtime::runtime_candidate_plan_batch(
+        &fields,
+        &excluded,
+        route_kind,
+        options.inflight_soft_limit,
+        options.responses_critical_floor_percent,
+    )
 }
 
 fn encode_u64_for_signed_order(value: u64) -> i64 {

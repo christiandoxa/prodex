@@ -401,8 +401,10 @@ function validateBaselineSnapshot(manifest, baselineRevision, baseline) {
     "frozen baseline Mojo semantic LOC changed");
   assert.equal(report.total_semantic_loc, baseline.total_loc, "frozen baseline total semantic LOC changed");
   assert.equal(report.mojo_percent, baseline.mojo_percent, "frozen baseline ownership percentage changed");
-  assert.equal(report.migration_volume_loc, baseline.mojo_loc,
-    "frozen baseline migration volume must equal eligible Mojo semantic LOC");
+  assert.equal(report.baseline_remaining_rust_semantic_loc, baseline.rust_loc,
+    "frozen baseline Rust denominator changed");
+  assert.equal(report.rust_semantic_loc_migrated, 0,
+    "frozen baseline must not count prior release migrations");
   const ratePercent = manifest.migration_rate_percent;
   assert.equal(snapshot.migration_rate_percent, ratePercent, "frozen migration rate changed");
   const requiredVolume = requiredMigrationVolume(baseline.rust_loc, ratePercent);
@@ -422,6 +424,43 @@ function requireReduction(reductions, file, message) {
   assert(["deleted", "adapter-only", "test-oracle-only"].includes(reduction.final_state),
     `${file} has an invalid Rust semantic reduction state`);
   return reduction;
+}
+
+function migrationVolume(manifest, baselineEntries, releaseRevision) {
+  const targetOperations = new Set((manifest.authoritative_operations ?? [])
+    .filter((operation) => operation.introduced_in === manifest.release_target ||
+      operation.expanded_in === manifest.release_target)
+    .map((operation) => operation.name));
+  const reductions = (manifest.rust_semantic_reductions ?? [])
+    .filter((reduction) => targetOperations.has(reduction.operation));
+  const baselineByPath = new Map(baselineEntries
+    .filter((entry) => entry.language === "rust" && isEligible(entry))
+    .map((entry) => [entry.path, entry]));
+  const releaseEntries = new Map([
+    ...entriesFor(manifest, "release", "rust"),
+    ...entriesFor(manifest, "release", "mojo"),
+  ].map((entry) => [entry.path, entry]));
+  const claimedByFile = new Map();
+  let migrated = 0;
+  for (const reduction of reductions) {
+    assert(Number.isInteger(reduction.migrated_semantic_loc) && reduction.migrated_semantic_loc > 0,
+      `${reduction.file}:${reduction.symbol} needs positive migrated_semantic_loc`);
+    const baseline = baselineByPath.get(reduction.file);
+    assert(baseline, `${reduction.file}:${reduction.symbol} is outside frozen Rust inventory`);
+    claimedByFile.set(
+      reduction.file,
+      (claimedByFile.get(reduction.file) ?? 0) + reduction.migrated_semantic_loc,
+    );
+    migrated += reduction.migrated_semantic_loc;
+  }
+  for (const [file, claimed] of claimedByFile) {
+    const baseline = baselineByPath.get(file);
+    const release = releaseEntries.get(file);
+    const remaining = release ? semanticLocAtRevision(manifest, releaseRevision, release) : 0;
+    assert(claimed <= baseline.semantic_loc - remaining,
+      `${file} claims ${claimed} migrated Rust LOC but only ${baseline.semantic_loc - remaining} semantic LOC were removed`);
+  }
+  return migrated;
 }
 
 function validateInventory(manifest, baselineRevision, releaseRevision) {
@@ -498,6 +537,10 @@ function validateInventory(manifest, baselineRevision, releaseRevision) {
       `${reduction.file} Rust reduction needs its previous responsibility`);
     assert(["deleted", "adapter-only", "test-oracle-only"].includes(reduction.final_state),
       `${reduction.file}:${reduction.symbol} has an invalid final Rust state`);
+    if (reduction.migrated_semantic_loc !== undefined) {
+      assert(Number.isInteger(reduction.migrated_semantic_loc) && reduction.migrated_semantic_loc > 0,
+        `${reduction.file}:${reduction.symbol} needs positive migrated_semantic_loc`);
+    }
     assert(sourceExists(manifest, baselineRevision, reduction.file),
       `${reduction.file}:${reduction.symbol} is not traceable in the frozen baseline source`);
     const baselineSource = sourceText(manifest, baselineRevision, reduction.file);
@@ -541,6 +584,8 @@ export function calculateOwnership(manifest, baselineRevision, releaseRevision) 
   if (strict) {
     assert(final.mojo_loc >= baseline.mojo_loc,
       `Mojo semantic ownership regressed from ${baseline.mojo_loc} to ${final.mojo_loc} LOC`);
+    assert(final.mojo_percent >= baseline.mojo_percent,
+      `Mojo ownership percentage regressed from ${baseline.mojo_percent.toFixed(2)}% to ${final.mojo_percent.toFixed(2)}%`);
   }
   const operations = manifest.authoritative_operations ?? [];
   const available = (operation) => {
@@ -564,6 +609,12 @@ export function calculateOwnership(manifest, baselineRevision, releaseRevision) 
     : authoritative.filter((operation) => operation.expanded_in === manifest.release_target);
   const migrationUnits = authoritative.filter((operation) =>
     operation.introduced_in === manifest.release_target || operation.expanded_in === manifest.release_target);
+  const rustSemanticLocMigrated = strict && releaseRevision !== baselineRevision
+    ? migrationVolume(manifest, [
+      ...entriesFor(manifest, "baseline", "rust"),
+      ...entriesFor(manifest, "baseline", "mojo"),
+    ], releaseRevision)
+    : 0;
   const requiredMigrationVolumeLoc = strict
     ? requiredMigrationVolume(baseline.rust_loc, manifest.migration_rate_percent)
     : 0;
@@ -571,8 +622,16 @@ export function calculateOwnership(manifest, baselineRevision, releaseRevision) 
     baseline,
     final,
     percentage_point_increase: final.mojo_percent - baseline.mojo_percent,
-    migration_volume_loc: final.mojo_loc,
-    new_migration_volume_loc: Math.max(0, final.mojo_loc - baseline.mojo_loc),
+    percentage_point_delta: final.mojo_percent - baseline.mojo_percent,
+    baseline_remaining_rust_semantic_loc: baseline.rust_loc,
+    rust_semantic_loc_migrated: rustSemanticLocMigrated,
+    rust_semantic_migration_percent: baseline.rust_loc === 0
+      ? 0
+      : (rustSemanticLocMigrated * 100) / baseline.rust_loc,
+    baseline_mojo_percent: baseline.mojo_percent,
+    final_mojo_percent: final.mojo_percent,
+    migration_volume_loc: rustSemanticLocMigrated,
+    new_migration_volume_loc: rustSemanticLocMigrated,
     required_migration_volume_loc: requiredMigrationVolumeLoc,
     rust_semantic_reduction_loc: Math.max(0, baseline.rust_loc - final.rust_loc),
     authoritative_operation_count: authoritative.length,
@@ -580,6 +639,7 @@ export function calculateOwnership(manifest, baselineRevision, releaseRevision) 
     new_migration_unit_count: migrationUnits.length,
     new_authoritative_operations: newOperations,
     expanded_authoritative_operations: expandedOperations,
+    rust_semantic_reductions: manifest.rust_semantic_reductions ?? [],
     authoritative_operations: operations,
   };
 }
@@ -615,10 +675,17 @@ async function main() {
     );
   }
   if (args.check && manifest.baseline_inventory &&
-      result.migration_volume_loc < result.required_migration_volume_loc) {
+      result.rust_semantic_migration_percent < manifest.migration_rate_percent) {
     throw new Error(
-      `Mojo migration volume ${result.migration_volume_loc} LOC is below the required ` +
-      `${result.required_migration_volume_loc} LOC floor`,
+      `Mojo migration moved ${result.rust_semantic_migration_percent.toFixed(2)}% of baseline eligible Rust semantics; ` +
+      `at least ${manifest.migration_rate_percent.toFixed(2)}% is required for ${manifest.release_target}`,
+    );
+  }
+  if (args.check && manifest.baseline_inventory &&
+      result.new_migration_unit_count < (manifest.minimum_migration_units ?? 6)) {
+    throw new Error(
+      `Mojo migration has ${result.new_migration_unit_count} new units; at least ` +
+      `${manifest.minimum_migration_units ?? 6} are required`,
     );
   }
   if (args.json) {
@@ -629,7 +696,7 @@ async function main() {
     [
       `baseline: ${result.baseline.mojo_percent.toFixed(2)}% Mojo (${result.baseline.mojo_loc}/${result.baseline.total_loc})`,
       `final: ${result.final.mojo_percent.toFixed(2)}% Mojo (${result.final.mojo_loc}/${result.final.total_loc})`,
-      `migration volume: ${result.migration_volume_loc} LOC (required ${result.required_migration_volume_loc})`,
+      `migration volume: ${result.rust_semantic_loc_migrated} Rust LOC (${result.rust_semantic_migration_percent.toFixed(2)}%; required ${result.required_migration_volume_loc})`,
       `increase: ${result.percentage_point_increase.toFixed(2)} percentage points`,
       `authoritative operations: ${result.authoritative_operation_count}`,
     ].join("\n") + "\n",

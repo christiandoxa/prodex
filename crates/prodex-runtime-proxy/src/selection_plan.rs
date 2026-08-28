@@ -4,7 +4,18 @@ use std::collections::BTreeSet;
 use crate::{
     RuntimeRouteDecisionReasonKind, RuntimeRouteKind, RuntimeSelectionQuotaPressureBand,
     RuntimeSelectionQuotaSource, RuntimeSelectionQuotaSummary,
-    runtime_quota_precommit_guard_reason, runtime_selection_quota_pressure_band_reason,
+    runtime_selection_quota_pressure_band_reason,
+};
+
+#[cfg(feature = "mojo")]
+#[path = "selection_prompt_cache_mojo.rs"]
+mod prompt_cache;
+#[cfg(not(feature = "mojo"))]
+#[path = "selection_prompt_cache_rust.rs"]
+mod prompt_cache;
+pub use prompt_cache::{
+    runtime_prompt_cache_affinity_batch, runtime_prompt_cache_affinity_sort_key,
+    runtime_prompt_cache_affinity_sort_key_with_owner,
 };
 
 pub type RuntimeResponseBackoffSortKey = (usize, i64, i64, i64);
@@ -34,10 +45,6 @@ pub enum RuntimeProfileAvailabilityState {
 }
 
 impl RuntimeProfileAvailabilityState {
-    pub fn is_hard_unusable(self) -> bool {
-        matches!(self, Self::QuotaExhausted | Self::AuthInvalid)
-    }
-
     pub fn skip_reason(self) -> Option<&'static str> {
         match self {
             Self::Ready | Self::Unknown => None,
@@ -48,6 +55,7 @@ impl RuntimeProfileAvailabilityState {
     }
 }
 
+#[cfg(any(not(feature = "mojo"), test))]
 pub fn runtime_profile_availability_state(
     auth_failure_active: bool,
     in_selection_backoff: bool,
@@ -151,37 +159,6 @@ impl RuntimeResponsePlannedCandidate {
             | RuntimeProfileAvailabilityState::TransientBackoff
             | RuntimeProfileAvailabilityState::Unknown => None,
         }
-    }
-}
-
-pub fn runtime_response_candidate_ready_skip_reason(
-    auth_failure_active: bool,
-    quota_guard_reason: Option<&'static str>,
-    inflight_soft_limited: bool,
-) -> Option<&'static str> {
-    runtime_response_candidate_common_skip_reason(auth_failure_active, quota_guard_reason).or_else(
-        || {
-            inflight_soft_limited
-                .then_some(RuntimeRouteDecisionReasonKind::ProfileInflightSoftLimit.as_str())
-        },
-    )
-}
-
-pub fn runtime_response_candidate_fallback_skip_reason(
-    auth_failure_active: bool,
-    quota_guard_reason: Option<&'static str>,
-) -> Option<&'static str> {
-    runtime_response_candidate_common_skip_reason(auth_failure_active, quota_guard_reason)
-}
-
-pub fn runtime_response_candidate_common_skip_reason(
-    auth_failure_active: bool,
-    quota_guard_reason: Option<&'static str>,
-) -> Option<&'static str> {
-    if auth_failure_active {
-        Some(RuntimeRouteDecisionReasonKind::AuthFailureBackoff.as_str())
-    } else {
-        quota_guard_reason
     }
 }
 
@@ -532,6 +509,39 @@ fn prompt_cache_key_present(prompt_cache_key: Option<&str>) -> bool {
         .is_some_and(|prompt_cache_key| !prompt_cache_key.is_empty())
 }
 
+#[cfg(feature = "mojo")]
+fn mojo_candidate_availability(tag: i64) -> RuntimeProfileAvailabilityState {
+    match tag {
+        prodex_mojo_core::runtime::RUNTIME_CANDIDATE_AVAILABILITY_READY => {
+            RuntimeProfileAvailabilityState::Ready
+        }
+        prodex_mojo_core::runtime::RUNTIME_CANDIDATE_AVAILABILITY_QUOTA_EXHAUSTED => {
+            RuntimeProfileAvailabilityState::QuotaExhausted
+        }
+        prodex_mojo_core::runtime::RUNTIME_CANDIDATE_AVAILABILITY_TRANSIENT_BACKOFF => {
+            RuntimeProfileAvailabilityState::TransientBackoff
+        }
+        prodex_mojo_core::runtime::RUNTIME_CANDIDATE_AVAILABILITY_AUTH_INVALID => {
+            RuntimeProfileAvailabilityState::AuthInvalid
+        }
+        prodex_mojo_core::runtime::RUNTIME_CANDIDATE_AVAILABILITY_UNKNOWN => {
+            RuntimeProfileAvailabilityState::Unknown
+        }
+        _ => panic!("validated Mojo candidate availability tag is out of range"),
+    }
+}
+
+#[cfg(feature = "mojo")]
+fn mojo_candidate_quota_guard_reason(tag: i64) -> Option<&'static str> {
+    match tag {
+        prodex_mojo_core::runtime::RUNTIME_CANDIDATE_SKIP_NONE => None,
+        prodex_mojo_core::runtime::RUNTIME_CANDIDATE_SKIP_QUOTA_EXHAUSTED => {
+            Some("quota_exhausted_before_send")
+        }
+        _ => panic!("validated Mojo candidate quota tag is out of range"),
+    }
+}
+
 pub fn build_runtime_response_candidate_execution_plan(
     candidates: Vec<RuntimeResponseCandidatePlanInput>,
     excluded_profiles: &BTreeSet<String>,
@@ -541,21 +551,51 @@ pub fn build_runtime_response_candidate_execution_plan(
         .into_iter()
         .filter(|candidate| !excluded_profiles.contains(&candidate.name))
         .collect::<Vec<_>>();
+    #[cfg(feature = "mojo")]
+    let mojo_plan =
+        crate::quota::mojo::runtime_response_candidate_plan_batch(&available_inputs, options)
+            .expect("Mojo runtime candidate plan returned invalid indices");
     let available_candidates = available_inputs
         .iter()
-        .map(|candidate| {
-            let quota_guard_reason = matches!(
-                options.route_kind,
-                RuntimeRouteKind::Responses | RuntimeRouteKind::Websocket
-            )
-            .then(|| {
-                runtime_quota_precommit_guard_reason(
-                    candidate.quota_summary,
-                    options.route_kind,
-                    options.responses_critical_floor_percent,
-                )
-            })
-            .flatten();
+        .enumerate()
+        .map(|(_index, candidate)| {
+            let (quota_guard_reason, availability) = {
+                #[cfg(feature = "mojo")]
+                {
+                    let decision = mojo_plan
+                        .decisions
+                        .get(_index)
+                        .expect("Mojo candidate decision count matches inputs");
+                    (
+                        mojo_candidate_quota_guard_reason(decision.quota_guard_reason),
+                        mojo_candidate_availability(decision.availability),
+                    )
+                }
+                #[cfg(not(feature = "mojo"))]
+                {
+                    let quota_guard_reason = matches!(
+                        options.route_kind,
+                        RuntimeRouteKind::Responses | RuntimeRouteKind::Websocket
+                    )
+                    .then(|| {
+                        crate::runtime_quota_precommit_guard_reason(
+                            candidate.quota_summary,
+                            options.route_kind,
+                            options.responses_critical_floor_percent,
+                        )
+                    })
+                    .flatten();
+                    (
+                        quota_guard_reason,
+                        runtime_profile_availability_state(
+                            candidate.auth_failure_active,
+                            candidate.in_selection_backoff,
+                            candidate.quota_summary,
+                            quota_guard_reason,
+                        ),
+                    )
+                }
+            };
             RuntimeResponsePlannedCandidate {
                 name: candidate.name.clone(),
                 order_index: candidate.order_index,
@@ -571,12 +611,7 @@ pub fn build_runtime_response_candidate_execution_plan(
                 provider_priority: candidate.provider_priority,
                 quota_sort_key: candidate.quota_sort_key,
                 in_selection_backoff: candidate.in_selection_backoff,
-                availability: runtime_profile_availability_state(
-                    candidate.auth_failure_active,
-                    candidate.in_selection_backoff,
-                    candidate.quota_summary,
-                    quota_guard_reason,
-                ),
+                availability,
                 prompt_cache_affinity_sort_key: runtime_prompt_cache_affinity_sort_key_with_owner(
                     options.prompt_cache_key,
                     options.prompt_cache_owner_profile,
@@ -589,16 +624,13 @@ pub fn build_runtime_response_candidate_execution_plan(
 
     #[cfg(feature = "mojo")]
     {
-        let plan =
-            crate::quota::mojo::runtime_response_candidate_plan_batch(&available_inputs, options)
-                .expect("Mojo runtime candidate plan returned invalid indices");
         RuntimeResponseCandidateExecutionPlan {
-            ready_candidates: plan
+            ready_candidates: mojo_plan
                 .ready_indices
                 .into_iter()
                 .map(|index| available_candidates[index].clone())
                 .collect(),
-            fallback_candidates: plan
+            fallback_candidates: mojo_plan
                 .fallback_indices
                 .into_iter()
                 .map(|index| available_candidates[index].clone())
@@ -648,6 +680,7 @@ pub fn build_runtime_response_candidate_execution_plan(
     }
 }
 
+#[cfg(not(feature = "mojo"))]
 pub fn runtime_response_quota_source_sort_key(
     route_kind: RuntimeRouteKind,
     source: RuntimeSelectionQuotaSource,
@@ -663,70 +696,6 @@ pub fn runtime_response_quota_source_sort_key(
         ) => 1,
         _ => 0,
     }
-}
-
-pub fn runtime_prompt_cache_affinity_sort_key_with_owner(
-    prompt_cache_key: Option<&str>,
-    prompt_cache_owner_profile: Option<&str>,
-    profile_name: &str,
-) -> (u8, u64) {
-    if prompt_cache_key
-        .map(str::trim)
-        .is_none_or(|prompt_cache_key| prompt_cache_key.is_empty())
-    {
-        return (0, 0);
-    }
-    if let Some(owner) = prompt_cache_owner_profile
-        .map(str::trim)
-        .filter(|owner| !owner.is_empty())
-    {
-        return if owner == profile_name {
-            (0, 0)
-        } else {
-            (
-                1,
-                runtime_prompt_cache_affinity_sort_key(prompt_cache_key, profile_name),
-            )
-        };
-    }
-    (
-        0,
-        runtime_prompt_cache_affinity_sort_key(prompt_cache_key, profile_name),
-    )
-}
-
-pub fn runtime_prompt_cache_affinity_sort_key(
-    prompt_cache_key: Option<&str>,
-    profile_name: &str,
-) -> u64 {
-    let Some(prompt_cache_key) = prompt_cache_key
-        .map(str::trim)
-        .filter(|prompt_cache_key| !prompt_cache_key.is_empty())
-    else {
-        return 0;
-    };
-
-    u64::MAX - runtime_prompt_cache_affinity_score(prompt_cache_key, profile_name)
-}
-
-fn runtime_prompt_cache_affinity_score(prompt_cache_key: &str, profile_name: &str) -> u64 {
-    const FNV_OFFSET_BASIS: u64 = 0xcbf29ce484222325;
-    const FNV_PRIME: u64 = 0x100000001b3;
-
-    let mut hash = FNV_OFFSET_BASIS;
-    for bytes in [
-        b"prodex-prompt-cache-affinity-v1".as_slice(),
-        b"\0".as_slice(),
-        prompt_cache_key.as_bytes(),
-        b"\0".as_slice(),
-        profile_name.as_bytes(),
-    ] {
-        for byte in bytes {
-            hash ^= u64::from(*byte);
-            hash = hash.wrapping_mul(FNV_PRIME);
-        }
-    }
-    hash
 }
 
 #[cfg(test)]

@@ -1,8 +1,66 @@
 use super::RuntimeTuningLaneLimits;
 #[cfg(feature = "mojo")]
 use super::mojo;
+
 #[cfg(feature = "mojo")]
-use super::{runtime_proxy_long_lived_worker_count_default, runtime_proxy_worker_count_default};
+pub fn runtime_proxy_worker_count_default(parallelism: usize) -> usize {
+    mojo::runtime_tuning_defaults(parallelism).worker_count
+}
+
+#[cfg(not(feature = "mojo"))]
+pub fn runtime_proxy_worker_count_default(parallelism: usize) -> usize {
+    runtime_proxy_worker_count_default_rust(parallelism)
+}
+
+#[cfg(any(not(feature = "mojo"), test))]
+pub(super) fn runtime_proxy_worker_count_default_rust(parallelism: usize) -> usize {
+    parallelism.clamp(4, 12)
+}
+
+#[cfg(feature = "mojo")]
+pub fn runtime_proxy_long_lived_worker_count_default(parallelism: usize) -> usize {
+    mojo::runtime_tuning_defaults(parallelism).long_lived_worker_count
+}
+
+#[cfg(not(feature = "mojo"))]
+pub fn runtime_proxy_long_lived_worker_count_default(parallelism: usize) -> usize {
+    runtime_proxy_long_lived_worker_count_default_rust(parallelism)
+}
+
+#[cfg(any(not(feature = "mojo"), test))]
+pub(super) fn runtime_proxy_long_lived_worker_count_default_rust(parallelism: usize) -> usize {
+    parallelism.saturating_mul(2).clamp(8, 24)
+}
+
+#[cfg(feature = "mojo")]
+pub fn runtime_probe_refresh_worker_count_default(parallelism: usize) -> usize {
+    mojo::runtime_tuning_defaults(parallelism).probe_refresh_worker_count
+}
+
+#[cfg(not(feature = "mojo"))]
+pub fn runtime_probe_refresh_worker_count_default(parallelism: usize) -> usize {
+    runtime_probe_refresh_worker_count_default_rust(parallelism)
+}
+
+#[cfg(any(not(feature = "mojo"), test))]
+pub(super) fn runtime_probe_refresh_worker_count_default_rust(parallelism: usize) -> usize {
+    parallelism.clamp(2, 4)
+}
+
+#[cfg(feature = "mojo")]
+pub fn runtime_proxy_async_worker_count_default(parallelism: usize) -> usize {
+    mojo::runtime_tuning_defaults(parallelism).async_worker_count
+}
+
+#[cfg(not(feature = "mojo"))]
+pub fn runtime_proxy_async_worker_count_default(parallelism: usize) -> usize {
+    runtime_proxy_async_worker_count_default_rust(parallelism)
+}
+
+#[cfg(any(not(feature = "mojo"), test))]
+pub(super) fn runtime_proxy_async_worker_count_default_rust(parallelism: usize) -> usize {
+    parallelism.clamp(2, 4)
+}
 
 #[cfg(feature = "mojo")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

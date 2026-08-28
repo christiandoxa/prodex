@@ -180,6 +180,8 @@ fn candidate_plan_matches_rust_oracle_for_generated_batches() {
             for offset in 19..=21 {
                 fields[base + offset] = (next_random(&mut state) % 401) as i64 - 200;
             }
+            fields[base + 22] = 0;
+            fields[base + 23] = 0;
         }
 
         let mut expected_ready = (0..count)
@@ -189,7 +191,8 @@ fn candidate_plan_matches_rust_oracle_for_generated_batches() {
         let mut expected_fallback = (0..count).collect::<Vec<_>>();
         expected_fallback.sort_by(|left, right| fallback_cmp(&fields, *left, *right, route_kind));
 
-        let actual = runtime_candidate_plan_batch(&fields, route_kind)
+        let excluded = vec![0_i64; count];
+        let actual = runtime_candidate_plan_batch(&fields, &excluded, route_kind, 8, 2)
             .expect("strict Mojo candidate plan should accept generated input");
         assert_eq!(
             actual.ready_indices, expected_ready,
@@ -200,6 +203,36 @@ fn candidate_plan_matches_rust_oracle_for_generated_batches() {
             "candidate case {case}"
         );
     }
+}
+
+#[test]
+fn candidate_plan_reports_bounded_availability_decisions() {
+    let count = 4;
+    let mut fields = vec![0_i64; count * RUNTIME_CANDIDATE_PLAN_FIELD_COUNT];
+    fields[22] = 1;
+    fields[RUNTIME_CANDIDATE_PLAN_FIELD_COUNT + 23] = 3;
+    fields[2 * RUNTIME_CANDIDATE_PLAN_FIELD_COUNT] = 1;
+    fields[3 * RUNTIME_CANDIDATE_PLAN_FIELD_COUNT + 23] = 4;
+    let excluded = [0, 0, 0, 1];
+
+    let plan = runtime_candidate_plan_batch(&fields, &excluded, 0, 8, 2)
+        .expect("candidate availability plan should validate");
+    assert_eq!(plan.ready_indices, [0, 1]);
+    assert_eq!(plan.fallback_indices, [0, 1, 2]);
+    assert_eq!(plan.decisions.len(), count);
+    assert_eq!(
+        plan.decisions[0].availability,
+        prodex_mojo_core::runtime::RUNTIME_CANDIDATE_AVAILABILITY_AUTH_INVALID
+    );
+    assert_eq!(
+        plan.decisions[1].availability,
+        prodex_mojo_core::runtime::RUNTIME_CANDIDATE_AVAILABILITY_QUOTA_EXHAUSTED
+    );
+    assert_eq!(
+        plan.decisions[2].availability,
+        prodex_mojo_core::runtime::RUNTIME_CANDIDATE_AVAILABILITY_TRANSIENT_BACKOFF
+    );
+    assert!(!plan.decisions[3].eligible);
 }
 
 #[test]
