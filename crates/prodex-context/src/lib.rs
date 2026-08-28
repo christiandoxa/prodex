@@ -35,11 +35,10 @@ pub use command_output::{
 pub(crate) use command_output::{
     command_lines, count_text_lines, generic_failed_test_name, has_zero_only_summary_count,
     is_eslint_diagnostic_line, is_exception_signal_line, is_junit_xml_failure_line,
-    is_log_level_signal_line, is_rust_backtrace_start, is_rust_exit_status_line,
-    is_rust_failure_summary_line, is_rust_panic_line, is_typescript_diagnostic_line,
-    normalize_command_output, parse_file_list_entry_line, parse_rg_json_match_line,
-    parse_search_match_line, rust_diagnostic_severity, rust_failed_test_name,
-    rust_failure_separator_name,
+    is_log_level_signal_line, is_rust_backtrace_start, is_rust_failure_summary_line,
+    is_rust_panic_line, is_typescript_diagnostic_line, normalize_command_output,
+    parse_file_list_entry_line, parse_rg_json_match_line, parse_search_match_line,
+    rust_diagnostic_severity, rust_failed_test_name, rust_failure_separator_name,
 };
 pub use compression::{
     compress_context_path, compress_context_text, render_context_compress_report,
