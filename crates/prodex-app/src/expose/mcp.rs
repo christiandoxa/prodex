@@ -30,8 +30,8 @@ const MCP_PROTOCOL_VERSIONS: [&str; 5] = [
 ];
 const MCP_RATE_LIMIT: usize = 120;
 const MCP_RATE_WINDOW: Duration = Duration::from_secs(1);
-const MCP_PUBLIC_INITIALIZE_TIMEOUT: Duration = Duration::from_secs(30);
-const MCP_PUBLIC_TOOLS_TIMEOUT: Duration = Duration::from_secs(15);
+const MCP_PUBLIC_INITIALIZE_TIMEOUT: Duration = Duration::from_secs(45);
+const MCP_PUBLIC_TOOLS_TIMEOUT: Duration = Duration::from_secs(20);
 const MCP_PUBLIC_READY_STEP: Duration = Duration::from_millis(250);
 const MCP_MAX_TASK_BYTES: usize = 64 * 1024;
 const MCP_MAX_JSON_NESTING: usize = 64;
