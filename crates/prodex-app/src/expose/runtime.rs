@@ -496,11 +496,7 @@ impl CloudflaredTransport {
 }
 
 const CLOUDFLARED_TRANSPORT_NEGOTIATION_TIMEOUT: Duration = if cfg!(test) {
-    if cfg!(windows) {
-        Duration::from_secs(30)
-    } else {
-        Duration::from_millis(250)
-    }
+    Duration::from_secs(5)
 } else {
     Duration::from_secs(20)
 };

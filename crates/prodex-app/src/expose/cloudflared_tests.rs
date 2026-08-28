@@ -189,8 +189,8 @@ else:
     config_path = sys.argv[sys.argv.index("--config") + 1]
     with open(os.environ["PRODEX_TEST_CLOUDFLARED_CONFIG_PROBE"], "w", encoding="utf-8") as file:
         file.write("present" if os.path.isfile(config_path) else "missing")
-    print("https://isolated.trycloudflare.com", flush=True)
-    print("Registered tunnel connection protocol=http2", flush=True)
+    print("https://isolated.trycloudflare.com", file=sys.stderr, flush=True)
+    print("Registered tunnel connection protocol=http2", file=sys.stderr, flush=True)
     time.sleep(30)
 "#,
     );
