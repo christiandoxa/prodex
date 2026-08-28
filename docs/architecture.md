@@ -53,7 +53,7 @@ browser expose subsystem:
 
 ```text
 ChatGPT
-  -> Cloudflare Quick Tunnel
+  -> Cloudflare Quick Tunnel or user-managed Cloudflare hostname
   -> loopback HTTP listener
   -> exact capability + public Host policy
   -> Streamable HTTP JSON MCP adapter
@@ -62,9 +62,11 @@ ChatGPT
   -> shared Super/runtime/profile routing
 ```
 
-`prodex s expose` binds the listener to `127.0.0.1:0`, captures one canonical
-initial workspace, configures Super before generating a capability, and starts
-one directly invoked, user-config-isolated `cloudflared tunnel --url ...` child. The
+`prodex s expose` captures one canonical initial workspace and configures Super
+before generating a capability. Quick Tunnel mode binds `127.0.0.1:0` and starts
+one directly invoked, user-config-isolated `cloudflared tunnel --protocol auto
+--url ...` child. Existing Tunnel mode binds the user-selected loopback port,
+uses the exact validated hostname, and does not start or stop cloudflared. The
 public default admits only `/pdx/v1/<capability>/mcp`; `prodex expose --tunnel`
 and `prodex s expose --tunnel` retain the explicit browser-terminal behavior.
 
@@ -177,6 +179,10 @@ Observability rules:
 - Prodex-owned screens may print before launching Codex or in standalone commands.
 - Runtime notices while Codex TUI runs go to log files only.
 - If runtime stalls, inspect latest runtime log markers before changing selection or transport behavior.
+- `prodex log stream` and `prodex log upstream` share the human TUI title `Prodex Log`. Their
+  right-aligned t/s field is output tokens per active generation second, sourced from existing
+  token-usage timing; prompt/cache tokens, payload bytes, TTFT, and unrelated processes are not
+  included. Final-only providers report an average on the token event and keep the live field idle.
 
 ## Session, Profile, And Shared Codex FS
 

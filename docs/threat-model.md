@@ -40,10 +40,14 @@ Super capability granted by that process. ChatGPT stores the URL and Cloudflare
 carries the path, so URL disclosure is credential disclosure. The mode is
 short-lived and intended for personal development, not a public multi-user
 plugin or plugin-directory publication. Stopping the process revokes access;
-rerunning creates a new capability and Quick Tunnel hostname.
+rerunning creates a new capability. Quick Tunnel also creates a new random
+hostname, while an existing user-managed hostname remains external
+infrastructure owned by the user.
 
-Each expose process owns its workspace context, MCP identity, tunnel, run
-manager, bounded output buffers, capability digest, and child process groups.
+Each expose process owns its workspace context, MCP identity, selected endpoint,
+run manager, bounded output buffers, capability digest, and child process groups.
+Only a Prodex-managed Quick Tunnel child belongs to its cleanup lifecycle;
+user-managed Cloudflare services remain external and are never stopped.
 Separate processes may share the established Prodex profile/quota/health and
 preference persistence, but active expose configuration and run tables are
 not shared. The initial workspace is not claimed to be a stronger filesystem

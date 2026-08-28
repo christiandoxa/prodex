@@ -439,18 +439,28 @@ prodex super --tool caveman --require-tool rtk
 prodex super --presidio
 ```
 
-Interactive Super launches render a terminal Presidio opt-in screen. Pass `--presidio` or `--no-presidio` for non-interactive launches. Super is the explicit YOLO entrypoint: it launches Codex with approval and sandbox bypass, bypasses hook-trust confirmation, and trusts the current workspace for that invocation without changing persisted Codex configuration. Use `prodex run` for the normal approval and workspace-trust flow.
+Interactive Super launches render a terminal Presidio opt-in screen. Pass `--presidio` or `--no-presidio` for non-interactive launches. Ordinary interactive `prodex s` still selects the main agent and provider, then reuses the remembered provider-scoped model and effort without reopening those pickers. Super is the explicit YOLO entrypoint: it launches Codex with approval and sandbox bypass, bypasses hook-trust confirmation, and trusts the current workspace for that invocation without changing persisted Codex configuration. Use `prodex run` for the normal approval and workspace-trust flow.
 
 `prodex s expose --no-tunnel` keeps the loopback-only browser terminal. Bare
 `prodex s expose` is the ChatGPT path: it configures Super first, then publishes
-only the MCP route through a Cloudflare Quick Tunnel. `prodex s expose --tunnel`
-keeps the explicit public browser-terminal behavior.
+only the MCP route through a Quick Tunnel by default, or through an existing
+user-managed Cloudflare hostname selected in the expose flow. `prodex s expose
+--tunnel` keeps the explicit public browser-terminal behavior.
 
 On Codex/provider-bridge paths, Smart Context preserves continuation metadata and critical signals while applying deterministic, validated context rewriting. Native opaque CLIs are outside that rewrite boundary. See [docs/smart-context.md](docs/smart-context.md) for its safety model and rollout controls.
 
 Managed optimizer roots are checked in this order: `PRODEX_OPTIMIZERS_HOME`, `$XDG_DATA_HOME/prodex-optimizers`, then `~/.local/share/prodex-optimizers`.
 
 </details>
+
+## OpenAI profile diagnostic
+
+Run `prodex ping openai` to perform a bounded, per-profile authenticated Codex
+health check. It validates a structured completed turn and an exact `PONG`
+response, runs in a private read-only ephemeral directory, and never rotates a
+probe to another profile. It does not prove every model or long-running stream
+is healthy, and it does not test Cloudflare expose connectivity. Use
+`prodex ping openai --json` for machine-readable results.
 
 ## ChatGPT MCP expose
 
@@ -460,10 +470,13 @@ Run this from the workspace you want the connection to start in:
 prodex s expose
 ```
 
-In an interactive terminal, Prodex asks for the main agent, main model, and
-model-aware reasoning effort, then asks whether sub-agents should be enabled
-and—when enabled—uses the shared sub-agent model and effort pickers. The final
-configuration is shown before any capability, listener, or tunnel is created.
+In an interactive terminal, Prodex asks for the main agent and provider, then
+asks for the main model and model-aware reasoning effort. It then asks whether
+sub-agents should be enabled and—when enabled—uses the shared sub-agent model
+and effort pickers. It then
+offers a random Quick Tunnel or an existing user-managed Cloudflare hostname
+and loopback origin port. The final configuration is shown before any
+capability, listener, or tunnel is created.
 In a non-TTY launch, explicit options win over remembered/default values without
 waiting for stdin:
 
@@ -487,8 +500,10 @@ The URL uses Ephemeral Capability Authentication:
 - this is short-lived personal-development access, not OAuth, account linking, identity authentication, or suitable multi-user/plugin-directory security.
 
 Quick Tunnel mode requires an installed `cloudflared` executable but no
-Cloudflare account, login, DNS, or `init`. It uses JSON responses over
-Streamable HTTP and does not depend on SSE. Long-running work is polled with
+Cloudflare account, login, DNS, or `init`; it uses QUIC/UDP 7844 when available
+and automatically falls back to HTTP/2/TCP 7844. Existing Tunnel mode does not
+start or stop the user's Cloudflare service. Both modes use JSON responses over
+Streamable HTTP and do not depend on SSE. Long-running work is polled with
 `prodex_super_status`, `prodex_super_events`, and `prodex_super_result` after
 `prodex_super_start` returns a run ID. The endpoint exposes only the MCP path;
 the legacy browser routes remain unavailable on its public host.
@@ -1178,8 +1193,8 @@ git diff | prodex context compact-output --kind git-diff
 |---|---|
 | `prodex info` | Shows provider route/quota shapes plus effective runtime tuning values after environment, policy, and default resolution. |
 | `prodex log` | Shows the latest session transcript text plus the latest runtime token event. |
-| `prodex log stream` | Follows session/runtime logs and prints assistant text and tool-call arguments once each item finishes streaming, plus token events. Add `--json` for JSON Lines events. Transient discovery/read failures during log creation, rotation, cleanup, or replacement skip one poll instead of ending the stream. |
-| `prodex log upstream` | Follows bounded, redacted backend-bound LLM payload snapshots after Prodex processing such as Presidio redaction and Smart Context rewriting. Add `--json` for JSON Lines payload events. Snapshots are capped at 64 KiB in the runtime log per payload. |
+| `prodex log stream` | Follows session/runtime logs and prints assistant text and tool-call arguments once each item finishes streaming, plus token events. Its human TUI is titled `Prodex Log` and shows authoritative output generation throughput when token timing is available; idle/final-only views show `— t/s`. Add `--json` for JSON Lines events. Transient discovery/read failures during log creation, rotation, cleanup, or replacement skip one poll instead of ending the stream. |
+| `prodex log upstream` | Follows bounded, redacted backend-bound LLM payload snapshots after Prodex processing such as Presidio redaction and Smart Context rewriting. Its human TUI is also titled `Prodex Log`; it never derives t/s from payload bytes. Add `--json` for JSON Lines payload events. Snapshots are capped at 64 KiB in the runtime log per payload. |
 | `prodex doctor --install` | Adds install and embedded asset checks to doctor output. |
 | `prodex doctor --runtime` | Runs runtime diagnostics. |
 | `prodex doctor --bundle PATH --redacted` | Writes a shareable JSON diagnostic bundle without stored auth tokens or headers. |
