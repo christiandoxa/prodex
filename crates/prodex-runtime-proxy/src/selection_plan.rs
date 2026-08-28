@@ -555,16 +555,16 @@ pub fn build_runtime_response_candidate_execution_plan(
     let mojo_plan =
         crate::quota::mojo::runtime_response_candidate_plan_batch(&available_inputs, options)
             .expect("Mojo runtime candidate plan returned invalid indices");
+    #[cfg(feature = "mojo")]
+    let mut mojo_decisions = mojo_plan.decisions.iter();
     let available_candidates = available_inputs
         .iter()
-        .enumerate()
-        .map(|(_index, candidate)| {
+        .map(|candidate| {
             let (quota_guard_reason, availability) = {
                 #[cfg(feature = "mojo")]
                 {
-                    let decision = mojo_plan
-                        .decisions
-                        .get(_index)
+                    let decision = mojo_decisions
+                        .next()
                         .expect("Mojo candidate decision count matches inputs");
                     (
                         mojo_candidate_quota_guard_reason(decision.quota_guard_reason),

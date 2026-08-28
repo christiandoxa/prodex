@@ -2,7 +2,7 @@ pub fn runtime_prompt_cache_affinity_batch(
     prompt_cache_key: Option<&str>,
     prompt_cache_owner_profile: Option<&str>,
     profiles: &[&str],
-) -> Result<Vec<(u8, u64)>, ()> {
+) -> Result<Vec<(u8, u64)>, std::convert::Infallible> {
     Ok(profiles
         .iter()
         .map(|profile| {
