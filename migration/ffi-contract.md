@@ -459,7 +459,7 @@ ABI. The Rust reference classifier is test-only on Mojo-enabled production paths
 ## Rich/domain ABI v5 (2026-08-28)
 
 Rich v5 is additive and does not overload text ABI v1. Its version entry point is
-`prodex_mojo_rich_abi_version`, returning `5`; its layout probe is
+`prodex_mojo_rich_abi_version`, returning `6`; its layout probe is
 `prodex_mojo_rich_abi_layout`. The current record family is:
 
 | Record | Purpose |

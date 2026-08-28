@@ -108,7 +108,7 @@ Rust to recompute the semantic answer.
 | `prodex-app::classify_runtime_log_event` | bounded event-key classification and severity mapping for operational log rendering | file IO, redaction, event-field extraction, and terminal/JSON rendering | `prodex-app` |
 
 The original scalar and text ABI rows remain historically accurate as the first migration wave.
-Rich ABI v5 is now the semantic boundary. JSON, TOML deserialization, credentials, prompts,
+Rich ABI v6 is now the semantic boundary. JSON, TOML deserialization, credentials, prompts,
 filesystem paths, and provider wire payloads remain Rust-owned after the package/runtime review.
 
 ## 0.419.1 migration wave
