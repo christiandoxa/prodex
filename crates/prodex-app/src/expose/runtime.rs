@@ -1,6 +1,9 @@
 use super::super_expose::{ensure_cloudflared_available, handle_super_expose};
 use super::*;
 mod cloudflared_startup;
+#[cfg(test)]
+#[path = "runtime/config_isolation_tests.rs"]
+mod config_isolation_tests;
 mod hostname;
 use std::fs::OpenOptions;
 use std::net::SocketAddr;
@@ -583,11 +586,6 @@ pub(super) fn cloudflared_command() -> Command {
 }
 
 impl CloudflaredTunnel {
-    #[cfg(test)]
-    pub(super) fn config_path(&self) -> &std::path::Path {
-        &self.config.path
-    }
-
     pub(super) fn exited(&mut self) -> Option<std::process::ExitStatus> {
         self.child.try_wait().ok().flatten()
     }
