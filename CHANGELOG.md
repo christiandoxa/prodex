@@ -2,6 +2,59 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.419.0 - 2026-08-28
+
+### Runtime
+
+- Preserve bounded selection and token accounting (`407c57b`)
+- Harden 0.418.1 diagnostics and expose (`269d3b9`)
+- Migrate deterministic runtime ownership (`43cfb19`)
+
+### Docs
+
+- Document 0.418.1 runtime and quota contracts (`ed4bf01`)
+
+### Misc
+
+- Allocate unique tunnel config paths (`fdb20bc`)
+- Make tunnel cleanup cross-platform (`318609b`)
+- Split endpoint startup lifecycle (`861aa16`)
+# Prodex 0.419.0
+
+## New Features
+
+- Added a public-endpoint choice to `prodex s expose`: keep the zero-config Quick Tunnel or use an existing user-managed Cloudflare hostname, with independent per-process workdirs, capabilities, and MCP sessions.
+- Hardened `prodex ping openai` into a safe per-profile end-to-end Codex health check that validates the structured turn lifecycle and exact `PONG` response.
+- Added live output-generation throughput to the compact `Prodex Log` header when authoritative token timing is available.
+
+## Bug Fixes
+
+- Fixed Quick Tunnel startup on networks that block Cloudflare QUIC by preferring `--protocol auto` and using a bounded HTTP/2 compatibility fallback when native negotiation does not register.
+- Separated Cloudflare transport negotiation, public endpoint warm-up, and MCP readiness so local-origin, DNS, TLS, routing, and protocol failures report their actual phase.
+- Improved runtime profile selection and upstream error classification so bounded transient recovery does not become false quota exhaustion or an unbounded selection loop.
+
+## Performance
+
+- Moved deterministic catalog, quota-pressure, scheduling, context-accounting, and log semantics kernels into the validated Mojo path while retaining Rust-owned I/O, security, persistence, and transport boundaries.
+- Bounded log throughput sampling and terminal repaint frequency to keep idle and high-rate log views responsive.
+
+## Architecture
+
+- Mojo ownership is measured from the immutable migration baseline and remains fail-closed with no production Mojo-to-Rust fallback.
+- OpenAI additional rate-limit buckets are preserved generically so future capacity lanes are not discarded when their semantic mapping is unknown.
+
+## Networking
+
+- Quick Tunnel edge transport prefers QUIC over UDP/7844 and falls back to HTTP/2 over TCP/7844; the local Prodex origin remains loopback HTTP and requires no inbound port.
+
+## Documentation
+
+- Updated migration, runtime, networking, quota, expose, and observability documentation for the `0.419.0` release scope.
+
+## Changelog
+
+Full Changelog: [`0.418.0...0.419.0`](https://github.com/christiandoxa/prodex/compare/0.418.0...0.419.0)
+
 ## 0.418.0 - 2026-08-28
 
 ### Runtime
@@ -38,75 +91,6 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 - Make log following incremental (`64456e7`)
 - Add Mojo operational log classification (`f7316db`)
 - Make prodex update version-aware (`29bf2bd`)
-## New Features
-
-- Added complete, role-aware model and reasoning-effort selection for the main agent and Prodex-owned sub-agents, including dynamic OpenAI catalog entries and future effort identifiers.
-- Added correlated operational insight to `prodex log stream` and request/transformation summaries to `prodex log upstream`, while keeping JSON Lines output machine-readable.
-
-## Bug Fixes
-
-- Fixed OpenAI main-agent selection so catalog-visible GPT-5.6 Sol and Terra models are not lost through sub-agent-specific filtering.
-- Made OpenAI profile rotation preserve usable near-zero quota and recover safe pre-commit requests across authoritative quota, temporary overload, and transport failures without replaying committed work.
-- Fixed bounded profile sweeps so a transient cooldown that expires between candidate passes is recovered before returning a terminal upstream failure.
-- Fixed compact recovery on slower platforms so the bounded candidate sweep completes before a current-profile last-chance attempt can run.
-- Made `prodex update` version-aware and idempotent: it now skips asset download and replacement when the installed version is current and never automatically downgrades a newer local build.
-- Fixed log following across file replacement and truncation on Windows and Unix without replaying historical output.
-- Hardened `prodex s expose` readiness diagnostics and cleanup for local MCP initialization, Quick Tunnel routing, and public tool discovery.
-- Hardened dashboard startup checks for slower macOS environments while preserving endpoint and security behavior.
-
-## Compatibility
-
-- Updated the supported Codex baseline to `rust-v0.150.1`, including the retained-image compaction budget default, `context_window_id`, MCP event streaming, task references, Interrupt hooks, executor MCP authentication, and required MCP-server behavior. Prodex preserves these settings, payloads, and metadata; Codex owns compaction budgeting and image trimming.
-- Official release targets now require compiled-in Mojo domain operations and fail closed on missing artifacts, ABI mismatch, or self-test failure; Rust remains the system, transport, credential, persistence, and security boundary.
-- Rich Mojo ABI v5 now uses fixed-width pointer-address inputs across its C boundary, passing input records by address to avoid platform-specific C ABI lowering differences without a Rust runtime fallback.
-- Revalidated the complete latest-stable Optional Tools matrix at release cut: Caveman 2.3.1, RTK 0.46.0, Codebase Memory MCP 0.10.8, Playwright MCP 0.0.79, Ponytail 4.9.0, and Presidio 2.2.364 with immutable pins/digests where applicable.
-- Release validation pins the current stable Kiro CLI toolchain used by the cross-platform provider smoke matrix.
-- Windows Mojo release archives now retain every compiled domain object, including the rich ABI and log exports required by the final linked artifact.
-- Windows ARM64 release validation now distinguishes strict cross-architecture archive/link evidence from executable runtime smoke, which requires a native ARM64 runner.
-
-## Security
-
-- Isolated ephemeral Quick Tunnel configuration and kept capability URLs, credentials, authorization headers, cookies, and profile authentication material out of diagnostics, MCP responses, and release artifacts.
-
-## Documentation
-
-- Updated Codex compatibility, model-catalog ownership, expose/MCP, Mojo migration, ecosystem-audit, and operational-log guidance.
-
-## Performance
-
-- Reduced steady-state log-following work by using bounded incremental reads, cached path discovery, file-identity rotation handling, and incremental record processing instead of repeated historical scans.
-- Reduced CI Rust test-build overhead by using debug-free development/test profiles across the full release matrix without dropping test lanes.
-- Added CI duration telemetry so future shard and queue regressions remain visible without affecting test execution.
-- Preserved the measured CI critical-path reduction while adding the final cross-platform Mojo ABI validation; no platform lane or security gate was removed.
-
-## Changelog
-
-Full Changelog: [`0.417.0...0.418.0`](https://github.com/christiandoxa/prodex/compare/0.417.0...0.418.0)
-
-- `864d251b` — fix: use portable rich C ABI pointers
-- `dc9d7158` — docs: record final freshness audit
-- `7be2dc72` — feat: refresh stable tool matrix
-- `29bf2bd4` — fix: make prodex update version-aware
-- `0fde6b36` — feat: upgrade Codex compatibility and model catalogs
-- `f7316dbb` — feat: add Mojo operational log classification
-- `64456e74` — perf: make log following incremental
-- `7cae05fd` — feat: enrich Prodex log views
-- `4805e3d5` — feat: harden ChatGPT MCP expose readiness
-- `2ec15eec` — build: enforce Mojo-backed release artifacts
-- `ef6fa033` — feat: publish curated release notes
-- `73f9adff` — ci: allow audited 0.418.0 migration range
-- `25ba645b` — fix: use stable Windows file identity API
-- `2ec28fbe` — fix: detect Windows log replacement reliably
-- `270a446c` — fix: keep Mojo build script within quality limits
-- `e6ab33a1` — fix: retry profiles after transient backoff expiry
-- `965aebfb` — ci: reduce test debug overhead and release serialization
-- `8b67d426` — fix: retain release container safety barrier
-- `2759d343` — test: accept immediate recovery sweep
-- `46a14ec3` — fix: keep profile sweep budget platform-safe
-- `811f59fa` — fix: complete bounded profile sweep before timeout
-- `1e6668ce` — fix: preserve all Windows archive objects
-- `73a92da1` — test: accept bounded compact sweep boundary
-- `d011215c` — fix: gate non-native Mojo smoke
 
 ## 0.417.0 - 2026-08-27
 
@@ -158,6 +142,12 @@ Full Changelog: [`0.417.0...0.418.0`](https://github.com/christiandoxa/prodex/co
 - Normalize Spark reasoning effort (`228918b`)
 
 ## 0.416.0 - 2026-08-24
+
+### CLI
+
+- Migrate context text and harden quota recovery (`b4486b5`)
+
+## 0.415.0 - 2026-08-24
 
 ### Runtime
 
@@ -259,7 +249,6 @@ Full Changelog: [`0.417.0...0.418.0`](https://github.com/christiandoxa/prodex/co
 
 ### CLI
 
-- Migrate context text and harden quota recovery (`b4486b5`)
 - Resolve providers and persist model choices (`ae33046`)
 - Tolerate slow heartbeat startup (`15d3f90`)
 - Preserve fraction-only Gemini quota (`7523ce7`)
