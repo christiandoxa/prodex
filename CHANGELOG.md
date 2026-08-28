@@ -94,63 +94,12 @@ Full Changelog: [`0.418.0...0.419.0`](https://github.com/christiandoxa/prodex/co
 
 ## 0.417.0 - 2026-08-27
 
-### CLI
-
-- Add bounded expose run manager (`b485f02`)
-- Configure expose model and reasoning effort (`6216e4a`)
-- Preserve Super expose invocation context (`3def38a`)
-
-### Claude
-
-- Expose MCP through a Quick Tunnel (`21478e6`)
-- Add Streamable HTTP MCP contract (`9392948`)
-
-### Docs
-
-- Document ChatGPT expose security and parallel workspaces (`01c1f20`)
-
-## 0.416.2 - 2026-08-26
-
 ### Runtime
 
 - Finish bounded transport profile sweep (`ecfb064`)
 - Honor recovery sweep budget (`1f5afcd`)
 - Budget recovery independently (`a5212f8`)
 - Wait through recoverable overloads (`acae002`)
-
-### CLI
-
-- Preserve cold-start probe guard (`c5e1cab`)
-
-### Docs
-
-- Document rich Mojo domain core (`b987dad`)
-
-### Misc
-
-- Reduce routing adapter complexity (`adf82de`)
-- Migrate rich domain semantics (`b84454a`)
-
-## 0.416.1 - 2026-08-25
-
-### CLI
-
-- Fit all profiles in TUI height (`8028f3d`)
-
-### Misc
-
-- Normalize Spark reasoning effort (`228918b`)
-
-## 0.416.0 - 2026-08-24
-
-### CLI
-
-- Migrate context text and harden quota recovery (`b4486b5`)
-
-## 0.415.0 - 2026-08-24
-
-### Runtime
-
 - Exhaust safe precommit candidates (`2792d48`)
 - Normalize weighted inflight limits (`333b4ea`)
 - Rotate precommit transport failures (`fff6e20`)
@@ -249,6 +198,12 @@ Full Changelog: [`0.418.0...0.419.0`](https://github.com/christiandoxa/prodex/co
 
 ### CLI
 
+- Add bounded expose run manager (`b485f02`)
+- Configure expose model and reasoning effort (`6216e4a`)
+- Preserve Super expose invocation context (`3def38a`)
+- Preserve cold-start probe guard (`c5e1cab`)
+- Fit all profiles in TUI height (`8028f3d`)
+- Migrate context text and harden quota recovery (`b4486b5`)
 - Resolve providers and persist model choices (`ae33046`)
 - Tolerate slow heartbeat startup (`15d3f90`)
 - Preserve fraction-only Gemini quota (`7523ce7`)
@@ -311,11 +266,15 @@ Full Changelog: [`0.418.0...0.419.0`](https://github.com/christiandoxa/prodex/co
 
 ### Claude
 
+- Expose MCP through a Quick Tunnel (`21478e6`)
+- Add Streamable HTTP MCP contract (`9392948`)
 - Stabilize optional MCP cold startup (`e3d0f87`)
 - Harden optional MCP startup probes (`4815d05`)
 
 ### Docs
 
+- Document ChatGPT expose security and parallel workspaces (`01c1f20`)
+- Document rich Mojo domain core (`b987dad`)
 - Restore durable agent guidance (`762fbe1`)
 - Align compatibility and remove obsolete guidance (`3aa3f2a`)
 - Sync weighted inflight policy (`e9b0731`)
@@ -381,6 +340,9 @@ Full Changelog: [`0.418.0...0.419.0`](https://github.com/christiandoxa/prodex/co
 
 ### Misc
 
+- Reduce routing adapter complexity (`adf82de`)
+- Migrate rich domain semantics (`b84454a`)
+- Normalize Spark reasoning effort (`228918b`)
 - Keep stream alive across transient file errors (`85ccf51`)
 - Support Codex 0.149.1 (`c85a85a`)
 - Reuse optional ABI tag decoder (`d15b2c7`)
