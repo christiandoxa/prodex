@@ -128,6 +128,81 @@ else:
 }
 
 #[test]
+fn quick_tunnel_child_uses_private_home_and_explicit_auto_protocol() {
+    let root = test_temp_root().join(format!(
+        "prodex-cloudflared-config-boundary-{}",
+        std::process::id()
+    ));
+    let user_home = root.join("user-home");
+    fs::create_dir_all(user_home.join(".cloudflared")).unwrap();
+    let user_config = user_home.join(".cloudflared/config.yaml");
+    fs::write(
+        &user_config,
+        "tunnel: user-named-tunnel\nprotocol: quic\ncredentials-file: user.json\n",
+    )
+    .unwrap();
+    let args_marker = root.join("child-args.txt");
+    fs::create_dir_all(&root).unwrap();
+    write_test_python_executable(
+        &root,
+        "cloudflared",
+        r#"#!/usr/bin/env python3
+import os
+import sys
+
+if len(sys.argv) > 1 and sys.argv[1] == "--version":
+    print("cloudflared version 2026.8.2", flush=True)
+elif len(sys.argv) > 2 and sys.argv[1] == "tunnel" and sys.argv[2] == "--help":
+    print("--config --protocol --url", flush=True)
+else:
+    config = sys.argv[sys.argv.index("--config") + 1]
+    origin = sys.argv[sys.argv.index("--url") + 1]
+    protocol = sys.argv[sys.argv.index("--protocol") + 1]
+    with open(os.environ["PRODEX_TEST_CLOUDFLARED_ARGS"], "w", encoding="utf-8") as file:
+        file.write("protocol=" + protocol + "\n")
+        file.write("origin=" + origin + "\n")
+        file.write("config=" + config + "\n")
+        file.write("home=" + os.environ.get("HOME", "") + "\n")
+        file.write("userprofile=" + os.environ.get("USERPROFILE", "") + "\n")
+        file.write("config_contents=" + open(config, encoding="utf-8").read() + "\n")
+    print("https://isolated.trycloudflare.com", file=sys.stderr, flush=True)
+    print("Registered tunnel connection protocol=quic", file=sys.stderr, flush=True)
+    import time
+    time.sleep(30)
+"#,
+    );
+    let _env_lock = TestEnvVarGuard::lock();
+    let (_home, _userprofile) = TestEnvVarGuard::set_home(&user_home);
+    let _script = expose_test_cloudflared_script(&root);
+    let _marker = TestEnvVarGuard::set(
+        "PRODEX_TEST_CLOUDFLARED_ARGS",
+        &args_marker.to_string_lossy(),
+    );
+    let _forced = TestEnvVarGuard::set("TUNNEL_TRANSPORT_PROTOCOL", "quic");
+    let path = std::env::join_paths(std::iter::once(root.clone()).chain(std::env::split_paths(
+        &std::env::var_os("PATH").unwrap_or_default(),
+    )))
+    .unwrap();
+    let _path = TestEnvVarGuard::set("PATH", &path.to_string_lossy());
+
+    let mut tunnel = start_cloudflared_tunnel("http://127.0.0.1:43123").unwrap();
+    let marker = fs::read_to_string(&args_marker)
+        .unwrap()
+        .replace("\r\n", "\n");
+    assert!(marker.contains("protocol=auto\n"));
+    assert!(marker.contains("origin=http://127.0.0.1:43123\n"));
+    assert!(!marker.contains(&format!("home={}\n", user_home.display())));
+    assert!(!marker.contains(&format!("userprofile={}\n", user_home.display())));
+    assert!(marker.contains("config_contents=\n"));
+    assert_eq!(
+        fs::read_to_string(&user_config).unwrap(),
+        "tunnel: user-named-tunnel\nprotocol: quic\ncredentials-file: user.json\n"
+    );
+    tunnel.shutdown();
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
 fn cloudflared_early_exit_is_detected_without_waiting_for_the_full_timeout() {
     let root = test_temp_root().join(format!("prodex-cloudflared-early-{}", std::process::id()));
     fs::create_dir_all(&root).unwrap();

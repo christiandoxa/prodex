@@ -1,7 +1,7 @@
 use super::tools::mcp_tool_names;
 use super::{
-    MCP_CURRENT_PROTOCOL_VERSION, MCP_PROTOCOL_VERSIONS, MCP_PUBLIC_READY_STEP,
-    MCP_PUBLIC_READY_TIMEOUT,
+    MCP_CURRENT_PROTOCOL_VERSION, MCP_PROTOCOL_VERSIONS, MCP_PUBLIC_INITIALIZE_TIMEOUT,
+    MCP_PUBLIC_READY_STEP, MCP_PUBLIC_TOOLS_TIMEOUT,
 };
 use anyhow::{Context, Result, bail};
 use reqwest::blocking::{Client, Response};
@@ -13,7 +13,6 @@ use std::time::{Duration, Instant};
 enum ProbePhase {
     LocalInitialize,
     LocalTools,
-    PublicDiscovery,
     PublicInitialize,
     PublicTools,
 }
@@ -23,7 +22,6 @@ impl ProbePhase {
         match self {
             Self::LocalInitialize => "local MCP initialize",
             Self::LocalTools => "local MCP tools/list",
-            Self::PublicDiscovery => "public MCP server/discover",
             Self::PublicInitialize => "public MCP initialize",
             Self::PublicTools => "public MCP tools/list",
         }
@@ -115,73 +113,58 @@ pub(crate) fn verify_public_mcp(url: &str) -> Result<()> {
         .build()
         .context("failed to initialize public MCP probe")?;
     let started = Instant::now();
-    let deadline = Instant::now() + MCP_PUBLIC_READY_TIMEOUT;
+    run_public_phase(
+        &client,
+        url,
+        ProbePhase::PublicInitialize,
+        MCP_PUBLIC_INITIALIZE_TIMEOUT,
+        |client, url| probe_initialize(client, url, ProbePhase::PublicInitialize),
+    )?;
+    run_public_phase(
+        &client,
+        url,
+        ProbePhase::PublicTools,
+        MCP_PUBLIC_TOOLS_TIMEOUT,
+        |client, url| probe_tools(client, url, ProbePhase::PublicTools),
+    )?;
+    crate::runtime_launch::emit_runtime_timing("expose.public_mcp_ready_ms", started);
+    Ok(())
+}
+
+fn run_public_phase<F>(
+    client: &Client,
+    url: &str,
+    phase: ProbePhase,
+    timeout: Duration,
+    mut probe: F,
+) -> Result<()>
+where
+    F: FnMut(&Client, &str) -> std::result::Result<(), ProbeFailure>,
+{
+    crate::print_launch_status(&format!("Validating {}...", phase.label()));
+    let deadline = Instant::now() + timeout;
     let mut delay = MCP_PUBLIC_READY_STEP;
-    let mut last_failure = None;
-    while Instant::now() < deadline {
-        match probe_public_once(&client, url) {
-            Ok(()) => {
-                crate::runtime_launch::emit_runtime_timing("expose.public_mcp_ready_ms", started);
-                return Ok(());
-            }
-            Err(failure) if failure.retryable() => last_failure = Some(failure),
+    loop {
+        let failure = match probe(client, url) {
+            Ok(()) => return Ok(()),
+            Err(failure) if failure.retryable() => failure,
             Err(failure) => bail!("{failure}"),
-        }
+        };
         if probe_cancelled() {
-            bail!("public MCP readiness cancelled")
+            bail!("{} cancelled", phase.label())
+        }
+        if Instant::now() >= deadline {
+            bail!(
+                "{} did not become ready within {} seconds: {failure}",
+                phase.label(),
+                timeout.as_secs()
+            )
         }
         if !wait_for_probe_retry(delay) {
-            bail!("public MCP readiness cancelled")
+            bail!("{} cancelled", phase.label())
         }
         delay = (delay * 2).min(Duration::from_secs(2));
     }
-    let failure = last_failure
-        .map(|failure| failure.to_string())
-        .unwrap_or_else(|| "public MCP probe did not return a response".to_string());
-    bail!(
-        "public MCP readiness timed out after {} seconds; last phase: {failure}",
-        MCP_PUBLIC_READY_TIMEOUT.as_secs()
-    )
-}
-
-fn probe_public_once(client: &Client, url: &str) -> std::result::Result<(), ProbeFailure> {
-    let modern = match mcp_probe_request(
-        client,
-        url,
-        "server/discover",
-        mcp_discover_body(),
-        ProbePhase::PublicDiscovery,
-    ) {
-        Ok(body) => {
-            let versions = body
-                .get("result")
-                .and_then(|result| result.get("supportedVersions"))
-                .and_then(Value::as_array)
-                .ok_or(ProbeFailure {
-                    phase: ProbePhase::PublicDiscovery,
-                    kind: ProbeFailureKind::InvalidProtocol,
-                })?;
-            if !versions
-                .iter()
-                .any(|version| version.as_str() == Some(MCP_CURRENT_PROTOCOL_VERSION))
-            {
-                return Err(ProbeFailure {
-                    phase: ProbePhase::PublicDiscovery,
-                    kind: ProbeFailureKind::InvalidProtocol,
-                });
-            }
-            true
-        }
-        Err(ProbeFailure {
-            kind: ProbeFailureKind::Http(404),
-            phase: ProbePhase::PublicDiscovery,
-        }) => false,
-        Err(failure) => return Err(failure),
-    };
-    if !modern {
-        probe_initialize(client, url, ProbePhase::PublicInitialize)?;
-    }
-    probe_tools(client, url, ProbePhase::PublicTools)
 }
 
 fn probe_initialize(
@@ -307,15 +290,6 @@ fn probe_cancelled() -> bool {
     }
     #[cfg(not(unix))]
     false
-}
-
-fn mcp_discover_body() -> Value {
-    json!({
-        "jsonrpc": "2.0",
-        "id": 0,
-        "method": "server/discover",
-        "params": {"_meta": {"io.modelcontextprotocol/protocolVersion": MCP_CURRENT_PROTOCOL_VERSION, "io.modelcontextprotocol/clientInfo": {"name": "prodex-probe", "version": env!("CARGO_PKG_VERSION")}, "io.modelcontextprotocol/clientCapabilities": {}}}
-    })
 }
 
 fn mcp_initialize_body() -> Value {
