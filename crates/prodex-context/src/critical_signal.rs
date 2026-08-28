@@ -3,7 +3,7 @@ use serde::Serialize;
 use std::collections::BTreeMap;
 
 #[cfg(any(not(feature = "mojo"), test))]
-use crate::is_rust_exit_status_line;
+use crate::command_output::is_rust_exit_status_line;
 use crate::{
     command_lines, generic_failed_test_name, has_zero_only_summary_count,
     is_eslint_diagnostic_line, is_exception_signal_line, is_junit_xml_failure_line,
