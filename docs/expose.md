@@ -74,8 +74,10 @@ capability and hostname. This is Ephemeral Capability Authentication, not OAuth,
 account linking, identity authentication, or suitable authentication for a
 public multi-user plugin.
 
-The endpoint uses JSON responses for `server/discover`, legacy `initialize`,
-`ping`, `tools/list`, and `tools/call`. It does not emit `text/event-stream` and
+The endpoint uses JSON responses for `server/discover`, `initialize`, `ping`,
+`tools/list`, and `tools/call`. Expose readiness validates the canonical
+`initialize` then `tools/list` transaction locally and publicly; `server/discover`
+remains a client compatibility method, not a separate readiness protocol. It does not emit `text/event-stream` and
 does not expose a long-lived GET/SSE endpoint. Notifications accepted by the
 compatibility surface return `202 Accepted` with an empty body.
 
