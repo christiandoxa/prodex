@@ -167,11 +167,11 @@ fn collect_new_upstream_payload_events(
 fn collect_new_upstream_payload_events_with_throughput(
     path: &Path,
     state: &mut FollowedLog,
-    mut throughput: Option<&mut OutputThroughput>,
+    throughput: Option<&mut OutputThroughput>,
 ) -> Result<Vec<UpstreamPayloadEvent>> {
     let mut events = Vec::new();
     for item in
-        collect_new_runtime_log_stream_items_with_throughput(path, state, false, throughput.take())?
+        collect_new_runtime_log_stream_items_with_throughput(path, state, false, throughput)?
     {
         if let LogStreamItem::UpstreamPayload(event) = item {
             events.push(event);

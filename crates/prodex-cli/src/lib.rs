@@ -74,7 +74,10 @@ pub enum Commands {
         about = "Monitor profiles, quota resets, token efficiency, and Prodex resource usage."
     )]
     Status(StatusArgs),
-    #[command(about = "Show the latest transcript text and token counts or stream them live.")]
+    #[command(
+        about = "Stream Prodex runtime logs (default); use upstream for payload snapshots.",
+        after_help = "Examples:\n  prodex log                 Live log stream (default)\n  prodex log stream          Explicit live log stream\n  prodex log upstream        Upstream payload view"
+    )]
     Log(LogArgs),
     #[command(
         subcommand,
