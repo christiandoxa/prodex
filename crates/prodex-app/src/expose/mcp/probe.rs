@@ -144,12 +144,11 @@ fn public_mcp_client(url: &str) -> Result<Client> {
         && let Some(host) = parsed
             .host_str()
             .filter(|host| host.ends_with(".trycloudflare.com"))
+        && let Some(address) = public_host_address(host)
     {
-        if let Some(address) = public_host_address(host) {
-            // Keep TLS SNI/Host bound to the discovered hostname while allowing a resolver that
-            // temporarily lags the Quick Tunnel wildcard to use the authoritative A record.
-            builder = builder.resolve(host, address);
-        }
+        // Keep TLS SNI/Host bound to the discovered hostname while allowing a resolver that
+        // temporarily lags the Quick Tunnel wildcard to use the authoritative A record.
+        builder = builder.resolve(host, address);
     }
     builder
         .build()
