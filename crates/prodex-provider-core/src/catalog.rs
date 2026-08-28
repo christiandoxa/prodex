@@ -93,9 +93,10 @@ pub use reasoning::{
     ProviderModelReasoningError, ProviderModelReasoningResolution,
     provider_model_reasoning_resolution,
 };
-pub(super) use reasoning::{
-    provider_model_reasoning_resolution_rust, reasoning_catalog_data, reasoning_effort_label,
-};
+#[cfg(test)]
+pub(super) use reasoning::{reasoning_catalog_data, reasoning_effort_label};
+#[cfg(any(not(feature = "mojo"), test))]
+pub(super) use reasoning::provider_model_reasoning_resolution_rust;
 
 /// Builds the offline model picker from the canonical catalog plus local configuration.
 #[cfg(feature = "mojo")]

@@ -32,14 +32,14 @@ impl fmt::Display for ProviderModelReasoningError {
 impl std::error::Error for ProviderModelReasoningError {}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-struct ProviderReasoningPlan {
-    model_index: Option<usize>,
-    supported_efforts: Vec<String>,
-    selected_effort: Option<String>,
-    default_effort: Option<String>,
+pub(crate) struct ProviderReasoningPlan {
+    pub(crate) model_index: Option<usize>,
+    pub(crate) supported_efforts: Vec<String>,
+    pub(crate) selected_effort: Option<String>,
+    pub(crate) default_effort: Option<String>,
 }
 
-pub(super) fn reasoning_effort_label(effort: ProviderReasoningEffort) -> Option<&'static str> {
+pub(crate) fn reasoning_effort_label(effort: ProviderReasoningEffort) -> Option<&'static str> {
     Some(match effort {
         ProviderReasoningEffort::None => "none",
         ProviderReasoningEffort::Minimal => "minimal",
@@ -53,7 +53,7 @@ pub(super) fn reasoning_effort_label(effort: ProviderReasoningEffort) -> Option<
     })
 }
 
-pub(super) fn reasoning_catalog_data(
+pub(crate) fn reasoning_catalog_data(
     provider: ProviderId,
 ) -> (
     Vec<&'static ProviderCatalogEntry>,
@@ -165,7 +165,7 @@ pub fn provider_model_reasoning_resolution(
 }
 
 #[cfg(any(not(feature = "mojo"), test))]
-pub(super) fn provider_model_reasoning_resolution_rust(
+pub(crate) fn provider_model_reasoning_resolution_rust(
     entries: &[&ProviderCatalogEntry],
     efforts: &[Vec<&str>],
     model: Option<&str>,

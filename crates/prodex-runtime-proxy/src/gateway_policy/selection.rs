@@ -1,6 +1,6 @@
 use super::{
-    RuntimeGatewayRouteAlias, RuntimeGatewayRouteModelState, RuntimeGatewayRouteModelMetrics,
-    RuntimeGatewayRouteRewrite, RuntimeGatewayRouteStrategy,
+    RuntimeGatewayRouteAlias, RuntimeGatewayRouteModelState, RuntimeGatewayRouteRewrite,
+    RuntimeGatewayRouteStrategy,
 };
 use crate::runtime_gateway_estimated_tokens;
 use std::collections::BTreeMap;
@@ -131,7 +131,7 @@ pub(crate) fn runtime_gateway_route_selected_model_from_models(
 }
 
 #[cfg(any(not(feature = "mojo"), test))]
-pub(super) fn runtime_gateway_route_selected_model_from_models_rust(
+pub(crate) fn runtime_gateway_route_selected_model_from_models_rust(
     alias: &RuntimeGatewayRouteAlias,
     models: &[String],
     request_id: u64,
