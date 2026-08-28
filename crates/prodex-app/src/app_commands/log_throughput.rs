@@ -155,9 +155,7 @@ impl OutputThroughput {
             .iter()
             .max_by_key(|(_, last_event_at, _)| *last_event_at)
             .map(|(path, _, _)| path.clone());
-        let Some(selected_path) = selected_path else {
-            return None;
-        };
+        let selected_path = selected_path?;
         let rate = active
             .into_iter()
             .filter(|(path, _, _)| *path == selected_path)
