@@ -27,14 +27,14 @@ pub(in crate::smart_context) fn smart_context_observed_calibrated_request_estima
             calibration_bucket_key,
             calibration_samples,
         );
-        return prodex_mojo_core::runtime::smart_context_calibrated_estimate_batch(&[
+        prodex_mojo_core::runtime::smart_context_calibrated_estimate_batch(&[
             prodex_mojo_core::runtime::SmartContextCalibratedEstimateInput {
                 body_bytes: u64::try_from(body_bytes).expect("request body length fits u64"),
                 baseline_estimate,
                 observed_accounted_input,
             },
         ])
-        .expect("Mojo Smart Context calibration returned invalid output")[0];
+        .expect("Mojo Smart Context calibration returned invalid output")[0]
     }
 
     #[cfg(not(feature = "mojo"))]

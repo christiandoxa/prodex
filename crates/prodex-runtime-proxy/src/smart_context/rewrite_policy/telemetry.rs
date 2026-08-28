@@ -69,7 +69,7 @@ pub fn smart_context_rewrite_telemetry_budget_decision(
             input.recent_rewrite_safety.saved_tokens,
         )
         .expect("Mojo Smart Context telemetry planner returned invalid output");
-        return match decision {
+        match decision {
             prodex_mojo_core::runtime::SMART_CONTEXT_BUDGET_DECISION_NO_CHANGE => {
                 SmartContextRewriteBudgetDecision::NoChange
             }
@@ -80,7 +80,7 @@ pub fn smart_context_rewrite_telemetry_budget_decision(
                 SmartContextRewriteBudgetDecision::Tighten
             }
             _ => unreachable!("Mojo Smart Context telemetry decision was validated"),
-        };
+        }
     }
 
     #[cfg(not(feature = "mojo"))]

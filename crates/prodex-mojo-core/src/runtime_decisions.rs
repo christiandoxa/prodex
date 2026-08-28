@@ -60,6 +60,19 @@ pub struct SmartContextAdaptiveBudgetPlan {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SmartContextAdaptiveBudgetPlanInput {
+    pub available_context_tokens: Option<u64>,
+    pub exactness_required: bool,
+    pub static_context_changed: bool,
+    pub missing_rehydrate_refs: bool,
+    pub unknown_token_window: bool,
+    pub unsafe_accounting: bool,
+    pub safe_rewrites: usize,
+    pub fallback_rewrites: usize,
+    pub saved_tokens: u64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SmartContextBudgetAdjustment {
     pub max_inline_bytes: u64,
     pub max_rehydrate_tokens: u64,
@@ -476,15 +489,7 @@ pub fn smart_context_calibrated_estimate_batch(
 }
 
 pub fn smart_context_adaptive_budget_plan(
-    available_context_tokens: Option<u64>,
-    exactness_required: bool,
-    static_context_changed: bool,
-    missing_rehydrate_refs: bool,
-    unknown_token_window: bool,
-    unsafe_accounting: bool,
-    safe_rewrites: usize,
-    fallback_rewrites: usize,
-    saved_tokens: u64,
+    input: SmartContextAdaptiveBudgetPlanInput,
 ) -> Result<SmartContextAdaptiveBudgetPlan, crate::MojoError> {
     let mut tier = -1_i64;
     let mut mode = -1_i64;
@@ -493,16 +498,16 @@ pub fn smart_context_adaptive_budget_plan(
     let mut reason_bits = 0_u64;
     let status = unsafe {
         prodex_smart_context_adaptive_budget_plan_v1(
-            available_context_tokens.unwrap_or_default(),
-            i64::from(available_context_tokens.is_some()),
-            i64::from(exactness_required),
-            i64::from(static_context_changed),
-            i64::from(missing_rehydrate_refs),
-            i64::from(unknown_token_window),
-            i64::from(unsafe_accounting),
-            u64::try_from(safe_rewrites).map_err(|_| crate::MojoError::InvalidInput)?,
-            u64::try_from(fallback_rewrites).map_err(|_| crate::MojoError::InvalidInput)?,
-            saved_tokens,
+            input.available_context_tokens.unwrap_or_default(),
+            i64::from(input.available_context_tokens.is_some()),
+            i64::from(input.exactness_required),
+            i64::from(input.static_context_changed),
+            i64::from(input.missing_rehydrate_refs),
+            i64::from(input.unknown_token_window),
+            i64::from(input.unsafe_accounting),
+            u64::try_from(input.safe_rewrites).map_err(|_| crate::MojoError::InvalidInput)?,
+            u64::try_from(input.fallback_rewrites).map_err(|_| crate::MojoError::InvalidInput)?,
+            input.saved_tokens,
             &mut tier,
             &mut mode,
             &mut max_inline_bytes,
