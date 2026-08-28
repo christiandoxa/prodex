@@ -33,9 +33,12 @@ pub fn extract_runtime_proxy_overload_message_from_websocket_payload(
     payload: &RuntimeWebsocketErrorPayload,
 ) -> Option<String> {
     let policy = runtime_websocket_error_policy(payload, RuntimeHttpErrorPhase::PreCommit);
-    (policy.class == RuntimeHttpErrorClass::Overload)
-        .then_some(policy.message)
-        .flatten()
+    matches!(
+        policy.class,
+        RuntimeHttpErrorClass::RateLimited | RuntimeHttpErrorClass::Overload
+    )
+    .then_some(policy.message)
+    .flatten()
 }
 
 pub fn runtime_websocket_error_policy(

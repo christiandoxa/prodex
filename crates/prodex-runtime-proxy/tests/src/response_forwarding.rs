@@ -302,3 +302,35 @@ fn sse_tap_state_deduplicates_token_usage_logs() {
         })]
     );
 }
+
+#[test]
+fn sse_tap_state_marks_generation_timing_only_after_output_begins() {
+    let mut state = RuntimeSseTapState::default();
+    assert!(
+        state
+            .observe_chunk(br#"data: {"type":"response.created"}"#)
+            .is_empty()
+    );
+    assert!(state.observe_chunk(b"\r\n\r\n").is_empty());
+    assert!(
+        state
+            .observe_chunk(br#"data: {"type":"response.output_item.added"}"#)
+            .is_empty()
+    );
+    assert!(state.observe_chunk(b"\r\n\r\n").is_empty());
+
+    let mut effects = state.observe_chunk(
+        br#"data: {"type":"response.completed","response":{"usage":{"input_tokens":1,"output_tokens":2}}}"#,
+    );
+    effects.extend(state.observe_chunk(b"\r\n\r\n"));
+    assert!(matches!(
+        effects.as_slice(),
+        [RuntimeSseTapEffect::LogTokenUsageWithGeneration {
+            usage: RuntimeTokenUsage {
+                output_tokens: 2,
+                ..
+            },
+            generation_ms: _,
+        }]
+    ));
+}

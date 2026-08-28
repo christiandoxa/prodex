@@ -1,11 +1,13 @@
 mod calibration;
 mod estimation;
+mod observed;
 
 pub(super) use calibration::*;
 pub use estimation::{
     SMART_CONTEXT_ESTIMATED_BYTES_PER_TOKEN, smart_context_estimate_tokens_from_body,
     smart_context_estimate_tokens_from_body_bytes,
 };
+use observed::smart_context_observed_usage_totals;
 
 use super::*;
 use crate::RuntimeTokenUsage;
@@ -412,31 +414,16 @@ pub fn smart_context_observed_token_accounting_with_calibration(
         calibration_bucket_key,
         calibration_samples,
     } = input;
-    let mut observed_input_tokens = 0u64;
-    let mut observed_cached_input_tokens = 0u64;
-    let mut observed_output_tokens = 0u64;
-    let mut observed_reasoning_tokens = 0u64;
-    let mut last_input_tokens = 0u64;
-    let mut last_accounted_input_tokens = 0u64;
-    let mut last_observed_context_tokens = 0u64;
+    let usage_totals = smart_context_observed_usage_totals(&input.observed_usage);
 
-    for usage in &input.observed_usage {
-        observed_input_tokens = observed_input_tokens.saturating_add(usage.input_tokens);
-        observed_cached_input_tokens =
-            observed_cached_input_tokens.saturating_add(usage.cached_input_tokens);
-        observed_output_tokens = observed_output_tokens.saturating_add(usage.output_tokens);
-        observed_reasoning_tokens =
-            observed_reasoning_tokens.saturating_add(usage.reasoning_tokens);
-        last_input_tokens = usage.input_tokens;
-        last_accounted_input_tokens = smart_context_accounted_input_tokens(*usage).unwrap_or(0);
-        last_observed_context_tokens =
-            smart_context_observed_usage_context_tokens(*usage).unwrap_or(0);
-    }
-
-    let observed_uncached_input_tokens =
-        observed_input_tokens.saturating_sub(observed_cached_input_tokens);
-    let observed_total_tokens = observed_input_tokens.saturating_add(observed_output_tokens);
-    let observed_context_tokens = observed_total_tokens.saturating_add(observed_reasoning_tokens);
+    let observed_uncached_input_tokens = usage_totals
+        .input_tokens
+        .saturating_sub(usage_totals.cached_input_tokens);
+    let observed_total_tokens = usage_totals
+        .input_tokens
+        .saturating_add(usage_totals.output_tokens);
+    let observed_context_tokens =
+        observed_total_tokens.saturating_add(usage_totals.reasoning_tokens);
     let baseline_estimated_current_request_tokens =
         input.current_request_estimated_tokens.unwrap_or_else(|| {
             smart_context_estimate_tokens_from_body_bytes(input.current_request_body_bytes)
@@ -451,12 +438,13 @@ pub fn smart_context_observed_token_accounting_with_calibration(
     let current_request_accounted_tokens = input
         .current_input_tokens
         .max(estimated_current_request_tokens);
-    let effective_input_tokens = current_request_accounted_tokens.max(last_accounted_input_tokens);
+    let effective_input_tokens =
+        current_request_accounted_tokens.max(usage_totals.last_accounted_input_tokens);
     let effective_input_source = smart_context_effective_input_source(
         input.current_input_tokens,
         estimated_current_request_tokens,
         current_request_accounted_tokens,
-        last_accounted_input_tokens,
+        usage_totals.last_accounted_input_tokens,
         effective_input_tokens,
     );
     let available_context_tokens = input.model_context_window_tokens.map(|window| {
@@ -481,16 +469,16 @@ pub fn smart_context_observed_token_accounting_with_calibration(
     SmartContextObservedTokenAccounting {
         model_context_window_tokens: input.model_context_window_tokens,
         observed_turns: input.observed_usage.len(),
-        observed_input_tokens,
-        observed_cached_input_tokens,
+        observed_input_tokens: usage_totals.input_tokens,
+        observed_cached_input_tokens: usage_totals.cached_input_tokens,
         observed_uncached_input_tokens,
-        observed_output_tokens,
-        observed_reasoning_tokens,
+        observed_output_tokens: usage_totals.output_tokens,
+        observed_reasoning_tokens: usage_totals.reasoning_tokens,
         observed_total_tokens,
         observed_context_tokens,
-        last_input_tokens,
-        last_accounted_input_tokens,
-        last_observed_context_tokens,
+        last_input_tokens: usage_totals.last_input_tokens,
+        last_accounted_input_tokens: usage_totals.last_accounted_input_tokens,
+        last_observed_context_tokens: usage_totals.last_observed_context_tokens,
         current_request_body_bytes: input.current_request_body_bytes,
         estimated_current_request_tokens,
         current_request_accounted_tokens,

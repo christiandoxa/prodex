@@ -9,6 +9,7 @@ pub enum RuntimeHttpErrorPhase {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RuntimeHttpErrorClass {
     Quota,
+    RateLimited,
     ProfileUnavailable,
     Overload,
     TransientServer,
@@ -33,6 +34,7 @@ pub struct RuntimeHttpErrorPolicy {
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum RuntimeHttpErrorSignal {
     ExplicitQuota,
+    ExplicitRateLimit,
     ExplicitProfileUnavailable,
     ExplicitOverload,
     TransientStatus,
@@ -62,6 +64,13 @@ const RUNTIME_HTTP_ERROR_RULES: &[RuntimeHttpErrorRule] = &[
         signal: RuntimeHttpErrorSignal::ExplicitProfileUnavailable,
         class: RuntimeHttpErrorClass::ProfileUnavailable,
         precommit_action: RuntimeHttpErrorAction::RotateProfile,
+    },
+    RuntimeHttpErrorRule {
+        name: "rate_limited",
+        statuses: &[429],
+        signal: RuntimeHttpErrorSignal::ExplicitRateLimit,
+        class: RuntimeHttpErrorClass::RateLimited,
+        precommit_action: RuntimeHttpErrorAction::RetryProfile,
     },
     RuntimeHttpErrorRule {
         name: "explicit_quota",
@@ -102,6 +111,11 @@ const RUNTIME_STREAM_ERROR_RULES: &[(RuntimeHttpErrorClass, RuntimeHttpErrorActi
         RuntimeHttpErrorAction::RotateProfile,
         "explicit_quota",
     ),
+    (
+        RuntimeHttpErrorClass::RateLimited,
+        RuntimeHttpErrorAction::RetryProfile,
+        "rate_limited",
+    ),
 ];
 
 #[derive(Clone, Copy)]
@@ -129,7 +143,11 @@ const RUNTIME_PAYLOAD_CODE_RULES: &[RuntimePayloadCodeRule] = &[
     },
     RuntimePayloadCodeRule {
         code: "rate_limit_exceeded",
-        signal: RuntimeHttpErrorSignal::ExplicitQuota,
+        signal: RuntimeHttpErrorSignal::ExplicitRateLimit,
+    },
+    RuntimePayloadCodeRule {
+        code: "rate_limit_exceeded_error",
+        signal: RuntimeHttpErrorSignal::ExplicitRateLimit,
     },
     RuntimePayloadCodeRule {
         code: "usage_limit_reached",
@@ -172,6 +190,11 @@ impl RuntimeHttpErrorRule {
                 } else {
                     RuntimeSignalMatchMode::UsageMessage
                 },
+            ),
+            RuntimeHttpErrorSignal::ExplicitRateLimit => runtime_error_signal_message_from_body(
+                body,
+                RuntimeHttpErrorSignal::ExplicitRateLimit,
+                RuntimeSignalMatchMode::ExplicitCode,
             ),
             RuntimeHttpErrorSignal::ExplicitProfileUnavailable => {
                 runtime_error_signal_message_from_body(
@@ -293,6 +316,7 @@ pub fn runtime_stream_error_policy_from_value(
 pub fn runtime_http_error_class_label(class: RuntimeHttpErrorClass) -> &'static str {
     match class {
         RuntimeHttpErrorClass::Quota => "quota",
+        RuntimeHttpErrorClass::RateLimited => "rate_limited",
         RuntimeHttpErrorClass::ProfileUnavailable => "profile_unavailable",
         RuntimeHttpErrorClass::Overload => "overload",
         RuntimeHttpErrorClass::TransientServer => "transient_5xx",
@@ -328,6 +352,13 @@ fn runtime_error_signal_message_from_value_mode(
         RuntimeHttpErrorClass::Quota => runtime_json_find(value, |candidate| {
             runtime_error_signal_candidate(candidate, RuntimeHttpErrorSignal::ExplicitQuota, mode)
         }),
+        RuntimeHttpErrorClass::RateLimited => runtime_json_find(value, |candidate| {
+            runtime_error_signal_candidate(
+                candidate,
+                RuntimeHttpErrorSignal::ExplicitRateLimit,
+                RuntimeSignalMatchMode::ExplicitCode,
+            )
+        }),
         RuntimeHttpErrorClass::ProfileUnavailable => runtime_json_find(value, |candidate| {
             runtime_error_signal_candidate(
                 candidate,
@@ -359,6 +390,10 @@ pub fn runtime_error_signal_message_from_text(
         RuntimeHttpErrorClass::Quota => {
             runtime_usage_limit_text_message(trimmed).then(|| trimmed.to_string())
         }
+        RuntimeHttpErrorClass::RateLimited => {
+            runtime_text_has_payload_code(trimmed, RuntimeHttpErrorSignal::ExplicitRateLimit)
+                .then(|| trimmed.to_string())
+        }
         RuntimeHttpErrorClass::ProfileUnavailable => {
             runtime_profile_unavailable_text_message(trimmed).then(|| trimmed.to_string())
         }
@@ -371,6 +406,10 @@ pub fn runtime_error_signal_message_from_text(
 
 pub fn runtime_quota_payload_code(code: &str) -> bool {
     runtime_payload_code_matches(code, RuntimeHttpErrorSignal::ExplicitQuota)
+}
+
+pub fn runtime_rate_limit_payload_code(code: &str) -> bool {
+    runtime_payload_code_matches(code, RuntimeHttpErrorSignal::ExplicitRateLimit)
 }
 
 pub fn runtime_overload_payload_code(code: &str) -> bool {
@@ -426,6 +465,13 @@ fn runtime_error_signal_message_from_body(
                 runtime_error_signal_message_from_text(text, RuntimeHttpErrorClass::Quota)
             }
         },
+        RuntimeHttpErrorSignal::ExplicitRateLimit => {
+            if match_mode == RuntimeSignalMatchMode::ExplicitCode {
+                None
+            } else {
+                runtime_error_signal_message_from_text(text, RuntimeHttpErrorClass::RateLimited)
+            }
+        }
         RuntimeHttpErrorSignal::ExplicitProfileUnavailable => {
             runtime_error_signal_message_from_text(text, RuntimeHttpErrorClass::ProfileUnavailable)
         }
@@ -501,6 +547,11 @@ fn runtime_error_signal_candidate(
                             .to_string(),
                     )
                 }
+                RuntimeHttpErrorSignal::ExplicitRateLimit if explicit_code => Some(
+                    message
+                        .unwrap_or("Upstream Codex profile is temporarily rate limited.")
+                        .to_string(),
+                ),
                 RuntimeHttpErrorSignal::ExplicitProfileUnavailable if explicit_code => Some(
                     message
                         .unwrap_or("Upstream Codex workspace is deactivated for this profile.")
@@ -520,6 +571,7 @@ fn runtime_error_signal_candidate(
                 }
                 RuntimeHttpErrorSignal::ExplicitOverload => None,
                 RuntimeHttpErrorSignal::ExplicitQuota
+                | RuntimeHttpErrorSignal::ExplicitRateLimit
                 | RuntimeHttpErrorSignal::ExplicitProfileUnavailable
                 | RuntimeHttpErrorSignal::TransientStatus => None,
             }

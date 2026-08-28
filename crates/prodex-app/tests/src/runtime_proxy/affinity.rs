@@ -229,6 +229,7 @@ fn prompt_cache_profile_hit_ignores_zero_or_absent_cached_tokens() {
         prompt_cache_key: Some(prompt_cache_key),
         model_name: None,
         usage: None,
+        generation_ms: None,
     });
     assert_eq!(
         runtime_prompt_cache_bound_profile_at(Some(prompt_cache_key), now + 2).as_deref(),
@@ -257,6 +258,7 @@ fn prompt_cache_token_usage_logs_bounded_redacted_cache_telemetry() {
             output_tokens: 40,
             reasoning_tokens: 7,
         }),
+        generation_ms: Some(1_000),
     });
     super::super::log_runtime_token_usage(super::super::RuntimeTokenUsageLog {
         shared: &shared,
@@ -272,6 +274,7 @@ fn prompt_cache_token_usage_logs_bounded_redacted_cache_telemetry() {
             output_tokens: 41,
             reasoning_tokens: 8,
         }),
+        generation_ms: None,
     });
 
     let log = read_runtime_proxy_test_log(&shared.log_path);
@@ -286,6 +289,8 @@ fn prompt_cache_token_usage_logs_bounded_redacted_cache_telemetry() {
     assert!(log.contains("prompt_cache_owner=owner_unchanged"));
     assert!(log.contains("cached_input_tokens=120"));
     assert!(log.contains("uncached_input_tokens=180"));
+    assert!(log.contains("generation_ms=1000"));
+    assert!(log.contains("output_tokens_per_second=40.0"));
     assert!(log.contains("transport=websocket"));
     assert!(!log.contains(prompt_cache_key));
 }

@@ -627,6 +627,9 @@ mod tests {
                 email: None,
                 plan_type: None,
                 rate_limit: Some(crate::WindowPair {
+                    allowed: None,
+                    limit_reached: None,
+                    extra: std::collections::BTreeMap::new(),
                     primary_window: None,
                     secondary_window: Some(crate::UsageWindow {
                         used_percent: Some(40),

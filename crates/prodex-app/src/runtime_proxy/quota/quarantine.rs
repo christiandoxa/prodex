@@ -174,6 +174,9 @@ mod tests {
             email: None,
             plan_type: None,
             rate_limit: Some(WindowPair {
+                allowed: None,
+                limit_reached: None,
+                extra: std::collections::BTreeMap::new(),
                 primary_window: Some(UsageWindow {
                     used_percent: Some(five_hour_used_percent),
                     reset_at: Some(now + 3_600),
@@ -197,9 +200,13 @@ mod tests {
         now: i64,
     ) -> AdditionalRateLimit {
         AdditionalRateLimit {
+            limit_id: None,
             limit_name: Some("GPT-5.3-Codex-Spark".to_string()),
             metered_feature: Some("codex_bengalfox".to_string()),
             rate_limit: WindowPair {
+                allowed: None,
+                limit_reached: None,
+                extra: std::collections::BTreeMap::new(),
                 primary_window: Some(UsageWindow {
                     used_percent: Some(100 - five_hour_remaining),
                     reset_at: Some(now + 7_200),
@@ -211,6 +218,9 @@ mod tests {
                     limit_window_seconds: Some(604_800),
                 }),
             },
+            allowed: None,
+            limit_reached: None,
+            extra: std::collections::BTreeMap::new(),
         }
     }
 

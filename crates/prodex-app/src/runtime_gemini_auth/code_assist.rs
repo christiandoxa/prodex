@@ -205,9 +205,10 @@ fn wait_for_gemini_code_assist_operation(
         ) {
             Ok(operation) => operation,
             Err(error)
-                if error
-                    .downcast_ref::<reqwest::Error>()
-                    .is_some_and(reqwest::Error::is_timeout) =>
+                if Instant::now() >= deadline
+                    || error
+                        .downcast_ref::<reqwest::Error>()
+                        .is_some_and(reqwest::Error::is_timeout) =>
             {
                 bail!("Gemini Code Assist onboarding timed out");
             }

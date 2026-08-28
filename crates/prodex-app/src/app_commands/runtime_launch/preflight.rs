@@ -376,6 +376,9 @@ pub(super) fn runtime_launch_usage_from_snapshot(
         email: None,
         plan_type: snapshot.plan_type.clone(),
         rate_limit: Some(WindowPair {
+            allowed: None,
+            limit_reached: None,
+            extra: std::collections::BTreeMap::new(),
             primary_window: runtime_launch_window_from_snapshot(
                 snapshot.five_hour_status,
                 snapshot.five_hour_remaining_percent,

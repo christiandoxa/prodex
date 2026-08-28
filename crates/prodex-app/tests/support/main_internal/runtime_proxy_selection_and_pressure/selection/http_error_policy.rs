@@ -16,7 +16,20 @@ fn runtime_http_error_policy_passes_generic_429_through() {
 
 #[test]
 fn runtime_http_error_policy_rotates_explicit_quota_codes_before_commit_only() {
-    for code in ["insufficient_quota", "rate_limit_exceeded"] {
+    for (code, class, action, rule) in [
+        (
+            "insufficient_quota",
+            RuntimeHttpErrorClass::Quota,
+            RuntimeHttpErrorAction::RotateProfile,
+            "explicit_quota",
+        ),
+        (
+            "rate_limit_exceeded",
+            RuntimeHttpErrorClass::RateLimited,
+            RuntimeHttpErrorAction::RetryProfile,
+            "rate_limited",
+        ),
+    ] {
         let body = serde_json::to_vec(&serde_json::json!({
             "error": {
                 "code": code,
@@ -26,17 +39,13 @@ fn runtime_http_error_policy_rotates_explicit_quota_codes_before_commit_only() {
         .expect("quota body should serialize");
 
         let precommit = runtime_http_error_policy(429, &body, RuntimeHttpErrorPhase::PreCommit);
-        assert_eq!(precommit.class, RuntimeHttpErrorClass::Quota, "{code}");
-        assert_eq!(
-            precommit.action,
-            RuntimeHttpErrorAction::RotateProfile,
-            "{code}"
-        );
-        assert_eq!(precommit.rule, Some("explicit_quota"), "{code}");
+        assert_eq!(precommit.class, class, "{code}");
+        assert_eq!(precommit.action, action, "{code}");
+        assert_eq!(precommit.rule, Some(rule), "{code}");
         assert_eq!(precommit.message.as_deref(), Some("Quota exhausted"));
 
         let committed = runtime_http_error_policy(429, &body, RuntimeHttpErrorPhase::Committed);
-        assert_eq!(committed.class, RuntimeHttpErrorClass::Quota, "{code}");
+        assert_eq!(committed.class, class, "{code}");
         assert_eq!(
             committed.action,
             RuntimeHttpErrorAction::PassThrough,

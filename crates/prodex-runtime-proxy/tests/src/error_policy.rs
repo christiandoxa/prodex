@@ -130,7 +130,6 @@ fn explicit_quota_payload_corpus_rotates_only_before_commit_for_supported_status
         ("quota_exhausted", "Quota exhausted"),
         ("quota_exceeded", "Quota exceeded"),
         ("resource_exhausted", "Resource exhausted"),
-        (" rate_limit_exceeded ", "Rate limit exceeded"),
         ("usage_limit_reached", "Usage limit reached"),
         ("USAGE_LIMIT_REACHED", "Usage limit reached"),
         ("usage_not_included", "Workspace credits exhausted"),
@@ -364,11 +363,7 @@ fn usage_limit_message_rotates_before_commit_only_for_non_429_quota_statuses() {
 
 #[test]
 fn explicit_quota_codes_rotate_only_before_commit() {
-    for code in [
-        "insufficient_quota",
-        "rate_limit_exceeded",
-        "usage_not_included",
-    ] {
+    for code in ["insufficient_quota", "usage_not_included"] {
         let body = json_body(serde_json::json!({
             "error": {
                 "code": code,
@@ -403,8 +398,8 @@ data: {"type":"response.failed","response":{"error":{"code":"rate_limit_exceeded
 
 "#;
     let precommit = runtime_http_error_policy(429, structured, RuntimeHttpErrorPhase::PreCommit);
-    assert_eq!(precommit.class, RuntimeHttpErrorClass::Quota);
-    assert_eq!(precommit.action, RuntimeHttpErrorAction::RotateProfile);
+    assert_eq!(precommit.class, RuntimeHttpErrorClass::RateLimited);
+    assert_eq!(precommit.action, RuntimeHttpErrorAction::RetryProfile);
     assert_eq!(precommit.message.as_deref(), Some("Rate limit exceeded"));
 
     let message_only = br#"event: response.failed
@@ -433,8 +428,8 @@ fn streaming_retry_requires_a_structured_explicit_code() {
     for (code, expected_class, expected_action) in [
         (
             "rate_limit_exceeded",
-            RuntimeHttpErrorClass::Quota,
-            RuntimeHttpErrorAction::RotateProfile,
+            RuntimeHttpErrorClass::RateLimited,
+            RuntimeHttpErrorAction::RetryProfile,
         ),
         (
             "server_is_overloaded",
@@ -463,26 +458,6 @@ fn explicit_quota_code_matrix_rotates_only_before_commit() {
                 }
             })),
             "Quota exhausted",
-        ),
-        (
-            "type_rate_limit_exceeded",
-            json_body(serde_json::json!({
-                "error": {
-                    "type": "rate_limit_exceeded",
-                    "message": "Rate limit exceeded"
-                }
-            })),
-            "Rate limit exceeded",
-        ),
-        (
-            "trimmed_case_insensitive_code",
-            json_body(serde_json::json!({
-                "error": {
-                    "code": " RATE_LIMIT_EXCEEDED ",
-                    "message": "Rate limit exceeded"
-                }
-            })),
-            "Rate limit exceeded",
         ),
         (
             "nested_usage_limit_code",

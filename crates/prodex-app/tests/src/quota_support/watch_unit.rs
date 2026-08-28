@@ -46,6 +46,9 @@
             email: Some("main@example.com".to_string()),
             plan_type: Some("plus".to_string()),
             rate_limit: Some(WindowPair {
+                allowed: None,
+                limit_reached: None,
+                extra: std::collections::BTreeMap::new(),
                 primary_window: Some(UsageWindow {
                     used_percent: Some(five_hour_used_percent),
                     reset_at: Some(reset_at),

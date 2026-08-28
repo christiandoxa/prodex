@@ -165,7 +165,17 @@ fn runtime_local_rewrite_live_fallback_class(
             )
         }
         runtime_proxy_crate::RuntimeSseInspectionProgress::Overloaded => {
-            Some(ProviderErrorClass::Transient)
+            let class = runtime_provider_error_class(provider, live.status, &live.prefix);
+            Some(
+                matches!(
+                    class,
+                    ProviderErrorClass::Quota
+                        | ProviderErrorClass::RateLimit
+                        | ProviderErrorClass::Transient
+                )
+                .then_some(class)
+                .unwrap_or(ProviderErrorClass::Transient),
+            )
         }
         _ => None,
     }

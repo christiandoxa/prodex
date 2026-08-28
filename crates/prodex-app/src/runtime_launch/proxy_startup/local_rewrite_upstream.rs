@@ -695,7 +695,7 @@ pub(super) fn runtime_local_rewrite_retryable_429_body(body: &[u8]) -> bool {
         runtime_proxy_crate::RuntimeHttpErrorPhase::PreCommit,
     )
     .action
-        == runtime_proxy_crate::RuntimeHttpErrorAction::RotateProfile
+    .retries_profile()
 }
 
 pub(super) fn send_runtime_local_rewrite_upstream_request(

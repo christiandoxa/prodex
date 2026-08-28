@@ -39,6 +39,9 @@ pub(super) fn bench_usage(
         email: None,
         plan_type: Some("bench".to_string()),
         rate_limit: Some(WindowPair {
+            allowed: None,
+            limit_reached: None,
+            extra: std::collections::BTreeMap::new(),
             primary_window: Some(UsageWindow {
                 used_percent: Some(primary_used_percent),
                 reset_at: Some(now + 5 * 60 * 60),
