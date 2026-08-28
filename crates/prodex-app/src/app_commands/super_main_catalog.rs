@@ -79,29 +79,29 @@ fn main_model_choice_from_provider(
             ("provider default".to_string(), None)
         }
         prodex_provider_core::ProviderModelChoice::Model(model) => {
-            let entry = prodex_provider_core::provider_catalog_entry(provider, model);
+            let reasoning = prodex_provider_core::provider_model_reasoning_resolution(
+                provider,
+                Some(model),
+                None,
+            )
+            .expect("provider model reasoning resolution failed");
             (
-                entry
+                prodex_provider_core::provider_catalog_entry(provider, model)
                     .map(|entry| entry.display_name.clone())
                     .unwrap_or_else(|| model.clone()),
-                entry
-                    .and_then(|entry| {
-                        entry.supported_reasoning_efforts.as_ref().map(|efforts| {
-                            efforts
-                                .iter()
-                                .filter_map(|effort| sub_agent_effort(*effort))
-                                .map(|effort| effort.as_str().to_string())
-                                .collect()
-                        })
-                    })
-                    .or_else(|| {
-                        (provider == prodex_provider_core::ProviderId::OpenAi).then(|| {
-                            canonical_sub_agent_efforts(provider, Some(model))
-                                .into_iter()
-                                .map(|effort| effort.as_str().to_string())
-                                .collect()
-                        })
-                    }),
+                Some(if reasoning.model_index.is_some() {
+                    reasoning
+                        .supported_reasoning_efforts
+                        .iter()
+                        .filter_map(|effort| sub_agent_effort(*effort))
+                        .map(|effort| effort.as_str().to_string())
+                        .collect()
+                } else {
+                    canonical_sub_agent_efforts(provider, Some(model))
+                        .into_iter()
+                        .map(|effort| effort.as_str().to_string())
+                        .collect()
+                }),
             )
         }
         prodex_provider_core::ProviderModelChoice::Custom => ("custom model...".to_string(), None),

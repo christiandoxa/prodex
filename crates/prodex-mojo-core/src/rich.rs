@@ -7,9 +7,9 @@
 
 use crate::{MojoError, MojoIssue};
 
-// v5 uses fixed-width UInt64 addresses for every pointer crossing the rich C
+// v6 uses fixed-width UInt64 addresses for every pointer crossing the rich C
 // ABI, including all by-value record inputs.
-pub const RICH_ABI_VERSION: i64 = 5;
+pub const RICH_ABI_VERSION: i64 = 6;
 
 const _: () = assert!(std::mem::size_of::<usize>() == std::mem::size_of::<u64>());
 
@@ -20,12 +20,16 @@ pub use context_plan::{ContextPlan, ContextPlanAction, ContextPlanItem, plan_con
 mod context;
 pub use context::{ContextAnalysis, ContextGroup, analyze_context};
 mod policy;
-pub use policy::{PolicyAliasInput, PolicyAliasPlan, PolicyModel, validate_policy_alias};
+pub use policy::{
+    PolicyAliasInput, PolicyAliasPlan, PolicyModel, PolicyRouteModel, PolicyRoutePlan,
+    plan_route_policy, validate_policy_alias,
+};
 mod fallback;
-pub use fallback::model_fallback_chain;
+pub use fallback::{model_fallback_chain, model_fallback_plan};
 mod catalog;
 pub use catalog::{
-    CatalogChoice, CatalogModel, merge_catalog_ids, plan_catalog_choices, resolve_catalog_model,
+    CatalogChoice, CatalogModel, CatalogReasoningModel, CatalogReasoningPlan, merge_catalog_ids,
+    plan_catalog_choices, resolve_catalog_model, resolve_catalog_reasoning,
 };
 
 const RICH_STATUS_INVALID: i64 = 1;
@@ -163,6 +167,55 @@ struct RichPolicyResult {
 
 #[repr(C)]
 #[derive(Debug, Clone, Copy, Default)]
+struct RichCatalogReasoningResult {
+    abi_version: i64,
+    model_index: i64,
+    efforts_written: i64,
+    selected_effort: RichSlice,
+    default_effort: RichSlice,
+    output_written: i64,
+    issue_kind: i64,
+    issue_index: i64,
+    issue_offset: i64,
+    issue_length: i64,
+}
+
+#[repr(C)]
+#[derive(Debug, Clone, Copy, Default)]
+struct RichPolicyRouteInput {
+    model: RichStringView,
+    input_cost: u64,
+    input_cost_present: i64,
+    output_cost: u64,
+    output_cost_present: i64,
+    policy_latency: u64,
+    policy_latency_present: i64,
+    state_latency: u64,
+    state_latency_present: i64,
+    in_flight: u64,
+    rpm_limit: u64,
+    rpm_limit_present: i64,
+    rpm_used: u64,
+    tpm_limit: u64,
+    tpm_limit_present: i64,
+    tpm_used: u64,
+}
+
+#[repr(C)]
+#[derive(Debug, Clone, Copy, Default)]
+struct RichPolicyRouteResult {
+    abi_version: i64,
+    selected_index: i64,
+    ordered_written: i64,
+    required_ordered: i64,
+    issue_kind: i64,
+    issue_index: i64,
+    issue_offset: i64,
+    issue_length: i64,
+}
+
+#[repr(C)]
+#[derive(Debug, Clone, Copy, Default)]
 struct RichFallbackRecord {
     model: RichSlice,
     source_kind: i64,
@@ -232,6 +285,9 @@ const _: () = {
     assert!(std::mem::offset_of!(RichPolicyInput, metric_count) == 56);
     assert!(std::mem::size_of::<RichPolicyModel>() == 32);
     assert!(std::mem::size_of::<RichPolicyResult>() == 80);
+    assert!(std::mem::size_of::<RichCatalogReasoningResult>() == 96);
+    assert!(std::mem::size_of::<RichPolicyRouteInput>() == 136);
+    assert!(std::mem::size_of::<RichPolicyRouteResult>() == 64);
     assert!(std::mem::size_of::<RichPlanItem>() == 32);
     assert!(std::mem::size_of::<RichPlanAction>() == 48);
     assert!(std::mem::size_of::<RichPlanResult>() == 72);
@@ -284,18 +340,6 @@ unsafe extern "C" {
         output_capacity: i64,
         result: u64,
     ) -> i64;
-    fn prodex_mojo_rich_model_fallback_v2(
-        abi_version: i64,
-        provider: u64,
-        model: u64,
-        output_records: u64,
-        record_capacity: i64,
-        output: u64,
-        output_capacity: i64,
-        hash_slots: u64,
-        hash_capacity: i64,
-        result: u64,
-    ) -> i64;
     fn prodex_mojo_rich_context_plan_v2(
         abi_version: i64,
         items: u64,
@@ -342,7 +386,7 @@ fn hash_capacity(count: usize) -> Result<usize, MojoError> {
 
 fn rich_abi_ready() -> bool {
     *RICH_ABI_READY.get_or_init(|| {
-        let mut layout = [0_u64; 28];
+        let mut layout = [0_u64; 34];
         let status =
             unsafe { prodex_mojo_rich_abi_layout(layout.as_mut_ptr(), layout.len() as i64) };
         let rust = [
@@ -374,6 +418,12 @@ fn rich_abi_ready() -> bool {
             std::mem::align_of::<RichPlanAction>() as u64,
             std::mem::size_of::<RichPlanResult>() as u64,
             std::mem::align_of::<RichPlanResult>() as u64,
+            std::mem::size_of::<RichCatalogReasoningResult>() as u64,
+            std::mem::align_of::<RichCatalogReasoningResult>() as u64,
+            std::mem::size_of::<RichPolicyRouteInput>() as u64,
+            std::mem::align_of::<RichPolicyRouteInput>() as u64,
+            std::mem::size_of::<RichPolicyRouteResult>() as u64,
+            std::mem::align_of::<RichPolicyRouteResult>() as u64,
         ];
         status == 0
             && unsafe { prodex_mojo_rich_abi_version() } == RICH_ABI_VERSION
@@ -444,6 +494,38 @@ pub fn rich_self_test() -> bool {
         metrics: &["gpt-5"],
     })
     .is_ok_and(|value| value.models[0].metric_match == Some(0));
+    let policy_route = plan_route_policy(
+        "lowest-cost",
+        1,
+        4,
+        &[
+            PolicyRouteModel {
+                model: "slow",
+                input_cost: Some(20),
+                output_cost: None,
+                policy_latency: Some(2),
+                state_latency: None,
+                in_flight: 0,
+                rpm_limit: None,
+                rpm_used: 0,
+                tpm_limit: None,
+                tpm_used: 0,
+            },
+            PolicyRouteModel {
+                model: "cheap",
+                input_cost: Some(10),
+                output_cost: None,
+                policy_latency: Some(3),
+                state_latency: None,
+                in_flight: 0,
+                rpm_limit: None,
+                rpm_used: 0,
+                tpm_limit: None,
+                tpm_used: 0,
+            },
+        ],
+    )
+    .is_ok_and(|value| value.selected_index == Some(1) && value.ordered_indices == [1]);
     let fallback = model_fallback_chain("copilot", " codex ")
         .is_ok_and(|value| value == ["gpt-5.3-codex", "gpt-5.1-codex", "gpt-4o"]);
     let context_plan = plan_context_items(
@@ -479,7 +561,25 @@ pub fn rich_self_test() -> bool {
                 ]
         })
         && merge_catalog_ids(&catalog, &["B", "gamma", "gamma"]).is_ok_and(|value| value == [1]);
-    context && routes && policy && fallback && context_plan && catalog
+    let reasoning_models = [CatalogReasoningModel {
+        id: "gpt-5.6-luna",
+        aliases: &["luna"],
+        efforts: &["none", "low", "medium", "max"],
+        default_effort: Some("medium"),
+    }];
+    let reasoning = resolve_catalog_reasoning(&reasoning_models, Some("luna"), None, None)
+        .is_ok_and(|value| value.selected_effort.as_deref() == Some("medium"));
+    let fallback_plan = model_fallback_plan("copilot", &["codex", "gpt-5.3-codex"])
+        .is_ok_and(|value| value == ["gpt-5.3-codex", "gpt-5.1-codex", "gpt-4o"]);
+    context
+        && routes
+        && policy
+        && policy_route
+        && fallback
+        && fallback_plan
+        && context_plan
+        && catalog
+        && reasoning
 }
 
 #[cfg(test)]

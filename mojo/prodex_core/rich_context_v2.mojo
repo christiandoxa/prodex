@@ -17,7 +17,7 @@ from rich_types import (
 )
 
 
-comptime PRODEX_RICH_ABI_VERSION: Int64 = 5
+comptime PRODEX_RICH_ABI_VERSION: Int64 = 6
 comptime RICH_CONTEXT_MAX_LINES: Int64 = 65_536
 comptime RICH_CONTEXT_MAX_TEXT_BYTES: Int64 = 1_048_576
 comptime RICH_CONTEXT_STATUS_OK: Int64 = 0

@@ -108,16 +108,9 @@ pub(super) fn ensure_supported_effort(
     model: Option<&str>,
     effort: &str,
 ) -> anyhow::Result<()> {
-    let parsed = effort
-        .parse::<SubAgentReasoningEffort>()
-        .map_err(|_| anyhow::anyhow!("reasoning effort is unsupported"))?;
-    if canonical_sub_agent_efforts(provider, model).contains(&parsed) {
-        Ok(())
-    } else {
-        Err(anyhow::anyhow!(
-            "reasoning effort is unsupported for the selected model"
-        ))
-    }
+    prodex_provider_core::provider_model_reasoning_resolution(provider, model, Some(effort))
+        .map(|_| ())
+        .map_err(|error| anyhow::anyhow!(error.to_string()))
 }
 
 fn remembered_main_selection(
@@ -195,8 +188,11 @@ fn default_main_effort(
     provider: prodex_provider_core::ProviderId,
     model: Option<&str>,
 ) -> Option<String> {
-    prodex_provider_core::provider_catalog_entry(provider, model?)
-        .and_then(|entry| entry.default_reasoning_effort)
+    let resolution =
+        prodex_provider_core::provider_model_reasoning_resolution(provider, model, None)
+            .expect("provider model reasoning resolution failed");
+    resolution
+        .selected_reasoning_effort
         .and_then(|effort| match effort {
             prodex_provider_core::ProviderReasoningEffort::None => Some("none"),
             prodex_provider_core::ProviderReasoningEffort::Minimal => Some("minimal"),

@@ -4,6 +4,7 @@ from std.sys.info import align_of, size_of
 from rich_types import (
     ProdexRichContextRecord,
     ProdexRichContextResult,
+    ProdexRichCatalogReasoningResult,
     ProdexRichFallbackRecord,
     ProdexRichFallbackResult,
     ProdexRichIssue,
@@ -13,6 +14,8 @@ from rich_types import (
     ProdexRichPolicyInput,
     ProdexRichPolicyModel,
     ProdexRichPolicyResult,
+    ProdexRichPolicyRouteInput,
+    ProdexRichPolicyRouteResult,
     ProdexRichRouteInput,
     ProdexRichRouteRecord,
     ProdexRichRouteResult,
@@ -21,7 +24,7 @@ from rich_types import (
 )
 
 
-comptime PRODEX_RICH_ABI_VERSION: Int64 = 5
+comptime PRODEX_RICH_ABI_VERSION: Int64 = 6
 
 
 @export("prodex_mojo_rich_abi_version")
@@ -33,7 +36,7 @@ def prodex_mojo_rich_abi_version() abi("C") -> Int64:
 def prodex_mojo_rich_abi_layout(
     output: Pointer[mut=True, UInt64, _], output_count: Int64
 ) abi("C") -> Int64:
-    if output_count != 28:
+    if output_count != 34:
         return 1
     output[unsafe_offset=0] = UInt64(size_of[ProdexRichStringView]())
     output[unsafe_offset=1] = UInt64(align_of[ProdexRichStringView]())
@@ -63,4 +66,10 @@ def prodex_mojo_rich_abi_layout(
     output[unsafe_offset=25] = UInt64(align_of[ProdexRichPlanAction]())
     output[unsafe_offset=26] = UInt64(size_of[ProdexRichPlanResult]())
     output[unsafe_offset=27] = UInt64(align_of[ProdexRichPlanResult]())
+    output[unsafe_offset=28] = UInt64(size_of[ProdexRichCatalogReasoningResult]())
+    output[unsafe_offset=29] = UInt64(align_of[ProdexRichCatalogReasoningResult]())
+    output[unsafe_offset=30] = UInt64(size_of[ProdexRichPolicyRouteInput]())
+    output[unsafe_offset=31] = UInt64(align_of[ProdexRichPolicyRouteInput]())
+    output[unsafe_offset=32] = UInt64(size_of[ProdexRichPolicyRouteResult]())
+    output[unsafe_offset=33] = UInt64(align_of[ProdexRichPolicyRouteResult]())
     return 0

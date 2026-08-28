@@ -38,9 +38,10 @@ pub use bridge::{
 };
 pub use catalog::{
     PROVIDER_MODEL_CATALOG_HARD_LIMIT, ProviderCatalogEntry, ProviderCatalogFeatureFlags,
-    ProviderModelCatalogLimitError, ProviderModelChoice, merge_provider_model_catalog_json,
-    provider_catalog_entries, provider_catalog_entries_for, provider_catalog_entry,
-    provider_catalog_json, provider_model_catalog_json, provider_model_json,
+    ProviderModelCatalogLimitError, ProviderModelChoice, ProviderModelReasoningError,
+    ProviderModelReasoningResolution, merge_provider_model_catalog_json, provider_catalog_entries,
+    provider_catalog_entries_for, provider_catalog_entry, provider_catalog_json,
+    provider_model_catalog_json, provider_model_json, provider_model_reasoning_resolution,
     resolve_provider_model_choices,
 };
 pub use chat_tools_bridge::{

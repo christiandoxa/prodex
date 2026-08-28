@@ -1,6 +1,8 @@
 //! Side-effect-free gateway alias planning with model-aware request constraints.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
+#[cfg(not(feature = "mojo"))]
+use std::collections::BTreeSet;
 
 use prodex_provider_core::{
     ProviderEndpoint, ProviderId, ProviderOutputAdjustment, ProviderReasoningEffort,
@@ -397,6 +399,41 @@ fn normalize_combo_output_adjustment(candidates: &mut [RuntimeGatewayConstraintC
     }
 }
 
+#[cfg(feature = "mojo")]
+fn concrete_models<'a>(
+    provider: ProviderId,
+    endpoint: ProviderEndpoint,
+    mut configured: impl ExactSizeIterator<Item = &'a str>,
+) -> (Vec<String>, usize) {
+    let configured_count = configured.len();
+    let seed_limit = if endpoint == ProviderEndpoint::Embeddings {
+        1
+    } else {
+        RUNTIME_GATEWAY_CONSTRAINT_PLANNER_MAX_CANDIDATES
+    };
+    let seeds = configured
+        .by_ref()
+        .take(seed_limit)
+        .map(str::to_string)
+        .collect::<Vec<_>>();
+    let omitted = usize::from(configured_count > seeds.len());
+    let seed_views = seeds.iter().map(String::as_str).collect::<Vec<_>>();
+    if endpoint == ProviderEndpoint::Embeddings {
+        return (seeds, omitted);
+    }
+    let models = prodex_mojo_core::rich::model_fallback_plan(provider.label(), &seed_views)
+        .expect("Mojo provider fallback planning returned an invalid structured result");
+    let chain_truncated = models.len() > RUNTIME_GATEWAY_CONSTRAINT_PLANNER_MAX_CANDIDATES;
+    (
+        models
+            .into_iter()
+            .take(RUNTIME_GATEWAY_CONSTRAINT_PLANNER_MAX_CANDIDATES)
+            .collect(),
+        usize::from(omitted > 0 || chain_truncated),
+    )
+}
+
+#[cfg(not(feature = "mojo"))]
 fn concrete_models<'a>(
     provider: ProviderId,
     endpoint: ProviderEndpoint,
@@ -429,6 +466,7 @@ fn concrete_models<'a>(
     (models, 0)
 }
 
+#[cfg(not(feature = "mojo"))]
 fn append_concrete_models(
     seen: &mut BTreeSet<String>,
     models: &mut Vec<String>,

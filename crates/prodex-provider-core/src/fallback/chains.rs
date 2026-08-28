@@ -150,6 +150,26 @@ fn rich_model_fallback_parser_matches_rust_oracle_for_generated_cases() {
     }
 }
 
+#[cfg(all(test, feature = "mojo"))]
+#[test]
+fn rich_model_fallback_batch_matches_rust_oracle() {
+    let seeds = ["codex", "gpt-5.3-codex", "custom-model", " custom-model "];
+    let actual =
+        prodex_mojo_core::rich::model_fallback_plan(ProviderId::Copilot.label(), &seeds).unwrap();
+    let mut expected = Vec::new();
+    for seed in seeds {
+        for model in provider_model_fallback_chain_rust(ProviderId::Copilot, seed) {
+            if !expected
+                .iter()
+                .any(|existing: &String| existing.eq_ignore_ascii_case(&model))
+            {
+                expected.push(model);
+            }
+        }
+    }
+    assert_eq!(actual, expected);
+}
+
 #[cfg(any(not(feature = "mojo"), test))]
 fn non_empty_single(model: &str) -> Vec<String> {
     if model.is_empty() {

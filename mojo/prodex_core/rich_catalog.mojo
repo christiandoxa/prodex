@@ -1,11 +1,16 @@
 from std.memory import Pointer
 from rich_text import (
+    rich_copy_range,
     rich_trim_bounds,
     rich_view_ptr,
     rich_view_valid,
 )
-from rich_types import ProdexRichStringView
-comptime PRODEX_RICH_ABI_VERSION: Int64 = 5
+from rich_types import (
+    ProdexRichCatalogReasoningResult,
+    ProdexRichSlice,
+    ProdexRichStringView,
+)
+comptime PRODEX_RICH_ABI_VERSION: Int64 = 6
 comptime CATALOG_MAX_MODELS: Int64 = 1_024
 comptime CATALOG_MAX_INPUT_MODELS: Int64 = 65_536
 comptime CATALOG_MAX_IDENTIFIER_BYTES: Int64 = 4_096
@@ -16,6 +21,7 @@ comptime RICH_STATUS_INVALID: Int64 = 1
 comptime RICH_STATUS_UTF8: Int64 = 2
 comptime RICH_STATUS_CAPACITY: Int64 = 3
 comptime RICH_STATUS_ABI: Int64 = 4
+comptime RICH_ISSUE_EFFORT: Int64 = 5
 
 comptime CHOICE_PROVIDER_DEFAULT: Int64 = 0
 comptime CHOICE_CATALOG: Int64 = 1
@@ -209,6 +215,265 @@ def catalog_prepare(
     if alias_count > 0 and (aliases_address == 0 or alias_models_address == 0):
         return False
     return True
+
+
+def catalog_effort_equal(
+    left: ProdexRichStringView,
+    left_start: Int64,
+    left_end: Int64,
+    right: ProdexRichStringView,
+    right_start: Int64,
+    right_end: Int64,
+) -> Bool:
+    return catalog_view_equal_range(
+        left, left_start, left_end, right, right_start, right_end
+    )
+
+
+def catalog_effort_output_equal(
+    output: Pointer[mut=False, UInt8, _],
+    stored: ProdexRichSlice,
+    candidate: ProdexRichStringView,
+    candidate_start: Int64,
+    candidate_end: Int64,
+) -> Bool:
+    if stored.len != candidate_end - candidate_start:
+        return False
+    var candidate_ptr = rich_view_ptr(candidate)
+    for index in range(stored.len):
+        if not catalog_byte_equal_folded(
+            output[unsafe_offset=stored.offset + index],
+            candidate_ptr[unsafe_offset=candidate_start + index],
+        ):
+            return False
+    return True
+
+
+@export("prodex_mojo_rich_catalog_reasoning_v1")
+def prodex_mojo_rich_catalog_reasoning_v1(
+    abi_version: Int64,
+    model_ids_address: UInt,
+    model_count: Int64,
+    aliases_address: UInt,
+    alias_models_address: UInt,
+    alias_count: Int64,
+    efforts_address: UInt,
+    effort_models_address: UInt,
+    effort_count: Int64,
+    defaults_address: UInt,
+    requested_model_address: UInt,
+    requested_present: Int64,
+    fallback_model_address: UInt,
+    fallback_present: Int64,
+    requested_effort_address: UInt,
+    effort_present: Int64,
+    output_efforts_address: UInt,
+    effort_capacity: Int64,
+    output_address: UInt,
+    output_capacity: Int64,
+    result_address: UInt,
+) abi("C") -> Int64:
+    if result_address == 0:
+        return RICH_STATUS_INVALID
+    var result_ptr = Pointer[
+        mut=True, ProdexRichCatalogReasoningResult, MutUntrackedOrigin
+    ](unsafe_from_address=Int(result_address))
+    result_ptr[].abi_version = PRODEX_RICH_ABI_VERSION
+    result_ptr[].model_index = -1
+    result_ptr[].efforts_written = 0
+    result_ptr[].selected_effort = ProdexRichSlice(-1, 0)
+    result_ptr[].default_effort = ProdexRichSlice(-1, 0)
+    result_ptr[].output_written = 0
+    result_ptr[].issue_kind = 0
+    result_ptr[].issue_index = -1
+    result_ptr[].issue_offset = -1
+    result_ptr[].issue_length = 0
+    if abi_version != PRODEX_RICH_ABI_VERSION:
+        result_ptr[].issue_kind = RICH_STATUS_ABI
+        return RICH_STATUS_ABI
+    if (
+        requested_present < 0
+        or requested_present > 1
+        or fallback_present < 0
+        or fallback_present > 1
+        or effort_present < 0
+        or effort_present > 1
+        or effort_count < 0
+        or effort_count > CATALOG_MAX_INPUT_MODELS
+        or effort_capacity < 0
+        or output_capacity < 0
+        or not catalog_prepare(
+            model_ids_address,
+            model_count,
+            aliases_address,
+            alias_models_address,
+            alias_count,
+        )
+    ):
+        return RICH_STATUS_INVALID
+    if model_count > 0 and defaults_address == 0:
+        return RICH_STATUS_INVALID
+    if effort_count > 0 and (efforts_address == 0 or effort_models_address == 0):
+        return RICH_STATUS_INVALID
+    if effort_capacity > 0 and output_efforts_address == 0:
+        return RICH_STATUS_INVALID
+    if output_capacity > 0 and output_address == 0:
+        return RICH_STATUS_INVALID
+    if requested_present == 1 and requested_model_address == 0:
+        return RICH_STATUS_INVALID
+    if fallback_present == 1 and fallback_model_address == 0:
+        return RICH_STATUS_INVALID
+    if effort_present == 1 and requested_effort_address == 0:
+        return RICH_STATUS_INVALID
+
+    var model_ids = Pointer[
+        mut=False, ProdexRichStringView, ImmUntrackedOrigin
+    ](unsafe_from_address=Int(model_ids_address))
+    var aliases = Pointer[
+        mut=False, ProdexRichStringView, ImmUntrackedOrigin
+    ](unsafe_from_address=Int(aliases_address))
+    var alias_models = Pointer[mut=False, Int64, ImmUntrackedOrigin](
+        unsafe_from_address=Int(alias_models_address)
+    )
+    if not catalog_valid_views(
+        model_ids, model_count, aliases, alias_models, alias_count
+    ):
+        return RICH_STATUS_UTF8
+    var defaults = Pointer[
+        mut=False, ProdexRichStringView, ImmUntrackedOrigin
+    ](unsafe_from_address=Int(defaults_address))
+    for index in range(model_count):
+        if not rich_view_valid(defaults[unsafe_offset=index], CATALOG_MAX_QUERY_BYTES):
+            return RICH_STATUS_UTF8
+    var efforts = Pointer[
+        mut=False, ProdexRichStringView, ImmUntrackedOrigin
+    ](unsafe_from_address=Int(efforts_address))
+    var effort_models = Pointer[mut=False, Int64, ImmUntrackedOrigin](
+        unsafe_from_address=Int(effort_models_address)
+    )
+    for index in range(effort_count):
+        if not rich_view_valid(
+            efforts[unsafe_offset=index], CATALOG_MAX_QUERY_BYTES
+        ) or effort_models[unsafe_offset=index] < 0 or effort_models[unsafe_offset=index] >= model_count:
+            return RICH_STATUS_INVALID
+    var requested_model = ProdexRichStringView(0, 0)
+    if requested_present == 1:
+        requested_model = Pointer[
+            mut=False, ProdexRichStringView, ImmUntrackedOrigin
+        ](unsafe_from_address=Int(requested_model_address))[].copy()
+        if not rich_view_valid(requested_model, CATALOG_MAX_QUERY_BYTES):
+            return RICH_STATUS_UTF8
+    var fallback_model = ProdexRichStringView(0, 0)
+    if fallback_present == 1:
+        fallback_model = Pointer[
+            mut=False, ProdexRichStringView, ImmUntrackedOrigin
+        ](unsafe_from_address=Int(fallback_model_address))[].copy()
+        if not rich_view_valid(fallback_model, CATALOG_MAX_QUERY_BYTES):
+            return RICH_STATUS_UTF8
+    var requested_effort = ProdexRichStringView(0, 0)
+    if effort_present == 1:
+        requested_effort = Pointer[
+            mut=False, ProdexRichStringView, ImmUntrackedOrigin
+        ](unsafe_from_address=Int(requested_effort_address))[].copy()
+        if not rich_view_valid(requested_effort, CATALOG_MAX_QUERY_BYTES):
+            return RICH_STATUS_UTF8
+    var selected_index: Int64 = -1
+    if requested_present == 1:
+        selected_index = catalog_find(
+            model_ids, model_count, aliases, alias_models, alias_count, requested_model
+        )
+    if selected_index < 0 and fallback_present == 1:
+        selected_index = catalog_find(
+            model_ids, model_count, aliases, alias_models, alias_count, fallback_model
+        )
+    result_ptr[].model_index = selected_index
+    if selected_index < 0:
+        return RICH_STATUS_OK
+
+    var output_efforts = Pointer[
+        mut=True, ProdexRichSlice, MutUntrackedOrigin
+    ](unsafe_from_address=Int(output_efforts_address))
+    var output = Pointer[mut=True, UInt8, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    var first_effort = ProdexRichSlice(-1, 0)
+    var written: Int64 = result_ptr[].output_written
+    var default_effort = defaults[unsafe_offset=selected_index].copy()
+    var default_bounds = rich_trim_bounds(default_effort)
+    if default_bounds[1] > default_bounds[0]:
+        var copied_default = rich_copy_range(
+            rich_view_ptr(default_effort),
+            default_bounds[0],
+            default_bounds[1],
+            output,
+            output_capacity,
+            Pointer(to=written),
+            False,
+        )
+        if copied_default.len < 0:
+            return RICH_STATUS_CAPACITY
+        result_ptr[].default_effort = copied_default.copy()
+        result_ptr[].output_written = written
+    for index in range(effort_count):
+        if effort_models[unsafe_offset=index] != selected_index:
+            continue
+        var effort = efforts[unsafe_offset=index].copy()
+        var bounds = rich_trim_bounds(effort)
+        if bounds[1] <= bounds[0]:
+            continue
+        var duplicate = False
+        for written_index in range(result_ptr[].efforts_written):
+            if catalog_effort_output_equal(
+                output,
+                output_efforts[unsafe_offset=written_index],
+                effort,
+                bounds[0],
+                bounds[1],
+            ):
+                duplicate = True
+                break
+        if duplicate:
+            continue
+        if result_ptr[].efforts_written >= effort_capacity:
+            return RICH_STATUS_CAPACITY
+        var copied = rich_copy_range(
+            rich_view_ptr(effort),
+            bounds[0],
+            bounds[1],
+            output,
+            output_capacity,
+            Pointer(to=written),
+            False,
+        )
+        if copied.len < 0:
+            return RICH_STATUS_CAPACITY
+        result_ptr[].output_written = written
+        output_efforts[unsafe_offset=result_ptr[].efforts_written] = copied.copy()
+        result_ptr[].efforts_written += 1
+        if first_effort.offset < 0:
+            first_effort = copied.copy()
+        if effort_present == 1:
+            var requested_bounds = rich_trim_bounds(requested_effort)
+            if catalog_effort_equal(
+                requested_effort,
+                requested_bounds[0],
+                requested_bounds[1],
+                effort,
+                bounds[0],
+                bounds[1],
+            ):
+                result_ptr[].selected_effort = copied.copy()
+    if effort_present == 1 and result_ptr[].selected_effort.offset < 0:
+        var requested_bounds = rich_trim_bounds(requested_effort)
+        result_ptr[].issue_kind = RICH_ISSUE_EFFORT
+        result_ptr[].issue_offset = requested_bounds[0]
+        result_ptr[].issue_length = requested_bounds[1] - requested_bounds[0]
+        return RICH_STATUS_OK
+    if result_ptr[].default_effort.offset < 0:
+        result_ptr[].default_effort = first_effort.copy()
+    if effort_present == 0:
+        result_ptr[].selected_effort = result_ptr[].default_effort.copy()
+    return RICH_STATUS_OK
 
 
 @export("prodex_mojo_rich_catalog_resolve_v1")

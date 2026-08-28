@@ -10,6 +10,22 @@ pub struct CatalogModel<'a> {
     pub aliases: &'a [&'a str],
 }
 
+#[derive(Debug, Clone, Copy)]
+pub struct CatalogReasoningModel<'a> {
+    pub id: &'a str,
+    pub aliases: &'a [&'a str],
+    pub efforts: &'a [&'a str],
+    pub default_effort: Option<&'a str>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CatalogReasoningPlan {
+    pub model_index: Option<usize>,
+    pub supported_efforts: Vec<String>,
+    pub selected_effort: Option<String>,
+    pub default_effort: Option<String>,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CatalogChoice {
     ProviderDefault,
@@ -64,6 +80,29 @@ unsafe extern "C" {
         accepted_indices: u64,
         output_capacity: i64,
         output_count: u64,
+    ) -> i64;
+    fn prodex_mojo_rich_catalog_reasoning_v1(
+        abi_version: i64,
+        model_ids: u64,
+        model_count: i64,
+        aliases: u64,
+        alias_models: u64,
+        alias_count: i64,
+        efforts: u64,
+        effort_models: u64,
+        effort_count: i64,
+        defaults: u64,
+        requested_model: u64,
+        requested_present: i64,
+        fallback_model: u64,
+        fallback_present: i64,
+        requested_effort: u64,
+        effort_present: i64,
+        output_efforts: u64,
+        effort_capacity: i64,
+        output: u64,
+        output_capacity: i64,
+        result: u64,
     ) -> i64;
 }
 
@@ -129,6 +168,51 @@ fn status(status: i64) -> Result<(), MojoError> {
 
 fn count_address(value: &mut i64) -> u64 {
     mojo_mut_pointer_address(value)
+}
+
+fn reasoning_views(
+    models: &[CatalogReasoningModel<'_>],
+) -> Result<
+    (
+        CatalogViews,
+        Vec<RichStringView>,
+        Vec<i64>,
+        Vec<RichStringView>,
+    ),
+    MojoError,
+> {
+    let catalog = views(
+        &models
+            .iter()
+            .map(|model| CatalogModel {
+                id: model.id,
+                aliases: model.aliases,
+            })
+            .collect::<Vec<_>>(),
+    )?;
+    let effort_count = models
+        .iter()
+        .try_fold(0_usize, |count, model| {
+            count.checked_add(model.efforts.len())
+        })
+        .ok_or(MojoError::InvalidInput)?;
+    if effort_count > CATALOG_MAX_INPUT_MODELS {
+        return Err(MojoError::InvalidInput);
+    }
+    let mut efforts = Vec::with_capacity(effort_count);
+    let mut effort_models = Vec::with_capacity(effort_count);
+    let mut defaults = Vec::with_capacity(models.len());
+    for (model_index, model) in models.iter().enumerate() {
+        defaults.push(model.default_effort.map(view).unwrap_or_default());
+        for effort in model.efforts {
+            if effort.len() > CATALOG_MAX_IDENTIFIER_BYTES {
+                return Err(MojoError::InvalidInput);
+            }
+            efforts.push(view(effort));
+            effort_models.push(i64::try_from(model_index).map_err(|_| MojoError::InvalidInput)?);
+        }
+    }
+    Ok((catalog, efforts, effort_models, defaults))
 }
 
 pub fn resolve_catalog_model(
@@ -271,4 +355,122 @@ pub fn merge_catalog_ids(
                 .ok_or(MojoError::InvalidOutput)
         })
         .collect()
+}
+
+pub fn resolve_catalog_reasoning(
+    models: &[CatalogReasoningModel<'_>],
+    requested_model: Option<&str>,
+    fallback_model: Option<&str>,
+    requested_effort: Option<&str>,
+) -> Result<CatalogReasoningPlan, MojoError> {
+    ensure_rich_abi()?;
+    let (views, efforts, effort_models, defaults) = reasoning_views(models)?;
+    let output_capacity = effort_models.len().max(1);
+    let output_bytes = models
+        .iter()
+        .filter_map(|model| model.default_effort)
+        .chain(
+            models
+                .iter()
+                .flat_map(|model| model.efforts.iter().copied()),
+        )
+        .try_fold(0_usize, |total, effort| total.checked_add(effort.len()))
+        .ok_or(MojoError::InvalidInput)?
+        .max(1);
+    let requested_model = requested_model.map(view);
+    let fallback_model = fallback_model.map(view);
+    let requested_effort = requested_effort.map(view);
+    let mut output_efforts = vec![RichSlice::default(); output_capacity];
+    let mut output = vec![0_u8; output_bytes];
+    let mut result = RichCatalogReasoningResult::default();
+    let status = unsafe {
+        prodex_mojo_rich_catalog_reasoning_v1(
+            RICH_ABI_VERSION,
+            address(&views.model_ids),
+            i64::try_from(views.model_ids.len()).map_err(|_| MojoError::InvalidInput)?,
+            address(&views.aliases),
+            address(&views.alias_models),
+            i64::try_from(views.aliases.len()).map_err(|_| MojoError::InvalidInput)?,
+            address(&efforts),
+            address(&effort_models),
+            i64::try_from(efforts.len()).map_err(|_| MojoError::InvalidInput)?,
+            address(&defaults),
+            requested_model
+                .as_ref()
+                .map_or(0, |value| mojo_pointer_address(value as *const _)),
+            i64::from(requested_model.is_some()),
+            fallback_model
+                .as_ref()
+                .map_or(0, |value| mojo_pointer_address(value as *const _)),
+            i64::from(fallback_model.is_some()),
+            requested_effort
+                .as_ref()
+                .map_or(0, |value| mojo_pointer_address(value as *const _)),
+            i64::from(requested_effort.is_some()),
+            mojo_mut_pointer_address(output_efforts.as_mut_ptr()),
+            i64::try_from(output_efforts.len()).map_err(|_| MojoError::InvalidInput)?,
+            mojo_mut_pointer_address(output.as_mut_ptr()),
+            i64::try_from(output.len()).map_err(|_| MojoError::InvalidInput)?,
+            mojo_mut_pointer_address(&mut result),
+        )
+    };
+    if status != 0 {
+        return Err(status_error(status, 6, 0, 0, 0));
+    }
+    if result.issue_kind != 0 {
+        return Err(issue(
+            6,
+            result.issue_kind,
+            0,
+            result.issue_index,
+            result.issue_offset,
+            result.issue_length,
+        ));
+    }
+    if result.abi_version != RICH_ABI_VERSION
+        || result.efforts_written < 0
+        || result.efforts_written as usize > output_efforts.len()
+        || result.output_written < 0
+        || result.output_written as usize > output.len()
+    {
+        return Err(MojoError::InvalidOutput);
+    }
+    let model_index = match result.model_index {
+        -1 => None,
+        index if index >= 0 => Some(
+            usize::try_from(index)
+                .ok()
+                .filter(|index| *index < models.len())
+                .ok_or(MojoError::InvalidOutput)?,
+        ),
+        _ => return Err(MojoError::InvalidOutput),
+    };
+    let output = &output[..result.output_written as usize];
+    let supported_efforts = output_efforts[..result.efforts_written as usize]
+        .iter()
+        .map(|effort| {
+            Ok(std::str::from_utf8(slice(output, *effort)?)
+                .map_err(|_| MojoError::InvalidOutput)?
+                .to_string())
+        })
+        .collect::<Result<Vec<_>, MojoError>>()?;
+    let read_slice = |value: RichSlice| -> Result<Option<String>, MojoError> {
+        if value.offset < 0 {
+            if value.len != 0 {
+                return Err(MojoError::InvalidOutput);
+            }
+            return Ok(None);
+        }
+        Ok(Some(
+            std::str::from_utf8(slice(output, value)?)
+                .map_err(|_| MojoError::InvalidOutput)?
+                .to_string(),
+        ))
+    };
+    Ok(CatalogReasoningPlan {
+        model_index,
+        supported_efforts,
+        selected_effort: read_slice(result.selected_effort)?,
+        default_effort: read_slice(result.default_effort)?,
+    })
 }
