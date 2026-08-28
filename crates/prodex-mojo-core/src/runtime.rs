@@ -67,21 +67,62 @@ pub struct SmartContextPressureSnapshot {
     pub estimator_confidence: i64,
 }
 
-pub const RUNTIME_CANDIDATE_PLAN_FIELD_COUNT: usize = 22;
+pub const RUNTIME_CANDIDATE_PLAN_FIELD_COUNT: usize = 24;
 pub const RUNTIME_CANDIDATE_PLAN_MAX_COUNT: usize = 256;
+pub const RUNTIME_CANDIDATE_DECISION_FIELD_COUNT: usize = 5;
+
+pub const RUNTIME_CANDIDATE_AVAILABILITY_READY: i64 = 0;
+pub const RUNTIME_CANDIDATE_AVAILABILITY_QUOTA_EXHAUSTED: i64 = 1;
+pub const RUNTIME_CANDIDATE_AVAILABILITY_TRANSIENT_BACKOFF: i64 = 2;
+pub const RUNTIME_CANDIDATE_AVAILABILITY_AUTH_INVALID: i64 = 3;
+pub const RUNTIME_CANDIDATE_AVAILABILITY_UNKNOWN: i64 = 4;
+
+pub const RUNTIME_CANDIDATE_SKIP_NONE: i64 = 0;
+pub const RUNTIME_CANDIDATE_SKIP_AUTH_FAILURE: i64 = 1;
+pub const RUNTIME_CANDIDATE_SKIP_SELECTION_BACKOFF: i64 = 2;
+pub const RUNTIME_CANDIDATE_SKIP_QUOTA_EXHAUSTED: i64 = 3;
+pub const RUNTIME_CANDIDATE_SKIP_QUOTA_CRITICAL_FLOOR: i64 = 4;
+pub const RUNTIME_CANDIDATE_SKIP_INFLIGHT: i64 = 5;
+pub const RUNTIME_CANDIDATE_SKIP_EXCLUDED: i64 = 6;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RuntimeCandidateDecision {
+    pub eligible: bool,
+    pub availability: i64,
+    pub quota_guard_reason: i64,
+    pub ready_skip_reason: i64,
+    pub fallback_skip_reason: i64,
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RuntimeCandidatePlan {
     pub ready_indices: Vec<usize>,
     pub fallback_indices: Vec<usize>,
+    pub decisions: Vec<RuntimeCandidateDecision>,
+}
+
+#[repr(C)]
+#[derive(Debug, Clone, Copy)]
+struct RuntimeStringView {
+    ptr: u64,
+    len: u64,
 }
 
 pub fn candidate_plan_self_test() -> bool {
     let mut fields = vec![0_i64; RUNTIME_CANDIDATE_PLAN_FIELD_COUNT * 2];
     fields[1] = 1;
     fields[RUNTIME_CANDIDATE_PLAN_FIELD_COUNT + 16] = 1;
-    runtime_candidate_plan_batch(&fields, 0)
-        .is_ok_and(|plan| plan.ready_indices == [1, 0] && plan.fallback_indices == [1, 0])
+    let excluded = [0_i64, 0];
+    runtime_candidate_plan_batch(&fields, &excluded, 0, 3, 2).is_ok_and(|plan| {
+        plan.ready_indices == [1, 0]
+            && plan.fallback_indices == [1, 0]
+            && plan.decisions.iter().all(|decision| {
+                decision.eligible
+                    && decision.availability == RUNTIME_CANDIDATE_AVAILABILITY_READY
+                    && decision.ready_skip_reason == RUNTIME_CANDIDATE_SKIP_NONE
+                    && decision.fallback_skip_reason == RUNTIME_CANDIDATE_SKIP_NONE
+            })
+    })
 }
 
 pub fn smart_context_pressure_snapshot_self_test() -> bool {
@@ -178,12 +219,26 @@ unsafe extern "C" {
     ) -> i64;
     fn prodex_runtime_candidate_plan_batch(
         fields: *const i64,
+        excluded: *const i64,
+        decision_tags: *mut i64,
         ready_indices: *mut i64,
         ready_count: *mut i64,
         fallback_indices: *mut i64,
         fallback_count: *mut i64,
         count: i64,
         route_kind: i64,
+        inflight_soft_limit: i64,
+        responses_critical_floor_percent: i64,
+    ) -> i64;
+    fn prodex_runtime_prompt_cache_affinity_batch_v1(
+        profile_views: u64,
+        key_view: u64,
+        key_present: i64,
+        owner_view: u64,
+        owner_present: i64,
+        priorities: u64,
+        scores: u64,
+        count: i64,
     ) -> i64;
 }
 pub fn pressure_band_for_route(
@@ -509,7 +564,10 @@ pub fn smart_context_pressure_snapshot(
 
 pub fn runtime_candidate_plan_batch(
     fields: &[i64],
+    excluded: &[i64],
     route_kind: i64,
+    inflight_soft_limit: usize,
+    responses_critical_floor_percent: i64,
 ) -> Result<RuntimeCandidatePlan, crate::MojoError> {
     if !fields
         .len()
@@ -518,12 +576,18 @@ pub fn runtime_candidate_plan_batch(
         return Err(crate::MojoError::InvalidInput);
     }
     let count = fields.len() / RUNTIME_CANDIDATE_PLAN_FIELD_COUNT;
-    if count > RUNTIME_CANDIDATE_PLAN_MAX_COUNT {
+    if count > RUNTIME_CANDIDATE_PLAN_MAX_COUNT || excluded.len() != count {
         return Err(crate::MojoError::InvalidInput);
     }
     if !(0..=3).contains(&route_kind) {
         return Err(crate::MojoError::InvalidInput);
     }
+    if excluded.iter().any(|flag| !matches!(flag, 0 | 1)) {
+        return Err(crate::MojoError::InvalidInput);
+    }
+    let inflight_soft_limit =
+        i64::try_from(inflight_soft_limit).map_err(|_| crate::MojoError::InvalidInput)?;
+    let mut decision_tags = vec![0_i64; count * RUNTIME_CANDIDATE_DECISION_FIELD_COUNT];
     let mut ready_indices = vec![0_i64; count];
     let mut fallback_indices = vec![0_i64; count];
     let mut ready_count = 0_i64;
@@ -531,12 +595,16 @@ pub fn runtime_candidate_plan_batch(
     let status = unsafe {
         prodex_runtime_candidate_plan_batch(
             fields.as_ptr(),
+            excluded.as_ptr(),
+            decision_tags.as_mut_ptr(),
             ready_indices.as_mut_ptr(),
             &mut ready_count,
             fallback_indices.as_mut_ptr(),
             &mut fallback_count,
             i64::try_from(count).map_err(|_| crate::MojoError::InvalidInput)?,
             route_kind,
+            inflight_soft_limit,
+            responses_critical_floor_percent,
         )
     };
     if status != 0
@@ -551,12 +619,22 @@ pub fn runtime_candidate_plan_batch(
         .ok_or(crate::MojoError::InvalidOutput)?;
     let fallback_indices = runtime_candidate_plan_indices(&fallback_indices, fallback_count, count)
         .ok_or(crate::MojoError::InvalidOutput)?;
-    if fallback_indices.len() != count {
+    let decisions = runtime_candidate_decisions(&decision_tags, count)
+        .ok_or(crate::MojoError::InvalidOutput)?;
+    if fallback_indices.len()
+        != decisions
+            .iter()
+            .filter(|decision| decision.eligible)
+            .count()
+    {
         return Err(crate::MojoError::InvalidOutput);
     }
     let mut seen_ready = vec![false; count];
     for index in &ready_indices {
         if seen_ready[*index] {
+            return Err(crate::MojoError::InvalidOutput);
+        }
+        if !decisions[*index].eligible || fields[*index * RUNTIME_CANDIDATE_PLAN_FIELD_COUNT] != 0 {
             return Err(crate::MojoError::InvalidOutput);
         }
         seen_ready[*index] = true;
@@ -566,15 +644,112 @@ pub fn runtime_candidate_plan_batch(
         if seen_fallback[*index] {
             return Err(crate::MojoError::InvalidOutput);
         }
+        if !decisions[*index].eligible {
+            return Err(crate::MojoError::InvalidOutput);
+        }
         seen_fallback[*index] = true;
     }
-    if seen_fallback.iter().any(|value| !value) {
+    if seen_fallback
+        .iter()
+        .zip(&decisions)
+        .any(|(seen, decision)| *seen != decision.eligible)
+    {
         return Err(crate::MojoError::InvalidOutput);
     }
     Ok(RuntimeCandidatePlan {
         ready_indices,
         fallback_indices,
+        decisions,
     })
+}
+
+pub fn prompt_cache_affinity_batch(
+    prompt_cache_key: Option<&str>,
+    prompt_cache_owner_profile: Option<&str>,
+    profiles: &[&str],
+) -> Result<Vec<(u8, u64)>, crate::MojoError> {
+    if profiles.len() > RUNTIME_CANDIDATE_PLAN_MAX_COUNT {
+        return Err(crate::MojoError::InvalidInput);
+    }
+    if profiles.is_empty() {
+        return Ok(Vec::new());
+    }
+    let profile_views = profiles
+        .iter()
+        .map(|profile| RuntimeStringView {
+            ptr: profile.as_ptr() as usize as u64,
+            len: profile.len() as u64,
+        })
+        .collect::<Vec<_>>();
+    let key_view = prompt_cache_key.map(|value| RuntimeStringView {
+        ptr: value.as_ptr() as usize as u64,
+        len: u64::try_from(value.len()).unwrap_or(u64::MAX),
+    });
+    let owner_view = prompt_cache_owner_profile.map(|value| RuntimeStringView {
+        ptr: value.as_ptr() as usize as u64,
+        len: u64::try_from(value.len()).unwrap_or(u64::MAX),
+    });
+    let mut priorities = vec![0_i64; profiles.len()];
+    let mut scores = vec![0_u64; profiles.len()];
+    let status = unsafe {
+        prodex_runtime_prompt_cache_affinity_batch_v1(
+            profile_views.as_ptr() as usize as u64,
+            key_view
+                .as_ref()
+                .map_or(0, |view| view as *const RuntimeStringView as usize as u64),
+            i64::from(key_view.is_some()),
+            owner_view
+                .as_ref()
+                .map_or(0, |view| view as *const RuntimeStringView as usize as u64),
+            i64::from(owner_view.is_some()),
+            priorities.as_mut_ptr() as usize as u64,
+            scores.as_mut_ptr() as usize as u64,
+            i64::try_from(profiles.len()).map_err(|_| crate::MojoError::InvalidInput)?,
+        )
+    };
+    if status != 0 || priorities.iter().any(|priority| !matches!(priority, 0 | 1)) {
+        return Err(crate::MojoError::InvalidOutput);
+    }
+    Ok(priorities
+        .into_iter()
+        .zip(scores)
+        .map(|(priority, score)| (u8::try_from(priority).unwrap_or(u8::MAX), score))
+        .collect())
+}
+
+fn runtime_candidate_decisions(
+    tags: &[i64],
+    candidate_count: usize,
+) -> Option<Vec<RuntimeCandidateDecision>> {
+    (0..candidate_count)
+        .map(|index| {
+            let base = index * RUNTIME_CANDIDATE_DECISION_FIELD_COUNT;
+            let eligible = match tags[base] {
+                0 => false,
+                1 => true,
+                _ => return None,
+            };
+            (0..=RUNTIME_CANDIDATE_AVAILABILITY_UNKNOWN)
+                .contains(&tags[base + 1])
+                .then_some(())?;
+            (0..=RUNTIME_CANDIDATE_SKIP_EXCLUDED)
+                .contains(&tags[base + 2])
+                .then_some(())?;
+            (0..=RUNTIME_CANDIDATE_SKIP_EXCLUDED)
+                .contains(&tags[base + 3])
+                .then_some(())?;
+            (0..=RUNTIME_CANDIDATE_SKIP_EXCLUDED)
+                .contains(&tags[base + 4])
+                .then_some(())?;
+            Some(RuntimeCandidateDecision {
+                eligible,
+                availability: tags[base + 1],
+                quota_guard_reason: tags[base + 2],
+                ready_skip_reason: tags[base + 3],
+                fallback_skip_reason: tags[base + 4],
+            })
+        })
+        .collect()
 }
 
 fn runtime_candidate_plan_indices(

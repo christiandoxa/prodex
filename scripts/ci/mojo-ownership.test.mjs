@@ -41,7 +41,9 @@ test("ownership result is deterministic for an explicit inventory", () => {
 
 test("removing a baseline Rust source requires a reduction record", () => {
   const manifest = releaseManifest();
-  manifest.release_inventory.removed = [manifest.baseline_inventory[1].path];
+  manifest.release_inventory.removed = [
+    manifest.baseline_inventory.find((entry) => entry.path.endsWith("provider-core/src/constraints.rs")).path,
+  ];
   assert.throws(
     () => validateManifest(manifest, BASE_SHA, "WORKTREE"),
     /removed from the release manifest without a Rust reduction record/,
@@ -86,29 +88,38 @@ test("baseline remains frozen while the final inventory evolves", () => {
 });
 
 test("the frozen baseline records the Rust denominator and migration floor", () => {
-  const result = calculateOwnership(releaseManifest(), BASE_SHA, "WORKTREE");
-  assert.equal(result.baseline.rust_loc, 3231);
-  assert.equal(result.required_migration_volume_loc, 324);
-  assert.equal(result.migration_volume_loc, 4959);
+  const result = calculateOwnership(releaseManifest(), BASE_SHA, BASE_SHA);
+  assert.equal(result.baseline.rust_loc, 4727);
+  assert.equal(result.required_migration_volume_loc, 473);
+  assert.equal(result.baseline_remaining_rust_semantic_loc, 4727);
+  assert.equal(result.rust_semantic_loc_migrated, 0);
+  assert.equal(result.rust_semantic_migration_percent, 0);
+  assert.equal(result.baseline_mojo_percent, result.baseline.mojo_percent);
+  assert.equal(result.final_mojo_percent, result.final.mojo_percent);
   assert.equal(result.baseline_authoritative_operation_count, 14);
 });
 
 test("release inventory cannot hide baseline Rust semantic lines", () => {
   const manifest = releaseManifest();
-  manifest.release_inventory.overrides[manifest.baseline_inventory[0].path] = {
+  const entry = manifest.baseline_inventory.find((candidate) =>
+    candidate.path.endsWith("provider-core/src/constraints.rs"));
+  manifest.release_inventory.overrides[entry.path] = {
     classification: "SYSTEM_BOUNDARY",
   };
   assert.throws(
     () => validateManifest(manifest, BASE_SHA, "WORKTREE"),
-    /eligibility change is not backed by a semantic LOC reduction/,
+    /without a traceable reduction/,
   );
 });
 
 test("baseline Mojo ownership cannot regress", () => {
   const manifest = releaseManifest();
-  manifest.release_inventory.overrides["mojo/prodex_core/rich_catalog.mojo"] = {
-    classification: "SYSTEM_BOUNDARY",
-  };
+  for (const entry of manifest.baseline_inventory.filter((candidate) => candidate.language === "mojo")) {
+    manifest.release_inventory.overrides[entry.path] = {
+      ...(manifest.release_inventory.overrides[entry.path] ?? {}),
+      classification: "SYSTEM_BOUNDARY",
+    };
+  }
   assert.throws(
     () => calculateOwnership(manifest, BASE_SHA, "WORKTREE"),
     /Mojo semantic ownership regressed/,

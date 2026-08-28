@@ -7,10 +7,11 @@ mod capacity;
 #[cfg(feature = "mojo")]
 mod mojo;
 pub use capacity::{
-    RuntimeProxyLaneLimitOverrides, runtime_proxy_active_request_limit_default,
+    RuntimeProxyLaneLimitOverrides, runtime_probe_refresh_worker_count_default,
+    runtime_proxy_active_request_limit_default, runtime_proxy_async_worker_count_default,
     runtime_proxy_lane_limits_from_overrides, runtime_proxy_log_queue_capacity_default,
-    runtime_proxy_long_lived_queue_capacity_default,
-    runtime_websocket_dns_resolve_overflow_capacity_default,
+    runtime_proxy_long_lived_queue_capacity_default, runtime_proxy_long_lived_worker_count_default,
+    runtime_proxy_worker_count_default, runtime_websocket_dns_resolve_overflow_capacity_default,
     runtime_websocket_dns_resolve_queue_capacity_default,
     runtime_websocket_dns_resolve_worker_count_default,
     runtime_websocket_tcp_connect_overflow_capacity_default,
@@ -140,10 +141,14 @@ pub fn runtime_tuning_defaults(parallelism: usize) -> RuntimeTuningDefaults {
 #[cfg(any(not(feature = "mojo"), test))]
 fn runtime_tuning_defaults_rust(parallelism: usize) -> RuntimeTuningDefaults {
     RuntimeTuningDefaults {
-        worker_count: runtime_proxy_worker_count_default(parallelism),
-        long_lived_worker_count: runtime_proxy_long_lived_worker_count_default(parallelism),
-        probe_refresh_worker_count: runtime_probe_refresh_worker_count_default(parallelism),
-        async_worker_count: runtime_proxy_async_worker_count_default(parallelism),
+        worker_count: capacity::runtime_proxy_worker_count_default_rust(parallelism),
+        long_lived_worker_count: capacity::runtime_proxy_long_lived_worker_count_default_rust(
+            parallelism,
+        ),
+        probe_refresh_worker_count: capacity::runtime_probe_refresh_worker_count_default_rust(
+            parallelism,
+        ),
+        async_worker_count: capacity::runtime_proxy_async_worker_count_default_rust(parallelism),
         log_queue_capacity: capacity::runtime_proxy_log_queue_capacity_default_rust(parallelism),
         websocket_connect_worker_count: runtime_websocket_tcp_connect_worker_count_default(
             parallelism,
@@ -194,22 +199,6 @@ impl RuntimeTuningSnapshotInput {
             profile_inflight_hard_limit: input.profile_inflight_hard_limit,
         }
     }
-}
-
-pub fn runtime_proxy_worker_count_default(parallelism: usize) -> usize {
-    parallelism.clamp(4, 12)
-}
-
-pub fn runtime_proxy_long_lived_worker_count_default(parallelism: usize) -> usize {
-    parallelism.saturating_mul(2).clamp(8, 24)
-}
-
-pub fn runtime_probe_refresh_worker_count_default(parallelism: usize) -> usize {
-    parallelism.clamp(2, 4)
-}
-
-pub fn runtime_proxy_async_worker_count_default(parallelism: usize) -> usize {
-    parallelism.clamp(2, 4)
 }
 
 fn runtime_fault_counters() -> &'static Mutex<BTreeMap<String, RuntimeFaultBudget>> {

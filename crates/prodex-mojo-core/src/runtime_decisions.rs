@@ -60,6 +60,12 @@ pub struct SmartContextAdaptiveBudgetPlan {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SmartContextBudgetAdjustment {
+    pub max_inline_bytes: u64,
+    pub max_rehydrate_tokens: u64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SmartContextRewriteTelemetryInput {
     pub body_bytes_before: u64,
     pub body_bytes_after: u64,
@@ -257,6 +263,17 @@ unsafe extern "C" {
         max_inline_bytes: *mut u64,
         max_rehydrate_tokens: *mut u64,
         reason_bits: *mut u64,
+    ) -> i64;
+    fn prodex_smart_context_budget_adjustment_v1(
+        tier: i64,
+        mode: i64,
+        max_inline_bytes: u64,
+        max_rehydrate_tokens: u64,
+        decision: i64,
+        available_context_tokens: u64,
+        available_has_value: i64,
+        adjusted_inline_bytes: *mut u64,
+        adjusted_rehydrate_tokens: *mut u64,
     ) -> i64;
     fn prodex_smart_context_rewrite_telemetry_decision_v1(
         body_bytes_before_address: u64,
@@ -506,6 +523,45 @@ pub fn smart_context_adaptive_budget_plan(
         max_inline_bytes,
         max_rehydrate_tokens,
         reason_bits,
+    })
+}
+
+pub fn smart_context_budget_adjustment(
+    tier: i64,
+    mode: i64,
+    max_inline_bytes: u64,
+    max_rehydrate_tokens: u64,
+    decision: i64,
+    available_context_tokens: Option<u64>,
+) -> Result<SmartContextBudgetAdjustment, crate::MojoError> {
+    if !(0..=3).contains(&tier)
+        || !(SMART_CONTEXT_BUDGET_MODE_EXACT..=SMART_CONTEXT_BUDGET_MODE_MINIMAL).contains(&mode)
+        || !(SMART_CONTEXT_BUDGET_DECISION_NO_CHANGE..=SMART_CONTEXT_BUDGET_DECISION_TIGHTEN)
+            .contains(&decision)
+    {
+        return Err(crate::MojoError::InvalidInput);
+    }
+    let mut adjusted_inline_bytes = 0;
+    let mut adjusted_rehydrate_tokens = 0;
+    let status = unsafe {
+        prodex_smart_context_budget_adjustment_v1(
+            tier,
+            mode,
+            max_inline_bytes,
+            max_rehydrate_tokens,
+            decision,
+            available_context_tokens.unwrap_or_default(),
+            i64::from(available_context_tokens.is_some()),
+            &mut adjusted_inline_bytes,
+            &mut adjusted_rehydrate_tokens,
+        )
+    };
+    if status != 0 {
+        return Err(crate::MojoError::InvalidOutput);
+    }
+    Ok(SmartContextBudgetAdjustment {
+        max_inline_bytes: adjusted_inline_bytes,
+        max_rehydrate_tokens: adjusted_rehydrate_tokens,
     })
 }
 

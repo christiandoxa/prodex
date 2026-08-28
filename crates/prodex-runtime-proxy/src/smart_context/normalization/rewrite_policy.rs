@@ -216,6 +216,7 @@ pub(in crate::smart_context) fn smart_context_rewrite_body_ratio_percent(
     body_bytes_after.saturating_mul(100) / body_bytes_before
 }
 
+#[cfg(not(feature = "mojo"))]
 pub(in crate::smart_context) fn smart_context_relaxed_inline_budget(
     tier: SmartContextTokenBudgetTier,
     value: usize,
@@ -240,6 +241,7 @@ pub(in crate::smart_context) fn smart_context_relaxed_inline_budget(
     .max(value)
 }
 
+#[cfg(not(feature = "mojo"))]
 pub(in crate::smart_context) fn smart_context_relaxed_rehydrate_budget(value: u64) -> u64 {
     if value == 0 || value == u64::MAX {
         return value;
@@ -252,6 +254,7 @@ pub(in crate::smart_context) fn smart_context_relaxed_rehydrate_budget(value: u6
     .max(value)
 }
 
+#[cfg(not(feature = "mojo"))]
 pub(in crate::smart_context) fn smart_context_tightened_inline_budget(value: usize) -> usize {
     if value <= SMART_CONTEXT_REWRITE_BUDGET_TIGHTEN_MIN_INLINE_BYTES {
         return value;
@@ -265,6 +268,7 @@ pub(in crate::smart_context) fn smart_context_tightened_inline_budget(value: usi
     .min(value)
 }
 
+#[cfg(not(feature = "mojo"))]
 pub(in crate::smart_context) fn smart_context_tightened_rehydrate_budget(value: u64) -> u64 {
     if value <= SMART_CONTEXT_REWRITE_BUDGET_TIGHTEN_MIN_REHYDRATE_TOKENS {
         return value;
@@ -278,6 +282,7 @@ pub(in crate::smart_context) fn smart_context_tightened_rehydrate_budget(value: 
     .min(value)
 }
 
+#[cfg(not(feature = "mojo"))]
 pub(in crate::smart_context) fn smart_context_scale_usize_ceil(
     value: usize,
     numerator: u64,
@@ -287,6 +292,7 @@ pub(in crate::smart_context) fn smart_context_scale_usize_ceil(
     smart_context_u64_saturating_usize(smart_context_scale_u64_ceil(value, numerator, denominator))
 }
 
+#[cfg(not(feature = "mojo"))]
 pub(in crate::smart_context) fn smart_context_scale_usize_floor(
     value: usize,
     numerator: u64,
@@ -296,6 +302,7 @@ pub(in crate::smart_context) fn smart_context_scale_usize_floor(
     smart_context_u64_saturating_usize(smart_context_scale_u64_floor(value, numerator, denominator))
 }
 
+#[cfg(not(feature = "mojo"))]
 pub(in crate::smart_context) fn smart_context_scale_u64_ceil(
     value: u64,
     numerator: u64,
@@ -310,6 +317,7 @@ pub(in crate::smart_context) fn smart_context_scale_u64_ceil(
         / denominator
 }
 
+#[cfg(not(feature = "mojo"))]
 pub(in crate::smart_context) fn smart_context_scale_u64_floor(
     value: u64,
     numerator: u64,
