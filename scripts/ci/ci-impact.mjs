@@ -49,7 +49,8 @@ export function requiresRuntimeProxyBench(changedPaths) {
   }
   const paths = [...new Set([...changedPaths].map(normalizeChangedPath).filter(Boolean))];
   if (paths.length === 0) {
-    return true;
+    // A valid empty diff is a no-op; heavy CI still runs, so no runtime benchmark is needed.
+    return false;
   }
   return paths.some(
     (filePath) =>
