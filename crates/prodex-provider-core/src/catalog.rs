@@ -89,13 +89,13 @@ pub enum ProviderModelChoice {
 
 #[path = "catalog/reasoning.rs"]
 mod reasoning;
-#[cfg(test)]
+#[cfg(all(test, feature = "mojo"))]
 pub(super) use reasoning::provider_model_reasoning_resolution_rust;
 pub use reasoning::{
     ProviderModelReasoningError, ProviderModelReasoningResolution,
     provider_model_reasoning_resolution,
 };
-#[cfg(test)]
+#[cfg(all(test, feature = "mojo"))]
 pub(super) use reasoning::{reasoning_catalog_data, reasoning_effort_label};
 
 /// Builds the offline model picker from the canonical catalog plus local configuration.
