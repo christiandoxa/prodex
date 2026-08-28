@@ -13,6 +13,9 @@ fn no_ready_runtime_profiles_plan_formats_blocked_report() {
             email: None,
             plan_type: None,
             rate_limit: Some(prodex_quota::WindowPair {
+                allowed: None,
+                limit_reached: None,
+                extra: std::collections::BTreeMap::new(),
                 primary_window: Some(prodex_quota::UsageWindow {
                     used_percent: Some(100),
                     reset_at: Some(1_900_000_000),

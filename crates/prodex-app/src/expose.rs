@@ -61,6 +61,9 @@ pub(crate) fn handle_expose(args: ExposeArgs) -> Result<()> {
 }
 
 #[cfg(test)]
+#[path = "expose/cloudflared_tests.rs"]
+mod cloudflared_tests;
+#[cfg(test)]
 #[path = "expose/mcp_parallel_tests.rs"]
 mod mcp_parallel_tests;
 #[cfg(test)]

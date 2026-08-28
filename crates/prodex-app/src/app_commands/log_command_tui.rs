@@ -10,8 +10,8 @@ use super::{
 };
 use crate::app_commands::collect_recent_runtime_log_paths;
 use crate::app_commands::log_tui::{
-    LogTuiHeaderDetail, LogTuiInput, LogTuiState, LogTuiTerminal, log_tui_header_detail,
-    log_tui_header_next_refresh_at,
+    LogTuiHeaderDetail, LogTuiInput, LogTuiState, LogTuiTerminal, OutputThroughput,
+    log_tui_header_detail, log_tui_header_next_refresh_at,
 };
 use crate::app_commands::log_upstream::{
     latest_upstream_payload_event, stream_upstream_payload_events,
@@ -123,6 +123,7 @@ fn stream_token_usage_events_tui() -> Result<()> {
     let mut header_detail = log_tui_header_detail(header_profile.as_deref());
     let mut header_refresh_at =
         log_tui_header_next_refresh_at(header_detail.as_ref(), Instant::now());
+    let mut throughput = OutputThroughput::default();
 
     let mut runtime_paths =
         FollowedLogPaths::new(prodex_runtime_log_paths_in_dir(&runtime_proxy_log_dir()));
@@ -142,6 +143,7 @@ fn stream_token_usage_events_tui() -> Result<()> {
             &mut followed_session_logs,
             &mut runtime_paths,
             &mut session_paths,
+            &mut throughput,
         )?;
         update_log_stream_header(
             &items,
@@ -151,7 +153,15 @@ fn stream_token_usage_events_tui() -> Result<()> {
         );
 
         tui.terminal
-            .draw(|frame| render_log_stream_tui(frame, &items, &view, header_detail.as_ref()))
+            .draw(|frame| {
+                render_log_stream_tui(
+                    frame,
+                    &items,
+                    &view,
+                    header_detail.as_ref(),
+                    throughput.display_rate(Instant::now()),
+                )
+            })
             .context("failed to draw log stream TUI")?;
 
         if log_stream_tui_should_quit(&mut view)? {
@@ -304,6 +314,7 @@ fn collect_log_stream_items(
     followed_session_logs: &mut BTreeMap<PathBuf, FollowedLog>,
     runtime_paths: &mut FollowedLogPaths,
     session_paths: &mut FollowedLogPaths,
+    throughput: &mut OutputThroughput,
 ) -> Result<()> {
     let current_runtime_paths =
         runtime_paths.refresh(|| prodex_runtime_log_paths_in_dir(&runtime_proxy_log_dir()));
@@ -313,6 +324,10 @@ fn collect_log_stream_items(
             .entry(path.clone())
             .or_insert_with(|| FollowedLog::at_end(path));
         for event in collect_new_runtime_log_stream_items(path, state, true)? {
+            if let LogStreamItem::TokenUsage(token_usage) = &event {
+                throughput.observe_token_usage(path, token_usage, Instant::now());
+                throughput.finish(path, token_usage);
+            }
             push_log_stream_item(items, event);
         }
     }
@@ -409,8 +424,9 @@ fn render_log_stream_tui(
     items: &VecDeque<LogStreamItem>,
     state: &LogTuiState,
     header_detail: Option<&LogTuiHeaderDetail>,
+    throughput_rate: Option<f64>,
 ) {
-    render::render_log_stream_tui(frame, items, state, header_detail);
+    render::render_log_stream_tui(frame, items, state, header_detail, throughput_rate);
 }
 
 #[cfg(test)]

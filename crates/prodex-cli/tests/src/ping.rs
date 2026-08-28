@@ -9,6 +9,7 @@ fn ping_openai_command_parses() {
         "--base-url",
         "http://127.0.0.1:9/backend-api",
         "--no-proxy",
+        "--json",
     ])
     .expect("ping openai should parse");
 
@@ -20,4 +21,5 @@ fn ping_openai_command_parses() {
         Some("http://127.0.0.1:9/backend-api")
     );
     assert!(args.no_proxy);
+    assert!(args.json);
 }

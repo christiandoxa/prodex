@@ -106,6 +106,13 @@ pub fn info_token_usage_event_from_line(line: &str) -> Option<InfoTokenUsageEven
             .get("reasoning_tokens")
             .and_then(|value| value.parse::<u64>().ok())
             .unwrap_or_default(),
+        generation_ms: fields
+            .get("generation_ms")
+            .and_then(|value| value.parse::<u64>().ok()),
+        output_tokens_per_second: fields
+            .get("output_tokens_per_second")
+            .and_then(|value| value.parse::<f64>().ok())
+            .filter(|value| value.is_finite() && *value >= 0.0),
     })
 }
 

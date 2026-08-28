@@ -88,6 +88,9 @@ fn quota_window_pair_readiness_matches_rust_oracle() {
         (Some(101), Some(0), false),
     ] {
         let pair = WindowPair {
+            allowed: None,
+            limit_reached: None,
+            extra: std::collections::BTreeMap::new(),
             primary_window: first.map(|used_percent| UsageWindow {
                 used_percent: Some(used_percent),
                 reset_at: None,

@@ -56,7 +56,7 @@ fn s_pty_renders_presidio_tui() {
 
     let run = run_prodex_with_pty_until_prompt(
         &fixture,
-        &["s", "--skip-quota-check", "exec", "hello"],
+        &["s", "--skip-quota-check"],
         &[("PRODEX_PRESIDIO_AUTO_START", "0")],
         "Use Presidio for data safety?",
     );

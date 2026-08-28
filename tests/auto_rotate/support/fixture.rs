@@ -96,6 +96,19 @@ fi
 if [ "$1" != "app-server" ] && [ -n "$TEST_CODEX_STDIN_LOG" ]; then
   cat > "$TEST_CODEX_STDIN_LOG"
 fi
+is_json_ping=0
+for arg in "$@"; do
+  if [ "$arg" = "--json" ]; then
+    is_json_ping=1
+  fi
+done
+if [ "$is_json_ping" = "1" ]; then
+  printf '%s\n' '{"type":"thread.started","thread_id":"diagnostic"}'
+  printf '%s\n' '{"type":"turn.started"}'
+  printf '%s\n' '{"type":"item.completed","item":{"type":"agent_message","text":"PONG"}}'
+  printf '%s\n' '{"type":"turn.completed","usage":{"input_tokens":1,"output_tokens":1}}'
+  exit 0
+fi
 if [ -n "$TEST_LONG_RUNNING_RUN" ]; then
   sleep "$TEST_LONG_RUNNING_RUN"
 fi
@@ -147,16 +160,25 @@ setlocal EnableExtensions
 if defined TEST_CODEX_LOG_APPEND >> "%TEST_CODEX_LOG_APPEND%" echo %CODEX_HOME%
 set "prodex_first_arg=%~1"
 set "prodex_with_api_key="
+set "prodex_json="
 if /I not "%prodex_first_arg%"=="app-server" if defined TEST_CODEX_ARGS_LOG if not defined TEST_CODEX_ARGS_LOG_APPEND type nul > "%TEST_CODEX_ARGS_LOG%"
 :prodex_args
 if "%~1"=="" goto prodex_stdin
 if /I not "%prodex_first_arg%"=="app-server" if defined TEST_CODEX_ARGS_LOG >> "%TEST_CODEX_ARGS_LOG%" echo %~1
 if /I "%~1"=="--with-api-key" set "prodex_with_api_key=1"
+if /I "%~1"=="--json" set "prodex_json=1"
 shift
 goto prodex_args
 :prodex_stdin
 if /I not "%prodex_first_arg%"=="app-server" if defined TEST_CODEX_STDIN_LOG more > "%TEST_CODEX_STDIN_LOG%"
 if defined TEST_LONG_RUNNING_RUN powershell.exe -NoProfile -NonInteractive -Command "Start-Sleep -Seconds %TEST_LONG_RUNNING_RUN%"
+if defined prodex_json (
+  echo {"type":"thread.started","thread_id":"diagnostic"}
+  echo {"type":"turn.started"}
+  echo {"type":"item.completed","item":{"type":"agent_message","text":"PONG"}}
+  echo {"type":"turn.completed","usage":{"input_tokens":1,"output_tokens":1}}
+  exit /b 0
+)
 if /I "%prodex_first_arg%"=="login" goto prodex_login
 goto prodex_session
 :prodex_login

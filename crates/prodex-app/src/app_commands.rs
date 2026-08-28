@@ -17,6 +17,7 @@ mod info;
 mod info_handler;
 mod log;
 mod log_format;
+mod log_throughput;
 mod log_tui;
 mod log_upstream;
 mod log_upstream_payload;
@@ -70,7 +71,8 @@ pub(super) fn handle_super(mut args: SuperArgs) -> Result<()> {
     args.validate_urls().map_err(anyhow::Error::msg)?;
     super_prompt::reject_sub_agent_recursion_reenable(&args)?;
     runtime_launch::resume_repair::repair_super_resume_session_metadata(&args)?;
-    let interactive = super_prompt::super_prompt_is_interactive();
+    let interactive = super_prompt::super_prompt_is_interactive()
+        && !prodex_runtime_launch::is_codex_exec_invocation(&args.codex_args);
     let (use_presidio, _main_agent, sub_agent) = resolve_super_launch_decisions_with_prompts(
         &mut args,
         interactive,

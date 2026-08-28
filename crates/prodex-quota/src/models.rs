@@ -292,17 +292,38 @@ pub fn scale_quota_pressure_for_plan(pressure: i64, scale_bps: i64) -> i64 {
         .unwrap_or(i64::MAX)
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct WindowPair {
+    /// Explicit backend admission state. `None` means unavailable, not denied.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub allowed: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub limit_reached: Option<bool>,
     pub primary_window: Option<UsageWindow>,
     pub secondary_window: Option<UsageWindow>,
+    /// Preserve future fields from the provider's rate-limit object.
+    #[serde(flatten)]
+    pub extra: BTreeMap<String, serde_json::Value>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AdditionalRateLimit {
+    /// Optional future/backend identifier. The pinned Codex 0.150.1 API does not provide one
+    /// for additional details, so Prodex never derives routing semantics from this field.
+    #[serde(default, alias = "limitId", skip_serializing_if = "Option::is_none")]
+    pub limit_id: Option<String>,
     pub limit_name: Option<String>,
     pub metered_feature: Option<String>,
+    #[serde(default, deserialize_with = "deserialize_null_default")]
     pub rate_limit: WindowPair,
+    /// Exact backend admission state when the usage endpoint provides it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub allowed: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub limit_reached: Option<bool>,
+    /// Retain fields introduced by a newer usage endpoint without making them routing authority.
+    #[serde(flatten)]
+    pub extra: BTreeMap<String, serde_json::Value>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

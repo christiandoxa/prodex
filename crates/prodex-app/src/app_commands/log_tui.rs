@@ -1,3 +1,4 @@
+pub(super) use super::log_throughput::{OutputThroughput, format_output_tokens_per_second};
 use crate::{
     AppPaths, AppState, AppStateIoExt, LiveQuotaWatchRuntimeUsageCache,
     RuntimeProfileUsageSnapshot, load_live_quota_watch_runtime_usage_cache,
@@ -13,6 +14,7 @@ use terminal_ui::AlternateScreenTerminal;
 
 const LOG_TUI_SHORT_RESET_TIME_FORMAT: &str = "%H:%M";
 const LOG_TUI_RESET_TIME_FORMAT: &str = "%m-%d %H:%M";
+pub(super) const LOG_TUI_TITLE: &str = "Prodex Log";
 
 pub(super) type LogTuiTerminal = AlternateScreenTerminal<io::Stdout>;
 
@@ -34,6 +36,36 @@ pub(super) struct LogTuiHeaderDetail {
     profile: String,
     quota: Option<LogTuiQuotaDetail>,
     refresh_interval: Duration,
+}
+
+pub(super) fn render_log_header(
+    title: &str,
+    count: &str,
+    detail: Option<&LogTuiHeaderDetail>,
+    throughput_rate: Option<f64>,
+    width: usize,
+) -> String {
+    let inner_width = width.saturating_sub(2);
+    let throughput = format_output_tokens_per_second(throughput_rate);
+    let throughput_width = terminal_ui::text_width(&throughput);
+    if inner_width <= throughput_width {
+        return terminal_ui::fit_cell(&throughput, inner_width);
+    }
+
+    let left_width = inner_width.saturating_sub(throughput_width + 2);
+    let prefix = format!("{title}  {count}");
+    let left = if terminal_ui::text_width(&prefix) <= left_width {
+        let detail_width = left_width.saturating_sub(terminal_ui::text_width(&prefix) + 2);
+        if let Some(detail) = detail.filter(|_| detail_width > 0) {
+            format!("{prefix}  {}", detail.render(detail_width))
+        } else {
+            prefix
+        }
+    } else {
+        terminal_ui::fit_cell(title, left_width)
+    };
+    let gap = inner_width.saturating_sub(terminal_ui::text_width(&left) + throughput_width);
+    format!("{left}{}{}", " ".repeat(gap), throughput)
 }
 
 #[derive(Debug, Clone)]
@@ -397,6 +429,35 @@ mod tests {
     }
 
     #[test]
+    fn human_log_modes_share_the_compact_title() {
+        assert_eq!(LOG_TUI_TITLE, "Prodex Log");
+    }
+
+    #[test]
+    fn log_header_keeps_throughput_at_the_right_edge() {
+        let detail = LogTuiHeaderDetail::profile_only("main".to_string(), Duration::from_secs(1));
+        let header = render_log_header(
+            LOG_TUI_TITLE,
+            "200 event(s)",
+            Some(&detail),
+            Some(100.0),
+            80,
+        );
+
+        assert_eq!(terminal_ui::text_width(&header), 78);
+        assert!(header.ends_with("100 t/s"));
+        assert!(header.starts_with(LOG_TUI_TITLE));
+    }
+
+    #[test]
+    fn narrow_log_header_preserves_title_and_idle_marker() {
+        let header = render_log_header(LOG_TUI_TITLE, "200 event(s)", None, None, 30);
+
+        assert!(header.contains(LOG_TUI_TITLE));
+        assert!(header.ends_with("— t/s"));
+    }
+
+    #[test]
     fn maps_scroll_and_search_keys() {
         let mut state = LogTuiState::default();
 
@@ -474,6 +535,22 @@ mod tests {
             detail.render(80),
             "main  5h unavailable  weekly 65% reset -"
         );
+    }
+
+    #[test]
+    fn header_detail_right_aligns_output_throughput() {
+        let detail = LogTuiHeaderDetail::profile_only("main".to_string(), Duration::from_secs(1));
+        let rendered = render_log_header(
+            LOG_TUI_TITLE,
+            "200 event(s)",
+            Some(&detail),
+            Some(100.0),
+            40,
+        );
+
+        assert_eq!(terminal_ui::text_width(&rendered), 38);
+        assert!(rendered.ends_with("100 t/s"));
+        assert!(rendered.starts_with(LOG_TUI_TITLE));
     }
 
     #[test]

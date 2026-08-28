@@ -34,7 +34,7 @@ pub struct InfoTokenUsageCounts {
     pub reasoning_tokens: u64,
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize)]
+#[derive(Debug, Clone, Default, PartialEq, serde::Serialize)]
 pub struct InfoTokenUsageEvent {
     pub timestamp: String,
     pub request: Option<u64>,
@@ -45,6 +45,10 @@ pub struct InfoTokenUsageEvent {
     pub cached_input_tokens: u64,
     pub output_tokens: u64,
     pub reasoning_tokens: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub generation_ms: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub output_tokens_per_second: Option<f64>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
