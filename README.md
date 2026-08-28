@@ -484,7 +484,7 @@ waiting for stdin:
 prodex s expose --model gpt-5.6-luna -c 'model_reasoning_effort="max"'
 ```
 
-After a real public `server/discover`/initialize and `tools/list` probe succeeds,
+After public `initialize` and `tools/list` probes succeed,
 Prodex prints one URL ending in `/mcp`. Paste it into:
 
 ```text

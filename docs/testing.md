@@ -512,8 +512,8 @@ handles, secure stdin task transport, model/effort inheritance, bounded
 events/results, three concurrent workspaces, and child-tree cancellation.
 
 Live validation is separate and must be reported honestly: with an installed
-`cloudflared`, run `prodex s expose`, perform MCP `server/discover` or
-`initialize`, `tools/list`, and a safe local run through the public URL, then
+`cloudflared`, run `prodex s expose`, perform MCP `initialize`, `tools/list`,
+and a safe local run through the public URL, then
 stop the process and confirm revocation. Interactive ChatGPT Developer Mode
 testing is optional environment evidence; MCP Inspector or an equivalent
 protocol client does not prove the ChatGPT UI path was executed.
