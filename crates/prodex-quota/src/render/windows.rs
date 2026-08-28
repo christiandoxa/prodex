@@ -62,6 +62,13 @@ pub fn usage_has_spark_limit(usage: &UsageResponse) -> bool {
         .any(additional_rate_limit_is_spark)
 }
 
+/// Checks only explicit backend admission state plus the bucket's own windows.
+pub fn additional_rate_limit_is_usable(additional: &AdditionalRateLimit) -> bool {
+    additional.allowed != Some(false)
+        && additional.limit_reached != Some(true)
+        && window_pair_has_ready_limit(&additional.rate_limit)
+}
+
 pub fn spark_window_snapshots_at(
     usage: &UsageResponse,
     now: i64,
@@ -100,6 +107,9 @@ fn additional_rate_limit_is_spark(additional: &AdditionalRateLimit) -> bool {
 }
 
 pub fn window_pair_has_ready_limit(pair: &WindowPair) -> bool {
+    if pair.allowed == Some(false) || pair.limit_reached == Some(true) {
+        return false;
+    }
     let first_used_percent = find_main_window(pair, "5h").and_then(|window| window.used_percent);
     let second_used_percent =
         find_main_window(pair, "weekly").and_then(|window| window.used_percent);
@@ -134,7 +144,10 @@ pub fn openai_quota_runtime_window_pair(usage: &UsageResponse) -> Option<&Window
     let spark = usage
         .additional_rate_limits
         .iter()
-        .find(|additional| additional_rate_limit_is_spark(additional))
+        .find(|additional| {
+            additional_rate_limit_is_spark(additional)
+                && additional_rate_limit_is_usable(additional)
+        })
         .map(|additional| &additional.rate_limit);
     if spark.is_some_and(window_pair_has_ready_limit) {
         return spark;
@@ -156,11 +169,9 @@ fn openai_quota_has_ready_runtime_limit(usage: &UsageResponse) -> bool {
         return true;
     }
 
-    usage
-        .additional_rate_limits
-        .iter()
-        .find(|additional| additional_rate_limit_is_spark(additional))
-        .is_some_and(|additional| window_pair_has_ready_limit(&additional.rate_limit))
+    usage.additional_rate_limits.iter().any(|additional| {
+        additional_rate_limit_is_spark(additional) && additional_rate_limit_is_usable(additional)
+    })
 }
 
 pub fn quota_window_summary(usage: &UsageResponse, label: &str) -> RuntimeQuotaWindowSummary {
@@ -448,7 +459,8 @@ pub fn collect_blocked_limits(
             let label = additional
                 .limit_name
                 .as_deref()
-                .or(additional.metered_feature.as_deref());
+                .or(additional.metered_feature.as_deref())
+                .or(additional.limit_id.as_deref());
             push_blocked_window(
                 &mut blocked,
                 label,

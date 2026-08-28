@@ -188,6 +188,7 @@ pub(crate) fn command_output_with_timeout(
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
     configure_child_process_group(command, true);
+    configure_child_parent_death(command);
     let mut child = command
         .spawn()
         .with_context(|| format!("failed to start {label}"))?;

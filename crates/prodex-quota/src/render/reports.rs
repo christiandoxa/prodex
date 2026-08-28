@@ -307,6 +307,7 @@ fn format_openai_additional_limit_summary(additional: &AdditionalRateLimit) -> O
         .limit_name
         .as_deref()
         .or(additional.metered_feature.as_deref())
+        .or(additional.limit_id.as_deref())
         .unwrap_or("Additional");
     let main = format_window_pair_compact(&additional.rate_limit);
     if main == "-" {

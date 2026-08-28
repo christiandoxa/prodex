@@ -4,23 +4,31 @@ use super::mcp::{
     verify_public_mcp,
 };
 use super::runtime::{
-    ExposeHttpServer, ExposePty, ExposeShared, cloudflared_command, expose_access_url,
-    expose_public_host, start_cloudflared_tunnel,
+    CloudflaredTransport, ExposeHttpServer, ExposePty, ExposeShared, cloudflared_command,
+    expose_access_url, expose_public_host, start_cloudflared_tunnel,
 };
 use super::session::{ExposeSessionStore, expose_random_token};
 use crate::ExposeArgs;
+use crate::app_state::AppStateIoExt;
 use crate::print_launch_status;
 use anyhow::{Context, bail};
 use prodex_cli::SuperArgs;
 use std::collections::BTreeSet;
 use std::env;
 use std::io::{self, IsTerminal};
+use std::net::IpAddr;
 use std::net::TcpListener;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
-use terminal_ui::print_panel;
+use terminal_ui::{print_panel, print_stderr_line, print_stderr_prompt};
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(super) enum ExposeEndpointMode {
+    QuickTunnel,
+    ExistingCloudflareTunnel { hostname: String, origin_port: u16 },
+}
 
 pub(super) fn handle_super_expose(mut args: ExposeArgs) -> anyhow::Result<()> {
     let mut super_args = args
@@ -40,16 +48,20 @@ pub(super) fn handle_super_expose(mut args: ExposeArgs) -> anyhow::Result<()> {
     let workspace_name = expose_display_name(None, &workspace_root)?;
     let display_name = expose_display_name(args.name.as_deref(), &workspace_root)?;
     print_super_expose_configuration(&super_args, &workspace_name)?;
-    ensure_cloudflared_available()?;
+    let endpoint = select_expose_endpoint(interactive)?;
+    confirm_expose_start(interactive)?;
+    remember_expose_model_preference(&super_args)?;
+    if matches!(endpoint, ExposeEndpointMode::QuickTunnel) {
+        ensure_cloudflared_available()?;
+    }
     #[cfg(unix)]
     let _sigint = crate::InteractiveSigintGuard::install()
         .context("failed to install expose signal handler")?;
     let bootstrap = zeroize::Zeroizing::new(expose_random_token()?);
     let capability = zeroize::Zeroizing::new(expose_random_token()?);
     let instance_id = expose_instance_id()?;
+    let listener = bind_expose_listener(&endpoint)?;
     let pty = ExposePty::spawn_in_cwd(&args, Some(&workspace_root))?;
-    let listener =
-        TcpListener::bind("127.0.0.1:0").context("failed to bind expose server on 127.0.0.1:0")?;
     let listen_addr = listener
         .local_addr()
         .context("failed to inspect expose listen address")?;
@@ -95,44 +107,66 @@ pub(super) fn handle_super_expose(mut args: ExposeArgs) -> anyhow::Result<()> {
         &format!("http://{listen_addr}"),
         &bootstrap,
     ));
-    let mut tunnel = match start_cloudflared_tunnel(&format!("http://{listen_addr}")) {
-        Ok(tunnel) => tunnel,
-        Err(error) => {
-            cleanup_super_expose(&shared, &mcp, &mut http, None);
-            return Err(error);
+    let mut tunnel = None;
+    let (public_origin, public_host) = match &endpoint {
+        ExposeEndpointMode::QuickTunnel => {
+            let mut quick_tunnel = match start_cloudflared_tunnel(&format!("http://{listen_addr}"))
+            {
+                Ok(tunnel) => tunnel,
+                Err(error) => {
+                    cleanup_super_expose(&shared, &mcp, &mut http, None);
+                    return Err(error);
+                }
+            };
+            if let Some(failure) = quick_tunnel.startup_failure.take() {
+                cleanup_super_expose(&shared, &mcp, &mut http, Some(&mut quick_tunnel));
+                return Err(anyhow::anyhow!(failure));
+            }
+            if quick_tunnel.url.is_none() {
+                let error = cloudflared_start_failure(&mut quick_tunnel);
+                cleanup_super_expose(&shared, &mcp, &mut http, Some(&mut quick_tunnel));
+                return Err(error);
+            }
+            if let Some(transport) = quick_tunnel.effective_transport {
+                let label = match transport {
+                    CloudflaredTransport::Auto => "auto",
+                    CloudflaredTransport::Quic => "QUIC",
+                    CloudflaredTransport::Http2 => "HTTP/2",
+                };
+                print_launch_status(&format!("Cloudflare {label} transport connected."));
+            }
+            print_launch_status("Cloudflare Quick Tunnel allocated.");
+            let Some(origin) = quick_tunnel.url.clone() else {
+                let error =
+                    anyhow::anyhow!("Cloudflare Quick Tunnel did not report a public hostname");
+                cleanup_super_expose(&shared, &mcp, &mut http, Some(&mut quick_tunnel));
+                return Err(error);
+            };
+            let Some(host) = expose_public_host(&origin) else {
+                let error = anyhow::anyhow!("Cloudflare Quick Tunnel reported an invalid hostname");
+                cleanup_super_expose(&shared, &mcp, &mut http, Some(&mut quick_tunnel));
+                return Err(error);
+            };
+            tunnel = Some(quick_tunnel);
+            (origin, host)
         }
-    };
-    if tunnel.url.is_none() {
-        let error = cloudflared_start_failure(&mut tunnel);
-        cleanup_super_expose(&shared, &mcp, &mut http, Some(&mut tunnel));
-        return Err(error);
-    }
-    print_launch_status("Cloudflare Quick Tunnel allocated.");
-    let tunnel_origin = match tunnel.url.as_deref() {
-        Some(url) => url.to_string(),
-        None => {
-            let error = cloudflared_start_failure(&mut tunnel);
-            cleanup_super_expose(&shared, &mcp, &mut http, Some(&mut tunnel));
-            return Err(error);
+        ExposeEndpointMode::ExistingCloudflareTunnel { hostname, .. } => {
+            print_launch_status("Using existing Cloudflare Tunnel hostname.");
+            (format!("https://{hostname}"), hostname.clone())
         }
-    };
-    let Some(public_host) = expose_public_host(&tunnel_origin) else {
-        let error = anyhow::anyhow!("Cloudflare Quick Tunnel reported an invalid hostname");
-        cleanup_super_expose(&shared, &mcp, &mut http, Some(&mut tunnel));
-        return Err(error);
     };
     shared.allow_host(public_host.clone());
     shared.allow_mcp_only_host(public_host);
-    let public_url = mcp_public_url(&tunnel_origin, &capability);
+    let public_url = mcp_public_url(&public_origin, &capability);
     print_launch_status("waiting for public MCP readiness...");
     if let Err(error) = verify_public_mcp(&public_url) {
-        cleanup_super_expose(&shared, &mcp, &mut http, Some(&mut tunnel));
+        cleanup_super_expose(&shared, &mcp, &mut http, tunnel.as_mut());
         return Err(error);
     }
     print_launch_status("Public MCP endpoint ready.");
     #[cfg(unix)]
     if crate::InteractiveSigintGuard::count() > 0 {
-        cleanup_super_expose(&shared, &mcp, &mut http, Some(&mut tunnel));
+        cleanup_super_expose(&shared, &mcp, &mut http, tunnel.as_mut());
         return Ok(());
     }
     print_super_expose_status(
@@ -142,6 +176,7 @@ pub(super) fn handle_super_expose(mut args: ExposeArgs) -> anyhow::Result<()> {
         &workspace_name,
         &display_name,
         &mcp,
+        &endpoint,
     )?;
     drop(local_url);
     drop(public_url);
@@ -152,17 +187,151 @@ pub(super) fn handle_super_expose(mut args: ExposeArgs) -> anyhow::Result<()> {
         if crate::InteractiveSigintGuard::count() > 0 {
             break;
         }
-        if tunnel.exited().is_some() {
+        if tunnel
+            .as_mut()
+            .is_some_and(|tunnel| tunnel.exited().is_some())
+        {
             tunnel_lost = true;
             break;
         }
         thread::sleep(Duration::from_millis(250));
     }
-    cleanup_super_expose(&shared, &mcp, &mut http, Some(&mut tunnel));
+    cleanup_super_expose(&shared, &mcp, &mut http, tunnel.as_mut());
     if tunnel_lost {
         bail!("Cloudflare Quick Tunnel exited after readiness; public access is unavailable")
     }
     Ok(())
+}
+
+fn select_expose_endpoint(interactive: bool) -> anyhow::Result<ExposeEndpointMode> {
+    if !interactive {
+        return Ok(ExposeEndpointMode::QuickTunnel);
+    }
+    print_stderr_line("Public endpoint:")?;
+    print_stderr_line("  1) Quick Tunnel (random trycloudflare.com hostname)")?;
+    print_stderr_line("  2) Existing Cloudflare Tunnel (configured hostname)")?;
+    loop {
+        print_stderr_prompt("Choose endpoint [1]: ")?;
+        let mut choice = String::new();
+        if io::stdin().read_line(&mut choice)? == 0 {
+            bail!("public endpoint selection cancelled");
+        }
+        match choice.trim() {
+            "" | "1" => return Ok(ExposeEndpointMode::QuickTunnel),
+            "2" => return prompt_existing_cloudflare_endpoint(),
+            _ => print_stderr_line("Choose 1 for Quick Tunnel or 2 for an existing tunnel.")?,
+        }
+    }
+}
+
+fn confirm_expose_start(interactive: bool) -> anyhow::Result<()> {
+    if !interactive {
+        return Ok(());
+    }
+    print_stderr_prompt("Press Enter to start expose, or type q to cancel: ")?;
+    let mut input = String::new();
+    if io::stdin().read_line(&mut input)? == 0 {
+        bail!("expose startup cancelled");
+    }
+    if input.trim().eq_ignore_ascii_case("q") || input.trim().eq_ignore_ascii_case("n") {
+        bail!("expose startup cancelled");
+    }
+    Ok(())
+}
+
+fn prompt_existing_cloudflare_endpoint() -> anyhow::Result<ExposeEndpointMode> {
+    let hostname = loop {
+        print_stderr_prompt("Public hostname: ")?;
+        let mut input = String::new();
+        if io::stdin().read_line(&mut input)? == 0 {
+            bail!("public endpoint selection cancelled");
+        }
+        match validate_existing_cloudflare_hostname(input.trim()) {
+            Ok(hostname) => break hostname,
+            Err(error) => print_stderr_line(&error.to_string())?,
+        }
+    };
+    let origin_port = loop {
+        print_stderr_prompt("Local origin port [8765]: ")?;
+        let mut input = String::new();
+        if io::stdin().read_line(&mut input)? == 0 {
+            bail!("public endpoint selection cancelled");
+        }
+        let value = if input.trim().is_empty() {
+            Ok(8765)
+        } else {
+            input
+                .trim()
+                .parse::<u16>()
+                .map_err(|_| "origin port must be 1-65535".to_string())
+        };
+        match value {
+            Ok(port) if port > 0 => break port,
+            Ok(_) | Err(_) => print_stderr_line("origin port must be 1-65535")?,
+        }
+    };
+    Ok(ExposeEndpointMode::ExistingCloudflareTunnel {
+        hostname,
+        origin_port,
+    })
+}
+
+pub(super) fn validate_existing_cloudflare_hostname(value: &str) -> anyhow::Result<String> {
+    if value.is_empty()
+        || value.contains("://")
+        || value.contains(['/', '\\', ':', '@', '?', '#'])
+        || !value.contains('.')
+        || value.parse::<IpAddr>().is_ok()
+        || !super::runtime::expose_valid_dns_hostname(value)
+    {
+        bail!("hostname must be a public DNS name such as prodex.example.com")
+    }
+    Ok(value.to_ascii_lowercase())
+}
+
+pub(super) fn bind_expose_listener(endpoint: &ExposeEndpointMode) -> anyhow::Result<TcpListener> {
+    let address = match endpoint {
+        ExposeEndpointMode::QuickTunnel => "127.0.0.1:0".to_string(),
+        ExposeEndpointMode::ExistingCloudflareTunnel { origin_port, .. } => {
+            format!("127.0.0.1:{origin_port}")
+        }
+    };
+    TcpListener::bind(&address).map_err(|error| {
+        if error.kind() == std::io::ErrorKind::AddrInUse {
+            anyhow::anyhow!("LocalOriginPortInUse: {address} is already in use")
+        } else {
+            anyhow::Error::new(error).context(format!("failed to bind expose origin on {address}"))
+        }
+    })
+}
+
+fn remember_expose_model_preference(args: &SuperArgs) -> anyhow::Result<()> {
+    let paths = crate::AppPaths::discover()?;
+    let state = crate::AppState::load_and_repair(&paths)?;
+    let codex_home = match crate::resolve_profile_name(&state, args.profile.as_deref()) {
+        Ok(profile_name) => state
+            .profiles
+            .get(&profile_name)
+            .map(|profile| profile.codex_home.clone())
+            .context("selected expose profile is unavailable")?,
+        Err(_error) if args.profile.is_none() => prodex_core::default_codex_home(&paths)?,
+        Err(error) => return Err(error),
+    };
+    let runtime_args = args.clone().into_runtime_tool_args_with_presidio(false);
+    let model = args
+        .local_model
+        .clone()
+        .or_else(|| crate::codex_cli_config_override_value(&runtime_args.codex_args, "model"));
+    let effort =
+        crate::codex_cli_config_override_value(&runtime_args.codex_args, "model_reasoning_effort");
+    crate::remember_model_preference_for_launch(
+        &paths,
+        &codex_home,
+        &runtime_args.codex_args,
+        model.as_deref(),
+        effort.as_deref(),
+        "expose-selection",
+    )
 }
 
 fn cleanup_super_expose(
@@ -191,7 +360,7 @@ fn cloudflared_start_failure(tunnel: &mut super::runtime::CloudflaredTunnel) -> 
     }
     if tunnel.startup_timed_out {
         return anyhow::anyhow!(
-            "Cloudflare Quick Tunnel did not allocate a public hostname within 12 seconds; check outbound Cloudflare connectivity"
+            "Cloudflare Quick Tunnel did not complete transport negotiation; check outbound UDP/TCP 7844 connectivity"
         );
     }
     anyhow::anyhow!("Cloudflare Quick Tunnel did not report a public hostname")
@@ -259,13 +428,14 @@ fn expose_display_name(
     Ok(name.to_string())
 }
 
-pub(super) fn print_super_expose_status(
+fn print_super_expose_status(
     local_url: &str,
     public_url: &str,
     instance_id: &str,
     workspace_name: &str,
     display_name: &str,
     mcp: &ExposeMcpEndpoint,
+    endpoint: &ExposeEndpointMode,
 ) -> anyhow::Result<()> {
     let args = &mcp.defaults;
     let model = args
@@ -300,7 +470,15 @@ pub(super) fn print_super_expose_status(
         ("Local browser URL".to_string(), local_url.to_string()),
         (
             "Cloudflare".to_string(),
-            "Quick Tunnel connected".to_string(),
+            match endpoint {
+                ExposeEndpointMode::QuickTunnel => "Quick Tunnel connected".to_string(),
+                ExposeEndpointMode::ExistingCloudflareTunnel {
+                    hostname,
+                    origin_port,
+                } => {
+                    format!("Existing Tunnel · {hostname} · 127.0.0.1:{origin_port}")
+                }
+            },
         ),
         (
             "Access".to_string(),

@@ -469,10 +469,36 @@ pub(super) fn expose_join_thread(thread: &Mutex<Option<JoinHandle<()>>>) {
 pub(super) struct CloudflaredTunnel {
     pub(super) child: std::process::Child,
     pub(super) url: Option<String>,
+    pub(super) effective_transport: Option<CloudflaredTransport>,
     reader_threads: Vec<JoinHandle<()>>,
     config: CloudflaredConfigIsolation,
     pub(super) startup_timed_out: bool,
+    pub(super) startup_failure: Option<String>,
 }
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum CloudflaredTransport {
+    Auto,
+    Quic,
+    Http2,
+}
+
+impl CloudflaredTransport {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Auto => "auto",
+            Self::Quic => "quic",
+            Self::Http2 => "http2",
+        }
+    }
+}
+
+const CLOUDFLARED_TRANSPORT_NEGOTIATION_TIMEOUT: Duration = if cfg!(test) {
+    Duration::from_millis(250)
+} else {
+    Duration::from_secs(20)
+};
+const CLOUDFLARED_EVENT_PREFIX: &str = "\0prodex-cloudflared-transport=";
 
 struct CloudflaredConfigIsolation {
     directory: std::path::PathBuf,
@@ -581,6 +607,39 @@ impl Drop for CloudflaredTunnel {
 }
 
 pub(super) fn start_cloudflared_tunnel(local_url: &str) -> Result<CloudflaredTunnel> {
+    let mut auto = start_cloudflared_attempt(local_url, CloudflaredTransport::Auto)?;
+    if auto.effective_transport.is_some() {
+        return Ok(auto);
+    }
+
+    let auto_can_fallback = auto.url.is_some() && auto.startup_timed_out;
+    if auto_can_fallback {
+        auto.shutdown();
+        crate::print_launch_status("Cloudflare QUIC unavailable; using HTTP/2 fallback.");
+        let mut http2 = start_cloudflared_attempt(local_url, CloudflaredTransport::Http2)?;
+        if http2.effective_transport.is_some() {
+            return Ok(http2);
+        }
+        http2.startup_failure = Some(
+            "Cloudflare edge transport unavailable: QUIC/UDP 7844 and HTTP/2/TCP 7844 failed"
+                .to_string(),
+        );
+        http2.shutdown();
+        return Ok(http2);
+    }
+
+    if auto.startup_failure.is_none() {
+        auto.startup_failure =
+            Some("Cloudflare Quick Tunnel did not register a transport connection".to_string());
+    }
+    auto.shutdown();
+    Ok(auto)
+}
+
+fn start_cloudflared_attempt(
+    local_url: &str,
+    transport: CloudflaredTransport,
+) -> Result<CloudflaredTunnel> {
     let config = CloudflaredConfigIsolation::create()?;
     let mut command = cloudflared_command();
     command
@@ -592,6 +651,8 @@ pub(super) fn start_cloudflared_tunnel(local_url: &str) -> Result<CloudflaredTun
                 .context("cloudflared config path is not UTF-8")?,
             "tunnel",
             "--no-autoupdate",
+            "--protocol",
+            transport.as_str(),
             "--url",
             local_url,
         ])
@@ -605,6 +666,7 @@ pub(super) fn start_cloudflared_tunnel(local_url: &str) -> Result<CloudflaredTun
         "TUNNEL_HOSTNAME",
         "TUNNEL_NAME",
         "TUNNEL_TOKEN",
+        "TUNNEL_TRANSPORT_PROTOCOL",
     ] {
         command.env_remove(variable);
     }
@@ -619,26 +681,48 @@ pub(super) fn start_cloudflared_tunnel(local_url: &str) -> Result<CloudflaredTun
     if let Some(stderr) = child.stderr.take() {
         reader_threads.push(expose_scan_cloudflared_output(stderr, tx));
     }
-    let deadline = Instant::now() + Duration::from_secs(12);
+    let deadline = Instant::now() + CLOUDFLARED_TRANSPORT_NEGOTIATION_TIMEOUT;
     let mut startup_timed_out = false;
-    let url = loop {
-        if let Ok(url) = rx.recv_timeout(Duration::from_millis(100)) {
-            break Some(url);
+    let mut url = None;
+    let mut effective_transport = None;
+    let startup_failure = loop {
+        if let Ok(event) = rx.recv_timeout(Duration::from_millis(100)) {
+            if let Some(protocol) = event.strip_prefix(CLOUDFLARED_EVENT_PREFIX) {
+                effective_transport = match protocol {
+                    "quic" => Some(CloudflaredTransport::Quic),
+                    "http2" => Some(CloudflaredTransport::Http2),
+                    _ => effective_transport,
+                };
+            } else if url.is_none() {
+                url = Some(event);
+            }
+            if url.is_some() && effective_transport.is_some() {
+                break None;
+            }
         }
-        if child.try_wait().ok().flatten().is_some() {
-            break None;
+        if let Ok(Some(status)) = child.try_wait() {
+            break Some(format!(
+                "cloudflared exited before {} transport registration ({status})",
+                transport.as_str()
+            ));
         }
         if Instant::now() >= deadline {
             startup_timed_out = true;
-            break None;
+            break Some(format!(
+                "cloudflared {} transport negotiation timed out after {} seconds",
+                transport.as_str(),
+                CLOUDFLARED_TRANSPORT_NEGOTIATION_TIMEOUT.as_secs()
+            ));
         }
     };
     Ok(CloudflaredTunnel {
         child,
         url,
+        effective_transport,
         reader_threads,
         config,
         startup_timed_out,
+        startup_failure,
     })
 }
 
@@ -679,9 +763,19 @@ fn expose_scan_cloudflared_byte(line: &mut Vec<u8>, byte: u8, tx: &mpsc::SyncSen
 }
 
 fn expose_scan_cloudflared_line(line: &[u8], tx: &mpsc::SyncSender<String>) {
-    if let Ok(line) = std::str::from_utf8(line)
-        && let Some(url) = expose_find_trycloudflare_url(line)
-    {
+    let Ok(line) = std::str::from_utf8(line) else {
+        return;
+    };
+    if line.contains("Registered tunnel connection") {
+        let protocol = line.split_whitespace().find_map(|part| {
+            part.strip_prefix("protocol=")
+                .filter(|value| matches!(*value, "quic" | "http2"))
+        });
+        if let Some(protocol) = protocol {
+            let _ = tx.try_send(format!("{CLOUDFLARED_EVENT_PREFIX}{protocol}"));
+        }
+    }
+    if let Some(url) = expose_find_trycloudflare_url(line) {
         let _ = tx.try_send(url);
     }
 }

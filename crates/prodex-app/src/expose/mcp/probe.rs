@@ -139,7 +139,8 @@ pub(crate) fn verify_public_mcp(url: &str) -> Result<()> {
         .map(|failure| failure.to_string())
         .unwrap_or_else(|| "public MCP probe did not return a response".to_string());
     bail!(
-        "public MCP readiness timed out after 45 seconds: {failure}; check outbound Cloudflare connectivity and retry"
+        "public MCP readiness timed out after {} seconds; last phase: {failure}",
+        MCP_PUBLIC_READY_TIMEOUT.as_secs()
     )
 }
 

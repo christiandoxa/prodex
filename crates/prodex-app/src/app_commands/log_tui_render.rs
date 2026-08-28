@@ -1,6 +1,6 @@
 use crate::app_commands::log_format::render_text_body;
 use crate::app_commands::log_tui::{
-    LogTuiHeaderDetail, LogTuiState, contains_ignore_ascii_case, visible_text,
+    LOG_TUI_TITLE, LogTuiHeaderDetail, LogTuiState, contains_ignore_ascii_case, visible_text,
 };
 use crate::app_commands::log_upstream_payload::{
     UpstreamPayloadEvent, render_upstream_payload_lines,
@@ -13,9 +13,8 @@ use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
 use std::collections::VecDeque;
 use terminal_ui::{
-    text_width, tui_accent_style, tui_border_style, tui_connected_footer_block,
-    tui_connected_header_block, tui_metric_style, tui_muted_style, tui_primary_style,
-    tui_title_style, tui_tool_style,
+    tui_accent_style, tui_border_style, tui_connected_footer_block, tui_connected_header_block,
+    tui_metric_style, tui_muted_style, tui_primary_style, tui_title_style, tui_tool_style,
 };
 
 pub(crate) fn log_snapshot_items(
@@ -99,6 +98,7 @@ pub(super) fn render_log_stream_tui(
     items: &VecDeque<LogStreamItem>,
     state: &LogTuiState,
     header_detail: Option<&LogTuiHeaderDetail>,
+    throughput_rate: Option<f64>,
 ) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
@@ -114,27 +114,17 @@ pub(super) fn render_log_stream_tui(
         None => format!("{} event(s)", items.len()),
     };
 
-    let title = "Prodex Log Stream";
-    let count_width = text_width(&count);
-    let mut header_spans = vec![
-        Span::styled(title, tui_title_style()),
-        Span::raw("  "),
-        Span::styled(count, tui_muted_style()),
-    ];
-    if let Some(detail) = header_detail {
-        let header_width = usize::from(chunks[0].width).saturating_sub(2);
-        let used = text_width(title) + 2 + count_width;
-        let detail_width = header_width.saturating_sub(used + 2);
-        if detail_width > 0 {
-            header_spans.push(Span::raw("  "));
-            header_spans.push(Span::styled(
-                detail.render(detail_width),
-                tui_primary_style(),
-            ));
-        }
-    }
-    let header = Paragraph::new(Line::from(header_spans))
-        .block(tui_connected_header_block(tui_border_style()));
+    let header = Paragraph::new(Line::styled(
+        crate::app_commands::log_tui::render_log_header(
+            LOG_TUI_TITLE,
+            &count,
+            header_detail,
+            throughput_rate,
+            chunks[0].width as usize,
+        ),
+        tui_title_style(),
+    ))
+    .block(tui_connected_header_block(tui_border_style()));
     frame.render_widget(header, chunks[0]);
 
     let body = Paragraph::new(log_stream_tui_text_for_view(
@@ -304,6 +294,15 @@ fn push_log_stream_item_lines(
                 Span::styled(" reasoning ", tui_muted_style()),
                 Span::styled(event.reasoning_tokens.to_string(), tui_tool_style()),
             ]));
+            if let Some(rate) = event.output_tokens_per_second {
+                lines.push(Line::from(vec![
+                    Span::styled("average ", tui_muted_style()),
+                    Span::styled(
+                        crate::app_commands::log_tui::format_output_tokens_per_second(Some(rate)),
+                        tui_metric_style(),
+                    ),
+                ]));
+            }
         }
         LogStreamItem::UpstreamPayload(event) => {
             let request = event

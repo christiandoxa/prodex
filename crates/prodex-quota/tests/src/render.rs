@@ -12,6 +12,9 @@ fn main_windows(
         email: None,
         plan_type: Some("plus".to_string()),
         rate_limit: Some(WindowPair {
+            allowed: None,
+            limit_reached: None,
+            extra: BTreeMap::new(),
             primary_window: Some(UsageWindow {
                 used_percent: Some(100 - five_hour_remaining),
                 reset_at: Some(five_hour_reset_at),
@@ -36,9 +39,13 @@ fn spark_limit(
     weekly_reset_at: i64,
 ) -> AdditionalRateLimit {
     AdditionalRateLimit {
+        limit_id: None,
         limit_name: Some("GPT-5.3-Codex-Spark".to_string()),
         metered_feature: Some("codex_bengalfox".to_string()),
         rate_limit: WindowPair {
+            allowed: None,
+            limit_reached: None,
+            extra: BTreeMap::new(),
             primary_window: Some(UsageWindow {
                 used_percent: Some(100 - five_hour_remaining),
                 reset_at: Some(five_hour_reset_at),
@@ -50,6 +57,9 @@ fn spark_limit(
                 limit_window_seconds: Some(604_800),
             }),
         },
+        allowed: None,
+        limit_reached: None,
+        extra: BTreeMap::new(),
     }
 }
 
@@ -103,6 +113,8 @@ fn sorted_names_by(reports: &[QuotaReport], sort: QuotaReportSort) -> Vec<String
         .collect()
 }
 
+#[path = "render/additional.rs"]
+mod additional;
 #[path = "render/spark.rs"]
 mod spark;
 
@@ -119,6 +131,9 @@ fn missing_main_window_does_not_block_available_window() {
         email: None,
         plan_type: None,
         rate_limit: Some(WindowPair {
+            allowed: None,
+            limit_reached: None,
+            extra: BTreeMap::new(),
             primary_window: Some(UsageWindow {
                 used_percent: Some(20),
                 reset_at: Some(1_700_000_000),
@@ -141,6 +156,9 @@ fn missing_five_hour_window_does_not_block_available_weekly_window() {
         email: None,
         plan_type: None,
         rate_limit: Some(WindowPair {
+            allowed: None,
+            limit_reached: None,
+            extra: BTreeMap::new(),
             primary_window: None,
             secondary_window: Some(UsageWindow {
                 used_percent: Some(0),
@@ -186,6 +204,9 @@ fn unknown_five_hour_usage_does_not_block_available_weekly_runtime() {
         email: None,
         plan_type: Some("plus".to_string()),
         rate_limit: Some(WindowPair {
+            allowed: None,
+            limit_reached: None,
+            extra: BTreeMap::new(),
             primary_window: Some(UsageWindow {
                 used_percent: None,
                 reset_at: None,
@@ -313,44 +334,14 @@ fn quota_reports_put_status_in_column_and_resets_on_left_detail_line() {
 }
 
 #[test]
-fn openai_quota_deserializes_rate_limit_reset_credits() {
-    let camel_usage: UsageResponse = serde_json::from_value(serde_json::json!({
-        "email": "user@example.com",
-        "plan_type": "plus",
-        "rate_limit": null,
-        "code_review_rate_limit": null,
-        "rate_limit_reset_credits": {
-            "availableCount": 3
-        }
-    }))
-    .expect("usage response should deserialize reset credits");
-
-    let camel_credits = camel_usage
-        .rate_limit_reset_credits
-        .as_ref()
-        .expect("camel reset credits");
-    assert_eq!(camel_credits.available_count, 3);
-
-    let snake_usage: UsageResponse = serde_json::from_value(serde_json::json!({
-        "rate_limit_reset_credits": {
-            "available_count": 4
-        }
-    }))
-    .expect("usage response should deserialize backend reset credits");
-
-    let snake_credits = snake_usage
-        .rate_limit_reset_credits
-        .as_ref()
-        .expect("snake reset credits");
-    assert_eq!(snake_credits.available_count, 4);
-}
-
-#[test]
 fn quota_summary_marks_exhausted_window() {
     let usage = UsageResponse {
         email: None,
         plan_type: None,
         rate_limit: Some(WindowPair {
+            allowed: None,
+            limit_reached: None,
+            extra: BTreeMap::new(),
             primary_window: Some(UsageWindow {
                 used_percent: Some(100),
                 reset_at: Some(1_700_000_000),
@@ -425,9 +416,13 @@ fn profile_quota_detail_renders_precise_reset_windows() {
 fn profile_quota_render_shows_monthly_workspace_limits() {
     let mut usage = main_windows(82, 1_700_001_800, 91, 1_700_259_200);
     usage.additional_rate_limits.push(AdditionalRateLimit {
+        limit_id: None,
         limit_name: Some("Workspace credits".to_string()),
         metered_feature: Some("codex".to_string()),
         rate_limit: WindowPair {
+            allowed: None,
+            limit_reached: None,
+            extra: BTreeMap::new(),
             primary_window: Some(UsageWindow {
                 used_percent: Some(27),
                 reset_at: Some(1_702_592_000),
@@ -435,6 +430,9 @@ fn profile_quota_render_shows_monthly_workspace_limits() {
             }),
             secondary_window: None,
         },
+        allowed: None,
+        limit_reached: None,
+        extra: BTreeMap::new(),
     });
 
     let rendered = render_profile_quota_with_width("main", &usage, 120);

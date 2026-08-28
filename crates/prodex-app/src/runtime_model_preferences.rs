@@ -5,16 +5,18 @@ use sha2::{Digest, Sha256};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
-
 const MODEL_PREFERENCE_SCHEMA_VERSION: u32 = 1;
 const MODEL_PREFERENCE_FILE: &str = "model-preferences.json";
 const OPENAI_PROVIDER_ID: &str = "openai";
 const GOVERNED_OPENAI_TRANSPORT_PROVIDER_ID: &str = "prodex-openai-governed-http";
 const MODEL_PREFERENCE_LOCK_WAIT: Duration = Duration::from_millis(250);
+#[path = "runtime_model_preferences_launch.rs"]
+mod launch;
 #[path = "runtime_model_preferences_lock.rs"]
 mod lock;
 #[path = "runtime_model_preferences_pending.rs"]
 mod pending;
+pub(crate) use launch::remember_model_preference_for_launch;
 use lock::try_acquire_model_preference_lock;
 use pending::{flush_pending_model_preference, save_pending_model_preference};
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -236,7 +238,6 @@ pub(crate) fn apply_fresh_model_preference_selection(
         include_effort && context.explicit_effort.is_none(),
     )
 }
-
 fn remove_model_preference_override(args: &mut Vec<std::ffi::OsString>) {
     let Some(index) = args.windows(2).position(|window| {
         matches!(window[0].to_str(), Some("-c" | "--config"))
@@ -562,7 +563,6 @@ fn record_model_preference(paths: &AppPaths, mut selection: LastModelSelection) 
         &preferences,
     )
 }
-
 pub(crate) struct ModelPreferenceSync {
     paths: AppPaths,
     config_paths: Vec<PathBuf>,

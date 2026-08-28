@@ -5,12 +5,14 @@ use crate::{
 };
 #[path = "super_main_catalog.rs"]
 mod catalog;
+#[cfg(test)]
+use catalog::main_model_choices_from_catalog;
+#[cfg(test)]
+use catalog::openai_main_model_choices;
 use catalog::{
     first_main_catalog_model, main_model_choice_is_selectable, main_model_choices,
     main_model_efforts, prompt_main_model,
 };
-#[cfg(test)]
-use catalog::{main_model_choices_from_catalog, openai_main_model_choices};
 use prodex_cli::{SubAgentReasoningEffort, SuperArgs, SuperExternalProvider};
 
 pub(super) fn resolve_main_model_and_effort(
@@ -24,11 +26,18 @@ pub(super) fn resolve_main_model_and_effort(
         .or_else(|| codex_cli_config_override_value(&args.codex_args, "model"));
     let explicit_effort =
         codex_cli_config_override_value(&args.codex_args, "model_reasoning_effort");
+    let remembered_selection = remembered_main_selection(args, provider);
     let remembered_model = explicit_model
         .is_none()
-        .then(|| remembered_main_model(args, provider))
+        .then(|| {
+            remembered_selection
+                .as_ref()
+                .map(|selection| selection.0.clone())
+        })
         .flatten();
-    let model_choices = main_model_choices(provider, remembered_model.as_deref());
+    // Do not add an unknown remembered value as a synthetic picker choice: ordinary
+    // Super has no model picker, so stale catalog entries must fall back.
+    let model_choices = main_model_choices(provider, None);
     let current_model = explicit_model
         .clone()
         .or_else(|| {
@@ -47,7 +56,7 @@ pub(super) fn resolve_main_model_and_effort(
     };
     let remembered_effort = explicit_effort
         .is_none()
-        .then(|| remembered_main_effort(args, provider))
+        .then(|| remembered_effort_for_model(remembered_selection.as_ref(), model.as_deref()))
         .flatten();
     let reasoning_effort = if let Some(explicit_effort) = explicit_effort {
         ensure_supported_main_effort(provider, model.as_deref(), &explicit_effort)?;
@@ -65,9 +74,11 @@ pub(super) fn resolve_main_model_and_effort(
         )?
         .map(|effort| effort.to_string())
     } else {
-        remembered_effort.filter(|effort| {
-            ensure_supported_main_effort(provider, model.as_deref(), effort).is_ok()
-        })
+        remembered_effort
+            .filter(|effort| {
+                ensure_supported_main_effort(provider, model.as_deref(), effort).is_ok()
+            })
+            .or_else(|| default_main_effort(provider, model.as_deref()))
     };
     Ok((model, reasoning_effort))
 }
@@ -131,6 +142,13 @@ fn remembered_main_selection(
             preference_args.url = None;
         }
     }
+    if provider == prodex_provider_core::ProviderId::OpenAi
+        && codex_cli_config_override_value(&preference_args.codex_args, "model_provider").is_none()
+    {
+        preference_args
+            .codex_args
+            .splice(0..0, ["-c".into(), "model_provider=\"openai\"".into()]);
+    }
     let runtime_args = preference_args.into_runtime_tool_args_with_presidio(false);
     let context = crate::resolve_fresh_model_preference_context_read_only(
         &paths,
@@ -154,18 +172,13 @@ fn remembered_main_selection(
     Some((model, effort))
 }
 
-fn remembered_main_model(
-    args: &SuperArgs,
-    provider: prodex_provider_core::ProviderId,
+fn remembered_effort_for_model(
+    selection: Option<&(String, Option<String>)>,
+    model: Option<&str>,
 ) -> Option<String> {
-    remembered_main_selection(args, provider).map(|selection| selection.0)
-}
-
-fn remembered_main_effort(
-    args: &SuperArgs,
-    provider: prodex_provider_core::ProviderId,
-) -> Option<String> {
-    remembered_main_selection(args, provider).and_then(|selection| selection.1)
+    let (remembered_model, effort) = selection?;
+    model.filter(|selected_model| selected_model.eq_ignore_ascii_case(remembered_model))?;
+    effort.clone()
 }
 
 fn default_main_model(provider: prodex_provider_core::ProviderId) -> Option<String> {
@@ -176,6 +189,27 @@ fn default_main_model(provider: prodex_provider_core::ProviderId) -> Option<Stri
                 .first()
                 .map(|entry| entry.id.clone())
         })
+}
+
+fn default_main_effort(
+    provider: prodex_provider_core::ProviderId,
+    model: Option<&str>,
+) -> Option<String> {
+    prodex_provider_core::provider_catalog_entry(provider, model?)
+        .and_then(|entry| entry.default_reasoning_effort)
+        .and_then(|effort| match effort {
+            prodex_provider_core::ProviderReasoningEffort::None => Some("none"),
+            prodex_provider_core::ProviderReasoningEffort::Minimal => Some("minimal"),
+            prodex_provider_core::ProviderReasoningEffort::Low => Some("low"),
+            prodex_provider_core::ProviderReasoningEffort::Medium => Some("medium"),
+            prodex_provider_core::ProviderReasoningEffort::High => Some("high"),
+            prodex_provider_core::ProviderReasoningEffort::XHigh => Some("xhigh"),
+            prodex_provider_core::ProviderReasoningEffort::Max => Some("max"),
+            prodex_provider_core::ProviderReasoningEffort::Ultra => Some("ultra"),
+            prodex_provider_core::ProviderReasoningEffort::Unknown => None,
+        })
+        .map(str::to_string)
+        .or_else(|| main_model_efforts(provider, model).first().cloned())
 }
 
 pub(super) fn prompt_super_model(
@@ -410,6 +444,20 @@ mod tests {
                 "future-depth".to_string(),
             ])
         );
+    }
+
+    #[test]
+    fn remembered_effort_is_not_reused_after_model_fallback_or_change() {
+        let selection = ("gpt-5.6-sol".to_string(), Some("max".to_string()));
+        assert_eq!(
+            remembered_effort_for_model(Some(&selection), Some("GPT-5.6-SOL")),
+            Some("max".to_string())
+        );
+        assert_eq!(
+            remembered_effort_for_model(Some(&selection), Some("gpt-5.6-terra")),
+            None
+        );
+        assert_eq!(remembered_effort_for_model(Some(&selection), None), None);
     }
 
     #[test]

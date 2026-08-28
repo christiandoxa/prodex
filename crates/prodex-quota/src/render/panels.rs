@@ -248,6 +248,7 @@ fn format_additional_limits(usage: &UsageResponse) -> Vec<(String, String)> {
             .limit_name
             .as_deref()
             .or(additional.metered_feature.as_deref())
+            .or(additional.limit_id.as_deref())
             .unwrap_or("Additional");
 
         if let Some(primary) = additional.rate_limit.primary_window.as_ref() {

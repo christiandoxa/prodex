@@ -319,6 +319,8 @@ fn log_snapshot_json_preserves_complete_event_order() {
         cached_input_tokens: 3,
         output_tokens: 4,
         reasoning_tokens: 1,
+        generation_ms: None,
+        output_tokens_per_second: None,
     };
     let upstream = crate::app_commands::log_upstream_payload::UpstreamPayloadEvent {
         timestamp: "2026-06-20 08:00:01".to_string(),
@@ -418,7 +420,7 @@ fn collects_websocket_payload_and_usage_from_runtime_log() {
         &path,
         concat!(
             "[2026-07-01 21:52:36.700 +07:00] upstream_payload request=28 transport=websocket route=websocket profile=main bytes=35 logged_bytes=35 truncated=false payload_b64=eyJpbnB1dCI6ImhlbGxvIn0=\n",
-            "[2026-07-01 21:52:36.729 +07:00] token_usage request=28 route=websocket transport=websocket profile=main source=responses_websocket prompt_cache_key=present prompt_cache_key_hash=sc:abc prompt_cache_owner=no_cached_tokens input_tokens=9741 uncached_input_tokens=9741 cached_input_tokens=0 output_tokens=0 reasoning_tokens=0\n"
+            "[2026-07-01 21:52:36.729 +07:00] token_usage request=28 route=websocket transport=websocket profile=main source=responses_websocket prompt_cache_key=present prompt_cache_key_hash=sc:abc prompt_cache_owner=no_cached_tokens input_tokens=9741 uncached_input_tokens=9741 cached_input_tokens=0 output_tokens=100 reasoning_tokens=0 generation_ms=1000 output_tokens_per_second=100.0\n"
         ),
     )
     .unwrap();
@@ -429,6 +431,11 @@ fn collects_websocket_payload_and_usage_from_runtime_log() {
     assert_eq!(items.len(), 2);
     assert!(matches!(items[0], LogStreamItem::UpstreamPayload(_)));
     assert!(matches!(items[1], LogStreamItem::TokenUsage(_)));
+    let LogStreamItem::TokenUsage(event) = &items[1] else {
+        panic!("expected token usage event");
+    };
+    assert_eq!(event.generation_ms, Some(1000));
+    assert_eq!(event.output_tokens_per_second, Some(100.0));
     fs::remove_dir_all(root).unwrap();
 }
 

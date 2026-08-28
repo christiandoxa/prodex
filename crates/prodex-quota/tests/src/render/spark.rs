@@ -86,3 +86,13 @@ fn quota_reports_status_stays_ready_when_main_remains_but_spark_is_blocked() {
             .any(|line| line.contains("spark-blocked") && line.contains("Ready"))
     );
 }
+
+#[test]
+fn explicit_additional_limit_admission_blocks_runtime_use() {
+    let mut usage = main_windows(0, 1_783_413_134, 0, 1_783_999_934);
+    let mut spark = spark_limit(89, 1_783_413_134, 97, 1_783_999_934);
+    spark.allowed = Some(false);
+    usage.additional_rate_limits.push(spark);
+
+    assert!(!openai_quota_has_ready_limit(&usage));
+}

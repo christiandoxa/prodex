@@ -1,5 +1,15 @@
 use super::*;
 
+fn sorted_log_lines(path: &std::path::Path) -> Vec<String> {
+    let mut lines = fs::read_to_string(path)
+        .expect("failed to read ping homes log")
+        .lines()
+        .map(str::to_string)
+        .collect::<Vec<_>>();
+    lines.sort();
+    lines
+}
+
 #[test]
 fn ping_openai_sends_ping_to_each_ready_openai_profile() {
     let fixture = setup_fixture();
@@ -23,26 +33,24 @@ fn ping_openai_sends_ping_to_each_ready_openai_profile() {
         "prodex ping openai failed: {}",
         String::from_utf8_lossy(&output.stderr)
     );
-    let homes = fs::read_to_string(home_log).expect("failed to read ping homes log");
     assert_eq!(
-        homes.lines().collect::<Vec<_>>(),
+        sorted_log_lines(&home_log),
         vec![
+            fixture.main_home.to_string_lossy().to_string(),
             fixture.second_home.to_string_lossy().to_string(),
             third_home.to_string_lossy().to_string(),
         ]
     );
     let args = fs::read_to_string(&fixture.codex_args_log).expect("failed to read args log");
-    assert_eq!(
-        args.lines().collect::<Vec<_>>(),
-        vec![
-            "--dangerously-bypass-approvals-and-sandbox",
-            "exec",
-            "ping",
-            "--dangerously-bypass-approvals-and-sandbox",
-            "exec",
-            "ping",
-        ]
-    );
+    let args = args.lines().collect::<Vec<_>>();
+    assert_eq!(args.iter().filter(|arg| **arg == "--json").count(), 3);
+    assert_eq!(args.iter().filter(|arg| **arg == "exec").count(), 3);
+    assert!(args.contains(&"--sandbox"));
+    assert!(args.contains(&"read-only"));
+    assert!(args.contains(&"--ephemeral"));
+    assert!(args.contains(&"--ignore-user-config"));
+    assert!(args.contains(&"--skip-git-repo-check"));
+    assert!(!args.contains(&"--dangerously-bypass-approvals-and-sandbox"));
 }
 
 #[test]
@@ -64,11 +72,9 @@ fn ping_openai_includes_profile_that_is_ready_on_weekly_quota_only() {
         String::from_utf8_lossy(&output.stderr)
     );
     assert_eq!(
-        fs::read_to_string(home_log)
-            .expect("weekly-ready profile should be pinged")
-            .lines()
-            .collect::<Vec<_>>(),
+        sorted_log_lines(&home_log),
         vec![
+            fixture.main_home.to_string_lossy().to_string(),
             fixture.second_home.to_string_lossy().to_string(),
             weekly_home.to_string_lossy().to_string(),
         ]
@@ -105,11 +111,9 @@ fn ping_openai_uses_ready_snapshots_when_live_quota_probe_fails() {
         String::from_utf8_lossy(&output.stderr)
     );
     assert_eq!(
-        fs::read_to_string(home_log)
-            .expect("ready snapshot profiles should be pinged")
-            .lines()
-            .collect::<Vec<_>>(),
+        sorted_log_lines(&home_log),
         vec![
+            fixture.main_home.to_string_lossy().to_string(),
             fixture.second_home.to_string_lossy().to_string(),
             third_home.to_string_lossy().to_string(),
         ]
@@ -117,7 +121,7 @@ fn ping_openai_uses_ready_snapshots_when_live_quota_probe_fails() {
 }
 
 #[test]
-fn ping_openai_continues_after_one_ready_profile_child_error() {
+fn ping_openai_ignores_unrelated_profile_session_files() {
     let fixture = setup_fixture();
     let broken_home = add_managed_profile(&fixture, "broken", "third-account");
     fs::write(broken_home.join("sessions"), b"not a directory")
@@ -131,14 +135,18 @@ fn ping_openai_continues_after_one_ready_profile_child_error() {
         &[("TEST_CODEX_LOG_APPEND", home_log_string.as_str())],
     );
 
-    assert!(!output.status.success());
-    assert!(String::from_utf8_lossy(&output.stderr).contains("ping failed for broken"));
+    assert!(
+        output.status.success(),
+        "isolated ping should not depend on the profile session directory: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
     assert_eq!(
-        fs::read_to_string(home_log)
-            .expect("later ready profile should still be pinged")
-            .lines()
-            .collect::<Vec<_>>(),
-        vec![fixture.second_home.to_string_lossy().to_string()]
+        sorted_log_lines(&home_log),
+        vec![
+            broken_home.to_string_lossy().to_string(),
+            fixture.main_home.to_string_lossy().to_string(),
+            fixture.second_home.to_string_lossy().to_string(),
+        ]
     );
 }
 
@@ -165,36 +173,20 @@ fn ping_openai_sends_extra_spark_ping_when_profile_has_spark_limit() {
         "prodex ping openai failed: {}",
         String::from_utf8_lossy(&output.stderr)
     );
-    let homes = fs::read_to_string(home_log).expect("failed to read ping homes log");
     assert_eq!(
-        homes.lines().collect::<Vec<_>>(),
+        sorted_log_lines(&home_log),
         vec![
+            fixture.main_home.to_string_lossy().to_string(),
             fixture.second_home.to_string_lossy().to_string(),
             spark_home.to_string_lossy().to_string(),
             spark_home.to_string_lossy().to_string(),
         ]
     );
     let args = fs::read_to_string(&fixture.codex_args_log).expect("failed to read args log");
-    assert_eq!(
-        args.lines().collect::<Vec<_>>(),
-        vec![
-            "--dangerously-bypass-approvals-and-sandbox",
-            "exec",
-            "ping",
-            "--dangerously-bypass-approvals-and-sandbox",
-            "exec",
-            "ping",
-            "--dangerously-bypass-approvals-and-sandbox",
-            "--model",
-            "gpt-5.3-codex-spark",
-            "exec",
-            "-c",
-            "model_context_window=128000",
-            "-c",
-            "model_auto_compact_token_limit=115200",
-            "-c",
-            "model_reasoning_effort=xhigh",
-            "ping",
-        ]
-    );
+    let args = args.lines().collect::<Vec<_>>();
+    assert_eq!(args.iter().filter(|arg| **arg == "--json").count(), 4);
+    assert_eq!(args.iter().filter(|arg| **arg == "exec").count(), 4);
+    assert!(args.contains(&"gpt-5.3-codex-spark"));
+    assert!(args.contains(&"model_reasoning_effort=xhigh"));
+    assert!(!args.contains(&"--dangerously-bypass-approvals-and-sandbox"));
 }

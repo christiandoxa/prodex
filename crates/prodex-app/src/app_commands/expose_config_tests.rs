@@ -144,7 +144,7 @@ fn remembered_main_pair_seeds_a_new_expose_configuration_without_locking_it() {
     let config_path = codex_home.join("config.toml");
     std::fs::write(
         &config_path,
-        "model_provider = \"openai\"\nmodel = \"initial\"\n",
+        "model_provider = \"openai\"\nmodel = \"gpt-5.6-sol\"\n",
     )
     .expect("initial Codex config should be written");
     let args = super_args(&["--no-sub-agent"]);
@@ -154,14 +154,14 @@ fn remembered_main_pair_seeds_a_new_expose_configuration_without_locking_it() {
         false,
     )
     .expect("current Codex configuration should resolve");
-    assert_eq!(configured.0.as_deref(), Some("initial"));
+    assert_eq!(configured.0.as_deref(), Some("gpt-5.6-sol"));
     let scope = model_preference_scope(&codex_home, &[]).expect("preference scope should resolve");
     let child = ChildProcessPlan::new("codex".into(), codex_home.clone());
     let mut sync = ModelPreferenceSync::start_with_scope(&paths, &child, scope)
         .expect("preference sync should start");
     std::fs::write(
         &config_path,
-        "model_provider = \"openai\"\nmodel = \"remembered-model\"\nmodel_reasoning_effort = \"high\"\n",
+        "model_provider = \"openai\"\nmodel = \"gpt-5.6-terra\"\nmodel_reasoning_effort = \"high\"\n",
     )
     .expect("remembered Codex config should be written");
     assert!(sync.finish().is_none());
@@ -173,12 +173,12 @@ fn remembered_main_pair_seeds_a_new_expose_configuration_without_locking_it() {
         false,
     )
     .expect("remembered expose pair should resolve");
-    assert_eq!(remembered.0.as_deref(), Some("remembered-model"));
+    assert_eq!(remembered.0.as_deref(), Some("gpt-5.6-terra"));
     assert_eq!(remembered.1.as_deref(), Some("high"));
 
     let mut explicit = super_args(&[
         "--model",
-        "selected-model",
+        "gpt-5.6-luna",
         "-c",
         "model_reasoning_effort=\"max\"",
         "--no-sub-agent",
@@ -190,7 +190,7 @@ fn remembered_main_pair_seeds_a_new_expose_configuration_without_locking_it() {
         false,
     )
     .expect("explicit expose pair should resolve");
-    assert_eq!(selected.0.as_deref(), Some("selected-model"));
+    assert_eq!(selected.0.as_deref(), Some("gpt-5.6-luna"));
     assert_eq!(selected.1.as_deref(), Some("max"));
     let _ = std::fs::remove_dir_all(root);
 }

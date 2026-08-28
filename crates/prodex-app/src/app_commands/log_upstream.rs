@@ -1,13 +1,16 @@
 use super::collect_recent_runtime_log_paths;
+use super::log::local_token_usage_event;
 use super::log::{FollowedLog, FollowedLogPaths, collect_new_followed_lines, retain_followed_logs};
 use super::log_format::{current_log_width, render_log_block};
 use super::log_tui::{
-    LogTuiHeaderDetail, LogTuiInput, LogTuiState, LogTuiTerminal, contains_ignore_ascii_case,
-    log_tui_header_detail, log_tui_header_next_refresh_at, visible_text,
+    LOG_TUI_TITLE, LogTuiHeaderDetail, LogTuiInput, LogTuiState, LogTuiTerminal, OutputThroughput,
+    contains_ignore_ascii_case, log_tui_header_detail, log_tui_header_next_refresh_at,
+    visible_text,
 };
 use super::log_upstream_payload::{
     UpstreamPayloadEvent, render_upstream_payload_lines, upstream_payload_event_from_runtime_line,
 };
+use crate::reports::info_token_usage_event_from_line;
 use crate::{prodex_runtime_log_paths_in_dir, runtime_proxy_log_dir};
 use anyhow::{Context, Result};
 use crossterm::event::{self, Event, KeyEventKind};
@@ -25,8 +28,8 @@ use std::time::{Duration, Instant};
 #[cfg(test)]
 use std::time::{SystemTime, UNIX_EPOCH};
 use terminal_ui::{
-    text_width, tui_border_style, tui_connected_footer_block, tui_connected_header_block,
-    tui_hint_style, tui_primary_style, tui_secondary_style, tui_success_style, tui_title_style,
+    tui_border_style, tui_connected_footer_block, tui_connected_header_block, tui_hint_style,
+    tui_primary_style, tui_secondary_style, tui_success_style, tui_title_style,
 };
 
 const LOG_STREAM_POLL_INTERVAL: Duration = Duration::from_millis(250);
@@ -81,6 +84,7 @@ fn stream_upstream_payload_events_tui() -> Result<()> {
     let mut header_detail = log_tui_header_detail(header_profile.as_deref());
     let mut header_refresh_at =
         log_tui_header_next_refresh_at(header_detail.as_ref(), Instant::now());
+    let mut throughput = OutputThroughput::default();
 
     let mut runtime_paths =
         FollowedLogPaths::new(prodex_runtime_log_paths_in_dir(&runtime_proxy_log_dir()));
@@ -96,7 +100,11 @@ fn stream_upstream_payload_events_tui() -> Result<()> {
             let state = followed_runtime_logs
                 .entry(path.clone())
                 .or_insert_with(|| FollowedLog::at_end(path));
-            for event in collect_new_upstream_payload_events(path, state)? {
+            for event in collect_new_upstream_payload_events_with_throughput(
+                path,
+                state,
+                Some(&mut throughput),
+            )? {
                 push_upstream_payload_event(&mut events, event);
             }
         }
@@ -108,7 +116,13 @@ fn stream_upstream_payload_events_tui() -> Result<()> {
             header_refresh_at = log_tui_header_next_refresh_at(header_detail.as_ref(), now);
         }
         tui.terminal.draw(|frame| {
-            render_upstream_payload_tui(frame, &events, &view, header_detail.as_ref());
+            render_upstream_payload_tui(
+                frame,
+                &events,
+                &view,
+                header_detail.as_ref(),
+                throughput.display_rate(now),
+            );
         })?;
         if event::poll(LOG_STREAM_POLL_INTERVAL)?
             && let Event::Key(key) = event::read()?
@@ -145,8 +159,22 @@ fn collect_new_upstream_payload_events(
     path: &Path,
     state: &mut FollowedLog,
 ) -> Result<Vec<UpstreamPayloadEvent>> {
+    collect_new_upstream_payload_events_with_throughput(path, state, None)
+}
+
+fn collect_new_upstream_payload_events_with_throughput(
+    path: &Path,
+    state: &mut FollowedLog,
+    mut throughput: Option<&mut OutputThroughput>,
+) -> Result<Vec<UpstreamPayloadEvent>> {
     let mut events = Vec::new();
     for line in collect_new_followed_lines(path, state)? {
+        if let Some(event) = info_token_usage_event_from_line(&line).map(local_token_usage_event)
+            && let Some(throughput) = throughput.as_deref_mut()
+        {
+            throughput.observe_token_usage(path, &event, Instant::now());
+            throughput.finish(path, &event);
+        }
         if let Some(event) = upstream_payload_event_from_runtime_line(&line) {
             events.push(event);
         }
@@ -195,6 +223,7 @@ fn render_upstream_payload_tui(
     events: &VecDeque<UpstreamPayloadEvent>,
     state: &LogTuiState,
     header_detail: Option<&LogTuiHeaderDetail>,
+    throughput_rate: Option<f64>,
 ) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
@@ -209,27 +238,17 @@ fn render_upstream_payload_tui(
         Some(_) => format!("{matches}/{} match(es)", events.len()),
         None => format!("{} event(s)", events.len()),
     };
-    let title = "Prodex Upstream Payloads";
-    let count_width = text_width(&count);
-    let mut header_spans = vec![
-        Span::styled(title, tui_title_style()),
-        Span::raw("  "),
-        Span::styled(count, tui_secondary_style()),
-    ];
-    if let Some(detail) = header_detail {
-        let header_width = usize::from(chunks[0].width).saturating_sub(2);
-        let used = text_width(title) + 2 + count_width;
-        let detail_width = header_width.saturating_sub(used + 2);
-        if detail_width > 0 {
-            header_spans.push(Span::raw("  "));
-            header_spans.push(Span::styled(
-                detail.render(detail_width),
-                tui_primary_style(),
-            ));
-        }
-    }
-    let header = Paragraph::new(Line::from(header_spans))
-        .block(tui_connected_header_block(tui_border_style()));
+    let header = Paragraph::new(Line::styled(
+        crate::app_commands::log_tui::render_log_header(
+            LOG_TUI_TITLE,
+            &count,
+            header_detail,
+            throughput_rate,
+            chunks[0].width as usize,
+        ),
+        tui_title_style(),
+    ))
+    .block(tui_connected_header_block(tui_border_style()));
     frame.render_widget(header, chunks[0]);
 
     let width = chunks[1].width.saturating_sub(4).max(24) as usize;

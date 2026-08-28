@@ -3,6 +3,7 @@ use super::log_transcript::TranscriptEvent;
 use crate::app_commands::log_format::{
     current_log_width, human_event_name, local_log_timestamp, render_log_block, render_text_body,
 };
+use crate::app_commands::log_tui::format_output_tokens_per_second;
 use crate::app_commands::log_upstream;
 use crate::app_commands::log_upstream_payload;
 use crate::app_commands::log_upstream_payload::UpstreamPayloadEvent;
@@ -541,6 +542,13 @@ pub(crate) fn print_token_usage_event(event: &InfoTokenUsageEvent, json: bool) -
             ("cache", event.cached_input_tokens.to_string()),
             ("output", event.output_tokens.to_string()),
             ("reasoning", event.reasoning_tokens.to_string()),
+            (
+                "avg_output",
+                event
+                    .output_tokens_per_second
+                    .map(|rate| format_output_tokens_per_second(Some(rate)))
+                    .unwrap_or_else(|| "- t/s".to_string()),
+            ),
         ];
         for line in render_log_block(&event.timestamp, "TOKENS", &meta, &[], current_log_width()) {
             println!("{line}");

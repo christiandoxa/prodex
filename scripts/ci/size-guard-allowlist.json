@@ -71,8 +71,8 @@
   },
   {
     "file": "crates/prodex-quota/tests/src/render.rs",
-    "maxLines": 865,
-    "reason": "Quota renderer coverage keeps provider panels, compact/detail layouts, reset metadata, and error snapshots in one fixture matrix."
+    "maxLines": 863,
+    "reason": "Quota renderer coverage keeps provider panels, compact/detail layouts, and error snapshots in one fixture matrix; additional metadata tests live in a sibling module."
   },
   {
     "file": "crates/prodex-provider-core/src/deepseek_bridge/tests.rs",

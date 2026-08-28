@@ -192,7 +192,7 @@ Notes:
   Sub-agent reasoning efforts are none, minimal, low, medium, high, xhigh, max, or ultra.
   Maximum active sub-agents defaults to 4; presets are 4, 8, 16, and 32, with custom values from 1 through 64.
   Additional Codex args are appended unchanged after Prodex's generated options.
-  `prodex s expose` asks for the main agent, model, and model-aware reasoning effort in an interactive terminal before starting its ChatGPT endpoint. It then uses a loopback MCP server and a Cloudflare Quick Tunnel; cloudflared needs to be installed, but no Cloudflare account or init is required.
+  `prodex s expose` asks for the main agent, provider, model, model-aware reasoning effort, and public endpoint in an interactive terminal before starting its ChatGPT endpoint. Choose the zero-config Quick Tunnel or an existing user-managed Cloudflare hostname; only Quick Tunnel mode requires Prodex to start cloudflared.
   The expose URL is an ephemeral full-Super bearer capability. Anyone with the complete URL can control the configured workspace session; this is not OAuth or multi-user authentication. Use `--no-tunnel` for the existing local browser terminal.";
 pub const CLI_EXPOSE_AFTER_HELP: &str = "\
 Examples:
@@ -204,9 +204,10 @@ Examples:
 
 Notes:
   `prodex expose` remains the loopback browser terminal and only publishes when `--tunnel` is explicit.
-  Bare `prodex s expose` configures Super first, then starts a JSON-response MCP endpoint through a Cloudflare Quick Tunnel. Quick Tunnel mode does not use SSE.
+  Bare `prodex s expose` configures Super first, then lets you choose a JSON-response MCP endpoint through a Cloudflare Quick Tunnel or an existing user-managed Cloudflare hostname. Quick Tunnel mode does not use SSE.
+  Quick Tunnel uses `--protocol auto` (QUIC/UDP 7844 preferred, HTTP/2/TCP 7844 fallback). Existing Tunnel mode asks for an exact public hostname and loopback origin port and never manages the user's Cloudflare service.
   `prodex s expose --tunnel` retains the explicit public browser-terminal behavior. `--no-tunnel` retains local-only compatibility.
-  Interactive expose freezes the selected main and optional sub-agent configuration for this process. Non-interactive expose uses explicit options, remembered preferences, and normal defaults without waiting for stdin.
+  Ordinary interactive `prodex s` selects the main agent and provider, then resolves the remembered provider-scoped model and model-aware effort without opening model/effort pickers. Interactive expose freezes the selected main and optional sub-agent configuration for this process. Non-interactive expose uses explicit options, remembered preferences, and normal defaults without waiting for stdin.
   The ChatGPT URL contains the only ephemeral capability. Treat URL disclosure as credential disclosure; stopping this process revokes it. This is not OAuth and is intended for personal development, not public plugin publication.";
 pub const CLI_DOCTOR_AFTER_HELP: &str = "\
 Examples:
