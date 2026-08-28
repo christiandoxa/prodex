@@ -17,13 +17,20 @@ needed. `KEEP_RUST` means Rust currently owns the ecosystem or trust boundary.
 
 The frozen source-level accounting is recorded in
 `migration/mojo-ownership-baseline-0.419.1.json` and checked by
-`node scripts/ci/mojo-ownership.mjs --check`. The baseline contains 3,231 eligible Rust
-deterministic production semantic LOC and 4,959 eligible Mojo LOC. The migration-volume
-floor is `ceil(3,231 * 10 / 100) = 324` LOC. The counter excludes blank/comment/import/directive
+`node scripts/ci/mojo-ownership.mjs --check`. The historical 0.419.0 record is preserved in
+`migration/mojo-ownership-baseline-0.419.0.json`; the new 0.419.1 baseline contains 4,727
+eligible Rust deterministic production semantic LOC and 4,959 eligible Mojo LOC. The
+migration-volume floor is `ceil(4,727 * 10 / 100) = 473` LOC. The counter excludes blank/comment/import/directive
 lines, test or `cfg(not(feature=...))` Rust bodies, and anything outside declared semantic
 ranges; the release inventory cannot reduce the Rust denominator without a source-traceable
 reduction record. Mojo volume is the eligible production Mojo semantic LOC, and existing Mojo
 ownership and authoritative operations must not regress.
+
+The 0.419.1 wave records 491 removed/reduced Rust semantic LOC (10.39%), leaving 4,225
+eligible Rust semantic LOC in the release inventory. It adds or expands eight authoritative
+units across routing, Smart Context, quota/capacity, runtime capacity, context classification,
+and candidate planning. The release report is generated from the manifest; these figures are
+not claims about the historical 0.419.0 wave.
 
 | Package / module area | Purpose | Pure vs IO | External / async | Risk | Class | Action | Evidence / reason |
 | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -37,7 +44,7 @@ ownership and authoritative operations must not regress.
 | `prodex-provider-spi::negotiate_provider_route_capability` | Match provider routes to required model capabilities | Pure after Rust enum-to-mask normalization | well-formed flags and seven-bit capability masks | High | B | `MOVE_NOW` | Separate flat-buffer capability batch returns first compatible/incompatible indices; Rust retains route/model selection, missing-capability details, and redacted errors |
 | `prodex-runtime-proxy::smart_context_estimate_tokens_from_body_bytes` | Estimate token budget from body size | Pure | None | Low | A | `MOVE_NOW` | Deterministic `u64` arithmetic; real Mojo parity and release diagnostic coverage |
 | `prodex-runtime-proxy::smart_context_pressure_snapshot` | Calculate effective context capacity, pressure, safety floor, and estimator confidence | Pure after Rust token/risk normalization | Fixed-width token values and tags | Medium | A/B | `MOVE_NOW` | `smart_context_observed_token_accounting_with_calibration` now consumes one Mojo batch-style scalar decision; Rust retains token estimation, model lookup, and risk collection; 300 generated parity cases |
-| `prodex-runtime-proxy::build_runtime_response_candidate_execution_plan` | Order ready and fallback runtime candidates | Pure after Rust exclusion, quota, and affinity normalization | Bounded normalized candidate fields | High | B | `MOVE_NOW` | One 22-field batch for up to 256 candidates; Mojo returns authoritative ready/fallback indices; Rust retains excluded-profile filtering, quota guard construction, affinity, health acquisition, and transport |
+| `prodex-runtime-proxy::build_runtime_response_candidate_execution_plan` | Order ready and fallback runtime candidates | Pure after Rust state normalization | Bounded normalized candidate fields | High | B | `MOVE_NOW` | One bounded candidate batch plus one affinity batch for up to 256 candidates; Mojo returns authoritative availability, affinity, ready/fallback indices; Rust retains profile exclusion, state acquisition, and transport |
 | `prodex-quota::render::{windows,gemini,pool,reports}` | Quota summaries, rendering, reset calculations | Mostly pure | `chrono`, terminal formatting | Medium | A/B | `MOVE_NOW` for normalized main-pool aggregation; `KEEP_RUST` for conversion/formatting | `prodex_quota_main_aggregate_batch` is called by the active pool renderer over normalized Gemini/Copilot rows; chrono, float conversion, labels, and rendering stay Rust |
 | `prodex-domain::accounting::commit_reservation` | Commit normalized reservation arithmetic | Pure helper, not the durable production path | Fixed-width usage values | High | B | `KEEP_RUST` | The production accounting flow uses durable `reconcile_reserved_usage`; the generic helper has no safe Mojo production seam and the domain boundary remains Rust-only |
 | `prodex-domain::rate_limit::evaluate_rate_limit` | Evaluate bounded request-window admission arithmetic | Pure helper, not distributed admission | Fixed-width counters and timestamps | High | B | `KEEP_RUST` | Production rate limiting is owned by Redis/runtime adapters; tenant ownership, clocks, and persistence stay Rust |
@@ -103,3 +110,16 @@ Rust to recompute the semantic answer.
 The original scalar and text ABI rows remain historically accurate as the first migration wave.
 Rich ABI v5 is now the semantic boundary. JSON, TOML deserialization, credentials, prompts,
 filesystem paths, and provider wire payloads remain Rust-owned after the package/runtime review.
+
+## 0.419.1 migration wave
+
+Measured from immutable baseline `6f0f632a178492647da764e3522ff2092db40fb3` (the 0.419.0
+product state), the release transfers 491 baseline Rust semantic LOC into Mojo-authoritative
+production paths: gateway route selection, adaptive and calibrated Smart Context planning,
+quota capacity-lane planning, runtime capacity defaults, quota route scoring, critical-signal
+classification, and candidate availability/prompt-cache planning. The release retains Rust for
+profile and quota acquisition, clocks, async orchestration, file/network/process IO, persistence,
+credentials, security, and ABI/result validation. Parity evidence and final-state records live
+in `migration/mojo-ownership.json`; the superseded Rust code is either removed from the Mojo
+production path or retained only as a feature-off/test oracle where the repository's Rust-only
+compatibility build requires it.
