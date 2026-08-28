@@ -5,7 +5,7 @@ use super::{
 use crate::runtime_gateway_estimated_tokens;
 use std::collections::BTreeMap;
 
-pub(crate) fn runtime_gateway_rewrite_route_alias(
+pub fn runtime_gateway_rewrite_route_alias(
     body: &[u8],
     aliases: &[RuntimeGatewayRouteAlias],
     request_id: u64,
@@ -13,7 +13,7 @@ pub(crate) fn runtime_gateway_rewrite_route_alias(
     runtime_gateway_rewrite_route_alias_with_state(body, aliases, request_id, &BTreeMap::new())
 }
 
-pub(crate) fn runtime_gateway_rewrite_route_alias_with_state(
+pub fn runtime_gateway_rewrite_route_alias_with_state(
     body: &[u8],
     aliases: &[RuntimeGatewayRouteAlias],
     request_id: u64,
@@ -33,7 +33,8 @@ pub(crate) fn runtime_gateway_rewrite_route_alias_with_state(
         .iter()
         .find(|alias| alias.alias == requested_model && !alias.models.is_empty())?;
     let estimated_tokens = runtime_gateway_estimated_tokens(body);
-    let model = runtime_gateway_route_selected_model(alias, request_id, model_state, estimated_tokens)?;
+    let model =
+        runtime_gateway_route_selected_model(alias, request_id, model_state, estimated_tokens)?;
     object.insert(
         "model".to_string(),
         serde_json::Value::String(model.clone()),
@@ -170,7 +171,9 @@ pub(crate) fn runtime_gateway_route_selected_model_from_models_rust(
                         metrics
                             .input_cost_per_million_microusd
                             .unwrap_or_default()
-                            .saturating_add(metrics.output_cost_per_million_microusd.unwrap_or_default())
+                            .saturating_add(
+                                metrics.output_cost_per_million_microusd.unwrap_or_default(),
+                            )
                     })
                     .unwrap_or(u64::MAX)
             })
