@@ -179,16 +179,11 @@ fn quick_tunnel_ignores_existing_cloudflared_config_and_cleans_private_config() 
 import sys
 import time
 
-if len(sys.argv) > 1 and sys.argv[1] == "--version":
-    print("cloudflared version 2026.1", flush=True)
-elif len(sys.argv) > 2 and sys.argv[1] == "tunnel" and sys.argv[2] == "--help":
-    print("--config --url", flush=True)
-else:
-    print("https://isolated.trycloudflare.com", flush=True)
-    print("Registered tunnel connection protocol=http2", flush=True)
-    print("https://isolated.trycloudflare.com", file=sys.stderr, flush=True)
-    print("Registered tunnel connection protocol=http2", file=sys.stderr, flush=True)
-    time.sleep(1)
+print("https://isolated.trycloudflare.com", flush=True)
+print("Registered tunnel connection protocol=http2", flush=True)
+print("https://isolated.trycloudflare.com", file=sys.stderr, flush=True)
+print("Registered tunnel connection protocol=http2", file=sys.stderr, flush=True)
+time.sleep(1)
 "#,
     );
     let _env_lock = TestEnvVarGuard::lock();
