@@ -1,5 +1,22 @@
 [
   {
+    "id": "audited-prodex-0.419.1-migration-wave",
+    "requiredSubjects": [
+      "ci(mojo): freeze 0.419.1 migration accounting",
+      "feat(quota): plan capacity lanes through Mojo",
+      "feat(mojo): complete the 0.419.1 ownership wave",
+      "fix(runtime): rotate past unavailable profiles safely",
+      "fix(expose): budget public MCP phases independently"
+    ],
+    "caps": {
+      "maxFiles": 115,
+      "maxBehaviorFiles": 95,
+      "maxLines": 10500,
+      "maxFileLines": 500
+    },
+    "reason": "This exact 0.419.1 campaign is an audited cross-cutting ownership and reliability wave: the frozen Mojo migration, profile recovery, sticky log/header fixes, and phase-separated expose lifecycle require coordinated source, ABI, test, and evidence changes. The narrow caps cover the measured campaign while the normal global churn thresholds remain unchanged."
+  },
+  {
     "id": "audited-prodex-0.419.0-campaign-range",
     "requiredSubjects": [
       "feat(mojo): migrate deterministic runtime ownership",
