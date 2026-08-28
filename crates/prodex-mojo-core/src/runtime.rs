@@ -1,6 +1,8 @@
 #[cfg(feature = "mojo-runtime")]
 pub use crate::runtime_decisions::*;
 
+mod candidate_plan;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ProfileScoreInput {
     pub weekly_pressure: i64,
@@ -569,22 +571,7 @@ pub fn runtime_candidate_plan_batch(
     inflight_soft_limit: usize,
     responses_critical_floor_percent: i64,
 ) -> Result<RuntimeCandidatePlan, crate::MojoError> {
-    if !fields
-        .len()
-        .is_multiple_of(RUNTIME_CANDIDATE_PLAN_FIELD_COUNT)
-    {
-        return Err(crate::MojoError::InvalidInput);
-    }
-    let count = fields.len() / RUNTIME_CANDIDATE_PLAN_FIELD_COUNT;
-    if count > RUNTIME_CANDIDATE_PLAN_MAX_COUNT || excluded.len() != count {
-        return Err(crate::MojoError::InvalidInput);
-    }
-    if !(0..=3).contains(&route_kind) {
-        return Err(crate::MojoError::InvalidInput);
-    }
-    if excluded.iter().any(|flag| !matches!(flag, 0 | 1)) {
-        return Err(crate::MojoError::InvalidInput);
-    }
+    let count = candidate_plan::input_count(fields, excluded, route_kind)?;
     let inflight_soft_limit =
         i64::try_from(inflight_soft_limit).map_err(|_| crate::MojoError::InvalidInput)?;
     let mut decision_tags = vec![0_i64; count * RUNTIME_CANDIDATE_DECISION_FIELD_COUNT];
@@ -607,55 +594,16 @@ pub fn runtime_candidate_plan_batch(
             responses_critical_floor_percent,
         )
     };
-    if status != 0
-        || ready_count < 0
-        || fallback_count < 0
-        || ready_count as usize > count
-        || fallback_count as usize > count
-    {
-        return Err(crate::MojoError::InvalidOutput);
-    }
-    let ready_indices = runtime_candidate_plan_indices(&ready_indices, ready_count, count)
-        .ok_or(crate::MojoError::InvalidOutput)?;
-    let fallback_indices = runtime_candidate_plan_indices(&fallback_indices, fallback_count, count)
-        .ok_or(crate::MojoError::InvalidOutput)?;
-    let decisions = runtime_candidate_decisions(&decision_tags, count)
-        .ok_or(crate::MojoError::InvalidOutput)?;
-    if fallback_indices.len()
-        != decisions
-            .iter()
-            .filter(|decision| decision.eligible)
-            .count()
-    {
-        return Err(crate::MojoError::InvalidOutput);
-    }
-    let mut seen_ready = vec![false; count];
-    for index in &ready_indices {
-        if seen_ready[*index] {
-            return Err(crate::MojoError::InvalidOutput);
-        }
-        if !decisions[*index].eligible || fields[*index * RUNTIME_CANDIDATE_PLAN_FIELD_COUNT] != 0 {
-            return Err(crate::MojoError::InvalidOutput);
-        }
-        seen_ready[*index] = true;
-    }
-    let mut seen_fallback = vec![false; count];
-    for index in &fallback_indices {
-        if seen_fallback[*index] {
-            return Err(crate::MojoError::InvalidOutput);
-        }
-        if !decisions[*index].eligible {
-            return Err(crate::MojoError::InvalidOutput);
-        }
-        seen_fallback[*index] = true;
-    }
-    if seen_fallback
-        .iter()
-        .zip(&decisions)
-        .any(|(seen, decision)| *seen != decision.eligible)
-    {
-        return Err(crate::MojoError::InvalidOutput);
-    }
+    let (ready_indices, fallback_indices, decisions) = candidate_plan::output(
+        status,
+        ready_count,
+        fallback_count,
+        &ready_indices,
+        &fallback_indices,
+        &decision_tags,
+        count,
+    )?;
+    candidate_plan::validate(fields, &ready_indices, &fallback_indices, &decisions)?;
     Ok(RuntimeCandidatePlan {
         ready_indices,
         fallback_indices,
@@ -715,55 +663,4 @@ pub fn prompt_cache_affinity_batch(
         .zip(scores)
         .map(|(priority, score)| (u8::try_from(priority).unwrap_or(u8::MAX), score))
         .collect())
-}
-
-fn runtime_candidate_decisions(
-    tags: &[i64],
-    candidate_count: usize,
-) -> Option<Vec<RuntimeCandidateDecision>> {
-    (0..candidate_count)
-        .map(|index| {
-            let base = index * RUNTIME_CANDIDATE_DECISION_FIELD_COUNT;
-            let eligible = match tags[base] {
-                0 => false,
-                1 => true,
-                _ => return None,
-            };
-            (0..=RUNTIME_CANDIDATE_AVAILABILITY_UNKNOWN)
-                .contains(&tags[base + 1])
-                .then_some(())?;
-            (0..=RUNTIME_CANDIDATE_SKIP_EXCLUDED)
-                .contains(&tags[base + 2])
-                .then_some(())?;
-            (0..=RUNTIME_CANDIDATE_SKIP_EXCLUDED)
-                .contains(&tags[base + 3])
-                .then_some(())?;
-            (0..=RUNTIME_CANDIDATE_SKIP_EXCLUDED)
-                .contains(&tags[base + 4])
-                .then_some(())?;
-            Some(RuntimeCandidateDecision {
-                eligible,
-                availability: tags[base + 1],
-                quota_guard_reason: tags[base + 2],
-                ready_skip_reason: tags[base + 3],
-                fallback_skip_reason: tags[base + 4],
-            })
-        })
-        .collect()
-}
-
-fn runtime_candidate_plan_indices(
-    values: &[i64],
-    count: i64,
-    candidate_count: usize,
-) -> Option<Vec<usize>> {
-    values
-        .get(..usize::try_from(count).ok()?)?
-        .iter()
-        .map(|value| {
-            usize::try_from(*value)
-                .ok()
-                .filter(|index| *index < candidate_count)
-        })
-        .collect()
 }

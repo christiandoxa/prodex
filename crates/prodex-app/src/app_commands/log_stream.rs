@@ -84,32 +84,47 @@ pub(crate) fn collect_new_runtime_log_stream_items_with_throughput(
 ) -> Result<Vec<LogStreamItem>> {
     let mut items = Vec::new();
     for line in collect_new_followed_lines(path, state)? {
-        if include_operational_insights
-            && let Some(event) = operational_event_from_runtime_line(&line)?
-        {
-            items.push(LogStreamItem::Transcript(event));
-        }
-        if let Some(event) = stream_payload_event_from_runtime_line(&line) {
-            items.push(LogStreamItem::Transcript(event));
-        }
-        if let Some(event) = log_upstream_payload::upstream_payload_event_from_runtime_line(&line) {
-            items.push(LogStreamItem::UpstreamPayload(event));
-        }
-        if let Some(event) = info_token_usage_progress_event_from_line(&line)
-            && let Some(throughput) = throughput.as_deref_mut()
-        {
+        items.extend(collect_runtime_log_line(
+            path,
+            &line,
+            include_operational_insights,
+            throughput.as_deref_mut(),
+        )?);
+    }
+    Ok(items)
+}
+
+fn collect_runtime_log_line(
+    path: &Path,
+    line: &str,
+    include_operational_insights: bool,
+    mut throughput: Option<&mut OutputThroughput>,
+) -> Result<Vec<LogStreamItem>> {
+    let mut items = Vec::new();
+    if include_operational_insights && let Some(event) = operational_event_from_runtime_line(line)?
+    {
+        items.push(LogStreamItem::Transcript(event));
+    }
+    if let Some(event) = stream_payload_event_from_runtime_line(line) {
+        items.push(LogStreamItem::Transcript(event));
+    }
+    if let Some(event) = log_upstream_payload::upstream_payload_event_from_runtime_line(line) {
+        items.push(LogStreamItem::UpstreamPayload(event));
+    }
+    if let Some(event) = info_token_usage_progress_event_from_line(line)
+        && let Some(throughput) = throughput.as_deref_mut()
+    {
+        throughput.observe_token_usage(path, &event, Instant::now());
+    }
+    if let Some(event) = info_token_usage_event_from_line(line) {
+        let event = local_token_usage_event(event);
+        if let Some(throughput) = throughput {
             throughput.observe_token_usage(path, &event, Instant::now());
-        }
-        if let Some(event) = info_token_usage_event_from_line(&line) {
-            let event = local_token_usage_event(event);
-            if let Some(throughput) = throughput.as_deref_mut() {
-                throughput.observe_token_usage(path, &event, Instant::now());
-                if event.generation_ms.is_some() || event.output_tokens_per_second.is_some() {
-                    throughput.finish(path, &event);
-                }
+            if event.generation_ms.is_some() || event.output_tokens_per_second.is_some() {
+                throughput.finish(path, &event);
             }
-            items.push(LogStreamItem::TokenUsage(event));
         }
+        items.push(LogStreamItem::TokenUsage(event));
     }
     Ok(items)
 }
