@@ -53,7 +53,34 @@ pub fn provider_model_catalog(provider: ProviderId) -> &'static [ProviderModelSp
         .model_catalog()
 }
 
+#[cfg(feature = "mojo")]
 pub fn provider_model_spec(
+    provider: ProviderId,
+    model: &str,
+) -> Option<&'static ProviderModelSpec> {
+    let models = provider_model_catalog(provider);
+    let catalog = models
+        .iter()
+        .map(|spec| prodex_mojo_core::rich::CatalogModel {
+            id: spec.id,
+            aliases: spec.aliases,
+        })
+        .collect::<Vec<_>>();
+    prodex_mojo_core::rich::resolve_catalog_model(&catalog, model)
+        .expect("Mojo model catalog lookup returned an invalid structured result")
+        .and_then(|index| models.get(index))
+}
+
+#[cfg(not(feature = "mojo"))]
+pub fn provider_model_spec(
+    provider: ProviderId,
+    model: &str,
+) -> Option<&'static ProviderModelSpec> {
+    provider_model_spec_rust(provider, model)
+}
+
+#[cfg(not(feature = "mojo"))]
+pub(super) fn provider_model_spec_rust(
     provider: ProviderId,
     model: &str,
 ) -> Option<&'static ProviderModelSpec> {

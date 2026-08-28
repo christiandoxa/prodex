@@ -1,7 +1,7 @@
 use crate::{
-    RuntimeProxyQuotaWindowObservation, RuntimeResponseCandidatePlanInput,
-    RuntimeResponseCandidatePlanOptions, RuntimeRouteKind, RuntimeSelectionQuotaPressureBand,
-    RuntimeSelectionQuotaWindowStatus,
+    RuntimeProxyQuotaObservationPair, RuntimeProxyQuotaScore, RuntimeProxyQuotaWindowObservation,
+    RuntimeResponseCandidatePlanInput, RuntimeResponseCandidatePlanOptions, RuntimeRouteKind,
+    RuntimeSelectionQuotaPressureBand, RuntimeSelectionQuotaWindowStatus, RuntimeTokenUsage,
 };
 
 pub(crate) fn pressure_band_for_route(
@@ -58,6 +58,61 @@ pub(crate) fn pressure_band_from_window_status(
     }
 }
 
+pub(crate) fn quota_score_batch(
+    observations: &[RuntimeProxyQuotaObservationPair],
+    route_kind: RuntimeRouteKind,
+) -> Result<Vec<RuntimeProxyQuotaScore>, prodex_mojo_core::MojoError> {
+    let inputs = observations
+        .iter()
+        .map(|(five_hour, weekly)| {
+            let five_hour = five_hour.as_ref();
+            let weekly = weekly.as_ref();
+            prodex_mojo_core::runtime::QuotaScoreInput {
+                weekly_pressure: weekly.map_or(i64::MAX, |window| window.pressure_score),
+                five_hour_pressure: five_hour.map_or(i64::MAX, |window| window.pressure_score),
+                weekly_remaining: weekly.map_or(0, |window| window.remaining_percent),
+                five_hour_remaining: five_hour.map_or(0, |window| window.remaining_percent),
+                weekly_has_value: weekly.is_some(),
+                five_hour_has_value: five_hour.is_some(),
+                weekly_reset_at: weekly.map_or(i64::MAX, |window| window.reset_at),
+                five_hour_reset_at: five_hour.map_or(i64::MAX, |window| window.reset_at),
+            }
+        })
+        .collect::<Vec<_>>();
+    prodex_mojo_core::runtime::quota_score_batch(
+        &inputs,
+        match route_kind {
+            RuntimeRouteKind::Responses => 0,
+            RuntimeRouteKind::Compact => 1,
+            RuntimeRouteKind::Websocket => 2,
+            RuntimeRouteKind::Standard => 3,
+        },
+    )?
+    .into_iter()
+    .map(|score| {
+        let pressure_band = match score.pressure_band {
+            0 => RuntimeSelectionQuotaPressureBand::Healthy,
+            1 => RuntimeSelectionQuotaPressureBand::Thin,
+            2 => RuntimeSelectionQuotaPressureBand::Critical,
+            3 => RuntimeSelectionQuotaPressureBand::Exhausted,
+            4 => RuntimeSelectionQuotaPressureBand::Unknown,
+            _ => return Err(prodex_mojo_core::MojoError::InvalidOutput),
+        };
+        Ok(RuntimeProxyQuotaScore {
+            pressure_band,
+            total_pressure: score.total_pressure,
+            weekly_pressure: score.weekly_pressure,
+            five_hour_pressure: score.five_hour_pressure,
+            reserve_floor: score.reserve_floor,
+            weekly_remaining: score.weekly_remaining,
+            five_hour_remaining: score.five_hour_remaining,
+            weekly_reset_at: score.weekly_reset_at,
+            five_hour_reset_at: score.five_hour_reset_at,
+        })
+    })
+    .collect()
+}
+
 pub(crate) fn smart_context_estimate_tokens_from_body_bytes(body_bytes: u64) -> u64 {
     prodex_mojo_core::runtime::smart_context_estimate_tokens_from_body_bytes(body_bytes)
 }
@@ -80,6 +135,23 @@ pub(crate) fn smart_context_pressure_snapshot(
         zero_context_window,
         reserved_output_consumes_window,
     )
+}
+
+pub(crate) fn smart_context_token_usage_summary(
+    usages: &[RuntimeTokenUsage],
+) -> Result<prodex_mojo_core::runtime::SmartContextTokenUsageSummary, prodex_mojo_core::MojoError> {
+    let inputs = usages
+        .iter()
+        .map(
+            |usage| prodex_mojo_core::runtime::SmartContextTokenUsageInput {
+                input_tokens: usage.input_tokens,
+                cached_input_tokens: usage.cached_input_tokens,
+                output_tokens: usage.output_tokens,
+                reasoning_tokens: usage.reasoning_tokens,
+            },
+        )
+        .collect::<Vec<_>>();
+    prodex_mojo_core::runtime::smart_context_token_usage_summary_batch(&inputs)
 }
 
 pub(crate) fn runtime_response_candidate_plan_batch(

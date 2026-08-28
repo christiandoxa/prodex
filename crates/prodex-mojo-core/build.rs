@@ -278,6 +278,7 @@ fn selected_sources() -> Vec<&'static str> {
         sources.push("../../mojo/prodex_core/rich_policy.mojo");
         sources.push("../../mojo/prodex_core/rich_fallback.mojo");
         sources.push("../../mojo/prodex_core/rich_plan.mojo");
+        sources.push("../../mojo/prodex_core/rich_catalog.mojo");
         sources.push("../../mojo/prodex_core/log_semantics.mojo");
     }
     if env::var_os("CARGO_FEATURE_MOJO_ROUTING").is_some()

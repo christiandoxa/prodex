@@ -23,6 +23,10 @@ mod policy;
 pub use policy::{PolicyAliasInput, PolicyAliasPlan, PolicyModel, validate_policy_alias};
 mod fallback;
 pub use fallback::model_fallback_chain;
+mod catalog;
+pub use catalog::{
+    CatalogChoice, CatalogModel, merge_catalog_ids, plan_catalog_choices, resolve_catalog_model,
+};
 
 const RICH_STATUS_INVALID: i64 = 1;
 const RICH_STATUS_UTF8: i64 = 2;
@@ -453,7 +457,29 @@ pub fn rich_self_test() -> bool {
         3,
     )
     .is_ok_and(|value| value.actions[0].action == 1 && value.used_tokens == 3);
-    context && routes && policy && fallback && context_plan
+    let catalog_ids = ["alpha", "beta"];
+    let catalog_aliases = [["a"], ["b"]];
+    let catalog = catalog_ids
+        .iter()
+        .zip(&catalog_aliases)
+        .map(|(id, aliases)| CatalogModel {
+            id,
+            aliases: aliases.as_slice(),
+        })
+        .collect::<Vec<_>>();
+    let catalog = resolve_catalog_model(&catalog, " A ").is_ok_and(|value| value == Some(0))
+        && plan_catalog_choices(&catalog, &["gamma"], Some("b")).is_ok_and(|value| {
+            value
+                == [
+                    CatalogChoice::ProviderDefault,
+                    CatalogChoice::Catalog(0),
+                    CatalogChoice::Catalog(1),
+                    CatalogChoice::Configured(0),
+                    CatalogChoice::Custom,
+                ]
+        })
+        && merge_catalog_ids(&catalog, &["B", "gamma", "gamma"]).is_ok_and(|value| value == [1]);
+    context && routes && policy && fallback && context_plan && catalog
 }
 
 #[cfg(test)]

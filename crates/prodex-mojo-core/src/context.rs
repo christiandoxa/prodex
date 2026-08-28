@@ -91,7 +91,7 @@ const CRITICAL_SIGNAL_COUNTER_COUNT: usize = 7;
 const CRITICAL_SIGNAL_ROW_WIDTH: usize = 8;
 const CRITICAL_SIGNAL_MAX_LINES: usize = 65_536;
 const CRITICAL_SIGNAL_MAX_KEYS: usize = 65_536;
-const CRITICAL_SIGNAL_MAX_RANGES: usize = 256;
+const CRITICAL_SIGNAL_MAX_RANGES: usize = 1_024;
 pub const CONTEXT_TEXT_ABI_VERSION: i64 = 1;
 static CONTEXT_TEXT_ABI_READY: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
 

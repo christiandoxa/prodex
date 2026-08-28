@@ -113,3 +113,36 @@ fn rich_abi_malformed_utf8_and_capacity_are_bounded() {
     assert!(result.required_output >= input.len() as i64);
     assert!(result.required_scratch >= 1);
 }
+
+#[test]
+fn rich_catalog_handles_aliases_duplicates_and_capacity() {
+    let ids = (0..1_024)
+        .map(|index| format!("model-{index}"))
+        .collect::<Vec<_>>();
+    let aliases = vec![Vec::<&str>::new(); ids.len()];
+    let models = ids
+        .iter()
+        .zip(&aliases)
+        .map(|(id, aliases)| CatalogModel {
+            id,
+            aliases: aliases.as_slice(),
+        })
+        .collect::<Vec<_>>();
+    let choices = plan_catalog_choices(&models, &[], Some("current-model")).unwrap();
+    assert_eq!(choices.len(), 1_026);
+    assert_eq!(choices.first(), Some(&CatalogChoice::ProviderDefault));
+    assert_eq!(choices.last(), Some(&CatalogChoice::Custom));
+    assert!(!choices.contains(&CatalogChoice::Current));
+}
+
+#[test]
+fn rich_catalog_merge_deduplicates_aliases_against_canonical_ids() {
+    let models = [CatalogModel {
+        id: "gpt-5.6-sol",
+        aliases: &["sol"],
+    }];
+    assert_eq!(
+        merge_catalog_ids(&models, &["sol", "gpt-5.6-sol", "new-model"]).unwrap(),
+        [2]
+    );
+}

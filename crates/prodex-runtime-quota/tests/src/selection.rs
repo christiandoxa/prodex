@@ -45,6 +45,9 @@ fn selection_usage(now: i64, remaining: i64) -> UsageResponse {
         email: None,
         plan_type: None,
         rate_limit: Some(WindowPair {
+            allowed: None,
+            limit_reached: None,
+            extra: std::collections::BTreeMap::new(),
             primary_window: Some(UsageWindow {
                 used_percent: Some(100 - remaining),
                 reset_at: Some(now + 3_600),

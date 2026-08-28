@@ -19,6 +19,9 @@ fn usage_response(
         email: None,
         plan_type: None,
         rate_limit: Some(WindowPair {
+            allowed: None,
+            limit_reached: None,
+            extra: std::collections::BTreeMap::new(),
             primary_window: Some(UsageWindow {
                 used_percent: Some(five_hour_used_percent),
                 reset_at: Some(now + 3_600),
@@ -49,9 +52,13 @@ fn probe_cache_entry(checked_at: i64) -> RuntimeProfileProbeCacheEntry {
 
 fn spark_limit(five_hour_remaining: i64, weekly_remaining: i64, now: i64) -> AdditionalRateLimit {
     AdditionalRateLimit {
+        limit_id: None,
         limit_name: Some("GPT-5.3-Codex-Spark".to_string()),
         metered_feature: Some("codex_bengalfox".to_string()),
         rate_limit: WindowPair {
+            allowed: None,
+            limit_reached: None,
+            extra: std::collections::BTreeMap::new(),
             primary_window: Some(UsageWindow {
                 used_percent: Some(100 - five_hour_remaining),
                 reset_at: Some(now + 7_200),
@@ -63,6 +70,9 @@ fn spark_limit(five_hour_remaining: i64, weekly_remaining: i64, now: i64) -> Add
                 limit_window_seconds: Some(604_800),
             }),
         },
+        allowed: None,
+        limit_reached: None,
+        extra: std::collections::BTreeMap::new(),
     }
 }
 
@@ -78,6 +88,27 @@ fn quota_summary_for_route_matches_usage_windows() {
     assert_eq!(summary.weekly.status, RuntimeQuotaWindowStatus::Ready);
     assert_eq!(summary.weekly.remaining_percent, 80);
     assert_eq!(summary.route_band, RuntimeQuotaPressureBand::Critical);
+}
+
+#[test]
+fn quota_pressure_score_batch_matches_each_clocked_scalar_score() {
+    let now = 10_000;
+    let first = usage_response(20, 30, now);
+    let second = usage_response(96, 20, now);
+    let usages = [&first, &second];
+
+    let batch =
+        runtime_quota_pressure_sort_keys_for_route_at(&usages, RuntimeRouteKind::Responses, now);
+
+    assert_eq!(batch.len(), usages.len());
+    assert_eq!(
+        batch[0],
+        runtime_quota_pressure_sort_key_for_route_at(&first, RuntimeRouteKind::Responses, now)
+    );
+    assert_eq!(
+        batch[1],
+        runtime_quota_pressure_sort_key_for_route_at(&second, RuntimeRouteKind::Responses, now)
+    );
 }
 
 #[test]
