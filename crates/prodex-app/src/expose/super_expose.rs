@@ -107,54 +107,14 @@ pub(super) fn handle_super_expose(mut args: ExposeArgs) -> anyhow::Result<()> {
         &format!("http://{listen_addr}"),
         &bootstrap,
     ));
-    let mut tunnel = None;
-    let (public_origin, public_host) = match &endpoint {
-        ExposeEndpointMode::QuickTunnel => {
-            let mut quick_tunnel = match start_cloudflared_tunnel(&format!("http://{listen_addr}"))
-            {
-                Ok(tunnel) => tunnel,
-                Err(error) => {
-                    cleanup_super_expose(&shared, &mcp, &mut http, None);
-                    return Err(error);
-                }
-            };
-            if let Some(failure) = quick_tunnel.startup_failure.take() {
-                cleanup_super_expose(&shared, &mcp, &mut http, Some(&mut quick_tunnel));
-                return Err(anyhow::anyhow!(failure));
-            }
-            if quick_tunnel.url.is_none() {
-                let error = cloudflared_start_failure(&mut quick_tunnel);
-                cleanup_super_expose(&shared, &mcp, &mut http, Some(&mut quick_tunnel));
+    let (public_origin, public_host, mut tunnel) =
+        match start_public_endpoint(&endpoint, &format!("http://{listen_addr}")) {
+            Ok(endpoint) => endpoint,
+            Err(error) => {
+                cleanup_super_expose(&shared, &mcp, &mut http, None);
                 return Err(error);
             }
-            if let Some(transport) = quick_tunnel.effective_transport {
-                let label = match transport {
-                    CloudflaredTransport::Auto => "auto",
-                    CloudflaredTransport::Quic => "QUIC",
-                    CloudflaredTransport::Http2 => "HTTP/2",
-                };
-                print_launch_status(&format!("Cloudflare {label} transport connected."));
-            }
-            print_launch_status("Cloudflare Quick Tunnel allocated.");
-            let Some(origin) = quick_tunnel.url.clone() else {
-                let error =
-                    anyhow::anyhow!("Cloudflare Quick Tunnel did not report a public hostname");
-                cleanup_super_expose(&shared, &mcp, &mut http, Some(&mut quick_tunnel));
-                return Err(error);
-            };
-            let Some(host) = expose_public_host(&origin) else {
-                let error = anyhow::anyhow!("Cloudflare Quick Tunnel reported an invalid hostname");
-                cleanup_super_expose(&shared, &mcp, &mut http, Some(&mut quick_tunnel));
-                return Err(error);
-            };
-            tunnel = Some(quick_tunnel);
-            (origin, host)
-        }
-        ExposeEndpointMode::ExistingCloudflareTunnel { hostname, .. } => {
-            print_launch_status("Using existing Cloudflare Tunnel hostname.");
-            (format!("https://{hostname}"), hostname.clone())
-        }
-    };
+        };
     shared.allow_host(public_host.clone());
     shared.allow_mcp_only_host(public_host);
     let public_url = mcp_public_url(&public_origin, &capability);
@@ -201,6 +161,41 @@ pub(super) fn handle_super_expose(mut args: ExposeArgs) -> anyhow::Result<()> {
         bail!("Cloudflare Quick Tunnel exited after readiness; public access is unavailable")
     }
     Ok(())
+}
+
+fn start_public_endpoint(
+    endpoint: &ExposeEndpointMode,
+    local_url: &str,
+) -> anyhow::Result<(String, String, Option<super::runtime::CloudflaredTunnel>)> {
+    match endpoint {
+        ExposeEndpointMode::QuickTunnel => {
+            let mut tunnel = start_cloudflared_tunnel(local_url)?;
+            if let Some(failure) = tunnel.startup_failure.take() {
+                return Err(anyhow::anyhow!(failure));
+            }
+            let Some(transport) = tunnel.effective_transport else {
+                return Err(cloudflared_start_failure(&mut tunnel));
+            };
+            let label = match transport {
+                CloudflaredTransport::Auto => "auto",
+                CloudflaredTransport::Quic => "QUIC",
+                CloudflaredTransport::Http2 => "HTTP/2",
+            };
+            print_launch_status(&format!("Cloudflare {label} transport connected."));
+            let origin = tunnel
+                .url
+                .clone()
+                .context("Cloudflare Quick Tunnel did not report a public hostname")?;
+            let host = expose_public_host(&origin)
+                .context("Cloudflare Quick Tunnel reported an invalid hostname")?;
+            print_launch_status("Cloudflare Quick Tunnel allocated.");
+            Ok((origin, host, Some(tunnel)))
+        }
+        ExposeEndpointMode::ExistingCloudflareTunnel { hostname, .. } => {
+            print_launch_status("Using existing Cloudflare Tunnel hostname.");
+            Ok((format!("https://{hostname}"), hostname.clone(), None))
+        }
+    }
 }
 
 fn select_expose_endpoint(interactive: bool) -> anyhow::Result<ExposeEndpointMode> {
