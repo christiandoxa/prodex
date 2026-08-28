@@ -1,9 +1,9 @@
 use super::*;
 
 #[test]
-fn rich_context_counts_match_rust_oracle_for_10_000_generated_inputs() {
+fn rich_context_counts_match_rust_oracle_for_20_000_generated_inputs() {
     let mut state = 0x7269_6368_5f74_6578_u64;
-    for case in 0..10_000 {
+    for case in 0..20_000 {
         let mut input = String::new();
         let line_count = (next(&mut state) % 18) as usize;
         for line in 0..line_count {
