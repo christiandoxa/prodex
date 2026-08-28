@@ -115,7 +115,8 @@ print(json.dumps({"type": "turn.completed", "usage": {"input_tokens": 1, "output
     let output = run_ping_child(&plan).unwrap();
     assert!(output.status.success());
     assert!(validate_ping_output(&output).is_ok());
-    assert_eq!(fs::read_dir(&root).unwrap().count(), 1);
+    let expected_files = if cfg!(windows) { 2 } else { 1 };
+    assert_eq!(fs::read_dir(&root).unwrap().count(), expected_files);
     fs::remove_dir_all(root).unwrap();
 }
 
