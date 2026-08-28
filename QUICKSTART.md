@@ -177,9 +177,12 @@ Settings → Security and login → Developer mode → Plugins → + → Public 
 The URL ends in `/mcp` and contains a fresh ephemeral full-Super capability.
 Anyone with the full URL can control that expose process, so treat it as a
 credential. This is not OAuth and is for personal development only. No
-Cloudflare account or initialization is required, but `cloudflared` must be
-installed. Quick Tunnel mode uses JSON responses and run polling instead of
-SSE. Stop the process with Ctrl+C to revoke access.
+Cloudflare account or initialization is required for the default Quick Tunnel,
+but `cloudflared` must be installed. Quick Tunnel prefers QUIC over outbound
+UDP/7844 and falls back to HTTP/2 over TCP/7844. The interactive flow can also
+use an existing user-managed Cloudflare hostname and loopback origin port;
+Prodex does not manage that tunnel. Both modes use JSON responses and run
+polling instead of SSE. Stop the process with Ctrl+C to revoke access.
 
 To use parallel workspaces, create separate worktrees and run one process in
 each; every process has its own port, hostname, capability, server identity,

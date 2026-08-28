@@ -615,6 +615,10 @@ shared-state integration around those operations.
 - Runtime hot paths must avoid broad disk reads, quota probes, or blocking state saves.
 - Quota, budget, transport, and local pressure signals must stay classified separately.
 - An available weekly quota window remains eligible when the 5-hour window is absent or unknown; explicit exhaustion still blocks selection.
+- OpenAI `additional_rate_limits` are preserved as independent backend buckets, including their
+  explicit `allowed` and `limit_reached` fields and unknown future fields. The pinned Codex
+  `rust-v0.150.1` contract does not identify a Luna Reserve bucket or map it to a model, so Prodex
+  reports such data generically and does not infer Reserve entitlement from plan or model names.
 - Resume launches preserve the session's last model unless the user supplies an explicit model override.
 - A fresh successful quota fetch is authoritative over historical authentication-backoff diagnostics.
 - Selection, admission, affinity, backoff, and first-chunk events must be structured in runtime logs.

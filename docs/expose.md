@@ -3,9 +3,10 @@
 `prodex s expose` is a personal-development frontend for the real Prodex Super
 runtime. It captures the current working directory, resolves the Super
 configuration, starts the existing loopback expose listener, adds a focused
-Streamable HTTP MCP route, starts an isolated `cloudflared tunnel --config <private-temp-config>
---url http://127.0.0.1:<port>` invocation, validates the reported Quick Tunnel hostname, and
-probes the public endpoint before printing its URL.
+Streamable HTTP MCP route, and probes the public endpoint before printing its URL.
+The default public endpoint is an isolated `cloudflared tunnel --protocol auto`
+Quick Tunnel; an interactive expose may instead consume an existing
+user-managed Cloudflare hostname and its configured loopback port.
 
 ## Modes
 
@@ -16,7 +17,7 @@ probes the public endpoint before printing its URL.
 | `prodex expose --no-tunnel` | Existing local-only compatibility mode. |
 | `prodex s expose --no-tunnel` | Existing local-only browser-terminal mode. |
 | `prodex s expose --tunnel` | Existing explicit public browser-terminal meaning. |
-| `prodex s expose` | Super configuration followed by MCP-only Quick Tunnel mode. |
+| `prodex s expose` | Super configuration followed by a Quick Tunnel (default) or an existing user-managed Cloudflare hostname. |
 
 The public default does not publish `/expose`, `/input`, `/output`, `/stream`,
 `/static`, or any other browser route. The loopback host keeps the browser
@@ -27,11 +28,14 @@ terminal and can be used for local protocol tests.
 Interactive setup runs before capability generation or process startup:
 
 1. main agent;
-2. main model;
-3. main reasoning effort, constrained by the selected model;
-4. sub-agent enablement;
-5. existing sub-agent provider/model/effort configuration when enabled;
-6. resolved configuration summary.
+2. main provider;
+3. main model;
+4. main reasoning effort, constrained by the selected model;
+5. sub-agent enablement;
+6. existing sub-agent provider/model/effort configuration when enabled;
+7. resolved configuration summary;
+8. public endpoint: Quick Tunnel or existing Cloudflare Tunnel; the latter asks for a public hostname and local origin port;
+9. final confirmation before capability/listener startup.
 
 The main and sub-agent model/effort choices use shared selection logic but
 role-specific catalogs: the main agent uses the provider/Codex top-level catalog,
@@ -44,10 +48,15 @@ normal Prodex defaults are resolved in that order.
 
 ## Authentication and transport
 
-The URL has this form:
+The URL has this form in either endpoint mode:
 
 ```text
-https://<random>.trycloudflare.com/pdx/v1/<opaque-capability>/mcp
+https://<configured-hostname>/pdx/v1/<opaque-capability>/mcp
+
+Quick Tunnel uses a random `*.trycloudflare.com` hostname. Existing Tunnel
+mode uses the exact validated hostname entered by the user. The stable hostname
+is routing identity only; the 256-bit capability path remains the required
+authentication.
 ```
 
 The capability is 32 bytes from the operating-system CSPRNG, encoded with
@@ -97,9 +106,11 @@ state; Super remains the owner of execution semantics.
 ## Parallel workspaces
 
 One expose process is the isolation unit. It owns one captured workspace, one
-capability digest, one MCP identity, one tunnel, one run manager, and its own
-child process groups. It binds to `127.0.0.1:0`, so multiple instances need no
-manual port assignment and do not share a tunnel or kill group.
+capability digest, one MCP identity, one endpoint selection, one run manager,
+and its own child process groups. Quick Tunnel instances bind to
+`127.0.0.1:0`. Existing Tunnel instances bind to the configured fixed
+loopback port, so parallel custom sessions use distinct hostname/port mappings.
+Prodex never stops or edits a user-managed Cloudflare service.
 
 ```bash
 git worktree add ../feature-a -b feature/a
@@ -128,16 +139,31 @@ Git conflicts.
 ## Cloudflare lifecycle
 
 `cloudflared` is detected with `cloudflared --version` and its tunnel help before Quick Tunnel
-startup. Prodex invokes it directly with typed arguments, isolates it from any default user
-configuration, and bounds output readers,
+startup. Prodex invokes managed Quick Tunnels with `--protocol auto`, preferring
+QUIC over UDP/7844 and allowing cloudflared's HTTP/2/TCP/7844 fallback. It
+isolates the child from default user configuration, bounds output readers,
 accepts only strict HTTPS `*.trycloudflare.com` hostnames, adds that exact Host
-to the MCP-only route policy, and waits for a public MCP probe. The probe checks
-modern `server/discover` where available (or legacy `initialize`) and then
-`tools/list`. A hostname appearing in logs is not readiness.
+to the MCP-only route policy, and waits for a public MCP probe. Existing Tunnel
+mode does not launch, stop, or reconfigure cloudflared; it validates the exact
+user hostname and probes its capability route. A hostname appearing in logs is
+not readiness.
 
-No account, login, DNS record, OAuth page, or manually authored reverse-proxy
-configuration is used. If `cloudflared` is missing, install it through the
-official platform instructions; `--no-tunnel` remains available for local use.
+The Cloudflare edge connection is outbound: QUIC uses UDP/7844 and the HTTP/2
+fallback uses TCP/7844. Cloudflare management/update traffic may use TCP/443.
+The Prodex origin stays on a loopback HTTP address; no inbound firewall port is
+required. Quick Tunnel transport negotiation is separate from public DNS/TLS
+and MCP `initialize`/`tools/list` readiness.
+
+If auto negotiation has not registered a transport by its bounded startup
+deadline, Prodex terminates that managed child and makes one explicit HTTP/2
+attempt. This compatibility path is still per-instance and does not persist a
+network preference; future exposes try `auto` again.
+
+Quick Tunnel mode needs no account, login, DNS record, OAuth page, or manually
+authored reverse-proxy configuration. Existing Tunnel mode assumes the user has
+already configured the hostname and service. If `cloudflared` is missing, install
+it through the official platform instructions; `--no-tunnel` remains available
+for local use.
 If the child exits after readiness, Prodex fails closed and asks the user to
 rerun rather than silently creating a new stale URL.
 

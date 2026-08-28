@@ -55,6 +55,12 @@ request has not yet committed to a profile. Quota classification should remain
 specific: generic upstream `429` is not account quota unless the payload clearly
 identifies quota or rate-limit exhaustion.
 
+OpenAI regular usage, additional rate-limit buckets, credits, and reset credits
+remain separate. Additional buckets are retained with explicit backend admission
+state and unknown fields; the pinned Codex compatibility target provides no
+source-backed Luna Reserve identifier or model mapping, so unknown Reserve state
+is not promoted into automatic routing.
+
 Route-scoped health should remain route-scoped. A `responses` transport penalty
 must not automatically poison `/responses/compact` or websocket selection unless
 there is explicit evidence.
@@ -89,7 +95,8 @@ release-vetted metadata compiled into Prodex.
 
 An expose process is intentionally process-local. It owns one captured initial
 workspace, one ephemeral capability digest, one MCP server identity, one
-Quick Tunnel child, one resolved Super configuration, one bounded run manager,
+selected public endpoint (and a Quick Tunnel child only when Prodex-managed),
+one resolved Super configuration, one bounded run manager,
 and one set of child process groups. It does not persist the capability, run
 table, task text, event history, or active model/effort configuration.
 
