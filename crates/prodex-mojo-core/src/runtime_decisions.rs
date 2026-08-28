@@ -28,6 +28,53 @@ pub struct SmartContextTokenUsageSummary {
     pub last_observed_context_tokens: u64,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SmartContextCalibratedEstimateInput {
+    pub body_bytes: u64,
+    pub baseline_estimate: u64,
+    pub observed_accounted_input: Option<u64>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SmartContextAdaptiveBudgetPlan {
+    pub tier: i64,
+    pub mode: i64,
+    pub max_inline_bytes: u64,
+    pub max_rehydrate_tokens: u64,
+    pub reason_bits: u64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SmartContextRewriteTelemetryInput {
+    pub body_bytes_before: u64,
+    pub body_bytes_after: u64,
+    pub tokens_before: u64,
+    pub tokens_after: u64,
+    pub token_count_source: i64,
+    pub safe: bool,
+    pub fallback: bool,
+    pub quality_risk: bool,
+}
+
+pub const SMART_CONTEXT_BUDGET_MODE_EXACT: i64 = 0;
+pub const SMART_CONTEXT_BUDGET_MODE_LARGE: i64 = 1;
+pub const SMART_CONTEXT_BUDGET_MODE_CONDENSED: i64 = 2;
+pub const SMART_CONTEXT_BUDGET_MODE_MINIMAL: i64 = 3;
+pub const SMART_CONTEXT_BUDGET_DECISION_NO_CHANGE: i64 = 0;
+pub const SMART_CONTEXT_BUDGET_DECISION_RELAX: i64 = 1;
+pub const SMART_CONTEXT_BUDGET_DECISION_TIGHTEN: i64 = 2;
+pub const SMART_CONTEXT_POLICY_REASON_EXACTNESS_REQUIRED: u64 = 1 << 0;
+pub const SMART_CONTEXT_POLICY_REASON_STATIC_CONTEXT_CHANGED: u64 = 1 << 1;
+pub const SMART_CONTEXT_POLICY_REASON_MISSING_REHYDRATE_REFS: u64 = 1 << 2;
+pub const SMART_CONTEXT_POLICY_REASON_UNKNOWN_TOKEN_WINDOW: u64 = 1 << 3;
+pub const SMART_CONTEXT_POLICY_REASON_UNSAFE_ACCOUNTING: u64 = 1 << 4;
+pub const SMART_CONTEXT_POLICY_REASON_RECENT_REWRITE_SAVINGS_SAFE: u64 = 1 << 5;
+pub const SMART_CONTEXT_POLICY_REASON_PLENTY_OF_BUDGET: u64 = 1 << 6;
+pub const SMART_CONTEXT_POLICY_REASON_MODERATE_BUDGET: u64 = 1 << 7;
+pub const SMART_CONTEXT_POLICY_REASON_TIGHT_BUDGET: u64 = 1 << 8;
+pub const SMART_CONTEXT_POLICY_REASON_CRITICAL_BUDGET: u64 = 1 << 9;
+pub const SMART_CONTEXT_POLICY_REASON_ALL: u64 = (1 << 10) - 1;
+
 pub const SMART_CONTEXT_TOKEN_ACCOUNTING_MAX_COUNT: usize = 256;
 
 pub const OPTIMISTIC_CANDIDATE_KEEP: i64 = 0;
@@ -137,6 +184,55 @@ unsafe extern "C" {
         last_input_tokens_address: u64,
         last_accounted_input_tokens_address: u64,
         last_observed_context_tokens_address: u64,
+        count: i64,
+    ) -> i64;
+    fn prodex_smart_context_exactness_plan_v1(
+        exact_mode: i64,
+        previous_response_present: i64,
+        turn_state_present: i64,
+        session_present: i64,
+        tool_output_without_artifact: i64,
+        decision: *mut i64,
+        reason_bits: *mut u64,
+    ) -> i64;
+    fn prodex_smart_context_calibrated_estimate_batch(
+        body_bytes_address: u64,
+        baseline_estimate_address: u64,
+        observed_accounted_input_address: u64,
+        observed_present_address: u64,
+        calibrated_estimate_address: u64,
+        count: i64,
+    ) -> i64;
+    fn prodex_smart_context_adaptive_budget_plan_v1(
+        available_context_tokens: u64,
+        available_has_value: i64,
+        exactness_required: i64,
+        static_context_changed: i64,
+        missing_rehydrate_refs: i64,
+        unknown_token_window: i64,
+        unsafe_accounting: i64,
+        safe_rewrites: u64,
+        fallback_rewrites: u64,
+        saved_tokens: u64,
+        tier: *mut i64,
+        mode: *mut i64,
+        max_inline_bytes: *mut u64,
+        max_rehydrate_tokens: *mut u64,
+        reason_bits: *mut u64,
+    ) -> i64;
+    fn prodex_smart_context_rewrite_telemetry_decision_v1(
+        body_bytes_before_address: u64,
+        body_bytes_after_address: u64,
+        tokens_before_address: u64,
+        tokens_after_address: u64,
+        token_count_source_address: u64,
+        safe_address: u64,
+        fallback_address: u64,
+        quality_risk_address: u64,
+        recent_safe_rewrites: u64,
+        recent_fallback_rewrites: u64,
+        recent_saved_tokens: u64,
+        decision: *mut i64,
         count: i64,
     ) -> i64;
 }
@@ -249,6 +345,200 @@ pub fn smart_context_token_usage_summary_self_test() -> bool {
             && summary.last_accounted_input_tokens == 8
             && summary.last_observed_context_tokens == 8
     })
+}
+
+pub fn smart_context_exactness_plan(
+    exact_mode: bool,
+    previous_response_present: bool,
+    turn_state_present: bool,
+    session_present: bool,
+    tool_output_without_artifact: bool,
+) -> Result<(i64, u64), crate::MojoError> {
+    let mut decision = -1_i64;
+    let mut reason_bits = 0_u64;
+    let status = unsafe {
+        prodex_smart_context_exactness_plan_v1(
+            i64::from(exact_mode),
+            i64::from(previous_response_present),
+            i64::from(turn_state_present),
+            i64::from(session_present),
+            i64::from(tool_output_without_artifact),
+            &mut decision,
+            &mut reason_bits,
+        )
+    };
+    if status != 0 {
+        return Err(crate::MojoError::InvalidOutput);
+    }
+    if !matches!(decision, 0 | 1) || reason_bits & !31 != 0 {
+        return Err(crate::MojoError::InvalidOutput);
+    }
+    Ok((decision, reason_bits))
+}
+
+pub const SMART_CONTEXT_CALIBRATION_MAX_COUNT: usize = 64;
+
+pub fn smart_context_calibrated_estimate_batch(
+    inputs: &[SmartContextCalibratedEstimateInput],
+) -> Result<Vec<u64>, crate::MojoError> {
+    if inputs.len() > SMART_CONTEXT_CALIBRATION_MAX_COUNT {
+        return Err(crate::MojoError::InvalidInput);
+    }
+    if inputs.is_empty() {
+        return Ok(Vec::new());
+    }
+    let body_bytes = inputs
+        .iter()
+        .map(|input| input.body_bytes)
+        .collect::<Vec<_>>();
+    let baseline_estimates = inputs
+        .iter()
+        .map(|input| input.baseline_estimate)
+        .collect::<Vec<_>>();
+    let observed_accounted_input = inputs
+        .iter()
+        .map(|input| input.observed_accounted_input.unwrap_or_default())
+        .collect::<Vec<_>>();
+    let observed_present = inputs
+        .iter()
+        .map(|input| i64::from(input.observed_accounted_input.is_some()))
+        .collect::<Vec<_>>();
+    let mut calibrated_estimates = vec![0_u64; inputs.len()];
+    let status = unsafe {
+        prodex_smart_context_calibrated_estimate_batch(
+            body_bytes.as_ptr() as u64,
+            baseline_estimates.as_ptr() as u64,
+            observed_accounted_input.as_ptr() as u64,
+            observed_present.as_ptr() as u64,
+            calibrated_estimates.as_mut_ptr() as u64,
+            i64::try_from(inputs.len()).map_err(|_| crate::MojoError::InvalidInput)?,
+        )
+    };
+    if status != 0 {
+        return Err(crate::MojoError::InvalidOutput);
+    }
+    Ok(calibrated_estimates)
+}
+
+pub fn smart_context_adaptive_budget_plan(
+    available_context_tokens: Option<u64>,
+    exactness_required: bool,
+    static_context_changed: bool,
+    missing_rehydrate_refs: bool,
+    unknown_token_window: bool,
+    unsafe_accounting: bool,
+    safe_rewrites: usize,
+    fallback_rewrites: usize,
+    saved_tokens: u64,
+) -> Result<SmartContextAdaptiveBudgetPlan, crate::MojoError> {
+    let mut tier = -1_i64;
+    let mut mode = -1_i64;
+    let mut max_inline_bytes = 0_u64;
+    let mut max_rehydrate_tokens = 0_u64;
+    let mut reason_bits = 0_u64;
+    let status = unsafe {
+        prodex_smart_context_adaptive_budget_plan_v1(
+            available_context_tokens.unwrap_or_default(),
+            i64::from(available_context_tokens.is_some()),
+            i64::from(exactness_required),
+            i64::from(static_context_changed),
+            i64::from(missing_rehydrate_refs),
+            i64::from(unknown_token_window),
+            i64::from(unsafe_accounting),
+            u64::try_from(safe_rewrites).map_err(|_| crate::MojoError::InvalidInput)?,
+            u64::try_from(fallback_rewrites).map_err(|_| crate::MojoError::InvalidInput)?,
+            saved_tokens,
+            &mut tier,
+            &mut mode,
+            &mut max_inline_bytes,
+            &mut max_rehydrate_tokens,
+            &mut reason_bits,
+        )
+    };
+    if status != 0
+        || !(0..=3).contains(&tier)
+        || !(SMART_CONTEXT_BUDGET_MODE_EXACT..=SMART_CONTEXT_BUDGET_MODE_MINIMAL).contains(&mode)
+        || reason_bits & !SMART_CONTEXT_POLICY_REASON_ALL != 0
+    {
+        return Err(crate::MojoError::InvalidOutput);
+    }
+    Ok(SmartContextAdaptiveBudgetPlan {
+        tier,
+        mode,
+        max_inline_bytes,
+        max_rehydrate_tokens,
+        reason_bits,
+    })
+}
+
+pub const SMART_CONTEXT_REWRITE_TELEMETRY_MAX_COUNT: usize = 64;
+
+pub fn smart_context_rewrite_telemetry_budget_decision(
+    inputs: &[SmartContextRewriteTelemetryInput],
+    recent_safe_rewrites: usize,
+    recent_fallback_rewrites: usize,
+    recent_saved_tokens: u64,
+) -> Result<i64, crate::MojoError> {
+    if inputs.len() > SMART_CONTEXT_REWRITE_TELEMETRY_MAX_COUNT {
+        return Err(crate::MojoError::InvalidInput);
+    }
+    let body_bytes_before = inputs
+        .iter()
+        .map(|input| input.body_bytes_before)
+        .collect::<Vec<_>>();
+    let body_bytes_after = inputs
+        .iter()
+        .map(|input| input.body_bytes_after)
+        .collect::<Vec<_>>();
+    let tokens_before = inputs
+        .iter()
+        .map(|input| input.tokens_before)
+        .collect::<Vec<_>>();
+    let tokens_after = inputs
+        .iter()
+        .map(|input| input.tokens_after)
+        .collect::<Vec<_>>();
+    let token_count_source = inputs
+        .iter()
+        .map(|input| input.token_count_source)
+        .collect::<Vec<_>>();
+    let safe = inputs
+        .iter()
+        .map(|input| i64::from(input.safe))
+        .collect::<Vec<_>>();
+    let fallback = inputs
+        .iter()
+        .map(|input| i64::from(input.fallback))
+        .collect::<Vec<_>>();
+    let quality_risk = inputs
+        .iter()
+        .map(|input| i64::from(input.quality_risk))
+        .collect::<Vec<_>>();
+    let mut decision = -1_i64;
+    let status = unsafe {
+        prodex_smart_context_rewrite_telemetry_decision_v1(
+            body_bytes_before.as_ptr() as u64,
+            body_bytes_after.as_ptr() as u64,
+            tokens_before.as_ptr() as u64,
+            tokens_after.as_ptr() as u64,
+            token_count_source.as_ptr() as u64,
+            safe.as_ptr() as u64,
+            fallback.as_ptr() as u64,
+            quality_risk.as_ptr() as u64,
+            u64::try_from(recent_safe_rewrites).map_err(|_| crate::MojoError::InvalidInput)?,
+            u64::try_from(recent_fallback_rewrites).map_err(|_| crate::MojoError::InvalidInput)?,
+            recent_saved_tokens,
+            &mut decision,
+            i64::try_from(inputs.len()).map_err(|_| crate::MojoError::InvalidInput)?,
+        )
+    };
+    if status != 0
+        || !(SMART_CONTEXT_BUDGET_DECISION_NO_CHANGE..=SMART_CONTEXT_BUDGET_DECISION_TIGHTEN)
+            .contains(&decision)
+    {
+        return Err(crate::MojoError::InvalidOutput);
+    }
+    Ok(decision)
 }
 
 pub fn optimistic_current_candidate_decision(

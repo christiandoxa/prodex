@@ -111,6 +111,34 @@ pub struct SmartContextExactnessGuard {
 pub fn smart_context_exactness_guard(
     input: SmartContextExactnessInput,
 ) -> SmartContextExactnessGuard {
+    #[cfg(feature = "mojo")]
+    {
+        let decision = prodex_mojo_core::runtime::smart_context_exactness_plan(
+            input.exact_mode,
+            input.previous_response_id.as_deref().is_some_and(non_empty),
+            input.turn_state.as_deref().is_some_and(non_empty),
+            input.session_id.as_deref().is_some_and(non_empty),
+            input.tool_output_without_artifact,
+        )
+        .expect("Mojo Smart Context exactness planner returned invalid output");
+        return SmartContextExactnessGuard {
+            decision: match decision.0 {
+                0 => SmartContextExactnessDecision::Allow,
+                1 => SmartContextExactnessDecision::RequireExact,
+                _ => unreachable!("Mojo Smart Context exactness decision was validated"),
+            },
+            reasons: smart_context_exactness_reasons_from_bits(decision.1),
+        };
+    }
+
+    #[cfg(not(feature = "mojo"))]
+    smart_context_exactness_guard_rust(input)
+}
+
+#[cfg(any(not(feature = "mojo"), test))]
+fn smart_context_exactness_guard_rust(
+    input: SmartContextExactnessInput,
+) -> SmartContextExactnessGuard {
     let mut reasons = Vec::new();
     if input.exact_mode {
         reasons.push(SmartContextExactnessReason::ExplicitExactMode);
@@ -134,6 +162,48 @@ pub fn smart_context_exactness_guard(
             SmartContextExactnessDecision::RequireExact
         },
         reasons,
+    }
+}
+
+#[cfg(feature = "mojo")]
+fn smart_context_exactness_reasons_from_bits(bits: u64) -> Vec<SmartContextExactnessReason> {
+    [
+        (1_u64 << 0, SmartContextExactnessReason::ExplicitExactMode),
+        (
+            1_u64 << 1,
+            SmartContextExactnessReason::PreviousResponseAffinity,
+        ),
+        (1_u64 << 2, SmartContextExactnessReason::TurnStateAffinity),
+        (1_u64 << 3, SmartContextExactnessReason::SessionAffinity),
+        (
+            1_u64 << 4,
+            SmartContextExactnessReason::ToolOutputWithoutArtifact,
+        ),
+    ]
+    .into_iter()
+    .filter_map(|(bit, reason)| (bits & bit != 0).then_some(reason))
+    .collect()
+}
+
+#[cfg(all(test, feature = "mojo"))]
+mod mojo_tests {
+    use super::*;
+
+    #[test]
+    fn exactness_planner_matches_rust_precedence() {
+        for mask in 0..32_u8 {
+            let input = SmartContextExactnessInput {
+                exact_mode: mask & 1 != 0,
+                previous_response_id: (mask & 2 != 0).then(|| "response".to_string()),
+                turn_state: (mask & 4 != 0).then(|| "turn".to_string()),
+                session_id: (mask & 8 != 0).then(|| "session".to_string()),
+                tool_output_without_artifact: mask & 16 != 0,
+                missing_rehydrate_refs: vec!["not used by this guard".to_string()],
+            };
+            let expected = smart_context_exactness_guard_rust(input.clone());
+            let actual = smart_context_exactness_guard(input);
+            assert_eq!(actual, expected, "exactness case {mask}");
+        }
     }
 }
 
