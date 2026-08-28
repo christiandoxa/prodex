@@ -3,11 +3,10 @@ pub(super) use self::render::log_snapshot_items;
 pub(super) use self::render::log_stream_tui_text;
 use super::{
     FollowedLog, FollowedLogPaths, LOG_SNAPSHOT_TAIL_BYTES, LogStreamItem, TranscriptEvent,
-    collect_new_runtime_log_stream_items,
-    collect_new_runtime_log_stream_items_with_throughput, collect_new_transcript_events,
-    latest_transcript_event, local_token_usage_event, print_log_stream_item, print_token_usage_event,
-    print_transcript_event, print_upstream_payload_event, recent_session_log_paths,
-    retain_followed_logs,
+    collect_new_runtime_log_stream_items, collect_new_runtime_log_stream_items_with_throughput,
+    collect_new_transcript_events, latest_transcript_event, local_token_usage_event,
+    print_log_stream_item, print_token_usage_event, print_transcript_event,
+    print_upstream_payload_event, recent_session_log_paths, retain_followed_logs,
 };
 use crate::app_commands::collect_recent_runtime_log_paths;
 use crate::app_commands::log_tui::{
@@ -417,7 +416,10 @@ fn push_log_stream_item(items: &mut VecDeque<LogStreamItem>, item: LogStreamItem
 fn latest_log_stream_profile(items: &VecDeque<LogStreamItem>) -> Option<&str> {
     items.iter().rev().find_map(|item| match item {
         LogStreamItem::TokenUsage(event) => Some(event.profile.as_str()),
-        LogStreamItem::UpstreamPayload(event) => Some(event.profile.as_str()),
+        // Upstream payload metadata is a route observation, not the header's canonical
+        // profile identity.  The shared header falls back to AppState when no token event
+        // supplies a profile, so a payload field cannot replace quota/profile state.
+        LogStreamItem::UpstreamPayload(_) => None,
         LogStreamItem::Transcript(_) => None,
     })
 }
@@ -436,6 +438,23 @@ fn render_log_stream_tui(
 mod tests {
     use super::*;
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+
+    #[test]
+    fn upstream_payload_metadata_cannot_replace_stream_header_profile() {
+        let items = VecDeque::from([LogStreamItem::UpstreamPayload(UpstreamPayloadEvent {
+            timestamp: "2026-08-28 10:00:00".to_string(),
+            request: Some(1),
+            transport: "http".to_string(),
+            route: "responses".to_string(),
+            profile: "second".to_string(),
+            bytes: 1,
+            logged_bytes: 1,
+            truncated: false,
+            payload: "{}".to_string(),
+        })]);
+
+        assert_eq!(latest_log_stream_profile(&items), None);
+    }
 
     fn key(code: KeyCode) -> KeyEvent {
         KeyEvent::new(code, KeyModifiers::NONE)
