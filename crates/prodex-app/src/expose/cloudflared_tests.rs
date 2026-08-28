@@ -117,10 +117,8 @@ else:
         tunnel.effective_transport,
         Some(CloudflaredTransport::Http2)
     );
-    assert_eq!(
-        fs::read_to_string(&marker).unwrap(),
-        "auto:None\nhttp2:None\n"
-    );
+    let marker_contents = fs::read_to_string(&marker).unwrap().replace("\r\n", "\n");
+    assert_eq!(marker_contents, "auto:None\nhttp2:None\n");
     assert_eq!(
         tunnel.url.as_deref(),
         Some("https://http2.trycloudflare.com")
