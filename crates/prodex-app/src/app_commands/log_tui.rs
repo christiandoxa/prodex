@@ -316,7 +316,8 @@ fn canonical_header_profile(
         .map(str::trim)
         .filter(|profile| !profile.is_empty() && *profile != "-");
     if let Some(state) = state {
-        if let Some(profile) = preferred_profile.filter(|profile| state.profiles.contains_key(*profile))
+        if let Some(profile) =
+            preferred_profile.filter(|profile| state.profiles.contains_key(*profile))
         {
             return Some(profile.to_string());
         }
@@ -589,7 +590,10 @@ mod tests {
         };
 
         assert_eq!(canonical_header_profile(Some("second"), Some(&state)), None);
-        assert_eq!(canonical_header_profile(Some("second"), None), Some("second".to_string()));
+        assert_eq!(
+            canonical_header_profile(Some("second"), None),
+            Some("second".to_string())
+        );
     }
 
     #[test]
