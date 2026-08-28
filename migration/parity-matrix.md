@@ -77,7 +77,7 @@ These rows supersede the baseline's normalization-only boundary descriptions.
 
 | Component | Rust oracle | Mojo entry point | Inputs/outputs | Coverage | Status |
 | --- | --- | --- | --- | --- | --- |
-| Context diagnostic analysis | `critical_signal_counts_for_line` plus Rust normalized text | `prodex_mojo_rich_context_analyze_v2` | bounded UTF-8 text; grouped `DiagnosticRecord` table, counts, normalized output strings | existing context suite plus 10,000 generated Unicode/ANSI/CRLF cases | `MOJO` |
+| Context diagnostic analysis | `critical_signal_counts_for_line` plus Rust normalized text | `prodex_mojo_rich_context_analyze_v2` | bounded UTF-8 text; grouped `DiagnosticRecord` table, counts, normalized output strings | existing context suite plus 20,000 generated Unicode/ANSI/CRLF cases | `MOJO` |
 | Provider/model fallback parser | `provider_model_fallback_chain_rust` | `prodex_mojo_rich_model_fallback_v2` | provider/model UTF-8 views; ordered deduped model records | 20,000 valid/invalid `combo:` and alias cases plus exact Gemini catalog aliases | `MOJO` |
 | Gateway route-alias policy parser | `validate_gateway_route_alias_rust` | `prodex_mojo_rich_policy_alias_v2` | alias, model list, optional strategy, metric list; normalized model records or issue fields | 20,000 generated valid/invalid grammar cases and existing policy suite | `MOJO` |
 | Governed provider route plan | `plan_governed_provider_route_rust` | `prodex_mojo_rich_route_plan_v2` | provider/model/capability text and bounded signals; candidate objects, score components, reasons, order | 10,000 generated candidate sets plus existing provider SPI suite | `MOJO` |
@@ -87,3 +87,9 @@ These rows supersede the baseline's normalization-only boundary descriptions.
 Each Rust wrapper validates version, status, counts, offsets, lengths, UTF-8, indices, tags,
 ordering, and duplicate invariants. The Rust implementations remain test-only or Rust-only-target
 oracles and are never selected after a Mojo-enabled error.
+
+The release-wide generated differential corpus contains 55,000 deterministic cases: 20,000
+Unicode/ANSI/CRLF context cases, 20,000 valid/invalid fallback-parser cases, 10,000 governed
+provider candidate sets, and 5,000 optimistic runtime-selection cases. Parser, routing, and
+selection cases compare the Mojo result with a Rust oracle; malformed ABI and boundary corpora
+remain additional negative coverage.
