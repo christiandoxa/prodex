@@ -157,14 +157,14 @@ exit 0
         r#"@echo off
 setlocal EnableExtensions
 > "%TEST_CODEX_LOG%" echo %CODEX_HOME%
-if defined TEST_CODEX_LOG_APPEND >> "%TEST_CODEX_LOG_APPEND%" echo %CODEX_HOME%
+if defined TEST_CODEX_LOG_APPEND call :prodex_append_line "%TEST_CODEX_LOG_APPEND%" "%CODEX_HOME%"
 set "prodex_first_arg=%~1"
 set "prodex_with_api_key="
 set "prodex_json="
 if /I not "%prodex_first_arg%"=="app-server" if defined TEST_CODEX_ARGS_LOG if not defined TEST_CODEX_ARGS_LOG_APPEND type nul > "%TEST_CODEX_ARGS_LOG%"
 :prodex_args
 if "%~1"=="" goto prodex_stdin
-if /I not "%prodex_first_arg%"=="app-server" if defined TEST_CODEX_ARGS_LOG >> "%TEST_CODEX_ARGS_LOG%" echo %~1
+if /I not "%prodex_first_arg%"=="app-server" if defined TEST_CODEX_ARGS_LOG call :prodex_append_line "%TEST_CODEX_ARGS_LOG%" "%~1"
 if /I "%~1"=="--with-api-key" set "prodex_with_api_key=1"
 if /I "%~1"=="--json" set "prodex_json=1"
 shift
@@ -206,6 +206,19 @@ if not defined TEST_MEMORY_MARKER goto prodex_done
 if not exist "%CODEX_HOME%\memories" mkdir "%CODEX_HOME%\memories"
 > "%CODEX_HOME%\memories\%TEST_MEMORY_MARKER%.json" echo {"memory":"%TEST_MEMORY_MARKER%"}
 :prodex_done
+exit /b 0
+:prodex_append_line
+set "prodex_append_path=%~1"
+set "prodex_append_value=%~2"
+set "prodex_append_lock=%prodex_append_path%.lock"
+:prodex_append_wait
+2>nul mkdir "%prodex_append_lock%"
+if errorlevel 1 (
+  powershell.exe -NoProfile -NonInteractive -Command "Start-Sleep -Milliseconds 10"
+  goto prodex_append_wait
+)
+>> "%prodex_append_path%" echo %prodex_append_value%
+rmdir "%prodex_append_lock%" >nul 2>&1
 exit /b 0
 "#,
     );

@@ -9,7 +9,7 @@ use std::env;
 use std::fmt;
 use std::io::{self, Read, Write};
 use std::net::{TcpListener, TcpStream};
-use std::process::{Command, Stdio};
+use std::process::Command;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::mpsc::{self, Receiver, TrySendError};
 use std::sync::{Arc, Mutex};
