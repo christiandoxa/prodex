@@ -7,6 +7,7 @@ from rich_text import (
     rich_slice_prefix,
     rich_unicode_space,
     rich_utf8_continuation,
+    rich_view_valid,
 )
 from rich_types import (
     ProdexRichContextRecord,
@@ -527,4 +528,48 @@ def prodex_mojo_rich_context_analyze_v2(
             cursor += 1
     result[].records_written = record_count
     result[].output_written = written
+    return RICH_CONTEXT_STATUS_OK
+
+
+@export("prodex_mojo_rich_context_signal_counts_batch_v1")
+def prodex_mojo_rich_context_signal_counts_batch_v1(
+    inputs_address: UInt,
+    outputs_address: UInt,
+    count: Int64,
+) abi("C") -> Int64:
+    if count < 0 or count > RICH_CONTEXT_MAX_LINES:
+        return RICH_CONTEXT_STATUS_INVALID
+    if count == 0:
+        return RICH_CONTEXT_STATUS_OK
+    if inputs_address == 0 or outputs_address == 0:
+        return RICH_CONTEXT_STATUS_INVALID
+    var inputs = Pointer[
+        mut=False, ProdexRichStringView, ImmUntrackedOrigin
+    ](unsafe_from_address=Int(inputs_address))
+    var outputs = Pointer[
+        mut=True, Int64, MutUntrackedOrigin
+    ](unsafe_from_address=Int(outputs_address))
+    for index in range(count):
+        var view = inputs[unsafe_offset=index].copy()
+        if not rich_view_valid(view, RICH_CONTEXT_MAX_TEXT_BYTES):
+            return RICH_CONTEXT_STATUS_UTF8
+        var line = ProdexRichSlice(0, Int64(view.len))
+        var output = Pointer[
+            mut=True, UInt8, MutUntrackedOrigin
+        ](unsafe_from_address=Int(view.ptr))
+        var offset = index * 7
+        outputs[unsafe_offset=offset] = Int64(context_is_error(output, line))
+        outputs[unsafe_offset=offset + 1] = context_file_locations(output, line)
+        outputs[unsafe_offset=offset + 2] = Int64(
+            rich_slice_prefix(output, line, StringSlice("@@ "), False)
+            and rich_slice_contains(output, line, StringSlice("@@"), False)
+        )
+        outputs[unsafe_offset=offset + 3] = Int64(context_is_test(output, line))
+        outputs[unsafe_offset=offset + 4] = Int64(
+            rich_slice_contains(output, line, StringSlice("exit status"), True)
+            or rich_slice_contains(output, line, StringSlice("exit code"), True)
+            or rich_slice_contains(output, line, StringSlice("exit_status"), True)
+        )
+        outputs[unsafe_offset=offset + 5] = Int64(context_is_stack(output, line))
+        outputs[unsafe_offset=offset + 6] = Int64(context_is_diagnostic(output, line))
     return RICH_CONTEXT_STATUS_OK

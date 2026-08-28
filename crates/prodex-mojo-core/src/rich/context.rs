@@ -23,6 +23,53 @@ pub struct ContextAnalysis {
     pub groups: Vec<ContextGroup>,
 }
 
+const SIGNAL_COUNT_BATCH_MAX: usize = 65_536;
+
+unsafe extern "C" {
+    fn prodex_mojo_rich_context_signal_counts_batch_v1(
+        inputs: u64,
+        outputs: u64,
+        count: i64,
+    ) -> i64;
+}
+
+/// Classifies a bounded batch of already-separated context lines in one Mojo call.
+pub fn signal_counts_batch(lines: &[&str]) -> Result<Vec<[usize; 7]>, MojoError> {
+    ensure_rich_abi()?;
+    if lines.len() > SIGNAL_COUNT_BATCH_MAX {
+        return Err(MojoError::InvalidInput);
+    }
+    if lines.is_empty() {
+        return Ok(Vec::new());
+    }
+    let views = lines.iter().map(|line| view(line)).collect::<Vec<_>>();
+    let mut output = vec![0_i64; lines.len() * 7];
+    let status = unsafe {
+        prodex_mojo_rich_context_signal_counts_batch_v1(
+            mojo_pointer_address(views.as_ptr()),
+            mojo_mut_pointer_address(output.as_mut_ptr()),
+            i64::try_from(lines.len()).map_err(|_| MojoError::InvalidInput)?,
+        )
+    };
+    if status != 0 {
+        return Err(if status == 2 {
+            MojoError::InvalidInput
+        } else {
+            MojoError::InvalidOutput
+        });
+    }
+    output
+        .chunks_exact(7)
+        .map(|row| {
+            row.iter()
+                .map(|value| usize::try_from(*value).map_err(|_| MojoError::InvalidOutput))
+                .collect::<Result<Vec<_>, _>>()?
+                .try_into()
+                .map_err(|_| MojoError::InvalidOutput)
+        })
+        .collect()
+}
+
 pub fn analyze_context(input: &str) -> Result<ContextAnalysis, MojoError> {
     ensure_rich_abi()?;
     let line_capacity = input

@@ -8,6 +8,7 @@ use chrono::Local;
 #[cfg(feature = "mojo")]
 use prodex_mojo_core::runtime::{
     ProfileScheduleInput as MojoProfileScheduleInput, ProfileScoreInput as MojoProfileScoreInput,
+    QuotaScoreInput as MojoQuotaScoreInput,
 };
 pub use prodex_quota::required_main_window_snapshot_at;
 use prodex_quota::{
@@ -263,6 +264,21 @@ pub fn ready_profile_score_for_route_at(
     route_kind: RuntimeRouteKind,
     now: i64,
 ) -> ReadyProfileScore {
+    #[cfg(feature = "mojo")]
+    {
+        return ready_profile_score_for_route_at_mojo(usage, route_kind, now);
+    }
+
+    #[cfg(not(feature = "mojo"))]
+    ready_profile_score_for_route_at_rust(usage, route_kind, now)
+}
+
+#[cfg(feature = "mojo")]
+fn ready_profile_score_for_route_at_mojo(
+    usage: &UsageResponse,
+    route_kind: RuntimeRouteKind,
+    now: i64,
+) -> ReadyProfileScore {
     let weekly = required_main_window_snapshot_at(usage, "weekly", now);
     let five_hour = required_main_window_snapshot_at(usage, "5h", now);
 
@@ -280,6 +296,78 @@ pub fn ready_profile_score_for_route_at(
         RuntimeRouteKind::Compact | RuntimeRouteKind::Standard => 8,
     };
     let reserve_bias = match runtime_quota_pressure_band_for_route_at(usage, route_kind, now) {
+        RuntimeQuotaPressureBand::Healthy => 0,
+        RuntimeQuotaPressureBand::Thin => 250_000,
+        RuntimeQuotaPressureBand::Critical => 1_000_000,
+        RuntimeQuotaPressureBand::Exhausted | RuntimeQuotaPressureBand::Unknown => i64::MAX / 4,
+    };
+
+    let score = prodex_mojo_core::runtime::quota_score_batch(
+        &[MojoQuotaScoreInput {
+            weekly_pressure: scaled_weekly_pressure,
+            five_hour_pressure: scaled_five_hour_pressure,
+            weekly_remaining,
+            five_hour_remaining,
+            weekly_has_value: weekly.is_some(),
+            five_hour_has_value: five_hour.is_some(),
+            weekly_reset_at: weekly.map_or(i64::MAX, |window| window.reset_at),
+            five_hour_reset_at: five_hour.map_or(i64::MAX, |window| window.reset_at),
+        }],
+        match route_kind {
+            RuntimeRouteKind::Responses => 0,
+            RuntimeRouteKind::Compact => 1,
+            RuntimeRouteKind::Websocket => 2,
+            RuntimeRouteKind::Standard => 3,
+        },
+    )
+    .expect("Mojo runtime quota score returned invalid output")
+    .into_iter()
+    .next()
+    .expect("Mojo runtime quota score returned no row");
+    debug_assert_eq!(
+        score.pressure_band,
+        match reserve_bias {
+            0 => 0,
+            250_000 => 1,
+            1_000_000 => 2,
+            _ => 3,
+        }
+    );
+    ReadyProfileScore {
+        total_pressure: score.total_pressure,
+        weekly_pressure: score.weekly_pressure,
+        five_hour_pressure: score.five_hour_pressure,
+        reserve_floor: score.reserve_floor,
+        weekly_remaining: score.weekly_remaining,
+        five_hour_remaining: score.five_hour_remaining,
+        weekly_reset_at: score.weekly_reset_at,
+        five_hour_reset_at: score.five_hour_reset_at,
+    }
+}
+
+#[cfg(any(not(feature = "mojo"), test))]
+fn ready_profile_score_for_route_at_rust(
+    usage: &UsageResponse,
+    route_kind: RuntimeRouteKind,
+    now: i64,
+) -> ReadyProfileScore {
+    let weekly = required_main_window_snapshot_at(usage, "weekly", now);
+    let five_hour = required_main_window_snapshot_at(usage, "5h", now);
+
+    let weekly_pressure = weekly.map_or(i64::MAX, |window| window.pressure_score);
+    let five_hour_pressure = five_hour.map_or(i64::MAX, |window| window.pressure_score);
+    let plan_pressure_scale_bps = usage_plan_capacity_pressure_scale_bps(usage);
+    let scaled_weekly_pressure =
+        scale_quota_pressure_for_plan(weekly_pressure, plan_pressure_scale_bps);
+    let scaled_five_hour_pressure =
+        scale_quota_pressure_for_plan(five_hour_pressure, plan_pressure_scale_bps);
+    let weekly_remaining = weekly.map_or(0, |window| window.remaining_percent);
+    let five_hour_remaining = five_hour.map_or(0, |window| window.remaining_percent);
+    let weekly_weight = match route_kind {
+        RuntimeRouteKind::Responses | RuntimeRouteKind::Websocket => 10,
+        RuntimeRouteKind::Compact | RuntimeRouteKind::Standard => 8,
+    };
+    let reserve_bias = match runtime_quota_pressure_band_for_route_at_rust(usage, route_kind, now) {
         RuntimeQuotaPressureBand::Healthy => 0,
         RuntimeQuotaPressureBand::Thin => 250_000,
         RuntimeQuotaPressureBand::Critical => 1_000_000,
@@ -308,6 +396,44 @@ pub fn runtime_quota_pressure_band_for_route(
 }
 
 pub fn runtime_quota_pressure_band_for_route_at(
+    usage: &UsageResponse,
+    route_kind: RuntimeRouteKind,
+    now: i64,
+) -> RuntimeQuotaPressureBand {
+    #[cfg(feature = "mojo")]
+    {
+        let Some(weekly) = required_main_window_snapshot_at(usage, "weekly", now) else {
+            return RuntimeQuotaPressureBand::Unknown;
+        };
+        let Some(five_hour) = required_main_window_snapshot_at(usage, "5h", now) else {
+            return RuntimeQuotaPressureBand::Unknown;
+        };
+        return match prodex_mojo_core::runtime::pressure_band_for_route(
+            Some((five_hour.remaining_percent, 1)),
+            Some((weekly.remaining_percent, 1)),
+            match route_kind {
+                RuntimeRouteKind::Responses => 0,
+                RuntimeRouteKind::Compact => 1,
+                RuntimeRouteKind::Websocket => 2,
+                RuntimeRouteKind::Standard => 3,
+            },
+        )
+        .expect("Mojo runtime quota pressure band returned invalid output")
+        {
+            0 => RuntimeQuotaPressureBand::Healthy,
+            1 => RuntimeQuotaPressureBand::Thin,
+            2 => RuntimeQuotaPressureBand::Critical,
+            3 => RuntimeQuotaPressureBand::Exhausted,
+            _ => RuntimeQuotaPressureBand::Unknown,
+        };
+    }
+
+    #[cfg(not(feature = "mojo"))]
+    runtime_quota_pressure_band_for_route_at_rust(usage, route_kind, now)
+}
+
+#[cfg(any(not(feature = "mojo"), test))]
+fn runtime_quota_pressure_band_for_route_at_rust(
     usage: &UsageResponse,
     route_kind: RuntimeRouteKind,
     now: i64,
