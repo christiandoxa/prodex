@@ -19,6 +19,7 @@ struct OutputThroughputStream {
     samples: VecDeque<(Instant, u64)>,
     active: bool,
     last_known_rate: Option<f64>,
+    last_event_at: Option<Instant>,
 }
 
 /// Tracks authoritative output-token deltas for active log streams.
@@ -29,7 +30,8 @@ struct OutputThroughputStream {
 #[derive(Debug, Default, Clone)]
 pub(crate) struct OutputThroughput {
     streams: BTreeMap<OutputThroughputKey, OutputThroughputStream>,
-    last_known_rate: Option<f64>,
+    last_known_rates: BTreeMap<PathBuf, f64>,
+    last_event_path: Option<PathBuf>,
     historical_rate_timestamp: Option<String>,
 }
 
@@ -45,8 +47,10 @@ impl OutputThroughput {
             profile: event.profile.clone(),
             request: event.request,
         };
+        self.last_event_path = Some(log_path.to_path_buf());
         let rate = {
             let stream = self.stream(&key);
+            stream.last_event_at = Some(observed_at);
             if stream
                 .samples
                 .back()
@@ -67,8 +71,7 @@ impl OutputThroughput {
             output_throughput_stream_rate(stream)
         };
         if let Some(rate) = rate.filter(|rate| rate.is_finite() && *rate >= 0.0) {
-            self.last_known_rate = Some(rate);
-            self.historical_rate_timestamp = None;
+            self.record_rate(log_path, rate);
         }
     }
 
@@ -89,8 +92,10 @@ impl OutputThroughput {
             profile: profile.to_string(),
             request,
         };
+        self.last_event_path = Some(log_path.to_path_buf());
         let rate = {
             let stream = self.stream(&key);
+            stream.last_event_at = Some(observed_at);
             let cumulative = stream
                 .samples
                 .back()
@@ -103,8 +108,7 @@ impl OutputThroughput {
             output_throughput_stream_rate(stream)
         };
         if let Some(rate) = rate.filter(|rate| rate.is_finite() && *rate >= 0.0) {
-            self.last_known_rate = Some(rate);
-            self.historical_rate_timestamp = None;
+            self.record_rate(log_path, rate);
         }
     }
 
@@ -130,35 +134,50 @@ impl OutputThroughput {
         } else {
             None
         };
-        if rate.is_some() {
-            self.last_known_rate = rate;
+        if let Some(rate) = rate {
+            self.record_rate(log_path, rate);
             self.historical_rate_timestamp = None;
         }
     }
 
     pub(super) fn active_rate(&mut self, now: Instant) -> Option<f64> {
-        let mut total = 0.0;
-        let mut found = false;
-        for stream in self.streams.values_mut().filter(|stream| stream.active) {
+        let mut active = Vec::new();
+        for (key, stream) in &mut self.streams {
+            if !stream.active {
+                continue;
+            }
             prune_output_throughput_samples(stream, now);
             if let Some(rate) = output_throughput_stream_rate(stream) {
-                total += rate;
-                found = true;
+                active.push((key.log_path.clone(), stream.last_event_at, rate));
             }
         }
-        let rate = (found && total.is_finite() && total >= 0.0).then_some(total);
-        if let Some(rate) = rate {
-            self.last_known_rate = Some(rate);
-            self.historical_rate_timestamp = None;
+        let selected_path = active
+            .iter()
+            .max_by_key(|(_, last_event_at, _)| *last_event_at)
+            .map(|(path, _, _)| path.clone());
+        let Some(selected_path) = selected_path else {
+            return None;
+        };
+        let rate = active
+            .into_iter()
+            .filter(|(path, _, _)| *path == selected_path)
+            .map(|(_, _, rate)| rate)
+            .sum::<f64>();
+        if rate.is_finite() && rate >= 0.0 {
+            self.record_rate(&selected_path, rate);
+            Some(rate)
+        } else {
+            None
         }
-        rate
     }
 
     pub(super) fn display_rate(&mut self, now: Instant) -> Option<f64> {
         if let Some(rate) = self.active_rate(now) {
             return Some(rate);
         }
-        self.last_known_rate
+        self.last_event_path
+            .as_ref()
+            .and_then(|path| self.last_known_rates.get(path).copied())
     }
 
     pub(super) fn observe_historical(&mut self, log_path: &Path, event: &InfoTokenUsageEvent) {
@@ -183,8 +202,15 @@ impl OutputThroughput {
         let stream = self.stream(&key);
         stream.active = false;
         stream.last_known_rate = Some(rate);
-        self.last_known_rate = Some(rate);
+        self.last_known_rates.insert(log_path.to_path_buf(), rate);
+        self.last_event_path = Some(log_path.to_path_buf());
         self.historical_rate_timestamp = Some(event.timestamp.clone());
+    }
+
+    fn record_rate(&mut self, log_path: &Path, rate: f64) {
+        self.last_known_rates.insert(log_path.to_path_buf(), rate);
+        self.last_event_path = Some(log_path.to_path_buf());
+        self.historical_rate_timestamp = None;
     }
 
     fn stream(&mut self, key: &OutputThroughputKey) -> &mut OutputThroughputStream {
@@ -272,6 +298,23 @@ mod tests {
             Some(100.0)
         );
         assert_eq!(format_output_tokens_per_second(Some(100.0)), "100 t/s");
+    }
+
+    #[test]
+    fn unrelated_runtime_logs_do_not_contribute_to_one_header_rate() {
+        let first = Path::new("/tmp/runtime-process-a.log");
+        let second = Path::new("/tmp/runtime-process-b.log");
+        let start = Instant::now();
+        let mut throughput = OutputThroughput::default();
+        throughput.observe_delta(first, "main", Some(1), 100, start);
+        throughput.observe_delta(first, "main", Some(1), 100, start + Duration::from_secs(1));
+        throughput.observe_delta(second, "main", Some(2), 50, start);
+        throughput.observe_delta(second, "main", Some(2), 50, start + Duration::from_secs(1));
+
+        assert_eq!(
+            throughput.active_rate(start + Duration::from_secs(1)),
+            Some(50.0)
+        );
     }
 
     #[test]
