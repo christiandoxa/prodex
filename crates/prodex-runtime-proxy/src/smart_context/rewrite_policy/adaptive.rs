@@ -332,40 +332,43 @@ mod mojo_tests {
             Some(15_999),
             Some(16_000),
         ] {
-            for exactness_required in [false, true] {
-                for missing in [false, true] {
-                    for unsafe_accounting in [false, true] {
-                        let input = SmartContextAdaptiveBudgetPolicyInput {
-                            exactness_guard: SmartContextExactnessGuard {
-                                decision: if exactness_required {
-                                    SmartContextExactnessDecision::RequireExact
-                                } else {
-                                    SmartContextExactnessDecision::Allow
-                                },
-                                reasons: Vec::new(),
-                            },
-                            accounting: accounting(available, unsafe_accounting),
-                            recent_rewrite_safety: SmartContextRecentRewriteSafety {
-                                safe_rewrites: 2,
-                                fallback_rewrites: 0,
-                                saved_tokens: 512,
-                            },
-                            static_context_changed: false,
-                            missing_rehydrate_refs: if missing {
-                                vec!["artifact".to_string()]
-                            } else {
-                                Vec::new()
-                            },
-                        };
-                        let expected = smart_context_adaptive_budget_policy_rust(input.clone());
-                        let actual = smart_context_adaptive_budget_policy(input);
-                        assert_eq!(
-                            actual, expected,
-                            "available={available:?} exact={exactness_required} missing={missing} unsafe={unsafe_accounting}"
-                        );
-                    }
-                }
+            for flags in 0..8 {
+                assert_adaptive_budget_case(available, flags);
             }
         }
+    }
+
+    fn assert_adaptive_budget_case(available: Option<u64>, flags: i32) {
+        let exactness_required = flags & 1 != 0;
+        let missing = flags & 2 != 0;
+        let unsafe_accounting = flags & 4 != 0;
+        let input = SmartContextAdaptiveBudgetPolicyInput {
+            exactness_guard: SmartContextExactnessGuard {
+                decision: if exactness_required {
+                    SmartContextExactnessDecision::RequireExact
+                } else {
+                    SmartContextExactnessDecision::Allow
+                },
+                reasons: Vec::new(),
+            },
+            accounting: accounting(available, unsafe_accounting),
+            recent_rewrite_safety: SmartContextRecentRewriteSafety {
+                safe_rewrites: 2,
+                fallback_rewrites: 0,
+                saved_tokens: 512,
+            },
+            static_context_changed: false,
+            missing_rehydrate_refs: if missing {
+                vec!["artifact".to_string()]
+            } else {
+                Vec::new()
+            },
+        };
+        let expected = smart_context_adaptive_budget_policy_rust(input.clone());
+        let actual = smart_context_adaptive_budget_policy(input);
+        assert_eq!(
+            actual, expected,
+            "available={available:?} exact={exactness_required} missing={missing} unsafe={unsafe_accounting}"
+        );
     }
 }
