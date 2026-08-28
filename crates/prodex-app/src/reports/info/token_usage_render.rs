@@ -74,7 +74,18 @@ pub fn info_token_usage_from_line(line: &str) -> Option<(String, InfoTokenUsageC
 }
 
 pub fn info_token_usage_event_from_line(line: &str) -> Option<InfoTokenUsageEvent> {
-    if !line.contains("token_usage") {
+    info_token_usage_event_from_line_with_event(line, "token_usage")
+}
+
+pub fn info_token_usage_progress_event_from_line(line: &str) -> Option<InfoTokenUsageEvent> {
+    info_token_usage_event_from_line_with_event(line, "token_usage_progress")
+}
+
+fn info_token_usage_event_from_line_with_event(
+    line: &str,
+    event_name: &str,
+) -> Option<InfoTokenUsageEvent> {
+    if !info_runtime_line_has_event(line, event_name) {
         return None;
     }
     let fields = info_runtime_parse_fields(line);
@@ -114,6 +125,18 @@ pub fn info_token_usage_event_from_line(line: &str) -> Option<InfoTokenUsageEven
             .and_then(|value| value.parse::<f64>().ok())
             .filter(|value| value.is_finite() && *value >= 0.0),
     })
+}
+
+fn info_runtime_line_has_event(line: &str, expected: &str) -> bool {
+    if let Ok(value) = serde_json::from_str::<serde_json::Value>(line) {
+        return value.get("event").and_then(serde_json::Value::as_str) == Some(expected);
+    }
+    line.split_once("] ")
+        .map(|(_, message)| message)
+        .unwrap_or(line)
+        .split_whitespace()
+        .next()
+        == Some(expected)
 }
 
 fn info_token_usage_timestamp(line: &str) -> String {

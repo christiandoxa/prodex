@@ -1,5 +1,5 @@
 use std::collections::BTreeSet;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use crate::{
     RuntimeTokenUsage, runtime_connection_header_tokens,
@@ -195,6 +195,48 @@ pub fn runtime_response_event_is_generation_start(event_type: Option<&str>) -> b
     )
 }
 
+const RUNTIME_LIVE_USAGE_LOG_INTERVAL: Duration = Duration::from_millis(250);
+
+/// Throttles cumulative output-token snapshots before logging them for live viewers.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct RuntimeTokenUsageProgress {
+    last_output_tokens: Option<u64>,
+    last_logged_at: Option<Instant>,
+}
+
+impl RuntimeTokenUsageProgress {
+    /// Returns a new positive cumulative snapshot at most four times per second.
+    pub fn observe(
+        &mut self,
+        usage: RuntimeTokenUsage,
+        observed_at: Instant,
+    ) -> Option<RuntimeTokenUsage> {
+        if usage.output_tokens == 0
+            || self
+                .last_output_tokens
+                .is_some_and(|last| usage.output_tokens <= last)
+        {
+            return None;
+        }
+        self.last_output_tokens = Some(usage.output_tokens);
+        if self.last_logged_at.is_some_and(|last| {
+            observed_at.saturating_duration_since(last) < RUNTIME_LIVE_USAGE_LOG_INTERVAL
+        }) {
+            return None;
+        }
+        self.last_logged_at = Some(observed_at);
+        Some(usage)
+    }
+}
+
+pub fn runtime_token_usage_event_is_live(
+    event_type: Option<&str>,
+    token_usage: Option<RuntimeTokenUsage>,
+) -> bool {
+    runtime_response_event_is_generation_start(event_type)
+        && token_usage.is_some_and(|usage| usage.output_tokens > 0)
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RuntimeSseTapEffect {
     RememberResponseIds {
@@ -205,6 +247,7 @@ pub enum RuntimeSseTapEffect {
         response_ids: Vec<String>,
     },
     LogTokenUsage(RuntimeTokenUsage),
+    LogTokenUsageProgress(RuntimeTokenUsage),
     LogTokenUsageWithGeneration {
         usage: RuntimeTokenUsage,
         generation_ms: u64,
@@ -225,6 +268,7 @@ pub struct RuntimeSseTapState {
     remembered_response_ids: BTreeSet<String>,
     response_ids_with_turn_state: BTreeSet<String>,
     logged_token_usage: BTreeSet<RuntimeTokenUsage>,
+    output_token_usage_progress: RuntimeTokenUsageProgress,
     generation_started_at: Option<Instant>,
     turn_state: Option<String>,
     request_previous_response_id: Option<String>,
@@ -297,6 +341,14 @@ impl RuntimeSseTapState {
                     .ok()
             })
             .flatten();
+        if runtime_token_usage_event_is_live(event_type, event.token_usage)
+            && let Some(token_usage) = event.token_usage
+            && let Some(token_usage) = self
+                .output_token_usage_progress
+                .observe(token_usage, Instant::now())
+        {
+            effects.push(RuntimeSseTapEffect::LogTokenUsageProgress(token_usage));
+        }
         self.log_token_usage(event_type, event.token_usage, generation_ms, effects);
     }
 
@@ -369,21 +421,21 @@ impl RuntimeSseTapState {
         generation_ms: Option<u64>,
         effects: &mut Vec<RuntimeSseTapEffect>,
     ) {
-        if !runtime_token_usage_event_is_loggable(event_type) {
-            return;
-        }
         let Some(token_usage) = token_usage else {
             return;
         };
-        if self.logged_token_usage.insert(token_usage) {
-            if let Some(generation_ms) = generation_ms {
-                effects.push(RuntimeSseTapEffect::LogTokenUsageWithGeneration {
-                    usage: token_usage,
-                    generation_ms,
-                });
-            } else {
-                effects.push(RuntimeSseTapEffect::LogTokenUsage(token_usage));
+        if runtime_token_usage_event_is_loggable(event_type) {
+            if self.logged_token_usage.insert(token_usage) {
+                if let Some(generation_ms) = generation_ms {
+                    effects.push(RuntimeSseTapEffect::LogTokenUsageWithGeneration {
+                        usage: token_usage,
+                        generation_ms,
+                    });
+                } else {
+                    effects.push(RuntimeSseTapEffect::LogTokenUsage(token_usage));
+                }
             }
+            return;
         }
     }
 }

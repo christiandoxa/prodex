@@ -240,6 +240,81 @@ fn token_usage_logging_accepts_terminal_and_completed_events() {
 }
 
 #[test]
+fn live_token_usage_is_loggable_only_on_generation_events_with_output_tokens() {
+    assert!(runtime_token_usage_event_is_live(
+        Some("response.output_text.delta"),
+        Some(RuntimeTokenUsage {
+            output_tokens: 1,
+            ..RuntimeTokenUsage::default()
+        })
+    ));
+    assert!(!runtime_token_usage_event_is_live(
+        Some("response.output_text.delta"),
+        Some(RuntimeTokenUsage::default())
+    ));
+    assert!(!runtime_token_usage_event_is_live(
+        Some("response.created"),
+        Some(RuntimeTokenUsage {
+            output_tokens: 1,
+            ..RuntimeTokenUsage::default()
+        })
+    ));
+}
+
+#[test]
+fn live_token_usage_progress_is_cumulative_and_rate_limited() {
+    let mut progress = RuntimeTokenUsageProgress::default();
+    let start = std::time::Instant::now();
+    let usage = |output_tokens| RuntimeTokenUsage {
+        input_tokens: 1,
+        output_tokens,
+        ..RuntimeTokenUsage::default()
+    };
+
+    assert_eq!(progress.observe(usage(10), start), Some(usage(10)));
+    assert_eq!(progress.observe(usage(20), start), None);
+    assert_eq!(
+        progress.observe(usage(30), start + std::time::Duration::from_millis(250)),
+        Some(usage(30))
+    );
+    assert_eq!(progress.observe(usage(20), start + std::time::Duration::from_secs(1)), None);
+}
+
+#[test]
+fn sse_tap_state_emits_cumulative_live_usage_and_final_average() {
+    let mut state = RuntimeSseTapState::default();
+    let mut effects = state.observe_chunk(
+        br#"data: {"type":"response.output_text.delta","usage":{"input_tokens":1,"output_tokens":10}}"#,
+    );
+    effects.extend(state.observe_chunk(b"\r\n\r\n"));
+    assert_eq!(
+        effects,
+        vec![RuntimeSseTapEffect::LogTokenUsageProgress(
+            RuntimeTokenUsage {
+                input_tokens: 1,
+                output_tokens: 10,
+                ..RuntimeTokenUsage::default()
+            }
+        )]
+    );
+
+    let mut completion = state.observe_chunk(
+        br#"data: {"type":"response.completed","response":{"usage":{"input_tokens":1,"output_tokens":20}}}"#,
+    );
+    completion.extend(state.observe_chunk(b"\r\n\r\n"));
+    assert!(matches!(
+        completion.as_slice(),
+        [RuntimeSseTapEffect::LogTokenUsageWithGeneration {
+            usage: RuntimeTokenUsage {
+                output_tokens: 20,
+                ..
+            },
+            ..
+        }]
+    ));
+}
+
+#[test]
 fn sse_tap_state_rebinds_remembered_response_ids_when_turn_state_arrives() {
     let mut state = RuntimeSseTapState::new(RuntimeSseTapStateInit {
         remembered_response_ids: &["resp-1".to_string()],
