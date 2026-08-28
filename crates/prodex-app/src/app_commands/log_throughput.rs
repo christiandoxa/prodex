@@ -192,7 +192,12 @@ pub(super) fn format_output_tokens_per_second(rate: Option<f64>) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::{
+        InfoTokenUsageEvent, OUTPUT_THROUGHPUT_MIN_SAMPLE, OutputThroughput,
+        format_output_tokens_per_second,
+    };
+    use std::path::Path;
+    use std::time::{Duration, Instant};
 
     #[test]
     fn output_throughput_uses_recent_output_deltas_only() {

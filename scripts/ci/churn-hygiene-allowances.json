@@ -1,6 +1,6 @@
 [
   {
-    "id": "audited-prodex-0.418.1-campaign-range",
+    "id": "audited-prodex-0.419.0-campaign-range",
     "requiredSubjects": [
       "feat(mojo): migrate deterministic runtime ownership",
       "feat(runtime): harden 0.418.1 diagnostics and expose",
@@ -12,10 +12,10 @@
       "maxLines": 7000,
       "maxFileLines": 850
     },
-    "reason": "The complete 0.418.1 product campaign is composed of three independently reviewed commits; this exact-subject range allowance covers their aggregate release-critical Mojo, runtime, expose, diagnostics, test, and contract evidence without changing global thresholds."
+    "reason": "The complete 0.419.0 product campaign is composed of three independently reviewed commits; this exact-subject range allowance covers their aggregate release-critical Mojo, runtime, expose, diagnostics, test, and contract evidence without changing global thresholds. The older 0.418.1 wording in the immutable commit subject is historical."
   },
   {
-    "id": "audited-prodex-0.418.1-runtime-accounting",
+    "id": "audited-prodex-0.419.0-runtime-accounting",
     "requiredSubjects": [
       "fix(runtime): preserve bounded selection and token accounting"
     ],
@@ -28,7 +28,7 @@
     "reason": "This small follow-up isolates provider error classification, bounded cold-start selection, runtime token timing, and the required constructor/regression updates; the narrow allowance covers 34 reviewed files without changing global thresholds."
   },
   {
-    "id": "audited-prodex-0.418.1-mojo-ownership",
+    "id": "audited-prodex-0.419.0-mojo-ownership",
     "requiredSubjects": [
       "feat(mojo): migrate deterministic runtime ownership"
     ],
@@ -38,10 +38,10 @@
       "maxLines": 3000,
       "maxFileLines": 500
     },
-    "reason": "The release-critical deterministic Mojo ownership migration is isolated to ABI, catalog, context, quota, parity, and immutable-baseline evidence files; the allowance is below the reviewed 0.418.1 migration size and does not alter global churn thresholds."
+    "reason": "The release-critical deterministic Mojo ownership migration is isolated to ABI, catalog, context, quota, parity, and immutable-baseline evidence files; the allowance is below the reviewed 0.419.0 migration size and does not alter global churn thresholds."
   },
   {
-    "id": "audited-prodex-0.418.1-runtime-expose-diagnostics",
+    "id": "audited-prodex-0.419.0-runtime-expose-diagnostics",
     "requiredSubjects": [
       "feat(runtime): harden 0.418.1 diagnostics and expose"
     ],
@@ -51,7 +51,7 @@
       "maxLines": 6500,
       "maxFileLines": 850
     },
-    "reason": "Reviewed the bounded 0.418.1 release-critical changes: baseline-safe Mojo ownership and static archives, Codex retry/error classification, provider-scoped Super resolution, QUIC-preferred Quick Tunnel fallback, user-managed Cloudflare endpoint isolation, structured per-profile OpenAI ping, and deterministic runtime/security regressions. The exact subject and caps cover this audited cross-cutting campaign while preserving all platform, security, parity, and release gates."
+    "reason": "Reviewed the bounded 0.419.0 release-critical changes: baseline-safe Mojo ownership and static archives, Codex retry/error classification, provider-scoped Super resolution, QUIC-preferred Quick Tunnel fallback, user-managed Cloudflare endpoint isolation, structured per-profile OpenAI ping, and deterministic runtime/security regressions. The exact subject and caps cover this audited cross-cutting campaign while preserving all platform, security, parity, and release gates."
   },
   {
     "id": "audited-rich-mojo-domain-core-0.416.1",
