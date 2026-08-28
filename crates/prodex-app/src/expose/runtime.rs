@@ -501,6 +501,7 @@ const CLOUDFLARED_TRANSPORT_NEGOTIATION_TIMEOUT: Duration = if cfg!(test) {
     Duration::from_secs(20)
 };
 const CLOUDFLARED_EVENT_PREFIX: &str = "\0prodex-cloudflared-transport=";
+static NEXT_CLOUDFLARED_CONFIG_ID: AtomicU64 = AtomicU64::new(1);
 
 struct CloudflaredConfigIsolation {
     directory: std::path::PathBuf,
@@ -510,11 +511,12 @@ struct CloudflaredConfigIsolation {
 
 impl CloudflaredConfigIsolation {
     fn create() -> Result<Self> {
+        let unique_id = NEXT_CLOUDFLARED_CONFIG_ID.fetch_add(1, Ordering::Relaxed);
         let directory = (0..16)
             .map(|attempt| {
                 std::env::temp_dir().join(format!(
-                    "prodex-cloudflared-{}-{attempt}",
-                    std::process::id()
+                    "prodex-cloudflared-{}-{unique_id}-{attempt}",
+                    std::process::id(),
                 ))
             })
             .find(|directory| std::fs::create_dir(directory).is_ok())
