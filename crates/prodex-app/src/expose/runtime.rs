@@ -1,6 +1,7 @@
 use super::super_expose::{ensure_cloudflared_available, handle_super_expose};
 use super::*;
 mod cloudflared_startup;
+mod hostname;
 use std::fs::OpenOptions;
 use std::net::SocketAddr;
 #[cfg(unix)]
@@ -504,6 +505,7 @@ const CLOUDFLARED_EVENT_PREFIX: &str = "\0prodex-cloudflared-transport=";
 struct CloudflaredConfigIsolation {
     directory: std::path::PathBuf,
     path: std::path::PathBuf,
+    cleaned: bool,
 }
 
 impl CloudflaredConfigIsolation {
@@ -541,10 +543,18 @@ impl CloudflaredConfigIsolation {
             let _ = std::fs::remove_dir(&directory);
             anyhow::bail!("private cloudflared config is not a regular file");
         }
-        Ok(Self { directory, path })
+        Ok(Self {
+            directory,
+            path,
+            cleaned: false,
+        })
     }
 
-    fn cleanup(&self) {
+    fn cleanup(&mut self) {
+        if self.cleaned {
+            return;
+        }
+        self.cleaned = true;
         let _ = std::fs::remove_file(&self.path);
         let _ = std::fs::remove_dir(&self.directory);
     }
@@ -747,21 +757,5 @@ pub(super) fn expose_public_host(url: &str) -> Option<String> {
 }
 
 pub(super) fn expose_valid_dns_hostname(host: &str) -> bool {
-    host.is_ascii()
-        && host.len() <= 253
-        && host.split('.').all(|label| {
-            !label.is_empty()
-                && label.len() <= 63
-                && label
-                    .bytes()
-                    .next()
-                    .is_some_and(|byte| byte.is_ascii_alphanumeric())
-                && label
-                    .bytes()
-                    .last()
-                    .is_some_and(|byte| byte.is_ascii_alphanumeric())
-                && label
-                    .bytes()
-                    .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-')
-        })
+    hostname::expose_valid_dns_hostname(host)
 }
