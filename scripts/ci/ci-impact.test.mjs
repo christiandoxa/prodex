@@ -151,7 +151,8 @@ test("runs runtime proxy benchmarks only for their owning paths", () => {
   }
   assert.equal(requiresRuntimeProxyBench(["Cargo.toml", "Cargo.lock", "CHANGELOG.md"]), false);
   assert.equal(requiresRuntimeProxyBench(["crates/prodex-provider-spi/src/lib.rs"]), false);
-  assert.equal(requiresRuntimeProxyBench([]), true);
+  assert.equal(requiresRuntimeProxyBench([]), false);
+  assert.equal(requiresRuntimeProxyBench(null), true);
 });
 
 test("runtime-stress weighted sharding balances duration hints", () => {
@@ -443,6 +444,18 @@ test("CLI reads git diff paths from base and head", async () => {
 
     assert.equal(result.heavy, false);
     assert.deepEqual(result.paths, ["README.md"]);
+
+    const { stdout: previousHeadStdout } = await execFileAsync("git", ["rev-parse", "HEAD"], { cwd: tempDir });
+    await execFileAsync("git", ["commit", "--allow-empty", "-m", "no-op"], { cwd: tempDir });
+    const { stdout: emptyHeadStdout } = await execFileAsync("git", ["rev-parse", "HEAD"], { cwd: tempDir });
+    const { stdout: emptyStdout } = await execFileAsync(
+      process.execPath,
+      [SCRIPT_PATH, "--base", previousHeadStdout.trim(), "--head", emptyHeadStdout.trim(), "--json"],
+      { cwd: tempDir },
+    );
+    const emptyResult = JSON.parse(emptyStdout);
+    assert.equal(emptyResult.heavy, true);
+    assert.equal(emptyResult.runtimeBench, false);
   } finally {
     await fs.rm(tempDir, { recursive: true, force: true });
   }

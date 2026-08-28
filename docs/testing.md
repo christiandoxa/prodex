@@ -58,7 +58,7 @@ and linking is faster.
 
 ## CI Impact Gating
 
-The CI workflow has a `changes` job that runs `node scripts/ci/ci-impact.mjs --base ... --head ... --github-output` with full git history. Its `heavy` output gates expensive Rust/runtime jobs such as supply-chain checks, auto-rotate, internal Rust shards, runtime proxy shards, and runtime stress. A narrower fail-closed `runtime_bench` output runs the optimized runtime benchmark for its owning runtime, Mojo, quota, benchmark, and workflow paths; unrelated heavy changes and release-only metadata avoid recompiling the benchmark. Scheduled and manual CI still force both outputs. The same already-running job generates the runtime-proxy matrix, so heavy shards can fan out immediately after impact classification without waiting for a second runner job.
+The CI workflow has a `changes` job that runs `node scripts/ci/ci-impact.mjs --base ... --head ... --github-output` with full git history. Its `heavy` output gates expensive Rust/runtime jobs such as supply-chain checks, auto-rotate, internal Rust shards, runtime proxy shards, and runtime stress. A narrower fail-closed `runtime_bench` output runs the optimized runtime benchmark for its owning runtime, Mojo, quota, benchmark, and workflow paths; unrelated heavy changes, empty diffs, and release-only metadata avoid recompiling the benchmark. Scheduled and manual CI still force both outputs. The same already-running job generates the runtime-proxy matrix, so heavy shards can fan out immediately after impact classification without waiting for a second runner job.
 
 The process guard uses sccache and its own dependency cache, so repeated Smart
 Context evidence compilation is cheaper without adding more runner jobs to the
