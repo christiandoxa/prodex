@@ -411,7 +411,7 @@
       "operation":"smart_context_adaptive_budget_planning",
       "previous_responsibility":"adaptive Smart Context tier, mode, budget, and reason decisions",
       "baseline_semantic_loc":179,
-      "migrated_semantic_loc":60,
+      "migrated_semantic_loc":57,
       "final_state":"test-oracle-only",
       "rust_before":"crates/prodex-runtime-proxy/src/smart_context/rewrite_policy/adaptive.rs::smart_context_adaptive_budget_policy",
       "rust_after":"test-oracle-only",
