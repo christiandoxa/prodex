@@ -2,6 +2,90 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.419.1 - 2026-08-29
+
+### Runtime
+
+- Satisfy default lint paths (`5630027`)
+- Rotate past unavailable profiles safely (`dd64959`)
+- Deepen runtime selection semantics (`6ca3fd6`)
+- Isolate throughput by runtime log (`44d15b0`)
+- Move gateway route policy into Mojo (`7d42d1b`)
+- Move capacity defaults into Mojo (`d899b32`)
+- Distinguish temporary profile failures from quota (`da727b1`)
+
+### CLI
+
+- Harden expose DNS and profile recovery (`f38bd66`)
+- Validate header profile identity (`b725fbd`)
+- Batch context and quota semantics (`d3b0ca7`)
+- Plan capacity lanes through Mojo (`337e6f7`)
+
+### Claude
+
+- Budget public MCP phases independently (`3b13b19`)
+- Separate tunnel and public MCP readiness (`d0d6dd0`)
+
+### Docs
+
+- Clarify migration accounting (`5e7dac8`)
+- Align rich ABI six evidence (`e1f3bab`)
+- Record differential corpus (`794e541`)
+- Document 0.419.1 log and migration ownership (`05ec545`)
+
+### Misc
+
+- Clarify public readiness phases (`16aa3df`)
+- Preserve upstream throughput state (`e9489ba`)
+- Use idiomatic empty-rate handling (`33205fe`)
+- Satisfy all-features quality gates (`b0c00a6`)
+- Clean feature-specific imports (`00081d8`)
+- Avoid unused parity oracle exports (`80b2e7a`)
+- Complete the 0.419.1 ownership wave (`a415724`)
+- Keep production adapter exports visible (`2d4ce3b`)
+- Make bare log use the stream view (`3e16cdf`)
+- Expose internal Mojo parity oracles only to tests (`1630c16`)
+- Add Mojo reasoning resolution adapter (`641aa94`)
+- Move adaptive planning into Mojo (`c120df7`)
+- Retain measured output throughput (`46c45af`)
+# Prodex 0.419.1
+
+## New Features
+
+- Made `prodex log` the canonical short form for the live `prodex log stream` view; `prodex log stream` remains an equivalent compatibility alias and `prodex log upstream` remains the explicit upstream-payload mode.
+- Expanded the Mojo-native deterministic core across quota/capacity planning, provider and runtime selection, Smart Context planning, critical-signal classification, and tuning decisions.
+
+## Bug Fixes
+
+- Fixed `Prodex Log` header state corruption that could replace profile or quota metadata with an unrelated fragment such as `second`; headers now render from one validated structured snapshot with atomic semantic segments.
+- Fixed the throughput indicator so live output-token generation shows a numeric rate, retains the last valid rate after completion and during the next request's TTFT, and never renders a bare `t/s`.
+- Fixed `prodex s expose` Quick Tunnel startup by separating local MCP, Cloudflare transport/allocation, public-network, and MCP protocol phases. Managed Quick Tunnels now use isolated temporary configuration and automatic QUIC-first/HTTP/2-fallback negotiation without collapsing recoverable startup states into a generic timeout.
+- Improved multi-account runtime recovery so near-exhausted profiles remain eligible until authoritative exhaustion and temporary overload, rate-limit, and transport failures do not become false quota exhaustion.
+
+## Performance
+
+- Kept log following incremental and bounded: throughput state updates with events, terminal rendering remains throttled, and idle views retain the last value without historical rescans or network work.
+- Added measured CI impact selection so unchanged diffs do not rebuild the runtime benchmark while owned runtime changes continue to run the benchmark and full platform/security matrix.
+
+## Architecture
+
+- Migrated `488` Rust semantic LOC from the immutable `0.419.0` remaining-ownership baseline, or `10.323672519568436%` of `4,727` eligible baseline Rust semantic LOC; the required ceiling was `473` LOC.
+- Overall Mojo ownership increased from `51.19760479041916%` to `60.22021456804065%` (`+9.02260977762149` percentage points). The wave contains seven new authoritative operations and one expanded operation, with `500` total traceable Rust semantic LOC reductions.
+- Superseded Rust semantic algorithms were removed after differential parity; Rust remains the host for async runtime, I/O, networking, persistence, platform integration, and security boundaries, with no production Rust fallback for Mojo-authoritative operations.
+
+## Compatibility
+
+- Preserved existing Cloudflare Tunnel mode independently from Prodex-managed Quick Tunnels, and kept the user Cloudflare configuration untouched.
+- Preserved account/session affinity and committed-output/tool-side-effect replay boundaries during temporary profile recovery.
+
+## Documentation
+
+- Updated active logging, expose, runtime-policy, migration, and release documentation for the `0.419.1` ownership and lifecycle contracts.
+
+## Changelog
+
+Full Changelog: [`0.419.0...0.419.1`](https://github.com/christiandoxa/prodex/compare/0.419.0...0.419.1)
+
 ## 0.419.0 - 2026-08-28
 
 ### Runtime
@@ -19,41 +103,6 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 - Allocate unique tunnel config paths (`fdb20bc`)
 - Make tunnel cleanup cross-platform (`318609b`)
 - Split endpoint startup lifecycle (`861aa16`)
-# Prodex 0.419.0
-
-## New Features
-
-- Added a public-endpoint choice to `prodex s expose`: keep the zero-config Quick Tunnel or use an existing user-managed Cloudflare hostname, with independent per-process workdirs, capabilities, and MCP sessions.
-- Hardened `prodex ping openai` into a safe per-profile end-to-end Codex health check that validates the structured turn lifecycle and exact `PONG` response.
-- Added live output-generation throughput to the compact `Prodex Log` header when authoritative token timing is available.
-
-## Bug Fixes
-
-- Fixed Quick Tunnel startup on networks that block Cloudflare QUIC by preferring `--protocol auto` and using a bounded HTTP/2 compatibility fallback when native negotiation does not register.
-- Separated Cloudflare transport negotiation, public endpoint warm-up, and MCP readiness so local-origin, DNS, TLS, routing, and protocol failures report their actual phase.
-- Improved runtime profile selection and upstream error classification so bounded transient recovery does not become false quota exhaustion or an unbounded selection loop.
-
-## Performance
-
-- Moved deterministic catalog, quota-pressure, scheduling, context-accounting, and log semantics kernels into the validated Mojo path while retaining Rust-owned I/O, security, persistence, and transport boundaries.
-- Bounded log throughput sampling and terminal repaint frequency to keep idle and high-rate log views responsive.
-
-## Architecture
-
-- Mojo ownership is measured from the immutable migration baseline and remains fail-closed with no production Mojo-to-Rust fallback.
-- OpenAI additional rate-limit buckets are preserved generically so future capacity lanes are not discarded when their semantic mapping is unknown.
-
-## Networking
-
-- Quick Tunnel edge transport prefers QUIC over UDP/7844 and falls back to HTTP/2 over TCP/7844; the local Prodex origin remains loopback HTTP and requires no inbound port.
-
-## Documentation
-
-- Updated migration, runtime, networking, quota, expose, and observability documentation for the `0.419.0` release scope.
-
-## Changelog
-
-Full Changelog: [`0.418.0...0.419.0`](https://github.com/christiandoxa/prodex/compare/0.418.0...0.419.0)
 
 ## 0.418.0 - 2026-08-28
 
@@ -64,38 +113,6 @@ Full Changelog: [`0.418.0...0.419.0`](https://github.com/christiandoxa/prodex/co
 - Keep profile sweep budget platform-safe (`46a14ec`)
 - Retry profiles after transient backoff expiry (`e6ab33a`)
 - Upgrade Codex compatibility and model catalogs (`0fde6b3`)
-
-### Claude
-
-- Harden ChatGPT MCP expose readiness (`4805e3d`)
-
-### Docs
-
-- Refresh release-cut audit (`d48d7d0`)
-- Record final freshness audit (`dc9d715`)
-
-### Misc
-
-- Remove diagnostic self-test tracing (`f175fd9`)
-- Pass rich inputs by address (`86105bb`)
-- Make rich ABI addresses explicit (`1dbbd2c`)
-- Align upstream baseline and yanked dependency (`afb4a90`)
-- Use portable rich C ABI pointers (`864d251`)
-- Retain health while enriching tool status (`ccc7d57`)
-- Refresh stable tool matrix (`7be2dc7`)
-- Preserve all Windows archive objects (`1e6668c`)
-- Detect Windows log replacement reliably (`2ec28fb`)
-- Use stable Windows file identity API (`25ba645`)
-- Publish curated release notes (`ef6fa03`)
-- Enrich Prodex log views (`7cae05f`)
-- Make log following incremental (`64456e7`)
-- Add Mojo operational log classification (`f7316db`)
-- Make prodex update version-aware (`29bf2bd`)
-
-## 0.417.0 - 2026-08-27
-
-### Runtime
-
 - Finish bounded transport profile sweep (`ecfb064`)
 - Honor recovery sweep budget (`1f5afcd`)
 - Budget recovery independently (`a5212f8`)
@@ -266,6 +283,7 @@ Full Changelog: [`0.418.0...0.419.0`](https://github.com/christiandoxa/prodex/co
 
 ### Claude
 
+- Harden ChatGPT MCP expose readiness (`4805e3d`)
 - Expose MCP through a Quick Tunnel (`21478e6`)
 - Add Streamable HTTP MCP contract (`9392948`)
 - Stabilize optional MCP cold startup (`e3d0f87`)
@@ -273,6 +291,8 @@ Full Changelog: [`0.418.0...0.419.0`](https://github.com/christiandoxa/prodex/co
 
 ### Docs
 
+- Refresh release-cut audit (`d48d7d0`)
+- Record final freshness audit (`dc9d715`)
 - Document ChatGPT expose security and parallel workspaces (`01c1f20`)
 - Document rich Mojo domain core (`b987dad`)
 - Restore durable agent guidance (`762fbe1`)
@@ -340,6 +360,21 @@ Full Changelog: [`0.418.0...0.419.0`](https://github.com/christiandoxa/prodex/co
 
 ### Misc
 
+- Remove diagnostic self-test tracing (`f175fd9`)
+- Pass rich inputs by address (`86105bb`)
+- Make rich ABI addresses explicit (`1dbbd2c`)
+- Align upstream baseline and yanked dependency (`afb4a90`)
+- Use portable rich C ABI pointers (`864d251`)
+- Retain health while enriching tool status (`ccc7d57`)
+- Refresh stable tool matrix (`7be2dc7`)
+- Preserve all Windows archive objects (`1e6668c`)
+- Detect Windows log replacement reliably (`2ec28fb`)
+- Use stable Windows file identity API (`25ba645`)
+- Publish curated release notes (`ef6fa03`)
+- Enrich Prodex log views (`7cae05f`)
+- Make log following incremental (`64456e7`)
+- Add Mojo operational log classification (`f7316db`)
+- Make prodex update version-aware (`29bf2bd`)
 - Reduce routing adapter complexity (`adf82de`)
 - Migrate rich domain semantics (`b84454a`)
 - Normalize Spark reasoning effort (`228918b`)
