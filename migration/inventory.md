@@ -26,8 +26,10 @@ ranges; the release inventory cannot reduce the Rust denominator without a sourc
 reduction record. Mojo volume is the eligible production Mojo semantic LOC, and existing Mojo
 ownership and authoritative operations must not regress.
 
-The 0.419.1 wave records 488 removed/reduced Rust semantic LOC (10.32%), leaving 4,228
-eligible Rust semantic LOC in the release inventory. It adds or expands eight authoritative
+The 0.419.1 wave records 488 counted migrated Rust semantic LOC (10.32%), leaving 4,227
+eligible Rust semantic LOC in the release inventory. The complete release inventory is 500 LOC
+lower than the frozen Rust inventory because it also contains smaller traceable reductions outside
+the counted target-operation volume. It adds or expands eight authoritative
 units across routing, Smart Context, quota/capacity, runtime capacity, context classification,
 and candidate planning. The release report is generated from the manifest; these figures are
 not claims about the historical 0.419.0 wave.
