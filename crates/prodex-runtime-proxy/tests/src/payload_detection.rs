@@ -417,7 +417,7 @@ fn runtime_sse_inspection_waits_for_complete_event_across_every_split() {
         (
             "rate_limit_exceeded",
             "data: {\"error\":{\"code\":\"rate_limit_exceeded\"}}\n\n",
-            RuntimeSseInspectionProgress::QuotaBlocked,
+            RuntimeSseInspectionProgress::Overloaded,
         ),
         (
             "server_is_overloaded",
@@ -578,7 +578,6 @@ fn quota_http_body_detection_accepts_explicit_quota_payloads_but_not_generic_429
         "quota_exhausted",
         "quota_exceeded",
         "resource_exhausted",
-        "rate_limit_exceeded",
         "usage_not_included",
         "usage_limit_reached",
         "workspace_member_credits_depleted",

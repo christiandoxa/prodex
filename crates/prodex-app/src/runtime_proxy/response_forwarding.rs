@@ -189,6 +189,7 @@ pub(crate) async fn prepare_runtime_proxy_responses_success(
             prompt_cache_key: request_prompt_cache_key,
             model_name: request_model_name,
             usage: extract_runtime_token_usage_from_body_bytes(&parts.body),
+            generation_ms: None,
         });
         if !response_ids.is_empty() && response_turn_state.is_some() {
             let _ = release_runtime_compact_lineage(

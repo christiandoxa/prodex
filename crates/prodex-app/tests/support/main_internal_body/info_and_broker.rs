@@ -77,6 +77,9 @@ fn build_info_quota_aggregate_keeps_weekly_data_without_five_hour_data() {
             email: None,
             plan_type: None,
             rate_limit: Some(WindowPair {
+                allowed: None,
+                limit_reached: None,
+                extra: std::collections::BTreeMap::new(),
                 primary_window: None,
                 secondary_window: Some(UsageWindow {
                     used_percent: Some(40),

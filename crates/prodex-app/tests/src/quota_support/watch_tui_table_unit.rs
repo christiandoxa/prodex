@@ -135,9 +135,13 @@ fn all_quota_watch_tui_detail_shows_spark_limit() {
     usage
         .additional_rate_limits
         .push(prodex_quota::AdditionalRateLimit {
+            limit_id: None,
             limit_name: Some("GPT-5.3-Codex-Spark".to_string()),
             metered_feature: Some("codex_bengalfox".to_string()),
             rate_limit: WindowPair {
+                allowed: None,
+                limit_reached: None,
+                extra: std::collections::BTreeMap::new(),
                 primary_window: Some(UsageWindow {
                     used_percent: Some(11),
                     reset_at: Some(1_783_413_134),
@@ -149,6 +153,9 @@ fn all_quota_watch_tui_detail_shows_spark_limit() {
                     limit_window_seconds: Some(604_800),
                 }),
             },
+            allowed: None,
+            limit_reached: None,
+            extra: std::collections::BTreeMap::new(),
         });
     let snapshot = AllQuotaWatchSnapshot::Reports {
         updated: "2026-06-26 10:00:00 UTC".to_string(),
@@ -183,9 +190,13 @@ fn all_quota_watch_tui_status_stays_ready_when_only_spark_is_blocked() {
     usage
         .additional_rate_limits
         .push(prodex_quota::AdditionalRateLimit {
+            limit_id: None,
             limit_name: Some("GPT-5.3-Codex-Spark".to_string()),
             metered_feature: Some("codex_bengalfox".to_string()),
             rate_limit: WindowPair {
+                allowed: None,
+                limit_reached: None,
+                extra: std::collections::BTreeMap::new(),
                 primary_window: Some(UsageWindow {
                     used_percent: Some(100),
                     reset_at: Some(1_783_413_134),
@@ -197,6 +208,9 @@ fn all_quota_watch_tui_status_stays_ready_when_only_spark_is_blocked() {
                     limit_window_seconds: Some(604_800),
                 }),
             },
+            allowed: None,
+            limit_reached: None,
+            extra: std::collections::BTreeMap::new(),
         });
     let snapshot = AllQuotaWatchSnapshot::Reports {
         updated: "2026-06-26 10:00:00 UTC".to_string(),

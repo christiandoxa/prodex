@@ -194,7 +194,9 @@ pub fn inspect_runtime_websocket_text_frame_with_phase(
     } else if error_policy.action == RuntimeHttpErrorAction::RetryProfile
         && matches!(
             error_policy.class,
-            RuntimeHttpErrorClass::Overload | RuntimeHttpErrorClass::TransientServer
+            RuntimeHttpErrorClass::RateLimited
+                | RuntimeHttpErrorClass::Overload
+                | RuntimeHttpErrorClass::TransientServer
         )
     {
         Some(RuntimeWebsocketRetryInspectionKind::Overloaded)

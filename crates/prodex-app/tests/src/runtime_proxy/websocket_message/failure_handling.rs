@@ -9,6 +9,9 @@ fn ready_usage() -> prodex_quota::UsageResponse {
         email: None,
         plan_type: Some("plus".to_string()),
         rate_limit: Some(prodex_quota::WindowPair {
+            allowed: None,
+            limit_reached: None,
+            extra: std::collections::BTreeMap::new(),
             primary_window: Some(prodex_quota::UsageWindow {
                 used_percent: Some(0),
                 reset_at: Some(now + 18_000),

@@ -212,6 +212,9 @@ fn test_usage_with_main_windows(
         email: None,
         plan_type: None,
         rate_limit: Some(WindowPair {
+            allowed: None,
+            limit_reached: None,
+            extra: std::collections::BTreeMap::new(),
             primary_window: Some(UsageWindow {
                 used_percent: Some((100 - five_hour_remaining).clamp(0, 100)),
                 reset_at: Some(now + five_hour_reset_offset_seconds),
@@ -237,6 +240,9 @@ fn test_usage_with_unbounded_main_windows(
         email: None,
         plan_type: None,
         rate_limit: Some(WindowPair {
+            allowed: None,
+            limit_reached: None,
+            extra: std::collections::BTreeMap::new(),
             primary_window: Some(UsageWindow {
                 used_percent: Some((100 - five_hour_remaining).clamp(0, 100)),
                 reset_at: Some(i64::MAX),

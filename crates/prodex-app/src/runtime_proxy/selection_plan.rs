@@ -1,4 +1,5 @@
 use super::*;
+use chrono::Local;
 
 #[derive(Debug, Clone)]
 pub(crate) struct RuntimePlannedProbeRefresh {
@@ -248,15 +249,31 @@ where
         jitter_for,
     } = options;
     let mut candidate_quota_summaries = BTreeMap::new();
-    let candidate_inputs = ready_profile_candidates
+    let candidates = ready_profile_candidates
         .into_iter()
         .enumerate()
         .filter(|(_, candidate)| !excluded_profiles.contains(&candidate.name))
         .filter_map(|(order_index, candidate)| {
             let entry = selection_state.entry(&candidate.name)?;
+            Some((order_index, candidate, entry))
+        })
+        .collect::<Vec<_>>();
+    let usages = candidates
+        .iter()
+        .map(|(_, candidate, _)| &candidate.usage)
+        .collect::<Vec<_>>();
+    let quota_sort_keys = prodex_runtime_quota::runtime_quota_pressure_sort_keys_for_route_at(
+        &usages,
+        route_kind,
+        Local::now().timestamp(),
+    );
+    let candidate_inputs = candidates
+        .into_iter()
+        .zip(quota_sort_keys)
+        .map(|((order_index, candidate, entry), quota_sort_key)| {
             let quota_summary = runtime_quota_summary_for_route(&candidate.usage, route_kind);
             candidate_quota_summaries.insert((candidate.name.clone(), order_index), quota_summary);
-            Some(runtime_proxy_crate::RuntimeResponseCandidatePlanInput {
+            runtime_proxy_crate::RuntimeResponseCandidatePlanInput {
                 name: candidate.name.clone(),
                 order_index,
                 inflight_count: entry.inflight_count,
@@ -272,11 +289,11 @@ where
                 provider_priority: candidate.provider_priority,
                 quota_sort_key:
                     prodex_runtime_quota::runtime_response_quota_pressure_sort_key_to_proxy(
-                        runtime_quota_pressure_sort_key_for_route(&candidate.usage, route_kind),
+                        quota_sort_key,
                     ),
                 in_selection_backoff: entry.in_selection_backoff,
                 jitter: jitter_for(&candidate.name),
-            })
+            }
         })
         .collect::<Vec<_>>();
     let proxy_plan = runtime_proxy_crate::build_runtime_response_candidate_execution_plan(

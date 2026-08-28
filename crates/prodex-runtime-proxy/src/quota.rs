@@ -56,6 +56,7 @@ pub struct RuntimeProxyUsageSnapshot {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct RuntimeProxyQuotaScore {
+    pub pressure_band: RuntimeSelectionQuotaPressureBand,
     pub total_pressure: i64,
     pub weekly_pressure: i64,
     pub five_hour_pressure: i64,
@@ -65,6 +66,11 @@ pub struct RuntimeProxyQuotaScore {
     pub weekly_reset_at: i64,
     pub five_hour_reset_at: i64,
 }
+
+pub type RuntimeProxyQuotaObservationPair = (
+    Option<RuntimeProxyQuotaWindowObservation>,
+    Option<RuntimeProxyQuotaWindowObservation>,
+);
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum RuntimePrecommitQuotaBlockReason {
@@ -381,7 +387,7 @@ pub fn runtime_proxy_quota_pressure_sort_key_for_route(
 ) -> RuntimeProxyQuotaPressureSortKey {
     let score = runtime_proxy_quota_score_for_route(five_hour, weekly, route_kind);
     (
-        runtime_proxy_quota_pressure_band_for_route(five_hour, weekly, route_kind),
+        score.pressure_band,
         score.total_pressure,
         score.weekly_pressure,
         score.five_hour_pressure,
@@ -419,24 +425,73 @@ pub fn runtime_proxy_quota_score_for_route(
     weekly: Option<RuntimeProxyQuotaWindowObservation>,
     route_kind: RuntimeRouteKind,
 ) -> RuntimeProxyQuotaScore {
+    #[cfg(feature = "mojo")]
+    {
+        runtime_proxy_quota_scores_for_route_batch(&[(five_hour, weekly)], route_kind)
+            .into_iter()
+            .next()
+            .expect("Mojo runtime quota score batch returned no score")
+    }
+
+    #[cfg(not(feature = "mojo"))]
+    runtime_proxy_quota_score_for_route_rust(five_hour, weekly, route_kind)
+}
+
+pub fn runtime_proxy_quota_scores_for_route_batch(
+    observations: &[RuntimeProxyQuotaObservationPair],
+    route_kind: RuntimeRouteKind,
+) -> Vec<RuntimeProxyQuotaScore> {
+    #[cfg(feature = "mojo")]
+    {
+        let mut scores = Vec::with_capacity(observations.len());
+        for chunk in observations.chunks(prodex_mojo_core::runtime::RUNTIME_QUOTA_SCORE_MAX_COUNT) {
+            scores.extend(
+                mojo::quota_score_batch(chunk, route_kind)
+                    .expect("Mojo runtime quota score batch returned invalid output"),
+            );
+        }
+        assert_eq!(
+            scores.len(),
+            observations.len(),
+            "Mojo runtime quota score batch returned the wrong count"
+        );
+        scores
+    }
+
+    #[cfg(not(feature = "mojo"))]
+    observations
+        .iter()
+        .map(|(five_hour, weekly)| {
+            runtime_proxy_quota_score_for_route_rust(*five_hour, *weekly, route_kind)
+        })
+        .collect()
+}
+
+#[cfg(not(feature = "mojo"))]
+fn runtime_proxy_quota_score_for_route_rust(
+    five_hour: Option<RuntimeProxyQuotaWindowObservation>,
+    weekly: Option<RuntimeProxyQuotaWindowObservation>,
+    route_kind: RuntimeRouteKind,
+) -> RuntimeProxyQuotaScore {
     let weekly_pressure = weekly.map_or(i64::MAX, |window| window.pressure_score);
     let five_hour_pressure = five_hour.map_or(i64::MAX, |window| window.pressure_score);
     let weekly_remaining = weekly.map_or(0, |window| window.remaining_percent);
     let five_hour_remaining = five_hour.map_or(0, |window| window.remaining_percent);
+    let pressure_band = runtime_proxy_quota_pressure_band_for_route(five_hour, weekly, route_kind);
     let weekly_weight = match route_kind {
         RuntimeRouteKind::Responses | RuntimeRouteKind::Websocket => 10,
         RuntimeRouteKind::Compact | RuntimeRouteKind::Standard => 8,
     };
-    let reserve_bias =
-        match runtime_proxy_quota_pressure_band_for_route(five_hour, weekly, route_kind) {
-            RuntimeSelectionQuotaPressureBand::Healthy => 0,
-            RuntimeSelectionQuotaPressureBand::Thin => 250_000,
-            RuntimeSelectionQuotaPressureBand::Critical => 1_000_000,
-            RuntimeSelectionQuotaPressureBand::Exhausted
-            | RuntimeSelectionQuotaPressureBand::Unknown => i64::MAX / 4,
-        };
+    let reserve_bias = match pressure_band {
+        RuntimeSelectionQuotaPressureBand::Healthy => 0,
+        RuntimeSelectionQuotaPressureBand::Thin => 250_000,
+        RuntimeSelectionQuotaPressureBand::Critical => 1_000_000,
+        RuntimeSelectionQuotaPressureBand::Exhausted
+        | RuntimeSelectionQuotaPressureBand::Unknown => i64::MAX / 4,
+    };
 
     RuntimeProxyQuotaScore {
+        pressure_band,
         total_pressure: reserve_bias
             .saturating_add(weekly_pressure.saturating_mul(weekly_weight))
             .saturating_add(five_hour_pressure),

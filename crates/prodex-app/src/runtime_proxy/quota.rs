@@ -42,7 +42,6 @@ pub(crate) use summary::*;
 pub(crate) use prodex_quota::quota_reset_at_from_message as runtime_proxy_quota_reset_at_from_message;
 pub(crate) use prodex_runtime_quota::{
     runtime_profile_usage_snapshot_from_usage, runtime_quota_pressure_band_reason,
-    runtime_quota_pressure_sort_key_for_route,
     runtime_quota_pressure_sort_key_for_route_from_summary, runtime_quota_source_label,
     runtime_quota_summary_for_route, runtime_quota_summary_from_cached_sources,
     runtime_quota_summary_from_usage_snapshot, runtime_quota_summary_from_usage_snapshot_at,

@@ -204,6 +204,9 @@ mod tests {
             email: None,
             plan_type: Some("plus".to_string()),
             rate_limit: Some(WindowPair {
+                allowed: None,
+                limit_reached: None,
+                extra: std::collections::BTreeMap::new(),
                 primary_window: Some(UsageWindow {
                     used_percent: Some(20),
                     reset_at: Some(1_700_000_000),

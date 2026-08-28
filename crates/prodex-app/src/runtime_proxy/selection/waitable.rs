@@ -36,6 +36,9 @@ pub(crate) fn runtime_remaining_sync_probe_cold_start_profiles_for_route(
             || !entry.supports_codex_runtime()
             || entry.cached_probe_entry.is_some()
             || entry.inflight_count >= inflight_soft_limit
+            || entry.in_selection_backoff
+            || entry.auth_failure_active
+            || entry.health_sort_key > 0
             || runtime_profile_inflight_hard_limited_for_context(
                 shared,
                 &name,

@@ -175,6 +175,7 @@ pub(crate) fn attempt_runtime_websocket_request_with_hard_affinity(
         transport_generation,
         compaction_generation,
         committed: false,
+        generation_started_at: None,
         first_upstream_frame_seen: false,
         first_upstream_text_seen: false,
         buffered_precommit_text_frames: Vec::new(),
@@ -213,6 +214,7 @@ struct RuntimeWebsocketResponseLoop<'a> {
     compaction_generation: Option<u64>,
     promote_committed_profile: bool,
     committed: bool,
+    generation_started_at: Option<Instant>,
     first_upstream_frame_seen: bool,
     first_upstream_text_seen: bool,
     buffered_precommit_text_frames: Vec<RuntimeBufferedWebsocketTextFrame>,
@@ -464,6 +466,21 @@ impl RuntimeWebsocketResponseLoop<'_> {
         &mut self,
         inspected: &runtime_proxy_crate::RuntimeInspectedWebsocketTextFrame,
     ) -> Result<bool> {
+        let event_type = inspected.event_type.as_deref();
+        if self.generation_started_at.is_none()
+            && runtime_proxy_crate::runtime_response_event_is_generation_start(event_type)
+        {
+            self.generation_started_at = Some(Instant::now());
+        }
+        let generation_ms = (event_type == Some("response.completed"))
+            .then(|| {
+                self.generation_started_at?
+                    .elapsed()
+                    .as_millis()
+                    .try_into()
+                    .ok()
+            })
+            .flatten();
         if !inspected.precommit_hold {
             self.committed_response_ids
                 .extend(inspected.response_ids.iter().cloned());
@@ -499,6 +516,7 @@ impl RuntimeWebsocketResponseLoop<'_> {
                 prompt_cache_key: self.request_prompt_cache_key,
                 model_name: self.request_model_name,
                 usage: inspected.token_usage,
+                generation_ms,
             });
         }
         let committed_previous_response_not_found = self.committed

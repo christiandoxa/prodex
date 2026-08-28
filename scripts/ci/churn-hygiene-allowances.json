@@ -1,5 +1,18 @@
 [
   {
+    "id": "audited-prodex-0.418.1-runtime-accounting",
+    "requiredSubjects": [
+      "fix(runtime): preserve bounded selection and token accounting"
+    ],
+    "caps": {
+      "maxFiles": 35,
+      "maxBehaviorFiles": 40,
+      "maxLines": 1500,
+      "maxFileLines": 600
+    },
+    "reason": "This small follow-up isolates provider error classification, bounded cold-start selection, runtime token timing, and the required constructor/regression updates; the narrow allowance covers 34 reviewed files without changing global thresholds."
+  },
+  {
     "id": "audited-prodex-0.418.1-mojo-ownership",
     "requiredSubjects": [
       "feat(mojo): migrate deterministic runtime ownership"

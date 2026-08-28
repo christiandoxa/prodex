@@ -78,6 +78,7 @@ pub(crate) struct RuntimeTokenUsageLog<'a> {
     pub(crate) prompt_cache_key: Option<&'a str>,
     pub(crate) model_name: Option<&'a str>,
     pub(crate) usage: Option<RuntimeTokenUsage>,
+    pub(crate) generation_ms: Option<u64>,
 }
 
 pub(crate) struct RuntimeStreamPayloadLog<'a> {
@@ -135,6 +136,7 @@ pub(crate) fn log_runtime_token_usage(input: RuntimeTokenUsageLog<'_>) {
         prompt_cache_key,
         model_name,
         usage,
+        generation_ms,
     } = input;
     let Some(usage) = usage else {
         return;
@@ -161,35 +163,43 @@ pub(crate) fn log_runtime_token_usage(input: RuntimeTokenUsageLog<'_>) {
         }),
     );
     let uncached_input_tokens = usage.input_tokens.saturating_sub(usage.cached_input_tokens);
+    let mut fields = vec![
+        runtime_proxy_log_field("request", request_id.to_string()),
+        runtime_proxy_log_field("route", runtime_route_kind_label(route_kind)),
+        runtime_proxy_log_field("transport", transport),
+        runtime_proxy_log_field("profile", profile_name),
+        runtime_proxy_log_field("source", source),
+        runtime_proxy_log_field(
+            "prompt_cache_key",
+            runtime_prompt_cache_key_log_label(prompt_cache_key),
+        ),
+        runtime_proxy_log_field(
+            "prompt_cache_key_hash",
+            runtime_prompt_cache_key_hash_label(prompt_cache_key),
+        ),
+        runtime_proxy_log_field("prompt_cache_owner", prompt_cache_observation.log_label()),
+        runtime_proxy_log_field("input_tokens", usage.input_tokens.to_string()),
+        runtime_proxy_log_field("uncached_input_tokens", uncached_input_tokens.to_string()),
+        runtime_proxy_log_field("cached_input_tokens", usage.cached_input_tokens.to_string()),
+        runtime_proxy_log_field("output_tokens", usage.output_tokens.to_string()),
+        runtime_proxy_log_field("reasoning_tokens", usage.reasoning_tokens.to_string()),
+    ];
+    if let Some(generation_ms) = generation_ms.filter(|value| *value > 0) {
+        fields.push(runtime_proxy_log_field(
+            "generation_ms",
+            generation_ms.to_string(),
+        ));
+        let output_tokens_per_second = usage.output_tokens as f64 * 1_000.0 / generation_ms as f64;
+        if output_tokens_per_second.is_finite() {
+            fields.push(runtime_proxy_log_field(
+                "output_tokens_per_second",
+                format!("{output_tokens_per_second:.1}"),
+            ));
+        }
+    }
     runtime_proxy_log(
         shared,
-        runtime_proxy_structured_log_message(
-            "token_usage",
-            [
-                runtime_proxy_log_field("request", request_id.to_string()),
-                runtime_proxy_log_field("route", runtime_route_kind_label(route_kind)),
-                runtime_proxy_log_field("transport", transport),
-                runtime_proxy_log_field("profile", profile_name),
-                runtime_proxy_log_field("source", source),
-                runtime_proxy_log_field(
-                    "prompt_cache_key",
-                    runtime_prompt_cache_key_log_label(prompt_cache_key),
-                ),
-                runtime_proxy_log_field(
-                    "prompt_cache_key_hash",
-                    runtime_prompt_cache_key_hash_label(prompt_cache_key),
-                ),
-                runtime_proxy_log_field("prompt_cache_owner", prompt_cache_observation.log_label()),
-                runtime_proxy_log_field("input_tokens", usage.input_tokens.to_string()),
-                runtime_proxy_log_field("uncached_input_tokens", uncached_input_tokens.to_string()),
-                runtime_proxy_log_field(
-                    "cached_input_tokens",
-                    usage.cached_input_tokens.to_string(),
-                ),
-                runtime_proxy_log_field("output_tokens", usage.output_tokens.to_string()),
-                runtime_proxy_log_field("reasoning_tokens", usage.reasoning_tokens.to_string()),
-            ],
-        ),
+        runtime_proxy_structured_log_message("token_usage", fields),
     );
 }
 

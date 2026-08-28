@@ -1,4 +1,5 @@
 use std::collections::BTreeSet;
+use std::time::Instant;
 
 use crate::{
     RuntimeTokenUsage, runtime_connection_header_tokens,
@@ -173,6 +174,27 @@ pub fn runtime_token_usage_event_is_loggable(event_type: Option<&str>) -> bool {
     }
 }
 
+/// Returns whether a Responses event marks the first model-generation phase.
+///
+/// Queueing, response headers, and time-to-first-token are intentionally excluded. The
+/// returned boundary is used only for output-throughput timing; it does not affect commit or
+/// retry decisions.
+pub fn runtime_response_event_is_generation_start(event_type: Option<&str>) -> bool {
+    matches!(
+        event_type,
+        Some(
+            "response.output_item.added"
+                | "response.content_part.added"
+                | "response.output_text.delta"
+                | "response.refusal.delta"
+                | "response.reasoning_summary_part.added"
+                | "response.reasoning_summary_text.delta"
+                | "response.function_call_arguments.delta"
+                | "response.custom_tool_call_input.delta"
+        )
+    )
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RuntimeSseTapEffect {
     RememberResponseIds {
@@ -183,6 +205,10 @@ pub enum RuntimeSseTapEffect {
         response_ids: Vec<String>,
     },
     LogTokenUsage(RuntimeTokenUsage),
+    LogTokenUsageWithGeneration {
+        usage: RuntimeTokenUsage,
+        generation_ms: u64,
+    },
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -199,6 +225,7 @@ pub struct RuntimeSseTapState {
     remembered_response_ids: BTreeSet<String>,
     response_ids_with_turn_state: BTreeSet<String>,
     logged_token_usage: BTreeSet<RuntimeTokenUsage>,
+    generation_started_at: Option<Instant>,
     turn_state: Option<String>,
     request_previous_response_id: Option<String>,
 }
@@ -255,7 +282,22 @@ impl RuntimeSseTapState {
                 response_ids: self.dead_chain_response_ids(),
             });
         }
-        self.log_token_usage(event.event_type.as_deref(), event.token_usage, effects);
+        let event_type = event.event_type.as_deref();
+        if self.generation_started_at.is_none()
+            && runtime_response_event_is_generation_start(event_type)
+        {
+            self.generation_started_at = Some(Instant::now());
+        }
+        let generation_ms = (event_type == Some("response.completed"))
+            .then(|| {
+                self.generation_started_at?
+                    .elapsed()
+                    .as_millis()
+                    .try_into()
+                    .ok()
+            })
+            .flatten();
+        self.log_token_usage(event_type, event.token_usage, generation_ms, effects);
     }
 
     fn remember_response_ids(
@@ -324,6 +366,7 @@ impl RuntimeSseTapState {
         &mut self,
         event_type: Option<&str>,
         token_usage: Option<RuntimeTokenUsage>,
+        generation_ms: Option<u64>,
         effects: &mut Vec<RuntimeSseTapEffect>,
     ) {
         if !runtime_token_usage_event_is_loggable(event_type) {
@@ -333,7 +376,14 @@ impl RuntimeSseTapState {
             return;
         };
         if self.logged_token_usage.insert(token_usage) {
-            effects.push(RuntimeSseTapEffect::LogTokenUsage(token_usage));
+            if let Some(generation_ms) = generation_ms {
+                effects.push(RuntimeSseTapEffect::LogTokenUsageWithGeneration {
+                    usage: token_usage,
+                    generation_ms,
+                });
+            } else {
+                effects.push(RuntimeSseTapEffect::LogTokenUsage(token_usage));
+            }
         }
     }
 }

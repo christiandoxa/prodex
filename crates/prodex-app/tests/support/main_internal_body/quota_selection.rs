@@ -20,6 +20,9 @@ fn blocks_when_main_window_is_exhausted() {
         email: None,
         plan_type: None,
         rate_limit: Some(WindowPair {
+            allowed: None,
+            limit_reached: None,
+            extra: std::collections::BTreeMap::new(),
             primary_window: Some(UsageWindow {
                 used_percent: Some(100),
                 reset_at: Some(1_700_000_000),
@@ -43,6 +46,9 @@ fn allows_available_main_window_when_weekly_window_is_missing() {
         email: None,
         plan_type: None,
         rate_limit: Some(WindowPair {
+            allowed: None,
+            limit_reached: None,
+            extra: std::collections::BTreeMap::new(),
             primary_window: Some(UsageWindow {
                 used_percent: Some(20),
                 reset_at: Some(1_700_000_000),
@@ -64,6 +70,9 @@ fn allows_available_weekly_window_when_five_hour_window_is_missing() {
         email: None,
         plan_type: None,
         rate_limit: Some(WindowPair {
+            allowed: None,
+            limit_reached: None,
+            extra: std::collections::BTreeMap::new(),
             primary_window: None,
             secondary_window: Some(UsageWindow {
                 used_percent: Some(0),
@@ -98,6 +107,9 @@ fn main_reset_summary_lists_required_windows() {
         email: None,
         plan_type: None,
         rate_limit: Some(WindowPair {
+            allowed: None,
+            limit_reached: None,
+            extra: std::collections::BTreeMap::new(),
             primary_window: Some(UsageWindow {
                 used_percent: Some(20),
                 reset_at: Some(1_700_000_000),
@@ -126,6 +138,9 @@ fn main_reset_summary_marks_missing_required_window() {
         email: None,
         plan_type: None,
         rate_limit: Some(WindowPair {
+            allowed: None,
+            limit_reached: None,
+            extra: std::collections::BTreeMap::new(),
             primary_window: Some(UsageWindow {
                 used_percent: Some(20),
                 reset_at: Some(1_700_000_000),
