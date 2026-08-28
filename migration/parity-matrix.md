@@ -33,6 +33,15 @@ not runtime fallback.
 | Runtime tuning defaults | Rust-only feature-off `runtime_tuning_defaults_rust` test oracle | `prodex_runtime_tuning_defaults` | Normalized host parallelism | Exact worker/log/websocket default tuple | `tuning_defaults_match_rust_oracle_for_generated_parallelism` (2,000 fixed-seed cases), runtime config and probe queue callers | `MOJO` |
 | Smart Context candidate scoring | `smart_context_candidate_score` and selection | Not started | Normalized candidate batch | Exact score/order | Smart Context regression fixtures | `AUDIT_ONLY` |
 
+## Prodex 0.418.1 additions
+
+| Component | Rust oracle | Mojo entry point | Inputs | Expected output | Coverage | Status |
+| --- | --- | --- | --- | --- | --- | --- |
+| Provider catalog identity and choices | feature-off catalog matcher/planner | `prodex_mojo_rich_catalog_resolve_v1`, `prodex_mojo_rich_catalog_choices_v1` | bounded provider catalog, aliases, configured IDs, current ID | canonical identity and stable provider/default/configured/custom choice order | provider-core catalog suite, alias/order/capacity tests | `MOJO` |
+| Provider catalog merge deduplication | feature-off catalog merge oracle | `prodex_mojo_rich_catalog_merge_v1` | bounded canonical IDs, aliases, additional IDs | accepted additional indices with alias/canonical deduplication | provider-core merge suite and rich alias regression | `MOJO` |
+| Route-aware quota pressure score | `runtime_proxy_quota_score_for_route_rust` | `prodex_runtime_quota_score_batch` | bounded two-window observations and route tag | pressure band, weighted pressure, reserve floor, remaining/reset values | 300 generated parity cases and runtime-quota batch/scalar equivalence | `MOJO` |
+| Observed Smart Context usage totals | `smart_context_observed_usage_totals_rust` | `prodex_smart_context_token_usage_summary_batch` | bounded input/cached/output/reasoning token rows | saturating totals and last-observation accounting values | generated saturation parity and full Mojo runtime suite | `MOJO` |
+
 ## Promotion rule
 
 Every future row needs normal, empty, invalid, boundary, extreme, and randomized inputs

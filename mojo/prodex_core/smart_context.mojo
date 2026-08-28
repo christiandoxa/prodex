@@ -2,6 +2,12 @@ from std.memory import Pointer
 
 comptime UINT64_MAX: UInt64 = 18446744073709551615
 comptime UINT32_MAX: UInt64 = 4294967295
+comptime SMART_CONTEXT_TOKEN_ACCOUNTING_MAX_COUNT: Int64 = 256
+
+def smart_context_saturating_add(left: UInt64, right: UInt64) -> UInt64:
+    if left > UINT64_MAX - right:
+        return UINT64_MAX
+    return left + right
 
 def smart_context_saturating_mul(left: UInt64, right: UInt64) -> UInt64:
     if left == 0 or right == 0:
@@ -95,6 +101,80 @@ def prodex_smart_context_pressure_snapshot(
             confidence = 1
     estimator_confidence[0] = confidence
     return 0
+
+@export("prodex_smart_context_token_usage_summary_batch")
+def prodex_smart_context_token_usage_summary_batch(
+    input_tokens_address: UInt,
+    cached_input_tokens_address: UInt,
+    output_tokens_address: UInt,
+    reasoning_tokens_address: UInt,
+    observed_input_tokens_address: UInt,
+    observed_cached_input_tokens_address: UInt,
+    observed_output_tokens_address: UInt,
+    observed_reasoning_tokens_address: UInt,
+    last_input_tokens_address: UInt,
+    last_accounted_input_tokens_address: UInt,
+    last_observed_context_tokens_address: UInt,
+    count: Int64,
+) abi("C") -> Int64:
+    if count < 0 or count > SMART_CONTEXT_TOKEN_ACCOUNTING_MAX_COUNT:
+        return 1
+    if count == 0:
+        return 0
+    if input_tokens_address == 0 or cached_input_tokens_address == 0 or output_tokens_address == 0 or reasoning_tokens_address == 0 or observed_input_tokens_address == 0 or observed_cached_input_tokens_address == 0 or observed_output_tokens_address == 0 or observed_reasoning_tokens_address == 0 or last_input_tokens_address == 0 or last_accounted_input_tokens_address == 0 or last_observed_context_tokens_address == 0:
+        return 1
+
+    var input_tokens = Pointer[mut=False, UInt64, ImmUntrackedOrigin](unsafe_from_address=Int(input_tokens_address))
+    var cached_input_tokens = Pointer[mut=False, UInt64, ImmUntrackedOrigin](unsafe_from_address=Int(cached_input_tokens_address))
+    var output_tokens = Pointer[mut=False, UInt64, ImmUntrackedOrigin](unsafe_from_address=Int(output_tokens_address))
+    var reasoning_tokens = Pointer[mut=False, UInt64, ImmUntrackedOrigin](unsafe_from_address=Int(reasoning_tokens_address))
+    var observed_input_tokens = Pointer[mut=True, UInt64, MutUntrackedOrigin](unsafe_from_address=Int(observed_input_tokens_address))
+    var observed_cached_input_tokens = Pointer[mut=True, UInt64, MutUntrackedOrigin](unsafe_from_address=Int(observed_cached_input_tokens_address))
+    var observed_output_tokens = Pointer[mut=True, UInt64, MutUntrackedOrigin](unsafe_from_address=Int(observed_output_tokens_address))
+    var observed_reasoning_tokens = Pointer[mut=True, UInt64, MutUntrackedOrigin](unsafe_from_address=Int(observed_reasoning_tokens_address))
+    var last_input_tokens = Pointer[mut=True, UInt64, MutUntrackedOrigin](unsafe_from_address=Int(last_input_tokens_address))
+    var last_accounted_input_tokens = Pointer[mut=True, UInt64, MutUntrackedOrigin](unsafe_from_address=Int(last_accounted_input_tokens_address))
+    var last_observed_context_tokens = Pointer[mut=True, UInt64, MutUntrackedOrigin](unsafe_from_address=Int(last_observed_context_tokens_address))
+
+    var total_input: UInt64 = 0
+    var total_cached_input: UInt64 = 0
+    var total_output: UInt64 = 0
+    var total_reasoning: UInt64 = 0
+    var last_input: UInt64 = 0
+    var last_accounted: UInt64 = 0
+    var last_context: UInt64 = 0
+    for index in range(count):
+        var input = input_tokens[unsafe_offset=index]
+        var cached_input = cached_input_tokens[unsafe_offset=index]
+        var output = output_tokens[unsafe_offset=index]
+        var reasoning = reasoning_tokens[unsafe_offset=index]
+        total_input = smart_context_saturating_add(total_input, input)
+        total_cached_input = smart_context_saturating_add(
+            total_cached_input, cached_input
+        )
+        total_output = smart_context_saturating_add(total_output, output)
+        total_reasoning = smart_context_saturating_add(total_reasoning, reasoning)
+        last_input = input
+        if input == 0:
+            last_accounted = cached_input
+        else:
+            last_accounted = input
+        var context = smart_context_saturating_add(input, output)
+        context = smart_context_saturating_add(context, reasoning)
+        if context == 0:
+            last_context = cached_input
+        else:
+            last_context = context
+
+    observed_input_tokens[unsafe_offset=0] = total_input
+    observed_cached_input_tokens[unsafe_offset=0] = total_cached_input
+    observed_output_tokens[unsafe_offset=0] = total_output
+    observed_reasoning_tokens[unsafe_offset=0] = total_reasoning
+    last_input_tokens[unsafe_offset=0] = last_input
+    last_accounted_input_tokens[unsafe_offset=0] = last_accounted
+    last_observed_context_tokens[unsafe_offset=0] = last_context
+    return 0
+
 
 @export("prodex_smart_context_estimate_tokens_from_body_bytes")
 def prodex_smart_context_estimate_tokens_from_body_bytes(body_bytes: UInt64) abi("C") -> UInt64:

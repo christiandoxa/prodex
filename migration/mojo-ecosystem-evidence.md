@@ -76,3 +76,20 @@ deterministic calls.
 Object sizes are diagnostic evidence, not a stable release API: link-time
 section selection can change them. The final binary, archive, GLIBC, and
 clean-machine checks remain authoritative.
+
+## 0.418.1 refresh
+
+The release additions were rechecked with the installed `Mojo 1.0.0 (ed45d567)` compiler:
+
+```text
+mojo build mojo/prodex_core/rich_catalog.mojo --emit object --optimization-level=3
+PASS
+mojo build mojo/prodex_core/quota_pressure.mojo --emit object --optimization-level=3
+PASS
+mojo build mojo/prodex_core/smart_context.mojo --emit object --optimization-level=3
+PASS
+```
+
+No community package was adopted. The catalog/quotas/usage additions use the existing standard
+library and static archive contract; no runtime package resolution or network dependency was
+introduced.

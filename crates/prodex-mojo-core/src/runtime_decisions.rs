@@ -9,6 +9,27 @@ pub struct RuntimeTuningDefaults {
     pub websocket_dns_worker_count: usize,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SmartContextTokenUsageInput {
+    pub input_tokens: u64,
+    pub cached_input_tokens: u64,
+    pub output_tokens: u64,
+    pub reasoning_tokens: u64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SmartContextTokenUsageSummary {
+    pub observed_input_tokens: u64,
+    pub observed_cached_input_tokens: u64,
+    pub observed_output_tokens: u64,
+    pub observed_reasoning_tokens: u64,
+    pub last_input_tokens: u64,
+    pub last_accounted_input_tokens: u64,
+    pub last_observed_context_tokens: u64,
+}
+
+pub const SMART_CONTEXT_TOKEN_ACCOUNTING_MAX_COUNT: usize = 256;
+
 pub const OPTIMISTIC_CANDIDATE_KEEP: i64 = 0;
 pub const OPTIMISTIC_CANDIDATE_AUTH_FAILURE: i64 = 1;
 pub const OPTIMISTIC_CANDIDATE_SELECTION_BACKOFF: i64 = 2;
@@ -104,6 +125,20 @@ unsafe extern "C" {
         websocket_connect_worker_count: *mut i64,
         websocket_dns_worker_count: *mut i64,
     ) -> i64;
+    fn prodex_smart_context_token_usage_summary_batch(
+        input_tokens_address: u64,
+        cached_input_tokens_address: u64,
+        output_tokens_address: u64,
+        reasoning_tokens_address: u64,
+        observed_input_tokens_address: u64,
+        observed_cached_input_tokens_address: u64,
+        observed_output_tokens_address: u64,
+        observed_reasoning_tokens_address: u64,
+        last_input_tokens_address: u64,
+        last_accounted_input_tokens_address: u64,
+        last_observed_context_tokens_address: u64,
+        count: i64,
+    ) -> i64;
 }
 
 pub fn rehydrate_plan_self_test() -> bool {
@@ -128,6 +163,91 @@ pub fn tuning_defaults_self_test() -> bool {
             && defaults.log_queue_capacity == 2_048
             && defaults.websocket_connect_worker_count == 8
             && defaults.websocket_dns_worker_count == 8
+    })
+}
+
+pub fn smart_context_token_usage_summary_batch(
+    inputs: &[SmartContextTokenUsageInput],
+) -> Result<SmartContextTokenUsageSummary, crate::MojoError> {
+    if inputs.len() > SMART_CONTEXT_TOKEN_ACCOUNTING_MAX_COUNT {
+        return Err(crate::MojoError::InvalidInput);
+    }
+    let input_tokens = inputs
+        .iter()
+        .map(|input| input.input_tokens)
+        .collect::<Vec<_>>();
+    let cached_input_tokens = inputs
+        .iter()
+        .map(|input| input.cached_input_tokens)
+        .collect::<Vec<_>>();
+    let output_tokens = inputs
+        .iter()
+        .map(|input| input.output_tokens)
+        .collect::<Vec<_>>();
+    let reasoning_tokens = inputs
+        .iter()
+        .map(|input| input.reasoning_tokens)
+        .collect::<Vec<_>>();
+    let mut observed_input_tokens = 0;
+    let mut observed_cached_input_tokens = 0;
+    let mut observed_output_tokens = 0;
+    let mut observed_reasoning_tokens = 0;
+    let mut last_input_tokens = 0;
+    let mut last_accounted_input_tokens = 0;
+    let mut last_observed_context_tokens = 0;
+    let status = unsafe {
+        prodex_smart_context_token_usage_summary_batch(
+            input_tokens.as_ptr() as u64,
+            cached_input_tokens.as_ptr() as u64,
+            output_tokens.as_ptr() as u64,
+            reasoning_tokens.as_ptr() as u64,
+            &mut observed_input_tokens as *mut u64 as u64,
+            &mut observed_cached_input_tokens as *mut u64 as u64,
+            &mut observed_output_tokens as *mut u64 as u64,
+            &mut observed_reasoning_tokens as *mut u64 as u64,
+            &mut last_input_tokens as *mut u64 as u64,
+            &mut last_accounted_input_tokens as *mut u64 as u64,
+            &mut last_observed_context_tokens as *mut u64 as u64,
+            i64::try_from(inputs.len()).map_err(|_| crate::MojoError::InvalidInput)?,
+        )
+    };
+    if status != 0 {
+        return Err(crate::MojoError::InvalidOutput);
+    }
+    Ok(SmartContextTokenUsageSummary {
+        observed_input_tokens,
+        observed_cached_input_tokens,
+        observed_output_tokens,
+        observed_reasoning_tokens,
+        last_input_tokens,
+        last_accounted_input_tokens,
+        last_observed_context_tokens,
+    })
+}
+
+pub fn smart_context_token_usage_summary_self_test() -> bool {
+    smart_context_token_usage_summary_batch(&[
+        SmartContextTokenUsageInput {
+            input_tokens: 20,
+            cached_input_tokens: 4,
+            output_tokens: 3,
+            reasoning_tokens: 1,
+        },
+        SmartContextTokenUsageInput {
+            input_tokens: 0,
+            cached_input_tokens: 8,
+            output_tokens: 0,
+            reasoning_tokens: 0,
+        },
+    ])
+    .is_ok_and(|summary| {
+        summary.observed_input_tokens == 20
+            && summary.observed_cached_input_tokens == 12
+            && summary.observed_output_tokens == 3
+            && summary.observed_reasoning_tokens == 1
+            && summary.last_input_tokens == 0
+            && summary.last_accounted_input_tokens == 8
+            && summary.last_observed_context_tokens == 8
     })
 }
 

@@ -79,6 +79,7 @@ pub fn self_test() -> bool {
             && result.compatible == [true, false]
     });
     let profile_schedule_ok = runtime::profile_schedule_self_test();
+    let quota_score_ok = runtime::quota_score_self_test();
     let candidate_plan_ok = runtime::candidate_plan_self_test();
     let pressure_snapshot_ok = runtime::smart_context_pressure_snapshot_self_test();
     let rehydrate_plan_ok = runtime_decisions::rehydrate_plan_self_test();
@@ -87,12 +88,14 @@ pub fn self_test() -> bool {
     let policy_validation_ok = policy::self_test();
     let context_ok = context::self_test();
     let tuning_defaults_ok = runtime_decisions::tuning_defaults_self_test();
+    let smart_context_usage_ok = runtime_decisions::smart_context_token_usage_summary_self_test();
     let rich_ok = rich::rich_self_test();
     let log_semantics_ok = log::self_test();
     let checks = [
         routing_ok,
         capability_ok,
         profile_schedule_ok,
+        quota_score_ok,
         candidate_plan_ok,
         pressure_snapshot_ok,
         rehydrate_plan_ok,
@@ -101,6 +104,7 @@ pub fn self_test() -> bool {
         policy_validation_ok,
         context_ok,
         tuning_defaults_ok,
+        smart_context_usage_ok,
         rich_ok,
         log_semantics_ok,
         routing::abi_version().is_ok(),

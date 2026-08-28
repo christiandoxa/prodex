@@ -1,6 +1,7 @@
 use crate::{ProviderEndpoint, ProviderId, ProviderReasoningEffort};
 use serde::{Deserialize, Deserializer, Serialize};
 use std::collections::BTreeMap;
+#[cfg(not(feature = "mojo"))]
 use std::collections::BTreeSet;
 use std::fmt;
 use std::sync::OnceLock;
@@ -87,7 +88,64 @@ pub enum ProviderModelChoice {
 }
 
 /// Builds the offline model picker from the canonical catalog plus local configuration.
+#[cfg(feature = "mojo")]
 pub fn resolve_provider_model_choices(
+    provider: ProviderId,
+    configured_models: &[String],
+    current_model: Option<&str>,
+) -> Vec<ProviderModelChoice> {
+    let entries = provider_catalog_entries_for(provider);
+    let configured = configured_models
+        .iter()
+        .map(String::as_str)
+        .collect::<Vec<_>>();
+    let aliases = entries
+        .iter()
+        .map(|entry| entry.aliases.iter().map(String::as_str).collect::<Vec<_>>())
+        .collect::<Vec<_>>();
+    let plan = prodex_mojo_core::rich::plan_catalog_choices(
+        &entries
+            .iter()
+            .zip(&aliases)
+            .map(|(entry, aliases)| prodex_mojo_core::rich::CatalogModel {
+                id: entry.id.as_str(),
+                aliases,
+            })
+            .collect::<Vec<_>>(),
+        &configured,
+        current_model,
+    )
+    .expect("Mojo catalog choice planning returned an invalid structured result");
+    plan.into_iter()
+        .map(|choice| match choice {
+            prodex_mojo_core::rich::CatalogChoice::ProviderDefault => {
+                ProviderModelChoice::ProviderDefault
+            }
+            prodex_mojo_core::rich::CatalogChoice::Catalog(index) => {
+                ProviderModelChoice::Model(entries[index].id.clone())
+            }
+            prodex_mojo_core::rich::CatalogChoice::Configured(index) => {
+                ProviderModelChoice::Model(normalize_model(provider, &configured_models[index]))
+            }
+            prodex_mojo_core::rich::CatalogChoice::Current => ProviderModelChoice::Model(
+                normalize_model(provider, current_model.expect("current catalog choice")),
+            ),
+            prodex_mojo_core::rich::CatalogChoice::Custom => ProviderModelChoice::Custom,
+        })
+        .collect()
+}
+
+#[cfg(not(feature = "mojo"))]
+pub fn resolve_provider_model_choices(
+    provider: ProviderId,
+    configured_models: &[String],
+    current_model: Option<&str>,
+) -> Vec<ProviderModelChoice> {
+    resolve_provider_model_choices_rust(provider, configured_models, current_model)
+}
+
+#[cfg(not(feature = "mojo"))]
+fn resolve_provider_model_choices_rust(
     provider: ProviderId,
     configured_models: &[String],
     current_model: Option<&str>,
@@ -95,7 +153,7 @@ pub fn resolve_provider_model_choices(
     let mut choices = vec![ProviderModelChoice::ProviderDefault];
     let mut seen = BTreeSet::new();
     let normalize = |model: &str| {
-        provider_catalog_entry(provider, model)
+        provider_catalog_entry_rust(provider, model)
             .map(|entry| entry.id.as_str())
             .or_else(|| crate::provider_model_spec(provider, model).map(|spec| spec.id))
             .unwrap_or(model)
@@ -139,6 +197,15 @@ pub fn resolve_provider_model_choices(
     choices
 }
 
+#[cfg(feature = "mojo")]
+fn normalize_model(provider: ProviderId, model: &str) -> String {
+    provider_catalog_entry(provider, model)
+        .map(|entry| entry.id.as_str())
+        .or_else(|| crate::provider_model_spec(provider, model).map(|spec| spec.id))
+        .unwrap_or(model)
+        .to_string()
+}
+
 fn provider_catalog_entries_static() -> &'static [ProviderCatalogEntry] {
     static ENTRIES: OnceLock<Vec<ProviderCatalogEntry>> = OnceLock::new();
     ENTRIES
@@ -160,7 +227,42 @@ pub fn provider_catalog_entries_for(provider: ProviderId) -> Vec<&'static Provid
         .collect()
 }
 
+#[cfg(feature = "mojo")]
 pub fn provider_catalog_entry(
+    provider: ProviderId,
+    model: &str,
+) -> Option<&'static ProviderCatalogEntry> {
+    let entries = provider_catalog_entries_static()
+        .iter()
+        .filter(|entry| entry.provider == provider)
+        .collect::<Vec<_>>();
+    let aliases = entries
+        .iter()
+        .map(|entry| entry.aliases.iter().map(String::as_str).collect::<Vec<_>>())
+        .collect::<Vec<_>>();
+    let catalog = entries
+        .iter()
+        .zip(&aliases)
+        .map(|(entry, aliases)| prodex_mojo_core::rich::CatalogModel {
+            id: entry.id.as_str(),
+            aliases,
+        })
+        .collect::<Vec<_>>();
+    prodex_mojo_core::rich::resolve_catalog_model(&catalog, model)
+        .expect("Mojo catalog lookup returned an invalid structured result")
+        .and_then(|index| entries.get(index).copied())
+}
+
+#[cfg(not(feature = "mojo"))]
+pub fn provider_catalog_entry(
+    provider: ProviderId,
+    model: &str,
+) -> Option<&'static ProviderCatalogEntry> {
+    provider_catalog_entry_rust(provider, model)
+}
+
+#[cfg(not(feature = "mojo"))]
+fn provider_catalog_entry_rust(
     provider: ProviderId,
     model: &str,
 ) -> Option<&'static ProviderCatalogEntry> {
@@ -252,37 +354,91 @@ pub fn merge_provider_model_catalog_json<'a>(
     if models.len() > PROVIDER_MODEL_CATALOG_HARD_LIMIT {
         return Err(ProviderModelCatalogLimitError { provider });
     }
-    let mut seen = models
+    let additional_models = additional_models.into_iter().collect::<Vec<_>>();
+    let additional = additional_models
         .iter()
-        .filter_map(|model| model.get("id").and_then(serde_json::Value::as_str))
-        .map(|id| id.to_ascii_lowercase())
+        .enumerate()
+        .filter_map(|(index, model)| {
+            model
+                .get("id")
+                .and_then(serde_json::Value::as_str)
+                .map(str::trim)
+                .filter(|id| !id.is_empty())
+                .map(|id| (index, id.to_string()))
+        })
+        .collect::<Vec<_>>();
+    #[cfg(feature = "mojo")]
+    let accepted = {
+        let entries = provider_catalog_entries_static()
+            .iter()
+            .filter(|entry| entry.provider == provider)
+            .collect::<Vec<_>>();
+        let aliases = entries
+            .iter()
+            .map(|entry| entry.aliases.iter().map(String::as_str).collect::<Vec<_>>())
+            .collect::<Vec<_>>();
+        let catalog = entries
+            .iter()
+            .zip(&aliases)
+            .map(|(entry, aliases)| prodex_mojo_core::rich::CatalogModel {
+                id: entry.id.as_str(),
+                aliases,
+            })
+            .collect::<Vec<_>>();
+        prodex_mojo_core::rich::merge_catalog_ids(
+            &catalog,
+            &additional
+                .iter()
+                .map(|(_, id)| id.as_str())
+                .collect::<Vec<_>>(),
+        )
+        .expect("Mojo catalog merge returned an invalid structured result")
+    };
+    #[cfg(not(feature = "mojo"))]
+    let accepted = merge_catalog_ids_rust(
+        provider,
+        &additional
+            .iter()
+            .map(|(_, id)| id.as_str())
+            .collect::<Vec<_>>(),
+    );
+    for index in accepted {
+        if models.len() >= PROVIDER_MODEL_CATALOG_HARD_LIMIT {
+            return Err(ProviderModelCatalogLimitError { provider });
+        }
+        let original_index = additional
+            .get(index)
+            .map(|(original_index, _)| *original_index)
+            .ok_or(ProviderModelCatalogLimitError { provider })?;
+        models.push((*additional_models[original_index]).clone());
+    }
+    Ok(models)
+}
+
+#[cfg(not(feature = "mojo"))]
+fn merge_catalog_ids_rust(provider: ProviderId, additional: &[&str]) -> Vec<usize> {
+    let mut seen = provider_catalog_entries_static()
+        .iter()
+        .filter(|entry| entry.provider == provider)
+        .map(|entry| entry.id.to_ascii_lowercase())
         .collect::<BTreeSet<_>>();
-    for model in additional_models {
-        let Some(id) = model
-            .get("id")
-            .and_then(serde_json::Value::as_str)
-            .map(str::trim)
-            .filter(|id| !id.is_empty())
-        else {
-            continue;
-        };
-        let canonical_id = provider_catalog_entry(provider, id)
+    let mut accepted = Vec::new();
+    for (index, id) in additional.iter().enumerate() {
+        let canonical = provider_catalog_entry_rust(provider, id)
             .map(|entry| entry.id.as_str())
             .or_else(|| crate::provider_model_spec(provider, id).map(|spec| spec.id))
             .unwrap_or(id);
-        if seen.insert(canonical_id.to_ascii_lowercase()) {
-            if models.len() >= PROVIDER_MODEL_CATALOG_HARD_LIMIT {
-                return Err(ProviderModelCatalogLimitError { provider });
-            }
-            models.push(model.clone());
+        if seen.insert(canonical.to_ascii_lowercase()) {
+            accepted.push(index);
         }
     }
-    Ok(models)
+    accepted
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::BTreeSet;
 
     #[test]
     fn provider_catalog_json_parses_and_covers_all_supported_providers() {
@@ -529,5 +685,30 @@ mod tests {
         );
         assert!(choices.contains(&ProviderModelChoice::Model("current-model".to_string())));
         assert_eq!(choices.last(), Some(&ProviderModelChoice::Custom));
+    }
+
+    #[cfg(feature = "mojo")]
+    #[test]
+    fn mojo_catalog_preserves_provider_scoped_identity_and_order() {
+        let entries = provider_catalog_entries_for(ProviderId::OpenAi);
+        let first = entries[0];
+        let alias = first
+            .aliases
+            .first()
+            .map(String::as_str)
+            .unwrap_or(first.id.as_str());
+        assert_eq!(
+            provider_catalog_entry(ProviderId::OpenAi, alias),
+            Some(first)
+        );
+
+        let choices = resolve_provider_model_choices(
+            ProviderId::OpenAi,
+            &["custom-a".to_string(), first.id.to_ascii_uppercase()],
+            Some("custom-b"),
+        );
+        assert_eq!(choices.first(), Some(&ProviderModelChoice::ProviderDefault));
+        assert_eq!(choices.last(), Some(&ProviderModelChoice::Custom));
+        assert!(choices.contains(&ProviderModelChoice::Model(first.id.clone())));
     }
 }

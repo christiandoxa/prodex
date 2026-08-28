@@ -1,7 +1,8 @@
 # Rust-to-Mojo migration inventory
 
-Audit basis: workspace source as of 2026-08-26, baseline `a66c4a54e0eb56229188f63616e05d0698085cb8`, `Cargo.toml`, maintained architecture
-and testing contracts, the code knowledge graph, and direct source inspection. The
+Audit basis: workspace source as of 2026-08-28, immutable release baseline
+`06fcea88bf68102cbc8bb516801c9d4db40e5717`, `Cargo.toml`, maintained architecture and testing
+contracts, the code knowledge graph, and direct source inspection. The
 workspace contains 59 Cargo packages. This inventory classifies ownership boundaries,
 not every generated fixture or test helper. Status `MOJO` means compiled Mojo is
 authoritative on the supported Mojo target: a feature-off Rust implementation is a

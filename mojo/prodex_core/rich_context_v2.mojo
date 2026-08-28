@@ -270,7 +270,43 @@ def context_file_locations(
         count += 1
     if rich_slice_contains(output, slice, StringSlice("File \""), False) and rich_slice_contains(output, slice, StringSlice(", line "), False):
         count += 1
+    if count == 0 and context_embedded_file_location(output, slice):
+        count = 1
     return count
+
+
+def context_location_delimiter(value: UInt8) -> Bool:
+    return value <= 32 or value == 34 or value == 39 or value == 44 or value == 59 or value == 91 or value == 93 or value == 123 or value == 125
+
+
+def context_embedded_file_location(
+    output: Pointer[mut=True, UInt8, _], slice: ProdexRichSlice
+) -> Bool:
+    var cursor: Int64 = 0
+    while cursor < slice.len:
+        if output[unsafe_offset=slice.offset + cursor] == 58:
+            var path_start = cursor
+            while path_start > 0 and not context_location_delimiter(
+                output[unsafe_offset=slice.offset + path_start - 1]
+            ):
+                path_start -= 1
+            var path_like = False
+            var path_cursor = path_start
+            while path_cursor < cursor:
+                var value = output[unsafe_offset=slice.offset + path_cursor]
+                if value == 47 or value == 92 or value == 46:
+                    path_like = True
+                path_cursor += 1
+            var line = cursor + 1
+            if path_like and line < slice.len and output[unsafe_offset=slice.offset + line] >= 48 and output[unsafe_offset=slice.offset + line] <= 57:
+                while line < slice.len and output[unsafe_offset=slice.offset + line] >= 48 and output[unsafe_offset=slice.offset + line] <= 57:
+                    line += 1
+                if line < slice.len and output[unsafe_offset=slice.offset + line] == 58:
+                    line += 1
+                    if line < slice.len and output[unsafe_offset=slice.offset + line] >= 48 and output[unsafe_offset=slice.offset + line] <= 57:
+                        return True
+        cursor += 1
+    return False
 
 
 def context_zero_summary(

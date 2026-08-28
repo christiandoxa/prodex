@@ -1,0 +1,31 @@
+{
+  "baseline_sha": "06fcea88bf68102cbc8bb516801c9d4db40e5717",
+  "baseline_tree": "372aa1a22c62f23ef026cb0bd84bdee2d2cff5cf",
+  "version": "0.418.0",
+  "command": "node scripts/ci/mojo-ownership.mjs --baseline 06fcea88bf68102cbc8bb516801c9d4db40e5717 --release-sha 06fcea88bf68102cbc8bb516801c9d4db40e5717 --json",
+  "legacy_report": {
+    "baseline": {
+      "mojo_loc": 4502,
+      "mojo_percent": 50.26236463101485,
+      "rust_loc": 4455,
+      "total_loc": 8957
+    },
+    "final": {
+      "mojo_loc": 4502,
+      "mojo_percent": 50.26236463101485,
+      "rust_loc": 4455,
+      "total_loc": 8957
+    },
+    "percentage_point_increase": 0,
+    "authoritative_operation_count": 6,
+    "authoritative_operations": [
+      "critical_signal_text_grouping",
+      "provider_model_fallback_parser",
+      "gateway_route_alias_policy",
+      "governed_provider_route_plan",
+      "smart_context_rehydration_plan",
+      "log_event_classification"
+    ]
+  },
+  "measurement_note": "Historical output of the pre-migration checker; it is not the release-gate metric."
+}

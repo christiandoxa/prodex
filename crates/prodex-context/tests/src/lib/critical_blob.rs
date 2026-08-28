@@ -48,6 +48,14 @@ fn critical_signal_counts_proxy_payload_error_text() {
 }
 
 #[test]
+fn critical_signal_counts_embedded_json_file_locations() {
+    let counts =
+        count_critical_signals(r#"{"input":[{"content":"error: failed\nsrc/main.rs:10:5"}]}"#);
+
+    assert_eq!(counts.file_locations, 1);
+}
+
+#[test]
 fn critical_signal_self_check_reports_lost_and_gained_counts() {
     let before = "\
 error: build failed

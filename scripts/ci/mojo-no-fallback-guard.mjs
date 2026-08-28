@@ -16,6 +16,7 @@ const PROMOTED_FILES = [
   "crates/prodex-mojo-core/src/policy.rs",
   "crates/prodex-mojo-core/src/context.rs",
   "crates/prodex-mojo-core/src/rich.rs",
+  "crates/prodex-mojo-core/src/rich/catalog.rs",
   "crates/prodex-mojo-core/src/rich/context_plan.rs",
   "crates/prodex-mojo-core/src/log.rs",
   "crates/prodex-mojo-core/src/rich/routing.rs",
@@ -31,6 +32,7 @@ const PROMOTED_FILES = [
   "crates/prodex-runtime-proxy/src/quota.rs",
   "crates/prodex-runtime-proxy/src/selection_plan.rs",
   "crates/prodex-runtime-proxy/src/smart_context/token_accounting.rs",
+  "crates/prodex-runtime-proxy/src/smart_context/token_accounting/observed.rs",
   "crates/prodex-runtime-proxy/src/smart_context/token_accounting/estimation.rs",
   "crates/prodex-runtime-quota/src/selection/scoring.rs",
   "crates/prodex-runtime-policy/src/validate.rs",
@@ -44,6 +46,9 @@ const PROMOTED_FILES = [
   "crates/prodex-runtime-tuning/src/lib.rs",
   "crates/prodex-runtime-tuning/src/mojo.rs",
   "crates/prodex-provider-core/src/fallback/chains.rs",
+  "crates/prodex-provider-core/src/catalog.rs",
+  "crates/prodex-provider-core/src/models.rs",
+  "crates/prodex-runtime-quota/src/pressure.rs",
 ];
 
 const FORBIDDEN_MARKERS = [

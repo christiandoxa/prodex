@@ -159,3 +159,19 @@ log-classification export, layout checks
 compare compiler-generated sizes/alignment, and the release archive checks all v3 symbols and
 rejects `KGEN_CompilerRT_*` references. Native heap and package-backed paths remain non-production
 until their full target and clean-machine gates pass.
+
+## Prodex 0.418.1 deterministic additions
+
+The release candidate adds only bounded, stateless kernels with existing Rust-owned trust and
+transport boundaries:
+
+| Operation | Mojo entry point | Rust-owned boundary | Evidence |
+| --- | --- | --- | --- |
+| Provider/model identity and choice planning | `prodex_mojo_rich_catalog_resolve_v1`, `prodex_mojo_rich_catalog_choices_v1` | Serde catalog loading, provider identity, and typed choice mapping | provider-core Mojo suite and rich ABI tests |
+| Provider catalog merge/deduplication | `prodex_mojo_rich_catalog_merge_v1` | JSON values, catalog limits, and error mapping | alias/canonical duplicate regression and provider-core suite |
+| Batched route-aware quota pressure score | `prodex_runtime_quota_score_batch` | quota windows, clocks, plan scaling, and candidate admission | 300 generated Mojo parity cases and runtime-quota suite |
+| Observed Smart Context token totals | `prodex_smart_context_token_usage_summary_batch` | token source selection, calibration, model limits, and context policy | saturating totals parity and Mojo runtime suite |
+
+The additions are compiled into the same static archive, use caller-owned bounded buffers, and
+fail closed on ABI/status/output violations. They add no package, runtime network call,
+credential, filesystem, or Mojo-to-Rust production fallback.

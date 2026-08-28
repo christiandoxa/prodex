@@ -270,3 +270,25 @@ runtime-policy TOML, or persisted state. Rich v3 receives already bounded non-se
 after those external compatibility and security boundaries. EmberJson immutable-document and
 reflection experiments are deferred until its compiler compatibility, complete-document
 validation, package provenance, and cross-target artifact gates pass.
+
+## 2026-08-28: 0.418.1 keeps new decisions bounded and fail-closed
+
+Provider catalog identity/choice/deduplication, route-aware quota pressure scoring, and observed
+Smart Context token totals now use the existing static Mojo archive through bounded caller-owned
+buffers. Serde, provider adapters, clocks, plan scaling, calibration, policy, state, and errors
+remain Rust-owned. Mojo-enabled errors are hard failures; the Rust implementations are separate
+feature-off builds or test oracles, never production fallback.
+
+`prodex s` keeps its existing interactive main-agent/provider selection but resolves the
+provider-scoped remembered model and model-valid effort without ordinary model/effort pickers.
+`prodex s expose` retains full per-instance configuration and freezes it before creating the
+process-local capability. Quick Tunnel owns an isolated `cloudflared --protocol auto` child and
+uses one bounded explicit HTTP/2 compatibility retry only after auto transport registration stalls;
+existing Cloudflare hostname mode validates but never owns the user's tunnel.
+
+`prodex ping openai` is a per-profile diagnostic, not a rotation request: it uses a read-only,
+ephemeral, isolated Codex JSONL turn and requires a completed turn plus exact `PONG`. Global
+provider-secret environment variables are removed from that child so its result remains bound to
+the selected profile. Normal Codex retry remains upstream-owned, while Prodex classification
+distinguishes explicit quota, rate limit, overload, transport, and permanent errors at the
+pre-commit boundary.

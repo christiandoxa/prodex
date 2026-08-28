@@ -233,10 +233,19 @@ pub fn critical_signal_lost_line_ranges_with_options(
             options.max_ranges,
             options.max_range_lines,
         )
-        .expect("Mojo critical-signal range selection returned invalid output")
+        .unwrap_or_else(|error| {
+            panic!(
+                "Mojo critical-signal range selection returned invalid output: {error:?}; before_rows={} after_available={} line_count={} lost={:?} options={:?}",
+                before_rows.len(),
+                after_available.len(),
+                line_count,
+                check.lost.values(),
+                options,
+            )
+        })
         .into_iter()
         .map(|(start, end)| CriticalSignalLineRange { start, end })
-        .collect()
+        .collect::<Vec<_>>()
     }
 
     #[cfg(not(feature = "mojo"))]

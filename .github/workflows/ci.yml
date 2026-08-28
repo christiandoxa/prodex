@@ -1868,6 +1868,11 @@ jobs:
           nm -g "${mojo_archive}" | grep -F 'prodex_mojo_rich_policy_alias_v2'
           nm -g "${mojo_archive}" | grep -F 'prodex_mojo_rich_model_fallback_v2'
           nm -g "${mojo_archive}" | grep -F 'prodex_mojo_rich_context_plan_v2'
+          nm -g "${mojo_archive}" | grep -F 'prodex_mojo_rich_catalog_resolve_v1'
+          nm -g "${mojo_archive}" | grep -F 'prodex_mojo_rich_catalog_choices_v1'
+          nm -g "${mojo_archive}" | grep -F 'prodex_mojo_rich_catalog_merge_v1'
+          nm -g "${mojo_archive}" | grep -F 'prodex_runtime_quota_score_batch'
+          nm -g "${mojo_archive}" | grep -F 'prodex_smart_context_token_usage_summary_batch'
           if nm -u "${mojo_archive}" | grep -F 'KGEN_CompilerRT_'; then
             echo "rich Mojo core unexpectedly requires the Mojo compiler runtime" >&2
             exit 1

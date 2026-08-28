@@ -1,8 +1,8 @@
 #![cfg(feature = "mojo-runtime")]
 
 use prodex_mojo_core::runtime::{
-    RUNTIME_CANDIDATE_PLAN_FIELD_COUNT, runtime_candidate_plan_batch,
-    smart_context_pressure_snapshot,
+    QuotaScore, QuotaScoreInput, RUNTIME_CANDIDATE_PLAN_FIELD_COUNT, quota_score_batch,
+    runtime_candidate_plan_batch, smart_context_pressure_snapshot,
 };
 use std::cmp::Ordering;
 
@@ -220,4 +220,141 @@ fn pressure_snapshot_matches_rust_oracle_for_generated_inputs() {
         .expect("strict Mojo pressure snapshot should accept generated input");
         assert_eq!(actual, expected, "pressure case {case}");
     }
+}
+
+fn expected_quota_score(input: QuotaScoreInput, route_kind: i64) -> QuotaScore {
+    let pressure_band = if !input.weekly_has_value && !input.five_hour_has_value {
+        4
+    } else if (input.weekly_has_value && input.weekly_remaining == 0)
+        || (input.five_hour_has_value && input.five_hour_remaining == 0)
+    {
+        3
+    } else {
+        let (thin_weekly, thin_five_hour, critical_weekly, critical_five_hour) =
+            if route_kind == 0 || route_kind == 2 {
+                (20, 10, 10, 5)
+            } else {
+                (10, 5, 5, 3)
+            };
+        if (input.weekly_has_value && input.weekly_remaining <= critical_weekly)
+            || (input.five_hour_has_value && input.five_hour_remaining <= critical_five_hour)
+        {
+            2
+        } else if (input.weekly_has_value && input.weekly_remaining <= thin_weekly)
+            || (input.five_hour_has_value && input.five_hour_remaining <= thin_five_hour)
+        {
+            1
+        } else {
+            0
+        }
+    };
+    let reserve_bias = match pressure_band {
+        0 => 0,
+        1 => 250_000,
+        2 => 1_000_000,
+        _ => i64::MAX / 4,
+    };
+    let weekly_weight = if route_kind == 0 || route_kind == 2 {
+        10
+    } else {
+        8
+    };
+    QuotaScore {
+        pressure_band,
+        total_pressure: reserve_bias
+            .saturating_add(input.weekly_pressure.saturating_mul(weekly_weight))
+            .saturating_add(input.five_hour_pressure),
+        weekly_pressure: input.weekly_pressure,
+        five_hour_pressure: input.five_hour_pressure,
+        reserve_floor: input.weekly_remaining.min(input.five_hour_remaining),
+        weekly_remaining: input.weekly_remaining,
+        five_hour_remaining: input.five_hour_remaining,
+        weekly_reset_at: input.weekly_reset_at,
+        five_hour_reset_at: input.five_hour_reset_at,
+    }
+}
+
+#[test]
+fn quota_score_matches_rust_oracle_for_generated_batches() {
+    let mut state = 0x71756f74615f7363_u64;
+    for case in 0..300 {
+        let route_kind = (case % 4) as i64;
+        let count = (next_random(&mut state) % 25) as usize;
+        let mut inputs = Vec::with_capacity(count);
+        for _ in 0..count {
+            let weekly_has_value = next_random(&mut state) & 1 != 0;
+            let five_hour_has_value = next_random(&mut state) & 1 != 0;
+            inputs.push(QuotaScoreInput {
+                weekly_pressure: if weekly_has_value {
+                    next_random(&mut state) as i64 & i64::MAX
+                } else {
+                    i64::MAX
+                },
+                five_hour_pressure: if five_hour_has_value {
+                    next_random(&mut state) as i64 & i64::MAX
+                } else {
+                    i64::MAX
+                },
+                weekly_remaining: if weekly_has_value {
+                    (next_random(&mut state) % 101) as i64
+                } else {
+                    0
+                },
+                five_hour_remaining: if five_hour_has_value {
+                    (next_random(&mut state) % 101) as i64
+                } else {
+                    0
+                },
+                weekly_has_value,
+                five_hour_has_value,
+                weekly_reset_at: next_random(&mut state) as i64,
+                five_hour_reset_at: next_random(&mut state) as i64,
+            });
+        }
+        let expected = inputs
+            .iter()
+            .copied()
+            .map(|input| expected_quota_score(input, route_kind))
+            .collect::<Vec<_>>();
+        assert_eq!(
+            quota_score_batch(&inputs, route_kind).expect("valid quota score batch"),
+            expected,
+            "quota score case {case}"
+        );
+    }
+}
+
+#[test]
+fn smart_context_token_usage_summary_matches_saturating_rust_oracle() {
+    let expected = prodex_mojo_core::runtime::SmartContextTokenUsageSummary {
+        observed_input_tokens: u64::MAX,
+        observed_cached_input_tokens: 14,
+        observed_output_tokens: 2,
+        observed_reasoning_tokens: 3,
+        last_input_tokens: 0,
+        last_accounted_input_tokens: 7,
+        last_observed_context_tokens: 7,
+    };
+    let actual = prodex_mojo_core::runtime::smart_context_token_usage_summary_batch(&[
+        prodex_mojo_core::runtime::SmartContextTokenUsageInput {
+            input_tokens: u64::MAX,
+            cached_input_tokens: 1,
+            output_tokens: 1,
+            reasoning_tokens: 1,
+        },
+        prodex_mojo_core::runtime::SmartContextTokenUsageInput {
+            input_tokens: 1,
+            cached_input_tokens: 6,
+            output_tokens: 1,
+            reasoning_tokens: 2,
+        },
+        prodex_mojo_core::runtime::SmartContextTokenUsageInput {
+            input_tokens: 0,
+            cached_input_tokens: 7,
+            output_tokens: 0,
+            reasoning_tokens: 0,
+        },
+    ])
+    .expect("valid Smart Context usage batch");
+    assert_eq!(actual, expected);
 }

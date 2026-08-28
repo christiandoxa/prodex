@@ -62,6 +62,9 @@ pub fn usage_from_runtime_usage_snapshot(snapshot: &RuntimeProfileUsageSnapshot)
         email: None,
         plan_type: snapshot.plan_type.clone(),
         rate_limit: Some(WindowPair {
+            allowed: None,
+            limit_reached: None,
+            extra: std::collections::BTreeMap::new(),
             primary_window: (snapshot.five_hour_status != RuntimeQuotaWindowStatus::Unknown).then(
                 || UsageWindow {
                     used_percent: Some((100 - snapshot.five_hour_remaining_percent).clamp(0, 100)),
