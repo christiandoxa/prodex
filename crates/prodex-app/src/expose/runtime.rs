@@ -1,5 +1,6 @@
 use super::super_expose::{ensure_cloudflared_available, handle_super_expose};
 use super::*;
+mod cloudflared_startup;
 use std::fs::OpenOptions;
 use std::net::SocketAddr;
 #[cfg(unix)]
@@ -641,88 +642,17 @@ fn start_cloudflared_attempt(
     transport: CloudflaredTransport,
 ) -> Result<CloudflaredTunnel> {
     let config = CloudflaredConfigIsolation::create()?;
-    let mut command = cloudflared_command();
-    command
-        .args([
-            "--config",
-            config
-                .path
-                .to_str()
-                .context("cloudflared config path is not UTF-8")?,
-            "tunnel",
-            "--no-autoupdate",
-            "--protocol",
-            transport.as_str(),
-            "--url",
-            local_url,
-        ])
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
-    for variable in [
-        "TUNNEL_CONFIG",
-        "TUNNEL_ORIGIN_CERT",
-        "TUNNEL_CRED_FILE",
-        "TUNNEL_HOSTNAME",
-        "TUNNEL_NAME",
-        "TUNNEL_TOKEN",
-        "TUNNEL_TRANSPORT_PROTOCOL",
-    ] {
-        command.env_remove(variable);
-    }
-    crate::configure_child_process_group(&mut command, true);
-    crate::configure_child_parent_death(&mut command);
-    let mut child = command.spawn().context("failed to spawn cloudflared")?;
-    let (tx, rx) = mpsc::sync_channel(4);
-    let mut reader_threads = Vec::new();
-    if let Some(stdout) = child.stdout.take() {
-        reader_threads.push(expose_scan_cloudflared_output(stdout, tx.clone()));
-    }
-    if let Some(stderr) = child.stderr.take() {
-        reader_threads.push(expose_scan_cloudflared_output(stderr, tx));
-    }
-    let deadline = Instant::now() + CLOUDFLARED_TRANSPORT_NEGOTIATION_TIMEOUT;
-    let mut startup_timed_out = false;
-    let mut url = None;
-    let mut effective_transport = None;
-    let startup_failure = loop {
-        if let Ok(event) = rx.recv_timeout(Duration::from_millis(100)) {
-            if let Some(protocol) = event.strip_prefix(CLOUDFLARED_EVENT_PREFIX) {
-                effective_transport = match protocol {
-                    "quic" => Some(CloudflaredTransport::Quic),
-                    "http2" => Some(CloudflaredTransport::Http2),
-                    _ => effective_transport,
-                };
-            } else if url.is_none() {
-                url = Some(event);
-            }
-            if url.is_some() && effective_transport.is_some() {
-                break None;
-            }
-        }
-        if let Ok(Some(status)) = child.try_wait() {
-            break Some(format!(
-                "cloudflared exited before {} transport registration ({status})",
-                transport.as_str()
-            ));
-        }
-        if Instant::now() >= deadline {
-            startup_timed_out = true;
-            break Some(format!(
-                "cloudflared {} transport negotiation timed out after {} seconds",
-                transport.as_str(),
-                CLOUDFLARED_TRANSPORT_NEGOTIATION_TIMEOUT.as_secs()
-            ));
-        }
-    };
+    let (mut child, rx, reader_threads) =
+        cloudflared_startup::spawn(local_url, transport, &config)?;
+    let startup = cloudflared_startup::wait(&mut child, &rx, transport);
     Ok(CloudflaredTunnel {
         child,
-        url,
-        effective_transport,
+        url: startup.url,
+        effective_transport: startup.effective_transport,
         reader_threads,
         config,
-        startup_timed_out,
-        startup_failure,
+        startup_timed_out: startup.startup_timed_out,
+        startup_failure: startup.startup_failure,
     })
 }
 
