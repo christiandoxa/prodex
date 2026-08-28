@@ -166,6 +166,7 @@ fn quick_tunnel_ignores_existing_cloudflared_config_and_cleans_private_config() 
     let root = test_temp_root().join(format!("prodex-cloudflared-config-{}", std::process::id()));
     let home = root.join("home");
     let user_config = home.join(".cloudflared/config.yaml");
+    let config_probe = root.join("config-probe.txt");
     fs::create_dir_all(user_config.parent().unwrap()).unwrap();
     fs::write(
         &user_config,
@@ -176,6 +177,7 @@ fn quick_tunnel_ignores_existing_cloudflared_config_and_cleans_private_config() 
         &root,
         "cloudflared",
         r#"#!/usr/bin/env python3
+import os
 import sys
 import time
 
@@ -184,6 +186,9 @@ if len(sys.argv) > 1 and sys.argv[1] == "--version":
 elif len(sys.argv) > 2 and sys.argv[1] == "tunnel" and sys.argv[2] == "--help":
     print("--config --url", flush=True)
 else:
+    config_path = sys.argv[sys.argv.index("--config") + 1]
+    with open(os.environ["PRODEX_TEST_CLOUDFLARED_CONFIG_PROBE"], "w", encoding="utf-8") as file:
+        file.write("present" if os.path.isfile(config_path) else "missing")
     print("https://isolated.trycloudflare.com", flush=True)
     print("Registered tunnel connection protocol=http2", flush=True)
     time.sleep(30)
@@ -192,6 +197,10 @@ else:
     let _env_lock = TestEnvVarGuard::lock();
     let _home = TestEnvVarGuard::set_home(&home);
     let _script = TestEnvVarGuard::set("PRODEX_TEST_CLOUDFLARED_SCRIPT", &script.to_string_lossy());
+    let _probe = TestEnvVarGuard::set(
+        "PRODEX_TEST_CLOUDFLARED_CONFIG_PROBE",
+        &config_probe.to_string_lossy(),
+    );
     let path = std::env::join_paths(std::iter::once(root.clone()).chain(std::env::split_paths(
         &std::env::var_os("PATH").unwrap_or_default(),
     )))
@@ -201,7 +210,15 @@ else:
     let mut tunnel = start_cloudflared_tunnel("http://127.0.0.1:12345").unwrap();
     let isolated_config = tunnel.config_path().to_path_buf();
     assert!(!isolated_config.starts_with(home.join(".cloudflared")));
-    assert!(isolated_config.exists());
+    assert_eq!(
+        tunnel.effective_transport,
+        Some(CloudflaredTransport::Http2)
+    );
+    assert_eq!(
+        tunnel.url.as_deref(),
+        Some("https://isolated.trycloudflare.com")
+    );
+    assert_eq!(fs::read_to_string(&config_probe).unwrap(), "present");
     assert_eq!(
         fs::read_to_string(&user_config).unwrap(),
         "tunnel: named-tunnel\ncredentials-file: secret.json\n"
