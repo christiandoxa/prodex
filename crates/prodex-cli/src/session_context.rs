@@ -107,19 +107,19 @@ impl Default for StatusArgs {
 
 #[derive(Clone, Copy, Debug, Default, ValueEnum, PartialEq, Eq)]
 pub enum LogMode {
-    /// Show the most recent transcript text and token usage event and exit.
-    #[default]
-    Last,
     /// Follow session/runtime logs and print live text, tool calls, and token usage events.
+    #[default]
     Stream,
+    /// Show the most recent transcript text and token usage event and exit.
+    Last,
     /// Follow redacted, bounded upstream payload snapshots sent toward the backend.
     Upstream,
 }
 
 #[derive(Args, Debug, Default)]
 pub struct LogArgs {
-    /// Output mode. Omit for the latest event, use `stream` for live transcript/tool/token logs,
-    /// or `upstream` for processed backend-bound payload snapshots.
+    /// Output mode. Omit for live transcript/tool/token logs, use `stream` for the explicit
+    /// equivalent, `last` for the latest event, or `upstream` for processed backend payloads.
     #[arg(value_enum, default_value_t)]
     pub mode: LogMode,
     /// Emit machine-readable JSON. Stream mode emits text/tool/token events; upstream mode emits payload events.

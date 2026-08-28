@@ -121,17 +121,28 @@ impl LogTuiHeaderDetail {
         if width == 0 {
             return String::new();
         }
-        let suffix = self
-            .quota
-            .as_ref()
-            .map(|quota| format!("  {}  {}", quota.five_hour, quota.weekly));
-        let suffix_text = suffix.as_deref().unwrap_or("");
-        let reserved = terminal_ui::text_width(suffix_text);
-        if reserved >= width {
-            return terminal_ui::fit_cell(&format!("{}{suffix_text}", self.profile), width);
+        let Some(quota) = self.quota.as_ref() else {
+            return middle_ellipsize(&self.profile, width);
+        };
+        let suffix = format!("  {}  {}", quota.five_hour, quota.weekly);
+        let profile_width = terminal_ui::text_width(&self.profile);
+        let suffix_width = terminal_ui::text_width(&suffix);
+        if profile_width + suffix_width <= width {
+            return format!("{}{suffix}", self.profile);
         }
-        let profile = middle_ellipsize(&self.profile, width - reserved);
-        format!("{profile}{suffix_text}")
+        // Header details are semantic segments.  Keep the quota segment atomic and only
+        // shorten the profile identity to make room for it.  If even an ellipsis cannot fit,
+        // omit the complete quota segment instead of clipping its words into a fake field.
+        if suffix_width + 3 <= width {
+            return format!(
+                "{}{suffix}",
+                middle_ellipsize(&self.profile, width - suffix_width)
+            );
+        }
+        if profile_width <= width {
+            return self.profile.clone();
+        }
+        middle_ellipsize(&self.profile, width)
     }
 }
 
@@ -258,11 +269,7 @@ pub(super) fn contains_ignore_ascii_case(haystack: &str, needle: &str) -> bool {
 pub(super) fn log_tui_header_detail(preferred_profile: Option<&str>) -> Option<LogTuiHeaderDetail> {
     let paths = AppPaths::discover().ok();
     let state = paths.as_ref().and_then(|paths| AppState::load(paths).ok());
-    let profile = preferred_profile.map(ToOwned::to_owned).or_else(|| {
-        state
-            .as_ref()
-            .and_then(|state| state.active_profile.clone())
-    })?;
+    let profile = canonical_header_profile(preferred_profile, state.as_ref())?;
     let Some((paths, state)) = paths.as_ref().zip(state.as_ref()) else {
         return Some(log_tui_header_profile_only_detail(profile));
     };
@@ -299,6 +306,27 @@ pub(super) fn log_tui_header_detail(preferred_profile: Option<&str>) -> Option<L
                 log_tui_header_snapshot_refresh_interval(snapshot, state.profiles.len(), now)
             }),
     ))
+}
+
+fn canonical_header_profile(
+    preferred_profile: Option<&str>,
+    state: Option<&AppState>,
+) -> Option<String> {
+    let preferred_profile = preferred_profile
+        .map(str::trim)
+        .filter(|profile| !profile.is_empty() && *profile != "-");
+    if let Some(state) = state {
+        if let Some(profile) = preferred_profile.filter(|profile| state.profiles.contains_key(*profile))
+        {
+            return Some(profile.to_string());
+        }
+        return state
+            .active_profile
+            .as_deref()
+            .filter(|profile| state.profiles.contains_key(*profile))
+            .map(ToOwned::to_owned);
+    }
+    preferred_profile.map(ToOwned::to_owned)
 }
 
 pub(super) fn seed_output_throughput_from_history(throughput: &mut OutputThroughput) {
@@ -551,6 +579,17 @@ mod tests {
             detail.render(80),
             "main  5h unavailable  weekly 65% reset -"
         );
+    }
+
+    #[test]
+    fn header_profile_falls_back_to_state_for_untrusted_event_metadata() {
+        let state = AppState {
+            active_profile: Some("main".to_string()),
+            ..AppState::default()
+        };
+
+        assert_eq!(canonical_header_profile(Some("second"), Some(&state)), None);
+        assert_eq!(canonical_header_profile(Some("second"), None), Some("second".to_string()));
     }
 
     #[test]

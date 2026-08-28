@@ -260,11 +260,7 @@ mod tests {
         let path = Path::new("/tmp/runtime-a.log");
         let start = Instant::now();
         let mut throughput = OutputThroughput::default();
-        throughput.observe_token_usage(
-            path,
-            &usage("main", Some(7), 50),
-            start,
-        );
+        throughput.observe_token_usage(path, &usage("main", Some(7), 50), start);
         throughput.observe_token_usage(
             path,
             &usage("main", Some(7), 150),

@@ -65,12 +65,12 @@ fn cleanup_command_does_not_default_to_run() {
 }
 
 #[test]
-fn log_command_supports_last_and_stream_modes() {
+fn log_command_defaults_to_stream_and_supports_explicit_modes() {
     let command = parse_cli_command_from(["prodex", "log"]).expect("log command");
     let Commands::Log(args) = command else {
         panic!("expected log command");
     };
-    assert_eq!(args.mode, LogMode::Last);
+    assert_eq!(args.mode, LogMode::Stream);
     assert!(!args.json);
 
     let command =
@@ -80,6 +80,13 @@ fn log_command_supports_last_and_stream_modes() {
     };
     assert_eq!(args.mode, LogMode::Stream);
     assert!(args.json);
+
+    let command = parse_cli_command_from(["prodex", "log", "upstream"])
+        .expect("log upstream command");
+    let Commands::Log(args) = command else {
+        panic!("expected log command");
+    };
+    assert_eq!(args.mode, LogMode::Upstream);
 }
 
 #[test]
