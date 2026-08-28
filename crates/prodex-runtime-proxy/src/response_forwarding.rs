@@ -424,18 +424,17 @@ impl RuntimeSseTapState {
         let Some(token_usage) = token_usage else {
             return;
         };
-        if runtime_token_usage_event_is_loggable(event_type) {
-            if self.logged_token_usage.insert(token_usage) {
-                if let Some(generation_ms) = generation_ms {
-                    effects.push(RuntimeSseTapEffect::LogTokenUsageWithGeneration {
-                        usage: token_usage,
-                        generation_ms,
-                    });
-                } else {
-                    effects.push(RuntimeSseTapEffect::LogTokenUsage(token_usage));
-                }
+        if runtime_token_usage_event_is_loggable(event_type)
+            && self.logged_token_usage.insert(token_usage)
+        {
+            if let Some(generation_ms) = generation_ms {
+                effects.push(RuntimeSseTapEffect::LogTokenUsageWithGeneration {
+                    usage: token_usage,
+                    generation_ms,
+                });
+            } else {
+                effects.push(RuntimeSseTapEffect::LogTokenUsage(token_usage));
             }
-            return;
         }
     }
 }

@@ -50,7 +50,7 @@ pub fn smart_context_apply_rewrite_budget_decision(
             .expect("Mojo Smart Context inline budget fits usize");
         policy.max_inline_bytes = policy.max_inline_tool_output_bytes;
         policy.max_rehydrate_tokens = adjusted.max_rehydrate_tokens;
-        return policy;
+        policy
     }
 
     #[cfg(not(feature = "mojo"))]

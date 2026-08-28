@@ -59,7 +59,9 @@ pub fn signal_counts_batch(lines: &[&str]) -> Result<Vec<[usize; 7]>, MojoError>
         });
     }
     output
-        .chunks_exact(7)
+        .as_chunks::<7>()
+        .0
+        .iter()
         .map(|row| {
             row.iter()
                 .map(|value| usize::try_from(*value).map_err(|_| MojoError::InvalidOutput))

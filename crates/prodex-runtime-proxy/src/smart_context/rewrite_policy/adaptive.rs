@@ -31,28 +31,31 @@ pub fn smart_context_adaptive_budget_policy(
     #[cfg(feature = "mojo")]
     {
         let plan = prodex_mojo_core::runtime::smart_context_adaptive_budget_plan(
-            input.accounting.available_context_tokens,
-            input.exactness_guard.decision == SmartContextExactnessDecision::RequireExact,
-            input.static_context_changed,
-            input
-                .missing_rehydrate_refs
-                .iter()
-                .any(|value| non_empty(value)),
-            input
-                .accounting
-                .accounting_risks
-                .contains(&SmartContextTokenAccountingRisk::UnknownTokenWindow),
-            input
-                .accounting
-                .accounting_risks
-                .iter()
-                .any(|risk| *risk != SmartContextTokenAccountingRisk::UnknownTokenWindow),
-            input.recent_rewrite_safety.safe_rewrites,
-            input.recent_rewrite_safety.fallback_rewrites,
-            input.recent_rewrite_safety.saved_tokens,
+            prodex_mojo_core::runtime::SmartContextAdaptiveBudgetPlanInput {
+                available_context_tokens: input.accounting.available_context_tokens,
+                exactness_required: input.exactness_guard.decision
+                    == SmartContextExactnessDecision::RequireExact,
+                static_context_changed: input.static_context_changed,
+                missing_rehydrate_refs: input
+                    .missing_rehydrate_refs
+                    .iter()
+                    .any(|value| non_empty(value)),
+                unknown_token_window: input
+                    .accounting
+                    .accounting_risks
+                    .contains(&SmartContextTokenAccountingRisk::UnknownTokenWindow),
+                unsafe_accounting: input
+                    .accounting
+                    .accounting_risks
+                    .iter()
+                    .any(|risk| *risk != SmartContextTokenAccountingRisk::UnknownTokenWindow),
+                safe_rewrites: input.recent_rewrite_safety.safe_rewrites,
+                fallback_rewrites: input.recent_rewrite_safety.fallback_rewrites,
+                saved_tokens: input.recent_rewrite_safety.saved_tokens,
+            },
         )
         .expect("Mojo Smart Context adaptive budget planner returned invalid output");
-        return SmartContextAdaptiveBudgetPolicy {
+        SmartContextAdaptiveBudgetPolicy {
             tier: match plan.tier {
                 0 => SmartContextTokenBudgetTier::Exact,
                 1 => SmartContextTokenBudgetTier::Large,
@@ -81,7 +84,7 @@ pub fn smart_context_adaptive_budget_policy(
                 .expect("Mojo Smart Context inline budget fits usize"),
             max_rehydrate_tokens: plan.max_rehydrate_tokens,
             reasons: smart_context_budget_policy_reasons_from_bits(plan.reason_bits),
-        };
+        }
     }
 
     #[cfg(not(feature = "mojo"))]

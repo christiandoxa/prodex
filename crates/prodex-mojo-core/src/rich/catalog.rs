@@ -112,6 +112,13 @@ struct CatalogViews {
     alias_models: Vec<i64>,
 }
 
+type ReasoningViews = (
+    CatalogViews,
+    Vec<RichStringView>,
+    Vec<i64>,
+    Vec<RichStringView>,
+);
+
 fn views(models: &[CatalogModel<'_>]) -> Result<CatalogViews, MojoError> {
     if models.len() > CATALOG_MAX_MODELS {
         return Err(MojoError::InvalidInput);
@@ -170,17 +177,7 @@ fn count_address(value: &mut i64) -> u64 {
     mojo_mut_pointer_address(value)
 }
 
-fn reasoning_views(
-    models: &[CatalogReasoningModel<'_>],
-) -> Result<
-    (
-        CatalogViews,
-        Vec<RichStringView>,
-        Vec<i64>,
-        Vec<RichStringView>,
-    ),
-    MojoError,
-> {
+fn reasoning_views(models: &[CatalogReasoningModel<'_>]) -> Result<ReasoningViews, MojoError> {
     let catalog = views(
         &models
             .iter()

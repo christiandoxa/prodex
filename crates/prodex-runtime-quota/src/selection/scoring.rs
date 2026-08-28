@@ -266,7 +266,7 @@ pub fn ready_profile_score_for_route_at(
 ) -> ReadyProfileScore {
     #[cfg(feature = "mojo")]
     {
-        return ready_profile_score_for_route_at_mojo(usage, route_kind, now);
+        ready_profile_score_for_route_at_mojo(usage, route_kind, now)
     }
 
     #[cfg(not(feature = "mojo"))]
@@ -341,7 +341,7 @@ fn ready_profile_score_for_route_at_mojo(
     }
 }
 
-#[cfg(any(not(feature = "mojo"), test))]
+#[cfg(not(feature = "mojo"))]
 fn ready_profile_score_for_route_at_rust(
     usage: &UsageResponse,
     route_kind: RuntimeRouteKind,
@@ -404,7 +404,7 @@ pub fn runtime_quota_pressure_band_for_route_at(
         let Some(five_hour) = required_main_window_snapshot_at(usage, "5h", now) else {
             return RuntimeQuotaPressureBand::Unknown;
         };
-        return match prodex_mojo_core::runtime::pressure_band_for_route(
+        match prodex_mojo_core::runtime::pressure_band_for_route(
             Some((five_hour.remaining_percent, 1)),
             Some((weekly.remaining_percent, 1)),
             match route_kind {
@@ -421,14 +421,14 @@ pub fn runtime_quota_pressure_band_for_route_at(
             2 => RuntimeQuotaPressureBand::Critical,
             3 => RuntimeQuotaPressureBand::Exhausted,
             _ => RuntimeQuotaPressureBand::Unknown,
-        };
+        }
     }
 
     #[cfg(not(feature = "mojo"))]
     runtime_quota_pressure_band_for_route_at_rust(usage, route_kind, now)
 }
 
-#[cfg(any(not(feature = "mojo"), test))]
+#[cfg(not(feature = "mojo"))]
 fn runtime_quota_pressure_band_for_route_at_rust(
     usage: &UsageResponse,
     route_kind: RuntimeRouteKind,

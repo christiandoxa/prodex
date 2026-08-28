@@ -121,14 +121,14 @@ pub fn smart_context_exactness_guard(
             input.tool_output_without_artifact,
         )
         .expect("Mojo Smart Context exactness planner returned invalid output");
-        return SmartContextExactnessGuard {
+        SmartContextExactnessGuard {
             decision: match decision.0 {
                 0 => SmartContextExactnessDecision::Allow,
                 1 => SmartContextExactnessDecision::RequireExact,
                 _ => unreachable!("Mojo Smart Context exactness decision was validated"),
             },
             reasons: smart_context_exactness_reasons_from_bits(decision.1),
-        };
+        }
     }
 
     #[cfg(not(feature = "mojo"))]
