@@ -8,7 +8,7 @@ import {
   validateManifest,
 } from "./mojo-ownership.mjs";
 
-const BASE_SHA = "06fcea88bf68102cbc8bb516801c9d4db40e5717";
+const BASE_SHA = "6f0f632a178492647da764e3522ff2092db40fb3";
 
 function releaseManifest() {
   return JSON.parse(fs.readFileSync("migration/mojo-ownership.json", "utf8"));
@@ -85,12 +85,60 @@ test("baseline remains frozen while the final inventory evolves", () => {
   assert.deepEqual(after, before);
 });
 
+test("the frozen baseline records the Rust denominator and migration floor", () => {
+  const result = calculateOwnership(releaseManifest(), BASE_SHA, "WORKTREE");
+  assert.equal(result.baseline.rust_loc, 3231);
+  assert.equal(result.required_migration_volume_loc, 324);
+  assert.equal(result.migration_volume_loc, 4959);
+  assert.equal(result.baseline_authoritative_operation_count, 14);
+});
+
+test("release inventory cannot hide baseline Rust semantic lines", () => {
+  const manifest = releaseManifest();
+  manifest.release_inventory.overrides[manifest.baseline_inventory[0].path] = {
+    classification: "SYSTEM_BOUNDARY",
+  };
+  assert.throws(
+    () => validateManifest(manifest, BASE_SHA, "WORKTREE"),
+    /eligibility change is not backed by a semantic LOC reduction/,
+  );
+});
+
+test("baseline Mojo ownership cannot regress", () => {
+  const manifest = releaseManifest();
+  manifest.release_inventory.overrides["mojo/prodex_core/rich_catalog.mojo"] = {
+    classification: "SYSTEM_BOUNDARY",
+  };
+  assert.throws(
+    () => calculateOwnership(manifest, BASE_SHA, "WORKTREE"),
+    /Mojo semantic ownership regressed/,
+  );
+});
+
+test("baseline authoritative operations remain continuous", () => {
+  const manifest = releaseManifest();
+  manifest.authoritative_operations.shift();
+  assert.throws(
+    () => validateManifest(manifest, BASE_SHA, "WORKTREE"),
+    /baseline authoritative operation .* is missing/,
+  );
+});
+
+test("Rust reductions are traceable in both baseline and release source", () => {
+  const manifest = releaseManifest();
+  manifest.rust_semantic_reductions[0].symbol = "missing_reduction_symbol";
+  assert.throws(
+    () => validateManifest(manifest, BASE_SHA, "WORKTREE"),
+    /not traceable in the frozen baseline source/,
+  );
+});
+
 test("authoritative operation metadata must point at its real exported entry", () => {
   const manifest = releaseManifest();
   manifest.authoritative_operations[0].mojo_entry = "not-shipped";
   assert.throws(
     () => validateManifest(manifest, BASE_SHA, "WORKTREE"),
-    /Mojo entry is not exported by its source/,
+    /baseline authoritative operation contract changed|Mojo entry is not exported by its source/,
   );
 });
 

@@ -1,0 +1,42 @@
+{
+  "schema_version": 1,
+  "release_target": "0.419.1",
+  "baseline_sha": "6f0f632a178492647da764e3522ff2092db40fb3",
+  "baseline_tree": "5da824acfccac557f581b8e60963efdf1784add5",
+  "command": "node scripts/ci/mojo-ownership.mjs --baseline 6f0f632a178492647da764e3522ff2092db40fb3 --release-sha 6f0f632a178492647da764e3522ff2092db40fb3 --json",
+  "counting_rules_version": 1,
+  "counting_rules": {
+    "eligible_classifications": ["DETERMINISTIC_DOMAIN", "MIXED"],
+    "eligible_roles": ["semantic", "undefined"],
+    "rust": "Count non-blank, non-comment semantic lines; exclude use/pub use imports, attributes, and bodies guarded by cfg(test) or cfg(not(feature=...)); semantic_ranges are one-based inclusive.",
+    "mojo": "Count non-blank, non-comment semantic lines; exclude imports and ABI/export directives; semantic_ranges are one-based inclusive.",
+    "production": "Count only manifest entries marked production_reachable and Mojo sources reachable from selected build.rs roots."
+  },
+  "baseline_inventory_sha256": "42c5af5be6144e74715854f32896bafc5eb6e154bb9bce77606980f236eff387",
+  "baseline_operations_sha256": "978af7c0e9b5e2fb84797eb28b21debbe09af308810f475d10123e6624a20d85",
+  "baseline_authoritative_operations": [
+    "critical_signal_text_grouping",
+    "provider_model_fallback_parser",
+    "gateway_route_alias_policy",
+    "governed_provider_route_plan",
+    "smart_context_rehydration_plan",
+    "log_event_classification",
+    "provider_catalog_model_identity",
+    "provider_catalog_choice_planning",
+    "provider_catalog_merge_dedup",
+    "quota_pressure_score_batch",
+    "smart_context_token_usage_summary",
+    "critical_signal_range_planning",
+    "runtime_profile_schedule_scoring",
+    "quota_pressure_band_and_reserve_scoring"
+  ],
+  "migration_rate_percent": 10,
+  "required_migration_volume_loc": 324,
+  "baseline_report": {
+    "eligible_rust_deterministic_production_semantic_loc": 3231,
+    "eligible_mojo_deterministic_production_semantic_loc": 4959,
+    "total_semantic_loc": 8190,
+    "mojo_percent": 60.54945054945055,
+    "migration_volume_loc": 4959
+  }
+}

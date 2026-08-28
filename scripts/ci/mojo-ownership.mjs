@@ -9,6 +9,7 @@ import { pathToFileURL } from "node:url";
 import { repoRoot } from "../npm/common.mjs";
 
 const manifestPath = path.join(repoRoot, "migration", "mojo-ownership.json");
+const COUNTING_RULES_VERSION = 1;
 const COUNTED_CLASSIFICATIONS = new Set(["DETERMINISTIC_DOMAIN", "MIXED"]);
 const SEMANTIC_ROLES = new Set(["semantic", undefined]);
 const sourceCache = new Map();
@@ -136,6 +137,62 @@ function digest(text) {
   return createHash("sha256").update(text).digest("hex");
 }
 
+function canonicalJson(value) {
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
+  if (value && typeof value === "object") {
+    return `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${canonicalJson(value[key])}`).join(",")}}`;
+  }
+  return JSON.stringify(value);
+}
+
+function digestJson(value) {
+  return digest(canonicalJson(value));
+}
+
+function isEligible(entry) {
+  return COUNTED_CLASSIFICATIONS.has(entry.classification ?? "MIXED") &&
+    entry.production_reachable !== false && SEMANTIC_ROLES.has(entry.role);
+}
+
+function accountingShape(entry) {
+  return {
+    classification: entry.classification ?? "MIXED",
+    language: entry.language,
+    production_reachable: entry.production_reachable !== false,
+    role: entry.role ?? null,
+    semantic_ranges: entry.semantic_ranges ?? [],
+  };
+}
+
+function requiredMigrationVolume(rustLoc, ratePercent) {
+  assert(Number.isInteger(rustLoc) && rustLoc >= 0, "baseline Rust semantic LOC must be non-negative");
+  assert(Number.isInteger(ratePercent) && ratePercent >= 0 && ratePercent <= 100,
+    "migration rate must be an integer percentage from 0 to 100");
+  return Math.ceil((rustLoc * ratePercent) / 100);
+}
+
+function snapshotPath(manifest) {
+  assert.equal(typeof manifest.baseline_snapshot, "string", "frozen baseline snapshot is required");
+  return path.join(repoRoot, manifest.baseline_snapshot);
+}
+
+function readBaselineSnapshot(manifest) {
+  return JSON.parse(readFileSync(snapshotPath(manifest), "utf8"));
+}
+
+function revisionTree(revision) {
+  return execFileSync("git", ["rev-parse", `${revision}^{tree}`], {
+    cwd: repoRoot,
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "ignore"],
+  }).trim();
+}
+
+function baselineOperations(manifest) {
+  return (manifest.authoritative_operations ?? [])
+    .filter((operation) => operation.baseline_state === "authoritative");
+}
+
 function readManifest() {
   return JSON.parse(readFileSync(manifestPath, "utf8"));
 }
@@ -194,10 +251,7 @@ function inventory(manifest, revision, kind) {
     if (isBaseline && entry.source_sha256) {
       assert.equal(digest(contents), entry.source_sha256, `${entry.path} baseline source changed`);
     }
-    if (!COUNTED_CLASSIFICATIONS.has(entry.classification ?? "MIXED") ||
-        entry.production_reachable === false || !SEMANTIC_ROLES.has(entry.role)) {
-      continue;
-    }
+    if (!isEligible(entry)) continue;
     const computed = countSemanticLines(contents, entry.language, entry.semantic_ranges ?? []);
     if (isBaseline && entry.semantic_loc !== undefined) {
       assert.equal(computed, entry.semantic_loc, `${entry.path} baseline semantic LOC changed`);
@@ -213,6 +267,15 @@ function inventory(manifest, revision, kind) {
     rust_loc: counts.rust,
     total_loc: total,
   };
+}
+
+function semanticLocAtRevision(manifest, revision, entry) {
+  if (!sourceExists(manifest, revision, entry.path)) return 0;
+  return countSemanticLines(
+    sourceText(manifest, revision, entry.path),
+    entry.language,
+    entry.semantic_ranges ?? [],
+  );
 }
 
 function selectedMojoSources(manifest, revision) {
@@ -293,6 +356,74 @@ function validateOperations(manifest, revision) {
   }
 }
 
+function validateOperationContinuity(manifest, snapshot) {
+  const expectedNames = snapshot.baseline_authoritative_operations;
+  assert(Array.isArray(expectedNames) && expectedNames.length > 0,
+    "frozen baseline needs authoritative operation names");
+  const operations = new Map((manifest.authoritative_operations ?? [])
+    .map((operation) => [operation.name, operation]));
+  for (const name of expectedNames) {
+    const operation = operations.get(name);
+    assert(operation, `baseline authoritative operation ${name} is missing from the release manifest`);
+    assert.equal(operation.baseline_state, "authoritative",
+      `baseline authoritative operation ${name} lost continuity`);
+    assert.equal(operation.final_state, "authoritative",
+      `baseline authoritative operation ${name} is not authoritative in the release`);
+  }
+  assert.deepEqual(
+    baselineOperations(manifest).map((operation) => operation.name),
+    expectedNames,
+    "baseline authoritative operation set changed",
+  );
+  assert.equal(
+    digestJson(baselineOperations(manifest)),
+    snapshot.baseline_operations_sha256,
+    "baseline authoritative operation contract changed",
+  );
+}
+
+function validateBaselineSnapshot(manifest, baselineRevision, baseline) {
+  const snapshot = readBaselineSnapshot(manifest);
+  assert.equal(snapshot.schema_version, 1, "unsupported frozen baseline snapshot schema");
+  assert.equal(snapshot.baseline_sha, manifest.baseline_sha, "snapshot baseline SHA does not match manifest");
+  assert.equal(snapshot.release_target, manifest.release_target,
+    "snapshot release target does not match manifest");
+  assert.equal(snapshot.baseline_tree, revisionTree(baselineRevision), "frozen baseline tree changed");
+  assert.equal(snapshot.counting_rules_version, COUNTING_RULES_VERSION,
+    "frozen baseline uses a different LOC counting rule version");
+  assert.equal(snapshot.baseline_inventory_sha256, digestJson(manifest.baseline_inventory),
+    "frozen baseline inventory changed");
+  const report = snapshot.baseline_report;
+  assert(report, "frozen baseline report is required");
+  assert.equal(report.eligible_rust_deterministic_production_semantic_loc, baseline.rust_loc,
+    "frozen baseline Rust semantic LOC changed");
+  assert.equal(report.eligible_mojo_deterministic_production_semantic_loc, baseline.mojo_loc,
+    "frozen baseline Mojo semantic LOC changed");
+  assert.equal(report.total_semantic_loc, baseline.total_loc, "frozen baseline total semantic LOC changed");
+  assert.equal(report.mojo_percent, baseline.mojo_percent, "frozen baseline ownership percentage changed");
+  assert.equal(report.migration_volume_loc, baseline.mojo_loc,
+    "frozen baseline migration volume must equal eligible Mojo semantic LOC");
+  const ratePercent = manifest.migration_rate_percent;
+  assert.equal(snapshot.migration_rate_percent, ratePercent, "frozen migration rate changed");
+  const requiredVolume = requiredMigrationVolume(baseline.rust_loc, ratePercent);
+  assert.equal(snapshot.required_migration_volume_loc, requiredVolume, "frozen migration-volume floor changed");
+  assert.equal(manifest.minimum_migration_loc, requiredVolume, "manifest migration-volume floor changed");
+  validateOperationContinuity(manifest, snapshot);
+  return snapshot;
+}
+
+function reductionFor(reductions, file) {
+  return reductions.find((reduction) => reduction.file === file);
+}
+
+function requireReduction(reductions, file, message) {
+  const reduction = reductionFor(reductions, file);
+  assert(reduction, message);
+  assert(["deleted", "adapter-only", "test-oracle-only"].includes(reduction.final_state),
+    `${file} has an invalid Rust semantic reduction state`);
+  return reduction;
+}
+
 function validateInventory(manifest, baselineRevision, releaseRevision) {
   const baselineEntries = [
     ...entriesFor(manifest, "baseline", "rust"),
@@ -313,21 +444,42 @@ function validateInventory(manifest, baselineRevision, releaseRevision) {
     ...(manifest.supporting_operations ?? []),
   ]);
   for (const baseline of baselineEntries) {
-    if (!COUNTED_CLASSIFICATIONS.has(baseline.classification ?? "MIXED") ||
-        baseline.production_reachable === false || !SEMANTIC_ROLES.has(baseline.role)) continue;
+    if (!isEligible(baseline)) continue;
     const release = releaseByPath.get(baseline.path);
-    if (release) continue;
-    assert(reductions.some((reduction) => reduction.file === baseline.path),
-      `baseline production source ${baseline.path} was removed from the release manifest without a Rust reduction record`);
-    if (baseline.language === "rust") {
-      assert(reductions.some((reduction) => reduction.file === baseline.path &&
-        ["deleted", "adapter-only", "test-oracle-only"].includes(reduction.final_state)),
-      `${baseline.path} removal is not a declared Rust semantic reduction`);
+    if (!release) {
+      const reduction = requireReduction(
+        reductions,
+        baseline.path,
+        `baseline production source ${baseline.path} was removed from the release manifest without a Rust reduction record`,
+      );
+      if (baseline.language === "rust") {
+        assert(["deleted", "adapter-only", "test-oracle-only"].includes(reduction.final_state),
+          `${baseline.path} removal is not a declared Rust semantic reduction`);
+      }
+      continue;
+    }
+    const releaseLoc = semanticLocAtRevision(manifest, releaseRevision, release);
+    const accountingChanged = canonicalJson(accountingShape(baseline)) !==
+      canonicalJson(accountingShape(release));
+    if (baseline.language === "rust" && accountingChanged) {
+      requireReduction(
+        reductions,
+        baseline.path,
+        `${baseline.path} changed its eligibility without a traceable reduction`,
+      );
+      assert(releaseLoc < baseline.semantic_loc,
+        `${baseline.path} eligibility change is not backed by a semantic LOC reduction`);
+    }
+    if (baseline.language === "rust" && releaseLoc < baseline.semantic_loc) {
+      requireReduction(
+        reductions,
+        baseline.path,
+        `${baseline.path} semantic LOC decreased without a traceable Rust reduction`,
+      );
     }
   }
   for (const entry of releaseEntriesAtRevision.filter((candidate) => candidate.language === "mojo")) {
-    if (entry.production_reachable === false || !COUNTED_CLASSIFICATIONS.has(entry.classification ?? "MIXED") ||
-        !SEMANTIC_ROLES.has(entry.role)) continue;
+    if (!isEligible(entry)) continue;
     const operations = entry.operations ?? (entry.operation ? [entry.operation] : []);
     assert(operations.length > 0 && operations.every((operation) => operationNames.has(operation)),
       `${entry.path} is counted without a declared production operation`);
@@ -337,17 +489,34 @@ function validateInventory(manifest, baselineRevision, releaseRevision) {
   }
   for (const reduction of reductions) {
     assert(typeof reduction.file === "string", "Rust reduction needs a file");
+    assert(reduction.file.endsWith(".rs"), `${reduction.file} Rust reduction must point to Rust source`);
     assert(typeof reduction.symbol === "string", `${reduction.file} Rust reduction needs a symbol`);
+    assert(typeof reduction.operation === "string", `${reduction.file} Rust reduction needs an operation`);
+    assert(operationNames.has(reduction.operation),
+      `${reduction.file}:${reduction.symbol} names an unknown operation`);
     assert(typeof reduction.previous_responsibility === "string",
       `${reduction.file} Rust reduction needs its previous responsibility`);
     assert(["deleted", "adapter-only", "test-oracle-only"].includes(reduction.final_state),
       `${reduction.file}:${reduction.symbol} has an invalid final Rust state`);
+    assert(sourceExists(manifest, baselineRevision, reduction.file),
+      `${reduction.file}:${reduction.symbol} is not traceable in the frozen baseline source`);
+    const baselineSource = sourceText(manifest, baselineRevision, reduction.file);
+    assert(baselineSource.includes(reduction.symbol),
+      `${reduction.file}:${reduction.symbol} is not traceable in the frozen baseline source`);
     if (releaseRevision === baselineRevision && !sourceExists(manifest, releaseRevision, reduction.file)) {
       continue;
     }
+    if (reduction.final_state === "deleted" && !sourceExists(manifest, releaseRevision, reduction.file)) continue;
+    assert(sourceExists(manifest, releaseRevision, reduction.file),
+      `${reduction.file}:${reduction.symbol} reduction source is absent from release`);
     const source = sourceText(manifest, releaseRevision, reduction.file);
-    assert(source.includes(reduction.symbol),
-      `${reduction.file}:${reduction.symbol} reduction is not traceable in release source`);
+    if (reduction.final_state === "deleted") {
+      assert(!source.includes(reduction.symbol),
+        `${reduction.file}:${reduction.symbol} deleted reduction remains in release source`);
+    } else {
+      assert(source.includes(reduction.symbol),
+        `${reduction.file}:${reduction.symbol} reduction is not traceable in release source`);
+    }
   }
   validateOperations(manifest, releaseRevision);
   return { baselineEntries, releaseEntries };
@@ -357,14 +526,22 @@ export function validateManifest(manifest, baselineRevision = manifest.baseline_
   if (!manifest.baseline_inventory) return;
   assert.equal(manifest.baseline_sha, baselineRevision,
     `requested baseline ${baselineRevision} differs from frozen manifest baseline ${manifest.baseline_sha}`);
+  const baseline = inventory(manifest, baselineRevision, "baseline");
+  validateBaselineSnapshot(manifest, baselineRevision, baseline);
   validateInventory(manifest, baselineRevision, releaseRevision);
+  return baseline;
 }
 
 export function calculateOwnership(manifest, baselineRevision, releaseRevision) {
   const strict = Boolean(manifest.baseline_inventory);
-  if (strict) validateManifest(manifest, baselineRevision, releaseRevision);
-  const baseline = inventory(manifest, baselineRevision, "baseline");
+  const baseline = strict
+    ? validateManifest(manifest, baselineRevision, releaseRevision)
+    : inventory(manifest, baselineRevision, "baseline");
   const final = inventory(manifest, releaseRevision, "release");
+  if (strict) {
+    assert(final.mojo_loc >= baseline.mojo_loc,
+      `Mojo semantic ownership regressed from ${baseline.mojo_loc} to ${final.mojo_loc} LOC`);
+  }
   const operations = manifest.authoritative_operations ?? [];
   const available = (operation) => {
     if (!sourceExists(manifest, releaseRevision, operation.mojo_source)) return false;
@@ -387,10 +564,17 @@ export function calculateOwnership(manifest, baselineRevision, releaseRevision) 
     : authoritative.filter((operation) => operation.expanded_in === manifest.release_target);
   const migrationUnits = authoritative.filter((operation) =>
     operation.introduced_in === manifest.release_target || operation.expanded_in === manifest.release_target);
+  const requiredMigrationVolumeLoc = strict
+    ? requiredMigrationVolume(baseline.rust_loc, manifest.migration_rate_percent)
+    : 0;
   return {
     baseline,
     final,
     percentage_point_increase: final.mojo_percent - baseline.mojo_percent,
+    migration_volume_loc: final.mojo_loc,
+    new_migration_volume_loc: Math.max(0, final.mojo_loc - baseline.mojo_loc),
+    required_migration_volume_loc: requiredMigrationVolumeLoc,
+    rust_semantic_reduction_loc: Math.max(0, baseline.rust_loc - final.rust_loc),
     authoritative_operation_count: authoritative.length,
     baseline_authoritative_operation_count: baselineAuthoritative.length,
     new_migration_unit_count: migrationUnits.length,
@@ -430,8 +614,12 @@ async function main() {
       `Mojo deterministic ownership ${result.final.mojo_percent.toFixed(2)}% is below ${manifest.minimum_percent}%`,
     );
   }
-  if (args.check && manifest.baseline_inventory && result.new_migration_unit_count < 8) {
-    throw new Error(`Mojo migration has ${result.new_migration_unit_count} new units; at least 8 are required`);
+  if (args.check && manifest.baseline_inventory &&
+      result.migration_volume_loc < result.required_migration_volume_loc) {
+    throw new Error(
+      `Mojo migration volume ${result.migration_volume_loc} LOC is below the required ` +
+      `${result.required_migration_volume_loc} LOC floor`,
+    );
   }
   if (args.json) {
     process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
@@ -441,6 +629,7 @@ async function main() {
     [
       `baseline: ${result.baseline.mojo_percent.toFixed(2)}% Mojo (${result.baseline.mojo_loc}/${result.baseline.total_loc})`,
       `final: ${result.final.mojo_percent.toFixed(2)}% Mojo (${result.final.mojo_loc}/${result.final.total_loc})`,
+      `migration volume: ${result.migration_volume_loc} LOC (required ${result.required_migration_volume_loc})`,
       `increase: ${result.percentage_point_increase.toFixed(2)} percentage points`,
       `authoritative operations: ${result.authoritative_operation_count}`,
     ].join("\n") + "\n",

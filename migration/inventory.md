@@ -1,7 +1,7 @@
 # Rust-to-Mojo migration inventory
 
 Audit basis: workspace source as of 2026-08-28, immutable release baseline
-`06fcea88bf68102cbc8bb516801c9d4db40e5717`, `Cargo.toml`, maintained architecture and testing
+`6f0f632a178492647da764e3522ff2092db40fb3`, `Cargo.toml`, maintained architecture and testing
 contracts, the code knowledge graph, and direct source inspection. The
 workspace contains 59 Cargo packages. This inventory classifies ownership boundaries,
 not every generated fixture or test helper. Status `MOJO` means compiled Mojo is
@@ -12,6 +12,18 @@ separate Rust-only build or test oracle, never runtime fallback.
 useful boundary. `REFACTOR_THEN_MOVE` means the logic is a candidate only after IO,
 security, and persistence are separated. `EXPERIMENT` means a bounded parity spike is
 needed. `KEEP_RUST` means Rust currently owns the ecosystem or trust boundary.
+
+## 0.419.1 accounting freeze
+
+The frozen source-level accounting is recorded in
+`migration/mojo-ownership-baseline-0.419.1.json` and checked by
+`node scripts/ci/mojo-ownership.mjs --check`. The baseline contains 3,231 eligible Rust
+deterministic production semantic LOC and 4,959 eligible Mojo LOC. The migration-volume
+floor is `ceil(3,231 * 10 / 100) = 324` LOC. The counter excludes blank/comment/import/directive
+lines, test or `cfg(not(feature=...))` Rust bodies, and anything outside declared semantic
+ranges; the release inventory cannot reduce the Rust denominator without a source-traceable
+reduction record. Mojo volume is the eligible production Mojo semantic LOC, and existing Mojo
+ownership and authoritative operations must not regress.
 
 | Package / module area | Purpose | Pure vs IO | External / async | Risk | Class | Action | Evidence / reason |
 | --- | --- | --- | --- | --- | --- | --- | --- |
