@@ -291,10 +291,6 @@ fn ready_profile_score_for_route_at_mojo(
         scale_quota_pressure_for_plan(five_hour_pressure, plan_pressure_scale_bps);
     let weekly_remaining = weekly.map_or(0, |window| window.remaining_percent);
     let five_hour_remaining = five_hour.map_or(0, |window| window.remaining_percent);
-    let weekly_weight = match route_kind {
-        RuntimeRouteKind::Responses | RuntimeRouteKind::Websocket => 10,
-        RuntimeRouteKind::Compact | RuntimeRouteKind::Standard => 8,
-    };
     let reserve_bias = match runtime_quota_pressure_band_for_route_at(usage, route_kind, now) {
         RuntimeQuotaPressureBand::Healthy => 0,
         RuntimeQuotaPressureBand::Thin => 250_000,
