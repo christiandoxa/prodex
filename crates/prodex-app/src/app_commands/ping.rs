@@ -522,99 +522,137 @@ fn diagnostic_reasoning_effort(model: &str) -> Option<&'static str> {
         })
 }
 
+#[derive(Default)]
+struct PingValidationState {
+    thread_started: bool,
+    turn_started: bool,
+    turn_completed: bool,
+    agent_message_completed: bool,
+    final_message: Option<String>,
+}
+
+impl PingValidationState {
+    fn finish(self) -> std::result::Result<(), PingValidationFailure> {
+        if !self.thread_started || !self.turn_started || !self.turn_completed {
+            return Err(PingValidationFailure {
+                status: PingStatus::ProtocolFailed,
+                detail: "Codex did not complete a structured turn",
+            });
+        }
+        if !self.agent_message_completed
+            || self
+                .final_message
+                .as_deref()
+                .is_none_or(|message| message.trim_end() != "PONG")
+        {
+            return Err(PingValidationFailure {
+                status: PingStatus::UnexpectedResponse,
+                detail: "completed turn did not return exactly PONG",
+            });
+        }
+        Ok(())
+    }
+}
+
 fn validate_ping_output(output: &Output) -> std::result::Result<(), PingValidationFailure> {
-    let mut thread_started = false;
-    let mut turn_started = false;
-    let mut turn_completed = false;
-    let mut agent_message_completed = false;
-    let mut final_message = None;
+    let mut state = PingValidationState::default();
     for line in String::from_utf8_lossy(&output.stdout).lines() {
         let event: Value = serde_json::from_str(line).map_err(|_| PingValidationFailure {
             status: PingStatus::ProtocolFailed,
             detail: "Codex JSONL output was malformed",
         })?;
-        match event.get("type").and_then(Value::as_str) {
-            Some("thread.started") => thread_started = true,
-            Some("turn.started") => turn_started = true,
-            Some("turn.completed") => turn_completed = true,
-            Some("turn.failed") => {
-                let status = classify_failure_text(
-                    event
-                        .get("error")
-                        .and_then(|error| error.get("message"))
-                        .and_then(Value::as_str)
-                        .unwrap_or("turn failed"),
-                )
-                .0;
-                return Err(PingValidationFailure {
-                    status: if status == PingStatus::ProcessFailed {
-                        PingStatus::TurnFailed
-                    } else {
-                        status
-                    },
-                    detail: "Codex turn failed",
-                });
-            }
-            Some("error") => {
-                return Err(PingValidationFailure {
-                    status: classify_failure_text(
-                        event
-                            .get("message")
-                            .and_then(Value::as_str)
-                            .unwrap_or("Codex error"),
-                    )
-                    .0,
-                    detail: "Codex reported an unrecoverable error",
-                });
-            }
-            Some("item.started") | Some("item.updated") | Some("item.completed") => {
-                let item = event.get("item").ok_or(PingValidationFailure {
-                    status: PingStatus::ProtocolFailed,
-                    detail: "Codex JSONL item event had no item",
-                })?;
-                match item.get("type").and_then(Value::as_str) {
-                    Some("agent_message") => {
-                        if event.get("type").and_then(Value::as_str) == Some("item.completed") {
-                            agent_message_completed = true;
-                            if let Some(text) = item.get("text").and_then(Value::as_str) {
-                                final_message = Some(text.to_string());
-                            }
-                        }
-                    }
-                    Some("reasoning") => {}
-                    Some(_) | None => {
-                        return Err(PingValidationFailure {
-                            status: PingStatus::ProtocolFailed,
-                            detail: "diagnostic turn emitted tool or unsupported activity",
-                        });
-                    }
-                }
-            }
-            Some(_) | None => {
-                return Err(PingValidationFailure {
-                    status: PingStatus::ProtocolFailed,
-                    detail: "Codex JSONL output contained an unsupported event",
-                });
-            }
+        validate_ping_event(&event, &mut state)?;
+    }
+    state.finish()
+}
+
+fn validate_ping_event(
+    event: &Value,
+    state: &mut PingValidationState,
+) -> std::result::Result<(), PingValidationFailure> {
+    match event.get("type").and_then(Value::as_str) {
+        Some("thread.started") => state.thread_started = true,
+        Some("turn.started") => state.turn_started = true,
+        Some("turn.completed") => state.turn_completed = true,
+        Some("turn.failed") => return ping_turn_failure(event),
+        Some("error") => return ping_event_failure(event),
+        Some(event_type) if is_ping_item_event(event_type) => {
+            return validate_ping_item(event_type, event, state);
+        }
+        Some(_) | None => {
+            return Err(PingValidationFailure {
+                status: PingStatus::ProtocolFailed,
+                detail: "Codex JSONL output contained an unsupported event",
+            });
         }
     }
-    if !thread_started || !turn_started || !turn_completed {
-        return Err(PingValidationFailure {
-            status: PingStatus::ProtocolFailed,
-            detail: "Codex did not complete a structured turn",
-        });
-    }
-    if !agent_message_completed
-        || final_message
-            .as_deref()
-            .is_none_or(|message| message.trim_end() != "PONG")
-    {
-        return Err(PingValidationFailure {
-            status: PingStatus::UnexpectedResponse,
-            detail: "completed turn did not return exactly PONG",
-        });
-    }
     Ok(())
+}
+
+fn is_ping_item_event(event_type: &str) -> bool {
+    matches!(
+        event_type,
+        "item.started" | "item.updated" | "item.completed"
+    )
+}
+
+fn ping_turn_failure(event: &Value) -> std::result::Result<(), PingValidationFailure> {
+    let status = classify_failure_text(
+        event
+            .get("error")
+            .and_then(|error| error.get("message"))
+            .and_then(Value::as_str)
+            .unwrap_or("turn failed"),
+    )
+    .0;
+    Err(PingValidationFailure {
+        status: if status == PingStatus::ProcessFailed {
+            PingStatus::TurnFailed
+        } else {
+            status
+        },
+        detail: "Codex turn failed",
+    })
+}
+
+fn ping_event_failure(event: &Value) -> std::result::Result<(), PingValidationFailure> {
+    Err(PingValidationFailure {
+        status: classify_failure_text(
+            event
+                .get("message")
+                .and_then(Value::as_str)
+                .unwrap_or("Codex error"),
+        )
+        .0,
+        detail: "Codex reported an unrecoverable error",
+    })
+}
+
+fn validate_ping_item(
+    event_type: &str,
+    event: &Value,
+    state: &mut PingValidationState,
+) -> std::result::Result<(), PingValidationFailure> {
+    let item = event.get("item").ok_or(PingValidationFailure {
+        status: PingStatus::ProtocolFailed,
+        detail: "Codex JSONL item event had no item",
+    })?;
+    match item.get("type").and_then(Value::as_str) {
+        Some("agent_message") => {
+            if event_type == "item.completed" {
+                state.agent_message_completed = true;
+                if let Some(text) = item.get("text").and_then(Value::as_str) {
+                    state.final_message = Some(text.to_string());
+                }
+            }
+            Ok(())
+        }
+        Some("reasoning") => Ok(()),
+        Some(_) | None => Err(PingValidationFailure {
+            status: PingStatus::ProtocolFailed,
+            detail: "diagnostic turn emitted tool or unsupported activity",
+        }),
+    }
 }
 
 fn classify_failure(output: &Output) -> (PingStatus, &'static str) {
@@ -626,64 +664,119 @@ fn classify_failure(output: &Output) -> (PingStatus, &'static str) {
     classify_failure_text(&text)
 }
 
+type PingFailureMatcher = fn(&str) -> bool;
+type PingFailureRule = (PingFailureMatcher, PingStatus, &'static str);
+
+const PING_FAILURE_RULES: &[PingFailureRule] = &[
+    (
+        is_quota_failure,
+        PingStatus::QuotaExhausted,
+        "OpenAI reported quota exhaustion",
+    ),
+    (
+        is_auth_failure,
+        PingStatus::AuthFailed,
+        "OpenAI authentication failed",
+    ),
+    (
+        is_rate_limit_failure,
+        PingStatus::RateLimited,
+        "OpenAI temporarily rate limited the profile",
+    ),
+    (
+        is_overload_failure,
+        PingStatus::UpstreamOverloaded,
+        "OpenAI upstream is temporarily unavailable",
+    ),
+    (
+        is_dns_failure,
+        PingStatus::DnsFailed,
+        "OpenAI hostname resolution failed",
+    ),
+    (
+        is_tls_failure,
+        PingStatus::TlsFailed,
+        "OpenAI TLS connection failed",
+    ),
+    (
+        is_model_failure,
+        PingStatus::ModelUnavailable,
+        "selected OpenAI model is unavailable",
+    ),
+    (
+        is_cancelled_failure,
+        PingStatus::Cancelled,
+        "OpenAI ping was cancelled",
+    ),
+    (
+        is_timeout_failure,
+        PingStatus::Timeout,
+        "OpenAI diagnostic timed out",
+    ),
+];
+
 fn classify_failure_text(text: &str) -> (PingStatus, &'static str) {
     let lower = text.to_ascii_lowercase();
-    if lower.contains("insufficient_quota")
-        || lower.contains("usage_limit_reached")
-        || lower.contains("quota exceeded")
-    {
-        return (
-            PingStatus::QuotaExhausted,
-            "OpenAI reported quota exhaustion",
-        );
-    }
-    if lower.contains("401")
-        || lower.contains("unauthorized")
-        || lower.contains("invalid api key")
-        || lower.contains("authentication")
-    {
-        return (PingStatus::AuthFailed, "OpenAI authentication failed");
-    }
-    if lower.contains("429") || lower.contains("rate_limit") || lower.contains("rate limit") {
-        return (
-            PingStatus::RateLimited,
-            "OpenAI temporarily rate limited the profile",
-        );
-    }
-    if lower.contains("503")
-        || lower.contains("502")
-        || lower.contains("504")
-        || lower.contains("overloaded")
-        || lower.contains("temporarily unavailable")
-    {
-        return (
-            PingStatus::UpstreamOverloaded,
-            "OpenAI upstream is temporarily unavailable",
-        );
-    }
-    if lower.contains("dns")
-        || lower.contains("resolve")
-        || lower.contains("name or service not known")
-        || lower.contains("getaddrinfo")
-    {
-        return (PingStatus::DnsFailed, "OpenAI hostname resolution failed");
-    }
-    if lower.contains("tls") || lower.contains("certificate") || lower.contains("handshake") {
-        return (PingStatus::TlsFailed, "OpenAI TLS connection failed");
-    }
-    if lower.contains("unsupported model") || lower.contains("model_not_found") {
-        return (
-            PingStatus::ModelUnavailable,
-            "selected OpenAI model is unavailable",
-        );
-    }
-    if lower.contains("cancel") {
-        return (PingStatus::Cancelled, "OpenAI ping was cancelled");
-    }
-    if lower.contains("timeout") || lower.contains("timed out") {
-        return (PingStatus::Timeout, "OpenAI diagnostic timed out");
-    }
-    (PingStatus::ProcessFailed, "Codex diagnostic process failed")
+    PING_FAILURE_RULES
+        .iter()
+        .find_map(|(matches, status, detail)| matches(&lower).then_some((*status, *detail)))
+        .unwrap_or((PingStatus::ProcessFailed, "Codex diagnostic process failed"))
+}
+
+fn contains_any(text: &str, needles: &[&str]) -> bool {
+    needles.iter().any(|needle| text.contains(needle))
+}
+
+fn is_quota_failure(text: &str) -> bool {
+    contains_any(
+        text,
+        &[
+            "insufficient_quota",
+            "usage_limit_reached",
+            "quota exceeded",
+        ],
+    )
+}
+
+fn is_auth_failure(text: &str) -> bool {
+    contains_any(
+        text,
+        &["401", "unauthorized", "invalid api key", "authentication"],
+    )
+}
+
+fn is_rate_limit_failure(text: &str) -> bool {
+    contains_any(text, &["429", "rate_limit", "rate limit"])
+}
+
+fn is_overload_failure(text: &str) -> bool {
+    contains_any(
+        text,
+        &["503", "502", "504", "overloaded", "temporarily unavailable"],
+    )
+}
+
+fn is_dns_failure(text: &str) -> bool {
+    contains_any(
+        text,
+        &["dns", "resolve", "name or service not known", "getaddrinfo"],
+    )
+}
+
+fn is_tls_failure(text: &str) -> bool {
+    contains_any(text, &["tls", "certificate", "handshake"])
+}
+
+fn is_model_failure(text: &str) -> bool {
+    contains_any(text, &["unsupported model", "model_not_found"])
+}
+
+fn is_cancelled_failure(text: &str) -> bool {
+    text.contains("cancel")
+}
+
+fn is_timeout_failure(text: &str) -> bool {
+    contains_any(text, &["timeout", "timed out"])
 }
 
 fn render_ping_results(results: &[PingResult], json: bool) -> Result<()> {
