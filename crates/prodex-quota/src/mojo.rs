@@ -47,3 +47,10 @@ pub(crate) fn main_quota_aggregate(
         aggregate.earliest_reset_at,
     ))
 }
+
+pub(crate) fn quota_capacity_batch(
+    inputs: &[prodex_mojo_core::quota::QuotaCapacityInput],
+    route_kind: i64,
+) -> Result<Vec<prodex_mojo_core::quota::QuotaCapacityOutput>, prodex_mojo_core::MojoError> {
+    prodex_mojo_core::quota::quota_capacity_batch(inputs, route_kind)
+}

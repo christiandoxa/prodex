@@ -1,4 +1,5 @@
 use super::*;
+use std::collections::BTreeMap;
 
 #[test]
 fn real_mojo_quota_smoke_calls_exported_c_abi() {
@@ -119,4 +120,65 @@ fn main_quota_aggregate_matches_rust_oracle_for_generated_rows() {
             "quota aggregation case {case}"
         );
     }
+}
+
+#[test]
+fn quota_capacity_keeps_unknown_reserve_non_routable() {
+    let _compiled_core = prodex_mojo_core::MOJO_ACTIVE;
+    let now = 1_700_000_000;
+    let window_pair = |five_hour_remaining: i64,
+                       five_hour_reset_at: i64,
+                       weekly_remaining: i64,
+                       weekly_reset_at: i64| WindowPair {
+        allowed: None,
+        limit_reached: None,
+        extra: BTreeMap::new(),
+        primary_window: Some(UsageWindow {
+            used_percent: Some(100 - five_hour_remaining),
+            reset_at: Some(five_hour_reset_at),
+            limit_window_seconds: Some(18_000),
+        }),
+        secondary_window: Some(UsageWindow {
+            used_percent: Some(100 - weekly_remaining),
+            reset_at: Some(weekly_reset_at),
+            limit_window_seconds: Some(604_800),
+        }),
+    };
+    let mut usage = UsageResponse {
+        email: None,
+        plan_type: Some("plus".to_string()),
+        rate_limit: Some(window_pair(0, now + 3_600, 0, now + 86_400)),
+        code_review_rate_limit: None,
+        rate_limit_reset_credits: None,
+        additional_rate_limits: Vec::new(),
+    };
+    usage.additional_rate_limits.push(AdditionalRateLimit {
+        limit_id: Some("luna-reserve".to_string()),
+        limit_name: Some("Luna Reserve".to_string()),
+        metered_feature: Some("future_reserve".to_string()),
+        rate_limit: window_pair(88, now + 7_200, 97, now + 172_800),
+        allowed: None,
+        limit_reached: None,
+        extra: BTreeMap::new(),
+    });
+
+    let candidates = crate::capacity::quota_capacity_candidates_for_usage_at(
+        &usage,
+        prodex_runtime_state::RuntimeRouteKind::Responses,
+        now,
+    )
+    .expect("normalized capacity rows should classify");
+    assert_eq!(candidates.len(), 2);
+    assert_eq!(
+        candidates[0].output.lane,
+        prodex_mojo_core::quota::QUOTA_CAPACITY_LANE_MAIN
+    );
+    assert!(!candidates[0].output.routing_eligible);
+    assert_eq!(
+        candidates[1].output.lane,
+        prodex_mojo_core::quota::QUOTA_CAPACITY_LANE_UNKNOWN_ADDITIONAL
+    );
+    assert!(candidates[1].output.usable);
+    assert!(!candidates[1].output.routing_eligible);
+    assert!(!openai_quota_has_ready_limit(&usage));
 }
