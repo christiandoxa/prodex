@@ -1,5 +1,20 @@
 [
   {
+    "id": "audited-prodex-0.418.1-campaign-range",
+    "requiredSubjects": [
+      "feat(mojo): migrate deterministic runtime ownership",
+      "feat(runtime): harden 0.418.1 diagnostics and expose",
+      "fix(runtime): preserve bounded selection and token accounting"
+    ],
+    "caps": {
+      "maxFiles": 125,
+      "maxBehaviorFiles": 110,
+      "maxLines": 7000,
+      "maxFileLines": 850
+    },
+    "reason": "The complete 0.418.1 product campaign is composed of three independently reviewed commits; this exact-subject range allowance covers their aggregate release-critical Mojo, runtime, expose, diagnostics, test, and contract evidence without changing global thresholds."
+  },
+  {
     "id": "audited-prodex-0.418.1-runtime-accounting",
     "requiredSubjects": [
       "fix(runtime): preserve bounded selection and token accounting"
