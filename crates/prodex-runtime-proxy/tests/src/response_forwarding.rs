@@ -277,7 +277,10 @@ fn live_token_usage_progress_is_cumulative_and_rate_limited() {
         progress.observe(usage(30), start + std::time::Duration::from_millis(250)),
         Some(usage(30))
     );
-    assert_eq!(progress.observe(usage(20), start + std::time::Duration::from_secs(1)), None);
+    assert_eq!(
+        progress.observe(usage(20), start + std::time::Duration::from_secs(1)),
+        None
+    );
 }
 
 #[test]

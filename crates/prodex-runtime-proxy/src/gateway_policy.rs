@@ -99,12 +99,12 @@ pub struct RuntimeGatewayRouteModelState {
 
 #[path = "gateway_policy/selection.rs"]
 mod selection;
-pub(crate) use selection::{
-    runtime_gateway_rewrite_route_alias, runtime_gateway_rewrite_route_alias_with_state,
-    runtime_gateway_route_selected_model_from_models,
-};
-#[cfg(any(not(feature = "mojo"), test))]
+pub(crate) use selection::runtime_gateway_route_selected_model_from_models;
+#[cfg(test)]
 pub(super) use selection::runtime_gateway_route_selected_model_from_models_rust;
+pub use selection::{
+    runtime_gateway_rewrite_route_alias, runtime_gateway_rewrite_route_alias_with_state,
+};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RuntimeGatewayRouteRewrite {

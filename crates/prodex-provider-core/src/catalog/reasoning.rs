@@ -90,8 +90,7 @@ pub fn provider_model_reasoning_resolution(
     requested_effort: Option<&str>,
 ) -> Result<ProviderModelReasoningResolution, ProviderModelReasoningError> {
     let (entries, efforts, aliases) = reasoning_catalog_data(provider);
-    let fallback_model =
-        provider_runtime_metadata(provider).map(|metadata| metadata.default_model);
+    let fallback_model = provider_runtime_metadata(provider).map(|metadata| metadata.default_model);
 
     #[cfg(feature = "mojo")]
     let plan = {
