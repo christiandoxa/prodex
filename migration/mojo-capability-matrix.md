@@ -160,7 +160,7 @@ compare compiler-generated sizes/alignment, and the release archive checks all v
 rejects `KGEN_CompilerRT_*` references. Native heap and package-backed paths remain non-production
 until their full target and clean-machine gates pass.
 
-## Prodex 0.418.1 deterministic additions
+## Prodex 0.419.0 deterministic additions
 
 The release candidate adds only bounded, stateless kernels with existing Rust-owned trust and
 transport boundaries:

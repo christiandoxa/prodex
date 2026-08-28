@@ -33,7 +33,7 @@ not runtime fallback.
 | Runtime tuning defaults | Rust-only feature-off `runtime_tuning_defaults_rust` test oracle | `prodex_runtime_tuning_defaults` | Normalized host parallelism | Exact worker/log/websocket default tuple | `tuning_defaults_match_rust_oracle_for_generated_parallelism` (2,000 fixed-seed cases), runtime config and probe queue callers | `MOJO` |
 | Smart Context candidate scoring | `smart_context_candidate_score` and selection | Not started | Normalized candidate batch | Exact score/order | Smart Context regression fixtures | `AUDIT_ONLY` |
 
-## Prodex 0.418.1 additions
+## Prodex 0.419.0 additions
 
 | Component | Rust oracle | Mojo entry point | Inputs | Expected output | Coverage | Status |
 | --- | --- | --- | --- | --- | --- | --- |

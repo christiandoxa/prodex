@@ -77,7 +77,7 @@ Object sizes are diagnostic evidence, not a stable release API: link-time
 section selection can change them. The final binary, archive, GLIBC, and
 clean-machine checks remain authoritative.
 
-## 0.418.1 refresh
+## 0.419.0 refresh
 
 The release additions were rechecked with the installed `Mojo 1.0.0 (ed45d567)` compiler:
 

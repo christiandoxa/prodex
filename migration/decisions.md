@@ -271,7 +271,7 @@ after those external compatibility and security boundaries. EmberJson immutable-
 reflection experiments are deferred until its compiler compatibility, complete-document
 validation, package provenance, and cross-target artifact gates pass.
 
-## 2026-08-28: 0.418.1 keeps new decisions bounded and fail-closed
+## 2026-08-28: 0.419.0 keeps new decisions bounded and fail-closed
 
 Provider catalog identity/choice/deduplication, route-aware quota pressure scoring, and observed
 Smart Context token totals now use the existing static Mojo archive through bounded caller-owned

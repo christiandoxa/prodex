@@ -1,6 +1,6 @@
 # Codex `rust-v0.150.1` compatibility audit
 
-This is the source record used for the `0.418.1` runtime changes. The pinned
+This is the source record used for the `0.419.0` runtime changes. The pinned
 upstream revision is `openai/codex` tag `rust-v0.150.1`; no later `main`
 behavior is used as a migration assumption.
 
