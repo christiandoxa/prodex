@@ -10,6 +10,11 @@ fn sorted_log_lines(path: &std::path::Path) -> Vec<String> {
     lines
 }
 
+fn sorted_paths(mut paths: Vec<String>) -> Vec<String> {
+    paths.sort();
+    paths
+}
+
 #[test]
 fn ping_openai_sends_ping_to_each_ready_openai_profile() {
     let fixture = setup_fixture();
@@ -35,11 +40,11 @@ fn ping_openai_sends_ping_to_each_ready_openai_profile() {
     );
     assert_eq!(
         sorted_log_lines(&home_log),
-        vec![
+        sorted_paths(vec![
             fixture.main_home.to_string_lossy().to_string(),
             fixture.second_home.to_string_lossy().to_string(),
             third_home.to_string_lossy().to_string(),
-        ]
+        ])
     );
     let args = fs::read_to_string(&fixture.codex_args_log).expect("failed to read args log");
     let args = args.lines().collect::<Vec<_>>();
@@ -73,11 +78,11 @@ fn ping_openai_includes_profile_that_is_ready_on_weekly_quota_only() {
     );
     assert_eq!(
         sorted_log_lines(&home_log),
-        vec![
+        sorted_paths(vec![
             fixture.main_home.to_string_lossy().to_string(),
             fixture.second_home.to_string_lossy().to_string(),
             weekly_home.to_string_lossy().to_string(),
-        ]
+        ])
     );
 }
 
@@ -112,11 +117,11 @@ fn ping_openai_uses_ready_snapshots_when_live_quota_probe_fails() {
     );
     assert_eq!(
         sorted_log_lines(&home_log),
-        vec![
+        sorted_paths(vec![
             fixture.main_home.to_string_lossy().to_string(),
             fixture.second_home.to_string_lossy().to_string(),
             third_home.to_string_lossy().to_string(),
-        ]
+        ])
     );
 }
 
@@ -142,11 +147,11 @@ fn ping_openai_ignores_unrelated_profile_session_files() {
     );
     assert_eq!(
         sorted_log_lines(&home_log),
-        vec![
+        sorted_paths(vec![
             broken_home.to_string_lossy().to_string(),
             fixture.main_home.to_string_lossy().to_string(),
             fixture.second_home.to_string_lossy().to_string(),
-        ]
+        ])
     );
 }
 
@@ -175,12 +180,12 @@ fn ping_openai_sends_extra_spark_ping_when_profile_has_spark_limit() {
     );
     assert_eq!(
         sorted_log_lines(&home_log),
-        vec![
+        sorted_paths(vec![
             fixture.main_home.to_string_lossy().to_string(),
             fixture.second_home.to_string_lossy().to_string(),
             spark_home.to_string_lossy().to_string(),
             spark_home.to_string_lossy().to_string(),
-        ]
+        ])
     );
     let args = fs::read_to_string(&fixture.codex_args_log).expect("failed to read args log");
     let args = args.lines().collect::<Vec<_>>();
