@@ -46,6 +46,10 @@ pub(super) enum RuntimeStandardAttempt {
         response: tiny_http::ResponseBox,
         overload: bool,
     },
+    ProfileUnavailable {
+        profile_name: String,
+        response: tiny_http::ResponseBox,
+    },
     AuthFailed {
         profile_name: String,
         response: tiny_http::ResponseBox,

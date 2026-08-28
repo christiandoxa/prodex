@@ -63,6 +63,7 @@ fn proxy_runtime_noncompact_realtime_request(
         }
         RuntimeStandardAttempt::StaleContinuation { response }
         | RuntimeStandardAttempt::RetryableFailure { response, .. }
+        | RuntimeStandardAttempt::ProfileUnavailable { response, .. }
         | RuntimeStandardAttempt::AuthFailed { response, .. } => Ok(response),
         RuntimeStandardAttempt::LocalSelectionBlocked { .. }
         | RuntimeStandardAttempt::TransportFailed { .. } => Ok(build_runtime_proxy_text_response(
@@ -442,6 +443,17 @@ fn handle_runtime_noncompact_attempt(
             response,
             overload,
         }),
+        RuntimeStandardAttempt::ProfileUnavailable {
+            profile_name,
+            response,
+        } => handle_runtime_noncompact_profile_unavailable(
+            request_id,
+            shared,
+            session_profile,
+            loop_state,
+            profile_name,
+            response,
+        ),
         RuntimeStandardAttempt::AuthFailed {
             profile_name,
             response,
@@ -509,6 +521,30 @@ struct RuntimeNoncompactRetryableContext<'a> {
     profile_name: String,
     response: tiny_http::ResponseBox,
     overload: bool,
+}
+
+fn handle_runtime_noncompact_profile_unavailable(
+    request_id: u64,
+    shared: &RuntimeRotationProxyShared,
+    session_profile: &mut Option<String>,
+    loop_state: &mut RuntimePrecommitLoopState<tiny_http::ResponseBox>,
+    profile_name: String,
+    response: tiny_http::ResponseBox,
+) -> Result<Option<tiny_http::ResponseBox>> {
+    runtime_proxy_log(
+        shared,
+        format!(
+            "request={request_id} transport=http standard_profile_unavailable profile={profile_name}"
+        ),
+    );
+    if session_profile.as_deref() == Some(profile_name.as_str()) {
+        return Ok(Some(response));
+    }
+    mark_runtime_profile_retry_backoff(shared, &profile_name)?;
+    clear_noncompact_session_profile(session_profile, &profile_name);
+    loop_state.excluded_profiles.insert(profile_name);
+    loop_state.last_failure = Some((response, false));
+    Ok(None)
 }
 
 fn handle_runtime_noncompact_retryable(

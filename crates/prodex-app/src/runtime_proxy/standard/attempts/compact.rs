@@ -197,6 +197,14 @@ fn handle_runtime_compact_error_parts(
             response,
         });
     }
+    if error_policy.class == runtime_proxy_crate::RuntimeHttpErrorClass::ProfileUnavailable
+        && error_policy.action == runtime_proxy_crate::RuntimeHttpErrorAction::RotateProfile
+    {
+        return Ok(RuntimeStandardAttempt::ProfileUnavailable {
+            profile_name: profile_name.to_string(),
+            response,
+        });
+    }
     if retryable_quota || retryable_overload {
         return Ok(RuntimeStandardAttempt::RetryableFailure {
             profile_name: profile_name.to_string(),

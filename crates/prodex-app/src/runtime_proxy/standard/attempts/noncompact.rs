@@ -292,9 +292,18 @@ fn handle_runtime_noncompact_usage_parts(
                 error_policy.message.as_deref().unwrap_or("-"),
             ),
         );
+        let response = build_runtime_proxy_response_from_parts(parts);
+        if error_policy.class == runtime_proxy_crate::RuntimeHttpErrorClass::ProfileUnavailable
+            && error_policy.action == runtime_proxy_crate::RuntimeHttpErrorAction::RotateProfile
+        {
+            return Ok(RuntimeStandardAttempt::ProfileUnavailable {
+                profile_name: profile_name.to_string(),
+                response,
+            });
+        }
         return Ok(RuntimeStandardAttempt::RetryableFailure {
             profile_name: profile_name.to_string(),
-            response: build_runtime_proxy_response_from_parts(parts),
+            response,
             overload: error_policy.action
                 == runtime_proxy_crate::RuntimeHttpErrorAction::RetryProfile
                 || (error_policy.action
@@ -368,6 +377,14 @@ fn handle_runtime_noncompact_error_parts(
     if status == 401 {
         note_runtime_profile_auth_failure(shared, profile_name, RuntimeRouteKind::Standard, status);
         return Ok(RuntimeStandardAttempt::AuthFailed {
+            profile_name: profile_name.to_string(),
+            response,
+        });
+    }
+    if error_policy.class == runtime_proxy_crate::RuntimeHttpErrorClass::ProfileUnavailable
+        && error_policy.action == runtime_proxy_crate::RuntimeHttpErrorAction::RotateProfile
+    {
+        return Ok(RuntimeStandardAttempt::ProfileUnavailable {
             profile_name: profile_name.to_string(),
             response,
         });

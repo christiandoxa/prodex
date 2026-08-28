@@ -1,7 +1,8 @@
 use super::super::{
     RuntimeResponseCandidateSelection, await_runtime_proxy_async_task,
-    clear_runtime_recovered_profiles, runtime_compact_route_followup_bound_profile,
-    runtime_profile_recovery_wait_for_route, runtime_proxy_current_profile, runtime_proxy_log,
+    clear_runtime_recovered_profiles, mark_runtime_profile_retry_backoff,
+    runtime_compact_route_followup_bound_profile, runtime_profile_recovery_wait_for_route,
+    runtime_proxy_current_profile, runtime_proxy_log,
     runtime_proxy_precommit_budget_exhausted_for_route,
     runtime_proxy_pressure_mode_active_for_route, runtime_proxy_probe_refresh_pause,
     runtime_proxy_should_shed_fresh_compact_request,
@@ -591,6 +592,25 @@ fn handle_runtime_compact_attempt(
                 RuntimeCompactFailureFlow::Retry => Ok(None),
                 RuntimeCompactFailureFlow::Return(response) => Ok(Some(response)),
             }
+        }
+        RuntimeStandardAttempt::ProfileUnavailable {
+            profile_name,
+            response,
+        } => {
+            runtime_proxy_log(
+                shared,
+                format!(
+                    "request={request_id} transport=http compact_profile_unavailable profile={profile_name}"
+                ),
+            );
+            if candidate_has_hard_affinity {
+                return Ok(Some(response));
+            }
+            mark_runtime_profile_retry_backoff(shared, &profile_name)?;
+            excluded_profiles.insert(profile_name);
+            *last_failure = Some((response, false));
+            *saw_transport_failure = true;
+            Ok(None)
         }
         RuntimeStandardAttempt::AuthFailed {
             profile_name,
