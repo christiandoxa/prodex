@@ -3,9 +3,20 @@ use std::env;
 use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
 
+mod capacity;
 #[cfg(feature = "mojo")]
 mod mojo;
-
+pub use capacity::{
+    RuntimeProxyLaneLimitOverrides, runtime_proxy_active_request_limit_default,
+    runtime_proxy_lane_limits_from_overrides, runtime_proxy_log_queue_capacity_default,
+    runtime_proxy_long_lived_queue_capacity_default,
+    runtime_websocket_dns_resolve_overflow_capacity_default,
+    runtime_websocket_dns_resolve_queue_capacity_default,
+    runtime_websocket_dns_resolve_worker_count_default,
+    runtime_websocket_tcp_connect_overflow_capacity_default,
+    runtime_websocket_tcp_connect_queue_capacity_default,
+    runtime_websocket_tcp_connect_worker_count_default,
+};
 #[derive(Debug, Clone)]
 struct RuntimeFaultBudget {
     raw_value: String,
@@ -133,7 +144,7 @@ fn runtime_tuning_defaults_rust(parallelism: usize) -> RuntimeTuningDefaults {
         long_lived_worker_count: runtime_proxy_long_lived_worker_count_default(parallelism),
         probe_refresh_worker_count: runtime_probe_refresh_worker_count_default(parallelism),
         async_worker_count: runtime_proxy_async_worker_count_default(parallelism),
-        log_queue_capacity: runtime_proxy_log_queue_capacity_default(parallelism),
+        log_queue_capacity: capacity::runtime_proxy_log_queue_capacity_default_rust(parallelism),
         websocket_connect_worker_count: runtime_websocket_tcp_connect_worker_count_default(
             parallelism,
         ),
@@ -199,107 +210,6 @@ pub fn runtime_probe_refresh_worker_count_default(parallelism: usize) -> usize {
 
 pub fn runtime_proxy_async_worker_count_default(parallelism: usize) -> usize {
     parallelism.clamp(2, 4)
-}
-
-pub fn runtime_proxy_long_lived_queue_capacity_default(worker_count: usize) -> usize {
-    worker_count.saturating_mul(8).clamp(128, 1024)
-}
-
-pub fn runtime_proxy_active_request_limit_default(
-    worker_count: usize,
-    long_lived_worker_count: usize,
-) -> usize {
-    worker_count
-        .saturating_add(long_lived_worker_count.saturating_mul(3))
-        .clamp(64, 512)
-}
-
-pub fn runtime_proxy_log_queue_capacity_default(parallelism: usize) -> usize {
-    parallelism.saturating_mul(256).clamp(1024, 8192)
-}
-
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub struct RuntimeProxyLaneLimitOverrides {
-    pub responses: Option<usize>,
-    pub compact: Option<usize>,
-    pub websocket: Option<usize>,
-    pub standard: Option<usize>,
-}
-
-pub fn runtime_proxy_lane_limits_from_overrides(
-    global_limit: usize,
-    worker_count: usize,
-    long_lived_worker_count: usize,
-    overrides: RuntimeProxyLaneLimitOverrides,
-) -> RuntimeTuningLaneLimits {
-    let global_limit = global_limit.max(1);
-    RuntimeTuningLaneLimits {
-        responses: overrides
-            .responses
-            .filter(|value| *value > 0)
-            .unwrap_or_else(|| (global_limit.saturating_mul(3) / 4).clamp(4, global_limit))
-            .min(global_limit)
-            .max(1),
-        compact: overrides
-            .compact
-            .filter(|value| *value > 0)
-            .unwrap_or_else(|| (global_limit / 4).clamp(2, 6).min(global_limit))
-            .min(global_limit)
-            .max(1),
-        websocket: overrides
-            .websocket
-            .filter(|value| *value > 0)
-            .unwrap_or_else(|| long_lived_worker_count.clamp(2, global_limit))
-            .min(global_limit)
-            .max(1),
-        standard: overrides
-            .standard
-            .filter(|value| *value > 0)
-            .unwrap_or_else(|| {
-                worker_count
-                    .saturating_mul(2)
-                    .clamp(8, 24)
-                    .min(global_limit)
-            })
-            .min(global_limit)
-            .max(1),
-    }
-}
-
-pub fn runtime_websocket_tcp_connect_worker_count_default(parallelism: usize) -> usize {
-    parallelism.clamp(4, 16)
-}
-
-pub fn runtime_websocket_tcp_connect_queue_capacity_default(worker_count: usize) -> usize {
-    worker_count.saturating_mul(8).clamp(32, 128)
-}
-
-pub fn runtime_websocket_tcp_connect_overflow_capacity_default(
-    worker_count: usize,
-    queue_capacity: usize,
-) -> usize {
-    queue_capacity
-        .saturating_mul(4)
-        .max(worker_count)
-        .clamp(32, 512)
-}
-
-pub fn runtime_websocket_dns_resolve_worker_count_default(parallelism: usize) -> usize {
-    parallelism.clamp(2, 8)
-}
-
-pub fn runtime_websocket_dns_resolve_queue_capacity_default(worker_count: usize) -> usize {
-    worker_count.saturating_mul(4).clamp(16, 64)
-}
-
-pub fn runtime_websocket_dns_resolve_overflow_capacity_default(
-    worker_count: usize,
-    queue_capacity: usize,
-) -> usize {
-    queue_capacity
-        .saturating_mul(2)
-        .max(worker_count)
-        .clamp(16, 128)
 }
 
 fn runtime_fault_counters() -> &'static Mutex<BTreeMap<String, RuntimeFaultBudget>> {
