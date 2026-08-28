@@ -18,7 +18,7 @@ pub use routing::{RouteCandidate, RouteInput, RoutePlan, plan_routes};
 mod context_plan;
 pub use context_plan::{ContextPlan, ContextPlanAction, ContextPlanItem, plan_context_items};
 mod context;
-pub use context::{ContextAnalysis, ContextGroup, analyze_context};
+pub use context::{ContextAnalysis, ContextGroup, analyze_context, signal_counts_batch};
 mod policy;
 pub use policy::{
     PolicyAliasInput, PolicyAliasPlan, PolicyModel, PolicyRouteModel, PolicyRoutePlan,

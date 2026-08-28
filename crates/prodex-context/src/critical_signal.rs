@@ -2,13 +2,14 @@ use serde::Serialize;
 #[cfg(any(not(feature = "mojo"), test))]
 use std::collections::BTreeMap;
 
+#[cfg(any(not(feature = "mojo"), test))]
+use crate::is_rust_exit_status_line;
 use crate::{
     command_lines, generic_failed_test_name, has_zero_only_summary_count,
     is_eslint_diagnostic_line, is_exception_signal_line, is_junit_xml_failure_line,
-    is_log_level_signal_line, is_rust_backtrace_start, is_rust_exit_status_line,
-    is_rust_failure_summary_line, is_rust_panic_line, is_typescript_diagnostic_line,
-    normalize_command_output, rust_diagnostic_severity, rust_failed_test_name,
-    rust_failure_separator_name,
+    is_log_level_signal_line, is_rust_backtrace_start, is_rust_failure_summary_line,
+    is_rust_panic_line, is_typescript_diagnostic_line, normalize_command_output,
+    rust_diagnostic_severity, rust_failed_test_name, rust_failure_separator_name,
 };
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
@@ -301,19 +302,37 @@ fn critical_signal_normalized_rows(
     let after = normalize_command_output(after);
     let before_lines = command_lines(&before);
     let after_lines = command_lines(&after);
+    let before_text = before_lines
+        .iter()
+        .map(|line| line.trim())
+        .collect::<Vec<_>>();
+    let after_text = after_lines
+        .iter()
+        .map(|line| line.trim())
+        .collect::<Vec<_>>();
+    let before_counts = prodex_mojo_core::rich::signal_counts_batch(&before_text)
+        .expect("Mojo critical-signal batch classification returned invalid output");
+    let after_counts = prodex_mojo_core::rich::signal_counts_batch(&after_text)
+        .expect("Mojo critical-signal batch classification returned invalid output");
     let before_input = before_lines
         .iter()
-        .map(|line| prodex_mojo_core::context::ContextSignalLine {
-            text: line.trim(),
-            counts: critical_signal_counts_for_line(line).values(),
-        })
+        .zip(before_counts)
+        .map(
+            |(line, counts)| prodex_mojo_core::context::ContextSignalLine {
+                text: line.trim(),
+                counts,
+            },
+        )
         .collect::<Vec<_>>();
     let after_input = after_lines
         .iter()
-        .map(|line| prodex_mojo_core::context::ContextSignalLine {
-            text: line.trim(),
-            counts: critical_signal_counts_for_line(line).values(),
-        })
+        .zip(after_counts)
+        .map(
+            |(line, counts)| prodex_mojo_core::context::ContextSignalLine {
+                text: line.trim(),
+                counts,
+            },
+        )
         .collect::<Vec<_>>();
     let rows = prodex_mojo_core::context::prepare_signal_rows(&before_input, &after_input)?;
     Ok((rows.before_rows, rows.after_available, before_lines.len()))
@@ -451,6 +470,7 @@ mod mojo_text_rows_tests {
     }
 }
 
+#[cfg(any(not(feature = "mojo"), test))]
 fn critical_signal_counts_for_line(line: &str) -> CriticalSignalCounts {
     let mut counts = CriticalSignalCounts::default();
     if is_error_signal_line(line) {
