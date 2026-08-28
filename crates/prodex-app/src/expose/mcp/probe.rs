@@ -6,6 +6,7 @@ use super::{
 use anyhow::{Context, Result, bail};
 use reqwest::blocking::{Client, Response};
 use serde_json::{Value, json};
+use std::net::{IpAddr, SocketAddr, ToSocketAddrs};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -30,12 +31,19 @@ impl ProbePhase {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum ProbeFailureKind {
-    Transport,
+    Transport(ProbeTransportFailure),
     Http(u16),
     EventStream,
     InvalidJson,
     InvalidProtocol,
     MissingTools,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ProbeTransportFailure {
+    Timeout,
+    Connect,
+    Other,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -48,7 +56,7 @@ impl ProbeFailure {
     const fn retryable(self) -> bool {
         matches!(
             self.kind,
-            ProbeFailureKind::Transport | ProbeFailureKind::Http(502..=504)
+            ProbeFailureKind::Transport(_) | ProbeFailureKind::Http(502..=504)
         )
     }
 }
@@ -56,10 +64,15 @@ impl ProbeFailure {
 impl std::fmt::Display for ProbeFailure {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self.kind {
-            ProbeFailureKind::Transport => write!(
+            ProbeFailureKind::Transport(kind) => write!(
                 formatter,
-                "{} could not reach the endpoint (DNS, TLS, connection, or timeout)",
-                self.phase.label()
+                "{} could not reach the endpoint ({})",
+                self.phase.label(),
+                match kind {
+                    ProbeTransportFailure::Timeout => "timeout",
+                    ProbeTransportFailure::Connect => "DNS, TLS, or connection",
+                    ProbeTransportFailure::Other => "network error",
+                }
             ),
             ProbeFailureKind::Http(404) => write!(
                 formatter,
@@ -108,20 +121,14 @@ pub(crate) fn verify_local_mcp(url: &str) -> Result<()> {
 }
 
 pub(crate) fn verify_public_mcp(url: &str) -> Result<()> {
-    let client = Client::builder()
-        .timeout(Duration::from_secs(3))
-        .build()
-        .context("failed to initialize public MCP probe")?;
     let started = Instant::now();
     run_public_phase(
-        &client,
         url,
         ProbePhase::PublicInitialize,
         MCP_PUBLIC_INITIALIZE_TIMEOUT,
         |client, url| probe_initialize(client, url, ProbePhase::PublicInitialize),
     )?;
     run_public_phase(
-        &client,
         url,
         ProbePhase::PublicTools,
         MCP_PUBLIC_TOOLS_TIMEOUT,
@@ -131,13 +138,62 @@ pub(crate) fn verify_public_mcp(url: &str) -> Result<()> {
     Ok(())
 }
 
-fn run_public_phase<F>(
-    client: &Client,
-    url: &str,
-    phase: ProbePhase,
-    timeout: Duration,
-    mut probe: F,
-) -> Result<()>
+fn public_mcp_client(url: &str) -> Result<Client> {
+    let mut builder = Client::builder().timeout(Duration::from_secs(3));
+    if let Ok(parsed) = url::Url::parse(url)
+        && let Some(host) = parsed
+            .host_str()
+            .filter(|host| host.ends_with(".trycloudflare.com"))
+    {
+        if let Some(address) = public_host_address(host) {
+            // Keep TLS SNI/Host bound to the discovered hostname while allowing a resolver that
+            // temporarily lags the Quick Tunnel wildcard to use the authoritative A record.
+            builder = builder.resolve(host, address);
+        }
+    }
+    builder
+        .build()
+        .context("failed to initialize public MCP probe")
+}
+
+fn public_host_address(host: &str) -> Option<SocketAddr> {
+    if let Ok(mut addresses) = (host, 443).to_socket_addrs()
+        && let Some(address) = addresses.find(SocketAddr::is_ipv4)
+    {
+        return Some(address);
+    }
+    cloudflare_doh_address(host)
+}
+
+fn cloudflare_doh_address(host: &str) -> Option<SocketAddr> {
+    let client = Client::builder()
+        .timeout(Duration::from_secs(3))
+        .build()
+        .ok()?;
+    let mut endpoint = url::Url::parse("https://cloudflare-dns.com/dns-query").ok()?;
+    endpoint
+        .query_pairs_mut()
+        .append_pair("name", host)
+        .append_pair("type", "A");
+    let value = client
+        .get(endpoint)
+        .header(reqwest::header::ACCEPT, "application/dns-json")
+        .send()
+        .ok()?
+        .json::<Value>()
+        .ok()?;
+    value
+        .get("Answer")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|answer| answer.get("data").and_then(Value::as_str))
+        .filter_map(|address| address.parse::<IpAddr>().ok())
+        .find(IpAddr::is_ipv4)
+        .map(|address| SocketAddr::new(address, 443))
+}
+
+fn run_public_phase<F>(url: &str, phase: ProbePhase, timeout: Duration, mut probe: F) -> Result<()>
 where
     F: FnMut(&Client, &str) -> std::result::Result<(), ProbeFailure>,
 {
@@ -145,7 +201,13 @@ where
     let deadline = Instant::now() + timeout;
     let mut delay = MCP_PUBLIC_READY_STEP;
     loop {
-        let failure = match probe(client, url) {
+        let failure = match public_mcp_client(url)
+            .map_err(|_| ProbeFailure {
+                phase,
+                kind: ProbeFailureKind::Transport(ProbeTransportFailure::Other),
+            })
+            .and_then(|client| probe(&client, url))
+        {
             Ok(()) => return Ok(()),
             Err(failure) if failure.retryable() => failure,
             Err(failure) => bail!("{failure}"),
@@ -235,9 +297,15 @@ fn mcp_probe_request(
         .header("Mcp-Method", method)
         .json(&body)
         .send()
-        .map_err(|_error| ProbeFailure {
+        .map_err(|error| ProbeFailure {
             phase,
-            kind: ProbeFailureKind::Transport,
+            kind: ProbeFailureKind::Transport(if error.is_timeout() {
+                ProbeTransportFailure::Timeout
+            } else if error.is_connect() {
+                ProbeTransportFailure::Connect
+            } else {
+                ProbeTransportFailure::Other
+            }),
         })?;
     mcp_probe_json(response, phase)
 }

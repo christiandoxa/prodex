@@ -74,6 +74,13 @@ capability and hostname. This is Ephemeral Capability Authentication, not OAuth,
 account linking, identity authentication, or suitable authentication for a
 public multi-user plugin.
 
+Quick Tunnel public readiness keeps local DNS as the first resolver. During
+short wildcard-record propagation gaps, Prodex performs a bounded authoritative
+Cloudflare DNS-over-HTTPS lookup for the discovered `trycloudflare.com` hostname
+and pins only that hostname's resolved edge address while preserving TLS SNI and
+Host. It never sends the capability to the resolver and does not alter the
+user's DNS configuration.
+
 The endpoint uses JSON responses for `server/discover`, `initialize`, `ping`,
 `tools/list`, and `tools/call`. Expose readiness validates the canonical
 `initialize` then `tools/list` transaction locally and publicly; `server/discover`

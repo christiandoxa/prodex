@@ -188,6 +188,7 @@ fn start_public_endpoint(
                 .context("Cloudflare Quick Tunnel did not report a public hostname")?;
             let host = expose_public_host(&origin)
                 .context("Cloudflare Quick Tunnel reported an invalid hostname")?;
+            print_launch_status(&format!("Cloudflare hostname allocated: {host}"));
             print_launch_status("Cloudflare Quick Tunnel allocated.");
             Ok((origin, host, Some(tunnel)))
         }

@@ -54,10 +54,6 @@ pub(super) fn spawn(
     ] {
         command.env_remove(variable);
     }
-    // Quick Tunnel must not consult a user's named-tunnel home/configuration.  The explicit
-    // --config is authoritative; private homes also cover cloudflared lookups outside that flag.
-    command.env("HOME", &config.directory);
-    command.env("USERPROFILE", &config.directory);
     crate::configure_child_process_group(&mut command, true);
     crate::configure_child_parent_death(&mut command);
     let mut child = command.spawn().context("failed to spawn cloudflared")?;
