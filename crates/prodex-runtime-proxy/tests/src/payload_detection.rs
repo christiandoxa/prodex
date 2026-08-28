@@ -770,6 +770,40 @@ fn inspect_sse_buffer_detects_overload_before_commit() {
 }
 
 #[test]
+fn inspect_sse_buffer_commits_before_later_retryable_failure() {
+    let body = concat!(
+        "event: response.output_text.delta\r\n",
+        "data: {\"type\":\"response.output_text.delta\",\"response\":{\"id\":\"resp-output\"},\"delta\":\"once\"}\r\n",
+        "\r\n",
+        "event: response.failed\r\n",
+        "data: {\"type\":\"response.failed\",\"response\":{\"error\":{\"code\":\"insufficient_quota\"}}}\r\n",
+        "\r\n",
+    );
+
+    assert_eq!(
+        inspect_runtime_sse_buffer(body.as_bytes()),
+        RuntimeSseInspectionProgress::Commit {
+            response_ids: vec!["resp-output".to_string()],
+            turn_state: None,
+        }
+    );
+}
+
+#[test]
+fn inspect_sse_profile_unavailable_is_retryable_without_quota_classification() {
+    let body = concat!(
+        "event: response.failed\n",
+        "data: {\"type\":\"response.failed\",\"error\":{\"code\":\"deactivated_workspace\"}}\n",
+        "\n",
+    );
+
+    assert_eq!(
+        inspect_runtime_sse_buffer(body.as_bytes()),
+        RuntimeSseInspectionProgress::Overloaded
+    );
+}
+
+#[test]
 fn inspect_sse_buffer_does_not_turn_a_prefix_budget_into_eof() {
     let body = b"data: {\"type\":\"response.completed\",\"response_id\":\"resp-prefix\"}\n";
 

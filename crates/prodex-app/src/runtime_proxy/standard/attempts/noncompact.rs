@@ -296,7 +296,11 @@ fn handle_runtime_noncompact_usage_parts(
             profile_name: profile_name.to_string(),
             response: build_runtime_proxy_response_from_parts(parts),
             overload: error_policy.action
-                == runtime_proxy_crate::RuntimeHttpErrorAction::RetryProfile,
+                == runtime_proxy_crate::RuntimeHttpErrorAction::RetryProfile
+                || (error_policy.action
+                    == runtime_proxy_crate::RuntimeHttpErrorAction::RotateProfile
+                    && error_policy.class
+                        == runtime_proxy_crate::RuntimeHttpErrorClass::ProfileUnavailable),
         });
     }
     if let Ok(usage) = serde_json::from_slice::<UsageResponse>(&parts.body) {
@@ -330,10 +334,14 @@ fn handle_runtime_noncompact_error_parts(
         &parts.body,
         runtime_proxy_crate::RuntimeHttpErrorPhase::PreCommit,
     );
-    let retryable_quota =
-        error_policy.action == runtime_proxy_crate::RuntimeHttpErrorAction::RotateProfile;
-    let retryable_overload =
-        error_policy.action == runtime_proxy_crate::RuntimeHttpErrorAction::RetryProfile;
+    let retryable_quota = error_policy.action
+        == runtime_proxy_crate::RuntimeHttpErrorAction::RotateProfile
+        && error_policy.class == runtime_proxy_crate::RuntimeHttpErrorClass::Quota;
+    let retryable_overload = error_policy.action
+        == runtime_proxy_crate::RuntimeHttpErrorAction::RetryProfile
+        || (error_policy.action == runtime_proxy_crate::RuntimeHttpErrorAction::RotateProfile
+            && error_policy.class
+                == runtime_proxy_crate::RuntimeHttpErrorClass::ProfileUnavailable);
     if matches!(status, 402 | 403 | 429) && !retryable_quota {
         runtime_proxy_log(
             shared,

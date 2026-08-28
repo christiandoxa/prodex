@@ -93,7 +93,7 @@ impl<F> RuntimePrecommitLoopState<F> {
 
     pub fn record_transport_failure_at(&mut self, stage: &str) {
         self.saw_transport_failure = true;
-        self.saw_transport_recovery_candidate =
+        self.saw_transport_recovery_candidate |=
             !stage.contains("upstream_request") && !stage.contains("connect");
     }
 
@@ -218,6 +218,16 @@ mod tests {
 
         assert!(!state.saw_transient_failure());
         state.record_transport_failure_at("response_body");
+        assert!(state.saw_transient_failure());
+    }
+
+    #[test]
+    fn transport_recovery_candidate_survives_later_connect_failure() {
+        let mut state = RuntimePrecommitLoopState::<()>::new();
+
+        state.record_transport_failure_at("responses_sse_lookahead");
+        state.record_transport_failure_at("responses_upstream_request");
+
         assert!(state.saw_transient_failure());
     }
 

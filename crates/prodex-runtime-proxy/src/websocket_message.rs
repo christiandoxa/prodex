@@ -191,20 +191,19 @@ pub fn inspect_runtime_websocket_text_frame_with_phase(
         Some(RuntimeWebsocketRetryInspectionKind::ConnectionLimitReached)
     } else if extract_runtime_proxy_previous_response_message_from_value(&value).is_some() {
         Some(RuntimeWebsocketRetryInspectionKind::PreviousResponseNotFound)
-    } else if error_policy.action == RuntimeHttpErrorAction::RetryProfile
+    } else if (error_policy.action == RuntimeHttpErrorAction::RetryProfile
         && matches!(
             error_policy.class,
             RuntimeHttpErrorClass::RateLimited
                 | RuntimeHttpErrorClass::Overload
                 | RuntimeHttpErrorClass::TransientServer
-        )
+        ))
+        || error_policy.action == RuntimeHttpErrorAction::RotateProfile
+            && error_policy.class == RuntimeHttpErrorClass::ProfileUnavailable
     {
         Some(RuntimeWebsocketRetryInspectionKind::Overloaded)
     } else if error_policy.action == RuntimeHttpErrorAction::RotateProfile
-        && matches!(
-            error_policy.class,
-            RuntimeHttpErrorClass::Quota | RuntimeHttpErrorClass::ProfileUnavailable
-        )
+        && error_policy.class == RuntimeHttpErrorClass::Quota
     {
         Some(RuntimeWebsocketRetryInspectionKind::QuotaBlocked)
     } else {

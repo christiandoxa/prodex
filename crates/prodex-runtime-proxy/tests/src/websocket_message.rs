@@ -187,6 +187,26 @@ fn websocket_text_frame_inspection_classifies_retry_and_terminal_events() {
 }
 
 #[test]
+fn websocket_profile_unavailable_is_retryable_without_quota_classification() {
+    let payload = serde_json::json!({
+        "type": "response.failed",
+        "error": {
+            "code": "deactivated_workspace",
+            "message": "profile unavailable",
+        }
+    })
+    .to_string();
+
+    let inspected = inspect_runtime_websocket_text_frame(&payload);
+
+    assert_eq!(
+        inspected.retry_kind,
+        Some(RuntimeWebsocketRetryInspectionKind::Overloaded)
+    );
+    assert!(inspected.terminal_event);
+}
+
+#[test]
 fn websocket_text_frame_inspection_never_retries_after_commit() {
     for (code, action) in [
         ("insufficient_quota", RuntimeHttpErrorAction::RotateProfile),

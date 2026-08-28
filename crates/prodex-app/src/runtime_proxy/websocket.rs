@@ -454,12 +454,17 @@ fn handle_runtime_proxy_websocket_http_response(
             ],
         ),
     );
-    if error_policy.action == runtime_proxy_crate::RuntimeHttpErrorAction::RotateProfile {
+    if error_policy.action == runtime_proxy_crate::RuntimeHttpErrorAction::RotateProfile
+        && error_policy.class == runtime_proxy_crate::RuntimeHttpErrorClass::Quota
+    {
         return Ok(Some(RuntimeWebsocketConnectResult::QuotaBlocked(
             runtime_websocket_error_payload_from_http_body(&body),
         )));
     }
-    if error_policy.action == runtime_proxy_crate::RuntimeHttpErrorAction::RetryProfile {
+    if error_policy.action == runtime_proxy_crate::RuntimeHttpErrorAction::RetryProfile
+        || (error_policy.action == runtime_proxy_crate::RuntimeHttpErrorAction::RotateProfile
+            && error_policy.class == runtime_proxy_crate::RuntimeHttpErrorClass::ProfileUnavailable)
+    {
         return Ok(Some(RuntimeWebsocketConnectResult::Overloaded(
             runtime_websocket_error_payload_from_http_body(&body),
         )));
