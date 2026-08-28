@@ -146,3 +146,90 @@ fn rich_catalog_merge_deduplicates_aliases_against_canonical_ids() {
         [2]
     );
 }
+
+#[test]
+fn rich_catalog_reasoning_resolves_model_defaults_and_efforts() {
+    let models = [
+        CatalogReasoningModel {
+            id: "gpt-5.6-luna",
+            aliases: &["luna"],
+            efforts: &["none", "low", "medium", "max"],
+            default_effort: Some("medium"),
+        },
+        CatalogReasoningModel {
+            id: "gpt-5.6-sol",
+            aliases: &["sol"],
+            efforts: &["low", "high", "ultra"],
+            default_effort: Some("low"),
+        },
+    ];
+    let plan = resolve_catalog_reasoning(&models, Some(" LUNA "), None, Some("MAX")).unwrap();
+    assert_eq!(plan.model_index, Some(0));
+    assert_eq!(plan.supported_efforts, ["none", "low", "medium", "max"]);
+    assert_eq!(plan.default_effort.as_deref(), Some("medium"));
+    assert_eq!(plan.selected_effort.as_deref(), Some("max"));
+    let unsupported = resolve_catalog_reasoning(&models, Some("luna"), None, Some("ultra"));
+    assert!(matches!(unsupported, Err(MojoError::Structured(issue)) if issue.kind == 5));
+}
+
+#[test]
+fn rich_policy_route_plan_preserves_stable_strategy_semantics() {
+    let models = [
+        PolicyRouteModel {
+            model: "a",
+            input_cost: Some(20),
+            output_cost: Some(30),
+            policy_latency: Some(300),
+            state_latency: Some(80),
+            in_flight: 3,
+            rpm_limit: Some(100),
+            rpm_used: 90,
+            tpm_limit: Some(10_000),
+            tpm_used: 9_900,
+        },
+        PolicyRouteModel {
+            model: "b",
+            input_cost: Some(10),
+            output_cost: Some(15),
+            policy_latency: Some(500),
+            state_latency: None,
+            in_flight: 1,
+            rpm_limit: Some(20),
+            rpm_used: 0,
+            tpm_limit: Some(100_000),
+            tpm_used: 0,
+        },
+    ];
+    assert_eq!(
+        plan_route_policy("fallback", 1, 10, &models)
+            .unwrap()
+            .ordered_indices,
+        [0, 1]
+    );
+    assert_eq!(
+        plan_route_policy("lowest-cost", 1, 10, &models)
+            .unwrap()
+            .selected_index,
+        Some(1)
+    );
+    assert_eq!(
+        plan_route_policy("lowest-latency", 1, 10, &models)
+            .unwrap()
+            .selected_index,
+        Some(0)
+    );
+    assert_eq!(
+        plan_route_policy("round-robin", 2, 10, &models)
+            .unwrap()
+            .selected_index,
+        Some(1)
+    );
+}
+
+#[test]
+fn rich_fallback_plan_deduplicates_multiple_seed_chains() {
+    assert_eq!(
+        model_fallback_plan("copilot", &["codex", "gpt-5.3-codex"]).unwrap(),
+        ["gpt-5.3-codex", "gpt-5.1-codex", "gpt-4o"]
+    );
+}

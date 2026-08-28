@@ -19,11 +19,13 @@ from rich_types import (
 )
 
 
-comptime PRODEX_RICH_ABI_VERSION: Int64 = 5
+comptime PRODEX_RICH_ABI_VERSION: Int64 = 6
 comptime RICH_MAX_IDENTIFIER_BYTES: Int64 = 4_096
-comptime RICH_MAX_FALLBACK_MODELS: Int64 = 32
+comptime RICH_MAX_FALLBACK_MODELS: Int64 = 2_048
+comptime RICH_MAX_FALLBACK_INPUTS: Int64 = 256
 comptime RICH_STATUS_OK: Int64 = 0
 comptime RICH_STATUS_INVALID: Int64 = 1
+comptime RICH_STATUS_UTF8: Int64 = 2
 comptime RICH_STATUS_CAPACITY: Int64 = 3
 comptime RICH_STATUS_ABI: Int64 = 4
 
@@ -218,6 +220,88 @@ def fallback_add_chain(
     if bounds[1] == bounds[0]:
         return True
     return fallback_add_view_range(model, bounds[0], bounds[1], output_records, record_count, output, output_capacity, written, hash_slots, hash_capacity)
+
+
+@export("prodex_mojo_rich_model_fallback_plan_v1")
+def prodex_mojo_rich_model_fallback_plan_v1(
+    abi_version: Int64,
+    provider_address: UInt,
+    models_address: UInt,
+    model_count: Int64,
+    output_records_address: UInt,
+    record_capacity: Int64,
+    output_address: UInt,
+    output_capacity: Int64,
+    hash_slots_address: UInt,
+    hash_capacity: Int64,
+    result_address: UInt,
+) abi("C") -> Int64:
+    if result_address == 0:
+        return RICH_STATUS_INVALID
+    var result_ptr = Pointer[
+        mut=True, ProdexRichFallbackResult, MutUntrackedOrigin
+    ](unsafe_from_address=Int(result_address))
+    result_ptr[].abi_version = PRODEX_RICH_ABI_VERSION
+    result_ptr[].records_written = 0
+    result_ptr[].required_records = 0
+    result_ptr[].output_written = 0
+    result_ptr[].required_output = 0
+    result_ptr[].issue_kind = 0
+    result_ptr[].issue_offset = -1
+    result_ptr[].issue_length = 0
+    if abi_version != PRODEX_RICH_ABI_VERSION:
+        result_ptr[].issue_kind = RICH_STATUS_ABI
+        return RICH_STATUS_ABI
+    if provider_address == 0 or model_count < 0 or model_count > RICH_MAX_FALLBACK_INPUTS or record_capacity < 1 or record_capacity > RICH_MAX_FALLBACK_MODELS or output_capacity < 1 or output_records_address == 0 or output_address == 0 or hash_slots_address == 0 or models_address == 0 and model_count > 0:
+        return RICH_STATUS_INVALID
+    var provider_ptr = Pointer[
+        mut=False, ProdexRichStringView, ImmUntrackedOrigin
+    ](unsafe_from_address=Int(provider_address))
+    var provider = provider_ptr[].copy()
+    if not rich_view_valid(provider, RICH_MAX_IDENTIFIER_BYTES):
+        return RICH_STATUS_UTF8
+    var models = Pointer[
+        mut=False, ProdexRichStringView, ImmUntrackedOrigin
+    ](unsafe_from_address=Int(models_address))
+    for index in range(model_count):
+        if not rich_view_valid(models[unsafe_offset=index], RICH_MAX_IDENTIFIER_BYTES):
+            return RICH_STATUS_UTF8
+    var output_records = Pointer[
+        mut=True, ProdexRichFallbackRecord, MutUntrackedOrigin
+    ](unsafe_from_address=Int(output_records_address))
+    var output = Pointer[mut=True, UInt8, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    var hash_slots = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(hash_slots_address)
+    )
+    var required_hash = rich_required_hash_capacity(record_capacity)
+    if hash_capacity != required_hash:
+        return RICH_STATUS_CAPACITY
+    for index in range(hash_capacity):
+        hash_slots[unsafe_offset=index] = -1
+    var written: Int64 = 0
+    var records: Int64 = 0
+    for index in range(model_count):
+        if not fallback_add_chain(
+            provider,
+            models[unsafe_offset=index],
+            output_records,
+            Pointer(to=records),
+            output,
+            output_capacity,
+            Pointer(to=written),
+            hash_slots,
+            hash_capacity,
+        ):
+            result_ptr[].required_records = records + 1
+            result_ptr[].required_output = written + 256
+            return RICH_STATUS_CAPACITY
+    result_ptr[].records_written = records
+    result_ptr[].required_records = records
+    result_ptr[].output_written = written
+    result_ptr[].required_output = written
+    return RICH_STATUS_OK
 
 
 @export("prodex_mojo_rich_model_fallback_v2")

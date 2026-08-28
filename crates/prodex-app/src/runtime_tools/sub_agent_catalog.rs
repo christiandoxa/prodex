@@ -1,7 +1,7 @@
 use prodex_cli::SubAgentReasoningEffort;
 use prodex_provider_core::{
-    PROVIDER_IMPLEMENTATION_ORDER, ProviderId, ProviderModelChoice, ProviderReasoningEffort,
-    provider_catalog_entry, provider_implementation_registry, provider_runtime_metadata,
+    PROVIDER_IMPLEMENTATION_ORDER, ProviderId, ProviderModelChoice,
+    provider_implementation_registry, provider_model_reasoning_resolution,
     resolve_provider_model_choices,
 };
 
@@ -20,29 +20,41 @@ pub(crate) fn canonical_sub_agent_efforts(
     provider: ProviderId,
     model: Option<&str>,
 ) -> Vec<SubAgentReasoningEffort> {
-    let Some(catalog_efforts) = model
-        .and_then(|model| provider_catalog_entry(provider, model))
-        .or_else(|| {
-            provider_runtime_metadata(provider)
-                .and_then(|metadata| provider_catalog_entry(provider, metadata.default_model))
-        })
-        .and_then(|entry| entry.supported_reasoning_efforts.as_deref())
-    else {
+    let resolution = provider_model_reasoning_resolution(provider, model, None)
+        .expect("provider model reasoning resolution failed");
+    if resolution.model_index.is_none() {
         return SubAgentReasoningEffort::ALL.to_vec();
-    };
+    }
 
-    catalog_efforts
+    resolution
+        .supported_reasoning_efforts
         .iter()
         .filter_map(|effort| match effort {
-            ProviderReasoningEffort::None => Some(SubAgentReasoningEffort::None),
-            ProviderReasoningEffort::Minimal => Some(SubAgentReasoningEffort::Minimal),
-            ProviderReasoningEffort::Low => Some(SubAgentReasoningEffort::Low),
-            ProviderReasoningEffort::Medium => Some(SubAgentReasoningEffort::Medium),
-            ProviderReasoningEffort::High => Some(SubAgentReasoningEffort::High),
-            ProviderReasoningEffort::XHigh => Some(SubAgentReasoningEffort::XHigh),
-            ProviderReasoningEffort::Max => Some(SubAgentReasoningEffort::Max),
-            ProviderReasoningEffort::Ultra => Some(SubAgentReasoningEffort::Ultra),
-            ProviderReasoningEffort::Unknown => None,
+            prodex_provider_core::ProviderReasoningEffort::None => {
+                Some(SubAgentReasoningEffort::None)
+            }
+            prodex_provider_core::ProviderReasoningEffort::Minimal => {
+                Some(SubAgentReasoningEffort::Minimal)
+            }
+            prodex_provider_core::ProviderReasoningEffort::Low => {
+                Some(SubAgentReasoningEffort::Low)
+            }
+            prodex_provider_core::ProviderReasoningEffort::Medium => {
+                Some(SubAgentReasoningEffort::Medium)
+            }
+            prodex_provider_core::ProviderReasoningEffort::High => {
+                Some(SubAgentReasoningEffort::High)
+            }
+            prodex_provider_core::ProviderReasoningEffort::XHigh => {
+                Some(SubAgentReasoningEffort::XHigh)
+            }
+            prodex_provider_core::ProviderReasoningEffort::Max => {
+                Some(SubAgentReasoningEffort::Max)
+            }
+            prodex_provider_core::ProviderReasoningEffort::Ultra => {
+                Some(SubAgentReasoningEffort::Ultra)
+            }
+            prodex_provider_core::ProviderReasoningEffort::Unknown => None,
         })
         .collect()
 }

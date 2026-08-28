@@ -141,6 +141,52 @@ struct ProdexRichPolicyResult(Copyable):
 
 
 @fieldwise_init
+struct ProdexRichCatalogReasoningResult(Copyable):
+    var abi_version: Int64
+    var model_index: Int64
+    var efforts_written: Int64
+    var selected_effort: ProdexRichSlice
+    var default_effort: ProdexRichSlice
+    var output_written: Int64
+    var issue_kind: Int64
+    var issue_index: Int64
+    var issue_offset: Int64
+    var issue_length: Int64
+
+
+@fieldwise_init
+struct ProdexRichPolicyRouteInput(Copyable):
+    var model: ProdexRichStringView
+    var input_cost: UInt64
+    var input_cost_present: Int64
+    var output_cost: UInt64
+    var output_cost_present: Int64
+    var policy_latency: UInt64
+    var policy_latency_present: Int64
+    var state_latency: UInt64
+    var state_latency_present: Int64
+    var in_flight: UInt64
+    var rpm_limit: UInt64
+    var rpm_limit_present: Int64
+    var rpm_used: UInt64
+    var tpm_limit: UInt64
+    var tpm_limit_present: Int64
+    var tpm_used: UInt64
+
+
+@fieldwise_init
+struct ProdexRichPolicyRouteResult(Copyable):
+    var abi_version: Int64
+    var selected_index: Int64
+    var ordered_written: Int64
+    var required_ordered: Int64
+    var issue_kind: Int64
+    var issue_index: Int64
+    var issue_offset: Int64
+    var issue_length: Int64
+
+
+@fieldwise_init
 struct ProdexRichFallbackRecord(Copyable):
     var model: ProdexRichSlice
     var source_kind: Int64

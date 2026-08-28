@@ -88,20 +88,6 @@ pub struct RuntimeGatewayRouteModelMetrics {
     pub tpm_limit: Option<u64>,
 }
 
-impl RuntimeGatewayRouteModelMetrics {
-    fn cost_score(&self) -> Option<u64> {
-        match (
-            self.input_cost_per_million_microusd,
-            self.output_cost_per_million_microusd,
-        ) {
-            (Some(input), Some(output)) => Some(input.saturating_add(output)),
-            (Some(input), None) => Some(input),
-            (None, Some(output)) => Some(output),
-            (None, None) => None,
-        }
-    }
-}
-
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct RuntimeGatewayRouteModelState {
     pub in_flight: usize,
@@ -110,6 +96,15 @@ pub struct RuntimeGatewayRouteModelState {
     pub requests_this_minute: u64,
     pub tokens_this_minute: u64,
 }
+
+#[path = "gateway_policy/selection.rs"]
+mod selection;
+pub(crate) use selection::{
+    runtime_gateway_rewrite_route_alias, runtime_gateway_rewrite_route_alias_with_state,
+    runtime_gateway_route_selected_model_from_models,
+};
+#[cfg(any(not(feature = "mojo"), test))]
+pub(super) use selection::runtime_gateway_route_selected_model_from_models_rust;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RuntimeGatewayRouteRewrite {
@@ -280,165 +275,6 @@ pub fn runtime_gateway_minute_epoch() -> u64 {
         .duration_since(std::time::UNIX_EPOCH)
         .map(|duration| duration.as_secs() / 60)
         .unwrap_or_default()
-}
-
-pub fn runtime_gateway_rewrite_route_alias(
-    body: &[u8],
-    aliases: &[RuntimeGatewayRouteAlias],
-    request_id: u64,
-) -> Option<RuntimeGatewayRouteRewrite> {
-    runtime_gateway_rewrite_route_alias_with_state(body, aliases, request_id, &BTreeMap::new())
-}
-
-pub fn runtime_gateway_rewrite_route_alias_with_state(
-    body: &[u8],
-    aliases: &[RuntimeGatewayRouteAlias],
-    request_id: u64,
-    model_state: &BTreeMap<String, RuntimeGatewayRouteModelState>,
-) -> Option<RuntimeGatewayRouteRewrite> {
-    if aliases.is_empty() {
-        return None;
-    }
-    let mut value = serde_json::from_slice::<serde_json::Value>(body).ok()?;
-    let object = value.as_object_mut()?;
-    let requested_model = object
-        .get("model")
-        .and_then(serde_json::Value::as_str)
-        .map(str::trim)
-        .filter(|model| !model.is_empty())?;
-    let alias = aliases
-        .iter()
-        .find(|alias| alias.alias == requested_model && !alias.models.is_empty())?;
-    let estimated_tokens = runtime_gateway_estimated_tokens(body);
-    let model =
-        runtime_gateway_route_selected_model(alias, request_id, model_state, estimated_tokens)?;
-    object.insert(
-        "model".to_string(),
-        serde_json::Value::String(model.clone()),
-    );
-    let body = serde_json::to_vec(&value).ok()?;
-    Some(RuntimeGatewayRouteRewrite {
-        alias: alias.alias.clone(),
-        strategy: alias.strategy,
-        model,
-        body,
-    })
-}
-
-fn runtime_gateway_route_selected_model(
-    alias: &RuntimeGatewayRouteAlias,
-    request_id: u64,
-    model_state: &BTreeMap<String, RuntimeGatewayRouteModelState>,
-    estimated_tokens: u64,
-) -> Option<String> {
-    let models = alias
-        .models
-        .iter()
-        .map(|model| model.trim())
-        .filter(|model| !model.is_empty())
-        .map(str::to_string)
-        .collect::<Vec<_>>();
-    runtime_gateway_route_selected_model_from_models(
-        alias,
-        &models,
-        request_id,
-        model_state,
-        estimated_tokens,
-    )
-}
-
-pub(crate) fn runtime_gateway_route_selected_model_from_models(
-    alias: &RuntimeGatewayRouteAlias,
-    models: &[String],
-    request_id: u64,
-    model_state: &BTreeMap<String, RuntimeGatewayRouteModelState>,
-    estimated_tokens: u64,
-) -> Option<String> {
-    let models = models.iter().map(String::as_str).collect::<Vec<_>>();
-    if models.is_empty() {
-        return None;
-    }
-    Some(match alias.strategy {
-        RuntimeGatewayRouteStrategy::Fallback => format!("combo:{}", models.join(",")),
-        RuntimeGatewayRouteStrategy::RoundRobin => {
-            let index = (request_id as usize).saturating_sub(1) % models.len();
-            models[index].to_string()
-        }
-        RuntimeGatewayRouteStrategy::First => models[0].to_string(),
-        RuntimeGatewayRouteStrategy::LeastBusy => models
-            .iter()
-            .min_by_key(|&model| {
-                model_state
-                    .get::<str>(model)
-                    .map(|state| state.in_flight)
-                    .unwrap_or_default()
-            })
-            .copied()
-            .unwrap_or(models[0])
-            .to_string(),
-        RuntimeGatewayRouteStrategy::LowestCost => models
-            .iter()
-            .min_by_key(|&model| {
-                alias
-                    .model_metrics
-                    .get::<str>(model)
-                    .and_then(RuntimeGatewayRouteModelMetrics::cost_score)
-                    .unwrap_or(u64::MAX)
-            })
-            .copied()
-            .unwrap_or(models[0])
-            .to_string(),
-        RuntimeGatewayRouteStrategy::LowestLatency => models
-            .iter()
-            .min_by_key(|&model| {
-                let state_latency = model_state
-                    .get::<str>(model)
-                    .and_then(|state| state.latency_ms_ewma);
-                let policy_latency = alias
-                    .model_metrics
-                    .get::<str>(model)
-                    .and_then(|metrics| metrics.latency_ms);
-                state_latency.or(policy_latency).unwrap_or(u64::MAX)
-            })
-            .copied()
-            .unwrap_or(models[0])
-            .to_string(),
-        RuntimeGatewayRouteStrategy::Rpm => models
-            .iter()
-            .max_by_key(|&model| {
-                let limit = alias
-                    .model_metrics
-                    .get::<str>(model)
-                    .and_then(|metrics| metrics.rpm_limit)
-                    .unwrap_or(u64::MAX / 2);
-                let used = model_state
-                    .get::<str>(model)
-                    .map(|state| state.requests_this_minute)
-                    .unwrap_or_default();
-                limit.saturating_sub(used)
-            })
-            .copied()
-            .unwrap_or(models[0])
-            .to_string(),
-        RuntimeGatewayRouteStrategy::Tpm => models
-            .iter()
-            .max_by_key(|&model| {
-                let limit = alias
-                    .model_metrics
-                    .get::<str>(model)
-                    .and_then(|metrics| metrics.tpm_limit)
-                    .unwrap_or(u64::MAX / 2);
-                let used = model_state
-                    .get::<str>(model)
-                    .map(|state| state.tokens_this_minute)
-                    .unwrap_or_default()
-                    .saturating_add(estimated_tokens);
-                limit.saturating_sub(used)
-            })
-            .copied()
-            .unwrap_or(models[0])
-            .to_string(),
-    })
 }
 
 pub fn runtime_gateway_estimated_tokens(body: &[u8]) -> u64 {
@@ -624,6 +460,68 @@ mod tests {
             )
             .expect("metric rewrite");
             assert_eq!(rewrite.model, expected, "{strategy:?}");
+        }
+    }
+
+    #[cfg(feature = "mojo")]
+    #[test]
+    fn mojo_route_policy_matches_rust_oracle_for_every_strategy() {
+        let metrics = BTreeMap::from([
+            (
+                "a".to_string(),
+                RuntimeGatewayRouteModelMetrics {
+                    input_cost_per_million_microusd: Some(20),
+                    output_cost_per_million_microusd: Some(30),
+                    latency_ms: Some(300),
+                    rpm_limit: Some(100),
+                    tpm_limit: Some(10_000),
+                },
+            ),
+            (
+                "b".to_string(),
+                RuntimeGatewayRouteModelMetrics {
+                    input_cost_per_million_microusd: Some(10),
+                    output_cost_per_million_microusd: Some(15),
+                    latency_ms: Some(500),
+                    rpm_limit: Some(20),
+                    tpm_limit: Some(100_000),
+                },
+            ),
+        ]);
+        let state = BTreeMap::from([(
+            "a".to_string(),
+            RuntimeGatewayRouteModelState {
+                in_flight: 3,
+                latency_ms_ewma: Some(80),
+                requests_this_minute: 90,
+                tokens_this_minute: 9_900,
+                ..RuntimeGatewayRouteModelState::default()
+            },
+        )]);
+        for strategy in [
+            RuntimeGatewayRouteStrategy::Fallback,
+            RuntimeGatewayRouteStrategy::RoundRobin,
+            RuntimeGatewayRouteStrategy::First,
+            RuntimeGatewayRouteStrategy::LeastBusy,
+            RuntimeGatewayRouteStrategy::LowestCost,
+            RuntimeGatewayRouteStrategy::LowestLatency,
+            RuntimeGatewayRouteStrategy::Rpm,
+            RuntimeGatewayRouteStrategy::Tpm,
+        ] {
+            let alias = RuntimeGatewayRouteAlias {
+                alias: "route".to_string(),
+                models: vec!["a".to_string(), "b".to_string()],
+                strategy,
+                model_metrics: metrics.clone(),
+            };
+            let models = alias.models.clone();
+            assert_eq!(
+                runtime_gateway_route_selected_model_from_models(&alias, &models, 2, &state, 10),
+                runtime_gateway_route_selected_model_from_models_rust(
+                    &alias, &models, 2, &state, 10
+                ),
+                "{strategy:?}"
+            );
         }
     }
 

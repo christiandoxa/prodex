@@ -87,6 +87,16 @@ pub enum ProviderModelChoice {
     Custom,
 }
 
+#[path = "catalog/reasoning.rs"]
+mod reasoning;
+pub use reasoning::{
+    ProviderModelReasoningError, ProviderModelReasoningResolution,
+    provider_model_reasoning_resolution,
+};
+pub(super) use reasoning::{
+    provider_model_reasoning_resolution_rust, reasoning_catalog_data, reasoning_effort_label,
+};
+
 /// Builds the offline model picker from the canonical catalog plus local configuration.
 #[cfg(feature = "mojo")]
 pub fn resolve_provider_model_choices(
@@ -685,6 +695,87 @@ mod tests {
         );
         assert!(choices.contains(&ProviderModelChoice::Model("current-model".to_string())));
         assert_eq!(choices.last(), Some(&ProviderModelChoice::Custom));
+    }
+
+    #[test]
+    fn model_reasoning_resolution_is_model_scoped_and_explicit() {
+        let resolution =
+            provider_model_reasoning_resolution(ProviderId::OpenAi, Some("LUNA"), Some("MAX"))
+                .unwrap();
+        assert!(resolution.model_index.is_some());
+        assert_eq!(
+            resolution.selected_reasoning_effort,
+            Some(ProviderReasoningEffort::Max)
+        );
+        assert_eq!(
+            resolution.default_reasoning_effort,
+            Some(ProviderReasoningEffort::Medium)
+        );
+        assert!(
+            resolution
+                .supported_reasoning_efforts
+                .contains(&ProviderReasoningEffort::None)
+        );
+        assert_eq!(
+            provider_model_reasoning_resolution(ProviderId::OpenAi, Some("luna"), Some("ultra")),
+            Err(ProviderModelReasoningError::UnsupportedEffort)
+        );
+    }
+
+    #[test]
+    fn model_reasoning_resolution_does_not_invent_unknown_openai_model() {
+        let resolution =
+            provider_model_reasoning_resolution(ProviderId::OpenAi, Some("account/model"), None)
+                .unwrap();
+        assert_eq!(resolution.model_index, None);
+        assert!(resolution.supported_reasoning_efforts.is_empty());
+        assert_eq!(resolution.selected_reasoning_effort, None);
+    }
+
+    #[cfg(feature = "mojo")]
+    #[test]
+    fn model_reasoning_resolution_matches_rust_oracle_for_catalog_cases() {
+        for (provider, model, effort) in [
+            (ProviderId::OpenAi, Some("luna"), Some("max")),
+            (ProviderId::Copilot, Some("luna"), Some("max")),
+            (ProviderId::Kiro, Some("luna"), Some("xhigh")),
+            (ProviderId::Gemini, Some("auto"), None),
+            (ProviderId::OpenAi, Some("unknown"), Some("ultra")),
+        ] {
+            let (entries, efforts, _) = reasoning_catalog_data(provider);
+            let expected = provider_model_reasoning_resolution_rust(
+                &entries,
+                &efforts,
+                model,
+                crate::provider_runtime_metadata(provider).map(|metadata| metadata.default_model),
+                effort,
+            )
+            .map(|plan| {
+                (
+                    plan.model_index,
+                    plan.supported_efforts,
+                    plan.default_effort,
+                    plan.selected_effort,
+                )
+            });
+            let actual = provider_model_reasoning_resolution(provider, model, effort).map(|plan| {
+                (
+                    plan.model_index,
+                    plan.supported_reasoning_efforts
+                        .iter()
+                        .filter_map(|effort| reasoning_effort_label(*effort))
+                        .map(str::to_string)
+                        .collect::<Vec<_>>(),
+                    plan.default_reasoning_effort
+                        .and_then(reasoning_effort_label)
+                        .map(str::to_string),
+                    plan.selected_reasoning_effort
+                        .and_then(reasoning_effort_label)
+                        .map(str::to_string),
+                )
+            });
+            assert_eq!(actual, expected, "{provider:?} {model:?} {effort:?}");
+        }
     }
 
     #[cfg(feature = "mojo")]
