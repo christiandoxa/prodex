@@ -192,6 +192,9 @@ else:
 "#,
     );
     let _env_lock = TestEnvVarGuard::lock();
+    #[cfg(windows)]
+    let _home = TestEnvVarGuard::set("HOME", &home.to_string_lossy());
+    #[cfg(not(windows))]
     let _home = TestEnvVarGuard::set_home(&home);
     let _script = TestEnvVarGuard::set("PRODEX_TEST_CLOUDFLARED_SCRIPT", &script.to_string_lossy());
     let path = std::env::join_paths(std::iter::once(root.clone()).chain(std::env::split_paths(
