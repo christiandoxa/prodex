@@ -456,9 +456,9 @@ The category tags are `None=0`, `Route=1`, `Quota=2`, `Backoff=3`, `Http=4`, `We
 `Load=21`. Severity is `0` through `3`. ABI version `4` is independent of the rich v5 record
 ABI. The Rust reference classifier is test-only on Mojo-enabled production paths.
 
-## Rich/domain ABI v5 (2026-08-28)
+## Rich/domain ABI v6 (2026-08-28)
 
-Rich v5 is additive and does not overload text ABI v1. Its version entry point is
+Rich v6 is additive and does not overload text ABI v1. Its version entry point is
 `prodex_mojo_rich_abi_version`, returning `6`; its layout probe is
 `prodex_mojo_rich_abi_layout`. The current record family is:
 
