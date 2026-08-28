@@ -81,6 +81,21 @@ pub(crate) struct RuntimeTokenUsageLog<'a> {
     pub(crate) generation_ms: Option<u64>,
 }
 
+#[derive(Debug, Clone, Copy)]
+enum RuntimeTokenUsageLogEvent {
+    Final,
+    Progress,
+}
+
+impl RuntimeTokenUsageLogEvent {
+    fn name(self) -> &'static str {
+        match self {
+            Self::Final => "token_usage",
+            Self::Progress => "token_usage_progress",
+        }
+    }
+}
+
 pub(crate) struct RuntimeStreamPayloadLog<'a> {
     pub(crate) shared: &'a RuntimeRotationProxyShared,
     pub(crate) request_id: u64,
@@ -127,6 +142,17 @@ fn runtime_stream_log_text(message: &str) -> String {
 }
 
 pub(crate) fn log_runtime_token_usage(input: RuntimeTokenUsageLog<'_>) {
+    log_runtime_token_usage_event(input, RuntimeTokenUsageLogEvent::Final);
+}
+
+pub(crate) fn log_runtime_token_usage_progress(input: RuntimeTokenUsageLog<'_>) {
+    log_runtime_token_usage_event(input, RuntimeTokenUsageLogEvent::Progress);
+}
+
+fn log_runtime_token_usage_event(
+    input: RuntimeTokenUsageLog<'_>,
+    event: RuntimeTokenUsageLogEvent,
+) {
     let RuntimeTokenUsageLog {
         shared,
         request_id,
@@ -145,23 +171,29 @@ pub(crate) fn log_runtime_token_usage(input: RuntimeTokenUsageLog<'_>) {
         "websocket" => RuntimeRouteKind::Websocket,
         _ => RuntimeRouteKind::Responses,
     };
-    let prompt_cache_observation = observe_runtime_prompt_cache_profile_hit(
-        shared,
-        profile_name,
-        prompt_cache_key,
-        usage.cached_input_tokens,
-        route_kind,
-    );
-    observe_runtime_smart_context_token_usage_for_bucket(
-        shared,
-        usage,
-        Some(runtime_proxy_crate::SmartContextTokenCalibrationBucketKey {
-            route: Some(runtime_route_kind_label(route_kind).to_string()),
-            model: runtime_smart_context_normalized_model_name(model_name),
-            profile: Some(profile_name.to_string()),
-            transport: Some(transport.to_string()),
-        }),
-    );
+    let prompt_cache_observation = if matches!(event, RuntimeTokenUsageLogEvent::Final) {
+        Some(observe_runtime_prompt_cache_profile_hit(
+            shared,
+            profile_name,
+            prompt_cache_key,
+            usage.cached_input_tokens,
+            route_kind,
+        ))
+    } else {
+        None
+    };
+    if matches!(event, RuntimeTokenUsageLogEvent::Final) {
+        observe_runtime_smart_context_token_usage_for_bucket(
+            shared,
+            usage,
+            Some(runtime_proxy_crate::SmartContextTokenCalibrationBucketKey {
+                route: Some(runtime_route_kind_label(route_kind).to_string()),
+                model: runtime_smart_context_normalized_model_name(model_name),
+                profile: Some(profile_name.to_string()),
+                transport: Some(transport.to_string()),
+            }),
+        );
+    }
     let uncached_input_tokens = usage.input_tokens.saturating_sub(usage.cached_input_tokens);
     let mut fields = vec![
         runtime_proxy_log_field("request", request_id.to_string()),
@@ -177,14 +209,19 @@ pub(crate) fn log_runtime_token_usage(input: RuntimeTokenUsageLog<'_>) {
             "prompt_cache_key_hash",
             runtime_prompt_cache_key_hash_label(prompt_cache_key),
         ),
-        runtime_proxy_log_field("prompt_cache_owner", prompt_cache_observation.log_label()),
+        runtime_proxy_log_field(
+            "prompt_cache_owner",
+            prompt_cache_observation.map_or("not_recorded", |value| value.log_label()),
+        ),
         runtime_proxy_log_field("input_tokens", usage.input_tokens.to_string()),
         runtime_proxy_log_field("uncached_input_tokens", uncached_input_tokens.to_string()),
         runtime_proxy_log_field("cached_input_tokens", usage.cached_input_tokens.to_string()),
         runtime_proxy_log_field("output_tokens", usage.output_tokens.to_string()),
         runtime_proxy_log_field("reasoning_tokens", usage.reasoning_tokens.to_string()),
     ];
-    if let Some(generation_ms) = generation_ms.filter(|value| *value > 0) {
+    if matches!(event, RuntimeTokenUsageLogEvent::Final)
+        && let Some(generation_ms) = generation_ms.filter(|value| *value > 0)
+    {
         fields.push(runtime_proxy_log_field(
             "generation_ms",
             generation_ms.to_string(),
@@ -199,7 +236,7 @@ pub(crate) fn log_runtime_token_usage(input: RuntimeTokenUsageLog<'_>) {
     }
     runtime_proxy_log(
         shared,
-        runtime_proxy_structured_log_message("token_usage", fields),
+        runtime_proxy_structured_log_message(event.name(), fields),
     );
 }
 

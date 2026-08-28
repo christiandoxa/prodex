@@ -1,6 +1,8 @@
 use super::collect_recent_runtime_log_paths;
-use super::log::local_token_usage_event;
-use super::log::{FollowedLog, FollowedLogPaths, collect_new_followed_lines, retain_followed_logs};
+use super::log::{
+    FollowedLog, FollowedLogPaths, LogStreamItem,
+    collect_new_runtime_log_stream_items_with_throughput, retain_followed_logs,
+};
 use super::log_format::{current_log_width, render_log_block};
 use super::log_tui::{
     LOG_TUI_TITLE, LogTuiHeaderDetail, LogTuiInput, LogTuiState, LogTuiTerminal, OutputThroughput,
@@ -10,7 +12,6 @@ use super::log_tui::{
 use super::log_upstream_payload::{
     UpstreamPayloadEvent, render_upstream_payload_lines, upstream_payload_event_from_runtime_line,
 };
-use crate::reports::info_token_usage_event_from_line;
 use crate::{prodex_runtime_log_paths_in_dir, runtime_proxy_log_dir};
 use anyhow::{Context, Result};
 use crossterm::event::{self, Event, KeyEventKind};
@@ -85,6 +86,7 @@ fn stream_upstream_payload_events_tui() -> Result<()> {
     let mut header_refresh_at =
         log_tui_header_next_refresh_at(header_detail.as_ref(), Instant::now());
     let mut throughput = OutputThroughput::default();
+    super::log_tui::seed_output_throughput_from_history(&mut throughput);
 
     let mut runtime_paths =
         FollowedLogPaths::new(prodex_runtime_log_paths_in_dir(&runtime_proxy_log_dir()));
@@ -168,14 +170,10 @@ fn collect_new_upstream_payload_events_with_throughput(
     mut throughput: Option<&mut OutputThroughput>,
 ) -> Result<Vec<UpstreamPayloadEvent>> {
     let mut events = Vec::new();
-    for line in collect_new_followed_lines(path, state)? {
-        if let Some(event) = info_token_usage_event_from_line(&line).map(local_token_usage_event)
-            && let Some(throughput) = throughput.as_deref_mut()
-        {
-            throughput.observe_token_usage(path, &event, Instant::now());
-            throughput.finish(path, &event);
-        }
-        if let Some(event) = upstream_payload_event_from_runtime_line(&line) {
+    for item in
+        collect_new_runtime_log_stream_items_with_throughput(path, state, false, throughput.take())?
+    {
+        if let LogStreamItem::UpstreamPayload(event) = item {
             events.push(event);
         }
     }

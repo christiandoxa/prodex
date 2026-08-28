@@ -176,6 +176,7 @@ pub(crate) fn attempt_runtime_websocket_request_with_hard_affinity(
         compaction_generation,
         committed: false,
         generation_started_at: None,
+        output_token_usage_progress: RuntimeTokenUsageProgress::default(),
         first_upstream_frame_seen: false,
         first_upstream_text_seen: false,
         buffered_precommit_text_frames: Vec::new(),
@@ -215,6 +216,7 @@ struct RuntimeWebsocketResponseLoop<'a> {
     promote_committed_profile: bool,
     committed: bool,
     generation_started_at: Option<Instant>,
+    output_token_usage_progress: RuntimeTokenUsageProgress,
     first_upstream_frame_seen: bool,
     first_upstream_text_seen: bool,
     buffered_precommit_text_frames: Vec<RuntimeBufferedWebsocketTextFrame>,
@@ -505,8 +507,26 @@ impl RuntimeWebsocketResponseLoop<'_> {
         if let Some(response_id) = inspected.response_ids.first() {
             self.log_continuation_trace(Some(response_id), 0, self.committed);
         }
-        if self.committed && runtime_token_usage_event_is_loggable(inspected.event_type.as_deref())
+        if self.committed
+            && runtime_token_usage_event_is_live(event_type, inspected.token_usage)
+            && let Some(token_usage) = inspected.token_usage
+            && let Some(token_usage) = self
+                .output_token_usage_progress
+                .observe(token_usage, Instant::now())
         {
+            log_runtime_token_usage_progress(RuntimeTokenUsageLog {
+                shared: self.shared,
+                request_id: self.request_id,
+                transport: "websocket",
+                profile_name: self.profile_name,
+                source: "responses_websocket",
+                prompt_cache_key: self.request_prompt_cache_key,
+                model_name: self.request_model_name,
+                usage: Some(token_usage),
+                generation_ms: None,
+            });
+        }
+        if self.committed && runtime_token_usage_event_is_loggable(event_type) {
             log_runtime_token_usage(RuntimeTokenUsageLog {
                 shared: self.shared,
                 request_id: self.request_id,

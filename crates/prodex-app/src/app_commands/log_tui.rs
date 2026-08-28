@@ -7,6 +7,7 @@ use crate::{
 use chrono::{Local, TimeZone};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use prodex_quota::RuntimeQuotaWindowStatus;
+use prodex_runtime_doctor::read_runtime_log_tail;
 use ratatui::text::{Line, Text};
 use std::io;
 use std::time::{Duration, Instant};
@@ -17,6 +18,8 @@ const LOG_TUI_RESET_TIME_FORMAT: &str = "%m-%d %H:%M";
 pub(super) const LOG_TUI_TITLE: &str = "Prodex Log";
 
 pub(super) type LogTuiTerminal = AlternateScreenTerminal<io::Stdout>;
+
+const LOG_TUI_HISTORY_TAIL_BYTES: usize = 1024 * 1024;
 
 #[derive(Debug, Default, Clone)]
 pub(super) struct LogTuiState {
@@ -298,6 +301,19 @@ pub(super) fn log_tui_header_detail(preferred_profile: Option<&str>) -> Option<L
     ))
 }
 
+pub(super) fn seed_output_throughput_from_history(throughput: &mut OutputThroughput) {
+    for path in crate::app_commands::collect_recent_runtime_log_paths(32) {
+        let Ok(tail) = read_runtime_log_tail(&path, LOG_TUI_HISTORY_TAIL_BYTES) else {
+            continue;
+        };
+        for line in String::from_utf8_lossy(&tail).lines() {
+            if let Some(event) = crate::reports::info_token_usage_event_from_line(line) {
+                throughput.observe_historical(&path, &event);
+            }
+        }
+    }
+}
+
 fn log_tui_header_profile_only_detail(profile: String) -> LogTuiHeaderDetail {
     log_tui_header_profile_only_detail_with_interval(
         profile,
@@ -551,6 +567,27 @@ mod tests {
         assert_eq!(terminal_ui::text_width(&rendered), 38);
         assert!(rendered.ends_with("100 t/s"));
         assert!(rendered.starts_with(LOG_TUI_TITLE));
+    }
+
+    #[test]
+    fn active_throughput_stays_atomic_across_clipping_boundary() {
+        let detail = LogTuiHeaderDetail::profile_only("main".to_string(), Duration::from_secs(1));
+        for width in 70..=120 {
+            let rendered = render_log_header(
+                LOG_TUI_TITLE,
+                "200 event(s)",
+                Some(&detail),
+                Some(100.0),
+                width,
+            );
+            assert!(rendered.contains("100 t/s"), "width {width}: {rendered:?}");
+            assert!(
+                rendered
+                    .strip_suffix(" t/s")
+                    .and_then(|prefix| prefix.chars().last())
+                    .is_some_and(|character| character.is_ascii_digit())
+            );
+        }
     }
 
     #[test]

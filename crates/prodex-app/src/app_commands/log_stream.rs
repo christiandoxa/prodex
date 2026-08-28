@@ -3,16 +3,21 @@ use super::log_transcript::TranscriptEvent;
 use crate::app_commands::log_format::{
     current_log_width, human_event_name, local_log_timestamp, render_log_block, render_text_body,
 };
+use crate::app_commands::log_throughput::OutputThroughput;
 use crate::app_commands::log_tui::format_output_tokens_per_second;
 use crate::app_commands::log_upstream;
 use crate::app_commands::log_upstream_payload;
 use crate::app_commands::log_upstream_payload::UpstreamPayloadEvent;
 use crate::app_commands::log_upstream_payload::parse_runtime_log_line;
-use crate::reports::{InfoTokenUsageEvent, info_token_usage_event_from_line};
+use crate::reports::{
+    InfoTokenUsageEvent, info_token_usage_event_from_line,
+    info_token_usage_progress_event_from_line,
+};
 use anyhow::{Context, Result};
 use std::collections::BTreeMap;
 use std::io::{self, Write};
 use std::path::Path;
+use std::time::Instant;
 
 #[derive(Debug, Clone)]
 pub(crate) enum LogStreamItem {
@@ -63,6 +68,20 @@ pub(crate) fn collect_new_runtime_log_stream_items(
     state: &mut FollowedLog,
     include_operational_insights: bool,
 ) -> Result<Vec<LogStreamItem>> {
+    collect_new_runtime_log_stream_items_with_throughput(
+        path,
+        state,
+        include_operational_insights,
+        None,
+    )
+}
+
+pub(crate) fn collect_new_runtime_log_stream_items_with_throughput(
+    path: &Path,
+    state: &mut FollowedLog,
+    include_operational_insights: bool,
+    mut throughput: Option<&mut OutputThroughput>,
+) -> Result<Vec<LogStreamItem>> {
     let mut items = Vec::new();
     for line in collect_new_followed_lines(path, state)? {
         if include_operational_insights
@@ -76,8 +95,20 @@ pub(crate) fn collect_new_runtime_log_stream_items(
         if let Some(event) = log_upstream_payload::upstream_payload_event_from_runtime_line(&line) {
             items.push(LogStreamItem::UpstreamPayload(event));
         }
+        if let Some(event) = info_token_usage_progress_event_from_line(&line)
+            && let Some(throughput) = throughput.as_deref_mut()
+        {
+            throughput.observe_token_usage(path, &event, Instant::now());
+        }
         if let Some(event) = info_token_usage_event_from_line(&line) {
-            items.push(LogStreamItem::TokenUsage(local_token_usage_event(event)));
+            let event = local_token_usage_event(event);
+            if let Some(throughput) = throughput.as_deref_mut() {
+                throughput.observe_token_usage(path, &event, Instant::now());
+                if event.generation_ms.is_some() || event.output_tokens_per_second.is_some() {
+                    throughput.finish(path, &event);
+                }
+            }
+            items.push(LogStreamItem::TokenUsage(event));
         }
     }
     Ok(items)

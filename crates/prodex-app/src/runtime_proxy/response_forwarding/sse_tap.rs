@@ -45,6 +45,19 @@ fn apply_runtime_sse_tap_effects(
                     generation_ms: None,
                 });
             }
+            RuntimeSseTapEffect::LogTokenUsageProgress(token_usage) => {
+                log_runtime_token_usage_progress(RuntimeTokenUsageLog {
+                    shared,
+                    request_id,
+                    transport: "http",
+                    profile_name,
+                    source: "responses_sse",
+                    prompt_cache_key,
+                    model_name,
+                    usage: Some(token_usage),
+                    generation_ms: None,
+                });
+            }
             RuntimeSseTapEffect::LogTokenUsageWithGeneration {
                 usage: token_usage,
                 generation_ms,

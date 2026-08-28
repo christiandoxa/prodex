@@ -3,8 +3,9 @@ pub(super) use self::render::log_snapshot_items;
 pub(super) use self::render::log_stream_tui_text;
 use super::{
     FollowedLog, FollowedLogPaths, LOG_SNAPSHOT_TAIL_BYTES, LogStreamItem, TranscriptEvent,
-    collect_new_runtime_log_stream_items, collect_new_transcript_events, latest_transcript_event,
-    local_token_usage_event, print_log_stream_item, print_token_usage_event,
+    collect_new_runtime_log_stream_items,
+    collect_new_runtime_log_stream_items_with_throughput, collect_new_transcript_events,
+    latest_transcript_event, local_token_usage_event, print_log_stream_item, print_token_usage_event,
     print_transcript_event, print_upstream_payload_event, recent_session_log_paths,
     retain_followed_logs,
 };
@@ -124,6 +125,7 @@ fn stream_token_usage_events_tui() -> Result<()> {
     let mut header_refresh_at =
         log_tui_header_next_refresh_at(header_detail.as_ref(), Instant::now());
     let mut throughput = OutputThroughput::default();
+    crate::app_commands::log_tui::seed_output_throughput_from_history(&mut throughput);
 
     let mut runtime_paths =
         FollowedLogPaths::new(prodex_runtime_log_paths_in_dir(&runtime_proxy_log_dir()));
@@ -323,11 +325,12 @@ fn collect_log_stream_items(
         let state = followed_runtime_logs
             .entry(path.clone())
             .or_insert_with(|| FollowedLog::at_end(path));
-        for event in collect_new_runtime_log_stream_items(path, state, true)? {
-            if let LogStreamItem::TokenUsage(token_usage) = &event {
-                throughput.observe_token_usage(path, token_usage, Instant::now());
-                throughput.finish(path, token_usage);
-            }
+        for event in collect_new_runtime_log_stream_items_with_throughput(
+            path,
+            state,
+            true,
+            Some(throughput),
+        )? {
             push_log_stream_item(items, event);
         }
     }
