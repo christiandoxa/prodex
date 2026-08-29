@@ -801,7 +801,7 @@ fn compact_final_failure_logs_inflight_saturation_terminal_reason() {
 
     assert_eq!(status, 503);
     assert!(
-        body.contains("temporarily saturated"),
+        body.contains("local capacity remained saturated until the request deadline"),
         "unexpected compact inflight saturation response body: {body}"
     );
     assert!(

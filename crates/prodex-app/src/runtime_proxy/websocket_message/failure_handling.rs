@@ -411,7 +411,9 @@ impl<'a> RuntimeWebsocketTextMessageFlow<'a> {
                 ),
             );
         }
-        self.excluded_profiles.insert(profile_name);
+        if reason != "profile_inflight_saturated" {
+            self.excluded_profiles.insert(profile_name);
+        }
         Ok(RuntimeWebsocketMessageLoopAction::Continue)
     }
 
@@ -617,7 +619,9 @@ impl<'a> RuntimeWebsocketTextMessageFlow<'a> {
                 ),
             );
         }
-        self.excluded_profiles.insert(profile_name);
+        if reason != "profile_inflight_saturated" {
+            self.excluded_profiles.insert(profile_name);
+        }
         Ok(RuntimeWebsocketMessageLoopAction::Continue)
     }
 }

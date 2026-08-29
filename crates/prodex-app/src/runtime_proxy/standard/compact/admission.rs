@@ -69,6 +69,30 @@ pub(super) fn log_runtime_compact_inflight_saturated(
     );
 }
 
+pub(super) fn log_runtime_compact_local_capacity_timeout(
+    request_id: u64,
+    shared: &RuntimeRotationProxyShared,
+    selection_attempts: usize,
+    selection_started_at: Instant,
+    pressure_mode: bool,
+) {
+    log_runtime_proxy_compact_final_failure(
+        shared,
+        RuntimeProxyCompactFinalFailureLog {
+            request_id,
+            exit: "local_capacity_timeout",
+            reason: "inflight_saturation",
+            selection_attempts,
+            selection_started_at,
+            pressure_mode,
+            last_failure_kind: "none",
+            saw_inflight_saturation: true,
+            saw_transport_failure: false,
+            profile_name: None,
+        },
+    );
+}
+
 pub(super) fn runtime_compact_candidate_inflight_saturated(
     request_id: u64,
     shared: &RuntimeRotationProxyShared,

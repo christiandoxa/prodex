@@ -741,6 +741,14 @@ export const RUNTIME_CI_TEST_CASES = [
     tags: SERIALIZED_TAGS,
   },
   {
+    name: "responses_wait_past_old_admission_window_for_healthy_saturated_profile",
+    tags: SERIALIZED_TAGS,
+  },
+  {
+    name: "responses_wait_for_any_saturated_profile_and_reselect_after_release",
+    tags: SERIALIZED_TAGS,
+  },
+  {
     name: "runtime_proxy_responses_inflight_relief_times_out_without_relief",
     tags: SERIALIZED_TAGS,
   },

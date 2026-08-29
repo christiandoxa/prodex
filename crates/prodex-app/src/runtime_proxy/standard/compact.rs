@@ -1,8 +1,10 @@
 use super::super::{
-    RuntimeResponseCandidateSelection, await_runtime_proxy_async_task,
+    RuntimeInflightReliefWait, RuntimeInflightReliefWaitResult, RuntimeResponseCandidateSelection,
+    await_runtime_proxy_async_task, build_runtime_proxy_json_error_response,
     clear_runtime_recovered_profiles, mark_runtime_profile_retry_backoff,
     runtime_compact_route_followup_bound_profile, runtime_profile_recovery_wait_for_route,
-    runtime_proxy_current_profile, runtime_proxy_log,
+    runtime_proxy_current_profile, runtime_proxy_local_capacity_timeout_message, runtime_proxy_log,
+    runtime_proxy_maybe_wait_for_interactive_inflight_relief,
     runtime_proxy_precommit_budget_exhausted_for_route,
     runtime_proxy_pressure_mode_active_for_route, runtime_proxy_probe_refresh_pause,
     runtime_proxy_should_shed_fresh_compact_request,
@@ -30,7 +32,8 @@ mod retryable;
 mod transport;
 use admission::{
     build_runtime_fresh_compact_pressure_response, log_runtime_compact_inflight_saturated,
-    log_runtime_compact_local_selection_blocked, runtime_compact_candidate_inflight_saturated,
+    log_runtime_compact_local_capacity_timeout, log_runtime_compact_local_selection_blocked,
+    runtime_compact_candidate_inflight_saturated,
 };
 use affinity::runtime_compact_route_candidate_has_hard_affinity;
 use auth::{RuntimeProxyCompactAuthFailure, handle_runtime_proxy_compact_auth_failure};
@@ -359,7 +362,6 @@ impl RuntimeCompactSelectionContext<'_> {
         &mut self,
         candidate_name: String,
     ) -> Result<Option<tiny_http::ResponseBox>> {
-        self.selection_attempts = self.selection_attempts.saturating_add(1);
         log_runtime_proxy_compact_candidate(
             self.request_id,
             self.shared,
@@ -378,9 +380,27 @@ impl RuntimeCompactSelectionContext<'_> {
             &candidate_name,
             candidate_has_hard_affinity,
         )? {
-            self.excluded_profiles.insert(candidate_name);
             self.saw_inflight_saturation = true;
-            return Ok(None);
+            return match self
+                .wait_for_inflight_relief(&candidate_name, candidate_has_hard_affinity)?
+            {
+                RuntimeInflightReliefWaitResult::Relieved
+                | RuntimeInflightReliefWaitResult::NotWaitable => Ok(None),
+                RuntimeInflightReliefWaitResult::DeadlineExpired => {
+                    log_runtime_compact_local_capacity_timeout(
+                        self.request_id,
+                        self.shared,
+                        self.selection_attempts,
+                        self.selection_started_at,
+                        self.pressure_mode,
+                    );
+                    Ok(Some(build_runtime_proxy_json_error_response(
+                        503,
+                        "local_capacity_timeout",
+                        runtime_proxy_local_capacity_timeout_message(),
+                    )))
+                }
+            };
         }
         let attempt = attempt_runtime_standard_request(
             self.request_id,
@@ -390,6 +410,38 @@ impl RuntimeCompactSelectionContext<'_> {
             candidate_has_hard_affinity,
             candidate_has_hard_affinity,
         )?;
+        if matches!(
+            &attempt,
+            RuntimeStandardAttempt::ProfileInflightSaturated { .. }
+        ) {
+            self.saw_inflight_saturation = true;
+            return match self
+                .wait_for_inflight_relief(&candidate_name, candidate_has_hard_affinity)?
+            {
+                RuntimeInflightReliefWaitResult::Relieved
+                | RuntimeInflightReliefWaitResult::NotWaitable => Ok(None),
+                RuntimeInflightReliefWaitResult::DeadlineExpired => {
+                    log_runtime_compact_local_capacity_timeout(
+                        self.request_id,
+                        self.shared,
+                        self.selection_attempts,
+                        self.selection_started_at,
+                        self.pressure_mode,
+                    );
+                    Ok(Some(build_runtime_proxy_json_error_response(
+                        503,
+                        "local_capacity_timeout",
+                        runtime_proxy_local_capacity_timeout_message(),
+                    )))
+                }
+            };
+        }
+        if !matches!(
+            &attempt,
+            RuntimeStandardAttempt::LocalSelectionBlocked { .. }
+        ) {
+            self.selection_attempts = self.selection_attempts.saturating_add(1);
+        }
         handle_runtime_compact_attempt(
             RuntimeCompactAttemptContext {
                 request_id: self.request_id,
@@ -415,6 +467,24 @@ impl RuntimeCompactSelectionContext<'_> {
             },
             attempt,
         )
+    }
+
+    fn wait_for_inflight_relief(
+        &self,
+        candidate_name: &str,
+        hard_affinity: bool,
+    ) -> Result<RuntimeInflightReliefWaitResult> {
+        runtime_proxy_maybe_wait_for_interactive_inflight_relief(RuntimeInflightReliefWait {
+            request_id: self.request_id,
+            request: self.request,
+            shared: self.shared,
+            excluded_profiles: &self.excluded_profiles,
+            route_kind: RuntimeRouteKind::Compact,
+            selection_started_at: self.selection_started_at,
+            continuation: !self.is_fresh_request(),
+            wait_affinity_owner: hard_affinity.then_some(candidate_name),
+            selected_profile: None,
+        })
     }
 
     fn is_fresh_request(&self) -> bool {
@@ -644,7 +714,6 @@ fn handle_runtime_compact_attempt(
         RuntimeStandardAttempt::ProfileInflightSaturated { profile_name } => {
             log_runtime_compact_inflight_saturated(request_id, shared, &profile_name);
             *saw_inflight_saturation = true;
-            excluded_profiles.insert(profile_name);
             Ok(None)
         }
     }

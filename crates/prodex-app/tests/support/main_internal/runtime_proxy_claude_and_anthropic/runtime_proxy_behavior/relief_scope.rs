@@ -91,7 +91,7 @@ fn runtime_proxy_responses_inflight_relief_times_out_without_relief() {
         body.get("error")
             .and_then(|error| error.get("code"))
             .and_then(serde_json::Value::as_str),
-        Some("service_unavailable")
+        Some("local_capacity_timeout")
     );
 
     let log = read_runtime_proxy_test_log(&shared.log_path);
@@ -163,7 +163,7 @@ fn runtime_proxy_wait_scopes_to_session_owner_relief() {
                     "sess-main".to_string(),
                     ResponseProfileBinding {
                         binding_identity: None,
-                profile_name: "main".to_string(),
+                        profile_name: "main".to_string(),
                         bound_at: Local::now().timestamp(),
                     },
                 )]),
@@ -240,18 +240,21 @@ fn runtime_proxy_wait_scopes_to_session_owner_relief() {
     };
     let excluded_profiles = BTreeSet::new();
     assert!(
-        !runtime_proxy_maybe_wait_for_interactive_inflight_relief(RuntimeInflightReliefWait {
-            request_id: 45,
-            request: &request,
-            shared: &shared,
-            excluded_profiles: &excluded_profiles,
-            route_kind: RuntimeRouteKind::Responses,
-            selection_started_at: Instant::now(),
-            continuation: true,
-            wait_affinity_owner: None,
-            selected_profile: Some("main"),
-        },)
-        .expect("selected-profile wait should complete"),
+        matches!(
+            runtime_proxy_maybe_wait_for_interactive_inflight_relief(RuntimeInflightReliefWait {
+                request_id: 45,
+                request: &request,
+                shared: &shared,
+                excluded_profiles: &excluded_profiles,
+                route_kind: RuntimeRouteKind::Responses,
+                selection_started_at: Instant::now(),
+                continuation: true,
+                wait_affinity_owner: None,
+                selected_profile: Some("main"),
+            },)
+            .expect("selected-profile wait should complete"),
+            RuntimeInflightReliefWaitResult::DeadlineExpired
+        ),
         "another profile's release should not count as useful relief"
     );
 

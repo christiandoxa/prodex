@@ -106,6 +106,10 @@ pub(super) fn runtime_proxy_local_selection_failure_message() -> &'static str {
     "Runtime proxy could not secure a healthy upstream profile before the pre-commit retry budget was exhausted. Retry the request."
 }
 
+pub(super) fn runtime_proxy_local_capacity_timeout_message() -> &'static str {
+    runtime_proxy_crate::runtime_proxy_local_capacity_timeout_message()
+}
+
 pub(super) fn await_runtime_proxy_async_task<T, F>(
     shared: &RuntimeRotationProxyShared,
     task_name: &'static str,

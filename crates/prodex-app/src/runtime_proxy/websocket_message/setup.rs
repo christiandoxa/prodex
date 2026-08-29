@@ -1,12 +1,13 @@
 use super::super::{
     RUNTIME_PROFILE_BAD_PAIRING_PENALTY, RUNTIME_PROFILE_OVERLOAD_HEALTH_PENALTY,
-    RuntimeCandidateAffinity, RuntimeResponseCandidateSelection,
-    RuntimeResponseProfileAffinityClear, RuntimeResponseRouteAffinityLogContext,
-    RuntimeResponseRouteAffinityRefreshSlots, RuntimeResponseRouteAffinityRequest,
-    RuntimeRouteKind, RuntimeUpstreamFailureResponse, RuntimeWebsocketAttempt,
-    RuntimeWebsocketAttemptRequest, attempt_runtime_websocket_request_with_hard_affinity,
-    bump_runtime_profile_bad_pairing_score, bump_runtime_profile_health_score,
-    clear_runtime_response_profile_affinity, mark_runtime_profile_retry_backoff,
+    RuntimeCandidateAffinity, RuntimeInflightReliefWait, RuntimeInflightReliefWaitResult,
+    RuntimeResponseCandidateSelection, RuntimeResponseProfileAffinityClear,
+    RuntimeResponseRouteAffinityLogContext, RuntimeResponseRouteAffinityRefreshSlots,
+    RuntimeResponseRouteAffinityRequest, RuntimeRouteKind, RuntimeUpstreamFailureResponse,
+    RuntimeWebsocketAttempt, RuntimeWebsocketAttemptRequest,
+    attempt_runtime_websocket_request_with_hard_affinity, bump_runtime_profile_bad_pairing_score,
+    bump_runtime_profile_health_score, clear_runtime_response_profile_affinity,
+    mark_runtime_profile_retry_backoff,
     refresh_and_log_runtime_response_route_affinity_for_request,
     release_runtime_quota_blocked_affinity, release_runtime_rotated_session_affinity,
     runtime_candidate_has_hard_affinity, runtime_noncompact_session_priority_profile,
@@ -14,9 +15,10 @@ use super::super::{
     runtime_previous_response_fresh_fallback_shape_with_session,
     runtime_previous_response_turn_state, runtime_profile_inflight_hard_limited_for_context,
     runtime_proxy_has_continuation_priority, runtime_proxy_log, runtime_proxy_log_field,
-    runtime_proxy_structured_log_message, runtime_quota_blocked_affinity_is_releasable,
-    runtime_request_explicit_session_id, runtime_request_turn_state,
-    runtime_response_bound_profile, runtime_smart_context_effective_websocket_prompt_cache_key,
+    runtime_proxy_maybe_wait_for_interactive_inflight_relief, runtime_proxy_structured_log_message,
+    runtime_quota_blocked_affinity_is_releasable, runtime_request_explicit_session_id,
+    runtime_request_turn_state, runtime_response_bound_profile,
+    runtime_smart_context_effective_websocket_prompt_cache_key,
     runtime_smart_context_model_name_from_body, runtime_turn_state_affinity_profile,
     runtime_websocket_request_requires_locked_previous_response_affinity,
     select_runtime_response_candidate_for_route_with_request,
@@ -28,6 +30,7 @@ use super::{
 };
 use anyhow::Result;
 use std::collections::BTreeSet;
+use std::time::Instant;
 
 #[cfg(test)]
 use super::super::{
@@ -144,6 +147,7 @@ impl<'a> RuntimeWebsocketTextMessageFlow<'a> {
             candidate_turn_state_retry_value: None,
             quota_last_chance_profile: None,
             saw_inflight_saturation: false,
+            local_capacity_wait_timed_out: false,
             saw_transport_failure: false,
             saw_overload_failure: false,
             recovery_sweeps: 0,
@@ -256,7 +260,11 @@ impl<'a> RuntimeWebsocketTextMessageFlow<'a> {
         );
     }
 
-    pub(super) fn candidate_inflight_saturated(&mut self, candidate_name: &str) -> Result<bool> {
+    pub(super) fn candidate_inflight_saturated(
+        &mut self,
+        candidate_name: &str,
+        selection_started_at: Instant,
+    ) -> Result<bool> {
         let session_affinity_candidate = self.session_profile.as_deref() == Some(candidate_name);
         if self.previous_response_id.is_none()
             && self.pinned_profile.is_none()
@@ -287,9 +295,27 @@ impl<'a> RuntimeWebsocketTextMessageFlow<'a> {
                     ],
                 ),
             );
-            self.excluded_profiles.insert(candidate_name.to_string());
             self.saw_inflight_saturation = true;
-            return Ok(true);
+            return match runtime_proxy_maybe_wait_for_interactive_inflight_relief(
+                RuntimeInflightReliefWait {
+                    request_id: self.request_id,
+                    request: &self.handshake_request,
+                    shared: self.shared,
+                    excluded_profiles: &self.excluded_profiles,
+                    route_kind: RuntimeRouteKind::Websocket,
+                    selection_started_at,
+                    continuation: self.has_continuation_priority(),
+                    wait_affinity_owner: None,
+                    selected_profile: None,
+                },
+            )? {
+                RuntimeInflightReliefWaitResult::Relieved
+                | RuntimeInflightReliefWaitResult::NotWaitable => Ok(true),
+                RuntimeInflightReliefWaitResult::DeadlineExpired => {
+                    self.local_capacity_wait_timed_out = true;
+                    Ok(true)
+                }
+            };
         }
         Ok(false)
     }

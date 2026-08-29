@@ -87,7 +87,11 @@ pub(crate) fn runtime_waitable_inflight_candidates_for_route(
         let Some(entry) = state.entry(&candidate.name) else {
             continue;
         };
-        if entry.in_selection_backoff || entry.auth_failure_active {
+        if !entry.supports_codex_runtime()
+            || entry.in_selection_backoff
+            || entry.auth_failure_active
+            || entry.health_sort_key > 0
+        {
             continue;
         }
         if runtime_quota_precommit_guard_reason(
@@ -137,7 +141,11 @@ pub(crate) fn runtime_any_waited_candidate_relieved(
         let Some(entry) = state.entry(&candidate.name) else {
             continue;
         };
-        if entry.in_selection_backoff || entry.auth_failure_active {
+        if !entry.supports_codex_runtime()
+            || entry.in_selection_backoff
+            || entry.auth_failure_active
+            || entry.health_sort_key > 0
+        {
             continue;
         }
         if runtime_quota_precommit_guard_reason(
@@ -172,9 +180,16 @@ pub(crate) struct RuntimeInflightReliefWait<'a> {
     pub(crate) selected_profile: Option<&'a str>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum RuntimeInflightReliefWaitResult {
+    NotWaitable,
+    Relieved,
+    DeadlineExpired,
+}
+
 pub(crate) fn runtime_proxy_maybe_wait_for_interactive_inflight_relief(
     wait: RuntimeInflightReliefWait<'_>,
-) -> Result<bool> {
+) -> Result<RuntimeInflightReliefWaitResult> {
     let RuntimeInflightReliefWait {
         request_id,
         request,
@@ -187,12 +202,6 @@ pub(crate) fn runtime_proxy_maybe_wait_for_interactive_inflight_relief(
         selected_profile,
     } = wait;
 
-    let pressure_mode = runtime_proxy_pressure_mode_active_for_route(shared, route_kind);
-    let wait_budget =
-        runtime_proxy_request_inflight_wait_budget(request, pressure_mode, &shared.runtime_config);
-    if wait_budget.is_zero() {
-        return Ok(false);
-    }
     let mut waited_profiles = runtime_waitable_inflight_candidates_for_route(
         shared,
         excluded_profiles,
@@ -203,14 +212,17 @@ pub(crate) fn runtime_proxy_maybe_wait_for_interactive_inflight_relief(
         waited_profiles.retain(|profile| profile == selected_profile);
     }
     if waited_profiles.is_empty() {
-        return Ok(false);
+        return Ok(RuntimeInflightReliefWaitResult::NotWaitable);
     }
 
-    let (_, precommit_budget) = runtime_proxy_precommit_budget(continuation, pressure_mode);
-    let remaining_budget = precommit_budget.saturating_sub(selection_started_at.elapsed());
-    let total_wait_budget = wait_budget.min(remaining_budget);
+    let capacity_budget = if cfg!(test) {
+        Duration::from_millis(1_500)
+    } else {
+        Duration::from_millis(runtime_proxy_crate::RUNTIME_PROXY_PRECOMMIT_RECOVERY_BUDGET_MS)
+    };
+    let total_wait_budget = capacity_budget.saturating_sub(selection_started_at.elapsed());
     if total_wait_budget.is_zero() {
-        return Ok(false);
+        return Ok(RuntimeInflightReliefWaitResult::DeadlineExpired);
     }
     let wait_deadline = Instant::now() + total_wait_budget;
 
@@ -223,6 +235,29 @@ pub(crate) fn runtime_proxy_maybe_wait_for_interactive_inflight_relief(
                 runtime_proxy_log_field("request", request_id.to_string()),
                 runtime_proxy_log_field("transport", "http"),
                 runtime_proxy_log_field("wait_ms", total_wait_budget.as_millis().to_string()),
+                runtime_proxy_log_field(
+                    "eligible_candidate_count",
+                    waited_profiles.len().to_string(),
+                ),
+                runtime_proxy_log_field(
+                    "saturated_candidate_count",
+                    waited_profiles.len().to_string(),
+                ),
+                runtime_proxy_log_field(
+                    "waiter_priority",
+                    if continuation {
+                        "continuation"
+                    } else if runtime_proxy_crate::runtime_proxy_request_prefers_interactive_inflight_wait(request)
+                    {
+                        "interactive"
+                    } else {
+                        "normal"
+                    },
+                ),
+                runtime_proxy_log_field(
+                    "deadline_ms",
+                    total_wait_budget.as_millis().to_string(),
+                ),
             ],
         ),
     );
@@ -245,6 +280,24 @@ pub(crate) fn runtime_proxy_maybe_wait_for_interactive_inflight_relief(
                 useful_relief =
                     runtime_any_waited_candidate_relieved(shared, &waited_profiles, route_kind)?;
                 if useful_relief {
+                    runtime_proxy_log(
+                        shared,
+                        runtime_proxy_structured_log_message(
+                            "local_capacity_wait_woke",
+                            [
+                                runtime_proxy_log_field(
+                                    "route",
+                                    runtime_route_kind_label(route_kind),
+                                ),
+                                runtime_proxy_log_field("request", request_id.to_string()),
+                                runtime_proxy_log_field("wake_reason", "capacity_released"),
+                                runtime_proxy_log_field(
+                                    "waited_ms",
+                                    started_at.elapsed().as_millis().to_string(),
+                                ),
+                            ],
+                        ),
+                    );
                     break;
                 }
             }
@@ -279,5 +332,24 @@ pub(crate) fn runtime_proxy_maybe_wait_for_interactive_inflight_relief(
             ],
         ),
     );
-    Ok(useful_relief)
+    if useful_relief {
+        Ok(RuntimeInflightReliefWaitResult::Relieved)
+    } else {
+        runtime_proxy_log(
+            shared,
+            runtime_proxy_structured_log_message(
+                "local_capacity_wait_timeout",
+                [
+                    runtime_proxy_log_field("route", runtime_route_kind_label(route_kind)),
+                    runtime_proxy_log_field("request", request_id.to_string()),
+                    runtime_proxy_log_field(
+                        "waited_ms",
+                        started_at.elapsed().as_millis().to_string(),
+                    ),
+                    runtime_proxy_log_field("wake_reason", "deadline_expired"),
+                ],
+            ),
+        );
+        Ok(RuntimeInflightReliefWaitResult::DeadlineExpired)
+    }
 }
