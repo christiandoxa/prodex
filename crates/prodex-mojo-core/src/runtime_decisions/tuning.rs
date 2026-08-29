@@ -24,6 +24,35 @@ pub struct RuntimeTuningCapacityDefaults {
     pub standard_lane_limit: usize,
 }
 
+/// Values supplied by a selected runtime-proxy policy preset.
+///
+/// `None` means the preset leaves that field unset so downstream runtime
+/// tuning can apply its normal default.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct RuntimeTuningProxyPresetDefaults {
+    pub worker_count: Option<usize>,
+    pub long_lived_worker_count: Option<usize>,
+    pub probe_refresh_worker_count: Option<usize>,
+    pub async_worker_count: Option<usize>,
+    pub long_lived_queue_capacity: Option<usize>,
+    pub active_request_limit: Option<usize>,
+    pub profile_inflight_soft_limit: Option<usize>,
+    pub profile_inflight_hard_limit: Option<usize>,
+    pub responses_active_limit: Option<usize>,
+    pub compact_active_limit: Option<usize>,
+    pub websocket_active_limit: Option<usize>,
+    pub standard_active_limit: Option<usize>,
+    pub websocket_connect_worker_count: Option<usize>,
+    pub websocket_connect_queue_capacity: Option<usize>,
+    pub websocket_connect_overflow_capacity: Option<usize>,
+    pub websocket_dns_worker_count: Option<usize>,
+    pub websocket_dns_queue_capacity: Option<usize>,
+    pub websocket_dns_overflow_capacity: Option<usize>,
+    pub startup_sync_probe_warm_limit: Option<usize>,
+}
+
+const RUNTIME_PROXY_PRESET_FIELD_COUNT: usize = 19;
+
 unsafe extern "C" {
     fn prodex_runtime_tuning_defaults(
         parallelism: i64,
@@ -58,6 +87,7 @@ unsafe extern "C" {
         websocket_lane_limit: *mut i64,
         standard_lane_limit: *mut i64,
     ) -> i64;
+    fn prodex_runtime_proxy_preset_defaults_v1(preset: i64, output: *mut i64) -> i64;
 }
 
 pub fn runtime_tuning_defaults(
@@ -163,5 +193,47 @@ pub fn runtime_tuning_capacity_defaults(
         compact_lane_limit: values[8],
         websocket_lane_limit: values[9],
         standard_lane_limit: values[10],
+    })
+}
+
+/// Resolve one runtime-proxy preset through the Mojo-owned normalization
+/// kernel. Preset ids are owned by the policy adapter: 0 is low, 1 is
+/// default, 2 is many-terminals, and 3 is aggressive.
+pub fn runtime_tuning_proxy_preset_defaults(
+    preset: i64,
+) -> Result<RuntimeTuningProxyPresetDefaults, crate::MojoError> {
+    let mut output = [0_i64; RUNTIME_PROXY_PRESET_FIELD_COUNT];
+    let status = unsafe { prodex_runtime_proxy_preset_defaults_v1(preset, output.as_mut_ptr()) };
+    if status != 0 {
+        return Err(crate::MojoError::InvalidOutput);
+    }
+    let values = output
+        .into_iter()
+        .map(|value| {
+            usize::try_from(value)
+                .map(|value| (value > 0).then_some(value))
+                .map_err(|_| crate::MojoError::InvalidOutput)
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(RuntimeTuningProxyPresetDefaults {
+        worker_count: values[0],
+        long_lived_worker_count: values[1],
+        probe_refresh_worker_count: values[2],
+        async_worker_count: values[3],
+        long_lived_queue_capacity: values[4],
+        active_request_limit: values[5],
+        profile_inflight_soft_limit: values[6],
+        profile_inflight_hard_limit: values[7],
+        responses_active_limit: values[8],
+        compact_active_limit: values[9],
+        websocket_active_limit: values[10],
+        standard_active_limit: values[11],
+        websocket_connect_worker_count: values[12],
+        websocket_connect_queue_capacity: values[13],
+        websocket_connect_overflow_capacity: values[14],
+        websocket_dns_worker_count: values[15],
+        websocket_dns_queue_capacity: values[16],
+        websocket_dns_overflow_capacity: values[17],
+        startup_sync_probe_warm_limit: values[18],
     })
 }

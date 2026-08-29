@@ -81,6 +81,144 @@ active_request_limit = 99
     let _ = fs::remove_dir_all(root);
 }
 
+#[cfg(feature = "mojo")]
+fn runtime_proxy_preset_values(
+    settings: &crate::RuntimePolicyProxySettings,
+) -> [Option<usize>; 19] {
+    [
+        settings.worker_count,
+        settings.long_lived_worker_count,
+        settings.probe_refresh_worker_count,
+        settings.async_worker_count,
+        settings.long_lived_queue_capacity,
+        settings.active_request_limit,
+        settings.profile_inflight_soft_limit,
+        settings.profile_inflight_hard_limit,
+        settings.responses_active_limit,
+        settings.compact_active_limit,
+        settings.websocket_active_limit,
+        settings.standard_active_limit,
+        settings.websocket_connect_worker_count,
+        settings.websocket_connect_queue_capacity,
+        settings.websocket_connect_overflow_capacity,
+        settings.websocket_dns_worker_count,
+        settings.websocket_dns_queue_capacity,
+        settings.websocket_dns_overflow_capacity,
+        settings.startup_sync_probe_warm_limit,
+    ]
+}
+
+#[cfg(feature = "mojo")]
+fn rust_runtime_proxy_preset_values(preset: RuntimePolicyProxyPreset) -> [Option<usize>; 19] {
+    let mut values = [None; 19];
+    match preset {
+        RuntimePolicyProxyPreset::Low => {
+            values = [
+                Some(4),
+                Some(8),
+                Some(2),
+                Some(2),
+                Some(128),
+                Some(48),
+                Some(2),
+                Some(4),
+                Some(36),
+                Some(3),
+                Some(8),
+                Some(2),
+                Some(4),
+                Some(32),
+                Some(64),
+                Some(2),
+                Some(16),
+                Some(32),
+                Some(1),
+            ]
+        }
+        RuntimePolicyProxyPreset::Default => {}
+        RuntimePolicyProxyPreset::ManyTerminals => {
+            values = [
+                Some(12),
+                Some(32),
+                Some(4),
+                Some(4),
+                Some(512),
+                Some(160),
+                Some(4),
+                Some(8),
+                Some(120),
+                Some(8),
+                Some(32),
+                Some(8),
+                Some(12),
+                Some(96),
+                Some(384),
+                Some(6),
+                Some(48),
+                Some(96),
+                Some(2),
+            ]
+        }
+        RuntimePolicyProxyPreset::Aggressive => {
+            values = [
+                Some(24),
+                Some(96),
+                Some(8),
+                Some(8),
+                Some(1024),
+                Some(384),
+                Some(8),
+                Some(16),
+                Some(288),
+                Some(16),
+                Some(96),
+                Some(16),
+                Some(16),
+                Some(128),
+                Some(512),
+                Some(8),
+                Some(64),
+                Some(128),
+                Some(3),
+            ]
+        }
+    }
+    values
+}
+
+#[cfg(feature = "mojo")]
+#[test]
+fn mojo_runtime_proxy_preset_normalization_matches_rust_oracle() {
+    for preset in [
+        RuntimePolicyProxyPreset::Low,
+        RuntimePolicyProxyPreset::Default,
+        RuntimePolicyProxyPreset::ManyTerminals,
+        RuntimePolicyProxyPreset::Aggressive,
+    ] {
+        clear_runtime_policy_cache();
+        let root = temp_root("preset-mojo-parity");
+        let path = runtime_policy_path(&root);
+        fs::write(
+            &path,
+            format!(
+                "version = 1\n\n[runtime_proxy]\npreset = \"{}\"\n",
+                preset.as_str()
+            ),
+        )
+        .unwrap();
+
+        let loaded = runtime_policy_proxy_from_root(&root, None).unwrap();
+        assert_eq!(
+            runtime_proxy_preset_values(&loaded),
+            rust_runtime_proxy_preset_values(preset),
+            "preset {}",
+            preset.as_str()
+        );
+
+        let _ = fs::remove_dir_all(root);
+    }
+}
+
 #[test]
 fn runtime_policy_proxy_uses_env_preset_without_policy_file() {
     clear_runtime_policy_cache();
