@@ -376,6 +376,10 @@ impl RuntimeLogFormat {
             _ => None,
         }
     }
+
+    fn settings(self) -> RuntimePolicyProxySettings {
+        self.resolve()
+    }
 }
 
 #[derive(Debug, Clone, Serialize)]
