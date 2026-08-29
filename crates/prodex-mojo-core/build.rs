@@ -259,6 +259,7 @@ fn selected_sources() -> Vec<&'static str> {
         || env::var_os("CARGO_FEATURE_MOJO_CORE").is_some()
     {
         sources.push("../../mojo/prodex_core/quota_pressure.mojo");
+        sources.push("../../mojo/prodex_core/runtime_auto_redeem.mojo");
         sources.push("../../mojo/prodex_core/profile_schedule.mojo");
         sources.push("../../mojo/prodex_core/candidate_decision.mojo");
         sources.push("../../mojo/prodex_core/smart_context_rehydrate.mojo");

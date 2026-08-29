@@ -1,39 +1,61 @@
+#[cfg(feature = "mojo-quota")]
 use super::{
     RateLimitResetCreditConsumeFlow, RateLimitResetCreditConsumeOutcome,
-    RuntimePrecommitQuotaBlockReason, RuntimeRotationProxyShared, RuntimeRouteKind,
     fetch_usage_with_proxy_policy, runtime_proxy_log, runtime_quota_summary_for_route,
     runtime_quota_summary_log_fields, runtime_route_kind_label,
     update_runtime_profile_probe_cache_with_usage,
 };
+use super::{RuntimePrecommitQuotaBlockReason, RuntimeRotationProxyShared, RuntimeRouteKind};
 use anyhow::Result;
+#[cfg(feature = "mojo-quota")]
 use chrono::Local;
+#[cfg(any(feature = "mojo-quota", test))]
 use prodex_domain::RequestId;
+#[cfg(any(feature = "mojo-quota", test))]
 use redaction::redaction_redact_secret_like_text;
 use std::collections::BTreeSet;
 
 #[path = "auto_redeem/pool.rs"]
 mod pool;
+#[cfg(any(feature = "mojo-quota", test))]
 #[path = "auto_redeem/summary.rs"]
 mod summary;
+#[cfg(not(any(feature = "mojo-quota", test)))]
+mod summary {
+    use super::RuntimePrecommitQuotaBlockReason;
+
+    pub(crate) fn runtime_auto_redeem_precommit_reason_warrants_credit(
+        reason: RuntimePrecommitQuotaBlockReason,
+    ) -> bool {
+        matches!(
+            reason,
+            RuntimePrecommitQuotaBlockReason::ExhaustedBeforeSend
+        )
+    }
+}
+#[cfg(feature = "mojo-quota")]
 use pool::runtime_auto_redeem_pool_has_weekly_remaining_profile;
 pub(crate) use pool::runtime_best_auto_redeem_profile_name;
+#[cfg(feature = "mojo-quota")]
+use summary::runtime_auto_redeem_candidate_is_eligible;
 pub(crate) use summary::runtime_auto_redeem_precommit_reason_warrants_credit;
-use summary::{
-    runtime_auto_redeem_quota_summary_allows_retry,
-    runtime_auto_redeem_quota_summary_warrants_credit,
-};
+#[cfg(feature = "mojo-quota")]
+use summary::runtime_auto_redeem_quota_summary_allows_retry;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum RuntimeAutoRedeemResetCreditOutcome {
     Redeemed,
     NothingToRedeem,
+    #[cfg(feature = "mojo-quota")]
     Failed,
 }
 
+#[cfg(any(feature = "mojo-quota", test))]
 fn runtime_auto_redeem_idempotency_key() -> String {
     format!("prodex-auto-redeem-{}", RequestId::new())
 }
 
+#[cfg(any(feature = "mojo-quota", test))]
 fn runtime_auto_redeem_error_log_value(err: &anyhow::Error) -> String {
     redaction_redact_secret_like_text(&err.to_string()).replace('\n', " ")
 }
@@ -52,6 +74,18 @@ pub(crate) fn refresh_runtime_auto_redeem_pool_missing_quota(
     )
 }
 
+#[cfg(not(feature = "mojo-quota"))]
+pub(crate) fn runtime_auto_redeem_usage_limit_reset_credit(
+    _shared: &RuntimeRotationProxyShared,
+    _profile_name: &str,
+    _route_kind: RuntimeRouteKind,
+    _context: &str,
+    _prefer_best_pool_profile: bool,
+) -> Result<RuntimeAutoRedeemResetCreditOutcome> {
+    Ok(RuntimeAutoRedeemResetCreditOutcome::NothingToRedeem)
+}
+
+#[cfg(feature = "mojo-quota")]
 pub(crate) fn runtime_auto_redeem_usage_limit_reset_credit(
     shared: &RuntimeRotationProxyShared,
     profile_name: &str,
@@ -146,28 +180,24 @@ pub(crate) fn runtime_auto_redeem_usage_limit_reset_credit(
     };
     update_runtime_profile_probe_cache_with_usage(shared, profile_name, before_usage.clone())?;
     let quota_summary = runtime_quota_summary_for_route(&before_usage, route_kind);
-    if !runtime_auto_redeem_quota_summary_warrants_credit(quota_summary, Local::now().timestamp()) {
+    let available_count = before_usage
+        .rate_limit_reset_credits
+        .as_ref()
+        .map(|credits| credits.available_count)
+        .unwrap_or_default();
+    #[cfg(feature = "mojo-quota")]
+    let warrants_credit = runtime_auto_redeem_candidate_is_eligible(
+        quota_summary,
+        available_count,
+        Local::now().timestamp(),
+    )?;
+    if !warrants_credit {
         runtime_proxy_log(
             shared,
             format!(
                 "{context}_auto_redeem_deferred profile={profile_name} route={} reason=not_exhausted_or_natural_reset_near {}",
                 runtime_route_kind_label(route_kind),
                 runtime_quota_summary_log_fields(quota_summary),
-            ),
-        );
-        return Ok(RuntimeAutoRedeemResetCreditOutcome::NothingToRedeem);
-    }
-    let available_count = before_usage
-        .rate_limit_reset_credits
-        .as_ref()
-        .map(|credits| credits.available_count)
-        .unwrap_or_default();
-    if available_count <= 0 {
-        runtime_proxy_log(
-            shared,
-            format!(
-                "{context}_auto_redeem_unavailable profile={profile_name} route={} available_count={available_count}",
-                runtime_route_kind_label(route_kind),
             ),
         );
         return Ok(RuntimeAutoRedeemResetCreditOutcome::NothingToRedeem);

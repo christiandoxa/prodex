@@ -1,5 +1,11 @@
 use super::*;
-use prodex_quota::AuthSummary;
+#[cfg(feature = "mojo")]
+use prodex_mojo_core::runtime::{
+    QuotaRouteScoreInput, QuotaScoreInput, quota_route_score_batch, quota_score_batch,
+};
+use prodex_quota::{
+    AuthSummary, scale_quota_pressure_for_plan, usage_plan_capacity_pressure_scale_bps,
+};
 use prodex_shared_types::{ReadyProfileCandidate, RunProfileProbeReport, RuntimeQuotaSource};
 use std::collections::BTreeMap;
 
@@ -97,6 +103,112 @@ fn selection_score_at_is_deterministic() {
     );
     assert_eq!(first.five_hour_reset_at, now + 3_600);
     assert_eq!(first.weekly_reset_at, now + 86_400);
+}
+
+#[cfg(feature = "mojo")]
+#[test]
+fn route_score_contract_matches_shared_score_for_normalized_input() {
+    let now = 1_700_000_000;
+    let mut usage = selection_usage(now, 80);
+    usage.plan_type = Some("pro".to_string());
+    let weekly = required_main_window_snapshot_at(&usage, "weekly", now).unwrap();
+    let five_hour = required_main_window_snapshot_at(&usage, "5h", now).unwrap();
+    let scale_bps = usage_plan_capacity_pressure_scale_bps(&usage);
+    let route_input = QuotaRouteScoreInput {
+        weekly_pressure: weekly.pressure_score,
+        five_hour_pressure: five_hour.pressure_score,
+        scale_bps,
+        weekly_remaining: weekly.remaining_percent,
+        five_hour_remaining: five_hour.remaining_percent,
+        weekly_has_value: true,
+        five_hour_has_value: true,
+        weekly_reset_at: weekly.reset_at,
+        five_hour_reset_at: five_hour.reset_at,
+    };
+    let route_score = quota_route_score_batch(&[route_input], 0)
+        .expect("route score contract should accept complete windows");
+    let normalized_score = quota_score_batch(
+        &[QuotaScoreInput {
+            weekly_pressure: scale_quota_pressure_for_plan(weekly.pressure_score, scale_bps),
+            five_hour_pressure: scale_quota_pressure_for_plan(five_hour.pressure_score, scale_bps),
+            weekly_remaining: weekly.remaining_percent,
+            five_hour_remaining: five_hour.remaining_percent,
+            weekly_has_value: true,
+            five_hour_has_value: true,
+            weekly_reset_at: weekly.reset_at,
+            five_hour_reset_at: five_hour.reset_at,
+        }],
+        0,
+    )
+    .expect("shared score contract should accept normalized windows");
+
+    assert_eq!(route_score, normalized_score);
+    let resolved = ready_profile_score_for_route_at(&usage, RuntimeRouteKind::Responses, now);
+    assert_eq!(resolved.weekly_pressure, route_score[0].weekly_pressure);
+    assert_eq!(
+        resolved.five_hour_pressure,
+        route_score[0].five_hour_pressure
+    );
+    assert_eq!(resolved.total_pressure, route_score[0].total_pressure);
+    assert_eq!(resolved.reserve_floor, route_score[0].reserve_floor);
+    assert_eq!(resolved.weekly_remaining, route_score[0].weekly_remaining);
+    assert_eq!(
+        resolved.five_hour_remaining,
+        route_score[0].five_hour_remaining
+    );
+    assert_eq!(resolved.weekly_reset_at, route_score[0].weekly_reset_at);
+    assert_eq!(
+        resolved.five_hour_reset_at,
+        route_score[0].five_hour_reset_at
+    );
+}
+
+#[test]
+fn route_score_contract_marks_incomplete_window_unknown() {
+    let now = 1_700_000_000;
+    let mut usage = selection_usage(now, 80);
+    usage.rate_limit.as_mut().unwrap().primary_window = None;
+
+    let score = ready_profile_score_for_route_at(&usage, RuntimeRouteKind::Responses, now);
+    assert_eq!(score.total_pressure, i64::MAX);
+    assert_eq!(score.five_hour_pressure, i64::MAX);
+
+    #[cfg(feature = "mojo")]
+    {
+        let weekly = required_main_window_snapshot_at(&usage, "weekly", now).unwrap();
+        let route_score = quota_route_score_batch(
+            &[QuotaRouteScoreInput {
+                weekly_pressure: weekly.pressure_score,
+                five_hour_pressure: i64::MAX,
+                scale_bps: 10_000,
+                weekly_remaining: weekly.remaining_percent,
+                five_hour_remaining: 0,
+                weekly_has_value: true,
+                five_hour_has_value: false,
+                weekly_reset_at: weekly.reset_at,
+                five_hour_reset_at: i64::MAX,
+            }],
+            0,
+        )
+        .expect("route score contract should accept an incomplete observation");
+        assert_eq!(route_score[0].pressure_band, 4);
+
+        let generic_score = quota_score_batch(
+            &[QuotaScoreInput {
+                weekly_pressure: weekly.pressure_score,
+                five_hour_pressure: i64::MAX,
+                weekly_remaining: weekly.remaining_percent,
+                five_hour_remaining: 0,
+                weekly_has_value: true,
+                five_hour_has_value: false,
+                weekly_reset_at: weekly.reset_at,
+                five_hour_reset_at: i64::MAX,
+            }],
+            0,
+        )
+        .expect("generic score contract should accept an incomplete observation");
+        assert_eq!(generic_score[0].pressure_band, 0);
+    }
 }
 
 #[test]

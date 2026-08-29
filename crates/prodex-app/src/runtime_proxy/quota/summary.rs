@@ -17,25 +17,9 @@ pub(crate) fn runtime_profile_known_quota_reset_at(
     route_kind: RuntimeRouteKind,
 ) -> Option<i64> {
     let now = Local::now().timestamp();
-    runtime
-        .profile_probe_cache
-        .get(profile_name)
-        .and_then(|entry| entry.result.as_ref().ok())
-        .map(|usage| runtime_quota_summary_for_route(usage, route_kind))
-        .and_then(|summary| runtime_quota_summary_blocking_reset_at(summary, route_kind))
-        .filter(|reset_at| *reset_at > now)
-        .or_else(|| {
-            runtime
-                .profile_usage_snapshots
-                .get(profile_name)
-                .and_then(|snapshot| {
-                    runtime_quota_summary_blocking_reset_at(
-                        runtime_quota_summary_from_usage_snapshot(snapshot, route_kind),
-                        route_kind,
-                    )
-                })
-                .filter(|reset_at| *reset_at > now)
-        })
+    let (summary, _) =
+        runtime_profile_quota_summary_for_route_from_state(runtime, profile_name, route_kind, now);
+    runtime_quota_summary_blocking_reset_at(summary, route_kind).filter(|reset_at| *reset_at > now)
 }
 
 pub(crate) fn runtime_quota_summary_allows_soft_affinity(

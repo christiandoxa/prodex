@@ -32,15 +32,23 @@ pub(super) fn required_window_snapshot_at(
     let window = find_main_window(pair, label)?;
     let remaining_percent = remaining_percent(window.used_percent);
     let reset_at = window.reset_at.unwrap_or(i64::MAX);
-    let seconds_until_reset = if reset_at == i64::MAX {
-        i64::MAX
-    } else {
-        (reset_at - now).max(0)
+
+    #[cfg(feature = "mojo")]
+    let pressure_score = crate::mojo::quota_window_pressure(remaining_percent, reset_at, now)
+        .expect("Mojo quota window pressure failed");
+
+    #[cfg(not(feature = "mojo"))]
+    let pressure_score = {
+        let seconds_until_reset = if reset_at == i64::MAX {
+            i64::MAX
+        } else {
+            reset_at.saturating_sub(now).max(0)
+        };
+        seconds_until_reset
+            .saturating_mul(1_000)
+            .checked_div(remaining_percent.max(1))
+            .unwrap_or(i64::MAX)
     };
-    let pressure_score = seconds_until_reset
-        .saturating_mul(1_000)
-        .checked_div(remaining_percent.max(1))
-        .unwrap_or(i64::MAX);
 
     Some(MainWindowSnapshot {
         remaining_percent,
