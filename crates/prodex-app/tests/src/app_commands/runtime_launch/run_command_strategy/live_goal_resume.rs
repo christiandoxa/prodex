@@ -351,10 +351,7 @@ fn run_strategy_recovers_exact_codex_0151_usage_limit_after_compaction_without_r
         prodex_runtime_launch::codex_resume_session_id(&strategy.codex_args),
         Some(session_id)
     );
-    assert!(!strategy
-        .codex_args
-        .iter()
-        .any(|arg| arg == original_prompt));
+    assert!(!strategy.codex_args.iter().any(|arg| arg == original_prompt));
     assert_eq!(
         strategy.codex_args.last(),
         Some(&OsString::from(CONTINUATION_PROMPT))
@@ -383,9 +380,11 @@ fn run_strategy_recovers_exact_codex_0151_usage_limit_after_compaction_without_r
     .unwrap();
     let terminal_args = terminal_strategy.codex_args.clone();
     assert!(!terminal_strategy.runtime_request().allow_auto_rotate);
-    assert!(!terminal_strategy
-        .relaunch_after_child_exit(&exit_status(1))
-        .unwrap());
+    assert!(
+        !terminal_strategy
+            .relaunch_after_child_exit(&exit_status(1))
+            .unwrap()
+    );
     assert_eq!(terminal_strategy.codex_args, terminal_args);
     assert!(terminal_strategy.pending_goal_resume_plan.is_none());
 }

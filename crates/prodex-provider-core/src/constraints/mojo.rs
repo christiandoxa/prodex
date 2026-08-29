@@ -15,8 +15,7 @@ pub(super) fn resolve_requirements(
     if let Some(reserves) = entry.reasoning_reserve_tokens.as_ref() {
         for (effort, value) in reserves {
             reasoning_reserve_by_effort[usize::try_from(reasoning_effort_to_mojo(*effort))
-                .expect("Mojo reasoning effort tag fits")
-                as usize] = Some(*value);
+                .expect("Mojo reasoning effort tag fits")] = Some(*value);
         }
     }
     let resolution = resolve_requirement_input(mojo_constraints::RequirementResolutionInput {

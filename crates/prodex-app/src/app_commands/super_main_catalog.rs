@@ -112,9 +112,7 @@ fn main_model_choice_from_provider(
                     .collect()
             };
             let entry = prodex_provider_core::provider_catalog_entry(provider, model);
-            let aliases = entry
-                .map(|entry| entry.aliases.clone())
-                .unwrap_or_default();
+            let aliases = entry.map(|entry| entry.aliases.clone()).unwrap_or_default();
             let default_effort = reasoning
                 .selected_reasoning_effort
                 .and_then(sub_agent_effort)
@@ -407,7 +405,10 @@ pub(super) fn main_model_choices_from_catalog(
     {
         return None;
     }
-    let owned = entries.into_iter().map(dynamic_catalog_model).collect::<Vec<_>>();
+    let owned = entries
+        .into_iter()
+        .map(dynamic_catalog_model)
+        .collect::<Vec<_>>();
     let effort_views = owned
         .iter()
         .map(|entry| entry.efforts.iter().map(String::as_str).collect::<Vec<_>>())
@@ -630,7 +631,11 @@ fn valid_default_effort(default_effort: Option<&str>, efforts: &[String]) -> Opt
     default_effort
         .map(str::trim)
         .filter(|default| !default.is_empty())
-        .filter(|default| efforts.iter().any(|effort| effort.eq_ignore_ascii_case(default)))
+        .filter(|default| {
+            efforts
+                .iter()
+                .any(|effort| effort.eq_ignore_ascii_case(default))
+        })
         .map(str::to_string)
 }
 
