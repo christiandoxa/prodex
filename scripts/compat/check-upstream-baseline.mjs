@@ -56,7 +56,7 @@ const REQUIRED_CRITICAL_FILES = [
 
 const REQUIRED_FILE_CONTAINS = {
   "codex-rs/core/src/client.rs": [
-    "RESPONSES_ENDPOINT",
+    "ResponsesEndpoint::Responses",
     "/responses",
     "RESPONSES_COMPACT_ENDPOINT",
     "/responses/compact",
@@ -304,7 +304,7 @@ const REQUIRED_FILE_CONTAINS = {
   ],
   "codex-rs/codex-api/src/endpoint/responses_websocket.rs": [
     "ResponsesWebsocketConnection",
-    "websocket_url_for_path(\"responses\")",
+    "websocket_url_for_path(self.endpoint.path())",
     "merge_request_headers",
     "add_auth_headers",
     "treatment_from_headers",
@@ -598,7 +598,7 @@ const REQUIRED_EXPECTED_ROUTES = [
   "/realtime/calls",
   "alpha/search",
   "/memories/trace_summarize",
-  "websocket_url_for_path(\"responses\")",
+  "websocket_url_for_path(self.endpoint.path())",
 ];
 
 const REQUIRED_APP_SERVER_METHODS = [
@@ -635,7 +635,7 @@ const REQUIRED_SEMANTIC_CHECKS = [
     id: "client.responses-route",
     kind: "route",
     file: "codex-rs/core/src/client.rs",
-    file_contains_all: ["RESPONSES_ENDPOINT", "/responses"],
+    file_contains_all: ["ResponsesEndpoint::Responses", "/responses"],
     expected_routes_all: ["/responses"],
   },
   {
@@ -983,8 +983,8 @@ const REQUIRED_SEMANTIC_CHECKS = [
     id: "websocket.responses-route",
     kind: "route",
     file: "codex-rs/codex-api/src/endpoint/responses_websocket.rs",
-    file_contains_all: ["ResponsesWebsocketConnection", "websocket_url_for_path(\"responses\")"],
-    expected_routes_all: ["websocket_url_for_path(\"responses\")"],
+    file_contains_all: ["ResponsesWebsocketConnection", "websocket_url_for_path(self.endpoint.path())"],
+    expected_routes_all: ["websocket_url_for_path(self.endpoint.path())"],
   },
   {
     id: "websocket.session-behavior",
@@ -992,7 +992,7 @@ const REQUIRED_SEMANTIC_CHECKS = [
     file: "codex-rs/codex-api/src/endpoint/responses_websocket.rs",
     file_contains_all: [
       "ResponsesWebsocketConnection",
-      "websocket_url_for_path(\"responses\")",
+      "websocket_url_for_path(self.endpoint.path())",
       "merge_request_headers",
       "add_auth_headers",
       "treatment_from_headers",
@@ -1009,7 +1009,7 @@ const REQUIRED_SEMANTIC_CHECKS = [
       "previous_response_not_found",
       "PREVIOUS_RESPONSE_NOT_FOUND_MESSAGE",
     ],
-    expected_routes_all: ["websocket_url_for_path(\"responses\")"],
+    expected_routes_all: ["websocket_url_for_path(self.endpoint.path())"],
     expected_headers_all: ["x-codex-turn-state"],
     expected_stream_events_all: [
       "response.created",
