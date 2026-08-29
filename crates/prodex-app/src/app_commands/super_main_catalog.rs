@@ -2,10 +2,7 @@ use super::super_prompt;
 use crate::{AppPaths, canonical_sub_agent_efforts};
 use prodex_cli::SubAgentReasoningEffort;
 #[cfg(feature = "mojo-core")]
-use prodex_mojo_core::rich::{
-    CatalogConfigurationInput, CatalogConfigurationPlan, CatalogPlanModel, CatalogPlanRole,
-    plan_catalog_configuration, plan_dynamic_catalog,
-};
+use prodex_mojo_core::rich::{CatalogPlanModel, plan_dynamic_catalog};
 use std::collections::BTreeSet;
 use std::fs;
 use std::io::Read as IoRead;
@@ -154,23 +151,6 @@ pub(super) fn main_model_choice_is_selectable(choices: &[MainModelChoice], model
     choices
         .iter()
         .any(|choice| main_model_choice_matches(choice, model))
-}
-
-pub(super) fn provider_model_choice_matches(
-    provider: prodex_provider_core::ProviderId,
-    choice: &prodex_provider_core::ProviderModelChoice,
-    model: &str,
-) -> bool {
-    let prodex_provider_core::ProviderModelChoice::Model(candidate) = choice else {
-        return false;
-    };
-    candidate.eq_ignore_ascii_case(model)
-        || prodex_provider_core::provider_catalog_entry(provider, candidate).is_some_and(|entry| {
-            entry
-                .aliases
-                .iter()
-                .any(|alias| alias.eq_ignore_ascii_case(model))
-        })
 }
 
 #[cfg(not(feature = "mojo-core"))]
@@ -449,17 +429,14 @@ pub(super) fn main_model_choices_from_catalog(
         default_effort: None,
     }];
     for model in plan.models {
-        let Some(source) = owned
+        let source = owned
             .iter()
             .find(|entry| entry.id.trim() == model.id)
             .or_else(|| {
                 owned
                     .iter()
                     .find(|entry| entry.id.trim().eq_ignore_ascii_case(&model.id))
-            })
-        else {
-            return None;
-        };
+            })?;
         choices.push(MainModelChoice {
             choice: prodex_provider_core::ProviderModelChoice::Model(model.id),
             label: model.label,
