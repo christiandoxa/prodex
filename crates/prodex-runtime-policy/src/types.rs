@@ -376,10 +376,6 @@ impl RuntimeLogFormat {
             _ => None,
         }
     }
-
-    fn settings(self) -> RuntimePolicyProxySettings {
-        self.resolve()
-    }
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -673,6 +669,16 @@ impl RuntimePolicyProxyPreset {
             "aggressive" => Some(Self::Aggressive),
             _ => None,
         }
+    }
+
+    #[cfg(feature = "mojo")]
+    fn settings(self) -> RuntimePolicyProxySettings {
+        self.resolve()
+    }
+
+    #[cfg(not(feature = "mojo"))]
+    fn settings(self) -> RuntimePolicyProxySettings {
+        self.resolve()
     }
 }
 
