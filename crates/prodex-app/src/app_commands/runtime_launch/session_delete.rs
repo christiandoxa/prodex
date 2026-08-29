@@ -42,7 +42,7 @@ pub(crate) fn maintain_shared_codex_session_after_child_exit(
     }
 }
 
-pub(super) fn clear_codex_session_binding(session_id: &str) -> Result<()> {
+pub(crate) fn clear_codex_session_binding(session_id: &str) -> Result<()> {
     let paths = AppPaths::discover()?;
     let _lock = acquire_state_file_lock(&paths)?;
     let mut state = AppState::load_with_recovery_unlocked(&paths)?.value;

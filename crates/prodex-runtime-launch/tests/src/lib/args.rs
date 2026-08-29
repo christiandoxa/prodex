@@ -536,6 +536,151 @@ fn retarget_codex_tui_resume_args_omits_thread_source() {
 }
 
 #[test]
+fn retarget_codex_exec_resume_args_keeps_headless_exec_mode() {
+    let args = retarget_codex_exec_resume_args(
+        &[
+            OsString::from("--model"),
+            OsString::from("gpt-5.6"),
+            OsString::from("exec"),
+            OsString::from("original prompt"),
+        ],
+        "019c9e3d-45a0-7ad0-a6ee-b194ac2d44f9",
+    );
+
+    assert_eq!(
+        args,
+        [
+            OsString::from("--model"),
+            OsString::from("gpt-5.6"),
+            OsString::from("exec"),
+            OsString::from("resume"),
+            OsString::from("019c9e3d-45a0-7ad0-a6ee-b194ac2d44f9"),
+        ]
+    );
+}
+
+#[test]
+fn retarget_codex_exec_resume_args_preserves_exec_options_not_prompt() {
+    let args = retarget_codex_exec_resume_args(
+        &[
+            OsString::from("exec"),
+            OsString::from("--json"),
+            OsString::from("--output-last-message"),
+            OsString::from("/tmp/last-message.txt"),
+            OsString::from("-c"),
+            OsString::from("model_reasoning_effort=\"max\""),
+            OsString::from("original prompt"),
+        ],
+        "019c9e3d-45a0-7ad0-a6ee-b194ac2d44f9",
+    );
+
+    assert_eq!(
+        args,
+        [
+            OsString::from("exec"),
+            OsString::from("resume"),
+            OsString::from("019c9e3d-45a0-7ad0-a6ee-b194ac2d44f9"),
+            OsString::from("--json"),
+            OsString::from("--output-last-message"),
+            OsString::from("/tmp/last-message.txt"),
+            OsString::from("-c"),
+            OsString::from("model_reasoning_effort=\"max\""),
+        ]
+    );
+}
+
+#[test]
+fn retarget_codex_exec_resume_args_replaces_last_with_exact_session() {
+    let session_id = OsString::from("019c9e3d-45a0-7ad0-a6ee-b194ac2d44f9");
+    for original in [
+        vec![OsString::from("exec"), OsString::from("--last"), OsString::from("prompt")],
+        vec![
+            OsString::from("exec"),
+            OsString::from("resume"),
+            OsString::from("--last"),
+            OsString::from("prompt"),
+        ],
+    ] {
+        assert_eq!(
+            retarget_codex_exec_resume_args(&original, session_id.to_str().unwrap()),
+            [OsString::from("exec"), OsString::from("resume"), session_id.clone()]
+        );
+    }
+}
+
+#[test]
+fn retarget_codex_exec_resume_args_drops_prompt_before_separator() {
+    let args = retarget_codex_exec_resume_args(
+        &[
+            OsString::from("exec"),
+            OsString::from("original prompt"),
+            OsString::from("--"),
+            OsString::from("literal prompt argument"),
+        ],
+        "019c9e3d-45a0-7ad0-a6ee-b194ac2d44f9",
+    );
+
+    assert_eq!(
+        args,
+        [
+            OsString::from("exec"),
+            OsString::from("resume"),
+            OsString::from("019c9e3d-45a0-7ad0-a6ee-b194ac2d44f9"),
+        ]
+    );
+}
+
+#[test]
+fn retarget_codex_exec_resume_args_drops_stdin_prompt_and_thread_source() {
+    let args = retarget_codex_exec_resume_args(
+        &[
+            OsString::from("exec"),
+            OsString::from("--thread-source"),
+            OsString::from("automated_review"),
+            OsString::from("-"),
+        ],
+        "019c9e3d-45a0-7ad0-a6ee-b194ac2d44f9",
+    );
+
+    assert_eq!(
+        args,
+        [
+            OsString::from("exec"),
+            OsString::from("resume"),
+            OsString::from("019c9e3d-45a0-7ad0-a6ee-b194ac2d44f9"),
+        ]
+    );
+}
+
+#[test]
+fn retarget_codex_tui_resume_args_preserves_options_after_prompt() {
+    let args = retarget_codex_tui_resume_args(
+        &[
+            OsString::from("--model"),
+            OsString::from("gpt-5.6"),
+            OsString::from("original prompt"),
+            OsString::from("--no-alt-screen"),
+            OsString::from("--cd"),
+            OsString::from("/home/test-user/workspace"),
+        ],
+        "019c9e3d-45a0-7ad0-a6ee-b194ac2d44f9",
+    );
+
+    assert_eq!(
+        args,
+        [
+            OsString::from("--model"),
+            OsString::from("gpt-5.6"),
+            OsString::from("resume"),
+            OsString::from("019c9e3d-45a0-7ad0-a6ee-b194ac2d44f9"),
+            OsString::from("--no-alt-screen"),
+            OsString::from("--cd"),
+            OsString::from("/home/test-user/workspace"),
+        ]
+    );
+}
+
+#[test]
 fn codex_resume_session_id_ignores_resume_without_target() {
     assert_eq!(
         codex_resume_session_id(&[OsString::from("resume"), OsString::from("--last")]),

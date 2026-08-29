@@ -16,6 +16,7 @@ pub(crate) mod resume_repair;
 mod run_command_strategy;
 mod selection;
 mod session_delete;
+mod usage_limit_recovery;
 pub(super) use command_server::codex_app_server_broker_launch;
 #[cfg(test)]
 use command_server::prepare_codex_command_server_runtime_launch;
@@ -37,17 +38,25 @@ use gateway_status::print_gateway_status;
 use goal_resume::*;
 pub(super) use resume_provider::runtime_resume_provider_from_codex_args;
 use resume_provider::*;
+pub(crate) use resume_provider::{
+    RuntimeResumeSessionSettings, runtime_resume_session_settings_from_codex_args,
+};
 use run_command_strategy::RunCommandStrategy;
 use selection::RuntimeLaunchSelection;
 pub(crate) use selection::resolve_runtime_launch_profile_name;
-use session_delete::{
-    cleanup_codex_deleted_session_binding, clear_codex_session_binding,
-    resolve_codex_delete_session_id,
-};
+use session_delete::{cleanup_codex_deleted_session_binding, resolve_codex_delete_session_id};
 pub(crate) use session_delete::{
-    maintain_shared_codex_session_after_child_exit, maintain_shared_codex_sessions_after_child_exit,
+    clear_codex_session_binding, maintain_shared_codex_session_after_child_exit,
+    maintain_shared_codex_sessions_after_child_exit,
 };
 use std::{borrow::Cow, path::Path, time::Instant};
+#[cfg(test)]
+pub(crate) use usage_limit_recovery::runtime_goal_monitor_dir;
+pub(crate) use usage_limit_recovery::{
+    GoalResumeRelaunchPlan, GoalUsageLimitMonitor, RuntimeUsageLimitResumeOptions,
+    next_runtime_usage_limit_plan, plan_runtime_usage_limit_relaunch,
+    prepare_goal_usage_limit_monitor,
+};
 use {preflight::*, provider_names::*, providers::*, resume_repair::*};
 pub(crate) fn handle_run(args: RunArgs) -> Result<()> {
     if let Some(base_url) = args.base_url.as_deref() {
@@ -112,7 +121,7 @@ pub(crate) fn resolve_super_dry_run_main_agent(args: &mut SuperArgs) -> Result<(
     )
     .map(|_| ())
 }
-fn restore_resume_session_settings(
+pub(crate) fn restore_resume_session_settings(
     codex_args: &mut Vec<OsString>,
     settings: Option<&RuntimeResumeSessionSettings>,
     model_is_explicit: bool,
