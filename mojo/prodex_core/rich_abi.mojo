@@ -5,6 +5,9 @@ from rich_types import (
     ProdexRichContextRecord,
     ProdexRichContextResult,
     ProdexRichCatalogReasoningResult,
+    ProdexRichCatalogPlanChoice,
+    ProdexRichCatalogPlanModel,
+    ProdexRichCatalogPlanResult,
     ProdexRichFallbackRecord,
     ProdexRichFallbackResult,
     ProdexRichIssue,
@@ -36,7 +39,7 @@ def prodex_mojo_rich_abi_version() abi("C") -> Int64:
 def prodex_mojo_rich_abi_layout(
     output: Pointer[mut=True, UInt64, _], output_count: Int64
 ) abi("C") -> Int64:
-    if output_count != 34:
+    if output_count != 40:
         return 1
     output[unsafe_offset=0] = UInt64(size_of[ProdexRichStringView]())
     output[unsafe_offset=1] = UInt64(align_of[ProdexRichStringView]())
@@ -72,4 +75,10 @@ def prodex_mojo_rich_abi_layout(
     output[unsafe_offset=31] = UInt64(align_of[ProdexRichPolicyRouteInput]())
     output[unsafe_offset=32] = UInt64(size_of[ProdexRichPolicyRouteResult]())
     output[unsafe_offset=33] = UInt64(align_of[ProdexRichPolicyRouteResult]())
+    output[unsafe_offset=34] = UInt64(size_of[ProdexRichCatalogPlanModel]())
+    output[unsafe_offset=35] = UInt64(align_of[ProdexRichCatalogPlanModel]())
+    output[unsafe_offset=36] = UInt64(size_of[ProdexRichCatalogPlanChoice]())
+    output[unsafe_offset=37] = UInt64(align_of[ProdexRichCatalogPlanChoice]())
+    output[unsafe_offset=38] = UInt64(size_of[ProdexRichCatalogPlanResult]())
+    output[unsafe_offset=39] = UInt64(align_of[ProdexRichCatalogPlanResult]())
     return 0
