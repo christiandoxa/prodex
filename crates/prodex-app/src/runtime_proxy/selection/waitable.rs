@@ -263,6 +263,7 @@ pub(crate) fn runtime_proxy_maybe_wait_for_interactive_inflight_relief(
     );
     let started_at = Instant::now();
     let mut observed_revision = runtime_profile_inflight_release_revision(shared);
+    let mut observed_selection_revision = shared.lane_admission.selection_change_revision();
     let mut signaled = false;
     let mut useful_relief = false;
     let mut wake_source = RuntimeProfileInFlightWaitOutcome::Timeout;
@@ -271,12 +272,17 @@ pub(crate) fn runtime_proxy_maybe_wait_for_interactive_inflight_relief(
         if remaining_wait.is_zero() {
             break;
         }
-        match runtime_profile_inflight_wait_outcome_since(shared, remaining_wait, observed_revision)
-        {
+        match runtime_profile_inflight_wait_outcome_since_with_selection_revision(
+            shared,
+            remaining_wait,
+            observed_revision,
+            observed_selection_revision,
+        ) {
             RuntimeProfileInFlightWaitOutcome::InflightRelease => {
                 signaled = true;
                 wake_source = RuntimeProfileInFlightWaitOutcome::InflightRelease;
                 observed_revision = runtime_profile_inflight_release_revision(shared);
+                observed_selection_revision = shared.lane_admission.selection_change_revision();
                 useful_relief =
                     runtime_any_waited_candidate_relieved(shared, &waited_profiles, route_kind)?;
                 if useful_relief {
@@ -305,6 +311,20 @@ pub(crate) fn runtime_proxy_maybe_wait_for_interactive_inflight_relief(
                 signaled = true;
                 wake_source = RuntimeProfileInFlightWaitOutcome::OtherNotify;
                 observed_revision = runtime_profile_inflight_release_revision(shared);
+                observed_selection_revision = shared.lane_admission.selection_change_revision();
+                useful_relief =
+                    runtime_any_waited_candidate_relieved(shared, &waited_profiles, route_kind)?;
+                if useful_relief {
+                    break;
+                }
+            }
+            RuntimeProfileInFlightWaitOutcome::SelectionChanged => {
+                signaled = true;
+                wake_source = RuntimeProfileInFlightWaitOutcome::SelectionChanged;
+                observed_revision = runtime_profile_inflight_release_revision(shared);
+                observed_selection_revision = shared.lane_admission.selection_change_revision();
+                useful_relief = true;
+                break;
             }
             RuntimeProfileInFlightWaitOutcome::Timeout => {
                 if !signaled {

@@ -40,6 +40,7 @@ pub(crate) fn schedule_runtime_state_save_request(
     shared: &RuntimeRotationProxyShared,
     request: RuntimeStateSaveRequest,
 ) {
+    shared.lane_admission.notify_selection_change();
     let reason = request.mutation.reason();
     let reason = reason.as_str();
     if !runtime_proxy_persistence_enabled(shared) {
@@ -252,6 +253,7 @@ pub(crate) fn schedule_runtime_state_save_from_runtime(
     runtime: &RuntimeRotationState,
     mutation: RuntimeStateMutation,
 ) {
+    shared.lane_admission.notify_selection_change();
     if !runtime_proxy_persistence_enabled(shared) {
         return;
     }
