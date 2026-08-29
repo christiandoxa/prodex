@@ -1,28 +1,35 @@
 use super::EXPOSE_MAX_CLIENTS_LIMIT;
 use super::mcp::{
-    ExposeMcpEndpoint, expose_instance_id, expose_main_provider, mcp_public_url, verify_local_mcp,
-    verify_public_mcp,
+    ExposeMcpEndpoint, PublicMcpEndpoint, expose_instance_id, verify_local_mcp_with_progress,
+    verify_public_mcp_with_progress,
 };
 use super::runtime::{
     CloudflaredTransport, ExposeHttpServer, ExposePty, ExposeShared, cloudflared_command,
-    expose_access_url, expose_public_host, start_cloudflared_tunnel,
+    expose_access_url, expose_public_host,
 };
 use super::session::{ExposeSessionStore, expose_random_token};
+#[path = "super_expose_status.rs"]
+mod status;
 use crate::ExposeArgs;
 use crate::app_state::AppStateIoExt;
 use crate::print_launch_status;
 use anyhow::{Context, bail};
 use prodex_cli::SuperArgs;
+use redaction::redaction_redact_secret_like_text;
+pub(super) use status::{print_super_expose_configuration, print_super_expose_status};
 use std::collections::BTreeSet;
 use std::env;
+use std::fmt;
 use std::io::{self, IsTerminal};
 use std::net::IpAddr;
 use std::net::TcpListener;
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
+use std::sync::mpsc::SyncSender;
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
-use terminal_ui::{print_panel, print_stderr_line, print_stderr_prompt};
+use terminal_ui::{print_stderr_line, print_stderr_prompt};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) enum ExposeEndpointMode {
@@ -30,14 +37,101 @@ pub(super) enum ExposeEndpointMode {
     ExistingCloudflareTunnel { hostname: String, origin_port: u16 },
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum ExposeLifecyclePhase {
+    Preparing,
+    CheckingCloudflared,
+    StartingSuper,
+    LocalMcpInitialize,
+    LocalMcpTools,
+    Cloudflare,
+    PublicMcpInitialize,
+    PublicMcpTools,
+}
+
+impl ExposeLifecyclePhase {
+    pub(super) const fn label(self) -> &'static str {
+        match self {
+            Self::Preparing => "Preparing expose",
+            Self::CheckingCloudflared => "Checking Cloudflare",
+            Self::StartingSuper => "Starting Prodex Super",
+            Self::LocalMcpInitialize => "Local MCP initialize",
+            Self::LocalMcpTools => "Local MCP tools/list",
+            Self::Cloudflare => "Cloudflare tunnel",
+            Self::PublicMcpInitialize => "Public MCP initialize",
+            Self::PublicMcpTools => "Public MCP tools/list",
+        }
+    }
+
+    pub(super) const fn order(self) -> usize {
+        match self {
+            Self::Preparing => 0,
+            Self::CheckingCloudflared => 1,
+            Self::StartingSuper => 2,
+            Self::LocalMcpInitialize => 3,
+            Self::LocalMcpTools => 4,
+            Self::Cloudflare => 5,
+            Self::PublicMcpInitialize => 6,
+            Self::PublicMcpTools => 7,
+        }
+    }
+}
+
+pub(super) struct ExposeReadyState {
+    pub(super) local_url: String,
+    pub(super) public_url: PublicMcpEndpoint,
+    pub(super) instance_id: String,
+    pub(super) workspace_name: String,
+    pub(super) display_name: String,
+    pub(super) endpoint: ExposeEndpointMode,
+    pub(super) mcp: Arc<ExposeMcpEndpoint>,
+}
+
+impl fmt::Debug for ExposeReadyState {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("ExposeReadyState")
+            .field("local_url", &"<redacted>")
+            .field("public_url", &self.public_url)
+            .field("instance_id", &self.instance_id)
+            .field("workspace_name", &self.workspace_name)
+            .field("display_name", &self.display_name)
+            .field("endpoint", &self.endpoint)
+            .finish_non_exhaustive()
+    }
+}
+
+pub(super) enum ExposeLifecycleEvent {
+    Phase(ExposeLifecyclePhase),
+    Ready(ExposeReadyState),
+    Stopped,
+    Failed(String),
+}
+
+impl fmt::Debug for ExposeLifecycleEvent {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Phase(phase) => formatter.debug_tuple("Phase").field(phase).finish(),
+            Self::Ready(_) => formatter.debug_tuple("Ready").field(&"<redacted>").finish(),
+            Self::Stopped => formatter.write_str("Stopped"),
+            Self::Failed(error) => formatter
+                .debug_tuple("Failed")
+                .field(&redaction_redact_secret_like_text(error))
+                .finish(),
+        }
+    }
+}
+
 pub(super) fn handle_super_expose(mut args: ExposeArgs) -> anyhow::Result<()> {
     let mut super_args = args
         .super_args
         .take()
         .context("Super expose configuration is unavailable")?;
+    validate_expose_launch_args(&super_args)?;
     super_args
         .extract_provider_overrides_from_codex_args()
         .map_err(anyhow::Error::msg)?;
+    crate::runtime_gemini_cli::validate_super_native_cli_preflight(&super_args)?;
     super_args.validate_urls().map_err(anyhow::Error::msg)?;
     let interactive = io::stdin().is_terminal() && io::stderr().is_terminal();
     crate::resolve_super_expose_configuration(&mut super_args, interactive)?;
@@ -47,16 +141,112 @@ pub(super) fn handle_super_expose(mut args: ExposeArgs) -> anyhow::Result<()> {
         .context("failed to resolve expose workspace")?;
     let workspace_name = expose_display_name(None, &workspace_root)?;
     let display_name = expose_display_name(args.name.as_deref(), &workspace_root)?;
-    print_super_expose_configuration(&super_args, &workspace_name)?;
-    let endpoint = select_expose_endpoint(interactive)?;
-    confirm_expose_start(interactive)?;
-    remember_expose_model_preference(&super_args)?;
-    if matches!(endpoint, ExposeEndpointMode::QuickTunnel) {
-        ensure_cloudflared_available()?;
-    }
     #[cfg(unix)]
     let _sigint = crate::InteractiveSigintGuard::install()
         .context("failed to install expose signal handler")?;
+    if interactive {
+        return super::super_expose_ui::run(
+            args,
+            super_args,
+            workspace_root,
+            workspace_name,
+            display_name,
+        );
+    }
+    print_super_expose_configuration(&super_args, &workspace_name)?;
+    let endpoint = select_expose_endpoint(false)?;
+    confirm_expose_start(false)?;
+    run_super_expose_engine(
+        ExposeEngineRequest {
+            args,
+            super_args,
+            workspace_root,
+            workspace_name,
+            display_name,
+            endpoint,
+        },
+        None,
+        Arc::new(AtomicBool::new(false)),
+    )
+}
+
+pub(super) fn validate_expose_launch_args(args: &SuperArgs) -> anyhow::Result<()> {
+    if args.dry_run {
+        bail!("--dry-run is not supported with `prodex s expose`; use `prodex s --dry-run`");
+    }
+    Ok(())
+}
+
+pub(super) struct ExposeEngineRequest {
+    pub(super) args: ExposeArgs,
+    pub(super) super_args: SuperArgs,
+    pub(super) workspace_root: PathBuf,
+    pub(super) workspace_name: String,
+    pub(super) display_name: String,
+    pub(super) endpoint: ExposeEndpointMode,
+}
+
+pub(super) fn run_super_expose_engine(
+    request: ExposeEngineRequest,
+    lifecycle_tx: Option<SyncSender<ExposeLifecycleEvent>>,
+    cancel: Arc<AtomicBool>,
+) -> anyhow::Result<()> {
+    let result = run_super_expose_engine_inner(request, lifecycle_tx.as_ref(), &cancel);
+    match result {
+        Ok(()) => {
+            emit_lifecycle(lifecycle_tx.as_ref(), ExposeLifecycleEvent::Stopped);
+            Ok(())
+        }
+        Err(_error) if expose_cancelled(&cancel) => {
+            emit_lifecycle(lifecycle_tx.as_ref(), ExposeLifecycleEvent::Stopped);
+            Ok(())
+        }
+        Err(error) => {
+            emit_lifecycle(
+                lifecycle_tx.as_ref(),
+                ExposeLifecycleEvent::Failed(redaction_redact_secret_like_text(&format!(
+                    "{error:#}"
+                ))),
+            );
+            Err(error)
+        }
+    }
+}
+
+fn run_super_expose_engine_inner(
+    request: ExposeEngineRequest,
+    lifecycle_tx: Option<&SyncSender<ExposeLifecycleEvent>>,
+    cancel: &AtomicBool,
+) -> anyhow::Result<()> {
+    let ExposeEngineRequest {
+        args,
+        super_args,
+        workspace_root,
+        workspace_name,
+        display_name,
+        endpoint,
+    } = request;
+    report_phase(
+        lifecycle_tx,
+        ExposeLifecyclePhase::Preparing,
+        "preparing Prodex Super expose...",
+    );
+    check_cancelled(cancel)?;
+    remember_expose_model_preference(&super_args)?;
+    if matches!(endpoint, ExposeEndpointMode::QuickTunnel) {
+        report_phase(
+            lifecycle_tx,
+            ExposeLifecyclePhase::CheckingCloudflared,
+            "checking Cloudflare Quick Tunnel...",
+        );
+        ensure_cloudflared_available()?;
+    }
+    check_cancelled(cancel)?;
+    report_phase(
+        lifecycle_tx,
+        ExposeLifecyclePhase::StartingSuper,
+        "starting Prodex Super Remote...",
+    );
     let bootstrap = zeroize::Zeroizing::new(expose_random_token()?);
     let capability = zeroize::Zeroizing::new(expose_random_token()?);
     let instance_id = expose_instance_id()?;
@@ -66,12 +256,12 @@ pub(super) fn handle_super_expose(mut args: ExposeArgs) -> anyhow::Result<()> {
         .local_addr()
         .context("failed to inspect expose listen address")?;
     let shutdown = Arc::new(AtomicBool::new(false));
-    let workspace_name = display_name.clone();
+    let mcp_workspace_name = display_name.clone();
     let mcp = ExposeMcpEndpoint::new(
         &capability,
         instance_id.clone(),
         workspace_root,
-        workspace_name.clone(),
+        mcp_workspace_name,
         display_name.clone(),
         super_args,
     );
@@ -94,21 +284,27 @@ pub(super) fn handle_super_expose(mut args: ExposeArgs) -> anyhow::Result<()> {
     });
     let mut http = ExposeHttpServer::start(listener, Arc::clone(&shared))
         .context("failed to start expose HTTP server")?;
-    print_launch_status("starting Prodex Super Remote...");
-    print_launch_status("waiting for local MCP server...");
-    let local_mcp_url = mcp_public_url(&format!("http://{listen_addr}"), &capability);
-    if let Err(error) = verify_local_mcp(&local_mcp_url) {
+    check_cancelled(cancel)?;
+    let local_origin = format!("http://{listen_addr}");
+    let local_mcp_url = match PublicMcpEndpoint::new(&local_origin, &capability) {
+        Ok(url) => url,
+        Err(error) => {
+            cleanup_super_expose(&shared, &mcp, &mut http, None);
+            return Err(error);
+        }
+    };
+    let cancelled = || expose_cancelled(cancel);
+    let mut progress = |label: &str| report_probe_phase(lifecycle_tx, label);
+    if let Err(error) =
+        verify_local_mcp_with_progress(local_mcp_url.as_str(), &mut progress, &cancelled)
+    {
         cleanup_super_expose(&shared, &mcp, &mut http, None);
         return Err(error);
     }
-    print_launch_status("Local MCP server ready.");
     drop(local_mcp_url);
-    let local_url = zeroize::Zeroizing::new(expose_access_url(
-        &format!("http://{listen_addr}"),
-        &bootstrap,
-    ));
+    let local_url = zeroize::Zeroizing::new(expose_access_url(&local_origin, &bootstrap));
     let (public_origin, public_host, mut tunnel) =
-        match start_public_endpoint(&endpoint, &format!("http://{listen_addr}")) {
+        match start_public_endpoint(&endpoint, &local_origin, lifecycle_tx, &cancelled) {
             Ok(endpoint) => endpoint,
             Err(error) => {
                 cleanup_super_expose(&shared, &mcp, &mut http, None);
@@ -117,36 +313,45 @@ pub(super) fn handle_super_expose(mut args: ExposeArgs) -> anyhow::Result<()> {
         };
     shared.allow_host(public_host.clone());
     shared.allow_mcp_only_host(public_host);
-    let public_url = mcp_public_url(&public_origin, &capability);
-    print_launch_status("waiting for public MCP readiness...");
-    if let Err(error) = verify_public_mcp(&public_url) {
+    let public_url = match PublicMcpEndpoint::new(&public_origin, &capability) {
+        Ok(url) => url,
+        Err(error) => {
+            cleanup_super_expose(&shared, &mcp, &mut http, tunnel.as_mut());
+            return Err(error);
+        }
+    };
+    let mut progress = |label: &str| report_probe_phase(lifecycle_tx, label);
+    if let Err(error) =
+        verify_public_mcp_with_progress(public_url.as_str(), &mut progress, &cancelled)
+    {
         cleanup_super_expose(&shared, &mcp, &mut http, tunnel.as_mut());
         return Err(error);
     }
-    print_launch_status("Public MCP endpoint ready.");
-    #[cfg(unix)]
-    if crate::InteractiveSigintGuard::count() > 0 {
-        cleanup_super_expose(&shared, &mcp, &mut http, tunnel.as_mut());
-        return Ok(());
-    }
-    print_super_expose_status(
-        &local_url,
-        &public_url,
-        &instance_id,
-        &workspace_name,
-        &display_name,
-        &mcp,
-        &endpoint,
-    )?;
-    drop(local_url);
-    drop(public_url);
+    let ready = ExposeReadyState {
+        local_url: local_url.to_string(),
+        public_url,
+        instance_id,
+        workspace_name,
+        display_name,
+        endpoint,
+        mcp: Arc::clone(&mcp),
+    };
     drop(capability);
+    if let Some(lifecycle_tx) = lifecycle_tx {
+        emit_lifecycle(Some(lifecycle_tx), ExposeLifecycleEvent::Ready(ready));
+    } else {
+        print_super_expose_status(
+            &ready.local_url,
+            &ready.public_url,
+            &ready.instance_id,
+            &ready.workspace_name,
+            &ready.display_name,
+            &ready.mcp,
+            &ready.endpoint,
+        )?;
+    }
     let mut tunnel_lost = false;
-    while !shared.shutdown.load(Ordering::SeqCst) {
-        #[cfg(unix)]
-        if crate::InteractiveSigintGuard::count() > 0 {
-            break;
-        }
+    while !shared.shutdown.load(Ordering::SeqCst) && !expose_cancelled(cancel) {
         if tunnel
             .as_mut()
             .is_some_and(|tunnel| tunnel.exited().is_some())
@@ -154,7 +359,7 @@ pub(super) fn handle_super_expose(mut args: ExposeArgs) -> anyhow::Result<()> {
             tunnel_lost = true;
             break;
         }
-        thread::sleep(Duration::from_millis(250));
+        thread::sleep(Duration::from_millis(100));
     }
     cleanup_super_expose(&shared, &mcp, &mut http, tunnel.as_mut());
     if tunnel_lost {
@@ -163,13 +368,78 @@ pub(super) fn handle_super_expose(mut args: ExposeArgs) -> anyhow::Result<()> {
     Ok(())
 }
 
+fn expose_cancelled(cancel: &AtomicBool) -> bool {
+    cancel.load(Ordering::SeqCst) || {
+        #[cfg(unix)]
+        {
+            crate::InteractiveSigintGuard::count() > 0
+        }
+        #[cfg(not(unix))]
+        {
+            false
+        }
+    }
+}
+
+fn check_cancelled(cancel: &AtomicBool) -> anyhow::Result<()> {
+    if expose_cancelled(cancel) {
+        bail!("expose startup cancelled")
+    }
+    Ok(())
+}
+
+fn emit_lifecycle(
+    lifecycle_tx: Option<&SyncSender<ExposeLifecycleEvent>>,
+    event: ExposeLifecycleEvent,
+) {
+    if let Some(lifecycle_tx) = lifecycle_tx {
+        let _ = lifecycle_tx.try_send(event);
+    }
+}
+
+fn report_phase(
+    lifecycle_tx: Option<&SyncSender<ExposeLifecycleEvent>>,
+    phase: ExposeLifecyclePhase,
+    message: &str,
+) {
+    if lifecycle_tx.is_some() {
+        emit_lifecycle(lifecycle_tx, ExposeLifecycleEvent::Phase(phase));
+    } else {
+        print_launch_status(message);
+    }
+}
+
+fn report_probe_phase(lifecycle_tx: Option<&SyncSender<ExposeLifecycleEvent>>, label: &str) {
+    let phase = match label {
+        "local MCP initialize" => ExposeLifecyclePhase::LocalMcpInitialize,
+        "local MCP tools/list" => ExposeLifecyclePhase::LocalMcpTools,
+        "public MCP initialize" => ExposeLifecyclePhase::PublicMcpInitialize,
+        "public MCP tools/list" => ExposeLifecyclePhase::PublicMcpTools,
+        _ => return,
+    };
+    if lifecycle_tx.is_some() {
+        emit_lifecycle(lifecycle_tx, ExposeLifecycleEvent::Phase(phase));
+    } else {
+        print_launch_status(&format!("Validating {label}..."));
+    }
+}
+
 fn start_public_endpoint(
     endpoint: &ExposeEndpointMode,
     local_url: &str,
+    lifecycle_tx: Option<&SyncSender<ExposeLifecycleEvent>>,
+    cancelled: &dyn Fn() -> bool,
 ) -> anyhow::Result<(String, String, Option<super::runtime::CloudflaredTunnel>)> {
     match endpoint {
         ExposeEndpointMode::QuickTunnel => {
-            let mut tunnel = start_cloudflared_tunnel(local_url)?;
+            let mut progress = |message: &str| {
+                report_phase(lifecycle_tx, ExposeLifecyclePhase::Cloudflare, message)
+            };
+            let mut tunnel = super::runtime::start_cloudflared_tunnel_with_cancel_and_progress(
+                local_url,
+                cancelled,
+                &mut progress,
+            )?;
             if let Some(failure) = tunnel.startup_failure.take() {
                 return Err(anyhow::anyhow!(failure));
             }
@@ -181,19 +451,30 @@ fn start_public_endpoint(
                 CloudflaredTransport::Quic => "QUIC",
                 CloudflaredTransport::Http2 => "HTTP/2",
             };
-            print_launch_status(&format!("Cloudflare {label} transport connected."));
+            report_phase(
+                lifecycle_tx,
+                ExposeLifecyclePhase::Cloudflare,
+                &format!("Cloudflare {label} transport connected."),
+            );
             let origin = tunnel
                 .url
                 .clone()
                 .context("Cloudflare Quick Tunnel did not report a public hostname")?;
             let host = expose_public_host(&origin)
                 .context("Cloudflare Quick Tunnel reported an invalid hostname")?;
-            print_launch_status(&format!("Cloudflare hostname allocated: {host}"));
-            print_launch_status("Cloudflare Quick Tunnel allocated.");
+            report_phase(
+                lifecycle_tx,
+                ExposeLifecyclePhase::Cloudflare,
+                &format!("Cloudflare hostname allocated: {host}"),
+            );
             Ok((origin, host, Some(tunnel)))
         }
         ExposeEndpointMode::ExistingCloudflareTunnel { hostname, .. } => {
-            print_launch_status("Using existing Cloudflare Tunnel hostname.");
+            report_phase(
+                lifecycle_tx,
+                ExposeLifecyclePhase::Cloudflare,
+                "Using existing Cloudflare Tunnel hostname.",
+            );
             Ok((format!("https://{hostname}"), hostname.clone(), None))
         }
     }
@@ -422,142 +703,4 @@ fn expose_display_name(
         bail!("expose name must be 1-64 characters without control characters")
     }
     Ok(name.to_string())
-}
-
-fn print_super_expose_status(
-    local_url: &str,
-    public_url: &str,
-    instance_id: &str,
-    workspace_name: &str,
-    display_name: &str,
-    mcp: &ExposeMcpEndpoint,
-    endpoint: &ExposeEndpointMode,
-) -> anyhow::Result<()> {
-    let args = &mcp.defaults;
-    let model = args
-        .local_model
-        .clone()
-        .or_else(|| crate::codex_cli_config_override_value(&args.codex_args, "model"))
-        .unwrap_or_else(|| "remembered/default".to_string());
-    let effort = crate::codex_cli_config_override_value(&args.codex_args, "model_reasoning_effort")
-        .unwrap_or_else(|| "remembered/default".to_string());
-    let sub_agent = args.sub_agent;
-    let mut fields = vec![
-        (
-            "WARNING".to_string(),
-            "FULL ACCESS: this URL controls Prodex Super in the current workspace".to_string(),
-        ),
-        (
-            "Instance".to_string(),
-            format!("{display_name} ({instance_id})"),
-        ),
-        ("Workspace".to_string(), workspace_name.to_string()),
-        ("Main agent".to_string(), "Super".to_string()),
-        (
-            "Main provider".to_string(),
-            expose_main_provider(args).label().to_string(),
-        ),
-        ("Model".to_string(), model),
-        ("Effort".to_string(), effort),
-        (
-            "Sub-agents".to_string(),
-            if sub_agent { "enabled" } else { "disabled" }.to_string(),
-        ),
-        ("Local browser URL".to_string(), local_url.to_string()),
-        (
-            "Cloudflare".to_string(),
-            match endpoint {
-                ExposeEndpointMode::QuickTunnel => "Quick Tunnel connected".to_string(),
-                ExposeEndpointMode::ExistingCloudflareTunnel {
-                    hostname,
-                    origin_port,
-                } => {
-                    format!("Existing Tunnel · {hostname} · 127.0.0.1:{origin_port}")
-                }
-            },
-        ),
-        (
-            "Access".to_string(),
-            "Ephemeral Capability Authentication".to_string(),
-        ),
-        ("ChatGPT MCP URL".to_string(), public_url.to_string()),
-        (
-            "Suggested ChatGPT name".to_string(),
-            format!("Prodex — {display_name}"),
-        ),
-        (
-            "Lifetime".to_string(),
-            "active only while this process is running".to_string(),
-        ),
-        (
-            "Stop".to_string(),
-            "Press Ctrl+C to revoke access and stop".to_string(),
-        ),
-    ];
-    if sub_agent {
-        fields.push((
-            "Sub-agent model/effort".to_string(),
-            format!(
-                "{}/{}",
-                args.sub_agent_model
-                    .as_deref()
-                    .unwrap_or("provider default"),
-                args.sub_agent_model_reasoning_effort
-                    .map_or("provider default", |effort| effort.as_str())
-            ),
-        ));
-    }
-    print_panel("Prodex Super for ChatGPT", &fields)?;
-    Ok(())
-}
-
-pub(super) fn print_super_expose_configuration(
-    args: &SuperArgs,
-    workspace_name: &str,
-) -> anyhow::Result<()> {
-    let model = args
-        .local_model
-        .clone()
-        .or_else(|| crate::codex_cli_config_override_value(&args.codex_args, "model"))
-        .unwrap_or_else(|| "remembered/default".to_string());
-    let effort = crate::codex_cli_config_override_value(&args.codex_args, "model_reasoning_effort")
-        .unwrap_or_else(|| "remembered/default".to_string());
-    let mut fields = vec![
-        ("Workspace".to_string(), workspace_name.to_string()),
-        ("Main agent".to_string(), "Super".to_string()),
-        (
-            "Main provider".to_string(),
-            expose_main_provider(args).label().to_string(),
-        ),
-        ("Main model".to_string(), model),
-        ("Main effort".to_string(), effort),
-        (
-            "Sub-agents".to_string(),
-            if args.sub_agent {
-                "enabled"
-            } else {
-                "disabled"
-            }
-            .to_string(),
-        ),
-    ];
-    if args.sub_agent {
-        fields.push((
-            "Sub-agent model/effort".to_string(),
-            format!(
-                "{}/{}",
-                args.sub_agent_model
-                    .as_deref()
-                    .unwrap_or("provider default"),
-                args.sub_agent_model_reasoning_effort
-                    .map_or("provider default", |effort| effort.as_str())
-            ),
-        ));
-    }
-    fields.push((
-        "Access".to_string(),
-        "full Super capability; workspace is the captured initial directory".to_string(),
-    ));
-    print_panel("Prodex Super Configuration", &fields)?;
-    Ok(())
 }

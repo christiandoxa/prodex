@@ -8,12 +8,13 @@ use super::protocol::{
     mcp_origin_allowed, request_id, validate_configured_main_effort, validate_mcp_request_headers,
 };
 use super::tools::{
-    apply_provider_override, main_provider, mcp_tools, optional_string, required_run_id,
-    required_string, run_summary_json, tool_result, value_u64, value_usize,
+    apply_provider_override, event_page_limit, main_provider, mcp_tools, optional_string,
+    required_run_id, required_string, run_summary_json, tool_result, validate_tool_arguments,
+    value_u64,
 };
 use super::{
     ExposeMcpEndpoint, MCP_CURRENT_PROTOCOL_VERSION, MCP_ERROR_HEADER_MISMATCH,
-    MCP_ERROR_UNSUPPORTED_VERSION, MCP_MAX_EVENT_PAGE, MCP_MAX_JSON_NESTING, MCP_MAX_MODEL_BYTES,
+    MCP_ERROR_UNSUPPORTED_VERSION, MCP_MAX_JSON_NESTING, MCP_MAX_MODEL_BYTES,
     MCP_MAX_PROFILE_BYTES, MCP_MAX_TASK_BYTES, MCP_PROTOCOL_VERSIONS, MCP_RATE_LIMIT,
     MCP_RATE_WINDOW, McpRateLimit,
 };
@@ -266,7 +267,7 @@ impl ExposeMcpEndpoint {
 
     fn instructions(&self) -> String {
         format!(
-            "This is a local full-access Prodex Super runtime permanently bound to workspace {:?} (instance {}). Use prodex_super_start only for explicit user-requested development work, include consequential external actions in the user's task, and poll an existing run instead of starting duplicates. The expose URL is ephemeral capability authentication; anyone with it can control this instance. The workspace is the initial working directory; normal Prodex Super permissions still govern any broader machine access.",
+            "This is a local full-access Prodex Super runtime starting in {:?} (instance {}). The initial directory is context, not a filesystem jail: runs retain normal OS-user filesystem, process, network, Git, and local-tool authority. Use prodex_super_start only for explicit user-requested development work, include consequential external actions in the user's task, and poll an existing run instead of starting duplicates. The expose URL is ephemeral capability authentication; anyone with it can control this instance.",
             self.workspace_name, self.instance_id
         )
     }
@@ -298,6 +299,9 @@ impl ExposeMcpEndpoint {
         let arguments = params.get("arguments").unwrap_or(&empty_arguments);
         if !arguments.is_object() {
             return mcp_error_response(400, id, -32602, "tool arguments must be an object");
+        }
+        if let Err(message) = validate_tool_arguments(name, arguments) {
+            return mcp_error_response(400, id, -32602, &message);
         }
         let result = match name {
             "prodex_super_start" => self.start_tool(arguments),
@@ -357,6 +361,8 @@ impl ExposeMcpEndpoint {
             ]);
         }
         if let Some(profile) = optional_string(arguments, "profile", MCP_MAX_PROFILE_BYTES)? {
+            prodex_profile_identity::validate_profile_name(&profile)
+                .map_err(|_| "profile is invalid".to_string())?;
             args.profile = Some(profile);
         }
         if let Some(sub_agents) = arguments.get("sub_agents")
@@ -379,8 +385,16 @@ impl ExposeMcpEndpoint {
             }
         }
         validate_configured_main_effort(&args)?;
-        args.validate_urls()
-            .map_err(|_| "run configuration is invalid".to_string())?;
+        if args
+            .cli
+            .is_some_and(|agent| agent != prodex_cli::SuperCliAgent::Codex)
+        {
+            crate::runtime_gemini_cli::validate_super_native_cli_preflight(&args)
+                .map_err(|error| error.to_string())?;
+        } else {
+            args.validate_urls()
+                .map_err(|_| "run configuration is invalid".to_string())?;
+        }
         let summary = self.run_manager.start(task, args).map_err(str::to_string)?;
         Ok(json!({
             "run_id": summary.run_id,
@@ -405,12 +419,7 @@ impl ExposeMcpEndpoint {
             .map(value_u64)
             .transpose()?
             .unwrap_or(0);
-        let limit = arguments
-            .get("limit")
-            .map(value_usize)
-            .transpose()?
-            .unwrap_or(MCP_MAX_EVENT_PAGE)
-            .clamp(1, MCP_MAX_EVENT_PAGE);
+        let limit = event_page_limit(arguments)?;
         let mut value = self.run_manager.events(&run_id, after_seq, limit).map_or_else(
             || json!({"run_id": run_id, "state": "unknown", "events": [], "next_seq": 0, "truncated": false}),
             |events| json!({

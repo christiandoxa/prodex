@@ -41,10 +41,47 @@ pub(super) fn optional_string(
     let Some(value) = value.as_str() else {
         return Err(format!("{name} must be a string"));
     };
-    if value.is_empty() || value.len() > max_bytes || value.as_bytes().contains(&0) {
+    if value.is_empty()
+        || value.len() > max_bytes
+        || value.as_bytes().contains(&0)
+        || value.chars().any(char::is_control)
+    {
         return Err(format!("{name} is empty or too large"));
     }
     Ok(Some(value.to_string()))
+}
+
+pub(super) fn validate_tool_arguments(
+    tool: &str,
+    arguments: &Value,
+) -> std::result::Result<(), String> {
+    let allowed = match tool {
+        "prodex_super_start" => [
+            "task",
+            "model",
+            "reasoning_effort",
+            "provider",
+            "profile",
+            "sub_agents",
+        ]
+        .as_slice(),
+        "prodex_super_status" | "prodex_super_result" | "prodex_super_cancel" => {
+            ["run_id"].as_slice()
+        }
+        "prodex_super_events" => ["run_id", "after_seq", "limit"].as_slice(),
+        "prodex_super_list" => [].as_slice(),
+        _ => return Ok(()),
+    };
+    let Some(object) = arguments.as_object() else {
+        return Err("tool arguments must be an object".to_string());
+    };
+    if let Some(unknown) = object
+        .keys()
+        .find(|key| !allowed.iter().any(|candidate| candidate == key))
+    {
+        return Err(format!("unknown tool argument: {unknown}"));
+    }
+    Ok(())
 }
 
 pub(super) fn required_run_id(arguments: &Value) -> std::result::Result<String, String> {
@@ -68,6 +105,14 @@ pub(super) fn value_u64(value: &Value) -> std::result::Result<u64, String> {
 pub(super) fn value_usize(value: &Value) -> std::result::Result<usize, String> {
     value_u64(value)
         .and_then(|value| usize::try_from(value).map_err(|_| "value is too large".to_string()))
+}
+
+pub(super) fn event_page_limit(arguments: &Value) -> std::result::Result<usize, String> {
+    match arguments.get("limit").map(value_usize).transpose()? {
+        Some(limit) if (1..=MCP_MAX_EVENT_PAGE).contains(&limit) => Ok(limit),
+        Some(_) => Err(format!("limit must be between 1 and {MCP_MAX_EVENT_PAGE}")),
+        None => Ok(MCP_MAX_EVENT_PAGE),
+    }
 }
 
 pub(super) fn main_provider(args: &SuperArgs) -> prodex_provider_core::ProviderId {
@@ -95,6 +140,15 @@ pub(super) fn apply_provider_override(
 ) -> std::result::Result<(), String> {
     let provider = prodex_provider_core::ProviderId::parse(provider)
         .ok_or_else(|| "provider is unsupported".to_string())?;
+    let provider_changed = main_provider(args) != provider;
+    // A run-scoped provider override must never reinterpret a key captured for
+    // another provider as the new provider's credential.
+    if provider_changed {
+        args.api_key = None;
+        args.local_model = None;
+        remove_codex_config_override(&mut args.codex_args, "model");
+        remove_codex_config_override(&mut args.codex_args, "model_reasoning_effort");
+    }
     remove_codex_config_override(&mut args.codex_args, "model_provider");
     match provider {
         prodex_provider_core::ProviderId::OpenAi => {
@@ -175,11 +229,11 @@ pub(super) fn mcp_tools() -> Vec<Value> {
     vec![
         tool_definition(
             "prodex_super_start",
-            "Start one full-access Prodex Super task in the permanently fixed expose workspace. Use only for explicit user-requested development work; poll its run_id instead of starting duplicates.",
+            "Start one full-access Prodex Super task in the captured initial working directory. The task retains normal OS-user filesystem, process, network, Git, and tool authority; the initial directory is not a jail. Use only for explicit user-requested development work; poll its run_id instead of starting duplicates.",
             json!({
                 "type": "object",
                 "properties": {
-                    "task": {"type": "string", "minLength": 1, "maxLength": 65536, "description": "Explicit development task to execute; do not supply a filesystem path to change this connection's workspace."},
+                    "task": {"type": "string", "minLength": 1, "maxLength": 65536, "description": "Explicit development task to execute. It starts in the captured directory but may use any filesystem path, executable, network, repository, or local tool available to the Prodex OS user."},
                     "model": {"type": ["string", "null"], "maxLength": 256, "description": "Optional main-agent model override for this run only; null inherits the expose default."},
                     "reasoning_effort": {"type": ["string", "null"], "maxLength": 256, "description": "Optional model-aware main-agent effort override for this run only; null inherits the expose default."},
                     "provider": {"type": ["string", "null"], "maxLength": 256, "description": "Optional main-agent provider override for this run only."},

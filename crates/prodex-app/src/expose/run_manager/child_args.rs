@@ -2,14 +2,34 @@ use super::SuperArgs;
 use std::ffi::OsString;
 
 pub(super) fn build_super_child_args(args: &SuperArgs) -> Vec<OsString> {
-    let mut output = vec![OsString::from("s")];
+    // Keep the child on the normal `prodex s` lifecycle; usage-limit recovery belongs there.
+    // Expose is a transport for Super, not a second permission model. Keep
+    // the supported Codex full-access launch flag explicit in the child argv;
+    // Super's normal conversion also forces this invariant.
+    let mut output = vec![OsString::from("s"), OsString::from("--full-access")];
     append_profile_args(&mut output, args);
     append_sub_agent_args(&mut output, args);
     append_tool_args(&mut output, args);
     append_target_args(&mut output, args);
-    output.extend(args.codex_features.to_codex_config_args());
-    output.extend(args.codex_args.iter().cloned());
-    output.extend([OsString::from("exec"), OsString::from("-")]);
+    let codex_frontend = matches!(args.cli, None | Some(prodex_cli::SuperCliAgent::Codex));
+    if codex_frontend {
+        output.extend(args.codex_features.to_codex_config_args());
+    }
+    if codex_frontend {
+        output.extend(args.codex_args.iter().cloned());
+    } else {
+        let mut native_args = args.codex_args.clone();
+        for key in ["model_provider", "model_reasoning_effort"] {
+            while crate::app_commands::runtime_launch::remove_first_codex_config_override_pair(
+                &mut native_args,
+                key,
+            ) {}
+        }
+        output.extend(native_args);
+    }
+    if codex_frontend {
+        output.extend([OsString::from("exec"), OsString::from("-")]);
+    }
     output
 }
 
@@ -123,4 +143,51 @@ pub(super) fn expose_api_key_env(args: &SuperArgs) -> Option<(&'static str, &str
         prodex_cli::SuperExternalProvider::Kiro => return None,
     };
     Some((env_name, key))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::build_super_child_args;
+    use std::ffi::OsString;
+
+    #[test]
+    fn native_frontend_drops_generated_codex_config_overrides() {
+        let crate::Commands::Super(mut args) = crate::parse_cli_command_from([
+            "prodex",
+            "s",
+            "--cli",
+            "gemini",
+            "--provider",
+            "gemini",
+        ])
+        .expect("native Super args should parse") else {
+            panic!("expected Super command");
+        };
+        args.codex_args = vec![
+            OsString::from("-c"),
+            OsString::from("model_provider=\"gemini\""),
+            OsString::from("--config"),
+            OsString::from("model_reasoning_effort=\"max\""),
+            OsString::from("--prompt"),
+            OsString::from("review"),
+        ];
+
+        let child_args = build_super_child_args(&args);
+
+        assert_eq!(child_args.first().and_then(|arg| arg.to_str()), Some("s"));
+        assert!(child_args.iter().any(|arg| arg == "--cli"));
+        assert!(child_args.iter().any(|arg| arg == "--prompt"));
+        assert!(child_args.iter().any(|arg| arg == "review"));
+        assert!(
+            !child_args
+                .iter()
+                .any(|arg| arg == "-c" || arg == "--config")
+        );
+        assert!(
+            !child_args
+                .iter()
+                .any(|arg| { arg.to_string_lossy().contains("model_reasoning_effort") })
+        );
+        assert!(!child_args.iter().any(|arg| arg == "exec" || arg == "-"));
+    }
 }

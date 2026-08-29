@@ -1,14 +1,16 @@
 use super::super_expose::{ensure_cloudflared_available, handle_super_expose};
 use super::*;
+#[path = "runtime/cloudflared.rs"]
+mod cloudflared;
 mod cloudflared_startup;
 #[cfg(test)]
 #[path = "runtime/config_isolation_tests.rs"]
 mod config_isolation_tests;
 mod hostname;
-use std::fs::OpenOptions;
+pub(super) use cloudflared::*;
 use std::net::SocketAddr;
-#[cfg(unix)]
-use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+#[cfg(windows)]
+use std::os::windows::io::{AsRawHandle, FromRawHandle, OwnedHandle, RawHandle};
 
 pub(super) fn handle_expose(args: ExposeArgs) -> Result<()> {
     if args.invocation == prodex_cli::ExposeInvocation::SuperAlias
@@ -362,6 +364,10 @@ pub(super) struct ExposePty {
     pub(super) clients: Arc<Mutex<Vec<ExposeOutputClient>>>,
     pub(super) running: Arc<AtomicBool>,
     pub(super) killer: Mutex<Box<dyn ChildKiller + Send + Sync>>,
+    process_id: Option<u32>,
+    process_tree_terminated: Arc<AtomicBool>,
+    #[cfg(windows)]
+    process_job: Mutex<Option<OwnedHandle>>,
     pub(super) reader_thread: Mutex<Option<JoinHandle<()>>>,
     pub(super) wait_thread: Mutex<Option<JoinHandle<()>>>,
 }
@@ -390,6 +396,13 @@ impl ExposePty {
             .slave
             .spawn_command(command)
             .context("failed to spawn exposed shell")?;
+        let process_id = child.process_id();
+        #[cfg(windows)]
+        // ponytail: nested Windows jobs may reject assignment; taskkill remains
+        // the bounded fallback until a breakaway policy is needed.
+        let process_job = child
+            .as_raw_handle()
+            .and_then(|handle| assign_expose_process_job(handle).ok());
         let killer = child.clone_killer();
         drop(pair.slave);
 
@@ -404,6 +417,7 @@ impl ExposePty {
         let scrollback = Arc::new(Mutex::new(VecDeque::new()));
         let clients = Arc::new(Mutex::new(Vec::new()));
         let running = Arc::new(AtomicBool::new(true));
+        let process_tree_terminated = Arc::new(AtomicBool::new(false));
 
         let reader_thread = {
             let scrollback = Arc::clone(&scrollback);
@@ -423,8 +437,10 @@ impl ExposePty {
         };
         let wait_thread = {
             let running = Arc::clone(&running);
+            let process_tree_terminated = Arc::clone(&process_tree_terminated);
             thread::spawn(move || {
                 let _ = child.wait();
+                terminate_expose_pty_process_tree_once(process_id, &process_tree_terminated);
                 running.store(false, Ordering::SeqCst);
             })
         };
@@ -436,6 +452,10 @@ impl ExposePty {
             clients,
             running,
             killer: Mutex::new(killer),
+            process_id,
+            process_tree_terminated,
+            #[cfg(windows)]
+            process_job: Mutex::new(process_job),
             reader_thread: Mutex::new(Some(reader_thread)),
             wait_thread: Mutex::new(Some(wait_thread)),
         })
@@ -446,8 +466,13 @@ impl ExposePty {
         if let Ok(mut writer) = self.writer.lock() {
             drop(writer.take());
         }
+        terminate_expose_pty_process_tree_once(self.process_id, &self.process_tree_terminated);
         if let Ok(mut killer) = self.killer.lock() {
             let _ = killer.kill();
+        }
+        #[cfg(windows)]
+        if let Ok(mut process_job) = self.process_job.lock() {
+            drop(process_job.take());
         }
         expose_join_thread(&self.wait_thread);
         if let Ok(mut master) = self.master.lock() {
@@ -457,11 +482,83 @@ impl ExposePty {
     }
 }
 
+#[cfg(windows)]
+fn assign_expose_process_job(raw_handle: RawHandle) -> std::io::Result<OwnedHandle> {
+    use windows_sys::Win32::System::JobObjects::{
+        AssignProcessToJobObject, CreateJobObjectW, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
+        JOBOBJECT_EXTENDED_LIMIT_INFORMATION, JobObjectExtendedLimitInformation,
+        SetInformationJobObject,
+    };
+
+    // SAFETY: null name and security descriptor request a new unnamed job.
+    let raw_job = unsafe { CreateJobObjectW(std::ptr::null(), std::ptr::null()) };
+    if raw_job.is_null() {
+        return Err(std::io::Error::last_os_error());
+    }
+    // SAFETY: raw_job is a new owned kernel handle returned by CreateJobObjectW.
+    let job = unsafe { OwnedHandle::from_raw_handle(raw_job) };
+    let mut limits = JOBOBJECT_EXTENDED_LIMIT_INFORMATION::default();
+    limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+    // SAFETY: job is live, limits points to the initialized structure, and the
+    // API is called with the matching structure size and information class.
+    let configured = unsafe {
+        SetInformationJobObject(
+            job.as_raw_handle(),
+            JobObjectExtendedLimitInformation,
+            std::ptr::from_ref(&limits).cast(),
+            std::mem::size_of_val(&limits) as u32,
+        )
+    } != 0;
+    if !configured {
+        return Err(std::io::Error::last_os_error());
+    }
+    // SAFETY: both handles are live and owned by this process.
+    if unsafe { AssignProcessToJobObject(job.as_raw_handle(), raw_handle) } == 0 {
+        return Err(std::io::Error::last_os_error());
+    }
+    Ok(job)
+}
+
 impl Drop for ExposePty {
     fn drop(&mut self) {
         self.shutdown();
     }
 }
+
+fn terminate_expose_pty_process_tree_once(process_id: Option<u32>, terminated: &AtomicBool) {
+    if !terminated.swap(true, Ordering::SeqCst) {
+        terminate_expose_pty_process_tree(process_id);
+    }
+}
+
+#[cfg(unix)]
+fn terminate_expose_pty_process_tree(process_id: Option<u32>) {
+    let Some(process_id) = process_id
+        .and_then(|process_id| libc::pid_t::try_from(process_id).ok())
+        .filter(|process_id| *process_id > 0)
+    else {
+        return;
+    };
+    // portable-pty creates the shell as a session/process-group leader. Signal
+    // only that owned group; never use a broad process-name kill.
+    let _ = unsafe { libc::kill(-process_id, libc::SIGKILL) };
+}
+
+#[cfg(windows)]
+fn terminate_expose_pty_process_tree(process_id: Option<u32>) {
+    let Some(process_id) = process_id else {
+        return;
+    };
+    let _ = std::process::Command::new("taskkill")
+        .args(["/PID", &process_id.to_string(), "/T", "/F"])
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status();
+}
+
+#[cfg(not(any(unix, windows)))]
+fn terminate_expose_pty_process_tree(_process_id: Option<u32>) {}
 
 pub(super) fn expose_join_thread(thread: &Mutex<Option<JoinHandle<()>>>) {
     if let Ok(mut thread) = thread.lock()
@@ -469,297 +566,4 @@ pub(super) fn expose_join_thread(thread: &Mutex<Option<JoinHandle<()>>>) {
     {
         let _ = thread.join();
     }
-}
-
-pub(super) struct CloudflaredTunnel {
-    pub(super) child: std::process::Child,
-    pub(super) url: Option<String>,
-    pub(super) effective_transport: Option<CloudflaredTransport>,
-    reader_threads: Vec<JoinHandle<()>>,
-    config: CloudflaredConfigIsolation,
-    pub(super) startup_timed_out: bool,
-    pub(super) startup_failure: Option<String>,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) enum CloudflaredTransport {
-    Auto,
-    Quic,
-    Http2,
-}
-
-impl CloudflaredTransport {
-    fn as_str(self) -> &'static str {
-        match self {
-            Self::Auto => "auto",
-            Self::Quic => "quic",
-            Self::Http2 => "http2",
-        }
-    }
-}
-
-const CLOUDFLARED_TRANSPORT_NEGOTIATION_TIMEOUT: Duration = if cfg!(test) {
-    if cfg!(windows) {
-        Duration::from_secs(30)
-    } else {
-        Duration::from_secs(5)
-    }
-} else {
-    Duration::from_secs(20)
-};
-const CLOUDFLARED_EVENT_PREFIX: &str = "\0prodex-cloudflared-transport=";
-static NEXT_CLOUDFLARED_CONFIG_ID: AtomicU64 = AtomicU64::new(1);
-
-struct CloudflaredConfigIsolation {
-    directory: std::path::PathBuf,
-    path: std::path::PathBuf,
-    cleaned: bool,
-}
-
-impl CloudflaredConfigIsolation {
-    fn create() -> Result<Self> {
-        let unique_id = NEXT_CLOUDFLARED_CONFIG_ID.fetch_add(1, Ordering::Relaxed);
-        let directory = (0..16)
-            .map(|attempt| {
-                std::env::temp_dir().join(format!(
-                    "prodex-cloudflared-{}-{unique_id}-{attempt}",
-                    std::process::id(),
-                ))
-            })
-            .find(|directory| std::fs::create_dir(directory).is_ok())
-            .context("failed to create private cloudflared config directory")?;
-        #[cfg(unix)]
-        std::fs::set_permissions(&directory, std::fs::Permissions::from_mode(0o700))?;
-        let path = directory.join("config.yaml");
-        let mut options = OpenOptions::new();
-        options.write(true).create_new(true);
-        #[cfg(unix)]
-        options.mode(0o600);
-        if let Err(error) = options.open(&path) {
-            let _ = std::fs::remove_dir(&directory);
-            return Err(error).context("failed to create private cloudflared config");
-        }
-        let metadata = match std::fs::symlink_metadata(&path) {
-            Ok(metadata) => metadata,
-            Err(error) => {
-                let _ = std::fs::remove_file(&path);
-                let _ = std::fs::remove_dir(&directory);
-                return Err(error).context("failed to inspect private cloudflared config");
-            }
-        };
-        if !metadata.file_type().is_file() {
-            let _ = std::fs::remove_file(&path);
-            let _ = std::fs::remove_dir(&directory);
-            anyhow::bail!("private cloudflared config is not a regular file");
-        }
-        Ok(Self {
-            directory,
-            path,
-            cleaned: false,
-        })
-    }
-
-    fn cleanup(&mut self) {
-        if self.cleaned {
-            return;
-        }
-        self.cleaned = true;
-        let _ = std::fs::remove_file(&self.path);
-        let _ = std::fs::remove_dir(&self.directory);
-    }
-}
-
-impl Drop for CloudflaredConfigIsolation {
-    fn drop(&mut self) {
-        self.cleanup();
-    }
-}
-
-pub(super) fn cloudflared_command() -> Command {
-    #[cfg(test)]
-    if let Some(script) = std::env::var_os("PRODEX_TEST_CLOUDFLARED_SCRIPT") {
-        let mut command = Command::new(if cfg!(windows) { "python" } else { "python3" });
-        command.arg(script);
-        return command;
-    }
-    Command::new("cloudflared")
-}
-
-impl CloudflaredTunnel {
-    pub(super) fn exited(&mut self) -> Option<std::process::ExitStatus> {
-        self.child.try_wait().ok().flatten()
-    }
-
-    pub(super) fn shutdown(&mut self) {
-        let _ = crate::terminate_child_process_tree(&mut self.child, true);
-        let deadline = Instant::now() + Duration::from_secs(2);
-        while Instant::now() < deadline {
-            match self.child.try_wait() {
-                Ok(Some(_)) => break,
-                Ok(None) => thread::sleep(Duration::from_millis(20)),
-                Err(_) => break,
-            }
-        }
-        if self.child.try_wait().ok().flatten().is_none() {
-            let _ = self.child.kill();
-            let _ = self.child.wait();
-        }
-        for thread in self.reader_threads.drain(..) {
-            let _ = crate::join_thread_with_timeout(
-                thread,
-                Duration::from_secs(1),
-                "cloudflared output reader",
-            );
-        }
-        self.config.cleanup();
-    }
-}
-
-impl Drop for CloudflaredTunnel {
-    fn drop(&mut self) {
-        self.shutdown();
-    }
-}
-
-pub(super) fn start_cloudflared_tunnel(local_url: &str) -> Result<CloudflaredTunnel> {
-    let mut auto = start_cloudflared_attempt(local_url, CloudflaredTransport::Auto)?;
-    if auto.effective_transport.is_some() {
-        return Ok(auto);
-    }
-
-    let auto_can_fallback = auto.url.is_some() && auto.startup_timed_out;
-    if auto_can_fallback {
-        auto.shutdown();
-        crate::print_launch_status("Cloudflare QUIC unavailable; using HTTP/2 fallback.");
-        let mut http2 = start_cloudflared_attempt(local_url, CloudflaredTransport::Http2)?;
-        if http2.effective_transport.is_some() {
-            return Ok(http2);
-        }
-        http2.startup_failure = Some(
-            "Cloudflare edge transport unavailable: QUIC/UDP 7844 and HTTP/2/TCP 7844 failed"
-                .to_string(),
-        );
-        http2.shutdown();
-        return Ok(http2);
-    }
-
-    if auto.startup_failure.is_none() {
-        auto.startup_failure =
-            Some("Cloudflare Quick Tunnel did not register a transport connection".to_string());
-    }
-    auto.shutdown();
-    Ok(auto)
-}
-
-fn start_cloudflared_attempt(
-    local_url: &str,
-    transport: CloudflaredTransport,
-) -> Result<CloudflaredTunnel> {
-    let config = CloudflaredConfigIsolation::create()?;
-    let (mut child, rx, reader_threads) =
-        cloudflared_startup::spawn(local_url, transport, &config)?;
-    let startup = cloudflared_startup::wait(&mut child, &rx, transport);
-    Ok(CloudflaredTunnel {
-        child,
-        url: startup.url,
-        effective_transport: startup.effective_transport,
-        reader_threads,
-        config,
-        startup_timed_out: startup.startup_timed_out,
-        startup_failure: startup.startup_failure,
-    })
-}
-
-pub(super) fn expose_scan_cloudflared_output<R>(
-    reader: R,
-    tx: mpsc::SyncSender<String>,
-) -> JoinHandle<()>
-where
-    R: Read + Send + 'static,
-{
-    thread::spawn(move || {
-        let mut reader = io::BufReader::new(reader);
-        let mut bytes = [0_u8; 1024];
-        let mut line = Vec::with_capacity(EXPOSE_CLOUDFLARED_LINE_MAX_BYTES);
-        loop {
-            match reader.read(&mut bytes) {
-                Ok(0) => break,
-                Ok(size) => {
-                    for byte in &bytes[..size] {
-                        expose_scan_cloudflared_byte(&mut line, *byte, &tx);
-                    }
-                }
-                Err(_) => break,
-            }
-        }
-        expose_scan_cloudflared_line(&line, &tx);
-    })
-}
-
-fn expose_scan_cloudflared_byte(line: &mut Vec<u8>, byte: u8, tx: &mpsc::SyncSender<String>) {
-    if line.len() < EXPOSE_CLOUDFLARED_LINE_MAX_BYTES {
-        line.push(byte);
-    }
-    if byte == b'\n' {
-        expose_scan_cloudflared_line(line, tx);
-        line.clear();
-    }
-}
-
-fn expose_scan_cloudflared_line(line: &[u8], tx: &mpsc::SyncSender<String>) {
-    let Ok(line) = std::str::from_utf8(line) else {
-        return;
-    };
-    if line.contains("Registered tunnel connection") {
-        let protocol = line.split_whitespace().find_map(|part| {
-            part.strip_prefix("protocol=")
-                .filter(|value| matches!(*value, "quic" | "http2"))
-        });
-        if let Some(protocol) = protocol {
-            let _ = tx.try_send(format!("{CLOUDFLARED_EVENT_PREFIX}{protocol}"));
-        }
-    }
-    if let Some(url) = expose_find_trycloudflare_url(line) {
-        let _ = tx.try_send(url);
-    }
-}
-
-pub(super) fn expose_find_trycloudflare_url(line: &str) -> Option<String> {
-    line.split_whitespace().find_map(|part| {
-        let candidate = part.trim_matches(|ch| matches!(ch, ',' | ';' | '(' | ')' | '[' | ']'));
-        expose_public_host(candidate).map(|host| format!("https://{host}"))
-    })
-}
-
-pub(super) fn expose_public_host(url: &str) -> Option<String> {
-    if !url.is_ascii() {
-        return None;
-    }
-    let authority = url
-        .strip_prefix("https://")?
-        .split(['/', '?', '#'])
-        .next()?;
-    if authority.contains([':', '@']) {
-        return None;
-    }
-    let parsed = url::Url::parse(url).ok()?;
-    if parsed.scheme() != "https"
-        || !parsed.username().is_empty()
-        || parsed.password().is_some()
-        || parsed.port().is_some()
-        || parsed.query().is_some()
-        || parsed.fragment().is_some()
-        || !matches!(parsed.path(), "" | "/")
-    {
-        return None;
-    }
-    let host = parsed.host_str()?.to_ascii_lowercase();
-    (host.ends_with(".trycloudflare.com")
-        && host != "trycloudflare.com"
-        && expose_valid_dns_hostname(&host))
-    .then_some(host)
-}
-
-pub(super) fn expose_valid_dns_hostname(host: &str) -> bool {
-    hostname::expose_valid_dns_hostname(host)
 }

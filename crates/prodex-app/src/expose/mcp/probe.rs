@@ -106,32 +106,55 @@ impl std::fmt::Display for ProbeFailure {
     }
 }
 
-pub(crate) fn verify_local_mcp(url: &str) -> Result<()> {
+pub(crate) fn verify_local_mcp_with_progress(
+    url: &str,
+    progress: &mut dyn FnMut(&str),
+    cancelled: &dyn Fn() -> bool,
+) -> Result<()> {
     let started = Instant::now();
     let client = Client::builder()
         .timeout(Duration::from_secs(3))
         .build()
         .context("failed to initialize local MCP probe")?;
+    if cancelled() {
+        bail!("local MCP verification cancelled")
+    }
+    progress(ProbePhase::LocalInitialize.label());
     probe_initialize(&client, url, ProbePhase::LocalInitialize)
         .map_err(|failure| anyhow::anyhow!("{failure}"))?;
+    if cancelled() {
+        bail!("local MCP verification cancelled")
+    }
+    progress(ProbePhase::LocalTools.label());
     probe_tools(&client, url, ProbePhase::LocalTools)
         .map_err(|failure| anyhow::anyhow!("{failure}"))?;
+    if cancelled() {
+        bail!("local MCP verification cancelled")
+    }
     crate::runtime_launch::emit_runtime_timing("expose.local_mcp_ready_ms", started);
     Ok(())
 }
 
-pub(crate) fn verify_public_mcp(url: &str) -> Result<()> {
+pub(crate) fn verify_public_mcp_with_progress(
+    url: &str,
+    progress: &mut dyn FnMut(&str),
+    cancelled: &dyn Fn() -> bool,
+) -> Result<()> {
     let started = Instant::now();
     run_public_phase(
         url,
         ProbePhase::PublicInitialize,
         MCP_PUBLIC_INITIALIZE_TIMEOUT,
+        progress,
+        cancelled,
         |client, url| probe_initialize(client, url, ProbePhase::PublicInitialize),
     )?;
     run_public_phase(
         url,
         ProbePhase::PublicTools,
         MCP_PUBLIC_TOOLS_TIMEOUT,
+        progress,
+        cancelled,
         |client, url| probe_tools(client, url, ProbePhase::PublicTools),
     )?;
     crate::runtime_launch::emit_runtime_timing("expose.public_mcp_ready_ms", started);
@@ -192,11 +215,18 @@ fn cloudflare_doh_address(host: &str) -> Option<SocketAddr> {
         .map(|address| SocketAddr::new(address, 443))
 }
 
-fn run_public_phase<F>(url: &str, phase: ProbePhase, timeout: Duration, mut probe: F) -> Result<()>
+fn run_public_phase<F>(
+    url: &str,
+    phase: ProbePhase,
+    timeout: Duration,
+    progress: &mut dyn FnMut(&str),
+    cancelled: &dyn Fn() -> bool,
+    mut probe: F,
+) -> Result<()>
 where
     F: FnMut(&Client, &str) -> std::result::Result<(), ProbeFailure>,
 {
-    crate::print_launch_status(&format!("Validating {}...", phase.label()));
+    progress(phase.label());
     let deadline = Instant::now() + timeout;
     let mut delay = MCP_PUBLIC_READY_STEP;
     loop {
@@ -207,11 +237,12 @@ where
             })
             .and_then(|client| probe(&client, url))
         {
+            Ok(()) if cancelled() => bail!("{} cancelled", phase.label()),
             Ok(()) => return Ok(()),
             Err(failure) if failure.retryable() => failure,
             Err(failure) => bail!("{failure}"),
         };
-        if probe_cancelled() {
+        if cancelled() {
             bail!("{} cancelled", phase.label())
         }
         if Instant::now() >= deadline {
@@ -221,7 +252,7 @@ where
                 timeout.as_secs()
             )
         }
-        if !wait_for_probe_retry(delay) {
+        if !wait_for_probe_retry(delay, cancelled) {
             bail!("{} cancelled", phase.label())
         }
         delay = (delay * 2).min(Duration::from_secs(2));
@@ -337,10 +368,10 @@ fn mcp_probe_json(
     })
 }
 
-fn wait_for_probe_retry(delay: Duration) -> bool {
+fn wait_for_probe_retry(delay: Duration, cancelled: &dyn Fn() -> bool) -> bool {
     let deadline = Instant::now() + delay;
     while Instant::now() < deadline {
-        if probe_cancelled() {
+        if cancelled() {
             return false;
         }
         thread::sleep(
@@ -348,15 +379,6 @@ fn wait_for_probe_retry(delay: Duration) -> bool {
         );
     }
     true
-}
-
-fn probe_cancelled() -> bool {
-    #[cfg(unix)]
-    {
-        crate::InteractiveSigintGuard::count() > 0
-    }
-    #[cfg(not(unix))]
-    false
 }
 
 fn mcp_initialize_body() -> Value {
