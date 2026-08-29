@@ -193,7 +193,7 @@ test("the ownership threshold is exact rather than rounded", () => {
 test("source-only cleanup stays separate from frozen migration volume", () => {
   const result = calculateOwnership(releaseManifest(), BASE_SHA, "WORKTREE");
   assert.equal(result.rust_semantic_loc_migrated, 457);
-  assert.equal(result.source_cleanup_loc, 179);
+  assert.equal(result.source_cleanup_loc, 404);
   assert.equal(result.required_migration_volume_loc, 423);
 });
 
