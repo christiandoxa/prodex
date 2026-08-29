@@ -1,0 +1,9 @@
+{
+  "schema_version": 1,
+  "release_target": "0.420.0",
+  "baseline_sha": "2531c7a345f1607a18aa926e204b4d02cc322167",
+  "baseline_snapshot": "migration/mojo-production-share-baseline-0.419.2.json",
+  "counting_rules_version": 1,
+  "minimum_percent": 10,
+  "production_build_feature": "mojo-core"
+}

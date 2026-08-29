@@ -12,6 +12,7 @@ const manifestPath = path.join(repoRoot, "migration", "mojo-ownership.json");
 const COUNTING_RULES_VERSION = 1;
 const COUNTED_CLASSIFICATIONS = new Set(["DETERMINISTIC_DOMAIN", "MIXED"]);
 const SEMANTIC_ROLES = new Set(["semantic", undefined]);
+const VALID_RUST_REDUCTION_STATES = new Set(["deleted", "adapter-only", "test-oracle-only"]);
 const sourceCache = new Map();
 
 function parseArgs(argv) {
@@ -193,6 +194,20 @@ function baselineOperations(manifest) {
     .filter((operation) => operation.baseline_state === "authoritative");
 }
 
+function operationsAtRevision(manifest, revision) {
+  const operations = manifest.authoritative_operations ?? [];
+  if (revision === manifest.baseline_sha) return operations;
+  const overrides = manifest.release_operation_overrides ?? {};
+  for (const name of Object.keys(overrides)) {
+    assert(operations.some((operation) => operation.name === name),
+      `release operation override names unknown operation ${name}`);
+  }
+  return operations.map((operation) => ({
+    ...operation,
+    ...(overrides[operation.name] ?? {}),
+  }));
+}
+
 function readManifest() {
   return JSON.parse(readFileSync(manifestPath, "utf8"));
 }
@@ -316,8 +331,26 @@ function operationSource(manifest, operation) {
   return entry;
 }
 
+export function rustConsumerSources(manifest, revision, relativePath) {
+  const sources = [{ path: relativePath, contents: sourceText(manifest, revision, relativePath) }];
+  const pending = [sources[0]];
+  const seen = new Set([relativePath]);
+  while (pending.length > 0) {
+    const current = pending.pop();
+    for (const match of current.contents.matchAll(/^\s*#\[path\s*=\s*"([^"]+)"\]\s*mod\s+[A-Za-z0-9_]+\s*;/gmu)) {
+      const childPath = path.posix.normalize(path.posix.join(path.posix.dirname(current.path), match[1]));
+      if (seen.has(childPath) || !sourceExists(manifest, revision, childPath)) continue;
+      const child = { path: childPath, contents: sourceText(manifest, revision, childPath) };
+      seen.add(childPath);
+      sources.push(child);
+      pending.push(child);
+    }
+  }
+  return sources;
+}
+
 function validateOperations(manifest, revision) {
-  const operations = manifest.authoritative_operations ?? [];
+  const operations = operationsAtRevision(manifest, revision);
   assert(operations.length >= 6, "at least six Mojo operations are required");
   assert(new Set(operations.map((operation) => operation.domain.split("/")[0])).size >= 4,
     "Mojo operations must span at least four deterministic domains");
@@ -344,10 +377,11 @@ function validateOperations(manifest, revision) {
       `${operation.name} Mojo entry is not exported by its source`);
     assert(mojoProductionReachable(manifest, revision, operation.mojo_source),
       `${operation.name} Mojo source is not reachable from build.rs`);
-    const consumer = sourceText(manifest, revision, operation.consumer);
-    assert(consumer.includes("prodex_mojo_core"), `${operation.name} consumer does not call prodex-mojo-core`);
+    const consumerSources = rustConsumerSources(manifest, revision, operation.consumer);
+    assert(consumerSources.some(({ contents }) => contents.includes("prodex_mojo_core")),
+      `${operation.name} consumer does not call prodex-mojo-core`);
     if (operation.consumer_marker) {
-      assert(consumer.includes(operation.consumer_marker),
+      assert(consumerSources.some(({ contents }) => contents.includes(operation.consumer_marker)),
         `${operation.name} consumer marker is missing`);
     }
     const reachabilityTest = sourceText(manifest, revision, operation.production_reachability_test);
@@ -421,18 +455,81 @@ function reductionFor(reductions, file) {
 function requireReduction(reductions, file, message) {
   const reduction = reductionFor(reductions, file);
   assert(reduction, message);
-  assert(["deleted", "adapter-only", "test-oracle-only"].includes(reduction.final_state),
+  assert(VALID_RUST_REDUCTION_STATES.has(reduction.final_state),
     `${file} has an invalid Rust semantic reduction state`);
   return reduction;
 }
 
+function isReleaseOperation(manifest, operation) {
+  return operation.introduced_in === manifest.release_target ||
+    operation.expanded_in === manifest.release_target;
+}
+
+function reductionLabel(reduction) {
+  return `${reduction.file}:${reduction.symbol}`;
+}
+
+function validateCleanupReduction(manifest, reduction, baselineRevision, releaseRevision) {
+  const label = reductionLabel(reduction);
+  assert(Number.isInteger(reduction.cleanup_loc) && reduction.cleanup_loc > 0,
+    `${label} needs positive cleanup_loc`);
+  const proof = reduction.cleanup_source;
+  assert(proof && typeof proof === "object", `${label} needs cleanup_source evidence`);
+  assert(proof.baseline_range && Number.isInteger(proof.baseline_range.start) &&
+    Number.isInteger(proof.baseline_range.end) && proof.baseline_range.start > 0 &&
+    proof.baseline_range.end >= proof.baseline_range.start,
+  `${label} cleanup_source needs a valid baseline_range`);
+  const baseline = sourceText(manifest, baselineRevision, reduction.file);
+  const baselineLines = baseline.split(/\r?\n/);
+  const baselineSlice = baselineLines
+    .slice(proof.baseline_range.start - 1, proof.baseline_range.end)
+    .join("\n");
+  assert(baselineSlice.includes(reduction.symbol),
+    `${label} cleanup range does not contain its baseline symbol`);
+  assert.equal(
+    countSemanticLines(baseline, "rust", [proof.baseline_range]),
+    reduction.cleanup_loc,
+    `${label} cleanup_loc does not match its baseline source range`,
+  );
+  if (releaseRevision === baselineRevision) return;
+  const release = sourceText(manifest, releaseRevision, reduction.file);
+  switch (proof.kind) {
+    case "deleted":
+      assert(!release.includes(reduction.symbol), `${label} deleted cleanup remains in release source`);
+      break;
+    case "feature-gated": {
+      assert.equal(typeof proof.release_symbol, "string", `${label} feature-gated cleanup needs release_symbol`);
+      assert.equal(typeof proof.release_gate, "string", `${label} feature-gated cleanup needs release_gate`);
+      let gateOffset = -1;
+      let symbolOffset = -1;
+      for (let from = 0; ; ) {
+        const candidateGate = release.indexOf(proof.release_gate, from);
+        if (candidateGate < 0) break;
+        const candidateSymbol = release.indexOf(proof.release_symbol, candidateGate + proof.release_gate.length);
+        if (candidateSymbol >= 0 && release.slice(candidateGate, candidateSymbol).split(/\r?\n/).length <= 3) {
+          gateOffset = candidateGate;
+          symbolOffset = candidateSymbol;
+          break;
+        }
+        from = candidateGate + proof.release_gate.length;
+      }
+      assert(gateOffset >= 0, `${label} feature-gated cleanup release gate/symbol is absent`);
+      assert(release.slice(gateOffset, symbolOffset).split(/\r?\n/).length <= 3,
+        `${label} feature-gated cleanup release symbol is not guarded by its release gate`);
+      break;
+    }
+    default:
+      assert.fail(`${label} cleanup_source has an unsupported kind`);
+  }
+}
+
 function migrationVolume(manifest, baselineEntries, releaseRevision) {
-  const targetOperations = new Set((manifest.authoritative_operations ?? [])
-    .filter((operation) => operation.introduced_in === manifest.release_target ||
-      operation.expanded_in === manifest.release_target)
+  const targetOperations = new Set(operationsAtRevision(manifest, releaseRevision)
+    .filter((operation) => isReleaseOperation(manifest, operation))
     .map((operation) => operation.name));
   const reductions = (manifest.rust_semantic_reductions ?? [])
-    .filter((reduction) => targetOperations.has(reduction.operation));
+    .filter((reduction) => targetOperations.has(reduction.operation) &&
+      reduction.migrated_semantic_loc !== undefined);
   const baselineByPath = new Map(baselineEntries
     .filter((entry) => entry.language === "rust" && isEligible(entry))
     .map((entry) => [entry.path, entry]));
@@ -478,10 +575,27 @@ function validateInventory(manifest, baselineRevision, releaseRevision) {
       !sourceExists(manifest, releaseRevision, entry.path)));
   const releaseByPath = new Map(releaseEntriesAtRevision.map((entry) => [entry.path, entry]));
   const reductions = manifest.rust_semantic_reductions ?? [];
+  const reductionKeys = new Set();
+  for (const reduction of reductions) {
+    const key = [reduction.operation, reduction.file, reduction.symbol].join("\u0000");
+    assert(!reductionKeys.has(key),
+      `duplicate Rust semantic reduction ${reduction.operation}:${reduction.file}:${reduction.symbol}`);
+    reductionKeys.add(key);
+  }
   const operationNames = new Set([
     ...(manifest.authoritative_operations ?? []).map((operation) => operation.name),
     ...(manifest.supporting_operations ?? []),
   ]);
+  for (const operation of operationsAtRevision(manifest, releaseRevision).filter((candidate) =>
+    isReleaseOperation(manifest, candidate))) {
+    const operationReductions = reductions.filter((reduction) => reduction.operation === operation.name);
+    assert(operationReductions.length > 0,
+      `${operation.name} needs a traceable Rust cleanup record`);
+    assert(operationReductions.some((reduction) =>
+      (Number.isInteger(reduction.migrated_semantic_loc) && reduction.migrated_semantic_loc > 0) ||
+      (Number.isInteger(reduction.cleanup_loc) && reduction.cleanup_loc > 0)),
+    `${operation.name} needs positive migrated_semantic_loc or cleanup_loc`);
+  }
   for (const baseline of baselineEntries) {
     if (!isEligible(baseline)) continue;
     const release = releaseByPath.get(baseline.path);
@@ -535,11 +649,19 @@ function validateInventory(manifest, baselineRevision, releaseRevision) {
       `${reduction.file}:${reduction.symbol} names an unknown operation`);
     assert(typeof reduction.previous_responsibility === "string",
       `${reduction.file} Rust reduction needs its previous responsibility`);
-    assert(["deleted", "adapter-only", "test-oracle-only"].includes(reduction.final_state),
+    assert(VALID_RUST_REDUCTION_STATES.has(reduction.final_state),
       `${reduction.file}:${reduction.symbol} has an invalid final Rust state`);
+    assert(!(reduction.migrated_semantic_loc !== undefined && reduction.cleanup_loc !== undefined),
+      `${reductionLabel(reduction)} cannot mix migrated_semantic_loc and cleanup_loc`);
     if (reduction.migrated_semantic_loc !== undefined) {
       assert(Number.isInteger(reduction.migrated_semantic_loc) && reduction.migrated_semantic_loc > 0,
         `${reduction.file}:${reduction.symbol} needs positive migrated_semantic_loc`);
+      const baselineEntry = baselineEntries.find((entry) => entry.path === reduction.file);
+      assert(baselineEntry?.language === "rust" && isEligible(baselineEntry),
+        `${reductionLabel(reduction)} migrated_semantic_loc must reference frozen baseline Rust inventory`);
+    }
+    if (reduction.cleanup_loc !== undefined) {
+      validateCleanupReduction(manifest, reduction, baselineRevision, releaseRevision);
     }
     assert(sourceExists(manifest, baselineRevision, reduction.file),
       `${reduction.file}:${reduction.symbol} is not traceable in the frozen baseline source`);
@@ -547,6 +669,11 @@ function validateInventory(manifest, baselineRevision, releaseRevision) {
     assert(baselineSource.includes(reduction.symbol),
       `${reduction.file}:${reduction.symbol} is not traceable in the frozen baseline source`);
     if (releaseRevision === baselineRevision && !sourceExists(manifest, releaseRevision, reduction.file)) {
+      continue;
+    }
+    const operation = (manifest.authoritative_operations ?? [])
+      .find((candidate) => candidate.name === reduction.operation);
+    if (releaseRevision === baselineRevision && operation && isReleaseOperation(manifest, operation)) {
       continue;
     }
     if (reduction.final_state === "deleted" && !sourceExists(manifest, releaseRevision, reduction.file)) continue;
@@ -587,7 +714,7 @@ export function calculateOwnership(manifest, baselineRevision, releaseRevision) 
     assert(final.mojo_percent >= baseline.mojo_percent,
       `Mojo ownership percentage regressed from ${baseline.mojo_percent.toFixed(2)}% to ${final.mojo_percent.toFixed(2)}%`);
   }
-  const operations = manifest.authoritative_operations ?? [];
+  const operations = operationsAtRevision(manifest, releaseRevision);
   const available = (operation) => {
     if (!sourceExists(manifest, releaseRevision, operation.mojo_source)) return false;
     const source = sourceText(manifest, releaseRevision, operation.mojo_source);
@@ -596,7 +723,7 @@ export function calculateOwnership(manifest, baselineRevision, releaseRevision) 
   const authoritative = operations.filter((operation) =>
     operation.final_state === "authoritative" && available(operation) &&
     (releaseRevision !== baselineRevision || operation.baseline_state === "authoritative"));
-  const baselineAuthoritative = operations.filter((operation) =>
+  const baselineAuthoritative = operationsAtRevision(manifest, baselineRevision).filter((operation) =>
     operation.baseline_state === "authoritative" &&
     sourceExists(manifest, baselineRevision, operation.mojo_source) &&
     sourceText(manifest, baselineRevision, operation.mojo_source)
@@ -607,14 +734,15 @@ export function calculateOwnership(manifest, baselineRevision, releaseRevision) 
   const expandedOperations = releaseRevision === baselineRevision
     ? []
     : authoritative.filter((operation) => operation.expanded_in === manifest.release_target);
-  const migrationUnits = authoritative.filter((operation) =>
-    operation.introduced_in === manifest.release_target || operation.expanded_in === manifest.release_target);
+  const migrationUnits = authoritative.filter((operation) => isReleaseOperation(manifest, operation));
   const rustSemanticLocMigrated = strict && releaseRevision !== baselineRevision
     ? migrationVolume(manifest, [
       ...entriesFor(manifest, "baseline", "rust"),
       ...entriesFor(manifest, "baseline", "mojo"),
     ], releaseRevision)
     : 0;
+  const sourceCleanupLoc = (manifest.rust_semantic_reductions ?? [])
+    .reduce((total, reduction) => total + (reduction.cleanup_loc ?? 0), 0);
   const requiredMigrationVolumeLoc = strict
     ? requiredMigrationVolume(baseline.rust_loc, manifest.migration_rate_percent)
     : 0;
@@ -632,6 +760,7 @@ export function calculateOwnership(manifest, baselineRevision, releaseRevision) 
     final_mojo_percent: final.mojo_percent,
     migration_volume_loc: rustSemanticLocMigrated,
     new_migration_volume_loc: rustSemanticLocMigrated,
+    source_cleanup_loc: sourceCleanupLoc,
     required_migration_volume_loc: requiredMigrationVolumeLoc,
     rust_semantic_reduction_loc: Math.max(0, baseline.rust_loc - final.rust_loc),
     authoritative_operation_count: authoritative.length,

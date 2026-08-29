@@ -470,6 +470,7 @@ Rich v6 is additive and does not overload text ABI v1. Its version entry point i
 | `RichRouteInput` / `RichRouteRecord` / `RichRouteResult` | provider/model/capability candidate graph and ordered decision |
 | `RichPolicyInput` / `RichPolicyModel` / `RichPolicyResult` | route-alias parser input, normalized model records, and issue metadata |
 | `RichPlanItem` / `RichPlanAction` / `RichPlanResult` | Smart Context item/action graph and budget result |
+| `RichCatalogPlanModel` / `RichCatalogPlanChoice` / `RichCatalogPlanResult` | dynamic catalog metadata, ordered picker choices, and main/sub-agent model-effort resolution |
 
 Rich operations are coarse-grained: one context text, route candidate set, policy alias, fallback
 selector, or context-item set per call. Inputs are borrowed only for the synchronous call. Mojo
@@ -492,10 +493,12 @@ and output sizes where the operation can determine them. Rust validates every st
 count, offset, length, UTF-8 slice, object index, type/reason tag, uniqueness constraint, and
 ordering relation. Invalid output is a hard internal error on Mojo-enabled builds.
 
-The layout probe covers all v3 record sizes and alignments. Current x86_64 evidence is 16-byte
+The layout probe covers all rich record sizes and alignments. Current x86_64 evidence is 16-byte
 string views/slices, 64-byte context records, 160-byte context results, 128-byte route inputs,
 160-byte route records, 80-byte route results, 64-byte policy inputs, 32-byte policy models,
-80-byte policy results, 32-byte plan items, 48-byte plan actions, and 72-byte plan results.
+80-byte policy results, 96-byte catalog plan models, 32-byte catalog plan choices,
+136-byte catalog plan results, 32-byte plan items, 48-byte plan actions, and 72-byte plan
+results.
 The ABI is reentrant and has no process-global mutable state; callers must provide disjoint buffers
 for concurrent calls.
 
@@ -503,4 +506,20 @@ Production v3 entry points are `prodex_mojo_rich_context_analyze_v2`,
 `prodex_mojo_rich_route_plan_v2`, `prodex_mojo_rich_policy_alias_v2`,
 `prodex_mojo_rich_model_fallback_v2`, and `prodex_mojo_rich_context_plan_v2`. The feature-off Rust
 implementation is a separate supported target and differential oracle, never a runtime fallback
-after a Mojo-enabled call fails.
+after a Mojo-enabled call fails. Catalog v2 adds `prodex_mojo_rich_catalog_choices_v2` for
+filtering/sorting dynamic model caches and `prodex_mojo_rich_catalog_config_v1` for remembered,
+provider-default, main-agent, and sub-agent model/effort precedence. Both use caller-owned rich
+record arrays and remain Mojo-authoritative when the rich feature is enabled.
+
+## Migration accounting
+
+`migrated_semantic_loc` is qualifying migration volume only when its Rust file is present in the
+frozen baseline inventory. `cleanup_loc` is separate source-only cleanup evidence: it records
+semantic Rust lines deleted or removed from the Mojo-enabled production path, but never counts
+toward the frozen-baseline migration floor. Every `cleanup_loc` record carries a baseline source
+range; feature-gated records also identify the release gate and retained Rust symbol so the guard
+can verify the evidence instead of treating a zero or unsupported claim as migration volume.
+
+Current 0.420.0 cleanup evidence is 17 lines for the deleted auto-redeem priority helper, 84 lines
+for the feature-gated dynamic catalog Rust planner, and 78 lines for the feature-gated main model
+configuration Rust planner. These 179 lines are reported separately from the 423-line requirement.

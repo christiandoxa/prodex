@@ -5,10 +5,11 @@ import {
   calculateOwnership,
   countSemanticLines,
   ownershipMeetsMinimum,
+  rustConsumerSources,
   validateManifest,
 } from "./mojo-ownership.mjs";
 
-const BASE_SHA = "6f0f632a178492647da764e3522ff2092db40fb3";
+const BASE_SHA = "2531c7a345f1607a18aa926e204b4d02cc322167";
 
 function releaseManifest() {
   return JSON.parse(fs.readFileSync("migration/mojo-ownership.json", "utf8"));
@@ -82,21 +83,21 @@ test("test-only Mojo source contributes no ownership", () => {
 test("baseline remains frozen while the final inventory evolves", () => {
   const manifest = releaseManifest();
   const before = calculateOwnership(manifest, BASE_SHA, "WORKTREE").baseline;
-  manifest.release_inventory.overrides["mojo/prodex_core/quota_pressure.mojo"].semantic_loc = 1;
+  manifest.release_inventory.overrides["mojo/prodex_core/rich_catalog.mojo"].semantic_loc = 1;
   const after = calculateOwnership(manifest, BASE_SHA, "WORKTREE").baseline;
   assert.deepEqual(after, before);
 });
 
 test("the frozen baseline records the Rust denominator and migration floor", () => {
   const result = calculateOwnership(releaseManifest(), BASE_SHA, BASE_SHA);
-  assert.equal(result.baseline.rust_loc, 4727);
-  assert.equal(result.required_migration_volume_loc, 473);
-  assert.equal(result.baseline_remaining_rust_semantic_loc, 4727);
+  assert.equal(result.baseline.rust_loc, 4227);
+  assert.equal(result.required_migration_volume_loc, 423);
+  assert.equal(result.baseline_remaining_rust_semantic_loc, 4227);
   assert.equal(result.rust_semantic_loc_migrated, 0);
   assert.equal(result.rust_semantic_migration_percent, 0);
   assert.equal(result.baseline_mojo_percent, result.baseline.mojo_percent);
   assert.equal(result.final_mojo_percent, result.final.mojo_percent);
-  assert.equal(result.baseline_authoritative_operation_count, 14);
+  assert.equal(result.baseline_authoritative_operation_count, 22);
 });
 
 test("release inventory cannot hide baseline Rust semantic lines", () => {
@@ -135,6 +136,19 @@ test("baseline authoritative operations remain continuous", () => {
   );
 });
 
+test("release operation overrides evolve an entry without rewriting the frozen baseline", () => {
+  const manifest = releaseManifest();
+  const baseline = calculateOwnership(manifest, BASE_SHA, BASE_SHA);
+  const release = calculateOwnership(manifest, BASE_SHA, "WORKTREE");
+  assert.equal(baseline.baseline_authoritative_operation_count, 22);
+  assert.equal(release.baseline_authoritative_operation_count, 22);
+  assert.equal(
+    release.authoritative_operations.find((operation) => operation.name === "quota_route_score_resolution")
+      .mojo_entry,
+    "prodex_runtime_quota_route_score_resolution_batch",
+  );
+});
+
 test("Rust reductions are traceable in both baseline and release source", () => {
   const manifest = releaseManifest();
   manifest.rust_semantic_reductions[0].symbol = "missing_reduction_symbol";
@@ -153,7 +167,47 @@ test("authoritative operation metadata must point at its real exported entry", (
   );
 });
 
+test("consumer markers follow explicit Rust path modules", () => {
+  const manifest = releaseManifest();
+  const operation = manifest.authoritative_operations.find(
+    (candidate) => candidate.name === "provider_catalog_merge_dedup",
+  );
+  const sources = rustConsumerSources(manifest, "WORKTREE", operation.consumer);
+  assert(sources.some(({ path, contents }) =>
+    path === "crates/prodex-provider-core/src/catalog.rs" &&
+    contents.includes(operation.consumer_marker)),
+  );
+});
+
 test("the ownership threshold is exact rather than rounded", () => {
   assert.equal(ownershipMeetsMinimum({ final: { mojo_percent: 19.99 } }, 20), false);
   assert.equal(ownershipMeetsMinimum({ final: { mojo_percent: 20 } }, 20), true);
+});
+
+test("source-only cleanup stays separate from frozen migration volume", () => {
+  const result = calculateOwnership(releaseManifest(), BASE_SHA, "WORKTREE");
+  assert.equal(result.rust_semantic_loc_migrated, 133);
+  assert.equal(result.source_cleanup_loc, 179);
+  assert.equal(result.required_migration_volume_loc, 423);
+});
+
+test("unsupported zero cleanup and duplicate reductions fail", () => {
+  const manifest = releaseManifest();
+  const reduction = manifest.rust_semantic_reductions.find(
+    (candidate) => candidate.operation === "runtime_auto_redeem_capacity_planning",
+  );
+  reduction.cleanup_loc = 0;
+  assert.throws(
+    () => validateManifest(manifest, BASE_SHA, "WORKTREE"),
+    /needs positive migrated_semantic_loc or cleanup_loc/u,
+  );
+
+  const duplicateManifest = releaseManifest();
+  duplicateManifest.rust_semantic_reductions.push({
+    ...duplicateManifest.rust_semantic_reductions[0],
+  });
+  assert.throws(
+    () => validateManifest(duplicateManifest, BASE_SHA, "WORKTREE"),
+    /duplicate Rust semantic reduction/u,
+  );
 });
