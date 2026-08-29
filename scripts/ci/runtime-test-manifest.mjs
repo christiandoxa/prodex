@@ -679,6 +679,10 @@ export const RUNTIME_CI_TEST_CASES = [
     tags: [TAGS.parallelSafe],
   },
   {
+    name: "fresh_live_quota_does_not_reuse_stale_exhausted_snapshot_reset",
+    tags: SERIALIZED_TAGS,
+  },
+  {
     id: "anthropic-request-translation",
     filter: "main_internal_tests::runtime_proxy_claude_and_anthropic::request_translation::",
     label: "parallel-safe-anthropic-request-translation",
