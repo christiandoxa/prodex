@@ -316,10 +316,10 @@ fn runtime_responses_candidate_saturated(
         selected_profile: None,
     })? {
         RuntimeInflightReliefWaitResult::Relieved
-        | RuntimeInflightReliefWaitResult::NotWaitable => return Ok(true),
+        | RuntimeInflightReliefWaitResult::NotWaitable => Ok(true),
         RuntimeInflightReliefWaitResult::DeadlineExpired => {
             loop_state.record_local_capacity_wait_timeout();
-            return Ok(true);
+            Ok(true)
         }
     }
 }

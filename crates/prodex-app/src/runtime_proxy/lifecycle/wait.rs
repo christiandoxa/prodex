@@ -41,6 +41,7 @@ pub(crate) fn runtime_profile_inflight_wait_outcome_label(
     }
 }
 
+#[cfg(test)]
 pub(crate) fn runtime_profile_inflight_wait_outcome_since(
     shared: &RuntimeRotationProxyShared,
     timeout: Duration,

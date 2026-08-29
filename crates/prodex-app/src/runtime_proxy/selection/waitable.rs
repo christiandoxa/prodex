@@ -321,8 +321,6 @@ pub(crate) fn runtime_proxy_maybe_wait_for_interactive_inflight_relief(
             RuntimeProfileInFlightWaitOutcome::SelectionChanged => {
                 signaled = true;
                 wake_source = RuntimeProfileInFlightWaitOutcome::SelectionChanged;
-                observed_revision = runtime_profile_inflight_release_revision(shared);
-                observed_selection_revision = shared.lane_admission.selection_change_revision();
                 useful_relief = true;
                 break;
             }
