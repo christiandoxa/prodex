@@ -3,6 +3,10 @@ from std.memory import Pointer
 comptime UINT64_MAX: UInt64 = 18446744073709551615
 comptime UINT32_MAX: UInt64 = 4294967295
 comptime SMART_CONTEXT_TOKEN_ACCOUNTING_MAX_COUNT: Int64 = 256
+comptime SMART_CONTEXT_ACCOUNTING_RISK_UNKNOWN_WINDOW: UInt64 = 1
+comptime SMART_CONTEXT_ACCOUNTING_RISK_ZERO_WINDOW: UInt64 = 2
+comptime SMART_CONTEXT_ACCOUNTING_RISK_RESERVED_OUTPUT: UInt64 = 4
+comptime SMART_CONTEXT_ACCOUNTING_RISK_UNKNOWN_INPUT: UInt64 = 8
 
 def smart_context_saturating_add(left: UInt64, right: UInt64) -> UInt64:
     if left > UINT64_MAX - right:
@@ -15,6 +19,30 @@ def smart_context_saturating_mul(left: UInt64, right: UInt64) -> UInt64:
     if left > UINT64_MAX / right:
         return UINT64_MAX
     return left * right
+
+def smart_context_saturating_sub(left: UInt64, right: UInt64) -> UInt64:
+    if right > left:
+        return 0
+    return left - right
+
+def smart_context_accounting_source(
+    current_input_tokens: UInt64,
+    estimated_current_request_tokens: UInt64,
+    current_request_accounted_tokens: UInt64,
+    last_accounted_input_tokens: UInt64,
+    effective_input_tokens: UInt64,
+) -> Int64:
+    if effective_input_tokens == 0:
+        return 3
+    if last_accounted_input_tokens > current_request_accounted_tokens:
+        return 2
+    if current_input_tokens >= estimated_current_request_tokens and current_input_tokens > 0:
+        return 0
+    if estimated_current_request_tokens > 0:
+        return 1
+    if last_accounted_input_tokens > 0:
+        return 2
+    return 3
 
 def smart_context_pressure_band(pressure_has_value: Int64, pressure: UInt64) -> Int64:
     if pressure_has_value == 0:
@@ -173,6 +201,81 @@ def prodex_smart_context_token_usage_summary_batch(
     last_input_tokens[unsafe_offset=0] = last_input
     last_accounted_input_tokens[unsafe_offset=0] = last_accounted
     last_observed_context_tokens[unsafe_offset=0] = last_context
+    return 0
+
+
+@export("prodex_smart_context_token_accounting_v1")
+def prodex_smart_context_token_accounting_v1(
+    model_context_window_tokens: UInt64,
+    model_context_window_has_value: Int64,
+    reserved_output_tokens: UInt64,
+    current_input_tokens: UInt64,
+    estimated_current_request_tokens: UInt64,
+    observed_input_tokens: UInt64,
+    observed_cached_input_tokens: UInt64,
+    observed_output_tokens: UInt64,
+    observed_reasoning_tokens: UInt64,
+    last_accounted_input_tokens: UInt64,
+    observed_uncached_input_tokens: Pointer[mut=True, UInt64, _],
+    observed_total_tokens: Pointer[mut=True, UInt64, _],
+    observed_context_tokens: Pointer[mut=True, UInt64, _],
+    current_request_accounted_tokens: Pointer[mut=True, UInt64, _],
+    effective_input_tokens: Pointer[mut=True, UInt64, _],
+    effective_input_source: Pointer[mut=True, Int64, _],
+    available_context_tokens: Pointer[mut=True, UInt64, _],
+    available_context_has_value: Pointer[mut=True, Int64, _],
+    risk_bits: Pointer[mut=True, UInt64, _],
+) abi("C") -> Int64:
+    if model_context_window_has_value < 0 or model_context_window_has_value > 1:
+        return 1
+
+    observed_uncached_input_tokens[unsafe_offset=0] = smart_context_saturating_sub(
+        observed_input_tokens, observed_cached_input_tokens
+    )
+    observed_total_tokens[unsafe_offset=0] = smart_context_saturating_add(
+        observed_input_tokens, observed_output_tokens
+    )
+    observed_context_tokens[unsafe_offset=0] = smart_context_saturating_add(
+        observed_total_tokens[unsafe_offset=0], observed_reasoning_tokens
+    )
+
+    var current_request_accounted = current_input_tokens
+    if estimated_current_request_tokens > current_request_accounted:
+        current_request_accounted = estimated_current_request_tokens
+    current_request_accounted_tokens[unsafe_offset=0] = current_request_accounted
+
+    var effective_input = current_request_accounted
+    if last_accounted_input_tokens > effective_input:
+        effective_input = last_accounted_input_tokens
+    effective_input_tokens[unsafe_offset=0] = effective_input
+    var source = smart_context_accounting_source(
+        current_input_tokens,
+        estimated_current_request_tokens,
+        current_request_accounted,
+        last_accounted_input_tokens,
+        effective_input,
+    )
+    effective_input_source[unsafe_offset=0] = source
+
+    var available: UInt64 = 0
+    if model_context_window_has_value == 1:
+        available = smart_context_saturating_sub(
+            smart_context_saturating_sub(model_context_window_tokens, effective_input),
+            reserved_output_tokens,
+        )
+    available_context_tokens[unsafe_offset=0] = available
+    available_context_has_value[unsafe_offset=0] = model_context_window_has_value
+
+    var reasons: UInt64 = 0
+    if model_context_window_has_value == 0:
+        reasons = reasons | SMART_CONTEXT_ACCOUNTING_RISK_UNKNOWN_WINDOW
+    elif model_context_window_tokens == 0:
+        reasons = reasons | SMART_CONTEXT_ACCOUNTING_RISK_ZERO_WINDOW
+    elif reserved_output_tokens >= model_context_window_tokens:
+        reasons = reasons | SMART_CONTEXT_ACCOUNTING_RISK_RESERVED_OUTPUT
+    if source == 3:
+        reasons = reasons | SMART_CONTEXT_ACCOUNTING_RISK_UNKNOWN_INPUT
+    risk_bits[unsafe_offset=0] = reasons
     return 0
 
 

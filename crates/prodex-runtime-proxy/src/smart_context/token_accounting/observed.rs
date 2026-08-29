@@ -1,5 +1,7 @@
-#[cfg(not(feature = "mojo"))]
-use super::{smart_context_accounted_input_tokens, smart_context_observed_usage_context_tokens};
+#[cfg(any(not(feature = "mojo"), test))]
+use super::{
+    smart_context_accounted_input_tokens, smart_context_observed_usage_context_tokens_rust,
+};
 use crate::RuntimeTokenUsage;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -13,6 +15,7 @@ pub(super) struct SmartContextObservedUsageTotals {
     pub(super) last_observed_context_tokens: u64,
 }
 
+#[cfg(feature = "mojo")]
 pub(super) fn smart_context_observed_usage_totals(
     usages: &[RuntimeTokenUsage],
 ) -> SmartContextObservedUsageTotals {
@@ -35,8 +38,8 @@ pub(super) fn smart_context_observed_usage_totals(
     smart_context_observed_usage_totals_rust(usages)
 }
 
-#[cfg(not(feature = "mojo"))]
-fn smart_context_observed_usage_totals_rust(
+#[cfg(any(not(feature = "mojo"), test))]
+pub(super) fn smart_context_observed_usage_totals_rust(
     usages: &[RuntimeTokenUsage],
 ) -> SmartContextObservedUsageTotals {
     let mut totals = SmartContextObservedUsageTotals {
@@ -61,7 +64,7 @@ fn smart_context_observed_usage_totals_rust(
         totals.last_accounted_input_tokens =
             smart_context_accounted_input_tokens(*usage).unwrap_or(0);
         totals.last_observed_context_tokens =
-            smart_context_observed_usage_context_tokens(*usage).unwrap_or(0);
+            smart_context_observed_usage_context_tokens_rust(*usage).unwrap_or(0);
     }
     totals
 }
