@@ -487,6 +487,57 @@ fn runtime_profile_inflight_relief_wait_ignores_active_request_release_notify() 
 }
 
 #[test]
+fn runtime_profile_inflight_wait_wakes_on_selection_state_change() {
+    let temp_dir = TestDir::isolated();
+    let shared = runtime_rotation_proxy_shared(
+        &temp_dir,
+        RuntimeRotationState {
+            paths: AppPaths {
+                root: temp_dir.path.join("prodex"),
+                state_file: temp_dir.path.join("prodex/state.json"),
+                managed_profiles_root: temp_dir.path.join("prodex/profiles"),
+                shared_codex_root: temp_dir.path.join("shared"),
+                legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
+            },
+            state: AppState::default(),
+            upstream_base_url: "https://chatgpt.com/backend-api".to_string(),
+            include_code_review: false,
+            current_profile: "main".to_string(),
+            profile_usage_auth: BTreeMap::new(),
+            profile_probe_cache: BTreeMap::new(),
+            profile_usage_snapshots: BTreeMap::new(),
+            profile_retry_backoff_until: BTreeMap::new(),
+            profile_transport_backoff_until: BTreeMap::new(),
+            profile_route_circuit_open_until: BTreeMap::new(),
+            profile_backoff_updated_at: BTreeMap::new(),
+            profile_health: BTreeMap::new(),
+            turn_state_bindings: BTreeMap::new(),
+            session_id_bindings: BTreeMap::new(),
+            continuation_statuses: RuntimeContinuationStatuses::default(),
+        },
+        usize::MAX,
+    );
+    let observed_inflight = runtime_profile_inflight_release_revision(&shared);
+    let observed_selection = shared.lane_admission.selection_change_revision();
+    let admission = shared.lane_admission.clone();
+    let notifier = thread::spawn(move || {
+        thread::sleep(Duration::from_millis(20));
+        admission.notify_selection_change();
+    });
+
+    assert_eq!(
+        runtime_profile_inflight_wait_outcome_since_with_selection_revision(
+            &shared,
+            Duration::from_millis(500),
+            observed_inflight,
+            observed_selection,
+        ),
+        RuntimeProfileInFlightWaitOutcome::SelectionChanged
+    );
+    notifier.join().expect("selection notifier should join");
+}
+
+#[test]
 fn runtime_probe_refresh_wait_returns_immediately_after_progress_is_observed() {
     let probe_refresh = RuntimeProbeRefreshTestGuard::new();
     let temp_dir = TestDir::isolated();

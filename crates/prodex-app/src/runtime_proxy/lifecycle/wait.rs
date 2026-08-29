@@ -14,6 +14,7 @@ pub(crate) fn runtime_profile_inflight_release_revision(
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum RuntimeProfileInFlightWaitOutcome {
     InflightRelease,
+    SelectionChanged,
     OtherNotify,
     Timeout,
 }
@@ -23,6 +24,7 @@ pub(crate) fn runtime_profile_wait_outcome_label(
 ) -> &'static str {
     match outcome {
         RuntimeProfileInFlightWaitOutcome::InflightRelease => "release",
+        RuntimeProfileInFlightWaitOutcome::SelectionChanged => "selection_changed",
         RuntimeProfileInFlightWaitOutcome::OtherNotify => "other_notify",
         RuntimeProfileInFlightWaitOutcome::Timeout => "timeout",
     }
@@ -33,6 +35,7 @@ pub(crate) fn runtime_profile_inflight_wait_outcome_label(
 ) -> &'static str {
     match outcome {
         RuntimeProfileInFlightWaitOutcome::InflightRelease => "inflight_release",
+        RuntimeProfileInFlightWaitOutcome::SelectionChanged => "selection_changed",
         RuntimeProfileInFlightWaitOutcome::OtherNotify => "other_notify",
         RuntimeProfileInFlightWaitOutcome::Timeout => "timeout",
     }
@@ -43,24 +46,46 @@ pub(crate) fn runtime_profile_inflight_wait_outcome_since(
     timeout: Duration,
     observed_revision: u64,
 ) -> RuntimeProfileInFlightWaitOutcome {
+    runtime_profile_inflight_wait_outcome_since_with_selection_revision(
+        shared,
+        timeout,
+        observed_revision,
+        shared.lane_admission.selection_change_revision(),
+    )
+}
+
+pub(crate) fn runtime_profile_inflight_wait_outcome_since_with_selection_revision(
+    shared: &RuntimeRotationProxyShared,
+    timeout: Duration,
+    observed_inflight_revision: u64,
+    observed_selection_revision: u64,
+) -> RuntimeProfileInFlightWaitOutcome {
     if timeout.is_zero() {
         return RuntimeProfileInFlightWaitOutcome::Timeout;
     }
-    if runtime_profile_inflight_release_revision(shared) != observed_revision {
+    if runtime_profile_inflight_release_revision(shared) != observed_inflight_revision {
         return RuntimeProfileInFlightWaitOutcome::InflightRelease;
+    }
+    if shared.lane_admission.selection_change_revision() != observed_selection_revision {
+        return RuntimeProfileInFlightWaitOutcome::SelectionChanged;
     }
     let (mutex, condvar) = shared.lane_admission.wait();
     let guard = mutex
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
-    if runtime_profile_inflight_release_revision(shared) != observed_revision {
+    if runtime_profile_inflight_release_revision(shared) != observed_inflight_revision {
         return RuntimeProfileInFlightWaitOutcome::InflightRelease;
+    }
+    if shared.lane_admission.selection_change_revision() != observed_selection_revision {
+        return RuntimeProfileInFlightWaitOutcome::SelectionChanged;
     }
     let (_guard, result) = condvar
         .wait_timeout(guard, timeout)
         .unwrap_or_else(|poisoned| poisoned.into_inner());
-    if runtime_profile_inflight_release_revision(shared) != observed_revision {
+    if runtime_profile_inflight_release_revision(shared) != observed_inflight_revision {
         RuntimeProfileInFlightWaitOutcome::InflightRelease
+    } else if shared.lane_admission.selection_change_revision() != observed_selection_revision {
+        RuntimeProfileInFlightWaitOutcome::SelectionChanged
     } else if result.timed_out() {
         RuntimeProfileInFlightWaitOutcome::Timeout
     } else {

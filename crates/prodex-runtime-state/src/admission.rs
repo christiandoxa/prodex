@@ -166,6 +166,7 @@ pub struct RuntimeProxyLaneAdmission {
     long_lived_queue_wait_metrics: Arc<RuntimeWaitDurationMetricCounters>,
     wait: Arc<(Mutex<()>, Condvar)>,
     inflight_release_revision: Arc<AtomicU64>,
+    selection_change_revision: Arc<AtomicU64>,
     limits: RuntimeProxyLaneLimits,
 }
 
@@ -205,6 +206,7 @@ impl RuntimeProxyLaneAdmission {
             long_lived_queue_wait_metrics: Arc::new(RuntimeWaitDurationMetricCounters::default()),
             wait: Arc::new((Mutex::new(()), Condvar::new())),
             inflight_release_revision: Arc::new(AtomicU64::new(0)),
+            selection_change_revision: Arc::new(AtomicU64::new(0)),
             limits,
         }
     }
@@ -409,6 +411,20 @@ impl RuntimeProxyLaneAdmission {
 
     pub fn record_inflight_release(&self) {
         self.inflight_release_revision
+            .fetch_add(1, Ordering::SeqCst);
+        let (mutex, condvar) = self.wait();
+        let _guard = mutex
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        condvar.notify_all();
+    }
+
+    pub fn selection_change_revision(&self) -> u64 {
+        self.selection_change_revision.load(Ordering::SeqCst)
+    }
+
+    pub fn notify_selection_change(&self) {
+        self.selection_change_revision
             .fetch_add(1, Ordering::SeqCst);
         let (mutex, condvar) = self.wait();
         let _guard = mutex

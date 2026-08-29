@@ -503,6 +503,20 @@ fn runtime_proxy_lane_admission_owns_distinct_shared_wait_metrics() {
 }
 
 #[test]
+fn runtime_proxy_lane_admission_notifies_selection_changes() {
+    let admission = RuntimeProxyLaneAdmission::new(RuntimeProxyLaneLimits {
+        responses: 1,
+        compact: 1,
+        websocket: 1,
+        standard: 1,
+    });
+
+    assert_eq!(admission.selection_change_revision(), 0);
+    admission.notify_selection_change();
+    assert_eq!(admission.selection_change_revision(), 1);
+}
+
+#[test]
 fn runtime_proxy_admission_permit_releases_global_and_lane_capacity() {
     let admission = RuntimeProxyLaneAdmission::new(RuntimeProxyLaneLimits {
         responses: 1,
