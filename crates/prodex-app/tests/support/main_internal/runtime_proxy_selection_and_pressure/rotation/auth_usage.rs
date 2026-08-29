@@ -148,6 +148,7 @@ fn runtime_responses_refreshes_access_token_after_401_before_rotating() {
     assert_eq!(auth_json["tokens"]["refresh_token"], "fresh-refresh-token");
 }
 #[test]
+#[cfg(feature = "mojo-quota")]
 fn runtime_responses_auto_redeems_reset_credit_before_rotating() {
     let temp_dir = TestDir::isolated();
     let backend = RuntimeProxyBackend::start_http_usage_limit_auto_redeem();
@@ -263,13 +264,13 @@ fn runtime_auto_redeem_disabled_by_default_does_not_consume_credit() {
     let backend = RuntimeProxyBackend::start_http_usage_limit_auto_redeem();
     let codex_home = temp_dir.path.join("homes/main");
     write_auth_json(&codex_home.join("auth.json"), "main-account");
-    let mut exhausted_usage: UsageResponse =
-        serde_json::from_str(&runtime_proxy_usage_body_with_remaining("main@example.com", 0, 0))
-            .expect("exhausted usage should parse");
+    let mut exhausted_usage: UsageResponse = serde_json::from_str(
+        &runtime_proxy_usage_body_with_remaining("main@example.com", 0, 0),
+    )
+    .expect("exhausted usage should parse");
     exhausted_usage.plan_type = Some("plus".to_string());
-    exhausted_usage.rate_limit_reset_credits = Some(prodex_quota::RateLimitResetCreditsSummary {
-        available_count: 1,
-    });
+    exhausted_usage.rate_limit_reset_credits =
+        Some(prodex_quota::RateLimitResetCreditsSummary { available_count: 1 });
     let now = Local::now().timestamp();
     let shared = runtime_rotation_proxy_shared(
         &temp_dir,
@@ -331,7 +332,10 @@ fn runtime_auto_redeem_disabled_by_default_does_not_consume_credit() {
         true,
     )
     .expect("auto-redeem disabled path should succeed");
-    assert_eq!(outcome, RuntimeAutoRedeemResetCreditOutcome::NothingToRedeem);
+    assert_eq!(
+        outcome,
+        RuntimeAutoRedeemResetCreditOutcome::NothingToRedeem
+    );
     assert!(
         backend.usage_accounts().is_empty(),
         "disabled auto-redeem must not probe usage"
@@ -342,6 +346,7 @@ fn runtime_auto_redeem_disabled_by_default_does_not_consume_credit() {
     );
 }
 #[test]
+#[cfg(feature = "mojo-quota")]
 fn runtime_responses_auto_redeem_pool_prefers_plus_before_prolite() {
     let temp_dir = TestDir::isolated();
     let backend = RuntimeProxyBackend::start_http_usage_limit_auto_redeem();
@@ -349,13 +354,13 @@ fn runtime_responses_auto_redeem_pool_prefers_plus_before_prolite() {
     let second_home = temp_dir.path.join("homes/second");
     write_auth_json(&main_home.join("auth.json"), "main-account");
     write_auth_json(&second_home.join("auth.json"), "second-account");
-    let mut prolite_usage: UsageResponse =
-        serde_json::from_str(&runtime_proxy_usage_body_with_remaining("second@example.com", 0, 0))
-            .expect("prolite usage should parse");
+    let mut prolite_usage: UsageResponse = serde_json::from_str(
+        &runtime_proxy_usage_body_with_remaining("second@example.com", 0, 0),
+    )
+    .expect("prolite usage should parse");
     prolite_usage.plan_type = Some("prolite".to_string());
-    prolite_usage.rate_limit_reset_credits = Some(prodex_quota::RateLimitResetCreditsSummary {
-        available_count: 1,
-    });
+    prolite_usage.rate_limit_reset_credits =
+        Some(prodex_quota::RateLimitResetCreditsSummary { available_count: 1 });
     let now = Local::now().timestamp();
     let shared = runtime_rotation_proxy_shared_with_auto_redeem(
         &temp_dir,
@@ -461,6 +466,7 @@ fn runtime_responses_auto_redeem_pool_prefers_plus_before_prolite() {
     assert!(log.contains("committed profile=main"), "{log}");
 }
 #[test]
+#[cfg(feature = "mojo-quota")]
 fn runtime_auto_redeem_defers_while_pool_quota_probe_is_pending() {
     let temp_dir = TestDir::isolated();
     let backend = RuntimeProxyBackend::start_http_usage_limit_auto_redeem();
@@ -468,13 +474,13 @@ fn runtime_auto_redeem_defers_while_pool_quota_probe_is_pending() {
     let third_home = temp_dir.path.join("homes/third");
     write_auth_json(&second_home.join("auth.json"), "second-account");
     write_auth_json(&third_home.join("auth.json"), "third-account");
-    let mut exhausted_usage: UsageResponse =
-        serde_json::from_str(&runtime_proxy_usage_body_with_remaining("second@example.com", 0, 0))
-            .expect("exhausted usage should parse");
+    let mut exhausted_usage: UsageResponse = serde_json::from_str(
+        &runtime_proxy_usage_body_with_remaining("second@example.com", 0, 0),
+    )
+    .expect("exhausted usage should parse");
     exhausted_usage.plan_type = Some("plus".to_string());
-    exhausted_usage.rate_limit_reset_credits = Some(prodex_quota::RateLimitResetCreditsSummary {
-        available_count: 1,
-    });
+    exhausted_usage.rate_limit_reset_credits =
+        Some(prodex_quota::RateLimitResetCreditsSummary { available_count: 1 });
     let now = Local::now().timestamp();
     let shared = runtime_rotation_proxy_shared_with_auto_redeem(
         &temp_dir,
@@ -548,7 +554,10 @@ fn runtime_auto_redeem_defers_while_pool_quota_probe_is_pending() {
         true,
     )
     .expect("auto-redeem decision should succeed");
-    assert_eq!(outcome, RuntimeAutoRedeemResetCreditOutcome::NothingToRedeem);
+    assert_eq!(
+        outcome,
+        RuntimeAutoRedeemResetCreditOutcome::NothingToRedeem
+    );
     assert!(
         backend.reset_credit_consume_accounts().is_empty(),
         "redeem must not consume a credit while another profile's quota is loading"
