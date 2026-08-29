@@ -38,6 +38,52 @@ pub struct ProfileScheduleInput {
 pub const RUNTIME_PROFILE_SCHEDULE_FIELD_COUNT: usize = 16;
 pub const RUNTIME_PROFILE_SCHEDULE_MAX_COUNT: usize = 256;
 
+pub fn provider_aware_profile_order_batch(
+    provider_priorities: &[usize],
+    order_indices: &[usize],
+) -> Result<Vec<usize>, crate::MojoError> {
+    if provider_priorities.len() != order_indices.len()
+        || provider_priorities.len() > RUNTIME_PROFILE_SCHEDULE_MAX_COUNT
+    {
+        return Err(crate::MojoError::InvalidInput);
+    }
+    let priorities = provider_priorities
+        .iter()
+        .map(|priority| i64::try_from(*priority).unwrap_or(i64::MAX))
+        .collect::<Vec<_>>();
+    let indices = order_indices
+        .iter()
+        .map(|index| i64::try_from(*index).unwrap_or(i64::MAX))
+        .collect::<Vec<_>>();
+    let mut ordered = vec![0_i64; indices.len()];
+    let status = unsafe {
+        prodex_runtime_profile_provider_order_batch(
+            priorities.as_ptr(),
+            indices.as_ptr(),
+            ordered.as_mut_ptr(),
+            i64::try_from(indices.len()).map_err(|_| crate::MojoError::InvalidInput)?,
+        )
+    };
+    if status != 0 {
+        return Err(crate::MojoError::InvalidOutput);
+    }
+    let mut seen = vec![false; priorities.len()];
+    ordered
+        .into_iter()
+        .map(|index| {
+            let index = usize::try_from(index)
+                .ok()
+                .filter(|index| *index < priorities.len())
+                .ok_or(crate::MojoError::InvalidOutput)?;
+            if seen[index] {
+                return Err(crate::MojoError::InvalidOutput);
+            }
+            seen[index] = true;
+            Ok(index)
+        })
+        .collect()
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct QuotaScoreInput {
     pub weekly_pressure: i64,
@@ -221,6 +267,12 @@ unsafe extern "C" {
         reserve_floor: *mut i64,
         ordered_indices: *mut i64,
         ordered_count: *mut i64,
+        count: i64,
+    ) -> i64;
+    fn prodex_runtime_profile_provider_order_batch(
+        priorities: *const i64,
+        order_indices: *const i64,
+        ordered_indices: *mut i64,
         count: i64,
     ) -> i64;
     fn prodex_runtime_quota_score_batch(

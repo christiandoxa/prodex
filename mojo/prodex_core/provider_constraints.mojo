@@ -27,6 +27,158 @@ comptime WARNING_CATALOG_UNAVAILABLE: UInt64 = 1 << 3
 
 comptime UINT64_MAX: UInt64 = 18446744073709551615
 
+comptime PROVIDER_REASONING_EFFORT_NONE: Int64 = 0
+comptime PROVIDER_REASONING_EFFORT_MINIMAL: Int64 = 1
+comptime PROVIDER_REASONING_EFFORT_UNKNOWN: Int64 = 8
+
+def provider_constraint_endpoint_mask_has(mask: UInt64, endpoint: Int64) -> Bool:
+    return mask & (UInt64(1) << UInt64(endpoint)) != 0
+
+def provider_constraint_entry_endpoint_supported(
+    endpoint_kind: Int64, supported_endpoint_mask: UInt64
+) -> Bool:
+    if endpoint_kind == 1:
+        return provider_constraint_endpoint_mask_has(supported_endpoint_mask, 0) or provider_constraint_endpoint_mask_has(supported_endpoint_mask, 1)
+    return provider_constraint_endpoint_mask_has(supported_endpoint_mask, endpoint_kind)
+
+def provider_constraint_feature_supported(
+    feature: Int64,
+    feature_mask: UInt64,
+) -> Bool:
+    return feature_mask & (UInt64(1) << UInt64(feature)) != 0
+
+@export("prodex_provider_constraints_resolve_v1")
+def prodex_provider_constraints_resolve_v1(
+    explicit_output_present: Int64,
+    default_output_present: Int64,
+    default_output_reserve_tokens: UInt64,
+    requested_reasoning_effort: Int64,
+    default_reasoning_effort: Int64,
+    reasoning_reserve_present: Int64,
+    reasoning_reserve_tokens: UInt64,
+    reasoning_reserve_by_effort_address: UInt,
+    reasoning_reserve_mask: UInt64,
+    output_default_output_present: Pointer[mut=True, Int64, _],
+    output_default_output_reserve_tokens: Pointer[mut=True, UInt64, _],
+    output_reasoning_effort_present: Pointer[mut=True, Int64, _],
+    output_reasoning_effort: Pointer[mut=True, Int64, _],
+    output_reasoning_reserve_present: Pointer[mut=True, Int64, _],
+    output_reasoning_reserve_tokens: Pointer[mut=True, UInt64, _],
+) abi("C") -> Int64:
+    if (
+        explicit_output_present < 0
+        or explicit_output_present > 1
+        or default_output_present < 0
+        or default_output_present > 1
+        or reasoning_reserve_present < 0
+        or reasoning_reserve_present > 1
+        or requested_reasoning_effort < -1
+        or requested_reasoning_effort > PROVIDER_REASONING_EFFORT_UNKNOWN
+        or default_reasoning_effort < -1
+        or default_reasoning_effort > PROVIDER_REASONING_EFFORT_UNKNOWN
+        or reasoning_reserve_mask > 511
+    ):
+        return ABI_STATUS_INVALID_INPUT
+    if (
+        (default_output_present == 0 and default_output_reserve_tokens != 0)
+        or (reasoning_reserve_present == 0 and reasoning_reserve_tokens != 0)
+        or (reasoning_reserve_mask != 0 and reasoning_reserve_by_effort_address == 0)
+    ):
+        return ABI_STATUS_INVALID_INPUT
+
+    output_default_output_present[] = 0
+    output_default_output_reserve_tokens[] = 0
+    if explicit_output_present == 0 and default_output_present == 1:
+        output_default_output_present[] = 1
+        output_default_output_reserve_tokens[] = default_output_reserve_tokens
+    output_reasoning_effort_present[] = 0
+    output_reasoning_effort[] = -1
+    var selected_reasoning_effort = requested_reasoning_effort
+    if selected_reasoning_effort < 0:
+        selected_reasoning_effort = default_reasoning_effort
+    if selected_reasoning_effort >= 0:
+        output_reasoning_effort_present[] = 1
+        output_reasoning_effort[] = selected_reasoning_effort
+
+    output_reasoning_reserve_present[] = 0
+    output_reasoning_reserve_tokens[] = 0
+    if reasoning_reserve_present == 1:
+        output_reasoning_reserve_present[] = 1
+        output_reasoning_reserve_tokens[] = reasoning_reserve_tokens
+    elif selected_reasoning_effort >= 2 and selected_reasoning_effort <= 7 and reasoning_reserve_mask & (UInt64(1) << UInt64(selected_reasoning_effort)) != 0:
+        var reserves = Pointer[mut=False, UInt64, ImmUntrackedOrigin](
+            unsafe_from_address=Int(reasoning_reserve_by_effort_address)
+        )
+        output_reasoning_reserve_present[] = 1
+        output_reasoning_reserve_tokens[] = reserves[unsafe_offset=selected_reasoning_effort]
+    return 0
+
+@export("prodex_provider_constraints_preclassify_v1")
+def prodex_provider_constraints_preclassify_v1(
+    endpoint_kind: Int64,
+    provider_endpoint_supported: Int64,
+    catalog_entry_present: Int64,
+    provider_streaming_supported: Int64,
+    supported_endpoint_mask: UInt64,
+    feature_mask: UInt64,
+    required_features_address: UInt,
+    required_feature_count: Int64,
+    reasoning_effort: Int64,
+    supported_reasoning_efforts_present: Int64,
+    supported_reasoning_efforts: UInt64,
+    endpoint_supported: Pointer[mut=True, Int64, _],
+    missing_feature_present: Pointer[mut=True, Int64, _],
+    missing_feature: Pointer[mut=True, Int64, _],
+    reasoning_effort_unsupported: Pointer[mut=True, Int64, _],
+) abi("C") -> Int64:
+    if (
+        endpoint_kind < 0
+        or endpoint_kind > 10
+        or provider_endpoint_supported < 0
+        or provider_endpoint_supported > 1
+        or catalog_entry_present < 0
+        or catalog_entry_present > 1
+        or provider_streaming_supported < 0
+        or provider_streaming_supported > 1
+        or supported_endpoint_mask > 2047
+        or feature_mask > 511
+        or required_feature_count < 0
+        or required_feature_count > 9
+        or reasoning_effort < -1
+        or reasoning_effort > PROVIDER_REASONING_EFFORT_UNKNOWN
+        or supported_reasoning_efforts_present < 0
+        or supported_reasoning_efforts_present > 1
+        or supported_reasoning_efforts > 511
+    ):
+        return ABI_STATUS_INVALID_INPUT
+    if required_feature_count > 0 and required_features_address == 0:
+        return ABI_STATUS_INVALID_INPUT
+
+    var required_features = Pointer[mut=False, Int64, ImmUntrackedOrigin](
+        unsafe_from_address=Int(required_features_address)
+    )
+    endpoint_supported[] = provider_endpoint_supported
+    if catalog_entry_present == 1 and not provider_constraint_entry_endpoint_supported(
+        endpoint_kind, supported_endpoint_mask
+    ):
+        endpoint_supported[] = 0
+    missing_feature_present[] = 0
+    missing_feature[] = 0
+    for index in range(required_feature_count):
+        var feature = required_features[unsafe_offset=index]
+        if feature < 0 or feature > 8:
+            return ABI_STATUS_INVALID_INPUT
+        if not provider_constraint_feature_supported(feature, feature_mask):
+            missing_feature_present[] = 1
+            missing_feature[] = feature
+            break
+    reasoning_effort_unsupported[] = 0
+    if reasoning_effort == PROVIDER_REASONING_EFFORT_UNKNOWN:
+        reasoning_effort_unsupported[] = 1
+    elif reasoning_effort >= 2 and reasoning_effort <= 7 and supported_reasoning_efforts_present == 1 and supported_reasoning_efforts & (UInt64(1) << UInt64(reasoning_effort)) == 0:
+        reasoning_effort_unsupported[] = 1
+    return 0
+
 
 def provider_constraint_saturating_add(left: UInt64, right: UInt64) -> UInt64:
     if left > UINT64_MAX - right:

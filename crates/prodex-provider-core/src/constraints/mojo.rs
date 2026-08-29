@@ -1,6 +1,49 @@
 use super::*;
 use prodex_mojo_core::provider_constraints as mojo_constraints;
 
+pub(super) fn resolve_requirement_input(
+    input: mojo_constraints::RequirementResolutionInput,
+) -> Result<mojo_constraints::RequirementResolution, prodex_mojo_core::MojoError> {
+    mojo_constraints::resolve_requirement_input(input)
+}
+
+pub(super) fn resolve_requirements(
+    mut requirements: ProviderRequestRequirements,
+    entry: &ProviderCatalogEntry,
+) -> ProviderRequestRequirements {
+    let mut reasoning_reserve_by_effort = [None; 9];
+    if let Some(reserves) = entry.reasoning_reserve_tokens.as_ref() {
+        for (effort, value) in reserves {
+            reasoning_reserve_by_effort[usize::try_from(reasoning_effort_to_mojo(*effort))
+                .expect("Mojo reasoning effort tag fits")
+                as usize] = Some(*value);
+        }
+    }
+    let resolution = resolve_requirement_input(mojo_constraints::RequirementResolutionInput {
+        explicit_output_present: requirements.explicit_output_tokens.is_some(),
+        default_output_reserve_tokens: entry.default_output_reserve_tokens,
+        requested_reasoning_effort: requirements.reasoning_effort.map(reasoning_effort_to_mojo),
+        default_reasoning_effort: entry.default_reasoning_effort.map(reasoning_effort_to_mojo),
+        reasoning_reserve_tokens: requirements.reasoning_reserve_tokens,
+        reasoning_reserve_by_effort,
+    })
+    .expect("Mojo provider requirement resolution returned invalid output");
+    requirements.default_output_reserve_tokens = resolution.default_output_reserve_tokens;
+    requirements.reasoning_effort = resolution.reasoning_effort.map(|effort| match effort {
+        0 => ProviderReasoningEffort::None,
+        1 => ProviderReasoningEffort::Minimal,
+        2 => ProviderReasoningEffort::Low,
+        3 => ProviderReasoningEffort::Medium,
+        4 => ProviderReasoningEffort::High,
+        5 => ProviderReasoningEffort::XHigh,
+        6 => ProviderReasoningEffort::Max,
+        7 => ProviderReasoningEffort::Ultra,
+        _ => ProviderReasoningEffort::Unknown,
+    });
+    requirements.reasoning_reserve_tokens = resolution.reasoning_reserve_tokens;
+    requirements
+}
+
 pub(super) fn evaluate(
     provider: ProviderId,
     requirements: &ProviderRequestRequirements,
@@ -8,21 +51,38 @@ pub(super) fn evaluate(
     resolved: &ProviderRequestRequirements,
     entry: Option<&ProviderCatalogEntry>,
 ) -> Result<ProviderRequestConstraintEvaluation, prodex_mojo_core::MojoError> {
-    let input = mojo_constraints::Input {
-        policy_enabled: policy.enabled,
-        endpoint_supported: endpoint_supported(provider, requirements.endpoint, entry),
-        catalog_entry_present: entry.is_some(),
-        embeddings_endpoint: requirements.endpoint == ProviderEndpoint::Embeddings,
-        missing_feature: entry.and_then(|entry| {
-            requirements
+    let preclassification =
+        mojo_constraints::preclassify(mojo_constraints::PreclassificationInput {
+            endpoint_kind: endpoint_kind(requirements.endpoint),
+            provider_endpoint_supported: !matches!(
+                provider_adapter(provider).capability_status(requirements.endpoint),
+                ProviderCapabilityStatus::Unsupported
+            ),
+            catalog_entry_present: entry.is_some(),
+            provider_streaming_supported: provider_adapter(provider).supports_streaming(),
+            supported_endpoint_mask: entry.map_or(0, endpoint_mask),
+            feature_mask: entry.map_or(0, |entry| feature_mask(provider, entry)),
+            required_features: requirements
                 .required_features
                 .iter()
                 .copied()
-                .find(|feature| !entry_supports_feature(provider, entry, *feature))
                 .map(feature_to_mojo)
-        }),
-        reasoning_effort_unsupported: entry
-            .is_some_and(|entry| unsupported_reasoning_effort(resolved, entry)),
+                .collect(),
+            reasoning_effort: resolved.reasoning_effort.map(reasoning_effort_to_mojo),
+            supported_reasoning_efforts: entry.and_then(|entry| {
+                entry
+                    .supported_reasoning_efforts
+                    .as_ref()
+                    .map(|efforts| reasoning_effort_mask(efforts))
+            }),
+        })?;
+    let input = mojo_constraints::Input {
+        policy_enabled: policy.enabled,
+        endpoint_supported: preclassification.endpoint_supported,
+        catalog_entry_present: entry.is_some(),
+        embeddings_endpoint: requirements.endpoint == ProviderEndpoint::Embeddings,
+        missing_feature: preclassification.missing_feature,
+        reasoning_effort_unsupported: preclassification.reasoning_effort_unsupported,
         estimated_input_tokens: resolved.estimated_input_tokens,
         explicit_output_tokens: resolved.explicit_output_tokens,
         default_output_reserve_tokens: resolved.default_output_reserve_tokens,
@@ -88,17 +148,6 @@ pub(super) fn evaluate(
     Ok(evaluation)
 }
 
-fn endpoint_supported(
-    provider: ProviderId,
-    endpoint: ProviderEndpoint,
-    entry: Option<&ProviderCatalogEntry>,
-) -> bool {
-    !matches!(
-        provider_adapter(provider).capability_status(endpoint),
-        ProviderCapabilityStatus::Unsupported
-    ) && entry.is_none_or(|entry| entry_supports_endpoint(entry, endpoint))
-}
-
 fn feature_to_mojo(feature: ProviderRequestFeature) -> mojo_constraints::Feature {
     match feature {
         ProviderRequestFeature::Tools => mojo_constraints::Feature::Tools,
@@ -111,6 +160,79 @@ fn feature_to_mojo(feature: ProviderRequestFeature) -> mojo_constraints::Feature
         ProviderRequestFeature::Compact => mojo_constraints::Feature::Compact,
         ProviderRequestFeature::Websocket => mojo_constraints::Feature::Websocket,
     }
+}
+
+pub(super) fn reasoning_effort_to_mojo(effort: ProviderReasoningEffort) -> i64 {
+    match effort {
+        ProviderReasoningEffort::None => 0,
+        ProviderReasoningEffort::Minimal => 1,
+        ProviderReasoningEffort::Low => 2,
+        ProviderReasoningEffort::Medium => 3,
+        ProviderReasoningEffort::High => 4,
+        ProviderReasoningEffort::XHigh => 5,
+        ProviderReasoningEffort::Max => 6,
+        ProviderReasoningEffort::Ultra => 7,
+        ProviderReasoningEffort::Unknown => 8,
+    }
+}
+
+fn endpoint_kind(endpoint: ProviderEndpoint) -> i64 {
+    match endpoint {
+        ProviderEndpoint::Responses => 0,
+        ProviderEndpoint::ResponsesCompact => 1,
+        ProviderEndpoint::ChatCompletions => 2,
+        ProviderEndpoint::Messages => 3,
+        ProviderEndpoint::Models => 4,
+        ProviderEndpoint::Embeddings => 5,
+        ProviderEndpoint::Images => 6,
+        ProviderEndpoint::Audio => 7,
+        ProviderEndpoint::Batches => 8,
+        ProviderEndpoint::Rerank => 9,
+        ProviderEndpoint::A2a => 10,
+    }
+}
+
+fn endpoint_mask(entry: &ProviderCatalogEntry) -> u64 {
+    entry
+        .supported_endpoints
+        .iter()
+        .map(|endpoint| endpoint_kind(*endpoint))
+        .fold(0, |mask, endpoint| mask | (1_u64 << endpoint))
+}
+
+fn feature_mask(provider: ProviderId, entry: &ProviderCatalogEntry) -> u64 {
+    let flags = [
+        entry.feature_flags.tools,
+        entry.feature_flags.json_schema,
+        entry.feature_flags.vision,
+        entry.feature_flags.audio,
+        entry.feature_flags.web_search,
+        entry.feature_flags.reasoning,
+        provider_adapter(provider).supports_streaming(),
+        entry_supports_endpoint_mask(entry, ProviderEndpoint::ResponsesCompact),
+        false,
+    ];
+    flags
+        .into_iter()
+        .enumerate()
+        .fold(0, |mask, (index, supported)| {
+            mask | u64::from(supported) << index
+        })
+}
+
+fn entry_supports_endpoint_mask(entry: &ProviderCatalogEntry, endpoint: ProviderEndpoint) -> bool {
+    let kind = endpoint_kind(endpoint);
+    if endpoint == ProviderEndpoint::ResponsesCompact {
+        (endpoint_mask(entry) & 1) != 0 || (endpoint_mask(entry) & (1 << kind)) != 0
+    } else {
+        endpoint_mask(entry) & (1 << kind) != 0
+    }
+}
+
+fn reasoning_effort_mask(efforts: &[ProviderReasoningEffort]) -> u64 {
+    efforts.iter().fold(0, |mask, effort| {
+        mask | (1_u64 << reasoning_effort_to_mojo(*effort))
+    })
 }
 
 fn feature_from_mojo(feature: mojo_constraints::Feature) -> ProviderRequestFeature {

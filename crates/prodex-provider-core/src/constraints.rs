@@ -458,6 +458,22 @@ fn resolve_provider_request_requirements(
             .map(|entry| entry.id.clone())
             .unwrap_or_else(|| resolved_model.trim().to_string()),
     );
+    #[cfg(feature = "mojo")]
+    if let Some(entry) = entry {
+        resolved = mojo::resolve_requirements(resolved, entry);
+    }
+    #[cfg(not(feature = "mojo"))]
+    {
+        resolved = resolve_provider_request_requirements_rust(resolved, entry);
+    }
+    resolved
+}
+
+#[cfg(not(feature = "mojo"))]
+fn resolve_provider_request_requirements_rust(
+    mut resolved: ProviderRequestRequirements,
+    entry: Option<&ProviderCatalogEntry>,
+) -> ProviderRequestRequirements {
     let Some(entry) = entry else {
         return resolved;
     };
@@ -536,6 +552,7 @@ fn evaluate_known_provider_constraints(
     result
 }
 
+#[cfg(any(not(feature = "mojo"), test))]
 fn unsupported_reasoning_effort(
     requirements: &ProviderRequestRequirements,
     entry: &ProviderCatalogEntry,
@@ -702,6 +719,7 @@ fn unknown_catalog_evaluation(
     result
 }
 
+#[cfg(any(not(feature = "mojo"), test))]
 fn entry_supports_feature(
     provider: ProviderId,
     entry: &ProviderCatalogEntry,
@@ -722,6 +740,7 @@ fn entry_supports_feature(
     }
 }
 
+#[cfg(any(not(feature = "mojo"), test))]
 fn entry_supports_endpoint(entry: &ProviderCatalogEntry, endpoint: ProviderEndpoint) -> bool {
     match endpoint {
         ProviderEndpoint::ResponsesCompact => entry.supported_endpoints.iter().any(|supported| {

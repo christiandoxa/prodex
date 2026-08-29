@@ -10,6 +10,35 @@ from runtime_math import (
 comptime RUNTIME_PROFILE_SCHEDULE_FIELD_COUNT: Int64 = 16
 comptime RUNTIME_PROFILE_SCHEDULE_MAX_COUNT: Int64 = 256
 
+@export("prodex_runtime_profile_provider_order_batch")
+def prodex_runtime_profile_provider_order_batch(
+    priorities: Pointer[mut=False, Int64, _],
+    order_indices: Pointer[mut=False, Int64, _],
+    ordered_indices: Pointer[mut=True, Int64, _],
+    count: Int64,
+) abi("C") -> Int64:
+    if count < 0 or count > RUNTIME_PROFILE_SCHEDULE_MAX_COUNT:
+        return 1
+    for index in range(count):
+        var order_index = order_indices[unsafe_offset=index]
+        if order_index < 0 or order_index >= count:
+            return 2
+        if priorities[unsafe_offset=order_index] < 0:
+            return 2
+        ordered_indices[unsafe_offset=index] = order_index
+    for position in range(count):
+        var best = position
+        for candidate in range(position + 1, count):
+            var candidate_index = ordered_indices[unsafe_offset=candidate]
+            var best_index = ordered_indices[unsafe_offset=best]
+            if priorities[unsafe_offset=candidate_index] < priorities[unsafe_offset=best_index]:
+                best = candidate
+        if best != position:
+            var selected = ordered_indices[unsafe_offset=best]
+            ordered_indices[unsafe_offset=best] = ordered_indices[unsafe_offset=position]
+            ordered_indices[unsafe_offset=position] = selected
+    return 0
+
 
 def runtime_profile_schedule_field(
     fields: Pointer[mut=False, Int64, _],
