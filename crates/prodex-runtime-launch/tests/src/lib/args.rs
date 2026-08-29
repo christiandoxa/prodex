@@ -593,7 +593,11 @@ fn retarget_codex_exec_resume_args_preserves_exec_options_not_prompt() {
 fn retarget_codex_exec_resume_args_replaces_last_with_exact_session() {
     let session_id = OsString::from("019c9e3d-45a0-7ad0-a6ee-b194ac2d44f9");
     for original in [
-        vec![OsString::from("exec"), OsString::from("--last"), OsString::from("prompt")],
+        vec![
+            OsString::from("exec"),
+            OsString::from("--last"),
+            OsString::from("prompt"),
+        ],
         vec![
             OsString::from("exec"),
             OsString::from("resume"),
@@ -603,7 +607,11 @@ fn retarget_codex_exec_resume_args_replaces_last_with_exact_session() {
     ] {
         assert_eq!(
             retarget_codex_exec_resume_args(&original, session_id.to_str().unwrap()),
-            [OsString::from("exec"), OsString::from("resume"), session_id.clone()]
+            [
+                OsString::from("exec"),
+                OsString::from("resume"),
+                session_id.clone()
+            ]
         );
     }
 }
