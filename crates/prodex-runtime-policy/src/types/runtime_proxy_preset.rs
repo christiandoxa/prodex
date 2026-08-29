@@ -123,7 +123,7 @@ impl RuntimePolicyProxySettings {
 }
 
 impl RuntimePolicyProxyPreset {
-    pub(super) fn settings(self) -> RuntimePolicyProxySettings {
+    pub(super) fn resolve(self) -> RuntimePolicyProxySettings {
         #[cfg(feature = "mojo")]
         {
             let preset = RuntimePolicyProxyPresetSelection::selected(self);
