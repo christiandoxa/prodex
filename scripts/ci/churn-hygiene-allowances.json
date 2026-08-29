@@ -1,5 +1,21 @@
 [
   {
+    "id": "audited-prodex-0.420.0-integration-train",
+    "requiredSubjects": [
+      "ci: parallelize independent release gates",
+      "feat(context): move signal and command classification to Mojo",
+      "ci(mojo): record runtime context migration evidence",
+      "fix(catalog): gate Mojo-only cache adapter"
+    ],
+    "caps": {
+      "maxFiles": 190,
+      "maxBehaviorFiles": 160,
+      "maxLines": 36000,
+      "maxFileLines": 9500
+    },
+    "reason": "Reviewed the bounded 0.420.0 integration train: runtime saturation and usage-limit recovery, Codex 0.151 compatibility, Expose hardening, deterministic Mojo ownership/ABI migrations, focused size extraction, release-range accounting, and their parity/CI evidence. The frozen 9,470-line production-share snapshot is an intentional immutable baseline artifact; these exact-subject caps cover the measured train without changing global churn thresholds or skipping any release gate."
+  },
+  {
     "id": "audited-prodex-0.419.1-migration-wave",
     "requiredSubjects": [
       "ci(mojo): freeze 0.419.1 migration accounting",
