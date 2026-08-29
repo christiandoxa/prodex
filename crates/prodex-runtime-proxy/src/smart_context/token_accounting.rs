@@ -1,8 +1,10 @@
 mod calibration;
 mod estimation;
 mod observed;
-mod oracle;
+pub(super) mod oracle;
 
+use super::*;
+use crate::RuntimeTokenUsage;
 pub(super) use calibration::*;
 pub use estimation::{
     SMART_CONTEXT_ESTIMATED_BYTES_PER_TOKEN, smart_context_estimate_tokens_from_body,
@@ -11,18 +13,6 @@ pub use estimation::{
 #[cfg(feature = "mojo")]
 use observed::smart_context_observed_usage_totals;
 use oracle::smart_context_observed_token_accounting_from_decision;
-#[cfg(any(not(feature = "mojo"), test))]
-pub(super) use oracle::{
-    smart_context_observed_token_accounting_rust, smart_context_pressure_snapshot_rust,
-};
-
-#[cfg(feature = "mojo")]
-pub(super) use super::{
-    smart_context_effective_input_source, smart_context_token_accounting_risks,
-};
-
-use super::*;
-use crate::RuntimeTokenUsage;
 use std::collections::BTreeSet;
 
 pub fn smart_context_token_budget_tier(available_tokens: usize) -> SmartContextTokenBudgetTier {
@@ -518,7 +508,7 @@ pub fn smart_context_observed_token_accounting_with_calibration(
             accounting_risks: &accounting_risks,
         });
 
-        return smart_context_observed_token_accounting_from_decision(
+        smart_context_observed_token_accounting_from_decision(
             input,
             usage_totals,
             estimated_current_request_tokens,
@@ -533,11 +523,11 @@ pub fn smart_context_observed_token_accounting_with_calibration(
                 accounting_risks,
             },
             pressure,
-        );
+        )
     }
 
     #[cfg(not(feature = "mojo"))]
-    smart_context_observed_token_accounting_rust(input)
+    oracle::smart_context_observed_token_accounting_rust(input)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -608,7 +598,7 @@ pub fn smart_context_pressure_snapshot(
     }
 
     #[cfg(not(feature = "mojo"))]
-    smart_context_pressure_snapshot_rust(input)
+    oracle::smart_context_pressure_snapshot_rust(input)
 }
 
 pub fn smart_context_pressure_band(pressure_basis_points: Option<u32>) -> SmartContextPressureBand {
@@ -664,8 +654,7 @@ pub fn smart_context_observed_usage_context_tokens(usage: RuntimeTokenUsage) -> 
     {
         let summary = crate::quota::mojo::smart_context_token_usage_summary(&[usage])
             .expect("Mojo Smart Context usage summary returned invalid output");
-        return (summary.last_observed_context_tokens > 0)
-            .then_some(summary.last_observed_context_tokens);
+        (summary.last_observed_context_tokens > 0).then_some(summary.last_observed_context_tokens)
     }
 
     #[cfg(not(feature = "mojo"))]
