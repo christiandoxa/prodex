@@ -71,6 +71,12 @@ unsafe extern "C" {
         metadata: *const ProdexStringView,
         output_kind: *mut i64,
     ) -> i64;
+    fn prodex_context_classify_ci_line_v1(
+        abi_version: i64,
+        line: *const ProdexStringView,
+        output: *mut i64,
+        output_count: i64,
+    ) -> i64;
     fn prodex_context_estimate_tokens(chars: u64, words: u64) -> u64;
     fn prodex_context_signal_diff(
         before: *const i64,
@@ -99,6 +105,13 @@ const CRITICAL_SIGNAL_MAX_KEYS: usize = 65_536;
 const CRITICAL_SIGNAL_MAX_RANGES: usize = 1_024;
 pub const CONTEXT_METADATA_MAX_BYTES: usize = 16_384;
 pub const CONTEXT_TEXT_ABI_VERSION: i64 = 1;
+const CONTEXT_CI_RESULT_WIDTH: usize = 7;
+const CONTEXT_CI_MARKER: i64 = 1;
+const CONTEXT_CI_ANNOTATION: i64 = 2;
+const CONTEXT_CI_JOB: i64 = 4;
+const CONTEXT_CI_STEP: i64 = 8;
+const CONTEXT_CI_EXIT_CODE: i64 = 16;
+const CONTEXT_CI_FAILURE_TEXT: i64 = 32;
 static CONTEXT_TEXT_ABI_READY: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -194,6 +207,64 @@ pub fn classify_command_metadata(metadata: &str) -> Result<Option<i64>, crate::M
         1 | 2 => Err(crate::MojoError::InvalidInput),
         _ => Err(crate::MojoError::InvalidOutput),
     }
+}
+
+/// Classifies deterministic CI log metadata and returns byte spans into `line`.
+pub fn classify_ci_line(line: &str) -> Result<[i64; CONTEXT_CI_RESULT_WIDTH], crate::MojoError> {
+    if !text_abi_is_ready() {
+        return Err(crate::MojoError::AbiMismatch);
+    }
+    let view = ProdexStringView {
+        ptr: line.as_ptr(),
+        len: line.len(),
+    };
+    let mut output = [-1_i64; CONTEXT_CI_RESULT_WIDTH];
+    let status = unsafe {
+        prodex_context_classify_ci_line_v1(
+            CONTEXT_TEXT_ABI_VERSION,
+            &view,
+            output.as_mut_ptr(),
+            CONTEXT_CI_RESULT_WIDTH as i64,
+        )
+    };
+    if status != 0 {
+        return Err(match status {
+            1 | 2 => crate::MojoError::InvalidInput,
+            4 => crate::MojoError::AbiMismatch,
+            _ => crate::MojoError::InvalidOutput,
+        });
+    }
+    if output[0] < 0
+        || output[0]
+            & !(CONTEXT_CI_MARKER
+                | CONTEXT_CI_ANNOTATION
+                | CONTEXT_CI_JOB
+                | CONTEXT_CI_STEP
+                | CONTEXT_CI_EXIT_CODE
+                | CONTEXT_CI_FAILURE_TEXT)
+            != 0
+    {
+        return Err(crate::MojoError::InvalidOutput);
+    }
+    for pair in output[1..].as_chunks::<2>().0 {
+        let (start, end) = (pair[0], pair[1]);
+        if start == -1 && end == -1 {
+            continue;
+        }
+        let valid = start >= 0
+            && end >= start
+            && usize::try_from(end)
+                .ok()
+                .is_some_and(|end| end <= line.len())
+            && usize::try_from(start)
+                .ok()
+                .zip(usize::try_from(end).ok())
+                .is_some_and(|(start, end)| line.get(start..end).is_some());
+        if !valid {
+            return Err(crate::MojoError::InvalidOutput);
+        }
+    }
+    Ok(output)
 }
 
 pub fn prepare_signal_rows(
@@ -454,8 +525,21 @@ pub fn self_test() -> bool {
         && classify_command_metadata("unknown-command") == Ok(None)
         && classify_command_metadata(&"cargo ".repeat(CONTEXT_METADATA_MAX_BYTES / 6 + 1))
             == Ok(None);
+    let ci_ok =
+        classify_ci_line("##[error]Process completed with exit code 7").is_ok_and(|result| {
+            result[0]
+                & (CONTEXT_CI_MARKER
+                    | CONTEXT_CI_ANNOTATION
+                    | CONTEXT_CI_EXIT_CODE
+                    | CONTEXT_CI_FAILURE_TEXT)
+                == (CONTEXT_CI_MARKER
+                    | CONTEXT_CI_ANNOTATION
+                    | CONTEXT_CI_EXIT_CODE
+                    | CONTEXT_CI_FAILURE_TEXT)
+        });
     text_ok
         && metadata_ok
+        && ci_ok
         && signal_diff(&[3, 0, 4, 1, 0, 2, 8], &[1, 2, 4, 0, 3, 0, 9]).is_ok_and(
             |(lost, gained)| {
                 lost == [2, 0, 0, 1, 0, 2, 0]
