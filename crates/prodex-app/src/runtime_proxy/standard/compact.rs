@@ -149,6 +149,7 @@ pub(super) fn proxy_runtime_compact_request(
         saw_inflight_saturation,
         saw_transport_failure,
         saw_overload_failure: false,
+        cold_start_probe_waited: false,
         recovery_sweeps: 0,
         recovery_started_at: None,
     })
@@ -177,6 +178,7 @@ struct RuntimeCompactSelectionContext<'a> {
     saw_inflight_saturation: bool,
     saw_transport_failure: bool,
     saw_overload_failure: bool,
+    cold_start_probe_waited: bool,
     recovery_sweeps: usize,
     recovery_started_at: Option<Instant>,
 }
@@ -338,7 +340,11 @@ impl RuntimeCompactSelectionContext<'_> {
                 &self.excluded_profiles,
                 RuntimeRouteKind::Compact,
             )?;
-        if remaining_cold_start_profiles > 0 && self.is_fresh_request() {
+        if remaining_cold_start_profiles > 0
+            && self.is_fresh_request()
+            && !self.cold_start_probe_waited
+        {
+            self.cold_start_probe_waited = true;
             runtime_proxy_log(
                 self.shared,
                 format!(
