@@ -1,5 +1,6 @@
 use super::*;
 
+#[cfg(any(not(feature = "mojo"), test))]
 pub(in crate::smart_context) fn smart_context_effective_input_source(
     current_input_tokens: u64,
     estimated_current_request_tokens: u64,
@@ -22,6 +23,7 @@ pub(in crate::smart_context) fn smart_context_effective_input_source(
     }
 }
 
+#[cfg(any(not(feature = "mojo"), test))]
 pub(in crate::smart_context) fn smart_context_token_accounting_risks(
     model_context_window_tokens: Option<u64>,
     reserved_output_tokens: u64,

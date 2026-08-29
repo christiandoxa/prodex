@@ -63,7 +63,7 @@ fn token_accounting_matches_rust_oracle_for_generated_inputs() {
         state = state.wrapping_mul(6364136223846793005).wrapping_add(1);
         let input = SmartContextObservedTokenAccountingCalibrationInput {
             accounting: SmartContextObservedTokenAccountingInput {
-                model_context_window_tokens: (state & 1 == 0).then(|| state % 300_000),
+                model_context_window_tokens: (state & 1 == 0).then_some(state % 300_000),
                 reserved_output_tokens: state.rotate_left(7) % 60_000,
                 current_input_tokens: state.rotate_right(13) % 200_000,
                 current_request_body_bytes: (state.rotate_left(23) % 300_000) as usize,
@@ -74,7 +74,10 @@ fn token_accounting_matches_rust_oracle_for_generated_inputs() {
             calibration_bucket_key: None,
             calibration_samples: Vec::new(),
         };
-        let expected = smart_context_observed_token_accounting_rust(input.clone());
+        let expected =
+            super::token_accounting::oracle::smart_context_observed_token_accounting_rust(
+                input.clone(),
+            );
         let actual = smart_context_observed_token_accounting_with_calibration(input);
         assert_eq!(actual, expected, "token accounting case {case}");
     }
