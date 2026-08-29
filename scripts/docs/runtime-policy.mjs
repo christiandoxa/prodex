@@ -4,10 +4,10 @@ import path from "node:path";
 import { repoRoot } from "../npm/common.mjs";
 
 const docsPath = path.join(repoRoot, "docs/runtime-policy.md");
-const runtimePolicyTypesPath = path.join(
-  repoRoot,
-  "crates/prodex-runtime-policy/src/types.rs",
-);
+const runtimePolicyTypesPaths = [
+  path.join(repoRoot, "crates/prodex-runtime-policy/src/types.rs"),
+  path.join(repoRoot, "crates/prodex-runtime-policy/src/types/runtime_proxy_preset.rs"),
+];
 const runtimeEnvSourcePaths = [
   path.join(repoRoot, "crates/prodex-app/src/runtime_core_shared.rs"),
   path.join(repoRoot, "crates/prodex-app/src/runtime_config/config.rs"),
@@ -349,7 +349,7 @@ function extractRuntimeProxyPolicyFields(typesSource) {
     throw new Error(
       `failed to find RuntimePolicyProxySettings in ${path.relative(
         repoRoot,
-        runtimePolicyTypesPath,
+        runtimePolicyTypesPaths[1],
       )}`,
     );
   }
@@ -385,7 +385,8 @@ async function checkMetadataAgainstRust() {
     errors.push(`duplicate policy env key: ${duplicate}`);
   }
 
-  const typesSource = await fs.readFile(runtimePolicyTypesPath, "utf8");
+  const typesSource = (await Promise.all(runtimePolicyTypesPaths.map((sourcePath) =>
+    fs.readFile(sourcePath, "utf8")))).join("\n");
   const rustFields = extractRuntimeProxyPolicyFields(typesSource);
   const metadataFieldSet = new Set(metadataFields);
   const rustFieldSet = new Set(rustFields);
