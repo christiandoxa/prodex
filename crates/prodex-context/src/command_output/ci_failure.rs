@@ -67,6 +67,80 @@ pub(super) fn compact_ci_failure_log_output(
     }
 }
 
+#[cfg(feature = "mojo")]
+const CI_LINE_MARKER: i64 = 1;
+#[cfg(feature = "mojo")]
+const CI_LINE_ANNOTATION: i64 = 2;
+#[cfg(feature = "mojo")]
+const CI_LINE_JOB: i64 = 4;
+#[cfg(feature = "mojo")]
+const CI_LINE_STEP: i64 = 8;
+#[cfg(feature = "mojo")]
+const CI_LINE_EXIT_CODE: i64 = 16;
+#[cfg(feature = "mojo")]
+const CI_LINE_FAILURE_TEXT: i64 = 32;
+
+#[cfg(feature = "mojo")]
+fn mojo_ci_line(line: &str) -> [i64; 7] {
+    prodex_mojo_core::context::classify_ci_line(line)
+        .unwrap_or_else(|error| panic!("Mojo CI line classification failed: {error:?}"))
+}
+
+#[cfg(feature = "mojo")]
+fn mojo_ci_line_span<'a>(line: &'a str, result: &[i64; 7], start: usize) -> Option<&'a str> {
+    let end = start + 1;
+    let start = usize::try_from(result[start]).ok()?;
+    let end = usize::try_from(result[end]).ok()?;
+    let value = line.get(start..end)?.trim();
+    (!value.is_empty()).then_some(value)
+}
+
+#[cfg(feature = "mojo")]
+fn is_ci_log_marker_line(line: &str) -> bool {
+    mojo_ci_line(line)[0] & CI_LINE_MARKER != 0
+}
+
+#[cfg(not(feature = "mojo"))]
+fn is_ci_log_marker_line(line: &str) -> bool {
+    is_ci_log_marker_line_rust(line)
+}
+
+#[cfg(any(not(feature = "mojo"), test))]
+fn is_ci_log_marker_line_rust(line: &str) -> bool {
+    let lower = line.trim_start().to_ascii_lowercase();
+    lower.starts_with("##[group]")
+        || lower.starts_with("##[endgroup]")
+        || lower.starts_with("##[error]")
+        || lower.starts_with("::error")
+        || lower.starts_with("current runner version:")
+        || lower.starts_with("runner name:")
+        || lower.starts_with("runner os:")
+        || lower.starts_with("prepare workflow directory")
+        || lower.starts_with("prepare all required actions")
+        || lower.starts_with("complete job")
+        || lower.starts_with("set up job")
+        || lower.contains("actions/checkout")
+        || lower.contains("/_actions/")
+        || lower.contains("github actions")
+        || lower.contains("process completed with exit code")
+}
+
+#[cfg(feature = "mojo")]
+fn is_ci_annotation_line(line: &str) -> bool {
+    mojo_ci_line(line)[0] & CI_LINE_ANNOTATION != 0
+}
+
+#[cfg(not(feature = "mojo"))]
+fn is_ci_annotation_line(line: &str) -> bool {
+    is_ci_annotation_line_rust(line)
+}
+
+#[cfg(any(not(feature = "mojo"), test))]
+fn is_ci_annotation_line_rust(line: &str) -> bool {
+    let lower = line.trim_start().to_ascii_lowercase();
+    lower.starts_with("##[error]") || lower.starts_with("::error")
+}
+
 fn select_ci_failure_indices(
     lines: &[&str],
     failure_indices: &[usize],
@@ -110,28 +184,24 @@ fn push_ci_failure_slice(
     }
 }
 
-fn is_ci_log_marker_line(line: &str) -> bool {
-    let lower = line.trim_start().to_ascii_lowercase();
-    lower.starts_with("##[group]")
-        || lower.starts_with("##[endgroup]")
-        || lower.starts_with("##[error]")
-        || lower.starts_with("::error")
-        || lower.starts_with("current runner version:")
-        || lower.starts_with("runner name:")
-        || lower.starts_with("runner os:")
-        || lower.starts_with("prepare workflow directory")
-        || lower.starts_with("prepare all required actions")
-        || lower.starts_with("complete job")
-        || lower.starts_with("set up job")
-        || lower.contains("actions/checkout")
-        || lower.contains("/_actions/")
-        || lower.contains("github actions")
-        || lower.contains("process completed with exit code")
+#[cfg(feature = "mojo")]
+fn is_ci_failure_signal_line(line: &str) -> bool {
+    let flags = mojo_ci_line(line)[0];
+    flags & (CI_LINE_ANNOTATION | CI_LINE_FAILURE_TEXT) != 0
+        || is_error_signal_line(line)
+        || is_test_failure_signal_line(line)
+        || is_success_output_failure_signal_line(line)
 }
 
+#[cfg(not(feature = "mojo"))]
 fn is_ci_failure_signal_line(line: &str) -> bool {
+    is_ci_failure_signal_line_rust(line)
+}
+
+#[cfg(any(not(feature = "mojo"), test))]
+fn is_ci_failure_signal_line_rust(line: &str) -> bool {
     let lower = line.trim_start().to_ascii_lowercase();
-    is_ci_annotation_line(line)
+    is_ci_annotation_line_rust(line)
         || lower.contains("process completed with exit code")
         || lower.contains("failed with exit code")
         || lower.contains("exited with code")
@@ -139,11 +209,6 @@ fn is_ci_failure_signal_line(line: &str) -> bool {
         || is_error_signal_line(line)
         || is_test_failure_signal_line(line)
         || is_success_output_failure_signal_line(line)
-}
-
-fn is_ci_annotation_line(line: &str) -> bool {
-    let lower = line.trim_start().to_ascii_lowercase();
-    lower.starts_with("##[error]") || lower.starts_with("::error")
 }
 
 fn ci_job_before(lines: &[&str], failure_index: usize) -> Option<(usize, String)> {
@@ -164,7 +229,22 @@ fn ci_step_before(lines: &[&str], failure_index: usize) -> Option<(usize, String
         .find_map(|(index, line)| ci_step_name_from_line(line).map(|name| (index, name)))
 }
 
+#[cfg(feature = "mojo")]
 fn ci_job_name_from_line(line: &str) -> Option<String> {
+    let result = mojo_ci_line(line);
+    if result[0] & CI_LINE_JOB == 0 {
+        return None;
+    }
+    mojo_ci_line_span(line, &result, 1).map(|value| truncate_command_line(value, 96))
+}
+
+#[cfg(not(feature = "mojo"))]
+fn ci_job_name_from_line(line: &str) -> Option<String> {
+    ci_job_name_from_line_rust(line)
+}
+
+#[cfg(any(not(feature = "mojo"), test))]
+fn ci_job_name_from_line_rust(line: &str) -> Option<String> {
     let trimmed = line.trim();
     let lower = trimmed.to_ascii_lowercase();
     for prefix in ["job:", "job name:", "workflow job:", "failed job:"] {
@@ -179,7 +259,22 @@ fn ci_job_name_from_line(line: &str) -> Option<String> {
     None
 }
 
+#[cfg(feature = "mojo")]
 fn ci_step_name_from_line(line: &str) -> Option<String> {
+    let result = mojo_ci_line(line);
+    if result[0] & CI_LINE_STEP == 0 {
+        return None;
+    }
+    mojo_ci_line_span(line, &result, 3).map(|value| truncate_command_line(value, 120))
+}
+
+#[cfg(not(feature = "mojo"))]
+fn ci_step_name_from_line(line: &str) -> Option<String> {
+    ci_step_name_from_line_rust(line)
+}
+
+#[cfg(any(not(feature = "mojo"), test))]
+fn ci_step_name_from_line_rust(line: &str) -> Option<String> {
     let trimmed = line.trim();
     let body = trimmed.strip_prefix("##[group]").unwrap_or(trimmed).trim();
     let lower = body.to_ascii_lowercase();
@@ -196,7 +291,22 @@ fn ci_step_name_from_line(line: &str) -> Option<String> {
     None
 }
 
+#[cfg(feature = "mojo")]
 fn ci_exit_code_from_line(line: &str) -> Option<String> {
+    let result = mojo_ci_line(line);
+    if result[0] & CI_LINE_EXIT_CODE == 0 {
+        return None;
+    }
+    mojo_ci_line_span(line, &result, 5).map(str::to_string)
+}
+
+#[cfg(not(feature = "mojo"))]
+fn ci_exit_code_from_line(line: &str) -> Option<String> {
+    ci_exit_code_from_line_rust(line)
+}
+
+#[cfg(any(not(feature = "mojo"), test))]
+fn ci_exit_code_from_line_rust(line: &str) -> Option<String> {
     let lower = line.to_ascii_lowercase();
     for needle in [
         "exit code",
@@ -214,6 +324,7 @@ fn ci_exit_code_from_line(line: &str) -> Option<String> {
     None
 }
 
+#[cfg(any(not(feature = "mojo"), test))]
 fn first_integer_token(input: &str) -> Option<String> {
     let mut digits = String::new();
     let mut started = false;
@@ -227,6 +338,77 @@ fn first_integer_token(input: &str) -> Option<String> {
     }
     let has_digit = digits.chars().any(|ch| ch.is_ascii_digit());
     has_digit.then_some(digits)
+}
+
+#[cfg(all(test, feature = "mojo"))]
+mod mojo_ci_line_tests {
+    use super::*;
+
+    #[test]
+    fn mojo_ci_line_metadata_matches_rust_oracle() {
+        let cases = [
+            "##[group]Run cargo test --workspace",
+            "##[endgroup]",
+            "##[error]Process completed with exit code 101.",
+            "::error file=src/lib.rs::broken",
+            " Current runner version: '2.0'",
+            "runner name: linux",
+            "runner os: Linux",
+            "prepare workflow directory",
+            "prepare all required actions",
+            "complete job",
+            "set up job",
+            "actions/checkout@v4",
+            "/_actions/prodex/test",
+            "GitHub Actions",
+            "job: test-linux",
+            "workflow job: unit",
+            "job test failed",
+            "##[group]step: cargo test",
+            "##[group]failed step: cargo test",
+            "##[GROUP]Run uppercase group is not a step",
+            "Process failed with code -1",
+            "exit code unavailable; exit status: 2",
+            "failed with code unavailable; code 4",
+            "exit status: 101",
+            "EXITED WITH CODE 7",
+            "\u{2003}job:\u{2003}unicode-linux",
+            "ordinary output",
+        ];
+
+        for line in cases {
+            assert_eq!(
+                is_ci_log_marker_line(line),
+                is_ci_log_marker_line_rust(line),
+                "marker: {line:?}"
+            );
+            assert_eq!(
+                is_ci_annotation_line(line),
+                is_ci_annotation_line_rust(line),
+                "annotation: {line:?}"
+            );
+            assert_eq!(
+                is_ci_failure_signal_line(line),
+                is_ci_failure_signal_line_rust(line),
+                "failure: {line:?}"
+            );
+            assert_eq!(
+                ci_job_name_from_line(line),
+                ci_job_name_from_line_rust(line),
+                "job: {line:?}"
+            );
+            assert_eq!(
+                ci_step_name_from_line(line),
+                ci_step_name_from_line_rust(line),
+                "step: {line:?}"
+            );
+            assert_eq!(
+                ci_exit_code_from_line(line),
+                ci_exit_code_from_line_rust(line),
+                "exit: {line:?}"
+            );
+        }
+    }
 }
 
 fn trim_ci_selected_indices(

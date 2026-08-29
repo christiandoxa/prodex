@@ -743,6 +743,309 @@ def context_metadata_kind(view: ProdexStringView) -> Int64:
     return CONTEXT_METADATA_NO_KIND
 
 
+comptime CONTEXT_CI_RESULT_WIDTH: Int64 = 7
+comptime CONTEXT_CI_MARKER: Int64 = 1
+comptime CONTEXT_CI_ANNOTATION: Int64 = 2
+comptime CONTEXT_CI_JOB: Int64 = 4
+comptime CONTEXT_CI_STEP: Int64 = 8
+comptime CONTEXT_CI_EXIT_CODE: Int64 = 16
+comptime CONTEXT_CI_FAILURE_TEXT: Int64 = 32
+
+
+def context_text_codepoint_width(value: UInt8) -> Int64:
+    if value <= 0x7F:
+        return 1
+    if value <= 0xDF:
+        return 2
+    if value <= 0xEF:
+        return 3
+    return 4
+
+
+def context_text_whitespace_width(
+    ptr: Pointer[mut=False, UInt8, _], index: Int64, end: Int64
+) -> Int64:
+    if index >= end:
+        return 0
+    var value = ptr[unsafe_offset=index]
+    if (
+        value == 9
+        or value == 10
+        or value == 11
+        or value == 12
+        or value == 13
+        or value == 32
+    ):
+        return 1
+    if value == 0xC2 and index + 1 < end:
+        var second = ptr[unsafe_offset=index + 1]
+        if second == 0x85 or second == 0xA0:
+            return 2
+    if value == 0xE1 and index + 2 < end:
+        if (
+            ptr[unsafe_offset=index + 1] == 0x9A
+            and ptr[unsafe_offset=index + 2] == 0x80
+        ):
+            return 3
+    if value == 0xE2 and index + 2 < end:
+        var second = ptr[unsafe_offset=index + 1]
+        var third = ptr[unsafe_offset=index + 2]
+        if second == 0x80 and (third >= 0x80 and third <= 0x8A or third >= 0xA8 and third <= 0xA9 or third == 0xAF):
+            return 3
+        if second == 0x81 and third == 0x9F:
+            return 3
+    if (
+        value == 0xE3
+        and index + 2 < end
+        and ptr[unsafe_offset=index + 1] == 0x80
+        and ptr[unsafe_offset=index + 2] == 0x80
+    ):
+        return 3
+    return 0
+
+
+def context_text_trim_bounds(
+    ptr: Pointer[mut=False, UInt8, _], start: Int64, end: Int64
+) -> InlineArray[Int64, 2]:
+    var bounds = InlineArray[Int64, 2](fill=0)
+    var first = end
+    var last = start
+    var index = start
+    while index < end:
+        var whitespace = context_text_whitespace_width(ptr, index, end)
+        if whitespace > 0:
+            index += whitespace
+            continue
+        if first == end:
+            first = index
+        index += context_text_codepoint_width(ptr[unsafe_offset=index])
+        last = index
+    if first == end:
+        bounds[0] = end
+        bounds[1] = end
+    else:
+        bounds[0] = first
+        bounds[1] = last
+    return bounds^
+
+
+def context_text_ascii_starts_at[literal: StaticString](
+    ptr: Pointer[mut=False, UInt8, _], start: Int64, end: Int64
+) -> Bool:
+    var length = Int64(literal.byte_length())
+    if start < 0 or end < start or start + length > end:
+        return False
+    var expected = literal.unsafe_ptr()
+    for index in range(length):
+        if (
+            context_metadata_lower(ptr[unsafe_offset=start + index])
+            != expected[unsafe_offset=index]
+        ):
+            return False
+    return True
+
+
+def context_text_ascii_starts_exact[literal: StaticString](
+    ptr: Pointer[mut=False, UInt8, _], start: Int64, end: Int64
+) -> Bool:
+    var length = Int64(literal.byte_length())
+    if start < 0 or end < start or start + length > end:
+        return False
+    var expected = literal.unsafe_ptr()
+    for index in range(length):
+        if ptr[unsafe_offset=start + index] != expected[unsafe_offset=index]:
+            return False
+    return True
+
+
+def context_text_ascii_contains[literal: StaticString](
+    ptr: Pointer[mut=False, UInt8, _], start: Int64, end: Int64
+) -> Bool:
+    var length = Int64(literal.byte_length())
+    if length == 0:
+        return True
+    if start < 0 or end < start or start + length > end:
+        return False
+    var expected = literal.unsafe_ptr()
+    for offset in range(start, end - length + 1):
+        var matched = True
+        for index in range(length):
+            if (
+                context_metadata_lower(ptr[unsafe_offset=offset + index])
+                != expected[unsafe_offset=index]
+            ):
+                matched = False
+                break
+        if matched:
+            return True
+    return False
+
+
+def context_text_ascii_find[literal: StaticString](
+    ptr: Pointer[mut=False, UInt8, _], start: Int64, end: Int64
+) -> Int64:
+    var length = Int64(literal.byte_length())
+    if length == 0:
+        return start
+    if start < 0 or end < start or start + length > end:
+        return -1
+    var expected = literal.unsafe_ptr()
+    for offset in range(start, end - length + 1):
+        var matched = True
+        for index in range(length):
+            if (
+                context_metadata_lower(ptr[unsafe_offset=offset + index])
+                != expected[unsafe_offset=index]
+            ):
+                matched = False
+                break
+        if matched:
+            return offset
+    return -1
+
+
+def context_ci_first_integer_token(
+    ptr: Pointer[mut=False, UInt8, _], start: Int64, end: Int64
+) -> InlineArray[Int64, 2]:
+    var result = InlineArray[Int64, 2](fill=-1)
+    var index = start
+    var token_start: Int64 = -1
+    var started = False
+    var has_digit = False
+    while index < end:
+        var value = ptr[unsafe_offset=index]
+        if value >= 48 and value <= 57 or not started and value == 45:
+            if not started:
+                token_start = index
+                started = True
+            if value >= 48 and value <= 57:
+                has_digit = True
+            index += 1
+        elif started:
+            break
+        else:
+            index += 1
+    if has_digit:
+        result[0] = token_start
+        result[1] = index
+    return result^
+
+
+def context_ci_exit_code_span(
+    ptr: Pointer[mut=False, UInt8, _], length: Int64
+) -> InlineArray[Int64, 2]:
+    var result = InlineArray[Int64, 2](fill=-1)
+    var marker = context_text_ascii_find["exit code"](ptr, 0, length)
+    if marker >= 0:
+        result = context_ci_first_integer_token(ptr, marker + 9, length)
+        if result[0] >= 0:
+            return result^
+    marker = context_text_ascii_find["exit status"](ptr, 0, length)
+    if marker >= 0:
+        result = context_ci_first_integer_token(ptr, marker + 11, length)
+        if result[0] >= 0:
+            return result^
+    marker = context_text_ascii_find["exited with code"](ptr, 0, length)
+    if marker >= 0:
+        result = context_ci_first_integer_token(ptr, marker + 16, length)
+        if result[0] >= 0:
+            return result^
+    marker = context_text_ascii_find["failed with code"](ptr, 0, length)
+    if marker >= 0:
+        result = context_ci_first_integer_token(ptr, marker + 16, length)
+        if result[0] >= 0:
+            return result^
+    marker = context_text_ascii_find["code"](ptr, 0, length)
+    if marker >= 0:
+        return context_ci_first_integer_token(ptr, marker + 4, length)^
+    return result^
+
+
+def context_ci_line_semantics(
+    ptr: Pointer[mut=False, UInt8, _], length: Int64, output: Pointer[mut=True, Int64, _]
+) -> None:
+    var trimmed = context_text_trim_bounds(ptr, 0, length)
+    var start = trimmed[0]
+    var end = trimmed[1]
+    if start >= end:
+        return
+
+    if (
+        context_text_ascii_starts_at["##[group]"](ptr, start, end)
+        or context_text_ascii_starts_at["##[endgroup]"](ptr, start, end)
+        or context_text_ascii_starts_at["##[error]"](ptr, start, end)
+        or context_text_ascii_starts_at["::error"](ptr, start, end)
+        or context_text_ascii_starts_at["current runner version:"](ptr, start, end)
+        or context_text_ascii_starts_at["runner name:"](ptr, start, end)
+        or context_text_ascii_starts_at["runner os:"](ptr, start, end)
+        or context_text_ascii_starts_at["prepare workflow directory"](ptr, start, end)
+        or context_text_ascii_starts_at["prepare all required actions"](ptr, start, end)
+        or context_text_ascii_starts_at["complete job"](ptr, start, end)
+        or context_text_ascii_starts_at["set up job"](ptr, start, end)
+        or context_text_ascii_contains["actions/checkout"](ptr, start, end)
+        or context_text_ascii_contains["/_actions/"](ptr, start, end)
+        or context_text_ascii_contains["github actions"](ptr, start, end)
+        or context_text_ascii_contains["process completed with exit code"](ptr, start, end)
+    ):
+        output[unsafe_offset=0] |= CONTEXT_CI_MARKER
+    if (
+        context_text_ascii_starts_at["##[error]"](ptr, start, end)
+        or context_text_ascii_starts_at["::error"](ptr, start, end)
+    ):
+        output[unsafe_offset=0] |= CONTEXT_CI_ANNOTATION
+    if (
+        context_text_ascii_contains["process completed with exit code"](ptr, start, end)
+        or context_text_ascii_contains["failed with exit code"](ptr, start, end)
+        or context_text_ascii_contains["exited with code"](ptr, start, end)
+        or context_text_ascii_contains["exit status"](ptr, start, end)
+    ):
+        output[unsafe_offset=0] |= CONTEXT_CI_FAILURE_TEXT
+
+    var job_prefix: Int64 = -1
+    if context_text_ascii_starts_at["job:"](ptr, start, end):
+        job_prefix = 4
+    elif context_text_ascii_starts_at["job name:"](ptr, start, end):
+        job_prefix = 9
+    elif context_text_ascii_starts_at["workflow job:"](ptr, start, end):
+        job_prefix = 13
+    elif context_text_ascii_starts_at["failed job:"](ptr, start, end):
+        job_prefix = 11
+    if job_prefix >= 0:
+        var job = context_text_trim_bounds(ptr, start + job_prefix, end)
+        if job[0] < job[1]:
+            output[unsafe_offset=0] |= CONTEXT_CI_JOB
+            output[unsafe_offset=1] = job[0]
+            output[unsafe_offset=2] = job[1]
+    elif context_text_ascii_starts_at["job "](ptr, start, end) and context_text_ascii_contains[" failed"](ptr, start, end):
+        output[unsafe_offset=0] |= CONTEXT_CI_JOB
+        output[unsafe_offset=1] = start
+        output[unsafe_offset=2] = end
+
+    var body_start = start
+    if context_text_ascii_starts_exact["##[group]"](ptr, body_start, end):
+        body_start += 9
+    var body = context_text_trim_bounds(ptr, body_start, end)
+    var step_prefix: Int64 = -1
+    if context_text_ascii_starts_at["run "](ptr, body[0], body[1]):
+        step_prefix = 4
+    elif context_text_ascii_starts_at["step:"](ptr, body[0], body[1]):
+        step_prefix = 5
+    elif context_text_ascii_starts_at["failed step:"](ptr, body[0], body[1]):
+        step_prefix = 12
+    if step_prefix >= 0:
+        var step = context_text_trim_bounds(ptr, body[0] + step_prefix, body[1])
+        if step[0] < step[1]:
+            output[unsafe_offset=0] |= CONTEXT_CI_STEP
+            output[unsafe_offset=3] = step[0]
+            output[unsafe_offset=4] = step[1]
+
+    var exit_code = context_ci_exit_code_span(ptr, length)
+    if exit_code[0] >= 0:
+        output[unsafe_offset=0] |= CONTEXT_CI_EXIT_CODE
+        output[unsafe_offset=5] = exit_code[0]
+        output[unsafe_offset=6] = exit_code[1]
+
+
 def context_text_line_counts(
     counts: Pointer[mut=False, Int64, _], line: Int64
 ) -> InlineArray[Int64, 7]:
@@ -827,6 +1130,29 @@ def prodex_context_classify_command_metadata_v1(
     if view.len == 0:
         return 0
     output_kind[] = context_metadata_kind(view)
+    return 0
+
+
+@export("prodex_context_classify_ci_line_v1")
+def prodex_context_classify_ci_line_v1(
+    abi_version: Int64,
+    line: Pointer[mut=False, ProdexStringView, _],
+    output: Pointer[mut=True, Int64, _],
+    output_count: Int64,
+) abi("C") -> Int64:
+    if output_count != CONTEXT_CI_RESULT_WIDTH:
+        return 1
+    for index in range(CONTEXT_CI_RESULT_WIDTH):
+        output[unsafe_offset=index] = -1
+    output[unsafe_offset=0] = 0
+    if abi_version != CONTEXT_TEXT_ABI_VERSION:
+        return 4
+    var view = line[].copy()
+    if not context_text_view_is_valid(view):
+        return 2
+    if view.len == 0:
+        return 0
+    context_ci_line_semantics(view.ptr.unsafe_value(), Int64(view.len), output)
     return 0
 
 
