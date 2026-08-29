@@ -1,6 +1,126 @@
-use super::{
-    RuntimePolicyProxyPreset, RuntimePolicyProxyPresetSelection, RuntimePolicyProxySettings,
-};
+use super::{RuntimePolicyProxyPreset, RuntimePolicyProxyPresetSelection};
+use serde::Deserialize;
+
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RuntimePolicyProxySettings {
+    #[serde(default)]
+    pub preset: RuntimePolicyProxyPresetSelection,
+    pub worker_count: Option<usize>,
+    pub long_lived_worker_count: Option<usize>,
+    pub probe_refresh_worker_count: Option<usize>,
+    pub async_worker_count: Option<usize>,
+    pub long_lived_queue_capacity: Option<usize>,
+    pub active_request_limit: Option<usize>,
+    pub profile_inflight_soft_limit: Option<usize>,
+    pub profile_inflight_hard_limit: Option<usize>,
+    pub responses_active_limit: Option<usize>,
+    pub compact_active_limit: Option<usize>,
+    pub websocket_active_limit: Option<usize>,
+    pub standard_active_limit: Option<usize>,
+    pub http_connect_timeout_ms: Option<u64>,
+    pub stream_idle_timeout_ms: Option<u64>,
+    pub compact_request_timeout_ms: Option<u64>,
+    pub sse_lookahead_timeout_ms: Option<u64>,
+    pub prefetch_backpressure_retry_ms: Option<u64>,
+    pub prefetch_backpressure_timeout_ms: Option<u64>,
+    pub prefetch_max_buffered_bytes: Option<usize>,
+    pub websocket_connect_timeout_ms: Option<u64>,
+    pub websocket_happy_eyeballs_delay_ms: Option<u64>,
+    pub websocket_precommit_progress_timeout_ms: Option<u64>,
+    pub websocket_connect_worker_count: Option<usize>,
+    pub websocket_connect_queue_capacity: Option<usize>,
+    pub websocket_connect_overflow_capacity: Option<usize>,
+    pub websocket_dns_worker_count: Option<usize>,
+    pub websocket_dns_queue_capacity: Option<usize>,
+    pub websocket_dns_overflow_capacity: Option<usize>,
+    pub broker_ready_timeout_ms: Option<u64>,
+    pub broker_health_connect_timeout_ms: Option<u64>,
+    pub broker_health_read_timeout_ms: Option<u64>,
+    pub websocket_previous_response_reuse_stale_ms: Option<u64>,
+    pub admission_wait_budget_ms: Option<u64>,
+    pub pressure_admission_wait_budget_ms: Option<u64>,
+    pub long_lived_queue_wait_budget_ms: Option<u64>,
+    pub pressure_long_lived_queue_wait_budget_ms: Option<u64>,
+    pub sync_probe_pressure_pause_ms: Option<u64>,
+    pub responses_critical_floor_percent: Option<i64>,
+    pub startup_sync_probe_warm_limit: Option<usize>,
+}
+
+impl RuntimePolicyProxySettings {
+    pub fn preset(&self) -> Option<RuntimePolicyProxyPreset> {
+        self.preset.get()
+    }
+
+    pub fn with_effective_preset(
+        self,
+        env_preset: Option<RuntimePolicyProxyPreset>,
+    ) -> RuntimePolicyProxySettings {
+        let selected_preset = env_preset.or_else(|| self.preset());
+        let Some(selected_preset) = selected_preset else {
+            return self;
+        };
+
+        let mut effective = selected_preset.settings();
+        effective.apply_non_preset_overrides(self);
+        effective.preset = RuntimePolicyProxyPresetSelection::selected(selected_preset);
+        effective
+    }
+
+    fn apply_non_preset_overrides(&mut self, overrides: RuntimePolicyProxySettings) {
+        macro_rules! apply_optional_overrides {
+            ($($field:ident),+ $(,)?) => {
+                $(
+                    if overrides.$field.is_some() {
+                        self.$field = overrides.$field;
+                    }
+                )+
+            };
+        }
+
+        apply_optional_overrides!(
+            worker_count,
+            long_lived_worker_count,
+            probe_refresh_worker_count,
+            async_worker_count,
+            long_lived_queue_capacity,
+            active_request_limit,
+            profile_inflight_soft_limit,
+            profile_inflight_hard_limit,
+            responses_active_limit,
+            compact_active_limit,
+            websocket_active_limit,
+            standard_active_limit,
+            http_connect_timeout_ms,
+            stream_idle_timeout_ms,
+            compact_request_timeout_ms,
+            sse_lookahead_timeout_ms,
+            prefetch_backpressure_retry_ms,
+            prefetch_backpressure_timeout_ms,
+            prefetch_max_buffered_bytes,
+            websocket_connect_timeout_ms,
+            websocket_happy_eyeballs_delay_ms,
+            websocket_precommit_progress_timeout_ms,
+            websocket_connect_worker_count,
+            websocket_connect_queue_capacity,
+            websocket_connect_overflow_capacity,
+            websocket_dns_worker_count,
+            websocket_dns_queue_capacity,
+            websocket_dns_overflow_capacity,
+            broker_ready_timeout_ms,
+            broker_health_connect_timeout_ms,
+            broker_health_read_timeout_ms,
+            websocket_previous_response_reuse_stale_ms,
+            admission_wait_budget_ms,
+            pressure_admission_wait_budget_ms,
+            long_lived_queue_wait_budget_ms,
+            pressure_long_lived_queue_wait_budget_ms,
+            sync_probe_pressure_pause_ms,
+            responses_critical_floor_percent,
+            startup_sync_probe_warm_limit,
+        );
+    }
+}
 
 impl RuntimePolicyProxyPreset {
     pub(super) fn settings(self) -> RuntimePolicyProxySettings {
