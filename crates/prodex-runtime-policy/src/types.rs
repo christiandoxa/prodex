@@ -3,6 +3,7 @@ use serde::{Deserialize, Deserializer, Serialize, de};
 use std::path::PathBuf;
 
 mod governance_condition;
+mod runtime_proxy_preset;
 pub use governance_condition::RuntimeGovernancePolicyRuleCondition;
 
 pub const PRODEX_POLICY_FILE_NAME: &str = "policy.toml";
@@ -669,86 +670,6 @@ impl RuntimePolicyProxyPreset {
         }
     }
 
-    fn settings(self) -> RuntimePolicyProxySettings {
-        let preset = RuntimePolicyProxyPresetSelection::selected(self);
-        // Presets only tune local concurrency/admission knobs. Transport timeouts stay unset
-        // to preserve upstream Codex stream and reconnect behavior.
-        match self {
-            Self::Low => RuntimePolicyProxySettings {
-                preset,
-                worker_count: Some(4),
-                long_lived_worker_count: Some(8),
-                probe_refresh_worker_count: Some(2),
-                async_worker_count: Some(2),
-                long_lived_queue_capacity: Some(128),
-                active_request_limit: Some(48),
-                profile_inflight_soft_limit: Some(2),
-                profile_inflight_hard_limit: Some(4),
-                responses_active_limit: Some(36),
-                compact_active_limit: Some(3),
-                websocket_active_limit: Some(8),
-                standard_active_limit: Some(2),
-                websocket_connect_worker_count: Some(4),
-                websocket_connect_queue_capacity: Some(32),
-                websocket_connect_overflow_capacity: Some(64),
-                websocket_dns_worker_count: Some(2),
-                websocket_dns_queue_capacity: Some(16),
-                websocket_dns_overflow_capacity: Some(32),
-                startup_sync_probe_warm_limit: Some(1),
-                ..RuntimePolicyProxySettings::default()
-            },
-            Self::Default => RuntimePolicyProxySettings {
-                preset,
-                ..RuntimePolicyProxySettings::default()
-            },
-            Self::ManyTerminals => RuntimePolicyProxySettings {
-                preset,
-                worker_count: Some(12),
-                long_lived_worker_count: Some(32),
-                probe_refresh_worker_count: Some(4),
-                async_worker_count: Some(4),
-                long_lived_queue_capacity: Some(512),
-                active_request_limit: Some(160),
-                profile_inflight_soft_limit: Some(4),
-                profile_inflight_hard_limit: Some(8),
-                responses_active_limit: Some(120),
-                compact_active_limit: Some(8),
-                websocket_active_limit: Some(32),
-                standard_active_limit: Some(8),
-                websocket_connect_worker_count: Some(12),
-                websocket_connect_queue_capacity: Some(96),
-                websocket_connect_overflow_capacity: Some(384),
-                websocket_dns_worker_count: Some(6),
-                websocket_dns_queue_capacity: Some(48),
-                websocket_dns_overflow_capacity: Some(96),
-                startup_sync_probe_warm_limit: Some(2),
-                ..RuntimePolicyProxySettings::default()
-            },
-            Self::Aggressive => RuntimePolicyProxySettings {
-                preset,
-                worker_count: Some(24),
-                long_lived_worker_count: Some(96),
-                probe_refresh_worker_count: Some(8),
-                async_worker_count: Some(8),
-                long_lived_queue_capacity: Some(1024),
-                active_request_limit: Some(384),
-                profile_inflight_soft_limit: Some(8),
-                profile_inflight_hard_limit: Some(16),
-                responses_active_limit: Some(288),
-                compact_active_limit: Some(16),
-                websocket_active_limit: Some(96),
-                standard_active_limit: Some(16),
-                websocket_connect_worker_count: Some(16),
-                websocket_connect_queue_capacity: Some(128),
-                websocket_connect_overflow_capacity: Some(512),
-                websocket_dns_worker_count: Some(8),
-                websocket_dns_queue_capacity: Some(64),
-                websocket_dns_overflow_capacity: Some(128),
-                startup_sync_probe_warm_limit: Some(3),
-                ..RuntimePolicyProxySettings::default()
-            },
-        }
-    }
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]

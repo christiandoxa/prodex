@@ -77,6 +77,79 @@ def runtime_tuning_lane_limit(
     return value
 
 
+@export("prodex_runtime_proxy_preset_defaults_v1")
+def prodex_runtime_proxy_preset_defaults_v1(
+    preset: Int64,
+    output: Pointer[mut=True, Int64, _],
+) abi("C") -> Int64:
+    if preset < 0 or preset > 3:
+        return 1
+    for index in range(19):
+        output[unsafe_offset=index] = 0
+
+    if preset == 0:
+        output[unsafe_offset=0] = 4
+        output[unsafe_offset=1] = 8
+        output[unsafe_offset=2] = 2
+        output[unsafe_offset=3] = 2
+        output[unsafe_offset=4] = 128
+        output[unsafe_offset=5] = 48
+        output[unsafe_offset=6] = 2
+        output[unsafe_offset=7] = 4
+        output[unsafe_offset=8] = 36
+        output[unsafe_offset=9] = 3
+        output[unsafe_offset=10] = 8
+        output[unsafe_offset=11] = 2
+        output[unsafe_offset=12] = 4
+        output[unsafe_offset=13] = 32
+        output[unsafe_offset=14] = 64
+        output[unsafe_offset=15] = 2
+        output[unsafe_offset=16] = 16
+        output[unsafe_offset=17] = 32
+        output[unsafe_offset=18] = 1
+    elif preset == 2:
+        output[unsafe_offset=0] = 12
+        output[unsafe_offset=1] = 32
+        output[unsafe_offset=2] = 4
+        output[unsafe_offset=3] = 4
+        output[unsafe_offset=4] = 512
+        output[unsafe_offset=5] = 160
+        output[unsafe_offset=6] = 4
+        output[unsafe_offset=7] = 8
+        output[unsafe_offset=8] = 120
+        output[unsafe_offset=9] = 8
+        output[unsafe_offset=10] = 32
+        output[unsafe_offset=11] = 8
+        output[unsafe_offset=12] = 12
+        output[unsafe_offset=13] = 96
+        output[unsafe_offset=14] = 384
+        output[unsafe_offset=15] = 6
+        output[unsafe_offset=16] = 48
+        output[unsafe_offset=17] = 96
+        output[unsafe_offset=18] = 2
+    elif preset == 3:
+        output[unsafe_offset=0] = 24
+        output[unsafe_offset=1] = 96
+        output[unsafe_offset=2] = 8
+        output[unsafe_offset=3] = 8
+        output[unsafe_offset=4] = 1024
+        output[unsafe_offset=5] = 384
+        output[unsafe_offset=6] = 8
+        output[unsafe_offset=7] = 16
+        output[unsafe_offset=8] = 288
+        output[unsafe_offset=9] = 16
+        output[unsafe_offset=10] = 96
+        output[unsafe_offset=11] = 16
+        output[unsafe_offset=12] = 16
+        output[unsafe_offset=13] = 128
+        output[unsafe_offset=14] = 512
+        output[unsafe_offset=15] = 8
+        output[unsafe_offset=16] = 64
+        output[unsafe_offset=17] = 128
+        output[unsafe_offset=18] = 3
+    return 0
+
+
 @export("prodex_runtime_tuning_capacity_defaults")
 def prodex_runtime_tuning_capacity_defaults(
     parallelism: Int64,

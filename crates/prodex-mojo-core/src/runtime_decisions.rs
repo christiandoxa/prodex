@@ -5,8 +5,9 @@ pub use calibration::{
     smart_context_calibration_models_match, smart_context_calibration_observed_input,
 };
 pub use tuning::{
-    RuntimeTuningCapacityDefaults, RuntimeTuningDefaults, runtime_tuning_capacity_defaults,
-    runtime_tuning_defaults,
+    RuntimeTuningCapacityDefaults, RuntimeTuningDefaults, RuntimeTuningProxyPresetDefaults,
+    runtime_tuning_capacity_defaults, runtime_tuning_defaults,
+    runtime_tuning_proxy_preset_defaults,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
