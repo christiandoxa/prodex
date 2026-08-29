@@ -180,11 +180,6 @@
     "reason": "Governed routing security coverage keeps hard filters, exact binding identity, conflict rejection, runtime health/quota/load signals, revocation, and bounded fresh fallback in one matrix."
   },
   {
-    "file": "crates/prodex-runtime-policy/src/types.rs",
-    "maxLines": 936,
-    "reason": "Runtime policy types carry gateway harness selection, governance authority and verifier roots, lifecycle, authentication assurance, session, audit, retention, and secret-backend configuration after rule-condition schema ownership moved to its focused module."
-  },
-  {
     "file": "crates/prodex-runtime-policy/tests/src/validate.rs",
     "maxLines": 1147,
     "reason": "Runtime-policy validation coverage remains capped after control-plane and bank-mode composition tests moved into a focused sibling module."
