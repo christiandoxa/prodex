@@ -137,6 +137,7 @@ pub fn infer_command_output_kind_from_metadata(metadata: &str) -> Option<Command
     command_output_kind_from_mojo_tag(tag)
 }
 
+#[cfg(feature = "mojo")]
 fn command_output_kind_from_mojo_tag(tag: Option<i64>) -> Option<CommandOutputKind> {
     tag.and_then(|tag| match tag {
         1 => Some(CommandOutputKind::GitStatus),
