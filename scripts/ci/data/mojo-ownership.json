@@ -14,6 +14,12 @@
       "consumer_marker": "prodex_mojo_core::runtime::quota_route_score_batch",
       "expanded_in": "0.420.0"
     },
+    "runtime_profile_schedule_scoring": {
+      "expanded_in": "0.420.0"
+    },
+    "smart_context_calibrated_estimate": {
+      "expanded_in": "0.420.0"
+    },
     "quota_capacity_lane_planning": {
       "expanded_in": "0.420.0"
     },
@@ -401,7 +407,6 @@
     ]
   },
   "supporting_operations": [
-    "provider_constraint_kernel",
     "quota_aggregation_kernel",
     "runtime_policy_numeric_kernel",
     "runtime_profile_schedule_kernel",
@@ -808,6 +813,24 @@
       "rust_adapter_scope": "line normalization and fixed-record adapter"
     },
     {
+      "name": "provider_constraint_kernel",
+      "domain": "provider/constraints",
+      "introduced_in": "0.420.0",
+      "baseline_state": "candidate",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_provider_constraints_evaluate_v2",
+      "mojo_source": "mojo/prodex_core/provider_constraints.mojo",
+      "consumer": "crates/prodex-provider-core/src/constraints/mojo.rs",
+      "consumer_marker": "prodex_mojo_core::provider_constraints",
+      "production_reachability_test": "crates/prodex-provider-core/src/constraints/mojo.rs",
+      "rust_owner_before": "provider endpoint, capability, reasoning, and request requirement preclassification",
+      "rust_state_after": "adapter-only",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "catalog and provider-boundary DTO collection"
+    },
+    {
       "name": "runtime_auto_redeem_capacity_planning",
       "domain": "quota/capacity/planning",
       "introduced_in": "0.420.0",
@@ -900,7 +923,7 @@
       "operation": "smart_context_calibrated_estimate",
       "previous_responsibility": "calibrated request-token estimate safety arithmetic",
       "baseline_semantic_loc": 248,
-      "migrated_semantic_loc": 42,
+      "migrated_semantic_loc": 206,
       "final_state": "test-oracle-only",
       "rust_before": "crates/prodex-runtime-proxy/src/smart_context/token_accounting/calibration.rs::smart_context_observed_calibrated_request_estimate",
       "rust_after": "test-oracle-only",
@@ -968,7 +991,7 @@
       "operation": "critical_signal_line_classification",
       "previous_responsibility": "critical-signal line classification and normalized range input construction",
       "baseline_semantic_loc": 367,
-      "migrated_semantic_loc": 123,
+      "migrated_semantic_loc": 130,
       "final_state": "test-oracle-only",
       "rust_before": "crates/prodex-context/src/critical_signal.rs::critical_signal_normalized_rows_rust",
       "rust_after": "test-oracle-only",
@@ -1037,6 +1060,40 @@
       "operation": "critical_signal_range_planning",
       "previous_responsibility": "signal-row identity and post-loss range input construction",
       "final_state": "test-oracle-only"
+    },
+    {
+      "file": "crates/prodex-provider-core/src/constraints.rs",
+      "symbol": "resolve_provider_request_requirements",
+      "operation": "provider_constraint_kernel",
+      "previous_responsibility": "provider request default, reasoning reserve, endpoint, capability, and reasoning-effort preclassification",
+      "baseline_semantic_loc": 423,
+      "migrated_semantic_loc": 61,
+      "final_state": "adapter-only",
+      "rust_before": "crates/prodex-provider-core/src/constraints.rs::resolve_provider_request_requirements",
+      "rust_after": "adapter-only; Mojo owns bounded requirement resolution and preclassification",
+      "mojo_owner": "mojo/prodex_core/provider_constraints.mojo::prodex_provider_constraints_resolve_v1",
+      "mojo_source": "mojo/prodex_core/provider_constraints.mojo",
+      "mojo_entry": "prodex_provider_constraints_resolve_v1",
+      "production_consumer": "crates/prodex-provider-core/src/constraints/mojo.rs",
+      "parity_test": "crates/prodex-provider-core/tests/src/constraints.rs",
+      "performance": "one bounded scalar preclassification and resolution call"
+    },
+    {
+      "file": "crates/prodex-runtime-quota/src/selection/scoring.rs",
+      "symbol": "provider_aware_profile_order_with_view",
+      "operation": "runtime_profile_schedule_scoring",
+      "previous_responsibility": "provider-priority stable ordering for current-first profile rotation",
+      "baseline_semantic_loc": 294,
+      "migrated_semantic_loc": 20,
+      "final_state": "adapter-only",
+      "rust_before": "crates/prodex-runtime-quota/src/selection/scoring.rs::provider_aware_profile_order_with_view",
+      "rust_after": "adapter-only re-export with validated index reconstruction",
+      "mojo_owner": "mojo/prodex_core/profile_schedule.mojo::prodex_runtime_profile_provider_order_batch",
+      "mojo_source": "mojo/prodex_core/profile_schedule.mojo",
+      "mojo_entry": "prodex_runtime_profile_provider_order_batch",
+      "production_consumer": "crates/prodex-runtime-quota/src/selection/scoring.rs",
+      "parity_test": "crates/prodex-runtime-quota/tests/src/selection.rs",
+      "performance": "one bounded index-order call"
     },
     {
       "file": "crates/prodex-app/src/runtime_proxy/quota/auto_redeem/pool.rs",
