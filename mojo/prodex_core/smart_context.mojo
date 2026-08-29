@@ -1,8 +1,13 @@
 from std.memory import Pointer
+from rich_text import rich_view_valid, rich_views_equal, rich_view_ptr
+from rich_types import ProdexRichStringView
 
 comptime UINT64_MAX: UInt64 = 18446744073709551615
 comptime UINT32_MAX: UInt64 = 4294967295
 comptime SMART_CONTEXT_TOKEN_ACCOUNTING_MAX_COUNT: Int64 = 256
+comptime SMART_CONTEXT_CALIBRATION_FIELD_COUNT: Int64 = 4
+comptime SMART_CONTEXT_CALIBRATION_MAX_COUNT: Int64 = 256
+comptime SMART_CONTEXT_CALIBRATION_MAX_BYTES: Int64 = 4096
 comptime SMART_CONTEXT_ACCOUNTING_RISK_UNKNOWN_WINDOW: UInt64 = 1
 comptime SMART_CONTEXT_ACCOUNTING_RISK_ZERO_WINDOW: UInt64 = 2
 comptime SMART_CONTEXT_ACCOUNTING_RISK_RESERVED_OUTPUT: UInt64 = 4
@@ -24,6 +29,458 @@ def smart_context_saturating_sub(left: UInt64, right: UInt64) -> UInt64:
     if right > left:
         return 0
     return left - right
+
+def smart_context_calibration_view(
+    views: Pointer[mut=False, ProdexRichStringView, _],
+    index: Int64,
+    field: Int64,
+) -> ProdexRichStringView:
+    return views[
+        unsafe_offset=(index * SMART_CONTEXT_CALIBRATION_FIELD_COUNT) + field
+    ].copy()
+
+def smart_context_calibration_mask_has(mask: Int64, field: Int64) -> Bool:
+    return mask & (1 << field) != 0
+
+def smart_context_calibration_bucket_present(mask: Int64) -> Bool:
+    return mask & 16 != 0
+
+def smart_context_calibration_field_equal(
+    left: ProdexRichStringView,
+    right: ProdexRichStringView,
+    left_present: Bool,
+    right_present: Bool,
+) -> Bool:
+    if left_present != right_present:
+        return False
+    if not left_present:
+        return True
+    return rich_views_equal(left, right)
+
+def smart_context_calibration_field_matches(
+    target: ProdexRichStringView,
+    sample: ProdexRichStringView,
+    target_present: Bool,
+    sample_present: Bool,
+) -> Bool:
+    return target_present and sample_present and target.len > 0 and rich_views_equal(target, sample)
+
+def smart_context_calibration_optional_field_compatible(
+    target: ProdexRichStringView,
+    sample: ProdexRichStringView,
+    target_present: Bool,
+    sample_present: Bool,
+) -> Bool:
+    if not sample_present:
+        return True
+    return target_present and rich_views_equal(target, sample)
+
+def smart_context_calibration_is_digit(value: UInt8) -> Bool:
+    return value >= 48 and value <= 57
+
+@fieldwise_init
+struct SmartContextCalibrationModelHashes(Copyable):
+    var exact: UInt64
+    var family: UInt64
+    var valid: Bool
+
+def smart_context_calibration_normalized_length(
+    view: ProdexRichStringView,
+) -> Int64:
+    if not rich_view_valid(view, SMART_CONTEXT_CALIBRATION_MAX_BYTES):
+        return -1
+    var source = rich_view_ptr(view)
+    var start: Int64 = 0
+    var end = Int64(view.len)
+    while start < end and source[unsafe_offset=start] == 32:
+        start += 1
+    while end > start and source[unsafe_offset=end - 1] == 32:
+        end -= 1
+    var length: Int64 = 0
+    var pending_separator = False
+    for index in range(start, end):
+        var value = source[unsafe_offset=index]
+        if value < 32:
+            return -1
+        if value == 95 or value == 32 or value == 45:
+            if length > 0:
+                pending_separator = True
+            continue
+        if pending_separator:
+            length += 1
+            pending_separator = False
+        length += 1
+    return length
+
+def smart_context_calibration_normalized_byte(
+    view: ProdexRichStringView, wanted: Int64
+) -> UInt8:
+    if wanted < 0:
+        return 0
+    var source = rich_view_ptr(view)
+    var start: Int64 = 0
+    var end = Int64(view.len)
+    while start < end and source[unsafe_offset=start] == 32:
+        start += 1
+    while end > start and source[unsafe_offset=end - 1] == 32:
+        end -= 1
+    var output_index: Int64 = 0
+    var pending_separator = False
+    for index in range(start, end):
+        var value = source[unsafe_offset=index]
+        if value == 95 or value == 32 or value == 45:
+            if output_index > 0:
+                pending_separator = True
+            continue
+        if pending_separator:
+            if output_index == wanted:
+                return 45
+            output_index += 1
+            pending_separator = False
+        if value >= 65 and value <= 90:
+            value += 32
+        if output_index == wanted:
+            return value
+        output_index += 1
+    return 0
+
+def smart_context_calibration_has_suffix[literal: StaticString](
+    view: ProdexRichStringView, length: Int64
+) -> Bool:
+    var literal_length = Int64(literal.byte_length())
+    if length < literal_length:
+        return False
+    var literal_ptr = literal.unsafe_ptr()
+    var offset = length - literal_length
+    for index in range(literal_length):
+        if smart_context_calibration_normalized_byte(view, offset + index) != literal_ptr[unsafe_offset=index]:
+            return False
+    return True
+
+def smart_context_calibration_model_hashes(
+    view: ProdexRichStringView,
+) -> SmartContextCalibrationModelHashes:
+    var length = smart_context_calibration_normalized_length(view)
+    if length <= 0:
+        return SmartContextCalibrationModelHashes(0, 0, False)
+    var exact_hash: UInt64 = 1469598103934665603
+    for index in range(length):
+        exact_hash = (
+            exact_hash ^ UInt64(smart_context_calibration_normalized_byte(view, index))
+        ) * 1099511628211
+
+    var family_length = length
+    if smart_context_calibration_has_suffix["-latest"](view, family_length):
+        family_length -= 7
+    elif smart_context_calibration_has_suffix["-preview"](view, family_length):
+        family_length -= 8
+    if smart_context_calibration_has_suffix["-mini"](view, family_length):
+        family_length -= 5
+    elif smart_context_calibration_has_suffix["-nano"](view, family_length):
+        family_length -= 5
+    elif smart_context_calibration_has_suffix["-codex"](view, family_length):
+        family_length -= 6
+    elif family_length >= 11:
+        var suffix = family_length - 11
+        if (
+            smart_context_calibration_normalized_byte(view, suffix) == 45
+            and smart_context_calibration_is_digit(smart_context_calibration_normalized_byte(view, suffix + 1))
+            and smart_context_calibration_is_digit(smart_context_calibration_normalized_byte(view, suffix + 2))
+            and smart_context_calibration_is_digit(smart_context_calibration_normalized_byte(view, suffix + 3))
+            and smart_context_calibration_is_digit(smart_context_calibration_normalized_byte(view, suffix + 4))
+            and smart_context_calibration_normalized_byte(view, suffix + 5) == 45
+            and smart_context_calibration_is_digit(smart_context_calibration_normalized_byte(view, suffix + 6))
+            and smart_context_calibration_is_digit(smart_context_calibration_normalized_byte(view, suffix + 7))
+            and smart_context_calibration_normalized_byte(view, suffix + 8) == 45
+            and smart_context_calibration_is_digit(smart_context_calibration_normalized_byte(view, suffix + 9))
+            and smart_context_calibration_is_digit(smart_context_calibration_normalized_byte(view, suffix + 10))
+        ):
+            family_length = suffix
+    if family_length <= 0:
+        family_length = length
+    var family_hash: UInt64 = 1469598103934665603
+    for index in range(family_length):
+        family_hash = (
+            family_hash ^ UInt64(smart_context_calibration_normalized_byte(view, index))
+        ) * 1099511628211
+    return SmartContextCalibrationModelHashes(exact_hash, family_hash, True)
+
+@export("prodex_smart_context_calibration_models_match_v1")
+def prodex_smart_context_calibration_models_match_v1(
+    target_view_address: UInt,
+    sample_view_address: UInt,
+) abi("C") -> Int64:
+    if target_view_address == 0 or sample_view_address == 0:
+        return 1
+    var target = Pointer[mut=False, ProdexRichStringView, ImmUntrackedOrigin](
+        unsafe_from_address=Int(target_view_address)
+    )[].copy()
+    var sample = Pointer[mut=False, ProdexRichStringView, ImmUntrackedOrigin](
+        unsafe_from_address=Int(sample_view_address)
+    )[].copy()
+    if (
+        not rich_view_valid(target, SMART_CONTEXT_CALIBRATION_MAX_BYTES)
+        or not rich_view_valid(sample, SMART_CONTEXT_CALIBRATION_MAX_BYTES)
+    ):
+        return 2
+    var target_length = smart_context_calibration_normalized_length(target)
+    var sample_length = smart_context_calibration_normalized_length(sample)
+    if target_length < 0 or sample_length < 0:
+        return 2
+    if target_length != sample_length:
+        return 0
+    for index in range(target_length):
+        if smart_context_calibration_normalized_byte(target, index) != smart_context_calibration_normalized_byte(sample, index):
+            return 0
+    return 1
+
+def smart_context_calibration_model_matches(
+    target: ProdexRichStringView,
+    sample: ProdexRichStringView,
+    target_present: Bool,
+    sample_present: Bool,
+) -> Bool:
+    if not target_present or not sample_present:
+        return False
+    var target_hashes = smart_context_calibration_model_hashes(target)
+    var sample_hashes = smart_context_calibration_model_hashes(sample)
+    return (
+        target_hashes.valid
+        and sample_hashes.valid
+        and (
+            target_hashes.exact == sample_hashes.exact
+            or target_hashes.family == sample_hashes.family
+        )
+    )
+
+def smart_context_calibration_bucket_matches(
+    target_views: Pointer[mut=False, ProdexRichStringView, _],
+    target_mask: Int64,
+    sample_views: Pointer[mut=False, ProdexRichStringView, _],
+    sample_mask: Int64,
+    sample_index: Int64,
+    mode: Int64,
+) -> Bool:
+    var target_bucket = smart_context_calibration_bucket_present(target_mask)
+    var sample_bucket = smart_context_calibration_bucket_present(sample_mask)
+    if mode == 0:
+        if target_bucket != sample_bucket:
+            return False
+        for field in range(SMART_CONTEXT_CALIBRATION_FIELD_COUNT):
+            if not smart_context_calibration_field_equal(
+                target_views[unsafe_offset=field],
+                smart_context_calibration_view(sample_views, sample_index, field),
+                smart_context_calibration_mask_has(target_mask, field),
+                smart_context_calibration_mask_has(sample_mask, field),
+            ):
+                return False
+        return True
+    if not target_bucket:
+        return False
+    var sample_model = smart_context_calibration_view(sample_views, sample_index, 1)
+    var target_model = target_views[unsafe_offset=1].copy()
+    var target_model_present = smart_context_calibration_mask_has(target_mask, 1)
+    var sample_model_present = smart_context_calibration_mask_has(sample_mask, 1)
+    if mode == 1:
+        return smart_context_calibration_model_matches(
+            target_model,
+            sample_model,
+            target_model_present,
+            sample_model_present,
+        )
+    if mode == 2:
+        return (
+            smart_context_calibration_field_matches(
+                target_views[unsafe_offset=2],
+                smart_context_calibration_view(sample_views, sample_index, 2),
+                smart_context_calibration_mask_has(target_mask, 2),
+                smart_context_calibration_mask_has(sample_mask, 2),
+            )
+            and smart_context_calibration_field_matches(
+                target_views[unsafe_offset=0],
+                smart_context_calibration_view(sample_views, sample_index, 0),
+                smart_context_calibration_mask_has(target_mask, 0),
+                smart_context_calibration_mask_has(sample_mask, 0),
+            )
+        )
+    if not sample_bucket:
+        return True
+    var strict_route_transport = (
+        smart_context_calibration_field_matches(
+            target_views[unsafe_offset=0],
+            smart_context_calibration_view(sample_views, sample_index, 0),
+            smart_context_calibration_mask_has(target_mask, 0),
+            smart_context_calibration_mask_has(sample_mask, 0),
+        )
+        and smart_context_calibration_field_matches(
+            target_views[unsafe_offset=3],
+            smart_context_calibration_view(sample_views, sample_index, 3),
+            smart_context_calibration_mask_has(target_mask, 3),
+            smart_context_calibration_mask_has(sample_mask, 3),
+        )
+    )
+    var global_compatible = (
+        smart_context_calibration_optional_field_compatible(
+            target_views[unsafe_offset=0],
+            smart_context_calibration_view(sample_views, sample_index, 0),
+            smart_context_calibration_mask_has(target_mask, 0),
+            smart_context_calibration_mask_has(sample_mask, 0),
+        )
+        and (
+            smart_context_calibration_model_matches(
+                target_model,
+                sample_model,
+                target_model_present,
+                sample_model_present,
+            )
+            or not sample_model_present
+        )
+        and smart_context_calibration_optional_field_compatible(
+            target_views[unsafe_offset=2],
+            smart_context_calibration_view(sample_views, sample_index, 2),
+            smart_context_calibration_mask_has(target_mask, 2),
+            smart_context_calibration_mask_has(sample_mask, 2),
+        )
+        and smart_context_calibration_optional_field_compatible(
+            target_views[unsafe_offset=3],
+            smart_context_calibration_view(sample_views, sample_index, 3),
+            smart_context_calibration_mask_has(target_mask, 3),
+            smart_context_calibration_mask_has(sample_mask, 3),
+        )
+    )
+    return strict_route_transport or global_compatible
+
+def smart_context_calibration_accounted_input(
+    input_tokens: Pointer[mut=False, UInt64, _],
+    cached_input_tokens: Pointer[mut=False, UInt64, _],
+    index: Int64,
+) -> UInt64:
+    var input = input_tokens[unsafe_offset=index]
+    if input != 0:
+        return input
+    return cached_input_tokens[unsafe_offset=index]
+
+@export("prodex_smart_context_calibration_observed_input_v1")
+def prodex_smart_context_calibration_observed_input_v1(
+    target_views_address: UInt,
+    target_mask: Int64,
+    sample_views_address: UInt,
+    sample_masks_address: UInt,
+    sample_input_tokens_address: UInt,
+    sample_cached_input_tokens_address: UInt,
+    sample_count: Int64,
+    observed_input_tokens_address: UInt,
+    observed_cached_input_tokens_address: UInt,
+    observed_count: Int64,
+    observed_accounted_input: Pointer[mut=True, UInt64, _],
+    observed_present: Pointer[mut=True, Int64, _],
+) abi("C") -> Int64:
+    if (
+        target_mask < 0
+        or target_mask > 31
+        or sample_count < 0
+        or sample_count > SMART_CONTEXT_CALIBRATION_MAX_COUNT
+        or observed_count < 0
+        or observed_count > SMART_CONTEXT_CALIBRATION_MAX_COUNT
+    ):
+        return 1
+    if target_views_address == 0:
+        return 1
+    if sample_count > 0 and (
+        sample_views_address == 0
+        or sample_masks_address == 0
+        or sample_input_tokens_address == 0
+        or sample_cached_input_tokens_address == 0
+    ):
+        return 1
+    if observed_count > 0 and (
+        observed_input_tokens_address == 0 or observed_cached_input_tokens_address == 0
+    ):
+        return 1
+
+    var target_views = Pointer[mut=False, ProdexRichStringView, ImmUntrackedOrigin](
+        unsafe_from_address=Int(target_views_address)
+    )
+    var sample_views = Pointer[mut=False, ProdexRichStringView, ImmUntrackedOrigin](
+        unsafe_from_address=Int(sample_views_address)
+    )
+    var sample_masks = Pointer[mut=False, Int64, ImmUntrackedOrigin](
+        unsafe_from_address=Int(sample_masks_address)
+    )
+    var sample_input_tokens = Pointer[mut=False, UInt64, ImmUntrackedOrigin](
+        unsafe_from_address=Int(sample_input_tokens_address)
+    )
+    var sample_cached_input_tokens = Pointer[mut=False, UInt64, ImmUntrackedOrigin](
+        unsafe_from_address=Int(sample_cached_input_tokens_address)
+    )
+    var observed_input_tokens = Pointer[mut=False, UInt64, ImmUntrackedOrigin](
+        unsafe_from_address=Int(observed_input_tokens_address)
+    )
+    var observed_cached_input_tokens = Pointer[mut=False, UInt64, ImmUntrackedOrigin](
+        unsafe_from_address=Int(observed_cached_input_tokens_address)
+    )
+    for field in range(SMART_CONTEXT_CALIBRATION_FIELD_COUNT):
+        if smart_context_calibration_mask_has(target_mask, field) and not rich_view_valid(
+            target_views[unsafe_offset=field], SMART_CONTEXT_CALIBRATION_MAX_BYTES
+        ):
+            return 2
+    for index in range(sample_count):
+        var mask = sample_masks[unsafe_offset=index]
+        if mask < 0 or mask > 31:
+            return 1
+        for field in range(SMART_CONTEXT_CALIBRATION_FIELD_COUNT):
+            if smart_context_calibration_mask_has(mask, field) and not rich_view_valid(
+                smart_context_calibration_view(sample_views, index, field),
+                SMART_CONTEXT_CALIBRATION_MAX_BYTES,
+            ):
+                return 2
+
+    var selected: UInt64 = 0
+    var found: Int64 = 0
+    if sample_count > 0:
+        var mode: Int64 = 0
+        while mode < 4:
+            if mode > 0 and not smart_context_calibration_bucket_present(target_mask):
+                break
+            var seen: Int64 = 0
+            var index = sample_count - 1
+            var mode_found: Int64 = 0
+            while index >= 0 and seen < 4:
+                var mask = sample_masks[unsafe_offset=index]
+                if smart_context_calibration_bucket_matches(
+                    target_views, target_mask, sample_views, mask, index, mode
+                ):
+                    var accounted = smart_context_calibration_accounted_input(
+                        sample_input_tokens, sample_cached_input_tokens, index
+                    )
+                    if accounted > 0:
+                        if accounted > selected:
+                            selected = accounted
+                        mode_found = 1
+                        seen += 1
+                index -= 1
+            if mode_found == 1:
+                found = 1
+                break
+            mode += 1
+    else:
+        var seen: Int64 = 0
+        var index = observed_count - 1
+        while index >= 0 and seen < 4:
+            var accounted = smart_context_calibration_accounted_input(
+                observed_input_tokens, observed_cached_input_tokens, index
+            )
+            if accounted > 0:
+                if accounted > selected:
+                    selected = accounted
+                seen += 1
+            index -= 1
+        if seen > 0:
+            found = 1
+
+    observed_accounted_input[] = selected
+    observed_present[] = found
+    return 0
 
 def smart_context_accounting_source(
     current_input_tokens: UInt64,

@@ -1,4 +1,9 @@
+mod calibration;
 mod tuning;
+pub use calibration::{
+    SmartContextCalibrationBucket, SmartContextCalibrationSample, SmartContextCalibrationUsage,
+    smart_context_calibration_models_match, smart_context_calibration_observed_input,
+};
 pub use tuning::{
     RuntimeTuningCapacityDefaults, RuntimeTuningDefaults, runtime_tuning_capacity_defaults,
     runtime_tuning_defaults,

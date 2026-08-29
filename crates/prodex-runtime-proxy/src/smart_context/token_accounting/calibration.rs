@@ -9,6 +9,7 @@ pub(in crate::smart_context) const SMART_CONTEXT_ADAPTIVE_ESTIMATE_SAFETY_NUMERA
 pub(in crate::smart_context) const SMART_CONTEXT_ADAPTIVE_ESTIMATE_SAFETY_DENOMINATOR: u64 = 8;
 #[cfg(any(not(feature = "mojo"), test))]
 pub(in crate::smart_context) const SMART_CONTEXT_ADAPTIVE_ESTIMATE_MIN_MARGIN_TOKENS: u64 = 64;
+#[cfg(any(not(feature = "mojo"), test))]
 pub(in crate::smart_context) const SMART_CONTEXT_ADAPTIVE_ESTIMATE_RECENT_USAGE_LIMIT: usize = 4;
 #[cfg(any(not(feature = "mojo"), test))]
 pub(in crate::smart_context) const SMART_CONTEXT_ADAPTIVE_ESTIMATE_MAX_INFLATION: u64 = 2;
@@ -23,11 +24,45 @@ pub(in crate::smart_context) fn smart_context_observed_calibrated_request_estima
 ) -> u64 {
     #[cfg(feature = "mojo")]
     {
-        let observed_accounted_input = smart_context_recent_accounted_input_calibration(
-            observed_usage,
-            calibration_bucket_key,
-            calibration_samples,
-        );
+        let bucket = calibration_bucket_key.map(|bucket| {
+            prodex_mojo_core::runtime::SmartContextCalibrationBucket {
+                route: bucket.route.as_deref(),
+                model: bucket.model.as_deref(),
+                profile: bucket.profile.as_deref(),
+                transport: bucket.transport.as_deref(),
+            }
+        });
+        let samples = calibration_samples
+            .iter()
+            .map(
+                |sample| prodex_mojo_core::runtime::SmartContextCalibrationSample {
+                    bucket: sample.bucket_key.as_ref().map(|bucket| {
+                        prodex_mojo_core::runtime::SmartContextCalibrationBucket {
+                            route: bucket.route.as_deref(),
+                            model: bucket.model.as_deref(),
+                            profile: bucket.profile.as_deref(),
+                            transport: bucket.transport.as_deref(),
+                        }
+                    }),
+                    input_tokens: sample.usage.input_tokens,
+                    cached_input_tokens: sample.usage.cached_input_tokens,
+                },
+            )
+            .collect::<Vec<_>>();
+        let usage = observed_usage
+            .iter()
+            .map(
+                |usage| prodex_mojo_core::runtime::SmartContextCalibrationUsage {
+                    input_tokens: usage.input_tokens,
+                    cached_input_tokens: usage.cached_input_tokens,
+                },
+            )
+            .collect::<Vec<_>>();
+        let observed_accounted_input =
+            prodex_mojo_core::runtime::smart_context_calibration_observed_input(
+                bucket, &samples, &usage,
+            )
+            .expect("Mojo Smart Context calibration selection returned invalid output");
         prodex_mojo_core::runtime::smart_context_calibrated_estimate_batch(&[
             prodex_mojo_core::runtime::SmartContextCalibratedEstimateInput {
                 body_bytes: u64::try_from(body_bytes).expect("request body length fits u64"),
@@ -87,6 +122,7 @@ pub(super) fn smart_context_observed_calibrated_request_estimate_rust(
     }
 }
 
+#[cfg(any(not(feature = "mojo"), test))]
 pub(in crate::smart_context) fn smart_context_recent_accounted_input_calibration(
     observed_usage: &[RuntimeTokenUsage],
     calibration_bucket_key: Option<&SmartContextTokenCalibrationBucketKey>,
@@ -107,6 +143,7 @@ pub(in crate::smart_context) fn smart_context_recent_accounted_input_calibration
         .max()
 }
 
+#[cfg(any(not(feature = "mojo"), test))]
 pub(in crate::smart_context) fn smart_context_recent_accounted_input_calibration_for_bucket(
     calibration_bucket_key: Option<&SmartContextTokenCalibrationBucketKey>,
     calibration_samples: &[SmartContextTokenCalibrationSample],
@@ -142,6 +179,7 @@ pub(in crate::smart_context) fn smart_context_recent_accounted_input_calibration
     None
 }
 
+#[cfg(any(not(feature = "mojo"), test))]
 pub(in crate::smart_context) fn smart_context_recent_accounted_input_calibration_matching(
     calibration_samples: &[SmartContextTokenCalibrationSample],
     mut bucket_matches: impl FnMut(Option<&SmartContextTokenCalibrationBucketKey>) -> bool,
@@ -155,6 +193,7 @@ pub(in crate::smart_context) fn smart_context_recent_accounted_input_calibration
         .max()
 }
 
+#[cfg(any(not(feature = "mojo"), test))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(in crate::smart_context) enum SmartContextTokenCalibrationFallbackTier {
     Model,
@@ -162,6 +201,7 @@ pub(in crate::smart_context) enum SmartContextTokenCalibrationFallbackTier {
     RouteTransportGlobal,
 }
 
+#[cfg(any(not(feature = "mojo"), test))]
 pub(in crate::smart_context) fn smart_context_token_calibration_bucket_fallback_matches(
     target: &SmartContextTokenCalibrationBucketKey,
     sample: Option<&SmartContextTokenCalibrationBucketKey>,
@@ -188,6 +228,7 @@ pub(in crate::smart_context) fn smart_context_token_calibration_bucket_fallback_
     }
 }
 
+#[cfg(any(not(feature = "mojo"), test))]
 pub(in crate::smart_context) fn smart_context_token_calibration_field_matches(
     target: &Option<String>,
     sample: &Option<String>,
@@ -195,6 +236,7 @@ pub(in crate::smart_context) fn smart_context_token_calibration_field_matches(
     target.as_deref().is_some_and(non_empty) && target == sample
 }
 
+#[cfg(any(not(feature = "mojo"), test))]
 pub(in crate::smart_context) fn smart_context_token_calibration_model_matches(
     target: &Option<String>,
     sample: &Option<String>,
@@ -210,6 +252,7 @@ pub(in crate::smart_context) fn smart_context_token_calibration_model_matches(
             == smart_context_token_calibration_model_family(&sample)
 }
 
+#[cfg(any(not(feature = "mojo"), test))]
 pub(in crate::smart_context) fn smart_context_token_calibration_sample_is_global_compatible(
     target: &SmartContextTokenCalibrationBucketKey,
     sample: &SmartContextTokenCalibrationBucketKey,
@@ -226,6 +269,7 @@ pub(in crate::smart_context) fn smart_context_token_calibration_sample_is_global
         )
 }
 
+#[cfg(any(not(feature = "mojo"), test))]
 pub(in crate::smart_context) fn smart_context_token_calibration_optional_field_compatible(
     target: &Option<String>,
     sample: &Option<String>,
@@ -235,6 +279,7 @@ pub(in crate::smart_context) fn smart_context_token_calibration_optional_field_c
         .is_none_or(|sample| target.as_deref() == Some(sample))
 }
 
+#[cfg(any(not(feature = "mojo"), test))]
 pub(in crate::smart_context) fn smart_context_token_calibration_optional_model_compatible(
     target: &Option<String>,
     sample: &Option<String>,
@@ -244,6 +289,7 @@ pub(in crate::smart_context) fn smart_context_token_calibration_optional_model_c
         .is_none_or(|_| smart_context_token_calibration_model_matches(target, sample))
 }
 
+#[cfg(any(not(feature = "mojo"), test))]
 pub(in crate::smart_context) fn smart_context_token_calibration_normalized_model(
     value: Option<&str>,
 ) -> Option<String> {
@@ -272,6 +318,7 @@ pub(in crate::smart_context) fn smart_context_token_calibration_normalized_model
     (!normalized.is_empty()).then(|| normalized.to_string())
 }
 
+#[cfg(any(not(feature = "mojo"), test))]
 pub(in crate::smart_context) fn smart_context_token_calibration_model_family(model: &str) -> &str {
     let model = model
         .strip_suffix("-latest")
@@ -303,6 +350,7 @@ pub(in crate::smart_context) fn smart_context_token_calibration_model_family(mod
     model
 }
 
+#[cfg(any(not(feature = "mojo"), test))]
 pub(in crate::smart_context) fn smart_context_accounted_input_tokens(
     usage: RuntimeTokenUsage,
 ) -> Option<u64> {
