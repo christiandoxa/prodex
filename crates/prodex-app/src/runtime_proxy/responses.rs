@@ -162,6 +162,15 @@ fn run_runtime_responses_loop(
     loop_state: &mut RuntimePrecommitLoopState<RuntimeUpstreamFailureResponse>,
 ) -> Result<RuntimeResponsesReply> {
     loop {
+        if loop_state.local_capacity_wait_timed_out {
+            return Ok(RuntimeResponsesReply::Buffered(
+                build_runtime_proxy_json_error_parts(
+                    503,
+                    "local_capacity_timeout",
+                    runtime_proxy_local_capacity_timeout_message(),
+                ),
+            ));
+        }
         if let Some(control) = handle_runtime_responses_budget_exhausted(
             context,
             affinity_state,
@@ -191,7 +200,6 @@ fn run_runtime_responses_loop(
                 RuntimeResponsesLoopControl::Return(response) => return Ok(*response),
             }
         };
-        loop_state.record_attempt();
         if runtime_responses_candidate_saturated(
             context,
             affinity_state,
@@ -295,7 +303,7 @@ fn runtime_responses_candidate_saturated(
         ),
     );
     loop_state.record_inflight_saturation();
-    if runtime_proxy_maybe_wait_for_interactive_inflight_relief(RuntimeInflightReliefWait {
+    match runtime_proxy_maybe_wait_for_interactive_inflight_relief(RuntimeInflightReliefWait {
         request_id: context.request_id,
         request: context.request,
         shared: context.shared,
@@ -305,14 +313,15 @@ fn runtime_responses_candidate_saturated(
         continuation: affinity_state
             .has_continuation_priority(context.previous_response_id, context.request_turn_state),
         wait_affinity_owner: affinity_state.wait_affinity_owner(),
-        selected_profile: Some(candidate_name),
+        selected_profile: None,
     })? {
-        return Ok(true);
+        RuntimeInflightReliefWaitResult::Relieved
+        | RuntimeInflightReliefWaitResult::NotWaitable => return Ok(true),
+        RuntimeInflightReliefWaitResult::DeadlineExpired => {
+            loop_state.record_local_capacity_wait_timeout();
+            return Ok(true);
+        }
     }
-    loop_state
-        .excluded_profiles
-        .insert(candidate_name.to_string());
-    Ok(true)
 }
 
 fn handle_runtime_responses_budget_exhausted(
@@ -428,7 +437,7 @@ fn handle_runtime_responses_candidate_exhausted(
     {
         return Ok(RuntimeResponsesLoopControl::Continue);
     }
-    if runtime_proxy_maybe_wait_for_interactive_inflight_relief(RuntimeInflightReliefWait {
+    match runtime_proxy_maybe_wait_for_interactive_inflight_relief(RuntimeInflightReliefWait {
         request_id: context.request_id,
         request: context.request,
         shared: context.shared,
@@ -440,7 +449,19 @@ fn handle_runtime_responses_candidate_exhausted(
         wait_affinity_owner: affinity_state.wait_affinity_owner(),
         selected_profile: None,
     })? {
-        return Ok(RuntimeResponsesLoopControl::Continue);
+        RuntimeInflightReliefWaitResult::Relieved => {
+            return Ok(RuntimeResponsesLoopControl::Continue);
+        }
+        RuntimeInflightReliefWaitResult::DeadlineExpired => {
+            return Ok(RuntimeResponsesLoopControl::Return(Box::new(
+                RuntimeResponsesReply::Buffered(build_runtime_proxy_json_error_parts(
+                    503,
+                    "local_capacity_timeout",
+                    runtime_proxy_local_capacity_timeout_message(),
+                )),
+            )));
+        }
+        RuntimeInflightReliefWaitResult::NotWaitable => {}
     }
     if let Some((profile_name, source)) = affinity_state.compact_followup_profile() {
         runtime_proxy_log(
@@ -520,7 +541,7 @@ fn handle_runtime_responses_attempt(
     loop_state: &mut RuntimePrecommitLoopState<RuntimeUpstreamFailureResponse>,
 ) -> Result<Option<RuntimeResponsesReply>> {
     let hard_affinity = affinity_state.candidate_has_hard_affinity(candidate_name);
-    match attempt_runtime_responses_request(
+    let attempt = attempt_runtime_responses_request(
         context.request_id,
         context.request,
         context.shared,
@@ -531,7 +552,14 @@ fn handle_runtime_responses_attempt(
             hard_affinity,
             selection_attempt: loop_state.selection_attempts,
         },
-    )? {
+    )?;
+    if !matches!(
+        &attempt,
+        RuntimeResponsesAttempt::LocalSelectionBlocked { .. }
+    ) {
+        loop_state.record_attempt();
+    }
+    match attempt {
         RuntimeResponsesAttempt::Success {
             profile_name,
             response,
@@ -749,7 +777,9 @@ fn handle_runtime_responses_local_selection_attempt(
 ) -> Result<Option<RuntimeResponsesReply>> {
     handle_runtime_responses_local_selection_blocked(RuntimeResponsesLocalSelectionBlocked {
         request_id: context.request_id,
+        request: context.request,
         shared: context.shared,
+        selection_started_at: loop_state.selection_started_at,
         profile_name,
         reason,
         previous_response_id: context.previous_response_id,

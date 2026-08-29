@@ -190,6 +190,12 @@ fn run_runtime_noncompact_standard_loop(
         loop_state,
     } = context;
     loop {
+        if loop_state.local_capacity_wait_timed_out {
+            return Ok(build_runtime_proxy_text_response(
+                503,
+                runtime_proxy_local_capacity_timeout_message(),
+            ));
+        }
         if loop_state.budget_exhausted(shared, session_profile.is_some(), pressure_mode)? {
             runtime_proxy_log(
                 shared,
@@ -235,8 +241,6 @@ fn run_runtime_noncompact_standard_loop(
             RuntimePrecommitLoopAction::Attempt(candidate_name) => candidate_name,
             RuntimePrecommitLoopAction::Return(response) => return Ok(response),
         };
-        loop_state.record_attempt();
-
         if runtime_noncompact_candidate_saturated(
             request_id,
             request,
@@ -256,6 +260,39 @@ fn run_runtime_noncompact_standard_loop(
             &candidate_name,
             session_profile.as_deref() == Some(candidate_name.as_str()),
         )?;
+        if matches!(
+            &attempt,
+            RuntimeStandardAttempt::ProfileInflightSaturated { .. }
+        ) {
+            loop_state.record_inflight_saturation();
+            match runtime_proxy_maybe_wait_for_interactive_inflight_relief(
+                RuntimeInflightReliefWait {
+                    request_id,
+                    request,
+                    shared,
+                    excluded_profiles: &loop_state.excluded_profiles,
+                    route_kind: RuntimeRouteKind::Standard,
+                    selection_started_at: loop_state.selection_started_at,
+                    continuation: session_profile.is_some(),
+                    wait_affinity_owner: session_profile.as_deref(),
+                    selected_profile: None,
+                },
+            )? {
+                RuntimeInflightReliefWaitResult::Relieved
+                | RuntimeInflightReliefWaitResult::NotWaitable => continue,
+                RuntimeInflightReliefWaitResult::DeadlineExpired => {
+                    loop_state.record_local_capacity_wait_timeout();
+                    continue;
+                }
+            }
+        }
+        if !matches!(
+            &attempt,
+            RuntimeStandardAttempt::LocalSelectionBlocked { .. }
+                | RuntimeStandardAttempt::ProfileInflightSaturated { .. }
+        ) {
+            loop_state.record_attempt();
+        }
         if let Some(response) = handle_runtime_noncompact_attempt(
             request_id,
             shared,
@@ -387,7 +424,7 @@ fn runtime_noncompact_candidate_saturated(
         ),
     );
     loop_state.record_inflight_saturation();
-    if runtime_proxy_maybe_wait_for_interactive_inflight_relief(RuntimeInflightReliefWait {
+    match runtime_proxy_maybe_wait_for_interactive_inflight_relief(RuntimeInflightReliefWait {
         request_id,
         request,
         shared,
@@ -396,14 +433,15 @@ fn runtime_noncompact_candidate_saturated(
         selection_started_at: loop_state.selection_started_at,
         continuation,
         wait_affinity_owner,
-        selected_profile: Some(candidate_name),
+        selected_profile: None,
     })? {
-        return Ok(true);
+        RuntimeInflightReliefWaitResult::Relieved
+        | RuntimeInflightReliefWaitResult::NotWaitable => return Ok(true),
+        RuntimeInflightReliefWaitResult::DeadlineExpired => {
+            loop_state.record_local_capacity_wait_timeout();
+            return Ok(true);
+        }
     }
-    loop_state
-        .excluded_profiles
-        .insert(candidate_name.to_string());
-    Ok(true)
 }
 
 fn handle_runtime_noncompact_attempt(
@@ -485,8 +523,6 @@ fn handle_runtime_noncompact_attempt(
                 ),
             );
             loop_state.record_inflight_saturation();
-            clear_noncompact_session_profile(session_profile, &profile_name);
-            loop_state.excluded_profiles.insert(profile_name);
             Ok(None)
         }
         RuntimeStandardAttempt::TransportFailed {

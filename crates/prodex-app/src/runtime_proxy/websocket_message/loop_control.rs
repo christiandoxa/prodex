@@ -1,13 +1,17 @@
 use super::super::{
-    RuntimeRouteKind, RuntimeSelectionTraceDirect, await_runtime_proxy_async_task,
+    RuntimeInflightReliefWait, RuntimeInflightReliefWaitResult, RuntimeRouteKind,
+    RuntimeSelectionTraceDirect, RuntimeWebsocketAttempt, await_runtime_proxy_async_task,
     clear_runtime_recovered_profiles, runtime_noncompact_session_priority_profile,
     runtime_profile_recovery_wait_for_route, runtime_proxy_allows_direct_current_profile_fallback,
-    runtime_proxy_direct_current_fallback_profile, runtime_proxy_log, runtime_proxy_log_field,
+    runtime_proxy_direct_current_fallback_profile, runtime_proxy_local_capacity_timeout_message,
+    runtime_proxy_log, runtime_proxy_log_field,
+    runtime_proxy_maybe_wait_for_interactive_inflight_relief,
     runtime_proxy_precommit_budget_exhausted_for_route,
     runtime_proxy_precommit_budget_for_profile_count, runtime_proxy_pressure_mode_active_for_route,
     runtime_proxy_probe_refresh_pause, runtime_proxy_structured_log_message,
     runtime_remaining_sync_probe_cold_start_profiles_for_route, runtime_route_kind_label,
     runtime_selection_trace_log_direct, runtime_smart_context_model_name_from_body,
+    send_runtime_proxy_websocket_error,
 };
 use super::{
     RuntimeWebsocketDirectCurrentFallbackReason, RuntimeWebsocketMessageLoopAction,
@@ -28,6 +32,15 @@ impl<'a> RuntimeWebsocketTextMessageFlow<'a> {
         let selection_started_at = Instant::now();
         let mut selection_attempts = 0usize;
         loop {
+            if self.local_capacity_wait_timed_out {
+                send_runtime_proxy_websocket_error(
+                    &mut *self.local_socket,
+                    503,
+                    "local_capacity_timeout",
+                    runtime_proxy_local_capacity_timeout_message(),
+                )?;
+                return Ok(());
+            }
             let pressure_mode = runtime_proxy_pressure_mode_active_for_route(
                 self.shared,
                 RuntimeRouteKind::Websocket,
@@ -53,14 +66,48 @@ impl<'a> RuntimeWebsocketTextMessageFlow<'a> {
                     RuntimeWebsocketMessageLoopAction::Finished => return Ok(()),
                 }
             };
-            selection_attempts = selection_attempts.saturating_add(1);
             let turn_state_override = self.turn_state_override_for(&candidate_name);
             self.log_candidate(&candidate_name, turn_state_override.as_deref());
-            if self.candidate_inflight_saturated(&candidate_name)? {
+            if self.candidate_inflight_saturated(&candidate_name, selection_started_at)? {
                 continue;
             }
 
             let attempt = self.attempt_profile(&candidate_name, turn_state_override.as_deref())?;
+            if matches!(
+                &attempt,
+                RuntimeWebsocketAttempt::LocalSelectionBlocked {
+                    reason: "profile_inflight_saturated",
+                    ..
+                }
+            ) {
+                self.saw_inflight_saturation = true;
+                match runtime_proxy_maybe_wait_for_interactive_inflight_relief(
+                    RuntimeInflightReliefWait {
+                        request_id: self.request_id,
+                        request: &self.handshake_request,
+                        shared: self.shared,
+                        excluded_profiles: &self.excluded_profiles,
+                        route_kind: RuntimeRouteKind::Websocket,
+                        selection_started_at,
+                        continuation: self.has_continuation_priority(),
+                        wait_affinity_owner: None,
+                        selected_profile: None,
+                    },
+                )? {
+                    RuntimeInflightReliefWaitResult::Relieved
+                    | RuntimeInflightReliefWaitResult::NotWaitable => continue,
+                    RuntimeInflightReliefWaitResult::DeadlineExpired => {
+                        self.local_capacity_wait_timed_out = true;
+                        continue;
+                    }
+                }
+            }
+            if !matches!(
+                &attempt,
+                RuntimeWebsocketAttempt::LocalSelectionBlocked { .. }
+            ) {
+                selection_attempts = selection_attempts.saturating_add(1);
+            }
             match self.handle_candidate_attempt(attempt, turn_state_override.as_deref())? {
                 RuntimeWebsocketMessageLoopAction::Continue => {
                     continue;

@@ -131,10 +131,14 @@ pub fn runtime_proxy_final_retryable_failure_message(
     local_selection_failure_message: &'static str,
 ) -> &'static str {
     if saw_inflight_saturation {
-        "All runtime auto-rotate candidates are temporarily saturated. Retry the request."
+        runtime_proxy_local_capacity_timeout_message()
     } else {
         local_selection_failure_message
     }
+}
+
+pub fn runtime_proxy_local_capacity_timeout_message() -> &'static str {
+    "Runtime proxy local capacity remained saturated until the request deadline. Retry the request."
 }
 
 #[cfg(test)]
