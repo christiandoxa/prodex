@@ -155,6 +155,45 @@ struct ProdexRichCatalogReasoningResult(Copyable):
 
 
 @fieldwise_init
+struct ProdexRichCatalogPlanModel(Copyable):
+    var id: ProdexRichStringView
+    var label: ProdexRichStringView
+    var default_effort: ProdexRichStringView
+    var priority: Int64
+    var flags: Int64
+    var effort_start: Int64
+    var effort_count: Int64
+    var alias_start: Int64
+    var alias_count: Int64
+
+
+@fieldwise_init
+struct ProdexRichCatalogPlanChoice(Copyable):
+    var kind: Int64
+    var index: Int64
+    var effort_start: Int64
+    var effort_count: Int64
+
+
+@fieldwise_init
+struct ProdexRichCatalogPlanResult(Copyable):
+    var abi_version: Int64
+    var choices_written: Int64
+    var required_choices: Int64
+    var efforts_written: Int64
+    var required_efforts: Int64
+    var output_written: Int64
+    var required_output: Int64
+    var selected_model: ProdexRichSlice
+    var selected_effort: ProdexRichSlice
+    var default_effort: ProdexRichSlice
+    var issue_kind: Int64
+    var issue_index: Int64
+    var issue_offset: Int64
+    var issue_length: Int64
+
+
+@fieldwise_init
 struct ProdexRichPolicyRouteInput(Copyable):
     var model: ProdexRichStringView
     var input_cost: UInt64

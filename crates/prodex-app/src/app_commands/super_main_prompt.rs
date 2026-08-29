@@ -7,14 +7,29 @@ use crate::{
 mod catalog;
 #[cfg(test)]
 use catalog::main_model_choices_from_catalog;
+#[cfg(all(test, feature = "mojo-core"))]
+use catalog::main_model_choices_from_catalog_rust;
 #[cfg(test)]
 use catalog::openai_main_model_choices;
-use catalog::{
-    first_main_catalog_model, main_model_choice_is_selectable, main_model_choices,
-    main_model_efforts, prompt_main_model,
-};
+#[cfg(not(feature = "mojo-core"))]
+use catalog::{first_main_catalog_model, main_model_choice_is_selectable};
+use catalog::{main_model_choices, main_model_efforts, prompt_main_model};
 use prodex_cli::{SubAgentReasoningEffort, SuperArgs, SuperExternalProvider};
+#[cfg(feature = "mojo-core")]
+use prodex_mojo_core::rich::{
+    CatalogConfigurationInput, CatalogPlanModel, CatalogPlanRole, plan_catalog_configuration,
+};
 
+#[cfg(feature = "mojo-core")]
+pub(super) fn resolve_main_model_and_effort(
+    args: &SuperArgs,
+    provider: prodex_provider_core::ProviderId,
+    prompt_model_and_effort: bool,
+) -> anyhow::Result<(Option<String>, Option<String>)> {
+    resolve_main_model_and_effort_mojo(args, provider, prompt_model_and_effort)
+}
+
+#[cfg(not(feature = "mojo-core"))]
 pub(super) fn resolve_main_model_and_effort(
     args: &SuperArgs,
     provider: prodex_provider_core::ProviderId,
@@ -83,6 +98,178 @@ pub(super) fn resolve_main_model_and_effort(
     Ok((model, reasoning_effort))
 }
 
+#[cfg(feature = "mojo-core")]
+fn resolve_main_model_and_effort_mojo(
+    args: &SuperArgs,
+    provider: prodex_provider_core::ProviderId,
+    prompt_model_and_effort: bool,
+) -> anyhow::Result<(Option<String>, Option<String>)> {
+    let explicit_model = args
+        .local_model
+        .clone()
+        .or_else(|| codex_cli_config_override_value(&args.codex_args, "model"));
+    let explicit_effort =
+        codex_cli_config_override_value(&args.codex_args, "model_reasoning_effort");
+    let remembered_selection = remembered_main_selection(args, provider);
+    let choices = main_model_choices(provider, None);
+    let owned_models = choices
+        .iter()
+        .filter_map(|choice| match &choice.choice {
+            prodex_provider_core::ProviderModelChoice::Model(model) => Some((
+                model.clone(),
+                choice.label.clone(),
+                choice.efforts.clone().unwrap_or_default(),
+            )),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    let defaults = owned_models
+        .iter()
+        .map(|(model, _, _)| {
+            prodex_provider_core::provider_model_reasoning_resolution(provider, Some(model), None)
+                .ok()
+                .and_then(|resolution| resolution.selected_reasoning_effort)
+                .and_then(provider_reasoning_effort_label)
+                .map(str::to_string)
+        })
+        .collect::<Vec<_>>();
+    let effort_views = owned_models
+        .iter()
+        .map(|(_, _, efforts)| efforts.iter().map(String::as_str).collect::<Vec<_>>())
+        .collect::<Vec<_>>();
+    let catalog_default = (provider == prodex_provider_core::ProviderId::OpenAi)
+        .then(|| owned_models.first().map(|(model, _, _)| model.as_str()))
+        .flatten();
+    let model_inputs = owned_models
+        .iter()
+        .zip(&effort_views)
+        .zip(&defaults)
+        .enumerate()
+        .map(
+            |(index, (((model, label, _), efforts), default_effort))| CatalogPlanModel {
+                id: model.as_str(),
+                aliases: &[],
+                label: label.as_str(),
+                priority: index as u64,
+                supported: true,
+                hidden: false,
+                listed: true,
+                efforts,
+                default_effort: default_effort.as_deref(),
+            },
+        )
+        .collect::<Vec<_>>();
+    let provider_default = default_main_model(provider);
+    let remembered_model = remembered_selection
+        .as_ref()
+        .map(|selection| selection.0.as_str());
+    let remembered_effort = remembered_selection
+        .as_ref()
+        .and_then(|selection| selection.1.as_deref());
+    let plan = |explicit_model: Option<&str>,
+                catalog_default: Option<&str>,
+                explicit_effort: Option<&str>,
+                fallback_efforts: &[String]| {
+        let fallback_effort_views = fallback_efforts
+            .iter()
+            .map(String::as_str)
+            .collect::<Vec<_>>();
+        plan_catalog_configuration(CatalogConfigurationInput {
+            role: CatalogPlanRole::Main,
+            models: &model_inputs,
+            current: None,
+            provider_default: provider_default.as_deref(),
+            catalog_default,
+            explicit_model,
+            remembered_model,
+            explicit_effort,
+            remembered_effort,
+            fallback_efforts: &fallback_effort_views,
+        })
+        .map_err(catalog_configuration_error)
+    };
+    let initial_fallback_efforts = main_model_efforts(provider, explicit_model.as_deref());
+    let initial_explicit_effort = if prompt_model_and_effort && explicit_model.is_none() {
+        None
+    } else {
+        explicit_effort.as_deref()
+    };
+    let initial = plan(
+        explicit_model.as_deref(),
+        catalog_default,
+        initial_explicit_effort,
+        &initial_fallback_efforts,
+    )?;
+    if !prompt_model_and_effort {
+        return Ok((
+            initial.selected_model,
+            explicit_effort.or(initial.selected_effort),
+        ));
+    }
+    let model = if explicit_model.is_none() {
+        prompt_main_model(
+            "Main-agent model",
+            provider,
+            initial.selected_model.as_deref(),
+        )?
+    } else {
+        initial.selected_model
+    };
+    let validation_fallback_efforts = main_model_efforts(provider, model.as_deref());
+    plan(
+        model.as_deref(),
+        None,
+        explicit_effort.as_deref(),
+        &validation_fallback_efforts,
+    )?;
+    if let Some(effort) = explicit_effort {
+        return Ok((model, Some(effort)));
+    }
+    let remembered_effort =
+        remembered_effort_for_model(remembered_selection.as_ref(), model.as_deref()).filter(
+            |effort| {
+                main_model_efforts(provider, model.as_deref())
+                    .iter()
+                    .any(|candidate| candidate.eq_ignore_ascii_case(effort))
+            },
+        );
+    let effort = prompt_main_reasoning_effort(
+        "Main-agent reasoning effort",
+        provider,
+        model.as_deref(),
+        remembered_effort.as_deref(),
+    )?;
+    Ok((model, effort))
+}
+
+#[cfg(feature = "mojo-core")]
+fn catalog_configuration_error(error: prodex_mojo_core::MojoError) -> anyhow::Error {
+    match error {
+        prodex_mojo_core::MojoError::Structured(issue) if issue.kind == 5 => {
+            anyhow::anyhow!("reasoning effort is unsupported for the selected model")
+        }
+        error => anyhow::anyhow!("catalog configuration planning failed: {error:?}"),
+    }
+}
+
+#[cfg(feature = "mojo-core")]
+fn provider_reasoning_effort_label(
+    effort: prodex_provider_core::ProviderReasoningEffort,
+) -> Option<&'static str> {
+    Some(match effort {
+        prodex_provider_core::ProviderReasoningEffort::None => "none",
+        prodex_provider_core::ProviderReasoningEffort::Minimal => "minimal",
+        prodex_provider_core::ProviderReasoningEffort::Low => "low",
+        prodex_provider_core::ProviderReasoningEffort::Medium => "medium",
+        prodex_provider_core::ProviderReasoningEffort::High => "high",
+        prodex_provider_core::ProviderReasoningEffort::XHigh => "xhigh",
+        prodex_provider_core::ProviderReasoningEffort::Max => "max",
+        prodex_provider_core::ProviderReasoningEffort::Ultra => "ultra",
+        prodex_provider_core::ProviderReasoningEffort::Unknown => return None,
+    })
+}
+
+#[cfg(not(feature = "mojo-core"))]
 fn ensure_supported_main_effort(
     provider: prodex_provider_core::ProviderId,
     model: Option<&str>,
@@ -103,6 +290,7 @@ fn ensure_supported_main_effort(
     }
 }
 
+#[cfg(any(not(feature = "mojo-core"), test))]
 pub(super) fn ensure_supported_effort(
     provider: prodex_provider_core::ProviderId,
     model: Option<&str>,
@@ -184,6 +372,7 @@ fn default_main_model(provider: prodex_provider_core::ProviderId) -> Option<Stri
         })
 }
 
+#[cfg(not(feature = "mojo-core"))]
 fn default_main_effort(
     provider: prodex_provider_core::ProviderId,
     model: Option<&str>,
@@ -318,6 +507,9 @@ fn prompt_reasoning_effort(
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[path = "super_main_prompt_tests.rs"]
+    mod catalog_cache_tests;
 
     fn catalog_model(
         slug: &str,
@@ -454,49 +646,5 @@ mod tests {
             None
         );
         assert_eq!(remembered_effort_for_model(Some(&selection), None), None);
-    }
-
-    #[test]
-    fn openai_main_picker_reads_the_active_models_cache() {
-        let root =
-            crate::test_temp_root().join(format!("prodex-main-model-cache-{}", std::process::id()));
-        let codex_home = root.join("codex");
-        std::fs::create_dir_all(&codex_home).unwrap();
-        let _env_lock = crate::test_support::TestEnvVarGuard::lock();
-        let _prodex_home = crate::test_support::TestEnvVarGuard::set(
-            "PRODEX_HOME",
-            root.join("prodex").to_str().unwrap(),
-        );
-        let _codex_home = crate::test_support::TestEnvVarGuard::set(
-            "PRODEX_SHARED_CODEX_HOME",
-            codex_home.to_str().unwrap(),
-        );
-        std::fs::write(
-            codex_home.join("models_cache.json"),
-            json!({
-                "client_version": "0.150.1",
-                "models": [
-                    catalog_model("gpt-5.6-terra", "GPT-5.6 Terra", 2, &["high"]),
-                    catalog_model("gpt-5.6-sol", "GPT-5.6 Sol", 1, &["max"]),
-                    catalog_model("gpt-5.6-luna", "GPT-5.6 Luna", 3, &["medium"]),
-                ]
-            })
-            .to_string(),
-        )
-        .unwrap();
-
-        let choices = openai_main_model_choices().unwrap();
-        let models = choices
-            .iter()
-            .filter_map(|choice| match &choice.choice {
-                prodex_provider_core::ProviderModelChoice::Model(model) => Some(model.as_str()),
-                _ => None,
-            })
-            .collect::<Vec<_>>();
-        assert_eq!(models, ["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"]);
-        drop(_codex_home);
-        drop(_prodex_home);
-        drop(_env_lock);
-        let _ = std::fs::remove_dir_all(root);
     }
 }

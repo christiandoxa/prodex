@@ -1,8 +1,20 @@
 use super::*;
 
+#[path = "catalog_planner.rs"]
+mod catalog_planner;
+pub use catalog_planner::{
+    CatalogChoicesPlan, CatalogConfigurationInput, CatalogConfigurationPlan, CatalogPlanModel,
+    CatalogPlanRole, CatalogPlannedModel, plan_catalog_configuration, plan_dynamic_catalog,
+};
+
 const CATALOG_MAX_MODELS: usize = 1_024;
 const CATALOG_MAX_INPUT_MODELS: usize = 65_536;
 const CATALOG_MAX_IDENTIFIER_BYTES: usize = 4_096;
+const CATALOG_CHOICE_PROVIDER_DEFAULT: i64 = 0;
+const CATALOG_CHOICE_CATALOG: i64 = 1;
+const CATALOG_CHOICE_CONFIGURED: i64 = 2;
+const CATALOG_CHOICE_CURRENT: i64 = 3;
+const CATALOG_CHOICE_CUSTOM: i64 = 4;
 
 #[derive(Debug, Clone, Copy)]
 pub struct CatalogModel<'a> {
@@ -34,12 +46,6 @@ pub enum CatalogChoice {
     Current,
     Custom,
 }
-
-const CATALOG_CHOICE_PROVIDER_DEFAULT: i64 = 0;
-const CATALOG_CHOICE_CATALOG: i64 = 1;
-const CATALOG_CHOICE_CONFIGURED: i64 = 2;
-const CATALOG_CHOICE_CURRENT: i64 = 3;
-const CATALOG_CHOICE_CUSTOM: i64 = 4;
 
 unsafe extern "C" {
     fn prodex_mojo_rich_catalog_resolve_v1(

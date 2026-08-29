@@ -79,8 +79,8 @@ pub fn provider_model_spec(
     provider_model_spec_rust(provider, model)
 }
 
-#[cfg(not(feature = "mojo"))]
-pub(super) fn provider_model_spec_rust(
+#[cfg(any(not(feature = "mojo"), test))]
+pub(crate) fn provider_model_spec_rust(
     provider: ProviderId,
     model: &str,
 ) -> Option<&'static ProviderModelSpec> {
