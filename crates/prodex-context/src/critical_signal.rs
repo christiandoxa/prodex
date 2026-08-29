@@ -413,7 +413,7 @@ fn mojo_critical_signal_counts_for_line(line: &str) -> [usize; 7] {
 pub(crate) fn is_error_signal_line(line: &str) -> bool {
     #[cfg(feature = "mojo")]
     {
-        return mojo_critical_signal_counts_for_line(line)[0] > 0;
+        mojo_critical_signal_counts_for_line(line)[0] > 0
     }
     #[cfg(not(feature = "mojo"))]
     {
@@ -424,7 +424,7 @@ pub(crate) fn is_error_signal_line(line: &str) -> bool {
 pub(crate) fn count_file_location_signals(line: &str) -> usize {
     #[cfg(feature = "mojo")]
     {
-        return mojo_critical_signal_counts_for_line(line)[1];
+        mojo_critical_signal_counts_for_line(line)[1]
     }
     #[cfg(not(feature = "mojo"))]
     {
@@ -435,7 +435,7 @@ pub(crate) fn count_file_location_signals(line: &str) -> usize {
 pub(crate) fn is_diff_hunk_line(line: &str) -> bool {
     #[cfg(feature = "mojo")]
     {
-        return mojo_critical_signal_counts_for_line(line)[2] > 0;
+        mojo_critical_signal_counts_for_line(line)[2] > 0
     }
     #[cfg(not(feature = "mojo"))]
     {
@@ -446,7 +446,7 @@ pub(crate) fn is_diff_hunk_line(line: &str) -> bool {
 pub(crate) fn is_test_failure_signal_line(line: &str) -> bool {
     #[cfg(feature = "mojo")]
     {
-        return mojo_critical_signal_counts_for_line(line)[3] > 0;
+        mojo_critical_signal_counts_for_line(line)[3] > 0
     }
     #[cfg(not(feature = "mojo"))]
     {
@@ -457,7 +457,7 @@ pub(crate) fn is_test_failure_signal_line(line: &str) -> bool {
 pub(crate) fn is_stack_signal_line(line: &str) -> bool {
     #[cfg(feature = "mojo")]
     {
-        return mojo_critical_signal_counts_for_line(line)[5] > 0;
+        mojo_critical_signal_counts_for_line(line)[5] > 0
     }
     #[cfg(not(feature = "mojo"))]
     {
@@ -468,7 +468,7 @@ pub(crate) fn is_stack_signal_line(line: &str) -> bool {
 pub(crate) fn is_rust_diagnostic_signal_line(line: &str) -> bool {
     #[cfg(feature = "mojo")]
     {
-        return mojo_critical_signal_counts_for_line(line)[6] > 0;
+        mojo_critical_signal_counts_for_line(line)[6] > 0
     }
     #[cfg(not(feature = "mojo"))]
     {
