@@ -2,7 +2,7 @@
   "codex": {
     "compatibility": {
       "upstream_repository": "https://github.com/openai/codex",
-      "baseline_source": "openai/codex rust-v0.150.1 release",
+      "baseline_source": "openai/codex rust-v0.151.0 release",
       "guard_command": "node scripts/compat/check-upstream-baseline.mjs",
       "format_version": 2,
       "critical_files": [
@@ -10,7 +10,7 @@
           "path": "codex-rs/core/src/client.rs",
           "reason": "Owns Responses route constants, compact route calls, request metadata/header construction, and websocket client metadata used by Prodex affinity.",
           "required_contains": [
-            "RESPONSES_ENDPOINT",
+            "ResponsesEndpoint::Responses",
             "/responses",
             "RESPONSES_COMPACT_ENDPOINT",
             "/responses/compact",
@@ -332,7 +332,7 @@
           "reason": "Owns websocket Responses connection setup, request header merging, stream completion boundary, rate limit events, and wrapped websocket errors.",
           "required_contains": [
             "ResponsesWebsocketConnection",
-            "websocket_url_for_path(\"responses\")",
+            "websocket_url_for_path(self.endpoint.path())",
             "merge_request_headers",
             "add_auth_headers",
             "x-codex-turn-state",
@@ -717,7 +717,7 @@
         "/responses/compact",
         "alpha/search",
         "/memories/trace_summarize",
-        "websocket_url_for_path(\"responses\")",
+        "websocket_url_for_path(self.endpoint.path())",
         "/realtime/calls"
       ],
       "expected_stream_events": [
@@ -739,7 +739,7 @@
           "file": "codex-rs/core/src/client.rs",
           "reason": "Responses unary traffic must keep the upstream route constant and path together.",
           "file_contains_all": [
-            "RESPONSES_ENDPOINT",
+            "ResponsesEndpoint::Responses",
             "/responses"
           ],
           "expected_routes_all": [
@@ -1186,10 +1186,10 @@
           "reason": "Websocket sessions must keep the upstream Responses websocket route.",
           "file_contains_all": [
             "ResponsesWebsocketConnection",
-            "websocket_url_for_path(\"responses\")"
+            "websocket_url_for_path(self.endpoint.path())"
           ],
           "expected_routes_all": [
-            "websocket_url_for_path(\"responses\")"
+            "websocket_url_for_path(self.endpoint.path())"
           ]
         },
         {
@@ -1199,7 +1199,7 @@
           "reason": "Websocket sessions must preserve upstream route selection, request metadata merge behavior, turn-state affinity, lifecycle events, and wrapped error handling.",
           "file_contains_all": [
             "ResponsesWebsocketConnection",
-            "websocket_url_for_path(\"responses\")",
+            "websocket_url_for_path(self.endpoint.path())",
             "merge_request_headers",
             "add_auth_headers",
             "x-codex-turn-state",
@@ -1217,7 +1217,7 @@
             "safety_buffering(treatment)"
           ],
           "expected_routes_all": [
-            "websocket_url_for_path(\"responses\")"
+            "websocket_url_for_path(self.endpoint.path())"
           ],
           "expected_headers_all": [
             "x-codex-turn-state"
@@ -1360,7 +1360,7 @@
           "id": "features.compaction-image-budget",
           "kind": "feature_gate",
           "file": "codex-rs/features/src/lib.rs",
-          "reason": "The Boolean remains a Codex feature config key; Codex 0.150.1 enables retained-image budgeting by default unless the user disables it.",
+          "reason": "The Boolean remains a Codex feature config key; Codex 0.151.0 enables retained-image budgeting by default unless the user disables it.",
           "file_contains_all": [
             "CompactionImageBudget",
             "compaction_image_budget",
@@ -1527,7 +1527,7 @@
           ]
         }
       ],
-      "tested_codex_release": "rust-v0.150.1",
+      "tested_codex_release": "rust-v0.151.0",
       "patch_deltas": [
         {
           "from": "rust-v0.150.0",
@@ -1539,6 +1539,19 @@
           ],
           "prodex_action": "Preserve the feature setting, compaction payload, and response metadata; do not implement image budgeting or pruning in Prodex.",
           "ci_only_changes": "The remaining patch-branch changes are upstream CI and test corrections with no Prodex runtime action."
+        },
+        {
+          "from": "rust-v0.150.1",
+          "to": "rust-v0.151.0",
+          "upstream_commit": "78c290807ce710180111df227df3b7a4fe845452",
+          "upstream_release_date": "2026-08-29T10:11:57+01:00",
+          "runtime_changes": [
+            "Responses and WebSocket endpoint selection became typed so Guardian routes cannot reuse the regular Responses route accidentally.",
+            "Exec resume continues to use the persisted thread rollout and accepts a new continuation prompt without replaying prior tool calls.",
+            "Model-specific tool plans, MCP error preservation, permission restoration, and executor environment propagation were expanded."
+          ],
+          "prodex_action": "Use the 0.151.0 Codex package, preserve upstream arguments and response metadata, use the typed route markers in this baseline, and keep account rotation below Codex session/resume ownership.",
+          "compatibility_evidence": "Audited the exact 0.150.1..0.151.0 source diff at the pinned commits; Prodex boundary tests cover argv preservation, session resume, runtime quota classification, MCP validation, and child process handling."
         }
       ],
       "app_server_protocol": {
@@ -1561,13 +1574,20 @@
       }
     },
     "latestRelease": {
-      "tag_name": "rust-v0.150.1",
-      "name": "0.150.1",
-      "published_at": "2026-08-27T01:56:54Z",
-      "html_url": "https://github.com/openai/codex/releases/tag/rust-v0.150.1",
+      "tag_name": "rust-v0.151.0",
+      "name": "0.151.0",
+      "published_at": "2026-08-29T09:55:39Z",
+      "html_url": "https://github.com/openai/codex/releases/tag/rust-v0.151.0",
       "body_head": [
-        "## Changelog",
-        "Full Changelog: https://github.com/openai/codex/compare/rust-v0.150.0...rust-v0.150.1"
+        "## New Features",
+        "- Added a configurable grace period for discovering tools from optional MCP servers. (#41199)",
+        "- Extensions can now inspect or replace MCP tool results before they reach the model. (#41202)",
+        "- Plugin catalogs now combine per-repository configuration and report invalid project marketplaces without hiding valid plugins. (#41208)",
+        "## Bug Fixes",
+        "- Preserved restored permission profiles across TUI turns and prevented /cd from weakening sandbox restrictions. (#41192)",
+        "- Kept tool availability and reasoning effort correct when switching models or falling back to another model. (#41195, #41206)",
+        "- Improved remote sandbox enforcement using the executor's actual home directory, operating system, and path conventions. (#41196, #41204, #41207, #41209)",
+        "- Preserved structured MCP tool and resource errors in app-server responses. (#41196)"
       ]
     }
   },
