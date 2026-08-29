@@ -1,8 +1,10 @@
 use super::log_stream::looks_like_log_stream_output;
 use super::*;
 
+#[cfg(any(not(feature = "mojo"), test))]
 type MetadataCommandDetector = fn(&[String], usize, &str) -> Option<CommandOutputKind>;
 
+#[cfg(any(not(feature = "mojo"), test))]
 const METADATA_COMMAND_DETECTORS: [MetadataCommandDetector; 7] = [
     infer_metadata_build_command,
     infer_metadata_stream_command,
@@ -122,11 +124,43 @@ pub(super) fn detect_command_output_kind_with_hint(
     }
 }
 
+#[cfg(not(feature = "mojo"))]
 pub fn infer_command_output_kind_from_metadata(metadata: &str) -> Option<CommandOutputKind> {
     let tokens = command_metadata_tokens(metadata);
     infer_command_output_kind_from_metadata_tokens(&tokens)
 }
 
+#[cfg(feature = "mojo")]
+pub fn infer_command_output_kind_from_metadata(metadata: &str) -> Option<CommandOutputKind> {
+    let tag = prodex_mojo_core::context::classify_command_metadata(metadata)
+        .unwrap_or_else(|error| panic!("Mojo command metadata classification failed: {error:?}"));
+    command_output_kind_from_mojo_tag(tag)
+}
+
+fn command_output_kind_from_mojo_tag(tag: Option<i64>) -> Option<CommandOutputKind> {
+    tag.and_then(|tag| match tag {
+        1 => Some(CommandOutputKind::GitStatus),
+        2 => Some(CommandOutputKind::GitDiff),
+        3 => Some(CommandOutputKind::RustDiagnostics),
+        4 => Some(CommandOutputKind::Diagnostics),
+        5 => Some(CommandOutputKind::GitLog),
+        6 => Some(CommandOutputKind::Search),
+        7 => Some(CommandOutputKind::FileList),
+        8 => Some(CommandOutputKind::LogStream),
+        9 => Some(CommandOutputKind::NoisySuccess),
+        _ => None,
+    })
+}
+
+#[cfg(all(test, feature = "mojo"))]
+pub(super) fn infer_command_output_kind_from_metadata_rust(
+    metadata: &str,
+) -> Option<CommandOutputKind> {
+    let tokens = command_metadata_tokens(metadata);
+    infer_command_output_kind_from_metadata_tokens(&tokens)
+}
+
+#[cfg(any(not(feature = "mojo"), test))]
 fn infer_command_output_kind_from_metadata_tokens(tokens: &[String]) -> Option<CommandOutputKind> {
     for index in 0..tokens.len() {
         let command = command_metadata_token_command_name(&tokens[index]);
@@ -142,6 +176,7 @@ fn infer_command_output_kind_from_metadata_tokens(tokens: &[String]) -> Option<C
     None
 }
 
+#[cfg(any(not(feature = "mojo"), test))]
 fn infer_metadata_direct_command(command: &str) -> Option<CommandOutputKind> {
     if matches!(command, "rg" | "ripgrep" | "grep" | "egrep" | "fgrep") {
         Some(CommandOutputKind::Search)
@@ -184,6 +219,7 @@ fn infer_metadata_direct_command(command: &str) -> Option<CommandOutputKind> {
     }
 }
 
+#[cfg(any(not(feature = "mojo"), test))]
 fn infer_metadata_build_command(
     tokens: &[String],
     index: usize,
@@ -199,6 +235,7 @@ fn infer_metadata_build_command(
     build_command.then_some(CommandOutputKind::NoisySuccess)
 }
 
+#[cfg(any(not(feature = "mojo"), test))]
 fn infer_metadata_stream_command(
     tokens: &[String],
     index: usize,
@@ -209,6 +246,7 @@ fn infer_metadata_stream_command(
     .then_some(CommandOutputKind::LogStream)
 }
 
+#[cfg(any(not(feature = "mojo"), test))]
 fn infer_metadata_language_command(
     tokens: &[String],
     index: usize,
@@ -220,6 +258,7 @@ fn infer_metadata_language_command(
     .then_some(CommandOutputKind::Diagnostics)
 }
 
+#[cfg(any(not(feature = "mojo"), test))]
 fn infer_metadata_cargo_command(
     tokens: &[String],
     index: usize,
@@ -245,6 +284,7 @@ fn infer_metadata_cargo_command(
     }
 }
 
+#[cfg(any(not(feature = "mojo"), test))]
 fn infer_metadata_git_command(
     tokens: &[String],
     index: usize,
@@ -263,6 +303,7 @@ fn infer_metadata_git_command(
     }
 }
 
+#[cfg(any(not(feature = "mojo"), test))]
 fn infer_metadata_docker_command(
     tokens: &[String],
     index: usize,
@@ -281,6 +322,7 @@ fn infer_metadata_docker_command(
     }
 }
 
+#[cfg(any(not(feature = "mojo"), test))]
 fn infer_metadata_package_command(
     tokens: &[String],
     index: usize,
@@ -323,6 +365,7 @@ pub(super) fn command_metadata_subcommand_after(
     None
 }
 
+#[cfg(any(not(feature = "mojo"), test))]
 fn command_metadata_package_script_after(tokens: &[String], command_index: usize) -> Option<&str> {
     let mut saw_run = false;
     let mut skip_next = false;
@@ -358,6 +401,7 @@ fn command_metadata_package_script_after(tokens: &[String], command_index: usize
     None
 }
 
+#[cfg(any(not(feature = "mojo"), test))]
 fn command_metadata_package_install_after(tokens: &[String], command_index: usize) -> Option<&str> {
     let mut skip_next = false;
     for token in tokens
@@ -468,4 +512,64 @@ pub(super) fn command_metadata_tokens(metadata: &str) -> Vec<String> {
         tokens.push(token);
     }
     tokens
+}
+
+#[cfg(all(test, feature = "mojo"))]
+mod mojo_metadata_tests {
+    use super::{
+        infer_command_output_kind_from_metadata, infer_command_output_kind_from_metadata_rust,
+    };
+
+    #[test]
+    fn mojo_metadata_classifier_matches_rust_oracle() {
+        let cases = [
+            "{\"cmd\":\"cargo test -q\"}",
+            "command: cargo +nightly check --workspace",
+            "rg --json needle crates",
+            "grep -R needle src",
+            "git -C repo status --short",
+            "git diff --stat",
+            "git log --stat --oneline",
+            "pytest tests -q",
+            "python -m pytest tests",
+            "ruff check .",
+            "mypy src",
+            "biome check --write .",
+            "oxlint --fix",
+            "npx tsc --noEmit",
+            "cargo clippy --fix --allow-dirty",
+            "cargo fmt --all",
+            "npm test -- --runInBand",
+            "npm --prefix web run typecheck",
+            "uv pip install -r requirements.txt",
+            "bazel test //...",
+            "npx nx affected -t build",
+            "turbo run build",
+            "docker compose up --wait",
+            "kubectl logs deploy/prodex",
+            "ls -la crates",
+            "find crates -maxdepth 2 -type f",
+            "tree -L 2 crates",
+            "./gradlew test",
+            "./mvnw verify",
+            "/usr/bin/rg.exe needle src",
+        ];
+
+        for metadata in cases {
+            assert_eq!(
+                infer_command_output_kind_from_metadata(metadata),
+                infer_command_output_kind_from_metadata_rust(metadata),
+                "metadata: {metadata}"
+            );
+        }
+    }
+
+    #[test]
+    fn mojo_metadata_classifier_bounds_untrusted_input() {
+        let metadata = format!(
+            "cargo check {}",
+            "x".repeat(prodex_mojo_core::context::CONTEXT_METADATA_MAX_BYTES)
+        );
+        assert_eq!(infer_command_output_kind_from_metadata(&metadata), None);
+    }
 }

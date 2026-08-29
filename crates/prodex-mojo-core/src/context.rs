@@ -66,6 +66,11 @@ unsafe extern "C" {
         key_indices: *mut i64,
         result: *mut ContextTextRowsResult,
     ) -> i64;
+    fn prodex_context_classify_command_metadata_v1(
+        abi_version: i64,
+        metadata: *const ProdexStringView,
+        output_kind: *mut i64,
+    ) -> i64;
     fn prodex_context_estimate_tokens(chars: u64, words: u64) -> u64;
     fn prodex_context_signal_diff(
         before: *const i64,
@@ -92,6 +97,7 @@ const CRITICAL_SIGNAL_ROW_WIDTH: usize = 8;
 const CRITICAL_SIGNAL_MAX_LINES: usize = 65_536;
 const CRITICAL_SIGNAL_MAX_KEYS: usize = 65_536;
 const CRITICAL_SIGNAL_MAX_RANGES: usize = 1_024;
+pub const CONTEXT_METADATA_MAX_BYTES: usize = 16_384;
 pub const CONTEXT_TEXT_ABI_VERSION: i64 = 1;
 static CONTEXT_TEXT_ABI_READY: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
 
@@ -154,13 +160,47 @@ pub fn text_abi_layout_matches() -> bool {
     status == 0 && mojo == rust
 }
 
+fn text_abi_is_ready() -> bool {
+    *CONTEXT_TEXT_ABI_READY.get_or_init(|| text_abi_version().is_ok() && text_abi_layout_matches())
+}
+
+pub fn classify_command_metadata(metadata: &str) -> Result<Option<i64>, crate::MojoError> {
+    if metadata.len() > CONTEXT_METADATA_MAX_BYTES {
+        return Ok(None);
+    }
+    if !text_abi_is_ready() {
+        return Err(crate::MojoError::AbiMismatch);
+    }
+    let view = ProdexStringView {
+        ptr: metadata.as_ptr(),
+        len: metadata.len(),
+    };
+    let mut output_kind = -1_i64;
+    let status = unsafe {
+        prodex_context_classify_command_metadata_v1(
+            CONTEXT_TEXT_ABI_VERSION,
+            &view,
+            &mut output_kind,
+        )
+    };
+    match status {
+        0 => match output_kind {
+            -1 => Ok(None),
+            1..=9 => Ok(Some(output_kind)),
+            _ => Err(crate::MojoError::InvalidOutput),
+        },
+        3 => Ok(None),
+        4 => Err(crate::MojoError::AbiMismatch),
+        1 | 2 => Err(crate::MojoError::InvalidInput),
+        _ => Err(crate::MojoError::InvalidOutput),
+    }
+}
+
 pub fn prepare_signal_rows(
     before: &[ContextSignalLine<'_>],
     after: &[ContextSignalLine<'_>],
 ) -> Result<ContextSignalRows, crate::MojoError> {
-    if !*CONTEXT_TEXT_ABI_READY
-        .get_or_init(|| text_abi_version().is_ok() && text_abi_layout_matches())
-    {
+    if !text_abi_is_ready() {
         return Err(crate::MojoError::AbiMismatch);
     }
     if before.len() > CRITICAL_SIGNAL_MAX_LINES || after.len() > CRITICAL_SIGNAL_MAX_LINES {
@@ -409,7 +449,13 @@ pub fn self_test() -> bool {
                     .map(|row| row[0])
                     .eq([0, 0, -1])
         });
+    let metadata_ok = classify_command_metadata("cargo test --workspace") == Ok(Some(3))
+        && classify_command_metadata("rg needle src") == Ok(Some(6))
+        && classify_command_metadata("unknown-command") == Ok(None)
+        && classify_command_metadata(&"cargo ".repeat(CONTEXT_METADATA_MAX_BYTES / 6 + 1))
+            == Ok(None);
     text_ok
+        && metadata_ok
         && signal_diff(&[3, 0, 4, 1, 0, 2, 8], &[1, 2, 4, 0, 3, 0, 9]).is_ok_and(
             |(lost, gained)| {
                 lost == [2, 0, 0, 1, 0, 2, 0]

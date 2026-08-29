@@ -259,6 +259,490 @@ def context_text_required_hash_capacity(key_capacity: Int64) -> Int64:
     return required
 
 
+comptime CONTEXT_METADATA_MAX_BYTES: Int64 = 16_384
+comptime CONTEXT_METADATA_NO_KIND: Int64 = -1
+
+
+def context_metadata_token_byte(value: UInt8) -> Bool:
+    return (
+        value >= 48
+        and value <= 57
+        or value >= 65
+        and value <= 90
+        or value >= 97
+        and value <= 122
+        or value == 45
+        or value == 95
+        or value == 46
+        or value == 47
+        or value == 43
+    )
+
+
+def context_metadata_lower(value: UInt8) -> UInt8:
+    if value >= 65 and value <= 90:
+        return value + 32
+    return value
+
+
+def context_metadata_next_token(
+    ptr: Pointer[mut=False, UInt8, _], length: Int64, cursor: Int64
+) -> InlineArray[Int64, 3]:
+    var bounds = InlineArray[Int64, 3](fill=-1)
+    var index = cursor
+    while index < length and not context_metadata_token_byte(
+        ptr[unsafe_offset=index]
+    ):
+        index += 1
+    if index >= length:
+        return bounds^
+    bounds[0] = index
+    while index < length and context_metadata_token_byte(
+        ptr[unsafe_offset=index]
+    ):
+        index += 1
+    bounds[1] = index
+    bounds[2] = index
+    return bounds^
+
+
+def context_metadata_command_bounds(
+    ptr: Pointer[mut=False, UInt8, _], start: Int64, end: Int64
+) -> InlineArray[Int64, 2]:
+    var bounds = InlineArray[Int64, 2](fill=0)
+    var command_start = start
+    var index = end
+    while index > start:
+        index -= 1
+        if ptr[unsafe_offset=index] == 47:
+            command_start = index + 1
+            break
+    var command_end = end
+    if command_end - command_start >= 4:
+        var suffix = command_end - 4
+        if (
+            context_metadata_lower(ptr[unsafe_offset=suffix]) == 46
+            and context_metadata_lower(ptr[unsafe_offset=suffix + 1]) == 101
+            and context_metadata_lower(ptr[unsafe_offset=suffix + 2]) == 120
+            and context_metadata_lower(ptr[unsafe_offset=suffix + 3]) == 101
+        ):
+            command_end = suffix
+    bounds[0] = command_start
+    bounds[1] = command_end
+    return bounds^
+
+
+def context_metadata_token_equals[literal: StaticString](
+    ptr: Pointer[mut=False, UInt8, _], start: Int64, end: Int64
+) -> Bool:
+    var bounds = context_metadata_command_bounds(ptr, start, end)
+    var length = bounds[1] - bounds[0]
+    if length != Int64(literal.byte_length()):
+        return False
+    var expected = literal.unsafe_ptr()
+    for index in range(length):
+        if (
+            context_metadata_lower(ptr[unsafe_offset=bounds[0] + index])
+            != expected[unsafe_offset=index]
+        ):
+            return False
+    return True
+
+
+def context_metadata_token_ends_with[literal: StaticString](
+    ptr: Pointer[mut=False, UInt8, _], start: Int64, end: Int64
+) -> Bool:
+    var bounds = context_metadata_command_bounds(ptr, start, end)
+    var suffix_length = Int64(literal.byte_length())
+    var length = bounds[1] - bounds[0]
+    if length < suffix_length:
+        return False
+    var expected = literal.unsafe_ptr()
+    var offset = bounds[1] - suffix_length
+    for index in range(suffix_length):
+        if (
+            context_metadata_lower(ptr[unsafe_offset=offset + index])
+            != expected[unsafe_offset=index]
+        ):
+            return False
+    return True
+
+
+def context_metadata_token_contains[literal: StaticString](
+    ptr: Pointer[mut=False, UInt8, _], start: Int64, end: Int64
+) -> Bool:
+    var bounds = context_metadata_command_bounds(ptr, start, end)
+    var needle_length = Int64(literal.byte_length())
+    var length = bounds[1] - bounds[0]
+    if needle_length == 0:
+        return True
+    if length < needle_length:
+        return False
+    var expected = literal.unsafe_ptr()
+    for offset in range(length - needle_length + 1):
+        var matched = True
+        for index in range(needle_length):
+            if (
+                context_metadata_lower(ptr[unsafe_offset=bounds[0] + offset + index])
+                != expected[unsafe_offset=index]
+            ):
+                matched = False
+                break
+        if matched:
+            return True
+    return False
+
+
+def context_metadata_token_is_option_or_shell_glue(
+    ptr: Pointer[mut=False, UInt8, _], start: Int64, end: Int64
+) -> Bool:
+    var bounds = context_metadata_command_bounds(ptr, start, end)
+    if bounds[1] <= bounds[0]:
+        return True
+    var first = context_metadata_lower(ptr[unsafe_offset=bounds[0]])
+    if first == 45 or first == 43:
+        return True
+    return (
+        context_metadata_token_equals["cmd"](ptr, start, end)
+        or context_metadata_token_equals["command"](ptr, start, end)
+        or context_metadata_token_equals["args"](ptr, start, end)
+        or context_metadata_token_equals["arguments"](ptr, start, end)
+        or context_metadata_token_equals["metadata"](ptr, start, end)
+        or context_metadata_token_equals["name"](ptr, start, end)
+        or context_metadata_token_equals["tool"](ptr, start, end)
+        or context_metadata_token_equals["tool_name"](ptr, start, end)
+        or context_metadata_token_equals["shell"](ptr, start, end)
+        or context_metadata_token_equals["bash"](ptr, start, end)
+        or context_metadata_token_equals["sh"](ptr, start, end)
+        or context_metadata_token_equals["zsh"](ptr, start, end)
+        or context_metadata_token_equals["fish"](ptr, start, end)
+        or context_metadata_token_equals["powershell"](ptr, start, end)
+        or context_metadata_token_equals["pwsh"](ptr, start, end)
+        or context_metadata_token_equals["python"](ptr, start, end)
+        or context_metadata_token_equals["python3"](ptr, start, end)
+        or context_metadata_token_equals["py"](ptr, start, end)
+        or context_metadata_token_equals["node"](ptr, start, end)
+        or context_metadata_token_equals["npx"](ptr, start, end)
+        or context_metadata_token_equals["bunx"](ptr, start, end)
+        or context_metadata_token_equals["uv"](ptr, start, end)
+        or context_metadata_token_equals["uvx"](ptr, start, end)
+        or context_metadata_token_equals["poetry"](ptr, start, end)
+        or context_metadata_token_equals["pipenv"](ptr, start, end)
+        or context_metadata_token_equals["exec_command"](ptr, start, end)
+        or context_metadata_token_equals["function_call"](ptr, start, end)
+        or context_metadata_token_equals["function_call_output"](ptr, start, end)
+        or context_metadata_token_equals["shell_call"](ptr, start, end)
+        or context_metadata_token_equals["shell_call_output"](ptr, start, end)
+        or context_metadata_token_equals["true"](ptr, start, end)
+        or context_metadata_token_equals["false"](ptr, start, end)
+        or context_metadata_token_equals["null"](ptr, start, end)
+    )
+
+
+def context_metadata_token_option_takes_value(
+    ptr: Pointer[mut=False, UInt8, _], start: Int64, end: Int64
+) -> Bool:
+    return (
+        context_metadata_token_equals["-c"](ptr, start, end)
+        or context_metadata_token_equals["-m"](ptr, start, end)
+        or context_metadata_token_equals["-p"](ptr, start, end)
+        or context_metadata_token_equals["--config"](ptr, start, end)
+        or context_metadata_token_equals["--git-dir"](ptr, start, end)
+        or context_metadata_token_equals["--work-tree"](ptr, start, end)
+        or context_metadata_token_equals["--manifest-path"](ptr, start, end)
+        or context_metadata_token_equals["--package"](ptr, start, end)
+        or context_metadata_token_equals["--bin"](ptr, start, end)
+        or context_metadata_token_equals["--example"](ptr, start, end)
+        or context_metadata_token_equals["--target"](ptr, start, end)
+        or context_metadata_token_equals["--project"](ptr, start, end)
+        or context_metadata_token_equals["--cwd"](ptr, start, end)
+        or context_metadata_token_equals["--prefix"](ptr, start, end)
+        or context_metadata_token_equals["--directory"](ptr, start, end)
+    )
+
+
+def context_metadata_subcommand_after(
+    ptr: Pointer[mut=False, UInt8, _], length: Int64, cursor: Int64
+) -> InlineArray[Int64, 2]:
+    var result = InlineArray[Int64, 2](fill=-1)
+    var scan = cursor
+    var skip_next = False
+    while scan < length:
+        var token = context_metadata_next_token(ptr, length, scan)
+        if token[0] < 0:
+            break
+        scan = token[2]
+        if skip_next:
+            skip_next = False
+            continue
+        if context_metadata_token_option_takes_value(ptr, token[0], token[1]):
+            skip_next = True
+            continue
+        if not context_metadata_token_is_option_or_shell_glue(
+            ptr, token[0], token[1]
+        ):
+            result[0] = token[0]
+            result[1] = token[1]
+            return result^
+    return result^
+
+
+def context_metadata_package_script_after(
+    ptr: Pointer[mut=False, UInt8, _], length: Int64, cursor: Int64
+) -> InlineArray[Int64, 2]:
+    var result = InlineArray[Int64, 2](fill=-1)
+    var scan = cursor
+    var saw_run = False
+    var skip_next = False
+    while scan < length:
+        var token = context_metadata_next_token(ptr, length, scan)
+        if token[0] < 0:
+            break
+        scan = token[2]
+        if skip_next:
+            skip_next = False
+            continue
+        if context_metadata_token_option_takes_value(ptr, token[0], token[1]):
+            skip_next = True
+            continue
+        if context_metadata_token_is_option_or_shell_glue(
+            ptr, token[0], token[1]
+        ):
+            continue
+        if context_metadata_token_equals["run"](ptr, token[0], token[1]) or context_metadata_token_equals[
+            "run-script"
+        ](ptr, token[0], token[1]):
+            saw_run = True
+            continue
+        if (
+            context_metadata_token_equals["test"](ptr, token[0], token[1])
+            or context_metadata_token_equals["t"](ptr, token[0], token[1])
+            or context_metadata_token_equals["typecheck"](ptr, token[0], token[1])
+            or context_metadata_token_equals["type-check"](ptr, token[0], token[1])
+            or context_metadata_token_equals["tsc"](ptr, token[0], token[1])
+            or context_metadata_token_equals["check"](ptr, token[0], token[1])
+            or saw_run
+            and (
+                context_metadata_token_contains["test"](ptr, token[0], token[1])
+                or context_metadata_token_contains["typecheck"](ptr, token[0], token[1])
+            )
+        ):
+            result[0] = token[0]
+            result[1] = token[1]
+            return result^
+        return result^
+    return result^
+
+
+def context_metadata_package_install_after(
+    ptr: Pointer[mut=False, UInt8, _], length: Int64, cursor: Int64
+) -> InlineArray[Int64, 2]:
+    var result = InlineArray[Int64, 2](fill=-1)
+    var scan = cursor
+    var skip_next = False
+    while scan < length:
+        var token = context_metadata_next_token(ptr, length, scan)
+        if token[0] < 0:
+            break
+        scan = token[2]
+        if skip_next:
+            skip_next = False
+            continue
+        if context_metadata_token_option_takes_value(ptr, token[0], token[1]):
+            skip_next = True
+            continue
+        if context_metadata_token_is_option_or_shell_glue(
+            ptr, token[0], token[1]
+        ):
+            continue
+        if (
+            context_metadata_token_equals["install"](ptr, token[0], token[1])
+            or context_metadata_token_equals["i"](ptr, token[0], token[1])
+            or context_metadata_token_equals["ci"](ptr, token[0], token[1])
+            or context_metadata_token_equals["add"](ptr, token[0], token[1])
+            or context_metadata_token_equals["update"](ptr, token[0], token[1])
+            or context_metadata_token_equals["upgrade"](ptr, token[0], token[1])
+            or context_metadata_token_equals["sync"](ptr, token[0], token[1])
+        ):
+            result[0] = token[0]
+            result[1] = token[1]
+            return result^
+        return result^
+    return result^
+
+
+def context_metadata_direct_kind(
+    ptr: Pointer[mut=False, UInt8, _], start: Int64, end: Int64
+) -> Int64:
+    if (
+        context_metadata_token_equals["rg"](ptr, start, end)
+        or context_metadata_token_equals["ripgrep"](ptr, start, end)
+        or context_metadata_token_equals["grep"](ptr, start, end)
+        or context_metadata_token_equals["egrep"](ptr, start, end)
+        or context_metadata_token_equals["fgrep"](ptr, start, end)
+    ):
+        return 6
+    if (
+        context_metadata_token_equals["ls"](ptr, start, end)
+        or context_metadata_token_equals["find"](ptr, start, end)
+        or context_metadata_token_equals["tree"](ptr, start, end)
+    ):
+        return 7
+    if (
+        context_metadata_token_equals["pytest"](ptr, start, end)
+        or context_metadata_token_equals["py.test"](ptr, start, end)
+        or context_metadata_token_equals["tsc"](ptr, start, end)
+        or context_metadata_token_equals["ruff"](ptr, start, end)
+        or context_metadata_token_equals["mypy"](ptr, start, end)
+        or context_metadata_token_equals["biome"](ptr, start, end)
+        or context_metadata_token_equals["oxlint"](ptr, start, end)
+        or context_metadata_token_equals["eslint"](ptr, start, end)
+        or context_metadata_token_equals["playwright"](ptr, start, end)
+        or context_metadata_token_equals["cypress"](ptr, start, end)
+        or context_metadata_token_ends_with["-tsc"](ptr, start, end)
+        or context_metadata_token_ends_with["_tsc"](ptr, start, end)
+    ):
+        return 4
+    if (
+        context_metadata_token_equals["bazel"](ptr, start, end)
+        or context_metadata_token_equals["bazelisk"](ptr, start, end)
+        or context_metadata_token_equals["nx"](ptr, start, end)
+        or context_metadata_token_equals["turbo"](ptr, start, end)
+        or context_metadata_token_equals["pip"](ptr, start, end)
+        or context_metadata_token_equals["pip3"](ptr, start, end)
+        or context_metadata_token_equals["uv"](ptr, start, end)
+        or context_metadata_token_equals["nyc"](ptr, start, end)
+        or context_metadata_token_equals["c8"](ptr, start, end)
+        or context_metadata_token_equals["vite"](ptr, start, end)
+        or context_metadata_token_equals["next"](ptr, start, end)
+        or context_metadata_token_equals["docker-compose"](ptr, start, end)
+    ):
+        return 9
+    return -1
+
+
+def context_metadata_kind_for_token(
+    ptr: Pointer[mut=False, UInt8, _],
+    length: Int64,
+    start: Int64,
+    end: Int64,
+    next_cursor: Int64,
+) -> Int64:
+    var direct = context_metadata_direct_kind(ptr, start, end)
+    if direct >= 0:
+        return direct
+
+    var subcommand = context_metadata_subcommand_after(
+        ptr, length, next_cursor
+    )
+    if (
+        context_metadata_token_equals["gradle"](ptr, start, end)
+        or context_metadata_token_equals["gradlew"](ptr, start, end)
+    ) and subcommand[0] >= 0 and (
+        context_metadata_token_equals["test"](ptr, subcommand[0], subcommand[1])
+        or context_metadata_token_equals["check"](ptr, subcommand[0], subcommand[1])
+        or context_metadata_token_equals["build"](ptr, subcommand[0], subcommand[1])
+    ):
+        return 9
+    if (
+        context_metadata_token_equals["mvn"](ptr, start, end)
+        or context_metadata_token_equals["mvnw"](ptr, start, end)
+    ) and subcommand[0] >= 0 and (
+        context_metadata_token_equals["test"](ptr, subcommand[0], subcommand[1])
+        or context_metadata_token_equals["verify"](ptr, subcommand[0], subcommand[1])
+        or context_metadata_token_equals["package"](ptr, subcommand[0], subcommand[1])
+        or context_metadata_token_equals["install"](ptr, subcommand[0], subcommand[1])
+    ):
+        return 9
+    if (
+        context_metadata_token_equals["journalctl"](ptr, start, end)
+        or context_metadata_token_equals["tail"](ptr, start, end)
+        or context_metadata_token_equals["kubectl"](ptr, start, end)
+        and subcommand[0] >= 0
+        and context_metadata_token_equals["logs"](ptr, subcommand[0], subcommand[1])
+    ):
+        return 8
+    if context_metadata_token_equals["go"](ptr, start, end) and subcommand[0] >= 0 and (
+        context_metadata_token_equals["vet"](ptr, subcommand[0], subcommand[1])
+        or context_metadata_token_equals["test"](ptr, subcommand[0], subcommand[1])
+        or context_metadata_token_equals["build"](ptr, subcommand[0], subcommand[1])
+    ):
+        return 4
+    if context_metadata_token_equals["cargo"](ptr, start, end) and subcommand[0] >= 0:
+        if (
+            context_metadata_token_equals["test"](ptr, subcommand[0], subcommand[1])
+            or context_metadata_token_equals["check"](ptr, subcommand[0], subcommand[1])
+            or context_metadata_token_equals["clippy"](ptr, subcommand[0], subcommand[1])
+            or context_metadata_token_equals["build"](ptr, subcommand[0], subcommand[1])
+            or context_metadata_token_equals["doc"](ptr, subcommand[0], subcommand[1])
+            or context_metadata_token_equals["nextest"](ptr, subcommand[0], subcommand[1])
+            or context_metadata_token_equals["fmt"](ptr, subcommand[0], subcommand[1])
+            or context_metadata_token_equals["fix"](ptr, subcommand[0], subcommand[1])
+        ):
+            return 3
+        if (
+            context_metadata_token_equals["update"](ptr, subcommand[0], subcommand[1])
+            or context_metadata_token_equals["install"](ptr, subcommand[0], subcommand[1])
+            or context_metadata_token_equals["fetch"](ptr, subcommand[0], subcommand[1])
+        ):
+            return 9
+    if context_metadata_token_equals["git"](ptr, start, end) and subcommand[0] >= 0:
+        if context_metadata_token_equals["status"](ptr, subcommand[0], subcommand[1]):
+            return 1
+        if (
+            context_metadata_token_equals["diff"](ptr, subcommand[0], subcommand[1])
+            or context_metadata_token_equals["show"](ptr, subcommand[0], subcommand[1])
+        ):
+            return 2
+        if context_metadata_token_equals["log"](ptr, subcommand[0], subcommand[1]):
+            return 5
+        if context_metadata_token_equals["grep"](ptr, subcommand[0], subcommand[1]):
+            return 6
+        if context_metadata_token_equals["ls-files"](ptr, subcommand[0], subcommand[1]):
+            return 7
+    if context_metadata_token_equals["docker"](ptr, start, end) and subcommand[0] >= 0 and (
+        context_metadata_token_equals["compose"](ptr, subcommand[0], subcommand[1])
+        or context_metadata_token_equals["build"](ptr, subcommand[0], subcommand[1])
+        or context_metadata_token_equals["buildx"](ptr, subcommand[0], subcommand[1])
+        or context_metadata_token_equals["pull"](ptr, subcommand[0], subcommand[1])
+    ):
+        return 9
+    if (
+        context_metadata_token_equals["npm"](ptr, start, end)
+        or context_metadata_token_equals["pnpm"](ptr, start, end)
+        or context_metadata_token_equals["yarn"](ptr, start, end)
+        or context_metadata_token_equals["bun"](ptr, start, end)
+    ):
+        var script = context_metadata_package_script_after(
+            ptr, length, next_cursor
+        )
+        if script[0] >= 0:
+            return 4
+        var install = context_metadata_package_install_after(
+            ptr, length, next_cursor
+        )
+        if install[0] >= 0:
+            return 9
+    return -1
+
+
+def context_metadata_kind(view: ProdexStringView) -> Int64:
+    var ptr = view.ptr.unsafe_value()
+    var length = Int64(view.len)
+    var cursor: Int64 = 0
+    while cursor < length:
+        var token = context_metadata_next_token(ptr, length, cursor)
+        if token[0] < 0:
+            break
+        var kind = context_metadata_kind_for_token(
+            ptr, length, token[0], token[1], token[2]
+        )
+        if kind >= 0:
+            return kind
+        cursor = token[2]
+    return CONTEXT_METADATA_NO_KIND
+
+
 def context_text_line_counts(
     counts: Pointer[mut=False, Int64, _], line: Int64
 ) -> InlineArray[Int64, 7]:
@@ -323,6 +807,26 @@ def prodex_mojo_text_abi_layout(
             name="required_hash_capacity"
         ]()
     )
+    return 0
+
+
+@export("prodex_context_classify_command_metadata_v1")
+def prodex_context_classify_command_metadata_v1(
+    abi_version: Int64,
+    metadata: Pointer[mut=False, ProdexStringView, _],
+    output_kind: Pointer[mut=True, Int64, _],
+) abi("C") -> Int64:
+    if abi_version != CONTEXT_TEXT_ABI_VERSION:
+        return 4
+    output_kind[] = CONTEXT_METADATA_NO_KIND
+    var view = metadata[].copy()
+    if view.len > UInt(CONTEXT_METADATA_MAX_BYTES):
+        return 1
+    if not context_text_view_is_valid(view):
+        return 2
+    if view.len == 0:
+        return 0
+    output_kind[] = context_metadata_kind(view)
     return 0
 
 
