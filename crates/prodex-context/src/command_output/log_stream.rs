@@ -194,7 +194,18 @@ pub(crate) fn is_log_level_signal_line(line: &str) -> bool {
         || lower.contains(" warn ")
 }
 
+#[cfg(feature = "mojo")]
 fn log_stream_level_label(line: &str) -> Option<&'static str> {
+    let lower = bounded_lowercase_log_line(line);
+    match prodex_mojo_core::log::classify_log_level(&lower) {
+        Ok(level) => level,
+        Err(prodex_mojo_core::MojoError::InvalidInput) => None,
+        Err(error) => panic!("Mojo log-level classification failed: {error:?}"),
+    }
+}
+
+#[cfg(any(not(feature = "mojo"), test))]
+fn log_stream_level_label_rust(line: &str) -> Option<&'static str> {
     let lower = line.trim_start().to_ascii_lowercase();
     for (level, label) in [
         ("fatal", "fatal"),
@@ -216,6 +227,65 @@ fn log_stream_level_label(line: &str) -> Option<&'static str> {
     None
 }
 
+#[cfg(not(feature = "mojo"))]
+fn log_stream_level_label(line: &str) -> Option<&'static str> {
+    log_stream_level_label_rust(line)
+}
+
+#[cfg(feature = "mojo")]
+fn bounded_lowercase_log_line(line: &str) -> String {
+    const MAX_BYTES: usize = 4096;
+    let lower = line.trim_start().to_ascii_lowercase();
+    if lower.len() <= MAX_BYTES {
+        return lower;
+    }
+    let end = lower
+        .char_indices()
+        .take_while(|(index, _)| *index <= MAX_BYTES)
+        .map(|(index, _)| index)
+        .last()
+        .unwrap_or_default();
+    lower[..end].to_string()
+}
+
+#[cfg(all(test, feature = "mojo"))]
+mod mojo_tests {
+    use super::*;
+
+    #[test]
+    fn mojo_log_level_classifier_matches_rust_oracle() {
+        for line in [
+            "fatal: shutdown",
+            "ERROR request failed",
+            "2026-05-05T00:00:00Z WARNING cache miss",
+            "{\"severity\": \"info\", \"message\": \"heartbeat\"}",
+            "{\"level\":\"fatal\",\"message\":\"shutdown\"}",
+            "status: warning",
+            "status=debug worker state",
+            "[warn] degraded",
+            "info heartbeat",
+            "trace\tframe",
+            "prefix trace\tframe",
+            "prefix [error] suffix",
+            "prefix[error] suffix",
+            "request has no level",
+        ] {
+            assert_eq!(
+                log_stream_level_label(line),
+                log_stream_level_label_rust(line),
+                "{line}"
+            );
+        }
+    }
+
+    #[test]
+    fn mojo_log_level_classifier_bounds_untrusted_lines() {
+        let line = format!("{} error ", "x".repeat(4096));
+        assert_eq!(log_stream_level_label(&line), None);
+    }
+}
+
+#[cfg(any(not(feature = "mojo"), test))]
 fn contains_json_log_level(lower: &str, level: &str) -> bool {
     for field in ["level", "severity", "status"] {
         if lower.contains(&format!("\"{field}\":\"{level}\""))
@@ -227,6 +297,7 @@ fn contains_json_log_level(lower: &str, level: &str) -> bool {
     false
 }
 
+#[cfg(any(not(feature = "mojo"), test))]
 fn contains_kv_log_level(lower: &str, level: &str) -> bool {
     for field in ["level", "severity", "status"] {
         if lower.contains(&format!("{field}={level}"))
@@ -238,6 +309,7 @@ fn contains_kv_log_level(lower: &str, level: &str) -> bool {
     false
 }
 
+#[cfg(any(not(feature = "mojo"), test))]
 fn starts_with_log_level_token(lower: &str, level: &str) -> bool {
     lower.starts_with(&format!("[{level}]"))
         || lower.starts_with(&format!("{level} "))
@@ -245,6 +317,7 @@ fn starts_with_log_level_token(lower: &str, level: &str) -> bool {
         || lower.starts_with(&format!("{level}\t"))
 }
 
+#[cfg(any(not(feature = "mojo"), test))]
 fn contains_delimited_log_level(lower: &str, level: &str) -> bool {
     lower.contains(&format!(" {level} "))
         || lower.contains(&format!(" {level}:"))
