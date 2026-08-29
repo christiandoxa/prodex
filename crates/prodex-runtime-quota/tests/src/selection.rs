@@ -3,9 +3,9 @@ use super::*;
 use prodex_mojo_core::runtime::{
     QuotaRouteScoreInput, QuotaScoreInput, quota_route_score_batch, quota_score_batch,
 };
-use prodex_quota::{
-    AuthSummary, scale_quota_pressure_for_plan, usage_plan_capacity_pressure_scale_bps,
-};
+use prodex_quota::AuthSummary;
+#[cfg(feature = "mojo")]
+use prodex_quota::{scale_quota_pressure_for_plan, usage_plan_capacity_pressure_scale_bps};
 use prodex_shared_types::{ReadyProfileCandidate, RunProfileProbeReport, RuntimeQuotaSource};
 use std::collections::BTreeMap;
 
