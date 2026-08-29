@@ -5,6 +5,7 @@ use super::{
     prepare_runtime_overlay_home, redaction_redact_secret_like_text,
     write_provider_runtime_codex_auth,
 };
+use crate::app_commands::runtime_launch::goal_resume::add_runtime_goal_session_tracking;
 use anyhow::{Result, bail};
 use std::path::{Path, PathBuf};
 use std::time::Instant;
@@ -140,6 +141,16 @@ pub(super) fn build_plan(
     let stage_started = Instant::now();
     let mut runtime_args =
         strategy.prepare_runtime_codex_args(&overlay_home, runtime_proxy, &preference_context)?;
+    if strategy.desktop_command.is_none()
+        && let Some(monitor) = strategy.goal_usage_limit_monitor.as_ref()
+    {
+        add_runtime_goal_session_tracking(
+            &overlay_home,
+            strategy.profile_v2_name.as_deref(),
+            &mut runtime_args,
+            &monitor.marker_path,
+        )?;
+    }
     if strategy.desktop_command.is_none()
         && !prodex_runtime_launch::is_codex_exec_invocation(&runtime_args)
         && !prodex_runtime_launch::codex_resume_requested(&runtime_args)

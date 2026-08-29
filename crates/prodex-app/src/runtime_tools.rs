@@ -1,4 +1,7 @@
 use super::*;
+use crate::app_commands::runtime_launch::{
+    GoalResumeRelaunchPlan, GoalUsageLimitMonitor, prepare_goal_usage_limit_monitor,
+};
 use crate::runtime_desktop::{
     DesktopGuiCommand, configure_desktop_codex_home, desktop_gui_command,
     prepare_desktop_overlay_home, prepare_runtime_overlay_home,
@@ -18,6 +21,8 @@ mod sub_agents;
 mod super_dry_run;
 #[path = "runtime_tools/super_trust.rs"]
 mod super_trust;
+#[path = "runtime_tools/usage_limit_recovery.rs"]
+mod usage_limit_recovery;
 pub(super) use child_env::{clear_rtk_auto_wrap_control_env, prepend_child_path};
 #[cfg(test)]
 pub(super) use overlay::prepare_prodex_overlay_home;
@@ -47,6 +52,10 @@ pub(crate) struct RuntimeToolLaunchStrategy {
     sub_agent: Option<ResolvedSuperSubAgent>,
     model_preference_sync: Option<ModelPreferenceSync>,
     resume_session_path: Option<PathBuf>,
+    auto_goal_resume_attempted_profiles: BTreeSet<String>,
+    goal_usage_limit_monitor: Option<GoalUsageLimitMonitor>,
+    pending_goal_resume_plan: Option<GoalResumeRelaunchPlan>,
+    goal_resume_session_affinity_release: Option<String>,
 }
 
 impl RuntimeToolLaunchStrategy {
@@ -88,6 +97,10 @@ impl RuntimeToolLaunchStrategy {
             sub_agent,
             model_preference_sync: None,
             resume_session_path: None,
+            auto_goal_resume_attempted_profiles: BTreeSet::new(),
+            goal_usage_limit_monitor: None,
+            pending_goal_resume_plan: None,
+            goal_resume_session_affinity_release: None,
         }
     }
 
@@ -136,7 +149,29 @@ impl RuntimeLaunchStrategy for RuntimeToolLaunchStrategy {
         prepared: &PreparedRuntimeLaunch,
         runtime_proxy: Option<&RuntimeProxyEndpoint>,
     ) -> Result<RuntimeLaunchPlan> {
+        if self.goal_usage_limit_monitor.is_none() && self.desktop_command.is_none() {
+            self.goal_usage_limit_monitor = prepare_goal_usage_limit_monitor(
+                &self.codex_args,
+                self.args.dry_run || self.args.no_auto_rotate,
+            )?;
+        }
         overlay::build_plan(self, prepared, runtime_proxy)
+    }
+
+    fn child_exit_requested(&mut self) -> Result<bool> {
+        Self::observe_child_exit_request(self)
+    }
+
+    fn monitors_child_exit(&self) -> bool {
+        self.goal_usage_limit_monitor.is_some()
+    }
+
+    fn session_affinity_release(&self) -> Option<&str> {
+        self.goal_resume_session_affinity_release.as_deref()
+    }
+
+    fn relaunch_after_child_exit(&mut self, status: &std::process::ExitStatus) -> Result<bool> {
+        Self::relaunch_after_usage_limit(self, status)
     }
 
     fn after_child_exit(

@@ -10,9 +10,9 @@ use std::path::Path;
 use super::remove_first_codex_config_override_pair;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(super) struct RuntimeResumeSessionSettings {
-    pub(super) model: Option<String>,
-    pub(super) reasoning_effort: Option<String>,
+pub(crate) struct RuntimeResumeSessionSettings {
+    pub(crate) model: Option<String>,
+    pub(crate) reasoning_effort: Option<String>,
 }
 
 pub(super) fn remove_resume_generated_effort_override(
@@ -41,7 +41,7 @@ pub(in crate::app_commands) fn runtime_resume_provider_from_codex_args(
     resolve_bound_provider_identity(report.model_provider.as_deref())
 }
 
-pub(super) fn runtime_resume_session_settings_from_codex_args(
+pub(crate) fn runtime_resume_session_settings_from_codex_args(
     codex_args: &[OsString],
 ) -> Option<RuntimeResumeSessionSettings> {
     runtime_resume_session_report_from_codex_args(codex_args)

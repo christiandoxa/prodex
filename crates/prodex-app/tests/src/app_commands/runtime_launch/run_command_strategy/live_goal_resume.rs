@@ -1,4 +1,5 @@
 use super::*;
+use std::io::Write;
 use std::path::Path;
 
 #[test]
@@ -36,8 +37,7 @@ fn run_strategy_plans_goal_resume_relaunch_after_usage_limit_with_active_goal() 
             "{\"id\":\"019c9e3d-45a0-7ad0-a6ee-b194ac2d44f9\",\"cwd\":\"/tmp/test\",\"model_provider\":\"prodex-kiro\"}}\n",
             "{\"timestamp\":\"2026-06-05T01:00:00Z\",\"type\":\"turn_context\",\"payload\":{\"model\":\"gpt-5.6-luna\",\"effort\":\"max\"}}\n",
             "{\"timestamp\":\"2026-06-05T01:00:00Z\",\"type\":\"thread\",\"payload\":{\"thread_id\":\"019c9e3d-45a0-7ad0-a6ee-b194ac2d44f9\"}}\n",
-            "{\"timestamp\":\"2026-06-05T01:00:01Z\",\"type\":\"message\",\"payload\":{\"role\":\"assistant\",\"content\":\"partial answer\"}}\n",
-            "{\"timestamp\":\"2026-06-05T01:00:02Z\",\"type\":\"error\",\"payload\":{\"message\":\"Your workspace is out of credits. Ask your workspace owner to refill in order to continue.\"}}\n"
+            "{\"timestamp\":\"2026-06-05T01:00:01Z\",\"type\":\"message\",\"payload\":{\"role\":\"assistant\",\"content\":\"partial answer\"}}\n"
         ),
     )
     .unwrap();
@@ -101,7 +101,7 @@ fn run_strategy_plans_goal_resume_relaunch_after_usage_limit_with_active_goal() 
         },
     );
 
-    let strategy = RunCommandStrategy::new(RunArgs {
+    let mut strategy = RunCommandStrategy::new(RunArgs {
         profile: None,
         auto_rotate: false,
         no_auto_rotate: false,
@@ -114,6 +114,16 @@ fn run_strategy_plans_goal_resume_relaunch_after_usage_limit_with_active_goal() 
         codex_features: CodexRuntimeFeatureArgs::default(),
         codex_args: vec![OsString::from(session_id)],
     })
+    .unwrap();
+
+    let session_path = sessions.join(format!("rollout-2026-06-05T01-00-00-{session_id}.jsonl"));
+    writeln!(
+        fs::OpenOptions::new()
+            .append(true)
+            .open(&session_path)
+            .unwrap(),
+        "{{\"timestamp\":\"2026-06-05T01:00:02Z\",\"type\":\"error\",\"payload\":{{\"message\":\"Your workspace is out of credits. Ask your workspace owner to refill in order to continue.\"}}}}"
+    )
     .unwrap();
 
     let analysis = analyze_goal_resume_session(Path::new(&format!(
@@ -220,6 +230,411 @@ fn run_strategy_plans_goal_resume_relaunch_after_usage_limit_with_active_goal() 
         fresh_strategy.codex_args.last(),
         Some(&OsString::from("/goal resume"))
     );
+}
+
+#[test]
+fn run_strategy_recovers_exact_codex_0151_usage_limit_after_compaction_without_replaying_work() {
+    const OBSERVED_USAGE_LIMIT_MESSAGE: &str = "You've hit your usage limit. Upgrade to Pro (https://chatgpt.com/explore/pro), visit https://chatgpt.com/codex/settings/usage to purchase more credits or try again at 5:08 PM.";
+    const CONTINUATION_PROMPT: &str = "Continue the interrupted task from the persisted session. Preserve completed work and do not repeat completed tool calls.";
+
+    let root = temp_dir("codex-0151-compaction-recovery");
+    let _env = TestEnvVarGuard::set("PRODEX_HOME", root.to_str().unwrap());
+    let shared_codex_home = root.join("shared-codex-home");
+    let _shared_env = TestEnvVarGuard::set(
+        "PRODEX_SHARED_CODEX_HOME",
+        shared_codex_home.to_str().unwrap(),
+    );
+    let paths = AppPaths::discover().unwrap();
+    let mut profiles = BTreeMap::new();
+    for profile_name in ["main", "ready-b", "ready-c"] {
+        let home = root.join("profiles").join(profile_name);
+        fs::create_dir_all(&home).unwrap();
+        write_runtime_launch_auth(
+            secret_store::auth_json_path(&home),
+            format!(
+                r#"{{"tokens":{{"access_token":"{profile_name}-token","account_id":"{profile_name}-account"}}}}"#
+            ),
+        )
+        .unwrap();
+        profiles.insert(
+            profile_name.to_string(),
+            ProfileEntry {
+                codex_home: home,
+                managed: false,
+                email: None,
+                provider: ProfileProvider::Openai,
+            },
+        );
+    }
+
+    let session_id = "019c9e3d-45a0-7ad0-a6ee-b194ac2d44f9";
+    let sessions = paths.shared_codex_root.join("sessions/2026/08/29");
+    fs::create_dir_all(&sessions).unwrap();
+    let session_path = sessions.join(format!("rollout-2026-08-29T01-00-00-{session_id}.jsonl"));
+    fs::write(
+        &session_path,
+        session_meta_line(session_id, Path::new("/tmp/test"), None),
+    )
+    .unwrap();
+    write_state(
+        &root,
+        AppState {
+            active_profile: Some("main".to_string()),
+            profiles,
+            session_profile_bindings: BTreeMap::from([(
+                session_id.to_string(),
+                ResponseProfileBinding {
+                    binding_identity: None,
+                    profile_name: "main".to_string(),
+                    bound_at: chrono::Local::now().timestamp(),
+                },
+            )]),
+            ..AppState::default()
+        },
+    );
+
+    let original_prompt = "finish the migration and run the side-effecting tool";
+    let original_args = vec![
+        OsString::from("exec"),
+        OsString::from("resume"),
+        OsString::from(session_id),
+        OsString::from(original_prompt),
+    ];
+    let mut strategy = RunCommandStrategy::new(RunArgs {
+        profile: None,
+        auto_rotate: false,
+        no_auto_rotate: false,
+        auto_redeem: false,
+        skip_quota_check: true,
+        full_access: false,
+        base_url: None,
+        no_proxy: true,
+        dry_run: false,
+        codex_features: CodexRuntimeFeatureArgs::default(),
+        codex_args: original_args.clone(),
+    })
+    .unwrap();
+
+    let mut session = fs::OpenOptions::new()
+        .append(true)
+        .open(&session_path)
+        .unwrap();
+    session
+        .write_all(
+            concat!(
+                "{\"timestamp\":\"2026-08-29T01:00:01Z\",\"type\":\"progress\",\"payload\":{\"message\":\"migration applied\"}}\n",
+                "{\"timestamp\":\"2026-08-29T01:00:02Z\",\"type\":\"compacted\",\"payload\":{\"window_id\":\"window-2\"}}\n",
+                "{\"timestamp\":\"2026-08-29T01:00:03Z\",\"type\":\"tool_completed\",\"payload\":{\"call_id\":\"side-effect-1\",\"status\":\"completed\"}}\n"
+            )
+            .as_bytes(),
+        )
+        .unwrap();
+    writeln!(
+        session,
+        "{}",
+        serde_json::json!({
+            "timestamp": "2026-08-29T01:00:04Z",
+            "type": "event_msg",
+            "payload": { "message": OBSERVED_USAGE_LIMIT_MESSAGE },
+        })
+    )
+    .unwrap();
+    let before_relaunch = fs::read(&session_path).unwrap();
+
+    assert!(strategy.relaunch_after_child_exit(&exit_status(1)).unwrap());
+    assert_eq!(strategy.args.profile.as_deref(), Some("ready-b"));
+    assert_eq!(strategy.resume_session_id(), Some(session_id));
+    assert!(prodex_runtime_launch::is_codex_exec_invocation(
+        &strategy.codex_args
+    ));
+    assert_eq!(
+        prodex_runtime_launch::codex_resume_session_id(&strategy.codex_args),
+        Some(session_id)
+    );
+    assert!(!strategy
+        .codex_args
+        .iter()
+        .any(|arg| arg == original_prompt));
+    assert_eq!(
+        strategy.codex_args.last(),
+        Some(&OsString::from(CONTINUATION_PROMPT))
+    );
+
+    let after_relaunch = fs::read(&session_path).unwrap();
+    assert_eq!(after_relaunch, before_relaunch);
+    let persisted = String::from_utf8(after_relaunch).unwrap();
+    assert_eq!(persisted.matches("side-effect-1").count(), 1);
+    assert!(persisted.contains("window-2"));
+    assert!(persisted.contains(OBSERVED_USAGE_LIMIT_MESSAGE));
+
+    let mut terminal_strategy = RunCommandStrategy::new(RunArgs {
+        profile: None,
+        auto_rotate: false,
+        no_auto_rotate: true,
+        auto_redeem: false,
+        skip_quota_check: true,
+        full_access: false,
+        base_url: None,
+        no_proxy: true,
+        dry_run: false,
+        codex_features: CodexRuntimeFeatureArgs::default(),
+        codex_args: original_args,
+    })
+    .unwrap();
+    let terminal_args = terminal_strategy.codex_args.clone();
+    assert!(!terminal_strategy.runtime_request().allow_auto_rotate);
+    assert!(!terminal_strategy
+        .relaunch_after_child_exit(&exit_status(1))
+        .unwrap());
+    assert_eq!(terminal_strategy.codex_args, terminal_args);
+    assert!(terminal_strategy.pending_goal_resume_plan.is_none());
+}
+
+#[test]
+fn run_strategy_skips_goal_resume_relaunch_when_goal_is_complete() {
+    let root = temp_dir("goal-resume-relaunch-complete");
+    let _env = TestEnvVarGuard::set("PRODEX_HOME", root.to_str().unwrap());
+    let shared_codex_home = root.join("shared-codex-home");
+    let _shared_env = TestEnvVarGuard::set(
+        "PRODEX_SHARED_CODEX_HOME",
+        shared_codex_home.to_str().unwrap(),
+    );
+    let paths = AppPaths::discover().unwrap();
+    let main_home = root.join("profiles").join("main");
+    let second_home = root.join("profiles").join("second");
+    fs::create_dir_all(&main_home).unwrap();
+    fs::create_dir_all(&second_home).unwrap();
+    write_runtime_launch_auth(
+        secret_store::auth_json_path(&main_home),
+        r#"{"tokens":{"access_token":"main-token","account_id":"main-account"}}"#,
+    )
+    .unwrap();
+    write_runtime_launch_auth(
+        secret_store::auth_json_path(&second_home),
+        r#"{"tokens":{"access_token":"second-token","account_id":"second-account"}}"#,
+    )
+    .unwrap();
+    let session_id = "019c9e3d-45a0-7ad0-a6ee-b194ac2d4500";
+    let sessions = paths.shared_codex_root.join("sessions/2026/06/05");
+    fs::create_dir_all(&sessions).unwrap();
+    fs::write(
+        sessions.join(format!("rollout-2026-06-05T01-00-00-{session_id}.jsonl")),
+        concat!(
+            "{\"timestamp\":\"2026-06-05T01:00:00Z\",\"type\":\"session_meta\",\"payload\":",
+            "{\"id\":\"019c9e3d-45a0-7ad0-a6ee-b194ac2d4500\",\"cwd\":\"/tmp/test\"}}\n",
+            "{\"timestamp\":\"2026-06-05T01:00:00Z\",\"type\":\"thread\",\"payload\":{\"thread_id\":\"thread-1\"}}\n",
+            ""
+        ),
+    )
+    .unwrap();
+    let goals_db = paths.shared_codex_root.join("goals_1.sqlite");
+    let conn = rusqlite::Connection::open(&goals_db).unwrap();
+    conn.execute_batch(
+        "CREATE TABLE thread_goals (
+            thread_id TEXT PRIMARY KEY,
+            goal_id TEXT NOT NULL,
+            objective TEXT NOT NULL,
+            status TEXT NOT NULL,
+            token_budget INTEGER,
+            tokens_used INTEGER NOT NULL DEFAULT 0,
+            time_used_seconds INTEGER NOT NULL DEFAULT 0,
+            created_at_ms INTEGER NOT NULL,
+            updated_at_ms INTEGER NOT NULL
+        );",
+    )
+    .unwrap();
+    conn.execute(
+        "INSERT INTO thread_goals (thread_id, goal_id, objective, status, created_at_ms, updated_at_ms) VALUES (?1, 'goal-1', 'finish work', 'complete', 1, 1)",
+        rusqlite::params!["thread-1"],
+    )
+    .unwrap();
+    let now = chrono::Local::now().timestamp();
+    write_state(
+        &root,
+        AppState {
+            active_profile: Some("main".to_string()),
+            profiles: BTreeMap::from([
+                (
+                    "main".to_string(),
+                    ProfileEntry {
+                        codex_home: main_home,
+                        managed: false,
+                        email: None,
+                        provider: ProfileProvider::Openai,
+                    },
+                ),
+                (
+                    "second".to_string(),
+                    ProfileEntry {
+                        codex_home: second_home,
+                        managed: false,
+                        email: None,
+                        provider: ProfileProvider::Openai,
+                    },
+                ),
+            ]),
+            session_profile_bindings: BTreeMap::from([(
+                session_id.to_string(),
+                ResponseProfileBinding {
+                    binding_identity: None,
+                    profile_name: "main".to_string(),
+                    bound_at: now,
+                },
+            )]),
+            ..AppState::default()
+        },
+    );
+
+    let mut strategy = RunCommandStrategy::new(RunArgs {
+        profile: None,
+        auto_rotate: false,
+        no_auto_rotate: false,
+        auto_redeem: false,
+        skip_quota_check: true,
+        full_access: false,
+        base_url: None,
+        no_proxy: true,
+        dry_run: false,
+        codex_features: CodexRuntimeFeatureArgs::default(),
+        codex_args: vec![OsString::from(session_id)],
+    })
+    .unwrap();
+
+    assert!(
+        strategy
+            .plan_goal_resume_relaunch(&exit_status(1))
+            .unwrap()
+            .is_none()
+    );
+}
+
+#[test]
+fn run_strategy_relaunch_after_child_exit_appends_goal_resume_and_releases_binding() {
+    let root = temp_dir("goal-resume-relaunch-apply");
+    let _env = TestEnvVarGuard::set("PRODEX_HOME", root.to_str().unwrap());
+    let shared_codex_home = root.join("shared-codex-home");
+    let _shared_env = TestEnvVarGuard::set(
+        "PRODEX_SHARED_CODEX_HOME",
+        shared_codex_home.to_str().unwrap(),
+    );
+    let paths = AppPaths::discover().unwrap();
+    let main_home = root.join("profiles").join("main");
+    let second_home = root.join("profiles").join("second");
+    fs::create_dir_all(&main_home).unwrap();
+    fs::create_dir_all(&second_home).unwrap();
+    write_runtime_launch_auth(
+        secret_store::auth_json_path(&main_home),
+        r#"{"tokens":{"access_token":"main-token","account_id":"main-account"}}"#,
+    )
+    .unwrap();
+    write_runtime_launch_auth(
+        secret_store::auth_json_path(&second_home),
+        r#"{"tokens":{"access_token":"second-token","account_id":"second-account"}}"#,
+    )
+    .unwrap();
+    let session_id = "019c9e3d-45a0-7ad0-a6ee-b194ac2d4501";
+    let sessions = paths.shared_codex_root.join("sessions/2026/06/05");
+    fs::create_dir_all(&sessions).unwrap();
+    fs::write(
+        sessions.join(format!("rollout-2026-06-05T01-00-00-{session_id}.jsonl")),
+        concat!(
+            "{\"timestamp\":\"2026-06-05T01:00:00Z\",\"type\":\"session_meta\",\"payload\":",
+            "{\"id\":\"019c9e3d-45a0-7ad0-a6ee-b194ac2d4501\",\"cwd\":\"/tmp/test\"}}\n",
+            "{\"timestamp\":\"2026-06-05T01:00:00Z\",\"type\":\"thread\",\"payload\":{\"thread_id\":\"thread-1\"}}\n",
+            "{\"timestamp\":\"2026-06-05T01:00:02Z\",\"type\":\"error\",\"payload\":{\"message\":\"You've hit your usage limit. Try again later.\"}}\n"
+        ),
+    )
+    .unwrap();
+    let goals_db = paths.shared_codex_root.join("goals_1.sqlite");
+    let conn = rusqlite::Connection::open(&goals_db).unwrap();
+    conn.execute_batch(
+        "CREATE TABLE thread_goals (
+            thread_id TEXT PRIMARY KEY,
+            goal_id TEXT NOT NULL,
+            objective TEXT NOT NULL,
+            status TEXT NOT NULL,
+            token_budget INTEGER,
+            tokens_used INTEGER NOT NULL DEFAULT 0,
+            time_used_seconds INTEGER NOT NULL DEFAULT 0,
+            created_at_ms INTEGER NOT NULL,
+            updated_at_ms INTEGER NOT NULL
+        );",
+    )
+    .unwrap();
+    conn.execute(
+        "INSERT INTO thread_goals (thread_id, goal_id, objective, status, created_at_ms, updated_at_ms) VALUES (?1, 'goal-1', 'finish work', 'paused', 1, 1)",
+        rusqlite::params!["thread-1"],
+    )
+    .unwrap();
+    let now = chrono::Local::now().timestamp();
+    write_state(
+        &root,
+        AppState {
+            active_profile: Some("main".to_string()),
+            profiles: BTreeMap::from([
+                (
+                    "main".to_string(),
+                    ProfileEntry {
+                        codex_home: main_home,
+                        managed: false,
+                        email: None,
+                        provider: ProfileProvider::Openai,
+                    },
+                ),
+                (
+                    "second".to_string(),
+                    ProfileEntry {
+                        codex_home: second_home,
+                        managed: false,
+                        email: None,
+                        provider: ProfileProvider::Openai,
+                    },
+                ),
+            ]),
+            session_profile_bindings: BTreeMap::from([(
+                session_id.to_string(),
+                ResponseProfileBinding {
+                    binding_identity: None,
+                    profile_name: "main".to_string(),
+                    bound_at: now,
+                },
+            )]),
+            ..AppState::default()
+        },
+    );
+
+    let mut strategy = RunCommandStrategy::new(RunArgs {
+        profile: None,
+        auto_rotate: false,
+        no_auto_rotate: false,
+        auto_redeem: false,
+        skip_quota_check: true,
+        full_access: false,
+        base_url: None,
+        no_proxy: true,
+        dry_run: false,
+        codex_features: CodexRuntimeFeatureArgs::default(),
+        codex_args: vec![OsString::from(session_id)],
+    })
+    .unwrap();
+
+    let session_path = sessions.join(format!("rollout-2026-06-05T01-00-00-{session_id}.jsonl"));
+    let mut session = fs::OpenOptions::new()
+        .append(true)
+        .open(session_path)
+        .unwrap();
+    writeln!(
+        session,
+        "{{\"timestamp\":\"2026-06-05T01:00:02Z\",\"type\":\"error\",\"payload\":{{\"message\":\"You've hit your usage limit. Try again later.\"}}}}"
+    )
+    .unwrap();
+
+    assert!(strategy.relaunch_after_child_exit(&exit_status(1)).unwrap());
+    assert_eq!(strategy.args.profile.as_deref(), Some("second"));
+    assert!(codex_args_include_goal_resume(&strategy.codex_args));
+
+    let state = AppState::load(&paths).unwrap();
+    assert!(!state.session_profile_bindings.contains_key(session_id));
 }
 
 #[test]

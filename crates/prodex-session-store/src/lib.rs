@@ -25,6 +25,7 @@ use repair_candidates::{
 };
 use repair_transaction::SessionRepairTransaction;
 use session_file::{read_session_file_to_string, visit_session_lines};
+pub use session_file::{session_file_has_line_since, session_file_logical_len};
 use state_db_index::collect_state_db_rollout_paths;
 pub use state_db_index::{
     repair_stale_overlay_rollout_path_for_session, repair_stale_overlay_rollout_paths,

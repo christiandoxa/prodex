@@ -1,7 +1,7 @@
 use super::{SESSION_STORE_FILE_MAX_BYTES, repair_transaction::same_named_file};
 use anyhow::{Context, Result, bail};
 use std::fs;
-use std::io::{BufRead, BufReader, Read};
+use std::io::{BufRead, BufReader, Read, Seek, SeekFrom};
 use std::path::Path;
 
 pub(super) fn read_session_file_to_string(path: &Path) -> Result<String> {
@@ -64,6 +64,89 @@ pub(super) fn visit_session_lines(path: &Path, mut visit: impl FnMut(&str) -> bo
         }
     }
     Ok(())
+}
+
+/// Returns the decoded byte length of a session file.
+///
+/// Compressed rollouts use decoded offsets so callers can compare a marker written before and
+/// after a child attempt using the same coordinate system for both file formats.
+pub fn session_file_logical_len(path: &Path) -> Result<u64> {
+    Ok(read_session_file_to_string(path)?.len() as u64)
+}
+
+/// Returns whether a predicate matched a decoded session line after a decoded byte offset.
+pub fn session_file_has_line_since(
+    path: &Path,
+    offset: u64,
+    visit: impl FnMut(&str) -> bool,
+) -> Result<bool> {
+    let file = open_session_regular_file(path)?;
+    if !is_compressed_session_file(path) {
+        let file_len = file.metadata()?.len();
+        if file_len > SESSION_STORE_FILE_MAX_BYTES {
+            bail!(
+                "session {} exceeds safe size limit ({} bytes)",
+                path.display(),
+                SESSION_STORE_FILE_MAX_BYTES
+            );
+        }
+        let mut file = file;
+        file.seek(SeekFrom::Start(offset.min(file_len)))?;
+        let mut reader = BufReader::new(file);
+        return visit_session_lines_from_reader(path, &mut reader, offset.min(file_len), visit);
+    }
+
+    if offset > SESSION_STORE_FILE_MAX_BYTES {
+        bail!(
+            "session {} offset exceeds safe size limit ({} bytes)",
+            path.display(),
+            SESSION_STORE_FILE_MAX_BYTES
+        );
+    }
+    let mut decoder = zstd::stream::read::Decoder::new(file)?;
+    {
+        let mut remaining = offset;
+        let mut discarded = [0_u8; 8 * 1024];
+        while remaining > 0 {
+            let chunk_len = remaining.min(discarded.len() as u64) as usize;
+            let read = decoder.read(&mut discarded[..chunk_len])?;
+            if read == 0 {
+                return Ok(false);
+            }
+            remaining = remaining.saturating_sub(read as u64);
+        }
+    }
+
+    let mut reader = BufReader::new(decoder);
+    visit_session_lines_from_reader(path, &mut reader, offset, visit)
+}
+
+fn visit_session_lines_from_reader<R: Read>(
+    path: &Path,
+    reader: &mut BufReader<R>,
+    mut decoded_bytes: u64,
+    mut visit: impl FnMut(&str) -> bool,
+) -> Result<bool> {
+    let mut line = String::new();
+    loop {
+        line.clear();
+        let read = reader
+            .read_line(&mut line)
+            .with_context(|| format!("failed to read session {}", path.display()))?;
+        if read == 0 {
+            return Ok(false);
+        }
+        decoded_bytes = decoded_bytes.saturating_add(read as u64);
+        if decoded_bytes > SESSION_STORE_FILE_MAX_BYTES {
+            bail!(
+                "session exceeds safe size limit ({} bytes)",
+                SESSION_STORE_FILE_MAX_BYTES
+            );
+        }
+        if visit(&line) {
+            return Ok(true);
+        }
+    }
 }
 
 fn is_compressed_session_file(path: &Path) -> bool {
@@ -158,6 +241,42 @@ mod tests {
             serde_json::from_str::<serde_json::Value>(first_line).unwrap()["type"],
             "session_meta"
         );
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn compressed_rollout_line_scan_uses_decoded_offsets() {
+        let root = std::env::temp_dir().join(format!(
+            "prodex-session-file-scan-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::create_dir_all(&root).unwrap();
+        let path = root.join("rollout-00000000-0000-0000-0000-000000000001.jsonl.zst");
+        let before = b"{\"type\":\"session_meta\"}\n";
+        let after = b"{\"type\":\"usage_limit_reached\"}\n";
+        let mut contents = before.to_vec();
+        contents.extend_from_slice(after);
+        fs::write(
+            &path,
+            zstd::stream::encode_all(contents.as_slice(), 3).unwrap(),
+        )
+        .unwrap();
+
+        assert_eq!(
+            session_file_logical_len(&path).unwrap(),
+            contents.len() as u64
+        );
+        assert!(
+            session_file_has_line_since(&path, before.len() as u64, |line| {
+                line.contains("usage_limit_reached")
+            })
+            .unwrap()
+        );
+        assert!(!session_file_has_line_since(&path, contents.len() as u64, |_| true).unwrap());
         let _ = fs::remove_dir_all(root);
     }
 }

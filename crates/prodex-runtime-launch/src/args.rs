@@ -151,14 +151,22 @@ pub fn codex_resume_requested(codex_args: &[OsString]) -> bool {
 }
 
 pub fn retarget_codex_tui_resume_args(codex_args: &[OsString], session_id: &str) -> Vec<OsString> {
-    let command_index = first_codex_positional_arg_index(codex_args).unwrap_or(codex_args.len());
-    let mut args = Vec::with_capacity(command_index + 2);
+    let positional_index = first_codex_positional_arg_index(codex_args);
+    let command_index = positional_index
+        .or_else(|| codex_args.iter().position(|arg| arg == "--"))
+        .unwrap_or(codex_args.len());
+    let mut args = Vec::with_capacity(codex_args.len() + 2);
     extend_without_codex_thread_source(&mut args, &codex_args[..command_index]);
-    if args.last().is_some_and(|arg| arg == "--") {
-        args.pop();
-    }
     args.push(OsString::from("resume"));
     args.push(OsString::from(session_id));
+    if positional_index.is_some() {
+        extend_without_codex_positionals(
+            &mut args,
+            codex_args
+                .get(command_index.saturating_add(1)..)
+                .unwrap_or_default(),
+        );
+    }
     args
 }
 
@@ -176,7 +184,7 @@ fn codex_resume_command_index(codex_args: &[OsString]) -> Option<usize> {
     }
 }
 
-fn first_codex_positional_arg_index(codex_args: &[OsString]) -> Option<usize> {
+pub(crate) fn first_codex_positional_arg_index(codex_args: &[OsString]) -> Option<usize> {
     let mut index = 0;
     while index < codex_args.len() {
         let Some(arg) = codex_args[index].to_str() else {
@@ -184,6 +192,9 @@ fn first_codex_positional_arg_index(codex_args: &[OsString]) -> Option<usize> {
         };
         if arg == "--" {
             return None;
+        }
+        if arg == "-" {
+            return Some(index);
         }
         if codex_option_takes_separate_value(arg) {
             index += 2;
@@ -236,7 +247,7 @@ fn codex_option_takes_separate_value(arg: &str) -> bool {
     )
 }
 
-fn extend_without_codex_thread_source(output: &mut Vec<OsString>, args: &[OsString]) {
+pub(crate) fn extend_without_codex_thread_source(output: &mut Vec<OsString>, args: &[OsString]) {
     let mut index = 0;
     while index < args.len() {
         let Some(arg) = args[index].to_str() else {
@@ -254,6 +265,24 @@ fn extend_without_codex_thread_source(output: &mut Vec<OsString>, args: &[OsStri
         }
         output.push(args[index].clone());
         index += 1;
+    }
+}
+
+pub(crate) fn extend_without_codex_positionals(output: &mut Vec<OsString>, args: &[OsString]) {
+    let mut index = 0;
+    while index < args.len() {
+        let separator = args[index..]
+            .iter()
+            .position(|arg| arg == "--")
+            .map(|relative| index + relative)
+            .unwrap_or(args.len());
+        let before_separator = &args[index..separator];
+        let Some(positional_index) = first_codex_positional_arg_index(before_separator) else {
+            extend_without_codex_thread_source(output, before_separator);
+            return;
+        };
+        extend_without_codex_thread_source(output, &before_separator[..positional_index]);
+        index += positional_index + 1;
     }
 }
 

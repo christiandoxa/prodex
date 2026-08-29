@@ -1,25 +1,38 @@
+#[cfg(test)]
+use super::usage_limit_recovery::GoalUsageLimitMonitor;
+use super::usage_limit_recovery::{
+    GoalResumeRelaunchPlan, RuntimeUsageLimitResumeOptions, next_runtime_usage_limit_plan,
+    plan_runtime_usage_limit_relaunch, runtime_goal_monitor_dir, runtime_goal_session_offset_path,
+};
+#[cfg(test)]
+use super::usage_limit_recovery::{goal_database_has_thread_goals, goal_database_is_file};
 use super::{
-    RunCommandStrategy, active_profile_selection_order, clear_codex_session_binding,
-    codex_cli_config_override_value, find_ready_profiles, goal_resume_line_has_usage_limit,
+    RunCommandStrategy, clear_codex_session_binding, codex_cli_config_override_value,
     remove_first_codex_config_override_pair, restore_resume_session_settings,
     runtime_launch_cli_model, runtime_resume_external_provider_from_codex_args,
     runtime_resume_session_settings_from_codex_args, super_external_provider_codex_args,
 };
-use crate::app_state::{AppStateIoExt, ProfileProviderExt};
+use crate::app_state::AppStateIoExt;
 use crate::{
     AppPaths, AppState, codex_cli_config_override_exact_value, codex_profile_v2_config_path,
 };
 use anyhow::{Context, Result, bail};
+#[cfg(test)]
 use rusqlite::OptionalExtension;
 use sha2::{Digest, Sha256};
+#[cfg(test)]
 use std::collections::VecDeque;
 use std::env;
 use std::ffi::{OsStr, OsString};
-use std::fs::{self, File};
-use std::io::{BufRead, BufReader, Read};
+use std::fs;
+#[cfg(test)]
+use std::fs::File;
+use std::io::Read;
+#[cfg(test)]
+use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
+#[cfg(test)]
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 pub(super) const RUNTIME_GOAL_SESSION_NOTIFY_COMMAND: &str = "__runtime-goal-session-notify";
 const RUNTIME_GOAL_SESSION_HOOK_TIMEOUT_SECS: u64 = 5;
@@ -28,43 +41,35 @@ const RUNTIME_GOAL_SESSION_NOTIFY_MAX_PAYLOAD_BYTES: u64 = 64 * 1024;
 const RUNTIME_GOAL_SESSION_HOOK_KEY: &str = "/<session-flags>/config.toml:session_start:0:0";
 #[cfg(windows)]
 const RUNTIME_GOAL_SESSION_HOOK_KEY: &str = r"C:\<session-flags>\config.toml:session_start:0:0";
-const GOAL_USAGE_LIMIT_RETRY_INTERVAL: Duration = Duration::from_secs(5);
+#[cfg(test)]
 static RUNTIME_GOAL_MONITOR_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
 impl RunCommandStrategy {
+    #[cfg(test)]
     pub(super) fn resume_session_id(&self) -> Option<&str> {
         prodex_runtime_launch::codex_resume_session_id(&self.codex_args)
     }
 
     pub(super) fn plan_goal_resume_relaunch(
-        &self,
+        &mut self,
         status: &std::process::ExitStatus,
     ) -> Result<Option<GoalResumeRelaunchPlan>> {
-        if status.success() || self.args.no_auto_rotate {
-            return Ok(None);
-        }
-        let Some(session_selector) = self.resume_session_id() else {
+        let Some(monitor) = self.goal_usage_limit_monitor.as_mut() else {
             return Ok(None);
         };
-        let paths = AppPaths::discover()?;
-        let state = AppState::load_and_repair(&paths)?;
-        let report = prodex_session_store::resolve_session_report_by_id_in_store(
-            &paths.shared_codex_root,
-            &state,
-            session_selector,
+        plan_runtime_usage_limit_relaunch(
+            monitor,
+            status,
+            &RuntimeUsageLimitResumeOptions {
+                requested_profile: self.args.profile.as_deref(),
+                no_auto_rotate: self.args.no_auto_rotate,
+                skip_quota_check: self.args.skip_quota_check,
+                base_url: self.args.base_url.as_deref(),
+                include_code_review: self.include_code_review,
+                no_proxy: self.args.no_proxy,
+                attempted_profiles: &self.auto_goal_resume_attempted_profiles,
+            },
         )
-        .with_context(|| "failed to resolve goal resume session")?;
-        let analysis = analyze_goal_resume_session(Path::new(&report.path))?;
-        if !analysis.saw_usage_limit {
-            return Ok(None);
-        }
-        let thread_id = analysis
-            .thread_id
-            .context("goal resume session is missing a thread id")?;
-        if !shared_goal_needs_resume(&paths.shared_codex_root, &thread_id)? {
-            return Ok(None);
-        }
-        Ok(self.next_goal_resume_plan(&state, &report.id))
     }
 
     fn next_goal_resume_plan(
@@ -72,94 +77,76 @@ impl RunCommandStrategy {
         state: &AppState,
         session_id: &str,
     ) -> Option<GoalResumeRelaunchPlan> {
-        let failed_profile = state
-            .session_profile_bindings
-            .get(session_id)
-            .map(|binding| binding.profile_name.clone())
-            .or_else(|| self.args.profile.clone())
-            .or_else(|| state.active_profile.clone())
-            .unwrap_or_default();
-        let candidates = if self.args.skip_quota_check {
-            active_profile_selection_order(state, &failed_profile)
-        } else {
-            find_ready_profiles(
-                state,
-                &failed_profile,
-                self.args.base_url.as_deref(),
-                self.include_code_review,
-                self.args.no_proxy,
-            )
-        };
-        candidates
-            .into_iter()
-            .filter(|candidate| candidate != &failed_profile)
-            .filter(|candidate| !self.auto_goal_resume_attempted_profiles.contains(candidate))
-            .find(|candidate| {
-                state.profiles.get(candidate).is_some_and(|profile| {
-                    profile.provider.supports_codex_runtime()
-                        && profile
-                            .provider
-                            .auth_summary(&profile.codex_home)
-                            .quota_compatible
-                })
-            })
-            .map(|profile_name| GoalResumeRelaunchPlan {
-                session_id: session_id.to_string(),
-                profile_name,
-            })
+        next_runtime_usage_limit_plan(
+            state,
+            session_id,
+            &RuntimeUsageLimitResumeOptions {
+                requested_profile: self.args.profile.as_deref(),
+                no_auto_rotate: self.args.no_auto_rotate,
+                skip_quota_check: self.args.skip_quota_check,
+                base_url: self.args.base_url.as_deref(),
+                include_code_review: self.include_code_review,
+                no_proxy: self.args.no_proxy,
+                attempted_profiles: &self.auto_goal_resume_attempted_profiles,
+            },
+        )
     }
 
     pub(super) fn apply_goal_resume_relaunch(
         &mut self,
         plan: GoalResumeRelaunchPlan,
     ) -> Result<()> {
-        let had_resume_session = self.resume_session_id().is_some();
+        let session_settings = runtime_resume_session_settings_from_codex_args(&self.codex_args);
+        let model_is_explicit = runtime_launch_cli_model(&self.codex_args).is_some()
+            || codex_cli_config_override_value(&self.codex_args, "model").is_some();
+        let effort_is_explicit =
+            codex_cli_config_override_value(&self.codex_args, "model_reasoning_effort").is_some();
+        let exec_mode = prodex_runtime_launch::is_codex_exec_invocation(&self.codex_args);
         clear_codex_session_binding(&plan.session_id)?;
         self.goal_resume_session_affinity_release = Some(plan.session_id.clone());
-        if !had_resume_session {
-            self.codex_args = prodex_runtime_launch::retarget_codex_tui_resume_args(
+        self.codex_args = if exec_mode {
+            prodex_runtime_launch::retarget_codex_exec_resume_args(
                 &self.codex_args,
                 &plan.session_id,
-            );
+            )
+        } else {
+            prodex_runtime_launch::retarget_codex_tui_resume_args(
+                &self.codex_args,
+                &plan.session_id,
+            )
+        };
+        let session_settings = session_settings
+            .or_else(|| runtime_resume_session_settings_from_codex_args(&self.codex_args));
+        restore_resume_session_settings(
+            &mut self.codex_args,
+            session_settings.as_ref(),
+            model_is_explicit,
+            effort_is_explicit,
+        );
 
-            let session_settings =
-                runtime_resume_session_settings_from_codex_args(&self.codex_args);
-            let model_is_explicit = runtime_launch_cli_model(&self.codex_args).is_some()
-                || codex_cli_config_override_value(&self.codex_args, "model").is_some();
-            let effort_is_explicit =
-                codex_cli_config_override_value(&self.codex_args, "model_reasoning_effort")
-                    .is_some();
-            restore_resume_session_settings(
-                &mut self.codex_args,
-                session_settings.as_ref(),
-                model_is_explicit,
-                effort_is_explicit,
-            );
-
-            if self.model_provider_override.is_none()
-                && let Some(provider) =
-                    runtime_resume_external_provider_from_codex_args(&self.codex_args)?
-            {
-                let base_url = self
-                    .args
-                    .base_url
-                    .as_deref()
-                    .unwrap_or_else(|| provider.default_base_url());
-                let mut provider_args =
-                    super_external_provider_codex_args(provider, base_url, None, None, None);
-                remove_first_codex_config_override_pair(&mut provider_args, "model");
-                let mut next_args = Vec::with_capacity(provider_args.len() + self.codex_args.len());
-                next_args.extend(provider_args);
-                next_args.extend(std::mem::take(&mut self.codex_args));
-                self.codex_args = next_args;
-                self.auto_external_provider = Some(provider);
-                self.auto_external_provider_base_url = Some(base_url.to_string());
-                self.model_provider_override = Some(provider.model_provider_id().to_string());
-                self.model_context_window_tokens =
-                    super::runtime_launch_cli_model_context_window_tokens(&self.codex_args);
-                self.gemini_thinking_budget_tokens =
-                    super::runtime_launch_cli_gemini_thinking_budget_tokens(&self.codex_args);
-            }
+        if self.model_provider_override.is_none()
+            && let Some(provider) =
+                runtime_resume_external_provider_from_codex_args(&self.codex_args)?
+        {
+            let base_url = self
+                .args
+                .base_url
+                .as_deref()
+                .unwrap_or_else(|| provider.default_base_url());
+            let mut provider_args =
+                super_external_provider_codex_args(provider, base_url, None, None, None);
+            remove_first_codex_config_override_pair(&mut provider_args, "model");
+            let mut next_args = Vec::with_capacity(provider_args.len() + self.codex_args.len());
+            next_args.extend(provider_args);
+            next_args.extend(std::mem::take(&mut self.codex_args));
+            self.codex_args = next_args;
+            self.auto_external_provider = Some(provider);
+            self.auto_external_provider_base_url = Some(base_url.to_string());
+            self.model_provider_override = Some(provider.model_provider_id().to_string());
+            self.model_context_window_tokens =
+                super::runtime_launch_cli_model_context_window_tokens(&self.codex_args);
+            self.gemini_thinking_budget_tokens =
+                super::runtime_launch_cli_gemini_thinking_budget_tokens(&self.codex_args);
         }
         self.auto_goal_resume_attempted_profiles
             .insert(plan.profile_name.clone());
@@ -167,7 +154,11 @@ impl RunCommandStrategy {
         if let Some(monitor) = self.goal_usage_limit_monitor.as_mut() {
             monitor.prepare_for_resume();
         }
-        if !codex_args_include_goal_resume(&self.codex_args) {
+        if exec_mode {
+            self.codex_args.push(OsString::from(
+                "Continue the interrupted task from the persisted session. Preserve completed work and do not repeat completed tool calls.",
+            ));
+        } else if !codex_args_include_goal_resume(&self.codex_args) {
             self.codex_args.push(OsString::from("/goal resume"));
         }
         Ok(())
@@ -183,206 +174,11 @@ impl RunCommandStrategy {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(super) struct GoalResumeRelaunchPlan {
-    pub(super) session_id: String,
-    pub(super) profile_name: String,
-}
-
+#[cfg(test)]
 #[derive(Debug, Default)]
 pub(super) struct GoalResumeSessionAnalysis {
     pub(super) thread_id: Option<String>,
     pub(super) saw_usage_limit: bool,
-}
-
-pub(super) struct GoalUsageLimitMonitor {
-    db_path: PathBuf,
-    pub(super) marker_path: PathBuf,
-    session_id: Option<String>,
-    connection: Option<rusqlite::Connection>,
-    armed: bool,
-    usage_limit_pending: bool,
-    next_retry_at: Instant,
-    started_at_ms: i64,
-}
-
-impl GoalUsageLimitMonitor {
-    fn new(db_path: PathBuf, marker_path: PathBuf, session_id: Option<String>) -> Self {
-        Self {
-            db_path,
-            marker_path,
-            session_id,
-            connection: None,
-            armed: false,
-            usage_limit_pending: false,
-            next_retry_at: Instant::now(),
-            started_at_ms: current_unix_time_millis(),
-        }
-    }
-
-    pub(super) fn take_usage_limit_signal(&mut self) -> Result<Option<String>> {
-        self.refresh_session_id()?;
-        let Some(session_id) = self.session_id.clone() else {
-            return Ok(None);
-        };
-        if self.connection.is_none() {
-            self.connection = Some(
-                rusqlite::Connection::open_with_flags(
-                    &self.db_path,
-                    rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY
-                        | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
-                )
-                .with_context(|| format!("failed to open {}", self.db_path.display()))?,
-            );
-        }
-        let status = self
-            .connection
-            .as_ref()
-            .context("goal usage monitor connection is unavailable")?
-            .query_row(
-                "SELECT status, updated_at_ms FROM thread_goals WHERE thread_id = ? ORDER BY updated_at_ms DESC LIMIT 1",
-                [&session_id],
-                |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?)),
-            )
-            .optional()
-            .with_context(|| format!("failed to read goal status from {}", self.db_path.display()))?;
-        let normalized = status
-            .as_ref()
-            .map(|(status, _)| status.trim().to_ascii_lowercase());
-        if normalized.as_deref() == Some("active") {
-            self.armed = true;
-            self.usage_limit_pending = false;
-            return Ok(None);
-        }
-        let current_attempt_hit_limit = status
-            .as_ref()
-            .is_some_and(|(_, updated_at_ms)| *updated_at_ms >= self.started_at_ms);
-        if !self.usage_limit_pending
-            && normalized.as_deref() == Some("usage_limited")
-            && (self.armed || current_attempt_hit_limit)
-        {
-            self.armed = false;
-            self.usage_limit_pending = true;
-            self.next_retry_at = Instant::now();
-        }
-        if self.usage_limit_pending && Instant::now() >= self.next_retry_at {
-            self.next_retry_at = Instant::now() + GOAL_USAGE_LIMIT_RETRY_INTERVAL;
-            return Ok(Some(session_id));
-        }
-        Ok(None)
-    }
-
-    fn refresh_session_id(&mut self) -> Result<()> {
-        let raw = match fs::read_to_string(&self.marker_path) {
-            Ok(raw) => raw,
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
-            Err(error) => {
-                return Err(error)
-                    .with_context(|| format!("failed to read {}", self.marker_path.display()));
-            }
-        };
-        let session_id = raw.trim();
-        uuid::Uuid::parse_str(session_id).context("invalid runtime goal session id")?;
-        if self.session_id.as_deref() == Some(session_id) {
-            return Ok(());
-        }
-        self.session_id = Some(session_id.to_string());
-        self.armed = false;
-        self.usage_limit_pending = false;
-        self.next_retry_at = Instant::now();
-        Ok(())
-    }
-
-    fn prepare_for_resume(&mut self) {
-        self.armed = false;
-        self.usage_limit_pending = false;
-        self.next_retry_at = Instant::now();
-        self.started_at_ms = current_unix_time_millis();
-    }
-}
-
-fn current_unix_time_millis() -> i64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .ok()
-        .and_then(|duration| i64::try_from(duration.as_millis()).ok())
-        .unwrap_or(i64::MAX)
-}
-
-impl Drop for GoalUsageLimitMonitor {
-    fn drop(&mut self) {
-        let _ = fs::remove_file(&self.marker_path);
-    }
-}
-
-pub(super) fn prepare_goal_usage_limit_monitor(
-    codex_args: &[OsString],
-    disabled: bool,
-) -> Result<Option<GoalUsageLimitMonitor>> {
-    if disabled {
-        return Ok(None);
-    }
-    let paths = AppPaths::discover()?;
-    let state = AppState::load_and_repair(&paths)?;
-    let rotatable_profile_count = state
-        .profiles
-        .values()
-        .filter(|profile| {
-            profile.provider.supports_codex_runtime()
-                && profile
-                    .provider
-                    .auth_summary(&profile.codex_home)
-                    .quota_compatible
-        })
-        .count();
-    if rotatable_profile_count < 2 {
-        return Ok(None);
-    }
-    let db_path = paths.shared_codex_root.join("goals_1.sqlite");
-    if !goal_database_is_file(&db_path)? {
-        return Ok(None);
-    }
-    let connection = rusqlite::Connection::open_with_flags(
-        &db_path,
-        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
-    )
-    .with_context(|| format!("failed to open {}", db_path.display()))?;
-    if !goal_database_has_thread_goals(&connection)? {
-        return Ok(None);
-    }
-    let session_id = prodex_runtime_launch::codex_resume_session_id(codex_args)
-        .map(|selector| {
-            prodex_session_store::resolve_session_report_by_id_in_store(
-                &paths.shared_codex_root,
-                &state,
-                selector,
-            )
-            .with_context(|| "failed to resolve goal resume session")
-            .map(|report| report.id)
-        })
-        .transpose()?;
-    let marker_dir = runtime_goal_monitor_dir(&paths);
-    fs::create_dir_all(&marker_dir)
-        .with_context(|| format!("failed to create {}", marker_dir.display()))?;
-    let sequence = RUNTIME_GOAL_MONITOR_SEQUENCE.fetch_add(1, Ordering::Relaxed);
-    let marker_path = marker_dir.join(format!("session-{}-{sequence}.id", std::process::id()));
-    match fs::remove_file(&marker_path) {
-        Ok(()) => {}
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-        Err(error) => {
-            return Err(error)
-                .with_context(|| format!("failed to clear {}", marker_path.display()));
-        }
-    }
-    Ok(Some(GoalUsageLimitMonitor::new(
-        db_path,
-        marker_path,
-        session_id,
-    )))
-}
-
-pub(super) fn runtime_goal_monitor_dir(paths: &AppPaths) -> PathBuf {
-    paths.root.join("runtime-goal-monitors")
 }
 
 fn codex_notify_is_configured(
@@ -413,7 +209,7 @@ fn codex_notify_is_configured(
         || config_has_notify(&codex_home.join("config.toml"))?)
 }
 
-pub(super) fn add_runtime_goal_session_tracking(
+pub(crate) fn add_runtime_goal_session_tracking(
     codex_home: &Path,
     profile_v2_name: Option<&str>,
     codex_args: &mut Vec<OsString>,
@@ -534,6 +330,23 @@ pub(super) fn write_runtime_goal_session_marker(marker_path: &Path, payload: &Os
         .and_then(serde_json::Value::as_str)
         .context("runtime goal session payload is missing a session id")?;
     uuid::Uuid::parse_str(session_id).context("invalid runtime goal session id")?;
+    let offset = AppState::load_and_repair(&paths)
+        .ok()
+        .and_then(|state| {
+            prodex_session_store::resolve_session_report_by_id_in_store(
+                &paths.shared_codex_root,
+                &state,
+                session_id,
+            )
+            .ok()
+        })
+        .and_then(|report| fs::metadata(report.path).ok())
+        .map(|metadata| metadata.len())
+        .unwrap_or(0);
+    fs::write(
+        runtime_goal_session_offset_path(marker_path),
+        format!("{offset}\n"),
+    )?;
     fs::write(marker_path, format!("{session_id}\n"))?;
     Ok(())
 }
@@ -546,6 +359,7 @@ pub(super) fn codex_args_include_goal_resume(codex_args: &[OsString]) -> bool {
     })
 }
 
+#[cfg(test)]
 pub(super) fn analyze_goal_resume_session(path: &Path) -> Result<GoalResumeSessionAnalysis> {
     let file = File::open(path).with_context(|| format!("failed to read {}", path.display()))?;
     let mut analysis = GoalResumeSessionAnalysis::default();
@@ -572,10 +386,11 @@ pub(super) fn analyze_goal_resume_session(path: &Path) -> Result<GoalResumeSessi
     }
     analysis.saw_usage_limit = tail
         .iter()
-        .any(|line| goal_resume_line_has_usage_limit(line));
+        .any(|line| runtime_proxy_crate::runtime_usage_limit_text_message(line));
     Ok(analysis)
 }
 
+#[cfg(test)]
 pub(super) fn shared_goal_needs_resume(shared_codex_root: &Path, thread_id: &str) -> Result<bool> {
     let db_path = shared_codex_root.join("goals_1.sqlite");
     if !goal_database_is_file(&db_path)? {
@@ -602,25 +417,6 @@ pub(super) fn shared_goal_needs_resume(shared_codex_root: &Path, thread_id: &str
     }))
 }
 
-fn goal_database_is_file(path: &Path) -> Result<bool> {
-    match fs::metadata(path) {
-        Ok(metadata) => Ok(metadata.is_file()),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
-        Err(error) => Err(error).with_context(|| format!("failed to read {}", path.display())),
-    }
-}
-
-fn goal_database_has_thread_goals(conn: &rusqlite::Connection) -> Result<bool> {
-    Ok(conn
-        .query_row(
-            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'thread_goals'",
-            [],
-            |_| Ok(()),
-        )
-        .optional()?
-        .is_some())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -644,7 +440,12 @@ mod tests {
 
         let marker_path = root.join("session.id");
         fs::write(&marker_path, "not-a-uuid\n").unwrap();
-        let mut monitor = GoalUsageLimitMonitor::new(root.join("goals.sqlite"), marker_path, None);
+        let mut monitor = GoalUsageLimitMonitor::new(
+            AppPaths::discover().unwrap(),
+            Some(root.join("goals.sqlite")),
+            marker_path,
+            None,
+        );
         let validation_error = monitor.take_usage_limit_signal().unwrap_err();
         assert!(
             validation_error

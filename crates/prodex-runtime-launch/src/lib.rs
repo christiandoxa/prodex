@@ -1,4 +1,5 @@
 mod args;
+mod args_resume;
 mod child;
 mod dry_run;
 mod profile;
@@ -11,6 +12,7 @@ use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 
 pub use self::args::*;
+pub use self::args_resume::*;
 pub use self::child::*;
 pub use self::dry_run::*;
 pub use self::profile::*;
