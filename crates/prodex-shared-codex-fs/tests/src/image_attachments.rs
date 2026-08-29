@@ -396,9 +396,10 @@ fn persist_codex_session_clipboard_image_ignores_non_temp_source() {
         .duration_since(UNIX_EPOCH)
         .expect("clock should be after epoch")
         .as_nanos();
-    let outside_root = std::env::current_dir()
-        .expect("current dir should exist")
-        .join("target")
+    let outside_root = std::env::var_os("HOME")
+        .or_else(|| std::env::var_os("USERPROFILE"))
+        .map(PathBuf::from)
+        .expect("a user home should exist")
         .join(format!(
             "prodex-image-attachments-non-temp-{}-{unique}",
             std::process::id()
