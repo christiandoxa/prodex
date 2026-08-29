@@ -15,6 +15,13 @@ function releaseManifest() {
   return JSON.parse(fs.readFileSync("migration/mojo-ownership.json", "utf8"));
 }
 
+function unreducedBaselineRustEntry(manifest) {
+  const reducedPaths = new Set(manifest.rust_semantic_reductions.map((reduction) => reduction.file));
+  return manifest.baseline_inventory.find(
+    (entry) => entry.language === "rust" && !reducedPaths.has(entry.path),
+  );
+}
+
 test("Mojo ownership counter excludes comments, imports, and Rust test modules", () => {
   assert.equal(
     countSemanticLines(
@@ -43,7 +50,7 @@ test("ownership result is deterministic for an explicit inventory", () => {
 test("removing a baseline Rust source requires a reduction record", () => {
   const manifest = releaseManifest();
   manifest.release_inventory.removed = [
-    manifest.baseline_inventory.find((entry) => entry.path.endsWith("provider-core/src/constraints.rs")).path,
+    unreducedBaselineRustEntry(manifest).path,
   ];
   assert.throws(
     () => validateManifest(manifest, BASE_SHA, "WORKTREE"),
@@ -102,8 +109,7 @@ test("the frozen baseline records the Rust denominator and migration floor", () 
 
 test("release inventory cannot hide baseline Rust semantic lines", () => {
   const manifest = releaseManifest();
-  const entry = manifest.baseline_inventory.find((candidate) =>
-    candidate.path.endsWith("provider-core/src/constraints.rs"));
+  const entry = unreducedBaselineRustEntry(manifest);
   manifest.release_inventory.overrides[entry.path] = {
     classification: "SYSTEM_BOUNDARY",
   };
@@ -186,7 +192,7 @@ test("the ownership threshold is exact rather than rounded", () => {
 
 test("source-only cleanup stays separate from frozen migration volume", () => {
   const result = calculateOwnership(releaseManifest(), BASE_SHA, "WORKTREE");
-  assert.equal(result.rust_semantic_loc_migrated, 133);
+  assert.equal(result.rust_semantic_loc_migrated, 427);
   assert.equal(result.source_cleanup_loc, 179);
   assert.equal(result.required_migration_volume_loc, 423);
 });
