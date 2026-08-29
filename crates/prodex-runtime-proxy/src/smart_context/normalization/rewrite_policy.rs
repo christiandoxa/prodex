@@ -34,11 +34,7 @@ pub(in crate::smart_context) fn smart_context_rewrite_policy_bucket_key_complete
     bucket_key: &SmartContextRewritePolicyBucketKey,
 ) -> bool {
     bucket_key.route.as_deref().is_some_and(non_empty)
-        && bucket_key
-            .model
-            .as_deref()
-            .and_then(|model| smart_context_token_calibration_normalized_model(Some(model)))
-            .is_some()
+        && smart_context_rewrite_policy_model_is_valid(&bucket_key.model)
         && bucket_key.profile.as_deref().is_some_and(non_empty)
 }
 
@@ -92,13 +88,39 @@ pub(in crate::smart_context) fn smart_context_rewrite_policy_model_matches(
     target: &Option<String>,
     sample: &Option<String>,
 ) -> bool {
-    let Some(target) = smart_context_token_calibration_normalized_model(target.as_deref()) else {
+    let (Some(target), Some(sample)) = (target.as_deref(), sample.as_deref()) else {
         return false;
     };
-    let Some(sample) = smart_context_token_calibration_normalized_model(sample.as_deref()) else {
+    #[cfg(feature = "mojo")]
+    {
+        prodex_mojo_core::runtime::smart_context_calibration_models_match(target, sample)
+            .is_ok_and(|matches| matches)
+    }
+    #[cfg(not(feature = "mojo"))]
+    {
+        let Some(target) = smart_context_token_calibration_normalized_model(Some(target)) else {
+            return false;
+        };
+        let Some(sample) = smart_context_token_calibration_normalized_model(Some(sample)) else {
+            return false;
+        };
+        target == sample
+    }
+}
+
+fn smart_context_rewrite_policy_model_is_valid(model: &Option<String>) -> bool {
+    let Some(model) = model.as_deref() else {
         return false;
     };
-    target == sample
+    #[cfg(feature = "mojo")]
+    {
+        prodex_mojo_core::runtime::smart_context_calibration_models_match(model, model)
+            .is_ok_and(|matches| matches)
+    }
+    #[cfg(not(feature = "mojo"))]
+    {
+        smart_context_token_calibration_normalized_model(Some(model)).is_some()
+    }
 }
 
 pub(in crate::smart_context) fn smart_context_rewrite_telemetry_sample_safe_saved(
