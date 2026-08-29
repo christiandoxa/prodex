@@ -44,6 +44,31 @@ pub struct SmartContextTokenUsageSummary {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SmartContextTokenAccountingInput {
+    pub model_context_window_tokens: Option<u64>,
+    pub reserved_output_tokens: u64,
+    pub current_input_tokens: u64,
+    pub estimated_current_request_tokens: u64,
+    pub observed_input_tokens: u64,
+    pub observed_cached_input_tokens: u64,
+    pub observed_output_tokens: u64,
+    pub observed_reasoning_tokens: u64,
+    pub last_accounted_input_tokens: u64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SmartContextTokenAccountingSummary {
+    pub observed_uncached_input_tokens: u64,
+    pub observed_total_tokens: u64,
+    pub observed_context_tokens: u64,
+    pub current_request_accounted_tokens: u64,
+    pub effective_input_tokens: u64,
+    pub effective_input_source: i64,
+    pub available_context_tokens: Option<u64>,
+    pub risk_bits: u64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SmartContextCalibratedEstimateInput {
     pub body_bytes: u64,
     pub baseline_estimate: u64,
@@ -110,6 +135,15 @@ pub const SMART_CONTEXT_POLICY_REASON_CRITICAL_BUDGET: u64 = 1 << 9;
 pub const SMART_CONTEXT_POLICY_REASON_ALL: u64 = (1 << 10) - 1;
 
 pub const SMART_CONTEXT_TOKEN_ACCOUNTING_MAX_COUNT: usize = 256;
+pub const SMART_CONTEXT_ACCOUNTING_SOURCE_CURRENT_TOKENS: i64 = 0;
+pub const SMART_CONTEXT_ACCOUNTING_SOURCE_BODY_ESTIMATE: i64 = 1;
+pub const SMART_CONTEXT_ACCOUNTING_SOURCE_OBSERVED_HISTORY: i64 = 2;
+pub const SMART_CONTEXT_ACCOUNTING_SOURCE_UNKNOWN: i64 = 3;
+pub const SMART_CONTEXT_ACCOUNTING_RISK_UNKNOWN_WINDOW: u64 = 1 << 0;
+pub const SMART_CONTEXT_ACCOUNTING_RISK_ZERO_WINDOW: u64 = 1 << 1;
+pub const SMART_CONTEXT_ACCOUNTING_RISK_RESERVED_OUTPUT: u64 = 1 << 2;
+pub const SMART_CONTEXT_ACCOUNTING_RISK_UNKNOWN_INPUT: u64 = 1 << 3;
+pub const SMART_CONTEXT_ACCOUNTING_RISK_ALL: u64 = (1 << 4) - 1;
 
 pub const OPTIMISTIC_CANDIDATE_KEEP: i64 = 0;
 pub const OPTIMISTIC_CANDIDATE_AUTH_FAILURE: i64 = 1;
@@ -242,6 +276,27 @@ unsafe extern "C" {
         last_accounted_input_tokens_address: u64,
         last_observed_context_tokens_address: u64,
         count: i64,
+    ) -> i64;
+    fn prodex_smart_context_token_accounting_v1(
+        model_context_window_tokens: u64,
+        model_context_window_has_value: i64,
+        reserved_output_tokens: u64,
+        current_input_tokens: u64,
+        estimated_current_request_tokens: u64,
+        observed_input_tokens: u64,
+        observed_cached_input_tokens: u64,
+        observed_output_tokens: u64,
+        observed_reasoning_tokens: u64,
+        last_accounted_input_tokens: u64,
+        observed_uncached_input_tokens: *mut u64,
+        observed_total_tokens: *mut u64,
+        observed_context_tokens: *mut u64,
+        current_request_accounted_tokens: *mut u64,
+        effective_input_tokens: *mut u64,
+        effective_input_source: *mut i64,
+        available_context_tokens: *mut u64,
+        available_context_has_value: *mut i64,
+        risk_bits: *mut u64,
     ) -> i64;
     fn prodex_smart_context_exactness_plan_v1(
         exact_mode: i64,
@@ -412,6 +467,61 @@ pub fn smart_context_token_usage_summary_self_test() -> bool {
             && summary.last_input_tokens == 0
             && summary.last_accounted_input_tokens == 8
             && summary.last_observed_context_tokens == 8
+    })
+}
+
+pub fn smart_context_token_accounting(
+    input: SmartContextTokenAccountingInput,
+) -> Result<SmartContextTokenAccountingSummary, crate::MojoError> {
+    let mut observed_uncached_input_tokens = 0_u64;
+    let mut observed_total_tokens = 0_u64;
+    let mut observed_context_tokens = 0_u64;
+    let mut current_request_accounted_tokens = 0_u64;
+    let mut effective_input_tokens = 0_u64;
+    let mut effective_input_source = -1_i64;
+    let mut available_context_tokens = 0_u64;
+    let mut available_context_has_value = 0_i64;
+    let mut risk_bits = 0_u64;
+    let status = unsafe {
+        prodex_smart_context_token_accounting_v1(
+            input.model_context_window_tokens.unwrap_or_default(),
+            i64::from(input.model_context_window_tokens.is_some()),
+            input.reserved_output_tokens,
+            input.current_input_tokens,
+            input.estimated_current_request_tokens,
+            input.observed_input_tokens,
+            input.observed_cached_input_tokens,
+            input.observed_output_tokens,
+            input.observed_reasoning_tokens,
+            input.last_accounted_input_tokens,
+            &mut observed_uncached_input_tokens,
+            &mut observed_total_tokens,
+            &mut observed_context_tokens,
+            &mut current_request_accounted_tokens,
+            &mut effective_input_tokens,
+            &mut effective_input_source,
+            &mut available_context_tokens,
+            &mut available_context_has_value,
+            &mut risk_bits,
+        )
+    };
+    if status != 0
+        || !matches!(effective_input_source, 0..=3)
+        || !matches!(available_context_has_value, 0 | 1)
+        || risk_bits & !SMART_CONTEXT_ACCOUNTING_RISK_ALL != 0
+    {
+        return Err(crate::MojoError::InvalidOutput);
+    }
+    Ok(SmartContextTokenAccountingSummary {
+        observed_uncached_input_tokens,
+        observed_total_tokens,
+        observed_context_tokens,
+        current_request_accounted_tokens,
+        effective_input_tokens,
+        effective_input_source,
+        available_context_tokens: (available_context_has_value == 1)
+            .then_some(available_context_tokens),
+        risk_bits,
     })
 }
 

@@ -1,5 +1,5 @@
 #[cfg(any(not(feature = "mojo"), test))]
-use super::estimation::smart_context_estimate_tokens_from_body_bytes;
+use super::estimation::smart_context_estimate_tokens_from_body_bytes_rust;
 use super::*;
 use crate::RuntimeTokenUsage;
 
@@ -13,6 +13,7 @@ pub(in crate::smart_context) const SMART_CONTEXT_ADAPTIVE_ESTIMATE_RECENT_USAGE_
 #[cfg(any(not(feature = "mojo"), test))]
 pub(in crate::smart_context) const SMART_CONTEXT_ADAPTIVE_ESTIMATE_MAX_INFLATION: u64 = 2;
 
+#[cfg(feature = "mojo")]
 pub(in crate::smart_context) fn smart_context_observed_calibrated_request_estimate(
     body_bytes: usize,
     baseline_estimate: u64,
@@ -48,7 +49,7 @@ pub(in crate::smart_context) fn smart_context_observed_calibrated_request_estima
 }
 
 #[cfg(any(not(feature = "mojo"), test))]
-fn smart_context_observed_calibrated_request_estimate_rust(
+pub(super) fn smart_context_observed_calibrated_request_estimate_rust(
     body_bytes: usize,
     baseline_estimate: u64,
     observed_usage: &[RuntimeTokenUsage],
@@ -65,7 +66,7 @@ fn smart_context_observed_calibrated_request_estimate_rust(
     ) else {
         return baseline_estimate;
     };
-    let raw_floor = smart_context_estimate_tokens_from_body_bytes(body_bytes)
+    let raw_floor = smart_context_estimate_tokens_from_body_bytes_rust(body_bytes)
         .saturating_add(1)
         .saturating_div(2)
         .max(1);

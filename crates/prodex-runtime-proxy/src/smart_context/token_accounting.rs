@@ -1,13 +1,25 @@
 mod calibration;
 mod estimation;
 mod observed;
+mod oracle;
 
 pub(super) use calibration::*;
 pub use estimation::{
     SMART_CONTEXT_ESTIMATED_BYTES_PER_TOKEN, smart_context_estimate_tokens_from_body,
     smart_context_estimate_tokens_from_body_bytes,
 };
+#[cfg(feature = "mojo")]
 use observed::smart_context_observed_usage_totals;
+use oracle::smart_context_observed_token_accounting_from_decision;
+#[cfg(any(not(feature = "mojo"), test))]
+pub(super) use oracle::{
+    smart_context_observed_token_accounting_rust, smart_context_pressure_snapshot_rust,
+};
+
+#[cfg(feature = "mojo")]
+pub(super) use super::{
+    smart_context_effective_input_source, smart_context_token_accounting_risks,
+};
 
 use super::*;
 use crate::RuntimeTokenUsage;
@@ -325,6 +337,33 @@ pub enum SmartContextEstimatorConfidence {
     Low,
 }
 
+#[cfg(feature = "mojo")]
+fn smart_context_token_accounting_risks_from_bits(
+    bits: u64,
+) -> Vec<SmartContextTokenAccountingRisk> {
+    [
+        (
+            prodex_mojo_core::runtime::SMART_CONTEXT_ACCOUNTING_RISK_UNKNOWN_WINDOW,
+            SmartContextTokenAccountingRisk::UnknownTokenWindow,
+        ),
+        (
+            prodex_mojo_core::runtime::SMART_CONTEXT_ACCOUNTING_RISK_ZERO_WINDOW,
+            SmartContextTokenAccountingRisk::ZeroContextWindow,
+        ),
+        (
+            prodex_mojo_core::runtime::SMART_CONTEXT_ACCOUNTING_RISK_RESERVED_OUTPUT,
+            SmartContextTokenAccountingRisk::ReservedOutputConsumesWindow,
+        ),
+        (
+            prodex_mojo_core::runtime::SMART_CONTEXT_ACCOUNTING_RISK_UNKNOWN_INPUT,
+            SmartContextTokenAccountingRisk::UnknownCurrentRequestAccounting,
+        ),
+    ]
+    .into_iter()
+    .filter_map(|(bit, risk)| (bits & bit != 0).then_some(risk))
+    .collect()
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SmartContextPressureSnapshot {
     pub model_context_window_tokens: Option<u64>,
@@ -394,6 +433,18 @@ pub struct SmartContextObservedTokenAccounting {
     pub pressure: SmartContextPressureSnapshot,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct SmartContextTokenAccountingDecision {
+    observed_uncached_input_tokens: u64,
+    observed_total_tokens: u64,
+    observed_context_tokens: u64,
+    current_request_accounted_tokens: u64,
+    effective_input_tokens: u64,
+    effective_input_source: SmartContextTokenAccountingSource,
+    available_context_tokens: Option<u64>,
+    accounting_risks: Vec<SmartContextTokenAccountingRisk>,
+}
+
 pub fn smart_context_observed_token_accounting(
     input: SmartContextObservedTokenAccountingInput,
 ) -> SmartContextObservedTokenAccounting {
@@ -409,86 +460,84 @@ pub fn smart_context_observed_token_accounting(
 pub fn smart_context_observed_token_accounting_with_calibration(
     input: SmartContextObservedTokenAccountingCalibrationInput,
 ) -> SmartContextObservedTokenAccounting {
-    let SmartContextObservedTokenAccountingCalibrationInput {
-        accounting: input,
-        calibration_bucket_key,
-        calibration_samples,
-    } = input;
-    let usage_totals = smart_context_observed_usage_totals(&input.observed_usage);
-
-    let observed_uncached_input_tokens = usage_totals
-        .input_tokens
-        .saturating_sub(usage_totals.cached_input_tokens);
-    let observed_total_tokens = usage_totals
-        .input_tokens
-        .saturating_add(usage_totals.output_tokens);
-    let observed_context_tokens =
-        observed_total_tokens.saturating_add(usage_totals.reasoning_tokens);
-    let baseline_estimated_current_request_tokens =
-        input.current_request_estimated_tokens.unwrap_or_else(|| {
-            smart_context_estimate_tokens_from_body_bytes(input.current_request_body_bytes)
+    #[cfg(feature = "mojo")]
+    {
+        let SmartContextObservedTokenAccountingCalibrationInput {
+            accounting: input,
+            calibration_bucket_key,
+            calibration_samples,
+        } = input;
+        let usage_totals = smart_context_observed_usage_totals(&input.observed_usage);
+        let baseline_estimated_current_request_tokens =
+            input.current_request_estimated_tokens.unwrap_or_else(|| {
+                smart_context_estimate_tokens_from_body_bytes(input.current_request_body_bytes)
+            });
+        let estimated_current_request_tokens = smart_context_observed_calibrated_request_estimate(
+            input.current_request_body_bytes,
+            baseline_estimated_current_request_tokens,
+            &input.observed_usage,
+            calibration_bucket_key.as_ref(),
+            &calibration_samples,
+        );
+        let decision = prodex_mojo_core::runtime::smart_context_token_accounting(
+            prodex_mojo_core::runtime::SmartContextTokenAccountingInput {
+                model_context_window_tokens: input.model_context_window_tokens,
+                reserved_output_tokens: input.reserved_output_tokens,
+                current_input_tokens: input.current_input_tokens,
+                estimated_current_request_tokens,
+                observed_input_tokens: usage_totals.input_tokens,
+                observed_cached_input_tokens: usage_totals.cached_input_tokens,
+                observed_output_tokens: usage_totals.output_tokens,
+                observed_reasoning_tokens: usage_totals.reasoning_tokens,
+                last_accounted_input_tokens: usage_totals.last_accounted_input_tokens,
+            },
+        )
+        .expect("Mojo Smart Context token accounting returned invalid output");
+        let effective_input_source = match decision.effective_input_source {
+            prodex_mojo_core::runtime::SMART_CONTEXT_ACCOUNTING_SOURCE_CURRENT_TOKENS => {
+                SmartContextTokenAccountingSource::CurrentRequestTokens
+            }
+            prodex_mojo_core::runtime::SMART_CONTEXT_ACCOUNTING_SOURCE_BODY_ESTIMATE => {
+                SmartContextTokenAccountingSource::CurrentRequestBodyEstimate
+            }
+            prodex_mojo_core::runtime::SMART_CONTEXT_ACCOUNTING_SOURCE_OBSERVED_HISTORY => {
+                SmartContextTokenAccountingSource::ObservedHistory
+            }
+            prodex_mojo_core::runtime::SMART_CONTEXT_ACCOUNTING_SOURCE_UNKNOWN => {
+                SmartContextTokenAccountingSource::Unknown
+            }
+            _ => unreachable!("Mojo Smart Context token accounting source was validated"),
+        };
+        let accounting_risks = smart_context_token_accounting_risks_from_bits(decision.risk_bits);
+        let pressure = smart_context_pressure_snapshot(SmartContextPressureSnapshotInput {
+            model_context_window_tokens: input.model_context_window_tokens,
+            reserved_output_tokens: input.reserved_output_tokens,
+            effective_input_tokens: decision.effective_input_tokens,
+            available_context_tokens: decision.available_context_tokens,
+            effective_input_source,
+            accounting_risks: &accounting_risks,
         });
-    let estimated_current_request_tokens = smart_context_observed_calibrated_request_estimate(
-        input.current_request_body_bytes,
-        baseline_estimated_current_request_tokens,
-        &input.observed_usage,
-        calibration_bucket_key.as_ref(),
-        &calibration_samples,
-    );
-    let current_request_accounted_tokens = input
-        .current_input_tokens
-        .max(estimated_current_request_tokens);
-    let effective_input_tokens =
-        current_request_accounted_tokens.max(usage_totals.last_accounted_input_tokens);
-    let effective_input_source = smart_context_effective_input_source(
-        input.current_input_tokens,
-        estimated_current_request_tokens,
-        current_request_accounted_tokens,
-        usage_totals.last_accounted_input_tokens,
-        effective_input_tokens,
-    );
-    let available_context_tokens = input.model_context_window_tokens.map(|window| {
-        window
-            .saturating_sub(effective_input_tokens)
-            .saturating_sub(input.reserved_output_tokens)
-    });
-    let accounting_risks = smart_context_token_accounting_risks(
-        input.model_context_window_tokens,
-        input.reserved_output_tokens,
-        effective_input_source,
-    );
-    let pressure = smart_context_pressure_snapshot(SmartContextPressureSnapshotInput {
-        model_context_window_tokens: input.model_context_window_tokens,
-        reserved_output_tokens: input.reserved_output_tokens,
-        effective_input_tokens,
-        available_context_tokens,
-        effective_input_source,
-        accounting_risks: &accounting_risks,
-    });
 
-    SmartContextObservedTokenAccounting {
-        model_context_window_tokens: input.model_context_window_tokens,
-        observed_turns: input.observed_usage.len(),
-        observed_input_tokens: usage_totals.input_tokens,
-        observed_cached_input_tokens: usage_totals.cached_input_tokens,
-        observed_uncached_input_tokens,
-        observed_output_tokens: usage_totals.output_tokens,
-        observed_reasoning_tokens: usage_totals.reasoning_tokens,
-        observed_total_tokens,
-        observed_context_tokens,
-        last_input_tokens: usage_totals.last_input_tokens,
-        last_accounted_input_tokens: usage_totals.last_accounted_input_tokens,
-        last_observed_context_tokens: usage_totals.last_observed_context_tokens,
-        current_request_body_bytes: input.current_request_body_bytes,
-        estimated_current_request_tokens,
-        current_request_accounted_tokens,
-        effective_input_tokens,
-        effective_input_source,
-        reserved_output_tokens: input.reserved_output_tokens,
-        available_context_tokens,
-        accounting_risks,
-        pressure,
+        return smart_context_observed_token_accounting_from_decision(
+            input,
+            usage_totals,
+            estimated_current_request_tokens,
+            SmartContextTokenAccountingDecision {
+                observed_uncached_input_tokens: decision.observed_uncached_input_tokens,
+                observed_total_tokens: decision.observed_total_tokens,
+                observed_context_tokens: decision.observed_context_tokens,
+                current_request_accounted_tokens: decision.current_request_accounted_tokens,
+                effective_input_tokens: decision.effective_input_tokens,
+                effective_input_source,
+                available_context_tokens: decision.available_context_tokens,
+                accounting_risks,
+            },
+            pressure,
+        );
     }
+
+    #[cfg(not(feature = "mojo"))]
+    smart_context_observed_token_accounting_rust(input)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -559,41 +608,7 @@ pub fn smart_context_pressure_snapshot(
     }
 
     #[cfg(not(feature = "mojo"))]
-    {
-        let effective_usable_context_tokens = input
-            .model_context_window_tokens
-            .and_then(|window| window.checked_sub(input.reserved_output_tokens));
-        let pressure_basis_points = effective_usable_context_tokens.and_then(|usable| {
-            (usable > 0).then(|| {
-                input
-                    .effective_input_tokens
-                    .saturating_mul(10_000)
-                    .checked_div(usable)
-                    .unwrap_or(u64::MAX)
-                    .min(u32::MAX as u64) as u32
-            })
-        });
-        let pressure_band = smart_context_pressure_band(pressure_basis_points);
-        let estimator_confidence = smart_context_estimator_confidence(
-            input.effective_input_source,
-            input.accounting_risks,
-        );
-
-        SmartContextPressureSnapshot {
-            model_context_window_tokens: input.model_context_window_tokens,
-            reserved_output_tokens: input.reserved_output_tokens,
-            effective_usable_context_tokens,
-            effective_used_tokens: input.effective_input_tokens,
-            pressure_basis_points,
-            pressure_band,
-            absolute_safety_floor_tokens: smart_context_absolute_safety_floor_tokens(
-                input.model_context_window_tokens,
-                input.reserved_output_tokens,
-            ),
-            available_context_tokens: input.available_context_tokens,
-            estimator_confidence,
-        }
-    }
+    smart_context_pressure_snapshot_rust(input)
 }
 
 pub fn smart_context_pressure_band(pressure_basis_points: Option<u32>) -> SmartContextPressureBand {
@@ -645,6 +660,22 @@ pub fn smart_context_absolute_safety_floor_tokens(
 }
 
 pub fn smart_context_observed_usage_context_tokens(usage: RuntimeTokenUsage) -> Option<u64> {
+    #[cfg(feature = "mojo")]
+    {
+        let summary = crate::quota::mojo::smart_context_token_usage_summary(&[usage])
+            .expect("Mojo Smart Context usage summary returned invalid output");
+        return (summary.last_observed_context_tokens > 0)
+            .then_some(summary.last_observed_context_tokens);
+    }
+
+    #[cfg(not(feature = "mojo"))]
+    smart_context_observed_usage_context_tokens_rust(usage)
+}
+
+#[cfg(any(not(feature = "mojo"), test))]
+pub(super) fn smart_context_observed_usage_context_tokens_rust(
+    usage: RuntimeTokenUsage,
+) -> Option<u64> {
     let observed = usage
         .input_tokens
         .saturating_add(usage.output_tokens)
