@@ -1,4 +1,4 @@
-use super::{
+use super::cloudflared::{
     CLOUDFLARED_EVENT_PREFIX, CLOUDFLARED_TRANSPORT_NEGOTIATION_TIMEOUT,
     CloudflaredConfigIsolation, CloudflaredTransport, cloudflared_command,
     expose_scan_cloudflared_output,
@@ -26,6 +26,7 @@ pub(super) fn spawn(
     Vec<JoinHandle<()>>,
 )> {
     let mut command = cloudflared_command();
+    let isolated_home = config.directory();
     command
         .args([
             "--config",
@@ -43,8 +44,16 @@ pub(super) fn spawn(
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
+    command.env("HOME", isolated_home);
+    command.env("USERPROFILE", isolated_home);
+    command.env("APPDATA", isolated_home);
+    command.env("LOCALAPPDATA", isolated_home);
+    command.env("XDG_CONFIG_HOME", isolated_home);
+    command.env("XDG_DATA_HOME", isolated_home);
+    command.env("XDG_CACHE_HOME", isolated_home);
     for variable in [
         "TUNNEL_CONFIG",
+        "TUNNEL_CERT",
         "TUNNEL_ORIGIN_CERT",
         "TUNNEL_CRED_FILE",
         "TUNNEL_HOSTNAME",
@@ -72,6 +81,7 @@ pub(super) fn wait(
     child: &mut std::process::Child,
     rx: &mpsc::Receiver<String>,
     transport: CloudflaredTransport,
+    cancelled: &dyn Fn() -> bool,
 ) -> CloudflaredStartup {
     let deadline = Instant::now() + CLOUDFLARED_TRANSPORT_NEGOTIATION_TIMEOUT;
     let mut startup = CloudflaredStartup {
@@ -81,6 +91,10 @@ pub(super) fn wait(
         startup_failure: None,
     };
     loop {
+        if cancelled() {
+            startup.startup_failure = Some("cloudflared startup cancelled".to_string());
+            break;
+        }
         if let Ok(event) = rx.recv_timeout(Duration::from_millis(100)) {
             record_event(&mut startup, event);
             if startup.url.is_some() && startup.effective_transport.is_some() {

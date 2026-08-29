@@ -1,5 +1,6 @@
 use super::super_expose::{
     ExposeEndpointMode, bind_expose_listener, validate_existing_cloudflare_hostname,
+    validate_expose_launch_args,
 };
 use super::*;
 use std::net::{Shutdown, SocketAddr};
@@ -102,6 +103,18 @@ fn expose_access_url_uses_one_time_fragment_without_path_or_query_secret() {
     assert_eq!(fragment, "bootstrap=bootstrap-capability");
     assert!(!request_target.contains("bootstrap-capability"));
     assert!(!url.contains("access_token"));
+}
+
+#[test]
+fn super_expose_rejects_dry_run_before_startup_side_effects() {
+    let crate::Commands::Super(mut args) =
+        crate::parse_cli_command_from(["prodex", "s"]).expect("Super args should parse")
+    else {
+        panic!("expected Super args");
+    };
+    args.dry_run = true;
+    let error = validate_expose_launch_args(&args).unwrap_err();
+    assert!(error.to_string().contains("use `prodex s --dry-run`"));
 }
 
 #[test]

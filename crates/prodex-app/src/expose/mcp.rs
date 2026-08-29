@@ -12,7 +12,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 mod probe;
-pub(super) use probe::{verify_local_mcp, verify_public_mcp};
+pub(super) use probe::{verify_local_mcp_with_progress, verify_public_mcp_with_progress};
 mod handler;
 mod protocol;
 mod tools;
@@ -85,11 +85,53 @@ pub(super) fn expose_main_provider(args: &SuperArgs) -> prodex_provider_core::Pr
     main_provider(args)
 }
 
-pub(super) fn mcp_public_url(tunnel_origin: &str, capability: &str) -> String {
-    format!(
-        "{}/pdx/v1/{capability}/mcp",
-        tunnel_origin.trim_end_matches('/')
-    )
+/// The complete bearer-style MCP endpoint kept as one logical value.
+pub(super) struct PublicMcpEndpoint(String);
+
+impl PublicMcpEndpoint {
+    pub(super) fn new(tunnel_origin: &str, capability: &str) -> Result<Self> {
+        let origin = tunnel_origin.trim_end_matches('/');
+        let parsed = url::Url::parse(origin).context("invalid MCP endpoint origin")?;
+        if origin.is_empty()
+            || origin.chars().any(char::is_control)
+            || origin.chars().any(char::is_whitespace)
+            || !matches!(parsed.scheme(), "http" | "https")
+            || !origin.split_once("://").is_some_and(|(_, authority)| {
+                !authority.is_empty() && !authority.contains(['/', '\\', '?', '#'])
+            })
+            || parsed.host_str().is_none()
+            || !parsed.username().is_empty()
+            || parsed.password().is_some()
+            || parsed.query().is_some()
+            || parsed.fragment().is_some()
+            || !matches!(parsed.path(), "" | "/")
+            || parsed.port() == Some(0)
+            || capability.is_empty()
+            || !capability
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-'))
+        {
+            anyhow::bail!("invalid MCP endpoint components")
+        }
+        let url = format!("{origin}{MCP_PATH_PREFIX}{capability}{MCP_PATH_SUFFIX}");
+        if url.bytes().any(|byte| byte == 10 || byte == 13) {
+            anyhow::bail!("MCP endpoint must be a single line")
+        }
+        Ok(Self(url))
+    }
+
+    pub(super) fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl fmt::Debug for PublicMcpEndpoint {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_tuple("PublicMcpEndpoint")
+            .field(&"<redacted>")
+            .finish()
+    }
 }
 
 pub(super) fn expose_instance_id() -> Result<String> {

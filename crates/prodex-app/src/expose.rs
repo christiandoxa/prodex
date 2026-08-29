@@ -9,7 +9,6 @@ use std::env;
 use std::fmt;
 use std::io::{self, Read, Write};
 use std::net::{TcpListener, TcpStream};
-use std::process::Command;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::mpsc::{self, Receiver, TrySendError};
 use std::sync::{Arc, Mutex};
@@ -49,6 +48,7 @@ mod run_manager;
 mod runtime;
 mod session;
 mod super_expose;
+mod super_expose_ui;
 
 use http::*;
 use mcp::*;
