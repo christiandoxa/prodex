@@ -257,6 +257,36 @@ def quota_capacity_pressure(
     return quota_capacity_saturating_mul(seconds_until_reset, 1_000) / denominator
 
 
+def quota_saturating_sub(left: Int64, right: Int64) -> Int64:
+    if right > 0 and left < INT64_MIN + right:
+        return INT64_MIN
+    if right < 0 and left > INT64_MAX + right:
+        return INT64_MAX
+    return left - right
+
+
+@export("prodex_quota_window_pressure")
+def prodex_quota_window_pressure(
+    remaining_percent: Int64,
+    reset_at: Int64,
+    now: Int64,
+) abi("C") -> Int64:
+    if remaining_percent < 0 or remaining_percent > 100:
+        return 1
+
+    var seconds_until_reset: Int64 = 0
+    if reset_at == INT64_MAX:
+        seconds_until_reset = INT64_MAX
+    elif reset_at > now:
+        seconds_until_reset = quota_saturating_sub(reset_at, now)
+
+    return quota_capacity_pressure(
+        seconds_until_reset,
+        remaining_percent,
+        1,
+    )
+
+
 def quota_capacity_pressure_band_for_route(
     five_hour_remaining: Int64,
     five_hour_has_value: Int64,

@@ -1,43 +1,25 @@
 //! Auto-redeem pool probing and candidate selection.
 
+#[cfg(feature = "mojo-quota")]
+use super::super::runtime_quota_summary_for_route;
 use super::super::{
     RUNTIME_PROFILE_SYNC_PROBE_FALLBACK_LIMIT, RuntimeRotationProxyShared, RuntimeRouteKind,
     active_profile_selection_order, prune_runtime_profile_selection_backoff,
-    runtime_profile_auth_failure_active_from_map, runtime_profile_health_score,
-    runtime_profile_inflight_soft_limit_for_shared, runtime_profile_inflight_sort_key,
-    runtime_profile_name_in_selection_backoff, runtime_profile_route_circuit_open_until,
-    runtime_proxy_log, runtime_proxy_pressure_mode_active_for_route,
-    runtime_quota_summary_for_route, runtime_route_kind_label, schedule_runtime_probe_refresh,
+    runtime_profile_auth_failure_active_from_map, runtime_profile_inflight_soft_limit_for_shared,
+    runtime_profile_inflight_sort_key, runtime_profile_name_in_selection_backoff,
+    runtime_proxy_log, runtime_proxy_pressure_mode_active_for_route, runtime_route_kind_label,
+    schedule_runtime_probe_refresh,
 };
-use super::summary::{
-    runtime_auto_redeem_quota_summary_has_weekly_remaining,
-    runtime_auto_redeem_quota_summary_warrants_credit,
-    runtime_auto_redeem_weekly_exhausted_reset_at,
-};
+#[cfg(feature = "mojo-quota")]
+use super::super::{runtime_profile_health_score, runtime_profile_route_circuit_open_until};
 use crate::ProfileProviderExt;
 use anyhow::Result;
 use chrono::Local;
+#[cfg(feature = "mojo-quota")]
+use prodex_runtime_quota::runtime_quota_window_usable_for_auto_rotate;
+#[cfg(feature = "mojo-quota")]
 use prodex_runtime_store::runtime_profile_transport_backoff_until_from_map;
 use std::collections::BTreeSet;
-
-fn runtime_auto_redeem_plan_priority(plan_type: Option<&str>) -> usize {
-    let normalized = plan_type
-        .unwrap_or_default()
-        .trim()
-        .to_ascii_lowercase()
-        .chars()
-        .filter(|ch| !matches!(ch, ' ' | '-' | '_'))
-        .collect::<String>();
-
-    match normalized.as_str() {
-        "plus" => 0,
-        "free" | "basic" => 1,
-        "" => 2,
-        "prolite" | "pro" | "pro5x" | "5x" | "pro20x" | "pro20" | "20x" | "ultra" | "max"
-        | "team" | "business" | "enterprise" => 3,
-        _ => 2,
-    }
-}
 
 pub(super) fn refresh_runtime_auto_redeem_pool_missing_quota(
     shared: &RuntimeRotationProxyShared,
@@ -111,6 +93,7 @@ pub(super) fn refresh_runtime_auto_redeem_pool_missing_quota(
     Ok(scheduled)
 }
 
+#[cfg(feature = "mojo-quota")]
 pub(super) fn runtime_auto_redeem_pool_has_weekly_remaining_profile(
     shared: &RuntimeRotationProxyShared,
     route_kind: RuntimeRouteKind,
@@ -169,8 +152,10 @@ pub(super) fn runtime_auto_redeem_pool_has_weekly_remaining_profile(
                 let Ok(usage) = probe.result.as_ref() else {
                     return false;
                 };
-                runtime_auto_redeem_quota_summary_has_weekly_remaining(
-                    runtime_quota_summary_for_route(usage, route_kind),
+                runtime_quota_window_usable_for_auto_rotate(
+                    runtime_quota_summary_for_route(usage, route_kind)
+                        .weekly
+                        .status,
                 )
             }),
     )
@@ -181,28 +166,38 @@ pub(crate) fn runtime_best_auto_redeem_profile_name(
     route_kind: RuntimeRouteKind,
     excluded_profiles: &BTreeSet<String>,
 ) -> Result<Option<String>> {
-    let now = Local::now().timestamp();
-    let pressure_mode = runtime_proxy_pressure_mode_active_for_route(shared, route_kind);
-    let inflight_soft_limit =
-        runtime_profile_inflight_soft_limit_for_shared(shared, route_kind, pressure_mode);
-    let profile_inflight = shared.lane_admission.profile_inflight_snapshot();
-    let runtime = shared
-        .runtime
-        .lock()
-        .map_err(|_| anyhow::anyhow!("runtime auto-rotate state is poisoned"))?;
-    let order = active_profile_selection_order(&runtime.state, &runtime.current_profile);
+    #[cfg(not(feature = "mojo-quota"))]
+    {
+        let _ = (shared, route_kind, excluded_profiles);
+        Ok(None)
+    }
 
-    Ok(order
-        .into_iter()
-        .enumerate()
-        .filter(|(_, name)| !excluded_profiles.contains(name))
-        .filter_map(|(order_index, name)| {
-            let profile = runtime.state.profiles.get(&name)?;
+    #[cfg(feature = "mojo-quota")]
+    {
+        let now = Local::now().timestamp();
+        let pressure_mode = runtime_proxy_pressure_mode_active_for_route(shared, route_kind);
+        let inflight_soft_limit =
+            runtime_profile_inflight_soft_limit_for_shared(shared, route_kind, pressure_mode);
+        let profile_inflight = shared.lane_admission.profile_inflight_snapshot();
+        let runtime = shared
+            .runtime
+            .lock()
+            .map_err(|_| anyhow::anyhow!("runtime auto-rotate state is poisoned"))?;
+        let order = active_profile_selection_order(&runtime.state, &runtime.current_profile);
+
+        let mut candidates = Vec::new();
+        for (order_index, name) in order.into_iter().enumerate() {
+            if excluded_profiles.contains(&name) {
+                continue;
+            }
+            let Some(profile) = runtime.state.profiles.get(&name) else {
+                continue;
+            };
             if !matches!(profile.provider, crate::ProfileProvider::Openai) {
-                return None;
+                continue;
             }
             if runtime_profile_auth_failure_active_from_map(&runtime.profile_health, &name, now) {
-                return None;
+                continue;
             }
             if runtime_profile_transport_backoff_until_from_map(
                 &runtime.profile_transport_backoff_until,
@@ -214,45 +209,60 @@ pub(crate) fn runtime_best_auto_redeem_profile_name(
                 || runtime_profile_route_circuit_open_until(&runtime, &name, route_kind, now)
                     .is_some()
             {
-                return None;
+                continue;
             }
             let inflight_count = runtime_profile_inflight_sort_key(&name, &profile_inflight);
             if inflight_count >= inflight_soft_limit {
-                return None;
+                continue;
             }
-            let probe = runtime.profile_probe_cache.get(&name)?;
+            let Some(probe) = runtime.profile_probe_cache.get(&name) else {
+                continue;
+            };
             if !probe.auth.quota_compatible {
-                return None;
+                continue;
             }
-            let usage = probe.result.as_ref().ok()?;
-            let available_count = usage
-                .rate_limit_reset_credits
-                .as_ref()
-                .map(|credits| credits.available_count)
-                .unwrap_or_default();
-            if available_count <= 0 {
-                return None;
-            }
+            let Some(usage) = probe.result.as_ref().ok() else {
+                continue;
+            };
             let quota_summary = runtime_quota_summary_for_route(usage, route_kind);
-            if !runtime_auto_redeem_quota_summary_warrants_credit(quota_summary, now) {
-                return None;
-            }
-            let reset_sort_key = runtime_auto_redeem_weekly_exhausted_reset_at(quota_summary)
-                .unwrap_or_default()
-                .saturating_neg();
             let health_sort_key = runtime_profile_health_score(&runtime, &name, now, route_kind);
-            Some((
-                (
-                    runtime_auto_redeem_plan_priority(usage.plan_type.as_deref()),
-                    reset_sort_key,
-                    inflight_count,
-                    health_sort_key,
-                    order_index,
-                    name.clone(),
-                ),
+            // ponytail: fixed 256-row ABI bound; raise only with a versioned capacity review.
+            if candidates.len() >= prodex_mojo_core::runtime::RUNTIME_AUTO_REDEEM_PLAN_MAX_COUNT {
+                return Err(anyhow::anyhow!(
+                    "auto-redeem candidate count exceeds Mojo planner bound"
+                ));
+            }
+            candidates.push((
                 name,
-            ))
-        })
-        .min_by_key(|(sort_key, _)| sort_key.clone())
-        .map(|(_, name)| name))
+                prodex_mojo_core::runtime::AutoRedeemCandidateInput {
+                    plan_type: usage.plan_type.as_deref(),
+                    available_count: usage
+                        .rate_limit_reset_credits
+                        .as_ref()
+                        .map(|credits| credits.available_count)
+                        .unwrap_or_default(),
+                    weekly_status: match quota_summary.weekly.status {
+                        prodex_quota::RuntimeQuotaWindowStatus::Ready => 0,
+                        prodex_quota::RuntimeQuotaWindowStatus::Thin => 1,
+                        prodex_quota::RuntimeQuotaWindowStatus::Critical => 2,
+                        prodex_quota::RuntimeQuotaWindowStatus::Exhausted => 3,
+                        prodex_quota::RuntimeQuotaWindowStatus::Unknown => 4,
+                    },
+                    weekly_reset_at: quota_summary.weekly.reset_at,
+                    inflight_count: i64::try_from(inflight_count)
+                        .map_err(|_| anyhow::anyhow!("auto-redeem in-flight count exceeds ABI"))?,
+                    health_sort_key: i64::from(health_sort_key),
+                    order_index: i64::try_from(order_index)
+                        .map_err(|_| anyhow::anyhow!("auto-redeem order exceeds ABI"))?,
+                },
+            ));
+        }
+        let inputs = candidates
+            .iter()
+            .map(|(_, input)| *input)
+            .collect::<Vec<_>>();
+        let selected = prodex_mojo_core::runtime::auto_redeem_plan_batch(&inputs, now)
+            .map_err(|error| anyhow::anyhow!("Mojo auto-redeem planner failed: {error:?}"))?;
+        Ok(selected.map(|index| candidates[index].0.clone()))
+    }
 }

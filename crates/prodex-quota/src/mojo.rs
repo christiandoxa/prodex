@@ -54,3 +54,11 @@ pub(crate) fn quota_capacity_batch(
 ) -> Result<Vec<prodex_mojo_core::quota::QuotaCapacityOutput>, prodex_mojo_core::MojoError> {
     prodex_mojo_core::quota::quota_capacity_batch(inputs, route_kind)
 }
+
+pub(super) fn quota_window_pressure(
+    remaining_percent: i64,
+    reset_at: i64,
+    now: i64,
+) -> Result<i64, prodex_mojo_core::MojoError> {
+    prodex_mojo_core::quota::quota_window_pressure(remaining_percent, reset_at, now)
+}

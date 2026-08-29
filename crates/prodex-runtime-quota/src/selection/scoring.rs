@@ -8,12 +8,13 @@ use chrono::Local;
 #[cfg(feature = "mojo")]
 use prodex_mojo_core::runtime::{
     ProfileScheduleInput as MojoProfileScheduleInput, ProfileScoreInput as MojoProfileScoreInput,
-    QuotaScoreInput as MojoQuotaScoreInput,
+    QuotaRouteScoreInput as MojoQuotaRouteScoreInput,
 };
 pub use prodex_quota::required_main_window_snapshot_at;
+#[cfg(not(feature = "mojo"))]
+use prodex_quota::scale_quota_pressure_for_plan;
 use prodex_quota::{
-    RuntimeQuotaPressureBand, UsageResponse, scale_quota_pressure_for_plan,
-    usage_plan_capacity_pressure_scale_bps,
+    RuntimeQuotaPressureBand, UsageResponse, usage_plan_capacity_pressure_scale_bps,
 };
 use prodex_runtime_state::RuntimeRouteKind;
 use prodex_shared_types::{ReadyProfileCandidate, ReadyProfileScore, RuntimeQuotaSource};
@@ -284,24 +285,14 @@ fn ready_profile_score_for_route_at_mojo(
 
     let weekly_pressure = weekly.map_or(i64::MAX, |window| window.pressure_score);
     let five_hour_pressure = five_hour.map_or(i64::MAX, |window| window.pressure_score);
-    let plan_pressure_scale_bps = usage_plan_capacity_pressure_scale_bps(usage);
-    let scaled_weekly_pressure =
-        scale_quota_pressure_for_plan(weekly_pressure, plan_pressure_scale_bps);
-    let scaled_five_hour_pressure =
-        scale_quota_pressure_for_plan(five_hour_pressure, plan_pressure_scale_bps);
     let weekly_remaining = weekly.map_or(0, |window| window.remaining_percent);
     let five_hour_remaining = five_hour.map_or(0, |window| window.remaining_percent);
-    let reserve_bias = match runtime_quota_pressure_band_for_route_at(usage, route_kind, now) {
-        RuntimeQuotaPressureBand::Healthy => 0,
-        RuntimeQuotaPressureBand::Thin => 250_000,
-        RuntimeQuotaPressureBand::Critical => 1_000_000,
-        RuntimeQuotaPressureBand::Exhausted | RuntimeQuotaPressureBand::Unknown => i64::MAX / 4,
-    };
 
-    let score = prodex_mojo_core::runtime::quota_score_batch(
-        &[MojoQuotaScoreInput {
-            weekly_pressure: scaled_weekly_pressure,
-            five_hour_pressure: scaled_five_hour_pressure,
+    let score = prodex_mojo_core::runtime::quota_route_score_batch(
+        &[MojoQuotaRouteScoreInput {
+            weekly_pressure,
+            five_hour_pressure,
+            scale_bps: usage_plan_capacity_pressure_scale_bps(usage),
             weekly_remaining,
             five_hour_remaining,
             weekly_has_value: weekly.is_some(),
@@ -320,15 +311,6 @@ fn ready_profile_score_for_route_at_mojo(
     .into_iter()
     .next()
     .expect("Mojo runtime quota score returned no row");
-    debug_assert_eq!(
-        score.pressure_band,
-        match reserve_bias {
-            0 => 0,
-            250_000 => 1,
-            1_000_000 => 2,
-            _ => 3,
-        }
-    );
     ReadyProfileScore {
         total_pressure: score.total_pressure,
         weekly_pressure: score.weekly_pressure,

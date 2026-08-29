@@ -111,6 +111,8 @@ pub fn self_test() -> bool {
             && outputs[0].usable
             && outputs[0].routing_eligible
     });
+    let window_pressure = quota_window_pressure(58, 1_700_003_600, 1_700_000_000)
+        .is_ok_and(|pressure| pressure == 62_068);
     remaining_percent(Some(42)) == 58
         && window_status(5, true) == 2
         && pressure_band(1, 2) == 2
@@ -118,6 +120,7 @@ pub fn self_test() -> bool {
         && round_f64(1.5) == 2
         && round_f64(-0.5) == -1
         && capacity
+        && window_pressure
         && gemini
 }
 
@@ -194,6 +197,7 @@ unsafe extern "C" {
         route_kind: i64,
         count: i64,
     ) -> i64;
+    fn prodex_quota_window_pressure(remaining_percent: i64, reset_at: i64, now: i64) -> i64;
 }
 
 pub fn round_f64(value: f64) -> i64 {
@@ -417,6 +421,21 @@ pub fn quota_capacity_batch(
         });
     }
     Ok(outputs)
+}
+
+pub fn quota_window_pressure(
+    remaining_percent: i64,
+    reset_at: i64,
+    now: i64,
+) -> Result<i64, crate::MojoError> {
+    if !(0..=100).contains(&remaining_percent) {
+        return Err(crate::MojoError::InvalidInput);
+    }
+    let pressure_score = unsafe { prodex_quota_window_pressure(remaining_percent, reset_at, now) };
+    if pressure_score < 0 {
+        return Err(crate::MojoError::InvalidOutput);
+    }
+    Ok(pressure_score)
 }
 
 pub fn main_quota_aggregate_batch(

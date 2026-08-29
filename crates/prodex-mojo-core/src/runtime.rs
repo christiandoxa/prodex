@@ -1,7 +1,14 @@
 #[cfg(feature = "mojo-runtime")]
 pub use crate::runtime_decisions::*;
 
+mod auto_redeem;
 mod candidate_plan;
+mod quota_route_score;
+pub use auto_redeem::{
+    AutoRedeemCandidateInput, RUNTIME_AUTO_REDEEM_PLAN_MAX_COUNT, auto_redeem_plan_batch,
+    auto_redeem_plan_self_test,
+};
+pub use quota_route_score::quota_route_score_batch;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ProfileScoreInput {
@@ -59,6 +66,27 @@ pub struct QuotaScore {
 pub const RUNTIME_QUOTA_SCORE_FIELD_COUNT: usize = 8;
 pub const RUNTIME_QUOTA_SCORE_MAX_COUNT: usize = 256;
 
+/// Raw route-scoring observations resolved by the route-selection adapter.
+///
+/// Unlike [`QuotaScoreInput`], this contract includes plan scaling and keeps
+/// window presence explicit so route selection can distinguish an incomplete
+/// observation from a healthy complete pair. The Mojo implementation then
+/// shares the same score arithmetic as `quota_score_batch`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct QuotaRouteScoreInput {
+    pub weekly_pressure: i64,
+    pub five_hour_pressure: i64,
+    pub scale_bps: i64,
+    pub weekly_remaining: i64,
+    pub five_hour_remaining: i64,
+    pub weekly_has_value: bool,
+    pub five_hour_has_value: bool,
+    pub weekly_reset_at: i64,
+    pub five_hour_reset_at: i64,
+}
+
+pub const RUNTIME_QUOTA_ROUTE_SCORE_FIELD_COUNT: usize = 9;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SmartContextPressureSnapshot {
     pub effective_usable_context_tokens: Option<u64>,
@@ -109,6 +137,14 @@ struct RuntimeStringView {
     ptr: u64,
     len: u64,
 }
+
+// This borrowed view intentionally matches the rich ABI v6 string-view layout.
+const _: () = {
+    assert!(std::mem::size_of::<RuntimeStringView>() == 16);
+    assert!(std::mem::align_of::<RuntimeStringView>() == 8);
+    assert!(std::mem::offset_of!(RuntimeStringView, ptr) == 0);
+    assert!(std::mem::offset_of!(RuntimeStringView, len) == 8);
+};
 
 pub fn candidate_plan_self_test() -> bool {
     let mut fields = vec![0_i64; RUNTIME_CANDIDATE_PLAN_FIELD_COUNT * 2];
@@ -188,6 +224,20 @@ unsafe extern "C" {
         count: i64,
     ) -> i64;
     fn prodex_runtime_quota_score_batch(
+        fields_address: u64,
+        pressure_band_address: u64,
+        total_pressure_address: u64,
+        weekly_pressure_address: u64,
+        five_hour_pressure_address: u64,
+        reserve_floor_address: u64,
+        weekly_remaining_address: u64,
+        five_hour_remaining_address: u64,
+        weekly_reset_at_address: u64,
+        five_hour_reset_at_address: u64,
+        count: i64,
+        route_kind: i64,
+    ) -> i64;
+    fn prodex_runtime_quota_route_score_resolution_batch(
         fields_address: u64,
         pressure_band_address: u64,
         total_pressure_address: u64,

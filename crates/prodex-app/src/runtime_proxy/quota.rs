@@ -1,23 +1,27 @@
 use super::{
-    prune_runtime_profile_selection_backoff, runtime_profile_health_score,
-    runtime_profile_inflight_hard_limited_for_context,
+    prune_runtime_profile_selection_backoff, runtime_profile_inflight_hard_limited_for_context,
     runtime_profile_inflight_soft_limit_for_shared, runtime_profile_inflight_sort_key,
     runtime_profile_name_in_selection_backoff, runtime_proxy_pressure_mode_active_for_route,
     runtime_quota_precommit_guard_reason, runtime_route_kind_inflight_context,
     runtime_route_kind_label,
 };
+#[cfg(feature = "mojo-quota")]
+use super::{runtime_profile_health_score, runtime_profile_route_circuit_open_until};
 use crate::{
     AuthSummary, ProfileProviderExt, RUNTIME_PROFILE_QUOTA_QUARANTINE_FALLBACK_SECONDS,
     RUNTIME_PROFILE_SYNC_PROBE_FALLBACK_LIMIT, RUNTIME_PROFILE_USAGE_CACHE_FRESH_SECONDS,
-    RUNTIME_PROFILE_USAGE_CACHE_STALE_GRACE_SECONDS, RateLimitResetCreditConsumeFlow,
-    RateLimitResetCreditConsumeOutcome, RuntimeProbeCacheFreshness, RuntimeProfileProbeCacheEntry,
-    RuntimeProfileUsageAuthCacheEntry, RuntimeProfileUsageSnapshot, RuntimeQuotaSource,
-    RuntimeRotationProxyShared, RuntimeRotationState, RuntimeRouteKind, UsageResponse,
-    active_profile_selection_order, apply_runtime_profile_probe_result,
-    fetch_usage_with_proxy_policy, runtime_profile_auth_failure_active,
-    runtime_profile_auth_failure_active_from_map, runtime_profile_route_circuit_open_until,
+    RUNTIME_PROFILE_USAGE_CACHE_STALE_GRACE_SECONDS, RuntimeProbeCacheFreshness,
+    RuntimeProfileProbeCacheEntry, RuntimeProfileUsageAuthCacheEntry, RuntimeProfileUsageSnapshot,
+    RuntimeQuotaSource, RuntimeRotationProxyShared, RuntimeRotationState, RuntimeRouteKind,
+    UsageResponse, active_profile_selection_order, apply_runtime_profile_probe_result,
+    runtime_profile_auth_failure_active, runtime_profile_auth_failure_active_from_map,
     runtime_proxy_log, runtime_proxy_responses_quota_critical_floor_percent,
     schedule_runtime_probe_refresh, schedule_runtime_state_save_from_runtime,
+};
+#[cfg(feature = "mojo-quota")]
+use crate::{
+    RateLimitResetCreditConsumeFlow, RateLimitResetCreditConsumeOutcome,
+    fetch_usage_with_proxy_policy,
 };
 use anyhow::Result;
 use chrono::Local;

@@ -17,6 +17,8 @@ default = []
 bench-support = ["dep:prodex_bench_support"]
 allocation-bench-support = ["dep:prodex_bench_support"]
 mojo-quota = [
+    "dep:prodex_mojo_core",
+    "prodex_mojo_core/mojo-runtime",
     "prodex_quota/mojo",
     "runtime_proxy_crate/mojo",
     "prodex_runtime_quota/mojo",

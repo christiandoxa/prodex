@@ -3,8 +3,10 @@
 use super::RuntimePrecommitQuotaBlockReason;
 use prodex_quota::{RuntimeQuotaSummary, RuntimeQuotaWindowStatus};
 
+#[cfg(not(feature = "mojo-quota"))]
 const RUNTIME_AUTO_REDEEM_NATURAL_RESET_GRACE_SECONDS: i64 = 5 * 60;
 
+#[cfg(not(feature = "mojo-quota"))]
 pub(super) fn runtime_auto_redeem_weekly_exhausted_reset_at(
     summary: RuntimeQuotaSummary,
 ) -> Option<i64> {
@@ -13,6 +15,33 @@ pub(super) fn runtime_auto_redeem_weekly_exhausted_reset_at(
         .filter(|reset_at| *reset_at != i64::MAX)
 }
 
+#[cfg(feature = "mojo-quota")]
+pub(super) fn runtime_auto_redeem_candidate_is_eligible(
+    summary: RuntimeQuotaSummary,
+    available_count: i64,
+    now: i64,
+) -> anyhow::Result<bool> {
+    let input = prodex_mojo_core::runtime::AutoRedeemCandidateInput {
+        plan_type: None,
+        available_count,
+        weekly_status: match summary.weekly.status {
+            prodex_quota::RuntimeQuotaWindowStatus::Ready => 0,
+            prodex_quota::RuntimeQuotaWindowStatus::Thin => 1,
+            prodex_quota::RuntimeQuotaWindowStatus::Critical => 2,
+            prodex_quota::RuntimeQuotaWindowStatus::Exhausted => 3,
+            prodex_quota::RuntimeQuotaWindowStatus::Unknown => 4,
+        },
+        weekly_reset_at: summary.weekly.reset_at,
+        inflight_count: 0,
+        health_sort_key: 0,
+        order_index: 0,
+    };
+    let selected = prodex_mojo_core::runtime::auto_redeem_plan_batch(&[input], now)
+        .map_err(|error| anyhow::anyhow!("Mojo auto-redeem planner failed: {error:?}"))?;
+    Ok(selected.is_some())
+}
+
+#[cfg(not(feature = "mojo-quota"))]
 pub(super) fn runtime_auto_redeem_quota_summary_warrants_credit(
     summary: RuntimeQuotaSummary,
     now: i64,
@@ -39,24 +68,20 @@ pub(crate) fn runtime_auto_redeem_precommit_reason_warrants_credit(
     )
 }
 
-fn runtime_auto_redeem_window_is_usable(status: RuntimeQuotaWindowStatus) -> bool {
-    matches!(
-        status,
-        RuntimeQuotaWindowStatus::Ready
-            | RuntimeQuotaWindowStatus::Thin
-            | RuntimeQuotaWindowStatus::Critical
-    )
-}
-
-pub(super) fn runtime_auto_redeem_quota_summary_has_weekly_remaining(
-    summary: RuntimeQuotaSummary,
-) -> bool {
-    runtime_auto_redeem_window_is_usable(summary.weekly.status)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(feature = "mojo-quota")]
+    fn quota_summary_warrants_credit(summary: RuntimeQuotaSummary, now: i64) -> bool {
+        runtime_auto_redeem_candidate_is_eligible(summary, 1, now)
+            .expect("Mojo auto-redeem planner should return a valid result")
+    }
+
+    #[cfg(not(feature = "mojo-quota"))]
+    fn quota_summary_warrants_credit(summary: RuntimeQuotaSummary, now: i64) -> bool {
+        runtime_auto_redeem_quota_summary_warrants_credit(summary, now)
+    }
 
     fn test_quota_summary(
         five_hour_status: RuntimeQuotaWindowStatus,
@@ -100,7 +125,7 @@ mod tests {
     #[test]
     fn auto_redeem_requires_exhausted_window_not_critical_floor() {
         let now = 1_000;
-        assert!(!runtime_auto_redeem_quota_summary_warrants_credit(
+        assert!(!quota_summary_warrants_credit(
             test_quota_summary(
                 RuntimeQuotaWindowStatus::Critical,
                 now + 3_600,
@@ -117,7 +142,7 @@ mod tests {
     #[test]
     fn auto_redeem_requires_weekly_exhausted_and_uses_weekly_reset_time() {
         let now = 1_000;
-        assert!(!runtime_auto_redeem_quota_summary_warrants_credit(
+        assert!(!quota_summary_warrants_credit(
             test_quota_summary(
                 RuntimeQuotaWindowStatus::Exhausted,
                 now + 3_600,
@@ -126,7 +151,7 @@ mod tests {
             ),
             now,
         ));
-        assert!(runtime_auto_redeem_quota_summary_warrants_credit(
+        assert!(quota_summary_warrants_credit(
             test_quota_summary(
                 RuntimeQuotaWindowStatus::Ready,
                 now + 3_600,
@@ -135,7 +160,7 @@ mod tests {
             ),
             now,
         ));
-        assert!(!runtime_auto_redeem_quota_summary_warrants_credit(
+        assert!(!quota_summary_warrants_credit(
             test_quota_summary(
                 RuntimeQuotaWindowStatus::Exhausted,
                 now + 30,
