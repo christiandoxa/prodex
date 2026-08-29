@@ -12,6 +12,7 @@ pub use estimation::{
 };
 #[cfg(feature = "mojo")]
 use observed::smart_context_observed_usage_totals;
+#[cfg(feature = "mojo")]
 use oracle::smart_context_observed_token_accounting_from_decision;
 use std::collections::BTreeSet;
 
