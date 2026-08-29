@@ -227,31 +227,430 @@ def context_range_extension(
     return dot > start and end - dot - 1 <= 12
 
 
+def context_all_digits(
+    output: Pointer[mut=True, UInt8, _], start: Int64, end: Int64
+) -> Bool:
+    if start >= end:
+        return False
+    for index in range(start, end):
+        if output[unsafe_offset=index] < 48 or output[unsafe_offset=index] > 57:
+            return False
+    return True
+
+
+def context_location_path(
+    output: Pointer[mut=True, UInt8, _], start: Int64, end: Int64
+) -> Bool:
+    var path_start = start
+    var path_end = end
+    while path_start < path_end and (
+        output[unsafe_offset=path_start] == 60
+        or output[unsafe_offset=path_start] == 62
+        or output[unsafe_offset=path_start] == 45
+        or output[unsafe_offset=path_start] == 58
+        or output[unsafe_offset=path_start] == 32
+    ):
+        path_start += 1
+    while path_end > path_start and (
+        output[unsafe_offset=path_end - 1] == 60
+        or output[unsafe_offset=path_end - 1] == 62
+        or output[unsafe_offset=path_end - 1] == 45
+        or output[unsafe_offset=path_end - 1] == 58
+        or output[unsafe_offset=path_end - 1] == 32
+    ):
+        path_end -= 1
+    if path_start == path_end:
+        return False
+    if context_range_contains(output, path_start, path_end, 47) or context_range_contains(
+        output, path_start, path_end, 92
+    ):
+        return True
+    var dot = path_end - 1
+    while dot >= path_start and output[unsafe_offset=dot] != 46:
+        dot -= 1
+    if dot <= path_start or dot + 1 >= path_end or path_end - dot - 1 > 12:
+        return False
+    return context_identifier_suffix(output, dot + 1, path_end)
+
+
+def context_identifier_suffix(
+    output: Pointer[mut=True, UInt8, _], start: Int64, end: Int64
+) -> Bool:
+    if start >= end:
+        return False
+    for index in range(start, end):
+        var value = output[unsafe_offset=index]
+        if not (
+            value >= 48 and value <= 57
+            or value >= 65 and value <= 90
+            or value >= 97 and value <= 122
+            or value == 95
+            or value == 45
+        ):
+            return False
+    return True
+
+
 def context_token_location(
     output: Pointer[mut=True, UInt8, _], start: Int64, end: Int64
 ) -> Bool:
+    var token_start = start
     var token_end = end
-    while token_end > start and (output[unsafe_offset=token_end - 1] == 58 or output[unsafe_offset=token_end - 1] == 46):
+    while token_start < token_end and (
+        output[unsafe_offset=token_start] == 34
+        or output[unsafe_offset=token_start] == 39
+        or output[unsafe_offset=token_start] == 96
+        or output[unsafe_offset=token_start] == 44
+        or output[unsafe_offset=token_start] == 59
+        or output[unsafe_offset=token_start] == 40
+        or output[unsafe_offset=token_start] == 41
+        or output[unsafe_offset=token_start] == 91
+        or output[unsafe_offset=token_start] == 93
+        or output[unsafe_offset=token_start] == 123
+        or output[unsafe_offset=token_start] == 125
+    ):
+        token_start += 1
+    while token_end > token_start and (
+        output[unsafe_offset=token_end - 1] == 34
+        or output[unsafe_offset=token_end - 1] == 39
+        or output[unsafe_offset=token_end - 1] == 96
+        or output[unsafe_offset=token_end - 1] == 44
+        or output[unsafe_offset=token_end - 1] == 59
+        or output[unsafe_offset=token_end - 1] == 40
+        or output[unsafe_offset=token_end - 1] == 41
+        or output[unsafe_offset=token_end - 1] == 91
+        or output[unsafe_offset=token_end - 1] == 93
+        or output[unsafe_offset=token_end - 1] == 123
+        or output[unsafe_offset=token_end - 1] == 125
+    ):
         token_end -= 1
-    var column = token_end - 1
-    while column >= start and output[unsafe_offset=column] != 58:
-        column -= 1
-    if column <= start or column + 1 >= token_end:
+    while token_end > token_start and (
+        output[unsafe_offset=token_end - 1] == 58 or output[unsafe_offset=token_end - 1] == 46
+    ):
+        token_end -= 1
+    var scheme = context_slice_find_literal(
+        output,
+        ProdexRichSlice(token_start, token_end - token_start),
+        StringSlice("://"),
+        False,
+    )
+    if scheme >= 0:
         return False
-    var index = column + 1
-    while index < token_end and output[unsafe_offset=index] >= 48 and output[unsafe_offset=index] <= 57:
-        index += 1
-    if index != token_end:
+    var has_digit = False
+    for index in range(token_start, token_end):
+        var value = output[unsafe_offset=index]
+        if value >= 48 and value <= 57:
+            has_digit = True
+            break
+    if not has_digit:
+        return False
+    var column = token_end - 1
+    while column >= token_start and output[unsafe_offset=column] != 58:
+        column -= 1
+    if column <= token_start or column + 1 >= token_end:
+        return False
+    if not context_all_digits(output, column + 1, token_end):
         return False
     var line = column - 1
-    while line >= start and output[unsafe_offset=line] != 58:
+    while line >= token_start and output[unsafe_offset=line] != 58:
         line -= 1
-    if line <= start or line + 1 >= column:
+    if line <= token_start or line + 1 >= column:
         return False
-    index = line + 1
-    while index < column and output[unsafe_offset=index] >= 48 and output[unsafe_offset=index] <= 57:
+    var middle_is_line = context_all_digits(output, line + 1, column)
+    if middle_is_line:
+        return context_location_path(output, token_start, line)
+    return context_location_path(output, line + 1, column)
+
+
+def context_slice_find_literal(
+    output: Pointer[mut=True, UInt8, _],
+    slice: ProdexRichSlice,
+    literal: StringSlice,
+    lowercase: Bool,
+) -> Int64:
+    var needle = Int64(literal.byte_length())
+    if needle == 0:
+        return 0
+    if needle > slice.len:
+        return -1
+    var right = literal.unsafe_ptr()
+    for start in range(slice.len - needle + 1):
+        var matched = True
+        for index in range(needle):
+            var value = output[unsafe_offset=slice.offset + start + index]
+            if lowercase and value >= 65 and value <= 90:
+                value += 32
+            if value != right[unsafe_offset=index]:
+                matched = False
+                break
+        if matched:
+            return start
+    return -1
+
+
+def context_slice_suffix(
+    output: Pointer[mut=True, UInt8, _],
+    slice: ProdexRichSlice,
+    literal: StringSlice,
+    lowercase: Bool,
+) -> Bool:
+    var needle = Int64(literal.byte_length())
+    if needle > slice.len:
+        return False
+    var right = literal.unsafe_ptr()
+    var start = slice.len - needle
+    for index in range(needle):
+        var value = output[unsafe_offset=slice.offset + start + index]
+        if lowercase and value >= 65 and value <= 90:
+            value += 32
+        if value != right[unsafe_offset=index]:
+            return False
+    return True
+
+
+def context_slice_equals_literal(
+    output: Pointer[mut=True, UInt8, _],
+    slice: ProdexRichSlice,
+    literal: StringSlice,
+    lowercase: Bool,
+) -> Bool:
+    return slice.len == Int64(literal.byte_length()) and rich_slice_prefix(
+        output, slice, literal, lowercase
+    )
+
+
+def context_trim_slice(
+    output: Pointer[mut=True, UInt8, _], slice: ProdexRichSlice
+) -> ProdexRichSlice:
+    var start = slice.offset
+    var end = slice.offset + slice.len
+    while start < end:
+        var width = rich_codepoint_width(output[unsafe_offset=start])
+        if not rich_unicode_space(rich_codepoint(output, start, width)):
+            break
+        start += width
+    while end > start:
+        var probe = end - 1
+        while probe > start and rich_utf8_continuation(output[unsafe_offset=probe]):
+            probe -= 1
+        var width = end - probe
+        if not rich_unicode_space(rich_codepoint(output, probe, width)):
+            break
+        end = probe
+    return ProdexRichSlice(start, end - start)
+
+
+def context_signal_line(
+    output: Pointer[mut=True, UInt8, _], slice: ProdexRichSlice
+) -> ProdexRichSlice:
+    var trimmed = context_trim_slice(output, slice)
+    if trimmed.len < 4 or output[unsafe_offset=trimmed.offset] != 76:
+        return trimmed.copy()
+    var cursor: Int64 = 1
+    while cursor < trimmed.len:
+        var value = output[unsafe_offset=trimmed.offset + cursor]
+        if value < 48 or value > 57:
+            break
+        cursor += 1
+    if cursor == 1 or cursor + 1 >= trimmed.len or output[unsafe_offset=trimmed.offset + cursor] != 58 or output[unsafe_offset=trimmed.offset + cursor + 1] != 32:
+        return trimmed.copy()
+    return context_trim_slice(
+        output,
+        ProdexRichSlice(trimmed.offset + cursor + 2, trimmed.len - cursor - 2),
+    )
+
+
+def context_parse_count(
+    output: Pointer[mut=True, UInt8, _], start: Int64, end: Int64
+) -> Int64:
+    if start >= end:
+        return -1
+    var value: Int64 = 0
+    var index = start
+    while index < end and output[unsafe_offset=index] >= 48 and output[unsafe_offset=index] <= 57:
+        var digit = Int64(output[unsafe_offset=index] - 48)
+        if value > 922337203685477580 or value * 10 > 9223372036854775807 - digit:
+            return -1
+        value = value * 10 + digit
         index += 1
-    return index == column and (context_range_contains(output, start, line, 47) or context_range_contains(output, start, line, 92) or context_range_extension(output, start, line))
+    if index > start:
+        return value
+    return -1
+
+
+def context_count_after_word(
+    output: Pointer[mut=True, UInt8, _], slice: ProdexRichSlice, word_end: Int64
+) -> Int64:
+    var index = word_end
+    var end = slice.offset + slice.len
+    while index < end:
+        var width = rich_codepoint_width(output[unsafe_offset=index])
+        if not rich_unicode_space(rich_codepoint(output, index, width)):
+            break
+        index += width
+    if index >= end:
+        return -1
+    var value = output[unsafe_offset=index]
+    if value != 58 and value != 61 and value != 40:
+        return -1
+    index += 1
+    while index < end:
+        var width = rich_codepoint_width(output[unsafe_offset=index])
+        if not rich_unicode_space(rich_codepoint(output, index, width)):
+            break
+        index += width
+    return context_parse_count(output, index, end)
+
+
+def context_count_before_word(
+    output: Pointer[mut=True, UInt8, _], slice: ProdexRichSlice, word_start: Int64
+) -> Int64:
+    var start = slice.offset
+    var end = word_start
+    while end > start:
+        var probe = end - 1
+        while probe > start and rich_utf8_continuation(output[unsafe_offset=probe]):
+            probe -= 1
+        var width = end - probe
+        var value = output[unsafe_offset=probe]
+        if not rich_unicode_space(rich_codepoint(output, probe, width)) and value != 44 and value != 58 and value != 59 and value != 40:
+            break
+        end = probe
+    var digits_end = end
+    while end > start:
+        var value = output[unsafe_offset=end - 1]
+        if value < 48 or value > 57:
+            break
+        end -= 1
+    return context_parse_count(output, end, digits_end)
+
+
+def context_summary_count(
+    output: Pointer[mut=True, UInt8, _], slice: ProdexRichSlice, word: StringSlice
+) -> Int64:
+    var cursor: Int64 = 0
+    var word_length = Int64(word.byte_length())
+    while cursor < slice.len:
+        var found = context_slice_find_literal(
+            output,
+            ProdexRichSlice(slice.offset + cursor, slice.len - cursor),
+            word,
+            True,
+        )
+        if found < 0:
+            return -1
+        var word_start = cursor + found
+        var count = context_count_after_word(output, slice, slice.offset + word_start + word_length)
+        if count < 0:
+            count = context_count_before_word(output, slice, slice.offset + word_start)
+        if count >= 0:
+            return count
+        cursor = word_start + 1
+    return -1
+
+
+def context_has_nonzero_summary_count(
+    output: Pointer[mut=True, UInt8, _], slice: ProdexRichSlice, word: StringSlice
+) -> Bool:
+    var cursor: Int64 = 0
+    var word_length = Int64(word.byte_length())
+    while cursor < slice.len:
+        var found = context_slice_find_literal(
+            output,
+            ProdexRichSlice(slice.offset + cursor, slice.len - cursor),
+            word,
+            True,
+        )
+        if found < 0:
+            return False
+        var word_start = cursor + found
+        var count = context_count_after_word(output, slice, slice.offset + word_start + word_length)
+        if count < 0:
+            count = context_count_before_word(output, slice, slice.offset + word_start)
+        if count > 0:
+            return True
+        cursor = word_start + 1
+    return False
+
+
+def context_has_zero_only_summary_count(
+    output: Pointer[mut=True, UInt8, _], slice: ProdexRichSlice, word: StringSlice
+) -> Bool:
+    var saw_count = False
+    var cursor: Int64 = 0
+    var word_length = Int64(word.byte_length())
+    while cursor < slice.len:
+        var found = context_slice_find_literal(
+            output,
+            ProdexRichSlice(slice.offset + cursor, slice.len - cursor),
+            word,
+            True,
+        )
+        if found < 0:
+            break
+        var word_start = cursor + found
+        var count = context_count_after_word(output, slice, slice.offset + word_start + word_length)
+        if count < 0:
+            count = context_count_before_word(output, slice, slice.offset + word_start)
+        if count >= 0:
+            saw_count = True
+            if count > 0:
+                return False
+        cursor = word_start + 1
+    return saw_count
+
+
+def context_python_file_location(
+    output: Pointer[mut=True, UInt8, _], slice: ProdexRichSlice
+) -> Bool:
+    var prefix_length: Int64 = 0
+    if rich_slice_prefix(output, slice, StringSlice("File \""), False) or rich_slice_prefix(
+        output, slice, StringSlice("File '"), False
+    ):
+        prefix_length = 6
+    else:
+        return False
+    var quote = output[unsafe_offset=slice.offset + prefix_length - 1]
+    var path_end = prefix_length
+    while path_end < slice.len and output[unsafe_offset=slice.offset + path_end] != quote:
+        path_end += 1
+    if path_end >= slice.len or not context_location_path(
+        output, slice.offset + prefix_length, slice.offset + path_end
+    ):
+        return False
+    var marker = context_slice_find_literal(
+        output,
+        ProdexRichSlice(slice.offset + path_end + 1, slice.len - path_end - 1),
+        StringSlice(", line "),
+        False,
+    )
+    if marker < 0:
+        return False
+    var line_start = path_end + 1 + marker + 7
+    return line_start < slice.len and output[unsafe_offset=slice.offset + line_start] >= 48 and output[unsafe_offset=slice.offset + line_start] <= 57
+
+
+def context_paren_file_location(
+    output: Pointer[mut=True, UInt8, _], start: Int64, end: Int64
+) -> Bool:
+    var open = start
+    while open < end and output[unsafe_offset=open] != 40:
+        open += 1
+    if open >= end:
+        return False
+    var close = open + 1
+    while close < end and output[unsafe_offset=close] != 41:
+        close += 1
+    if close >= end:
+        return False
+    var comma = open + 1
+    while comma < close and output[unsafe_offset=comma] != 44:
+        comma += 1
+    if comma >= close:
+        return False
+    return context_location_path(output, start, open)
+        and context_all_digits(output, open + 1, comma)
+        and context_all_digits(output, comma + 1, close)
 
 
 def context_file_locations(
@@ -260,16 +659,28 @@ def context_file_locations(
     var count: Int64 = 0
     var index: Int64 = 0
     while index < slice.len:
-        while index < slice.len and output[unsafe_offset=slice.offset + index] <= 32:
-            index += 1
+        while index < slice.len:
+            var width = rich_codepoint_width(output[unsafe_offset=slice.offset + index])
+            if not rich_unicode_space(
+                rich_codepoint(output, slice.offset + index, width)
+            ):
+                break
+            index += width
         var start = index
-        while index < slice.len and output[unsafe_offset=slice.offset + index] > 32:
-            index += 1
+        while index < slice.len:
+            var width = rich_codepoint_width(output[unsafe_offset=slice.offset + index])
+            if rich_unicode_space(
+                rich_codepoint(output, slice.offset + index, width)
+            ):
+                break
+            index += width
         if index > start and context_token_location(output, slice.offset + start, slice.offset + index):
+            count += 1
+        if index > start and context_paren_file_location(output, slice.offset + start, slice.offset + index):
             count += 1
     if rich_slice_contains(output, slice, StringSlice("line_number"), False) and (rich_slice_contains(output, slice, StringSlice(".rs"), False) or rich_slice_contains(output, slice, StringSlice(".md"), False)):
         count += 1
-    if rich_slice_contains(output, slice, StringSlice("File \""), False) and rich_slice_contains(output, slice, StringSlice(", line "), False):
+    if context_python_file_location(output, slice):
         count += 1
     if count == 0 and context_embedded_file_location(output, slice):
         count = 1
@@ -328,10 +739,26 @@ def context_zero_summary(
     return index == slice.len
 
 
+def context_is_exception(
+    output: Pointer[mut=True, UInt8, _], slice: ProdexRichSlice
+) -> Bool:
+    if rich_slice_prefix(output, slice, StringSlice("E   "), False):
+        return True
+    var colon = context_slice_find_literal(
+        output, slice, StringSlice(":"), False
+    )
+    if colon <= 0:
+        return False
+    var prefix = ProdexRichSlice(slice.offset, colon)
+    return context_slice_suffix(output, prefix, StringSlice("Error"), False) or context_slice_suffix(
+        output, prefix, StringSlice("Exception"), False
+    )
+
+
 def context_is_error(output: Pointer[mut=True, UInt8, _], slice: ProdexRichSlice) -> Bool:
     if context_zero_summary(output, slice, StringSlice("error:")) or context_zero_summary(output, slice, StringSlice("errors:")):
         return False
-    return rich_slice_prefix(output, slice, StringSlice("error:"), True) or rich_slice_prefix(output, slice, StringSlice("error["), True) or rich_slice_prefix(output, slice, StringSlice("fatal:"), True) or rich_slice_prefix(output, slice, StringSlice("panic:"), True) or rich_slice_prefix(output, slice, StringSlice("npm err!"), True) or rich_slice_prefix(output, slice, StringSlice("npm error"), True) or rich_slice_prefix(output, slice, StringSlice("pnpm error"), True) or rich_slice_prefix(output, slice, StringSlice("yarn error"), True) or rich_slice_prefix(output, slice, StringSlice("bun error"), True) or rich_slice_prefix(output, slice, StringSlice("failed "), True) or rich_slice_prefix(output, slice, StringSlice("fail "), True) or rich_slice_prefix(output, slice, StringSlice("e   "), False) or rich_slice_contains(output, slice, StringSlice("panicked at"), True) or rich_slice_contains(output, slice, StringSlice("\"error\""), False) or rich_slice_contains(output, slice, StringSlice("status=error"), True) or rich_slice_contains(output, slice, StringSlice("level=error"), True) or rich_slice_contains(output, slice, StringSlice("exception"), True)
+    return rich_slice_prefix(output, slice, StringSlice("error:"), True) or rich_slice_prefix(output, slice, StringSlice("error["), True) or rich_slice_prefix(output, slice, StringSlice("error "), True) or rich_slice_prefix(output, slice, StringSlice("error\\t"), True) or rich_slice_prefix(output, slice, StringSlice("fatal:"), True) or rich_slice_prefix(output, slice, StringSlice("panic:"), True) or rich_slice_prefix(output, slice, StringSlice("npm err!"), True) or rich_slice_prefix(output, slice, StringSlice("npm error"), True) or rich_slice_prefix(output, slice, StringSlice("pnpm error"), True) or rich_slice_prefix(output, slice, StringSlice("yarn error"), True) or rich_slice_prefix(output, slice, StringSlice("bun error"), True) or rich_slice_prefix(output, slice, StringSlice("failed "), True) or rich_slice_prefix(output, slice, StringSlice("fail "), True) or rich_slice_prefix(output, slice, StringSlice("e   "), False) or rich_slice_contains(output, slice, StringSlice("panicked at"), True) or rich_slice_contains(output, slice, StringSlice("\"error\""), False) or rich_slice_contains(output, slice, StringSlice("status=error"), True) or rich_slice_contains(output, slice, StringSlice("level=error"), True) or context_is_exception(output, slice) or rich_slice_contains(output, slice, StringSlice("exception"), True)
 
 
 def context_is_test(output: Pointer[mut=True, UInt8, _], slice: ProdexRichSlice) -> Bool:
@@ -461,14 +888,15 @@ def prodex_mojo_rich_context_analyze_v2(
         if key.len == 0:
             result[].noise_lines += 1
         else:
-            var kind = context_kind(output, key)
-            var file_count = context_file_locations(output, key)
-            var is_error = context_is_error(output, key)
-            var is_diff = rich_slice_prefix(output, key, StringSlice("@@ "), False) and rich_slice_contains(output, key, StringSlice("@@"), False)
-            var is_test = context_is_test(output, key)
-            var is_exit = rich_slice_contains(output, key, StringSlice("exit status"), True) or rich_slice_contains(output, key, StringSlice("exit code"), True) or rich_slice_contains(output, key, StringSlice("exit_status"), True)
-            var is_stack = context_is_stack(output, key)
-            var is_diag = context_is_diagnostic(output, key)
+            var signal_key = context_signal_line(output, key)
+            var kind = context_kind(output, signal_key)
+            var file_count = context_file_locations(output, signal_key)
+            var is_error = context_is_error(output, signal_key)
+            var is_diff = rich_slice_prefix(output, signal_key, StringSlice("@@ "), False) and rich_slice_contains(output, signal_key, StringSlice("@@"), False)
+            var is_test = context_is_test(output, signal_key)
+            var is_exit = rich_slice_contains(output, signal_key, StringSlice("exit status"), True) or rich_slice_contains(output, signal_key, StringSlice("exit code"), True) or rich_slice_contains(output, signal_key, StringSlice("exit_status"), True)
+            var is_stack = context_is_stack(output, signal_key)
+            var is_diag = context_is_diagnostic(output, signal_key)
             if is_error:
                 result[].counts[0] += 1
             result[].counts[1] += file_count
@@ -553,10 +981,12 @@ def prodex_mojo_rich_context_signal_counts_batch_v1(
         var view = inputs[unsafe_offset=index].copy()
         if not rich_view_valid(view, RICH_CONTEXT_MAX_TEXT_BYTES):
             return RICH_CONTEXT_STATUS_UTF8
-        var line = ProdexRichSlice(0, Int64(view.len))
         var output = Pointer[
             mut=True, UInt8, MutUntrackedOrigin
         ](unsafe_from_address=Int(view.ptr))
+        var line = context_signal_line(
+            output, ProdexRichSlice(0, Int64(view.len))
+        )
         var offset = index * 7
         outputs[unsafe_offset=offset] = Int64(context_is_error(output, line))
         outputs[unsafe_offset=offset + 1] = context_file_locations(output, line)

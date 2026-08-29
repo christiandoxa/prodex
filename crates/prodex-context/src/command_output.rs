@@ -267,7 +267,11 @@ pub fn compact_command_output_with_options_and_kind_hint(
             CommandOutputKind::NoisySuccess => compact_noisy_success_output(&normalized, options),
             CommandOutputKind::Plain => smart_truncate_command_output(&normalized, options),
         });
-    let output = canonicalize_compacted_command_paths(&normalized, &output, detected_kind);
+    let output = if options.max_lines <= 12 {
+        output
+    } else {
+        canonicalize_compacted_command_paths(&normalized, &output, detected_kind)
+    };
 
     let original_lines = count_text_lines(&normalized);
     let compacted_lines = count_text_lines(&output);
@@ -330,7 +334,11 @@ pub fn compact_command_output_with_intent_options(
         &intent_terms,
     );
     let output = ensure_no_critical_signal_loss_for_intent(&normalized, &output, &options.base);
-    let output = canonicalize_compacted_command_paths(&normalized, &output, report.detected_kind);
+    let output = if options.base.max_lines <= 12 {
+        output
+    } else {
+        canonicalize_compacted_command_paths(&normalized, &output, report.detected_kind)
+    };
 
     report.compacted_lines = count_text_lines(&output);
     report.estimated_tokens_after =

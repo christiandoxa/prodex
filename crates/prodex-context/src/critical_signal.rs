@@ -4,11 +4,13 @@ use std::collections::BTreeMap;
 
 #[cfg(any(not(feature = "mojo"), test))]
 use crate::command_output::is_rust_exit_status_line;
+use crate::{command_lines, normalize_command_output};
+#[cfg(any(not(feature = "mojo"), test))]
 use crate::{
-    command_lines, generic_failed_test_name, has_zero_only_summary_count,
+    generic_failed_test_name, has_zero_only_summary_count,
     is_eslint_diagnostic_line, is_exception_signal_line, is_junit_xml_failure_line,
     is_log_level_signal_line, is_rust_backtrace_start, is_rust_failure_summary_line,
-    is_rust_panic_line, is_typescript_diagnostic_line, normalize_command_output,
+    is_rust_panic_line, is_typescript_diagnostic_line,
     rust_diagnostic_severity, rust_failed_test_name, rust_failure_separator_name,
 };
 
@@ -173,7 +175,7 @@ pub fn count_critical_signals(input: &str) -> CriticalSignalCounts {
         let mut counts = CriticalSignalCounts::default();
 
         for line in command_lines(&normalized) {
-            counts.add_assign(critical_signal_counts_for_line(line));
+            counts.add_assign(rust_critical_signal_counts_for_line(line));
         }
 
         counts
@@ -263,7 +265,7 @@ pub fn critical_signal_lost_line_ranges_with_options(
                 break;
             }
 
-            let counts = critical_signal_counts_for_line(line);
+            let counts = rust_critical_signal_counts_for_line(line);
             if counts.is_empty() {
                 continue;
             }
@@ -350,7 +352,7 @@ fn critical_signal_normalized_rows_rust(
     let mut after_available = Vec::<i64>::new();
 
     for line in command_lines(&after) {
-        let counts = critical_signal_counts_for_line(line);
+        let counts = rust_critical_signal_counts_for_line(line);
         if counts.is_empty() {
             continue;
         }
@@ -373,7 +375,7 @@ fn critical_signal_normalized_rows_rust(
             .ok_or(prodex_mojo_core::MojoError::InvalidInput)?,
     );
     for line in &before_lines {
-        let counts = critical_signal_counts_for_line(line);
+        let counts = rust_critical_signal_counts_for_line(line);
         let key_id = if counts.is_empty() {
             -1
         } else {
@@ -470,41 +472,130 @@ mod mojo_text_rows_tests {
     }
 }
 
+#[cfg(feature = "mojo")]
+fn mojo_critical_signal_counts_for_line(line: &str) -> [usize; 7] {
+    prodex_mojo_core::rich::signal_counts_batch(&[line])
+        .expect("Mojo critical-signal line classification returned an invalid result")
+        .into_iter()
+        .next()
+        .expect("Mojo critical-signal line classification returned no result")
+}
+
+pub(crate) fn is_error_signal_line(line: &str) -> bool {
+    #[cfg(feature = "mojo")]
+    {
+        return mojo_critical_signal_counts_for_line(line)[0] > 0;
+    }
+    #[cfg(not(feature = "mojo"))]
+    {
+        rust_is_error_signal_line(line)
+    }
+}
+
+pub(crate) fn count_file_location_signals(line: &str) -> usize {
+    #[cfg(feature = "mojo")]
+    {
+        return mojo_critical_signal_counts_for_line(line)[1];
+    }
+    #[cfg(not(feature = "mojo"))]
+    {
+        rust_count_file_location_signals(line)
+    }
+}
+
+pub(crate) fn is_diff_hunk_line(line: &str) -> bool {
+    #[cfg(feature = "mojo")]
+    {
+        return mojo_critical_signal_counts_for_line(line)[2] > 0;
+    }
+    #[cfg(not(feature = "mojo"))]
+    {
+        rust_is_diff_hunk_line(line)
+    }
+}
+
+pub(crate) fn is_test_failure_signal_line(line: &str) -> bool {
+    #[cfg(feature = "mojo")]
+    {
+        return mojo_critical_signal_counts_for_line(line)[3] > 0;
+    }
+    #[cfg(not(feature = "mojo"))]
+    {
+        rust_is_test_failure_signal_line(line)
+    }
+}
+
+pub(crate) fn is_stack_signal_line(line: &str) -> bool {
+    #[cfg(feature = "mojo")]
+    {
+        return mojo_critical_signal_counts_for_line(line)[5] > 0;
+    }
+    #[cfg(not(feature = "mojo"))]
+    {
+        rust_is_stack_signal_line(line)
+    }
+}
+
+pub(crate) fn is_rust_diagnostic_signal_line(line: &str) -> bool {
+    #[cfg(feature = "mojo")]
+    {
+        return mojo_critical_signal_counts_for_line(line)[6] > 0;
+    }
+    #[cfg(not(feature = "mojo"))]
+    {
+        rust_is_diagnostic_signal_line(line)
+    }
+}
+
 #[cfg(any(not(feature = "mojo"), test))]
-fn critical_signal_counts_for_line(line: &str) -> CriticalSignalCounts {
+fn rust_critical_signal_counts_for_line(line: &str) -> CriticalSignalCounts {
+    let line = rust_unprefix_numbered_critical_line(line);
     let mut counts = CriticalSignalCounts::default();
-    if is_error_signal_line(line) {
+    if rust_is_error_signal_line(line) {
         counts.errors += 1;
     }
-    counts.file_locations += count_file_location_signals(line);
-    if is_diff_hunk_line(line) {
+    counts.file_locations += rust_count_file_location_signals(line);
+    if rust_is_diff_hunk_line(line) {
         counts.diff_hunks += 1;
     }
-    if is_test_failure_signal_line(line) {
+    if rust_is_test_failure_signal_line(line) {
         counts.test_failures += 1;
     }
     if is_rust_exit_status_line(line) {
         counts.exit_codes += 1;
     }
-    if is_stack_signal_line(line) {
+    if rust_is_stack_signal_line(line) {
         counts.stack_markers += 1;
     }
-    if is_rust_diagnostic_signal_line(line) {
+    if rust_is_diagnostic_signal_line(line) {
         counts.rust_diagnostics += 1;
     }
     counts
 }
 
+#[cfg(any(not(feature = "mojo"), test))]
+fn rust_unprefix_numbered_critical_line(line: &str) -> &str {
+    let trimmed = line.trim_start();
+    let Some(rest) = trimmed.strip_prefix('L') else {
+        return line;
+    };
+    let digits = rest.bytes().take_while(u8::is_ascii_digit).count();
+    if digits == 0 || !rest[digits..].starts_with(": ") {
+        return line;
+    }
+    rest[digits + 2..].trim_start()
+}
+
 #[cfg(all(test, feature = "mojo"))]
 pub(crate) fn critical_signal_counts_for_line_for_test(line: &str) -> CriticalSignalCounts {
-    critical_signal_counts_for_line(line)
+    rust_critical_signal_counts_for_line(line)
 }
 
 #[cfg(not(feature = "mojo"))]
 fn critical_signal_line_multiset(input: &str) -> BTreeMap<String, usize> {
     let mut counts = BTreeMap::<String, usize>::new();
     for line in command_lines(input) {
-        if critical_signal_counts_for_line(line).is_empty() {
+        if rust_critical_signal_counts_for_line(line).is_empty() {
             continue;
         }
         counts
@@ -569,7 +660,8 @@ fn merge_critical_signal_ranges(
     merged
 }
 
-pub(crate) fn is_error_signal_line(line: &str) -> bool {
+#[cfg(any(not(feature = "mojo"), test))]
+fn rust_is_error_signal_line(line: &str) -> bool {
     let trimmed = line.trim_start();
     let lower = trimmed.to_ascii_lowercase();
     if has_zero_only_summary_count(&lower, &["error", "errors"]) {
@@ -601,14 +693,15 @@ pub(crate) fn is_error_signal_line(line: &str) -> bool {
         return true;
     }
 
-    contains_jsonish_error_key(trimmed)
+    rust_contains_jsonish_error_key(trimmed)
         || lower.contains(" status=error")
         || lower.starts_with("status=error")
         || lower.contains(" level=error")
         || lower.starts_with("level=error")
 }
 
-fn contains_jsonish_error_key(line: &str) -> bool {
+#[cfg(any(not(feature = "mojo"), test))]
+fn rust_contains_jsonish_error_key(line: &str) -> bool {
     line.contains("\"error\"")
         || line.contains("'error'")
         || line.contains("\\\"error\\\"")
@@ -618,17 +711,19 @@ fn contains_jsonish_error_key(line: &str) -> bool {
         || line.contains("\\\"type\\\": \\\"error\\\"")
 }
 
-pub(crate) fn count_file_location_signals(line: &str) -> usize {
+#[cfg(any(not(feature = "mojo"), test))]
+fn rust_count_file_location_signals(line: &str) -> usize {
     let token_locations = line
         .split_whitespace()
-        .filter(|token| token_contains_file_location(token))
+        .filter(|token| rust_token_contains_file_location(token))
         .count();
-    let python_location = usize::from(contains_python_file_location(line));
-    let paren_location = usize::from(contains_paren_file_location(line));
+    let python_location = usize::from(rust_contains_python_file_location(line));
+    let paren_location = usize::from(rust_contains_paren_file_location(line));
     token_locations + python_location + paren_location
 }
 
-fn token_contains_file_location(token: &str) -> bool {
+#[cfg(any(not(feature = "mojo"), test))]
+fn rust_token_contains_file_location(token: &str) -> bool {
     let token = token.trim_matches(|ch: char| {
         matches!(
             ch,
@@ -656,7 +751,8 @@ fn token_contains_file_location(token: &str) -> bool {
     looks_like_location_path(middle)
 }
 
-fn contains_python_file_location(line: &str) -> bool {
+#[cfg(any(not(feature = "mojo"), test))]
+fn rust_contains_python_file_location(line: &str) -> bool {
     let trimmed = line.trim_start();
     let (quote, rest) = if let Some(rest) = trimmed.strip_prefix("File \"") {
         ('"', rest)
@@ -680,12 +776,14 @@ fn contains_python_file_location(line: &str) -> bool {
         .is_some_and(|ch| ch.is_ascii_digit())
 }
 
-fn contains_paren_file_location(line: &str) -> bool {
+#[cfg(any(not(feature = "mojo"), test))]
+fn rust_contains_paren_file_location(line: &str) -> bool {
     line.split_whitespace()
-        .any(token_contains_paren_file_location)
+        .any(rust_token_contains_paren_file_location)
 }
 
-fn token_contains_paren_file_location(token: &str) -> bool {
+#[cfg(any(not(feature = "mojo"), test))]
+fn rust_token_contains_paren_file_location(token: &str) -> bool {
     let token = token.trim_matches(|ch: char| {
         matches!(ch, '"' | '\'' | '`' | ',' | ';' | '[' | ']' | '{' | '}')
     });
@@ -723,12 +821,14 @@ pub(crate) fn looks_like_location_path(path: &str) -> bool {
         })
 }
 
-pub(crate) fn is_diff_hunk_line(line: &str) -> bool {
+#[cfg(any(not(feature = "mojo"), test))]
+fn rust_is_diff_hunk_line(line: &str) -> bool {
     let trimmed = line.trim_start();
     trimmed.starts_with("@@ ") && trimmed[3..].contains("@@")
 }
 
-pub(crate) fn is_test_failure_signal_line(line: &str) -> bool {
+#[cfg(any(not(feature = "mojo"), test))]
+fn rust_is_test_failure_signal_line(line: &str) -> bool {
     let trimmed = line.trim_start();
     rust_failed_test_name(trimmed).is_some()
         || rust_failure_separator_name(trimmed).is_some()
@@ -739,7 +839,8 @@ pub(crate) fn is_test_failure_signal_line(line: &str) -> bool {
         || trimmed.contains(" ... FAILED")
 }
 
-pub(crate) fn is_stack_signal_line(line: &str) -> bool {
+#[cfg(any(not(feature = "mojo"), test))]
+fn rust_is_stack_signal_line(line: &str) -> bool {
     let trimmed = line.trim_start();
     is_rust_backtrace_start(trimmed)
         || trimmed.starts_with("Traceback (most recent call last):")
@@ -749,7 +850,8 @@ pub(crate) fn is_stack_signal_line(line: &str) -> bool {
         || trimmed.starts_with("Caused by:")
 }
 
-pub(crate) fn is_rust_diagnostic_signal_line(line: &str) -> bool {
+#[cfg(any(not(feature = "mojo"), test))]
+fn rust_is_diagnostic_signal_line(line: &str) -> bool {
     let trimmed = line.trim_start();
     rust_diagnostic_severity(trimmed).is_some()
         || trimmed.starts_with("--> ")
