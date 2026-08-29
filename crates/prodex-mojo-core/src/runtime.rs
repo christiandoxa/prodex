@@ -3,11 +3,13 @@ pub use crate::runtime_decisions::*;
 
 mod auto_redeem;
 mod candidate_plan;
+mod profile_rotation;
 mod quota_route_score;
 pub use auto_redeem::{
     AutoRedeemCandidateInput, RUNTIME_AUTO_REDEEM_PLAN_MAX_COUNT, auto_redeem_plan_batch,
     auto_redeem_plan_self_test,
 };
+pub use profile_rotation::profile_selection_order_batch;
 pub use quota_route_score::quota_route_score_batch;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

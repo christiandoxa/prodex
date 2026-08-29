@@ -340,4 +340,8 @@ fn rotation_order_keeps_current_then_provider_aware_rotation() {
         active_profile_selection_order_with_view(selection, "current"),
         ["current", "same-provider", "lower-provider"]
     );
+    assert_eq!(
+        profile_rotation_order_with_view(selection, "missing"),
+        ["current", "same-provider", "lower-provider"]
+    );
 }

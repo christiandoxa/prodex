@@ -486,33 +486,86 @@ pub fn active_profile_selection_order_with_view<S: ProfileSelectionRead>(
     selection: S,
     current_profile: &str,
 ) -> Vec<String> {
-    provider_aware_profile_order_with_view(
-        selection,
-        std::iter::once(current_profile.to_string())
-            .chain(profile_rotation_order_with_view(selection, current_profile)),
-    )
+    #[cfg(feature = "mojo")]
+    {
+        let names = selection.profile_names();
+        profile_selection_order_with_mojo(selection, names, current_profile, true)
+    }
+
+    #[cfg(not(feature = "mojo"))]
+    {
+        provider_aware_profile_order_with_view(
+            selection,
+            std::iter::once(current_profile.to_string())
+                .chain(profile_rotation_order_with_view(selection, current_profile)),
+        )
+    }
 }
 
 pub fn profile_rotation_order_with_view<S: ProfileSelectionRead>(
     selection: S,
     current_profile: &str,
 ) -> Vec<String> {
-    let names = selection.profile_names();
-    let Some(index) = names.iter().position(|name| name == current_profile) else {
-        return provider_aware_profile_order_with_view(
-            selection,
-            names.into_iter().filter(|name| name != current_profile),
-        );
-    };
+    #[cfg(feature = "mojo")]
+    {
+        let names = selection.profile_names();
+        profile_selection_order_with_mojo(selection, names, current_profile, false)
+    }
 
-    provider_aware_profile_order_with_view(
-        selection,
-        names
-            .iter()
-            .skip(index + 1)
-            .chain(names.iter().take(index))
-            .cloned(),
+    #[cfg(not(feature = "mojo"))]
+    {
+        let names = selection.profile_names();
+        let Some(index) = names.iter().position(|name| name == current_profile) else {
+            return provider_aware_profile_order_with_view(
+                selection,
+                names.into_iter().filter(|name| name != current_profile),
+            );
+        };
+
+        provider_aware_profile_order_with_view(
+            selection,
+            names
+                .iter()
+                .skip(index + 1)
+                .chain(names.iter().take(index))
+                .cloned(),
+        )
+    }
+}
+
+#[cfg(feature = "mojo")]
+fn profile_selection_order_with_mojo<S: ProfileSelectionRead>(
+    selection: S,
+    names: Vec<String>,
+    current_profile: &str,
+    include_current: bool,
+) -> Vec<String> {
+    let priorities = names
+        .iter()
+        .map(|name| {
+            selection
+                .profile_entry(name)
+                .map(ProfileSelectionProvider::runtime_pool_priority)
+                .unwrap_or(usize::MAX)
+        })
+        .collect::<Vec<_>>();
+    let current_index = names.iter().position(|name| name == current_profile);
+    let order = prodex_mojo_core::runtime::profile_selection_order_batch(
+        &priorities,
+        current_index,
+        include_current,
     )
+    .expect("Mojo profile rotation order returned invalid output");
+    order
+        .into_iter()
+        .map(|index| {
+            if index == names.len() {
+                current_profile.to_string()
+            } else {
+                names[index].clone()
+            }
+        })
+        .collect()
 }
 
 #[path = "scoring/profile_order.rs"]

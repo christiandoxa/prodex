@@ -10,6 +10,89 @@ from runtime_math import (
 comptime RUNTIME_PROFILE_SCHEDULE_FIELD_COUNT: Int64 = 16
 comptime RUNTIME_PROFILE_SCHEDULE_MAX_COUNT: Int64 = 256
 
+def runtime_profile_rotation_index(
+    offset: Int64,
+    count: Int64,
+    current_index: Int64,
+) -> Int64:
+    if current_index < 0:
+        return offset
+    var after_count = count - current_index - 1
+    if offset < after_count:
+        return current_index + 1 + offset
+    return offset - after_count
+
+
+def runtime_profile_rotation_priority(
+    priorities: Pointer[mut=False, Int64, _],
+    index: Int64,
+    count: Int64,
+) -> Int64:
+    if index == count:
+        return INT64_MAX
+    return priorities[unsafe_offset=index]
+
+
+@export("prodex_runtime_profile_rotation_order_batch")
+def prodex_runtime_profile_rotation_order_batch(
+    priorities: Pointer[mut=False, Int64, _],
+    ordered_indices: Pointer[mut=True, Int64, _],
+    ordered_count: Pointer[mut=True, Int64, _],
+    count: Int64,
+    current_index: Int64,
+    include_current: Int64,
+) abi("C") -> Int64:
+    if count < 0 or count > RUNTIME_PROFILE_SCHEDULE_MAX_COUNT:
+        return 1
+    if current_index < -1 or current_index >= count:
+        return 2
+    if include_current < 0 or include_current > 1:
+        return 2
+    var total_count = count
+    if include_current == 1 and current_index < 0:
+        total_count += 1
+    elif include_current == 0 and current_index >= 0:
+        total_count -= 1
+    if total_count > RUNTIME_PROFILE_SCHEDULE_MAX_COUNT:
+        return 1
+    for index in range(count):
+        if priorities[unsafe_offset=index] < 0:
+            return 2
+
+    for position in range(total_count):
+        if include_current == 1 and position == 0:
+            if current_index < 0:
+                ordered_indices[unsafe_offset=position] = count
+            else:
+                ordered_indices[unsafe_offset=position] = current_index
+        else:
+            var offset = position
+            if include_current == 1:
+                offset -= 1
+            ordered_indices[unsafe_offset=position] = runtime_profile_rotation_index(
+                offset, count, current_index
+            )
+
+    for position in range(total_count):
+        var best = position
+        for candidate in range(position + 1, total_count):
+            var candidate_index = ordered_indices[unsafe_offset=candidate]
+            var best_index = ordered_indices[unsafe_offset=best]
+            if runtime_profile_rotation_priority(
+                priorities, candidate_index, count
+            ) < runtime_profile_rotation_priority(
+                priorities, best_index, count
+            ):
+                best = candidate
+        if best != position:
+            var selected = ordered_indices[unsafe_offset=best]
+            ordered_indices[unsafe_offset=best] = ordered_indices[
+                unsafe_offset=position
+            ]
+            ordered_indices[unsafe_offset=position] = selected
+    ordered_count[unsafe_offset=0] = total_count
+    return 0
+
 @export("prodex_runtime_profile_provider_order_batch")
 def prodex_runtime_profile_provider_order_batch(
     priorities: Pointer[mut=False, Int64, _],
