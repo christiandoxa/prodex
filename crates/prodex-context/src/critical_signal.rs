@@ -341,6 +341,64 @@ fn critical_signal_normalized_rows(
 }
 
 #[cfg(all(test, feature = "mojo"))]
+fn critical_signal_normalized_rows_rust(
+    before: &str,
+    after: &str,
+) -> Result<(Vec<i64>, Vec<i64>, usize), prodex_mojo_core::MojoError> {
+    let before = normalize_command_output(before);
+    let after = normalize_command_output(after);
+    let before_lines = command_lines(&before);
+    let mut key_ids = BTreeMap::<String, usize>::new();
+    let mut after_available = Vec::<i64>::new();
+
+    for line in command_lines(&after) {
+        let counts = rust_critical_signal_counts_for_line(line);
+        if counts.is_empty() {
+            continue;
+        }
+        let next_id = key_ids.len();
+        let key_id = *key_ids
+            .entry(critical_signal_line_key(line))
+            .or_insert(next_id);
+        if key_id == after_available.len() {
+            after_available.push(0);
+        }
+        after_available[key_id] = after_available[key_id]
+            .checked_add(1_i64)
+            .ok_or(prodex_mojo_core::MojoError::InvalidInput)?;
+    }
+
+    let mut before_rows = Vec::with_capacity(
+        before_lines
+            .len()
+            .checked_mul(8)
+            .ok_or(prodex_mojo_core::MojoError::InvalidInput)?,
+    );
+    for line in &before_lines {
+        let counts = rust_critical_signal_counts_for_line(line);
+        let key_id = if counts.is_empty() {
+            -1
+        } else {
+            let next_id = key_ids.len();
+            let key_id = *key_ids
+                .entry(critical_signal_line_key(line))
+                .or_insert(next_id);
+            if key_id == after_available.len() {
+                after_available.push(0);
+            }
+            i64::try_from(key_id).map_err(|_| prodex_mojo_core::MojoError::InvalidInput)?
+        };
+        before_rows.push(key_id);
+        for value in counts.values() {
+            before_rows
+                .push(i64::try_from(value).map_err(|_| prodex_mojo_core::MojoError::InvalidInput)?);
+        }
+    }
+
+    Ok((before_rows, after_available, before_lines.len()))
+}
+
+#[cfg(all(test, feature = "mojo"))]
 #[path = "critical_signal_tests.rs"]
 mod mojo_text_rows_tests;
 #[cfg(feature = "mojo")]
