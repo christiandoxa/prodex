@@ -47,6 +47,8 @@ test("root package exposes only the maintained developer interface", async () =>
     "docs",
     "compat",
     "mojo:ownership",
+    "mojo:production-share",
+    "mojo:authority",
     "optional-tools:freshness",
     "bench",
     "ci",

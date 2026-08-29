@@ -96,6 +96,32 @@ jobs:
             echo "version=${version}"
           } >> "${GITHUB_OUTPUT}"
 
+      - name: Install Node.js for release metadata checks
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: 22
+          package-manager-cache: false
+
+      - name: Verify optional-tool freshness at release cut
+        env:
+          RELEASE_SHA: ${{ steps.target.outputs.target_sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          node scripts/ci/optional-tools-freshness.mjs \
+            --check --json --checkpoint B --release-sha "${RELEASE_SHA}" \
+            | tee "${RUNNER_TEMP}/optional-tools-freshness-B.json"
+          test -s "${RUNNER_TEMP}/optional-tools-freshness-B.json"
+
+      - name: Upload optional-tool freshness evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: optional-tools-freshness-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/optional-tools-freshness-B.json
+          if-no-files-found: error
+          retention-days: 14
+
       - name: Wait for CI success
         env:
           GH_TOKEN: ${{ github.token }}
@@ -528,6 +554,7 @@ jobs:
             "${symbol_tool[@]}" -g "${archive}" | grep -F 'prodex_mojo_rich_catalog_choices_v1'
             "${symbol_tool[@]}" -g "${archive}" | grep -F 'prodex_mojo_rich_catalog_merge_v1'
             "${symbol_tool[@]}" -g "${archive}" | grep -F 'prodex_runtime_quota_score_batch'
+            "${symbol_tool[@]}" -g "${archive}" | grep -F 'prodex_runtime_quota_route_score_resolution_batch'
             "${symbol_tool[@]}" -g "${archive}" | grep -F 'prodex_smart_context_token_usage_summary_batch'
             if "${symbol_tool[@]}" -u "${archive}" | grep -F 'KGEN_CompilerRT_'; then
               echo "rich Mojo core unexpectedly requires the Mojo compiler runtime" >&2
@@ -1239,9 +1266,45 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          log_dir="${RUNNER_TEMP}/release-provenance"
+          mkdir -p "${log_dir}"
+          pids=()
+          assets=()
           while IFS= read -r -d '' asset; do
-            gh attestation verify "${asset}" --repo "${GITHUB_REPOSITORY}"
+            index="${#pids[@]}"
+            assets+=("${asset}")
+            gh attestation verify "${asset}" --repo "${GITHUB_REPOSITORY}" \
+              >"${log_dir}/${index}.log" 2>&1 &
+            pids+=("$!")
           done < <(find release-assets -maxdepth 1 -type f -print0)
+          status=0
+          for index in "${!pids[@]}"; do
+            if wait "${pids[index]}"; then
+              echo "Verified release provenance: ${assets[index]}"
+            else
+              status=1
+              echo "Release provenance verification failed: ${assets[index]}" >&2
+            fi
+            cat "${log_dir}/${index}.log"
+          done
+          exit "${status}"
+
+      - name: Validate curated release notes before tagging
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="${{ steps.release.outputs.version }}"
+          curated_notes="docs/release-notes/${version}.md"
+          test -f "${curated_notes}" || {
+            echo "missing curated release notes: ${curated_notes}" >&2
+            exit 1
+          }
+          for heading in "## New Features" "## Bug Fixes" "## Changelog"; do
+            grep -Fqx "${heading}" "${curated_notes}" || {
+              echo "${curated_notes} is missing mandatory heading: ${heading}" >&2
+              exit 1
+            }
+          done
 
       - name: Create release tag
         env:

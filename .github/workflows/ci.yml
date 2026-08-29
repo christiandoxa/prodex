@@ -1201,13 +1201,43 @@ jobs:
             ~/.cargo/bin/cargo-machete
           key: ${{ runner.os }}-cargo-supply-chain-tools-audit-0.22.1-deny-0.19.0-machete-0.9.2
 
-      - name: Install cargo-audit
+      - name: Install cargo supply-chain tools in parallel
         shell: bash
         run: |
           set -euo pipefail
-          if ! command -v cargo-audit >/dev/null 2>&1; then
-            cargo install cargo-audit --locked --version 0.22.1
-          fi
+          log_dir="${RUNNER_TEMP}/cargo-supply-chain-tools"
+          mkdir -p "${log_dir}"
+          pids=()
+          labels=()
+          install_tool() {
+            local binary="$1"
+            shift
+            if ! command -v "${binary}" >/dev/null 2>&1; then
+              local root="${RUNNER_TEMP}/cargo-supply-chain-${binary}"
+              mkdir -p "${root}"
+              CARGO_TARGET_DIR="${root}/target" cargo install --root "${root}" "$@"
+              install -m 0755 "${root}/bin/${binary}" "${HOME}/.cargo/bin/${binary}"
+            fi
+          }
+          run_install() {
+            local label="$1"
+            shift
+            labels+=("${label}")
+            "$@" >"${log_dir}/${label}.log" 2>&1 &
+            pids+=("$!")
+          }
+          run_install cargo-audit install_tool cargo-audit cargo-audit --locked --version 0.22.1
+          run_install cargo-deny install_tool cargo-deny cargo-deny --locked --version 0.19.0
+          run_install cargo-machete install_tool cargo-machete cargo-machete --locked --version 0.9.2
+
+          status=0
+          for index in "${!pids[@]}"; do
+            if ! wait "${pids[index]}"; then
+              status=1
+            fi
+            cat "${log_dir}/${labels[index]}.log"
+          done
+          exit "${status}"
 
       - name: Run cargo audit
         shell: bash
@@ -1223,14 +1253,6 @@ jobs:
             sleep "$((attempt * 5))"
           done
 
-      - name: Install cargo-deny
-        shell: bash
-        run: |
-          set -euo pipefail
-          if ! command -v cargo-deny >/dev/null 2>&1; then
-            cargo install cargo-deny --locked --version 0.19.0
-          fi
-
       - name: Run cargo deny checks
         shell: bash
         run: |
@@ -1244,14 +1266,6 @@ jobs:
             fi
             sleep "$((attempt * 5))"
           done
-
-      - name: Install cargo-machete
-        shell: bash
-        run: |
-          set -euo pipefail
-          if ! command -v cargo-machete >/dev/null 2>&1; then
-            cargo install cargo-machete --locked --version 0.9.2
-          fi
 
       - name: Reject unused direct dependencies
         run: cargo machete --with-metadata
@@ -1872,6 +1886,7 @@ jobs:
           nm -g "${mojo_archive}" | grep -F 'prodex_mojo_rich_catalog_choices_v1'
           nm -g "${mojo_archive}" | grep -F 'prodex_mojo_rich_catalog_merge_v1'
           nm -g "${mojo_archive}" | grep -F 'prodex_runtime_quota_score_batch'
+          nm -g "${mojo_archive}" | grep -F 'prodex_runtime_quota_route_score_resolution_batch'
           nm -g "${mojo_archive}" | grep -F 'prodex_smart_context_token_usage_summary_batch'
           if nm -u "${mojo_archive}" | grep -F 'KGEN_CompilerRT_'; then
             echo "rich Mojo core unexpectedly requires the Mojo compiler runtime" >&2
@@ -1918,47 +1933,37 @@ jobs:
           done
           exit "${status}"
 
-      - name: Run provider-constraint and tuning Mojo parity tests
+      - name: Run remaining Mojo parity tests in parallel
         shell: bash
         run: |
-          set -uo pipefail
-          cargo test --locked -q -p prodex-provider-core --features mojo -- --test-threads=1 &
-          provider_pid=$!
-          cargo test --locked -q -p prodex-runtime-tuning --features mojo -- --test-threads=1 &
-          tuning_pid=$!
-          status=0
-          wait "${provider_pid}" || status=1
-          wait "${tuning_pid}" || status=1
-          exit "${status}"
+          set -euo pipefail
+          log_dir="${RUNNER_TEMP}/mojo-remaining-tests"
+          mkdir -p "${log_dir}"
+          pids=()
+          labels=()
+          run_test() {
+            local label="$1"
+            shift
+            labels+=("${label}")
+            "$@" >"${log_dir}/${label}.log" 2>&1 &
+            pids+=("$!")
+          }
+          run_test provider-core cargo test --locked -q -p prodex-provider-core --features mojo -- --test-threads=1
+          run_test runtime-tuning cargo test --locked -q -p prodex-runtime-tuning --features mojo -- --test-threads=1
+          run_test context cargo test --locked -q -p prodex-context --features mojo -- --test-threads=1
+          run_test runtime-policy cargo test --locked -q -p prodex-runtime-policy --features mojo -- --test-threads=1
+          run_test gateway-constraints cargo test --locked -q -p prodex-app --features mojo-core --lib resolved_gateway_request_constraints -- --test-threads=1
+          run_test smart-context-rehydrate cargo test --locked -q -p prodex-app --features mojo-core --lib smart_context_auto_rehydrate_plan_defers_over_budget_refs -- --test-threads=1
+          run_test mojo-core cargo test --locked -q -p prodex-mojo-core --features mojo-core -- --test-threads=1
 
-      - name: Run context and runtime-policy Mojo parity tests
-        shell: bash
-        run: |
-          set -uo pipefail
-          cargo test --locked -q -p prodex-context --features mojo -- --test-threads=1 &
-          context_pid=$!
-          cargo test --locked -q -p prodex-runtime-policy --features mojo -- --test-threads=1 &
-          policy_pid=$!
           status=0
-          wait "${context_pid}" || status=1
-          wait "${policy_pid}" || status=1
+          for index in "${!pids[@]}"; do
+            if ! wait "${pids[index]}"; then
+              status=1
+            fi
+            cat "${log_dir}/${labels[index]}.log"
+          done
           exit "${status}"
-
-      - name: Run new Mojo production-path tests
-        shell: bash
-        run: |
-          set -uo pipefail
-          cargo test --locked -q -p prodex-app --features mojo-core --lib resolved_gateway_request_constraints -- --test-threads=1 &
-          constraints_pid=$!
-          cargo test --locked -q -p prodex-app --features mojo-core --lib smart_context_auto_rehydrate_plan_defers_over_budget_refs -- --test-threads=1 &
-          rehydrate_pid=$!
-          status=0
-          wait "${constraints_pid}" || status=1
-          wait "${rehydrate_pid}" || status=1
-          exit "${status}"
-
-      - name: Run Mojo core kernel tests
-        run: cargo test --locked -q -p prodex-mojo-core --features mojo-core -- --test-threads=1
 
   ci-duration-telemetry:
     name: CI duration telemetry
