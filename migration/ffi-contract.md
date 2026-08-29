@@ -172,6 +172,11 @@ prodex_routing_plan_batch(..., count: Int64, required_capability_mask: Int64, we
 prodex_capability_match_batch(..., count: Int64, required_capability_mask: Int64) -> Int64
 prodex_smart_context_pressure_snapshot(..., output pointers...) -> Int64
 prodex_runtime_candidate_plan_batch(..., count: Int64, route_kind: Int64) -> Int64
+prodex_runtime_profile_provider_order_batch(..., count: Int64) -> Int64
+prodex_smart_context_calibration_models_match_v1(...string views...) -> Int64
+prodex_smart_context_calibration_observed_input_v1(...bucket and usage rows...) -> Int64
+prodex_provider_constraints_resolve_v1(...scalar planning inputs...) -> Int64
+prodex_provider_constraints_preclassify_v1(...scalar constraint inputs...) -> Int64
 ```
 
 Existing routing and capability batches use parallel flat `Int64` arrays and accept at most 64
@@ -201,6 +206,14 @@ names, and persisted preference state. The numeric policy batch accepts a
 section-sized list of `NonZero=0`, `Range=1`, and `LessOrEqual=2` rules. Mojo writes one `Int64`
 failure flag per input rule; Rust validates the flags and maps failed indices to existing
 path-aware errors.
+
+The profile provider-order batch is an index-only companion for rotation planning. It accepts
+parallel provider-priority and original-order arrays, writes a stable ordered-index array, and
+does not receive profile names or account state. Calibration matching accepts bounded string
+views and returns only a validated match tag; observed-input calibration accepts bounded bucket,
+sample, and usage rows and writes an optional observed input count. Provider requirement
+resolution and constraint preclassification are scalar, synchronous planning calls; they do not
+perform catalog lookup, authentication, transport, persistence, or policy authorization.
 
 The legacy context signal-diff batch exchanges exactly seven non-negative `Int64` counters for
 each side and writes seven lost plus seven gained counters. The additive text ABI below now owns
@@ -352,6 +365,10 @@ exact field counts of 17/7 input `Int64`/`UInt64` words and 12/5 output words. I
 output word zero carry the provider ABI version. Rust exposes typed enums rather than numeric tags;
 unknown tags, invalid presence/value pairs, wrong counts, reserved decision output, and version
 mismatch fail closed before a result reaches provider routing.
+
+The planning helpers above are intentionally separate from provider constraint ABI version `2`:
+they use scalar arguments and return status plus caller-owned output scalars. Rust validates every
+status and output presence/value combination before constructing a provider-facing plan.
 
 The shared routing ABI remains version `1`; provider constraints deliberately replace their
 unversioned scalar ABI with the versioned buffer contract above. Rust owns every input/output
@@ -523,3 +540,10 @@ can verify the evidence instead of treating a zero or unsupported claim as migra
 Current 0.420.0 cleanup evidence is 17 lines for the deleted auto-redeem priority helper, 84 lines
 for the feature-gated dynamic catalog Rust planner, and 78 lines for the feature-gated main model
 configuration Rust planner. These 179 lines are reported separately from the 423-line requirement.
+
+The 0.420.0 qualifying migration inventory also records profile provider-order planning,
+Smart Context calibration matching, and provider constraint preclassification. Their Rust
+consumers retain only observation acquisition, bounded DTO construction, status validation, and
+typed result reconstruction; the deterministic decisions execute through the listed Mojo entry
+points in production feature builds. Feature-off Rust implementations remain parity oracles and
+are not runtime fallback paths after a Mojo-enabled call fails.
