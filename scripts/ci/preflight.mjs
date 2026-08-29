@@ -139,6 +139,16 @@ export function preflightSteps(args) {
       args: ["scripts/ci/mojo-ownership.mjs", "--check"],
     },
     {
+      label: "mojo-production-share",
+      command: "node",
+      args: ["scripts/ci/mojo-production-share.mjs", "--check"],
+    },
+    {
+      label: "mojo-authority-guard",
+      command: "node",
+      args: ["scripts/ci/mojo-authority-guard.mjs"],
+    },
+    {
       label: "mojo-no-fallback",
       command: "node",
       args: ["scripts/ci/mojo-no-fallback-guard.mjs"],

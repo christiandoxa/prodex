@@ -45,6 +45,8 @@ test("preflight enforces Mojo ownership and no-fallback guards", () => {
   const labels = preflightSteps(parseArgs(["node", "preflight.mjs"])).map((step) => step.label);
 
   assert.ok(labels.includes("mojo-ownership"));
+  assert.ok(labels.includes("mojo-production-share"));
+  assert.ok(labels.includes("mojo-authority-guard"));
   assert.ok(labels.includes("mojo-no-fallback"));
 });
 
