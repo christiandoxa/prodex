@@ -391,6 +391,43 @@
           "model_catalog_choice_planning",
           "model_catalog_configuration_resolution"
         ]
+      },
+      "mojo/prodex_core/log_semantics.mojo": {
+        "operations": [
+          "log_event_classification",
+          "runtime_log_level_classification"
+        ]
+      },
+      "mojo/prodex_core/profile_schedule.mojo": {
+        "operations": [
+          "runtime_profile_schedule_scoring",
+          "runtime_profile_rotation_planning"
+        ]
+      },
+      "mojo/prodex_core/runtime_tuning.mojo": {
+        "operations": [
+          "runtime_tuning_defaults_kernel",
+          "runtime_tuning_capacity_defaults",
+          "runtime_policy_proxy_preset_defaults"
+        ]
+      },
+      "mojo/prodex_core/context_text.mojo": {
+        "operations": [
+          "critical_signal_text_grouping",
+          "runtime_ci_failure_classification"
+        ]
+      },
+      "crates/prodex-runtime-quota/src/selection/scoring.rs": {
+        "semantic_ranges": [
+          {
+            "start": 1,
+            "end": 484
+          },
+          {
+            "start": 570,
+            "end": 574
+          }
+        ]
       }
     },
     "additions": [
@@ -880,6 +917,78 @@
       "production_fallback": false,
       "duplicate_production_owner": false,
       "platform_fallback": false
+    },
+    {
+      "name": "runtime_profile_rotation_planning",
+      "domain": "quota/profile-planning",
+      "introduced_in": "0.420.0",
+      "baseline_state": "candidate",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_runtime_profile_rotation_order_batch",
+      "mojo_source": "mojo/prodex_core/profile_schedule.mojo",
+      "consumer": "crates/prodex-runtime-quota/src/selection/scoring.rs",
+      "consumer_marker": "profile_selection_order_batch",
+      "production_reachability_test": "crates/prodex-runtime-quota/src/selection/scoring.rs",
+      "rust_owner_before": "current-relative profile rotation order and provider-priority ranking",
+      "rust_state_after": "adapter-only",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "profile-state observation and validated name reconstruction"
+    },
+    {
+      "name": "runtime_policy_proxy_preset_defaults",
+      "domain": "runtime-policy/capacity",
+      "introduced_in": "0.420.0",
+      "baseline_state": "candidate",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_runtime_proxy_preset_defaults_v1",
+      "mojo_source": "mojo/prodex_core/runtime_tuning.mojo",
+      "consumer": "crates/prodex-runtime-policy/src/types/runtime_proxy_preset.rs",
+      "consumer_marker": "runtime_tuning_proxy_preset_defaults",
+      "production_reachability_test": "crates/prodex-runtime-policy/src/types/runtime_proxy_preset.rs",
+      "rust_owner_before": "runtime-proxy preset default normalization",
+      "rust_state_after": "adapter-only",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "typed preset selection and validated scalar mapping"
+    },
+    {
+      "name": "runtime_log_level_classification",
+      "domain": "strings/observability",
+      "introduced_in": "0.420.0",
+      "baseline_state": "candidate",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_mojo_log_level_classify_v1",
+      "mojo_source": "mojo/prodex_core/log_semantics.mojo",
+      "consumer": "crates/prodex-context/src/command_output/log_stream.rs",
+      "consumer_marker": "prodex_mojo_core::log::classify_log_level",
+      "production_reachability_test": "crates/prodex-context/src/command_output/log_stream.rs",
+      "rust_owner_before": "bounded log-level token, key-value, and JSON classification",
+      "rust_state_after": "adapter-only",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "bounded lowercase normalization and validated ABI mapping"
+    },
+    {
+      "name": "runtime_ci_failure_classification",
+      "domain": "strings/ci-observability",
+      "introduced_in": "0.420.0",
+      "baseline_state": "candidate",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_context_classify_ci_line_v1",
+      "mojo_source": "mojo/prodex_core/context_text.mojo",
+      "consumer": "crates/prodex-context/src/command_output/ci_failure.rs",
+      "consumer_marker": "prodex_mojo_core::context::classify_ci_line",
+      "production_reachability_test": "crates/prodex-context/src/command_output/ci_failure.rs",
+      "rust_owner_before": "bounded CI marker, failure, job, step, and exit-code classification",
+      "rust_state_after": "adapter-only",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "bounded input normalization and validated metadata mapping"
     }
   ],
   "rust_semantic_reductions": [
@@ -1096,6 +1205,23 @@
       "performance": "one bounded index-order call"
     },
     {
+      "file": "crates/prodex-runtime-quota/src/selection/scoring.rs",
+      "symbol": "profile_rotation_order_with_view",
+      "operation": "runtime_profile_rotation_planning",
+      "previous_responsibility": "current-relative profile rotation order and provider-priority ranking",
+      "baseline_semantic_loc": 294,
+      "migrated_semantic_loc": 30,
+      "final_state": "adapter-only",
+      "rust_before": "crates/prodex-runtime-quota/src/selection/scoring.rs::active_profile_selection_order_with_view and profile_rotation_order_with_view",
+      "rust_after": "adapter-only name reconstruction with hard affinity and profile state retained in Rust",
+      "mojo_owner": "mojo/prodex_core/profile_schedule.mojo::prodex_runtime_profile_rotation_order_batch",
+      "mojo_source": "mojo/prodex_core/profile_schedule.mojo",
+      "mojo_entry": "prodex_runtime_profile_rotation_order_batch",
+      "production_consumer": "crates/prodex-runtime-quota/src/selection/scoring.rs",
+      "parity_test": "crates/prodex-mojo-core/tests/profile_schedule.rs",
+      "performance": "one bounded index-order call"
+    },
+    {
       "file": "crates/prodex-app/src/runtime_proxy/quota/auto_redeem/pool.rs",
       "symbol": "runtime_auto_redeem_plan_priority",
       "operation": "runtime_auto_redeem_capacity_planning",
@@ -1167,6 +1293,131 @@
         "release_gate": "#[cfg(not(feature = \"mojo-core\"))]"
       },
       "cleanup_evidence": "The mojo-core production path supplies explicit, remembered, provider-default, catalog-default, and supported-effort inputs to one Mojo plan and maps its validated output."
+    },
+    {
+      "file": "crates/prodex-runtime-policy/src/types.rs",
+      "symbol": "fn settings(self) -> RuntimePolicyProxySettings",
+      "operation": "runtime_policy_proxy_preset_defaults",
+      "previous_responsibility": "runtime-proxy preset default normalization",
+      "final_state": "adapter-only",
+      "rust_before": "crates/prodex-runtime-policy/src/types.rs::RuntimePolicyProxyPreset::settings",
+      "rust_after": "adapter-only wrapper; Mojo owns the preset default table",
+      "mojo_owner": "mojo/prodex_core/runtime_tuning.mojo::prodex_runtime_proxy_preset_defaults_v1",
+      "mojo_source": "mojo/prodex_core/runtime_tuning.mojo",
+      "mojo_entry": "prodex_runtime_proxy_preset_defaults_v1",
+      "production_consumer": "crates/prodex-runtime-policy/src/types/runtime_proxy_preset.rs",
+      "parity_test": "crates/prodex-runtime-policy/tests/src/runtime_proxy.rs",
+      "cleanup_loc": 78,
+      "cleanup_source": {
+        "kind": "feature-gated",
+        "baseline_range": {
+          "start": 672,
+          "end": 751
+        },
+        "release_symbol": "fn settings(self) -> RuntimePolicyProxySettings",
+        "release_gate": "#[cfg(feature = \"mojo\")]"
+      },
+      "cleanup_evidence": "The Mojo-enabled runtime policy path resolves all preset defaults through the bounded runtime-tuning ABI; the feature-off Rust table remains an oracle."
+    },
+    {
+      "file": "crates/prodex-context/src/command_output/log_stream.rs",
+      "symbol": "fn log_stream_level_label(line: &str) -> Option<&'static str>",
+      "operation": "runtime_log_level_classification",
+      "previous_responsibility": "log-level token, key-value, and JSON classification",
+      "final_state": "adapter-only",
+      "rust_before": "crates/prodex-context/src/command_output/log_stream.rs::log_stream_level_label",
+      "rust_after": "feature-gated Rust oracle plus bounded Mojo adapter",
+      "mojo_owner": "mojo/prodex_core/log_semantics.mojo::prodex_mojo_log_level_classify_v1",
+      "mojo_source": "mojo/prodex_core/log_semantics.mojo",
+      "mojo_entry": "prodex_mojo_log_level_classify_v1",
+      "production_consumer": "crates/prodex-context/src/command_output/log_stream.rs",
+      "parity_test": "crates/prodex-context/src/command_output/log_stream.rs",
+      "cleanup_loc": 53,
+      "cleanup_source": {
+        "kind": "feature-gated",
+        "baseline_range": {
+          "start": 197,
+          "end": 253
+        },
+        "release_symbol": "fn log_stream_level_label_rust(line: &str) -> Option<&'static str>",
+        "release_gate": "#[cfg(any(not(feature = \"mojo\"), test))]"
+      },
+      "cleanup_evidence": "The Mojo production path bounds the untrusted line, classifies supported log-level forms, and maps the validated tag; the Rust classifier remains only for feature-off and parity builds."
+    },
+    {
+      "file": "crates/prodex-context/src/command_output/ci_failure.rs",
+      "symbol": "is_ci_log_marker_line",
+      "operation": "runtime_ci_failure_classification",
+      "previous_responsibility": "CI log marker, annotation, failure-text, job, step, and exit-code classification",
+      "final_state": "adapter-only",
+      "rust_before": "crates/prodex-context/src/command_output/ci_failure.rs::is_ci_log_marker_line",
+      "rust_after": "feature-gated Rust oracle plus bounded Mojo metadata adapter",
+      "mojo_owner": "mojo/prodex_core/context_text.mojo::prodex_context_classify_ci_line_v1",
+      "mojo_source": "mojo/prodex_core/context_text.mojo",
+      "mojo_entry": "prodex_context_classify_ci_line_v1",
+      "production_consumer": "crates/prodex-context/src/command_output/ci_failure.rs",
+      "parity_test": "crates/prodex-context/src/command_output/ci_failure.rs",
+      "cleanup_loc": 33,
+      "cleanup_source": {
+        "kind": "feature-gated",
+        "baseline_range": {
+          "start": 113,
+          "end": 147
+        },
+        "release_symbol": "fn is_ci_log_marker_line_rust(line: &str) -> bool",
+        "release_gate": "#[cfg(any(not(feature = \"mojo\"), test))]"
+      },
+      "cleanup_evidence": "The Mojo production path classifies bounded CI metadata through one fixed-width call; Rust retains normalization, failure-index selection, truncation, and the feature-off/test oracle."
+    },
+    {
+      "file": "crates/prodex-context/src/command_output/ci_failure.rs",
+      "symbol": "ci_job_name_from_line",
+      "operation": "runtime_ci_failure_classification",
+      "previous_responsibility": "CI job and step name extraction from diagnostic lines",
+      "final_state": "adapter-only",
+      "rust_before": "crates/prodex-context/src/command_output/ci_failure.rs::ci_job_name_from_line and ci_step_name_from_line",
+      "rust_after": "feature-gated Rust oracle plus bounded Mojo span mapping",
+      "mojo_owner": "mojo/prodex_core/context_text.mojo::prodex_context_classify_ci_line_v1",
+      "mojo_source": "mojo/prodex_core/context_text.mojo",
+      "mojo_entry": "prodex_context_classify_ci_line_v1",
+      "production_consumer": "crates/prodex-context/src/command_output/ci_failure.rs",
+      "parity_test": "crates/prodex-context/src/command_output/ci_failure.rs",
+      "cleanup_loc": 30,
+      "cleanup_source": {
+        "kind": "feature-gated",
+        "baseline_range": {
+          "start": 167,
+          "end": 197
+        },
+        "release_symbol": "fn ci_job_name_from_line_rust(line: &str) -> Option<String>",
+        "release_gate": "#[cfg(any(not(feature = \"mojo\"), test))]"
+      },
+      "cleanup_evidence": "Mojo returns bounded job and step spans while Rust retains the surrounding line-window search and truncation policy."
+    },
+    {
+      "file": "crates/prodex-context/src/command_output/ci_failure.rs",
+      "symbol": "ci_exit_code_from_line",
+      "operation": "runtime_ci_failure_classification",
+      "previous_responsibility": "CI exit-code token extraction",
+      "final_state": "adapter-only",
+      "rust_before": "crates/prodex-context/src/command_output/ci_failure.rs::ci_exit_code_from_line",
+      "rust_after": "feature-gated Rust oracle plus bounded Mojo span mapping",
+      "mojo_owner": "mojo/prodex_core/context_text.mojo::prodex_context_classify_ci_line_v1",
+      "mojo_source": "mojo/prodex_core/context_text.mojo",
+      "mojo_entry": "prodex_context_classify_ci_line_v1",
+      "production_consumer": "crates/prodex-context/src/command_output/ci_failure.rs",
+      "parity_test": "crates/prodex-context/src/command_output/ci_failure.rs",
+      "cleanup_loc": 31,
+      "cleanup_source": {
+        "kind": "feature-gated",
+        "baseline_range": {
+          "start": 199,
+          "end": 230
+        },
+        "release_symbol": "fn ci_exit_code_from_line_rust(line: &str) -> Option<String>",
+        "release_gate": "#[cfg(any(not(feature = \"mojo\"), test))]"
+      },
+      "cleanup_evidence": "Mojo extracts the bounded exit-code span; Rust retains only the feature-off/test integer-token oracle."
     }
   ]
 }
