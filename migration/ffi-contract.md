@@ -173,10 +173,13 @@ prodex_capability_match_batch(..., count: Int64, required_capability_mask: Int64
 prodex_smart_context_pressure_snapshot(..., output pointers...) -> Int64
 prodex_runtime_candidate_plan_batch(..., count: Int64, route_kind: Int64) -> Int64
 prodex_runtime_profile_provider_order_batch(..., count: Int64) -> Int64
+prodex_runtime_profile_rotation_order_batch(..., count: Int64, current_index: Int64, include_current: Int64) -> Int64
 prodex_smart_context_calibration_models_match_v1(...string views...) -> Int64
 prodex_smart_context_calibration_observed_input_v1(...bucket and usage rows...) -> Int64
 prodex_provider_constraints_resolve_v1(...scalar planning inputs...) -> Int64
 prodex_provider_constraints_preclassify_v1(...scalar constraint inputs...) -> Int64
+prodex_runtime_proxy_preset_defaults_v1(preset: Int64, output: *mut Int64) -> Int64
+prodex_mojo_log_level_classify_v1(abi_version: Int64, event: *const StringView, level: *mut Int64) -> Int64
 ```
 
 Existing routing and capability batches use parallel flat `Int64` arrays and accept at most 64
@@ -214,6 +217,13 @@ views and returns only a validated match tag; observed-input calibration accepts
 sample, and usage rows and writes an optional observed input count. Provider requirement
 resolution and constraint preclassification are scalar, synchronous planning calls; they do not
 perform catalog lookup, authentication, transport, persistence, or policy authorization.
+
+The profile rotation batch accepts at most 256 provider-priority rows and writes a stable
+current-relative permutation; `current_index=-1` denotes a missing current profile and
+`include_current=1` permits the synthetic current slot. Runtime-proxy preset defaults accept one
+of four typed preset ids and write 19 optional scalar values, with zero meaning unset. The log
+level classifier accepts one bounded non-secret string view and writes a validated level tag;
+Rust performs the input normalization and maps the tag to the existing log representation.
 
 The legacy context signal-diff batch exchanges exactly seven non-negative `Int64` counters for
 each side and writes seven lost plus seven gained counters. The additive text ABI below now owns
