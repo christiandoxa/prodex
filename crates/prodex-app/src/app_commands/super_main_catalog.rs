@@ -267,6 +267,7 @@ fn merge_bundled_openai_choices(choices: &mut Vec<MainModelChoice>) {
     choices.splice(insert_at..insert_at, bundled);
 }
 
+#[cfg(feature = "mojo-core")]
 #[derive(Debug)]
 struct DynamicCatalogModel {
     id: String,
@@ -280,6 +281,7 @@ struct DynamicCatalogModel {
     default_effort: Option<String>,
 }
 
+#[cfg(feature = "mojo-core")]
 fn dynamic_catalog_model(entry: serde_json::Value) -> DynamicCatalogModel {
     let id = catalog_entry_model_id(&entry).to_string();
     let label = ["display_name", "displayName"]
