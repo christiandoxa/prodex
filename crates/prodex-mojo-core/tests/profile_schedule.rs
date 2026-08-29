@@ -1,6 +1,8 @@
 #![cfg(feature = "mojo-runtime")]
 
-use prodex_mojo_core::runtime::{ProfileScheduleInput, ProfileScoreInput, profile_schedule_batch};
+use prodex_mojo_core::runtime::{
+    ProfileScheduleInput, ProfileScoreInput, profile_schedule_batch, profile_selection_order_batch,
+};
 
 fn input(
     order_index: i64,
@@ -265,4 +267,34 @@ fn profile_schedule_prefers_preferred_candidate_on_tie() {
     ];
 
     assert_eq!(profile_schedule_batch(&candidates).unwrap(), [1, 0]);
+}
+
+#[test]
+fn profile_selection_order_rotates_before_provider_ranking() {
+    let priorities = [1, 0, 0];
+
+    assert_eq!(
+        profile_selection_order_batch(&priorities, Some(0), false).unwrap(),
+        [1, 2]
+    );
+    assert_eq!(
+        profile_selection_order_batch(&priorities, Some(0), true).unwrap(),
+        [1, 2, 0]
+    );
+    assert_eq!(
+        profile_selection_order_batch(&priorities, Some(1), false).unwrap(),
+        [2, 0]
+    );
+    assert_eq!(
+        profile_selection_order_batch(&priorities, Some(1), true).unwrap(),
+        [1, 2, 0]
+    );
+    assert_eq!(
+        profile_selection_order_batch(&priorities, None, false).unwrap(),
+        [1, 2, 0]
+    );
+    assert_eq!(
+        profile_selection_order_batch(&priorities, None, true).unwrap(),
+        [1, 2, 0, 3]
+    );
 }

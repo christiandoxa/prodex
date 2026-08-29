@@ -23,10 +23,10 @@ where
         let order =
             prodex_mojo_core::runtime::provider_aware_profile_order_batch(&priorities, &order)
                 .expect("Mojo provider profile order returned invalid output");
-        return order
+        order
             .into_iter()
             .map(|index| names[index].clone())
-            .collect();
+            .collect()
     }
 
     #[cfg(not(feature = "mojo"))]
