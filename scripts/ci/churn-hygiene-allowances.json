@@ -3,7 +3,7 @@
     "id": "audited-prodex-0.420.0-integration-train",
     "requiredSubjects": [
       "ci: parallelize independent release gates",
-      "feat(context): move signal and command classification to Mojo",
+      "feat(context): migrate signal and command classification to Mojo",
       "ci(mojo): record runtime context migration evidence",
       "fix(catalog): gate Mojo-only cache adapter"
     ],
