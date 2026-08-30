@@ -10,6 +10,14 @@ comptime CONTEXT_TEXT_ABI_VERSION: Int64 = 1
 comptime CONTEXT_TEXT_SOURCE_AFTER: Int64 = 0
 comptime CONTEXT_TEXT_SOURCE_BEFORE: Int64 = 1
 comptime CONTEXT_TEXT_HASH_SEED: UInt64 = 1469598103934665603
+comptime CONTEXT_GIT_SEARCH_MAX_BYTES: Int64 = 131_072
+comptime CONTEXT_GIT_SEARCH_RESULT_WIDTH: Int64 = 4
+comptime CONTEXT_GIT_SEARCH_DIRECT_MATCH: Int64 = 1
+comptime CONTEXT_GIT_SEARCH_JSON_MATCH: Int64 = 2
+comptime CONTEXT_GIT_SEARCH_JSON_LINE: Int64 = 4
+comptime CONTEXT_GIT_SEARCH_HEADING_PATH: Int64 = 8
+comptime CONTEXT_GIT_SEARCH_HEADING_MATCH: Int64 = 16
+comptime CONTEXT_GIT_SEARCH_CAPACITY: Int64 = -2
 
 
 @fieldwise_init
@@ -1046,6 +1054,673 @@ def context_ci_line_semantics(
         output[unsafe_offset=6] = exit_code[1]
 
 
+def context_search_ascii_starts_exact[literal: StaticString](
+    ptr: Pointer[mut=False, UInt8, _], start: Int64, end: Int64
+) -> Bool:
+    var length = Int64(literal.byte_length())
+    if start < 0 or end < start or start + length > end:
+        return False
+    var expected = literal.unsafe_ptr()
+    for index in range(length):
+        if ptr[unsafe_offset=start + index] != expected[unsafe_offset=index]:
+            return False
+    return True
+
+
+def context_search_ascii_contains_exact[literal: StaticString](
+    ptr: Pointer[mut=False, UInt8, _], start: Int64, end: Int64
+) -> Bool:
+    var length = Int64(literal.byte_length())
+    if length == 0:
+        return True
+    if start < 0 or end < start or start + length > end:
+        return False
+    for offset in range(start, end - length + 1):
+        if context_search_ascii_starts_exact[literal](ptr, offset, end):
+            return True
+    return False
+
+
+def context_search_ascii_find_exact[literal: StaticString](
+    ptr: Pointer[mut=False, UInt8, _], start: Int64, end: Int64
+) -> Int64:
+    var length = Int64(literal.byte_length())
+    if length == 0:
+        return start
+    if start < 0 or end < start or start + length > end:
+        return -1
+    for offset in range(start, end - length + 1):
+        if context_search_ascii_starts_exact[literal](ptr, offset, end):
+            return offset
+    return -1
+
+
+def context_search_find_byte(
+    ptr: Pointer[mut=False, UInt8, _], start: Int64, end: Int64, value: UInt8
+) -> Int64:
+    for index in range(start, end):
+        if ptr[unsafe_offset=index] == value:
+            return index
+    return -1
+
+
+def context_search_all_digits(
+    ptr: Pointer[mut=False, UInt8, _], start: Int64, end: Int64
+) -> Bool:
+    for index in range(start, end):
+        var value = ptr[unsafe_offset=index]
+        if value < 48 or value > 57:
+            return False
+    return True
+
+
+def context_search_parse_i64_digits(
+    ptr: Pointer[mut=False, UInt8, _], start: Int64, end: Int64
+) -> Int64:
+    if start >= end or not context_search_all_digits(ptr, start, end):
+        return -1
+    var value: Int64 = 0
+    for index in range(start, end):
+        var digit = Int64(ptr[unsafe_offset=index] - 48)
+        if value > 922337203685477580 or value * 10 > 9223372036854775807 - digit:
+            return -1
+        value = value * 10 + digit
+    return value
+
+
+def context_search_whitespace_count(
+    ptr: Pointer[mut=False, UInt8, _], start: Int64, end: Int64
+) -> Int64:
+    var count: Int64 = 0
+    var index = start
+    while index < end:
+        var whitespace = context_text_whitespace_width(ptr, index, end)
+        if whitespace > 0:
+            count += 1
+            if count > 1:
+                return count
+            index += whitespace
+            continue
+        index += context_text_codepoint_width(ptr[unsafe_offset=index])
+    return count
+
+
+def context_search_path_like(
+    ptr: Pointer[mut=False, UInt8, _], start: Int64, end: Int64
+) -> Bool:
+    return (
+        context_search_find_byte(ptr, start, end, 47) >= 0
+        or context_search_find_byte(ptr, start, end, 92) >= 0
+        or context_search_find_byte(ptr, start, end, 46) >= 0
+    )
+
+
+def context_search_bare_path_entry(
+    ptr: Pointer[mut=False, UInt8, _], start: Int64, end: Int64
+) -> Bool:
+    if start >= end or context_search_whitespace_count(ptr, start, end) > 0:
+        return False
+    var first = ptr[unsafe_offset=start]
+    if first == 45 or first == 123 or first == 91:
+        return False
+    if context_search_find_byte(ptr, start, end, 58) >= 0:
+        return False
+    if (
+        context_search_ascii_starts_exact["Cargo.toml"](ptr, start, end)
+        or context_search_ascii_starts_exact["Cargo.lock"](ptr, start, end)
+        or context_search_ascii_starts_exact["Makefile"](ptr, start, end)
+        or context_search_ascii_starts_exact["README"](ptr, start, end)
+        or context_search_ascii_starts_exact["README.md"](ptr, start, end)
+        or context_search_ascii_starts_exact["LICENSE"](ptr, start, end)
+        or context_search_ascii_starts_exact["AGENTS.md"](ptr, start, end)
+        or context_search_ascii_starts_exact[".gitignore"](ptr, start, end)
+    ):
+        return True
+    var dot: Int64 = -1
+    for index in range(start, end):
+        if ptr[unsafe_offset=index] == 46:
+            dot = index
+    if dot < start or dot + 1 >= end or end - dot - 1 > 12:
+        return False
+    for index in range(dot + 1, end):
+        var value = ptr[unsafe_offset=index]
+        if not (
+            value >= 48
+            and value <= 57
+            or value >= 65
+            and value <= 90
+            or value >= 97
+            and value <= 122
+            or value == 95
+            or value == 45
+        ):
+            return False
+    return True
+
+
+def context_search_file_list_candidate(
+    ptr: Pointer[mut=False, UInt8, _], start: Int64, end: Int64
+) -> Bool:
+    if (
+        context_search_ascii_starts_exact["./"](ptr, start, end)
+        or ptr[unsafe_offset=start] == 47
+        or context_search_find_byte(ptr, start, end, 47) >= 0
+        or context_search_find_byte(ptr, start, end, 92) >= 0
+        or context_search_ascii_starts_exact["|-- "](ptr, start, end)
+        or context_search_ascii_starts_exact["`-- "](ptr, start, end)
+        or context_search_ascii_starts_exact["├── "](ptr, start, end)
+        or context_search_ascii_starts_exact["└── "](ptr, start, end)
+    ):
+        return True
+    return context_search_bare_path_entry(ptr, start, end)
+
+
+def context_search_windows_drive_prefix(
+    ptr: Pointer[mut=False, UInt8, _], start: Int64, end: Int64
+) -> Bool:
+    if end - start < 3:
+        return False
+    var first = ptr[unsafe_offset=start]
+    return (
+        (first >= 65 and first <= 90 or first >= 97 and first <= 122)
+        and ptr[unsafe_offset=start + 1] == 58
+        and (ptr[unsafe_offset=start + 2] == 47 or ptr[unsafe_offset=start + 2] == 92)
+    )
+
+
+def context_search_heading_path_bounds(
+    ptr: Pointer[mut=False, UInt8, _], length: Int64
+) -> InlineArray[Int64, 2]:
+    var result = InlineArray[Int64, 2](fill=-1)
+    var trimmed = context_text_trim_bounds(ptr, 0, length)
+    var start = trimmed[0]
+    var end = trimmed[1]
+    if start >= end or context_search_ascii_starts_exact["--"](ptr, start, end):
+        return result^
+    if (
+        context_search_find_byte(ptr, start, end, 58) >= 0
+        and not (
+            context_search_windows_drive_prefix(ptr, start, end)
+            and context_search_find_byte(ptr, start + 2, end, 58) < 0
+        )
+    ):
+        return result^
+    if (
+        context_search_ascii_contains_exact["://"](ptr, start, end)
+        or context_search_whitespace_count(ptr, start, end) > 1
+        or not context_search_file_list_candidate(ptr, start, end)
+        or not context_search_path_like(ptr, start, end)
+    ):
+        return result^
+    result[0] = start
+    result[1] = end
+    return result^
+
+
+def context_search_last_marker_end[literal: StaticString](
+    ptr: Pointer[mut=False, UInt8, _], start: Int64, end: Int64
+) -> Int64:
+    var length = Int64(literal.byte_length())
+    var found: Int64 = -1
+    if start < 0 or end < start or start + length > end:
+        return found
+    for index in range(start, end - length + 1):
+        if context_search_ascii_starts_exact[literal](ptr, index, end):
+            found = index + length
+    return found
+
+
+def context_search_copy_normalized_path(
+    ptr: Pointer[mut=False, UInt8, _],
+    start: Int64,
+    end: Int64,
+    output: Pointer[mut=True, UInt8, _],
+    capacity: Int64,
+) -> Int64:
+    var trimmed = context_text_trim_bounds(ptr, start, end)
+    var marker_end: Int64 = -1
+    var candidate = context_search_last_marker_end["|-- "](ptr, trimmed[0], trimmed[1])
+    if candidate > marker_end:
+        marker_end = candidate
+    candidate = context_search_last_marker_end["`-- "](ptr, trimmed[0], trimmed[1])
+    if candidate > marker_end:
+        marker_end = candidate
+    candidate = context_search_last_marker_end["├── "](ptr, trimmed[0], trimmed[1])
+    if candidate > marker_end:
+        marker_end = candidate
+    candidate = context_search_last_marker_end["└── "](ptr, trimmed[0], trimmed[1])
+    if candidate > marker_end:
+        marker_end = candidate
+    var suffix_start = trimmed[0] if marker_end < 0 else marker_end
+    var suffix = context_text_trim_bounds(ptr, suffix_start, trimmed[1])
+    var written: Int64 = 0
+    for index in range(suffix[0], suffix[1]):
+        if written >= capacity:
+            return -1
+        var value = ptr[unsafe_offset=index]
+        if value == 92:
+            value = 47
+        output[unsafe_offset=written] = value
+        written += 1
+    return written
+
+
+def context_search_copy_trimmed_span(
+    ptr: Pointer[mut=False, UInt8, _],
+    start: Int64,
+    end: Int64,
+    output: Pointer[mut=True, UInt8, _],
+    capacity: Int64,
+) -> Int64:
+    var bounds = context_text_trim_bounds(ptr, start, end)
+    var length = bounds[1] - bounds[0]
+    if length > capacity:
+        return -1
+    for index in range(length):
+        output[unsafe_offset=index] = ptr[unsafe_offset=bounds[0] + index]
+    return length
+
+
+def context_search_json_field_bounds[literal: StaticString](
+    ptr: Pointer[mut=False, UInt8, _], start: Int64, end: Int64
+) -> InlineArray[Int64, 2]:
+    var result = InlineArray[Int64, 2](fill=-1)
+    var marker = context_search_ascii_find_exact[literal](ptr, start, end)
+    if marker < 0:
+        return result^
+    var colon = context_search_find_byte(
+        ptr, marker + Int64(literal.byte_length()), end, 58
+    )
+    if colon < 0:
+        return result^
+    var value_start = colon + 1
+    while value_start < end:
+        var whitespace = context_text_whitespace_width(ptr, value_start, end)
+        if whitespace == 0:
+            break
+        value_start += whitespace
+    if value_start >= end or ptr[unsafe_offset=value_start] != 34:
+        return result^
+    value_start += 1
+    var cursor = value_start
+    var escaped = False
+    while cursor < end:
+        var value = ptr[unsafe_offset=cursor]
+        if escaped:
+            escaped = False
+            cursor += context_text_codepoint_width(value)
+        elif value == 92:
+            escaped = True
+            cursor += 1
+        elif value == 34:
+            result[0] = value_start
+            result[1] = cursor
+            return result^
+        else:
+            cursor += context_text_codepoint_width(value)
+    return result^
+
+
+def context_search_json_value_equals[literal: StaticString](
+    ptr: Pointer[mut=False, UInt8, _], start: Int64, end: Int64
+) -> Bool:
+    var expected = literal.unsafe_ptr()
+    var expected_length = Int64(literal.byte_length())
+    var expected_index: Int64 = 0
+    var cursor = start
+    while cursor < end:
+        var value = ptr[unsafe_offset=cursor]
+        if value == 92:
+            cursor += 1
+            if cursor >= end:
+                return False
+            value = ptr[unsafe_offset=cursor]
+            if value == 110:
+                value = 10
+                cursor += 1
+            elif value == 114:
+                value = 13
+                cursor += 1
+            elif value == 116:
+                value = 9
+                cursor += 1
+            elif value == 34 or value == 92:
+                cursor += 1
+            else:
+                var width = context_text_codepoint_width(value)
+                if expected_index + width > expected_length:
+                    return False
+                for index in range(width):
+                    if ptr[unsafe_offset=cursor + index] != expected[unsafe_offset=expected_index + index]:
+                        return False
+                expected_index += width
+                cursor += width
+                continue
+        else:
+            var width = context_text_codepoint_width(value)
+            if expected_index + width > expected_length:
+                return False
+            for index in range(width):
+                if ptr[unsafe_offset=cursor + index] != expected[unsafe_offset=expected_index + index]:
+                    return False
+            expected_index += width
+            cursor += width
+            continue
+        if expected_index >= expected_length or value != expected[unsafe_offset=expected_index]:
+            return False
+        expected_index += 1
+    return expected_index == expected_length
+
+
+def context_search_copy_json_value(
+    ptr: Pointer[mut=False, UInt8, _],
+    start: Int64,
+    end: Int64,
+    output: Pointer[mut=True, UInt8, _],
+    capacity: Int64,
+) -> Int64:
+    var written: Int64 = 0
+    var cursor = start
+    while cursor < end:
+        var value = ptr[unsafe_offset=cursor]
+        if value == 92:
+            cursor += 1
+            if cursor >= end:
+                return -1
+            value = ptr[unsafe_offset=cursor]
+            if value == 110:
+                value = 10
+                cursor += 1
+            elif value == 114:
+                value = 13
+                cursor += 1
+            elif value == 116:
+                value = 9
+                cursor += 1
+            elif value == 34 or value == 92:
+                cursor += 1
+            else:
+                var width = context_text_codepoint_width(value)
+                if written + width > capacity:
+                    return -1
+                for index in range(width):
+                    output[unsafe_offset=written + index] = ptr[unsafe_offset=cursor + index]
+                written += width
+                cursor += width
+                continue
+        else:
+            var width = context_text_codepoint_width(value)
+            if written + width > capacity:
+                return -1
+            for index in range(width):
+                output[unsafe_offset=written + index] = ptr[unsafe_offset=cursor + index]
+            written += width
+            cursor += width
+            continue
+        if written >= capacity:
+            return -1
+        output[unsafe_offset=written] = value
+        written += 1
+    return written
+
+
+def context_search_trim_output(
+    output: Pointer[mut=True, UInt8, _], length: Int64
+) -> Int64:
+    var bounds = context_text_trim_bounds(output, 0, length)
+    var trimmed_length = bounds[1] - bounds[0]
+    for index in range(trimmed_length):
+        output[unsafe_offset=index] = output[unsafe_offset=bounds[0] + index]
+    return trimmed_length
+
+
+def context_search_normalize_output_path(
+    output: Pointer[mut=True, UInt8, _], written: Int64, capacity: Int64
+) -> Int64:
+    var trimmed = context_text_trim_bounds(output, 0, written)
+    var marker_end: Int64 = -1
+    var candidate = context_search_last_marker_end["|-- "](output, trimmed[0], trimmed[1])
+    if candidate > marker_end:
+        marker_end = candidate
+    candidate = context_search_last_marker_end["`-- "](output, trimmed[0], trimmed[1])
+    if candidate > marker_end:
+        marker_end = candidate
+    candidate = context_search_last_marker_end["├── "](output, trimmed[0], trimmed[1])
+    if candidate > marker_end:
+        marker_end = candidate
+    candidate = context_search_last_marker_end["└── "](output, trimmed[0], trimmed[1])
+    if candidate > marker_end:
+        marker_end = candidate
+    var suffix_start = trimmed[0] if marker_end < 0 else marker_end
+    var suffix = context_text_trim_bounds(output, suffix_start, trimmed[1])
+    var normalized_length = suffix[1] - suffix[0]
+    if normalized_length > capacity:
+        return -1
+    for index in range(normalized_length):
+        var value = output[unsafe_offset=suffix[0] + index]
+        if value == 92:
+            value = 47
+        output[unsafe_offset=index] = value
+    return normalized_length
+
+
+def context_search_plain_result(
+    ptr: Pointer[mut=False, UInt8, _],
+    length: Int64,
+    path_output: Pointer[mut=True, UInt8, _],
+    path_capacity: Int64,
+    text_output: Pointer[mut=True, UInt8, _],
+    text_capacity: Int64,
+) -> InlineArray[Int64, 4]:
+    var result = InlineArray[Int64, 4](fill=-1)
+    result[0] = 0
+    var separator_start: Int64 = 0
+    if context_search_windows_drive_prefix(ptr, 0, length):
+        separator_start = 2
+    var separator = context_search_find_byte(ptr, separator_start, length, 58)
+    if separator < 0:
+        return result^
+    var path = context_text_trim_bounds(ptr, 0, separator)
+    var rest_start = separator + 1
+    var rest = context_text_trim_bounds(ptr, rest_start, length)
+    if path[0] >= path[1] or rest[0] >= rest[1]:
+        return result^
+    var second = context_search_find_byte(ptr, rest_start, length, 58)
+    var text_start = rest_start
+    var line_number: Int64 = -1
+    if second < 0:
+        if not context_search_path_like(ptr, path[0], path[1]):
+            return result^
+    elif context_search_all_digits(ptr, rest_start, second):
+        line_number = context_search_parse_i64_digits(ptr, rest_start, second)
+        text_start = second + 1
+        var column = context_search_find_byte(ptr, text_start, length, 58)
+        if column >= 0 and context_search_all_digits(ptr, text_start, column):
+            text_start = column + 1
+    elif not context_search_path_like(ptr, path[0], path[1]):
+        return result^
+    var path_length = context_search_copy_normalized_path(
+        ptr, path[0], path[1], path_output, path_capacity
+    )
+    var text_length = context_search_copy_trimmed_span(
+        ptr, text_start, length, text_output, text_capacity
+    )
+    if path_length < 0 or text_length < 0:
+        result[0] = CONTEXT_GIT_SEARCH_CAPACITY
+        return result^
+    result[0] = CONTEXT_GIT_SEARCH_DIRECT_MATCH
+    result[1] = line_number
+    result[2] = path_length
+    result[3] = text_length
+    return result^
+
+
+def context_search_json_result(
+    ptr: Pointer[mut=False, UInt8, _],
+    length: Int64,
+    path_output: Pointer[mut=True, UInt8, _],
+    path_capacity: Int64,
+    text_output: Pointer[mut=True, UInt8, _],
+    text_capacity: Int64,
+) -> InlineArray[Int64, 4]:
+    var result = InlineArray[Int64, 4](fill=-1)
+    result[0] = 0
+    var trimmed = context_text_trim_bounds(ptr, 0, length)
+    if (
+        not context_search_ascii_starts_exact["{"](ptr, trimmed[0], trimmed[1])
+        or not context_search_ascii_contains_exact["\"type\""](ptr, trimmed[0], trimmed[1])
+        or not (
+            context_search_ascii_contains_exact["\"data\""](ptr, trimmed[0], trimmed[1])
+            or context_search_ascii_contains_exact["\"path\""](ptr, trimmed[0], trimmed[1])
+        )
+    ):
+        return result^
+    result[0] = CONTEXT_GIT_SEARCH_JSON_LINE
+    var type = context_search_json_field_bounds["\"type\""](ptr, 0, length)
+    if type[0] < 0 or not context_search_json_value_equals["match"](ptr, type[0], type[1]):
+        return result^
+    var path_marker = context_search_ascii_find_exact["\"path\""](ptr, 0, length)
+    if path_marker < 0:
+        return result^
+    var path_start = path_marker + 6
+    var path = context_search_json_field_bounds["\"text\""](ptr, path_start, length)
+    if path[0] < 0:
+        path = context_search_json_field_bounds["\"path\""](ptr, path_start, length)
+    if path[0] < 0:
+        return result^
+    var path_length = context_search_copy_json_value(
+        ptr, path[0], path[1], path_output, path_capacity
+    )
+    if path_length < 0:
+        result[0] = CONTEXT_GIT_SEARCH_CAPACITY
+        return result^
+    path_length = context_search_normalize_output_path(
+        path_output, path_length, path_capacity
+    )
+    if path_length < 0:
+        result[0] = CONTEXT_GIT_SEARCH_CAPACITY
+        return result^
+    var text_length: Int64 = 0
+    var lines_marker = context_search_ascii_find_exact["\"lines\""](ptr, 0, length)
+    if lines_marker >= 0:
+        var lines = context_search_json_field_bounds["\"text\""](
+            ptr, lines_marker + 7, length
+        )
+        if lines[0] >= 0:
+            text_length = context_search_copy_json_value(
+                ptr, lines[0], lines[1], text_output, text_capacity
+            )
+            if text_length < 0:
+                result[0] = CONTEXT_GIT_SEARCH_CAPACITY
+                return result^
+            text_length = context_search_trim_output(text_output, text_length)
+    result[0] = CONTEXT_GIT_SEARCH_JSON_LINE | CONTEXT_GIT_SEARCH_JSON_MATCH
+    result[1] = context_search_json_number["\"line_number\""](ptr, 0, length)
+    result[2] = path_length
+    result[3] = text_length
+    return result^
+
+
+def context_search_json_number[literal: StaticString](
+    ptr: Pointer[mut=False, UInt8, _], start: Int64, end: Int64
+) -> Int64:
+    var marker = context_search_ascii_find_exact[literal](ptr, start, end)
+    if marker < 0:
+        return -1
+    var colon = context_search_find_byte(
+        ptr, marker + Int64(literal.byte_length()), end, 58
+    )
+    if colon < 0:
+        return -1
+    var value_start = colon + 1
+    while value_start < end:
+        var whitespace = context_text_whitespace_width(ptr, value_start, end)
+        if whitespace == 0:
+            break
+        value_start += whitespace
+    var value_end = value_start
+    while value_end < end:
+        var value = ptr[unsafe_offset=value_end]
+        if value < 48 or value > 57:
+            break
+        value_end += 1
+    return context_search_parse_i64_digits(ptr, value_start, value_end)
+
+
+def context_search_heading_match_result(
+    ptr: Pointer[mut=False, UInt8, _],
+    length: Int64,
+    heading_present: Bool,
+    text_output: Pointer[mut=True, UInt8, _],
+    text_capacity: Int64,
+) -> InlineArray[Int64, 4]:
+    var result = InlineArray[Int64, 4](fill=-1)
+    result[0] = 0
+    if not heading_present:
+        return result^
+    var leading = context_text_trim_bounds(ptr, 0, length)
+    var start = leading[0]
+    var separator = context_search_find_byte(ptr, start, length, 58)
+    if separator < 0 or not context_search_all_digits(ptr, start, separator):
+        return result^
+    var text_start = separator + 1
+    var column = context_search_find_byte(ptr, text_start, length, 58)
+    if column >= 0 and context_search_all_digits(ptr, text_start, column):
+        text_start = column + 1
+    var text_length = context_search_copy_trimmed_span(
+        ptr, text_start, length, text_output, text_capacity
+    )
+    if text_length < 0:
+        result[0] = CONTEXT_GIT_SEARCH_CAPACITY
+        return result^
+    result[0] = CONTEXT_GIT_SEARCH_HEADING_MATCH
+    result[1] = context_search_parse_i64_digits(ptr, start, separator)
+    result[3] = text_length
+    return result^
+
+
+def context_search_classify_line(
+    ptr: Pointer[mut=False, UInt8, _],
+    length: Int64,
+    heading_present: Bool,
+    path_output: Pointer[mut=True, UInt8, _],
+    path_capacity: Int64,
+    text_output: Pointer[mut=True, UInt8, _],
+    text_capacity: Int64,
+) -> InlineArray[Int64, 4]:
+    var result = context_search_plain_result(
+        ptr, length, path_output, path_capacity, text_output, text_capacity
+    )
+    if heading_present:
+        result = context_search_heading_match_result(
+            ptr, length, True, text_output, text_capacity
+        )
+        if result[0] == CONTEXT_GIT_SEARCH_HEADING_MATCH or result[0] == CONTEXT_GIT_SEARCH_CAPACITY:
+            return result^
+        result[0] = 0
+    if result[0] == CONTEXT_GIT_SEARCH_DIRECT_MATCH or result[0] == CONTEXT_GIT_SEARCH_CAPACITY:
+        return result^
+    result = context_search_json_result(
+        ptr, length, path_output, path_capacity, text_output, text_capacity
+    )
+    if result[0] != 0:
+        return result^
+    var heading = context_search_heading_path_bounds(ptr, length)
+    if heading[0] >= 0:
+        var path_length = context_search_copy_normalized_path(
+            ptr, heading[0], heading[1], path_output, path_capacity
+        )
+        if path_length < 0:
+            result[0] = CONTEXT_GIT_SEARCH_CAPACITY
+            return result^
+        result[0] = CONTEXT_GIT_SEARCH_HEADING_PATH
+        result[2] = path_length
+        return result^
+    return context_search_heading_match_result(
+        ptr, length, heading_present, text_output, text_capacity
+    )^
+
+
 def context_text_line_counts(
     counts: Pointer[mut=False, Int64, _], line: Int64
 ) -> InlineArray[Int64, 7]:
@@ -1231,6 +1906,65 @@ def prodex_mojo_text_abi_layout(
             name="required_hash_capacity"
         ]()
     )
+    return 0
+
+
+@export("prodex_context_classify_git_search_line_v1")
+def prodex_context_classify_git_search_line_v1(
+    abi_version: Int64,
+    line: Pointer[mut=False, ProdexStringView, _],
+    heading_path: Pointer[mut=False, ProdexStringView, _],
+    heading_present: Int64,
+    path_output: Pointer[mut=True, UInt8, _],
+    path_output_capacity: Int64,
+    text_output: Pointer[mut=True, UInt8, _],
+    text_output_capacity: Int64,
+    output: Pointer[mut=True, Int64, _],
+    output_count: Int64,
+) abi("C") -> Int64:
+    if output_count != CONTEXT_GIT_SEARCH_RESULT_WIDTH:
+        return 1
+    for index in range(CONTEXT_GIT_SEARCH_RESULT_WIDTH):
+        output[unsafe_offset=index] = -1
+    output[unsafe_offset=0] = 0
+    if abi_version != CONTEXT_TEXT_ABI_VERSION:
+        return 4
+    if (
+        heading_present < 0
+        or heading_present > 1
+        or path_output_capacity < 1
+        or path_output_capacity > CONTEXT_GIT_SEARCH_MAX_BYTES
+        or text_output_capacity < 1
+        or text_output_capacity > CONTEXT_GIT_SEARCH_MAX_BYTES
+    ):
+        return 1
+    var line_view = line[].copy()
+    var heading_view = heading_path[].copy()
+    if (
+        line_view.len > UInt(CONTEXT_GIT_SEARCH_MAX_BYTES)
+        or heading_present == 1
+        and heading_view.len > UInt(CONTEXT_GIT_SEARCH_MAX_BYTES)
+    ):
+        return 1
+    if not context_text_view_is_valid(line_view) or (
+        heading_present == 1 and not context_text_view_is_valid(heading_view)
+    ):
+        return 2
+    var result = context_search_classify_line(
+        line_view.ptr.unsafe_value(),
+        Int64(line_view.len),
+        heading_present == 1,
+        path_output,
+        path_output_capacity,
+        text_output,
+        text_output_capacity,
+    )
+    if result[0] == CONTEXT_GIT_SEARCH_CAPACITY:
+        return 3
+    output[unsafe_offset=0] = result[0]
+    output[unsafe_offset=1] = result[1]
+    output[unsafe_offset=2] = result[2]
+    output[unsafe_offset=3] = result[3]
     return 0
 
 
