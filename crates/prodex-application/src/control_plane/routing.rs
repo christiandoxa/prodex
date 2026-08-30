@@ -5,7 +5,7 @@
 mod routing_tests;
 #[path = "routing_validation.rs"]
 mod routing_validation;
-#[cfg(test)]
+#[cfg(all(test, feature = "mojo"))]
 use routing_validation::control_plane_route_validation_rust;
 use routing_validation::{
     ControlPlaneRouteValidationDecision, ControlPlaneRouteValidationMode,
