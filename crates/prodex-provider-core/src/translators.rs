@@ -58,13 +58,20 @@ pub(crate) use gemini::gemini_contents_from_request;
 pub(crate) use gemini::gemini_contextual_user_instruction_text;
 pub(crate) use gemini::gemini_custom_apply_patch_input;
 pub(crate) use gemini::gemini_function_declaration_from_openai_tool;
+#[cfg(not(feature = "mojo"))]
 pub(crate) use gemini::gemini_generation_config_from_request;
 pub(crate) use gemini::gemini_is_contextual_user_fragment;
 pub(crate) use gemini::gemini_normalized_response_value;
 pub(crate) use gemini::gemini_preserve_tool_call_signatures;
+#[cfg(not(feature = "mojo"))]
 pub(crate) use gemini::gemini_request_body_without_tool;
+#[cfg(not(feature = "mojo"))]
 pub(crate) use gemini::gemini_sanitize_function_schema;
+#[cfg(not(feature = "mojo"))]
 pub(crate) use gemini::gemini_tool_config_from_request;
+#[cfg(not(feature = "mojo"))]
+pub(crate) use gemini::gemini_validate_candidate_count;
+pub(crate) use gemini::gemini_validate_openai_tools;
 pub use gemini::{
     GeminiProviderCoreStreamChunkMetadata, GeminiProviderCoreStreamFunctionCallDelta,
     GeminiProviderCoreStreamToolCall, gemini_provider_core_function_call_arguments_delta_event,
@@ -112,7 +119,6 @@ pub(crate) use gemini::{
     gemini_runtime_responses_value_from_generate_value_with_fallback_ids,
     gemini_text_from_special_part, gemini_web_search_call_from_grounding,
 };
-pub(crate) use gemini::{gemini_validate_candidate_count, gemini_validate_openai_tools};
 pub use kiro::{
     KIRO_PROVIDER_CORE_MAX_TOOL_ACTIVITY_EVENTS, KIRO_PROVIDER_CORE_MAX_TOOL_ACTIVITY_ID_BYTES,
     KiroProviderCoreRequestError, KiroTranslator, kiro_provider_core_acp_assistant_output_message,

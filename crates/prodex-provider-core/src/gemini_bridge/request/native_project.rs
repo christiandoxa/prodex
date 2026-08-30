@@ -1,5 +1,17 @@
 //! Gemini native request project stamping.
 
+#[cfg(feature = "mojo")]
+pub fn gemini_provider_core_native_request_body_with_project(
+    body: &[u8],
+    project_id: Option<&str>,
+) -> Result<Vec<u8>, serde_json::Error> {
+    let Some(project_id) = project_id else {
+        return Ok(body.to_vec());
+    };
+    Ok(super::request_contents::gemini_bridge_request_native_project(body, project_id))
+}
+
+#[cfg(not(feature = "mojo"))]
 pub fn gemini_provider_core_native_request_body_with_project(
     body: &[u8],
     project_id: Option<&str>,
@@ -15,6 +27,7 @@ pub fn gemini_provider_core_native_request_body_with_project(
     serde_json::to_vec(&value)
 }
 
+#[cfg(not(feature = "mojo"))]
 fn gemini_provider_core_stamp_native_project(value: &mut serde_json::Value, project_id: &str) {
     let Some(object) = value.as_object_mut() else {
         return;
@@ -35,6 +48,7 @@ fn gemini_provider_core_stamp_native_project(value: &mut serde_json::Value, proj
     }
 }
 
+#[cfg(not(feature = "mojo"))]
 fn gemini_provider_core_stamp_native_metadata_project(
     value: Option<&mut serde_json::Value>,
     project_id: &str,

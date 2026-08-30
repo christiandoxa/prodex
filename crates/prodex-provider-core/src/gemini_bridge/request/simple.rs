@@ -1,9 +1,17 @@
 //! Gemini simple-request fast-path classification.
 
+#[cfg(not(feature = "mojo"))]
 mod builtin;
 
+#[cfg(not(feature = "mojo"))]
 use self::builtin::{gemini_provider_core_builtin_tool, gemini_provider_core_builtin_tool_choice};
 
+#[cfg(feature = "mojo")]
+pub fn gemini_provider_core_simple_request(body: &[u8]) -> bool {
+    super::request_contents::gemini_bridge_request_simple(body)
+}
+
+#[cfg(not(feature = "mojo"))]
 pub fn gemini_provider_core_simple_request(body: &[u8]) -> bool {
     let Ok(value) = serde_json::from_slice::<serde_json::Value>(body) else {
         return false;
@@ -32,6 +40,7 @@ pub fn gemini_provider_core_simple_request(body: &[u8]) -> bool {
     }
 }
 
+#[cfg(not(feature = "mojo"))]
 fn gemini_simple_input_item(item: &serde_json::Value) -> bool {
     let Some(object) = item.as_object() else {
         return false;
@@ -71,6 +80,7 @@ fn gemini_simple_input_item(item: &serde_json::Value) -> bool {
     object.get("tool_calls").is_none()
 }
 
+#[cfg(not(feature = "mojo"))]
 fn gemini_simple_content_item(value: &serde_json::Value) -> bool {
     let Some(object) = value.as_object() else {
         return false;
@@ -91,6 +101,7 @@ fn gemini_simple_content_item(value: &serde_json::Value) -> bool {
     false
 }
 
+#[cfg(not(feature = "mojo"))]
 fn gemini_simple_tool_calls(value: &serde_json::Value) -> bool {
     let Some(tool_calls) = value.as_array() else {
         return false;
@@ -98,6 +109,7 @@ fn gemini_simple_tool_calls(value: &serde_json::Value) -> bool {
     tool_calls.iter().all(gemini_simple_tool_call)
 }
 
+#[cfg(not(feature = "mojo"))]
 fn gemini_simple_tool_call(value: &serde_json::Value) -> bool {
     let Some(object) = value.as_object() else {
         return false;
