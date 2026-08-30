@@ -486,7 +486,81 @@ pub struct RuntimeSoftAffinityPolicyInput {
     pub responses_critical_floor_percent: i64,
 }
 
+#[cfg(feature = "mojo")]
+fn runtime_soft_affinity_policy_mojo(input: RuntimeSoftAffinityPolicyInput) -> i64 {
+    prodex_mojo_core::runtime::soft_affinity_policy(
+        prodex_mojo_core::runtime::SoftAffinityPolicyInput {
+            affinity_kind: match input.affinity_kind {
+                RuntimeAffinitySelectionKind::Strict => 0,
+                RuntimeAffinitySelectionKind::Pinned => 1,
+                RuntimeAffinitySelectionKind::TurnState => 2,
+                RuntimeAffinitySelectionKind::Session => 3,
+            },
+            route_kind: match input.route_kind {
+                RuntimeRouteKind::Responses => 0,
+                RuntimeRouteKind::Compact => 1,
+                RuntimeRouteKind::Websocket => 2,
+                RuntimeRouteKind::Standard => 3,
+            },
+            five_hour_status: match input.quota_summary.five_hour.status {
+                RuntimeSelectionQuotaWindowStatus::Ready => 0,
+                RuntimeSelectionQuotaWindowStatus::Thin => 1,
+                RuntimeSelectionQuotaWindowStatus::Critical => 2,
+                RuntimeSelectionQuotaWindowStatus::Exhausted => 3,
+                RuntimeSelectionQuotaWindowStatus::Unknown => 4,
+            },
+            weekly_status: match input.quota_summary.weekly.status {
+                RuntimeSelectionQuotaWindowStatus::Ready => 0,
+                RuntimeSelectionQuotaWindowStatus::Thin => 1,
+                RuntimeSelectionQuotaWindowStatus::Critical => 2,
+                RuntimeSelectionQuotaWindowStatus::Exhausted => 3,
+                RuntimeSelectionQuotaWindowStatus::Unknown => 4,
+            },
+            quota_band: match input.quota_summary.route_band {
+                RuntimeSelectionQuotaPressureBand::Healthy => 0,
+                RuntimeSelectionQuotaPressureBand::Thin => 1,
+                RuntimeSelectionQuotaPressureBand::Critical => 2,
+                RuntimeSelectionQuotaPressureBand::Exhausted => 3,
+                RuntimeSelectionQuotaPressureBand::Unknown => 4,
+            },
+            quota_source_present: input.quota_source.is_some(),
+            current_profile_matches_candidate: input.current_profile_matches_candidate,
+            has_route_eligible_quota_fallback: input.has_route_eligible_quota_fallback,
+        },
+    )
+    .expect("Mojo soft affinity policy returned an invalid result")
+}
+
+#[cfg(feature = "mojo")]
+fn runtime_soft_affinity_policy_reason(code: i64) -> Option<&'static str> {
+    match code {
+        prodex_mojo_core::runtime::SOFT_AFFINITY_POLICY_QUOTA_WINDOWS_UNAVAILABLE => {
+            Some("quota_windows_unavailable")
+        }
+        prodex_mojo_core::runtime::SOFT_AFFINITY_POLICY_QUOTA_EXHAUSTED_BEFORE_SEND => {
+            Some("quota_exhausted_before_send")
+        }
+        prodex_mojo_core::runtime::SOFT_AFFINITY_POLICY_QUOTA_EXHAUSTED => Some("quota_exhausted"),
+        prodex_mojo_core::runtime::SOFT_AFFINITY_POLICY_QUOTA_HEALTHY => Some("quota_healthy"),
+        prodex_mojo_core::runtime::SOFT_AFFINITY_POLICY_QUOTA_THIN => Some("quota_thin"),
+        prodex_mojo_core::runtime::SOFT_AFFINITY_POLICY_QUOTA_CRITICAL => Some("quota_critical"),
+        prodex_mojo_core::runtime::SOFT_AFFINITY_POLICY_QUOTA_UNKNOWN => Some("quota_unknown"),
+        prodex_mojo_core::runtime::SOFT_AFFINITY_POLICY_ALLOWED => None,
+        _ => None,
+    }
+}
+
 pub fn runtime_soft_affinity_allowed(input: RuntimeSoftAffinityPolicyInput) -> bool {
+    #[cfg(feature = "mojo")]
+    return runtime_soft_affinity_policy_mojo(input)
+        == prodex_mojo_core::runtime::SOFT_AFFINITY_POLICY_ALLOWED;
+
+    #[cfg(not(feature = "mojo"))]
+    runtime_soft_affinity_allowed_rust(input)
+}
+
+#[cfg(any(not(feature = "mojo"), test))]
+fn runtime_soft_affinity_allowed_rust(input: RuntimeSoftAffinityPolicyInput) -> bool {
     match input.affinity_kind {
         RuntimeAffinitySelectionKind::Strict => {
             let compact_followup_owner_without_probe = matches!(
@@ -529,6 +603,20 @@ pub fn runtime_soft_affinity_allowed(input: RuntimeSoftAffinityPolicyInput) -> b
 }
 
 pub fn runtime_soft_affinity_rejection_reason(
+    input: RuntimeSoftAffinityPolicyInput,
+) -> &'static str {
+    #[cfg(feature = "mojo")]
+    {
+        return runtime_soft_affinity_policy_reason(runtime_soft_affinity_policy_mojo(input))
+            .unwrap_or("quota_unknown");
+    }
+
+    #[cfg(not(feature = "mojo"))]
+    runtime_soft_affinity_rejection_reason_rust(input)
+}
+
+#[cfg(any(not(feature = "mojo"), test))]
+fn runtime_soft_affinity_rejection_reason_rust(
     input: RuntimeSoftAffinityPolicyInput,
 ) -> &'static str {
     match input.affinity_kind {

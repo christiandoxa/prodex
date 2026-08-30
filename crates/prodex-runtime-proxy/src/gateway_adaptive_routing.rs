@@ -82,6 +82,25 @@ impl RuntimeGatewayAdaptiveQualityWindow {
     }
 
     pub fn quality_score_bps(&self) -> i64 {
+        #[cfg(feature = "mojo")]
+        return prodex_mojo_core::runtime::adaptive_routing_plan(
+            &[runtime_gateway_adaptive_quality_input(Some(self))],
+            None,
+            false,
+            0,
+            0,
+            0,
+        )
+        .expect("Mojo adaptive quality scoring returned an invalid result")
+        .quality_score_bps
+        .unwrap_or_default();
+
+        #[cfg(not(feature = "mojo"))]
+        self.quality_score_bps_rust()
+    }
+
+    #[cfg(any(not(feature = "mojo"), test))]
+    fn quality_score_bps_rust(&self) -> i64 {
         let positive = self
             .task_completed
             .saturating_mul(1_000)
@@ -97,6 +116,7 @@ impl RuntimeGatewayAdaptiveQualityWindow {
         positive as i64 - negative as i64
     }
 
+    #[cfg(any(not(feature = "mojo"), test))]
     pub fn has_min_samples(&self, min_samples: u64) -> bool {
         self.samples >= min_samples
     }
@@ -184,7 +204,121 @@ pub struct RuntimeGatewayAdaptiveShadowDecision {
     pub override_reason: &'static str,
 }
 
+#[cfg(feature = "mojo")]
+fn runtime_gateway_adaptive_quality_input(
+    window: Option<&RuntimeGatewayAdaptiveQualityWindow>,
+) -> prodex_mojo_core::runtime::AdaptiveQualityInput {
+    let Some(window) = window else {
+        return prodex_mojo_core::runtime::AdaptiveQualityInput {
+            has_window: false,
+            samples: 0,
+            task_completed: 0,
+            corrective_user_messages: 0,
+            additional_turns: 0,
+            previous_response_not_found: 0,
+            invalid_tool_call_continuation: 0,
+            errors: 0,
+            token_savings: 0,
+            latency_ms_total: 0,
+        };
+    };
+    prodex_mojo_core::runtime::AdaptiveQualityInput {
+        has_window: true,
+        samples: window.samples,
+        task_completed: window.task_completed,
+        corrective_user_messages: window.corrective_user_messages,
+        additional_turns: window.additional_turns,
+        previous_response_not_found: window.previous_response_not_found,
+        invalid_tool_call_continuation: window.invalid_tool_call_continuation,
+        errors: window.errors,
+        token_savings: window.token_savings,
+        latency_ms_total: window.latency_ms_total,
+    }
+}
+
 pub fn runtime_gateway_adaptive_shadow_decision(
+    input: RuntimeGatewayAdaptiveShadowInput,
+) -> RuntimeGatewayAdaptiveShadowDecision {
+    #[cfg(feature = "mojo")]
+    {
+        if let Some(owner) = input.continuation_owner_model.as_ref() {
+            return RuntimeGatewayAdaptiveShadowDecision {
+                actual_model: input.actual_model,
+                recommended_model: Some(owner.clone()),
+                quality_score_bps: None,
+                override_reason: "continuation_affinity",
+            };
+        }
+        if !input.config.enabled {
+            return RuntimeGatewayAdaptiveShadowDecision {
+                actual_model: input.actual_model,
+                recommended_model: None,
+                quality_score_bps: None,
+                override_reason: "adaptive_disabled",
+            };
+        }
+        return runtime_gateway_adaptive_shadow_decision_mojo(input);
+    }
+
+    #[cfg(not(feature = "mojo"))]
+    runtime_gateway_adaptive_shadow_decision_rust(input)
+}
+
+#[cfg(feature = "mojo")]
+fn runtime_gateway_adaptive_shadow_decision_mojo(
+    input: RuntimeGatewayAdaptiveShadowInput,
+) -> RuntimeGatewayAdaptiveShadowDecision {
+    let blocked = input
+        .quota_blocked_models
+        .iter()
+        .map(|model| model.as_str())
+        .collect::<BTreeSet<_>>();
+    let candidates = input
+        .candidates
+        .iter()
+        .filter(|candidate| !blocked.contains(candidate.as_str()))
+        .collect::<Vec<_>>();
+    let actual_index = candidates
+        .iter()
+        .position(|candidate| candidate.as_str() == input.actual_model);
+    let quality = candidates
+        .iter()
+        .map(|candidate| runtime_gateway_adaptive_quality_input(input.quality.get(*candidate)))
+        .collect::<Vec<_>>();
+    let plan = prodex_mojo_core::runtime::adaptive_routing_plan(
+        &quality,
+        actual_index,
+        input.config.shadow_mode,
+        input.config.min_samples,
+        input.config.exploration_rate_bps,
+        input.diagnostic_seed,
+    )
+    .expect("Mojo adaptive routing plan returned an invalid result");
+    let recommended_model = plan
+        .recommended_index
+        .map(|index| candidates[index].to_string());
+    let override_reason = match plan.reason {
+        prodex_mojo_core::runtime::ADAPTIVE_PLAN_REASON_INSUFFICIENT_SAMPLES => {
+            "insufficient_samples"
+        }
+        prodex_mojo_core::runtime::ADAPTIVE_PLAN_REASON_SHADOW_ONLY => "shadow_only",
+        prodex_mojo_core::runtime::ADAPTIVE_PLAN_REASON_ADAPTIVE_ENABLED => "adaptive_enabled",
+        prodex_mojo_core::runtime::ADAPTIVE_PLAN_REASON_SHADOW_EXPLORATION => "shadow_exploration",
+        prodex_mojo_core::runtime::ADAPTIVE_PLAN_REASON_ADAPTIVE_EXPLORATION => {
+            "adaptive_exploration"
+        }
+        _ => "insufficient_samples",
+    };
+    RuntimeGatewayAdaptiveShadowDecision {
+        actual_model: input.actual_model,
+        recommended_model,
+        quality_score_bps: plan.quality_score_bps,
+        override_reason,
+    }
+}
+
+#[cfg(any(not(feature = "mojo"), test))]
+fn runtime_gateway_adaptive_shadow_decision_rust(
     input: RuntimeGatewayAdaptiveShadowInput,
 ) -> RuntimeGatewayAdaptiveShadowDecision {
     if let Some(owner) = input.continuation_owner_model.as_ref() {
@@ -225,7 +359,7 @@ pub fn runtime_gateway_adaptive_shadow_decision(
         if !window.has_min_samples(input.config.min_samples) {
             continue;
         }
-        let score = window.quality_score_bps();
+        let score = window.quality_score_bps_rust();
         if best.is_none_or(|(_, best_score)| score > best_score) {
             best = Some((candidate.as_str(), score));
         }
@@ -252,6 +386,7 @@ pub fn runtime_gateway_adaptive_shadow_decision(
     }
 }
 
+#[cfg(any(not(feature = "mojo"), test))]
 fn adaptive_exploration_decision(
     input: &RuntimeGatewayAdaptiveShadowInput,
     candidates: &[&String],
@@ -280,6 +415,7 @@ fn adaptive_exploration_decision(
     })
 }
 
+#[cfg(any(not(feature = "mojo"), test))]
 fn adaptive_seed(mut value: u64) -> u64 {
     value = value.wrapping_add(0x9e37_79b9_7f4a_7c15);
     value = (value ^ (value >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
@@ -409,5 +545,34 @@ mod tests {
 
         assert_eq!(decision.recommended_model.as_deref(), Some("b"));
         assert_eq!(decision.override_reason, "adaptive_exploration");
+    }
+
+    #[cfg(feature = "mojo")]
+    #[test]
+    fn adaptive_mojo_matches_rust_oracle_for_sampled_selection() {
+        let mut good = RuntimeGatewayAdaptiveQualityWindow::default();
+        for _ in 0..8 {
+            good.record(RuntimeGatewayAdaptiveFeedbackSignal::TaskCompleted);
+            good.record(RuntimeGatewayAdaptiveFeedbackSignal::TokenSavings(10_000));
+        }
+        let input = RuntimeGatewayAdaptiveShadowInput {
+            config: RuntimeGatewayAdaptiveRoutingConfig {
+                enabled: true,
+                shadow_mode: false,
+                min_samples: 8,
+                ..RuntimeGatewayAdaptiveRoutingConfig::default()
+            },
+            diagnostic_seed: 1,
+            actual_model: "slow".to_string(),
+            continuation_owner_model: None,
+            candidates: vec!["slow".to_string(), "good".to_string()],
+            quota_blocked_models: Vec::new(),
+            quality: BTreeMap::from([("good".to_string(), good)]),
+        };
+
+        assert_eq!(
+            runtime_gateway_adaptive_shadow_decision(input.clone()),
+            runtime_gateway_adaptive_shadow_decision_rust(input),
+        );
     }
 }
