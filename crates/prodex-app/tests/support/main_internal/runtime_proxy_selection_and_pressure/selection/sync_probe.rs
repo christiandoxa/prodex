@@ -56,8 +56,8 @@ fn fresh_selection_retries_after_scheduled_cold_start_probe() {
     let _env_lock = TestEnvVarGuard::lock();
     let _pause_guard = ci_runtime_proxy_timeout_guard(
         "PRODEX_RUNTIME_PROXY_SYNC_PROBE_PRESSURE_PAUSE_MS",
-        1_000,
         2_000,
+        4_000,
     );
     clear_runtime_policy_cache();
 

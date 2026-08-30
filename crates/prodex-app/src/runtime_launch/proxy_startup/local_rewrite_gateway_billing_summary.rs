@@ -478,47 +478,60 @@ fn runtime_gateway_billing_summary_numeric_batch_rust(
             let Ok(bucket_id) = usize::try_from(bucket_id) else {
                 continue;
             };
-            let bucket = &mut buckets[bucket_id];
-            bucket.requests = bucket.requests.saturating_add(1);
-            match input.response_status_present {
-                0 => bucket.unreconciled_requests = bucket.unreconciled_requests.saturating_add(1),
-                _ if (200..300).contains(&input.response_status) => {
-                    bucket.successful_requests = bucket.successful_requests.saturating_add(1)
-                }
-                _ => bucket.failed_requests = bucket.failed_requests.saturating_add(1),
-            }
-            bucket.input_tokens = bucket.input_tokens.saturating_add(input.input_tokens);
-            bucket.output_tokens = bucket.output_tokens.saturating_add(input.output_tokens);
-            bucket.response_bytes = bucket.response_bytes.saturating_add(input.response_bytes);
-            bucket.estimated_cost_microusd = bucket
-                .estimated_cost_microusd
-                .saturating_add(input.estimated_cost_microusd);
-            bucket.final_cost_microusd = bucket
-                .final_cost_microusd
-                .saturating_add(input.final_cost_microusd);
-            if bucket.first_created_at_present == 0 {
-                bucket.first_created_at_epoch = input.created_at_epoch;
-                bucket.last_created_at_epoch = input.created_at_epoch;
-                bucket.first_created_at_present = 1;
-            } else {
-                bucket.first_created_at_epoch =
-                    bucket.first_created_at_epoch.min(input.created_at_epoch);
-                bucket.last_created_at_epoch =
-                    bucket.last_created_at_epoch.max(input.created_at_epoch);
-            }
-            if input.reconciled_at_present == 1 {
-                if bucket.last_reconciled_at_present == 0 {
-                    bucket.last_reconciled_at_epoch = input.reconciled_at_epoch;
-                    bucket.last_reconciled_at_present = 1;
-                } else {
-                    bucket.last_reconciled_at_epoch = bucket
-                        .last_reconciled_at_epoch
-                        .max(input.reconciled_at_epoch);
-                }
-            }
+            add_gateway_billing_summary_numeric_input(&mut buckets[bucket_id], input);
         }
     }
     buckets
+}
+
+#[cfg(not(feature = "mojo-core"))]
+fn add_gateway_billing_summary_numeric_input(
+    bucket: &mut RuntimeGatewayBillingSummaryNumericBucket,
+    input: &RuntimeGatewayBillingSummaryNumericInput,
+) {
+    bucket.requests = bucket.requests.saturating_add(1);
+    match input.response_status_present {
+        0 => bucket.unreconciled_requests = bucket.unreconciled_requests.saturating_add(1),
+        _ if (200..300).contains(&input.response_status) => {
+            bucket.successful_requests = bucket.successful_requests.saturating_add(1)
+        }
+        _ => bucket.failed_requests = bucket.failed_requests.saturating_add(1),
+    }
+    bucket.input_tokens = bucket.input_tokens.saturating_add(input.input_tokens);
+    bucket.output_tokens = bucket.output_tokens.saturating_add(input.output_tokens);
+    bucket.response_bytes = bucket.response_bytes.saturating_add(input.response_bytes);
+    bucket.estimated_cost_microusd = bucket
+        .estimated_cost_microusd
+        .saturating_add(input.estimated_cost_microusd);
+    bucket.final_cost_microusd = bucket
+        .final_cost_microusd
+        .saturating_add(input.final_cost_microusd);
+    update_gateway_billing_summary_numeric_timestamps(bucket, input);
+}
+
+#[cfg(not(feature = "mojo-core"))]
+fn update_gateway_billing_summary_numeric_timestamps(
+    bucket: &mut RuntimeGatewayBillingSummaryNumericBucket,
+    input: &RuntimeGatewayBillingSummaryNumericInput,
+) {
+    if bucket.first_created_at_present == 0 {
+        bucket.first_created_at_epoch = input.created_at_epoch;
+        bucket.last_created_at_epoch = input.created_at_epoch;
+        bucket.first_created_at_present = 1;
+    } else {
+        bucket.first_created_at_epoch = bucket.first_created_at_epoch.min(input.created_at_epoch);
+        bucket.last_created_at_epoch = bucket.last_created_at_epoch.max(input.created_at_epoch);
+    }
+    if input.reconciled_at_present == 1 {
+        if bucket.last_reconciled_at_present == 0 {
+            bucket.last_reconciled_at_epoch = input.reconciled_at_epoch;
+            bucket.last_reconciled_at_present = 1;
+        } else {
+            bucket.last_reconciled_at_epoch = bucket
+                .last_reconciled_at_epoch
+                .max(input.reconciled_at_epoch);
+        }
+    }
 }
 
 fn microusd_to_usd(value: u64) -> f64 {

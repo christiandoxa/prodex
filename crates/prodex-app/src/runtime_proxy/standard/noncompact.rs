@@ -174,6 +174,83 @@ struct RuntimeNoncompactStandardLoopContext<'a> {
     loop_state: &'a mut RuntimePrecommitLoopState<tiny_http::ResponseBox>,
 }
 
+enum RuntimeNoncompactBudgetAction {
+    Proceed,
+    Continue,
+    Return(tiny_http::ResponseBox),
+}
+
+fn runtime_noncompact_budget_action(
+    request_id: u64,
+    shared: &RuntimeRotationProxyShared,
+    session_present: bool,
+    pressure_mode: bool,
+    loop_state: &mut RuntimePrecommitLoopState<tiny_http::ResponseBox>,
+) -> Result<RuntimeNoncompactBudgetAction> {
+    if loop_state.local_capacity_wait_timed_out {
+        return Ok(RuntimeNoncompactBudgetAction::Return(
+            build_runtime_proxy_text_response(503, runtime_proxy_local_capacity_timeout_message()),
+        ));
+    }
+    if !loop_state.budget_exhausted(shared, session_present, pressure_mode)? {
+        return Ok(RuntimeNoncompactBudgetAction::Proceed);
+    }
+    runtime_proxy_log(
+        shared,
+        format!(
+            "request={request_id} transport=http standard_precommit_budget_exhausted attempts={} elapsed_ms={} pressure_mode={pressure_mode}",
+            loop_state.selection_attempts,
+            loop_state.selection_started_at.elapsed().as_millis()
+        ),
+    );
+    if !session_present
+        && loop_state.maybe_wait_for_transient_recovery(
+            request_id,
+            shared,
+            RuntimeRouteKind::Standard,
+        )?
+    {
+        return Ok(RuntimeNoncompactBudgetAction::Continue);
+    }
+    Ok(RuntimeNoncompactBudgetAction::Return(
+        runtime_proxy_final_retryable_http_failure_response(
+            loop_state.last_failure.take(),
+            loop_state.saw_inflight_saturation,
+            false,
+        )
+        .unwrap_or_else(|| {
+            build_runtime_proxy_text_response(503, runtime_proxy_local_selection_failure_message())
+        }),
+    ))
+}
+
+fn wait_after_runtime_noncompact_inflight_saturation(
+    request_id: u64,
+    request: &RuntimeProxyRequest,
+    shared: &RuntimeRotationProxyShared,
+    loop_state: &mut RuntimePrecommitLoopState<tiny_http::ResponseBox>,
+    session_profile: &Option<String>,
+) -> Result<()> {
+    loop_state.record_inflight_saturation();
+    if matches!(
+        runtime_proxy_maybe_wait_for_interactive_inflight_relief(RuntimeInflightReliefWait {
+            request_id,
+            request,
+            shared,
+            excluded_profiles: &loop_state.excluded_profiles,
+            route_kind: RuntimeRouteKind::Standard,
+            selection_started_at: loop_state.selection_started_at,
+            continuation: session_profile.is_some(),
+            wait_affinity_owner: session_profile.as_deref(),
+            selected_profile: None,
+        })?,
+        RuntimeInflightReliefWaitResult::DeadlineExpired
+    ) {
+        loop_state.record_local_capacity_wait_timeout();
+    }
+    Ok(())
+}
+
 fn run_runtime_noncompact_standard_loop(
     context: RuntimeNoncompactStandardLoopContext<'_>,
 ) -> Result<tiny_http::ResponseBox> {
@@ -190,41 +267,16 @@ fn run_runtime_noncompact_standard_loop(
         loop_state,
     } = context;
     loop {
-        if loop_state.local_capacity_wait_timed_out {
-            return Ok(build_runtime_proxy_text_response(
-                503,
-                runtime_proxy_local_capacity_timeout_message(),
-            ));
-        }
-        if loop_state.budget_exhausted(shared, session_profile.is_some(), pressure_mode)? {
-            runtime_proxy_log(
-                shared,
-                format!(
-                    "request={request_id} transport=http standard_precommit_budget_exhausted attempts={} elapsed_ms={} pressure_mode={pressure_mode}",
-                    loop_state.selection_attempts,
-                    loop_state.selection_started_at.elapsed().as_millis()
-                ),
-            );
-            if session_profile.is_none()
-                && loop_state.maybe_wait_for_transient_recovery(
-                    request_id,
-                    shared,
-                    RuntimeRouteKind::Standard,
-                )?
-            {
-                continue;
-            }
-            return Ok(runtime_proxy_final_retryable_http_failure_response(
-                loop_state.last_failure.take(),
-                loop_state.saw_inflight_saturation,
-                false,
-            )
-            .unwrap_or_else(|| {
-                build_runtime_proxy_text_response(
-                    503,
-                    runtime_proxy_local_selection_failure_message(),
-                )
-            }));
+        match runtime_noncompact_budget_action(
+            request_id,
+            shared,
+            session_profile.is_some(),
+            pressure_mode,
+            &mut *loop_state,
+        )? {
+            RuntimeNoncompactBudgetAction::Continue => continue,
+            RuntimeNoncompactBudgetAction::Return(response) => return Ok(response),
+            RuntimeNoncompactBudgetAction::Proceed => {}
         }
 
         let action = runtime_noncompact_next_action(
@@ -264,27 +316,14 @@ fn run_runtime_noncompact_standard_loop(
             &attempt,
             RuntimeStandardAttempt::ProfileInflightSaturated { .. }
         ) {
-            loop_state.record_inflight_saturation();
-            match runtime_proxy_maybe_wait_for_interactive_inflight_relief(
-                RuntimeInflightReliefWait {
-                    request_id,
-                    request,
-                    shared,
-                    excluded_profiles: &loop_state.excluded_profiles,
-                    route_kind: RuntimeRouteKind::Standard,
-                    selection_started_at: loop_state.selection_started_at,
-                    continuation: session_profile.is_some(),
-                    wait_affinity_owner: session_profile.as_deref(),
-                    selected_profile: None,
-                },
-            )? {
-                RuntimeInflightReliefWaitResult::Relieved
-                | RuntimeInflightReliefWaitResult::NotWaitable => continue,
-                RuntimeInflightReliefWaitResult::DeadlineExpired => {
-                    loop_state.record_local_capacity_wait_timeout();
-                    continue;
-                }
-            }
+            wait_after_runtime_noncompact_inflight_saturation(
+                request_id,
+                request,
+                shared,
+                &mut *loop_state,
+                session_profile,
+            )?;
+            continue;
         }
         if !matches!(
             &attempt,
