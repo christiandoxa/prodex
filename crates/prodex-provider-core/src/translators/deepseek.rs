@@ -52,6 +52,23 @@ pub(crate) use self::tooling::{
 #[derive(Clone, Copy)]
 pub struct DeepSeekTranslator;
 
+#[cfg(feature = "mojo")]
+pub(super) fn deepseek_mojo_body(
+    input: prodex_mojo_core::rich::DeepSeekKernelInput<'_>,
+) -> Vec<u8> {
+    prodex_mojo_core::rich::deepseek_kernel(input)
+        .unwrap_or_else(|error| panic!("Mojo DeepSeek kernel failed: {error:?}"))
+}
+
+#[cfg(feature = "mojo")]
+pub(super) fn deepseek_mojo_value(
+    input: prodex_mojo_core::rich::DeepSeekKernelInput<'_>,
+) -> serde_json::Value {
+    let body = deepseek_mojo_body(input);
+    serde_json::from_slice(&body)
+        .unwrap_or_else(|error| panic!("Mojo DeepSeek kernel returned invalid JSON: {error}"))
+}
+
 impl ProviderTranslator for DeepSeekTranslator {
     fn provider(&self) -> ProviderId {
         ProviderId::DeepSeek

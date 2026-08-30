@@ -1,6 +1,11 @@
 //! DeepSeek buffered response metadata extraction.
 
-use serde_json::{Value, json};
+use serde_json::Value;
+
+#[cfg(feature = "mojo")]
+use prodex_mojo_core::rich::{DeepSeekKernelInput, DeepSeekKernelOperation};
+#[cfg(not(feature = "mojo"))]
+use serde_json::json;
 
 pub(super) fn deepseek_response_metadata(value: &Value, message: Option<&Value>) -> Option<Value> {
     let mut metadata = serde_json::Map::new();
@@ -59,5 +64,18 @@ pub(super) fn deepseek_response_metadata(value: &Value, message: Option<&Value>)
             Value::String(system_fingerprint.to_string()),
         );
     }
-    (!metadata.is_empty()).then(|| json!({ "deepseek": metadata }))
+    if metadata.is_empty() {
+        return None;
+    }
+    #[cfg(feature = "mojo")]
+    {
+        let metadata = serde_json::to_string(&Value::Object(metadata))
+            .expect("DeepSeek response metadata serializes");
+        let mut input = DeepSeekKernelInput::new(DeepSeekKernelOperation::ResponseMetadata);
+        input.role = Some("deepseek");
+        input.metadata = Some(&metadata);
+        return Some(crate::translators::deepseek::deepseek_mojo_value(input));
+    }
+    #[cfg(not(feature = "mojo"))]
+    Some(json!({ "deepseek": metadata }))
 }

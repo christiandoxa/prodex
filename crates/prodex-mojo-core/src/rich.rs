@@ -63,6 +63,9 @@ mod gemini_response;
 pub use gemini_response::{
     GeminiResponseKernelInput, GeminiResponseKernelOperation, gemini_response_kernel,
 };
+#[path = "rich/deepseek.rs"]
+mod deepseek;
+pub use deepseek::{DeepSeekKernelInput, DeepSeekKernelOperation, deepseek_kernel};
 
 const RICH_STATUS_INVALID: i64 = 1;
 const RICH_STATUS_UTF8: i64 = 2;
@@ -660,6 +663,10 @@ pub fn rich_self_test() -> bool {
         .is_ok_and(|value| value.selected_effort.as_deref() == Some("medium"));
     let fallback_plan = model_fallback_plan("copilot", &["codex", "gpt-5.3-codex"])
         .is_ok_and(|value| value == ["gpt-5.3-codex", "gpt-5.1-codex", "gpt-4o"]);
+    let deepseek = deepseek_kernel(DeepSeekKernelInput::new(
+        DeepSeekKernelOperation::UserMessage,
+    ))
+    .is_ok_and(|value| value == br#"{\"role\":\"user\",\"content\":\"\"}"#);
     context
         && routes
         && policy
@@ -669,6 +676,7 @@ pub fn rich_self_test() -> bool {
         && context_plan
         && catalog
         && reasoning
+        && deepseek
 }
 
 #[cfg(test)]
