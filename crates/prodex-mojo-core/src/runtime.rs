@@ -6,6 +6,7 @@ mod candidate_plan;
 mod profile_rotation;
 mod prompt_cache_affinity;
 mod quota_route_score;
+mod selection_planning;
 pub use auto_redeem::{
     AutoRedeemCandidateInput, RUNTIME_AUTO_REDEEM_PLAN_MAX_COUNT, auto_redeem_plan_batch,
     auto_redeem_plan_self_test,
@@ -13,6 +14,16 @@ pub use auto_redeem::{
 pub use profile_rotation::profile_selection_order_batch;
 pub use prompt_cache_affinity::prompt_cache_affinity_batch;
 pub use quota_route_score::quota_route_score_batch;
+pub use selection_planning::{
+    ADAPTIVE_PLAN_REASON_ADAPTIVE_ENABLED, ADAPTIVE_PLAN_REASON_ADAPTIVE_EXPLORATION,
+    ADAPTIVE_PLAN_REASON_INSUFFICIENT_SAMPLES, ADAPTIVE_PLAN_REASON_SHADOW_EXPLORATION,
+    ADAPTIVE_PLAN_REASON_SHADOW_ONLY, ADAPTIVE_ROUTING_MAX_COUNT, AdaptiveQualityInput,
+    AdaptiveRoutingPlan, SOFT_AFFINITY_POLICY_ALLOWED, SOFT_AFFINITY_POLICY_QUOTA_CRITICAL,
+    SOFT_AFFINITY_POLICY_QUOTA_EXHAUSTED, SOFT_AFFINITY_POLICY_QUOTA_EXHAUSTED_BEFORE_SEND,
+    SOFT_AFFINITY_POLICY_QUOTA_HEALTHY, SOFT_AFFINITY_POLICY_QUOTA_THIN,
+    SOFT_AFFINITY_POLICY_QUOTA_UNKNOWN, SOFT_AFFINITY_POLICY_QUOTA_WINDOWS_UNAVAILABLE,
+    SoftAffinityPolicyInput, adaptive_routing_plan, soft_affinity_policy,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ProfileScoreInput {

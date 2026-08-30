@@ -479,6 +479,35 @@ fn soft_affinity_blocks_fallback_when_weekly_is_exhausted() {
     );
 }
 
+#[cfg(feature = "mojo")]
+#[test]
+fn soft_affinity_mojo_matches_rust_oracle() {
+    let mut summary = healthy_summary();
+    summary.weekly = RuntimeSelectionQuotaWindowSummary {
+        status: RuntimeSelectionQuotaWindowStatus::Exhausted,
+        remaining_percent: 0,
+    };
+    summary.route_band = RuntimeSelectionQuotaPressureBand::Exhausted;
+    let input = RuntimeSoftAffinityPolicyInput {
+        affinity_kind: RuntimeAffinitySelectionKind::Pinned,
+        route_kind: RuntimeRouteKind::Responses,
+        quota_summary: summary,
+        quota_source: Some(RuntimeSelectionQuotaSource::LiveProbe),
+        current_profile_matches_candidate: false,
+        has_route_eligible_quota_fallback: true,
+        responses_critical_floor_percent: 2,
+    };
+
+    assert_eq!(
+        runtime_soft_affinity_allowed(input),
+        runtime_soft_affinity_allowed_rust(input),
+    );
+    assert_eq!(
+        runtime_soft_affinity_rejection_reason(input),
+        runtime_soft_affinity_rejection_reason_rust(input),
+    );
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum AffinityProfileCase {
     None,

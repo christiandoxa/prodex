@@ -1,7 +1,7 @@
 from std.memory import Pointer
 from rich_text import rich_view_valid, rich_views_equal
 from rich_types import ProdexRichStringView, rich_view_ptr
-from runtime_math import INT64_MAX, runtime_quota_saturating_add
+from runtime_math import INT64_MAX, INT64_MIN, runtime_quota_saturating_add
 
 comptime RUNTIME_CANDIDATE_PLAN_FIELD_COUNT: Int64 = 24
 comptime RUNTIME_CANDIDATE_PLAN_MAX_COUNT: Int64 = 256
@@ -351,6 +351,95 @@ def prodex_runtime_optimistic_current_candidate_decision(
     return OPTIMISTIC_CANDIDATE_KEEP
 
 
+comptime SOFT_AFFINITY_POLICY_ALLOWED: Int64 = 0
+comptime SOFT_AFFINITY_POLICY_QUOTA_WINDOWS_UNAVAILABLE: Int64 = 1
+comptime SOFT_AFFINITY_POLICY_QUOTA_EXHAUSTED_BEFORE_SEND: Int64 = 2
+comptime SOFT_AFFINITY_POLICY_QUOTA_EXHAUSTED: Int64 = 3
+comptime SOFT_AFFINITY_POLICY_QUOTA_HEALTHY: Int64 = 4
+comptime SOFT_AFFINITY_POLICY_QUOTA_THIN: Int64 = 5
+comptime SOFT_AFFINITY_POLICY_QUOTA_CRITICAL: Int64 = 6
+comptime SOFT_AFFINITY_POLICY_QUOTA_UNKNOWN: Int64 = 7
+
+
+def runtime_soft_affinity_policy_band_reason(band: Int64) -> Int64:
+    if band == 0:
+        return SOFT_AFFINITY_POLICY_QUOTA_HEALTHY
+    if band == 1:
+        return SOFT_AFFINITY_POLICY_QUOTA_THIN
+    if band == 2:
+        return SOFT_AFFINITY_POLICY_QUOTA_CRITICAL
+    if band == 3:
+        return SOFT_AFFINITY_POLICY_QUOTA_EXHAUSTED
+    return SOFT_AFFINITY_POLICY_QUOTA_UNKNOWN
+
+
+@export("prodex_runtime_soft_affinity_policy_v1")
+def prodex_runtime_soft_affinity_policy_v1(
+    affinity_kind: Int64,
+    route_kind: Int64,
+    five_hour_status: Int64,
+    weekly_status: Int64,
+    quota_band: Int64,
+    quota_source_present: Int64,
+    current_profile_matches_candidate: Int64,
+    has_route_eligible_quota_fallback: Int64,
+) abi("C") -> Int64:
+    if (
+        affinity_kind < 0
+        or affinity_kind > 3
+        or route_kind < 0
+        or route_kind > 3
+        or five_hour_status < 0
+        or five_hour_status > 4
+        or weekly_status < 0
+        or weekly_status > 4
+        or quota_band < 0
+        or quota_band > 4
+        or quota_source_present < 0
+        or quota_source_present > 1
+        or current_profile_matches_candidate < 0
+        or current_profile_matches_candidate > 1
+        or has_route_eligible_quota_fallback < 0
+        or has_route_eligible_quota_fallback > 1
+    ):
+        return -1
+
+    var summary_allows = (
+        quota_source_present == 1
+        and five_hour_status <= 2
+        and weekly_status <= 2
+    )
+    var precommit_guard = five_hour_status == 3
+    var allowed = False
+    if affinity_kind == 0:
+        allowed = summary_allows or (
+            (route_kind == 0 or route_kind == 2) and quota_source_present == 0
+        )
+    elif affinity_kind == 1 or affinity_kind == 2:
+        allowed = quota_band <= 2 and not precommit_guard
+    else:
+        allowed = summary_allows or (
+            route_kind == 1 and quota_source_present == 0
+        ) or (
+            route_kind == 2
+            and quota_source_present == 0
+            and current_profile_matches_candidate == 1
+            and has_route_eligible_quota_fallback == 0
+        )
+    if allowed:
+        return SOFT_AFFINITY_POLICY_ALLOWED
+
+    if affinity_kind == 1 or affinity_kind == 2:
+        return runtime_soft_affinity_policy_band_reason(quota_band)
+    if quota_source_present == 0 or five_hour_status == 4 or weekly_status == 4:
+        return SOFT_AFFINITY_POLICY_QUOTA_WINDOWS_UNAVAILABLE
+    if precommit_guard:
+        return SOFT_AFFINITY_POLICY_QUOTA_EXHAUSTED_BEFORE_SEND
+    if five_hour_status == 3 or weekly_status == 3:
+        return SOFT_AFFINITY_POLICY_QUOTA_EXHAUSTED
+    return runtime_soft_affinity_policy_band_reason(quota_band)
+
+
 @export("prodex_runtime_candidate_plan_batch")
 def prodex_runtime_candidate_plan_batch(
     fields: Pointer[mut=False, Int64, _],
@@ -495,4 +584,178 @@ def prodex_runtime_candidate_plan_batch(
                 unsafe_offset=position
             ]
             fallback_indices[unsafe_offset=position] = selected
+    return 0
+
+
+comptime RUNTIME_ADAPTIVE_QUALITY_FIELD_COUNT: Int64 = 9
+comptime RUNTIME_ADAPTIVE_ROUTING_MAX_COUNT: Int64 = 256
+comptime ADAPTIVE_PLAN_REASON_INSUFFICIENT_SAMPLES: Int64 = 0
+comptime ADAPTIVE_PLAN_REASON_SHADOW_ONLY: Int64 = 1
+comptime ADAPTIVE_PLAN_REASON_ADAPTIVE_ENABLED: Int64 = 2
+comptime ADAPTIVE_PLAN_REASON_SHADOW_EXPLORATION: Int64 = 3
+comptime ADAPTIVE_PLAN_REASON_ADAPTIVE_EXPLORATION: Int64 = 4
+
+
+def runtime_adaptive_saturating_add(left: UInt64, right: UInt64) -> UInt64:
+    if left > UINT64_MAX - right:
+        return UINT64_MAX
+    return left + right
+
+
+def runtime_adaptive_saturating_mul(left: UInt64, right: UInt64) -> UInt64:
+    if left == 0 or right == 0:
+        return 0
+    if left > UINT64_MAX / right:
+        return UINT64_MAX
+    return left * right
+
+
+def runtime_adaptive_quality_score(
+    samples: UInt64,
+    task_completed: UInt64,
+    corrective_user_messages: UInt64,
+    additional_turns: UInt64,
+    previous_response_not_found: UInt64,
+    invalid_tool_call_continuation: UInt64,
+    errors: UInt64,
+    token_savings: UInt64,
+    latency_ms_total: UInt64,
+) -> Int64:
+    var positive = runtime_adaptive_saturating_mul(task_completed, 1_000)
+    var savings = token_savings / 100
+    if savings > 2_000:
+        savings = 2_000
+    positive = runtime_adaptive_saturating_add(positive, savings)
+
+    var negative = runtime_adaptive_saturating_mul(
+        corrective_user_messages, 1_200
+    )
+    negative = runtime_adaptive_saturating_add(
+        negative, runtime_adaptive_saturating_mul(additional_turns, 200)
+    )
+    negative = runtime_adaptive_saturating_add(
+        negative,
+        runtime_adaptive_saturating_mul(previous_response_not_found, 2_000),
+    )
+    negative = runtime_adaptive_saturating_add(
+        negative,
+        runtime_adaptive_saturating_mul(invalid_tool_call_continuation, 2_000),
+    )
+    negative = runtime_adaptive_saturating_add(
+        negative, runtime_adaptive_saturating_mul(errors, 1_500)
+    )
+    var latency = latency_ms_total / 1_000
+    if latency > 2_000:
+        latency = 2_000
+    negative = runtime_adaptive_saturating_add(negative, latency)
+
+    if positive >= negative:
+        var difference = positive - negative
+        if difference > UInt64(INT64_MAX):
+            return INT64_MAX
+        return Int64(difference)
+    var difference = negative - positive
+    if difference >= UInt64(9223372036854775808):
+        return INT64_MIN
+    return -Int64(difference)
+
+
+def runtime_adaptive_quality_field(
+    fields: Pointer[mut=False, UInt64, _], index: Int64, field: Int64
+) -> UInt64:
+    return fields[
+        unsafe_offset=(index * RUNTIME_ADAPTIVE_QUALITY_FIELD_COUNT) + field
+    ]
+
+
+def runtime_adaptive_seed(value: UInt64) -> UInt64:
+    var mixed = value + UInt64(0x9e3779b97f4a7c15)
+    mixed = (mixed ^ (mixed >> 30)) * UInt64(0xbf58476d1ce4e5b9)
+    mixed = (mixed ^ (mixed >> 27)) * UInt64(0x94d049bb133111eb)
+    return mixed ^ (mixed >> 31)
+
+
+@export("prodex_runtime_gateway_adaptive_plan_v1")
+def prodex_runtime_gateway_adaptive_plan_v1(
+    quality_fields: Pointer[mut=False, UInt64, _],
+    window_present: Pointer[mut=False, Int64, _],
+    recommended_index: Pointer[mut=True, Int64, _],
+    quality_score_bps: Pointer[mut=True, Int64, _],
+    quality_score_present: Pointer[mut=True, Int64, _],
+    reason: Pointer[mut=True, Int64, _],
+    count: Int64,
+    actual_index: Int64,
+    shadow_mode: Int64,
+    min_samples: UInt64,
+    exploration_rate_bps: Int64,
+    diagnostic_seed: UInt64,
+) abi("C") -> Int64:
+    if (
+        count < 0
+        or count > RUNTIME_ADAPTIVE_ROUTING_MAX_COUNT
+        or actual_index < -1
+        or actual_index >= count
+        or shadow_mode < 0
+        or shadow_mode > 1
+        or exploration_rate_bps < 0
+    ):
+        return 1
+
+    recommended_index[unsafe_offset=0] = -1
+    quality_score_bps[unsafe_offset=0] = 0
+    quality_score_present[unsafe_offset=0] = 0
+    reason[unsafe_offset=0] = ADAPTIVE_PLAN_REASON_INSUFFICIENT_SAMPLES
+
+    if count > 0 and exploration_rate_bps > 0:
+        if (
+            runtime_adaptive_seed(diagnostic_seed) % 10_000
+            < UInt64(exploration_rate_bps)
+        ):
+            var selected = Int64(
+                runtime_adaptive_seed(
+                    diagnostic_seed ^ UInt64(0x9e3779b97f4a7c15)
+                ) % UInt64(count)
+            )
+            if count > 1 and selected == actual_index:
+                selected = (selected + 1) % count
+            recommended_index[unsafe_offset=0] = selected
+            if shadow_mode == 1:
+                reason[unsafe_offset=0] = ADAPTIVE_PLAN_REASON_SHADOW_EXPLORATION
+            else:
+                reason[unsafe_offset=0] = ADAPTIVE_PLAN_REASON_ADAPTIVE_EXPLORATION
+            return 0
+
+    var best_index: Int64 = -1
+    var best_score = INT64_MIN
+    for index in range(count):
+        var present = window_present[unsafe_offset=index]
+        if present < 0 or present > 1:
+            return 2
+        if present == 1 and runtime_adaptive_quality_field(
+            quality_fields, index, 0
+        ) >= min_samples:
+            var score = runtime_adaptive_quality_score(
+                runtime_adaptive_quality_field(quality_fields, index, 0),
+                runtime_adaptive_quality_field(quality_fields, index, 1),
+                runtime_adaptive_quality_field(quality_fields, index, 2),
+                runtime_adaptive_quality_field(quality_fields, index, 3),
+                runtime_adaptive_quality_field(quality_fields, index, 4),
+                runtime_adaptive_quality_field(quality_fields, index, 5),
+                runtime_adaptive_quality_field(quality_fields, index, 6),
+                runtime_adaptive_quality_field(quality_fields, index, 7),
+                runtime_adaptive_quality_field(quality_fields, index, 8),
+            )
+            if best_index == -1 or score > best_score:
+                best_index = index
+                best_score = score
+
+    if best_index == -1:
+        return 0
+    recommended_index[unsafe_offset=0] = best_index
+    quality_score_bps[unsafe_offset=0] = best_score
+    quality_score_present[unsafe_offset=0] = 1
+    if shadow_mode == 1:
+        reason[unsafe_offset=0] = ADAPTIVE_PLAN_REASON_SHADOW_ONLY
+    else:
+        reason[unsafe_offset=0] = ADAPTIVE_PLAN_REASON_ADAPTIVE_ENABLED
     return 0
