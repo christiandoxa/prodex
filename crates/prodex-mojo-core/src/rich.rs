@@ -18,10 +18,13 @@ pub use app_server_broker::{
     AffinityPlan as AppServerBrokerAffinityPlan, MethodPlan as AppServerBrokerMethodPlan,
     ValidationInput as AppServerBrokerValidationInput, WireInput as AppServerBrokerWireInput,
     WirePlan as AppServerBrokerWirePlan, classify_wire as app_server_broker_classify_wire,
+    lifecycle_sequence_reason as app_server_broker_lifecycle_sequence_reason,
     lifecycle_validation_reason as app_server_broker_lifecycle_validation_reason,
     normalize_method as app_server_broker_normalize_method,
     plan_affinity as app_server_broker_plan_affinity,
+    request_sequence_reason as app_server_broker_request_sequence_reason,
     response_schema as app_server_broker_response_schema,
+    response_sequence_reason as app_server_broker_response_sequence_reason,
 };
 
 mod routing;

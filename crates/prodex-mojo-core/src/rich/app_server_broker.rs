@@ -15,6 +15,12 @@ const METHOD_KIND_OTHER: i64 = 2;
 const REASON_NONE: i64 = 0;
 const REASON_MISSING_METHOD_AND_RESPONSE_PAYLOAD: i64 = 17;
 
+const SEQUENCE_EVENT_REQUEST: i64 = 1;
+const SEQUENCE_EVENT_RESPONSE: i64 = 2;
+const SEQUENCE_EVENT_LIFECYCLE: i64 = 3;
+const SEQUENCE_REASON_REQUEST_MISSING_ID: i64 = 20;
+const SEQUENCE_REASON_DUPLICATE_TURN_COMPLETED: i64 = 36;
+
 #[repr(C)]
 #[derive(Debug, Clone, Copy)]
 struct AppServerStringView {
@@ -85,6 +91,19 @@ pub struct ValidationInput<'a> {
     pub turn_items: bool,
 }
 
+struct SequenceInput<'a> {
+    event_kind: i64,
+    stage: Option<&'a str>,
+    id_present: bool,
+    thread_id_present: bool,
+    pending_request_present: bool,
+    duplicate_pending_request: bool,
+    started_turn_present: bool,
+    completed_turn_present: bool,
+    active_turn_present: bool,
+    active_turn_matches: bool,
+}
+
 unsafe extern "C" {
     fn prodex_mojo_app_server_broker_wire_v1(
         abi_version: i64,
@@ -138,6 +157,20 @@ unsafe extern "C" {
         turn_id_present: i64,
         turn_status: u64,
         turn_items: i64,
+        output: u64,
+    ) -> i64;
+    fn prodex_mojo_app_server_broker_sequence_v1(
+        abi_version: i64,
+        event_kind: i64,
+        stage: u64,
+        id_present: i64,
+        thread_id_present: i64,
+        pending_request_present: i64,
+        duplicate_pending_request: i64,
+        started_turn_present: i64,
+        completed_turn_present: i64,
+        active_turn_present: i64,
+        active_turn_matches: i64,
         output: u64,
     ) -> i64;
 }
@@ -388,6 +421,114 @@ pub fn lifecycle_validation_reason(input: ValidationInput<'_>) -> Result<Option<
     Ok((output >= 1).then_some(output))
 }
 
+fn sequence_reason(input: SequenceInput<'_>) -> Result<Option<i64>, MojoError> {
+    let SequenceInput {
+        event_kind,
+        stage,
+        id_present,
+        thread_id_present,
+        pending_request_present,
+        duplicate_pending_request,
+        started_turn_present,
+        completed_turn_present,
+        active_turn_present,
+        active_turn_matches,
+    } = input;
+    if !(SEQUENCE_EVENT_REQUEST..=SEQUENCE_EVENT_LIFECYCLE).contains(&event_kind)
+        || stage.is_some_and(|value| value.len() > APP_SERVER_BROKER_METHOD_MAX_BYTES)
+    {
+        return Err(MojoError::InvalidInput);
+    }
+    let stage_view = string_view(stage);
+    let stage_address = stage.map_or(0, |_| pointer_address(&stage_view));
+    let mut output = -1_i64;
+    let status = unsafe {
+        prodex_mojo_app_server_broker_sequence_v1(
+            APP_SERVER_BROKER_ABI_VERSION,
+            event_kind,
+            stage_address,
+            flag(id_present),
+            flag(thread_id_present),
+            flag(pending_request_present),
+            flag(duplicate_pending_request),
+            flag(started_turn_present),
+            flag(completed_turn_present),
+            flag(active_turn_present),
+            flag(active_turn_matches),
+            mutable_pointer_address(&mut output),
+        )
+    };
+    if status != 0 {
+        return Err(status_error(status));
+    }
+    if output != 0
+        && !(SEQUENCE_REASON_REQUEST_MISSING_ID..=SEQUENCE_REASON_DUPLICATE_TURN_COMPLETED)
+            .contains(&output)
+    {
+        return Err(MojoError::InvalidOutput);
+    }
+    Ok((output != 0).then_some(output))
+}
+
+pub fn request_sequence_reason(
+    id_present: bool,
+    duplicate_pending_request: bool,
+) -> Result<Option<i64>, MojoError> {
+    sequence_reason(SequenceInput {
+        event_kind: SEQUENCE_EVENT_REQUEST,
+        stage: None,
+        id_present,
+        thread_id_present: false,
+        pending_request_present: false,
+        duplicate_pending_request,
+        started_turn_present: false,
+        completed_turn_present: false,
+        active_turn_present: false,
+        active_turn_matches: false,
+    })
+}
+
+pub fn response_sequence_reason(
+    id_present: bool,
+    pending_request_present: bool,
+) -> Result<Option<i64>, MojoError> {
+    sequence_reason(SequenceInput {
+        event_kind: SEQUENCE_EVENT_RESPONSE,
+        stage: None,
+        id_present,
+        thread_id_present: false,
+        pending_request_present,
+        duplicate_pending_request: false,
+        started_turn_present: false,
+        completed_turn_present: false,
+        active_turn_present: false,
+        active_turn_matches: false,
+    })
+}
+
+pub fn lifecycle_sequence_reason(
+    stage: &str,
+    turn_id_present: bool,
+    thread_id_present: bool,
+    completed_turn_present: bool,
+    active_turn_present: bool,
+    active_turn_matches: bool,
+    started_turn_present: bool,
+) -> Result<Option<i64>, MojoError> {
+    sequence_reason(SequenceInput {
+        event_kind: SEQUENCE_EVENT_LIFECYCLE,
+        stage: Some(stage),
+        id_present: turn_id_present,
+        thread_id_present,
+        pending_request_present: false,
+        duplicate_pending_request: false,
+        started_turn_present,
+        completed_turn_present,
+        active_turn_present,
+        active_turn_matches,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -476,6 +617,82 @@ mod tests {
                 turn_items: true,
             })
             .expect("Mojo validation planner should accept a valid turn notification"),
+            None
+        );
+    }
+
+    #[test]
+    fn mojo_sequence_reason_matrix_matches_protocol_contract() {
+        assert_eq!(request_sequence_reason(false, false).unwrap(), Some(20));
+        assert_eq!(request_sequence_reason(true, true).unwrap(), Some(23));
+        assert_eq!(request_sequence_reason(true, false).unwrap(), None);
+        assert_eq!(response_sequence_reason(false, false).unwrap(), Some(21));
+        assert_eq!(response_sequence_reason(true, false).unwrap(), Some(22));
+        assert_eq!(response_sequence_reason(true, true).unwrap(), None);
+
+        let stage = "turn_started_notification";
+        assert_eq!(
+            lifecycle_sequence_reason(stage, false, true, false, false, false, false).unwrap(),
+            Some(24)
+        );
+        assert_eq!(
+            lifecycle_sequence_reason(stage, true, false, false, false, false, false).unwrap(),
+            Some(25)
+        );
+        assert_eq!(
+            lifecycle_sequence_reason(stage, true, true, true, false, false, false).unwrap(),
+            Some(31)
+        );
+        assert_eq!(
+            lifecycle_sequence_reason(stage, true, true, false, true, false, false).unwrap(),
+            Some(32)
+        );
+        assert_eq!(
+            lifecycle_sequence_reason(stage, true, true, false, false, false, true).unwrap(),
+            Some(35)
+        );
+
+        let stage = "turn_completed_notification";
+        assert_eq!(
+            lifecycle_sequence_reason(stage, false, true, false, false, false, true).unwrap(),
+            Some(26)
+        );
+        assert_eq!(
+            lifecycle_sequence_reason(stage, true, false, false, false, false, true).unwrap(),
+            Some(27)
+        );
+        assert_eq!(
+            lifecycle_sequence_reason(stage, true, true, false, false, false, false).unwrap(),
+            Some(30)
+        );
+        assert_eq!(
+            lifecycle_sequence_reason(stage, true, true, false, true, false, true).unwrap(),
+            Some(33)
+        );
+        assert_eq!(
+            lifecycle_sequence_reason(stage, true, true, true, false, false, true).unwrap(),
+            Some(36)
+        );
+        assert_eq!(
+            lifecycle_sequence_reason(stage, true, true, false, false, false, true).unwrap(),
+            None
+        );
+
+        let stage = "turn_interrupt_request";
+        assert_eq!(
+            lifecycle_sequence_reason(stage, false, true, false, false, false, false).unwrap(),
+            Some(28)
+        );
+        assert_eq!(
+            lifecycle_sequence_reason(stage, true, false, false, false, false, false).unwrap(),
+            Some(29)
+        );
+        assert_eq!(
+            lifecycle_sequence_reason(stage, true, true, false, true, false, false).unwrap(),
+            Some(34)
+        );
+        assert_eq!(
+            lifecycle_sequence_reason(stage, true, true, false, true, true, false).unwrap(),
             None
         );
     }

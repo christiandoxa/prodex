@@ -1,6 +1,9 @@
 use super::super::super::app_server_broker_protocol::app_server_broker_lifecycle_response_schema_file;
 #[cfg(feature = "mojo-core")]
-use super::super::super::app_server_broker_protocol::app_server_broker_mojo_validation_reason;
+use super::super::super::app_server_broker_protocol::{
+    app_server_broker_mojo_request_sequence_reason,
+    app_server_broker_mojo_response_sequence_reason, app_server_broker_mojo_validation_reason,
+};
 #[cfg(feature = "mojo-core")]
 use super::payload::{
     frame_active_flags_valid, frame_thread_status_type, frame_turn_status,
@@ -102,7 +105,38 @@ impl RequestResponseValidation {
         preview: &Value,
         direction: ProtocolDirection,
     ) -> Option<ValidationFailure> {
-        let Some(id) = preview_id_key(preview) else {
+        let id = preview_id_key(preview);
+        #[cfg(feature = "mojo-core")]
+        {
+            let duplicate = id
+                .as_ref()
+                .is_some_and(|id| self.pending_requests.contains_key(&(direction, id.clone())));
+            if let Some(reason) =
+                app_server_broker_mojo_request_sequence_reason(id.is_some(), duplicate)
+            {
+                let failure = ValidationFailure::from_preview(preview, reason);
+                return Some(match id {
+                    Some(id) => failure.request_id(id),
+                    None => failure,
+                });
+            }
+        }
+        #[cfg(not(feature = "mojo-core"))]
+        {
+            let Some(id) = id.as_ref() else {
+                return Some(ValidationFailure::from_preview(
+                    preview,
+                    "request_missing_id",
+                ));
+            };
+            if self.pending_requests.contains_key(&(direction, id.clone())) {
+                return Some(
+                    ValidationFailure::from_preview(preview, "duplicate_pending_request_id")
+                        .request_id(id.clone()),
+                );
+            }
+        }
+        let Some(id) = id else {
             return Some(ValidationFailure::from_preview(
                 preview,
                 "request_missing_id",
@@ -112,12 +146,6 @@ impl RequestResponseValidation {
             .as_str()
             .map(str::to_string);
         let key = (direction, id.clone());
-        if self.pending_requests.contains_key(&key) {
-            return Some(
-                ValidationFailure::from_preview(preview, "duplicate_pending_request_id")
-                    .request_id(id),
-            );
-        }
         if self.pending_requests.len() >= APP_SERVER_BROKER_MAX_ACTIVE_VALIDATION_ITEMS {
             return Some(
                 ValidationFailure::from_preview(preview, "pending_request_limit_exceeded")
@@ -134,19 +162,58 @@ impl RequestResponseValidation {
         frame: Option<&Value>,
         direction: ProtocolDirection,
     ) -> Option<ValidationFailure> {
-        let Some(id) = preview_id_key(preview) else {
-            return Some(ValidationFailure::from_preview(
-                preview,
-                "response_missing_id",
-            ));
-        };
-        let key = (direction.requester_for_response(), id.clone());
-        let Some(lifecycle_stage) = self.pending_requests.remove(&key) else {
-            return Some(
-                ValidationFailure::from_preview(preview, "response_without_request").request_id(id),
-            );
-        };
-        self.validate_lifecycle_response(preview, frame, lifecycle_stage.as_deref())
+        let id = preview_id_key(preview);
+        let key_direction = direction.requester_for_response();
+        #[cfg(feature = "mojo-core")]
+        {
+            let pending = id.as_ref().is_some_and(|id| {
+                self.pending_requests
+                    .contains_key(&(key_direction, id.clone()))
+            });
+            if let Some(reason) =
+                app_server_broker_mojo_response_sequence_reason(id.is_some(), pending)
+            {
+                let failure = ValidationFailure::from_preview(preview, reason);
+                return Some(match id {
+                    Some(id) => failure.request_id(id),
+                    None => failure,
+                });
+            }
+        }
+        #[cfg(not(feature = "mojo-core"))]
+        {
+            let Some(id) = id.as_ref() else {
+                return Some(ValidationFailure::from_preview(
+                    preview,
+                    "response_missing_id",
+                ));
+            };
+            let key = (key_direction, id.clone());
+            let Some(lifecycle_stage) = self.pending_requests.remove(&key) else {
+                return Some(
+                    ValidationFailure::from_preview(preview, "response_without_request")
+                        .request_id(id.clone()),
+                );
+            };
+            return self.validate_lifecycle_response(preview, frame, lifecycle_stage.as_deref());
+        }
+        #[cfg(feature = "mojo-core")]
+        {
+            let Some(id) = id else {
+                return Some(ValidationFailure::from_preview(
+                    preview,
+                    "response_missing_id",
+                ));
+            };
+            let key = (key_direction, id.clone());
+            let Some(lifecycle_stage) = self.pending_requests.remove(&key) else {
+                return Some(
+                    ValidationFailure::from_preview(preview, "response_without_request")
+                        .request_id(id),
+                );
+            };
+            return self.validate_lifecycle_response(preview, frame, lifecycle_stage.as_deref());
+        }
     }
 
     fn validate_lifecycle_response(

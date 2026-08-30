@@ -72,6 +72,27 @@ comptime REASON_MISSING_RESPONSE_ID: Int64 = 15
 comptime REASON_METHOD_WITH_RESULT_OR_ERROR: Int64 = 16
 comptime REASON_MISSING_METHOD_AND_RESPONSE_PAYLOAD: Int64 = 17
 
+comptime SEQUENCE_EVENT_REQUEST: Int64 = 1
+comptime SEQUENCE_EVENT_RESPONSE: Int64 = 2
+comptime SEQUENCE_EVENT_LIFECYCLE: Int64 = 3
+comptime SEQUENCE_REASON_REQUEST_MISSING_ID: Int64 = 20
+comptime SEQUENCE_REASON_RESPONSE_MISSING_ID: Int64 = 21
+comptime SEQUENCE_REASON_RESPONSE_WITHOUT_REQUEST: Int64 = 22
+comptime SEQUENCE_REASON_DUPLICATE_PENDING_REQUEST: Int64 = 23
+comptime SEQUENCE_REASON_TURN_STARTED_MISSING_ID: Int64 = 24
+comptime SEQUENCE_REASON_TURN_STARTED_MISSING_THREAD_ID: Int64 = 25
+comptime SEQUENCE_REASON_TURN_COMPLETED_MISSING_ID: Int64 = 26
+comptime SEQUENCE_REASON_TURN_COMPLETED_MISSING_THREAD_ID: Int64 = 27
+comptime SEQUENCE_REASON_TURN_INTERRUPT_MISSING_ID: Int64 = 28
+comptime SEQUENCE_REASON_TURN_INTERRUPT_MISSING_THREAD_ID: Int64 = 29
+comptime SEQUENCE_REASON_TURN_COMPLETED_WITHOUT_START: Int64 = 30
+comptime SEQUENCE_REASON_TURN_STARTED_AFTER_COMPLETION: Int64 = 31
+comptime SEQUENCE_REASON_THREAD_ACTIVE_CONFLICT: Int64 = 32
+comptime SEQUENCE_REASON_TURN_COMPLETED_NOT_ACTIVE: Int64 = 33
+comptime SEQUENCE_REASON_TURN_INTERRUPT_ACTIVE_CONFLICT: Int64 = 34
+comptime SEQUENCE_REASON_DUPLICATE_TURN_STARTED: Int64 = 35
+comptime SEQUENCE_REASON_DUPLICATE_TURN_COMPLETED: Int64 = 36
+
 comptime VALIDATION_MISSING_THREAD_ID: Int64 = 1
 comptime VALIDATION_MISSING_THREAD_OBJECT_ID: Int64 = 2
 comptime VALIDATION_MISSING_THREAD_CONTEXT: Int64 = 3
@@ -413,6 +434,100 @@ def app_server_broker_wire_v1_impl(
         output[unsafe_offset=1] = FRAME_KIND_NOTIFICATION
     else:
         output[unsafe_offset=1] = FRAME_KIND_RESPONSE
+    return 0
+
+
+def app_server_broker_sequence_v1_impl(
+    abi_version: Int64,
+    event_kind: Int64,
+    stage_address: UInt,
+    id_present: Int64,
+    thread_id_present: Int64,
+    pending_request_present: Int64,
+    duplicate_pending_request: Int64,
+    started_turn_present: Int64,
+    completed_turn_present: Int64,
+    active_turn_present: Int64,
+    active_turn_matches: Int64,
+    output_address: UInt,
+) abi("C") -> Int64:
+    if output_address == 0:
+        return 1
+    var output = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    output[] = 0
+    if abi_version != APP_SERVER_BROKER_ABI_VERSION:
+        return 4
+    if (
+        event_kind < SEQUENCE_EVENT_REQUEST
+        or event_kind > SEQUENCE_EVENT_LIFECYCLE
+        or id_present < 0
+        or id_present > 1
+        or thread_id_present < 0
+        or thread_id_present > 1
+        or pending_request_present < 0
+        or pending_request_present > 1
+        or duplicate_pending_request < 0
+        or duplicate_pending_request > 1
+        or started_turn_present < 0
+        or started_turn_present > 1
+        or completed_turn_present < 0
+        or completed_turn_present > 1
+        or active_turn_present < 0
+        or active_turn_present > 1
+        or active_turn_matches < 0
+        or active_turn_matches > 1
+    ):
+        return 1
+    if event_kind == SEQUENCE_EVENT_REQUEST:
+        if id_present == 0:
+            output[] = SEQUENCE_REASON_REQUEST_MISSING_ID
+        elif duplicate_pending_request == 1:
+            output[] = SEQUENCE_REASON_DUPLICATE_PENDING_REQUEST
+        return 0
+    if event_kind == SEQUENCE_EVENT_RESPONSE:
+        if id_present == 0:
+            output[] = SEQUENCE_REASON_RESPONSE_MISSING_ID
+        elif pending_request_present == 0:
+            output[] = SEQUENCE_REASON_RESPONSE_WITHOUT_REQUEST
+        return 0
+    if stage_address == 0:
+        return 1
+    var stage = app_server_method_from_address(stage_address)
+    if not rich_view_valid(stage, APP_SERVER_BROKER_METHOD_MAX_BYTES):
+        return 2
+    var bounds = rich_trim_bounds(stage)
+    var ptr = rich_view_ptr(stage)
+    if app_server_view_matches["turn_started_notification"](ptr, bounds[0], bounds[1], False):
+        if id_present == 0:
+            output[] = SEQUENCE_REASON_TURN_STARTED_MISSING_ID
+        elif thread_id_present == 0:
+            output[] = SEQUENCE_REASON_TURN_STARTED_MISSING_THREAD_ID
+        elif completed_turn_present == 1:
+            output[] = SEQUENCE_REASON_TURN_STARTED_AFTER_COMPLETION
+        elif active_turn_present == 1 and active_turn_matches == 0:
+            output[] = SEQUENCE_REASON_THREAD_ACTIVE_CONFLICT
+        elif started_turn_present == 1:
+            output[] = SEQUENCE_REASON_DUPLICATE_TURN_STARTED
+    elif app_server_view_matches["turn_completed_notification"](ptr, bounds[0], bounds[1], False):
+        if id_present == 0:
+            output[] = SEQUENCE_REASON_TURN_COMPLETED_MISSING_ID
+        elif thread_id_present == 0:
+            output[] = SEQUENCE_REASON_TURN_COMPLETED_MISSING_THREAD_ID
+        elif started_turn_present == 0:
+            output[] = SEQUENCE_REASON_TURN_COMPLETED_WITHOUT_START
+        elif active_turn_present == 1 and active_turn_matches == 0:
+            output[] = SEQUENCE_REASON_TURN_COMPLETED_NOT_ACTIVE
+        elif completed_turn_present == 1:
+            output[] = SEQUENCE_REASON_DUPLICATE_TURN_COMPLETED
+    elif app_server_view_matches["turn_interrupt_request"](ptr, bounds[0], bounds[1], False):
+        if id_present == 0:
+            output[] = SEQUENCE_REASON_TURN_INTERRUPT_MISSING_ID
+        elif thread_id_present == 0:
+            output[] = SEQUENCE_REASON_TURN_INTERRUPT_MISSING_THREAD_ID
+        elif active_turn_present == 1 and active_turn_matches == 0:
+            output[] = SEQUENCE_REASON_TURN_INTERRUPT_ACTIVE_CONFLICT
     return 0
 
 
