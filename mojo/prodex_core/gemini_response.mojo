@@ -328,7 +328,10 @@ def gemini_write_operation(
                 return False
         return gemini_put_byte(writer, 125)
     if operation == GEMINI_FUNCTION_CALL_ARGUMENTS_DELTA:
-        if not gemini_put_event_prefix(writer, StringSlice("response.function_call_arguments.delta"), input.sequence_number, input.created_at, False):
+        if not gemini_put_literal(
+            writer,
+            StringSlice('{"type":"response.function_call_arguments.delta"'),
+        ):
             return False
         if input.call_id_present == 1:
             if not gemini_put_literal(writer, StringSlice(',"call_id":')) or not gemini_put_json_string(writer, input.call_id):
@@ -336,7 +339,7 @@ def gemini_write_operation(
         return (
             gemini_put_literal(writer, StringSlice(',"delta":'))
             and gemini_put_json_string(writer, input.delta)
-            and gemini_put_byte(writer, 125)
+            and gemini_put_literal(writer, StringSlice('}'))
         )
     if operation == GEMINI_OUTPUT_TEXT_DELTA:
         return (
