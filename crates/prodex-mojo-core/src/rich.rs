@@ -721,13 +721,13 @@ pub fn rich_self_test() -> bool {
     let deepseek = deepseek_kernel(DeepSeekKernelInput::new(
         DeepSeekKernelOperation::UserMessage,
     ))
-    .is_ok_and(|value| value == br#"{\"role\":\"user\",\"content\":\"\"}"#);
+    .is_ok_and(|value| value == br#"{"role":"user","content":""}"#);
     let kiro = {
         let mut input = KiroKernelInput::new(KiroKernelOperation::ResponseMessageItem);
         input.role = Some("assistant");
         input.content = Some("hello");
         kiro_kernel(input).is_ok_and(|value| {
-            value == br#"{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"input_text\",\"text\":\"hello\"}]}"#
+            value == br#"{"type":"message","role":"assistant","content":[{"type":"input_text","text":"hello"}]}"#
         })
     };
     context
