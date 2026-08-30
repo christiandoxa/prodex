@@ -1,7 +1,10 @@
 //! DeepSeek response tool-call normalization helpers.
 
 use crate::translators::tool_args::{rtk_prefixed_noisy_shell_command, wrap_json_string_arg_with};
-use serde_json::{Value, json};
+use serde_json::Value;
+
+#[cfg(not(feature = "mojo"))]
+use serde_json::json;
 
 pub(crate) fn deepseek_responses_tool_call_item(
     tool_call: &Value,
@@ -28,36 +31,78 @@ pub(crate) fn deepseek_responses_tool_call_item(
     if name == "tool_search" {
         let arguments = serde_json::from_str::<Value>(arguments)
             .map_err(|error| deepseek_tool_call_arguments_error(name, error))?;
-        return Ok(Some(json!({
-            "type": "tool_search_call",
-            "call_id": call_id,
-            "execution": "client",
-            "arguments": arguments,
-        })));
+        #[cfg(feature = "mojo")]
+        {
+            let arguments = serde_json::to_string(&arguments).map_err(|error| error.to_string())?;
+            let mut input = prodex_mojo_core::rich::DeepSeekKernelInput::new(
+                prodex_mojo_core::rich::DeepSeekKernelOperation::ToolSearchItem,
+            );
+            input.call_id = Some(call_id);
+            input.arguments = Some(&arguments);
+            return Ok(Some(super::super::deepseek_mojo_value(input)));
+        }
+        #[cfg(not(feature = "mojo"))]
+        {
+            return Ok(Some(json!({
+                "type": "tool_search_call",
+                "call_id": call_id,
+                "execution": "client",
+                "arguments": arguments,
+            })));
+        }
     }
     if name == "apply_patch" {
-        return Ok(Some(json!({
-            "type": "custom_tool_call",
-            "call_id": call_id,
-            "name": name,
-            "input": arguments,
-        })));
+        #[cfg(feature = "mojo")]
+        {
+            let mut input = prodex_mojo_core::rich::DeepSeekKernelInput::new(
+                prodex_mojo_core::rich::DeepSeekKernelOperation::CustomToolCallItem,
+            );
+            input.call_id = Some(call_id);
+            input.name = Some(name);
+            input.input = Some(arguments);
+            return Ok(Some(super::super::deepseek_mojo_value(input)));
+        }
+        #[cfg(not(feature = "mojo"))]
+        {
+            return Ok(Some(json!({
+                "type": "custom_tool_call",
+                "call_id": call_id,
+                "name": name,
+                "input": arguments,
+            })));
+        }
     }
     let arguments = deepseek_rtk_wrapped_tool_arguments(name, arguments);
     let (namespace, name) = deepseek_split_flat_namespace_tool_name(name);
-    let mut item = json!({
-        "type":"function_call",
-        "call_id": call_id,
-        "name": name,
-        "arguments": arguments,
-    });
-    if let Some(namespace) = namespace {
-        item["namespace"] = Value::String(namespace);
+    let signature = deepseek_chat_tool_call_thought_signature(tool_call);
+    #[cfg(feature = "mojo")]
+    {
+        let mut input = prodex_mojo_core::rich::DeepSeekKernelInput::new(
+            prodex_mojo_core::rich::DeepSeekKernelOperation::FunctionCallItem,
+        );
+        input.call_id = Some(call_id);
+        input.name = Some(&name);
+        input.arguments = Some(&arguments);
+        input.namespace = namespace.as_deref();
+        input.signature = signature.as_deref();
+        Ok(Some(super::super::deepseek_mojo_value(input)))
     }
-    if let Some(signature) = deepseek_chat_tool_call_thought_signature(tool_call) {
-        item["gemini_thought_signature"] = Value::String(signature);
+    #[cfg(not(feature = "mojo"))]
+    {
+        let mut item = json!({
+            "type":"function_call",
+            "call_id": call_id,
+            "name": name,
+            "arguments": arguments,
+        });
+        if let Some(namespace) = namespace {
+            item["namespace"] = Value::String(namespace);
+        }
+        if let Some(signature) = signature {
+            item["gemini_thought_signature"] = Value::String(signature);
+        }
+        Ok(Some(item))
     }
-    Ok(Some(item))
 }
 
 fn deepseek_validate_tool_call_arguments(name: &str, arguments: &str) -> Result<(), String> {

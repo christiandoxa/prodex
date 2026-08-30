@@ -37,6 +37,8 @@ from rich_types import (
     ProdexRichStringView,
 )
 from gemini_response import gemini_response_kernel_v1
+# DeepSeek shares the rich ABI while keeping its provider wire semantics isolated.
+from deepseek import deepseek_kernel_v1
 
 
 comptime PRODEX_RICH_ABI_VERSION: Int64 = 6
@@ -341,6 +343,19 @@ def prodex_mojo_gemini_response_kernel_v1(
     written_address: UInt,
 ) abi("C") -> Int64:
     return gemini_response_kernel_v1(
+        abi_version, input_address, output_address, output_capacity, written_address
+    )
+
+
+@export("prodex_mojo_deepseek_kernel_v1")
+def prodex_mojo_deepseek_kernel_v1(
+    abi_version: Int64,
+    input_address: UInt,
+    output_address: UInt,
+    output_capacity: Int64,
+    written_address: UInt,
+) abi("C") -> Int64:
+    return deepseek_kernel_v1(
         abi_version, input_address, output_address, output_capacity, written_address
     )
 

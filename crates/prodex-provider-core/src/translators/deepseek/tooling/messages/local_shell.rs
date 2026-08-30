@@ -1,6 +1,7 @@
 //! DeepSeek local-shell input call shaping.
 
-use serde_json::{Value, json};
+use super::deepseek_tool_call_message;
+use serde_json::Value;
 
 pub(super) fn deepseek_input_local_shell_call_message(item: &Value) -> Option<Value> {
     let call_id = item
@@ -33,18 +34,12 @@ pub(super) fn deepseek_input_local_shell_call_message(item: &Value) -> Option<Va
     deepseek_copy_shell_argument(item, &mut shell_arguments, "timeout");
     deepseek_copy_shell_argument(item, &mut shell_arguments, "env");
     let arguments = serde_json::to_string(&Value::Object(shell_arguments)).ok()?;
-    Some(json!({
-        "role": "assistant",
-        "content": "",
-        "tool_calls": [{
-            "id": call_id,
-            "type": "function",
-            "function": {
-                "name": "shell_command",
-                "arguments": arguments,
-            },
-        }],
-    }))
+    Some(deepseek_tool_call_message(
+        call_id,
+        "shell_command",
+        &arguments,
+        None,
+    ))
 }
 
 fn deepseek_copy_shell_argument(

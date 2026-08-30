@@ -4,6 +4,9 @@ use crate::bridge::{
 };
 use serde_json::{Value, json};
 
+#[cfg(feature = "mojo")]
+use prodex_mojo_core::rich::{DeepSeekKernelInput, DeepSeekKernelOperation};
+
 #[path = "response/metadata.rs"]
 mod metadata;
 
@@ -24,29 +27,54 @@ pub(super) fn deepseek_stream_event_from_chat_value(
             .get("function")
             .and_then(|function| function.get("arguments"))
             .and_then(Value::as_str)?;
-        let mut transformed = json!({
-            "type":"response.function_call_arguments.delta",
-            "delta": arguments,
-        });
-        if let Some(call_id) = tool_call.get("id").and_then(Value::as_str)
-            && let Some(object) = transformed.as_object_mut()
+        #[cfg(feature = "mojo")]
         {
-            object.insert("call_id".to_string(), Value::String(call_id.to_string()));
+            let mut input = DeepSeekKernelInput::new(DeepSeekKernelOperation::SseFunctionCallDelta);
+            input.call_id = tool_call.get("id").and_then(Value::as_str);
+            input.delta = Some(arguments);
+            return Some((
+                "response.function_call_arguments.delta",
+                super::deepseek_mojo_value(input),
+            ));
         }
-        return Some(("response.function_call_arguments.delta", transformed));
+        #[cfg(not(feature = "mojo"))]
+        {
+            let mut transformed = json!({
+                "type":"response.function_call_arguments.delta",
+                "delta": arguments,
+            });
+            if let Some(call_id) = tool_call.get("id").and_then(Value::as_str)
+                && let Some(object) = transformed.as_object_mut()
+            {
+                object.insert("call_id".to_string(), Value::String(call_id.to_string()));
+            }
+            return Some(("response.function_call_arguments.delta", transformed));
+        }
     }
     let text = delta
         .get("content")
         .and_then(Value::as_str)
         .unwrap_or_default();
-    Some((
-        "response.output_text.delta",
-        if text.is_empty() {
-            json!({"type":"response.output_text.delta","delta":""})
-        } else {
-            json!({"type":"response.output_text.delta","delta":text})
-        },
-    ))
+    #[cfg(feature = "mojo")]
+    {
+        let mut input = DeepSeekKernelInput::new(DeepSeekKernelOperation::SseTextDelta);
+        input.delta = Some(text);
+        return Some((
+            "response.output_text.delta",
+            super::deepseek_mojo_value(input),
+        ));
+    }
+    #[cfg(not(feature = "mojo"))]
+    {
+        Some((
+            "response.output_text.delta",
+            if text.is_empty() {
+                json!({"type":"response.output_text.delta","delta":""})
+            } else {
+                json!({"type":"response.output_text.delta","delta":text})
+            },
+        ))
+    }
 }
 
 pub(super) fn deepseek_responses_value_from_chat_value(value: &Value) -> Value {
@@ -91,27 +119,59 @@ pub(super) fn deepseek_responses_value_from_chat_value(value: &Value) -> Value {
             }
         }
     }
-    let mut response = json!({
-        "id": response_id,
-        "object": "response",
-        "created_at": created_at,
-        "model": value.get("model").and_then(Value::as_str).unwrap_or("deepseek-chat"),
-        "output": output,
-    });
-    if let Some(error) = tool_call_error {
-        response["status"] = Value::String("failed".to_string());
-        response["error"] = json!({
-            "code": "invalid_tool_call_arguments",
-            "message": error,
+    #[cfg(feature = "mojo")]
+    {
+        let output = serde_json::to_string(&output).expect("DeepSeek response output serializes");
+        let usage = value
+            .get("usage")
+            .and_then(deepseek_responses_usage)
+            .map(|value| {
+                serde_json::to_string(&value).expect("DeepSeek response usage serializes")
+            });
+        let metadata = metadata::deepseek_response_metadata(value, message).map(|value| {
+            serde_json::to_string(&value).expect("DeepSeek response metadata serializes")
         });
+        let error_message = tool_call_error.as_deref();
+        let mut input = DeepSeekKernelInput::new(DeepSeekKernelOperation::BufferedResponse);
+        input.response_id = Some(response_id);
+        input.created_at = created_at;
+        input.model = Some(
+            value
+                .get("model")
+                .and_then(Value::as_str)
+                .unwrap_or("deepseek-chat"),
+        );
+        input.output = Some(&output);
+        input.usage = usage.as_deref();
+        input.metadata = metadata.as_deref();
+        input.error_code = error_message.map(|_| "invalid_tool_call_arguments");
+        input.error_message = error_message;
+        return super::deepseek_mojo_value(input);
     }
-    if let Some(usage) = value.get("usage").and_then(deepseek_responses_usage) {
-        response["usage"] = usage;
+    #[cfg(not(feature = "mojo"))]
+    {
+        let mut response = json!({
+            "id": response_id,
+            "object": "response",
+            "created_at": created_at,
+            "model": value.get("model").and_then(Value::as_str).unwrap_or("deepseek-chat"),
+            "output": output,
+        });
+        if let Some(error) = tool_call_error {
+            response["status"] = Value::String("failed".to_string());
+            response["error"] = json!({
+                "code": "invalid_tool_call_arguments",
+                "message": error,
+            });
+        }
+        if let Some(usage) = value.get("usage").and_then(deepseek_responses_usage) {
+            response["usage"] = usage;
+        }
+        if let Some(metadata) = metadata::deepseek_response_metadata(value, message) {
+            response["metadata"] = metadata;
+        }
+        response
     }
-    if let Some(metadata) = metadata::deepseek_response_metadata(value, message) {
-        response["metadata"] = metadata;
-    }
-    response
 }
 
 pub(super) fn deepseek_responses_usage(usage: &Value) -> Option<Value> {

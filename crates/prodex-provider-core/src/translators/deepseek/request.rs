@@ -6,6 +6,9 @@ use super::tooling::deepseek_messages_from_request;
 use serde_json::{Value, json};
 use std::collections::BTreeMap;
 
+#[cfg(feature = "mojo")]
+use prodex_mojo_core::rich::{DeepSeekKernelInput, DeepSeekKernelOperation};
+
 #[path = "request/params.rs"]
 mod params;
 
@@ -121,6 +124,50 @@ pub(super) fn deepseek_request_body_from_responses(
             }
         }
     }
-    let body = serde_json::to_vec(&Value::Object(request)).expect("deepseek request serializes");
-    Ok((body, degraded))
+    #[cfg(feature = "mojo")]
+    {
+        let messages = serde_json::to_string(request.get("messages").expect("messages present"))
+            .expect("DeepSeek request messages serialize");
+        let tools = request
+            .get("tools")
+            .map(|value| serde_json::to_string(value).expect("DeepSeek request tools serialize"));
+        let tool_choice = request.get("tool_choice").map(|value| {
+            serde_json::to_string(value).expect("DeepSeek request tool choice serializes")
+        });
+        let extra = request
+            .iter()
+            .filter(|(key, _)| {
+                !matches!(
+                    key.as_str(),
+                    "model" | "stream" | "messages" | "tools" | "tool_choice"
+                )
+            })
+            .map(|(key, value)| (key.clone(), value.clone()))
+            .collect::<serde_json::Map<_, _>>();
+        let extra = serde_json::to_string(&Value::Object(extra))
+            .expect("DeepSeek request extra fields serialize");
+        let model = request
+            .get("model")
+            .and_then(Value::as_str)
+            .unwrap_or("deepseek-chat");
+        let stream = request
+            .get("stream")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        let mut input = DeepSeekKernelInput::new(DeepSeekKernelOperation::RequestBody);
+        input.model = Some(model);
+        input.stream = stream;
+        input.messages = Some(&messages);
+        input.tools = tools.as_deref();
+        input.tool_choice = tool_choice.as_deref();
+        input.extra = Some(&extra);
+        let body = super::deepseek_mojo_body(input);
+        return Ok((body, degraded));
+    }
+    #[cfg(not(feature = "mojo"))]
+    {
+        let body =
+            serde_json::to_vec(&Value::Object(request)).expect("deepseek request serializes");
+        Ok((body, degraded))
+    }
 }
