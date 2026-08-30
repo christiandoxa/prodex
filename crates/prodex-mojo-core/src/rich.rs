@@ -35,6 +35,11 @@ pub use anthropic_messages::{
     AnthropicResponseBlock, AnthropicResponseBlockKind, AnthropicResponsePlanItem,
     AnthropicResponsePlanKind, plan_anthropic_response_blocks,
 };
+#[path = "rich/anthropic_request.rs"]
+mod anthropic_request;
+pub use anthropic_request::{
+    AnthropicRequestKernelInput, AnthropicRequestKernelOperation, anthropic_request_kernel,
+};
 mod policy;
 pub use policy::{
     PolicyAliasInput, PolicyAliasPlan, PolicyModel, PolicyRouteModel, PolicyRoutePlan,

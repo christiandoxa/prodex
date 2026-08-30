@@ -8,6 +8,10 @@ use crate::translators::openai_chat_compat::{
 };
 use crate::translators::{provider_declares_passthrough, unsupported_endpoint_result};
 use crate::{ProviderEndpoint, ProviderId, ProviderWireFormat, provider_supported_endpoints};
+#[cfg(feature = "mojo")]
+use prodex_mojo_core::rich::{AnthropicRequestKernelInput, anthropic_request_kernel};
+#[cfg(feature = "mojo")]
+use serde_json::Value;
 
 #[path = "anthropic/messages.rs"]
 mod messages;
@@ -17,6 +21,23 @@ pub struct AnthropicTranslator;
 
 #[derive(Clone, Copy)]
 pub struct AnthropicMessagesTranslator;
+
+#[cfg(feature = "mojo")]
+pub(super) fn anthropic_mojo_body(
+    input: AnthropicRequestKernelInput<'_>,
+) -> Result<Vec<u8>, String> {
+    anthropic_request_kernel(input)
+        .map_err(|error| format!("Anthropic request kernel failed: {error:?}"))
+}
+
+#[cfg(feature = "mojo")]
+pub(super) fn anthropic_mojo_value(
+    input: AnthropicRequestKernelInput<'_>,
+) -> Result<Value, String> {
+    let body = anthropic_mojo_body(input)?;
+    serde_json::from_slice(&body)
+        .map_err(|error| format!("Anthropic request kernel returned invalid JSON: {error}"))
+}
 
 pub fn translate_openai_chat_request_to_anthropic_messages(
     input: ProviderTransformInput,
