@@ -1,5 +1,8 @@
 //! HTTP route, precondition, pagination, and idempotency planning.
 
+#[cfg(test)]
+mod routing_tests;
+
 use super::super::*;
 use super::*;
 
@@ -515,34 +518,168 @@ pub fn plan_application_control_plane_precondition_from_http(
     Ok(ApplicationControlPlanePreconditionPlan { action, entity_tag })
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ControlPlaneRouteValidationMode {
+    Exact,
+    AllowAlias,
+    AllowAliasAndMethodCheck,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ControlPlaneRouteValidationDecision {
+    Allow,
+    OperationMismatch,
+    MethodNotAllowed,
+}
+
+fn control_plane_route_validation(
+    route_operation: ControlPlaneOperation,
+    action_operation: ControlPlaneOperation,
+    method: prodex_gateway_http::GatewayHttpMethod,
+    mode: ControlPlaneRouteValidationMode,
+) -> Result<ControlPlaneRouteValidationDecision, ApplicationControlPlaneHttpRouteError> {
+    #[cfg(feature = "mojo")]
+    {
+        let route_operation = ControlPlaneOperation::ALL
+            .iter()
+            .position(|operation| *operation == route_operation)
+            .and_then(prodex_mojo_core::control_plane_routing::ControlPlaneOperationTag::new)
+            .ok_or_else(control_plane_route_kernel_failure)?;
+        let action_operation = ControlPlaneOperation::ALL
+            .iter()
+            .position(|operation| *operation == action_operation)
+            .and_then(prodex_mojo_core::control_plane_routing::ControlPlaneOperationTag::new)
+            .ok_or_else(control_plane_route_kernel_failure)?;
+        let method = match method {
+            prodex_gateway_http::GatewayHttpMethod::Get => {
+                prodex_mojo_core::control_plane_routing::ControlPlaneHttpMethod::Get
+            }
+            prodex_gateway_http::GatewayHttpMethod::Post => {
+                prodex_mojo_core::control_plane_routing::ControlPlaneHttpMethod::Post
+            }
+            prodex_gateway_http::GatewayHttpMethod::Put => {
+                prodex_mojo_core::control_plane_routing::ControlPlaneHttpMethod::Put
+            }
+            prodex_gateway_http::GatewayHttpMethod::Patch => {
+                prodex_mojo_core::control_plane_routing::ControlPlaneHttpMethod::Patch
+            }
+            prodex_gateway_http::GatewayHttpMethod::Delete => {
+                prodex_mojo_core::control_plane_routing::ControlPlaneHttpMethod::Delete
+            }
+            prodex_gateway_http::GatewayHttpMethod::Options => {
+                prodex_mojo_core::control_plane_routing::ControlPlaneHttpMethod::Options
+            }
+            prodex_gateway_http::GatewayHttpMethod::Other => {
+                prodex_mojo_core::control_plane_routing::ControlPlaneHttpMethod::Other
+            }
+        };
+        let mode = match mode {
+            ControlPlaneRouteValidationMode::Exact => {
+                prodex_mojo_core::control_plane_routing::ControlPlaneRouteValidationMode::Exact
+            }
+            ControlPlaneRouteValidationMode::AllowAlias => {
+                prodex_mojo_core::control_plane_routing::ControlPlaneRouteValidationMode::AllowAlias
+            }
+            ControlPlaneRouteValidationMode::AllowAliasAndMethodCheck => {
+                prodex_mojo_core::control_plane_routing::ControlPlaneRouteValidationMode::AllowAliasAndMethodCheck
+            }
+        };
+        return prodex_mojo_core::control_plane_routing::validate(
+            prodex_mojo_core::control_plane_routing::ControlPlaneRouteValidationInput {
+                route_operation,
+                action_operation,
+                method,
+                mode,
+            },
+        )
+        .map(|decision| match decision {
+            prodex_mojo_core::control_plane_routing::ControlPlaneRouteValidationDecision::Allow => {
+                ControlPlaneRouteValidationDecision::Allow
+            }
+            prodex_mojo_core::control_plane_routing::ControlPlaneRouteValidationDecision::OperationMismatch => {
+                ControlPlaneRouteValidationDecision::OperationMismatch
+            }
+            prodex_mojo_core::control_plane_routing::ControlPlaneRouteValidationDecision::MethodNotAllowed => {
+                ControlPlaneRouteValidationDecision::MethodNotAllowed
+            }
+        })
+        .map_err(|_| control_plane_route_kernel_failure());
+    }
+
+    #[cfg(not(feature = "mojo"))]
+    Ok(control_plane_route_validation_rust(
+        route_operation,
+        action_operation,
+        method,
+        mode,
+    ))
+}
+
+#[cfg(feature = "mojo")]
+fn control_plane_route_kernel_failure() -> ApplicationControlPlaneHttpRouteError {
+    ApplicationControlPlaneHttpRouteError::Route(
+        GatewayControlPlaneRouteError::UnknownControlPlaneRoute,
+    )
+}
+
+#[cfg(any(not(feature = "mojo"), test))]
+fn control_plane_route_validation_rust(
+    route_operation: ControlPlaneOperation,
+    action_operation: ControlPlaneOperation,
+    method: prodex_gateway_http::GatewayHttpMethod,
+    mode: ControlPlaneRouteValidationMode,
+) -> ControlPlaneRouteValidationDecision {
+    if route_operation == action_operation {
+        return ControlPlaneRouteValidationDecision::Allow;
+    }
+    if !matches!(mode, ControlPlaneRouteValidationMode::Exact)
+        && control_plane_http_action_alias_allowed(route_operation, action_operation, method)
+    {
+        return ControlPlaneRouteValidationDecision::Allow;
+    }
+    if matches!(
+        mode,
+        ControlPlaneRouteValidationMode::AllowAliasAndMethodCheck
+    ) && control_plane_operations_share_route_family(route_operation, action_operation)
+        && !control_plane_operation_allows_http_method(action_operation, method)
+    {
+        return ControlPlaneRouteValidationDecision::MethodNotAllowed;
+    }
+    ControlPlaneRouteValidationDecision::OperationMismatch
+}
+
 fn validate_control_plane_http_action(
     action: &ControlPlaneActionRequest,
     http: &GatewayHttpRequestMeta,
 ) -> Result<(), ApplicationControlPlaneIdempotencyError> {
     let route = plan_application_control_plane_http_route(http)
         .map_err(ApplicationControlPlaneIdempotencyError::HttpRoute)?;
-    if route.operation != action.operation {
-        if control_plane_http_action_alias_allowed(route.operation, action.operation, http.method) {
-            return Ok(());
-        }
-        if control_plane_operations_share_route_family(route.operation, action.operation)
-            && !control_plane_operation_allows_http_method(action.operation, http.method)
-        {
-            return Err(ApplicationControlPlaneIdempotencyError::HttpRoute(
+    let decision = control_plane_route_validation(
+        route.operation,
+        action.operation,
+        http.method,
+        ControlPlaneRouteValidationMode::AllowAliasAndMethodCheck,
+    )
+    .map_err(ApplicationControlPlaneIdempotencyError::HttpRoute)?;
+    match decision {
+        ControlPlaneRouteValidationDecision::Allow => Ok(()),
+        ControlPlaneRouteValidationDecision::MethodNotAllowed => {
+            Err(ApplicationControlPlaneIdempotencyError::HttpRoute(
                 ApplicationControlPlaneHttpRouteError::Route(
                     GatewayControlPlaneRouteError::MethodNotAllowed {
                         operation: gateway_operation_from_control_plane_action(action.operation),
                         method: http.method,
                     },
                 ),
-            ));
+            ))
         }
-        return Err(ApplicationControlPlaneIdempotencyError::OperationMismatch {
-            route_operation: route.operation,
-            action_operation: action.operation,
-        });
+        ControlPlaneRouteValidationDecision::OperationMismatch => {
+            Err(ApplicationControlPlaneIdempotencyError::OperationMismatch {
+                route_operation: route.operation,
+                action_operation: action.operation,
+            })
+        }
     }
-    Ok(())
 }
 
 fn validate_control_plane_http_action_for_page_request(
@@ -551,7 +688,14 @@ fn validate_control_plane_http_action_for_page_request(
 ) -> Result<(), ApplicationControlPlanePageRequestError> {
     let route = plan_application_control_plane_http_route(http)
         .map_err(ApplicationControlPlanePageRequestError::HttpRoute)?;
-    if route.operation != action.operation {
+    let decision = control_plane_route_validation(
+        route.operation,
+        action.operation,
+        http.method,
+        ControlPlaneRouteValidationMode::Exact,
+    )
+    .map_err(ApplicationControlPlanePageRequestError::HttpRoute)?;
+    if decision != ControlPlaneRouteValidationDecision::Allow {
         return Err(ApplicationControlPlanePageRequestError::OperationMismatch {
             route_operation: route.operation,
             action_operation: action.operation,
@@ -566,9 +710,14 @@ fn validate_control_plane_http_action_for_precondition(
 ) -> Result<(), ApplicationControlPlanePreconditionError> {
     let route = plan_application_control_plane_http_route(http)
         .map_err(ApplicationControlPlanePreconditionError::HttpRoute)?;
-    if route.operation != action.operation
-        && !control_plane_http_action_alias_allowed(route.operation, action.operation, http.method)
-    {
+    let decision = control_plane_route_validation(
+        route.operation,
+        action.operation,
+        http.method,
+        ControlPlaneRouteValidationMode::AllowAlias,
+    )
+    .map_err(ApplicationControlPlanePreconditionError::HttpRoute)?;
+    if decision != ControlPlaneRouteValidationDecision::Allow {
         return Err(
             ApplicationControlPlanePreconditionError::OperationMismatch {
                 route_operation: route.operation,
@@ -585,9 +734,14 @@ pub(crate) fn validate_control_plane_http_action_for_audit(
 ) -> Result<ApplicationControlPlaneHttpRoutePlan, ApplicationControlPlaneAuditError> {
     let route = plan_application_control_plane_http_route(http)
         .map_err(ApplicationControlPlaneAuditError::HttpRoute)?;
-    if route.operation != action.operation
-        && !control_plane_http_action_alias_allowed(route.operation, action.operation, http.method)
-    {
+    let decision = control_plane_route_validation(
+        route.operation,
+        action.operation,
+        http.method,
+        ControlPlaneRouteValidationMode::AllowAlias,
+    )
+    .map_err(ApplicationControlPlaneAuditError::HttpRoute)?;
+    if decision != ControlPlaneRouteValidationDecision::Allow {
         return Err(ApplicationControlPlaneAuditError::OperationMismatch {
             route_operation: route.operation,
             action_operation: action.operation,
@@ -654,6 +808,7 @@ fn control_plane_operation_from_gateway_route(
     }
 }
 
+#[cfg(any(not(feature = "mojo"), test))]
 fn control_plane_operations_share_route_family(
     route_operation: ControlPlaneOperation,
     action_operation: ControlPlaneOperation,
@@ -722,6 +877,7 @@ fn control_plane_operations_share_route_family(
     )
 }
 
+#[cfg(any(not(feature = "mojo"), test))]
 fn control_plane_http_action_alias_allowed(
     route_operation: ControlPlaneOperation,
     action_operation: ControlPlaneOperation,
@@ -789,6 +945,7 @@ fn gateway_operation_from_control_plane_action(
     }
 }
 
+#[cfg(any(not(feature = "mojo"), test))]
 fn control_plane_operation_allows_http_method(
     operation: ControlPlaneOperation,
     method: prodex_gateway_http::GatewayHttpMethod,
