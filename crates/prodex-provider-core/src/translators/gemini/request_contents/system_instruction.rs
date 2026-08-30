@@ -1,6 +1,8 @@
 //! Gemini systemInstruction shaping from Responses input.
 
-use serde_json::{Value, json};
+use serde_json::Value;
+#[cfg(not(feature = "mojo"))]
+use serde_json::json;
 
 use super::text::{gemini_contextual_user_instruction_text, gemini_message_text};
 
@@ -24,5 +26,21 @@ pub(crate) fn gemini_system_instruction_from_request(value: &Value) -> Option<Va
         }
         system_text.push_str(&contextual_user_text);
     }
-    (!system_text.trim().is_empty()).then(|| json!({ "parts": [{ "text": system_text }] }))
+    if system_text.trim().is_empty() {
+        return None;
+    }
+    #[cfg(feature = "mojo")]
+    {
+        let text = serde_json::to_vec(&system_text).expect("Gemini system instruction serializes");
+        return Some(super::gemini_request_content_mojo_value(
+            prodex_mojo_core::provider_constraints::GeminiRequestContentOperation::SystemInstruction,
+            Some(&text),
+            None,
+            None,
+            None,
+            0,
+        ));
+    }
+    #[cfg(not(feature = "mojo"))]
+    Some(json!({ "parts": [{ "text": system_text }] }))
 }

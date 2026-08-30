@@ -1,11 +1,48 @@
 //! Gemini schema sanitization for request tools and response formats.
 
+#[cfg(not(feature = "mojo"))]
 #[path = "schema/composition.rs"]
 mod composition;
 
+#[cfg(not(feature = "mojo"))]
 use self::composition::{collapse_schema_union, has_composition, sanitized_composition};
-use serde_json::{Value, json};
+use serde_json::Value;
+#[cfg(not(feature = "mojo"))]
+use serde_json::json;
 
+#[cfg(feature = "mojo")]
+fn sanitize_with_mojo(
+    schema: &Value,
+    operation: prodex_mojo_core::provider_constraints::GeminiRequestContentOperation,
+) -> Value {
+    let input = serde_json::to_vec(schema).expect("Gemini schema serializes");
+    super::super::request_contents::gemini_request_content_mojo_value(
+        operation,
+        Some(&input),
+        None,
+        None,
+        None,
+        0,
+    )
+}
+
+#[cfg(feature = "mojo")]
+pub(crate) fn sanitize_schema(schema: &Value) -> Value {
+    sanitize_with_mojo(
+        schema,
+        prodex_mojo_core::provider_constraints::GeminiRequestContentOperation::SanitizeSchema,
+    )
+}
+
+#[cfg(feature = "mojo")]
+pub(crate) fn sanitize_function_schema(schema: &Value) -> Value {
+    sanitize_with_mojo(
+        schema,
+        prodex_mojo_core::provider_constraints::GeminiRequestContentOperation::SanitizeFunctionSchema,
+    )
+}
+
+#[cfg(not(feature = "mojo"))]
 pub(crate) fn sanitize_schema(schema: &Value) -> Value {
     match schema {
         Value::Array(values) => Value::Array(values.iter().map(sanitize_schema).collect()),
@@ -23,6 +60,7 @@ pub(crate) fn sanitize_schema(schema: &Value) -> Value {
     }
 }
 
+#[cfg(not(feature = "mojo"))]
 pub(crate) fn sanitize_function_schema(schema: &Value) -> Value {
     let Some(object) = schema.as_object() else {
         return json!({ "type": "object" });
@@ -73,6 +111,7 @@ pub(crate) fn sanitize_function_schema(schema: &Value) -> Value {
     Value::Object(sanitized)
 }
 
+#[cfg(not(feature = "mojo"))]
 fn schema_type<'a>(
     object: &'a serde_json::Map<String, Value>,
     nullable: &mut bool,
@@ -97,6 +136,7 @@ fn schema_type<'a>(
     }
 }
 
+#[cfg(not(feature = "mojo"))]
 fn supported_schema_type(schema_type: &str) -> Option<&'static str> {
     match schema_type.to_ascii_lowercase().as_str() {
         "object" => Some("object"),
@@ -109,6 +149,7 @@ fn supported_schema_type(schema_type: &str) -> Option<&'static str> {
     }
 }
 
+#[cfg(not(feature = "mojo"))]
 fn sanitized_enum(value: Option<&Value>) -> Option<Vec<Value>> {
     let values = value?.as_array()?;
     let strings = values
@@ -119,6 +160,7 @@ fn sanitized_enum(value: Option<&Value>) -> Option<Vec<Value>> {
     (!strings.is_empty()).then_some(strings)
 }
 
+#[cfg(not(feature = "mojo"))]
 fn sanitized_properties(value: Option<&Value>) -> Option<Value> {
     let properties = value?.as_object()?;
     let sanitized = properties
@@ -128,6 +170,7 @@ fn sanitized_properties(value: Option<&Value>) -> Option<Value> {
     Some(Value::Object(sanitized))
 }
 
+#[cfg(not(feature = "mojo"))]
 fn sanitized_required(value: Option<&Value>) -> Option<Value> {
     let required = value?.as_array()?;
     let required = required

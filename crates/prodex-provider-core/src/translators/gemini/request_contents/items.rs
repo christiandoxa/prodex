@@ -6,6 +6,26 @@ use crate::gemini_bridge::gemini_provider_core_collect_media_parts;
 
 use super::text::{gemini_contextual_user_instruction_text, gemini_message_text};
 
+fn gemini_content_value(role: &str, parts: Vec<Value>) -> Value {
+    #[cfg(feature = "mojo")]
+    {
+        let role = serde_json::to_vec(role).expect("Gemini content role serializes");
+        let parts = serde_json::to_vec(&parts).expect("Gemini content parts serialize");
+        return super::gemini_request_content_mojo_value(
+            prodex_mojo_core::provider_constraints::GeminiRequestContentOperation::Content,
+            Some(&role),
+            Some(&parts),
+            None,
+            None,
+            0,
+        );
+    }
+    #[cfg(not(feature = "mojo"))]
+    {
+        json!({"role": role, "parts": parts})
+    }
+}
+
 pub(crate) fn gemini_contains_local_media_path(value: &Value) -> bool {
     match value {
         Value::Array(items) => items.iter().any(gemini_contains_local_media_path),
@@ -81,12 +101,12 @@ fn gemini_content_parts_from_message_content(message: &Value) -> Vec<Value> {
 pub(crate) fn gemini_contents_from_request(value: &Value) -> Vec<Value> {
     if let Some(input) = value.get("input") {
         return match input {
-            Value::String(text) => vec![json!({"role":"user","parts":[{"text": text}]})],
+            Value::String(text) => vec![gemini_content_value("user", vec![json!({"text": text})])],
             Value::Array(items) => gemini_contents_from_input_items(items),
-            _ => vec![json!({"role":"user","parts":[{"text":""}]})],
+            _ => vec![gemini_content_value("user", vec![json!({"text":""})])],
         };
     }
-    vec![json!({"role":"user","parts":[{"text":""}]})]
+    vec![gemini_content_value("user", vec![json!({"text":""})])]
 }
 
 fn gemini_contents_from_input_items(items: &[Value]) -> Vec<Value> {
@@ -121,7 +141,7 @@ fn gemini_contents_from_input_items(items: &[Value]) -> Vec<Value> {
         index += 1;
     }
     if contents.is_empty() {
-        contents.push(json!({"role":"user","parts":[{"text":""}]}));
+        contents.push(gemini_content_value("user", vec![json!({"text":""})]));
     }
     contents
 }
@@ -143,10 +163,7 @@ fn gemini_append_assistant_content(
         }
     }
     if !parts.is_empty() {
-        contents.push(json!({
-            "role": "model",
-            "parts": parts,
-        }));
+        contents.push(gemini_content_value("model", parts));
     }
 }
 
@@ -196,10 +213,7 @@ fn gemini_append_tool_content(
         ));
         *index += 1;
     }
-    contents.push(json!({
-        "role": "user",
-        "parts": parts,
-    }));
+    contents.push(gemini_content_value("user", parts));
 }
 
 fn gemini_function_response_part(
@@ -230,10 +244,7 @@ fn gemini_function_response_part(
 fn gemini_append_user_content(item: &Value, contents: &mut Vec<Value>) {
     let parts = gemini_content_parts_from_message_content(item.get("content").unwrap_or(item));
     if !parts.is_empty() {
-        contents.push(json!({
-            "role":"user",
-            "parts": parts,
-        }));
+        contents.push(gemini_content_value("user", parts));
     }
 }
 
