@@ -81,6 +81,9 @@ pub use openai_compat::{
     openai_compat_split_tool_name, openai_compat_stream_event, openai_compat_supported_params,
     openai_compat_validate_request,
 };
+#[path = "rich/kiro.rs"]
+mod kiro;
+pub use kiro::{KiroKernelInput, KiroKernelOperation, kiro_kernel};
 
 const RICH_STATUS_INVALID: i64 = 1;
 const RICH_STATUS_UTF8: i64 = 2;
@@ -682,6 +685,14 @@ pub fn rich_self_test() -> bool {
         DeepSeekKernelOperation::UserMessage,
     ))
     .is_ok_and(|value| value == br#"{\"role\":\"user\",\"content\":\"\"}"#);
+    let kiro = {
+        let mut input = KiroKernelInput::new(KiroKernelOperation::ResponseMessageItem);
+        input.role = Some("assistant");
+        input.content = Some("hello");
+        kiro_kernel(input).is_ok_and(|value| {
+            value == br#"{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"input_text\",\"text\":\"hello\"}]}"#
+        })
+    };
     context
         && routes
         && policy
@@ -692,6 +703,7 @@ pub fn rich_self_test() -> bool {
         && catalog
         && reasoning
         && deepseek
+        && kiro
 }
 
 #[cfg(test)]

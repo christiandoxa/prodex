@@ -21,6 +21,9 @@ pub use messages::{
 };
 use serde_json::Value;
 
+#[cfg(feature = "mojo")]
+use prodex_mojo_core::rich::{KiroKernelInput, kiro_kernel};
+
 use crate::{
     deepseek_provider_core_reject_beta_completion_fields,
     deepseek_provider_core_reject_unsupported_request_fields,
@@ -42,6 +45,11 @@ impl KiroProviderCoreRequestError {
             code: code.into(),
         }
     }
+}
+
+#[cfg(feature = "mojo")]
+pub(super) fn kiro_mojo_body(input: KiroKernelInput<'_>) -> Vec<u8> {
+    kiro_kernel(input).unwrap_or_else(|error| panic!("Mojo Kiro kernel failed: {error:?}"))
 }
 
 pub fn kiro_provider_core_chat_completions_request_body(
@@ -260,7 +268,30 @@ pub(super) fn kiro_provider_core_responses_request_body(
         .map_err(kiro_invalid_request)?;
     deepseek_provider_core_reject_unsupported_request_fields(&value, "Kiro")
         .map_err(kiro_invalid_request)?;
-    Ok(body.to_vec())
+    #[cfg(feature = "mojo")]
+    {
+        let model = object.get("model").and_then(Value::as_str);
+        let input = object
+            .get("input")
+            .map(|value| serde_json::to_string(value).expect("Kiro request input serializes"));
+        let extra = object
+            .iter()
+            .filter(|(key, _)| !matches!(key.as_str(), "model" | "input"))
+            .map(|(key, value)| (key.clone(), value.clone()))
+            .collect::<serde_json::Map<_, _>>();
+        let extra = serde_json::to_string(&Value::Object(extra))
+            .expect("Kiro request extra fields serialize");
+        let mut input_value =
+            KiroKernelInput::new(prodex_mojo_core::rich::KiroKernelOperation::RequestBody);
+        input_value.model = model;
+        input_value.input = input.as_deref();
+        input_value.extra = Some(&extra);
+        return Ok(kiro_mojo_body(input_value));
+    }
+    #[cfg(not(feature = "mojo"))]
+    {
+        Ok(body.to_vec())
+    }
 }
 
 fn kiro_validate_response_input(

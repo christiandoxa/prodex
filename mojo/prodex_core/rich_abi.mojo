@@ -41,6 +41,8 @@ from gemini_response import gemini_response_kernel_v1
 from deepseek import deepseek_kernel_v1
 from anthropic_request import anthropic_request_kernel_v1
 from openai_compat import openai_compat_kernel_v1
+# Kiro shares the rich ABI while keeping ACP transport and session behavior in Rust.
+from kiro import kiro_kernel_v1
 
 
 comptime PRODEX_RICH_ABI_VERSION: Int64 = 6
@@ -384,6 +386,19 @@ def prodex_mojo_openai_compat_kernel_v1(
     written_address: UInt,
 ) abi("C") -> Int64:
     return openai_compat_kernel_v1(
+        abi_version, input_address, output_address, output_capacity, written_address
+    )
+
+
+@export("prodex_mojo_kiro_kernel_v1")
+def prodex_mojo_kiro_kernel_v1(
+    abi_version: Int64,
+    input_address: UInt,
+    output_address: UInt,
+    output_capacity: Int64,
+    written_address: UInt,
+) abi("C") -> Int64:
+    return kiro_kernel_v1(
         abi_version, input_address, output_address, output_capacity, written_address
     )
 
