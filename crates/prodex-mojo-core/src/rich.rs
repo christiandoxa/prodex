@@ -112,6 +112,12 @@ pub use smart_context_normalization::{
 #[path = "rich/runtime_doctor_plan.rs"]
 mod runtime_doctor_plan;
 pub use runtime_doctor_plan::*;
+#[path = "rich/application_obligations.rs"]
+mod application_obligations;
+pub use application_obligations::*;
+#[path = "rich/application_metadata.rs"]
+mod application_metadata;
+pub use application_metadata::*;
 
 const RICH_STATUS_INVALID: i64 = 1;
 const RICH_STATUS_UTF8: i64 = 2;

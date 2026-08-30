@@ -73,7 +73,36 @@ pub struct ApplicationRequestMetadata {
 }
 
 impl ApplicationRequestMetadata {
+    #[cfg(feature = "mojo")]
     fn from_headers(headers: &[GatewayHttpHeader]) -> Self {
+        let header_names = headers
+            .iter()
+            .take(APPLICATION_REQUEST_METADATA_HEADER_LIMIT)
+            .map(|header| header.name.as_str())
+            .collect::<Vec<_>>();
+        let plan = prodex_mojo_core::rich::normalize_application_request_metadata(
+            &header_names,
+            headers.len(),
+        )
+        .expect("Mojo application request metadata planner returned invalid output");
+        Self {
+            observed_header_count: plan.observed_header_count as u8,
+            headers_truncated: plan.headers_truncated,
+            trace_context_present: plan.trace_context_present,
+            credential_present: plan.credential_present,
+            affinity_present: plan.affinity_present,
+            codex_metadata_present: plan.codex_metadata_present,
+            user_agent_present: plan.user_agent_present,
+        }
+    }
+
+    #[cfg(not(feature = "mojo"))]
+    fn from_headers(headers: &[GatewayHttpHeader]) -> Self {
+        Self::from_headers_rust(headers)
+    }
+
+    #[cfg(any(not(feature = "mojo"), test))]
+    fn from_headers_rust(headers: &[GatewayHttpHeader]) -> Self {
         let mut metadata = Self {
             observed_header_count: headers.len().min(APPLICATION_REQUEST_METADATA_HEADER_LIMIT)
                 as u8,
@@ -762,3 +791,7 @@ mod tests {
 #[cfg(test)]
 #[path = "request_context_snapshot_tests.rs"]
 mod snapshot_tests;
+
+#[cfg(all(test, feature = "mojo"))]
+#[path = "request_context_mojo_tests.rs"]
+mod mojo_tests;
