@@ -266,8 +266,9 @@ pub(super) fn noisy_success_label(line: &str) -> Option<&'static str> {
         {
             return None;
         }
-        return noisy_success_framework_label(trimmed, &lower)
-            .or_else(|| noisy_success_mojo_label(line).and_then(noisy_success_label_from_mojo_code))
+        return noisy_success_mojo_label(line)
+            .and_then(noisy_success_label_from_mojo_code)
+            .or_else(|| noisy_success_framework_label(trimmed, &lower))
             .or_else(|| rust_noise_label(line))
             .or_else(|| noisy_success_language_label(trimmed, &lower))
             .or_else(|| noisy_success_go_test_label(trimmed, &lower))
@@ -361,6 +362,25 @@ fn noisy_success_label_from_mojo_code(code: i64) -> Option<&'static str> {
         51 => "build_summary",
         52 => "passed_tests",
         53 => "pytest_progress",
+        54 => "coverage",
+        55 => "gradle_test",
+        56 => "maven_test",
+        57 => "package_install",
+        58 => "docker_buildx",
+        59 => "bazel_test",
+        60 => "junit_xml",
+        61 => "swift_test",
+        62 => "playwright",
+        63 => "biome_summary",
+        64 => "oxlint_summary",
+        65 => "build_success",
+        66 => "gradle_tasks",
+        67 => "maven_summary",
+        68 => "docker_steps",
+        69 => "docker_summary",
+        70 => "bazel_summary",
+        71 => "nx_summary",
+        72 => "turbo_summary",
         _ => return None,
     })
 }
