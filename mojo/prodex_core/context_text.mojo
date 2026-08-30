@@ -2037,6 +2037,28 @@ def prodex_context_classify_ci_line_v1(
     return 0
 
 
+@export("prodex_context_classify_dot_reporter_success_line_v1")
+def prodex_context_classify_dot_reporter_success_line_v1(
+    abi_version: Int64,
+    line: Pointer[mut=False, ProdexStringView, _],
+    output: Pointer[mut=True, Int64, _],
+) abi("C") -> Int64:
+    if abi_version != CONTEXT_TEXT_ABI_VERSION:
+        return 4
+    output[] = 0
+    var view = line[].copy()
+    if not context_text_view_is_valid(view):
+        return 2
+    if view.len < 4:
+        return 0
+    ref ptr = view.ptr.unsafe_value()
+    for index in range(Int64(view.len)):
+        if ptr[unsafe_offset=index] != 46:
+            return 0
+    output[] = 1
+    return 0
+
+
 @export("prodex_context_prepare_signal_rows_v1")
 def prodex_context_prepare_signal_rows_v1(
     abi_version: Int64,

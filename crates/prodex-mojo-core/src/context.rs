@@ -123,18 +123,19 @@ static CONTEXT_TEXT_ABI_READY: std::sync::OnceLock<bool> = std::sync::OnceLock::
 #[path = "context/git_search.rs"]
 mod git_search;
 pub use git_search::classify_git_search_line;
+#[path = "context/command_output.rs"]
+mod command_output;
+pub use command_output::classify_dot_reporter_success_line;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ContextSignalLine<'a> {
     pub text: &'a str,
     pub counts: [usize; CRITICAL_SIGNAL_COUNTER_COUNT],
 }
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ContextSignalRows {
     pub before_rows: Vec<i64>,
     pub after_available: Vec<i64>,
 }
-
 fn counters_to_i64(
     values: &[usize; CRITICAL_SIGNAL_COUNTER_COUNT],
 ) -> Result<[i64; CRITICAL_SIGNAL_COUNTER_COUNT], crate::MojoError> {
@@ -144,7 +145,6 @@ fn counters_to_i64(
     }
     Ok(converted)
 }
-
 fn counters_from_i64(
     values: [i64; CRITICAL_SIGNAL_COUNTER_COUNT],
 ) -> Result<[usize; CRITICAL_SIGNAL_COUNTER_COUNT], crate::MojoError> {

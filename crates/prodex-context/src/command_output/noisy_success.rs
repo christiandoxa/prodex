@@ -15,7 +15,20 @@ pub(super) fn docker_compose_success_state(lower: &str) -> bool {
         || lower.contains(" pulled")
 }
 
+#[cfg(feature = "mojo")]
 pub(super) fn is_dot_reporter_success_line(trimmed: &str) -> bool {
+    prodex_mojo_core::context::classify_dot_reporter_success_line(trimmed)
+        .unwrap_or_else(|error| panic!("Mojo dot-progress classification failed: {error:?}"))
+}
+
+// Rust-only fallback for builds without the optional Mojo runtime.
+#[cfg(not(feature = "mojo"))]
+pub(super) fn is_dot_reporter_success_line(trimmed: &str) -> bool {
+    is_dot_reporter_success_line_rust(trimmed)
+}
+
+#[cfg(any(not(feature = "mojo"), test))]
+pub(super) fn is_dot_reporter_success_line_rust(trimmed: &str) -> bool {
     trimmed.len() >= 4 && trimmed.chars().all(|ch| ch == '.')
 }
 

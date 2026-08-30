@@ -507,3 +507,22 @@ fn noisy_success_quality_label(trimmed: &str, lower: &str) -> Option<&'static st
         None
     }
 }
+
+#[cfg(test)]
+mod noisy_success_leaf_tests {
+    use super::*;
+
+    #[test]
+    fn dot_reporter_leaf_matches_rust_oracle_and_label_path() {
+        for line in ["....", ".....", "...", "  ....  ", "....x", "....🙂"] {
+            let trimmed = line.trim();
+            let expected = is_dot_reporter_success_line_rust(trimmed);
+            assert_eq!(is_dot_reporter_success_line(trimmed), expected, "{line:?}");
+            assert_eq!(
+                noisy_success_label(line).is_some_and(|label| label == "dot_progress"),
+                expected,
+                "{line:?}"
+            );
+        }
+    }
+}
