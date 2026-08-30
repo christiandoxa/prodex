@@ -43,15 +43,16 @@
       "feat(mojo): migrate Gemini response shaping",
       "feat(mojo): migrate runtime doctor planning",
       "fix(doctor): satisfy Mojo guard and size limits",
-      "test(gemini): split response shaping tests"
+      "test(gemini): split response shaping tests",
+      "feat(mojo): migrate Kiro response stream"
     ],
     "caps": {
-      "maxFiles": 156,
-      "maxBehaviorFiles": 131,
-      "maxLines": 35587,
+      "maxFiles": 158,
+      "maxBehaviorFiles": 133,
+      "maxLines": 36384,
       "maxFileLines": 3225
     },
-    "reason": "Reviewed the exact 0.420.0 migration tail dff2b7442b60ff9d2a1d735b8d6d52de4dd839bf..65711f68b4099ba1ab3cf273aa6a61e58c43be83: 42 contiguous commits covering Mojo-owned deterministic kernels and ABIs, provider and runtime planning, compatibility transforms, focused module extraction, and their CI, test, and documentation evidence. The measured integrated tail is 156 files, 131 behavior files, and 35,587 changed lines including this allowance record; the 3,225-line context_text Mojo module is intentional migration ownership, not incidental churn. Exact subjects and caps cover this tail only; global thresholds and release behavior remain unchanged."
+    "reason": "Reviewed the exact 0.420.0 migration tail dff2b7442b60ff9d2a1d735b8d6d52de4dd839bf..HEAD: 43 contiguous migration commits covering Mojo-owned deterministic kernels and ABIs, provider and runtime planning, compatibility transforms, focused module extraction, and their CI, test, and documentation evidence, including the integrated Kiro response/stream migration, plus the allowance record. The measured integrated tail is 158 files, 133 behavior files, and 36,384 changed lines including this allowance record; the 3,225-line context_text Mojo module is intentional migration ownership, not incidental churn. Exact subjects and caps cover this tail only; global thresholds and release behavior remain unchanged."
   },
   {
     "id": "audited-prodex-0.420.0-integration-train",
