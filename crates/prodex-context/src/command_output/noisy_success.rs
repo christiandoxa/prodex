@@ -21,7 +21,22 @@ pub(crate) mod rust_output_prefix {
 #[cfg(any(not(feature = "mojo"), test))]
 pub(crate) use rust_output_prefix::docker_compose_success_state;
 
-#[cfg(any(not(feature = "mojo"), test))]
+#[cfg(not(feature = "mojo"))]
+pub(crate) use rust_output::{
+    is_bazel_test_success_line, is_biome_success_summary_line, is_bun_test_success_line,
+    is_coverage_noise_line, is_cypress_success_line, is_diagnostic_block_start,
+    is_diagnostic_detection_start, is_diagnostic_failure_summary_line, is_diagnostic_key_line,
+    is_docker_buildx_success_line, is_dot_reporter_success_line, is_eslint_diagnostic_line,
+    is_exception_signal_line, is_gradle_test_success_line, is_junit_xml_failure_line,
+    is_junit_xml_success_line, is_maven_test_success_line, is_next_success_line,
+    is_noisy_success_key_line, is_oxlint_success_summary_line, is_package_install_success_line,
+    is_playwright_success_line, is_pytest_progress_line, is_pytest_success_summary_line,
+    is_success_output_failure_signal_line, is_success_output_warning_signal_line,
+    is_swift_test_success_line, is_typescript_diagnostic_line, is_typescript_success_line,
+    is_vite_success_line, is_zig_test_success_line,
+};
+
+#[cfg(all(feature = "mojo", test))]
 pub(crate) use rust_output::{
     is_diagnostic_block_start, is_diagnostic_failure_summary_line, is_diagnostic_key_line,
     is_eslint_diagnostic_line, is_exception_signal_line, is_junit_xml_failure_line,
