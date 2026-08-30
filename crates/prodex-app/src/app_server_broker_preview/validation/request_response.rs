@@ -195,7 +195,7 @@ impl RequestResponseValidation {
                         .request_id(id.clone()),
                 );
             };
-            return self.validate_lifecycle_response(preview, frame, lifecycle_stage.as_deref());
+            self.validate_lifecycle_response(preview, frame, lifecycle_stage.as_deref())
         }
         #[cfg(feature = "mojo-core")]
         {

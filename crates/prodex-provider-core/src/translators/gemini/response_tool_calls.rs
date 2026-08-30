@@ -65,7 +65,7 @@ pub(crate) fn gemini_response_tool_call_added_item_with_call_id(
         if let Some(signature) = signature {
             item["gemini_thought_signature"] = Value::String(signature.to_string());
         }
-        return Some(item);
+        Some(item)
     }
 }
 
@@ -105,7 +105,7 @@ pub(crate) fn gemini_response_tool_call_raw_item_with_call_id(
         if let Some(signature) = signature {
             item["gemini_thought_signature"] = Value::String(signature.to_string());
         }
-        return item;
+        item
     }
 }
 
@@ -204,7 +204,7 @@ pub(crate) fn gemini_response_tool_call_item_with_call_id(
         if let Some(signature) = signature {
             item["gemini_thought_signature"] = Value::String(signature.to_string());
         }
-        return item;
+        item
     }
 }
 

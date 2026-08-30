@@ -56,6 +56,6 @@ pub(crate) fn gemini_chat_assistant_tool_call_item_with_call_id(
         if let Some(signature) = signature {
             item["gemini_thought_signature"] = Value::String(signature.to_string());
         }
-        return item;
+        item
     }
 }
