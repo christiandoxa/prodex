@@ -191,6 +191,20 @@ mod tests {
     }
 
     #[test]
+    fn deepseek_api_key_resolver_accepts_single_environment_key_and_cli_override() {
+        let _keys = TestEnvVarGuard::unset("DEEPSEEK_API_KEYS");
+        let _key = TestEnvVarGuard::set("DEEPSEEK_API_KEY", "fixture-deepseek-key");
+        assert_eq!(
+            runtime_deepseek_api_keys_from_request_or_env(None).unwrap(),
+            Some(vec!["fixture-deepseek-key".to_string()])
+        );
+        assert_eq!(
+            runtime_deepseek_api_keys_from_request_or_env(Some("fixture-cli-key")).unwrap(),
+            Some(vec!["fixture-cli-key".to_string()])
+        );
+    }
+
+    #[test]
     fn deepseek_strict_tools_reads_env_fallback() {
         let _strict = TestEnvVarGuard::set("PRODEX_DEEPSEEK_STRICT_TOOLS", "true");
         let _beta = TestEnvVarGuard::set(

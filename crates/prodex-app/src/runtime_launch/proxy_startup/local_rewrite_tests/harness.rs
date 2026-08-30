@@ -394,6 +394,61 @@ fn deepseek_auto_web_search_uses_native_anthropic_transport() {
 }
 
 #[test]
+fn deepseek_auto_web_search_falls_back_before_send_when_native_translation_rejects() {
+    let root = temp_root("deepseek-auto-web-search-fallback");
+    let paths = app_paths_for_root(root);
+    let upstream = TestUpstream::start_with_response_body(
+        r#"{"id":"chat_issue_61","object":"chat.completion","created":1,"model":"deepseek-v4-flash","choices":[{"index":0,"message":{"role":"assistant","content":"safe fallback"},"finish_reason":"stop"}],"usage":{"prompt_tokens":5,"completion_tokens":2,"total_tokens":7}}"#,
+    );
+    let proxy = start_deepseek_proxy(&paths, format!("http://{}/v1", upstream.addr));
+
+    let response = reqwest::blocking::Client::new()
+        .post(format!("http://{}/v1/responses", proxy.listen_addr))
+        .json(&serde_json::json!({
+            "model": "deepseek-v4-flash",
+            "input": "continue coding",
+            "response_format": {"type": "json_object"},
+            "tools": [
+                {"type": "web_search_preview", "context_size": "high"},
+                {"type": "function", "name": "shell", "parameters": {"type": "object"}}
+            ],
+            "tool_choice": "none",
+            "stream": false
+        }))
+        .send()
+        .unwrap();
+
+    assert_eq!(response.status().as_u16(), 200);
+    let response: serde_json::Value = response.json().unwrap();
+    assert_eq!(response["output"][0]["content"][0]["text"], "safe fallback");
+    assert!(
+        !response.to_string().contains(
+            "request is incompatible with DeepSeek native Anthropic web-search translation"
+        )
+    );
+
+    assert_eq!(
+        upstream
+            .path_rx
+            .recv_timeout(Duration::from_secs(2))
+            .unwrap(),
+        "/v1/chat/completions"
+    );
+    let request: serde_json::Value = serde_json::from_slice(
+        &upstream
+            .body_rx
+            .recv_timeout(Duration::from_secs(2))
+            .unwrap(),
+    )
+    .unwrap();
+    assert!(request.get("web_search_options").is_none());
+    assert_eq!(request["model"], "deepseek-v4-flash");
+    assert_eq!(request["response_format"]["type"], "json_object");
+    assert_eq!(request["tools"][0]["function"]["name"], "shell");
+    assert!(upstream.path_rx.try_recv().is_err());
+}
+
+#[test]
 fn deepseek_compact_uses_local_emulation_without_upstream_io() {
     let root = temp_root("deepseek-local-compact");
     let paths = app_paths_for_root(root);
