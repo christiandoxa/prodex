@@ -271,6 +271,7 @@ mod tests {
             json!({"candidateCount": null}),
             json!({"candidate_count": null}),
             json!({"candidateCount": null, "candidate_count": null}),
+            json!({"candidateCount": null, "candidate_count": 1}),
         ] {
             let result = transform(request);
             let body: serde_json::Value = serde_json::from_slice(&result.body.unwrap()).unwrap();
@@ -354,5 +355,27 @@ mod tests {
 
         assert_eq!(declaration["name"], "apply_patch");
         assert_eq!(declaration["parameters"]["required"][0], "input");
+    }
+
+    #[test]
+    fn aliased_generation_and_optional_fields_keep_existing_precedence() {
+        let result = transform(json!({
+            "top_k": 1,
+            "topK": 2,
+            "presence_penalty": 0.1,
+            "presencePenalty": 0.3,
+            "safety_settings": null,
+            "safetySettings": [{"category": "synthetic"}],
+            "cached_content": null,
+            "cachedContent": "synthetic-cache",
+            "labels": {"suite": "synthetic"},
+        }));
+        let body: serde_json::Value = serde_json::from_slice(&result.body.unwrap()).unwrap();
+
+        assert_eq!(body["request"]["generationConfig"]["topK"], 2);
+        assert_eq!(body["request"]["generationConfig"]["presencePenalty"], 0.3);
+        assert!(body["request"]["safetySettings"].is_null());
+        assert!(body["request"].get("cachedContent").is_none());
+        assert_eq!(body["request"]["labels"]["suite"], "synthetic");
     }
 }
