@@ -136,13 +136,13 @@ fn run_child_plan_inner(
     Ok(status)
 }
 
-fn wait_for_child(child: &mut Child, private_process_group: bool) -> io::Result<ExitStatus> {
+fn wait_for_child(child: &mut Child, _private_process_group: bool) -> io::Result<ExitStatus> {
     loop {
         match child.wait() {
             Err(error) if error.kind() == io::ErrorKind::Interrupted => {
                 #[cfg(unix)]
                 if InteractiveSigintGuard::count() >= 2 {
-                    let _ = terminate_child_process_tree(child, private_process_group);
+                    let _ = terminate_child_process_tree(child, _private_process_group);
                 }
                 continue;
             }

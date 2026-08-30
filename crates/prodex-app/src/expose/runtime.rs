@@ -400,9 +400,7 @@ impl ExposePty {
         #[cfg(windows)]
         // ponytail: nested Windows jobs may reject assignment; taskkill remains
         // the bounded fallback until a breakaway policy is needed.
-        let process_job = child
-            .as_raw_handle()
-            .and_then(|handle| assign_expose_process_job(handle).ok());
+        let process_job = assign_expose_process_job(child.as_raw_handle()).ok();
         let killer = child.clone_killer();
         drop(pair.slave);
 

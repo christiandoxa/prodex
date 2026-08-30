@@ -1,6 +1,8 @@
 use crate::AppPaths;
 use anyhow::{Context, Result, bail};
-use std::ffi::{OsStr, OsString};
+#[cfg(target_os = "linux")]
+use std::ffi::OsStr;
+use std::ffi::OsString;
 use std::fs;
 use std::path::{Path, PathBuf};
 
