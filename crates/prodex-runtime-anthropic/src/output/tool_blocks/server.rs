@@ -1,5 +1,39 @@
 use super::*;
 
+#[cfg(feature = "mojo")]
+pub fn runtime_anthropic_server_tool_use_block(
+    call_id: &str,
+    tool_name: &str,
+    input: serde_json::Value,
+    server_tools: Option<&RuntimeAnthropicServerTools>,
+) -> Option<serde_json::Value> {
+    let (response_name, block_type) =
+        runtime_anthropic_server_tool_registration_for_call(tool_name, server_tools)?;
+    let mut input = input;
+    let server_name = input
+        .get("server_name")
+        .and_then(serde_json::Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string);
+    if let Some(object) = input.as_object_mut() {
+        object.remove("server_name");
+    }
+    let input = serde_json::to_string(&input).expect("Anthropic server tool input serializes");
+    Some(crate::mojo::json({
+        let mut kernel_input = prodex_mojo_core::rich::RuntimeAnthropicKernelInput::new(
+            prodex_mojo_core::rich::RuntimeAnthropicKernelOperation::ServerToolBlock,
+        );
+        kernel_input.id = Some(call_id);
+        kernel_input.name = Some(&response_name);
+        kernel_input.block_type = Some(&block_type);
+        kernel_input.server_name = server_name.as_deref();
+        kernel_input.input = Some(&input);
+        kernel_input
+    }))
+}
+
+#[cfg(not(feature = "mojo"))]
 pub fn runtime_anthropic_server_tool_use_block(
     call_id: &str,
     tool_name: &str,

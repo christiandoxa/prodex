@@ -59,6 +59,30 @@ pub fn runtime_anthropic_shell_tool_input_from_output_item(
     serde_json::Value::Object(input)
 }
 
+#[cfg(feature = "mojo")]
+pub fn runtime_anthropic_shell_tool_use_block_from_output_item(
+    item: &serde_json::Value,
+) -> serde_json::Value {
+    let call_id = item
+        .get("call_id")
+        .and_then(serde_json::Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or("shell_call");
+    let input = runtime_anthropic_shell_tool_input_from_output_item(item);
+    let input = serde_json::to_string(&input).expect("Anthropic shell input serializes");
+    crate::mojo::json({
+        let mut kernel_input = prodex_mojo_core::rich::RuntimeAnthropicKernelInput::new(
+            prodex_mojo_core::rich::RuntimeAnthropicKernelOperation::ToolUseBlock,
+        );
+        kernel_input.id = Some(call_id);
+        kernel_input.name = Some("bash");
+        kernel_input.input = Some(&input);
+        kernel_input
+    })
+}
+
+#[cfg(not(feature = "mojo"))]
 pub fn runtime_anthropic_shell_tool_use_block_from_output_item(
     item: &serde_json::Value,
 ) -> serde_json::Value {

@@ -204,6 +204,28 @@ pub fn runtime_anthropic_code_execution_request_count_from_output(
         .sum()
 }
 
+#[cfg(feature = "mojo")]
+pub fn runtime_anthropic_usage_json(
+    input_tokens: u64,
+    output_tokens: u64,
+    cached_tokens: Option<u64>,
+    web_search_requests: u64,
+    web_fetch_requests: u64,
+    code_execution_requests: u64,
+    tool_search_requests: u64,
+) -> serde_json::Map<String, serde_json::Value> {
+    crate::mojo::usage(
+        input_tokens,
+        output_tokens,
+        cached_tokens,
+        web_search_requests,
+        web_fetch_requests,
+        code_execution_requests,
+        tool_search_requests,
+    )
+}
+
+#[cfg(not(feature = "mojo"))]
 pub fn runtime_anthropic_usage_json(
     input_tokens: u64,
     output_tokens: u64,

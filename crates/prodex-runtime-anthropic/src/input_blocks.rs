@@ -18,6 +18,21 @@ pub fn runtime_proxy_anthropic_image_data_url(block: &serde_json::Value) -> Opti
     Some(format!("data:{media_type};base64,{data}"))
 }
 
+#[cfg(feature = "mojo")]
+pub fn runtime_proxy_translate_anthropic_image_part(
+    block: &serde_json::Value,
+) -> Option<serde_json::Value> {
+    let image_url = runtime_proxy_anthropic_image_data_url(block)?;
+    Some(crate::mojo::json({
+        let mut input = prodex_mojo_core::rich::RuntimeAnthropicKernelInput::new(
+            prodex_mojo_core::rich::RuntimeAnthropicKernelOperation::ImagePart,
+        );
+        input.text = Some(&image_url);
+        input
+    }))
+}
+
+#[cfg(not(feature = "mojo"))]
 pub fn runtime_proxy_translate_anthropic_image_part(
     block: &serde_json::Value,
 ) -> Option<serde_json::Value> {
@@ -435,6 +450,18 @@ fn runtime_proxy_flush_anthropic_input_text(
     );
 }
 
+#[cfg(feature = "mojo")]
+fn runtime_proxy_anthropic_input_text(text: String) -> serde_json::Value {
+    crate::mojo::json({
+        let mut input = prodex_mojo_core::rich::RuntimeAnthropicKernelInput::new(
+            prodex_mojo_core::rich::RuntimeAnthropicKernelOperation::InputText,
+        );
+        input.text = Some(&text);
+        input
+    })
+}
+
+#[cfg(not(feature = "mojo"))]
 fn runtime_proxy_anthropic_input_text(text: String) -> serde_json::Value {
     serde_json::json!({
         "type": "input_text",
@@ -450,6 +477,63 @@ pub fn runtime_proxy_translate_anthropic_text_blocks(blocks: &[serde_json::Value
         .join("\n")
 }
 
+#[cfg(feature = "mojo")]
+pub fn runtime_proxy_translate_anthropic_tool_call(
+    block: &serde_json::Value,
+) -> Result<serde_json::Value> {
+    let block_type = block
+        .get("type")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("tool_use");
+    let name = block
+        .get("name")
+        .and_then(serde_json::Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(|value| {
+            if block_type == "server_tool_use" {
+                runtime_proxy_anthropic_builtin_server_tool_name(value).unwrap_or(value)
+            } else {
+                value
+            }
+        })
+        .with_context(|| format!("Anthropic {block_type} block requires a non-empty name"))?;
+    let call_id = block
+        .get("id")
+        .and_then(serde_json::Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .with_context(|| format!("Anthropic {block_type} block requires a non-empty id"))?;
+    let mut input = block
+        .get("input")
+        .cloned()
+        .unwrap_or_else(|| serde_json::Value::Object(serde_json::Map::new()));
+    if block_type == "mcp_tool_use"
+        && let Some(server_name) = block
+            .get("server_name")
+            .and_then(serde_json::Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+        && let Some(object) = input.as_object_mut()
+    {
+        object
+            .entry("server_name".to_string())
+            .or_insert_with(|| serde_json::Value::String(server_name.to_string()));
+    }
+    let input = serde_json::to_string(&input)
+        .with_context(|| format!("failed to serialize Anthropic {block_type} input"))?;
+    Ok(crate::mojo::json({
+        let mut kernel_input = prodex_mojo_core::rich::RuntimeAnthropicKernelInput::new(
+            prodex_mojo_core::rich::RuntimeAnthropicKernelOperation::FunctionCall,
+        );
+        kernel_input.id = Some(call_id);
+        kernel_input.name = Some(name);
+        kernel_input.input = Some(&input);
+        kernel_input
+    }))
+}
+
+#[cfg(not(feature = "mojo"))]
 pub fn runtime_proxy_translate_anthropic_tool_call(
     block: &serde_json::Value,
 ) -> Result<serde_json::Value> {

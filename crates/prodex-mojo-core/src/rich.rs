@@ -40,6 +40,13 @@ mod anthropic_request;
 pub use anthropic_request::{
     AnthropicRequestKernelInput, AnthropicRequestKernelOperation, anthropic_request_kernel,
 };
+#[path = "rich/runtime_anthropic.rs"]
+mod runtime_anthropic;
+pub use runtime_anthropic::{
+    RUNTIME_ANTHROPIC_FLAG_CACHED_TOKENS, RUNTIME_ANTHROPIC_FLAG_ERROR,
+    RUNTIME_ANTHROPIC_FLAG_MAX_OUTPUT_LENGTH, RuntimeAnthropicKernelInput,
+    RuntimeAnthropicKernelOperation, runtime_anthropic_kernel,
+};
 mod policy;
 pub use policy::{
     PolicyAliasInput, PolicyAliasPlan, PolicyModel, PolicyRouteModel, PolicyRoutePlan,

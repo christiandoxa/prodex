@@ -139,6 +139,17 @@ impl<'a> RuntimeAnthropicOutputBlockTranslator<'a> {
         }
         let thinking = runtime_anthropic_reasoning_summary_text(item);
         if !thinking.is_empty() {
+            #[cfg(feature = "mojo")]
+            {
+                self.content.push(crate::mojo::json({
+                    let mut input = prodex_mojo_core::rich::RuntimeAnthropicKernelInput::new(
+                        prodex_mojo_core::rich::RuntimeAnthropicKernelOperation::ThinkingBlock,
+                    );
+                    input.text = Some(&thinking);
+                    input
+                }));
+            }
+            #[cfg(not(feature = "mojo"))]
             self.content.push(serde_json::json!({
                 "type": "thinking",
                 "thinking": thinking,
@@ -162,6 +173,17 @@ impl<'a> RuntimeAnthropicOutputBlockTranslator<'a> {
             }
         }
         if !text.is_empty() {
+            #[cfg(feature = "mojo")]
+            {
+                self.content.push(crate::mojo::json({
+                    let mut input = prodex_mojo_core::rich::RuntimeAnthropicKernelInput::new(
+                        prodex_mojo_core::rich::RuntimeAnthropicKernelOperation::TextBlock,
+                    );
+                    input.text = Some(&text);
+                    input
+                }));
+            }
+            #[cfg(not(feature = "mojo"))]
             self.content.push(serde_json::json!({
                 "type": "text",
                 "text": text,
@@ -184,22 +206,33 @@ impl<'a> RuntimeAnthropicOutputBlockTranslator<'a> {
                 .and_then(serde_json::Value::as_str)
                 .unwrap_or("{}"),
         );
-        self.content.push(
-            runtime_anthropic_server_tool_use_block(
-                call_id,
-                name,
-                input.clone(),
-                self.server_tools,
-            )
-            .unwrap_or_else(|| {
-                serde_json::json!({
-                    "type": "tool_use",
-                    "id": call_id,
-                    "name": name,
-                    "input": input,
-                })
-            }),
-        );
+        if let Some(server_tool) =
+            runtime_anthropic_server_tool_use_block(call_id, name, input.clone(), self.server_tools)
+        {
+            self.content.push(server_tool);
+            return;
+        }
+        #[cfg(feature = "mojo")]
+        {
+            let input_json =
+                serde_json::to_string(&input).expect("Anthropic tool input serializes");
+            self.content.push(crate::mojo::json({
+                let mut kernel_input = prodex_mojo_core::rich::RuntimeAnthropicKernelInput::new(
+                    prodex_mojo_core::rich::RuntimeAnthropicKernelOperation::ToolUseBlock,
+                );
+                kernel_input.id = Some(call_id);
+                kernel_input.name = Some(name);
+                kernel_input.input = Some(&input_json);
+                kernel_input
+            }));
+        }
+        #[cfg(not(feature = "mojo"))]
+        self.content.push(serde_json::json!({
+            "type": "tool_use",
+            "id": call_id,
+            "name": name,
+            "input": input,
+        }));
     }
 }
 
@@ -272,19 +305,34 @@ pub fn runtime_anthropic_response_from_json_value_with_carried_usage(
         code_execution_requests,
         tool_search_requests,
     );
+    let stop_reason = if has_tool_calls {
+        "tool_use"
+    } else if runtime_anthropic_response_is_max_tokens_incomplete(value) {
+        "max_tokens"
+    } else {
+        "end_turn"
+    };
+    #[cfg(feature = "mojo")]
+    {
+        let content =
+            serde_json::to_string(&content).expect("Anthropic response content serializes");
+        let usage = serde_json::to_string(&usage).expect("Anthropic response usage serializes");
+        crate::mojo::response_message(
+            &runtime_anthropic_message_id(),
+            requested_model,
+            &content,
+            &usage,
+            stop_reason,
+        )
+    }
+    #[cfg(not(feature = "mojo"))]
     serde_json::json!({
         "id": runtime_anthropic_message_id(),
         "type": "message",
         "role": "assistant",
         "content": content,
         "model": requested_model,
-        "stop_reason": if has_tool_calls {
-            "tool_use"
-        } else if runtime_anthropic_response_is_max_tokens_incomplete(value) {
-            "max_tokens"
-        } else {
-            "end_turn"
-        },
+        "stop_reason": stop_reason,
         "stop_sequence": serde_json::Value::Null,
         "usage": usage,
     })

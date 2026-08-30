@@ -3218,6 +3218,7 @@ version = "0.419.1"
 dependencies = [
  "anyhow",
  "base64 0.23.1",
+ "prodex-mojo-core",
  "serde_json",
  "uuid",
  "zeroize",
