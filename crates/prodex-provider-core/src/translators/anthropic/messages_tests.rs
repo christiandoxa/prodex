@@ -215,6 +215,37 @@ fn response_maps_native_web_search_call_sources_and_usage() {
 }
 
 #[test]
+fn response_plan_preserves_flush_and_web_search_result_order() {
+    let result = anthropic_messages_translator().transform_response(ProviderTransformInput::new(
+        ProviderEndpoint::Responses,
+        serde_json::to_vec(&json!({
+            "id": "msg_order",
+            "content": [
+                {"type": "text", "text": "before"},
+                {"type": "thinking"},
+                {"type": "web_search_tool_result", "tool_use_id": "srv_later", "content": [
+                    {"type": "web_search_result", "url": "https://example.com/later"}
+                ]},
+                {"type": "server_tool_use", "id": "srv_later", "name": "web_search", "input": {"query": "later"}},
+                {"type": "text", "text": "after"}
+            ]
+        }))
+        .unwrap(),
+    ));
+    let body: Value = serde_json::from_slice(result.body.as_ref().unwrap()).unwrap();
+    assert_eq!(body["output"].as_array().unwrap().len(), 3);
+    assert_eq!(body["output"][0]["content"][0]["text"], "before");
+    assert_eq!(body["output"][1]["type"], "web_search_call");
+    assert!(
+        body["output"][1]["action"]["sources"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
+    assert_eq!(body["output"][2]["content"][0]["text"], "after");
+}
+
+#[test]
 fn stream_maps_native_delta_and_tolerates_ping() {
     let ping = anthropic_messages_translator().transform_stream_event(ProviderTransformInput::new(
         ProviderEndpoint::Responses,
