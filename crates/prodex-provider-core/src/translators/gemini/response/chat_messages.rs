@@ -6,6 +6,7 @@ use super::gemini_function_call_id;
 use super::response_media::{gemini_media_content_item_from_part, gemini_text_from_special_part};
 use super::response_metadata::gemini_response_metadata;
 use super::response_tool_calls::gemini_chat_assistant_tool_call_item_with_call_id;
+use crate::{GeminiProviderCoreResponsePartInput, gemini_provider_core_response_part_plan};
 
 pub(crate) fn gemini_chat_assistant_messages_from_generate_value(
     value: &Value,
@@ -29,15 +30,42 @@ pub(crate) fn gemini_chat_assistant_messages_from_generate_value(
     let mut tool_calls = Vec::new();
     let suppress_visible_text = parts.iter().any(|part| part.get("functionCall").is_some());
     for (index, part) in parts.iter().enumerate() {
-        gemini_append_chat_response_text(
-            part,
+        let visible_text = crate::gemini_bridge::gemini_provider_core_visible_text_from_part(part);
+        let special_text = gemini_text_from_special_part(part);
+        let content_item = gemini_media_content_item_from_part(part);
+        let has_function_call = part.get("functionCall").is_some();
+        let plan = gemini_provider_core_response_part_plan(GeminiProviderCoreResponsePartInput {
+            has_text: part
+                .get("text")
+                .and_then(Value::as_str)
+                .is_some_and(|text| !text.is_empty()),
+            is_thought: part
+                .get("thought")
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
+            has_visible_text: visible_text.is_some(),
+            has_special_text: special_text.is_some(),
+            has_media: content_item.is_some(),
+            has_video_metadata: part.get("videoMetadata").is_some(),
+            has_image_generation: false,
+            has_function_call,
+            command_output_only: false,
+            forced_output: false,
+            internal_instruction_echo: false,
             suppress_visible_text,
-            &mut text,
-            &mut reasoning_content,
+        })
+        .expect("Gemini response part planner returned invalid output");
+        gemini_append_chat_response_text(part, plan, &mut text, &mut reasoning_content);
+        gemini_append_chat_response_media(
+            plan,
+            content_item,
+            part,
+            &mut gemini_content,
+            &mut native_parts,
         );
-        gemini_append_chat_response_media(part, &mut gemini_content, &mut native_parts);
         gemini_append_chat_response_tool_call(
             part,
+            plan,
             request_id,
             index,
             &mut text,
@@ -59,24 +87,23 @@ pub(crate) fn gemini_chat_assistant_messages_from_generate_value(
 
 fn gemini_append_chat_response_text(
     part: &Value,
-    suppress_visible_text: bool,
+    plan: crate::GeminiProviderCoreResponsePartPlan,
     text: &mut String,
     reasoning_content: &mut String,
 ) {
-    if let Some(part_text) = part.get("text").and_then(Value::as_str)
-        && part
-            .get("thought")
-            .and_then(Value::as_bool)
-            .unwrap_or(false)
+    if plan.emit_reasoning
+        && let Some(part_text) = part.get("text").and_then(Value::as_str)
     {
         reasoning_content.push_str(part_text);
-    } else if !suppress_visible_text
+    } else if plan.emit_visible_text
         && let Some(part_text) =
             crate::gemini_bridge::gemini_provider_core_visible_text_from_part(part)
     {
         text.push_str(&part_text);
     }
-    if let Some(part_text) = gemini_text_from_special_part(part) {
+    if plan.emit_special_text
+        && let Some(part_text) = gemini_text_from_special_part(part)
+    {
         if !text.is_empty() {
             text.push('\n');
         }
@@ -85,27 +112,34 @@ fn gemini_append_chat_response_text(
 }
 
 fn gemini_append_chat_response_media(
+    plan: crate::GeminiProviderCoreResponsePartPlan,
+    content_item: Option<Value>,
     part: &Value,
     gemini_content: &mut Vec<Value>,
     native_parts: &mut Vec<Value>,
 ) {
-    if let Some(content_item) = gemini_media_content_item_from_part(part) {
+    if plan.record_media
+        && let Some(content_item) = content_item
+    {
         gemini_content.push(content_item);
         native_parts.push(part.clone());
-    }
-    if part.get("videoMetadata").is_some() && !native_parts.contains(part) {
+    } else if plan.record_native && !native_parts.contains(part) {
         native_parts.push(part.clone());
     }
 }
 
 fn gemini_append_chat_response_tool_call(
     part: &Value,
+    plan: crate::GeminiProviderCoreResponsePartPlan,
     request_id: u64,
     index: usize,
     text: &mut String,
     tool_calls: &mut Vec<Value>,
     blocked_tool_call_message: &mut impl FnMut(&str, &Value) -> Option<String>,
 ) {
+    if !plan.emit_function {
+        return;
+    }
     let Some(function_call) = part.get("functionCall") else {
         return;
     };

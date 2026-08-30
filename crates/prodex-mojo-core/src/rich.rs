@@ -42,6 +42,11 @@ pub use catalog::{
     CatalogReasoningPlan, merge_catalog_ids, plan_catalog_choices, plan_catalog_configuration,
     plan_dynamic_catalog, resolve_catalog_model, resolve_catalog_reasoning,
 };
+#[path = "rich/gemini_sse_state.rs"]
+mod gemini_sse_state;
+pub use gemini_sse_state::{
+    GEMINI_RESPONSE_STATE_ABI_VERSION, GeminiResponsePartInput, plan_gemini_response_part,
+};
 
 const RICH_STATUS_INVALID: i64 = 1;
 const RICH_STATUS_UTF8: i64 = 2;

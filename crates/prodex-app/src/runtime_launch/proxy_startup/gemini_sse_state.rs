@@ -14,7 +14,8 @@ use super::RuntimeGeminiBindingRecorder;
 use prodex_domain::RequestId;
 use prodex_provider_core::PRODEX_GEMINI_DEFAULT_MODEL as GEMINI_DEFAULT_MODEL;
 use prodex_provider_core::{
-    GeminiProviderCoreStreamToolCall, gemini_provider_core_citation_text,
+    GeminiProviderCoreResponsePartInput, GeminiProviderCoreStreamToolCall,
+    gemini_provider_core_citation_text,
     gemini_provider_core_conversation_requests_command_output_only as runtime_gemini_conversation_requests_command_output_only,
     gemini_provider_core_finish_reason_failure, gemini_provider_core_finish_reason_incomplete,
     gemini_provider_core_forced_command_output as runtime_gemini_forced_command_output,
@@ -28,14 +29,13 @@ use prodex_provider_core::{
     gemini_provider_core_reasoning_summary_text_delta_event,
     gemini_provider_core_response_completed_event, gemini_provider_core_response_created_event,
     gemini_provider_core_response_incomplete_event, gemini_provider_core_response_metadata_event,
-    gemini_provider_core_stream_candidate_parts,
+    gemini_provider_core_response_part_plan, gemini_provider_core_stream_candidate_parts,
     gemini_provider_core_stream_chat_assistant_message, gemini_provider_core_stream_chunk_metadata,
     gemini_provider_core_stream_error as runtime_gemini_stream_error,
     gemini_provider_core_stream_message_item, gemini_provider_core_stream_output_items,
     gemini_provider_core_stream_output_text_content,
     gemini_provider_core_stream_part_function_call,
-    gemini_provider_core_stream_part_has_video_metadata,
-    gemini_provider_core_stream_part_is_thought, gemini_provider_core_stream_part_text,
+    gemini_provider_core_stream_part_has_video_metadata, gemini_provider_core_stream_part_text,
     gemini_provider_core_stream_reasoning_delta_source, gemini_provider_core_stream_response_value,
     gemini_provider_core_stream_text_delta_source, gemini_provider_core_stream_tool_call,
     gemini_provider_core_stream_tool_call_ids,
@@ -258,55 +258,89 @@ impl RuntimeGeminiSseState {
         part_index: usize,
         part: &serde_json::Value,
     ) -> Vec<String> {
-        let mut events = self.observe_part_text(part);
-        if let Some(content_item) = gemini_provider_core_media_content_item_from_part(part) {
+        let visible_text = gemini_provider_core_visible_text_from_part(part);
+        let special_text = gemini_provider_core_text_from_special_part(part);
+        let media_content_item = gemini_provider_core_media_content_item_from_part(part);
+        let image_generation_item = gemini_provider_core_image_generation_call_item_from_part(
+            &self.response_id,
+            part_index,
+            part,
+        );
+        let plan =
+            match gemini_provider_core_response_part_plan(GeminiProviderCoreResponsePartInput {
+                has_text: gemini_provider_core_stream_part_text(part).is_some(),
+                is_thought: part
+                    .get("thought")
+                    .and_then(serde_json::Value::as_bool)
+                    .unwrap_or(false),
+                has_visible_text: visible_text.is_some(),
+                has_special_text: special_text.is_some(),
+                has_media: media_content_item.is_some(),
+                has_video_metadata: gemini_provider_core_stream_part_has_video_metadata(part),
+                has_image_generation: image_generation_item.is_some(),
+                has_function_call: gemini_provider_core_stream_part_function_call(part).is_some(),
+                command_output_only: self.command_output_only,
+                forced_output: self.forced_output_text.is_some(),
+                internal_instruction_echo: visible_text.as_deref().is_some_and(|text| {
+                    gemini_provider_core_text_echoes_internal_instruction(
+                        text,
+                        &self.internal_instruction_corpus,
+                    )
+                }),
+                suppress_visible_text: false,
+            }) {
+                Ok(plan) => plan,
+                Err(_) => {
+                    return self
+                        .failed_event(
+                            "gemini_response_state_plan",
+                            "Gemini response state planning failed",
+                        )
+                        .into_iter()
+                        .collect();
+                }
+            };
+        let mut events = Vec::new();
+        if plan.emit_reasoning
+            && let Some(text) = gemini_provider_core_stream_part_text(part)
+        {
+            self.reasoning_content.push_str(text);
+            events.extend(self.reasoning_delta_events(text));
+        }
+        if plan.emit_visible_text
+            && let Some(text) = visible_text.as_deref()
+        {
+            events.extend(self.observe_output_text(text));
+        }
+        if plan.record_media
+            && let Some(content_item) = media_content_item
+        {
             if !self.media_content_items.contains(&content_item) {
                 self.media_content_items.push(content_item);
             }
+        }
+        if plan.record_native {
             self.add_native_part(part);
         }
-        if gemini_provider_core_stream_part_has_video_metadata(part) {
-            self.add_native_part(part);
-        }
-        if let Some(text) = gemini_provider_core_text_from_special_part(part)
-            && !self.command_output_only
-            && self.forced_output_text.is_none()
+        if plan.emit_special_text
+            && let Some(text) = special_text.as_deref()
         {
-            events.extend(self.observe_output_text(&text));
+            events.extend(self.observe_output_text(text));
         }
-        self.observe_image_generation(part_index, part);
-        if let Some(function_call) = gemini_provider_core_stream_part_function_call(part)
-            && self.forced_output_text.is_none()
-        {
+        if plan.record_image {
+            self.observe_image_generation(image_generation_item);
+        }
+        if plan.flush_pending {
             events.extend(self.flush_pending_output_text_events());
+        }
+        if plan.emit_function
+            && let Some(function_call) = gemini_provider_core_stream_part_function_call(part)
+        {
             let thought_signature = gemini_provider_core_thought_signature(part)
                 .or_else(|| gemini_provider_core_thought_signature(function_call));
             events.extend(self.observe_function_call(part_index, function_call, thought_signature));
         }
         events
-    }
-
-    fn observe_part_text(&mut self, part: &serde_json::Value) -> Vec<String> {
-        let Some(text) = gemini_provider_core_stream_part_text(part) else {
-            return Vec::new();
-        };
-        if gemini_provider_core_stream_part_is_thought(part) {
-            self.reasoning_content.push_str(text);
-            return self.reasoning_delta_events(text);
-        }
-        let Some(text) = gemini_provider_core_visible_text_from_part(part) else {
-            return Vec::new();
-        };
-        if self.command_output_only || self.forced_output_text.is_some() {
-            return Vec::new();
-        }
-        if gemini_provider_core_text_echoes_internal_instruction(
-            &text,
-            &self.internal_instruction_corpus,
-        ) {
-            return Vec::new();
-        }
-        self.observe_output_text(&text)
     }
 
     fn add_native_part(&mut self, part: &serde_json::Value) {
@@ -315,12 +349,8 @@ impl RuntimeGeminiSseState {
         }
     }
 
-    fn observe_image_generation(&mut self, part_index: usize, part: &serde_json::Value) {
-        let Some(item) = gemini_provider_core_image_generation_call_item_from_part(
-            &self.response_id,
-            part_index,
-            part,
-        ) else {
+    fn observe_image_generation(&mut self, item: Option<serde_json::Value>) {
+        let Some(item) = item else {
             return;
         };
         let item_id = item.get("id").and_then(serde_json::Value::as_str);

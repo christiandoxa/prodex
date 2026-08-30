@@ -7,6 +7,7 @@ use super::{
     gemini_media_content_item_from_part, gemini_response_metadata, gemini_response_status,
     gemini_responses_usage, gemini_text_from_special_part, gemini_web_search_call_from_grounding,
 };
+use crate::{GeminiProviderCoreResponsePartInput, gemini_provider_core_response_part_plan};
 
 #[allow(clippy::too_many_arguments)]
 pub(super) fn gemini_build_response_value(
@@ -73,24 +74,58 @@ fn gemini_collect_response_parts(
     let suppress_visible_text = suppress_visible_text_when_tool_calls
         && parts.iter().any(|part| part.get("functionCall").is_some());
     for (index, part) in parts.into_iter().enumerate() {
-        if !suppress_visible_text && let Some(part_text) = visible_text_from_part(&part) {
+        let visible_text = visible_text_from_part(&part);
+        let special_text = gemini_text_from_special_part(&part);
+        let content_item = gemini_media_content_item_from_part(&part);
+        let image_generation =
+            gemini_image_generation_call_item_from_part(response_id, index, &part);
+        let plan = gemini_provider_core_response_part_plan(GeminiProviderCoreResponsePartInput {
+            has_text: part
+                .get("text")
+                .and_then(Value::as_str)
+                .is_some_and(|text| !text.is_empty()),
+            is_thought: part
+                .get("thought")
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
+            has_visible_text: visible_text.is_some(),
+            has_special_text: special_text.is_some(),
+            has_media: content_item.is_some(),
+            has_video_metadata: part.get("videoMetadata").is_some(),
+            has_image_generation: image_generation.is_some(),
+            has_function_call: part.get("functionCall").is_some(),
+            command_output_only: false,
+            forced_output: false,
+            internal_instruction_echo: false,
+            suppress_visible_text,
+        })
+        .expect("Gemini response part planner returned invalid output");
+        if plan.emit_visible_text
+            && let Some(part_text) = visible_text
+        {
             text.push_str(&part_text);
         }
-        if let Some(part_text) = gemini_text_from_special_part(&part) {
+        if plan.emit_special_text
+            && let Some(part_text) = special_text
+        {
             content_items.push(json!({
                 "type": "output_text",
                 "text": part_text,
             }));
         }
-        if let Some(content_item) = gemini_media_content_item_from_part(&part) {
+        if plan.record_media
+            && let Some(content_item) = content_item
+        {
             content_items.push(content_item);
         }
-        if let Some(image_generation) =
-            gemini_image_generation_call_item_from_part(response_id, index, &part)
+        if plan.record_image
+            && let Some(image_generation) = image_generation
         {
             output.push(image_generation);
         }
-        if let Some(function_call) = part.get("functionCall") {
+        if plan.emit_function
+            && let Some(function_call) = part.get("functionCall")
+        {
             output.push(function_call_item(&part, function_call, index));
         }
     }
