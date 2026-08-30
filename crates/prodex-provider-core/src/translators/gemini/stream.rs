@@ -696,7 +696,7 @@ fn gemini_stream_event_from_generate_value(value: &Value) -> Option<(&'static st
         #[cfg(feature = "mojo")]
         let transformed = {
             let mut kernel_input = GeminiResponseKernelInput::new(
-                GeminiResponseKernelOperation::FunctionCallArgumentsDelta,
+                GeminiResponseKernelOperation::FunctionCallArgumentsDeltaWithoutSequence,
             );
             kernel_input.call_id = function_call.get("id").and_then(Value::as_str);
             kernel_input.delta = Some(&arguments);
