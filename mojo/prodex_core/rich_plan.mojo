@@ -12,6 +12,9 @@ from rich_types import (
     ProdexRichPlanItem,
     ProdexRichPlanResult,
     ProdexRichStringView,
+    ProdexGatewayBillingSummaryBucket,
+    ProdexGatewayBillingSummaryInput,
+    ProdexGatewayBillingSummaryResult,
     rich_view_ptr,
 )
 
@@ -167,4 +170,173 @@ def prodex_mojo_rich_context_plan_v2(
     result_ptr[].actions_written = plan.action_count
     result_ptr[].output_written = written
     result_ptr[].used_tokens = plan.used_tokens
+    return RICH_STATUS_OK
+
+
+comptime RICH_MAX_BILLING_INPUTS: Int64 = 100_000
+comptime RICH_BILLING_CATEGORIES: Int64 = 9
+comptime RICH_BILLING_STATUS_MAX: Int64 = 65_535
+comptime UINT64_MAX: UInt64 = 18446744073709551615
+comptime RICH_STATUS_ABI: Int64 = 4
+
+
+def billing_saturating_add(left: UInt64, right: UInt64) -> UInt64:
+    if left > UINT64_MAX - right:
+        return UINT64_MAX
+    return left + right
+
+
+def billing_flag_valid(value: Int64) -> Bool:
+    return value == 0 or value == 1
+
+
+def billing_bucket_apply(
+    output: Pointer[mut=True, ProdexGatewayBillingSummaryBucket, _],
+    bucket_index: Int64,
+    input: ProdexGatewayBillingSummaryInput,
+) -> None:
+    var bucket_output = output + bucket_index
+    var bucket = bucket_output[].copy()
+    bucket.requests = billing_saturating_add(bucket.requests, 1)
+    if input.response_status_present == 0:
+        bucket.unreconciled_requests = billing_saturating_add(
+            bucket.unreconciled_requests, 1
+        )
+    elif input.response_status >= 200 and input.response_status < 300:
+        bucket.successful_requests = billing_saturating_add(
+            bucket.successful_requests, 1
+        )
+    else:
+        bucket.failed_requests = billing_saturating_add(bucket.failed_requests, 1)
+    bucket.input_tokens = billing_saturating_add(bucket.input_tokens, input.input_tokens)
+    bucket.output_tokens = billing_saturating_add(bucket.output_tokens, input.output_tokens)
+    bucket.response_bytes = billing_saturating_add(bucket.response_bytes, input.response_bytes)
+    bucket.estimated_cost_microusd = billing_saturating_add(
+        bucket.estimated_cost_microusd, input.estimated_cost_microusd
+    )
+    bucket.final_cost_microusd = billing_saturating_add(
+        bucket.final_cost_microusd, input.final_cost_microusd
+    )
+    if bucket.first_created_at_present == 0:
+        bucket.first_created_at_epoch = input.created_at_epoch
+        bucket.first_created_at_present = 1
+        bucket.last_created_at_epoch = input.created_at_epoch
+    else:
+        if input.created_at_epoch < bucket.first_created_at_epoch:
+            bucket.first_created_at_epoch = input.created_at_epoch
+        if input.created_at_epoch > bucket.last_created_at_epoch:
+            bucket.last_created_at_epoch = input.created_at_epoch
+    if input.reconciled_at_present == 1:
+        if bucket.last_reconciled_at_present == 0:
+            bucket.last_reconciled_at_epoch = input.reconciled_at_epoch
+            bucket.last_reconciled_at_present = 1
+        else:
+            if input.reconciled_at_epoch > bucket.last_reconciled_at_epoch:
+                bucket.last_reconciled_at_epoch = input.reconciled_at_epoch
+    bucket_output[] = bucket.copy()
+
+
+def billing_bucket_reference_valid(bucket_index: Int64, bucket_count: Int64) -> Bool:
+    return bucket_index >= -1 and bucket_index < bucket_count
+
+
+def billing_bucket_apply_if_present(
+    output: Pointer[mut=True, ProdexGatewayBillingSummaryBucket, _],
+    bucket_index: Int64,
+    bucket_count: Int64,
+    input: ProdexGatewayBillingSummaryInput,
+) -> Bool:
+    if not billing_bucket_reference_valid(bucket_index, bucket_count):
+        return False
+    if bucket_index >= 0:
+        billing_bucket_apply(output, bucket_index, input)
+    return True
+
+
+@export("prodex_mojo_rich_gateway_billing_summary_v1")
+def prodex_mojo_rich_gateway_billing_summary_v1(
+    abi_version: Int64,
+    inputs_address: UInt,
+    input_count: Int64,
+    outputs_address: UInt,
+    bucket_count: Int64,
+    result_address: UInt,
+) abi("C") -> Int64:
+    if result_address == 0:
+        return RICH_STATUS_INVALID
+    var result = Pointer[
+        mut=True, ProdexGatewayBillingSummaryResult, MutUntrackedOrigin
+    ](unsafe_from_address=Int(result_address))
+    result[].abi_version = PRODEX_RICH_ABI_VERSION
+    result[].buckets_written = 0
+    result[].required_buckets = bucket_count
+    result[].issue_kind = 0
+    if abi_version != PRODEX_RICH_ABI_VERSION:
+        result[].issue_kind = RICH_STATUS_ABI
+        return RICH_STATUS_ABI
+    if (
+        input_count < 0
+        or input_count > RICH_MAX_BILLING_INPUTS
+        or bucket_count < 1
+        or bucket_count > input_count * RICH_BILLING_CATEGORIES + 1
+        or outputs_address == 0
+    ):
+        return RICH_STATUS_INVALID
+    if input_count > 0 and inputs_address == 0:
+        return RICH_STATUS_INVALID
+    var inputs = Pointer[
+        mut=False, ProdexGatewayBillingSummaryInput, ImmUntrackedOrigin
+    ](unsafe_from_address=Int(inputs_address))
+    var outputs = Pointer[
+        mut=True, ProdexGatewayBillingSummaryBucket, MutUntrackedOrigin
+    ](unsafe_from_address=Int(outputs_address))
+    for bucket_index in range(bucket_count):
+        var bucket_output = outputs + bucket_index
+        var bucket = bucket_output[].copy()
+        bucket.requests = 0
+        bucket.successful_requests = 0
+        bucket.failed_requests = 0
+        bucket.unreconciled_requests = 0
+        bucket.input_tokens = 0
+        bucket.output_tokens = 0
+        bucket.response_bytes = 0
+        bucket.estimated_cost_microusd = 0
+        bucket.final_cost_microusd = 0
+        bucket.first_created_at_epoch = 0
+        bucket.first_created_at_present = 0
+        bucket.last_created_at_epoch = 0
+        bucket.last_reconciled_at_epoch = 0
+        bucket.last_reconciled_at_present = 0
+        bucket_output[] = bucket.copy()
+    for input_index in range(input_count):
+        var input = inputs[unsafe_offset=input_index].copy()
+        if not billing_flag_valid(input.response_status_present) or not billing_flag_valid(
+            input.reconciled_at_present
+        ):
+            return RICH_STATUS_INVALID
+        if input.response_status_present == 1 and (
+            input.response_status < 0 or input.response_status > RICH_BILLING_STATUS_MAX
+        ):
+            return RICH_STATUS_INVALID
+        if not billing_bucket_apply_if_present(
+            outputs, input.bucket_ids[0], bucket_count, input
+        ) or not billing_bucket_apply_if_present(
+            outputs, input.bucket_ids[1], bucket_count, input
+        ) or not billing_bucket_apply_if_present(
+            outputs, input.bucket_ids[2], bucket_count, input
+        ) or not billing_bucket_apply_if_present(
+            outputs, input.bucket_ids[3], bucket_count, input
+        ) or not billing_bucket_apply_if_present(
+            outputs, input.bucket_ids[4], bucket_count, input
+        ) or not billing_bucket_apply_if_present(
+            outputs, input.bucket_ids[5], bucket_count, input
+        ) or not billing_bucket_apply_if_present(
+            outputs, input.bucket_ids[6], bucket_count, input
+        ) or not billing_bucket_apply_if_present(
+            outputs, input.bucket_ids[7], bucket_count, input
+        ) or not billing_bucket_apply_if_present(
+            outputs, input.bucket_ids[8], bucket_count, input
+        ):
+            return RICH_STATUS_INVALID
+    result[].buckets_written = bucket_count
     return RICH_STATUS_OK

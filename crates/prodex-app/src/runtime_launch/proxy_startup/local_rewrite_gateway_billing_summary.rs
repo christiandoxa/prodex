@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, btree_map::Entry};
 use std::fmt;
 
 use serde::Serialize;
@@ -174,50 +174,84 @@ impl RuntimeGatewayBillingSummaryBucket {
         bucket
     }
 
-    fn record(&mut self, entry: &RuntimeGatewayBillingSummaryRecord) {
-        self.requests = self.requests.saturating_add(1);
-        match entry.response_status {
-            Some(status) if (200..300).contains(&status) => {
-                self.successful_requests = self.successful_requests.saturating_add(1);
-            }
-            Some(_) => {
-                self.failed_requests = self.failed_requests.saturating_add(1);
-            }
-            None => {
-                self.unreconciled_requests = self.unreconciled_requests.saturating_add(1);
-            }
-        }
-        self.input_tokens = self.input_tokens.saturating_add(entry.input_tokens);
-        self.output_tokens = self
-            .output_tokens
-            .saturating_add(entry.output_tokens.unwrap_or_default());
-        self.response_bytes = self
-            .response_bytes
-            .saturating_add(entry.response_bytes.unwrap_or_default());
-        self.estimated_cost_microusd = self
-            .estimated_cost_microusd
-            .saturating_add(entry.estimated_cost_microusd.unwrap_or_default());
-        self.final_cost_microusd = self
-            .final_cost_microusd
-            .saturating_add(entry.final_cost_microusd.unwrap_or_default());
-        self.estimated_cost_usd = microusd_to_usd(self.estimated_cost_microusd);
-        self.final_cost_usd = microusd_to_usd(self.final_cost_microusd);
-        self.first_created_at_epoch = Some(
-            self.first_created_at_epoch
-                .map(|current| current.min(entry.created_at_epoch))
-                .unwrap_or(entry.created_at_epoch),
-        );
-        self.last_created_at_epoch = Some(
-            self.last_created_at_epoch
-                .map(|current| current.max(entry.created_at_epoch))
-                .unwrap_or(entry.created_at_epoch),
-        );
-        if let Some(reconciled_at_epoch) = entry.reconciled_at_epoch {
-            self.last_reconciled_at_epoch = Some(
-                self.last_reconciled_at_epoch
-                    .map(|current| current.max(reconciled_at_epoch))
-                    .unwrap_or(reconciled_at_epoch),
-            );
+    fn with_numeric(mut self, numeric: RuntimeGatewayBillingSummaryNumericBucket) -> Self {
+        self.requests = numeric.requests;
+        self.successful_requests = numeric.successful_requests;
+        self.failed_requests = numeric.failed_requests;
+        self.unreconciled_requests = numeric.unreconciled_requests;
+        self.input_tokens = numeric.input_tokens;
+        self.output_tokens = numeric.output_tokens;
+        self.response_bytes = numeric.response_bytes;
+        self.estimated_cost_microusd = numeric.estimated_cost_microusd;
+        self.estimated_cost_usd = microusd_to_usd(numeric.estimated_cost_microusd);
+        self.final_cost_microusd = numeric.final_cost_microusd;
+        self.final_cost_usd = microusd_to_usd(numeric.final_cost_microusd);
+        self.first_created_at_epoch =
+            (numeric.first_created_at_present == 1).then_some(numeric.first_created_at_epoch);
+        self.last_created_at_epoch =
+            (numeric.first_created_at_present == 1).then_some(numeric.last_created_at_epoch);
+        self.last_reconciled_at_epoch =
+            (numeric.last_reconciled_at_present == 1).then_some(numeric.last_reconciled_at_epoch);
+        self
+    }
+}
+
+const RUNTIME_GATEWAY_BILLING_SUMMARY_CATEGORY_COUNT: usize = 9;
+const RUNTIME_GATEWAY_BILLING_SUMMARY_TOTAL: usize = 0;
+const RUNTIME_GATEWAY_BILLING_SUMMARY_BY_KEY: usize = 1;
+const RUNTIME_GATEWAY_BILLING_SUMMARY_BY_MODEL: usize = 2;
+const RUNTIME_GATEWAY_BILLING_SUMMARY_BY_KEY_MODEL: usize = 3;
+const RUNTIME_GATEWAY_BILLING_SUMMARY_BY_TENANT: usize = 4;
+const RUNTIME_GATEWAY_BILLING_SUMMARY_BY_TEAM: usize = 5;
+const RUNTIME_GATEWAY_BILLING_SUMMARY_BY_PROJECT: usize = 6;
+const RUNTIME_GATEWAY_BILLING_SUMMARY_BY_USER: usize = 7;
+const RUNTIME_GATEWAY_BILLING_SUMMARY_BY_BUDGET: usize = 8;
+
+#[derive(Clone, Copy, Debug, Default)]
+struct RuntimeGatewayBillingSummaryNumericInput {
+    bucket_ids: [i64; RUNTIME_GATEWAY_BILLING_SUMMARY_CATEGORY_COUNT],
+    response_status: i64,
+    response_status_present: i64,
+    input_tokens: u64,
+    output_tokens: u64,
+    response_bytes: u64,
+    estimated_cost_microusd: u64,
+    final_cost_microusd: u64,
+    created_at_epoch: u64,
+    reconciled_at_epoch: u64,
+    reconciled_at_present: i64,
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+struct RuntimeGatewayBillingSummaryNumericBucket {
+    requests: u64,
+    successful_requests: u64,
+    failed_requests: u64,
+    unreconciled_requests: u64,
+    input_tokens: u64,
+    output_tokens: u64,
+    response_bytes: u64,
+    estimated_cost_microusd: u64,
+    final_cost_microusd: u64,
+    first_created_at_epoch: u64,
+    first_created_at_present: i64,
+    last_created_at_epoch: u64,
+    last_reconciled_at_epoch: u64,
+    last_reconciled_at_present: i64,
+}
+
+fn runtime_gateway_billing_summary_group_index<K: Ord>(
+    groups: &mut BTreeMap<K, usize>,
+    key: K,
+    next_bucket: &mut usize,
+) -> usize {
+    match groups.entry(key) {
+        Entry::Occupied(entry) => *entry.get(),
+        Entry::Vacant(entry) => {
+            let index = *next_bucket;
+            *next_bucket += 1;
+            entry.insert(index);
+            index
         }
     }
 }
@@ -228,42 +262,37 @@ pub(super) fn runtime_gateway_billing_summary_payload(
     records: &[RuntimeGatewayBillingSummaryRecord],
     key_dimensions: &BTreeMap<String, RuntimeGatewayBillingSummaryKeyDimensions>,
 ) -> serde_json::Value {
-    let mut totals = RuntimeGatewayBillingSummaryBucket::default();
-    let mut by_key: BTreeMap<String, RuntimeGatewayBillingSummaryBucket> = BTreeMap::new();
-    let mut by_model: BTreeMap<String, RuntimeGatewayBillingSummaryBucket> = BTreeMap::new();
-    let mut by_key_model: BTreeMap<(String, String), RuntimeGatewayBillingSummaryBucket> =
-        BTreeMap::new();
-    let mut by_tenant: BTreeMap<String, RuntimeGatewayBillingSummaryBucket> = BTreeMap::new();
-    let mut by_team: BTreeMap<String, RuntimeGatewayBillingSummaryBucket> = BTreeMap::new();
-    let mut by_project: BTreeMap<String, RuntimeGatewayBillingSummaryBucket> = BTreeMap::new();
-    let mut by_user: BTreeMap<String, RuntimeGatewayBillingSummaryBucket> = BTreeMap::new();
-    let mut by_budget: BTreeMap<String, RuntimeGatewayBillingSummaryBucket> = BTreeMap::new();
+    let mut by_key = BTreeMap::new();
+    let mut by_model = BTreeMap::new();
+    let mut by_key_model = BTreeMap::new();
+    let mut by_tenant = BTreeMap::new();
+    let mut by_team = BTreeMap::new();
+    let mut by_project = BTreeMap::new();
+    let mut by_user = BTreeMap::new();
+    let mut by_budget = BTreeMap::new();
+    let mut next_bucket = 1;
+    let mut numeric_inputs = Vec::with_capacity(records.len());
     for record in records.iter().filter(|record| record.phase == "request") {
-        totals.record(record);
-        by_key
-            .entry(record.key_name.clone())
-            .or_insert_with(|| {
-                RuntimeGatewayBillingSummaryBucket::with_key_model(
-                    Some(record.key_name.clone()),
-                    None,
-                )
-            })
-            .record(record);
-        by_model
-            .entry(record.model.clone())
-            .or_insert_with(|| {
-                RuntimeGatewayBillingSummaryBucket::with_key_model(None, Some(record.model.clone()))
-            })
-            .record(record);
-        by_key_model
-            .entry((record.key_name.clone(), record.model.clone()))
-            .or_insert_with(|| {
-                RuntimeGatewayBillingSummaryBucket::with_key_model(
-                    Some(record.key_name.clone()),
-                    Some(record.model.clone()),
-                )
-            })
-            .record(record);
+        let mut bucket_ids = [-1_i64; RUNTIME_GATEWAY_BILLING_SUMMARY_CATEGORY_COUNT];
+        bucket_ids[RUNTIME_GATEWAY_BILLING_SUMMARY_TOTAL] = 0;
+        bucket_ids[RUNTIME_GATEWAY_BILLING_SUMMARY_BY_KEY] =
+            runtime_gateway_billing_summary_group_index(
+                &mut by_key,
+                record.key_name.clone(),
+                &mut next_bucket,
+            ) as i64;
+        bucket_ids[RUNTIME_GATEWAY_BILLING_SUMMARY_BY_MODEL] =
+            runtime_gateway_billing_summary_group_index(
+                &mut by_model,
+                record.model.clone(),
+                &mut next_bucket,
+            ) as i64;
+        bucket_ids[RUNTIME_GATEWAY_BILLING_SUMMARY_BY_KEY_MODEL] =
+            runtime_gateway_billing_summary_group_index(
+                &mut by_key_model,
+                (record.key_name.clone(), record.model.clone()),
+                &mut next_bucket,
+            ) as i64;
         let ledger_dimensions = RuntimeGatewayBillingSummaryKeyDimensions {
             tenant_id: record.tenant_id.clone(),
             team_id: record.team_id.clone(),
@@ -272,49 +301,224 @@ pub(super) fn runtime_gateway_billing_summary_payload(
             budget_id: record.budget_id.clone(),
         };
         let dimensions = if ledger_dimensions.has_any() {
-            Some(&ledger_dimensions)
+            ledger_dimensions
         } else {
-            key_dimensions.get(&record.key_name.to_ascii_lowercase())
+            key_dimensions
+                .get(&record.key_name.to_ascii_lowercase())
+                .cloned()
+                .unwrap_or_default()
         };
-        let Some(dimensions) = dimensions else {
-            continue;
-        };
-        for (value, field, buckets) in [
-            (dimensions.tenant_id.as_deref(), "tenant_id", &mut by_tenant),
-            (dimensions.team_id.as_deref(), "team_id", &mut by_team),
+        for (slot, value, groups) in [
             (
+                RUNTIME_GATEWAY_BILLING_SUMMARY_BY_TENANT,
+                dimensions.tenant_id.as_deref(),
+                &mut by_tenant,
+            ),
+            (
+                RUNTIME_GATEWAY_BILLING_SUMMARY_BY_TEAM,
+                dimensions.team_id.as_deref(),
+                &mut by_team,
+            ),
+            (
+                RUNTIME_GATEWAY_BILLING_SUMMARY_BY_PROJECT,
                 dimensions.project_id.as_deref(),
-                "project_id",
                 &mut by_project,
             ),
-            (dimensions.user_id.as_deref(), "user_id", &mut by_user),
-            (dimensions.budget_id.as_deref(), "budget_id", &mut by_budget),
+            (
+                RUNTIME_GATEWAY_BILLING_SUMMARY_BY_USER,
+                dimensions.user_id.as_deref(),
+                &mut by_user,
+            ),
+            (
+                RUNTIME_GATEWAY_BILLING_SUMMARY_BY_BUDGET,
+                dimensions.budget_id.as_deref(),
+                &mut by_budget,
+            ),
         ] {
             if let Some(value) = value.map(str::trim).filter(|value| !value.is_empty()) {
-                buckets
-                    .entry(value.to_string())
-                    .or_insert_with(|| {
-                        RuntimeGatewayBillingSummaryBucket::with_dimension(field, value.to_string())
-                    })
-                    .record(record);
+                bucket_ids[slot] = runtime_gateway_billing_summary_group_index(
+                    groups,
+                    value.to_string(),
+                    &mut next_bucket,
+                ) as i64;
             }
         }
+        numeric_inputs.push(RuntimeGatewayBillingSummaryNumericInput {
+            bucket_ids,
+            response_status: i64::from(record.response_status.unwrap_or_default()),
+            response_status_present: i64::from(record.response_status.is_some()),
+            input_tokens: record.input_tokens,
+            output_tokens: record.output_tokens.unwrap_or_default(),
+            response_bytes: record.response_bytes.unwrap_or_default(),
+            estimated_cost_microusd: record.estimated_cost_microusd.unwrap_or_default(),
+            final_cost_microusd: record.final_cost_microusd.unwrap_or_default(),
+            created_at_epoch: record.created_at_epoch,
+            reconciled_at_epoch: record.reconciled_at_epoch.unwrap_or_default(),
+            reconciled_at_present: i64::from(record.reconciled_at_epoch.is_some()),
+        });
     }
+    let numeric = runtime_gateway_billing_summary_numeric_batch(&numeric_inputs, next_bucket);
+    let totals = RuntimeGatewayBillingSummaryBucket::default().with_numeric(numeric[0]);
+    let by_key = by_key
+        .into_iter()
+        .map(|(key, index)| {
+            RuntimeGatewayBillingSummaryBucket::with_key_model(Some(key), None)
+                .with_numeric(numeric[index])
+        })
+        .collect::<Vec<_>>();
+    let by_model = by_model
+        .into_iter()
+        .map(|(model, index)| {
+            RuntimeGatewayBillingSummaryBucket::with_key_model(None, Some(model))
+                .with_numeric(numeric[index])
+        })
+        .collect::<Vec<_>>();
+    let by_key_model = by_key_model
+        .into_iter()
+        .map(|((key, model), index)| {
+            RuntimeGatewayBillingSummaryBucket::with_key_model(Some(key), Some(model))
+                .with_numeric(numeric[index])
+        })
+        .collect::<Vec<_>>();
+    let by_tenant =
+        runtime_gateway_billing_summary_dimension_buckets(by_tenant, "tenant_id", &numeric);
+    let by_team = runtime_gateway_billing_summary_dimension_buckets(by_team, "team_id", &numeric);
+    let by_project =
+        runtime_gateway_billing_summary_dimension_buckets(by_project, "project_id", &numeric);
+    let by_user = runtime_gateway_billing_summary_dimension_buckets(by_user, "user_id", &numeric);
+    let by_budget =
+        runtime_gateway_billing_summary_dimension_buckets(by_budget, "budget_id", &numeric);
     serde_json::json!({
         "object": "gateway.billing_summary",
         "state_backend": state_backend,
         "ledger_path": ledger_path,
         "record_count": records.len(),
         "totals": totals,
-        "by_key": by_key.into_values().collect::<Vec<_>>(),
-        "by_model": by_model.into_values().collect::<Vec<_>>(),
-        "by_key_model": by_key_model.into_values().collect::<Vec<_>>(),
-        "by_tenant": by_tenant.into_values().collect::<Vec<_>>(),
-        "by_team": by_team.into_values().collect::<Vec<_>>(),
-        "by_project": by_project.into_values().collect::<Vec<_>>(),
-        "by_user": by_user.into_values().collect::<Vec<_>>(),
-        "by_budget": by_budget.into_values().collect::<Vec<_>>(),
+        "by_key": by_key,
+        "by_model": by_model,
+        "by_key_model": by_key_model,
+        "by_tenant": by_tenant,
+        "by_team": by_team,
+        "by_project": by_project,
+        "by_user": by_user,
+        "by_budget": by_budget,
     })
+}
+
+fn runtime_gateway_billing_summary_dimension_buckets(
+    groups: BTreeMap<String, usize>,
+    field: &str,
+    numeric: &[RuntimeGatewayBillingSummaryNumericBucket],
+) -> Vec<RuntimeGatewayBillingSummaryBucket> {
+    groups
+        .into_iter()
+        .map(|(value, index)| {
+            RuntimeGatewayBillingSummaryBucket::with_dimension(field, value)
+                .with_numeric(numeric[index])
+        })
+        .collect()
+}
+
+fn runtime_gateway_billing_summary_numeric_batch(
+    inputs: &[RuntimeGatewayBillingSummaryNumericInput],
+    bucket_count: usize,
+) -> Vec<RuntimeGatewayBillingSummaryNumericBucket> {
+    #[cfg(feature = "mojo-core")]
+    {
+        let inputs = inputs
+            .iter()
+            .map(|input| prodex_mojo_core::rich::GatewayBillingSummaryInput {
+                bucket_ids: input.bucket_ids,
+                response_status: input.response_status,
+                response_status_present: input.response_status_present,
+                input_tokens: input.input_tokens,
+                output_tokens: input.output_tokens,
+                response_bytes: input.response_bytes,
+                estimated_cost_microusd: input.estimated_cost_microusd,
+                final_cost_microusd: input.final_cost_microusd,
+                created_at_epoch: input.created_at_epoch,
+                reconciled_at_epoch: input.reconciled_at_epoch,
+                reconciled_at_present: input.reconciled_at_present,
+            })
+            .collect::<Vec<_>>();
+        return prodex_mojo_core::rich::gateway_billing_summary_batch(&inputs, bucket_count)
+            .expect("Mojo gateway billing summary batch returned invalid structured result")
+            .into_iter()
+            .map(|bucket| RuntimeGatewayBillingSummaryNumericBucket {
+                requests: bucket.requests,
+                successful_requests: bucket.successful_requests,
+                failed_requests: bucket.failed_requests,
+                unreconciled_requests: bucket.unreconciled_requests,
+                input_tokens: bucket.input_tokens,
+                output_tokens: bucket.output_tokens,
+                response_bytes: bucket.response_bytes,
+                estimated_cost_microusd: bucket.estimated_cost_microusd,
+                final_cost_microusd: bucket.final_cost_microusd,
+                first_created_at_epoch: bucket.first_created_at_epoch,
+                first_created_at_present: bucket.first_created_at_present,
+                last_created_at_epoch: bucket.last_created_at_epoch,
+                last_reconciled_at_epoch: bucket.last_reconciled_at_epoch,
+                last_reconciled_at_present: bucket.last_reconciled_at_present,
+            })
+            .collect();
+    }
+
+    #[cfg(not(feature = "mojo-core"))]
+    runtime_gateway_billing_summary_numeric_batch_rust(inputs, bucket_count)
+}
+
+#[cfg(not(feature = "mojo-core"))]
+fn runtime_gateway_billing_summary_numeric_batch_rust(
+    inputs: &[RuntimeGatewayBillingSummaryNumericInput],
+    bucket_count: usize,
+) -> Vec<RuntimeGatewayBillingSummaryNumericBucket> {
+    let mut buckets = vec![RuntimeGatewayBillingSummaryNumericBucket::default(); bucket_count];
+    for input in inputs {
+        for bucket_id in input.bucket_ids {
+            let Ok(bucket_id) = usize::try_from(bucket_id) else {
+                continue;
+            };
+            let bucket = &mut buckets[bucket_id];
+            bucket.requests = bucket.requests.saturating_add(1);
+            match input.response_status_present {
+                0 => bucket.unreconciled_requests = bucket.unreconciled_requests.saturating_add(1),
+                _ if (200..300).contains(&input.response_status) => {
+                    bucket.successful_requests = bucket.successful_requests.saturating_add(1)
+                }
+                _ => bucket.failed_requests = bucket.failed_requests.saturating_add(1),
+            }
+            bucket.input_tokens = bucket.input_tokens.saturating_add(input.input_tokens);
+            bucket.output_tokens = bucket.output_tokens.saturating_add(input.output_tokens);
+            bucket.response_bytes = bucket.response_bytes.saturating_add(input.response_bytes);
+            bucket.estimated_cost_microusd = bucket
+                .estimated_cost_microusd
+                .saturating_add(input.estimated_cost_microusd);
+            bucket.final_cost_microusd = bucket
+                .final_cost_microusd
+                .saturating_add(input.final_cost_microusd);
+            if bucket.first_created_at_present == 0 {
+                bucket.first_created_at_epoch = input.created_at_epoch;
+                bucket.last_created_at_epoch = input.created_at_epoch;
+                bucket.first_created_at_present = 1;
+            } else {
+                bucket.first_created_at_epoch =
+                    bucket.first_created_at_epoch.min(input.created_at_epoch);
+                bucket.last_created_at_epoch =
+                    bucket.last_created_at_epoch.max(input.created_at_epoch);
+            }
+            if input.reconciled_at_present == 1 {
+                if bucket.last_reconciled_at_present == 0 {
+                    bucket.last_reconciled_at_epoch = input.reconciled_at_epoch;
+                    bucket.last_reconciled_at_present = 1;
+                } else {
+                    bucket.last_reconciled_at_epoch = bucket
+                        .last_reconciled_at_epoch
+                        .max(input.reconciled_at_epoch);
+                }
+            }
+        }
+    }
+    buckets
 }
 
 fn microusd_to_usd(value: u64) -> f64 {
@@ -447,7 +651,21 @@ mod tests {
         bucket.project_id = Some("project-bucket-secret".to_string());
         bucket.user_id = Some("user-bucket-secret".to_string());
         bucket.budget_id = Some("budget-bucket-secret".to_string());
-        bucket.record(&record);
+        bucket = bucket.with_numeric(RuntimeGatewayBillingSummaryNumericBucket {
+            requests: 1,
+            successful_requests: 1,
+            input_tokens: record.input_tokens,
+            output_tokens: record.output_tokens.unwrap_or_default(),
+            response_bytes: record.response_bytes.unwrap_or_default(),
+            estimated_cost_microusd: record.estimated_cost_microusd.unwrap_or_default(),
+            final_cost_microusd: record.final_cost_microusd.unwrap_or_default(),
+            first_created_at_epoch: record.created_at_epoch,
+            first_created_at_present: 1,
+            last_created_at_epoch: record.created_at_epoch,
+            last_reconciled_at_epoch: record.reconciled_at_epoch.unwrap_or_default(),
+            last_reconciled_at_present: i64::from(record.reconciled_at_epoch.is_some()),
+            ..Default::default()
+        });
 
         let rendered = format!("{record:?}\n{dimensions:?}\n{bucket:?}");
         assert!(rendered.contains("RuntimeGatewayBillingSummaryRecord"));
