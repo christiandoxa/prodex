@@ -54,7 +54,7 @@ pub fn classify_noisy_success_line(line: &str) -> Result<Option<i64>, crate::Moj
     match status {
         0 => match output {
             -1 | 0 => Ok(None),
-            1..=64 => Ok(Some(output)),
+            1..=72 => Ok(Some(output)),
             _ => Err(crate::MojoError::InvalidOutput),
         },
         4 => Err(crate::MojoError::AbiMismatch),

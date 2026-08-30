@@ -2101,24 +2101,33 @@ def context_success_all_dots(
     return True
 
 
+def context_success_has_digit(
+    ptr: Pointer[mut=False, UInt8, _], start: Int64, end: Int64
+) -> Bool:
+    for index in range(start, end):
+        if ptr[unsafe_offset=index] >= 48 and ptr[unsafe_offset=index] <= 57:
+            return True
+    return False
+
+
 def context_success_label(
     ptr: Pointer[mut=False, UInt8, _], start: Int64, end: Int64
 ) -> Int64:
-    if context_success_prefix["compiling "](ptr, start, end):
+    if context_success_exact_prefix["Compiling "](ptr, start, end):
         return 1
-    if context_success_prefix["checking "](ptr, start, end):
+    if context_success_exact_prefix["Checking "](ptr, start, end):
         return 2
-    if context_success_prefix["fresh "](ptr, start, end):
+    if context_success_exact_prefix["Fresh "](ptr, start, end):
         return 3
-    if context_success_prefix["documenting "](ptr, start, end):
+    if context_success_exact_prefix["Documenting "](ptr, start, end):
         return 4
-    if context_success_prefix["formatting "](ptr, start, end):
+    if context_success_exact_prefix["Formatting "](ptr, start, end):
         return 5
-    if context_success_prefix["fixing "](ptr, start, end) or context_success_prefix["fixed "](ptr, start, end):
+    if context_success_exact_prefix["Fixing "](ptr, start, end) or context_success_exact_prefix["Fixed "](ptr, start, end):
         return 6
-    if context_success_prefix["generated "](ptr, start, end):
+    if context_success_exact_prefix["Generated "](ptr, start, end):
         return 7
-    if context_success_prefix["finished "](ptr, start, end):
+    if context_success_exact_prefix["Finished "](ptr, start, end) and not context_success_prefix["finished in "](ptr, start, end):
         return 8
     if context_success_exact_prefix["Running "](ptr, start, end):
         return 9
@@ -2210,6 +2219,50 @@ def context_success_label(
         return 52
     if context_success_prefix["collected "](ptr, start, end) and context_success_contains[" item"](ptr, start, end):
         return 53
+    if context_success_prefix["coverage summary"](ptr, start, end) or context_success_prefix["all files"](ptr, start, end) or context_success_prefix["statements"](ptr, start, end) or context_success_prefix["branches"](ptr, start, end) or context_success_prefix["functions"](ptr, start, end) or context_success_prefix["lines"](ptr, start, end) or context_success_prefix["coverage html written"](ptr, start, end) or context_success_prefix["coverage xml written"](ptr, start, end) or context_success_prefix["coverage json written"](ptr, start, end):
+        return 54
+    if context_success_prefix["> task "](ptr, start, end) and context_success_contains[":test"](ptr, start, end) and not context_success_ends[" failed"](ptr, start, end):
+        return 55
+    if context_success_contains[" tests successful"](ptr, start, end) or context_success_contains[" tests skipped"](ptr, start, end) or context_success_ends[" tests completed"](ptr, start, end) or context_success_contains[" tests completed, 0 failed"](ptr, start, end) or context_success_exact["build successful"](ptr, start, end):
+        return 55
+    if context_success_prefix["[info] running "](ptr, start, end) or context_success_prefix["[info] results:"](ptr, start, end) or context_success_prefix["[info] surefire report directory:"](ptr, start, end):
+        return 56
+    if context_success_prefix["[info] tests run:"](ptr, start, end) and (context_success_contains["failures: 0"](ptr, start, end) or context_success_contains["errors: 0"](ptr, start, end)):
+        return 56
+    if context_success_prefix["yarn install v"](ptr, start, end) or context_success_prefix["[1/4] resolving packages"](ptr, start, end) or context_success_prefix["[2/4] fetching packages"](ptr, start, end) or context_success_prefix["[3/4] linking dependencies"](ptr, start, end) or context_success_prefix["[4/4] building fresh packages"](ptr, start, end) or context_success_prefix["success saved lockfile"](ptr, start, end) or context_success_prefix["success already up-to-date"](ptr, start, end) or context_success_prefix["saved lockfile"](ptr, start, end) or context_success_prefix["bun install v"](ptr, start, end) or context_success_contains[" packages installed"](ptr, start, end):
+        return 57
+    if context_success_prefix["#"](ptr, start, end) and (context_success_contains[" building with "](ptr, start, end) or context_success_contains[" transferring "](ptr, start, end) or context_success_contains[" exporting "](ptr, start, end) or context_success_contains[" resolving provenance"](ptr, start, end) or context_success_contains[" cached"](ptr, start, end)):
+        return 58
+    if context_success_prefix["//"](ptr, start, end) and (context_success_contains[" passed in "](ptr, start, end) or context_success_ends[" passed"](ptr, start, end)):
+        return 59
+    if (context_success_prefix["<testsuite"](ptr, start, end) or context_success_prefix["<testsuites"](ptr, start, end)) and context_success_contains["tests="](ptr, start, end) and context_success_contains["failures=\"0\""](ptr, start, end) and context_success_contains["errors=\"0\""](ptr, start, end):
+        return 60
+    if context_success_prefix["build complete!"](ptr, start, end) or context_success_prefix["test suite "](ptr, start, end) and context_success_contains[" passed at "](ptr, start, end) or context_success_prefix["test case "](ptr, start, end) and context_success_contains[" passed ("](ptr, start, end) or context_success_prefix["executed "](ptr, start, end) and context_success_contains[" tests"](ptr, start, end) and context_success_contains["with 0 failures"](ptr, start, end):
+        return 61
+    if context_success_prefix["running "](ptr, start, end) and context_success_contains[" tests using "](ptr, start, end) or context_success_prefix["slow test file:"](ptr, start, end) or context_success_contains[" passed ("](ptr, start, end) and context_success_has_digit(ptr, start, end):
+        return 62
+    if context_success_prefix["checked "](ptr, start, end) or context_success_prefix["formatted "](ptr, start, end) or context_success_prefix["linted "](ptr, start, end) or context_success_exact["no fixes applied."](ptr, start, end) or context_success_prefix["fixed "](ptr, start, end) and context_success_contains[" file"](ptr, start, end):
+        return 63
+    if context_success_prefix["finished in "](ptr, start, end) and context_success_contains[" on "](ptr, start, end) and context_success_contains[" file"](ptr, start, end):
+        return 64
+    if context_success_prefix["build successful"](ptr, start, end) or context_success_prefix["build success"](ptr, start, end) or context_success_prefix["[info] build success"](ptr, start, end) or context_success_contains[" build success"](ptr, start, end):
+        return 65
+    if context_success_contains["actionable tasks:"](ptr, start, end) or context_success_contains["actionable task:"](ptr, start, end):
+        return 66
+    if context_success_prefix["[info] total time:"](ptr, start, end) or context_success_prefix["[info] finished at:"](ptr, start, end):
+        return 67
+    if context_success_prefix["=> "](ptr, start, end) or context_success_prefix["=>=> "](ptr, start, end):
+        return 68
+    if context_success_prefix["successfully built "](ptr, start, end) or context_success_prefix["successfully tagged "](ptr, start, end) or context_success_contains["writing image sha256:"](ptr, start, end) or context_success_contains["naming to "](ptr, start, end):
+        return 69
+    if context_success_prefix["info: build completed successfully"](ptr, start, end):
+        return 70
+    if context_success_contains["successfully ran target"](ptr, start, end) or context_success_prefix["nx successfully ran"](ptr, start, end):
+        return 71
+    if context_success_prefix["tasks:"](ptr, start, end) and context_success_contains["successful"](ptr, start, end):
+        return 72
+    if context_success_prefix["found 0 errors"](ptr, start, end) or context_success_prefix["found 0 warnings"](ptr, start, end) or context_success_prefix["found 0 issues"](ptr, start, end):
+        return 16
     return 0
 
 
