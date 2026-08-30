@@ -1,6 +1,24 @@
 use super::*;
 use serde_json::json;
 
+#[cfg(feature = "mojo")]
+#[test]
+fn gemini_provider_core_mojo_kernel_preserves_escaped_values() {
+    let response_id = "resp_\"🔥\n";
+    assert_eq!(
+        gemini_provider_core_response_created_event(1, 2, response_id)["response"]["id"],
+        response_id
+    );
+
+    let usage = super::gemini_responses_usage(&json!({
+        "promptTokenCount": 3,
+        "candidatesTokenCount": 5,
+        "totalTokenCount": 0,
+    }))
+    .unwrap();
+    assert_eq!(usage["total_tokens"], 0);
+}
+
 #[test]
 fn gemini_provider_core_shapes_response_stream_events() {
     let response = json!({"id": "resp_1"});

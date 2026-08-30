@@ -22,24 +22,40 @@ pub(crate) fn gemini_chat_assistant_tool_call_item_with_call_id(
         .cloned()
         .unwrap_or_else(|| json!({}));
     let args = serde_json::to_string(&args).unwrap_or_else(|_| "{}".to_string());
-    let mut item = json!({
-        "id": call_id,
-        "type": "function",
-        "function": {
-            "name": flat_name,
-            "arguments": gemini_rtk_wrapped_tool_arguments(flat_name, &args),
-        },
-    });
-    if let Some(signature) = part
+    let args = gemini_rtk_wrapped_tool_arguments(flat_name, &args);
+    let signature = part
         .get("thoughtSignature")
         .and_then(Value::as_str)
         .or_else(|| {
             function_call
                 .get("thoughtSignature")
                 .and_then(Value::as_str)
-        })
+        });
+    #[cfg(feature = "mojo")]
     {
-        item["gemini_thought_signature"] = Value::String(signature.to_string());
+        let mut input = prodex_mojo_core::rich::GeminiResponseKernelInput::new(
+            prodex_mojo_core::rich::GeminiResponseKernelOperation::ChatFunctionCallItem,
+        );
+        input.call_id = Some(call_id);
+        input.name = Some(flat_name);
+        input.arguments = Some(&args);
+        input.signature = signature;
+        return super::super::super::stream::gemini_mojo_value(input);
     }
-    item
+    #[cfg(not(feature = "mojo"))]
+    let mut item = json!({
+        "id": call_id,
+        "type": "function",
+        "function": {
+            "name": flat_name,
+            "arguments": args,
+        },
+    });
+    #[cfg(not(feature = "mojo"))]
+    {
+        if let Some(signature) = signature {
+            item["gemini_thought_signature"] = Value::String(signature.to_string());
+        }
+        return item;
+    }
 }
