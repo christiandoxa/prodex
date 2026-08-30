@@ -5,5 +5,13 @@
   "baseline_snapshot": "migration/mojo-production-share-baseline-0.419.2.json",
   "counting_rules_version": 1,
   "minimum_percent": 10,
-  "production_build_feature": "mojo-core"
+  "production_build_feature": "mojo-core",
+  "temporary_release_waiver": {
+    "release_target": "0.420.0",
+    "baseline_sha": "2531c7a345f1607a18aa926e204b4d02cc322167",
+    "temporary_release_floor_percent": 7,
+    "scope": "0.420.0 only",
+    "expiration": "immediately after 0.420.0",
+    "reason": "The broad Mojo migration continues in the next release; semantic migration, authority, and no-fallback requirements remain satisfied."
+  }
 }
