@@ -440,6 +440,16 @@
         "operations": [
           "runtime_auto_redeem_capacity_planning"
         ]
+      },
+      {
+        "path": "mojo/prodex_core/smart_context_normalization.mojo",
+        "language": "mojo",
+        "classification": "DETERMINISTIC_DOMAIN",
+        "production_reachable": true,
+        "role": "semantic",
+        "operations": [
+          "smart_context_rehydration_plan"
+        ]
       }
     ]
   },
@@ -1418,6 +1428,56 @@
         "release_gate": "#[cfg(any(not(feature = \"mojo\"), test))]"
       },
       "cleanup_evidence": "Mojo extracts the bounded exit-code span; Rust retains only the feature-off/test integer-token oracle."
+    },
+    {
+      "file": "crates/prodex-runtime-proxy/src/smart_context/token_accounting.rs",
+      "symbol": "smart_context_memory_capsule_token_budget",
+      "operation": "smart_context_rehydration_plan",
+      "previous_responsibility": "memory-capsule budget selection from accounting, mode, tier, and policy reasons",
+      "final_state": "adapter-only",
+      "rust_before": "crates/prodex-runtime-proxy/src/smart_context/token_accounting.rs::smart_context_memory_capsule_token_budget",
+      "rust_after": "feature-gated Mojo adapter with Rust-only feature-off path",
+      "mojo_owner": "mojo/prodex_core/smart_context_normalization.mojo::prodex_mojo_smart_context_memory_capsule_budget_v1",
+      "mojo_source": "mojo/prodex_core/smart_context_normalization.mojo",
+      "mojo_entry": "prodex_mojo_smart_context_memory_capsule_budget_v1",
+      "production_consumer": "crates/prodex-runtime-proxy/src/smart_context/token_accounting.rs",
+      "parity_test": "crates/prodex-runtime-proxy/src/smart_context/token_accounting.rs",
+      "cleanup_loc": 39,
+      "cleanup_source": {
+        "kind": "feature-gated",
+        "baseline_range": {
+          "start": 55,
+          "end": 96
+        },
+        "release_symbol": "smart_context_memory_capsule_token_budget",
+        "release_gate": "#[cfg(feature = \"mojo\")]"
+      },
+      "cleanup_evidence": "The production Mojo feature delegates budget arithmetic through the new normalization ABI; the feature-off Rust implementation remains isolated in the normalization adapter."
+    },
+    {
+      "file": "crates/prodex-runtime-proxy/src/smart_context/token_accounting.rs",
+      "symbol": "smart_context_select_memory_capsules",
+      "operation": "smart_context_rehydration_plan",
+      "previous_responsibility": "required-first and relevance-ordered memory-capsule admission under a token budget",
+      "final_state": "adapter-only",
+      "rust_before": "crates/prodex-runtime-proxy/src/smart_context/token_accounting.rs::smart_context_select_memory_capsules",
+      "rust_after": "feature-gated Mojo adapter with Rust-only feature-off path",
+      "mojo_owner": "mojo/prodex_core/smart_context_normalization.mojo::prodex_mojo_smart_context_capsule_plan_v1",
+      "mojo_source": "mojo/prodex_core/smart_context_normalization.mojo",
+      "mojo_entry": "prodex_mojo_smart_context_capsule_plan_v1",
+      "production_consumer": "crates/prodex-runtime-proxy/src/smart_context/token_accounting.rs",
+      "parity_test": "crates/prodex-runtime-proxy/src/smart_context/token_accounting.rs",
+      "cleanup_loc": 32,
+      "cleanup_source": {
+        "kind": "feature-gated",
+        "baseline_range": {
+          "start": 98,
+          "end": 133
+        },
+        "release_symbol": "smart_context_select_memory_capsules",
+        "release_gate": "#[cfg(feature = \"mojo\")]"
+      },
+      "cleanup_evidence": "The production Mojo feature delegates bounded capsule admission through the new normalization ABI; Rust retains only the feature-off adapter implementation."
     }
   ]
 }

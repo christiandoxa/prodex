@@ -59,6 +59,7 @@ pub fn smart_context_select_memory_capsules_for_policy(
     )
 }
 
+#[cfg(feature = "mojo")]
 pub fn smart_context_memory_capsule_token_budget(
     accounting: &SmartContextObservedTokenAccounting,
     policy: &SmartContextAdaptiveBudgetPolicy,
@@ -66,6 +67,23 @@ pub fn smart_context_memory_capsule_token_budget(
     super::normalization::smart_context_memory_capsule_token_budget_impl(accounting, policy)
 }
 
+#[cfg(not(feature = "mojo"))]
+pub fn smart_context_memory_capsule_token_budget(
+    accounting: &SmartContextObservedTokenAccounting,
+    policy: &SmartContextAdaptiveBudgetPolicy,
+) -> usize {
+    super::normalization::smart_context_memory_capsule_token_budget_impl(accounting, policy)
+}
+
+#[cfg(feature = "mojo")]
+pub fn smart_context_select_memory_capsules(
+    capsules: impl IntoIterator<Item = SmartContextMemoryCapsule>,
+    token_budget: usize,
+) -> SmartContextMemoryCapsuleSelection {
+    super::normalization::smart_context_select_memory_capsules_impl(capsules, token_budget)
+}
+
+#[cfg(not(feature = "mojo"))]
 pub fn smart_context_select_memory_capsules(
     capsules: impl IntoIterator<Item = SmartContextMemoryCapsule>,
     token_budget: usize,
