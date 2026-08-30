@@ -13,6 +13,17 @@ pub const RICH_ABI_VERSION: i64 = 6;
 
 const _: () = assert!(std::mem::size_of::<usize>() == std::mem::size_of::<u64>());
 
+mod app_server_broker;
+pub use app_server_broker::{
+    AffinityPlan as AppServerBrokerAffinityPlan, MethodPlan as AppServerBrokerMethodPlan,
+    ValidationInput as AppServerBrokerValidationInput, WireInput as AppServerBrokerWireInput,
+    WirePlan as AppServerBrokerWirePlan, classify_wire as app_server_broker_classify_wire,
+    lifecycle_validation_reason as app_server_broker_lifecycle_validation_reason,
+    normalize_method as app_server_broker_normalize_method,
+    plan_affinity as app_server_broker_plan_affinity,
+    response_schema as app_server_broker_response_schema,
+};
+
 mod routing;
 pub use routing::{RouteCandidate, RouteInput, RoutePlan, plan_routes};
 mod context_plan;

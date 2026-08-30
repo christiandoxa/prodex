@@ -1,9 +1,20 @@
 use super::super::super::app_server_broker_protocol::app_server_broker_lifecycle_response_schema_file;
+#[cfg(feature = "mojo-core")]
+use super::super::super::app_server_broker_protocol::app_server_broker_mojo_validation_reason;
+#[cfg(feature = "mojo-core")]
 use super::payload::{
-    frame_string, frame_value, is_valid_turn_status, preview_id_key, thread_object_has_context,
-    thread_response_has_context, thread_response_has_valid_context, thread_status_failure_reason,
+    frame_active_flags_valid, frame_thread_status_type, frame_turn_status,
+    thread_object_has_context, thread_response_has_context, thread_response_has_valid_context,
+};
+use super::payload::{frame_string, frame_value, preview_id_key};
+#[cfg(not(feature = "mojo-core"))]
+use super::payload::{
+    is_valid_turn_status, thread_object_has_context, thread_response_has_context,
+    thread_response_has_valid_context, thread_status_failure_reason,
 };
 use super::{APP_SERVER_BROKER_MAX_ACTIVE_VALIDATION_ITEMS, ProtocolDirection, ValidationFailure};
+#[cfg(feature = "mojo-core")]
+use prodex_mojo_core::rich::AppServerBrokerValidationInput;
 use serde_json::Value;
 use std::collections::HashMap;
 
@@ -148,12 +159,46 @@ impl RequestResponseValidation {
         if frame.get("error").is_some() {
             return None;
         }
-        match lifecycle_stage {
-            Some("thread_start_request" | "thread_resume_request" | "thread_fork_request") => {
-                validate_thread_response(preview, frame)
+        #[cfg(feature = "mojo-core")]
+        {
+            let stage = lifecycle_stage?;
+            return app_server_broker_mojo_validation_reason(AppServerBrokerValidationInput {
+                response: true,
+                stage,
+                thread_id_present: frame_string(frame, &["result", "thread", "id"]).is_some(),
+                thread_object_id_present: false,
+                thread_status: frame_thread_status_type(
+                    Some(frame),
+                    &["result", "thread", "status"],
+                ),
+                thread_active_flags_valid: frame_active_flags_valid(
+                    Some(frame),
+                    &["result", "thread", "status"],
+                ),
+                thread_object_context: false,
+                response_thread_context: thread_response_has_context(frame),
+                response_thread_context_valid: thread_response_has_valid_context(frame),
+                response_thread_object_context: thread_object_has_context(
+                    frame,
+                    &["result", "thread"],
+                ),
+                turn_input: false,
+                turn_id_present: frame_string(frame, &["result", "turn", "id"]).is_some(),
+                turn_status: frame_turn_status(Some(frame), &["result", "turn", "status"]),
+                turn_items: frame_value(frame, &["result", "turn", "items"])
+                    .is_some_and(Value::is_array),
+            })
+            .map(|reason| ValidationFailure::from_preview(preview, reason));
+        }
+        #[cfg(not(feature = "mojo-core"))]
+        {
+            match lifecycle_stage {
+                Some("thread_start_request" | "thread_resume_request" | "thread_fork_request") => {
+                    validate_thread_response(preview, frame)
+                }
+                Some("turn_start_request") => validate_turn_response(preview, frame),
+                _ => None,
             }
-            Some("turn_start_request") => validate_turn_response(preview, frame),
-            _ => None,
         }
     }
 
@@ -166,6 +211,7 @@ impl RequestResponseValidation {
     }
 }
 
+#[cfg(not(feature = "mojo-core"))]
 fn validate_thread_response(preview: &Value, frame: &Value) -> Option<ValidationFailure> {
     if frame_string(frame, &["result", "thread", "id"]).is_none() {
         return Some(ValidationFailure::from_preview(
@@ -203,6 +249,7 @@ fn validate_thread_response(preview: &Value, frame: &Value) -> Option<Validation
     None
 }
 
+#[cfg(not(feature = "mojo-core"))]
 fn validate_turn_response(preview: &Value, frame: &Value) -> Option<ValidationFailure> {
     if frame_string(frame, &["result", "turn", "id"]).is_none() {
         return Some(ValidationFailure::from_preview(

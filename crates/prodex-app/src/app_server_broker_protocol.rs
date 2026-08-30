@@ -7,10 +7,16 @@ mod affinity;
 mod lifecycle;
 #[path = "app_server_broker_protocol/metadata.rs"]
 mod metadata;
+#[cfg(feature = "mojo-core")]
+#[path = "app_server_broker_protocol/mojo.rs"]
+mod mojo;
 #[path = "app_server_broker_protocol/report.rs"]
 mod report;
 #[path = "app_server_broker_protocol/wire.rs"]
 mod wire;
+
+#[cfg(feature = "mojo-core")]
+pub(crate) use mojo::validation_reason as app_server_broker_mojo_validation_reason;
 
 pub(crate) use affinity::{
     app_server_broker_affinity_keys, app_server_broker_continuation_affinity_summary_json,
@@ -336,15 +342,7 @@ pub(crate) fn app_server_broker_diagnostic_summary(
     value: &Value,
 ) -> AppServerBrokerDiagnosticSummary {
     let object = value.as_object();
-    let valid_jsonrpc = object.is_some_and(app_server_broker_has_valid_wire_jsonrpc)
-        || value.as_array().is_some_and(|batch| {
-            !batch.is_empty()
-                && batch.iter().all(|frame| {
-                    frame
-                        .as_object()
-                        .is_some_and(app_server_broker_has_valid_wire_jsonrpc)
-                })
-        });
+    let valid_jsonrpc = app_server_broker_valid_jsonrpc(value);
     let method = object
         .and_then(|object| object.get("method"))
         .and_then(Value::as_str)
@@ -358,6 +356,24 @@ pub(crate) fn app_server_broker_diagnostic_summary(
         invalid_reason: app_server_broker_invalid_reason(value),
         metadata: app_server_broker_metadata_from_value(value),
     }
+}
+
+fn app_server_broker_valid_jsonrpc(value: &Value) -> bool {
+    #[cfg(feature = "mojo-core")]
+    if let Some(object) = value.as_object() {
+        return mojo::wire_plan(object).valid_jsonrpc;
+    }
+    value
+        .as_object()
+        .is_some_and(app_server_broker_has_valid_wire_jsonrpc)
+        || value.as_array().is_some_and(|batch| {
+            !batch.is_empty()
+                && batch.iter().all(|frame| {
+                    frame
+                        .as_object()
+                        .is_some_and(app_server_broker_has_valid_wire_jsonrpc)
+                })
+        })
 }
 
 pub(crate) fn app_server_broker_method_kind(method: Option<&str>) -> AppServerBrokerMethodKind {
