@@ -67,6 +67,7 @@ pub fn self_test() -> bool {
         },
     );
     let capability = routing::capability_match_batch(&[true, true], &[1, 0], 1);
+    let control_plane_routing_ok = control_plane_routing::self_test();
     let routing_ok = routing.is_ok_and(|plan| {
         plan.eligible == [true]
             && plan.reason_tags == [routing::ROUTING_REASON_ELIGIBLE]
@@ -108,6 +109,7 @@ pub fn self_test() -> bool {
         rich_ok,
         log_semantics_ok,
         routing::abi_version().is_ok(),
+        control_plane_routing_ok,
         quota,
         runtime::pressure_band_for_route(Some((4, 1)), None, 0).is_ok_and(|band| band == 2),
         runtime::smart_context_estimate_tokens_from_body_bytes(7) == 2,
@@ -127,6 +129,8 @@ fn compiled_core_self_test_passes() {
 
 #[cfg(feature = "mojo-runtime")]
 pub mod context;
+#[cfg(feature = "mojo-routing")]
+pub mod control_plane_routing;
 #[cfg(feature = "mojo-rich")]
 pub mod log;
 #[cfg(feature = "mojo-runtime")]

@@ -10,6 +10,10 @@ repository.workspace = true
 name = "prodex_application"
 path = "src/lib.rs"
 
+[features]
+default = []
+mojo = ["dep:prodex_mojo_core", "prodex_mojo_core/mojo-routing"]
+
 [dependencies]
 prodex_authn = { workspace = true }
 prodex_authz = { workspace = true }
@@ -18,6 +22,7 @@ prodex_control_plane = { workspace = true }
 prodex_domain = { workspace = true }
 prodex_gateway_core = { workspace = true }
 prodex_gateway_http = { workspace = true }
+prodex_mojo_core = { workspace = true, optional = true }
 prodex_provider_spi = { workspace = true }
 prodex_provider_core = { workspace = true }
 prodex_observability = { workspace = true }
