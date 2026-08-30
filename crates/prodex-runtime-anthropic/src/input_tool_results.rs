@@ -65,6 +65,42 @@ pub fn runtime_proxy_translate_anthropic_error_tool_result_output(output_text: S
     format!("Error: {output_text}")
 }
 
+#[cfg(feature = "mojo")]
+pub fn runtime_proxy_translate_anthropic_shell_tool_result(
+    block: &serde_json::Value,
+    max_output_length: Option<u64>,
+) -> Result<Vec<serde_json::Value>> {
+    let (call_id, output_text, image_parts) =
+        runtime_proxy_translate_anthropic_tool_result_payload(block)?;
+    let image_parts_json = if image_parts.is_empty() {
+        None
+    } else {
+        Some(serde_json::to_string(&image_parts).context("failed to serialize Anthropic images")?)
+    };
+    let mut input = prodex_mojo_core::rich::RuntimeAnthropicKernelInput::new(
+        prodex_mojo_core::rich::RuntimeAnthropicKernelOperation::ShellToolResult,
+    );
+    input.id = Some(&call_id);
+    input.text = Some(&output_text);
+    input.content = image_parts_json.as_deref();
+    if block
+        .get("is_error")
+        .and_then(serde_json::Value::as_bool)
+        .unwrap_or(false)
+    {
+        input.flags |= prodex_mojo_core::rich::RUNTIME_ANTHROPIC_FLAG_ERROR;
+    }
+    if let Some(max_output_length) = max_output_length {
+        input.max_output_length = max_output_length;
+        input.flags |= prodex_mojo_core::rich::RUNTIME_ANTHROPIC_FLAG_MAX_OUTPUT_LENGTH;
+    }
+    Ok(crate::mojo::json(input)
+        .as_array()
+        .cloned()
+        .expect("Anthropic shell result output should be an array"))
+}
+
+#[cfg(not(feature = "mojo"))]
 pub fn runtime_proxy_translate_anthropic_shell_tool_result(
     block: &serde_json::Value,
     max_output_length: Option<u64>,
@@ -109,6 +145,46 @@ pub fn runtime_proxy_translate_anthropic_shell_tool_result(
     Ok(translated)
 }
 
+#[cfg(feature = "mojo")]
+pub fn runtime_proxy_translate_anthropic_computer_tool_result(
+    block: &serde_json::Value,
+) -> Result<Option<Vec<serde_json::Value>>> {
+    if block
+        .get("is_error")
+        .and_then(serde_json::Value::as_bool)
+        .unwrap_or(false)
+    {
+        return Ok(None);
+    }
+    let call_id = block
+        .get("tool_use_id")
+        .and_then(serde_json::Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .context("Anthropic tool_result block requires a non-empty tool_use_id")?;
+    let image_url = match block.get("content") {
+        Some(serde_json::Value::Array(items)) if items.len() == 1 => items
+            .first()
+            .and_then(runtime_proxy_anthropic_image_data_url),
+        Some(serde_json::Value::Object(object)) => {
+            runtime_proxy_anthropic_image_data_url(&serde_json::Value::Object(object.clone()))
+        }
+        _ => None,
+    };
+    let Some(image_url) = image_url else {
+        return Ok(None);
+    };
+    let mut input = prodex_mojo_core::rich::RuntimeAnthropicKernelInput::new(
+        prodex_mojo_core::rich::RuntimeAnthropicKernelOperation::ComputerToolResult,
+    );
+    input.id = Some(call_id);
+    input.text = Some(&image_url);
+    Ok(Some(crate::mojo::json(input).as_array().cloned().expect(
+        "Anthropic computer result output should be an array",
+    )))
+}
+
+#[cfg(not(feature = "mojo"))]
 pub fn runtime_proxy_translate_anthropic_computer_tool_result(
     block: &serde_json::Value,
 ) -> Result<Option<Vec<serde_json::Value>>> {
@@ -428,6 +504,30 @@ pub fn runtime_proxy_normalize_anthropic_tool_result_text(text: &str) -> Option<
     Some(serde_json::Value::Object(output).to_string())
 }
 
+#[cfg(feature = "mojo")]
+pub fn runtime_proxy_translate_anthropic_tool_result(
+    block: &serde_json::Value,
+) -> Result<Vec<serde_json::Value>> {
+    let (call_id, output_text, image_parts) =
+        runtime_proxy_translate_anthropic_tool_result_payload(block)?;
+    let image_parts_json = if image_parts.is_empty() {
+        None
+    } else {
+        Some(serde_json::to_string(&image_parts).context("failed to serialize Anthropic images")?)
+    };
+    let mut input = prodex_mojo_core::rich::RuntimeAnthropicKernelInput::new(
+        prodex_mojo_core::rich::RuntimeAnthropicKernelOperation::FunctionCallOutput,
+    );
+    input.id = Some(&call_id);
+    input.text = Some(&output_text);
+    input.content = image_parts_json.as_deref();
+    Ok(crate::mojo::json(input)
+        .as_array()
+        .cloned()
+        .expect("Anthropic tool result output should be an array"))
+}
+
+#[cfg(not(feature = "mojo"))]
 pub fn runtime_proxy_translate_anthropic_tool_result(
     block: &serde_json::Value,
 ) -> Result<Vec<serde_json::Value>> {

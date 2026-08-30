@@ -23,6 +23,8 @@ pub fn runtime_anthropic_first_event_retry_allowed(
 
 mod input;
 mod models;
+#[cfg(feature = "mojo")]
+mod mojo;
 mod output;
 mod tools;
 

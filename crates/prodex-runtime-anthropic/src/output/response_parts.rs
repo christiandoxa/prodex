@@ -10,6 +10,12 @@ pub fn runtime_anthropic_json_response_parts(
     }
 }
 
+#[cfg(feature = "mojo")]
+pub fn runtime_anthropic_sse_event_bytes(event_type: &str, data: serde_json::Value) -> Vec<u8> {
+    crate::mojo::sse_event(event_type, &data)
+}
+
+#[cfg(not(feature = "mojo"))]
 pub fn runtime_anthropic_sse_event_bytes(event_type: &str, data: serde_json::Value) -> Vec<u8> {
     format!(
         "event: {event_type}\ndata: {}\n\n",
@@ -18,6 +24,18 @@ pub fn runtime_anthropic_sse_event_bytes(event_type: &str, data: serde_json::Val
     .into_bytes()
 }
 
+#[cfg(feature = "mojo")]
+pub fn runtime_anthropic_sse_response_parts_from_message_value(
+    value: serde_json::Value,
+) -> RuntimeBufferedResponseParts {
+    RuntimeBufferedResponseParts {
+        status: 200,
+        headers: vec![("Content-Type".to_string(), b"text/event-stream".to_vec())],
+        body: crate::mojo::message_sse(&value),
+    }
+}
+
+#[cfg(not(feature = "mojo"))]
 pub fn runtime_anthropic_sse_response_parts_from_message_value(
     value: serde_json::Value,
 ) -> RuntimeBufferedResponseParts {

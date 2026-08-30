@@ -32,6 +32,7 @@ mojo-core = [
     "mojo-routing",
     "prodex_application/mojo",
     "prodex_provider_core/mojo",
+    "runtime_anthropic_crate/mojo",
     "prodex_runtime_tuning/mojo",
     "dep:prodex_mojo_core",
     "prodex_mojo_core/mojo-core",
