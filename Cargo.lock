@@ -3036,7 +3036,6 @@ dependencies = [
 name = "prodex-domain"
 version = "0.419.1"
 dependencies = [
- "prodex-mojo-core",
  "serde",
  "serde_json",
  "sha2 0.11.0",
