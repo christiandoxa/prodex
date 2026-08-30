@@ -1,10 +1,7 @@
 //! Gemini local context ignore/filter rules, including gitignore and geminiignore handling.
 
 use super::super::super::gemini_request_io::runtime_gemini_read_text_limited;
-use super::path_match::{
-    runtime_gemini_context_match_path, runtime_gemini_glob_matches,
-    runtime_gemini_glob_segment_matches,
-};
+use super::path_match::{runtime_gemini_context_match_path, runtime_gemini_glob_matches};
 use super::{RUNTIME_GEMINI_CONTEXT_DEPTH_LIMIT, RUNTIME_GEMINI_CONTEXT_SCAN_LIMIT};
 use prodex_provider_core::{
     gemini_provider_core_collect_string_values, gemini_provider_core_skip_context_path_name,
@@ -368,7 +365,7 @@ fn runtime_gemini_ignore_pattern_matches(pattern: &str, path: &str, directory_on
         return false;
     }
     if pattern.contains('/') {
-        if runtime_gemini_glob_matches(&pattern, &path) {
+        if runtime_gemini_glob_matches(&pattern, &path).unwrap_or(true) {
             return true;
         }
         return directory_only
@@ -382,9 +379,9 @@ fn runtime_gemini_ignore_pattern_matches(pattern: &str, path: &str, directory_on
     } else {
         components.len()
     };
-    components[..component_limit].iter().any(|component| {
-        runtime_gemini_glob_segment_matches(pattern.as_bytes(), component.as_bytes())
-    })
+    components[..component_limit]
+        .iter()
+        .any(|component| runtime_gemini_glob_matches(&pattern, component).unwrap_or(true))
 }
 
 #[cfg(test)]

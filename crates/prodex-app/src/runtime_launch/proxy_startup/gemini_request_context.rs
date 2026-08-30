@@ -135,7 +135,7 @@ fn runtime_gemini_collect_glob_file_parts(
             break;
         }
         let candidate_match_path = runtime_gemini_context_match_path(&candidate, pattern);
-        if !runtime_gemini_glob_matches(pattern, &candidate_match_path)
+        if !runtime_gemini_glob_matches(pattern, &candidate_match_path).unwrap_or(false)
             || filter.is_excluded(&candidate, excludes)
         {
             continue;
