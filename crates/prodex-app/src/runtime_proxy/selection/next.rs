@@ -152,7 +152,7 @@ fn wait_for_cold_start_probe(
     };
 
     *waited_for_cold_start_probe = true;
-    let (_, precommit_budget) = runtime_proxy_precommit_budget(false, prepared.pressure_mode);
+    let (_, precommit_budget) = runtime_proxy_precommit_budget(false, false);
     let remaining_budget = precommit_budget.saturating_sub(selection_started_at.elapsed());
     let wait_budget = Duration::from_millis(shared.runtime_config.sync_probe_pressure_pause_ms)
         .min(remaining_budget);
