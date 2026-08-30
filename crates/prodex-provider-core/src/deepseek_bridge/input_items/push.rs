@@ -15,6 +15,41 @@ use super::super::{
     deepseek_provider_core_tool_call_thought_signature,
 };
 
+pub(super) fn deepseek_provider_core_chat_message(role: &str, content: &str) -> serde_json::Value {
+    #[cfg(feature = "mojo")]
+    {
+        let mut input = prodex_mojo_core::rich::DeepSeekKernelInput::new(
+            prodex_mojo_core::rich::DeepSeekKernelOperation::Message,
+        );
+        input.role = Some(role);
+        input.content = Some(content);
+        return deepseek_provider_core_mojo_value(input);
+    }
+    #[cfg(not(feature = "mojo"))]
+    serde_json::json!({"role": role, "content": content})
+}
+
+pub(super) fn deepseek_provider_core_chat_tool_message(
+    call_id: &str,
+    content: &str,
+) -> serde_json::Value {
+    #[cfg(feature = "mojo")]
+    {
+        let mut input = prodex_mojo_core::rich::DeepSeekKernelInput::new(
+            prodex_mojo_core::rich::DeepSeekKernelOperation::ToolMessage,
+        );
+        input.call_id = Some(call_id);
+        input.content = Some(content);
+        return deepseek_provider_core_mojo_value(input);
+    }
+    #[cfg(not(feature = "mojo"))]
+    serde_json::json!({
+        "role": "tool",
+        "tool_call_id": call_id,
+        "content": content,
+    })
+}
+
 pub(super) fn deepseek_provider_core_push_chat_tool_call_message(
     object: &serde_json::Map<String, serde_json::Value>,
     call_id: String,
@@ -22,22 +57,38 @@ pub(super) fn deepseek_provider_core_push_chat_tool_call_message(
 ) {
     let name = deepseek_provider_core_input_tool_call_name(object);
     let arguments = deepseek_provider_core_input_tool_call_arguments(object);
-    let mut tool_call = serde_json::json!({
-        "id": call_id,
-        "type": "function",
-        "function": {
-            "name": name,
-            "arguments": arguments,
-        },
-    });
-    if let Some(signature) = deepseek_provider_core_tool_call_thought_signature(object) {
-        tool_call["gemini_thought_signature"] = serde_json::Value::String(signature);
+    #[cfg(feature = "mojo")]
+    {
+        let signature = deepseek_provider_core_tool_call_thought_signature(object);
+        let mut input = prodex_mojo_core::rich::DeepSeekKernelInput::new(
+            prodex_mojo_core::rich::DeepSeekKernelOperation::ToolCallMessage,
+        );
+        input.call_id = Some(&call_id);
+        input.name = Some(&name);
+        input.arguments = Some(&arguments);
+        input.signature = signature.as_deref();
+        messages.push(deepseek_provider_core_mojo_value(input));
+        return;
     }
-    messages.push(serde_json::json!({
-        "role": "assistant",
-        "content": "",
-        "tool_calls": [tool_call],
-    }));
+    #[cfg(not(feature = "mojo"))]
+    {
+        let mut tool_call = serde_json::json!({
+            "id": call_id,
+            "type": "function",
+            "function": {
+                "name": name,
+                "arguments": arguments,
+            },
+        });
+        if let Some(signature) = deepseek_provider_core_tool_call_thought_signature(object) {
+            tool_call["gemini_thought_signature"] = serde_json::Value::String(signature);
+        }
+        messages.push(serde_json::json!({
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [tool_call],
+        }));
+    }
 }
 
 pub(super) fn deepseek_provider_core_push_chat_custom_tool_call_message(
@@ -114,17 +165,41 @@ pub(super) fn deepseek_provider_core_push_chat_tool_call_message_with_arguments(
     arguments: String,
     messages: &mut Vec<serde_json::Value>,
 ) {
-    let tool_call = serde_json::json!({
-        "id": call_id,
-        "type": "function",
-        "function": {
-            "name": name,
-            "arguments": arguments,
-        },
-    });
-    messages.push(serde_json::json!({
-        "role": "assistant",
-        "content": "",
-        "tool_calls": [tool_call],
-    }));
+    #[cfg(feature = "mojo")]
+    {
+        let mut input = prodex_mojo_core::rich::DeepSeekKernelInput::new(
+            prodex_mojo_core::rich::DeepSeekKernelOperation::ToolCallMessage,
+        );
+        input.call_id = Some(&call_id);
+        input.name = Some(&name);
+        input.arguments = Some(&arguments);
+        messages.push(deepseek_provider_core_mojo_value(input));
+        return;
+    }
+    #[cfg(not(feature = "mojo"))]
+    {
+        let tool_call = serde_json::json!({
+            "id": call_id,
+            "type": "function",
+            "function": {
+                "name": name,
+                "arguments": arguments,
+            },
+        });
+        messages.push(serde_json::json!({
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [tool_call],
+        }));
+    }
+}
+
+#[cfg(feature = "mojo")]
+fn deepseek_provider_core_mojo_value(
+    input: prodex_mojo_core::rich::DeepSeekKernelInput<'_>,
+) -> serde_json::Value {
+    let body = prodex_mojo_core::rich::deepseek_kernel(input)
+        .unwrap_or_else(|error| panic!("DeepSeek Mojo kernel failed: {error:?}"));
+    serde_json::from_slice(&body)
+        .unwrap_or_else(|error| panic!("DeepSeek Mojo kernel returned invalid JSON: {error}"))
 }

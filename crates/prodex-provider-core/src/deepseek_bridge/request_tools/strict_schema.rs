@@ -1,5 +1,6 @@
 //! DeepSeek strict function-tool schema sanitizer.
 
+#[cfg(not(feature = "mojo"))]
 pub(super) fn deepseek_provider_core_sanitize_strict_schema(
     schema: &mut serde_json::Value,
     path: &str,
@@ -68,6 +69,88 @@ pub(super) fn deepseek_provider_core_sanitize_strict_schema(
     }
 }
 
+#[cfg(feature = "mojo")]
+pub(super) fn deepseek_provider_core_validate_strict_schema(
+    schema: &serde_json::Value,
+    path: &str,
+    provider_label: &str,
+) -> Result<(), String> {
+    let Some(object) = schema.as_object() else {
+        return Err(format!(
+            "{provider_label} strict tool schema `{path}` must be a JSON object"
+        ));
+    };
+    deepseek_provider_core_reject_strict_schema_keywords(object, path, provider_label)?;
+    if let Some(any_of) = object.get("anyOf") {
+        let Some(items) = any_of.as_array() else {
+            return Err(format!(
+                "{provider_label} strict tool schema `{path}.anyOf` must be an array"
+            ));
+        };
+        for (index, item) in items.iter().enumerate() {
+            deepseek_provider_core_validate_strict_schema(
+                item,
+                &format!("{path}.anyOf[{index}]"),
+                provider_label,
+            )?;
+        }
+        return Ok(());
+    }
+    if let Some(enum_values) = object.get("enum")
+        && !enum_values.is_array()
+    {
+        return Err(format!(
+            "{provider_label} strict tool schema `{path}.enum` must be an array"
+        ));
+    }
+    let schema_type = object.get("type").map_or(Ok("object"), |value| {
+        value.as_str().ok_or_else(|| {
+            format!("{provider_label} strict tool schema `{path}.type` must be a string")
+        })
+    })?;
+    if !matches!(
+        schema_type,
+        "object" | "string" | "number" | "integer" | "boolean" | "array"
+    ) {
+        return Err(format!(
+            "{provider_label} strict tool schema `{path}` uses unsupported type `{schema_type}`"
+        ));
+    }
+    match schema_type {
+        "object" => {
+            if let Some(properties) = object.get("properties") {
+                let Some(properties) = properties.as_object() else {
+                    return Err(format!(
+                        "{provider_label} strict tool schema `{path}.properties` must be an object"
+                    ));
+                };
+                for (name, property) in properties {
+                    deepseek_provider_core_validate_strict_schema(
+                        property,
+                        &format!("{path}.{name}"),
+                        provider_label,
+                    )?;
+                }
+            }
+        }
+        "array" => {
+            let Some(items) = object.get("items") else {
+                return Err(format!(
+                    "{provider_label} strict tool schema `{path}` array requires items"
+                ));
+            };
+            deepseek_provider_core_validate_strict_schema(
+                items,
+                &format!("{path}.items"),
+                provider_label,
+            )?;
+        }
+        _ => {}
+    }
+    Ok(())
+}
+
+#[cfg(not(feature = "mojo"))]
 fn deepseek_provider_core_sanitize_strict_object_schema(
     object: &mut serde_json::Map<String, serde_json::Value>,
     path: &str,

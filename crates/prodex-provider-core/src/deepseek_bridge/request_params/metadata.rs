@@ -16,6 +16,18 @@ pub fn deepseek_provider_core_response_format_from_responses_request(
         .unwrap_or_default();
     match format_type {
         "json_object" | "json_schema" | "json" | "structured_output" => {
+            #[cfg(feature = "mojo")]
+            {
+                let mut input =
+                    super::DeepSeekKernelInput::new(super::DeepSeekKernelOperation::ResponseFormat);
+                input.role = Some(format_type);
+                return super::deepseek_provider_core_mojo_value(input)
+                    .map(Some)
+                    .map_err(|error| {
+                        format!("{provider_label} response_format could not be normalized: {error}")
+                    });
+            }
+            #[cfg(not(feature = "mojo"))]
             Ok(Some(serde_json::json!({"type": "json_object"})))
         }
         "text" => Ok(None),

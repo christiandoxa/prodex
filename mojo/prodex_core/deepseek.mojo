@@ -37,6 +37,12 @@ comptime DEEPSEEK_TEXT_DELTA_SOURCE: Int64 = 23
 comptime DEEPSEEK_SSE_FUNCTION_CALL_DELTA: Int64 = 24
 comptime DEEPSEEK_SSE_TEXT_DELTA: Int64 = 25
 comptime DEEPSEEK_RESPONSE_METADATA: Int64 = 26
+comptime DEEPSEEK_STRICT_FUNCTION_SCHEMA: Int64 = 27
+comptime DEEPSEEK_PRIMITIVE_REQUEST_FIELDS: Int64 = 28
+comptime DEEPSEEK_REASONING_PARAMETERS: Int64 = 29
+comptime DEEPSEEK_RESPONSE_FORMAT: Int64 = 30
+comptime DEEPSEEK_USER_ID: Int64 = 31
+comptime DEEPSEEK_JSON_MAX_DEPTH: Int64 = 256
 
 
 @fieldwise_init
@@ -138,15 +144,19 @@ def deepseek_put_hex_byte(
     return deepseek_put_byte(writer, high) and deepseek_put_byte(writer, low)
 
 
-def deepseek_put_json_string(
+def deepseek_put_json_string_range(
     writer: Pointer[mut=True, DeepSeekResponseWriter, _],
     view: ProdexRichStringView,
+    start: Int64,
+    end: Int64,
 ) -> Bool:
+    if start < 0 or end < start or end > Int64(view.len):
+        return False
     if not deepseek_put_byte(writer, 34):
         return False
-    if view.len > 0:
+    if end > start:
         var ptr = rich_view_ptr(view)
-        for index in range(Int64(view.len)):
+        for index in range(start, end):
             var value = ptr[unsafe_offset=index]
             if value == 34 or value == 92:
                 if not deepseek_put_byte(writer, 92) or not deepseek_put_byte(writer, value):
@@ -172,6 +182,13 @@ def deepseek_put_json_string(
             elif not deepseek_put_byte(writer, value):
                 return False
     return deepseek_put_byte(writer, 34)
+
+
+def deepseek_put_json_string(
+    writer: Pointer[mut=True, DeepSeekResponseWriter, _],
+    view: ProdexRichStringView,
+) -> Bool:
+    return deepseek_put_json_string_range(writer, view, 0, Int64(view.len))
 
 
 def deepseek_put_view(
@@ -255,6 +272,638 @@ def deepseek_put_view_range(
     return True
 
 
+# These scanners keep JSON parsing at the Rust boundary while letting the
+# DeepSeek kernel own the bounded rewrites that only need structural offsets.
+def deepseek_json_byte(view: ProdexRichStringView, index: Int64) -> UInt8:
+    return rich_view_ptr(view)[unsafe_offset=index]
+
+
+def deepseek_json_skip_ws(
+    view: ProdexRichStringView, start: Int64, end: Int64
+) -> Int64:
+    var index = start
+    while index < end:
+        var value = deepseek_json_byte(view, index)
+        if value != 9 and value != 10 and value != 13 and value != 32:
+            break
+        index += 1
+    return index
+
+
+def deepseek_json_string_end(
+    view: ProdexRichStringView, start: Int64, end: Int64
+) -> Int64:
+    if start < 0 or start >= end or deepseek_json_byte(view, start) != 34:
+        return -1
+    var index = start + 1
+    while index < end:
+        var value = deepseek_json_byte(view, index)
+        if value == 92:
+            if index + 1 >= end:
+                return -1
+            index += 2
+        elif value == 34:
+            return index + 1
+        elif value < 32:
+            return -1
+        else:
+            index += 1
+    return -1
+
+
+def deepseek_json_value_end(
+    view: ProdexRichStringView,
+    start: Int64,
+    end: Int64,
+    depth: Int64,
+) -> Int64:
+    if depth > DEEPSEEK_JSON_MAX_DEPTH:
+        return -1
+    var index = deepseek_json_skip_ws(view, start, end)
+    if index >= end:
+        return -1
+    var opening = deepseek_json_byte(view, index)
+    if opening == 34:
+        return deepseek_json_string_end(view, index, end)
+    if opening == 91:
+        index += 1
+        index = deepseek_json_skip_ws(view, index, end)
+        if index < end and deepseek_json_byte(view, index) == 93:
+            return index + 1
+        while index < end:
+            var value_end = deepseek_json_value_end(view, index, end, depth + 1)
+            if value_end < 0:
+                return -1
+            index = deepseek_json_skip_ws(view, value_end, end)
+            if index < end and deepseek_json_byte(view, index) == 44:
+                index = deepseek_json_skip_ws(view, index + 1, end)
+                continue
+            if index < end and deepseek_json_byte(view, index) == 93:
+                return index + 1
+            return -1
+        return -1
+    if opening == 123:
+        index += 1
+        index = deepseek_json_skip_ws(view, index, end)
+        if index < end and deepseek_json_byte(view, index) == 125:
+            return index + 1
+        while index < end:
+            var key_end = deepseek_json_string_end(view, index, end)
+            if key_end < 0:
+                return -1
+            index = deepseek_json_skip_ws(view, key_end, end)
+            if index >= end or deepseek_json_byte(view, index) != 58:
+                return -1
+            index = deepseek_json_skip_ws(view, index + 1, end)
+            var value_end = deepseek_json_value_end(view, index, end, depth + 1)
+            if value_end < 0:
+                return -1
+            index = deepseek_json_skip_ws(view, value_end, end)
+            if index < end and deepseek_json_byte(view, index) == 44:
+                index = deepseek_json_skip_ws(view, index + 1, end)
+                continue
+            if index < end and deepseek_json_byte(view, index) == 125:
+                return index + 1
+            return -1
+        return -1
+    var primitive_start = index
+    while index < end:
+        var value = deepseek_json_byte(view, index)
+        if value == 9 or value == 10 or value == 13 or value == 32 or value == 44 or value == 93 or value == 125:
+            break
+        index += 1
+    if index == primitive_start:
+        return -1
+    return index
+
+
+def deepseek_json_object_member(
+    view: ProdexRichStringView,
+    object_start: Int64,
+    object_end: Int64,
+    key: StringSlice,
+) -> InlineArray[Int64, 2]:
+    var result = InlineArray[Int64, 2](fill=-1)
+    if object_start < 0 or object_end > Int64(view.len) or object_end <= object_start + 1:
+        return result^
+    if deepseek_json_byte(view, object_start) != 123 or deepseek_json_byte(view, object_end - 1) != 125:
+        return result^
+    var index = deepseek_json_skip_ws(view, object_start + 1, object_end - 1)
+    while index < object_end - 1:
+        var key_start = index
+        var key_end = deepseek_json_string_end(view, key_start, object_end - 1)
+        if key_end < 0:
+            return InlineArray[Int64, 2](fill=-1)^
+        index = deepseek_json_skip_ws(view, key_end, object_end - 1)
+        if index >= object_end - 1 or deepseek_json_byte(view, index) != 58:
+            return InlineArray[Int64, 2](fill=-1)^
+        var value_start = deepseek_json_skip_ws(view, index + 1, object_end - 1)
+        var value_end = deepseek_json_value_end(view, value_start, object_end - 1, 0)
+        if value_end < 0:
+            return InlineArray[Int64, 2](fill=-1)^
+        if deepseek_json_raw_equals(view, key_start, key_end, key):
+            result[0] = value_start
+            result[1] = value_end
+        index = deepseek_json_skip_ws(view, value_end, object_end - 1)
+        if index < object_end - 1 and deepseek_json_byte(view, index) == 44:
+            index = deepseek_json_skip_ws(view, index + 1, object_end - 1)
+            continue
+        if index == object_end - 1:
+            break
+        return InlineArray[Int64, 2](fill=-1)^
+    return result^
+
+
+def deepseek_json_raw_equals(
+    view: ProdexRichStringView,
+    start: Int64,
+    end: Int64,
+    literal: StringSlice,
+) -> Bool:
+    if start < 0 or end < start + 2:
+        return False
+    if deepseek_json_byte(view, start) != 34 or deepseek_json_byte(view, end - 1) != 34:
+        return False
+    var expected_length = Int64(literal.byte_length())
+    if end - start - 2 != expected_length:
+        return False
+    var expected = literal.unsafe_ptr()
+    var actual = rich_view_ptr(view)
+    for index in range(expected_length):
+        if actual[unsafe_offset=start + 1 + index] != expected[unsafe_offset=index]:
+            return False
+    return True
+
+
+def deepseek_json_fragment_valid(view: ProdexRichStringView) -> Bool:
+    if view.len == 0:
+        return False
+    var start = deepseek_json_skip_ws(view, 0, Int64(view.len))
+    var value_end = deepseek_json_value_end(view, start, Int64(view.len), 0)
+    return value_end >= 0 and deepseek_json_skip_ws(view, value_end, Int64(view.len)) == Int64(view.len)
+
+
+def deepseek_put_raw_json_member(
+    writer: Pointer[mut=True, DeepSeekResponseWriter, _],
+    key: StringSlice,
+    view: ProdexRichStringView,
+    start: Int64,
+    end: Int64,
+) -> Bool:
+    return deepseek_put_literal(writer, key) and deepseek_put_view_range(writer, view, start, end)
+
+
+def deepseek_put_request_raw_member(
+    writer: Pointer[mut=True, DeepSeekResponseWriter, _],
+    key: StringSlice,
+    view: ProdexRichStringView,
+    bounds: InlineArray[Int64, 2],
+    first: Pointer[mut=True, Bool, _],
+) -> Bool:
+    if bounds[0] < 0 or bounds[1] < bounds[0]:
+        return True
+    if not first[] and not deepseek_put_byte(writer, 44):
+        return False
+    first[] = False
+    return deepseek_put_raw_json_member(writer, key, view, bounds[0], bounds[1])
+
+
+def deepseek_schema_write_any_of_array(
+    view: ProdexRichStringView,
+    start: Int64,
+    end: Int64,
+    writer: Pointer[mut=True, DeepSeekResponseWriter, _],
+    depth: Int64,
+) -> Bool:
+    if start < 0 or end <= start + 1 or deepseek_json_byte(view, start) != 91 or deepseek_json_byte(view, end - 1) != 93:
+        return False
+    if not deepseek_put_byte(writer, 91):
+        return False
+    var first = True
+    var index = deepseek_json_skip_ws(view, start + 1, end - 1)
+    if index < end - 1 and deepseek_json_byte(view, index) == 93:
+        return deepseek_put_byte(writer, 93)
+    while index < end - 1:
+        var value_end = deepseek_json_value_end(view, index, end - 1, depth + 1)
+        if value_end < 0:
+            return False
+        if not first and not deepseek_put_byte(writer, 44):
+            return False
+        first = False
+        if not deepseek_schema_write(view, index, value_end, writer, depth + 1):
+            return False
+        index = deepseek_json_skip_ws(view, value_end, end - 1)
+        if index < end - 1 and deepseek_json_byte(view, index) == 44:
+            index = deepseek_json_skip_ws(view, index + 1, end - 1)
+            continue
+        if index < end - 1 and deepseek_json_byte(view, index) == 93:
+            return deepseek_put_byte(writer, 93)
+        return False
+    return False
+
+
+def deepseek_schema_write_any_of(
+    view: ProdexRichStringView,
+    start: Int64,
+    end: Int64,
+    writer: Pointer[mut=True, DeepSeekResponseWriter, _],
+) -> Bool:
+    if not deepseek_put_byte(writer, 123):
+        return False
+    var first = True
+    var index = deepseek_json_skip_ws(view, start + 1, end - 1)
+    while index < end - 1:
+        var key_start = index
+        var key_end = deepseek_json_string_end(view, key_start, end - 1)
+        if key_end < 0:
+            return False
+        index = deepseek_json_skip_ws(view, key_end, end - 1)
+        if index >= end - 1 or deepseek_json_byte(view, index) != 58:
+            return False
+        var value_start = deepseek_json_skip_ws(view, index + 1, end - 1)
+        var value_end = deepseek_json_value_end(view, value_start, end - 1, 0)
+        if value_end < 0:
+            return False
+        if not first and not deepseek_put_byte(writer, 44):
+            return False
+        first = False
+        if not deepseek_put_view_range(writer, view, key_start, key_end) or not deepseek_put_byte(writer, 58):
+            return False
+        if deepseek_json_raw_equals(view, key_start, key_end, StringSlice("anyOf")):
+            if not deepseek_schema_write_any_of_array(view, value_start, value_end, writer, 0):
+                return False
+        elif not deepseek_put_view_range(writer, view, value_start, value_end):
+            return False
+        index = deepseek_json_skip_ws(view, value_end, end - 1)
+        if index < end - 1 and deepseek_json_byte(view, index) == 44:
+            index = deepseek_json_skip_ws(view, index + 1, end - 1)
+            continue
+        if index == end - 1:
+            break
+        return False
+    return deepseek_put_byte(writer, 125)
+
+
+def deepseek_schema_write_properties(
+    view: ProdexRichStringView,
+    start: Int64,
+    end: Int64,
+    writer: Pointer[mut=True, DeepSeekResponseWriter, _],
+    depth: Int64,
+) -> Bool:
+    if start < 0:
+        return deepseek_put_literal(writer, StringSlice("{}"))
+    if end <= start + 1 or deepseek_json_byte(view, start) != 123 or deepseek_json_byte(view, end - 1) != 125:
+        return False
+    if not deepseek_put_byte(writer, 123):
+        return False
+    var first = True
+    var index = deepseek_json_skip_ws(view, start + 1, end - 1)
+    while index < end - 1:
+        var key_start = index
+        var key_end = deepseek_json_string_end(view, key_start, end - 1)
+        if key_end < 0:
+            return False
+        index = deepseek_json_skip_ws(view, key_end, end - 1)
+        if index >= end - 1 or deepseek_json_byte(view, index) != 58:
+            return False
+        var value_start = deepseek_json_skip_ws(view, index + 1, end - 1)
+        var value_end = deepseek_json_value_end(view, value_start, end - 1, depth + 1)
+        if value_end < 0:
+            return False
+        if not first and not deepseek_put_byte(writer, 44):
+            return False
+        first = False
+        if not deepseek_put_view_range(writer, view, key_start, key_end) or not deepseek_put_byte(writer, 58):
+            return False
+        if not deepseek_schema_write(view, value_start, value_end, writer, depth + 1):
+            return False
+        index = deepseek_json_skip_ws(view, value_end, end - 1)
+        if index < end - 1 and deepseek_json_byte(view, index) == 44:
+            index = deepseek_json_skip_ws(view, index + 1, end - 1)
+            continue
+        if index == end - 1:
+            break
+        return False
+    return deepseek_put_byte(writer, 125)
+
+
+def deepseek_schema_write_required(
+    view: ProdexRichStringView,
+    start: Int64,
+    end: Int64,
+    writer: Pointer[mut=True, DeepSeekResponseWriter, _],
+) -> Bool:
+    if start < 0:
+        return deepseek_put_literal(writer, StringSlice("[]"))
+    if end <= start + 1 or deepseek_json_byte(view, start) != 123 or deepseek_json_byte(view, end - 1) != 125:
+        return False
+    if not deepseek_put_byte(writer, 91):
+        return False
+    var first = True
+    var index = deepseek_json_skip_ws(view, start + 1, end - 1)
+    while index < end - 1:
+        var key_start = index
+        var key_end = deepseek_json_string_end(view, key_start, end - 1)
+        if key_end < 0:
+            return False
+        index = deepseek_json_skip_ws(view, key_end, end - 1)
+        if index >= end - 1 or deepseek_json_byte(view, index) != 58:
+            return False
+        var value_start = deepseek_json_skip_ws(view, index + 1, end - 1)
+        var value_end = deepseek_json_value_end(view, value_start, end - 1, 0)
+        if value_end < 0:
+            return False
+        if not first and not deepseek_put_byte(writer, 44):
+            return False
+        first = False
+        if not deepseek_put_view_range(writer, view, key_start, key_end):
+            return False
+        index = deepseek_json_skip_ws(view, value_end, end - 1)
+        if index < end - 1 and deepseek_json_byte(view, index) == 44:
+            index = deepseek_json_skip_ws(view, index + 1, end - 1)
+            continue
+        if index == end - 1:
+            break
+        return False
+    return deepseek_put_byte(writer, 93)
+
+
+def deepseek_schema_write(
+    view: ProdexRichStringView,
+    start: Int64,
+    end: Int64,
+    writer: Pointer[mut=True, DeepSeekResponseWriter, _],
+    depth: Int64,
+) -> Bool:
+    if depth > DEEPSEEK_JSON_MAX_DEPTH or start < 0 or end <= start or deepseek_json_byte(view, start) != 123:
+        return False
+    var any_of = deepseek_json_object_member(view, start, end, StringSlice("anyOf"))
+    if any_of[0] >= 0:
+        return deepseek_schema_write_any_of(view, start, end, writer)
+
+    var type_bounds = deepseek_json_object_member(view, start, end, StringSlice("type"))
+    var is_object = type_bounds[0] < 0
+    var is_array = False
+    if type_bounds[0] >= 0:
+        if deepseek_json_byte(view, type_bounds[0]) != 34:
+            return False
+        if deepseek_json_raw_equals(view, type_bounds[0], type_bounds[1], StringSlice("object")):
+            is_object = True
+        elif deepseek_json_raw_equals(view, type_bounds[0], type_bounds[1], StringSlice("array")):
+            is_array = True
+        elif not (
+            deepseek_json_raw_equals(view, type_bounds[0], type_bounds[1], StringSlice("string"))
+            or deepseek_json_raw_equals(view, type_bounds[0], type_bounds[1], StringSlice("number"))
+            or deepseek_json_raw_equals(view, type_bounds[0], type_bounds[1], StringSlice("integer"))
+            or deepseek_json_raw_equals(view, type_bounds[0], type_bounds[1], StringSlice("boolean"))
+        ):
+            return False
+    if is_object:
+        var properties = deepseek_json_object_member(view, start, end, StringSlice("properties"))
+        if properties[0] >= 0 and deepseek_json_byte(view, properties[0]) != 123:
+            return False
+        if not deepseek_put_literal(writer, StringSlice('{"type":"object"')):
+            return False
+        var index = deepseek_json_skip_ws(view, start + 1, end - 1)
+        while index < end - 1:
+            var key_start = index
+            var key_end = deepseek_json_string_end(view, key_start, end - 1)
+            if key_end < 0:
+                return False
+            index = deepseek_json_skip_ws(view, key_end, end - 1)
+            if index >= end - 1 or deepseek_json_byte(view, index) != 58:
+                return False
+            var value_start = deepseek_json_skip_ws(view, index + 1, end - 1)
+            var value_end = deepseek_json_value_end(view, value_start, end - 1, 0)
+            if value_end < 0:
+                return False
+            if not (
+                deepseek_json_raw_equals(view, key_start, key_end, StringSlice("type"))
+                or deepseek_json_raw_equals(view, key_start, key_end, StringSlice("properties"))
+                or deepseek_json_raw_equals(view, key_start, key_end, StringSlice("required"))
+                or deepseek_json_raw_equals(view, key_start, key_end, StringSlice("additionalProperties"))
+            ):
+                if not deepseek_put_byte(writer, 44) or not deepseek_put_view_range(writer, view, key_start, key_end) or not deepseek_put_byte(writer, 58) or not deepseek_put_view_range(writer, view, value_start, value_end):
+                    return False
+            index = deepseek_json_skip_ws(view, value_end, end - 1)
+            if index < end - 1 and deepseek_json_byte(view, index) == 44:
+                index = deepseek_json_skip_ws(view, index + 1, end - 1)
+                continue
+            if index == end - 1:
+                break
+            return False
+        if not deepseek_put_literal(writer, StringSlice(',"properties":')) or not deepseek_schema_write_properties(view, properties[0], properties[1], writer, depth + 1):
+            return False
+        if not deepseek_put_literal(writer, StringSlice(',"required":')) or not deepseek_schema_write_required(view, properties[0], properties[1], writer):
+            return False
+        return deepseek_put_literal(writer, StringSlice(',"additionalProperties":false}'))
+    if is_array:
+        var items = deepseek_json_object_member(view, start, end, StringSlice("items"))
+        if items[0] < 0:
+            return False
+        if not deepseek_put_byte(writer, 123):
+            return False
+        var first = True
+        var index = deepseek_json_skip_ws(view, start + 1, end - 1)
+        while index < end - 1:
+            var key_start = index
+            var key_end = deepseek_json_string_end(view, key_start, end - 1)
+            if key_end < 0:
+                return False
+            index = deepseek_json_skip_ws(view, key_end, end - 1)
+            if index >= end - 1 or deepseek_json_byte(view, index) != 58:
+                return False
+            var value_start = deepseek_json_skip_ws(view, index + 1, end - 1)
+            var value_end = deepseek_json_value_end(view, value_start, end - 1, 0)
+            if value_end < 0:
+                return False
+            if deepseek_json_raw_equals(view, key_start, key_end, StringSlice("items")):
+                if not first and not deepseek_put_byte(writer, 44):
+                    return False
+                if not deepseek_put_literal(writer, StringSlice('"items":')) or not deepseek_schema_write(view, value_start, value_end, writer, depth + 1):
+                    return False
+            else:
+                if not first and not deepseek_put_byte(writer, 44):
+                    return False
+                if not deepseek_put_view_range(writer, view, key_start, key_end) or not deepseek_put_byte(writer, 58) or not deepseek_put_view_range(writer, view, value_start, value_end):
+                    return False
+            first = False
+            index = deepseek_json_skip_ws(view, value_end, end - 1)
+            if index < end - 1 and deepseek_json_byte(view, index) == 44:
+                index = deepseek_json_skip_ws(view, index + 1, end - 1)
+                continue
+            if index == end - 1:
+                break
+            return False
+        return deepseek_put_byte(writer, 125)
+    if not deepseek_put_byte(writer, 123):
+        return False
+    var first = True
+    var index = deepseek_json_skip_ws(view, start + 1, end - 1)
+    while index < end - 1:
+        var key_start = index
+        var key_end = deepseek_json_string_end(view, key_start, end - 1)
+        if key_end < 0:
+            return False
+        index = deepseek_json_skip_ws(view, key_end, end - 1)
+        if index >= end - 1 or deepseek_json_byte(view, index) != 58:
+            return False
+        var value_start = deepseek_json_skip_ws(view, index + 1, end - 1)
+        var value_end = deepseek_json_value_end(view, value_start, end - 1, 0)
+        if value_end < 0:
+            return False
+        if not first and not deepseek_put_byte(writer, 44):
+            return False
+        first = False
+        if not deepseek_put_view_range(writer, view, key_start, key_end) or not deepseek_put_byte(writer, 58) or not deepseek_put_view_range(writer, view, value_start, value_end):
+            return False
+        index = deepseek_json_skip_ws(view, value_end, end - 1)
+        if index < end - 1 and deepseek_json_byte(view, index) == 44:
+            index = deepseek_json_skip_ws(view, index + 1, end - 1)
+            continue
+        if index == end - 1:
+            break
+        return False
+    return deepseek_put_byte(writer, 125)
+
+
+def deepseek_put_primitive_request_fields(
+    writer: Pointer[mut=True, DeepSeekResponseWriter, _],
+    input: ProdexDeepSeekKernelInput,
+) -> Bool:
+    if input.input_present != 1 or not deepseek_json_fragment_valid(input.input):
+        return False
+    var source = input.input.copy()
+    var source_start = deepseek_json_skip_ws(source, 0, Int64(source.len))
+    var source_end = deepseek_json_value_end(source, source_start, Int64(source.len), 0)
+    if source_end != Int64(source.len) or source_start < 0 or deepseek_json_byte(source, source_start) != 123:
+        return False
+    var temperature = deepseek_json_object_member(source, source_start, source_end, StringSlice("temperature"))
+    var top_p = deepseek_json_object_member(source, source_start, source_end, StringSlice("top_p"))
+    var logprobs = deepseek_json_object_member(source, source_start, source_end, StringSlice("logprobs"))
+    var max_start: Int64 = -1
+    var max_end: Int64 = -1
+    for key in [StringSlice("max_output_tokens"), StringSlice("max_tokens"), StringSlice("max_completion_tokens")]:
+        var bounds = deepseek_json_object_member(source, source_start, source_end, key)
+        if bounds[0] >= 0:
+            max_start = bounds[0]
+            max_end = bounds[1]
+    if not deepseek_put_byte(writer, 123):
+        return False
+    var first = True
+    var first_ptr = Pointer(to=first)
+    if not deepseek_put_request_raw_member(writer, StringSlice('"temperature":'), source, temperature, first_ptr):
+        return False
+    if not deepseek_put_request_raw_member(writer, StringSlice('"top_p":'), source, top_p, first_ptr):
+        return False
+    var max_bounds = InlineArray[Int64, 2](fill=-1)
+    max_bounds[0] = max_start
+    max_bounds[1] = max_end
+    if not deepseek_put_request_raw_member(writer, StringSlice('"max_tokens":'), source, max_bounds, first_ptr):
+        return False
+    if not deepseek_put_request_raw_member(writer, StringSlice('"logprobs":'), source, logprobs, first_ptr):
+        return False
+    return deepseek_put_byte(writer, 125)
+
+
+def deepseek_trim_start(view: ProdexRichStringView) -> Int64:
+    var start: Int64 = 0
+    while start < Int64(view.len):
+        var value = deepseek_json_byte(view, start)
+        if value != 9 and value != 10 and value != 13 and value != 32:
+            break
+        start += 1
+    return start
+
+
+def deepseek_trim_end(view: ProdexRichStringView, start: Int64) -> Int64:
+    var end = Int64(view.len)
+    while end > start:
+        var value = deepseek_json_byte(view, end - 1)
+        if value != 9 and value != 10 and value != 13 and value != 32:
+            break
+        end -= 1
+    return end
+
+
+def deepseek_trimmed_ascii_equals(
+    view: ProdexRichStringView, literal: StringSlice
+) -> Bool:
+    var start = deepseek_trim_start(view)
+    var end = deepseek_trim_end(view, start)
+    var length = Int64(literal.byte_length())
+    if end - start != length:
+        return False
+    var expected = literal.unsafe_ptr()
+    var actual = rich_view_ptr(view)
+    for index in range(length):
+        var value = actual[unsafe_offset=start + index]
+        var wanted = expected[unsafe_offset=index]
+        if value >= 65 and value <= 90:
+            value += 32
+        if wanted >= 65 and wanted <= 90:
+            wanted += 32
+        if value != wanted:
+            return False
+    return True
+
+
+def deepseek_put_reasoning_parameters(
+    writer: Pointer[mut=True, DeepSeekResponseWriter, _],
+    input: ProdexDeepSeekKernelInput,
+) -> Bool:
+    if input.reasoning_content_present != 1 or input.reasoning_content.len == 0:
+        return False
+    var effort = input.reasoning_content.copy()
+    var is_xhigh = deepseek_trimmed_ascii_equals(effort, StringSlice("xhigh"))
+    var is_max = deepseek_trimmed_ascii_equals(effort, StringSlice("max"))
+    var is_high = deepseek_trimmed_ascii_equals(effort, StringSlice("high"))
+    var is_medium = deepseek_trimmed_ascii_equals(effort, StringSlice("medium"))
+    var is_low = deepseek_trimmed_ascii_equals(effort, StringSlice("low"))
+    var is_minimal = deepseek_trimmed_ascii_equals(effort, StringSlice("minimal"))
+    var is_none = deepseek_trimmed_ascii_equals(effort, StringSlice("none"))
+    if input.stream == 1:
+        if is_xhigh or is_max or is_high:
+            return deepseek_put_literal(writer, StringSlice('{"reasoning_effort":"high"}'))
+        if is_medium:
+            return deepseek_put_literal(writer, StringSlice('{"reasoning_effort":"medium"}'))
+        if is_low:
+            return deepseek_put_literal(writer, StringSlice('{"reasoning_effort":"low"}'))
+        if is_minimal:
+            return deepseek_put_literal(writer, StringSlice('{"reasoning_effort":"minimal"}'))
+        if is_none:
+            return deepseek_put_literal(writer, StringSlice('{"reasoning_effort":"none"}'))
+        return False
+    if is_xhigh or is_max:
+        return deepseek_put_literal(writer, StringSlice('{"thinking":{"type":"enabled"},"reasoning_effort":"max"}'))
+    if is_high or is_medium or is_low:
+        return deepseek_put_literal(writer, StringSlice('{"thinking":{"type":"enabled"},"reasoning_effort":"high"}'))
+    if is_minimal or is_none:
+        return deepseek_put_literal(writer, StringSlice('{"thinking":{"type":"disabled"}}'))
+    return False
+
+
+def deepseek_put_response_format(
+    writer: Pointer[mut=True, DeepSeekResponseWriter, _],
+    input: ProdexDeepSeekKernelInput,
+) -> Bool:
+    if input.role_present != 1 or input.role.len == 0:
+        return False
+    return deepseek_put_literal(writer, StringSlice('{"type":"json_object"}'))
+
+
+def deepseek_put_user_id(
+    writer: Pointer[mut=True, DeepSeekResponseWriter, _],
+    input: ProdexDeepSeekKernelInput,
+) -> Bool:
+    if input.input_present != 1:
+        return False
+    var start = deepseek_trim_start(input.input)
+    var end = deepseek_trim_end(input.input, start)
+    return deepseek_put_json_string_range(writer, input.input, start, end)
+
+
 def deepseek_put_function_call(
     writer: Pointer[mut=True, DeepSeekResponseWriter, _],
     input: ProdexDeepSeekKernelInput,
@@ -302,6 +951,22 @@ def deepseek_write_operation(
     input: ProdexDeepSeekKernelInput,
 ) -> Bool:
     var operation = input.operation
+    if operation == DEEPSEEK_STRICT_FUNCTION_SCHEMA:
+        if not deepseek_json_fragment_valid(input.input):
+            return False
+        var start = deepseek_json_skip_ws(input.input, 0, Int64(input.input.len))
+        var end = deepseek_json_value_end(input.input, start, Int64(input.input.len), 0)
+        if end != Int64(input.input.len):
+            return False
+        return deepseek_schema_write(input.input, start, end, writer, 0)
+    if operation == DEEPSEEK_PRIMITIVE_REQUEST_FIELDS:
+        return deepseek_put_primitive_request_fields(writer, input)
+    if operation == DEEPSEEK_REASONING_PARAMETERS:
+        return deepseek_put_reasoning_parameters(writer, input)
+    if operation == DEEPSEEK_RESPONSE_FORMAT:
+        return deepseek_put_response_format(writer, input)
+    if operation == DEEPSEEK_USER_ID:
+        return deepseek_put_user_id(writer, input)
     if operation == DEEPSEEK_REQUEST_BODY:
         if not deepseek_put_literal(writer, StringSlice('{"model":')) or not deepseek_put_json_string(writer, input.model):
             return False
@@ -539,6 +1204,9 @@ def deepseek_flag_valid(value: Int64) -> Bool:
 
 def deepseek_input_valid(input: ProdexDeepSeekKernelInput) -> Bool:
     return (
+        input.operation >= DEEPSEEK_REQUEST_BODY
+        and input.operation <= DEEPSEEK_USER_ID
+        and
         deepseek_flag_valid(input.stream)
         and deepseek_flag_valid(input.response_id_present)
         and deepseek_flag_valid(input.call_id_present)

@@ -13,6 +13,7 @@ pub use self::history::{
     deepseek_provider_core_tool_call_ids, deepseek_provider_core_tool_output_call_ids,
 };
 use self::push::{
+    deepseek_provider_core_chat_message, deepseek_provider_core_chat_tool_message,
     deepseek_provider_core_input_tool_call_id, deepseek_provider_core_input_tool_output_call_id,
     deepseek_provider_core_input_tool_output_text, deepseek_provider_core_mcp_call_has_result,
     deepseek_provider_core_push_chat_custom_tool_call_message,
@@ -67,6 +68,15 @@ pub fn deepseek_provider_core_validate_supported_input_item(
 }
 
 pub fn deepseek_provider_core_system_message(content: &str) -> serde_json::Value {
+    #[cfg(feature = "mojo")]
+    {
+        let mut input = prodex_mojo_core::rich::DeepSeekKernelInput::new(
+            prodex_mojo_core::rich::DeepSeekKernelOperation::SystemMessage,
+        );
+        input.content = Some(content);
+        return deepseek_provider_core_mojo_value(input);
+    }
+    #[cfg(not(feature = "mojo"))]
     serde_json::json!({
         "role": "system",
         "content": content,
@@ -74,6 +84,15 @@ pub fn deepseek_provider_core_system_message(content: &str) -> serde_json::Value
 }
 
 pub fn deepseek_provider_core_user_message(content: &str) -> serde_json::Value {
+    #[cfg(feature = "mojo")]
+    {
+        let mut input = prodex_mojo_core::rich::DeepSeekKernelInput::new(
+            prodex_mojo_core::rich::DeepSeekKernelOperation::UserMessage,
+        );
+        input.content = Some(content);
+        return deepseek_provider_core_mojo_value(input);
+    }
+    #[cfg(not(feature = "mojo"))]
     serde_json::json!({
         "role": "user",
         "content": content,
@@ -165,10 +184,7 @@ fn deepseek_provider_core_push_message_item(
         return;
     }
     if !text.trim().is_empty() {
-        messages.push(serde_json::json!({
-            "role": role,
-            "content": text,
-        }));
+        messages.push(deepseek_provider_core_chat_message(role, &text));
     }
 }
 
@@ -194,11 +210,10 @@ fn deepseek_provider_core_push_tool_output_item(
     if replayed_tool_output_call_ids.contains(&call_id) {
         return;
     }
-    messages.push(serde_json::json!({
-        "role": "tool",
-        "tool_call_id": call_id,
-        "content": deepseek_provider_core_input_tool_output_text(object),
-    }));
+    messages.push(deepseek_provider_core_chat_tool_message(
+        &call_id,
+        &deepseek_provider_core_input_tool_output_text(object),
+    ));
 }
 
 fn deepseek_provider_core_push_mcp_call_item(
@@ -214,10 +229,19 @@ fn deepseek_provider_core_push_mcp_call_item(
     if deepseek_provider_core_mcp_call_has_result(object)
         && !replayed_tool_output_call_ids.contains(&call_id)
     {
-        messages.push(serde_json::json!({
-            "role": "tool",
-            "tool_call_id": call_id,
-            "content": deepseek_provider_core_input_tool_output_text(object),
-        }));
+        messages.push(deepseek_provider_core_chat_tool_message(
+            &call_id,
+            &deepseek_provider_core_input_tool_output_text(object),
+        ));
     }
+}
+
+#[cfg(feature = "mojo")]
+fn deepseek_provider_core_mojo_value(
+    input: prodex_mojo_core::rich::DeepSeekKernelInput<'_>,
+) -> serde_json::Value {
+    let body = prodex_mojo_core::rich::deepseek_kernel(input)
+        .unwrap_or_else(|error| panic!("DeepSeek Mojo kernel failed: {error:?}"));
+    serde_json::from_slice(&body)
+        .unwrap_or_else(|error| panic!("DeepSeek Mojo kernel returned invalid JSON: {error}"))
 }
