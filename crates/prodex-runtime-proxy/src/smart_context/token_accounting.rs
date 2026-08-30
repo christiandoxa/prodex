@@ -17,6 +17,10 @@ use oracle::smart_context_observed_token_accounting_from_decision;
 use std::collections::BTreeSet;
 
 pub fn smart_context_token_budget_tier(available_tokens: usize) -> SmartContextTokenBudgetTier {
+    #[cfg(feature = "mojo")]
+    return smart_context_u64_budget_tier(u64::try_from(available_tokens).unwrap_or(u64::MAX));
+
+    #[cfg(not(feature = "mojo"))]
     match available_tokens {
         16_000.. => SmartContextTokenBudgetTier::Exact,
         8_000..=15_999 => SmartContextTokenBudgetTier::Large,
@@ -59,80 +63,14 @@ pub fn smart_context_memory_capsule_token_budget(
     accounting: &SmartContextObservedTokenAccounting,
     policy: &SmartContextAdaptiveBudgetPolicy,
 ) -> usize {
-    if smart_context_memory_capsule_policy_allows_unbounded_budget(accounting, policy) {
-        return usize::MAX;
-    }
-    if !smart_context_memory_capsule_policy_allows_bounded_budget(accounting, policy) {
-        return 0;
-    }
-
-    let Some(available_context_tokens) = accounting.available_context_tokens else {
-        return 0;
-    };
-
-    let mode_budget = match policy.mode {
-        SmartContextBudgetMode::MinimalRefsOnly => {
-            SMART_CONTEXT_MEMORY_CAPSULE_MINIMAL_TOKEN_BUDGET
-        }
-        SmartContextBudgetMode::ArtifactCondensed => {
-            SMART_CONTEXT_MEMORY_CAPSULE_CONDENSED_TOKEN_BUDGET
-        }
-        SmartContextBudgetMode::LargeLossless => SMART_CONTEXT_MEMORY_CAPSULE_LARGE_TOKEN_BUDGET,
-        SmartContextBudgetMode::ExactPassThrough => match policy.tier {
-            SmartContextTokenBudgetTier::Exact | SmartContextTokenBudgetTier::Large => {
-                SMART_CONTEXT_MEMORY_CAPSULE_LARGE_TOKEN_BUDGET
-            }
-            SmartContextTokenBudgetTier::Condensed => {
-                SMART_CONTEXT_MEMORY_CAPSULE_CONDENSED_TOKEN_BUDGET
-            }
-            SmartContextTokenBudgetTier::Minimal => {
-                SMART_CONTEXT_MEMORY_CAPSULE_MINIMAL_TOKEN_BUDGET
-            }
-        },
-    };
-
-    mode_budget
-        .min(smart_context_u64_saturating_usize(
-            policy.max_rehydrate_tokens,
-        ))
-        .min(smart_context_u64_saturating_usize(available_context_tokens))
+    super::normalization::smart_context_memory_capsule_token_budget_impl(accounting, policy)
 }
 
 pub fn smart_context_select_memory_capsules(
     capsules: impl IntoIterator<Item = SmartContextMemoryCapsule>,
     token_budget: usize,
 ) -> SmartContextMemoryCapsuleSelection {
-    let mut required = Vec::new();
-    let mut optional = Vec::new();
-    for capsule in capsules {
-        if capsule.required {
-            required.push(capsule);
-        } else {
-            optional.push(capsule);
-        }
-    }
-
-    required.sort_by(|left, right| left.id.cmp(&right.id));
-    optional.sort_by(smart_context_capsule_order);
-
-    let mut selected_ids = Vec::new();
-    let mut omitted_ids = Vec::new();
-    let mut used_tokens = 0usize;
-
-    for capsule in required.into_iter().chain(optional) {
-        if used_tokens.saturating_add(capsule.token_cost) <= token_budget {
-            used_tokens += capsule.token_cost;
-            selected_ids.push(capsule.id);
-        } else {
-            omitted_ids.push(capsule.id);
-        }
-    }
-
-    SmartContextMemoryCapsuleSelection {
-        selected_ids,
-        omitted_ids,
-        used_tokens,
-    }
+    super::normalization::smart_context_select_memory_capsules_impl(capsules, token_budget)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

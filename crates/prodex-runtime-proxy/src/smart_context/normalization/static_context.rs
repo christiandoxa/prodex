@@ -88,6 +88,18 @@ pub(in crate::smart_context) fn smart_context_static_context_prompt_cache_payloa
 }
 
 pub(in crate::smart_context) fn smart_context_static_context_noise_line(line: &str) -> bool {
+    #[cfg(feature = "mojo")]
+    {
+        return prodex_mojo_core::rich::smart_context_static_context_noise_line(line)
+            .expect("Mojo Smart Context static-context classifier returned invalid output");
+    }
+
+    #[cfg(not(feature = "mojo"))]
+    smart_context_static_context_noise_line_rust(line)
+}
+
+#[cfg(not(feature = "mojo"))]
+fn smart_context_static_context_noise_line_rust(line: &str) -> bool {
     let mut value = line.trim();
     if let Some(inner) = value
         .strip_prefix("<!--")
@@ -117,6 +129,7 @@ pub(in crate::smart_context) fn smart_context_static_context_noise_line(line: &s
     ) || smart_context_static_context_noise_value_looks_volatile(noise_value)
 }
 
+#[cfg(not(feature = "mojo"))]
 pub(in crate::smart_context) fn smart_context_static_context_noise_key(key: &str) -> String {
     let lower = key.trim().to_ascii_lowercase();
     let mut normalized = String::new();
@@ -144,6 +157,7 @@ pub(in crate::smart_context) fn smart_context_static_context_noise_key(key: &str
         .to_string()
 }
 
+#[cfg(not(feature = "mojo"))]
 pub(in crate::smart_context) fn smart_context_static_context_noise_key_is_volatile(
     key: &str,
 ) -> bool {
@@ -168,6 +182,7 @@ pub(in crate::smart_context) fn smart_context_static_context_noise_key_is_volati
     )
 }
 
+#[cfg(not(feature = "mojo"))]
 pub(in crate::smart_context) fn smart_context_static_context_noise_value_looks_volatile(
     value: &str,
 ) -> bool {

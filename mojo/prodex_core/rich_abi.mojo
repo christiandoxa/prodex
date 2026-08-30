@@ -43,6 +43,12 @@ from anthropic_request import anthropic_request_kernel_v1
 from openai_compat import openai_compat_kernel_v1
 # Kiro shares the rich ABI while keeping ACP transport and session behavior in Rust.
 from kiro import kiro_kernel_v1
+from smart_context_normalization import (
+    prodex_mojo_smart_context_normalization_v1,
+    prodex_mojo_smart_context_budget_tier_v1,
+    prodex_mojo_smart_context_memory_capsule_budget_v1,
+    prodex_mojo_smart_context_capsule_plan_v1,
+)
 
 
 comptime PRODEX_RICH_ABI_VERSION: Int64 = 6

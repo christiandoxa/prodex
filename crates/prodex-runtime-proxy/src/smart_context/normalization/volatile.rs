@@ -1,7 +1,25 @@
+#[cfg(not(feature = "mojo"))]
 use super::*;
 use std::borrow::Cow;
 
 pub fn smart_context_normalize_volatile_command_output(text: &str) -> Cow<'_, str> {
+    #[cfg(feature = "mojo")]
+    {
+        return Cow::Owned(
+            prodex_mojo_core::rich::normalize_smart_context_volatile(
+                text,
+                prodex_mojo_core::rich::SmartContextNormalizationMode::CommandOutput,
+            )
+            .expect("Mojo Smart Context volatile normalizer returned invalid output"),
+        );
+    }
+
+    #[cfg(not(feature = "mojo"))]
+    smart_context_normalize_volatile_command_output_rust(text)
+}
+
+#[cfg(not(feature = "mojo"))]
+fn smart_context_normalize_volatile_command_output_rust(text: &str) -> Cow<'_, str> {
     let mut normalized = String::with_capacity(text.len());
     let mut changed = false;
     let mut index = 0usize;
@@ -28,6 +46,7 @@ pub fn smart_context_normalize_volatile_command_output(text: &str) -> Cow<'_, st
     }
 }
 
+#[cfg(not(feature = "mojo"))]
 fn smart_context_command_output_replacement(
     text: &str,
     previous: Option<char>,
@@ -54,6 +73,23 @@ fn smart_context_command_output_replacement(
 }
 
 pub fn smart_context_normalize_volatile_static_context(text: &str) -> Cow<'_, str> {
+    #[cfg(feature = "mojo")]
+    {
+        return Cow::Owned(
+            prodex_mojo_core::rich::normalize_smart_context_volatile(
+                text,
+                prodex_mojo_core::rich::SmartContextNormalizationMode::StaticContext,
+            )
+            .expect("Mojo Smart Context volatile normalizer returned invalid output"),
+        );
+    }
+
+    #[cfg(not(feature = "mojo"))]
+    smart_context_normalize_volatile_static_context_rust(text)
+}
+
+#[cfg(not(feature = "mojo"))]
+fn smart_context_normalize_volatile_static_context_rust(text: &str) -> Cow<'_, str> {
     let mut normalized = String::with_capacity(text.len());
     let mut changed = false;
     let mut index = 0usize;
@@ -106,6 +142,7 @@ pub fn smart_context_normalize_volatile_static_context(text: &str) -> Cow<'_, st
     }
 }
 
+#[cfg(not(feature = "mojo"))]
 pub(in crate::smart_context) fn smart_context_previous_char(
     text: &str,
     index: usize,
@@ -117,6 +154,7 @@ pub(in crate::smart_context) fn smart_context_previous_char(
     }
 }
 
+#[cfg(not(feature = "mojo"))]
 pub(in crate::smart_context) fn smart_context_ansi_escape_len(text: &str) -> Option<usize> {
     let bytes = text.as_bytes();
     if bytes.first().copied()? != 0x1b {
@@ -149,6 +187,7 @@ pub(in crate::smart_context) fn smart_context_ansi_escape_len(text: &str) -> Opt
     }
 }
 
+#[cfg(not(feature = "mojo"))]
 pub(in crate::smart_context) fn smart_context_temp_path_len(text: &str) -> Option<usize> {
     for prefix in [
         "/tmp/",
@@ -180,6 +219,7 @@ pub(in crate::smart_context) fn smart_context_temp_path_len(text: &str) -> Optio
     None
 }
 
+#[cfg(not(feature = "mojo"))]
 pub(in crate::smart_context) fn smart_context_path_token_len(text: &str) -> usize {
     text.char_indices()
         .find(|(index, ch)| *index > 0 && smart_context_path_token_delimiter(*ch))
@@ -187,6 +227,7 @@ pub(in crate::smart_context) fn smart_context_path_token_len(text: &str) -> usiz
         .unwrap_or(text.len())
 }
 
+#[cfg(not(feature = "mojo"))]
 pub(in crate::smart_context) fn smart_context_path_token_delimiter(ch: char) -> bool {
     ch.is_whitespace()
         || ch.is_control()
@@ -196,6 +237,7 @@ pub(in crate::smart_context) fn smart_context_path_token_delimiter(ch: char) -> 
         )
 }
 
+#[cfg(not(feature = "mojo"))]
 pub(in crate::smart_context) fn smart_context_timestamp_len(
     text: &str,
     previous: Option<char>,
@@ -213,6 +255,7 @@ pub(in crate::smart_context) fn smart_context_timestamp_len(
     smart_context_after_token_boundary(text, index).then_some(index)
 }
 
+#[cfg(not(feature = "mojo"))]
 fn smart_context_timestamp_prefix_is_valid(bytes: &[u8]) -> bool {
     bytes.len() >= 16
         && smart_context_ascii_digits(bytes, 0, 4)
@@ -226,6 +269,7 @@ fn smart_context_timestamp_prefix_is_valid(bytes: &[u8]) -> bool {
         && smart_context_ascii_digits(bytes, 14, 2)
 }
 
+#[cfg(not(feature = "mojo"))]
 fn smart_context_timestamp_seconds_end(bytes: &[u8], mut index: usize) -> Option<usize> {
     if bytes.get(index) == Some(&b':') {
         if !smart_context_ascii_digits(bytes, index + 1, 2) {
@@ -246,6 +290,7 @@ fn smart_context_timestamp_seconds_end(bytes: &[u8], mut index: usize) -> Option
     Some(index)
 }
 
+#[cfg(not(feature = "mojo"))]
 fn smart_context_timestamp_timezone_end(bytes: &[u8], mut index: usize) -> Option<usize> {
     if bytes.get(index) == Some(&b'Z') {
         index += 1;
@@ -266,6 +311,7 @@ fn smart_context_timestamp_timezone_end(bytes: &[u8], mut index: usize) -> Optio
     Some(index)
 }
 
+#[cfg(not(feature = "mojo"))]
 pub(in crate::smart_context) fn smart_context_progress_counter_len(
     text: &str,
     previous: Option<char>,
@@ -279,6 +325,7 @@ pub(in crate::smart_context) fn smart_context_progress_counter_len(
         .or_else(|| smart_context_of_progress_len(text))
 }
 
+#[cfg(not(feature = "mojo"))]
 pub(in crate::smart_context) fn smart_context_percent_progress_len(text: &str) -> Option<usize> {
     let (mut index, _) = smart_context_parse_unsigned_ascii_int(text, 0)?;
     if text.as_bytes().get(index) == Some(&b'.') {
@@ -298,6 +345,7 @@ pub(in crate::smart_context) fn smart_context_percent_progress_len(text: &str) -
     smart_context_after_token_boundary(text, index).then_some(index)
 }
 
+#[cfg(not(feature = "mojo"))]
 pub(in crate::smart_context) fn smart_context_slash_progress_len(text: &str) -> Option<usize> {
     let (left_end, left) = smart_context_parse_unsigned_ascii_int(text, 0)?;
     if text.as_bytes().get(left_end) != Some(&b'/') {
@@ -310,6 +358,7 @@ pub(in crate::smart_context) fn smart_context_slash_progress_len(text: &str) -> 
     smart_context_after_token_boundary(text, right_end).then_some(right_end)
 }
 
+#[cfg(not(feature = "mojo"))]
 pub(in crate::smart_context) fn smart_context_of_progress_len(text: &str) -> Option<usize> {
     let (left_end, left) = smart_context_parse_unsigned_ascii_int(text, 0)?;
     let mut index = smart_context_skip_ascii_spaces(text, left_end);
@@ -332,6 +381,7 @@ pub(in crate::smart_context) fn smart_context_of_progress_len(text: &str) -> Opt
     smart_context_after_token_boundary(text, right_end).then_some(right_end)
 }
 
+#[cfg(not(feature = "mojo"))]
 pub(in crate::smart_context) fn smart_context_labeled_random_id_replacement(
     text: &str,
     previous: Option<char>,
@@ -373,6 +423,7 @@ pub(in crate::smart_context) fn smart_context_labeled_random_id_replacement(
     Some((value_end, replacement))
 }
 
+#[cfg(not(feature = "mojo"))]
 pub(in crate::smart_context) fn smart_context_uuid_len(
     text: &str,
     previous: Option<char>,
@@ -387,6 +438,7 @@ pub(in crate::smart_context) fn smart_context_uuid_len(
     Some(36)
 }
 
+#[cfg(not(feature = "mojo"))]
 pub(in crate::smart_context) fn smart_context_duration_len(
     text: &str,
     previous: Option<char>,
@@ -412,6 +464,7 @@ pub(in crate::smart_context) fn smart_context_duration_len(
     smart_context_after_token_boundary(text, end).then_some(end)
 }
 
+#[cfg(not(feature = "mojo"))]
 pub(in crate::smart_context) fn smart_context_duration_unit_len(text: &str) -> Option<usize> {
     for unit in [
         "milliseconds",
@@ -452,6 +505,7 @@ pub(in crate::smart_context) fn smart_context_duration_unit_len(text: &str) -> O
     None
 }
 
+#[cfg(not(feature = "mojo"))]
 pub(in crate::smart_context) fn smart_context_random_id_key_is_volatile(key: &str) -> bool {
     matches!(
         key,
@@ -474,6 +528,7 @@ pub(in crate::smart_context) fn smart_context_random_id_key_is_volatile(key: &st
     )
 }
 
+#[cfg(not(feature = "mojo"))]
 pub(in crate::smart_context) fn smart_context_random_id_value_len(text: &str) -> Option<usize> {
     let len = text
         .char_indices()
@@ -483,6 +538,7 @@ pub(in crate::smart_context) fn smart_context_random_id_value_len(text: &str) ->
     (len > 0).then_some(len)
 }
 
+#[cfg(not(feature = "mojo"))]
 pub(in crate::smart_context) fn smart_context_random_id_value_looks_volatile_for_key(
     key: &str,
     value: &str,
@@ -506,6 +562,7 @@ pub(in crate::smart_context) fn smart_context_random_id_value_looks_volatile_for
     (hex_like && value.len() >= 16) || (alpha && digit && (value.len() >= 16 || entropy_marks > 0))
 }
 
+#[cfg(not(feature = "mojo"))]
 fn smart_context_random_id_characteristics(value: &str) -> Option<(bool, bool, bool, usize)> {
     let mut alpha = false;
     let mut digit = false;
@@ -528,6 +585,7 @@ fn smart_context_random_id_characteristics(value: &str) -> Option<(bool, bool, b
     Some((alpha, digit, hex_like, entropy_marks))
 }
 
+#[cfg(not(feature = "mojo"))]
 pub(in crate::smart_context) fn smart_context_uuid_token_exact(value: &str) -> bool {
     let bytes = value.as_bytes();
     if bytes.len() != 36 {
@@ -545,6 +603,7 @@ pub(in crate::smart_context) fn smart_context_uuid_token_exact(value: &str) -> b
     true
 }
 
+#[cfg(not(feature = "mojo"))]
 pub(in crate::smart_context) fn smart_context_parse_unsigned_ascii_int(
     text: &str,
     start: usize,
@@ -566,6 +625,7 @@ pub(in crate::smart_context) fn smart_context_parse_unsigned_ascii_int(
     (digits > 0).then_some((index, value))
 }
 
+#[cfg(not(feature = "mojo"))]
 pub(in crate::smart_context) fn smart_context_skip_ascii_spaces(text: &str, start: usize) -> usize {
     let bytes = text.as_bytes();
     let mut index = start;
@@ -575,6 +635,7 @@ pub(in crate::smart_context) fn smart_context_skip_ascii_spaces(text: &str, star
     index
 }
 
+#[cfg(not(feature = "mojo"))]
 pub(in crate::smart_context) fn smart_context_ascii_digits(
     bytes: &[u8],
     start: usize,
@@ -585,15 +646,18 @@ pub(in crate::smart_context) fn smart_context_ascii_digits(
         .is_some_and(|value| value.iter().all(u8::is_ascii_digit))
 }
 
+#[cfg(not(feature = "mojo"))]
 pub(in crate::smart_context) fn smart_context_ascii_case_prefix(text: &str, prefix: &str) -> bool {
     text.get(..prefix.len())
         .is_some_and(|value| value.eq_ignore_ascii_case(prefix))
 }
 
+#[cfg(not(feature = "mojo"))]
 pub(in crate::smart_context) fn smart_context_token_boundary(ch: Option<char>) -> bool {
     ch.is_none_or(|ch| !(ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-' | '.' | ':' | '/')))
 }
 
+#[cfg(not(feature = "mojo"))]
 pub(in crate::smart_context) fn smart_context_after_token_boundary(
     text: &str,
     index: usize,
