@@ -1,5 +1,12 @@
+#[cfg(feature = "mojo")]
+use super::super::anthropic_mojo_value;
+#[cfg(feature = "mojo")]
+use super::json_fragment;
+#[cfg(feature = "mojo")]
+use prodex_mojo_core::rich::{AnthropicRequestKernelInput, AnthropicRequestKernelOperation};
 use serde_json::{Map, Value, json};
 
+#[cfg(not(feature = "mojo"))]
 pub(super) fn anthropic_web_search_tool(value: &Value) -> Result<(Value, Option<Value>), String> {
     let Some(options) = value.as_object() else {
         return Err("web_search_options must be an object".to_string());
@@ -23,6 +30,34 @@ pub(super) fn anthropic_web_search_tool(value: &Value) -> Result<(Value, Option<
         }
     }
     Ok((Value::Object(tool), ignored_context_size))
+}
+
+#[cfg(feature = "mojo")]
+pub(super) fn anthropic_web_search_tool(value: &Value) -> Result<(Value, Option<Value>), String> {
+    let Some(options) = value.as_object() else {
+        return Err("web_search_options must be an object".to_string());
+    };
+    let ignored_context_size = validate_anthropic_web_search_options(options)?;
+    let allowed_domains = options
+        .get("allowed_domains")
+        .map(json_fragment)
+        .transpose()?;
+    let blocked_domains = options
+        .get("blocked_domains")
+        .map(json_fragment)
+        .transpose()?;
+    let user_location = options
+        .get("user_location")
+        .map(json_fragment)
+        .transpose()?;
+    let max_uses = options.get("max_uses").map(json_fragment).transpose()?;
+    let mut input =
+        AnthropicRequestKernelInput::new(AnthropicRequestKernelOperation::WebSearchTool);
+    input.allowed_domains = allowed_domains.as_deref();
+    input.blocked_domains = blocked_domains.as_deref();
+    input.user_location = user_location.as_deref();
+    input.max_uses = max_uses.as_deref();
+    Ok((anthropic_mojo_value(input)?, ignored_context_size))
 }
 
 fn validate_anthropic_web_search_options(
@@ -88,6 +123,7 @@ fn validate_anthropic_web_search_options(
     Ok(ignored_context_size)
 }
 
+#[cfg(not(feature = "mojo"))]
 pub(super) fn anthropic_web_search_call(block: &Value) -> Result<Value, String> {
     let Some(id) = block.get("id").and_then(Value::as_str) else {
         return Err("Anthropic server_tool_use block must contain id".to_string());
@@ -108,7 +144,48 @@ pub(super) fn anthropic_web_search_call(block: &Value) -> Result<Value, String> 
     }))
 }
 
+#[cfg(feature = "mojo")]
+pub(super) fn anthropic_web_search_call(block: &Value) -> Result<Value, String> {
+    let Some(id) = block.get("id").and_then(Value::as_str) else {
+        return Err("Anthropic server_tool_use block must contain id".to_string());
+    };
+    if block.get("name").and_then(Value::as_str) != Some("web_search") {
+        return Err("unsupported Anthropic server tool".to_string());
+    }
+    let queries = json_fragment(&Value::Array(anthropic_web_search_queries(
+        block.get("input"),
+    )))?;
+    let id = json_fragment(&Value::String(id.to_string()))?;
+    let mut input =
+        AnthropicRequestKernelInput::new(AnthropicRequestKernelOperation::WebSearchCall);
+    input.id = Some(&id);
+    input.queries = Some(&queries);
+    Ok(anthropic_mojo_value(input)?)
+}
+
+#[cfg(not(feature = "mojo"))]
 fn anthropic_web_search_queries(input: Option<&Value>) -> Vec<Value> {
+    if let Some(query) = input
+        .and_then(|input| input.get("query"))
+        .and_then(Value::as_str)
+    {
+        return vec![Value::String(query.to_string())];
+    }
+    input
+        .and_then(|input| input.get("queries"))
+        .and_then(Value::as_array)
+        .map(|queries| {
+            queries
+                .iter()
+                .filter_map(Value::as_str)
+                .map(|query| Value::String(query.to_string()))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+#[cfg(feature = "mojo")]
+pub(super) fn anthropic_web_search_queries(input: Option<&Value>) -> Vec<Value> {
     if let Some(query) = input
         .and_then(|input| input.get("query"))
         .and_then(Value::as_str)
@@ -159,9 +236,20 @@ fn anthropic_web_search_sources(block: &Value) -> Vec<Value> {
         .collect()
 }
 
+#[cfg(not(feature = "mojo"))]
 pub(super) fn anthropic_tool_usage(value: Option<&Value>) -> Option<Value> {
     let requests = value?
         .pointer("/server_tool_use/web_search_requests")?
         .as_u64()?;
     Some(json!({"web_search": {"num_requests": requests}}))
+}
+
+#[cfg(feature = "mojo")]
+pub(super) fn anthropic_tool_usage(value: Option<&Value>) -> Option<Value> {
+    let requests = value?
+        .pointer("/server_tool_use/web_search_requests")?
+        .as_u64()?;
+    let mut input = AnthropicRequestKernelInput::new(AnthropicRequestKernelOperation::ToolUsage);
+    input.count = requests;
+    anthropic_mojo_value(input).ok()
 }

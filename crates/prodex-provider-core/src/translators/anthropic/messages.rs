@@ -1,18 +1,28 @@
 use super::super::openai_chat_compat::translate_responses_request_to_chat;
+#[cfg(feature = "mojo")]
+use super::anthropic_mojo_value;
 use crate::{
     ProviderEndpoint, ProviderId, ProviderTransformInput, ProviderTransformLoss,
     ProviderTransformResult, ProviderWireFormat,
 };
+#[cfg(feature = "mojo")]
+use prodex_mojo_core::rich::{AnthropicRequestKernelInput, AnthropicRequestKernelOperation};
 use serde_json::{Map, Value, json};
 use std::{
     collections::BTreeMap,
     time::{SystemTime, UNIX_EPOCH},
 };
 
+#[cfg(feature = "mojo")]
+#[path = "messages/request_builder.rs"]
+mod request_builder;
 #[path = "messages/response.rs"]
 mod response;
 #[path = "messages/stream.rs"]
 mod stream;
+#[cfg(feature = "mojo")]
+#[path = "messages/tool_shapes.rs"]
+mod tool_shapes;
 #[path = "messages/web_search.rs"]
 mod web_search;
 
@@ -124,6 +134,7 @@ pub(super) fn translate_chat_request_to_anthropic(
     }
 }
 
+#[cfg(not(feature = "mojo"))]
 fn build_anthropic_chat_request(
     system: &[String],
     messages: Vec<Value>,
@@ -197,6 +208,14 @@ fn build_anthropic_chat_request(
     Ok((request, degradation_details))
 }
 
+#[cfg(feature = "mojo")]
+fn json_fragment(value: &Value) -> Result<String, String> {
+    serde_json::to_string(value).map_err(|error| format!("Anthropic JSON fragment failed: {error}"))
+}
+
+#[cfg(feature = "mojo")]
+use request_builder::build_anthropic_chat_request;
+
 fn validate_anthropic_chat_fields(chat: &Map<String, Value>) -> Result<(), String> {
     for field in chat.keys() {
         match field.as_str() {
@@ -269,6 +288,7 @@ pub(super) fn translate_anthropic_response_to_responses(
     )
 }
 
+#[cfg(not(feature = "mojo"))]
 fn anthropic_tool_use_item(block: &Value) -> Result<Value, String> {
     let Some(id) = block.get("id").and_then(Value::as_str) else {
         return Err("Anthropic tool_use block must contain id".to_string());
@@ -292,6 +312,33 @@ fn anthropic_tool_use_item(block: &Value) -> Result<Value, String> {
         item["namespace"] = Value::String(namespace);
     }
     Ok(item)
+}
+
+#[cfg(feature = "mojo")]
+fn anthropic_tool_use_item(block: &Value) -> Result<Value, String> {
+    let Some(id) = block.get("id").and_then(Value::as_str) else {
+        return Err("Anthropic tool_use block must contain id".to_string());
+    };
+    let Some(full_name) = block.get("name").and_then(Value::as_str) else {
+        return Err("Anthropic tool_use block must contain name".to_string());
+    };
+    let arguments = serde_json::to_string(block.get("input").unwrap_or(&Value::Object(Map::new())))
+        .map_err(|error| format!("Anthropic tool input serializes: {error}"))?;
+    let arguments =
+        crate::provider_core_chat_compatible_rtk_wrapped_tool_arguments(full_name, &arguments);
+    let (namespace, name) = crate::provider_core_split_flat_namespace_tool_name(full_name);
+    let id = json_fragment(&Value::String(id.to_string()))?;
+    let name = json_fragment(&Value::String(name))?;
+    let namespace = namespace
+        .map(|namespace| json_fragment(&Value::String(namespace)))
+        .transpose()?;
+    let arguments = json_fragment(&Value::String(arguments))?;
+    let mut input = AnthropicRequestKernelInput::new(AnthropicRequestKernelOperation::ToolUseItem);
+    input.id = Some(&id);
+    input.name = Some(&name);
+    input.namespace = namespace.as_deref();
+    input.arguments = Some(&arguments);
+    anthropic_mojo_value(input)
 }
 
 fn anthropic_messages(value: Option<&Value>) -> Result<(Vec<String>, Vec<Value>), String> {
@@ -331,11 +378,15 @@ fn append_anthropic_message(
     };
     let blocks = anthropic_message_blocks(object)?;
     if !blocks.is_empty() {
+        #[cfg(feature = "mojo")]
+        append_message(translated, role, blocks)?;
+        #[cfg(not(feature = "mojo"))]
         append_message(translated, role, blocks);
     }
     Ok(())
 }
 
+#[cfg(not(feature = "mojo"))]
 fn anthropic_message_blocks(object: &Map<String, Value>) -> Result<Vec<Value>, String> {
     let mut blocks = Vec::new();
     if object.get("role").and_then(Value::as_str) != Some("tool")
@@ -357,6 +408,45 @@ fn anthropic_message_blocks(object: &Map<String, Value>) -> Result<Vec<Value>, S
     Ok(blocks)
 }
 
+#[cfg(feature = "mojo")]
+fn anthropic_message_blocks(object: &Map<String, Value>) -> Result<Vec<Value>, String> {
+    let mut blocks = Vec::new();
+    if object.get("role").and_then(Value::as_str) != Some("tool")
+        && let Some(text) = object.get("content").and_then(Value::as_str)
+        && !text.is_empty()
+    {
+        let content = json_fragment(&Value::String(text.to_string()))?;
+        let mut input =
+            AnthropicRequestKernelInput::new(AnthropicRequestKernelOperation::TextBlock);
+        input.content = Some(&content);
+        blocks.push(anthropic_mojo_value(input)?);
+    }
+    if let Some(tool_calls) = object.get("tool_calls").and_then(Value::as_array) {
+        blocks.extend(anthropic_tool_call_blocks(object, tool_calls)?);
+    }
+    if object.get("role").and_then(Value::as_str) == Some("tool") {
+        let tool_use_id = object
+            .get("tool_call_id")
+            .and_then(Value::as_str)
+            .unwrap_or("call_prodex");
+        let tool_use_id = json_fragment(&Value::String(tool_use_id.to_string()))?;
+        let content = json_fragment(&Value::String(
+            object
+                .get("content")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .to_string(),
+        ))?;
+        let mut input =
+            AnthropicRequestKernelInput::new(AnthropicRequestKernelOperation::ToolResultBlock);
+        input.tool_use_id = Some(&tool_use_id);
+        input.content = Some(&content);
+        blocks.push(anthropic_mojo_value(input)?);
+    }
+    Ok(blocks)
+}
+
+#[cfg(not(feature = "mojo"))]
 fn anthropic_tool_call_blocks(
     object: &Map<String, Value>,
     tool_calls: &[Value],
@@ -367,6 +457,18 @@ fn anthropic_tool_call_blocks(
         .collect()
 }
 
+#[cfg(feature = "mojo")]
+fn anthropic_tool_call_blocks(
+    object: &Map<String, Value>,
+    tool_calls: &[Value],
+) -> Result<Vec<Value>, String> {
+    tool_calls
+        .iter()
+        .map(|tool_call| anthropic_tool_call_block(object, tool_call))
+        .collect()
+}
+
+#[cfg(not(feature = "mojo"))]
 fn anthropic_tool_call_block(
     object: &Map<String, Value>,
     tool_call: &Value,
@@ -397,6 +499,47 @@ fn anthropic_tool_call_block(
     }))
 }
 
+#[cfg(feature = "mojo")]
+fn anthropic_tool_call_block(
+    object: &Map<String, Value>,
+    tool_call: &Value,
+) -> Result<Value, String> {
+    let function = tool_call
+        .get("function")
+        .and_then(Value::as_object)
+        .ok_or_else(|| "function call must contain function".to_string())?;
+    let name = function
+        .get("name")
+        .and_then(Value::as_str)
+        .ok_or_else(|| "function call must contain name".to_string())?;
+    let name = anthropic_tool_name(object.get("namespace").and_then(Value::as_str), name);
+    let arguments = function
+        .get("arguments")
+        .and_then(Value::as_str)
+        .unwrap_or("{}");
+    let input: Value = serde_json::from_str(arguments)
+        .map_err(|_| "function call arguments must be valid JSON".to_string())?;
+    if !input.is_object() {
+        return Err("function call arguments must be a JSON object".to_string());
+    }
+    let id = json_fragment(&Value::String(
+        tool_call
+            .get("id")
+            .and_then(Value::as_str)
+            .unwrap_or("call_prodex")
+            .to_string(),
+    ))?;
+    let name = json_fragment(&Value::String(name))?;
+    let input_value = json_fragment(&input)?;
+    let mut kernel =
+        AnthropicRequestKernelInput::new(AnthropicRequestKernelOperation::ToolUseBlock);
+    kernel.id = Some(&id);
+    kernel.name = Some(&name);
+    kernel.input = Some(&input_value);
+    anthropic_mojo_value(kernel)
+}
+
+#[cfg(not(feature = "mojo"))]
 fn append_message(messages: &mut Vec<Value>, role: &str, blocks: Vec<Value>) {
     if let Some(previous) = messages.last_mut()
         && previous.get("role").and_then(Value::as_str) == Some(role)
@@ -423,6 +566,25 @@ fn append_message(messages: &mut Vec<Value>, role: &str, blocks: Vec<Value>) {
     messages.push(json!({"role": role, "content": blocks}));
 }
 
+#[cfg(feature = "mojo")]
+fn append_message(messages: &mut Vec<Value>, role: &str, blocks: Vec<Value>) -> Result<(), String> {
+    let existing = json_fragment(&Value::Array(std::mem::take(messages)))?;
+    let role = json_fragment(&Value::String(role.to_string()))?;
+    let blocks = json_fragment(&Value::Array(blocks))?;
+    let mut input =
+        AnthropicRequestKernelInput::new(AnthropicRequestKernelOperation::AppendMessage);
+    input.messages = Some(&existing);
+    input.role = Some(&role);
+    input.blocks = Some(&blocks);
+    let output = anthropic_mojo_value(input)?;
+    *messages = output
+        .as_array()
+        .cloned()
+        .ok_or_else(|| "Anthropic append-message kernel returned a non-array".to_string())?;
+    Ok(())
+}
+
+#[cfg(not(feature = "mojo"))]
 fn anthropic_tools(value: &Value) -> Result<Vec<Value>, String> {
     let Some(tools) = value.as_array() else {
         return Err("Responses `tools` must be an array".to_string());
@@ -457,6 +619,7 @@ fn anthropic_tools(value: &Value) -> Result<Vec<Value>, String> {
         .collect()
 }
 
+#[cfg(not(feature = "mojo"))]
 fn anthropic_tool_choice(value: &Value) -> Result<Option<Value>, String> {
     match value {
         Value::String(choice) => match choice.as_str() {
