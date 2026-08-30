@@ -1,20 +1,33 @@
-use super::{CONTEXT_TEXT_ABI_VERSION, ProdexStringView, text_abi_is_ready};
+use super::{
+    CONTEXT_GIT_SEARCH_MAX_BYTES, CONTEXT_TEXT_ABI_VERSION, ProdexStringView, text_abi_is_ready,
+};
+
+#[repr(C)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct CommandOutputLineClassification {
+    pub flags: i64,
+    pub noisy_label: i64,
+    pub diagnostic_label: i64,
+}
+
+const _: () = assert!(
+    std::mem::size_of::<CommandOutputLineClassification>() == 3 * std::mem::size_of::<i64>()
+);
 
 unsafe extern "C" {
-    fn prodex_context_classify_dot_reporter_success_line_v1(
+    fn prodex_context_classify_command_output_line_v1(
         abi_version: i64,
         line: *const ProdexStringView,
-        output: *mut i64,
-    ) -> i64;
-    fn prodex_context_classify_noisy_success_line_v1(
-        abi_version: i64,
-        line: *const ProdexStringView,
-        output: *mut i64,
+        result: *mut CommandOutputLineClassification,
     ) -> i64;
 }
 
-/// Classifies one command-output dot-progress line through the Mojo text ABI.
-pub fn classify_dot_reporter_success_line(line: &str) -> Result<bool, crate::MojoError> {
+pub fn classify_command_output_line(
+    line: &str,
+) -> Result<CommandOutputLineClassification, crate::MojoError> {
+    if line.len() > CONTEXT_GIT_SEARCH_MAX_BYTES {
+        return Err(crate::MojoError::InvalidInput);
+    }
     if !text_abi_is_ready() {
         return Err(crate::MojoError::AbiMismatch);
     }
@@ -22,60 +35,21 @@ pub fn classify_dot_reporter_success_line(line: &str) -> Result<bool, crate::Moj
         ptr: line.as_ptr(),
         len: line.len(),
     };
-    let mut output = 0_i64;
+    let mut result = CommandOutputLineClassification::default();
     let status = unsafe {
-        prodex_context_classify_dot_reporter_success_line_v1(
-            CONTEXT_TEXT_ABI_VERSION,
-            &view,
-            &mut output,
-        )
+        prodex_context_classify_command_output_line_v1(CONTEXT_TEXT_ABI_VERSION, &view, &mut result)
     };
     match status {
-        0 if matches!(output, 0 | 1) => Ok(output == 1),
-        4 => Err(crate::MojoError::AbiMismatch),
-        1 | 2 => Err(crate::MojoError::InvalidInput),
-        _ => Err(crate::MojoError::InvalidOutput),
-    }
-}
-
-/// Classifies one deterministic command-output success/noise label through Mojo.
-pub fn classify_noisy_success_line(line: &str) -> Result<Option<i64>, crate::MojoError> {
-    if !text_abi_is_ready() {
-        return Err(crate::MojoError::AbiMismatch);
-    }
-    let view = ProdexStringView {
-        ptr: line.as_ptr(),
-        len: line.len(),
-    };
-    let mut output = -1_i64;
-    let status = unsafe {
-        prodex_context_classify_noisy_success_line_v1(CONTEXT_TEXT_ABI_VERSION, &view, &mut output)
-    };
-    match status {
-        0 => match output {
-            -1 | 0 => Ok(None),
-            1..=72 => Ok(Some(output)),
-            _ => Err(crate::MojoError::InvalidOutput),
-        },
-        4 => Err(crate::MojoError::AbiMismatch),
-        1 | 2 => Err(crate::MojoError::InvalidInput),
-        _ => Err(crate::MojoError::InvalidOutput),
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::classify_dot_reporter_success_line;
-
-    #[test]
-    fn dot_reporter_adapter_matches_rust_shape() {
-        for line in ["....", "...", "....x", "....🙂", ""] {
-            let expected = line.len() >= 4 && line.chars().all(|ch| ch == '.');
-            assert_eq!(
-                classify_dot_reporter_success_line(line),
-                Ok(expected),
-                "{line:?}"
-            );
+        0 if result.flags >= 0
+            && result.noisy_label >= 0
+            && result.diagnostic_label >= 0
+            && result.noisy_label <= 100
+            && result.diagnostic_label <= 100 =>
+        {
+            Ok(result)
         }
+        4 => Err(crate::MojoError::AbiMismatch),
+        1 | 2 => Err(crate::MojoError::InvalidInput),
+        _ => Err(crate::MojoError::InvalidOutput),
     }
 }

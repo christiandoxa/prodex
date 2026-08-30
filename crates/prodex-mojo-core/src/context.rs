@@ -119,23 +119,41 @@ const CONTEXT_CI_JOB: i64 = 4;
 const CONTEXT_CI_STEP: i64 = 8;
 const CONTEXT_CI_EXIT_CODE: i64 = 16;
 const CONTEXT_CI_FAILURE_TEXT: i64 = 32;
+pub const CONTEXT_OUTPUT_RUST_STRONG: i64 = 1;
+pub const CONTEXT_OUTPUT_RUST_LOCATION: i64 = 2;
+pub const CONTEXT_OUTPUT_RUST_BACKTRACE: i64 = 4;
+pub const CONTEXT_OUTPUT_RUST_EXIT: i64 = 8;
+pub const CONTEXT_OUTPUT_RUST_NOISE: i64 = 16;
+pub const CONTEXT_OUTPUT_CLIPPY: i64 = 32;
+pub const CONTEXT_OUTPUT_DIAGNOSTIC_TARGET: i64 = 64;
+pub const CONTEXT_OUTPUT_NOISY_KEY: i64 = 128;
+pub const CONTEXT_OUTPUT_FAILURE: i64 = 256;
+pub const CONTEXT_OUTPUT_WARNING: i64 = 512;
+pub const CONTEXT_OUTPUT_DIAGNOSTIC_SUCCESS: i64 = 1024;
+pub const CONTEXT_OUTPUT_DIAGNOSTIC_FAILURE: i64 = 2048;
+pub const CONTEXT_OUTPUT_TYPESCRIPT: i64 = 4096;
+pub const CONTEXT_OUTPUT_ESLINT: i64 = 8192;
+pub const CONTEXT_OUTPUT_EXCEPTION: i64 = 16_384;
+pub const CONTEXT_OUTPUT_JUNIT_FAILURE: i64 = 32_768;
 static CONTEXT_TEXT_ABI_READY: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
 #[path = "context/git_search.rs"]
 mod git_search;
 pub use git_search::classify_git_search_line;
 #[path = "context/command_output.rs"]
 mod command_output;
-pub use command_output::{classify_dot_reporter_success_line, classify_noisy_success_line};
+pub use command_output::{CommandOutputLineClassification, classify_command_output_line};
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ContextSignalLine<'a> {
     pub text: &'a str,
     pub counts: [usize; CRITICAL_SIGNAL_COUNTER_COUNT],
 }
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ContextSignalRows {
     pub before_rows: Vec<i64>,
     pub after_available: Vec<i64>,
 }
+
 fn counters_to_i64(
     values: &[usize; CRITICAL_SIGNAL_COUNTER_COUNT],
 ) -> Result<[i64; CRITICAL_SIGNAL_COUNTER_COUNT], crate::MojoError> {
@@ -145,6 +163,7 @@ fn counters_to_i64(
     }
     Ok(converted)
 }
+
 fn counters_from_i64(
     values: [i64; CRITICAL_SIGNAL_COUNTER_COUNT],
 ) -> Result<[usize; CRITICAL_SIGNAL_COUNTER_COUNT], crate::MojoError> {
@@ -615,154 +634,8 @@ fn next_random(state: &mut u64) -> u64 {
 }
 
 #[cfg(all(test, feature = "mojo-runtime"))]
-mod text_abi_tests {
-    use super::{
-        CONTEXT_TEXT_ABI_VERSION, ContextSignalLine, ContextTextRowsResult, ProdexStringView,
-        gemini_glob_matches, prepare_signal_rows, prodex_context_prepare_signal_rows_v1,
-        text_abi_layout_matches, text_abi_version,
-    };
-
-    #[test]
-    fn text_abi_accepts_utf8_embedded_nul_empty_and_unsentinelled_views() {
-        assert_eq!(text_abi_version(), Ok(CONTEXT_TEXT_ABI_VERSION));
-        assert!(text_abi_layout_matches());
-
-        let unicode = "账户🙂e\u{301}\0東京";
-        assert_eq!(raw_status(unicode.as_ptr(), unicode.len(), 8).0, 0);
-        assert_eq!(raw_status(std::ptr::null(), 0, 8).0, 0);
-
-        let no_sentinel = [b'e', b'r', b'r', b'o', 0xff];
-        assert_eq!(raw_status(no_sentinel.as_ptr(), 4, 8).0, 0);
-    }
-
-    #[test]
-    fn text_abi_rejects_malformed_utf8_null_nonempty_and_short_output() {
-        for malformed in [
-            &[0x80][..],
-            &[0xc0, 0xaf],
-            &[0xe0, 0x80, 0x80],
-            &[0xed, 0xa0, 0x80],
-            &[0xf0, 0x90, 0x80],
-            &[0xf4, 0x90, 0x80, 0x80],
-            &[0xff],
-        ] {
-            assert_eq!(raw_status(malformed.as_ptr(), malformed.len(), 8).0, 2);
-        }
-        assert_eq!(raw_status("🔥".as_ptr(), 3, 8).0, 2);
-        assert_eq!(raw_status(std::ptr::null(), 1, 8).0, 2);
-        assert_eq!(raw_status_version(0, b"error".as_ptr(), 5, 8).0, 4);
-
-        let (status, result) = raw_status(b"error".as_ptr(), 5, 7);
-        assert_eq!(status, 1);
-        assert_eq!(result.required_before_rows, 8);
-        assert_eq!(result.required_key_capacity, 1);
-        assert_eq!(result.required_hash_capacity, 2);
-    }
-
-    #[test]
-    fn text_pipeline_is_reentrant_across_concurrent_calls() {
-        let threads = (0..8)
-            .map(|_| {
-                std::thread::spawn(|| {
-                    let signal = ContextSignalLine {
-                        text: "error: 并行🙂\0",
-                        counts: [1, 0, 0, 0, 0, 0, 0],
-                    };
-                    for _ in 0..100 {
-                        let rows = prepare_signal_rows(&[signal, signal], &[signal]).unwrap();
-                        assert_eq!(rows.after_available, [1]);
-                        assert_eq!(
-                            rows.before_rows
-                                .as_chunks::<8>()
-                                .0
-                                .iter()
-                                .map(|row| row[0])
-                                .collect::<Vec<_>>(),
-                            [0, 0]
-                        );
-                    }
-                })
-            })
-            .collect::<Vec<_>>();
-        for thread in threads {
-            thread.join().unwrap();
-        }
-    }
-
-    #[test]
-    fn gemini_glob_matches_request_context_patterns() {
-        for (pattern, path, expected) in [
-            ("**/*.rs", "src/lib.rs", true),
-            ("**/*.rs", "lib.rs", true),
-            ("src/*.RS", "src/lib.rs", true),
-            ("src/?ib.rs", "src/lib.rs", true),
-            ("src/*.rs", "src/nested/lib.rs", false),
-            ("a/**/b", "a/b", true),
-            ("a/**/b", "a/x/y/b", true),
-            ("a/**/b", "a/x/y/c", false),
-            ("a/**/b", "a/b/c", false),
-            ("a/**", "a", true),
-            ("a/**", "a/x/y", true),
-            ("a/*/b", "a//b", true),
-            ("a/*/b", "a/x/y/b", false),
-            ("ab*cd", "abXYZcd", true),
-            ("*a*b", "xxaYYb", true),
-            ("a/", "a/", true),
-            ("a/", "a", false),
-        ] {
-            assert_eq!(gemini_glob_matches(pattern, path), Ok(expected));
-        }
-    }
-
-    fn raw_status(
-        ptr: *const u8,
-        len: usize,
-        before_rows_capacity: usize,
-    ) -> (i64, ContextTextRowsResult) {
-        raw_status_version(CONTEXT_TEXT_ABI_VERSION, ptr, len, before_rows_capacity)
-    }
-
-    fn raw_status_version(
-        abi_version: i64,
-        ptr: *const u8,
-        len: usize,
-        before_rows_capacity: usize,
-    ) -> (i64, ContextTextRowsResult) {
-        let before_views = [ProdexStringView { ptr, len }];
-        let before_counts = [1_i64, 0, 0, 0, 0, 0, 0];
-        let after_views: [ProdexStringView; 0] = [];
-        let after_counts: [i64; 0] = [];
-        let mut before_rows = vec![0_i64; before_rows_capacity.max(1)];
-        let mut after_available = [0_i64; 1];
-        let mut hash_slots = [-1_i64; 2];
-        let mut key_hashes = [0_u64; 1];
-        let mut key_sources = [0_i64; 1];
-        let mut key_indices = [0_i64; 1];
-        let mut result = ContextTextRowsResult::default();
-        let status = unsafe {
-            prodex_context_prepare_signal_rows_v1(
-                abi_version,
-                before_views.as_ptr(),
-                before_counts.as_ptr(),
-                1,
-                after_views.as_ptr(),
-                after_counts.as_ptr(),
-                0,
-                before_rows.as_mut_ptr(),
-                before_rows_capacity as i64,
-                after_available.as_mut_ptr(),
-                1,
-                hash_slots.as_mut_ptr(),
-                2,
-                key_hashes.as_mut_ptr(),
-                key_sources.as_mut_ptr(),
-                key_indices.as_mut_ptr(),
-                &mut result,
-            )
-        };
-        (status, result)
-    }
-}
+#[path = "context/tests.rs"]
+mod text_abi_tests;
 
 #[path = "context/gemini_glob.rs"]
 mod gemini_glob;
