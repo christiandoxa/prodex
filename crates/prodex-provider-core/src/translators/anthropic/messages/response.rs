@@ -2,8 +2,8 @@ use super::*;
 
 #[cfg(feature = "mojo")]
 use prodex_mojo_core::rich::{
-    AnthropicResponseBlock, AnthropicResponseBlockKind, AnthropicResponsePlanKind,
-    plan_anthropic_response_blocks,
+    AnthropicRequestKernelInput, AnthropicRequestKernelOperation, AnthropicResponseBlock,
+    AnthropicResponseBlockKind, AnthropicResponsePlanKind, plan_anthropic_response_blocks,
 };
 
 #[derive(Clone, Copy)]
@@ -155,6 +155,55 @@ fn plan_with_rust(inputs: &[ResponseBlockInput]) -> Vec<ResponsePlanItem> {
     plan
 }
 
+#[cfg(feature = "mojo")]
+fn render_response_message(blocks: &[Value]) -> Result<Value, String> {
+    let blocks = super::json_fragment(&Value::Array(blocks.to_vec()))?;
+    let mut input =
+        AnthropicRequestKernelInput::new(AnthropicRequestKernelOperation::ResponseMessage);
+    input.blocks = Some(&blocks);
+    super::anthropic_mojo_value(input)
+}
+
+#[cfg(not(feature = "mojo"))]
+fn render_response_message(blocks: &[Value]) -> Result<Value, String> {
+    let content = blocks
+        .iter()
+        .map(|block| {
+            let text = block
+                .get("text")
+                .and_then(Value::as_str)
+                .ok_or_else(|| "Anthropic text block must contain text".to_string())?;
+            Ok(json!({"type": "output_text", "text": text}))
+        })
+        .collect::<Result<Vec<_>, String>>()?;
+    Ok(json!({
+        "type": "message",
+        "role": "assistant",
+        "content": content,
+    }))
+}
+
+#[cfg(feature = "mojo")]
+fn render_response_reasoning(block: &Value) -> Result<Value, String> {
+    let block = super::json_fragment(block)?;
+    let mut input =
+        AnthropicRequestKernelInput::new(AnthropicRequestKernelOperation::ResponseReasoning);
+    input.content = Some(&block);
+    super::anthropic_mojo_value(input)
+}
+
+#[cfg(not(feature = "mojo"))]
+fn render_response_reasoning(block: &Value) -> Result<Value, String> {
+    let thinking = block
+        .get("thinking")
+        .and_then(Value::as_str)
+        .ok_or_else(|| "Anthropic response plan referenced invalid reasoning".to_string())?;
+    Ok(json!({
+        "type": "reasoning",
+        "summary": [{"type": "summary_text", "text": thinking}],
+    }))
+}
+
 pub(super) fn anthropic_response_output(content: &[Value]) -> Result<Vec<Value>, String> {
     let inputs = content
         .iter()
@@ -175,21 +224,8 @@ pub(super) fn anthropic_response_output(content: &[Value]) -> Result<Vec<Value>,
                     .ok_or_else(|| "Anthropic response plan range overflowed".to_string())?;
                 let blocks = content
                     .get(item.start..end)
-                    .ok_or_else(|| "Anthropic response plan referenced invalid text".to_string())?
-                    .iter()
-                    .map(|block| {
-                        let text = block
-                            .get("text")
-                            .and_then(Value::as_str)
-                            .ok_or_else(|| "Anthropic text block must contain text".to_string())?;
-                        Ok(json!({"type": "output_text", "text": text}))
-                    })
-                    .collect::<Result<Vec<_>, String>>()?;
-                output.push(json!({
-                    "type": "message",
-                    "role": "assistant",
-                    "content": blocks,
-                }));
+                    .ok_or_else(|| "Anthropic response plan referenced invalid text".to_string())?;
+                output.push(render_response_message(blocks)?);
             }
             ResponsePlanKind::ToolUse | ResponsePlanKind::WebSearchCall => {
                 let value = inputs
@@ -208,16 +244,7 @@ pub(super) fn anthropic_response_output(content: &[Value]) -> Result<Vec<Value>,
                 let block = content.get(item.input_index).ok_or_else(|| {
                     "Anthropic response plan referenced invalid reasoning".to_string()
                 })?;
-                let thinking = block
-                    .get("thinking")
-                    .and_then(Value::as_str)
-                    .ok_or_else(|| {
-                        "Anthropic response plan referenced invalid reasoning".to_string()
-                    })?;
-                output.push(json!({
-                    "type": "reasoning",
-                    "summary": [{"type": "summary_text", "text": thinking}],
-                }));
+                output.push(render_response_reasoning(block)?);
             }
         }
     }

@@ -261,6 +261,94 @@ fn stream_maps_native_delta_and_tolerates_ping() {
         ),
     );
     let body = String::from_utf8(delta.body.unwrap()).unwrap();
-    assert!(body.contains("event: response.output_text.delta"));
-    assert!(body.contains("\"delta\":\"hello\""));
+    assert_eq!(
+        body.lines().next(),
+        Some("event: response.output_text.delta")
+    );
+    let expected = responses_sse_event(
+        "response.output_text.delta",
+        json!({
+            "type": "response.output_text.delta",
+            "output_index": 0,
+            "delta": "hello",
+        }),
+    );
+    assert_eq!(
+        serde_json::from_str::<Value>(
+            body.lines()
+                .find_map(|line| line.strip_prefix("data: "))
+                .unwrap(),
+        )
+        .unwrap(),
+        serde_json::from_str::<Value>(
+            expected
+                .lines()
+                .find_map(|line| line.strip_prefix("data: "))
+                .unwrap(),
+        )
+        .unwrap()
+    );
+}
+
+#[test]
+fn response_preserves_escaped_text_and_reasoning() {
+    let result = anthropic_messages_translator().transform_response(ProviderTransformInput::new(
+        ProviderEndpoint::Responses,
+        serde_json::to_vec(&json!({
+            "content": [
+                {"type": "text", "text": "line \"one\"\nline two"},
+                {"type": "thinking", "thinking": "hidden \"step\""},
+                {"type": "text", "text": "done"}
+            ]
+        }))
+        .unwrap(),
+    ));
+    let body: Value = serde_json::from_slice(result.body.as_ref().unwrap()).unwrap();
+    assert_eq!(
+        body["output"][0]["content"][0]["text"],
+        "line \"one\"\nline two"
+    );
+    assert_eq!(body["output"][1]["type"], "reasoning");
+    assert_eq!(body["output"][1]["summary"][0]["text"], "hidden \"step\"");
+    assert_eq!(body["output"][2]["content"][0]["text"], "done");
+}
+
+#[test]
+fn stream_maps_tool_search_and_completion_events() {
+    let tool = anthropic_messages_translator().transform_stream_event(
+        ProviderTransformInput::new(
+            ProviderEndpoint::Responses,
+            b"event: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":2,\"content_block\":{\"type\":\"tool_use\",\"id\":\"call_stream\",\"name\":\"read_file\"}}\n\n".to_vec(),
+        ),
+    );
+    let tool = String::from_utf8(tool.body.unwrap()).unwrap();
+    assert!(tool.contains("\"type\":\"function_call\""));
+    assert!(tool.contains("\"call_id\":\"call_stream\""));
+
+    let search = anthropic_messages_translator().transform_stream_event(
+        ProviderTransformInput::new(
+            ProviderEndpoint::Responses,
+            b"event: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":3,\"content_block\":{\"type\":\"server_tool_use\",\"id\":\"srv_stream\",\"name\":\"web_search\",\"input\":{\"query\":\"current release\"}}}\n\n".to_vec(),
+        ),
+    );
+    let search: Value = serde_json::from_str(
+        String::from_utf8(search.body.unwrap())
+            .unwrap()
+            .lines()
+            .find_map(|line| line.strip_prefix("data: "))
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(search["item"]["status"], "in_progress");
+    assert_eq!(search["item"]["action"]["queries"][0], "current release");
+
+    let completed =
+        anthropic_messages_translator().transform_stream_event(ProviderTransformInput::new(
+            ProviderEndpoint::Responses,
+            b"event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n".to_vec(),
+        ));
+    assert_eq!(
+        String::from_utf8(completed.body.unwrap()).unwrap(),
+        "event: response.completed\ndata: {\"type\":\"response.completed\"}\n\n"
+    );
 }
