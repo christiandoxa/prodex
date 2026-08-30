@@ -91,6 +91,7 @@ pub fn self_test() -> bool {
     let tuning_defaults_ok = runtime_decisions::tuning_defaults_self_test();
     let smart_context_usage_ok = runtime_decisions::smart_context_token_usage_summary_self_test();
     let rich_ok = rich::rich_self_test();
+    let runtime_doctor_plan_ok = rich::runtime_doctor_plan_self_test();
     let log_semantics_ok = log::self_test();
     let checks = [
         routing_ok,
@@ -107,6 +108,7 @@ pub fn self_test() -> bool {
         tuning_defaults_ok,
         smart_context_usage_ok,
         rich_ok,
+        runtime_doctor_plan_ok,
         log_semantics_ok,
         routing::abi_version().is_ok(),
         control_plane_routing_ok,

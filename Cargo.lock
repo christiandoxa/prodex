@@ -3270,6 +3270,7 @@ version = "0.419.1"
 dependencies = [
  "anyhow",
  "chrono",
+ "prodex-mojo-core",
  "prodex-quota",
  "prodex-runtime-proxy",
  "prodex-runtime-state",
