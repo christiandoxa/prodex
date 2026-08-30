@@ -674,10 +674,6 @@ fn anthropic_usage(value: Option<&Value>) -> Option<Value> {
     }))
 }
 
-fn responses_sse_event(name: &str, value: Value) -> String {
-    format!("event: {name}\ndata: {value}\n\n")
-}
-
 fn remap_result(mut result: ProviderTransformResult) -> ProviderTransformResult {
     result.to_format = ProviderWireFormat::AnthropicMessages;
     result
