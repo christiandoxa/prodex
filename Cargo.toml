@@ -91,7 +91,7 @@ doc = false
 [workspace.dependencies]
 aes-gcm-siv = "0.12.0"
 anyhow = "1.0.102"
-argon2 = "0.5.3"
+argon2 = "0.6.0"
 arc-swap = "1.9.2"
 base64 = "0.23.1"
 aws-lc-rs = "1.17.1"
