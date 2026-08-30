@@ -5,45 +5,6 @@ pub fn reserve_budget(
     limit: BudgetLimit,
     request: ReservationRequest,
 ) -> Result<BudgetSnapshot, BudgetRejection> {
-    #[cfg(feature = "mojo")]
-    {
-        let result = prodex_mojo_core::policy::accounting_operation(
-            prodex_mojo_core::policy::ACCOUNTING_RESERVE,
-            &[
-                snapshot.reserved.tokens,
-                snapshot.reserved.cost_micros,
-                snapshot.committed.tokens,
-                snapshot.committed.cost_micros,
-                limit.max.tokens,
-                limit.max.cost_micros,
-                request.estimate.tokens,
-                request.estimate.cost_micros,
-            ],
-        )
-        .unwrap_or_else(|_| panic!("Mojo budget reservation returned invalid output"));
-        let rejection = |reason| BudgetRejection {
-            reason,
-            available: snapshot.available(limit),
-            requested: request.estimate,
-        };
-        match result.result_code {
-            0 => Ok(BudgetSnapshot {
-                reserved: UsageAmount::new(result.values[0], result.values[1]),
-                committed: snapshot.committed,
-            }),
-            1 => Err(BudgetRejection {
-                reason: BudgetRejectionReason::ArithmeticOverflow,
-                available: UsageAmount::ZERO,
-                requested: request.estimate,
-            }),
-            2 => Err(rejection(BudgetRejectionReason::ZeroEstimate)),
-            3 => Err(rejection(BudgetRejectionReason::TokenLimitExceeded)),
-            4 => Err(rejection(BudgetRejectionReason::CostLimitExceeded)),
-            _ => Err(rejection(BudgetRejectionReason::ArithmeticOverflow)),
-        }
-    }
-
-    #[cfg(not(feature = "mojo"))]
     {
         if request.estimate == UsageAmount::ZERO {
             return Err(BudgetRejection {
@@ -135,48 +96,6 @@ pub fn commit_reservation(
     snapshot: BudgetSnapshot,
     commit: ReservationCommit,
 ) -> Result<BudgetSnapshot, ReservationCommitError> {
-    #[cfg(feature = "mojo")]
-    {
-        let result = prodex_mojo_core::policy::accounting_operation(
-            prodex_mojo_core::policy::ACCOUNTING_COMMIT,
-            &[
-                snapshot.reserved.tokens,
-                snapshot.reserved.cost_micros,
-                snapshot.committed.tokens,
-                snapshot.committed.cost_micros,
-                commit.reserved.tokens,
-                commit.reserved.cost_micros,
-                commit.actual.tokens,
-                commit.actual.cost_micros,
-            ],
-        )
-        .unwrap_or_else(|_| panic!("Mojo reservation commit returned invalid output"));
-        match result.result_code {
-            0 => Ok(BudgetSnapshot {
-                reserved: UsageAmount::new(result.values[0], result.values[1]),
-                committed: UsageAmount::new(result.values[2], result.values[3]),
-            }),
-            1 => Err(ReservationCommitError::ZeroActual),
-            2 => Err(ReservationCommitError::ActualExceedsReserved {
-                reserved: commit.reserved,
-                actual: commit.actual,
-            }),
-            3 => Err(ReservationCommitError::ReservedBalanceUnderflow {
-                reserved: commit.reserved,
-                available: snapshot.reserved,
-            }),
-            4 => Err(ReservationCommitError::CommittedUsageOverflow {
-                committed: snapshot.committed,
-                actual: commit.actual,
-            }),
-            _ => Err(ReservationCommitError::CommittedUsageOverflow {
-                committed: snapshot.committed,
-                actual: commit.actual,
-            }),
-        }
-    }
-
-    #[cfg(not(feature = "mojo"))]
     {
         if commit.actual == UsageAmount::ZERO {
             return Err(ReservationCommitError::ZeroActual);

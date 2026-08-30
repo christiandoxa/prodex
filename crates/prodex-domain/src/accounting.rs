@@ -41,22 +41,6 @@ impl UsageAmount {
     }
 
     pub fn checked_add(self, other: Self) -> Option<Self> {
-        #[cfg(feature = "mojo")]
-        {
-            let result = prodex_mojo_core::policy::accounting_operation(
-                prodex_mojo_core::policy::ACCOUNTING_USAGE_ADD,
-                &[
-                    self.tokens,
-                    self.cost_micros,
-                    other.tokens,
-                    other.cost_micros,
-                ],
-            )
-            .ok()?;
-            (result.result_code == 0).then(|| Self::new(result.values[0], result.values[1]))
-        }
-
-        #[cfg(not(feature = "mojo"))]
         Some(Self {
             tokens: self.tokens.checked_add(other.tokens)?,
             cost_micros: self.cost_micros.checked_add(other.cost_micros)?,
@@ -64,22 +48,6 @@ impl UsageAmount {
     }
 
     pub fn saturating_sub(self, other: Self) -> Self {
-        #[cfg(feature = "mojo")]
-        {
-            let result = prodex_mojo_core::policy::accounting_operation(
-                prodex_mojo_core::policy::ACCOUNTING_USAGE_SATURATING_SUB,
-                &[
-                    self.tokens,
-                    self.cost_micros,
-                    other.tokens,
-                    other.cost_micros,
-                ],
-            )
-            .expect("Mojo accounting subtraction returned invalid output");
-            Self::new(result.values[0], result.values[1])
-        }
-
-        #[cfg(not(feature = "mojo"))]
         Self {
             tokens: self.tokens.saturating_sub(other.tokens),
             cost_micros: self.cost_micros.saturating_sub(other.cost_micros),
@@ -87,25 +55,7 @@ impl UsageAmount {
     }
 
     pub fn exceeds(self, limit: Self) -> bool {
-        #[cfg(feature = "mojo")]
-        {
-            let result = prodex_mojo_core::policy::accounting_operation(
-                prodex_mojo_core::policy::ACCOUNTING_USAGE_EXCEEDS,
-                &[
-                    self.tokens,
-                    self.cost_micros,
-                    limit.tokens,
-                    limit.cost_micros,
-                ],
-            )
-            .expect("Mojo accounting comparison returned invalid output");
-            result.result_code == 0 && result.values[0] == 1
-        }
-
-        #[cfg(not(feature = "mojo"))]
-        {
-            self.tokens > limit.tokens || self.cost_micros > limit.cost_micros
-        }
+        self.tokens > limit.tokens || self.cost_micros > limit.cost_micros
     }
 }
 
@@ -130,24 +80,6 @@ impl BudgetSnapshot {
     }
 
     pub fn available(self, limit: BudgetLimit) -> UsageAmount {
-        #[cfg(feature = "mojo")]
-        {
-            let result = prodex_mojo_core::policy::accounting_operation(
-                prodex_mojo_core::policy::ACCOUNTING_SNAPSHOT_AVAILABLE,
-                &[
-                    self.reserved.tokens,
-                    self.reserved.cost_micros,
-                    self.committed.tokens,
-                    self.committed.cost_micros,
-                    limit.max.tokens,
-                    limit.max.cost_micros,
-                ],
-            )
-            .expect("Mojo accounting availability returned invalid output");
-            UsageAmount::new(result.values[0], result.values[1])
-        }
-
-        #[cfg(not(feature = "mojo"))]
         match self.total_held() {
             Some(held) => limit.max.saturating_sub(held),
             None => UsageAmount::ZERO,
