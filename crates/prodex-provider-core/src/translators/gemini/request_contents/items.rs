@@ -11,14 +11,14 @@ fn gemini_content_value(role: &str, parts: Vec<Value>) -> Value {
     {
         let role = serde_json::to_vec(role).expect("Gemini content role serializes");
         let parts = serde_json::to_vec(&parts).expect("Gemini content parts serialize");
-        return super::gemini_request_content_mojo_value(
+        super::gemini_request_content_mojo_value(
             prodex_mojo_core::provider_constraints::GeminiRequestContentOperation::Content,
             Some(&role),
             Some(&parts),
             None,
             None,
             0,
-        );
+        )
     }
     #[cfg(not(feature = "mojo"))]
     {

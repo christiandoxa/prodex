@@ -55,13 +55,13 @@ pub(super) fn validate_responses_chat_compat_request(
                 .get("input")
                 .is_some_and(responses_input_has_non_text_content),
         };
-        return match prodex_mojo_core::rich::openai_compat_validate_request(input) {
+        match prodex_mojo_core::rich::openai_compat_validate_request(input) {
             Ok(()) => Ok(()),
             Err(OpenAiCompatError::Rejected(reason)) => Err(reason),
             Err(OpenAiCompatError::Mojo(error)) => {
                 panic!("Mojo OpenAI compatibility validation failed: {error:?}")
             }
-        };
+        }
     }
 
     #[cfg(not(feature = "mojo"))]

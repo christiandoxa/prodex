@@ -5,13 +5,13 @@ use std::borrow::Cow;
 pub fn smart_context_normalize_volatile_command_output(text: &str) -> Cow<'_, str> {
     #[cfg(feature = "mojo")]
     {
-        return Cow::Owned(
+        Cow::Owned(
             prodex_mojo_core::rich::normalize_smart_context_volatile(
                 text,
                 prodex_mojo_core::rich::SmartContextNormalizationMode::CommandOutput,
             )
             .expect("Mojo Smart Context volatile normalizer returned invalid output"),
-        );
+        )
     }
 
     #[cfg(not(feature = "mojo"))]
@@ -75,13 +75,13 @@ fn smart_context_command_output_replacement(
 pub fn smart_context_normalize_volatile_static_context(text: &str) -> Cow<'_, str> {
     #[cfg(feature = "mojo")]
     {
-        return Cow::Owned(
+        Cow::Owned(
             prodex_mojo_core::rich::normalize_smart_context_volatile(
                 text,
                 prodex_mojo_core::rich::SmartContextNormalizationMode::StaticContext,
             )
             .expect("Mojo Smart Context volatile normalizer returned invalid output"),
-        );
+        )
     }
 
     #[cfg(not(feature = "mojo"))]

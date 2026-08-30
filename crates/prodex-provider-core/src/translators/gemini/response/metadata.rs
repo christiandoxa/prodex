@@ -38,7 +38,7 @@ pub(crate) fn gemini_responses_usage(usage: &Value) -> Option<Value> {
         input.cached_content_token_count = cached_tokens;
         input.thoughts_token_count = reasoning_tokens;
         input.tool_use_prompt_token_count = tool_tokens;
-        return Some(super::super::stream::gemini_mojo_value(input));
+        Some(super::super::stream::gemini_mojo_value(input))
     }
     #[cfg(not(feature = "mojo"))]
     {

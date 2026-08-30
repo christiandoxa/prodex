@@ -32,14 +32,14 @@ pub(crate) fn gemini_system_instruction_from_request(value: &Value) -> Option<Va
     #[cfg(feature = "mojo")]
     {
         let text = serde_json::to_vec(&system_text).expect("Gemini system instruction serializes");
-        return Some(super::gemini_request_content_mojo_value(
+        Some(super::gemini_request_content_mojo_value(
             prodex_mojo_core::provider_constraints::GeminiRequestContentOperation::SystemInstruction,
             Some(&text),
             None,
             None,
             None,
             0,
-        ));
+        ))
     }
     #[cfg(not(feature = "mojo"))]
     Some(json!({ "parts": [{ "text": system_text }] }))

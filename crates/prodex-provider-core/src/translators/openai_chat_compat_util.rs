@@ -41,9 +41,9 @@ fn output_text(text: &str) -> Value {
             prodex_mojo_core::rich::openai_compat_output_text(text).unwrap_or_else(|error| {
                 panic!("Mojo OpenAI compatibility output text failed: {error:?}")
             });
-        return serde_json::from_slice(&body).unwrap_or_else(|error| {
+        serde_json::from_slice(&body).unwrap_or_else(|error| {
             panic!("Mojo OpenAI compatibility output text was invalid JSON: {error}")
-        });
+        })
     }
 
     #[cfg(not(feature = "mojo"))]
@@ -134,9 +134,9 @@ pub(super) fn chat_usage_to_responses_usage(usage: Option<&Value>) -> Option<Val
             total_tokens_present,
         )
         .unwrap_or_else(|error| panic!("Mojo OpenAI compatibility usage failed: {error:?}"));
-        return Some(serde_json::from_slice(&body).unwrap_or_else(|error| {
+        Some(serde_json::from_slice(&body).unwrap_or_else(|error| {
             panic!("Mojo OpenAI compatibility usage was invalid JSON: {error}")
-        }));
+        }))
     }
 
     #[cfg(not(feature = "mojo"))]
@@ -179,7 +179,7 @@ pub(super) fn split_flat_namespace_tool_name(name: &str) -> (Option<String>, Str
             .get("namespace")
             .and_then(Value::as_str)
             .map(str::to_string);
-        return (namespace, name);
+        (namespace, name)
     }
 
     #[cfg(not(feature = "mojo"))]
@@ -207,10 +207,9 @@ pub(super) fn split_flat_namespace_tool_name(name: &str) -> (Option<String>, Str
 pub(super) fn rtk_wrapped_tool_arguments(name: &str, arguments: &str) -> String {
     #[cfg(feature = "mojo")]
     {
-        return prodex_mojo_core::rich::openai_compat_rtk_arguments(name, arguments)
-            .unwrap_or_else(|error| {
-                panic!("Mojo OpenAI compatibility RTK rewrite failed: {error:?}")
-            });
+        prodex_mojo_core::rich::openai_compat_rtk_arguments(name, arguments).unwrap_or_else(
+            |error| panic!("Mojo OpenAI compatibility RTK rewrite failed: {error:?}"),
+        )
     }
 
     #[cfg(not(feature = "mojo"))]

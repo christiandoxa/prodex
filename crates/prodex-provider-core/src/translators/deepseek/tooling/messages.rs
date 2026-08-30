@@ -59,7 +59,7 @@ pub(super) fn deepseek_tool_call_message(
         input.name = Some(name);
         input.arguments = Some(arguments);
         input.signature = signature;
-        return super::super::deepseek_mojo_value(input);
+        super::super::deepseek_mojo_value(input)
     }
     #[cfg(not(feature = "mojo"))]
     {
@@ -93,7 +93,7 @@ pub(super) fn deepseek_tool_message(call_id: &str, content: &str) -> Value {
         let mut input = DeepSeekKernelInput::new(DeepSeekKernelOperation::ToolMessage);
         input.call_id = Some(call_id);
         input.content = Some(content);
-        return super::super::deepseek_mojo_value(input);
+        super::super::deepseek_mojo_value(input)
     }
     #[cfg(not(feature = "mojo"))]
     json!({
@@ -110,7 +110,7 @@ pub(super) fn deepseek_raw_tool_message(call_id: &str, content: &Value) -> Value
         let mut input = DeepSeekKernelInput::new(DeepSeekKernelOperation::ToolMessage);
         input.call_id = Some(call_id);
         input.input = Some(&content);
-        return super::super::deepseek_mojo_value(input);
+        super::super::deepseek_mojo_value(input)
     }
     #[cfg(not(feature = "mojo"))]
     json!({

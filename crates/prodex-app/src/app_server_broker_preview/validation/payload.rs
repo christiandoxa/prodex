@@ -21,7 +21,7 @@ impl LifecyclePayloadValidation {
         let stage = preview["preview"]["summary"]["lifecycle_stage"].as_str()?;
         #[cfg(feature = "mojo-core")]
         {
-            return app_server_broker_mojo_validation_reason(AppServerBrokerValidationInput {
+            app_server_broker_mojo_validation_reason(AppServerBrokerValidationInput {
                 response: false,
                 stage,
                 thread_id_present: preview_thread_id(preview).is_some(),
@@ -47,7 +47,7 @@ impl LifecyclePayloadValidation {
                     .and_then(|frame| frame_value(frame, &["params", "turn", "items"]))
                     .is_some_and(Value::is_array),
             })
-            .map(|reason| payload_failure(preview, reason));
+            .map(|reason| payload_failure(preview, reason))
         }
         #[cfg(not(feature = "mojo-core"))]
         {

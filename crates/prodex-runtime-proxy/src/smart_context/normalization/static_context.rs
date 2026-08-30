@@ -90,8 +90,8 @@ pub(in crate::smart_context) fn smart_context_static_context_prompt_cache_payloa
 pub(in crate::smart_context) fn smart_context_static_context_noise_line(line: &str) -> bool {
     #[cfg(feature = "mojo")]
     {
-        return prodex_mojo_core::rich::smart_context_static_context_noise_line(line)
-            .expect("Mojo Smart Context static-context classifier returned invalid output");
+        prodex_mojo_core::rich::smart_context_static_context_noise_line(line)
+            .expect("Mojo Smart Context static-context classifier returned invalid output")
     }
 
     #[cfg(not(feature = "mojo"))]

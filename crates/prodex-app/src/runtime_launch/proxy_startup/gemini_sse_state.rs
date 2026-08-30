@@ -314,10 +314,9 @@ impl RuntimeGeminiSseState {
         }
         if plan.record_media
             && let Some(content_item) = media_content_item
+            && !self.media_content_items.contains(&content_item)
         {
-            if !self.media_content_items.contains(&content_item) {
-                self.media_content_items.push(content_item);
-            }
+            self.media_content_items.push(content_item);
         }
         if plan.record_native {
             self.add_native_part(part);

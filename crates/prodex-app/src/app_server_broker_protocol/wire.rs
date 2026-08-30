@@ -84,7 +84,7 @@ pub(crate) fn app_server_broker_invalid_reason(value: &Value) -> Option<&'static
         let Some(object) = value.as_object() else {
             return Some("non_object_frame");
         };
-        return super::mojo::invalid_reason(super::mojo::wire_plan(object).invalid_reason);
+        super::mojo::invalid_reason(super::mojo::wire_plan(object).invalid_reason)
     }
     #[cfg(not(feature = "mojo-core"))]
     {

@@ -326,10 +326,9 @@ fn sequence_failure(
             | "turn_started_missing_turn_id"
             | "turn_completed_missing_turn_id"
             | "turn_interrupt_missing_turn_id"
-    ) {
-        if let Some(turn_id) = turn_id.as_ref() {
-            failure = failure.turn_id(turn_id.clone());
-        }
+    ) && let Some(turn_id) = turn_id.as_ref()
+    {
+        failure = failure.turn_id(turn_id.clone());
     }
     if matches!(
         reason,

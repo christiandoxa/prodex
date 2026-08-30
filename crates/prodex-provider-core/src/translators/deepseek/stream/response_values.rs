@@ -42,7 +42,7 @@ pub fn deepseek_provider_core_stream_response_value(
         input.model = model;
         input.usage = usage.as_deref();
         input.metadata = metadata.as_deref();
-        return super::super::deepseek_mojo_value(input);
+        super::super::deepseek_mojo_value(input)
     }
     #[cfg(not(feature = "mojo"))]
     {
@@ -107,7 +107,7 @@ pub fn deepseek_provider_core_stream_chat_assistant_message(
         input.content = (!output_text.is_empty()).then_some(output_text);
         input.reasoning_content = (!reasoning_content.is_empty()).then_some(reasoning_content);
         input.tool_calls = tool_calls.as_deref();
-        return Some(super::super::deepseek_mojo_value(input));
+        Some(super::super::deepseek_mojo_value(input))
     }
     #[cfg(not(feature = "mojo"))]
     {

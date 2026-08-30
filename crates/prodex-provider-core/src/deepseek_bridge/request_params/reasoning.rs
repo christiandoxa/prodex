@@ -29,7 +29,7 @@ pub fn deepseek_provider_core_apply_reasoning_from_responses_request(
                     .map(|(key, value)| (key.clone(), value.clone())),
             );
         }
-        return Ok(());
+        Ok(())
     }
     #[cfg(not(feature = "mojo"))]
     {
@@ -91,7 +91,7 @@ pub fn deepseek_provider_core_thinking_enabled(value: &serde_json::Value) -> boo
         let mut input =
             super::DeepSeekKernelInput::new(super::DeepSeekKernelOperation::ReasoningParameters);
         input.reasoning_content = Some(effort);
-        return super::deepseek_provider_core_mojo_value(input)
+        super::deepseek_provider_core_mojo_value(input)
             .ok()
             .is_some_and(|mapped| {
                 mapped
@@ -99,7 +99,7 @@ pub fn deepseek_provider_core_thinking_enabled(value: &serde_json::Value) -> boo
                     .and_then(|thinking| thinking.get("type"))
                     .and_then(serde_json::Value::as_str)
                     == Some("enabled")
-            });
+            })
     }
     #[cfg(not(feature = "mojo"))]
     deepseek_provider_core_reasoning_effort_from_responses_request(value, "DeepSeek")

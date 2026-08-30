@@ -74,7 +74,7 @@ pub(super) fn deepseek_response_metadata(value: &Value, message: Option<&Value>)
         let mut input = DeepSeekKernelInput::new(DeepSeekKernelOperation::ResponseMetadata);
         input.role = Some("deepseek");
         input.metadata = Some(&metadata);
-        return Some(crate::translators::deepseek::deepseek_mojo_value(input));
+        Some(crate::translators::deepseek::deepseek_mojo_value(input))
     }
     #[cfg(not(feature = "mojo"))]
     Some(json!({ "deepseek": metadata }))

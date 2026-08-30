@@ -49,7 +49,7 @@ pub(crate) fn gemini_response_tool_call_added_item_with_call_id(
         input.call_id = Some(call_id);
         input.name = Some(flat_name);
         input.signature = signature;
-        return Some(super::super::stream::gemini_mojo_value(input));
+        Some(super::super::stream::gemini_mojo_value(input))
     }
     #[cfg(not(feature = "mojo"))]
     let mut item = json!({
@@ -88,7 +88,7 @@ pub(crate) fn gemini_response_tool_call_raw_item_with_call_id(
         input.name = Some(flat_name);
         input.arguments = Some(arguments);
         input.signature = signature;
-        return super::super::stream::gemini_mojo_value(input);
+        super::super::stream::gemini_mojo_value(input)
     }
     #[cfg(not(feature = "mojo"))]
     let mut item = json!({
@@ -187,7 +187,7 @@ pub(crate) fn gemini_response_tool_call_item_with_call_id(
         input.name = Some(flat_name);
         input.arguments = Some(&args);
         input.signature = signature;
-        return super::super::stream::gemini_mojo_value(input);
+        super::super::stream::gemini_mojo_value(input)
     }
     #[cfg(not(feature = "mojo"))]
     let mut item = json!({

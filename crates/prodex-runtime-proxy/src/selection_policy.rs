@@ -607,8 +607,8 @@ pub fn runtime_soft_affinity_rejection_reason(
 ) -> &'static str {
     #[cfg(feature = "mojo")]
     {
-        return runtime_soft_affinity_policy_reason(runtime_soft_affinity_policy_mojo(input))
-            .unwrap_or("quota_unknown");
+        runtime_soft_affinity_policy_reason(runtime_soft_affinity_policy_mojo(input))
+            .unwrap_or("quota_unknown")
     }
 
     #[cfg(not(feature = "mojo"))]

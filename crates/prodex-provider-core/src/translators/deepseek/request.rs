@@ -162,7 +162,7 @@ pub(super) fn deepseek_request_body_from_responses(
         input.tool_choice = tool_choice.as_deref();
         input.extra = Some(&extra);
         let body = super::deepseek_mojo_body(input);
-        return Ok((body, degraded));
+        Ok((body, degraded))
     }
     #[cfg(not(feature = "mojo"))]
     {

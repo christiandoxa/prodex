@@ -59,10 +59,10 @@ pub(super) fn deepseek_stream_event_from_chat_value(
     {
         let mut input = DeepSeekKernelInput::new(DeepSeekKernelOperation::SseTextDelta);
         input.delta = Some(text);
-        return Some((
+        Some((
             "response.output_text.delta",
             super::deepseek_mojo_value(input),
-        ));
+        ))
     }
     #[cfg(not(feature = "mojo"))]
     {
@@ -146,7 +146,7 @@ pub(super) fn deepseek_responses_value_from_chat_value(value: &Value) -> Value {
         input.metadata = metadata.as_deref();
         input.error_code = error_message.map(|_| "invalid_tool_call_arguments");
         input.error_message = error_message;
-        return super::deepseek_mojo_value(input);
+        super::deepseek_mojo_value(input)
     }
     #[cfg(not(feature = "mojo"))]
     {
