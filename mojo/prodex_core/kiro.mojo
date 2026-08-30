@@ -44,6 +44,7 @@ comptime KIRO_TOOL_CALL_ARGUMENTS_DELTA_CHAT_VALUE: Int64 = 24
 comptime KIRO_USAGE_UPDATE: Int64 = 25
 comptime KIRO_STREAM_TOOL_ARGUMENTS: Int64 = 26
 comptime KIRO_FINISH_REASON: Int64 = 27
+comptime KIRO_CHAT_TOOL_CALL_ITEM: Int64 = 28
 
 
 @fieldwise_init
@@ -137,11 +138,12 @@ def kiro_put_hex_byte(
     return kiro_put_byte(writer, high) and kiro_put_byte(writer, low)
 
 
-def kiro_put_json_string(
+def kiro_put_json_string_with_prefix(
     writer: Pointer[mut=True, KiroResponseWriter, _],
+    prefix: StringSlice,
     view: ProdexRichStringView,
 ) -> Bool:
-    if not kiro_put_byte(writer, 34):
+    if not kiro_put_byte(writer, 34) or not kiro_put_literal(writer, prefix):
         return False
     if view.len > 0:
         var ptr = rich_view_ptr(view)
@@ -171,6 +173,13 @@ def kiro_put_json_string(
             elif not kiro_put_byte(writer, value):
                 return False
     return kiro_put_byte(writer, 34)
+
+
+def kiro_put_json_string(
+    writer: Pointer[mut=True, KiroResponseWriter, _],
+    view: ProdexRichStringView,
+) -> Bool:
+    return kiro_put_json_string_with_prefix(writer, StringSlice(""), view)
 
 
 def kiro_put_view(
@@ -317,7 +326,12 @@ def kiro_put_anthropic_stop_reason(
     if input.has_tool_calls == 1:
         return kiro_put_literal(writer, StringSlice('"tool_use"'))
     if input.reason_present == 1:
-        return kiro_put_json_string(writer, input.reason)
+        if rich_view_matches_literal["max_output_tokens"](input.reason, False) or rich_view_matches_literal[
+            "max_tokens"
+        ](input.reason, False):
+            return kiro_put_literal(writer, StringSlice('"max_tokens"'))
+        if rich_view_matches_literal["tool_use"](input.reason, False):
+            return kiro_put_literal(writer, StringSlice('"tool_use"'))
     return kiro_put_literal(writer, StringSlice('"end_turn"'))
 
 
@@ -438,13 +452,18 @@ def kiro_write_operation(
         if not kiro_put_literal(writer, StringSlice('{"id":')):
             return False
         if input.response_id_present == 1:
-            if not kiro_put_json_string(writer, input.response_id):
+            if not kiro_put_json_string_with_prefix(writer, StringSlice("chatcmpl_"), input.response_id):
                 return False
         elif not kiro_put_literal(writer, StringSlice('"chatcmpl_kiro_')) or not kiro_put_u64(writer, input.request_id) or not kiro_put_byte(writer, 34):
             return False
         if not kiro_put_literal(writer, StringSlice(',"object":"chat.completion","created":')) or not kiro_put_u64(writer, input.created_at):
             return False
-        if not kiro_put_literal(writer, StringSlice(',"model":')) or not kiro_put_json_string(writer, input.model):
+        if not kiro_put_literal(writer, StringSlice(',"model":')):
+            return False
+        if input.model_present == 1:
+            if not kiro_put_json_string(writer, input.model):
+                return False
+        elif not kiro_put_literal(writer, StringSlice('"kiro-cli"')):
             return False
         if not kiro_put_literal(writer, StringSlice(',"choices":[{"index":0,"message":{"role":"assistant","content":')):
             return False
@@ -465,7 +484,7 @@ def kiro_write_operation(
                 return False
         if not kiro_put_literal(writer, StringSlice('},"finish_reason":"')):
             return False
-        if not kiro_put_chat_finish_reason(writer, input) or not kiro_put_literal(writer, StringSlice('"}]}')):
+        if not kiro_put_chat_finish_reason(writer, input) or not kiro_put_literal(writer, StringSlice('"}]')):
             return False
         if input.requested_model_present == 1:
             if not kiro_put_literal(writer, StringSlice(',"requested_model":')) or not kiro_put_json_string(writer, input.requested_model):
@@ -653,6 +672,29 @@ def kiro_write_operation(
         if not kiro_put_chat_finish_reason(writer, input):
             return False
         return kiro_put_byte(writer, 34)
+    if operation == KIRO_CHAT_TOOL_CALL_ITEM:
+        if not kiro_put_literal(writer, StringSlice('{"id":')):
+            return False
+        if input.call_id_present == 1:
+            if not kiro_put_json_string(writer, input.call_id):
+                return False
+        elif not kiro_put_literal(writer, StringSlice('"call_kiro"')):
+            return False
+        if not kiro_put_literal(writer, StringSlice(',"type":"function","function":{"name":')):
+            return False
+        if input.name_present == 1:
+            if not kiro_put_json_string(writer, input.name):
+                return False
+        elif not kiro_put_literal(writer, StringSlice('"tool_call"')):
+            return False
+        if not kiro_put_literal(writer, StringSlice(',"arguments":')):
+            return False
+        if input.arguments_present == 1:
+            if not kiro_put_json_string(writer, input.arguments):
+                return False
+        elif not kiro_put_literal(writer, StringSlice('"{}"')):
+            return False
+        return kiro_put_literal(writer, StringSlice("}}"))
     return False
 
 

@@ -2,6 +2,22 @@
 
 use serde_json::{Value, json};
 
+#[cfg(feature = "mojo")]
+use prodex_mojo_core::rich::{KiroKernelInput, KiroKernelOperation};
+
+#[cfg(feature = "mojo")]
+pub(super) fn kiro_mojo_body(input: KiroKernelInput<'_>) -> Vec<u8> {
+    prodex_mojo_core::rich::kiro_kernel(input)
+        .unwrap_or_else(|error| panic!("Mojo Kiro kernel failed: {error:?}"))
+}
+
+#[cfg(feature = "mojo")]
+pub(super) fn kiro_mojo_value(input: KiroKernelInput<'_>) -> Value {
+    let body = kiro_mojo_body(input);
+    serde_json::from_slice(&body)
+        .unwrap_or_else(|error| panic!("Mojo Kiro kernel returned invalid JSON: {error}"))
+}
+
 pub const KIRO_PROVIDER_CORE_MAX_TOOL_ACTIVITY_EVENTS: usize = 128;
 pub const KIRO_PROVIDER_CORE_MAX_TOOL_ACTIVITY_ID_BYTES: usize = 256;
 const KIRO_PROVIDER_CORE_ACTIVITY_NAME_MAX_BYTES: usize = 160;
@@ -13,44 +29,91 @@ pub fn kiro_provider_core_chat_completion_chunk(
     delta: Value,
     finish_reason: Option<&str>,
 ) -> Result<Vec<u8>, serde_json::Error> {
-    let mut chunk = json!({
-        "id": chat_completion_id,
-        "object": "chat.completion.chunk",
-        "choices": [{
-            "index": 0,
-            "delta": delta,
-        }],
-    });
-    if let Some(model) = model.filter(|value| !value.is_empty()) {
-        chunk["model"] = Value::String(model.to_string());
+    #[cfg(feature = "mojo")]
+    {
+        let delta = serde_json::to_string(&delta)?;
+        let mut input = KiroKernelInput::new(KiroKernelOperation::ChatCompletionChunk);
+        input.response_id = Some(chat_completion_id);
+        input.model = model;
+        input.content = Some(&delta);
+        input.finish_reason = finish_reason;
+        return Ok(kiro_mojo_body(input));
     }
-    if let Some(finish_reason) = finish_reason {
-        chunk["choices"][0]["finish_reason"] = Value::String(finish_reason.to_string());
+    #[cfg(not(feature = "mojo"))]
+    {
+        let mut chunk = json!({
+            "id": chat_completion_id,
+            "object": "chat.completion.chunk",
+            "choices": [{
+                "index": 0,
+                "delta": delta,
+            }],
+        });
+        if let Some(model) = model.filter(|value| !value.is_empty()) {
+            chunk["model"] = Value::String(model.to_string());
+        }
+        if let Some(finish_reason) = finish_reason {
+            chunk["choices"][0]["finish_reason"] = Value::String(finish_reason.to_string());
+        }
+        Ok(format!("data: {}\n\n", serde_json::to_string(&chunk)?).into_bytes())
     }
-    Ok(format!("data: {}\n\n", serde_json::to_string(&chunk)?).into_bytes())
 }
 
 pub fn kiro_provider_core_chat_completion_role_delta() -> Value {
-    json!({"role": "assistant"})
+    #[cfg(feature = "mojo")]
+    {
+        return kiro_mojo_value(KiroKernelInput::new(KiroKernelOperation::ChatRoleDelta));
+    }
+    #[cfg(not(feature = "mojo"))]
+    {
+        json!({"role": "assistant"})
+    }
 }
 
 pub fn kiro_provider_core_chat_completion_empty_delta() -> Value {
-    json!({})
+    #[cfg(feature = "mojo")]
+    {
+        return kiro_mojo_value(KiroKernelInput::new(KiroKernelOperation::ChatEmptyDelta));
+    }
+    #[cfg(not(feature = "mojo"))]
+    {
+        json!({})
+    }
 }
 
 pub fn kiro_provider_core_chat_completion_text_delta(text: &str, include_role: bool) -> Value {
-    if include_role {
-        json!({"role": "assistant", "content": text})
-    } else {
-        json!({"content": text})
+    #[cfg(feature = "mojo")]
+    {
+        let mut input = KiroKernelInput::new(KiroKernelOperation::ChatTextDelta);
+        input.content = Some(text);
+        input.include_role = include_role;
+        return kiro_mojo_value(input);
+    }
+    #[cfg(not(feature = "mojo"))]
+    {
+        if include_role {
+            json!({"role": "assistant", "content": text})
+        } else {
+            json!({"content": text})
+        }
     }
 }
 
 pub fn kiro_provider_core_chat_completion_reasoning_delta(text: &str, include_role: bool) -> Value {
-    if include_role {
-        json!({"role": "assistant", "reasoning_content": text})
-    } else {
-        json!({"reasoning_content": text})
+    #[cfg(feature = "mojo")]
+    {
+        let mut input = KiroKernelInput::new(KiroKernelOperation::ChatReasoningDelta);
+        input.content = Some(text);
+        input.include_role = include_role;
+        return kiro_mojo_value(input);
+    }
+    #[cfg(not(feature = "mojo"))]
+    {
+        if include_role {
+            json!({"role": "assistant", "reasoning_content": text})
+        } else {
+            json!({"reasoning_content": text})
+        }
     }
 }
 
@@ -60,19 +123,31 @@ pub fn kiro_provider_core_chat_completion_tool_call_delta(
     arguments: &str,
     include_role: bool,
 ) -> Value {
-    let tool_call = json!({
-        "index": 0,
-        "id": tool_call_id,
-        "type": "function",
-        "function": {
-            "name": name,
-            "arguments": arguments,
+    #[cfg(feature = "mojo")]
+    {
+        let mut input = KiroKernelInput::new(KiroKernelOperation::ChatToolCallDelta);
+        input.call_id = Some(tool_call_id);
+        input.name = Some(name);
+        input.arguments = Some(arguments);
+        input.include_role = include_role;
+        return kiro_mojo_value(input);
+    }
+    #[cfg(not(feature = "mojo"))]
+    {
+        let tool_call = json!({
+            "index": 0,
+            "id": tool_call_id,
+            "type": "function",
+            "function": {
+                "name": name,
+                "arguments": arguments,
+            }
+        });
+        if include_role {
+            json!({"role": "assistant", "tool_calls": [tool_call]})
+        } else {
+            json!({"tool_calls": [tool_call]})
         }
-    });
-    if include_role {
-        json!({"role": "assistant", "tool_calls": [tool_call]})
-    } else {
-        json!({"tool_calls": [tool_call]})
     }
 }
 
@@ -82,13 +157,25 @@ pub fn kiro_provider_core_output_text_delta_event(
     response_id: &str,
     delta: &str,
 ) -> Value {
-    json!({
-        "type": "response.output_text.delta",
-        "sequence_number": sequence_number,
-        "created_at": created_at,
-        "response_id": response_id,
-        "delta": delta,
-    })
+    #[cfg(feature = "mojo")]
+    {
+        let mut input = KiroKernelInput::new(KiroKernelOperation::OutputTextDeltaEvent);
+        input.sequence_number = sequence_number;
+        input.created_at = created_at;
+        input.response_id = Some(response_id);
+        input.content = Some(delta);
+        return kiro_mojo_value(input);
+    }
+    #[cfg(not(feature = "mojo"))]
+    {
+        json!({
+            "type": "response.output_text.delta",
+            "sequence_number": sequence_number,
+            "created_at": created_at,
+            "response_id": response_id,
+            "delta": delta,
+        })
+    }
 }
 
 pub fn kiro_provider_core_response_created_event(
@@ -96,20 +183,42 @@ pub fn kiro_provider_core_response_created_event(
     created_at: u64,
     response_id: &str,
 ) -> Value {
-    json!({
-        "type": "response.created",
-        "sequence_number": sequence_number,
-        "created_at": created_at,
-        "response": {"id": response_id},
-    })
+    #[cfg(feature = "mojo")]
+    {
+        let mut input = KiroKernelInput::new(KiroKernelOperation::ResponseCreatedEvent);
+        input.sequence_number = sequence_number;
+        input.created_at = created_at;
+        input.response_id = Some(response_id);
+        return kiro_mojo_value(input);
+    }
+    #[cfg(not(feature = "mojo"))]
+    {
+        json!({
+            "type": "response.created",
+            "sequence_number": sequence_number,
+            "created_at": created_at,
+            "response": {"id": response_id},
+        })
+    }
 }
 
 pub fn kiro_provider_core_output_item_added_event(sequence_number: u64, item: &Value) -> Value {
-    json!({
-        "type": "response.output_item.added",
-        "sequence_number": sequence_number,
-        "item": item,
-    })
+    #[cfg(feature = "mojo")]
+    {
+        let item = serde_json::to_string(item).expect("Kiro output item serializes");
+        let mut input = KiroKernelInput::new(KiroKernelOperation::OutputItemAddedEvent);
+        input.sequence_number = sequence_number;
+        input.output = Some(&item);
+        return kiro_mojo_value(input);
+    }
+    #[cfg(not(feature = "mojo"))]
+    {
+        json!({
+            "type": "response.output_item.added",
+            "sequence_number": sequence_number,
+            "item": item,
+        })
+    }
 }
 
 pub fn kiro_provider_core_output_item_done_event(
@@ -117,12 +226,24 @@ pub fn kiro_provider_core_output_item_done_event(
     response_id: &str,
     item: &Value,
 ) -> Value {
-    json!({
-        "type": "response.output_item.done",
-        "sequence_number": sequence_number,
-        "item": item,
-        "response_id": response_id,
-    })
+    #[cfg(feature = "mojo")]
+    {
+        let item = serde_json::to_string(item).expect("Kiro output item serializes");
+        let mut input = KiroKernelInput::new(KiroKernelOperation::OutputItemDoneEvent);
+        input.sequence_number = sequence_number;
+        input.response_id = Some(response_id);
+        input.output = Some(&item);
+        return kiro_mojo_value(input);
+    }
+    #[cfg(not(feature = "mojo"))]
+    {
+        json!({
+            "type": "response.output_item.done",
+            "sequence_number": sequence_number,
+            "item": item,
+            "response_id": response_id,
+        })
+    }
 }
 
 pub fn kiro_provider_core_response_completed_event(
@@ -130,12 +251,24 @@ pub fn kiro_provider_core_response_completed_event(
     created_at: u64,
     response: &Value,
 ) -> Value {
-    kiro_provider_core_response_terminal_event(
-        "response.completed",
-        sequence_number,
-        created_at,
-        response,
-    )
+    #[cfg(feature = "mojo")]
+    {
+        let response = serde_json::to_string(response).expect("Kiro response serializes");
+        let mut input = KiroKernelInput::new(KiroKernelOperation::ResponseCompletedEvent);
+        input.sequence_number = sequence_number;
+        input.created_at = created_at;
+        input.output = Some(&response);
+        return kiro_mojo_value(input);
+    }
+    #[cfg(not(feature = "mojo"))]
+    {
+        kiro_provider_core_response_terminal_event(
+            "response.completed",
+            sequence_number,
+            created_at,
+            response,
+        )
+    }
 }
 
 pub fn kiro_provider_core_response_failed_event(
@@ -143,12 +276,24 @@ pub fn kiro_provider_core_response_failed_event(
     created_at: u64,
     response: &Value,
 ) -> Value {
-    kiro_provider_core_response_terminal_event(
-        "response.failed",
-        sequence_number,
-        created_at,
-        response,
-    )
+    #[cfg(feature = "mojo")]
+    {
+        let response = serde_json::to_string(response).expect("Kiro response serializes");
+        let mut input = KiroKernelInput::new(KiroKernelOperation::ResponseFailedEvent);
+        input.sequence_number = sequence_number;
+        input.created_at = created_at;
+        input.output = Some(&response);
+        return kiro_mojo_value(input);
+    }
+    #[cfg(not(feature = "mojo"))]
+    {
+        kiro_provider_core_response_terminal_event(
+            "response.failed",
+            sequence_number,
+            created_at,
+            response,
+        )
+    }
 }
 
 pub fn kiro_provider_core_response_incomplete_event(
@@ -156,14 +301,27 @@ pub fn kiro_provider_core_response_incomplete_event(
     created_at: u64,
     response: &Value,
 ) -> Value {
-    kiro_provider_core_response_terminal_event(
-        "response.incomplete",
-        sequence_number,
-        created_at,
-        response,
-    )
+    #[cfg(feature = "mojo")]
+    {
+        let response = serde_json::to_string(response).expect("Kiro response serializes");
+        let mut input = KiroKernelInput::new(KiroKernelOperation::ResponseIncompleteEvent);
+        input.sequence_number = sequence_number;
+        input.created_at = created_at;
+        input.output = Some(&response);
+        return kiro_mojo_value(input);
+    }
+    #[cfg(not(feature = "mojo"))]
+    {
+        kiro_provider_core_response_terminal_event(
+            "response.incomplete",
+            sequence_number,
+            created_at,
+            response,
+        )
+    }
 }
 
+#[cfg(not(feature = "mojo"))]
 fn kiro_provider_core_response_terminal_event(
     event_type: &str,
     sequence_number: u64,
@@ -182,18 +340,28 @@ pub fn kiro_provider_core_tool_call_arguments_delta_chat_value(
     tool_call_id: &str,
     arguments: &str,
 ) -> Value {
-    json!({
-        "choices": [{
-            "delta": {
-                "tool_calls": [{
-                    "id": tool_call_id,
-                    "function": {
-                        "arguments": arguments,
-                    }
-                }]
-            }
-        }]
-    })
+    #[cfg(feature = "mojo")]
+    {
+        let mut input = KiroKernelInput::new(KiroKernelOperation::ToolCallArgumentsDeltaChatValue);
+        input.call_id = Some(tool_call_id);
+        input.arguments = Some(arguments);
+        return kiro_mojo_value(input);
+    }
+    #[cfg(not(feature = "mojo"))]
+    {
+        json!({
+            "choices": [{
+                "delta": {
+                    "tool_calls": [{
+                        "id": tool_call_id,
+                        "function": {
+                            "arguments": arguments,
+                        }
+                    }]
+                }
+            }]
+        })
+    }
 }
 
 pub fn kiro_provider_core_stream_content_text(value: &Value) -> Option<String> {
@@ -345,22 +513,50 @@ pub fn kiro_provider_core_acp_usage_update_json(
     size: u64,
     cost: Option<(f64, &str)>,
 ) -> Value {
-    json!({
-        "used": used,
-        "size": size,
-        "remaining": size.saturating_sub(used),
-        "cost": cost.map(|(amount, currency)| json!({
-            "amount": amount,
-            "currency": currency,
-        })),
-    })
+    #[cfg(feature = "mojo")]
+    {
+        let extra = serde_json::to_string(&json!({
+            "cost": cost.map(|(amount, currency)| json!({
+                "amount": amount,
+                "currency": currency,
+            })),
+        }))
+        .expect("Kiro ACP usage cost serializes");
+        let mut input = KiroKernelInput::new(KiroKernelOperation::UsageUpdate);
+        input.used = used;
+        input.size = size;
+        input.extra = Some(&extra);
+        return kiro_mojo_value(input);
+    }
+    #[cfg(not(feature = "mojo"))]
+    {
+        json!({
+            "used": used,
+            "size": size,
+            "remaining": size.saturating_sub(used),
+            "cost": cost.map(|(amount, currency)| json!({
+                "amount": amount,
+                "currency": currency,
+            })),
+        })
+    }
 }
 
 pub fn kiro_provider_core_stream_tool_arguments(raw_input: Option<&Value>) -> String {
-    if raw_input.is_some() {
-        r#"{"details_omitted":true}"#.to_string()
-    } else {
-        "{}".to_string()
+    #[cfg(feature = "mojo")]
+    {
+        let mut input = KiroKernelInput::new(KiroKernelOperation::StreamToolArguments);
+        input.input = raw_input.map(|_| "");
+        return String::from_utf8(kiro_mojo_body(input))
+            .expect("Mojo Kiro stream tool arguments are UTF-8");
+    }
+    #[cfg(not(feature = "mojo"))]
+    {
+        if raw_input.is_some() {
+            r#"{"details_omitted":true}"#.to_string()
+        } else {
+            "{}".to_string()
+        }
     }
 }
 
