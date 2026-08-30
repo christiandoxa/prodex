@@ -216,9 +216,7 @@ fn start_cloudflared_attempt(
     let (mut child, rx, reader_threads) =
         cloudflared_startup::spawn(local_url, transport, &config)?;
     #[cfg(windows)]
-    let process_job = child
-        .as_raw_handle()
-        .and_then(|handle| super::assign_expose_process_job(handle).ok());
+    let process_job = super::assign_expose_process_job(child.as_raw_handle()).ok();
     let startup = cloudflared_startup::wait(&mut child, &rx, transport, cancelled);
     Ok(CloudflaredTunnel {
         child,
