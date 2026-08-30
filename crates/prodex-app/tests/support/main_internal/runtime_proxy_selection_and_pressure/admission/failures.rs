@@ -289,10 +289,13 @@ fn compact_candidate_wait_without_selection_does_not_consume_an_attempt() {
 
     assert_eq!(status, 503, "{log}");
     let selected_candidates = log.matches("transport=http compact_candidate=").count();
+    let candidate_exhausted = log.contains("compact_final_failure exit=candidate_exhausted")
+        && log.contains(&format!("attempts={selected_candidates} "));
+    let bounded_capacity_timeout = log.contains("compact_final_failure exit=local_capacity_timeout")
+        && log.contains("attempts=0 ");
     assert!(
-        log.contains("compact_final_failure exit=candidate_exhausted")
-            && log.contains(&format!("attempts={selected_candidates} ")),
-        "only the selected saturated candidate may spend an attempt: {log}"
+        candidate_exhausted || bounded_capacity_timeout,
+        "only the selected saturated candidate may spend an attempt, or the bounded local-capacity timeout may return before any attempt: {log}"
     );
     assert!(backend.responses_accounts().is_empty(), "{log}");
 }
