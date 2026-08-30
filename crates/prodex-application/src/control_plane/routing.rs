@@ -1,6 +1,7 @@
 //! HTTP route, precondition, pagination, and idempotency planning.
 
 #[cfg(test)]
+#[path = "routing_tests.rs"]
 mod routing_tests;
 
 use super::super::*;

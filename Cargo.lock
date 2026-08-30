@@ -2932,6 +2932,7 @@ dependencies = [
  "prodex-domain",
  "prodex-gateway-core",
  "prodex-gateway-http",
+ "prodex-mojo-core",
  "prodex-observability",
  "prodex-provider-core",
  "prodex-provider-spi",
