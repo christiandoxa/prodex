@@ -105,6 +105,13 @@ const CRITICAL_SIGNAL_MAX_KEYS: usize = 65_536;
 const CRITICAL_SIGNAL_MAX_RANGES: usize = 1_024;
 pub const CONTEXT_METADATA_MAX_BYTES: usize = 16_384;
 pub const CONTEXT_TEXT_ABI_VERSION: i64 = 1;
+pub const CONTEXT_GIT_SEARCH_MAX_BYTES: usize = 131_072;
+pub const CONTEXT_GIT_SEARCH_DIRECT_MATCH: i64 = 1;
+pub const CONTEXT_GIT_SEARCH_JSON_MATCH: i64 = 2;
+pub const CONTEXT_GIT_SEARCH_JSON_LINE: i64 = 4;
+pub const CONTEXT_GIT_SEARCH_HEADING_PATH: i64 = 8;
+pub const CONTEXT_GIT_SEARCH_HEADING_MATCH: i64 = 16;
+const CONTEXT_GIT_SEARCH_RESULT_WIDTH: usize = 4;
 const CONTEXT_CI_RESULT_WIDTH: usize = 7;
 const CONTEXT_CI_MARKER: i64 = 1;
 const CONTEXT_CI_ANNOTATION: i64 = 2;
@@ -113,7 +120,9 @@ const CONTEXT_CI_STEP: i64 = 8;
 const CONTEXT_CI_EXIT_CODE: i64 = 16;
 const CONTEXT_CI_FAILURE_TEXT: i64 = 32;
 static CONTEXT_TEXT_ABI_READY: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-
+#[path = "context/git_search.rs"]
+mod git_search;
+pub use git_search::classify_git_search_line;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ContextSignalLine<'a> {
     pub text: &'a str,
@@ -528,6 +537,15 @@ pub fn self_test() -> bool {
     let gemini_glob_ok = gemini_glob_matches("**/*.rs", "src/lib.rs") == Ok(true)
         && gemini_glob_matches("src/*.rs", "src/lib.rs") == Ok(true)
         && gemini_glob_matches("src/*.rs", "src/nested/lib.rs") == Ok(false);
+    let mut search_path = [0_u8; 64];
+    let mut search_text = [0_u8; 64];
+    let search_ok = classify_git_search_line(
+        "src/lib.rs:7:needle",
+        None,
+        &mut search_path,
+        &mut search_text,
+    )
+    .is_ok_and(|result| result[0] == CONTEXT_GIT_SEARCH_DIRECT_MATCH && result[1] == 7);
     let ci_ok =
         classify_ci_line("##[error]Process completed with exit code 7").is_ok_and(|result| {
             result[0]
@@ -543,6 +561,7 @@ pub fn self_test() -> bool {
     text_ok
         && metadata_ok
         && gemini_glob_ok
+        && search_ok
         && ci_ok
         && signal_diff(&[3, 0, 4, 1, 0, 2, 8], &[1, 2, 4, 0, 3, 0, 9]).is_ok_and(
             |(lost, gained)| {

@@ -7,7 +7,62 @@ pub(crate) struct SearchMatch {
     pub(crate) text: String,
 }
 
+#[cfg(feature = "mojo")]
+use prodex_mojo_core::context::{
+    CONTEXT_GIT_SEARCH_DIRECT_MATCH, CONTEXT_GIT_SEARCH_HEADING_MATCH,
+    CONTEXT_GIT_SEARCH_HEADING_PATH, CONTEXT_GIT_SEARCH_JSON_LINE, CONTEXT_GIT_SEARCH_JSON_MATCH,
+    classify_git_search_line,
+};
+
+#[cfg(feature = "mojo")]
+struct MojoGitSearchLine {
+    flags: i64,
+    line_number: Option<usize>,
+    path: String,
+    text: String,
+}
+
+#[cfg(feature = "mojo")]
+fn mojo_git_search_line(line: &str, heading_path: Option<&str>) -> Option<MojoGitSearchLine> {
+    let capacity = line.len().max(1);
+    let mut path_output = vec![0_u8; capacity];
+    let mut text_output = vec![0_u8; capacity];
+    let result =
+        classify_git_search_line(line, heading_path, &mut path_output, &mut text_output).ok()?;
+    let output_string = |length: i64, output: &[u8]| {
+        if length == -1 {
+            return Some(String::new());
+        }
+        let length = usize::try_from(length).ok()?;
+        std::str::from_utf8(output.get(..length)?)
+            .ok()
+            .map(str::to_owned)
+    };
+    Some(MojoGitSearchLine {
+        flags: result[0],
+        line_number: usize::try_from(result[1]).ok(),
+        path: output_string(result[2], &path_output)?,
+        text: output_string(result[3], &text_output)?,
+    })
+}
+
+#[cfg(feature = "mojo")]
 pub(crate) fn parse_search_match_line(line: &str) -> Option<SearchMatch> {
+    let result = mojo_git_search_line(line, None)?;
+    (result.flags == CONTEXT_GIT_SEARCH_DIRECT_MATCH).then_some(SearchMatch {
+        path: result.path,
+        line_number: result.line_number,
+        text: result.text,
+    })
+}
+
+#[cfg(not(feature = "mojo"))]
+pub(crate) fn parse_search_match_line(line: &str) -> Option<SearchMatch> {
+    parse_search_match_line_rust(line)
+}
+
+#[cfg(any(not(feature = "mojo"), test))]
+pub(crate) fn parse_search_match_line_rust(line: &str) -> Option<SearchMatch> {
     let separator_start = usize::from(has_windows_drive_prefix(line)) * 2;
     let separator = line[separator_start..].find(':')? + separator_start;
     let (path, rest) = line.split_at(separator);
@@ -25,6 +80,7 @@ pub(crate) fn parse_search_match_line(line: &str) -> Option<SearchMatch> {
     })
 }
 
+#[cfg(any(not(feature = "mojo"), test))]
 fn parse_search_match_rest<'a>(path: &str, rest: &'a str) -> Option<(Option<usize>, &'a str)> {
     let Some((candidate, after_line)) = rest.split_once(':') else {
         return looks_like_search_path(path).then_some((None, rest));
@@ -40,8 +96,24 @@ fn parse_search_match_rest<'a>(path: &str, rest: &'a str) -> Option<(Option<usiz
     looks_like_search_path(path).then_some((None, rest))
 }
 
+#[cfg(feature = "mojo")]
 pub(crate) fn parse_rg_json_match_line(line: &str) -> Option<SearchMatch> {
-    if !looks_like_rg_json_line(line) || !json_field_has_string_value(line, "type", "match") {
+    let result = mojo_git_search_line(line, None)?;
+    (result.flags & CONTEXT_GIT_SEARCH_JSON_MATCH != 0).then_some(SearchMatch {
+        path: result.path,
+        line_number: result.line_number,
+        text: result.text,
+    })
+}
+
+#[cfg(not(feature = "mojo"))]
+pub(crate) fn parse_rg_json_match_line(line: &str) -> Option<SearchMatch> {
+    parse_rg_json_match_line_rust(line)
+}
+
+#[cfg(any(not(feature = "mojo"), test))]
+pub(crate) fn parse_rg_json_match_line_rust(line: &str) -> Option<SearchMatch> {
+    if !looks_like_rg_json_line_rust(line) || !json_field_has_string_value(line, "type", "match") {
         return None;
     }
 
@@ -59,17 +131,31 @@ pub(crate) fn parse_rg_json_match_line(line: &str) -> Option<SearchMatch> {
     })
 }
 
+#[cfg(feature = "mojo")]
 pub(crate) fn looks_like_rg_json_line(line: &str) -> bool {
+    mojo_git_search_line(line, None)
+        .is_some_and(|result| result.flags & CONTEXT_GIT_SEARCH_JSON_LINE != 0)
+}
+
+#[cfg(not(feature = "mojo"))]
+pub(crate) fn looks_like_rg_json_line(line: &str) -> bool {
+    looks_like_rg_json_line_rust(line)
+}
+
+#[cfg(any(not(feature = "mojo"), test))]
+pub(crate) fn looks_like_rg_json_line_rust(line: &str) -> bool {
     let trimmed = line.trim_start();
     trimmed.starts_with('{')
         && trimmed.contains("\"type\"")
         && (trimmed.contains("\"data\"") || trimmed.contains("\"path\""))
 }
 
+#[cfg(any(not(feature = "mojo"), test))]
 pub(crate) fn json_field_has_string_value(line: &str, field: &str, value: &str) -> bool {
     extract_json_string_field(line, field).is_some_and(|found| found == value)
 }
 
+#[cfg(any(not(feature = "mojo"), test))]
 pub(crate) fn extract_json_string_field(input: &str, field: &str) -> Option<String> {
     let marker = format!("\"{field}\"");
     let after_marker = input.split_once(&marker)?.1;
@@ -78,6 +164,7 @@ pub(crate) fn extract_json_string_field(input: &str, field: &str) -> Option<Stri
     parse_json_string_prefix(value)
 }
 
+#[cfg(any(not(feature = "mojo"), test))]
 pub(crate) fn extract_json_usize_field(input: &str, field: &str) -> Option<usize> {
     let marker = format!("\"{field}\"");
     let after_marker = input.split_once(&marker)?.1;
@@ -89,6 +176,7 @@ pub(crate) fn extract_json_usize_field(input: &str, field: &str) -> Option<usize
     (!digits.is_empty()).then(|| digits.parse::<usize>().ok())?
 }
 
+#[cfg(any(not(feature = "mojo"), test))]
 pub(crate) fn parse_json_string_prefix(input: &str) -> Option<String> {
     let mut output = String::new();
     let mut escaped = false;
@@ -114,7 +202,19 @@ pub(crate) fn parse_json_string_prefix(input: &str) -> Option<String> {
     None
 }
 
+#[cfg(feature = "mojo")]
 pub(crate) fn parse_search_heading_line(line: &str) -> Option<String> {
+    let result = mojo_git_search_line(line, None)?;
+    (result.flags == CONTEXT_GIT_SEARCH_HEADING_PATH).then_some(result.path)
+}
+
+#[cfg(not(feature = "mojo"))]
+pub(crate) fn parse_search_heading_line(line: &str) -> Option<String> {
+    parse_search_heading_line_rust(line)
+}
+
+#[cfg(any(not(feature = "mojo"), test))]
+pub(crate) fn parse_search_heading_line_rust(line: &str) -> Option<String> {
     let trimmed = line.trim();
     let has_non_drive_colon = trimmed.contains(':')
         && !(has_windows_drive_prefix(trimmed) && !trimmed[2..].contains(':'));
@@ -129,7 +229,29 @@ pub(crate) fn parse_search_heading_line(line: &str) -> Option<String> {
     parse_file_list_entry_line(trimmed).filter(|path| looks_like_search_path(path))
 }
 
+#[cfg(feature = "mojo")]
 pub(crate) fn parse_heading_search_match_line(
+    line: &str,
+    path: Option<&str>,
+) -> Option<SearchMatch> {
+    let result = mojo_git_search_line(line, path)?;
+    (result.flags == CONTEXT_GIT_SEARCH_HEADING_MATCH).then_some(SearchMatch {
+        path: path?.to_string(),
+        line_number: result.line_number,
+        text: result.text,
+    })
+}
+
+#[cfg(not(feature = "mojo"))]
+pub(crate) fn parse_heading_search_match_line(
+    line: &str,
+    path: Option<&str>,
+) -> Option<SearchMatch> {
+    parse_heading_search_match_line_rust(line, path)
+}
+
+#[cfg(any(not(feature = "mojo"), test))]
+pub(crate) fn parse_heading_search_match_line_rust(
     line: &str,
     path: Option<&str>,
 ) -> Option<SearchMatch> {
@@ -174,10 +296,12 @@ pub(crate) fn count_heading_search_matches(lines: &[&str]) -> usize {
     count
 }
 
+#[cfg(any(not(feature = "mojo"), test))]
 pub(crate) fn looks_like_search_path(path: &str) -> bool {
     path.contains('/') || path.contains('\\') || path.contains('.')
 }
 
+#[cfg(any(not(feature = "mojo"), test))]
 fn has_windows_drive_prefix(path: &str) -> bool {
     let bytes = path.as_bytes();
     bytes.len() >= 3
@@ -367,4 +491,89 @@ pub(crate) fn is_critical_preserve_line(line: &str) -> bool {
         || is_stack_signal_line(line)
         || is_rust_diagnostic_signal_line(line)
         || is_log_level_signal_line(line)
+}
+
+#[cfg(all(test, feature = "mojo"))]
+mod mojo_search_tests {
+    use super::*;
+
+    fn shape(value: Option<SearchMatch>) -> Option<(String, Option<usize>, String)> {
+        value.map(|value| (value.path, value.line_number, value.text))
+    }
+
+    #[test]
+    fn mojo_search_parser_matches_rust_oracle() {
+        let plain = [
+            "src/lib.rs:10:fn alpha() {}",
+            "src/lib.rs:20:5:let beta = true;",
+            "C:\\workspace\\prodex\\src\\lib.rs:30:fn gamma() {}",
+            "README.md:context helper",
+            "not a search result",
+            ":10:missing path",
+            "src/lib.rs::empty line number",
+        ];
+        for line in plain {
+            assert_eq!(
+                shape(parse_search_match_line(line)),
+                shape(parse_search_match_line_rust(line)),
+                "plain: {line:?}"
+            );
+        }
+
+        let json = [
+            r#"{"type":"match","data":{"path":{"text":"src\\lib.rs"},"lines":{"text":"fn alpha()\n"}},"line_number":10}"#,
+            r#"{"type":"begin","data":{"path":{"text":"src/lib.rs"}}}"#,
+            r#"{"type":"match","data":{"path":{"text":"unterminated}}"#,
+            r#"{"type":"match","data":{"path":{"text":"src/lib.rs"},"lines":{"text":"x\u1234"}},"line_number":999999999999999999999}"#,
+        ];
+        for line in json {
+            assert_eq!(
+                shape(parse_rg_json_match_line(line)),
+                shape(parse_rg_json_match_line_rust(line)),
+                "json: {line:?}"
+            );
+            assert_eq!(
+                looks_like_rg_json_line(line),
+                looks_like_rg_json_line_rust(line),
+                "json marker: {line:?}"
+            );
+        }
+
+        let heading = "src/lib.rs";
+        assert_eq!(
+            parse_search_heading_line(heading),
+            parse_search_heading_line_rust(heading)
+        );
+        assert_eq!(
+            shape(parse_heading_search_match_line(
+                " 10:5:fn alpha() {}",
+                Some(heading),
+            )),
+            shape(parse_heading_search_match_line_rust(
+                " 10:5:fn alpha() {}",
+                Some(heading),
+            ))
+        );
+
+        let mut path_output = [0_u8; 1];
+        let mut text_output = [0_u8; 1];
+        assert_eq!(
+            prodex_mojo_core::context::classify_git_search_line(
+                "src/lib.rs:10:needle",
+                None,
+                &mut path_output,
+                &mut text_output,
+            ),
+            Err(prodex_mojo_core::MojoError::Capacity)
+        );
+        assert_eq!(
+            prodex_mojo_core::context::classify_git_search_line(
+                &"x".repeat(prodex_mojo_core::context::CONTEXT_GIT_SEARCH_MAX_BYTES + 1),
+                None,
+                &mut path_output,
+                &mut text_output,
+            ),
+            Err(prodex_mojo_core::MojoError::InvalidInput)
+        );
+    }
 }
