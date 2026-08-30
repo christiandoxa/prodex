@@ -78,11 +78,17 @@ test("0.420.0 waiver passes only at or above its temporary floor", () => {
   assert.equal(validateManifestMetadata(manifest), manifest);
   assert.equal(productionShareMeetsReleaseRequirement({
     final: { broad_mojo_production_loc: 700, broad_total_production_loc: 10_000 },
-    release_requirement_met: true,
+    minimum_percent: 10,
+    temporary_release_waiver_applicable: true,
+    temporary_release_floor_percent: 7,
+    temporary_release_waiver_scope: "0.420.0 only",
   }), true);
   assert.equal(productionShareMeetsReleaseRequirement({
     final: { broad_mojo_production_loc: 699, broad_total_production_loc: 10_000 },
-    release_requirement_met: false,
+    minimum_percent: 10,
+    temporary_release_waiver_applicable: true,
+    temporary_release_floor_percent: 7,
+    temporary_release_waiver_scope: "0.420.0 only",
   }), false);
   assert.equal(productionShareMeetsMinimum({
     final: { broad_mojo_production_loc: 700, broad_total_production_loc: 10_000 },
