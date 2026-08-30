@@ -94,6 +94,19 @@ pub fn gemini_provider_core_stream_function_call_delta(
     }
 }
 
+#[cfg(feature = "mojo")]
+fn gemini_provider_core_stream_chat_tool_call_item(
+    tool_call: &GeminiProviderCoreStreamToolCall,
+) -> Value {
+    let mut input =
+        GeminiResponseKernelInput::new(GeminiResponseKernelOperation::ChatFunctionCallItem);
+    input.call_id = Some(&tool_call.call_id);
+    input.name = Some(&tool_call.name);
+    input.arguments = Some(&tool_call.arguments);
+    input.signature = tool_call.thought_signature.as_deref();
+    gemini_mojo_value(input)
+}
+
 pub fn gemini_provider_core_stream_tool_call(
     request_id: u64,
     index: usize,
@@ -371,6 +384,12 @@ pub fn gemini_provider_core_stream_chat_assistant_message(
     {
         return None;
     }
+    #[cfg(feature = "mojo")]
+    let tool_call_items = tool_calls
+        .iter()
+        .map(gemini_provider_core_stream_chat_tool_call_item)
+        .collect::<Vec<_>>();
+    #[cfg(not(feature = "mojo"))]
     let tool_call_items = tool_calls
         .iter()
         .map(|tool_call| {

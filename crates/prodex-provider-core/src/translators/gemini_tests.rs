@@ -362,6 +362,47 @@ fn gemini_provider_core_shapes_completed_stream_tool_call_items() {
 }
 
 #[test]
+fn gemini_provider_core_shapes_namespaced_and_special_tool_items() {
+    let part = json!({"thoughtSignature": "sig"});
+    let function_call = json!({
+        "name": "mcp__prodex_sqz__compress",
+        "args": {"text": "large content"},
+    });
+    let item =
+        gemini_response_tool_call_item_with_call_id(&part, &function_call, Some("call_namespaced"));
+    assert_eq!(item["namespace"], "mcp__prodex_sqz");
+    assert_eq!(item["name"], "compress");
+    assert_eq!(item["gemini_thought_signature"], "sig");
+
+    let raw = gemini_response_tool_call_raw_item_with_call_id(
+        &part,
+        "server--lookup",
+        "not-json",
+        Some("call_raw"),
+    );
+    assert_eq!(raw["namespace"], "server");
+    assert_eq!(raw["name"], "lookup");
+    assert_eq!(raw["arguments"], "not-json");
+
+    let search = gemini_response_tool_call_item_with_call_id(
+        &json!({}),
+        &json!({"name": "tool_search", "args": {"query": "prodex"}}),
+        Some("call_search"),
+    );
+    assert_eq!(search["type"], "tool_search_call");
+    assert_eq!(search["arguments"]["query"], "prodex");
+
+    let patch = gemini_response_tool_call_item_with_call_id(
+        &json!({}),
+        &json!({"name": "apply_patch", "args": {"input": "*** Begin Patch\n*** End Patch"}}),
+        Some("call_patch"),
+    );
+    assert_eq!(patch["type"], "custom_tool_call");
+    assert_eq!(patch["name"], "apply_patch");
+    assert_eq!(patch["input"], "*** Begin Patch\n*** End Patch");
+}
+
+#[test]
 fn gemini_provider_core_shapes_stream_message_items() {
     assert_eq!(
         gemini_provider_core_stream_output_text_content("citation"),

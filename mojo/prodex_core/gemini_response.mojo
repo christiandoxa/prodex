@@ -1,6 +1,6 @@
 from std.memory import Pointer
 
-from rich_text import rich_view_valid
+from rich_text import rich_trim_bounds, rich_view_valid
 from rich_types import ProdexRichStringView, rich_view_ptr
 
 comptime PRODEX_RICH_ABI_VERSION: Int64 = 6
@@ -42,6 +42,8 @@ comptime GEMINI_CITATION_TEXT: Int64 = 27
 comptime GEMINI_WEB_SEARCH_CALL: Int64 = 28
 comptime GEMINI_STREAM_ASSISTANT_MESSAGE: Int64 = 29
 comptime GEMINI_STREAM_OUTPUT_ITEMS: Int64 = 30
+comptime GEMINI_TOOL_SEARCH_CALL_ITEM: Int64 = 31
+comptime GEMINI_CUSTOM_TOOL_CALL_ITEM: Int64 = 32
 
 
 @fieldwise_init
@@ -130,13 +132,17 @@ def gemini_put_hex_byte(
     return gemini_put_byte(writer, high) and gemini_put_byte(writer, low)
 
 
-def gemini_put_json_escaped(
+def gemini_put_json_escaped_range(
     writer: Pointer[mut=True, GeminiResponseWriter, _],
     view: ProdexRichStringView,
+    start: Int64,
+    end: Int64,
 ) -> Bool:
-    if view.len > 0:
+    if start < 0 or end < start or end > Int64(view.len):
+        return False
+    if end > start:
         var ptr = rich_view_ptr(view)
-        for index in range(Int64(view.len)):
+        for index in range(start, end):
             var value = ptr[unsafe_offset=index]
             if value == 34 or value == 92:
                 if not gemini_put_byte(writer, 92) or not gemini_put_byte(writer, value):
@@ -164,11 +170,27 @@ def gemini_put_json_escaped(
     return True
 
 
+def gemini_put_json_escaped(
+    writer: Pointer[mut=True, GeminiResponseWriter, _],
+    view: ProdexRichStringView,
+) -> Bool:
+    return gemini_put_json_escaped_range(writer, view, 0, Int64(view.len))
+
+
 def gemini_put_json_string(
     writer: Pointer[mut=True, GeminiResponseWriter, _],
     view: ProdexRichStringView,
 ) -> Bool:
     return gemini_put_byte(writer, 34) and gemini_put_json_escaped(writer, view) and gemini_put_byte(writer, 34)
+
+
+def gemini_put_json_string_range(
+    writer: Pointer[mut=True, GeminiResponseWriter, _],
+    view: ProdexRichStringView,
+    start: Int64,
+    end: Int64,
+) -> Bool:
+    return gemini_put_byte(writer, 34) and gemini_put_json_escaped_range(writer, view, start, end) and gemini_put_byte(writer, 34)
 
 
 def gemini_put_json_string_prefix(
@@ -270,7 +292,7 @@ def gemini_put_event_prefix(
 def gemini_views_valid(input: ProdexGeminiResponseKernelInput) -> Bool:
     return (
         input.operation >= GEMINI_RESPONSE_CREATED
-        and input.operation <= GEMINI_STREAM_OUTPUT_ITEMS
+        and input.operation <= GEMINI_CUSTOM_TOOL_CALL_ITEM
         and input.response_id_present >= 0
         and input.response_id_present <= 1
         and input.call_id_present >= 0
@@ -315,6 +337,70 @@ def gemini_views_valid(input: ProdexGeminiResponseKernelInput) -> Bool:
     )
 
 
+def gemini_tool_name_split(view: ProdexRichStringView) -> InlineArray[Int64, 2]:
+    var result = InlineArray[Int64, 2](fill=-1)
+    var length = Int64(view.len)
+    if length < 2:
+        return result^
+    var ptr = rich_view_ptr(view)
+    var index = length - 2
+    while index >= 0:
+        if ptr[unsafe_offset=index] == 45 and ptr[unsafe_offset=index + 1] == 45:
+            var prefix = ProdexRichStringView(view.ptr, UInt(index))
+            var suffix = ProdexRichStringView(
+                view.ptr + UInt(index + 2), UInt(length - index - 2)
+            )
+            var prefix_bounds = rich_trim_bounds(prefix)
+            var suffix_bounds = rich_trim_bounds(suffix)
+            if prefix_bounds[0] < prefix_bounds[1] and suffix_bounds[0] < suffix_bounds[1]:
+                result[0] = index
+                result[1] = index + 2
+                return result^
+        index -= 1
+    if length < 5 or ptr[unsafe_offset=0] != 109 or ptr[unsafe_offset=1] != 99 or ptr[unsafe_offset=2] != 112 or ptr[unsafe_offset=3] != 95 or ptr[unsafe_offset=4] != 95:
+        return result^
+    index = length - 2
+    while index >= 5:
+        if ptr[unsafe_offset=index] == 95 and ptr[unsafe_offset=index + 1] == 95:
+            var suffix = ProdexRichStringView(
+                view.ptr + UInt(index + 2), UInt(length - index - 2)
+            )
+            var suffix_bounds = rich_trim_bounds(suffix)
+            if suffix_bounds[0] < suffix_bounds[1]:
+                result[0] = index
+                result[1] = index + 2
+                return result^
+        index -= 1
+    return result^
+
+
+def gemini_put_tool_name(
+    writer: Pointer[mut=True, GeminiResponseWriter, _],
+    input: ProdexGeminiResponseKernelInput,
+) -> Bool:
+    if input.namespace_present == 1:
+        return gemini_put_json_string(writer, input.name)
+    var bounds = gemini_tool_name_split(input.name)
+    if bounds[0] < 0:
+        return gemini_put_json_string(writer, input.name)
+    return gemini_put_json_string_range(writer, input.name, bounds[1], Int64(input.name.len))
+
+
+def gemini_put_tool_namespace(
+    writer: Pointer[mut=True, GeminiResponseWriter, _],
+    input: ProdexGeminiResponseKernelInput,
+) -> Bool:
+    if input.namespace_present == 1:
+        return gemini_put_literal(writer, StringSlice(',"namespace":')) and gemini_put_json_string(writer, input.namespace)
+    var bounds = gemini_tool_name_split(input.name)
+    if bounds[0] < 0:
+        return True
+    return (
+        gemini_put_literal(writer, StringSlice(',"namespace":'))
+        and gemini_put_json_string_range(writer, input.name, 0, bounds[0])
+    )
+
+
 def gemini_put_tool_item(
     writer: Pointer[mut=True, GeminiResponseWriter, _],
     input: ProdexGeminiResponseKernelInput,
@@ -323,17 +409,44 @@ def gemini_put_tool_item(
         return False
     if not gemini_put_json_string(writer, input.call_id):
         return False
-    if not gemini_put_literal(writer, StringSlice(',"name":')) or not gemini_put_json_string(writer, input.name):
+    if not gemini_put_literal(writer, StringSlice(',"name":')) or not gemini_put_tool_name(writer, input):
         return False
     if not gemini_put_literal(writer, StringSlice(',"arguments":')) or not gemini_put_json_string(writer, input.arguments):
         return False
-    if input.namespace_present == 1:
-        if not gemini_put_literal(writer, StringSlice(',"namespace":')) or not gemini_put_json_string(writer, input.namespace):
-            return False
+    if not gemini_put_tool_namespace(writer, input):
+        return False
     if input.signature_present == 1:
         if not gemini_put_literal(writer, StringSlice(',"gemini_thought_signature":')) or not gemini_put_json_string(writer, input.signature):
             return False
     return gemini_put_byte(writer, 125)
+
+
+def gemini_put_tool_search_item(
+    writer: Pointer[mut=True, GeminiResponseWriter, _],
+    input: ProdexGeminiResponseKernelInput,
+) -> Bool:
+    return (
+        gemini_put_literal(writer, StringSlice('{"type":"tool_search_call","call_id":'))
+        and gemini_put_json_string(writer, input.call_id)
+        and gemini_put_literal(writer, StringSlice(',"execution":"client","arguments":'))
+        and gemini_put_view(writer, input.arguments)
+        and gemini_put_byte(writer, 125)
+    )
+
+
+def gemini_put_custom_tool_item(
+    writer: Pointer[mut=True, GeminiResponseWriter, _],
+    input: ProdexGeminiResponseKernelInput,
+) -> Bool:
+    return (
+        gemini_put_literal(writer, StringSlice('{"type":"custom_tool_call","call_id":'))
+        and gemini_put_json_string(writer, input.call_id)
+        and gemini_put_literal(writer, StringSlice(',"name":'))
+        and gemini_put_json_string(writer, input.name)
+        and gemini_put_literal(writer, StringSlice(',"input":'))
+        and gemini_put_json_string(writer, input.arguments)
+        and gemini_put_byte(writer, 125)
+    )
 
 
 def gemini_put_buffered_message(
@@ -687,16 +800,19 @@ def gemini_write_operation(
         return gemini_put_tool_item(writer, input)
     if operation == GEMINI_RAW_FUNCTION_CALL_ITEM:
         return gemini_put_tool_item(writer, input)
+    if operation == GEMINI_TOOL_SEARCH_CALL_ITEM:
+        return gemini_put_tool_search_item(writer, input)
+    if operation == GEMINI_CUSTOM_TOOL_CALL_ITEM:
+        return gemini_put_custom_tool_item(writer, input)
     if operation == GEMINI_ADDED_FUNCTION_CALL_ITEM:
         if not gemini_put_literal(writer, StringSlice('{"type":"function_call","call_id":')):
             return False
         if not gemini_put_json_string(writer, input.call_id) or not gemini_put_literal(writer, StringSlice(',"name":')):
             return False
-        if not gemini_put_json_string(writer, input.name):
+        if not gemini_put_tool_name(writer, input):
             return False
-        if input.namespace_present == 1:
-            if not gemini_put_literal(writer, StringSlice(',"namespace":')) or not gemini_put_json_string(writer, input.namespace):
-                return False
+        if not gemini_put_tool_namespace(writer, input):
+            return False
         if input.signature_present == 1:
             if not gemini_put_literal(writer, StringSlice(',"gemini_thought_signature":')) or not gemini_put_json_string(writer, input.signature):
                 return False

@@ -31,6 +31,7 @@ pub(crate) fn gemini_response_tool_call_added_item_with_call_id(
     if matches!(flat_name, "tool_search" | "apply_patch") {
         return None;
     }
+    #[cfg(not(feature = "mojo"))]
     let (namespace, name) = gemini_split_flat_namespace_tool_name(flat_name);
     let signature = part
         .get("thoughtSignature")
@@ -46,8 +47,7 @@ pub(crate) fn gemini_response_tool_call_added_item_with_call_id(
             prodex_mojo_core::rich::GeminiResponseKernelOperation::AddedFunctionCallItem,
         );
         input.call_id = Some(call_id);
-        input.name = Some(name.as_str());
-        input.namespace = namespace.as_deref();
+        input.name = Some(flat_name);
         input.signature = signature;
         return Some(super::super::stream::gemini_mojo_value(input));
     }
@@ -76,6 +76,7 @@ pub(crate) fn gemini_response_tool_call_raw_item_with_call_id(
     call_id_override: Option<&str>,
 ) -> Value {
     let call_id = call_id_override.unwrap_or("call_1");
+    #[cfg(not(feature = "mojo"))]
     let (namespace, name) = gemini_split_flat_namespace_tool_name(flat_name);
     let signature = part.get("thoughtSignature").and_then(Value::as_str);
     #[cfg(feature = "mojo")]
@@ -84,9 +85,8 @@ pub(crate) fn gemini_response_tool_call_raw_item_with_call_id(
             prodex_mojo_core::rich::GeminiResponseKernelOperation::RawFunctionCallItem,
         );
         input.call_id = Some(call_id);
-        input.name = Some(name.as_str());
+        input.name = Some(flat_name);
         input.arguments = Some(arguments);
-        input.namespace = namespace.as_deref();
         input.signature = signature;
         return super::super::stream::gemini_mojo_value(input);
     }
@@ -128,6 +128,17 @@ pub(crate) fn gemini_response_tool_call_item_with_call_id(
         .cloned()
         .unwrap_or_else(|| json!({}));
     if flat_name == "tool_search" {
+        #[cfg(feature = "mojo")]
+        {
+            let arguments = serde_json::to_string(&args_value).unwrap_or_else(|_| "{}".to_string());
+            let mut input = prodex_mojo_core::rich::GeminiResponseKernelInput::new(
+                prodex_mojo_core::rich::GeminiResponseKernelOperation::ToolSearchCallItem,
+            );
+            input.call_id = Some(call_id);
+            input.arguments = Some(&arguments);
+            return super::super::stream::gemini_mojo_value(input);
+        }
+        #[cfg(not(feature = "mojo"))]
         return json!({
             "type": "tool_search_call",
             "call_id": call_id,
@@ -135,11 +146,29 @@ pub(crate) fn gemini_response_tool_call_item_with_call_id(
             "arguments": args_value,
         });
     }
-    if let Some(item) = gemini_custom_tool_call_item(call_id, flat_name, &args_value) {
-        return item;
+    if flat_name == "apply_patch" {
+        let input_value = gemini_custom_apply_patch_input(&args_value);
+        #[cfg(feature = "mojo")]
+        {
+            let mut input = prodex_mojo_core::rich::GeminiResponseKernelInput::new(
+                prodex_mojo_core::rich::GeminiResponseKernelOperation::CustomToolCallItem,
+            );
+            input.call_id = Some(call_id);
+            input.name = Some(flat_name);
+            input.arguments = Some(&input_value);
+            return super::super::stream::gemini_mojo_value(input);
+        }
+        #[cfg(not(feature = "mojo"))]
+        return json!({
+            "type": "custom_tool_call",
+            "call_id": call_id,
+            "name": flat_name,
+            "input": input_value,
+        });
     }
     let args = serde_json::to_string(&args_value).unwrap_or_else(|_| "{}".to_string());
     let args = gemini_rtk_wrapped_tool_arguments(flat_name, &args);
+    #[cfg(not(feature = "mojo"))]
     let (namespace, name) = gemini_split_flat_namespace_tool_name(flat_name);
     let signature = part
         .get("thoughtSignature")
@@ -155,9 +184,8 @@ pub(crate) fn gemini_response_tool_call_item_with_call_id(
             prodex_mojo_core::rich::GeminiResponseKernelOperation::FunctionCallItem,
         );
         input.call_id = Some(call_id);
-        input.name = Some(name.as_str());
+        input.name = Some(flat_name);
         input.arguments = Some(&args);
-        input.namespace = namespace.as_deref();
         input.signature = signature;
         return super::super::stream::gemini_mojo_value(input);
     }
@@ -180,22 +208,7 @@ pub(crate) fn gemini_response_tool_call_item_with_call_id(
     }
 }
 
-fn gemini_custom_tool_call_item(
-    call_id: &str,
-    flat_name: &str,
-    args_value: &Value,
-) -> Option<Value> {
-    if flat_name != "apply_patch" {
-        return None;
-    }
-    Some(json!({
-        "type": "custom_tool_call",
-        "call_id": call_id,
-        "name": flat_name,
-        "input": gemini_custom_apply_patch_input(args_value),
-    }))
-}
-
+#[cfg(not(feature = "mojo"))]
 fn gemini_split_flat_namespace_tool_name(name: &str) -> (Option<String>, String) {
     if let Some((namespace, tool_name)) = name.rsplit_once("--")
         && !namespace.trim().is_empty()
