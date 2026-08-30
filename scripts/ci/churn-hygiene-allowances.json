@@ -62,15 +62,16 @@
       "fix(context): retain default test classification oracles",
       "fix(ci): keep all-feature builds lint-clean",
       "fix(provider): use typed Gemini bridge inputs",
-      "fix(ci): close super wildcard guard"
+      "fix(ci): close super wildcard guard",
+      "fix(ci): keep domain boundary pure"
     ],
     "caps": {
-      "maxFiles": 201,
+      "maxFiles": 200,
       "maxBehaviorFiles": 168,
-      "maxLines": 42900,
+      "maxLines": 42800,
       "maxFileLines": 3225
     },
-    "reason": "Reviewed the exact frozen 0.420.0 migration tail dff2b7442b60ff9d2a1d735b8d6d52de4dd839bf..HEAD: the contiguous Mojo migration, release-waiver, optional-tool freshness, test-split, feature-oracle, lint-repair, typed-bridge, super-wildcard repair, and integration-history commits in this train. The measured final tail is 201 files, 168 behavior files, and 42,846 changed lines; the 3,225-line context_text Mojo module remains intentional migration ownership, not incidental churn. Exact required subjects and narrow caps cover this train only; global churn thresholds and release behavior remain unchanged."
+    "reason": "Reviewed the exact frozen 0.420.0 migration tail dff2b7442b60ff9d2a1d735b8d6d52de4dd839bf..HEAD: the contiguous Mojo migration, release-waiver, optional-tool freshness, test-split, feature-oracle, lint-repair, typed-bridge, super-wildcard repair, domain-boundary repair, and integration-history commits in this train. The measured final tail is 200 files, 168 behavior files, and 42,689 changed lines; the 3,225-line context_text Mojo module remains intentional migration ownership, not incidental churn. Exact required subjects and narrow caps cover this train only; global churn thresholds and release behavior remain unchanged."
   },
   {
     "id": "audited-prodex-0.420.0-integration-train",
