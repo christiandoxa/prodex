@@ -17,6 +17,7 @@ const ALLOWED_DEPENDENCIES = new Set([
   "prodex_domain",
   "prodex_gateway_core",
   "prodex_gateway_http",
+  "prodex_mojo_core",
   "prodex_observability",
   "prodex_provider_core",
   "prodex_provider_spi",
