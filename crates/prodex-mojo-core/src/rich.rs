@@ -47,6 +47,11 @@ mod gemini_sse_state;
 pub use gemini_sse_state::{
     GEMINI_RESPONSE_STATE_ABI_VERSION, GeminiResponsePartInput, plan_gemini_response_part,
 };
+#[path = "rich/gemini_response.rs"]
+mod gemini_response;
+pub use gemini_response::{
+    GeminiResponseKernelInput, GeminiResponseKernelOperation, gemini_response_kernel,
+};
 
 const RICH_STATUS_INVALID: i64 = 1;
 const RICH_STATUS_UTF8: i64 = 2;

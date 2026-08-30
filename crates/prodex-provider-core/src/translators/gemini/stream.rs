@@ -4,6 +4,20 @@ use crate::translator::{ProviderTransformInput, ProviderTransformResult};
 use crate::{ProviderEndpoint, ProviderId, ProviderWireFormat};
 use serde_json::{Value, json};
 
+#[cfg(feature = "mojo")]
+use prodex_mojo_core::rich::{
+    GeminiResponseKernelInput, GeminiResponseKernelOperation, gemini_response_kernel,
+};
+
+#[cfg(feature = "mojo")]
+pub(super) fn gemini_mojo_value(input: GeminiResponseKernelInput<'_>) -> Value {
+    let body = gemini_response_kernel(input)
+        .unwrap_or_else(|error| panic!("Mojo Gemini response kernel failed: {error:?}"));
+    serde_json::from_slice(&body).unwrap_or_else(|error| {
+        panic!("Mojo Gemini response kernel returned invalid JSON: {error}")
+    })
+}
+
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct GeminiProviderCoreStreamChunkMetadata {
     pub response_id: Option<String>,
@@ -28,92 +42,15 @@ pub struct GeminiProviderCoreStreamFunctionCallDelta {
     pub arguments: String,
 }
 
-pub fn gemini_provider_core_response_created_event(
-    sequence_number: u64,
-    created_at: u64,
-    response_id: &str,
-) -> Value {
-    json!({
-        "type": "response.created",
-        "sequence_number": sequence_number,
-        "created_at": created_at,
-        "response": {"id": response_id},
-    })
-}
-
-pub fn gemini_provider_core_response_completed_event(
-    sequence_number: u64,
-    created_at: u64,
-    response: &Value,
-) -> Value {
-    json!({
-        "type": "response.completed",
-        "sequence_number": sequence_number,
-        "created_at": created_at,
-        "response": response,
-    })
-}
-
-pub fn gemini_provider_core_response_incomplete_event(
-    sequence_number: u64,
-    created_at: u64,
-    response_id: &str,
-    reason: &str,
-    message: &str,
-) -> Value {
-    json!({
-        "type": "response.incomplete",
-        "sequence_number": sequence_number,
-        "created_at": created_at,
-        "response": {
-            "id": response_id,
-            "status": "incomplete",
-            "incomplete_details": {
-                "reason": reason,
-                "message": message,
-            },
-        },
-    })
-}
-
-pub fn gemini_provider_core_response_metadata_event(
-    sequence_number: u64,
-    created_at: u64,
-    response_id: &str,
-    metadata: Value,
-) -> Value {
-    json!({
-        "type": "response.metadata",
-        "sequence_number": sequence_number,
-        "created_at": created_at,
-        "response_id": response_id,
-        "metadata": metadata,
-    })
-}
-
-pub fn gemini_provider_core_output_item_added_event(sequence_number: u64, item: &Value) -> Value {
-    json!({
-        "type": "response.output_item.added",
-        "sequence_number": sequence_number,
-        "item": item,
-    })
-}
-
-pub fn gemini_provider_core_output_item_done_event(
-    sequence_number: u64,
-    response_id: Option<&str>,
-    item: &Value,
-) -> Value {
-    let mut event = json!({
-        "type": "response.output_item.done",
-        "sequence_number": sequence_number,
-        "item": item,
-    });
-    if let Some(response_id) = response_id {
-        event["response_id"] = Value::String(response_id.to_string());
-    }
-    event
-}
+#[path = "stream/events.rs"]
+mod events;
+pub use events::{
+    gemini_provider_core_function_call_arguments_delta_event,
+    gemini_provider_core_output_item_added_event, gemini_provider_core_output_item_done_event,
+    gemini_provider_core_response_completed_event, gemini_provider_core_response_created_event,
+    gemini_provider_core_response_incomplete_event, gemini_provider_core_response_metadata_event,
+    gemini_provider_core_stream_function_call_arguments_delta_source,
+};
 
 pub fn gemini_provider_core_stream_output_text_item_id(request_id: u64) -> String {
     format!("msg_gemini_{request_id}")
@@ -187,40 +124,6 @@ pub fn gemini_provider_core_stream_tool_call_ids(
 
 pub fn gemini_provider_core_stream_should_emit_function_call_arguments_delta(name: &str) -> bool {
     !matches!(name, "tool_search" | "apply_patch")
-}
-
-pub fn gemini_provider_core_stream_function_call_arguments_delta_source(
-    call_id: &str,
-    name: &str,
-    arguments: &str,
-) -> Value {
-    json!({
-        "candidates": [{
-            "content": {
-                "parts": [{
-                    "functionCall": {
-                        "id": call_id,
-                        "name": name,
-                        "args": serde_json::from_str::<Value>(arguments)
-                            .unwrap_or_else(|_| json!({})),
-                    }
-                }]
-            }
-        }]
-    })
-}
-
-pub fn gemini_provider_core_function_call_arguments_delta_event(
-    sequence_number: u64,
-    call_id: &str,
-    arguments: &str,
-) -> Value {
-    json!({
-        "type": "response.function_call_arguments.delta",
-        "sequence_number": sequence_number,
-        "call_id": call_id,
-        "delta": arguments,
-    })
 }
 
 pub fn gemini_provider_core_function_call_arguments_delta_event_with_thought_signature(
@@ -367,23 +270,49 @@ pub fn gemini_provider_core_stream_response_value(
     usage: Option<Value>,
     metadata: Option<Value>,
 ) -> Value {
-    let mut response = json!({
-        "id": response_id,
-        "output": output,
-    });
-    if let Some(model) = model {
-        response["model"] = Value::String(model.to_string());
+    #[cfg(feature = "mojo")]
+    {
+        let output = serde_json::to_string(&output).expect("stream output serializes");
+        let usage = usage.map(|value| serde_json::to_string(&value).expect("usage serializes"));
+        let metadata =
+            metadata.map(|value| serde_json::to_string(&value).expect("metadata serializes"));
+        let mut input =
+            GeminiResponseKernelInput::new(GeminiResponseKernelOperation::ResponseValue);
+        input.response_id = Some(response_id);
+        input.output = Some(&output);
+        input.model = model;
+        input.usage = usage.as_deref();
+        input.metadata = metadata.as_deref();
+        return gemini_mojo_value(input);
     }
-    if let Some(usage) = usage {
-        response["usage"] = usage;
+    #[cfg(not(feature = "mojo"))]
+    {
+        let mut response = json!({
+            "id": response_id,
+            "output": output,
+        });
+        if let Some(model) = model {
+            response["model"] = Value::String(model.to_string());
+        }
+        if let Some(usage) = usage {
+            response["usage"] = usage;
+        }
+        if let Some(metadata) = metadata {
+            response["metadata"] = metadata;
+        }
+        response
     }
-    if let Some(metadata) = metadata {
-        response["metadata"] = metadata;
-    }
-    response
 }
 
 pub fn gemini_provider_core_stream_output_text_content(text: &str) -> Value {
+    #[cfg(feature = "mojo")]
+    {
+        let mut input =
+            GeminiResponseKernelInput::new(GeminiResponseKernelOperation::OutputTextContent);
+        input.delta = Some(text);
+        return gemini_mojo_value(input);
+    }
+    #[cfg(not(feature = "mojo"))]
     json!({
         "type": "output_text",
         "text": text,
@@ -391,6 +320,15 @@ pub fn gemini_provider_core_stream_output_text_content(text: &str) -> Value {
 }
 
 pub fn gemini_provider_core_stream_message_item(item_id: &str, content: Vec<Value>) -> Value {
+    #[cfg(feature = "mojo")]
+    {
+        let content = serde_json::to_string(&content).expect("message content serializes");
+        let mut input = GeminiResponseKernelInput::new(GeminiResponseKernelOperation::MessageItem);
+        input.response_id = Some(item_id);
+        input.content = Some(&content);
+        return gemini_mojo_value(input);
+    }
+    #[cfg(not(feature = "mojo"))]
     json!({
         "id": item_id,
         "type": "message",
@@ -400,6 +338,15 @@ pub fn gemini_provider_core_stream_message_item(item_id: &str, content: Vec<Valu
 }
 
 pub fn gemini_provider_core_stream_output_message_item(content: Vec<Value>) -> Value {
+    #[cfg(feature = "mojo")]
+    {
+        let content = serde_json::to_string(&content).expect("message content serializes");
+        let mut input =
+            GeminiResponseKernelInput::new(GeminiResponseKernelOperation::OutputMessageItem);
+        input.content = Some(&content);
+        return gemini_mojo_value(input);
+    }
+    #[cfg(not(feature = "mojo"))]
     json!({
         "type": "message",
         "role": "assistant",
@@ -555,6 +502,13 @@ fn gemini_append_stream_tool_call(
 }
 
 pub fn gemini_provider_core_stream_text_delta_source(text: &str) -> Value {
+    #[cfg(feature = "mojo")]
+    {
+        let mut input = GeminiResponseKernelInput::new(GeminiResponseKernelOperation::TextSource);
+        input.delta = Some(text);
+        return gemini_mojo_value(input);
+    }
+    #[cfg(not(feature = "mojo"))]
     json!({
         "candidates": [{
             "content": {
@@ -567,6 +521,14 @@ pub fn gemini_provider_core_stream_text_delta_source(text: &str) -> Value {
 }
 
 pub fn gemini_provider_core_stream_reasoning_delta_source(text: &str) -> Value {
+    #[cfg(feature = "mojo")]
+    {
+        let mut input =
+            GeminiResponseKernelInput::new(GeminiResponseKernelOperation::ReasoningSource);
+        input.delta = Some(text);
+        return gemini_mojo_value(input);
+    }
+    #[cfg(not(feature = "mojo"))]
     json!({
         "candidates": [{
             "content": {
@@ -585,6 +547,17 @@ pub fn gemini_provider_core_output_text_delta_event(
     response_id: &str,
     delta: &str,
 ) -> Value {
+    #[cfg(feature = "mojo")]
+    {
+        let mut input =
+            GeminiResponseKernelInput::new(GeminiResponseKernelOperation::OutputTextDelta);
+        input.sequence_number = sequence_number;
+        input.created_at = created_at;
+        input.response_id = Some(response_id);
+        input.delta = Some(delta);
+        return gemini_mojo_value(input);
+    }
+    #[cfg(not(feature = "mojo"))]
     json!({
         "type": "response.output_text.delta",
         "sequence_number": sequence_number,
@@ -599,6 +572,17 @@ pub fn gemini_provider_core_reasoning_summary_part_added_event(
     response_id: &str,
     summary_index: u64,
 ) -> Value {
+    #[cfg(feature = "mojo")]
+    {
+        let mut input = GeminiResponseKernelInput::new(
+            GeminiResponseKernelOperation::ReasoningSummaryPartAdded,
+        );
+        input.sequence_number = sequence_number;
+        input.response_id = Some(response_id);
+        input.summary_index = summary_index;
+        return gemini_mojo_value(input);
+    }
+    #[cfg(not(feature = "mojo"))]
     json!({
         "type": "response.reasoning_summary_part.added",
         "sequence_number": sequence_number,
@@ -613,6 +597,18 @@ pub fn gemini_provider_core_reasoning_summary_text_delta_event(
     summary_index: u64,
     delta: &str,
 ) -> Value {
+    #[cfg(feature = "mojo")]
+    {
+        let mut input = GeminiResponseKernelInput::new(
+            GeminiResponseKernelOperation::ReasoningSummaryTextDelta,
+        );
+        input.sequence_number = sequence_number;
+        input.response_id = Some(response_id);
+        input.summary_index = summary_index;
+        input.delta = Some(delta);
+        return gemini_mojo_value(input);
+    }
+    #[cfg(not(feature = "mojo"))]
     json!({
         "type": "response.reasoning_summary_text.delta",
         "sequence_number": sequence_number,
@@ -696,15 +692,29 @@ fn gemini_stream_event_from_generate_value(value: &Value) -> Option<(&'static st
             .get("args")
             .cloned()
             .unwrap_or_else(|| json!({}));
-        let mut transformed = json!({
-            "type":"response.function_call_arguments.delta",
-            "delta": serde_json::to_string(&args).ok()?,
-        });
-        if let Some(call_id) = function_call.get("id").and_then(Value::as_str)
-            && let Some(object) = transformed.as_object_mut()
-        {
-            object.insert("call_id".to_string(), Value::String(call_id.to_string()));
-        }
+        let arguments = serde_json::to_string(&args).ok()?;
+        #[cfg(feature = "mojo")]
+        let transformed = {
+            let mut kernel_input = GeminiResponseKernelInput::new(
+                GeminiResponseKernelOperation::FunctionCallArgumentsDelta,
+            );
+            kernel_input.call_id = function_call.get("id").and_then(Value::as_str);
+            kernel_input.delta = Some(&arguments);
+            gemini_mojo_value(kernel_input)
+        };
+        #[cfg(not(feature = "mojo"))]
+        let transformed = {
+            let mut transformed = json!({
+                "type":"response.function_call_arguments.delta",
+                "delta": arguments,
+            });
+            if let Some(call_id) = function_call.get("id").and_then(Value::as_str)
+                && let Some(object) = transformed.as_object_mut()
+            {
+                object.insert("call_id".to_string(), Value::String(call_id.to_string()));
+            }
+            transformed
+        };
         return Some(("response.function_call_arguments.delta", transformed));
     }
     if let Some(part) = value.pointer("/candidates/0/content/parts/0")
@@ -714,19 +724,34 @@ fn gemini_stream_event_from_generate_value(value: &Value) -> Option<(&'static st
             .unwrap_or(false)
     {
         let text = part.get("text").and_then(Value::as_str)?;
-        return Some((
-            "response.reasoning_summary_text.delta",
-            json!({
-                "type":"response.reasoning_summary_text.delta",
-                "delta":text,
-            }),
-        ));
+        #[cfg(feature = "mojo")]
+        let transformed = {
+            let mut kernel_input =
+                GeminiResponseKernelInput::new(GeminiResponseKernelOperation::StreamReasoningDelta);
+            kernel_input.delta = Some(text);
+            gemini_mojo_value(kernel_input)
+        };
+        #[cfg(not(feature = "mojo"))]
+        let transformed = json!({
+            "type":"response.reasoning_summary_text.delta",
+            "delta":text,
+        });
+        return Some(("response.reasoning_summary_text.delta", transformed));
     }
     let text = value
         .pointer("/candidates/0/content/parts/0/text")
         .and_then(Value::as_str)?;
-    Some((
-        "response.output_text.delta",
-        json!({"type":"response.output_text.delta","delta":text}),
-    ))
+    #[cfg(feature = "mojo")]
+    let transformed = {
+        let mut kernel_input =
+            GeminiResponseKernelInput::new(GeminiResponseKernelOperation::StreamTextDelta);
+        kernel_input.delta = Some(text);
+        gemini_mojo_value(kernel_input)
+    };
+    #[cfg(not(feature = "mojo"))]
+    let transformed = json!({
+        "type":"response.output_text.delta",
+        "delta":text,
+    });
+    Some(("response.output_text.delta", transformed))
 }

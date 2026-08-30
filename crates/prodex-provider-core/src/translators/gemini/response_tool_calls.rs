@@ -32,26 +32,41 @@ pub(crate) fn gemini_response_tool_call_added_item_with_call_id(
         return None;
     }
     let (namespace, name) = gemini_split_flat_namespace_tool_name(flat_name);
-    let mut item = json!({
-        "type": "function_call",
-        "call_id": call_id,
-        "name": name,
-    });
-    if let Some(namespace) = namespace {
-        item["namespace"] = Value::String(namespace);
-    }
-    if let Some(signature) = part
+    let signature = part
         .get("thoughtSignature")
         .and_then(Value::as_str)
         .or_else(|| {
             function_call
                 .get("thoughtSignature")
                 .and_then(Value::as_str)
-        })
+        });
+    #[cfg(feature = "mojo")]
     {
-        item["gemini_thought_signature"] = Value::String(signature.to_string());
+        let mut input = prodex_mojo_core::rich::GeminiResponseKernelInput::new(
+            prodex_mojo_core::rich::GeminiResponseKernelOperation::AddedFunctionCallItem,
+        );
+        input.call_id = Some(call_id);
+        input.name = Some(name.as_str());
+        input.namespace = namespace.as_deref();
+        input.signature = signature;
+        return Some(super::super::stream::gemini_mojo_value(input));
     }
-    Some(item)
+    #[cfg(not(feature = "mojo"))]
+    let mut item = json!({
+        "type": "function_call",
+        "call_id": call_id,
+        "name": name,
+    });
+    #[cfg(not(feature = "mojo"))]
+    {
+        if let Some(namespace) = namespace {
+            item["namespace"] = Value::String(namespace);
+        }
+        if let Some(signature) = signature {
+            item["gemini_thought_signature"] = Value::String(signature.to_string());
+        }
+        return Some(item);
+    }
 }
 
 pub(crate) fn gemini_response_tool_call_raw_item_with_call_id(
@@ -62,19 +77,36 @@ pub(crate) fn gemini_response_tool_call_raw_item_with_call_id(
 ) -> Value {
     let call_id = call_id_override.unwrap_or("call_1");
     let (namespace, name) = gemini_split_flat_namespace_tool_name(flat_name);
+    let signature = part.get("thoughtSignature").and_then(Value::as_str);
+    #[cfg(feature = "mojo")]
+    {
+        let mut input = prodex_mojo_core::rich::GeminiResponseKernelInput::new(
+            prodex_mojo_core::rich::GeminiResponseKernelOperation::RawFunctionCallItem,
+        );
+        input.call_id = Some(call_id);
+        input.name = Some(name.as_str());
+        input.arguments = Some(arguments);
+        input.namespace = namespace.as_deref();
+        input.signature = signature;
+        return super::super::stream::gemini_mojo_value(input);
+    }
+    #[cfg(not(feature = "mojo"))]
     let mut item = json!({
         "type": "function_call",
         "call_id": call_id,
         "name": name,
         "arguments": arguments,
     });
-    if let Some(namespace) = namespace {
-        item["namespace"] = Value::String(namespace);
+    #[cfg(not(feature = "mojo"))]
+    {
+        if let Some(namespace) = namespace {
+            item["namespace"] = Value::String(namespace);
+        }
+        if let Some(signature) = signature {
+            item["gemini_thought_signature"] = Value::String(signature.to_string());
+        }
+        return item;
     }
-    if let Some(signature) = part.get("thoughtSignature").and_then(Value::as_str) {
-        item["gemini_thought_signature"] = Value::String(signature.to_string());
-    }
-    item
 }
 
 pub(crate) fn gemini_response_tool_call_item_with_call_id(
@@ -107,28 +139,45 @@ pub(crate) fn gemini_response_tool_call_item_with_call_id(
         return item;
     }
     let args = serde_json::to_string(&args_value).unwrap_or_else(|_| "{}".to_string());
+    let args = gemini_rtk_wrapped_tool_arguments(flat_name, &args);
     let (namespace, name) = gemini_split_flat_namespace_tool_name(flat_name);
-    let mut item = json!({
-        "type": "function_call",
-        "call_id": call_id,
-        "name": name,
-        "arguments": gemini_rtk_wrapped_tool_arguments(flat_name, &args),
-    });
-    if let Some(namespace) = namespace {
-        item["namespace"] = Value::String(namespace);
-    }
-    if let Some(signature) = part
+    let signature = part
         .get("thoughtSignature")
         .and_then(Value::as_str)
         .or_else(|| {
             function_call
                 .get("thoughtSignature")
                 .and_then(Value::as_str)
-        })
+        });
+    #[cfg(feature = "mojo")]
     {
-        item["gemini_thought_signature"] = Value::String(signature.to_string());
+        let mut input = prodex_mojo_core::rich::GeminiResponseKernelInput::new(
+            prodex_mojo_core::rich::GeminiResponseKernelOperation::FunctionCallItem,
+        );
+        input.call_id = Some(call_id);
+        input.name = Some(name.as_str());
+        input.arguments = Some(&args);
+        input.namespace = namespace.as_deref();
+        input.signature = signature;
+        return super::super::stream::gemini_mojo_value(input);
     }
-    item
+    #[cfg(not(feature = "mojo"))]
+    let mut item = json!({
+        "type": "function_call",
+        "call_id": call_id,
+        "name": name,
+        "arguments": args,
+    });
+    #[cfg(not(feature = "mojo"))]
+    {
+        if let Some(namespace) = namespace {
+            item["namespace"] = Value::String(namespace);
+        }
+        if let Some(signature) = signature {
+            item["gemini_thought_signature"] = Value::String(signature.to_string());
+        }
+        return item;
+    }
 }
 
 fn gemini_custom_tool_call_item(

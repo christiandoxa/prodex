@@ -11,10 +11,6 @@ pub(crate) fn gemini_responses_usage(usage: &Value) -> Option<Value> {
         .get("candidatesTokenCount")
         .and_then(Value::as_u64)
         .unwrap_or(0);
-    let total_tokens = usage
-        .get("totalTokenCount")
-        .and_then(Value::as_u64)
-        .unwrap_or_else(|| input_tokens.saturating_add(output_tokens));
     let cached_tokens = usage
         .get("cachedContentTokenCount")
         .and_then(Value::as_u64)
@@ -27,18 +23,42 @@ pub(crate) fn gemini_responses_usage(usage: &Value) -> Option<Value> {
         .get("toolUsePromptTokenCount")
         .and_then(Value::as_u64)
         .unwrap_or(0);
-    Some(json!({
-        "input_tokens": input_tokens,
-        "input_tokens_details": {
-            "cached_tokens": cached_tokens,
-            "tool_tokens": tool_tokens,
-        },
-        "output_tokens": output_tokens,
-        "output_tokens_details": {
-            "reasoning_tokens": reasoning_tokens,
-        },
-        "total_tokens": total_tokens,
-    }))
+    #[cfg(feature = "mojo")]
+    {
+        let mut input = prodex_mojo_core::rich::GeminiResponseKernelInput::new(
+            prodex_mojo_core::rich::GeminiResponseKernelOperation::ResponseUsage,
+        );
+        input.prompt_token_count = input_tokens;
+        input.candidate_token_count = output_tokens;
+        input.total_token_count_present = i64::from(usage.get("totalTokenCount").is_some());
+        input.total_token_count = usage
+            .get("totalTokenCount")
+            .and_then(Value::as_u64)
+            .unwrap_or(0);
+        input.cached_content_token_count = cached_tokens;
+        input.thoughts_token_count = reasoning_tokens;
+        input.tool_use_prompt_token_count = tool_tokens;
+        return Some(super::super::stream::gemini_mojo_value(input));
+    }
+    #[cfg(not(feature = "mojo"))]
+    {
+        let total_tokens = usage
+            .get("totalTokenCount")
+            .and_then(Value::as_u64)
+            .unwrap_or_else(|| input_tokens.saturating_add(output_tokens));
+        Some(json!({
+            "input_tokens": input_tokens,
+            "input_tokens_details": {
+                "cached_tokens": cached_tokens,
+                "tool_tokens": tool_tokens,
+            },
+            "output_tokens": output_tokens,
+            "output_tokens_details": {
+                "reasoning_tokens": reasoning_tokens,
+            },
+            "total_tokens": total_tokens,
+        }))
+    }
 }
 
 pub(crate) fn gemini_response_metadata(value: &Value) -> Option<Value> {

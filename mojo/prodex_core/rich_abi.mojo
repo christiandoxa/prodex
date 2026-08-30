@@ -29,6 +29,7 @@ from rich_types import (
     ProdexRichSlice,
     ProdexRichStringView,
 )
+from gemini_response import gemini_response_kernel_v1
 
 
 comptime PRODEX_RICH_ABI_VERSION: Int64 = 6
@@ -322,4 +323,16 @@ def prodex_mojo_rich_gemini_response_part_plan_v1(
         internal_instruction_echo,
         suppress_visible_text,
         output_actions,
+    )
+
+@export("prodex_mojo_gemini_response_kernel_v1")
+def prodex_mojo_gemini_response_kernel_v1(
+    abi_version: Int64,
+    input_address: UInt,
+    output_address: UInt,
+    output_capacity: Int64,
+    written_address: UInt,
+) abi("C") -> Int64:
+    return gemini_response_kernel_v1(
+        abi_version, input_address, output_address, output_capacity, written_address
     )
