@@ -1,7 +1,6 @@
-use super::{
-    ControlPlaneRouteValidationMode, control_plane_route_validation,
-    control_plane_route_validation_rust,
-};
+#[cfg(feature = "mojo")]
+use super::control_plane_route_validation_rust;
+use super::{ControlPlaneRouteValidationMode, control_plane_route_validation};
 use prodex_control_plane::ControlPlaneOperation;
 use prodex_gateway_http::GatewayHttpMethod;
 

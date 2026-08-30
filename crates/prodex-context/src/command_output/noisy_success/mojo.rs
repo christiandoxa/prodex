@@ -3,9 +3,8 @@ use super::super::*;
 use prodex_mojo_core::context::{
     CONTEXT_OUTPUT_DIAGNOSTIC_FAILURE, CONTEXT_OUTPUT_DIAGNOSTIC_SUCCESS,
     CONTEXT_OUTPUT_DIAGNOSTIC_TARGET, CONTEXT_OUTPUT_EXCEPTION, CONTEXT_OUTPUT_FAILURE,
-    CONTEXT_OUTPUT_NOISY_KEY,
-    CONTEXT_OUTPUT_TYPESCRIPT, CONTEXT_OUTPUT_WARNING, CommandOutputLineClassification,
-    classify_command_output_line,
+    CONTEXT_OUTPUT_NOISY_KEY, CONTEXT_OUTPUT_TYPESCRIPT, CONTEXT_OUTPUT_WARNING,
+    CommandOutputLineClassification, classify_command_output_line,
 };
 
 #[cfg(feature = "mojo")]
