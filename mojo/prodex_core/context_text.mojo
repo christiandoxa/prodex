@@ -2059,6 +2059,178 @@ def prodex_context_classify_dot_reporter_success_line_v1(
     return 0
 
 
+def context_success_prefix[literal: StaticString](
+    ptr: Pointer[mut=False, UInt8, _], start: Int64, end: Int64
+) -> Bool:
+    return context_text_ascii_starts_at[literal](ptr, start, end)
+
+
+def context_success_exact_prefix[literal: StaticString](
+    ptr: Pointer[mut=False, UInt8, _], start: Int64, end: Int64
+) -> Bool:
+    return context_text_ascii_starts_exact[literal](ptr, start, end)
+
+
+def context_success_exact[literal: StaticString](
+    ptr: Pointer[mut=False, UInt8, _], start: Int64, end: Int64
+) -> Bool:
+    return end - start == Int64(literal.byte_length()) and context_success_prefix[literal](ptr, start, end)
+
+
+def context_success_contains[literal: StaticString](
+    ptr: Pointer[mut=False, UInt8, _], start: Int64, end: Int64
+) -> Bool:
+    return context_text_ascii_contains[literal](ptr, start, end)
+
+
+def context_success_ends[literal: StaticString](
+    ptr: Pointer[mut=False, UInt8, _], start: Int64, end: Int64
+) -> Bool:
+    var length = Int64(literal.byte_length())
+    return end - start >= length and context_text_ascii_starts_at[literal](ptr, end - length, end)
+
+
+def context_success_all_dots(
+    ptr: Pointer[mut=False, UInt8, _], start: Int64, end: Int64
+) -> Bool:
+    if end - start < 4:
+        return False
+    for index in range(start, end):
+        if ptr[unsafe_offset=index] != 46:
+            return False
+    return True
+
+
+def context_success_label(
+    ptr: Pointer[mut=False, UInt8, _], start: Int64, end: Int64
+) -> Int64:
+    if context_success_prefix["compiling "](ptr, start, end):
+        return 1
+    if context_success_prefix["checking "](ptr, start, end):
+        return 2
+    if context_success_prefix["fresh "](ptr, start, end):
+        return 3
+    if context_success_prefix["documenting "](ptr, start, end):
+        return 4
+    if context_success_prefix["formatting "](ptr, start, end):
+        return 5
+    if context_success_prefix["fixing "](ptr, start, end) or context_success_prefix["fixed "](ptr, start, end):
+        return 6
+    if context_success_prefix["generated "](ptr, start, end):
+        return 7
+    if context_success_prefix["finished "](ptr, start, end):
+        return 8
+    if context_success_exact_prefix["Running "](ptr, start, end):
+        return 9
+    if context_success_exact_prefix["Doc-tests "](ptr, start, end):
+        return 10
+    if context_success_prefix["running "](ptr, start, end) and context_success_ends[" tests"](ptr, start, end):
+        return 11
+    if context_success_prefix["test "](ptr, start, end) and context_success_contains[" ... ok"](ptr, start, end):
+        return 12
+    if context_success_prefix["pass ["](ptr, start, end):
+        return 13
+    if context_success_prefix["summary ["](ptr, start, end) and context_success_contains[" passed"](ptr, start, end):
+        return 14
+    if context_success_prefix["test result: ok"](ptr, start, end):
+        return 15
+    if context_success_prefix["project '"](ptr, start, end) and context_success_contains[" is up to date"](ptr, start, end):
+        return 16
+    if context_success_prefix["building project '"](ptr, start, end) or context_success_prefix["updating unchanged output timestamps"](ptr, start, end) or context_success_prefix["projects in this build:"](ptr, start, end):
+        return 16
+    if context_success_prefix["vite "](ptr, start, end) and context_success_contains[" building for production"](ptr, start, end):
+        return 17
+    if context_success_exact["transforming..."](ptr, start, end) or context_success_exact["rendering chunks..."](ptr, start, end) or context_success_exact["computing gzip size..."](ptr, start, end) or context_success_contains[" modules transformed"](ptr, start, end):
+        return 17
+    if context_success_prefix["next.js "](ptr, start, end) or context_success_prefix["creating an optimized production build"](ptr, start, end) or context_success_contains["compiled successfully"](ptr, start, end) or context_success_prefix["linting and checking validity of types"](ptr, start, end) or context_success_prefix["collecting page data"](ptr, start, end) or context_success_prefix["generating static pages"](ptr, start, end) or context_success_prefix["finalizing page optimization"](ptr, start, end) or context_success_prefix["collecting build traces"](ptr, start, end):
+        return 18
+    if context_success_all_dots(ptr, start, end):
+        return 19
+    if context_success_prefix["bun test v"](ptr, start, end) or context_success_prefix["(pass) "](ptr, start, end):
+        return 20
+    if context_success_prefix["pass "](ptr, start, end):
+        return 23
+    if context_success_prefix["ok "](ptr, start, end) and end - start > 3:
+        return 24
+    if context_success_prefix["? "](ptr, start, end) and context_success_contains["[no test files]"](ptr, start, end):
+        return 25
+    if context_success_prefix["=== run "](ptr, start, end):
+        return 26
+    if context_success_prefix["=== pause "](ptr, start, end):
+        return 27
+    if context_success_prefix["=== cont "](ptr, start, end):
+        return 28
+    if context_success_prefix["--- pass: "](ptr, start, end):
+        return 29
+    if context_success_prefix["--- skip: "](ptr, start, end):
+        return 30
+    if context_success_exact["pass"](ptr, start, end):
+        return 31
+    if context_success_prefix["test suites:"](ptr, start, end) and context_success_contains["passed"](ptr, start, end):
+        return 32
+    if context_success_prefix["tests:"](ptr, start, end) and context_success_contains["passed"](ptr, start, end):
+        return 33
+    if context_success_prefix["snapshots:"](ptr, start, end) and (context_success_contains["passed"](ptr, start, end) or context_success_contains["0 total"](ptr, start, end)):
+        return 34
+    if context_success_prefix["test files"](ptr, start, end) and context_success_contains["passed"](ptr, start, end):
+        return 35
+    if context_success_prefix["duration"](ptr, start, end):
+        return 36
+    if context_success_prefix["time:"](ptr, start, end):
+        return 37
+    if context_success_prefix["ran all test suites"](ptr, start, end):
+        return 38
+    if context_success_prefix["done in "](ptr, start, end):
+        return 39
+    if context_success_prefix["added "](ptr, start, end) and context_success_contains[" package"](ptr, start, end):
+        return 40
+    if context_success_prefix["audited "](ptr, start, end) and context_success_contains[" package"](ptr, start, end):
+        return 41
+    if context_success_prefix["updating crates.io index"](ptr, start, end):
+        return 42
+    if context_success_prefix["locking "](ptr, start, end) and context_success_contains[" package"](ptr, start, end):
+        return 43
+    if context_success_prefix["downloading crates"](ptr, start, end) or context_success_prefix["downloaded "](ptr, start, end):
+        return 44
+    if context_success_prefix["packages: "](ptr, start, end) or context_success_prefix["progress: resolved"](ptr, start, end):
+        return 45
+    if context_success_prefix["lockfile is up to date"](ptr, start, end) or context_success_prefix["already up to date"](ptr, start, end):
+        return 46
+    if context_success_prefix["requirement already satisfied"](ptr, start, end) or context_success_prefix["successfully installed"](ptr, start, end) or context_success_prefix["installing collected packages"](ptr, start, end):
+        return 47
+    if context_success_prefix["found 0 vulnerabilities"](ptr, start, end):
+        return 48
+    if context_success_prefix["all files pass"](ptr, start, end) or context_success_prefix["all checks passed"](ptr, start, end):
+        return 49
+    if context_success_prefix["compiled successfully"](ptr, start, end):
+        return 50
+    if context_success_prefix["built in "](ptr, start, end) or context_success_contains[" built in "](ptr, start, end):
+        return 51
+    if context_success_prefix["tests/"](ptr, start, end) and context_success_contains[" passed"](ptr, start, end):
+        return 52
+    if context_success_prefix["collected "](ptr, start, end) and context_success_contains[" item"](ptr, start, end):
+        return 53
+    return 0
+
+
+@export("prodex_context_classify_noisy_success_line_v1")
+def prodex_context_classify_noisy_success_line_v1(
+    abi_version: Int64,
+    line: Pointer[mut=False, ProdexStringView, _],
+    output: Pointer[mut=True, Int64, _],
+) abi("C") -> Int64:
+    if abi_version != CONTEXT_TEXT_ABI_VERSION:
+        return 4
+    output[] = -1
+    var view = line[].copy()
+    if not context_text_view_is_valid(view):
+        return 2
+    var bounds = context_text_trim_bounds(view.ptr.unsafe_value(), 0, Int64(view.len))
+    if bounds[1] > bounds[0]:
+        output[] = context_success_label(view.ptr.unsafe_value(), bounds[0], bounds[1])
+    return 0
+
+
 @export("prodex_context_prepare_signal_rows_v1")
 def prodex_context_prepare_signal_rows_v1(
     abi_version: Int64,

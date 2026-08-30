@@ -163,6 +163,15 @@ pub(super) fn rust_noise_label(line: &str) -> Option<&'static str> {
         return None;
     }
 
+    #[cfg(feature = "mojo")]
+    {
+        return noisy_success_mojo_label(line)
+            .and_then(rust_noise_label_from_mojo_code)
+            .or_else(|| rust_compilation_noise_label(trimmed))
+            .or_else(|| rust_test_noise_label(trimmed));
+    }
+
+    #[cfg(not(feature = "mojo"))]
     rust_compilation_noise_label(trimmed).or_else(|| rust_test_noise_label(trimmed))
 }
 
@@ -208,6 +217,28 @@ fn rust_test_noise_label(trimmed: &str) -> Option<&'static str> {
     }
 }
 
+#[cfg(feature = "mojo")]
+fn rust_noise_label_from_mojo_code(code: i64) -> Option<&'static str> {
+    match code {
+        1 => Some("compiling"),
+        2 => Some("checking"),
+        3 => Some("fresh"),
+        4 => Some("documenting"),
+        5 => Some("formatting"),
+        6 => Some("cargo_fix"),
+        7 => Some("generated_docs"),
+        8 => Some("finished"),
+        9 => Some("running_targets"),
+        10 => Some("doc_tests"),
+        11 => Some("running_tests"),
+        12 => Some("passed_tests"),
+        13 => Some("nextest_pass"),
+        14 => Some("nextest_summary"),
+        15 => Some("test_result_ok"),
+        _ => None,
+    }
+}
+
 pub(super) fn diagnostic_noise_label(line: &str) -> Option<&'static str> {
     let trimmed = line.trim_start();
     let lower = trimmed.to_ascii_lowercase();
@@ -225,23 +256,113 @@ pub(super) fn diagnostic_noise_label(line: &str) -> Option<&'static str> {
 }
 
 pub(super) fn noisy_success_label(line: &str) -> Option<&'static str> {
-    let trimmed = line.trim();
-    let lower = trimmed.to_ascii_lowercase();
-    if is_success_output_failure_signal_line(trimmed)
-        && !is_diagnostic_failure_summary_line(trimmed)
-        || is_success_output_warning_signal_line(trimmed)
+    #[cfg(feature = "mojo")]
     {
-        return None;
+        let trimmed = line.trim();
+        let lower = trimmed.to_ascii_lowercase();
+        if is_success_output_failure_signal_line(trimmed)
+            && !is_diagnostic_failure_summary_line(trimmed)
+            || is_success_output_warning_signal_line(trimmed)
+        {
+            return None;
+        }
+        return noisy_success_framework_label(trimmed, &lower)
+            .or_else(|| noisy_success_mojo_label(line).and_then(noisy_success_label_from_mojo_code))
+            .or_else(|| rust_noise_label(line))
+            .or_else(|| noisy_success_language_label(trimmed, &lower))
+            .or_else(|| noisy_success_go_test_label(trimmed, &lower))
+            .or_else(|| noisy_success_test_summary_label(trimmed, &lower))
+            .or_else(|| noisy_success_build_label(&lower))
+            .or_else(|| noisy_success_package_label(&lower))
+            .or_else(|| noisy_success_quality_label(trimmed, &lower));
     }
 
-    noisy_success_framework_label(trimmed, &lower)
-        .or_else(|| rust_noise_label(line))
-        .or_else(|| noisy_success_language_label(trimmed, &lower))
-        .or_else(|| noisy_success_go_test_label(trimmed, &lower))
-        .or_else(|| noisy_success_test_summary_label(trimmed, &lower))
-        .or_else(|| noisy_success_build_label(&lower))
-        .or_else(|| noisy_success_package_label(&lower))
-        .or_else(|| noisy_success_quality_label(trimmed, &lower))
+    #[cfg(not(feature = "mojo"))]
+    {
+        let trimmed = line.trim();
+        let lower = trimmed.to_ascii_lowercase();
+        if is_success_output_failure_signal_line(trimmed)
+            && !is_diagnostic_failure_summary_line(trimmed)
+            || is_success_output_warning_signal_line(trimmed)
+        {
+            return None;
+        }
+
+        noisy_success_framework_label(trimmed, &lower)
+            .or_else(|| rust_noise_label(line))
+            .or_else(|| noisy_success_language_label(trimmed, &lower))
+            .or_else(|| noisy_success_go_test_label(trimmed, &lower))
+            .or_else(|| noisy_success_test_summary_label(trimmed, &lower))
+            .or_else(|| noisy_success_build_label(&lower))
+            .or_else(|| noisy_success_package_label(&lower))
+            .or_else(|| noisy_success_quality_label(trimmed, &lower))
+    }
+}
+
+#[cfg(feature = "mojo")]
+fn noisy_success_mojo_label(line: &str) -> Option<i64> {
+    prodex_mojo_core::context::classify_noisy_success_line(line)
+        .unwrap_or_else(|error| panic!("Mojo command-output classification failed: {error:?}"))
+}
+
+#[cfg(feature = "mojo")]
+fn noisy_success_label_from_mojo_code(code: i64) -> Option<&'static str> {
+    Some(match code {
+        1 => "compiling",
+        2 => "checking",
+        3 => "fresh",
+        4 => "documenting",
+        5 => "formatting",
+        6 => "cargo_fix",
+        7 => "generated_docs",
+        8 => "finished",
+        9 => "running_targets",
+        10 => "doc_tests",
+        11 => "running_tests",
+        12 => "passed_tests",
+        13 => "nextest_pass",
+        14 => "nextest_summary",
+        15 => "test_result_ok",
+        16 => "typecheck_summary",
+        17 => "vite",
+        18 => "next",
+        19 => "dot_progress",
+        20 => "bun_test",
+        21 => "cypress",
+        22 => "zig_test",
+        23 => "passed_suites",
+        24 => "go_test_ok",
+        25 => "go_test_no_files",
+        26 => "go_test_run",
+        27 => "go_test_pause",
+        28 => "go_test_cont",
+        29 => "go_test_pass",
+        30 => "go_test_skip",
+        31 => "go_test_pass_summary",
+        32 => "test_suites",
+        33 => "test_cases",
+        34 => "snapshots",
+        35 => "test_files",
+        36 => "test_duration",
+        37 => "test_time",
+        38 => "test_runner_summary",
+        39 => "done",
+        40 => "packages_added",
+        41 => "packages_audited",
+        42 => "cargo_index",
+        43 => "cargo_lock",
+        44 => "cargo_download",
+        45 => "package_progress",
+        46 => "packages_up_to_date",
+        47 => "python_packages",
+        48 => "vulnerability_summary",
+        49 => "formatter_summary",
+        50 => "compile_summary",
+        51 => "build_summary",
+        52 => "passed_tests",
+        53 => "pytest_progress",
+        _ => return None,
+    })
 }
 
 fn noisy_success_framework_label(trimmed: &str, lower: &str) -> Option<&'static str> {

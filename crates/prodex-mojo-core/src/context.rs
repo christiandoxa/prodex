@@ -125,7 +125,7 @@ mod git_search;
 pub use git_search::classify_git_search_line;
 #[path = "context/command_output.rs"]
 mod command_output;
-pub use command_output::classify_dot_reporter_success_line;
+pub use command_output::{classify_dot_reporter_success_line, classify_noisy_success_line};
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ContextSignalLine<'a> {
     pub text: &'a str,
