@@ -9,17 +9,72 @@ use self::input_content::{
     responses_input_has_custom_tool_or_tool_search, responses_input_has_non_text_content,
 };
 
+#[cfg(feature = "mojo")]
+use prodex_mojo_core::rich::{OpenAiCompatError, OpenAiCompatValidationInput};
+
 pub(super) fn validate_responses_chat_compat_request(
     provider: ProviderId,
     obj: &serde_json::Map<String, Value>,
 ) -> Result<(), String> {
-    validate_responses_chat_compat_base(provider, obj)?;
-    validate_responses_chat_compat_request_metadata(provider, obj)?;
-    validate_responses_chat_compat_tools(provider, obj)?;
-    validate_responses_chat_compat_output_controls(provider, obj)?;
-    validate_responses_chat_compat_input(provider, obj)
+    #[cfg(feature = "mojo")]
+    {
+        let input = OpenAiCompatValidationInput {
+            provider: provider.label(),
+            has_messages: obj.contains_key("messages"),
+            has_response_format: obj.contains_key("response_format"),
+            has_reasoning: obj.contains_key("reasoning"),
+            has_previous_response_id: obj.contains_key("previous_response_id"),
+            has_text_format: obj
+                .get("text")
+                .and_then(Value::as_object)
+                .is_some_and(|text| text.contains_key("format")),
+            n_gt_one: obj.get("n").and_then(Value::as_u64).is_some_and(|n| n > 1),
+            has_metadata: obj.contains_key("metadata"),
+            has_safety_identifier: obj.contains_key("safety_identifier"),
+            has_web_search_options: obj.contains_key("web_search_options"),
+            tools_non_function: obj
+                .get("tools")
+                .and_then(Value::as_array)
+                .is_some_and(|tools| {
+                    tools
+                        .iter()
+                        .any(|tool| tool.get("type").and_then(Value::as_str) != Some("function"))
+                }),
+            tool_choice_invalid: obj
+                .get("tool_choice")
+                .is_some_and(|choice| !responses_chat_compat_tool_choice_supported(choice)),
+            parallel_tool_calls_false: obj.get("parallel_tool_calls").and_then(Value::as_bool)
+                == Some(false),
+            has_logprobs: obj.contains_key("logprobs"),
+            has_top_logprobs: obj.contains_key("top_logprobs"),
+            has_stop_sequences: obj.contains_key("stop_sequences"),
+            input_custom_tool: obj
+                .get("input")
+                .is_some_and(responses_input_has_custom_tool_or_tool_search),
+            input_non_text: obj
+                .get("input")
+                .is_some_and(responses_input_has_non_text_content),
+        };
+        return match prodex_mojo_core::rich::openai_compat_validate_request(input) {
+            Ok(()) => Ok(()),
+            Err(OpenAiCompatError::Rejected(reason)) => Err(reason),
+            Err(OpenAiCompatError::Mojo(error)) => {
+                panic!("Mojo OpenAI compatibility validation failed: {error:?}")
+            }
+        };
+    }
+
+    #[cfg(not(feature = "mojo"))]
+    {
+        validate_responses_chat_compat_base(provider, obj)?;
+        validate_responses_chat_compat_request_metadata(provider, obj)?;
+        validate_responses_chat_compat_tools(provider, obj)?;
+        validate_responses_chat_compat_output_controls(provider, obj)?;
+        validate_responses_chat_compat_input(provider, obj)
+    }
 }
 
+#[cfg(not(feature = "mojo"))]
 fn validate_responses_chat_compat_base(
     provider: ProviderId,
     obj: &serde_json::Map<String, Value>,
@@ -67,6 +122,7 @@ fn validate_responses_chat_compat_base(
     Ok(())
 }
 
+#[cfg(not(feature = "mojo"))]
 fn validate_responses_chat_compat_request_metadata(
     provider: ProviderId,
     obj: &serde_json::Map<String, Value>,
@@ -92,6 +148,7 @@ fn validate_responses_chat_compat_request_metadata(
     Ok(())
 }
 
+#[cfg(not(feature = "mojo"))]
 fn validate_responses_chat_compat_tools(
     provider: ProviderId,
     obj: &serde_json::Map<String, Value>,
@@ -121,6 +178,7 @@ fn validate_responses_chat_compat_tools(
     Ok(())
 }
 
+#[cfg(not(feature = "mojo"))]
 fn validate_responses_chat_compat_output_controls(
     provider: ProviderId,
     obj: &serde_json::Map<String, Value>,
@@ -149,6 +207,7 @@ fn validate_responses_chat_compat_output_controls(
     Ok(())
 }
 
+#[cfg(not(feature = "mojo"))]
 fn validate_responses_chat_compat_input(
     provider: ProviderId,
     obj: &serde_json::Map<String, Value>,

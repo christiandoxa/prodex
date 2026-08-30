@@ -1,13 +1,16 @@
 //! Shared JSON/text/tool helpers for the OpenAI chat-compatible bridge.
 
+#[cfg(not(feature = "mojo"))]
 use crate::translators::tool_args::{prefix_command_with_rtk, wrap_json_string_arg_with};
 
-use super::{Value, json};
+use super::Value;
+#[cfg(not(feature = "mojo"))]
+use super::json;
 
 pub(super) fn message_content_to_output_content(content: Option<&Value>) -> Vec<Value> {
     match content {
         Some(Value::String(text)) if !text.is_empty() => {
-            vec![json!({"type": "output_text", "text": text})]
+            vec![output_text(text)]
         }
         Some(Value::Array(items)) => items
             .iter()
@@ -19,16 +22,32 @@ pub(super) fn message_content_to_output_content(content: Option<&Value>) -> Vec<
                 if text.is_empty() {
                     None
                 } else {
-                    Some(json!({"type": "output_text", "text": text}))
+                    Some(output_text(text))
                 }
             })
             .collect(),
         Some(other) => value_to_text(other)
             .filter(|text| !text.is_empty())
-            .map(|text| vec![json!({"type": "output_text", "text": text})])
+            .map(|text| vec![output_text(&text)])
             .unwrap_or_default(),
         None => Vec::new(),
     }
+}
+
+fn output_text(text: &str) -> Value {
+    #[cfg(feature = "mojo")]
+    {
+        let body =
+            prodex_mojo_core::rich::openai_compat_output_text(text).unwrap_or_else(|error| {
+                panic!("Mojo OpenAI compatibility output text failed: {error:?}")
+            });
+        return serde_json::from_slice(&body).unwrap_or_else(|error| {
+            panic!("Mojo OpenAI compatibility output text was invalid JSON: {error}")
+        });
+    }
+
+    #[cfg(not(feature = "mojo"))]
+    json!({"type": "output_text", "text": text})
 }
 
 pub(super) fn value_to_text(value: &Value) -> Option<String> {
@@ -101,15 +120,37 @@ pub(super) fn chat_usage_to_responses_usage(usage: Option<&Value>) -> Option<Val
         .or_else(|| usage.get("output_tokens"))
         .and_then(Value::as_u64)
         .unwrap_or(0);
-    let total_tokens = usage
-        .get("total_tokens")
-        .and_then(Value::as_u64)
-        .unwrap_or(input_tokens + output_tokens);
-    Some(json!({
-        "input_tokens": input_tokens,
-        "output_tokens": output_tokens,
-        "total_tokens": total_tokens,
-    }))
+    #[cfg(feature = "mojo")]
+    {
+        let total_tokens = usage
+            .get("total_tokens")
+            .and_then(Value::as_u64)
+            .unwrap_or(0);
+        let total_tokens_present = usage.get("total_tokens").and_then(Value::as_u64).is_some();
+        let body = prodex_mojo_core::rich::openai_compat_response_usage(
+            input_tokens,
+            output_tokens,
+            total_tokens,
+            total_tokens_present,
+        )
+        .unwrap_or_else(|error| panic!("Mojo OpenAI compatibility usage failed: {error:?}"));
+        return Some(serde_json::from_slice(&body).unwrap_or_else(|error| {
+            panic!("Mojo OpenAI compatibility usage was invalid JSON: {error}")
+        }));
+    }
+
+    #[cfg(not(feature = "mojo"))]
+    {
+        let total_tokens = usage
+            .get("total_tokens")
+            .and_then(Value::as_u64)
+            .unwrap_or(input_tokens + output_tokens);
+        Some(json!({
+            "input_tokens": input_tokens,
+            "output_tokens": output_tokens,
+            "total_tokens": total_tokens,
+        }))
+    }
 }
 
 pub(super) fn stringify_arguments(value: &Value) -> String {
@@ -120,28 +161,63 @@ pub(super) fn stringify_arguments(value: &Value) -> String {
 }
 
 pub(super) fn split_flat_namespace_tool_name(name: &str) -> (Option<String>, String) {
-    let mut parts = name.split('.');
-    let first = parts.next().unwrap_or(name).trim();
-    let second = parts.next();
-    match second {
-        Some(rest) if !first.is_empty() => {
-            let remainder = std::iter::once(rest)
-                .chain(parts)
-                .collect::<Vec<_>>()
-                .join(".");
-            if remainder.is_empty() {
-                (None, name.to_string())
-            } else {
-                (Some(first.to_string()), remainder)
+    #[cfg(feature = "mojo")]
+    {
+        let body =
+            prodex_mojo_core::rich::openai_compat_split_tool_name(name).unwrap_or_else(|error| {
+                panic!("Mojo OpenAI compatibility tool-name split failed: {error:?}")
+            });
+        let value: Value = serde_json::from_slice(&body).unwrap_or_else(|error| {
+            panic!("Mojo OpenAI compatibility tool-name split was invalid JSON: {error}")
+        });
+        let name = value
+            .get("name")
+            .and_then(Value::as_str)
+            .unwrap_or(name)
+            .to_string();
+        let namespace = value
+            .get("namespace")
+            .and_then(Value::as_str)
+            .map(str::to_string);
+        return (namespace, name);
+    }
+
+    #[cfg(not(feature = "mojo"))]
+    {
+        let mut parts = name.split('.');
+        let first = parts.next().unwrap_or(name).trim();
+        let second = parts.next();
+        match second {
+            Some(rest) if !first.is_empty() => {
+                let remainder = std::iter::once(rest)
+                    .chain(parts)
+                    .collect::<Vec<_>>()
+                    .join(".");
+                if remainder.is_empty() {
+                    (None, name.to_string())
+                } else {
+                    (Some(first.to_string()), remainder)
+                }
             }
+            _ => (None, name.to_string()),
         }
-        _ => (None, name.to_string()),
     }
 }
 
 pub(super) fn rtk_wrapped_tool_arguments(name: &str, arguments: &str) -> String {
-    if name != "functions.exec_command" && name != "exec_command" {
-        return arguments.to_string();
+    #[cfg(feature = "mojo")]
+    {
+        return prodex_mojo_core::rich::openai_compat_rtk_arguments(name, arguments)
+            .unwrap_or_else(|error| {
+                panic!("Mojo OpenAI compatibility RTK rewrite failed: {error:?}")
+            });
     }
-    wrap_json_string_arg_with(arguments, &["cmd"], prefix_command_with_rtk)
+
+    #[cfg(not(feature = "mojo"))]
+    {
+        if name != "functions.exec_command" && name != "exec_command" {
+            return arguments.to_string();
+        }
+        wrap_json_string_arg_with(arguments, &["cmd"], prefix_command_with_rtk)
+    }
 }
