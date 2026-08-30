@@ -71,12 +71,6 @@ unsafe extern "C" {
         metadata: *const ProdexStringView,
         output_kind: *mut i64,
     ) -> i64;
-    fn prodex_context_gemini_glob_matches_v1(
-        abi_version: i64,
-        pattern: *const ProdexStringView,
-        path: *const ProdexStringView,
-        output: *mut i64,
-    ) -> i64;
     fn prodex_context_classify_ci_line_v1(
         abi_version: i64,
         line: *const ProdexStringView,
@@ -110,7 +104,6 @@ const CRITICAL_SIGNAL_MAX_LINES: usize = 65_536;
 const CRITICAL_SIGNAL_MAX_KEYS: usize = 65_536;
 const CRITICAL_SIGNAL_MAX_RANGES: usize = 1_024;
 pub const CONTEXT_METADATA_MAX_BYTES: usize = 16_384;
-pub const GEMINI_GLOB_MAX_BYTES: usize = 131_072;
 pub const CONTEXT_TEXT_ABI_VERSION: i64 = 1;
 const CONTEXT_CI_RESULT_WIDTH: usize = 7;
 const CONTEXT_CI_MARKER: i64 = 1;
@@ -210,47 +203,6 @@ pub fn classify_command_metadata(metadata: &str) -> Result<Option<i64>, crate::M
             _ => Err(crate::MojoError::InvalidOutput),
         },
         3 => Ok(None),
-        4 => Err(crate::MojoError::AbiMismatch),
-        1 | 2 => Err(crate::MojoError::InvalidInput),
-        _ => Err(crate::MojoError::InvalidOutput),
-    }
-}
-
-/// Matches one normalized Gemini context glob against one normalized path.
-///
-/// Rust owns path normalization and filesystem policy; Mojo owns only the
-/// bounded wildcard matching semantics. Inputs must be UTF-8 and use `/` as
-/// the path separator.
-pub fn gemini_glob_matches(pattern: &str, path: &str) -> Result<bool, crate::MojoError> {
-    if pattern.len() > GEMINI_GLOB_MAX_BYTES || path.len() > GEMINI_GLOB_MAX_BYTES {
-        return Err(crate::MojoError::InvalidInput);
-    }
-    if !text_abi_is_ready() {
-        return Err(crate::MojoError::AbiMismatch);
-    }
-    let pattern_view = ProdexStringView {
-        ptr: pattern.as_ptr(),
-        len: pattern.len(),
-    };
-    let path_view = ProdexStringView {
-        ptr: path.as_ptr(),
-        len: path.len(),
-    };
-    let mut output = -1_i64;
-    let status = unsafe {
-        prodex_context_gemini_glob_matches_v1(
-            CONTEXT_TEXT_ABI_VERSION,
-            &pattern_view,
-            &path_view,
-            &mut output,
-        )
-    };
-    match status {
-        0 => match output {
-            0 => Ok(false),
-            1 => Ok(true),
-            _ => Err(crate::MojoError::InvalidOutput),
-        },
         4 => Err(crate::MojoError::AbiMismatch),
         1 | 2 => Err(crate::MojoError::InvalidInput),
         _ => Err(crate::MojoError::InvalidOutput),
@@ -792,3 +744,7 @@ mod text_abi_tests {
         (status, result)
     }
 }
+
+#[path = "context/gemini_glob.rs"]
+mod gemini_glob;
+pub use gemini_glob::gemini_glob_matches;
