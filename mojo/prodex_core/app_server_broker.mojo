@@ -298,7 +298,8 @@ def app_server_broker_response_schema_v1_impl(
     var stage = app_server_method_from_address(request_stage_address)
     if not rich_view_valid(stage, APP_SERVER_BROKER_METHOD_MAX_BYTES):
         return 2
-    var bounds = InlineArray[Int64, 2](0, stage.len)
+    var bounds = InlineArray[Int64, 2](fill=0)
+    bounds[1] = Int64(stage.len)
     var ptr = rich_view_ptr(stage)
     if app_server_view_matches["thread_start_request"](ptr, bounds[0], bounds[1], False):
         output[] = RESPONSE_SCHEMA_THREAD_START
