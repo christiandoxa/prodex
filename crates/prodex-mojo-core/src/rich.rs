@@ -26,6 +26,10 @@ pub use policy::{
 };
 mod fallback;
 pub use fallback::{model_fallback_chain, model_fallback_plan};
+mod billing;
+pub use billing::{
+    GatewayBillingSummaryBucket, GatewayBillingSummaryInput, gateway_billing_summary_batch,
+};
 mod catalog;
 pub use catalog::{
     CatalogChoice, CatalogChoicesPlan, CatalogConfigurationInput, CatalogConfigurationPlan,
@@ -433,7 +437,7 @@ fn hash_capacity(count: usize) -> Result<usize, MojoError> {
 
 fn rich_abi_ready() -> bool {
     *RICH_ABI_READY.get_or_init(|| {
-        let mut layout = [0_u64; 40];
+        let mut layout = [0_u64; 46];
         let status =
             unsafe { prodex_mojo_rich_abi_layout(layout.as_mut_ptr(), layout.len() as i64) };
         let rust = [
@@ -477,6 +481,12 @@ fn rich_abi_ready() -> bool {
             std::mem::align_of::<RichCatalogPlanChoice>() as u64,
             std::mem::size_of::<RichCatalogPlanResult>() as u64,
             std::mem::align_of::<RichCatalogPlanResult>() as u64,
+            std::mem::size_of::<billing::GatewayBillingSummaryInput>() as u64,
+            std::mem::align_of::<billing::GatewayBillingSummaryInput>() as u64,
+            std::mem::size_of::<billing::GatewayBillingSummaryBucket>() as u64,
+            std::mem::align_of::<billing::GatewayBillingSummaryBucket>() as u64,
+            std::mem::size_of::<billing::GatewayBillingSummaryResult>() as u64,
+            std::mem::align_of::<billing::GatewayBillingSummaryResult>() as u64,
         ];
         status == 0
             && unsafe { prodex_mojo_rich_abi_version() } == RICH_ABI_VERSION

@@ -274,6 +274,47 @@ struct ProdexRichPlanResult(Copyable):
 
 
 @fieldwise_init
+struct ProdexGatewayBillingSummaryInput(Copyable):
+    var bucket_ids: InlineArray[Int64, 9]
+    var response_status: Int64
+    var response_status_present: Int64
+    var input_tokens: UInt64
+    var output_tokens: UInt64
+    var response_bytes: UInt64
+    var estimated_cost_microusd: UInt64
+    var final_cost_microusd: UInt64
+    var created_at_epoch: UInt64
+    var reconciled_at_epoch: UInt64
+    var reconciled_at_present: Int64
+
+
+@fieldwise_init
+struct ProdexGatewayBillingSummaryBucket(Copyable):
+    var requests: UInt64
+    var successful_requests: UInt64
+    var failed_requests: UInt64
+    var unreconciled_requests: UInt64
+    var input_tokens: UInt64
+    var output_tokens: UInt64
+    var response_bytes: UInt64
+    var estimated_cost_microusd: UInt64
+    var final_cost_microusd: UInt64
+    var first_created_at_epoch: UInt64
+    var first_created_at_present: Int64
+    var last_created_at_epoch: UInt64
+    var last_reconciled_at_epoch: UInt64
+    var last_reconciled_at_present: Int64
+
+
+@fieldwise_init
+struct ProdexGatewayBillingSummaryResult(Copyable):
+    var abi_version: Int64
+    var buckets_written: Int64
+    var required_buckets: Int64
+    var issue_kind: Int64
+
+
+@fieldwise_init
 struct NormalizedIdentifier(Copyable):
     var raw: ProdexRichStringView
     var normalized: ProdexRichSlice

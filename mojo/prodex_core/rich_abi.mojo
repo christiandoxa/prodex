@@ -8,6 +8,9 @@ from rich_types import (
     ProdexRichCatalogPlanChoice,
     ProdexRichCatalogPlanModel,
     ProdexRichCatalogPlanResult,
+    ProdexGatewayBillingSummaryBucket,
+    ProdexGatewayBillingSummaryInput,
+    ProdexGatewayBillingSummaryResult,
     ProdexRichFallbackRecord,
     ProdexRichFallbackResult,
     ProdexRichIssue,
@@ -39,7 +42,7 @@ def prodex_mojo_rich_abi_version() abi("C") -> Int64:
 def prodex_mojo_rich_abi_layout(
     output: Pointer[mut=True, UInt64, _], output_count: Int64
 ) abi("C") -> Int64:
-    if output_count != 40:
+    if output_count != 46:
         return 1
     output[unsafe_offset=0] = UInt64(size_of[ProdexRichStringView]())
     output[unsafe_offset=1] = UInt64(align_of[ProdexRichStringView]())
@@ -81,4 +84,10 @@ def prodex_mojo_rich_abi_layout(
     output[unsafe_offset=37] = UInt64(align_of[ProdexRichCatalogPlanChoice]())
     output[unsafe_offset=38] = UInt64(size_of[ProdexRichCatalogPlanResult]())
     output[unsafe_offset=39] = UInt64(align_of[ProdexRichCatalogPlanResult]())
+    output[unsafe_offset=40] = UInt64(size_of[ProdexGatewayBillingSummaryInput]())
+    output[unsafe_offset=41] = UInt64(align_of[ProdexGatewayBillingSummaryInput]())
+    output[unsafe_offset=42] = UInt64(size_of[ProdexGatewayBillingSummaryBucket]())
+    output[unsafe_offset=43] = UInt64(align_of[ProdexGatewayBillingSummaryBucket]())
+    output[unsafe_offset=44] = UInt64(size_of[ProdexGatewayBillingSummaryResult]())
+    output[unsafe_offset=45] = UInt64(align_of[ProdexGatewayBillingSummaryResult]())
     return 0
