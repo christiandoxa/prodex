@@ -34,51 +34,16 @@ pub(super) fn gemini_request_content_value(
 }
 
 #[cfg(feature = "mojo")]
-#[allow(clippy::too_many_arguments)]
 fn gemini_bridge_request_bytes(
-    operation: GeminiBridgeRequestOperation,
-    primary: Option<&[u8]>,
-    secondary: Option<&[u8]>,
-    tertiary: Option<&[u8]>,
-    quaternary: Option<&[u8]>,
-    quinary: Option<&[u8]>,
-    senary: Option<&[u8]>,
-    septenary: Option<&[u8]>,
-    octonary: Option<&[u8]>,
-    kind: i64,
+    input: GeminiBridgeRequestKernelInput<'_>,
 ) -> Result<Vec<u8>, MojoError> {
-    let mut input = GeminiBridgeRequestKernelInput::new(operation);
-    input.primary = primary;
-    input.secondary = secondary;
-    input.tertiary = tertiary;
-    input.quaternary = quaternary;
-    input.quinary = quinary;
-    input.senary = senary;
-    input.septenary = septenary;
-    input.octonary = octonary;
-    input.kind = kind;
     prodex_mojo_core::provider_constraints::gemini_bridge_request_kernel(input)
 }
 
 #[cfg(feature = "mojo")]
-#[allow(clippy::too_many_arguments)]
-pub(super) fn gemini_bridge_request_value(
-    operation: GeminiBridgeRequestOperation,
-    primary: Option<&[u8]>,
-    secondary: Option<&[u8]>,
-    tertiary: Option<&[u8]>,
-    quaternary: Option<&[u8]>,
-    quinary: Option<&[u8]>,
-    senary: Option<&[u8]>,
-    septenary: Option<&[u8]>,
-    octonary: Option<&[u8]>,
-    kind: i64,
-) -> Value {
-    let body = gemini_bridge_request_bytes(
-        operation, primary, secondary, tertiary, quaternary, quinary, senary, septenary, octonary,
-        kind,
-    )
-    .unwrap_or_else(|error| panic!("Mojo Gemini bridge request kernel failed: {error:?}"));
+pub(super) fn gemini_bridge_request_value(input: GeminiBridgeRequestKernelInput<'_>) -> Value {
+    let body = gemini_bridge_request_bytes(input)
+        .unwrap_or_else(|error| panic!("Mojo Gemini bridge request kernel failed: {error:?}"));
     serde_json::from_slice(&body).unwrap_or_else(|error| {
         panic!("Mojo Gemini bridge request kernel returned invalid JSON: {error}")
     })
@@ -86,18 +51,11 @@ pub(super) fn gemini_bridge_request_value(
 
 #[cfg(feature = "mojo")]
 pub(super) fn gemini_bridge_request_simple(body: &[u8]) -> bool {
-    let Ok(body) = gemini_bridge_request_bytes(
-        GeminiBridgeRequestOperation::SimpleRequest,
-        Some(body),
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        0,
-    ) else {
+    let Ok(body) = gemini_bridge_request_bytes(GeminiBridgeRequestKernelInput {
+        operation: GeminiBridgeRequestOperation::SimpleRequest,
+        primary: Some(body),
+        ..GeminiBridgeRequestKernelInput::new(GeminiBridgeRequestOperation::SimpleRequest)
+    }) else {
         return false;
     };
     serde_json::from_slice::<Value>(&body)
@@ -109,18 +67,11 @@ pub(super) fn gemini_bridge_request_simple(body: &[u8]) -> bool {
 #[cfg(feature = "mojo")]
 pub(super) fn gemini_bridge_request_candidate_count(value: &Value) -> Result<(), String> {
     let input = serde_json::to_vec(value).expect("Gemini candidate-count input serializes");
-    let body = gemini_bridge_request_bytes(
-        GeminiBridgeRequestOperation::ValidateCandidateCount,
-        Some(&input),
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        0,
-    )
+    let body = gemini_bridge_request_bytes(GeminiBridgeRequestKernelInput {
+        operation: GeminiBridgeRequestOperation::ValidateCandidateCount,
+        primary: Some(&input),
+        ..GeminiBridgeRequestKernelInput::new(GeminiBridgeRequestOperation::ValidateCandidateCount)
+    })
     .map_err(|error| format!("invalid_candidate_count: Mojo validation failed: {error:?}"))?;
     match serde_json::from_slice::<Value>(&body) {
         Ok(Value::Null) => Ok(()),
@@ -140,18 +91,15 @@ pub(super) fn gemini_bridge_request_generation_config(
     let chat = serde_json::to_vec(chat).expect("Gemini chat request serializes");
     let model = serde_json::to_vec(model).expect("Gemini model serializes");
     let budget = thinking_budget_tokens.map(|value| value.to_string());
-    gemini_bridge_request_value(
-        GeminiBridgeRequestOperation::GenerationConfig,
-        Some(&original),
-        Some(&chat),
-        Some(&model),
-        budget.as_deref().map(str::as_bytes),
-        None,
-        None,
-        None,
-        None,
-        i64::from(thinking_budget_tokens.is_some()),
-    )
+    gemini_bridge_request_value(GeminiBridgeRequestKernelInput {
+        operation: GeminiBridgeRequestOperation::GenerationConfig,
+        primary: Some(&original),
+        secondary: Some(&chat),
+        tertiary: Some(&model),
+        quaternary: budget.as_deref().map(str::as_bytes),
+        kind: i64::from(thinking_budget_tokens.is_some()),
+        ..GeminiBridgeRequestKernelInput::new(GeminiBridgeRequestOperation::GenerationConfig)
+    })
 }
 
 #[cfg(feature = "mojo")]
@@ -172,18 +120,16 @@ pub(super) fn gemini_bridge_request_map(
         tool_config.map(|value| serde_json::to_vec(value).expect("Gemini tool config serializes"));
     let generation_config =
         serde_json::to_vec(generation_config).expect("Gemini generation config serializes");
-    let value = gemini_bridge_request_value(
-        GeminiBridgeRequestOperation::GenerateContentRequest,
-        Some(&original),
-        system_instruction.as_deref(),
-        Some(&contents),
-        tools.as_deref(),
-        tool_config.as_deref(),
-        Some(&generation_config),
-        None,
-        None,
-        0,
-    );
+    let value = gemini_bridge_request_value(GeminiBridgeRequestKernelInput {
+        operation: GeminiBridgeRequestOperation::GenerateContentRequest,
+        primary: Some(&original),
+        secondary: system_instruction.as_deref(),
+        tertiary: Some(&contents),
+        quaternary: tools.as_deref(),
+        quinary: tool_config.as_deref(),
+        senary: Some(&generation_config),
+        ..GeminiBridgeRequestKernelInput::new(GeminiBridgeRequestOperation::GenerateContentRequest)
+    });
     value
         .as_object()
         .cloned()
@@ -202,52 +148,36 @@ pub(super) fn gemini_bridge_request_body(
         .map(|value| serde_json::to_vec(value).expect("Gemini project serializes"))
         .unwrap_or_else(|| b"null".to_vec());
     let request = serde_json::to_vec(request).expect("Gemini request serializes");
-    gemini_bridge_request_value(
-        GeminiBridgeRequestOperation::GenerateContentBody,
-        Some(&model),
-        Some(&project),
-        Some(&request),
-        None,
-        None,
-        None,
-        None,
-        None,
-        i64::from(code_assist),
-    )
+    gemini_bridge_request_value(GeminiBridgeRequestKernelInput {
+        operation: GeminiBridgeRequestOperation::GenerateContentBody,
+        primary: Some(&model),
+        secondary: Some(&project),
+        tertiary: Some(&request),
+        kind: i64::from(code_assist),
+        ..GeminiBridgeRequestKernelInput::new(GeminiBridgeRequestOperation::GenerateContentBody)
+    })
 }
 
 #[cfg(feature = "mojo")]
 pub(super) fn gemini_bridge_request_native_project(body: &[u8], project_id: &str) -> Vec<u8> {
     let project = serde_json::to_vec(project_id).expect("Gemini project serializes");
-    gemini_bridge_request_bytes(
-        GeminiBridgeRequestOperation::NativeProject,
-        Some(body),
-        Some(&project),
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        0,
-    )
+    gemini_bridge_request_bytes(GeminiBridgeRequestKernelInput {
+        operation: GeminiBridgeRequestOperation::NativeProject,
+        primary: Some(body),
+        secondary: Some(&project),
+        ..GeminiBridgeRequestKernelInput::new(GeminiBridgeRequestOperation::NativeProject)
+    })
     .unwrap_or_else(|error| panic!("Mojo Gemini bridge request kernel failed: {error:?}"))
 }
 
 #[cfg(feature = "mojo")]
 pub(super) fn gemini_bridge_request_without_tool(body: &[u8], tool_name: &str) -> Option<Vec<u8>> {
-    let result = gemini_bridge_request_bytes(
-        GeminiBridgeRequestOperation::RequestBodyWithoutTool,
-        Some(body),
-        Some(tool_name.as_bytes()),
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        0,
-    )
+    let result = gemini_bridge_request_bytes(GeminiBridgeRequestKernelInput {
+        operation: GeminiBridgeRequestOperation::RequestBodyWithoutTool,
+        primary: Some(body),
+        secondary: Some(tool_name.as_bytes()),
+        ..GeminiBridgeRequestKernelInput::new(GeminiBridgeRequestOperation::RequestBodyWithoutTool)
+    })
     .ok()?;
     (!matches!(result.as_slice(), b"null")).then_some(result)
 }
