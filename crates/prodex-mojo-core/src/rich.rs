@@ -84,6 +84,13 @@ pub use openai_compat::{
 #[path = "rich/kiro.rs"]
 mod kiro;
 pub use kiro::{KiroKernelInput, KiroKernelOperation, kiro_kernel};
+#[path = "rich/smart_context_normalization.rs"]
+mod smart_context_normalization;
+pub use smart_context_normalization::{
+    SmartContextCapsuleInput, SmartContextCapsulePlan, SmartContextNormalizationMode,
+    normalize_smart_context_volatile, plan_smart_context_capsules, smart_context_budget_tier,
+    smart_context_memory_capsule_token_budget, smart_context_static_context_noise_line,
+};
 
 const RICH_STATUS_INVALID: i64 = 1;
 const RICH_STATUS_UTF8: i64 = 2;
