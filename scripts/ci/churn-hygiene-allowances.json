@@ -60,7 +60,8 @@
       "test(mojo): align cleanup accounting expectation",
       "fix(context): keep feature test oracles available",
       "fix(context): retain default test classification oracles",
-      "fix(ci): keep all-feature builds lint-clean"
+      "fix(ci): keep all-feature builds lint-clean",
+      "fix(provider): use typed Gemini bridge inputs"
     ],
     "caps": {
       "maxFiles": 198,
@@ -68,7 +69,7 @@
       "maxLines": 43000,
       "maxFileLines": 3225
     },
-    "reason": "Reviewed the exact frozen 0.420.0 migration tail dff2b7442b60ff9d2a1d735b8d6d52de4dd839bf..HEAD: the contiguous Mojo migration, release-waiver, optional-tool freshness, test-split, feature-oracle, lint-repair, and integration-history commits in this train. The measured final tail is 197 files, 164 behavior files, and 42,852 changed lines; the 3,225-line context_text Mojo module remains intentional migration ownership, not incidental churn. Exact required subjects and narrow caps cover this train only; global churn thresholds and release behavior remain unchanged."
+    "reason": "Reviewed the exact frozen 0.420.0 migration tail dff2b7442b60ff9d2a1d735b8d6d52de4dd839bf..HEAD: the contiguous Mojo migration, release-waiver, optional-tool freshness, test-split, feature-oracle, lint-repair, typed-bridge, and integration-history commits in this train. The measured final tail is 197 files, 164 behavior files, and 42,783 changed lines; the 3,225-line context_text Mojo module remains intentional migration ownership, not incidental churn. Exact required subjects and narrow caps cover this train only; global churn thresholds and release behavior remain unchanged."
   },
   {
     "id": "audited-prodex-0.420.0-integration-train",
