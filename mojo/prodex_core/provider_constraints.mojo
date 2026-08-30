@@ -1939,3 +1939,1481 @@ def prodex_gemini_request_content_kernel_v1(
         return GEMINI_REQUEST_CONTENT_STATUS_INVALID
     written[] = writer.written
     return 0
+
+
+# The bridge request adapter owns only deterministic JSON decisions that are
+# not part of the existing request-content kernel. JSON bytes stay borrowed
+# across this boundary; Rust retains serialization, policy callbacks, media,
+# credentials, and transport effects.
+comptime GEMINI_BRIDGE_REQUEST_ABI_VERSION: Int64 = 1
+comptime GEMINI_BRIDGE_REQUEST_STATUS_INVALID: Int64 = 1
+comptime GEMINI_BRIDGE_REQUEST_STATUS_CAPACITY: Int64 = 2
+comptime GEMINI_BRIDGE_REQUEST_STATUS_ABI_MISMATCH: Int64 = 3
+comptime GEMINI_BRIDGE_REQUEST_MAX_BYTES: Int64 = 4_194_304
+
+comptime GEMINI_BRIDGE_REQUEST_GENERATE_CONTENT_REQUEST: Int64 = 1
+comptime GEMINI_BRIDGE_REQUEST_GENERATE_CONTENT_BODY: Int64 = 2
+comptime GEMINI_BRIDGE_REQUEST_GENERATION_CONFIG: Int64 = 3
+comptime GEMINI_BRIDGE_REQUEST_NATIVE_PROJECT: Int64 = 4
+comptime GEMINI_BRIDGE_REQUEST_WITHOUT_TOOL: Int64 = 5
+comptime GEMINI_BRIDGE_REQUEST_SIMPLE: Int64 = 6
+comptime GEMINI_BRIDGE_REQUEST_VALIDATE_CANDIDATE_COUNT: Int64 = 7
+
+@fieldwise_init
+struct GeminiBridgeRequestInput(Copyable):
+    var operation: Int64
+    var primary: GeminiRequestContentStringView
+    var secondary: GeminiRequestContentStringView
+    var tertiary: GeminiRequestContentStringView
+    var quaternary: GeminiRequestContentStringView
+    var quinary: GeminiRequestContentStringView
+    var senary: GeminiRequestContentStringView
+    var septenary: GeminiRequestContentStringView
+    var octonary: GeminiRequestContentStringView
+    var primary_present: Int64
+    var secondary_present: Int64
+    var tertiary_present: Int64
+    var quaternary_present: Int64
+    var quinary_present: Int64
+    var senary_present: Int64
+    var septenary_present: Int64
+    var octonary_present: Int64
+    var kind: Int64
+
+
+def gemini_bridge_request_input_flag_valid(value: Int64) -> Bool:
+    return value == 0 or value == 1
+
+
+def gemini_bridge_request_input_valid(input: GeminiBridgeRequestInput) -> Bool:
+    if input.operation < GEMINI_BRIDGE_REQUEST_GENERATE_CONTENT_REQUEST or input.operation > GEMINI_BRIDGE_REQUEST_VALIDATE_CANDIDATE_COUNT:
+        return False
+    if not gemini_bridge_request_input_flag_valid(input.primary_present) or not gemini_bridge_request_input_flag_valid(input.secondary_present) or not gemini_bridge_request_input_flag_valid(input.tertiary_present) or not gemini_bridge_request_input_flag_valid(input.quaternary_present) or not gemini_bridge_request_input_flag_valid(input.quinary_present) or not gemini_bridge_request_input_flag_valid(input.senary_present) or not gemini_bridge_request_input_flag_valid(input.septenary_present) or not gemini_bridge_request_input_flag_valid(input.octonary_present):
+        return False
+    if not gemini_request_content_view_valid(input.primary) or not gemini_request_content_view_valid(input.secondary) or not gemini_request_content_view_valid(input.tertiary) or not gemini_request_content_view_valid(input.quaternary) or not gemini_request_content_view_valid(input.quinary) or not gemini_request_content_view_valid(input.senary) or not gemini_request_content_view_valid(input.septenary) or not gemini_request_content_view_valid(input.octonary):
+        return False
+    if input.primary_present == 0 and input.primary.len != 0 or input.secondary_present == 0 and input.secondary.len != 0 or input.tertiary_present == 0 and input.tertiary.len != 0 or input.quaternary_present == 0 and input.quaternary.len != 0 or input.quinary_present == 0 and input.quinary.len != 0 or input.senary_present == 0 and input.senary.len != 0 or input.septenary_present == 0 and input.septenary.len != 0 or input.octonary_present == 0 and input.octonary.len != 0:
+        return False
+    if input.operation == GEMINI_BRIDGE_REQUEST_GENERATE_CONTENT_REQUEST and (
+        input.tertiary_present == 0 or input.senary_present == 0
+    ):
+        return False
+    if input.operation == GEMINI_BRIDGE_REQUEST_GENERATE_CONTENT_BODY and (
+        input.primary_present == 0 or input.secondary_present == 0 or input.tertiary_present == 0 or input.kind < 0 or input.kind > 1
+    ):
+        return False
+    if input.operation == GEMINI_BRIDGE_REQUEST_GENERATION_CONFIG and (
+        input.primary_present == 0 or input.secondary_present == 0 or input.tertiary_present == 0 or input.kind < 0 or input.kind > 1
+    ):
+        return False
+    if input.operation == GEMINI_BRIDGE_REQUEST_NATIVE_PROJECT and (
+        input.primary_present == 0 or input.secondary_present == 0
+    ):
+        return False
+    if input.operation == GEMINI_BRIDGE_REQUEST_WITHOUT_TOOL and (
+        input.primary_present == 0 or input.secondary_present == 0
+    ):
+        return False
+    if input.operation == GEMINI_BRIDGE_REQUEST_SIMPLE and input.primary_present == 0:
+        return False
+    if input.operation == GEMINI_BRIDGE_REQUEST_VALIDATE_CANDIDATE_COUNT and input.primary_present == 0:
+        return False
+    return True
+
+
+def gemini_bridge_request_value_bounds(
+    view: GeminiRequestContentStringView,
+) -> InlineArray[Int64, 2]:
+    var result = InlineArray[Int64, 2](fill=-1)
+    if not gemini_request_content_view_valid(view) or view.len == 0:
+        return result^
+    var end = Int64(view.len)
+    var start = gemini_request_content_skip_ws(view, 0, end)
+    var value_end = gemini_request_content_value_end(view, start, end, 0)
+    if value_end < 0 or gemini_request_content_skip_ws(view, value_end, end) != end:
+        return result^
+    result[0] = start
+    result[1] = value_end
+    return result^
+
+
+def gemini_bridge_request_object_member(
+    view: GeminiRequestContentStringView,
+    object_start: Int64,
+    object_end: Int64,
+    key: StringSlice,
+) -> InlineArray[Int64, 2]:
+    return gemini_request_content_object_member(view, object_start, object_end, key)
+
+
+def gemini_bridge_request_is_object(
+    view: GeminiRequestContentStringView, start: Int64, end: Int64
+) -> Bool:
+    return start >= 0 and end > start and gemini_request_content_byte(view, start) == 123 and gemini_request_content_byte(view, end - 1) == 125
+
+
+def gemini_bridge_request_is_array(
+    view: GeminiRequestContentStringView, start: Int64, end: Int64
+) -> Bool:
+    return start >= 0 and end > start and gemini_request_content_byte(view, start) == 91 and gemini_request_content_byte(view, end - 1) == 93
+
+
+def gemini_bridge_request_literal_equals(
+    view: GeminiRequestContentStringView,
+    start: Int64,
+    end: Int64,
+    literal: StringSlice,
+) -> Bool:
+    if start < 0 or end < start or end - start != Int64(literal.byte_length()):
+        return False
+    var expected = literal.unsafe_ptr()
+    for offset in range(end - start):
+        if gemini_request_content_byte(view, start + offset) != expected[unsafe_offset=offset]:
+            return False
+    return True
+
+
+def gemini_bridge_request_is_null(
+    view: GeminiRequestContentStringView, start: Int64, end: Int64
+) -> Bool:
+    return gemini_bridge_request_literal_equals(view, start, end, StringSlice("null"))
+
+
+def gemini_bridge_request_put_field_prefix(
+    writer: Pointer[mut=True, GeminiRequestContentWriter, _],
+    first: Pointer[mut=True, Bool, _],
+    key: StringSlice,
+) -> Bool:
+    if not first[] and not gemini_request_content_put_byte(writer, 44):
+        return False
+    first[] = False
+    return gemini_request_content_put_literal(writer, key)
+
+
+def gemini_bridge_request_put_raw_field(
+    writer: Pointer[mut=True, GeminiRequestContentWriter, _],
+    first: Pointer[mut=True, Bool, _],
+    key: StringSlice,
+    value: GeminiRequestContentStringView,
+) -> Bool:
+    return gemini_bridge_request_put_field_prefix(writer, first, key) and gemini_request_content_put_range(writer, value, 0, Int64(value.len))
+
+
+def gemini_bridge_request_put_literal_field(
+    writer: Pointer[mut=True, GeminiRequestContentWriter, _],
+    first: Pointer[mut=True, Bool, _],
+    value: StringSlice,
+) -> Bool:
+    if not first[] and not gemini_request_content_put_byte(writer, 44):
+        return False
+    first[] = False
+    return gemini_request_content_put_literal(writer, value)
+
+
+def gemini_bridge_request_write_optional_original_fields(
+    original: GeminiRequestContentStringView,
+    original_bounds: InlineArray[Int64, 2],
+    writer: Pointer[mut=True, GeminiRequestContentWriter, _],
+    first: Pointer[mut=True, Bool, _],
+) -> Bool:
+    if not gemini_bridge_request_is_object(original, original_bounds[0], original_bounds[1]):
+        return True
+    var safety = gemini_bridge_request_object_member(
+        original, original_bounds[0], original_bounds[1], StringSlice("safety_settings")
+    )
+    if safety[0] < 0:
+        safety = gemini_bridge_request_object_member(
+            original, original_bounds[0], original_bounds[1], StringSlice("safetySettings")
+        )
+    if safety[0] >= 0:
+        var safety_view = GeminiRequestContentStringView(
+            original.ptr + UInt64(safety[0]), UInt64(safety[1] - safety[0])
+        )
+        if not gemini_bridge_request_put_raw_field(
+            writer, first, StringSlice("\"safetySettings\":"), safety_view
+        ):
+            return False
+    var cached = gemini_bridge_request_object_member(
+        original, original_bounds[0], original_bounds[1], StringSlice("cached_content")
+    )
+    if cached[0] < 0:
+        cached = gemini_bridge_request_object_member(
+            original, original_bounds[0], original_bounds[1], StringSlice("cachedContent")
+        )
+    if cached[0] >= 0 and not gemini_bridge_request_is_null(original, cached[0], cached[1]):
+        var cached_view = GeminiRequestContentStringView(
+            original.ptr + UInt64(cached[0]), UInt64(cached[1] - cached[0])
+        )
+        if not gemini_bridge_request_put_raw_field(
+            writer, first, StringSlice("\"cachedContent\":"), cached_view
+        ):
+            return False
+    var labels = gemini_bridge_request_object_member(
+        original, original_bounds[0], original_bounds[1], StringSlice("labels")
+    )
+    if labels[0] >= 0 and not gemini_bridge_request_is_null(original, labels[0], labels[1]):
+        var labels_view = GeminiRequestContentStringView(
+            original.ptr + UInt64(labels[0]), UInt64(labels[1] - labels[0])
+        )
+        if not gemini_bridge_request_put_raw_field(
+            writer, first, StringSlice("\"labels\":"), labels_view
+        ):
+            return False
+    return True
+
+
+def gemini_bridge_request_write_content_request(
+    input: GeminiBridgeRequestInput,
+    writer: Pointer[mut=True, GeminiRequestContentWriter, _],
+) -> Bool:
+    var original = input.primary.copy()
+    var original_bounds = gemini_bridge_request_value_bounds(original)
+    if not gemini_request_content_fragment_valid(original):
+        return False
+    if not gemini_request_content_fragment_valid(input.tertiary) or not gemini_request_content_fragment_valid(input.senary):
+        return False
+    var first = True
+    var first_ptr = Pointer(to=first)
+    if not gemini_request_content_put_byte(writer, 123):
+        return False
+    if input.secondary_present == 1 and not gemini_bridge_request_put_raw_field(
+        writer, first_ptr, StringSlice("\"systemInstruction\":"), input.secondary
+    ):
+        return False
+    if not gemini_bridge_request_put_raw_field(
+        writer, first_ptr, StringSlice("\"contents\":"), input.tertiary
+    ):
+        return False
+    if input.quaternary_present == 1 and not gemini_bridge_request_put_raw_field(
+        writer, first_ptr, StringSlice("\"tools\":"), input.quaternary
+    ):
+        return False
+    if input.quinary_present == 1 and not gemini_bridge_request_put_raw_field(
+        writer, first_ptr, StringSlice("\"toolConfig\":"), input.quinary
+    ):
+        return False
+    if not gemini_bridge_request_put_raw_field(
+        writer, first_ptr, StringSlice("\"generationConfig\":"), input.senary
+    ):
+        return False
+    if not gemini_bridge_request_write_optional_original_fields(
+        original, original_bounds, writer, first_ptr
+    ):
+        return False
+    return gemini_request_content_put_byte(writer, 125)
+
+
+def gemini_bridge_request_write_content_body(
+    input: GeminiBridgeRequestInput,
+    writer: Pointer[mut=True, GeminiRequestContentWriter, _],
+) -> Bool:
+    if not gemini_request_content_fragment_valid(input.primary) or not gemini_request_content_fragment_valid(input.secondary) or not gemini_request_content_fragment_valid(input.tertiary):
+        return False
+    if input.kind == 0:
+        return gemini_request_content_put_range(writer, input.tertiary, 0, Int64(input.tertiary.len))
+    return gemini_request_content_put_literal(writer, StringSlice("{\"model\":")) and gemini_request_content_put_range(writer, input.primary, 0, Int64(input.primary.len)) and gemini_request_content_put_literal(writer, StringSlice(",\"project\":")) and gemini_request_content_put_range(writer, input.secondary, 0, Int64(input.secondary.len)) and gemini_request_content_put_literal(writer, StringSlice(",\"request\":")) and gemini_request_content_put_range(writer, input.tertiary, 0, Int64(input.tertiary.len)) and gemini_request_content_put_byte(writer, 125)
+
+
+def gemini_bridge_request_source_bounds(
+    source: GeminiRequestContentStringView,
+    object_bounds: InlineArray[Int64, 2],
+    index: Int64,
+) -> InlineArray[Int64, 2]:
+    var result = InlineArray[Int64, 2](fill=-1)
+    if index < 0 or not gemini_bridge_request_is_object(
+        source, object_bounds[0], object_bounds[1]
+    ):
+        return result^
+    if index == 0:
+        return gemini_bridge_request_object_member(source, object_bounds[0], object_bounds[1], StringSlice("temperature"))
+    if index == 1:
+        return gemini_bridge_request_object_member(source, object_bounds[0], object_bounds[1], StringSlice("top_p"))
+    if index == 2:
+        return gemini_bridge_request_object_member(source, object_bounds[0], object_bounds[1], StringSlice("max_tokens"))
+    if index == 3:
+        return gemini_bridge_request_object_member(source, object_bounds[0], object_bounds[1], StringSlice("stop"))
+    if index == 4:
+        return gemini_bridge_request_object_member(source, object_bounds[0], object_bounds[1], StringSlice("stop_sequences"))
+    if index == 5:
+        return gemini_bridge_request_object_member(source, object_bounds[0], object_bounds[1], StringSlice("stopSequences"))
+    if index == 6:
+        return gemini_bridge_request_object_member(source, object_bounds[0], object_bounds[1], StringSlice("top_k"))
+    if index == 7:
+        return gemini_bridge_request_object_member(source, object_bounds[0], object_bounds[1], StringSlice("topK"))
+    if index == 8:
+        return gemini_bridge_request_object_member(source, object_bounds[0], object_bounds[1], StringSlice("seed"))
+    if index == 9:
+        return gemini_bridge_request_object_member(source, object_bounds[0], object_bounds[1], StringSlice("presence_penalty"))
+    if index == 10:
+        return gemini_bridge_request_object_member(source, object_bounds[0], object_bounds[1], StringSlice("presencePenalty"))
+    if index == 11:
+        return gemini_bridge_request_object_member(source, object_bounds[0], object_bounds[1], StringSlice("frequency_penalty"))
+    if index == 12:
+        return gemini_bridge_request_object_member(source, object_bounds[0], object_bounds[1], StringSlice("frequencyPenalty"))
+    if index == 13:
+        return gemini_bridge_request_object_member(source, object_bounds[0], object_bounds[1], StringSlice("response_mime_type"))
+    if index == 14:
+        return gemini_bridge_request_object_member(source, object_bounds[0], object_bounds[1], StringSlice("responseMimeType"))
+    if index == 15:
+        return gemini_bridge_request_object_member(source, object_bounds[0], object_bounds[1], StringSlice("response_schema"))
+    if index == 16:
+        return gemini_bridge_request_object_member(source, object_bounds[0], object_bounds[1], StringSlice("responseSchema"))
+    if index == 17:
+        return gemini_bridge_request_object_member(source, object_bounds[0], object_bounds[1], StringSlice("response_json_schema"))
+    if index == 18:
+        return gemini_bridge_request_object_member(source, object_bounds[0], object_bounds[1], StringSlice("responseJsonSchema"))
+    if index == 19:
+        return gemini_bridge_request_object_member(source, object_bounds[0], object_bounds[1], StringSlice("response_modalities"))
+    if index == 20:
+        return gemini_bridge_request_object_member(source, object_bounds[0], object_bounds[1], StringSlice("responseModalities"))
+    if index == 21:
+        return gemini_bridge_request_object_member(source, object_bounds[0], object_bounds[1], StringSlice("media_resolution"))
+    if index == 22:
+        return gemini_bridge_request_object_member(source, object_bounds[0], object_bounds[1], StringSlice("mediaResolution"))
+    if index == 23:
+        return gemini_bridge_request_object_member(source, object_bounds[0], object_bounds[1], StringSlice("audio_timestamp"))
+    if index == 24:
+        return gemini_bridge_request_object_member(source, object_bounds[0], object_bounds[1], StringSlice("audioTimestamp"))
+    if index == 25:
+        return gemini_bridge_request_object_member(source, object_bounds[0], object_bounds[1], StringSlice("speech_config"))
+    if index == 26:
+        return gemini_bridge_request_object_member(source, object_bounds[0], object_bounds[1], StringSlice("speechConfig"))
+    if index == 27:
+        return gemini_bridge_request_object_member(source, object_bounds[0], object_bounds[1], StringSlice("candidateCount"))
+    if index == 28:
+        return gemini_bridge_request_object_member(source, object_bounds[0], object_bounds[1], StringSlice("candidate_count"))
+    return result^
+
+
+def gemini_bridge_request_value_view(
+    source: GeminiRequestContentStringView, bounds: InlineArray[Int64, 2]
+) -> GeminiRequestContentStringView:
+    return GeminiRequestContentStringView(
+        source.ptr + UInt64(bounds[0]), UInt64(bounds[1] - bounds[0])
+    )
+
+
+def gemini_bridge_request_put_source_pair(
+    source: GeminiRequestContentStringView,
+    object_bounds: InlineArray[Int64, 2],
+    first_source: Int64,
+    second_source: Int64,
+    target: StringSlice,
+    omit_null: Bool,
+    writer: Pointer[mut=True, GeminiRequestContentWriter, _],
+    first: Pointer[mut=True, Bool, _],
+) -> Bool:
+    var bounds = gemini_bridge_request_source_bounds(source, object_bounds, first_source)
+    if bounds[0] < 0:
+        bounds = gemini_bridge_request_source_bounds(source, object_bounds, second_source)
+    if bounds[0] < 0 or omit_null and gemini_bridge_request_is_null(source, bounds[0], bounds[1]):
+        return True
+    return gemini_bridge_request_put_raw_field(
+        writer, first, target, gemini_bridge_request_value_view(source, bounds)
+    )
+
+
+def gemini_bridge_request_put_source_triple(
+    source: GeminiRequestContentStringView,
+    object_bounds: InlineArray[Int64, 2],
+    first_source: Int64,
+    second_source: Int64,
+    third_source: Int64,
+    target: StringSlice,
+    omit_null: Bool,
+    writer: Pointer[mut=True, GeminiRequestContentWriter, _],
+    first: Pointer[mut=True, Bool, _],
+) -> Bool:
+    var bounds = gemini_bridge_request_source_bounds(source, object_bounds, first_source)
+    if bounds[0] < 0:
+        bounds = gemini_bridge_request_source_bounds(source, object_bounds, second_source)
+    if bounds[0] < 0:
+        bounds = gemini_bridge_request_source_bounds(source, object_bounds, third_source)
+    if bounds[0] < 0 or omit_null and gemini_bridge_request_is_null(source, bounds[0], bounds[1]):
+        return True
+    return gemini_bridge_request_put_raw_field(
+        writer, first, target, gemini_bridge_request_value_view(source, bounds)
+    )
+
+
+def gemini_bridge_request_ascii_fold(value: UInt8) -> UInt8:
+    if value >= 65 and value <= 90:
+        return value + 32
+    return value
+
+
+def gemini_bridge_request_string_equals(
+    view: GeminiRequestContentStringView, literal: StringSlice
+) -> Bool:
+    return gemini_request_content_string_equals(
+        view, 0, Int64(view.len), literal, True
+    )
+
+
+def gemini_bridge_request_string_contains(
+    view: GeminiRequestContentStringView, literal: StringSlice
+) -> Bool:
+    if view.len < 2 or gemini_request_content_byte(view, 0) != 34 or gemini_request_content_byte(view, Int64(view.len) - 1) != 34:
+        return False
+    var expected = literal.unsafe_ptr()
+    var expected_length = Int64(literal.byte_length())
+    if expected_length == 0:
+        return True
+    var actual_length = Int64(view.len) - 2
+    if expected_length > actual_length:
+        return False
+    var start: Int64 = 0
+    while start <= actual_length - expected_length:
+        var matched = True
+        for offset in range(expected_length):
+            var left = gemini_bridge_request_ascii_fold(
+                gemini_request_content_byte(view, 1 + start + offset)
+            )
+            var right = gemini_bridge_request_ascii_fold(expected[unsafe_offset=offset])
+            if left != right:
+                matched = False
+                break
+        if matched:
+            return True
+        start += 1
+    return False
+
+
+def gemini_bridge_request_text_format_kind(
+    original: GeminiRequestContentStringView,
+    original_bounds: InlineArray[Int64, 2],
+) -> Int64:
+    if not gemini_bridge_request_is_object(original, original_bounds[0], original_bounds[1]):
+        return 0
+    var text = gemini_bridge_request_object_member(
+        original, original_bounds[0], original_bounds[1], StringSlice("text")
+    )
+    if not gemini_bridge_request_is_object(original, text[0], text[1]):
+        return 0
+    var format = gemini_bridge_request_object_member(
+        original, text[0], text[1], StringSlice("format")
+    )
+    if not gemini_bridge_request_is_object(original, format[0], format[1]):
+        return 0
+    var kind = gemini_bridge_request_object_member(
+        original, format[0], format[1], StringSlice("type")
+    )
+    if kind[0] < 0 or gemini_request_content_byte(original, kind[0]) != 34:
+        return 0
+    if gemini_request_content_string_equals(
+        original, kind[0], kind[1], StringSlice("json_object"), False
+    ):
+        return 1
+    if gemini_request_content_string_equals(
+        original, kind[0], kind[1], StringSlice("json_schema"), False
+    ):
+        return 2
+    return 0
+
+
+def gemini_bridge_request_write_text_format(
+    original: GeminiRequestContentStringView,
+    original_bounds: InlineArray[Int64, 2],
+    format_kind: Int64,
+    writer: Pointer[mut=True, GeminiRequestContentWriter, _],
+    first: Pointer[mut=True, Bool, _],
+) -> Bool:
+    if format_kind == 1:
+        return gemini_bridge_request_put_literal_field(
+            writer, first, StringSlice("\"responseMimeType\":\"application/json\"")
+        )
+    if format_kind != 2:
+        return True
+    if not gemini_bridge_request_put_literal_field(
+        writer, first, StringSlice("\"responseMimeType\":\"application/json\"")
+    ):
+        return False
+    var text = gemini_bridge_request_object_member(
+        original, original_bounds[0], original_bounds[1], StringSlice("text")
+    )
+    var format = gemini_bridge_request_object_member(
+        original, text[0], text[1], StringSlice("format")
+    )
+    var schema = gemini_bridge_request_object_member(
+        original, format[0], format[1], StringSlice("schema")
+    )
+    if schema[0] < 0:
+        schema = gemini_bridge_request_object_member(
+            original, format[0], format[1], StringSlice("json_schema")
+        )
+    if schema[0] >= 0:
+        return gemini_bridge_request_put_raw_field(
+            writer,
+            first,
+            StringSlice("\"responseJsonSchema\":"),
+            gemini_bridge_request_value_view(original, schema),
+        )
+    return True
+
+
+def gemini_bridge_request_reasoning_effort(
+    original: GeminiRequestContentStringView,
+    original_bounds: InlineArray[Int64, 2],
+) -> GeminiRequestContentStringView:
+    var empty = GeminiRequestContentStringView(0, 0)
+    if not gemini_bridge_request_is_object(original, original_bounds[0], original_bounds[1]):
+        return empty^
+    var reasoning = gemini_bridge_request_object_member(
+        original, original_bounds[0], original_bounds[1], StringSlice("reasoning")
+    )
+    if not gemini_bridge_request_is_object(original, reasoning[0], reasoning[1]):
+        return empty^
+    var effort = gemini_bridge_request_object_member(
+        original, reasoning[0], reasoning[1], StringSlice("effort")
+    )
+    if effort[0] < 0 or gemini_request_content_byte(original, effort[0]) != 34:
+        return empty^
+    return gemini_bridge_request_value_view(original, effort).copy()
+
+
+def gemini_bridge_request_write_thinking_config(
+    original: GeminiRequestContentStringView,
+    original_bounds: InlineArray[Int64, 2],
+    model: GeminiRequestContentStringView,
+    budget: GeminiRequestContentStringView,
+    budget_present: Int64,
+    writer: Pointer[mut=True, GeminiRequestContentWriter, _],
+    first: Pointer[mut=True, Bool, _],
+) -> Bool:
+    var effort = gemini_bridge_request_reasoning_effort(original, original_bounds)
+    var disabled = gemini_bridge_request_string_equals(effort, StringSlice("none")) or gemini_bridge_request_string_equals(effort, StringSlice("minimal"))
+    if disabled:
+        return gemini_bridge_request_put_literal_field(
+            writer, first, StringSlice("\"thinkingConfig\":{\"includeThoughts\":false,\"thinkingBudget\":0}")
+        )
+    var thinking_level = gemini_bridge_request_string_contains(model, StringSlice("gemini-3")) or gemini_bridge_request_string_contains(model, StringSlice("gemma-3")) or gemini_bridge_request_string_contains(model, StringSlice("gemma-4"))
+    if thinking_level:
+        var level = StringSlice("HIGH")
+        if gemini_bridge_request_string_equals(effort, StringSlice("low")):
+            level = StringSlice("LOW")
+        elif gemini_bridge_request_string_equals(effort, StringSlice("medium")):
+            level = StringSlice("MEDIUM")
+        return gemini_bridge_request_put_literal_field(
+            writer,
+            first,
+            StringSlice("\"thinkingConfig\":{\"includeThoughts\":true,\"thinkingLevel\":\""),
+        ) and gemini_request_content_put_literal(writer, level) and gemini_request_content_put_literal(writer, StringSlice("\"}"))
+    if budget_present == 1:
+        if not gemini_request_content_fragment_valid(budget):
+            return False
+        if not gemini_bridge_request_put_field_prefix(
+            writer,
+            first,
+            StringSlice("\"thinkingConfig\":{\"includeThoughts\":true,\"thinkingBudget\":"),
+        ):
+            return False
+        return gemini_request_content_put_range(writer, budget, 0, Int64(budget.len)) and gemini_request_content_put_byte(writer, 125)
+    var value = StringSlice("\"thinkingConfig\":{\"includeThoughts\":true,\"thinkingBudget\":8192}")
+    if gemini_bridge_request_string_equals(effort, StringSlice("low")):
+        value = StringSlice("\"thinkingConfig\":{\"includeThoughts\":true,\"thinkingBudget\":1024}")
+    elif gemini_bridge_request_string_equals(effort, StringSlice("xhigh")):
+        value = StringSlice("\"thinkingConfig\":{\"includeThoughts\":true,\"thinkingBudget\":24576}")
+    return gemini_bridge_request_put_literal_field(
+        writer, first, value,
+    )
+
+
+def gemini_bridge_request_write_generation_config(
+    input: GeminiBridgeRequestInput,
+    writer: Pointer[mut=True, GeminiRequestContentWriter, _],
+) -> Bool:
+    if not gemini_request_content_fragment_valid(input.primary) or not gemini_request_content_fragment_valid(input.secondary) or not gemini_request_content_fragment_valid(input.tertiary):
+        return False
+    var original = input.primary.copy()
+    var chat = input.secondary.copy()
+    var original_bounds = gemini_bridge_request_value_bounds(original)
+    var chat_bounds = gemini_bridge_request_value_bounds(chat)
+    var model = input.tertiary.copy()
+    if not gemini_request_content_fragment_valid(model) or gemini_request_content_byte(model, 0) != 34:
+        return False
+    var first = True
+    var first_ptr = Pointer(to=first)
+    if not gemini_request_content_put_byte(writer, 123):
+        return False
+    if gemini_bridge_request_is_object(chat, chat_bounds[0], chat_bounds[1]):
+        if not gemini_bridge_request_put_source_pair(
+            chat, chat_bounds, 0, -1, StringSlice("\"temperature\":"), False, writer, first_ptr
+        ) or not gemini_bridge_request_put_source_pair(
+            chat, chat_bounds, 1, -1, StringSlice("\"topP\":"), False, writer, first_ptr
+        ) or not gemini_bridge_request_put_source_pair(
+            chat, chat_bounds, 2, -1, StringSlice("\"maxOutputTokens\":"), False, writer, first_ptr
+        ):
+            return False
+    if not gemini_bridge_request_is_object(original, original_bounds[0], original_bounds[1]):
+        return gemini_request_content_put_byte(writer, 125)
+
+    var format_kind = gemini_bridge_request_text_format_kind(original, original_bounds)
+    if not gemini_bridge_request_put_source_pair(
+        original, original_bounds, 6, 7, StringSlice("\"topK\":"), True, writer, first_ptr
+    ) or not gemini_bridge_request_put_source_pair(
+        original, original_bounds, 8, -1, StringSlice("\"seed\":"), True, writer, first_ptr
+    ) or not gemini_bridge_request_put_source_pair(
+        original, original_bounds, 10, 9, StringSlice("\"presencePenalty\":"), True, writer, first_ptr
+    ) or not gemini_bridge_request_put_source_pair(
+        original, original_bounds, 12, 11, StringSlice("\"frequencyPenalty\":"), True, writer, first_ptr
+    ) or not gemini_bridge_request_put_source_pair(
+        original, original_bounds, 14, 13, StringSlice("\"responseMimeType\":"), True, writer, first_ptr
+    ) or not gemini_bridge_request_put_source_pair(
+        original, original_bounds, 16, 15, StringSlice("\"responseSchema\":"), True, writer, first_ptr
+    ) or not gemini_bridge_request_put_source_pair(
+        original, original_bounds, 18, 17, StringSlice("\"responseJsonSchema\":"), True, writer, first_ptr
+    ) or not gemini_bridge_request_put_source_pair(
+        original, original_bounds, 20, 19, StringSlice("\"responseModalities\":"), True, writer, first_ptr
+    ) or not gemini_bridge_request_put_source_pair(
+        original, original_bounds, 22, 21, StringSlice("\"mediaResolution\":"), True, writer, first_ptr
+    ) or not gemini_bridge_request_put_source_pair(
+        original, original_bounds, 24, 23, StringSlice("\"audioTimestamp\":"), True, writer, first_ptr
+    ) or not gemini_bridge_request_put_source_pair(
+        original, original_bounds, 26, 25, StringSlice("\"speechConfig\":"), True, writer, first_ptr
+    ) or not gemini_bridge_request_put_source_pair(
+        original, original_bounds, 27, 28, StringSlice("\"candidateCount\":"), True, writer, first_ptr
+    ):
+        return False
+    var stop = gemini_bridge_request_object_member(
+        original, original_bounds[0], original_bounds[1], StringSlice("stop")
+    )
+    if stop[0] < 0:
+        stop = gemini_bridge_request_object_member(
+            original, original_bounds[0], original_bounds[1], StringSlice("stop_sequences")
+        )
+    if stop[0] < 0:
+        stop = gemini_bridge_request_object_member(
+            original, original_bounds[0], original_bounds[1], StringSlice("stopSequences")
+        )
+    if stop[0] >= 0 and not gemini_bridge_request_is_null(original, stop[0], stop[1]) and not gemini_bridge_request_put_raw_field(
+        writer, first_ptr, StringSlice("\"stopSequences\":"), gemini_bridge_request_value_view(original, stop)
+    ):
+        return False
+    if not gemini_bridge_request_write_text_format(
+        original, original_bounds, format_kind, writer, first_ptr
+    ):
+        return False
+    if not gemini_bridge_request_write_thinking_config(
+        original,
+        original_bounds,
+        model,
+        input.quaternary,
+        input.quaternary_present,
+        writer,
+        first_ptr,
+    ):
+        return False
+    return gemini_request_content_put_byte(writer, 125)
+
+
+def gemini_bridge_request_write_native_metadata(
+    source: GeminiRequestContentStringView,
+    object_start: Int64,
+    object_end: Int64,
+    project: GeminiRequestContentStringView,
+    writer: Pointer[mut=True, GeminiRequestContentWriter, _],
+) -> Bool:
+    if not gemini_bridge_request_is_object(source, object_start, object_end):
+        return gemini_request_content_put_range(writer, source, object_start, object_end)
+    if not gemini_request_content_put_byte(writer, 123):
+        return False
+    var first = True
+    var index = gemini_request_content_skip_ws(source, object_start + 1, object_end - 1)
+    while index < object_end - 1 and gemini_request_content_byte(source, index) != 125:
+        var key_start = index
+        var key_end = gemini_request_content_string_end(source, key_start, object_end - 1)
+        if key_end < 0:
+            return False
+        index = gemini_request_content_skip_ws(source, key_end, object_end - 1)
+        if index >= object_end - 1 or gemini_request_content_byte(source, index) != 58:
+            return False
+        var value_start = gemini_request_content_skip_ws(source, index + 1, object_end - 1)
+        var value_end = gemini_request_content_value_end(source, value_start, object_end - 1, 0)
+        if value_end < 0:
+            return False
+        if not first and not gemini_request_content_put_byte(writer, 44):
+            return False
+        first = False
+        if not gemini_request_content_put_range(writer, source, key_start, key_end) or not gemini_request_content_put_byte(writer, 58):
+            return False
+        if gemini_request_content_raw_equals(source, key_start, key_end, StringSlice("duetProject")):
+            if not gemini_request_content_put_range(writer, project, 0, Int64(project.len)):
+                return False
+        else:
+            if not gemini_request_content_put_range(writer, source, value_start, value_end):
+                return False
+        index = gemini_request_content_skip_ws(source, value_end, object_end - 1)
+        if index < object_end - 1 and gemini_request_content_byte(source, index) == 44:
+            index = gemini_request_content_skip_ws(source, index + 1, object_end - 1)
+        elif index != object_end - 1:
+            return False
+    return gemini_request_content_put_byte(writer, 125)
+
+
+def gemini_bridge_request_write_native_value(
+    source: GeminiRequestContentStringView,
+    start: Int64,
+    end: Int64,
+    project: GeminiRequestContentStringView,
+    writer: Pointer[mut=True, GeminiRequestContentWriter, _],
+    depth: Int64,
+) -> Bool:
+    if depth > GEMINI_REQUEST_CONTENT_MAX_DEPTH or start < 0 or end <= start:
+        return False
+    if not gemini_bridge_request_is_object(source, start, end):
+        return gemini_request_content_put_range(writer, source, start, end)
+    if not gemini_request_content_put_byte(writer, 123):
+        return False
+    var first = True
+    var index = gemini_request_content_skip_ws(source, start + 1, end - 1)
+    while index < end - 1 and gemini_request_content_byte(source, index) != 125:
+        var key_start = index
+        var key_end = gemini_request_content_string_end(source, key_start, end - 1)
+        if key_end < 0:
+            return False
+        index = gemini_request_content_skip_ws(source, key_end, end - 1)
+        if index >= end - 1 or gemini_request_content_byte(source, index) != 58:
+            return False
+        var value_start = gemini_request_content_skip_ws(source, index + 1, end - 1)
+        var value_end = gemini_request_content_value_end(source, value_start, end - 1, depth + 1)
+        if value_end < 0:
+            return False
+        if not first and not gemini_request_content_put_byte(writer, 44):
+            return False
+        first = False
+        if not gemini_request_content_put_range(writer, source, key_start, key_end) or not gemini_request_content_put_byte(writer, 58):
+            return False
+        if gemini_request_content_raw_equals(source, key_start, key_end, StringSlice("project")) or gemini_request_content_raw_equals(source, key_start, key_end, StringSlice("projectId")) or gemini_request_content_raw_equals(source, key_start, key_end, StringSlice("cloudaicompanionProject")):
+            if not gemini_request_content_put_range(writer, project, 0, Int64(project.len)):
+                return False
+        elif gemini_request_content_raw_equals(source, key_start, key_end, StringSlice("metadata")) and gemini_bridge_request_is_object(source, value_start, value_end):
+            if not gemini_bridge_request_write_native_metadata(source, value_start, value_end, project, writer):
+                return False
+        elif gemini_request_content_raw_equals(source, key_start, key_end, StringSlice("request")) and gemini_bridge_request_is_object(source, value_start, value_end):
+            if not gemini_bridge_request_write_native_value(source, value_start, value_end, project, writer, depth + 1):
+                return False
+        elif not gemini_request_content_put_range(writer, source, value_start, value_end):
+            return False
+        index = gemini_request_content_skip_ws(source, value_end, end - 1)
+        if index < end - 1 and gemini_request_content_byte(source, index) == 44:
+            index = gemini_request_content_skip_ws(source, index + 1, end - 1)
+        elif index != end - 1:
+            return False
+    return gemini_request_content_put_byte(writer, 125)
+
+
+def gemini_bridge_request_write_native_project(
+    input: GeminiBridgeRequestInput,
+    writer: Pointer[mut=True, GeminiRequestContentWriter, _],
+) -> Bool:
+    if not gemini_request_content_fragment_valid(input.primary) or not gemini_request_content_fragment_valid(input.secondary):
+        return gemini_request_content_put_range(writer, input.primary, 0, Int64(input.primary.len))
+    var bounds = gemini_bridge_request_value_bounds(input.primary)
+    if not gemini_bridge_request_is_object(input.primary, bounds[0], bounds[1]):
+        return gemini_request_content_put_range(writer, input.primary, bounds[0], bounds[1])
+    return gemini_bridge_request_write_native_value(
+        input.primary, bounds[0], bounds[1], input.secondary, writer, 0
+    )
+
+
+def gemini_bridge_request_tool_key_matches(
+    source: GeminiRequestContentStringView,
+    key_start: Int64,
+    key_end: Int64,
+    name: GeminiRequestContentStringView,
+) -> Bool:
+    if key_end < key_start + 2 or gemini_request_content_byte(source, key_start) != 34 or gemini_request_content_byte(source, key_end - 1) != 34:
+        return False
+    if key_end - key_start - 2 != Int64(name.len):
+        return False
+    for offset in range(Int64(name.len)):
+        if gemini_request_content_byte(source, key_start + 1 + offset) != gemini_request_content_byte(name, offset):
+            return False
+    return True
+
+
+def gemini_bridge_request_scan_tool_array(
+    source: GeminiRequestContentStringView,
+    start: Int64,
+    end: Int64,
+    name: GeminiRequestContentStringView,
+    removed: Pointer[mut=True, Int64, _],
+    kept: Pointer[mut=True, Int64, _],
+) -> Bool:
+    if not gemini_bridge_request_is_array(source, start, end):
+        return False
+    removed[] = 0
+    kept[] = 0
+    var index = gemini_request_content_skip_ws(source, start + 1, end - 1)
+    while index < end - 1 and gemini_request_content_byte(source, index) != 93:
+        var value_end = gemini_request_content_value_end(source, index, end - 1, 0)
+        if value_end < 0:
+            return False
+        var drop = False
+        if gemini_bridge_request_is_object(source, index, value_end):
+            var object_end = value_end
+            var key_probe = gemini_request_content_skip_ws(source, index + 1, object_end - 1)
+            while key_probe < object_end - 1 and gemini_request_content_byte(source, key_probe) != 125:
+                var key_start = key_probe
+                var key_end = gemini_request_content_string_end(source, key_start, object_end - 1)
+                if key_end < 0:
+                    return False
+                key_probe = gemini_request_content_skip_ws(source, key_end, object_end - 1)
+                if key_probe >= object_end - 1 or gemini_request_content_byte(source, key_probe) != 58:
+                    return False
+                var member_start = gemini_request_content_skip_ws(source, key_probe + 1, object_end - 1)
+                var member_end = gemini_request_content_value_end(source, member_start, object_end - 1, 0)
+                if member_end < 0:
+                    return False
+                if gemini_bridge_request_tool_key_matches(source, key_start, key_end, name):
+                    drop = True
+                key_probe = gemini_request_content_skip_ws(source, member_end, object_end - 1)
+                if key_probe < object_end - 1 and gemini_request_content_byte(source, key_probe) == 44:
+                    key_probe = gemini_request_content_skip_ws(source, key_probe + 1, object_end - 1)
+                elif key_probe != object_end - 1:
+                    return False
+        if drop:
+            removed[] = removed[] + 1
+        else:
+            kept[] = kept[] + 1
+        index = gemini_request_content_skip_ws(source, value_end, end - 1)
+        if index < end - 1 and gemini_request_content_byte(source, index) == 44:
+            index = gemini_request_content_skip_ws(source, index + 1, end - 1)
+        elif index != end - 1:
+            return False
+    return True
+
+
+def gemini_bridge_request_write_filtered_tools(
+    source: GeminiRequestContentStringView,
+    start: Int64,
+    end: Int64,
+    name: GeminiRequestContentStringView,
+    writer: Pointer[mut=True, GeminiRequestContentWriter, _],
+) -> Bool:
+    if not gemini_request_content_put_byte(writer, 91):
+        return False
+    var first = True
+    var index = gemini_request_content_skip_ws(source, start + 1, end - 1)
+    while index < end - 1 and gemini_request_content_byte(source, index) != 93:
+        var value_end = gemini_request_content_value_end(source, index, end - 1, 0)
+        if value_end < 0:
+            return False
+        var drop = False
+        if gemini_bridge_request_is_object(source, index, value_end):
+            var probe = gemini_request_content_skip_ws(source, index + 1, value_end - 1)
+            while probe < value_end - 1 and gemini_request_content_byte(source, probe) != 125:
+                var key_start = probe
+                var key_end = gemini_request_content_string_end(source, key_start, value_end - 1)
+                if key_end < 0:
+                    return False
+                probe = gemini_request_content_skip_ws(source, key_end, value_end - 1)
+                if probe >= value_end - 1 or gemini_request_content_byte(source, probe) != 58:
+                    return False
+                var member_start = gemini_request_content_skip_ws(source, probe + 1, value_end - 1)
+                var member_end = gemini_request_content_value_end(source, member_start, value_end - 1, 0)
+                if member_end < 0:
+                    return False
+                if gemini_bridge_request_tool_key_matches(source, key_start, key_end, name):
+                    drop = True
+                probe = gemini_request_content_skip_ws(source, member_end, value_end - 1)
+                if probe < value_end - 1 and gemini_request_content_byte(source, probe) == 44:
+                    probe = gemini_request_content_skip_ws(source, probe + 1, value_end - 1)
+                elif probe != value_end - 1:
+                    return False
+        if not drop:
+            if not first and not gemini_request_content_put_byte(writer, 44):
+                return False
+            first = False
+            if not gemini_request_content_put_range(writer, source, index, value_end):
+                return False
+        index = gemini_request_content_skip_ws(source, value_end, end - 1)
+        if index < end - 1 and gemini_request_content_byte(source, index) == 44:
+            index = gemini_request_content_skip_ws(source, index + 1, end - 1)
+        elif index != end - 1:
+            return False
+    return gemini_request_content_put_byte(writer, 93)
+
+
+def gemini_bridge_request_write_filtered_object(
+    source: GeminiRequestContentStringView,
+    start: Int64,
+    end: Int64,
+    name: GeminiRequestContentStringView,
+    writer: Pointer[mut=True, GeminiRequestContentWriter, _],
+    changed: Pointer[mut=True, Int64, _],
+) -> Bool:
+    if not gemini_bridge_request_is_object(source, start, end):
+        return False
+    if not gemini_request_content_put_byte(writer, 123):
+        return False
+    var first = True
+    var index = gemini_request_content_skip_ws(source, start + 1, end - 1)
+    while index < end - 1 and gemini_request_content_byte(source, index) != 125:
+        var key_start = index
+        var key_end = gemini_request_content_string_end(source, key_start, end - 1)
+        if key_end < 0:
+            return False
+        index = gemini_request_content_skip_ws(source, key_end, end - 1)
+        if index >= end - 1 or gemini_request_content_byte(source, index) != 58:
+            return False
+        var value_start = gemini_request_content_skip_ws(source, index + 1, end - 1)
+        var value_end = gemini_request_content_value_end(source, value_start, end - 1, 0)
+        if value_end < 0:
+            return False
+        var is_tools = gemini_request_content_raw_equals(
+            source, key_start, key_end, StringSlice("tools")
+        )
+        var removed: Int64 = 0
+        var kept: Int64 = 0
+        var removed_ptr = Pointer(to=removed)
+        var kept_ptr = Pointer(to=kept)
+        if is_tools and not gemini_bridge_request_scan_tool_array(
+            source, value_start, value_end, name, removed_ptr, kept_ptr
+        ):
+            return False
+        if is_tools and removed > 0:
+            changed[] = 1
+            if kept == 0:
+                index = gemini_request_content_skip_ws(source, value_end, end - 1)
+                if index < end - 1 and gemini_request_content_byte(source, index) == 44:
+                    index = gemini_request_content_skip_ws(source, index + 1, end - 1)
+                elif index != end - 1:
+                    return False
+                continue
+            if not first and not gemini_request_content_put_byte(writer, 44):
+                return False
+            first = False
+            if not gemini_request_content_put_range(writer, source, key_start, key_end) or not gemini_request_content_put_byte(writer, 58) or not gemini_bridge_request_write_filtered_tools(source, value_start, value_end, name, writer):
+                return False
+        else:
+            if not first and not gemini_request_content_put_byte(writer, 44):
+                return False
+            first = False
+            if not gemini_request_content_put_range(writer, source, key_start, key_end) or not gemini_request_content_put_byte(writer, 58) or not gemini_request_content_put_range(writer, source, value_start, value_end):
+                return False
+        index = gemini_request_content_skip_ws(source, value_end, end - 1)
+        if index < end - 1 and gemini_request_content_byte(source, index) == 44:
+            index = gemini_request_content_skip_ws(source, index + 1, end - 1)
+        elif index != end - 1:
+            return False
+    return gemini_request_content_put_byte(writer, 125)
+
+
+def gemini_bridge_request_write_root_without_tool(
+    source: GeminiRequestContentStringView,
+    start: Int64,
+    end: Int64,
+    name: GeminiRequestContentStringView,
+    writer: Pointer[mut=True, GeminiRequestContentWriter, _],
+    changed: Pointer[mut=True, Int64, _],
+) -> Bool:
+    if not gemini_bridge_request_is_object(source, start, end):
+        return False
+    var request = gemini_bridge_request_object_member(
+        source, start, end, StringSlice("request")
+    )
+    if request[0] < 0:
+        return gemini_bridge_request_write_filtered_object(
+            source, start, end, name, writer, changed
+        )
+    if not gemini_bridge_request_is_object(source, request[0], request[1]):
+        return False
+    if not gemini_request_content_put_byte(writer, 123):
+        return False
+    var first = True
+    var index = gemini_request_content_skip_ws(source, start + 1, end - 1)
+    while index < end - 1 and gemini_request_content_byte(source, index) != 125:
+        var key_start = index
+        var key_end = gemini_request_content_string_end(source, key_start, end - 1)
+        if key_end < 0:
+            return False
+        index = gemini_request_content_skip_ws(source, key_end, end - 1)
+        if index >= end - 1 or gemini_request_content_byte(source, index) != 58:
+            return False
+        var value_start = gemini_request_content_skip_ws(source, index + 1, end - 1)
+        var value_end = gemini_request_content_value_end(source, value_start, end - 1, 0)
+        if value_end < 0:
+            return False
+        if not first and not gemini_request_content_put_byte(writer, 44):
+            return False
+        first = False
+        if not gemini_request_content_put_range(writer, source, key_start, key_end) or not gemini_request_content_put_byte(writer, 58):
+            return False
+        if gemini_request_content_raw_equals(source, key_start, key_end, StringSlice("request")):
+            if not gemini_bridge_request_write_filtered_object(
+                source, value_start, value_end, name, writer, changed
+            ):
+                return False
+        elif not gemini_request_content_put_range(writer, source, value_start, value_end):
+            return False
+        index = gemini_request_content_skip_ws(source, value_end, end - 1)
+        if index < end - 1 and gemini_request_content_byte(source, index) == 44:
+            index = gemini_request_content_skip_ws(source, index + 1, end - 1)
+        elif index != end - 1:
+            return False
+    return gemini_request_content_put_byte(writer, 125)
+
+
+def gemini_bridge_request_write_without_tool(
+    input: GeminiBridgeRequestInput,
+    writer: Pointer[mut=True, GeminiRequestContentWriter, _],
+) -> Bool:
+    if not gemini_request_content_fragment_valid(input.primary) or input.secondary.len == 0:
+        return False
+    var bounds = gemini_bridge_request_value_bounds(input.primary)
+    var changed: Int64 = 0
+    var changed_ptr = Pointer(to=changed)
+    if not gemini_bridge_request_write_root_without_tool(
+        input.primary, bounds[0], bounds[1], input.secondary, writer, changed_ptr
+    ):
+        return False
+    if changed == 0:
+        writer[].written = 0
+        return gemini_request_content_put_literal(writer, StringSlice("null"))
+    return True
+
+
+def gemini_bridge_request_raw_values_equal(
+    source: GeminiRequestContentStringView,
+    left: InlineArray[Int64, 2],
+    right: InlineArray[Int64, 2],
+) -> Bool:
+    if left[0] < 0 or right[0] < 0 or left[1] - left[0] != right[1] - right[0]:
+        return False
+    for offset in range(left[1] - left[0]):
+        if gemini_request_content_byte(source, left[0] + offset) != gemini_request_content_byte(source, right[0] + offset):
+            return False
+    return True
+
+
+def gemini_bridge_request_write_candidate_validation(
+    input: GeminiBridgeRequestInput,
+    writer: Pointer[mut=True, GeminiRequestContentWriter, _],
+) -> Bool:
+    if not gemini_request_content_fragment_valid(input.primary):
+        return False
+    var bounds = gemini_bridge_request_value_bounds(input.primary)
+    if not gemini_bridge_request_is_object(input.primary, bounds[0], bounds[1]):
+        return gemini_request_content_put_literal(writer, StringSlice("null"))
+    var snake = gemini_bridge_request_object_member(
+        input.primary, bounds[0], bounds[1], StringSlice("candidate_count")
+    )
+    var camel = gemini_bridge_request_object_member(
+        input.primary, bounds[0], bounds[1], StringSlice("candidateCount")
+    )
+    var snake_active = snake[0] >= 0 and not gemini_bridge_request_is_null(input.primary, snake[0], snake[1])
+    var camel_active = camel[0] >= 0 and not gemini_bridge_request_is_null(input.primary, camel[0], camel[1])
+    if snake_active and camel_active:
+        if not gemini_bridge_request_raw_values_equal(input.primary, snake, camel):
+            return gemini_request_content_put_literal(writer, StringSlice("\"invalid_candidate_count: Gemini request fields `candidate_count` and `candidateCount` conflict\""))
+    if snake_active and not gemini_bridge_request_literal_equals(input.primary, snake[0], snake[1], StringSlice("1")):
+        return gemini_request_content_put_literal(writer, StringSlice("\"invalid_candidate_count: Gemini request field `candidate_count` must be omitted, null, or 1\""))
+    if camel_active and not gemini_bridge_request_literal_equals(input.primary, camel[0], camel[1], StringSlice("1")):
+        return gemini_request_content_put_literal(writer, StringSlice("\"invalid_candidate_count: Gemini request field `candidateCount` must be omitted, null, or 1\""))
+    return gemini_request_content_put_literal(writer, StringSlice("null"))
+
+
+def gemini_bridge_request_string_starts_with(
+    view: GeminiRequestContentStringView, literal: StringSlice
+) -> Bool:
+    if view.len < UInt64(literal.byte_length()) + 2 or gemini_request_content_byte(view, 0) != 34:
+        return False
+    var expected = literal.unsafe_ptr()
+    for offset in range(Int64(literal.byte_length())):
+        if gemini_request_content_byte(view, 1 + offset) != expected[unsafe_offset=offset]:
+            return False
+    return True
+
+
+def gemini_bridge_request_builtin_tool(
+    source: GeminiRequestContentStringView, start: Int64, end: Int64
+) -> Bool:
+    if not gemini_bridge_request_is_object(source, start, end):
+        return False
+    var type = gemini_bridge_request_object_member(
+        source, start, end, StringSlice("type")
+    )
+    if type[0] >= 0 and gemini_request_content_byte(source, type[0]) == 34:
+        var value = gemini_bridge_request_value_view(source, type)
+        if gemini_bridge_request_string_equals(value, StringSlice("web_search")) or gemini_bridge_request_string_equals(value, StringSlice("web_search_preview")) or gemini_bridge_request_string_starts_with(value, StringSlice("web_search_preview_")) or gemini_bridge_request_string_equals(value, StringSlice("code_interpreter")) or gemini_bridge_request_string_equals(value, StringSlice("code_execution")) or gemini_bridge_request_string_equals(value, StringSlice("codeExecution")) or gemini_bridge_request_string_equals(value, StringSlice("computer")) or gemini_bridge_request_string_equals(value, StringSlice("computer_use")) or gemini_bridge_request_string_equals(value, StringSlice("computerUse")) or gemini_bridge_request_string_equals(value, StringSlice("computer_use_preview")) or gemini_bridge_request_string_starts_with(value, StringSlice("computer_")) or gemini_bridge_request_string_equals(value, StringSlice("web_fetch")) or gemini_bridge_request_string_equals(value, StringSlice("url_context")) or gemini_bridge_request_string_equals(value, StringSlice("urlContext")) or gemini_bridge_request_string_equals(value, StringSlice("web_fetch_preview")) or gemini_bridge_request_string_starts_with(value, StringSlice("web_fetch_preview_")):
+            return True
+    return gemini_bridge_request_object_member(source, start, end, StringSlice("computerUse"))[0] >= 0 or gemini_bridge_request_object_member(source, start, end, StringSlice("codeExecution"))[0] >= 0 or gemini_bridge_request_object_member(source, start, end, StringSlice("urlContext"))[0] >= 0
+
+
+def gemini_bridge_request_builtin_tool_choice(
+    source: GeminiRequestContentStringView, start: Int64, end: Int64
+) -> Bool:
+    if gemini_bridge_request_is_null(source, start, end) or gemini_request_content_byte(source, start) != 34:
+        return True
+    return gemini_request_content_string_equals(source, start, end, StringSlice("auto"), False) or gemini_request_content_string_equals(source, start, end, StringSlice("none"), False)
+
+
+def gemini_bridge_request_write_decoded_byte(
+    output: Pointer[mut=True, UInt8, _],
+    position: Pointer[mut=True, Int64, _],
+    capacity: Int64,
+    value: UInt8,
+) -> Bool:
+    if position[] < 0 or position[] >= capacity:
+        return False
+    output[unsafe_offset=position[]] = value
+    position[] += 1
+    return True
+
+
+def gemini_bridge_request_write_codepoint(
+    output: Pointer[mut=True, UInt8, _],
+    position: Pointer[mut=True, Int64, _],
+    capacity: Int64,
+    codepoint: Int64,
+) -> Bool:
+    if codepoint < 0 or codepoint > 1_114_111 or codepoint >= 55_296 and codepoint <= 57_343:
+        return False
+    if codepoint <= 127:
+        return gemini_bridge_request_write_decoded_byte(output, position, capacity, UInt8(codepoint))
+    if codepoint <= 2_047:
+        return gemini_bridge_request_write_decoded_byte(output, position, capacity, UInt8(192 | (codepoint >> 6))) and gemini_bridge_request_write_decoded_byte(output, position, capacity, UInt8(128 | (codepoint & 63)))
+    if codepoint <= 65_535:
+        return gemini_bridge_request_write_decoded_byte(output, position, capacity, UInt8(224 | (codepoint >> 12))) and gemini_bridge_request_write_decoded_byte(output, position, capacity, UInt8(128 | ((codepoint >> 6) & 63))) and gemini_bridge_request_write_decoded_byte(output, position, capacity, UInt8(128 | (codepoint & 63)))
+    return gemini_bridge_request_write_decoded_byte(output, position, capacity, UInt8(240 | (codepoint >> 18))) and gemini_bridge_request_write_decoded_byte(output, position, capacity, UInt8(128 | ((codepoint >> 12) & 63))) and gemini_bridge_request_write_decoded_byte(output, position, capacity, UInt8(128 | ((codepoint >> 6) & 63))) and gemini_bridge_request_write_decoded_byte(output, position, capacity, UInt8(128 | (codepoint & 63)))
+
+
+def gemini_bridge_request_decode_json_string(
+    source: GeminiRequestContentStringView,
+    start: Int64,
+    end: Int64,
+    output: Pointer[mut=True, UInt8, _],
+    capacity: Int64,
+) -> Int64:
+    if start < 0 or end <= start + 1 or gemini_request_content_byte(source, start) != 34 or gemini_request_content_byte(source, end - 1) != 34:
+        return -1
+    var position: Int64 = 0
+    var index = start + 1
+    while index < end - 1:
+        var value = gemini_request_content_byte(source, index)
+        if value == 92:
+            if index + 1 >= end - 1:
+                return -1
+            var escaped = gemini_request_content_byte(source, index + 1)
+            if escaped == 34 or escaped == 92 or escaped == 47:
+                if not gemini_bridge_request_write_decoded_byte(output, Pointer(to=position), capacity, escaped):
+                    return -1
+                index += 2
+            elif escaped == 98:
+                if not gemini_bridge_request_write_decoded_byte(output, Pointer(to=position), capacity, 8):
+                    return -1
+                index += 2
+            elif escaped == 102:
+                if not gemini_bridge_request_write_decoded_byte(output, Pointer(to=position), capacity, 12):
+                    return -1
+                index += 2
+            elif escaped == 110:
+                if not gemini_bridge_request_write_decoded_byte(output, Pointer(to=position), capacity, 10):
+                    return -1
+                index += 2
+            elif escaped == 114:
+                if not gemini_bridge_request_write_decoded_byte(output, Pointer(to=position), capacity, 13):
+                    return -1
+                index += 2
+            elif escaped == 116:
+                if not gemini_bridge_request_write_decoded_byte(output, Pointer(to=position), capacity, 9):
+                    return -1
+                index += 2
+            elif escaped == 117:
+                if index + 5 >= end:
+                    return -1
+                var codepoint: Int64 = 0
+                for offset in range(4):
+                    var digit = gemini_request_content_hex(
+                        gemini_request_content_byte(source, index + 2 + Int64(offset))
+                    )
+                    if digit < 0:
+                        return -1
+                    codepoint = (codepoint << 4) | digit
+                index += 6
+                if codepoint >= 55_296 and codepoint <= 56_319:
+                    if index + 5 >= end or gemini_request_content_byte(source, index) != 92 or gemini_request_content_byte(source, index + 1) != 117:
+                        return -1
+                    var low: Int64 = 0
+                    for offset in range(4):
+                        var digit = gemini_request_content_hex(
+                            gemini_request_content_byte(source, index + 2 + Int64(offset))
+                        )
+                        if digit < 0:
+                            return -1
+                        low = (low << 4) | digit
+                    if low < 56_320 or low > 57_343:
+                        return -1
+                    codepoint = 65_536 + ((codepoint - 55_296) << 10) + low - 56_320
+                    index += 6
+                elif codepoint >= 56_320 and codepoint <= 57_343:
+                    return -1
+                if not gemini_bridge_request_write_codepoint(output, Pointer(to=position), capacity, codepoint):
+                    return -1
+            else:
+                return -1
+        else:
+            if value < 32 or not gemini_bridge_request_write_decoded_byte(output, Pointer(to=position), capacity, value):
+                return -1
+            index += 1
+    return position
+
+
+def gemini_bridge_request_simple_content_item(
+    source: GeminiRequestContentStringView, start: Int64, end: Int64
+) -> Bool:
+    if not gemini_bridge_request_is_object(source, start, end):
+        return False
+    var text = gemini_bridge_request_object_member(source, start, end, StringSlice("text"))
+    var content = gemini_bridge_request_object_member(source, start, end, StringSlice("content"))
+    var text_string = text[0] >= 0 and gemini_request_content_byte(source, text[0]) == 34
+    var content_string = content[0] >= 0 and gemini_request_content_byte(source, content[0]) == 34
+    if not text_string and not content_string:
+        return False
+    var type = gemini_bridge_request_object_member(source, start, end, StringSlice("type"))
+    if type[0] >= 0 and not (
+        gemini_request_content_string_equals(source, type[0], type[1], StringSlice("input_text"), False) or gemini_request_content_string_equals(source, type[0], type[1], StringSlice("output_text"), False) or gemini_request_content_string_equals(source, type[0], type[1], StringSlice("text"), False)
+    ):
+        return False
+    return True
+
+
+def gemini_bridge_request_simple_tool_call(
+    source: GeminiRequestContentStringView,
+    start: Int64,
+    end: Int64,
+    scratch_address: UInt64,
+    scratch: Pointer[mut=True, UInt8, _],
+    scratch_capacity: Int64,
+) -> Bool:
+    if not gemini_bridge_request_is_object(source, start, end):
+        return False
+    var id = gemini_bridge_request_object_member(source, start, end, StringSlice("id"))
+    if id[0] >= 0 and gemini_request_content_byte(source, id[0]) != 34:
+        return False
+    var function = gemini_bridge_request_object_member(source, start, end, StringSlice("function"))
+    if not gemini_bridge_request_is_object(source, function[0], function[1]):
+        return False
+    var name = gemini_bridge_request_object_member(source, function[0], function[1], StringSlice("name"))
+    var arguments = gemini_bridge_request_object_member(source, function[0], function[1], StringSlice("arguments"))
+    if name[0] < 0 or gemini_request_content_byte(source, name[0]) != 34 or arguments[0] < 0 or gemini_request_content_byte(source, arguments[0]) != 34:
+        return False
+    var decoded = gemini_bridge_request_decode_json_string(
+        source, arguments[0], arguments[1], scratch, scratch_capacity
+    )
+    if decoded < 0:
+        return False
+    return gemini_request_content_fragment_valid(
+        GeminiRequestContentStringView(scratch_address, UInt64(decoded))
+    )
+
+
+def gemini_bridge_request_simple_tool_calls(
+    source: GeminiRequestContentStringView,
+    start: Int64,
+    end: Int64,
+    scratch_address: UInt64,
+    scratch: Pointer[mut=True, UInt8, _],
+    scratch_capacity: Int64,
+) -> Bool:
+    if not gemini_bridge_request_is_array(source, start, end):
+        return False
+    var index = gemini_request_content_skip_ws(source, start + 1, end - 1)
+    while index < end - 1 and gemini_request_content_byte(source, index) != 93:
+        var value_end = gemini_request_content_value_end(source, index, end - 1, 0)
+        if value_end < 0 or not gemini_bridge_request_simple_tool_call(
+            source, index, value_end, scratch_address, scratch, scratch_capacity
+        ):
+            return False
+        index = gemini_request_content_skip_ws(source, value_end, end - 1)
+        if index < end - 1 and gemini_request_content_byte(source, index) == 44:
+            index = gemini_request_content_skip_ws(source, index + 1, end - 1)
+        elif index != end - 1:
+            return False
+    return True
+
+
+def gemini_bridge_request_simple_role(
+    source: GeminiRequestContentStringView, start: Int64, end: Int64
+) -> Int64:
+    var role = gemini_bridge_request_object_member(source, start, end, StringSlice("role"))
+    if role[0] < 0 or gemini_request_content_byte(source, role[0]) != 34:
+        return 1
+    if gemini_request_content_string_equals(source, role[0], role[1], StringSlice("system"), False):
+        return 0
+    if gemini_request_content_string_equals(source, role[0], role[1], StringSlice("user"), False):
+        return 1
+    if gemini_request_content_string_equals(source, role[0], role[1], StringSlice("assistant"), False):
+        return 2
+    if gemini_request_content_string_equals(source, role[0], role[1], StringSlice("tool"), False):
+        return 3
+    return -1
+
+
+def gemini_bridge_request_simple_input_item(
+    source: GeminiRequestContentStringView,
+    start: Int64,
+    end: Int64,
+    scratch_address: UInt64,
+    scratch: Pointer[mut=True, UInt8, _],
+    scratch_capacity: Int64,
+) -> Bool:
+    if not gemini_bridge_request_is_object(source, start, end):
+        return False
+    var type = gemini_bridge_request_object_member(source, start, end, StringSlice("type"))
+    if type[0] >= 0 and not gemini_request_content_string_equals(source, type[0], type[1], StringSlice("message"), False):
+        return False
+    var role = gemini_bridge_request_simple_role(source, start, end)
+    if role < 0:
+        return False
+    var content = gemini_bridge_request_object_member(source, start, end, StringSlice("content"))
+    if content[0] >= 0:
+        if gemini_request_content_byte(source, content[0]) != 34 and gemini_bridge_request_is_array(source, content[0], content[1]):
+            var index = gemini_request_content_skip_ws(source, content[0] + 1, content[1] - 1)
+            while index < content[1] - 1 and gemini_request_content_byte(source, index) != 93:
+                var value_end = gemini_request_content_value_end(source, index, content[1] - 1, 0)
+                if value_end < 0 or not gemini_bridge_request_simple_content_item(source, index, value_end):
+                    return False
+                index = gemini_request_content_skip_ws(source, value_end, content[1] - 1)
+                if index < content[1] - 1 and gemini_request_content_byte(source, index) == 44:
+                    index = gemini_request_content_skip_ws(source, index + 1, content[1] - 1)
+                elif index != content[1] - 1:
+                    return False
+        elif gemini_request_content_byte(source, content[0]) != 34:
+            return False
+    if gemini_bridge_request_object_member(source, start, end, StringSlice("gemini_native_parts"))[0] >= 0:
+        return False
+    var tool_calls = gemini_bridge_request_object_member(source, start, end, StringSlice("tool_calls"))
+    if role == 2:
+        if tool_calls[0] >= 0 and not gemini_bridge_request_simple_tool_calls(
+            source, tool_calls[0], tool_calls[1], scratch_address, scratch, scratch_capacity
+        ):
+            return False
+        return True
+    if role == 3:
+        var tool_call_id = gemini_bridge_request_object_member(source, start, end, StringSlice("tool_call_id"))
+        var name = gemini_bridge_request_object_member(source, start, end, StringSlice("name"))
+        return (tool_call_id[0] < 0 or gemini_request_content_byte(source, tool_call_id[0]) == 34) and (name[0] < 0 or gemini_request_content_byte(source, name[0]) == 34)
+    return tool_calls[0] < 0
+
+
+def gemini_bridge_request_simple_input_items(
+    source: GeminiRequestContentStringView,
+    start: Int64,
+    end: Int64,
+    scratch_address: UInt64,
+    scratch: Pointer[mut=True, UInt8, _],
+    scratch_capacity: Int64,
+) -> Bool:
+    if not gemini_bridge_request_is_array(source, start, end):
+        return False
+    var index = gemini_request_content_skip_ws(source, start + 1, end - 1)
+    while index < end - 1 and gemini_request_content_byte(source, index) != 93:
+        var value_end = gemini_request_content_value_end(source, index, end - 1, 0)
+        if value_end < 0 or not gemini_bridge_request_simple_input_item(
+            source, index, value_end, scratch_address, scratch, scratch_capacity
+        ):
+            return False
+        index = gemini_request_content_skip_ws(source, value_end, end - 1)
+        if index < end - 1 and gemini_request_content_byte(source, index) == 44:
+            index = gemini_request_content_skip_ws(source, index + 1, end - 1)
+        elif index != end - 1:
+            return False
+    return True
+
+
+def gemini_bridge_request_simple(
+    input: GeminiBridgeRequestInput,
+    writer: Pointer[mut=True, GeminiRequestContentWriter, _],
+    scratch_address: UInt64,
+) -> Bool:
+    if not gemini_request_content_fragment_valid(input.primary):
+        return False
+    var bounds = gemini_bridge_request_value_bounds(input.primary)
+    if not gemini_bridge_request_is_object(input.primary, bounds[0], bounds[1]):
+        return False
+    var tools = gemini_bridge_request_object_member(input.primary, bounds[0], bounds[1], StringSlice("tools"))
+    if tools[0] >= 0:
+        if not gemini_bridge_request_is_array(input.primary, tools[0], tools[1]):
+            return False
+        var index = gemini_request_content_skip_ws(input.primary, tools[0] + 1, tools[1] - 1)
+        while index < tools[1] - 1 and gemini_request_content_byte(input.primary, index) != 93:
+            var value_end = gemini_request_content_value_end(input.primary, index, tools[1] - 1, 0)
+            if value_end < 0 or not gemini_bridge_request_builtin_tool(input.primary, index, value_end):
+                return False
+            index = gemini_request_content_skip_ws(input.primary, value_end, tools[1] - 1)
+            if index < tools[1] - 1 and gemini_request_content_byte(input.primary, index) == 44:
+                index = gemini_request_content_skip_ws(input.primary, index + 1, tools[1] - 1)
+            elif index != tools[1] - 1:
+                return False
+        var choice = gemini_bridge_request_object_member(input.primary, bounds[0], bounds[1], StringSlice("tool_choice"))
+        if choice[0] >= 0 and not gemini_bridge_request_builtin_tool_choice(input.primary, choice[0], choice[1]):
+            return False
+    var request_input = gemini_bridge_request_object_member(input.primary, bounds[0], bounds[1], StringSlice("input"))
+    if request_input[0] < 0:
+        return False
+    if gemini_request_content_byte(input.primary, request_input[0]) == 34:
+        return True
+    return gemini_bridge_request_simple_input_items(
+        input.primary,
+        request_input[0],
+        request_input[1],
+        scratch_address,
+        writer[].output,
+        writer[].capacity,
+    )
+
+
+@export("prodex_gemini_bridge_request_kernel_v1")
+def prodex_gemini_bridge_request_kernel_v1(
+    abi_version: Int64,
+    input_address: UInt64,
+    output_address: UInt64,
+    output_capacity: Int64,
+    written_address: UInt64,
+) abi("C") -> Int64:
+    if abi_version != GEMINI_BRIDGE_REQUEST_ABI_VERSION:
+        return GEMINI_BRIDGE_REQUEST_STATUS_ABI_MISMATCH
+    if input_address == 0 or output_address == 0 or written_address == 0 or output_capacity <= 0:
+        return GEMINI_BRIDGE_REQUEST_STATUS_INVALID
+    var input = Pointer[
+        mut=False, GeminiBridgeRequestInput, ImmUntrackedOrigin
+    ](unsafe_from_address=Int(input_address))[].copy()
+    if not gemini_bridge_request_input_valid(input):
+        return GEMINI_BRIDGE_REQUEST_STATUS_INVALID
+    var output = Pointer[mut=True, UInt8, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    var written = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(written_address)
+    )
+    var writer = GeminiRequestContentWriter(output, output_capacity, 0)
+    var writer_ptr = Pointer(to=writer)
+    var ok = False
+    if input.operation == GEMINI_BRIDGE_REQUEST_GENERATE_CONTENT_REQUEST:
+        ok = gemini_bridge_request_write_content_request(input, writer_ptr)
+    elif input.operation == GEMINI_BRIDGE_REQUEST_GENERATE_CONTENT_BODY:
+        ok = gemini_bridge_request_write_content_body(input, writer_ptr)
+    elif input.operation == GEMINI_BRIDGE_REQUEST_GENERATION_CONFIG:
+        ok = gemini_bridge_request_write_generation_config(input, writer_ptr)
+    elif input.operation == GEMINI_BRIDGE_REQUEST_NATIVE_PROJECT:
+        ok = gemini_bridge_request_write_native_project(input, writer_ptr)
+    elif input.operation == GEMINI_BRIDGE_REQUEST_WITHOUT_TOOL:
+        ok = gemini_bridge_request_write_without_tool(input, writer_ptr)
+    elif input.operation == GEMINI_BRIDGE_REQUEST_SIMPLE:
+        var result = gemini_bridge_request_simple(input, writer_ptr, output_address)
+        writer.written = 0
+        if result:
+            ok = gemini_request_content_put_literal(writer_ptr, StringSlice("true"))
+        else:
+            ok = gemini_request_content_put_literal(writer_ptr, StringSlice("false"))
+    elif input.operation == GEMINI_BRIDGE_REQUEST_VALIDATE_CANDIDATE_COUNT:
+        ok = gemini_bridge_request_write_candidate_validation(input, writer_ptr)
+    if not ok:
+        written[] = writer.written
+        if writer.written >= output_capacity:
+            return GEMINI_BRIDGE_REQUEST_STATUS_CAPACITY
+        return GEMINI_BRIDGE_REQUEST_STATUS_INVALID
+    written[] = writer.written
+    return 0

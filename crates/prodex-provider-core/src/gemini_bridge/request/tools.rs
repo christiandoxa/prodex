@@ -2,18 +2,70 @@
 
 use crate::translators::{
     gemini_builtin_tools_from_request, gemini_function_declaration_from_openai_tool,
+    gemini_validate_openai_tools,
+};
+#[cfg(not(feature = "mojo"))]
+use crate::translators::{
     gemini_request_body_without_tool, gemini_sanitize_function_schema,
-    gemini_tool_config_from_request, gemini_validate_openai_tools,
+    gemini_tool_config_from_request,
 };
 
 use crate::gemini_bridge::gemini_provider_core_apply_gemini3_tool_declaration_overrides;
 
+#[cfg(feature = "mojo")]
+pub fn gemini_provider_core_sanitize_function_schema(
+    schema: &serde_json::Value,
+) -> serde_json::Value {
+    let schema = serde_json::to_vec(schema).expect("Gemini function schema serializes");
+    super::request_contents::gemini_request_content_value(
+        prodex_mojo_core::provider_constraints::GeminiRequestContentOperation::SanitizeFunctionSchema,
+        Some(&schema),
+        None,
+        None,
+        None,
+        0,
+    )
+}
+
+#[cfg(not(feature = "mojo"))]
 pub fn gemini_provider_core_sanitize_function_schema(
     schema: &serde_json::Value,
 ) -> serde_json::Value {
     gemini_sanitize_function_schema(schema)
 }
 
+#[cfg(feature = "mojo")]
+pub fn gemini_provider_core_tool_config_from_request(
+    value: &serde_json::Value,
+) -> Option<serde_json::Value> {
+    let tool_choice = value.get("tool_choice")?;
+    let (mode, name) = if tool_choice.as_str() == Some("auto") {
+        return None;
+    } else if tool_choice.as_str() == Some("none") {
+        ("NONE", None)
+    } else if tool_choice.as_str() == Some("required") {
+        ("ANY", None)
+    } else {
+        let name = tool_choice
+            .get("function")
+            .and_then(|function| function.get("name"))
+            .and_then(serde_json::Value::as_str)
+            .or_else(|| tool_choice.get("name").and_then(serde_json::Value::as_str))?;
+        ("ANY", Some(name))
+    };
+    let mode = serde_json::to_vec(mode).expect("Gemini tool mode serializes");
+    let name = name.map(|name| serde_json::to_vec(name).expect("Gemini tool name serializes"));
+    Some(super::request_contents::gemini_request_content_value(
+        prodex_mojo_core::provider_constraints::GeminiRequestContentOperation::ToolConfig,
+        Some(&mode),
+        name.as_deref(),
+        None,
+        None,
+        0,
+    ))
+}
+
+#[cfg(not(feature = "mojo"))]
 pub fn gemini_provider_core_tool_config_from_request(
     value: &serde_json::Value,
 ) -> Option<serde_json::Value> {
@@ -125,6 +177,15 @@ pub fn gemini_provider_core_validate_request_tools(
     }
 }
 
+#[cfg(feature = "mojo")]
+pub fn gemini_provider_core_request_body_without_tool(
+    body: &[u8],
+    tool_name: &str,
+) -> Option<Vec<u8>> {
+    super::request_contents::gemini_bridge_request_without_tool(body, tool_name)
+}
+
+#[cfg(not(feature = "mojo"))]
 pub fn gemini_provider_core_request_body_without_tool(
     body: &[u8],
     tool_name: &str,
@@ -140,6 +201,7 @@ pub fn gemini_provider_core_unsupported_tool_fallback_body(
         .into_iter()
         .filter(|tool_name| crate::provider_error_rejects_request_member(error_body, tool_name))
         .find_map(|tool_name| {
-            gemini_request_body_without_tool(body, tool_name).map(|body| (tool_name, body))
+            gemini_provider_core_request_body_without_tool(body, tool_name)
+                .map(|body| (tool_name, body))
         })
 }

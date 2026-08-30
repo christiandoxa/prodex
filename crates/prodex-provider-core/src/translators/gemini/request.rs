@@ -18,16 +18,17 @@ mod tool_signatures;
 mod tools;
 
 pub(super) use self::continuation::gemini_continuation_metadata;
+#[cfg(not(feature = "mojo"))]
+pub(crate) use self::generation_config::gemini_generation_config_from_request;
 pub use self::generation_config::gemini_provider_core_model_uses_thinking_level;
+pub(crate) use self::generation_config::gemini_validate_candidate_count;
 pub(super) use self::generation_config::{
     gemini_apply_text_format, gemini_insert_basic_generation_config,
     gemini_insert_extended_generation_config, gemini_thinking_config_from_request,
 };
-pub(crate) use self::generation_config::{
-    gemini_generation_config_from_request, gemini_validate_candidate_count,
-};
 pub(super) use self::optional_fields::gemini_apply_optional_request_fields;
 pub(super) use self::response_format::gemini_apply_response_format;
+#[cfg(not(feature = "mojo"))]
 pub(crate) use self::schema::sanitize_function_schema;
 pub(crate) use self::tool_signatures::gemini_preserve_tool_call_signatures;
 pub(super) use self::tools::gemini_tool_from_openai_tool;
@@ -213,6 +214,7 @@ fn gemini_optional_field_mask(source: &Map<String, Value>) -> u64 {
     mask
 }
 
+#[cfg(not(feature = "mojo"))]
 pub(crate) fn gemini_request_body_without_tool(body: &[u8], tool_name: &str) -> Option<Vec<u8>> {
     let mut value: Value = serde_json::from_slice(body).ok()?;
     let request = gemini_request_object_mut(&mut value)?;
@@ -233,6 +235,7 @@ pub(crate) fn gemini_request_body_without_tool(body: &[u8], tool_name: &str) -> 
     serde_json::to_vec(&value).ok()
 }
 
+#[cfg(not(feature = "mojo"))]
 fn gemini_request_object_mut(value: &mut Value) -> Option<&mut serde_json::Map<String, Value>> {
     if value.get("request").is_some() {
         value.get_mut("request")?.as_object_mut()

@@ -7,6 +7,7 @@ use serde_json::Value;
 
 pub use self::thinking::gemini_provider_core_model_uses_thinking_level;
 pub(in crate::translators::gemini) use self::thinking::gemini_thinking_config_from_request;
+#[cfg(not(feature = "mojo"))]
 use self::thinking::gemini_thinking_config_with_budget_from_request;
 
 #[cfg(feature = "mojo")]
@@ -96,6 +97,7 @@ pub(crate) fn gemini_validate_candidate_count(value: &Value) -> Result<(), Strin
     Ok(())
 }
 
+#[cfg(not(feature = "mojo"))]
 pub(crate) fn gemini_generation_config_from_request(
     original: &Value,
     chat: &Value,

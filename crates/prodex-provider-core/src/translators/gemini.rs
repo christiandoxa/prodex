@@ -1,12 +1,18 @@
 pub(crate) use self::request::gemini_builtin_tools_from_request;
 pub(crate) use self::request::gemini_function_declaration_from_openai_tool;
+#[cfg(not(feature = "mojo"))]
 pub(crate) use self::request::gemini_generation_config_from_request;
 pub(crate) use self::request::gemini_preserve_tool_call_signatures;
 pub use self::request::gemini_provider_core_model_uses_thinking_level;
+#[cfg(not(feature = "mojo"))]
 pub(crate) use self::request::gemini_request_body_without_tool;
+#[cfg(not(feature = "mojo"))]
 pub(crate) use self::request::gemini_tool_config_from_request;
+#[cfg(not(feature = "mojo"))]
+pub(crate) use self::request::gemini_validate_candidate_count;
+pub(crate) use self::request::gemini_validate_openai_tools;
+#[cfg(not(feature = "mojo"))]
 pub(crate) use self::request::sanitize_function_schema as gemini_sanitize_function_schema;
-pub(crate) use self::request::{gemini_validate_candidate_count, gemini_validate_openai_tools};
 pub(crate) use self::request_contents::gemini_contents_from_request;
 pub(crate) use self::request_contents::{
     gemini_contextual_user_instruction_text, gemini_is_contextual_user_fragment,

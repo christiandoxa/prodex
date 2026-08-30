@@ -9,6 +9,7 @@ pub(in crate::translators::gemini) fn gemini_thinking_config_from_request(
     gemini_thinking_config(obj, model, None)
 }
 
+#[cfg(not(feature = "mojo"))]
 pub(super) fn gemini_thinking_config_with_budget_from_request(
     obj: &serde_json::Map<String, Value>,
     model: &str,

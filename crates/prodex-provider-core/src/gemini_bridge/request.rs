@@ -2,6 +2,8 @@
 
 mod exact_output;
 mod native_project;
+#[path = "request_contents.rs"]
+mod request_contents;
 mod simple;
 mod tools;
 
@@ -20,7 +22,9 @@ pub use self::tools::{
     gemini_provider_core_validate_request_tools,
 };
 
-use crate::translators::{gemini_contents_from_request, gemini_generation_config_from_request};
+use crate::translators::gemini_contents_from_request;
+#[cfg(not(feature = "mojo"))]
+use crate::translators::gemini_generation_config_from_request;
 use crate::{ProviderTransformResult, provider_core_rewritten_body};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -84,6 +88,18 @@ fn runtime_gemini_contents_from_chat(chat: &serde_json::Value) -> Vec<serde_json
     if let Some(messages) = chat.get("messages").and_then(serde_json::Value::as_array) {
         return gemini_contents_from_request(&serde_json::json!({ "input": messages }));
     }
+    #[cfg(feature = "mojo")]
+    {
+        return vec![request_contents::gemini_request_content_value(
+            prodex_mojo_core::provider_constraints::GeminiRequestContentOperation::Content,
+            Some(b"\"user\""),
+            Some(br#"[{"text":""}]"#),
+            None,
+            None,
+            0,
+        )];
+    }
+    #[cfg(not(feature = "mojo"))]
     vec![serde_json::json!({"role":"user","parts":[{"text":""}]})]
 }
 
@@ -113,12 +129,27 @@ pub fn gemini_provider_core_generation_config_from_request(
     model: &str,
     thinking_budget_tokens: Option<u64>,
 ) -> serde_json::Value {
+    #[cfg(feature = "mojo")]
+    {
+        return request_contents::gemini_bridge_request_generation_config(
+            original,
+            chat,
+            model,
+            thinking_budget_tokens,
+        );
+    }
+    #[cfg(not(feature = "mojo"))]
     gemini_generation_config_from_request(original, chat, model, thinking_budget_tokens)
 }
 
 pub fn gemini_provider_core_validate_candidate_count(
     value: &serde_json::Value,
 ) -> Result<(), String> {
+    #[cfg(feature = "mojo")]
+    {
+        return request_contents::gemini_bridge_request_candidate_count(value);
+    }
+    #[cfg(not(feature = "mojo"))]
     crate::translators::gemini_validate_candidate_count(value)
 }
 
@@ -130,35 +161,49 @@ pub fn gemini_provider_core_generate_content_request_map(
     tool_config: Option<serde_json::Value>,
     generation_config: serde_json::Value,
 ) -> serde_json::Map<String, serde_json::Value> {
-    let mut request = serde_json::Map::new();
-    if let Some(system_instruction) = system_instruction {
-        request.insert("systemInstruction".to_string(), system_instruction);
-    }
-    request.insert("contents".to_string(), serde_json::Value::Array(contents));
-    if let Some(tools) = tools {
-        request.insert("tools".to_string(), tools);
-    }
-    if let Some(tool_config) = tool_config {
-        request.insert("toolConfig".to_string(), tool_config);
-    }
-    request.insert("generationConfig".to_string(), generation_config);
-    if let Some(settings) = original
-        .get("safety_settings")
-        .or_else(|| original.get("safetySettings"))
+    #[cfg(feature = "mojo")]
     {
-        request.insert("safetySettings".to_string(), settings.clone());
+        return request_contents::gemini_bridge_request_map(
+            original,
+            system_instruction.as_ref(),
+            &contents,
+            tools.as_ref(),
+            tool_config.as_ref(),
+            &generation_config,
+        );
     }
-    if let Some(cached_content) = original
-        .get("cached_content")
-        .or_else(|| original.get("cachedContent"))
-        .filter(|value| !value.is_null())
+    #[cfg(not(feature = "mojo"))]
     {
-        request.insert("cachedContent".to_string(), cached_content.clone());
+        let mut request = serde_json::Map::new();
+        if let Some(system_instruction) = system_instruction {
+            request.insert("systemInstruction".to_string(), system_instruction);
+        }
+        request.insert("contents".to_string(), serde_json::Value::Array(contents));
+        if let Some(tools) = tools {
+            request.insert("tools".to_string(), tools);
+        }
+        if let Some(tool_config) = tool_config {
+            request.insert("toolConfig".to_string(), tool_config);
+        }
+        request.insert("generationConfig".to_string(), generation_config);
+        if let Some(settings) = original
+            .get("safety_settings")
+            .or_else(|| original.get("safetySettings"))
+        {
+            request.insert("safetySettings".to_string(), settings.clone());
+        }
+        if let Some(cached_content) = original
+            .get("cached_content")
+            .or_else(|| original.get("cachedContent"))
+            .filter(|value| !value.is_null())
+        {
+            request.insert("cachedContent".to_string(), cached_content.clone());
+        }
+        if let Some(labels) = original.get("labels").filter(|value| !value.is_null()) {
+            request.insert("labels".to_string(), labels.clone());
+        }
+        request
     }
-    if let Some(labels) = original.get("labels").filter(|value| !value.is_null()) {
-        request.insert("labels".to_string(), labels.clone());
-    }
-    request
 }
 
 pub fn gemini_provider_core_generate_content_body_value(
@@ -167,13 +212,25 @@ pub fn gemini_provider_core_generate_content_body_value(
     code_assist: bool,
     request: &serde_json::Map<String, serde_json::Value>,
 ) -> serde_json::Value {
-    if code_assist {
-        serde_json::json!({
-            "model": model,
-            "project": project_id,
-            "request": serde_json::Value::Object(request.clone()),
-        })
-    } else {
-        serde_json::Value::Object(request.clone())
+    #[cfg(feature = "mojo")]
+    {
+        return request_contents::gemini_bridge_request_body(
+            model,
+            project_id,
+            code_assist,
+            request,
+        );
+    }
+    #[cfg(not(feature = "mojo"))]
+    {
+        if code_assist {
+            serde_json::json!({
+                "model": model,
+                "project": project_id,
+                "request": serde_json::Value::Object(request.clone()),
+            })
+        } else {
+            serde_json::Value::Object(request.clone())
+        }
     }
 }
