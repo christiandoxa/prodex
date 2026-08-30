@@ -65,7 +65,130 @@ pub(super) struct ConstraintTraceInput<'a> {
     pub(super) model_state: &'a BTreeMap<String, RuntimeGatewayRouteModelState>,
 }
 
+#[derive(Clone, Copy)]
+enum ConstraintTraceRejectionStage {
+    EndpointCapability,
+    RequestConstraints,
+}
+
 pub(super) fn constraint_trace(input: ConstraintTraceInput<'_>) -> RuntimeRouteDecisionTrace {
+    #[cfg(feature = "mojo")]
+    return constraint_trace_mojo(input);
+
+    #[cfg(not(feature = "mojo"))]
+    constraint_trace_rust(input)
+}
+
+#[cfg(feature = "mojo")]
+fn constraint_trace_mojo(input: ConstraintTraceInput<'_>) -> RuntimeRouteDecisionTrace {
+    let ConstraintTraceInput {
+        endpoint,
+        provider,
+        requested_model,
+        candidates,
+        selected_index,
+        selected_model,
+        no_route_reason,
+        hard_affinity,
+        model_state,
+    } = input;
+    let eligible = candidates
+        .iter()
+        .map(|candidate| candidate.evaluation.eligible)
+        .collect::<Vec<_>>();
+    let decisions = candidates
+        .iter()
+        .map(|candidate| candidate.evaluation.decision as i64)
+        .collect::<Vec<_>>();
+    let plan = prodex_mojo_core::rich::plan_gateway_constraint_trace(
+        &eligible,
+        &decisions,
+        ProviderRequestConstraintDecision::EndpointUnsupported as i64,
+        selected_index,
+        hard_affinity,
+    )
+    .expect("Mojo gateway constraint trace planning returned an invalid result");
+    let mut builder = trace_builder(endpoint, requested_model);
+    builder.record_affinity(
+        if hard_affinity {
+            RuntimeRouteAffinityKind::Strict
+        } else {
+            RuntimeRouteAffinityKind::None
+        },
+        hard_affinity
+            .then(|| candidates.first().map(|candidate| candidate.model.as_str()))
+            .flatten(),
+        hard_affinity,
+        match plan.affinity_outcome {
+            prodex_mojo_core::rich::GatewayConstraintTraceAffinityOutcome::NotApplicable => {
+                RuntimeRouteAffinityOutcome::NotApplicable
+            }
+            prodex_mojo_core::rich::GatewayConstraintTraceAffinityOutcome::Retained => {
+                RuntimeRouteAffinityOutcome::Retained
+            }
+            prodex_mojo_core::rich::GatewayConstraintTraceAffinityOutcome::Exhausted => {
+                RuntimeRouteAffinityOutcome::Exhausted
+            }
+        },
+    );
+    for index in plan.ordered_indices {
+        let rejection_stage = plan.rejection_stages[index].map(|stage| match stage {
+            prodex_mojo_core::rich::GatewayConstraintTraceRejectionStage::EndpointCapability => {
+                ConstraintTraceRejectionStage::EndpointCapability
+            }
+            prodex_mojo_core::rich::GatewayConstraintTraceRejectionStage::RequestConstraints => {
+                ConstraintTraceRejectionStage::RequestConstraints
+            }
+        });
+        record_constraint_trace_candidate(
+            &mut builder,
+            &candidates[index],
+            provider,
+            hard_affinity,
+            model_state,
+            rejection_stage,
+        );
+    }
+    builder.record_stage(
+        RuntimeRouteDecisionStage::EndpointCapability,
+        if plan.endpoint_supported {
+            RuntimeRouteDecisionStageOutcome::Passed
+        } else {
+            RuntimeRouteDecisionStageOutcome::Rejected
+        },
+    );
+    if let Some(passed) = plan.request_constraints_passed {
+        builder.record_stage(
+            RuntimeRouteDecisionStage::RequestConstraints,
+            if passed {
+                RuntimeRouteDecisionStageOutcome::Passed
+            } else {
+                RuntimeRouteDecisionStageOutcome::Rejected
+            },
+        );
+    }
+    if let Some(index) = selected_index {
+        builder.mark_selected(&candidates[index].model);
+        builder.set_resolved_model(selected_model);
+    }
+    builder.finish(
+        match plan.terminal_outcome {
+            prodex_mojo_core::rich::GatewayConstraintTraceTerminalOutcome::Selected => {
+                RuntimeRouteDecisionTerminalOutcome::Selected
+            }
+            prodex_mojo_core::rich::GatewayConstraintTraceTerminalOutcome::NoCandidate => {
+                RuntimeRouteDecisionTerminalOutcome::NoCandidate
+            }
+            prodex_mojo_core::rich::GatewayConstraintTraceTerminalOutcome::AffinityExhausted => {
+                RuntimeRouteDecisionTerminalOutcome::AffinityExhausted
+            }
+        },
+        no_route_reason.map(|reason| RuntimeRouteDecisionReason::from_label(reason.as_str())),
+    )
+}
+
+#[cfg(any(not(feature = "mojo"), test))]
+fn constraint_trace_rust(input: ConstraintTraceInput<'_>) -> RuntimeRouteDecisionTrace {
     let ConstraintTraceInput {
         endpoint,
         provider,
@@ -107,6 +230,15 @@ pub(super) fn constraint_trace(input: ConstraintTraceInput<'_>) -> RuntimeRouteD
             provider,
             hard_affinity,
             model_state,
+            (!candidates[index].evaluation.eligible).then_some(
+                if candidates[index].evaluation.decision
+                    == ProviderRequestConstraintDecision::EndpointUnsupported
+                {
+                    ConstraintTraceRejectionStage::EndpointCapability
+                } else {
+                    ConstraintTraceRejectionStage::RequestConstraints
+                },
+            ),
         );
     }
     let endpoint_supported = candidates.iter().any(|candidate| {
@@ -140,6 +272,7 @@ pub(super) fn constraint_trace(input: ConstraintTraceInput<'_>) -> RuntimeRouteD
     )
 }
 
+#[cfg(any(not(feature = "mojo"), test))]
 fn trace_affinity_outcome(
     hard_affinity: bool,
     selected_index: Option<usize>,
@@ -157,6 +290,7 @@ fn record_constraint_trace_candidate(
     provider: ProviderId,
     hard_affinity: bool,
     model_state: &BTreeMap<String, RuntimeGatewayRouteModelState>,
+    rejection_stage: Option<ConstraintTraceRejectionStage>,
 ) {
     let reason = (candidate.evaluation.decision != ProviderRequestConstraintDecision::Compatible)
         .then(|| RuntimeRouteDecisionReason::from_label(candidate.evaluation.decision.as_str()));
@@ -176,13 +310,14 @@ fn record_constraint_trace_candidate(
     } else {
         RuntimeRouteCandidateEligibility::Rejected
     };
-    input.rejection_stage = (!candidate.evaluation.eligible).then_some(
-        if candidate.evaluation.decision == ProviderRequestConstraintDecision::EndpointUnsupported {
+    input.rejection_stage = rejection_stage.map(|stage| match stage {
+        ConstraintTraceRejectionStage::EndpointCapability => {
             RuntimeRouteDecisionStage::EndpointCapability
-        } else {
+        }
+        ConstraintTraceRejectionStage::RequestConstraints => {
             RuntimeRouteDecisionStage::RequestConstraints
-        },
-    );
+        }
+    });
     input.reason = reason;
     input.selected = candidate.selected;
     input.inflight_count = model_state
@@ -192,6 +327,7 @@ fn record_constraint_trace_candidate(
     builder.record_candidate(&candidate.model, input);
 }
 
+#[cfg(any(not(feature = "mojo"), test))]
 fn trace_terminal_outcome(
     selected_index: Option<usize>,
     hard_affinity: bool,
@@ -238,6 +374,22 @@ fn trace_route(endpoint: ProviderEndpoint) -> RuntimeRouteDecisionRoute {
         ProviderEndpoint::Embeddings => RuntimeRouteDecisionRoute::Embeddings,
         _ => RuntimeRouteDecisionRoute::Standard,
     }
+}
+
+#[cfg(feature = "mojo")]
+fn trace_builder(
+    endpoint: ProviderEndpoint,
+    requested_model: &str,
+) -> RuntimeRouteDecisionTraceBuilder {
+    let mut builder = RuntimeRouteDecisionTraceBuilder::new(
+        trace_route(endpoint),
+        (!requested_model.is_empty()).then_some(requested_model),
+    );
+    builder.record_stage(
+        RuntimeRouteDecisionStage::ModelResolution,
+        RuntimeRouteDecisionStageOutcome::Passed,
+    );
+    builder
 }
 
 pub(super) fn legacy_trace(
@@ -289,3 +441,7 @@ pub(super) fn legacy_trace(
     builder.set_resolved_model(selected_model);
     builder.finish(RuntimeRouteDecisionTerminalOutcome::Selected, None)
 }
+
+#[cfg(test)]
+#[path = "../../tests/src/gateway_constraint_trace.rs"]
+mod trace_tests;

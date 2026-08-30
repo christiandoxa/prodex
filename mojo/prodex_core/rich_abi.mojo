@@ -50,9 +50,47 @@ from smart_context_normalization import (
     prodex_mojo_smart_context_memory_capsule_budget_v1,
     prodex_mojo_smart_context_capsule_plan_v1,
 )
+from gateway_constraint_trace import prodex_mojo_gateway_constraint_trace_impl
 
 
 comptime PRODEX_RICH_ABI_VERSION: Int64 = 6
+
+
+@export("prodex_mojo_gateway_constraint_trace_v1")
+def prodex_mojo_gateway_constraint_trace_v1(
+    abi_version: Int64,
+    eligible_address: UInt,
+    decisions_address: UInt,
+    endpoint_unsupported_decision: Int64,
+    candidate_count: Int64,
+    selected_index: Int64,
+    hard_affinity: Int64,
+    ordered_indices_address: UInt,
+    ordered_capacity: Int64,
+    rejection_stages_address: UInt,
+    rejection_capacity: Int64,
+    endpoint_supported_address: UInt,
+    request_constraints_outcome_address: UInt,
+    affinity_outcome_address: UInt,
+    terminal_outcome_address: UInt,
+) abi("C") -> Int64:
+    return prodex_mojo_gateway_constraint_trace_impl(
+        abi_version,
+        eligible_address,
+        decisions_address,
+        endpoint_unsupported_decision,
+        candidate_count,
+        selected_index,
+        hard_affinity,
+        ordered_indices_address,
+        ordered_capacity,
+        rejection_stages_address,
+        rejection_capacity,
+        endpoint_supported_address,
+        request_constraints_outcome_address,
+        affinity_outcome_address,
+        terminal_outcome_address,
+    )
 
 
 @export("prodex_mojo_rich_abi_version")

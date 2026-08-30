@@ -47,6 +47,12 @@ pub use policy::{
 };
 mod fallback;
 pub use fallback::{model_fallback_chain, model_fallback_plan};
+mod gateway_constraint_trace;
+pub use gateway_constraint_trace::{
+    GatewayConstraintTraceAffinityOutcome, GatewayConstraintTracePlan,
+    GatewayConstraintTraceRejectionStage, GatewayConstraintTraceTerminalOutcome,
+    plan_gateway_constraint_trace,
+};
 mod billing;
 pub use billing::{
     GatewayBillingSummaryBucket, GatewayBillingSummaryInput, gateway_billing_summary_batch,
