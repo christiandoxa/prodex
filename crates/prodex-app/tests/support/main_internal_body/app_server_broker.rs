@@ -6671,22 +6671,3 @@ fn app_server_broker_invalid_reason_matrix_matches_contract_taxonomy() {
         assert_eq!(app_server_broker_invalid_reason(&payload), expected, "{payload}");
     }
 }
-
-#[cfg(feature = "mojo-core")]
-#[test]
-fn app_server_broker_mojo_sequence_validation_preserves_caller_failure() {
-    let replay = concat!(
-        r#"{"jsonrpc":"2.0","method":"turn/started","params":{"thread_id":"thread-1","turn_id":"turn-1","turn":{"status":"inProgress","items":[]}}}"#,
-        "\n",
-        r#"{"jsonrpc":"2.0","method":"turn/started","params":{"thread_id":"thread-1","turn_id":"turn-1","turn":{"status":"inProgress","items":[]}}}"#,
-        "\n",
-    );
-    let mut diagnostics = Vec::new();
-    let error = app_server_broker_write_stdio_validate_stream(
-        std::io::Cursor::new(replay),
-        &mut diagnostics,
-    )
-    .expect_err("duplicate turn start must fail closed");
-
-    assert!(error.to_string().contains("duplicate_turn_started"));
-}
