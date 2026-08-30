@@ -36,6 +36,7 @@ comptime GEMINI_CHAT_FUNCTION_CALL_ITEM: Int64 = 21
 comptime GEMINI_RESPONSE_USAGE: Int64 = 22
 comptime GEMINI_STREAM_TEXT_DELTA: Int64 = 23
 comptime GEMINI_STREAM_REASONING_DELTA: Int64 = 24
+comptime GEMINI_FUNCTION_CALL_ARGUMENTS_DELTA_WITHOUT_SEQUENCE: Int64 = 25
 
 
 @fieldwise_init
@@ -328,9 +329,19 @@ def gemini_write_operation(
                 return False
         return gemini_put_byte(writer, 125)
     if operation == GEMINI_FUNCTION_CALL_ARGUMENTS_DELTA:
+        if not gemini_put_event_prefix(writer, StringSlice("response.function_call_arguments.delta"), input.sequence_number, input.created_at, False):
+            return False
+        if input.call_id_present == 1:
+            if not gemini_put_literal(writer, StringSlice(',"call_id":')) or not gemini_put_json_string(writer, input.call_id):
+                return False
+        return (
+            gemini_put_literal(writer, StringSlice(',"delta":'))
+            and gemini_put_json_string(writer, input.delta)
+            and gemini_put_byte(writer, 125)
+        )
+    if operation == GEMINI_FUNCTION_CALL_ARGUMENTS_DELTA_WITHOUT_SEQUENCE:
         if not gemini_put_literal(
-            writer,
-            StringSlice('{"type":"response.function_call_arguments.delta"'),
+            writer, StringSlice('{"type":"response.function_call_arguments.delta"')
         ):
             return False
         if input.call_id_present == 1:
@@ -339,7 +350,7 @@ def gemini_write_operation(
         return (
             gemini_put_literal(writer, StringSlice(',"delta":'))
             and gemini_put_json_string(writer, input.delta)
-            and gemini_put_literal(writer, StringSlice('}'))
+            and gemini_put_byte(writer, 125)
         )
     if operation == GEMINI_OUTPUT_TEXT_DELTA:
         return (

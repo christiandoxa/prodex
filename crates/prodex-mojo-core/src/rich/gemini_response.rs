@@ -31,6 +31,7 @@ pub enum GeminiResponseKernelOperation {
     ResponseUsage = 22,
     StreamTextDelta = 23,
     StreamReasoningDelta = 24,
+    FunctionCallArgumentsDeltaWithoutSequence = 25,
 }
 
 /// Inputs for one bounded Gemini response or stream JSON shape.
@@ -182,6 +183,7 @@ fn gemini_kernel_operation(operation: GeminiResponseKernelOperation) -> i64 {
         GeminiResponseKernelOperation::ResponseUsage => 22,
         GeminiResponseKernelOperation::StreamTextDelta => 23,
         GeminiResponseKernelOperation::StreamReasoningDelta => 24,
+        GeminiResponseKernelOperation::FunctionCallArgumentsDeltaWithoutSequence => 25,
     }
 }
 
