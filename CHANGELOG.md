@@ -2,6 +2,103 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.420.0 - 2026-08-30
+
+### Runtime
+
+- Use route-aware probe wait budget (`c1c4c4b`)
+- Migrate runtime Anthropic shaping (`dba5484`)
+- Migrate runtime doctor planning (`01fdc02`)
+- Migrate runtime policy text validation (`60a86fd`)
+- Migrate runtime selection planning (`11c2e77`)
+- Bound compact cold-start probe retry (`0d824b9`)
+- Normalize runtime proxy presets (`91585c8`)
+- Wake selection on state changes (`ed739ea`)
+- Validate usage limit events (`6d7f174`)
+- Harden native and tunnel runtime (`5f1b7a1`)
+- Resume usage-limited sessions (`6ca36b6`)
+- Recover temporary profile saturation (`987daa4`)
+
+### CLI
+
+- Gate Mojo-only selection oracle imports (`8d28d1f`)
+- Migrate profile rotation planning (`4992559`)
+- Migrate profile order planning (`1e23a74`)
+- Delegate capacity planning to Mojo (`54362c1`)
+
+### Claude
+
+- Retain compatibility stream oracle (`2b09bca`)
+- Remove obsolete stream helper (`a66c7ab`)
+- Migrate Anthropic stream shaping (`095f519`)
+- Migrate Anthropic request shaping (`02e7790`)
+- Migrate Anthropic response planning (`eef0699`)
+
+### Docs
+
+- Update Caveman freshness pin (`b6aac0f`)
+- Require temporary artifact cleanup (`4caa6ca`)
+- Require Mojo-first development (`2d6963c`)
+- Track split runtime policy types (`12ae730`)
+- Document runtime planning ABIs (`5a2a08d`)
+- Document 0.420.0 ABI planning (`371f0df`)
+- Align rich ABI documentation (`2531c7a`)
+
+### Misc
+
+- Use typed Gemini bridge inputs (`8079949`)
+- Retain default test classification oracles (`6a331de`)
+- Keep feature test oracles available (`9a1e77e`)
+- Move broker sequence validation (`8074983`)
+- Move application plan kernels (`4e98c9a`)
+- Migrate gateway trace planning (`d5e9a08`)
+- Migrate Gemini tool response shaping (`2e37203`)
+- Migrate Kiro response stream (`cb2b7bd`)
+- Satisfy Mojo guard and size limits (`eae622f`)
+- Migrate Gemini response shaping (`556f52f`)
+- Migrate Gemini generation config planning (`1c38df3`)
+- Gate route oracle import (`6c1b755`)
+- Keep context and route tests lint-clean (`8728949`)
+- Move control-plane route validation (`84c7073`)
+- Extend context output classification (`81cb571`)
+- Migrate domain accounting arithmetic (`b8516c4`)
+- Migrate command output framework labels (`91a1614`)
+- Migrate command output noise labels (`68cad82`)
+- Migrate smart context normalization (`b989ecb`)
+- Move dot-progress leaf (`d5c3698`)
+- Migrate Kiro request shaping (`a833d8b`)
+- Migrate Gemini bridge request shaping (`2a92904`)
+- Preserve Gemini raw stream event shape (`ad6ca7a`)
+- Migrate OpenAI compatibility shaping (`098a26a`)
+- Preserve Gemini stream event shape (`1bda1ca`)
+- Migrate DeepSeek bridge planning (`f237509`)
+- Migrate Git search parsing (`5902dea`)
+- Migrate Gemini request content shaping (`fde0a4f`)
+- Migrate DeepSeek transformation kernel (`fdc0a01`)
+- Compile app-server broker bounds (`b24bdb8`)
+- Move broker protocol to Mojo (`de0318b`)
+- Migrate Gemini response stream kernel (`bc1d112`)
+- Migrate Gemini response part planning (`521646c`)
+- Map Gemini SSE tool-call indexes (`7400727`)
+- Migrate Gemini request field planning (`6e56b37`)
+- Migrate gateway billing summary (`0c68a1e`)
+- Migrate Gemini glob matching (`5b5ad88`)
+- Fall back from incompatible web search (`dff2b74`)
+- Gate Mojo-only cache adapter (`fd801f6`)
+- Move CI log semantics to Mojo (`41babf2`)
+- Gate Mojo-only kind mapping (`0830dbb`)
+- Move log level classification to Mojo (`71e6ae6`)
+- Keep Mojo diagnostics lint-clean (`32b7c2f`)
+- Gate Mojo-only oracle import (`a57c3ac`)
+- Keep feature builds lint-clean (`e4d5f9c`)
+- Pin Codex 0.151.0 (`4ce9c87`)
+- Migrate provider planning (`6a805b4`)
+- Migrate Smart Context calibration (`b4457ba`)
+- Migrate signal and command classification to Mojo (`987bc57`)
+- Delegate token accounting to Mojo (`a39e1ec`)
+- Move model planning into Mojo (`c7c38a4`)
+- Audit Codex rust-v0.151.0 (`2d93cf5`)
+
 ## 0.419.1 - 2026-08-29
 
 ### Runtime
@@ -48,43 +145,6 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 - Add Mojo reasoning resolution adapter (`641aa94`)
 - Move adaptive planning into Mojo (`c120df7`)
 - Retain measured output throughput (`46c45af`)
-# Prodex 0.419.1
-
-## New Features
-
-- Made `prodex log` the canonical short form for the live `prodex log stream` view; `prodex log stream` remains an equivalent compatibility alias and `prodex log upstream` remains the explicit upstream-payload mode.
-- Expanded the Mojo-native deterministic core across quota/capacity planning, provider and runtime selection, Smart Context planning, critical-signal classification, and tuning decisions.
-
-## Bug Fixes
-
-- Fixed `Prodex Log` header state corruption that could replace profile or quota metadata with an unrelated fragment such as `second`; headers now render from one validated structured snapshot with atomic semantic segments.
-- Fixed the throughput indicator so live output-token generation shows a numeric rate, retains the last valid rate after completion and during the next request's TTFT, and never renders a bare `t/s`.
-- Fixed `prodex s expose` Quick Tunnel startup by separating local MCP, Cloudflare transport/allocation, public-network, and MCP protocol phases. Managed Quick Tunnels now use isolated temporary configuration and automatic QUIC-first/HTTP/2-fallback negotiation without collapsing recoverable startup states into a generic timeout.
-- Improved multi-account runtime recovery so near-exhausted profiles remain eligible until authoritative exhaustion and temporary overload, rate-limit, and transport failures do not become false quota exhaustion.
-
-## Performance
-
-- Kept log following incremental and bounded: throughput state updates with events, terminal rendering remains throttled, and idle views retain the last value without historical rescans or network work.
-- Added measured CI impact selection so unchanged diffs do not rebuild the runtime benchmark while owned runtime changes continue to run the benchmark and full platform/security matrix.
-
-## Architecture
-
-- Migrated `488` Rust semantic LOC from the immutable `0.419.0` remaining-ownership baseline, or `10.323672519568436%` of `4,727` eligible baseline Rust semantic LOC; the required ceiling was `473` LOC.
-- Overall Mojo ownership increased from `51.19760479041916%` to `60.22021456804065%` (`+9.02260977762149` percentage points). The wave contains seven new authoritative operations and one expanded operation, with `500` total traceable Rust semantic LOC reductions.
-- Superseded Rust semantic algorithms were removed after differential parity; Rust remains the host for async runtime, I/O, networking, persistence, platform integration, and security boundaries, with no production Rust fallback for Mojo-authoritative operations.
-
-## Compatibility
-
-- Preserved existing Cloudflare Tunnel mode independently from Prodex-managed Quick Tunnels, and kept the user Cloudflare configuration untouched.
-- Preserved account/session affinity and committed-output/tool-side-effect replay boundaries during temporary profile recovery.
-
-## Documentation
-
-- Updated active logging, expose, runtime-policy, migration, and release documentation for the `0.419.1` ownership and lifecycle contracts.
-
-## Changelog
-
-Full Changelog: [`0.419.0...0.419.1`](https://github.com/christiandoxa/prodex/compare/0.419.0...0.419.1)
 
 ## 0.419.0 - 2026-08-28
 
