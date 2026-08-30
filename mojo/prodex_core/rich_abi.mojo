@@ -1,6 +1,7 @@
 from std.memory import Pointer
 from std.sys.info import align_of, size_of
 
+from gemini_sse_state import gemini_response_part_plan
 from rich_types import (
     ProdexRichContextRecord,
     ProdexRichContextResult,
@@ -287,3 +288,38 @@ def prodex_mojo_rich_anthropic_response_plan_v1(
     ):
         return ANTHROPIC_RESPONSE_PLAN_STATUS_CAPACITY
     return ANTHROPIC_RESPONSE_PLAN_STATUS_OK
+
+@export("prodex_mojo_rich_gemini_response_part_plan_v1")
+def prodex_mojo_rich_gemini_response_part_plan_v1(
+    abi_version: Int64,
+    has_text: Int64,
+    is_thought: Int64,
+    has_visible_text: Int64,
+    has_special_text: Int64,
+    has_media: Int64,
+    has_video_metadata: Int64,
+    has_image_generation: Int64,
+    has_function_call: Int64,
+    command_output_only: Int64,
+    forced_output: Int64,
+    internal_instruction_echo: Int64,
+    suppress_visible_text: Int64,
+    output_actions: Pointer[mut=True, Int64, _],
+) abi("C") -> Int64:
+    if abi_version != 1:
+        return 4
+    return gemini_response_part_plan(
+        has_text,
+        is_thought,
+        has_visible_text,
+        has_special_text,
+        has_media,
+        has_video_metadata,
+        has_image_generation,
+        has_function_call,
+        command_output_only,
+        forced_output,
+        internal_instruction_echo,
+        suppress_visible_text,
+        output_actions,
+    )

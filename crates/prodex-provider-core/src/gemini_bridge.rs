@@ -13,6 +13,7 @@ mod media;
 mod precommit;
 mod request;
 mod response;
+mod response_state;
 mod tool_io;
 mod tooling;
 mod util;
@@ -140,6 +141,10 @@ pub use self::response::{
     gemini_provider_core_runtime_responses_value_with_fallback_ids,
     gemini_provider_core_simple_response, gemini_provider_core_text_from_special_part,
     gemini_provider_core_web_search_call_from_grounding,
+};
+pub use self::response_state::{
+    GeminiProviderCoreResponsePartInput, GeminiProviderCoreResponsePartPlan,
+    GeminiProviderCoreResponsePartPlanError, gemini_provider_core_response_part_plan,
 };
 pub use self::tool_io::{
     gemini_provider_core_function_call_part,
