@@ -44,15 +44,21 @@
       "feat(mojo): migrate runtime doctor planning",
       "fix(doctor): satisfy Mojo guard and size limits",
       "test(gemini): split response shaping tests",
-      "feat(mojo): migrate Kiro response stream"
+      "feat(mojo): migrate Kiro response stream",
+      "feat(mojo): migrate Anthropic stream shaping",
+      "fix(anthropic): remove obsolete stream helper",
+      "feat(mojo): migrate Gemini tool response shaping",
+      "fix(anthropic): retain compatibility stream oracle",
+      "feat(mojo): migrate gateway trace planning",
+      "feat(mojo): migrate runtime Anthropic shaping"
     ],
     "caps": {
-      "maxFiles": 158,
-      "maxBehaviorFiles": 133,
-      "maxLines": 36384,
+      "maxFiles": 178,
+      "maxBehaviorFiles": 150,
+      "maxLines": 39809,
       "maxFileLines": 3225
     },
-    "reason": "Reviewed the exact 0.420.0 migration tail dff2b7442b60ff9d2a1d735b8d6d52de4dd839bf..HEAD: 43 contiguous migration commits covering Mojo-owned deterministic kernels and ABIs, provider and runtime planning, compatibility transforms, focused module extraction, and their CI, test, and documentation evidence, including the integrated Kiro response/stream migration, plus the allowance record. The measured integrated tail is 158 files, 133 behavior files, and 36,384 changed lines including this allowance record; the 3,225-line context_text Mojo module is intentional migration ownership, not incidental churn. Exact subjects and caps cover this tail only; global thresholds and release behavior remain unchanged."
+    "reason": "Reviewed the exact 0.420.0 migration tail dff2b7442b60ff9d2a1d735b8d6d52de4dd839bf..HEAD: 49 contiguous migration commits covering Mojo-owned deterministic kernels and ABIs, provider and runtime planning, compatibility transforms, focused module extraction, and their CI, test, and documentation evidence, including the integrated Kiro response/stream, Anthropic stream/compatibility, Gemini tool-response, gateway trace, and runtime-Anthropic migrations, plus the allowance records. The measured integrated tail is 178 files, 150 behavior files, and 39,809 changed lines including the allowance records; the 3,225-line context_text Mojo module is intentional migration ownership, not incidental churn. Exact subjects and caps cover this tail only; global thresholds and release behavior remain unchanged."
   },
   {
     "id": "audited-prodex-0.420.0-integration-train",
