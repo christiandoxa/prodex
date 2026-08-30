@@ -32,7 +32,22 @@ pub(crate) fn gemini_citation_text(value: &Value) -> Option<String> {
         .collect::<Vec<_>>();
     lines.sort();
     lines.dedup();
-    (!lines.is_empty()).then(|| format!("Citations:\n{}", lines.join("\n")))
+    if lines.is_empty() {
+        return None;
+    }
+    #[cfg(feature = "mojo")]
+    {
+        let lines = lines.join("\n");
+        let mut input = prodex_mojo_core::rich::GeminiResponseKernelInput::new(
+            prodex_mojo_core::rich::GeminiResponseKernelOperation::CitationText,
+        );
+        input.delta = Some(&lines);
+        super::super::stream::gemini_mojo_value(input)
+            .as_str()
+            .map(str::to_string)
+    }
+    #[cfg(not(feature = "mojo"))]
+    Some(format!("Citations:\n{}", lines.join("\n")))
 }
 
 pub(crate) fn gemini_web_search_call_from_grounding(
@@ -53,29 +68,51 @@ pub(crate) fn gemini_web_search_call_from_grounding(
     if sources.is_empty() && queries.is_empty() {
         return None;
     }
-    let action = if queries.is_empty() {
-        let first_url = sources
-            .first()
-            .and_then(|source| source.get("url"))
-            .and_then(Value::as_str)?;
-        json!({
-            "type": "open_page",
-            "url": first_url,
-            "sources": sources,
-        })
-    } else {
-        json!({
-            "type": "search",
-            "queries": queries,
-            "sources": sources,
-        })
-    };
-    Some(json!({
-        "type": "web_search_call",
-        "id": format!("ws_{response_id}"),
-        "status": "completed",
-        "action": action,
-    }))
+    #[cfg(feature = "mojo")]
+    {
+        let queries_json = serde_json::to_string(&queries).expect("Gemini queries serialize");
+        let sources_json = serde_json::to_string(&sources).expect("Gemini sources serialize");
+        let first_url = queries.is_empty().then(|| {
+            sources
+                .first()
+                .and_then(|source| source.get("url"))
+                .and_then(Value::as_str)
+        });
+        let mut input = prodex_mojo_core::rich::GeminiResponseKernelInput::new(
+            prodex_mojo_core::rich::GeminiResponseKernelOperation::WebSearchCall,
+        );
+        input.response_id = Some(response_id);
+        input.content = Some(&queries_json);
+        input.output = Some(&sources_json);
+        input.delta = first_url.flatten();
+        Some(super::super::stream::gemini_mojo_value(input))
+    }
+    #[cfg(not(feature = "mojo"))]
+    {
+        let action = if queries.is_empty() {
+            let first_url = sources
+                .first()
+                .and_then(|source| source.get("url"))
+                .and_then(Value::as_str)?;
+            json!({
+                "type": "open_page",
+                "url": first_url,
+                "sources": sources,
+            })
+        } else {
+            json!({
+                "type": "search",
+                "queries": queries,
+                "sources": sources,
+            })
+        };
+        Some(json!({
+            "type": "web_search_call",
+            "id": format!("ws_{response_id}"),
+            "status": "completed",
+            "action": action,
+        }))
+    }
 }
 
 fn gemini_collect_grounding_chunk_sources(

@@ -32,6 +32,11 @@ pub enum GeminiResponseKernelOperation {
     StreamTextDelta = 23,
     StreamReasoningDelta = 24,
     FunctionCallArgumentsDeltaWithoutSequence = 25,
+    BufferedResponse = 26,
+    CitationText = 27,
+    WebSearchCall = 28,
+    StreamAssistantMessage = 29,
+    StreamOutputItems = 30,
 }
 
 /// Inputs for one bounded Gemini response or stream JSON shape.
@@ -64,6 +69,11 @@ pub struct GeminiResponseKernelInput<'a> {
     pub content: Option<&'a str>,
     pub output: Option<&'a str>,
     pub arguments: Option<&'a str>,
+    pub created_at_present: bool,
+    pub include_empty_usage: bool,
+    pub include_empty_metadata: bool,
+    pub citations: Option<&'a str>,
+    pub reason_present: bool,
 }
 
 impl<'a> GeminiResponseKernelInput<'a> {
@@ -96,6 +106,11 @@ impl<'a> GeminiResponseKernelInput<'a> {
             content: None,
             output: None,
             arguments: None,
+            created_at_present: false,
+            include_empty_usage: false,
+            include_empty_metadata: false,
+            citations: None,
+            reason_present: false,
         }
     }
 }
@@ -137,9 +152,14 @@ struct GeminiResponseKernelFfiInput {
     signature: RichStringView,
     namespace: RichStringView,
     arguments: RichStringView,
+    created_at_present: i64,
+    include_empty_usage: i64,
+    include_empty_metadata: i64,
+    citations: RichStringView,
+    reason_present: i64,
 }
 
-const _: () = assert!(std::mem::size_of::<GeminiResponseKernelFfiInput>() == 400);
+const _: () = assert!(std::mem::size_of::<GeminiResponseKernelFfiInput>() == 448);
 
 unsafe extern "C" {
     fn prodex_mojo_gemini_response_kernel_v1(
@@ -184,6 +204,11 @@ fn gemini_kernel_operation(operation: GeminiResponseKernelOperation) -> i64 {
         GeminiResponseKernelOperation::StreamTextDelta => 23,
         GeminiResponseKernelOperation::StreamReasoningDelta => 24,
         GeminiResponseKernelOperation::FunctionCallArgumentsDeltaWithoutSequence => 25,
+        GeminiResponseKernelOperation::BufferedResponse => 26,
+        GeminiResponseKernelOperation::CitationText => 27,
+        GeminiResponseKernelOperation::WebSearchCall => 28,
+        GeminiResponseKernelOperation::StreamAssistantMessage => 29,
+        GeminiResponseKernelOperation::StreamOutputItems => 30,
     }
 }
 
@@ -205,6 +230,7 @@ fn gemini_kernel_capacity(input: &GeminiResponseKernelInput<'_>) -> Result<usize
         input.content,
         input.output,
         input.arguments,
+        input.citations,
     ];
     let input_bytes = views.iter().flatten().try_fold(0_usize, |total, value| {
         total
@@ -260,6 +286,11 @@ pub fn gemini_response_kernel(input: GeminiResponseKernelInput<'_>) -> Result<Ve
         signature: gemini_kernel_view(input.signature),
         namespace: gemini_kernel_view(input.namespace),
         arguments: gemini_kernel_view(input.arguments),
+        created_at_present: i64::from(input.created_at_present),
+        include_empty_usage: i64::from(input.include_empty_usage),
+        include_empty_metadata: i64::from(input.include_empty_metadata),
+        citations: gemini_kernel_view(input.citations),
+        reason_present: i64::from(input.reason_present),
     };
     let mut written = 0_i64;
     let status = unsafe {

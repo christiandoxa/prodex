@@ -493,6 +493,10 @@ fn gemini_provider_core_shapes_stream_output_items() {
     assert_eq!(output[5]["call_id"], "call_2");
     assert_eq!(output[5]["arguments"], "not-json");
     assert_eq!(output[6]["content"][0]["text"], "blocked by policy");
+
+    let empty_citation =
+        gemini_provider_core_stream_output_items(None, &[], "", &[], Some(""), &[], |_, _| None);
+    assert_eq!(empty_citation[0]["content"][0]["text"], "");
 }
 
 #[test]

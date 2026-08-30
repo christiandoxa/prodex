@@ -37,6 +37,11 @@ comptime GEMINI_RESPONSE_USAGE: Int64 = 22
 comptime GEMINI_STREAM_TEXT_DELTA: Int64 = 23
 comptime GEMINI_STREAM_REASONING_DELTA: Int64 = 24
 comptime GEMINI_FUNCTION_CALL_ARGUMENTS_DELTA_WITHOUT_SEQUENCE: Int64 = 25
+comptime GEMINI_BUFFERED_RESPONSE: Int64 = 26
+comptime GEMINI_CITATION_TEXT: Int64 = 27
+comptime GEMINI_WEB_SEARCH_CALL: Int64 = 28
+comptime GEMINI_STREAM_ASSISTANT_MESSAGE: Int64 = 29
+comptime GEMINI_STREAM_OUTPUT_ITEMS: Int64 = 30
 
 
 @fieldwise_init
@@ -75,6 +80,11 @@ struct ProdexGeminiResponseKernelInput(Copyable):
     var signature: ProdexRichStringView
     var namespace: ProdexRichStringView
     var arguments: ProdexRichStringView
+    var created_at_present: Int64
+    var include_empty_usage: Int64
+    var include_empty_metadata: Int64
+    var citations: ProdexRichStringView
+    var reason_present: Int64
 
 
 @fieldwise_init
@@ -120,12 +130,10 @@ def gemini_put_hex_byte(
     return gemini_put_byte(writer, high) and gemini_put_byte(writer, low)
 
 
-def gemini_put_json_string(
+def gemini_put_json_escaped(
     writer: Pointer[mut=True, GeminiResponseWriter, _],
     view: ProdexRichStringView,
 ) -> Bool:
-    if not gemini_put_byte(writer, 34):
-        return False
     if view.len > 0:
         var ptr = rich_view_ptr(view)
         for index in range(Int64(view.len)):
@@ -153,7 +161,22 @@ def gemini_put_json_string(
                     return False
             elif not gemini_put_byte(writer, value):
                 return False
-    return gemini_put_byte(writer, 34)
+    return True
+
+
+def gemini_put_json_string(
+    writer: Pointer[mut=True, GeminiResponseWriter, _],
+    view: ProdexRichStringView,
+) -> Bool:
+    return gemini_put_byte(writer, 34) and gemini_put_json_escaped(writer, view) and gemini_put_byte(writer, 34)
+
+
+def gemini_put_json_string_prefix(
+    writer: Pointer[mut=True, GeminiResponseWriter, _],
+    prefix: StringSlice,
+    view: ProdexRichStringView,
+) -> Bool:
+    return gemini_put_byte(writer, 34) and gemini_put_literal(writer, prefix) and gemini_put_json_escaped(writer, view) and gemini_put_byte(writer, 34)
 
 
 def gemini_put_view(
@@ -167,6 +190,35 @@ def gemini_put_view(
         if not gemini_put_byte(writer, ptr[unsafe_offset=index]):
             return False
     return True
+
+
+def gemini_put_view_range(
+    writer: Pointer[mut=True, GeminiResponseWriter, _],
+    view: ProdexRichStringView,
+    start: Int64,
+    end: Int64,
+) -> Bool:
+    if start < 0 or end < start or end > Int64(view.len):
+        return False
+    if end == start:
+        return True
+    var ptr = rich_view_ptr(view)
+    for index in range(start, end):
+        if not gemini_put_byte(writer, ptr[unsafe_offset=index]):
+            return False
+    return True
+
+
+def gemini_put_array_items(
+    writer: Pointer[mut=True, GeminiResponseWriter, _],
+    view: ProdexRichStringView,
+) -> Bool:
+    if view.len < 2:
+        return False
+    var ptr = rich_view_ptr(view)
+    if ptr[unsafe_offset=0] != 91 or ptr[unsafe_offset=Int64(view.len) - 1] != 93:
+        return False
+    return gemini_put_view_range(writer, view, 1, Int64(view.len) - 1)
 
 
 def gemini_put_u64(
@@ -217,7 +269,9 @@ def gemini_put_event_prefix(
 
 def gemini_views_valid(input: ProdexGeminiResponseKernelInput) -> Bool:
     return (
-        input.response_id_present >= 0
+        input.operation >= GEMINI_RESPONSE_CREATED
+        and input.operation <= GEMINI_STREAM_OUTPUT_ITEMS
+        and input.response_id_present >= 0
         and input.response_id_present <= 1
         and input.call_id_present >= 0
         and input.call_id_present <= 1
@@ -233,6 +287,14 @@ def gemini_views_valid(input: ProdexGeminiResponseKernelInput) -> Bool:
         and input.namespace_present <= 1
         and input.total_token_count_present >= 0
         and input.total_token_count_present <= 1
+        and input.created_at_present >= 0
+        and input.created_at_present <= 1
+        and input.include_empty_usage >= 0
+        and input.include_empty_usage <= 1
+        and input.include_empty_metadata >= 0
+        and input.include_empty_metadata <= 1
+        and input.reason_present >= 0
+        and input.reason_present <= 1
         and rich_view_valid(input.response_id, GEMINI_KERNEL_MAX_BYTES)
         and rich_view_valid(input.call_id, GEMINI_KERNEL_MAX_BYTES)
         and rich_view_valid(input.name, GEMINI_KERNEL_MAX_BYTES)
@@ -249,6 +311,7 @@ def gemini_views_valid(input: ProdexGeminiResponseKernelInput) -> Bool:
         and rich_view_valid(input.signature, GEMINI_KERNEL_MAX_BYTES)
         and rich_view_valid(input.namespace, GEMINI_KERNEL_MAX_BYTES)
         and rich_view_valid(input.arguments, GEMINI_KERNEL_MAX_BYTES)
+        and rich_view_valid(input.citations, GEMINI_KERNEL_MAX_BYTES)
     )
 
 
@@ -271,6 +334,182 @@ def gemini_put_tool_item(
         if not gemini_put_literal(writer, StringSlice(',"gemini_thought_signature":')) or not gemini_put_json_string(writer, input.signature):
             return False
     return gemini_put_byte(writer, 125)
+
+
+def gemini_put_buffered_message(
+    writer: Pointer[mut=True, GeminiResponseWriter, _],
+    input: ProdexGeminiResponseKernelInput,
+) -> Bool:
+    if not gemini_put_literal(writer, StringSlice('{"type":"message","role":"assistant","content":[')):
+        return False
+    var first = True
+    if input.delta.len > 0:
+        if not gemini_put_literal(writer, StringSlice('{"type":"output_text","text":')) or not gemini_put_json_string(writer, input.delta) or not gemini_put_byte(writer, 125):
+            return False
+        first = False
+    if input.content.len > 0:
+        if not first and not gemini_put_byte(writer, 44):
+            return False
+        if not gemini_put_array_items(writer, input.content):
+            return False
+    return gemini_put_literal(writer, StringSlice("]}"))
+
+
+def gemini_put_buffered_response(
+    writer: Pointer[mut=True, GeminiResponseWriter, _],
+    input: ProdexGeminiResponseKernelInput,
+) -> Bool:
+    if not gemini_put_literal(writer, StringSlice('{"id":')) or not gemini_put_json_string(writer, input.response_id):
+        return False
+    if not gemini_put_literal(writer, StringSlice(',"object":"response","model":')) or not gemini_put_json_string(writer, input.model):
+        return False
+    if not gemini_put_literal(writer, StringSlice(',"output":[')):
+        return False
+    var has_message = input.delta.len > 0 or input.content.len > 0
+    var output_has_items = input.output.len > 2
+    if has_message:
+        if not gemini_put_buffered_message(writer, input):
+            return False
+        if output_has_items and not gemini_put_byte(writer, 44):
+            return False
+    if not gemini_put_array_items(writer, input.output):
+        return False
+    if input.citations.len > 0:
+        if (has_message or output_has_items) and not gemini_put_byte(writer, 44):
+            return False
+        if not gemini_put_literal(writer, StringSlice('{"type":"message","role":"assistant","content":[{"type":"output_text","text":')):
+            return False
+        if not gemini_put_json_string(writer, input.citations) or not gemini_put_literal(writer, StringSlice("}]}")):
+            return False
+    if not gemini_put_byte(writer, 93):
+        return False
+    if input.created_at_present == 1:
+        if not gemini_put_literal(writer, StringSlice(',"created_at":')) or not gemini_put_u64(writer, input.created_at):
+            return False
+    if input.usage.len > 0:
+        if not gemini_put_literal(writer, StringSlice(',"usage":')) or not gemini_put_view(writer, input.usage):
+            return False
+    elif input.include_empty_usage == 1 and not gemini_put_literal(writer, StringSlice(',"usage":{}')):
+        return False
+    if input.metadata.len > 0:
+        if not gemini_put_literal(writer, StringSlice(',"metadata":')) or not gemini_put_view(writer, input.metadata):
+            return False
+    elif input.include_empty_metadata == 1 and not gemini_put_literal(writer, StringSlice(',"metadata":{}')):
+        return False
+    return gemini_put_byte(writer, 125)
+
+
+def gemini_put_web_search_call(
+    writer: Pointer[mut=True, GeminiResponseWriter, _],
+    input: ProdexGeminiResponseKernelInput,
+) -> Bool:
+    if not gemini_put_literal(writer, StringSlice('{"type":"web_search_call","id":')):
+        return False
+    if not gemini_put_json_string_prefix(writer, StringSlice("ws_"), input.response_id):
+        return False
+    if not gemini_put_literal(writer, StringSlice(',"status":"completed","action":')):
+        return False
+    if input.delta.len > 0:
+        return (
+            gemini_put_literal(writer, StringSlice('{"type":"open_page","url":'))
+            and gemini_put_json_string(writer, input.delta)
+            and gemini_put_literal(writer, StringSlice(',"sources":'))
+            and gemini_put_view(writer, input.output)
+            and gemini_put_literal(writer, StringSlice("}}"))
+        )
+    return (
+        gemini_put_literal(writer, StringSlice('{"type":"search","queries":'))
+        and gemini_put_view(writer, input.content)
+        and gemini_put_literal(writer, StringSlice(',"sources":'))
+        and gemini_put_view(writer, input.output)
+        and gemini_put_literal(writer, StringSlice("}}"))
+    )
+
+
+def gemini_put_stream_assistant_message(
+    writer: Pointer[mut=True, GeminiResponseWriter, _],
+    input: ProdexGeminiResponseKernelInput,
+) -> Bool:
+    if not gemini_put_literal(writer, StringSlice('{"role":"assistant","content":')):
+        return False
+    if input.delta.len > 0:
+        if not gemini_put_json_string(writer, input.delta):
+            return False
+    elif input.arguments.len > 0:
+        if not gemini_put_literal(writer, StringSlice('""')):
+            return False
+    elif not gemini_put_literal(writer, StringSlice("null")):
+        return False
+    if input.reason.len > 0:
+        if not gemini_put_literal(writer, StringSlice(',"reasoning_content":')) or not gemini_put_json_string(writer, input.reason):
+            return False
+    if input.content.len > 0:
+        if not gemini_put_literal(writer, StringSlice(',"gemini_media_content":')) or not gemini_put_view(writer, input.content):
+            return False
+    if input.item.len > 0:
+        if not gemini_put_literal(writer, StringSlice(',"gemini_native_parts":')) or not gemini_put_view(writer, input.item):
+            return False
+    if input.output.len > 0:
+        if not gemini_put_literal(writer, StringSlice(',"gemini_image_generation":')) or not gemini_put_view(writer, input.output):
+            return False
+    if input.metadata.len > 0:
+        if not gemini_put_literal(writer, StringSlice(',"gemini_metadata":')) or not gemini_put_view(writer, input.metadata):
+            return False
+    if input.arguments.len > 0:
+        if not gemini_put_literal(writer, StringSlice(',"tool_calls":')) or not gemini_put_view(writer, input.arguments):
+            return False
+    return gemini_put_byte(writer, 125)
+
+
+def gemini_put_stream_output_items(
+    writer: Pointer[mut=True, GeminiResponseWriter, _],
+    input: ProdexGeminiResponseKernelInput,
+) -> Bool:
+    if not gemini_put_byte(writer, 91):
+        return False
+    var first = True
+    if input.response.len > 0:
+        if not gemini_put_view(writer, input.response):
+            return False
+        first = False
+    if input.output.len > 2:
+        if not first and not gemini_put_byte(writer, 44):
+            return False
+        if not gemini_put_array_items(writer, input.output):
+            return False
+        first = False
+    if input.delta.len > 0 or input.content.len > 0:
+        if not first and not gemini_put_byte(writer, 44):
+            return False
+        if not gemini_put_literal(writer, StringSlice('{"type":"message","role":"assistant","content":[')):
+            return False
+        var content_first = True
+        if input.delta.len > 0:
+            if not gemini_put_literal(writer, StringSlice('{"type":"output_text","text":')) or not gemini_put_json_string(writer, input.delta) or not gemini_put_byte(writer, 125):
+                return False
+            content_first = False
+        if input.content.len > 0:
+            if not content_first and not gemini_put_byte(writer, 44):
+                return False
+            if not gemini_put_array_items(writer, input.content):
+                return False
+        if not gemini_put_literal(writer, StringSlice("]}")):
+            return False
+        first = False
+    if input.reason_present == 1:
+        if not first and not gemini_put_byte(writer, 44):
+            return False
+        if not gemini_put_literal(writer, StringSlice('{"type":"message","role":"assistant","content":[{"type":"output_text","text":')):
+            return False
+        if not gemini_put_json_string(writer, input.reason) or not gemini_put_literal(writer, StringSlice("}]}")):
+            return False
+        first = False
+    if input.arguments.len > 2:
+        if not first and not gemini_put_byte(writer, 44):
+            return False
+        if not gemini_put_array_items(writer, input.arguments):
+            return False
+    return gemini_put_byte(writer, 93)
 
 
 def gemini_write_operation(
@@ -419,6 +658,16 @@ def gemini_write_operation(
             and gemini_put_view(writer, input.content)
             and gemini_put_byte(writer, 125)
         )
+    if operation == GEMINI_BUFFERED_RESPONSE:
+        return gemini_put_buffered_response(writer, input)
+    if operation == GEMINI_CITATION_TEXT:
+        return gemini_put_json_string_prefix(writer, StringSlice("Citations:\\n"), input.delta)
+    if operation == GEMINI_WEB_SEARCH_CALL:
+        return gemini_put_web_search_call(writer, input)
+    if operation == GEMINI_STREAM_ASSISTANT_MESSAGE:
+        return gemini_put_stream_assistant_message(writer, input)
+    if operation == GEMINI_STREAM_OUTPUT_ITEMS:
+        return gemini_put_stream_output_items(writer, input)
     if operation == GEMINI_RESPONSE_VALUE:
         if not gemini_put_literal(writer, StringSlice('{"id":')) or not gemini_put_json_string(writer, input.response_id):
             return False

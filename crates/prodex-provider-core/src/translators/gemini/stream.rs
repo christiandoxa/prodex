@@ -371,55 +371,84 @@ pub fn gemini_provider_core_stream_chat_assistant_message(
     {
         return None;
     }
-    let mut assistant = json!({
-        "role": "assistant",
-        "content": if output_text.is_empty() {
-            if tool_calls.is_empty() {
-                Value::Null
-            } else {
-                Value::String(String::new())
+    let tool_call_items = tool_calls
+        .iter()
+        .map(|tool_call| {
+            let mut item = json!({
+                "id": tool_call.call_id,
+                "type": "function",
+                "function": {
+                    "name": tool_call.name,
+                    "arguments": tool_call.arguments,
+                },
+            });
+            if let Some(signature) = tool_call.thought_signature.as_deref() {
+                item["gemini_thought_signature"] = Value::String(signature.to_string());
             }
-        } else {
-            Value::String(output_text.to_string())
-        },
-    });
-    if !reasoning_content.is_empty() {
-        assistant["reasoning_content"] = Value::String(reasoning_content.to_string());
+            item
+        })
+        .collect::<Vec<_>>();
+    #[cfg(feature = "mojo")]
+    {
+        let media_content = (!media_content_items.is_empty()).then(|| {
+            serde_json::to_string(media_content_items).expect("stream media content serializes")
+        });
+        let native_parts = (!native_parts.is_empty())
+            .then(|| serde_json::to_string(native_parts).expect("stream native parts serialize"));
+        let image_generation = (!image_generation_items.is_empty()).then(|| {
+            serde_json::to_string(image_generation_items)
+                .expect("stream image generation items serialize")
+        });
+        let metadata = metadata.map(|value| {
+            serde_json::to_string(value).expect("stream assistant metadata serializes")
+        });
+        let tool_calls = (!tool_call_items.is_empty())
+            .then(|| serde_json::to_string(&tool_call_items).expect("stream tool calls serialize"));
+        let mut input =
+            GeminiResponseKernelInput::new(GeminiResponseKernelOperation::StreamAssistantMessage);
+        input.delta = (!output_text.is_empty()).then_some(output_text);
+        input.reason = (!reasoning_content.is_empty()).then_some(reasoning_content);
+        input.content = media_content.as_deref();
+        input.item = native_parts.as_deref();
+        input.output = image_generation.as_deref();
+        input.metadata = metadata.as_deref();
+        input.arguments = tool_calls.as_deref();
+        Some(gemini_mojo_value(input))
     }
-    if !media_content_items.is_empty() {
-        assistant["gemini_media_content"] = Value::Array(media_content_items.to_vec());
+    #[cfg(not(feature = "mojo"))]
+    {
+        let mut assistant = json!({
+            "role": "assistant",
+            "content": if output_text.is_empty() {
+                if tool_calls.is_empty() {
+                    Value::Null
+                } else {
+                    Value::String(String::new())
+                }
+            } else {
+                Value::String(output_text.to_string())
+            },
+        });
+        if !reasoning_content.is_empty() {
+            assistant["reasoning_content"] = Value::String(reasoning_content.to_string());
+        }
+        if !media_content_items.is_empty() {
+            assistant["gemini_media_content"] = Value::Array(media_content_items.to_vec());
+        }
+        if !native_parts.is_empty() {
+            assistant["gemini_native_parts"] = Value::Array(native_parts.to_vec());
+        }
+        if !image_generation_items.is_empty() {
+            assistant["gemini_image_generation"] = Value::Array(image_generation_items.to_vec());
+        }
+        if let Some(metadata) = metadata {
+            assistant["gemini_metadata"] = metadata.clone();
+        }
+        if !tool_calls.is_empty() {
+            assistant["tool_calls"] = Value::Array(tool_call_items);
+        }
+        Some(assistant)
     }
-    if !native_parts.is_empty() {
-        assistant["gemini_native_parts"] = Value::Array(native_parts.to_vec());
-    }
-    if !image_generation_items.is_empty() {
-        assistant["gemini_image_generation"] = Value::Array(image_generation_items.to_vec());
-    }
-    if let Some(metadata) = metadata {
-        assistant["gemini_metadata"] = metadata.clone();
-    }
-    if !tool_calls.is_empty() {
-        assistant["tool_calls"] = Value::Array(
-            tool_calls
-                .iter()
-                .map(|tool_call| {
-                    let mut item = json!({
-                        "id": tool_call.call_id,
-                        "type": "function",
-                        "function": {
-                            "name": tool_call.name,
-                            "arguments": tool_call.arguments,
-                        },
-                    });
-                    if let Some(signature) = tool_call.thought_signature.as_deref() {
-                        item["gemini_thought_signature"] = Value::String(signature.to_string());
-                    }
-                    item
-                })
-                .collect(),
-        );
-    }
-    Some(assistant)
 }
 
 pub fn gemini_provider_core_stream_output_items(
@@ -431,29 +460,68 @@ pub fn gemini_provider_core_stream_output_items(
     tool_calls: &[GeminiProviderCoreStreamToolCall],
     mut blocked_tool_call_message: impl FnMut(&str, &Value) -> Option<String>,
 ) -> Vec<Value> {
-    let mut output = Vec::new();
-    if let Some(item) = web_search_call {
-        output.push(item.clone());
+    #[cfg(feature = "mojo")]
+    {
+        let mut tool_call_items = Vec::new();
+        for tool_call in tool_calls {
+            gemini_append_stream_tool_call(
+                &mut tool_call_items,
+                tool_call,
+                &mut blocked_tool_call_message,
+            );
+        }
+        let web_search_call = web_search_call
+            .map(|item| serde_json::to_string(item).expect("stream web search call serializes"));
+        let image_generation_items = (!image_generation_items.is_empty()).then(|| {
+            serde_json::to_string(image_generation_items)
+                .expect("stream image generation items serialize")
+        });
+        let media_content_items = (!media_content_items.is_empty()).then(|| {
+            serde_json::to_string(media_content_items).expect("stream media content serializes")
+        });
+        let tool_call_items = (!tool_call_items.is_empty()).then(|| {
+            serde_json::to_string(&tool_call_items).expect("stream output tool calls serialize")
+        });
+        let mut input =
+            GeminiResponseKernelInput::new(GeminiResponseKernelOperation::StreamOutputItems);
+        input.response = web_search_call.as_deref();
+        input.output = image_generation_items.as_deref();
+        input.delta = (!output_text.is_empty()).then_some(output_text);
+        input.content = media_content_items.as_deref();
+        input.reason = citation_text;
+        input.reason_present = citation_text.is_some();
+        input.arguments = tool_call_items.as_deref();
+        let value = gemini_mojo_value(input);
+        value.as_array().cloned().unwrap_or_else(|| {
+            panic!("Mojo Gemini stream output-items kernel returned a non-array")
+        })
     }
-    output.extend(image_generation_items.iter().cloned());
-    if !output_text.is_empty() {
-        let mut content = vec![gemini_provider_core_stream_output_text_content(output_text)];
-        content.extend(media_content_items.iter().cloned());
-        output.push(gemini_provider_core_stream_output_message_item(content));
-    } else if !media_content_items.is_empty() {
-        output.push(gemini_provider_core_stream_output_message_item(
-            media_content_items.to_vec(),
-        ));
+    #[cfg(not(feature = "mojo"))]
+    {
+        let mut output = Vec::new();
+        if let Some(item) = web_search_call {
+            output.push(item.clone());
+        }
+        output.extend(image_generation_items.iter().cloned());
+        if !output_text.is_empty() {
+            let mut content = vec![gemini_provider_core_stream_output_text_content(output_text)];
+            content.extend(media_content_items.iter().cloned());
+            output.push(gemini_provider_core_stream_output_message_item(content));
+        } else if !media_content_items.is_empty() {
+            output.push(gemini_provider_core_stream_output_message_item(
+                media_content_items.to_vec(),
+            ));
+        }
+        if let Some(citations) = citation_text {
+            output.push(gemini_provider_core_stream_output_message_item(vec![
+                gemini_provider_core_stream_output_text_content(citations),
+            ]));
+        }
+        for tool_call in tool_calls {
+            gemini_append_stream_tool_call(&mut output, tool_call, &mut blocked_tool_call_message);
+        }
+        output
     }
-    if let Some(citations) = citation_text {
-        output.push(gemini_provider_core_stream_output_message_item(vec![
-            gemini_provider_core_stream_output_text_content(citations),
-        ]));
-    }
-    for tool_call in tool_calls {
-        gemini_append_stream_tool_call(&mut output, tool_call, &mut blocked_tool_call_message);
-    }
-    output
 }
 
 fn gemini_append_stream_tool_call(
