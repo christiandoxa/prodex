@@ -20,6 +20,12 @@ use super::{
 use anyhow::Result;
 use std::time::{Duration, Instant};
 
+enum RuntimeWebsocketBudgetDecision {
+    Proceed,
+    Continue,
+    Finished,
+}
+
 #[cfg(test)]
 use super::super::{
     RuntimeUpstreamFailureResponse, RuntimeWebsocketErrorPayload, RuntimeWebsocketSessionState,
@@ -39,19 +45,14 @@ impl<'a> RuntimeWebsocketTextMessageFlow<'a> {
                 self.shared,
                 RuntimeRouteKind::Websocket,
             );
-            if self.precommit_budget_exhausted(
+            match self.precommit_budget_decision(
                 selection_started_at,
                 selection_attempts,
                 pressure_mode,
             )? {
-                match self.handle_precommit_budget_exhausted(
-                    selection_started_at,
-                    selection_attempts,
-                    pressure_mode,
-                )? {
-                    RuntimeWebsocketMessageLoopAction::Continue => continue,
-                    RuntimeWebsocketMessageLoopAction::Finished => return Ok(()),
-                }
+                RuntimeWebsocketBudgetDecision::Proceed => {}
+                RuntimeWebsocketBudgetDecision::Continue => continue,
+                RuntimeWebsocketBudgetDecision::Finished => return Ok(()),
             }
 
             let Some(candidate_name) = self.select_candidate()? else {
@@ -128,6 +129,35 @@ impl<'a> RuntimeWebsocketTextMessageFlow<'a> {
                 Ok(true)
             }
         }
+    }
+
+    fn precommit_budget_decision(
+        &mut self,
+        selection_started_at: Instant,
+        selection_attempts: usize,
+        pressure_mode: bool,
+    ) -> Result<RuntimeWebsocketBudgetDecision> {
+        if !self.precommit_budget_exhausted(
+            selection_started_at,
+            selection_attempts,
+            pressure_mode,
+        )? {
+            return Ok(RuntimeWebsocketBudgetDecision::Proceed);
+        }
+        Ok(
+            match self.handle_precommit_budget_exhausted(
+                selection_started_at,
+                selection_attempts,
+                pressure_mode,
+            )? {
+                RuntimeWebsocketMessageLoopAction::Continue => {
+                    RuntimeWebsocketBudgetDecision::Continue
+                }
+                RuntimeWebsocketMessageLoopAction::Finished => {
+                    RuntimeWebsocketBudgetDecision::Finished
+                }
+            },
+        )
     }
 
     fn precommit_budget_exhausted(
