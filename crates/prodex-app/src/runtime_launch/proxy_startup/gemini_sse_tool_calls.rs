@@ -4,6 +4,10 @@ use super::super::super::provider_bridge::{
 use super::RuntimeGeminiSseState;
 use super::runtime_gemini_blocked_tool_call_message_with_config;
 use prodex_domain::CallId;
+#[cfg(feature = "mojo-core")]
+use prodex_mojo_core::provider_constraints::{
+    GeminiToolCallIndexBinding, GeminiToolCallIndexRecord, gemini_tool_call_index,
+};
 use prodex_provider_core::{
     gemini_provider_core_function_call_arguments_delta_event,
     gemini_provider_core_function_call_arguments_delta_event_with_thought_signature,
@@ -126,6 +130,33 @@ impl RuntimeGeminiSseState {
         events
     }
 
+    #[cfg(feature = "mojo-core")]
+    fn function_call_index(
+        &self,
+        part_index: usize,
+        explicit_call_id: Option<&str>,
+        name: &str,
+    ) -> usize {
+        let records = self
+            .tool_calls
+            .iter()
+            .map(|(index, tool_call)| GeminiToolCallIndexRecord {
+                index: *index,
+                explicit_call_id: tool_call.explicit_call_id,
+                done: tool_call.done,
+                name: tool_call.name.as_deref(),
+            })
+            .collect::<Vec<_>>();
+        let bindings = self
+            .tool_call_indices_by_id
+            .iter()
+            .map(|(id, index)| GeminiToolCallIndexBinding { id, index: *index })
+            .collect::<Vec<_>>();
+        gemini_tool_call_index(part_index, explicit_call_id, name, &records, &bindings)
+            .unwrap_or_else(|error| panic!("Mojo Gemini tool-call index failed: {error:?}"))
+    }
+
+    #[cfg(not(feature = "mojo-core"))]
     fn function_call_index(
         &self,
         part_index: usize,

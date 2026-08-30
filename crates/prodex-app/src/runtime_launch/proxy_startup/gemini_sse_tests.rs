@@ -463,6 +463,54 @@ fn gemini_sse_reader_merges_repeated_function_call_without_id() {
 }
 
 #[test]
+fn gemini_sse_reader_merges_repeated_function_call_when_part_index_changes() {
+    let first = serde_json::json!({
+        "responseId": "resp_shell_part",
+        "modelVersion": "gemini-2.5-pro",
+        "candidates": [{
+            "content": {
+                "parts": [{"functionCall": {"name": "shell", "args": {"cmd": "l"}}}]
+            }
+        }]
+    });
+    let second = serde_json::json!({
+        "responseId": "resp_shell_part",
+        "modelVersion": "gemini-2.5-pro",
+        "candidates": [{
+            "content": {
+                "parts": [
+                    {"text": "continuing"},
+                    {"functionCall": {"name": "shell", "args": {"cmd": "ls"}}}
+                ]
+            },
+            "finishReason": "STOP"
+        }]
+    });
+    let stream = format!("data: {first}\n\ndata: {second}\n\ndata: [DONE]\n\n");
+    let mut reader = RuntimeGeminiGenerateSseReader::new(
+        std::io::Cursor::new(stream.as_bytes()),
+        9,
+        Vec::new(),
+        conversation_store(),
+        None,
+    );
+    let mut output = String::new();
+    reader.read_to_string(&mut output).unwrap();
+
+    let call_ids = output
+        .split("\"call_id\":\"")
+        .skip(1)
+        .filter_map(|part| part.split('"').next())
+        .filter(|id| id.starts_with("call_gemini_"))
+        .collect::<Vec<_>>();
+    assert!(!call_ids.is_empty());
+    assert!(call_ids.iter().all(|id| *id == call_ids[0]));
+    assert!(output.contains("\"delta\":\"{\\\"cmd\\\":\\\"l\\\"}\""));
+    assert!(output.contains("\"delta\":\"{\\\"cmd\\\":\\\"ls\\\"}\""));
+    assert!(output.contains("\"arguments\":\"{\\\"cmd\\\":\\\"rtk ls\\\"}\""));
+}
+
+#[test]
 fn gemini_sse_reader_normalizes_unified_diff_apply_patch() {
     let unified_diff = "\
 --- a/crates/prodex-cli/src/presidio.rs

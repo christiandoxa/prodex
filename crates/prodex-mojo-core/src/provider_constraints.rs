@@ -191,10 +191,14 @@ pub struct Input {
 }
 
 mod gemini_request;
+mod gemini_sse_tool_call_index;
 mod planning;
 pub use gemini_request::{
     GEMINI_REQUEST_FIELD_PLAN_MAX_FIELDS, GeminiRequestField, GeminiRequestFieldTarget,
     gemini_request_field_plan,
+};
+pub use gemini_sse_tool_call_index::{
+    GeminiToolCallIndexBinding, GeminiToolCallIndexRecord, gemini_tool_call_index,
 };
 pub use planning::{
     Preclassification, PreclassificationInput, RequirementResolution, RequirementResolutionInput,

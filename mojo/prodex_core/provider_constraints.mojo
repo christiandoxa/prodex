@@ -831,3 +831,190 @@ def prodex_provider_constraints_evaluate_v2(
         unsafe_offset=OUTPUT_I64_ADJUSTMENT_REASON_PRESENT
     ] = result_adjustment_reason_present
     return 0
+
+
+@fieldwise_init
+struct GeminiToolCallStringView(Copyable):
+    var ptr: UInt64
+    var len: UInt64
+
+
+@fieldwise_init
+struct GeminiToolCallIndexRecord(Copyable):
+    var index: UInt64
+    var explicit_call_id: Int64
+    var done: Int64
+    var name_present: Int64
+    var name: GeminiToolCallStringView
+
+
+@fieldwise_init
+struct GeminiToolCallIndexBinding(Copyable):
+    var id: GeminiToolCallStringView
+    var index: UInt64
+
+
+comptime GEMINI_TOOL_CALL_INDEX_ABI_VERSION: Int64 = 1
+comptime GEMINI_TOOL_CALL_INDEX_UINT64_MAX: UInt64 = 18446744073709551615
+comptime GEMINI_TOOL_CALL_INDEX_INT64_MAX: UInt64 = 9223372036854775807
+
+
+def gemini_tool_call_string_view_valid(view: GeminiToolCallStringView) -> Bool:
+    return view.len <= GEMINI_TOOL_CALL_INDEX_INT64_MAX and (
+        view.len == 0 or view.ptr != 0
+    )
+
+
+def gemini_tool_call_string_view_equals(
+    left: GeminiToolCallStringView, right: GeminiToolCallStringView
+) -> Bool:
+    if left.len != right.len:
+        return False
+    if left.len == 0:
+        return True
+    if left.ptr == 0 or right.ptr == 0:
+        return False
+    var left_ptr = Pointer[mut=False, UInt8, ImmUntrackedOrigin](
+        unsafe_from_address=Int(left.ptr)
+    )
+    var right_ptr = Pointer[mut=False, UInt8, ImmUntrackedOrigin](
+        unsafe_from_address=Int(right.ptr)
+    )
+    for index in range(Int64(left.len)):
+        if left_ptr[unsafe_offset=index] != right_ptr[unsafe_offset=index]:
+            return False
+    return True
+
+
+def gemini_tool_call_index_contains(
+    records: Pointer[mut=False, GeminiToolCallIndexRecord, _],
+    record_count: Int64,
+    index: UInt64,
+) -> Bool:
+    for offset in range(record_count):
+        if records[unsafe_offset=offset].index == index:
+            return True
+    return False
+
+
+@export("prodex_provider_constraints_gemini_tool_call_index_v1")
+def prodex_provider_constraints_gemini_tool_call_index_v1(
+    abi_version: Int64,
+    part_index: UInt64,
+    explicit_call_id_present: Int64,
+    explicit_call_id_address: UInt64,
+    name_address: UInt64,
+    records_address: UInt64,
+    record_count: Int64,
+    bindings_address: UInt64,
+    binding_count: Int64,
+    output_index_address: UInt64,
+) abi("C") -> Int64:
+    if abi_version != GEMINI_TOOL_CALL_INDEX_ABI_VERSION:
+        return ABI_STATUS_MISMATCH
+    if (
+        explicit_call_id_present < 0
+        or explicit_call_id_present > 1
+        or record_count < 0
+        or binding_count < 0
+        or explicit_call_id_address == 0
+        or name_address == 0
+        or output_index_address == 0
+    ):
+        return ABI_STATUS_INVALID_INPUT
+    if record_count > 0 and records_address == 0:
+        return ABI_STATUS_INVALID_INPUT
+    if binding_count > 0 and bindings_address == 0:
+        return ABI_STATUS_INVALID_INPUT
+
+    var explicit_call_id = Pointer[
+        mut=False, GeminiToolCallStringView, ImmUntrackedOrigin
+    ](unsafe_from_address=Int(explicit_call_id_address))[].copy()
+    var name = Pointer[
+        mut=False, GeminiToolCallStringView, ImmUntrackedOrigin
+    ](unsafe_from_address=Int(name_address))[].copy()
+    if (
+        not gemini_tool_call_string_view_valid(explicit_call_id)
+        or not gemini_tool_call_string_view_valid(name)
+    ):
+        return ABI_STATUS_INVALID_INPUT
+    if explicit_call_id_present == 1 and explicit_call_id.len == 0:
+        return ABI_STATUS_INVALID_INPUT
+
+    var output = Pointer[mut=True, UInt64, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_index_address)
+    )
+    output[] = 0
+    var records = Pointer[
+        mut=False, GeminiToolCallIndexRecord, ImmUntrackedOrigin
+    ](unsafe_from_address=Int(records_address))
+    var bindings = Pointer[
+        mut=False, GeminiToolCallIndexBinding, ImmUntrackedOrigin
+    ](unsafe_from_address=Int(bindings_address))
+
+    var has_previous_index = False
+    var previous_index: UInt64 = 0
+    for offset in range(record_count):
+        var record = records[unsafe_offset=offset].copy()
+        if (
+            record.explicit_call_id < 0
+            or record.explicit_call_id > 1
+            or record.done < 0
+            or record.done > 1
+            or record.name_present < 0
+            or record.name_present > 1
+            or has_previous_index and record.index <= previous_index
+            or not gemini_tool_call_string_view_valid(record.name)
+            or record.name_present == 0 and record.name.len != 0
+        ):
+            return ABI_STATUS_INVALID_INPUT
+        previous_index = record.index
+        has_previous_index = True
+    for offset in range(binding_count):
+        if not gemini_tool_call_string_view_valid(bindings[unsafe_offset=offset].id):
+            return ABI_STATUS_INVALID_INPUT
+    if explicit_call_id_present == 1:
+        for offset in range(binding_count):
+            var binding = bindings[unsafe_offset=offset].copy()
+            if gemini_tool_call_string_view_equals(binding.id, explicit_call_id):
+                output[] = binding.index
+                return 0
+    elif record_count > 0:
+        for offset in range(record_count):
+            var record = records[unsafe_offset=offset].copy()
+            if (
+                record.index == part_index
+                and record.done == 0
+                and record.explicit_call_id == 0
+                and (
+                    record.name_present == 0
+                    or gemini_tool_call_string_view_equals(record.name, name)
+                )
+            ):
+                output[] = part_index
+                return 0
+        for offset in range(record_count):
+            var record = records[unsafe_offset=offset].copy()
+            if (
+                record.done == 0
+                and record.explicit_call_id == 0
+                and record.name_present == 1
+                and gemini_tool_call_string_view_equals(record.name, name)
+            ):
+                output[] = record.index
+                return 0
+    if not gemini_tool_call_index_contains(records, record_count, part_index):
+        output[] = part_index
+        return 0
+
+    var candidate = UInt64(record_count)
+    var attempts: Int64 = 0
+    while attempts <= record_count:
+        if not gemini_tool_call_index_contains(records, record_count, candidate):
+            output[] = candidate
+            return 0
+        if candidate == GEMINI_TOOL_CALL_INDEX_UINT64_MAX:
+            return ABI_STATUS_INVALID_INPUT
+        candidate += 1
+        attempts += 1
+    return ABI_STATUS_INVALID_INPUT
