@@ -229,72 +229,23 @@ pub(crate) fn runtime_best_auto_redeem_profile_name(
             if excluded_profiles.contains(&name) {
                 continue;
             }
-            let Some(profile) = runtime.state.profiles.get(&name) else {
-                continue;
-            };
-            if !matches!(profile.provider, crate::ProfileProvider::Openai) {
-                continue;
-            }
-            if runtime_profile_auth_failure_active_from_map(&runtime.profile_health, &name, now) {
-                continue;
-            }
-            if runtime_profile_transport_backoff_until_from_map(
-                &runtime.profile_transport_backoff_until,
-                &name,
-                route_kind,
-                now,
-            )
-            .is_some()
-                || runtime_profile_route_circuit_open_until(&runtime, &name, route_kind, now)
-                    .is_some()
-            {
-                continue;
-            }
-            let inflight_count = runtime_profile_inflight_sort_key(&name, &profile_inflight);
-            if inflight_count >= inflight_soft_limit {
-                continue;
-            }
-            let Some(probe) = runtime.profile_probe_cache.get(&name) else {
-                continue;
-            };
-            if !probe.auth.quota_compatible {
-                continue;
-            }
-            let Some(usage) = probe.result.as_ref().ok() else {
-                continue;
-            };
-            let quota_summary = runtime_quota_summary_for_route(usage, route_kind);
-            let health_sort_key = runtime_profile_health_score(&runtime, &name, now, route_kind);
             // ponytail: fixed 256-row ABI bound; raise only with a versioned capacity review.
             if candidates.len() >= prodex_mojo_core::runtime::RUNTIME_AUTO_REDEEM_PLAN_MAX_COUNT {
                 return Err(anyhow::anyhow!(
                     "auto-redeem candidate count exceeds Mojo planner bound"
                 ));
             }
-            candidates.push((
+            if let Some(candidate) = runtime_auto_redeem_candidate(
+                &runtime,
                 name,
-                prodex_mojo_core::runtime::AutoRedeemCandidateInput {
-                    plan_type: usage.plan_type.as_deref(),
-                    available_count: usage
-                        .rate_limit_reset_credits
-                        .as_ref()
-                        .map(|credits| credits.available_count)
-                        .unwrap_or_default(),
-                    weekly_status: match quota_summary.weekly.status {
-                        prodex_quota::RuntimeQuotaWindowStatus::Ready => 0,
-                        prodex_quota::RuntimeQuotaWindowStatus::Thin => 1,
-                        prodex_quota::RuntimeQuotaWindowStatus::Critical => 2,
-                        prodex_quota::RuntimeQuotaWindowStatus::Exhausted => 3,
-                        prodex_quota::RuntimeQuotaWindowStatus::Unknown => 4,
-                    },
-                    weekly_reset_at: quota_summary.weekly.reset_at,
-                    inflight_count: i64::try_from(inflight_count)
-                        .map_err(|_| anyhow::anyhow!("auto-redeem in-flight count exceeds ABI"))?,
-                    health_sort_key: i64::from(health_sort_key),
-                    order_index: i64::try_from(order_index)
-                        .map_err(|_| anyhow::anyhow!("auto-redeem order exceeds ABI"))?,
-                },
-            ));
+                order_index,
+                route_kind,
+                now,
+                inflight_soft_limit,
+                &profile_inflight,
+            )? {
+                candidates.push(candidate);
+            }
         }
         let inputs = candidates
             .iter()
@@ -304,4 +255,65 @@ pub(crate) fn runtime_best_auto_redeem_profile_name(
             .map_err(|error| anyhow::anyhow!("Mojo auto-redeem planner failed: {error:?}"))?;
         Ok(selected.map(|index| candidates[index].0.clone()))
     }
+}
+
+#[cfg(feature = "mojo-quota")]
+fn runtime_auto_redeem_candidate<'a>(
+    runtime: &'a RuntimeRotationState,
+    name: String,
+    order_index: usize,
+    route_kind: RuntimeRouteKind,
+    now: i64,
+    inflight_soft_limit: usize,
+    profile_inflight: &BTreeMap<String, usize>,
+) -> Result<
+    Option<(
+        String,
+        prodex_mojo_core::runtime::AutoRedeemCandidateInput<'a>,
+    )>,
+> {
+    if !runtime_auto_redeem_profile_is_available(
+        runtime,
+        &name,
+        route_kind,
+        now,
+        inflight_soft_limit,
+        profile_inflight,
+    ) {
+        return Ok(None);
+    }
+    let Some(probe) = runtime.profile_probe_cache.get(&name) else {
+        return Ok(None);
+    };
+    if !probe.auth.quota_compatible {
+        return Ok(None);
+    }
+    let Some(usage) = probe.result.as_ref().ok() else {
+        return Ok(None);
+    };
+    let quota_summary = runtime_quota_summary_for_route(usage, route_kind);
+    let inflight_count = runtime_profile_inflight_sort_key(&name, profile_inflight);
+    let health_sort_key = runtime_profile_health_score(runtime, &name, now, route_kind);
+    let input = prodex_mojo_core::runtime::AutoRedeemCandidateInput {
+        plan_type: usage.plan_type.as_deref(),
+        available_count: usage
+            .rate_limit_reset_credits
+            .as_ref()
+            .map(|credits| credits.available_count)
+            .unwrap_or_default(),
+        weekly_status: match quota_summary.weekly.status {
+            prodex_quota::RuntimeQuotaWindowStatus::Ready => 0,
+            prodex_quota::RuntimeQuotaWindowStatus::Thin => 1,
+            prodex_quota::RuntimeQuotaWindowStatus::Critical => 2,
+            prodex_quota::RuntimeQuotaWindowStatus::Exhausted => 3,
+            prodex_quota::RuntimeQuotaWindowStatus::Unknown => 4,
+        },
+        weekly_reset_at: quota_summary.weekly.reset_at,
+        inflight_count: i64::try_from(inflight_count)
+            .map_err(|_| anyhow::anyhow!("auto-redeem in-flight count exceeds ABI"))?,
+        health_sort_key: i64::from(health_sort_key),
+        order_index: i64::try_from(order_index)
+            .map_err(|_| anyhow::anyhow!("auto-redeem order exceeds ABI"))?,
+    };
+    Ok(Some((name, input)))
 }

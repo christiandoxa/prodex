@@ -155,21 +155,53 @@ pub fn plan_dynamic_catalog(
     if status != 0 {
         return Err(status_error(status, 6, result.issue_kind, 0, 0));
     }
+    validate_catalog_plan_result(&result, choices.len(), output_efforts.len(), output.len())?;
+    let choice_count = result.choices_written as usize;
+    let output = &output[..result.output_written as usize];
+    let output_efforts = &output_efforts[..result.efforts_written as usize];
+    validate_catalog_choice_sentinels(&choices, choice_count)?;
+    let planned = (1..choice_count - 1)
+        .map(|index| {
+            planned_catalog_model(
+                index,
+                models,
+                &choices,
+                &output_ids,
+                &output_labels,
+                output_efforts,
+                output,
+            )
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(CatalogChoicesPlan { models: planned })
+}
+
+fn validate_catalog_plan_result(
+    result: &RichCatalogPlanResult,
+    choice_capacity: usize,
+    effort_capacity: usize,
+    output_capacity: usize,
+) -> Result<(), MojoError> {
     if result.abi_version != RICH_ABI_VERSION
         || result.choices_written < 2
-        || result.choices_written as usize > choices.len()
+        || result.choices_written as usize > choice_capacity
         || result.required_choices != result.choices_written
         || result.efforts_written < 0
-        || result.efforts_written as usize > output_efforts.len()
+        || result.efforts_written as usize > effort_capacity
         || result.required_efforts != result.efforts_written
         || result.output_written < 0
-        || result.output_written as usize > output.len()
+        || result.output_written as usize > output_capacity
         || result.required_output != result.output_written
     {
         return Err(MojoError::InvalidOutput);
     }
-    let choice_count = result.choices_written as usize;
-    let output = &output[..result.output_written as usize];
+    Ok(())
+}
+
+fn validate_catalog_choice_sentinels(
+    choices: &[RichCatalogPlanChoice],
+    choice_count: usize,
+) -> Result<(), MojoError> {
     if choices[0].kind != CATALOG_CHOICE_PROVIDER_DEFAULT
         || choices[0].index != -1
         || choices[choice_count - 1].kind != CATALOG_CHOICE_CUSTOM
@@ -177,50 +209,65 @@ pub fn plan_dynamic_catalog(
     {
         return Err(MojoError::InvalidOutput);
     }
-    let mut planned = Vec::with_capacity(choice_count.saturating_sub(2));
-    for index in 1..choice_count - 1 {
-        let choice = choices[index];
-        if choice.kind != CATALOG_CHOICE_CATALOG {
-            return Err(MojoError::InvalidOutput);
-        }
-        let model_index = usize::try_from(choice.index)
-            .ok()
-            .filter(|index| *index < models.len())
-            .ok_or(MojoError::InvalidOutput)?;
-        let id = checked_slice_text(output, output_ids[index])?.ok_or(MojoError::InvalidOutput)?;
-        let expected_id = models[model_index].id.trim();
-        if id != expected_id {
-            return Err(MojoError::InvalidOutput);
-        }
-        let label =
-            checked_slice_text(output, output_labels[index])?.ok_or(MojoError::InvalidOutput)?;
-        if label != models[model_index].label.trim() {
-            return Err(MojoError::InvalidOutput);
-        }
-        let effort_count =
-            usize::try_from(choice.effort_count).map_err(|_| MojoError::InvalidOutput)?;
-        let efforts = if choice.effort_start < 0 {
-            if effort_count != 0 {
-                return Err(MojoError::InvalidOutput);
-            }
-            Vec::new()
-        } else {
-            let effort_start =
-                usize::try_from(choice.effort_start).map_err(|_| MojoError::InvalidOutput)?;
-            let effort_end = effort_start
-                .checked_add(effort_count)
-                .ok_or(MojoError::InvalidOutput)?;
-            if effort_end > result.efforts_written as usize {
-                return Err(MojoError::InvalidOutput);
-            }
-            output_efforts[effort_start..effort_end]
-                .iter()
-                .map(|effort| checked_slice_text(output, *effort)?.ok_or(MojoError::InvalidOutput))
-                .collect::<Result<Vec<_>, _>>()?
-        };
-        planned.push(CatalogPlannedModel { id, label, efforts });
+    Ok(())
+}
+
+fn planned_catalog_model(
+    index: usize,
+    models: &[CatalogPlanModel<'_>],
+    choices: &[RichCatalogPlanChoice],
+    output_ids: &[RichSlice],
+    output_labels: &[RichSlice],
+    output_efforts: &[RichSlice],
+    output: &[u8],
+) -> Result<CatalogPlannedModel, MojoError> {
+    let choice = choices[index];
+    if choice.kind != CATALOG_CHOICE_CATALOG {
+        return Err(MojoError::InvalidOutput);
     }
-    Ok(CatalogChoicesPlan { models: planned })
+    let model_index = usize::try_from(choice.index)
+        .ok()
+        .filter(|index| *index < models.len())
+        .ok_or(MojoError::InvalidOutput)?;
+    let id = checked_slice_text(output, output_ids[index])?.ok_or(MojoError::InvalidOutput)?;
+    if id != models[model_index].id.trim() {
+        return Err(MojoError::InvalidOutput);
+    }
+    let label =
+        checked_slice_text(output, output_labels[index])?.ok_or(MojoError::InvalidOutput)?;
+    if label != models[model_index].label.trim() {
+        return Err(MojoError::InvalidOutput);
+    }
+    let effort_count =
+        usize::try_from(choice.effort_count).map_err(|_| MojoError::InvalidOutput)?;
+    let efforts = catalog_model_efforts(choice, effort_count, output_efforts, output)?;
+    Ok(CatalogPlannedModel { id, label, efforts })
+}
+
+fn catalog_model_efforts(
+    choice: RichCatalogPlanChoice,
+    effort_count: usize,
+    output_efforts: &[RichSlice],
+    output: &[u8],
+) -> Result<Vec<String>, MojoError> {
+    if choice.effort_start < 0 {
+        if effort_count != 0 {
+            return Err(MojoError::InvalidOutput);
+        }
+        return Ok(Vec::new());
+    }
+    let effort_start =
+        usize::try_from(choice.effort_start).map_err(|_| MojoError::InvalidOutput)?;
+    let effort_end = effort_start
+        .checked_add(effort_count)
+        .ok_or(MojoError::InvalidOutput)?;
+    if effort_end > output_efforts.len() {
+        return Err(MojoError::InvalidOutput);
+    }
+    output_efforts[effort_start..effort_end]
+        .iter()
+        .map(|effort| checked_slice_text(output, *effort)?.ok_or(MojoError::InvalidOutput))
+        .collect()
 }
 
 /// Resolves model/effort precedence for main or sub-agent launches.

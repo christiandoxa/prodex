@@ -248,6 +248,22 @@ pub(crate) fn noisy_success_label(line: &str) -> Option<&'static str> {
 
 #[cfg(feature = "mojo")]
 pub(crate) fn looks_like_rust_diagnostic_output(lines: &[&str]) -> bool {
+    let (strong, noise, locations, backtraces, exits, clippy) =
+        rust_diagnostic_signal_counts(lines);
+    if strong > 0 {
+        return strong + noise + locations + backtraces + exits + clippy >= 2;
+    }
+    if backtraces > 0 && locations > 0 {
+        return true;
+    }
+    if exits > 0 && (noise > 0 || locations > 0) {
+        return true;
+    }
+    noise >= 4
+}
+
+#[cfg(feature = "mojo")]
+fn rust_diagnostic_signal_counts(lines: &[&str]) -> (usize, usize, usize, usize, usize, usize) {
     let mut strong = 0usize;
     let mut noise = 0usize;
     let mut locations = 0usize;
@@ -279,16 +295,7 @@ pub(crate) fn looks_like_rust_diagnostic_output(lines: &[&str]) -> bool {
             clippy += 1;
         }
     }
-    if strong > 0 {
-        return strong + noise + locations + backtraces + exits + clippy >= 2;
-    }
-    if backtraces > 0 && locations > 0 {
-        return true;
-    }
-    if exits > 0 && (noise > 0 || locations > 0) {
-        return true;
-    }
-    noise >= 4
+    (strong, noise, locations, backtraces, exits, clippy)
 }
 
 #[cfg(feature = "mojo")]

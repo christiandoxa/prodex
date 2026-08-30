@@ -27,13 +27,7 @@ pub fn classify_git_search_line(
     path_output: &mut [u8],
     text_output: &mut [u8],
 ) -> Result<[i64; CONTEXT_GIT_SEARCH_RESULT_WIDTH], crate::MojoError> {
-    if line.len() > CONTEXT_GIT_SEARCH_MAX_BYTES
-        || heading_path.is_some_and(|path| path.len() > CONTEXT_GIT_SEARCH_MAX_BYTES)
-        || path_output.is_empty()
-        || text_output.is_empty()
-        || path_output.len() > CONTEXT_GIT_SEARCH_MAX_BYTES
-        || text_output.len() > CONTEXT_GIT_SEARCH_MAX_BYTES
-    {
+    if !git_search_input_is_valid(line, heading_path, path_output, text_output) {
         return Err(crate::MojoError::InvalidInput);
     }
     if !text_abi_is_ready() {
@@ -77,6 +71,32 @@ pub fn classify_git_search_line(
         });
     }
 
+    let primary = validate_git_search_flags(&output)?;
+    validate_git_search_buffers(&output, path_output, text_output)?;
+    let has_path = output[2] >= 0;
+    let has_text = output[3] >= 0;
+    git_search_shape_is_valid(primary, output[1], has_path, has_text)
+        .then_some(output)
+        .ok_or(crate::MojoError::InvalidOutput)
+}
+
+fn git_search_input_is_valid(
+    line: &str,
+    heading_path: Option<&str>,
+    path_output: &[u8],
+    text_output: &[u8],
+) -> bool {
+    line.len() <= CONTEXT_GIT_SEARCH_MAX_BYTES
+        && heading_path.is_none_or(|path| path.len() <= CONTEXT_GIT_SEARCH_MAX_BYTES)
+        && !path_output.is_empty()
+        && !text_output.is_empty()
+        && path_output.len() <= CONTEXT_GIT_SEARCH_MAX_BYTES
+        && text_output.len() <= CONTEXT_GIT_SEARCH_MAX_BYTES
+}
+
+fn validate_git_search_flags(
+    output: &[i64; CONTEXT_GIT_SEARCH_RESULT_WIDTH],
+) -> Result<i64, crate::MojoError> {
     let allowed = CONTEXT_GIT_SEARCH_DIRECT_MATCH
         | CONTEXT_GIT_SEARCH_JSON_MATCH
         | CONTEXT_GIT_SEARCH_JSON_LINE
@@ -87,22 +107,30 @@ pub fn classify_git_search_line(
             | CONTEXT_GIT_SEARCH_JSON_MATCH
             | CONTEXT_GIT_SEARCH_HEADING_PATH
             | CONTEXT_GIT_SEARCH_HEADING_MATCH);
+    let known_primary = matches!(
+        primary,
+        0 | CONTEXT_GIT_SEARCH_DIRECT_MATCH
+            | CONTEXT_GIT_SEARCH_JSON_MATCH
+            | CONTEXT_GIT_SEARCH_HEADING_PATH
+            | CONTEXT_GIT_SEARCH_HEADING_MATCH
+    );
     if output[0] < 0
         || output[0] & !allowed != 0
-        || (primary != 0
-            && !matches!(
-                primary,
-                CONTEXT_GIT_SEARCH_DIRECT_MATCH
-                    | CONTEXT_GIT_SEARCH_JSON_MATCH
-                    | CONTEXT_GIT_SEARCH_HEADING_PATH
-                    | CONTEXT_GIT_SEARCH_HEADING_MATCH
-            ))
-        || output[0] & CONTEXT_GIT_SEARCH_JSON_MATCH != 0
-            && primary != CONTEXT_GIT_SEARCH_JSON_MATCH
+        || !known_primary
+        || (output[0] & CONTEXT_GIT_SEARCH_JSON_MATCH != 0
+            && primary != CONTEXT_GIT_SEARCH_JSON_MATCH)
         || output[1] < -1
     {
         return Err(crate::MojoError::InvalidOutput);
     }
+    Ok(primary)
+}
+
+fn validate_git_search_buffers(
+    output: &[i64; CONTEXT_GIT_SEARCH_RESULT_WIDTH],
+    path_output: &[u8],
+    text_output: &[u8],
+) -> Result<(), crate::MojoError> {
     for (length, buffer) in [(output[2], path_output), (output[3], text_output)] {
         if length < -1 {
             return Err(crate::MojoError::InvalidOutput);
@@ -114,16 +142,15 @@ pub fn classify_git_search_line(
             return Err(crate::MojoError::InvalidOutput);
         }
     }
-    let has_path = output[2] >= 0;
-    let has_text = output[3] >= 0;
-    let shape_ok = match primary {
-        0 => !has_path && !has_text && output[1] == -1,
+    Ok(())
+}
+
+fn git_search_shape_is_valid(primary: i64, kind: i64, has_path: bool, has_text: bool) -> bool {
+    match primary {
+        0 => !has_path && !has_text && kind == -1,
         CONTEXT_GIT_SEARCH_DIRECT_MATCH | CONTEXT_GIT_SEARCH_JSON_MATCH => has_path && has_text,
-        CONTEXT_GIT_SEARCH_HEADING_PATH => has_path && !has_text && output[1] == -1,
+        CONTEXT_GIT_SEARCH_HEADING_PATH => has_path && !has_text && kind == -1,
         CONTEXT_GIT_SEARCH_HEADING_MATCH => !has_path && has_text,
         _ => false,
-    };
-    shape_ok
-        .then_some(output)
-        .ok_or(crate::MojoError::InvalidOutput)
+    }
 }

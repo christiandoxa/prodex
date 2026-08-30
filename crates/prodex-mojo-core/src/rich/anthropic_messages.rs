@@ -124,61 +124,15 @@ pub fn plan_anthropic_response_blocks(
         let count = usize::try_from(output_counts[index]).map_err(|_| MojoError::InvalidOutput)?;
         let input_index =
             usize::try_from(output_indices[index]).map_err(|_| MojoError::InvalidOutput)?;
-        match kind {
-            AnthropicResponsePlanKind::Message => {
-                let end = start.checked_add(count).ok_or(MojoError::InvalidOutput)?;
-                if count == 0 || start < last_input || end > input.len() {
-                    return Err(MojoError::InvalidOutput);
-                }
-                for block_index in start..end {
-                    if covered[block_index]
-                        || input[block_index].kind != AnthropicResponseBlockKind::Text
-                        || !input[block_index].has_text
-                    {
-                        return Err(MojoError::InvalidOutput);
-                    }
-                    covered[block_index] = true;
-                }
-                if input_index != 0 {
-                    return Err(MojoError::InvalidOutput);
-                }
-                last_input = end;
-            }
-            AnthropicResponsePlanKind::ToolUse
-            | AnthropicResponsePlanKind::WebSearchCall
-            | AnthropicResponsePlanKind::WebSearchResult
-            | AnthropicResponsePlanKind::Reasoning => {
-                if start != 0
-                    || count != 0
-                    || input_index < last_input
-                    || input_index >= input.len()
-                {
-                    return Err(MojoError::InvalidOutput);
-                }
-                let input_block = input[input_index];
-                let expected = match kind {
-                    AnthropicResponsePlanKind::ToolUse => {
-                        input_block.kind == AnthropicResponseBlockKind::ToolUse
-                    }
-                    AnthropicResponsePlanKind::WebSearchCall => {
-                        input_block.kind == AnthropicResponseBlockKind::WebSearchCall
-                    }
-                    AnthropicResponsePlanKind::WebSearchResult => {
-                        input_block.kind == AnthropicResponseBlockKind::WebSearchResult
-                    }
-                    AnthropicResponsePlanKind::Reasoning => {
-                        input_block.kind == AnthropicResponseBlockKind::Thinking
-                            && input_block.has_text
-                    }
-                    AnthropicResponsePlanKind::Message => false,
-                };
-                if !expected || covered[input_index] {
-                    return Err(MojoError::InvalidOutput);
-                }
-                covered[input_index] = true;
-                last_input = input_index.saturating_add(1);
-            }
-        }
+        validate_anthropic_plan_item(
+            input,
+            &mut covered,
+            &mut last_input,
+            kind,
+            start,
+            count,
+            input_index,
+        )?;
         plan.push(AnthropicResponsePlanItem {
             kind,
             start,
@@ -186,6 +140,102 @@ pub fn plan_anthropic_response_blocks(
             input_index,
         });
     }
+    validate_anthropic_plan_coverage(input, &covered)?;
+    Ok(plan)
+}
+
+fn validate_anthropic_plan_item(
+    input: &[AnthropicResponseBlock],
+    covered: &mut [bool],
+    last_input: &mut usize,
+    kind: AnthropicResponsePlanKind,
+    start: usize,
+    count: usize,
+    input_index: usize,
+) -> Result<(), MojoError> {
+    match kind {
+        AnthropicResponsePlanKind::Message => {
+            validate_anthropic_text_message(input, covered, last_input, start, count, input_index)
+        }
+        AnthropicResponsePlanKind::ToolUse
+        | AnthropicResponsePlanKind::WebSearchCall
+        | AnthropicResponsePlanKind::WebSearchResult
+        | AnthropicResponsePlanKind::Reasoning => validate_anthropic_structured_item(
+            input,
+            covered,
+            last_input,
+            kind,
+            start,
+            count,
+            input_index,
+        ),
+    }
+}
+
+fn validate_anthropic_text_message(
+    input: &[AnthropicResponseBlock],
+    covered: &mut [bool],
+    last_input: &mut usize,
+    start: usize,
+    count: usize,
+    input_index: usize,
+) -> Result<(), MojoError> {
+    let end = start.checked_add(count).ok_or(MojoError::InvalidOutput)?;
+    if count == 0 || start < *last_input || end > input.len() || input_index != 0 {
+        return Err(MojoError::InvalidOutput);
+    }
+    for block_index in start..end {
+        let block = input[block_index];
+        if covered[block_index] || block.kind != AnthropicResponseBlockKind::Text || !block.has_text
+        {
+            return Err(MojoError::InvalidOutput);
+        }
+        covered[block_index] = true;
+    }
+    *last_input = end;
+    Ok(())
+}
+
+fn validate_anthropic_structured_item(
+    input: &[AnthropicResponseBlock],
+    covered: &mut [bool],
+    last_input: &mut usize,
+    kind: AnthropicResponsePlanKind,
+    start: usize,
+    count: usize,
+    input_index: usize,
+) -> Result<(), MojoError> {
+    if start != 0 || count != 0 || input_index < *last_input || input_index >= input.len() {
+        return Err(MojoError::InvalidOutput);
+    }
+    let input_block = input[input_index];
+    let expected = match kind {
+        AnthropicResponsePlanKind::ToolUse => {
+            input_block.kind == AnthropicResponseBlockKind::ToolUse
+        }
+        AnthropicResponsePlanKind::WebSearchCall => {
+            input_block.kind == AnthropicResponseBlockKind::WebSearchCall
+        }
+        AnthropicResponsePlanKind::WebSearchResult => {
+            input_block.kind == AnthropicResponseBlockKind::WebSearchResult
+        }
+        AnthropicResponsePlanKind::Reasoning => {
+            input_block.kind == AnthropicResponseBlockKind::Thinking && input_block.has_text
+        }
+        AnthropicResponsePlanKind::Message => false,
+    };
+    if !expected || covered[input_index] {
+        return Err(MojoError::InvalidOutput);
+    }
+    covered[input_index] = true;
+    *last_input = input_index.saturating_add(1);
+    Ok(())
+}
+
+fn validate_anthropic_plan_coverage(
+    input: &[AnthropicResponseBlock],
+    covered: &[bool],
+) -> Result<(), MojoError> {
     for (index, block) in input.iter().enumerate() {
         if !covered[index]
             && !(block.kind == AnthropicResponseBlockKind::Thinking && !block.has_text)
@@ -193,5 +243,5 @@ pub fn plan_anthropic_response_blocks(
             return Err(MojoError::InvalidOutput);
         }
     }
-    Ok(plan)
+    Ok(())
 }
