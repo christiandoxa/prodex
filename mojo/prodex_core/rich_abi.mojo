@@ -91,3 +91,199 @@ def prodex_mojo_rich_abi_layout(
     output[unsafe_offset=44] = UInt64(size_of[ProdexGatewayBillingSummaryResult]())
     output[unsafe_offset=45] = UInt64(align_of[ProdexGatewayBillingSummaryResult]())
     return 0
+
+
+comptime ANTHROPIC_RESPONSE_PLAN_MAX_BLOCKS: Int64 = 65_536
+comptime ANTHROPIC_RESPONSE_PLAN_STATUS_OK: Int64 = 0
+comptime ANTHROPIC_RESPONSE_PLAN_STATUS_INVALID: Int64 = 1
+comptime ANTHROPIC_RESPONSE_PLAN_STATUS_CAPACITY: Int64 = 3
+comptime ANTHROPIC_RESPONSE_PLAN_STATUS_ABI: Int64 = 4
+comptime ANTHROPIC_RESPONSE_PLAN_ABI_VERSION: Int64 = 6
+
+
+def anthropic_response_plan_append(
+    kinds: Pointer[mut=True, Int64, _],
+    starts: Pointer[mut=True, Int64, _],
+    counts: Pointer[mut=True, Int64, _],
+    indices: Pointer[mut=True, Int64, _],
+    output_count: Pointer[mut=True, Int64, _],
+    output_capacity: Int64,
+    kind: Int64,
+    start: Int64,
+    count: Int64,
+    input_index: Int64,
+) -> Bool:
+    if output_count[] >= output_capacity:
+        return False
+    var index = output_count[]
+    kinds[unsafe_offset=index] = kind
+    starts[unsafe_offset=index] = start
+    counts[unsafe_offset=index] = count
+    indices[unsafe_offset=index] = input_index
+    output_count[] = index + 1
+    return True
+
+
+@export("prodex_mojo_rich_anthropic_response_plan_v1")
+def prodex_mojo_rich_anthropic_response_plan_v1(
+    abi_version: Int64,
+    input_kinds_address: UInt,
+    input_has_text_address: UInt,
+    output_kinds_address: UInt,
+    output_starts_address: UInt,
+    output_counts_address: UInt,
+    output_indices_address: UInt,
+    output_capacity: Int64,
+    output_count_address: UInt,
+    input_count: Int64,
+) abi("C") -> Int64:
+    if abi_version != ANTHROPIC_RESPONSE_PLAN_ABI_VERSION:
+        return ANTHROPIC_RESPONSE_PLAN_STATUS_ABI
+    if output_count_address == 0:
+        return ANTHROPIC_RESPONSE_PLAN_STATUS_INVALID
+    if input_count < 0 or input_count > ANTHROPIC_RESPONSE_PLAN_MAX_BLOCKS:
+        return ANTHROPIC_RESPONSE_PLAN_STATUS_INVALID
+    if output_capacity < input_count or output_capacity > ANTHROPIC_RESPONSE_PLAN_MAX_BLOCKS:
+        return ANTHROPIC_RESPONSE_PLAN_STATUS_CAPACITY
+
+    var output_count = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_count_address)
+    )
+    output_count[] = 0
+    if input_count == 0:
+        return ANTHROPIC_RESPONSE_PLAN_STATUS_OK
+    if (
+        input_kinds_address == 0
+        or input_has_text_address == 0
+        or output_kinds_address == 0
+        or output_starts_address == 0
+        or output_counts_address == 0
+        or output_indices_address == 0
+    ):
+        return ANTHROPIC_RESPONSE_PLAN_STATUS_INVALID
+
+    var input_kinds = Pointer[mut=False, Int64, ImmUntrackedOrigin](
+        unsafe_from_address=Int(input_kinds_address)
+    )
+    var input_has_text = Pointer[mut=False, Int64, ImmUntrackedOrigin](
+        unsafe_from_address=Int(input_has_text_address)
+    )
+    var output_kinds = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_kinds_address)
+    )
+    var output_starts = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_starts_address)
+    )
+    var output_counts = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_counts_address)
+    )
+    var output_indices = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_indices_address)
+    )
+
+    for index in range(input_count):
+        var kind = input_kinds[unsafe_offset=index]
+        var has_text = input_has_text[unsafe_offset=index]
+        if kind < 0 or kind > 4 or has_text < 0 or has_text > 1:
+            return ANTHROPIC_RESPONSE_PLAN_STATUS_INVALID
+        if kind == 0 and has_text != 1:
+            return ANTHROPIC_RESPONSE_PLAN_STATUS_INVALID
+        if kind != 0 and kind != 4 and has_text != 0:
+            return ANTHROPIC_RESPONSE_PLAN_STATUS_INVALID
+
+    var open_start: Int64 = -1
+    var open_count: Int64 = 0
+    for index in range(input_count):
+        var kind = input_kinds[unsafe_offset=index]
+        var has_text = input_has_text[unsafe_offset=index]
+        if kind == 0 and has_text == 1:
+            if open_start < 0:
+                open_start = index
+            open_count += 1
+            continue
+        if open_start >= 0:
+            if not anthropic_response_plan_append(
+                output_kinds,
+                output_starts,
+                output_counts,
+                output_indices,
+                output_count,
+                output_capacity,
+                0,
+                open_start,
+                open_count,
+                0,
+            ):
+                return ANTHROPIC_RESPONSE_PLAN_STATUS_CAPACITY
+            open_start = -1
+            open_count = 0
+        if kind == 1:
+            if not anthropic_response_plan_append(
+                output_kinds,
+                output_starts,
+                output_counts,
+                output_indices,
+                output_count,
+                output_capacity,
+                1,
+                0,
+                0,
+                index,
+            ):
+                return ANTHROPIC_RESPONSE_PLAN_STATUS_CAPACITY
+        elif kind == 2:
+            if not anthropic_response_plan_append(
+                output_kinds,
+                output_starts,
+                output_counts,
+                output_indices,
+                output_count,
+                output_capacity,
+                2,
+                0,
+                0,
+                index,
+            ):
+                return ANTHROPIC_RESPONSE_PLAN_STATUS_CAPACITY
+        elif kind == 3:
+            if not anthropic_response_plan_append(
+                output_kinds,
+                output_starts,
+                output_counts,
+                output_indices,
+                output_count,
+                output_capacity,
+                3,
+                0,
+                0,
+                index,
+            ):
+                return ANTHROPIC_RESPONSE_PLAN_STATUS_CAPACITY
+        elif kind == 4 and has_text == 1:
+            if not anthropic_response_plan_append(
+                output_kinds,
+                output_starts,
+                output_counts,
+                output_indices,
+                output_count,
+                output_capacity,
+                4,
+                0,
+                0,
+                index,
+            ):
+                return ANTHROPIC_RESPONSE_PLAN_STATUS_CAPACITY
+    if open_start >= 0 and not anthropic_response_plan_append(
+        output_kinds,
+        output_starts,
+        output_counts,
+        output_indices,
+        output_count,
+        output_capacity,
+        0,
+        open_start,
+        open_count,
+        0,
+    ):
+        return ANTHROPIC_RESPONSE_PLAN_STATUS_CAPACITY
+    return ANTHROPIC_RESPONSE_PLAN_STATUS_OK

@@ -9,6 +9,8 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
+#[path = "messages/response.rs"]
+mod response;
 #[path = "messages/stream.rs"]
 mod stream;
 #[path = "messages/web_search.rs"]
@@ -236,7 +238,7 @@ pub(super) fn translate_anthropic_response_to_responses(
     let Some(content) = value.get("content").and_then(Value::as_array) else {
         return rejected_response("Anthropic Messages response must contain a content array");
     };
-    let output = match anthropic_response_output(content) {
+    let output = match response::anthropic_response_output(content) {
         Ok(output) => output,
         Err(reason) => return rejected_response(reason),
     };
@@ -265,59 +267,6 @@ pub(super) fn translate_anthropic_response_to_responses(
         ProviderWireFormat::OpenAiResponses,
         serde_json::to_vec(&response).expect("Responses response serializes"),
     )
-}
-
-fn anthropic_response_output(content: &[Value]) -> Result<Vec<Value>, String> {
-    let mut output = Vec::new();
-    let mut text = Vec::new();
-    for block in content {
-        anthropic_append_response_block(block, &mut output, &mut text)?;
-    }
-    flush_text_output(&mut output, &mut text);
-    Ok(output)
-}
-
-fn anthropic_append_response_block(
-    block: &Value,
-    output: &mut Vec<Value>,
-    text: &mut Vec<Value>,
-) -> Result<(), String> {
-    match block.get("type").and_then(Value::as_str) {
-        Some("text") => {
-            let Some(value) = block.get("text").and_then(Value::as_str) else {
-                return Err("Anthropic text block must contain text".to_string());
-            };
-            text.push(json!({"type": "output_text", "text": value}));
-        }
-        Some("tool_use") => {
-            flush_text_output(output, text);
-            output.push(anthropic_tool_use_item(block)?);
-        }
-        Some("server_tool_use") => {
-            flush_text_output(output, text);
-            output.push(anthropic_web_search_call(block)?);
-        }
-        Some("web_search_tool_result") => {
-            flush_text_output(output, text);
-            merge_anthropic_web_search_result(output, block);
-        }
-        Some("thinking") => {
-            flush_text_output(output, text);
-            if let Some(thinking) = block.get("thinking").and_then(Value::as_str) {
-                output.push(json!({
-                    "type": "reasoning",
-                    "summary": [{"type": "summary_text", "text": thinking}],
-                }));
-            }
-        }
-        Some(kind) => {
-            return Err(format!(
-                "unsupported Anthropic Messages content block `{kind}`"
-            ));
-        }
-        None => return Err("Anthropic Messages content block requires type".to_string()),
-    }
-    Ok(())
 }
 
 fn anthropic_tool_use_item(block: &Value) -> Result<Value, String> {
@@ -543,16 +492,6 @@ fn anthropic_tool_name(namespace: Option<&str>, name: &str) -> String {
                 .map(|(namespace, name)| format!("{namespace}--{name}"))
         })
         .unwrap_or_else(|| name.to_string())
-}
-
-fn flush_text_output(output: &mut Vec<Value>, text: &mut Vec<Value>) {
-    if !text.is_empty() {
-        output.push(json!({
-            "type": "message",
-            "role": "assistant",
-            "content": std::mem::take(text),
-        }));
-    }
 }
 
 fn anthropic_usage(value: Option<&Value>) -> Option<Value> {
