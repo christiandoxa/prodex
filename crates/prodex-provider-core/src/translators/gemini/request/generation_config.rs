@@ -11,6 +11,27 @@ pub(in crate::translators::gemini) use self::thinking::gemini_thinking_config_fr
 use self::thinking::gemini_thinking_config_with_budget_from_request;
 
 #[cfg(feature = "mojo")]
+pub(crate) fn gemini_config_value(
+    operation: prodex_mojo_core::rich::GeminiConfigKernelOperation,
+    primary: Option<&str>,
+    secondary: Option<&str>,
+    tertiary: Option<&str>,
+    quaternary: Option<&str>,
+    number: Option<u64>,
+) -> Value {
+    let mut input = prodex_mojo_core::rich::GeminiConfigKernelInput::new(operation);
+    input.primary = primary;
+    input.secondary = secondary;
+    input.tertiary = tertiary;
+    input.quaternary = quaternary;
+    input.number = number;
+    let body = prodex_mojo_core::rich::gemini_config_kernel(input)
+        .unwrap_or_else(|error| panic!("Mojo Gemini config kernel failed: {error:?}"));
+    serde_json::from_slice(&body)
+        .unwrap_or_else(|error| panic!("Mojo Gemini config kernel returned invalid JSON: {error}"))
+}
+
+#[cfg(feature = "mojo")]
 fn gemini_apply_mojo_generation_fields(
     obj: &serde_json::Map<String, Value>,
     generation_config: &mut serde_json::Map<String, Value>,
@@ -66,6 +87,35 @@ pub(in crate::translators::gemini) fn gemini_insert_basic_generation_config(
     }
 }
 
+#[cfg(feature = "mojo")]
+pub(crate) fn gemini_validate_candidate_count(value: &Value) -> Result<(), String> {
+    let Some(object) = value.as_object() else {
+        return Ok(());
+    };
+    let encoded = serde_json::to_string(object).expect("Gemini request serializes");
+    let result = gemini_config_value(
+        prodex_mojo_core::rich::GeminiConfigKernelOperation::ValidateCandidateCount,
+        Some(&encoded),
+        None,
+        None,
+        None,
+        None,
+    );
+    if result.get("conflict").and_then(Value::as_bool) == Some(true) {
+        return Err(
+            "invalid_candidate_count: Gemini request fields `candidate_count` and `candidateCount` conflict"
+                .to_string(),
+        );
+    }
+    if let Some(field) = result.get("invalidField").and_then(Value::as_str) {
+        return Err(format!(
+            "invalid_candidate_count: Gemini request field `{field}` must be omitted, null, or 1"
+        ));
+    }
+    Ok(())
+}
+
+#[cfg(not(feature = "mojo"))]
 pub(crate) fn gemini_validate_candidate_count(value: &Value) -> Result<(), String> {
     let Some(object) = value.as_object() else {
         return Ok(());
@@ -106,13 +156,41 @@ pub(crate) fn gemini_generation_config_from_request(
 ) -> Value {
     let mut config = serde_json::Map::new();
     if let Some(chat) = chat.as_object() {
-        for (from, to) in [
-            ("temperature", "temperature"),
-            ("top_p", "topP"),
-            ("max_tokens", "maxOutputTokens"),
-        ] {
-            if let Some(value) = chat.get(from) {
-                config.insert(to.to_string(), value.clone());
+        #[cfg(feature = "mojo")]
+        {
+            use prodex_mojo_core::provider_constraints::GeminiRequestFieldTarget as Target;
+            for field in super::gemini_request_field_plan(
+                chat,
+                super::GeminiRequestFieldScope::BasicGeneration,
+            ) {
+                if !matches!(
+                    field.target,
+                    Target::Temperature | Target::TopP | Target::MaxOutputTokens
+                ) {
+                    continue;
+                }
+                let Some(value) = super::gemini_request_source_value(chat, field) else {
+                    continue;
+                };
+                if value.is_null() {
+                    continue;
+                }
+                config.insert(
+                    super::gemini_request_target_name(field.target).to_string(),
+                    value.clone(),
+                );
+            }
+        }
+        #[cfg(not(feature = "mojo"))]
+        {
+            for (from, to) in [
+                ("temperature", "temperature"),
+                ("top_p", "topP"),
+                ("max_tokens", "maxOutputTokens"),
+            ] {
+                if let Some(value) = chat.get(from) {
+                    config.insert(to.to_string(), value.clone());
+                }
             }
         }
     }
@@ -190,6 +268,32 @@ pub(in crate::translators::gemini) fn gemini_insert_extended_generation_config(
     }
 }
 
+#[cfg(feature = "mojo")]
+pub(in crate::translators::gemini) fn gemini_apply_text_format(
+    obj: &serde_json::Map<String, Value>,
+    generation_config: &mut serde_json::Map<String, Value>,
+) {
+    let Some(text) = obj.get("text").and_then(Value::as_object) else {
+        return;
+    };
+    let Some(format) = text.get("format").and_then(Value::as_object) else {
+        return;
+    };
+    let encoded = serde_json::to_string(format).expect("Gemini text format serializes");
+    let Value::Object(fields) = gemini_config_value(
+        prodex_mojo_core::rich::GeminiConfigKernelOperation::TextFormat,
+        Some(&encoded),
+        None,
+        None,
+        None,
+        None,
+    ) else {
+        return;
+    };
+    generation_config.extend(fields);
+}
+
+#[cfg(not(feature = "mojo"))]
 pub(in crate::translators::gemini) fn gemini_apply_text_format(
     obj: &serde_json::Map<String, Value>,
     generation_config: &mut serde_json::Map<String, Value>,

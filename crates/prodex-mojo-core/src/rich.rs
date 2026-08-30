@@ -68,6 +68,11 @@ mod gemini_response;
 pub use gemini_response::{
     GeminiResponseKernelInput, GeminiResponseKernelOperation, gemini_response_kernel,
 };
+#[path = "rich/gemini_config.rs"]
+mod gemini_config;
+pub use gemini_config::{
+    GeminiConfigKernelInput, GeminiConfigKernelOperation, gemini_config_kernel,
+};
 #[path = "rich/deepseek.rs"]
 mod deepseek;
 pub use deepseek::{DeepSeekKernelInput, DeepSeekKernelOperation, deepseek_kernel};
