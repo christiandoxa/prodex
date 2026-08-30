@@ -187,6 +187,14 @@ pub(crate) enum RuntimeInflightReliefWaitResult {
     DeadlineExpired,
 }
 
+struct RuntimeInflightWaitState {
+    observed_revision: u64,
+    observed_selection_revision: u64,
+    signaled: bool,
+    useful_relief: bool,
+    wake_source: RuntimeProfileInFlightWaitOutcome,
+}
+
 pub(crate) fn runtime_proxy_maybe_wait_for_interactive_inflight_relief(
     wait: RuntimeInflightReliefWait<'_>,
 ) -> Result<RuntimeInflightReliefWaitResult> {
@@ -262,74 +270,34 @@ pub(crate) fn runtime_proxy_maybe_wait_for_interactive_inflight_relief(
         ),
     );
     let started_at = Instant::now();
-    let mut observed_revision = runtime_profile_inflight_release_revision(shared);
-    let mut observed_selection_revision = shared.lane_admission.selection_change_revision();
-    let mut signaled = false;
-    let mut useful_relief = false;
-    let mut wake_source = RuntimeProfileInFlightWaitOutcome::Timeout;
+    let mut wait_state = RuntimeInflightWaitState {
+        observed_revision: runtime_profile_inflight_release_revision(shared),
+        observed_selection_revision: shared.lane_admission.selection_change_revision(),
+        signaled: false,
+        useful_relief: false,
+        wake_source: RuntimeProfileInFlightWaitOutcome::Timeout,
+    };
     loop {
         let remaining_wait = wait_deadline.saturating_duration_since(Instant::now());
         if remaining_wait.is_zero() {
             break;
         }
-        match runtime_profile_inflight_wait_outcome_since_with_selection_revision(
+        let outcome = runtime_profile_inflight_wait_outcome_since_with_selection_revision(
             shared,
             remaining_wait,
-            observed_revision,
-            observed_selection_revision,
-        ) {
-            RuntimeProfileInFlightWaitOutcome::InflightRelease => {
-                signaled = true;
-                wake_source = RuntimeProfileInFlightWaitOutcome::InflightRelease;
-                observed_revision = runtime_profile_inflight_release_revision(shared);
-                observed_selection_revision = shared.lane_admission.selection_change_revision();
-                useful_relief =
-                    runtime_any_waited_candidate_relieved(shared, &waited_profiles, route_kind)?;
-                if useful_relief {
-                    runtime_proxy_log(
-                        shared,
-                        runtime_proxy_structured_log_message(
-                            "local_capacity_wait_woke",
-                            [
-                                runtime_proxy_log_field(
-                                    "route",
-                                    runtime_route_kind_label(route_kind),
-                                ),
-                                runtime_proxy_log_field("request", request_id.to_string()),
-                                runtime_proxy_log_field("wake_reason", "capacity_released"),
-                                runtime_proxy_log_field(
-                                    "waited_ms",
-                                    started_at.elapsed().as_millis().to_string(),
-                                ),
-                            ],
-                        ),
-                    );
-                    break;
-                }
-            }
-            RuntimeProfileInFlightWaitOutcome::OtherNotify => {
-                signaled = true;
-                wake_source = RuntimeProfileInFlightWaitOutcome::OtherNotify;
-                observed_revision = runtime_profile_inflight_release_revision(shared);
-                observed_selection_revision = shared.lane_admission.selection_change_revision();
-                useful_relief =
-                    runtime_any_waited_candidate_relieved(shared, &waited_profiles, route_kind)?;
-                if useful_relief {
-                    break;
-                }
-            }
-            RuntimeProfileInFlightWaitOutcome::SelectionChanged => {
-                signaled = true;
-                wake_source = RuntimeProfileInFlightWaitOutcome::SelectionChanged;
-                useful_relief = true;
-                break;
-            }
-            RuntimeProfileInFlightWaitOutcome::Timeout => {
-                if !signaled {
-                    wake_source = RuntimeProfileInFlightWaitOutcome::Timeout;
-                }
-                break;
-            }
+            wait_state.observed_revision,
+            wait_state.observed_selection_revision,
+        );
+        if process_runtime_inflight_wait_outcome(
+            shared,
+            &waited_profiles,
+            route_kind,
+            request_id,
+            started_at,
+            &mut wait_state,
+            outcome,
+        )? {
+            break;
         }
     }
     runtime_proxy_log(
@@ -341,16 +309,16 @@ pub(crate) fn runtime_proxy_maybe_wait_for_interactive_inflight_relief(
                 runtime_proxy_log_field("request", request_id.to_string()),
                 runtime_proxy_log_field("transport", "http"),
                 runtime_proxy_log_field("waited_ms", started_at.elapsed().as_millis().to_string()),
-                runtime_proxy_log_field("signaled", signaled.to_string()),
-                runtime_proxy_log_field("useful", useful_relief.to_string()),
+                runtime_proxy_log_field("signaled", wait_state.signaled.to_string()),
+                runtime_proxy_log_field("useful", wait_state.useful_relief.to_string()),
                 runtime_proxy_log_field(
                     "wake_source",
-                    runtime_profile_inflight_wait_outcome_label(wake_source),
+                    runtime_profile_inflight_wait_outcome_label(wait_state.wake_source),
                 ),
             ],
         ),
     );
-    if useful_relief {
+    if wait_state.useful_relief {
         Ok(RuntimeInflightReliefWaitResult::Relieved)
     } else {
         runtime_proxy_log(
@@ -370,4 +338,67 @@ pub(crate) fn runtime_proxy_maybe_wait_for_interactive_inflight_relief(
         );
         Ok(RuntimeInflightReliefWaitResult::DeadlineExpired)
     }
+}
+
+fn process_runtime_inflight_wait_outcome(
+    shared: &RuntimeRotationProxyShared,
+    waited_profiles: &BTreeSet<String>,
+    route_kind: RuntimeRouteKind,
+    request_id: u64,
+    started_at: Instant,
+    state: &mut RuntimeInflightWaitState,
+    outcome: RuntimeProfileInFlightWaitOutcome,
+) -> Result<bool> {
+    match outcome {
+        RuntimeProfileInFlightWaitOutcome::InflightRelease => {
+            state.signaled = true;
+            state.wake_source = RuntimeProfileInFlightWaitOutcome::InflightRelease;
+            state.observed_revision = runtime_profile_inflight_release_revision(shared);
+            state.observed_selection_revision = shared.lane_admission.selection_change_revision();
+            state.useful_relief =
+                runtime_any_waited_candidate_relieved(shared, waited_profiles, route_kind)?;
+            if state.useful_relief {
+                runtime_proxy_log(
+                    shared,
+                    runtime_proxy_structured_log_message(
+                        "local_capacity_wait_woke",
+                        [
+                            runtime_proxy_log_field("route", runtime_route_kind_label(route_kind)),
+                            runtime_proxy_log_field("request", request_id.to_string()),
+                            runtime_proxy_log_field("wake_reason", "capacity_released"),
+                            runtime_proxy_log_field(
+                                "waited_ms",
+                                started_at.elapsed().as_millis().to_string(),
+                            ),
+                        ],
+                    ),
+                );
+                return Ok(true);
+            }
+        }
+        RuntimeProfileInFlightWaitOutcome::OtherNotify => {
+            state.signaled = true;
+            state.wake_source = RuntimeProfileInFlightWaitOutcome::OtherNotify;
+            state.observed_revision = runtime_profile_inflight_release_revision(shared);
+            state.observed_selection_revision = shared.lane_admission.selection_change_revision();
+            state.useful_relief =
+                runtime_any_waited_candidate_relieved(shared, waited_profiles, route_kind)?;
+            if state.useful_relief {
+                return Ok(true);
+            }
+        }
+        RuntimeProfileInFlightWaitOutcome::SelectionChanged => {
+            state.signaled = true;
+            state.wake_source = RuntimeProfileInFlightWaitOutcome::SelectionChanged;
+            state.useful_relief = true;
+            return Ok(true);
+        }
+        RuntimeProfileInFlightWaitOutcome::Timeout => {
+            if !state.signaled {
+                state.wake_source = RuntimeProfileInFlightWaitOutcome::Timeout;
+            }
+            return Ok(true);
+        }
+    }
+    Ok(false)
 }

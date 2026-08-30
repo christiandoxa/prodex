@@ -11,7 +11,9 @@ use super::super::{
     schedule_runtime_probe_refresh,
 };
 #[cfg(feature = "mojo-quota")]
-use super::super::{runtime_profile_health_score, runtime_profile_route_circuit_open_until};
+use super::super::{
+    RuntimeRotationState, runtime_profile_health_score, runtime_profile_route_circuit_open_until,
+};
 use crate::ProfileProviderExt;
 use anyhow::Result;
 use chrono::Local;
@@ -19,6 +21,8 @@ use chrono::Local;
 use prodex_runtime_quota::runtime_quota_window_usable_for_auto_rotate;
 #[cfg(feature = "mojo-quota")]
 use prodex_runtime_store::runtime_profile_transport_backoff_until_from_map;
+#[cfg(feature = "mojo-quota")]
+use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 
 pub(super) fn refresh_runtime_auto_redeem_pool_missing_quota(
@@ -117,48 +121,83 @@ pub(super) fn runtime_auto_redeem_pool_has_weekly_remaining_profile(
             .into_iter()
             .filter(|name| !excluded_profiles.contains(name))
             .find(|name| {
-                let Some(profile) = runtime.state.profiles.get(name) else {
-                    return false;
-                };
-                if !matches!(profile.provider, crate::ProfileProvider::Openai) {
-                    return false;
-                }
-                if runtime_profile_auth_failure_active_from_map(&runtime.profile_health, name, now)
-                {
-                    return false;
-                }
-                if runtime_profile_transport_backoff_until_from_map(
-                    &runtime.profile_transport_backoff_until,
+                runtime_auto_redeem_profile_has_weekly_remaining(
+                    &runtime,
                     name,
                     route_kind,
                     now,
-                )
-                .is_some()
-                    || runtime_profile_route_circuit_open_until(&runtime, name, route_kind, now)
-                        .is_some()
-                {
-                    return false;
-                }
-                if runtime_profile_inflight_sort_key(name, &profile_inflight) >= inflight_soft_limit
-                {
-                    return false;
-                }
-                let Some(probe) = runtime.profile_probe_cache.get(name) else {
-                    return false;
-                };
-                if !probe.auth.quota_compatible {
-                    return false;
-                }
-                let Ok(usage) = probe.result.as_ref() else {
-                    return false;
-                };
-                runtime_quota_window_usable_for_auto_rotate(
-                    runtime_quota_summary_for_route(usage, route_kind)
-                        .weekly
-                        .status,
+                    inflight_soft_limit,
+                    &profile_inflight,
                 )
             }),
     )
+}
+
+#[cfg(feature = "mojo-quota")]
+fn runtime_auto_redeem_profile_has_weekly_remaining(
+    runtime: &RuntimeRotationState,
+    name: &str,
+    route_kind: RuntimeRouteKind,
+    now: i64,
+    inflight_soft_limit: usize,
+    profile_inflight: &BTreeMap<String, usize>,
+) -> bool {
+    if !runtime_auto_redeem_profile_is_available(
+        runtime,
+        name,
+        route_kind,
+        now,
+        inflight_soft_limit,
+        profile_inflight,
+    ) {
+        return false;
+    }
+    let Some(probe) = runtime.profile_probe_cache.get(name) else {
+        return false;
+    };
+    if !probe.auth.quota_compatible {
+        return false;
+    }
+    let Ok(usage) = probe.result.as_ref() else {
+        return false;
+    };
+    runtime_quota_window_usable_for_auto_rotate(
+        runtime_quota_summary_for_route(usage, route_kind)
+            .weekly
+            .status,
+    )
+}
+
+#[cfg(feature = "mojo-quota")]
+fn runtime_auto_redeem_profile_is_available(
+    runtime: &RuntimeRotationState,
+    name: &str,
+    route_kind: RuntimeRouteKind,
+    now: i64,
+    inflight_soft_limit: usize,
+    profile_inflight: &BTreeMap<String, usize>,
+) -> bool {
+    let Some(profile) = runtime.state.profiles.get(name) else {
+        return false;
+    };
+    if !matches!(profile.provider, crate::ProfileProvider::Openai) {
+        return false;
+    }
+    if runtime_profile_auth_failure_active_from_map(&runtime.profile_health, name, now) {
+        return false;
+    }
+    if runtime_profile_transport_backoff_until_from_map(
+        &runtime.profile_transport_backoff_until,
+        name,
+        route_kind,
+        now,
+    )
+    .is_some()
+        || runtime_profile_route_circuit_open_until(runtime, name, route_kind, now).is_some()
+    {
+        return false;
+    }
+    runtime_profile_inflight_sort_key(name, profile_inflight) < inflight_soft_limit
 }
 
 pub(crate) fn runtime_best_auto_redeem_profile_name(
