@@ -33,6 +33,11 @@ pub enum DeepSeekKernelOperation {
     SseFunctionCallDelta = 24,
     SseTextDelta = 25,
     ResponseMetadata = 26,
+    StrictFunctionSchema = 27,
+    PrimitiveRequestFields = 28,
+    ReasoningParameters = 29,
+    ResponseFormat = 30,
+    UserId = 31,
 }
 
 /// Inputs for one bounded DeepSeek JSON transformation.
@@ -206,6 +211,11 @@ fn operation_code(operation: DeepSeekKernelOperation) -> i64 {
         DeepSeekKernelOperation::SseFunctionCallDelta => 24,
         DeepSeekKernelOperation::SseTextDelta => 25,
         DeepSeekKernelOperation::ResponseMetadata => 26,
+        DeepSeekKernelOperation::StrictFunctionSchema => 27,
+        DeepSeekKernelOperation::PrimitiveRequestFields => 28,
+        DeepSeekKernelOperation::ReasoningParameters => 29,
+        DeepSeekKernelOperation::ResponseFormat => 30,
+        DeepSeekKernelOperation::UserId => 31,
     }
 }
 

@@ -6,6 +6,19 @@ mod metadata;
 mod reasoning;
 mod reject;
 
+#[cfg(feature = "mojo")]
+use prodex_mojo_core::rich::{DeepSeekKernelInput, DeepSeekKernelOperation};
+
+#[cfg(feature = "mojo")]
+fn deepseek_provider_core_mojo_value(
+    input: DeepSeekKernelInput<'_>,
+) -> Result<serde_json::Value, String> {
+    let body = prodex_mojo_core::rich::deepseek_kernel(input)
+        .map_err(|error| format!("DeepSeek Mojo kernel failed: {error:?}"))?;
+    serde_json::from_slice(&body)
+        .map_err(|error| format!("DeepSeek Mojo kernel returned invalid JSON: {error}"))
+}
+
 pub use self::metadata::{
     deepseek_provider_core_ensure_json_prompt_instruction,
     deepseek_provider_core_note_thinking_tool_choice_omission,
@@ -63,7 +76,6 @@ pub fn deepseek_provider_core_insert_primitive_request_fields(
             if !next.is_number() {
                 return Err(format!("{provider_label} {field} must be a number"));
             }
-            request.insert(field.to_string(), next.clone());
         }
     }
     for field in ["max_output_tokens", "max_tokens", "max_completion_tokens"] {
@@ -73,15 +85,51 @@ pub fn deepseek_provider_core_insert_primitive_request_fields(
                     "{provider_label} {field} must be a positive integer"
                 ));
             }
-            request.insert("max_tokens".to_string(), next.clone());
         }
     }
     if let Some(logprobs) = value.get("logprobs") {
         if !logprobs.is_boolean() {
             return Err(format!("{provider_label} logprobs must be a boolean"));
         }
-        request.insert("logprobs".to_string(), logprobs.clone());
     }
+    #[cfg(feature = "mojo")]
+    {
+        let source = serde_json::to_string(value)
+            .map_err(|error| format!("{provider_label} request serialization failed: {error}"))?;
+        let mut input = DeepSeekKernelInput::new(DeepSeekKernelOperation::PrimitiveRequestFields);
+        input.input = Some(&source);
+        let fields = deepseek_provider_core_mojo_value(input).map_err(|error| {
+            format!("{provider_label} primitive request fields could not be normalized: {error}")
+        })?;
+        let Some(fields) = fields.as_object() else {
+            return Err(format!(
+                "{provider_label} primitive request fields normalization returned a non-object"
+            ));
+        };
+        request.extend(
+            fields
+                .iter()
+                .map(|(key, value)| (key.clone(), value.clone())),
+        );
+        return Ok(());
+    }
+    #[cfg(not(feature = "mojo"))]
+    {
+        for field in ["temperature", "top_p"] {
+            if let Some(next) = value.get(field) {
+                request.insert(field.to_string(), next.clone());
+            }
+        }
+        for field in ["max_output_tokens", "max_tokens", "max_completion_tokens"] {
+            if let Some(next) = value.get(field) {
+                request.insert("max_tokens".to_string(), next.clone());
+            }
+        }
+        if let Some(logprobs) = value.get("logprobs") {
+            request.insert("logprobs".to_string(), logprobs.clone());
+        }
+    }
+    #[cfg(not(feature = "mojo"))]
     Ok(())
 }
 
@@ -120,8 +168,17 @@ pub fn deepseek_provider_core_user_id_from_responses_request(
     let Some(user_id) = user_id.as_str() else {
         return Err(format!("{provider_label} user_id must be a string"));
     };
-    let user_id = user_id.trim();
+    let raw_user_id = user_id;
+    let user_id = raw_user_id.trim();
     if user_id.is_empty() {
+        #[cfg(feature = "mojo")]
+        {
+            let mut input = DeepSeekKernelInput::new(DeepSeekKernelOperation::UserId);
+            input.input = Some(raw_user_id);
+            let _ = deepseek_provider_core_mojo_value(input).map_err(|error| {
+                format!("{provider_label} user_id could not be normalized: {error}")
+            })?;
+        }
         return Ok(None);
     }
     if user_id.len() > 512
@@ -133,5 +190,19 @@ pub fn deepseek_provider_core_user_id_from_responses_request(
             "{provider_label} user_id must use only letters, numbers, underscores, or dashes and be at most 512 bytes"
         ));
     }
+    #[cfg(feature = "mojo")]
+    {
+        let mut input = DeepSeekKernelInput::new(DeepSeekKernelOperation::UserId);
+        input.input = Some(raw_user_id);
+        let normalized = deepseek_provider_core_mojo_value(input).map_err(|error| {
+            format!("{provider_label} user_id could not be normalized: {error}")
+        })?;
+        return normalized
+            .as_str()
+            .filter(|user_id| !user_id.is_empty())
+            .map(str::to_string)
+            .map_or(Ok(None), |user_id| Ok(Some(user_id)));
+    }
+    #[cfg(not(feature = "mojo"))]
     Ok(Some(user_id.to_string()))
 }

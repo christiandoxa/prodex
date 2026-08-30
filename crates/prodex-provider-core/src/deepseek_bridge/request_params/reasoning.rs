@@ -8,52 +8,100 @@ pub fn deepseek_provider_core_apply_reasoning_from_responses_request(
 ) -> Result<(), String> {
     let effort =
         deepseek_provider_core_reasoning_effort_from_responses_request(value, provider_label)?;
-    if gemini_compat {
+    #[cfg(feature = "mojo")]
+    {
         if let Some(effort) = effort {
-            let Some(effort) = deepseek_provider_core_gemini_openai_reasoning_effort(effort) else {
+            let mut input = super::DeepSeekKernelInput::new(
+                super::DeepSeekKernelOperation::ReasoningParameters,
+            );
+            input.stream = gemini_compat;
+            input.reasoning_content = Some(effort);
+            let mapped = super::deepseek_provider_core_mojo_value(input)
+                .map_err(|_| format!("{provider_label} reasoning effort is not supported"))?;
+            let Some(mapped) = mapped.as_object() else {
                 return Err(format!(
-                    "{provider_label} reasoning effort is not supported"
+                    "{provider_label} reasoning effort normalization returned a non-object"
                 ));
             };
-            request.insert(
-                "reasoning_effort".to_string(),
-                serde_json::Value::String(effort.to_string()),
+            request.extend(
+                mapped
+                    .iter()
+                    .map(|(key, value)| (key.clone(), value.clone())),
             );
         }
         return Ok(());
     }
-    match effort.and_then(deepseek_provider_core_reasoning_effort) {
-        Some(Some(effort)) => {
-            request.insert(
-                "thinking".to_string(),
-                serde_json::json!({"type": "enabled"}),
-            );
-            request.insert(
-                "reasoning_effort".to_string(),
-                serde_json::Value::String(effort.to_string()),
-            );
-        }
-        Some(None) => {
-            request.insert(
-                "thinking".to_string(),
-                serde_json::json!({"type": "disabled"}),
-            );
-        }
-        None => {}
-    }
-    if effort.is_some()
-        && effort
-            .and_then(deepseek_provider_core_reasoning_effort)
-            .is_none()
+    #[cfg(not(feature = "mojo"))]
     {
-        return Err(format!(
-            "{provider_label} reasoning effort is not supported"
-        ));
+        if gemini_compat {
+            if let Some(effort) = effort {
+                let Some(effort) = deepseek_provider_core_gemini_openai_reasoning_effort(effort)
+                else {
+                    return Err(format!(
+                        "{provider_label} reasoning effort is not supported"
+                    ));
+                };
+                request.insert(
+                    "reasoning_effort".to_string(),
+                    serde_json::Value::String(effort.to_string()),
+                );
+            }
+            return Ok(());
+        }
+        match effort.and_then(deepseek_provider_core_reasoning_effort) {
+            Some(Some(effort)) => {
+                request.insert(
+                    "thinking".to_string(),
+                    serde_json::json!({"type": "enabled"}),
+                );
+                request.insert(
+                    "reasoning_effort".to_string(),
+                    serde_json::Value::String(effort.to_string()),
+                );
+            }
+            Some(None) => {
+                request.insert(
+                    "thinking".to_string(),
+                    serde_json::json!({"type": "disabled"}),
+                );
+            }
+            None => {}
+        }
+        if effort.is_some()
+            && effort
+                .and_then(deepseek_provider_core_reasoning_effort)
+                .is_none()
+        {
+            return Err(format!(
+                "{provider_label} reasoning effort is not supported"
+            ));
+        }
+        Ok(())
     }
-    Ok(())
 }
 
 pub fn deepseek_provider_core_thinking_enabled(value: &serde_json::Value) -> bool {
+    #[cfg(feature = "mojo")]
+    {
+        let Ok(Some(effort)) =
+            deepseek_provider_core_reasoning_effort_from_responses_request(value, "DeepSeek")
+        else {
+            return false;
+        };
+        let mut input =
+            super::DeepSeekKernelInput::new(super::DeepSeekKernelOperation::ReasoningParameters);
+        input.reasoning_content = Some(effort);
+        return super::deepseek_provider_core_mojo_value(input)
+            .ok()
+            .is_some_and(|mapped| {
+                mapped
+                    .get("thinking")
+                    .and_then(|thinking| thinking.get("type"))
+                    .and_then(serde_json::Value::as_str)
+                    == Some("enabled")
+            });
+    }
+    #[cfg(not(feature = "mojo"))]
     deepseek_provider_core_reasoning_effort_from_responses_request(value, "DeepSeek")
         .ok()
         .flatten()
@@ -100,6 +148,7 @@ fn deepseek_provider_core_reasoning_effort_from_responses_request<'a>(
     Ok(None)
 }
 
+#[cfg(not(feature = "mojo"))]
 fn deepseek_provider_core_gemini_openai_reasoning_effort(effort: &str) -> Option<&'static str> {
     match effort.trim().to_ascii_lowercase().as_str() {
         "xhigh" | "max" | "high" => Some("high"),
@@ -111,6 +160,7 @@ fn deepseek_provider_core_gemini_openai_reasoning_effort(effort: &str) -> Option
     }
 }
 
+#[cfg(not(feature = "mojo"))]
 fn deepseek_provider_core_reasoning_effort(effort: &str) -> Option<Option<&'static str>> {
     match effort.trim().to_ascii_lowercase().as_str() {
         "xhigh" | "max" => Some(Some("max")),
