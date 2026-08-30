@@ -1,6 +1,8 @@
 //! Gemini thinking-config mapping from OpenAI-compatible reasoning fields.
 
-use serde_json::{Value, json};
+use serde_json::Value;
+#[cfg(not(feature = "mojo"))]
+use serde_json::json;
 
 pub(in crate::translators::gemini) fn gemini_thinking_config_from_request(
     obj: &serde_json::Map<String, Value>,
@@ -18,6 +20,27 @@ pub(super) fn gemini_thinking_config_with_budget_from_request(
     gemini_thinking_config(obj, model, thinking_budget_tokens)
 }
 
+#[cfg(feature = "mojo")]
+fn gemini_thinking_config(
+    obj: &serde_json::Map<String, Value>,
+    model: &str,
+    thinking_budget_tokens: Option<u64>,
+) -> Option<Value> {
+    let effort = obj
+        .get("reasoning")
+        .and_then(|reasoning| reasoning.get("effort"))
+        .and_then(Value::as_str);
+    Some(super::gemini_config_value(
+        prodex_mojo_core::rich::GeminiConfigKernelOperation::ThinkingConfig,
+        Some(model),
+        effort,
+        None,
+        None,
+        thinking_budget_tokens,
+    ))
+}
+
+#[cfg(not(feature = "mojo"))]
 fn gemini_thinking_config(
     obj: &serde_json::Map<String, Value>,
     model: &str,
@@ -59,6 +82,19 @@ fn gemini_thinking_config(
     }))
 }
 
+#[cfg(feature = "mojo")]
+pub fn gemini_provider_core_model_uses_thinking_level(model: &str) -> bool {
+    super::gemini_config_value(
+        prodex_mojo_core::rich::GeminiConfigKernelOperation::ModelUsesThinkingLevel,
+        Some(model),
+        None,
+        None,
+        None,
+        None,
+    ) == Value::Bool(true)
+}
+
+#[cfg(not(feature = "mojo"))]
 pub fn gemini_provider_core_model_uses_thinking_level(model: &str) -> bool {
     let model = model.to_ascii_lowercase();
     model.contains("gemini-3") || model.contains("gemma-3") || model.contains("gemma-4")
