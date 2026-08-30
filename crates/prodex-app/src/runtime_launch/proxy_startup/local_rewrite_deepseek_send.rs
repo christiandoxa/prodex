@@ -30,11 +30,12 @@ use super::super::provider_bridge::{
     runtime_provider_model_fallback_chain, runtime_provider_request_body_with_model,
     runtime_provider_request_conformance_result,
 };
+use super::super::provider_tools::runtime_provider_chat_request_body_without_web_search_options;
 use crate::{RuntimeHeapTrimmedBufferedResponseParts, RuntimeProxyRequest, runtime_proxy_log};
 use anyhow::Result;
 use prodex_provider_core::{
-    ProviderEndpoint, ProviderId, ProviderTransformInput, RuntimeProviderBindingIdentity,
-    deepseek_provider_core_first_event_retry_allowed,
+    ProviderEndpoint, ProviderId, ProviderTransformInput, ProviderTransformLoss,
+    RuntimeProviderBindingIdentity, deepseek_provider_core_first_event_retry_allowed,
     deepseek_provider_core_request_body as core_deepseek_provider_core_request_body,
     deepseek_provider_core_simple_request, provider_core_rewritten_body,
     translate_openai_chat_request_to_anthropic_messages,
@@ -452,7 +453,7 @@ fn runtime_deepseek_prepare_model_request(
     {
         translated.body = body;
     }
-    let native_messages = runtime_deepseek_uses_native_web_search(
+    let mut native_messages = runtime_deepseek_uses_native_web_search(
         context.web_search_mode,
         translated.body.as_slice(),
     );
@@ -467,10 +468,21 @@ fn runtime_deepseek_prepare_model_request(
             RuntimeProviderBridgeKind::DeepSeek,
             &result,
         );
-        let Some(body) = provider_core_rewritten_body(Some(&result)) else {
-            return Ok(None);
-        };
-        body
+        match provider_core_rewritten_body(Some(&result)) {
+            Some(body) => body,
+            None if runtime_deepseek_native_translation_fallback_is_safe(&result) => {
+                let Some(body) = runtime_deepseek_auto_chat_fallback_body(
+                    translated.body.as_slice(),
+                    context.web_search_mode,
+                ) else {
+                    return Ok(None);
+                };
+                native_messages = false;
+                runtime_deepseek_log_native_search_fallback(context, model);
+                body
+            }
+            None => return Ok(None),
+        }
     } else {
         translated.body
     };
@@ -755,6 +767,52 @@ fn runtime_deepseek_uses_native_web_search(
         .is_some()
 }
 
+fn runtime_deepseek_auto_chat_fallback_body(
+    body: &[u8],
+    mode: super::super::deepseek_rewrite::RuntimeDeepSeekWebSearchMode,
+) -> Option<Vec<u8>> {
+    matches!(
+        mode,
+        super::super::deepseek_rewrite::RuntimeDeepSeekWebSearchMode::Auto
+    )
+    .then(|| runtime_provider_chat_request_body_without_web_search_options(body))
+    .flatten()
+}
+
+fn runtime_deepseek_native_translation_fallback_is_safe(
+    result: &prodex_provider_core::ProviderTransformResult,
+) -> bool {
+    let ProviderTransformLoss::Rejected { reason } = &result.loss else {
+        return false;
+    };
+    reason.starts_with("Anthropic Messages does not translate chat field ")
+        || reason.starts_with("Anthropic Messages does not translate web_search_options field ")
+        || reason.starts_with("Anthropic web search ")
+}
+
+fn runtime_deepseek_log_native_search_fallback(
+    context: &RuntimeDeepSeekResponseAttemptContext<'_>,
+    model: &str,
+) {
+    runtime_proxy_log(
+        &context.shared.runtime_shared,
+        runtime_proxy_structured_log_message(
+            "local_rewrite_web_search_options_fallback",
+            [
+                runtime_proxy_log_field("request", context.request_id.to_string()),
+                runtime_proxy_log_field(
+                    "provider",
+                    runtime_provider_label(RuntimeProviderBridgeKind::DeepSeek),
+                ),
+                runtime_proxy_log_field("model", model),
+                runtime_proxy_log_field("route", "chat"),
+                runtime_proxy_log_field("degradation", "web_search_unavailable"),
+                runtime_proxy_log_field("phase", "precommit"),
+            ],
+        ),
+    );
+}
+
 fn runtime_deepseek_native_translation_incompatible() -> RuntimeLocalRewriteUpstreamResult {
     runtime_deepseek_buffered_result(
         super::super::local_rewrite_upstream::runtime_local_rewrite_json_parts(
@@ -771,50 +829,5 @@ fn runtime_deepseek_native_translation_incompatible() -> RuntimeLocalRewriteUpst
 }
 
 #[cfg(test)]
-mod tests {
-    use super::super::super::deepseek_rewrite::RuntimeDeepSeekWebSearchMode;
-    use super::*;
-
-    #[test]
-    fn native_web_search_route_is_selected_only_for_native_modes_with_options() {
-        let body = br#"{"web_search_options":{}}"#;
-        assert!(runtime_deepseek_uses_native_web_search(
-            RuntimeDeepSeekWebSearchMode::Auto,
-            body
-        ));
-        assert!(runtime_deepseek_uses_native_web_search(
-            RuntimeDeepSeekWebSearchMode::Anthropic,
-            body
-        ));
-        assert!(!runtime_deepseek_uses_native_web_search(
-            RuntimeDeepSeekWebSearchMode::OpenAiChat,
-            body
-        ));
-        assert!(!runtime_deepseek_uses_native_web_search(
-            RuntimeDeepSeekWebSearchMode::Auto,
-            br#"{}"#
-        ));
-    }
-
-    #[test]
-    fn passthrough_url_selects_native_messages_without_changing_chat_completions() {
-        assert_eq!(
-            runtime_deepseek_passthrough_upstream_url(
-                "https://api.deepseek.com/v1",
-                "/v1",
-                "/v1/messages",
-                true,
-            ),
-            "https://api.deepseek.com/anthropic/v1/messages"
-        );
-        assert_eq!(
-            runtime_deepseek_passthrough_upstream_url(
-                "https://api.deepseek.com/v1",
-                "/v1",
-                "/v1/chat/completions",
-                false,
-            ),
-            "https://api.deepseek.com/v1/chat/completions"
-        );
-    }
-}
+#[path = "local_rewrite_deepseek_send_tests.rs"]
+mod tests;
