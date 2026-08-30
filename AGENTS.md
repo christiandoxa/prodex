@@ -107,6 +107,22 @@ constraint makes Mojo unsuitable.
 - This policy does not require an immediate rewrite of unrelated existing Rust. It applies to new
   capabilities and significant maintenance additions, while preserving safe host boundaries.
 
+## Temporary artifact lifecycle
+
+- Temporary worktrees, build targets, test homes, scratch directories, generated test artifacts,
+  and campaign state require an explicit owner and lifecycle; remove them promptly after use.
+- Before deletion, verify that no active process or task references the artifact, no uncommitted
+  WIP would be lost, and useful commits or evidence are integrated, preserved, or superseded.
+- Treat dirty or unknown worktrees, active builds, and current test/runtime state as protected.
+  Retain release-resume state, release artifacts, provenance/security evidence, and published-
+  artifact verification inputs until their lifecycle is complete.
+- Delete reproducible build/test output after its final consumer finishes when it no longer has
+  cache value. Under disk pressure, prefer shared broker-owned caches over per-worker targets.
+- Use exact targeted cleanup only. Never use broad destructive patterns such as `rm -rf /tmp/prodex-*`,
+  `git clean -fd`, or destructive repository resets as housekeeping.
+- A worker that creates temporary state must clean it after harvesting its result or explicitly
+  transfer lifecycle ownership to the coordinator.
+
 ## Audit and delivery discipline
 
 - During a whole-source audit, accept a finding only with a concrete path and symbol/line, an
