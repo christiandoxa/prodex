@@ -582,7 +582,12 @@ export function productionShareMeetsMinimum(result) {
 }
 
 export function productionShareMeetsReleaseRequirement(result) {
-  return result.release_requirement_met ?? productionShareMeetsMinimum(result);
+  if (productionShareMeetsMinimum(result)) return true;
+  return result.temporary_release_waiver_applicable === true &&
+    result.temporary_release_floor_percent === 7 &&
+    result.temporary_release_waiver_scope === "0.420.0 only" &&
+    result.final.broad_mojo_production_loc * 100 >=
+      result.temporary_release_floor_percent * result.final.broad_total_production_loc;
 }
 
 function writeSnapshot(manifest, baselineRevision) {
