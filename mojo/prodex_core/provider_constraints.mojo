@@ -211,6 +211,236 @@ def provider_constraint_total(
     return total
 
 
+comptime GEMINI_REQUEST_PLAN_ABI_VERSION: Int64 = 1
+comptime GEMINI_REQUEST_PLAN_STATUS_ABI_MISMATCH: Int64 = 1
+comptime GEMINI_REQUEST_PLAN_STATUS_INVALID_INPUT: Int64 = 2
+comptime GEMINI_REQUEST_PLAN_STATUS_CAPACITY: Int64 = 3
+
+comptime GEMINI_REQUEST_TARGET_TEMPERATURE: Int64 = 0
+comptime GEMINI_REQUEST_TARGET_TOP_P: Int64 = 1
+comptime GEMINI_REQUEST_TARGET_MAX_OUTPUT_TOKENS: Int64 = 2
+comptime GEMINI_REQUEST_TARGET_STOP_SEQUENCES: Int64 = 3
+comptime GEMINI_REQUEST_TARGET_TOP_K: Int64 = 4
+comptime GEMINI_REQUEST_TARGET_SEED: Int64 = 5
+comptime GEMINI_REQUEST_TARGET_PRESENCE_PENALTY: Int64 = 6
+comptime GEMINI_REQUEST_TARGET_FREQUENCY_PENALTY: Int64 = 7
+comptime GEMINI_REQUEST_TARGET_RESPONSE_MIME_TYPE: Int64 = 8
+comptime GEMINI_REQUEST_TARGET_RESPONSE_SCHEMA: Int64 = 9
+comptime GEMINI_REQUEST_TARGET_RESPONSE_JSON_SCHEMA: Int64 = 10
+comptime GEMINI_REQUEST_TARGET_RESPONSE_MODALITIES: Int64 = 11
+comptime GEMINI_REQUEST_TARGET_MEDIA_RESOLUTION: Int64 = 12
+comptime GEMINI_REQUEST_TARGET_AUDIO_TIMESTAMP: Int64 = 13
+comptime GEMINI_REQUEST_TARGET_SPEECH_CONFIG: Int64 = 14
+comptime GEMINI_REQUEST_TARGET_CANDIDATE_COUNT: Int64 = 15
+comptime GEMINI_REQUEST_TARGET_SAFETY_SETTINGS: Int64 = 16
+comptime GEMINI_REQUEST_TARGET_CACHED_CONTENT: Int64 = 17
+comptime GEMINI_REQUEST_TARGET_LABELS: Int64 = 18
+
+def gemini_request_field_present(mask: UInt64, bit: Int64) -> Bool:
+    return mask & (UInt64(1) << UInt64(bit)) != 0
+
+def gemini_request_emit_field(
+    target: Int64,
+    source: Int64,
+    output_targets: Pointer[mut=True, Int64, _],
+    output_sources: Pointer[mut=True, Int64, _],
+    output_capacity: Int64,
+    output_count: Pointer[mut=True, Int64, _],
+) -> Bool:
+    if output_count[] >= output_capacity:
+        return False
+    output_targets[unsafe_offset=output_count[]] = target
+    output_sources[unsafe_offset=output_count[]] = source
+    output_count[] = output_count[] + 1
+    return True
+
+@export("prodex_gemini_request_field_plan_v1")
+def prodex_gemini_request_field_plan_v1(
+    abi_version: Int64,
+    basic_fields: UInt64,
+    extended_fields: UInt64,
+    optional_fields: UInt64,
+    output_targets: Pointer[mut=True, Int64, _],
+    output_sources: Pointer[mut=True, Int64, _],
+    output_capacity: Int64,
+    output_count: Pointer[mut=True, Int64, _],
+) abi("C") -> Int64:
+    if abi_version != GEMINI_REQUEST_PLAN_ABI_VERSION:
+        return GEMINI_REQUEST_PLAN_STATUS_ABI_MISMATCH
+    if output_capacity < 0 or basic_fields > 63 or extended_fields > 8388607 or optional_fields > 31:
+        return GEMINI_REQUEST_PLAN_STATUS_INVALID_INPUT
+
+    output_count[] = 0
+    if gemini_request_field_present(basic_fields, 0) and not gemini_request_emit_field(
+        GEMINI_REQUEST_TARGET_TEMPERATURE, 0, output_targets, output_sources, output_capacity, output_count
+    ):
+        return GEMINI_REQUEST_PLAN_STATUS_CAPACITY
+    if gemini_request_field_present(basic_fields, 1) and not gemini_request_emit_field(
+        GEMINI_REQUEST_TARGET_TOP_P, 1, output_targets, output_sources, output_capacity, output_count
+    ):
+        return GEMINI_REQUEST_PLAN_STATUS_CAPACITY
+    if gemini_request_field_present(basic_fields, 2) and not gemini_request_emit_field(
+        GEMINI_REQUEST_TARGET_MAX_OUTPUT_TOKENS, 2, output_targets, output_sources, output_capacity, output_count
+    ):
+        return GEMINI_REQUEST_PLAN_STATUS_CAPACITY
+    if gemini_request_field_present(basic_fields, 3):
+        if not gemini_request_emit_field(
+            GEMINI_REQUEST_TARGET_STOP_SEQUENCES, 3, output_targets, output_sources, output_capacity, output_count
+        ):
+            return GEMINI_REQUEST_PLAN_STATUS_CAPACITY
+    elif gemini_request_field_present(basic_fields, 4):
+        if not gemini_request_emit_field(
+            GEMINI_REQUEST_TARGET_STOP_SEQUENCES, 4, output_targets, output_sources, output_capacity, output_count
+        ):
+            return GEMINI_REQUEST_PLAN_STATUS_CAPACITY
+    elif gemini_request_field_present(basic_fields, 5):
+        if not gemini_request_emit_field(
+            GEMINI_REQUEST_TARGET_STOP_SEQUENCES, 5, output_targets, output_sources, output_capacity, output_count
+        ):
+            return GEMINI_REQUEST_PLAN_STATUS_CAPACITY
+
+    if gemini_request_field_present(extended_fields, 1):
+        if not gemini_request_emit_field(
+            GEMINI_REQUEST_TARGET_TOP_K, 7, output_targets, output_sources, output_capacity, output_count
+        ):
+            return GEMINI_REQUEST_PLAN_STATUS_CAPACITY
+    elif gemini_request_field_present(extended_fields, 0):
+        if not gemini_request_emit_field(
+            GEMINI_REQUEST_TARGET_TOP_K, 6, output_targets, output_sources, output_capacity, output_count
+        ):
+            return GEMINI_REQUEST_PLAN_STATUS_CAPACITY
+    if gemini_request_field_present(extended_fields, 2) and not gemini_request_emit_field(
+        GEMINI_REQUEST_TARGET_SEED, 8, output_targets, output_sources, output_capacity, output_count
+    ):
+        return GEMINI_REQUEST_PLAN_STATUS_CAPACITY
+    if gemini_request_field_present(extended_fields, 4):
+        if not gemini_request_emit_field(
+            GEMINI_REQUEST_TARGET_PRESENCE_PENALTY, 10, output_targets, output_sources, output_capacity, output_count
+        ):
+            return GEMINI_REQUEST_PLAN_STATUS_CAPACITY
+    elif gemini_request_field_present(extended_fields, 3):
+        if not gemini_request_emit_field(
+            GEMINI_REQUEST_TARGET_PRESENCE_PENALTY, 9, output_targets, output_sources, output_capacity, output_count
+        ):
+            return GEMINI_REQUEST_PLAN_STATUS_CAPACITY
+    if gemini_request_field_present(extended_fields, 6):
+        if not gemini_request_emit_field(
+            GEMINI_REQUEST_TARGET_FREQUENCY_PENALTY, 12, output_targets, output_sources, output_capacity, output_count
+        ):
+            return GEMINI_REQUEST_PLAN_STATUS_CAPACITY
+    elif gemini_request_field_present(extended_fields, 5):
+        if not gemini_request_emit_field(
+            GEMINI_REQUEST_TARGET_FREQUENCY_PENALTY, 11, output_targets, output_sources, output_capacity, output_count
+        ):
+            return GEMINI_REQUEST_PLAN_STATUS_CAPACITY
+    if gemini_request_field_present(extended_fields, 8):
+        if not gemini_request_emit_field(
+            GEMINI_REQUEST_TARGET_RESPONSE_MIME_TYPE, 14, output_targets, output_sources, output_capacity, output_count
+        ):
+            return GEMINI_REQUEST_PLAN_STATUS_CAPACITY
+    elif gemini_request_field_present(extended_fields, 7):
+        if not gemini_request_emit_field(
+            GEMINI_REQUEST_TARGET_RESPONSE_MIME_TYPE, 13, output_targets, output_sources, output_capacity, output_count
+        ):
+            return GEMINI_REQUEST_PLAN_STATUS_CAPACITY
+    if gemini_request_field_present(extended_fields, 10):
+        if not gemini_request_emit_field(
+            GEMINI_REQUEST_TARGET_RESPONSE_SCHEMA, 16, output_targets, output_sources, output_capacity, output_count
+        ):
+            return GEMINI_REQUEST_PLAN_STATUS_CAPACITY
+    elif gemini_request_field_present(extended_fields, 9):
+        if not gemini_request_emit_field(
+            GEMINI_REQUEST_TARGET_RESPONSE_SCHEMA, 15, output_targets, output_sources, output_capacity, output_count
+        ):
+            return GEMINI_REQUEST_PLAN_STATUS_CAPACITY
+    if gemini_request_field_present(extended_fields, 12):
+        if not gemini_request_emit_field(
+            GEMINI_REQUEST_TARGET_RESPONSE_JSON_SCHEMA, 18, output_targets, output_sources, output_capacity, output_count
+        ):
+            return GEMINI_REQUEST_PLAN_STATUS_CAPACITY
+    elif gemini_request_field_present(extended_fields, 11):
+        if not gemini_request_emit_field(
+            GEMINI_REQUEST_TARGET_RESPONSE_JSON_SCHEMA, 17, output_targets, output_sources, output_capacity, output_count
+        ):
+            return GEMINI_REQUEST_PLAN_STATUS_CAPACITY
+    if gemini_request_field_present(extended_fields, 14):
+        if not gemini_request_emit_field(
+            GEMINI_REQUEST_TARGET_RESPONSE_MODALITIES, 20, output_targets, output_sources, output_capacity, output_count
+        ):
+            return GEMINI_REQUEST_PLAN_STATUS_CAPACITY
+    elif gemini_request_field_present(extended_fields, 13):
+        if not gemini_request_emit_field(
+            GEMINI_REQUEST_TARGET_RESPONSE_MODALITIES, 19, output_targets, output_sources, output_capacity, output_count
+        ):
+            return GEMINI_REQUEST_PLAN_STATUS_CAPACITY
+    if gemini_request_field_present(extended_fields, 16):
+        if not gemini_request_emit_field(
+            GEMINI_REQUEST_TARGET_MEDIA_RESOLUTION, 22, output_targets, output_sources, output_capacity, output_count
+        ):
+            return GEMINI_REQUEST_PLAN_STATUS_CAPACITY
+    elif gemini_request_field_present(extended_fields, 15):
+        if not gemini_request_emit_field(
+            GEMINI_REQUEST_TARGET_MEDIA_RESOLUTION, 21, output_targets, output_sources, output_capacity, output_count
+        ):
+            return GEMINI_REQUEST_PLAN_STATUS_CAPACITY
+    if gemini_request_field_present(extended_fields, 18):
+        if not gemini_request_emit_field(
+            GEMINI_REQUEST_TARGET_AUDIO_TIMESTAMP, 24, output_targets, output_sources, output_capacity, output_count
+        ):
+            return GEMINI_REQUEST_PLAN_STATUS_CAPACITY
+    elif gemini_request_field_present(extended_fields, 17):
+        if not gemini_request_emit_field(
+            GEMINI_REQUEST_TARGET_AUDIO_TIMESTAMP, 23, output_targets, output_sources, output_capacity, output_count
+        ):
+            return GEMINI_REQUEST_PLAN_STATUS_CAPACITY
+    if gemini_request_field_present(extended_fields, 20):
+        if not gemini_request_emit_field(
+            GEMINI_REQUEST_TARGET_SPEECH_CONFIG, 26, output_targets, output_sources, output_capacity, output_count
+        ):
+            return GEMINI_REQUEST_PLAN_STATUS_CAPACITY
+    elif gemini_request_field_present(extended_fields, 19):
+        if not gemini_request_emit_field(
+            GEMINI_REQUEST_TARGET_SPEECH_CONFIG, 25, output_targets, output_sources, output_capacity, output_count
+        ):
+            return GEMINI_REQUEST_PLAN_STATUS_CAPACITY
+    if gemini_request_field_present(extended_fields, 21):
+        if not gemini_request_emit_field(
+            GEMINI_REQUEST_TARGET_CANDIDATE_COUNT, 27, output_targets, output_sources, output_capacity, output_count
+        ):
+            return GEMINI_REQUEST_PLAN_STATUS_CAPACITY
+    elif gemini_request_field_present(extended_fields, 22):
+        if not gemini_request_emit_field(
+            GEMINI_REQUEST_TARGET_CANDIDATE_COUNT, 28, output_targets, output_sources, output_capacity, output_count
+        ):
+            return GEMINI_REQUEST_PLAN_STATUS_CAPACITY
+
+    if gemini_request_field_present(optional_fields, 0):
+        if not gemini_request_emit_field(
+            GEMINI_REQUEST_TARGET_SAFETY_SETTINGS, 29, output_targets, output_sources, output_capacity, output_count
+        ):
+            return GEMINI_REQUEST_PLAN_STATUS_CAPACITY
+    elif gemini_request_field_present(optional_fields, 1):
+        if not gemini_request_emit_field(
+            GEMINI_REQUEST_TARGET_SAFETY_SETTINGS, 30, output_targets, output_sources, output_capacity, output_count
+        ):
+            return GEMINI_REQUEST_PLAN_STATUS_CAPACITY
+    if gemini_request_field_present(optional_fields, 2):
+        if not gemini_request_emit_field(
+            GEMINI_REQUEST_TARGET_CACHED_CONTENT, 31, output_targets, output_sources, output_capacity, output_count
+        ):
+            return GEMINI_REQUEST_PLAN_STATUS_CAPACITY
+    elif gemini_request_field_present(optional_fields, 3):
+        if not gemini_request_emit_field(
+            GEMINI_REQUEST_TARGET_CACHED_CONTENT, 32, output_targets, output_sources, output_capacity, output_count
+        ):
+            return GEMINI_REQUEST_PLAN_STATUS_CAPACITY
+    if gemini_request_field_present(optional_fields, 4) and not gemini_request_emit_field(
+        GEMINI_REQUEST_TARGET_LABELS, 33, output_targets, output_sources, output_capacity, output_count
+    ):
+        return GEMINI_REQUEST_PLAN_STATUS_CAPACITY
+    return 0
+
+
 comptime ABI_VERSION: Int64 = 2
 comptime ABI_STATUS_MISMATCH: Int64 = 1
 comptime ABI_STATUS_INVALID_INPUT: Int64 = 2

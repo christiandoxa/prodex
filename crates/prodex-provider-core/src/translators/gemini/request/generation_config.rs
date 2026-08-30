@@ -9,6 +9,39 @@ pub use self::thinking::gemini_provider_core_model_uses_thinking_level;
 pub(in crate::translators::gemini) use self::thinking::gemini_thinking_config_from_request;
 use self::thinking::gemini_thinking_config_with_budget_from_request;
 
+#[cfg(feature = "mojo")]
+fn gemini_apply_mojo_generation_fields(
+    obj: &serde_json::Map<String, Value>,
+    generation_config: &mut serde_json::Map<String, Value>,
+    scope: super::GeminiRequestFieldScope,
+) {
+    for field in super::gemini_request_field_plan(obj, scope) {
+        let Some(value) = super::gemini_request_source_value(obj, field) else {
+            continue;
+        };
+        if value.is_null() {
+            continue;
+        }
+        generation_config.insert(
+            super::gemini_request_target_name(field.target).to_string(),
+            value.clone(),
+        );
+    }
+}
+
+#[cfg(feature = "mojo")]
+pub(in crate::translators::gemini) fn gemini_insert_basic_generation_config(
+    obj: &serde_json::Map<String, Value>,
+    generation_config: &mut serde_json::Map<String, Value>,
+) {
+    gemini_apply_mojo_generation_fields(
+        obj,
+        generation_config,
+        super::GeminiRequestFieldScope::BasicGeneration,
+    );
+}
+
+#[cfg(not(feature = "mojo"))]
 pub(in crate::translators::gemini) fn gemini_insert_basic_generation_config(
     obj: &serde_json::Map<String, Value>,
     generation_config: &mut serde_json::Map<String, Value>,
@@ -102,6 +135,19 @@ pub(crate) fn gemini_generation_config_from_request(
     Value::Object(config)
 }
 
+#[cfg(feature = "mojo")]
+pub(in crate::translators::gemini) fn gemini_insert_extended_generation_config(
+    obj: &serde_json::Map<String, Value>,
+    generation_config: &mut serde_json::Map<String, Value>,
+) {
+    gemini_apply_mojo_generation_fields(
+        obj,
+        generation_config,
+        super::GeminiRequestFieldScope::ExtendedGeneration,
+    );
+}
+
+#[cfg(not(feature = "mojo"))]
 pub(in crate::translators::gemini) fn gemini_insert_extended_generation_config(
     obj: &serde_json::Map<String, Value>,
     generation_config: &mut serde_json::Map<String, Value>,
