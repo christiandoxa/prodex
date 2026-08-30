@@ -74,48 +74,24 @@ pub(crate) fn failed_numeric_rules(rules: &[NumericRule]) -> Result<Vec<usize>> 
     }
 }
 
+#[cfg(any(not(feature = "mojo"), test))]
 pub(crate) fn validate_gateway_route_strategy(value: &str) -> Result<()> {
-    #[cfg(feature = "mojo")]
-    {
-        if value.is_empty() {
-            bail!("strategy cannot be empty");
-        }
-        if value.chars().any(char::is_whitespace) {
-            bail!("strategy must not contain whitespace");
-        }
-        if !prodex_mojo_core::policy::validate_text(
-            value,
-            prodex_mojo_core::policy::PolicyTextKind::RouteStrategy,
-        )
-        .expect("Mojo runtime-policy text validation returned invalid output")
-        {
-            bail!(
-                "strategy must be one of fallback, round-robin, first, least-busy, lowest-cost, lowest-latency, rpm, tpm"
-            );
-        }
-        return Ok(());
+    if value.is_empty() {
+        bail!("strategy cannot be empty");
     }
-
-    #[cfg(not(feature = "mojo"))]
-    {
-        if value.is_empty() {
-            bail!("strategy cannot be empty");
-        }
-        if value.chars().any(char::is_whitespace) {
-            bail!("strategy must not contain whitespace");
-        }
-        match value.to_ascii_lowercase().as_str() {
-            "fallback" | "ordered-fallback" | "ordered_fallback" | "round-robin"
-            | "round_robin" | "rr" | "first" | "first-available" | "first_available"
-            | "ordered" | "least-busy" | "least_busy" | "least-busy-model" | "least_busy_model"
-            | "lowest-cost" | "lowest_cost" | "cost" | "cost-optimized" | "cost_optimized"
-            | "lowest-latency" | "lowest_latency" | "latency" | "latency-optimized"
-            | "latency_optimized" | "rpm" | "rpm-headroom" | "rpm_headroom" | "tpm"
-            | "tpm-headroom" | "tpm_headroom" => Ok(()),
-            _ => bail!(
-                "strategy must be one of fallback, round-robin, first, least-busy, lowest-cost, lowest-latency, rpm, tpm"
-            ),
-        }
+    if value.chars().any(char::is_whitespace) {
+        bail!("strategy must not contain whitespace");
+    }
+    match value.to_ascii_lowercase().as_str() {
+        "fallback" | "ordered-fallback" | "ordered_fallback" | "round-robin" | "round_robin"
+        | "rr" | "first" | "first-available" | "first_available" | "ordered" | "least-busy"
+        | "least_busy" | "least-busy-model" | "least_busy_model" | "lowest-cost"
+        | "lowest_cost" | "cost" | "cost-optimized" | "cost_optimized" | "lowest-latency"
+        | "lowest_latency" | "latency" | "latency-optimized" | "latency_optimized" | "rpm"
+        | "rpm-headroom" | "rpm_headroom" | "tpm" | "tpm-headroom" | "tpm_headroom" => Ok(()),
+        _ => bail!(
+            "strategy must be one of fallback, round-robin, first, least-busy, lowest-cost, lowest-latency, rpm, tpm"
+        ),
     }
 }
 
