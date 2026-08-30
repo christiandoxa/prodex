@@ -25,6 +25,8 @@ comptime ANTHROPIC_WEB_SEARCH_CALL: Int64 = 9
 comptime ANTHROPIC_TOOL_USE_ITEM: Int64 = 10
 comptime ANTHROPIC_TOOL_USAGE: Int64 = 11
 comptime ANTHROPIC_APPEND_MESSAGE: Int64 = 12
+comptime ANTHROPIC_RESPONSE_MESSAGE: Int64 = 13
+comptime ANTHROPIC_RESPONSE_REASONING: Int64 = 14
 comptime ANTHROPIC_STREAM_MESSAGE_START: Int64 = 20
 comptime ANTHROPIC_STREAM_TEXT_START: Int64 = 21
 comptime ANTHROPIC_STREAM_TOOL_START: Int64 = 22
@@ -686,6 +688,85 @@ def anthropic_request_item_is_tool_result_value(
     )
 
 
+def anthropic_request_write_response_message(
+    writer: Pointer[mut=True, AnthropicRequestKernelWriter, _],
+    input: ProdexAnthropicRequestKernelInput,
+) -> Bool:
+    if (
+        input.blocks.len < 2
+        or anthropic_request_byte(input.blocks, 0) != 91
+        or anthropic_request_byte(input.blocks, Int64(input.blocks.len) - 1) != 93
+    ):
+        return False
+    var end = Int64(input.blocks.len) - 1
+    var index = anthropic_request_skip_ws(input.blocks, 1, end)
+    if index >= end:
+        return False
+    if not anthropic_request_put_literal(
+        writer, StringSlice('{"type":"message","role":"assistant","content":[')
+    ):
+        return False
+    var first = True
+    while index < end:
+        var item_end = anthropic_request_value_end(input.blocks, index, end, 0)
+        if item_end < 0:
+            return False
+        var kind = anthropic_request_object_field(
+            input.blocks, index, item_end, StringSlice('"type"')
+        )
+        if kind[0] < 0 or not anthropic_request_range_matches_literal(
+            input.blocks, kind[0], kind[1], StringSlice('"text"')
+        ):
+            return False
+        var text = anthropic_request_object_field(
+            input.blocks, index, item_end, StringSlice('"text"')
+        )
+        if text[0] < 0:
+            return False
+        if not first and not anthropic_request_put_byte(writer, 44):
+            return False
+        first = False
+        if not anthropic_request_put_literal(
+            writer, StringSlice('{"type":"output_text","text":')
+        ) or not anthropic_request_put_view_range(
+            writer, input.blocks, text[0], text[1]
+        ) or not anthropic_request_put_byte(writer, 125):
+            return False
+        index = anthropic_request_skip_ws(input.blocks, item_end, end)
+        if index < end and anthropic_request_byte(input.blocks, index) == 44:
+            index = anthropic_request_skip_ws(input.blocks, index + 1, end)
+            if index >= end:
+                return False
+        elif index != end:
+            return False
+    return not first and anthropic_request_put_literal(writer, StringSlice("]}"))
+
+
+def anthropic_request_write_response_reasoning(
+    writer: Pointer[mut=True, AnthropicRequestKernelWriter, _],
+    input: ProdexAnthropicRequestKernelInput,
+) -> Bool:
+    if input.content.len < 2:
+        return False
+    var kind = anthropic_request_object_field(
+        input.content, 0, Int64(input.content.len), StringSlice('"type"')
+    )
+    var thinking = anthropic_request_object_field(
+        input.content, 0, Int64(input.content.len), StringSlice('"thinking"')
+    )
+    if kind[0] < 0 or not anthropic_request_range_matches_literal(
+        input.content, kind[0], kind[1], StringSlice('"thinking"')
+    ) or thinking[0] < 0:
+        return False
+    return (
+        anthropic_request_put_literal(
+            writer, StringSlice('{"type":"reasoning","summary":[{"type":"summary_text","text":')
+        )
+        and anthropic_request_put_view_range(writer, input.content, thinking[0], thinking[1])
+        and anthropic_request_put_literal(writer, StringSlice("}]}"))
+    )
+
+
 def anthropic_request_put_new_message(
     writer: Pointer[mut=True, AnthropicRequestKernelWriter, _],
     role: ProdexRichStringView,
@@ -824,10 +905,8 @@ def anthropic_request_write_stream(
     writer: Pointer[mut=True, AnthropicRequestKernelWriter, _],
     input: ProdexAnthropicRequestKernelInput,
 ) -> Bool:
-    var event = StringSlice("")
     if input.operation == ANTHROPIC_STREAM_MESSAGE_START:
-        event = StringSlice("response.created")
-        if not anthropic_request_put_event_prefix(writer, event):
+        if not anthropic_request_put_event_prefix(writer, StringSlice("response.created")):
             return False
         if not anthropic_request_put_literal(
             writer, StringSlice('{"type":"response.created","response":{"id":')
@@ -843,8 +922,9 @@ def anthropic_request_write_stream(
             return False
         return anthropic_request_put_literal(writer, StringSlice(',"output":[]}}')) and anthropic_request_finish_event(writer)
     if input.operation == ANTHROPIC_STREAM_TEXT_START:
-        event = StringSlice("response.output_item.added")
-        if not anthropic_request_put_event_prefix(writer, event):
+        if not anthropic_request_put_event_prefix(
+            writer, StringSlice("response.output_item.added")
+        ):
             return False
         return (
             anthropic_request_put_literal(
@@ -857,8 +937,9 @@ def anthropic_request_write_stream(
             and anthropic_request_finish_event(writer)
         )
     if input.operation == ANTHROPIC_STREAM_TOOL_START:
-        event = StringSlice("response.output_item.added")
-        if not anthropic_request_put_event_prefix(writer, event):
+        if not anthropic_request_put_event_prefix(
+            writer, StringSlice("response.output_item.added")
+        ):
             return False
         return (
             anthropic_request_put_literal(
@@ -873,8 +954,9 @@ def anthropic_request_write_stream(
             and anthropic_request_finish_event(writer)
         )
     if input.operation == ANTHROPIC_STREAM_WEB_SEARCH_START:
-        event = StringSlice("response.output_item.added")
-        if not anthropic_request_put_event_prefix(writer, event):
+        if not anthropic_request_put_event_prefix(
+            writer, StringSlice("response.output_item.added")
+        ):
             return False
         return (
             anthropic_request_put_literal(
@@ -885,12 +967,13 @@ def anthropic_request_write_stream(
             and anthropic_request_put_view(writer, input.id)
             and anthropic_request_put_literal(writer, StringSlice(',"status":"in_progress","action":{"type":"search","queries":'))
             and anthropic_request_put_view(writer, input.queries)
-            and anthropic_request_put_literal(writer, StringSlice(',"sources":[]}}'))
+            and anthropic_request_put_literal(writer, StringSlice(',"sources":[]}}}'))
             and anthropic_request_finish_event(writer)
         )
     if input.operation == ANTHROPIC_STREAM_THINKING_START:
-        event = StringSlice("response.output_item.added")
-        if not anthropic_request_put_event_prefix(writer, event):
+        if not anthropic_request_put_event_prefix(
+            writer, StringSlice("response.output_item.added")
+        ):
             return False
         return (
             anthropic_request_put_literal(
@@ -901,16 +984,18 @@ def anthropic_request_write_stream(
             and anthropic_request_finish_event(writer)
         )
     if input.operation == ANTHROPIC_STREAM_TEXT_DELTA or input.operation == ANTHROPIC_STREAM_ARGUMENTS_DELTA or input.operation == ANTHROPIC_STREAM_THINKING_DELTA:
-        var prefix = StringSlice("")
-        if input.operation == ANTHROPIC_STREAM_TEXT_DELTA:
-            event = StringSlice("response.output_text.delta")
-            prefix = StringSlice('{"type":"response.output_text.delta","output_index":')
-        elif input.operation == ANTHROPIC_STREAM_ARGUMENTS_DELTA:
+        var event = StringSlice("response.output_text.delta")
+        var prefix = StringSlice('{"type":"response.output_text.delta","output_index":')
+        if input.operation == ANTHROPIC_STREAM_ARGUMENTS_DELTA:
             event = StringSlice("response.function_call_arguments.delta")
-            prefix = StringSlice('{"type":"response.function_call_arguments.delta","output_index":')
-        else:
+            prefix = StringSlice(
+                '{"type":"response.function_call_arguments.delta","output_index":'
+            )
+        elif input.operation == ANTHROPIC_STREAM_THINKING_DELTA:
             event = StringSlice("response.reasoning_summary_text.delta")
-            prefix = StringSlice('{"type":"response.reasoning_summary_text.delta","output_index":')
+            prefix = StringSlice(
+                '{"type":"response.reasoning_summary_text.delta","output_index":'
+            )
         if not anthropic_request_put_event_prefix(writer, event):
             return False
         return (
@@ -1005,6 +1090,10 @@ def anthropic_request_write_operation(
         return anthropic_request_write_tool_usage(writer, input)
     if input.operation == ANTHROPIC_APPEND_MESSAGE:
         return anthropic_request_append_message(writer, input)
+    if input.operation == ANTHROPIC_RESPONSE_MESSAGE:
+        return anthropic_request_write_response_message(writer, input)
+    if input.operation == ANTHROPIC_RESPONSE_REASONING:
+        return anthropic_request_write_response_reasoning(writer, input)
     if input.operation >= ANTHROPIC_STREAM_MESSAGE_START:
         return anthropic_request_write_stream(writer, input)
     return False

@@ -21,6 +21,8 @@ pub enum AnthropicRequestKernelOperation {
     ToolUseItem = 10,
     ToolUsage = 11,
     AppendMessage = 12,
+    ResponseMessage = 13,
+    ResponseReasoning = 14,
     StreamMessageStart = 20,
     StreamTextStart = 21,
     StreamToolStart = 22,
@@ -197,8 +199,8 @@ fn input_bytes(input: &AnthropicRequestKernelInput<'_>) -> Result<usize, MojoErr
     })
 }
 
-/// Runs one bounded Anthropic request, message, tool, web-search, or stream
-/// JSON writer in compiled Mojo.
+/// Runs one bounded Anthropic request, response, message, tool, web-search, or
+/// stream JSON writer in compiled Mojo.
 pub fn anthropic_request_kernel(
     input: AnthropicRequestKernelInput<'_>,
 ) -> Result<Vec<u8>, MojoError> {
