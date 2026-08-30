@@ -1,6 +1,6 @@
 use super::super_expose::{
-    ExposeEndpointMode, ExposeEngineRequest, ExposeLifecycleEvent, ExposeLifecyclePhase,
-    ExposeReadyState, run_super_expose_engine, validate_existing_cloudflare_hostname,
+    ExposeEndpointMode, ExposeLifecycleEvent, ExposeLifecyclePhase, ExposeReadyState,
+    validate_existing_cloudflare_hostname,
 };
 use super::{PublicMcpEndpoint, expose_main_provider};
 use crate::ExposeArgs;
@@ -17,18 +17,20 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;
-use std::thread::{self, JoinHandle};
+use std::thread::JoinHandle;
 use std::time::Duration;
 use terminal_ui::{
     AlternateScreenTerminal, tui_border_style, tui_error_style, tui_hint_style, tui_muted_style,
     tui_primary_style, tui_success_style, tui_title_style,
 };
 
+#[path = "super_expose_ui_loop.rs"]
+mod loop_support;
 #[path = "super_expose_ui_support.rs"]
 mod support;
 #[cfg(test)]
 use support::copy_public_url_to_clipboard_with;
-use support::{copy_public_url_to_clipboard, visible_url};
+use support::visible_url;
 
 const EXPOSE_TUI_EVENT_CAPACITY: usize = 32;
 const EXPOSE_TUI_INPUT_POLL: Duration = Duration::from_millis(100);
@@ -336,8 +338,8 @@ pub(super) fn run(
     let result = (|| -> Result<()> {
         loop {
             drain_engine_events(&mut state, &event_rx);
-            reap_finished_worker(&mut state, &mut worker)?;
-            if handle_signal(&mut state, &cancel, &worker, &mut stopping) {
+            loop_support::reap_finished_worker(&mut state, &mut worker)?;
+            if loop_support::handle_signal(&mut state, &cancel, &worker, &mut stopping) {
                 break Ok(());
             }
 
@@ -349,13 +351,13 @@ pub(super) fn run(
                 state.redraw_needed = false;
             }
 
-            if should_finish(&state, &worker, stopping) {
+            if loop_support::should_finish(&state, &worker, stopping) {
                 break worker_result(&state);
             }
 
             if event::poll(EXPOSE_TUI_INPUT_POLL)
                 .context("failed to poll Super expose TUI input")?
-                && handle_input(
+                && loop_support::handle_input(
                     &mut state,
                     &event_tx,
                     &cancel,
@@ -374,115 +376,6 @@ pub(super) fn run(
         let _ = worker.join();
     }
     result
-}
-
-fn reap_finished_worker(
-    state: &mut ExposeTuiState,
-    worker: &mut Option<JoinHandle<Result<()>>>,
-) -> Result<()> {
-    if !worker.as_ref().is_some_and(JoinHandle::is_finished) {
-        return Ok(());
-    }
-    let Some(worker_handle) = worker.take() else {
-        return Ok(());
-    };
-    let finished = worker_handle
-        .join()
-        .map_err(|_| anyhow::anyhow!("expose lifecycle worker panicked"))?;
-    if let Err(error) = finished
-        && !matches!(
-            state.phase,
-            ExposeTuiPhase::Failed | ExposeTuiPhase::Stopped
-        )
-    {
-        state.apply_engine_event(ExposeLifecycleEvent::Failed(
-            redaction::redaction_redact_secret_like_text(&format!("{error:#}")),
-        ));
-    }
-    Ok(())
-}
-
-fn handle_signal(
-    state: &mut ExposeTuiState,
-    cancel: &AtomicBool,
-    worker: &Option<JoinHandle<Result<()>>>,
-    stopping: &mut bool,
-) -> bool {
-    if !signal_requested() || *stopping {
-        return false;
-    }
-    if worker.is_none() {
-        return true;
-    }
-    cancel.store(true, Ordering::SeqCst);
-    state.set_stopping();
-    *stopping = true;
-    false
-}
-
-fn should_finish(
-    state: &ExposeTuiState,
-    worker: &Option<JoinHandle<Result<()>>>,
-    stopping: bool,
-) -> bool {
-    worker.is_none()
-        && (stopping
-            || matches!(
-                state.phase,
-                ExposeTuiPhase::Stopped | ExposeTuiPhase::Failed
-            ))
-}
-
-fn handle_input(
-    state: &mut ExposeTuiState,
-    event_tx: &mpsc::SyncSender<ExposeLifecycleEvent>,
-    cancel: &Arc<AtomicBool>,
-    launch: &mut Option<(ExposeArgs, SuperArgs, PathBuf, String, String)>,
-    worker: &mut Option<JoinHandle<Result<()>>>,
-    stopping: &mut bool,
-) -> Result<bool> {
-    let action =
-        state.handle_event(event::read().context("failed to read Super expose TUI input")?);
-    match action {
-        ExposeTuiAction::None => {}
-        ExposeTuiAction::CopyUrl => {
-            if let Some(ready) = state.ready.as_ref() {
-                match copy_public_url_to_clipboard(&ready.public_url) {
-                    Ok(()) => state.set_status("MCP URL copied to clipboard"),
-                    Err(_) => state.set_status("clipboard is unavailable"),
-                }
-            }
-        }
-        ExposeTuiAction::Start(endpoint) => {
-            let (args, super_args, workspace_root, workspace_name, display_name) =
-                launch.take().context("expose endpoint selected twice")?;
-            let event_tx = event_tx.clone();
-            let cancel = Arc::clone(cancel);
-            *worker = Some(thread::spawn(move || {
-                run_super_expose_engine(
-                    ExposeEngineRequest {
-                        args,
-                        super_args,
-                        workspace_root,
-                        workspace_name,
-                        display_name,
-                        endpoint,
-                    },
-                    Some(event_tx),
-                    cancel,
-                )
-            }));
-        }
-        ExposeTuiAction::Stop => {
-            if worker.is_none() {
-                return Ok(true);
-            }
-            cancel.store(true, Ordering::SeqCst);
-            state.set_stopping();
-            *stopping = true;
-        }
-    }
-    Ok(false)
 }
 
 fn drain_engine_events(
