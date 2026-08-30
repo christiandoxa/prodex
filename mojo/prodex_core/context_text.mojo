@@ -1073,6 +1073,127 @@ def context_text_counts_have_signal(values: InlineArray[Int64, 7]) -> Bool:
     )
 
 
+comptime CONTEXT_GEMINI_GLOB_MAX_BYTES: Int64 = 131_072
+
+
+def context_gemini_glob_component_bounds(
+    view: ProdexStringView, cursor: Int64
+) -> InlineArray[Int64, 3]:
+    var bounds = InlineArray[Int64, 3](fill=-1)
+    var length = Int64(view.len)
+    if cursor < 0 or cursor > length:
+        return bounds^
+    var start = cursor
+    ref ptr = view.ptr.unsafe_value()
+    var end = start
+    while end < length and ptr[unsafe_offset=end] != 47:
+        end += 1
+    bounds[0] = start
+    bounds[1] = end
+    bounds[2] = end + 1 if end < length else length + 1
+    return bounds^
+
+
+def context_gemini_glob_ascii_lower(value: UInt8) -> UInt8:
+    if value >= 65 and value <= 90:
+        return value + 32
+    return value
+
+
+def context_gemini_glob_segment_matches(
+    pattern: ProdexStringView,
+    pattern_bounds: InlineArray[Int64, 3],
+    text: ProdexStringView,
+    text_bounds: InlineArray[Int64, 3],
+) -> Bool:
+    ref pattern_ptr = pattern.ptr.unsafe_value()
+    ref text_ptr = text.ptr.unsafe_value()
+    var pattern_index = pattern_bounds[0]
+    var text_index = text_bounds[0]
+    var pattern_end = pattern_bounds[1]
+    var text_end = text_bounds[1]
+    var star: Int64 = -1
+    var star_text = text_index
+    while text_index < text_end:
+        if pattern_index < pattern_end:
+            var value = pattern_ptr[unsafe_offset=pattern_index]
+            if value == 42:
+                star = pattern_index
+                pattern_index += 1
+                star_text = text_index
+                continue
+            if value == 63 or (
+                context_gemini_glob_ascii_lower(value)
+                == context_gemini_glob_ascii_lower(
+                    text_ptr[unsafe_offset=text_index]
+                )
+            ):
+                pattern_index += 1
+                text_index += 1
+                continue
+            if star < 0:
+                return False
+        elif star < 0:
+            return False
+        pattern_index = star + 1
+        star_text += 1
+        text_index = star_text
+    while pattern_index < pattern_end and pattern_ptr[unsafe_offset=pattern_index] == 42:
+        pattern_index += 1
+    return pattern_index == pattern_end
+
+
+def context_gemini_glob_component_is_double_star(
+    view: ProdexStringView, bounds: InlineArray[Int64, 3]
+) -> Bool:
+    return (
+        bounds[1] - bounds[0] == 2
+        and view.ptr.unsafe_value()[unsafe_offset=bounds[0]] == 42
+        and view.ptr.unsafe_value()[unsafe_offset=bounds[0] + 1] == 42
+    )
+
+
+def context_gemini_glob_matches(
+    pattern: ProdexStringView, path: ProdexStringView
+) -> Bool:
+    var pattern_length = Int64(pattern.len)
+    var path_length = Int64(path.len)
+    var pattern_cursor: Int64 = 0
+    var path_cursor: Int64 = 0
+    var star_pattern_cursor: Int64 = -1
+    var star_path_cursor: Int64 = -1
+    while path_cursor <= path_length:
+        if pattern_cursor <= pattern_length:
+            var pattern_bounds = context_gemini_glob_component_bounds(
+                pattern, pattern_cursor
+            )
+            if context_gemini_glob_component_is_double_star(
+                pattern, pattern_bounds
+            ):
+                star_pattern_cursor = pattern_bounds[2]
+                pattern_cursor = pattern_bounds[2]
+                star_path_cursor = path_cursor
+                continue
+            var path_bounds = context_gemini_glob_component_bounds(path, path_cursor)
+            if context_gemini_glob_segment_matches(pattern, pattern_bounds, path, path_bounds):
+                pattern_cursor = pattern_bounds[2]
+                path_cursor = path_bounds[2]
+                continue
+
+        if star_pattern_cursor < 0 or star_path_cursor > path_length:
+            return False
+        var star_bounds = context_gemini_glob_component_bounds(path, star_path_cursor)
+        star_path_cursor = star_bounds[2]
+        path_cursor = star_path_cursor
+        pattern_cursor = star_pattern_cursor
+    while pattern_cursor <= pattern_length:
+        var bounds = context_gemini_glob_component_bounds(pattern, pattern_cursor)
+        if not context_gemini_glob_component_is_double_star(pattern, bounds):
+            return False
+        pattern_cursor = bounds[2]
+    return True
+
+
 @export("prodex_mojo_text_abi_version")
 def prodex_mojo_text_abi_version() abi("C") -> Int64:
     return CONTEXT_TEXT_ABI_VERSION
@@ -1130,6 +1251,32 @@ def prodex_context_classify_command_metadata_v1(
     if view.len == 0:
         return 0
     output_kind[] = context_metadata_kind(view)
+    return 0
+
+
+@export("prodex_context_gemini_glob_matches_v1")
+def prodex_context_gemini_glob_matches_v1(
+    abi_version: Int64,
+    pattern: Pointer[mut=False, ProdexStringView, _],
+    path: Pointer[mut=False, ProdexStringView, _],
+    output: Pointer[mut=True, Int64, _],
+) abi("C") -> Int64:
+    if abi_version != CONTEXT_TEXT_ABI_VERSION:
+        return 4
+    output[] = 0
+    var pattern_view = pattern[].copy()
+    var path_view = path[].copy()
+    if (
+        pattern_view.len > UInt(CONTEXT_GEMINI_GLOB_MAX_BYTES)
+        or path_view.len > UInt(CONTEXT_GEMINI_GLOB_MAX_BYTES)
+    ):
+        return 1
+    if not context_text_view_is_valid(pattern_view) or not context_text_view_is_valid(
+        path_view
+    ):
+        return 2
+    if context_gemini_glob_matches(pattern_view, path_view):
+        output[] = 1
     return 0
 
 
