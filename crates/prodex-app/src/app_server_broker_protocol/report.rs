@@ -1,6 +1,16 @@
 //! JSON report rendering for app-server broker protocol diagnostics.
 
-use super::*;
+use super::{
+    AppServerBrokerAffinityKey, AppServerBrokerMetadata, AppServerBrokerMethodKind,
+    app_server_broker_affinity_keys, app_server_broker_continuation_affinity_summary_json,
+    app_server_broker_continuation_decision, app_server_broker_diagnostic_summary,
+    app_server_broker_lifecycle_schema_file, app_server_broker_lifecycle_stage,
+    app_server_broker_method_kind, app_server_broker_policy_hint_json,
+};
+#[cfg(test)]
+use super::{AppServerBrokerFrameKind, AppServerBrokerRequest};
+use redaction::redaction_redact_secret_like_text;
+use serde_json::Value;
 
 #[cfg(test)]
 pub(crate) fn app_server_broker_request_summary_json(

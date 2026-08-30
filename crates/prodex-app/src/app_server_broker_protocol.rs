@@ -1,4 +1,3 @@
-use redaction::redaction_redact_secret_like_text;
 use serde_json::Value;
 
 #[path = "app_server_broker_protocol/affinity.rs"]

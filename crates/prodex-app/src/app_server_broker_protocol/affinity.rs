@@ -1,7 +1,19 @@
 //! Affinity and safe-rotation policy helpers for app-server broker frames.
 
 use super::report::app_server_broker_affinity_key_json;
-use super::*;
+use super::{
+    AppServerBrokerAffinityKey, AppServerBrokerAffinityKeyKind,
+    AppServerBrokerContinuationDecision, AppServerBrokerContinuationOwnerKind,
+    AppServerBrokerLifecycleBinding, AppServerBrokerPolicyHint,
+    app_server_broker_diagnostic_summary, app_server_broker_lifecycle_stage,
+};
+#[cfg(not(feature = "mojo-core"))]
+use super::{
+    AppServerBrokerCommitBoundary, AppServerBrokerFrameKind, AppServerBrokerLifecycleStage,
+    AppServerBrokerMetadata, AppServerBrokerPolicyHintMode, AppServerBrokerRotationWindow,
+    AppServerBrokerRoutingHint,
+};
+use serde_json::Value;
 
 pub(crate) fn app_server_broker_lifecycle_binding(
     value: &Value,
