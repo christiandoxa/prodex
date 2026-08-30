@@ -8,7 +8,6 @@ comptime POLICY_NUMERIC_RANGE: Int64 = 1
 comptime POLICY_NUMERIC_RELATION_LE: Int64 = 2
 comptime UINT64_MAX: UInt64 = 18446744073709551615
 
-comptime POLICY_TEXT_ROUTE_STRATEGY: Int64 = 0
 comptime POLICY_TEXT_OBSERVABILITY_SCHEMA: Int64 = 1
 comptime POLICY_TEXT_STATE_BACKEND: Int64 = 2
 comptime POLICY_TEXT_ADMIN_ROLE: Int64 = 3
@@ -56,22 +55,6 @@ def policy_text_has_ascii_whitespace(view: ProdexRichStringView) -> Bool:
 
 def policy_text_token_allowed(view: ProdexRichStringView, kind: Int64) -> Bool:
     if view.len == 0 or policy_text_has_ascii_whitespace(view):
-        return False
-    if kind == POLICY_TEXT_ROUTE_STRATEGY:
-        for literal in [
-            StringSlice("fallback"), StringSlice("ordered-fallback"), StringSlice("ordered_fallback"),
-            StringSlice("round-robin"), StringSlice("round_robin"), StringSlice("rr"), StringSlice("first"),
-            StringSlice("first-available"), StringSlice("first_available"), StringSlice("ordered"),
-            StringSlice("least-busy"), StringSlice("least_busy"), StringSlice("least-busy-model"),
-            StringSlice("least_busy_model"), StringSlice("lowest-cost"), StringSlice("lowest_cost"),
-            StringSlice("cost"), StringSlice("cost-optimized"), StringSlice("cost_optimized"),
-            StringSlice("lowest-latency"), StringSlice("lowest_latency"), StringSlice("latency"),
-            StringSlice("latency-optimized"), StringSlice("latency_optimized"), StringSlice("rpm"),
-            StringSlice("rpm-headroom"), StringSlice("rpm_headroom"), StringSlice("tpm"),
-            StringSlice("tpm-headroom"), StringSlice("tpm_headroom"),
-        ]:
-            if policy_text_equals(view, literal):
-                return True
         return False
     if kind == POLICY_TEXT_OBSERVABILITY_SCHEMA:
         for literal in [
@@ -155,7 +138,7 @@ def prodex_runtime_policy_validate_text(
     if kind == POLICY_TEXT_HTTP_ENDPOINT:
         output[] = Int64(policy_text_http_endpoint_valid(view))
         return 0
-    if kind < POLICY_TEXT_ROUTE_STRATEGY or kind > POLICY_TEXT_WEBHOOK_PHASE:
+    if kind < POLICY_TEXT_OBSERVABILITY_SCHEMA or kind > POLICY_TEXT_WEBHOOK_PHASE:
         return 1
     output[] = Int64(policy_text_token_allowed(view, kind))
     return 0
@@ -190,4 +173,133 @@ def prodex_runtime_policy_validate_numeric(
             failed_rules[unsafe_offset=index] = 1
         else:
             failed_rules[unsafe_offset=index] = 0
+    return 0
+
+
+comptime ACCOUNTING_USAGE_ADD: Int64 = 0
+comptime ACCOUNTING_USAGE_SATURATING_SUB: Int64 = 1
+comptime ACCOUNTING_USAGE_EXCEEDS: Int64 = 2
+comptime ACCOUNTING_SNAPSHOT_AVAILABLE: Int64 = 3
+comptime ACCOUNTING_RESERVE: Int64 = 4
+comptime ACCOUNTING_COMMIT: Int64 = 5
+
+
+def accounting_value(
+    values_address: UInt, index: Int64
+) -> UInt64:
+    var values = Pointer[mut=False, UInt64, ImmUntrackedOrigin](
+        unsafe_from_address=Int(values_address)
+    )
+    return values[unsafe_offset=index]
+
+
+def accounting_checked_add(left: UInt64, right: UInt64) -> InlineArray[UInt64, 2]:
+    var result = InlineArray[UInt64, 2](fill=0)
+    if left > UINT64_MAX - right:
+        result[1] = 1
+    else:
+        result[0] = left + right
+    return result^
+
+
+@export("prodex_domain_accounting_arithmetic_v1")
+def prodex_domain_accounting_arithmetic_v1(
+    abi_version: Int64,
+    operation: Int64,
+    values_address: UInt,
+    value_count: Int64,
+    output_address: UInt,
+    result_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != 6 or value_count < 0 or output_address == 0 or result_address == 0:
+        return 4
+    var output = Pointer[mut=True, UInt64, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    var result = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(result_address)
+    )
+    output[unsafe_offset=0] = 0
+    output[unsafe_offset=1] = 0
+    result[] = 0
+    var required: Int64 = 4
+    if operation == ACCOUNTING_SNAPSHOT_AVAILABLE:
+        required = 6
+    elif operation == ACCOUNTING_RESERVE or operation == ACCOUNTING_COMMIT:
+        required = 8
+    if operation < ACCOUNTING_USAGE_ADD or operation > ACCOUNTING_COMMIT or value_count < required:
+        return 1
+    if required > 0 and values_address == 0:
+        return 1
+
+    if operation == ACCOUNTING_USAGE_ADD:
+        var tokens = accounting_checked_add(accounting_value(values_address, 0), accounting_value(values_address, 2))
+        var cost = accounting_checked_add(accounting_value(values_address, 1), accounting_value(values_address, 3))
+        if tokens[1] == 1 or cost[1] == 1:
+            result[] = 1
+        else:
+            output[unsafe_offset=0] = tokens[0]
+            output[unsafe_offset=1] = cost[0]
+        return 0
+    if operation == ACCOUNTING_USAGE_SATURATING_SUB:
+        output[unsafe_offset=0] = accounting_value(values_address, 0) - accounting_value(values_address, 2) if accounting_value(values_address, 0) > accounting_value(values_address, 2) else 0
+        output[unsafe_offset=1] = accounting_value(values_address, 1) - accounting_value(values_address, 3) if accounting_value(values_address, 1) > accounting_value(values_address, 3) else 0
+        return 0
+    if operation == ACCOUNTING_USAGE_EXCEEDS:
+        output[unsafe_offset=0] = UInt64(accounting_value(values_address, 0) > accounting_value(values_address, 2) or accounting_value(values_address, 1) > accounting_value(values_address, 3))
+        return 0
+    if operation == ACCOUNTING_SNAPSHOT_AVAILABLE:
+        var held_tokens = accounting_checked_add(accounting_value(values_address, 0), accounting_value(values_address, 2))
+        var held_cost = accounting_checked_add(accounting_value(values_address, 1), accounting_value(values_address, 3))
+        if held_tokens[1] == 1 or held_cost[1] == 1:
+            result[] = 1
+        else:
+            output[unsafe_offset=0] = accounting_value(values_address, 4) - held_tokens[0] if accounting_value(values_address, 4) > held_tokens[0] else 0
+            output[unsafe_offset=1] = accounting_value(values_address, 5) - held_cost[0] if accounting_value(values_address, 5) > held_cost[0] else 0
+        return 0
+    if operation == ACCOUNTING_RESERVE:
+        var request_tokens = accounting_value(values_address, 6)
+        var request_cost = accounting_value(values_address, 7)
+        if request_tokens == 0 and request_cost == 0:
+            result[] = 2
+            return 0
+        var held_tokens = accounting_checked_add(accounting_value(values_address, 0), accounting_value(values_address, 2))
+        var held_cost = accounting_checked_add(accounting_value(values_address, 1), accounting_value(values_address, 3))
+        var next_tokens = accounting_checked_add(held_tokens[0], request_tokens)
+        var next_cost = accounting_checked_add(held_cost[0], request_cost)
+        if held_tokens[1] == 1 or held_cost[1] == 1 or next_tokens[1] == 1 or next_cost[1] == 1:
+            result[] = 1
+        elif next_tokens[0] > accounting_value(values_address, 4):
+            result[] = 3
+        elif next_cost[0] > accounting_value(values_address, 5):
+            result[] = 4
+        else:
+            var reserved_tokens = accounting_checked_add(accounting_value(values_address, 0), request_tokens)
+            var reserved_cost = accounting_checked_add(accounting_value(values_address, 1), request_cost)
+            if reserved_tokens[1] == 1 or reserved_cost[1] == 1:
+                result[] = 1
+            else:
+                output[unsafe_offset=0] = reserved_tokens[0]
+                output[unsafe_offset=1] = reserved_cost[0]
+                output[unsafe_offset=2] = accounting_value(values_address, 2)
+                output[unsafe_offset=3] = accounting_value(values_address, 3)
+        return 0
+    if accounting_value(values_address, 6) == 0 and accounting_value(values_address, 7) == 0:
+        result[] = 1
+        return 0
+    if accounting_value(values_address, 6) > accounting_value(values_address, 4) or accounting_value(values_address, 7) > accounting_value(values_address, 5):
+        result[] = 2
+        return 0
+    if accounting_value(values_address, 4) > accounting_value(values_address, 0) or accounting_value(values_address, 5) > accounting_value(values_address, 1):
+        result[] = 3
+        return 0
+    var committed_tokens = accounting_checked_add(accounting_value(values_address, 2), accounting_value(values_address, 6))
+    var committed_cost = accounting_checked_add(accounting_value(values_address, 3), accounting_value(values_address, 7))
+    if committed_tokens[1] == 1 or committed_cost[1] == 1:
+        result[] = 4
+        return 0
+    output[unsafe_offset=0] = accounting_value(values_address, 0) - accounting_value(values_address, 4) if accounting_value(values_address, 0) > accounting_value(values_address, 4) else 0
+    output[unsafe_offset=1] = accounting_value(values_address, 1) - accounting_value(values_address, 5) if accounting_value(values_address, 1) > accounting_value(values_address, 5) else 0
+    output[unsafe_offset=2] = committed_tokens[0]
+    output[unsafe_offset=3] = committed_cost[0]
     return 0
