@@ -4,6 +4,22 @@ use super::*;
 
 pub(crate) const APP_SERVER_BROKER_MAX_BATCH_ITEMS: usize = 4_096;
 
+#[cfg(feature = "mojo-core")]
+pub(crate) fn app_server_broker_frame_kind(value: &Value) -> AppServerBrokerFrameKind {
+    if value.is_array() {
+        return if app_server_broker_invalid_reason(value).is_none() {
+            AppServerBrokerFrameKind::Batch
+        } else {
+            AppServerBrokerFrameKind::Invalid
+        };
+    }
+    let Some(object) = value.as_object() else {
+        return AppServerBrokerFrameKind::Invalid;
+    };
+    super::mojo::frame_kind(super::mojo::wire_plan(object).frame_kind)
+}
+
+#[cfg(not(feature = "mojo-core"))]
 pub(crate) fn app_server_broker_frame_kind(value: &Value) -> AppServerBrokerFrameKind {
     if value.is_array() {
         return if app_server_broker_invalid_reason(value).is_none() {
@@ -21,6 +37,7 @@ pub(crate) fn app_server_broker_frame_kind(value: &Value) -> AppServerBrokerFram
     app_server_broker_object_frame_kind(object)
 }
 
+#[cfg(not(feature = "mojo-core"))]
 fn app_server_broker_has_valid_wire_object(object: &serde_json::Map<String, Value>) -> bool {
     app_server_broker_has_valid_wire_jsonrpc(object)
         && app_server_broker_has_valid_wire_id(object)
@@ -33,6 +50,7 @@ fn app_server_broker_has_valid_wire_object(object: &serde_json::Map<String, Valu
         && app_server_broker_has_valid_wire_method_name(object)
 }
 
+#[cfg(not(feature = "mojo-core"))]
 fn app_server_broker_object_frame_kind(
     object: &serde_json::Map<String, Value>,
 ) -> AppServerBrokerFrameKind {
@@ -58,13 +76,26 @@ fn app_server_broker_object_frame_kind(
 }
 
 pub(crate) fn app_server_broker_invalid_reason(value: &Value) -> Option<&'static str> {
-    if let Some(batch) = value.as_array() {
-        return app_server_broker_invalid_batch_reason(batch);
+    #[cfg(feature = "mojo-core")]
+    {
+        if let Some(batch) = value.as_array() {
+            return app_server_broker_invalid_batch_reason(batch);
+        }
+        let Some(object) = value.as_object() else {
+            return Some("non_object_frame");
+        };
+        return super::mojo::invalid_reason(super::mojo::wire_plan(object).invalid_reason);
     }
-    let Some(object) = value.as_object() else {
-        return Some("non_object_frame");
-    };
-    app_server_broker_invalid_object_reason(object)
+    #[cfg(not(feature = "mojo-core"))]
+    {
+        if let Some(batch) = value.as_array() {
+            return app_server_broker_invalid_batch_reason(batch);
+        }
+        let Some(object) = value.as_object() else {
+            return Some("non_object_frame");
+        };
+        app_server_broker_invalid_object_reason(object)
+    }
 }
 
 fn app_server_broker_invalid_batch_reason(batch: &[Value]) -> Option<&'static str> {
@@ -86,6 +117,7 @@ fn app_server_broker_invalid_batch_reason(batch: &[Value]) -> Option<&'static st
     None
 }
 
+#[cfg(not(feature = "mojo-core"))]
 fn app_server_broker_invalid_object_reason(
     object: &serde_json::Map<String, Value>,
 ) -> Option<&'static str> {
@@ -119,6 +151,7 @@ fn app_server_broker_invalid_object_reason(
     app_server_broker_invalid_payload_reason(object)
 }
 
+#[cfg(not(feature = "mojo-core"))]
 fn app_server_broker_invalid_payload_reason(
     object: &serde_json::Map<String, Value>,
 ) -> Option<&'static str> {
@@ -147,6 +180,7 @@ pub(super) fn app_server_broker_has_valid_wire_jsonrpc(
         .unwrap_or(true)
 }
 
+#[cfg(not(feature = "mojo-core"))]
 fn app_server_broker_has_valid_wire_id(object: &serde_json::Map<String, Value>) -> bool {
     object
         .get("id")
@@ -154,6 +188,7 @@ fn app_server_broker_has_valid_wire_id(object: &serde_json::Map<String, Value>) 
         .unwrap_or(true)
 }
 
+#[cfg(not(feature = "mojo-core"))]
 fn app_server_broker_has_valid_wire_params(object: &serde_json::Map<String, Value>) -> bool {
     object
         .get("params")
@@ -161,10 +196,12 @@ fn app_server_broker_has_valid_wire_params(object: &serde_json::Map<String, Valu
         .unwrap_or(true)
 }
 
+#[cfg(not(feature = "mojo-core"))]
 fn app_server_broker_has_valid_wire_error(object: &serde_json::Map<String, Value>) -> bool {
     object.get("error").map(Value::is_object).unwrap_or(true)
 }
 
+#[cfg(not(feature = "mojo-core"))]
 fn app_server_broker_has_valid_wire_error_code(object: &serde_json::Map<String, Value>) -> bool {
     let Some(error) = object.get("error").and_then(Value::as_object) else {
         return true;
@@ -174,6 +211,7 @@ fn app_server_broker_has_valid_wire_error_code(object: &serde_json::Map<String, 
         .is_some_and(|code| code.as_i64().is_some() || code.as_u64().is_some())
 }
 
+#[cfg(not(feature = "mojo-core"))]
 fn app_server_broker_has_valid_wire_error_message(object: &serde_json::Map<String, Value>) -> bool {
     let Some(error) = object.get("error").and_then(Value::as_object) else {
         return true;
@@ -181,6 +219,7 @@ fn app_server_broker_has_valid_wire_error_message(object: &serde_json::Map<Strin
     error.get("message").is_some_and(Value::is_string)
 }
 
+#[cfg(not(feature = "mojo-core"))]
 fn app_server_broker_has_valid_wire_method_name(object: &serde_json::Map<String, Value>) -> bool {
     object
         .get("method")

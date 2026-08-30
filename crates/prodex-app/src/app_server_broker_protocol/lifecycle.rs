@@ -111,6 +111,12 @@ pub(crate) fn app_server_broker_lifecycle_methods() -> [&'static str; 19] {
     ]
 }
 
+#[cfg(feature = "mojo-core")]
+pub(crate) fn app_server_broker_is_lifecycle_method(method: &str) -> bool {
+    super::mojo::method_plan(Some(method), AppServerBrokerFrameKind::Invalid).method_kind == 1
+}
+
+#[cfg(not(feature = "mojo-core"))]
 pub(crate) fn app_server_broker_is_lifecycle_method(method: &str) -> bool {
     let method = method.trim();
     method.eq_ignore_ascii_case("notifications/initialized")
@@ -124,16 +130,26 @@ pub(crate) fn app_server_broker_lifecycle_stage(
     method: Option<&str>,
     frame_kind: AppServerBrokerFrameKind,
 ) -> Option<AppServerBrokerLifecycleStage> {
-    let method = method?.trim();
-    match frame_kind {
-        AppServerBrokerFrameKind::Request => app_server_broker_request_stage(method),
-        AppServerBrokerFrameKind::Notification => app_server_broker_notification_stage(method),
-        AppServerBrokerFrameKind::Batch
-        | AppServerBrokerFrameKind::Invalid
-        | AppServerBrokerFrameKind::Response => None,
+    #[cfg(feature = "mojo-core")]
+    {
+        return super::mojo::lifecycle_stage(
+            super::mojo::method_plan(method, frame_kind).lifecycle_stage,
+        );
+    }
+    #[cfg(not(feature = "mojo-core"))]
+    {
+        let method = method?.trim();
+        match frame_kind {
+            AppServerBrokerFrameKind::Request => app_server_broker_request_stage(method),
+            AppServerBrokerFrameKind::Notification => app_server_broker_notification_stage(method),
+            AppServerBrokerFrameKind::Batch
+            | AppServerBrokerFrameKind::Invalid
+            | AppServerBrokerFrameKind::Response => None,
+        }
     }
 }
 
+#[cfg(not(feature = "mojo-core"))]
 fn app_server_broker_request_stage(method: &str) -> Option<AppServerBrokerLifecycleStage> {
     if method.eq_ignore_ascii_case("initialize") {
         Some(AppServerBrokerLifecycleStage::InitializeRequest)
@@ -166,6 +182,7 @@ fn app_server_broker_request_stage(method: &str) -> Option<AppServerBrokerLifecy
     }
 }
 
+#[cfg(not(feature = "mojo-core"))]
 fn app_server_broker_notification_stage(method: &str) -> Option<AppServerBrokerLifecycleStage> {
     if method.eq_ignore_ascii_case("notifications/initialized")
         || method.eq_ignore_ascii_case("initialized")
@@ -190,30 +207,47 @@ pub(crate) fn app_server_broker_lifecycle_schema_file(
     method: Option<&str>,
     frame_kind: AppServerBrokerFrameKind,
 ) -> Option<&'static str> {
-    match app_server_broker_lifecycle_stage(method, frame_kind)? {
-        AppServerBrokerLifecycleStage::ThreadStartRequest => Some("ThreadStartParams.json"),
-        AppServerBrokerLifecycleStage::ThreadStartedNotification => {
-            Some("ThreadStartedNotification.json")
+    #[cfg(feature = "mojo-core")]
+    {
+        return super::mojo::lifecycle_schema(
+            super::mojo::method_plan(method, frame_kind).lifecycle_schema,
+        );
+    }
+    #[cfg(not(feature = "mojo-core"))]
+    {
+        match app_server_broker_lifecycle_stage(method, frame_kind)? {
+            AppServerBrokerLifecycleStage::ThreadStartRequest => Some("ThreadStartParams.json"),
+            AppServerBrokerLifecycleStage::ThreadStartedNotification => {
+                Some("ThreadStartedNotification.json")
+            }
+            AppServerBrokerLifecycleStage::ThreadResumeRequest => Some("ThreadResumeParams.json"),
+            AppServerBrokerLifecycleStage::ThreadForkRequest => Some("ThreadForkParams.json"),
+            AppServerBrokerLifecycleStage::ThreadQueueRequest
+            | AppServerBrokerLifecycleStage::ThreadQueueChangedNotification
+            | AppServerBrokerLifecycleStage::ThreadRevertRequest
+            | AppServerBrokerLifecycleStage::ThreadRevertedNotification => None,
+            AppServerBrokerLifecycleStage::TurnStartRequest => Some("TurnStartParams.json"),
+            AppServerBrokerLifecycleStage::TurnStartedNotification => {
+                Some("TurnStartedNotification.json")
+            }
+            AppServerBrokerLifecycleStage::TurnCompletedNotification => {
+                Some("TurnCompletedNotification.json")
+            }
+            AppServerBrokerLifecycleStage::TurnInterruptRequest => Some("TurnInterruptParams.json"),
+            AppServerBrokerLifecycleStage::InitializeRequest
+            | AppServerBrokerLifecycleStage::InitializedNotification => None,
         }
-        AppServerBrokerLifecycleStage::ThreadResumeRequest => Some("ThreadResumeParams.json"),
-        AppServerBrokerLifecycleStage::ThreadForkRequest => Some("ThreadForkParams.json"),
-        AppServerBrokerLifecycleStage::ThreadQueueRequest
-        | AppServerBrokerLifecycleStage::ThreadQueueChangedNotification
-        | AppServerBrokerLifecycleStage::ThreadRevertRequest
-        | AppServerBrokerLifecycleStage::ThreadRevertedNotification => None,
-        AppServerBrokerLifecycleStage::TurnStartRequest => Some("TurnStartParams.json"),
-        AppServerBrokerLifecycleStage::TurnStartedNotification => {
-            Some("TurnStartedNotification.json")
-        }
-        AppServerBrokerLifecycleStage::TurnCompletedNotification => {
-            Some("TurnCompletedNotification.json")
-        }
-        AppServerBrokerLifecycleStage::TurnInterruptRequest => Some("TurnInterruptParams.json"),
-        AppServerBrokerLifecycleStage::InitializeRequest
-        | AppServerBrokerLifecycleStage::InitializedNotification => None,
     }
 }
 
+#[cfg(feature = "mojo-core")]
+pub(crate) fn app_server_broker_lifecycle_response_schema_file(
+    request_stage: &str,
+) -> Option<&'static str> {
+    super::mojo::response_schema(request_stage)
+}
+
+#[cfg(not(feature = "mojo-core"))]
 pub(crate) fn app_server_broker_lifecycle_response_schema_file(
     request_stage: &str,
 ) -> Option<&'static str> {

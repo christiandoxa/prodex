@@ -14,6 +14,24 @@ pub(crate) fn app_server_broker_lifecycle_binding(
     })
 }
 
+#[cfg(feature = "mojo-core")]
+pub(crate) fn app_server_broker_affinity_keys(value: &Value) -> Vec<AppServerBrokerAffinityKey> {
+    let summary = app_server_broker_diagnostic_summary(value);
+    super::mojo::affinity_plan(value)
+        .keys
+        .into_iter()
+        .filter_map(|kind| {
+            let value = match kind {
+                AppServerBrokerAffinityKeyKind::Session => summary.metadata.session_id.clone(),
+                AppServerBrokerAffinityKeyKind::Thread => summary.metadata.thread_id.clone(),
+                AppServerBrokerAffinityKeyKind::Turn => summary.metadata.turn_id.clone(),
+            }?;
+            Some(AppServerBrokerAffinityKey { kind, value })
+        })
+        .collect()
+}
+
+#[cfg(not(feature = "mojo-core"))]
 pub(crate) fn app_server_broker_affinity_keys(value: &Value) -> Vec<AppServerBrokerAffinityKey> {
     if let Some(binding) = app_server_broker_lifecycle_binding(value) {
         return app_server_broker_lifecycle_affinity_keys(binding);
@@ -29,6 +47,7 @@ pub(crate) fn app_server_broker_affinity_keys(value: &Value) -> Vec<AppServerBro
     app_server_broker_response_affinity_keys(summary.metadata)
 }
 
+#[cfg(not(feature = "mojo-core"))]
 fn app_server_broker_thread_affinity_method(
     method: Option<&str>,
     frame_kind: AppServerBrokerFrameKind,
@@ -63,6 +82,7 @@ fn app_server_broker_thread_affinity_method(
     .any(|candidate| candidate.eq_ignore_ascii_case(method.trim()))
 }
 
+#[cfg(not(feature = "mojo-core"))]
 fn app_server_broker_lifecycle_affinity_keys(
     binding: AppServerBrokerLifecycleBinding,
 ) -> Vec<AppServerBrokerAffinityKey> {
@@ -119,6 +139,7 @@ fn app_server_broker_lifecycle_affinity_keys(
     keys
 }
 
+#[cfg(not(feature = "mojo-core"))]
 fn app_server_broker_response_affinity_keys(
     metadata: AppServerBrokerMetadata,
 ) -> Vec<AppServerBrokerAffinityKey> {
@@ -141,6 +162,7 @@ fn app_server_broker_response_affinity_keys(
     keys
 }
 
+#[cfg(not(feature = "mojo-core"))]
 fn push_affinity_key(
     keys: &mut Vec<AppServerBrokerAffinityKey>,
     kind: AppServerBrokerAffinityKeyKind,
@@ -151,6 +173,34 @@ fn push_affinity_key(
     }
 }
 
+#[cfg(feature = "mojo-core")]
+pub(crate) fn app_server_broker_continuation_affinity_summary_json(value: &Value) -> Value {
+    let binding = app_server_broker_lifecycle_binding(value);
+    let keys = app_server_broker_affinity_keys(value);
+    let primary = keys.first().map(app_server_broker_affinity_key_json);
+    let owner_kind = match keys.first().map(|key| key.kind) {
+        Some(AppServerBrokerAffinityKeyKind::Session) => {
+            AppServerBrokerContinuationOwnerKind::Session
+        }
+        Some(AppServerBrokerAffinityKeyKind::Thread) => {
+            AppServerBrokerContinuationOwnerKind::Thread
+        }
+        Some(AppServerBrokerAffinityKeyKind::Turn) => AppServerBrokerContinuationOwnerKind::Turn,
+        None => AppServerBrokerContinuationOwnerKind::None,
+    };
+    serde_json::json!({
+        "stage": binding.as_ref().map(|binding| binding.stage.label()),
+        "owner_kind": owner_kind.label(),
+        "owner": primary,
+        "primary": primary,
+        "key_count": keys.len(),
+        "has_turn": keys.iter().any(|key| matches!(key.kind, AppServerBrokerAffinityKeyKind::Turn)),
+        "has_thread": keys.iter().any(|key| matches!(key.kind, AppServerBrokerAffinityKeyKind::Thread)),
+        "has_session": keys.iter().any(|key| matches!(key.kind, AppServerBrokerAffinityKeyKind::Session)),
+    })
+}
+
+#[cfg(not(feature = "mojo-core"))]
 pub(crate) fn app_server_broker_continuation_affinity_summary_json(value: &Value) -> Value {
     let binding = app_server_broker_lifecycle_binding(value);
     let keys = app_server_broker_affinity_keys(value);
@@ -186,6 +236,14 @@ pub(crate) fn app_server_broker_continuation_affinity_summary_json(value: &Value
     })
 }
 
+#[cfg(feature = "mojo-core")]
+pub(crate) fn app_server_broker_continuation_decision(
+    value: &Value,
+) -> AppServerBrokerContinuationDecision {
+    super::mojo::affinity_plan(value).decision
+}
+
+#[cfg(not(feature = "mojo-core"))]
 pub(crate) fn app_server_broker_continuation_decision(
     value: &Value,
 ) -> AppServerBrokerContinuationDecision {
@@ -221,6 +279,12 @@ pub(crate) fn app_server_broker_policy_hint_json(value: &Value) -> Value {
     })
 }
 
+#[cfg(feature = "mojo-core")]
+pub(crate) fn app_server_broker_policy_hint(value: &Value) -> AppServerBrokerPolicyHint {
+    super::mojo::affinity_plan(value).policy_hint
+}
+
+#[cfg(not(feature = "mojo-core"))]
 pub(crate) fn app_server_broker_policy_hint(value: &Value) -> AppServerBrokerPolicyHint {
     let commit_boundary = app_server_broker_commit_boundary(value);
     let rotation_window = app_server_broker_rotation_window(value);
@@ -267,6 +331,7 @@ pub(crate) fn app_server_broker_allows_provider_switch(
     explicit_override || app_server_broker_policy_hint(value).rotation_allowed()
 }
 
+#[cfg(not(feature = "mojo-core"))]
 pub(crate) fn app_server_broker_commit_boundary(value: &Value) -> AppServerBrokerCommitBoundary {
     if let Some(binding) = app_server_broker_lifecycle_binding(value) {
         return match binding.stage {
@@ -301,6 +366,7 @@ pub(crate) fn app_server_broker_commit_boundary(value: &Value) -> AppServerBroke
     }
 }
 
+#[cfg(not(feature = "mojo-core"))]
 pub(crate) fn app_server_broker_rotation_window(value: &Value) -> AppServerBrokerRotationWindow {
     let commit_boundary = app_server_broker_commit_boundary(value);
     let decision = app_server_broker_continuation_decision(value);
