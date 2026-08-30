@@ -343,13 +343,7 @@ pub(super) fn run(
                 break Ok(());
             }
 
-            if state.redraw_needed {
-                terminal
-                    .autoresize()
-                    .context("failed to resize Super expose TUI")?;
-                draw(&mut terminal, &state)?;
-                state.redraw_needed = false;
-            }
+            loop_support::redraw_if_needed(&mut terminal, &mut state)?;
 
             if loop_support::should_finish(&state, &worker, stopping) {
                 break worker_result(&state);

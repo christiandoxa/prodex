@@ -12,6 +12,21 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;
 use std::thread::{self, JoinHandle};
 
+pub(super) fn redraw_if_needed(
+    terminal: &mut super::ExposeTuiTerminal,
+    state: &mut super::ExposeTuiState,
+) -> Result<()> {
+    if !state.redraw_needed {
+        return Ok(());
+    }
+    terminal
+        .autoresize()
+        .context("failed to resize Super expose TUI")?;
+    super::draw(terminal, state)?;
+    state.redraw_needed = false;
+    Ok(())
+}
+
 pub(super) fn reap_finished_worker(
     state: &mut ExposeTuiState,
     worker: &mut Option<JoinHandle<Result<()>>>,

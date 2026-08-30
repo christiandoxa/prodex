@@ -156,48 +156,44 @@ pub(crate) fn gemini_generation_config_from_request(
 ) -> Value {
     let mut config = serde_json::Map::new();
     if let Some(chat) = chat.as_object() {
-        #[cfg(feature = "mojo")]
-        {
-            use prodex_mojo_core::provider_constraints::GeminiRequestFieldTarget as Target;
-            for field in super::gemini_request_field_plan(
-                chat,
-                super::GeminiRequestFieldScope::BasicGeneration,
-            ) {
-                if !matches!(
-                    field.target,
-                    Target::Temperature | Target::TopP | Target::MaxOutputTokens
-                ) {
-                    continue;
-                }
-                let Some(value) = super::gemini_request_source_value(chat, field) else {
-                    continue;
-                };
-                if value.is_null() {
-                    continue;
-                }
-                config.insert(
-                    super::gemini_request_target_name(field.target).to_string(),
-                    value.clone(),
-                );
-            }
-        }
-        #[cfg(not(feature = "mojo"))]
-        {
-            for (from, to) in [
-                ("temperature", "temperature"),
-                ("top_p", "topP"),
-                ("max_tokens", "maxOutputTokens"),
-            ] {
-                if let Some(value) = chat.get(from) {
-                    config.insert(to.to_string(), value.clone());
-                }
-            }
+        gemini_insert_basic_generation_fields(chat, &mut config);
+    }
+    gemini_insert_additional_generation_config(
+        original,
+        model,
+        thinking_budget_tokens,
+        &mut config,
+    );
+    Value::Object(config)
+}
+
+#[cfg(not(feature = "mojo"))]
+fn gemini_insert_basic_generation_fields(
+    chat: &serde_json::Map<String, Value>,
+    config: &mut serde_json::Map<String, Value>,
+) {
+    for (from, to) in [
+        ("temperature", "temperature"),
+        ("top_p", "topP"),
+        ("max_tokens", "maxOutputTokens"),
+    ] {
+        if let Some(value) = chat.get(from) {
+            config.insert(to.to_string(), value.clone());
         }
     }
+}
+
+#[cfg(not(feature = "mojo"))]
+fn gemini_insert_additional_generation_config(
+    original: &Value,
+    model: &str,
+    thinking_budget_tokens: Option<u64>,
+    config: &mut serde_json::Map<String, Value>,
+) {
     let Some(original) = original.as_object() else {
-        return Value::Object(config);
+        return;
     };
-    gemini_insert_extended_generation_config(original, &mut config);
+    gemini_insert_extended_generation_config(original, config);
     if let Some(stop) = original
         .get("stop")
         .or_else(|| original.get("stop_sequences"))
@@ -206,13 +202,12 @@ pub(crate) fn gemini_generation_config_from_request(
     {
         config.insert("stopSequences".to_string(), stop.clone());
     }
-    gemini_apply_text_format(original, &mut config);
+    gemini_apply_text_format(original, config);
     if let Some(thinking_config) =
         gemini_thinking_config_with_budget_from_request(original, model, thinking_budget_tokens)
     {
         config.insert("thinkingConfig".to_string(), thinking_config);
     }
-    Value::Object(config)
 }
 
 #[cfg(feature = "mojo")]

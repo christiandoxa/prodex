@@ -33,13 +33,7 @@ impl<'a> RuntimeWebsocketTextMessageFlow<'a> {
         let mut selection_attempts = 0usize;
         loop {
             if self.local_capacity_wait_timed_out {
-                send_runtime_proxy_websocket_error(
-                    &mut *self.local_socket,
-                    503,
-                    "local_capacity_timeout",
-                    runtime_proxy_local_capacity_timeout_message(),
-                )?;
-                return Ok(());
+                return self.finish_local_capacity_timeout();
             }
             let pressure_mode = runtime_proxy_pressure_mode_active_for_route(
                 self.shared,
@@ -73,34 +67,8 @@ impl<'a> RuntimeWebsocketTextMessageFlow<'a> {
             }
 
             let attempt = self.attempt_profile(&candidate_name, turn_state_override.as_deref())?;
-            if matches!(
-                &attempt,
-                RuntimeWebsocketAttempt::LocalSelectionBlocked {
-                    reason: "profile_inflight_saturated",
-                    ..
-                }
-            ) {
-                self.saw_inflight_saturation = true;
-                match runtime_proxy_maybe_wait_for_interactive_inflight_relief(
-                    RuntimeInflightReliefWait {
-                        request_id: self.request_id,
-                        request: &self.handshake_request,
-                        shared: self.shared,
-                        excluded_profiles: &self.excluded_profiles,
-                        route_kind: RuntimeRouteKind::Websocket,
-                        selection_started_at,
-                        continuation: self.has_continuation_priority(),
-                        wait_affinity_owner: None,
-                        selected_profile: None,
-                    },
-                )? {
-                    RuntimeInflightReliefWaitResult::Relieved
-                    | RuntimeInflightReliefWaitResult::NotWaitable => continue,
-                    RuntimeInflightReliefWaitResult::DeadlineExpired => {
-                        self.local_capacity_wait_timed_out = true;
-                        continue;
-                    }
-                }
+            if self.handle_inflight_saturation(&attempt, selection_started_at)? {
+                continue;
             }
             if !matches!(
                 &attempt,
@@ -113,6 +81,51 @@ impl<'a> RuntimeWebsocketTextMessageFlow<'a> {
                     continue;
                 }
                 RuntimeWebsocketMessageLoopAction::Finished => return Ok(()),
+            }
+        }
+    }
+
+    fn finish_local_capacity_timeout(&mut self) -> Result<()> {
+        send_runtime_proxy_websocket_error(
+            &mut *self.local_socket,
+            503,
+            "local_capacity_timeout",
+            runtime_proxy_local_capacity_timeout_message(),
+        )?;
+        Ok(())
+    }
+
+    fn handle_inflight_saturation(
+        &mut self,
+        attempt: &RuntimeWebsocketAttempt,
+        selection_started_at: Instant,
+    ) -> Result<bool> {
+        if !matches!(
+            attempt,
+            RuntimeWebsocketAttempt::LocalSelectionBlocked {
+                reason: "profile_inflight_saturated",
+                ..
+            }
+        ) {
+            return Ok(false);
+        }
+        self.saw_inflight_saturation = true;
+        match runtime_proxy_maybe_wait_for_interactive_inflight_relief(RuntimeInflightReliefWait {
+            request_id: self.request_id,
+            request: &self.handshake_request,
+            shared: self.shared,
+            excluded_profiles: &self.excluded_profiles,
+            route_kind: RuntimeRouteKind::Websocket,
+            selection_started_at,
+            continuation: self.has_continuation_priority(),
+            wait_affinity_owner: None,
+            selected_profile: None,
+        })? {
+            RuntimeInflightReliefWaitResult::Relieved
+            | RuntimeInflightReliefWaitResult::NotWaitable => Ok(true),
+            RuntimeInflightReliefWaitResult::DeadlineExpired => {
+                self.local_capacity_wait_timed_out = true;
+                Ok(true)
             }
         }
     }
