@@ -2,6 +2,61 @@ pub const POLICY_NUMERIC_NON_ZERO: i64 = 0;
 pub const POLICY_NUMERIC_RANGE: i64 = 1;
 pub const POLICY_NUMERIC_RELATION_LE: i64 = 2;
 
+#[repr(i64)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PolicyTextKind {
+    RouteStrategy = 0,
+    ObservabilitySchema = 1,
+    StateBackend = 2,
+    AdminRole = 3,
+    WebhookPhase = 4,
+    HttpEndpoint = 5,
+}
+
+#[repr(C)]
+#[derive(Debug, Clone, Copy)]
+struct PolicyStringView {
+    ptr: u64,
+    len: u64,
+}
+
+unsafe extern "C" {
+    fn prodex_runtime_policy_validate_text(
+        abi_version: i64,
+        value: u64,
+        kind: i64,
+        output: u64,
+    ) -> i64;
+}
+
+pub fn validate_text(value: &str, kind: PolicyTextKind) -> Result<bool, crate::MojoError> {
+    let value = PolicyStringView {
+        ptr: value.as_ptr() as u64,
+        len: value.len() as u64,
+    };
+    let mut output = -1_i64;
+    let status = unsafe {
+        prodex_runtime_policy_validate_text(
+            6,
+            (&value as *const PolicyStringView) as u64,
+            kind as i64,
+            (&mut output as *mut i64) as u64,
+        )
+    };
+    if status != 0 {
+        return Err(match status {
+            1 | 2 => crate::MojoError::InvalidInput,
+            4 => crate::MojoError::AbiMismatch,
+            _ => crate::MojoError::InvalidOutput,
+        });
+    }
+    match output {
+        0 => Ok(false),
+        1 => Ok(true),
+        _ => Err(crate::MojoError::InvalidOutput),
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct NumericRule {
     pub kind: i64,
