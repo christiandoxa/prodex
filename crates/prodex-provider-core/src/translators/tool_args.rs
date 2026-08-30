@@ -28,6 +28,7 @@ pub fn wrap_json_string_arg_with(
     arguments.to_string()
 }
 
+#[cfg(not(feature = "mojo"))]
 pub fn prefix_command_with_rtk(command: &str) -> Option<String> {
     if command.trim().is_empty() || command.trim_start().starts_with("rtk ") {
         None
