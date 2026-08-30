@@ -132,9 +132,7 @@ pub(crate) fn app_server_broker_lifecycle_stage(
 ) -> Option<AppServerBrokerLifecycleStage> {
     #[cfg(feature = "mojo-core")]
     {
-        return super::mojo::lifecycle_stage(
-            super::mojo::method_plan(method, frame_kind).lifecycle_stage,
-        );
+        super::mojo::lifecycle_stage(super::mojo::method_plan(method, frame_kind).lifecycle_stage)
     }
     #[cfg(not(feature = "mojo-core"))]
     {
@@ -209,9 +207,7 @@ pub(crate) fn app_server_broker_lifecycle_schema_file(
 ) -> Option<&'static str> {
     #[cfg(feature = "mojo-core")]
     {
-        return super::mojo::lifecycle_schema(
-            super::mojo::method_plan(method, frame_kind).lifecycle_schema,
-        );
+        super::mojo::lifecycle_schema(super::mojo::method_plan(method, frame_kind).lifecycle_schema)
     }
     #[cfg(not(feature = "mojo-core"))]
     {

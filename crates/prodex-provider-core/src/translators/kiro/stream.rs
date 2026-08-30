@@ -37,7 +37,7 @@ pub fn kiro_provider_core_chat_completion_chunk(
         input.model = model;
         input.content = Some(&delta);
         input.finish_reason = finish_reason;
-        return Ok(kiro_mojo_body(input));
+        Ok(kiro_mojo_body(input))
     }
     #[cfg(not(feature = "mojo"))]
     {
@@ -62,7 +62,7 @@ pub fn kiro_provider_core_chat_completion_chunk(
 pub fn kiro_provider_core_chat_completion_role_delta() -> Value {
     #[cfg(feature = "mojo")]
     {
-        return kiro_mojo_value(KiroKernelInput::new(KiroKernelOperation::ChatRoleDelta));
+        kiro_mojo_value(KiroKernelInput::new(KiroKernelOperation::ChatRoleDelta))
     }
     #[cfg(not(feature = "mojo"))]
     {
@@ -73,7 +73,7 @@ pub fn kiro_provider_core_chat_completion_role_delta() -> Value {
 pub fn kiro_provider_core_chat_completion_empty_delta() -> Value {
     #[cfg(feature = "mojo")]
     {
-        return kiro_mojo_value(KiroKernelInput::new(KiroKernelOperation::ChatEmptyDelta));
+        kiro_mojo_value(KiroKernelInput::new(KiroKernelOperation::ChatEmptyDelta))
     }
     #[cfg(not(feature = "mojo"))]
     {
@@ -87,7 +87,7 @@ pub fn kiro_provider_core_chat_completion_text_delta(text: &str, include_role: b
         let mut input = KiroKernelInput::new(KiroKernelOperation::ChatTextDelta);
         input.content = Some(text);
         input.include_role = include_role;
-        return kiro_mojo_value(input);
+        kiro_mojo_value(input)
     }
     #[cfg(not(feature = "mojo"))]
     {
@@ -105,7 +105,7 @@ pub fn kiro_provider_core_chat_completion_reasoning_delta(text: &str, include_ro
         let mut input = KiroKernelInput::new(KiroKernelOperation::ChatReasoningDelta);
         input.content = Some(text);
         input.include_role = include_role;
-        return kiro_mojo_value(input);
+        kiro_mojo_value(input)
     }
     #[cfg(not(feature = "mojo"))]
     {
@@ -130,7 +130,7 @@ pub fn kiro_provider_core_chat_completion_tool_call_delta(
         input.name = Some(name);
         input.arguments = Some(arguments);
         input.include_role = include_role;
-        return kiro_mojo_value(input);
+        kiro_mojo_value(input)
     }
     #[cfg(not(feature = "mojo"))]
     {
@@ -164,7 +164,7 @@ pub fn kiro_provider_core_output_text_delta_event(
         input.created_at = created_at;
         input.response_id = Some(response_id);
         input.content = Some(delta);
-        return kiro_mojo_value(input);
+        kiro_mojo_value(input)
     }
     #[cfg(not(feature = "mojo"))]
     {
@@ -189,7 +189,7 @@ pub fn kiro_provider_core_response_created_event(
         input.sequence_number = sequence_number;
         input.created_at = created_at;
         input.response_id = Some(response_id);
-        return kiro_mojo_value(input);
+        kiro_mojo_value(input)
     }
     #[cfg(not(feature = "mojo"))]
     {
@@ -209,7 +209,7 @@ pub fn kiro_provider_core_output_item_added_event(sequence_number: u64, item: &V
         let mut input = KiroKernelInput::new(KiroKernelOperation::OutputItemAddedEvent);
         input.sequence_number = sequence_number;
         input.output = Some(&item);
-        return kiro_mojo_value(input);
+        kiro_mojo_value(input)
     }
     #[cfg(not(feature = "mojo"))]
     {
@@ -233,7 +233,7 @@ pub fn kiro_provider_core_output_item_done_event(
         input.sequence_number = sequence_number;
         input.response_id = Some(response_id);
         input.output = Some(&item);
-        return kiro_mojo_value(input);
+        kiro_mojo_value(input)
     }
     #[cfg(not(feature = "mojo"))]
     {
@@ -258,7 +258,7 @@ pub fn kiro_provider_core_response_completed_event(
         input.sequence_number = sequence_number;
         input.created_at = created_at;
         input.output = Some(&response);
-        return kiro_mojo_value(input);
+        kiro_mojo_value(input)
     }
     #[cfg(not(feature = "mojo"))]
     {
@@ -283,7 +283,7 @@ pub fn kiro_provider_core_response_failed_event(
         input.sequence_number = sequence_number;
         input.created_at = created_at;
         input.output = Some(&response);
-        return kiro_mojo_value(input);
+        kiro_mojo_value(input)
     }
     #[cfg(not(feature = "mojo"))]
     {
@@ -308,7 +308,7 @@ pub fn kiro_provider_core_response_incomplete_event(
         input.sequence_number = sequence_number;
         input.created_at = created_at;
         input.output = Some(&response);
-        return kiro_mojo_value(input);
+        kiro_mojo_value(input)
     }
     #[cfg(not(feature = "mojo"))]
     {
@@ -345,7 +345,7 @@ pub fn kiro_provider_core_tool_call_arguments_delta_chat_value(
         let mut input = KiroKernelInput::new(KiroKernelOperation::ToolCallArgumentsDeltaChatValue);
         input.call_id = Some(tool_call_id);
         input.arguments = Some(arguments);
-        return kiro_mojo_value(input);
+        kiro_mojo_value(input)
     }
     #[cfg(not(feature = "mojo"))]
     {
@@ -526,7 +526,7 @@ pub fn kiro_provider_core_acp_usage_update_json(
         input.used = used;
         input.size = size;
         input.extra = Some(&extra);
-        return kiro_mojo_value(input);
+        kiro_mojo_value(input)
     }
     #[cfg(not(feature = "mojo"))]
     {
@@ -547,8 +547,7 @@ pub fn kiro_provider_core_stream_tool_arguments(raw_input: Option<&Value>) -> St
     {
         let mut input = KiroKernelInput::new(KiroKernelOperation::StreamToolArguments);
         input.input = raw_input.map(|_| "");
-        return String::from_utf8(kiro_mojo_body(input))
-            .expect("Mojo Kiro stream tool arguments are UTF-8");
+        String::from_utf8(kiro_mojo_body(input)).expect("Mojo Kiro stream tool arguments are UTF-8")
     }
     #[cfg(not(feature = "mojo"))]
     {

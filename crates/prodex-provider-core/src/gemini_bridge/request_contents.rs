@@ -34,6 +34,7 @@ pub(super) fn gemini_request_content_value(
 }
 
 #[cfg(feature = "mojo")]
+#[allow(clippy::too_many_arguments)]
 fn gemini_bridge_request_bytes(
     operation: GeminiBridgeRequestOperation,
     primary: Option<&[u8]>,
@@ -60,6 +61,7 @@ fn gemini_bridge_request_bytes(
 }
 
 #[cfg(feature = "mojo")]
+#[allow(clippy::too_many_arguments)]
 pub(super) fn gemini_bridge_request_value(
     operation: GeminiBridgeRequestOperation,
     primary: Option<&[u8]>,

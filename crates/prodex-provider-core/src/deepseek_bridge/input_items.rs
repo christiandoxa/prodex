@@ -74,7 +74,7 @@ pub fn deepseek_provider_core_system_message(content: &str) -> serde_json::Value
             prodex_mojo_core::rich::DeepSeekKernelOperation::SystemMessage,
         );
         input.content = Some(content);
-        return deepseek_provider_core_mojo_value(input);
+        deepseek_provider_core_mojo_value(input)
     }
     #[cfg(not(feature = "mojo"))]
     serde_json::json!({
@@ -90,7 +90,7 @@ pub fn deepseek_provider_core_user_message(content: &str) -> serde_json::Value {
             prodex_mojo_core::rich::DeepSeekKernelOperation::UserMessage,
         );
         input.content = Some(content);
-        return deepseek_provider_core_mojo_value(input);
+        deepseek_provider_core_mojo_value(input)
     }
     #[cfg(not(feature = "mojo"))]
     serde_json::json!({

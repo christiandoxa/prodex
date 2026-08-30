@@ -23,7 +23,7 @@ pub(super) fn deepseek_provider_core_chat_message(role: &str, content: &str) -> 
         );
         input.role = Some(role);
         input.content = Some(content);
-        return deepseek_provider_core_mojo_value(input);
+        deepseek_provider_core_mojo_value(input)
     }
     #[cfg(not(feature = "mojo"))]
     serde_json::json!({"role": role, "content": content})
@@ -40,7 +40,7 @@ pub(super) fn deepseek_provider_core_chat_tool_message(
         );
         input.call_id = Some(call_id);
         input.content = Some(content);
-        return deepseek_provider_core_mojo_value(input);
+        deepseek_provider_core_mojo_value(input)
     }
     #[cfg(not(feature = "mojo"))]
     serde_json::json!({
@@ -68,7 +68,6 @@ pub(super) fn deepseek_provider_core_push_chat_tool_call_message(
         input.arguments = Some(&arguments);
         input.signature = signature.as_deref();
         messages.push(deepseek_provider_core_mojo_value(input));
-        return;
     }
     #[cfg(not(feature = "mojo"))]
     {
@@ -174,7 +173,6 @@ pub(super) fn deepseek_provider_core_push_chat_tool_call_message_with_arguments(
         input.name = Some(&name);
         input.arguments = Some(&arguments);
         messages.push(deepseek_provider_core_mojo_value(input));
-        return;
     }
     #[cfg(not(feature = "mojo"))]
     {

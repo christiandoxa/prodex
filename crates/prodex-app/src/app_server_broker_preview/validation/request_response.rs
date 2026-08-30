@@ -212,7 +212,7 @@ impl RequestResponseValidation {
                         .request_id(id),
                 );
             };
-            return self.validate_lifecycle_response(preview, frame, lifecycle_stage.as_deref());
+            self.validate_lifecycle_response(preview, frame, lifecycle_stage.as_deref())
         }
     }
 
@@ -229,7 +229,7 @@ impl RequestResponseValidation {
         #[cfg(feature = "mojo-core")]
         {
             let stage = lifecycle_stage?;
-            return app_server_broker_mojo_validation_reason(AppServerBrokerValidationInput {
+            app_server_broker_mojo_validation_reason(AppServerBrokerValidationInput {
                 response: true,
                 stage,
                 thread_id_present: frame_string(frame, &["result", "thread", "id"]).is_some(),
@@ -255,7 +255,7 @@ impl RequestResponseValidation {
                 turn_items: frame_value(frame, &["result", "turn", "items"])
                     .is_some_and(Value::is_array),
             })
-            .map(|reason| ValidationFailure::from_preview(preview, reason));
+            .map(|reason| ValidationFailure::from_preview(preview, reason))
         }
         #[cfg(not(feature = "mojo-core"))]
         {

@@ -18,7 +18,7 @@ pub fn gemini_provider_core_response_created_event(
         input.sequence_number = sequence_number;
         input.created_at = created_at;
         input.response_id = Some(response_id);
-        return gemini_mojo_value(input);
+        gemini_mojo_value(input)
     }
     #[cfg(not(feature = "mojo"))]
     json!({
@@ -42,7 +42,7 @@ pub fn gemini_provider_core_response_completed_event(
         input.sequence_number = sequence_number;
         input.created_at = created_at;
         input.response = Some(&response);
-        return gemini_mojo_value(input);
+        gemini_mojo_value(input)
     }
     #[cfg(not(feature = "mojo"))]
     json!({
@@ -69,7 +69,7 @@ pub fn gemini_provider_core_response_incomplete_event(
         input.response_id = Some(response_id);
         input.reason = Some(reason);
         input.message = Some(message);
-        return gemini_mojo_value(input);
+        gemini_mojo_value(input)
     }
     #[cfg(not(feature = "mojo"))]
     json!({
@@ -102,7 +102,7 @@ pub fn gemini_provider_core_response_metadata_event(
         input.created_at = created_at;
         input.response_id = Some(response_id);
         input.metadata = Some(&metadata);
-        return gemini_mojo_value(input);
+        gemini_mojo_value(input)
     }
     #[cfg(not(feature = "mojo"))]
     json!({
@@ -122,7 +122,7 @@ pub fn gemini_provider_core_output_item_added_event(sequence_number: u64, item: 
             GeminiResponseKernelInput::new(GeminiResponseKernelOperation::OutputItemAdded);
         input.sequence_number = sequence_number;
         input.item = Some(&item);
-        return gemini_mojo_value(input);
+        gemini_mojo_value(input)
     }
     #[cfg(not(feature = "mojo"))]
     json!({
@@ -145,7 +145,7 @@ pub fn gemini_provider_core_output_item_done_event(
         input.sequence_number = sequence_number;
         input.response_id = response_id;
         input.item = Some(&item);
-        return gemini_mojo_value(input);
+        gemini_mojo_value(input)
     }
     #[cfg(not(feature = "mojo"))]
     {
@@ -175,7 +175,7 @@ pub fn gemini_provider_core_stream_function_call_arguments_delta_source(
         input.call_id = Some(call_id);
         input.name = Some(name);
         input.arguments = Some(&arguments);
-        return gemini_mojo_value(input);
+        gemini_mojo_value(input)
     }
     #[cfg(not(feature = "mojo"))]
     json!({
@@ -207,7 +207,7 @@ pub fn gemini_provider_core_function_call_arguments_delta_event(
         input.sequence_number = sequence_number;
         input.call_id = Some(call_id);
         input.delta = Some(arguments);
-        return gemini_mojo_value(input);
+        gemini_mojo_value(input)
     }
     #[cfg(not(feature = "mojo"))]
     json!({

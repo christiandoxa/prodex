@@ -160,7 +160,7 @@ pub(super) fn anthropic_web_search_call(block: &Value) -> Result<Value, String> 
         AnthropicRequestKernelInput::new(AnthropicRequestKernelOperation::WebSearchCall);
     input.id = Some(&id);
     input.queries = Some(&queries);
-    Ok(anthropic_mojo_value(input)?)
+    anthropic_mojo_value(input)
 }
 
 #[cfg(not(feature = "mojo"))]

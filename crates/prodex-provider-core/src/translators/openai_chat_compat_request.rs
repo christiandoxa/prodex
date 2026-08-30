@@ -50,9 +50,9 @@ fn request_message(
         .unwrap_or_else(|error| {
             panic!("Mojo OpenAI compatibility request message failed: {error:?}")
         });
-        return serde_json::from_slice(&body).unwrap_or_else(|error| {
+        serde_json::from_slice(&body).unwrap_or_else(|error| {
             panic!("Mojo OpenAI compatibility request message was invalid JSON: {error}")
-        });
+        })
     }
 
     #[cfg(not(feature = "mojo"))]

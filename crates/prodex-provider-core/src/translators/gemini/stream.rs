@@ -296,7 +296,7 @@ pub fn gemini_provider_core_stream_response_value(
         input.model = model;
         input.usage = usage.as_deref();
         input.metadata = metadata.as_deref();
-        return gemini_mojo_value(input);
+        gemini_mojo_value(input)
     }
     #[cfg(not(feature = "mojo"))]
     {
@@ -323,7 +323,7 @@ pub fn gemini_provider_core_stream_output_text_content(text: &str) -> Value {
         let mut input =
             GeminiResponseKernelInput::new(GeminiResponseKernelOperation::OutputTextContent);
         input.delta = Some(text);
-        return gemini_mojo_value(input);
+        gemini_mojo_value(input)
     }
     #[cfg(not(feature = "mojo"))]
     json!({
@@ -339,7 +339,7 @@ pub fn gemini_provider_core_stream_message_item(item_id: &str, content: Vec<Valu
         let mut input = GeminiResponseKernelInput::new(GeminiResponseKernelOperation::MessageItem);
         input.response_id = Some(item_id);
         input.content = Some(&content);
-        return gemini_mojo_value(input);
+        gemini_mojo_value(input)
     }
     #[cfg(not(feature = "mojo"))]
     json!({
@@ -357,7 +357,7 @@ pub fn gemini_provider_core_stream_output_message_item(content: Vec<Value>) -> V
         let mut input =
             GeminiResponseKernelInput::new(GeminiResponseKernelOperation::OutputMessageItem);
         input.content = Some(&content);
-        return gemini_mojo_value(input);
+        gemini_mojo_value(input)
     }
     #[cfg(not(feature = "mojo"))]
     json!({
@@ -593,7 +593,7 @@ pub fn gemini_provider_core_stream_text_delta_source(text: &str) -> Value {
     {
         let mut input = GeminiResponseKernelInput::new(GeminiResponseKernelOperation::TextSource);
         input.delta = Some(text);
-        return gemini_mojo_value(input);
+        gemini_mojo_value(input)
     }
     #[cfg(not(feature = "mojo"))]
     json!({
@@ -613,7 +613,7 @@ pub fn gemini_provider_core_stream_reasoning_delta_source(text: &str) -> Value {
         let mut input =
             GeminiResponseKernelInput::new(GeminiResponseKernelOperation::ReasoningSource);
         input.delta = Some(text);
-        return gemini_mojo_value(input);
+        gemini_mojo_value(input)
     }
     #[cfg(not(feature = "mojo"))]
     json!({
@@ -642,7 +642,7 @@ pub fn gemini_provider_core_output_text_delta_event(
         input.created_at = created_at;
         input.response_id = Some(response_id);
         input.delta = Some(delta);
-        return gemini_mojo_value(input);
+        gemini_mojo_value(input)
     }
     #[cfg(not(feature = "mojo"))]
     json!({
@@ -667,7 +667,7 @@ pub fn gemini_provider_core_reasoning_summary_part_added_event(
         input.sequence_number = sequence_number;
         input.response_id = Some(response_id);
         input.summary_index = summary_index;
-        return gemini_mojo_value(input);
+        gemini_mojo_value(input)
     }
     #[cfg(not(feature = "mojo"))]
     json!({
@@ -693,7 +693,7 @@ pub fn gemini_provider_core_reasoning_summary_text_delta_event(
         input.response_id = Some(response_id);
         input.summary_index = summary_index;
         input.delta = Some(delta);
-        return gemini_mojo_value(input);
+        gemini_mojo_value(input)
     }
     #[cfg(not(feature = "mojo"))]
     json!({

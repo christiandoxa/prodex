@@ -67,7 +67,7 @@ pub fn deepseek_provider_core_response_completed_event(
         input.sequence_number = sequence_number;
         input.created_at = created_at;
         input.response = Some(&response);
-        return super::deepseek_mojo_value(input);
+        super::deepseek_mojo_value(input)
     }
     #[cfg(not(feature = "mojo"))]
     {
@@ -91,7 +91,7 @@ pub fn deepseek_provider_core_response_created_event(
         input.sequence_number = sequence_number;
         input.created_at = created_at;
         input.response_id = Some(response_id);
-        return super::deepseek_mojo_value(input);
+        super::deepseek_mojo_value(input)
     }
     #[cfg(not(feature = "mojo"))]
     {
@@ -367,7 +367,7 @@ pub fn deepseek_provider_core_stream_output_text_item(text: &str) -> Value {
     {
         let mut input = DeepSeekKernelInput::new(DeepSeekKernelOperation::OutputTextItem);
         input.delta = Some(text);
-        return super::deepseek_mojo_value(input);
+        super::deepseek_mojo_value(input)
     }
     #[cfg(not(feature = "mojo"))]
     {
@@ -404,7 +404,7 @@ pub fn deepseek_provider_core_stream_tool_call_added_item(
         input.call_id = Some(call_id);
         input.name = Some(&name);
         input.namespace = namespace.as_deref();
-        return Some(super::deepseek_mojo_value(input));
+        Some(super::deepseek_mojo_value(input))
     }
     #[cfg(not(feature = "mojo"))]
     {
@@ -470,7 +470,7 @@ pub fn deepseek_provider_core_stream_tool_call_item(
         input.arguments = Some(arguments);
         input.namespace = namespace.as_deref();
         input.signature = thought_signature;
-        return super::deepseek_mojo_value(input);
+        super::deepseek_mojo_value(input)
     }
     #[cfg(not(feature = "mojo"))]
     {
@@ -520,7 +520,7 @@ pub fn deepseek_provider_core_stream_function_call_arguments_delta_source(
             DeepSeekKernelInput::new(DeepSeekKernelOperation::FunctionCallArgumentsDeltaSource);
         input.call_id = Some(call_id);
         input.arguments = Some(arguments);
-        return super::deepseek_mojo_value(input);
+        super::deepseek_mojo_value(input)
     }
     #[cfg(not(feature = "mojo"))]
     {
@@ -544,7 +544,7 @@ pub fn deepseek_provider_core_stream_text_delta_source(text: &str) -> Value {
     {
         let mut input = DeepSeekKernelInput::new(DeepSeekKernelOperation::TextDeltaSource);
         input.delta = Some(text);
-        return super::deepseek_mojo_value(input);
+        super::deepseek_mojo_value(input)
     }
     #[cfg(not(feature = "mojo"))]
     {
@@ -565,7 +565,7 @@ pub fn deepseek_provider_core_output_item_added_event(sequence_number: u64, item
         let mut input = DeepSeekKernelInput::new(DeepSeekKernelOperation::OutputItemAddedEvent);
         input.sequence_number = sequence_number;
         input.item = Some(&item);
-        return super::deepseek_mojo_value(input);
+        super::deepseek_mojo_value(input)
     }
     #[cfg(not(feature = "mojo"))]
     {
@@ -589,7 +589,7 @@ pub fn deepseek_provider_core_function_call_arguments_delta_event(
         input.sequence_number = sequence_number;
         input.call_id = Some(call_id);
         input.delta = Some(arguments);
-        return super::deepseek_mojo_value(input);
+        super::deepseek_mojo_value(input)
     }
     #[cfg(not(feature = "mojo"))]
     {
@@ -615,7 +615,7 @@ pub fn deepseek_provider_core_output_text_delta_event(
         input.created_at = created_at;
         input.response_id = Some(response_id);
         input.delta = Some(delta);
-        return super::deepseek_mojo_value(input);
+        super::deepseek_mojo_value(input)
     }
     #[cfg(not(feature = "mojo"))]
     {
@@ -636,7 +636,7 @@ pub fn deepseek_provider_core_output_item_done_event(sequence_number: u64, item:
         let mut input = DeepSeekKernelInput::new(DeepSeekKernelOperation::OutputItemDoneEvent);
         input.sequence_number = sequence_number;
         input.item = Some(&item);
-        return super::deepseek_mojo_value(input);
+        super::deepseek_mojo_value(input)
     }
     #[cfg(not(feature = "mojo"))]
     {

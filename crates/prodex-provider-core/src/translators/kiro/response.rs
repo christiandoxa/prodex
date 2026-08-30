@@ -106,7 +106,7 @@ pub fn kiro_provider_core_chat_completion_value_from_response(
         input.incomplete_reason = response
             .pointer("/incomplete_details/reason")
             .and_then(Value::as_str);
-        return kiro_mojo_value(input);
+        kiro_mojo_value(input)
     }
 
     #[cfg(not(feature = "mojo"))]
@@ -252,11 +252,11 @@ pub fn kiro_provider_core_chat_completion_finish_reason(
             .and_then(Value::as_str);
         let reason: String = serde_json::from_slice(&kiro_mojo_body(input))
             .expect("Mojo Kiro finish reason is a JSON string");
-        return match reason.as_str() {
+        match reason.as_str() {
             "tool_calls" => "tool_calls",
             "length" => "length",
             _ => "stop",
-        };
+        }
     }
     #[cfg(not(feature = "mojo"))]
     {
@@ -358,7 +358,7 @@ pub fn kiro_provider_core_anthropic_message_value_from_response(
         input.reason = reason;
         input.used = used;
         input.size = size;
-        return kiro_mojo_value(input);
+        kiro_mojo_value(input)
     }
 
     #[cfg(not(feature = "mojo"))]

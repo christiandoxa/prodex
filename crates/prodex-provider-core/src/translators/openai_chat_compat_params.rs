@@ -16,10 +16,10 @@ pub(crate) fn responses_chat_compat_supported_params(provider: ProviderId) -> Pr
                 reason: parameter.reason,
             })
             .collect();
-        return ProviderParamSupport {
+        ProviderParamSupport {
             supported: true,
             unsupported,
-        };
+        }
     }
 
     #[cfg(not(feature = "mojo"))]

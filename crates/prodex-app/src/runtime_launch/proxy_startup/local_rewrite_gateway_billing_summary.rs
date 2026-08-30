@@ -441,7 +441,7 @@ fn runtime_gateway_billing_summary_numeric_batch(
                 reconciled_at_present: input.reconciled_at_present,
             })
             .collect::<Vec<_>>();
-        return prodex_mojo_core::rich::gateway_billing_summary_batch(&inputs, bucket_count)
+        prodex_mojo_core::rich::gateway_billing_summary_batch(&inputs, bucket_count)
             .expect("Mojo gateway billing summary batch returned invalid structured result")
             .into_iter()
             .map(|bucket| RuntimeGatewayBillingSummaryNumericBucket {
@@ -460,7 +460,7 @@ fn runtime_gateway_billing_summary_numeric_batch(
                 last_reconciled_at_epoch: bucket.last_reconciled_at_epoch,
                 last_reconciled_at_present: bucket.last_reconciled_at_present,
             })
-            .collect();
+            .collect()
     }
 
     #[cfg(not(feature = "mojo-core"))]

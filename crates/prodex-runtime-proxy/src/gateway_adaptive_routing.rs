@@ -257,7 +257,7 @@ pub fn runtime_gateway_adaptive_shadow_decision(
                 override_reason: "adaptive_disabled",
             };
         }
-        return runtime_gateway_adaptive_shadow_decision_mojo(input);
+        runtime_gateway_adaptive_shadow_decision_mojo(input)
     }
 
     #[cfg(not(feature = "mojo"))]

@@ -68,7 +68,7 @@ pub(super) fn control_plane_route_validation(
                 prodex_mojo_core::control_plane_routing::ControlPlaneRouteValidationMode::AllowAliasAndMethodCheck
             }
         };
-        return prodex_mojo_core::control_plane_routing::validate(
+        prodex_mojo_core::control_plane_routing::validate(
             prodex_mojo_core::control_plane_routing::ControlPlaneRouteValidationInput {
                 route_operation,
                 action_operation,
@@ -87,7 +87,7 @@ pub(super) fn control_plane_route_validation(
                 ControlPlaneRouteValidationDecision::MethodNotAllowed
             }
         })
-        .map_err(|_| control_plane_route_kernel_failure());
+        .map_err(|_| control_plane_route_kernel_failure())
     }
 
     #[cfg(not(feature = "mojo"))]

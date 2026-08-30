@@ -40,7 +40,7 @@ pub(crate) fn gemini_chat_assistant_tool_call_item_with_call_id(
         input.name = Some(flat_name);
         input.arguments = Some(&args);
         input.signature = signature;
-        return super::super::super::stream::gemini_mojo_value(input);
+        super::super::super::stream::gemini_mojo_value(input)
     }
     #[cfg(not(feature = "mojo"))]
     let mut item = json!({

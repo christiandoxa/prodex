@@ -72,25 +72,25 @@ pub fn deepseek_provider_core_insert_primitive_request_fields(
     provider_label: &str,
 ) -> Result<(), String> {
     for field in ["temperature", "top_p"] {
-        if let Some(next) = value.get(field) {
-            if !next.is_number() {
-                return Err(format!("{provider_label} {field} must be a number"));
-            }
+        if let Some(next) = value.get(field)
+            && !next.is_number()
+        {
+            return Err(format!("{provider_label} {field} must be a number"));
         }
     }
     for field in ["max_output_tokens", "max_tokens", "max_completion_tokens"] {
-        if let Some(next) = value.get(field) {
-            if next.as_u64().is_none_or(|count| count == 0) {
-                return Err(format!(
-                    "{provider_label} {field} must be a positive integer"
-                ));
-            }
+        if let Some(next) = value.get(field)
+            && next.as_u64().is_none_or(|count| count == 0)
+        {
+            return Err(format!(
+                "{provider_label} {field} must be a positive integer"
+            ));
         }
     }
-    if let Some(logprobs) = value.get("logprobs") {
-        if !logprobs.is_boolean() {
-            return Err(format!("{provider_label} logprobs must be a boolean"));
-        }
+    if let Some(logprobs) = value.get("logprobs")
+        && !logprobs.is_boolean()
+    {
+        return Err(format!("{provider_label} logprobs must be a boolean"));
     }
     #[cfg(feature = "mojo")]
     {
@@ -111,7 +111,7 @@ pub fn deepseek_provider_core_insert_primitive_request_fields(
                 .iter()
                 .map(|(key, value)| (key.clone(), value.clone())),
         );
-        return Ok(());
+        Ok(())
     }
     #[cfg(not(feature = "mojo"))]
     {
@@ -197,11 +197,11 @@ pub fn deepseek_provider_core_user_id_from_responses_request(
         let normalized = deepseek_provider_core_mojo_value(input).map_err(|error| {
             format!("{provider_label} user_id could not be normalized: {error}")
         })?;
-        return normalized
+        normalized
             .as_str()
             .filter(|user_id| !user_id.is_empty())
             .map(str::to_string)
-            .map_or(Ok(None), |user_id| Ok(Some(user_id)));
+            .map_or(Ok(None), |user_id| Ok(Some(user_id)))
     }
     #[cfg(not(feature = "mojo"))]
     Ok(Some(user_id.to_string()))

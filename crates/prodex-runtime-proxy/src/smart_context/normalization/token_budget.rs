@@ -51,7 +51,7 @@ pub(in crate::smart_context) fn smart_context_u64_budget_tier(
 ) -> SmartContextTokenBudgetTier {
     #[cfg(feature = "mojo")]
     {
-        return match prodex_mojo_core::rich::smart_context_budget_tier(available_tokens)
+        match prodex_mojo_core::rich::smart_context_budget_tier(available_tokens)
             .expect("Mojo Smart Context budget tier returned invalid output")
         {
             0 => SmartContextTokenBudgetTier::Exact,
@@ -59,7 +59,7 @@ pub(in crate::smart_context) fn smart_context_u64_budget_tier(
             2 => SmartContextTokenBudgetTier::Condensed,
             3 => SmartContextTokenBudgetTier::Minimal,
             _ => unreachable!("Mojo Smart Context budget tier was validated"),
-        };
+        }
     }
 
     #[cfg(not(feature = "mojo"))]
@@ -147,7 +147,7 @@ pub(in crate::smart_context) fn smart_context_memory_capsule_token_budget_impl(
                 SmartContextBudgetPolicyReason::CriticalBudget => 1 << 9,
             }
         });
-        return smart_context_u64_saturating_usize(
+        smart_context_u64_saturating_usize(
             prodex_mojo_core::rich::smart_context_memory_capsule_token_budget(
                 accounting.available_context_tokens,
                 mode,
@@ -157,7 +157,7 @@ pub(in crate::smart_context) fn smart_context_memory_capsule_token_budget_impl(
                 accounting.accounting_risks.is_empty(),
             )
             .expect("Mojo Smart Context capsule budget returned invalid output"),
-        );
+        )
     }
 
     #[cfg(not(feature = "mojo"))]
@@ -243,11 +243,11 @@ pub(in crate::smart_context) fn smart_context_select_memory_capsules_impl(
                 omitted_ids.push(capsule.id);
             }
         }
-        return SmartContextMemoryCapsuleSelection {
+        SmartContextMemoryCapsuleSelection {
             selected_ids,
             omitted_ids,
             used_tokens: plan.used_tokens,
-        };
+        }
     }
 
     #[cfg(not(feature = "mojo"))]

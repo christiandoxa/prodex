@@ -112,7 +112,7 @@ pub(crate) fn validate_gateway_observability_http_schema(value: &str) -> Result<
         {
             bail!("schema must be one of generic, otel, otlp, datadog, langfuse");
         }
-        return Ok(());
+        Ok(())
     }
 
     #[cfg(not(feature = "mojo"))]
@@ -147,7 +147,7 @@ pub(crate) fn validate_gateway_state_backend(value: &str) -> Result<()> {
         {
             bail!("backend must be one of file, sqlite, postgres, redis");
         }
-        return Ok(());
+        Ok(())
     }
 
     #[cfg(not(feature = "mojo"))]
@@ -182,7 +182,7 @@ pub(crate) fn validate_gateway_admin_role(value: &str) -> Result<()> {
         {
             bail!("role must be one of admin, viewer");
         }
-        return Ok(());
+        Ok(())
     }
 
     #[cfg(not(feature = "mojo"))]
@@ -217,7 +217,7 @@ pub(crate) fn validate_gateway_guardrail_webhook_phase(value: &str) -> Result<()
         {
             bail!("phase must be one of pre, post");
         }
-        return Ok(());
+        Ok(())
     }
 
     #[cfg(not(feature = "mojo"))]
@@ -238,11 +238,11 @@ pub(crate) fn validate_gateway_guardrail_webhook_phase(value: &str) -> Result<()
 pub(crate) fn gateway_observability_http_endpoint_has_http_host(value: &str) -> bool {
     #[cfg(feature = "mojo")]
     {
-        return prodex_mojo_core::policy::validate_text(
+        prodex_mojo_core::policy::validate_text(
             value,
             prodex_mojo_core::policy::PolicyTextKind::HttpEndpoint,
         )
-        .expect("Mojo runtime-policy URL validation returned invalid output");
+        .expect("Mojo runtime-policy URL validation returned invalid output")
     }
 
     #[cfg(not(feature = "mojo"))]

@@ -286,7 +286,7 @@ pub(super) fn kiro_provider_core_responses_request_body(
         input_value.model = model;
         input_value.input = input.as_deref();
         input_value.extra = Some(&extra);
-        return Ok(kiro_mojo_body(input_value));
+        Ok(kiro_mojo_body(input_value))
     }
     #[cfg(not(feature = "mojo"))]
     {

@@ -26,7 +26,7 @@ pub fn reserve_budget(
             available: snapshot.available(limit),
             requested: request.estimate,
         };
-        return match result.result_code {
+        match result.result_code {
             0 => Ok(BudgetSnapshot {
                 reserved: UsageAmount::new(result.values[0], result.values[1]),
                 committed: snapshot.committed,
@@ -40,7 +40,7 @@ pub fn reserve_budget(
             3 => Err(rejection(BudgetRejectionReason::TokenLimitExceeded)),
             4 => Err(rejection(BudgetRejectionReason::CostLimitExceeded)),
             _ => Err(rejection(BudgetRejectionReason::ArithmeticOverflow)),
-        };
+        }
     }
 
     #[cfg(not(feature = "mojo"))]
@@ -151,7 +151,7 @@ pub fn commit_reservation(
             ],
         )
         .unwrap_or_else(|_| panic!("Mojo reservation commit returned invalid output"));
-        return match result.result_code {
+        match result.result_code {
             0 => Ok(BudgetSnapshot {
                 reserved: UsageAmount::new(result.values[0], result.values[1]),
                 committed: UsageAmount::new(result.values[2], result.values[3]),
@@ -173,7 +173,7 @@ pub fn commit_reservation(
                 committed: snapshot.committed,
                 actual: commit.actual,
             }),
-        };
+        }
     }
 
     #[cfg(not(feature = "mojo"))]

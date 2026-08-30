@@ -90,14 +90,14 @@ fn runtime_gemini_contents_from_chat(chat: &serde_json::Value) -> Vec<serde_json
     }
     #[cfg(feature = "mojo")]
     {
-        return vec![request_contents::gemini_request_content_value(
+        vec![request_contents::gemini_request_content_value(
             prodex_mojo_core::provider_constraints::GeminiRequestContentOperation::Content,
             Some(b"\"user\""),
             Some(br#"[{"text":""}]"#),
             None,
             None,
             0,
-        )];
+        )]
     }
     #[cfg(not(feature = "mojo"))]
     vec![serde_json::json!({"role":"user","parts":[{"text":""}]})]
@@ -131,12 +131,12 @@ pub fn gemini_provider_core_generation_config_from_request(
 ) -> serde_json::Value {
     #[cfg(feature = "mojo")]
     {
-        return request_contents::gemini_bridge_request_generation_config(
+        request_contents::gemini_bridge_request_generation_config(
             original,
             chat,
             model,
             thinking_budget_tokens,
-        );
+        )
     }
     #[cfg(not(feature = "mojo"))]
     gemini_generation_config_from_request(original, chat, model, thinking_budget_tokens)
@@ -147,7 +147,7 @@ pub fn gemini_provider_core_validate_candidate_count(
 ) -> Result<(), String> {
     #[cfg(feature = "mojo")]
     {
-        return request_contents::gemini_bridge_request_candidate_count(value);
+        request_contents::gemini_bridge_request_candidate_count(value)
     }
     #[cfg(not(feature = "mojo"))]
     crate::translators::gemini_validate_candidate_count(value)
@@ -163,14 +163,14 @@ pub fn gemini_provider_core_generate_content_request_map(
 ) -> serde_json::Map<String, serde_json::Value> {
     #[cfg(feature = "mojo")]
     {
-        return request_contents::gemini_bridge_request_map(
+        request_contents::gemini_bridge_request_map(
             original,
             system_instruction.as_ref(),
             &contents,
             tools.as_ref(),
             tool_config.as_ref(),
             &generation_config,
-        );
+        )
     }
     #[cfg(not(feature = "mojo"))]
     {
@@ -214,12 +214,7 @@ pub fn gemini_provider_core_generate_content_body_value(
 ) -> serde_json::Value {
     #[cfg(feature = "mojo")]
     {
-        return request_contents::gemini_bridge_request_body(
-            model,
-            project_id,
-            code_assist,
-            request,
-        );
+        request_contents::gemini_bridge_request_body(model, project_id, code_assist, request)
     }
     #[cfg(not(feature = "mojo"))]
     {
