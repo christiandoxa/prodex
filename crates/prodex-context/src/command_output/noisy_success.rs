@@ -6,7 +6,7 @@ mod rust;
 pub(crate) use counts::*;
 pub(crate) use rust::*;
 
-#[cfg(not(feature = "mojo"))]
+#[cfg(any(not(feature = "mojo"), test))]
 pub(crate) mod rust_output_prefix {
     pub(crate) fn docker_compose_success_state(lower: &str) -> bool {
         lower.contains(" started")
@@ -18,10 +18,10 @@ pub(crate) mod rust_output_prefix {
     }
 }
 
-#[cfg(not(feature = "mojo"))]
+#[cfg(any(not(feature = "mojo"), test))]
 pub(crate) use rust_output_prefix::docker_compose_success_state;
 
-#[cfg(not(feature = "mojo"))]
+#[cfg(any(not(feature = "mojo"), test))]
 pub(crate) use rust_output::{
     is_bazel_test_success_line, is_biome_success_summary_line, is_bun_test_success_line,
     is_coverage_noise_line, is_cypress_success_line, is_diagnostic_block_start,
@@ -41,7 +41,7 @@ pub(crate) use rust_output::{
 mod mojo;
 #[cfg(feature = "mojo")]
 pub(crate) use mojo::*;
-#[cfg(not(feature = "mojo"))]
+#[cfg(any(not(feature = "mojo"), test))]
 pub(crate) mod rust_output {
     use super::*;
 
