@@ -53,15 +53,15 @@ external release below:
 
 | Field | Required value |
 | --- | --- |
-| Version | `2.3.1` |
+| Version | `2.4.0` |
 | Source | `https://github.com/JuliusBrussee/caveman` |
-| Commit | `b5ec6351396b643a17cbbec4a6eee8b3fb9dd782` |
-| Prodex tree SHA-256 | `6ae2fa37ef76e25e0dcad1188e8fce4e3afca54b25fe9e4dbe84812003d4472d` |
+| Commit | `df2ccd85c94ec3c8289cb62ac020d241ccfb0c60` |
+| Prodex tree SHA-256 | `c9b065a86cfe818ff1217562c0735cdfa913257862db94f5b2b11fcd51b0b640` |
 
 Install the exact checked-out tree at:
 
 ```text
-<managed-root>/caveman/2.3.1/
+<managed-root>/caveman/2.4.0/
 ```
 
 The directory must contain the upstream `AGENTS.md`,
@@ -72,10 +72,10 @@ manifest as `prodex-tool.json`:
 {
   "schema_version": 1,
   "id": "caveman",
-  "version": "2.3.1",
+  "version": "2.4.0",
   "source": "https://github.com/JuliusBrussee/caveman",
-  "commit": "b5ec6351396b643a17cbbec4a6eee8b3fb9dd782",
-  "tree_sha256": "6ae2fa37ef76e25e0dcad1188e8fce4e3afca54b25fe9e4dbe84812003d4472d"
+  "commit": "df2ccd85c94ec3c8289cb62ac020d241ccfb0c60",
+  "tree_sha256": "c9b065a86cfe818ff1217562c0735cdfa913257862db94f5b2b11fcd51b0b640"
 }
 ```
 
