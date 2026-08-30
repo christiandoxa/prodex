@@ -5,18 +5,43 @@ use serde_json::{Value, json};
 pub(crate) fn gemini_builtin_tools_from_request(tools: &[Value]) -> Vec<Value> {
     let mut translated = Vec::new();
     if let Some(computer_use) = gemini_computer_use_tool(tools) {
-        translated.push(json!({ "computerUse": computer_use }));
+        translated.push(gemini_builtin_tool_value(1, Some(computer_use)));
     }
     if tools.iter().any(gemini_is_code_execution_tool) {
-        translated.push(json!({ "codeExecution": {} }));
+        translated.push(gemini_builtin_tool_value(2, None));
     }
     if tools.iter().any(gemini_is_web_search_tool) {
-        translated.push(json!({ "googleSearch": {} }));
+        translated.push(gemini_builtin_tool_value(3, None));
     }
     if tools.iter().any(gemini_is_url_context_tool) {
-        translated.push(json!({ "urlContext": {} }));
+        translated.push(gemini_builtin_tool_value(4, None));
     }
     translated
+}
+
+#[cfg(feature = "mojo")]
+fn gemini_builtin_tool_value(kind: i64, value: Option<Value>) -> Value {
+    let value =
+        value.map(|value| serde_json::to_vec(&value).expect("Gemini built-in tool serializes"));
+    crate::translators::gemini::request_contents::gemini_request_content_mojo_value(
+        prodex_mojo_core::provider_constraints::GeminiRequestContentOperation::BuiltinTool,
+        value.as_deref(),
+        None,
+        None,
+        None,
+        kind,
+    )
+}
+
+#[cfg(not(feature = "mojo"))]
+fn gemini_builtin_tool_value(kind: i64, value: Option<Value>) -> Value {
+    match kind {
+        1 => json!({ "computerUse": value.unwrap_or_else(|| json!({})) }),
+        2 => json!({ "codeExecution": {} }),
+        3 => json!({ "googleSearch": {} }),
+        4 => json!({ "urlContext": {} }),
+        _ => unreachable!("unknown Gemini built-in tool kind"),
+    }
 }
 
 pub(crate) fn gemini_is_supported_builtin_tool(tool: &Value) -> bool {

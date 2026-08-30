@@ -103,6 +103,47 @@ fn gemini_validate_function_tool(
     Ok(())
 }
 
+#[cfg(feature = "mojo")]
+pub(crate) fn gemini_tool_from_openai_tool(tool: &Value, index: usize) -> Result<Value, String> {
+    let Some(function) = tool.get("function") else {
+        return Err(format!(
+            "invalid_tool_declaration: Gemini request field `tools[{index}].function` must be an object"
+        ));
+    };
+    let Some(name) = function.get("name").and_then(Value::as_str) else {
+        return Err(format!(
+            "invalid_tool_declaration: Gemini request field `tools[{index}].function.name` must be a non-empty string"
+        ));
+    };
+    if name.trim().is_empty() {
+        return Err(format!(
+            "invalid_tool_declaration: Gemini request field `tools[{index}].function.name` must be a non-empty string"
+        ));
+    }
+    let description = function
+        .get("description")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    let parameters = function
+        .get("parameters")
+        .map(sanitize_schema)
+        .unwrap_or_else(|| json!({"type":"object","properties":{}}));
+    let name = serde_json::to_vec(name).expect("Gemini tool name serializes");
+    let description = serde_json::to_vec(description).expect("Gemini tool description serializes");
+    let parameters = serde_json::to_vec(&parameters).expect("Gemini tool parameters serialize");
+    Ok(
+        crate::translators::gemini::request_contents::gemini_request_content_mojo_value(
+            prodex_mojo_core::provider_constraints::GeminiRequestContentOperation::ToolDeclaration,
+            Some(&name),
+            Some(&description),
+            Some(&parameters),
+            None,
+            0,
+        ),
+    )
+}
+
+#[cfg(not(feature = "mojo"))]
 pub(crate) fn gemini_tool_from_openai_tool(tool: &Value, index: usize) -> Result<Value, String> {
     let Some(function) = tool.get("function") else {
         return Err(format!(
@@ -134,6 +175,34 @@ pub(crate) fn gemini_tool_from_openai_tool(tool: &Value, index: usize) -> Result
     }))
 }
 
+#[cfg(feature = "mojo")]
+pub(crate) fn gemini_function_declaration_from_openai_tool(tool: &Value) -> Option<Value> {
+    let function = tool.get("function")?;
+    let name = function.get("name").and_then(Value::as_str)?;
+    let default_parameters = json!({"type": "object"});
+    let parameters = function.get("parameters").unwrap_or(&default_parameters);
+    let parameters = sanitize_function_schema(parameters);
+    let name = serde_json::to_vec(name).expect("Gemini tool name serializes");
+    let parameters = serde_json::to_vec(&parameters).expect("Gemini tool parameters serialize");
+    let description = function
+        .get("description")
+        .and_then(Value::as_str)
+        .map(|description| {
+            serde_json::to_vec(description).expect("Gemini tool description serializes")
+        });
+    Some(
+        crate::translators::gemini::request_contents::gemini_request_content_mojo_value(
+            prodex_mojo_core::provider_constraints::GeminiRequestContentOperation::ToolDeclaration,
+            Some(&name),
+            description.as_deref(),
+            Some(&parameters),
+            None,
+            0,
+        ),
+    )
+}
+
+#[cfg(not(feature = "mojo"))]
 pub(crate) fn gemini_function_declaration_from_openai_tool(tool: &Value) -> Option<Value> {
     let function = tool.get("function")?;
     let name = function.get("name").and_then(Value::as_str)?;
@@ -149,6 +218,38 @@ pub(crate) fn gemini_function_declaration_from_openai_tool(tool: &Value) -> Opti
     Some(declaration)
 }
 
+#[cfg(feature = "mojo")]
+pub(crate) fn gemini_tool_config_from_request(value: &Value) -> Option<Value> {
+    let tool_choice = value.get("tool_choice")?;
+    let (mode, name) = if tool_choice.as_str() == Some("auto") {
+        return None;
+    } else if tool_choice.as_str() == Some("none") {
+        ("NONE", None)
+    } else if tool_choice.as_str() == Some("required") {
+        ("ANY", None)
+    } else {
+        let name = tool_choice
+            .get("function")
+            .and_then(|function| function.get("name"))
+            .and_then(Value::as_str)
+            .or_else(|| tool_choice.get("name").and_then(Value::as_str))?;
+        ("ANY", Some(name))
+    };
+    let mode = serde_json::to_vec(mode).expect("Gemini tool mode serializes");
+    let name = name.map(|name| serde_json::to_vec(name).expect("Gemini tool name serializes"));
+    Some(
+        crate::translators::gemini::request_contents::gemini_request_content_mojo_value(
+            prodex_mojo_core::provider_constraints::GeminiRequestContentOperation::ToolConfig,
+            Some(&mode),
+            name.as_deref(),
+            None,
+            None,
+            0,
+        ),
+    )
+}
+
+#[cfg(not(feature = "mojo"))]
 pub(crate) fn gemini_tool_config_from_request(value: &Value) -> Option<Value> {
     let tool_choice = value.get("tool_choice")?;
     if tool_choice.as_str() == Some("auto") {
