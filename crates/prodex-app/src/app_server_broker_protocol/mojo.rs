@@ -6,8 +6,10 @@ use super::{
 };
 use prodex_mojo_core::rich::{
     AppServerBrokerValidationInput, app_server_broker_classify_wire,
-    app_server_broker_lifecycle_validation_reason, app_server_broker_normalize_method,
-    app_server_broker_plan_affinity, app_server_broker_response_schema,
+    app_server_broker_lifecycle_sequence_reason, app_server_broker_lifecycle_validation_reason,
+    app_server_broker_normalize_method, app_server_broker_plan_affinity,
+    app_server_broker_request_sequence_reason, app_server_broker_response_schema,
+    app_server_broker_response_sequence_reason,
 };
 use serde_json::{Map, Value};
 
@@ -229,6 +231,79 @@ pub(crate) fn validation_reason(input: AppServerBrokerValidationInput<'_>) -> Op
         Some(18) => Some("lifecycle_response_missing_turn_status"),
         Some(19) => Some("lifecycle_response_invalid_turn_status"),
         Some(_) => panic!("Mojo app-server broker returned unknown validation reason"),
+    }
+}
+
+pub(crate) fn request_sequence_reason(
+    id_present: bool,
+    duplicate_pending_request: bool,
+) -> Option<&'static str> {
+    sequence_reason_label(
+        app_server_broker_request_sequence_reason(id_present, duplicate_pending_request)
+            .unwrap_or_else(|error| {
+                panic!("Mojo app-server broker request sequencing failed: {error:?}")
+            }),
+    )
+}
+
+pub(crate) fn response_sequence_reason(
+    id_present: bool,
+    pending_request_present: bool,
+) -> Option<&'static str> {
+    sequence_reason_label(
+        app_server_broker_response_sequence_reason(id_present, pending_request_present)
+            .unwrap_or_else(|error| {
+                panic!("Mojo app-server broker response sequencing failed: {error:?}")
+            }),
+    )
+}
+
+pub(crate) fn lifecycle_sequence_reason(
+    stage: &str,
+    turn_id_present: bool,
+    thread_id_present: bool,
+    completed_turn_present: bool,
+    active_turn_present: bool,
+    active_turn_matches: bool,
+    started_turn_present: bool,
+) -> Option<&'static str> {
+    sequence_reason_label(
+        app_server_broker_lifecycle_sequence_reason(
+            stage,
+            turn_id_present,
+            thread_id_present,
+            completed_turn_present,
+            active_turn_present,
+            active_turn_matches,
+            started_turn_present,
+        )
+        .unwrap_or_else(|error| {
+            panic!("Mojo app-server broker lifecycle sequencing failed: {error:?}")
+        }),
+    )
+}
+
+fn sequence_reason_label(reason: Option<i64>) -> Option<&'static str> {
+    match reason {
+        None | Some(0) => None,
+        Some(20) => Some("request_missing_id"),
+        Some(21) => Some("response_missing_id"),
+        Some(22) => Some("response_without_request"),
+        Some(23) => Some("duplicate_pending_request_id"),
+        Some(24) => Some("turn_started_missing_turn_id"),
+        Some(25) => Some("turn_started_missing_thread_id"),
+        Some(26) => Some("turn_completed_missing_turn_id"),
+        Some(27) => Some("turn_completed_missing_thread_id"),
+        Some(28) => Some("turn_interrupt_missing_turn_id"),
+        Some(29) => Some("turn_interrupt_missing_thread_id"),
+        Some(30) => Some("turn_completed_without_turn_started"),
+        Some(31) => Some("turn_started_after_completed"),
+        Some(32) => Some("thread_active_turn_conflict"),
+        Some(33) => Some("turn_completed_not_active"),
+        Some(34) => Some("turn_interrupt_active_turn_conflict"),
+        Some(35) => Some("duplicate_turn_started"),
+        Some(36) => Some("duplicate_turn_completed"),
+        Some(_) => panic!("Mojo app-server broker returned unknown sequence reason"),
     }
 }
 

@@ -16,7 +16,12 @@ mod report;
 mod wire;
 
 #[cfg(feature = "mojo-core")]
-pub(crate) use mojo::validation_reason as app_server_broker_mojo_validation_reason;
+pub(crate) use mojo::{
+    lifecycle_sequence_reason as app_server_broker_mojo_lifecycle_sequence_reason,
+    request_sequence_reason as app_server_broker_mojo_request_sequence_reason,
+    response_sequence_reason as app_server_broker_mojo_response_sequence_reason,
+    validation_reason as app_server_broker_mojo_validation_reason,
+};
 
 pub(crate) use affinity::{
     app_server_broker_affinity_keys, app_server_broker_continuation_affinity_summary_json,

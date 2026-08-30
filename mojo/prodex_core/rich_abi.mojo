@@ -6,6 +6,7 @@ from app_server_broker import (
     app_server_broker_affinity_v1_impl,
     app_server_broker_method_v1_impl,
     app_server_broker_response_schema_v1_impl,
+    app_server_broker_sequence_v1_impl,
     app_server_broker_validation_v1_impl,
     app_server_broker_wire_v1_impl,
 )
@@ -586,5 +587,36 @@ def prodex_mojo_app_server_broker_validation_v1(
         turn_id_present,
         turn_status_address,
         turn_items,
+        output_address,
+    )
+
+
+@export("prodex_mojo_app_server_broker_sequence_v1")
+def prodex_mojo_app_server_broker_sequence_v1(
+    abi_version: Int64,
+    event_kind: Int64,
+    stage_address: UInt,
+    id_present: Int64,
+    thread_id_present: Int64,
+    pending_request_present: Int64,
+    duplicate_pending_request: Int64,
+    started_turn_present: Int64,
+    completed_turn_present: Int64,
+    active_turn_present: Int64,
+    active_turn_matches: Int64,
+    output_address: UInt,
+) abi("C") -> Int64:
+    return app_server_broker_sequence_v1_impl(
+        abi_version,
+        event_kind,
+        stage_address,
+        id_present,
+        thread_id_present,
+        pending_request_present,
+        duplicate_pending_request,
+        started_turn_present,
+        completed_turn_present,
+        active_turn_present,
+        active_turn_matches,
         output_address,
     )
