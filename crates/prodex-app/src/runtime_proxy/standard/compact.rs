@@ -523,7 +523,6 @@ impl RuntimeCompactSelectionContext<'_> {
             &mut self.excluded_profiles,
             &mut self.recovery_sweeps,
             &mut self.recovery_started_at,
-            self.saw_overload_failure,
         )
     }
 

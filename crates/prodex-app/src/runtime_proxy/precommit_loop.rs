@@ -112,10 +112,9 @@ impl<F> RuntimePrecommitLoopState<F> {
     }
 
     pub fn recovery_budget_exhausted(&self) -> bool {
-        if self.saw_overload_failure {
-            return false;
-        }
-        self.recovery_sweeps >= runtime_proxy_crate::RUNTIME_PROXY_PRECOMMIT_RECOVERY_SWEEP_LIMIT
+        (!self.saw_overload_failure
+            && self.recovery_sweeps
+                >= runtime_proxy_crate::RUNTIME_PROXY_PRECOMMIT_RECOVERY_SWEEP_LIMIT)
             || self.recovery_started_at.is_some_and(|started_at| {
                 started_at.elapsed()
                     >= Duration::from_millis(
@@ -152,12 +151,9 @@ impl<F> RuntimePrecommitLoopState<F> {
             return Ok(false);
         }
         let recovery_started_at = *self.recovery_started_at.get_or_insert_with(Instant::now);
-        let recovery_budget = if self.saw_overload_failure {
-            Duration::from_secs(30)
-        } else {
+        let recovery_budget =
             Duration::from_millis(runtime_proxy_crate::RUNTIME_PROXY_PRECOMMIT_RECOVERY_BUDGET_MS)
-                .saturating_sub(recovery_started_at.elapsed())
-        };
+                .saturating_sub(recovery_started_at.elapsed());
         let recovered = clear_runtime_recovered_profiles(
             shared,
             &mut self.excluded_profiles,
@@ -189,7 +185,7 @@ impl<F> RuntimePrecommitLoopState<F> {
             })
             .filter(|wait| !wait.is_zero())
         else {
-            if self.saw_overload_failure {
+            if self.saw_overload_failure && !recovery_budget.is_zero() {
                 let exponent = self.recovery_sweeps.min(5) as u32;
                 let base_ms = 250_u64.saturating_mul(1_u64 << exponent);
                 let jitter_ms = (request_id.saturating_add(self.recovery_sweeps as u64)) % 251;

@@ -35,6 +35,7 @@ pub(crate) fn runtime_proxy_backend_initial_response_id_for_account(
         "third-account" => Some("resp-third"),
         "fourth-account" => Some("resp-fourth"),
         "fifth-account" => Some("resp-fifth"),
+        "stream-account" => Some("resp-stream"),
         _ => None,
     }
 }

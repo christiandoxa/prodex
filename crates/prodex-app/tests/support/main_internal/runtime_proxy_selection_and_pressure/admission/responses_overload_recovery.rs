@@ -13,14 +13,6 @@ fn fresh_responses_keep_recovering_after_multiple_provider_overload_sweeps() {
             RuntimeProxyBackendFaultRoute::Responses,
             "second-account",
         ),
-        RuntimeProxyBackendFaultStep::sse_overloaded(
-            RuntimeProxyBackendFaultRoute::Responses,
-            "main-account",
-        ),
-        RuntimeProxyBackendFaultStep::sse_overloaded(
-            RuntimeProxyBackendFaultRoute::Responses,
-            "second-account",
-        ),
         RuntimeProxyBackendFaultStep::sse_success(
             RuntimeProxyBackendFaultRoute::Responses,
             "main-account",
@@ -62,12 +54,6 @@ fn fresh_responses_keep_recovering_after_multiple_provider_overload_sweeps() {
     assert!(!body.contains("server_is_overloaded"), "{body}");
     assert_eq!(
         backend.responses_accounts(),
-        [
-            "main-account",
-            "second-account",
-            "main-account",
-            "second-account",
-            "main-account"
-        ]
+        ["main-account", "second-account", "main-account"]
     );
 }

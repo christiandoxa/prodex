@@ -24,14 +24,6 @@ pub fn required_main_window_snapshot_at(
     required_window_snapshot_at(usage.rate_limit.as_ref()?, label, now)
 }
 
-pub fn required_window_snapshot_for_pair_at(
-    pair: &WindowPair,
-    label: &str,
-    now: i64,
-) -> Option<MainWindowSnapshot> {
-    required_window_snapshot_at(pair, label, now)
-}
-
 pub(super) fn required_window_snapshot_at(
     pair: &WindowPair,
     label: &str,
@@ -78,20 +70,7 @@ pub fn usage_has_spark_limit(usage: &UsageResponse) -> bool {
         .any(crate::capacity::additional_rate_limit_is_spark)
 }
 
-/// Checks only explicit backend admission state plus the bucket's own windows.
-pub fn additional_rate_limit_is_usable(additional: &AdditionalRateLimit) -> bool {
-    #[cfg(feature = "mojo")]
-    {
-        crate::capacity::classify_additional_rate_limit_is_usable(additional)
-    }
-
-    #[cfg(not(feature = "mojo"))]
-    {
-        additional.allowed != Some(false)
-            && additional.limit_reached != Some(true)
-            && window_pair_has_ready_limit(&additional.rate_limit)
-    }
-}
+pub use crate::capacity::additional_rate_limit_is_usable;
 
 pub fn spark_window_snapshots_at(
     usage: &UsageResponse,
