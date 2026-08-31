@@ -683,6 +683,14 @@ export const RUNTIME_CI_TEST_CASES = [
     tags: SERIALIZED_TAGS,
   },
   {
+    name: "luna_compact_falls_back_to_actual_spark_model_after_luna_capacity_exhausts",
+    tags: SERIALIZED_TAGS,
+  },
+  {
+    name: "fresh_responses_keep_recovering_after_multiple_provider_overload_sweeps",
+    tags: SERIALIZED_TAGS,
+  },
+  {
     id: "anthropic-request-translation",
     filter: "main_internal_tests::runtime_proxy_claude_and_anthropic::request_translation::",
     label: "parallel-safe-anthropic-request-translation",
