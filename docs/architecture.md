@@ -53,7 +53,7 @@ browser expose subsystem:
 
 ```text
 ChatGPT
-  -> Cloudflare Quick Tunnel or user-managed Cloudflare hostname
+  -> Cloudflare Quick Tunnel, user-managed Cloudflare hostname, or OpenAI Secure MCP Tunnel
   -> loopback HTTP listener
   -> exact capability + public Host policy
   -> Streamable HTTP JSON MCP adapter
@@ -69,6 +69,9 @@ one directly invoked, user-config-isolated `cloudflared tunnel --protocol auto
 uses the exact validated hostname, and does not start or stop cloudflared. The
 public default admits only `/pdx/v1/<capability>/mcp`; `prodex expose --tunnel`
 and `prodex s expose --tunnel` retain the explicit browser-terminal behavior.
+`prodex s expose --tunnel-provider openai` supervises the official tunnel client
+for MCP connectivity only: its browser terminal stays local and no public
+browser URL is generated.
 
 The MCP layer owns ingress validation, protocol schemas, bounded run lifecycle,
 and redacted status/events/results. It does not own model selection, provider

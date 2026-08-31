@@ -83,6 +83,17 @@ prodex run --profile second
 Prodex preserves continuation affinity and rotates only before commit. It does
 not move a live continuation or rotate after streamed output begins.
 
+Check a real OpenAI application path with a minimal model request:
+
+```bash
+prodex ping openai
+```
+
+This is not a DNS or server-health probe. For the three expose modes, use
+`prodex s expose` for local-only MCP/browser access, `--tunnel` for the
+Cloudflare Quick Tunnel, or `--tunnel-provider openai` for MCP-only OpenAI
+Secure Tunnel access; the browser remains local in OpenAI mode.
+
 ## 5. Use Super/YOLO mode
 
 Inspect the plan first:

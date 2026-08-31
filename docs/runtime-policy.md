@@ -618,7 +618,16 @@ shared-state integration around those operations.
 - OpenAI `additional_rate_limits` are preserved as independent backend buckets, including their
   explicit `allowed` and `limit_reached` fields and unknown future fields. The pinned Codex
   `rust-v0.150.1` contract does not identify a Luna Reserve bucket or map it to a model, so Prodex
-  reports such data generically and does not infer Reserve entitlement from plan or model names.
+  reports unknown Reserve data generically. When an upstream bucket explicitly identifies itself
+  as `Luna Reserve`, it is applicable only to Luna requests; Sol and Terra never use it. When all
+  supported Luna capacity is unavailable, a Luna request may make one model-aware pre-commit
+  fallback to catalog-advertised `gpt-5.3-codex-spark` capacity. Requested and effective models
+  remain distinct in runtime state and diagnostics. A 429/503 or transport error never zeros
+  Reserve or Spark capacity without authoritative provider evidence.
+- `prodex ping openai` is an application-level diagnostic: it sends the text `ping` through the
+  normal OpenAI/Codex runtime path, including profile selection and safe pre-commit recovery,
+  and succeeds only after a valid model response completes. It is not a DNS, TCP, TLS, ICMP,
+  `/models`, or server-health probe.
 - Resume launches preserve the session's last model unless the user supplies an explicit model override.
 - A fresh successful quota fetch is authoritative over historical authentication-backoff diagnostics.
 - Selection, admission, affinity, backoff, and first-chunk events must be structured in runtime logs.
