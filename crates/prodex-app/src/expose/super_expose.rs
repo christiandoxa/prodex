@@ -338,6 +338,14 @@ fn run_super_expose_engine_inner(
                 &cancelled,
             ) {
                 Ok(tunnel) => {
+                    report_phase(
+                        lifecycle_tx,
+                        ExposeLifecyclePhase::OpenAiTunnel,
+                        &format!(
+                            "OpenAI tunnel-client ready ({})",
+                            tunnel.status.client_version
+                        ),
+                    );
                     openai_tunnel = Some(tunnel);
                     None
                 }

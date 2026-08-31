@@ -4,6 +4,7 @@ use crate::runtime_launch::proxy_startup::chat_compatible_rewrite::runtime_provi
 use crate::runtime_launch::proxy_startup::provider_bridge::RuntimeProviderBridgeKind;
 use serde_json::{Value, json};
 use std::fs;
+use std::io::Read;
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
 use std::path::Path;

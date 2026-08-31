@@ -416,15 +416,16 @@ fn wait_for_openai_tunnel_ready(
             Ok(None) => {}
             Err(error) => return Err(error).context("failed to inspect tunnel-client startup"),
         }
-        if health.is_none() {
-            if let Some(base_url) = read_health_base_url(health_url_path)? {
-                let client = Client::builder()
-                    .timeout(OPENAI_TUNNEL_HEALTH_REQUEST_TIMEOUT)
-                    .redirect(reqwest::redirect::Policy::none())
-                    .build()
-                    .context("failed to initialize tunnel-client health probe")?;
-                health = Some((client, base_url));
-            }
+        if health.is_none()
+            && let Some(base_url) = read_health_base_url(health_url_path)?
+        {
+            let client = Client::builder()
+                .no_proxy()
+                .timeout(OPENAI_TUNNEL_HEALTH_REQUEST_TIMEOUT)
+                .redirect(reqwest::redirect::Policy::none())
+                .build()
+                .context("failed to initialize tunnel-client health probe")?;
+            health = Some((client, base_url));
         }
         if let Some((client, base_url)) = health.as_ref()
             && tunnel_health_ready(client, base_url)
