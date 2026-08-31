@@ -1686,5 +1686,19 @@
       "maxFileLines": 700
     },
     "reason": "Reviewed the 0.422.0 Expose connection picker, preserved Quick Tunnel and 0.419.1 phase/config-isolation invariants, existing Cloudflare config/token-file consumption, independent browser readiness, complete responsive URL rendering, OpenAI MCP-only lifecycle, and TUI-only load-event coalescing. The bounded cap covers the audited feature plus synchronized release metadata without changing global churn thresholds or weakening correctness/security gates."
+  },
+  {
+    "id": "prodex-0.422.0-platform-repair-churn",
+    "requiredSubjects": [
+      "fix(expose): contain existing tunnel jobs on Windows",
+      "fix(log): split operational stream parsing"
+    ],
+    "caps": {
+      "maxFiles": 10,
+      "maxBehaviorFiles": 10,
+      "maxLines": 160,
+      "maxFileLines": 60
+    },
+    "reason": "Reviewed the bounded follow-up for the exact 0.422.0 candidate: Windows process-job ownership and the Sonar cognitive-complexity extraction for log parsing. The cap covers only these two confirmed repairs plus their guard declaration and keeps the global churn thresholds unchanged."
   }
 ]
