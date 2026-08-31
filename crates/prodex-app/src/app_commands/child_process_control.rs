@@ -4,6 +4,8 @@ use std::process::{Child, Command, Output, Stdio};
 use std::thread;
 use std::time::{Duration, Instant};
 
+#[cfg(windows)]
+use std::os::windows::io::{AsRawHandle, FromRawHandle, OwnedHandle};
 #[cfg(unix)]
 use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -192,6 +194,8 @@ pub(crate) fn command_output_with_timeout(
     let mut child = command
         .spawn()
         .with_context(|| format!("failed to start {label}"))?;
+    #[cfg(windows)]
+    let child_job = assign_command_output_job(&child).ok();
     let stdout = child.stdout.take().context("failed to capture stdout")?;
     let stderr = child.stderr.take().context("failed to capture stderr")?;
     let stdout_reader = bounded_output_reader(stdout, max_output_bytes);
@@ -204,15 +208,21 @@ pub(crate) fn command_output_with_timeout(
             Ok(None) => {
                 let _ = terminate_child_process_tree(&mut child, true);
                 let _ = child.wait();
+                #[cfg(windows)]
+                drop(child_job);
                 anyhow::bail!("{label} timed out");
             }
             Err(error) => {
                 let _ = terminate_child_process_tree(&mut child, true);
                 let _ = child.wait();
+                #[cfg(windows)]
+                drop(child_job);
                 return Err(error).with_context(|| format!("failed to poll {label}"));
             }
         }
     };
+    #[cfg(windows)]
+    drop(child_job);
     let stdout = join_bounded_output_reader(stdout_reader, &mut child, label)?;
     let stderr = join_bounded_output_reader(stderr_reader, &mut child, label)?;
     if stdout.len() > max_output_bytes || stderr.len() > max_output_bytes {
@@ -223,6 +233,38 @@ pub(crate) fn command_output_with_timeout(
         stdout,
         stderr,
     })
+}
+
+#[cfg(windows)]
+fn assign_command_output_job(child: &Child) -> io::Result<OwnedHandle> {
+    use windows_sys::Win32::System::JobObjects::{
+        AssignProcessToJobObject, CreateJobObjectW, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
+        JOBOBJECT_EXTENDED_LIMIT_INFORMATION, JobObjectExtendedLimitInformation,
+        SetInformationJobObject,
+    };
+
+    let raw_job = unsafe { CreateJobObjectW(std::ptr::null(), std::ptr::null()) };
+    if raw_job.is_null() {
+        return Err(io::Error::last_os_error());
+    }
+    let job = unsafe { OwnedHandle::from_raw_handle(raw_job) };
+    let mut limits = JOBOBJECT_EXTENDED_LIMIT_INFORMATION::default();
+    limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+    let configured = unsafe {
+        SetInformationJobObject(
+            job.as_raw_handle(),
+            JobObjectExtendedLimitInformation,
+            std::ptr::from_ref(&limits).cast(),
+            std::mem::size_of_val(&limits) as u32,
+        )
+    } != 0;
+    if !configured {
+        return Err(io::Error::last_os_error());
+    }
+    if unsafe { AssignProcessToJobObject(job.as_raw_handle(), child.as_raw_handle()) } == 0 {
+        return Err(io::Error::last_os_error());
+    }
+    Ok(job)
 }
 
 pub(crate) fn command_probe_output(command: &mut Command, label: &str) -> Result<Output> {
