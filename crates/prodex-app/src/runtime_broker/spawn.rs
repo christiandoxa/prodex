@@ -259,6 +259,7 @@ pub(crate) fn spawn_runtime_broker_process(
         prodex_runtime_broker::runtime_broker_process_command_plan(current_exe, &paths.root);
     let mut child = Command::new(command_plan.executable)
         .args(command_plan.args)
+        .current_dir(&paths.root)
         .envs(command_plan.environment)
         .stdin(Stdio::piped())
         .stdout(Stdio::null())
