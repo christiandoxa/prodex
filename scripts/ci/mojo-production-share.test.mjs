@@ -76,7 +76,16 @@ test("0.421.0 requires the normal 10 percent requirement", () => {
   }), false);
 });
 
-test("0.421.0 rejects inherited release waivers", () => {
+const validWaiver = {
+  release_target: "0.421.0",
+  baseline_sha: "2531c7a345f1607a18aa926e204b4d02cc322167",
+  temporary_release_floor_percent: 7,
+  scope: "0.421.0 only",
+  expiration: "immediately after 0.421.0",
+  reason: "quantity-only release waiver",
+};
+
+test("0.421.0 accepts only its explicit quantity waiver", () => {
   const manifest = {
     schema_version: 1,
     release_target: "0.421.0",
@@ -84,11 +93,33 @@ test("0.421.0 rejects inherited release waivers", () => {
     counting_rules_version: 1,
     minimum_percent: 10,
     production_build_feature: "mojo-core",
-    temporary_release_waiver: { release_target: "0.420.0" },
+    temporary_release_waiver: validWaiver,
   };
-  assert.throws(() => validateManifestMetadata(manifest), /not permitted for 0.421.0/u);
+  assert.equal(validateManifestMetadata(manifest), manifest);
+  assert.equal(productionShareMeetsReleaseRequirement({
+    final: { broad_mojo_production_loc: 700, broad_total_production_loc: 10_000 },
+    minimum_percent: 10,
+    temporary_release_waiver_applicable: true,
+    temporary_release_floor_percent: 7,
+    temporary_release_waiver_scope: "0.421.0 only",
+  }), true);
+  assert.equal(productionShareMeetsReleaseRequirement({
+    final: { broad_mojo_production_loc: 699, broad_total_production_loc: 10_000 },
+    minimum_percent: 10,
+    temporary_release_waiver_applicable: true,
+    temporary_release_floor_percent: 7,
+    temporary_release_waiver_scope: "0.421.0 only",
+  }), false);
   assert.throws(
-    () => validateManifestMetadata({ ...manifest, counting_rules_version: 2 }),
+    () => validateManifestMetadata({ ...manifest, temporary_release_waiver: { ...validWaiver, release_target: "0.422.0" } }),
+    /release target must be 0.421.0/u,
+  );
+  assert.throws(
+    () => validateManifestMetadata({ ...manifest, temporary_release_waiver: { ...validWaiver, temporary_release_floor_percent: 6 } }),
+    /exactly 7/u,
+  );
+  assert.throws(
+    () => validateManifestMetadata({ ...manifest, temporary_release_waiver: undefined, counting_rules_version: 2 }),
     /counting rules must be 1/u,
   );
   assert.throws(

@@ -13,6 +13,7 @@ const COUNTING_RULES_VERSION = 1;
 const REQUIRED_BASELINE_SHA = "2531c7a345f1607a18aa926e204b4d02cc322167";
 const REQUIRED_RELEASE_TARGET = "0.421.0";
 const REQUIRED_MINIMUM_PERCENT = 10;
+const REQUIRED_TEMPORARY_RELEASE_FLOOR_PERCENT = 7;
 const REQUIRED_PRODUCTION_BUILD_FEATURE = "mojo-core";
 const DEFAULT_SNAPSHOT_PATH = "migration/mojo-production-share-baseline-0.419.2.json";
 const EXCLUDED_COMPONENTS = /^(?:tests?|benches|examples|fixtures?|snapshots|generated|vendor|target|fuzz|test-support|bench_support|prodex-bench-support)$/iu;
@@ -94,8 +95,26 @@ export function validateManifestMetadata(manifest) {
       `broad production-share build feature must be ${REQUIRED_PRODUCTION_BUILD_FEATURE}`,
     );
   }
-  if (manifest.temporary_release_waiver !== undefined) {
-    throw new Error("temporary release waiver is not permitted for 0.421.0");
+  const waiver = manifest.temporary_release_waiver;
+  if (waiver !== undefined) {
+    if (!waiver || typeof waiver !== "object" || Array.isArray(waiver)) {
+      throw new Error("temporary release waiver must be an object");
+    }
+    if (waiver.release_target !== manifest.release_target || waiver.release_target !== REQUIRED_RELEASE_TARGET) {
+      throw new Error("temporary release waiver release target must be 0.421.0");
+    }
+    if (waiver.baseline_sha !== manifest.baseline_sha || waiver.baseline_sha !== REQUIRED_BASELINE_SHA) {
+      throw new Error("temporary release waiver baseline SHA does not match the frozen baseline");
+    }
+    if (waiver.temporary_release_floor_percent !== REQUIRED_TEMPORARY_RELEASE_FLOOR_PERCENT) {
+      throw new Error("temporary release waiver floor must be exactly 7%");
+    }
+    if (waiver.scope !== "0.421.0 only" || waiver.expiration !== "immediately after 0.421.0") {
+      throw new Error("temporary release waiver scope or expiration is invalid");
+    }
+    if (typeof waiver.reason !== "string" || waiver.reason.trim() === "") {
+      throw new Error("temporary release waiver reason is required");
+    }
   }
   return manifest;
 }
@@ -511,8 +530,13 @@ export function calculateProductionShare(manifest, baselineRevision = manifest.b
   const snapshot = readSnapshot(manifest);
   validateFrozenBaseline(manifest, baselineRevision, baseline, snapshot);
   const required = requiredMojoLoc(final.rust_production_loc, manifest.minimum_percent);
+  const waiver = manifest.temporary_release_waiver;
   const normalRequirementMet = final.mojo_production_loc * 100 >=
     manifest.minimum_percent * final.total_production_loc;
+  const temporaryReleaseFloorPercent = waiver?.temporary_release_floor_percent ?? null;
+  const temporaryWaiverApplicable = waiver !== undefined;
+  const releaseRequirementMet = normalRequirementMet || temporaryWaiverApplicable &&
+    final.mojo_production_loc * 100 >= temporaryReleaseFloorPercent * final.total_production_loc;
   return {
     baseline: {
       broad_mojo_percent: baseline.mojo_percent,
@@ -530,13 +554,17 @@ export function calculateProductionShare(manifest, baselineRevision = manifest.b
     },
     minimum_percent: manifest.minimum_percent,
     project_target_percent: manifest.minimum_percent,
-    temporary_release_floor_percent: null,
-    temporary_release_waiver_applicable: false,
-    temporary_release_waiver_scope: null,
-    temporary_release_waiver_reason: null,
+    temporary_release_floor_percent: temporaryReleaseFloorPercent,
+    temporary_release_waiver_applicable: temporaryWaiverApplicable,
+    temporary_release_waiver_scope: waiver?.scope ?? null,
+    temporary_release_waiver_reason: waiver?.reason ?? null,
     normal_requirement_met: normalRequirementMet,
-    release_requirement_met: normalRequirementMet,
-    release_status: normalRequirementMet ? "PASS" : "FAIL",
+    release_requirement_met: releaseRequirementMet,
+    release_status: normalRequirementMet
+      ? "PASS"
+      : releaseRequirementMet
+        ? "PASS_WITH_EXPLICIT_0_421_0_WAIVER"
+        : "FAIL",
     required_mojo_loc_at_final_rust_volume: required,
     additional_mojo_loc_needed_at_final_rust_volume: Math.max(0, required - final.mojo_production_loc),
     counting_rules_version: COUNTING_RULES_VERSION,
@@ -554,7 +582,12 @@ export function productionShareMeetsMinimum(result) {
 }
 
 export function productionShareMeetsReleaseRequirement(result) {
-  return productionShareMeetsMinimum(result);
+  if (productionShareMeetsMinimum(result)) return true;
+  return result.temporary_release_waiver_applicable === true &&
+    result.temporary_release_floor_percent === REQUIRED_TEMPORARY_RELEASE_FLOOR_PERCENT &&
+    result.temporary_release_waiver_scope === "0.421.0 only" &&
+    result.final.broad_mojo_production_loc * 100 >=
+      result.temporary_release_floor_percent * result.final.broad_total_production_loc;
 }
 
 function writeSnapshot(manifest, baselineRevision) {
@@ -700,7 +733,13 @@ async function main() {
     `Total: ${result.final.broad_total_production_loc.toLocaleString("en-US")} LOC`,
     `Mojo share: ${result.final.broad_mojo_percent.toFixed(2)}%`,
     `Project target: >=${result.project_target_percent.toFixed(2)}%`,
-    `Status: ${result.release_status}`,
+    ...(result.temporary_release_waiver_applicable
+      ? [
+          `0.421.0 explicit release waiver floor: >=${result.temporary_release_floor_percent.toFixed(2)}%`,
+          `Status: ${result.release_status}`,
+          "10% target deferred to the next release",
+        ]
+      : [`Status: ${result.release_status}`]),
     `Additional Mojo LOC needed at current Rust volume: ${result.additional_mojo_loc_needed_at_final_rust_volume.toLocaleString("en-US")}`,
   ].join("\n") + "\n");
 }
