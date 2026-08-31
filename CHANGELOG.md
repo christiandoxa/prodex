@@ -2,7 +2,70 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
-## 0.420.0 - 2026-08-30
+## 0.421.0 - 2026-08-31
+
+### Runtime
+
+- Stabilize broker working directory (`7340f6b`)
+- Simplify compact retry classification (`1e4cde9`)
+- Preserve provider recovery and model fallback (`2bf4acb`)
+- Make OpenAI capacity model-aware (`9fc53e3`)
+- Batch runtime profile health scoring (`40fcb78`)
+- Harden expose and provider runtime paths (`27cf042`)
+
+### CLI
+
+- Preserve Luna reserve capacity (`028c1e2`)
+- Add expose tunnel providers (`7859b34`)
+
+### Claude
+
+- Supervise OpenAI Secure MCP tunnel client (`118927d`)
+- Add OpenAI MCP tunnel provider (`6d59243`)
+
+### Docs
+
+- Reflect public Cloudflare browser access (`bbd7ea0`)
+- Add canonical root guide (`8334efe`)
+- Document 0.421.0 runtime semantics (`e722539`)
+- Document local and tunneled modes (`642e412`)
+
+### Deps
+
+- Bump argon2 in /fuzz in the fuzz-cargo group (`6674044`)
+- Bump the cargo group with 4 updates (`b8afd47`)
+
+### Misc
+
+- Contain command output descendants (`fb40fbd`)
+- Preserve bounded child failure detail (`0814e3a`)
+- Close exact CI regressions (`f3f74c6`)
+- Publish Cloudflare browser route (`3928fb5`)
+- Move Kiro request capability policy (`1d0bdbb`)
+- Validate official tunnel identifier (`e96ab94`)
+- Keep tunnel readiness probe local (`b4e1d91`)
+- Keep live ACP tasks alive while quiet (`83641b2`)
+- Use canonical OpenAI application request (`dceefac`)
+# Prodex 0.421.0
+
+## New Features
+
+- Added model-aware OpenAI capacity routing for Luna workflows. Explicitly identified Luna Reserve capacity remains available to Luna requests, and usable `gpt-5.3-codex-spark` capacity can continue a Luna workflow after applicable Luna capacity is unavailable. The effective fallback model is Spark; Luna does not consume Spark quota, and Sol/Terra do not use this fallback.
+- Added application-level `prodex ping openai`, which sends the text `ping` through the normal OpenAI/Codex request path and succeeds on a valid completed model response.
+- Added OpenAI Secure MCP Tunnel support to `prodex s expose`. It keeps the browser terminal local and exposes MCP connectivity through the supervised official tunnel client; it does not publish a public browser shell.
+- Preserved `prodex s expose --tunnel` as the Cloudflare Quick Tunnel mode and added explicit provider selection.
+
+## Bug Fixes
+
+- Improved provider-wide overload recovery with bounded backoff while preserving the logical pre-commit request; transient 503 responses are not classified as quota exhaustion.
+- Kept quiet, long-running Kiro ACP work alive instead of treating output silence as a reconnect condition, while retaining concurrent bounded stdout/stderr draining and real child-exit detection.
+- Improved Cloudflare Quick Tunnel diagnostics for transport registration versus public DNS, DoH, TLS, and MCP readiness failures.
+
+## Changelog
+
+Full Changelog: [`0.420.0...0.421.0`](https://github.com/christiandoxa/prodex/compare/0.420.0...0.421.0)
+
+## 0.420.0 - 2026-08-31
 
 ### Runtime
 
@@ -46,6 +109,9 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 
 ### Misc
 
+- Correct rich self-test JSON (`7c1d5f3`)
+- Handle optional pty process handles (`2ddc507`)
+- Repair exposed process job handles (`3a994da`)
 - Use typed Gemini bridge inputs (`8079949`)
 - Retain default test classification oracles (`6a331de`)
 - Keep feature test oracles available (`9a1e77e`)
