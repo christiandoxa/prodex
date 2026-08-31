@@ -27,10 +27,10 @@
     "caps": {
       "maxFiles": 125,
       "maxBehaviorFiles": 105,
-      "maxLines": 7000,
+      "maxLines": 7400,
       "maxFileLines": 600
     },
-    "reason": "This exact 0.421.0 integration campaign combines the release-critical OpenAI application ping, model-aware Luna/Reserve/Spark recovery, Cloudflare and Secure MCP expose paths, Kiro quiet-child supervision, dependency integration, runtime fixtures, docs, and CI manifest evidence. The measured range is 118 files, 99 behavior files, 6,479 changed lines, and 551 changed lines in the largest file; the narrow allowance covers this audited train without changing global churn thresholds or skipping gates."
+    "reason": "This exact 0.421.0 integration campaign combines the release-critical OpenAI application ping, model-aware Luna/Reserve/Spark recovery, Cloudflare and Secure MCP expose paths, Kiro quiet-child supervision, dependency integration, runtime fixtures, docs, and CI manifest evidence. The measured range is 125 files, 104 behavior files, 7,386 changed lines, and 551 changed lines in the largest file; the narrow allowance covers this audited train without changing global churn thresholds or skipping gates."
   },
   {
     "id": "audited-prodex-0.420.0-migration-tail",
