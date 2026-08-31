@@ -488,7 +488,9 @@ pub(super) fn handle_runtime_proxy_backend_responses_route(
             {
                 usage_limit_sse_response(mode)
             }
-            "fourth-account" | "fifth-account" => initial_account_response(account_id, mode),
+            "fourth-account" | "fifth-account" | "stream-account" => {
+                initial_account_response(account_id, mode)
+            }
             _ => (
                 "HTTP/1.1 200 OK",
                 "text/event-stream",

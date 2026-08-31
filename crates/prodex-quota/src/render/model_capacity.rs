@@ -1,7 +1,16 @@
+use super::windows::required_window_snapshot_at;
 use super::{
-    UsageResponse, WindowPair, collect_blocked_limits, find_main_window,
+    MainWindowSnapshot, UsageResponse, WindowPair, collect_blocked_limits, find_main_window,
     openai_quota_has_ready_limit, openai_quota_runtime_window_pair, window_pair_has_ready_limit,
 };
+
+pub fn required_window_snapshot_for_pair_at(
+    pair: &WindowPair,
+    label: &str,
+    now: i64,
+) -> Option<MainWindowSnapshot> {
+    required_window_snapshot_at(pair, label, now)
+}
 
 pub const OPENAI_LUNA_MODEL: &str = "gpt-5.6-luna";
 pub const OPENAI_SPARK_MODEL: &str = "gpt-5.3-codex-spark";

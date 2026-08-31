@@ -15,6 +15,21 @@ pub(crate) fn additional_rate_limit_is_spark(additional: &AdditionalRateLimit) -
     })
 }
 
+/// Checks explicit backend admission state plus the bucket's own windows.
+pub fn additional_rate_limit_is_usable(additional: &AdditionalRateLimit) -> bool {
+    #[cfg(feature = "mojo")]
+    {
+        classify_additional_rate_limit_is_usable(additional)
+    }
+
+    #[cfg(not(feature = "mojo"))]
+    {
+        additional.allowed != Some(false)
+            && additional.limit_reached != Some(true)
+            && crate::render::window_pair_has_ready_limit(&additional.rate_limit)
+    }
+}
+
 #[cfg(feature = "mojo")]
 use prodex_runtime_state::RuntimeRouteKind;
 
