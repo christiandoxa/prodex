@@ -1,0 +1,529 @@
+# Prodex Expose
+
+`prodex s expose` runs the Prodex Super runtime for the current workspace and
+provides:
+
+- a browser terminal;
+- a Streamable HTTP MCP endpoint; and
+- optionally, an external tunnel for the MCP endpoint and, in Cloudflare mode,
+  the browser terminal.
+
+The listener is loopback-bound. Expose grants Super-level authority as the
+current operating-system user, so the URL is a capability, not a harmless
+preview link. Anyone who obtains a complete public URL can use the authority
+available to that expose process.
+
+For the detailed mode and security model, use this document as the canonical
+reference. The shorter [Expose reference](docs/expose.md) remains a maintained
+summary.
+
+## Quick start
+
+Local browser and local MCP:
+
+```bash
+prodex s expose
+```
+
+Cloudflare Quick Tunnel (public browser terminal and public MCP):
+
+```bash
+prodex s expose --tunnel
+```
+
+The explicit equivalent is:
+
+```bash
+prodex s expose --tunnel-provider cloudflare
+```
+
+OpenAI Secure MCP Tunnel (local browser, remote MCP through OpenAI):
+
+```bash
+CONTROL_PLANE_TUNNEL_ID=tunnel_0123456789abcdefghijklmnopqrstuv \
+CONTROL_PLANE_API_KEY='replace-with-your-runtime-key' \
+prodex s expose --tunnel-provider openai
+```
+
+Replace the tunnel identifier and runtime key with values from the supported
+OpenAI tunnel setup. The identifier must be `tunnel_` followed by 32 lowercase
+letters or digits. The API key is deliberately not a command-line option.
+
+## Mode comparison
+
+| Mode | Browser terminal | MCP | External tunnel | Public browser shell |
+|---|---|---|---|---|
+| Local | Local loopback | Local loopback | None | No |
+| Cloudflare | Public through Quick Tunnel, or an interactively selected existing Cloudflare hostname | Public through the same Cloudflare endpoint | `cloudflared`; Quick Tunnel uses `auto` with QUIC/HTTP/2 fallback | Yes |
+| OpenAI Secure MCP Tunnel | Local loopback only | Remote through the supervised official tunnel client | OpenAI Secure MCP Tunnel | No |
+
+OpenAI mode is MCP-only. It does not publish a generic browser reverse proxy,
+does not emit a fabricated `openai.com` browser URL, and does not route browser
+terminal traffic into an MCP transport.
+
+## Command reference
+
+The command is owned by the `ExposeArgs` parser. The current help surface is
+available with:
+
+```bash
+prodex s expose --help
+```
+
+The principal syntax is:
+
+```text
+prodex s expose [OPTIONS] [CODEX_ARG]...
+```
+
+`[CODEX_ARG]...` is passed to Codex after Prodex's generated launch options.
+
+### Expose options
+
+| Option | Meaning |
+|---|---|
+| `--command <COMMAND>` | Shell command run inside the exposed PTY; defaults to `$SHELL` or `sh`. |
+| `--cols <COLS>` | Initial terminal columns; default `100`. |
+| `--rows <ROWS>` | Initial terminal rows; default `32`. |
+| `--max-clients <MAX_CLIENTS>` | Concurrent browser clients, from 1 through 32; default `4`. |
+| `--tunnel` | Explicitly selects the Cloudflare public expose path. It remains a boolean compatibility flag. |
+| `--tunnel-provider cloudflare` | Explicit Cloudflare selection. |
+| `--tunnel-provider openai` | OpenAI Secure MCP Tunnel selection; browser remains local. |
+| `--openai-tunnel-id <ID>` | Non-secret OpenAI Platform tunnel identifier. It requires `--tunnel-provider openai`. |
+| `--name <NAME>` | Suggested display name for the ChatGPT connection. |
+| `-p, --profile <NAME>` | Starting Prodex profile; otherwise the active profile is used. |
+| `--auto-rotate` | Allow eligible pre-commit profile rotation; this is the default. |
+| `--no-auto-rotate` | Keep the selected profile fixed and fail rather than rotate. |
+| `--auto-redeem` | Permit the existing guarded reset-credit redemption behavior. |
+| `--skip-quota-check` | Skip the launch preflight quota gate. |
+| `--full-access` | Compatibility flag; Super already launches with launch-time full access. |
+| `--base-url <URL>` | Override the upstream ChatGPT base URL used by quota preflight and the runtime proxy. |
+| `--no-proxy` | Disable system and environment proxy settings for upstream OpenAI/quota HTTP requests. |
+| `--presidio` / `--no-presidio` | Enable or disable request-body and WebSocket redaction without prompting. |
+| `--sub-agent` / `--no-sub-agent` | Enable or disable Codex sub-agent support. |
+| `--sub-agent-provider <PROVIDER>` | Provider used by sub-agents. Detail flags require explicit sub-agent selection. |
+| `--sub-agent-model <MODEL>` | Sub-agent model identifier. |
+| `--sub-agent-model-reasoning-effort <EFFORT>` | Sub-agent reasoning effort. |
+| `--sub-agent-url <URL>` | Local HTTP(S) endpoint for local sub-agents. |
+| `--sub-agent-max-concurrency <VALUE>` | Active child process limit, from 1 through 64. |
+| `--tool <TOOL>` / `--require-tool <TOOL>` | Add or require an optional Super tool. |
+| `--url <URL>` | Route Codex directly to a local OpenAI-compatible `/v1` endpoint. |
+| `--provider <PROVIDER>` | Select an external provider preset through Codex/Super. |
+| `--harness <native\|minimal\|evaluated>` | Select the provider-bridge harness policy. |
+| `--cli <CLI>` | Select a native agent CLI where supported, including `gemini`, `copilot`, `kiro`, or `agy`. |
+| `--api-key <KEY>` | Provider API key option for provider bridges. Prefer the provider-specific environment variable so secrets do not enter shell history. |
+| `--model <MODEL>` | Main model identifier; `--local-model` is an alias. |
+| `--context-window <TOKENS>` | Context-window override for local/provider bridges. |
+| `--auto-compact-token-limit <TOKENS>` | Auto-compaction threshold for local/provider bridges. |
+| `--web-search <MODE>` | Hosted web-search mode: `disabled`, `cached`, `indexed`, or `live`. |
+| `--dry-run` | Not supported by `prodex s expose`; use `prodex s --dry-run` for launch diagnostics. |
+| `--no-tunnel` | Hidden deprecated compatibility alias for local-only behavior. |
+
+Options inherited from Super are still subject to the selected provider's
+validation and Codex's own option handling. `--tunnel` cannot be combined with
+`--tunnel-provider` or `--no-tunnel`.
+
+### Backwards compatibility
+
+These meanings are preserved:
+
+```bash
+prodex s expose                 # local-only by default
+prodex s expose --tunnel        # Cloudflare public expose path
+prodex s expose --no-tunnel     # hidden local-only compatibility alias
+```
+
+`--tunnel` is never an alias for OpenAI mode. Select OpenAI explicitly with
+`--tunnel-provider openai`.
+
+## Architecture
+
+The runtime has one owner process and one isolated expose instance:
+
+```text
+Prodex Super parent
+  ├─ loopback HTTP server (127.0.0.1:0 for local/Quick/OpenAI)
+  │    ├─ browser terminal routes (/expose, session, input, stream)
+  │    └─ MCP route (/pdx/v1/<capability>/mcp)
+  ├─ Super PTY and bounded run manager
+  └─ optional supervised external child
+       ├─ cloudflared (Cloudflare mode)
+       └─ official tunnel-client (OpenAI MCP mode)
+```
+
+The current working directory is captured as workspace context. It is not a
+security sandbox: the Super child retains the launch-time authority of the
+current OS user.
+
+The MCP endpoint supports JSON responses for `server/discover`, `initialize`,
+`ping`, `tools/list`, and `tools/call`. Expose does not require a long-lived
+GET/SSE MCP endpoint; its readiness probes require JSON protocol responses.
+Notifications are accepted with `202 Accepted` and no response body.
+
+The endpoint exposes bounded Super operations rather than an arbitrary shell
+MCP primitive:
+
+- `prodex_super_start`
+- `prodex_super_status`
+- `prodex_super_events`
+- `prodex_super_result`
+- `prodex_super_cancel`
+- `prodex_super_list`
+
+The run manager permits four active runs, sixteen queued runs, thirty-two
+retained terminal runs, 256 events per run, 8 KiB per event, and 256 KiB of
+final output. Run task text is carried through bounded private task state and
+the normal Prodex child launch path.
+
+## Startup and readiness
+
+The lifecycle is:
+
+1. Parse Super and Expose options and validate provider URLs/options.
+2. Resolve the workspace, profile, provider, model, effort, sub-agent setup,
+   and remembered preferences. Interactive tunnel launches freeze the confirmed
+   configuration for this process.
+3. Create a fresh capability and bind the loopback listener.
+4. Start the Super PTY and local HTTP server.
+5. Probe local MCP `initialize`, then `tools/list`.
+6. If requested, start and validate the selected external tunnel.
+7. Probe the public Cloudflare MCP endpoint when Cloudflare is selected, or
+   validate the tunnel-client's local health endpoints in OpenAI mode.
+8. Print the ready status and keep the parent, child runs, listener, and tunnel
+   supervised until cancellation, normal shutdown, or a real child failure.
+
+Local readiness means local MCP `initialize` and `tools/list` passed. Cloudflare
+readiness additionally means the public endpoint passed those probes. OpenAI
+readiness means the local MCP passed and the tunnel-client child remained alive
+after its local `/healthz` and `/readyz` checks succeeded.
+
+The existence of a tunnel child alone is not readiness. A child that exits
+after readiness causes Expose to fail closed with a tunnel-unavailable error.
+
+## Local mode
+
+`prodex s expose` binds the origin to `127.0.0.1:0`, so the operating system
+chooses a free loopback port. Prodex prints:
+
+- a local browser URL containing a one-time bootstrap fragment; and
+- a local MCP URL containing the capability path.
+
+The browser exchanges its bootstrap value for an HttpOnly, SameSite session
+cookie. Browser input requires the session and CSRF checks. The browser stream
+uses a bounded SSE presentation channel, while MCP uses the JSON endpoint.
+
+Local mode has no external tunnel and requires no inbound firewall exposure.
+Ctrl+C stops the server, PTY, run manager, and child process trees.
+
+## Cloudflare Quick Tunnel
+
+Quick Tunnel mode uses the installed `cloudflared` executable. Prodex checks
+`cloudflared --version` and its tunnel help before starting. It creates a
+private temporary configuration area and removes it during shutdown.
+
+The managed command is equivalent to:
+
+```text
+cloudflared --config <private-config> tunnel --no-autoupdate --protocol auto --url http://127.0.0.1:<origin-port>
+```
+
+Prodex does not require a Cloudflare account, login, DNS record, `init`, or a
+user-authored tunnel configuration for Quick Tunnel mode. It accepts only a
+strict HTTPS `*.trycloudflare.com` hostname from the child output.
+
+The discovered hostname is allowed for the MCP route, and the public URL is
+constructed as:
+
+```text
+https://<hostname>/pdx/v1/<opaque-capability>/mcp
+```
+
+The public host is MCP-only. Browser routes are not made public by Quick Tunnel
+mode even though the local browser remains available. The top-level legacy
+`prodex expose --tunnel` command is a separate, older browser-terminal path;
+do not confuse it with the Super MCP-only host behavior documented here.
+
+### QUIC to HTTP/2 fallback
+
+Quick Tunnel starts with `--protocol auto`. The expected transport order is:
+
+```text
+QUIC / UDP 7844
+        ↓ if negotiation does not complete
+HTTP/2 / TCP 7844
+```
+
+Transport negotiation is bounded. When auto negotiation reports a hostname but
+does not register a transport before its deadline, Prodex stops that child and
+makes one explicit HTTP/2 attempt. This is a transport fallback, not a silent
+provider switch and not a readiness claim.
+
+The known failure class is a network that blocks UDP/7844 while permitting
+TCP/7844. In that case QUIC can fail while HTTP/2 registers successfully.
+Cloudflare management/update traffic can also use TCP/443. The local origin
+still remains loopback-bound.
+
+### DNS, DoH, TLS, and MCP are separate layers
+
+A registered Cloudflare transport does not prove that the public hostname is
+already usable. For a newly allocated wildcard hostname, local DNS can lag.
+Prodex first uses normal hostname resolution. For a `trycloudflare.com` host it
+also has a bounded fallback lookup through:
+
+```text
+https://cloudflare-dns.com/dns-query
+```
+
+The resolved address is used only for that public probe while preserving the
+hostname for TLS SNI and HTTP Host. It does not change the machine's resolver
+configuration and does not send the capability to DNS.
+
+These are distinct diagnostic layers:
+
+```text
+cloudflared transport registered
+    ≠ public hostname resolves
+    ≠ TCP/TLS connection succeeds
+    ≠ MCP initialize succeeds
+    ≠ MCP tools/list succeeds
+```
+
+If UDP/7844 is blocked, TCP/7844 works, the HTTP/2 tunnel registers, and both
+local DNS and Cloudflare DoH are delayed or reset, Prodex must report bounded
+public readiness failure. It does not pretend the public MCP endpoint is
+ready. Use OpenAI mode only when its own network and authentication contract
+is available; Prodex never silently switches providers.
+
+### Existing Cloudflare Tunnel selection
+
+When a tunnel-enabled Super expose is interactive, the endpoint selector
+defaults to Quick Tunnel. Use Up/Down or `2` to choose **Existing Cloudflare
+Tunnel**, then enter a public DNS hostname and a loopback origin port. The
+default displayed origin port is `8765`.
+
+Prodex validates the hostname and probes the configured public MCP URL, but it
+does not launch, stop, reconfigure, or authenticate the user's existing
+Cloudflare service. A fixed origin port must already match that service's
+configuration.
+
+## OpenAI Secure MCP Tunnel
+
+OpenAI mode uses the official [openai/tunnel-client](https://github.com/openai/tunnel-client)
+as a supervised external process. Prodex does not implement or clone the
+tunnel wire protocol. The integration points the client at the OpenAI control
+plane and gives it the local MCP endpoint; the client owns the upstream tunnel
+protocol and authentication behavior.
+
+The current integration requires the audited stable client `v0.0.13` at commit
+`4b5267f823be0b046bb883aacb51603cfde3a0ea`. Install the supported client from
+the official OpenAI tunnel surface, or set `PRODEX_TUNNEL_CLIENT_BIN` to an
+explicit executable path:
+
+```bash
+PRODEX_TUNNEL_CLIENT_BIN=/absolute/path/to/tunnel-client \
+CONTROL_PLANE_TUNNEL_ID=tunnel_0123456789abcdefghijklmnopqrstuv \
+CONTROL_PLANE_API_KEY='replace-with-your-runtime-key' \
+prodex s expose --tunnel-provider openai
+```
+
+The exact client command receives a private configuration path, the OpenAI
+control-plane base URL `https://api.openai.com`, the validated tunnel ID, and
+the API-key reference `env:CONTROL_PLANE_API_KEY`. It also receives loopback
+health-listener and log-file paths. The runtime key is never placed in argv or
+the generated configuration.
+
+OpenAI mode requires:
+
+- a pre-created OpenAI Platform tunnel;
+- `CONTROL_PLANE_API_KEY` in the environment; and
+- the supported `tunnel-client` executable.
+
+The tunnel identifier is non-secret routing/configuration data. The runtime key
+is secret. Do not put it in shell history, a process argument, a committed file,
+or a diagnostic log.
+
+Prodex creates a private temporary directory containing the local MCP reference,
+client configuration, health URL file, and client log path. It uses the
+client's loopback `/healthz` and `/readyz` responses for startup readiness, then
+checks that the child is still alive. The directory and child are removed or
+terminated on normal exit, cancellation, startup failure, or post-ready child
+failure.
+
+The OpenAI tunnel path is independent of `trycloudflare.com`,
+`cloudflare-dns.com`, `cloudflared`, and Cloudflare's UDP/7844 transport. The
+Prodex-selected control-plane endpoint is `api.openai.com` over HTTPS/TCP 443;
+the official client may have additional current network requirements, so follow
+its own release documentation for deployment-specific restrictions.
+
+## Credentials and security
+
+Expose has two different capability surfaces:
+
+- the local browser bootstrap and session cookie; and
+- the MCP capability path in the printed MCP URL.
+
+The MCP capability is generated from operating-system randomness, retained as a
+digest for validation, and intended to be ephemeral. The complete URL is a
+bearer credential. Treat copying, pasting, storing, and logging it as credential
+handling. Stop Expose to revoke it; a new process creates a new capability.
+
+This is not OAuth, account linking, identity authentication, or a multi-user
+authorization system. Do not publish a public browser shell or MCP URL to an
+untrusted audience. The URL grants the Super authority of the process, not a
+restricted workspace-only permission set.
+
+Prodex replaces only the selected profile's upstream auth headers in runtime
+proxy paths. It keeps profile credentials isolated and redacts secret-like
+diagnostic errors. Tunnel children receive only the environment/configuration
+required by their provider; inherited Cloudflare and OpenAI tunnel settings are
+removed before launch. Temporary tunnel directories are private and are
+cleaned after their final consumer exits.
+
+## Status and observability
+
+After readiness, the non-TTY status output includes the instance, workspace,
+provider, model, effort, local browser URL, tunnel provider, local MCP URL, and
+the active lifetime/stop instructions. Cloudflare mode additionally prints the
+ChatGPT MCP URL. OpenAI mode prints the validated tunnel ID and safe client
+version, but no public browser URL.
+
+The public Cloudflare MCP URL contains the capability path. An OpenAI tunnel ID
+is only an identifier and is never a browser URL.
+
+With a TTY, the expose view shows lifecycle phases such as Preparing,
+Cloudflare tunnel, OpenAI Secure MCP Tunnel, local MCP initialize/tools, public
+MCP initialize/tools, Ready, Stopped, and Failed. State transitions are bounded
+and failures are redacted before presentation.
+
+## Process supervision and shutdown
+
+The parent owns the HTTP server, PTY, run manager, and external tunnel child.
+Cloudflare and OpenAI children are checked for real process exit; an absent
+output line is not itself a ready or failed state. Ctrl+C or `q` in the expose
+view cancels startup or shuts down a ready instance.
+
+Shutdown terminates the relevant process tree, waits within the provider's
+bounded cleanup period, stops the PTY/run manager, closes the listener, joins
+output readers where applicable, and removes private temporary configuration.
+An external child that dies after readiness is reported as unavailable rather
+than automatically replaced with a different tunnel provider.
+
+## Troubleshooting
+
+Use this sequence before changing configuration:
+
+```text
+Did the local MCP initialize/tools/list probe pass?
+  no  -> inspect the local listener, selected profile/provider, and local logs
+  yes -> continue
+
+Was Cloudflare transport registered?
+  no  -> inspect cloudflared installation and UDP/TCP 7844 reachability
+  yes -> continue
+
+Does the public hostname resolve?
+  no  -> local DNS or bounded Cloudflare DoH failure; wait/retry or use another mode
+  yes -> continue
+
+Does public TLS connect?
+  no  -> public edge/TLS/network failure; do not treat transport registration as ready
+  yes -> continue
+
+Did public MCP initialize/tools/list pass?
+  no  -> MCP route, Host/capability, or application readiness failure
+  yes -> Cloudflare expose is ready
+```
+
+| Symptom | Layer | Safe action |
+|---|---|---|
+| `cloudflared` missing or version/help check fails | Local executable | Install a current `cloudflared` using Cloudflare's official instructions. Local mode does not need it. |
+| QUIC negotiation times out | Cloudflare transport | Check outbound UDP/7844. Prodex makes one HTTP/2/TCP/7844 fallback when the auto attempt has a hostname but no registered transport. |
+| HTTP/2 registers but `*.trycloudflare.com` does not resolve | DNS propagation | Treat transport and DNS separately. Wait within the bounded public probe, inspect local DNS, and check whether `cloudflare-dns.com` DoH is blocked/reset. |
+| Public TLS or MCP probe times out | Public readiness | Check DNS, TCP/TLS, hostname, capability URL, and public route. Do not increase the timeout indefinitely or declare readiness manually. |
+| `tunnel-client` missing | OpenAI executable | Install the audited official client or set `PRODEX_TUNNEL_CLIENT_BIN` to its absolute path. |
+| OpenAI tunnel ID rejected | Configuration | Use `CONTROL_PLANE_TUNNEL_ID` or `--openai-tunnel-id` with `tunnel_` plus exactly 32 lowercase letters/digits. |
+| OpenAI runtime key missing | Secret configuration | Set `CONTROL_PLANE_API_KEY` in the environment. There is no `--openai-api-key` option. |
+| OpenAI tunnel does not become ready | OpenAI startup/network | Check the pre-created tunnel, outbound HTTPS/TCP 443 to the configured OpenAI control plane, client permissions, and the local MCP endpoint. The client health probe is bounded. |
+| `LocalOriginPortInUse` | Local listener | Choose a different existing-tunnel origin port or stop the process that owns that exact loopback port. Quick/Local/OpenAI modes use an OS-selected port. |
+| URL works locally but public browser route is 404 | Intentional routing | Cloudflare public hosts are MCP-only for `prodex s expose`; use the printed local browser URL. OpenAI mode never has a public browser URL. |
+| Tunnel child exits after Ready | Child lifecycle | Stop/restart Expose after inspecting the redacted status/log information. Prodex fails closed and does not silently switch providers. |
+| Startup cancelled or Ctrl+C appears stuck | Cleanup | Allow the bounded child-tree cleanup to finish. Do not kill unrelated processes or delete active temporary state. |
+
+For a machine that blocks UDP/7844 but permits TCP/7844, Cloudflare Quick
+Tunnel can still work if HTTP/2 registers and the public DNS/TLS/MCP probes are
+available. If Cloudflare wildcard DNS or its DoH fallback is blocked, OpenAI
+Secure MCP Tunnel can be a better fit when its own TCP/443 and tunnel-auth
+requirements are satisfied. It is not a general VPN and is not a replacement
+for public browser access.
+
+## Provider selection guidance
+
+- Choose **Local** when the browser and MCP client run on the same machine and
+  no external access is needed.
+- Choose **Cloudflare** when a public browser terminal and public MCP endpoint
+  are both intentional requirements. Treat the complete URL as a full-access
+  bearer credential.
+- Choose **OpenAI Secure MCP Tunnel** when an OpenAI-supported surface needs
+  remote MCP connectivity, while the browser terminal should remain local and
+  no generic public browser shell is required.
+
+Provider choice is explicit. A Cloudflare DNS failure does not silently select
+OpenAI, and an OpenAI control-plane failure does not silently fall back to
+Cloudflare.
+
+## Failure semantics
+
+- Local MCP startup failure: Expose cleans up and returns an error.
+- Cloudflare transport, hostname, TLS, or public MCP readiness failure: Expose
+  cleans up the listener/tunnel and returns a bounded error.
+- OpenAI tunnel-client startup or health failure: Expose cleans up the local
+  listener/client state and returns a bounded error.
+- Tunnel child death after readiness: Expose fails closed; it does not create a
+  replacement with another provider.
+- User cancellation: Expose stops its owned children and returns cleanly.
+- Local browser/session expiry or MCP capability mismatch: the endpoint rejects
+  the request; it does not grant a new capability implicitly.
+
+## Platform notes
+
+The same Expose modes and loopback policy apply on Linux, macOS, and Windows.
+The runtime uses platform-specific process-tree containment where available:
+Unix children use private process groups, and Windows tunnel children can be
+placed in a job object with kill-on-close behavior. Paths are passed as native
+argument values, not through shell interpolation. Always validate the installed
+`cloudflared`/`tunnel-client` executable on the target platform.
+
+## Testing and source map
+
+Offline focused tests use deterministic fake children and local HTTP fixtures;
+they do not require a live Cloudflare account or live OpenAI tunnel:
+
+```bash
+cargo test --locked -q -p prodex-app --lib expose:: -- --test-threads=1
+cargo test --locked -q -p prodex-cli --tests expose
+npm run docs
+```
+
+The main implementation areas are:
+
+- `crates/prodex-cli/src/runtime_args.rs` — Expose option ownership and tunnel
+  provider enum;
+- `crates/prodex-app/src/expose/super_expose.rs` — mode selection, lifecycle,
+  listener, readiness sequencing, and shutdown;
+- `crates/prodex-app/src/expose/runtime.rs` — local runtime and legacy expose
+  plumbing;
+- `crates/prodex-app/src/expose/runtime/cloudflared.rs` and
+  `cloudflared_startup.rs` — isolated Cloudflare child and transport startup;
+- `crates/prodex-app/src/expose/runtime/openai_tunnel.rs` — official
+  tunnel-client supervision and local health readiness;
+- `crates/prodex-app/src/expose/mcp/**` — MCP protocol, tools, and probes;
+- `crates/prodex-app/src/expose/http.rs` and `routes.rs` — browser/session/MCP
+  route boundaries;
+- `crates/prodex-app/src/expose/run_manager/**` — bounded task lifecycle;
+- `crates/prodex-app/src/expose/*_tests.rs` — deterministic capability,
+  routing, Cloudflare, OpenAI tunnel, and lifecycle coverage.
+
+The document is intentionally explicit about what Expose does not do: OpenAI
+Secure MCP Tunnel is MCP connectivity, Cloudflare public readiness is checked
+through separate transport/DNS/TLS/application layers, and the full-access
+capability URL is not a multi-user security boundary.

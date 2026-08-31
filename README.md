@@ -19,6 +19,7 @@ Use multiple Codex accounts and supported provider backends from one command lin
 - [Quick start](#quick-start)
 - [Daily command: `prodex s`](#daily-command-prodex-s)
 - [ChatGPT MCP expose](#chatgpt-mcp-expose)
+- [EXPOSE.md](EXPOSE.md)
 - [Commands](#commands)
 - [Modes](#modes)
 - [Sub-agents](docs/sub-agents.md)
@@ -466,81 +467,50 @@ connectivity testing.
 
 ## ChatGPT MCP expose
 
-Run this from the workspace you want the connection to start in:
+Run this from the workspace you want the local connection to start in:
 
 ```bash
 prodex s expose
 ```
 
-In an interactive terminal, Prodex asks for the main agent and provider, then
-asks for the main model and model-aware reasoning effort. It then asks whether
-sub-agents should be enabled and—when enabled—uses the shared sub-agent model
-and effort pickers. Local mode starts without an external tunnel. Cloudflare
-mode starts the Quick Tunnel after configuration; OpenAI mode requires a
-pre-created tunnel and runtime key.
-In a non-TTY launch, explicit options win over remembered/default values without
-waiting for stdin:
+The three explicit modes are:
+
+```bash
+prodex s expose                                  # local browser + local MCP
+prodex s expose --tunnel                         # Cloudflare public browser + MCP
+prodex s expose --tunnel-provider openai         # OpenAI remote MCP; browser local
+```
+
+WARNING: Cloudflare mode publishes a full-access Super capability. Anyone who
+obtains the complete URL can control the expose process as the current OS user;
+the URL is not OAuth or multi-user authentication. OpenAI Secure MCP Tunnel is
+MCP-only and never publishes a generic browser-terminal URL.
+
+See [EXPOSE.md](EXPOSE.md) for the verified CLI reference, readiness layers,
+Cloudflare QUIC/HTTP/2 and DNS/DoH troubleshooting, OpenAI Secure MCP Tunnel
+configuration, lifecycle, security model, and focused tests.
+
+<details>
+<summary><strong>Expose configuration and ChatGPT connection</strong></summary>
+
+In an interactive terminal, Prodex asks for the main agent/provider/model,
+model-aware effort, and optional sub-agent configuration before starting. The
+Cloudflare selector defaults to Quick Tunnel; an existing Cloudflare hostname
+can be selected interactively. Non-TTY launches use explicit, remembered, and
+normal default values without waiting for stdin.
+
+After readiness, Prodex prints the local browser URL and either a local MCP URL
+or a public Cloudflare MCP URL. Add a model/effort override when needed:
 
 ```bash
 prodex s expose --model gpt-5.6-luna -c 'model_reasoning_effort="max"'
 ```
 
-After public `initialize` and `tools/list` probes succeed,
-Prodex prints one URL ending in `/mcp`. Paste it into:
+The public URL is intended for ChatGPT Developer Mode's public MCP server URL
+connection. Treat the complete URL as a credential and stop the process to
+revoke it.
 
-```text
-ChatGPT → Settings → Security and login → Developer mode → Plugins → + → Public MCP server URL
-```
-
-The URL uses Ephemeral Capability Authentication:
-
-- the path contains a fresh 256-bit URL-safe bearer capability;
-- anyone with the complete URL can control the full Super runtime for that expose process;
-- the capability is kept as an in-memory digest and is revoked when the process exits;
-- the URL is a credential—ChatGPT stores it and Cloudflare carries the path;
-- this is short-lived personal-development access, not OAuth, account linking, identity authentication, or suitable multi-user/plugin-directory security.
-
-Quick Tunnel mode requires an installed `cloudflared` executable but no
-Cloudflare account, login, DNS, or `init`; it uses QUIC/UDP 7844 when available
-and automatically falls back to HTTP/2/TCP 7844. Existing Tunnel mode does not
-start or stop the user's Cloudflare service. Both modes use JSON responses over
-Streamable HTTP and do not depend on SSE. Long-running work is polled with
-`prodex_super_status`, `prodex_super_events`, and `prodex_super_result` after
-`prodex_super_start` returns a run ID. The endpoint exposes only the MCP path;
-the legacy browser routes remain unavailable on its public host.
-
-Each process captures one immutable initial workspace, selects its own loopback
-port, tunnel, capability, server identity, configuration, run manager, and
-child process trees. Multiple workspaces can run in parallel:
-
-```bash
-# Terminal A
-cd ~/work/prodex-api && prodex s expose --name api
-# Terminal B
-cd ~/work/prodex-ui && prodex s expose --name ui
-# Terminal C
-cd ~/work/prodex-exp && prodex s expose --name experiment
-```
-
-Git worktrees are recommended when the sessions modify one repository:
-
-```bash
-git worktree add ../feature-a -b feature/a
-git worktree add ../feature-b -b feature/b
-git worktree add ../feature-c -b feature/c
-```
-
-Worktrees isolate files, indexes, and branches while intentionally sharing
-repository objects. Prodex profile/account and quota state may remain shared
-through the normal `PRODEX_HOME` state model. The captured workspace is the
-initial working directory; full Super permissions remain the underlying
-authority, so expose does not claim a stronger filesystem sandbox than local
-Super provides.
-
-The per-process defaults are bounded at four active runs, sixteen queued runs,
-thirty-two retained completed runs, and 256 events per run. Stop an expose
-process with Ctrl+C; its tunnel, listener, capability, and active child runs
-are shut down without stopping another expose process.
+</details>
 
 ## Sub-agents
 
