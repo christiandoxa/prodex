@@ -4,13 +4,18 @@
 mod controls;
 #[path = "request/messages.rs"]
 mod messages;
+#[cfg(feature = "mojo")]
+#[path = "request/validation.rs"]
+mod validation;
 
+#[cfg(not(feature = "mojo"))]
+use controls::kiro_provider_core_reject_token_limit_controls;
+#[cfg(not(feature = "mojo"))]
 use controls::{
     kiro_provider_core_has_requested_nondefault_number,
     kiro_provider_core_has_requested_parallel_tool_calls_control,
     kiro_provider_core_has_requested_sampling_value,
     kiro_provider_core_has_requested_stop_sequences,
-    kiro_provider_core_reject_token_limit_controls,
     kiro_provider_core_supported_chat_response_format,
 };
 pub use messages::{
@@ -67,10 +72,21 @@ pub fn kiro_provider_core_chat_completions_request_body(
             "invalid_request_body",
         ));
     };
-    kiro_validate_chat_completion_format_and_sampling(object)?;
-    kiro_validate_chat_completion_penalties(object)?;
+    #[cfg(feature = "mojo")]
+    {
+        let plan = prodex_mojo_core::rich::kiro_validate_request(validation::chat_input(object))
+            .unwrap_or_else(|error| panic!("Mojo Kiro request validation failed: {error:?}"));
+        validation::error(plan, object)?;
+        validation::remove_chat_defaults(object);
+    }
+    #[cfg(not(feature = "mojo"))]
+    {
+        kiro_validate_chat_completion_format_and_sampling(object)?;
+        kiro_validate_chat_completion_penalties(object)?;
+    }
     object.remove("n");
     object.remove("user");
+    #[cfg(not(feature = "mojo"))]
     kiro_provider_core_reject_token_limit_controls(object)?;
     if object.contains_key("input") {
         return kiro_validate_serialized_chat_body(&value);
@@ -79,6 +95,7 @@ pub fn kiro_provider_core_chat_completions_request_body(
     kiro_validate_serialized_chat_body(&value)
 }
 
+#[cfg(not(feature = "mojo"))]
 fn kiro_validate_chat_completion_format_and_sampling(
     object: &mut serde_json::Map<String, Value>,
 ) -> Result<(), KiroProviderCoreRequestError> {
@@ -122,6 +139,7 @@ fn kiro_validate_chat_completion_format_and_sampling(
     )
 }
 
+#[cfg(not(feature = "mojo"))]
 fn kiro_validate_chat_completion_penalties(
     object: &mut serde_json::Map<String, Value>,
 ) -> Result<(), KiroProviderCoreRequestError> {
@@ -157,6 +175,7 @@ fn kiro_validate_chat_completion_penalties(
     )
 }
 
+#[cfg(not(feature = "mojo"))]
 fn kiro_remove_default_chat_control(
     object: &mut serde_json::Map<String, Value>,
     field: &str,
@@ -173,6 +192,7 @@ fn kiro_remove_default_chat_control(
     Ok(())
 }
 
+#[cfg(not(feature = "mojo"))]
 fn kiro_remove_default_number_chat_control(
     object: &mut serde_json::Map<String, Value>,
     field: &str,
@@ -261,9 +281,29 @@ pub(super) fn kiro_provider_core_responses_request_body(
     let object = value.as_object().expect("validated request object");
 
     kiro_validate_response_input(object)?;
-    kiro_validate_response_generation_controls(object, allow_token_limit)?;
-    kiro_validate_response_format_and_tools(object)?;
-    kiro_validate_response_reasoning(&value, object)?;
+    #[cfg(feature = "mojo")]
+    {
+        let plan = prodex_mojo_core::rich::kiro_validate_request(validation::response_input(
+            object,
+            allow_token_limit,
+        ))
+        .unwrap_or_else(|error| panic!("Mojo Kiro request validation failed: {error:?}"));
+        if matches!(
+            plan.reason,
+            prodex_mojo_core::rich::KiroRequestValidationPlan::REASON_NONE
+                | prodex_mojo_core::rich::KiroRequestValidationPlan::REASON_REASONING_EFFORT
+        ) {
+            deepseek_provider_core_validate_reasoning_shape(&value, "Kiro")
+                .map_err(kiro_invalid_request)?;
+        }
+        validation::error(plan, object)?;
+    }
+    #[cfg(not(feature = "mojo"))]
+    {
+        kiro_validate_response_generation_controls(object, allow_token_limit)?;
+        kiro_validate_response_format_and_tools(object)?;
+        kiro_validate_response_reasoning(&value, object)?;
+    }
     deepseek_provider_core_reject_beta_completion_fields(&value, "Kiro")
         .map_err(kiro_invalid_request)?;
     deepseek_provider_core_reject_unsupported_request_fields(&value, "Kiro")
@@ -306,6 +346,7 @@ fn kiro_validate_response_input(
     Ok(())
 }
 
+#[cfg(not(feature = "mojo"))]
 fn kiro_validate_response_generation_controls(
     object: &serde_json::Map<String, Value>,
     allow_token_limit: bool,
@@ -335,6 +376,7 @@ fn kiro_validate_response_generation_controls(
     kiro_validate_response_logprobs(object)
 }
 
+#[cfg(not(feature = "mojo"))]
 fn kiro_validate_response_logprobs(
     object: &serde_json::Map<String, Value>,
 ) -> Result<(), KiroProviderCoreRequestError> {
@@ -367,6 +409,7 @@ fn kiro_validate_response_logprobs(
     Ok(())
 }
 
+#[cfg(not(feature = "mojo"))]
 fn kiro_validate_response_format_and_tools(
     object: &serde_json::Map<String, Value>,
 ) -> Result<(), KiroProviderCoreRequestError> {
@@ -411,6 +454,7 @@ fn kiro_validate_response_format_and_tools(
     Ok(())
 }
 
+#[cfg(not(feature = "mojo"))]
 fn kiro_validate_response_reasoning(
     value: &Value,
     object: &serde_json::Map<String, Value>,

@@ -68,6 +68,93 @@ pub struct KiroKernelInput<'a> {
     pub incomplete_reason: Option<&'a str>,
 }
 
+/// Selects the Kiro request surface whose capability rules are being checked.
+#[repr(i64)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum KiroRequestValidationMode {
+    ChatCompletions = 1,
+    Responses = 2,
+}
+
+/// JSON facts extracted by Rust before Mojo applies Kiro capability policy.
+///
+/// Rust owns JSON parsing and request mutation. Mojo owns the ordered decision
+/// about whether a parsed request asks for an unsupported capability.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct KiroRequestValidationInput {
+    pub mode: KiroRequestValidationMode,
+    pub flags: u64,
+    pub detail: i64,
+    pub allow_token_limit: bool,
+}
+
+/// Ordered Kiro request capability decision returned by Mojo.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct KiroRequestValidationPlan {
+    pub reason: i64,
+    pub detail: i64,
+    pub detail_is_invalid: bool,
+}
+
+impl KiroRequestValidationPlan {
+    pub const REASON_NONE: i64 = 0;
+    pub const REASON_CHAT_RESPONSE_FORMAT: i64 = 1;
+    pub const REASON_CHAT_CHOICE_COUNT: i64 = 2;
+    pub const REASON_CHAT_STOP: i64 = 3;
+    pub const REASON_CHAT_TEMPERATURE: i64 = 4;
+    pub const REASON_CHAT_TOP_P: i64 = 5;
+    pub const REASON_CHAT_PRESENCE_PENALTY: i64 = 6;
+    pub const REASON_CHAT_FREQUENCY_PENALTY: i64 = 7;
+    pub const REASON_CHAT_SEED: i64 = 8;
+    pub const REASON_CHAT_PARALLEL_TOOL_CALLS: i64 = 9;
+    pub const REASON_TOKEN_LIMIT: i64 = 10;
+    pub const REASON_GENERATION_CONTROL: i64 = 11;
+    pub const REASON_RESPONSE_STOP: i64 = 12;
+    pub const REASON_LOGPROBS: i64 = 13;
+    pub const REASON_TOP_LOGPROBS: i64 = 14;
+    pub const REASON_RESPONSE_FORMAT: i64 = 15;
+    pub const REASON_TOOL_CHOICE: i64 = 16;
+    pub const REASON_TOOLS: i64 = 17;
+    pub const REASON_WEB_SEARCH: i64 = 18;
+    pub const REASON_REASONING_EFFORT: i64 = 19;
+}
+
+impl KiroRequestValidationInput {
+    pub const FLAG_CHAT_RESPONSE_FORMAT: u64 = 1 << 0;
+    pub const FLAG_CHAT_CHOICE_COUNT: u64 = 1 << 1;
+    pub const FLAG_CHAT_STOP: u64 = 1 << 2;
+    pub const FLAG_CHAT_TEMPERATURE: u64 = 1 << 3;
+    pub const FLAG_CHAT_TOP_P: u64 = 1 << 4;
+    pub const FLAG_CHAT_PRESENCE_PENALTY: u64 = 1 << 5;
+    pub const FLAG_CHAT_FREQUENCY_PENALTY: u64 = 1 << 6;
+    pub const FLAG_CHAT_SEED: u64 = 1 << 7;
+    pub const FLAG_CHAT_PARALLEL_TOOL_CALLS: u64 = 1 << 8;
+    pub const FLAG_TOKEN_LIMIT: u64 = 1 << 9;
+    pub const FLAG_TOKEN_LIMIT_INVALID: u64 = 1 << 10;
+    pub const FLAG_GENERATION_CONTROL: u64 = 1 << 11;
+    pub const FLAG_RESPONSE_STOP: u64 = 1 << 12;
+    pub const FLAG_LOGPROBS_UNSUPPORTED: u64 = 1 << 13;
+    pub const FLAG_LOGPROBS_INVALID: u64 = 1 << 14;
+    pub const FLAG_TOP_LOGPROBS: u64 = 1 << 15;
+    pub const FLAG_RESPONSE_FORMAT: u64 = 1 << 16;
+    pub const FLAG_TOOL_CHOICE: u64 = 1 << 17;
+    pub const FLAG_TOOLS: u64 = 1 << 18;
+    pub const FLAG_WEB_SEARCH: u64 = 1 << 19;
+    pub const FLAG_REASONING_EFFORT: u64 = 1 << 20;
+    pub const FLAG_MASK: u64 = (1 << 21) - 1;
+}
+
+#[repr(C)]
+#[derive(Debug, Clone, Copy)]
+struct KiroRequestValidationFfiInput {
+    mode: i64,
+    flags: u64,
+    detail: i64,
+    allow_token_limit: i64,
+}
+
+const _: () = assert!(std::mem::size_of::<KiroRequestValidationFfiInput>() == 32);
+
 impl<'a> KiroKernelInput<'a> {
     pub const fn new(operation: KiroKernelOperation) -> Self {
         Self {
@@ -160,6 +247,7 @@ unsafe extern "C" {
         output_capacity: i64,
         written: u64,
     ) -> i64;
+    fn prodex_mojo_kiro_request_validation_v1(abi_version: i64, input: u64, output: u64) -> i64;
 }
 
 const KIRO_KERNEL_MAX_BYTES: usize = 4 * 1024 * 1024;
@@ -322,4 +410,65 @@ pub fn kiro_kernel(input: KiroKernelInput<'_>) -> Result<Vec<u8>, MojoError> {
     }
     output.truncate(written);
     Ok(output)
+}
+
+/// Apply the authoritative Kiro request capability policy in Mojo.
+pub fn kiro_validate_request(
+    input: KiroRequestValidationInput,
+) -> Result<KiroRequestValidationPlan, MojoError> {
+    ensure_rich_abi()?;
+    if input.flags & !KiroRequestValidationInput::FLAG_MASK != 0
+        || !(-1..=2).contains(&input.detail)
+    {
+        return Err(MojoError::InvalidInput);
+    }
+    let ffi_input = KiroRequestValidationFfiInput {
+        mode: input.mode as i64,
+        flags: input.flags,
+        detail: input.detail,
+        allow_token_limit: i64::from(input.allow_token_limit),
+    };
+    let mut output = [-1_i64; 3];
+    let status = unsafe {
+        prodex_mojo_kiro_request_validation_v1(
+            RICH_ABI_VERSION,
+            mojo_pointer_address(&ffi_input),
+            mojo_mut_pointer_address(output.as_mut_ptr()),
+        )
+    };
+    if status != 0 {
+        return Err(match status {
+            4 => MojoError::AbiMismatch,
+            1 => MojoError::InvalidInput,
+            _ => MojoError::InvalidOutput,
+        });
+    }
+    if !(KiroRequestValidationPlan::REASON_NONE
+        ..=KiroRequestValidationPlan::REASON_REASONING_EFFORT)
+        .contains(&output[0])
+        || !(-1..=2).contains(&output[1])
+        || !matches!(output[2], 0 | 1)
+        || (matches!(
+            output[0],
+            KiroRequestValidationPlan::REASON_TOKEN_LIMIT
+                | KiroRequestValidationPlan::REASON_GENERATION_CONTROL
+        ) && output[1] < 0)
+        || (!matches!(
+            output[0],
+            KiroRequestValidationPlan::REASON_TOKEN_LIMIT
+                | KiroRequestValidationPlan::REASON_GENERATION_CONTROL
+        ) && output[1] != -1)
+        || (!matches!(
+            output[0],
+            KiroRequestValidationPlan::REASON_TOKEN_LIMIT
+                | KiroRequestValidationPlan::REASON_LOGPROBS
+        ) && output[2] != 0)
+    {
+        return Err(MojoError::InvalidOutput);
+    }
+    Ok(KiroRequestValidationPlan {
+        reason: output[0],
+        detail: output[1],
+        detail_is_invalid: output[2] == 1,
+    })
 }
