@@ -92,6 +92,7 @@ impl ExposeLifecyclePhase {
 pub(super) struct ExposeReadyState {
     pub(super) local_url: String,
     pub(super) local_mcp_url: PublicMcpEndpoint,
+    pub(super) public_browser_url: Option<String>,
     pub(super) public_url: Option<PublicMcpEndpoint>,
     pub(super) instance_id: String,
     pub(super) workspace_name: String,
@@ -106,6 +107,10 @@ impl fmt::Debug for ExposeReadyState {
             .debug_struct("ExposeReadyState")
             .field("local_url", &"<redacted>")
             .field("local_mcp_url", &self.local_mcp_url)
+            .field(
+                "public_browser_url",
+                &self.public_browser_url.as_ref().map(|_| "<redacted>"),
+            )
             .field("public_url", &self.public_url)
             .field("instance_id", &self.instance_id)
             .field("workspace_name", &self.workspace_name)
@@ -320,6 +325,7 @@ fn run_super_expose_engine_inner(
     let local_url = zeroize::Zeroizing::new(expose_access_url(&local_origin, &bootstrap));
     let mut cloudflared = None;
     let mut openai_tunnel = None;
+    let mut public_browser_url = None;
     let public_url = match &endpoint {
         ExposeEndpointMode::LocalOnly => None,
         ExposeEndpointMode::OpenAiSecureMcp {
@@ -365,7 +371,6 @@ fn run_super_expose_engine_inner(
                     }
                 };
             shared.allow_host(public_host.clone());
-            shared.allow_mcp_only_host(public_host);
             let public_url = match PublicMcpEndpoint::new(&public_origin, &capability) {
                 Ok(url) => url,
                 Err(error) => {
@@ -382,6 +387,7 @@ fn run_super_expose_engine_inner(
                 cleanup_super_expose(&shared, &mcp, &mut http, tunnel.as_mut(), None);
                 return Err(error);
             }
+            public_browser_url = Some(expose_access_url(&public_origin, &bootstrap));
             cloudflared = tunnel;
             Some(public_url)
         }
@@ -389,6 +395,7 @@ fn run_super_expose_engine_inner(
     let ready = ExposeReadyState {
         local_url: local_url.to_string(),
         local_mcp_url,
+        public_browser_url,
         public_url,
         instance_id,
         workspace_name,

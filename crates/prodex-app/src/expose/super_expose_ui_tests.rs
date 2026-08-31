@@ -59,6 +59,9 @@ fn lifecycle_events_reach_ready_and_stop() {
     let ready = ExposeReadyState {
         local_url: "http://127.0.0.1:1234/expose#bootstrap=bootstrap".to_string(),
         local_mcp_url: PublicMcpEndpoint::new("http://127.0.0.1:1234", "capability").unwrap(),
+        public_browser_url: Some(
+            "https://shell.example.com/expose#bootstrap=bootstrap".to_string(),
+        ),
         public_url: Some(url),
         instance_id: "pdxi_test".to_string(),
         workspace_name: "workspace".to_string(),
@@ -124,6 +127,9 @@ fn ready_copies_with_the_mandated_c_key() {
     state.apply_engine_event(ExposeLifecycleEvent::Ready(ExposeReadyState {
         local_url: "http://127.0.0.1:1234/expose#bootstrap=bootstrap".to_string(),
         local_mcp_url: PublicMcpEndpoint::new("http://127.0.0.1:1234", "capability").unwrap(),
+        public_browser_url: Some(
+            "https://shell.example.com/expose#bootstrap=bootstrap".to_string(),
+        ),
         public_url: Some(url),
         instance_id: "pdxi_test".to_string(),
         workspace_name: "workspace".to_string(),
@@ -165,6 +171,9 @@ fn ready_url_navigation_only_changes_the_viewport_offset() {
     state.apply_engine_event(ExposeLifecycleEvent::Ready(ExposeReadyState {
         local_url: "http://127.0.0.1:1234/expose#bootstrap=bootstrap".to_string(),
         local_mcp_url: PublicMcpEndpoint::new("http://127.0.0.1:1234", "capability").unwrap(),
+        public_browser_url: Some(
+            "https://example.trycloudflare.com/expose#bootstrap=bootstrap".to_string(),
+        ),
         public_url: Some(url),
         instance_id: "pdxi_test".to_string(),
         workspace_name: "workspace".to_string(),

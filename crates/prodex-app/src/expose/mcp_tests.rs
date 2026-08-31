@@ -328,6 +328,26 @@ fn mcp_json_protocol_and_public_route_isolation_are_enforced() {
 }
 
 #[test]
+fn cloudflare_public_host_can_serve_the_browser_route_when_not_mcp_only() {
+    let capability = "abcdefghijklmnopqrstuvwxyz0123456789ABCDEFG";
+    let public_host = "browser-test.trycloudflare.com";
+    let (listen_addr, shared, mut server) =
+        expose_start_mcp_test_server(capability, "pdxi_browser", "browser", public_host);
+    shared.mcp_only_hosts.lock().unwrap().clear();
+
+    let browser = expose_send_test_request(
+        listen_addr,
+        &format!("GET /expose HTTP/1.1\r\nHost: {public_host}\r\n\r\n"),
+    );
+    assert!(browser.starts_with("HTTP/1.1 200"));
+    assert!(browser.contains("Prodex"));
+
+    server.shutdown();
+    shared.pty.shutdown();
+    shared.mcp.as_ref().unwrap().run_manager.shutdown();
+}
+
+#[test]
 fn official_rmcp_client_discovers_and_lists_tools_over_json() {
     let capability = "abcdefghijklmnopqrstuvwxyz0123456789ABCDEFG";
     let (listen_addr, shared, mut server) = expose_start_mcp_test_server(

@@ -206,12 +206,6 @@ impl ExposeShared {
         }
     }
 
-    pub(super) fn allow_mcp_only_host(&self, host: String) {
-        if let Ok(mut hosts) = self.mcp_only_hosts.lock() {
-            hosts.insert(host.to_ascii_lowercase());
-        }
-    }
-
     pub(super) fn is_mcp_only_host(&self, host: &str) -> bool {
         self.mcp_only_hosts
             .lock()

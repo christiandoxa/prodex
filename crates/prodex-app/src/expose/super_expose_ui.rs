@@ -674,6 +674,15 @@ fn ready_body(state: &ExposeTuiState, width: u16) -> Vec<Line<'static>> {
             ]),
         );
     }
+    if let Some(public_browser_url) = ready.public_browser_url.as_deref() {
+        lines.insert(
+            12,
+            Line::from(vec![
+                Span::styled("Public browser URL: ", tui_muted_style()),
+                Span::raw(visible_url(public_browser_url, state.url_offset, url_width)),
+            ]),
+        );
+    }
     if let ExposeEndpointMode::OpenAiSecureMcp {
         tunnel_id,
         client_version,

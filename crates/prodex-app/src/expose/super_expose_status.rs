@@ -119,6 +119,9 @@ pub(crate) fn print_super_expose_status(ready: &ExposeReadyState) -> anyhow::Res
     } else {
         print_stdout_line(&format!("Local MCP URL: {}", local_mcp_url.as_str()))?;
     }
+    if let Some(public_browser_url) = ready.public_browser_url.as_deref() {
+        print_stdout_line(&format!("Public browser URL: {public_browser_url}"))?;
+    }
     Ok(())
 }
 

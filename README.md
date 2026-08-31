@@ -500,7 +500,7 @@ can be selected interactively. Non-TTY launches use explicit, remembered, and
 normal default values without waiting for stdin.
 
 After readiness, Prodex prints the local browser URL and either a local MCP URL
-or a public Cloudflare MCP URL. Add a model/effort override when needed:
+or public Cloudflare browser and MCP URLs. Add a model/effort override when needed:
 
 ```bash
 prodex s expose --model gpt-5.6-luna -c 'model_reasoning_effort="max"'
