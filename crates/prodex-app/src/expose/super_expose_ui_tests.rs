@@ -58,7 +58,8 @@ fn lifecycle_events_reach_ready_and_stop() {
     let url = PublicMcpEndpoint::new("https://shell.example.com", "capability").unwrap();
     let ready = ExposeReadyState {
         local_url: "http://127.0.0.1:1234/expose#bootstrap=bootstrap".to_string(),
-        public_url: url,
+        local_mcp_url: PublicMcpEndpoint::new("http://127.0.0.1:1234", "capability").unwrap(),
+        public_url: Some(url),
         instance_id: "pdxi_test".to_string(),
         workspace_name: "workspace".to_string(),
         display_name: "workspace".to_string(),
@@ -122,7 +123,8 @@ fn ready_copies_with_the_mandated_c_key() {
     let url = PublicMcpEndpoint::new("https://shell.example.com", "capability").unwrap();
     state.apply_engine_event(ExposeLifecycleEvent::Ready(ExposeReadyState {
         local_url: "http://127.0.0.1:1234/expose#bootstrap=bootstrap".to_string(),
-        public_url: url,
+        local_mcp_url: PublicMcpEndpoint::new("http://127.0.0.1:1234", "capability").unwrap(),
+        public_url: Some(url),
         instance_id: "pdxi_test".to_string(),
         workspace_name: "workspace".to_string(),
         display_name: "workspace".to_string(),
@@ -162,7 +164,8 @@ fn ready_url_navigation_only_changes_the_viewport_offset() {
     let canonical = url.as_str().to_string();
     state.apply_engine_event(ExposeLifecycleEvent::Ready(ExposeReadyState {
         local_url: "http://127.0.0.1:1234/expose#bootstrap=bootstrap".to_string(),
-        public_url: url,
+        local_mcp_url: PublicMcpEndpoint::new("http://127.0.0.1:1234", "capability").unwrap(),
+        public_url: Some(url),
         instance_id: "pdxi_test".to_string(),
         workspace_name: "workspace".to_string(),
         display_name: "workspace".to_string(),
@@ -180,5 +183,15 @@ fn ready_url_navigation_only_changes_the_viewport_offset() {
     state.handle_key(KeyEvent::new(KeyCode::Home, KeyModifiers::NONE));
     state.handle_key(KeyEvent::new(KeyCode::Right, KeyModifiers::NONE));
     state.handle_key(KeyEvent::new(KeyCode::Left, KeyModifiers::NONE));
-    assert_eq!(state.ready.as_ref().unwrap().public_url.as_str(), canonical);
+    assert_eq!(
+        state
+            .ready
+            .as_ref()
+            .unwrap()
+            .public_url
+            .as_ref()
+            .unwrap()
+            .as_str(),
+        canonical
+    );
 }

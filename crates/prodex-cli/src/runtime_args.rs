@@ -85,6 +85,9 @@ pub struct ExposeArgs {
         conflicts_with_all = ["tunnel", "no_tunnel"]
     )]
     pub tunnel_provider: Option<ExposeTunnelProvider>,
+    /// Existing OpenAI Platform tunnel id used by the OpenAI Secure MCP Tunnel provider.
+    #[arg(long, value_name = "ID")]
+    pub openai_tunnel_id: Option<String>,
     /// Suggested display name for the ChatGPT connection.
     #[arg(long, value_name = "NAME")]
     pub name: Option<String>,

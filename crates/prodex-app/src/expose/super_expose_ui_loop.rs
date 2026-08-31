@@ -97,8 +97,10 @@ pub(super) fn handle_input(
     match action {
         ExposeTuiAction::None => {}
         ExposeTuiAction::CopyUrl => {
-            if let Some(ready) = state.ready.as_ref() {
-                match copy_public_url_to_clipboard(&ready.public_url) {
+            if let Some(ready) = state.ready.as_ref()
+                && let Some(public_url) = ready.public_url.as_ref()
+            {
+                match copy_public_url_to_clipboard(public_url) {
                     Ok(()) => state.set_status("MCP URL copied to clipboard"),
                     Err(_) => state.set_status("clipboard is unavailable"),
                 }
