@@ -268,6 +268,7 @@ fn selected_sources() -> Vec<&'static str> {
         sources.push("../../mojo/prodex_core/policy_validation.mojo");
         sources.push("../../mojo/prodex_core/context.mojo");
         sources.push("../../mojo/prodex_core/context_text.mojo");
+        sources.push("../../mojo/prodex_core/runtime_health.mojo");
     }
     if env::var_os("CARGO_FEATURE_MOJO_RICH").is_some()
         || env::var_os("CARGO_FEATURE_MOJO_CORE").is_some()

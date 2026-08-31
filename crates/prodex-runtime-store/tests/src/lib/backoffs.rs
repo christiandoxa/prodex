@@ -227,6 +227,40 @@ fn profile_health_sort_key_includes_route_coupling_and_performance() {
     );
 }
 
+#[cfg(feature = "mojo")]
+#[test]
+fn profile_health_sort_key_batch_preserves_store_order() {
+    let scores = BTreeMap::from([
+        (
+            "alpha".to_string(),
+            RuntimeProfileHealth {
+                score: 1,
+                updated_at: 100,
+            },
+        ),
+        (
+            runtime_profile_route_health_key("alpha", RuntimeRouteKind::Responses),
+            RuntimeProfileHealth {
+                score: 2,
+                updated_at: 100,
+            },
+        ),
+        (
+            runtime_profile_route_health_key("alpha", RuntimeRouteKind::Websocket),
+            RuntimeProfileHealth {
+                score: 4,
+                updated_at: 100,
+            },
+        ),
+    ]);
+    let names = ["alpha", "missing"];
+
+    assert_eq!(
+        runtime_profile_health_sort_keys(&names, &scores, 100, RuntimeRouteKind::Responses),
+        vec![5, 0]
+    );
+}
+
 #[test]
 fn previous_response_negative_cache_helpers_decay_and_clear_route_keys() {
     let mut scores = BTreeMap::from([

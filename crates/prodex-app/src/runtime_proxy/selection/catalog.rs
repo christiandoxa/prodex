@@ -3,7 +3,7 @@ use super::{
     RuntimeRouteSelectionCatalog, RuntimeRouteSelectionCatalogView, RuntimeRouteSelectionEntry,
     RuntimeSelectionProfileEntry, runtime_profile_auth_failure_active_from_map,
     runtime_profile_backoff_sort_key, runtime_profile_cached_auth_summary_from_maps_for_selection,
-    runtime_profile_health_sort_key, runtime_profile_inflight_sort_key,
+    runtime_profile_health_sort_keys, runtime_profile_inflight_sort_key,
     runtime_profile_name_in_selection_backoff, runtime_profile_usage_cache_is_fresh,
     runtime_usage_snapshot_is_usable,
 };
@@ -44,14 +44,26 @@ pub(crate) fn runtime_route_selection_catalog(
         .profile_health
         .keys()
         .any(|key| key.starts_with("__auth_failure__:"));
+    let profiles = runtime_profile_selection_catalog(runtime).entries;
+    let profile_names = profiles
+        .iter()
+        .map(|profile| profile.name.as_str())
+        .collect::<Vec<_>>();
+    let health_sort_keys =
+        runtime_profile_health_sort_keys(&profile_names, &runtime.profile_health, now, route_kind);
+    assert_eq!(
+        profiles.len(),
+        health_sort_keys.len(),
+        "profile health batch must preserve profile order"
+    );
     RuntimeRouteSelectionCatalog {
         current_profile: runtime.current_profile.clone(),
         include_code_review: runtime.include_code_review,
         upstream_base_url: runtime.upstream_base_url.clone(),
-        entries: runtime_profile_selection_catalog(runtime)
-            .entries
+        entries: profiles
             .into_iter()
-            .map(|profile| RuntimeRouteSelectionEntry {
+            .zip(health_sort_keys)
+            .map(|(profile, health_sort_key)| RuntimeRouteSelectionEntry {
                 cached_auth_summary: runtime_profile_cached_auth_summary_from_maps_for_selection(
                     &profile.name,
                     &runtime.profile_usage_auth,
@@ -90,12 +102,7 @@ pub(crate) fn runtime_route_selection_catalog(
                     now,
                 ),
                 inflight_count: runtime_profile_inflight_sort_key(&profile.name, profile_inflight),
-                health_sort_key: runtime_profile_health_sort_key(
-                    &profile.name,
-                    &runtime.profile_health,
-                    now,
-                    route_kind,
-                ),
+                health_sort_key,
                 profile,
             })
             .collect(),

@@ -3382,6 +3382,7 @@ name = "prodex-runtime-store"
 version = "0.420.0"
 dependencies = [
  "prodex-core",
+ "prodex-mojo-core",
  "prodex-runtime-state",
  "prodex-state",
  "serde",

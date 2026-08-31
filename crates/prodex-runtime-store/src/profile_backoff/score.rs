@@ -201,6 +201,7 @@ pub fn runtime_profile_health_score(
         ))
 }
 
+#[cfg(not(feature = "mojo"))]
 pub fn runtime_profile_health_sort_key(
     profile_name: &str,
     profile_health: &BTreeMap<String, RuntimeProfileHealth>,
@@ -232,6 +233,114 @@ pub fn runtime_profile_health_sort_key(
             now,
             route_kind,
         ))
+}
+
+#[cfg(feature = "mojo")]
+pub fn runtime_profile_health_sort_key(
+    profile_name: &str,
+    profile_health: &BTreeMap<String, RuntimeProfileHealth>,
+    now: i64,
+    route_kind: RuntimeRouteKind,
+) -> u32 {
+    runtime_profile_health_sort_keys(&[profile_name], profile_health, now, route_kind)
+        .into_iter()
+        .next()
+        .expect("single profile health score must be returned")
+}
+
+#[cfg(feature = "mojo")]
+fn profile_health_score_input(
+    profile_health: &BTreeMap<String, RuntimeProfileHealth>,
+    profile_name: &str,
+    route_kind: RuntimeRouteKind,
+) -> prodex_mojo_core::runtime::ProfileHealthScoreInput {
+    let coupled_kind = runtime_route_coupled_kinds(route_kind)
+        .first()
+        .copied()
+        .expect("every runtime route has one coupled route");
+    let value = |key: String| {
+        profile_health
+            .get(&key)
+            .map(|entry| (entry.score, entry.updated_at))
+            .unwrap_or((0, 0))
+    };
+    let (global_score, global_updated_at) = value(profile_name.to_string());
+    let (route_health_score, route_health_updated_at) =
+        value(runtime_profile_route_health_key(profile_name, route_kind));
+    let (route_bad_pairing_score, route_bad_pairing_updated_at) = value(
+        runtime_profile_route_bad_pairing_key(profile_name, route_kind),
+    );
+    let (coupled_health_score, coupled_health_updated_at) =
+        value(runtime_profile_route_health_key(profile_name, coupled_kind));
+    let (coupled_bad_pairing_score, coupled_bad_pairing_updated_at) = value(
+        runtime_profile_route_bad_pairing_key(profile_name, coupled_kind),
+    );
+    let (route_performance_score, route_performance_updated_at) = value(
+        runtime_profile_route_performance_key(profile_name, route_kind),
+    );
+    let (coupled_performance_score, coupled_performance_updated_at) = value(
+        runtime_profile_route_performance_key(profile_name, coupled_kind),
+    );
+    prodex_mojo_core::runtime::ProfileHealthScoreInput {
+        global_score,
+        global_updated_at,
+        route_health_score,
+        route_health_updated_at,
+        route_bad_pairing_score,
+        route_bad_pairing_updated_at,
+        coupled_health_score,
+        coupled_health_updated_at,
+        coupled_bad_pairing_score,
+        coupled_bad_pairing_updated_at,
+        route_performance_score,
+        route_performance_updated_at,
+        coupled_performance_score,
+        coupled_performance_updated_at,
+    }
+}
+
+#[cfg(feature = "mojo")]
+pub fn runtime_profile_health_sort_keys(
+    profile_names: &[&str],
+    profile_health: &BTreeMap<String, RuntimeProfileHealth>,
+    now: i64,
+    route_kind: RuntimeRouteKind,
+) -> Vec<u32> {
+    // ponytail: 256-row ABI batches; raise only with a versioned ABI/capacity review.
+    profile_names
+        .chunks(prodex_mojo_core::runtime::RUNTIME_PROFILE_HEALTH_SCORE_MAX_COUNT)
+        .flat_map(|batch| {
+            let inputs = batch
+                .iter()
+                .map(|profile_name| {
+                    profile_health_score_input(profile_health, profile_name, route_kind)
+                })
+                .collect::<Vec<_>>();
+            prodex_mojo_core::runtime::profile_health_sort_key_batch(
+                &inputs,
+                now,
+                crate::RUNTIME_PROFILE_HEALTH_DECAY_SECONDS,
+                crate::RUNTIME_PROFILE_BAD_PAIRING_DECAY_SECONDS,
+                crate::RUNTIME_PROFILE_PERFORMANCE_DECAY_SECONDS,
+            )
+            .unwrap_or_else(|error| panic!("Mojo profile health score failed: {error:?}"))
+        })
+        .collect()
+}
+
+#[cfg(not(feature = "mojo"))]
+pub fn runtime_profile_health_sort_keys(
+    profile_names: &[&str],
+    profile_health: &BTreeMap<String, RuntimeProfileHealth>,
+    now: i64,
+    route_kind: RuntimeRouteKind,
+) -> Vec<u32> {
+    profile_names
+        .iter()
+        .map(|profile_name| {
+            runtime_profile_health_sort_key(profile_name, profile_health, now, route_kind)
+        })
+        .collect()
 }
 
 pub fn runtime_previous_response_negative_cache_key(
