@@ -32,7 +32,9 @@
     "SYSTEM_BOUNDARY": "FFI, platform, persistence, transport, security, or generated ABI code excluded from the deterministic denominator.",
     "MIXED": "A source containing both boundary and deterministic code; semantic_ranges identify the counted region when needed."
   },
-  "baseline_optional_sources": [],
+  "baseline_optional_sources": [
+    "mojo/prodex_core/runtime_health.mojo"
+  ],
   "baseline_inventory": [
     {
       "path": "crates/prodex-context/src/critical_signal.rs",

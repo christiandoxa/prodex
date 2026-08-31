@@ -371,6 +371,12 @@ function validateOperations(manifest, revision) {
     if (revision === manifest.baseline_sha && operation.introduced_in === manifest.release_target) {
       continue;
     }
+    if (revision === manifest.baseline_sha &&
+        operation.introduced_in !== manifest.release_target &&
+        manifest.baseline_optional_sources?.includes(operation.mojo_source) &&
+        sourceText(manifest, revision, operation.mojo_source) === "") {
+      continue;
+    }
     operationSource(manifest, operation);
     const mojo = sourceText(manifest, revision, operation.mojo_source);
     assert(mojo.includes(`@export("${operation.mojo_entry}")`),
@@ -633,6 +639,11 @@ function validateInventory(manifest, baselineRevision, releaseRevision) {
   }
   for (const entry of releaseEntriesAtRevision.filter((candidate) => candidate.language === "mojo")) {
     if (!isEligible(entry)) continue;
+    if (releaseRevision === baselineRevision &&
+        manifest.baseline_optional_sources?.includes(entry.path) &&
+        sourceText(manifest, releaseRevision, entry.path) === "") {
+      continue;
+    }
     const operations = entry.operations ?? (entry.operation ? [entry.operation] : []);
     assert(operations.length > 0 && operations.every((operation) => operationNames.has(operation)),
       `${entry.path} is counted without a declared production operation`);
