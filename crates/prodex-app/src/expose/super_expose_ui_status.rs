@@ -17,7 +17,7 @@ pub(crate) fn ready_body(state: &ExposeTuiState, width: usize) -> Vec<Line<'stat
         .count();
     let endpoint = match &ready.endpoint {
         ExposeEndpointMode::LocalOnly => "Local only",
-        ExposeEndpointMode::QuickTunnel => "Quick Tunnel",
+        ExposeEndpointMode::QuickTunnel => "Cloudflare Quick Tunnel",
         ExposeEndpointMode::ExistingCloudflareTunnel { .. } => "Existing Cloudflare Tunnel",
         ExposeEndpointMode::OpenAiSecureMcp { .. } => "OpenAI Secure MCP Tunnel",
     };
@@ -139,7 +139,11 @@ pub(crate) fn ready_body(state: &ExposeTuiState, width: usize) -> Vec<Line<'stat
         tui_error_style(),
     ));
     lines.extend(text_lines(
-        "The MCP URL is an ephemeral bearer capability; stop expose to revoke it.",
+        if ready.public_url.is_some() {
+            "The public MCP URL is an ephemeral bearer capability; stop expose to revoke it."
+        } else {
+            "Local-only mode stays on loopback; stop expose to revoke its ephemeral capability."
+        },
         width,
         tui_error_style(),
     ));

@@ -561,12 +561,8 @@ fn draw_frame(frame: &mut Frame<'_>, state: &mut ExposeTuiState) {
     );
 
     let footer = match state.phase {
-        ExposeTuiPhase::EndpointSelection => {
-            "↑/↓/j/k select · Tab edit · Enter start · q/Ctrl-C cancel"
-        }
-        ExposeTuiPhase::Ready => {
-            "c copy URL · ↑/↓/j/k scroll · PgUp/PgDn · Home/End · q/Ctrl-C stop"
-        }
+        ExposeTuiPhase::EndpointSelection => "↑↓/jk select · Tab edit · Enter · q/Ctrl-C cancel",
+        ExposeTuiPhase::Ready => "c copy · ↑↓/jk scroll · PgUp/Dn · Home/End · q/Ctrl-C stop",
         ExposeTuiPhase::Stopping => "waiting for cleanup...",
         ExposeTuiPhase::Stopped | ExposeTuiPhase::Failed => "q/Ctrl-C exit",
         ExposeTuiPhase::Preflight(_) => "q/Ctrl-C stop",

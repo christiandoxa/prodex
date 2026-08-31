@@ -4,7 +4,7 @@ use super::hostname;
 use anyhow::{Context, Result, bail};
 use std::io::{self, Read};
 #[cfg(windows)]
-use std::os::windows::io::AsRawHandle;
+use std::os::windows::io::{AsRawHandle, OwnedHandle};
 use std::path::Path;
 use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -120,6 +120,11 @@ pub(in crate::expose) fn cloudflared_command() -> Command {
 }
 
 impl CloudflaredTunnel {
+    #[cfg(windows)]
+    pub(in crate::expose) fn attach_process_job(&mut self, process_job: Option<OwnedHandle>) {
+        self.process_job = process_job;
+    }
+
     pub(in crate::expose) fn from_existing(
         child: std::process::Child,
         effective_transport: CloudflaredTransport,
