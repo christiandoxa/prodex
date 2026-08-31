@@ -36,6 +36,7 @@ fn expose_start_mcp_test_server(
         max_clients: 4,
         tunnel: false,
         no_tunnel: false,
+        tunnel_provider: None,
         name: Some("test".to_string()),
         invocation: prodex_cli::ExposeInvocation::SuperAlias,
         super_args: None,
