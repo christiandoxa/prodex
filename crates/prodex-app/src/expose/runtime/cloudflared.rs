@@ -112,9 +112,14 @@ impl Drop for CloudflaredConfigIsolation {
 pub(in crate::expose) fn cloudflared_command() -> Command {
     #[cfg(test)]
     if let Some(script) = std::env::var_os("PRODEX_TEST_CLOUDFLARED_SCRIPT") {
-        let mut command = Command::new(if cfg!(windows) { "python" } else { "python3" });
-        command.arg(script);
-        return command;
+        #[cfg(windows)]
+        return Command::new(script);
+        #[cfg(not(windows))]
+        {
+            let mut command = Command::new("python3");
+            command.arg(script);
+            return command;
+        }
     }
     Command::new("cloudflared")
 }

@@ -1700,5 +1700,18 @@
       "maxFileLines": 60
     },
     "reason": "Reviewed the bounded follow-up for the exact 0.422.0 candidate: Windows process-job ownership and the Sonar cognitive-complexity extraction for log parsing. The cap covers only these two confirmed repairs plus their guard declaration and keeps the global churn thresholds unchanged."
+  },
+  {
+    "id": "prodex-0.422.0-windows-fixture-churn",
+    "requiredSubjects": [
+      "fix(expose): execute Windows tunnel fixtures directly"
+    ],
+    "caps": {
+      "maxFiles": 3,
+      "maxBehaviorFiles": 3,
+      "maxLines": 80,
+      "maxFileLines": 60
+    },
+    "reason": "Reviewed the bounded Windows-only test fixture repair for the exact 0.422.0 candidate: the existing Cloudflare fake launcher now executes its platform wrapper directly, matching the shared test-support contract without changing production tunnel behavior."
   }
 ]
