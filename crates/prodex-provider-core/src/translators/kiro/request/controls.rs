@@ -1,5 +1,6 @@
 //! Supported-parameter checks for Kiro chat request compatibility.
 
+#[cfg(not(feature = "mojo"))]
 use super::KiroProviderCoreRequestError;
 use serde_json::Value;
 
@@ -49,6 +50,7 @@ pub(super) fn kiro_provider_core_has_requested_parallel_tool_calls_control(value
     }
 }
 
+#[cfg(not(feature = "mojo"))]
 pub(super) fn kiro_provider_core_reject_token_limit_controls(
     object: &serde_json::Map<String, Value>,
 ) -> Result<(), KiroProviderCoreRequestError> {

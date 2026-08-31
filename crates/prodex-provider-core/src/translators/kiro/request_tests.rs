@@ -88,6 +88,54 @@ fn kiro_provider_core_rejects_unenforceable_responses_controls() {
     }
 }
 
+#[cfg(feature = "mojo")]
+#[test]
+fn kiro_mojo_request_policy_keeps_surface_precedence_and_field_details() {
+    let error = kiro_provider_core_responses_request_body(
+        br#"{"model":"auto","input":"hello","temperature":1,"stop":["END"]}"#,
+        false,
+    )
+    .unwrap_err();
+    assert_eq!(error.code, "unsupported_generation_control");
+    assert_eq!(
+        error.message,
+        "Kiro ACP does not expose the temperature control"
+    );
+
+    let error = kiro_provider_core_responses_request_body(
+        br#"{"model":"auto","input":"hello","logprobs":"yes"}"#,
+        false,
+    )
+    .unwrap_err();
+    assert_eq!(error.code, "invalid_logprobs");
+
+    let error = kiro_provider_core_chat_completions_request_body(
+        br#"{"messages":[{"role":"user","content":"hello"}],"max_completion_tokens":0}"#,
+    )
+    .unwrap_err();
+    assert_eq!(error.code, "unsupported_token_limit");
+    assert_eq!(
+        error.message,
+        "Kiro max_completion_tokens must be a positive integer"
+    );
+
+    let error = kiro_provider_core_responses_request_body(
+        br#"{"model":"auto","input":"hello","reasoning":{"other":true,"effort":"bogus"}}"#,
+        false,
+    )
+    .unwrap_err();
+    assert_eq!(error.code, "invalid_request");
+    assert!(error.message.contains("reasoning.other"));
+
+    assert!(
+        kiro_provider_core_responses_request_body(
+            br#"{"model":"auto","input":"hello","max_output_tokens":64}"#,
+            true,
+        )
+        .is_ok()
+    );
+}
+
 #[test]
 fn kiro_provider_core_accepts_catalogued_none_reasoning_effort() {
     let request = json!({

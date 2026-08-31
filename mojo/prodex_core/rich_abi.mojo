@@ -46,7 +46,7 @@ from anthropic_request import anthropic_request_kernel_v1
 from runtime_anthropic import runtime_anthropic_kernel_v1
 from openai_compat import openai_compat_kernel_v1
 # Kiro shares the rich ABI while keeping ACP transport and session behavior in Rust.
-from kiro import kiro_kernel_v1
+from kiro import kiro_kernel_v1, kiro_request_validation_v1
 from smart_context_normalization import (
     prodex_mojo_smart_context_normalization_v1,
     prodex_mojo_smart_context_budget_tier_v1,
@@ -475,6 +475,16 @@ def prodex_mojo_kiro_kernel_v1(
     return kiro_kernel_v1(
         abi_version, input_address, output_address, output_capacity, written_address
     )
+
+
+@export("prodex_mojo_kiro_request_validation_v1")
+def prodex_mojo_kiro_request_validation_v1(
+    abi_version: Int64,
+    input_address: UInt,
+    output_address: UInt,
+) abi("C") -> Int64:
+    return kiro_request_validation_v1(abi_version, input_address, output_address)
+
 
 @export("prodex_mojo_app_server_broker_wire_v1")
 def prodex_mojo_app_server_broker_wire_v1(

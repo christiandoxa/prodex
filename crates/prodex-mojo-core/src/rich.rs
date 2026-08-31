@@ -104,7 +104,10 @@ pub use openai_compat::{
 };
 #[path = "rich/kiro.rs"]
 mod kiro;
-pub use kiro::{KiroKernelInput, KiroKernelOperation, kiro_kernel};
+pub use kiro::{
+    KiroKernelInput, KiroKernelOperation, KiroRequestValidationInput, KiroRequestValidationMode,
+    KiroRequestValidationPlan, kiro_kernel, kiro_validate_request,
+};
 #[path = "rich/smart_context_normalization.rs"]
 mod smart_context_normalization;
 pub use smart_context_normalization::{

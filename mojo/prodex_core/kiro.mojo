@@ -46,6 +46,51 @@ comptime KIRO_STREAM_TOOL_ARGUMENTS: Int64 = 26
 comptime KIRO_FINISH_REASON: Int64 = 27
 comptime KIRO_CHAT_TOOL_CALL_ITEM: Int64 = 28
 
+comptime KIRO_REQUEST_VALIDATION_CHAT: Int64 = 1
+comptime KIRO_REQUEST_VALIDATION_RESPONSES: Int64 = 2
+comptime KIRO_REQUEST_VALIDATION_NONE: Int64 = 0
+comptime KIRO_REQUEST_VALIDATION_CHAT_RESPONSE_FORMAT: Int64 = 1
+comptime KIRO_REQUEST_VALIDATION_CHAT_CHOICE_COUNT: Int64 = 2
+comptime KIRO_REQUEST_VALIDATION_CHAT_STOP: Int64 = 3
+comptime KIRO_REQUEST_VALIDATION_CHAT_TEMPERATURE: Int64 = 4
+comptime KIRO_REQUEST_VALIDATION_CHAT_TOP_P: Int64 = 5
+comptime KIRO_REQUEST_VALIDATION_CHAT_PRESENCE_PENALTY: Int64 = 6
+comptime KIRO_REQUEST_VALIDATION_CHAT_FREQUENCY_PENALTY: Int64 = 7
+comptime KIRO_REQUEST_VALIDATION_CHAT_SEED: Int64 = 8
+comptime KIRO_REQUEST_VALIDATION_CHAT_PARALLEL_TOOL_CALLS: Int64 = 9
+comptime KIRO_REQUEST_VALIDATION_TOKEN_LIMIT: Int64 = 10
+comptime KIRO_REQUEST_VALIDATION_GENERATION_CONTROL: Int64 = 11
+comptime KIRO_REQUEST_VALIDATION_RESPONSE_STOP: Int64 = 12
+comptime KIRO_REQUEST_VALIDATION_LOGPROBS: Int64 = 13
+comptime KIRO_REQUEST_VALIDATION_TOP_LOGPROBS: Int64 = 14
+comptime KIRO_REQUEST_VALIDATION_RESPONSE_FORMAT: Int64 = 15
+comptime KIRO_REQUEST_VALIDATION_TOOL_CHOICE: Int64 = 16
+comptime KIRO_REQUEST_VALIDATION_TOOLS: Int64 = 17
+comptime KIRO_REQUEST_VALIDATION_WEB_SEARCH: Int64 = 18
+comptime KIRO_REQUEST_VALIDATION_REASONING_EFFORT: Int64 = 19
+comptime KIRO_REQUEST_FLAG_CHAT_RESPONSE_FORMAT: UInt64 = 1 << 0
+comptime KIRO_REQUEST_FLAG_CHAT_CHOICE_COUNT: UInt64 = 1 << 1
+comptime KIRO_REQUEST_FLAG_CHAT_STOP: UInt64 = 1 << 2
+comptime KIRO_REQUEST_FLAG_CHAT_TEMPERATURE: UInt64 = 1 << 3
+comptime KIRO_REQUEST_FLAG_CHAT_TOP_P: UInt64 = 1 << 4
+comptime KIRO_REQUEST_FLAG_CHAT_PRESENCE_PENALTY: UInt64 = 1 << 5
+comptime KIRO_REQUEST_FLAG_CHAT_FREQUENCY_PENALTY: UInt64 = 1 << 6
+comptime KIRO_REQUEST_FLAG_CHAT_SEED: UInt64 = 1 << 7
+comptime KIRO_REQUEST_FLAG_CHAT_PARALLEL_TOOL_CALLS: UInt64 = 1 << 8
+comptime KIRO_REQUEST_FLAG_TOKEN_LIMIT: UInt64 = 1 << 9
+comptime KIRO_REQUEST_FLAG_TOKEN_LIMIT_INVALID: UInt64 = 1 << 10
+comptime KIRO_REQUEST_FLAG_GENERATION_CONTROL: UInt64 = 1 << 11
+comptime KIRO_REQUEST_FLAG_RESPONSE_STOP: UInt64 = 1 << 12
+comptime KIRO_REQUEST_FLAG_LOGPROBS_UNSUPPORTED: UInt64 = 1 << 13
+comptime KIRO_REQUEST_FLAG_LOGPROBS_INVALID: UInt64 = 1 << 14
+comptime KIRO_REQUEST_FLAG_TOP_LOGPROBS: UInt64 = 1 << 15
+comptime KIRO_REQUEST_FLAG_RESPONSE_FORMAT: UInt64 = 1 << 16
+comptime KIRO_REQUEST_FLAG_TOOL_CHOICE: UInt64 = 1 << 17
+comptime KIRO_REQUEST_FLAG_TOOLS: UInt64 = 1 << 18
+comptime KIRO_REQUEST_FLAG_WEB_SEARCH: UInt64 = 1 << 19
+comptime KIRO_REQUEST_FLAG_REASONING_EFFORT: UInt64 = 1 << 20
+comptime KIRO_REQUEST_FLAG_MASK: UInt64 = (1 << 21) - 1
+
 
 @fieldwise_init
 struct ProdexKiroKernelInput(Copyable):
@@ -93,6 +138,14 @@ struct ProdexKiroKernelInput(Copyable):
     var error: ProdexRichStringView
     var extra: ProdexRichStringView
     var incomplete_reason: ProdexRichStringView
+
+
+@fieldwise_init
+struct ProdexKiroRequestValidationInput(Copyable):
+    var mode: Int64
+    var flags: UInt64
+    var detail: Int64
+    var allow_token_limit: Int64
 
 
 @fieldwise_init
@@ -743,6 +796,102 @@ def kiro_input_valid(input: ProdexKiroKernelInput) -> Bool:
         and rich_view_valid(input.extra, KIRO_KERNEL_MAX_BYTES)
         and rich_view_valid(input.incomplete_reason, KIRO_KERNEL_MAX_BYTES)
     )
+
+
+def kiro_request_validation_input_valid(
+    input: ProdexKiroRequestValidationInput
+) -> Bool:
+    if input.mode < KIRO_REQUEST_VALIDATION_CHAT or input.mode > KIRO_REQUEST_VALIDATION_RESPONSES:
+        return False
+    if input.flags & ~KIRO_REQUEST_FLAG_MASK != 0:
+        return False
+    if input.detail < -1 or input.detail > 2:
+        return False
+    return kiro_flag_valid(input.allow_token_limit)
+
+
+def kiro_request_validation_v1(
+    abi_version: Int64,
+    input_address: UInt,
+    output_address: UInt,
+) abi("C") -> Int64:
+    if input_address == 0 or output_address == 0:
+        return KIRO_KERNEL_STATUS_INVALID
+    var output = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    output[unsafe_offset=0] = KIRO_REQUEST_VALIDATION_NONE
+    output[unsafe_offset=1] = -1
+    output[unsafe_offset=2] = 0
+    if abi_version != PRODEX_RICH_ABI_VERSION:
+        return KIRO_KERNEL_STATUS_ABI
+    var input = Pointer[
+        mut=False, ProdexKiroRequestValidationInput, ImmUntrackedOrigin
+    ](unsafe_from_address=Int(input_address))
+    var value = input[].copy()
+    if not kiro_request_validation_input_valid(value):
+        return KIRO_KERNEL_STATUS_INVALID
+
+    if value.mode == KIRO_REQUEST_VALIDATION_CHAT:
+        if value.flags & KIRO_REQUEST_FLAG_CHAT_RESPONSE_FORMAT != 0:
+            output[unsafe_offset=0] = KIRO_REQUEST_VALIDATION_CHAT_RESPONSE_FORMAT
+        elif value.flags & KIRO_REQUEST_FLAG_CHAT_CHOICE_COUNT != 0:
+            output[unsafe_offset=0] = KIRO_REQUEST_VALIDATION_CHAT_CHOICE_COUNT
+        elif value.flags & KIRO_REQUEST_FLAG_CHAT_STOP != 0:
+            output[unsafe_offset=0] = KIRO_REQUEST_VALIDATION_CHAT_STOP
+        elif value.flags & KIRO_REQUEST_FLAG_CHAT_TEMPERATURE != 0:
+            output[unsafe_offset=0] = KIRO_REQUEST_VALIDATION_CHAT_TEMPERATURE
+        elif value.flags & KIRO_REQUEST_FLAG_CHAT_TOP_P != 0:
+            output[unsafe_offset=0] = KIRO_REQUEST_VALIDATION_CHAT_TOP_P
+        elif value.flags & KIRO_REQUEST_FLAG_CHAT_PRESENCE_PENALTY != 0:
+            output[unsafe_offset=0] = KIRO_REQUEST_VALIDATION_CHAT_PRESENCE_PENALTY
+        elif value.flags & KIRO_REQUEST_FLAG_CHAT_FREQUENCY_PENALTY != 0:
+            output[unsafe_offset=0] = KIRO_REQUEST_VALIDATION_CHAT_FREQUENCY_PENALTY
+        elif value.flags & KIRO_REQUEST_FLAG_CHAT_SEED != 0:
+            output[unsafe_offset=0] = KIRO_REQUEST_VALIDATION_CHAT_SEED
+        elif value.flags & KIRO_REQUEST_FLAG_CHAT_PARALLEL_TOOL_CALLS != 0:
+            output[unsafe_offset=0] = KIRO_REQUEST_VALIDATION_CHAT_PARALLEL_TOOL_CALLS
+        elif value.flags & KIRO_REQUEST_FLAG_TOKEN_LIMIT != 0:
+            output[unsafe_offset=0] = KIRO_REQUEST_VALIDATION_TOKEN_LIMIT
+            output[unsafe_offset=1] = value.detail
+            output[unsafe_offset=2] = Int64(
+                value.flags & KIRO_REQUEST_FLAG_TOKEN_LIMIT_INVALID != 0
+            )
+            return KIRO_KERNEL_STATUS_OK
+        return KIRO_KERNEL_STATUS_OK
+
+    if value.flags & KIRO_REQUEST_FLAG_GENERATION_CONTROL != 0:
+        output[unsafe_offset=0] = KIRO_REQUEST_VALIDATION_GENERATION_CONTROL
+        output[unsafe_offset=1] = value.detail
+    elif value.allow_token_limit == 0 and value.flags & KIRO_REQUEST_FLAG_TOKEN_LIMIT != 0:
+        output[unsafe_offset=0] = KIRO_REQUEST_VALIDATION_TOKEN_LIMIT
+        output[unsafe_offset=1] = value.detail
+        output[unsafe_offset=2] = Int64(
+            value.flags & KIRO_REQUEST_FLAG_TOKEN_LIMIT_INVALID != 0
+        )
+        return KIRO_KERNEL_STATUS_OK
+    elif value.flags & KIRO_REQUEST_FLAG_RESPONSE_STOP != 0:
+        output[unsafe_offset=0] = KIRO_REQUEST_VALIDATION_RESPONSE_STOP
+    elif value.flags & (
+        KIRO_REQUEST_FLAG_LOGPROBS_UNSUPPORTED | KIRO_REQUEST_FLAG_LOGPROBS_INVALID
+    ) != 0:
+        output[unsafe_offset=0] = KIRO_REQUEST_VALIDATION_LOGPROBS
+        output[unsafe_offset=2] = Int64(
+            value.flags & KIRO_REQUEST_FLAG_LOGPROBS_INVALID != 0
+        )
+    elif value.flags & KIRO_REQUEST_FLAG_TOP_LOGPROBS != 0:
+        output[unsafe_offset=0] = KIRO_REQUEST_VALIDATION_TOP_LOGPROBS
+    elif value.flags & KIRO_REQUEST_FLAG_RESPONSE_FORMAT != 0:
+        output[unsafe_offset=0] = KIRO_REQUEST_VALIDATION_RESPONSE_FORMAT
+    elif value.flags & KIRO_REQUEST_FLAG_TOOL_CHOICE != 0:
+        output[unsafe_offset=0] = KIRO_REQUEST_VALIDATION_TOOL_CHOICE
+    elif value.flags & KIRO_REQUEST_FLAG_TOOLS != 0:
+        output[unsafe_offset=0] = KIRO_REQUEST_VALIDATION_TOOLS
+    elif value.flags & KIRO_REQUEST_FLAG_WEB_SEARCH != 0:
+        output[unsafe_offset=0] = KIRO_REQUEST_VALIDATION_WEB_SEARCH
+    elif value.flags & KIRO_REQUEST_FLAG_REASONING_EFFORT != 0:
+        output[unsafe_offset=0] = KIRO_REQUEST_VALIDATION_REASONING_EFFORT
+    return KIRO_KERNEL_STATUS_OK
 
 
 def kiro_kernel_v1(

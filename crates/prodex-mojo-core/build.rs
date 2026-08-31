@@ -47,6 +47,7 @@ fn emit_source_rerun_directives(sources: &[&str], manifest_dir: &Path) {
         for source in [
             "../../mojo/prodex_core/rich_types.mojo",
             "../../mojo/prodex_core/rich_text.mojo",
+            "../../mojo/prodex_core/kiro.mojo",
         ] {
             println!(
                 "cargo:rerun-if-changed={}",
