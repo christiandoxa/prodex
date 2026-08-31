@@ -59,7 +59,8 @@ letters or digits. The API key is deliberately not a command-line option.
 
 OpenAI mode is MCP-only. It does not publish a generic browser reverse proxy,
 does not emit a fabricated `openai.com` browser URL, and does not route browser
-terminal traffic into an MCP transport.
+terminal traffic into an MCP transport. Cloudflare mode is the explicit public
+browser-terminal mode.
 
 ## Command reference
 
@@ -231,17 +232,22 @@ Prodex does not require a Cloudflare account, login, DNS record, `init`, or a
 user-authored tunnel configuration for Quick Tunnel mode. It accepts only a
 strict HTTPS `*.trycloudflare.com` hostname from the child output.
 
-The discovered hostname is allowed for the MCP route, and the public URL is
-constructed as:
+The discovered hostname is allowed for the browser and MCP routes. The public
+browser URL uses the same one-time bootstrap fragment as the local browser URL:
+
+```text
+https://<hostname>/expose#bootstrap=<opaque-bootstrap>
+```
+
+The public MCP URL is:
 
 ```text
 https://<hostname>/pdx/v1/<opaque-capability>/mcp
 ```
 
-The public host is MCP-only. Browser routes are not made public by Quick Tunnel
-mode even though the local browser remains available. The top-level legacy
-`prodex expose --tunnel` command is a separate, older browser-terminal path;
-do not confuse it with the Super MCP-only host behavior documented here.
+The top-level legacy `prodex expose --tunnel` command is a separate browser
+terminal path with its own lifecycle; the `prodex s expose` Cloudflare path is
+the documented Super mode here.
 
 ### QUIC to HTTP/2 fallback
 
@@ -445,7 +451,7 @@ Did public MCP initialize/tools/list pass?
 | OpenAI runtime key missing | Secret configuration | Set `CONTROL_PLANE_API_KEY` in the environment. There is no `--openai-api-key` option. |
 | OpenAI tunnel does not become ready | OpenAI startup/network | Check the pre-created tunnel, outbound HTTPS/TCP 443 to the configured OpenAI control plane, client permissions, and the local MCP endpoint. The client health probe is bounded. |
 | `LocalOriginPortInUse` | Local listener | Choose a different existing-tunnel origin port or stop the process that owns that exact loopback port. Quick/Local/OpenAI modes use an OS-selected port. |
-| URL works locally but public browser route is 404 | Intentional routing | Cloudflare public hosts are MCP-only for `prodex s expose`; use the printed local browser URL. OpenAI mode never has a public browser URL. |
+| URL works locally but public browser route is 404 | Intentional routing or provider mode | Cloudflare mode publishes the browser route; OpenAI mode intentionally keeps it local. Use the local browser URL for OpenAI and inspect Host/capability routing for Cloudflare. |
 | Tunnel child exits after Ready | Child lifecycle | Stop/restart Expose after inspecting the redacted status/log information. Prodex fails closed and does not silently switch providers. |
 | Startup cancelled or Ctrl+C appears stuck | Cleanup | Allow the bounded child-tree cleanup to finish. Do not kill unrelated processes or delete active temporary state. |
 
@@ -461,8 +467,8 @@ for public browser access.
 - Choose **Local** when the browser and MCP client run on the same machine and
   no external access is needed.
 - Choose **Cloudflare** when a public browser terminal and public MCP endpoint
-  are both intentional requirements. Treat the complete URL as a full-access
-  bearer credential.
+  are both intentional requirements. Treat both complete URLs as full-access
+  bearer credentials.
 - Choose **OpenAI Secure MCP Tunnel** when an OpenAI-supported surface needs
   remote MCP connectivity, while the browser terminal should remain local and
   no generic public browser shell is required.
