@@ -113,7 +113,11 @@ pub(in crate::expose) fn cloudflared_command() -> Command {
     #[cfg(test)]
     if let Some(script) = std::env::var_os("PRODEX_TEST_CLOUDFLARED_SCRIPT") {
         #[cfg(windows)]
-        return Command::new(script);
+        {
+            let mut command = Command::new("cmd.exe");
+            command.arg("/C").arg(script);
+            return command;
+        }
         #[cfg(not(windows))]
         {
             let mut command = Command::new("python3");
