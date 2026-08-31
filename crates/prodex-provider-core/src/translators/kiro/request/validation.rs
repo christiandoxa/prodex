@@ -132,6 +132,34 @@ pub(super) fn response_input(
         .position(|field| object.get(field).is_some_and(|value| !value.is_null()))
         .map(|index| i64::try_from(index).unwrap_or(-1))
         .unwrap_or(-1);
+    let flags = response_flags(
+        object,
+        token_limit,
+        response_format_supported,
+        logprobs_kind,
+        reasoning_effort_supported,
+        generation_detail,
+    );
+    KiroRequestValidationInput {
+        mode: KiroRequestValidationMode::Responses,
+        flags,
+        detail: if generation_detail >= 0 {
+            generation_detail
+        } else {
+            token_limit.map(|(field, _)| i64::from(field)).unwrap_or(-1)
+        },
+        allow_token_limit,
+    }
+}
+
+fn response_flags(
+    object: &Map<String, Value>,
+    token_limit: Option<(u8, bool)>,
+    response_format_supported: bool,
+    logprobs_kind: u8,
+    reasoning_effort_supported: bool,
+    generation_detail: i64,
+) -> u64 {
     let mut flags = 0;
     if generation_detail >= 0 {
         flags |= KiroRequestValidationInput::FLAG_GENERATION_CONTROL;
@@ -183,16 +211,7 @@ pub(super) fn response_input(
     if !reasoning_effort_supported {
         flags |= KiroRequestValidationInput::FLAG_REASONING_EFFORT;
     }
-    KiroRequestValidationInput {
-        mode: KiroRequestValidationMode::Responses,
-        flags,
-        detail: if generation_detail >= 0 {
-            generation_detail
-        } else {
-            token_limit.map(|(field, _)| i64::from(field)).unwrap_or(-1)
-        },
-        allow_token_limit,
-    }
+    flags
 }
 
 pub(super) fn error(
