@@ -1,5 +1,6 @@
 use anyhow::{Context, Result, bail};
 use prodex_cli::{PingCommands, PingOpenaiArgs};
+use redaction::redaction_redact_secret_like_text;
 use serde_json::Value;
 use std::ffi::OsString;
 use std::fs;
@@ -67,10 +68,7 @@ fn handle_ping_openai(args: PingOpenaiArgs) -> Result<()> {
             let (status, detail) = if error.to_string().contains("timed out") {
                 (PingStatus::Timeout, "OpenAI application ping timed out")
             } else {
-                (
-                    PingStatus::ProcessFailed,
-                    "OpenAI application ping process failed",
-                )
+                (PingStatus::ProcessFailed, ping_process_error_detail(&error))
             };
             let result = PingResult {
                 model: args.model.clone(),
@@ -79,7 +77,10 @@ fn handle_ping_openai(args: PingOpenaiArgs) -> Result<()> {
                 latency_ms: Some(started.elapsed().as_millis()),
             };
             render_ping_result(&result, args.json)?;
-            bail!("OpenAI application ping failed: {detail}");
+            bail!(
+                "OpenAI application ping failed: {detail}: {}",
+                redaction_redact_secret_like_text(&format!("{error:#}"))
+            );
         }
     };
     let result = ping_result_from_output(&output, args.model.clone(), started);
@@ -88,6 +89,19 @@ fn handle_ping_openai(args: PingOpenaiArgs) -> Result<()> {
         bail!("OpenAI application ping failed: {}", result.detail);
     }
     Ok(())
+}
+
+fn ping_process_error_detail(error: &anyhow::Error) -> &'static str {
+    let message = error.to_string();
+    if message.contains("output did not close") {
+        "OpenAI application ping output did not close"
+    } else if message.contains("clean the diagnostic directory") {
+        "OpenAI application ping cleanup failed"
+    } else if message.contains("failed to start") {
+        "OpenAI application ping could not start"
+    } else {
+        "OpenAI application ping process failed"
+    }
 }
 
 fn validate_ping_args(args: &PingOpenaiArgs) -> Result<()> {
