@@ -15,7 +15,6 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 const RUNTIME_KIRO_ACP_BOOTSTRAP_TIMEOUT: Duration = Duration::from_secs(5);
-const RUNTIME_KIRO_ACP_PROMPT_TURN_TIMEOUT: Duration = Duration::from_secs(120);
 
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct RuntimeKiroAcpBootstrapResult {
@@ -93,17 +92,12 @@ pub(crate) fn runtime_kiro_acp_prompt_turn_with_command_and_options(
     effort: Option<&str>,
     prompt: &str,
 ) -> Result<RuntimeKiroAcpPromptTurnResult> {
-    runtime_kiro_acp_prompt_turn_with_command_and_options_and_timeout(
-        command,
-        cwd,
-        extra_env,
-        model,
-        effort,
-        prompt,
-        RUNTIME_KIRO_ACP_PROMPT_TURN_TIMEOUT,
+    runtime_kiro_acp_prompt_turn_with_command_and_options_until_completion(
+        command, cwd, extra_env, model, effort, prompt, None,
     )
 }
 
+#[cfg(test)]
 pub(crate) fn runtime_kiro_acp_prompt_turn_with_command_and_options_and_timeout(
     command: &OsStr,
     cwd: &Path,
@@ -112,6 +106,26 @@ pub(crate) fn runtime_kiro_acp_prompt_turn_with_command_and_options_and_timeout(
     effort: Option<&str>,
     prompt: &str,
     timeout: Duration,
+) -> Result<RuntimeKiroAcpPromptTurnResult> {
+    runtime_kiro_acp_prompt_turn_with_command_and_options_until_completion(
+        command,
+        cwd,
+        extra_env,
+        model,
+        effort,
+        prompt,
+        Some(timeout),
+    )
+}
+
+fn runtime_kiro_acp_prompt_turn_with_command_and_options_until_completion(
+    command: &OsStr,
+    cwd: &Path,
+    extra_env: &[(OsString, OsString)],
+    model: Option<&str>,
+    effort: Option<&str>,
+    prompt: &str,
+    timeout: Option<Duration>,
 ) -> Result<RuntimeKiroAcpPromptTurnResult> {
     let program = command;
     let mut process = Command::new(program);
@@ -258,7 +272,7 @@ fn runtime_kiro_acp_prompt_turn_child(
     child: &mut std::process::Child,
     cwd: &Path,
     prompt: &str,
-    timeout: Duration,
+    timeout: Option<Duration>,
 ) -> Result<RuntimeKiroAcpPromptTurnResult> {
     let mut stdin = BufWriter::new(
         child
@@ -296,12 +310,17 @@ fn runtime_kiro_acp_prompt_turn_child(
     let mut notifications = Vec::new();
     let mut prompt_sent = false;
     loop {
-        let line = match lines.recv_timeout(timeout) {
+        if child.try_wait()?.is_some() {
+            break;
+        }
+        let receive_timeout = timeout.unwrap_or(Duration::from_millis(50));
+        let line = match lines.recv_timeout(receive_timeout) {
             Ok(Ok(line)) => line,
             Ok(Err(error)) => return Err(error).context("failed to read Kiro ACP stdout"),
-            Err(mpsc::RecvTimeoutError::Timeout) => {
+            Err(mpsc::RecvTimeoutError::Timeout) if timeout.is_some() => {
                 bail!("Kiro ACP prompt turn timed out waiting for output")
             }
+            Err(mpsc::RecvTimeoutError::Timeout) => continue,
             Err(mpsc::RecvTimeoutError::Disconnected) => break,
         };
         let current = line.trim();
