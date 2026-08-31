@@ -324,7 +324,7 @@ fn run_super_expose_engine_inner(
         ExposeEndpointMode::LocalOnly => None,
         ExposeEndpointMode::OpenAiSecureMcp {
             tunnel_id,
-            client_version: _,
+            client_version,
         } => {
             report_phase(
                 lifecycle_tx,

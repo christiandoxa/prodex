@@ -441,11 +441,12 @@ prodex super --presidio
 
 Interactive Super launches render a terminal Presidio opt-in screen. Pass `--presidio` or `--no-presidio` for non-interactive launches. Ordinary interactive `prodex s` still selects the main agent and provider, then reuses the remembered provider-scoped model and effort without reopening those pickers. Super is the explicit YOLO entrypoint: it launches Codex with approval and sandbox bypass, bypasses hook-trust confirmation, and trusts the current workspace for that invocation without changing persisted Codex configuration. Use `prodex run` for the normal approval and workspace-trust flow.
 
-`prodex s expose --no-tunnel` keeps the loopback-only browser terminal. Bare
-`prodex s expose` is the ChatGPT path: it configures Super first, then publishes
-only the MCP route through a Quick Tunnel by default, or through an existing
-user-managed Cloudflare hostname selected in the expose flow. `prodex s expose
---tunnel` keeps the explicit public browser-terminal behavior.
+`prodex s expose` and `prodex s expose --no-tunnel` keep the browser terminal
+and MCP route local. `prodex s expose --tunnel` or
+`--tunnel-provider cloudflare` selects the Cloudflare Quick Tunnel and publishes
+the browser terminal plus MCP route. `--tunnel-provider openai` uses the OpenAI
+Secure MCP Tunnel for MCP only; the browser remains local and no public browser
+URL exists.
 
 On Codex/provider-bridge paths, Smart Context preserves continuation metadata and critical signals while applying deterministic, validated context rewriting. Native opaque CLIs are outside that rewrite boundary. See [docs/smart-context.md](docs/smart-context.md) for its safety model and rollout controls.
 
@@ -455,12 +456,13 @@ Managed optimizer roots are checked in this order: `PRODEX_OPTIMIZERS_HOME`, `$X
 
 ## OpenAI profile diagnostic
 
-Run `prodex ping openai` to perform a bounded, per-profile authenticated Codex
-health check. It validates a structured completed turn and an exact `PONG`
-response, runs in a private read-only ephemeral directory, and never rotates a
-probe to another profile. It does not prove every model or long-running stream
-is healthy, and it does not test Cloudflare expose connectivity. Use
-`prodex ping openai --json` for machine-readable results.
+`prodex ping openai` sends the minimal user text `ping` through the normal
+Prodex OpenAI/Codex request path and succeeds when a valid completed model
+response is received. It uses normal profile selection, authentication,
+rotation, and response validation; the response does not need to say `pong`.
+Use `prodex ping openai --json` for machine-readable results. This is an
+application-level provider diagnostic, not ICMP, DNS, TCP, TLS, or `/models`
+connectivity testing.
 
 ## ChatGPT MCP expose
 
@@ -473,10 +475,9 @@ prodex s expose
 In an interactive terminal, Prodex asks for the main agent and provider, then
 asks for the main model and model-aware reasoning effort. It then asks whether
 sub-agents should be enabled and—when enabled—uses the shared sub-agent model
-and effort pickers. It then
-offers a random Quick Tunnel or an existing user-managed Cloudflare hostname
-and loopback origin port. The final configuration is shown before any
-capability, listener, or tunnel is created.
+and effort pickers. Local mode starts without an external tunnel. Cloudflare
+mode starts the Quick Tunnel after configuration; OpenAI mode requires a
+pre-created tunnel and runtime key.
 In a non-TTY launch, explicit options win over remembered/default values without
 waiting for stdin:
 
