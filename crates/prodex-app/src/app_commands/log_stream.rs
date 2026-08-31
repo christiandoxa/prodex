@@ -10,15 +10,15 @@ use crate::app_commands::log_upstream;
 use crate::app_commands::log_upstream_payload;
 use crate::app_commands::log_upstream_payload::UpstreamPayloadEvent;
 use crate::app_commands::log_upstream_payload::parse_runtime_log_line;
-use crate::reports::{
-    InfoTokenUsageEvent, info_token_usage_event_from_line,
-    info_token_usage_progress_event_from_line,
-};
+use crate::reports::{InfoTokenUsageEvent, info_token_usage_event_from_line};
 use anyhow::{Context, Result};
 use std::collections::BTreeMap;
 use std::io::{self, Write};
 use std::path::Path;
 use std::time::Instant;
+
+#[path = "log_stream/operational.rs"]
+mod operational;
 
 #[derive(Debug, Clone)]
 pub(crate) enum LogStreamItem {
@@ -225,30 +225,14 @@ fn collect_runtime_log_line(
     mut throughput: Option<&mut OutputThroughput>,
     coalesce_load: bool,
 ) -> Result<Vec<LogStreamItem>> {
-    let mut items = Vec::new();
-    if include_operational_insights && let Some(event) = operational_event_from_runtime_line(line)?
-    {
-        if coalesce_load {
-            if let Some(load) = event.load {
-                items.push(LogStreamItem::LoadObservation(load));
-            } else {
-                items.push(LogStreamItem::Transcript(event.transcript));
-            }
-        } else {
-            items.push(LogStreamItem::Transcript(event.transcript));
-        }
-    }
+    let mut items = operational::log_items(line, include_operational_insights, coalesce_load)?;
     if let Some(event) = stream_payload_event_from_runtime_line(line) {
         items.push(LogStreamItem::Transcript(event));
     }
     if let Some(event) = log_upstream_payload::upstream_payload_event_from_runtime_line(line) {
         items.push(LogStreamItem::UpstreamPayload(event));
     }
-    if let Some(event) = info_token_usage_progress_event_from_line(line)
-        && let Some(throughput) = throughput.as_deref_mut()
-    {
-        throughput.observe_token_usage(path, &event, Instant::now());
-    }
+    operational::observe_token_usage_progress(path, line, throughput.as_deref_mut());
     if let Some(event) = info_token_usage_event_from_line(line) {
         let event = local_token_usage_event(event);
         if let Some(throughput) = throughput {
