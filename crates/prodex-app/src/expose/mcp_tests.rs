@@ -37,6 +37,7 @@ fn expose_start_mcp_test_server(
         tunnel: false,
         no_tunnel: false,
         tunnel_provider: None,
+        openai_tunnel_id: None,
         name: Some("test".to_string()),
         invocation: prodex_cli::ExposeInvocation::SuperAlias,
         super_args: None,

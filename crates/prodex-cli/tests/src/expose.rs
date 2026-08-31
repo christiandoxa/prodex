@@ -16,6 +16,7 @@ fn s_expose_rewrites_to_expose_command() {
     assert!(args.tunnel);
     assert!(!args.no_tunnel);
     assert_eq!(args.tunnel_provider, None);
+    assert_eq!(args.openai_tunnel_id, None);
     assert_eq!(args.invocation, ExposeInvocation::SuperAlias);
     assert!(args.super_args.is_some());
     assert_eq!(args.cols, 120);
@@ -118,6 +119,7 @@ fn expose_tunnel_is_opt_in_and_legacy_no_tunnel_is_unambiguous() {
     assert!(!legacy.tunnel);
     assert!(legacy.no_tunnel);
     assert_eq!(legacy.tunnel_provider, None);
+    assert_eq!(legacy.openai_tunnel_id, None);
 
     assert!(parse_cli_command_from(["prodex", "expose", "--tunnel", "--no-tunnel"]).is_err());
     assert!(parse_cli_command_from(["prodex", "expose", "--max-clients", "0"]).is_err());
@@ -170,6 +172,36 @@ fn expose_tunnel_provider_rejects_invalid_values_and_legacy_conflicts() {
             "--no-tunnel",
             "--tunnel-provider",
             "cloudflare",
+        ])
+        .is_err()
+    );
+}
+
+#[test]
+fn openai_tunnel_id_is_non_secret_configuration_and_requires_no_api_key_flag() {
+    let Commands::Expose(args) = parse_cli_command_from([
+        "prodex",
+        "s",
+        "--tunnel-provider",
+        "openai",
+        "--openai-tunnel-id",
+        "tunnel_test",
+        "expose",
+    ])
+    .expect("OpenAI tunnel id should parse") else {
+        panic!("expected expose command");
+    };
+    assert_eq!(args.tunnel_provider, Some(ExposeTunnelProvider::OpenAi));
+    assert_eq!(args.openai_tunnel_id.as_deref(), Some("tunnel_test"));
+    assert!(
+        parse_cli_command_from([
+            "prodex",
+            "s",
+            "--tunnel-provider",
+            "openai",
+            "--api-key",
+            "secret",
+            "expose",
         ])
         .is_err()
     );

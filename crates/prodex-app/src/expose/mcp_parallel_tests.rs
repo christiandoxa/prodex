@@ -111,6 +111,7 @@ else:
             tunnel: false,
             no_tunnel: false,
             tunnel_provider: None,
+            openai_tunnel_id: None,
             name: Some(label.to_string()),
             invocation: prodex_cli::ExposeInvocation::SuperAlias,
             super_args: None,

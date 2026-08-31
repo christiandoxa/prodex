@@ -7,16 +7,16 @@ mod cloudflared_startup;
 #[path = "runtime/config_isolation_tests.rs"]
 mod config_isolation_tests;
 mod hostname;
+#[path = "runtime/openai_tunnel.rs"]
+mod openai_tunnel;
 pub(super) use cloudflared::*;
+pub(super) use openai_tunnel::*;
 use std::net::SocketAddr;
 #[cfg(windows)]
 use std::os::windows::io::{AsRawHandle, FromRawHandle, OwnedHandle, RawHandle};
 
 pub(super) fn handle_expose(args: ExposeArgs) -> Result<()> {
-    if args.invocation == prodex_cli::ExposeInvocation::SuperAlias
-        && !args.tunnel
-        && !args.no_tunnel
-    {
+    if args.invocation == prodex_cli::ExposeInvocation::SuperAlias {
         return handle_super_expose(args);
     }
     handle_legacy_expose(args)

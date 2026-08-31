@@ -150,7 +150,14 @@ impl ExposeTuiState {
                     KeyCode::Char('c')
                     | KeyCode::Char('C')
                     | KeyCode::Char('y')
-                    | KeyCode::Char('Y') => return ExposeTuiAction::CopyUrl,
+                    | KeyCode::Char('Y')
+                        if self
+                            .ready
+                            .as_ref()
+                            .is_some_and(|ready| ready.public_url.is_some()) =>
+                    {
+                        return ExposeTuiAction::CopyUrl;
+                    }
                     KeyCode::Left => self.scroll_url(-1),
                     KeyCode::Right => self.scroll_url(1),
                     KeyCode::Home => {
@@ -161,7 +168,8 @@ impl ExposeTuiState {
                         self.url_offset = self
                             .ready
                             .as_ref()
-                            .map_or(0, |ready| ready.public_url.as_str().chars().count());
+                            .and_then(|ready| ready.public_url.as_ref())
+                            .map_or(0, |url| url.as_str().chars().count());
                         self.redraw_needed = true;
                     }
                     _ => {}
@@ -297,7 +305,8 @@ impl ExposeTuiState {
         let length = self
             .ready
             .as_ref()
-            .map_or(0, |ready| ready.public_url.as_str().chars().count());
+            .and_then(|ready| ready.public_url.as_ref())
+            .map_or(0, |url| url.as_str().chars().count());
         self.url_offset = if delta.is_negative() {
             self.url_offset.saturating_sub(delta.unsigned_abs())
         } else {
@@ -587,15 +596,20 @@ fn ready_body(state: &ExposeTuiState, width: u16) -> Vec<Line<'static>> {
         .filter(|run| !run.state.terminal())
         .count();
     let endpoint = match &ready.endpoint {
+        ExposeEndpointMode::LocalOnly => "Local only",
         ExposeEndpointMode::QuickTunnel => "Quick Tunnel",
         ExposeEndpointMode::ExistingCloudflareTunnel { .. } => "Existing Cloudflare Tunnel",
+        ExposeEndpointMode::OpenAiSecureMcp { .. } => "OpenAI Secure MCP Tunnel",
     };
     let url_prefix = "MCP URL: ";
     let url_width = usize::from(width).saturating_sub(url_prefix.len());
-    let url = visible_url(ready.public_url.as_str(), state.url_offset, url_width);
     let mut lines = vec![
         Line::styled(
-            "Ready — public MCP passed initialize and tools/list",
+            if ready.public_url.is_some() {
+                "Ready — public MCP passed initialize and tools/list"
+            } else {
+                "Ready — local MCP passed initialize and tools/list"
+            },
             tui_success_style().add_modifier(Modifier::BOLD),
         ),
         Line::from(format!(
@@ -623,8 +637,15 @@ fn ready_body(state: &ExposeTuiState, width: u16) -> Vec<Line<'static>> {
         Line::from(format!("Active runs: {active_runs}")),
         Line::from(""),
         Line::from(vec![
-            Span::styled("MCP URL: ", tui_primary_style()),
-            Span::raw(url),
+            Span::styled(
+                if ready.public_url.is_some() {
+                    "MCP URL: "
+                } else {
+                    "Local MCP URL: "
+                },
+                tui_primary_style(),
+            ),
+            Span::raw(ready.local_mcp_url.as_str().to_string()),
         ]),
         Line::from(vec![
             Span::styled("Browser URL: ", tui_muted_style()),
@@ -640,6 +661,31 @@ fn ready_body(state: &ExposeTuiState, width: u16) -> Vec<Line<'static>> {
             tui_error_style(),
         ),
     ];
+    if let Some(public_url) = ready.public_url.as_ref() {
+        lines.insert(
+            10,
+            Line::from(vec![
+                Span::styled("Public MCP URL: ", tui_primary_style()),
+                Span::raw(visible_url(
+                    public_url.as_str(),
+                    state.url_offset,
+                    url_width,
+                )),
+            ]),
+        );
+    }
+    if let ExposeEndpointMode::OpenAiSecureMcp {
+        tunnel_id,
+        client_version,
+    } = &ready.endpoint
+    {
+        lines.insert(
+            11,
+            Line::from(format!(
+                "OpenAI tunnel: {tunnel_id} · ready · {client_version}"
+            )),
+        );
+    }
     if let Some(status) = state.status.as_deref() {
         lines.push(Line::styled(status.to_string(), tui_success_style()));
     }

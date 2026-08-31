@@ -379,6 +379,7 @@ fn super_option_takes_value(value: &str) -> bool {
             | "--rows"
             | "--max-clients"
             | "--tunnel-provider"
+            | "--openai-tunnel-id"
             | "--profile"
             | "--base-url"
             | "--provider"

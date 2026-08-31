@@ -1,18 +1,18 @@
 use super::super::mcp::expose_main_provider;
-use super::{ExposeEndpointMode, ExposeMcpEndpoint, PublicMcpEndpoint};
+use super::{ExposeEndpointMode, ExposeReadyState};
 use crate::print_stdout_line;
 use prodex_cli::SuperArgs;
 use terminal_ui::print_panel;
 
-pub(crate) fn print_super_expose_status(
-    local_url: &str,
-    public_url: &PublicMcpEndpoint,
-    instance_id: &str,
-    workspace_name: &str,
-    display_name: &str,
-    mcp: &ExposeMcpEndpoint,
-    endpoint: &ExposeEndpointMode,
-) -> anyhow::Result<()> {
+pub(crate) fn print_super_expose_status(ready: &ExposeReadyState) -> anyhow::Result<()> {
+    let local_url = &ready.local_url;
+    let local_mcp_url = &ready.local_mcp_url;
+    let public_url = ready.public_url.as_ref();
+    let instance_id = &ready.instance_id;
+    let workspace_name = &ready.workspace_name;
+    let display_name = &ready.display_name;
+    let mcp = &ready.mcp;
+    let endpoint = &ready.endpoint;
     let args = &mcp.defaults;
     let model = args
         .local_model
@@ -45,14 +45,12 @@ pub(crate) fn print_super_expose_status(
         ),
         ("Local browser URL".to_string(), local_url.to_string()),
         (
-            "Cloudflare".to_string(),
-            match endpoint {
-                ExposeEndpointMode::QuickTunnel => "Quick Tunnel connected".to_string(),
-                ExposeEndpointMode::ExistingCloudflareTunnel {
-                    hostname,
-                    origin_port,
-                } => format!("Existing Tunnel · {hostname} · 127.0.0.1:{origin_port}"),
-            },
+            "Tunnel provider".to_string(),
+            endpoint_provider(endpoint).to_string(),
+        ),
+        (
+            "Local MCP URL".to_string(),
+            local_mcp_url.as_str().to_string(),
         ),
         (
             "Access".to_string(),
@@ -84,9 +82,54 @@ pub(crate) fn print_super_expose_status(
             ),
         ));
     }
+    match endpoint {
+        ExposeEndpointMode::LocalOnly => fields.push((
+            "MCP transport".to_string(),
+            "local loopback only".to_string(),
+        )),
+        ExposeEndpointMode::QuickTunnel => fields.push((
+            "Cloudflare".to_string(),
+            "Quick Tunnel connected".to_string(),
+        )),
+        ExposeEndpointMode::ExistingCloudflareTunnel {
+            hostname,
+            origin_port,
+        } => fields.push((
+            "Cloudflare".to_string(),
+            format!("Existing Tunnel · {hostname} · 127.0.0.1:{origin_port}"),
+        )),
+        ExposeEndpointMode::OpenAiSecureMcp {
+            tunnel_id,
+            client_version,
+        } => {
+            fields.push((
+                "MCP transport".to_string(),
+                "OpenAI Secure MCP Tunnel".to_string(),
+            ));
+            fields.push(("Tunnel ID".to_string(), tunnel_id.clone()));
+            fields.push((
+                "tunnel-client".to_string(),
+                format!("ready · {client_version}"),
+            ));
+        }
+    }
     print_panel("Prodex Super for ChatGPT", &fields)?;
-    print_stdout_line(&format!("ChatGPT MCP URL: {}", public_url.as_str()))?;
+    if let Some(public_url) = public_url {
+        print_stdout_line(&format!("ChatGPT MCP URL: {}", public_url.as_str()))?;
+    } else {
+        print_stdout_line(&format!("Local MCP URL: {}", local_mcp_url.as_str()))?;
+    }
     Ok(())
+}
+
+fn endpoint_provider(endpoint: &ExposeEndpointMode) -> &'static str {
+    match endpoint {
+        ExposeEndpointMode::LocalOnly => "none",
+        ExposeEndpointMode::QuickTunnel | ExposeEndpointMode::ExistingCloudflareTunnel { .. } => {
+            "cloudflare"
+        }
+        ExposeEndpointMode::OpenAiSecureMcp { .. } => "openai",
+    }
 }
 
 pub(crate) fn print_super_expose_configuration(
