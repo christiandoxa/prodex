@@ -15,7 +15,7 @@ const OPENAI_TUNNEL_READY_TIMEOUT: Duration = if cfg!(test) {
 };
 const OPENAI_TUNNEL_READY_POLL: Duration = Duration::from_millis(100);
 const OPENAI_TUNNEL_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(2);
-const OPENAI_TUNNEL_ID_MAX_BYTES: usize = 128;
+const OPENAI_TUNNEL_ID_LENGTH: usize = "tunnel_".len() + 32;
 const OPENAI_TUNNEL_VERSION_MAX_BYTES: usize = 128;
 const OPENAI_TUNNEL_HEALTH_URL_MAX_BYTES: u64 = 4096;
 static NEXT_OPENAI_TUNNEL_CONFIG_ID: AtomicU64 = AtomicU64::new(1);
@@ -227,14 +227,14 @@ impl Drop for OpenAiTunnel {
 
 fn validate_openai_tunnel_id(value: &str) -> Result<()> {
     let value = value.trim();
-    if value.len() > OPENAI_TUNNEL_ID_MAX_BYTES
+    if value.len() != OPENAI_TUNNEL_ID_LENGTH
         || !value.starts_with("tunnel_")
-        || value.len() == "tunnel_".len()
         || !value
+            ["tunnel_".len()..]
             .bytes()
-            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-' | b'.'))
+            .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit())
     {
-        bail!("OpenAI tunnel id must be a valid tunnel_... identifier")
+        bail!("OpenAI tunnel id must match tunnel_<32 lowercase letters or digits>")
     }
     Ok(())
 }
