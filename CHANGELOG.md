@@ -2,6 +2,17 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.422.0 - 2026-08-31
+
+### Misc
+
+- Support Python tunnel fixtures on Windows (`3902174`)
+- Invoke Windows tunnel fixture through cmd (`003439b`)
+- Execute Windows tunnel fixtures directly (`a3550d1`)
+- Split operational stream parsing (`46212a2`)
+- Contain existing tunnel jobs on Windows (`af3bc42`)
+- Add connection modes and signal-rich status (`d30e684`)
+
 ## 0.421.0 - 2026-08-31
 
 ### Runtime
@@ -46,24 +57,6 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 - Keep tunnel readiness probe local (`b4e1d91`)
 - Keep live ACP tasks alive while quiet (`83641b2`)
 - Use canonical OpenAI application request (`dceefac`)
-# Prodex 0.421.0
-
-## New Features
-
-- Added model-aware OpenAI capacity routing for Luna workflows. Explicitly identified Luna Reserve capacity remains available to Luna requests, and usable `gpt-5.3-codex-spark` capacity can continue a Luna workflow after applicable Luna capacity is unavailable. The effective fallback model is Spark; Luna does not consume Spark quota, and Sol/Terra do not use this fallback.
-- Added application-level `prodex ping openai`, which sends the text `ping` through the normal OpenAI/Codex request path and succeeds on a valid completed model response.
-- Added OpenAI Secure MCP Tunnel support to `prodex s expose`. It keeps the browser terminal local and exposes MCP connectivity through the supervised official tunnel client; it does not publish a public browser shell.
-- Preserved `prodex s expose --tunnel` as the Cloudflare Quick Tunnel mode and added explicit provider selection.
-
-## Bug Fixes
-
-- Improved provider-wide overload recovery with bounded backoff while preserving the logical pre-commit request; transient 503 responses are not classified as quota exhaustion.
-- Kept quiet, long-running Kiro ACP work alive instead of treating output silence as a reconnect condition, while retaining concurrent bounded stdout/stderr draining and real child-exit detection.
-- Improved Cloudflare Quick Tunnel diagnostics for transport registration versus public DNS, DoH, TLS, and MCP readiness failures.
-
-## Changelog
-
-Full Changelog: [`0.420.0...0.421.0`](https://github.com/christiandoxa/prodex/compare/0.420.0...0.421.0)
 
 ## 0.420.0 - 2026-08-31
 
@@ -219,21 +212,6 @@ Full Changelog: [`0.420.0...0.421.0`](https://github.com/christiandoxa/prodex/co
 - Preserve bounded selection and token accounting (`407c57b`)
 - Harden 0.418.1 diagnostics and expose (`269d3b9`)
 - Migrate deterministic runtime ownership (`43cfb19`)
-
-### Docs
-
-- Document 0.418.1 runtime and quota contracts (`ed4bf01`)
-
-### Misc
-
-- Allocate unique tunnel config paths (`fdb20bc`)
-- Make tunnel cleanup cross-platform (`318609b`)
-- Split endpoint startup lifecycle (`861aa16`)
-
-## 0.418.0 - 2026-08-28
-
-### Runtime
-
 - Complete compact profile sweeps (`399ac74`)
 - Complete bounded profile sweep before timeout (`811f59f`)
 - Keep profile sweep budget platform-safe (`46a14ec`)
@@ -417,6 +395,7 @@ Full Changelog: [`0.420.0...0.421.0`](https://github.com/christiandoxa/prodex/co
 
 ### Docs
 
+- Document 0.418.1 runtime and quota contracts (`ed4bf01`)
 - Refresh release-cut audit (`d48d7d0`)
 - Record final freshness audit (`dc9d715`)
 - Document ChatGPT expose security and parallel workspaces (`01c1f20`)
@@ -486,6 +465,9 @@ Full Changelog: [`0.420.0...0.421.0`](https://github.com/christiandoxa/prodex/co
 
 ### Misc
 
+- Allocate unique tunnel config paths (`fdb20bc`)
+- Make tunnel cleanup cross-platform (`318609b`)
+- Split endpoint startup lifecycle (`861aa16`)
 - Remove diagnostic self-test tracing (`f175fd9`)
 - Pass rich inputs by address (`86105bb`)
 - Make rich ABI addresses explicit (`1dbbd2c`)
