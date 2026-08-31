@@ -444,10 +444,11 @@ Interactive Super launches render a terminal Presidio opt-in screen. Pass `--pre
 
 `prodex s expose` and `prodex s expose --no-tunnel` keep the browser terminal
 and MCP route local. `prodex s expose --tunnel` or
-`--tunnel-provider cloudflare` selects the Cloudflare Quick Tunnel and publishes
-the browser terminal plus MCP route. `--tunnel-provider openai` uses the OpenAI
-Secure MCP Tunnel for MCP only; the browser remains local and no public browser
-URL exists.
+`--tunnel-provider cloudflare-quick` (alias `cloudflare`) selects the Cloudflare
+Quick Tunnel and publishes the browser terminal plus MCP route.
+`--tunnel-provider cloudflare-existing` uses an existing Cloudflare config or
+token file. `--tunnel-provider openai` uses the OpenAI Secure MCP Tunnel for MCP
+only; the browser remains local and no public browser URL exists.
 
 On Codex/provider-bridge paths, Smart Context preserves continuation metadata and critical signals while applying deterministic, validated context rewriting. Native opaque CLIs are outside that rewrite boundary. See [docs/smart-context.md](docs/smart-context.md) for its safety model and rollout controls.
 
@@ -473,18 +474,32 @@ Run this from the workspace you want the local connection to start in:
 prodex s expose
 ```
 
-The three explicit modes are:
+In a real TTY, `prodex s expose` opens a Ratatui picker with **Local only**
+selected first. The choices are Local only, Cloudflare Quick Tunnel, Existing
+Cloudflare Tunnel, and OpenAI Secure MCP Tunnel. Use the keyboard to choose and
+confirm; Esc or `q` cancels before any external child starts. Without a TTY,
+the picker is never opened and the bare command remains loopback-only.
+
+Explicit automation modes are:
 
 ```bash
-prodex s expose                                  # local browser + local MCP
-prodex s expose --tunnel                         # Cloudflare public browser + MCP
+prodex s expose --no-tunnel                      # local browser + local MCP
+prodex s expose --tunnel                         # Cloudflare Quick public browser + MCP
+prodex s expose --tunnel-provider cloudflare-quick    # same explicit Quick Tunnel mode
+prodex s expose --tunnel-provider cloudflare-existing # existing Cloudflare config/token file
 prodex s expose --tunnel-provider openai         # OpenAI remote MCP; browser local
 ```
 
+`cloudflare` remains an alias for `cloudflare-quick`, and `--no-tunnel` remains
+the local-only compatibility alias.
+
 WARNING: Cloudflare mode publishes a full-access Super capability. Anyone who
 obtains the complete URL can control the expose process as the current OS user;
-the URL is not OAuth or multi-user authentication. OpenAI Secure MCP Tunnel is
-MCP-only and never publishes a generic browser-terminal URL.
+the URL is not OAuth or multi-user authentication. Existing Cloudflare mode
+requires a pre-created user-managed tunnel whose configured hostname routes to
+the selected loopback origin; Prodex does not request or display its secrets.
+OpenAI Secure MCP Tunnel is MCP-only and never publishes a generic
+browser-terminal URL.
 
 See [EXPOSE.md](EXPOSE.md) for the verified CLI reference, readiness layers,
 Cloudflare QUIC/HTTP/2 and DNS/DoH troubleshooting, OpenAI Secure MCP Tunnel
@@ -494,13 +509,16 @@ configuration, lifecycle, security model, and focused tests.
 <summary><strong>Expose configuration and ChatGPT connection</strong></summary>
 
 In an interactive terminal, Prodex asks for the main agent/provider/model,
-model-aware effort, and optional sub-agent configuration before starting. The
-Cloudflare selector defaults to Quick Tunnel; an existing Cloudflare hostname
-can be selected interactively. Non-TTY launches use explicit, remembered, and
-normal default values without waiting for stdin.
+model-aware effort, optional sub-agent configuration, and expose mode before
+starting. Existing Cloudflare setup uses a public hostname and loopback origin
+port already configured by the user; Quick Tunnel remains ephemeral. Non-TTY
+launches use explicit, remembered, and normal default values without waiting for
+stdin.
 
-After readiness, Prodex prints the local browser URL and either a local MCP URL
-or public Cloudflare browser and MCP URLs. Add a model/effort override when needed:
+After readiness, Prodex prints the relevant local/public URLs and provider
+status. The interactive Ready panel wraps complete long URLs—including
+capability paths—across rows and scrolls its body on short terminals; it never
+silently clips or ellipsizes them. Add a model/effort override when needed:
 
 ```bash
 prodex s expose --model gpt-5.6-luna -c 'model_reasoning_effort="max"'
@@ -1164,7 +1182,7 @@ git diff | prodex context compact-output --kind git-diff
 |---|---|
 | `prodex info` | Shows provider route/quota shapes plus effective runtime tuning values after environment, policy, and default resolution. |
 | `prodex log` | Follows the live session/runtime log view; it is the short form of `prodex log stream`. |
-| `prodex log stream` | Explicit equivalent of `prodex log`: follows session/runtime logs and prints assistant text and tool-call arguments once each item finishes streaming, plus token events. Its human TUI is titled `Prodex Log` and shows authoritative output generation throughput when token timing is available; after a valid measurement the last numeric rate remains visible while idle, otherwise it shows `— t/s`. Add `--json` for JSON Lines events. Transient discovery/read failures during log creation, rotation, cleanup, or replacement skip one poll instead of ending the stream. |
+| `prodex log stream` | Explicit equivalent of `prodex log`: follows session/runtime logs and prints assistant text and tool-call arguments once each item finishes streaming, plus token events. Its human TUI is titled `Prodex Log`, coalesces repeated low-signal load observations into bounded episodes with occurrence/run counts, and shows authoritative output generation throughput when token timing is available; after a valid measurement the last numeric rate remains visible while idle, otherwise it shows `— t/s`. Add `--json` for individual JSON Lines events. Transient discovery/read failures during log creation, rotation, cleanup, or replacement skip one poll instead of ending the stream. |
 | `prodex log upstream` | Explicit upstream-focused mode: follows bounded, redacted backend-bound LLM payload snapshots after Prodex processing such as Presidio redaction and Smart Context rewriting. Its human TUI is also titled `Prodex Log`; it never derives t/s from payload bytes and retains the last correlated numeric rate while idle. Add `--json` for JSON Lines payload events. Snapshots are capped at 64 KiB in the runtime log per payload. |
 | `prodex doctor --install` | Adds install and embedded asset checks to doctor output. |
 | `prodex doctor --runtime` | Runs runtime diagnostics. |

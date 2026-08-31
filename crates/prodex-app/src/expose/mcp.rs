@@ -12,7 +12,10 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 mod probe;
-pub(super) use probe::{verify_local_mcp_with_progress, verify_public_mcp_with_progress};
+pub(super) use probe::{
+    verify_local_browser_with_progress, verify_local_mcp_with_progress,
+    verify_public_browser_with_progress, verify_public_mcp_with_progress,
+};
 mod handler;
 mod protocol;
 mod tools;

@@ -518,6 +518,58 @@ fn human_stream_adds_correlated_operational_events_without_exposing_urls() {
 }
 
 #[test]
+fn json_stream_keeps_repeated_load_observations_raw() {
+    let root = env::temp_dir().join(format!(
+        "prodex-log-load-json-{}-{}",
+        std::process::id(),
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    fs::create_dir_all(&root).unwrap();
+    let path = root.join("runtime.log");
+    fs::write(
+        &path,
+        concat!(
+            "[2026-07-01 21:52:36.700 +07:00] profile_inflight_saturated request=1 route=responses profile=main active=8 hard_limit=8\n",
+            "[2026-07-01 21:52:36.701 +07:00] profile_inflight_saturated request=2 route=responses profile=main active=8 hard_limit=8\n"
+        ),
+    )
+    .unwrap();
+
+    let items =
+        collect_new_runtime_log_stream_items(&path, &mut FollowedLog::default(), true).unwrap();
+    assert_eq!(items.len(), 2);
+    assert!(
+        items
+            .iter()
+            .all(|item| matches!(item, LogStreamItem::Transcript(_)))
+    );
+    let json = items
+        .iter()
+        .map(log_stream_item_json)
+        .collect::<Result<Vec<_>>>()
+        .unwrap();
+    assert_eq!(json.len(), 2);
+    assert!(json.iter().any(|line| line.contains("r0001")));
+    assert!(json.iter().any(|line| line.contains("r0002")));
+    let tui_items = collect_new_runtime_log_stream_items_for_tui_with_throughput(
+        &path,
+        &mut FollowedLog::default(),
+        true,
+        None,
+    )
+    .unwrap();
+    assert!(
+        tui_items
+            .iter()
+            .all(|item| matches!(item, LogStreamItem::LoadObservation(_)))
+    );
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
 fn dedupes_consecutive_equivalent_transcript_events() {
     let root = env::temp_dir().join(format!(
         "prodex-transcript-dedupe-{}-{}",

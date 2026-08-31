@@ -1,7 +1,8 @@
-use super::super_expose::{ensure_cloudflared_available, handle_super_expose};
+use super::super_expose::handle_super_expose;
 use super::*;
 #[path = "runtime/cloudflared.rs"]
 mod cloudflared;
+mod cloudflared_existing;
 mod cloudflared_startup;
 #[cfg(test)]
 #[path = "runtime/config_isolation_tests.rs"]
@@ -10,6 +11,7 @@ mod hostname;
 #[path = "runtime/openai_tunnel.rs"]
 mod openai_tunnel;
 pub(super) use cloudflared::*;
+pub(super) use cloudflared_existing::*;
 pub(super) use openai_tunnel::*;
 use std::net::SocketAddr;
 #[cfg(windows)]
@@ -95,7 +97,7 @@ fn expose_start_tunnel(
             None,
         );
     }
-    if let Err(err) = ensure_cloudflared_available() {
+    if let Err(err) = cloudflared::ensure_cloudflared_available() {
         return (expose_tunnel_unavailable_status(&err), None, None);
     }
     match start_cloudflared_tunnel(&format!("http://{listen_addr}")) {

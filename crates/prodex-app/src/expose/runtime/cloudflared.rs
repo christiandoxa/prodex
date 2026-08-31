@@ -1,7 +1,7 @@
 use super::super::EXPOSE_CLOUDFLARED_LINE_MAX_BYTES;
 use super::cloudflared_startup;
 use super::hostname;
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, bail};
 use std::io::{self, Read};
 #[cfg(windows)]
 use std::os::windows::io::AsRawHandle;
@@ -17,7 +17,7 @@ pub(in crate::expose) struct CloudflaredTunnel {
     pub(in crate::expose) url: Option<String>,
     pub(in crate::expose) effective_transport: Option<CloudflaredTransport>,
     reader_threads: Vec<JoinHandle<()>>,
-    config: CloudflaredConfigIsolation,
+    config: Option<CloudflaredConfigIsolation>,
     shut_down: bool,
     #[cfg(windows)]
     process_job: Option<std::os::windows::io::OwnedHandle>,
@@ -120,6 +120,25 @@ pub(in crate::expose) fn cloudflared_command() -> Command {
 }
 
 impl CloudflaredTunnel {
+    pub(in crate::expose) fn from_existing(
+        child: std::process::Child,
+        effective_transport: CloudflaredTransport,
+        reader_threads: Vec<JoinHandle<()>>,
+    ) -> Self {
+        Self {
+            child,
+            url: None,
+            effective_transport: Some(effective_transport),
+            reader_threads,
+            config: None,
+            shut_down: false,
+            #[cfg(windows)]
+            process_job: None,
+            startup_timed_out: false,
+            startup_failure: None,
+        }
+    }
+
     pub(in crate::expose) fn exited(&mut self) -> Option<std::process::ExitStatus> {
         self.child.try_wait().ok().flatten()
     }
@@ -151,7 +170,9 @@ impl CloudflaredTunnel {
                 "cloudflared output reader",
             );
         }
-        self.config.cleanup();
+        if let Some(config) = self.config.as_mut() {
+            config.cleanup();
+        }
     }
 }
 
@@ -223,7 +244,7 @@ fn start_cloudflared_attempt(
         url: startup.url,
         effective_transport: startup.effective_transport,
         reader_threads,
-        config,
+        config: Some(config),
         shut_down: false,
         #[cfg(windows)]
         process_job,
@@ -324,4 +345,68 @@ pub(in crate::expose) fn expose_public_host(url: &str) -> Option<String> {
 
 pub(in crate::expose) fn expose_valid_dns_hostname(host: &str) -> bool {
     hostname::expose_valid_dns_hostname(host)
+}
+
+pub(in crate::expose) fn cloudflared_start_failure(
+    tunnel: &mut CloudflaredTunnel,
+) -> anyhow::Error {
+    if let Some(status) = tunnel.exited() {
+        return anyhow::anyhow!(
+            "Cloudflare Quick Tunnel exited before obtaining a public hostname (status {})",
+            status
+                .code()
+                .map_or_else(|| "signal".to_string(), |code| code.to_string())
+        );
+    }
+    if tunnel.startup_timed_out {
+        return anyhow::anyhow!(
+            "Cloudflare Quick Tunnel did not complete transport negotiation; check outbound UDP/TCP 7844 connectivity"
+        );
+    }
+    anyhow::anyhow!("Cloudflare Quick Tunnel did not report a public hostname")
+}
+
+pub(in crate::expose) fn ensure_cloudflared_available() -> anyhow::Result<()> {
+    let mut command = cloudflared_command();
+    command.arg("--version");
+    let output = crate::command_probe_output(&mut command, "cloudflared version probe");
+    match output {
+        Ok(output) if output.status.success() && cloudflared_version_is_parseable(&output) => {}
+        Ok(_) => bail!(
+            "cloudflared --version failed or reported an unsupported version; install a current cloudflared (no account or init is required)"
+        ),
+        Err(_) => bail!(
+            "cloudflared is required for Quick Tunnel mode; install it from https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/ (no account or init is required)"
+        ),
+    }
+    let mut help = cloudflared_command();
+    help.args(["tunnel", "--help"]);
+    let help = crate::command_probe_output(&mut help, "cloudflared Quick Tunnel capability probe")
+        .context("cloudflared Quick Tunnel capability probe failed; upgrade cloudflared")?;
+    let help = String::from_utf8_lossy(&help.stdout);
+    if !help.contains("--config") || !help.contains("--url") {
+        bail!(
+            "installed cloudflared does not support isolated Quick Tunnel configuration; upgrade cloudflared"
+        );
+    }
+    Ok(())
+}
+
+fn cloudflared_version_is_parseable(output: &std::process::Output) -> bool {
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    [stdout.as_ref(), stderr.as_ref()].into_iter().any(|text| {
+        text.split_whitespace().any(|token| {
+            let token = token.trim_matches(|character: char| {
+                !character.is_ascii_alphanumeric() && character != '.'
+            });
+            let token = token.strip_prefix('v').unwrap_or(token);
+            let token = token.split(['-', '+']).next().unwrap_or_default();
+            let parts = token.split('.').collect::<Vec<_>>();
+            parts.len() >= 2
+                && parts
+                    .iter()
+                    .all(|part| !part.is_empty() && part.bytes().all(|byte| byte.is_ascii_digit()))
+        })
+    })
 }

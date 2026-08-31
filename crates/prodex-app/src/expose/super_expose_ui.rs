@@ -1,3 +1,7 @@
+use super::runtime::{
+    ExistingCloudflareSelection, discover_existing_cloudflare, ensure_openai_tunnel_available,
+    resolve_openai_tunnel_id,
+};
 use super::super_expose::{
     ExposeEndpointMode, ExposeLifecycleEvent, ExposeLifecyclePhase, ExposeReadyState,
     validate_existing_cloudflare_hostname,
@@ -26,11 +30,13 @@ use terminal_ui::{
 
 #[path = "super_expose_ui_loop.rs"]
 mod loop_support;
+#[path = "super_expose_ui_status.rs"]
+mod status;
 #[path = "super_expose_ui_support.rs"]
 mod support;
+pub(super) use status::{ready_body, status_body};
 #[cfg(test)]
 use support::copy_public_url_to_clipboard_with;
-use support::visible_url;
 
 const EXPOSE_TUI_EVENT_CAPACITY: usize = 32;
 const EXPOSE_TUI_INPUT_POLL: Duration = Duration::from_millis(100);
@@ -49,8 +55,10 @@ pub(super) enum ExposeTuiPhase {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum EndpointChoice {
+    LocalOnly,
     QuickTunnel,
     ExistingCloudflareTunnel,
+    OpenAiSecureMcp,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -61,7 +69,10 @@ enum EndpointField {
 
 enum ExposeTuiAction {
     None,
-    Start(ExposeEndpointMode),
+    Start {
+        endpoint: ExposeEndpointMode,
+        existing: Option<ExistingCloudflareSelection>,
+    },
     Stop,
     CopyUrl,
 }
@@ -80,14 +91,17 @@ pub(super) struct ExposeTuiState {
     endpoint_field: EndpointField,
     hostname: String,
     origin_port: String,
+    existing_cloudflare: Option<ExistingCloudflareSelection>,
+    openai_tunnel_id: Option<String>,
     ready: Option<ExposeReadyState>,
     status: Option<String>,
-    url_offset: usize,
+    body_scroll: usize,
     redraw_needed: bool,
 }
 
 impl ExposeTuiState {
     fn new(args: &SuperArgs, workspace_name: String, display_name: String) -> Self {
+        let existing = discover_existing_cloudflare().ok().flatten();
         Self {
             phase: ExposeTuiPhase::EndpointSelection,
             workspace_name,
@@ -112,13 +126,20 @@ impl ExposeTuiState {
                 || "provider default".to_string(),
                 |effort| effort.as_str().to_string(),
             ),
-            endpoint_choice: EndpointChoice::QuickTunnel,
+            endpoint_choice: EndpointChoice::LocalOnly,
             endpoint_field: EndpointField::Hostname,
-            hostname: String::new(),
-            origin_port: "8765".to_string(),
+            hostname: existing
+                .as_ref()
+                .map_or_else(String::new, |selection| selection.hostname.clone()),
+            origin_port: existing.as_ref().map_or_else(
+                || "8765".to_string(),
+                |selection| selection.origin_port.to_string(),
+            ),
+            existing_cloudflare: existing,
+            openai_tunnel_id: None,
             ready: None,
             status: None,
-            url_offset: 0,
+            body_scroll: 0,
             redraw_needed: true,
         }
     }
@@ -126,6 +147,11 @@ impl ExposeTuiState {
     #[cfg(test)]
     fn phase(&self) -> ExposeTuiPhase {
         self.phase
+    }
+
+    #[cfg(test)]
+    fn body_scroll(&self) -> usize {
+        self.body_scroll
     }
 
     fn handle_event(&mut self, event: Event) -> ExposeTuiAction {
@@ -140,7 +166,7 @@ impl ExposeTuiState {
     }
 
     fn handle_key(&mut self, key: KeyEvent) -> ExposeTuiAction {
-        if is_stop_key(key) {
+        if support::is_stop_key(key) {
             return ExposeTuiAction::Stop;
         }
         match self.phase {
@@ -158,18 +184,28 @@ impl ExposeTuiState {
                     {
                         return ExposeTuiAction::CopyUrl;
                     }
-                    KeyCode::Left => self.scroll_url(-1),
-                    KeyCode::Right => self.scroll_url(1),
+                    KeyCode::Up | KeyCode::Char('k') => {
+                        self.body_scroll = self.body_scroll.saturating_sub(1);
+                        self.redraw_needed = true;
+                    }
+                    KeyCode::Down | KeyCode::Char('j') => {
+                        self.body_scroll = self.body_scroll.saturating_add(1);
+                        self.redraw_needed = true;
+                    }
+                    KeyCode::PageUp => {
+                        self.body_scroll = self.body_scroll.saturating_sub(10);
+                        self.redraw_needed = true;
+                    }
+                    KeyCode::PageDown => {
+                        self.body_scroll = self.body_scroll.saturating_add(10);
+                        self.redraw_needed = true;
+                    }
                     KeyCode::Home => {
-                        self.url_offset = 0;
+                        self.body_scroll = 0;
                         self.redraw_needed = true;
                     }
                     KeyCode::End => {
-                        self.url_offset = self
-                            .ready
-                            .as_ref()
-                            .and_then(|ready| ready.public_url.as_ref())
-                            .map_or(0, |url| url.as_str().chars().count());
+                        self.body_scroll = usize::MAX;
                         self.redraw_needed = true;
                     }
                     _ => {}
@@ -185,14 +221,8 @@ impl ExposeTuiState {
 
     fn handle_endpoint_key(&mut self, key: KeyEvent) -> ExposeTuiAction {
         match key.code {
-            KeyCode::Up | KeyCode::Down => {
-                self.endpoint_choice = match self.endpoint_choice {
-                    EndpointChoice::QuickTunnel => EndpointChoice::ExistingCloudflareTunnel,
-                    EndpointChoice::ExistingCloudflareTunnel => EndpointChoice::QuickTunnel,
-                };
-                self.status = None;
-                self.redraw_needed = true;
-            }
+            KeyCode::Up | KeyCode::Char('k') => self.select_previous_endpoint(),
+            KeyCode::Down | KeyCode::Char('j') => self.select_next_endpoint(),
             KeyCode::Tab => {
                 if self.endpoint_choice == EndpointChoice::ExistingCloudflareTunnel {
                     self.endpoint_field = match self.endpoint_field {
@@ -210,12 +240,10 @@ impl ExposeTuiState {
             KeyCode::Char('u') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                 self.edit_endpoint_field(String::clear);
             }
-            KeyCode::Char('2') if self.endpoint_choice == EndpointChoice::QuickTunnel => {
-                self.endpoint_choice = EndpointChoice::ExistingCloudflareTunnel;
-                self.endpoint_field = EndpointField::Hostname;
-                self.status = None;
-                self.redraw_needed = true;
-            }
+            KeyCode::Char('1') => self.select_endpoint(EndpointChoice::LocalOnly),
+            KeyCode::Char('2') => self.select_endpoint(EndpointChoice::QuickTunnel),
+            KeyCode::Char('3') => self.select_endpoint(EndpointChoice::ExistingCloudflareTunnel),
+            KeyCode::Char('4') => self.select_endpoint(EndpointChoice::OpenAiSecureMcp),
             KeyCode::Char(character) => {
                 self.edit_endpoint_field(|value| value.push(character));
             }
@@ -223,6 +251,31 @@ impl ExposeTuiState {
             _ => {}
         }
         ExposeTuiAction::None
+    }
+
+    fn select_previous_endpoint(&mut self) {
+        self.select_endpoint(match self.endpoint_choice {
+            EndpointChoice::LocalOnly => EndpointChoice::OpenAiSecureMcp,
+            EndpointChoice::QuickTunnel => EndpointChoice::LocalOnly,
+            EndpointChoice::ExistingCloudflareTunnel => EndpointChoice::QuickTunnel,
+            EndpointChoice::OpenAiSecureMcp => EndpointChoice::ExistingCloudflareTunnel,
+        });
+    }
+
+    fn select_next_endpoint(&mut self) {
+        self.select_endpoint(match self.endpoint_choice {
+            EndpointChoice::LocalOnly => EndpointChoice::QuickTunnel,
+            EndpointChoice::QuickTunnel => EndpointChoice::ExistingCloudflareTunnel,
+            EndpointChoice::ExistingCloudflareTunnel => EndpointChoice::OpenAiSecureMcp,
+            EndpointChoice::OpenAiSecureMcp => EndpointChoice::LocalOnly,
+        });
+    }
+
+    fn select_endpoint(&mut self, endpoint: EndpointChoice) {
+        self.endpoint_choice = endpoint;
+        self.endpoint_field = EndpointField::Hostname;
+        self.status = None;
+        self.redraw_needed = true;
     }
 
     fn edit_endpoint_field(&mut self, edit: impl FnOnce(&mut String)) {
@@ -240,7 +293,14 @@ impl ExposeTuiState {
 
     fn selected_endpoint(&mut self) -> ExposeTuiAction {
         match self.endpoint_choice {
-            EndpointChoice::QuickTunnel => ExposeTuiAction::Start(ExposeEndpointMode::QuickTunnel),
+            EndpointChoice::LocalOnly => ExposeTuiAction::Start {
+                endpoint: ExposeEndpointMode::LocalOnly,
+                existing: None,
+            },
+            EndpointChoice::QuickTunnel => ExposeTuiAction::Start {
+                endpoint: ExposeEndpointMode::QuickTunnel,
+                existing: None,
+            },
             EndpointChoice::ExistingCloudflareTunnel => {
                 let hostname = match validate_existing_cloudflare_hostname(self.hostname.trim()) {
                     Ok(hostname) => hostname,
@@ -258,10 +318,55 @@ impl ExposeTuiState {
                         return ExposeTuiAction::None;
                     }
                 };
-                ExposeTuiAction::Start(ExposeEndpointMode::ExistingCloudflareTunnel {
-                    hostname,
-                    origin_port,
-                })
+                let existing = self.existing_cloudflare.as_ref().map(|selection| {
+                    let mut selection = selection.clone();
+                    selection.hostname.clone_from(&hostname);
+                    selection.origin_port = origin_port;
+                    selection
+                });
+                if existing.is_none() {
+                    self.status = Some(
+                        "no usable Cloudflare config detected; use --cloudflare-config or a token file"
+                            .to_string(),
+                    );
+                    self.redraw_needed = true;
+                    return ExposeTuiAction::None;
+                }
+                ExposeTuiAction::Start {
+                    endpoint: ExposeEndpointMode::ExistingCloudflareTunnel {
+                        hostname,
+                        origin_port,
+                        tunnel: existing
+                            .as_ref()
+                            .and_then(|selection| selection.tunnel.clone()),
+                    },
+                    existing,
+                }
+            }
+            EndpointChoice::OpenAiSecureMcp => {
+                let tunnel_id = match resolve_openai_tunnel_id(self.openai_tunnel_id.as_deref()) {
+                    Ok(tunnel_id) => tunnel_id,
+                    Err(error) => {
+                        self.status = Some(error.to_string());
+                        self.redraw_needed = true;
+                        return ExposeTuiAction::None;
+                    }
+                };
+                let client_version = match ensure_openai_tunnel_available(&tunnel_id) {
+                    Ok(client_version) => client_version,
+                    Err(error) => {
+                        self.status = Some(error.to_string());
+                        self.redraw_needed = true;
+                        return ExposeTuiAction::None;
+                    }
+                };
+                ExposeTuiAction::Start {
+                    endpoint: ExposeEndpointMode::OpenAiSecureMcp {
+                        tunnel_id,
+                        client_version,
+                    },
+                    existing: None,
+                }
             }
         }
     }
@@ -274,8 +379,8 @@ impl ExposeTuiState {
             }
             ExposeLifecycleEvent::Ready(ready) => {
                 self.phase = ExposeTuiPhase::Ready;
-                self.ready = Some(ready);
-                self.url_offset = 0;
+                self.ready = Some(*ready);
+                self.body_scroll = 0;
                 self.status = None;
             }
             ExposeLifecycleEvent::Stopped => {
@@ -301,24 +406,12 @@ impl ExposeTuiState {
         self.redraw_needed = true;
     }
 
-    fn scroll_url(&mut self, delta: isize) {
-        let length = self
-            .ready
-            .as_ref()
-            .and_then(|ready| ready.public_url.as_ref())
-            .map_or(0, |url| url.as_str().chars().count());
-        self.url_offset = if delta.is_negative() {
-            self.url_offset.saturating_sub(delta.unsigned_abs())
-        } else {
-            self.url_offset.saturating_add(delta as usize).min(length)
-        };
-        self.redraw_needed = true;
-    }
-
     fn endpoint_label(&self) -> &'static str {
         match self.endpoint_choice {
+            EndpointChoice::LocalOnly => "Local only",
             EndpointChoice::QuickTunnel => "Quick Tunnel",
             EndpointChoice::ExistingCloudflareTunnel => "Existing Cloudflare Tunnel",
+            EndpointChoice::OpenAiSecureMcp => "OpenAI Secure MCP Tunnel",
         }
     }
 }
@@ -332,6 +425,7 @@ pub(super) fn run(
 ) -> Result<()> {
     let mut terminal = ExposeTuiTerminal::stderr("Super expose TUI")?;
     let mut state = ExposeTuiState::new(&super_args, workspace_name.clone(), display_name.clone());
+    state.openai_tunnel_id = args.openai_tunnel_id.clone();
     let (event_tx, event_rx) = mpsc::sync_channel(EXPOSE_TUI_EVENT_CAPACITY);
     let cancel = Arc::new(AtomicBool::new(false));
     let mut launch = Some((
@@ -399,14 +493,14 @@ fn worker_result(state: &ExposeTuiState) -> Result<()> {
     Ok(())
 }
 
-fn draw(terminal: &mut ExposeTuiTerminal, state: &ExposeTuiState) -> Result<()> {
+fn draw(terminal: &mut ExposeTuiTerminal, state: &mut ExposeTuiState) -> Result<()> {
     terminal
         .draw(|frame| draw_frame(frame, state))
         .context("failed to draw Super expose TUI")?;
     Ok(())
 }
 
-fn draw_frame(frame: &mut Frame<'_>, state: &ExposeTuiState) {
+fn draw_frame(frame: &mut Frame<'_>, state: &mut ExposeTuiState) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
@@ -438,11 +532,25 @@ fn draw_frame(frame: &mut Frame<'_>, state: &ExposeTuiState) {
     let body = match state.phase {
         ExposeTuiPhase::EndpointSelection => endpoint_body(state),
         ExposeTuiPhase::Preflight(phase) => preflight_body(state, phase),
-        ExposeTuiPhase::Ready => ready_body(state, chunks[1].width.saturating_sub(2)),
+        ExposeTuiPhase::Ready => ready_body(state, usize::from(chunks[1].width.saturating_sub(2))),
         ExposeTuiPhase::Stopping | ExposeTuiPhase::Stopped | ExposeTuiPhase::Failed => {
             status_body(state)
         }
     };
+    let body_height = usize::from(chunks[1].height.saturating_sub(2));
+    let body_len = body.len();
+    let body_scroll = if state.phase == ExposeTuiPhase::Ready {
+        state.body_scroll = state.body_scroll.min(body_len.saturating_sub(body_height));
+        state.body_scroll
+    } else {
+        state.body_scroll = 0;
+        0
+    };
+    let body = body
+        .into_iter()
+        .skip(body_scroll)
+        .take(body_height)
+        .collect::<Vec<_>>();
     frame.render_widget(
         Paragraph::new(body).block(
             Block::default()
@@ -454,12 +562,25 @@ fn draw_frame(frame: &mut Frame<'_>, state: &ExposeTuiState) {
 
     let footer = match state.phase {
         ExposeTuiPhase::EndpointSelection => {
-            "↑/↓ select · Tab edit · Enter start · q/Ctrl-C cancel"
+            "↑/↓/j/k select · Tab edit · Enter start · q/Ctrl-C cancel"
         }
-        ExposeTuiPhase::Ready => "c copy URL · ←/→ scroll · Home/End · q/Ctrl-C stop",
+        ExposeTuiPhase::Ready => {
+            "c copy URL · ↑/↓/j/k scroll · PgUp/PgDn · Home/End · q/Ctrl-C stop"
+        }
         ExposeTuiPhase::Stopping => "waiting for cleanup...",
         ExposeTuiPhase::Stopped | ExposeTuiPhase::Failed => "q/Ctrl-C exit",
         ExposeTuiPhase::Preflight(_) => "q/Ctrl-C stop",
+    };
+    let footer = if state.phase == ExposeTuiPhase::Ready {
+        let max_scroll = body_len.saturating_sub(body_height);
+        match (body_scroll > 0, body_scroll < max_scroll) {
+            (false, true) => format!("{footer} · ↓ more"),
+            (true, false) => format!("{footer} · ↑ more"),
+            (true, true) => format!("{footer} · ↑/↓ more"),
+            (false, false) => footer.to_string(),
+        }
+    } else {
+        footer.to_string()
     };
     frame.render_widget(
         Paragraph::new(Line::styled(footer, tui_hint_style())).block(
@@ -487,8 +608,13 @@ fn endpoint_body(state: &ExposeTuiState) -> Vec<Line<'static>> {
         )),
         Line::from(""),
         option_line(
+            state.endpoint_choice == EndpointChoice::LocalOnly,
+            "Local only",
+            "loopback only; no external tunnel",
+        ),
+        option_line(
             state.endpoint_choice == EndpointChoice::QuickTunnel,
-            "Quick Tunnel",
+            "Cloudflare Quick Tunnel",
             "random trycloudflare.com hostname",
         ),
         option_line(
@@ -496,9 +622,22 @@ fn endpoint_body(state: &ExposeTuiState) -> Vec<Line<'static>> {
             "Existing Cloudflare Tunnel",
             "use a configured hostname and loopback origin",
         ),
+        option_line(
+            state.endpoint_choice == EndpointChoice::OpenAiSecureMcp,
+            "OpenAI Secure MCP Tunnel",
+            "remote MCP; browser stays local",
+        ),
     ];
     if state.endpoint_choice == EndpointChoice::ExistingCloudflareTunnel {
         lines.extend([
+            Line::from(format!(
+                "Tunnel: {}",
+                state
+                    .existing_cloudflare
+                    .as_ref()
+                    .and_then(|selection| selection.tunnel.as_deref())
+                    .unwrap_or("<detected config identity unavailable>"),
+            )),
             Line::from(format!(
                 "Hostname{}: {}",
                 if state.endpoint_field == EndpointField::Hostname {
@@ -523,6 +662,19 @@ fn endpoint_body(state: &ExposeTuiState) -> Vec<Line<'static>> {
             )),
         ]);
     }
+    if state.endpoint_choice == EndpointChoice::OpenAiSecureMcp {
+        lines.extend([
+            Line::from(format!(
+                "Tunnel ID: {}",
+                state
+                    .openai_tunnel_id
+                    .as_deref()
+                    .unwrap_or("<CONTROL_PLANE_TUNNEL_ID not set>")
+            )),
+            Line::from("Browser: local only"),
+            Line::from("MCP: OpenAI Secure MCP Tunnel"),
+        ]);
+    }
     if let Some(status) = state.status.as_deref() {
         lines.push(Line::styled(status.to_string(), tui_error_style()));
     }
@@ -543,15 +695,18 @@ fn option_line(selected: bool, name: &str, description: &str) -> Line<'static> {
 }
 
 fn preflight_body(state: &ExposeTuiState, current: ExposeLifecyclePhase) -> Vec<Line<'static>> {
-    const PHASES: [ExposeLifecyclePhase; 8] = [
+    const PHASES: [ExposeLifecyclePhase; 11] = [
         ExposeLifecyclePhase::Preparing,
         ExposeLifecyclePhase::CheckingCloudflared,
         ExposeLifecyclePhase::StartingSuper,
         ExposeLifecyclePhase::LocalMcpInitialize,
         ExposeLifecyclePhase::LocalMcpTools,
+        ExposeLifecyclePhase::LocalBrowser,
         ExposeLifecyclePhase::Cloudflare,
+        ExposeLifecyclePhase::OpenAiTunnel,
         ExposeLifecyclePhase::PublicMcpInitialize,
         ExposeLifecyclePhase::PublicMcpTools,
+        ExposeLifecyclePhase::PublicBrowser,
     ];
     let endpoint = state.endpoint_label();
     let mut lines = vec![
@@ -562,8 +717,32 @@ fn preflight_body(state: &ExposeTuiState, current: ExposeLifecyclePhase) -> Vec<
         Line::from(""),
     ];
     lines.extend(PHASES.into_iter().map(|phase| {
-        let skipped = phase == ExposeLifecyclePhase::CheckingCloudflared
-            && state.endpoint_choice == EndpointChoice::ExistingCloudflareTunnel;
+        let skipped = match state.endpoint_choice {
+            EndpointChoice::LocalOnly => matches!(
+                phase,
+                ExposeLifecyclePhase::CheckingCloudflared
+                    | ExposeLifecyclePhase::LocalBrowser
+                    | ExposeLifecyclePhase::Cloudflare
+                    | ExposeLifecyclePhase::OpenAiTunnel
+                    | ExposeLifecyclePhase::PublicMcpInitialize
+                    | ExposeLifecyclePhase::PublicMcpTools
+                    | ExposeLifecyclePhase::PublicBrowser
+            ),
+            EndpointChoice::QuickTunnel => phase == ExposeLifecyclePhase::OpenAiTunnel,
+            EndpointChoice::ExistingCloudflareTunnel => {
+                phase == ExposeLifecyclePhase::CheckingCloudflared
+                    || phase == ExposeLifecyclePhase::OpenAiTunnel
+            }
+            EndpointChoice::OpenAiSecureMcp => matches!(
+                phase,
+                ExposeLifecyclePhase::CheckingCloudflared
+                    | ExposeLifecyclePhase::LocalBrowser
+                    | ExposeLifecyclePhase::Cloudflare
+                    | ExposeLifecyclePhase::PublicMcpInitialize
+                    | ExposeLifecyclePhase::PublicMcpTools
+                    | ExposeLifecyclePhase::PublicBrowser
+            ),
+        };
         let (marker, style) = if skipped {
             ("–", tui_muted_style())
         } else if phase.order() < current.order() {
@@ -582,154 +761,6 @@ fn preflight_body(state: &ExposeTuiState, current: ExposeLifecyclePhase) -> Vec<
         lines.push(Line::styled(status.to_string(), tui_error_style()));
     }
     lines
-}
-
-fn ready_body(state: &ExposeTuiState, width: u16) -> Vec<Line<'static>> {
-    let Some(ready) = state.ready.as_ref() else {
-        return vec![Line::styled("Ready", tui_success_style())];
-    };
-    let active_runs = ready
-        .mcp
-        .run_manager
-        .list()
-        .into_iter()
-        .filter(|run| !run.state.terminal())
-        .count();
-    let endpoint = match &ready.endpoint {
-        ExposeEndpointMode::LocalOnly => "Local only",
-        ExposeEndpointMode::QuickTunnel => "Quick Tunnel",
-        ExposeEndpointMode::ExistingCloudflareTunnel { .. } => "Existing Cloudflare Tunnel",
-        ExposeEndpointMode::OpenAiSecureMcp { .. } => "OpenAI Secure MCP Tunnel",
-    };
-    let url_prefix = "MCP URL: ";
-    let url_width = usize::from(width).saturating_sub(url_prefix.len());
-    let mut lines = vec![
-        Line::styled(
-            if ready.public_url.is_some() {
-                "Ready — public MCP passed initialize and tools/list"
-            } else {
-                "Ready — local MCP passed initialize and tools/list"
-            },
-            tui_success_style().add_modifier(Modifier::BOLD),
-        ),
-        Line::from(format!(
-            "Instance: {} ({})",
-            ready.display_name, ready.instance_id
-        )),
-        Line::from(format!("Workspace: {}", ready.workspace_name)),
-        Line::from(format!("Provider: {}", state.provider)),
-        Line::from(format!("Model: {}", state.model)),
-        Line::from(format!("Effort: {}", state.effort)),
-        Line::from(format!(
-            "Sub-agents: {}{}",
-            if state.sub_agent {
-                "enabled"
-            } else {
-                "disabled"
-            },
-            if state.sub_agent {
-                format!(" · {}/{}", state.sub_agent_model, state.sub_agent_effort)
-            } else {
-                String::new()
-            },
-        )),
-        Line::from(format!("Endpoint: {endpoint}")),
-        Line::from(format!("Active runs: {active_runs}")),
-        Line::from(""),
-        Line::from(vec![
-            Span::styled(
-                if ready.public_url.is_some() {
-                    "MCP URL: "
-                } else {
-                    "Local MCP URL: "
-                },
-                tui_primary_style(),
-            ),
-            Span::raw(ready.local_mcp_url.as_str().to_string()),
-        ]),
-        Line::from(vec![
-            Span::styled("Browser URL: ", tui_muted_style()),
-            Span::raw(ready.local_url.clone()),
-        ]),
-        Line::from(""),
-        Line::styled(
-            "Access: full Super authority as the current OS user; initial directory is context only.",
-            tui_error_style(),
-        ),
-        Line::styled(
-            "The MCP URL is an ephemeral bearer capability; stop expose to revoke it.",
-            tui_error_style(),
-        ),
-    ];
-    if let Some(public_url) = ready.public_url.as_ref() {
-        lines.insert(
-            10,
-            Line::from(vec![
-                Span::styled("Public MCP URL: ", tui_primary_style()),
-                Span::raw(visible_url(
-                    public_url.as_str(),
-                    state.url_offset,
-                    url_width,
-                )),
-            ]),
-        );
-    }
-    if let Some(public_browser_url) = ready.public_browser_url.as_deref() {
-        lines.insert(
-            12,
-            Line::from(vec![
-                Span::styled("Public browser URL: ", tui_muted_style()),
-                Span::raw(visible_url(public_browser_url, state.url_offset, url_width)),
-            ]),
-        );
-    }
-    if let ExposeEndpointMode::OpenAiSecureMcp {
-        tunnel_id,
-        client_version,
-    } = &ready.endpoint
-    {
-        lines.insert(
-            11,
-            Line::from(format!(
-                "OpenAI tunnel: {tunnel_id} · ready · {client_version}"
-            )),
-        );
-    }
-    if let Some(status) = state.status.as_deref() {
-        lines.push(Line::styled(status.to_string(), tui_success_style()));
-    }
-    lines
-}
-
-fn status_body(state: &ExposeTuiState) -> Vec<Line<'static>> {
-    let style = if state.phase == ExposeTuiPhase::Failed {
-        tui_error_style()
-    } else {
-        tui_muted_style()
-    };
-    vec![Line::styled(
-        state.status.clone().unwrap_or_else(|| "done".to_string()),
-        style,
-    )]
-}
-
-fn is_stop_key(key: KeyEvent) -> bool {
-    matches!(
-        key.code,
-        KeyCode::Char('q') | KeyCode::Char('Q') | KeyCode::Esc
-    ) || (key.modifiers.contains(KeyModifiers::CONTROL)
-        && matches!(key.code, KeyCode::Char('c' | 'C')))
-}
-
-fn signal_requested() -> bool {
-    #[cfg(unix)]
-    {
-        crate::InteractiveSigintGuard::count() > 0
-    }
-    #[cfg(not(unix))]
-    {
-        false
-    }
 }
 
 #[cfg(test)]

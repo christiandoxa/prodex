@@ -161,6 +161,85 @@ pub(crate) fn verify_public_mcp_with_progress(
     Ok(())
 }
 
+pub(crate) fn verify_local_browser_with_progress(
+    url: &str,
+    progress: &mut dyn FnMut(&str),
+    cancelled: &dyn Fn() -> bool,
+) -> Result<()> {
+    verify_browser_with_progress(url, "local browser route", progress, cancelled)
+}
+
+pub(crate) fn verify_public_browser_with_progress(
+    url: &str,
+    progress: &mut dyn FnMut(&str),
+    cancelled: &dyn Fn() -> bool,
+) -> Result<()> {
+    verify_browser_with_progress(url, "public browser route", progress, cancelled)
+}
+
+fn verify_browser_with_progress(
+    url: &str,
+    label: &'static str,
+    progress: &mut dyn FnMut(&str),
+    cancelled: &dyn Fn() -> bool,
+) -> Result<()> {
+    const BROWSER_TIMEOUT: Duration = Duration::from_secs(10);
+    let started = Instant::now();
+    progress(label);
+    let mut root = url::Url::parse(url).context("invalid public browser URL")?;
+    root.set_fragment(None);
+    root.set_path("/expose");
+    let mut script = root.clone();
+    script.set_path("/expose/app.js");
+    let client = public_mcp_client(url)?;
+    let deadline = Instant::now() + BROWSER_TIMEOUT;
+    loop {
+        if cancelled() {
+            bail!("{label} cancelled")
+        }
+        if browser_route_ready(&client, &root, &script) {
+            crate::runtime_launch::emit_runtime_timing("expose.public_browser_ready_ms", started);
+            return Ok(());
+        }
+        if Instant::now() >= deadline {
+            bail!("{label} did not become ready within 10 seconds")
+        }
+        if !wait_for_probe_retry(MCP_PUBLIC_READY_STEP, cancelled) {
+            bail!("{label} cancelled")
+        }
+    }
+}
+
+fn browser_route_ready(client: &Client, root: &url::Url, script: &url::Url) -> bool {
+    let Ok(response) = client.get(root.clone()).send() else {
+        return false;
+    };
+    if !response.status().is_success()
+        || !response
+            .headers()
+            .get(reqwest::header::CONTENT_TYPE)
+            .and_then(|value| value.to_str().ok())
+            .is_some_and(|value| value.to_ascii_lowercase().contains("text/html"))
+    {
+        return false;
+    }
+    let Ok(html) = response.text() else {
+        return false;
+    };
+    if !html.contains("/expose/app.js") {
+        return false;
+    }
+    let Ok(response) = client.get(script.clone()).send() else {
+        return false;
+    };
+    if !response.status().is_success() {
+        return false;
+    }
+    response.text().is_ok_and(|javascript| {
+        javascript.contains("/session") && javascript.contains("location.hash")
+    })
+}
+
 fn public_mcp_client(url: &str) -> Result<Client> {
     let mut builder = Client::builder().timeout(Duration::from_secs(3));
     if let Ok(parsed) = url::Url::parse(url)

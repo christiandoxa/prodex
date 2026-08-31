@@ -8,6 +8,11 @@ provides:
 - optionally, an external tunnel for the MCP endpoint and, in Cloudflare mode,
   the browser terminal.
 
+In a real interactive terminal, the command opens the Expose mode picker before
+starting an external tunnel. **Local only** is highlighted first. Explicit
+provider flags bypass that picker. A non-TTY invocation never opens Ratatui and
+keeps the bare command loopback-only.
+
 The listener is loopback-bound. Expose grants Super-level authority as the
 current operating-system user, so the URL is a capability, not a harmless
 preview link. Anyone who obtains a complete public URL can use the authority
@@ -19,7 +24,7 @@ summary.
 
 ## Quick start
 
-Local browser and local MCP:
+Local-only browser and MCP (the safe default, including non-TTY use):
 
 ```bash
 prodex s expose
@@ -34,7 +39,13 @@ prodex s expose --tunnel
 The explicit equivalent is:
 
 ```bash
-prodex s expose --tunnel-provider cloudflare
+prodex s expose --tunnel-provider cloudflare-quick
+```
+
+Existing Cloudflare Tunnel (using detected or explicitly selected config):
+
+```bash
+prodex s expose --tunnel-provider cloudflare-existing
 ```
 
 OpenAI Secure MCP Tunnel (local browser, remote MCP through OpenAI):
@@ -49,12 +60,31 @@ Replace the tunnel identifier and runtime key with values from the supported
 OpenAI tunnel setup. The identifier must be `tunnel_` followed by 32 lowercase
 letters or digits. The API key is deliberately not a command-line option.
 
+## Interactive setup
+
+With stdin and the terminal output attached to a TTY, the mode picker offers:
+
+```text
+Expose mode
+
+> Local only
+  Cloudflare Quick Tunnel
+  Existing Cloudflare Tunnel
+  OpenAI Secure MCP Tunnel
+```
+
+Use Up/Down to select, Enter to continue, and Esc or `q` to cancel. Cancellation
+before startup has no external side effects. Prodex does not start
+`cloudflared` or `tunnel-client` until an external mode has been explicitly
+selected and confirmed. The Ready view keeps the selected mode visible.
+
 ## Mode comparison
 
 | Mode | Browser terminal | MCP | External tunnel | Public browser shell |
 |---|---|---|---|---|
-| Local | Local loopback | Local loopback | None | No |
-| Cloudflare | Public through Quick Tunnel, or an interactively selected existing Cloudflare hostname | Public through the same Cloudflare endpoint | `cloudflared`; Quick Tunnel uses `auto` with QUIC/HTTP/2 fallback | Yes |
+| Local only | Local loopback | Local loopback | None | No |
+| Cloudflare Quick Tunnel | Public through an ephemeral `trycloudflare.com` hostname | Public through the same Cloudflare endpoint | Prodex-supervised `cloudflared` Quick Tunnel | Yes |
+| Existing Cloudflare Tunnel | Public through the configured existing hostname | Public through the same Cloudflare endpoint | A pre-created, user-managed Cloudflare tunnel/service | Yes |
 | OpenAI Secure MCP Tunnel | Local loopback only | Remote through the supervised official tunnel client | OpenAI Secure MCP Tunnel | No |
 
 OpenAI mode is MCP-only. It does not publish a generic browser reverse proxy,
@@ -87,9 +117,15 @@ prodex s expose [OPTIONS] [CODEX_ARG]...
 | `--cols <COLS>` | Initial terminal columns; default `100`. |
 | `--rows <ROWS>` | Initial terminal rows; default `32`. |
 | `--max-clients <MAX_CLIENTS>` | Concurrent browser clients, from 1 through 32; default `4`. |
-| `--tunnel` | Explicitly selects the Cloudflare public expose path. It remains a boolean compatibility flag. |
-| `--tunnel-provider cloudflare` | Explicit Cloudflare selection. |
+| `--tunnel` | Explicitly selects the Cloudflare Quick Tunnel public expose path. It remains a boolean compatibility flag. |
+| `--tunnel-provider cloudflare-quick` | Explicitly selects Cloudflare Quick Tunnel and bypasses the picker. `cloudflare` remains an alias. |
+| `--tunnel-provider cloudflare-existing` | Explicitly selects a pre-created Cloudflare Tunnel from local config or a token file. `cloudflare-named` remains an alias. |
 | `--tunnel-provider openai` | OpenAI Secure MCP Tunnel selection; browser remains local. |
+| `--cloudflare-config <PATH>` | Existing Cloudflare config file; defaults to the official local search locations. Mutually exclusive with `--cloudflare-token-file`. |
+| `--cloudflare-tunnel <NAME\|UUID>` | Existing Cloudflare tunnel name or UUID; otherwise read from the selected config. |
+| `--cloudflare-hostname <HOSTNAME>` | Existing Cloudflare public hostname; otherwise use the unique loopback ingress hostname from config. |
+| `--cloudflare-origin-port <PORT>` | Existing loopback origin port; otherwise use the matching config service port. |
+| `--cloudflare-token-file <PATH>` | Existing Cloudflare token file passed to `cloudflared`; the token contents are never shown or accepted as an argv value. Mutually exclusive with `--cloudflare-config`. |
 | `--openai-tunnel-id <ID>` | Non-secret OpenAI Platform tunnel identifier. It requires `--tunnel-provider openai`. |
 | `--name <NAME>` | Suggested display name for the ChatGPT connection. |
 | `-p, --profile <NAME>` | Starting Prodex profile; otherwise the active profile is used. |
@@ -117,7 +153,7 @@ prodex s expose [OPTIONS] [CODEX_ARG]...
 | `--context-window <TOKENS>` | Context-window override for local/provider bridges. |
 | `--auto-compact-token-limit <TOKENS>` | Auto-compaction threshold for local/provider bridges. |
 | `--web-search <MODE>` | Hosted web-search mode: `disabled`, `cached`, `indexed`, or `live`. |
-| `--dry-run` | Not supported by `prodex s expose`; use `prodex s --dry-run` for launch diagnostics. |
+| `--dry-run` | Print the resolved mode, provider, local bind, binary, and redacted configuration source without starting Expose or a tunnel child. |
 | `--no-tunnel` | Hidden deprecated compatibility alias for local-only behavior. |
 
 Options inherited from Super are still subject to the selected provider's
@@ -134,8 +170,14 @@ prodex s expose --tunnel        # Cloudflare public expose path
 prodex s expose --no-tunnel     # hidden local-only compatibility alias
 ```
 
-`--tunnel` is never an alias for OpenAI mode. Select OpenAI explicitly with
-`--tunnel-provider openai`.
+`--tunnel` remains the Quick Tunnel compatibility flag and is never an alias
+for Existing Cloudflare or OpenAI mode. The explicit provider values are
+`cloudflare-quick` (alias `cloudflare`), `cloudflare-existing` (alias
+`cloudflare-named`), and `openai`.
+
+The interactive picker is not used when stdin or the terminal output is not a
+TTY. In that case, bare `prodex s expose` remains local-only; use `--tunnel` or
+an explicit supported provider flag in scripts when external access is intended.
 
 ## Architecture
 
@@ -148,7 +190,7 @@ Prodex Super parent
   │    └─ MCP route (/pdx/v1/<capability>/mcp)
   ├─ Super PTY and bounded run manager
   └─ optional supervised external child
-       ├─ cloudflared (Cloudflare mode)
+       ├─ cloudflared (Quick or Existing Cloudflare mode)
        └─ official tunnel-client (OpenAI MCP mode)
 ```
 
@@ -187,9 +229,9 @@ The lifecycle is:
 3. Create a fresh capability and bind the loopback listener.
 4. Start the Super PTY and local HTTP server.
 5. Probe local MCP `initialize`, then `tools/list`.
-6. If requested, start and validate the selected external tunnel.
-7. Probe the public Cloudflare MCP endpoint when Cloudflare is selected, or
-   validate the tunnel-client's local health endpoints in OpenAI mode.
+6. If requested, start the selected Quick/Existing Cloudflare or OpenAI child.
+7. Probe the public Cloudflare MCP endpoint when a Cloudflare route is selected,
+   or validate the tunnel-client's local health endpoints in OpenAI mode.
 8. Print the ready status and keep the parent, child runs, listener, and tunnel
    supervised until cancellation, normal shutdown, or a real child failure.
 
@@ -300,17 +342,42 @@ public readiness failure. It does not pretend the public MCP endpoint is
 ready. Use OpenAI mode only when its own network and authentication contract
 is available; Prodex never silently switches providers.
 
-### Existing Cloudflare Tunnel selection
+### Existing Cloudflare Tunnel
 
-When a tunnel-enabled Super expose is interactive, the endpoint selector
-defaults to Quick Tunnel. Use Up/Down or `2` to choose **Existing Cloudflare
-Tunnel**, then enter a public DNS hostname and a loopback origin port. The
-default displayed origin port is `8765`.
+This mode uses a pre-created, user-managed Cloudflare Tunnel. It is not a Quick
+Tunnel and does not create a Cloudflare account resource, DNS record, tunnel, or
+credential. Prodex starts `cloudflared tunnel run` with the existing tunnel
+identity and supervises that child; it does not silently mutate the tunnel.
 
-Prodex validates the hostname and probes the configured public MCP URL, but it
-does not launch, stop, reconfigure, or authenticate the user's existing
-Cloudflare service. A fixed origin port must already match that service's
-configuration.
+The interactive picker may preselect one valid detected configuration, but still
+requires explicit confirmation. For deterministic use, select
+`cloudflare-existing` with `--tunnel-provider`.
+
+Prodex accepts either an official Cloudflare config file or a token file:
+
+- `--cloudflare-config` (or `PRODEX_CLOUDFLARE_CONFIG`/`TUNNEL_CONFIG`) selects
+  a config. Without an override, Prodex checks `~/.cloudflared/config.yml` and
+  `config.yaml`, plus the standard Unix system locations when applicable.
+- `--cloudflare-token-file` (or `PRODEX_CLOUDFLARE_TOKEN_FILE`/
+  `TUNNEL_TOKEN_FILE`) selects a token file. Token mode also requires
+  `--cloudflare-hostname` or `PRODEX_CLOUDFLARE_HOSTNAME`; the optional tunnel
+  name/UUID and origin port can be supplied with their corresponding flags or
+  environment variables.
+
+A config must provide a tunnel name/UUID and exactly one usable loopback HTTP
+ingress hostname, such as `prodex.example.com` mapped to
+`http://127.0.0.1:<port>`. Use `--cloudflare-hostname` when multiple routes
+exist. `--cloudflare-origin-port` must match the configured service port;
+Prodex binds `127.0.0.1:<origin-port>` and does not rewrite ingress. The
+configured hostname is preserved and used for the public browser and MCP
+routes; Prodex never fabricates a hostname.
+
+Config and token-file modes are mutually exclusive. Keep tunnel credentials and
+token contents in the official Cloudflare/cloudflared files. Prodex never asks
+for, displays, logs, or puts the token value in argv; it passes only the
+selected file path to `cloudflared`. It does not create, delete, reconfigure, or
+rotate the tunnel. If the ingress does not map the selected hostname to the
+chosen loopback port, setup fails with an actionable error.
 
 ## OpenAI Secure MCP Tunnel
 
@@ -361,6 +428,12 @@ Prodex-selected control-plane endpoint is `api.openai.com` over HTTPS/TCP 443;
 the official client may have additional current network requirements, so follow
 its own release documentation for deployment-specific restrictions.
 
+When selected from the interactive picker, OpenAI setup shows the configured
+non-secret tunnel ID and the fixed split: Browser **Local only**, MCP **OpenAI
+Secure MCP Tunnel**. If the tunnel ID, runtime key, or supported client is
+missing, setup stops with guidance instead of attempting a broken launch. The
+runtime API key is never displayed.
+
 ## Credentials and security
 
 Expose has two different capability surfaces:
@@ -401,6 +474,23 @@ With a TTY, the expose view shows lifecycle phases such as Preparing,
 Cloudflare tunnel, OpenAI Secure MCP Tunnel, local MCP initialize/tools, public
 MCP initialize/tools, Ready, Stopped, and Failed. State transitions are bounded
 and failures are redacted before presentation.
+
+### Complete URLs in the Ready view
+
+The interactive Ready panel renders the complete value of every URL or
+operational endpoint it shows. This includes `Public MCP URL`, `MCP URL`,
+`Public Browser URL`, `Browser URL`, an Existing Cloudflare hostname, and any
+OpenAI tunnel endpoint or identifier. Long values—including unbroken capability
+URLs with no spaces—wrap at terminal display-column boundaries; they are never
+right-clipped, ellipsized, or replaced with `...`.
+
+Wrapping is presentation-only: the underlying URL and capability value remain
+unchanged. Each wrapped field contributes its actual height, so later fields do
+not overlap it. If a short terminal cannot show the whole status at once, the
+central status body scrolls vertically while the header, footer, and full-access
+warning remain stable and reachable. Resizing recomputes wrapping and clamps
+the scroll position. OpenAI mode shows its local browser/MCP information and
+safe tunnel identifier, but never invents a public browser URL.
 
 ## Process supervision and shutdown
 
@@ -465,11 +555,14 @@ for public browser access.
 
 ## Provider selection guidance
 
-- Choose **Local** when the browser and MCP client run on the same machine and
-  no external access is needed.
-- Choose **Cloudflare** when a public browser terminal and public MCP endpoint
-  are both intentional requirements. Treat both complete URLs as full-access
-  bearer credentials.
+- Choose **Local only** when the browser and MCP client run on the same machine
+  and no external access is needed.
+- Choose **Cloudflare Quick Tunnel** for an ephemeral public browser terminal
+  and public MCP endpoint without a Cloudflare account. Treat both complete
+  URLs as full-access bearer credentials.
+- Choose **Existing Cloudflare Tunnel** when a pre-created tunnel, stable
+  hostname, and its official config or token file are already managed by the
+  user. Treat both complete URLs as full-access bearer credentials.
 - Choose **OpenAI Secure MCP Tunnel** when an OpenAI-supported surface needs
   remote MCP connectivity, while the browser terminal should remain local and
   no generic public browser shell is required.

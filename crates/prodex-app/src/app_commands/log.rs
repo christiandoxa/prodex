@@ -8,7 +8,8 @@ use self::log_paths::recent_session_log_paths;
 #[cfg(test)]
 use self::log_stream::log_stream_item_json;
 pub(crate) use self::log_stream::{
-    LogStreamItem, collect_new_runtime_log_stream_items,
+    LogLoadAggregate, LogLoadObservation, LogStreamItem, collect_new_runtime_log_stream_items,
+    collect_new_runtime_log_stream_items_for_tui_with_throughput,
     collect_new_runtime_log_stream_items_with_throughput, local_token_usage_event, log_event_label,
     print_log_stream_item, print_token_usage_event, print_transcript_event,
     print_upstream_payload_event,

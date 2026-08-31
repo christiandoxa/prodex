@@ -108,10 +108,23 @@ pub(super) fn render_log_stream_tui(
             Constraint::Length(3),
         ])
         .split(frame.area());
-    let matches = matching_log_stream_items(items, state.query()).len();
-    let count = match state.query() {
-        Some(_) => format!("{matches}/{} match(es)", items.len()),
-        None => format!("{} event(s)", items.len()),
+    let matches = matching_log_stream_items(items, state.query());
+    let raw_count = items.iter().map(log_stream_item_raw_count).sum::<usize>();
+    let count = if raw_count == items.len() {
+        match state.query() {
+            Some(_) => format!("{}/{} match(es)", matches.len(), items.len()),
+            None => format!("{} event(s)", items.len()),
+        }
+    } else {
+        match state.query() {
+            Some(_) => format!(
+                "{}/{} entries · {} raw observations",
+                matches.len(),
+                items.len(),
+                raw_count
+            ),
+            None => format!("{} entries · {} raw observations", items.len(), raw_count),
+        }
     };
 
     let header = Paragraph::new(Line::styled(
@@ -204,6 +217,13 @@ fn log_stream_item_matches(item: &LogStreamItem, query: &str) -> bool {
         LogStreamItem::Transcript(event) => {
             format!("{} {} {}", event.timestamp, event.source, event.text)
         }
+        LogStreamItem::LoadObservation(event) => {
+            format!(
+                "{} {} {}",
+                event.event.timestamp, event.event.source, event.event.text
+            )
+        }
+        LogStreamItem::LoadAggregate(event) => return event.matches(query),
         LogStreamItem::TokenUsage(event) => format!(
             "{} {} {} {} {} {} {} {} {}",
             event.timestamp,
@@ -244,20 +264,13 @@ fn push_log_stream_item_lines(
     body_width: usize,
 ) {
     match item {
-        LogStreamItem::Transcript(event) => {
-            lines.push(Line::from(vec![
-                Span::styled(event.timestamp.clone(), tui_muted_style()),
-                Span::raw(" "),
-                Span::styled(
-                    log_event_label(&event.source),
-                    Style::default()
-                        .fg(log_stream_source_color(&event.source))
-                        .add_modifier(Modifier::BOLD),
-                ),
-            ]));
-            for line in render_text_body(&event.text, body_width) {
-                lines.push(Line::styled(line, tui_primary_style()));
-            }
+        LogStreamItem::Transcript(event) => push_transcript_lines(lines, event, body_width),
+        LogStreamItem::LoadObservation(event) => {
+            push_transcript_lines(lines, &event.event, body_width);
+        }
+        LogStreamItem::LoadAggregate(event) => {
+            let event = event.as_transcript();
+            push_transcript_lines(lines, &event, body_width);
         }
         LogStreamItem::TokenUsage(event) => {
             let request = event
@@ -333,6 +346,33 @@ fn push_log_stream_item_lines(
                 lines.push(Line::styled(line, tui_primary_style()));
             }
         }
+    }
+}
+
+fn push_transcript_lines(
+    lines: &mut Vec<Line<'static>>,
+    event: &TranscriptEvent,
+    body_width: usize,
+) {
+    lines.push(Line::from(vec![
+        Span::styled(event.timestamp.clone(), tui_muted_style()),
+        Span::raw(" "),
+        Span::styled(
+            log_event_label(&event.source),
+            Style::default()
+                .fg(log_stream_source_color(&event.source))
+                .add_modifier(Modifier::BOLD),
+        ),
+    ]));
+    for line in render_text_body(&event.text, body_width) {
+        lines.push(Line::styled(line, tui_primary_style()));
+    }
+}
+
+fn log_stream_item_raw_count(item: &LogStreamItem) -> usize {
+    match item {
+        LogStreamItem::LoadAggregate(event) => event.occurrences,
+        _ => 1,
     }
 }
 
