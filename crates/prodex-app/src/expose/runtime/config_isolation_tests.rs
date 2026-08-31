@@ -62,6 +62,7 @@ fn pty_shutdown_terminates_background_processes_in_its_session() {
         max_clients: 1,
         tunnel: false,
         no_tunnel: false,
+        tunnel_provider: None,
         name: None,
         invocation: prodex_cli::ExposeInvocation::Standalone,
         super_args: None,
