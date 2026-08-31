@@ -168,14 +168,14 @@ pub(crate) fn runtime_profile_selection_jitter(
     )
 }
 
-pub(crate) fn runtime_profile_health_sort_key(
-    profile_name: &str,
+pub(crate) fn runtime_profile_health_sort_keys(
+    profile_names: &[&str],
     profile_health: &BTreeMap<String, RuntimeProfileHealth>,
     now: i64,
     route_kind: RuntimeRouteKind,
-) -> u32 {
-    prodex_runtime_store::runtime_profile_health_sort_key(
-        profile_name,
+) -> Vec<u32> {
+    prodex_runtime_store::runtime_profile_health_sort_keys(
+        profile_names,
         profile_health,
         now,
         route_kind,

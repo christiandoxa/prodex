@@ -450,6 +450,16 @@
         "operations": [
           "smart_context_rehydration_plan"
         ]
+      },
+      {
+        "path": "mojo/prodex_core/runtime_health.mojo",
+        "language": "mojo",
+        "classification": "DETERMINISTIC_DOMAIN",
+        "production_reachable": true,
+        "role": "semantic",
+        "operations": [
+          "runtime_profile_health_sorting"
+        ]
       }
     ]
   },
@@ -999,6 +1009,24 @@
       "duplicate_production_owner": false,
       "platform_fallback": false,
       "rust_adapter_scope": "bounded input normalization and validated metadata mapping"
+    },
+    {
+      "name": "runtime_profile_health_sorting",
+      "domain": "runtime/health-scoring",
+      "introduced_in": "0.420.1",
+      "baseline_state": "candidate",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_runtime_profile_health_sort_key_batch_v1",
+      "mojo_source": "mojo/prodex_core/runtime_health.mojo",
+      "consumer": "crates/prodex-runtime-store/src/profile_backoff/score.rs",
+      "consumer_marker": "prodex_mojo_core::runtime::profile_health_sort_key_batch",
+      "production_reachability_test": "crates/prodex-mojo-core/tests/profile_health.rs",
+      "rust_owner_before": "route health decay, coupling, performance, and saturated sort-key arithmetic",
+      "rust_state_after": "adapter-only",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "profile-state lookup, route-key construction, and bounded batch mapping"
     }
   ],
   "rust_semantic_reductions": [
@@ -1478,6 +1506,24 @@
         "release_gate": "#[cfg(feature = \"mojo\")]"
       },
       "cleanup_evidence": "The production Mojo feature delegates bounded capsule admission through the new normalization ABI; Rust retains only the feature-off adapter implementation."
+    },
+    {
+      "file": "crates/prodex-runtime-store/src/profile_backoff/score.rs",
+      "symbol": "runtime_profile_health_sort_key",
+      "operation": "runtime_profile_health_sorting",
+      "previous_responsibility": "route health decay, coupling, performance, and saturated sort-key arithmetic",
+      "final_state": "adapter-only",
+      "cleanup_loc": 32,
+      "cleanup_source": {
+        "kind": "feature-gated",
+        "baseline_range": {
+          "start": 204,
+          "end": 235
+        },
+        "release_symbol": "pub fn runtime_profile_health_sort_key",
+        "release_gate": "#[cfg(feature = \"mojo\")]"
+      },
+      "cleanup_evidence": "The active selection catalog now collects normalized profile health observations and delegates bounded sort-key arithmetic to one Mojo batch; Rust retains state lookup and ordering reconstruction."
     }
   ]
 }

@@ -3,6 +3,7 @@ pub use crate::runtime_decisions::*;
 
 mod auto_redeem;
 mod candidate_plan;
+mod profile_health;
 mod profile_rotation;
 mod prompt_cache_affinity;
 mod quota_route_score;
@@ -10,6 +11,10 @@ mod selection_planning;
 pub use auto_redeem::{
     AutoRedeemCandidateInput, RUNTIME_AUTO_REDEEM_PLAN_MAX_COUNT, auto_redeem_plan_batch,
     auto_redeem_plan_self_test,
+};
+pub use profile_health::{
+    ProfileHealthScoreInput, RUNTIME_PROFILE_HEALTH_SCORE_FIELD_COUNT,
+    RUNTIME_PROFILE_HEALTH_SCORE_MAX_COUNT, profile_health_sort_key_batch,
 };
 pub use profile_rotation::profile_selection_order_batch;
 pub use prompt_cache_affinity::prompt_cache_affinity_batch;
