@@ -17,12 +17,18 @@ const OPENAI_TUNNEL_READY_POLL: Duration = Duration::from_millis(100);
 const OPENAI_TUNNEL_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(2);
 const OPENAI_TUNNEL_ID_MAX_BYTES: usize = 128;
 const OPENAI_TUNNEL_VERSION_MAX_BYTES: usize = 128;
+const OPENAI_TUNNEL_HEALTH_URL_MAX_BYTES: u64 = 4096;
 static NEXT_OPENAI_TUNNEL_CONFIG_ID: AtomicU64 = AtomicU64::new(1);
+
+#[cfg(windows)]
+use std::os::windows::io::{AsRawHandle, OwnedHandle};
 
 pub(in crate::expose) struct OpenAiTunnel {
     child: std::process::Child,
     files: OpenAiTunnelFiles,
     shut_down: bool,
+    #[cfg(windows)]
+    process_job: Option<OwnedHandle>,
 }
 
 struct OpenAiTunnelFiles {
@@ -36,6 +42,8 @@ struct OpenAiTunnelFiles {
 
 impl OpenAiTunnelFiles {
     fn create(local_mcp_url: &str, tunnel_id: &str) -> Result<Self> {
+        let local_mcp_url = validate_local_mcp_url(local_mcp_url)?;
+        validate_openai_tunnel_id(tunnel_id)?;
         let unique_id = NEXT_OPENAI_TUNNEL_CONFIG_ID.fetch_add(1, Ordering::Relaxed);
         let directory = (0..16)
             .map(|attempt| {
@@ -46,8 +54,6 @@ impl OpenAiTunnelFiles {
             })
             .find(|directory| std::fs::create_dir(directory).is_ok())
             .context("failed to create private OpenAI tunnel directory")?;
-        secret_store::ensure_private_directory(&directory)
-            .context("failed to secure OpenAI tunnel directory")?;
         let files = Self {
             config: directory.join("config.yaml"),
             mcp_url: directory.join("mcp-url"),
@@ -56,18 +62,24 @@ impl OpenAiTunnelFiles {
             directory,
             cleaned: false,
         };
-        for path in [&files.config, &files.mcp_url, &files.health_url, &files.log] {
-            secret_store::write_private_file_create_new(path, &[])
-                .context("failed to create private OpenAI tunnel file")?;
-        }
-        secret_store::write_private_file_atomic(&files.mcp_url, local_mcp_url.as_bytes())
-            .context("failed to write private MCP endpoint reference")?;
-        secret_store::write_private_file_atomic(
-            &files.config,
-            openai_tunnel_config(tunnel_id, &files.mcp_url, &files.health_url, &files.log)
-                .as_bytes(),
-        )
-        .context("failed to write private OpenAI tunnel configuration")?;
+        let result = (|| {
+            secret_store::ensure_private_directory(&files.directory)
+                .context("failed to secure OpenAI tunnel directory")?;
+            for path in [&files.config, &files.mcp_url, &files.health_url, &files.log] {
+                secret_store::write_private_file_create_new(path, &[])
+                    .context("failed to create private OpenAI tunnel file")?;
+            }
+            secret_store::write_private_file_atomic(&files.mcp_url, local_mcp_url.as_bytes())
+                .context("failed to write private MCP endpoint reference")?;
+            secret_store::write_private_file_atomic(
+                &files.config,
+                openai_tunnel_config(tunnel_id, &files.mcp_url, &files.health_url, &files.log)
+                    .as_bytes(),
+            )
+            .context("failed to write private OpenAI tunnel configuration")?;
+            Ok::<(), anyhow::Error>(())
+        })();
+        result?;
         Ok(files)
     }
 
@@ -113,6 +125,8 @@ pub(in crate::expose) fn ensure_openai_tunnel_available(tunnel_id: &str) -> Resu
     }
     let mut command = openai_tunnel_client_command();
     command.arg("--version");
+    remove_inherited_tunnel_configuration(&mut command);
+    command.env_remove("CONTROL_PLANE_API_KEY");
     let output = crate::command_probe_output(&mut command, "tunnel-client version probe")
         .map_err(|_| {
             anyhow::anyhow!(
@@ -128,10 +142,9 @@ pub(in crate::expose) fn ensure_openai_tunnel_available(tunnel_id: &str) -> Resu
 }
 
 pub(in crate::expose) fn openai_tunnel_client_command() -> Command {
-    Command::new(
-        std::env::var_os("PRODEX_TUNNEL_CLIENT_BIN")
-            .unwrap_or_else(|| OsString::from("tunnel-client")),
-    )
+    let configured = std::env::var_os("PRODEX_TUNNEL_CLIENT_BIN")
+        .unwrap_or_else(|| OsString::from("tunnel-client"));
+    Command::new(prodex_core::resolve_binary_path(&configured).unwrap_or_else(|| configured.into()))
 }
 
 pub(in crate::expose) fn start_openai_tunnel(
@@ -150,17 +163,7 @@ pub(in crate::expose) fn start_openai_tunnel(
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null());
-    // The config names the dedicated runtime key explicitly. Do not let the child silently
-    // select a model/admin key or a legacy Cloudflare credential from the parent environment.
-    for variable in [
-        "OPENAI_API_KEY",
-        "OPENAI_ADMIN_KEY",
-        "TUNNEL_TOKEN",
-        "TUNNEL_CONFIG",
-        "TUNNEL_CRED_FILE",
-    ] {
-        command.env_remove(variable);
-    }
+    remove_inherited_tunnel_configuration(&mut command);
     crate::configure_child_process_group(&mut command, true);
     crate::configure_child_parent_death(&mut command);
     let mut child = match command.spawn() {
@@ -170,15 +173,32 @@ pub(in crate::expose) fn start_openai_tunnel(
             return Err(error).context("failed to spawn tunnel-client");
         }
     };
+    #[cfg(windows)]
+    let process_job = super::assign_expose_process_job(child.as_raw_handle()).ok();
     if let Err(error) = wait_for_openai_tunnel_ready(&mut child, &files.health_url, cancelled) {
         stop_child(&mut child);
+        #[cfg(windows)]
+        drop(process_job);
         files.cleanup();
         return Err(error);
+    }
+    if child
+        .try_wait()
+        .context("failed to inspect tunnel-client after readiness")?
+        .is_some()
+    {
+        stop_child(&mut child);
+        #[cfg(windows)]
+        drop(process_job);
+        files.cleanup();
+        bail!("tunnel-client exited before local readiness completed")
     }
     Ok(OpenAiTunnel {
         child,
         files,
         shut_down: false,
+        #[cfg(windows)]
+        process_job,
     })
 }
 
@@ -193,6 +213,8 @@ impl OpenAiTunnel {
         }
         self.shut_down = true;
         stop_child(&mut self.child);
+        #[cfg(windows)]
+        drop(self.process_job.take());
         self.files.cleanup();
     }
 }
@@ -215,6 +237,66 @@ fn validate_openai_tunnel_id(value: &str) -> Result<()> {
         bail!("OpenAI tunnel id must be a valid tunnel_... identifier")
     }
     Ok(())
+}
+
+fn validate_local_mcp_url(value: &str) -> Result<String> {
+    let value = value.trim();
+    let parsed =
+        url::Url::parse(value).context("OpenAI tunnel MCP endpoint must be a loopback HTTP URL")?;
+    let host = parsed
+        .host_str()
+        .context("OpenAI tunnel MCP endpoint must have a loopback host")?;
+    let loopback = host == "localhost"
+        || host
+            .parse::<IpAddr>()
+            .is_ok_and(|address| address.is_loopback());
+    if !loopback
+        || parsed.scheme() != "http"
+        || !parsed.username().is_empty()
+        || parsed.password().is_some()
+        || parsed.port().is_none_or(|port| port == 0)
+        || parsed.query().is_some()
+        || parsed.fragment().is_some()
+        || value
+            .chars()
+            .any(|character| character.is_control() || character.is_whitespace())
+    {
+        bail!("OpenAI tunnel MCP endpoint must be a loopback HTTP URL")
+    }
+    Ok(value.to_string())
+}
+
+fn remove_inherited_tunnel_configuration(command: &mut Command) {
+    for variable in [
+        "OPENAI_API_KEY",
+        "OPENAI_API_KEYS",
+        "OPENAI_ADMIN_KEY",
+        "TUNNEL_CLIENT_CONFIG",
+        "TUNNEL_CLIENT_PROFILE",
+        "TUNNEL_CLIENT_PROFILE_FILE",
+        "TUNNEL_CLIENT_PROFILE_DIR",
+        "CONTROL_PLANE_BASE_URL",
+        "CONTROL_PLANE_URL_PATH",
+        "CONTROL_PLANE_TUNNEL_ID",
+        "CONTROL_PLANE_POLL_CHANNELS",
+        "MCP_SERVER_URL",
+        "MCP_COMMAND",
+        "HEALTH_LISTEN_ADDR",
+        "HEALTH_UNIX_SOCKET",
+        "HEALTH_URL_FILE",
+        "LOG_FILE",
+        "LOG_HTTP_RAW_UNSAFE",
+        "TUNNEL_CONFIG",
+        "TUNNEL_CERT",
+        "TUNNEL_ORIGIN_CERT",
+        "TUNNEL_CRED_FILE",
+        "TUNNEL_HOSTNAME",
+        "TUNNEL_NAME",
+        "TUNNEL_TOKEN",
+        "TUNNEL_TRANSPORT_PROTOCOL",
+    ] {
+        command.env_remove(variable);
+    }
 }
 
 fn openai_tunnel_config(tunnel_id: &str, mcp_url: &Path, health_url: &Path, log: &Path) -> String {
@@ -276,7 +358,11 @@ fn wait_for_openai_tunnel_ready(
             )
         }
         if client.is_none()
-            && let Ok(value) = std::fs::read_to_string(health_url_path)
+            && let Ok(Some(bytes)) = secret_store::read_private_file_bounded(
+                health_url_path,
+                OPENAI_TUNNEL_HEALTH_URL_MAX_BYTES,
+            )
+            && let Ok(value) = String::from_utf8(bytes.to_vec())
             && let Ok(base_url) = parse_health_base_url(&value)
         {
             client = Client::builder()
