@@ -59,7 +59,12 @@ OpenAI regular usage, additional rate-limit buckets, credits, and reset credits
 remain separate. Additional buckets are retained with explicit backend admission
 state and unknown fields; the pinned Codex compatibility target provides no
 source-backed Luna Reserve identifier or model mapping, so unknown Reserve state
-is not promoted into automatic routing.
+is not promoted into automatic routing. An explicitly labelled `Luna Reserve`
+bucket is considered only for Luna requests; it is never regular Sol/Terra
+capacity. Spark is a separate model-specific bucket. A Luna workflow keeps its
+requested model as Luna, but may use the actual `gpt-5.3-codex-spark` model at a
+safe pre-commit boundary only after usable Luna regular/Reserve capacity is
+unavailable. Temporary errors do not mark either capacity class exhausted.
 
 Route-scoped health should remain route-scoped. A `responses` transport penalty
 must not automatically poison `/responses/compact` or websocket selection unless
