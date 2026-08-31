@@ -1,4 +1,37 @@
-[
+[  {
+    "id": "audited-prodex-0.421.0-integration-campaign",
+    "requiredSubjects": [
+      "feat(cli): add expose tunnel providers",
+      "fix(ping): use canonical OpenAI application request",
+      "feat(expose): add OpenAI MCP tunnel provider",
+      "test(expose): cover cloudflare dns fallback failure",
+      "fix(kiro): keep live ACP tasks alive while quiet",
+      "fix(expose): keep tunnel readiness probe local",
+      "feat(0.421.0): harden expose and provider runtime paths",
+      "fix(expose): validate official tunnel identifier",
+      "feat(expose): supervise OpenAI Secure MCP tunnel client",
+      "docs(expose): document local and tunneled modes",
+      "chore(deps): bump the cargo group with 4 updates",
+      "chore(deps): bump argon2 in /fuzz in the fuzz-cargo group",
+      "feat(mojo): batch runtime profile health scoring",
+      "feat(mojo): move Kiro request capability policy",
+      "refactor(kiro): isolate streaming driver",
+      "feat(runtime): make OpenAI capacity model-aware",
+      "fix(runtime): preserve provider recovery and model fallback",
+      "test(runtime): stabilize provider recovery fixtures",
+      "fix(quota): preserve Luna reserve capacity",
+      "docs: document 0.421.0 runtime semantics",
+      "chore(ci): satisfy source import guard",
+      "test(ci): cover new runtime recovery cases"
+    ],
+    "caps": {
+      "maxFiles": 125,
+      "maxBehaviorFiles": 105,
+      "maxLines": 7000,
+      "maxFileLines": 600
+    },
+    "reason": "This exact 0.421.0 integration campaign combines the release-critical OpenAI application ping, model-aware Luna/Reserve/Spark recovery, Cloudflare and Secure MCP expose paths, Kiro quiet-child supervision, dependency integration, runtime fixtures, docs, and CI manifest evidence. The measured range is 118 files, 99 behavior files, 6,479 changed lines, and 551 changed lines in the largest file; the narrow allowance covers this audited train without changing global churn thresholds or skipping gates."
+  },
   {
     "id": "audited-prodex-0.420.0-migration-tail",
     "requiredSubjects": [
