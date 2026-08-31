@@ -105,7 +105,7 @@ done
 if [ "$is_json_ping" = "1" ]; then
   printf '%s\n' '{"type":"thread.started","thread_id":"diagnostic"}'
   printf '%s\n' '{"type":"turn.started"}'
-  printf '%s\n' '{"type":"item.completed","item":{"type":"agent_message","text":"PONG"}}'
+  printf '%s\n' '{"type":"item.completed","item":{"type":"agent_message","text":"Hello"}}'
   printf '%s\n' '{"type":"turn.completed","usage":{"input_tokens":1,"output_tokens":1}}'
   exit 0
 fi
@@ -175,7 +175,7 @@ if defined TEST_LONG_RUNNING_RUN powershell.exe -NoProfile -NonInteractive -Comm
 if defined prodex_json (
   echo {"type":"thread.started","thread_id":"diagnostic"}
   echo {"type":"turn.started"}
-  echo {"type":"item.completed","item":{"type":"agent_message","text":"PONG"}}
+  echo {"type":"item.completed","item":{"type":"agent_message","text":"Hello"}}
   echo {"type":"turn.completed","usage":{"input_tokens":1,"output_tokens":1}}
   exit /b 0
 )
