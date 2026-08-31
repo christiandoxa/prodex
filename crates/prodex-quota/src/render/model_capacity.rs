@@ -48,6 +48,19 @@ pub fn openai_quota_runtime_window_pair_for_model<'a>(
             .find(|additional| crate::capacity::additional_rate_limit_is_spark(additional))
             .map(|additional| &additional.rate_limit);
     }
+    if openai_model_is_luna(model)
+        && !usage
+            .rate_limit
+            .as_ref()
+            .is_some_and(window_pair_has_ready_limit)
+        && let Some(reserve) = usage
+            .additional_rate_limits
+            .iter()
+            .find(|additional| additional_rate_limit_is_luna_reserve(additional))
+            .filter(|additional| super::additional_rate_limit_is_usable(additional))
+    {
+        return Some(&reserve.rate_limit);
+    }
     if model.is_some() {
         return usage.rate_limit.as_ref();
     }
@@ -65,6 +78,15 @@ pub fn openai_quota_has_ready_limit_for_model(usage: &UsageResponse, model: Opti
                     && window_pair_has_ready_limit(&additional.rate_limit)
             });
     }
+    if openai_model_is_luna(model)
+        && usage.additional_rate_limits.iter().any(|additional| {
+            additional_rate_limit_is_luna_reserve(additional)
+                && super::additional_rate_limit_is_usable(additional)
+                && window_pair_has_ready_limit(&additional.rate_limit)
+        })
+    {
+        return true;
+    }
     if model.is_some() {
         return usage
             .rate_limit
@@ -72,6 +94,19 @@ pub fn openai_quota_has_ready_limit_for_model(usage: &UsageResponse, model: Opti
             .is_some_and(window_pair_has_ready_limit);
     }
     openai_quota_has_ready_limit(usage)
+}
+
+pub fn additional_rate_limit_is_luna_reserve(additional: &super::AdditionalRateLimit) -> bool {
+    [
+        additional.limit_name.as_deref(),
+        additional.metered_feature.as_deref(),
+    ]
+    .into_iter()
+    .flatten()
+    .any(|value| {
+        let normalized = value.to_ascii_lowercase();
+        normalized.contains("luna") && normalized.contains("reserve")
+    })
 }
 
 pub fn openai_usage_has_unknown_luna_capacity(usage: &UsageResponse) -> bool {
