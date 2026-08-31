@@ -390,11 +390,12 @@ cleaned after their final consumer exits.
 After readiness, the non-TTY status output includes the instance, workspace,
 provider, model, effort, local browser URL, tunnel provider, local MCP URL, and
 the active lifetime/stop instructions. Cloudflare mode additionally prints the
-ChatGPT MCP URL. OpenAI mode prints the validated tunnel ID and safe client
-version, but no public browser URL.
+public browser URL and ChatGPT MCP URL. OpenAI mode prints the validated tunnel
+ID and safe client version, but no public browser URL.
 
-The public Cloudflare MCP URL contains the capability path. An OpenAI tunnel ID
-is only an identifier and is never a browser URL.
+The public Cloudflare browser URL contains the bootstrap capability in its
+fragment, and the public MCP URL contains the MCP capability path. An OpenAI
+tunnel ID is only an identifier and is never a browser URL.
 
 With a TTY, the expose view shows lifecycle phases such as Preparing,
 Cloudflare tunnel, OpenAI Secure MCP Tunnel, local MCP initialize/tools, public
@@ -532,4 +533,4 @@ The main implementation areas are:
 The document is intentionally explicit about what Expose does not do: OpenAI
 Secure MCP Tunnel is MCP connectivity, Cloudflare public readiness is checked
 through separate transport/DNS/TLS/application layers, and the full-access
-capability URL is not a multi-user security boundary.
+capability URLs are not a multi-user security boundary.
