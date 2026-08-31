@@ -280,6 +280,7 @@ fn wait_for_openai_tunnel_ready(
             && let Ok(base_url) = parse_health_base_url(&value)
         {
             client = Client::builder()
+                .no_proxy()
                 .timeout(Duration::from_millis(750))
                 .build()
                 .ok()
