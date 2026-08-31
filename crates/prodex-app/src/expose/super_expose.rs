@@ -331,7 +331,12 @@ fn run_super_expose_engine_inner(
                 ExposeLifecyclePhase::OpenAiTunnel,
                 "starting OpenAI Secure MCP Tunnel...",
             );
-            match start_openai_tunnel(local_mcp_url.as_str(), tunnel_id.clone(), &cancelled) {
+            match start_openai_tunnel(
+                local_mcp_url.as_str(),
+                tunnel_id.clone(),
+                client_version.clone(),
+                &cancelled,
+            ) {
                 Ok(tunnel) => {
                     openai_tunnel = Some(tunnel);
                     None
