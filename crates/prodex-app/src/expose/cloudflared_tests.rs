@@ -5,8 +5,12 @@ use super::runtime::{
 use super::super_expose::ensure_cloudflared_available;
 use crate::{TestEnvVarGuard, test_temp_root, write_test_python_executable};
 use std::fs;
-use std::io;
+use std::io::{self, Read};
+use std::net::{Shutdown, TcpListener};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;
+use std::thread;
 use std::time::{Duration, Instant};
 
 fn expose_test_cloudflared_script(root: &std::path::Path) -> TestEnvVarGuard {
@@ -123,6 +127,113 @@ else:
         tunnel.url.as_deref(),
         Some("https://http2.trycloudflare.com")
     );
+    tunnel.shutdown();
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn quick_tunnel_http2_does_not_become_ready_when_public_dns_and_doh_reset() {
+    let root = test_temp_root().join(format!(
+        "prodex-cloudflared-public-dns-{}",
+        std::process::id()
+    ));
+    fs::create_dir_all(&root).unwrap();
+    write_test_python_executable(
+        &root,
+        "cloudflared",
+        r#"#!/usr/bin/env python3
+import sys
+import time
+
+if len(sys.argv) > 1 and sys.argv[1] == "--version":
+    print("cloudflared version 2026.6.0", flush=True)
+elif len(sys.argv) > 2 and sys.argv[1] == "tunnel" and sys.argv[2] == "--help":
+    print("--config --protocol --url", flush=True)
+else:
+    protocol = sys.argv[sys.argv.index("--protocol") + 1]
+    print("https://http2.trycloudflare.com", flush=True)
+    if protocol == "auto":
+        print("Failed to dial a quic connection", file=sys.stderr, flush=True)
+    else:
+        print("Registered tunnel connection protocol=http2", flush=True)
+    time.sleep(30)
+"#,
+    );
+
+    let _env_lock = TestEnvVarGuard::lock();
+    let _script = expose_test_cloudflared_script(&root);
+    let path = std::env::join_paths(std::iter::once(root.clone()).chain(std::env::split_paths(
+        &std::env::var_os("PATH").unwrap_or_default(),
+    )))
+    .unwrap();
+    let _path = TestEnvVarGuard::set("PATH", &path.to_string_lossy());
+
+    let mut tunnel = start_cloudflared_tunnel("http://127.0.0.1:12345").unwrap();
+    assert_eq!(
+        tunnel.effective_transport,
+        Some(CloudflaredTransport::Http2)
+    );
+
+    let proxy_listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let proxy_addr = proxy_listener.local_addr().unwrap();
+    let proxy_failed = Arc::new(AtomicBool::new(false));
+    let proxy_failed_thread = Arc::clone(&proxy_failed);
+    let (request_sender, request_receiver) = mpsc::channel();
+    let proxy_thread = thread::spawn(move || {
+        proxy_listener.set_nonblocking(true).unwrap();
+        let deadline = Instant::now() + Duration::from_secs(2);
+        let request = loop {
+            match proxy_listener.accept() {
+                Ok((mut stream, _)) => {
+                    proxy_failed_thread.store(true, Ordering::SeqCst);
+                    let mut request = [0_u8; 1024];
+                    let _ = stream.set_read_timeout(Some(Duration::from_secs(1)));
+                    let size = stream.read(&mut request).unwrap_or(0);
+                    let _ = stream.shutdown(Shutdown::Both);
+                    break request[..size].to_vec();
+                }
+                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                    if Instant::now() >= deadline {
+                        proxy_failed_thread.store(true, Ordering::SeqCst);
+                        break Vec::new();
+                    }
+                    thread::sleep(Duration::from_millis(10));
+                }
+                Err(_) => {
+                    proxy_failed_thread.store(true, Ordering::SeqCst);
+                    break Vec::new();
+                }
+            }
+        };
+        let _ = request_sender.send(request);
+    });
+    let proxy = format!("http://{proxy_addr}");
+    let _https_proxy = TestEnvVarGuard::set("HTTPS_PROXY", &proxy);
+    let _no_proxy = TestEnvVarGuard::set("NO_PROXY", "");
+
+    let public_url = "https://w4-dns-unavailable.invalid.trycloudflare.com/pdx/v1/fixture/mcp";
+    let mut progress = |_phase: &str| {};
+    let started = Instant::now();
+    let error = super::verify_public_mcp_with_progress(public_url, &mut progress, &|| {
+        proxy_failed.load(Ordering::SeqCst)
+    })
+    .unwrap_err();
+    assert!(started.elapsed() < Duration::from_secs(4));
+    assert!(
+        error
+            .to_string()
+            .contains("public MCP initialize cancelled")
+    );
+    let request = request_receiver
+        .recv_timeout(Duration::from_secs(1))
+        .unwrap();
+    assert!(
+        String::from_utf8_lossy(&request).contains("CONNECT cloudflare-dns.com:443"),
+        "public probe should try Cloudflare DoH after hostname resolution fails: {:?}",
+        String::from_utf8_lossy(&request)
+    );
+
+    proxy_thread.join().unwrap();
     tunnel.shutdown();
     let _ = fs::remove_dir_all(root);
 }
