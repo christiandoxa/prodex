@@ -1,4 +1,8 @@
-use super::*;
+use super::{
+    OPENAI_TUNNEL_CLIENT_READY_TIMEOUT, OpenAiTunnelFiles, ensure_openai_tunnel_available,
+    parse_health_base_url, safe_client_version, safe_version_label, start_openai_tunnel,
+    validate_openai_tunnel_id,
+};
 use crate::{TestEnvVarGuard, test_temp_root, write_test_python_executable};
 use std::fs;
 use std::path::Path;
