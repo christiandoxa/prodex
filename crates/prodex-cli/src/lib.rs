@@ -378,6 +378,7 @@ fn super_option_takes_value(value: &str) -> bool {
             | "--cols"
             | "--rows"
             | "--max-clients"
+            | "--tunnel-provider"
             | "--profile"
             | "--base-url"
             | "--provider"

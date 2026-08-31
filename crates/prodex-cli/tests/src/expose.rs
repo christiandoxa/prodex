@@ -15,6 +15,7 @@ fn s_expose_rewrites_to_expose_command() {
     };
     assert!(args.tunnel);
     assert!(!args.no_tunnel);
+    assert_eq!(args.tunnel_provider, None);
     assert_eq!(args.invocation, ExposeInvocation::SuperAlias);
     assert!(args.super_args.is_some());
     assert_eq!(args.cols, 120);
@@ -107,6 +108,7 @@ fn expose_tunnel_is_opt_in_and_legacy_no_tunnel_is_unambiguous() {
     };
     assert!(!defaults.tunnel);
     assert!(!defaults.no_tunnel);
+    assert_eq!(defaults.tunnel_provider, None);
 
     let Commands::Expose(legacy) = parse_cli_command_from(["prodex", "expose", "--no-tunnel"])
         .expect("legacy no-tunnel alias should parse")
@@ -115,8 +117,60 @@ fn expose_tunnel_is_opt_in_and_legacy_no_tunnel_is_unambiguous() {
     };
     assert!(!legacy.tunnel);
     assert!(legacy.no_tunnel);
+    assert_eq!(legacy.tunnel_provider, None);
 
     assert!(parse_cli_command_from(["prodex", "expose", "--tunnel", "--no-tunnel"]).is_err());
     assert!(parse_cli_command_from(["prodex", "expose", "--max-clients", "0"]).is_err());
     assert!(parse_cli_command_from(["prodex", "expose", "--max-clients", "33"]).is_err());
+}
+
+#[test]
+fn expose_tunnel_provider_accepts_explicit_values_in_both_alias_positions() {
+    let Commands::Expose(cloudflare) =
+        parse_cli_command_from(["prodex", "expose", "--tunnel-provider", "cloudflare"])
+            .expect("explicit Cloudflare provider should parse")
+    else {
+        panic!("expected expose command");
+    };
+    assert_eq!(
+        cloudflare.tunnel_provider,
+        Some(ExposeTunnelProvider::Cloudflare)
+    );
+    assert!(!cloudflare.tunnel);
+
+    let Commands::Expose(openai) =
+        parse_cli_command_from(["prodex", "s", "--tunnel-provider", "openai", "expose"])
+            .expect("provider before Super expose alias should parse")
+    else {
+        panic!("expected expose command");
+    };
+    assert_eq!(openai.tunnel_provider, Some(ExposeTunnelProvider::OpenAi));
+    assert!(!openai.tunnel);
+    assert_eq!(openai.invocation, ExposeInvocation::SuperAlias);
+}
+
+#[test]
+fn expose_tunnel_provider_rejects_invalid_values_and_legacy_conflicts() {
+    assert!(parse_cli_command_from(["prodex", "expose", "--tunnel-provider", "invalid"]).is_err());
+    assert!(
+        parse_cli_command_from([
+            "prodex",
+            "expose",
+            "--tunnel",
+            "--tunnel-provider",
+            "openai",
+        ])
+        .is_err()
+    );
+    assert!(
+        parse_cli_command_from([
+            "prodex",
+            "s",
+            "expose",
+            "--no-tunnel",
+            "--tunnel-provider",
+            "cloudflare",
+        ])
+        .is_err()
+    );
 }

@@ -68,11 +68,23 @@ pub struct ExposeArgs {
     )]
     pub max_clients: u16,
     /// Explicitly publish the loopback-only server through a cloudflared quick tunnel.
-    #[arg(long, conflicts_with = "no_tunnel")]
+    #[arg(long, conflicts_with_all = ["no_tunnel", "tunnel_provider"])]
     pub tunnel: bool,
     /// Deprecated compatibility alias; tunnel access is now disabled by default.
-    #[arg(long, hide = true, conflicts_with = "tunnel")]
+    #[arg(
+        long,
+        hide = true,
+        conflicts_with_all = ["tunnel", "tunnel_provider"]
+    )]
     pub no_tunnel: bool,
+    /// Select the tunnel provider; OpenAI publishes MCP only and keeps the browser local.
+    #[arg(
+        long,
+        value_name = "PROVIDER",
+        value_enum,
+        conflicts_with_all = ["tunnel", "no_tunnel"]
+    )]
+    pub tunnel_provider: Option<ExposeTunnelProvider>,
     /// Suggested display name for the ChatGPT connection.
     #[arg(long, value_name = "NAME")]
     pub name: Option<String>,
@@ -82,6 +94,13 @@ pub struct ExposeArgs {
     /// Super configuration captured by the `prodex s expose` alias.
     #[arg(skip)]
     pub super_args: Option<SuperArgs>,
+}
+
+#[derive(clap::ValueEnum, Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ExposeTunnelProvider {
+    Cloudflare,
+    #[value(name = "openai")]
+    OpenAi,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
