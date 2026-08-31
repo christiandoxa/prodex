@@ -114,8 +114,16 @@ pub(in crate::expose) fn cloudflared_command() -> Command {
     if let Some(script) = std::env::var_os("PRODEX_TEST_CLOUDFLARED_SCRIPT") {
         #[cfg(windows)]
         {
-            let mut command = Command::new("cmd.exe");
-            command.arg("/C").arg(script);
+            if Path::new(&script)
+                .extension()
+                .is_some_and(|extension| extension.to_string_lossy().eq_ignore_ascii_case("cmd"))
+            {
+                let mut command = Command::new("cmd.exe");
+                command.arg("/C").arg(script);
+                return command;
+            }
+            let mut command = Command::new("python");
+            command.arg(script);
             return command;
         }
         #[cfg(not(windows))]
