@@ -656,7 +656,6 @@ fn runtime_kiro_streaming_reader(
         receiver,
         pending: Cursor::new(Vec::new()),
         finished: false,
-        idle_timeout,
         cancelled,
     })
 }
@@ -795,13 +794,13 @@ fn runtime_kiro_streaming_child(
     let mut state = RuntimeKiroStreamingState::new(request_id, requested_model.as_deref());
     state.cancelled = Arc::clone(&cancelled);
     runtime_kiro_receive_stream(
+        child,
         &sender,
         &mut stdin,
         lines,
         prompt,
         &mut state,
         chat_completions_route,
-        idle_timeout,
     )?;
     drop(stdin);
     runtime_kiro_finish_stream(
@@ -869,16 +868,16 @@ impl RuntimeKiroStreamingState {
 }
 
 fn runtime_kiro_receive_stream(
+    child: &mut std::process::Child,
     sender: &SyncSender<RuntimeKiroStreamingChunk>,
     stdin: &mut impl Write,
     lines: Receiver<io::Result<String>>,
     prompt: &str,
     state: &mut RuntimeKiroStreamingState,
     chat_completions_route: bool,
-    idle_timeout: Duration,
 ) -> Result<()> {
     loop {
-        let Some(line) = runtime_kiro_next_stream_line(&lines, idle_timeout, &state.cancelled)?
+        let Some(line) = runtime_kiro_next_stream_line(child, sender, &lines, &state.cancelled)?
         else {
             break;
         };
@@ -901,24 +900,28 @@ fn runtime_kiro_receive_stream(
 }
 
 fn runtime_kiro_next_stream_line(
+    child: &mut std::process::Child,
+    sender: &SyncSender<RuntimeKiroStreamingChunk>,
     lines: &Receiver<io::Result<String>>,
-    timeout: Duration,
     cancelled: &AtomicBool,
 ) -> Result<Option<String>> {
-    let deadline = std::time::Instant::now() + timeout;
+    let mut last_heartbeat = std::time::Instant::now();
     loop {
         if cancelled.load(Ordering::Acquire) {
             anyhow::bail!("Kiro ACP stream consumer disconnected");
         }
-        let Some(remaining) = deadline.checked_duration_since(std::time::Instant::now()) else {
-            anyhow::bail!(
-                "Kiro ACP stream timed out waiting for output; no reconnect was attempted"
-            );
-        };
-        match lines.recv_timeout(remaining.min(Duration::from_millis(50))) {
+        if child.try_wait()?.is_some() {
+            return Ok(None);
+        }
+        match lines.recv_timeout(Duration::from_millis(50)) {
             Ok(Ok(line)) => return Ok(Some(line)),
             Ok(Err(error)) => return Err(error).context("failed to read Kiro ACP stdout"),
-            Err(mpsc::RecvTimeoutError::Timeout) => {}
+            Err(mpsc::RecvTimeoutError::Timeout) => {
+                if last_heartbeat.elapsed() >= Duration::from_secs(1) {
+                    let _ = sender.try_send(RuntimeKiroStreamingChunk::Heartbeat);
+                    last_heartbeat = std::time::Instant::now();
+                }
+            }
             Err(mpsc::RecvTimeoutError::Disconnected) => return Ok(None),
         }
     }
@@ -1048,6 +1051,7 @@ fn runtime_kiro_created_at() -> u64 {
 
 enum RuntimeKiroStreamingChunk {
     Data(Vec<u8>),
+    Heartbeat,
     Error(io::Error),
     End,
 }
@@ -1056,7 +1060,6 @@ struct RuntimeKiroStreamingReader {
     receiver: Receiver<RuntimeKiroStreamingChunk>,
     pending: Cursor<Vec<u8>>,
     finished: bool,
-    idle_timeout: Duration,
     cancelled: Arc<AtomicBool>,
 }
 
@@ -1076,21 +1079,17 @@ impl Read for RuntimeKiroStreamingReader {
             if self.finished {
                 return Ok(0);
             }
-            match self.receiver.recv_timeout(self.idle_timeout) {
+            match self.receiver.recv_timeout(Duration::from_millis(50)) {
                 Ok(RuntimeKiroStreamingChunk::Data(bytes)) => {
                     self.pending = Cursor::new(bytes);
                 }
+                Ok(RuntimeKiroStreamingChunk::Heartbeat) => {}
                 Ok(RuntimeKiroStreamingChunk::Error(err)) => return Err(err),
                 Ok(RuntimeKiroStreamingChunk::End) | Err(mpsc::RecvTimeoutError::Disconnected) => {
                     self.finished = true;
                     return Ok(0);
                 }
-                Err(mpsc::RecvTimeoutError::Timeout) => {
-                    return Err(io::Error::new(
-                        io::ErrorKind::TimedOut,
-                        "Kiro ACP stream timed out waiting for output",
-                    ));
-                }
+                Err(mpsc::RecvTimeoutError::Timeout) => continue,
             }
         }
     }

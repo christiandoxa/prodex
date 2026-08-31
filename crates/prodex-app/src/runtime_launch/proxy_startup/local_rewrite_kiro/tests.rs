@@ -63,35 +63,52 @@ fn oversized_kiro_catalog_only_rejects_model_routes() {
 }
 
 #[test]
-fn kiro_streaming_reader_times_out_while_the_worker_is_silent() {
-    let (_sender, receiver) = mpsc::channel();
+fn kiro_streaming_reader_stays_alive_while_worker_is_silent() {
+    let (sender, receiver) = mpsc::sync_channel(4);
     let mut reader = RuntimeKiroStreamingReader {
         receiver,
         pending: Cursor::new(Vec::new()),
         finished: false,
-        idle_timeout: Duration::from_millis(10),
         cancelled: Arc::new(AtomicBool::new(false)),
     };
-
-    let error = reader.read(&mut [0_u8; 1]).unwrap_err();
-
-    assert_eq!(error.kind(), io::ErrorKind::TimedOut);
+    let producer = std::thread::spawn(move || {
+        sender.send(RuntimeKiroStreamingChunk::Heartbeat).unwrap();
+        std::thread::sleep(Duration::from_millis(30));
+        sender
+            .send(RuntimeKiroStreamingChunk::Data(b"x".to_vec()))
+            .unwrap();
+        sender.send(RuntimeKiroStreamingChunk::End).unwrap();
+    });
+    let mut output = [0_u8; 1];
+    assert_eq!(reader.read(&mut output).unwrap(), 1);
+    assert_eq!(&output, b"x");
+    producer.join().unwrap();
 }
 
 #[test]
 fn dropping_kiro_streaming_reader_cancels_silent_worker() {
-    let (_sender, receiver) = mpsc::channel();
+    let (sender, receiver) = mpsc::sync_channel(4);
     let cancelled = Arc::new(AtomicBool::new(false));
     let reader = RuntimeKiroStreamingReader {
         receiver,
         pending: Cursor::new(Vec::new()),
         finished: false,
-        idle_timeout: Duration::from_secs(5),
         cancelled: Arc::clone(&cancelled),
     };
     let worker = std::thread::spawn(move || {
         let (_line_sender, lines) = mpsc::channel();
-        runtime_kiro_next_stream_line(&lines, Duration::from_secs(5), &cancelled).unwrap_err()
+        let mut child = std::process::Command::new(if cfg!(windows) { "cmd" } else { "sleep" });
+        if cfg!(windows) {
+            child.args(["/C", "ping -n 6 127.0.0.1 >NUL"]);
+        } else {
+            child.arg("5");
+        }
+        let mut child = child.spawn().unwrap();
+        let result =
+            runtime_kiro_next_stream_line(&mut child, &sender, &lines, &cancelled).unwrap_err();
+        let _ = child.kill();
+        let _ = child.wait();
+        result
     });
 
     std::thread::sleep(Duration::from_millis(20));
@@ -226,17 +243,26 @@ fn kiro_streaming_activity_resets_the_idle_timeout() {
             .unwrap();
     });
 
+    let mut child = std::process::Command::new(if cfg!(windows) { "cmd" } else { "sleep" });
+    if cfg!(windows) {
+        child.args(["/C", "ping -n 6 127.0.0.1 >NUL"]);
+    } else {
+        child.arg("5");
+    }
+    let mut child = child.spawn().unwrap();
     runtime_kiro_receive_stream(
+        &mut child,
         &sender,
         &mut Vec::new(),
         line_receiver,
         "prompt",
         &mut state,
         false,
-        Duration::from_millis(250),
     )
     .unwrap();
     producer.join().unwrap();
+    let _ = child.kill();
+    let _ = child.wait();
 
     assert!(state.prompt_response.is_some());
     assert_eq!(state.assistant_text, ".".repeat(15));
