@@ -14,6 +14,7 @@ pub(super) struct RuntimeWebsocketPreSendQuotaGateRequest<'a> {
     pub(super) shared: &'a RuntimeRotationProxyShared,
     pub(super) websocket_session: &'a mut RuntimeWebsocketSessionState,
     pub(super) profile_name: &'a str,
+    pub(super) requested_model: Option<&'a str>,
     pub(super) request_previous_response_id: Option<&'a str>,
     pub(super) request_session_id: Option<&'a str>,
     pub(super) request_turn_state: Option<&'a str>,
@@ -28,6 +29,7 @@ pub(super) fn runtime_websocket_pre_send_quota_gate(
         shared,
         websocket_session,
         profile_name,
+        requested_model,
         request_previous_response_id,
         request_session_id,
         request_turn_state,
@@ -38,6 +40,7 @@ pub(super) fn runtime_websocket_pre_send_quota_gate(
         shared,
         profile_name,
         route_kind: RuntimeRouteKind::Websocket,
+        requested_model,
         has_continuation_context: request_previous_response_id.is_some()
             || request_session_id.is_some()
             || request_turn_state.is_some(),

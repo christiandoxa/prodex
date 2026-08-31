@@ -6,16 +6,63 @@ pub(crate) fn runtime_has_route_eligible_quota_fallback(
     excluded_profiles: &BTreeSet<String>,
     route_kind: RuntimeRouteKind,
 ) -> Result<bool> {
-    runtime_has_route_quota_fallback(shared, profile_name, excluded_profiles, route_kind, false)
+    runtime_has_route_eligible_quota_fallback_for_model(
+        shared,
+        profile_name,
+        excluded_profiles,
+        route_kind,
+        None,
+    )
 }
 
+pub(crate) fn runtime_has_route_eligible_quota_fallback_for_model(
+    shared: &RuntimeRotationProxyShared,
+    profile_name: &str,
+    excluded_profiles: &BTreeSet<String>,
+    route_kind: RuntimeRouteKind,
+    requested_model: Option<&str>,
+) -> Result<bool> {
+    runtime_has_route_quota_fallback(
+        shared,
+        profile_name,
+        excluded_profiles,
+        route_kind,
+        false,
+        requested_model,
+    )
+}
+
+#[cfg(test)]
 pub(crate) fn runtime_has_route_ready_quota_fallback(
     shared: &RuntimeRotationProxyShared,
     profile_name: &str,
     excluded_profiles: &BTreeSet<String>,
     route_kind: RuntimeRouteKind,
 ) -> Result<bool> {
-    runtime_has_route_quota_fallback(shared, profile_name, excluded_profiles, route_kind, true)
+    runtime_has_route_ready_quota_fallback_for_model(
+        shared,
+        profile_name,
+        excluded_profiles,
+        route_kind,
+        None,
+    )
+}
+
+pub(crate) fn runtime_has_route_ready_quota_fallback_for_model(
+    shared: &RuntimeRotationProxyShared,
+    profile_name: &str,
+    excluded_profiles: &BTreeSet<String>,
+    route_kind: RuntimeRouteKind,
+    requested_model: Option<&str>,
+) -> Result<bool> {
+    runtime_has_route_quota_fallback(
+        shared,
+        profile_name,
+        excluded_profiles,
+        route_kind,
+        true,
+        requested_model,
+    )
 }
 
 fn runtime_has_route_quota_fallback(
@@ -24,6 +71,7 @@ fn runtime_has_route_quota_fallback(
     excluded_profiles: &BTreeSet<String>,
     route_kind: RuntimeRouteKind,
     require_quota_evidence: bool,
+    requested_model: Option<&str>,
 ) -> Result<bool> {
     let now = Local::now().timestamp();
     let pressure_mode = runtime_proxy_pressure_mode_active_for_route(shared, route_kind);
@@ -67,10 +115,11 @@ fn runtime_has_route_quota_fallback(
         if !require_quota_evidence {
             return Ok(true);
         }
-        let (summary, source) = runtime_profile_quota_summary_for_route_from_state(
+        let (summary, source) = runtime_profile_quota_summary_for_route_from_state_with_model(
             &runtime,
             candidate_name,
             route_kind,
+            requested_model,
             now,
         );
         if runtime_quota_summary_allows_soft_affinity(summary, source, route_kind) {
@@ -102,9 +151,14 @@ pub(crate) fn runtime_profile_precommit_quota_summary(
     route_kind: RuntimeRouteKind,
     context: &str,
     schedule_live_probe: bool,
+    requested_model: Option<&str>,
 ) -> Result<(RuntimeQuotaSummary, Option<RuntimeQuotaSource>)> {
-    let (quota_summary, quota_source) =
-        runtime_profile_quota_summary_for_route(shared, profile_name, route_kind)?;
+    let (quota_summary, quota_source) = runtime_profile_quota_summary_for_route_with_model(
+        shared,
+        profile_name,
+        route_kind,
+        requested_model,
+    )?;
     if schedule_live_probe
         || runtime_quota_summary_requires_precommit_live_probe(
             quota_summary,
@@ -121,6 +175,7 @@ pub(crate) struct RuntimePrecommitQuotaGateRequest<'a> {
     pub(crate) shared: &'a RuntimeRotationProxyShared,
     pub(crate) profile_name: &'a str,
     pub(crate) route_kind: RuntimeRouteKind,
+    pub(crate) requested_model: Option<&'a str>,
     pub(crate) has_continuation_context: bool,
     pub(crate) hard_affinity: bool,
     pub(crate) reprobe_context: &'a str,
@@ -142,13 +197,19 @@ pub(crate) fn runtime_precommit_quota_gate(
         shared,
         profile_name,
         route_kind,
+        requested_model,
         has_continuation_context,
         hard_affinity,
         reprobe_context,
     } = request;
 
     let (initial_quota_summary, initial_quota_source) =
-        runtime_profile_quota_summary_for_route(shared, profile_name, route_kind)?;
+        runtime_profile_quota_summary_for_route_with_model(
+            shared,
+            profile_name,
+            route_kind,
+            requested_model,
+        )?;
     match prodex_runtime_quota::runtime_precommit_quota_gate_initial_decision(
         initial_quota_summary,
         initial_quota_source,
@@ -169,8 +230,13 @@ pub(crate) fn runtime_precommit_quota_gate(
         | runtime_proxy_crate::RuntimeProxyPrecommitQuotaGateInitialDecision::RefreshRequired => {}
     }
 
-    let has_alternative_quota_profile =
-        runtime_has_route_ready_quota_fallback(shared, profile_name, &BTreeSet::new(), route_kind)?;
+    let has_alternative_quota_profile = runtime_has_route_ready_quota_fallback_for_model(
+        shared,
+        profile_name,
+        &BTreeSet::new(),
+        route_kind,
+        requested_model,
+    )?;
     let schedule_live_probe = runtime_precommit_quota_gate_schedules_live_probe(
         initial_quota_source,
         route_kind,
@@ -182,6 +248,7 @@ pub(crate) fn runtime_precommit_quota_gate(
         route_kind,
         reprobe_context,
         schedule_live_probe,
+        requested_model,
     )?;
 
     match prodex_runtime_quota::runtime_precommit_quota_gate_final_decision(
@@ -209,6 +276,7 @@ pub(crate) fn runtime_precommit_quota_gate(
                         route_kind,
                         reprobe_context,
                         false,
+                        requested_model,
                     )?;
                 if prodex_runtime_quota::runtime_precommit_quota_gate_final_decision(
                     redeemed_quota_summary,

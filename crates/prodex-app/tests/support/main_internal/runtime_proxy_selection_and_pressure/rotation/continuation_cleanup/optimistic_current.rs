@@ -415,6 +415,7 @@ fn direct_current_fallback_profile_bypasses_local_selection_penalties() {
             &shared,
             &BTreeSet::new(),
             RuntimeRouteKind::Standard,
+            None,
         )
         .expect("direct fallback lookup should succeed"),
         Some("main".to_string())
@@ -478,6 +479,7 @@ fn direct_current_fallback_profile_is_route_aware_for_heavy_routes() {
             &shared,
             &BTreeSet::new(),
             RuntimeRouteKind::Standard,
+            None,
         )
         .expect("standard direct fallback lookup should succeed"),
         Some("main".to_string())
@@ -487,6 +489,7 @@ fn direct_current_fallback_profile_is_route_aware_for_heavy_routes() {
             &shared,
             &BTreeSet::new(),
             RuntimeRouteKind::Responses,
+            None,
         )
         .expect("responses direct fallback lookup should succeed"),
         None

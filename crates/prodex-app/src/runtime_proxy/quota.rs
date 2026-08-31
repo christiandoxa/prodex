@@ -48,8 +48,9 @@ pub(crate) use prodex_runtime_quota::{
     runtime_profile_usage_snapshot_from_usage, runtime_quota_pressure_band_reason,
     runtime_quota_pressure_sort_key_for_route_from_summary, runtime_quota_source_label,
     runtime_quota_summary_for_route, runtime_quota_summary_from_cached_sources,
-    runtime_quota_summary_from_usage_snapshot, runtime_quota_summary_from_usage_snapshot_at,
-    runtime_quota_summary_log_fields, runtime_quota_summary_requires_live_source_after_probe,
+    runtime_quota_summary_from_cached_sources_for_model, runtime_quota_summary_from_usage_snapshot,
+    runtime_quota_summary_from_usage_snapshot_at, runtime_quota_summary_log_fields,
+    runtime_quota_summary_requires_live_source_after_probe,
     runtime_quota_summary_requires_precommit_live_probe, runtime_quota_window_status_reason,
 };
 pub(crate) use runtime_proxy_crate::RuntimePrecommitQuotaBlockReason;

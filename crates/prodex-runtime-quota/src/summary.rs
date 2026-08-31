@@ -8,10 +8,10 @@ use crate::snapshot::{
 };
 use crate::source::runtime_quota_source_option_to_proxy;
 use crate::window::{
-    runtime_quota_window_observation, runtime_quota_window_status_from_proxy,
-    runtime_quota_window_status_reason, runtime_quota_window_status_to_proxy,
-    runtime_quota_window_summary_from_proxy, runtime_quota_window_summary_to_proxy,
-    runtime_quota_window_usable_for_auto_rotate,
+    runtime_quota_window_observation, runtime_quota_window_observation_for_model_at,
+    runtime_quota_window_status_from_proxy, runtime_quota_window_status_reason,
+    runtime_quota_window_status_to_proxy, runtime_quota_window_summary_from_proxy,
+    runtime_quota_window_summary_to_proxy, runtime_quota_window_usable_for_auto_rotate,
 };
 use prodex_quota::{
     RuntimeQuotaPressureBand, RuntimeQuotaSummary, RuntimeQuotaWindowStatus,
@@ -86,6 +86,37 @@ pub fn runtime_quota_summary_for_route(
     ))
 }
 
+pub fn runtime_quota_summary_for_route_with_model(
+    usage: &UsageResponse,
+    route_kind: RuntimeRouteKind,
+    requested_model: Option<&str>,
+) -> RuntimeQuotaSummary {
+    if prodex_quota::openai_model_is_luna(requested_model)
+        && prodex_quota::openai_usage_has_unknown_luna_capacity(usage)
+    {
+        return unknown_runtime_quota_summary();
+    }
+    runtime_quota_summary_for_route_with_model_at(
+        usage,
+        route_kind,
+        requested_model,
+        chrono::Local::now().timestamp(),
+    )
+}
+
+pub fn runtime_quota_summary_for_route_with_model_at(
+    usage: &UsageResponse,
+    route_kind: RuntimeRouteKind,
+    requested_model: Option<&str>,
+    now: i64,
+) -> RuntimeQuotaSummary {
+    runtime_quota_summary_from_proxy(runtime_proxy::runtime_proxy_quota_summary_for_route(
+        runtime_quota_window_observation_for_model_at(usage, "5h", requested_model, now),
+        runtime_quota_window_observation_for_model_at(usage, "weekly", requested_model, now),
+        route_kind,
+    ))
+}
+
 pub fn runtime_quota_summary_blocking_reset_at(
     summary: RuntimeQuotaSummary,
     route_kind: RuntimeRouteKind,
@@ -137,6 +168,63 @@ pub fn runtime_quota_summary_from_cached_sources(
         },
         None,
     )
+}
+
+pub fn runtime_quota_summary_from_cached_sources_for_model(
+    live_probe_usage: Option<&UsageResponse>,
+    persisted_snapshot: Option<&RuntimeProfileUsageSnapshot>,
+    route_kind: RuntimeRouteKind,
+    requested_model: Option<&str>,
+    now: i64,
+    stale_grace_seconds: i64,
+) -> (RuntimeQuotaSummary, Option<RuntimeQuotaSource>) {
+    if let Some(usage) = live_probe_usage {
+        if prodex_quota::openai_model_is_luna(requested_model)
+            && prodex_quota::openai_usage_has_unknown_luna_capacity(usage)
+        {
+            return (
+                unknown_runtime_quota_summary(),
+                Some(RuntimeQuotaSource::LiveProbe),
+            );
+        }
+        return (
+            runtime_quota_summary_for_route_with_model(usage, route_kind, requested_model),
+            Some(RuntimeQuotaSource::LiveProbe),
+        );
+    }
+    if prodex_quota::openai_model_is_spark(requested_model) {
+        return (unknown_runtime_quota_summary(), None);
+    }
+    let summary = runtime_quota_summary_from_cached_sources(
+        live_probe_usage,
+        persisted_snapshot,
+        route_kind,
+        now,
+        stale_grace_seconds,
+    );
+    if prodex_quota::openai_model_is_luna(requested_model)
+        && summary.0.route_band == RuntimeQuotaPressureBand::Exhausted
+    {
+        (unknown_runtime_quota_summary(), summary.1)
+    } else {
+        summary
+    }
+}
+
+fn unknown_runtime_quota_summary() -> RuntimeQuotaSummary {
+    RuntimeQuotaSummary {
+        five_hour: RuntimeQuotaWindowSummary {
+            status: RuntimeQuotaWindowStatus::Unknown,
+            remaining_percent: 0,
+            reset_at: i64::MAX,
+        },
+        weekly: RuntimeQuotaWindowSummary {
+            status: RuntimeQuotaWindowStatus::Unknown,
+            remaining_percent: 0,
+            reset_at: i64::MAX,
+        },
+        route_band: RuntimeQuotaPressureBand::Unknown,
+    }
 }
 
 pub fn runtime_quota_summary_requires_precommit_live_probe(

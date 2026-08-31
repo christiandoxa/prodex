@@ -93,6 +93,15 @@ pub(super) fn handle_runtime_proxy_backend_responses_route(
                 )
             }
             "second-account"
+                if matches!(mode, RuntimeProxyBackendMode::HttpOnlyLunaQuotaThenSpark)
+                    && body_json
+                        .get("model")
+                        .and_then(serde_json::Value::as_str)
+                        .is_some_and(|model| model.eq_ignore_ascii_case("gpt-5.6-luna")) =>
+            {
+                usage_limit_sse_response(mode)
+            }
+            "second-account"
                 if matches!(
                     mode,
                     RuntimeProxyBackendMode::HttpOnlyInvalidPreviousResponseId
@@ -525,7 +534,7 @@ fn usage_limit_sse_response(
         "text/event-stream",
         concat!(
             "event: response.failed\r\n",
-            "data: {\"type\":\"response.failed\",\"response\":{\"error\":{\"code\":\"rate_limit_exceeded\",\"message\":\"You've hit your usage limit. To get more access now, send a request to your admin or try again at Mar 24th, 2026 2:04 AM.\"}}}\r\n",
+            "data: {\"type\":\"response.failed\",\"response\":{\"error\":{\"code\":\"usage_limit_reached\",\"message\":\"You've hit your usage limit. To get more access now, send a request to your admin or try again at Mar 24th, 2026 2:04 AM.\"}}}\r\n",
             "\r\n"
         )
         .to_string(),

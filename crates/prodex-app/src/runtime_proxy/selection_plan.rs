@@ -19,6 +19,7 @@ pub(crate) fn build_runtime_response_probe_plan(
     selection_state: &RuntimeRouteSelectionCatalog,
     excluded_profiles: &BTreeSet<String>,
     route_kind: RuntimeRouteKind,
+    requested_model: Option<&str>,
     now: i64,
 ) -> RuntimeResponseProbePlan {
     let mut reports = Vec::new();
@@ -101,8 +102,12 @@ pub(crate) fn build_runtime_response_probe_plan(
     });
 
     reports.sort_by_key(|report| report.order_index);
-    let ready_candidates =
-        runtime_response_ready_candidates(selection_state, &reports, &cached_usage_snapshots);
+    let ready_candidates = runtime_response_ready_candidates(
+        selection_state,
+        &reports,
+        &cached_usage_snapshots,
+        requested_model,
+    );
     RuntimeResponseProbePlan {
         reports,
         ready_candidates,
@@ -238,6 +243,7 @@ pub(crate) fn build_runtime_response_candidate_execution_plan<F>(
     route_kind: RuntimeRouteKind,
     inflight_soft_limit: usize,
     ready_profile_candidates: Vec<ReadyProfileCandidate>,
+    requested_model: Option<&str>,
     options: RuntimeResponseCandidateExecutionOptions<'_, F>,
 ) -> RuntimeResponseCandidateExecutionPlan
 where
@@ -262,16 +268,28 @@ where
         .iter()
         .map(|(_, candidate, _)| &candidate.usage)
         .collect::<Vec<_>>();
-    let quota_sort_keys = prodex_runtime_quota::runtime_quota_pressure_sort_keys_for_route_at(
-        &usages,
-        route_kind,
-        Local::now().timestamp(),
-    );
+    let now = Local::now().timestamp();
+    let quota_sort_keys = if requested_model.is_some() {
+        prodex_runtime_quota::runtime_quota_pressure_sort_keys_for_route_at_with_model(
+            &usages,
+            route_kind,
+            requested_model,
+            now,
+        )
+    } else {
+        prodex_runtime_quota::runtime_quota_pressure_sort_keys_for_route_at(
+            &usages, route_kind, now,
+        )
+    };
     let candidate_inputs = candidates
         .into_iter()
         .zip(quota_sort_keys)
         .map(|((order_index, candidate, entry), quota_sort_key)| {
-            let quota_summary = runtime_quota_summary_for_route(&candidate.usage, route_kind);
+            let quota_summary = prodex_runtime_quota::runtime_quota_summary_for_route_with_model(
+                &candidate.usage,
+                route_kind,
+                requested_model,
+            );
             candidate_quota_summaries.insert((candidate.name.clone(), order_index), quota_summary);
             runtime_proxy_crate::RuntimeResponseCandidatePlanInput {
                 name: candidate.name.clone(),
@@ -363,13 +381,16 @@ fn runtime_response_ready_candidates(
     selection_state: &RuntimeRouteSelectionCatalog,
     reports: &[RunProfileProbeReport],
     cached_usage_snapshots: &BTreeMap<String, RuntimeProfileUsageSnapshot>,
+    requested_model: Option<&str>,
 ) -> Vec<ReadyProfileCandidate> {
-    ready_profile_candidates_with_view(
+    prodex_runtime_quota::ready_profile_candidates_with_view_for_model(
         reports,
         selection_state.include_code_review,
         Some(selection_state.current_profile.as_str()),
         runtime_route_selection_view(selection_state),
         Some(cached_usage_snapshots),
+        RUNTIME_PROFILE_USAGE_CACHE_STALE_GRACE_SECONDS,
+        requested_model,
     )
 }
 

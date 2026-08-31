@@ -11,14 +11,15 @@ use super::{
     RuntimeQuotaSummary, RuntimeResponseCandidateSelection, RuntimeRotationProxyShared,
     RuntimeRouteKind, prune_runtime_profile_selection_backoff,
     reserve_runtime_profile_route_circuit_half_open_probe, runtime_affinity_selection_profile,
-    runtime_candidate_has_hard_affinity, runtime_has_route_eligible_quota_fallback,
+    runtime_candidate_has_hard_affinity, runtime_has_route_eligible_quota_fallback_for_model,
     runtime_profile_auth_failure_active_from_map, runtime_profile_name_in_selection_backoff,
-    runtime_profile_quota_summary_for_route, runtime_proxy_current_profile, runtime_proxy_log,
-    runtime_proxy_log_field, runtime_proxy_responses_quota_critical_floor_percent,
-    runtime_proxy_structured_log_message, runtime_request_hard_binding_owner,
-    runtime_route_kind_label, runtime_selection_log_fields_with_quota,
-    runtime_selection_quota_source_label, runtime_selection_trace_affinity_kind,
-    runtime_selection_trace_candidate, runtime_selection_trace_reject,
+    runtime_profile_quota_summary_for_route_with_model, runtime_proxy_current_profile,
+    runtime_proxy_log, runtime_proxy_log_field,
+    runtime_proxy_responses_quota_critical_floor_percent, runtime_proxy_structured_log_message,
+    runtime_request_hard_binding_owner, runtime_route_kind_label,
+    runtime_selection_log_fields_with_quota, runtime_selection_quota_source_label,
+    runtime_selection_trace_affinity_kind, runtime_selection_trace_candidate,
+    runtime_selection_trace_reject,
 };
 
 pub(crate) fn runtime_previous_response_affinity_is_trusted(
@@ -181,18 +182,23 @@ fn runtime_soft_affinity_selection_decision(
     profile_name: &str,
     trace: &mut runtime_proxy_crate::RuntimeRouteDecisionTraceBuilder,
 ) -> Result<RuntimeAffinitySelectionDecision> {
-    let (quota_summary, quota_source) =
-        runtime_profile_quota_summary_for_route(shared, profile_name, selection.route_kind)?;
+    let (quota_summary, quota_source) = runtime_profile_quota_summary_for_route_with_model(
+        shared,
+        profile_name,
+        selection.route_kind,
+        selection.requested_model,
+    )?;
     let current_profile_matches_candidate = affinity_kind == RuntimeAffinitySelectionKind::Session
         && selection.route_kind == RuntimeRouteKind::Websocket
         && quota_source.is_none()
         && runtime_proxy_current_profile(shared)? == profile_name;
     let has_route_eligible_quota_fallback = if current_profile_matches_candidate {
-        runtime_has_route_eligible_quota_fallback(
+        runtime_has_route_eligible_quota_fallback_for_model(
             shared,
             profile_name,
             selection.excluded_profiles,
             selection.route_kind,
+            selection.requested_model,
         )?
     } else {
         false

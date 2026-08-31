@@ -6,8 +6,33 @@ pub(super) fn handle_runtime_proxy_backend_compact_route(
     mode: RuntimeProxyBackendMode,
 ) -> RuntimeProxyBackendHttpResponse {
     let previous_response_id = request_previous_response_id(request);
+    let body = request
+        .split_once("\r\n\r\n")
+        .map(|(_, body)| body)
+        .unwrap_or(request);
+    let body_json = serde_json::from_str::<serde_json::Value>(body)
+        .unwrap_or(serde_json::Value::Null);
     let (status_line, content_type, body, response_turn_state, initial_body_stall, chunk_delay) =
         match (account_id, mode) {
+            ("second-account", RuntimeProxyBackendMode::HttpOnlyLunaQuotaThenSpark)
+                if body_json
+                    .get("model")
+                    .and_then(serde_json::Value::as_str)
+                    .is_some_and(|model| model.eq_ignore_ascii_case("gpt-5.6-luna")) =>
+            (
+                "HTTP/1.1 429 Too Many Requests",
+                "application/json",
+                serde_json::json!({
+                    "error": {
+                        "type": "usage_limit_reached",
+                        "message": "The usage limit has been reached"
+                    }
+                })
+                .to_string(),
+                None,
+                None,
+                None,
+            ),
             (
                 "main-account",
                 RuntimeProxyBackendMode::HttpOnlyUsageLimitMessage

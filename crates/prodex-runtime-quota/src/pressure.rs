@@ -1,5 +1,8 @@
 use crate::summary::runtime_quota_summary_to_proxy;
-use crate::window::{runtime_quota_window_observation, runtime_quota_window_observation_at};
+use crate::window::{
+    runtime_quota_window_observation, runtime_quota_window_observation_at,
+    runtime_quota_window_observation_for_model_at,
+};
 use chrono::Local;
 use prodex_quota::{
     RuntimeQuotaPressureBand, RuntimeQuotaSummary, UsageResponse, scale_quota_pressure_for_plan,
@@ -160,6 +163,40 @@ pub fn runtime_quota_pressure_sort_keys_for_route_at(
             (
                 runtime_quota_window_observation_at(usage, "5h", now),
                 runtime_quota_window_observation_at(usage, "weekly", now),
+            )
+        })
+        .collect::<Vec<_>>();
+    let scores =
+        runtime_proxy::runtime_proxy_quota_scores_for_route_batch(&observations, route_kind);
+    assert_eq!(
+        scores.len(),
+        usages.len(),
+        "runtime quota score batch returned the wrong count"
+    );
+    usages
+        .iter()
+        .zip(scores)
+        .map(|(usage, score)| runtime_quota_pressure_sort_key_from_score(usage, score))
+        .collect()
+}
+
+pub fn runtime_quota_pressure_sort_keys_for_route_at_with_model(
+    usages: &[&UsageResponse],
+    route_kind: RuntimeRouteKind,
+    requested_model: Option<&str>,
+    now: i64,
+) -> Vec<RuntimeQuotaPressureSortKey> {
+    let observations = usages
+        .iter()
+        .map(|usage| {
+            (
+                runtime_quota_window_observation_for_model_at(usage, "5h", requested_model, now),
+                runtime_quota_window_observation_for_model_at(
+                    usage,
+                    "weekly",
+                    requested_model,
+                    now,
+                ),
             )
         })
         .collect::<Vec<_>>();

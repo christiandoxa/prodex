@@ -349,6 +349,7 @@ fn response_selection_uses_prompt_cache_affinity_for_fresh_ties() {
             discover_previous_response_owner: false,
             previous_response_id: None,
             route_kind: RuntimeRouteKind::Responses,
+            requested_model: None,
         },
     )
     .expect("selection should succeed");
@@ -399,6 +400,7 @@ fn response_selection_keeps_inflight_pressure_ahead_of_prompt_cache_owner() {
             discover_previous_response_owner: false,
             previous_response_id: None,
             route_kind: RuntimeRouteKind::Responses,
+            requested_model: None,
         },
     )
     .expect("selection should succeed");
@@ -608,6 +610,7 @@ fn response_selection_prefers_recorded_prompt_cache_owner_for_fresh_request() {
             discover_previous_response_owner: false,
             previous_response_id: None,
             route_kind: RuntimeRouteKind::Responses,
+            requested_model: None,
         },
     )
     .expect("selection should succeed");

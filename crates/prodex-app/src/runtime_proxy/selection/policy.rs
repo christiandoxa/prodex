@@ -115,6 +115,7 @@ pub(crate) struct RuntimeResponseCandidateSelection<'a> {
     pub(crate) discover_previous_response_owner: bool,
     pub(crate) previous_response_id: Option<&'a str>,
     pub(crate) route_kind: RuntimeRouteKind,
+    pub(crate) requested_model: Option<&'a str>,
 }
 
 impl<'a> RuntimeResponseCandidateSelection<'a> {
@@ -132,6 +133,7 @@ impl<'a> RuntimeResponseCandidateSelection<'a> {
             discover_previous_response_owner: false,
             previous_response_id: None,
             route_kind,
+            requested_model: None,
         }
     }
 }

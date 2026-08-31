@@ -113,6 +113,15 @@ sub-agent concurrency limit reached; wait for an active child to finish before r
 
 It does not spawn another child, wait forever, or busy-spin. Existing children remain untouched.
 
+The supervisor separates process liveness from output activity. A child that is
+still running but quiet— including a long reasoning interval, partial line, or
+stderr-only progress— remains `Running`/`Idle but alive`; silence alone does not
+trigger reconnect or restart. Stdout and stderr are drained concurrently with
+bounded buffering, and pipe EOF is treated as terminal only with the child exit
+or a provider contract that says the channel is closed. Provider retry, rate
+limit waiting, authentication failure, cancellation, and actual child exit are
+reported as distinct outcomes rather than one generic reconnect state.
+
 ## Effective instruction delivery
 
 Prodex writes a diagnostic `SUB_AGENTS.md` and injects its complete content between these markers in the temporary overlay's effective Codex instruction file:
@@ -171,4 +180,7 @@ Maximum active sub-agents: 23 (custom)
 
 Implemented behavior covers configuration, provider/model/effort selection, effective instruction injection, deterministic child launch, cross-process active-child limits, Presidio and strict optional-tool inheritance, recursion prevention, and stdout/stderr/status propagation.
 
-Prodex does not yet provide a centralized semantic scheduler, automatic work decomposition, runtime-enforced file ownership, a global cancellation tree, distributed supervision, remote model discovery, A2A child transport, or automatic worktree allocation. The main model remains responsible for choosing narrow tasks, avoiding overlapping edits, verifying child output, integrating results, and running final validation.
+Prodex does not provide automatic work decomposition, runtime-enforced file ownership, distributed
+supervision, remote model discovery, A2A child transport, or automatic worktree allocation. The
+main model remains responsible for choosing narrow tasks, avoiding overlapping edits, verifying
+child output, integrating results, and running final validation.

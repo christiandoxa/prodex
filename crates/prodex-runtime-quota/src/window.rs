@@ -93,6 +93,30 @@ pub fn runtime_quota_window_observation_at(
     })
 }
 
+pub fn runtime_quota_window_observation_for_model(
+    usage: &UsageResponse,
+    label: &str,
+    model: Option<&str>,
+) -> Option<runtime_proxy::RuntimeProxyQuotaWindowObservation> {
+    runtime_quota_window_observation_for_model_at(usage, label, model, Local::now().timestamp())
+}
+
+pub fn runtime_quota_window_observation_for_model_at(
+    usage: &UsageResponse,
+    label: &str,
+    model: Option<&str>,
+    now: i64,
+) -> Option<runtime_proxy::RuntimeProxyQuotaWindowObservation> {
+    let pair = prodex_quota::openai_quota_runtime_window_pair_for_model(usage, model)?;
+    find_main_window(pair, label)?;
+    let snapshot = prodex_quota::required_window_snapshot_for_pair_at(pair, label, now)?;
+    Some(runtime_proxy::RuntimeProxyQuotaWindowObservation {
+        remaining_percent: snapshot.remaining_percent,
+        reset_at: snapshot.reset_at,
+        pressure_score: snapshot.pressure_score,
+    })
+}
+
 pub fn runtime_quota_window_status_reason(status: RuntimeQuotaWindowStatus) -> &'static str {
     runtime_proxy::runtime_proxy_quota_window_status_reason(runtime_quota_window_status_to_proxy(
         status,

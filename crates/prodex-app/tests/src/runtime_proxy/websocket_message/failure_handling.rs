@@ -100,6 +100,7 @@ fn quota_blocked_uses_one_last_chance_ready_profile_past_soft_load_and_circuit()
             &BTreeSet::from(["alpha".to_string()]),
             RuntimeRouteKind::Websocket,
             None,
+            None,
         )
         .unwrap(),
         Some("beta".to_string())
@@ -163,6 +164,7 @@ fn quota_last_chance_respects_hard_inflight_cap() {
             &shared,
             &BTreeSet::from(["alpha".to_string()]),
             RuntimeRouteKind::Websocket,
+            None,
             None,
         )
         .unwrap(),

@@ -506,11 +506,12 @@ impl<'a> RuntimeWebsocketTextMessageFlow<'a> {
     fn prepare_quota_fallback(&mut self, profile_name: &str) -> Result<bool> {
         let mut excluded_profiles = self.excluded_profiles.clone();
         excluded_profiles.insert(profile_name.to_string());
-        if runtime_has_route_eligible_quota_fallback(
+        if runtime_has_route_eligible_quota_fallback_for_model(
             self.shared,
             profile_name,
             &excluded_profiles,
             RuntimeRouteKind::Websocket,
+            runtime_smart_context_model_name_from_body(self.request_text.as_bytes()).as_deref(),
         )? {
             return Ok(true);
         }
@@ -528,6 +529,7 @@ impl<'a> RuntimeWebsocketTextMessageFlow<'a> {
             &excluded_profiles,
             RuntimeRouteKind::Websocket,
             self.prompt_cache_key.as_deref(),
+            runtime_smart_context_model_name_from_body(self.request_text.as_bytes()).as_deref(),
         )?
         else {
             return Ok(false);

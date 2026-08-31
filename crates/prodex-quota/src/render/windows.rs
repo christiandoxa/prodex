@@ -24,6 +24,14 @@ pub fn required_main_window_snapshot_at(
     required_window_snapshot_at(usage.rate_limit.as_ref()?, label, now)
 }
 
+pub fn required_window_snapshot_for_pair_at(
+    pair: &WindowPair,
+    label: &str,
+    now: i64,
+) -> Option<MainWindowSnapshot> {
+    required_window_snapshot_at(pair, label, now)
+}
+
 pub(super) fn required_window_snapshot_at(
     pair: &WindowPair,
     label: &str,
