@@ -112,6 +112,9 @@ impl<F> RuntimePrecommitLoopState<F> {
     }
 
     pub fn recovery_budget_exhausted(&self) -> bool {
+        if self.saw_overload_failure {
+            return false;
+        }
         self.recovery_sweeps >= runtime_proxy_crate::RUNTIME_PROXY_PRECOMMIT_RECOVERY_SWEEP_LIMIT
             || self.recovery_started_at.is_some_and(|started_at| {
                 started_at.elapsed()
@@ -149,9 +152,12 @@ impl<F> RuntimePrecommitLoopState<F> {
             return Ok(false);
         }
         let recovery_started_at = *self.recovery_started_at.get_or_insert_with(Instant::now);
-        let recovery_budget =
+        let recovery_budget = if self.saw_overload_failure {
+            Duration::from_secs(30)
+        } else {
             Duration::from_millis(runtime_proxy_crate::RUNTIME_PROXY_PRECOMMIT_RECOVERY_BUDGET_MS)
-                .saturating_sub(recovery_started_at.elapsed());
+                .saturating_sub(recovery_started_at.elapsed())
+        };
         let recovered = clear_runtime_recovered_profiles(
             shared,
             &mut self.excluded_profiles,
@@ -183,6 +189,39 @@ impl<F> RuntimePrecommitLoopState<F> {
             })
             .filter(|wait| !wait.is_zero())
         else {
+            if self.saw_overload_failure {
+                let exponent = self.recovery_sweeps.min(5) as u32;
+                let base_ms = 250_u64.saturating_mul(1_u64 << exponent);
+                let jitter_ms = (request_id.saturating_add(self.recovery_sweeps as u64)) % 251;
+                let wait = Duration::from_millis(base_ms.saturating_add(jitter_ms).min(30_000));
+                runtime_proxy_log(
+                    shared,
+                    runtime_proxy_structured_log_message(
+                        "provider_temporarily_unavailable_retry",
+                        [
+                            runtime_proxy_log_field("request", request_id.to_string()),
+                            runtime_proxy_log_field("route", runtime_route_kind_label(route_kind)),
+                            runtime_proxy_log_field("wait_ms", wait.as_millis().to_string()),
+                            runtime_proxy_log_field(
+                                "sweep",
+                                self.recovery_sweeps.saturating_add(1).to_string(),
+                            ),
+                        ],
+                    ),
+                );
+                await_runtime_proxy_async_task(shared, "provider_recovery_wait", async move {
+                    tokio::time::sleep(wait).await;
+                    Ok(())
+                })?;
+                let recovered = clear_runtime_recovered_profiles(
+                    shared,
+                    &mut self.excluded_profiles,
+                    route_kind,
+                    true,
+                )?;
+                self.record_recovery_sweep();
+                return Ok(recovered > 0 || self.saw_overload_failure);
+            }
             return Ok(false);
         };
 
