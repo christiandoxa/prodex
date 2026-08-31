@@ -21,6 +21,7 @@ pub(in crate::runtime_proxy::standard) fn attempt_runtime_standard_request(
         request_previous_response_id.is_none()
             && request_session_id.is_none()
             && request_turn_state.is_none(),
+        runtime_smart_context_model_name_from_body(&request.body).as_deref(),
     )? {
         RuntimeStandardPrecommitGuard::Continue => {}
         RuntimeStandardPrecommitGuard::RetryWithoutGuard => {

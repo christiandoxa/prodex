@@ -95,6 +95,74 @@ fn quota_snapshot(
 }
 
 #[test]
+fn luna_request_falls_back_to_actual_spark_model_after_luna_capacity_exhausts() {
+    let backend = RuntimeProxyBackend::start_http_luna_quota_then_spark();
+    let harness = RuntimeProxyProfileHarnessBuilder::single_openai_profile(
+        "spark-profile",
+        "second-account",
+        "spark@example.com",
+    )
+    .upstream_base_url(backend.base_url())
+    .profile_usage_snapshot(
+        "spark-profile",
+        runtime_usage_snapshot(
+            quota_window_exhausted(3_600),
+            quota_window_exhausted(86_400),
+        ),
+    )
+    .build();
+    let now = Local::now().timestamp();
+    harness
+        .shared()
+        .runtime
+        .lock()
+        .expect("runtime lock")
+        .profile_probe_cache
+        .insert(
+            "spark-profile".to_string(),
+            RuntimeProfileProbeCacheEntry {
+                checked_at: now,
+                auth: AuthSummary {
+                    label: "chatgpt".to_string(),
+                    quota_compatible: true,
+                },
+                result: Ok(exhausted_luna_with_ready_spark_usage()),
+            },
+        );
+
+    let reply = proxy_runtime_responses_request(
+        901,
+        &responses_request(
+            br#"{"model":"gpt-5.6-luna","input":[{"role":"user","content":"ping"}]}"#,
+        ),
+        harness.shared(),
+    )
+    .expect("Spark fallback should complete the request");
+    let (status, body, profile) = consume_responses_reply(reply);
+
+    assert_eq!(status, 200, "{body}");
+    assert_eq!(profile.as_deref(), Some("spark-profile"));
+    assert_eq!(
+        backend.responses_accounts(),
+        ["second-account", "second-account"]
+    );
+    let request_bodies = backend.responses_bodies();
+    assert_eq!(
+        request_bodies.len(),
+        2,
+        "Luna should fail before Spark fallback: {request_bodies:?}"
+    );
+    let request_body = request_bodies
+        .into_iter()
+        .last()
+        .expect("the fallback request should reach upstream");
+    let request: serde_json::Value =
+        serde_json::from_str(&request_body).expect("fallback body should be JSON");
+    assert_eq!(request["model"], "gpt-5.3-codex-spark");
+    assert_eq!(request["input"][0]["content"], "ping");
+}
+
+#[test]
 fn fresh_responses_use_last_positive_quota_after_current_exhaustion() {
     let backend = RuntimeProxyBackend::start();
     let harness = RuntimeProxyProfileHarnessBuilder::new()

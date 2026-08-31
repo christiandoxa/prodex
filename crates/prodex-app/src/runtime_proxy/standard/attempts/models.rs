@@ -49,21 +49,6 @@ fn runtime_patch_openai_spark_models_response(
         .find(|model| runtime_model_catalog_entry_matches_slug(model, "gpt-5.3-codex-spark"))
     {
         runtime_patch_openai_spark_model_entry(model);
-    } else if let Some(mut model) = ["gpt-5.3-codex", "gpt-5.4", "gpt-5.5"]
-        .iter()
-        .find_map(|slug| {
-            models
-                .iter()
-                .find(|model| runtime_model_catalog_entry_matches_slug(model, slug))
-                .cloned()
-        })
-        .or_else(|| models.first().cloned())
-    {
-        if let Some(object) = model.as_object_mut() {
-            object.remove("model_specialty");
-        }
-        runtime_patch_openai_spark_model_entry(&mut model);
-        models.push(model);
     }
 
     if let Ok(body) = serde_json::to_vec(&value) {
@@ -131,7 +116,7 @@ mod tests {
     }
 
     #[test]
-    fn openai_models_response_adds_spark_context_from_codex_metadata() {
+    fn openai_models_response_preserves_catalog_without_spark_metadata() {
         let parts = runtime_patch_openai_spark_models_response(response_parts(json!({
             "models": [{
                 "slug": "gpt-5.3-codex",
@@ -143,20 +128,13 @@ mod tests {
             }]
         })));
         let value: serde_json::Value = serde_json::from_slice(&parts.body).unwrap();
-        let spark = value["models"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .find(|model| model["slug"] == "gpt-5.3-codex-spark")
-            .unwrap();
-
-        assert_eq!(spark["context_window"], 128_000);
-        assert_eq!(spark["max_context_window"], 128_000);
-        assert_eq!(spark["auto_compact_token_limit"], 115_200);
+        assert_eq!(value["models"].as_array().unwrap().len(), 1);
+        assert_eq!(value["models"][0]["slug"], "gpt-5.3-codex");
+        assert_eq!(value["models"][0]["context_window"], 272_000);
     }
 
     #[test]
-    fn openai_models_response_adds_spark_when_codex_metadata_is_absent() {
+    fn openai_models_response_does_not_invent_spark_when_catalog_omits_it() {
         let parts = runtime_patch_openai_spark_models_response(response_parts(json!({
             "models": [{
                 "slug": "gpt-5.4",
@@ -169,18 +147,8 @@ mod tests {
             }]
         })));
         let value: serde_json::Value = serde_json::from_slice(&parts.body).unwrap();
-        let spark = value["models"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .find(|model| model["slug"] == "gpt-5.3-codex-spark")
-            .unwrap();
-
-        assert_eq!(spark["display_name"], "gpt-5.3-codex-spark");
-        assert_eq!(spark["context_window"], 128_000);
-        assert_eq!(spark["max_context_window"], 128_000);
-        assert_eq!(spark["auto_compact_token_limit"], 115_200);
-        assert!(spark.get("model_specialty").is_none());
+        assert_eq!(value["models"].as_array().unwrap().len(), 1);
+        assert_eq!(value["models"][0]["slug"], "gpt-5.4");
         assert_eq!(value["models"][0]["model_specialty"], "cyber");
     }
 

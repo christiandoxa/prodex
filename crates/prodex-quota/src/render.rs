@@ -16,6 +16,7 @@ use super::{
 
 mod copilot;
 mod gemini;
+mod model_capacity;
 mod panels;
 mod pool;
 mod quota_policy;
@@ -35,6 +36,7 @@ fn round_quota_float(value: f64) -> i64 {
 
 pub use copilot::*;
 pub use gemini::*;
+pub use model_capacity::*;
 pub use panels::*;
 pub use pool::*;
 pub use quota_policy::*;

@@ -34,6 +34,7 @@ pub(in crate::runtime_proxy::standard) fn attempt_runtime_noncompact_standard_re
             shared,
             profile_name,
             request_session_id.is_none(),
+            runtime_smart_context_model_name_from_body(&request.body).as_deref(),
         )? {
             RuntimeStandardPrecommitGuard::Continue => {}
             RuntimeStandardPrecommitGuard::RetryWithoutGuard => {

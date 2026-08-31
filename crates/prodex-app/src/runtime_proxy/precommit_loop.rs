@@ -125,6 +125,20 @@ impl<F> RuntimePrecommitLoopState<F> {
         self.recovery_sweeps = self.recovery_sweeps.saturating_add(1);
     }
 
+    pub fn reset_for_model_fallback(&mut self) {
+        self.selection_started_at = Instant::now();
+        self.selection_attempts = 0;
+        self.excluded_profiles.clear();
+        self.saw_inflight_saturation = false;
+        self.local_capacity_wait_timed_out = false;
+        self.saw_transport_failure = false;
+        self.saw_transport_recovery_candidate = false;
+        self.saw_overload_failure = false;
+        self.recovery_sweeps = 0;
+        self.recovery_started_at = None;
+        self.last_failure = None;
+    }
+
     pub fn maybe_wait_for_transient_recovery(
         &mut self,
         request_id: u64,

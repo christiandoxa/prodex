@@ -4,6 +4,7 @@ mod affinity_state;
 mod attempt;
 mod fallback;
 mod local_selection;
+mod model_fallback;
 mod overloaded;
 mod previous_response;
 mod quota_blocked;
@@ -25,6 +26,7 @@ use self::local_selection::{
     RuntimeResponsesLocalSelectionBlocked, handle_runtime_responses_local_selection_blocked,
     runtime_responses_local_selection_failure_reply,
 };
+use self::model_fallback::try_runtime_responses_luna_spark_fallback;
 use self::overloaded::{RuntimeResponsesOverloaded, handle_runtime_responses_overloaded};
 use self::previous_response::{
     RuntimeResponsesPreviousResponseNotFoundContextInput,
@@ -44,7 +46,7 @@ fn runtime_responses_stale_continuation_reply() -> RuntimeResponsesReply {
 
 struct RuntimeResponsesRequestContext<'a> {
     request_id: u64,
-    request: &'a RuntimeProxyRequest,
+    request: RuntimeProxyRequest,
     shared: &'a RuntimeRotationProxyShared,
     request_requires_previous_response_affinity: bool,
     previous_response_fresh_fallback_shape: Option<RuntimePreviousResponseFreshFallbackShape>,
@@ -52,7 +54,8 @@ struct RuntimeResponsesRequestContext<'a> {
     prompt_cache_key: Option<&'a str>,
     request_turn_state: Option<&'a str>,
     request_session_id: Option<&'a str>,
-    request_model_name: Option<&'a str>,
+    requested_model_name: Option<String>,
+    request_model_name: Option<String>,
 }
 
 enum RuntimeResponsesLoopControl {
@@ -132,9 +135,9 @@ pub(crate) fn proxy_runtime_responses_request(
     let mut auto_redeemed_profiles = BTreeSet::new();
     let mut quota_last_chance_profile = None;
     let mut loop_state = RuntimePrecommitLoopState::<RuntimeUpstreamFailureResponse>::new();
-    let context = RuntimeResponsesRequestContext {
+    let mut context = RuntimeResponsesRequestContext {
         request_id,
-        request,
+        request: request.clone(),
         shared,
         request_requires_previous_response_affinity,
         previous_response_fresh_fallback_shape,
@@ -142,11 +145,12 @@ pub(crate) fn proxy_runtime_responses_request(
         prompt_cache_key: prompt_cache_key.as_deref(),
         request_turn_state: request_turn_state.as_deref(),
         request_session_id: request_session_id.as_deref(),
-        request_model_name: request_model_name.as_deref(),
+        requested_model_name: request_model_name.clone(),
+        request_model_name,
     };
 
     run_runtime_responses_loop(
-        &context,
+        &mut context,
         &mut affinity_state,
         &mut auto_redeemed_profiles,
         &mut quota_last_chance_profile,
@@ -155,7 +159,7 @@ pub(crate) fn proxy_runtime_responses_request(
 }
 
 fn run_runtime_responses_loop(
-    context: &RuntimeResponsesRequestContext<'_>,
+    context: &mut RuntimeResponsesRequestContext<'_>,
     affinity_state: &mut RuntimeResponsesAffinityState,
     auto_redeemed_profiles: &mut BTreeSet<String>,
     quota_last_chance_profile: &mut Option<String>,
@@ -255,7 +259,7 @@ fn runtime_responses_next_candidate(
                 context.prompt_cache_key,
             ),
             Some(context.request_id),
-            context.request_model_name,
+            context.request_model_name.as_deref(),
         )?
     };
     let _ = release_runtime_rotated_session_affinity(
@@ -305,7 +309,7 @@ fn runtime_responses_candidate_saturated(
     loop_state.record_inflight_saturation();
     match runtime_proxy_maybe_wait_for_interactive_inflight_relief(RuntimeInflightReliefWait {
         request_id: context.request_id,
-        request: context.request,
+        request: &context.request,
         shared: context.shared,
         excluded_profiles: &loop_state.excluded_profiles,
         route_kind: RuntimeRouteKind::Responses,
@@ -376,7 +380,7 @@ fn handle_runtime_responses_budget_exhausted(
     if let Some(action) = try_runtime_responses_direct_current_profile_fallback(
         RuntimeResponsesDirectCurrentFallback {
             request_id: context.request_id,
-            request: context.request,
+            request: &context.request,
             shared: context.shared,
             reason: RuntimeResponsesDirectCurrentFallbackReason::PrecommitBudgetExhausted,
             previous_response_id: context.previous_response_id,
@@ -411,7 +415,7 @@ fn handle_runtime_responses_budget_exhausted(
 }
 
 fn handle_runtime_responses_candidate_exhausted(
-    context: &RuntimeResponsesRequestContext<'_>,
+    context: &mut RuntimeResponsesRequestContext<'_>,
     affinity_state: &mut RuntimeResponsesAffinityState,
     loop_state: &mut RuntimePrecommitLoopState<RuntimeUpstreamFailureResponse>,
     quota_last_chance_profile: &mut Option<String>,
@@ -439,7 +443,7 @@ fn handle_runtime_responses_candidate_exhausted(
     }
     match runtime_proxy_maybe_wait_for_interactive_inflight_relief(RuntimeInflightReliefWait {
         request_id: context.request_id,
-        request: context.request,
+        request: &context.request,
         shared: context.shared,
         excluded_profiles: &loop_state.excluded_profiles,
         route_kind: RuntimeRouteKind::Responses,
@@ -494,10 +498,18 @@ fn handle_runtime_responses_candidate_exhausted(
         runtime_proxy_probe_refresh_pause(context.shared, RuntimeRouteKind::Responses);
         return Ok(RuntimeResponsesLoopControl::Continue);
     }
+    if try_runtime_responses_luna_spark_fallback(
+        context,
+        affinity_state,
+        loop_state,
+        quota_last_chance_profile,
+    )? {
+        return Ok(RuntimeResponsesLoopControl::Continue);
+    }
     if let Some(action) = try_runtime_responses_direct_current_profile_fallback(
         RuntimeResponsesDirectCurrentFallback {
             request_id: context.request_id,
-            request: context.request,
+            request: &context.request,
             shared: context.shared,
             reason: RuntimeResponsesDirectCurrentFallbackReason::CandidateExhausted,
             previous_response_id: context.previous_response_id,
@@ -532,7 +544,7 @@ fn handle_runtime_responses_candidate_exhausted(
 }
 
 fn handle_runtime_responses_attempt(
-    context: &RuntimeResponsesRequestContext<'_>,
+    context: &mut RuntimeResponsesRequestContext<'_>,
     candidate_name: &str,
     turn_state_override: Option<&str>,
     affinity_state: &mut RuntimeResponsesAffinityState,
@@ -543,7 +555,7 @@ fn handle_runtime_responses_attempt(
     let hard_affinity = affinity_state.candidate_has_hard_affinity(candidate_name);
     let attempt = attempt_runtime_responses_request(
         context.request_id,
-        context.request,
+        &context.request,
         context.shared,
         candidate_name,
         RuntimeResponsesAttemptOptions {
@@ -671,7 +683,7 @@ fn handle_runtime_responses_success(
 }
 
 fn handle_runtime_responses_quota_attempt(
-    context: &RuntimeResponsesRequestContext<'_>,
+    context: &mut RuntimeResponsesRequestContext<'_>,
     affinity_state: &mut RuntimeResponsesAffinityState,
     auto_redeemed_profiles: &mut BTreeSet<String>,
     quota_last_chance_profile: &mut Option<String>,
@@ -679,12 +691,12 @@ fn handle_runtime_responses_quota_attempt(
     profile_name: String,
     response: RuntimeResponsesReply,
 ) -> Result<Option<RuntimeResponsesReply>> {
-    handle_runtime_responses_quota_blocked(RuntimeResponsesQuotaBlocked {
+    let result = handle_runtime_responses_quota_blocked(RuntimeResponsesQuotaBlocked {
         request_id: context.request_id,
         shared: context.shared,
         profile_name,
         response,
-        request_model_name: context.request_model_name,
+        request_model_name: context.request_model_name.as_deref(),
         prompt_cache_key: context.prompt_cache_key,
         previous_response_id: context.previous_response_id,
         request_turn_state: context.request_turn_state,
@@ -697,7 +709,18 @@ fn handle_runtime_responses_quota_attempt(
         quota_last_chance_profile,
         excluded_profiles: &mut loop_state.excluded_profiles,
         last_failure: &mut loop_state.last_failure,
-    })
+    })?;
+    if result.is_some()
+        && try_runtime_responses_luna_spark_fallback(
+            context,
+            affinity_state,
+            loop_state,
+            quota_last_chance_profile,
+        )?
+    {
+        return Ok(None);
+    }
+    Ok(result)
 }
 
 fn handle_runtime_responses_overloaded_attempt(
@@ -777,7 +800,7 @@ fn handle_runtime_responses_local_selection_attempt(
 ) -> Result<Option<RuntimeResponsesReply>> {
     handle_runtime_responses_local_selection_blocked(RuntimeResponsesLocalSelectionBlocked {
         request_id: context.request_id,
-        request: context.request,
+        request: &context.request,
         shared: context.shared,
         selection_started_at: loop_state.selection_started_at,
         profile_name,

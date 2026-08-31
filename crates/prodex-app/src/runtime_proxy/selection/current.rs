@@ -12,6 +12,7 @@ pub(crate) fn runtime_proxy_optimistic_current_candidate_for_route(
         excluded_profiles,
         route_kind,
         None,
+        None,
         &mut trace,
     )
 }
@@ -21,6 +22,7 @@ pub(super) fn runtime_proxy_optimistic_current_candidate_for_route_with_selectio
     excluded_profiles: &BTreeSet<String>,
     route_kind: RuntimeRouteKind,
     prompt_cache_key: Option<&str>,
+    requested_model: Option<&str>,
     trace: &mut runtime_proxy_crate::RuntimeRouteDecisionTraceBuilder,
 ) -> Result<Option<String>> {
     let pressure_mode = runtime_proxy_pressure_mode_active(shared);
@@ -92,19 +94,25 @@ pub(super) fn runtime_proxy_optimistic_current_candidate_for_route_with_selectio
                 .cloned(),
         )
     };
-    let has_alternative_quota_compatible_profile = runtime_has_route_ready_quota_fallback(
-        shared,
-        &current_profile,
-        excluded_profiles,
-        route_kind,
-    )?;
+    let has_alternative_quota_compatible_profile =
+        runtime_has_route_ready_quota_fallback_for_model(
+            shared,
+            &current_profile,
+            excluded_profiles,
+            route_kind,
+            requested_model,
+        )?;
     let current_profile_quota_compatible = runtime_profile_cached_auth_summary_for_selection(
         cached_usage_auth_entry,
         probe_cache_entry,
     )
     .is_some_and(|summary| summary.quota_compatible);
-    let (quota_summary, quota_source) =
-        runtime_profile_quota_summary_for_route(shared, &current_profile, route_kind)?;
+    let (quota_summary, quota_source) = runtime_profile_quota_summary_for_route_with_model(
+        shared,
+        &current_profile,
+        route_kind,
+        requested_model,
+    )?;
     let inflight_soft_limit =
         runtime_profile_inflight_soft_limit_for_shared(shared, route_kind, pressure_mode);
     let trace_candidate = || {

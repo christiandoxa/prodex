@@ -75,8 +75,9 @@ pub(crate) fn runtime_waitable_inflight_candidates_for_route(
         runtime_route_selection_catalog(&runtime, &profile_inflight, route_kind, now)
     };
     let mut waitable_profiles = BTreeSet::new();
-    for candidate in build_runtime_response_probe_plan(&state, excluded_profiles, route_kind, now)
-        .ready_candidates
+    for candidate in
+        build_runtime_response_probe_plan(&state, excluded_profiles, route_kind, None, now)
+            .ready_candidates
     {
         if wait_affinity_owner.is_some_and(|owner| owner != candidate.name) {
             continue;
@@ -132,8 +133,9 @@ pub(crate) fn runtime_any_waited_candidate_relieved(
         prune_runtime_profile_selection_backoff(&mut runtime, now);
         runtime_route_selection_catalog(&runtime, &profile_inflight, route_kind, now)
     };
-    for candidate in build_runtime_response_probe_plan(&state, &BTreeSet::new(), route_kind, now)
-        .ready_candidates
+    for candidate in
+        build_runtime_response_probe_plan(&state, &BTreeSet::new(), route_kind, None, now)
+            .ready_candidates
     {
         if !waited_profiles.contains(&candidate.name) {
             continue;

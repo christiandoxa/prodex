@@ -205,3 +205,51 @@ pub(super) fn runtime_usage_snapshot(
         weekly_reset_at: now + weekly.reset_offset_seconds,
     }
 }
+
+pub(super) fn exhausted_luna_with_ready_spark_usage() -> UsageResponse {
+    let now = Local::now().timestamp();
+    UsageResponse {
+        email: None,
+        plan_type: None,
+        rate_limit: Some(WindowPair {
+            allowed: None,
+            limit_reached: None,
+            extra: BTreeMap::new(),
+            primary_window: Some(UsageWindow {
+                used_percent: Some(100),
+                reset_at: Some(now + 3_600),
+                limit_window_seconds: Some(18_000),
+            }),
+            secondary_window: Some(UsageWindow {
+                used_percent: Some(100),
+                reset_at: Some(now + 86_400),
+                limit_window_seconds: Some(604_800),
+            }),
+        }),
+        code_review_rate_limit: None,
+        rate_limit_reset_credits: None,
+        additional_rate_limits: vec![AdditionalRateLimit {
+            limit_id: None,
+            limit_name: Some("GPT-5.3-Codex-Spark".to_string()),
+            metered_feature: None,
+            rate_limit: WindowPair {
+                allowed: None,
+                limit_reached: None,
+                extra: BTreeMap::new(),
+                primary_window: Some(UsageWindow {
+                    used_percent: Some(0),
+                    reset_at: Some(now + 3_600),
+                    limit_window_seconds: Some(18_000),
+                }),
+                secondary_window: Some(UsageWindow {
+                    used_percent: Some(0),
+                    reset_at: Some(now + 86_400),
+                    limit_window_seconds: Some(604_800),
+                }),
+            },
+            allowed: Some(true),
+            limit_reached: Some(false),
+            extra: BTreeMap::new(),
+        }],
+    }
+}

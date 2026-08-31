@@ -25,6 +25,7 @@ pub(crate) fn next_runtime_response_candidate_for_route(
         excluded_profiles,
         route_kind,
         None,
+        None,
         &mut trace,
     )
 }
@@ -34,6 +35,7 @@ pub(super) fn next_runtime_response_candidate_for_route_with_prompt_cache_key(
     excluded_profiles: &BTreeSet<String>,
     route_kind: RuntimeRouteKind,
     prompt_cache_key: Option<&str>,
+    requested_model: Option<&str>,
     trace: &mut runtime_proxy_crate::RuntimeRouteDecisionTraceBuilder,
 ) -> Result<Option<String>> {
     let prompt_cache_owner = runtime_prompt_cache_bound_profile(prompt_cache_key);
@@ -41,14 +43,19 @@ pub(super) fn next_runtime_response_candidate_for_route_with_prompt_cache_key(
     let mut waited_for_cold_start_probe = false;
 
     loop {
-        let mut prepared =
-            prepare_runtime_response_selection(shared, excluded_profiles, route_kind)?;
+        let mut prepared = prepare_runtime_response_selection(
+            shared,
+            excluded_profiles,
+            route_kind,
+            requested_model,
+        )?;
         let candidate_plan = build_runtime_response_candidate_execution_plan(
             &prepared.selection_state,
             excluded_profiles,
             route_kind,
             prepared.inflight_soft_limit,
             std::mem::take(&mut prepared.ready_candidates),
+            requested_model,
             runtime_response_candidate_execution_options(
                 prompt_cache_key,
                 prompt_cache_owner.as_deref(),
@@ -168,8 +175,10 @@ pub(crate) fn runtime_quota_last_chance_profile_for_route(
     excluded_profiles: &BTreeSet<String>,
     route_kind: RuntimeRouteKind,
     prompt_cache_key: Option<&str>,
+    requested_model: Option<&str>,
 ) -> Result<Option<String>> {
-    let mut prepared = prepare_runtime_response_selection(shared, excluded_profiles, route_kind)?;
+    let mut prepared =
+        prepare_runtime_response_selection(shared, excluded_profiles, route_kind, requested_model)?;
     let prompt_cache_owner = runtime_prompt_cache_bound_profile(prompt_cache_key);
     let candidate_plan = build_runtime_response_candidate_execution_plan(
         &prepared.selection_state,
@@ -177,6 +186,7 @@ pub(crate) fn runtime_quota_last_chance_profile_for_route(
         route_kind,
         prepared.inflight_soft_limit,
         std::mem::take(&mut prepared.ready_candidates),
+        requested_model,
         runtime_response_candidate_execution_options(
             prompt_cache_key,
             prompt_cache_owner.as_deref(),

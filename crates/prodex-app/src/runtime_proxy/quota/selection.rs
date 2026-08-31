@@ -4,6 +4,7 @@ pub(crate) fn runtime_proxy_direct_current_fallback_profile(
     shared: &RuntimeRotationProxyShared,
     excluded_profiles: &BTreeSet<String>,
     route_kind: RuntimeRouteKind,
+    requested_model: Option<&str>,
 ) -> Result<Option<String>> {
     let (profile_name, auth_failure_active, cached_usage_auth_entry, probe_cache_entry) = {
         let runtime = shared
@@ -55,8 +56,12 @@ pub(crate) fn runtime_proxy_direct_current_fallback_profile(
         route_kind,
         RuntimeRouteKind::Responses | RuntimeRouteKind::Websocket
     ) {
-        let (quota_summary, quota_source) =
-            runtime_profile_quota_summary_for_route(shared, &profile_name, route_kind)?;
+        let (quota_summary, quota_source) = runtime_profile_quota_summary_for_route_with_model(
+            shared,
+            &profile_name,
+            route_kind,
+            requested_model,
+        )?;
         if quota_source.is_none()
             || runtime_quota_summary_requires_live_source_after_probe(
                 quota_summary,

@@ -68,6 +68,7 @@ pub(crate) fn attempt_runtime_websocket_request_with_hard_affinity(
             shared,
             websocket_session,
             profile_name,
+            requested_model: request_model_name.as_deref(),
             request_previous_response_id,
             request_session_id,
             request_turn_state,

@@ -115,9 +115,10 @@ fn sorted_names_by(reports: &[QuotaReport], sort: QuotaReportSort) -> Vec<String
 
 #[path = "render/additional.rs"]
 mod additional;
+#[path = "render/model_capacity.rs"]
+mod model_capacity;
 #[path = "render/spark.rs"]
 mod spark;
-
 #[test]
 fn labels_standard_windows() {
     assert_eq!(window_label(Some(18_000)), "5h");
@@ -851,7 +852,6 @@ fn quota_reset_at_from_message_parses_usage_limit_json() {
 
     assert_eq!(parsed, 1_780_245_646);
 }
-
 #[test]
 fn quota_reset_at_from_message_parses_codex_reset_headers() {
     let parsed = quota_reset_at_from_message(

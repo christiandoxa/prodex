@@ -4,6 +4,8 @@ use super::*;
 mod cli_mount;
 #[path = "admission/compact.rs"]
 mod compact;
+#[path = "admission/compact_model_fallback.rs"]
+mod compact_model_fallback;
 #[path = "admission/continuation_store.rs"]
 mod continuation_store;
 #[path = "admission/doctor_summary.rs"]

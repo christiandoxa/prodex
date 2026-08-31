@@ -181,6 +181,7 @@ impl RuntimeResponsesAffinityState {
             discover_previous_response_owner: previous_response_id.is_some(),
             previous_response_id,
             route_kind: RuntimeRouteKind::Responses,
+            requested_model: None,
         }
     }
 

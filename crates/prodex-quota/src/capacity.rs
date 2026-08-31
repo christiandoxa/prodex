@@ -11,7 +11,7 @@ pub(crate) fn additional_rate_limit_is_spark(additional: &AdditionalRateLimit) -
     .flatten()
     .any(|value| {
         let normalized = value.to_ascii_lowercase();
-        normalized.contains("spark") || normalized.contains("bengalfox")
+        normalized.contains("spark")
     })
 }
 

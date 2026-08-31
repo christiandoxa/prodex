@@ -27,6 +27,7 @@ pub(super) fn prepare_runtime_response_selection(
     shared: &RuntimeRotationProxyShared,
     excluded_profiles: &BTreeSet<String>,
     route_kind: RuntimeRouteKind,
+    requested_model: Option<&str>,
 ) -> Result<RuntimeResponseSelectionPrepared> {
     if shared.auto_redeem_enabled
         && runtime_best_auto_redeem_profile_name(shared, route_kind, excluded_profiles)?.is_some()
@@ -45,8 +46,13 @@ pub(super) fn prepare_runtime_response_selection(
     let inflight_soft_limit =
         runtime_profile_inflight_soft_limit_for_shared(shared, route_kind, pressure_mode);
     let selection_state = load_runtime_route_selection_catalog(shared, route_kind, now)?;
-    let probe_plan =
-        build_runtime_response_probe_plan(&selection_state, excluded_profiles, route_kind, now);
+    let probe_plan = build_runtime_response_probe_plan(
+        &selection_state,
+        excluded_profiles,
+        route_kind,
+        requested_model,
+        now,
+    );
     let probe_counts = RuntimeResponseProbeCounts {
         stale_refreshes: probe_plan.stale_probe_refreshes.len(),
         cold_start_jobs: probe_plan.cold_start_probe_jobs.len(),

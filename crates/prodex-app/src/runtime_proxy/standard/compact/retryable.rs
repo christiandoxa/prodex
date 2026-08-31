@@ -8,7 +8,8 @@ use super::super::super::{
     bump_runtime_profile_bad_pairing_score, bump_runtime_profile_health_score,
     mark_runtime_profile_retry_backoff, release_runtime_compact_lineage,
     release_runtime_quota_blocked_affinity, runtime_auto_redeem_usage_limit_reset_credit,
-    runtime_has_route_eligible_quota_fallback, runtime_proxy_log,
+    runtime_has_route_eligible_quota_fallback_for_model,
+    runtime_luna_quota_block_has_spark_capacity, runtime_proxy_log,
 };
 use super::{
     affinity::runtime_compact_candidate_has_hard_affinity,
@@ -33,6 +34,7 @@ pub(super) struct RuntimeProxyCompactRetryableFailure<'a> {
     pub(super) previous_response_profile: Option<&'a str>,
     pub(super) request_session_id: Option<&'a str>,
     pub(super) request_turn_state: Option<&'a str>,
+    pub(super) request_model_name: Option<&'a str>,
     pub(super) current_profile: &'a str,
     pub(super) compact_followup_profile: &'a mut Option<(String, &'static str)>,
     pub(super) session_profile: &'a mut Option<String>,
@@ -59,6 +61,7 @@ pub(super) fn handle_runtime_proxy_compact_retryable_failure(
         previous_response_profile,
         request_session_id,
         request_turn_state,
+        request_model_name,
         current_profile,
         compact_followup_profile,
         session_profile,
@@ -109,11 +112,17 @@ pub(super) fn handle_runtime_proxy_compact_retryable_failure(
             if overload { "overload" } else { "quota" }
         ),
     );
-    mark_runtime_profile_retry_backoff(shared, &profile_name)?;
+    if !(prodex_quota::openai_model_is_luna(request_model_name)
+        && !overload
+        && runtime_luna_quota_block_has_spark_capacity(shared, &profile_name))
+    {
+        mark_runtime_profile_retry_backoff(shared, &profile_name)?;
+    }
 
     if runtime_compact_quota_fallback_exhausted(
         shared,
         overload,
+        request_model_name,
         RuntimeProxyCompactAttemptFailureLog {
             request_id,
             exit: "quota_fallback_exhausted",
@@ -374,15 +383,19 @@ fn runtime_compact_record_overload_penalty(
 fn runtime_compact_quota_fallback_exhausted(
     shared: &RuntimeRotationProxyShared,
     overload: bool,
+    request_model_name: Option<&str>,
     failure: RuntimeProxyCompactAttemptFailureLog<'_>,
 ) -> Result<bool> {
     if overload
-        || runtime_has_route_eligible_quota_fallback(
+        || runtime_has_route_eligible_quota_fallback_for_model(
             shared,
             failure.profile_name,
             &BTreeSet::new(),
             RuntimeRouteKind::Compact,
+            request_model_name,
         )?
+        || (prodex_quota::openai_model_is_luna(request_model_name)
+            && runtime_luna_quota_block_has_spark_capacity(shared, failure.profile_name))
     {
         return Ok(false);
     }

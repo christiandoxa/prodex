@@ -1,8 +1,9 @@
 use super::super::{
-    RuntimeInflightReliefWait, RuntimeInflightReliefWaitResult, RuntimeRouteKind,
-    RuntimeSelectionTraceDirect, RuntimeWebsocketAttempt, await_runtime_proxy_async_task,
-    clear_runtime_recovered_profiles, runtime_noncompact_session_priority_profile,
-    runtime_profile_recovery_wait_for_route, runtime_proxy_allows_direct_current_profile_fallback,
+    RuntimeInflightReliefWait, RuntimeInflightReliefWaitResult, RuntimeResponseCandidateSelection,
+    RuntimeRouteKind, RuntimeSelectionTraceDirect, RuntimeWebsocketAttempt,
+    await_runtime_proxy_async_task, clear_runtime_recovered_profiles,
+    runtime_noncompact_session_priority_profile, runtime_profile_recovery_wait_for_route,
+    runtime_proxy_allows_direct_current_profile_fallback,
     runtime_proxy_direct_current_fallback_profile, runtime_proxy_local_capacity_timeout_message,
     runtime_proxy_log, runtime_proxy_log_field,
     runtime_proxy_maybe_wait_for_interactive_inflight_relief,
@@ -11,7 +12,7 @@ use super::super::{
     runtime_proxy_probe_refresh_pause, runtime_proxy_structured_log_message,
     runtime_remaining_sync_probe_cold_start_profiles_for_route, runtime_route_kind_label,
     runtime_selection_trace_log_direct, runtime_smart_context_model_name_from_body,
-    send_runtime_proxy_websocket_error,
+    select_runtime_response_candidate_for_route_with_request, send_runtime_proxy_websocket_error,
 };
 use super::{
     RuntimeWebsocketDirectCurrentFallbackReason, RuntimeWebsocketMessageLoopAction,
@@ -35,7 +36,7 @@ use crate::acquire_test_runtime_lock;
 
 impl<'a> RuntimeWebsocketTextMessageFlow<'a> {
     pub(super) fn run(&mut self) -> Result<()> {
-        let selection_started_at = Instant::now();
+        let mut selection_started_at = Instant::now();
         let mut selection_attempts = 0usize;
         loop {
             if self.local_capacity_wait_timed_out {
@@ -57,7 +58,13 @@ impl<'a> RuntimeWebsocketTextMessageFlow<'a> {
 
             let Some(candidate_name) = self.select_candidate()? else {
                 match self.handle_candidate_exhausted()? {
-                    RuntimeWebsocketMessageLoopAction::Continue => continue,
+                    RuntimeWebsocketMessageLoopAction::Continue => {
+                        if std::mem::take(&mut self.reset_selection_budget) {
+                            selection_started_at = Instant::now();
+                            selection_attempts = 0;
+                        }
+                        continue;
+                    }
                     RuntimeWebsocketMessageLoopAction::Finished => return Ok(()),
                 }
             };
@@ -409,6 +416,9 @@ impl<'a> RuntimeWebsocketTextMessageFlow<'a> {
             runtime_proxy_probe_refresh_pause(self.shared, RuntimeRouteKind::Websocket);
             return Ok(RuntimeWebsocketMessageLoopAction::Continue);
         }
+        if self.try_luna_spark_fallback()? {
+            return Ok(RuntimeWebsocketMessageLoopAction::Continue);
+        }
         if let Some(action) = self.try_direct_current_profile_fallback(
             RuntimeWebsocketDirectCurrentFallbackReason::CandidateExhausted,
         )? {
@@ -429,6 +439,7 @@ impl<'a> RuntimeWebsocketTextMessageFlow<'a> {
             self.shared,
             &self.excluded_profiles,
             RuntimeRouteKind::Websocket,
+            runtime_smart_context_model_name_from_body(self.request_text.as_bytes()).as_deref(),
         )?
         else {
             return Ok(None);
@@ -461,6 +472,61 @@ impl<'a> RuntimeWebsocketTextMessageFlow<'a> {
         let attempt = self.attempt_profile(&current_profile, turn_state_override.as_deref())?;
         self.handle_direct_current_fallback_attempt(reason, attempt)
             .map(Some)
+    }
+
+    fn try_luna_spark_fallback(&mut self) -> Result<bool> {
+        let Some(spark_model) = prodex_quota::openai_luna_spark_fallback_model(
+            self.requested_model_name.as_deref(),
+            runtime_smart_context_model_name_from_body(self.request_text.as_bytes()).as_deref(),
+        ) else {
+            return Ok(false);
+        };
+        if self.previous_response_id.is_some()
+            || self.request_turn_state.is_some()
+            || self.request_session_id.is_some()
+            || self.request_requires_previous_response_affinity
+            || self.prompt_cache_key.is_some()
+            || self.has_continuation_priority()
+            || self.saw_inflight_saturation
+        {
+            return Ok(false);
+        }
+
+        let Some(spark_candidate) = select_runtime_response_candidate_for_route_with_request(
+            self.shared,
+            RuntimeResponseCandidateSelection::fresh(
+                &std::collections::BTreeSet::new(),
+                RuntimeRouteKind::Websocket,
+            ),
+            Some(self.request_id),
+            Some(spark_model),
+        )?
+        else {
+            return Ok(false);
+        };
+
+        let rewritten = prodex_provider_core::provider_request_body_with_model(
+            self.request_text.as_bytes(),
+            spark_model,
+        );
+        self.request_text = String::from_utf8(rewritten)
+            .map_err(|_| anyhow::anyhow!("Spark fallback request body was not valid UTF-8"))?;
+        self.excluded_profiles.clear();
+        self.last_failure = None;
+        self.saw_transport_failure = false;
+        self.saw_overload_failure = false;
+        self.recovery_sweeps = 0;
+        self.recovery_started_at = None;
+        self.quota_last_chance_profile = Some(spark_candidate.clone());
+        self.reset_selection_budget = true;
+        runtime_proxy_log(
+            self.shared,
+            format!(
+                "request={} websocket_session={} model_fallback requested_model=luna effective_model={} profile={} reason=luna_capacity_unavailable_spark_available",
+                self.request_id, self.session_id, spark_model, spark_candidate
+            ),
+        );
+        Ok(true)
     }
 
     pub(super) fn allows_direct_current_profile_fallback(&self) -> bool {

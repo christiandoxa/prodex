@@ -112,6 +112,7 @@ pub(super) fn handle_runtime_responses_quota_blocked(
         prompt_cache_key,
         excluded_profiles,
         quota_last_chance_profile,
+        request_model_name,
     )? {
         return Ok(Some(response));
     }
@@ -127,13 +128,15 @@ pub(super) fn prepare_runtime_responses_quota_fallback(
     prompt_cache_key: Option<&str>,
     excluded_profiles: &mut BTreeSet<String>,
     quota_last_chance_profile: &mut Option<String>,
+    request_model_name: Option<&str>,
 ) -> Result<bool> {
     excluded_profiles.insert(profile_name.to_string());
-    if runtime_has_route_eligible_quota_fallback(
+    if runtime_has_route_eligible_quota_fallback_for_model(
         shared,
         profile_name,
         excluded_profiles,
         RuntimeRouteKind::Responses,
+        request_model_name,
     )? {
         return Ok(true);
     }
@@ -142,6 +145,7 @@ pub(super) fn prepare_runtime_responses_quota_fallback(
         excluded_profiles,
         RuntimeRouteKind::Responses,
         prompt_cache_key,
+        request_model_name,
     )?
     else {
         return Ok(false);

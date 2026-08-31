@@ -28,6 +28,7 @@ mod commit;
 mod fallback;
 mod flow;
 mod logging;
+mod model_fallback;
 mod retryable;
 mod transport;
 use admission::{
@@ -128,8 +129,9 @@ pub(super) fn proxy_runtime_compact_request(
     let saw_transport_failure = false;
     run_runtime_compact_selection(RuntimeCompactSelectionContext {
         request_id,
-        request,
+        request: request.clone(),
         shared,
+        requested_model_name: request_model_name.clone(),
         request_model_name,
         request_previous_response_id,
         request_session_id,
@@ -157,8 +159,9 @@ pub(super) fn proxy_runtime_compact_request(
 
 struct RuntimeCompactSelectionContext<'a> {
     request_id: u64,
-    request: &'a RuntimeProxyRequest,
+    request: RuntimeProxyRequest,
     shared: &'a RuntimeRotationProxyShared,
+    requested_model_name: Option<String>,
     request_model_name: Option<String>,
     request_previous_response_id: Option<String>,
     request_session_id: Option<String>,
@@ -358,6 +361,9 @@ impl RuntimeCompactSelectionContext<'_> {
         if self.can_wait_for_overload_recovery() && self.wait_for_overload_recovery()? {
             return Ok(RuntimeCompactLoopAction::Continue);
         }
+        if self.try_luna_spark_fallback()? {
+            return Ok(RuntimeCompactLoopAction::Continue);
+        }
         Ok(RuntimeCompactLoopAction::Return(self.finish(
             "candidate_exhausted",
             "candidate_exhausted_fallback",
@@ -410,7 +416,7 @@ impl RuntimeCompactSelectionContext<'_> {
         }
         let attempt = attempt_runtime_standard_request(
             self.request_id,
-            self.request,
+            &self.request,
             self.shared,
             &candidate_name,
             candidate_has_hard_affinity,
@@ -456,6 +462,7 @@ impl RuntimeCompactSelectionContext<'_> {
                 previous_response_profile: self.previous_response_profile.as_deref(),
                 request_session_id: self.request_session_id.as_deref(),
                 request_turn_state: self.request_turn_state.as_deref(),
+                request_model_name: self.request_model_name.as_deref(),
                 current_profile: &self.current_profile,
                 compact_followup_profile: &mut self.compact_followup_profile,
                 session_profile: &mut self.session_profile,
@@ -482,7 +489,7 @@ impl RuntimeCompactSelectionContext<'_> {
     ) -> Result<RuntimeInflightReliefWaitResult> {
         runtime_proxy_maybe_wait_for_interactive_inflight_relief(RuntimeInflightReliefWait {
             request_id: self.request_id,
-            request: self.request,
+            request: &self.request,
             shared: self.shared,
             excluded_profiles: &self.excluded_profiles,
             route_kind: RuntimeRouteKind::Compact,
@@ -525,7 +532,7 @@ impl RuntimeCompactSelectionContext<'_> {
         finish_runtime_proxy_compact_selection_exhausted(
             RuntimeProxyCompactSelectionExhausted {
                 request_id: self.request_id,
-                request: self.request,
+                request: &self.request,
                 shared: self.shared,
                 compact_owner_profile: &self.compact_owner_profile,
                 previous_response_id: self.request_previous_response_id.as_deref(),
@@ -555,6 +562,7 @@ struct RuntimeCompactAttemptContext<'a> {
     previous_response_profile: Option<&'a str>,
     request_session_id: Option<&'a str>,
     request_turn_state: Option<&'a str>,
+    request_model_name: Option<&'a str>,
     current_profile: &'a str,
     compact_followup_profile: &'a mut Option<(String, &'static str)>,
     session_profile: &'a mut Option<String>,
@@ -581,6 +589,7 @@ fn handle_runtime_compact_attempt(
         previous_response_profile,
         request_session_id,
         request_turn_state,
+        request_model_name,
         current_profile,
         compact_followup_profile,
         session_profile,
@@ -651,6 +660,7 @@ fn handle_runtime_compact_attempt(
                     previous_response_profile,
                     request_session_id,
                     request_turn_state,
+                    request_model_name,
                     current_profile,
                     compact_followup_profile,
                     session_profile,

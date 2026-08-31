@@ -13,7 +13,8 @@ pub use pressure::{
     runtime_quota_pressure_band_reason, runtime_quota_pressure_band_to_proxy,
     runtime_quota_pressure_sort_key_for_route, runtime_quota_pressure_sort_key_for_route_at,
     runtime_quota_pressure_sort_key_for_route_from_summary,
-    runtime_quota_pressure_sort_keys_for_route_at, runtime_quota_sort_key_from_proxy,
+    runtime_quota_pressure_sort_keys_for_route_at,
+    runtime_quota_pressure_sort_keys_for_route_at_with_model, runtime_quota_sort_key_from_proxy,
     runtime_response_quota_pressure_sort_key_to_proxy,
 };
 pub use selection::*;
@@ -34,13 +35,16 @@ pub use summary::{
     runtime_precommit_quota_gate_initial_decision, runtime_quota_precommit_guard_reason,
     runtime_quota_soft_affinity_rejection_reason, runtime_quota_summary_allows_soft_affinity,
     runtime_quota_summary_blocking_reset_at, runtime_quota_summary_for_route,
-    runtime_quota_summary_from_cached_sources, runtime_quota_summary_from_proxy,
-    runtime_quota_summary_log_fields, runtime_quota_summary_requires_live_source_after_probe,
+    runtime_quota_summary_for_route_with_model, runtime_quota_summary_for_route_with_model_at,
+    runtime_quota_summary_from_cached_sources, runtime_quota_summary_from_cached_sources_for_model,
+    runtime_quota_summary_from_proxy, runtime_quota_summary_log_fields,
+    runtime_quota_summary_requires_live_source_after_probe,
     runtime_quota_summary_requires_precommit_live_probe, runtime_quota_summary_to_proxy,
     runtime_selection_quota_summary_from_proxy, runtime_selection_quota_summary_to_proxy,
 };
 pub use window::{
     runtime_quota_window_observation, runtime_quota_window_observation_at,
+    runtime_quota_window_observation_for_model, runtime_quota_window_observation_for_model_at,
     runtime_quota_window_status_from_proxy, runtime_quota_window_status_reason,
     runtime_quota_window_status_to_proxy, runtime_quota_window_summary,
     runtime_quota_window_summary_from_proxy, runtime_quota_window_summary_from_usage_snapshot_at,

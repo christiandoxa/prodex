@@ -54,6 +54,7 @@ pub(super) fn try_runtime_responses_direct_current_profile_fallback(
         fallback.shared,
         excluded_profiles,
         RuntimeRouteKind::Responses,
+        runtime_smart_context_model_name_from_body(&fallback.request.body).as_deref(),
     )?
     else {
         return Ok(None);
@@ -287,6 +288,7 @@ fn handle_runtime_responses_direct_quota(
         fallback.prompt_cache_key,
         excluded_profiles,
         quota_last_chance_profile,
+        runtime_smart_context_model_name_from_body(&fallback.request.body).as_deref(),
     )? {
         return Ok(Some(RuntimeResponsesDirectCurrentFallbackAction::Return(
             Box::new(response),

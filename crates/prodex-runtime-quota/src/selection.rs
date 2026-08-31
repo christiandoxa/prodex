@@ -205,6 +205,26 @@ pub fn ready_profile_candidates_with_view<S: ProfileSelectionRead>(
     persisted_usage_snapshots: Option<&BTreeMap<String, RuntimeProfileUsageSnapshot>>,
     stale_grace_seconds: i64,
 ) -> Vec<ReadyProfileCandidate> {
+    ready_profile_candidates_with_view_for_model(
+        reports,
+        include_code_review,
+        preferred_profile,
+        selection,
+        persisted_usage_snapshots,
+        stale_grace_seconds,
+        None,
+    )
+}
+
+pub fn ready_profile_candidates_with_view_for_model<S: ProfileSelectionRead>(
+    reports: &[RunProfileProbeReport],
+    include_code_review: bool,
+    preferred_profile: Option<&str>,
+    selection: S,
+    persisted_usage_snapshots: Option<&BTreeMap<String, RuntimeProfileUsageSnapshot>>,
+    stale_grace_seconds: i64,
+    requested_model: Option<&str>,
+) -> Vec<ReadyProfileCandidate> {
     let candidates = reports
         .iter()
         .filter_map(|report| {
@@ -227,7 +247,11 @@ pub fn ready_profile_candidates_with_view<S: ProfileSelectionRead>(
                     )
                 }
             };
-            if !collect_blocked_limits(&usage, include_code_review).is_empty() {
+            if !prodex_quota::openai_usage_supports_model(
+                &usage,
+                include_code_review,
+                requested_model,
+            ) {
                 return None;
             }
 

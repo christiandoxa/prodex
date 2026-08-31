@@ -200,6 +200,7 @@ pub(crate) fn attempt_runtime_responses_request(
         shared,
         profile_name,
         route_kind: RuntimeRouteKind::Responses,
+        requested_model: runtime_smart_context_model_name_from_body(&request.body).as_deref(),
         has_continuation_context: request_previous_response_id.is_some()
             || request_session_id.is_some()
             || request_turn_state.is_some(),

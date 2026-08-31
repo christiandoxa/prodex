@@ -24,6 +24,10 @@ pub(crate) fn select_runtime_response_candidate_for_route_with_request(
     request_id: Option<u64>,
     requested_model: Option<&str>,
 ) -> Result<Option<String>> {
+    let selection = RuntimeResponseCandidateSelection {
+        requested_model,
+        ..selection
+    };
     let mut trace = runtime_selection_trace_builder(selection.route_kind, requested_model);
     if requested_model.is_some() {
         trace.set_resolved_model(requested_model);
@@ -126,6 +130,7 @@ fn select_runtime_response_candidate_for_route_inner(
         selection.excluded_profiles,
         selection.route_kind,
         selection.prompt_cache_key,
+        selection.requested_model,
         trace,
     )? {
         return Ok(Some(profile_name));
@@ -136,6 +141,7 @@ fn select_runtime_response_candidate_for_route_inner(
         selection.excluded_profiles,
         selection.route_kind,
         selection.prompt_cache_key,
+        selection.requested_model,
         trace,
     )
 }

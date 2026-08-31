@@ -28,6 +28,7 @@ fn probe_plan_queues_cold_profiles_for_background_refresh() {
         &state,
         &BTreeSet::new(),
         RuntimeRouteKind::Responses,
+        None,
         now,
     );
 
@@ -78,6 +79,7 @@ fn candidate_plan_reuses_supplied_ready_candidates_without_rebuilding() {
         RuntimeRouteKind::Responses,
         3,
         ready_candidates,
+        None,
         runtime_response_candidate_execution_options(None, None, |_| 0),
     );
 
@@ -145,6 +147,7 @@ fn candidate_plan_excludes_failed_profiles_from_ready_and_fallback_candidates() 
         RuntimeRouteKind::Responses,
         3,
         ready_candidates,
+        None,
         runtime_response_candidate_execution_options(None, None, |_| 0),
     );
 

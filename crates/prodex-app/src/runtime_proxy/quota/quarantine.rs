@@ -92,6 +92,18 @@ pub(crate) fn mark_runtime_profile_quota_quarantine_for_request_model(
     quota_message: Option<&str>,
     request_model_name: Option<&str>,
 ) -> Result<()> {
+    if prodex_quota::openai_model_is_luna(request_model_name)
+        && runtime_luna_quota_block_has_spark_capacity(shared, profile_name)
+    {
+        runtime_proxy_log(
+            shared,
+            format!(
+                "profile_luna_quota_quarantine_deferred profile={profile_name} route={} reason=spark_capacity_preserved",
+                runtime_route_kind_label(route_kind),
+            ),
+        );
+        return Ok(());
+    }
     if runtime_spark_scoped_quota_block_has_main_remaining(
         shared,
         profile_name,
@@ -111,6 +123,22 @@ pub(crate) fn mark_runtime_profile_quota_quarantine_for_request_model(
     }
 
     mark_runtime_profile_quota_quarantine(shared, profile_name, route_kind, quota_message)
+}
+
+pub(crate) fn runtime_luna_quota_block_has_spark_capacity(
+    shared: &RuntimeRotationProxyShared,
+    profile_name: &str,
+) -> bool {
+    let Ok(runtime) = shared.runtime.lock() else {
+        return false;
+    };
+    runtime
+        .profile_probe_cache
+        .get(profile_name)
+        .and_then(|entry| entry.result.as_ref().ok())
+        .is_some_and(|usage| {
+            prodex_quota::openai_quota_has_ready_limit_for_model(usage, Some("gpt-5.3-codex-spark"))
+        })
 }
 
 fn runtime_spark_scoped_quota_block_has_main_remaining(
@@ -147,8 +175,7 @@ fn runtime_text_mentions_spark_quota_target(value: Option<&str>) -> bool {
         return false;
     };
     let normalized = value.to_ascii_lowercase();
-    normalized.contains("bengalfox")
-        || normalized.contains("gpt-5.3-codex-spark")
+    normalized.contains("gpt-5.3-codex-spark")
         || normalized.contains("codex-spark")
         || (normalized.contains("codex") && normalized.contains("spark"))
 }
@@ -232,7 +259,7 @@ mod tests {
         ));
         assert!(runtime_quota_block_is_spark_scoped(
             None,
-            Some("codex_bengalfox usage limit reached"),
+            Some("GPT-5.3-Codex-Spark usage limit reached"),
         ));
         assert!(!runtime_quota_block_is_spark_scoped(
             Some("gpt-5.3-codex"),

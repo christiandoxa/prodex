@@ -13,9 +13,14 @@ pub(super) fn runtime_standard_precommit_quota_guard(
     shared: &RuntimeRotationProxyShared,
     profile_name: &str,
     fresh_request: bool,
+    requested_model: Option<&str>,
 ) -> Result<RuntimeStandardPrecommitGuard> {
-    let (quota_summary, quota_source) =
-        runtime_profile_quota_summary_for_route(shared, profile_name, RuntimeRouteKind::Standard)?;
+    let (quota_summary, quota_source) = runtime_profile_quota_summary_for_route_with_model(
+        shared,
+        profile_name,
+        RuntimeRouteKind::Standard,
+        requested_model,
+    )?;
     if quota_summary.route_band != RuntimeQuotaPressureBand::Exhausted {
         return Ok(RuntimeStandardPrecommitGuard::Continue);
     }
@@ -28,10 +33,11 @@ pub(super) fn runtime_standard_precommit_quota_guard(
         fresh_request,
     )? == RuntimeAutoRedeemResetCreditOutcome::Redeemed
     {
-        let (redeemed_summary, _) = runtime_profile_quota_summary_for_route(
+        let (redeemed_summary, _) = runtime_profile_quota_summary_for_route_with_model(
             shared,
             profile_name,
             RuntimeRouteKind::Standard,
+            requested_model,
         )?;
         if redeemed_summary.route_band != RuntimeQuotaPressureBand::Exhausted {
             return Ok(RuntimeStandardPrecommitGuard::RetryWithoutGuard);
@@ -61,9 +67,14 @@ pub(super) fn runtime_compact_precommit_quota_guard(
     profile_name: &str,
     allow_quota_exhausted_send: bool,
     fresh_request: bool,
+    requested_model: Option<&str>,
 ) -> Result<RuntimeStandardPrecommitGuard> {
-    let (quota_summary, quota_source) =
-        runtime_profile_quota_summary_for_route(shared, profile_name, RuntimeRouteKind::Compact)?;
+    let (quota_summary, quota_source) = runtime_profile_quota_summary_for_route_with_model(
+        shared,
+        profile_name,
+        RuntimeRouteKind::Compact,
+        requested_model,
+    )?;
     if quota_summary.route_band != RuntimeQuotaPressureBand::Exhausted {
         return Ok(RuntimeStandardPrecommitGuard::Continue);
     }
@@ -77,10 +88,11 @@ pub(super) fn runtime_compact_precommit_quota_guard(
             fresh_request,
         )? == RuntimeAutoRedeemResetCreditOutcome::Redeemed
         {
-            let (redeemed_summary, _) = runtime_profile_quota_summary_for_route(
+            let (redeemed_summary, _) = runtime_profile_quota_summary_for_route_with_model(
                 shared,
                 profile_name,
                 RuntimeRouteKind::Compact,
+                requested_model,
             )?;
             if redeemed_summary.route_band != RuntimeQuotaPressureBand::Exhausted {
                 return Ok(RuntimeStandardPrecommitGuard::RetryWithoutGuard);

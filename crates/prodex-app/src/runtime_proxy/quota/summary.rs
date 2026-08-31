@@ -66,6 +66,28 @@ pub(crate) fn runtime_profile_quota_summary_for_route(
     ))
 }
 
+pub(crate) fn runtime_profile_quota_summary_for_route_with_model(
+    shared: &RuntimeRotationProxyShared,
+    profile_name: &str,
+    route_kind: RuntimeRouteKind,
+    requested_model: Option<&str>,
+) -> Result<(RuntimeQuotaSummary, Option<RuntimeQuotaSource>)> {
+    let runtime = shared
+        .runtime
+        .lock()
+        .map_err(|_| anyhow::anyhow!("runtime auto-rotate state is poisoned"))?;
+    let now = Local::now().timestamp();
+    Ok(
+        runtime_profile_quota_summary_for_route_from_state_with_model(
+            &runtime,
+            profile_name,
+            route_kind,
+            requested_model,
+            now,
+        ),
+    )
+}
+
 pub(crate) fn runtime_profile_quota_summary_for_route_from_state(
     runtime: &RuntimeRotationState,
     profile_name: &str,
@@ -81,6 +103,28 @@ pub(crate) fn runtime_profile_quota_summary_for_route_from_state(
         live_probe_usage,
         runtime.profile_usage_snapshots.get(profile_name),
         route_kind,
+        now,
+        RUNTIME_PROFILE_USAGE_CACHE_STALE_GRACE_SECONDS,
+    )
+}
+
+pub(crate) fn runtime_profile_quota_summary_for_route_from_state_with_model(
+    runtime: &RuntimeRotationState,
+    profile_name: &str,
+    route_kind: RuntimeRouteKind,
+    requested_model: Option<&str>,
+    now: i64,
+) -> (RuntimeQuotaSummary, Option<RuntimeQuotaSource>) {
+    let live_probe_usage = runtime
+        .profile_probe_cache
+        .get(profile_name)
+        .filter(|entry| runtime_profile_usage_cache_is_fresh(entry, now))
+        .and_then(|entry| entry.result.as_ref().ok());
+    runtime_quota_summary_from_cached_sources_for_model(
+        live_probe_usage,
+        runtime.profile_usage_snapshots.get(profile_name),
+        route_kind,
+        requested_model,
         now,
         RUNTIME_PROFILE_USAGE_CACHE_STALE_GRACE_SECONDS,
     )
