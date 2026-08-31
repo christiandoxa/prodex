@@ -223,7 +223,7 @@ pub(in crate::expose) fn start_existing_cloudflared_tunnel(
     let tunnel = CloudflaredTunnel::from_existing(child, transport, reader_threads);
     #[cfg(windows)]
     {
-        tunnel.process_job = process_job;
+        tunnel.attach_process_job(process_job);
     }
     Ok(tunnel)
 }
