@@ -1,12 +1,15 @@
 use super::EXPOSE_MAX_CLIENTS_LIMIT;
 use super::mcp::{
-    ExposeMcpEndpoint, PublicMcpEndpoint, expose_instance_id, verify_local_mcp_with_progress,
+    ExposeMcpEndpoint, PublicMcpEndpoint, expose_instance_id, verify_local_browser_with_progress,
+    verify_local_mcp_with_progress, verify_public_browser_with_progress,
     verify_public_mcp_with_progress,
 };
+pub(super) use super::runtime::ensure_cloudflared_available;
 use super::runtime::{
     CloudflaredTransport, CloudflaredTunnel, ExposeHttpServer, ExposePty, ExposeShared,
-    OpenAiTunnel, cloudflared_command, ensure_openai_tunnel_available, expose_access_url,
-    expose_public_host, resolve_openai_tunnel_id, start_openai_tunnel,
+    OpenAiTunnel, cloudflared_start_failure, ensure_openai_tunnel_available, expose_access_url,
+    expose_public_host, resolve_existing_cloudflare_selection, resolve_openai_tunnel_id,
+    start_existing_cloudflared_tunnel, start_openai_tunnel,
 };
 use super::session::{ExposeSessionStore, expose_random_token};
 #[path = "super_expose_status.rs"]
@@ -17,7 +20,9 @@ use crate::print_launch_status;
 use anyhow::{Context, bail};
 use prodex_cli::{ExposeTunnelProvider, SuperArgs};
 use redaction::redaction_redact_secret_like_text;
-pub(super) use status::{print_super_expose_configuration, print_super_expose_status};
+pub(super) use status::{
+    print_expose_dry_run, print_super_expose_configuration, print_super_expose_status,
+};
 use std::collections::BTreeSet;
 use std::env;
 use std::fmt;
@@ -39,6 +44,7 @@ pub(super) enum ExposeEndpointMode {
     ExistingCloudflareTunnel {
         hostname: String,
         origin_port: u16,
+        tunnel: Option<String>,
     },
     OpenAiSecureMcp {
         tunnel_id: String,
@@ -53,10 +59,12 @@ pub(super) enum ExposeLifecyclePhase {
     StartingSuper,
     LocalMcpInitialize,
     LocalMcpTools,
+    LocalBrowser,
     Cloudflare,
     OpenAiTunnel,
     PublicMcpInitialize,
     PublicMcpTools,
+    PublicBrowser,
 }
 
 impl ExposeLifecyclePhase {
@@ -67,10 +75,12 @@ impl ExposeLifecyclePhase {
             Self::StartingSuper => "Starting Prodex Super",
             Self::LocalMcpInitialize => "Local MCP initialize",
             Self::LocalMcpTools => "Local MCP tools/list",
+            Self::LocalBrowser => "Local browser route",
             Self::Cloudflare => "Cloudflare tunnel",
             Self::OpenAiTunnel => "OpenAI Secure MCP Tunnel",
             Self::PublicMcpInitialize => "Public MCP initialize",
             Self::PublicMcpTools => "Public MCP tools/list",
+            Self::PublicBrowser => "Public browser route",
         }
     }
 
@@ -81,10 +91,12 @@ impl ExposeLifecyclePhase {
             Self::StartingSuper => 2,
             Self::LocalMcpInitialize => 3,
             Self::LocalMcpTools => 4,
-            Self::Cloudflare => 5,
-            Self::OpenAiTunnel => 6,
-            Self::PublicMcpInitialize => 7,
-            Self::PublicMcpTools => 8,
+            Self::LocalBrowser => 5,
+            Self::Cloudflare => 6,
+            Self::OpenAiTunnel => 7,
+            Self::PublicMcpInitialize => 8,
+            Self::PublicMcpTools => 9,
+            Self::PublicBrowser => 10,
         }
     }
 }
@@ -122,7 +134,7 @@ impl fmt::Debug for ExposeReadyState {
 
 pub(super) enum ExposeLifecycleEvent {
     Phase(ExposeLifecyclePhase),
-    Ready(ExposeReadyState),
+    Ready(Box<ExposeReadyState>),
     Stopped,
     Failed(String),
 }
@@ -152,7 +164,8 @@ pub(super) fn handle_super_expose(mut args: ExposeArgs) -> anyhow::Result<()> {
         .map_err(anyhow::Error::msg)?;
     crate::runtime_gemini_cli::validate_super_native_cli_preflight(&super_args)?;
     super_args.validate_urls().map_err(anyhow::Error::msg)?;
-    let interactive = io::stdin().is_terminal() && io::stderr().is_terminal();
+    let interactive =
+        io::stdin().is_terminal() && io::stdout().is_terminal() && io::stderr().is_terminal();
     crate::resolve_super_expose_configuration(&mut super_args, interactive)?;
     let workspace_root = env::current_dir()
         .context("failed to capture expose workspace")?
@@ -163,9 +176,9 @@ pub(super) fn handle_super_expose(mut args: ExposeArgs) -> anyhow::Result<()> {
     #[cfg(unix)]
     let _sigint = crate::InteractiveSigintGuard::install()
         .context("failed to install expose signal handler")?;
-    if interactive
-        && (args.tunnel || args.tunnel_provider == Some(ExposeTunnelProvider::Cloudflare))
-    {
+    let explicit_endpoint =
+        super_args.dry_run || args.no_tunnel || args.tunnel || args.tunnel_provider.is_some();
+    if interactive && !explicit_endpoint {
         return super::super_expose_ui::run(
             args,
             super_args,
@@ -175,7 +188,11 @@ pub(super) fn handle_super_expose(mut args: ExposeArgs) -> anyhow::Result<()> {
         );
     }
     print_super_expose_configuration(&super_args, &workspace_name)?;
-    let endpoint = select_expose_endpoint(&args)?;
+    let endpoint = select_expose_endpoint(&args, !super_args.dry_run)?;
+    if super_args.dry_run {
+        print_expose_dry_run(&args, &endpoint)?;
+        return Ok(());
+    }
     confirm_expose_start(interactive)?;
     run_super_expose_engine(
         ExposeEngineRequest {
@@ -192,9 +209,7 @@ pub(super) fn handle_super_expose(mut args: ExposeArgs) -> anyhow::Result<()> {
 }
 
 pub(super) fn validate_expose_launch_args(args: &SuperArgs) -> anyhow::Result<()> {
-    if args.dry_run {
-        bail!("--dry-run is not supported with `prodex s expose`; use `prodex s --dry-run`");
-    }
+    let _ = args;
     Ok(())
 }
 
@@ -323,12 +338,17 @@ fn run_super_expose_engine_inner(
         return Err(error);
     }
     let local_url = zeroize::Zeroizing::new(expose_access_url(&local_origin, &bootstrap));
+    if let Err(error) = verify_local_browser_with_progress(&local_url, &mut progress, &cancelled) {
+        cleanup_super_expose(&shared, &mcp, &mut http, None, None);
+        return Err(error);
+    }
     let ExposeEndpointState {
         mut cloudflared,
         mut openai_tunnel,
         public_browser_url,
         public_url,
     } = start_expose_endpoint(ExposeEndpointStartup {
+        args: &args,
         endpoint: &endpoint,
         local_origin: &local_origin,
         local_mcp_url: &local_mcp_url,
@@ -353,7 +373,10 @@ fn run_super_expose_engine_inner(
     };
     drop(capability);
     if let Some(lifecycle_tx) = lifecycle_tx {
-        emit_lifecycle(Some(lifecycle_tx), ExposeLifecycleEvent::Ready(ready));
+        emit_lifecycle(
+            Some(lifecycle_tx),
+            ExposeLifecycleEvent::Ready(Box::new(ready)),
+        );
     } else {
         print_super_expose_status(&ready)?;
     }
@@ -392,6 +415,7 @@ struct ExposeEndpointState {
 }
 
 struct ExposeEndpointStartup<'a> {
+    args: &'a ExposeArgs,
     endpoint: &'a ExposeEndpointMode,
     local_origin: &'a str,
     local_mcp_url: &'a PublicMcpEndpoint,
@@ -408,6 +432,7 @@ fn start_expose_endpoint(
     startup: ExposeEndpointStartup<'_>,
 ) -> anyhow::Result<ExposeEndpointState> {
     let ExposeEndpointStartup {
+        args,
         endpoint,
         local_origin,
         local_mcp_url,
@@ -464,14 +489,19 @@ fn start_expose_endpoint(
             }
         }
         ExposeEndpointMode::QuickTunnel | ExposeEndpointMode::ExistingCloudflareTunnel { .. } => {
-            let (public_origin, public_host, mut tunnel) =
-                match start_public_endpoint(endpoint, local_origin, lifecycle_tx, cancelled) {
-                    Ok(endpoint) => endpoint,
-                    Err(error) => {
-                        cleanup_super_expose(shared, mcp, http, None, None);
-                        return Err(error);
-                    }
-                };
+            let (public_origin, public_host, mut tunnel) = match start_public_endpoint(
+                endpoint,
+                args,
+                local_origin,
+                lifecycle_tx,
+                cancelled,
+            ) {
+                Ok(endpoint) => endpoint,
+                Err(error) => {
+                    cleanup_super_expose(shared, mcp, http, None, None);
+                    return Err(error);
+                }
+            };
             shared.allow_host(public_host);
             let public_url = match PublicMcpEndpoint::new(&public_origin, capability) {
                 Ok(url) => url,
@@ -487,10 +517,17 @@ fn start_expose_endpoint(
                 cleanup_super_expose(shared, mcp, http, tunnel.as_mut(), None);
                 return Err(error);
             }
+            let public_browser_url = expose_access_url(&public_origin, bootstrap);
+            if let Err(error) =
+                verify_public_browser_with_progress(&public_browser_url, &mut progress, cancelled)
+            {
+                cleanup_super_expose(shared, mcp, http, tunnel.as_mut(), None);
+                return Err(error);
+            }
             Ok(ExposeEndpointState {
                 cloudflared: tunnel,
                 openai_tunnel: None,
-                public_browser_url: Some(expose_access_url(&public_origin, bootstrap)),
+                public_browser_url: Some(public_browser_url),
                 public_url: Some(public_url),
             })
         }
@@ -542,8 +579,10 @@ fn report_probe_phase(lifecycle_tx: Option<&SyncSender<ExposeLifecycleEvent>>, l
     let phase = match label {
         "local MCP initialize" => ExposeLifecyclePhase::LocalMcpInitialize,
         "local MCP tools/list" => ExposeLifecyclePhase::LocalMcpTools,
+        "local browser route" => ExposeLifecyclePhase::LocalBrowser,
         "public MCP initialize" => ExposeLifecyclePhase::PublicMcpInitialize,
         "public MCP tools/list" => ExposeLifecyclePhase::PublicMcpTools,
+        "public browser route" => ExposeLifecyclePhase::PublicBrowser,
         _ => return,
     };
     if lifecycle_tx.is_some() {
@@ -555,6 +594,7 @@ fn report_probe_phase(lifecycle_tx: Option<&SyncSender<ExposeLifecycleEvent>>, l
 
 fn start_public_endpoint(
     endpoint: &ExposeEndpointMode,
+    args: &ExposeArgs,
     local_url: &str,
     lifecycle_tx: Option<&SyncSender<ExposeLifecycleEvent>>,
     cancelled: &dyn Fn() -> bool,
@@ -598,13 +638,31 @@ fn start_public_endpoint(
             );
             Ok((origin, host, Some(tunnel)))
         }
-        ExposeEndpointMode::ExistingCloudflareTunnel { hostname, .. } => {
+        ExposeEndpointMode::ExistingCloudflareTunnel {
+            hostname,
+            origin_port,
+            tunnel: expected_tunnel,
+        } => {
             report_phase(
                 lifecycle_tx,
                 ExposeLifecyclePhase::Cloudflare,
                 "Using existing Cloudflare Tunnel hostname.",
             );
-            Ok((format!("https://{hostname}"), hostname.clone(), None))
+            let selection = resolve_existing_cloudflare_selection(args)?;
+            if selection.hostname != *hostname
+                || selection.origin_port != *origin_port
+                || selection.tunnel != *expected_tunnel
+            {
+                bail!(
+                    "existing Cloudflare selection changed before startup; reselect the configured route"
+                )
+            }
+            let tunnel = start_existing_cloudflared_tunnel(&selection, cancelled)?;
+            Ok((
+                format!("https://{hostname}"),
+                hostname.clone(),
+                Some(tunnel),
+            ))
         }
         ExposeEndpointMode::LocalOnly | ExposeEndpointMode::OpenAiSecureMcp { .. } => {
             unreachable!("non-Cloudflare endpoint passed to public endpoint startup")
@@ -612,10 +670,22 @@ fn start_public_endpoint(
     }
 }
 
-fn select_expose_endpoint(args: &ExposeArgs) -> anyhow::Result<ExposeEndpointMode> {
+pub(super) fn select_expose_endpoint(
+    args: &ExposeArgs,
+    probe_external_clients: bool,
+) -> anyhow::Result<ExposeEndpointMode> {
     if args.openai_tunnel_id.is_some() && args.tunnel_provider != Some(ExposeTunnelProvider::OpenAi)
     {
         bail!("--openai-tunnel-id requires --tunnel-provider openai")
+    }
+    if (args.cloudflare_config.is_some()
+        || args.cloudflare_tunnel.is_some()
+        || args.cloudflare_hostname.is_some()
+        || args.cloudflare_origin_port.is_some()
+        || args.cloudflare_token_file.is_some())
+        && args.tunnel_provider != Some(ExposeTunnelProvider::CloudflareExisting)
+    {
+        bail!("Cloudflare existing options require --tunnel-provider cloudflare-existing")
     }
     if args.no_tunnel {
         return Ok(ExposeEndpointMode::LocalOnly);
@@ -623,13 +693,25 @@ fn select_expose_endpoint(args: &ExposeArgs) -> anyhow::Result<ExposeEndpointMod
     match args.tunnel_provider {
         Some(ExposeTunnelProvider::OpenAi) => {
             let tunnel_id = resolve_openai_tunnel_id(args.openai_tunnel_id.as_deref())?;
-            let client_version = ensure_openai_tunnel_available(&tunnel_id)?;
+            let client_version = if probe_external_clients {
+                ensure_openai_tunnel_available(&tunnel_id)?
+            } else {
+                "not probed (dry run)".to_string()
+            };
             return Ok(ExposeEndpointMode::OpenAiSecureMcp {
                 tunnel_id,
                 client_version,
             });
         }
-        Some(ExposeTunnelProvider::Cloudflare) => return Ok(ExposeEndpointMode::QuickTunnel),
+        Some(ExposeTunnelProvider::CloudflareQuick) => return Ok(ExposeEndpointMode::QuickTunnel),
+        Some(ExposeTunnelProvider::CloudflareExisting) => {
+            let selection = resolve_existing_cloudflare_selection(args)?;
+            return Ok(ExposeEndpointMode::ExistingCloudflareTunnel {
+                hostname: selection.hostname,
+                origin_port: selection.origin_port,
+                tunnel: selection.tunnel,
+            });
+        }
         None if args.tunnel => return Ok(ExposeEndpointMode::QuickTunnel),
         None => {}
     }
@@ -728,68 +810,6 @@ fn cleanup_super_expose(
     }
     shared.pty.shutdown();
     http.shutdown();
-}
-
-fn cloudflared_start_failure(tunnel: &mut super::runtime::CloudflaredTunnel) -> anyhow::Error {
-    if let Some(status) = tunnel.exited() {
-        return anyhow::anyhow!(
-            "Cloudflare Quick Tunnel exited before obtaining a public hostname (status {})",
-            status
-                .code()
-                .map_or_else(|| "signal".to_string(), |code| code.to_string())
-        );
-    }
-    if tunnel.startup_timed_out {
-        return anyhow::anyhow!(
-            "Cloudflare Quick Tunnel did not complete transport negotiation; check outbound UDP/TCP 7844 connectivity"
-        );
-    }
-    anyhow::anyhow!("Cloudflare Quick Tunnel did not report a public hostname")
-}
-
-pub(super) fn ensure_cloudflared_available() -> anyhow::Result<()> {
-    let mut command = cloudflared_command();
-    command.arg("--version");
-    let output = crate::command_probe_output(&mut command, "cloudflared version probe");
-    match output {
-        Ok(output) if output.status.success() && cloudflared_version_is_parseable(&output) => {}
-        Ok(_) => bail!(
-            "cloudflared --version failed or reported an unsupported version; install a current cloudflared (no account or init is required)"
-        ),
-        Err(_) => bail!(
-            "cloudflared is required for Quick Tunnel mode; install it from https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/ (no account or init is required)"
-        ),
-    }
-    let mut help = cloudflared_command();
-    help.args(["tunnel", "--help"]);
-    let help = crate::command_probe_output(&mut help, "cloudflared Quick Tunnel capability probe")
-        .context("cloudflared Quick Tunnel capability probe failed; upgrade cloudflared")?;
-    let help = String::from_utf8_lossy(&help.stdout);
-    if !help.contains("--config") || !help.contains("--url") {
-        bail!(
-            "installed cloudflared does not support isolated Quick Tunnel configuration; upgrade cloudflared"
-        );
-    }
-    Ok(())
-}
-
-fn cloudflared_version_is_parseable(output: &std::process::Output) -> bool {
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    [stdout.as_ref(), stderr.as_ref()].into_iter().any(|text| {
-        text.split_whitespace().any(|token| {
-            let token = token.trim_matches(|character: char| {
-                !character.is_ascii_alphanumeric() && character != '.'
-            });
-            let token = token.strip_prefix('v').unwrap_or(token);
-            let token = token.split(['-', '+']).next().unwrap_or_default();
-            let parts = token.split('.').collect::<Vec<_>>();
-            parts.len() >= 2
-                && parts
-                    .iter()
-                    .all(|part| !part.is_empty() && part.bytes().all(|byte| byte.is_ascii_digit()))
-        })
-    })
 }
 
 fn expose_display_name(

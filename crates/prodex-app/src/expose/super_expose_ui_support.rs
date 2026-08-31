@@ -1,35 +1,73 @@
 use super::PublicMcpEndpoint;
 use base64::Engine;
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use ratatui::style::Style;
+use ratatui::text::{Line, Span};
 use std::io::{self, Write};
+use terminal_ui::{chunk_token, text_width};
 
-pub(super) fn visible_url(url: &str, offset: usize, width: usize) -> String {
+pub(super) fn labeled_value_lines(
+    label: &str,
+    value: &str,
+    width: usize,
+    label_style: Style,
+    value_style: Style,
+) -> Vec<Line<'static>> {
     if width == 0 {
-        return String::new();
+        return Vec::new();
     }
-    let characters = url.chars().collect::<Vec<_>>();
-    if characters.len() <= width {
-        return url.to_string();
+
+    let prefix = format!("{label}: ");
+    let prefix_width = text_width(&prefix);
+    if prefix_width < width {
+        let value_width = width - prefix_width;
+        let indent = " ".repeat(prefix_width);
+        let mut chunks = chunk_token(value, value_width).into_iter();
+        let first = chunks.next().unwrap_or_default();
+        let mut lines = vec![Line::from(vec![
+            Span::styled(prefix, label_style),
+            Span::styled(first, value_style),
+        ])];
+        lines.extend(chunks.map(|chunk| {
+            Line::from(vec![
+                Span::raw(indent.clone()),
+                Span::styled(chunk, value_style),
+            ])
+        }));
+        return lines;
     }
-    let requested_start = offset.min(characters.len());
-    let at_end = requested_start == characters.len();
-    let prefix_len = usize::from(requested_start > 0);
-    let tail_len = usize::from(!at_end);
-    let body_len = width.saturating_sub(prefix_len + tail_len);
-    let start = if at_end {
-        characters.len().saturating_sub(body_len)
-    } else {
-        requested_start
-    };
-    let end = start.saturating_add(body_len).min(characters.len());
-    let mut output = String::with_capacity(width);
-    if prefix_len != 0 {
-        output.push('<');
-    }
-    output.extend(characters[start..end].iter());
-    if end < characters.len() {
-        output.push('>');
-    }
-    output
+
+    let label_lines = chunk_token(&prefix, width)
+        .into_iter()
+        .map(|chunk| Line::from(Span::styled(chunk, label_style)))
+        .collect::<Vec<_>>();
+    let indent_width = width.min(2);
+    let value_width = width.saturating_sub(indent_width).max(1);
+    let indent = " ".repeat(width - value_width);
+    label_lines
+        .into_iter()
+        .chain(chunk_token(value, value_width).into_iter().map(|chunk| {
+            Line::from(vec![
+                Span::raw(indent.clone()),
+                Span::styled(chunk, value_style),
+            ])
+        }))
+        .collect()
+}
+
+pub(super) fn text_lines(value: &str, width: usize, style: Style) -> Vec<Line<'static>> {
+    terminal_ui::wrap_text(value, width)
+        .into_iter()
+        .map(|line| Line::styled(line, style))
+        .collect()
+}
+
+pub(super) fn is_stop_key(key: KeyEvent) -> bool {
+    matches!(
+        key.code,
+        KeyCode::Char('q') | KeyCode::Char('Q') | KeyCode::Esc
+    ) || (key.modifiers.contains(KeyModifiers::CONTROL)
+        && matches!(key.code, KeyCode::Char('c' | 'C')))
 }
 
 pub(super) fn copy_public_url_to_clipboard(public_url: &PublicMcpEndpoint) -> io::Result<()> {

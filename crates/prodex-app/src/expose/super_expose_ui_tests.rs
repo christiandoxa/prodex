@@ -1,12 +1,17 @@
 use super::super::mcp::ExposeMcpEndpoint;
+use super::super::runtime::ExistingCloudflareSelection;
 use super::{
     ExposeEndpointMode, ExposeLifecycleEvent, ExposeLifecyclePhase, ExposeReadyState,
     ExposeTuiAction, ExposeTuiPhase, ExposeTuiState, PublicMcpEndpoint,
-    copy_public_url_to_clipboard_with, visible_url,
+    copy_public_url_to_clipboard_with, draw_frame, ready_body, support::labeled_value_lines,
 };
 use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
 use prodex_cli::SuperArgs;
+use ratatui::Terminal;
+use ratatui::backend::TestBackend;
+use ratatui::text::Line;
 use std::path::PathBuf;
+use terminal_ui::{chunk_token, text_width};
 
 fn state() -> ExposeTuiState {
     state_with_args(&super_args())
@@ -28,9 +33,16 @@ fn state_with_args(args: &SuperArgs) -> ExposeTuiState {
 #[test]
 fn endpoint_selection_is_stateful_and_validates_existing_tunnel() {
     let mut state = state();
+    state.existing_cloudflare = Some(ExistingCloudflareSelection {
+        config_path: Some(PathBuf::from("/home/test-user/.cloudflared/config.yml")),
+        tunnel: Some("prodex-main".to_string()),
+        token_file: None,
+        hostname: "configured.example.com".to_string(),
+        origin_port: 8765,
+    });
     assert_eq!(state.phase(), ExposeTuiPhase::EndpointSelection);
     assert!(matches!(
-        state.handle_key(KeyEvent::new(KeyCode::Char('2'), KeyModifiers::NONE)),
+        state.handle_key(KeyEvent::new(KeyCode::Char('3'), KeyModifiers::NONE)),
         ExposeTuiAction::None
     ));
     for character in "shell.example.com".chars() {
@@ -38,11 +50,36 @@ fn endpoint_selection_is_stateful_and_validates_existing_tunnel() {
     }
     assert!(matches!(
         state.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)),
-        ExposeTuiAction::Start(ExposeEndpointMode::ExistingCloudflareTunnel {
-            hostname,
-            origin_port: 8765,
-        }) if hostname == "shell.example.com"
+        ExposeTuiAction::Start {
+            endpoint: ExposeEndpointMode::ExistingCloudflareTunnel {
+                hostname,
+                origin_port: 8765,
+                ..
+            },
+            ..
+        } if hostname == "shell.example.com"
     ));
+}
+
+#[test]
+fn picker_defaults_to_local_and_cycles_all_connection_modes() {
+    let mut state = state();
+    assert_eq!(state.endpoint_label(), "Local only");
+    assert!(matches!(
+        state.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)),
+        ExposeTuiAction::Start {
+            endpoint: ExposeEndpointMode::LocalOnly,
+            ..
+        }
+    ));
+    state.handle_key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
+    assert_eq!(state.endpoint_label(), "Quick Tunnel");
+    state.handle_key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
+    assert_eq!(state.endpoint_label(), "Existing Cloudflare Tunnel");
+    state.handle_key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
+    assert_eq!(state.endpoint_label(), "OpenAI Secure MCP Tunnel");
+    state.handle_key(KeyEvent::new(KeyCode::Up, KeyModifiers::NONE));
+    assert_eq!(state.endpoint_label(), "Existing Cloudflare Tunnel");
 }
 
 #[test]
@@ -76,7 +113,7 @@ fn lifecycle_events_reach_ready_and_stop() {
             super_args(),
         ),
     };
-    state.apply_engine_event(ExposeLifecycleEvent::Ready(ready));
+    state.apply_engine_event(ExposeLifecycleEvent::Ready(Box::new(ready)));
     assert_eq!(state.phase(), ExposeTuiPhase::Ready);
     state.apply_engine_event(ExposeLifecycleEvent::Stopped);
     assert_eq!(state.phase(), ExposeTuiPhase::Stopped);
@@ -112,6 +149,10 @@ fn stop_keys_include_q_ctrl_c_and_resize_only_redraws() {
         ))),
         ExposeTuiAction::Stop
     ));
+    assert!(matches!(
+        state.handle_event(Event::Key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE,))),
+        ExposeTuiAction::Stop
+    ));
     state.redraw_needed = false;
     assert!(matches!(
         state.handle_event(Event::Resize(120, 40)),
@@ -124,7 +165,7 @@ fn stop_keys_include_q_ctrl_c_and_resize_only_redraws() {
 fn ready_copies_with_the_mandated_c_key() {
     let mut state = state();
     let url = PublicMcpEndpoint::new("https://shell.example.com", "capability").unwrap();
-    state.apply_engine_event(ExposeLifecycleEvent::Ready(ExposeReadyState {
+    state.apply_engine_event(ExposeLifecycleEvent::Ready(Box::new(ExposeReadyState {
         local_url: "http://127.0.0.1:1234/expose#bootstrap=bootstrap".to_string(),
         local_mcp_url: PublicMcpEndpoint::new("http://127.0.0.1:1234", "capability").unwrap(),
         public_browser_url: Some(
@@ -143,7 +184,7 @@ fn ready_copies_with_the_mandated_c_key() {
             "workspace".to_string(),
             super_args(),
         ),
-    }));
+    })));
     assert!(matches!(
         state.handle_key(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::NONE)),
         ExposeTuiAction::CopyUrl
@@ -151,30 +192,121 @@ fn ready_copies_with_the_mandated_c_key() {
 }
 
 #[test]
-fn narrow_url_viewport_is_bounded_and_keeps_the_canonical_value_atomic() {
-    let url = "https://example.trycloudflare.com/pdx/v1/abc123/mcp";
-    for width in [1, 8, 16, 32, 60, 70, 80, 100, 120, 160, 200] {
-        let visible = visible_url(url, 0, width);
-        assert!(visible.chars().count() <= width);
-        assert!(!visible.contains(['\n', '\r']));
-    }
-    assert_eq!(visible_url(url, 0, url.chars().count()), url);
-    assert!(visible_url(url, 4, 16).starts_with('<'));
-    assert!(visible_url(url, url.chars().count(), 16).ends_with("/mcp"));
+fn long_unbroken_value_wraps_at_display_width_without_mutation() {
+    let value = "https://表🙂.example.com/very-long-path/capability";
+    let lines = labeled_value_lines(
+        "Public MCP URL",
+        value,
+        32,
+        super::tui_primary_style(),
+        super::tui_primary_style(),
+    );
+    assert!(lines.iter().all(|line| line.width() <= 32));
+    assert_eq!(
+        reconstruct_field(&lines, "Public MCP URL", value, 32),
+        value
+    );
+    assert!(lines.iter().all(|line| !line_text(line).contains("...")));
 }
 
 #[test]
-fn ready_url_navigation_only_changes_the_viewport_offset() {
-    let mut state = state();
-    let url = PublicMcpEndpoint::new("https://example.trycloudflare.com", "abc123").unwrap();
-    let canonical = url.as_str().to_string();
-    state.apply_engine_event(ExposeLifecycleEvent::Ready(ExposeReadyState {
-        local_url: "http://127.0.0.1:1234/expose#bootstrap=bootstrap".to_string(),
-        local_mcp_url: PublicMcpEndpoint::new("http://127.0.0.1:1234", "capability").unwrap(),
-        public_browser_url: Some(
-            "https://example.trycloudflare.com/expose#bootstrap=bootstrap".to_string(),
+fn ready_body_preserves_all_four_long_urls_at_a_narrow_width() {
+    let state = long_ready_state();
+    let ready = state.ready.as_ref().expect("ready fixture");
+    let fields = [
+        (
+            "Public MCP URL",
+            ready.public_url.as_ref().expect("public URL").as_str(),
         ),
-        public_url: Some(url),
+        ("MCP URL", ready.local_mcp_url.as_str()),
+        (
+            "Public Browser URL",
+            ready
+                .public_browser_url
+                .as_deref()
+                .expect("public browser URL"),
+        ),
+        ("Browser URL", ready.local_url.as_str()),
+    ];
+
+    for width in [160, 120, 100, 80, 60, 56] {
+        let lines = ready_body(&state, width);
+        assert!(
+            lines
+                .iter()
+                .all(|line| text_width(&line_text(line)) <= width)
+        );
+        for (label, value) in fields.iter().copied() {
+            assert_eq!(
+                reconstruct_field(&lines, label, value, width),
+                value,
+                "{label} must remain complete at width {width}"
+            );
+        }
+    }
+}
+
+#[test]
+fn ready_body_scrolls_wrapped_content_and_clamps_after_resize() {
+    let mut state = state();
+    let long_state = long_ready_state();
+    state.ready = long_state.ready;
+    state.phase = ExposeTuiPhase::Ready;
+    let mut terminal = Terminal::new(TestBackend::new(120, 20)).expect("test terminal");
+
+    terminal
+        .draw(|frame| draw_frame(frame, &mut state))
+        .expect("wide render");
+    terminal.backend_mut().resize(70, 12);
+    terminal
+        .draw(|frame| draw_frame(frame, &mut state))
+        .expect("narrow render");
+    assert_eq!(state.body_scroll(), 0);
+
+    state.handle_key(KeyEvent::new(KeyCode::End, KeyModifiers::NONE));
+    terminal
+        .draw(|frame| draw_frame(frame, &mut state))
+        .expect("scrolled render");
+    let narrow_body = ready_body(&state, 68);
+    assert_eq!(
+        state.body_scroll(),
+        narrow_body
+            .len()
+            .saturating_sub(12_usize.saturating_sub(5).saturating_sub(2))
+    );
+
+    terminal.backend_mut().resize(140, 60);
+    terminal
+        .draw(|frame| draw_frame(frame, &mut state))
+        .expect("resized render");
+    let resized_body = ready_body(&state, 138);
+    assert_eq!(
+        state.body_scroll(),
+        resized_body
+            .len()
+            .saturating_sub(60_usize.saturating_sub(5).saturating_sub(2))
+    );
+}
+
+fn long_ready_state() -> ExposeTuiState {
+    let mut state = state();
+    let capability = "capability_0123456789abcdef0123456789abcdef0123456789abcdef";
+    let public_url = PublicMcpEndpoint::new(
+        "https://very-long-generated-subdomain.trycloudflare.com",
+        capability,
+    )
+    .expect("public URL");
+    let local_mcp_url =
+        PublicMcpEndpoint::new("http://127.0.0.1:1234", capability).expect("local MCP URL");
+    state.apply_engine_event(ExposeLifecycleEvent::Ready(Box::new(ExposeReadyState {
+        local_url: format!(
+            "http://127.0.0.1:1234/expose#bootstrap={capability}_local_browser_bootstrap"
+        ),
+        local_mcp_url,
+        public_browser_url: Some(format!(
+            "https://very-long-generated-subdomain.trycloudflare.com/expose#bootstrap={capability}_public_browser_bootstrap"
+        )),
+        public_url: Some(public_url),
         instance_id: "pdxi_test".to_string(),
         workspace_name: "workspace".to_string(),
         display_name: "workspace".to_string(),
@@ -187,20 +319,40 @@ fn ready_url_navigation_only_changes_the_viewport_offset() {
             "workspace".to_string(),
             super_args(),
         ),
-    }));
-    state.handle_key(KeyEvent::new(KeyCode::End, KeyModifiers::NONE));
-    state.handle_key(KeyEvent::new(KeyCode::Home, KeyModifiers::NONE));
-    state.handle_key(KeyEvent::new(KeyCode::Right, KeyModifiers::NONE));
-    state.handle_key(KeyEvent::new(KeyCode::Left, KeyModifiers::NONE));
-    assert_eq!(
-        state
-            .ready
-            .as_ref()
-            .unwrap()
-            .public_url
-            .as_ref()
-            .unwrap()
-            .as_str(),
-        canonical
-    );
+    })));
+    state
+}
+
+fn line_text(line: &Line<'_>) -> String {
+    line.spans
+        .iter()
+        .map(|span| span.content.as_ref())
+        .collect()
+}
+
+fn reconstruct_field(lines: &[Line<'_>], label: &str, value: &str, width: usize) -> String {
+    let prefix = format!("{label}: ");
+    let start = lines
+        .iter()
+        .position(|line| line_text(line).starts_with(&prefix))
+        .expect("field label");
+    let value_width = width.saturating_sub(text_width(&prefix));
+    let chunks = chunk_token(value, value_width);
+    let indent = " ".repeat(text_width(&prefix));
+    let mut rendered = line_text(&lines[start])
+        .strip_prefix(&prefix)
+        .expect("field prefix")
+        .to_string();
+    for line in lines
+        .iter()
+        .skip(start + 1)
+        .take(chunks.len().saturating_sub(1))
+    {
+        rendered.push_str(
+            line_text(line)
+                .strip_prefix(&indent)
+                .expect("field continuation indentation"),
+        );
+    }
+    rendered
 }

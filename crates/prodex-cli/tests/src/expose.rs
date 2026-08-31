@@ -136,7 +136,7 @@ fn expose_tunnel_provider_accepts_explicit_values_in_both_alias_positions() {
     };
     assert_eq!(
         cloudflare.tunnel_provider,
-        Some(ExposeTunnelProvider::Cloudflare)
+        Some(ExposeTunnelProvider::CloudflareQuick)
     );
     assert!(!cloudflare.tunnel);
 
@@ -149,6 +149,51 @@ fn expose_tunnel_provider_accepts_explicit_values_in_both_alias_positions() {
     assert_eq!(openai.tunnel_provider, Some(ExposeTunnelProvider::OpenAi));
     assert!(!openai.tunnel);
     assert_eq!(openai.invocation, ExposeInvocation::SuperAlias);
+
+    let Commands::Expose(existing) = parse_cli_command_from([
+        "prodex",
+        "expose",
+        "--tunnel-provider",
+        "cloudflare-existing",
+        "--cloudflare-config",
+        "/home/test-user/.cloudflared/config.yml",
+    ])
+    .expect("existing Cloudflare provider should parse") else {
+        panic!("expected expose command");
+    };
+    assert_eq!(
+        existing.tunnel_provider,
+        Some(ExposeTunnelProvider::CloudflareExisting)
+    );
+    assert_eq!(
+        existing.cloudflare_config.as_deref(),
+        Some(std::path::Path::new(
+            "/home/test-user/.cloudflared/config.yml"
+        ))
+    );
+
+    let Commands::Expose(positioned) = parse_cli_command_from([
+        "prodex",
+        "s",
+        "--tunnel-provider",
+        "cloudflare-existing",
+        "--cloudflare-config",
+        "/home/test-user/.cloudflared/config.yml",
+        "expose",
+    ])
+    .expect("positioned existing Cloudflare options should parse") else {
+        panic!("expected expose command");
+    };
+    assert_eq!(
+        positioned.tunnel_provider,
+        Some(ExposeTunnelProvider::CloudflareExisting)
+    );
+    assert_eq!(
+        positioned.cloudflare_config.as_deref(),
+        Some(std::path::Path::new(
+            "/home/test-user/.cloudflared/config.yml"
+        ))
+    );
 }
 
 #[test]

@@ -2,11 +2,12 @@ pub(super) use self::render::log_snapshot_items;
 #[cfg(test)]
 pub(super) use self::render::log_stream_tui_text;
 use super::{
-    FollowedLog, FollowedLogPaths, LOG_SNAPSHOT_TAIL_BYTES, LogStreamItem, TranscriptEvent,
-    collect_new_runtime_log_stream_items, collect_new_runtime_log_stream_items_with_throughput,
-    collect_new_transcript_events, latest_transcript_event, local_token_usage_event,
-    print_log_stream_item, print_token_usage_event, print_transcript_event,
-    print_upstream_payload_event, recent_session_log_paths, retain_followed_logs,
+    FollowedLog, FollowedLogPaths, LOG_SNAPSHOT_TAIL_BYTES, LogLoadAggregate, LogStreamItem,
+    TranscriptEvent, collect_new_runtime_log_stream_items,
+    collect_new_runtime_log_stream_items_for_tui_with_throughput, collect_new_transcript_events,
+    latest_transcript_event, local_token_usage_event, print_log_stream_item,
+    print_token_usage_event, print_transcript_event, print_upstream_payload_event,
+    recent_session_log_paths, retain_followed_logs,
 };
 use crate::app_commands::collect_recent_runtime_log_paths;
 use crate::app_commands::log_tui::{
@@ -35,6 +36,7 @@ mod render;
 const LOG_STREAM_POLL_INTERVAL: Duration = Duration::from_millis(250);
 const SESSION_PATH_RECONCILE_INTERVAL: Duration = Duration::from_secs(10);
 const LOG_TUI_EVENT_LIMIT: usize = 200;
+const LOG_LOAD_COALESCE_WINDOW: Duration = Duration::from_secs(5);
 
 pub(crate) fn handle_log(args: LogArgs) -> Result<()> {
     match args.mode {
@@ -324,7 +326,7 @@ fn collect_log_stream_items(
         let state = followed_runtime_logs
             .entry(path.clone())
             .or_insert_with(|| FollowedLog::at_end(path));
-        for event in collect_new_runtime_log_stream_items_with_throughput(
+        for event in collect_new_runtime_log_stream_items_for_tui_with_throughput(
             path,
             state,
             true,
@@ -407,10 +409,62 @@ fn print_log_snapshot(
 }
 
 fn push_log_stream_item(items: &mut VecDeque<LogStreamItem>, item: LogStreamItem) {
-    items.push_back(item);
+    push_log_stream_item_at(items, item, Instant::now());
+}
+
+fn push_log_stream_item_at(items: &mut VecDeque<LogStreamItem>, item: LogStreamItem, now: Instant) {
+    if let LogStreamItem::LoadObservation(observation) = item {
+        let key = load_observation_key(&observation);
+        let event = observation.event;
+        let run_id = observation.run_id;
+        // ponytail: a bounded 5s projection episode with at most 256 run ids; replace the
+        // vector with a compact counter if higher-cardinality diagnostics become necessary.
+        if let Some(LogStreamItem::LoadAggregate(aggregate)) = items.back_mut()
+            && aggregate.key == key
+            && now.saturating_duration_since(aggregate.last_seen) <= LOG_LOAD_COALESCE_WINDOW
+        {
+            aggregate.observe(event, run_id, now);
+            return;
+        }
+        items.push_back(LogStreamItem::LoadAggregate(LogLoadAggregate::new(
+            event, key, run_id, now,
+        )));
+    } else {
+        items.push_back(item);
+    }
     while items.len() > LOG_TUI_EVENT_LIMIT {
         items.pop_front();
     }
+}
+
+fn load_observation_key(observation: &super::LogLoadObservation) -> String {
+    let field = |name: &str| {
+        observation
+            .fields
+            .get(name)
+            .map(String::as_str)
+            .unwrap_or("-")
+    };
+    [
+        observation.event_name.as_str(),
+        field("profile"),
+        field("route"),
+        field("lane"),
+        field("transport"),
+        field("context"),
+        field("path"),
+        field("provider"),
+        field("model"),
+        field("active"),
+        observation
+            .fields
+            .get("limit")
+            .or_else(|| observation.fields.get("hard_limit"))
+            .map(String::as_str)
+            .unwrap_or("-"),
+        field("reason"),
+    ]
+    .join("\u{1f}")
 }
 
 fn latest_log_stream_profile(items: &VecDeque<LogStreamItem>) -> Option<&str> {
@@ -420,6 +474,8 @@ fn latest_log_stream_profile(items: &VecDeque<LogStreamItem>) -> Option<&str> {
         // profile identity.  The shared header falls back to AppState when no token event
         // supplies a profile, so a payload field cannot replace quota/profile state.
         LogStreamItem::UpstreamPayload(_) => None,
+        LogStreamItem::LoadObservation(_) => None,
+        LogStreamItem::LoadAggregate(_) => None,
         LogStreamItem::Transcript(_) => None,
     })
 }
@@ -437,6 +493,7 @@ fn render_log_stream_tui(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::app_commands::LogLoadObservation;
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
     #[test]
@@ -476,6 +533,131 @@ mod tests {
 
         assert_eq!(state.query(), Some("hi"));
         assert!(state.footer_text("q quit").contains("search: /hi"));
+    }
+
+    fn load_event(run_id: usize, profile: &str, limit: usize) -> LogStreamItem {
+        let event = TranscriptEvent {
+            timestamp: "2026-08-31 10:00:00.000 +07:00".to_string(),
+            source: "load".to_string(),
+            text: format!("r{run_id:04x}  profile busy  profile={profile} · route=responses"),
+        };
+        LogStreamItem::LoadObservation(LogLoadObservation {
+            event,
+            event_name: "profile_inflight_saturated".to_string(),
+            fields: BTreeMap::from([
+                ("profile".to_string(), profile.to_string()),
+                ("route".to_string(), "responses".to_string()),
+                ("transport".to_string(), "http".to_string()),
+                ("active".to_string(), limit.to_string()),
+                ("hard_limit".to_string(), limit.to_string()),
+            ]),
+            run_id: Some(format!("r{run_id:04x}")),
+        })
+    }
+
+    #[test]
+    fn coalesces_repeated_profile_busy_observations_and_keeps_counts() {
+        let mut items = VecDeque::new();
+        let now = Instant::now();
+        for run_id in 0..100 {
+            push_log_stream_item_at(&mut items, load_event(run_id, "main", 8), now);
+        }
+
+        assert_eq!(items.len(), 1);
+        let LogStreamItem::LoadAggregate(aggregate) = &items[0] else {
+            panic!("profile busy observations should become one aggregate");
+        };
+        assert_eq!(aggregate.occurrences, 100);
+        assert_eq!(aggregate.unique_runs.len(), 100);
+        assert!(aggregate.as_transcript().text.contains("×100"));
+        assert!(aggregate.matches("r0063"));
+    }
+
+    #[test]
+    fn load_aggregation_keeps_profiles_limits_and_separate_episodes_distinct() {
+        let mut items = VecDeque::new();
+        let now = Instant::now();
+        push_log_stream_item_at(&mut items, load_event(1, "main", 8), now);
+        push_log_stream_item_at(&mut items, load_event(2, "backup", 8), now);
+        push_log_stream_item_at(&mut items, load_event(3, "main", 16), now);
+        push_log_stream_item_at(
+            &mut items,
+            load_event(4, "main", 8),
+            now + Duration::from_secs(6),
+        );
+
+        assert_eq!(items.len(), 4);
+        assert!(items.iter().all(|item| {
+            matches!(item, LogStreamItem::LoadAggregate(aggregate) if aggregate.occurrences == 1)
+        }));
+    }
+
+    #[test]
+    fn load_aggregation_does_not_evict_a_meaningful_event() {
+        let mut items = VecDeque::new();
+        let now = Instant::now();
+        for run_id in 0..1000 {
+            push_log_stream_item_at(&mut items, load_event(run_id, "main", 8), now);
+        }
+        items.push_back(LogStreamItem::Transcript(TranscriptEvent {
+            timestamp: "2026-08-31 10:00:01.000 +07:00".to_string(),
+            source: "error".to_string(),
+            text: "provider auth failed".to_string(),
+        }));
+        for run_id in 1000..2000 {
+            push_log_stream_item_at(&mut items, load_event(run_id, "main", 8), now);
+        }
+
+        assert_eq!(items.len(), 3);
+        assert!(items.iter().any(|item| {
+            matches!(item, LogStreamItem::Transcript(event) if event.source == "error")
+        }));
+        assert_eq!(
+            items
+                .iter()
+                .filter_map(|item| match item {
+                    LogStreamItem::LoadAggregate(aggregate) => Some(aggregate.occurrences),
+                    _ => None,
+                })
+                .collect::<Vec<_>>(),
+            vec![1000, 1000]
+        );
+    }
+
+    #[test]
+    fn load_recovery_starts_a_new_busy_episode() {
+        let mut items = VecDeque::new();
+        let now = Instant::now();
+        push_log_stream_item_at(&mut items, load_event(1, "main", 8), now);
+        let mut recovery = load_event(2, "main", 8);
+        if let LogStreamItem::LoadObservation(observation) = &mut recovery {
+            observation.event_name = "profile_inflight".to_string();
+            observation.event.text = "r0002 profile available profile=main active=7".to_string();
+            observation
+                .fields
+                .insert("active".to_string(), "7".to_string());
+        }
+        push_log_stream_item_at(&mut items, recovery, now + Duration::from_millis(10));
+        push_log_stream_item_at(
+            &mut items,
+            load_event(3, "main", 8),
+            now + Duration::from_millis(20),
+        );
+
+        assert_eq!(items.len(), 3);
+        assert!(matches!(
+            &items[0],
+            LogStreamItem::LoadAggregate(aggregate) if aggregate.occurrences == 1
+        ));
+        assert!(matches!(
+            &items[1],
+            LogStreamItem::LoadAggregate(aggregate)
+                if aggregate.key.starts_with("profile_inflight\u{1f}")
+        ));
+        assert!(matches!(
+            &items[2],
+            LogStreamItem::LoadAggregate(aggregate) if aggregate.occurrences == 1
+        ));
     }
 
     #[test]

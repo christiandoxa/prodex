@@ -36,6 +36,11 @@ fn expose_start_test_server(
         tunnel: false,
         no_tunnel: false,
         tunnel_provider: None,
+        cloudflare_config: None,
+        cloudflare_tunnel: None,
+        cloudflare_hostname: None,
+        cloudflare_origin_port: None,
+        cloudflare_token_file: None,
         openai_tunnel_id: None,
         name: None,
         invocation: prodex_cli::ExposeInvocation::Standalone,
@@ -108,15 +113,33 @@ fn expose_access_url_uses_one_time_fragment_without_path_or_query_secret() {
 }
 
 #[test]
-fn super_expose_rejects_dry_run_before_startup_side_effects() {
+fn explicit_super_tunnel_keeps_the_quick_tunnel_backend_contract() {
+    let crate::Commands::Expose(args) = crate::parse_cli_command_from([
+        "prodex",
+        "s",
+        "expose",
+        "--tunnel",
+        "--no-presidio",
+        "--no-sub-agent",
+    ])
+    .expect("explicit Super tunnel should parse") else {
+        panic!("expected expose command");
+    };
+    assert!(matches!(
+        super::super_expose::select_expose_endpoint(&args, false),
+        Ok(ExposeEndpointMode::QuickTunnel)
+    ));
+}
+
+#[test]
+fn super_expose_accepts_dry_run_before_startup_side_effects() {
     let crate::Commands::Super(mut args) =
         crate::parse_cli_command_from(["prodex", "s"]).expect("Super args should parse")
     else {
         panic!("expected Super args");
     };
     args.dry_run = true;
-    let error = validate_expose_launch_args(&args).unwrap_err();
-    assert!(error.to_string().contains("use `prodex s --dry-run`"));
+    assert!(validate_expose_launch_args(&args).is_ok());
 }
 
 #[test]
@@ -582,6 +605,7 @@ fn existing_cloudflare_endpoint_keeps_hostname_exact_and_binds_loopback_port() {
     let error = bind_expose_listener(&ExposeEndpointMode::ExistingCloudflareTunnel {
         hostname: "prodex.example.com".to_string(),
         origin_port: port,
+        tunnel: None,
     })
     .unwrap_err()
     .to_string();
@@ -608,6 +632,11 @@ fn expose_pty_shutdown_terminates_and_joins_shell_threads() {
         tunnel: false,
         no_tunnel: false,
         tunnel_provider: None,
+        cloudflare_config: None,
+        cloudflare_tunnel: None,
+        cloudflare_hostname: None,
+        cloudflare_origin_port: None,
+        cloudflare_token_file: None,
         openai_tunnel_id: None,
         name: None,
         invocation: prodex_cli::ExposeInvocation::Standalone,

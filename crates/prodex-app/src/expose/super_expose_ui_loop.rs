@@ -2,7 +2,7 @@ use super::super::super_expose::{
     ExposeEngineRequest, ExposeLifecycleEvent, run_super_expose_engine,
 };
 use super::support::copy_public_url_to_clipboard;
-use super::{ExposeTuiAction, ExposeTuiPhase, ExposeTuiState, signal_requested};
+use super::{ExposeTuiAction, ExposeTuiPhase, ExposeTuiState};
 use anyhow::{Context, Result};
 use crossterm::event;
 use prodex_cli::SuperArgs;
@@ -71,6 +71,17 @@ pub(super) fn handle_signal(
     false
 }
 
+fn signal_requested() -> bool {
+    #[cfg(unix)]
+    {
+        crate::InteractiveSigintGuard::count() > 0
+    }
+    #[cfg(not(unix))]
+    {
+        false
+    }
+}
+
 pub(super) fn should_finish(
     state: &ExposeTuiState,
     worker: &Option<JoinHandle<Result<()>>>,
@@ -106,9 +117,17 @@ pub(super) fn handle_input(
                 }
             }
         }
-        ExposeTuiAction::Start(endpoint) => {
+        ExposeTuiAction::Start { endpoint, existing } => {
             let (args, super_args, workspace_root, workspace_name, display_name) =
                 launch.take().context("expose endpoint selected twice")?;
+            let mut args = args;
+            if let Some(selection) = existing {
+                args.cloudflare_config = selection.config_path;
+                args.cloudflare_token_file = selection.token_file;
+                args.cloudflare_tunnel = selection.tunnel;
+                args.cloudflare_hostname = Some(selection.hostname);
+                args.cloudflare_origin_port = Some(selection.origin_port);
+            }
             let event_tx = event_tx.clone();
             let cancel = Arc::clone(cancel);
             *worker = Some(thread::spawn(move || {

@@ -192,8 +192,8 @@ Notes:
   Sub-agent reasoning efforts are none, minimal, low, medium, high, xhigh, max, or ultra.
   Maximum active sub-agents defaults to 4; presets are 4, 8, 16, and 32, with custom values from 1 through 64.
   Additional Codex args are appended unchanged after Prodex's generated options.
-  `prodex s expose` asks for the main agent, provider, model, model-aware reasoning effort, and public endpoint in an interactive terminal before starting its ChatGPT endpoint. Choose the zero-config Quick Tunnel or an existing user-managed Cloudflare hostname; only Quick Tunnel mode requires Prodex to start cloudflared.
-  The expose URL is an ephemeral full-Super bearer capability. Anyone with the complete URL can control the configured workspace session; this is not OAuth or multi-user authentication. Use `--no-tunnel` for the existing local browser terminal.";
+  `prodex s expose` asks for the main agent, provider, model, model-aware reasoning effort, and expose mode in an interactive terminal before starting its ChatGPT endpoint. The safe default is Local only; the picker also offers Cloudflare Quick Tunnel, Existing Cloudflare Tunnel, and OpenAI Secure MCP Tunnel.
+  The expose URL is an ephemeral full-Super bearer capability. Anyone with the complete URL can control the configured workspace session; this is not OAuth or multi-user authentication. Use `--no-tunnel` or select Local only for loopback access.";
 pub const CLI_EXPOSE_AFTER_HELP: &str = "\
 Examples:
   prodex expose
@@ -204,9 +204,9 @@ Examples:
 
 Notes:
   `prodex expose` remains the loopback browser terminal and only publishes when `--tunnel` is explicit.
-  Bare `prodex s expose` configures Super first, then lets you choose a JSON-response MCP endpoint through a Cloudflare Quick Tunnel or an existing user-managed Cloudflare hostname. Quick Tunnel mode does not use SSE.
-  Quick Tunnel uses `--protocol auto` (QUIC/UDP 7844 preferred, HTTP/2/TCP 7844 fallback). Existing Tunnel mode asks for an exact public hostname and loopback origin port and never manages the user's Cloudflare service.
-  `prodex s expose --tunnel` retains the explicit public browser-terminal behavior. `--no-tunnel` retains local-only compatibility.
+  Bare `prodex s expose` configures Super first, then opens the keyboard-only mode picker. It never selects an external mode automatically; Esc/q cancels before startup. Quick Tunnel mode does not use SSE.
+  Quick Tunnel uses `--protocol auto` (QUIC/UDP 7844 preferred, HTTP/2/TCP 7844 fallback). Existing Tunnel mode consumes a user-managed config or token file and never manages Cloudflare infrastructure. OpenAI Secure MCP Tunnel is MCP-only; the browser remains local.
+  `prodex s expose --tunnel` retains the explicit public browser-terminal and public MCP behavior. `--no-tunnel` retains local-only compatibility. Non-TTY launches never open Ratatui.
   Ordinary interactive `prodex s` selects the main agent and provider, then resolves the remembered provider-scoped model and model-aware effort without opening model/effort pickers. Interactive expose freezes the selected main and optional sub-agent configuration for this process. Non-interactive expose uses explicit options, remembered preferences, and normal defaults without waiting for stdin.
   The ChatGPT URL contains the only ephemeral capability. Treat URL disclosure as credential disclosure; stopping this process revokes it. This is not OAuth and is intended for personal development, not public plugin publication.";
 pub const CLI_DOCTOR_AFTER_HELP: &str = "\

@@ -37,6 +37,11 @@ fn expose_start_mcp_test_server(
         tunnel: false,
         no_tunnel: false,
         tunnel_provider: None,
+        cloudflare_config: None,
+        cloudflare_tunnel: None,
+        cloudflare_hostname: None,
+        cloudflare_origin_port: None,
+        cloudflare_token_file: None,
         openai_tunnel_id: None,
         name: Some("test".to_string()),
         invocation: prodex_cli::ExposeInvocation::SuperAlias,
@@ -341,6 +346,18 @@ fn cloudflare_public_host_can_serve_the_browser_route_when_not_mcp_only() {
     );
     assert!(browser.starts_with("HTTP/1.1 200"));
     assert!(browser.contains("Prodex"));
+    let browser_url = format!("http://{listen_addr}/expose#bootstrap=synthetic-bootstrap");
+    let mut progress = |_label: &str| {};
+    super::verify_public_browser_with_progress(&browser_url, &mut progress, &|| false)
+        .expect("public browser route and static app should be ready");
+    let bootstrap = expose_send_test_request(
+        listen_addr,
+        &format!(
+            "POST /expose/session HTTP/1.1\r\nHost: {public_host}\r\nOrigin: http://{public_host}\r\nAuthorization: Bearer bootstrap_capability_for_mcp_test\r\nContent-Length: 0\r\n\r\n"
+        ),
+    );
+    assert!(bootstrap.starts_with("HTTP/1.1 201"));
+    assert!(bootstrap.contains("Set-Cookie: prodex_expose_session="));
 
     server.shutdown();
     shared.pty.shutdown();

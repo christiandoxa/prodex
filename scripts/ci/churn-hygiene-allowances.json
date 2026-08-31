@@ -1673,5 +1673,18 @@
       "maxFileLines": 600
     },
     "reason": "Reviewed the complete 0.418.0 Codex 0.150.1 compatibility, model catalogs, Mojo authority, incremental and enriched observability, expose readiness, updater idempotency, release tooling, and cross-platform artifact range. The exact subject set and bounded cap preserve every default guard and require the full audited migration to be present."
+  },
+  {
+    "id": "prodex-0.422.0-expose-log-ux",
+    "requiredSubjects": [
+      "feat(expose): add connection modes and signal-rich status"
+    ],
+    "caps": {
+      "maxFiles": 48,
+      "maxBehaviorFiles": 38,
+      "maxLines": 4300,
+      "maxFileLines": 700
+    },
+    "reason": "Reviewed the 0.422.0 Expose connection picker, preserved Quick Tunnel and 0.419.1 phase/config-isolation invariants, existing Cloudflare config/token-file consumption, independent browser readiness, complete responsive URL rendering, OpenAI MCP-only lifecycle, and TUI-only load-event coalescing. The bounded cap covers the audited feature plus synchronized release metadata without changing global churn thresholds or weakening correctness/security gates."
   }
 ]

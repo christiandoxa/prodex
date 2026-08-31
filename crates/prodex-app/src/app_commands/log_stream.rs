@@ -1,3 +1,4 @@
+use super::super::log_tui::contains_ignore_ascii_case;
 use super::log_follow::{FollowedLog, collect_new_followed_lines};
 use super::log_transcript::TranscriptEvent;
 use crate::app_commands::log_format::{
@@ -22,8 +23,95 @@ use std::time::Instant;
 #[derive(Debug, Clone)]
 pub(crate) enum LogStreamItem {
     Transcript(TranscriptEvent),
+    LoadObservation(LogLoadObservation),
+    LoadAggregate(LogLoadAggregate),
     TokenUsage(InfoTokenUsageEvent),
     UpstreamPayload(UpstreamPayloadEvent),
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct LogLoadObservation {
+    pub(crate) event: TranscriptEvent,
+    pub(crate) event_name: String,
+    pub(crate) fields: BTreeMap<String, String>,
+    pub(crate) run_id: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct LogLoadAggregate {
+    pub(crate) event: TranscriptEvent,
+    pub(crate) key: String,
+    pub(crate) occurrences: usize,
+    pub(crate) unique_runs: Vec<String>,
+    pub(crate) run_count_overflow: bool,
+    pub(crate) last_seen: Instant,
+}
+
+impl LogLoadAggregate {
+    pub(crate) fn new(
+        event: TranscriptEvent,
+        key: String,
+        run_id: Option<String>,
+        now: Instant,
+    ) -> Self {
+        let mut aggregate = Self {
+            event,
+            key,
+            occurrences: 1,
+            unique_runs: Vec::new(),
+            run_count_overflow: false,
+            last_seen: now,
+        };
+        aggregate.add_run(run_id);
+        aggregate
+    }
+
+    pub(crate) fn observe(&mut self, event: TranscriptEvent, run_id: Option<String>, now: Instant) {
+        self.event = event;
+        self.occurrences = self.occurrences.saturating_add(1);
+        self.last_seen = now;
+        self.add_run(run_id);
+    }
+
+    pub(crate) fn as_transcript(&self) -> TranscriptEvent {
+        let run_count = if self.run_count_overflow {
+            format!("{}+", self.unique_runs.len())
+        } else {
+            self.unique_runs.len().to_string()
+        };
+        let mut event = self.event.clone();
+        event.text = format!(
+            "{} · ×{} · {} runs",
+            event.text, self.occurrences, run_count
+        );
+        event
+    }
+
+    fn add_run(&mut self, run_id: Option<String>) {
+        const MAX_UNIQUE_RUNS: usize = 256;
+        let Some(run_id) = run_id else {
+            return;
+        };
+        if self.unique_runs.iter().any(|current| current == &run_id) {
+            return;
+        }
+        if self.unique_runs.len() >= MAX_UNIQUE_RUNS {
+            self.run_count_overflow = true;
+            return;
+        }
+        self.unique_runs.push(run_id);
+    }
+
+    pub(crate) fn matches(&self, query: &str) -> bool {
+        let event = self.as_transcript();
+        contains_ignore_ascii_case(
+            &format!("{} {} {}", event.timestamp, event.source, event.text),
+            query,
+        ) || self
+            .unique_runs
+            .iter()
+            .any(|run| contains_ignore_ascii_case(run, query))
+    }
 }
 
 pub(crate) fn print_log_stream_item(event: &LogStreamItem, json: bool) -> Result<()> {
@@ -35,6 +123,8 @@ pub(crate) fn print_log_stream_item(event: &LogStreamItem, json: bool) -> Result
     }
     match event {
         LogStreamItem::Transcript(event) => print_transcript_event(event),
+        LogStreamItem::LoadObservation(event) => print_transcript_event(&event.event),
+        LogStreamItem::LoadAggregate(event) => print_transcript_event(&event.as_transcript()),
         LogStreamItem::TokenUsage(event) => print_token_usage_event(event, false),
         LogStreamItem::UpstreamPayload(event) => print_upstream_payload_event(event),
     }
@@ -43,6 +133,8 @@ pub(crate) fn print_log_stream_item(event: &LogStreamItem, json: bool) -> Result
 pub(crate) fn log_stream_item_json(event: &LogStreamItem) -> Result<String> {
     match event {
         LogStreamItem::Transcript(event) => serde_json::to_string(event),
+        LogStreamItem::LoadObservation(event) => serde_json::to_string(&event.event),
+        LogStreamItem::LoadAggregate(event) => serde_json::to_string(&event.as_transcript()),
         LogStreamItem::TokenUsage(event) => serde_json::to_string(event),
         LogStreamItem::UpstreamPayload(event) => serde_json::to_string(event),
     }
@@ -80,7 +172,38 @@ pub(crate) fn collect_new_runtime_log_stream_items_with_throughput(
     path: &Path,
     state: &mut FollowedLog,
     include_operational_insights: bool,
+    throughput: Option<&mut OutputThroughput>,
+) -> Result<Vec<LogStreamItem>> {
+    collect_new_runtime_log_stream_items_internal(
+        path,
+        state,
+        include_operational_insights,
+        throughput,
+        false,
+    )
+}
+
+pub(crate) fn collect_new_runtime_log_stream_items_for_tui_with_throughput(
+    path: &Path,
+    state: &mut FollowedLog,
+    include_operational_insights: bool,
+    throughput: Option<&mut OutputThroughput>,
+) -> Result<Vec<LogStreamItem>> {
+    collect_new_runtime_log_stream_items_internal(
+        path,
+        state,
+        include_operational_insights,
+        throughput,
+        true,
+    )
+}
+
+fn collect_new_runtime_log_stream_items_internal(
+    path: &Path,
+    state: &mut FollowedLog,
+    include_operational_insights: bool,
     mut throughput: Option<&mut OutputThroughput>,
+    coalesce_load: bool,
 ) -> Result<Vec<LogStreamItem>> {
     let mut items = Vec::new();
     for line in collect_new_followed_lines(path, state)? {
@@ -89,6 +212,7 @@ pub(crate) fn collect_new_runtime_log_stream_items_with_throughput(
             &line,
             include_operational_insights,
             throughput.as_deref_mut(),
+            coalesce_load,
         )?);
     }
     Ok(items)
@@ -99,11 +223,20 @@ fn collect_runtime_log_line(
     line: &str,
     include_operational_insights: bool,
     mut throughput: Option<&mut OutputThroughput>,
+    coalesce_load: bool,
 ) -> Result<Vec<LogStreamItem>> {
     let mut items = Vec::new();
     if include_operational_insights && let Some(event) = operational_event_from_runtime_line(line)?
     {
-        items.push(LogStreamItem::Transcript(event));
+        if coalesce_load {
+            if let Some(load) = event.load {
+                items.push(LogStreamItem::LoadObservation(load));
+            } else {
+                items.push(LogStreamItem::Transcript(event.transcript));
+            }
+        } else {
+            items.push(LogStreamItem::Transcript(event.transcript));
+        }
     }
     if let Some(event) = stream_payload_event_from_runtime_line(line) {
         items.push(LogStreamItem::Transcript(event));
@@ -129,7 +262,12 @@ fn collect_runtime_log_line(
     Ok(items)
 }
 
-fn operational_event_from_runtime_line(line: &str) -> Result<Option<TranscriptEvent>> {
+struct ParsedOperationalEvent {
+    transcript: TranscriptEvent,
+    load: Option<LogLoadObservation>,
+}
+
+fn operational_event_from_runtime_line(line: &str) -> Result<Option<ParsedOperationalEvent>> {
     let Some(parsed) = parse_runtime_log_line(line) else {
         return Ok(None);
     };
@@ -156,11 +294,47 @@ fn operational_event_from_runtime_line(line: &str) -> Result<Option<TranscriptEv
         .map(short_request_id)
         .unwrap_or_else(|| "-".to_string());
     let summary = operational_event_summary(event, source, &parsed.fields);
-    Ok(Some(TranscriptEvent {
+    let transcript = TranscriptEvent {
         timestamp: local_log_timestamp(&parsed.timestamp),
         source: source.to_string(),
         text: format!("{correlation}  {summary}"),
-    }))
+    };
+    let load = (source == "load").then(|| LogLoadObservation {
+        event: transcript.clone(),
+        event_name: event.to_string(),
+        fields: parsed
+            .fields
+            .iter()
+            .filter(|(key, _)| {
+                matches!(
+                    key.as_str(),
+                    "profile"
+                        | "route"
+                        | "lane"
+                        | "transport"
+                        | "context"
+                        | "provider"
+                        | "model"
+                        | "path"
+                        | "limit"
+                        | "hard_limit"
+                        | "reason"
+                )
+            })
+            .map(|(key, value)| {
+                (
+                    key.clone(),
+                    if key == "path" {
+                        safe_endpoint(value)
+                    } else {
+                        value.clone()
+                    },
+                )
+            })
+            .collect(),
+        run_id: request.map(short_request_id),
+    });
+    Ok(Some(ParsedOperationalEvent { transcript, load }))
 }
 
 fn operational_event_is_interesting(event: &str, fields: &BTreeMap<String, String>) -> bool {

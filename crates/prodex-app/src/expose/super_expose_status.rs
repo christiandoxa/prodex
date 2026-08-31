@@ -1,5 +1,6 @@
 use super::super::mcp::expose_main_provider;
 use super::{ExposeEndpointMode, ExposeReadyState};
+use crate::ExposeArgs;
 use crate::print_stdout_line;
 use prodex_cli::SuperArgs;
 use terminal_ui::print_panel;
@@ -94,9 +95,13 @@ pub(crate) fn print_super_expose_status(ready: &ExposeReadyState) -> anyhow::Res
         ExposeEndpointMode::ExistingCloudflareTunnel {
             hostname,
             origin_port,
+            tunnel,
         } => fields.push((
             "Cloudflare".to_string(),
-            format!("Existing Tunnel · {hostname} · 127.0.0.1:{origin_port}"),
+            format!(
+                "Existing Tunnel · {} · {hostname} · 127.0.0.1:{origin_port}",
+                tunnel.as_deref().unwrap_or("configured identity")
+            ),
         )),
         ExposeEndpointMode::OpenAiSecureMcp {
             tunnel_id,
@@ -127,11 +132,10 @@ pub(crate) fn print_super_expose_status(ready: &ExposeReadyState) -> anyhow::Res
 
 fn endpoint_provider(endpoint: &ExposeEndpointMode) -> &'static str {
     match endpoint {
-        ExposeEndpointMode::LocalOnly => "none",
-        ExposeEndpointMode::QuickTunnel | ExposeEndpointMode::ExistingCloudflareTunnel { .. } => {
-            "cloudflare"
-        }
-        ExposeEndpointMode::OpenAiSecureMcp { .. } => "openai",
+        ExposeEndpointMode::LocalOnly => "Local only",
+        ExposeEndpointMode::QuickTunnel => "Cloudflare Quick Tunnel",
+        ExposeEndpointMode::ExistingCloudflareTunnel { .. } => "Existing Cloudflare Tunnel",
+        ExposeEndpointMode::OpenAiSecureMcp { .. } => "OpenAI Secure MCP Tunnel",
     }
 }
 
@@ -184,5 +188,63 @@ pub(crate) fn print_super_expose_configuration(
             .to_string(),
     ));
     print_panel("Prodex Super Configuration", &fields)?;
+    Ok(())
+}
+
+pub(crate) fn print_expose_dry_run(
+    args: &ExposeArgs,
+    endpoint: &ExposeEndpointMode,
+) -> anyhow::Result<()> {
+    let (mode, binary, bind, browser, mcp, source) = match endpoint {
+        ExposeEndpointMode::LocalOnly => (
+            "Local only",
+            "none",
+            "127.0.0.1:<os-assigned-port>".to_string(),
+            "local only",
+            "local loopback",
+            "none",
+        ),
+        ExposeEndpointMode::QuickTunnel => (
+            "Cloudflare Quick Tunnel",
+            "cloudflared",
+            "127.0.0.1:<os-assigned-port>".to_string(),
+            "public",
+            "Cloudflare public",
+            "ephemeral Quick Tunnel",
+        ),
+        ExposeEndpointMode::ExistingCloudflareTunnel { origin_port, .. } => (
+            "Existing Cloudflare Tunnel",
+            "cloudflared",
+            format!("127.0.0.1:{origin_port}"),
+            "public",
+            "Cloudflare public",
+            if args.cloudflare_token_file.is_some() {
+                "configured token file"
+            } else {
+                "configured Cloudflare config"
+            },
+        ),
+        ExposeEndpointMode::OpenAiSecureMcp { .. } => (
+            "OpenAI Secure MCP Tunnel",
+            "tunnel-client",
+            "127.0.0.1:<os-assigned-port>".to_string(),
+            "local only",
+            "OpenAI Secure MCP Tunnel",
+            "configured OpenAI tunnel ID",
+        ),
+    };
+    print_panel(
+        "Expose dry run",
+        &[
+            ("Mode".to_string(), mode.to_string()),
+            ("Tunnel provider".to_string(), mode.to_string()),
+            ("Binary".to_string(), binary.to_string()),
+            ("Local bind".to_string(), bind),
+            ("Public browser".to_string(), browser.to_string()),
+            ("MCP transport".to_string(), mcp.to_string()),
+            ("Configuration".to_string(), source.to_string()),
+            ("Secrets".to_string(), "not displayed".to_string()),
+        ],
+    )?;
     Ok(())
 }

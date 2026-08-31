@@ -67,7 +67,7 @@ pub struct ExposeArgs {
         value_parser = clap::value_parser!(u16).range(1..=32)
     )]
     pub max_clients: u16,
-    /// Explicitly publish the loopback-only server through a cloudflared quick tunnel.
+    /// Explicitly publish the loopback-only server through a Cloudflare Quick Tunnel.
     #[arg(long, conflicts_with_all = ["no_tunnel", "tunnel_provider"])]
     pub tunnel: bool,
     /// Deprecated compatibility alias; tunnel access is now disabled by default.
@@ -85,6 +85,21 @@ pub struct ExposeArgs {
         conflicts_with_all = ["tunnel", "no_tunnel"]
     )]
     pub tunnel_provider: Option<ExposeTunnelProvider>,
+    /// Existing Cloudflare config file. Defaults to cloudflared's official search locations.
+    #[arg(long, value_name = "PATH", conflicts_with = "cloudflare_token_file")]
+    pub cloudflare_config: Option<PathBuf>,
+    /// Existing Cloudflare tunnel name or UUID. Defaults to the config's `tunnel` value.
+    #[arg(long, value_name = "NAME|UUID")]
+    pub cloudflare_tunnel: Option<String>,
+    /// Existing Cloudflare public hostname. Defaults to the unique hostname in the config.
+    #[arg(long, value_name = "HOSTNAME")]
+    pub cloudflare_hostname: Option<String>,
+    /// Existing Cloudflare loopback origin port. Defaults to the matching config service port.
+    #[arg(long, value_name = "PORT")]
+    pub cloudflare_origin_port: Option<u16>,
+    /// Existing remotely-managed Cloudflare token file passed to cloudflared via --token-file.
+    #[arg(long, value_name = "PATH", conflicts_with = "cloudflare_config")]
+    pub cloudflare_token_file: Option<PathBuf>,
     /// Existing OpenAI Platform tunnel id used by the OpenAI Secure MCP Tunnel provider.
     #[arg(long, value_name = "ID")]
     pub openai_tunnel_id: Option<String>,
@@ -101,7 +116,13 @@ pub struct ExposeArgs {
 
 #[derive(clap::ValueEnum, Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ExposeTunnelProvider {
-    Cloudflare,
+    /// Start an ephemeral `trycloudflare.com` Quick Tunnel.
+    #[value(name = "cloudflare-quick", alias = "cloudflare")]
+    CloudflareQuick,
+    /// Start a pre-created, user-managed Cloudflare Tunnel from local configuration.
+    #[value(name = "cloudflare-existing", alias = "cloudflare-named")]
+    CloudflareExisting,
+    /// Connect MCP through the official OpenAI Secure MCP Tunnel client.
     #[value(name = "openai")]
     OpenAi,
 }
