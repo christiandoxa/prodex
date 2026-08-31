@@ -72,7 +72,7 @@ fallible-iterator v0.3.0
     der v0.8.0
 
 getrandom v0.2.17
-    rand_core v0.6.4
+    legacy-crypto v0.1.0
 
 getrandom v0.4.3
     tempfile v3.27.0
@@ -106,11 +106,6 @@ nix v0.28.0
 
 nix v0.31.3
     os_info v3.15.0
-
-rand_core v0.6.4 (*)
-
-rand_core v0.10.1
-    rand v0.10.2
 
 sha2 v0.10.9
     secret-service v5.1.0
@@ -168,7 +163,6 @@ test("default budget accepts current duplicate families", () => {
       ["inout", 2],
       ["itertools", 2],
       ["nix", 2],
-      ["rand_core", 2],
       ["sha2", 2],
       ["syn", 2],
       ["thiserror", 2],
@@ -191,8 +185,12 @@ test("unallowlisted duplicate family fails", () => {
 });
 
 test("allowed family over version budget fails", () => {
-  const duplicateFamilies = parseCargoTreeDuplicates(`${CURRENT_TREE_OUTPUT}\nrand_core v0.11.0\n`);
-  const summary = evaluateDuplicateBudget(duplicateFamilies);
+  const duplicateFamilies = parseCargoTreeDuplicates("rand_core v0.6.4\n\nrand_core v0.10.1\n\nrand_core v0.11.0\n");
+  const summary = evaluateDuplicateBudget(duplicateFamilies, [{
+    name: "rand_core",
+    maxVersions: 2,
+    reason: "fixture budget for the over-budget test",
+  }]);
 
   assert.equal(summary.status, "failed");
   assert.deepEqual(summary.overBudgetFamilies, [
@@ -200,7 +198,7 @@ test("allowed family over version budget fails", () => {
       name: "rand_core",
       versions: ["0.6.4", "0.10.1", "0.11.0"],
       maxVersions: 2,
-      reason: "legacy crypto and current rand/JWT AWS-LC dependencies resolve rand_core 0.6 and 0.10.",
+      reason: "fixture budget for the over-budget test",
     },
   ]);
 });

@@ -86,11 +86,6 @@ export const DEFAULT_DUPLICATE_BUDGET = Object.freeze([
     reason: "Codex-compatible os_info metadata uses nix 0.31 while portable PTY support still resolves nix 0.28.",
   },
   {
-    name: "rand_core",
-    maxVersions: 2,
-    reason: "legacy crypto and current rand/JWT AWS-LC dependencies resolve rand_core 0.6 and 0.10.",
-  },
-  {
     name: "sha2",
     maxVersions: 2,
     reason: "the native Secret Service keyring backend and current application/storage crypto resolve sha2 0.10 and 0.11.",
