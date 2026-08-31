@@ -112,12 +112,12 @@ pub(super) fn handle_runtime_proxy_compact_retryable_failure(
             if overload { "overload" } else { "quota" }
         ),
     );
-    if !(prodex_quota::openai_model_is_luna(request_model_name)
-        && !overload
-        && runtime_luna_quota_block_has_spark_capacity(shared, &profile_name))
-    {
-        mark_runtime_profile_retry_backoff(shared, &profile_name)?;
-    }
+    runtime_compact_mark_retry_backoff_if_needed(
+        shared,
+        &profile_name,
+        overload,
+        request_model_name,
+    )?;
 
     if runtime_compact_quota_fallback_exhausted(
         shared,
@@ -230,6 +230,21 @@ struct RuntimeCompactAffinityOwners<'a> {
     compact_followup_profile: Option<&'a str>,
     previous_response_profile: Option<&'a str>,
     session_profile: Option<&'a str>,
+}
+
+fn runtime_compact_mark_retry_backoff_if_needed(
+    shared: &RuntimeRotationProxyShared,
+    profile_name: &str,
+    overload: bool,
+    request_model_name: Option<&str>,
+) -> Result<()> {
+    if !prodex_quota::openai_model_is_luna(request_model_name)
+        || overload
+        || !runtime_luna_quota_block_has_spark_capacity(shared, profile_name)
+    {
+        mark_runtime_profile_retry_backoff(shared, profile_name)?;
+    }
+    Ok(())
 }
 
 fn runtime_compact_previous_profile_hard_affinity_failure(
