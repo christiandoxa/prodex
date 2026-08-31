@@ -230,9 +230,11 @@ impl<'a> RuntimeWebsocketTextMessageFlow<'a> {
     }
 
     fn wait_for_transient_recovery(&mut self) -> Result<bool> {
+        let provider_outage = self.saw_overload_failure && !self.has_continuation_priority();
         if !(self.saw_overload_failure || self.saw_transport_failure)
-            || self.recovery_sweeps
-                >= runtime_proxy_crate::RUNTIME_PROXY_PRECOMMIT_RECOVERY_SWEEP_LIMIT
+            || (!provider_outage
+                && self.recovery_sweeps
+                    >= runtime_proxy_crate::RUNTIME_PROXY_PRECOMMIT_RECOVERY_SWEEP_LIMIT)
         {
             return Ok(false);
         }
@@ -268,20 +270,63 @@ impl<'a> RuntimeWebsocketTextMessageFlow<'a> {
             true,
         )?
         else {
+            if provider_outage {
+                let exponent = self.recovery_sweeps.min(5) as u32;
+                let wait = Duration::from_millis(
+                    250_u64
+                        .saturating_mul(1_u64 << exponent)
+                        .saturating_add((self.request_id + self.recovery_sweeps as u64) % 251)
+                        .min(30_000),
+                );
+                runtime_proxy_log(
+                    self.shared,
+                    format!(
+                        "request={} websocket_session={} provider_temporarily_unavailable_retry route=websocket wait_ms={} sweep={}",
+                        self.request_id,
+                        self.session_id,
+                        wait.as_millis(),
+                        self.recovery_sweeps.saturating_add(1),
+                    ),
+                );
+                await_runtime_proxy_async_task(
+                    self.shared,
+                    "provider_recovery_wait",
+                    async move {
+                        tokio::time::sleep(wait).await;
+                        Ok(())
+                    },
+                )?;
+                self.excluded_profiles.clear();
+                self.recovery_sweeps = self.recovery_sweeps.saturating_add(1);
+                return Ok(true);
+            }
             return Ok(false);
         };
         let recovery_started_at = *self
             .recovery_started_at
             .get_or_insert_with(std::time::Instant::now);
         let now = chrono::Local::now().timestamp();
-        let recovery_budget =
+        let recovery_budget = if provider_outage {
+            Duration::from_secs(30)
+        } else {
             Duration::from_millis(runtime_proxy_crate::RUNTIME_PROXY_PRECOMMIT_RECOVERY_BUDGET_MS)
-                .saturating_sub(recovery_started_at.elapsed());
+                .saturating_sub(recovery_started_at.elapsed())
+        };
         let wait =
             std::time::Duration::from_secs(u64::try_from(until.saturating_sub(now)).unwrap_or(0))
                 .saturating_add(std::time::Duration::from_secs(1))
                 .min(recovery_budget);
-        if wait.is_zero() {
+        let wait = if wait.is_zero() && provider_outage {
+            Duration::from_millis(
+                250_u64
+                    .saturating_mul(1_u64 << self.recovery_sweeps.min(5) as u32)
+                    .saturating_add((self.request_id + self.recovery_sweeps as u64) % 251)
+                    .min(30_000),
+            )
+        } else {
+            wait
+        };
+        if wait.is_zero() && !provider_outage {
             return Ok(false);
         }
         runtime_proxy_log(
