@@ -168,21 +168,23 @@ listener or Cloudflare process. In a headless shell, use existing options such
 as `--model` and `-c 'model_reasoning_effort="max"'`; explicit values win and
 stdin is never read indefinitely.
 
-After public MCP readiness is verified, paste the printed URL into ChatGPT:
+After MCP readiness is verified, paste the printed URL into ChatGPT:
 
 ```text
 Settings → Security and login → Developer mode → Plugins → + → Public MCP server URL
 ```
 
-The URL ends in `/mcp` and contains a fresh ephemeral full-Super capability.
+Cloudflare mode prints a public URL ending in `/mcp` and containing a fresh
+ephemeral full-Super capability.
 Anyone with the full URL can control that expose process, so treat it as a
 credential. This is not OAuth and is for personal development only. No
-Cloudflare account or initialization is required for the default Quick Tunnel,
-but `cloudflared` must be installed. Quick Tunnel prefers QUIC over outbound
-UDP/7844 and falls back to HTTP/2 over TCP/7844. The interactive flow can also
-use an existing user-managed Cloudflare hostname and loopback origin port;
-Prodex does not manage that tunnel. Both modes use JSON responses and run
-polling instead of SSE. Stop the process with Ctrl+C to revoke access.
+Cloudflare account or initialization is required for Quick Tunnel mode, but
+`cloudflared` must be installed. Quick Tunnel prefers QUIC over outbound
+UDP/7844 and falls back to HTTP/2 over TCP/7844. Local mode has no external
+tunnel. OpenAI mode requires a pre-created tunnel ID, the
+`CONTROL_PLANE_API_KEY` runtime key, and the official `tunnel-client`; it uses
+outbound HTTPS/TCP 443 and provides MCP connectivity only. The browser remains
+local in OpenAI mode. Stop the process with Ctrl+C to revoke access.
 
 To use parallel workspaces, create separate worktrees and run one process in
 each; every process has its own port, hostname, capability, server identity,
