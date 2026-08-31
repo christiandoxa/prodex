@@ -153,15 +153,12 @@ fn version_probe_does_not_pass_runtime_key_to_an_untrusted_binary() {
     let _marker = TestEnvVarGuard::set("PRODEX_OPENAI_TUNNEL_MARKER", &marker.to_string_lossy());
     let version = ensure_openai_tunnel_available(VALID_TUNNEL_ID).unwrap();
     assert_eq!(version, "0.0.13");
+    let marker_contents = fs::read_to_string(&marker).unwrap();
     assert_eq!(
-        fs::read_to_string(&marker).unwrap(),
+        marker_contents.replace("\r\n", "\n"),
         "CONTROL_PLANE_API_KEY_PRESENT=False\n"
     );
-    assert!(
-        !fs::read_to_string(&marker)
-            .unwrap()
-            .contains(API_KEY_SENTINEL)
-    );
+    assert!(!marker_contents.contains(API_KEY_SENTINEL));
     fs::remove_dir_all(root).unwrap();
 }
 

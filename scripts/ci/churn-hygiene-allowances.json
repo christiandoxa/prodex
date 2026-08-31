@@ -33,7 +33,8 @@
       "ci: finalize Mojo gate churn allowance",
       "ci: correct measured Mojo gate churn",
       "ci: restore explicit 0.421 Mojo waiver",
-      "fix(ci): ratchet duplicate dependency budget"
+      "fix(ci): ratchet duplicate dependency budget",
+      "fix(reliability): close exact CI regressions"
     ],
     "caps": {
       "maxFiles": 130,
@@ -41,7 +42,7 @@
       "maxLines": 8000,
       "maxFileLines": 551
     },
-    "reason": "This exact 0.421.0 integration campaign combines the release-critical OpenAI application ping, model-aware Luna/Reserve/Spark recovery, Cloudflare and Secure MCP expose paths, Kiro quiet-child supervision, dependency integration, runtime fixtures, docs, CI manifest evidence, the explicit quantity-only 0.421.0 Mojo waiver, and the dependency-budget ratchet required by the integrated Dependabot upgrade. The measured range is bounded by 130 files, 108 behavior files, 8,000 changed lines, and 551 changed lines in the largest file; the narrow allowance covers this audited train without changing global churn thresholds or skipping correctness gates."
+    "reason": "This exact 0.421.0 integration campaign combines the release-critical OpenAI application ping, model-aware Luna/Reserve/Spark recovery, Cloudflare and Secure MCP expose paths, Kiro quiet-child supervision, dependency integration, runtime fixtures, docs, CI manifest evidence, the explicit quantity-only 0.421.0 Mojo waiver, the dependency-budget ratchet required by the integrated Dependabot upgrade, and repairs for the exact CI Sonar, Windows, and process-cleanup regressions. The measured range is bounded by 130 files, 108 behavior files, 8,000 changed lines, and 551 changed lines in the largest file; the narrow allowance covers this audited train without changing global churn thresholds or skipping correctness gates."
   },
   {
     "id": "audited-prodex-0.420.0-migration-tail",

@@ -139,30 +139,30 @@ pub(super) fn handle_runtime_proxy_compact_retryable_failure(
         return Ok(RuntimeCompactFailureFlow::Return(response));
     }
 
-    if previous_response_profile == Some(profile_name.as_str())
-        && runtime_compact_hard_affinity_failure(
-            shared,
-            RuntimeCompactAffinityOwners {
-                compact_followup_profile: compact_followup_profile
-                    .as_ref()
-                    .map(|(profile_name, _)| profile_name.as_str()),
-                previous_response_profile,
-                session_profile: session_profile.as_deref(),
-            },
-            RuntimeProxyCompactAttemptFailureLog {
-                request_id,
-                exit: "hard_affinity_retryable_failure",
-                reason: if overload { "overload" } else { "quota" },
-                selection_attempts,
-                selection_started_at,
-                pressure_mode,
-                last_failure: last_failure.as_ref(),
-                saw_inflight_saturation,
-                saw_transport_failure,
-                profile_name: &profile_name,
-            },
-        )
-    {
+    if runtime_compact_previous_profile_hard_affinity_failure(
+        shared,
+        &profile_name,
+        previous_response_profile,
+        RuntimeCompactAffinityOwners {
+            compact_followup_profile: compact_followup_profile
+                .as_ref()
+                .map(|(profile_name, _)| profile_name.as_str()),
+            previous_response_profile,
+            session_profile: session_profile.as_deref(),
+        },
+        RuntimeProxyCompactAttemptFailureLog {
+            request_id,
+            exit: "hard_affinity_retryable_failure",
+            reason: if overload { "overload" } else { "quota" },
+            selection_attempts,
+            selection_started_at,
+            pressure_mode,
+            last_failure: last_failure.as_ref(),
+            saw_inflight_saturation,
+            saw_transport_failure,
+            profile_name: &profile_name,
+        },
+    ) {
         return Ok(RuntimeCompactFailureFlow::Return(response));
     }
 
@@ -230,6 +230,17 @@ struct RuntimeCompactAffinityOwners<'a> {
     compact_followup_profile: Option<&'a str>,
     previous_response_profile: Option<&'a str>,
     session_profile: Option<&'a str>,
+}
+
+fn runtime_compact_previous_profile_hard_affinity_failure(
+    shared: &RuntimeRotationProxyShared,
+    profile_name: &str,
+    previous_response_profile: Option<&str>,
+    owners: RuntimeCompactAffinityOwners<'_>,
+    failure_log: RuntimeProxyCompactAttemptFailureLog<'_>,
+) -> bool {
+    previous_response_profile == Some(profile_name)
+        && runtime_compact_hard_affinity_failure(shared, owners, failure_log)
 }
 
 fn runtime_compact_try_auto_redeem(

@@ -3,7 +3,7 @@ use prodex_cli::{PingCommands, PingOpenaiArgs};
 use serde_json::Value;
 use std::ffi::OsString;
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use terminal_ui::print_stdout_line;
@@ -165,7 +165,7 @@ fn run_ping_command(args: &PingOpenaiArgs) -> Result<Output> {
             "OpenAI application ping",
         )
     };
-    let cleanup = fs::remove_dir_all(&cwd);
+    let cleanup = cleanup_ping_cwd(&cwd);
     match (result, cleanup) {
         (Ok(output), Ok(())) => Ok(output),
         (Err(error), Ok(())) => Err(error),
@@ -173,6 +173,27 @@ fn run_ping_command(args: &PingOpenaiArgs) -> Result<Output> {
         (Err(error), Err(cleanup_error)) => Err(error).context(format!(
             "failed to clean the diagnostic directory: {cleanup_error}"
         )),
+    }
+}
+
+fn cleanup_ping_cwd(path: &Path) -> std::io::Result<()> {
+    #[cfg(windows)]
+    {
+        let deadline = Instant::now() + Duration::from_secs(2);
+        loop {
+            match fs::remove_dir_all(path) {
+                Ok(()) => return Ok(()),
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+                Err(error) if Instant::now() < deadline => {
+                    std::thread::sleep(Duration::from_millis(25));
+                }
+                Err(error) => return Err(error),
+            }
+        }
+    }
+    #[cfg(not(windows))]
+    {
+        fs::remove_dir_all(path)
     }
 }
 

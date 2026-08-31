@@ -4,9 +4,9 @@ use super::mcp::{
     verify_public_mcp_with_progress,
 };
 use super::runtime::{
-    CloudflaredTransport, ExposeHttpServer, ExposePty, ExposeShared, OpenAiTunnel,
-    cloudflared_command, ensure_openai_tunnel_available, expose_access_url, expose_public_host,
-    resolve_openai_tunnel_id, start_openai_tunnel,
+    CloudflaredTransport, CloudflaredTunnel, ExposeHttpServer, ExposePty, ExposeShared,
+    OpenAiTunnel, cloudflared_command, ensure_openai_tunnel_available, expose_access_url,
+    expose_public_host, resolve_openai_tunnel_id, start_openai_tunnel,
 };
 use super::session::{ExposeSessionStore, expose_random_token};
 #[path = "super_expose_status.rs"]
@@ -323,75 +323,23 @@ fn run_super_expose_engine_inner(
         return Err(error);
     }
     let local_url = zeroize::Zeroizing::new(expose_access_url(&local_origin, &bootstrap));
-    let mut cloudflared = None;
-    let mut openai_tunnel = None;
-    let mut public_browser_url = None;
-    let public_url = match &endpoint {
-        ExposeEndpointMode::LocalOnly => None,
-        ExposeEndpointMode::OpenAiSecureMcp {
-            tunnel_id,
-            client_version,
-        } => {
-            report_phase(
-                lifecycle_tx,
-                ExposeLifecyclePhase::OpenAiTunnel,
-                "starting OpenAI Secure MCP Tunnel...",
-            );
-            match start_openai_tunnel(
-                local_mcp_url.as_str(),
-                tunnel_id.clone(),
-                client_version.clone(),
-                &cancelled,
-            ) {
-                Ok(tunnel) => {
-                    report_phase(
-                        lifecycle_tx,
-                        ExposeLifecyclePhase::OpenAiTunnel,
-                        &format!(
-                            "OpenAI tunnel-client ready ({})",
-                            tunnel.status.client_version
-                        ),
-                    );
-                    openai_tunnel = Some(tunnel);
-                    None
-                }
-                Err(error) => {
-                    cleanup_super_expose(&shared, &mcp, &mut http, None, None);
-                    return Err(error);
-                }
-            }
-        }
-        ExposeEndpointMode::QuickTunnel | ExposeEndpointMode::ExistingCloudflareTunnel { .. } => {
-            let (public_origin, public_host, tunnel) =
-                match start_public_endpoint(&endpoint, &local_origin, lifecycle_tx, &cancelled) {
-                    Ok(endpoint) => endpoint,
-                    Err(error) => {
-                        cleanup_super_expose(&shared, &mcp, &mut http, None, None);
-                        return Err(error);
-                    }
-                };
-            shared.allow_host(public_host.clone());
-            let public_url = match PublicMcpEndpoint::new(&public_origin, &capability) {
-                Ok(url) => url,
-                Err(error) => {
-                    let mut tunnel = tunnel;
-                    cleanup_super_expose(&shared, &mcp, &mut http, tunnel.as_mut(), None);
-                    return Err(error);
-                }
-            };
-            let mut progress = |label: &str| report_probe_phase(lifecycle_tx, label);
-            if let Err(error) =
-                verify_public_mcp_with_progress(public_url.as_str(), &mut progress, &cancelled)
-            {
-                let mut tunnel = tunnel;
-                cleanup_super_expose(&shared, &mcp, &mut http, tunnel.as_mut(), None);
-                return Err(error);
-            }
-            public_browser_url = Some(expose_access_url(&public_origin, &bootstrap));
-            cloudflared = tunnel;
-            Some(public_url)
-        }
-    };
+    let ExposeEndpointState {
+        mut cloudflared,
+        mut openai_tunnel,
+        public_browser_url,
+        public_url,
+    } = start_expose_endpoint(ExposeEndpointStartup {
+        endpoint: &endpoint,
+        local_origin: &local_origin,
+        local_mcp_url: &local_mcp_url,
+        capability: &capability,
+        bootstrap: &bootstrap,
+        lifecycle_tx,
+        cancelled: &cancelled,
+        shared: &shared,
+        mcp: &mcp,
+        http: &mut http,
+    })?;
     let ready = ExposeReadyState {
         local_url: local_url.to_string(),
         local_mcp_url,
@@ -434,6 +382,119 @@ fn run_super_expose_engine_inner(
         bail!("expose tunnel process exited after readiness; remote access is unavailable")
     }
     Ok(())
+}
+
+struct ExposeEndpointState {
+    cloudflared: Option<CloudflaredTunnel>,
+    openai_tunnel: Option<OpenAiTunnel>,
+    public_browser_url: Option<String>,
+    public_url: Option<PublicMcpEndpoint>,
+}
+
+struct ExposeEndpointStartup<'a> {
+    endpoint: &'a ExposeEndpointMode,
+    local_origin: &'a str,
+    local_mcp_url: &'a PublicMcpEndpoint,
+    capability: &'a str,
+    bootstrap: &'a str,
+    lifecycle_tx: Option<&'a SyncSender<ExposeLifecycleEvent>>,
+    cancelled: &'a dyn Fn() -> bool,
+    shared: &'a ExposeShared,
+    mcp: &'a ExposeMcpEndpoint,
+    http: &'a mut ExposeHttpServer,
+}
+
+fn start_expose_endpoint(
+    startup: ExposeEndpointStartup<'_>,
+) -> anyhow::Result<ExposeEndpointState> {
+    let ExposeEndpointStartup {
+        endpoint,
+        local_origin,
+        local_mcp_url,
+        capability,
+        bootstrap,
+        lifecycle_tx,
+        cancelled,
+        shared,
+        mcp,
+        http,
+    } = startup;
+    match endpoint {
+        ExposeEndpointMode::LocalOnly => Ok(ExposeEndpointState {
+            cloudflared: None,
+            openai_tunnel: None,
+            public_browser_url: None,
+            public_url: None,
+        }),
+        ExposeEndpointMode::OpenAiSecureMcp {
+            tunnel_id,
+            client_version,
+        } => {
+            report_phase(
+                lifecycle_tx,
+                ExposeLifecyclePhase::OpenAiTunnel,
+                "starting OpenAI Secure MCP Tunnel...",
+            );
+            match start_openai_tunnel(
+                local_mcp_url.as_str(),
+                tunnel_id.clone(),
+                client_version.clone(),
+                cancelled,
+            ) {
+                Ok(tunnel) => {
+                    report_phase(
+                        lifecycle_tx,
+                        ExposeLifecyclePhase::OpenAiTunnel,
+                        &format!(
+                            "OpenAI tunnel-client ready ({})",
+                            tunnel.status.client_version
+                        ),
+                    );
+                    Ok(ExposeEndpointState {
+                        cloudflared: None,
+                        openai_tunnel: Some(tunnel),
+                        public_browser_url: None,
+                        public_url: None,
+                    })
+                }
+                Err(error) => {
+                    cleanup_super_expose(shared, mcp, http, None, None);
+                    Err(error)
+                }
+            }
+        }
+        ExposeEndpointMode::QuickTunnel | ExposeEndpointMode::ExistingCloudflareTunnel { .. } => {
+            let (public_origin, public_host, mut tunnel) =
+                match start_public_endpoint(endpoint, local_origin, lifecycle_tx, cancelled) {
+                    Ok(endpoint) => endpoint,
+                    Err(error) => {
+                        cleanup_super_expose(shared, mcp, http, None, None);
+                        return Err(error);
+                    }
+                };
+            shared.allow_host(public_host);
+            let public_url = match PublicMcpEndpoint::new(&public_origin, capability) {
+                Ok(url) => url,
+                Err(error) => {
+                    cleanup_super_expose(shared, mcp, http, tunnel.as_mut(), None);
+                    return Err(error);
+                }
+            };
+            let mut progress = |label: &str| report_probe_phase(lifecycle_tx, label);
+            if let Err(error) =
+                verify_public_mcp_with_progress(public_url.as_str(), &mut progress, cancelled)
+            {
+                cleanup_super_expose(shared, mcp, http, tunnel.as_mut(), None);
+                return Err(error);
+            }
+            Ok(ExposeEndpointState {
+                cloudflared: tunnel,
+                openai_tunnel: None,
+                public_browser_url: Some(expose_access_url(&public_origin, bootstrap)),
+                public_url: Some(public_url),
+            })
+        }
+    }
 }
 
 fn expose_cancelled(cancel: &AtomicBool) -> bool {

@@ -56,41 +56,51 @@ impl<'a> RuntimeWebsocketTextMessageFlow<'a> {
                 RuntimeWebsocketBudgetDecision::Finished => return Ok(()),
             }
 
-            let Some(candidate_name) = self.select_candidate()? else {
-                match self.handle_candidate_exhausted()? {
-                    RuntimeWebsocketMessageLoopAction::Continue => {
-                        if std::mem::take(&mut self.reset_selection_budget) {
-                            selection_started_at = Instant::now();
-                            selection_attempts = 0;
-                        }
-                        continue;
-                    }
-                    RuntimeWebsocketMessageLoopAction::Finished => return Ok(()),
-                }
-            };
-            let turn_state_override = self.turn_state_override_for(&candidate_name);
-            self.log_candidate(&candidate_name, turn_state_override.as_deref());
-            if self.candidate_inflight_saturated(&candidate_name, selection_started_at)? {
-                continue;
-            }
-
-            let attempt = self.attempt_profile(&candidate_name, turn_state_override.as_deref())?;
-            if self.handle_inflight_saturation(&attempt, selection_started_at)? {
-                continue;
-            }
-            if !matches!(
-                &attempt,
-                RuntimeWebsocketAttempt::LocalSelectionBlocked { .. }
-            ) {
-                selection_attempts = selection_attempts.saturating_add(1);
-            }
-            match self.handle_candidate_attempt(attempt, turn_state_override.as_deref())? {
+            match self.process_next_candidate(&mut selection_started_at, &mut selection_attempts)? {
                 RuntimeWebsocketMessageLoopAction::Continue => {
                     continue;
                 }
                 RuntimeWebsocketMessageLoopAction::Finished => return Ok(()),
             }
         }
+    }
+
+    fn process_next_candidate(
+        &mut self,
+        selection_started_at: &mut Instant,
+        selection_attempts: &mut usize,
+    ) -> Result<RuntimeWebsocketMessageLoopAction> {
+        let Some(candidate_name) = self.select_candidate()? else {
+            return match self.handle_candidate_exhausted()? {
+                RuntimeWebsocketMessageLoopAction::Continue => {
+                    if std::mem::take(&mut self.reset_selection_budget) {
+                        *selection_started_at = Instant::now();
+                        *selection_attempts = 0;
+                    }
+                    Ok(RuntimeWebsocketMessageLoopAction::Continue)
+                }
+                RuntimeWebsocketMessageLoopAction::Finished => {
+                    Ok(RuntimeWebsocketMessageLoopAction::Finished)
+                }
+            };
+        };
+        let turn_state_override = self.turn_state_override_for(&candidate_name);
+        self.log_candidate(&candidate_name, turn_state_override.as_deref());
+        if self.candidate_inflight_saturated(&candidate_name, *selection_started_at)? {
+            return Ok(RuntimeWebsocketMessageLoopAction::Continue);
+        }
+
+        let attempt = self.attempt_profile(&candidate_name, turn_state_override.as_deref())?;
+        if self.handle_inflight_saturation(&attempt, *selection_started_at)? {
+            return Ok(RuntimeWebsocketMessageLoopAction::Continue);
+        }
+        if !matches!(
+            &attempt,
+            RuntimeWebsocketAttempt::LocalSelectionBlocked { .. }
+        ) {
+            *selection_attempts = selection_attempts.saturating_add(1);
+        }
+        self.handle_candidate_attempt(attempt, turn_state_override.as_deref())
     }
 
     fn finish_local_capacity_timeout(&mut self) -> Result<()> {
