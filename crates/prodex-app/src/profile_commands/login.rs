@@ -48,8 +48,8 @@ use super::manage::print_profile_panel;
 use super::{prepare_profile_codex_home, write_secret_text_file};
 use crate::{
     AppPaths, AppState, AppStateIoExt, CodexPassthroughArgs, ProfileEntry, ProfileProvider,
-    activate_profile, agy_bin, claude_oauth_profile_identity, codex_child_plan, exit_with_status,
-    fetch_profile_email, fetch_profile_identity, find_profile_by_identity, login_with_claude_oauth,
+    activate_profile, agy_bin, codex_child_plan, exit_with_status, fetch_profile_email,
+    fetch_profile_identity, find_profile_by_identity, login_with_claude_oauth,
     managed_profile_home_path, persist_login_home, prepare_managed_codex_home, read_auth_summary,
     remove_dir_if_exists, required_auth_json_text, run_child_plan, unique_profile_name_for_email,
     update_existing_profile_auth, write_profile_openai_compatible_base_url,

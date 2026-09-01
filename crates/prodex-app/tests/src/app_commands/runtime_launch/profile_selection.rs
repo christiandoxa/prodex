@@ -1,6 +1,94 @@
 use super::*;
 
 #[test]
+fn super_anthropic_resolution_selects_oauth_profile_and_token() {
+    let root = temp_dir("anthropic-oauth-profile-selection");
+    let _env = TestEnvVarGuard::set("PRODEX_HOME", root.to_str().unwrap());
+    let openai_home = root.join("openai-home");
+    let anthropic_home = root.join("anthropic-home");
+    create_codex_home_if_missing(&openai_home).unwrap();
+    create_codex_home_if_missing(&anthropic_home).unwrap();
+    write_runtime_launch_auth(
+        anthropic_home.join(CLAUDE_CREDENTIALS_FILE),
+        r#"{
+          "claudeAiOauth": {
+            "accessToken": "super-anthropic-access-token",
+            "expiresAt": 1900000000000,
+            "subscriptionType": "pro"
+          }
+        }"#,
+    )
+    .unwrap();
+    write_state(
+        &root,
+        AppState {
+            active_profile: Some("openai-main".to_string()),
+            profiles: BTreeMap::from([
+                (
+                    "openai-main".to_string(),
+                    ProfileEntry {
+                        codex_home: openai_home,
+                        managed: false,
+                        email: None,
+                        provider: ProfileProvider::Openai,
+                    },
+                ),
+                (
+                    "claude-main".to_string(),
+                    ProfileEntry {
+                        codex_home: anthropic_home.clone(),
+                        managed: false,
+                        email: Some("claude@example.com".to_string()),
+                        provider: ProfileProvider::Anthropic {
+                            account: Some("claude@example.com".to_string()),
+                            auth_method: Some("claude-ai-oauth:pro".to_string()),
+                        },
+                    },
+                ),
+            ]),
+            ..AppState::default()
+        },
+    );
+
+    let request = RuntimeLaunchRequest {
+        profile: None,
+        allow_auto_rotate: false,
+        auto_redeem: false,
+        skip_quota_check: true,
+        base_url: None,
+        upstream_no_proxy: false,
+        include_code_review: false,
+        smart_context_enabled: false,
+        presidio_redaction_enabled: false,
+        model_context_window_tokens: None,
+        gemini_thinking_budget_tokens: None,
+        force_runtime_proxy: false,
+        model_provider_override: None,
+        profile_v2_name: None,
+        external_provider: Some("anthropic"),
+        external_provider_api_key: None,
+    };
+    let paths = AppPaths::discover().unwrap();
+    let state = AppState::load(&paths).unwrap();
+    let selection = RuntimeLaunchSelection::resolve(
+        &paths,
+        &state,
+        request.profile,
+        request.model_provider_override,
+        request.profile_v2_name,
+        request.external_provider,
+        request.external_provider_api_key,
+    )
+    .unwrap();
+    assert_eq!(selection.selected_profile_name, "claude-main");
+    let profiles = runtime_anthropic_oauth_profiles_for_provider(&state, &selection, &request)
+        .expect("Super Anthropic should resolve imported OAuth credentials");
+    assert_eq!(profiles.len(), 1);
+    assert_eq!(profiles[0].profile_name, "claude-main");
+    assert_eq!(profiles[0].access_token, "super-anthropic-access-token");
+}
+
+#[test]
 fn runtime_launch_selection_resolve_chooses_profile_when_none_is_active() {
     let root = temp_dir("resolve-no-active-profile");
     let copilot_home = root.join("copilot");

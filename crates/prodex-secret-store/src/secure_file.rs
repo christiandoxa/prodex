@@ -35,6 +35,7 @@ pub(crate) fn insecure_file_access_enabled() -> bool {
 pub(crate) enum FileSecurity {
     Private,
     UnsealedPrivate,
+    External,
     Projected,
 }
 

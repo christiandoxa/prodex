@@ -21,8 +21,44 @@ impl FileSecretBackend {
         max_bytes: u64,
     ) -> Result<Option<SecretValue>, SecretError> {
         let path = file_path(location)?;
-        let Some(opened) = secure_file::open_file(path, FileSecurity::Private)
-            .map_err(|error| secure_error(path, error))?
+        self.read_path_bounded(path, FileSecurity::Private, max_bytes)
+    }
+
+    /// Reads an explicitly external source file without following path indirection.
+    ///
+    /// The source must be a bounded regular file owned by the current user, with
+    /// trusted parent directories. Unlike `read_bounded`, readable group/other
+    /// permissions are allowed because the source is owned by another CLI.
+    pub fn read_external_bounded(
+        &self,
+        path: &Path,
+        max_bytes: u64,
+    ) -> Result<Option<SecretValue>, SecretError> {
+        self.read_path_bounded(path, FileSecurity::External, max_bytes)
+    }
+
+    pub fn read_external_text_bounded(
+        &self,
+        path: &Path,
+        max_bytes: u64,
+    ) -> Result<Option<String>, SecretError> {
+        match self.read_external_bounded(path, max_bytes)? {
+            Some(SecretValue::Text(mut text)) => Ok(Some(std::mem::take(&mut *text))),
+            Some(SecretValue::Bytes(_)) => Err(SecretError::invalid_location(
+                "secret payload is not valid UTF-8",
+            )),
+            None => Ok(None),
+        }
+    }
+
+    fn read_path_bounded(
+        &self,
+        path: &Path,
+        security: FileSecurity,
+        max_bytes: u64,
+    ) -> Result<Option<SecretValue>, SecretError> {
+        let Some(opened) =
+            secure_file::open_file(path, security).map_err(|error| secure_error(path, error))?
         else {
             return Ok(None);
         };

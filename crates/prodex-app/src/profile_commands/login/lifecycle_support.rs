@@ -4,13 +4,14 @@ use super::super::import_export::{
     read_optional_secret_text_file,
 };
 use super::{
-    LoginMethod, LoginRequest, claude_oauth_profile_identity, create_temporary_login_home,
-    fetch_profile_email, finish_named_anthropic_profile_login, finish_named_profile_login,
+    LoginMethod, LoginRequest, create_temporary_login_home, fetch_profile_email,
+    finish_named_anthropic_profile_login, finish_named_profile_login,
     prepare_anthropic_profile_login_home, prepare_profile_login_home, read_auth_summary,
     required_auth_json_text, run_codex_login, write_secret_text_file,
 };
 use crate::{
-    AppPaths, AppState, ProfileEntry, ProfileProvider, remove_dir_if_exists, resolve_profile_name,
+    AppPaths, AppState, ProfileEntry, ProfileProvider, claude_external_oauth_profile_identity,
+    read_external_claude_credentials_text, remove_dir_if_exists, resolve_profile_name,
 };
 use anyhow::{Context, Result, bail};
 use std::path::Path;
@@ -123,7 +124,7 @@ fn finish_login_into_profile_locked(
 ) -> Result<ExitStatus> {
     if login_request.method == LoginMethod::Claude {
         let codex_home = prepare_anthropic_profile_login_home(paths, state, profile_name)?;
-        let (account, auth_method) = claude_oauth_profile_identity(login_home)?;
+        let (account, auth_method) = claude_external_oauth_profile_identity(login_home)?;
         let mut desired_profile = state
             .profiles
             .get(profile_name)
@@ -134,9 +135,8 @@ fn finish_login_into_profile_locked(
             account,
             auth_method,
         };
-        let credentials =
-            read_optional_secret_text_file(&login_home.join(crate::CLAUDE_CREDENTIALS_FILE))?
-                .context("Claude login did not produce credentials")?;
+        let credentials = read_external_claude_credentials_text(login_home)
+            .context("Claude login did not produce credentials")?;
         let (lifecycle_path, auth_journal_path) = prepare_existing_profile_lifecycle(
             paths,
             "login",

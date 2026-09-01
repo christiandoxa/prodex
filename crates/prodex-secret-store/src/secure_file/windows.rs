@@ -138,6 +138,7 @@ impl Directory {
             match security {
                 FileSecurity::Private => AclUse::PrivateFile,
                 FileSecurity::UnsealedPrivate => AclUse::UnsealedPrivateFile,
+                FileSecurity::External => AclUse::ExternalFile,
                 FileSecurity::Projected => AclUse::ProjectedFile,
             },
         )?;
@@ -302,6 +303,7 @@ enum AclUse {
     Directory,
     PrivateFile,
     UnsealedPrivateFile,
+    ExternalFile,
     ProjectedFile,
 }
 
@@ -608,7 +610,7 @@ fn security_info(file: &File) -> io::Result<(PSID, *mut ACL, LocalSecurityDescri
 }
 
 fn validate_acl_owner(owner: PSID, user: PSID, usage: AclUse) -> io::Result<()> {
-    if matches!(usage, AclUse::PrivateFile) {
+    if matches!(usage, AclUse::PrivateFile | AclUse::ExternalFile) {
         // SAFETY: both SID pointers are live for this descriptor/user buffer.
         if unsafe { EqualSid(owner, user) } == 0 {
             return Err(permission_denied(
@@ -692,7 +694,10 @@ fn sensitive_access(usage: AclUse) -> u32 {
                 | GENERIC_ALL
                 | GENERIC_WRITE
         }
-        AclUse::PrivateFile | AclUse::UnsealedPrivateFile | AclUse::ProjectedFile => {
+        AclUse::PrivateFile
+        | AclUse::UnsealedPrivateFile
+        | AclUse::ExternalFile
+        | AclUse::ProjectedFile => {
             FILE_GENERIC_READ
                 | FILE_GENERIC_WRITE
                 | DELETE

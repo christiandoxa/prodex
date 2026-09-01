@@ -309,6 +309,13 @@ fn validate_file(metadata: &Metadata, security: FileSecurity) -> io::Result<()> 
                 return Err(permission_denied("secret file is not owned by this user"));
             }
         }
+        FileSecurity::External => {
+            if metadata.uid() != euid || metadata.mode() & 0o022 != 0 {
+                return Err(permission_denied(
+                    "external secret file is not owned by this user or is writable by another principal",
+                ));
+            }
+        }
         FileSecurity::Projected => {
             if (metadata.uid() != euid && metadata.uid() != 0)
                 || metadata.mode() & 0o037 != 0
