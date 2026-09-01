@@ -484,7 +484,7 @@ fn run_command(command: Commands) -> Result<()> {
 fn command_uses_minimal_startup(command: &Commands) -> bool {
     matches!(
         command,
-        Commands::McpJsonlBridge(_) | Commands::Capability(_)
+        Commands::McpJsonlBridge(_) | Commands::Capability(_) | Commands::Ping(_)
     ) || matches!(command, Commands::Gateway(args) if args.command.is_some())
         || matches!(command, Commands::Setup(args) if args.dry_run)
         || matches!(
@@ -514,10 +514,12 @@ mod minimal_startup_tests {
             parse_cli_command_from(["prodex", "__mcp-jsonl-bridge", "mcp-server"]).unwrap();
         let super_doctor =
             parse_cli_command_from(["prodex", "s", "--no-presidio", "doctor"]).unwrap();
+        let ping = parse_cli_command_from(["prodex", "ping", "openai"]).unwrap();
 
         assert!(command_uses_minimal_startup(&install));
         assert!(command_uses_minimal_startup(&bridge));
         assert!(command_uses_minimal_startup(&super_doctor));
+        assert!(command_uses_minimal_startup(&ping));
         assert!(!command_uses_minimal_startup(&combined));
     }
 
