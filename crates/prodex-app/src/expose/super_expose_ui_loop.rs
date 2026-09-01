@@ -125,7 +125,7 @@ pub(super) fn handle_input(
             let (args, super_args, workspace_root, workspace_name, display_name) =
                 launch.take().context("expose endpoint selected twice")?;
             let mut args = args;
-            if let Some(selection) = existing {
+            if let Some(selection) = existing.map(|selection| *selection) {
                 args.cloudflare_config = selection.config_path;
                 args.cloudflare_token_file = selection.token_file;
                 args.cloudflare_tunnel = selection.tunnel;

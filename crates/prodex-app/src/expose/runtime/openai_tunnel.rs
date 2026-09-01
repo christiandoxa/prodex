@@ -245,6 +245,8 @@ pub(in crate::expose) fn start_openai_tunnel(
         .args(["--health.listen-addr", "127.0.0.1:0"])
         .args(["--health.url-file", health_url_path])
         .args(["--log.file", log_path])
+        // Pinned tunnel-client logs resolved MCP bearer URLs at INFO.
+        .args(["--log.level", "warn"])
         .env("CONTROL_PLANE_API_KEY", credentials.api_key())
         .stdin(Stdio::null())
         .stdout(Stdio::null())
