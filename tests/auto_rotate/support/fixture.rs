@@ -248,7 +248,7 @@ if defined prodex_json (
     )
     if /I "%TEST_CODEX_FAILURE_KIND%"=="process" (
       >&2 echo fast child failure Bearer fixture-token
-      exit /b 23
+      exit 23
     )
     if /I "%TEST_CODEX_FAILURE_KIND%"=="auth" (
       echo {"type":"thread.started","thread_id":"diagnostic"}
