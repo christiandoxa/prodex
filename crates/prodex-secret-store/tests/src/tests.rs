@@ -453,6 +453,55 @@ fn external_file_backend_allows_readable_cli_permissions_but_not_writes() {
 
 #[cfg(unix)]
 #[test]
+fn external_file_backend_rejects_fifo_without_blocking() {
+    use std::ffi::CString;
+    use std::os::unix::ffi::OsStrExt as _;
+    use std::process::Command;
+    use std::time::Instant;
+
+    if let Some(path) = std::env::var_os("PRODEX_SECRET_STORE_FIFO_TEST_PATH") {
+        let error = FileSecretBackend::new()
+            .read_external_text_bounded(&PathBuf::from(path), 64)
+            .unwrap_err();
+        assert!(error.is_unsafe_file());
+        return;
+    }
+
+    let root = temp_dir("external-source-fifo");
+    let path = root.join(".credentials.json");
+    let path_bytes = CString::new(path.as_os_str().as_bytes()).unwrap();
+    // SAFETY: `path_bytes` is a valid NUL-terminated path and the mode is
+    // intentionally private to the current test user.
+    assert_eq!(unsafe { libc::mkfifo(path_bytes.as_ptr(), 0o600) }, 0);
+
+    let mut child = Command::new(std::env::current_exe().unwrap())
+        .args([
+            "--exact",
+            "tests::external_file_backend_rejects_fifo_without_blocking",
+            "--nocapture",
+        ])
+        .env("PRODEX_SECRET_STORE_FIFO_TEST_PATH", &path)
+        .spawn()
+        .unwrap();
+    let deadline = Instant::now() + Duration::from_secs(2);
+    loop {
+        if let Some(status) = child.try_wait().unwrap() {
+            assert!(status.success());
+            break;
+        }
+        if Instant::now() >= deadline {
+            let _ = child.kill();
+            let _ = child.wait();
+            panic!("external FIFO read did not finish before its deadline");
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+
+    let _ = fs::remove_dir_all(root);
+}
+
+#[cfg(unix)]
+#[test]
 fn external_file_backend_rejects_symlink_parent_traversal_and_oversized_files() {
     use std::os::unix::fs::symlink;
 

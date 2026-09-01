@@ -137,13 +137,19 @@ impl Directory {
 
     pub(super) fn open_file(&self, name: &OsStr, security: FileSecurity) -> io::Result<File> {
         let name = c_name(name)?;
+        let nonblocking = if matches!(security, FileSecurity::External) {
+            libc::O_NONBLOCK
+        } else {
+            0
+        };
         // SAFETY: the parent fd is live and `name` is a single NUL-terminated
-        // component. `O_NOFOLLOW` makes the final symlink check part of open.
+        // component. `O_NOFOLLOW` makes the final symlink check part of open;
+        // external special files cannot block before regular-file validation.
         let fd = unsafe {
             libc::openat(
                 self.file.as_raw_fd(),
                 name.as_ptr(),
-                libc::O_RDONLY | libc::O_CLOEXEC | libc::O_NOFOLLOW,
+                libc::O_RDONLY | libc::O_CLOEXEC | libc::O_NOFOLLOW | nonblocking,
             )
         };
         let file = file_from_fd(fd)?;
