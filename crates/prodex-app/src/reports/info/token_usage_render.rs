@@ -132,7 +132,7 @@ fn info_token_usage_event_from_line_with_event(
         output_tokens_per_second: fields
             .get("output_tokens_per_second")
             .and_then(|value| value.parse::<f64>().ok())
-            .filter(|value| value.is_finite() && *value >= 0.0),
+            .filter(|value| value.is_finite() && *value > 0.0),
     })
 }
 
