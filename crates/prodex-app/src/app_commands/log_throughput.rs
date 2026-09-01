@@ -95,13 +95,16 @@ impl OutputThroughput {
         self.last_event_path = Some(log_path.to_path_buf());
         let rate = {
             let stream = self.stream(&key);
-            stream.last_event_at = Some(observed_at);
             let cumulative = stream
                 .samples
                 .back()
-                .map_or(output_tokens, |(_, previous)| {
-                    previous.saturating_add(output_tokens)
+                .map_or(Some(output_tokens), |(_, previous)| {
+                    previous.checked_add(output_tokens)
                 });
+            let Some(cumulative) = cumulative else {
+                return;
+            };
+            stream.last_event_at = Some(observed_at);
             stream.samples.push_back((observed_at, cumulative));
             stream.active = output_tokens > 0;
             prune_output_throughput_samples(stream, observed_at);
@@ -120,9 +123,7 @@ impl OutputThroughput {
         };
         let rate = if let Some(stream) = self.streams.get_mut(&key) {
             stream.active = false;
-            let rate = event
-                .output_tokens_per_second
-                .filter(|rate| rate.is_finite() && *rate >= 0.0)
+            let rate = valid_output_rate(event)
                 .or_else(|| output_throughput_stream_rate(stream))
                 .or(stream.last_known_rate);
             if let Some(rate) = rate.filter(|rate| rate.is_finite() && *rate >= 0.0) {
@@ -179,10 +180,7 @@ impl OutputThroughput {
     }
 
     pub(super) fn observe_historical(&mut self, log_path: &Path, event: &InfoTokenUsageEvent) {
-        let Some(rate) = event
-            .output_tokens_per_second
-            .filter(|rate| rate.is_finite() && *rate >= 0.0)
-        else {
+        let Some(rate) = valid_output_rate(event) else {
             return;
         };
         if self
@@ -220,6 +218,14 @@ impl OutputThroughput {
         }
         self.streams.entry(key.clone()).or_default()
     }
+}
+
+fn valid_output_rate(event: &InfoTokenUsageEvent) -> Option<f64> {
+    event
+        .output_tokens_per_second
+        .filter(|rate| rate.is_finite() && *rate >= 0.0)
+        .filter(|_| event.output_tokens > 0)
+        .filter(|_| event.generation_ms.is_none_or(|duration| duration > 0))
 }
 
 fn prune_output_throughput_samples(stream: &mut OutputThroughputStream, now: Instant) {
@@ -428,6 +434,120 @@ mod tests {
             throughput.display_rate(start + Duration::from_secs(61)),
             Some(66.3)
         );
+    }
+
+    #[test]
+    fn later_turn_refreshes_the_header_rate() {
+        let path = Path::new("/tmp/runtime-later-turn.log");
+        let start = Instant::now();
+        let mut throughput = OutputThroughput::default();
+        throughput.observe_token_usage(path, &usage("main", Some(1), 100), start);
+        throughput.observe_token_usage(
+            path,
+            &usage("main", Some(1), 200),
+            start + Duration::from_secs(1),
+        );
+        throughput.finish(
+            path,
+            &InfoTokenUsageEvent {
+                profile: "main".to_string(),
+                request: Some(1),
+                output_tokens: 200,
+                output_tokens_per_second: Some(100.0),
+                ..InfoTokenUsageEvent::default()
+            },
+        );
+
+        throughput.observe_token_usage(
+            path,
+            &usage("main", Some(2), 10),
+            start + Duration::from_secs(2),
+        );
+        throughput.observe_token_usage(
+            path,
+            &usage("main", Some(2), 40),
+            start + Duration::from_secs(3),
+        );
+
+        assert_eq!(
+            throughput.display_rate(start + Duration::from_secs(3)),
+            Some(30.0)
+        );
+    }
+
+    #[test]
+    fn profile_rotation_keeps_token_counters_separate() {
+        let path = Path::new("/tmp/runtime-profile-rotation.log");
+        let start = Instant::now();
+        let mut throughput = OutputThroughput::default();
+        throughput.observe_token_usage(path, &usage("main", Some(3), 100), start);
+        throughput.observe_token_usage(
+            path,
+            &usage("main", Some(3), 200),
+            start + Duration::from_secs(1),
+        );
+        throughput.finish(
+            path,
+            &InfoTokenUsageEvent {
+                profile: "main".to_string(),
+                request: Some(3),
+                output_tokens: 200,
+                output_tokens_per_second: Some(100.0),
+                ..InfoTokenUsageEvent::default()
+            },
+        );
+
+        throughput.observe_token_usage(
+            path,
+            &usage("backup", Some(4), 5),
+            start + Duration::from_secs(2),
+        );
+        throughput.observe_token_usage(
+            path,
+            &usage("backup", Some(4), 25),
+            start + Duration::from_secs(3),
+        );
+
+        assert_eq!(
+            throughput.active_rate(start + Duration::from_secs(3)),
+            Some(20.0)
+        );
+    }
+
+    #[test]
+    fn invalid_final_duration_does_not_replace_a_rate() {
+        let path = Path::new("/tmp/runtime-invalid-duration.log");
+        let now = Instant::now();
+        let event = InfoTokenUsageEvent {
+            profile: "main".to_string(),
+            request: Some(5),
+            output_tokens: 50,
+            generation_ms: Some(0),
+            output_tokens_per_second: Some(50.0),
+            ..InfoTokenUsageEvent::default()
+        };
+        let mut throughput = OutputThroughput::default();
+        throughput.observe_token_usage(path, &event, now);
+        throughput.finish(path, &event);
+
+        assert_eq!(throughput.display_rate(now), None);
+    }
+
+    #[test]
+    fn overflow_delta_is_ignored_without_saturating_the_stream() {
+        let path = Path::new("/tmp/runtime-overflow.log");
+        let start = Instant::now();
+        let mut throughput = OutputThroughput::default();
+        throughput.observe_delta(path, "main", Some(6), u64::MAX, start);
+        throughput.observe_delta(path, "main", Some(6), 1, start + Duration::from_secs(1));
+
+        let stream = throughput
+            .streams
+            .values()
+            .next()
+            .expect("stream should remain bounded");
+        assert_eq!(stream.samples.len(), 1);
+        assert_eq!(throughput.active_rate(start + Duration::from_secs(1)), None);
     }
 
     #[test]

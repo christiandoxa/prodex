@@ -141,13 +141,13 @@ fn stream_token_usage_events_tui() -> Result<()> {
     let mut tui = LogTuiTerminal::stdout("log stream TUI")?;
     let mut view = LogTuiState::default();
     let mut live_source = LiveRuntimeLogSource::new();
-    let mut items = initial_log_stream_items_with_live(&mut live_source)?;
+    let mut throughput = OutputThroughput::default();
+    crate::app_commands::log_tui::seed_output_throughput_from_history(&mut throughput);
+    let mut items = initial_log_stream_items_with_live(&mut live_source, Some(&mut throughput))?;
     let mut header_profile = latest_log_stream_profile(&items).map(str::to_string);
     let mut header_detail = log_tui_header_detail(header_profile.as_deref());
     let mut header_refresh_at =
         log_tui_header_next_refresh_at(header_detail.as_ref(), Instant::now());
-    let mut throughput = OutputThroughput::default();
-    crate::app_commands::log_tui::seed_output_throughput_from_history(&mut throughput);
 
     let mut runtime_paths =
         FollowedLogPaths::new(prodex_runtime_log_paths_in_dir(&runtime_proxy_log_dir()));
@@ -199,7 +199,7 @@ fn print_initial_token_usage_events(
     json: bool,
     live_source: &mut Option<LiveRuntimeLogSource>,
 ) -> Result<()> {
-    let items = initial_log_stream_items_with_live(live_source)?;
+    let items = initial_log_stream_items_with_live(live_source, None)?;
     if items.is_empty() {
         eprintln!("Waiting for transcript, upstream payload, or token usage events...");
         return Ok(());
@@ -301,11 +301,12 @@ fn read_token_usage_events_tick_with_live(
 
 #[cfg(test)]
 fn initial_log_stream_items() -> Result<VecDeque<LogStreamItem>> {
-    initial_log_stream_items_with_live(&mut None)
+    initial_log_stream_items_with_live(&mut None, None)
 }
 
 fn initial_log_stream_items_with_live(
     live_source: &mut Option<LiveRuntimeLogSource>,
+    throughput: Option<&mut OutputThroughput>,
 ) -> Result<VecDeque<LogStreamItem>> {
     let mut items = VecDeque::new();
     if let Ok(Some(event)) = latest_transcript_event() {
@@ -321,7 +322,7 @@ fn initial_log_stream_items_with_live(
     if let Some(event) = token_usage {
         push_log_stream_item(&mut items, LogStreamItem::TokenUsage(event));
     }
-    for event in collect_live_log_items(live_source, true, None)? {
+    for event in collect_live_log_items(live_source, true, throughput)? {
         push_log_stream_item(&mut items, event);
     }
     Ok(items)
