@@ -27,8 +27,27 @@ pub(super) struct RuntimeProxyBackend {
     usage_accounts: Arc<Mutex<Vec<String>>>,
     reset_credit_consume_accounts: Arc<Mutex<Vec<String>>>,
     reset_credit_consume_bodies: Arc<Mutex<Vec<String>>>,
+    accepted_streams: Arc<Mutex<Vec<Option<TcpStream>>>>,
     connection_threads: Arc<Mutex<Vec<JoinHandle<()>>>>,
     thread: Option<JoinHandle<()>>,
+}
+
+struct RuntimeProxyBackendAcceptedStreamGuard {
+    accepted_streams: Arc<Mutex<Vec<Option<TcpStream>>>>,
+    slot: usize,
+}
+
+impl Drop for RuntimeProxyBackendAcceptedStreamGuard {
+    fn drop(&mut self) {
+        if let Some(stream) = self
+            .accepted_streams
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .get_mut(self.slot)
+        {
+            *stream = None;
+        }
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -326,6 +345,8 @@ impl RuntimeProxyBackend {
         let usage_accounts = Arc::new(Mutex::new(Vec::new()));
         let reset_credit_consume_accounts = Arc::new(Mutex::new(Vec::new()));
         let reset_credit_consume_bodies = Arc::new(Mutex::new(Vec::new()));
+        let accepted_streams = Arc::new(Mutex::new(Vec::new()));
+        let websocket_connection_sequence = Arc::new(AtomicUsize::new(0));
         let connection_threads = Arc::new(Mutex::new(Vec::new()));
         let shutdown_flag = Arc::clone(&shutdown);
         let responses_accounts_flag = Arc::clone(&responses_accounts);
@@ -335,6 +356,8 @@ impl RuntimeProxyBackend {
         let usage_accounts_flag = Arc::clone(&usage_accounts);
         let reset_credit_consume_accounts_flag = Arc::clone(&reset_credit_consume_accounts);
         let reset_credit_consume_bodies_flag = Arc::clone(&reset_credit_consume_bodies);
+        let accepted_streams_flag = Arc::clone(&accepted_streams);
+        let websocket_connection_sequence_flag = Arc::clone(&websocket_connection_sequence);
         let connection_threads_flag = Arc::clone(&connection_threads);
         let fault_script_flag = fault_script.as_ref().map(Arc::clone);
         let thread = thread::spawn(move || {
@@ -353,7 +376,10 @@ impl RuntimeProxyBackend {
                             Arc::clone(&reset_credit_consume_accounts_flag);
                         let reset_credit_consume_bodies_flag =
                             Arc::clone(&reset_credit_consume_bodies_flag);
+                        let accepted_streams_flag = Arc::clone(&accepted_streams_flag);
                         let fault_script_flag = fault_script_flag.as_ref().map(Arc::clone);
+                        let websocket_connection_sequence_flag =
+                            Arc::clone(&websocket_connection_sequence_flag);
                         let websocket_enabled = matches!(
                             mode,
                             RuntimeProxyBackendMode::Websocket
@@ -378,15 +404,35 @@ impl RuntimeProxyBackend {
                                 | RuntimeProxyBackendMode::WebsocketRealtimeSideband
                         );
                         let handler = thread::spawn(move || {
-                            if websocket_enabled
-                                && runtime_proxy_backend_is_websocket_upgrade(&stream)
-                            {
+                            let websocket_upgrade = websocket_enabled
+                                && runtime_proxy_backend_is_websocket_upgrade(&stream);
+                            if websocket_upgrade {
+                                let slot = {
+                                    let mut accepted_streams = accepted_streams_flag
+                                        .lock()
+                                        .expect("accepted_streams poisoned");
+                                    accepted_streams.push(Some(
+                                        stream
+                                            .try_clone()
+                                            .expect("runtime proxy backend stream should clone"),
+                                    ));
+                                    accepted_streams.len() - 1
+                                };
+                                let _accepted_stream_guard =
+                                    RuntimeProxyBackendAcceptedStreamGuard {
+                                        accepted_streams: Arc::clone(&accepted_streams_flag),
+                                        slot,
+                                    };
+                                let first_connection = websocket_connection_sequence_flag
+                                    .fetch_add(1, Ordering::SeqCst)
+                                    == 0;
                                 handle_runtime_proxy_backend_websocket(
                                     stream,
                                     &responses_accounts_flag,
                                     &responses_headers_flag,
                                     &websocket_requests_flag,
                                     mode,
+                                    first_connection,
                                 );
                             } else {
                                 handle_runtime_proxy_backend_request(
@@ -428,6 +474,7 @@ impl RuntimeProxyBackend {
             usage_accounts,
             reset_credit_consume_accounts,
             reset_credit_consume_bodies,
+            accepted_streams,
             connection_threads,
             thread: Some(thread),
         }
@@ -494,12 +541,33 @@ impl Drop for RuntimeProxyBackend {
         if let Some(thread) = self.thread.take() {
             let _ = thread.join();
         }
+        for stream in self
+            .accepted_streams
+            .lock()
+            .expect("accepted_streams poisoned")
+            .iter()
+            .flatten()
+        {
+            let _ = stream.shutdown(std::net::Shutdown::Both);
+        }
         let mut handlers = self
             .connection_threads
             .lock()
             .expect("connection_threads poisoned");
         while let Some(thread) = handlers.pop() {
-            let _ = thread.join();
+            thread
+                .join()
+                .expect("runtime proxy backend connection handler should exit cleanly");
         }
     }
+}
+
+#[test]
+fn runtime_proxy_backend_shutdown_closes_open_websocket_before_joining_handlers() {
+    let backend = RuntimeProxyBackend::start_websocket();
+    let (_client, _response) =
+        ws_connect(format!("ws://{}/backend-api/codex/responses", backend.addr))
+            .expect("backend websocket client should connect");
+
+    drop(backend);
 }
