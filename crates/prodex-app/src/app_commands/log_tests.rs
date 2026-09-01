@@ -440,6 +440,26 @@ fn collects_websocket_payload_and_usage_from_runtime_log() {
 }
 
 #[test]
+fn runtime_token_sample_reaches_header_state_through_shared_collector() {
+    let path = std::path::Path::new("/tmp/runtime-throughput.log");
+    let mut throughput = crate::app_commands::log_throughput::OutputThroughput::default();
+    let items = super::log_stream::collect_runtime_log_line(
+        path,
+        "[2026-07-01 21:52:36.729 +07:00] token_usage request=28 route=responses transport=http profile=main source=responses_sse input_tokens=10 cached_input_tokens=0 output_tokens=100 reasoning_tokens=0 generation_ms=1000 output_tokens_per_second=100.0",
+        false,
+        Some(&mut throughput),
+        true,
+    )
+    .unwrap();
+
+    assert!(matches!(items.as_slice(), [LogStreamItem::TokenUsage(_)]));
+    assert_eq!(
+        throughput.display_rate(std::time::Instant::now()),
+        Some(100.0)
+    );
+}
+
+#[test]
 fn collects_websocket_stream_payload_as_plain_tool_call_text() {
     let root = env::temp_dir().join(format!(
         "prodex-runtime-stream-payload-follow-{}-{}",

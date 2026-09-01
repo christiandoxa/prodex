@@ -89,6 +89,18 @@ fn info_token_usage_event_from_line_with_event(
         return None;
     }
     let fields = info_runtime_parse_fields(line);
+    let input_tokens = match event_name {
+        "token_usage_progress" => fields
+            .get("input_tokens")
+            .and_then(|value| value.parse::<u64>().ok())
+            .unwrap_or_default(),
+        _ => fields.get("input_tokens")?.parse::<u64>().ok()?,
+    };
+    let output_tokens = match fields.get("output_tokens") {
+        Some(value) => value.parse::<u64>().ok()?,
+        None if event_name == "token_usage_progress" => return None,
+        None => 0,
+    };
     Some(InfoTokenUsageEvent {
         timestamp: info_token_usage_timestamp(line),
         request: fields.get("request").and_then(|value| value.parse().ok()),
@@ -104,15 +116,12 @@ fn info_token_usage_event_from_line_with_event(
             .get("source")
             .cloned()
             .unwrap_or_else(|| "unknown".to_string()),
-        input_tokens: fields.get("input_tokens")?.parse::<u64>().ok()?,
+        input_tokens,
         cached_input_tokens: fields
             .get("cached_input_tokens")
             .and_then(|value| value.parse::<u64>().ok())
             .unwrap_or_default(),
-        output_tokens: fields
-            .get("output_tokens")
-            .and_then(|value| value.parse::<u64>().ok())
-            .unwrap_or_default(),
+        output_tokens,
         reasoning_tokens: fields
             .get("reasoning_tokens")
             .and_then(|value| value.parse::<u64>().ok())

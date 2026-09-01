@@ -46,6 +46,36 @@ fn token_usage_event_parses_snapshot_fields() {
 }
 
 #[test]
+fn token_usage_progress_uses_output_counter_and_rejects_bad_values() {
+    let event = info_token_usage_progress_event_from_line(
+        "[2026-06-19 20:00:00.000 +07:00] token_usage_progress request=42 profile=main output_tokens=15",
+    )
+    .expect("progress event");
+    assert_eq!(event.request, Some(42));
+    assert_eq!(event.profile, "main");
+    assert_eq!(event.output_tokens, 15);
+
+    let json = serde_json::json!({
+        "timestamp": "2026-06-19 20:00:00.000 +07:00",
+        "event": "token_usage_progress",
+        "fields": {"profile": "main", "output_tokens": "15"}
+    });
+    assert_eq!(
+        info_token_usage_progress_event_from_line(&json.to_string())
+            .expect("JSON progress event")
+            .output_tokens,
+        15
+    );
+
+    for output_tokens in ["-1", "18446744073709551616"] {
+        assert!(info_token_usage_progress_event_from_line(&format!(
+            "[2026-06-19 20:00:00.000 +07:00] token_usage_progress profile=main output_tokens={output_tokens}"
+        ))
+        .is_none());
+    }
+}
+
+#[test]
 fn active_runtime_log_paths_filter_to_runtime_processes() {
     let processes = vec![
         ProdexProcessInfo {
