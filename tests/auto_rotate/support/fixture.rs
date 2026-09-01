@@ -126,6 +126,16 @@ if [ "$is_json_ping" = "1" ]; then
         printf '%s\n' '{"type":"turn.failed","error":{"message":"HTTP 503 upstream unavailable"}}'
         exit 1
         ;;
+      rate_limited)
+        printf '%s\n' '{"type":"thread.started","thread_id":"diagnostic"}'
+        printf '%s\n' '{"type":"turn.started"}'
+        printf '%s\n' '{"type":"turn.failed","error":{"message":"HTTP 429 Too Many Requests"}}'
+        exit 1
+        ;;
+      process)
+        printf '%s\n' 'fast child failure Bearer fixture-token' >&2
+        exit 23
+        ;;
       auth)
         printf '%s\n' '{"type":"thread.started","thread_id":"diagnostic"}'
         printf '%s\n' '{"type":"turn.started"}'
@@ -229,6 +239,16 @@ if defined prodex_json (
       echo {"type":"turn.started"}
       echo {"type":"turn.failed","error":{"message":"HTTP 503 upstream unavailable"}}
       exit /b 1
+    )
+    if /I "%TEST_CODEX_FAILURE_KIND%"=="rate_limited" (
+      echo {"type":"thread.started","thread_id":"diagnostic"}
+      echo {"type":"turn.started"}
+      echo {"type":"turn.failed","error":{"message":"HTTP 429 Too Many Requests"}}
+      exit /b 1
+    )
+    if /I "%TEST_CODEX_FAILURE_KIND%"=="process" (
+      >&2 echo fast child failure Bearer fixture-token
+      exit /b 23
     )
     if /I "%TEST_CODEX_FAILURE_KIND%"=="auth" (
       echo {"type":"thread.started","thread_id":"diagnostic"}
