@@ -4,7 +4,7 @@ use self::log_command_tui::{log_snapshot_items, log_stream_tui_text};
 pub(crate) use self::log_follow::{
     FollowedLog, FollowedLogPaths, collect_new_followed_lines, retain_followed_logs,
 };
-pub(crate) use self::log_live::LiveRuntimeLogSource;
+pub(crate) use self::log_live::{LiveRuntimeLogSource, collect_live_log_items};
 pub(crate) use self::log_load::{LogLoadAggregate, LogLoadObservation, is_routine_load_event};
 use self::log_paths::recent_session_log_paths;
 #[cfg(test)]
@@ -12,9 +12,9 @@ use self::log_stream::log_stream_item_json;
 pub(crate) use self::log_stream::{
     LogStreamItem, collect_new_runtime_log_stream_items,
     collect_new_runtime_log_stream_items_for_tui_with_throughput,
-    collect_new_runtime_log_stream_items_with_throughput, collect_runtime_log_line,
-    local_token_usage_event, log_event_label, print_log_stream_item, print_token_usage_event,
-    print_transcript_event, print_upstream_payload_event,
+    collect_new_runtime_log_stream_items_with_throughput, local_token_usage_event, log_event_label,
+    print_log_stream_item, print_token_usage_event, print_transcript_event,
+    print_upstream_payload_event,
 };
 pub(crate) use self::log_transcript::{TranscriptEvent, transcript_events_from_session_line};
 #[cfg(test)]
