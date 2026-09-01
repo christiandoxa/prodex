@@ -289,10 +289,61 @@ impl OutputThroughput {
             && self.streams.len() >= OUTPUT_THROUGHPUT_MAX_STREAMS
             && let Some(oldest) = self.streams.keys().next().cloned()
         {
-            self.streams.remove(&oldest);
-            self.last_known_rates.remove(&oldest);
+            self.evict_stream(&oldest);
         }
         self.streams.entry(key.clone()).or_default()
+    }
+
+    fn evict_stream(&mut self, key: &OutputThroughputKey) {
+        self.streams.remove(key);
+        self.last_known_rates.remove(key);
+        if self
+            .last_event_keys
+            .get(&key.profile)
+            .is_some_and(|current| current == key)
+        {
+            self.last_event_keys.remove(&key.profile);
+            self.historical_rate_timestamps.remove(&key.profile);
+        }
+        if self.last_event_key.as_ref() == Some(key) {
+            self.repair_global_identity();
+        }
+    }
+
+    fn repair_global_identity(&mut self) {
+        if self.historical_rate_timestamp.is_some() {
+            let replacement = self
+                .historical_rate_timestamps
+                .iter()
+                .filter_map(|(profile, timestamp)| {
+                    let key = self.last_event_keys.get(profile)?;
+                    self.last_known_rates
+                        .contains_key(key)
+                        .then_some((timestamp, key))
+                })
+                .max_by(|(left, _), (right, _)| left.cmp(right))
+                .map(|(timestamp, key)| (timestamp.clone(), key.clone()));
+            if let Some((timestamp, key)) = replacement {
+                self.last_event_key = Some(key);
+                self.historical_rate_timestamp = Some(timestamp);
+            } else {
+                self.last_event_key = None;
+                self.historical_rate_timestamp = None;
+            }
+            return;
+        }
+
+        self.last_event_key = self
+            .last_event_keys
+            .values()
+            .filter(|key| self.last_known_rates.contains_key(*key))
+            .filter(|key| self.streams.contains_key(*key))
+            .max_by_key(|key| {
+                self.streams
+                    .get(*key)
+                    .and_then(|stream| stream.last_event_at)
+            })
+            .cloned();
     }
 
     fn remember_observation(&mut self, observation: OutputThroughputObservation, log_path: &Path) {
@@ -374,7 +425,7 @@ fn output_throughput_stream_rate(stream: &OutputThroughputStream) -> Option<f64>
 
 #[cfg(test)]
 mod tests {
-    use super::{InfoTokenUsageEvent, OutputThroughput};
+    use super::{InfoTokenUsageEvent, OUTPUT_THROUGHPUT_MAX_STREAMS, OutputThroughput};
     use std::path::Path;
     use std::time::{Duration, Instant};
 
@@ -458,5 +509,97 @@ mod tests {
             .expect("stream should remain bounded");
         assert_eq!(stream.samples.len(), 1);
         assert!(active_rate(&mut throughput, start + Duration::from_secs(1)).is_none());
+    }
+
+    #[test]
+    fn stream_churn_bounds_identity_maps_and_keeps_latest_samples() {
+        let path = Path::new("/home/test-user/runtime-throughput-churn.log");
+        let mut throughput = OutputThroughput::default();
+        for index in 1_u64..64 {
+            throughput.observe_historical(
+                path,
+                &InfoTokenUsageEvent {
+                    timestamp: format!("2026-08-28T00:00:{index:03}Z"),
+                    profile: format!("profile-{index:03}"),
+                    request: Some(index),
+                    output_tokens: 1,
+                    output_tokens_per_second: Some(index as f64),
+                    ..InfoTokenUsageEvent::default()
+                },
+            );
+        }
+        throughput.observe_historical(
+            path,
+            &InfoTokenUsageEvent {
+                timestamp: "2026-08-28T00:00:100Z".to_string(),
+                profile: "profile-000".to_string(),
+                request: Some(100),
+                output_tokens: 1,
+                output_tokens_per_second: Some(100.0),
+                ..InfoTokenUsageEvent::default()
+            },
+        );
+        throughput.observe_historical(
+            path,
+            &InfoTokenUsageEvent {
+                timestamp: "2026-08-28T00:00:050Z".to_string(),
+                profile: "profile-064".to_string(),
+                request: Some(64),
+                output_tokens: 1,
+                output_tokens_per_second: Some(64.0),
+                ..InfoTokenUsageEvent::default()
+            },
+        );
+
+        assert_eq!(throughput.streams.len(), OUTPUT_THROUGHPUT_MAX_STREAMS);
+        assert_eq!(
+            throughput.last_known_rates.len(),
+            OUTPUT_THROUGHPUT_MAX_STREAMS
+        );
+        assert_eq!(
+            throughput.last_event_keys.len(),
+            OUTPUT_THROUGHPUT_MAX_STREAMS
+        );
+        assert_eq!(
+            throughput.historical_rate_timestamps.len(),
+            OUTPUT_THROUGHPUT_MAX_STREAMS
+        );
+        assert_eq!(throughput.seen_observations.len(), 65);
+        assert!(!throughput.last_event_keys.contains_key("profile-000"));
+        assert!(
+            !throughput
+                .historical_rate_timestamps
+                .contains_key("profile-000")
+        );
+        assert!(
+            throughput
+                .last_known_rates
+                .keys()
+                .all(|key| throughput.streams.contains_key(key))
+        );
+        assert!(
+            throughput
+                .last_event_keys
+                .values()
+                .all(|key| throughput.streams.contains_key(key))
+        );
+        assert!(
+            throughput
+                .historical_rate_timestamps
+                .keys()
+                .all(|profile| throughput.last_event_keys.contains_key(profile))
+        );
+        assert_eq!(
+            throughput.display_rate_for_profile(Instant::now(), Some("profile-000")),
+            None
+        );
+        assert_eq!(
+            throughput.display_rate_for_profile(Instant::now(), Some("profile-064")),
+            Some(64.0)
+        );
+        assert_eq!(
+            throughput.display_rate_for_profile(Instant::now(), None),
+            Some(63.0)
+        );
     }
 }
