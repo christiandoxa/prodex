@@ -459,7 +459,7 @@ pub(super) fn validate_super_native_cli_preflight(args: &SuperArgs) -> Result<()
         return Ok(());
     }
     let mut command = Command::new(agy_bin());
-    command.arg("--version");
+    command.arg("--version").env_remove("CONTROL_PLANE_API_KEY");
     match crate::command_probe_output(&mut command, "Antigravity CLI version probe") {
         Ok(output) if output.status.success() => Ok(()),
         Ok(_) => bail!("native Antigravity CLI capability `agy` is unavailable"),

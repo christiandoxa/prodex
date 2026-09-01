@@ -61,7 +61,6 @@ struct OpenAiMcpRelay {
     request_target: String,
     mcp_target: String,
 }
-
 impl OpenAiMcpRelay {
     fn new(mcp_url: &PublicMcpEndpoint) -> Result<Self> {
         let mut parsed =
