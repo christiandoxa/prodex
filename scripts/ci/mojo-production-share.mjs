@@ -11,9 +11,9 @@ import { cargoTomlPath, parseCargoVersion, repoRoot } from "../npm/common.mjs";
 const manifestPath = path.join(repoRoot, "migration", "mojo-production-share.json");
 const COUNTING_RULES_VERSION = 1;
 const REQUIRED_BASELINE_SHA = "2531c7a345f1607a18aa926e204b4d02cc322167";
-const REQUIRED_RELEASE_TARGET = "0.421.0";
-const REQUIRED_MINIMUM_PERCENT = 10;
-const REQUIRED_TEMPORARY_RELEASE_FLOOR_PERCENT = 7;
+const REQUIRED_HISTORICAL_RELEASE_TARGET = "0.421.0";
+const REQUIRED_RELEASE_FLOOR_PERCENT = 7;
+const REQUIRED_PROJECT_TARGET_PERCENT = 10;
 const REQUIRED_PRODUCTION_BUILD_FEATURE = "mojo-core";
 const DEFAULT_SNAPSHOT_PATH = "migration/mojo-production-share-baseline-0.419.2.json";
 const EXCLUDED_COMPONENTS = /^(?:tests?|benches|examples|fixtures?|snapshots|generated|vendor|target|fuzz|test-support|bench_support|prodex-bench-support)$/iu;
@@ -81,14 +81,50 @@ export function validateManifestMetadata(manifest) {
   if (manifest.baseline_sha !== REQUIRED_BASELINE_SHA) {
     throw new Error(`broad production-share baseline must be ${REQUIRED_BASELINE_SHA}`);
   }
-  if (manifest.release_target !== REQUIRED_RELEASE_TARGET) {
-    throw new Error(`broad production-share release target must be ${REQUIRED_RELEASE_TARGET}`);
+  if (manifest.release_target !== REQUIRED_HISTORICAL_RELEASE_TARGET) {
+    throw new Error(`historical broad production-share release target must be ${REQUIRED_HISTORICAL_RELEASE_TARGET}`);
   }
   if (manifest.counting_rules_version !== COUNTING_RULES_VERSION) {
     throw new Error(`broad production-share counting rules must be ${COUNTING_RULES_VERSION}`);
   }
-  if (manifest.minimum_percent !== REQUIRED_MINIMUM_PERCENT) {
-    throw new Error(`broad production-share minimum must remain ${REQUIRED_MINIMUM_PERCENT}%`);
+  if (manifest.release_floor_percent !== REQUIRED_RELEASE_FLOOR_PERCENT) {
+    throw new Error(`broad production-share release floor must remain ${REQUIRED_RELEASE_FLOOR_PERCENT}%`);
+  }
+  if (manifest.project_target_percent !== REQUIRED_PROJECT_TARGET_PERCENT) {
+    throw new Error(`broad production-share project target must remain ${REQUIRED_PROJECT_TARGET_PERCENT}%`);
+  }
+  if (manifest.release_floor_percent >= manifest.project_target_percent) {
+    throw new Error("broad production-share release floor must be below project target");
+  }
+  const nonRegression = manifest.mojo_non_regression;
+  if (!nonRegression || typeof nonRegression !== "object" || Array.isArray(nonRegression)) {
+    throw new Error("Mojo production non-regression policy is required");
+  }
+  if (typeof nonRegression.baseline_sha !== "string" || !/^[0-9a-f]{40}$/u.test(nonRegression.baseline_sha)) {
+    throw new Error("Mojo production non-regression baseline must be a full commit SHA");
+  }
+  if (typeof nonRegression.baseline_source_inventory_sha256 !== "string" ||
+      !/^[0-9a-f]{64}$/u.test(nonRegression.baseline_source_inventory_sha256)) {
+    throw new Error("Mojo production non-regression baseline inventory digest must be a SHA-256");
+  }
+  if (!Number.isInteger(nonRegression.baseline_mojo_production_loc) ||
+      nonRegression.baseline_mojo_production_loc < 0) {
+    throw new Error("Mojo production non-regression baseline Mojo LOC must be non-negative");
+  }
+  if (!Array.isArray(nonRegression.approved_reductions)) {
+    throw new Error("Mojo production non-regression reductions must be an array");
+  }
+  const reductionPaths = new Set();
+  for (const reduction of nonRegression.approved_reductions) {
+    if (!reduction || typeof reduction !== "object" || Array.isArray(reduction) ||
+        typeof reduction.path !== "string" || typeof reduction.reason !== "string" ||
+        reduction.reason.trim() === "") {
+      throw new Error("Mojo production non-regression reductions need path and reason");
+    }
+    if (reductionPaths.has(reduction.path)) {
+      throw new Error(`duplicate Mojo production non-regression reduction ${reduction.path}`);
+    }
+    reductionPaths.add(reduction.path);
   }
   if (manifest.production_build_feature !== REQUIRED_PRODUCTION_BUILD_FEATURE) {
     throw new Error(
@@ -100,16 +136,17 @@ export function validateManifestMetadata(manifest) {
     if (!waiver || typeof waiver !== "object" || Array.isArray(waiver)) {
       throw new Error("temporary release waiver must be an object");
     }
-    if (waiver.release_target !== manifest.release_target || waiver.release_target !== REQUIRED_RELEASE_TARGET) {
+    if (waiver.release_target !== REQUIRED_HISTORICAL_RELEASE_TARGET) {
       throw new Error("temporary release waiver release target must be 0.421.0");
     }
     if (waiver.baseline_sha !== manifest.baseline_sha || waiver.baseline_sha !== REQUIRED_BASELINE_SHA) {
       throw new Error("temporary release waiver baseline SHA does not match the frozen baseline");
     }
-    if (waiver.temporary_release_floor_percent !== REQUIRED_TEMPORARY_RELEASE_FLOOR_PERCENT) {
+    if (waiver.temporary_release_floor_percent !== REQUIRED_RELEASE_FLOOR_PERCENT) {
       throw new Error("temporary release waiver floor must be exactly 7%");
     }
-    if (waiver.scope !== "0.421.0 only" || waiver.expiration !== "immediately after 0.421.0") {
+    if (waiver.scope !== "0.421.0 only" || waiver.expiration !== "immediately after 0.421.0" ||
+        waiver.status !== "expired") {
       throw new Error("temporary release waiver scope or expiration is invalid");
     }
     if (typeof waiver.reason !== "string" || waiver.reason.trim() === "") {
@@ -478,6 +515,40 @@ function countEntries(entries) {
   };
 }
 
+export function assessMojoProductionNonRegression(baseline, final, approvedReductions = []) {
+  const baselineMojoEntries = new Map(
+    baseline.entries.filter((entry) => entry.language === "mojo").map((entry) => [entry.path, entry]),
+  );
+  const finalReachable = new Set(final.reachable_mojo_sources);
+  const approvedPaths = new Set();
+  let approvedReductionLoc = 0;
+  for (const reduction of approvedReductions) {
+    assert(reduction && typeof reduction.path === "string" && typeof reduction.reason === "string" &&
+      reduction.reason.trim() !== "", "Mojo production non-regression reductions need path and reason");
+    assert(!approvedPaths.has(reduction.path),
+      `duplicate Mojo production non-regression reduction ${reduction.path}`);
+    const baselineEntry = baselineMojoEntries.get(reduction.path);
+    assert(baselineEntry && baseline.reachable_mojo_sources.includes(reduction.path),
+      `${reduction.path} is not a reachable Mojo source in the non-regression baseline`);
+    approvedPaths.add(reduction.path);
+    if (!finalReachable.has(reduction.path)) approvedReductionLoc += baselineEntry.loc;
+  }
+  const missingReachableSources = baseline.reachable_mojo_sources.filter((source) =>
+    !finalReachable.has(source) && !approvedPaths.has(source));
+  const requiredMojoProductionLoc = Math.max(0, baseline.mojo_production_loc - approvedReductionLoc);
+  const mojoProductionLocRegressed = final.mojo_production_loc < requiredMojoProductionLoc;
+  return {
+    approved_reduction_loc: approvedReductionLoc,
+    approved_reductions: approvedReductions,
+    baseline_mojo_production_loc: baseline.mojo_production_loc,
+    final_mojo_production_loc: final.mojo_production_loc,
+    missing_reachable_mojo_sources: missingReachableSources,
+    mojo_production_loc_regressed: mojoProductionLocRegressed,
+    required_mojo_production_loc: requiredMojoProductionLoc,
+    met: missingReachableSources.length === 0 && !mojoProductionLocRegressed,
+  };
+}
+
 export function productionInventoryAtRevision(revision) {
   const reachable = reachableMojoSources(revision);
   const entries = [
@@ -529,17 +600,35 @@ export function calculateProductionShare(manifest, baselineRevision = manifest.b
   const final = productionInventoryAtRevision(releaseRevision);
   const snapshot = readSnapshot(manifest);
   validateFrozenBaseline(manifest, baselineRevision, baseline, snapshot);
-  const required = requiredMojoLoc(final.rust_production_loc, manifest.minimum_percent);
+  const nonRegressionBaseline = productionInventoryAtRevision(manifest.mojo_non_regression.baseline_sha);
+  assert.equal(
+    nonRegressionBaseline.source_inventory_sha256,
+    manifest.mojo_non_regression.baseline_source_inventory_sha256,
+    "Mojo production non-regression baseline inventory changed",
+  );
+  assert.equal(
+    nonRegressionBaseline.mojo_production_loc,
+    manifest.mojo_non_regression.baseline_mojo_production_loc,
+    "Mojo production non-regression baseline Mojo LOC changed",
+  );
+  const nonRegression = assessMojoProductionNonRegression(
+    nonRegressionBaseline,
+    final,
+    manifest.mojo_non_regression.approved_reductions,
+  );
+  const requiredAtReleaseFloor = requiredMojoLoc(final.rust_production_loc, manifest.release_floor_percent);
+  const requiredAtProjectTarget = requiredMojoLoc(final.rust_production_loc, manifest.project_target_percent);
   const currentProdexVersion = parseCargoVersion(fs.readFileSync(cargoTomlPath, "utf8"));
   const waiver = manifest.temporary_release_waiver;
-  const normalRequirementMet = final.mojo_production_loc * 100 >=
-    manifest.minimum_percent * final.total_production_loc;
-  const temporaryWaiverApplicable = waiver?.release_target === currentProdexVersion;
-  const temporaryReleaseFloorPercent = temporaryWaiverApplicable
-    ? waiver.temporary_release_floor_percent
-    : null;
-  const releaseRequirementMet = normalRequirementMet || temporaryWaiverApplicable &&
-    final.mojo_production_loc * 100 >= temporaryReleaseFloorPercent * final.total_production_loc;
+  const releaseFloorMet = productionShareMeetsReleaseFloor({
+    final,
+    release_floor_percent: manifest.release_floor_percent,
+  });
+  const projectTargetMet = productionShareMeetsProjectTarget({
+    final,
+    project_target_percent: manifest.project_target_percent,
+  });
+  const releaseRequirementMet = releaseFloorMet && nonRegression.met;
   return {
     baseline: {
       broad_mojo_percent: baseline.mojo_percent,
@@ -556,21 +645,43 @@ export function calculateProductionShare(manifest, baselineRevision = manifest.b
       source_inventory_sha256: final.source_inventory_sha256,
     },
     current_prodex_version: currentProdexVersion,
-    minimum_percent: manifest.minimum_percent,
-    project_target_percent: manifest.minimum_percent,
-    temporary_release_floor_percent: temporaryReleaseFloorPercent,
-    temporary_release_waiver_applicable: temporaryWaiverApplicable,
-    temporary_release_waiver_scope: temporaryWaiverApplicable ? waiver.scope : null,
-    temporary_release_waiver_reason: temporaryWaiverApplicable ? waiver.reason : null,
-    normal_requirement_met: normalRequirementMet,
+    release_floor_percent: manifest.release_floor_percent,
+    release_floor_met: releaseFloorMet,
+    release_floor_status: releaseFloorMet ? "PASS" : "FAIL",
+    project_target_percent: manifest.project_target_percent,
+    project_target_met: projectTargetMet,
+    project_target_status: projectTargetMet ? "MET" : "NOT_YET_MET",
+    mojo_non_regression_baseline_sha: manifest.mojo_non_regression.baseline_sha,
+    mojo_non_regression_baseline_source_inventory_sha256: nonRegressionBaseline.source_inventory_sha256,
+    mojo_non_regression_baseline_mojo_production_loc: nonRegressionBaseline.mojo_production_loc,
+    mojo_non_regression: nonRegression,
+    mojo_non_regression_met: nonRegression.met,
+    mojo_non_regression_status: nonRegression.met ? "PASS" : "FAIL",
+    historical_temporary_release_waiver: waiver
+      ? {
+          release_target: waiver.release_target,
+          baseline_sha: waiver.baseline_sha,
+          floor_percent: waiver.temporary_release_floor_percent,
+          scope: waiver.scope,
+          expiration: waiver.expiration,
+          status: waiver.status.toUpperCase(),
+        }
+      : null,
+    temporary_release_floor_percent: null,
+    temporary_release_waiver_applicable: false,
+    temporary_release_waiver_scope: null,
+    temporary_release_waiver_reason: null,
+    normal_requirement_met: projectTargetMet,
     release_requirement_met: releaseRequirementMet,
-    release_status: normalRequirementMet
+    release_status: releaseRequirementMet
       ? "PASS"
-      : releaseRequirementMet
-        ? "PASS_WITH_EXPLICIT_0_421_0_WAIVER"
-        : "FAIL",
-    required_mojo_loc_at_final_rust_volume: required,
-    additional_mojo_loc_needed_at_final_rust_volume: Math.max(0, required - final.mojo_production_loc),
+      : "FAIL",
+    required_mojo_loc_at_release_floor: requiredAtReleaseFloor,
+    additional_mojo_loc_needed_at_release_floor: Math.max(0, requiredAtReleaseFloor - final.mojo_production_loc),
+    required_mojo_loc_at_project_target: requiredAtProjectTarget,
+    additional_mojo_loc_needed_at_project_target: Math.max(0, requiredAtProjectTarget - final.mojo_production_loc),
+    required_mojo_loc_at_final_rust_volume: requiredAtProjectTarget,
+    additional_mojo_loc_needed_at_final_rust_volume: Math.max(0, requiredAtProjectTarget - final.mojo_production_loc),
     counting_rules_version: COUNTING_RULES_VERSION,
     baseline_tree: snapshot.baseline_tree,
     baseline_authoritative_operations: snapshot.authoritative_operations ?? [],
@@ -581,18 +692,29 @@ export function calculateProductionShare(manifest, baselineRevision = manifest.b
 }
 
 export function productionShareMeetsMinimum(result) {
-  return result.final.broad_mojo_production_loc * 100 >=
-    result.minimum_percent * result.final.broad_total_production_loc;
+  return productionShareMeetsProjectTarget(result);
+}
+
+function productionShareAtLeast(result, threshold) {
+  const mojoLoc = result.final.broad_mojo_production_loc ?? result.final.mojo_production_loc;
+  const totalLoc = result.final.broad_total_production_loc ?? result.final.total_production_loc;
+  return mojoLoc * 100 >= threshold * totalLoc;
+}
+
+export function productionShareMeetsReleaseFloor(result) {
+  return productionShareAtLeast(result, result.release_floor_percent ?? REQUIRED_RELEASE_FLOOR_PERCENT);
+}
+
+export function productionShareMeetsProjectTarget(result) {
+  return productionShareAtLeast(
+    result,
+    result.project_target_percent ?? result.minimum_percent ?? REQUIRED_PROJECT_TARGET_PERCENT,
+  );
 }
 
 export function productionShareMeetsReleaseRequirement(result) {
-  if (productionShareMeetsMinimum(result)) return true;
-  return result.temporary_release_waiver_applicable === true &&
-    result.current_prodex_version === REQUIRED_RELEASE_TARGET &&
-    result.temporary_release_floor_percent === REQUIRED_TEMPORARY_RELEASE_FLOOR_PERCENT &&
-    result.temporary_release_waiver_scope === "0.421.0 only" &&
-    result.final.broad_mojo_production_loc * 100 >=
-      result.temporary_release_floor_percent * result.final.broad_total_production_loc;
+  return productionShareMeetsReleaseFloor(result) &&
+    (result.mojo_non_regression_met ?? result.mojo_non_regression?.met ?? true);
 }
 
 function writeSnapshot(manifest, baselineRevision) {
@@ -642,24 +764,37 @@ function writeSnapshot(manifest, baselineRevision) {
 }
 
 function selfTest() {
-  assert.doesNotThrow(() => validateManifestMetadata({
+  const policy = {
     schema_version: 1,
     baseline_sha: REQUIRED_BASELINE_SHA,
-    release_target: REQUIRED_RELEASE_TARGET,
+    release_target: REQUIRED_HISTORICAL_RELEASE_TARGET,
     counting_rules_version: COUNTING_RULES_VERSION,
-    minimum_percent: REQUIRED_MINIMUM_PERCENT,
+    release_floor_percent: REQUIRED_RELEASE_FLOOR_PERCENT,
+    project_target_percent: REQUIRED_PROJECT_TARGET_PERCENT,
+    mojo_non_regression: {
+      baseline_sha: "43768659073cc1ab5c5686d3d58f2af68eebdef2",
+      baseline_source_inventory_sha256: "0".repeat(64),
+      baseline_mojo_production_loc: 0,
+      approved_reductions: [],
+    },
     production_build_feature: REQUIRED_PRODUCTION_BUILD_FEATURE,
+  };
+  assert.doesNotThrow(() => validateManifestMetadata({
+    ...policy,
   }));
   assert.throws(
     () => validateManifestMetadata({
-      schema_version: 1,
-      baseline_sha: REQUIRED_BASELINE_SHA,
-      release_target: REQUIRED_RELEASE_TARGET,
-      counting_rules_version: COUNTING_RULES_VERSION,
-      minimum_percent: REQUIRED_MINIMUM_PERCENT - 1,
-      production_build_feature: REQUIRED_PRODUCTION_BUILD_FEATURE,
+      ...policy,
+      release_floor_percent: REQUIRED_RELEASE_FLOOR_PERCENT - 0.01,
     }),
-    /minimum must remain 10%/u,
+    /release floor must remain 7%/u,
+  );
+  assert.throws(
+    () => validateManifestMetadata({
+      ...policy,
+      project_target_percent: REQUIRED_PROJECT_TARGET_PERCENT - 0.01,
+    }),
+    /project target must remain 10%/u,
   );
   assert.deepEqual(
     selectedMojoSourcesFromBuild([
@@ -700,8 +835,27 @@ function selfTest() {
   assert.equal(isProductionRustPath("migration/abi_probe.rs"), false);
   assert.equal(requiredMojoLoc(90, 10), 10);
   assert.equal(requiredMojoLoc(91, 10), 11);
-  assert.equal(productionShareMeetsMinimum({ final: { broad_mojo_production_loc: 999, broad_total_production_loc: 10_000 }, minimum_percent: 10 }), false);
-  assert.equal(productionShareMeetsMinimum({ final: { broad_mojo_production_loc: 1_000, broad_total_production_loc: 10_000 }, minimum_percent: 10 }), true);
+  const share = (mojo) => ({
+    final: { broad_mojo_production_loc: mojo, broad_total_production_loc: 10_000 },
+    release_floor_percent: 7,
+    project_target_percent: 10,
+    mojo_non_regression_met: true,
+  });
+  assert.equal(productionShareMeetsReleaseFloor(share(699)), false);
+  assert.equal(productionShareMeetsReleaseFloor(share(700)), true);
+  assert.equal(productionShareMeetsProjectTarget(share(999)), false);
+  assert.equal(productionShareMeetsProjectTarget(share(1_000)), true);
+  assert.equal(productionShareMeetsReleaseRequirement(share(700)), true);
+  assert.equal(productionShareMeetsReleaseRequirement({ ...share(700), mojo_non_regression_met: false }), false);
+  const baseline = {
+    entries: [{ language: "mojo", path: "mojo/prodex_core/example.mojo", loc: 100 }],
+    mojo_production_loc: 100,
+    reachable_mojo_sources: ["mojo/prodex_core/example.mojo"],
+  };
+  assert.equal(assessMojoProductionNonRegression(baseline, {
+    mojo_production_loc: 100,
+    reachable_mojo_sources: ["mojo/prodex_core/replacement.mojo"],
+  }).met, false);
 }
 
 async function main() {
@@ -720,11 +874,15 @@ async function main() {
   }
   const result = calculateProductionShare(manifest, baseline, args.releaseSha);
   if (args.check && !productionShareMeetsReleaseRequirement(result)) {
+    if (!result.release_floor_met) {
+      throw new Error(
+        `Mojo production implementation share is ${result.final.broad_mojo_percent.toFixed(2)}%; ` +
+        `at least ${result.release_floor_percent.toFixed(2)}% release floor is required`,
+      );
+    }
     throw new Error(
-      `Mojo production implementation share is ${result.final.broad_mojo_percent.toFixed(2)}%; ` +
-      `at least ${(result.temporary_release_waiver_applicable
-        ? result.temporary_release_floor_percent
-        : result.minimum_percent).toFixed(2)}% is required for ${result.current_prodex_version}`,
+      `Mojo production ownership regressed; missing ${result.mojo_non_regression.missing_reachable_mojo_sources.length} ` +
+      `baseline reachable source(s) or below ${result.mojo_non_regression.required_mojo_production_loc} Mojo LOC`,
     );
   }
   if (args.json) {
@@ -737,15 +895,14 @@ async function main() {
     `Mojo: ${result.final.broad_mojo_production_loc.toLocaleString("en-US")} LOC`,
     `Total: ${result.final.broad_total_production_loc.toLocaleString("en-US")} LOC`,
     `Mojo share: ${result.final.broad_mojo_percent.toFixed(2)}%`,
+    `Release floor: >=${result.release_floor_percent.toFixed(2)}%`,
+    `Release floor status: ${result.release_floor_status}`,
     `Project target: >=${result.project_target_percent.toFixed(2)}%`,
-    ...(result.temporary_release_waiver_applicable
-      ? [
-          `0.421.0 explicit release waiver floor: >=${result.temporary_release_floor_percent.toFixed(2)}%`,
-          `Status: ${result.release_status}`,
-          "10% target deferred to the next release",
-        ]
-      : [`Status: ${result.release_status}`]),
-    `Additional Mojo LOC needed at current Rust volume: ${result.additional_mojo_loc_needed_at_final_rust_volume.toLocaleString("en-US")}`,
+    `Project target status: ${result.project_target_status.replaceAll("_", " ")}`,
+    `Mojo ownership non-regression: ${result.mojo_non_regression_status}`,
+    `Historical 0.421.0 waiver: ${result.historical_temporary_release_waiver?.status ?? "NONE"}`,
+    `Status: ${result.release_status}`,
+    `Additional Mojo LOC needed at project target at current Rust volume: ${result.additional_mojo_loc_needed_at_project_target.toLocaleString("en-US")}`,
   ].join("\n") + "\n");
 }
 

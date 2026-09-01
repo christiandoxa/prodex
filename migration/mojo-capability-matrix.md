@@ -93,6 +93,21 @@ Rust consumers. The current production feature set also includes provider constr
 policy numeric validation, and runtime tuning defaults; these reuse shared-core wiring, with one
 explicit `mojo-provider-constraints` feature for the provider-core owner.
 
+## Production-share governance
+
+`migration/mojo-production-share.json` and
+`node scripts/ci/mojo-production-share.mjs` retain one canonical production counter: only Rust
+production paths and Mojo sources reachable from the `mojo-core` build roots contribute to the
+denominator. The current audited tree measures 26,420 reachable Mojo LOC out of 366,913 total
+production LOC (`7.200617040006759%`).
+
+The general release floor is `7.0%`; the long-term project target remains `10.0%`. The report
+exposes separate floor and target fields/statuses, and `--check` requires the floor plus
+non-regression of the pinned reachable-Mojo baseline. A missing or newly unselected baseline
+source fails unless an explicit, reasoned production removal/rearchitecture record is added to
+the canonical policy. The historical `0.421.0` quantity waiver remains scoped and expired; it
+has no effect on current releases.
+
 ## 2026-08-21 promotion evidence
 
 | Kernel | Boundary shape | Maximum / tags | Float or strings | Rust retained outside `MOJO` |
