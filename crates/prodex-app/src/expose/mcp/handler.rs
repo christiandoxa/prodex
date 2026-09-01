@@ -74,6 +74,7 @@ impl ExposeMcpEndpoint {
     ) -> Arc<Self> {
         Arc::new(Self {
             capability_digest: expose_token_digest(capability),
+            openai_relay: Mutex::new(None),
             run_manager,
             server_name: format!("Prodex Super — {display_name}"),
             workspace_name,
@@ -91,6 +92,31 @@ impl ExposeMcpEndpoint {
             return false;
         };
         expose_digest_eq(&self.capability_digest, &expose_token_digest(capability))
+    }
+
+    pub(in crate::expose) fn install_openai_relay(&self, mcp_url: &str) -> anyhow::Result<String> {
+        let relay = super::OpenAiMcpRelay::new(mcp_url)?;
+        let endpoint = relay.endpoint.clone();
+        let mut slot = self
+            .openai_relay
+            .lock()
+            .map_err(|_| anyhow::anyhow!("OpenAI MCP relay state unavailable"))?;
+        *slot = Some(relay);
+        Ok(endpoint)
+    }
+
+    pub(in crate::expose) fn openai_relay_target(&self, request_target: &str) -> Option<String> {
+        let relay = self.openai_relay.lock().ok()?;
+        relay
+            .as_ref()
+            .filter(|relay| relay.request_target == request_target)
+            .map(|relay| relay.mcp_target.clone())
+    }
+
+    pub(in crate::expose) fn clear_openai_relay(&self) {
+        if let Ok(mut relay) = self.openai_relay.lock() {
+            *relay = None;
+        }
     }
 
     pub(super) fn handle(&self, request: ExposeHttpRequest, host: &str) {

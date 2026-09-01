@@ -16,6 +16,12 @@ pub(super) fn handle_expose_request(request: ExposeHttpRequest, shared: &Arc<Exp
     let host = expose_single_header(&request, "Host")
         .map(str::to_ascii_lowercase)
         .unwrap_or_default();
+    let mut request = request;
+    if let Some(mcp) = shared.mcp.as_ref()
+        && let Some(target) = mcp.openai_relay_target(request.target())
+    {
+        request.rewrite_target(target);
+    }
     let path = request.target().to_string();
     if shared.is_mcp_only_host(&host) || request.target().starts_with("/pdx/v1/") {
         handle_mcp_route(request, shared, &host);

@@ -24,6 +24,10 @@ impl ExposeHttpRequest {
         &self.request.target
     }
 
+    pub(super) fn rewrite_target(&mut self, target: String) {
+        self.request.target = target;
+    }
+
     pub(super) fn body(&self) -> &[u8] {
         &self.request.body
     }

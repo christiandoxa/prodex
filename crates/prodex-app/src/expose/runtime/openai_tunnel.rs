@@ -91,7 +91,6 @@ struct OpenAiTunnelFiles {
     config: PathBuf,
     mcp_url: PathBuf,
     health_url: PathBuf,
-    log: PathBuf,
     cleaned: bool,
 }
 
@@ -122,13 +121,12 @@ impl OpenAiTunnelFiles {
             config: directory.join("config.yaml"),
             mcp_url: directory.join("mcp-url"),
             health_url: directory.join("health-url"),
-            log: directory.join("tunnel-client.log"),
             directory,
             cleaned: false,
         };
         secret_store::ensure_private_directory(&files.directory)
             .context("failed to secure private OpenAI tunnel directory")?;
-        for path in [&files.config, &files.mcp_url, &files.health_url, &files.log] {
+        for path in [&files.config, &files.mcp_url, &files.health_url] {
             if path
                 .to_str()
                 .is_none_or(|value| value.chars().any(char::is_control))
@@ -215,14 +213,14 @@ pub(in crate::expose) fn openai_tunnel_client_command() -> Result<Command> {
 }
 
 pub(in crate::expose) fn start_openai_tunnel(
-    local_mcp_url: &str,
+    client_mcp_url: &str,
     credentials: OpenAiTunnelCredentials,
     client_version: String,
     cancelled: &dyn Fn() -> bool,
 ) -> Result<OpenAiTunnel> {
     let tunnel_id = credentials.tunnel_id().to_owned();
     validate_openai_tunnel_id(&tunnel_id)?;
-    let mut files = OpenAiTunnelFiles::create(local_mcp_url, &tunnel_id)?;
+    let mut files = OpenAiTunnelFiles::create(client_mcp_url, &tunnel_id)?;
     let config_path = files
         .config
         .to_str()
@@ -241,8 +239,9 @@ pub(in crate::expose) fn start_openai_tunnel(
         .args(["--health.listen-addr", "127.0.0.1:0"])
         .args(["--health.url-file", health_url_path])
         // Pinned tunnel-client can log resolved MCP bearer URLs at ERROR.
-        // Keep its default output disconnected instead of retaining it in a file.
+        // Keep its output disconnected; the caller supplies an opaque relay URL.
         .args(["--log.level", "warn"])
+        .args(["--log.format", "struct-text"])
         .env("CONTROL_PLANE_API_KEY", credentials.api_key())
         .stdin(Stdio::null())
         .stdout(Stdio::null())
@@ -262,10 +261,17 @@ pub(in crate::expose) fn start_openai_tunnel(
             return Err(error);
         }
     };
-    if let Some(status) = child
-        .try_wait()
-        .context("failed to inspect tunnel-client after readiness")?
-    {
+    let status = match child.try_wait() {
+        Ok(status) => status,
+        Err(error) => {
+            stop_child(&mut child);
+            #[cfg(windows)]
+            drop(process_job);
+            files.cleanup();
+            return Err(error).context("failed to inspect tunnel-client after readiness");
+        }
+    };
+    if let Some(status) = status {
         stop_child(&mut child);
         #[cfg(windows)]
         drop(process_job);

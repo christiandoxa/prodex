@@ -7,6 +7,7 @@ use anyhow::{Context, Result};
 use base64::Engine;
 use prodex_cli::SuperArgs;
 use std::fmt;
+use std::net::IpAddr;
 use std::sync::atomic::Ordering;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -46,12 +47,57 @@ const MCP_ERROR_HEADER_MISMATCH: i64 = -32020;
 
 pub(super) struct ExposeMcpEndpoint {
     capability_digest: ExposeDigest,
+    openai_relay: Mutex<Option<OpenAiMcpRelay>>,
     pub(super) run_manager: ExposeRunManager,
     pub(super) server_name: String,
     pub(super) workspace_name: String,
     pub(super) instance_id: String,
     pub(super) defaults: SuperArgs,
     rate: Mutex<McpRateLimit>,
+}
+
+struct OpenAiMcpRelay {
+    endpoint: String,
+    request_target: String,
+    mcp_target: String,
+}
+
+impl OpenAiMcpRelay {
+    fn new(mcp_url: &str) -> Result<Self> {
+        let mut parsed = url::Url::parse(mcp_url).context("OpenAI MCP relay target is invalid")?;
+        let host = parsed
+            .host_str()
+            .context("OpenAI MCP relay target is invalid")?;
+        let ip: IpAddr = host
+            .parse()
+            .map_err(|_| anyhow::anyhow!("OpenAI MCP relay target is invalid"))?;
+        if parsed.scheme() != "http"
+            || !ip.is_loopback()
+            || parsed.port().is_none_or(|port| port == 0)
+            || !parsed.username().is_empty()
+            || parsed.password().is_some()
+            || parsed.query().is_some()
+            || parsed.fragment().is_some()
+            || parsed.path().is_empty()
+            || parsed.path().chars().any(|character| {
+                character.is_control() || character.is_whitespace() || !character.is_ascii()
+            })
+        {
+            anyhow::bail!("OpenAI MCP relay target is invalid")
+        }
+        let mcp_target = parsed.path().to_owned();
+        let token =
+            super::session::expose_random_token().context("failed to create OpenAI MCP relay")?;
+        let request_target = format!("/__prodex_openai_mcp_relay/{}/mcp", token);
+        parsed.set_path(&request_target);
+        parsed.set_query(None);
+        parsed.set_fragment(None);
+        Ok(Self {
+            endpoint: parsed.to_string(),
+            request_target,
+            mcp_target,
+        })
+    }
 }
 
 impl fmt::Debug for ExposeMcpEndpoint {

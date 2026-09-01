@@ -1,4 +1,4 @@
-use super::mcp::ExposeMcpEndpoint;
+use super::mcp::{ExposeMcpEndpoint, PublicMcpEndpoint};
 use super::run_manager::{ExposeRunManager, ExposeRunState};
 use super::runtime::{ExposeHttpServer, ExposePty, ExposeShared};
 use super::session::ExposeSessionStore;
@@ -108,6 +108,37 @@ pub(super) fn expose_mcp_request(
             body.len()
         ),
     )
+}
+
+#[test]
+fn openai_opaque_relay_uses_existing_mcp_boundary() {
+    let capability = "capability-secret-for-openai-relay";
+    let (listen_addr, shared, mut server) = expose_start_mcp_test_server(
+        capability,
+        "pdxi_openai_relay",
+        "openai-relay",
+        "unused.trycloudflare.com",
+    );
+    let mcp = Arc::clone(shared.mcp.as_ref().unwrap());
+    let actual = PublicMcpEndpoint::new(&format!("http://{listen_addr}"), capability).unwrap();
+    let opaque = mcp.install_openai_relay(actual.as_str()).unwrap();
+    assert!(!opaque.contains(actual.as_str()));
+    assert!(!opaque.contains(capability));
+    let relay_path = url::Url::parse(&opaque).unwrap().path().to_string();
+    let response = expose_mcp_request(
+        listen_addr,
+        &listen_addr.to_string(),
+        &relay_path,
+        r#"{"jsonrpc":"2.0","id":1,"method":"ping","params":{}}"#,
+        "",
+    );
+    assert!(response.starts_with("HTTP/1.1 200"));
+    assert!(response.contains("\"result\""));
+    mcp.clear_openai_relay();
+    assert!(mcp.openai_relay_target(&relay_path).is_none());
+    server.shutdown();
+    shared.pty.shutdown();
+    mcp.run_manager.shutdown();
 }
 
 #[test]
