@@ -411,4 +411,10 @@ fn sse_tap_state_marks_generation_timing_only_after_output_begins() {
             generation_ms: _,
         }]
     ));
+    let [RuntimeSseTapEffect::LogTokenUsageWithGeneration { generation_ms, .. }] =
+        effects.as_slice()
+    else {
+        panic!("completion should emit final usage with generation timing");
+    };
+    assert!(*generation_ms > 0);
 }

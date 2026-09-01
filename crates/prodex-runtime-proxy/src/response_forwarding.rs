@@ -195,6 +195,11 @@ pub fn runtime_response_event_is_generation_start(event_type: Option<&str>) -> b
     )
 }
 
+/// Measures elapsed generation time with a positive millisecond floor.
+pub fn runtime_generation_elapsed_ms(started_at: Option<Instant>) -> Option<u64> {
+    started_at.and_then(|started_at| started_at.elapsed().as_millis().max(1).try_into().ok())
+}
+
 const RUNTIME_LIVE_USAGE_LOG_INTERVAL: Duration = Duration::from_millis(250);
 
 /// Throttles cumulative output-token snapshots before logging them for live viewers.
@@ -333,13 +338,7 @@ impl RuntimeSseTapState {
             self.generation_started_at = Some(Instant::now());
         }
         let generation_ms = (event_type == Some("response.completed"))
-            .then(|| {
-                self.generation_started_at?
-                    .elapsed()
-                    .as_millis()
-                    .try_into()
-                    .ok()
-            })
+            .then(|| runtime_generation_elapsed_ms(self.generation_started_at))
             .flatten();
         if runtime_token_usage_event_is_live(event_type, event.token_usage)
             && let Some(token_usage) = event.token_usage

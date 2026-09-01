@@ -272,6 +272,7 @@ impl RuntimeWebsocketResponseLoop<'_> {
         self.mark_text_progress()?;
         let stream_payload = runtime_websocket_stream_payload_from_text(&text);
         let inspected = self.inspect_text(&text)?;
+        self.observe_generation_start(inspected.event_type.as_deref());
         if let Some(attempt) = self.retry_attempt(&inspected, &text) {
             return Ok(RuntimeWebsocketTextResult::Attempt(attempt));
         }
@@ -470,19 +471,8 @@ impl RuntimeWebsocketResponseLoop<'_> {
         inspected: &runtime_proxy_crate::RuntimeInspectedWebsocketTextFrame,
     ) -> Result<bool> {
         let event_type = inspected.event_type.as_deref();
-        if self.generation_started_at.is_none()
-            && runtime_proxy_crate::runtime_response_event_is_generation_start(event_type)
-        {
-            self.generation_started_at = Some(Instant::now());
-        }
         let generation_ms = (event_type == Some("response.completed"))
-            .then(|| {
-                self.generation_started_at?
-                    .elapsed()
-                    .as_millis()
-                    .try_into()
-                    .ok()
-            })
+            .then(|| runtime_proxy_crate::runtime_generation_elapsed_ms(self.generation_started_at))
             .flatten();
         if !inspected.precommit_hold {
             self.committed_response_ids
@@ -557,6 +547,14 @@ impl RuntimeWebsocketResponseLoop<'_> {
             );
         }
         Ok(committed_previous_response_not_found)
+    }
+
+    fn observe_generation_start(&mut self, event_type: Option<&str>) {
+        if self.generation_started_at.is_none()
+            && runtime_proxy_crate::runtime_response_event_is_generation_start(event_type)
+        {
+            self.generation_started_at = Some(Instant::now());
+        }
     }
 
     fn log_continuation_trace(
