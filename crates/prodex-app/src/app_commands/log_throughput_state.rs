@@ -256,13 +256,15 @@ impl OutputThroughput {
             profile: event.profile.clone(),
             request: event.request,
         };
+        {
+            let stream = self.stream(&key);
+            stream.active = false;
+            stream.last_known_rate = Some(rate);
+        }
         let global_latest = self
             .historical_rate_timestamp
             .as_deref()
             .is_none_or(|timestamp| timestamp <= event.timestamp.as_str());
-        let stream = self.stream(&key);
-        stream.active = false;
-        stream.last_known_rate = Some(rate);
         self.remember_observation(output_throughput_observation(event), log_path);
         self.last_known_rates.insert(key.clone(), rate);
         self.last_event_keys
@@ -542,7 +544,7 @@ mod tests {
         throughput.observe_historical(
             path,
             &InfoTokenUsageEvent {
-                timestamp: "2026-08-28T00:00:050Z".to_string(),
+                timestamp: "2026-08-28T00:00:090Z".to_string(),
                 profile: "profile-064".to_string(),
                 request: Some(64),
                 output_tokens: 1,
@@ -599,7 +601,7 @@ mod tests {
         );
         assert_eq!(
             throughput.display_rate_for_profile(Instant::now(), None),
-            Some(63.0)
+            Some(64.0)
         );
     }
 }
