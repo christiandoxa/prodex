@@ -3,12 +3,11 @@ pub(super) use self::render::log_snapshot_items;
 pub(super) use self::render::log_stream_tui_text;
 use super::{
     FollowedLog, FollowedLogPaths, LOG_SNAPSHOT_TAIL_BYTES, LiveRuntimeLogSource, LogLoadAggregate,
-    LogStreamItem, TranscriptEvent, collect_new_runtime_log_stream_items,
+    LogStreamItem, TranscriptEvent, collect_live_log_items, collect_new_runtime_log_stream_items,
     collect_new_runtime_log_stream_items_for_tui_with_throughput, collect_new_transcript_events,
-    collect_runtime_log_line, is_routine_load_event, latest_transcript_event,
-    local_token_usage_event, print_log_stream_item, print_token_usage_event,
-    print_transcript_event, print_upstream_payload_event, recent_session_log_paths,
-    retain_followed_logs,
+    is_routine_load_event, latest_transcript_event, local_token_usage_event, print_log_stream_item,
+    print_token_usage_event, print_transcript_event, print_upstream_payload_event,
+    recent_session_log_paths, retain_followed_logs,
 };
 use crate::app_commands::collect_recent_runtime_log_paths;
 use crate::app_commands::log_tui::{
@@ -269,7 +268,7 @@ fn read_token_usage_events_tick_with_live(
     session_paths: &mut FollowedLogPaths,
     live_source: &mut Option<LiveRuntimeLogSource>,
 ) -> Result<()> {
-    for event in live_log_items(live_source, true, None)? {
+    for event in collect_live_log_items(live_source, true, None)? {
         print_log_stream_item(&event, json)?;
     }
     let current_runtime_paths =
@@ -322,7 +321,7 @@ fn initial_log_stream_items_with_live(
     if let Some(event) = token_usage {
         push_log_stream_item(&mut items, LogStreamItem::TokenUsage(event));
     }
-    for event in live_log_items(live_source, true, None)? {
+    for event in collect_live_log_items(live_source, true, None)? {
         push_log_stream_item(&mut items, event);
     }
     Ok(items)
@@ -380,7 +379,7 @@ fn collect_log_stream_items_with_live(
     throughput: &mut OutputThroughput,
     live_source: &mut Option<LiveRuntimeLogSource>,
 ) -> Result<()> {
-    for event in live_log_items(live_source, true, Some(throughput))? {
+    for event in collect_live_log_items(live_source, true, Some(throughput))? {
         push_log_stream_item(items, event);
     }
     let current_runtime_paths =
@@ -410,27 +409,6 @@ fn collect_log_stream_items_with_live(
         }
     }
     Ok(())
-}
-
-fn live_log_items(
-    live_source: &mut Option<LiveRuntimeLogSource>,
-    include_operational_insights: bool,
-    mut throughput: Option<&mut OutputThroughput>,
-) -> Result<Vec<LogStreamItem>> {
-    let Some(live_source) = live_source.as_mut() else {
-        return Ok(Vec::new());
-    };
-    let mut items = Vec::new();
-    for (path, line) in live_source.poll() {
-        items.extend(collect_runtime_log_line(
-            &path,
-            &line,
-            include_operational_insights,
-            throughput.as_deref_mut(),
-            true,
-        )?);
-    }
-    Ok(items)
 }
 
 fn update_log_stream_header(
