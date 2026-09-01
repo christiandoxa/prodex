@@ -2,49 +2,53 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
-## 0.422.0 - 2026-08-31
+## 0.423.0 - 2026-09-01
 
 ### Misc
 
-- Support Python tunnel fixtures on Windows (`3902174`)
-- Invoke Windows tunnel fixture through cmd (`003439b`)
-- Execute Windows tunnel fixtures directly (`a3550d1`)
-- Split operational stream parsing (`46212a2`)
-- Contain existing tunnel jobs on Windows (`af3bc42`)
-- Add connection modes and signal-rich status (`d30e684`)
-# Prodex 0.422.0
+- Resolve release CI blockers (`392aa3a`)
+- Ship 0.423.0 stability train (`0862b70`)
+# Prodex 0.423.0
 
 ## New Features
 
-- Added a safe interactive `prodex s expose` connection picker. Local-only
-  mode is the default, with explicit Cloudflare Quick Tunnel, Existing
-  Cloudflare Tunnel, and OpenAI Secure MCP Tunnel choices.
-- Added explicit Cloudflare Quick/Existing and OpenAI tunnel-provider values,
-  including supported Cloudflare config and token-file references without
-  placing tunnel secrets in argv or status output.
-- Added complete display-width-aware wrapping and vertical scrolling for long
-  Expose URLs, hostnames, and tunnel identifiers in narrow or resized
-  terminals.
-- Added semantic coalescing of repeated low-signal profile-load observations
-  in the human log-stream TUI while preserving raw JSON observations and
-  occurrence/run counts.
+- `prodex ping openai` probes every configured OpenAI profile independently
+  through the normal application request path and reports typed per-profile
+  results without aborting on the first failure.
+- Routes live runtime and upstream diagnostics through a bounded authenticated
+  runtime-broker window without requiring a perpetual raw telemetry journal.
 
 ## Bug Fixes
 
-- Preserved `prodex s expose --tunnel` as the Cloudflare Quick Tunnel path and
-  independently validates its local MCP, public MCP, local browser, and
-  public browser routes before reporting readiness.
-- Kept Quick Tunnel configuration isolated and separate from existing
-  user-managed Cloudflare Tunnel configuration, with bounded transport and
-  cleanup behavior.
-- Fixed Windows test-process launcher compatibility for Cloudflare tunnel
-  fixtures and retained process-job ownership in the Cloudflare runtime.
+- Automatically continues safe pre-commit OpenAI requests through the remaining
+  eligible profile pool after authoritative account usage exhaustion, while
+  keeping transient overload and generic rate-limit failures distinct.
+- Restores quota/reset/throughput priority in the default log header and
+  removes routine scheduler-load rows from the primary timeline.
+- Keeps Expose local, Cloudflare, public Browser/MCP, and OpenAI Secure MCP
+  Tunnel readiness states distinct, including an explicit unverified
+  ChatGPT-connector state.
+
+## Compatibility
+
+- Updates the maintained Codex dependency and installer pin to stable
+  `rust-v0.152.0`.
+- Audits the exact `rust-v0.151.0..rust-v0.152.0` protocol delta and preserves
+  the existing JSONL, continuation, MCP, model, and authentication boundaries.
+
+- Raw runtime-log recording is disabled by default and is available only
+  through bounded explicit recording configuration.
+
+## Expose and diagnostics
+
+- Retains bounded explicit recording as an opt-in diagnostic path while live
+  stream consumers use the broker window.
 
 ## Changelog
 
-Full Changelog: [`0.421.0...0.422.0`](https://github.com/christiandoxa/prodex/compare/0.421.0...0.422.0)
+Full Changelog: [`0.422.0...0.423.0`](https://github.com/christiandoxa/prodex/compare/0.422.0...0.423.0)
 
-## 0.421.0 - 2026-08-31
+## 0.422.0 - 2026-08-31
 
 ### Runtime
 
@@ -54,45 +58,6 @@ Full Changelog: [`0.421.0...0.422.0`](https://github.com/christiandoxa/prodex/co
 - Make OpenAI capacity model-aware (`9fc53e3`)
 - Batch runtime profile health scoring (`40fcb78`)
 - Harden expose and provider runtime paths (`27cf042`)
-
-### CLI
-
-- Preserve Luna reserve capacity (`028c1e2`)
-- Add expose tunnel providers (`7859b34`)
-
-### Claude
-
-- Supervise OpenAI Secure MCP tunnel client (`118927d`)
-- Add OpenAI MCP tunnel provider (`6d59243`)
-
-### Docs
-
-- Reflect public Cloudflare browser access (`bbd7ea0`)
-- Add canonical root guide (`8334efe`)
-- Document 0.421.0 runtime semantics (`e722539`)
-- Document local and tunneled modes (`642e412`)
-
-### Deps
-
-- Bump argon2 in /fuzz in the fuzz-cargo group (`6674044`)
-- Bump the cargo group with 4 updates (`b8afd47`)
-
-### Misc
-
-- Contain command output descendants (`fb40fbd`)
-- Preserve bounded child failure detail (`0814e3a`)
-- Close exact CI regressions (`f3f74c6`)
-- Publish Cloudflare browser route (`3928fb5`)
-- Move Kiro request capability policy (`1d0bdbb`)
-- Validate official tunnel identifier (`e96ab94`)
-- Keep tunnel readiness probe local (`b4e1d91`)
-- Keep live ACP tasks alive while quiet (`83641b2`)
-- Use canonical OpenAI application request (`dceefac`)
-
-## 0.420.0 - 2026-08-31
-
-### Runtime
-
 - Use route-aware probe wait budget (`c1c4c4b`)
 - Migrate runtime Anthropic shaping (`dba5484`)
 - Migrate runtime doctor planning (`01fdc02`)
@@ -108,6 +73,8 @@ Full Changelog: [`0.421.0...0.422.0`](https://github.com/christiandoxa/prodex/co
 
 ### CLI
 
+- Preserve Luna reserve capacity (`028c1e2`)
+- Add expose tunnel providers (`7859b34`)
 - Gate Mojo-only selection oracle imports (`8d28d1f`)
 - Migrate profile rotation planning (`4992559`)
 - Migrate profile order planning (`1e23a74`)
@@ -115,6 +82,8 @@ Full Changelog: [`0.421.0...0.422.0`](https://github.com/christiandoxa/prodex/co
 
 ### Claude
 
+- Supervise OpenAI Secure MCP tunnel client (`118927d`)
+- Add OpenAI MCP tunnel provider (`6d59243`)
 - Retain compatibility stream oracle (`2b09bca`)
 - Remove obsolete stream helper (`a66c7ab`)
 - Migrate Anthropic stream shaping (`095f519`)
@@ -123,6 +92,10 @@ Full Changelog: [`0.421.0...0.422.0`](https://github.com/christiandoxa/prodex/co
 
 ### Docs
 
+- Reflect public Cloudflare browser access (`bbd7ea0`)
+- Add canonical root guide (`8334efe`)
+- Document 0.421.0 runtime semantics (`e722539`)
+- Document local and tunneled modes (`642e412`)
 - Update Caveman freshness pin (`b6aac0f`)
 - Require temporary artifact cleanup (`4caa6ca`)
 - Require Mojo-first development (`2d6963c`)
@@ -131,8 +104,28 @@ Full Changelog: [`0.421.0...0.422.0`](https://github.com/christiandoxa/prodex/co
 - Document 0.420.0 ABI planning (`371f0df`)
 - Align rich ABI documentation (`2531c7a`)
 
+### Deps
+
+- Bump argon2 in /fuzz in the fuzz-cargo group (`6674044`)
+- Bump the cargo group with 4 updates (`b8afd47`)
+
 ### Misc
 
+- Support Python tunnel fixtures on Windows (`3902174`)
+- Invoke Windows tunnel fixture through cmd (`003439b`)
+- Execute Windows tunnel fixtures directly (`a3550d1`)
+- Split operational stream parsing (`46212a2`)
+- Contain existing tunnel jobs on Windows (`af3bc42`)
+- Add connection modes and signal-rich status (`d30e684`)
+- Contain command output descendants (`fb40fbd`)
+- Preserve bounded child failure detail (`0814e3a`)
+- Close exact CI regressions (`f3f74c6`)
+- Publish Cloudflare browser route (`3928fb5`)
+- Move Kiro request capability policy (`1d0bdbb`)
+- Validate official tunnel identifier (`e96ab94`)
+- Keep tunnel readiness probe local (`b4e1d91`)
+- Keep live ACP tasks alive while quiet (`83641b2`)
+- Use canonical OpenAI application request (`dceefac`)
 - Correct rich self-test JSON (`7c1d5f3`)
 - Handle optional pty process handles (`2ddc507`)
 - Repair exposed process job handles (`3a994da`)
