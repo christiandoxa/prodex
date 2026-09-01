@@ -111,6 +111,7 @@ fn command_runs_profile_lifecycle_recovery(command: &Commands) -> bool {
                 | Commands::Cleanup(_)
                 | Commands::Doctor(_)
                 | Commands::Capability(_)
+                | Commands::Ping(_)
                 | Commands::McpJsonlBridge(_)
                 | Commands::SubAgentExec(_)
         )
@@ -309,6 +310,14 @@ mod tests {
         let command = parse_cli_command_from(["prodex", "gateway", "providers"]).unwrap();
 
         assert!(!command_runs_profile_lifecycle_recovery(&command));
+    }
+
+    #[test]
+    fn ping_skips_profile_recovery_and_housekeeping() {
+        let command = parse_cli_command_from(["prodex", "ping", "openai"]).unwrap();
+
+        assert!(!command_runs_profile_lifecycle_recovery(&command));
+        assert!(!crate::housekeeping::command_runs_auto_runtime_housekeeping(&command));
     }
 
     #[test]
