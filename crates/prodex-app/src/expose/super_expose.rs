@@ -491,8 +491,11 @@ fn start_expose_endpoint(
                     bail!("OpenAI tunnel credentials are unavailable")
                 }
             };
+            let client_mcp_url = mcp
+                .install_openai_relay(local_mcp_url.as_str())
+                .inspect_err(|_| cleanup_super_expose(shared, mcp, http, None, None))?;
             match start_openai_tunnel(
-                local_mcp_url.as_str(),
+                &client_mcp_url,
                 credentials,
                 client_version.clone(),
                 cancelled,
@@ -840,6 +843,7 @@ fn cleanup_super_expose(
     if let Some(tunnel) = openai_tunnel {
         tunnel.shutdown();
     }
+    mcp.clear_openai_relay();
     shared.pty.shutdown();
     http.shutdown();
 }

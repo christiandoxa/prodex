@@ -30,6 +30,7 @@ fn fake_tunnel_client(root: &Path) -> std::path::PathBuf {
         "tunnel-client",
         r#"#!/usr/bin/env python3
 import http.server
+import json
 import os
 import sys
 
@@ -54,6 +55,10 @@ mcp_url_path = os.path.join(os.path.dirname(config), "mcp-url")
 mcp_url = open(mcp_url_path, encoding="utf-8").read()
 log_path = flag_value("--log.file")
 log_level = flag_value("--log.level")
+log_format = flag_value("--log.format")
+if log_level == "warn" and log_format not in ("struct-text", "json"):
+    print("log level requires 'struct-text' or 'json' log format", file=sys.stderr, flush=True)
+    raise SystemExit(2)
 # Pinned tunnel-client v0.0.13 emits this ERROR even at --log.level warn.
 error_line = 'level=ERROR msg=failed to connect to mcp error=Post "' + mcp_url + '"'
 if log_path:
@@ -68,6 +73,7 @@ if marker:
         file.write("config=" + open(config, encoding="utf-8").read() + "\n")
         file.write("mcp_url_file_present=" + str(bool(mcp_url)) + "\n")
         file.write("log_level=" + log_level + "\n")
+        file.write("log_format=" + log_format + "\n")
         file.write("mcp_probe_error_emitted=True\n")
         for name in [
             "CONTROL_PLANE_API_KEY",
@@ -86,10 +92,19 @@ if os.environ.get("PRODEX_OPENAI_TUNNEL_MODE") == "exit":
 
 class Handler(http.server.BaseHTTPRequestHandler):
     def do_GET(self):
-        status = 503 if os.environ.get("PRODEX_OPENAI_TUNNEL_MODE") == "not-ready" and self.path == "/readyz" else 200
+        if self.path == "/api/status":
+            body = json.dumps({"mcp_server_url": mcp_url}).encode()
+            status = 200
+        elif self.path == "/api/logs":
+            body = json.dumps({"events": [{"message": error_line}]}).encode()
+            status = 200
+        else:
+            status = 503 if os.environ.get("PRODEX_OPENAI_TUNNEL_MODE") == "not-ready" and self.path == "/readyz" else 200
+            body = b"ok"
         self.send_response(status)
+        self.send_header("Content-Length", str(len(body)))
         self.end_headers()
-        self.wfile.write(b"ok")
+        self.wfile.write(body)
 
     def log_message(self, format, *args):
         pass
@@ -148,10 +163,14 @@ fn tunnel_id_resolution_prefers_explicit_then_environment() {
 
 #[test]
 fn config_keeps_capability_url_outside_argv_and_yaml() {
-    let mut files = OpenAiTunnelFiles::create(LOCAL_MCP_URL, VALID_TUNNEL_ID).unwrap();
+    let relay_url = "http://127.0.0.1:43123/__prodex_openai_mcp_relay/opaque-relay/mcp";
+    let mut files = OpenAiTunnelFiles::create(relay_url, VALID_TUNNEL_ID).unwrap();
     let config = fs::read_to_string(&files.config).unwrap();
+    let mcp_url = fs::read_to_string(&files.mcp_url).unwrap();
     let directory = files.directory.clone();
     assert!(!config.contains(LOCAL_MCP_URL));
+    assert_eq!(mcp_url, relay_url);
+    assert!(!mcp_url.contains(LOCAL_MCP_URL));
     assert!(config.contains("config_version: 1"));
     assert!(config.contains("url: 'file:"));
     assert!(config.contains(&files.mcp_url.display().to_string()));
@@ -225,7 +244,7 @@ fn fake_client_reaches_local_health_ready_and_keeps_secrets_out_of_argv_and_conf
     let _key = TestEnvVarGuard::set("CONTROL_PLANE_API_KEY", API_KEY_SENTINEL);
     let _marker = TestEnvVarGuard::set("PRODEX_OPENAI_TUNNEL_MARKER", &marker.to_string_lossy());
     let mut tunnel = start_openai_tunnel(
-        LOCAL_MCP_URL,
+        "http://127.0.0.1:43123/__prodex_openai_mcp_relay/opaque-relay/mcp",
         OpenAiTunnelCredentials::new(VALID_TUNNEL_ID, LAUNCH_API_KEY_SENTINEL).unwrap(),
         "0.0.13".to_string(),
         &|| false,
@@ -235,7 +254,9 @@ fn fake_client_reaches_local_health_ready_and_keeps_secrets_out_of_argv_and_conf
     assert_eq!(tunnel.status.client_version, "0.0.13");
     let marker_contents = fs::read_to_string(&marker).unwrap().replace("\r\n", "\n");
     let mcp_url_file = fs::read_to_string(&tunnel.files.mcp_url).unwrap();
-    assert_eq!(mcp_url_file, LOCAL_MCP_URL);
+    assert_ne!(mcp_url_file, LOCAL_MCP_URL);
+    assert!(mcp_url_file.contains("/__prodex_openai_mcp_relay/"));
+    assert!(!mcp_url_file.contains("capability-secret"));
     assert!(!mcp_url_file.contains(API_KEY_SENTINEL));
     assert!(!mcp_url_file.contains(LAUNCH_API_KEY_SENTINEL));
     for prefix in ["argv=", "config="] {
@@ -244,20 +265,40 @@ fn fake_client_reaches_local_health_ready_and_keeps_secrets_out_of_argv_and_conf
                 .is_some_and(|value| value.contains(LOCAL_MCP_URL))
         }));
     }
-    let log_contents = fs::read_to_string(&tunnel.files.log).unwrap();
     assert!(!marker_contents.contains(API_KEY_SENTINEL));
     assert!(!marker_contents.contains(LAUNCH_API_KEY_SENTINEL));
     assert!(!marker_contents.contains(LOCAL_MCP_URL));
-    assert!(!log_contents.contains(LOCAL_MCP_URL));
-    assert!(!log_contents.contains(API_KEY_SENTINEL));
-    assert!(!log_contents.contains(LAUNCH_API_KEY_SENTINEL));
+    assert!(!tunnel.files.directory.join("tunnel-client.log").exists());
+    let health_url = fs::read_to_string(&tunnel.files.health_url).unwrap();
+    let admin = reqwest::blocking::Client::builder()
+        .no_proxy()
+        .build()
+        .unwrap();
+    let status = admin
+        .get(format!("{health_url}/api/status"))
+        .send()
+        .unwrap()
+        .text()
+        .unwrap();
+    let logs = admin
+        .get(format!("{health_url}/api/logs"))
+        .send()
+        .unwrap()
+        .text()
+        .unwrap();
+    for surface in [&status, &logs] {
+        assert!(!surface.contains(LOCAL_MCP_URL));
+        assert!(!surface.contains(API_KEY_SENTINEL));
+        assert!(!surface.contains(LAUNCH_API_KEY_SENTINEL));
+        assert!(surface.contains(&mcp_url_file));
+    }
     assert!(marker_contents.contains("mcp_url_file_present=True"));
     assert!(marker_contents.contains("log_level=warn"));
+    assert!(marker_contents.contains("log_format=struct-text"));
     assert!(marker_contents.contains("mcp_probe_error_emitted=True"));
     assert!(!marker_contents.contains("--log.file"));
     assert!(marker_contents.contains("health_url=http://127.0.0.1:"));
     assert!(marker_contents.contains("log=\n"));
-    assert!(fs::read_to_string(&tunnel.files.log).unwrap().is_empty());
     assert!(marker_contents.contains("--control-plane.api-key"));
     assert!(marker_contents.contains("env:CONTROL_PLANE_API_KEY"));
     assert!(marker_contents.contains("CONTROL_PLANE_API_KEY_PRESENT=True"));

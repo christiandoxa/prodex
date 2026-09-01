@@ -389,8 +389,8 @@ chosen loopback port, setup fails with an actionable error.
 OpenAI mode uses the official [openai/tunnel-client](https://github.com/openai/tunnel-client)
 as a supervised external process. Prodex does not implement or clone the
 tunnel wire protocol. The integration points the client at the OpenAI control
-plane and gives it the local MCP endpoint; the client owns the upstream tunnel
-protocol and authentication behavior.
+plane and gives it a loopback-only opaque relay for the local MCP endpoint; the
+client owns the upstream tunnel protocol and authentication behavior.
 
 OpenAI readiness is layered. Local MCP initialization/tools, the tunnel-client
 process, and its `/healthz`/`/readyz` responses prove local tunnel runtime
@@ -414,15 +414,18 @@ prodex s expose --tunnel-provider openai
 The exact client command receives a private configuration path, the OpenAI
 control-plane base URL `https://api.openai.com`, the validated tunnel ID, and
 the API-key reference `env:CONTROL_PLANE_API_KEY`. It also receives a loopback
-health-listener path. Prodex disconnects the client's stdout/stderr and does
-not pass `--log.file`, so resolved MCP capability URLs cannot become retained
-or user-visible client logs. The runtime key is never placed in argv or the
-generated configuration.
+health-listener path. It sets `--log.level warn --log.format struct-text` for
+the pinned client, disconnects stdout/stderr, and does not pass `--log.file`.
+The client receives only a loopback opaque relay URL, so its retained status or
+log buffer cannot contain the resolved MCP capability URL. The runtime key is
+never placed in argv or the generated configuration.
 
-The generated client configuration binds the actual local MCP endpoint to the
-explicit `main` channel. It does not use the browser URL. Control-plane polling
-uses the official host-root API URL and the client-owned `/v1/tunnels/...`
-routes; Prodex does not use a GET to `/v1/mcp/...` as a readiness probe.
+The generated client configuration binds the opaque relay to the explicit
+`main` channel. The existing bounded loopback HTTP server translates only the
+exact opaque relay request target to the actual local capability route; it does
+not use the browser URL. Control-plane polling uses the official host-root API
+URL and the client-owned `/v1/tunnels/...` routes; Prodex does not use a GET to
+`/v1/mcp/...` as a readiness probe.
 
 OpenAI mode requires:
 
@@ -440,12 +443,12 @@ The tunnel identifier is non-secret routing/configuration data. The runtime key
 is secret and held in zeroizing memory. Do not put it in shell history, a
 process argument, a committed file, or a diagnostic log.
 
-Prodex creates a private temporary directory containing the local MCP reference,
-client configuration, health URL file, and an empty private log placeholder. It
-uses the client's loopback `/healthz` and `/readyz` responses for startup
-readiness, then checks that the child is still alive. The directory and child
-are removed or terminated on normal exit, cancellation, startup failure, or
-post-ready child failure.
+Prodex creates a private temporary directory containing the opaque relay
+reference, client configuration, and health URL file. It uses the client's
+loopback `/healthz` and `/readyz` responses for startup readiness, then checks
+that the child is still alive. The relay, directory, and child are removed or
+terminated on normal exit, cancellation, startup failure, or post-ready child
+failure.
 
 The OpenAI tunnel path is independent of `trycloudflare.com`,
 `cloudflare-dns.com`, `cloudflared`, and Cloudflare's UDP/7844 transport. The
@@ -662,6 +665,9 @@ The main implementation areas are:
   `cloudflared_startup.rs` — isolated Cloudflare child and transport startup;
 - `crates/prodex-app/src/expose/runtime/openai_tunnel.rs` — official
   tunnel-client supervision and local health readiness;
+- `crates/prodex-app/src/expose/mcp.rs` and `mcp/handler.rs` — opaque relay
+  target and exact request translation that keep the MCP capability URL out of
+  tunnel-client state;
 - `crates/prodex-app/src/expose/mcp/**` — MCP protocol, tools, and probes;
 - `crates/prodex-app/src/expose/http.rs` and `routes.rs` — browser/session/MCP
   route boundaries;
