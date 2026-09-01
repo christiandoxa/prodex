@@ -5,15 +5,15 @@ use super::import_export::{
     ProfileAuthUpdate, ProfileLifecycleHomeAction, ProfileLifecyclePlan,
     acquire_profile_lifecycle_lock, cleanup_profile_lifecycle_and_auth_journal,
     lifecycle_profile_state, load_profile_state_with_profile_recovery_locked,
-    prepare_existing_profile_lifecycle, read_optional_secret_text_file,
-    write_profile_lifecycle_plan,
+    prepare_existing_profile_lifecycle, write_profile_lifecycle_plan,
 };
 use super::manage::print_profile_panel;
 use crate::{
     AppPaths, AppState, AppStateIoExt, ImportProfileArgs, ProfileEntry, ProfileProvider,
-    activate_profile, claude_config_dir_from_env_or_default, claude_oauth_profile_identity,
-    copy_claude_oauth_credentials, ensure_path_is_unique, managed_profile_home_path,
-    prepare_managed_codex_home, prepare_profile_codex_home,
+    activate_profile, claude_config_dir_from_env_or_default,
+    claude_external_oauth_profile_identity, copy_claude_oauth_credentials, ensure_path_is_unique,
+    managed_profile_home_path, prepare_managed_codex_home, prepare_profile_codex_home,
+    read_external_claude_credentials_text,
 };
 
 pub(super) fn is_claude_import_source(path: &Path) -> bool {
@@ -26,14 +26,13 @@ pub(super) fn is_claude_import_source(path: &Path) -> bool {
 
 pub(crate) fn handle_import_claude_profile(args: &ImportProfileArgs) -> Result<()> {
     let source_config_dir = claude_config_dir_from_env_or_default()?;
-    let (account, auth_method) = claude_oauth_profile_identity(&source_config_dir).with_context(
-        || {
+    let (account, auth_method) = claude_external_oauth_profile_identity(&source_config_dir)
+        .with_context(|| {
             format!(
                 "failed to read Claude Code credentials from {}. Run `claude auth login --claudeai` first, or use `prodex login --with-claude`.",
                 source_config_dir.display()
             )
-        },
-    )?;
+        })?;
 
     let paths = AppPaths::discover()?;
     let _lock = acquire_profile_lifecycle_lock(&paths)?;
@@ -111,9 +110,7 @@ fn update_existing_claude_profile(
         .get(existing)
         .with_context(|| format!("profile '{}' is missing", existing))?
         .clone();
-    let credentials =
-        read_optional_secret_text_file(&source_config_dir.join(crate::CLAUDE_CREDENTIALS_FILE))?
-            .context("Claude credentials file is missing")?;
+    let credentials = read_external_claude_credentials_text(source_config_dir)?;
     let desired_profile = ProfileEntry {
         email: account.clone(),
         provider: ProfileProvider::Anthropic {

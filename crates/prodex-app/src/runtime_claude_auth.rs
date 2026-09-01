@@ -2,14 +2,16 @@ use crate::secret_store_support::secret_file_read_error;
 use crate::{create_codex_home_if_missing, print_wrapped_stderr};
 use anyhow::{Context, Result, bail};
 use dirs::home_dir;
+use redaction::redaction_redact_secret_like_text;
 use serde::Deserialize;
 use std::env;
 use std::fmt;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 use std::process::{Command, ExitStatus, Stdio};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 pub(crate) const CLAUDE_CREDENTIALS_FILE: &str = ".credentials.json";
+const CLAUDE_CREDENTIALS_MAX_BYTES: u64 = 64 * 1024;
 const CLAUDE_OAUTH_EXPIRY_SKEW_MS: i64 = 60_000;
 
 #[derive(Clone)]
@@ -92,7 +94,7 @@ impl fmt::Debug for ClaudeCredentialsFile {
 #[derive(Clone, Deserialize)]
 struct ClaudeCredentialsToken {
     #[serde(rename = "accessToken")]
-    access_token: String,
+    access_token: Option<String>,
     #[serde(rename = "expiresAt")]
     expires_at: Option<i64>,
     #[serde(rename = "subscriptionType")]
@@ -116,10 +118,12 @@ impl fmt::Debug for ClaudeCredentialsToken {
 }
 
 pub(crate) fn claude_config_dir_from_env_or_default() -> Result<PathBuf> {
-    env::var_os("CLAUDE_CONFIG_DIR")
+    let config_dir = env::var_os("CLAUDE_CONFIG_DIR")
         .map(PathBuf::from)
         .or_else(|| home_dir().map(|home| home.join(".claude")))
-        .context("failed to determine Claude config directory")
+        .context("failed to determine Claude config directory")?;
+    validate_external_claude_config_dir(&config_dir)?;
+    Ok(config_dir)
 }
 
 pub(crate) fn claude_credentials_path(config_dir: &Path) -> PathBuf {
@@ -128,7 +132,14 @@ pub(crate) fn claude_credentials_path(config_dir: &Path) -> PathBuf {
 
 pub(crate) fn read_claude_oauth_secret(config_dir: &Path) -> Result<ClaudeOAuthSecret> {
     let path = claude_credentials_path(config_dir);
-    let text = read_claude_credentials_text(&path)?;
+    let text = read_private_claude_credentials_text(&path)?;
+    parse_claude_oauth_secret_text(&text)
+        .with_context(|| format!("failed to parse {}", path.display()))
+}
+
+pub(crate) fn read_external_claude_oauth_secret(config_dir: &Path) -> Result<ClaudeOAuthSecret> {
+    let path = external_claude_credentials_path(config_dir)?;
+    let text = read_external_claude_credentials_text(config_dir)?;
     parse_claude_oauth_secret_text(&text)
         .with_context(|| format!("failed to parse {}", path.display()))
 }
@@ -138,7 +149,7 @@ pub(crate) fn copy_claude_oauth_credentials(
     to_config_dir: &Path,
 ) -> Result<()> {
     let from_path = claude_credentials_path(from_config_dir);
-    let text = read_claude_credentials_text(&from_path)?;
+    let text = read_external_claude_credentials_text(from_config_dir)?;
     parse_claude_oauth_secret_text(&text)
         .with_context(|| format!("failed to parse {}", from_path.display()))?;
     create_codex_home_if_missing(to_config_dir)?;
@@ -149,12 +160,39 @@ pub(crate) fn copy_claude_oauth_credentials(
         .with_context(|| format!("failed to write {}", to_path.display()))
 }
 
-fn read_claude_credentials_text(path: &Path) -> Result<String> {
+fn read_private_claude_credentials_text(path: &Path) -> Result<String> {
     secret_store::SecretManager::new(secret_store::FileSecretBackend::new())
         .read_text(&secret_store::SecretLocation::file(path))
         .map_err(secret_file_read_error)
         .with_context(|| format!("failed to read {}", path.display()))?
         .with_context(|| format!("failed to read {}", path.display()))
+}
+
+pub(crate) fn read_external_claude_credentials_text(config_dir: &Path) -> Result<String> {
+    let path = external_claude_credentials_path(config_dir)?;
+    secret_store::FileSecretBackend::new()
+        .read_external_text_bounded(&path, CLAUDE_CREDENTIALS_MAX_BYTES)
+        .map_err(secret_file_read_error)
+        .with_context(|| format!("failed to read {}", path.display()))?
+        .context("Claude credentials file is missing")
+}
+
+fn external_claude_credentials_path(config_dir: &Path) -> Result<PathBuf> {
+    validate_external_claude_config_dir(config_dir)?;
+    Ok(claude_credentials_path(config_dir))
+}
+
+fn validate_external_claude_config_dir(config_dir: &Path) -> Result<()> {
+    if config_dir.as_os_str().is_empty() {
+        bail!("Claude config directory is empty");
+    }
+    if config_dir
+        .components()
+        .any(|component| matches!(component, Component::ParentDir))
+    {
+        bail!("Claude config directory path is unsafe");
+    }
+    Ok(())
 }
 
 pub(crate) fn login_with_claude_oauth(
@@ -207,7 +245,8 @@ pub(crate) fn claude_auth_status(config_dir: &Path) -> Result<ClaudeAuthStatus> 
     let output = crate::command_probe_output(&mut command, "Claude auth status")
         .with_context(|| format!("failed to execute {}", claude_binary()))?;
     if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        let stderr =
+            redaction_redact_secret_like_text(String::from_utf8_lossy(&output.stderr).trim());
         if stderr.is_empty() {
             bail!("Claude auth status failed");
         }
@@ -239,6 +278,20 @@ pub(crate) fn claude_oauth_profile_identity(
     config_dir: &Path,
 ) -> Result<(Option<String>, Option<String>)> {
     let secret = read_claude_oauth_secret(config_dir)?;
+    claude_oauth_profile_identity_from_secret(config_dir, secret)
+}
+
+pub(crate) fn claude_external_oauth_profile_identity(
+    config_dir: &Path,
+) -> Result<(Option<String>, Option<String>)> {
+    let secret = read_external_claude_oauth_secret(config_dir)?;
+    claude_oauth_profile_identity_from_secret(config_dir, secret)
+}
+
+fn claude_oauth_profile_identity_from_secret(
+    config_dir: &Path,
+    secret: ClaudeOAuthSecret,
+) -> Result<(Option<String>, Option<String>)> {
     let status = claude_auth_status(config_dir).ok();
     let account = status
         .as_ref()
@@ -257,7 +310,11 @@ pub(crate) fn parse_claude_oauth_secret_text(text: &str) -> Result<ClaudeOAuthSe
     let file: ClaudeCredentialsFile =
         serde_json::from_str(text).context("invalid Claude credentials JSON")?;
     if let Some(token) = file.claude_ai_oauth {
-        let access_token = token.access_token.trim().to_string();
+        let access_token = token
+            .access_token
+            .context("Claude credentials did not include claudeAiOauth.accessToken")?
+            .trim()
+            .to_string();
         if access_token.is_empty() {
             bail!("Claude credentials did not include an access token");
         }
@@ -343,8 +400,12 @@ mod tests {
         r#"{
           "claudeAiOauth": {
             "accessToken": "oauth-token",
+            "refreshToken": "refresh-token",
             "expiresAt": 1900000000000,
+            "refreshTokenExpiresAt": 1900000000001,
+            "scopes": ["user:inference", "user:profile"],
             "subscriptionType": "max",
+            "rateLimitTier": "default_claude_ai",
             "email": "user@example.com"
           }
         }"#
@@ -364,10 +425,81 @@ mod tests {
         std::fs::write(&target, claude_credentials_text()).unwrap();
         std::os::unix::fs::symlink(&target, claude_credentials_path(&root)).unwrap();
 
-        let err = read_claude_oauth_secret(&root).expect_err("symlink secret must be rejected");
+        let err =
+            read_external_claude_oauth_secret(&root).expect_err("symlink secret must be rejected");
 
         assert!(err.to_string().contains("failed to read"));
         assert!(format!("{err:#}").contains("regular secret file"));
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn external_claude_reader_accepts_cli_permissions_without_relaxing_private_reads() {
+        use std::os::unix::fs::PermissionsExt as _;
+
+        let root = std::env::temp_dir().join(format!(
+            "prodex-claude-oauth-external-{}-{}",
+            std::process::id(),
+            current_time_ms()
+        ));
+        crate::create_codex_home_if_missing(&root).unwrap();
+        let path = claude_credentials_path(&root);
+        std::fs::write(&path, claude_credentials_text()).unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).unwrap();
+
+        assert_eq!(
+            read_external_claude_oauth_secret(&root)
+                .unwrap()
+                .access_token,
+            "oauth-token"
+        );
+        assert!(read_claude_oauth_secret(&root).is_err());
+
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn claude_oauth_errors_distinguish_missing_malformed_and_missing_access_token() {
+        let missing = parse_claude_oauth_secret_text("{}")
+            .unwrap_err()
+            .to_string();
+        assert!(missing.contains("did not include an access token"));
+
+        let nested_missing = parse_claude_oauth_secret_text(r#"{"claudeAiOauth":{}}"#)
+            .unwrap_err()
+            .to_string();
+        assert!(nested_missing.contains("claudeAiOauth.accessToken"));
+
+        let malformed = parse_claude_oauth_secret_text(
+            r#"{"claudeAiOauth":{"accessToken":42,"refreshToken":"oauth-error-secret"}}"#,
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(malformed.contains("invalid Claude credentials JSON"));
+        assert!(!malformed.contains("oauth-error-secret"));
+    }
+
+    #[test]
+    fn external_claude_reader_distinguishes_missing_and_traversal() {
+        let root = std::env::temp_dir().join(format!(
+            "prodex-claude-oauth-missing-{}-{}",
+            std::process::id(),
+            current_time_ms()
+        ));
+        crate::create_codex_home_if_missing(&root).unwrap();
+
+        let missing = read_external_claude_credentials_text(&root)
+            .unwrap_err()
+            .to_string();
+        assert!(missing.contains("Claude credentials file is missing"));
+
+        let traversal = read_external_claude_credentials_text(Path::new("../claude"))
+            .unwrap_err()
+            .to_string();
+        assert!(traversal.contains("unsafe"));
+        assert!(!traversal.contains("oauth-error-secret"));
+
         std::fs::remove_dir_all(root).unwrap();
     }
 
@@ -385,7 +517,7 @@ mod tests {
             account: Some("bob@example.test".to_string()),
         };
         let token = ClaudeCredentialsToken {
-            access_token: "claude-nested-token-secret".to_string(),
+            access_token: Some("claude-nested-token-secret".to_string()),
             expires_at: Some(1_900_000_000_001),
             subscription_type: Some("max-secret".to_string()),
             email: Some("carol@example.test".to_string()),
@@ -451,5 +583,67 @@ mod tests {
         assert_eq!(secret.expires_at, Some(1900000000001));
         assert_eq!(secret.account.as_deref(), Some("user@example.com"));
         assert_eq!(secret.auth_method.as_deref(), Some("claude-ai-oauth"));
+    }
+
+    #[test]
+    fn claude_login_copies_cli_credentials_into_private_destination() {
+        let root = std::env::temp_dir().join(format!(
+            "prodex-claude-oauth-login-{}-{}",
+            std::process::id(),
+            current_time_ms()
+        ));
+        crate::create_codex_home_if_missing(&root).unwrap();
+        let fake_claude = crate::write_test_python_executable(
+            &root,
+            "fake-claude",
+            r#"#!/usr/bin/env python3
+import json
+import os
+from pathlib import Path
+
+config_dir = Path(os.environ["CLAUDE_CONFIG_DIR"])
+(config_dir / ".credentials.json").write_text(json.dumps({
+    "claudeAiOauth": {
+        "accessToken": "login-test-access-token",
+        "expiresAt": 1900000000000,
+        "subscriptionType": "pro",
+        "email": "login@example.com"
+    }
+}), encoding="utf-8")
+os.chmod(config_dir / ".credentials.json", 0o644)
+"#,
+        );
+        let _claude_bin =
+            crate::TestEnvVarGuard::set("CLAUDE_BIN", &fake_claude.display().to_string());
+        let login_home = root.join("login-home");
+        let status = login_with_claude_oauth(&login_home, Some("login@example.com")).unwrap();
+        assert!(status.success());
+        assert_eq!(
+            read_external_claude_oauth_secret(&login_home)
+                .unwrap()
+                .access_token,
+            "login-test-access-token"
+        );
+
+        let destination = root.join("destination");
+        copy_claude_oauth_credentials(&login_home, &destination).unwrap();
+        assert_eq!(
+            read_claude_oauth_secret(&destination).unwrap().access_token,
+            "login-test-access-token"
+        );
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt as _;
+            assert_eq!(
+                std::fs::metadata(claude_credentials_path(&destination))
+                    .unwrap()
+                    .permissions()
+                    .mode()
+                    & 0o777,
+                0o600
+            );
+        }
+
+        std::fs::remove_dir_all(root).unwrap();
     }
 }

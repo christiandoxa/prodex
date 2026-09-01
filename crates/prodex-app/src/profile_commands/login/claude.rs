@@ -1,15 +1,15 @@
 use super::super::import_export::{
     ProfileAuthUpdate, ProfileLifecycleHomeAction, ProfileLifecyclePlan,
     cleanup_profile_lifecycle_and_auth_journal, lifecycle_profile_state,
-    prepare_existing_profile_lifecycle, read_optional_secret_text_file,
-    write_profile_lifecycle_plan,
+    prepare_existing_profile_lifecycle, write_profile_lifecycle_plan,
 };
 use super::super::manage::print_profile_panel;
 use super::unique_profile_name_for_slug;
 use crate::{
     AppPaths, AppState, AppStateIoExt, ProfileEntry, ProfileProvider, activate_profile,
-    claude_oauth_profile_identity, copy_claude_oauth_credentials, managed_profile_home_path,
-    prepare_managed_codex_home, prepare_profile_codex_home, remove_dir_if_exists,
+    claude_external_oauth_profile_identity, claude_oauth_profile_identity,
+    copy_claude_oauth_credentials, managed_profile_home_path, prepare_managed_codex_home,
+    prepare_profile_codex_home, read_external_claude_credentials_text, remove_dir_if_exists,
 };
 use anyhow::{Context, Result, bail};
 use std::path::{Path, PathBuf};
@@ -75,7 +75,7 @@ pub(super) fn finish_auto_login_for_anthropic_profile(
     state: &mut AppState,
     login_home: &Path,
 ) -> Result<()> {
-    let (account, auth_method) = claude_oauth_profile_identity(login_home)?;
+    let (account, auth_method) = claude_external_oauth_profile_identity(login_home)?;
     if let Some(profile_name) = state.profiles.iter().find_map(|(name, profile)| {
         profile
             .provider
@@ -114,9 +114,8 @@ fn finish_anthropic_login_for_existing_profile(
         account: account.clone(),
         auth_method: auth_method.clone(),
     };
-    let credentials =
-        read_optional_secret_text_file(&login_home.join(crate::CLAUDE_CREDENTIALS_FILE))?
-            .context("Claude login did not produce credentials")?;
+    let credentials = read_external_claude_credentials_text(login_home)
+        .context("Claude login did not produce credentials")?;
     let (lifecycle_path, auth_journal_path) = prepare_existing_profile_lifecycle(
         paths,
         "login",
