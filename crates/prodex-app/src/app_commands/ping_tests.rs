@@ -13,7 +13,8 @@ use std::ffi::OsString;
 use std::fs;
 use std::process::Output;
 #[cfg(unix)]
-use std::time::{Duration, Instant};
+use std::time::Duration;
+use std::time::Instant;
 
 #[cfg(unix)]
 use std::os::unix::process::ExitStatusExt;
