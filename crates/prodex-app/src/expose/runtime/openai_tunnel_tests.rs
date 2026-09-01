@@ -97,7 +97,6 @@ fn launch_credentials_are_zeroized_and_debug_redacted() {
     let credentials = OpenAiTunnelCredentials::new(VALID_TUNNEL_ID, LAUNCH_API_KEY_SENTINEL)
         .expect("fixture credentials should be valid");
     let debug = format!("{credentials:?}");
-
     assert_eq!(credentials.tunnel_id(), VALID_TUNNEL_ID);
     assert_eq!(credentials.api_key(), LAUNCH_API_KEY_SENTINEL);
     assert!(debug.contains("<redacted>"));
@@ -115,12 +114,15 @@ fn launch_credentials_are_zeroized_and_debug_redacted() {
 #[test]
 fn config_keeps_capability_url_outside_argv_and_yaml() {
     let relay_url = "http://127.0.0.1:43123/__prodex_openai_mcp_relay/opaque-relay/mcp";
-    let files = OpenAiTunnelFiles::create(relay_url, VALID_TUNNEL_ID).unwrap();
+    let mut files = OpenAiTunnelFiles::create(relay_url, VALID_TUNNEL_ID).unwrap();
     let config = fs::read_to_string(&files.config).unwrap();
+    let directory = files.directory.clone();
     assert!(!config.contains(LOCAL_MCP_URL));
     assert!(config.contains("config_version: 1"));
     assert!(config.contains("url: 'file:"));
     assert!(config.contains(&files.mcp_url.display().to_string()));
+    files.cleanup();
+    assert!(!directory.exists());
 }
 
 #[test]

@@ -167,6 +167,7 @@ pub(crate) fn terminate_child_process_tree(
     #[cfg(windows)]
     {
         let status = Command::new("taskkill")
+            .env_remove("CONTROL_PLANE_API_KEY")
             .args(["/PID", &child.id().to_string(), "/T", "/F"])
             .stdin(Stdio::null())
             .stdout(Stdio::null())

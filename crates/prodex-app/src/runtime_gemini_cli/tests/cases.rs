@@ -128,6 +128,15 @@ fn native_agy_preflight_rejects_missing_capability() {
     let error = validate_super_native_cli_preflight(&args).unwrap_err();
 
     assert!(error.to_string().contains("Antigravity CLI capability"));
+    let binary = crate::write_test_python_executable(
+        missing.parent().unwrap(),
+        missing.file_name().unwrap().to_str().unwrap(),
+        "#!/usr/bin/env python3\nimport os\nraise SystemExit(17 if 'CONTROL_PLANE_API_KEY' in os.environ else 0)\n",
+    );
+    let _agy = TestEnvVarGuard::set("PRODEX_AGY_BIN", binary.to_str().unwrap());
+    let _key = TestEnvVarGuard::set("CONTROL_PLANE_API_KEY", "configured-key");
+    validate_super_native_cli_preflight(&args).unwrap();
+    std::fs::remove_file(binary).unwrap();
 }
 
 #[test]

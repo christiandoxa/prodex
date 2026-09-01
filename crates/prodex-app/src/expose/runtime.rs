@@ -548,6 +548,7 @@ fn terminate_expose_pty_process_tree(process_id: Option<u32>) {
         return;
     };
     let _ = std::process::Command::new("taskkill")
+        .env_remove("CONTROL_PLANE_API_KEY")
         .args(["/PID", &process_id.to_string(), "/T", "/F"])
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::null())
@@ -565,7 +566,6 @@ pub(super) fn expose_join_thread(thread: &Mutex<Option<JoinHandle<()>>>) {
         let _ = thread.join();
     }
 }
-
 pub(super) fn expose_display_name(
     requested: Option<&str>,
     workspace_root: &std::path::Path,

@@ -2,8 +2,9 @@ use super::super::mcp::ExposeMcpEndpoint;
 use super::super::runtime::ExistingCloudflareSelection;
 use super::{
     ExposeEndpointMode, ExposeLifecycleEvent, ExposeLifecyclePhase, ExposeReadyState,
-    ExposeTuiAction, ExposeTuiPhase, ExposeTuiState, OpenAiSetupField, PublicMcpEndpoint,
-    copy_public_url_to_clipboard_with, draw_frame, ready_body, support::labeled_value_lines,
+    ExposeTuiAction, ExposeTuiPhase, ExposeTuiState, OpenAiSetupField, OpenAiSetupState,
+    PublicMcpEndpoint, copy_public_url_to_clipboard_with, draw_frame, ready_body,
+    support::labeled_value_lines,
 };
 use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
 use prodex_cli::SuperArgs;
@@ -84,57 +85,43 @@ fn picker_defaults_to_local_and_cycles_all_connection_modes() {
 }
 
 #[test]
-fn openai_setup_uses_cli_id_before_environment_and_masks_pasted_key() {
+fn openai_setup_prefills_only_missing_values_and_bounds_input() {
+    const CLI_ID: &str = "tunnel_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+    const ENV_ID: &str = "tunnel_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+    const VALID_ID: &str = "tunnel_0123456789abcdef0123456789abcdef";
     let _env_lock = crate::TestEnvVarGuard::lock();
-    let _env_id = crate::TestEnvVarGuard::set(
-        "CONTROL_PLANE_TUNNEL_ID",
-        "tunnel_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-    );
     let _env_key = crate::TestEnvVarGuard::unset("CONTROL_PLANE_API_KEY");
-    let mut state = state();
-    state.openai_tunnel_id = Some("tunnel_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb".to_string());
-    state.handle_key(KeyEvent::new(KeyCode::Char('4'), KeyModifiers::NONE));
-    assert!(matches!(
-        state.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)),
-        ExposeTuiAction::None
-    ));
+    let _env_id = crate::TestEnvVarGuard::set("CONTROL_PLANE_TUNNEL_ID", ENV_ID);
+    let mut cli_setup = OpenAiSetupState::new(Some(CLI_ID));
+    assert_eq!(cli_setup.next_field(), Some(OpenAiSetupField::ApiKey));
+    cli_setup.append(OpenAiSetupField::ApiKey, "pasted-key-q");
+    let lines = super::setup_body(Some(&cli_setup), OpenAiSetupField::ApiKey, None, 80);
+    assert!(lines.iter().any(|line| line_text(line).contains(CLI_ID)));
+    assert!(lines.iter().any(|line| {
+        line_text(line).contains("API key*: ************")
+            && !line_text(line).contains("pasted-key-q")
+    }));
+    let _env_id = crate::TestEnvVarGuard::unset("CONTROL_PLANE_TUNNEL_ID");
+    let mut setup = OpenAiSetupState::new(None);
+    assert_eq!(setup.next_field(), Some(OpenAiSetupField::TunnelId));
+    setup.append(OpenAiSetupField::TunnelId, &format!("{VALID_ID}overflow"));
+    let enter = KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE);
+    setup.handle_key(OpenAiSetupField::TunnelId, enter).unwrap();
+    assert_eq!(setup.next_field(), Some(OpenAiSetupField::ApiKey));
+    setup.append(OpenAiSetupField::ApiKey, &"k".repeat(4097));
+    assert_eq!(setup.masked_api_key().len(), 4096);
+    setup.handle_key(OpenAiSetupField::ApiKey, enter).unwrap();
+    let _env_id = crate::TestEnvVarGuard::set("CONTROL_PLANE_TUNNEL_ID", VALID_ID);
     assert_eq!(
-        state.phase(),
-        ExposeTuiPhase::OpenAiSetup(OpenAiSetupField::ApiKey)
+        OpenAiSetupState::new(None).next_field(),
+        Some(OpenAiSetupField::ApiKey)
     );
-    state.handle_event(Event::Key(KeyEvent::new(
-        KeyCode::Char('u'),
-        KeyModifiers::CONTROL,
-    )));
-    state.handle_event(Event::Paste("pasted-key-q".to_string()));
-    let rendered = super::setup_body(
-        state.openai_setup.as_ref(),
-        OpenAiSetupField::ApiKey,
-        None,
-        80,
-    )
-    .iter()
-    .map(line_text)
-    .collect::<Vec<_>>()
-    .join("\n");
-    assert!(
-        rendered.contains("tunnel_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"),
-        "{rendered}"
-    );
-    assert!(rendered.contains("API key*: ************"), "{rendered}");
-    assert!(!rendered.contains("pasted-key-q"), "{rendered}");
-    for code in [KeyCode::Backspace, KeyCode::Delete] {
-        assert!(matches!(
-            state.handle_event(Event::Key(KeyEvent::new(code, KeyModifiers::NONE))),
-            ExposeTuiAction::None
-        ));
-    }
-    assert!(matches!(
-        state.handle_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)),
-        ExposeTuiAction::Stop
-    ));
+    let _env_id = crate::TestEnvVarGuard::unset("CONTROL_PLANE_TUNNEL_ID");
+    let _env_key = crate::TestEnvVarGuard::set("CONTROL_PLANE_API_KEY", "environment-key");
+    let setup = OpenAiSetupState::new(None);
+    assert_eq!(setup.next_field(), Some(OpenAiSetupField::TunnelId));
+    assert_eq!(setup.masked_api_key(), "*".repeat("environment-key".len()));
 }
-
 #[test]
 fn openai_setup_starts_directly_when_values_are_configured() {
     let root =
