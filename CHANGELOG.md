@@ -32,13 +32,6 @@ Full Changelog: [`0.423.0...0.423.1`](https://github.com/christiandoxa/prodex/co
 
 ## 0.423.0 - 2026-09-01
 
-### Misc
-
-- Resolve release CI blockers (`392aa3a`)
-- Ship 0.423.0 stability train (`0862b70`)
-
-## 0.422.0 - 2026-08-31
-
 ### Runtime
 
 - Stabilize broker working directory (`7340f6b`)
@@ -100,6 +93,8 @@ Full Changelog: [`0.423.0...0.423.1`](https://github.com/christiandoxa/prodex/co
 
 ### Misc
 
+- Resolve release CI blockers (`392aa3a`)
+- Ship 0.423.0 stability train (`0862b70`)
 - Support Python tunnel fixtures on Windows (`3902174`)
 - Invoke Windows tunnel fixture through cmd (`003439b`)
 - Execute Windows tunnel fixtures directly (`a3550d1`)
