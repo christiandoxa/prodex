@@ -319,12 +319,19 @@ fn openai_ready_status_separates_local_browser_mcp_and_connector_state() {
         ),
     })));
 
+    let capability_url = "http://127.0.0.1:1234/pdx/v1/capability/mcp";
+
     let rendered = ready_body(&state, 120)
         .iter()
         .map(line_text)
         .collect::<Vec<_>>()
         .join("\n");
     assert!(rendered.contains("Tunnel runtime ready"), "{rendered}");
+    assert!(
+        rendered.contains("Local MCP URL: local loopback only"),
+        "{rendered}"
+    );
+    assert!(!rendered.contains(capability_url), "{rendered}");
     assert!(
         rendered.contains("OpenAI client: 0.0.13 · /healthz and /readyz ready"),
         "{rendered}"
@@ -337,10 +344,8 @@ fn openai_ready_status_separates_local_browser_mcp_and_connector_state() {
         rendered.contains("Browser remains local on loopback"),
         "{rendered}"
     );
-    assert!(
-        !rendered.contains("Local-only mode stays on loopback"),
-        "{rendered}"
-    );
+    let debug = format!("{:?}", state.ready.as_ref().expect("OpenAI ready state"));
+    assert!(!debug.contains(capability_url), "{debug}");
 }
 
 #[test]
