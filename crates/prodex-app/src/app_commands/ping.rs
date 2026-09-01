@@ -15,7 +15,10 @@ use super::{AppPaths, AppState, AppStateIoExt, ProfileProvider, command_output_w
 
 #[path = "ping_output.rs"]
 mod ping_output;
+#[path = "ping_workers.rs"]
+mod ping_workers;
 use ping_output::{render_ping_result, render_ping_summary};
+use ping_workers::{collect_ping_results, probe_ping_worker};
 
 const PING_PROMPT: &str = "ping";
 const PING_TIMEOUT: Duration = Duration::from_secs(45);
@@ -198,28 +201,10 @@ fn probe_ping_targets(
             let queue = Arc::clone(&queue);
             let sender = sender.clone();
             let options = options.clone();
-            scope.spawn(move || {
-                loop {
-                    let target = queue.lock().ok().and_then(|mut queue| queue.pop_front());
-                    let Some(target) = target else {
-                        return;
-                    };
-                    let result = probe_ping_target(target, &options);
-                    if sender.send(result).is_err() {
-                        return;
-                    }
-                }
-            });
+            scope.spawn(move || probe_ping_worker(&queue, sender, &options));
         }
-        for _ in 0..target_count {
-            let result = receiver
-                .recv()
-                .context("OpenAI application ping worker stopped unexpectedly")?;
-            if !json {
-                render_ping_result(&result)?;
-            }
-            results.push(result);
-        }
+        drop(sender);
+        results = collect_ping_results(&receiver, target_count, json)?;
         Ok::<_, anyhow::Error>(())
     })?;
 

@@ -423,50 +423,62 @@ fn runtime_async_logger_wait_for_write_permit() {
 
 fn runtime_async_logger_worker_loop(inner: Arc<RuntimeAsyncLoggerInner>) {
     loop {
-        let work_item = {
-            let mut state = inner
-                .state
-                .lock()
-                .unwrap_or_else(|poisoned| poisoned.into_inner());
-            loop {
-                if let Some(work_item) = state.pop_work_item(inner.capacity) {
-                    break work_item;
-                }
-                if Arc::strong_count(&inner) == 1 {
-                    return;
-                }
-                state = inner
-                    .work_available
-                    .wait(state)
-                    .unwrap_or_else(|poisoned| poisoned.into_inner());
-            }
+        let Some(work_item) = next_runtime_async_logger_work_item(&inner) else {
+            return;
         };
 
         runtime_async_logger_wait_for_write_permit();
-
-        let mut completed = Vec::with_capacity(2);
-        if let Some(entry) = work_item.line {
-            let result = write_log_line(&inner, &entry.log_path, &entry.line);
-            completed.push((entry.log_path, result));
-        }
-        if let Some(marker) = work_item.dropped_marker {
-            let line = (inner.dropped_marker_formatter)(marker.marker);
-            let result = write_log_line(&inner, &marker.log_path, &line);
-            completed.push((marker.log_path, result));
-        }
-
-        let mut state = inner
-            .state
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
-        for (log_path, result) in completed {
-            if let Err(error) = result {
-                state.record_write_error(&log_path, error);
-            }
-            state.decrement_pending_for_path(&log_path);
-        }
-        inner.path_drained.notify_all();
+        complete_runtime_async_logger_work_item(&inner, work_item);
     }
+}
+
+fn next_runtime_async_logger_work_item(
+    inner: &Arc<RuntimeAsyncLoggerInner>,
+) -> Option<RuntimeAsyncLoggerWorkItem> {
+    let mut state = inner
+        .state
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    loop {
+        if let Some(work_item) = state.pop_work_item(inner.capacity) {
+            return Some(work_item);
+        }
+        if Arc::strong_count(inner) == 1 {
+            return None;
+        }
+        state = inner
+            .work_available
+            .wait(state)
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+    }
+}
+
+fn complete_runtime_async_logger_work_item(
+    inner: &Arc<RuntimeAsyncLoggerInner>,
+    work_item: RuntimeAsyncLoggerWorkItem,
+) {
+    let mut completed = Vec::with_capacity(2);
+    if let Some(entry) = work_item.line {
+        let result = write_log_line(inner, &entry.log_path, &entry.line);
+        completed.push((entry.log_path, result));
+    }
+    if let Some(marker) = work_item.dropped_marker {
+        let line = (inner.dropped_marker_formatter)(marker.marker);
+        let result = write_log_line(inner, &marker.log_path, &line);
+        completed.push((marker.log_path, result));
+    }
+
+    let mut state = inner
+        .state
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    for (log_path, result) in completed {
+        if let Err(error) = result {
+            state.record_write_error(&log_path, error);
+        }
+        state.decrement_pending_for_path(&log_path);
+    }
+    inner.path_drained.notify_all();
 }
 
 impl Drop for RuntimeAsyncLogger {

@@ -295,6 +295,24 @@ pub fn cleanup_runtime_log_directory_with_prefix(
     log_prefix: &str,
 ) -> RuntimeLogCleanupReport {
     let policy = policy.normalized();
+    match runtime_log_directory_is_directory(dir) {
+        Ok(true) => {}
+        Ok(false) => {
+            return RuntimeLogCleanupReport {
+                scan_failures: 1,
+                ..RuntimeLogCleanupReport::default()
+            };
+        }
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {
+            return RuntimeLogCleanupReport::default();
+        }
+        Err(_) => {
+            return RuntimeLogCleanupReport {
+                scan_failures: 1,
+                ..RuntimeLogCleanupReport::default()
+            };
+        }
+    }
     let _lock = match RuntimeLogDirectoryLock::try_acquire(dir) {
         Ok(Some(lock)) => lock,
         Ok(None) => return RuntimeLogCleanupReport::default(),
@@ -316,6 +334,12 @@ struct RuntimeLogFileEntry {
     path: PathBuf,
     size: u64,
     modified_epoch_seconds: i64,
+}
+
+struct RuntimeLogScan {
+    logs: Vec<RuntimeLogFileEntry>,
+    lock_paths: Vec<PathBuf>,
+    report: RuntimeLogCleanupReport,
 }
 
 fn open_runtime_log_lock_file(path: &Path) -> io::Result<fs::File> {
@@ -436,59 +460,11 @@ fn cleanup_runtime_log_directory_locked(
     protected_paths: &[PathBuf],
     log_prefix: &str,
 ) -> RuntimeLogCleanupReport {
-    let entries = match fs::read_dir(dir) {
-        Ok(entries) => entries,
-        Err(error) if error.kind() == io::ErrorKind::NotFound => {
-            return RuntimeLogCleanupReport::default();
-        }
-        Err(_) => {
-            return RuntimeLogCleanupReport {
-                scan_failures: 1,
-                ..RuntimeLogCleanupReport::default()
-            };
-        }
-    };
-    let mut report = RuntimeLogCleanupReport::default();
-    let mut logs = Vec::new();
-    let mut lock_paths = Vec::new();
-    for entry in entries {
-        let Ok(entry) = entry else {
-            report.scan_failures += 1;
-            continue;
-        };
-        let path = entry.path();
-        let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
-            continue;
-        };
-        if name.starts_with(log_prefix) && name.ends_with(RUNTIME_LOG_ACTIVE_LOCK_SUFFIX) {
-            lock_paths.push(path);
-            continue;
-        }
-        if !(name.starts_with(log_prefix) && name.ends_with(".log")) {
-            continue;
-        }
-        let Ok(metadata) = fs::symlink_metadata(&path) else {
-            report.scan_failures += 1;
-            continue;
-        };
-        if metadata.file_type().is_symlink() || !metadata.is_file() {
-            continue;
-        }
-        let Some(modified_epoch_seconds) = metadata
-            .modified()
-            .ok()
-            .and_then(|modified| modified.duration_since(UNIX_EPOCH).ok())
-            .and_then(|duration| i64::try_from(duration.as_secs()).ok())
-        else {
-            report.scan_failures += 1;
-            continue;
-        };
-        logs.push(RuntimeLogFileEntry {
-            path,
-            size: metadata.len(),
-            modified_epoch_seconds,
-        });
-    }
+    let RuntimeLogScan {
+        mut logs,
+        lock_paths,
+        mut report,
+    } = scan_runtime_log_directory(dir, log_prefix);
     logs.sort_by(|left, right| {
         left.modified_epoch_seconds
             .cmp(&right.modified_epoch_seconds)
@@ -505,30 +481,157 @@ fn cleanup_runtime_log_directory_locked(
     let mut total_bytes = logs.iter().map(|log| log.size).sum::<u64>();
     let mut remaining_count = logs.len();
 
-    for log in &logs {
+    remove_expired_runtime_logs(
+        &logs,
+        oldest_allowed,
+        &protected_paths,
+        &mut removed_paths,
+        &mut report,
+        &mut total_bytes,
+        &mut remaining_count,
+    );
+    remove_over_budget_runtime_logs(
+        &logs,
+        policy,
+        &protected_paths,
+        &mut removed_paths,
+        &mut report,
+        &mut total_bytes,
+        &mut remaining_count,
+    );
+    remove_stale_runtime_log_locks(dir, lock_paths, &mut report);
+    report
+}
+
+fn runtime_log_directory_is_directory(dir: &Path) -> io::Result<bool> {
+    let metadata = fs::symlink_metadata(dir)?;
+    Ok(metadata.is_dir() && !metadata.file_type().is_symlink())
+}
+
+fn scan_runtime_log_directory(dir: &Path, log_prefix: &str) -> RuntimeLogScan {
+    let entries = match fs::read_dir(dir) {
+        Ok(entries) => entries,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {
+            return RuntimeLogScan {
+                logs: Vec::new(),
+                lock_paths: Vec::new(),
+                report: RuntimeLogCleanupReport::default(),
+            };
+        }
+        Err(_) => {
+            return RuntimeLogScan {
+                logs: Vec::new(),
+                lock_paths: Vec::new(),
+                report: RuntimeLogCleanupReport {
+                    scan_failures: 1,
+                    ..RuntimeLogCleanupReport::default()
+                },
+            };
+        }
+    };
+    let mut scan = RuntimeLogScan {
+        logs: Vec::new(),
+        lock_paths: Vec::new(),
+        report: RuntimeLogCleanupReport::default(),
+    };
+    for entry in entries {
+        match entry {
+            Ok(entry) => inspect_runtime_log_entry(entry.path(), log_prefix, &mut scan),
+            Err(_) => scan.report.scan_failures += 1,
+        }
+    }
+    scan
+}
+
+fn inspect_runtime_log_entry(path: PathBuf, log_prefix: &str, scan: &mut RuntimeLogScan) {
+    let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
+        return;
+    };
+    if name.starts_with(log_prefix) && name.ends_with(RUNTIME_LOG_ACTIVE_LOCK_SUFFIX) {
+        scan.lock_paths.push(path);
+        return;
+    }
+    if !(name.starts_with(log_prefix) && name.ends_with(".log")) {
+        return;
+    }
+    let Ok(metadata) = fs::symlink_metadata(&path) else {
+        scan.report.scan_failures += 1;
+        return;
+    };
+    if metadata.file_type().is_symlink() || !metadata.is_file() {
+        return;
+    }
+    let Some(modified_epoch_seconds) = metadata
+        .modified()
+        .ok()
+        .and_then(|modified| modified.duration_since(UNIX_EPOCH).ok())
+        .and_then(|duration| i64::try_from(duration.as_secs()).ok())
+    else {
+        scan.report.scan_failures += 1;
+        return;
+    };
+    scan.logs.push(RuntimeLogFileEntry {
+        path,
+        size: metadata.len(),
+        modified_epoch_seconds,
+    });
+}
+
+fn runtime_log_is_removable(path: &Path, protected_paths: &BTreeSet<&PathBuf>) -> bool {
+    !protected_paths
+        .iter()
+        .any(|protected| protected.as_path() == path)
+        && !runtime_log_path_is_active(path)
+}
+
+fn remove_expired_runtime_logs(
+    logs: &[RuntimeLogFileEntry],
+    oldest_allowed: i64,
+    protected_paths: &BTreeSet<&PathBuf>,
+    removed_paths: &mut BTreeSet<PathBuf>,
+    report: &mut RuntimeLogCleanupReport,
+    total_bytes: &mut u64,
+    remaining_count: &mut usize,
+) {
+    for log in logs {
         if log.modified_epoch_seconds < oldest_allowed
-            && !protected_paths.contains(&log.path)
-            && !runtime_log_path_is_active(&log.path)
-            && remove_runtime_log_file(log, &mut report, &mut total_bytes, &mut remaining_count)
+            && runtime_log_is_removable(&log.path, protected_paths)
+            && remove_runtime_log_file(log, report, total_bytes, remaining_count)
         {
             removed_paths.insert(log.path.clone());
         }
     }
-    for log in &logs {
-        if remaining_count <= policy.max_files && total_bytes <= policy.total_bytes {
+}
+
+fn remove_over_budget_runtime_logs(
+    logs: &[RuntimeLogFileEntry],
+    policy: RuntimeLogPolicy,
+    protected_paths: &BTreeSet<&PathBuf>,
+    removed_paths: &mut BTreeSet<PathBuf>,
+    report: &mut RuntimeLogCleanupReport,
+    total_bytes: &mut u64,
+    remaining_count: &mut usize,
+) {
+    for log in logs {
+        if *remaining_count <= policy.max_files && *total_bytes <= policy.total_bytes {
             break;
         }
         if removed_paths.contains(&log.path)
-            || protected_paths.contains(&log.path)
-            || runtime_log_path_is_active(&log.path)
+            || !runtime_log_is_removable(&log.path, protected_paths)
         {
             continue;
         }
-        if remove_runtime_log_file(log, &mut report, &mut total_bytes, &mut remaining_count) {
+        if remove_runtime_log_file(log, report, total_bytes, remaining_count) {
             removed_paths.insert(log.path.clone());
         }
     }
+}
 
+fn remove_stale_runtime_log_locks(
+    dir: &Path,
+    lock_paths: Vec<PathBuf>,
+    report: &mut RuntimeLogCleanupReport,
+) {
     for lock_path in lock_paths {
         let Some(log_path) = lock_path
             .file_name()
@@ -538,15 +641,15 @@ fn cleanup_runtime_log_directory_locked(
         else {
             continue;
         };
-        if !log_path.exists() && !runtime_log_path_is_active_from_lock(&lock_path) {
-            match fs::remove_file(lock_path) {
-                Ok(()) => {}
-                Err(error) if error.kind() == io::ErrorKind::NotFound => {}
-                Err(_) => report.delete_failures += 1,
-            }
+        if log_path.exists() || runtime_log_path_is_active_from_lock(&lock_path) {
+            continue;
+        }
+        match fs::remove_file(lock_path) {
+            Ok(()) => {}
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+            Err(_) => report.delete_failures += 1,
         }
     }
-    report
 }
 
 fn runtime_log_path_is_active(path: &Path) -> bool {
