@@ -69,7 +69,11 @@ impl OutputThroughput {
             .is_some_and(|(_, previous)| event.output_tokens < *previous);
         if event.output_tokens > 0 {
             let observation = output_throughput_observation(event);
-            if !counter_reset && self.is_duplicate_live_disk_observation(&observation, log_path) {
+            if !counter_reset
+                && self
+                    .duplicate_observation_path(&observation, log_path)
+                    .is_some()
+            {
                 return;
             }
             self.remember_observation(observation, log_path);
@@ -141,18 +145,27 @@ impl OutputThroughput {
     }
 
     pub(super) fn finish(&mut self, log_path: &Path, event: &InfoTokenUsageEvent) {
-        if self.is_duplicate_live_disk_observation(&output_throughput_observation(event), log_path)
-        {
-            return;
-        }
+        let observation = output_throughput_observation(event);
         let key = OutputThroughputKey {
             log_path: log_path.to_path_buf(),
             profile: event.profile.clone(),
             request: event.request,
         };
+        let duplicate_rate = self
+            .duplicate_observation_path(&observation, log_path)
+            .and_then(|path| {
+                self.last_known_rates
+                    .get(&OutputThroughputKey {
+                        log_path: path.to_path_buf(),
+                        profile: event.profile.clone(),
+                        request: event.request,
+                    })
+                    .copied()
+            });
         let rate = if let Some(stream) = self.streams.get_mut(&key) {
             stream.active = false;
-            let rate = valid_output_rate(event)
+            let rate = duplicate_rate
+                .or_else(|| valid_output_rate(event))
                 .or_else(|| output_throughput_stream_rate(stream))
                 .or(stream.last_known_rate);
             if let Some(rate) = rate.filter(|rate| rate.is_finite() && *rate > 0.0) {
@@ -294,17 +307,18 @@ impl OutputThroughput {
             .insert(observation, log_path.to_path_buf());
     }
 
-    fn is_duplicate_live_disk_observation(
+    fn duplicate_observation_path(
         &self,
         observation: &OutputThroughputObservation,
         log_path: &Path,
-    ) -> bool {
+    ) -> Option<&Path> {
         self.seen_observations
             .get(observation)
-            .is_some_and(|previous_path| {
-                previous_path != log_path
-                    && is_live_log_path(previous_path) != is_live_log_path(log_path)
+            .filter(|previous_path| {
+                previous_path.as_path() != log_path
+                    && is_live_log_path(previous_path.as_path()) != is_live_log_path(log_path)
             })
+            .map(|path| path.as_path())
     }
 }
 
@@ -782,5 +796,51 @@ mod tests {
             Some(10.0)
         );
         assert_eq!(throughput.display_rate(Instant::now()), Some(20.0));
+    }
+
+    #[test]
+    fn historical_final_then_live_replay_keeps_authoritative_idle_rate() {
+        let disk = Path::new("/tmp/runtime-history-replay.log");
+        let live = Path::new("broker:runtime:instance");
+        let start = Instant::now();
+        let completed = InfoTokenUsageEvent {
+            timestamp: "2026-08-28 12:00:01".to_string(),
+            profile: "main".to_string(),
+            request: Some(16),
+            output_tokens: 200,
+            generation_ms: Some(2_500),
+            output_tokens_per_second: Some(80.0),
+            ..InfoTokenUsageEvent::default()
+        };
+        let mut throughput = OutputThroughput::default();
+        throughput.observe_historical(disk, &completed);
+        throughput.observe_token_usage(
+            live,
+            &InfoTokenUsageEvent {
+                output_tokens: 100,
+                generation_ms: None,
+                output_tokens_per_second: None,
+                ..completed.clone()
+            },
+            start,
+        );
+        throughput.observe_token_usage(
+            live,
+            &InfoTokenUsageEvent {
+                output_tokens: 200,
+                generation_ms: None,
+                output_tokens_per_second: None,
+                ..completed.clone()
+            },
+            start + Duration::from_secs(1),
+        );
+        throughput.observe_token_usage(live, &completed, start + Duration::from_secs(1));
+        throughput.finish(live, &completed);
+
+        assert_eq!(throughput.active_rate(start + Duration::from_secs(1)), None);
+        assert_eq!(
+            throughput.display_rate(start + Duration::from_secs(1)),
+            Some(80.0)
+        );
     }
 }
