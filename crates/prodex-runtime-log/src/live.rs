@@ -45,9 +45,10 @@ pub(super) struct RuntimeLiveLogStore {
 
 impl RuntimeLiveLogStore {
     pub(super) fn append(&self, path: &Path, line: &str) {
-        let Ok(mut state) = self.state.try_lock() else {
-            return;
-        };
+        let mut state = self
+            .state
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         let line = bounded_live_log_line(line);
         let sequence = state.next_sequence.saturating_add(1);
         state.next_sequence = sequence;
@@ -204,6 +205,96 @@ fn clip_json_strings(value: &mut serde_json::Value, max_bytes: usize) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::{Arc, mpsc::sync_channel};
+    use std::thread;
+    use std::time::Duration;
+
+    fn dropped_marker(marker: super::super::RuntimeDroppedLogMarker) -> String {
+        format!("dropped={}\n", marker.dropped_count)
+    }
+
+    #[test]
+    fn append_contention_retains_event_after_state_is_released() {
+        let store = Arc::new(RuntimeLiveLogStore::default());
+        let path = PathBuf::from("runtime.log");
+        let state = store.state.lock().unwrap();
+        let (done_tx, done_rx) = sync_channel(0);
+        let append_store = Arc::clone(&store);
+        let append_path = path.clone();
+        let append_thread = thread::spawn(move || {
+            append_store.append(&append_path, "event\n");
+            done_tx.send(()).unwrap();
+        });
+
+        assert!(done_rx.recv_timeout(Duration::from_millis(50)).is_err());
+        drop(state);
+        done_rx.recv_timeout(Duration::from_secs(1)).unwrap();
+        append_thread.join().unwrap();
+
+        let snapshot = store.snapshot_after(&path, 0, 1);
+        assert_eq!(snapshot.entries.len(), 1);
+        assert_eq!(snapshot.dropped, 0);
+        assert_eq!(snapshot.entries[0].line, "event\n");
+    }
+
+    #[test]
+    fn snapshot_contention_waits_for_a_coherent_live_state() {
+        let store = Arc::new(RuntimeLiveLogStore::default());
+        let path = PathBuf::from("runtime.log");
+        store.append(&path, "before\n");
+        let state = store.state.lock().unwrap();
+        let (snapshot_tx, snapshot_rx) = sync_channel(0);
+        let snapshot_store = Arc::clone(&store);
+        let snapshot_path = path.clone();
+        let snapshot_thread = thread::spawn(move || {
+            snapshot_tx
+                .send(snapshot_store.snapshot_after(&snapshot_path, 0, 1))
+                .unwrap();
+        });
+
+        assert!(snapshot_rx.recv_timeout(Duration::from_millis(50)).is_err());
+        drop(state);
+        let snapshot = snapshot_rx.recv_timeout(Duration::from_secs(1)).unwrap();
+        snapshot_thread.join().unwrap();
+
+        assert_eq!(snapshot.entries.len(), 1);
+        assert_eq!(snapshot.dropped, 0);
+        assert_eq!(snapshot.entries[0].line, "before\n");
+    }
+
+    #[test]
+    fn token_usage_event_survives_live_store_contention() {
+        let path = PathBuf::from("token-usage.log");
+        let logger =
+            super::super::RuntimeAsyncLogger::new_with_recording(4, dropped_marker, false).unwrap();
+        let live_state = logger.inner.live.state.lock().unwrap();
+        logger.try_enqueue(&path, "token_usage request=7 output_tokens=4\n".to_string());
+
+        let (flushed_tx, flushed_rx) = sync_channel(0);
+        let flush_logger = logger.clone();
+        let flush_path = path.clone();
+        let flush_thread = thread::spawn(move || {
+            flushed_tx
+                .send(flush_logger.flush_path(&flush_path))
+                .unwrap();
+        });
+
+        assert!(flushed_rx.recv_timeout(Duration::from_millis(50)).is_err());
+        drop(live_state);
+        flushed_rx
+            .recv_timeout(Duration::from_secs(1))
+            .unwrap()
+            .unwrap();
+        flush_thread.join().unwrap();
+
+        let snapshot = logger.live_log_snapshot_after(&path, 0, 1);
+        assert_eq!(snapshot.entries.len(), 1);
+        assert_eq!(snapshot.dropped, 0);
+        assert_eq!(
+            snapshot.entries[0].line,
+            "token_usage request=7 output_tokens=4\n"
+        );
+    }
 
     #[test]
     fn live_log_store_is_bounded_and_keeps_complete_lines() {
