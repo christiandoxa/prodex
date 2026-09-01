@@ -1,7 +1,10 @@
+use super::super::log_throughput::OutputThroughput;
+use super::log_stream::{LogStreamItem, collect_runtime_log_line};
 use crate::{
     AppPaths, RuntimeConfig, load_runtime_broker_registry, probe_runtime_broker_log_snapshot,
     runtime_broker_registry_keys, runtime_process_pid_alive,
 };
+use anyhow::Result;
 use reqwest::blocking::Client;
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -60,4 +63,25 @@ impl LiveRuntimeLogSource {
         }
         lines
     }
+}
+
+pub(crate) fn collect_live_log_items(
+    live_source: &mut Option<LiveRuntimeLogSource>,
+    include_operational_insights: bool,
+    mut throughput: Option<&mut OutputThroughput>,
+) -> Result<Vec<LogStreamItem>> {
+    let Some(live_source) = live_source.as_mut() else {
+        return Ok(Vec::new());
+    };
+    let mut items = Vec::new();
+    for (path, line) in live_source.poll() {
+        items.extend(collect_runtime_log_line(
+            &path,
+            &line,
+            include_operational_insights,
+            throughput.as_deref_mut(),
+            true,
+        )?);
+    }
+    Ok(items)
 }
