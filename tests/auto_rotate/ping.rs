@@ -239,6 +239,37 @@ fn ping_openai_reports_middle_503_without_calling_it_quota() {
 }
 
 #[test]
+fn ping_openai_reports_generic_429_as_rate_limited() {
+    let fixture = setup_fixture();
+    let third_home = add_managed_profile(&fixture, "third", "third-account");
+    let home_log = fixture._temp_dir.path.join("ping-rate-limited-homes.log");
+    let home_log_string = home_log.display().to_string();
+
+    let output = run_prodex_with_env(
+        &fixture,
+        &["ping", "openai"],
+        &[
+            ("TEST_CODEX_FAILURE_PROFILE", "second"),
+            ("TEST_CODEX_FAILURE_KIND", "rate_limited"),
+            ("TEST_CODEX_LOG_APPEND", home_log_string.as_str()),
+        ],
+    );
+
+    assert!(!output.status.success());
+    assert_profiles_were_probed(
+        &home_log,
+        &[
+            fixture.main_home.clone(),
+            fixture.second_home.clone(),
+            third_home,
+        ],
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("second  RATE_LIMITED"), "{stdout}");
+    assert!(stdout.contains("Exhausted: 0"), "{stdout}");
+}
+
+#[test]
 fn ping_openai_reports_malformed_output_and_continues() {
     let fixture = setup_fixture();
     let third_home = add_managed_profile(&fixture, "third", "third-account");
@@ -293,6 +324,31 @@ fn ping_openai_reports_child_spawn_failure_and_continues() {
     );
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("main  SPAWN_FAILED"), "{stdout}");
+    assert!(stdout.contains("second  OK"), "{stdout}");
+}
+
+#[test]
+fn ping_openai_reports_fast_nonzero_exit_detail_and_continues() {
+    let fixture = setup_fixture();
+    let home_log = fixture._temp_dir.path.join("ping-process-homes.log");
+    let home_log_string = home_log.display().to_string();
+
+    let output = run_prodex_with_env(
+        &fixture,
+        &["ping", "openai"],
+        &[
+            ("TEST_CODEX_FAILURE_PROFILE", "main"),
+            ("TEST_CODEX_FAILURE_KIND", "process"),
+            ("TEST_CODEX_LOG_APPEND", home_log_string.as_str()),
+        ],
+    );
+
+    assert!(!output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("main  PROCESS_FAILED"), "{stdout}");
+    assert!(stdout.contains("exit code 23"), "{stdout}");
+    assert!(stdout.contains("fast child failure"), "{stdout}");
+    assert!(!stdout.contains("fixture-token"), "{stdout}");
     assert!(stdout.contains("second  OK"), "{stdout}");
 }
 
@@ -370,6 +426,10 @@ fn ping_openai_ignores_unrelated_profile_session_files_without_aborting_inventor
     let broken_home = add_managed_profile(&fixture, "broken", "unknown-account");
     fs::write(broken_home.join("sessions"), b"not a directory")
         .expect("failed to create broken sessions path");
+    let state_before = fs::read(fixture.prodex_home.join("state.json"))
+        .expect("state should be readable before ping");
+    let sessions_before = fs::read(broken_home.join("sessions"))
+        .expect("unrelated session state should be readable before ping");
     let home_log = fixture._temp_dir.path.join("ping-error-homes.log");
     let home_log_string = home_log.display().to_string();
 
@@ -379,10 +439,23 @@ fn ping_openai_ignores_unrelated_profile_session_files_without_aborting_inventor
         &[("TEST_CODEX_LOG_APPEND", home_log_string.as_str())],
     );
 
-    assert!(!output.status.success());
+    assert!(
+        output.status.success(),
+        "unrelated profile session state should not block ping: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
     let homes = sorted_log_lines(&home_log);
     assert!(homes.contains(&fixture.main_home.to_string_lossy().to_string()));
     assert!(homes.contains(&fixture.second_home.to_string_lossy().to_string()));
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("Profiles tested: 3"), "{stdout}");
+    assert!(stdout.contains("Healthy: 3"), "{stdout}");
+    assert_eq!(
+        fs::read(fixture.prodex_home.join("state.json")).unwrap(),
+        state_before
+    );
+    assert_eq!(
+        fs::read(broken_home.join("sessions")).unwrap(),
+        sessions_before
+    );
 }
