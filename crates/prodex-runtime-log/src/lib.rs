@@ -1,7 +1,24 @@
+mod live;
+mod retention;
+
+use live::RuntimeLiveLogStore;
+pub use live::{
+    DEFAULT_RUNTIME_LIVE_LOG_MAX_BYTES, DEFAULT_RUNTIME_LIVE_LOG_MAX_ENTRIES, RuntimeLiveLogEntry,
+    RuntimeLiveLogSnapshot,
+};
+#[cfg(test)]
+use retention::RUNTIME_LOG_FILE_PREFIX;
+pub use retention::{
+    DEFAULT_RUNTIME_LOG_MAX_AGE_SECONDS, DEFAULT_RUNTIME_LOG_MAX_FILE_BYTES,
+    DEFAULT_RUNTIME_LOG_MAX_FILES, DEFAULT_RUNTIME_LOG_TOTAL_BYTES, RuntimeLogCleanupReport,
+    RuntimeLogPolicy, cleanup_runtime_log_directory, cleanup_runtime_log_directory_with_prefix,
+};
+use retention::{RuntimeLogWriterState, write_log_line};
 use runtime_proxy_crate as runtime_proxy;
 use std::collections::{BTreeMap, VecDeque};
+#[cfg(test)]
 use std::fs;
-use std::io::{self, Write};
+use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Condvar, Mutex, OnceLock};
 use std::thread;
@@ -12,6 +29,25 @@ use std::time::{SystemTime, UNIX_EPOCH};
 const RUNTIME_LOG_FLUSH_TIMEOUT: Duration = Duration::from_secs(5);
 
 pub const RUNTIME_ASYNC_LOG_DROPPED_EVENT: &str = "runtime_proxy_async_log_dropped";
+
+/// Returns whether explicit bounded raw runtime-log recording is enabled.
+pub fn runtime_log_recording_enabled() -> bool {
+    retention::runtime_log_recording_enabled()
+}
+
+/// Returns whether a runtime message is routine capacity telemetry rather than a user-facing
+/// operational event. These messages are intentionally admitted only to bounded diagnostics.
+pub fn runtime_log_message_is_routine_load(message: &str) -> bool {
+    let event = runtime_proxy::runtime_proxy_parse_log_message(message);
+    matches!(
+        event.event(),
+        Some(
+            "profile_inflight_saturated"
+                | "runtime_proxy_active_limit_reached"
+                | "runtime_proxy_lane_limit_reached",
+        )
+    )
+}
 
 pub fn decode_zstd_bounded(payload: &[u8], max_bytes: usize) -> io::Result<Vec<u8>> {
     zstd::bulk::decompress(payload, max_bytes)
@@ -115,10 +151,13 @@ struct RuntimeAsyncLoggerState {
 #[derive(Debug)]
 struct RuntimeAsyncLoggerInner {
     state: Mutex<RuntimeAsyncLoggerState>,
+    writer: Mutex<RuntimeLogWriterState>,
+    live: RuntimeLiveLogStore,
     work_available: Condvar,
     path_drained: Condvar,
     capacity: usize,
     dropped_marker_formatter: RuntimeDroppedLogMarkerFormatter,
+    policy: RuntimeLogPolicy,
 }
 
 #[derive(Debug, Clone)]
@@ -146,12 +185,42 @@ impl RuntimeAsyncLogger {
         capacity: usize,
         dropped_marker_formatter: RuntimeDroppedLogMarkerFormatter,
     ) -> io::Result<Self> {
+        Self::new_with_recording(
+            capacity,
+            dropped_marker_formatter,
+            retention::runtime_log_recording_enabled(),
+        )
+    }
+
+    pub fn new_with_recording(
+        capacity: usize,
+        dropped_marker_formatter: RuntimeDroppedLogMarkerFormatter,
+        record_to_disk: bool,
+    ) -> io::Result<Self> {
+        Self::new_with_policy(
+            capacity,
+            dropped_marker_formatter,
+            RuntimeLogPolicy {
+                record_to_disk,
+                ..RuntimeLogPolicy::from_environment()
+            },
+        )
+    }
+
+    fn new_with_policy(
+        capacity: usize,
+        dropped_marker_formatter: RuntimeDroppedLogMarkerFormatter,
+        policy: RuntimeLogPolicy,
+    ) -> io::Result<Self> {
         let inner = Arc::new(RuntimeAsyncLoggerInner {
             state: Mutex::new(RuntimeAsyncLoggerState::default()),
+            writer: Mutex::new(RuntimeLogWriterState::default()),
+            live: RuntimeLiveLogStore::default(),
             work_available: Condvar::new(),
             path_drained: Condvar::new(),
             capacity: capacity.max(1),
             dropped_marker_formatter,
+            policy: policy.normalized(),
         });
         let worker_inner = Arc::clone(&inner);
         thread::Builder::new()
@@ -205,6 +274,15 @@ impl RuntimeAsyncLogger {
             Some((kind, message)) => Err(io::Error::new(kind, message)),
             None => Ok(()),
         }
+    }
+
+    pub fn live_log_snapshot_after(
+        &self,
+        log_path: &Path,
+        after: u64,
+        limit: usize,
+    ) -> RuntimeLiveLogSnapshot {
+        self.inner.live.snapshot_after(log_path, after, limit)
     }
 
     #[doc(hidden)]
@@ -354,6 +432,9 @@ fn runtime_async_logger_worker_loop(inner: Arc<RuntimeAsyncLoggerInner>) {
                 if let Some(work_item) = state.pop_work_item(inner.capacity) {
                     break work_item;
                 }
+                if Arc::strong_count(&inner) == 1 {
+                    return;
+                }
                 state = inner
                     .work_available
                     .wait(state)
@@ -365,12 +446,12 @@ fn runtime_async_logger_worker_loop(inner: Arc<RuntimeAsyncLoggerInner>) {
 
         let mut completed = Vec::with_capacity(2);
         if let Some(entry) = work_item.line {
-            let result = runtime_write_log_line(&entry.log_path, &entry.line);
+            let result = write_log_line(&inner, &entry.log_path, &entry.line);
             completed.push((entry.log_path, result));
         }
         if let Some(marker) = work_item.dropped_marker {
             let line = (inner.dropped_marker_formatter)(marker.marker);
-            let result = runtime_write_log_line(&marker.log_path, &line);
+            let result = write_log_line(&inner, &marker.log_path, &line);
             completed.push((marker.log_path, result));
         }
 
@@ -388,19 +469,10 @@ fn runtime_async_logger_worker_loop(inner: Arc<RuntimeAsyncLoggerInner>) {
     }
 }
 
-fn runtime_write_log_line(log_path: &Path, line: &str) -> io::Result<()> {
-    let mut options = fs::OpenOptions::new();
-    options.write(true).append(true);
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::OpenOptionsExt;
-        options.custom_flags(libc::O_NOFOLLOW);
+impl Drop for RuntimeAsyncLogger {
+    fn drop(&mut self) {
+        self.inner.work_available.notify_one();
     }
-    let mut file = options.open(log_path)?;
-    if !file.metadata()?.is_file() {
-        return Err(io::Error::other("runtime log path is not a regular file"));
-    }
-    file.write_all(line.as_bytes())
 }
 
 #[doc(hidden)]
@@ -427,6 +499,38 @@ mod tests {
         ))
     }
 
+    fn runtime_log_path(root: &Path, name: &str) -> PathBuf {
+        root.join(format!("{RUNTIME_LOG_FILE_PREFIX}-{name}.log"))
+    }
+
+    fn test_policy(max_file_bytes: u64, max_files: usize, total_bytes: u64) -> RuntimeLogPolicy {
+        RuntimeLogPolicy {
+            max_file_bytes,
+            max_files,
+            total_bytes,
+            max_age_seconds: DEFAULT_RUNTIME_LOG_MAX_AGE_SECONDS,
+            record_to_disk: true,
+        }
+    }
+
+    fn create_empty_log(path: &Path) {
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent).unwrap();
+        }
+        fs::write(path, []).unwrap();
+    }
+
+    fn remove_test_root(root: &Path) {
+        for _ in 0..100 {
+            match fs::remove_dir_all(root) {
+                Ok(()) => return,
+                Err(error) if error.kind() == io::ErrorKind::NotFound => return,
+                Err(_) => std::thread::sleep(Duration::from_millis(5)),
+            }
+        }
+        let _ = fs::remove_dir_all(root);
+    }
+
     #[test]
     fn json_log_format_uses_typed_event_fields() {
         let line = runtime_format_log_line(
@@ -449,9 +553,164 @@ mod tests {
     }
 
     #[test]
+    fn routine_load_telemetry_is_distinguished_from_failures() {
+        assert!(runtime_log_message_is_routine_load(
+            "profile_inflight_saturated profile=main active=8 hard_limit=8"
+        ));
+        assert!(!runtime_log_message_is_routine_load(
+            "runtime_proxy_queue_overloaded lane=responses reason=long_lived_queue_full"
+        ));
+        assert!(!runtime_log_message_is_routine_load(
+            "profile_auth_recovery_failed profile=main"
+        ));
+    }
+
+    #[test]
+    fn runtime_log_rotates_complete_records_by_bytes() {
+        let root = test_path("rotate");
+        fs::create_dir_all(&root).unwrap();
+        let path = runtime_log_path(&root, "active");
+        create_empty_log(&path);
+        let logger =
+            RuntimeAsyncLogger::new_with_policy(4, dropped_marker, test_policy(5, 10, 1024))
+                .unwrap();
+
+        logger.try_enqueue(&path, "1234\n".to_string());
+        logger.flush_path(&path).unwrap();
+        logger.try_enqueue(&path, "next\n".to_string());
+        logger.flush_path(&path).unwrap();
+
+        let mut logs = fs::read_dir(&root)
+            .unwrap()
+            .filter_map(Result::ok)
+            .map(|entry| entry.path())
+            .filter(|path| path.extension().and_then(|value| value.to_str()) == Some("log"))
+            .collect::<Vec<_>>();
+        logs.sort();
+        assert_eq!(logs.len(), 2);
+        assert_eq!(fs::read_to_string(&path).unwrap(), "1234\n");
+        let rotated = logs.iter().find(|candidate| *candidate != &path).unwrap();
+        assert_eq!(fs::read_to_string(rotated).unwrap(), "next\n");
+        assert!(logs.iter().all(|path| {
+            fs::read(path)
+                .unwrap()
+                .last()
+                .is_some_and(|byte| *byte == b'\n')
+        }));
+
+        drop(logger);
+        remove_test_root(&root);
+    }
+
+    #[test]
+    fn oversized_runtime_log_record_is_written_once_then_rotated() {
+        let root = test_path("oversized");
+        fs::create_dir_all(&root).unwrap();
+        let path = runtime_log_path(&root, "active");
+        create_empty_log(&path);
+        let logger =
+            RuntimeAsyncLogger::new_with_policy(4, dropped_marker, test_policy(4, 10, 1024))
+                .unwrap();
+
+        logger.try_enqueue(&path, "oversized\n".to_string());
+        logger.flush_path(&path).unwrap();
+        assert_eq!(fs::read_to_string(&path).unwrap(), "oversized\n");
+        logger.try_enqueue(&path, "ok\n".to_string());
+        logger.flush_path(&path).unwrap();
+
+        let logs = fs::read_dir(&root)
+            .unwrap()
+            .filter_map(Result::ok)
+            .map(|entry| entry.path())
+            .filter(|path| path.extension().and_then(|value| value.to_str()) == Some("log"))
+            .count();
+        assert_eq!(logs, 2);
+        assert!(
+            fs::read_dir(&root)
+                .unwrap()
+                .filter_map(Result::ok)
+                .map(|entry| entry.path())
+                .filter(|path| path.extension().and_then(|value| value.to_str()) == Some("log"))
+                .any(|path| fs::read_to_string(path).unwrap() == "ok\n")
+        );
+
+        drop(logger);
+        remove_test_root(&root);
+    }
+
+    #[test]
+    fn total_runtime_log_budget_removes_old_inactive_files_but_keeps_active() {
+        let root = test_path("budget");
+        fs::create_dir_all(&root).unwrap();
+        let active = runtime_log_path(&root, "active");
+        create_empty_log(&active);
+        let logger =
+            RuntimeAsyncLogger::new_with_policy(4, dropped_marker, test_policy(1024, 8, 8))
+                .unwrap();
+        logger.try_enqueue(&active, "active\n".to_string());
+        logger.flush_path(&active).unwrap();
+
+        for name in ["old-a", "old-b", "old-c"] {
+            fs::write(runtime_log_path(&root, name), "12345\n").unwrap();
+        }
+        let report =
+            cleanup_runtime_log_directory(&root, SystemTime::now(), test_policy(1024, 8, 8));
+
+        assert!(report.removed >= 2);
+        assert!(active.exists());
+        let total = fs::read_dir(&root)
+            .unwrap()
+            .filter_map(Result::ok)
+            .map(|entry| entry.path())
+            .filter(|path| path.extension().and_then(|value| value.to_str()) == Some("log"))
+            .map(|path| fs::metadata(path).unwrap().len())
+            .sum::<u64>();
+        assert!(total <= 8, "runtime log budget exceeded: {total}");
+
+        drop(logger);
+        remove_test_root(&root);
+    }
+
+    #[test]
+    fn invalid_runtime_log_limits_fall_back_to_bounded_defaults() {
+        assert_eq!(
+            RuntimeLogPolicy {
+                max_file_bytes: 0,
+                max_files: 0,
+                total_bytes: 0,
+                max_age_seconds: 0,
+                record_to_disk: false,
+            }
+            .normalized(),
+            RuntimeLogPolicy::default()
+        );
+    }
+
+    #[test]
+    fn live_logging_does_not_create_a_disk_journal_by_default() {
+        let root = test_path("live-only");
+        fs::create_dir_all(&root).unwrap();
+        let path = runtime_log_path(&root, "active");
+        let logger = RuntimeAsyncLogger::new_with_recording(4, dropped_marker, false).unwrap();
+
+        logger.try_enqueue(&path, "event\n".to_string());
+        logger.flush_path(&path).unwrap();
+
+        assert!(!path.exists());
+        let snapshot = logger.live_log_snapshot_after(&path, 0, 1);
+        assert_eq!(snapshot.entries.len(), 1);
+        assert_eq!(snapshot.entries[0].line, "event\n");
+
+        drop(logger);
+        remove_test_root(&root);
+    }
+
+    #[test]
     fn async_logger_reports_missing_log_instead_of_creating_it() {
         let path = test_path("missing.log");
-        let logger = RuntimeAsyncLogger::new(4, dropped_marker).unwrap();
+        let logger =
+            RuntimeAsyncLogger::new_with_policy(4, dropped_marker, test_policy(1024, 8, 1024))
+                .unwrap();
 
         logger.try_enqueue(&path, "entry\n".to_string());
         let error = logger.flush_path(&path).unwrap_err();
@@ -467,7 +726,9 @@ mod tests {
         let link = test_path("link.log");
         fs::write(&target, "original\n").unwrap();
         std::os::unix::fs::symlink(&target, &link).unwrap();
-        let logger = RuntimeAsyncLogger::new(4, dropped_marker).unwrap();
+        let logger =
+            RuntimeAsyncLogger::new_with_policy(4, dropped_marker, test_policy(1024, 8, 1024))
+                .unwrap();
 
         logger.try_enqueue(&link, "entry\n".to_string());
         assert!(logger.flush_path(&link).is_err());

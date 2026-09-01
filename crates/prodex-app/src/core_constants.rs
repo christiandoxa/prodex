@@ -41,7 +41,11 @@ pub(crate) const ORPHAN_MANAGED_PROFILE_AUDIT_RETENTION_SECONDS: i64 =
     if cfg!(test) { 60 } else { 7 * 24 * 60 * 60 };
 pub(crate) const RUNTIME_PROXY_LOG_RETENTION_SECONDS: i64 =
     if cfg!(test) { 120 } else { 7 * 24 * 60 * 60 };
-pub(crate) const RUNTIME_PROXY_LOG_RETENTION_COUNT: usize = if cfg!(test) { 4 } else { 40 };
+pub(crate) const RUNTIME_PROXY_LOG_RETENTION_COUNT: usize = if cfg!(test) {
+    4
+} else {
+    runtime_log::DEFAULT_RUNTIME_LOG_MAX_FILES
+};
 pub(crate) const AUTO_RUNTIME_HOUSEKEEPING_INTERVAL_SECONDS: i64 =
     if cfg!(test) { 0 } else { 6 * 60 * 60 };
 pub(crate) const AUTO_RUNTIME_HOUSEKEEPING_LOCK_FILE: &str = "runtime-housekeeping.lock";

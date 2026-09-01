@@ -21,15 +21,19 @@ pub(crate) fn ready_body(state: &ExposeTuiState, width: usize) -> Vec<Line<'stat
         ExposeEndpointMode::ExistingCloudflareTunnel { .. } => "Existing Cloudflare Tunnel",
         ExposeEndpointMode::OpenAiSecureMcp { .. } => "OpenAI Secure MCP Tunnel",
     };
-    let mut lines = vec![
-        Line::styled(
-            if ready.public_url.is_some() {
-                "Ready — public MCP and browser route passed readiness"
-            } else {
-                "Ready — local MCP and browser route passed readiness"
-            },
-            tui_success_style().add_modifier(ratatui::style::Modifier::BOLD),
-        ),
+    let ready_summary = match &ready.endpoint {
+        ExposeEndpointMode::OpenAiSecureMcp { .. } => {
+            "Tunnel runtime ready — local MCP and browser route passed readiness; ChatGPT connector not verified"
+        }
+        _ if ready.public_url.is_some() => "Ready — public MCP and browser route passed readiness",
+        _ => "Ready — local MCP and browser route passed readiness",
+    };
+    let mut lines = text_lines(
+        ready_summary,
+        width,
+        tui_success_style().add_modifier(ratatui::style::Modifier::BOLD),
+    );
+    lines.extend([
         Line::from(format!(
             "Instance: {} ({})",
             ready.display_name, ready.instance_id
@@ -54,7 +58,7 @@ pub(crate) fn ready_body(state: &ExposeTuiState, width: usize) -> Vec<Line<'stat
         Line::from(format!("Endpoint: {endpoint}")),
         Line::from(format!("Active runs: {active_runs}")),
         Line::from(""),
-    ];
+    ]);
     if let Some(public_url) = ready.public_url.as_ref() {
         lines.extend(labeled_value_lines(
             "Public MCP URL",
@@ -129,8 +133,9 @@ pub(crate) fn ready_body(state: &ExposeTuiState, width: usize) -> Vec<Line<'stat
             tui_primary_style(),
         ));
         lines.push(Line::from(format!(
-            "OpenAI client: {client_version} · ready"
+            "OpenAI client: {client_version} · /healthz and /readyz ready"
         )));
+        lines.push(Line::from("ChatGPT connector: not verified"));
     }
     lines.push(Line::from(""));
     lines.extend(text_lines(
@@ -139,10 +144,14 @@ pub(crate) fn ready_body(state: &ExposeTuiState, width: usize) -> Vec<Line<'stat
         tui_error_style(),
     ));
     lines.extend(text_lines(
-        if ready.public_url.is_some() {
-            "The public MCP URL is an ephemeral bearer capability; stop expose to revoke it."
-        } else {
-            "Local-only mode stays on loopback; stop expose to revoke its ephemeral capability."
+        match &ready.endpoint {
+            ExposeEndpointMode::OpenAiSecureMcp { .. } => {
+                "Browser remains local on loopback; MCP is reachable through the configured OpenAI Secure MCP Tunnel. Stop expose to revoke its ephemeral capability and stop the tunnel runtime."
+            }
+            _ if ready.public_url.is_some() => {
+                "The public MCP URL is an ephemeral bearer capability; stop expose to revoke it."
+            }
+            _ => "Local-only mode stays on loopback; stop expose to revoke its ephemeral capability.",
         },
         width,
         tui_error_style(),

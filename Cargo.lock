@@ -3086,6 +3086,7 @@ name = "prodex-housekeeping"
 version = "0.422.0"
 dependencies = [
  "prodex-core",
+ "prodex-runtime-log",
  "prodex-state",
  "serde_json",
 ]
@@ -3308,6 +3309,7 @@ dependencies = [
 name = "prodex-runtime-log"
 version = "0.422.0"
 dependencies = [
+ "fs2",
  "libc",
  "prodex-runtime-proxy",
  "serde_json",

@@ -1,4 +1,16 @@
 [  {
+    "id": "audited-prodex-0.423.0-reliability-train",
+    "requiredSubjects": [
+      "feat(reliability): ship 0.423.0 stability train"
+    ],
+    "caps": {
+      "maxFiles": 80,
+      "maxBehaviorFiles": 60,
+      "maxLines": 5000,
+      "maxFileLines": 700
+    },
+    "reason": "Reviewed the bounded 0.423.0 release train: Codex rust-v0.152.0 compatibility evidence, all-account application ping, pre-commit usage-limit recovery, Expose readiness diagnostics, quota-first log UX, and authenticated bounded live telemetry replace the previous raw runtime-log sink. The allowance scopes only this release-critical source/test/docs train; all normal churn, size, compatibility, security, coverage, and release gates remain enforced."
+  }, {
     "id": "audited-prodex-0.421.0-integration-campaign",
     "requiredSubjects": [
       "feat(cli): add expose tunnel providers",

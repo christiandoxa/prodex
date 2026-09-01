@@ -387,6 +387,13 @@ tunnel wire protocol. The integration points the client at the OpenAI control
 plane and gives it the local MCP endpoint; the client owns the upstream tunnel
 protocol and authentication behavior.
 
+OpenAI readiness is layered. Local MCP initialization/tools, the tunnel-client
+process, and its `/healthz`/`/readyz` responses prove local tunnel runtime
+readiness only. They do not prove that ChatGPT can create a connector or that a
+remote discovery/tool request has reached this process. Prodex therefore reports
+the ChatGPT connector as **unverified** until an actual connector request is
+observed; it does not fabricate a remote end-to-end probe.
+
 The current integration requires the audited stable client `v0.0.13` at commit
 `4b5267f823be0b046bb883aacb51603cfde3a0ea`. Install the supported client from
 the official OpenAI tunnel surface, or set `PRODEX_TUNNEL_CLIENT_BIN` to an
@@ -404,6 +411,11 @@ control-plane base URL `https://api.openai.com`, the validated tunnel ID, and
 the API-key reference `env:CONTROL_PLANE_API_KEY`. It also receives loopback
 health-listener and log-file paths. The runtime key is never placed in argv or
 the generated configuration.
+
+The generated client configuration binds the actual local MCP endpoint to the
+explicit `main` channel. It does not use the browser URL. Control-plane polling
+uses the official host-root API URL and the client-owned `/v1/tunnels/...`
+routes; Prodex does not use a GET to `/v1/mcp/...` as a readiness probe.
 
 OpenAI mode requires:
 
@@ -433,6 +445,20 @@ non-secret tunnel ID and the fixed split: Browser **Local only**, MCP **OpenAI
 Secure MCP Tunnel**. If the tunnel ID, runtime key, or supported client is
 missing, setup stops with guidance instead of attempting a broken launch. The
 runtime API key is never displayed.
+
+The OpenAI Platform tunnel must be associated with the intended ChatGPT
+workspace, and the relevant principals need Tunnels **Read** + **Use**. Seeing
+or creating a tunnel is not proof that its runtime key or ChatGPT connector may
+use it. A newly created tunnel can also need the documented propagation window
+before connector setup sees it.
+
+ChatGPT connector creation can fail before any command reaches the local MCP.
+In that case inspect the tunnel-client status/log or its redacted support
+archive and classify the failure as remote or permission/workspace related;
+do not call local Prodex MCP unhealthy. Historical [issue #35](https://github.com/openai/tunnel-client/issues/35)
+documents a ChatGPT-side SSE/404 probe, while the still-open [issue #41](https://github.com/openai/tunnel-client/issues/41)
+documents a no-auth `server/discover` reconnect class. These upstream reports
+are not proof that a current Prodex request failed locally.
 
 ## Credentials and security
 
@@ -474,6 +500,12 @@ With a TTY, the expose view shows lifecycle phases such as Preparing,
 Cloudflare tunnel, OpenAI Secure MCP Tunnel, local MCP initialize/tools, public
 MCP initialize/tools, Ready, Stopped, and Failed. State transitions are bounded
 and failures are redacted before presentation.
+
+For OpenAI mode, the Ready view means: local MCP ready, local browser on
+loopback, and tunnel-client health ready. It also shows **ChatGPT connector:
+not verified**. A remote `server/discover`, `initialize`, `tools/list`, or
+`tools/call` observed by the tunnel runtime is a separate diagnostic result,
+not an automatic consequence of `/readyz`.
 
 ### Complete URLs in the Ready view
 
@@ -541,6 +573,7 @@ Did public MCP initialize/tools/list pass?
 | OpenAI tunnel ID rejected | Configuration | Use `CONTROL_PLANE_TUNNEL_ID` or `--openai-tunnel-id` with `tunnel_` plus exactly 32 lowercase letters/digits. |
 | OpenAI runtime key missing | Secret configuration | Set `CONTROL_PLANE_API_KEY` in the environment. There is no `--openai-api-key` option. |
 | OpenAI tunnel does not become ready | OpenAI startup/network | Check the pre-created tunnel, outbound HTTPS/TCP 443 to the configured OpenAI control plane, client permissions, and the local MCP endpoint. The client health probe is bounded. |
+| ChatGPT connector creation fails but `/readyz` is 200 | Remote connector/control plane | Check workspace association, Tunnels Read + Use, tunnel propagation, and whether any command appears in the tunnel-client log/support archive. `/readyz` does not prove ChatGPT connector readiness. |
 | `LocalOriginPortInUse` | Local listener | Choose a different existing-tunnel origin port or stop the process that owns that exact loopback port. Quick/Local/OpenAI modes use an OS-selected port. |
 | URL works locally but public browser route is 404 | Intentional routing or provider mode | Cloudflare mode publishes the browser route; OpenAI mode intentionally keeps it local. Use the local browser URL for OpenAI and inspect Host/capability routing for Cloudflare. |
 | Tunnel child exits after Ready | Child lifecycle | Stop/restart Expose after inspecting the redacted status/log information. Prodex fails closed and does not silently switch providers. |

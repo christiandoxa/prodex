@@ -448,7 +448,10 @@ and MCP route local. `prodex s expose --tunnel` or
 Quick Tunnel and publishes the browser terminal plus MCP route.
 `--tunnel-provider cloudflare-existing` uses an existing Cloudflare config or
 token file. `--tunnel-provider openai` uses the OpenAI Secure MCP Tunnel for MCP
-only; the browser remains local and no public browser URL exists.
+only; the browser remains local and no public browser URL exists. Local MCP and
+tunnel-client `/readyz` readiness do not prove ChatGPT connector creation or
+remote discovery; the connector remains unverified until real remote traffic
+is observed.
 
 On Codex/provider-bridge paths, Smart Context preserves continuation metadata and critical signals while applying deterministic, validated context rewriting. Native opaque CLIs are outside that rewrite boundary. See [docs/smart-context.md](docs/smart-context.md) for its safety model and rollout controls.
 
@@ -458,13 +461,16 @@ Managed optimizer roots are checked in this order: `PRODEX_OPTIMIZERS_HOME`, `$X
 
 ## OpenAI profile diagnostic
 
-`prodex ping openai` sends the minimal user text `ping` through the normal
-Prodex OpenAI/Codex request path and succeeds when a valid completed model
-response is received. It uses normal profile selection, authentication,
-rotation, and response validation; the response does not need to say `pong`.
-Use `prodex ping openai --json` for machine-readable results. This is an
-application-level provider diagnostic, not ICMP, DNS, TCP, TLS, or `/models`
-connectivity testing.
+`prodex ping openai` snapshots every configured eligible OpenAI profile and
+sends the minimal user text `ping` through the normal Prodex OpenAI/Codex
+request path, pinning each probe so one account cannot hide behind another.
+It reports each completed response or typed failure, continues after failures,
+and exits non-zero unless every requested profile succeeds. A valid completed
+model response is enough; the response does not need to say `pong`. Use
+`prodex ping openai --profile NAME` for one explicit profile or
+`prodex ping openai --json` for the aggregate machine-readable result. This
+is an application-level provider diagnostic, not ICMP, DNS, TCP, TLS, or
+`/models` connectivity testing.
 
 ## ChatGPT MCP expose
 
@@ -499,7 +505,10 @@ the URL is not OAuth or multi-user authentication. Existing Cloudflare mode
 requires a pre-created user-managed tunnel whose configured hostname routes to
 the selected loopback origin; Prodex does not request or display its secrets.
 OpenAI Secure MCP Tunnel is MCP-only and never publishes a generic
-browser-terminal URL.
+browser-terminal URL. The OpenAI Platform tunnel must have the intended
+ChatGPT workspace association, and the runtime principal needs Tunnels
+**Read** + **Use**. A newly created tunnel may need its documented propagation
+window before connector setup succeeds.
 
 See [EXPOSE.md](EXPOSE.md) for the verified CLI reference, readiness layers,
 Cloudflare QUIC/HTTP/2 and DNS/DoH troubleshooting, OpenAI Secure MCP Tunnel
@@ -749,7 +758,7 @@ prodex run --current-time-reminder --current-time-reminder-interval 2
 prodex run --respect-system-proxy
 ```
 
-Codex `rust-v0.150.1` thread classification remains transparent passthrough. `--thread-source` accepts arbitrary upstream feature strings, applies to newly created and forked threads, and is never treated as a Prodex profile or routing signal:
+Codex `rust-v0.152.0` thread classification remains transparent passthrough. `--thread-source` accepts arbitrary upstream feature strings, applies to newly created and forked threads, and is never treated as a Prodex profile or routing signal:
 
 ```bash
 prodex exec --thread-source automated_review "review this repository"
@@ -759,7 +768,7 @@ prodex s --no-presidio --no-sub-agent exec --thread-source automated_review "rev
 prodex exec fork THREAD_ID --thread-source automated_review "continue the review"
 ```
 
-Prodex preserves the value and its position in Codex argv. It does not inject Codex's `user` default. Resume helpers omit the option so `prodex exec resume THREAD_ID` retains the thread's persisted source. Codex `rust-v0.150.1` enables retained-image budgeting during remote compaction by default; use the normal Codex configuration surface when an explicit override is needed:
+Prodex preserves the value and its position in Codex argv. It does not inject Codex's `user` default. Resume helpers omit the option so `prodex exec resume THREAD_ID` retains the thread's persisted source. Codex `rust-v0.152.0` enables retained-image budgeting during remote compaction by default; use the normal Codex configuration surface when an explicit override is needed:
 
 ```bash
 prodex -c features.compaction_image_budget=true exec "review this repository"
@@ -770,7 +779,7 @@ prodex s --provider gemini -c features.compaction_image_budget=true exec "review
 prodex -c features.compaction_image_budget=false exec "review this repository"
 ```
 
-Generated Prodex provider/default overrides precede passthrough arguments. Explicit user `-c` arguments retain their order, so a later explicit override wins; unspecified state leaves the Codex 0.150.1 default enabled, while explicit `true` or `false` is preserved exactly. Codex owns retained-image accounting, image/label boundary atomicity, and the no-backfill rule. Prodex only preserves the configuration and `/responses/compact` image, label, audio, text, metadata, developer-message, and unknown JSON structures.
+Generated Prodex provider/default overrides precede passthrough arguments. Explicit user `-c` arguments retain their order, so a later explicit override wins; unspecified state leaves the Codex 0.152.0 default enabled, while explicit `true` or `false` is preserved exactly. Codex owns retained-image accounting, image/label boundary atomicity, and the no-backfill rule. Prodex only preserves the configuration and `/responses/compact` image, label, audio, text, metadata, developer-message, and unknown JSON structures.
 
 Detached memory traffic carries `thread_source: "memory_consolidation"` in `x-codex-turn-metadata` and the matching nested `client_metadata` entry. Prodex preserves both opaquely, including unknown metadata fields and pre-commit retries. This classification is metadata, not a Prodex affinity, selection, rotation, quota, or governance mode. In the explicit JSON-RPC broker, upstream `threadSource` is an optional free-form string on `thread/start` and `thread/fork`; `thread/resume` receives no generated source.
 
@@ -1182,8 +1191,8 @@ git diff | prodex context compact-output --kind git-diff
 |---|---|
 | `prodex info` | Shows provider route/quota shapes plus effective runtime tuning values after environment, policy, and default resolution. |
 | `prodex log` | Follows the live session/runtime log view; it is the short form of `prodex log stream`. |
-| `prodex log stream` | Explicit equivalent of `prodex log`: follows session/runtime logs and prints assistant text and tool-call arguments once each item finishes streaming, plus token events. Its human TUI is titled `Prodex Log`, coalesces repeated low-signal load observations into bounded episodes with occurrence/run counts, and shows authoritative output generation throughput when token timing is available; after a valid measurement the last numeric rate remains visible while idle, otherwise it shows `— t/s`. Add `--json` for individual JSON Lines events. Transient discovery/read failures during log creation, rotation, cleanup, or replacement skip one poll instead of ending the stream. |
-| `prodex log upstream` | Explicit upstream-focused mode: follows bounded, redacted backend-bound LLM payload snapshots after Prodex processing such as Presidio redaction and Smart Context rewriting. Its human TUI is also titled `Prodex Log`; it never derives t/s from payload bytes and retains the last correlated numeric rate while idle. Add `--json` for JSON Lines payload events. Snapshots are capped at 64 KiB in the runtime log per payload. |
+| `prodex log stream` | Explicit equivalent of `prodex log`: subscribes to the authenticated runtime broker's bounded live window and session history, printing meaningful assistant/tool/model events plus token events. Routine scheduler `LOAD profile busy` telemetry is excluded before history admission. Its human TUI is titled `Prodex Log`, restores the profile/quota/reset/throughput header, and keeps the last numeric rate visible while idle. Add `--json` for individual JSON Lines events. It does not require a perpetual raw runtime-log journal; legacy recorded files are only a bounded fallback. |
+| `prodex log upstream` | Explicit upstream-focused live mode: subscribes to bounded, redacted backend-bound LLM payload snapshots after Prodex processing such as Presidio redaction and Smart Context rewriting. Its human TUI is also titled `Prodex Log`; it never derives t/s from payload bytes and retains the last correlated numeric rate while idle. Add `--json` for JSON Lines payload events. Raw upstream telemetry is not recorded by default; payload snapshots are bounded before broker admission. |
 | `prodex doctor --install` | Adds install and embedded asset checks to doctor output. |
 | `prodex doctor --runtime` | Runs runtime diagnostics. |
 | `prodex doctor --bundle PATH --redacted` | Writes a shareable JSON diagnostic bundle without stored auth tokens or headers. |

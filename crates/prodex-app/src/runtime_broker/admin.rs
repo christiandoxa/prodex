@@ -1,8 +1,8 @@
 use super::{
     RuntimeRotationProxyShared, build_runtime_proxy_json_error_response, path_without_query,
     release_runtime_session_affinity, runtime_broker_metadata_by_log_path,
-    runtime_broker_metadata_for_log_path, runtime_broker_metrics_snapshot, runtime_proxy_log,
-    runtime_proxy_persistence_enabled,
+    runtime_broker_metadata_for_log_path, runtime_broker_metrics_snapshot,
+    runtime_proxy_live_log_snapshot, runtime_proxy_log, runtime_proxy_persistence_enabled,
 };
 use anyhow::{Context, Result};
 use prodex_runtime_broker::{RuntimeBrokerHealth, RuntimeBrokerMetadata};
@@ -138,6 +138,91 @@ fn runtime_broker_health_response(
     );
     let body = serde_json::to_string(&health).ok()?;
     Some(build_runtime_proxy_json_response(200, body))
+}
+
+fn runtime_broker_log_snapshot_query(
+    request: &tiny_http::Request,
+) -> std::result::Result<(u64, usize), tiny_http::ResponseBox> {
+    runtime_broker_log_snapshot_query_url(request.url())
+}
+
+fn runtime_broker_log_snapshot_query_url(
+    url: &str,
+) -> std::result::Result<(u64, usize), tiny_http::ResponseBox> {
+    let mut after = 0_u64;
+    let mut limit = runtime_log::DEFAULT_RUNTIME_LIVE_LOG_MAX_ENTRIES;
+    let Some((_, query)) = url.split_once('?') else {
+        return Ok((after, limit));
+    };
+    for pair in query.split('&').filter(|pair| !pair.is_empty()) {
+        let Some((name, value)) = pair.split_once('=') else {
+            return Err(build_runtime_proxy_json_error_response(
+                400,
+                "invalid_request",
+                "runtime log snapshot query is malformed",
+            ));
+        };
+        match name {
+            "after" => {
+                after = value.parse().map_err(|_| {
+                    build_runtime_proxy_json_error_response(
+                        400,
+                        "invalid_request",
+                        "runtime log snapshot cursor is invalid",
+                    )
+                })?;
+            }
+            "limit" => {
+                limit = value.parse::<usize>().map_err(|_| {
+                    build_runtime_proxy_json_error_response(
+                        400,
+                        "invalid_request",
+                        "runtime log snapshot limit is invalid",
+                    )
+                })?;
+                if limit == 0 || limit > runtime_log::DEFAULT_RUNTIME_LIVE_LOG_MAX_ENTRIES {
+                    return Err(build_runtime_proxy_json_error_response(
+                        400,
+                        "invalid_request",
+                        "runtime log snapshot limit is outside the supported bound",
+                    ));
+                }
+            }
+            _ => {}
+        }
+    }
+    Ok((after, limit))
+}
+
+fn runtime_broker_log_snapshot_response(
+    request: &tiny_http::Request,
+    shared: &RuntimeRotationProxyShared,
+) -> Option<tiny_http::ResponseBox> {
+    let (after, limit) = match runtime_broker_log_snapshot_query(request) {
+        Ok(query) => query,
+        Err(response) => return Some(response),
+    };
+    let snapshot = match runtime_proxy_live_log_snapshot(&shared.log_path, after, limit) {
+        Ok(snapshot) => snapshot,
+        Err(error) => {
+            return Some(build_runtime_proxy_json_error_response(
+                503,
+                "live_log_unavailable",
+                &error.to_string(),
+            ));
+        }
+    };
+    let body = serde_json::json!({
+        "cursor": snapshot.cursor,
+        "dropped": snapshot.dropped,
+        "entries": snapshot.entries.into_iter().map(|entry| {
+            serde_json::json!({
+                "sequence": entry.sequence,
+                "line": entry.line,
+            })
+        }).collect::<Vec<_>>(),
+    });
+    Some(build_runtime_proxy_json_response(200, body.to_string()))
 }
 
 fn runtime_broker_activation_profile(
@@ -323,6 +408,9 @@ pub(crate) fn handle_runtime_proxy_admin_request(
         prodex_runtime_broker::RuntimeBrokerAdminRoute::ReleaseSessionAffinity => {
             runtime_broker_session_affinity_release_response(request, shared, metadata)
         }
+        prodex_runtime_broker::RuntimeBrokerAdminRoute::LogSnapshot => {
+            runtime_broker_log_snapshot_response(request, shared)
+        }
     }
 }
 
@@ -350,6 +438,24 @@ mod tests {
         assert!(
             err.downcast_ref::<RuntimeBrokerActivationBodyTooLarge>()
                 .is_some()
+        );
+    }
+
+    #[test]
+    fn runtime_broker_log_snapshot_query_is_bounded() {
+        assert!(matches!(
+            runtime_broker_log_snapshot_query_url(
+                "/__prodex/runtime/log/snapshot?after=17&limit=12"
+            ),
+            Ok((17, 12))
+        ));
+        assert!(
+            runtime_broker_log_snapshot_query_url("/__prodex/runtime/log/snapshot?limit=0")
+                .is_err()
+        );
+        assert!(
+            runtime_broker_log_snapshot_query_url("/__prodex/runtime/log/snapshot?after=nope")
+                .is_err()
         );
     }
 }

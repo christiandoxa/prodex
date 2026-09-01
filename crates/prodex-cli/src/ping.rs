@@ -9,7 +9,7 @@ pub enum PingCommands {
 
 #[derive(Args)]
 pub struct PingOpenaiArgs {
-    /// Starting OpenAI profile; omitted uses normal active-profile selection and rotation.
+    /// Probe only this OpenAI profile; omitted probes every configured eligible OpenAI profile.
     #[arg(short, long, value_name = "NAME")]
     pub profile: Option<String>,
     /// Model passed through to the normal Codex request path.

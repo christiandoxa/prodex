@@ -2,12 +2,13 @@ pub(super) use self::render::log_snapshot_items;
 #[cfg(test)]
 pub(super) use self::render::log_stream_tui_text;
 use super::{
-    FollowedLog, FollowedLogPaths, LOG_SNAPSHOT_TAIL_BYTES, LogLoadAggregate, LogStreamItem,
-    TranscriptEvent, collect_new_runtime_log_stream_items,
+    FollowedLog, FollowedLogPaths, LOG_SNAPSHOT_TAIL_BYTES, LiveRuntimeLogSource, LogLoadAggregate,
+    LogStreamItem, TranscriptEvent, collect_new_runtime_log_stream_items,
     collect_new_runtime_log_stream_items_for_tui_with_throughput, collect_new_transcript_events,
-    latest_transcript_event, local_token_usage_event, print_log_stream_item,
-    print_token_usage_event, print_transcript_event, print_upstream_payload_event,
-    recent_session_log_paths, retain_followed_logs,
+    collect_runtime_log_line, is_routine_load_event, latest_transcript_event,
+    local_token_usage_event, print_log_stream_item, print_token_usage_event,
+    print_transcript_event, print_upstream_payload_event, recent_session_log_paths,
+    retain_followed_logs,
 };
 use crate::app_commands::collect_recent_runtime_log_paths;
 use crate::app_commands::log_tui::{
@@ -85,6 +86,24 @@ fn latest_token_usage_event() -> Option<InfoTokenUsageEvent> {
             }
         }
     }
+    let mut live_source = LiveRuntimeLogSource::new();
+    for (_, line) in live_source
+        .as_mut()
+        .map(LiveRuntimeLogSource::poll)
+        .into_iter()
+        .flatten()
+    {
+        let Some(event) = info_token_usage_event_from_line(&line).map(local_token_usage_event)
+        else {
+            continue;
+        };
+        if latest
+            .as_ref()
+            .is_none_or(|current: &InfoTokenUsageEvent| event.timestamp >= current.timestamp)
+        {
+            latest = Some(event);
+        }
+    }
     latest
 }
 
@@ -97,7 +116,8 @@ fn stream_token_usage_events(json: bool) -> Result<()> {
         return stream_token_usage_events_tui();
     }
 
-    print_initial_token_usage_events(json)?;
+    let mut live_source = LiveRuntimeLogSource::new();
+    print_initial_token_usage_events(json, &mut live_source)?;
     let mut runtime_paths =
         FollowedLogPaths::new(prodex_runtime_log_paths_in_dir(&runtime_proxy_log_dir()));
     let mut session_paths = FollowedLogPaths::with_refresh_interval(
@@ -114,13 +134,15 @@ fn stream_token_usage_events(json: bool) -> Result<()> {
         &mut followed_session_logs,
         &mut runtime_paths,
         &mut session_paths,
+        &mut live_source,
     )
 }
 
 fn stream_token_usage_events_tui() -> Result<()> {
     let mut tui = LogTuiTerminal::stdout("log stream TUI")?;
     let mut view = LogTuiState::default();
-    let mut items = initial_log_stream_items()?;
+    let mut live_source = LiveRuntimeLogSource::new();
+    let mut items = initial_log_stream_items_with_live(&mut live_source)?;
     let mut header_profile = latest_log_stream_profile(&items).map(str::to_string);
     let mut header_detail = log_tui_header_detail(header_profile.as_deref());
     let mut header_refresh_at =
@@ -140,13 +162,14 @@ fn stream_token_usage_events_tui() -> Result<()> {
     let mut followed_session_logs = followed_logs(session_paths.refresh(stream_session_log_paths));
 
     loop {
-        collect_log_stream_items(
+        collect_log_stream_items_with_live(
             &mut items,
             &mut followed_runtime_logs,
             &mut followed_session_logs,
             &mut runtime_paths,
             &mut session_paths,
             &mut throughput,
+            &mut live_source,
         )?;
         update_log_stream_header(
             &items,
@@ -173,8 +196,11 @@ fn stream_token_usage_events_tui() -> Result<()> {
     }
 }
 
-fn print_initial_token_usage_events(json: bool) -> Result<()> {
-    let items = initial_log_stream_items()?;
+fn print_initial_token_usage_events(
+    json: bool,
+    live_source: &mut Option<LiveRuntimeLogSource>,
+) -> Result<()> {
+    let items = initial_log_stream_items_with_live(live_source)?;
     if items.is_empty() {
         eprintln!("Waiting for transcript, upstream payload, or token usage events...");
         return Ok(());
@@ -202,19 +228,22 @@ fn follow_token_usage_events(
     followed_session_logs: &mut BTreeMap<PathBuf, FollowedLog>,
     runtime_paths: &mut FollowedLogPaths,
     session_paths: &mut FollowedLogPaths,
+    live_source: &mut Option<LiveRuntimeLogSource>,
 ) -> Result<()> {
     loop {
-        read_token_usage_events_tick(
+        read_token_usage_events_tick_with_live(
             json,
             followed_runtime_logs,
             followed_session_logs,
             runtime_paths,
             session_paths,
+            live_source,
         )?;
         thread::sleep(LOG_STREAM_POLL_INTERVAL);
     }
 }
 
+#[cfg(test)]
 fn read_token_usage_events_tick(
     json: bool,
     followed_runtime_logs: &mut BTreeMap<PathBuf, FollowedLog>,
@@ -222,6 +251,27 @@ fn read_token_usage_events_tick(
     runtime_paths: &mut FollowedLogPaths,
     session_paths: &mut FollowedLogPaths,
 ) -> Result<()> {
+    read_token_usage_events_tick_with_live(
+        json,
+        followed_runtime_logs,
+        followed_session_logs,
+        runtime_paths,
+        session_paths,
+        &mut None,
+    )
+}
+
+fn read_token_usage_events_tick_with_live(
+    json: bool,
+    followed_runtime_logs: &mut BTreeMap<PathBuf, FollowedLog>,
+    followed_session_logs: &mut BTreeMap<PathBuf, FollowedLog>,
+    runtime_paths: &mut FollowedLogPaths,
+    session_paths: &mut FollowedLogPaths,
+    live_source: &mut Option<LiveRuntimeLogSource>,
+) -> Result<()> {
+    for event in live_log_items(live_source, true, None)? {
+        print_log_stream_item(&event, json)?;
+    }
     let current_runtime_paths =
         runtime_paths.refresh(|| prodex_runtime_log_paths_in_dir(&runtime_proxy_log_dir()));
     retain_followed_logs(followed_runtime_logs, current_runtime_paths);
@@ -250,7 +300,14 @@ fn read_token_usage_events_tick(
     Ok(())
 }
 
+#[cfg(test)]
 fn initial_log_stream_items() -> Result<VecDeque<LogStreamItem>> {
+    initial_log_stream_items_with_live(&mut None)
+}
+
+fn initial_log_stream_items_with_live(
+    live_source: &mut Option<LiveRuntimeLogSource>,
+) -> Result<VecDeque<LogStreamItem>> {
     let mut items = VecDeque::new();
     if let Ok(Some(event)) = latest_transcript_event() {
         push_log_stream_item(&mut items, LogStreamItem::Transcript(event));
@@ -264,6 +321,9 @@ fn initial_log_stream_items() -> Result<VecDeque<LogStreamItem>> {
     }
     if let Some(event) = token_usage {
         push_log_stream_item(&mut items, LogStreamItem::TokenUsage(event));
+    }
+    for event in live_log_items(live_source, true, None)? {
+        push_log_stream_item(&mut items, event);
     }
     Ok(items)
 }
@@ -311,14 +371,18 @@ fn latest_runtime_snapshot_events() -> (
     (latest_stream, latest_upstream, latest_token_usage)
 }
 
-fn collect_log_stream_items(
+fn collect_log_stream_items_with_live(
     items: &mut VecDeque<LogStreamItem>,
     followed_runtime_logs: &mut BTreeMap<PathBuf, FollowedLog>,
     followed_session_logs: &mut BTreeMap<PathBuf, FollowedLog>,
     runtime_paths: &mut FollowedLogPaths,
     session_paths: &mut FollowedLogPaths,
     throughput: &mut OutputThroughput,
+    live_source: &mut Option<LiveRuntimeLogSource>,
 ) -> Result<()> {
+    for event in live_log_items(live_source, true, Some(throughput))? {
+        push_log_stream_item(items, event);
+    }
     let current_runtime_paths =
         runtime_paths.refresh(|| prodex_runtime_log_paths_in_dir(&runtime_proxy_log_dir()));
     retain_followed_logs(followed_runtime_logs, current_runtime_paths);
@@ -346,6 +410,27 @@ fn collect_log_stream_items(
         }
     }
     Ok(())
+}
+
+fn live_log_items(
+    live_source: &mut Option<LiveRuntimeLogSource>,
+    include_operational_insights: bool,
+    mut throughput: Option<&mut OutputThroughput>,
+) -> Result<Vec<LogStreamItem>> {
+    let Some(live_source) = live_source.as_mut() else {
+        return Ok(Vec::new());
+    };
+    let mut items = Vec::new();
+    for (path, line) in live_source.poll() {
+        items.extend(collect_runtime_log_line(
+            &path,
+            &line,
+            include_operational_insights,
+            throughput.as_deref_mut(),
+            true,
+        )?);
+    }
+    Ok(items)
 }
 
 fn update_log_stream_header(
@@ -413,6 +498,10 @@ fn push_log_stream_item(items: &mut VecDeque<LogStreamItem>, item: LogStreamItem
 }
 
 fn push_log_stream_item_at(items: &mut VecDeque<LogStreamItem>, item: LogStreamItem, now: Instant) {
+    if matches!(&item, LogStreamItem::LoadObservation(observation) if is_routine_load_event(&observation.event_name))
+    {
+        return;
+    }
     if let LogStreamItem::LoadObservation(observation) = item {
         let key = load_observation_key(&observation);
         let event = observation.event;
@@ -556,21 +645,34 @@ mod tests {
     }
 
     #[test]
-    fn coalesces_repeated_profile_busy_observations_and_keeps_counts() {
+    fn hides_repeated_profile_busy_observations_from_default_timeline() {
         let mut items = VecDeque::new();
         let now = Instant::now();
         for run_id in 0..100 {
             push_log_stream_item_at(&mut items, load_event(run_id, "main", 8), now);
         }
 
+        assert!(items.is_empty(), "routine profile-busy telemetry is hidden");
+    }
+
+    #[test]
+    fn routine_load_telemetry_cannot_evict_a_real_error() {
+        let mut items = VecDeque::new();
+        let now = Instant::now();
+        for run_id in 0..100_000 {
+            push_log_stream_item_at(&mut items, load_event(run_id, "main", 8), now);
+        }
+        items.push_back(LogStreamItem::Transcript(TranscriptEvent {
+            timestamp: "2026-08-31 10:00:01.000 +07:00".to_string(),
+            source: "error".to_string(),
+            text: "provider auth failed".to_string(),
+        }));
+
         assert_eq!(items.len(), 1);
-        let LogStreamItem::LoadAggregate(aggregate) = &items[0] else {
-            panic!("profile busy observations should become one aggregate");
-        };
-        assert_eq!(aggregate.occurrences, 100);
-        assert_eq!(aggregate.unique_runs.len(), 100);
-        assert!(aggregate.as_transcript().text.contains("×100"));
-        assert!(aggregate.matches("r0063"));
+        assert!(matches!(
+            &items[0],
+            LogStreamItem::Transcript(event) if event.source == "error"
+        ));
     }
 
     #[test]
@@ -586,10 +688,7 @@ mod tests {
             now + Duration::from_secs(6),
         );
 
-        assert_eq!(items.len(), 4);
-        assert!(items.iter().all(|item| {
-            matches!(item, LogStreamItem::LoadAggregate(aggregate) if aggregate.occurrences == 1)
-        }));
+        assert!(items.is_empty(), "routine load telemetry is hidden");
     }
 
     #[test]
@@ -608,20 +707,14 @@ mod tests {
             push_log_stream_item_at(&mut items, load_event(run_id, "main", 8), now);
         }
 
-        assert_eq!(items.len(), 3);
+        assert_eq!(items.len(), 1);
         assert!(items.iter().any(|item| {
             matches!(item, LogStreamItem::Transcript(event) if event.source == "error")
         }));
-        assert_eq!(
-            items
-                .iter()
-                .filter_map(|item| match item {
-                    LogStreamItem::LoadAggregate(aggregate) => Some(aggregate.occurrences),
-                    _ => None,
-                })
-                .collect::<Vec<_>>(),
-            vec![1000, 1000]
-        );
+        assert!(items.iter().all(|item| !matches!(
+            item,
+            LogStreamItem::LoadObservation(_) | LogStreamItem::LoadAggregate(_)
+        )));
     }
 
     #[test]
@@ -644,19 +737,11 @@ mod tests {
             now + Duration::from_millis(20),
         );
 
-        assert_eq!(items.len(), 3);
+        assert_eq!(items.len(), 1);
         assert!(matches!(
             &items[0],
-            LogStreamItem::LoadAggregate(aggregate) if aggregate.occurrences == 1
-        ));
-        assert!(matches!(
-            &items[1],
             LogStreamItem::LoadAggregate(aggregate)
                 if aggregate.key.starts_with("profile_inflight\u{1f}")
-        ));
-        assert!(matches!(
-            &items[2],
-            LogStreamItem::LoadAggregate(aggregate) if aggregate.occurrences == 1
         ));
     }
 

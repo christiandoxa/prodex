@@ -413,6 +413,16 @@ data: {"type":"response.failed","response":{"error":{"message":"The usage limit 
 }
 
 #[test]
+fn canonical_codex_usage_limit_message_rotates_on_code_free_429() {
+    let body = br#"{"error":{"message":"You've hit your usage limit. Upgrade to Pro or try again later."},"status":429}"#;
+    let policy = runtime_http_error_policy(429, body, RuntimeHttpErrorPhase::PreCommit);
+
+    assert_eq!(policy.class, RuntimeHttpErrorClass::Quota);
+    assert_eq!(policy.action, RuntimeHttpErrorAction::RotateProfile);
+    assert_eq!(policy.rule, Some("explicit_quota"));
+}
+
+#[test]
 fn streaming_retry_requires_a_structured_explicit_code() {
     for body in [
         b"rate_limit_exceeded".as_slice(),

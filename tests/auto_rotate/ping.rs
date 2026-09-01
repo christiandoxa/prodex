@@ -10,8 +10,49 @@ fn sorted_log_lines(path: &std::path::Path) -> Vec<String> {
     lines
 }
 
+fn assert_profiles_were_probed(path: &std::path::Path, profiles: &[std::path::PathBuf]) {
+    let homes = sorted_log_lines(path);
+    let mut expected = profiles
+        .iter()
+        .map(|profile| profile.to_string_lossy().to_string())
+        .collect::<Vec<_>>();
+    expected.sort();
+    assert_eq!(homes, expected);
+}
+
+fn assert_ping_args(fixture: &Fixture, expected_count: usize) {
+    let args = fs::read_to_string(&fixture.codex_args_log)
+        .expect("failed to read codex args log")
+        .lines()
+        .map(str::to_string)
+        .collect::<Vec<_>>();
+    assert_eq!(
+        args.iter().filter(|arg| arg.as_str() == "--json").count(),
+        expected_count
+    );
+    assert_eq!(
+        args.iter().filter(|arg| arg.as_str() == "exec").count(),
+        expected_count
+    );
+    assert_eq!(
+        args.iter().filter(|arg| arg.as_str() == "ping").count(),
+        expected_count
+    );
+    assert!(args.iter().any(|arg| arg == "--sandbox"));
+    assert!(args.iter().any(|arg| arg == "read-only"));
+    assert!(args.iter().any(|arg| arg == "--ephemeral"));
+    assert!(args.iter().any(|arg| arg == "--ignore-user-config"));
+    assert!(args.iter().any(|arg| arg == "--ignore-rules"));
+    assert!(args.iter().any(|arg| arg == "--skip-git-repo-check"));
+    assert!(
+        !args
+            .iter()
+            .any(|arg| arg == "--dangerously-bypass-approvals-and-sandbox")
+    );
+}
+
 #[test]
-fn ping_openai_sends_one_canonical_model_request() {
+fn ping_openai_probes_every_configured_openai_profile() {
     let fixture = setup_fixture();
     let third_home = add_managed_profile(&fixture, "third", "third-account");
     let args_log = fixture.codex_args_log.display().to_string();
@@ -27,42 +68,30 @@ fn ping_openai_sends_one_canonical_model_request() {
             ("TEST_CODEX_LOG_APPEND", home_log_string.as_str()),
         ],
     );
+
     assert!(
         output.status.success(),
         "prodex ping openai failed: {}",
         String::from_utf8_lossy(&output.stderr)
     );
-    let homes = sorted_log_lines(&home_log);
-    assert_eq!(
-        homes.len(),
-        1,
-        "application ping must send one model request"
+    assert_profiles_were_probed(
+        &home_log,
+        &[
+            fixture.main_home.clone(),
+            fixture.second_home.clone(),
+            third_home,
+        ],
     );
-    assert!(
-        [
-            fixture.main_home.to_string_lossy().to_string(),
-            fixture.second_home.to_string_lossy().to_string(),
-            third_home.to_string_lossy().to_string(),
-        ]
-        .contains(&homes[0]),
-        "canonical ping selected an unknown profile: {}",
-        homes[0]
-    );
-    let args = fs::read_to_string(&fixture.codex_args_log).expect("failed to read args log");
-    let args = args.lines().collect::<Vec<_>>();
-    assert_eq!(args.iter().filter(|arg| **arg == "--json").count(), 1);
-    assert_eq!(args.iter().filter(|arg| **arg == "exec").count(), 1);
-    assert_eq!(args.iter().filter(|arg| **arg == "ping").count(), 1);
-    assert!(args.contains(&"--sandbox"));
-    assert!(args.contains(&"read-only"));
-    assert!(args.contains(&"--ephemeral"));
-    assert!(args.contains(&"--ignore-user-config"));
-    assert!(args.contains(&"--skip-git-repo-check"));
-    assert!(!args.contains(&"--dangerously-bypass-approvals-and-sandbox"));
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("Profiles discovered: 3"), "{stdout}");
+    assert!(stdout.contains("Profiles tested: 3"), "{stdout}");
+    assert!(stdout.contains("Healthy: 3"), "{stdout}");
+    assert!(stdout.contains("Pool usable: yes"), "{stdout}");
+    assert_ping_args(&fixture, 3);
 }
 
 #[test]
-fn ping_openai_uses_a_profile_that_is_ready_on_weekly_quota_only() {
+fn ping_openai_includes_profile_that_is_ready_on_weekly_quota_only() {
     let fixture = setup_fixture();
     let weekly_home = add_managed_profile(&fixture, "weekly-only", "weekly-only-account");
     let home_log = fixture._temp_dir.path.join("ping-weekly-only-homes.log");
@@ -73,37 +102,22 @@ fn ping_openai_uses_a_profile_that_is_ready_on_weekly_quota_only() {
         &["ping", "openai"],
         &[("TEST_CODEX_LOG_APPEND", home_log_string.as_str())],
     );
-    assert!(
-        output.status.success(),
-        "prodex ping openai failed: {}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    let homes = sorted_log_lines(&home_log);
-    assert_eq!(
-        homes.len(),
-        1,
-        "application ping must send one model request"
-    );
-    assert!(
-        [
-            fixture.main_home.to_string_lossy().to_string(),
-            fixture.second_home.to_string_lossy().to_string(),
-            weekly_home.to_string_lossy().to_string(),
-        ]
-        .contains(&homes[0])
+
+    assert!(output.status.success());
+    assert_profiles_were_probed(
+        &home_log,
+        &[
+            fixture.main_home.clone(),
+            fixture.second_home.clone(),
+            weekly_home,
+        ],
     );
 }
 
 #[test]
-fn ping_openai_uses_ready_snapshots_when_live_quota_probe_fails() {
+fn ping_openai_uses_all_profiles_when_live_quota_probe_is_unavailable() {
     let fixture = setup_fixture();
     let third_home = add_managed_profile(&fixture, "third", "third-account");
-    let quota = run_prodex(&fixture, &["quota", "--all", "--once"]);
-    assert!(
-        quota.status.success(),
-        "failed to seed quota snapshots: {}",
-        String::from_utf8_lossy(&quota.stderr)
-    );
     let home_log = fixture._temp_dir.path.join("ping-snapshot-homes.log");
     let home_log_string = home_log.display().to_string();
 
@@ -118,56 +132,205 @@ fn ping_openai_uses_ready_snapshots_when_live_quota_probe_fails() {
         &[("TEST_CODEX_LOG_APPEND", home_log_string.as_str())],
     );
 
-    assert!(
-        output.status.success(),
-        "prodex ping openai failed: {}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    let homes = sorted_log_lines(&home_log);
-    assert_eq!(
-        homes.len(),
-        1,
-        "snapshot-backed ping must send one model request"
-    );
-    assert!(
-        [
-            fixture.main_home.to_string_lossy().to_string(),
-            fixture.second_home.to_string_lossy().to_string(),
-            third_home.to_string_lossy().to_string(),
-        ]
-        .contains(&homes[0])
+    assert!(output.status.success());
+    assert_profiles_were_probed(
+        &home_log,
+        &[
+            fixture.main_home.clone(),
+            fixture.second_home.clone(),
+            third_home,
+        ],
     );
 }
 
 #[test]
-fn ping_openai_ignores_unrelated_profile_session_files() {
+fn ping_openai_continues_after_first_structured_turn_failure() {
     let fixture = setup_fixture();
-    let broken_home = add_managed_profile(&fixture, "broken", "unknown-account");
-    fs::write(broken_home.join("sessions"), b"not a directory")
-        .expect("failed to create broken sessions path");
-    let home_log = fixture._temp_dir.path.join("ping-error-homes.log");
+    let third_home = add_managed_profile(&fixture, "third", "third-account");
+    let home_log = fixture._temp_dir.path.join("ping-protocol-homes.log");
     let home_log_string = home_log.display().to_string();
 
     let output = run_prodex_with_env(
         &fixture,
         &["ping", "openai"],
-        &[("TEST_CODEX_LOG_APPEND", home_log_string.as_str())],
+        &[
+            ("TEST_CODEX_FAILURE_PROFILE", "main"),
+            ("TEST_CODEX_FAILURE_KIND", "protocol"),
+            ("TEST_CODEX_LOG_APPEND", home_log_string.as_str()),
+        ],
     );
+
+    assert!(!output.status.success());
+    assert_profiles_were_probed(
+        &home_log,
+        &[
+            fixture.main_home.clone(),
+            fixture.second_home.clone(),
+            third_home,
+        ],
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("main  PROTOCOL_FAILED"), "{stdout}");
+    assert!(stdout.contains("second  OK"), "{stdout}");
+    assert!(stdout.contains("third  OK"), "{stdout}");
+    assert!(stdout.contains("Healthy: 2"), "{stdout}");
+}
+
+#[test]
+fn ping_openai_reports_exhaustion_and_continues() {
+    let fixture = setup_fixture();
+    let home_log = fixture._temp_dir.path.join("ping-exhausted-homes.log");
+    let home_log_string = home_log.display().to_string();
+
+    let output = run_prodex_with_env(
+        &fixture,
+        &["ping", "openai"],
+        &[
+            ("TEST_CODEX_FAILURE_PROFILE", "main"),
+            ("TEST_CODEX_FAILURE_KIND", "exhausted"),
+            ("TEST_CODEX_LOG_APPEND", home_log_string.as_str()),
+        ],
+    );
+
+    assert!(!output.status.success());
+    assert_profiles_were_probed(
+        &home_log,
+        &[fixture.main_home.clone(), fixture.second_home.clone()],
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("main  EXHAUSTED"), "{stdout}");
+    assert!(stdout.contains("Healthy: 1"), "{stdout}");
+    assert!(stdout.contains("Exhausted: 1"), "{stdout}");
+    assert!(stdout.contains("Pool usable: yes"), "{stdout}");
+}
+
+#[test]
+fn ping_openai_reports_middle_503_without_calling_it_quota() {
+    let fixture = setup_fixture();
+    let third_home = add_managed_profile(&fixture, "third", "third-account");
+    let home_log = fixture._temp_dir.path.join("ping-overload-homes.log");
+    let home_log_string = home_log.display().to_string();
+
+    let output = run_prodex_with_env(
+        &fixture,
+        &["ping", "openai"],
+        &[
+            ("TEST_CODEX_FAILURE_PROFILE", "second"),
+            ("TEST_CODEX_FAILURE_KIND", "overloaded"),
+            ("TEST_CODEX_LOG_APPEND", home_log_string.as_str()),
+        ],
+    );
+
+    assert!(!output.status.success());
+    assert_profiles_were_probed(
+        &home_log,
+        &[
+            fixture.main_home.clone(),
+            fixture.second_home.clone(),
+            third_home,
+        ],
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("main  OK"), "{stdout}");
+    assert!(stdout.contains("second  UPSTREAM_OVERLOADED"), "{stdout}");
+    assert!(stdout.contains("third  OK"), "{stdout}");
+    assert!(stdout.contains("Exhausted: 0"), "{stdout}");
+    assert!(stdout.contains("Pool usable: yes"), "{stdout}");
+}
+
+#[test]
+fn ping_openai_reports_malformed_output_and_continues() {
+    let fixture = setup_fixture();
+    let third_home = add_managed_profile(&fixture, "third", "third-account");
+    let home_log = fixture._temp_dir.path.join("ping-malformed-homes.log");
+    let home_log_string = home_log.display().to_string();
+
+    let output = run_prodex_with_env(
+        &fixture,
+        &["ping", "openai"],
+        &[
+            ("TEST_CODEX_FAILURE_PROFILE", "main"),
+            ("TEST_CODEX_FAILURE_KIND", "malformed"),
+            ("TEST_CODEX_LOG_APPEND", home_log_string.as_str()),
+        ],
+    );
+
+    assert!(!output.status.success());
+    assert_profiles_were_probed(
+        &home_log,
+        &[
+            fixture.main_home.clone(),
+            fixture.second_home.clone(),
+            third_home,
+        ],
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("main  PROTOCOL_FAILED"), "{stdout}");
+    assert!(stdout.contains("second  OK"), "{stdout}");
+    assert!(stdout.contains("third  OK"), "{stdout}");
+}
+
+#[test]
+fn ping_openai_reports_child_spawn_failure_and_continues() {
+    let fixture = setup_fixture();
+    let home_log = fixture._temp_dir.path.join("ping-spawn-homes.log");
+    let home_log_string = home_log.display().to_string();
+
+    let output = run_prodex_with_env(
+        &fixture,
+        &["ping", "openai"],
+        &[
+            ("TEST_CODEX_FAILURE_PROFILE", "main"),
+            ("TEST_CODEX_FAILURE_KIND", "spawn"),
+            ("TEST_CODEX_LOG_APPEND", home_log_string.as_str()),
+        ],
+    );
+
+    assert!(!output.status.success());
+    assert_profiles_were_probed(
+        &home_log,
+        &[fixture.main_home.clone(), fixture.second_home.clone()],
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("main  SPAWN_FAILED"), "{stdout}");
+    assert!(stdout.contains("second  OK"), "{stdout}");
+}
+
+#[test]
+fn ping_openai_json_contains_per_profile_results() {
+    let fixture = setup_fixture();
+    let output = run_prodex(&fixture, &["ping", "openai", "--json"]);
     assert!(
         output.status.success(),
-        "isolated ping should not depend on the profile session directory: {}",
+        "prodex ping openai --json failed: {}",
         String::from_utf8_lossy(&output.stderr)
     );
-    let homes = sorted_log_lines(&home_log);
-    assert_eq!(homes.len(), 1, "isolated ping must send one model request");
-    assert!(
-        [
-            broken_home.to_string_lossy().to_string(),
-            fixture.main_home.to_string_lossy().to_string(),
-            fixture.second_home.to_string_lossy().to_string(),
-        ]
-        .contains(&homes[0])
+    let value: Value = serde_json::from_slice(&output.stdout).expect("ping JSON should parse");
+    assert_eq!(value["provider"], "openai");
+    assert_eq!(value["status"], "ok");
+    assert_eq!(value["profiles"].as_array().unwrap().len(), 2);
+    assert_eq!(value["summary"]["profiles_discovered"], 2);
+    assert_eq!(value["summary"]["profiles_tested"], 2);
+    assert_eq!(value["summary"]["pool_usable"], true);
+}
+
+#[test]
+fn ping_openai_profile_selector_pins_one_profile() {
+    let fixture = setup_fixture();
+    let home_log = fixture._temp_dir.path.join("ping-pinned-homes.log");
+    let home_log_string = home_log.display().to_string();
+
+    let output = run_prodex_with_env(
+        &fixture,
+        &["ping", "openai", "--profile", "second"],
+        &[("TEST_CODEX_LOG_APPEND", home_log_string.as_str())],
     );
+
+    assert!(output.status.success());
+    assert_profiles_were_probed(&home_log, std::slice::from_ref(&fixture.second_home));
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("Profiles discovered: 1"), "{stdout}");
+    assert!(stdout.contains("Pool usable: yes"), "{stdout}");
 }
 
 #[test]
@@ -188,23 +351,38 @@ fn ping_openai_does_not_probe_spark_separately() {
         ],
     );
 
-    assert!(
-        output.status.success(),
-        "prodex ping openai failed: {}",
-        String::from_utf8_lossy(&output.stderr)
+    assert!(output.status.success());
+    assert_profiles_were_probed(
+        &home_log,
+        &[
+            fixture.main_home.clone(),
+            fixture.second_home.clone(),
+            spark_home,
+        ],
     );
-    let homes = sorted_log_lines(&home_log);
-    assert_eq!(
-        homes.len(),
-        1,
-        "application ping must not probe every quota bucket"
-    );
-    assert_eq!(homes[0], spark_home.to_string_lossy());
     let args = fs::read_to_string(&fixture.codex_args_log).expect("failed to read args log");
-    let args = args.lines().collect::<Vec<_>>();
-    assert_eq!(args.iter().filter(|arg| **arg == "--json").count(), 1);
-    assert_eq!(args.iter().filter(|arg| **arg == "exec").count(), 1);
-    assert_eq!(args.iter().filter(|arg| **arg == "ping").count(), 1);
-    assert!(!args.contains(&"gpt-5.3-codex-spark"));
-    assert!(!args.contains(&"--dangerously-bypass-approvals-and-sandbox"));
+    assert!(!args.lines().any(|arg| arg == "gpt-5.3-codex-spark"));
+}
+
+#[test]
+fn ping_openai_ignores_unrelated_profile_session_files_without_aborting_inventory() {
+    let fixture = setup_fixture();
+    let broken_home = add_managed_profile(&fixture, "broken", "unknown-account");
+    fs::write(broken_home.join("sessions"), b"not a directory")
+        .expect("failed to create broken sessions path");
+    let home_log = fixture._temp_dir.path.join("ping-error-homes.log");
+    let home_log_string = home_log.display().to_string();
+
+    let output = run_prodex_with_env(
+        &fixture,
+        &["ping", "openai"],
+        &[("TEST_CODEX_LOG_APPEND", home_log_string.as_str())],
+    );
+
+    assert!(!output.status.success());
+    let homes = sorted_log_lines(&home_log);
+    assert!(homes.contains(&fixture.main_home.to_string_lossy().to_string()));
+    assert!(homes.contains(&fixture.second_home.to_string_lossy().to_string()));
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("Profiles tested: 3"), "{stdout}");
 }

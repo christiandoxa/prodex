@@ -37,6 +37,14 @@ pub(crate) struct LogLoadObservation {
     pub(crate) run_id: Option<String>,
 }
 
+pub(crate) fn is_routine_load_event(event_name: &str) -> bool {
+    matches!(
+        event_name,
+        "profile_inflight_saturated"
+            | "runtime_proxy_active_limit_reached"
+            | "runtime_proxy_lane_limit_reached"
+    )
+}
 #[derive(Debug, Clone)]
 pub(crate) struct LogLoadAggregate {
     pub(crate) event: TranscriptEvent,
@@ -46,7 +54,6 @@ pub(crate) struct LogLoadAggregate {
     pub(crate) run_count_overflow: bool,
     pub(crate) last_seen: Instant,
 }
-
 impl LogLoadAggregate {
     pub(crate) fn new(
         event: TranscriptEvent,
@@ -115,6 +122,9 @@ impl LogLoadAggregate {
 }
 
 pub(crate) fn print_log_stream_item(event: &LogStreamItem, json: bool) -> Result<()> {
+    if !json && matches!(event, LogStreamItem::Transcript(event) if event.source == "load") {
+        return Ok(());
+    }
     if json {
         println!("{}", log_stream_item_json(event)?);
         return io::stdout()
@@ -123,8 +133,19 @@ pub(crate) fn print_log_stream_item(event: &LogStreamItem, json: bool) -> Result
     }
     match event {
         LogStreamItem::Transcript(event) => print_transcript_event(event),
-        LogStreamItem::LoadObservation(event) => print_transcript_event(&event.event),
-        LogStreamItem::LoadAggregate(event) => print_transcript_event(&event.as_transcript()),
+        LogStreamItem::LoadObservation(event) if !is_routine_load_event(&event.event_name) => {
+            print_transcript_event(&event.event)
+        }
+        LogStreamItem::LoadAggregate(event)
+            if !event
+                .key
+                .split('\u{1f}')
+                .next()
+                .is_some_and(is_routine_load_event) =>
+        {
+            print_transcript_event(&event.as_transcript())
+        }
+        LogStreamItem::LoadObservation(_) | LogStreamItem::LoadAggregate(_) => Ok(()),
         LogStreamItem::TokenUsage(event) => print_token_usage_event(event, false),
         LogStreamItem::UpstreamPayload(event) => print_upstream_payload_event(event),
     }
@@ -218,7 +239,7 @@ fn collect_new_runtime_log_stream_items_internal(
     Ok(items)
 }
 
-fn collect_runtime_log_line(
+pub(crate) fn collect_runtime_log_line(
     path: &Path,
     line: &str,
     include_operational_insights: bool,
@@ -263,6 +284,11 @@ fn operational_event_from_runtime_line(line: &str) -> Result<Option<ParsedOperat
     }
     let Some(source) = operational_event_source(event, &parsed.fields)? else {
         return Ok(None);
+    };
+    let source = if source == "load" && !is_routine_load_event(event) {
+        "error"
+    } else {
+        source
     };
     if source == "route"
         && event == "profile_commit"
