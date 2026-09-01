@@ -105,6 +105,18 @@ pub(super) fn handle_input(
 ) -> Result<bool> {
     let action =
         state.handle_event(event::read().context("failed to read Super expose TUI input")?);
+    handle_action(state, event_tx, cancel, launch, worker, stopping, action)
+}
+
+pub(super) fn handle_action(
+    state: &mut ExposeTuiState,
+    event_tx: &mpsc::SyncSender<ExposeLifecycleEvent>,
+    cancel: &Arc<AtomicBool>,
+    launch: &mut Option<(crate::ExposeArgs, SuperArgs, PathBuf, String, String)>,
+    worker: &mut Option<JoinHandle<Result<()>>>,
+    stopping: &mut bool,
+    action: super::ExposeTuiAction,
+) -> Result<bool> {
     match action {
         ExposeTuiAction::None => {}
         ExposeTuiAction::CopyUrl => {

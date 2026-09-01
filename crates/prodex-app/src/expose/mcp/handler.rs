@@ -94,29 +94,30 @@ impl ExposeMcpEndpoint {
         expose_digest_eq(&self.capability_digest, &expose_token_digest(capability))
     }
 
-    pub(in crate::expose) fn install_openai_relay(&self, mcp_url: &str) -> anyhow::Result<String> {
+    pub(in crate::expose) fn install_openai_relay(
+        &self,
+        mcp_url: &super::PublicMcpEndpoint,
+    ) -> anyhow::Result<String> {
         let relay = super::OpenAiMcpRelay::new(mcp_url)?;
         let endpoint = relay.endpoint.clone();
-        let mut slot = self
+        *self
             .openai_relay
             .lock()
-            .map_err(|_| anyhow::anyhow!("OpenAI MCP relay state unavailable"))?;
-        *slot = Some(relay);
+            .map_err(|_| anyhow::anyhow!("OpenAI MCP relay state unavailable"))? = Some(relay);
         Ok(endpoint)
     }
 
     pub(in crate::expose) fn openai_relay_target(&self, request_target: &str) -> Option<String> {
-        let relay = self.openai_relay.lock().ok()?;
-        relay
+        self.openai_relay
+            .lock()
+            .ok()?
             .as_ref()
             .filter(|relay| relay.request_target == request_target)
             .map(|relay| relay.mcp_target.clone())
     }
 
     pub(in crate::expose) fn clear_openai_relay(&self) {
-        if let Ok(mut relay) = self.openai_relay.lock() {
-            *relay = None;
-        }
+        let _ = self.openai_relay.lock().map(|mut relay| *relay = None);
     }
 
     pub(super) fn handle(&self, request: ExposeHttpRequest, host: &str) {

@@ -2,7 +2,6 @@ use super::{EndpointChoice, EndpointField, ExposeTuiState};
 use ratatui::style::Modifier;
 use ratatui::text::{Line, Span};
 use terminal_ui::{tui_error_style, tui_muted_style, tui_primary_style, tui_success_style};
-
 pub(super) fn endpoint_body(state: &ExposeTuiState) -> Vec<Line<'static>> {
     let mut lines = vec![
         Line::styled(
@@ -40,48 +39,44 @@ pub(super) fn endpoint_body(state: &ExposeTuiState) -> Vec<Line<'static>> {
         ),
     ];
     if state.endpoint_choice == EndpointChoice::ExistingCloudflareTunnel {
+        let tunnel = state
+            .existing_cloudflare
+            .as_ref()
+            .and_then(|selection| selection.tunnel.as_deref())
+            .unwrap_or("<detected config identity unavailable>");
+        let hostname = if state.hostname.is_empty() {
+            "<type a public DNS name>"
+        } else {
+            &state.hostname
+        };
+        let origin = state.origin_port.as_str();
         lines.extend([
+            Line::from(format!("Tunnel: {tunnel}")),
             Line::from(format!(
-                "Tunnel: {}",
-                state
-                    .existing_cloudflare
-                    .as_ref()
-                    .and_then(|selection| selection.tunnel.as_deref())
-                    .unwrap_or("<detected config identity unavailable>"),
-            )),
-            Line::from(format!(
-                "Hostname{}: {}",
+                "Hostname{}: {hostname}",
                 if state.endpoint_field == EndpointField::Hostname {
                     "*"
                 } else {
                     ""
                 },
-                if state.hostname.is_empty() {
-                    "<type a public DNS name>"
-                } else {
-                    &state.hostname
-                },
             )),
             Line::from(format!(
-                "Origin port{}: {}",
+                "Origin port{}: {origin}",
                 if state.endpoint_field == EndpointField::OriginPort {
                     "*"
                 } else {
                     ""
                 },
-                state.origin_port,
             )),
         ]);
     }
     if state.endpoint_choice == EndpointChoice::OpenAiSecureMcp {
+        let tunnel_id = state
+            .openai_tunnel_id
+            .as_deref()
+            .unwrap_or("<CONTROL_PLANE_TUNNEL_ID not set>");
         lines.extend([
-            Line::from(format!(
-                "Tunnel ID: {}",
-                state
-                    .openai_tunnel_id
-                    .as_deref()
-                    .unwrap_or("<CONTROL_PLANE_TUNNEL_ID not set>")
-            )),
+            Line::from(format!("Tunnel ID: {tunnel_id}")),
             Line::from("Browser: local only"),
             Line::from("MCP: OpenAI Secure MCP Tunnel"),
         ]);

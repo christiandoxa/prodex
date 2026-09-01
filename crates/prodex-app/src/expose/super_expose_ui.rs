@@ -174,9 +174,8 @@ impl ExposeTuiState {
                 if let ExposeTuiPhase::OpenAiSetup(field) = self.phase
                     && let Some(setup) = self.openai_setup.as_mut()
                 {
-                    setup.handle_paste(field, &text);
-                    self.status = None;
-                    self.redraw_needed = true;
+                    setup.append(field, &text);
+                    self.clear_status();
                 }
                 ExposeTuiAction::None
             }
@@ -299,8 +298,7 @@ impl ExposeTuiState {
     fn select_endpoint(&mut self, endpoint: EndpointChoice) {
         self.endpoint_choice = endpoint;
         self.endpoint_field = EndpointField::Hostname;
-        self.status = None;
-        self.redraw_needed = true;
+        self.clear_status();
     }
 
     fn edit_endpoint_field(&mut self, edit: impl FnOnce(&mut String)) {
@@ -312,8 +310,7 @@ impl ExposeTuiState {
             EndpointField::OriginPort => &mut self.origin_port,
         };
         edit(value);
-        self.status = None;
-        self.redraw_needed = true;
+        self.clear_status();
     }
 
     fn selected_endpoint(&mut self) -> ExposeTuiAction {
@@ -371,20 +368,20 @@ impl ExposeTuiState {
                     openai_credentials: None,
                 }
             }
-            EndpointChoice::OpenAiSecureMcp => {
-                self.begin_openai_setup();
-                ExposeTuiAction::None
-            }
+            EndpointChoice::OpenAiSecureMcp => self.begin_setup().unwrap_or(ExposeTuiAction::None),
         }
     }
-
-    fn begin_openai_setup(&mut self) {
-        self.openai_setup = Some(OpenAiSetupState::new(self.openai_tunnel_id.as_deref()));
-        self.phase = ExposeTuiPhase::OpenAiSetup(OpenAiSetupField::TunnelId);
-        self.status = None;
-        self.redraw_needed = true;
+    fn begin_setup(&mut self) -> Option<ExposeTuiAction> {
+        let setup = OpenAiSetupState::new(self.openai_tunnel_id.as_deref());
+        let next = setup.next_field();
+        let field = next.unwrap_or(OpenAiSetupField::ApiKey);
+        self.openai_setup = Some(setup);
+        self.phase = ExposeTuiPhase::OpenAiSetup(field);
+        self.clear_status();
+        next.is_none().then(|| {
+            self.handle_openai_setup_key(field, KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
+        })
     }
-
     fn handle_openai_setup_key(
         &mut self,
         field: OpenAiSetupField,
@@ -393,22 +390,29 @@ impl ExposeTuiState {
         let input = match self.openai_setup.as_mut() {
             Some(setup) => setup.handle_key(field, key),
             None => {
-                self.status = Some("OpenAI tunnel setup is unavailable".to_string());
-                self.redraw_needed = true;
+                self.set_status("OpenAI tunnel setup is unavailable");
                 return ExposeTuiAction::None;
             }
         };
         match input {
             Ok(openai::OpenAiSetupInput::Ignored) => ExposeTuiAction::None,
             Ok(openai::OpenAiSetupInput::Edited) => {
-                self.status = None;
-                self.redraw_needed = true;
+                self.clear_status();
                 ExposeTuiAction::None
             }
             Ok(openai::OpenAiSetupInput::Next) => {
+                if self
+                    .openai_setup
+                    .as_ref()
+                    .is_some_and(|setup| setup.next_field().is_none())
+                {
+                    return self.handle_openai_setup_key(
+                        OpenAiSetupField::ApiKey,
+                        KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE),
+                    );
+                }
                 self.phase = ExposeTuiPhase::OpenAiSetup(OpenAiSetupField::ApiKey);
-                self.status = None;
-                self.redraw_needed = true;
+                self.clear_status();
                 ExposeTuiAction::None
             }
             Ok(openai::OpenAiSetupInput::Credentials(credentials)) => {
@@ -416,8 +420,7 @@ impl ExposeTuiState {
                 let client_version = match ensure_openai_tunnel_available(&tunnel_id) {
                     Ok(client_version) => client_version,
                     Err(error) => {
-                        self.status = Some(error.to_string());
-                        self.redraw_needed = true;
+                        self.set_status(error.to_string());
                         return ExposeTuiAction::None;
                     }
                 };
@@ -432,8 +435,7 @@ impl ExposeTuiState {
                 }
             }
             Err(error) => {
-                self.status = Some(error.to_string());
-                self.redraw_needed = true;
+                self.set_status(error.to_string());
                 ExposeTuiAction::None
             }
         }
@@ -473,6 +475,10 @@ impl ExposeTuiState {
         self.status = Some(status.into());
         self.redraw_needed = true;
     }
+    fn clear_status(&mut self) {
+        self.status = None;
+        self.redraw_needed = true;
+    }
 
     fn endpoint_label(&self) -> &'static str {
         match self.endpoint_choice {
@@ -494,10 +500,12 @@ pub(super) fn run(
     let mut terminal = ExposeTuiTerminal::stderr("Super expose TUI")?;
     let mut state = ExposeTuiState::new(&super_args, workspace_name.clone(), display_name.clone());
     state.openai_tunnel_id = args.openai_tunnel_id.clone();
-    if args.tunnel_provider == Some(prodex_cli::ExposeTunnelProvider::OpenAi) {
-        state.endpoint_choice = EndpointChoice::OpenAiSecureMcp;
-        state.begin_openai_setup();
-    }
+    let initial_action = (args.tunnel_provider == Some(prodex_cli::ExposeTunnelProvider::OpenAi))
+        .then(|| {
+            state.endpoint_choice = EndpointChoice::OpenAiSecureMcp;
+            state.begin_setup()
+        })
+        .flatten();
     let (event_tx, event_rx) = mpsc::sync_channel(EXPOSE_TUI_EVENT_CAPACITY);
     let cancel = Arc::new(AtomicBool::new(false));
     let mut launch = Some((
@@ -510,6 +518,17 @@ pub(super) fn run(
     let mut worker: Option<JoinHandle<Result<()>>> = None;
     let mut stopping = false;
 
+    if let Some(action) = initial_action {
+        loop_support::handle_action(
+            &mut state,
+            &event_tx,
+            &cancel,
+            &mut launch,
+            &mut worker,
+            &mut stopping,
+            action,
+        )?;
+    }
     let result = (|| -> Result<()> {
         loop {
             drain_engine_events(&mut state, &event_rx);

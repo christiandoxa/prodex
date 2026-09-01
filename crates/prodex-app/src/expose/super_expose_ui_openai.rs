@@ -6,21 +6,17 @@ use ratatui::style::Modifier;
 use ratatui::text::Line;
 use std::fmt;
 use zeroize::Zeroizing;
-
 const OPENAI_TUNNEL_ID_INPUT_MAX_BYTES: usize = "tunnel_".len() + 32;
 const OPENAI_API_KEY_INPUT_MAX_BYTES: usize = 4096;
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(in crate::expose) enum OpenAiSetupField {
     TunnelId,
     ApiKey,
 }
-
 pub(in crate::expose) struct OpenAiSetupState {
     tunnel_id: String,
     api_key: Zeroizing<String>,
 }
-
 impl fmt::Debug for OpenAiSetupState {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
@@ -30,17 +26,16 @@ impl fmt::Debug for OpenAiSetupState {
             .finish()
     }
 }
-
 pub(super) enum OpenAiSetupInput {
     Ignored,
     Edited,
     Next,
     Credentials(OpenAiTunnelCredentials),
 }
-
 impl OpenAiSetupState {
     pub(super) fn new(explicit_tunnel_id: Option<&str>) -> Self {
         let tunnel_id = explicit_tunnel_id
+            .filter(|value| !value.trim().is_empty())
             .map(str::to_owned)
             .or_else(|| std::env::var("CONTROL_PLANE_TUNNEL_ID").ok())
             .unwrap_or_default();
@@ -49,15 +44,16 @@ impl OpenAiSetupState {
             api_key: Zeroizing::new(std::env::var("CONTROL_PLANE_API_KEY").unwrap_or_default()),
         }
     }
-
-    pub(super) fn tunnel_id(&self) -> &str {
-        &self.tunnel_id
-    }
-
     pub(super) fn masked_api_key(&self) -> String {
         "*".repeat(self.api_key.chars().count())
     }
-
+    pub(super) fn next_field(&self) -> Option<OpenAiSetupField> {
+        if self.tunnel_id.is_empty() {
+            Some(OpenAiSetupField::TunnelId)
+        } else {
+            self.api_key.is_empty().then_some(OpenAiSetupField::ApiKey)
+        }
+    }
     pub(super) fn handle_key(
         &mut self,
         field: OpenAiSetupField,
@@ -66,11 +62,9 @@ impl OpenAiSetupState {
         match key.code {
             KeyCode::Backspace | KeyCode::Delete => {
                 self.value_mut(field).pop();
-                Ok(OpenAiSetupInput::Edited)
             }
             KeyCode::Char('u') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                 self.value_mut(field).clear();
-                Ok(OpenAiSetupInput::Edited)
             }
             KeyCode::Char(character)
                 if !key.modifiers.intersects(
@@ -78,36 +72,29 @@ impl OpenAiSetupState {
                 ) =>
             {
                 self.append(field, &character.to_string());
-                Ok(OpenAiSetupInput::Edited)
             }
-            KeyCode::Enter => self.submit(field),
-            _ => Ok(OpenAiSetupInput::Ignored),
+            KeyCode::Enter => return self.submit(field),
+            _ => return Ok(OpenAiSetupInput::Ignored),
         }
+        Ok(OpenAiSetupInput::Edited)
     }
-
-    pub(super) fn handle_paste(&mut self, field: OpenAiSetupField, text: &str) {
-        self.append(field, text);
-    }
-
     fn submit(&mut self, field: OpenAiSetupField) -> Result<OpenAiSetupInput> {
         let tunnel_id = resolve_openai_tunnel_id(Some(&self.tunnel_id))?;
         self.tunnel_id.clone_from(&tunnel_id);
-        match field {
-            OpenAiSetupField::TunnelId => Ok(OpenAiSetupInput::Next),
-            OpenAiSetupField::ApiKey => Ok(OpenAiSetupInput::Credentials(
+        Ok(match field {
+            OpenAiSetupField::TunnelId => OpenAiSetupInput::Next,
+            OpenAiSetupField::ApiKey => OpenAiSetupInput::Credentials(
                 OpenAiTunnelCredentials::new(tunnel_id, self.api_key.to_string())?,
-            )),
-        }
+            ),
+        })
     }
-
     fn value_mut(&mut self, field: OpenAiSetupField) -> &mut String {
         match field {
             OpenAiSetupField::TunnelId => &mut self.tunnel_id,
             OpenAiSetupField::ApiKey => &mut self.api_key,
         }
     }
-
-    fn append(&mut self, field: OpenAiSetupField, text: &str) {
+    pub(super) fn append(&mut self, field: OpenAiSetupField, text: &str) {
         let value = self.value_mut(field);
         let max_bytes = match field {
             OpenAiSetupField::TunnelId => OPENAI_TUNNEL_ID_INPUT_MAX_BYTES,
@@ -123,7 +110,6 @@ impl OpenAiSetupState {
         }
     }
 }
-
 pub(in crate::expose) fn setup_body(
     state: Option<&OpenAiSetupState>,
     field: OpenAiSetupField,
@@ -137,52 +123,39 @@ pub(in crate::expose) fn setup_body(
         )];
     };
     let masked_api_key = state.masked_api_key();
-    let mut lines = vec![
-        Line::styled(
-            "OpenAI Secure MCP Tunnel setup",
-            super::tui_primary_style().add_modifier(Modifier::BOLD),
-        ),
-        Line::from("Tunnel ID uses the CLI value, then CONTROL_PLANE_TUNNEL_ID, then this field."),
-    ];
+    let tunnel_label = match field {
+        OpenAiSetupField::TunnelId => "Tunnel ID*",
+        OpenAiSetupField::ApiKey => "Tunnel ID",
+    };
+    let tunnel_value = match state.tunnel_id.is_empty() {
+        true => "<enter tunnel_<32 lowercase letters or digits>>",
+        false => state.tunnel_id.as_str(),
+    };
+    let api_key_label = match field {
+        OpenAiSetupField::TunnelId => "API key",
+        OpenAiSetupField::ApiKey => "API key*",
+    };
+    let api_key_value = match masked_api_key.is_empty() {
+        true => "<enter a control-plane key>",
+        false => masked_api_key.as_str(),
+    };
+    let mut lines = vec![Line::styled(
+        "OpenAI Secure MCP Tunnel setup",
+        super::tui_primary_style().add_modifier(Modifier::BOLD),
+    )];
     lines.extend(labeled_value_lines(
-        if field == OpenAiSetupField::TunnelId {
-            "Tunnel ID*"
-        } else {
-            "Tunnel ID"
-        },
-        if state.tunnel_id().is_empty() {
-            "<enter tunnel_<32 lowercase letters or digits>>"
-        } else {
-            state.tunnel_id()
-        },
+        tunnel_label,
+        tunnel_value,
         width,
         super::tui_primary_style(),
         super::tui_primary_style(),
-    ));
-    lines.extend(text_lines(
-        "The API key uses CONTROL_PLANE_API_KEY when set, or can be entered below.",
-        width,
-        super::tui_muted_style(),
     ));
     lines.extend(labeled_value_lines(
-        if field == OpenAiSetupField::ApiKey {
-            "API key*"
-        } else {
-            "API key"
-        },
-        if masked_api_key.is_empty() {
-            "<enter a control-plane key>"
-        } else {
-            masked_api_key.as_str()
-        },
+        api_key_label,
+        api_key_value,
         width,
         super::tui_primary_style(),
         super::tui_primary_style(),
-    ));
-    lines.extend(text_lines(
-        "The API key is masked and is used only for this tunnel-client run.",
-        width,
-        super::tui_muted_style(),
     ));
     if let Some(status) = status {
         lines.extend(text_lines(status, width, super::tui_error_style()));

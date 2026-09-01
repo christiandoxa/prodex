@@ -101,6 +101,16 @@ fn expose_test_csrf(response: &str) -> String {
         .to_string()
 }
 
+fn openai_args() -> ExposeArgs {
+    let crate::Commands::Expose(args) = crate::parse_cli_command_from(
+        "prodex s expose --tunnel-provider openai --openai-tunnel-id tunnel_0123456789abcdef0123456789abcdef"
+            .split_whitespace(),
+    )
+    .expect("OpenAI expose should parse") else {
+        panic!("expected expose command");
+    };
+    args
+}
 #[test]
 fn expose_access_url_uses_one_time_fragment_without_path_or_query_secret() {
     let url = expose_access_url("http://127.0.0.1:7777", "bootstrap-capability");
@@ -140,36 +150,18 @@ fn super_expose_accepts_dry_run_before_startup_side_effects() {
     };
     args.dry_run = true;
     assert!(validate_expose_launch_args(&args).is_ok());
-}
-
-#[test]
-fn openai_dry_run_does_not_require_or_prompt_for_a_control_plane_key() {
     let _env_lock = crate::TestEnvVarGuard::lock();
     let _key = crate::TestEnvVarGuard::unset("CONTROL_PLANE_API_KEY");
     let _binary = crate::TestEnvVarGuard::set(
         "PRODEX_TUNNEL_CLIENT_BIN",
         "/home/test-user/missing/tunnel-client",
     );
-    let crate::Commands::Expose(args) = crate::parse_cli_command_from([
-        "prodex",
-        "s",
-        "expose",
-        "--tunnel-provider",
-        "openai",
-        "--openai-tunnel-id",
-        "tunnel_0123456789abcdef0123456789abcdef",
-    ])
-    .expect("OpenAI expose should parse") else {
-        panic!("expected expose command");
-    };
-
+    let args = openai_args();
     assert!(matches!(
         super::super_expose::select_expose_endpoint(&args, false),
-        Ok(ExposeEndpointMode::OpenAiSecureMcp {
-            tunnel_id,
-            client_version,
-        }) if tunnel_id == "tunnel_0123456789abcdef0123456789abcdef"
-            && client_version == "not probed (dry run)"
+        Ok(ExposeEndpointMode::OpenAiSecureMcp { tunnel_id, client_version })
+            if tunnel_id == "tunnel_0123456789abcdef0123456789abcdef"
+                && client_version == "not probed (dry run)"
     ));
 }
 
@@ -181,19 +173,7 @@ fn openai_noninteractive_setup_fails_for_missing_key_before_client_probe() {
         "PRODEX_TUNNEL_CLIENT_BIN",
         "/home/test-user/missing/tunnel-client",
     );
-    let crate::Commands::Expose(args) = crate::parse_cli_command_from([
-        "prodex",
-        "s",
-        "expose",
-        "--tunnel-provider",
-        "openai",
-        "--openai-tunnel-id",
-        "tunnel_0123456789abcdef0123456789abcdef",
-    ])
-    .expect("OpenAI expose should parse") else {
-        panic!("expected expose command");
-    };
-
+    let args = openai_args();
     let error = super::super_expose::select_expose_endpoint(&args, true).unwrap_err();
     assert!(error.to_string().contains("CONTROL_PLANE_API_KEY"));
     assert!(!error.to_string().contains("tunnel-client is required"));
