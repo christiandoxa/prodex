@@ -6,7 +6,7 @@ import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
-import { repoRoot } from "../npm/common.mjs";
+import { cargoTomlPath, parseCargoVersion, repoRoot } from "../npm/common.mjs";
 
 const manifestPath = path.join(repoRoot, "migration", "mojo-production-share.json");
 const COUNTING_RULES_VERSION = 1;
@@ -530,11 +530,14 @@ export function calculateProductionShare(manifest, baselineRevision = manifest.b
   const snapshot = readSnapshot(manifest);
   validateFrozenBaseline(manifest, baselineRevision, baseline, snapshot);
   const required = requiredMojoLoc(final.rust_production_loc, manifest.minimum_percent);
+  const currentProdexVersion = parseCargoVersion(fs.readFileSync(cargoTomlPath, "utf8"));
   const waiver = manifest.temporary_release_waiver;
   const normalRequirementMet = final.mojo_production_loc * 100 >=
     manifest.minimum_percent * final.total_production_loc;
-  const temporaryReleaseFloorPercent = waiver?.temporary_release_floor_percent ?? null;
-  const temporaryWaiverApplicable = waiver !== undefined;
+  const temporaryWaiverApplicable = waiver?.release_target === currentProdexVersion;
+  const temporaryReleaseFloorPercent = temporaryWaiverApplicable
+    ? waiver.temporary_release_floor_percent
+    : null;
   const releaseRequirementMet = normalRequirementMet || temporaryWaiverApplicable &&
     final.mojo_production_loc * 100 >= temporaryReleaseFloorPercent * final.total_production_loc;
   return {
@@ -552,12 +555,13 @@ export function calculateProductionShare(manifest, baselineRevision = manifest.b
       broad_total_production_loc: final.total_production_loc,
       source_inventory_sha256: final.source_inventory_sha256,
     },
+    current_prodex_version: currentProdexVersion,
     minimum_percent: manifest.minimum_percent,
     project_target_percent: manifest.minimum_percent,
     temporary_release_floor_percent: temporaryReleaseFloorPercent,
     temporary_release_waiver_applicable: temporaryWaiverApplicable,
-    temporary_release_waiver_scope: waiver?.scope ?? null,
-    temporary_release_waiver_reason: waiver?.reason ?? null,
+    temporary_release_waiver_scope: temporaryWaiverApplicable ? waiver.scope : null,
+    temporary_release_waiver_reason: temporaryWaiverApplicable ? waiver.reason : null,
     normal_requirement_met: normalRequirementMet,
     release_requirement_met: releaseRequirementMet,
     release_status: normalRequirementMet
@@ -584,6 +588,7 @@ export function productionShareMeetsMinimum(result) {
 export function productionShareMeetsReleaseRequirement(result) {
   if (productionShareMeetsMinimum(result)) return true;
   return result.temporary_release_waiver_applicable === true &&
+    result.current_prodex_version === REQUIRED_RELEASE_TARGET &&
     result.temporary_release_floor_percent === REQUIRED_TEMPORARY_RELEASE_FLOOR_PERCENT &&
     result.temporary_release_waiver_scope === "0.421.0 only" &&
     result.final.broad_mojo_production_loc * 100 >=
@@ -719,7 +724,7 @@ async function main() {
       `Mojo production implementation share is ${result.final.broad_mojo_percent.toFixed(2)}%; ` +
       `at least ${(result.temporary_release_waiver_applicable
         ? result.temporary_release_floor_percent
-        : result.minimum_percent).toFixed(2)}% is required for ${manifest.release_target}`,
+        : result.minimum_percent).toFixed(2)}% is required for ${result.current_prodex_version}`,
     );
   }
   if (args.json) {
