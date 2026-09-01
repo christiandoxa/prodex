@@ -413,16 +413,16 @@ jobs:
           toolchain: 1.98.0
           targets: ${{ matrix.target }}
 
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        with:
+          key: release-${{ matrix.target }}
+
       - name: Download target Mojo archive
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
           name: mojo-archive-${{ matrix.target }}
           path: target/mojo-release/${{ matrix.target }}
-
-      - name: Cache Rust dependencies
-        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
-        with:
-          key: release-${{ matrix.target }}
 
       - name: Install sccache
         if: ${{ matrix.use-cross == false || matrix.can-native-smoke || matrix.mojo-release }}
