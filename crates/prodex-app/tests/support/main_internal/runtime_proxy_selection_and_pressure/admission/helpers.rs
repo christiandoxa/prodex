@@ -1,8 +1,9 @@
 use super::*;
 
 pub(super) struct RuntimeProxyProfileHarness {
-    _temp_dir: TestDir,
     shared: RuntimeRotationProxyShared,
+    _probe_refresh_cleanup: RuntimeProbeRefreshQueueCleanup,
+    _temp_dir: TestDir,
 }
 
 impl RuntimeProxyProfileHarness {
@@ -155,10 +156,12 @@ impl RuntimeProxyProfileHarnessBuilder {
             profile_health: BTreeMap::new(),
         };
         let shared = runtime_rotation_proxy_shared(&temp_dir, runtime, self.active_request_limit);
+        let _probe_refresh_cleanup = RuntimeProbeRefreshQueueCleanup::new();
 
         RuntimeProxyProfileHarness {
-            _temp_dir: temp_dir,
             shared,
+            _probe_refresh_cleanup,
+            _temp_dir: temp_dir,
         }
     }
 }
