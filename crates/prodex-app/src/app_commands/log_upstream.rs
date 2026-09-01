@@ -1,6 +1,6 @@
 use super::collect_recent_runtime_log_paths;
 use super::log::{
-    FollowedLog, FollowedLogPaths, LogStreamItem,
+    FollowedLog, FollowedLogPaths, LiveRuntimeLogSource, LogStreamItem,
     collect_new_runtime_log_stream_items_with_throughput, retain_followed_logs,
 };
 use super::log_format::{current_log_width, render_log_block};
@@ -51,6 +51,10 @@ pub(super) fn stream_upstream_payload_events(json: bool) -> Result<()> {
     } else {
         eprintln!("Waiting for processed upstream payload events...");
     }
+    let mut live_source = LiveRuntimeLogSource::new();
+    for event in live_upstream_payload_events(&mut live_source) {
+        print_upstream_payload_event(&event, json)?;
+    }
 
     let mut runtime_paths =
         FollowedLogPaths::new(prodex_runtime_log_paths_in_dir(&runtime_proxy_log_dir()));
@@ -62,6 +66,9 @@ pub(super) fn stream_upstream_payload_events(json: bool) -> Result<()> {
         let current_runtime_paths =
             runtime_paths.refresh(|| prodex_runtime_log_paths_in_dir(&runtime_proxy_log_dir()));
         retain_followed_logs(&mut followed_runtime_logs, current_runtime_paths);
+        for event in live_upstream_payload_events(&mut live_source) {
+            print_upstream_payload_event(&event, json)?;
+        }
         for path in current_runtime_paths {
             let state = followed_runtime_logs
                 .entry(path.clone())
@@ -78,7 +85,11 @@ fn stream_upstream_payload_events_tui() -> Result<()> {
     let mut tui = LogTuiTerminal::stdout("upstream payload TUI")?;
     let mut view = LogTuiState::default();
     let mut events = VecDeque::<UpstreamPayloadEvent>::new();
+    let mut live_source = LiveRuntimeLogSource::new();
     if let Some(event) = latest_upstream_payload_event() {
+        push_upstream_payload_event(&mut events, event);
+    }
+    for event in live_upstream_payload_events(&mut live_source) {
         push_upstream_payload_event(&mut events, event);
     }
     let mut header_profile = latest_upstream_payload_profile(&events).map(str::to_string);
@@ -98,6 +109,9 @@ fn stream_upstream_payload_events_tui() -> Result<()> {
         let current_runtime_paths =
             runtime_paths.refresh(|| prodex_runtime_log_paths_in_dir(&runtime_proxy_log_dir()));
         retain_followed_logs(&mut followed_runtime_logs, current_runtime_paths);
+        for event in live_upstream_payload_events(&mut live_source) {
+            push_upstream_payload_event(&mut events, event);
+        }
         for path in current_runtime_paths {
             let state = followed_runtime_logs
                 .entry(path.clone())
@@ -151,6 +165,19 @@ fn push_upstream_payload_event(
     while events.len() > UPSTREAM_TUI_EVENT_LIMIT {
         events.pop_front();
     }
+}
+
+fn live_upstream_payload_events(
+    live_source: &mut Option<LiveRuntimeLogSource>,
+) -> Vec<UpstreamPayloadEvent> {
+    let Some(live_source) = live_source.as_mut() else {
+        return Vec::new();
+    };
+    live_source
+        .poll()
+        .into_iter()
+        .filter_map(|(_, line)| upstream_payload_event_from_runtime_line(&line))
+        .collect()
 }
 
 fn latest_upstream_payload_profile(events: &VecDeque<UpstreamPayloadEvent>) -> Option<&str> {

@@ -103,6 +103,41 @@ for arg in "$@"; do
   fi
 done
 if [ "$is_json_ping" = "1" ]; then
+  profile_name="${CODEX_HOME##*/}"
+  if [ "$TEST_CODEX_FAILURE_PROFILE" = "$profile_name" ]; then
+    case "${TEST_CODEX_FAILURE_KIND:-protocol}" in
+      protocol)
+        printf '%s\n' '{"type":"thread.started","thread_id":"diagnostic"}'
+        exit 0
+        ;;
+      malformed)
+        printf '%s\n' 'not-json'
+        exit 0
+        ;;
+      exhausted)
+        printf '%s\n' '{"type":"thread.started","thread_id":"diagnostic"}'
+        printf '%s\n' '{"type":"turn.started"}'
+        printf '%s\n' '{"type":"turn.failed","error":{"message":"usage_limit_reached"}}'
+        exit 1
+        ;;
+      overloaded)
+        printf '%s\n' '{"type":"thread.started","thread_id":"diagnostic"}'
+        printf '%s\n' '{"type":"turn.started"}'
+        printf '%s\n' '{"type":"turn.failed","error":{"message":"HTTP 503 upstream unavailable"}}'
+        exit 1
+        ;;
+      auth)
+        printf '%s\n' '{"type":"thread.started","thread_id":"diagnostic"}'
+        printf '%s\n' '{"type":"turn.started"}'
+        printf '%s\n' '{"type":"turn.failed","error":{"message":"401 Unauthorized"}}'
+        exit 1
+        ;;
+      spawn)
+        printf '%s\n' 'failed to start codex child' >&2
+        exit 127
+        ;;
+    esac
+  fi
   printf '%s\n' '{"type":"thread.started","thread_id":"diagnostic"}'
   printf '%s\n' '{"type":"turn.started"}'
   printf '%s\n' '{"type":"item.completed","item":{"type":"agent_message","text":"Hello"}}'
@@ -172,7 +207,40 @@ goto prodex_args
 :prodex_stdin
 if /I not "%prodex_first_arg%"=="app-server" if defined TEST_CODEX_STDIN_LOG more > "%TEST_CODEX_STDIN_LOG%"
 if defined TEST_LONG_RUNNING_RUN powershell.exe -NoProfile -NonInteractive -Command "Start-Sleep -Seconds %TEST_LONG_RUNNING_RUN%"
+for %%P in ("%CODEX_HOME%") do set "prodex_profile_name=%%~nxP"
 if defined prodex_json (
+  if /I "%TEST_CODEX_FAILURE_PROFILE%"=="%prodex_profile_name%" (
+    if /I "%TEST_CODEX_FAILURE_KIND%"=="protocol" (
+      echo {"type":"thread.started","thread_id":"diagnostic"}
+      exit /b 0
+    )
+    if /I "%TEST_CODEX_FAILURE_KIND%"=="malformed" (
+      echo not-json
+      exit /b 0
+    )
+    if /I "%TEST_CODEX_FAILURE_KIND%"=="exhausted" (
+      echo {"type":"thread.started","thread_id":"diagnostic"}
+      echo {"type":"turn.started"}
+      echo {"type":"turn.failed","error":{"message":"usage_limit_reached"}}
+      exit /b 1
+    )
+    if /I "%TEST_CODEX_FAILURE_KIND%"=="overloaded" (
+      echo {"type":"thread.started","thread_id":"diagnostic"}
+      echo {"type":"turn.started"}
+      echo {"type":"turn.failed","error":{"message":"HTTP 503 upstream unavailable"}}
+      exit /b 1
+    )
+    if /I "%TEST_CODEX_FAILURE_KIND%"=="auth" (
+      echo {"type":"thread.started","thread_id":"diagnostic"}
+      echo {"type":"turn.started"}
+      echo {"type":"turn.failed","error":{"message":"401 Unauthorized"}}
+      exit /b 1
+    )
+    if /I "%TEST_CODEX_FAILURE_KIND%"=="spawn" (
+      >&2 echo failed to start codex child
+      exit /b 127
+    )
+  )
   echo {"type":"thread.started","thread_id":"diagnostic"}
   echo {"type":"turn.started"}
   echo {"type":"item.completed","item":{"type":"agent_message","text":"Hello"}}

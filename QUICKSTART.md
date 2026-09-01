@@ -83,16 +83,22 @@ prodex run --profile second
 Prodex preserves continuation affinity and rotates only before commit. It does
 not move a live continuation or rotate after streamed output begins.
 
-Check a real OpenAI application path with a minimal model request:
+Check every configured eligible OpenAI profile with isolated minimal model
+requests:
 
 ```bash
 prodex ping openai
 ```
 
-This is not a DNS or server-health probe. For the three expose modes, use
-`prodex s expose` for local-only MCP/browser access, `--tunnel` for the
+Each probe sends user text `ping`, stays pinned to its profile, and continues
+after another profile fails. `--profile NAME` limits the check to one profile;
+`--json` emits the aggregate per-profile result. A valid completed response is
+enough; exact `PONG` wording is not required. This is an application-level
+probe, not a DNS or server-health probe. For expose modes, use
+`prodex s expose` for local-only browser/MCP access, `--tunnel` for the
 Cloudflare Quick Tunnel, or `--tunnel-provider openai` for MCP-only OpenAI
-Secure Tunnel access; the browser remains local in OpenAI mode.
+Secure Tunnel access; the browser remains loopback-local in OpenAI mode, and
+tunnel-client readiness does not by itself verify ChatGPT connector creation.
 
 ## 5. Use Super/YOLO mode
 
@@ -252,9 +258,12 @@ prodex doctor --bundle ./prodex-doctor.json --redacted
 prodex audit --tail 20
 ```
 
-Use `log_path` from the JSON output to inspect the active runtime log. Runtime
-notices are never printed over the Codex TUI. `prodex audit` exposes local
-events; it is not immutable compliance retention or a disaster-recovery plan.
+Use `log_path` from the JSON output to inspect an explicitly recorded runtime
+log. Live `prodex log stream` and `prodex log upstream` use the bounded
+authenticated runtime broker by default, so normal observability does not grow
+a raw disk journal. Runtime notices are never printed over the Codex TUI.
+`prodex audit` exposes local events; it is not immutable compliance retention or
+a disaster-recovery plan.
 
 If Prodex returns `409 stale_continuation`, resume with the original profile or
 start a new prompt. Prodex refuses an ambiguous cross-profile replay.

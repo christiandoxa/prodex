@@ -18,9 +18,10 @@ fn runtime_proxy_async_logger() -> io::Result<&'static runtime_log::RuntimeAsync
     static LOGGER: OnceLock<Result<runtime_log::RuntimeAsyncLogger, (io::ErrorKind, String)>> =
         OnceLock::new();
     match LOGGER.get_or_init(|| {
-        runtime_log::RuntimeAsyncLogger::new(
+        runtime_log::RuntimeAsyncLogger::new_with_recording(
             runtime_proxy_log_queue_capacity(),
             runtime_proxy_format_dropped_log_marker,
+            cfg!(test) || runtime_log::runtime_log_recording_enabled(),
         )
         .map_err(|error| (error.kind(), error.to_string()))
     }) {
@@ -67,8 +68,11 @@ pub(super) fn create_runtime_proxy_log_path() -> Result<PathBuf> {
 }
 
 fn create_runtime_proxy_log_path_in_dir(dir: &Path) -> Result<PathBuf> {
-    fs::create_dir_all(dir)
-        .with_context(|| format!("failed to create runtime log directory {}", dir.display()))?;
+    let record_to_disk = cfg!(test) || runtime_log::runtime_log_recording_enabled();
+    if record_to_disk {
+        fs::create_dir_all(dir)
+            .with_context(|| format!("failed to create runtime log directory {}", dir.display()))?;
+    }
     for _ in 0..128 {
         let millis = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -79,6 +83,12 @@ fn create_runtime_proxy_log_path_in_dir(dir: &Path) -> Result<PathBuf> {
             "{RUNTIME_PROXY_LOG_FILE_PREFIX}-{}-{millis}-{sequence}.log",
             std::process::id()
         ));
+        if !record_to_disk {
+            if !path.exists() {
+                return Ok(path);
+            }
+            continue;
+        }
         match open_runtime_proxy_private_file(&path) {
             Ok(_) => return Ok(path),
             Err(err) if err.kind() == io::ErrorKind::AlreadyExists => continue,
@@ -137,8 +147,10 @@ pub(super) fn initialize_runtime_proxy_log_path() -> Result<PathBuf> {
     let format = runtime_proxy_log_format();
     set_runtime_proxy_log_format(format);
     let log_path = create_runtime_proxy_log_path()?;
-    write_runtime_proxy_latest_log_pointer(&log_path)
-        .context("failed to update latest runtime log pointer")?;
+    if runtime_proxy_log_recording_enabled() {
+        write_runtime_proxy_latest_log_pointer(&log_path)
+            .context("failed to update latest runtime log pointer")?;
+    }
     initialize_runtime_proxy_log_contents(&log_path)?;
     Ok(log_path)
 }
@@ -148,8 +160,10 @@ pub(super) fn initialize_runtime_proxy_log_path_from_config(
 ) -> Result<PathBuf> {
     set_runtime_proxy_log_format(config.log_format);
     let log_path = create_runtime_proxy_log_path_in_dir(&config.log_dir)?;
-    write_runtime_proxy_latest_log_pointer_in_dir(&log_path, &config.log_dir)
-        .context("failed to update latest runtime log pointer")?;
+    if runtime_proxy_log_recording_enabled() {
+        write_runtime_proxy_latest_log_pointer_in_dir(&log_path, &config.log_dir)
+            .context("failed to update latest runtime log pointer")?;
+    }
     initialize_runtime_proxy_log_contents(&log_path)?;
     Ok(log_path)
 }
@@ -185,6 +199,9 @@ fn write_runtime_proxy_latest_log_pointer_in_dir(
     log_path: &Path,
     log_dir: &Path,
 ) -> io::Result<()> {
+    if !runtime_proxy_log_recording_enabled() {
+        return Ok(());
+    }
     let pointer_path = log_dir.join(RUNTIME_PROXY_LATEST_LOG_POINTER);
     if let Some(parent) = pointer_path.parent() {
         fs::create_dir_all(parent)?;
@@ -196,6 +213,10 @@ fn write_runtime_proxy_latest_log_pointer_in_dir(
         return Err(err);
     }
     Ok(())
+}
+
+fn runtime_proxy_log_recording_enabled() -> bool {
+    cfg!(test) || runtime_log::runtime_log_recording_enabled()
 }
 
 fn runtime_proxy_latest_log_pointer_temp_path(pointer_path: &Path) -> PathBuf {
@@ -383,6 +404,9 @@ fn runtime_proxy_format_dropped_log_marker(marker: runtime_log::RuntimeDroppedLo
 }
 
 pub(super) fn runtime_proxy_log_to_path(log_path: &Path, message: &str) {
+    if runtime_log::runtime_log_message_is_routine_load(message) {
+        return;
+    }
     let Ok(logger) = runtime_proxy_async_logger() else {
         return;
     };
@@ -392,6 +416,14 @@ pub(super) fn runtime_proxy_log_to_path(log_path: &Path, message: &str) {
 
 pub(super) fn runtime_proxy_flush_logs_for_path(log_path: &Path) -> io::Result<()> {
     runtime_proxy_async_logger()?.flush_path(log_path)
+}
+
+pub(crate) fn runtime_proxy_live_log_snapshot(
+    log_path: &Path,
+    after: u64,
+    limit: usize,
+) -> io::Result<runtime_log::RuntimeLiveLogSnapshot> {
+    Ok(runtime_proxy_async_logger()?.live_log_snapshot_after(log_path, after, limit))
 }
 
 #[cfg(test)]

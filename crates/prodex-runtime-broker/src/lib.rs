@@ -21,6 +21,7 @@ pub const RUNTIME_BROKER_METRICS_PROMETHEUS_PATH: &str = "/__prodex/runtime/metr
 pub const RUNTIME_BROKER_ACTIVATE_PATH: &str = "/__prodex/runtime/activate";
 pub const RUNTIME_BROKER_RELEASE_SESSION_AFFINITY_PATH: &str =
     "/__prodex/runtime/session-affinity/release";
+pub const RUNTIME_BROKER_LOG_SNAPSHOT_PATH: &str = "/__prodex/runtime/log/snapshot";
 pub const RUNTIME_BROKER_ADMIN_TOKEN_HEADER: &str = "X-Prodex-Admin-Token";
 
 mod admin;

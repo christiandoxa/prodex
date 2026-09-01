@@ -5,7 +5,7 @@ use crate::app_commands::log_tui::{
 use crate::app_commands::log_upstream_payload::{
     UpstreamPayloadEvent, render_upstream_payload_lines,
 };
-use crate::app_commands::{LogStreamItem, TranscriptEvent, log_event_label};
+use crate::app_commands::{LogStreamItem, TranscriptEvent, is_routine_load_event, log_event_label};
 use crate::reports::InfoTokenUsageEvent;
 use ratatui::layout::{Constraint, Direction, Layout};
 use ratatui::style::{Color, Modifier, Style};
@@ -108,29 +108,10 @@ pub(super) fn render_log_stream_tui(
             Constraint::Length(3),
         ])
         .split(frame.area());
-    let matches = matching_log_stream_items(items, state.query());
-    let raw_count = items.iter().map(log_stream_item_raw_count).sum::<usize>();
-    let count = if raw_count == items.len() {
-        match state.query() {
-            Some(_) => format!("{}/{} match(es)", matches.len(), items.len()),
-            None => format!("{} event(s)", items.len()),
-        }
-    } else {
-        match state.query() {
-            Some(_) => format!(
-                "{}/{} entries · {} raw observations",
-                matches.len(),
-                items.len(),
-                raw_count
-            ),
-            None => format!("{} entries · {} raw observations", items.len(), raw_count),
-        }
-    };
-
     let header = Paragraph::new(Line::styled(
         crate::app_commands::log_tui::render_log_header(
             LOG_TUI_TITLE,
-            &count,
+            "",
             header_detail,
             throughput_rate,
             chunks[0].width as usize,
@@ -208,8 +189,21 @@ fn matching_log_stream_items<'a>(
 ) -> Vec<&'a LogStreamItem> {
     items
         .iter()
+        .filter(|item| !log_stream_item_is_routine_load(item))
         .filter(|item| query.is_none_or(|query| log_stream_item_matches(item, query)))
         .collect()
+}
+
+fn log_stream_item_is_routine_load(item: &LogStreamItem) -> bool {
+    match item {
+        LogStreamItem::LoadObservation(event) => is_routine_load_event(&event.event_name),
+        LogStreamItem::LoadAggregate(event) => event
+            .key
+            .split('\u{1f}')
+            .next()
+            .is_some_and(is_routine_load_event),
+        _ => false,
+    }
 }
 
 fn log_stream_item_matches(item: &LogStreamItem, query: &str) -> bool {
@@ -366,13 +360,6 @@ fn push_transcript_lines(
     ]));
     for line in render_text_body(&event.text, body_width) {
         lines.push(Line::styled(line, tui_primary_style()));
-    }
-}
-
-fn log_stream_item_raw_count(item: &LogStreamItem) -> usize {
-    match item {
-        LogStreamItem::LoadAggregate(event) => event.occurrences,
-        _ => 1,
     }
 }
 

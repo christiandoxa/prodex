@@ -114,8 +114,9 @@ pub(crate) fn print_super_expose_status(ready: &ExposeReadyState) -> anyhow::Res
             fields.push(("Tunnel ID".to_string(), tunnel_id.clone()));
             fields.push((
                 "tunnel-client".to_string(),
-                format!("ready · {client_version}"),
+                format!("ready · {client_version} · ChatGPT connector unverified"),
             ));
+            fields.push(("Browser".to_string(), "local loopback only".to_string()));
         }
     }
     print_panel("Prodex Super for ChatGPT", &fields)?;

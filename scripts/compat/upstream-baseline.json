@@ -2,7 +2,7 @@
   "codex": {
     "compatibility": {
       "upstream_repository": "https://github.com/openai/codex",
-      "baseline_source": "openai/codex rust-v0.151.0 release",
+      "baseline_source": "openai/codex rust-v0.152.0 release",
       "guard_command": "node scripts/compat/check-upstream-baseline.mjs",
       "format_version": 2,
       "critical_files": [
@@ -1527,7 +1527,7 @@
           ]
         }
       ],
-      "tested_codex_release": "rust-v0.151.0",
+      "tested_codex_release": "rust-v0.152.0",
       "patch_deltas": [
         {
           "from": "rust-v0.150.0",
@@ -1552,6 +1552,19 @@
           ],
           "prodex_action": "Use the 0.151.0 Codex package, preserve upstream arguments and response metadata, use the typed route markers in this baseline, and keep account rotation below Codex session/resume ownership.",
           "compatibility_evidence": "Audited the exact 0.150.1..0.151.0 source diff at the pinned commits; Prodex boundary tests cover argv preservation, session resume, runtime quota classification, MCP validation, and child process handling."
+        },
+        {
+          "from": "rust-v0.151.0",
+          "to": "rust-v0.152.0",
+          "upstream_commit": "316795b3cf2a45e90d121d9f46499d4658b2645c",
+          "upstream_release_date": "2026-09-01T01:58:32Z",
+          "runtime_changes": [
+            "Exec JSONL event definitions and completion events are unchanged.",
+            "App-server and MCP contracts add auth-recovery, elicitation, tool-output-budget, shell-timeout, and additive catalog fields.",
+            "Codex owns new tool, Guardian, model-catalog, and rate-limit presentation behavior."
+          ],
+          "prodex_action": "Use the 0.152.0 package, keep JSONL completion validation and typed route/affinity boundaries, and preserve additive upstream payloads without duplicating Codex semantics.",
+          "compatibility_evidence": "Audited the exact 0.151.0..0.152.0 source diff from the coordinator mirror; exec JSONL files had no source diff, and focused Prodex ping/app-server/quota/MCP/security tests remain the boundary checks."
         }
       ],
       "app_server_protocol": {
@@ -1574,29 +1587,28 @@
       }
     },
     "latestRelease": {
-      "tag_name": "rust-v0.151.0",
-      "name": "0.151.0",
-      "published_at": "2026-08-29T09:55:39Z",
-      "html_url": "https://github.com/openai/codex/releases/tag/rust-v0.151.0",
+      "tag_name": "rust-v0.152.0",
+      "name": "0.152.0",
+      "published_at": "2026-09-01T01:58:32Z",
+      "html_url": "https://github.com/openai/codex/releases/tag/rust-v0.152.0",
       "body_head": [
         "## New Features",
-        "- Added a configurable grace period for discovering tools from optional MCP servers. (#41199)",
-        "- Extensions can now inspect or replace MCP tool results before they reach the model. (#41202)",
-        "- Plugin catalogs now combine per-repository configuration and report invalid project marketplaces without hiding valid plugins. (#41208)",
-        "## Bug Fixes",
-        "- Preserved restored permission profiles across TUI turns and prevented /cd from weakening sandbox restrictions. (#41192)",
-        "- Kept tool availability and reasoning effort correct when switching models or falling back to another model. (#41195, #41206)",
-        "- Improved remote sandbox enforcement using the executor's actual home directory, operating system, and path conventions. (#41196, #41204, #41207, #41209)",
-        "- Preserved structured MCP tool and resource errors in app-server responses. (#41196)"
+        "- Vim mode supports `/` and `?` searches within drafts, highlighted matches, and repeat navigation with `n` and `N`. (#41586)",
+        "- Rate-limit banners offer actions for checking usage, managing credits, resetting limits, and managing plans. (#41742)",
+        "- The terminal UI and `codex exec` show credential-refresh progress, including Amazon Bedrock reauthentication. (#41239)",
+        "- MCP server names can contain `:`, `@`, `/`, and `.`, supporting package-style names throughout CLI commands and authentication. (#41700)",
+        "- Individual MCP tools support an `output_token_limit` setting, with consistent truncation across session resumes. (#41421)",
+        "- App-server clients can configure `thread/shellCommand` timeouts, including deadlines longer than one hour. (#41384)",
+        "## Bug Fixes"
       ]
     }
   },
   "claude": {
     "latestRelease": {
-      "tag_name": "v2.1.247",
-      "name": "v2.1.247",
-      "published_at": "2026-08-26T23:06:39Z",
-      "html_url": "https://github.com/anthropics/claude-code/releases/tag/v2.1.247"
+      "tag_name": "v2.1.252",
+      "name": "v2.1.252",
+      "published_at": "2026-08-31T19:46:55Z",
+      "html_url": "https://github.com/anthropics/claude-code/releases/tag/v2.1.252"
     },
     "docs": [
       {

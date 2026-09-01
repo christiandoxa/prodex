@@ -120,6 +120,55 @@ fn lifecycle_events_reach_ready_and_stop() {
 }
 
 #[test]
+fn openai_ready_status_separates_local_browser_mcp_and_connector_state() {
+    let mut state = state();
+    state.apply_engine_event(ExposeLifecycleEvent::Ready(Box::new(ExposeReadyState {
+        local_url: "http://127.0.0.1:1234/expose#bootstrap=bootstrap".to_string(),
+        local_mcp_url: PublicMcpEndpoint::new("http://127.0.0.1:1234", "capability").unwrap(),
+        public_browser_url: None,
+        public_url: None,
+        instance_id: "pdxi_test".to_string(),
+        workspace_name: "workspace".to_string(),
+        display_name: "workspace".to_string(),
+        endpoint: ExposeEndpointMode::OpenAiSecureMcp {
+            tunnel_id: "tunnel_0123456789abcdef0123456789abcdef".to_string(),
+            client_version: "0.0.13".to_string(),
+        },
+        mcp: ExposeMcpEndpoint::new(
+            "capability",
+            "pdxi_test".to_string(),
+            PathBuf::from("/home/test-user/workspace"),
+            "workspace".to_string(),
+            "workspace".to_string(),
+            super_args(),
+        ),
+    })));
+
+    let rendered = ready_body(&state, 120)
+        .iter()
+        .map(line_text)
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(rendered.contains("Tunnel runtime ready"), "{rendered}");
+    assert!(
+        rendered.contains("OpenAI client: 0.0.13 · /healthz and /readyz ready"),
+        "{rendered}"
+    );
+    assert!(
+        rendered.contains("ChatGPT connector: not verified"),
+        "{rendered}"
+    );
+    assert!(
+        rendered.contains("Browser remains local on loopback"),
+        "{rendered}"
+    );
+    assert!(
+        !rendered.contains("Local-only mode stays on loopback"),
+        "{rendered}"
+    );
+}
+
+#[test]
 fn clipboard_injection_receives_the_exact_url_bytes_without_a_newline() {
     let url = PublicMcpEndpoint::new("https://shell.example.com", "capability").unwrap();
     let mut copied = Vec::new();

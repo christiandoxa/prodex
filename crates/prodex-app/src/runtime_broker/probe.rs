@@ -14,7 +14,21 @@ use prodex_runtime_broker::{
 };
 use reqwest::blocking::Client;
 use reqwest::header::HeaderValue;
+use serde::Deserialize;
 use std::time::Duration;
+
+#[derive(Debug, Deserialize)]
+struct RuntimeBrokerLogSnapshotEntry {
+    sequence: u64,
+    line: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct RuntimeBrokerLogSnapshotResponse {
+    cursor: u64,
+    dropped: u64,
+    entries: Vec<RuntimeBrokerLogSnapshotEntry>,
+}
 
 fn runtime_broker_admin_header(capability: &RuntimeBrokerSecret) -> Result<HeaderValue> {
     let mut value = HeaderValue::from_str(capability.expose())
@@ -59,6 +73,10 @@ pub(crate) fn runtime_broker_release_session_affinity_url(
     registry: &RuntimeBrokerRegistry,
 ) -> String {
     prodex_runtime_broker::runtime_broker_release_session_affinity_url(registry)
+}
+
+pub(crate) fn runtime_broker_log_snapshot_url(registry: &RuntimeBrokerRegistry) -> String {
+    registry.log_snapshot_url()
 }
 
 pub(crate) fn probe_runtime_broker_health(
@@ -127,6 +145,57 @@ pub(crate) fn probe_runtime_broker_metrics(
     let metrics = serde_json::from_slice::<RuntimeBrokerMetrics>(&body)
         .context("failed to decode runtime broker metrics response")?;
     Ok(Some(metrics))
+}
+
+pub(crate) fn probe_runtime_broker_log_snapshot(
+    client: &Client,
+    paths: &AppPaths,
+    broker_key: &str,
+    registry: &RuntimeBrokerRegistry,
+    after: u64,
+) -> Result<Option<runtime_log::RuntimeLiveLogSnapshot>> {
+    let Ok(capability) = load_runtime_broker_capability(paths, broker_key, &registry.instance_id)
+    else {
+        return Ok(None);
+    };
+    let url = format!(
+        "{}?after={after}&limit={}",
+        runtime_broker_log_snapshot_url(registry),
+        runtime_log::DEFAULT_RUNTIME_LIVE_LOG_MAX_ENTRIES
+    );
+    let response = match client
+        .get(url)
+        .header(
+            prodex_runtime_broker::RUNTIME_BROKER_ADMIN_TOKEN_HEADER,
+            runtime_broker_admin_header(&capability)?,
+        )
+        .send()
+    {
+        Ok(response) => response,
+        Err(_) => return Ok(None),
+    };
+    if !response.status().is_success() {
+        return Ok(None);
+    }
+    let body = read_blocking_response_body_with_limit(
+        response,
+        RUNTIME_PROXY_BUFFERED_RESPONSE_MAX_BYTES,
+        "failed to read runtime broker log snapshot response",
+    )?;
+    let snapshot = serde_json::from_slice::<RuntimeBrokerLogSnapshotResponse>(&body)
+        .context("failed to decode runtime broker log snapshot response")?;
+    Ok(Some(runtime_log::RuntimeLiveLogSnapshot {
+        cursor: snapshot.cursor,
+        dropped: snapshot.dropped,
+        entries: snapshot
+            .entries
+            .into_iter()
+            .map(|entry| runtime_log::RuntimeLiveLogEntry {
+                sequence: entry.sequence,
+                line: entry.line,
+            })
+            .collect(),
+    }))
 }
 
 pub(crate) fn collect_live_runtime_broker_observations(

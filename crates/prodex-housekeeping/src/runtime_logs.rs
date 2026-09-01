@@ -1,8 +1,6 @@
 use super::ProdexCleanupCounts;
-use prodex_core::{
-    runtime_proxy_log_file_name_is_owned, select_newest_modified_path,
-    select_runtime_log_paths_to_remove, system_time_to_unix_seconds,
-};
+use prodex_core::{runtime_proxy_log_file_name_is_owned, select_newest_modified_path};
+use runtime_log::RuntimeLogPolicy;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -75,38 +73,17 @@ pub fn cleanup_runtime_proxy_logs_in_dir_with_counts(
     retention_count: usize,
     log_prefix: &str,
 ) -> ProdexCleanupCounts {
-    let now_epoch = system_time_to_unix_seconds(now).unwrap_or_default();
-    let oldest_allowed = now_epoch.saturating_sub(retention_seconds);
-    let (paths, scan_failures) = prodex_runtime_log_paths_in_dir_with_counts(dir, log_prefix);
-    let mut counts = ProdexCleanupCounts {
-        scan_failures,
-        ..ProdexCleanupCounts::default()
-    };
-    let paths = paths
-        .into_iter()
-        .filter_map(|path| {
-            let modified = path
-                .metadata()
-                .and_then(|meta| meta.modified())
-                .ok()
-                .and_then(system_time_to_unix_seconds);
-            match modified {
-                Some(modified) => Some((path, modified)),
-                None => {
-                    counts.scan_failures += 1;
-                    None
-                }
-            }
-        })
-        .collect::<Vec<_>>();
-    for path in select_runtime_log_paths_to_remove(paths, oldest_allowed, retention_count) {
-        match fs::remove_file(path) {
-            Ok(()) => counts.removed += 1,
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-            Err(_) => counts.delete_failures += 1,
-        }
+    let report = runtime_log::cleanup_runtime_log_directory_with_prefix(
+        dir,
+        now,
+        RuntimeLogPolicy::from_environment_with_retention(retention_seconds, retention_count),
+        log_prefix,
+    );
+    ProdexCleanupCounts {
+        removed: report.removed,
+        scan_failures: report.scan_failures,
+        delete_failures: report.delete_failures,
     }
-    counts
 }
 
 pub fn newest_runtime_proxy_log_in_dir(dir: &Path, log_prefix: &str) -> Option<PathBuf> {

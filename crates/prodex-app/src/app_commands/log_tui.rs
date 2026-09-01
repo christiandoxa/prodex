@@ -43,7 +43,7 @@ pub(super) struct LogTuiHeaderDetail {
 
 pub(super) fn render_log_header(
     title: &str,
-    count: &str,
+    _count: &str,
     detail: Option<&LogTuiHeaderDetail>,
     throughput_rate: Option<f64>,
     width: usize,
@@ -56,7 +56,7 @@ pub(super) fn render_log_header(
     }
 
     let left_width = inner_width.saturating_sub(throughput_width + 2);
-    let prefix = format!("{title}  {count}");
+    let prefix = title.to_string();
     let left = if terminal_ui::text_width(&prefix) <= left_width {
         let detail_width = left_width.saturating_sub(terminal_ui::text_width(&prefix) + 2);
         if let Some(detail) = detail.filter(|_| detail_width > 0) {
@@ -316,14 +316,14 @@ fn canonical_header_profile(
         .map(str::trim)
         .filter(|profile| !profile.is_empty() && *profile != "-");
     if let Some(state) = state {
-        if let Some(profile) =
-            preferred_profile.filter(|profile| state.profiles.contains_key(*profile))
+        if let Some(profile) = state
+            .active_profile
+            .as_deref()
+            .filter(|profile| state.profiles.contains_key(*profile))
         {
             return Some(profile.to_string());
         }
-        return state
-            .active_profile
-            .as_deref()
+        return preferred_profile
             .filter(|profile| state.profiles.contains_key(*profile))
             .map(ToOwned::to_owned);
     }
@@ -492,6 +492,40 @@ mod tests {
         assert_eq!(terminal_ui::text_width(&header), 78);
         assert!(header.ends_with("100 t/s"));
         assert!(header.starts_with(LOG_TUI_TITLE));
+        assert!(!header.contains("200 event(s)"));
+    }
+
+    #[test]
+    fn log_header_prioritizes_quota_over_buffer_counts() {
+        let snapshot = RuntimeProfileUsageSnapshot {
+            checked_at: 0,
+            plan_type: None,
+            five_hour_status: RuntimeQuotaWindowStatus::Ready,
+            five_hour_remaining_percent: 73,
+            five_hour_reset_at: i64::MAX,
+            weekly_status: RuntimeQuotaWindowStatus::Ready,
+            weekly_remaining_percent: 80,
+            weekly_reset_at: i64::MAX,
+        };
+        let detail = LogTuiHeaderDetail::quota(
+            "synthetic-profile".to_string(),
+            &snapshot,
+            Duration::from_secs(1),
+        );
+        let header = render_log_header(
+            LOG_TUI_TITLE,
+            "200 entries · 568004 raw observations",
+            Some(&detail),
+            Some(59.1),
+            160,
+        );
+
+        assert!(header.contains("synthetic-profile"));
+        assert!(header.contains("5h 73% reset -"));
+        assert!(header.contains("weekly 80% reset -"));
+        assert!(header.contains("59.1 t/s"));
+        assert!(!header.contains("200 entries"));
+        assert!(!header.contains("568004 raw observations"));
     }
 
     #[test]

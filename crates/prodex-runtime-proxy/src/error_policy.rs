@@ -181,7 +181,7 @@ impl RuntimeHttpErrorRule {
             return None;
         }
 
-        match self.signal {
+        let message = match self.signal {
             RuntimeHttpErrorSignal::ExplicitQuota => runtime_error_signal_message_from_body(
                 body,
                 RuntimeHttpErrorSignal::ExplicitQuota,
@@ -211,7 +211,24 @@ impl RuntimeHttpErrorRule {
             RuntimeHttpErrorSignal::TransientStatus => {
                 Some(runtime_transient_http_error_message(status, body))
             }
+        };
+        if message.is_some() {
+            return message;
         }
+
+        // A canonical Codex usage-limit message is authoritative even when a 429
+        // response omitted its structured error code. Generic 429 bodies remain
+        // pass-through to avoid turning ordinary throttling into quota exhaustion.
+        (self.signal == RuntimeHttpErrorSignal::ExplicitQuota && status == 429)
+            .then(|| {
+                runtime_error_signal_message_from_body(
+                    body,
+                    RuntimeHttpErrorSignal::ExplicitQuota,
+                    RuntimeSignalMatchMode::UsageMessage,
+                )
+                .filter(|message| runtime_authoritative_usage_limit_text_message(message))
+            })
+            .flatten()
     }
 }
 
@@ -428,6 +445,13 @@ pub fn runtime_usage_limit_text_message(message: &str) -> bool {
             && (lower.contains("try again at")
                 || lower.contains("request to your admin")
                 || lower.contains("more access now"))
+}
+
+pub fn runtime_authoritative_usage_limit_text_message(message: &str) -> bool {
+    let lower = message.to_ascii_lowercase();
+    lower.contains("you've hit your usage limit")
+        || lower.contains("you have hit your usage limit")
+        || lower.contains("you hit your usage limit")
 }
 
 pub fn runtime_overload_text_message(message: &str) -> bool {

@@ -588,7 +588,7 @@ fn scripted_responses_overload_keeps_hard_affinity_owner() {
 }
 
 #[test]
-fn scripted_backend_fault_usage_limit_429_passes_through_without_rotation() {
+fn scripted_backend_fault_usage_limit_429_rotates_to_ready_profile() {
     let backend =
         RuntimeProxyBackend::start_with_fault_script(RuntimeProxyBackendFaultScript::new([
             RuntimeProxyBackendFaultStep::usage_limit_429(
@@ -611,20 +611,30 @@ fn scripted_backend_fault_usage_limit_429_passes_through_without_rotation() {
     };
 
     let response = proxy_runtime_responses_request(13, &request, harness.shared())
-        .expect("usage-limit text-only 429 should pass through");
-    let RuntimeResponsesReply::Buffered(parts) = response else {
-        panic!("text-only usage-limit 429 should be returned as a buffered upstream response");
+        .expect("canonical usage-limit message should rotate to the ready profile");
+    let (status, body) = match response {
+        RuntimeResponsesReply::Buffered(parts) => (
+            parts.status,
+            String::from_utf8(parts.body.into_vec()).expect("response body should decode"),
+        ),
+        RuntimeResponsesReply::Streaming(mut response) => {
+            let mut body = String::new();
+            response
+                .body
+                .read_to_string(&mut body)
+                .expect("response body should decode");
+            (response.status, body)
+        }
     };
-    let body = String::from_utf8(parts.body.into_vec()).expect("429 body should decode");
 
-    assert_eq!(parts.status, 429);
+    assert_eq!(status, 200);
     assert!(
-        body.contains("usage limit"),
-        "expected original 429 body: {body}"
+        !body.contains("usage limit"),
+        "account-level usage text leaked after a successful rotation: {body}"
     );
     assert_eq!(
         backend.responses_accounts(),
-        vec!["main-account".to_string()]
+        vec!["main-account".to_string(), "second-account".to_string()]
     );
 }
 
