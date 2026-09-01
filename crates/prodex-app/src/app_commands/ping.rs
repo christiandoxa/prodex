@@ -127,7 +127,7 @@ struct PingTarget {
 #[derive(Debug)]
 struct PingValidationFailure {
     status: PingStatus,
-    detail: &'static str,
+    detail: String,
 }
 
 pub(crate) fn handle_ping(command: PingCommands) -> Result<()> {
@@ -258,7 +258,10 @@ fn validate_ping_args(args: &PingOpenaiArgs) -> Result<()> {
 fn ping_result_from_output(output: &Output, model: Option<String>, started: Instant) -> PingResult {
     let no_stdout = output.stdout.iter().all(u8::is_ascii_whitespace);
     let (status, detail) = match validate_ping_output(output) {
-        Ok(()) if output.status.success() => (PingStatus::Pass, "valid model response received"),
+        Ok(()) if output.status.success() => (
+            PingStatus::Pass,
+            "valid model response received".to_string(),
+        ),
         Ok(()) => classify_failure(output),
         Err(failure) if no_stdout => {
             let classified = classify_failure(output);
@@ -275,9 +278,9 @@ fn ping_result_from_output(output: &Output, model: Option<String>, started: Inst
         Err(failure) => (failure.status, failure.detail),
     };
     let detail = if status == PingStatus::Pass {
-        detail.to_string()
+        detail
     } else {
-        ping_output_failure_detail(detail, output)
+        ping_output_failure_detail(&detail, output)
     };
     PingResult {
         profile: String::new(),
@@ -302,7 +305,7 @@ impl PingValidationState {
         if !self.thread_started || !self.turn_started || !self.turn_completed {
             return Err(PingValidationFailure {
                 status: PingStatus::ProtocolFailed,
-                detail: "Codex did not complete a structured turn",
+                detail: "Codex did not complete a structured turn".to_string(),
             });
         }
         if !self.agent_message_completed
@@ -313,7 +316,7 @@ impl PingValidationState {
         {
             return Err(PingValidationFailure {
                 status: PingStatus::UnexpectedResponse,
-                detail: "completed turn did not return a model response",
+                detail: "completed turn did not return a model response".to_string(),
             });
         }
         Ok(())
@@ -325,7 +328,7 @@ fn validate_ping_output(output: &Output) -> std::result::Result<(), PingValidati
     for line in String::from_utf8_lossy(&output.stdout).lines() {
         let event: Value = serde_json::from_str(line).map_err(|_| PingValidationFailure {
             status: PingStatus::ProtocolFailed,
-            detail: "Codex JSONL output was malformed",
+            detail: "Codex JSONL output was malformed".to_string(),
         })?;
         validate_ping_event(&event, &mut state)?;
     }
@@ -348,7 +351,7 @@ fn validate_ping_event(
             {
                 return Err(PingValidationFailure {
                     status: PingStatus::ProtocolFailed,
-                    detail: "Codex JSONL output contained an invalid thread start",
+                    detail: "Codex JSONL output contained an invalid thread start".to_string(),
                 });
             }
             state.thread_started = true;
@@ -357,7 +360,7 @@ fn validate_ping_event(
             if !state.thread_started || state.turn_started || state.turn_completed {
                 return Err(PingValidationFailure {
                     status: PingStatus::ProtocolFailed,
-                    detail: "Codex JSONL output contained an invalid turn start",
+                    detail: "Codex JSONL output contained an invalid turn start".to_string(),
                 });
             }
             state.turn_started = true;
@@ -366,7 +369,7 @@ fn validate_ping_event(
             if !state.thread_started || !state.turn_started || state.turn_completed {
                 return Err(PingValidationFailure {
                     status: PingStatus::ProtocolFailed,
-                    detail: "Codex JSONL output contained an invalid turn completion",
+                    detail: "Codex JSONL output contained an invalid turn completion".to_string(),
                 });
             }
             state.turn_completed = true;
@@ -377,7 +380,8 @@ fn validate_ping_event(
             if !state.thread_started || !state.turn_started || state.turn_completed {
                 return Err(PingValidationFailure {
                     status: PingStatus::ProtocolFailed,
-                    detail: "Codex JSONL output contained an item outside the active turn",
+                    detail: "Codex JSONL output contained an item outside the active turn"
+                        .to_string(),
                 });
             }
             return validate_ping_item(event_type, event, state);
@@ -385,7 +389,7 @@ fn validate_ping_event(
         Some(_) | None => {
             return Err(PingValidationFailure {
                 status: PingStatus::ProtocolFailed,
-                detail: "Codex JSONL output contained an unsupported event",
+                detail: "Codex JSONL output contained an unsupported event".to_string(),
             });
         }
     }
@@ -400,21 +404,23 @@ fn is_ping_item_event(event_type: &str) -> bool {
 }
 
 fn ping_turn_failure(event: &Value) -> std::result::Result<(), PingValidationFailure> {
-    let status = classify_failure_text(&ping_event_failure_text(event, "turn failed")).0;
+    let message = ping_event_failure_text(event, "turn failed");
+    let status = classify_failure_text(&message).0;
     Err(PingValidationFailure {
         status: if status == PingStatus::ProcessFailed {
             PingStatus::TurnFailed
         } else {
             status
         },
-        detail: "Codex turn failed",
+        detail: ping_process::bounded_ping_detail(&message),
     })
 }
 
 fn ping_event_failure(event: &Value) -> std::result::Result<(), PingValidationFailure> {
+    let message = ping_event_failure_text(event, "Codex error");
     Err(PingValidationFailure {
-        status: classify_failure_text(&ping_event_failure_text(event, "Codex error")).0,
-        detail: "Codex reported an unrecoverable error",
+        status: classify_failure_text(&message).0,
+        detail: ping_process::bounded_ping_detail(&message),
     })
 }
 
@@ -452,7 +458,7 @@ fn validate_ping_item(
 ) -> std::result::Result<(), PingValidationFailure> {
     let item = event.get("item").ok_or(PingValidationFailure {
         status: PingStatus::ProtocolFailed,
-        detail: "Codex JSONL item event had no item",
+        detail: "Codex JSONL item event had no item".to_string(),
     })?;
     match item.get("type").and_then(Value::as_str) {
         Some("agent_message") => {
@@ -467,18 +473,19 @@ fn validate_ping_item(
         Some("reasoning") => Ok(()),
         Some(_) | None => Err(PingValidationFailure {
             status: PingStatus::ProtocolFailed,
-            detail: "diagnostic turn emitted tool or unsupported activity",
+            detail: "diagnostic turn emitted tool or unsupported activity".to_string(),
         }),
     }
 }
 
-fn classify_failure(output: &Output) -> (PingStatus, &'static str) {
+fn classify_failure(output: &Output) -> (PingStatus, String) {
     let text = format!(
         "{}\n{}",
         String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr)
     );
-    classify_failure_text(&text)
+    let (status, detail) = classify_failure_text(&text);
+    (status, detail.to_string())
 }
 
 type PingFailureMatcher = fn(&str) -> bool;

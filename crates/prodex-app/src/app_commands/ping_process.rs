@@ -151,7 +151,7 @@ pub(super) fn ping_output_failure_detail(base: &str, output: &Output) -> String 
     detail
 }
 
-fn bounded_ping_detail(text: &str) -> String {
+pub(super) fn bounded_ping_detail(text: &str) -> String {
     let text = redaction_redact_secret_like_text(text)
         .replace(['\r', '\n'], " ")
         .trim()

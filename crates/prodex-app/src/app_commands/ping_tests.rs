@@ -161,6 +161,27 @@ fn structured_turn_failure_preserves_quota_classification() {
 }
 
 #[test]
+fn structured_failure_detail_preserves_authoritative_message() {
+    let result = ping_result_from_output(
+        &output(
+            r#"{"type":"thread.started","thread_id":"t"}
+{"type":"turn.started"}
+{"type":"turn.failed","error":{"message":"usage_limit_reached"}}"#,
+            false,
+        ),
+        None,
+        Instant::now(),
+    );
+
+    assert_eq!(result.status, PingStatus::QuotaExhausted);
+    assert!(
+        result.detail.contains("usage_limit_reached"),
+        "{}",
+        result.detail
+    );
+}
+
+#[test]
 fn fast_nonzero_exit_preserves_bounded_redacted_stderr_detail() {
     let secret = "Bearer ping-secret-token";
     let result = ping_result_from_output(
