@@ -1,12 +1,18 @@
-use super::ping_process::{PING_ERROR_DETAIL_MAX_BYTES, ping_command_args, run_ping_child};
+#[cfg(unix)]
+use super::ping_process::run_ping_child;
+use super::ping_process::{PING_ERROR_DETAIL_MAX_BYTES, ping_command_args};
 use super::{
     PING_PROMPT, PingOpenaiArgs, PingProbeOptions, PingStatus, classify_failure_text,
     ping_result_from_output, validate_ping_output,
 };
+#[cfg(unix)]
 use crate::ChildProcessPlan;
+#[cfg(unix)]
 use std::ffi::OsString;
+#[cfg(unix)]
 use std::fs;
 use std::process::Output;
+#[cfg(unix)]
 use std::time::{Duration, Instant};
 
 #[cfg(unix)]
@@ -19,12 +25,20 @@ fn output(stdout: &str, success: bool) -> Output {
 }
 
 fn output_with_stderr(stdout: &str, stderr: &str, success: bool) -> Output {
+    let status = if success {
+        std::process::ExitStatus::from_raw(0)
+    } else {
+        #[cfg(unix)]
+        {
+            std::process::ExitStatus::from_raw(1 << 8)
+        }
+        #[cfg(windows)]
+        {
+            std::process::ExitStatus::from_raw(1)
+        }
+    };
     Output {
-        status: if success {
-            std::process::ExitStatus::from_raw(0)
-        } else {
-            std::process::ExitStatus::from_raw(256)
-        },
+        status,
         stdout: stdout.as_bytes().to_vec(),
         stderr: stderr.as_bytes().to_vec(),
     }
