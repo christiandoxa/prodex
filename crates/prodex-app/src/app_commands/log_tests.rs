@@ -454,7 +454,97 @@ fn runtime_token_sample_reaches_header_state_through_shared_collector() {
 
     assert!(matches!(items.as_slice(), [LogStreamItem::TokenUsage(_)]));
     assert_eq!(
-        throughput.display_rate(std::time::Instant::now()),
+        throughput.display_rate_for_profile(std::time::Instant::now(), None),
+        Some(100.0)
+    );
+}
+
+#[test]
+fn untimed_terminal_token_usage_closes_live_throughput_stream() {
+    let path = std::path::Path::new("/tmp/runtime-untimed-final.log");
+    let start = std::time::Instant::now();
+    let mut throughput = crate::app_commands::log_throughput::OutputThroughput::default();
+    for (output_tokens, observed_at) in [
+        (100, start),
+        (200, start + std::time::Duration::from_secs(1)),
+    ] {
+        throughput.observe_token_usage(
+            path,
+            &InfoTokenUsageEvent {
+                profile: "main".to_string(),
+                request: Some(29),
+                output_tokens,
+                ..InfoTokenUsageEvent::default()
+            },
+            observed_at,
+        );
+    }
+    assert_eq!(
+        throughput.active_rate_for_profile(start + std::time::Duration::from_secs(1), Some("main")),
+        Some(100.0)
+    );
+
+    let items = super::log_stream::collect_runtime_log_line(
+        path,
+        "[2026-07-01 21:52:37.729 +07:00] token_usage request=29 route=responses transport=http profile=main source=responses_unary input_tokens=10 output_tokens=200 reasoning_tokens=0",
+        false,
+        Some(&mut throughput),
+        true,
+    )
+    .unwrap();
+
+    assert!(matches!(items.as_slice(), [LogStreamItem::TokenUsage(_)]));
+    assert!(
+        throughput
+            .active_rate_for_profile(std::time::Instant::now(), Some("main"))
+            .is_none()
+    );
+    assert_eq!(
+        throughput.display_rate_for_profile(std::time::Instant::now(), Some("main")),
+        Some(100.0)
+    );
+}
+
+#[test]
+fn live_progress_selects_current_profile_over_historical_rate() {
+    let history = std::path::Path::new("/tmp/runtime-history-profile-a.log");
+    let live = std::path::Path::new("broker:runtime-profile-b:instance");
+    let start = std::time::Instant::now();
+    let mut throughput = crate::app_commands::log_throughput::OutputThroughput::default();
+    throughput.observe_historical(
+        history,
+        &InfoTokenUsageEvent {
+            profile: "profile-a".to_string(),
+            request: Some(1),
+            output_tokens: 200,
+            generation_ms: Some(2_500),
+            output_tokens_per_second: Some(80.0),
+            ..InfoTokenUsageEvent::default()
+        },
+    );
+    for (output_tokens, observed_at) in [
+        (100, start),
+        (200, start + std::time::Duration::from_secs(1)),
+    ] {
+        throughput.observe_token_usage(
+            live,
+            &InfoTokenUsageEvent {
+                profile: "profile-b".to_string(),
+                request: Some(2),
+                output_tokens,
+                ..InfoTokenUsageEvent::default()
+            },
+            observed_at,
+        );
+    }
+
+    let current_profile = throughput.active_profile();
+    assert_eq!(current_profile.as_deref(), Some("profile-b"));
+    assert_eq!(
+        throughput.display_rate_for_profile(
+            start + std::time::Duration::from_secs(1),
+            current_profile.as_deref(),
+        ),
         Some(100.0)
     );
 }

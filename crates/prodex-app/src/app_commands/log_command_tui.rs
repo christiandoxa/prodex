@@ -172,6 +172,7 @@ fn stream_token_usage_events_tui() -> Result<()> {
         )?;
         update_log_stream_header(
             &items,
+            &throughput,
             &mut header_profile,
             &mut header_detail,
             &mut header_refresh_at,
@@ -414,11 +415,14 @@ fn collect_log_stream_items_with_live(
 
 fn update_log_stream_header(
     items: &VecDeque<LogStreamItem>,
+    throughput: &OutputThroughput,
     header_profile: &mut Option<String>,
     header_detail: &mut Option<LogTuiHeaderDetail>,
     header_refresh_at: &mut Instant,
 ) {
-    let latest_profile = latest_log_stream_profile(items).map(str::to_string);
+    let latest_profile = throughput
+        .active_profile()
+        .or_else(|| latest_log_stream_profile(items).map(str::to_string));
     let now = Instant::now();
     if latest_profile != *header_profile || now >= *header_refresh_at {
         *header_profile = latest_profile;

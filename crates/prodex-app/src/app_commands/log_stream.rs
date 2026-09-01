@@ -166,9 +166,7 @@ pub(crate) fn collect_runtime_log_line(
         let event = local_token_usage_event(event);
         if let Some(throughput) = throughput {
             throughput.observe_token_usage(path, &event, Instant::now());
-            if event.generation_ms.is_some() || event.output_tokens_per_second.is_some() {
-                throughput.finish(path, &event);
-            }
+            throughput.finish(path, &event);
         }
         items.push(LogStreamItem::TokenUsage(event));
     }

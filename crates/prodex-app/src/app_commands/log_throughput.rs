@@ -167,7 +167,8 @@ impl OutputThroughput {
             let rate = duplicate_rate
                 .or_else(|| valid_output_rate(event))
                 .or_else(|| output_throughput_stream_rate(stream))
-                .or(stream.last_known_rate);
+                .or(stream.last_known_rate)
+                .or_else(|| self.last_known_rates.get(&key).copied());
             if let Some(rate) = rate.filter(|rate| rate.is_finite() && *rate > 0.0) {
                 stream.last_known_rate = Some(rate);
                 Some(rate)
@@ -182,8 +183,12 @@ impl OutputThroughput {
         }
     }
 
-    pub(super) fn active_rate(&mut self, now: Instant) -> Option<f64> {
-        self.active_rate_for_profile(now, None)
+    pub(super) fn active_profile(&self) -> Option<String> {
+        self.streams
+            .iter()
+            .filter(|(_, stream)| stream.active)
+            .max_by_key(|(_, stream)| stream.last_event_at)
+            .map(|(key, _)| key.profile.clone())
     }
 
     pub(super) fn active_rate_for_profile(
@@ -218,10 +223,6 @@ impl OutputThroughput {
         } else {
             None
         }
-    }
-
-    pub(super) fn display_rate(&mut self, now: Instant) -> Option<f64> {
-        self.display_rate_for_profile(now, None)
     }
 
     pub(super) fn display_rate_for_profile(
@@ -289,6 +290,7 @@ impl OutputThroughput {
             && let Some(oldest) = self.streams.keys().next().cloned()
         {
             self.streams.remove(&oldest);
+            self.last_known_rates.remove(&oldest);
         }
         self.streams.entry(key.clone()).or_default()
     }
@@ -404,6 +406,14 @@ mod tests {
         }
     }
 
+    fn active_rate(throughput: &mut OutputThroughput, now: Instant) -> Option<f64> {
+        throughput.active_rate_for_profile(now, None)
+    }
+
+    fn display_rate(throughput: &mut OutputThroughput, now: Instant) -> Option<f64> {
+        throughput.display_rate_for_profile(now, None)
+    }
+
     #[test]
     fn output_throughput_uses_recent_output_deltas_only() {
         let path = Path::new("/tmp/runtime-a.log");
@@ -417,7 +427,7 @@ mod tests {
         );
 
         assert_eq!(
-            throughput.active_rate(start + Duration::from_secs(1)),
+            active_rate(&mut throughput, start + Duration::from_secs(1)),
             Some(100.0)
         );
         assert_eq!(format_output_tokens_per_second(Some(100.0)), "100 t/s");
@@ -435,7 +445,7 @@ mod tests {
         throughput.observe_delta(second, "main", Some(2), 50, start + Duration::from_secs(1));
 
         assert_eq!(
-            throughput.active_rate(start + Duration::from_secs(1)),
+            active_rate(&mut throughput, start + Duration::from_secs(1)),
             Some(50.0)
         );
     }
@@ -446,10 +456,7 @@ mod tests {
         let start = Instant::now();
         let mut throughput = OutputThroughput::default();
         throughput.observe_token_usage(path, &usage("main", Some(8), 1), start);
-        assert_eq!(
-            throughput.active_rate(start + Duration::from_millis(1)),
-            None
-        );
+        assert!(active_rate(&mut throughput, start + Duration::from_millis(1)).is_none());
         assert_eq!(format_output_tokens_per_second(None), "— t/s");
 
         throughput.observe_token_usage(
@@ -459,7 +466,7 @@ mod tests {
         );
         assert!(
             throughput
-                .active_rate(start + OUTPUT_THROUGHPUT_MIN_SAMPLE)
+                .active_rate_for_profile(start + OUTPUT_THROUGHPUT_MIN_SAMPLE, None)
                 .is_some()
         );
     }
@@ -471,7 +478,7 @@ mod tests {
         let mut throughput = OutputThroughput::default();
         throughput.observe_token_usage(path, &usage("main", Some(9), 10), start);
         throughput.observe_token_usage(path, &usage("main", Some(9), 10), start);
-        assert_eq!(throughput.active_rate(start), None);
+        assert!(active_rate(&mut throughput, start).is_none());
 
         let event = InfoTokenUsageEvent {
             profile: "main".to_string(),
@@ -485,7 +492,7 @@ mod tests {
             ..event
         };
         throughput.observe_token_usage(path, &reset_event, start + Duration::from_secs(1));
-        assert_eq!(throughput.active_rate(start + Duration::from_secs(1)), None);
+        assert!(active_rate(&mut throughput, start + Duration::from_secs(1)).is_none());
     }
 
     #[test]
@@ -504,15 +511,11 @@ mod tests {
         throughput.observe_token_usage(path, &event, now);
         throughput.finish(path, &event);
 
-        assert_eq!(throughput.active_rate(now), None);
-        assert_eq!(throughput.display_rate(Instant::now()), Some(100.0));
-        assert_eq!(format_output_tokens_per_second(Some(f64::NAN)), "— t/s");
-        assert_eq!(
-            format_output_tokens_per_second(Some(f64::INFINITY)),
-            "— t/s"
-        );
-        assert_eq!(format_output_tokens_per_second(Some(0.0)), "— t/s");
-        assert_eq!(format_output_tokens_per_second(Some(-1.0)), "— t/s");
+        assert!(active_rate(&mut throughput, now).is_none());
+        assert_eq!(display_rate(&mut throughput, Instant::now()), Some(100.0));
+        for rate in [f64::NAN, f64::INFINITY, 0.0, -1.0] {
+            assert_eq!(format_output_tokens_per_second(Some(rate)), "— t/s");
+        }
         assert_eq!(format_output_tokens_per_second(Some(0.7)), "0.7 t/s");
     }
 
@@ -536,7 +539,7 @@ mod tests {
         throughput.observe_token_usage(live, &first, start);
         throughput.observe_token_usage(live, &second, start + Duration::from_secs(1));
         assert_eq!(
-            throughput.active_rate(start + Duration::from_secs(1)),
+            active_rate(&mut throughput, start + Duration::from_secs(1)),
             Some(100.0)
         );
 
@@ -551,7 +554,7 @@ mod tests {
         );
 
         assert_eq!(
-            throughput.display_rate(start + Duration::from_secs(4)),
+            display_rate(&mut throughput, start + Duration::from_secs(4)),
             Some(100.0)
         );
     }
@@ -564,7 +567,7 @@ mod tests {
         throughput.observe_delta(path, "main", Some(11), 100, start);
         throughput.observe_delta(path, "main", Some(11), 100, start + Duration::from_secs(1));
         assert_eq!(
-            throughput.active_rate(start + Duration::from_secs(1)),
+            active_rate(&mut throughput, start + Duration::from_secs(1)),
             Some(100.0)
         );
 
@@ -579,7 +582,7 @@ mod tests {
         throughput.observe_token_usage(path, &completed, start + Duration::from_secs(1));
         throughput.finish(path, &completed);
         assert_eq!(
-            throughput.display_rate(start + Duration::from_secs(60)),
+            display_rate(&mut throughput, start + Duration::from_secs(60)),
             Some(66.3)
         );
 
@@ -591,7 +594,7 @@ mod tests {
         };
         throughput.observe_token_usage(path, &warming, start + Duration::from_secs(61));
         assert_eq!(
-            throughput.display_rate(start + Duration::from_secs(61)),
+            display_rate(&mut throughput, start + Duration::from_secs(61)),
             Some(66.3)
         );
     }
@@ -630,7 +633,7 @@ mod tests {
         );
 
         assert_eq!(
-            throughput.display_rate(start + Duration::from_secs(3)),
+            display_rate(&mut throughput, start + Duration::from_secs(3)),
             Some(30.0)
         );
     }
@@ -669,7 +672,7 @@ mod tests {
         );
 
         assert_eq!(
-            throughput.active_rate(start + Duration::from_secs(3)),
+            active_rate(&mut throughput, start + Duration::from_secs(3)),
             Some(20.0)
         );
     }
@@ -721,7 +724,7 @@ mod tests {
         throughput.observe_token_usage(path, &event, now);
         throughput.finish(path, &event);
 
-        assert_eq!(throughput.display_rate(now), None);
+        assert!(display_rate(&mut throughput, now).is_none());
     }
 
     #[test]
@@ -738,7 +741,7 @@ mod tests {
             .next()
             .expect("stream should remain bounded");
         assert_eq!(stream.samples.len(), 1);
-        assert_eq!(throughput.active_rate(start + Duration::from_secs(1)), None);
+        assert!(active_rate(&mut throughput, start + Duration::from_secs(1)).is_none());
     }
 
     #[test]
@@ -757,7 +760,7 @@ mod tests {
             },
         );
 
-        assert_eq!(throughput.display_rate(Instant::now()), Some(66.3));
+        assert_eq!(display_rate(&mut throughput, Instant::now()), Some(66.3));
     }
 
     #[test]
@@ -795,7 +798,7 @@ mod tests {
             throughput.display_rate_for_profile(Instant::now(), Some("main")),
             Some(10.0)
         );
-        assert_eq!(throughput.display_rate(Instant::now()), Some(20.0));
+        assert_eq!(display_rate(&mut throughput, Instant::now()), Some(20.0));
     }
 
     #[test]
@@ -837,9 +840,9 @@ mod tests {
         throughput.observe_token_usage(live, &completed, start + Duration::from_secs(1));
         throughput.finish(live, &completed);
 
-        assert_eq!(throughput.active_rate(start + Duration::from_secs(1)), None);
+        assert!(active_rate(&mut throughput, start + Duration::from_secs(1)).is_none());
         assert_eq!(
-            throughput.display_rate(start + Duration::from_secs(1)),
+            display_rate(&mut throughput, start + Duration::from_secs(1)),
             Some(80.0)
         );
     }
