@@ -231,10 +231,6 @@ pub(in crate::expose) fn start_openai_tunnel(
         .health_url
         .to_str()
         .context("OpenAI tunnel health URL path is not UTF-8")?;
-    let log_path = files
-        .log
-        .to_str()
-        .context("OpenAI tunnel log path is not UTF-8")?;
     let mut command = openai_tunnel_client_command()?;
     remove_inherited_tunnel_configuration(&mut command);
     command
@@ -244,8 +240,8 @@ pub(in crate::expose) fn start_openai_tunnel(
         .args(["--control-plane.api-key", "env:CONTROL_PLANE_API_KEY"])
         .args(["--health.listen-addr", "127.0.0.1:0"])
         .args(["--health.url-file", health_url_path])
-        .args(["--log.file", log_path])
-        // Pinned tunnel-client logs resolved MCP bearer URLs at INFO.
+        // Pinned tunnel-client can log resolved MCP bearer URLs at ERROR.
+        // Keep its default output disconnected instead of retaining it in a file.
         .args(["--log.level", "warn"])
         .env("CONTROL_PLANE_API_KEY", credentials.api_key())
         .stdin(Stdio::null())
