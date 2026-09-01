@@ -303,3 +303,99 @@ fn websocket_runtime_log_emits_only_completed_stream_payloads() {
     let _ = client_socket.close(None);
     let _ = std::fs::remove_file(&shared.log_path);
 }
+
+#[test]
+fn websocket_tool_call_first_completion_usage_reports_generation_timing() {
+    let _guard = acquire_test_runtime_lock();
+    let listener = std::net::TcpListener::bind("127.0.0.1:0")
+        .expect("upstream websocket listener should bind");
+    let upstream_addr = listener
+        .local_addr()
+        .expect("upstream websocket listener should expose address");
+    let upstream = thread::spawn(move || {
+        let (stream, _) = listener
+            .accept()
+            .expect("upstream websocket should accept connection");
+        let mut socket = tungstenite::accept(stream).expect("upstream websocket handshake");
+        let _request = socket
+            .read()
+            .expect("upstream websocket should receive request");
+        socket
+            .send(WsMessage::Text(
+                r#"{"type":"response.output_item.added","item":{"type":"function_call","call_id":"call-1","name":"exec"}}"#
+                    .into(),
+            ))
+            .expect("upstream should send the tool item");
+        thread::sleep(Duration::from_millis(10));
+        socket
+            .send(WsMessage::Text(
+                r#"{"type":"response.function_call_arguments.delta","call_id":"call-1","delta":"{}"}"#
+                    .into(),
+            ))
+            .expect("upstream should send the tool delta");
+        socket
+            .send(WsMessage::Text(
+                r#"{"type":"response.completed","response":{"id":"resp-ws-throughput","usage":{"input_tokens":2,"output_tokens":8}}}"#
+                    .into(),
+            ))
+            .expect("upstream should send completion usage");
+    });
+
+    let shared = websocket_test_shared_with_main_profile("throughput", upstream_addr);
+    let (mut local_socket, mut client_socket) = websocket_test_local_pair();
+    let handshake_request = RuntimeProxyRequest {
+        method: "GET".to_string(),
+        path_and_query: "/backend-api/prodex/responses".to_string(),
+        headers: Vec::new(),
+        body: Vec::new(),
+    };
+    let mut websocket_session = RuntimeWebsocketSessionState::default();
+    let attempt = attempt_runtime_websocket_request(RuntimeWebsocketAttemptRequest {
+        request_id: 902,
+        local_socket: &mut local_socket,
+        handshake_request: &handshake_request,
+        request_text: r#"{"type":"response.create"}"#,
+        request_previous_response_id: None,
+        request_prompt_cache_key: None,
+        request_session_id: None,
+        request_turn_state: None,
+        shared: &shared,
+        websocket_session: &mut websocket_session,
+        profile_name: "main",
+        turn_state_override: None,
+        promote_committed_profile: true,
+    })
+    .expect("websocket response should complete");
+
+    assert!(matches!(attempt, RuntimeWebsocketAttempt::Delivered));
+    for _ in 0..3 {
+        client_socket
+            .read()
+            .expect("client should receive every tool response frame");
+    }
+    let log = read_websocket_test_log_after_marker(&shared.log_path, "token_usage request=902");
+    let line = log
+        .lines()
+        .find(|line| line.contains("] token_usage request=902"))
+        .expect("websocket completion usage should be logged");
+    let generation_ms = line
+        .split_whitespace()
+        .find_map(|field| field.strip_prefix("generation_ms="))
+        .and_then(|value| value.parse::<u64>().ok());
+    assert!(generation_ms.is_some_and(|value| value > 0), "{line}");
+    assert!(line.contains("output_tokens=8"));
+    let output_tokens_per_second = line
+        .split_whitespace()
+        .find_map(|field| field.strip_prefix("output_tokens_per_second="))
+        .and_then(|value| value.parse::<f64>().ok());
+    assert!(
+        output_tokens_per_second.is_some_and(|value| value > 0.0),
+        "{line}"
+    );
+    assert!(!log.contains("token_usage_progress request=902"));
+    upstream
+        .join()
+        .expect("upstream websocket thread should finish");
+    let _ = client_socket.close(None);
+    let _ = std::fs::remove_file(&shared.log_path);
+}

@@ -167,6 +167,191 @@ fn sse_tap_reader_observes_split_events_without_event_buffering() {
 }
 
 #[test]
+fn sse_tap_logs_completion_usage_without_delta_usage() {
+    let _guard = acquire_test_runtime_lock();
+    let log_path = env::temp_dir().join(format!(
+        "prodex-response-forwarding-throughput-test-{}.log",
+        std::process::id()
+    ));
+    prepare_runtime_proxy_test_log_path(&log_path);
+    let shared = test_runtime_streaming_shared(log_path.clone());
+    let mut reader = RuntimeSseTapReader::new(
+        ChunkedReader::new([
+            b"data: {\"type\":\"response.created\"}\r\n\r\n".as_slice(),
+            b"data: {\"type\":\"response.output_text.delta\",\"delta\":\"hello\"}\r\n\r\n",
+            b"data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp-sse\",\"usage\":{\"input_tokens\":3,\"output_tokens\":12}}}\r\n\r\n",
+        ]),
+        RuntimeSseTapReaderInit {
+            shared: shared.clone(),
+            profile_name: "test".to_string(),
+            prelude: &[],
+            remembered_response_ids: &[],
+            request_previous_response_id: None,
+            turn_state: None,
+            request_id: 501,
+            prompt_cache_key: None,
+            model_name: None,
+        },
+    );
+    let mut buf = [0; 4096];
+    reader.read(&mut buf).expect("created event should read");
+    reader.read(&mut buf).expect("output delta should read");
+    thread::sleep(Duration::from_millis(10));
+    reader.read(&mut buf).expect("completion event should read");
+    assert_eq!(reader.read(&mut buf).expect("SSE should reach EOF"), 0);
+
+    let log = crate::read_runtime_proxy_test_log(&shared.log_path);
+    let line = log
+        .lines()
+        .find(|line| line.contains("] token_usage request=501"))
+        .expect("completion usage should be logged");
+    let generation_ms = line
+        .split_whitespace()
+        .find_map(|field| field.strip_prefix("generation_ms="))
+        .and_then(|value| value.parse::<u64>().ok());
+    assert!(generation_ms.is_some_and(|value| value > 0), "{line}");
+    assert!(line.contains("output_tokens=12"));
+    let output_tokens_per_second = line
+        .split_whitespace()
+        .find_map(|field| field.strip_prefix("output_tokens_per_second="))
+        .and_then(|value| value.parse::<f64>().ok());
+    assert!(
+        output_tokens_per_second.is_some_and(|value| value > 0.0),
+        "{line}"
+    );
+    assert!(!log.contains("token_usage_progress request=501"));
+    let _ = std::fs::remove_file(log_path);
+}
+
+#[test]
+fn sse_tap_times_tool_call_first_completion_usage() {
+    let _guard = acquire_test_runtime_lock();
+    let log_path = env::temp_dir().join(format!(
+        "prodex-response-forwarding-tool-throughput-test-{}.log",
+        std::process::id()
+    ));
+    prepare_runtime_proxy_test_log_path(&log_path);
+    let shared = test_runtime_streaming_shared(log_path.clone());
+    let mut reader = RuntimeSseTapReader::new(
+        ChunkedReader::new([
+            b"data: {\"type\":\"response.created\"}\r\n\r\n".as_slice(),
+            b"data: {\"type\":\"response.output_item.added\",\"item\":{\"type\":\"function_call\",\"name\":\"exec\"}}\r\n\r\n",
+            b"data: {\"type\":\"response.function_call_arguments.delta\",\"delta\":\"{}\"}\r\n\r\n",
+            b"data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp-tool\",\"usage\":{\"input_tokens\":2,\"output_tokens\":7}}}\r\n\r\n",
+        ]),
+        RuntimeSseTapReaderInit {
+            shared: shared.clone(),
+            profile_name: "test".to_string(),
+            prelude: &[],
+            remembered_response_ids: &[],
+            request_previous_response_id: None,
+            turn_state: None,
+            request_id: 502,
+            prompt_cache_key: None,
+            model_name: None,
+        },
+    );
+    let mut buf = [0; 4096];
+    reader.read(&mut buf).expect("created event should read");
+    reader.read(&mut buf).expect("tool item should read");
+    thread::sleep(Duration::from_millis(10));
+    reader.read(&mut buf).expect("tool delta should read");
+    reader.read(&mut buf).expect("completion event should read");
+    assert_eq!(reader.read(&mut buf).expect("SSE should reach EOF"), 0);
+
+    let log = crate::read_runtime_proxy_test_log(&shared.log_path);
+    let line = log
+        .lines()
+        .find(|line| line.contains("] token_usage request=502"))
+        .expect("tool-call completion usage should be logged");
+    let generation_ms = line
+        .split_whitespace()
+        .find_map(|field| field.strip_prefix("generation_ms="))
+        .and_then(|value| value.parse::<u64>().ok());
+    assert!(generation_ms.is_some_and(|value| value > 0), "{line}");
+    assert!(line.contains("output_tokens=7"));
+    let output_tokens_per_second = line
+        .split_whitespace()
+        .find_map(|field| field.strip_prefix("output_tokens_per_second="))
+        .and_then(|value| value.parse::<f64>().ok());
+    assert!(
+        output_tokens_per_second.is_some_and(|value| value > 0.0),
+        "{line}"
+    );
+    assert!(!log.contains("token_usage_progress request=502"));
+    let _ = std::fs::remove_file(log_path);
+}
+
+#[test]
+fn untimed_unary_usage_does_not_emit_generation_rate() {
+    let _guard = acquire_test_runtime_lock();
+    let log_path = env::temp_dir().join(format!(
+        "prodex-response-forwarding-unary-throughput-test-{}.log",
+        std::process::id()
+    ));
+    prepare_runtime_proxy_test_log_path(&log_path);
+    let shared = test_runtime_streaming_shared(log_path.clone());
+    log_runtime_token_usage(RuntimeTokenUsageLog {
+        shared: &shared,
+        request_id: 503,
+        transport: "http",
+        profile_name: "test",
+        source: "responses_unary",
+        prompt_cache_key: None,
+        model_name: None,
+        usage: Some(RuntimeTokenUsage {
+            input_tokens: 2,
+            output_tokens: 5,
+            ..RuntimeTokenUsage::default()
+        }),
+        generation_ms: None,
+    });
+
+    let log = crate::read_runtime_proxy_test_log(&shared.log_path);
+    let line = log
+        .lines()
+        .find(|line| line.contains("] token_usage request=503"))
+        .expect("unary usage should still be logged");
+    assert!(!line.contains("generation_ms="));
+    assert!(!line.contains("output_tokens_per_second="));
+    let _ = std::fs::remove_file(log_path);
+}
+
+#[test]
+fn zero_output_usage_does_not_emit_generation_rate() {
+    let _guard = acquire_test_runtime_lock();
+    let log_path = env::temp_dir().join(format!(
+        "prodex-response-forwarding-zero-output-throughput-test-{}.log",
+        std::process::id()
+    ));
+    prepare_runtime_proxy_test_log_path(&log_path);
+    let shared = test_runtime_streaming_shared(log_path.clone());
+    log_runtime_token_usage(RuntimeTokenUsageLog {
+        shared: &shared,
+        request_id: 504,
+        transport: "websocket",
+        profile_name: "test",
+        source: "responses_websocket",
+        prompt_cache_key: None,
+        model_name: None,
+        usage: Some(RuntimeTokenUsage {
+            input_tokens: 2,
+            ..RuntimeTokenUsage::default()
+        }),
+        generation_ms: Some(1_000),
+    });
+
+    let log = crate::read_runtime_proxy_test_log(&shared.log_path);
+    let line = log
+        .lines()
+        .find(|line| line.contains("] token_usage request=504"))
+        .expect("zero-output usage should still be logged");
+    assert!(!line.contains("generation_ms="));
+    assert!(!line.contains("output_tokens_per_second="));
+    let _ = std::fs::remove_file(log_path);
+}
+
+#[test]
 fn streaming_sse_previous_response_error_passes_through_after_commit() {
     let event = concat!(
         "event: response.failed\r\n",
