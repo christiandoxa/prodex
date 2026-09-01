@@ -29,13 +29,14 @@ use windows_sys::Win32::Security::{
 };
 use windows_sys::Win32::Storage::FileSystem::{
     BY_HANDLE_FILE_INFORMATION, DELETE, FILE_ADD_FILE, FILE_ADD_SUBDIRECTORY, FILE_ALL_ACCESS,
-    FILE_ATTRIBUTE_DIRECTORY, FILE_ATTRIBUTE_REPARSE_POINT, FILE_DELETE_CHILD,
+    FILE_APPEND_DATA, FILE_ATTRIBUTE_DIRECTORY, FILE_ATTRIBUTE_REPARSE_POINT, FILE_DELETE_CHILD,
     FILE_DISPOSITION_FLAG_DELETE, FILE_DISPOSITION_FLAG_POSIX_SEMANTICS, FILE_DISPOSITION_INFO,
     FILE_DISPOSITION_INFO_EX, FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT,
     FILE_GENERIC_READ, FILE_GENERIC_WRITE, FILE_NAME_NORMALIZED, FILE_SHARE_DELETE,
-    FILE_SHARE_READ, FILE_SHARE_WRITE, FileDispositionInfo, FileDispositionInfoEx,
-    GetFileInformationByHandle, GetFinalPathNameByHandleW, READ_CONTROL,
-    SetFileInformationByHandle, VOLUME_NAME_DOS, WRITE_DAC, WRITE_OWNER,
+    FILE_SHARE_READ, FILE_SHARE_WRITE, FILE_WRITE_ATTRIBUTES, FILE_WRITE_DATA, FILE_WRITE_EA,
+    FileDispositionInfo, FileDispositionInfoEx, GetFileInformationByHandle,
+    GetFinalPathNameByHandleW, READ_CONTROL, SetFileInformationByHandle, VOLUME_NAME_DOS,
+    WRITE_DAC, WRITE_OWNER,
 };
 use windows_sys::Win32::System::IO::IO_STATUS_BLOCK;
 use windows_sys::Win32::System::SystemServices::{ACCESS_ALLOWED_ACE_TYPE, ACCESS_DENIED_ACE_TYPE};
@@ -645,8 +646,9 @@ fn validate_acl_entries(dacl: *mut ACL, user: PSID, usage: AclUse) -> io::Result
     // SAFETY: `dacl` points into the live descriptor and AceCount bounds GetAce.
     let ace_count = unsafe { (*dacl).AceCount };
     for index in 0..u32::from(ace_count) {
-        if let Some(sid) = validate_acl_entry(dacl, index, usage)?
+        if let Some((sid, mask)) = validate_acl_entry(dacl, index, usage)?
             && !principal_is_trusted(sid, user, usage)?
+            && !(matches!(usage, AclUse::ExternalFile) && mask & external_write_access() == 0)
         {
             return Err(permission_denied(
                 "secret object grants sensitive access to an untrusted principal",
@@ -656,7 +658,11 @@ fn validate_acl_entries(dacl: *mut ACL, user: PSID, usage: AclUse) -> io::Result
     Ok(())
 }
 
-fn validate_acl_entry(dacl: *mut ACL, index: u32, usage: AclUse) -> io::Result<Option<PSID>> {
+fn validate_acl_entry(
+    dacl: *mut ACL,
+    index: u32,
+    usage: AclUse,
+) -> io::Result<Option<(PSID, u32)>> {
     let mut ace = std::ptr::null_mut();
     // SAFETY: index is below AceCount and `ace` is a valid output pointer.
     if unsafe { GetAce(dacl, index, &mut ace) } == 0 {
@@ -679,7 +685,22 @@ fn validate_acl_entry(dacl: *mut ACL, index: u32, usage: AclUse) -> io::Result<O
     if allowed.Mask & sensitive_access(usage) == 0 {
         return Ok(None);
     }
-    Ok(Some(std::ptr::addr_of!(allowed.SidStart).cast_mut().cast()))
+    Ok(Some((
+        std::ptr::addr_of!(allowed.SidStart).cast_mut().cast(),
+        allowed.Mask,
+    )))
+}
+
+fn external_write_access() -> u32 {
+    FILE_APPEND_DATA
+        | FILE_WRITE_DATA
+        | FILE_WRITE_EA
+        | FILE_WRITE_ATTRIBUTES
+        | DELETE
+        | WRITE_DAC
+        | WRITE_OWNER
+        | GENERIC_ALL
+        | GENERIC_WRITE
 }
 
 fn sensitive_access(usage: AclUse) -> u32 {
@@ -835,7 +856,7 @@ fn permission_denied(message: &'static str) -> io::Error {
 mod tests {
     use super::*;
     use windows_sys::Win32::Security::{
-        CreateWellKnownSid, SECURITY_MAX_SID_SIZE, WinInteractiveSid,
+        CreateWellKnownSid, INHERITED_ACE, SECURITY_MAX_SID_SIZE, WinInteractiveSid,
     };
 
     #[test]
@@ -908,7 +929,7 @@ mod tests {
             0
         );
         let group = group_storage.as_mut_ptr().cast();
-        set_test_acl_with_group(&file, user.sid(), group);
+        set_test_acl_with_group(&file, user.sid(), group, FILE_GENERIC_READ);
 
         let error = validate_acl(&file, AclUse::PrivateFile).unwrap_err();
         assert_eq!(error.kind(), io::ErrorKind::PermissionDenied);
@@ -917,7 +938,48 @@ mod tests {
         fs::remove_dir_all(root).unwrap();
     }
 
-    fn set_test_acl_with_group(file: &File, user: PSID, group: PSID) {
+    #[test]
+    fn external_acl_allows_inherited_read_only_group_but_rejects_write() {
+        let root = std::env::temp_dir().join(format!(
+            "prodex-secret-windows-external-acl-{}",
+            std::process::id()
+        ));
+        fs::create_dir_all(&root).unwrap();
+        let directory = Directory::open_path(&root, false).unwrap();
+        let file = directory
+            .create_private_file(OsStr::new("external.tmp"))
+            .unwrap();
+        let user = CurrentUserSid::load().unwrap();
+        let mut group_storage =
+            vec![0usize; (SECURITY_MAX_SID_SIZE as usize).div_ceil(size_of::<usize>())];
+        let mut group_len = SECURITY_MAX_SID_SIZE;
+        // SAFETY: the aligned buffer contains `SECURITY_MAX_SID_SIZE` writable
+        // bytes and remains live while its SID is added to the ACL.
+        assert_ne!(
+            unsafe {
+                CreateWellKnownSid(
+                    WinInteractiveSid,
+                    std::ptr::null_mut(),
+                    group_storage.as_mut_ptr().cast(),
+                    &mut group_len,
+                )
+            },
+            0
+        );
+        let group = group_storage.as_mut_ptr().cast();
+
+        set_test_acl_with_group(&file, user.sid(), group, FILE_GENERIC_READ);
+        validate_acl(&file, AclUse::ExternalFile).unwrap();
+
+        set_test_acl_with_group(&file, user.sid(), group, FILE_GENERIC_WRITE);
+        let error = validate_acl(&file, AclUse::ExternalFile).unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::PermissionDenied);
+
+        drop(file);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    fn set_test_acl_with_group(file: &File, user: PSID, group: PSID, group_access: u32) {
         // SAFETY: both SIDs point into live aligned buffers owned by the caller.
         let user_len = unsafe { GetLengthSid(user) };
         // SAFETY: same as above.
@@ -944,7 +1006,7 @@ mod tests {
                 0
             );
             assert_ne!(
-                AddAccessAllowedAceEx(acl, ACL_REVISION, 0, FILE_GENERIC_READ, group),
+                AddAccessAllowedAceEx(acl, ACL_REVISION, INHERITED_ACE, group_access, group),
                 0
             );
             assert_eq!(
