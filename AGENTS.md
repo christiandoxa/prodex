@@ -107,6 +107,12 @@ constraint makes Mojo unsuitable.
 - This policy does not require an immediate rewrite of unrelated existing Rust. It applies to new
   capabilities and significant maintenance additions, while preserving safe host boundaries.
 
+The canonical production-share policy uses a general 7.0% release floor and a separate 10.0%
+long-term project target. `node scripts/ci/mojo-production-share.mjs --check` enforces the floor
+and the audited reachable-Mojo non-regression baseline; it does not require the project target.
+The historical 0.421.0 quantity waiver is expired metadata only and must never satisfy a current
+release check or be replaced with a version-specific waiver.
+
 ## Temporary artifact lifecycle
 
 - Temporary worktrees, build targets, test homes, scratch directories, generated test artifacts,
