@@ -10,9 +10,7 @@ provides:
 
 In a real interactive terminal, the command opens the Expose mode picker before
 starting an external tunnel. **Local only** is highlighted first. Explicit
-Cloudflare provider flags bypass that picker; `--tunnel-provider openai` opens
-the OpenAI setup screen in the same Ratatui terminal. A non-TTY invocation never
-opens Ratatui and uses only explicit configuration.
+Cloudflare provider flags bypass the picker; `--tunnel-provider openai` opens the OpenAI setup screen in the same Ratatui terminal. Non-TTY invocations never open Ratatui and use only explicit configuration.
 
 The listener is loopback-bound. Expose grants Super-level authority as the
 current operating-system user, so the URL is a capability, not a harmless
@@ -77,11 +75,7 @@ Expose mode
 Use Up/Down to select, Enter to continue, and Esc or `q` to cancel. Cancellation
 before startup has no external side effects. Prodex does not start
 `cloudflared` or `tunnel-client` until an external mode has been explicitly
-selected and confirmed. For OpenAI mode, the setup screen uses
-`--openai-tunnel-id`, then `CONTROL_PLANE_TUNNEL_ID`, then a tunnel-ID field;
-`CONTROL_PLANE_API_KEY` is used first and otherwise collected in a masked field.
-Use Enter to advance, Backspace/Delete or Ctrl-U to edit, and Esc or Ctrl-C to
-cancel. The Ready view keeps the selected mode visible.
+selected and confirmed. The Ready view keeps the selected mode visible.
 
 ## Mode comparison
 
@@ -411,44 +405,20 @@ CONTROL_PLANE_API_KEY='replace-with-your-runtime-key' \
 prodex s expose --tunnel-provider openai
 ```
 
-The exact client command receives a private configuration path, the OpenAI
-control-plane base URL `https://api.openai.com`, the validated tunnel ID, and
-the API-key reference `env:CONTROL_PLANE_API_KEY`. It also receives a loopback
-health-listener path. It sets `--log.level warn --log.format struct-text` for
-the pinned client, disconnects stdout/stderr, and does not pass `--log.file`.
-The client receives only a loopback opaque relay URL, so its retained status or
-log buffer cannot contain the resolved MCP capability URL. The runtime key is
-never placed in argv or the generated configuration.
+The exact client command receives a private configuration path, the validated tunnel ID, `https://api.openai.com`, `env:CONTROL_PLANE_API_KEY`, and a loopback health path. It sets `--log.level warn --log.format struct-text`, disconnects stdout/stderr, omits `--log.file`, and receives only an opaque loopback relay; the runtime key and resolved capability URL never enter argv, config, or logs.
 
-The generated client configuration binds the opaque relay to the explicit
-`main` channel. The existing bounded loopback HTTP server translates only the
-exact opaque relay request target to the actual local capability route; it does
-not use the browser URL. Control-plane polling uses the official host-root API
-URL and the client-owned `/v1/tunnels/...` routes; Prodex does not use a GET to
-`/v1/mcp/...` as a readiness probe.
+The generated config binds the opaque relay to `main`; the bounded loopback server translates only that exact target to the local capability route. Polling uses the official host-root API and client-owned `/v1/tunnels/...` routes, never a browser URL or GET `/v1/mcp/...` readiness probe.
 
 OpenAI mode requires:
 
 - a pre-created OpenAI Platform tunnel;
 - the supported `tunnel-client` executable.
 
-In a TTY, setup resolves `--openai-tunnel-id` before
-`CONTROL_PLANE_TUNNEL_ID`, then permits a bounded tunnel-ID input. It resolves
-`CONTROL_PLANE_API_KEY` first and otherwise accepts the API key in a masked
-input field. In non-TTY mode, no prompt is available: the API key must be in
-`CONTROL_PLANE_API_KEY`, and the tunnel ID must come from `--openai-tunnel-id`
-or `CONTROL_PLANE_TUNNEL_ID`.
+In a TTY, setup uses `--openai-tunnel-id`, then `CONTROL_PLANE_TUNNEL_ID`, then bounded tunnel-ID input, and uses `CONTROL_PLANE_API_KEY` before masked input. Configured fields are skipped and startup begins immediately when both exist; non-TTY mode requires both values from configuration.
 
-The tunnel identifier is non-secret routing/configuration data. The runtime key
-is secret and held in zeroizing memory. Do not put it in shell history, a
-process argument, a committed file, or a diagnostic log.
+The tunnel identifier is non-secret routing data. The runtime key is held in zeroizing memory; never put it in shell history, process arguments, files, or logs.
 
-Prodex creates a private temporary directory containing the opaque relay
-reference, client configuration, and health URL file. It uses the client's
-loopback `/healthz` and `/readyz` responses for startup readiness, then checks
-that the child is still alive. The relay, directory, and child are removed or
-terminated on normal exit, cancellation, startup failure, or post-ready child
-failure.
+Prodex creates a private temporary directory for the opaque relay, config, and health URL file; it requires loopback `/healthz` and `/readyz` plus a live child. The relay, directory, and child are removed on exit, cancellation, or failure.
 
 The OpenAI tunnel path is independent of `trycloudflare.com`,
 `cloudflare-dns.com`, `cloudflared`, and Cloudflare's UDP/7844 transport. The
@@ -665,9 +635,6 @@ The main implementation areas are:
   `cloudflared_startup.rs` — isolated Cloudflare child and transport startup;
 - `crates/prodex-app/src/expose/runtime/openai_tunnel.rs` — official
   tunnel-client supervision and local health readiness;
-- `crates/prodex-app/src/expose/mcp.rs` and `mcp/handler.rs` — opaque relay
-  target and exact request translation that keep the MCP capability URL out of
-  tunnel-client state;
 - `crates/prodex-app/src/expose/mcp/**` — MCP protocol, tools, and probes;
 - `crates/prodex-app/src/expose/http.rs` and `routes.rs` — browser/session/MCP
   route boundaries;

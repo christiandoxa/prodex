@@ -63,25 +63,15 @@ struct OpenAiMcpRelay {
 }
 
 impl OpenAiMcpRelay {
-    fn new(mcp_url: &str) -> Result<Self> {
-        let mut parsed = url::Url::parse(mcp_url).context("OpenAI MCP relay target is invalid")?;
-        let host = parsed
+    fn new(mcp_url: &PublicMcpEndpoint) -> Result<Self> {
+        let mut parsed =
+            url::Url::parse(mcp_url.as_str()).context("OpenAI MCP relay target is invalid")?;
+        let ip = parsed
             .host_str()
-            .context("OpenAI MCP relay target is invalid")?;
-        let ip: IpAddr = host
-            .parse()
-            .map_err(|_| anyhow::anyhow!("OpenAI MCP relay target is invalid"))?;
+            .and_then(|host| host.parse::<IpAddr>().ok());
         if parsed.scheme() != "http"
-            || !ip.is_loopback()
+            || !ip.is_some_and(|ip| ip.is_loopback())
             || parsed.port().is_none_or(|port| port == 0)
-            || !parsed.username().is_empty()
-            || parsed.password().is_some()
-            || parsed.query().is_some()
-            || parsed.fragment().is_some()
-            || parsed.path().is_empty()
-            || parsed.path().chars().any(|character| {
-                character.is_control() || character.is_whitespace() || !character.is_ascii()
-            })
         {
             anyhow::bail!("OpenAI MCP relay target is invalid")
         }
@@ -90,8 +80,6 @@ impl OpenAiMcpRelay {
             super::session::expose_random_token().context("failed to create OpenAI MCP relay")?;
         let request_target = format!("/__prodex_openai_mcp_relay/{}/mcp", token);
         parsed.set_path(&request_target);
-        parsed.set_query(None);
-        parsed.set_fragment(None);
         Ok(Self {
             endpoint: parsed.to_string(),
             request_target,

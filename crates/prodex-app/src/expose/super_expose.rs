@@ -493,7 +493,7 @@ fn start_expose_endpoint(
                 }
             };
             let client_mcp_url = mcp
-                .install_openai_relay(local_mcp_url.as_str())
+                .install_openai_relay(local_mcp_url)
                 .inspect_err(|_| cleanup_super_expose(shared, mcp, http, None, None))?;
             match start_openai_tunnel(
                 &client_mcp_url,

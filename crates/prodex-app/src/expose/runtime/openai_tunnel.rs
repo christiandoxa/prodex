@@ -15,6 +15,7 @@ use zeroize::Zeroizing;
 use std::os::windows::io::{AsRawHandle, OwnedHandle};
 
 const OPENAI_TUNNEL_CLIENT_RELEASE: &str = "v0.0.13";
+const OPENAI_TUNNEL_CLIENT_VERSION: &str = "0.0.13";
 const OPENAI_TUNNEL_CLIENT_COMMIT: &str = "4b5267f823be0b046bb883aacb51603cfde3a0ea";
 const OPENAI_TUNNEL_CLIENT_READY_TIMEOUT: Duration = if cfg!(test) {
     Duration::from_secs(3)
@@ -26,7 +27,6 @@ const OPENAI_TUNNEL_CLIENT_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(2);
 const OPENAI_TUNNEL_HEALTH_REQUEST_TIMEOUT: Duration = Duration::from_millis(750);
 const OPENAI_TUNNEL_HEALTH_URL_MAX_BYTES: u64 = 4096;
 const OPENAI_TUNNEL_ID_LENGTH: usize = "tunnel_".len() + 32;
-const OPENAI_TUNNEL_VERSION_MAX_BYTES: usize = 32;
 const OPENAI_TUNNEL_API_KEY_MAX_BYTES: usize = 4096;
 static NEXT_OPENAI_TUNNEL_CONFIG_ID: AtomicU64 = AtomicU64::new(1);
 
@@ -238,8 +238,7 @@ pub(in crate::expose) fn start_openai_tunnel(
         .args(["--control-plane.api-key", "env:CONTROL_PLANE_API_KEY"])
         .args(["--health.listen-addr", "127.0.0.1:0"])
         .args(["--health.url-file", health_url_path])
-        // Pinned tunnel-client can log resolved MCP bearer URLs at ERROR.
-        // Keep its output disconnected; the caller supplies an opaque relay URL.
+        // Pinned client can log capability URLs; keep output disconnected and use the opaque relay.
         .args(["--log.level", "warn"])
         .args(["--log.format", "struct-text"])
         .env("CONTROL_PLANE_API_KEY", credentials.api_key())
@@ -420,29 +419,20 @@ fn safe_client_version(output: &Output) -> Option<String> {
         String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr)
     );
-    text.split_whitespace().find_map(|token| {
-        let token = token.trim_matches(|character: char| {
-            !character.is_ascii_alphanumeric() && character != '.' && character != '-'
-        });
-        let token = token.strip_prefix('v').unwrap_or(token);
-        let version = token.split(['-', '+']).next().unwrap_or_default();
-        let parts = version.split('.').collect::<Vec<_>>();
-        (parts.len() == 3
-            && version.len() <= OPENAI_TUNNEL_VERSION_MAX_BYTES
-            && parts
-                .iter()
-                .all(|part| !part.is_empty() && part.bytes().all(|byte| byte.is_ascii_digit())))
-        .then_some(version.to_owned())
-    })
+    let expected = format!(
+        "{OPENAI_TUNNEL_CLIENT_VERSION}+{OPENAI_TUNNEL_CLIENT_COMMIT} (git sha: {OPENAI_TUNNEL_CLIENT_COMMIT})"
+    );
+    text.lines()
+        .any(|line| line.trim() == expected)
+        .then_some(OPENAI_TUNNEL_CLIENT_VERSION.to_owned())
 }
 
 fn safe_version_label(value: &str) -> String {
-    let output = Output {
-        status: std::process::ExitStatus::default(),
-        stdout: value.as_bytes().to_vec(),
-        stderr: Vec::new(),
-    };
-    safe_client_version(&output).unwrap_or_else(|| "unknown".to_string())
+    if value == OPENAI_TUNNEL_CLIENT_VERSION {
+        value.to_owned()
+    } else {
+        "unknown".to_string()
+    }
 }
 
 fn wait_for_openai_tunnel_ready(

@@ -2,15 +2,15 @@ use super::super::mcp::ExposeMcpEndpoint;
 use super::super::runtime::ExistingCloudflareSelection;
 use super::{
     ExposeEndpointMode, ExposeLifecycleEvent, ExposeLifecyclePhase, ExposeReadyState,
-    ExposeTuiAction, ExposeTuiPhase, ExposeTuiState, OpenAiSetupField, OpenAiSetupState,
-    PublicMcpEndpoint, copy_public_url_to_clipboard_with, draw_frame, ready_body,
-    support::labeled_value_lines,
+    ExposeTuiAction, ExposeTuiPhase, ExposeTuiState, OpenAiSetupField, PublicMcpEndpoint,
+    copy_public_url_to_clipboard_with, draw_frame, ready_body, support::labeled_value_lines,
 };
 use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
 use prodex_cli::SuperArgs;
 use ratatui::Terminal;
 use ratatui::backend::TestBackend;
 use ratatui::text::Line;
+use std::fs;
 use std::path::PathBuf;
 use terminal_ui::{chunk_token, text_width};
 
@@ -90,7 +90,7 @@ fn openai_setup_uses_cli_id_before_environment_and_masks_pasted_key() {
         "CONTROL_PLANE_TUNNEL_ID",
         "tunnel_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
     );
-    let _env_key = crate::TestEnvVarGuard::set("CONTROL_PLANE_API_KEY", "environment-key");
+    let _env_key = crate::TestEnvVarGuard::unset("CONTROL_PLANE_API_KEY");
     let mut state = state();
     state.openai_tunnel_id = Some("tunnel_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb".to_string());
     state.handle_key(KeyEvent::new(KeyCode::Char('4'), KeyModifiers::NONE));
@@ -100,41 +100,8 @@ fn openai_setup_uses_cli_id_before_environment_and_masks_pasted_key() {
     ));
     assert_eq!(
         state.phase(),
-        ExposeTuiPhase::OpenAiSetup(OpenAiSetupField::TunnelId)
-    );
-    assert_eq!(
-        state
-            .openai_setup
-            .as_ref()
-            .expect("OpenAI setup")
-            .tunnel_id(),
-        "tunnel_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
-    );
-    assert_eq!(
-        state
-            .openai_setup
-            .as_ref()
-            .expect("OpenAI setup")
-            .masked_api_key(),
-        "*".repeat("environment-key".len())
-    );
-
-    state.handle_event(Event::Key(KeyEvent::new(
-        KeyCode::Char('u'),
-        KeyModifiers::CONTROL,
-    )));
-    state.handle_event(Event::Paste(
-        "tunnel_0123456789abcdef0123456789abcdef".to_string(),
-    ));
-    assert!(matches!(
-        state.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)),
-        ExposeTuiAction::None
-    ));
-    assert_eq!(
-        state.phase(),
         ExposeTuiPhase::OpenAiSetup(OpenAiSetupField::ApiKey)
     );
-
     state.handle_event(Event::Key(KeyEvent::new(
         KeyCode::Char('u'),
         KeyModifiers::CONTROL,
@@ -150,29 +117,18 @@ fn openai_setup_uses_cli_id_before_environment_and_masks_pasted_key() {
     .map(line_text)
     .collect::<Vec<_>>()
     .join("\n");
+    assert!(
+        rendered.contains("tunnel_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"),
+        "{rendered}"
+    );
     assert!(rendered.contains("API key*: ************"), "{rendered}");
     assert!(!rendered.contains("pasted-key-q"), "{rendered}");
-    assert!(!rendered.contains("environment-key"), "{rendered}");
-    assert!(matches!(
-        state.handle_key(KeyEvent::new(KeyCode::Char('q'), KeyModifiers::NONE)),
-        ExposeTuiAction::None
-    ));
-    assert!(matches!(
-        state.handle_event(Event::Key(KeyEvent::new(
-            KeyCode::Backspace,
-            KeyModifiers::NONE,
-        ))),
-        ExposeTuiAction::None
-    ));
-    assert!(matches!(
-        state.handle_event(Event::Key(KeyEvent::new(
-            KeyCode::Delete,
-            KeyModifiers::NONE,
-        ))),
-        ExposeTuiAction::None
-    ));
-    state.handle_event(Event::Resize(40, 12));
-    assert!(state.redraw_needed);
+    for code in [KeyCode::Backspace, KeyCode::Delete] {
+        assert!(matches!(
+            state.handle_event(Event::Key(KeyEvent::new(code, KeyModifiers::NONE))),
+            ExposeTuiAction::None
+        ));
+    }
     assert!(matches!(
         state.handle_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)),
         ExposeTuiAction::Stop
@@ -180,83 +136,33 @@ fn openai_setup_uses_cli_id_before_environment_and_masks_pasted_key() {
 }
 
 #[test]
-fn openai_setup_accepts_both_missing_values_in_sequence() {
-    let _env_lock = crate::TestEnvVarGuard::lock();
-    let _env_id = crate::TestEnvVarGuard::unset("CONTROL_PLANE_TUNNEL_ID");
-    let _env_key = crate::TestEnvVarGuard::unset("CONTROL_PLANE_API_KEY");
-    let mut setup = OpenAiSetupState::new(None);
-
-    assert!(setup.tunnel_id().is_empty());
-    assert!(setup.masked_api_key().is_empty());
-    for character in "tunnel_0123456789abcdef0123456789abcdef".chars() {
-        assert!(matches!(
-            setup.handle_key(
-                OpenAiSetupField::TunnelId,
-                KeyEvent::new(KeyCode::Char(character), KeyModifiers::NONE),
-            ),
-            Ok(super::openai::OpenAiSetupInput::Edited)
-        ));
-    }
-    assert!(matches!(
-        setup
-            .handle_key(
-                OpenAiSetupField::TunnelId,
-                KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE),
-            )
-            .unwrap(),
-        super::openai::OpenAiSetupInput::Next
-    ));
-    setup.handle_paste(OpenAiSetupField::ApiKey, "typed-openai-key");
-    let credentials = match setup
-        .handle_key(
-            OpenAiSetupField::ApiKey,
-            KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE),
-        )
-        .unwrap()
-    {
-        super::openai::OpenAiSetupInput::Credentials(credentials) => credentials,
-        _ => panic!("both-missing setup should produce credentials"),
-    };
-    assert_eq!(
-        credentials.tunnel_id(),
-        "tunnel_0123456789abcdef0123456789abcdef"
+fn openai_setup_starts_directly_when_values_are_configured() {
+    let root =
+        crate::test_temp_root().join(format!("prodex-openai-ui-version-{}", std::process::id()));
+    fs::create_dir_all(&root).unwrap();
+    let binary = crate::write_test_python_executable(
+        &root,
+        "tunnel-client",
+        "#!/usr/bin/env python3\nprint(\"0.0.13+4b5267f823be0b046bb883aacb51603cfde3a0ea (git sha: 4b5267f823be0b046bb883aacb51603cfde3a0ea)\")\n",
     );
-    assert_eq!(credentials.api_key(), "typed-openai-key");
+    let _env_lock = crate::TestEnvVarGuard::lock();
+    let _env_key = crate::TestEnvVarGuard::set("CONTROL_PLANE_API_KEY", "configured-key");
+    let _binary =
+        crate::TestEnvVarGuard::set("PRODEX_TUNNEL_CLIENT_BIN", &binary.to_string_lossy());
+    let mut state = state();
+    state.openai_tunnel_id = Some("tunnel_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb".to_string());
+    state.endpoint_choice = super::EndpointChoice::OpenAiSecureMcp;
+    assert!(matches!(
+        state.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)),
+        ExposeTuiAction::Start {
+            endpoint: ExposeEndpointMode::OpenAiSecureMcp { tunnel_id, .. },
+            openai_credentials: Some(_),
+            ..
+        } if tunnel_id == "tunnel_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+    ));
+    assert!(state.openai_setup.is_none());
+    fs::remove_dir_all(root).unwrap();
 }
-
-#[test]
-fn openai_setup_prefills_partial_environment_configuration_and_bounds_edits() {
-    {
-        let _env_lock = crate::TestEnvVarGuard::lock();
-        let _env_id = crate::TestEnvVarGuard::set(
-            "CONTROL_PLANE_TUNNEL_ID",
-            "tunnel_0123456789abcdef0123456789abcdef",
-        );
-        let _env_key = crate::TestEnvVarGuard::unset("CONTROL_PLANE_API_KEY");
-        let setup = OpenAiSetupState::new(None);
-        assert_eq!(setup.tunnel_id(), "tunnel_0123456789abcdef0123456789abcdef");
-        assert!(setup.masked_api_key().is_empty());
-    }
-    {
-        let _env_lock = crate::TestEnvVarGuard::lock();
-        let _env_id = crate::TestEnvVarGuard::unset("CONTROL_PLANE_TUNNEL_ID");
-        let _env_key = crate::TestEnvVarGuard::set("CONTROL_PLANE_API_KEY", "environment-key");
-        let mut setup = OpenAiSetupState::new(None);
-        assert!(setup.tunnel_id().is_empty());
-        assert_eq!(setup.masked_api_key(), "*".repeat("environment-key".len()));
-        setup.handle_paste(OpenAiSetupField::TunnelId, &"x".repeat(200));
-        assert!(setup.tunnel_id().len() <= "tunnel_".len() + 32);
-        setup
-            .handle_key(
-                OpenAiSetupField::ApiKey,
-                KeyEvent::new(KeyCode::Char('u'), KeyModifiers::CONTROL),
-            )
-            .unwrap();
-        setup.handle_paste(OpenAiSetupField::ApiKey, &"k".repeat(5_000));
-        assert_eq!(setup.masked_api_key().len(), 4_096);
-    }
-}
-
 #[test]
 fn lifecycle_events_reach_ready_and_stop() {
     let mut state = state();

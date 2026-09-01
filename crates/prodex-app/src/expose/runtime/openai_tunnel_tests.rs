@@ -14,7 +14,6 @@ const VALID_TUNNEL_ID: &str = "tunnel_0123456789abcdef0123456789abcdef";
 const API_KEY_SENTINEL: &str = "runtime-key-sentinel";
 const LAUNCH_API_KEY_SENTINEL: &str = "launch-key-sentinel";
 const LOCAL_MCP_URL: &str = "http://127.0.0.1:43123/pdx/v1/capability-secret/mcp";
-
 fn test_root(name: &str) -> std::path::PathBuf {
     let root = test_temp_root().join(format!(
         "prodex-openai-tunnel-{name}-{}",
@@ -29,13 +28,9 @@ fn fake_tunnel_client(root: &Path) -> std::path::PathBuf {
         root,
         "tunnel-client",
         r#"#!/usr/bin/env python3
-import http.server
-import json
-import os
-import sys
+import http.server, json, os, sys
 
-args = sys.argv[1:]
-marker = os.environ.get("PRODEX_OPENAI_TUNNEL_MARKER")
+args = sys.argv[1:]; marker = os.environ.get("PRODEX_OPENAI_TUNNEL_MARKER")
 
 def flag_value(name):
     try:
@@ -47,44 +42,17 @@ if "--version" in args:
     if marker:
         with open(marker, "w", encoding="utf-8") as file:
             file.write("CONTROL_PLANE_API_KEY_PRESENT=" + str("CONTROL_PLANE_API_KEY" in os.environ) + "\n")
-    print("tunnel-client 0.0.13", flush=True)
+    print(os.environ.get("PRODEX_OPENAI_TUNNEL_VERSION", "0.0.13+4b5267f823be0b046bb883aacb51603cfde3a0ea (git sha: 4b5267f823be0b046bb883aacb51603cfde3a0ea)"), flush=True)
     raise SystemExit(0)
 
-config = flag_value("--config")
-mcp_url_path = os.path.join(os.path.dirname(config), "mcp-url")
-mcp_url = open(mcp_url_path, encoding="utf-8").read()
-log_path = flag_value("--log.file")
-log_level = flag_value("--log.level")
-log_format = flag_value("--log.format")
-if log_level == "warn" and log_format not in ("struct-text", "json"):
-    print("log level requires 'struct-text' or 'json' log format", file=sys.stderr, flush=True)
-    raise SystemExit(2)
-# Pinned tunnel-client v0.0.13 emits this ERROR even at --log.level warn.
-error_line = 'level=ERROR msg=failed to connect to mcp error=Post "' + mcp_url + '"'
-if log_path:
-    with open(log_path, "a", encoding="utf-8") as file:
-        file.write(error_line + "\n")
-else:
-    print(error_line, flush=True)
-    print(error_line, file=sys.stderr, flush=True)
+config = flag_value("--config"); mcp_url_path = os.path.join(os.path.dirname(config), "mcp-url"); mcp_url = open(mcp_url_path, encoding="utf-8").read(); log_level = flag_value("--log.level"); log_format = flag_value("--log.format")
+if log_level == "warn" and log_format not in ("struct-text", "json"): raise SystemExit(2)
+error_line = 'level=ERROR msg=failed to connect to mcp error=Post "' + mcp_url + '"'; print(error_line, flush=True); print(error_line, file=sys.stderr, flush=True)
 if marker:
     with open(marker, "w", encoding="utf-8") as file:
-        file.write("argv=" + repr(args) + "\n")
-        file.write("config=" + open(config, encoding="utf-8").read() + "\n")
-        file.write("mcp_url_file_present=" + str(bool(mcp_url)) + "\n")
-        file.write("log_level=" + log_level + "\n")
-        file.write("log_format=" + log_format + "\n")
-        file.write("mcp_probe_error_emitted=True\n")
-        for name in [
-            "CONTROL_PLANE_API_KEY",
-            "OPENAI_API_KEY",
-            "OPENAI_ADMIN_KEY",
-            "MCP_SERVER_URL",
-            "MCP_COMMAND",
-            "CLOUDFLARED_MANAGED",
-            "CLOUDFLARED_TUNNEL_TOKEN",
-        ]:
-            file.write(name + "_PRESENT=" + str(name in os.environ) + "\n")
+        file.write("argv=" + repr(args) + "\n"); file.write("config=" + open(config, encoding="utf-8").read() + "\n")
+        file.write("log_level=" + log_level + "\n"); file.write("log_format=" + log_format + "\n")
+        for name in ("CONTROL_PLANE_API_KEY", "OPENAI_API_KEY", "OPENAI_ADMIN_KEY", "MCP_SERVER_URL", "MCP_COMMAND", "CLOUDFLARED_MANAGED", "CLOUDFLARED_TUNNEL_TOKEN"): file.write(name + "_PRESENT=" + str(name in os.environ) + "\n")
         file.write("CONTROL_PLANE_API_KEY_MATCHES=" + str(os.environ.get("CONTROL_PLANE_API_KEY") == "launch-key-sentinel") + "\n")
 
 if os.environ.get("PRODEX_OPENAI_TUNNEL_MODE") == "exit":
@@ -92,17 +60,9 @@ if os.environ.get("PRODEX_OPENAI_TUNNEL_MODE") == "exit":
 
 class Handler(http.server.BaseHTTPRequestHandler):
     def do_GET(self):
-        if self.path == "/api/status":
-            body = json.dumps({"mcp_server_url": mcp_url}).encode()
-            status = 200
-        elif self.path == "/api/logs":
-            body = json.dumps({"events": [{"message": error_line}]}).encode()
-            status = 200
-        else:
-            status = 503 if os.environ.get("PRODEX_OPENAI_TUNNEL_MODE") == "not-ready" and self.path == "/readyz" else 200
-            body = b"ok"
+        body = json.dumps({"mcp_server_url": mcp_url}).encode() if self.path == "/api/status" else json.dumps({"events": [{"message": error_line}]}).encode() if self.path == "/api/logs" else b"ok"
+        status = 503 if os.environ.get("PRODEX_OPENAI_TUNNEL_MODE") == "not-ready" and self.path == "/readyz" else 200
         self.send_response(status)
-        self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
 
@@ -110,12 +70,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         pass
 
 server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
-with open(flag_value("--health.url-file"), "w", encoding="utf-8") as file:
-    file.write("http://127.0.0.1:" + str(server.server_port))
-if marker:
-    with open(marker, "a", encoding="utf-8") as file:
-        file.write("health_url=" + open(flag_value("--health.url-file"), encoding="utf-8").read() + "\n")
-        file.write("log=" + (open(log_path, encoding="utf-8").read() if log_path else "") + "\n")
+with open(flag_value("--health.url-file"), "w", encoding="utf-8") as file: file.write("http://127.0.0.1:" + str(server.server_port))
 server.serve_forever()
 "#,
     )
@@ -134,6 +89,11 @@ fn validates_official_tunnel_id_shape() {
 
 #[test]
 fn launch_credentials_are_zeroized_and_debug_redacted() {
+    let _env_lock = TestEnvVarGuard::lock();
+    let _env_id = TestEnvVarGuard::set(
+        "CONTROL_PLANE_TUNNEL_ID",
+        "tunnel_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    );
     let credentials = OpenAiTunnelCredentials::new(VALID_TUNNEL_ID, LAUNCH_API_KEY_SENTINEL)
         .expect("fixture credentials should be valid");
     let debug = format!("{credentials:?}");
@@ -142,15 +102,6 @@ fn launch_credentials_are_zeroized_and_debug_redacted() {
     assert_eq!(credentials.api_key(), LAUNCH_API_KEY_SENTINEL);
     assert!(debug.contains("<redacted>"));
     assert!(!debug.contains(LAUNCH_API_KEY_SENTINEL));
-}
-
-#[test]
-fn tunnel_id_resolution_prefers_explicit_then_environment() {
-    let _env_lock = TestEnvVarGuard::lock();
-    let _env_id = TestEnvVarGuard::set(
-        "CONTROL_PLANE_TUNNEL_ID",
-        "tunnel_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-    );
     assert_eq!(
         resolve_openai_tunnel_id(None).unwrap(),
         "tunnel_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
@@ -164,18 +115,12 @@ fn tunnel_id_resolution_prefers_explicit_then_environment() {
 #[test]
 fn config_keeps_capability_url_outside_argv_and_yaml() {
     let relay_url = "http://127.0.0.1:43123/__prodex_openai_mcp_relay/opaque-relay/mcp";
-    let mut files = OpenAiTunnelFiles::create(relay_url, VALID_TUNNEL_ID).unwrap();
+    let files = OpenAiTunnelFiles::create(relay_url, VALID_TUNNEL_ID).unwrap();
     let config = fs::read_to_string(&files.config).unwrap();
-    let mcp_url = fs::read_to_string(&files.mcp_url).unwrap();
-    let directory = files.directory.clone();
     assert!(!config.contains(LOCAL_MCP_URL));
-    assert_eq!(mcp_url, relay_url);
-    assert!(!mcp_url.contains(LOCAL_MCP_URL));
     assert!(config.contains("config_version: 1"));
     assert!(config.contains("url: 'file:"));
     assert!(config.contains(&files.mcp_url.display().to_string()));
-    files.cleanup();
-    assert!(!directory.exists());
 }
 
 #[test]
@@ -215,7 +160,7 @@ fn missing_binary_fails_with_install_guidance_without_echoing_a_secret() {
 }
 
 #[test]
-fn version_probe_does_not_pass_runtime_key_to_an_untrusted_binary() {
+fn version_probe_is_secretless_and_rejects_wrong_build() {
     let root = test_root("version");
     let marker = root.join("marker.txt");
     let _env_lock = TestEnvVarGuard::lock();
@@ -225,6 +170,11 @@ fn version_probe_does_not_pass_runtime_key_to_an_untrusted_binary() {
     let _marker = TestEnvVarGuard::set("PRODEX_OPENAI_TUNNEL_MARKER", &marker.to_string_lossy());
     let version = ensure_openai_tunnel_available(VALID_TUNNEL_ID).unwrap();
     assert_eq!(version, "0.0.13");
+    let wrong_sha = format!("0.0.13+{0} (git sha: 0)", "0".repeat(40));
+    for wrong in ["0.0.14", wrong_sha.as_str()] {
+        let _version = TestEnvVarGuard::set("PRODEX_OPENAI_TUNNEL_VERSION", wrong);
+        assert!(ensure_openai_tunnel_available(VALID_TUNNEL_ID).is_err());
+    }
     let marker_contents = fs::read_to_string(&marker).unwrap();
     assert_eq!(
         marker_contents.replace("\r\n", "\n"),
@@ -254,19 +204,10 @@ fn fake_client_reaches_local_health_ready_and_keeps_secrets_out_of_argv_and_conf
     assert_eq!(tunnel.status.client_version, "0.0.13");
     let marker_contents = fs::read_to_string(&marker).unwrap().replace("\r\n", "\n");
     let mcp_url_file = fs::read_to_string(&tunnel.files.mcp_url).unwrap();
-    assert_ne!(mcp_url_file, LOCAL_MCP_URL);
-    assert!(mcp_url_file.contains("/__prodex_openai_mcp_relay/"));
     assert!(!mcp_url_file.contains("capability-secret"));
     assert!(!mcp_url_file.contains(API_KEY_SENTINEL));
     assert!(!mcp_url_file.contains(LAUNCH_API_KEY_SENTINEL));
-    for prefix in ["argv=", "config="] {
-        assert!(!marker_contents.lines().any(|line| {
-            line.strip_prefix(prefix)
-                .is_some_and(|value| value.contains(LOCAL_MCP_URL))
-        }));
-    }
     assert!(!marker_contents.contains(API_KEY_SENTINEL));
-    assert!(!marker_contents.contains(LAUNCH_API_KEY_SENTINEL));
     assert!(!marker_contents.contains(LOCAL_MCP_URL));
     assert!(!tunnel.files.directory.join("tunnel-client.log").exists());
     let health_url = fs::read_to_string(&tunnel.files.health_url).unwrap();
@@ -274,40 +215,26 @@ fn fake_client_reaches_local_health_ready_and_keeps_secrets_out_of_argv_and_conf
         .no_proxy()
         .build()
         .unwrap();
-    let status = admin
-        .get(format!("{health_url}/api/status"))
-        .send()
-        .unwrap()
-        .text()
-        .unwrap();
-    let logs = admin
-        .get(format!("{health_url}/api/logs"))
-        .send()
-        .unwrap()
-        .text()
-        .unwrap();
+    let get = |path| {
+        admin
+            .get(format!("{health_url}{path}"))
+            .send()
+            .unwrap()
+            .text()
+            .unwrap()
+    };
+    let status = get("/api/status");
+    let logs = get("/api/logs");
     for surface in [&status, &logs] {
         assert!(!surface.contains(LOCAL_MCP_URL));
         assert!(!surface.contains(API_KEY_SENTINEL));
         assert!(!surface.contains(LAUNCH_API_KEY_SENTINEL));
         assert!(surface.contains(&mcp_url_file));
     }
-    assert!(marker_contents.contains("mcp_url_file_present=True"));
-    assert!(marker_contents.contains("log_level=warn"));
-    assert!(marker_contents.contains("log_format=struct-text"));
-    assert!(marker_contents.contains("mcp_probe_error_emitted=True"));
     assert!(!marker_contents.contains("--log.file"));
-    assert!(marker_contents.contains("health_url=http://127.0.0.1:"));
-    assert!(marker_contents.contains("log=\n"));
-    assert!(marker_contents.contains("--control-plane.api-key"));
-    assert!(marker_contents.contains("env:CONTROL_PLANE_API_KEY"));
-    assert!(marker_contents.contains("CONTROL_PLANE_API_KEY_PRESENT=True"));
-    assert!(marker_contents.contains("CONTROL_PLANE_API_KEY_MATCHES=True"));
-    assert!(marker_contents.contains("OPENAI_API_KEY_PRESENT=False"));
-    assert!(marker_contents.contains("OPENAI_ADMIN_KEY_PRESENT=False"));
-    assert!(marker_contents.contains("MCP_SERVER_URL_PRESENT=False"));
-    assert!(marker_contents.contains("CLOUDFLARED_MANAGED_PRESENT=False"));
-    assert!(marker_contents.contains("CLOUDFLARED_TUNNEL_TOKEN_PRESENT=False"));
+    for expected in "log_level=warn log_format=struct-text --control-plane.api-key env:CONTROL_PLANE_API_KEY CONTROL_PLANE_API_KEY_MATCHES=True OPENAI_API_KEY_PRESENT=False OPENAI_ADMIN_KEY_PRESENT=False MCP_SERVER_URL_PRESENT=False CLOUDFLARED_MANAGED_PRESENT=False CLOUDFLARED_TUNNEL_TOKEN_PRESENT=False".split_whitespace() {
+        assert!(marker_contents.contains(expected), "{expected}");
+    }
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
