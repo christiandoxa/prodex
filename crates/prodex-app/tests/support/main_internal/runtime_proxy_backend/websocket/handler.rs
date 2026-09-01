@@ -31,6 +31,7 @@ pub(super) fn handle_runtime_proxy_backend_websocket(
     responses_headers: &Arc<Mutex<Vec<BTreeMap<String, String>>>>,
     websocket_requests: &Arc<Mutex<Vec<String>>>,
     mode: RuntimeProxyBackendMode,
+    first_connection: bool,
 ) {
     entry::handle_runtime_proxy_backend_websocket(
         stream,
@@ -38,5 +39,6 @@ pub(super) fn handle_runtime_proxy_backend_websocket(
         responses_headers,
         websocket_requests,
         mode,
+        first_connection,
     );
 }

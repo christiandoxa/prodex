@@ -6,11 +6,8 @@ pub(super) fn handle_runtime_proxy_backend_websocket(
     responses_headers: &Arc<Mutex<Vec<BTreeMap<String, String>>>>,
     websocket_requests: &Arc<Mutex<Vec<String>>>,
     mode: RuntimeProxyBackendMode,
+    first_connection: bool,
 ) {
-    let first_connection = responses_accounts
-        .lock()
-        .expect("responses_accounts poisoned")
-        .is_empty();
     let accepted =
         accepted::accept_runtime_proxy_backend_websocket(stream, mode, first_connection);
     let mut websocket = accepted.websocket;

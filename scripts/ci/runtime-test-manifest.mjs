@@ -310,6 +310,12 @@ export const RUNTIME_CI_WORKFLOW_SHARDS = [
         filter: "main_internal_tests::runtime_proxy_backend::request_parsing::",
         label: "request-parsing",
       },
+      {
+        id: "runtime-backend-websocket-lifecycle",
+        filter:
+          "main_internal_tests::runtime_proxy_backend::runtime_proxy_backend_shutdown_",
+        label: "websocket-lifecycle",
+      },
     ],
   },
   {
