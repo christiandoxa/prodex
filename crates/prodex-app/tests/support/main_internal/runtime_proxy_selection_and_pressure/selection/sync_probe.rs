@@ -52,7 +52,39 @@ sync_probe_pressure_pause_ms = 2
 }
 
 #[test]
-fn fresh_selection_retries_after_scheduled_cold_start_probe() {
+fn contaminating_runtime_proxy_fixture_does_not_block_sync_probe() {
+    let fixture = start_runtime_continuation_fixture(
+        RuntimeProxyBackend::start(),
+        "main",
+        &["main", "second"],
+        &[],
+        vec![("sess-transport-rotation".to_string(), "main")],
+    )
+    .restart_with_transport_backoff("main", RuntimeRouteKind::Responses);
+    let response = fixture.post_json(
+        "backend-api/codex/responses",
+        serde_json::json!({
+            "session_id": "sess-transport-rotation",
+            "input": [{
+                "type": "message",
+                "role": "user",
+                "content": "resume after the original owner entered transport backoff",
+            }],
+        }),
+    );
+    assert_eq!(response.status().as_u16(), 200);
+    assert!(
+        response
+            .text()
+            .expect("resume body should decode")
+            .contains("\"id\":\"resp-second\"")
+    );
+    drop(fixture);
+
+    assert_fresh_selection_retries_after_scheduled_cold_start_probe();
+}
+
+fn assert_fresh_selection_retries_after_scheduled_cold_start_probe() {
     let _env_lock = TestEnvVarGuard::lock();
     let _pause_guard = ci_runtime_proxy_timeout_guard(
         "PRODEX_RUNTIME_PROXY_SYNC_PROBE_PRESSURE_PAUSE_MS",
@@ -84,4 +116,9 @@ fn fresh_selection_retries_after_scheduled_cold_start_probe() {
     drop(backend);
     wait_for_runtime_background_queues_idle();
     clear_runtime_policy_cache();
+}
+
+#[test]
+fn fresh_selection_retries_after_scheduled_cold_start_probe() {
+    assert_fresh_selection_retries_after_scheduled_cold_start_probe();
 }

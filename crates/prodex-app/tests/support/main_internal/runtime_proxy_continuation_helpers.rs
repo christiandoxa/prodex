@@ -111,10 +111,11 @@ pub(super) fn codex_0135_compaction_turn_metadata() -> String {
 }
 
 pub(super) struct RuntimeContinuationFixture {
-    _temp_dir: TestDir,
+    proxy: RuntimeRotationProxy,
+    _probe_refresh_cleanup: RuntimeProbeRefreshQueueCleanup,
     pub(super) backend: RuntimeProxyBackend,
     pub(super) paths: AppPaths,
-    proxy: RuntimeRotationProxy,
+    _temp_dir: TestDir,
 }
 
 pub(super) fn start_runtime_continuation_fixture(
@@ -189,24 +190,28 @@ pub(super) fn start_runtime_continuation_fixture(
     let proxy =
         start_runtime_rotation_proxy(&paths, &state, active_profile, backend.base_url(), false)
             .expect("runtime proxy should start");
+    let _probe_refresh_cleanup = RuntimeProbeRefreshQueueCleanup::new();
 
     RuntimeContinuationFixture {
         _temp_dir: temp_dir,
         backend,
         paths,
         proxy,
+        _probe_refresh_cleanup,
     }
 }
 
 impl RuntimeContinuationFixture {
     pub(super) fn restart(self) -> Self {
         let Self {
-            _temp_dir,
+            proxy,
+            _probe_refresh_cleanup,
             backend,
             paths,
-            proxy,
+            _temp_dir,
         } = self;
         drop(proxy);
+        drop(_probe_refresh_cleanup);
         let state = AppState::load(&paths).expect("runtime state should reload after restart");
         let active_profile = state
             .active_profile
@@ -221,10 +226,11 @@ impl RuntimeContinuationFixture {
         )
         .expect("runtime proxy should restart");
         Self {
-            _temp_dir,
+            proxy,
+            _probe_refresh_cleanup: RuntimeProbeRefreshQueueCleanup::new(),
             backend,
             paths,
-            proxy,
+            _temp_dir,
         }
     }
 
@@ -280,12 +286,14 @@ impl RuntimeContinuationFixture {
         continuations: RuntimeContinuationStore,
     ) -> Self {
         let Self {
-            _temp_dir,
+            proxy,
+            _probe_refresh_cleanup,
             backend,
             paths,
-            proxy,
+            _temp_dir,
         } = self;
         drop(proxy);
+        drop(_probe_refresh_cleanup);
         wait_for_runtime_background_queues_idle();
         let state = AppState::load(&paths).expect("runtime state should reload after restart");
         save_runtime_continuation_journal_for_profiles(
@@ -308,10 +316,11 @@ impl RuntimeContinuationFixture {
         )
         .expect("runtime proxy should restart from continuation journal");
         Self {
-            _temp_dir,
+            proxy,
+            _probe_refresh_cleanup: RuntimeProbeRefreshQueueCleanup::new(),
             backend,
             paths,
-            proxy,
+            _temp_dir,
         }
     }
 

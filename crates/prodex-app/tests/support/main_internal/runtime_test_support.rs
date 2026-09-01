@@ -98,6 +98,8 @@ pub(super) struct RuntimeProbeRefreshTestGuard {
     backlog_before: usize,
 }
 
+pub(super) struct RuntimeProbeRefreshQueueCleanup;
+
 static TEST_DIR_SEQUENCE: AtomicU64 = AtomicU64::new(1);
 
 impl TestDir {
@@ -146,6 +148,7 @@ impl RuntimeProbeRefreshTestGuard {
     pub(super) fn new() -> Self {
         let guard = crate::acquire_test_runtime_lock();
         wait_for_runtime_background_queues_idle();
+        wait_for_runtime_probe_refresh_queue_idle();
         Self {
             _guard: guard,
             observed_revision: runtime_probe_refresh_revision(),
@@ -159,6 +162,45 @@ impl RuntimeProbeRefreshTestGuard {
 
     pub(super) fn backlog_before(&self) -> usize {
         self.backlog_before
+    }
+}
+
+impl RuntimeProbeRefreshQueueCleanup {
+    pub(super) fn new() -> Self {
+        wait_for_runtime_probe_refresh_queue_idle();
+        Self
+    }
+}
+
+impl Drop for RuntimeProbeRefreshQueueCleanup {
+    fn drop(&mut self) {
+        wait_for_runtime_probe_refresh_queue_idle();
+    }
+}
+
+pub(super) fn wait_for_runtime_probe_refresh_queue_idle() {
+    let deadline = Instant::now() + ci_timing_upper_bound_ms(5_000, 10_000);
+    let grace = ci_timing_upper_bound_ms(250, 2_000);
+    let started_at = Instant::now();
+    loop {
+        let backlog = runtime_probe_refresh_queue_backlog();
+        let active = runtime_probe_refresh_queue_active();
+        if backlog == 0 && active == 0 {
+            return;
+        }
+        if started_at.elapsed() >= grace && backlog > 0 {
+            runtime_probe_refresh_queue()
+                .pending
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .clear();
+        }
+        if Instant::now() >= deadline {
+            panic!(
+                "runtime probe refresh queue did not go idle before timeout: backlog={backlog} active={active}"
+            );
+        }
+        thread::sleep(Duration::from_millis(10));
     }
 }
 
