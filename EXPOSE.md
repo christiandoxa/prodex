@@ -425,12 +425,18 @@ routes; Prodex does not use a GET to `/v1/mcp/...` as a readiness probe.
 OpenAI mode requires:
 
 - a pre-created OpenAI Platform tunnel;
-- `CONTROL_PLANE_API_KEY` in the environment; and
 - the supported `tunnel-client` executable.
 
+In a TTY, setup resolves `--openai-tunnel-id` before
+`CONTROL_PLANE_TUNNEL_ID`, then permits a bounded tunnel-ID input. It resolves
+`CONTROL_PLANE_API_KEY` first and otherwise accepts the API key in a masked
+input field. In non-TTY mode, no prompt is available: the API key must be in
+`CONTROL_PLANE_API_KEY`, and the tunnel ID must come from `--openai-tunnel-id`
+or `CONTROL_PLANE_TUNNEL_ID`.
+
 The tunnel identifier is non-secret routing/configuration data. The runtime key
-is secret. Do not put it in shell history, a process argument, a committed file,
-or a diagnostic log.
+is secret and held in zeroizing memory. Do not put it in shell history, a
+process argument, a committed file, or a diagnostic log.
 
 Prodex creates a private temporary directory containing the local MCP reference,
 client configuration, health URL file, and client log path. It uses the
@@ -576,7 +582,7 @@ Did public MCP initialize/tools/list pass?
 | Public TLS or MCP probe times out | Public readiness | Check DNS, TCP/TLS, hostname, capability URL, and public route. Do not increase the timeout indefinitely or declare readiness manually. |
 | `tunnel-client` missing | OpenAI executable | Install the audited official client or set `PRODEX_TUNNEL_CLIENT_BIN` to its absolute path. |
 | OpenAI tunnel ID rejected | Configuration | Use `CONTROL_PLANE_TUNNEL_ID` or `--openai-tunnel-id` with `tunnel_` plus exactly 32 lowercase letters/digits. |
-| OpenAI runtime key missing | Secret configuration | Set `CONTROL_PLANE_API_KEY` in the environment. There is no `--openai-api-key` option. |
+| OpenAI runtime key missing | Secret configuration | Set `CONTROL_PLANE_API_KEY` for non-TTY use, or enter it in the masked interactive setup. There is no `--openai-api-key` option. |
 | OpenAI tunnel does not become ready | OpenAI startup/network | Check the pre-created tunnel, outbound HTTPS/TCP 443 to the configured OpenAI control plane, client permissions, and the local MCP endpoint. The client health probe is bounded. |
 | ChatGPT connector creation fails but `/readyz` is 200 | Remote connector/control plane | Check workspace association, Tunnels Read + Use, tunnel propagation, and whether any command appears in the tunnel-client log/support archive. `/readyz` does not prove ChatGPT connector readiness. |
 | `LocalOriginPortInUse` | Local listener | Choose a different existing-tunnel origin port or stop the process that owns that exact loopback port. Quick/Local/OpenAI modes use an OS-selected port. |

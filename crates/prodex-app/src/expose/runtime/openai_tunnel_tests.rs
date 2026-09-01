@@ -50,11 +50,19 @@ if "--version" in args:
     raise SystemExit(0)
 
 config = flag_value("--config")
+mcp_url_path = os.path.join(os.path.dirname(config), "mcp-url")
+mcp_url = open(mcp_url_path, encoding="utf-8").read()
+log_path = flag_value("--log.file")
+log_level = flag_value("--log.level")
+if log_level != "warn":
+    with open(log_path, "a", encoding="utf-8") as file:
+        file.write("level=INFO msg=Probing MCP server target=" + mcp_url + "\n")
 if marker:
     with open(marker, "w", encoding="utf-8") as file:
         file.write("argv=" + repr(args) + "\n")
         file.write("config=" + open(config, encoding="utf-8").read() + "\n")
-        file.write("mcp_url=" + open(os.path.join(os.path.dirname(config), "mcp-url"), encoding="utf-8").read() + "\n")
+        file.write("mcp_url_file_present=" + str(bool(mcp_url)) + "\n")
+        file.write("log_level=" + log_level + "\n")
         for name in [
             "CONTROL_PLANE_API_KEY",
             "OPENAI_API_KEY",
@@ -220,15 +228,25 @@ fn fake_client_reaches_local_health_ready_and_keeps_secrets_out_of_argv_and_conf
     assert_eq!(tunnel.status.tunnel_id, VALID_TUNNEL_ID);
     assert_eq!(tunnel.status.client_version, "0.0.13");
     let marker_contents = fs::read_to_string(&marker).unwrap().replace("\r\n", "\n");
+    let mcp_url_file = fs::read_to_string(&tunnel.files.mcp_url).unwrap();
+    assert_eq!(mcp_url_file, LOCAL_MCP_URL);
+    assert!(!mcp_url_file.contains(API_KEY_SENTINEL));
+    assert!(!mcp_url_file.contains(LAUNCH_API_KEY_SENTINEL));
     for prefix in ["argv=", "config="] {
         assert!(!marker_contents.lines().any(|line| {
             line.strip_prefix(prefix)
                 .is_some_and(|value| value.contains(LOCAL_MCP_URL))
         }));
     }
+    let log_contents = fs::read_to_string(&tunnel.files.log).unwrap();
     assert!(!marker_contents.contains(API_KEY_SENTINEL));
     assert!(!marker_contents.contains(LAUNCH_API_KEY_SENTINEL));
-    assert!(marker_contents.contains(&format!("mcp_url={LOCAL_MCP_URL}")));
+    assert!(!marker_contents.contains(LOCAL_MCP_URL));
+    assert!(!log_contents.contains(LOCAL_MCP_URL));
+    assert!(!log_contents.contains(API_KEY_SENTINEL));
+    assert!(!log_contents.contains(LAUNCH_API_KEY_SENTINEL));
+    assert!(marker_contents.contains("mcp_url_file_present=True"));
+    assert!(marker_contents.contains("log_level=warn"));
     assert!(marker_contents.contains("health_url=http://127.0.0.1:"));
     assert!(marker_contents.contains("log=\n"));
     assert!(marker_contents.contains("--control-plane.api-key"));

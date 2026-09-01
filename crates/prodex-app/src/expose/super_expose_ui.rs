@@ -78,7 +78,7 @@ enum ExposeTuiAction {
     None,
     Start {
         endpoint: ExposeEndpointMode,
-        existing: Option<ExistingCloudflareSelection>,
+        existing: Option<Box<ExistingCloudflareSelection>>,
         openai_credentials: Option<OpenAiTunnelCredentials>,
     },
     Stop,
@@ -367,7 +367,7 @@ impl ExposeTuiState {
                             .as_ref()
                             .and_then(|selection| selection.tunnel.clone()),
                     },
-                    existing,
+                    existing: existing.map(Box::new),
                     openai_credentials: None,
                 }
             }
