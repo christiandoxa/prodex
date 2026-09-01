@@ -685,7 +685,7 @@ pub(crate) fn print_token_usage_event(event: &InfoTokenUsageEvent, json: bool) -
                 event
                     .output_tokens_per_second
                     .map(|rate| format_output_tokens_per_second(Some(rate)))
-                    .unwrap_or_else(|| "- t/s".to_string()),
+                    .unwrap_or_else(|| format_output_tokens_per_second(None)),
             ),
         ];
         for line in render_log_block(&event.timestamp, "TOKENS", &meta, &[], current_log_width()) {

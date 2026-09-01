@@ -51,9 +51,12 @@ impl LiveRuntimeLogSource {
             ) else {
                 continue;
             };
-            self.cursors
-                .insert(broker_key.clone(), (registry.instance_id, snapshot.cursor));
-            let source_path = PathBuf::from(format!("broker:{broker_key}"));
+            self.cursors.insert(
+                broker_key.clone(),
+                (registry.instance_id.clone(), snapshot.cursor),
+            );
+            let source_path =
+                PathBuf::from(format!("broker:{broker_key}:{}", registry.instance_id));
             lines.extend(
                 snapshot
                     .entries

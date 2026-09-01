@@ -184,7 +184,7 @@ fn stream_token_usage_events_tui() -> Result<()> {
                     &items,
                     &view,
                     header_detail.as_ref(),
-                    throughput.display_rate(Instant::now()),
+                    throughput.display_rate_for_profile(Instant::now(), header_profile.as_deref()),
                 )
             })
             .context("failed to draw log stream TUI")?;

@@ -76,6 +76,17 @@ fn token_usage_progress_uses_output_counter_and_rejects_bad_values() {
 }
 
 #[test]
+fn token_usage_rejects_invalid_or_zero_output_rates() {
+    for rate in ["0", "0.0", "-1", "NaN", "inf"] {
+        let event = info_token_usage_event_from_line(&format!(
+            "[2026-06-19 20:00:00.000 +07:00] token_usage profile=main input_tokens=1 output_tokens=10 generation_ms=1000 output_tokens_per_second={rate}"
+        ))
+        .expect("token event");
+        assert_eq!(event.output_tokens_per_second, None, "rate={rate}");
+    }
+}
+
+#[test]
 fn active_runtime_log_paths_filter_to_runtime_processes() {
     let processes = vec![
         ProdexProcessInfo {
