@@ -391,6 +391,7 @@ pub(in crate::expose) fn cloudflared_start_failure(
 pub(in crate::expose) fn ensure_cloudflared_available() -> anyhow::Result<()> {
     let mut command = cloudflared_command();
     command.arg("--version");
+    command.env_remove("CONTROL_PLANE_API_KEY");
     let output = crate::command_probe_output(&mut command, "cloudflared version probe");
     match output {
         Ok(output) if output.status.success() && cloudflared_version_is_parseable(&output) => {}
@@ -403,6 +404,7 @@ pub(in crate::expose) fn ensure_cloudflared_available() -> anyhow::Result<()> {
     }
     let mut help = cloudflared_command();
     help.args(["tunnel", "--help"]);
+    help.env_remove("CONTROL_PLANE_API_KEY");
     let help = crate::command_probe_output(&mut help, "cloudflared Quick Tunnel capability probe")
         .context("cloudflared Quick Tunnel capability probe failed; upgrade cloudflared")?;
     let help = String::from_utf8_lossy(&help.stdout);

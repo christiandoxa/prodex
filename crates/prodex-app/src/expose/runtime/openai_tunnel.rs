@@ -1,6 +1,7 @@
 use anyhow::{Context, Result, bail};
 use reqwest::blocking::Client;
 use std::ffi::OsString;
+use std::fmt;
 use std::fs;
 use std::net::IpAddr;
 use std::path::{Path, PathBuf};
@@ -8,6 +9,7 @@ use std::process::{Command, Output, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::thread;
 use std::time::{Duration, Instant};
+use zeroize::Zeroizing;
 
 #[cfg(windows)]
 use std::os::windows::io::{AsRawHandle, OwnedHandle};
@@ -25,12 +27,54 @@ const OPENAI_TUNNEL_HEALTH_REQUEST_TIMEOUT: Duration = Duration::from_millis(750
 const OPENAI_TUNNEL_HEALTH_URL_MAX_BYTES: u64 = 4096;
 const OPENAI_TUNNEL_ID_LENGTH: usize = "tunnel_".len() + 32;
 const OPENAI_TUNNEL_VERSION_MAX_BYTES: usize = 32;
+const OPENAI_TUNNEL_API_KEY_MAX_BYTES: usize = 4096;
 static NEXT_OPENAI_TUNNEL_CONFIG_ID: AtomicU64 = AtomicU64::new(1);
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(in crate::expose) struct OpenAiTunnelStatus {
     pub(in crate::expose) tunnel_id: String,
     pub(in crate::expose) client_version: String,
+}
+
+pub(in crate::expose) struct OpenAiTunnelCredentials {
+    tunnel_id: String,
+    api_key: Zeroizing<String>,
+}
+
+impl fmt::Debug for OpenAiTunnelCredentials {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("OpenAiTunnelCredentials")
+            .field("tunnel_id", &self.tunnel_id)
+            .field("api_key", &"<redacted>")
+            .finish()
+    }
+}
+
+impl OpenAiTunnelCredentials {
+    pub(in crate::expose) fn new(
+        tunnel_id: impl Into<String>,
+        api_key: impl Into<String>,
+    ) -> Result<Self> {
+        let tunnel_id = tunnel_id.into().trim().to_owned();
+        validate_openai_tunnel_id(&tunnel_id)?;
+        let api_key = Zeroizing::new(api_key.into());
+        if api_key.is_empty()
+            || api_key.len() > OPENAI_TUNNEL_API_KEY_MAX_BYTES
+            || api_key.chars().any(char::is_control)
+        {
+            bail!("OpenAI Secure MCP Tunnel API key is invalid")
+        }
+        Ok(Self { tunnel_id, api_key })
+    }
+
+    pub(in crate::expose) fn tunnel_id(&self) -> &str {
+        &self.tunnel_id
+    }
+
+    pub(in crate::expose) fn api_key(&self) -> &str {
+        &self.api_key
+    }
 }
 
 pub(in crate::expose) struct OpenAiTunnel {
@@ -138,10 +182,8 @@ pub(in crate::expose) fn resolve_openai_tunnel_id(explicit: Option<&str>) -> Res
 
 pub(in crate::expose) fn ensure_openai_tunnel_available(tunnel_id: &str) -> Result<String> {
     validate_openai_tunnel_id(tunnel_id)?;
-    ensure_runtime_api_key_present()?;
     let mut command = openai_tunnel_client_command()?;
     command.arg("--version");
-    command.env_remove("CONTROL_PLANE_API_KEY");
     remove_inherited_tunnel_configuration(&mut command);
     let output = crate::command_probe_output(&mut command, "tunnel-client version probe")
         .map_err(|_| openai_tunnel_install_error())?;
@@ -151,6 +193,17 @@ pub(in crate::expose) fn ensure_openai_tunnel_available(tunnel_id: &str) -> Resu
         )
     }
     safe_client_version(&output).context("tunnel-client did not report a supported version")
+}
+
+pub(in crate::expose) fn openai_tunnel_credentials_from_env(
+    tunnel_id: &str,
+) -> Result<OpenAiTunnelCredentials> {
+    let api_key = std::env::var("CONTROL_PLANE_API_KEY").map_err(|_| {
+        anyhow::anyhow!(
+            "OpenAI Secure MCP Tunnel requires CONTROL_PLANE_API_KEY in noninteractive mode"
+        )
+    })?;
+    OpenAiTunnelCredentials::new(tunnel_id.to_owned(), api_key)
 }
 
 pub(in crate::expose) fn openai_tunnel_client_command() -> Result<Command> {
@@ -163,12 +216,12 @@ pub(in crate::expose) fn openai_tunnel_client_command() -> Result<Command> {
 
 pub(in crate::expose) fn start_openai_tunnel(
     local_mcp_url: &str,
-    tunnel_id: String,
+    credentials: OpenAiTunnelCredentials,
     client_version: String,
     cancelled: &dyn Fn() -> bool,
 ) -> Result<OpenAiTunnel> {
+    let tunnel_id = credentials.tunnel_id().to_owned();
     validate_openai_tunnel_id(&tunnel_id)?;
-    ensure_runtime_api_key_present()?;
     let mut files = OpenAiTunnelFiles::create(local_mcp_url, &tunnel_id)?;
     let config_path = files
         .config
@@ -183,6 +236,7 @@ pub(in crate::expose) fn start_openai_tunnel(
         .to_str()
         .context("OpenAI tunnel log path is not UTF-8")?;
     let mut command = openai_tunnel_client_command()?;
+    remove_inherited_tunnel_configuration(&mut command);
     command
         .args(["run", "--config", config_path])
         .args(["--control-plane.base-url", "https://api.openai.com"])
@@ -191,10 +245,10 @@ pub(in crate::expose) fn start_openai_tunnel(
         .args(["--health.listen-addr", "127.0.0.1:0"])
         .args(["--health.url-file", health_url_path])
         .args(["--log.file", log_path])
+        .env("CONTROL_PLANE_API_KEY", credentials.api_key())
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null());
-    remove_inherited_tunnel_configuration(&mut command);
     crate::configure_child_process_group(&mut command, true);
     crate::configure_child_parent_death(&mut command);
     let mut child = command.spawn().context("failed to spawn tunnel-client")?;
@@ -265,20 +319,12 @@ fn openai_tunnel_install_error() -> anyhow::Error {
     )
 }
 
-fn ensure_runtime_api_key_present() -> Result<()> {
-    if std::env::var_os("CONTROL_PLANE_API_KEY").is_none_or(|value| value.is_empty()) {
-        bail!(
-            "OpenAI Secure MCP Tunnel requires CONTROL_PLANE_API_KEY; set the runtime key in the environment (it is never accepted on argv)"
-        )
-    }
-    Ok(())
-}
-
 fn remove_inherited_tunnel_configuration(command: &mut Command) {
     for variable in [
         "OPENAI_API_KEY",
         "OPENAI_API_KEYS",
         "OPENAI_ADMIN_KEY",
+        "CONTROL_PLANE_API_KEY",
         "TUNNEL_CLIENT_CONFIG",
         "TUNNEL_CLIENT_PROFILE",
         "TUNNEL_CLIENT_PROFILE_FILE",

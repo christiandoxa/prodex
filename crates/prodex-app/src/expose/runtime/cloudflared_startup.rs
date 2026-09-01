@@ -52,6 +52,7 @@ pub(super) fn spawn(
     command.env("XDG_DATA_HOME", isolated_home);
     command.env("XDG_CACHE_HOME", isolated_home);
     for variable in [
+        "CONTROL_PLANE_API_KEY",
         "TUNNEL_CONFIG",
         "TUNNEL_CERT",
         "TUNNEL_ORIGIN_CERT",

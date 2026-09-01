@@ -83,7 +83,8 @@ impl ExposeRunManager {
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .env("PRODEX_EXPOSE_INSTANCE_ID", &self.inner.instance_id)
-            .env("PRODEX_EXPOSE_WORKSPACE_NAME", &self.inner.workspace_name);
+            .env("PRODEX_EXPOSE_WORKSPACE_NAME", &self.inner.workspace_name)
+            .env_remove("CONTROL_PLANE_API_KEY");
         if let Some((key, value)) = expose_api_key_env(&job.args) {
             command.env(key, value);
         }

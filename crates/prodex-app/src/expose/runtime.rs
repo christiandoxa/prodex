@@ -1,5 +1,6 @@
 use super::super_expose::handle_super_expose;
 use super::*;
+use anyhow::bail;
 #[path = "runtime/cloudflared.rs"]
 mod cloudflared;
 mod cloudflared_existing;
@@ -385,6 +386,7 @@ impl ExposePty {
             .context("failed to open PTY")?;
         let mut command = expose_command_builder(args.command.as_deref());
         command.env("TERM", "xterm-256color");
+        command.env_remove("CONTROL_PLANE_API_KEY");
         if let Some(cwd) = cwd {
             command.cwd(cwd.as_os_str());
         }
@@ -562,4 +564,21 @@ pub(super) fn expose_join_thread(thread: &Mutex<Option<JoinHandle<()>>>) {
     {
         let _ = thread.join();
     }
+}
+
+pub(super) fn expose_display_name(
+    requested: Option<&str>,
+    workspace_root: &std::path::Path,
+) -> anyhow::Result<String> {
+    let name = requested
+        .or_else(|| workspace_root.file_name().and_then(|name| name.to_str()))
+        .unwrap_or("workspace");
+    if name.is_empty()
+        || name.len() > 64
+        || name.as_bytes().contains(&0)
+        || name.chars().any(|ch| ch.is_control())
+    {
+        bail!("expose name must be 1-64 characters without control characters")
+    }
+    Ok(name.to_string())
 }

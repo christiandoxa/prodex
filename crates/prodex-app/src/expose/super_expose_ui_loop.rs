@@ -117,7 +117,11 @@ pub(super) fn handle_input(
                 }
             }
         }
-        ExposeTuiAction::Start { endpoint, existing } => {
+        ExposeTuiAction::Start {
+            endpoint,
+            existing,
+            openai_credentials,
+        } => {
             let (args, super_args, workspace_root, workspace_name, display_name) =
                 launch.take().context("expose endpoint selected twice")?;
             let mut args = args;
@@ -139,6 +143,7 @@ pub(super) fn handle_input(
                         workspace_name,
                         display_name,
                         endpoint,
+                        openai_credentials,
                     },
                     Some(event_tx),
                     cancel,

@@ -31,6 +31,12 @@ The OpenAI identifier is non-secret and must match the validated `tunnel_` plus
 shell history. `--openai-tunnel-id` is the non-secret CLI alternative to the
 identifier environment variable; there is no `--openai-api-key` option.
 
+In a TTY, OpenAI mode opens setup in the existing Ratatui terminal. It uses the
+CLI tunnel ID, then `CONTROL_PLANE_TUNNEL_ID`, then a bounded tunnel-ID input;
+the API key uses `CONTROL_PLANE_API_KEY` or a masked input. Non-TTY runs require
+both values from configuration and fail before starting a child when either is
+missing.
+
 ## Security and readiness
 
 The local origin binds to loopback. Expose validates local MCP `initialize` and
