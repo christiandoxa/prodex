@@ -22,7 +22,8 @@ use anyhow::{Context, bail};
 use prodex_cli::{ExposeTunnelProvider, SuperArgs};
 use redaction::redaction_redact_secret_like_text;
 pub(super) use status::{
-    print_expose_dry_run, print_super_expose_configuration, print_super_expose_status,
+    display_local_mcp_url, print_expose_dry_run, print_super_expose_configuration,
+    print_super_expose_status,
 };
 use std::collections::BTreeSet;
 use std::env;

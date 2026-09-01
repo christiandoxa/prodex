@@ -1,9 +1,19 @@
-use super::super::mcp::expose_main_provider;
+use super::super::mcp::{PublicMcpEndpoint, expose_main_provider};
 use super::{ExposeEndpointMode, ExposeReadyState};
 use crate::ExposeArgs;
 use crate::print_stdout_line;
 use prodex_cli::SuperArgs;
 use terminal_ui::print_panel;
+
+pub(crate) fn display_local_mcp_url<'a>(
+    endpoint: &ExposeEndpointMode,
+    local_mcp_url: &'a PublicMcpEndpoint,
+) -> &'a str {
+    match endpoint {
+        ExposeEndpointMode::OpenAiSecureMcp { .. } => "local loopback only",
+        _ => local_mcp_url.as_str(),
+    }
+}
 
 pub(crate) fn print_super_expose_status(ready: &ExposeReadyState) -> anyhow::Result<()> {
     let local_url = &ready.local_url;
@@ -14,6 +24,7 @@ pub(crate) fn print_super_expose_status(ready: &ExposeReadyState) -> anyhow::Res
     let display_name = &ready.display_name;
     let mcp = &ready.mcp;
     let endpoint = &ready.endpoint;
+    let local_mcp_status = display_local_mcp_url(endpoint, local_mcp_url);
     let args = &mcp.defaults;
     let model = args
         .local_model
@@ -49,10 +60,7 @@ pub(crate) fn print_super_expose_status(ready: &ExposeReadyState) -> anyhow::Res
             "Tunnel provider".to_string(),
             endpoint_provider(endpoint).to_string(),
         ),
-        (
-            "Local MCP URL".to_string(),
-            local_mcp_url.as_str().to_string(),
-        ),
+        ("Local MCP URL".to_string(), local_mcp_status.to_string()),
         (
             "Access".to_string(),
             "Ephemeral Capability Authentication".to_string(),
@@ -123,7 +131,7 @@ pub(crate) fn print_super_expose_status(ready: &ExposeReadyState) -> anyhow::Res
     if let Some(public_url) = public_url {
         print_stdout_line(&format!("ChatGPT MCP URL: {}", public_url.as_str()))?;
     } else {
-        print_stdout_line(&format!("Local MCP URL: {}", local_mcp_url.as_str()))?;
+        print_stdout_line(&format!("Local MCP URL: {local_mcp_status}"))?;
     }
     if let Some(public_browser_url) = ready.public_browser_url.as_deref() {
         print_stdout_line(&format!("Public browser URL: {public_browser_url}"))?;

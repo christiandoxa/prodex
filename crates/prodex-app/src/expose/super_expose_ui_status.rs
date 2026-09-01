@@ -1,4 +1,4 @@
-use super::super::super_expose::ExposeEndpointMode;
+use super::super::super_expose::{ExposeEndpointMode, display_local_mcp_url};
 use super::support::{labeled_value_lines, text_lines};
 use super::{ExposeTuiPhase, ExposeTuiState};
 use ratatui::text::Line;
@@ -68,13 +68,14 @@ pub(crate) fn ready_body(state: &ExposeTuiState, width: usize) -> Vec<Line<'stat
             tui_primary_style(),
         ));
     }
+    let local_mcp_status = display_local_mcp_url(&ready.endpoint, &ready.local_mcp_url);
     lines.extend(labeled_value_lines(
         if ready.public_url.is_some() {
             "MCP URL"
         } else {
             "Local MCP URL"
         },
-        ready.local_mcp_url.as_str(),
+        local_mcp_status,
         width,
         tui_primary_style(),
         tui_primary_style(),
