@@ -7,9 +7,10 @@ use super::mcp::{
 pub(super) use super::runtime::ensure_cloudflared_available;
 use super::runtime::{
     CloudflaredTransport, CloudflaredTunnel, ExposeHttpServer, ExposePty, ExposeShared,
-    OpenAiTunnel, cloudflared_start_failure, ensure_openai_tunnel_available, expose_access_url,
-    expose_public_host, resolve_existing_cloudflare_selection, resolve_openai_tunnel_id,
-    start_existing_cloudflared_tunnel, start_openai_tunnel,
+    OpenAiTunnel, OpenAiTunnelCredentials, cloudflared_start_failure,
+    ensure_openai_tunnel_available, expose_access_url, expose_display_name, expose_public_host,
+    openai_tunnel_credentials_from_env, resolve_existing_cloudflare_selection,
+    resolve_openai_tunnel_id, start_existing_cloudflared_tunnel, start_openai_tunnel,
 };
 use super::session::{ExposeSessionStore, expose_random_token};
 #[path = "super_expose_status.rs"]
@@ -178,7 +179,10 @@ pub(super) fn handle_super_expose(mut args: ExposeArgs) -> anyhow::Result<()> {
         .context("failed to install expose signal handler")?;
     let explicit_endpoint =
         super_args.dry_run || args.no_tunnel || args.tunnel || args.tunnel_provider.is_some();
-    if interactive && !explicit_endpoint {
+    let interactive_openai_setup = interactive
+        && !super_args.dry_run
+        && args.tunnel_provider == Some(ExposeTunnelProvider::OpenAi);
+    if interactive && (!explicit_endpoint || interactive_openai_setup) {
         return super::super_expose_ui::run(
             args,
             super_args,
@@ -189,6 +193,16 @@ pub(super) fn handle_super_expose(mut args: ExposeArgs) -> anyhow::Result<()> {
     }
     print_super_expose_configuration(&super_args, &workspace_name)?;
     let endpoint = select_expose_endpoint(&args, !super_args.dry_run)?;
+    let openai_credentials = if super_args.dry_run {
+        None
+    } else {
+        match &endpoint {
+            ExposeEndpointMode::OpenAiSecureMcp { tunnel_id, .. } => {
+                Some(openai_tunnel_credentials_from_env(tunnel_id)?)
+            }
+            _ => None,
+        }
+    };
     if super_args.dry_run {
         print_expose_dry_run(&args, &endpoint)?;
         return Ok(());
@@ -202,6 +216,7 @@ pub(super) fn handle_super_expose(mut args: ExposeArgs) -> anyhow::Result<()> {
             workspace_name,
             display_name,
             endpoint,
+            openai_credentials,
         },
         None,
         Arc::new(AtomicBool::new(false)),
@@ -220,6 +235,7 @@ pub(super) struct ExposeEngineRequest {
     pub(super) workspace_name: String,
     pub(super) display_name: String,
     pub(super) endpoint: ExposeEndpointMode,
+    pub(super) openai_credentials: Option<OpenAiTunnelCredentials>,
 }
 
 pub(super) fn run_super_expose_engine(
@@ -261,6 +277,7 @@ fn run_super_expose_engine_inner(
         workspace_name,
         display_name,
         endpoint,
+        openai_credentials,
     } = request;
     report_phase(
         lifecycle_tx,
@@ -350,6 +367,7 @@ fn run_super_expose_engine_inner(
     } = start_expose_endpoint(ExposeEndpointStartup {
         args: &args,
         endpoint: &endpoint,
+        openai_credentials,
         local_origin: &local_origin,
         local_mcp_url: &local_mcp_url,
         capability: &capability,
@@ -417,6 +435,7 @@ struct ExposeEndpointState {
 struct ExposeEndpointStartup<'a> {
     args: &'a ExposeArgs,
     endpoint: &'a ExposeEndpointMode,
+    openai_credentials: Option<OpenAiTunnelCredentials>,
     local_origin: &'a str,
     local_mcp_url: &'a PublicMcpEndpoint,
     capability: &'a str,
@@ -434,6 +453,7 @@ fn start_expose_endpoint(
     let ExposeEndpointStartup {
         args,
         endpoint,
+        openai_credentials,
         local_origin,
         local_mcp_url,
         capability,
@@ -460,9 +480,20 @@ fn start_expose_endpoint(
                 ExposeLifecyclePhase::OpenAiTunnel,
                 "starting OpenAI Secure MCP Tunnel...",
             );
+            let credentials = match openai_credentials {
+                Some(credentials) if credentials.tunnel_id() == tunnel_id => credentials,
+                Some(_) => {
+                    cleanup_super_expose(shared, mcp, http, None, None);
+                    bail!("OpenAI tunnel credentials changed before startup")
+                }
+                None => {
+                    cleanup_super_expose(shared, mcp, http, None, None);
+                    bail!("OpenAI tunnel credentials are unavailable")
+                }
+            };
             match start_openai_tunnel(
                 local_mcp_url.as_str(),
-                tunnel_id.clone(),
+                credentials,
                 client_version.clone(),
                 cancelled,
             ) {
@@ -694,6 +725,7 @@ pub(super) fn select_expose_endpoint(
         Some(ExposeTunnelProvider::OpenAi) => {
             let tunnel_id = resolve_openai_tunnel_id(args.openai_tunnel_id.as_deref())?;
             let client_version = if probe_external_clients {
+                let _ = openai_tunnel_credentials_from_env(&tunnel_id)?;
                 ensure_openai_tunnel_available(&tunnel_id)?
             } else {
                 "not probed (dry run)".to_string()
@@ -810,21 +842,4 @@ fn cleanup_super_expose(
     }
     shared.pty.shutdown();
     http.shutdown();
-}
-
-fn expose_display_name(
-    requested: Option<&str>,
-    workspace_root: &std::path::Path,
-) -> anyhow::Result<String> {
-    let name = requested
-        .or_else(|| workspace_root.file_name().and_then(|name| name.to_str()))
-        .unwrap_or("workspace");
-    if name.is_empty()
-        || name.len() > 64
-        || name.as_bytes().contains(&0)
-        || name.chars().any(|ch| ch.is_control())
-    {
-        bail!("expose name must be 1-64 characters without control characters")
-    }
-    Ok(name.to_string())
 }

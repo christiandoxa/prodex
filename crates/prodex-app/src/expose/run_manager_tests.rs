@@ -3,6 +3,7 @@ use super::run_manager::{
     EXPOSE_MAX_RUN_OUTPUT_BYTES, ExposeRunManager, ExposeRunResult, ExposeRunState, bounded_text,
     expose_run_id, redacted_output_text,
 };
+use crate::TestEnvVarGuard;
 use std::fs;
 use std::io::{Read, Write};
 use std::net::TcpListener;
@@ -86,6 +87,7 @@ else:
     print("TASK=" + task, flush=True)
     print("CWD=" + os.getcwd(), flush=True)
     print("ARGV=" + repr(sys.argv), flush=True)
+    print("CHILD_CONTROL_ENV_PRESENT=" + str("CONTROL_PLANE_API_KEY" in os.environ), flush=True)
     for sentinel in ("A_ONLY", "B_ONLY", "C_ONLY"):
         if os.path.exists(sentinel):
             print("SENTINEL=" + sentinel, flush=True)
@@ -124,6 +126,8 @@ fn output_is_redacted_and_bounded() {
 
 #[test]
 fn run_manager_uses_private_stdin_and_captured_workspace() {
+    let _env_lock = TestEnvVarGuard::lock();
+    let _control_key = TestEnvVarGuard::set("CONTROL_PLANE_API_KEY", "inherited-key-sentinel");
     let root = test_root("stdin");
     let workspace = root.join("workspace");
     fs::create_dir_all(&workspace).unwrap();
@@ -146,6 +150,7 @@ fn run_manager_uses_private_stdin_and_captured_workspace() {
             .contains(&format!("CWD={}", workspace.display()))
     );
     assert!(result.output.contains("ARGV="));
+    assert!(result.output.contains("CHILD_CONTROL_ENV_PRESENT=False"));
     assert!(result.output.contains("--full-access"));
     assert!(result.output.contains("--model"));
     assert!(result.output.contains("model-a"));

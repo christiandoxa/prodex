@@ -10,8 +10,9 @@ provides:
 
 In a real interactive terminal, the command opens the Expose mode picker before
 starting an external tunnel. **Local only** is highlighted first. Explicit
-provider flags bypass that picker. A non-TTY invocation never opens Ratatui and
-keeps the bare command loopback-only.
+Cloudflare provider flags bypass that picker; `--tunnel-provider openai` opens
+the OpenAI setup screen in the same Ratatui terminal. A non-TTY invocation never
+opens Ratatui and uses only explicit configuration.
 
 The listener is loopback-bound. Expose grants Super-level authority as the
 current operating-system user, so the URL is a capability, not a harmless
@@ -76,7 +77,11 @@ Expose mode
 Use Up/Down to select, Enter to continue, and Esc or `q` to cancel. Cancellation
 before startup has no external side effects. Prodex does not start
 `cloudflared` or `tunnel-client` until an external mode has been explicitly
-selected and confirmed. The Ready view keeps the selected mode visible.
+selected and confirmed. For OpenAI mode, the setup screen uses
+`--openai-tunnel-id`, then `CONTROL_PLANE_TUNNEL_ID`, then a tunnel-ID field;
+`CONTROL_PLANE_API_KEY` is used first and otherwise collected in a masked field.
+Use Enter to advance, Backspace/Delete or Ctrl-U to edit, and Esc or Ctrl-C to
+cancel. The Ready view keeps the selected mode visible.
 
 ## Mode comparison
 

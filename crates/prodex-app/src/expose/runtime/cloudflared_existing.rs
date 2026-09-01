@@ -285,6 +285,7 @@ fn stop_child(child: &mut std::process::Child) {
 
 fn remove_inherited_cloudflare_configuration(command: &mut std::process::Command) {
     for variable in [
+        "CONTROL_PLANE_API_KEY",
         "TUNNEL_CONFIG",
         "TUNNEL_CERT",
         "TUNNEL_ORIGIN_CERT",

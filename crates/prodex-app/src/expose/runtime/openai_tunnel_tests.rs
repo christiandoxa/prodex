@@ -1,6 +1,7 @@
 use super::{
-    OPENAI_TUNNEL_CLIENT_READY_TIMEOUT, OpenAiTunnelFiles, ensure_openai_tunnel_available,
-    parse_health_base_url, safe_client_version, safe_version_label, start_openai_tunnel,
+    OPENAI_TUNNEL_CLIENT_READY_TIMEOUT, OpenAiTunnelCredentials, OpenAiTunnelFiles,
+    ensure_openai_tunnel_available, openai_tunnel_credentials_from_env, parse_health_base_url,
+    resolve_openai_tunnel_id, safe_client_version, safe_version_label, start_openai_tunnel,
     validate_openai_tunnel_id,
 };
 use crate::{TestEnvVarGuard, test_temp_root, write_test_python_executable};
@@ -11,6 +12,7 @@ use std::time::{Duration, Instant};
 
 const VALID_TUNNEL_ID: &str = "tunnel_0123456789abcdef0123456789abcdef";
 const API_KEY_SENTINEL: &str = "runtime-key-sentinel";
+const LAUNCH_API_KEY_SENTINEL: &str = "launch-key-sentinel";
 const LOCAL_MCP_URL: &str = "http://127.0.0.1:43123/pdx/v1/capability-secret/mcp";
 
 fn test_root(name: &str) -> std::path::PathBuf {
@@ -52,6 +54,7 @@ if marker:
     with open(marker, "w", encoding="utf-8") as file:
         file.write("argv=" + repr(args) + "\n")
         file.write("config=" + open(config, encoding="utf-8").read() + "\n")
+        file.write("mcp_url=" + open(os.path.join(os.path.dirname(config), "mcp-url"), encoding="utf-8").read() + "\n")
         for name in [
             "CONTROL_PLANE_API_KEY",
             "OPENAI_API_KEY",
@@ -62,6 +65,7 @@ if marker:
             "CLOUDFLARED_TUNNEL_TOKEN",
         ]:
             file.write(name + "_PRESENT=" + str(name in os.environ) + "\n")
+        file.write("CONTROL_PLANE_API_KEY_MATCHES=" + str(os.environ.get("CONTROL_PLANE_API_KEY") == "launch-key-sentinel") + "\n")
 
 if os.environ.get("PRODEX_OPENAI_TUNNEL_MODE") == "exit":
     raise SystemExit(17)
@@ -79,6 +83,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
 server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
 with open(flag_value("--health.url-file"), "w", encoding="utf-8") as file:
     file.write("http://127.0.0.1:" + str(server.server_port))
+if marker:
+    with open(marker, "a", encoding="utf-8") as file:
+        file.write("health_url=" + open(flag_value("--health.url-file"), encoding="utf-8").read() + "\n")
+        file.write("log=" + open(flag_value("--log.file"), encoding="utf-8").read() + "\n")
 server.serve_forever()
 "#,
     )
@@ -96,14 +104,45 @@ fn validates_official_tunnel_id_shape() {
 }
 
 #[test]
+fn launch_credentials_are_zeroized_and_debug_redacted() {
+    let credentials = OpenAiTunnelCredentials::new(VALID_TUNNEL_ID, LAUNCH_API_KEY_SENTINEL)
+        .expect("fixture credentials should be valid");
+    let debug = format!("{credentials:?}");
+
+    assert_eq!(credentials.tunnel_id(), VALID_TUNNEL_ID);
+    assert_eq!(credentials.api_key(), LAUNCH_API_KEY_SENTINEL);
+    assert!(debug.contains("<redacted>"));
+    assert!(!debug.contains(LAUNCH_API_KEY_SENTINEL));
+}
+
+#[test]
+fn tunnel_id_resolution_prefers_explicit_then_environment() {
+    let _env_lock = TestEnvVarGuard::lock();
+    let _env_id = TestEnvVarGuard::set(
+        "CONTROL_PLANE_TUNNEL_ID",
+        "tunnel_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    );
+    assert_eq!(
+        resolve_openai_tunnel_id(None).unwrap(),
+        "tunnel_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    );
+    assert_eq!(
+        resolve_openai_tunnel_id(Some(" tunnel_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb ")).unwrap(),
+        "tunnel_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+    );
+}
+
+#[test]
 fn config_keeps_capability_url_outside_argv_and_yaml() {
     let mut files = OpenAiTunnelFiles::create(LOCAL_MCP_URL, VALID_TUNNEL_ID).unwrap();
     let config = fs::read_to_string(&files.config).unwrap();
+    let directory = files.directory.clone();
     assert!(!config.contains(LOCAL_MCP_URL));
     assert!(config.contains("config_version: 1"));
     assert!(config.contains("url: 'file:"));
     assert!(config.contains(&files.mcp_url.display().to_string()));
     files.cleanup();
+    assert!(!directory.exists());
 }
 
 #[test]
@@ -119,10 +158,10 @@ fn health_url_parser_accepts_only_loopback_http_with_port() {
 }
 
 #[test]
-fn missing_runtime_key_fails_without_echoing_a_secret() {
+fn missing_runtime_key_fails_before_launch_without_echoing_a_secret() {
     let _env_lock = TestEnvVarGuard::lock();
     let _key = TestEnvVarGuard::unset("CONTROL_PLANE_API_KEY");
-    let error = ensure_openai_tunnel_available(VALID_TUNNEL_ID).unwrap_err();
+    let error = openai_tunnel_credentials_from_env(VALID_TUNNEL_ID).unwrap_err();
     assert!(error.to_string().contains("CONTROL_PLANE_API_KEY"));
     assert!(!error.to_string().contains(API_KEY_SENTINEL));
 }
@@ -173,19 +212,29 @@ fn fake_client_reaches_local_health_ready_and_keeps_secrets_out_of_argv_and_conf
     let _marker = TestEnvVarGuard::set("PRODEX_OPENAI_TUNNEL_MARKER", &marker.to_string_lossy());
     let mut tunnel = start_openai_tunnel(
         LOCAL_MCP_URL,
-        VALID_TUNNEL_ID.to_string(),
+        OpenAiTunnelCredentials::new(VALID_TUNNEL_ID, LAUNCH_API_KEY_SENTINEL).unwrap(),
         "0.0.13".to_string(),
         &|| false,
     )
     .unwrap();
     assert_eq!(tunnel.status.tunnel_id, VALID_TUNNEL_ID);
     assert_eq!(tunnel.status.client_version, "0.0.13");
-    let marker_contents = fs::read_to_string(&marker).unwrap();
-    assert!(!marker_contents.contains(LOCAL_MCP_URL));
+    let marker_contents = fs::read_to_string(&marker).unwrap().replace("\r\n", "\n");
+    for prefix in ["argv=", "config="] {
+        assert!(!marker_contents.lines().any(|line| {
+            line.strip_prefix(prefix)
+                .is_some_and(|value| value.contains(LOCAL_MCP_URL))
+        }));
+    }
     assert!(!marker_contents.contains(API_KEY_SENTINEL));
+    assert!(!marker_contents.contains(LAUNCH_API_KEY_SENTINEL));
+    assert!(marker_contents.contains(&format!("mcp_url={LOCAL_MCP_URL}")));
+    assert!(marker_contents.contains("health_url=http://127.0.0.1:"));
+    assert!(marker_contents.contains("log=\n"));
     assert!(marker_contents.contains("--control-plane.api-key"));
     assert!(marker_contents.contains("env:CONTROL_PLANE_API_KEY"));
     assert!(marker_contents.contains("CONTROL_PLANE_API_KEY_PRESENT=True"));
+    assert!(marker_contents.contains("CONTROL_PLANE_API_KEY_MATCHES=True"));
     assert!(marker_contents.contains("OPENAI_API_KEY_PRESENT=False"));
     assert!(marker_contents.contains("OPENAI_ADMIN_KEY_PRESENT=False"));
     assert!(marker_contents.contains("MCP_SERVER_URL_PRESENT=False"));
@@ -230,7 +279,7 @@ fn child_exit_before_ready_is_reported_and_cleaned_up() {
     let _mode = TestEnvVarGuard::set("PRODEX_OPENAI_TUNNEL_MODE", "exit");
     let error = match start_openai_tunnel(
         LOCAL_MCP_URL,
-        VALID_TUNNEL_ID.to_string(),
+        OpenAiTunnelCredentials::new(VALID_TUNNEL_ID, LAUNCH_API_KEY_SENTINEL).unwrap(),
         "0.0.13".to_string(),
         &|| false,
     ) {
@@ -253,7 +302,7 @@ fn readiness_timeout_is_bounded_and_cleaned_up() {
     let started = Instant::now();
     let error = match start_openai_tunnel(
         LOCAL_MCP_URL,
-        VALID_TUNNEL_ID.to_string(),
+        OpenAiTunnelCredentials::new(VALID_TUNNEL_ID, LAUNCH_API_KEY_SENTINEL).unwrap(),
         "0.0.13".to_string(),
         &|| false,
     ) {
@@ -274,7 +323,7 @@ fn cancellation_is_bounded_before_readiness() {
     let _key = TestEnvVarGuard::set("CONTROL_PLANE_API_KEY", API_KEY_SENTINEL);
     let error = match start_openai_tunnel(
         LOCAL_MCP_URL,
-        VALID_TUNNEL_ID.to_string(),
+        OpenAiTunnelCredentials::new(VALID_TUNNEL_ID, LAUNCH_API_KEY_SENTINEL).unwrap(),
         "0.0.13".to_string(),
         &|| true,
     ) {
