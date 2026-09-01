@@ -2,51 +2,40 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.423.1 - 2026-09-01
+
+### Misc
+
+- Preserve structured failure details (`a91a72c`)
+- Use supported Codex exec invocation (`32b37cc`)
+- Skip diagnostic startup side effects (`1ce2730`)
+- Capture initial live throughput samples (`e162d11`)
+# Prodex 0.423.1
+
+## New Features
+
+- No new features.
+
+## Bug Fixes
+
+- Fixed `prodex ping openai` incorrectly collapsing OpenAI profile
+  diagnostics into generic `PROCESS_FAILED` by using the supported
+  Codex diagnostic invocation and preserving bounded failure details.
+- Fixed `prodex log stream` leaving throughput permanently at `— t/s`;
+  trustworthy token-throughput samples now propagate to the live header.
+- Added regression coverage for ping timeout/process cleanup and
+  throughput propagation.
+
+## Changelog
+
+Full Changelog: [`0.423.0...0.423.1`](https://github.com/christiandoxa/prodex/compare/0.423.0...0.423.1)
+
 ## 0.423.0 - 2026-09-01
 
 ### Misc
 
 - Resolve release CI blockers (`392aa3a`)
 - Ship 0.423.0 stability train (`0862b70`)
-# Prodex 0.423.0
-
-## New Features
-
-- `prodex ping openai` probes every configured OpenAI profile independently
-  through the normal application request path and reports typed per-profile
-  results without aborting on the first failure.
-- Routes live runtime and upstream diagnostics through a bounded authenticated
-  runtime-broker window without requiring a perpetual raw telemetry journal.
-
-## Bug Fixes
-
-- Automatically continues safe pre-commit OpenAI requests through the remaining
-  eligible profile pool after authoritative account usage exhaustion, while
-  keeping transient overload and generic rate-limit failures distinct.
-- Restores quota/reset/throughput priority in the default log header and
-  removes routine scheduler-load rows from the primary timeline.
-- Keeps Expose local, Cloudflare, public Browser/MCP, and OpenAI Secure MCP
-  Tunnel readiness states distinct, including an explicit unverified
-  ChatGPT-connector state.
-
-## Compatibility
-
-- Updates the maintained Codex dependency and installer pin to stable
-  `rust-v0.152.0`.
-- Audits the exact `rust-v0.151.0..rust-v0.152.0` protocol delta and preserves
-  the existing JSONL, continuation, MCP, model, and authentication boundaries.
-
-- Raw runtime-log recording is disabled by default and is available only
-  through bounded explicit recording configuration.
-
-## Expose and diagnostics
-
-- Retains bounded explicit recording as an opt-in diagnostic path while live
-  stream consumers use the broker window.
-
-## Changelog
-
-Full Changelog: [`0.422.0...0.423.0`](https://github.com/christiandoxa/prodex/compare/0.422.0...0.423.0)
 
 ## 0.422.0 - 2026-08-31
 
