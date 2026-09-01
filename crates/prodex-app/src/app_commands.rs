@@ -18,6 +18,7 @@ mod info_handler;
 mod log;
 mod log_format;
 mod log_throughput;
+mod log_throughput_state;
 mod log_tui;
 mod log_upstream;
 mod log_upstream_payload;
