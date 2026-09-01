@@ -177,7 +177,7 @@ fn cleanup_ping_cwd(path: &Path) -> std::io::Result<()> {
             match fs::remove_dir_all(path) {
                 Ok(()) => return Ok(()),
                 Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
-                Err(error) if std::time::Instant::now() < deadline => {
+                Err(_) if std::time::Instant::now() < deadline => {
                     std::thread::sleep(Duration::from_millis(25));
                 }
                 Err(error) => return Err(error),
