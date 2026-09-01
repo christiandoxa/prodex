@@ -96,7 +96,9 @@ fn stream_upstream_payload_events_tui() -> Result<()> {
     {
         push_upstream_payload_event(&mut events, event);
     }
-    let mut header_profile = latest_upstream_payload_profile(&events).map(str::to_string);
+    let mut header_profile = throughput
+        .active_profile()
+        .or_else(|| latest_upstream_payload_profile(&events).map(str::to_string));
     let mut header_detail = log_tui_header_detail(header_profile.as_deref());
     let mut header_refresh_at =
         log_tui_header_next_refresh_at(header_detail.as_ref(), Instant::now());
@@ -127,7 +129,9 @@ fn stream_upstream_payload_events_tui() -> Result<()> {
                 push_upstream_payload_event(&mut events, event);
             }
         }
-        let latest_profile = latest_upstream_payload_profile(&events).map(str::to_string);
+        let latest_profile = throughput
+            .active_profile()
+            .or_else(|| latest_upstream_payload_profile(&events).map(str::to_string));
         let now = Instant::now();
         if latest_profile != header_profile || now >= header_refresh_at {
             header_profile = latest_profile;
