@@ -54,15 +54,21 @@ mcp_url_path = os.path.join(os.path.dirname(config), "mcp-url")
 mcp_url = open(mcp_url_path, encoding="utf-8").read()
 log_path = flag_value("--log.file")
 log_level = flag_value("--log.level")
-if log_level != "warn":
+# Pinned tunnel-client v0.0.13 emits this ERROR even at --log.level warn.
+error_line = 'level=ERROR msg=failed to connect to mcp error=Post "' + mcp_url + '"'
+if log_path:
     with open(log_path, "a", encoding="utf-8") as file:
-        file.write("level=INFO msg=Probing MCP server target=" + mcp_url + "\n")
+        file.write(error_line + "\n")
+else:
+    print(error_line, flush=True)
+    print(error_line, file=sys.stderr, flush=True)
 if marker:
     with open(marker, "w", encoding="utf-8") as file:
         file.write("argv=" + repr(args) + "\n")
         file.write("config=" + open(config, encoding="utf-8").read() + "\n")
         file.write("mcp_url_file_present=" + str(bool(mcp_url)) + "\n")
         file.write("log_level=" + log_level + "\n")
+        file.write("mcp_probe_error_emitted=True\n")
         for name in [
             "CONTROL_PLANE_API_KEY",
             "OPENAI_API_KEY",
@@ -94,7 +100,7 @@ with open(flag_value("--health.url-file"), "w", encoding="utf-8") as file:
 if marker:
     with open(marker, "a", encoding="utf-8") as file:
         file.write("health_url=" + open(flag_value("--health.url-file"), encoding="utf-8").read() + "\n")
-        file.write("log=" + open(flag_value("--log.file"), encoding="utf-8").read() + "\n")
+        file.write("log=" + (open(log_path, encoding="utf-8").read() if log_path else "") + "\n")
 server.serve_forever()
 "#,
     )
@@ -247,8 +253,11 @@ fn fake_client_reaches_local_health_ready_and_keeps_secrets_out_of_argv_and_conf
     assert!(!log_contents.contains(LAUNCH_API_KEY_SENTINEL));
     assert!(marker_contents.contains("mcp_url_file_present=True"));
     assert!(marker_contents.contains("log_level=warn"));
+    assert!(marker_contents.contains("mcp_probe_error_emitted=True"));
+    assert!(!marker_contents.contains("--log.file"));
     assert!(marker_contents.contains("health_url=http://127.0.0.1:"));
     assert!(marker_contents.contains("log=\n"));
+    assert!(fs::read_to_string(&tunnel.files.log).unwrap().is_empty());
     assert!(marker_contents.contains("--control-plane.api-key"));
     assert!(marker_contents.contains("env:CONTROL_PLANE_API_KEY"));
     assert!(marker_contents.contains("CONTROL_PLANE_API_KEY_PRESENT=True"));

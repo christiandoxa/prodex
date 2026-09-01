@@ -413,9 +413,11 @@ prodex s expose --tunnel-provider openai
 
 The exact client command receives a private configuration path, the OpenAI
 control-plane base URL `https://api.openai.com`, the validated tunnel ID, and
-the API-key reference `env:CONTROL_PLANE_API_KEY`. It also receives loopback
-health-listener and log-file paths. The runtime key is never placed in argv or
-the generated configuration.
+the API-key reference `env:CONTROL_PLANE_API_KEY`. It also receives a loopback
+health-listener path. Prodex disconnects the client's stdout/stderr and does
+not pass `--log.file`, so resolved MCP capability URLs cannot become retained
+or user-visible client logs. The runtime key is never placed in argv or the
+generated configuration.
 
 The generated client configuration binds the actual local MCP endpoint to the
 explicit `main` channel. It does not use the browser URL. Control-plane polling
@@ -439,11 +441,11 @@ is secret and held in zeroizing memory. Do not put it in shell history, a
 process argument, a committed file, or a diagnostic log.
 
 Prodex creates a private temporary directory containing the local MCP reference,
-client configuration, health URL file, and client log path. It uses the
-client's loopback `/healthz` and `/readyz` responses for startup readiness, then
-checks that the child is still alive. The directory and child are removed or
-terminated on normal exit, cancellation, startup failure, or post-ready child
-failure.
+client configuration, health URL file, and an empty private log placeholder. It
+uses the client's loopback `/healthz` and `/readyz` responses for startup
+readiness, then checks that the child is still alive. The directory and child
+are removed or terminated on normal exit, cancellation, startup failure, or
+post-ready child failure.
 
 The OpenAI tunnel path is independent of `trycloudflare.com`,
 `cloudflare-dns.com`, `cloudflared`, and Cloudflare's UDP/7844 transport. The
@@ -464,8 +466,8 @@ use it. A newly created tunnel can also need the documented propagation window
 before connector setup sees it.
 
 ChatGPT connector creation can fail before any command reaches the local MCP.
-In that case inspect the tunnel-client status/log or its redacted support
-archive and classify the failure as remote or permission/workspace related;
+In that case inspect the tunnel-client status or its redacted support archive
+and classify the failure as remote or permission/workspace related;
 do not call local Prodex MCP unhealthy. Historical [issue #35](https://github.com/openai/tunnel-client/issues/35)
 documents a ChatGPT-side SSE/404 probe, while the still-open [issue #41](https://github.com/openai/tunnel-client/issues/41)
 documents a no-auth `server/discover` reconnect class. These upstream reports
