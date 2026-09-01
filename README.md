@@ -244,13 +244,13 @@ heavy indexing work are skipped unless updated. Prodex leaves `CBM_CACHE_DIR` un
 sub-agent sessions join the account-wide canonical daemon; an explicit user override is inherited
 unchanged and must stay consistent across every CBM client.
 
-Playwright MCP (latest stable, pinned `@playwright/mcp@0.0.79`):
+Playwright MCP (latest stable, pinned `@playwright/mcp@0.0.80`):
 
 ```bash
 node --version
 npx --version
-npx -y @playwright/mcp@0.0.79 install-browser chrome
-npx -y @playwright/mcp@0.0.79 --version
+npx -y @playwright/mcp@0.0.80 install-browser chrome
+npx -y @playwright/mcp@0.0.80 --version
 prodex capability super-doctor
 prodex playwright --dry-run
 ```

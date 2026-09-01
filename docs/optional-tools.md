@@ -115,7 +115,7 @@ Kiro launches retain that shared server but add `check_index_coverage` to the
 server's `disabledTools` list because Kiro/Bedrock rejects its top-level JSON
 Schema composition; all other Codebase Memory tools remain available.
 Playwright MCP requires validated Node.js 18+, `npx`, and the pinned
-`@playwright/mcp@0.0.79` package to pass an offline probe; install the package
+`@playwright/mcp@0.0.80` package to pass an offline probe; install the package
 and browser before launching Super, then use `prodex capability super-doctor`
 to verify it explicitly.
 Presidio remains an explicit service selection and is checked by its existing

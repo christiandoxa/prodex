@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
-  "audited_at": "2026-08-30T12:50:17Z",
-  "release": "0.420.0",
+  "audited_at": "2026-09-01T05:28:00Z",
+  "release": "0.423.0",
   "tools": [
     {
       "id": "caveman",
@@ -56,21 +56,21 @@
     {
       "id": "playwright-mcp",
       "repository": "https://github.com/microsoft/playwright-mcp",
-      "latest_stable": "0.0.79",
-      "release": "v0.0.79",
-      "commit": "4c5077651542f68525a0b51e97bab2a32abc9290",
-      "git_tree": "c8c3606cfcc481d8ec9e4debff98009adbd7628d",
+      "latest_stable": "0.0.80",
+      "release": "v0.0.80",
+      "commit": "4c1fb03bad3bae379b0ae0e3d81d2660de56bd91",
+      "git_tree": "3f2a39f21fca00e473b2951462958f57c8fc794f",
       "npm": {
         "package": "@playwright/mcp",
-        "version": "0.0.79",
-        "integrity": "sha512-VpqD4a3vFyGQMY9sh3UJiO6wjcurggkljKfAyCHL0QWGY5m6Ehr3MNsAAHPDHO//n13g0PCjpHatAOiulrqdZQ==",
+        "version": "0.0.80",
+        "integrity": "sha512-FOPXHm2SvFhAQylm10jMZ35B/SR2TaMLVkavAlwoG4N2qCb5RqbvhQYcu3zmXNyxR2DW0Ooxe+9XPVt5UjKRCQ==",
         "node": ">=18"
       },
       "license": "Apache-2.0",
       "runtime": "Pinned npm package through npx; isolated browser profile",
       "platforms": ["linux", "macos", "windows"],
       "decision": "ADOPT_PACKAGE",
-      "notes": "Release adds WebP screenshots, codegen languages, settle delay, and browser reconnect fixes."
+      "notes": "Stable v0.0.80 is verified from the official release tag and npm package; retain the pinned package and Node.js >=18 runtime contract."
     },
     {
       "id": "ponytail",
