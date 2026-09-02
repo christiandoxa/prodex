@@ -512,7 +512,7 @@ mod tests {
         let endpoint = format!("http://{listen_addr}/v1internal");
         let secret = test_gemini_secret(None);
         let handle = thread::spawn(move || {
-            while let Ok(Some(request)) = server.recv_timeout(Duration::from_millis(50)) {
+            while let Ok(Some(request)) = server.recv_timeout(Duration::from_secs(1)) {
                 thread::sleep(Duration::from_millis(50));
                 let _ = request.respond(TinyResponse::from_string(
                     r#"{"name":"operations/pending","done":false}"#,
