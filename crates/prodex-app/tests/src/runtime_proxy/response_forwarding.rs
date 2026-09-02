@@ -194,10 +194,10 @@ fn sse_tap_logs_completion_usage_without_delta_usage() {
         },
     );
     let mut buf = [0; 4096];
-    reader.read(&mut buf).expect("created event should read");
-    reader.read(&mut buf).expect("output delta should read");
+    assert!(reader.read(&mut buf).expect("created event should read") > 0);
+    assert!(reader.read(&mut buf).expect("output delta should read") > 0);
     thread::sleep(Duration::from_millis(10));
-    reader.read(&mut buf).expect("completion event should read");
+    assert!(reader.read(&mut buf).expect("completion event should read") > 0);
     assert_eq!(reader.read(&mut buf).expect("SSE should reach EOF"), 0);
 
     let log = crate::read_runtime_proxy_test_log(&shared.log_path);
@@ -252,11 +252,11 @@ fn sse_tap_times_tool_call_first_completion_usage() {
         },
     );
     let mut buf = [0; 4096];
-    reader.read(&mut buf).expect("created event should read");
-    reader.read(&mut buf).expect("tool item should read");
+    assert!(reader.read(&mut buf).expect("created event should read") > 0);
+    assert!(reader.read(&mut buf).expect("tool item should read") > 0);
     thread::sleep(Duration::from_millis(10));
-    reader.read(&mut buf).expect("tool delta should read");
-    reader.read(&mut buf).expect("completion event should read");
+    assert!(reader.read(&mut buf).expect("tool delta should read") > 0);
+    assert!(reader.read(&mut buf).expect("completion event should read") > 0);
     assert_eq!(reader.read(&mut buf).expect("SSE should reach EOF"), 0);
 
     let log = crate::read_runtime_proxy_test_log(&shared.log_path);
