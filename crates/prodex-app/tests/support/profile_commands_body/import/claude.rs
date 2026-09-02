@@ -42,19 +42,25 @@ fn write_claude_import_source(source_dir: &Path, access_token: &str) {
 }
 
 #[test]
-fn profile_import_claude_supports_default_home_source_and_private_destination() {
-    let sandbox_dir = ProfileCommandsTestDir::new("claude-default-import");
+fn profile_import_claude_supports_isolated_source_and_private_destination() {
+    let sandbox_dir = ProfileCommandsTestDir::new("claude-isolated-import");
     let _env = ProfileCommandsTestEnv::new(&sandbox_dir.path);
-    let _source_override = TestEnvVarGuard::unset("CLAUDE_CONFIG_DIR");
     let _claude_bin = TestEnvVarGuard::set(
         "CLAUDE_BIN",
         &sandbox_dir.path.join("missing-claude").display().to_string(),
     );
     let source_dir = sandbox_dir.path.join("home/.claude");
-    write_claude_import_source(&source_dir, "default-claude-access-token");
+    write_claude_import_source(&source_dir, "isolated-claude-access-token");
+    #[cfg(windows)]
+    let _source_override = TestEnvVarGuard::set(
+        "CLAUDE_CONFIG_DIR",
+        &source_dir.display().to_string(),
+    );
+    #[cfg(not(windows))]
+    let _source_override = TestEnvVarGuard::unset("CLAUDE_CONFIG_DIR");
 
     handle_import_claude_profile(&claude_import_args(Some("claude-default"), true))
-        .expect("default Claude credentials should import");
+        .expect("isolated Claude credentials should import");
 
     let paths = AppPaths::discover().expect("Prodex paths should resolve");
     let state = AppState::load(&paths).expect("profile state should load");
@@ -68,7 +74,7 @@ fn profile_import_claude_supports_default_home_source_and_private_destination() 
     assert_eq!(
         fs::read_to_string(profile.codex_home.join(CLAUDE_CREDENTIALS_FILE))
             .expect("managed Claude credentials should be readable"),
-        claude_import_credentials("default-claude-access-token")
+        claude_import_credentials("isolated-claude-access-token")
     );
     #[cfg(unix)]
     {
