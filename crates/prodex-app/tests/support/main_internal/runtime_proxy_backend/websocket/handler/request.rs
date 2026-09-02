@@ -9,6 +9,7 @@ fn backend_websocket_connection_closed(error: &WsError) -> bool {
                 | std::io::ErrorKind::ConnectionAborted
                 | std::io::ErrorKind::ConnectionReset
                 | std::io::ErrorKind::NotConnected
+                | std::io::ErrorKind::TimedOut
                 | std::io::ErrorKind::UnexpectedEof
         ),
         WsError::Protocol(tungstenite::error::ProtocolError::ResetWithoutClosingHandshake) => true,
