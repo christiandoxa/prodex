@@ -3,6 +3,7 @@ import os from "node:os";
 import { formatCommand, parsePositiveInteger } from "./guard-common.mjs";
 
 const ZERO_TESTS_PATTERN = /\brunning 0 tests\b/;
+const POSITIVE_TESTS_PATTERN = /\brunning (\d+) tests?\b/g;
 
 export function defaultJobCount() {
   const available = typeof os.availableParallelism === "function" ? os.availableParallelism() : os.cpus().length;
@@ -225,6 +226,7 @@ async function runStepOnce(step) {
     });
 
     let sawZeroTests = false;
+    let sawPositiveTests = false;
     let probeTail = "";
     let timedOut = false;
     const timeoutHandle =
@@ -238,6 +240,11 @@ async function runStepOnce(step) {
       const text = probeTail + chunk;
       if (ZERO_TESTS_PATTERN.test(text)) {
         sawZeroTests = true;
+      }
+      for (const match of text.matchAll(POSITIVE_TESTS_PATTERN)) {
+        if (Number.parseInt(match[1], 10) > 0) {
+          sawPositiveTests = true;
+        }
       }
       probeTail = text.slice(-64);
     };
@@ -280,7 +287,7 @@ async function runStepOnce(step) {
         reject(new Error(`${step.label} exited with code ${code}`));
         return;
       }
-      if (step.failOnZeroTests && (sawZeroTests || ZERO_TESTS_PATTERN.test(probeTail))) {
+      if (step.failOnZeroTests && !sawPositiveTests && (sawZeroTests || ZERO_TESTS_PATTERN.test(probeTail))) {
         reject(new Error(`${step.label} matched no tests (cargo reported "running 0 tests")`));
         return;
       }

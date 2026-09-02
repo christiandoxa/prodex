@@ -75,6 +75,16 @@ test("targeted steps reject zero tests across output chunks", async () => {
   );
 });
 
+test("targeted steps allow an auxiliary zero-test harness after positive tests", async () => {
+  const result = await runStep({
+    label: "positive-then-zero-test",
+    command: process.execPath,
+    args: ["-e", "process.stdout.write('running 2 tests\\n'); process.stdout.write('running 0 tests\\n');"],
+    failOnZeroTests: true,
+  });
+  assert.equal(result.label, "positive-then-zero-test");
+});
+
 test("timed-out steps terminate their process group and report the timeout", async () => {
   await assert.rejects(
     runStep({
