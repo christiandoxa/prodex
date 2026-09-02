@@ -21,6 +21,18 @@ function normalizeVersion(value) {
   return match?.[1] ?? null;
 }
 
+function latestStableReleaseTag(releases) {
+  if (!Array.isArray(releases)) return null;
+  return (
+    releases.find(
+      (release) =>
+        !release.draft &&
+        !release.prerelease &&
+        normalizeVersion(release.tag_name),
+    )?.tag_name ?? null
+  );
+}
+
 export function compareFreshness(audit, observed) {
   return audit.tools.map((tool) => {
     const actual = observed[tool.id];
@@ -53,8 +65,12 @@ async function observedLatest() {
   const observed = Object.fromEntries(
     await Promise.all(
       [...githubTools.entries()].map(async ([id, repository]) => {
-        const release = await fetchJson(`https://api.github.com/repos/${repository}/releases/latest`);
-        return [id, release.tag_name];
+        const releases = await fetchJson(
+          `https://api.github.com/repos/${repository}/releases?per_page=100`,
+        );
+        const tag = latestStableReleaseTag(releases);
+        if (!tag) throw new Error(`no stable semver release found for ${repository}`);
+        return [id, tag];
       }),
     ),
   );
@@ -101,6 +117,17 @@ function selfTest() {
   assert.equal(compareFreshness(audit, { one: "1.2.4", two: "0.4.5" })[0].status, "drift");
   assert.equal(normalizeVersion("v1.2.3+build.4"), "1.2.3");
   assert.equal(normalizeVersion("latest"), null);
+  assert.equal(
+    latestStableReleaseTag([
+      { tag_name: "bin-v1.1.5", draft: false, prerelease: false },
+      { tag_name: "v2.5.0", draft: false, prerelease: false },
+    ]),
+    "v2.5.0",
+  );
+  assert.equal(
+    latestStableReleaseTag([{ tag_name: "v2.5.0", draft: false, prerelease: true }]),
+    null,
+  );
 }
 
 if (process.argv.includes("--self-test")) {
