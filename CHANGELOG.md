@@ -2,33 +2,41 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.424.0 - 2026-09-02
+
+### Claude
+
+- Reject unsafe external credential files (`190e699`)
+- Import existing OAuth credentials (`5f66a68`)
+
+### Misc
+
+- Scrub graceful taskkill environment (`4b8ef61`)
+- Close credential inheritance gaps (`56071bf`)
+- Enforce tunnel setup contracts (`b81af1e`)
+- Redact local capability status only when validation is green (`0401b04`)
+- Isolate tunnel-client capability data (`42cd209`)
+- Contain tunnel-client capability logs (`c3cfb0f`)
+- Harden interactive tunnel setup (`f8408b5`)
+- Prompt for OpenAI tunnel setup (`2ac40b1`)
+- Repair throughput eviction ownership (`fd35f20`)
+- Bound throughput identity state (`2b1246d`)
+- Complete throughput state lifecycle (`4c1cb9e`)
+- Close duplicate final throughput streams (`f252f9c`)
+- Retain live throughput samples (`ca1455a`)
+- Measure completed generation throughput (`13081d1`)
+- Prevent silent live event loss (`75288d9`)
+
 ## 0.423.1 - 2026-09-01
 
 ### Misc
 
+- Keep cross-platform test timing import (`124de59`)
+- Make exit fixture portable (`9223fe4`)
 - Preserve structured failure details (`a91a72c`)
 - Use supported Codex exec invocation (`32b37cc`)
 - Skip diagnostic startup side effects (`1ce2730`)
 - Capture initial live throughput samples (`e162d11`)
-# Prodex 0.423.1
-
-## New Features
-
-- No new features.
-
-## Bug Fixes
-
-- Fixed `prodex ping openai` incorrectly collapsing OpenAI profile
-  diagnostics into generic `PROCESS_FAILED` by using the supported
-  Codex diagnostic invocation and preserving bounded failure details.
-- Fixed `prodex log stream` leaving throughput permanently at `— t/s`;
-  trustworthy token-throughput samples now propagate to the live header.
-- Added regression coverage for ping timeout/process cleanup and
-  throughput propagation.
-
-## Changelog
-
-Full Changelog: [`0.423.0...0.423.1`](https://github.com/christiandoxa/prodex/compare/0.423.0...0.423.1)
 
 ## 0.423.0 - 2026-09-01
 

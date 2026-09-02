@@ -1,6 +1,6 @@
 {
   "name": "@christiandoxa/prodex-darwin-x64",
-  "version": "0.423.1",
+  "version": "0.424.0",
   "private": true,
   "description": "Native prodex binary for x86_64-apple-darwin",
   "license": "Apache-2.0",
