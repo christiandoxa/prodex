@@ -623,7 +623,7 @@ shared-state integration around those operations.
 - An available weekly quota window remains eligible when the 5-hour window is absent or unknown; explicit exhaustion still blocks selection.
 - OpenAI `additional_rate_limits` are preserved as independent backend buckets, including their
   explicit `allowed` and `limit_reached` fields and unknown future fields. The pinned Codex
-  `rust-v0.152.0` contract does not identify a Luna Reserve bucket or map it to a model, so Prodex
+  `rust-v0.152.1` contract does not identify a Luna Reserve bucket or map it to a model, so Prodex
   reports unknown Reserve data generically. When an upstream bucket explicitly identifies itself
   as `Luna Reserve`, it is applicable only to Luna requests; Sol and Terra never use it. When all
   supported Luna capacity is unavailable, a Luna request may make one model-aware pre-commit
