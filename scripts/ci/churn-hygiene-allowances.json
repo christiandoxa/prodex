@@ -1773,6 +1773,7 @@
       "fix(ci): expire release-scoped Mojo waiver",
       "fix(ci): adopt capability-aware Mojo release floor",
       "fix(ci): pin Mojo ownership baseline",
+      "test(ci): update Mojo share expectations",
       "chore(codex): update runtime to 0.152.1",
       "test(release): smoke runtime behavior in artifact",
       "test(runtime): isolate sync probe state",
@@ -1783,9 +1784,9 @@
     "caps": {
       "maxFiles": 90,
       "maxBehaviorFiles": 78,
-      "maxLines": 5591,
+      "maxLines": 5593,
       "maxFileLines": 608
     },
-    "reason": "Reviewed the exact integrated 0.424.0 train across operational log throughput state, Claude OAuth credential and external-file boundaries, OpenAI Expose setup/capability/credential and Windows process cleanup, Mojo production-share policy, Codex 0.152.1 compatibility and artifact smoke, and runtime proxy sync-probe, websocket, and verified Gemini deadline fixture stabilization. The reviewed range is 89 files, 77 behavior files, 5,550 changed lines, and 607 changed lines in the largest file; including this policy record, the final range is 5,590 changed lines. This narrow allowance covers only the listed reviewed subjects while global thresholds and all other guard semantics remain enforced."
+    "reason": "Reviewed the exact integrated 0.424.0 train across operational log throughput state, Claude OAuth credential and external-file boundaries, OpenAI Expose setup/capability/credential and Windows process cleanup, Mojo production-share policy and the reviewed CI expectation repair, Codex 0.152.1 compatibility and artifact smoke, and runtime proxy sync-probe, websocket, and verified Gemini deadline fixture stabilization. The reviewed range is 89 files, 77 behavior files, 5,550 changed lines, and 607 changed lines in the largest file; including this policy record and the reviewed CI expectation repair, the final range is 5,593 changed lines. This narrow allowance covers only the listed reviewed subjects while global thresholds and all other guard semantics remain enforced."
   }
 ]
