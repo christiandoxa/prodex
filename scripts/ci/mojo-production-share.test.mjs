@@ -104,6 +104,13 @@ test("manifest separates general release floor, project target, and frozen polic
     }),
     /non-regression baseline must be/u,
   );
+  assert.throws(
+    () => validateManifestMetadata({
+      ...current,
+      mojo_non_regression: { ...current.mojo_non_regression, baseline_sha: BASE_SHA },
+    }),
+    /non-regression baseline must be 43768659073cc1ab5c5686d3d58f2af68eebdef2/u,
+  );
 });
 
 test("release floor and project target thresholds are exact", () => {

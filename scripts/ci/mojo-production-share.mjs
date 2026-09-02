@@ -11,6 +11,7 @@ import { cargoTomlPath, parseCargoVersion, repoRoot } from "../npm/common.mjs";
 const manifestPath = path.join(repoRoot, "migration", "mojo-production-share.json");
 const COUNTING_RULES_VERSION = 1;
 const REQUIRED_BASELINE_SHA = "2531c7a345f1607a18aa926e204b4d02cc322167";
+const REQUIRED_MOJO_NON_REGRESSION_BASELINE_SHA = "43768659073cc1ab5c5686d3d58f2af68eebdef2";
 const REQUIRED_HISTORICAL_RELEASE_TARGET = "0.421.0";
 const REQUIRED_RELEASE_FLOOR_PERCENT = 7;
 const REQUIRED_PROJECT_TARGET_PERCENT = 10;
@@ -99,6 +100,11 @@ export function validateManifestMetadata(manifest) {
   const nonRegression = manifest.mojo_non_regression;
   if (!nonRegression || typeof nonRegression !== "object" || Array.isArray(nonRegression)) {
     throw new Error("Mojo production non-regression policy is required");
+  }
+  if (nonRegression.baseline_sha !== REQUIRED_MOJO_NON_REGRESSION_BASELINE_SHA) {
+    throw new Error(
+      `Mojo production non-regression baseline must be ${REQUIRED_MOJO_NON_REGRESSION_BASELINE_SHA}`,
+    );
   }
   if (typeof nonRegression.baseline_sha !== "string" || !/^[0-9a-f]{40}$/u.test(nonRegression.baseline_sha)) {
     throw new Error("Mojo production non-regression baseline must be a full commit SHA");
