@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import test from "node:test";
+import { readCargoVersion } from "../npm/common.mjs";
 import {
   assessMojoProductionNonRegression,
   calculateProductionShare,
@@ -210,12 +211,12 @@ test("historical waiver remains expired, scoped to 0.421.0, and cannot lower the
   }
 });
 
-test("canonical report exposes separate statuses and --check enforces only floor plus non-regression", () => {
+test("canonical report exposes separate statuses and --check enforces only floor plus non-regression", async () => {
   const report = JSON.parse(runShare("--json"));
-  assert.equal(report.current_prodex_version, "0.423.1");
+  assert.equal(report.current_prodex_version, await readCargoVersion());
   assert.equal(report.final.broad_mojo_production_loc, 26_420);
-  assert.equal(report.final.broad_total_production_loc, 366_913);
-  assert.equal(report.final.broad_mojo_percent, 7.200617040006759);
+  assert.equal(report.final.broad_total_production_loc, 367_612);
+  assert.equal(report.final.broad_mojo_percent, 7.186925345200918);
   assert.equal(report.release_floor_percent, 7);
   assert.equal(report.release_floor_met, true);
   assert.equal(report.release_floor_status, "PASS");
