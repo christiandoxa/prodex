@@ -405,6 +405,8 @@ pub(super) fn start_runtime_local_rewrite_proxy_with_file_access(
         log_path,
         marker_guard,
     } = prepared;
+    #[cfg(test)]
+    let (listener_ready_tx, listener_ready_rx) = std::sync::mpsc::channel();
     let RuntimeLocalRewriteWorkers {
         worker_threads,
         gemini_live_sidecar_addr,
@@ -414,8 +416,16 @@ pub(super) fn start_runtime_local_rewrite_proxy_with_file_access(
         &shutdown,
         worker_count,
         secret_refresh,
+        #[cfg(test)]
+        Some(listener_ready_tx),
         true,
     )?;
+    #[cfg(test)]
+    for _ in 0..worker_count {
+        listener_ready_rx
+            .recv()
+            .expect("runtime local rewrite listener should start");
+    }
     Ok(RuntimeRotationProxy {
         runtime_config: Arc::clone(&runtime_config),
         server,
