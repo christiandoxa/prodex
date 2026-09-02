@@ -322,14 +322,17 @@ fn validate_file(metadata: &Metadata, security: FileSecurity) -> io::Result<()> 
                 ));
             }
         }
-        FileSecurity::Projected => {
-            if (metadata.uid() != euid && metadata.uid() != 0)
-                || metadata.mode() & 0o037 != 0
-                || metadata.mode() & 0o040 != 0 && !process_in_group(metadata.gid())?
-            {
-                return Err(permission_denied("projected secret file is not private"));
-            }
-        }
+        FileSecurity::Projected => validate_projected_file(metadata, euid)?,
+    }
+    Ok(())
+}
+
+fn validate_projected_file(metadata: &Metadata, euid: libc::uid_t) -> io::Result<()> {
+    if (metadata.uid() != euid && metadata.uid() != 0)
+        || metadata.mode() & 0o037 != 0
+        || metadata.mode() & 0o040 != 0 && !process_in_group(metadata.gid())?
+    {
+        return Err(permission_denied("projected secret file is not private"));
     }
     Ok(())
 }
