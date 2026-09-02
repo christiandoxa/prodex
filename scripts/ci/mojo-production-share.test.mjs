@@ -114,7 +114,7 @@ test("manifest separates general release floor, project target, and frozen polic
   );
 });
 
-test("release floor and project target thresholds are exact", () => {
+test("release floor and project target thresholds are exact", async (t) => {
   const cases = [
     ["6.99%", 699, false, false, false],
     ["7.00%", 700, true, false, true],
@@ -123,7 +123,7 @@ test("release floor and project target thresholds are exact", () => {
     ["10.00%", 1_000, true, true, true],
   ];
   for (const [label, mojoLoc, floorMet, targetMet, releaseMet] of cases) {
-    test(`threshold ${label}`, () => {
+    await t.test(`threshold ${label}`, () => {
       const result = share(mojoLoc);
       assert.equal(productionShareMeetsReleaseFloor(result), floorMet);
       assert.equal(productionShareMeetsProjectTarget(result), targetMet);
