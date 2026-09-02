@@ -1746,5 +1746,45 @@
       "maxFileLines": 244
     },
     "reason": "Reviewed the exact R-K-2 OpenAI Expose series covering interactive setup, opaque capability routing, credential-boundary repairs, and Windows graceful taskkill scrubbing. The measured final range is 28 files, 26 behavior files, 1,255 changed lines, and 244 changed lines in the largest file; this allowance is limited to the listed subjects while global thresholds and all other guards remain enforced."
+  },
+  {
+    "id": "audited-prodex-0.424.0-integration-train",
+    "requiredSubjects": [
+      "fix(log): prevent silent live event loss",
+      "fix(log): measure completed generation throughput",
+      "fix(log): retain live throughput samples",
+      "fix(log): close duplicate final throughput streams",
+      "fix(log): complete throughput state lifecycle",
+      "refactor(log): split throughput state",
+      "fix(log): bound throughput identity state",
+      "fix(log): repair throughput eviction ownership",
+      "fix(claude): import existing OAuth credentials",
+      "fix(claude): reject unsafe external credential files",
+      "refactor(claude): split security test fixtures",
+      "feat(expose): prompt for OpenAI tunnel setup",
+      "fix(expose): harden interactive tunnel setup",
+      "fix(expose): contain tunnel-client capability logs",
+      "fix(expose): isolate tunnel-client capability data",
+      "fix(expose): redact local capability status only when validation is green",
+      "fix(expose): enforce tunnel setup contracts",
+      "fix(expose): close credential inheritance gaps",
+      "fix(expose): scrub graceful taskkill environment",
+      "ci: bound R-K-2 expose churn",
+      "fix(ci): expire release-scoped Mojo waiver",
+      "fix(ci): adopt capability-aware Mojo release floor",
+      "fix(ci): pin Mojo ownership baseline",
+      "chore(codex): update runtime to 0.152.1",
+      "test(release): smoke runtime behavior in artifact",
+      "test(runtime): isolate sync probe state",
+      "test(runtime): fix probe fixture drop order",
+      "test(runtime): stabilize websocket fixture teardown"
+    ],
+    "caps": {
+      "maxFiles": 89,
+      "maxBehaviorFiles": 77,
+      "maxLines": 5589,
+      "maxFileLines": 608
+    },
+    "reason": "Reviewed the exact integrated 0.424.0 train across operational log throughput state, Claude OAuth credential and external-file boundaries, OpenAI Expose setup/capability/credential and Windows process cleanup, Mojo production-share policy, Codex 0.152.1 compatibility and artifact smoke, and runtime proxy sync-probe and websocket fixtures. The reviewed range is 88 files, 76 behavior files, 5,548 changed lines, and 607 changed lines in the largest file; including this policy record, the final range is 5,588 changed lines. This narrow allowance covers only the listed reviewed subjects while global thresholds and all other guard semantics remain enforced."
   }
 ]
