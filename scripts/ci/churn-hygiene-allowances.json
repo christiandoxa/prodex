@@ -1725,5 +1725,26 @@
       "maxFileLines": 60
     },
     "reason": "Reviewed the bounded Windows-only test fixture repair for the exact 0.422.0 candidate: the existing Cloudflare fake launcher now executes its platform wrapper directly, matching the shared test-support contract without changing production tunnel behavior."
+  },
+  {
+    "id": "prodex-r-k-2-openai-expose-churn",
+    "requiredSubjects": [
+      "feat(expose): prompt for OpenAI tunnel setup",
+      "fix(expose): harden interactive tunnel setup",
+      "fix(expose): contain tunnel-client capability logs",
+      "fix(expose): isolate tunnel-client capability data",
+      "fix(expose): redact local capability status only when validation is green",
+      "fix(expose): enforce tunnel setup contracts",
+      "fix(expose): close credential inheritance gaps",
+      "fix(expose): scrub graceful taskkill environment",
+      "ci: bound R-K-2 expose churn"
+    ],
+    "caps": {
+      "maxFiles": 28,
+      "maxBehaviorFiles": 26,
+      "maxLines": 1255,
+      "maxFileLines": 244
+    },
+    "reason": "Reviewed the exact R-K-2 OpenAI Expose series covering interactive setup, opaque capability routing, credential-boundary repairs, and Windows graceful taskkill scrubbing. The measured final range is 28 files, 26 behavior files, 1,255 changed lines, and 244 changed lines in the largest file; this allowance is limited to the listed subjects while global thresholds and all other guards remain enforced."
   }
 ]
