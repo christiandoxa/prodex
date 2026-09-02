@@ -53,15 +53,15 @@ external release below:
 
 | Field | Required value |
 | --- | --- |
-| Version | `2.4.0` |
+| Version | `2.5.0` |
 | Source | `https://github.com/JuliusBrussee/caveman` |
-| Commit | `df2ccd85c94ec3c8289cb62ac020d241ccfb0c60` |
-| Prodex tree SHA-256 | `c9b065a86cfe818ff1217562c0735cdfa913257862db94f5b2b11fcd51b0b640` |
+| Commit | `f9a039a93d249f3fcdb47a9e02544cd1ce37ba4a` |
+| Prodex tree SHA-256 | `7b7a90ab252a09f200ea46ad719ad52d36c0b3fbdcbf33769fd7c872f9548dda` |
 
 Install the exact checked-out tree at:
 
 ```text
-<managed-root>/caveman/2.4.0/
+<managed-root>/caveman/2.5.0/
 ```
 
 The directory must contain the upstream `AGENTS.md`,
@@ -72,10 +72,10 @@ manifest as `prodex-tool.json`:
 {
   "schema_version": 1,
   "id": "caveman",
-  "version": "2.4.0",
+  "version": "2.5.0",
   "source": "https://github.com/JuliusBrussee/caveman",
-  "commit": "df2ccd85c94ec3c8289cb62ac020d241ccfb0c60",
-  "tree_sha256": "c9b065a86cfe818ff1217562c0735cdfa913257862db94f5b2b11fcd51b0b640"
+  "commit": "f9a039a93d249f3fcdb47a9e02544cd1ce37ba4a",
+  "tree_sha256": "7b7a90ab252a09f200ea46ad719ad52d36c0b3fbdcbf33769fd7c872f9548dda"
 }
 ```
 
@@ -97,7 +97,7 @@ Ponytail uses the same manifest and tree-validation contract at
 - commit: `0a4dd63ad4541f4f655c4108a295916f3c1d8fda`
 - tree SHA-256: `88c6dfa10bc0a63385a8f3f01bc4a3e51963c8fd76a0ebc0426bd889f0705970`
 
-RTK `0.46.0` is the latest stable release validated for this Prodex release; it remains
+RTK `0.47.0` is the latest stable release validated for this Prodex release; it remains
 externally managed and version-compatible rather than latest-only. Codebase Memory MCP
 `0.10.8` is the latest stable release validated for this Prodex release. Both resolve from
 managed roots first and then `PATH`.
