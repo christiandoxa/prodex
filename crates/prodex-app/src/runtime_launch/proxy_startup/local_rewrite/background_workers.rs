@@ -342,6 +342,7 @@ pub(in crate::runtime_launch::proxy_startup) fn spawn_runtime_local_rewrite_work
     shutdown: &Arc<AtomicBool>,
     worker_count: usize,
     secret_refresh: Option<RuntimeGatewayCredentialRefreshPlan>,
+    #[cfg(test)] listener_ready: Option<std::sync::mpsc::Sender<()>>,
     spawn_gemini_sidecar_listener: bool,
 ) -> Result<RuntimeLocalRewriteWorkers> {
     let mut worker_threads = Vec::new();
@@ -393,6 +394,8 @@ pub(in crate::runtime_launch::proxy_startup) fn spawn_runtime_local_rewrite_work
             Arc::clone(server),
             Arc::clone(shutdown),
             shared.clone(),
+            #[cfg(test)]
+            listener_ready.clone(),
         );
         match worker {
             Ok(worker) => worker_threads.push(worker),

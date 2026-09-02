@@ -15,12 +15,19 @@ pub(super) fn spawn_runtime_local_rewrite_listener_worker(
     server: Arc<TinyServer>,
     shutdown: Arc<AtomicBool>,
     shared: RuntimeLocalRewriteProxyShared,
+    #[cfg(test)] listener_ready: Option<std::sync::mpsc::Sender<()>>,
 ) -> std::io::Result<thread::JoinHandle<()>> {
     try_spawn_runtime_supervised_worker(
         format!("prodex-runtime-local-rewrite-{worker_index}"),
         shared.runtime_shared.log_path.clone(),
         Arc::clone(&shutdown),
-        move || runtime_local_rewrite_worker_loop(&server, &shutdown, &shared),
+        move || {
+            #[cfg(test)]
+            if let Some(listener_ready) = listener_ready.as_ref() {
+                let _ = listener_ready.send(());
+            }
+            runtime_local_rewrite_worker_loop(&server, &shutdown, &shared);
+        },
     )
 }
 

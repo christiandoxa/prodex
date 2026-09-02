@@ -75,6 +75,8 @@ impl RuntimeGatewayApplication {
             &shutdown,
             0,
             secret_refresh,
+            #[cfg(test)]
+            None,
             false,
         )?;
         debug_assert!(workers.gemini_live_sidecar_addr.is_none());
