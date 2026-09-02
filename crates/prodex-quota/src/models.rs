@@ -308,7 +308,7 @@ pub struct WindowPair {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AdditionalRateLimit {
-    /// Optional future/backend identifier. The pinned Codex 0.152.0 API does not provide one
+    /// Optional future/backend identifier. The pinned Codex 0.152.1 API does not provide one
     /// for additional details, so Prodex never derives routing semantics from this field.
     #[serde(default, alias = "limitId", skip_serializing_if = "Option::is_none")]
     pub limit_id: Option<String>,

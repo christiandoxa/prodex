@@ -758,7 +758,7 @@ prodex run --current-time-reminder --current-time-reminder-interval 2
 prodex run --respect-system-proxy
 ```
 
-Codex `rust-v0.152.0` thread classification remains transparent passthrough. `--thread-source` accepts arbitrary upstream feature strings, applies to newly created and forked threads, and is never treated as a Prodex profile or routing signal:
+Codex `rust-v0.152.1` thread classification remains transparent passthrough. `--thread-source` accepts arbitrary upstream feature strings, applies to newly created and forked threads, and is never treated as a Prodex profile or routing signal:
 
 ```bash
 prodex exec --thread-source automated_review "review this repository"
@@ -768,7 +768,7 @@ prodex s --no-presidio --no-sub-agent exec --thread-source automated_review "rev
 prodex exec fork THREAD_ID --thread-source automated_review "continue the review"
 ```
 
-Prodex preserves the value and its position in Codex argv. It does not inject Codex's `user` default. Resume helpers omit the option so `prodex exec resume THREAD_ID` retains the thread's persisted source. Codex `rust-v0.152.0` enables retained-image budgeting during remote compaction by default; use the normal Codex configuration surface when an explicit override is needed:
+Prodex preserves the value and its position in Codex argv. It does not inject Codex's `user` default. Resume helpers omit the option so `prodex exec resume THREAD_ID` retains the thread's persisted source. Codex `rust-v0.152.1` enables retained-image budgeting during remote compaction by default; use the normal Codex configuration surface when an explicit override is needed:
 
 ```bash
 prodex -c features.compaction_image_budget=true exec "review this repository"
@@ -779,7 +779,7 @@ prodex s --provider gemini -c features.compaction_image_budget=true exec "review
 prodex -c features.compaction_image_budget=false exec "review this repository"
 ```
 
-Generated Prodex provider/default overrides precede passthrough arguments. Explicit user `-c` arguments retain their order, so a later explicit override wins; unspecified state leaves the Codex 0.152.0 default enabled, while explicit `true` or `false` is preserved exactly. Codex owns retained-image accounting, image/label boundary atomicity, and the no-backfill rule. Prodex only preserves the configuration and `/responses/compact` image, label, audio, text, metadata, developer-message, and unknown JSON structures.
+Generated Prodex provider/default overrides precede passthrough arguments. Explicit user `-c` arguments retain their order, so a later explicit override wins; unspecified state leaves the Codex 0.152.1 default enabled, while explicit `true` or `false` is preserved exactly. Codex owns retained-image accounting, image/label boundary atomicity, and the no-backfill rule. Prodex only preserves the configuration and `/responses/compact` image, label, audio, text, metadata, developer-message, and unknown JSON structures.
 
 Detached memory traffic carries `thread_source: "memory_consolidation"` in `x-codex-turn-metadata` and the matching nested `client_metadata` entry. Prodex preserves both opaquely, including unknown metadata fields and pre-commit retries. This classification is metadata, not a Prodex affinity, selection, rotation, quota, or governance mode. In the explicit JSON-RPC broker, upstream `threadSource` is an optional free-form string on `thread/start` and `thread/fork`; `thread/resume` receives no generated source.
 

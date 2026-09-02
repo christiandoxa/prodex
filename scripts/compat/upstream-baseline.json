@@ -2,7 +2,7 @@
   "codex": {
     "compatibility": {
       "upstream_repository": "https://github.com/openai/codex",
-      "baseline_source": "openai/codex rust-v0.152.0 release",
+      "baseline_source": "openai/codex rust-v0.152.1 release",
       "guard_command": "node scripts/compat/check-upstream-baseline.mjs",
       "format_version": 2,
       "critical_files": [
@@ -1527,7 +1527,7 @@
           ]
         }
       ],
-      "tested_codex_release": "rust-v0.152.0",
+      "tested_codex_release": "rust-v0.152.1",
       "patch_deltas": [
         {
           "from": "rust-v0.150.0",
@@ -1565,6 +1565,19 @@
           ],
           "prodex_action": "Use the 0.152.0 package, keep JSONL completion validation and typed route/affinity boundaries, and preserve additive upstream payloads without duplicating Codex semantics.",
           "compatibility_evidence": "Audited the exact 0.151.0..0.152.0 source diff from the coordinator mirror; exec JSONL files had no source diff, and focused Prodex ping/app-server/quota/MCP/security tests remain the boundary checks."
+        },
+        {
+          "from": "rust-v0.152.0",
+          "to": "rust-v0.152.1",
+          "upstream_commit": "5adb68a49933ae446bf11935662c83dba55a0804",
+          "upstream_pr": "#41919",
+          "upstream_release_date": "2026-09-01T22:33:02Z",
+          "runtime_changes": [
+            "Guardian Node/CUA REPL review policy may come from additive auto_review.node_repl_policy model metadata, with bundled fallback and explicit-empty suppression.",
+            "Guardian reviewer-session reuse and parent-model fallback now reject effective Node/CUA REPL policy changes."
+          ],
+          "prodex_action": "Use the 0.152.1 package, preserve auto_review.node_repl_policy and related additive metadata opaquely, and do not duplicate Codex Guardian semantics or policy injection.",
+          "compatibility_evidence": "Audited the exact rust-v0.152.0...rust-v0.152.1 comparison: 3 commits and 12 files, with substantive PR #41919 at 796a15132358f30a24f342e7a8956f77e5d13ca3; release preparation and chores have no Prodex runtime impact. Existing ping/app-server/transport/MCP/auth boundary tests remain applicable."
         }
       ],
       "app_server_protocol": {
@@ -1587,19 +1600,14 @@
       }
     },
     "latestRelease": {
-      "tag_name": "rust-v0.152.0",
-      "name": "0.152.0",
-      "published_at": "2026-09-01T01:58:32Z",
-      "html_url": "https://github.com/openai/codex/releases/tag/rust-v0.152.0",
+      "tag_name": "rust-v0.152.1",
+      "name": "0.152.1",
+      "published_at": "2026-09-01T22:33:02Z",
+      "html_url": "https://github.com/openai/codex/releases/tag/rust-v0.152.1",
       "body_head": [
-        "## New Features",
-        "- Vim mode supports `/` and `?` searches within drafts, highlighted matches, and repeat navigation with `n` and `N`. (#41586)",
-        "- Rate-limit banners offer actions for checking usage, managing credits, resetting limits, and managing plans. (#41742)",
-        "- The terminal UI and `codex exec` show credential-refresh progress, including Amazon Bedrock reauthentication. (#41239)",
-        "- MCP server names can contain `:`, `@`, `/`, and `.`, supporting package-style names throughout CLI commands and authentication. (#41700)",
-        "- Individual MCP tools support an `output_token_limit` setting, with consistent truncation across session resumes. (#41421)",
-        "- App-server clients can configure `thread/shellCommand` timeouts, including deadlines longer than one hour. (#41384)",
-        "## Bug Fixes"
+        "## Bug Fixes",
+        "- Guardian approval review now honors Node REPL policies provided through model metadata.",
+        "**Full Changelog**: https://github.com/openai/codex/compare/rust-v0.152.0...rust-v0.152.1"
       ]
     }
   },
