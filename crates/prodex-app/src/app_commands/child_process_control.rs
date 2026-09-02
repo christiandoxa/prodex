@@ -334,20 +334,42 @@ fn join_bounded_output_reader(
 }
 
 #[cfg(windows)]
+fn graceful_taskkill_command(child_id: u32) -> Command {
+    let mut command = Command::new("taskkill");
+    command
+        .env_remove("CONTROL_PLANE_API_KEY")
+        .args(["/PID", &child_id.to_string(), "/T"])
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    command
+}
+
+#[cfg(windows)]
 pub(crate) fn terminate_child_gracefully(
     child: &mut Child,
     _private_process_group: bool,
 ) -> io::Result<()> {
-    let status = Command::new("taskkill")
-        .args(["/PID", &child.id().to_string(), "/T"])
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status()?;
+    let status = graceful_taskkill_command(child.id()).status()?;
     if status.success() || child.try_wait()?.is_some() {
         Ok(())
     } else {
         child.kill()
+    }
+}
+
+#[cfg(all(test, windows))]
+mod tests {
+    use super::graceful_taskkill_command;
+    use std::ffi::OsStr;
+
+    #[test]
+    fn graceful_taskkill_removes_control_plane_api_key() {
+        assert!(
+            graceful_taskkill_command(123)
+                .get_envs()
+                .any(|(key, value)| key == OsStr::new("CONTROL_PLANE_API_KEY") && value.is_none())
+        );
     }
 }
 
