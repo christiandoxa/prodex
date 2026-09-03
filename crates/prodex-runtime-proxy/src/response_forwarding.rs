@@ -189,7 +189,9 @@ pub fn runtime_response_event_is_generation_start(event_type: Option<&str>) -> b
                 | "response.refusal.delta"
                 | "response.reasoning_summary_part.added"
                 | "response.reasoning_summary_text.delta"
+                | "response.reasoning_text.delta"
                 | "response.function_call_arguments.delta"
+                | "response.mcp_call_arguments.delta"
                 | "response.custom_tool_call_input.delta"
         )
     )

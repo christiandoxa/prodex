@@ -1,0 +1,11 @@
+event: response.created
+data: {"type":"response.created","response":{"id":"resp-fixture"}}
+
+event: response.reasoning_text.delta
+data: {"type":"response.reasoning_text.delta","item_id":"reasoning-fixture","content_index":0,"delta":"[reasoning]"}
+
+event: response.mcp_call_arguments.delta
+data: {"type":"response.mcp_call_arguments.delta","item_id":"mcp-fixture","delta":"{}"}
+
+event: response.completed
+data: {"type":"response.completed","response":{"id":"resp-fixture","usage":{"input_tokens":10,"input_tokens_details":{"cached_tokens":2},"output_tokens":7,"output_tokens_details":{"reasoning_tokens":3},"total_tokens":17}}}

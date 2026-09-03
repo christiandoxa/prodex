@@ -224,6 +224,65 @@ fn sse_tap_logs_completion_usage_without_delta_usage() {
 }
 
 #[test]
+fn sse_tap_logs_current_codex_01530_fixture_throughput() {
+    let _guard = acquire_test_runtime_lock();
+    let log_path = env::temp_dir().join(format!(
+        "prodex-response-forwarding-codex-01530-throughput-test-{}.log",
+        std::process::id()
+    ));
+    prepare_runtime_proxy_test_log_path(&log_path);
+    let shared = test_runtime_streaming_shared(log_path.clone());
+    let mut reader = RuntimeSseTapReader::new(
+        ChunkedReader::new([include_bytes!(
+            "../../../../prodex-runtime-proxy/tests/fixtures/codex-0.153.0-reasoning-first.sse"
+        )
+        .as_slice()]),
+        RuntimeSseTapReaderInit {
+            shared: shared.clone(),
+            profile_name: "test".to_string(),
+            prelude: &[],
+            remembered_response_ids: &[],
+            request_previous_response_id: None,
+            turn_state: None,
+            request_id: 505,
+            prompt_cache_key: None,
+            model_name: None,
+        },
+    );
+    let mut buf = [0; 64];
+    loop {
+        let read = reader
+            .read(&mut buf)
+            .expect("current Codex fixture should read");
+        if read == 0 {
+            break;
+        }
+        thread::sleep(Duration::from_millis(1));
+    }
+
+    let log = crate::read_runtime_proxy_test_log(&shared.log_path);
+    let line = log
+        .lines()
+        .find(|line| line.contains("] token_usage request=505"))
+        .expect("current Codex completion usage should be logged");
+    assert!(line.contains("output_tokens=7"));
+    let generation_ms = line
+        .split_whitespace()
+        .find_map(|field| field.strip_prefix("generation_ms="))
+        .and_then(|value| value.parse::<u64>().ok());
+    assert!(generation_ms.is_some_and(|value| value > 0), "{line}");
+    let output_tokens_per_second = line
+        .split_whitespace()
+        .find_map(|field| field.strip_prefix("output_tokens_per_second="))
+        .and_then(|value| value.parse::<f64>().ok());
+    assert!(
+        output_tokens_per_second.is_some_and(|value| value > 0.0),
+        "{line}"
+    );
+    let _ = std::fs::remove_file(log_path);
+}
+
+#[test]
 fn sse_tap_times_tool_call_first_completion_usage() {
     let _guard = acquire_test_runtime_lock();
     let log_path = env::temp_dir().join(format!(
