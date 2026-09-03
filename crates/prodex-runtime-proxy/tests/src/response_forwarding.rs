@@ -262,6 +262,58 @@ fn live_token_usage_is_loggable_only_on_generation_events_with_output_tokens() {
 }
 
 #[test]
+fn current_codex_generation_deltas_are_output_boundaries_only() {
+    for event_type in [
+        "response.reasoning_text.delta",
+        "response.mcp_call_arguments.delta",
+    ] {
+        assert!(runtime_token_usage_event_is_live(
+            Some(event_type),
+            Some(RuntimeTokenUsage {
+                output_tokens: 1,
+                ..RuntimeTokenUsage::default()
+            })
+        ));
+    }
+    for event_type in [
+        "response.created",
+        "response.in_progress",
+        "response.output_text.done",
+        "response.reasoning_summary_text.done",
+        "response.output_item.done",
+    ] {
+        assert!(!runtime_response_event_is_generation_start(Some(
+            event_type
+        )));
+    }
+}
+
+#[test]
+fn current_codex_reasoning_first_fixture_times_final_usage() {
+    let mut state = RuntimeSseTapState::default();
+    let mut effects = Vec::new();
+    for chunk in include_bytes!("../fixtures/codex-0.153.0-reasoning-first.sse").chunks(17) {
+        effects.extend(state.observe_chunk(chunk));
+    }
+    effects.extend(state.finish_pending());
+
+    let Some(RuntimeSseTapEffect::LogTokenUsageWithGeneration {
+        usage: RuntimeTokenUsage { output_tokens, .. },
+        generation_ms,
+    }) = effects.iter().find(|effect| {
+        matches!(
+            effect,
+            RuntimeSseTapEffect::LogTokenUsageWithGeneration { .. }
+        )
+    })
+    else {
+        panic!("current Codex reasoning-first completion should be timed");
+    };
+    assert_eq!(*output_tokens, 7);
+    assert!(*generation_ms > 0);
+}
+
+#[test]
 fn live_token_usage_progress_is_cumulative_and_rate_limited() {
     let mut progress = RuntimeTokenUsageProgress::default();
     let start = std::time::Instant::now();
