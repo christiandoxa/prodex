@@ -32,6 +32,29 @@ shell history. `--openai-tunnel-id` is the non-secret CLI alternative to the
 identifier environment variable; there is no `--openai-api-key` option.
 TTY OpenAI setup prompts only for missing values; configured values skip the prompt.
 
+## Existing-session MCP bridge
+
+Run one plain `prodex s` and one matching `prodex s expose` from the same
+canonical workspace. MCP tools are enabled by default:
+
+```json
+prodex_session_output_read({})
+prodex_session_prompt_inject({"message":"inspect the failing test"})
+prodex_session_output_read({"cursor":"<next_cursor>","wait_ms":5000})
+```
+
+The tools share the same fail-closed resolver and bind input/output to the same
+Prodex PID, Codex writer PID, canonical cwd, and thread UUID. They observe only
+sanitized visible transcript/tool events, use bounded cursor reads, and use the
+supported Codex queue/app-server control plane for input. They never scrape or
+write a PTY, insert SQLite queue payloads, or create a second solver.
+
+Modern Codex authority is an open
+`thread-writer-locks/<UUID>.lock`; legacy authority is one open
+`rollout-...-<UUID>.jsonl`. If both exist, UUIDs must agree. The active session
+must be persisted/queue-addressable; possession of a queue database and UUID
+alone is not sufficient.
+
 ## Security and readiness
 
 The local origin binds to loopback. Expose validates local MCP `initialize` and

@@ -630,7 +630,8 @@ fn start_runtime_proxy_endpoint(
     let model_context_window_tokens =
         runtime_launch_effective_model_context_window_tokens(request, &selection.codex_home)?;
     let proxy_state = runtime_proxy_endpoint_state(state, selection, fixed)?;
-    let proxy = start_runtime_rotation_proxy_with_options(RuntimeRotationProxyStartOptions {
+    let live_upstream_base_url = runtime_upstream_base_url.clone();
+    let mut proxy = start_runtime_rotation_proxy_with_options(RuntimeRotationProxyStartOptions {
         paths,
         state: proxy_state.as_ref(),
         current_profile: &selection.selected_profile_name,
@@ -643,6 +644,16 @@ fn start_runtime_proxy_endpoint(
         model_context_window_tokens,
         preferred_listen_addr: None,
     })?;
+    let live_log_source = publish_runtime_live_log_source(
+        paths,
+        &proxy,
+        &selection.selected_profile_name,
+        &live_upstream_base_url,
+        request.include_code_review,
+        request.upstream_no_proxy,
+        request.smart_context_enabled,
+    )?;
+    proxy._live_log_source = Some(live_log_source);
     Ok(RuntimeProxyEndpoint {
         listen_addr: proxy.listen_addr,
         openai_mount_path: RUNTIME_PROXY_OPENAI_MOUNT_PATH.to_string(),
@@ -675,7 +686,8 @@ fn start_local_rewrite_proxy_endpoint(
 ) -> Result<RuntimeProxyEndpoint> {
     let model_context_window_tokens =
         runtime_launch_effective_model_context_window_tokens(request, &selection.codex_home)?;
-    let proxy = start_runtime_local_rewrite_proxy_with_harness(
+    let live_upstream_base_url = upstream_base_url.clone();
+    let mut proxy = start_runtime_local_rewrite_proxy_with_harness(
         RuntimeLocalRewriteProxyStartOptions {
             paths,
             state,
@@ -699,6 +711,16 @@ fn start_local_rewrite_proxy_endpoint(
         },
         resolved_harness,
     )?;
+    let live_log_source = publish_runtime_live_log_source(
+        paths,
+        &proxy,
+        &selection.selected_profile_name,
+        &live_upstream_base_url,
+        request.include_code_review,
+        request.upstream_no_proxy,
+        request.smart_context_enabled,
+    )?;
+    proxy._live_log_source = Some(live_log_source);
     let local_model_provider_id = runtime_local_rewrite_model_provider_id(selection, request)
         .unwrap_or(SUPER_LOCAL_PROVIDER_ID);
     Ok(RuntimeProxyEndpoint {

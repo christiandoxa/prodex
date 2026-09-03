@@ -273,6 +273,7 @@ struct RuntimeRotationProxy {
     gateway_side_effect_snapshot:
         Option<Arc<dyn Fn() -> RuntimeGatewaySideEffectSnapshot + Send + Sync>>,
     owner_lock: Option<StateFileLock>,
+    _live_log_source: Option<RuntimeLiveLogSourceGuard>,
     _marker_guard: RuntimeProxyMarkerGuard,
 }
 

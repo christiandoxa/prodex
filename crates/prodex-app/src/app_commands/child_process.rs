@@ -48,6 +48,9 @@ pub(crate) const PROVIDER_SECRET_ENV_KEYS: [&str; 12] = [
 #[path = "child_process_control.rs"]
 mod process_control;
 pub(crate) use process_control::*;
+#[path = "child_process_runtime.rs"]
+mod runtime;
+pub(crate) use runtime::run_runtime_launch_plan;
 
 pub(crate) fn codex_child_plan(codex_home: PathBuf, args: Vec<OsString>) -> ChildProcessPlan {
     prodex_runtime_launch::codex_child_plan(codex_bin(), codex_home, args, SUPER_LOCAL_PROVIDER_ID)

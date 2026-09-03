@@ -1,6 +1,10 @@
 use super::super::http::ExposeHttpRequest;
 use super::super::run_manager::ExposeRunManager;
 use super::super::session::{expose_digest_eq, expose_token_digest};
+use super::super::session_prompt_injection::{
+    PROMPT_INJECTION_MAX_MESSAGE_BYTES, PromptInjectionRequest, PromptOutputReadRequest,
+    SessionPromptInjectionService,
+};
 use super::super::ui::{ExposeHttpResponse, expose_mcp_empty_response, expose_text_response};
 use super::protocol::{
     jsonrpc_result, mcp_accept_allowed, mcp_capability_segment, mcp_content_type_allowed,
@@ -8,13 +12,14 @@ use super::protocol::{
     mcp_origin_allowed, request_id, validate_configured_main_effort, validate_mcp_request_headers,
 };
 use super::tools::{
-    apply_provider_override, event_page_limit, main_provider, mcp_tools, optional_string,
-    required_run_id, required_string, run_summary_json, tool_result, validate_tool_arguments,
-    value_u64,
+    apply_provider_override, event_page_limit, main_provider, mcp_tools, optional_process_id,
+    optional_string, required_run_id, required_string, run_summary_json, tool_result,
+    validate_tool_arguments, value_u64, value_usize,
 };
 use super::{
-    ExposeMcpEndpoint, MCP_CURRENT_PROTOCOL_VERSION, MCP_ERROR_HEADER_MISMATCH,
-    MCP_ERROR_UNSUPPORTED_VERSION, MCP_MAX_JSON_NESTING, MCP_MAX_MODEL_BYTES,
+    ExposeMcpEndpoint, ExposeMcpEndpointInit, MCP_CURRENT_PROTOCOL_VERSION,
+    MCP_ERROR_HEADER_MISMATCH, MCP_ERROR_UNSUPPORTED_VERSION, MCP_MAX_CURSOR_BYTES,
+    MCP_MAX_JSON_NESTING, MCP_MAX_MODEL_BYTES, MCP_MAX_OUTPUT_EVENTS, MCP_MAX_OUTPUT_WAIT_MS,
     MCP_MAX_PROFILE_BYTES, MCP_MAX_TASK_BYTES, MCP_PROTOCOL_VERSIONS, MCP_RATE_LIMIT,
     MCP_RATE_WINDOW, McpRateLimit,
 };
@@ -23,6 +28,14 @@ use serde_json::{Value, json};
 use std::ffi::OsString;
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
+
+fn mcp_binding_key(request: &ExposeHttpRequest) -> String {
+    let session = request.header("Mcp-Session-Id").unwrap_or("stateless");
+    expose_token_digest(session)
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
+}
 
 impl ExposeMcpEndpoint {
     pub(crate) fn new(
@@ -33,16 +46,19 @@ impl ExposeMcpEndpoint {
         display_name: String,
         defaults: SuperArgs,
     ) -> Arc<Self> {
+        let injector_workspace_root = workspace_root.clone();
         let run_manager =
             ExposeRunManager::new(workspace_root, instance_id.clone(), workspace_name.clone());
-        Self::from_run_manager(
-            capability,
+        Self::from_run_manager(ExposeMcpEndpointInit {
+            capability: capability.to_string(),
             instance_id,
             workspace_name,
             display_name,
             defaults,
             run_manager,
-        )
+            workspace_root: injector_workspace_root,
+            session_injector: Arc::new(SessionPromptInjectionService::default()),
+        })
     }
 
     #[cfg(test)]
@@ -54,32 +70,34 @@ impl ExposeMcpEndpoint {
         defaults: SuperArgs,
         run_manager: ExposeRunManager,
     ) -> Arc<Self> {
-        Self::from_run_manager(
-            capability,
+        Self::from_run_manager(ExposeMcpEndpointInit {
+            capability: capability.to_string(),
             instance_id,
             workspace_name,
             display_name,
             defaults,
             run_manager,
-        )
+            workspace_root: std::env::current_dir().unwrap_or_default(),
+            session_injector: Arc::new(SessionPromptInjectionService::default()),
+        })
     }
 
-    fn from_run_manager(
-        capability: &str,
-        instance_id: String,
-        workspace_name: String,
-        display_name: String,
-        defaults: SuperArgs,
-        run_manager: ExposeRunManager,
-    ) -> Arc<Self> {
+    #[cfg(test)]
+    pub(crate) fn new_with_run_manager_and_injector(init: ExposeMcpEndpointInit) -> Arc<Self> {
+        Self::from_run_manager(init)
+    }
+
+    fn from_run_manager(init: ExposeMcpEndpointInit) -> Arc<Self> {
         Arc::new(Self {
-            capability_digest: expose_token_digest(capability),
+            capability_digest: expose_token_digest(&init.capability),
             openai_relay: Mutex::new(None),
-            run_manager,
-            server_name: format!("Prodex Super — {display_name}"),
-            workspace_name,
-            instance_id,
-            defaults,
+            run_manager: init.run_manager,
+            server_name: format!("Prodex Super — {}", init.display_name),
+            workspace_name: init.workspace_name,
+            instance_id: init.instance_id,
+            defaults: init.defaults,
+            workspace_root: init.workspace_root,
+            session_injector: init.session_injector,
             rate: Mutex::new(McpRateLimit {
                 started: Instant::now(),
                 requests: 0,
@@ -223,7 +241,7 @@ impl ExposeMcpEndpoint {
             "initialize" => self.initialize(id, params, request.header("MCP-Protocol-Version")),
             "ping" => mcp_json_response(200, jsonrpc_result(id, json!({}))),
             "tools/list" => self.tools_list(id),
-            "tools/call" => self.tools_call(id, params),
+            "tools/call" => self.tools_call(id, params, &mcp_binding_key(request)),
             _ => mcp_error_response(404, id, -32601, "method not found"),
         }
     }
@@ -315,7 +333,12 @@ impl ExposeMcpEndpoint {
         )
     }
 
-    fn tools_call(&self, id: Option<Value>, params: &Value) -> ExposeHttpResponse {
+    fn tools_call(
+        &self,
+        id: Option<Value>,
+        params: &Value,
+        binding_key: &str,
+    ) -> ExposeHttpResponse {
         let Some(params) = params.as_object() else {
             return mcp_error_response(400, id, -32602, "tool parameters are required");
         };
@@ -336,6 +359,8 @@ impl ExposeMcpEndpoint {
             "prodex_super_events" => self.events_tool(arguments),
             "prodex_super_result" => self.result_tool(arguments),
             "prodex_super_cancel" => self.cancel_tool(arguments),
+            "prodex_session_prompt_inject" => self.prompt_inject_tool(arguments, binding_key),
+            "prodex_session_output_read" => self.output_read_tool(arguments, binding_key),
             "prodex_super_list" => Ok(json!({
                 "instance_id": self.instance_id,
                 "runs": self.run_manager.list().iter().map(run_summary_json).collect::<Vec<_>>()
@@ -354,6 +379,95 @@ impl ExposeMcpEndpoint {
                 jsonrpc_result(id, tool_result(json!({ "error": message }), true)),
             ),
         }
+    }
+
+    fn prompt_inject_tool(
+        &self,
+        arguments: &Value,
+        binding_key: &str,
+    ) -> std::result::Result<Value, String> {
+        let message = required_string(arguments, "message", PROMPT_INJECTION_MAX_MESSAGE_BYTES)?;
+        if message.as_bytes().contains(&0) {
+            return Err("message must not contain NUL".to_string());
+        }
+        let request = PromptInjectionRequest {
+            workspace_root: self.workspace_root.clone(),
+            message,
+            cwd: optional_string(arguments, "cwd", 4096)?,
+            prodex_pid: optional_process_id(arguments)?,
+            thread_id: optional_string(arguments, "thread_id", 128)?,
+            binding_key: binding_key.to_string(),
+        };
+        let result = self
+            .session_injector
+            .inject(request)
+            .map_err(|error| error.as_str().to_string())?;
+        Ok(json!({
+            "status": "queued",
+            "prodex_pid": result.prodex_pid,
+            "codex_pid": result.codex_pid,
+            "thread_id": result.thread_id,
+            "message_id": result.message_id,
+            "queue_exit": result.queue_exit,
+            "verification": result.verification,
+        }))
+    }
+
+    fn output_read_tool(
+        &self,
+        arguments: &Value,
+        binding_key: &str,
+    ) -> std::result::Result<Value, String> {
+        let limit = arguments
+            .get("limit")
+            .map(value_usize)
+            .transpose()?
+            .unwrap_or(MCP_MAX_OUTPUT_EVENTS);
+        if !(1..=MCP_MAX_OUTPUT_EVENTS).contains(&limit) {
+            return Err(format!(
+                "limit must be between 1 and {MCP_MAX_OUTPUT_EVENTS}"
+            ));
+        }
+        let wait_ms = arguments
+            .get("wait_ms")
+            .map(value_u64)
+            .transpose()?
+            .unwrap_or_default();
+        if wait_ms > MCP_MAX_OUTPUT_WAIT_MS {
+            return Err(format!(
+                "wait_ms must be between 0 and {MCP_MAX_OUTPUT_WAIT_MS}"
+            ));
+        }
+        let request = PromptOutputReadRequest {
+            workspace_root: self.workspace_root.clone(),
+            cursor: optional_string(arguments, "cursor", MCP_MAX_CURSOR_BYTES)?,
+            limit,
+            wait_ms,
+            prodex_pid: optional_process_id(arguments)?,
+            thread_id: optional_string(arguments, "thread_id", 128)?,
+            binding_key: binding_key.to_string(),
+        };
+        let result = self
+            .session_injector
+            .read_output(request)
+            .map_err(|error| error.as_str().to_string())?;
+        Ok(json!({
+            "status": "ok",
+            "prodex_pid": result.prodex_pid,
+            "codex_pid": result.codex_pid,
+            "thread_id": result.thread_id,
+            "source": result.source,
+            "events": result.events.into_iter().map(|event| json!({
+                "sequence": event.sequence,
+                "timestamp": event.timestamp,
+                "kind": event.kind,
+                "name": event.name,
+                "status": event.status,
+                "text": event.text,
+            })).collect::<Vec<_>>(),
+            "next_cursor": result.next_cursor,
+            "has_more": result.has_more,
+        }))
     }
 
     pub(crate) fn start_tool(&self, arguments: &Value) -> std::result::Result<Value, String> {

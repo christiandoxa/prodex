@@ -171,7 +171,10 @@ fn local_catalog_model(
         "default_service_tier": null,
         "availability_nux": null,
         "upgrade": null,
-        "base_instructions": null,
+        // Codex app-server requires an explicit instruction source for persisted
+        // sessions; an empty value preserves the local provider's existing
+        // prompt semantics without inventing provider instructions.
+        "base_instructions": "",
         "supports_reasoning_summaries": false,
         "supports_reasoning_summary_parameter": false,
         "default_reasoning_summary": "none",
@@ -266,6 +269,7 @@ mod tests {
             serde_json::from_str(&fs::read_to_string(&catalog_path).unwrap()).unwrap();
         assert_eq!(catalog["models"][0]["slug"], "local/qwen");
         assert_eq!(catalog["models"][0]["apply_patch_tool_type"], "freeform");
+        assert_eq!(catalog["models"][0]["base_instructions"], "");
         assert_eq!(catalog["models"][0]["supports_search_tool"], true);
         let efforts = catalog["models"][0]["supported_reasoning_levels"]
             .as_array()

@@ -10,6 +10,11 @@ use crate::runtime_desktop::{
 mod child_env;
 #[path = "runtime_tools/overlay.rs"]
 mod overlay;
+#[cfg(unix)]
+#[path = "runtime_tools/session_app_server.rs"]
+mod session_app_server;
+#[cfg(unix)]
+use session_app_server::build_session_app_server_companion;
 #[path = "runtime_tools/provider_auth.rs"]
 mod provider_auth;
 #[cfg(test)]
@@ -381,6 +386,38 @@ mod tests {
                 "{extracted_prefix} should be consumed before Codex launch"
             );
         }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn plain_super_launch_has_one_persisted_app_server_companion() {
+        let strategy = RuntimeToolLaunchStrategy::new(super_as_caveman_args(&["prodex", "s"]));
+        let root = crate::test_temp_root()
+            .join(format!("prodex-session-server-plan-{}", std::process::id()));
+        std::fs::create_dir_all(&root).unwrap();
+        let (companion, socket) = build_session_app_server_companion(&strategy, &root, &[])
+            .unwrap()
+            .expect("plain Super needs the session app server");
+        assert_eq!(
+            companion.args.first().and_then(|arg| arg.to_str()),
+            Some("app-server")
+        );
+        assert!(companion.args.iter().any(|arg| arg == "--listen"));
+        assert!(
+            companion
+                .args
+                .iter()
+                .any(|arg| arg.to_string_lossy().contains("unix://"))
+        );
+        assert_eq!(
+            socket.file_name().and_then(|name| name.to_str()),
+            Some(".s")
+        );
+        assert!(!companion.args.iter().any(|arg| {
+            arg == "--dangerously-bypass-approvals-and-sandbox"
+                || arg == "--dangerously-bypass-hook-trust"
+        }));
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

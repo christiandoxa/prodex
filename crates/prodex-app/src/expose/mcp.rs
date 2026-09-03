@@ -2,12 +2,14 @@ use super::http::ExposeHttpRequest;
 use super::run_manager::ExposeRunManager;
 use super::runtime::ExposeShared;
 use super::session::ExposeDigest;
+use super::session_prompt_injection::ExistingSessionPromptInjector;
 use super::ui::expose_text_response;
 use anyhow::{Context, Result};
 use base64::Engine;
 use prodex_cli::SuperArgs;
 use std::fmt;
 use std::net::IpAddr;
+use std::path::PathBuf;
 use std::sync::atomic::Ordering;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -38,12 +40,26 @@ const MCP_PUBLIC_INITIALIZE_TIMEOUT: Duration = Duration::from_secs(45);
 const MCP_PUBLIC_TOOLS_TIMEOUT: Duration = Duration::from_secs(20);
 const MCP_PUBLIC_READY_STEP: Duration = Duration::from_millis(250);
 const MCP_MAX_TASK_BYTES: usize = 64 * 1024;
+const MCP_MAX_CURSOR_BYTES: usize = 16 * 1024;
+const MCP_MAX_OUTPUT_EVENTS: usize = 200;
+const MCP_MAX_OUTPUT_WAIT_MS: u64 = 10_000;
 const MCP_MAX_JSON_NESTING: usize = 64;
 const MCP_MAX_MODEL_BYTES: usize = 256;
 const MCP_MAX_PROFILE_BYTES: usize = 128;
 const MCP_MAX_EVENT_PAGE: usize = 64;
 const MCP_ERROR_UNSUPPORTED_VERSION: i64 = -32022;
 const MCP_ERROR_HEADER_MISMATCH: i64 = -32020;
+
+pub(super) struct ExposeMcpEndpointInit {
+    pub(super) capability: String,
+    pub(super) instance_id: String,
+    pub(super) workspace_name: String,
+    pub(super) display_name: String,
+    pub(super) defaults: SuperArgs,
+    pub(super) run_manager: ExposeRunManager,
+    pub(super) workspace_root: PathBuf,
+    pub(super) session_injector: Arc<dyn ExistingSessionPromptInjector>,
+}
 
 pub(super) struct ExposeMcpEndpoint {
     capability_digest: ExposeDigest,
@@ -53,6 +69,8 @@ pub(super) struct ExposeMcpEndpoint {
     pub(super) workspace_name: String,
     pub(super) instance_id: String,
     pub(super) defaults: SuperArgs,
+    pub(super) workspace_root: PathBuf,
+    pub(super) session_injector: Arc<dyn ExistingSessionPromptInjector>,
     rate: Mutex<McpRateLimit>,
 }
 

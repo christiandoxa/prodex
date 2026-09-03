@@ -1,6 +1,6 @@
 use super::{
     PreparedRuntimeLaunch, RuntimeLaunchPlan, RuntimeLaunchRequest, RuntimeProxyEndpoint,
-    cleanup_runtime_launch_plan, exit_with_status, run_child_plan, run_child_plan_with_monitor,
+    cleanup_runtime_launch_plan, exit_with_status, run_runtime_launch_plan,
 };
 use crate::print_launch_status;
 use anyhow::Result;
@@ -138,10 +138,7 @@ fn run_runtime_launch_execution(
     } = execution;
     print_launch_status("starting child process...");
     let child_wait_started = Instant::now();
-    let status = match child_exit_requested {
-        Some(monitor) => run_child_plan_with_monitor(&plan.child, runtime_proxy.as_ref(), monitor),
-        None => run_child_plan(&plan.child, runtime_proxy.as_ref()),
-    };
+    let status = run_runtime_launch_plan(&plan, runtime_proxy.as_ref(), child_exit_requested);
     emit_runtime_timing("shutdown.child_wait_ms", child_wait_started);
     let runtime_proxy_shutdown_started = Instant::now();
     drop(runtime_proxy);

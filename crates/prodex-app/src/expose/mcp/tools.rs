@@ -70,6 +70,10 @@ pub(super) fn validate_tool_arguments(
         }
         "prodex_super_events" => ["run_id", "after_seq", "limit"].as_slice(),
         "prodex_super_list" => [].as_slice(),
+        "prodex_session_prompt_inject" => ["message", "cwd", "prodex_pid", "thread_id"].as_slice(),
+        "prodex_session_output_read" => {
+            ["cursor", "limit", "wait_ms", "prodex_pid", "thread_id"].as_slice()
+        }
         _ => return Ok(()),
     };
     let Some(object) = arguments.as_object() else {
@@ -105,6 +109,21 @@ pub(super) fn value_u64(value: &Value) -> std::result::Result<u64, String> {
 pub(super) fn value_usize(value: &Value) -> std::result::Result<usize, String> {
     value_u64(value)
         .and_then(|value| usize::try_from(value).map_err(|_| "value is too large".to_string()))
+}
+
+pub(super) fn optional_process_id(arguments: &Value) -> std::result::Result<Option<u32>, String> {
+    let Some(value) = arguments.get("prodex_pid") else {
+        return Ok(None);
+    };
+    if value.is_null() {
+        return Ok(None);
+    }
+    let value = value_u64(value)?;
+    u32::try_from(value)
+        .ok()
+        .filter(|value| *value > 0)
+        .map(Some)
+        .ok_or_else(|| "prodex_pid is invalid".to_string())
 }
 
 pub(super) fn event_page_limit(arguments: &Value) -> std::result::Result<usize, String> {
@@ -214,7 +233,7 @@ fn config_assignment_has_key(assignment: &str, key: &str) -> bool {
         .is_some_and(|(name, _)| name.trim() == key)
 }
 
-pub(super) fn mcp_tool_names() -> [&'static str; 6] {
+pub(super) fn mcp_tool_names() -> [&'static str; 8] {
     [
         "prodex_super_start",
         "prodex_super_status",
@@ -222,6 +241,8 @@ pub(super) fn mcp_tool_names() -> [&'static str; 6] {
         "prodex_super_result",
         "prodex_super_cancel",
         "prodex_super_list",
+        "prodex_session_prompt_inject",
+        "prodex_session_output_read",
     ]
 }
 
@@ -289,6 +310,44 @@ pub(super) fn mcp_tools() -> Vec<Value> {
             "List bounded runs owned by this expose instance; it never lists runs from another instance.",
             json!({"type": "object", "properties": {}, "additionalProperties": false}),
             json!({"type": "object", "properties": {"instance_id": {"type": "string"}, "runs": {"type": "array"}}, "required": ["instance_id", "runs"]}),
+            true,
+            false,
+            false,
+        ),
+        tool_definition(
+            "prodex_session_prompt_inject",
+            "Queue a user message into an already-running plain `prodex s` interactive session. This tool does not start another solver.",
+            json!({
+                "type": "object",
+                "properties": {
+                    "message": {"type": "string", "minLength": 1, "maxLength": 65536},
+                    "cwd": {"type": ["string", "null"], "maxLength": 4096},
+                    "prodex_pid": {"type": ["integer", "null"], "minimum": 1},
+                    "thread_id": {"type": ["string", "null"], "maxLength": 128}
+                },
+                "required": ["message"],
+                "additionalProperties": false
+            }),
+            json!({"type": "object", "properties": {"status": {"type": "string"}, "prodex_pid": {"type": "integer"}, "codex_pid": {"type": "integer"}, "thread_id": {"type": "string"}, "message_id": {"type": ["string", "null"]}, "queue_exit": {"type": "integer"}, "verification": {"type": "string"}}, "required": ["status", "prodex_pid", "codex_pid", "thread_id", "queue_exit", "verification"]}),
+            false,
+            false,
+            false,
+        ),
+        tool_definition(
+            "prodex_session_output_read",
+            "Read bounded user-visible output from the same already-running plain `prodex s` interactive session; it never starts another solver or reads its PTY.",
+            json!({
+                "type": "object",
+                "properties": {
+                    "cursor": {"type": ["string", "null"], "maxLength": 16384},
+                    "limit": {"type": "integer", "minimum": 1, "maximum": 200},
+                    "wait_ms": {"type": "integer", "minimum": 0, "maximum": 10000},
+                    "prodex_pid": {"type": ["integer", "null"], "minimum": 1},
+                    "thread_id": {"type": ["string", "null"], "maxLength": 128}
+                },
+                "additionalProperties": false
+            }),
+            json!({"type": "object", "properties": {"status": {"type": "string"}, "prodex_pid": {"type": "integer"}, "codex_pid": {"type": "integer"}, "thread_id": {"type": "string"}, "source": {"type": "string"}, "events": {"type": "array"}, "next_cursor": {"type": "string"}, "has_more": {"type": "boolean"}}, "required": ["status", "prodex_pid", "codex_pid", "thread_id", "source", "events", "next_cursor", "has_more"]}),
             true,
             false,
             false,

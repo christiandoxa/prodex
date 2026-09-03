@@ -86,7 +86,7 @@ fn json_nesting_is_bounded_before_deserialization() {
 #[test]
 fn tool_list_is_focused_and_annotations_are_present() {
     let tools = mcp_tools();
-    assert_eq!(tools.len(), 6);
+    assert_eq!(tools.len(), 8);
     assert!(tools.iter().all(|tool| tool.get("annotations").is_some()));
     assert!(tools.iter().all(|tool| {
         tool.get("name")

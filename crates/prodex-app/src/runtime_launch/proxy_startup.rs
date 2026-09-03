@@ -597,6 +597,7 @@ pub(crate) fn start_runtime_rotation_proxy_with_options(
         #[cfg(test)]
         gateway_side_effect_snapshot: None,
         owner_lock,
+        _live_log_source: None,
         _marker_guard: marker_guard,
     })
 }
