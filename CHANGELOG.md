@@ -2,7 +2,38 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
-## 0.424.0 - 2026-09-02
+## 0.425.0 - 2026-09-03
+
+### Misc
+
+- Restore measured output throughput (`3d0bba7`)
+# Prodex 0.425.0
+
+## New Features
+
+- Add the exact-tree Codex 0.153.0 compatibility audit and current Responses
+  protocol fixture.
+
+## Bug Fixes
+
+- Restore measured output tokens/second for current Codex reasoning and MCP
+  generation events. Rates use only authoritative output-token usage and a
+  positive monotonic generation interval; unknown samples remain `— t/s`.
+- Keep completed throughput values visible across idle time, profile rotation,
+  live/disk duplicate delivery, and high-volume operational log activity.
+
+## Compatibility
+
+- Update the bundled Codex runtime to `rust-v0.153.0` / `@openai/codex@0.153.0`.
+- Preserve Codex 0.153 raw response usage metadata, app-server additions,
+  rollout/session behavior, MCP event streams, Guardian behavior, and config
+  ownership without reimplementing upstream semantics.
+
+## Changelog
+
+Full Changelog: [`0.424.0...0.425.0`](https://github.com/christiandoxa/prodex/compare/0.424.0...0.425.0)
+
+## 0.424.0 - 2026-09-03
 
 ### Claude
 
