@@ -537,6 +537,15 @@ The public URL is intended for ChatGPT Developer Mode's public MCP server URL
 connection. Treat the complete URL as a credential and stop the process to
 revoke it.
 
+When a plain `prodex s` is already running in the same workspace, the default
+MCP tool list also includes `prodex_session_prompt_inject` and
+`prodex_session_output_read`. The first accepts only `{ "message": "..." }`
+in the common case; the second returns bounded, cursor-based user-visible
+assistant/tool output. Both bind to the same process-bound Codex writer and
+thread, so this is a no-copy/paste bridge to the existing session and never
+starts another solver. The transport is Codex's supported queue/app-server
+control plane; it does not write the PTY or SQLite queue payloads.
+
 </details>
 
 ## Sub-agents
@@ -1191,7 +1200,7 @@ git diff | prodex context compact-output --kind git-diff
 |---|---|
 | `prodex info` | Shows provider route/quota shapes plus effective runtime tuning values after environment, policy, and default resolution. |
 | `prodex log` | Follows the live session/runtime log view; it is the short form of `prodex log stream`. |
-| `prodex log stream` | Explicit equivalent of `prodex log`: subscribes to the authenticated runtime broker's bounded live window and session history, printing meaningful assistant/tool/model events plus token events. Routine scheduler `LOAD profile busy` telemetry is excluded before history admission. Its human TUI is titled `Prodex Log`, restores the profile/quota/reset/throughput header, and keeps the last numeric rate visible while idle. Add `--json` for individual JSON Lines events. It does not require a perpetual raw runtime-log journal; legacy recorded files are only a bounded fallback. |
+| `prodex log stream` | Explicit equivalent of `prodex log`: subscribes to bounded authenticated live runtime sources, including direct and broker-backed proxies, plus session history, printing meaningful assistant/tool/model events plus token events. Routine scheduler `LOAD profile busy` telemetry is excluded before history admission. Its human TUI is titled `Prodex Log`, restores the profile/quota/reset/throughput header, and keeps the last numeric rate visible while idle. Add `--json` for individual JSON Lines events. It does not require a perpetual raw runtime-log journal; legacy recorded files are only a bounded fallback. |
 | `prodex log upstream` | Explicit upstream-focused live mode: subscribes to bounded, redacted backend-bound LLM payload snapshots after Prodex processing such as Presidio redaction and Smart Context rewriting. Its human TUI is also titled `Prodex Log`; it never derives t/s from payload bytes and retains the last correlated numeric rate while idle. Add `--json` for JSON Lines payload events. Raw upstream telemetry is not recorded by default; payload snapshots are bounded before broker admission. |
 | `prodex doctor --install` | Adds install and embedded asset checks to doctor output. |
 | `prodex doctor --runtime` | Runs runtime diagnostics. |

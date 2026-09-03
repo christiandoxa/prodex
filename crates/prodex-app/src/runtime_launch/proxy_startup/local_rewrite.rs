@@ -451,6 +451,7 @@ pub(super) fn start_runtime_local_rewrite_proxy_with_file_access(
         #[cfg(test)]
         gateway_side_effect_snapshot: Some(super::gateway_snapshot_handle(shared.clone())),
         owner_lock: None,
+        _live_log_source: None,
         _marker_guard: marker_guard,
     })
 }

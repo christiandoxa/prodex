@@ -3,6 +3,8 @@ use std::path::PathBuf;
 
 use crate::{AppPaths, AppState, last_good_file_path};
 
+pub(crate) const RUNTIME_LIVE_LOG_SOURCE_KEY_PREFIX: &str = "live-";
+
 pub(crate) fn merge_app_state_for_save(existing: AppState, desired: &AppState) -> AppState {
     prodex_state::merge_app_state_for_save(existing, desired)
 }
@@ -53,6 +55,18 @@ pub(crate) fn runtime_broker_ensure_lock_path(paths: &AppPaths, broker_key: &str
 }
 
 pub(crate) fn runtime_broker_registry_keys(paths: &AppPaths) -> Vec<String> {
+    runtime_registry_keys(paths, |key| {
+        !key.starts_with(RUNTIME_LIVE_LOG_SOURCE_KEY_PREFIX)
+    })
+}
+
+pub(crate) fn runtime_live_log_source_registry_keys(paths: &AppPaths) -> Vec<String> {
+    runtime_registry_keys(paths, |key| {
+        key.starts_with(RUNTIME_LIVE_LOG_SOURCE_KEY_PREFIX)
+    })
+}
+
+fn runtime_registry_keys(paths: &AppPaths, include: impl Fn(&str) -> bool) -> Vec<String> {
     let Ok(entries) = fs::read_dir(&paths.root) else {
         return Vec::new();
     };
@@ -64,6 +78,7 @@ pub(crate) fn runtime_broker_registry_keys(paths: &AppPaths) -> Vec<String> {
             let name = name.to_str()?;
             name.strip_prefix("runtime-broker-")
                 .and_then(|suffix| suffix.strip_suffix(".json"))
+                .filter(|key| include(key))
                 .map(str::to_string)
         })
         .collect::<Vec<_>>();

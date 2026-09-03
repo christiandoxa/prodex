@@ -47,6 +47,7 @@ mod routes;
 mod run_manager;
 mod runtime;
 mod session;
+mod session_prompt_injection;
 mod super_expose;
 mod super_expose_ui;
 
@@ -72,6 +73,9 @@ mod mcp_tests;
 #[cfg(test)]
 #[path = "expose/run_manager_tests.rs"]
 mod run_manager_tests;
+#[cfg(test)]
+#[path = "expose/session_prompt_injection_tests.rs"]
+mod session_prompt_injection_tests;
 #[cfg(test)]
 #[path = "expose/tests.rs"]
 mod tests;

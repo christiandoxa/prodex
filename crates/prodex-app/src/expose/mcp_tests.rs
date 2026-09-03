@@ -1,12 +1,17 @@
-use super::mcp::{ExposeMcpEndpoint, PublicMcpEndpoint};
+use super::mcp::{ExposeMcpEndpoint, ExposeMcpEndpointInit, PublicMcpEndpoint};
 use super::run_manager::{ExposeRunManager, ExposeRunState};
 use super::runtime::{ExposeHttpServer, ExposePty, ExposeShared};
 use super::session::ExposeSessionStore;
+use super::session_prompt_injection::{
+    ExistingSessionPromptInjector, PromptInjectionError, PromptInjectionRequest,
+    PromptInjectionSuccess, PromptOutputEvent, PromptOutputReadRequest, PromptOutputReadSuccess,
+};
 use crate::ExposeArgs;
 use std::collections::BTreeSet;
 use std::fs;
 use std::io::{Read, Write};
 use std::net::{Shutdown, SocketAddr, TcpListener, TcpStream};
+use std::result::Result;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -23,13 +28,8 @@ fn expose_send_test_request(listen_addr: SocketAddr, request: &str) -> String {
     response
 }
 
-fn expose_start_mcp_test_server(
-    capability: &str,
-    instance_id: &str,
-    workspace_name: &str,
-    public_host: &str,
-) -> (SocketAddr, Arc<ExposeShared>, ExposeHttpServer) {
-    let args = ExposeArgs {
+fn expose_test_args() -> ExposeArgs {
+    ExposeArgs {
         command: None,
         cols: 80,
         rows: 24,
@@ -46,7 +46,16 @@ fn expose_start_mcp_test_server(
         name: Some("test".to_string()),
         invocation: prodex_cli::ExposeInvocation::SuperAlias,
         super_args: None,
-    };
+    }
+}
+
+fn expose_start_mcp_test_server(
+    capability: &str,
+    instance_id: &str,
+    workspace_name: &str,
+    public_host: &str,
+) -> (SocketAddr, Arc<ExposeShared>, ExposeHttpServer) {
+    let args = expose_test_args();
     let crate::Commands::Super(super_args) =
         crate::parse_cli_command_from(["prodex", "s"]).expect("Super args should parse")
     else {
@@ -108,6 +117,106 @@ pub(super) fn expose_mcp_request(
             body.len()
         ),
     )
+}
+
+#[derive(Default)]
+struct SyntheticSessionBridge {
+    injected: Mutex<Vec<PromptInjectionRequest>>,
+}
+
+impl ExistingSessionPromptInjector for SyntheticSessionBridge {
+    fn inject(
+        &self,
+        request: PromptInjectionRequest,
+    ) -> Result<PromptInjectionSuccess, PromptInjectionError> {
+        self.injected.lock().unwrap().push(request);
+        Ok(PromptInjectionSuccess {
+            prodex_pid: 123,
+            codex_pid: 456,
+            thread_id: "019f3b59-7771-7ea1-a9a1-3cd638f216c4".to_string(),
+            message_id: Some("019f3b59-7771-7ea1-a9a1-3cd638f216c5".to_string()),
+            queue_exit: 0,
+            verification: "queued_item_present",
+        })
+    }
+
+    fn read_output(
+        &self,
+        _request: PromptOutputReadRequest,
+    ) -> Result<PromptOutputReadSuccess, PromptInjectionError> {
+        Ok(PromptOutputReadSuccess {
+            prodex_pid: 123,
+            codex_pid: 456,
+            thread_id: "019f3b59-7771-7ea1-a9a1-3cd638f216c4".to_string(),
+            source: "codex_rollout",
+            events: vec![PromptOutputEvent {
+                sequence: 1,
+                timestamp: "2026-09-03T10:00:00Z".to_string(),
+                kind: "assistant".to_string(),
+                name: None,
+                status: None,
+                text: "synthetic output".to_string(),
+            }],
+            next_cursor: "cursor-1".to_string(),
+            has_more: false,
+        })
+    }
+}
+
+#[test]
+fn mcp_session_bridge_routes_default_input_and_output_tools() {
+    let capability = "abcdefghijklmnopqrstuvwxyz0123456789ABCDEFG";
+    let crate::Commands::Super(defaults) =
+        crate::parse_cli_command_from(["prodex", "s"]).expect("Super args should parse")
+    else {
+        panic!("expected Super defaults");
+    };
+    let workspace = std::env::current_dir().unwrap();
+    let bridge = Arc::new(SyntheticSessionBridge::default());
+    let manager = ExposeRunManager::new(
+        workspace.clone(),
+        "pdxi_bridge".to_string(),
+        "bridge".to_string(),
+    );
+    let endpoint = ExposeMcpEndpoint::new_with_run_manager_and_injector(ExposeMcpEndpointInit {
+        capability: capability.to_string(),
+        instance_id: "pdxi_bridge".to_string(),
+        workspace_name: "bridge".to_string(),
+        display_name: "bridge".to_string(),
+        defaults,
+        run_manager: manager,
+        workspace_root: workspace,
+        session_injector: bridge.clone(),
+    });
+    let (listen_addr, shared, mut server) = expose_start_mcp_test_server_with_endpoint(
+        endpoint,
+        "bridge.trycloudflare.com",
+        expose_test_args(),
+    );
+    let target = format!("/pdx/v1/{capability}/mcp");
+    let inject = expose_mcp_request(
+        listen_addr,
+        "bridge.trycloudflare.com",
+        &target,
+        r#"{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"prodex_session_prompt_inject","arguments":{"message":"continue fixing"}}}"#,
+        "Mcp-Session-Id: bridge-session\r\nMcp-Method: tools/call\r\nMcp-Name: prodex_session_prompt_inject\r\n",
+    );
+    assert!(inject.contains("queued_item_present"));
+    assert_eq!(
+        bridge.injected.lock().unwrap()[0].message,
+        "continue fixing"
+    );
+    let output = expose_mcp_request(
+        listen_addr,
+        "bridge.trycloudflare.com",
+        &target,
+        r#"{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"prodex_session_output_read","arguments":{}}}"#,
+        "Mcp-Session-Id: bridge-session\r\nMcp-Method: tools/call\r\nMcp-Name: prodex_session_output_read\r\n",
+    );
+    assert!(output.contains("synthetic output"));
+    server.shutdown();
+    shared.pty.shutdown();
+    shared.mcp.as_ref().unwrap().run_manager.shutdown();
 }
 
 #[test]
@@ -261,6 +370,8 @@ fn mcp_json_protocol_and_public_route_isolation_are_enforced() {
         "prodex_super_result",
         "prodex_super_cancel",
         "prodex_super_list",
+        "prodex_session_prompt_inject",
+        "prodex_session_output_read",
     ] {
         assert!(tools.contains(name), "missing tool {name}");
     }
@@ -423,7 +534,7 @@ fn official_rmcp_client_discovers_and_lists_tools_over_json() {
             .list_tools(None)
             .await
             .expect("official MCP client should list tools");
-        assert_eq!(tools.tools.len(), 6);
+        assert_eq!(tools.tools.len(), 8);
         assert!(
             tools
                 .tools

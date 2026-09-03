@@ -6,6 +6,8 @@ use std::path::{Path, PathBuf};
 #[derive(Debug, Clone)]
 pub struct RuntimeLaunchPlan {
     pub child: ChildProcessPlan,
+    pub companion: Option<ChildProcessPlan>,
+    pub companion_unix_socket: Option<PathBuf>,
     pub cleanup_paths: Vec<PathBuf>,
 }
 
@@ -13,8 +15,17 @@ impl RuntimeLaunchPlan {
     pub fn new(child: ChildProcessPlan) -> Self {
         Self {
             child,
+            companion: None,
+            companion_unix_socket: None,
             cleanup_paths: Vec::new(),
         }
+    }
+
+    #[cfg(unix)]
+    pub fn with_unix_companion(mut self, companion: ChildProcessPlan, socket: PathBuf) -> Self {
+        self.companion = Some(companion);
+        self.companion_unix_socket = Some(socket);
+        self
     }
 
     pub fn with_cleanup_path(mut self, path: PathBuf) -> Self {

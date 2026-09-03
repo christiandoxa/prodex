@@ -228,6 +228,10 @@ pub(crate) fn runtime_process_birth_identity(pid: u32) -> Option<String> {
     RuntimeProcessPlatformImpl::process_birth_identity(pid)
 }
 
+pub(crate) fn runtime_process_executable_path(pid: u32) -> Option<PathBuf> {
+    RuntimeProcessPlatformImpl::executable_path(pid)
+}
+
 pub(crate) fn read_prodex_sha256_from_executable(executable: &Path) -> Result<String> {
     runtime_executable_sha256(executable)
 }

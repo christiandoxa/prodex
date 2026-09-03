@@ -186,6 +186,16 @@ pub(super) fn build_plan(
         "startup.optional_tool_activation_ms",
         stage_started,
     );
+    #[cfg(unix)]
+    let companion =
+        super::build_session_app_server_companion(strategy, &overlay_home, &runtime_args)?;
+    #[cfg(unix)]
+    if let Some((_, socket)) = companion.as_ref() {
+        runtime_args.extend([
+            std::ffi::OsString::from("--remote"),
+            std::ffi::OsString::from(format!("unix://{}", socket.display())),
+        ]);
+    }
     let mut child = strategy.build_child_plan(prepared, &overlay_home, &runtime_args)?;
     strategy.finalize_child_plan(&mut child, &overlay_home, runtime_proxy);
     if prepared.managed
@@ -226,7 +236,26 @@ pub(super) fn build_plan(
             }
         };
     }
-    Ok(RuntimeLaunchPlan::new(child).with_cleanup_path(cleanup.keep()))
+    let plan = RuntimeLaunchPlan::new(child).with_cleanup_path(cleanup.keep());
+    #[cfg(unix)]
+    let plan = if let Some((mut companion, socket)) = companion {
+        strategy.finalize_child_plan(&mut companion, &overlay_home, runtime_proxy);
+        if prepared.managed
+            && !companion
+                .extra_env
+                .iter()
+                .any(|(key, _)| key == "CODEX_SQLITE_HOME")
+        {
+            companion.extra_env.push((
+                "CODEX_SQLITE_HOME".into(),
+                prepared.paths.shared_codex_root.as_os_str().to_os_string(),
+            ));
+        }
+        plan.with_unix_companion(companion, socket)
+    } else {
+        plan
+    };
+    Ok(plan)
 }
 
 fn resolve_optional_tool_plan(

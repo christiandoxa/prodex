@@ -10,6 +10,7 @@ mod report;
 mod resolve_error;
 mod session_file;
 mod session_meta;
+mod session_selector;
 mod state_db_index;
 
 pub use report::{
@@ -26,6 +27,14 @@ use repair_candidates::{
 use repair_transaction::SessionRepairTransaction;
 use session_file::{read_session_file_to_string, visit_session_lines};
 pub use session_file::{session_file_has_line_since, session_file_logical_len};
+use session_selector::{
+    codex_session_id_from_path, full_codex_session_id, session_id_matches_selector,
+    session_line_is_valid_json, session_line_resume_id_matches,
+    session_line_resume_id_matches_mode, session_line_resume_id_matching_mode,
+    session_line_starts_resume_metadata, session_lines_start_resume_metadata,
+    session_path_id_matches_selector, session_path_id_matching_selector,
+    session_value_starts_resume_metadata,
+};
 use state_db_index::collect_state_db_rollout_paths;
 pub use state_db_index::{
     repair_stale_overlay_rollout_path_for_session, repair_stale_overlay_rollout_paths,
@@ -569,31 +578,6 @@ fn read_jsonl_session_report(path: &Path, report: &mut SessionReport) -> Result<
     Ok(saw_resume_metadata && valid_resume_metadata)
 }
 
-fn session_lines_start_resume_metadata<'a>(lines: impl IntoIterator<Item = &'a str>) -> bool {
-    lines
-        .into_iter()
-        .map(str::trim)
-        .find(|line| !line.is_empty())
-        .is_some_and(session_line_starts_resume_metadata)
-}
-
-fn session_line_starts_resume_metadata(line: &str) -> bool {
-    serde_json::from_str::<serde_json::Value>(line)
-        .ok()
-        .is_some_and(|value| session_value_starts_resume_metadata(&value))
-}
-
-fn session_value_starts_resume_metadata(value: &serde_json::Value) -> bool {
-    if session_value_resume_id(value).is_none() {
-        return false;
-    }
-
-    value
-        .get("type")
-        .and_then(serde_json::Value::as_str)
-        .is_none_or(|kind| kind == "session_meta")
-}
-
 fn repair_session_file_metadata_prefix(
     repository_root: &Path,
     path: &Path,
@@ -743,82 +727,6 @@ fn session_file_has_resume_metadata_for_selector(path: &Path, selector: &str) ->
         !matched
     })?;
     Ok(matched)
-}
-
-fn session_line_resume_id_matches(line: &str, selector: &str) -> bool {
-    session_line_resume_id_matches_mode(line, selector, false)
-}
-
-fn session_line_is_valid_json(line: &str) -> bool {
-    serde_json::from_str::<serde_json::Value>(line).is_ok()
-}
-
-fn session_line_resume_id_matches_mode(line: &str, selector: &str, exact: bool) -> bool {
-    session_line_resume_id_matching_mode(line, selector, exact).is_some()
-}
-
-fn session_line_resume_id_matching_mode(line: &str, selector: &str, exact: bool) -> Option<String> {
-    serde_json::from_str::<serde_json::Value>(line)
-        .ok()
-        .and_then(|value| session_value_resume_id(&value))
-        .filter(|id| session_id_matches_selector(id, selector, exact))
-}
-
-fn session_value_resume_id(value: &serde_json::Value) -> Option<String> {
-    first_string_value(
-        value,
-        &[
-            &["payload", "id"],
-            &["payload", "session_id"],
-            &["id"],
-            &["session_id"],
-        ],
-    )
-}
-
-fn session_path_id_matches_selector(path: &Path, selector: &str, exact: bool) -> bool {
-    session_path_id_matching_selector(path, selector, exact).is_some()
-}
-
-fn session_path_id_matching_selector(path: &Path, selector: &str, exact: bool) -> Option<String> {
-    let stem = path.file_stem().and_then(|stem| stem.to_str())?;
-    if session_id_matches_selector(stem, selector, exact) {
-        return Some(stem.to_string());
-    }
-    stem.split('-')
-        .collect::<Vec<_>>()
-        .windows(5)
-        .map(|parts| parts.join("-"))
-        .find(|candidate| session_id_matches_selector(candidate, selector, exact))
-}
-
-fn session_id_matches_selector(id: &str, selector: &str, exact: bool) -> bool {
-    if id.eq_ignore_ascii_case(selector) {
-        return true;
-    }
-    !exact && id.to_lowercase().starts_with(&selector.to_lowercase())
-}
-
-fn full_codex_session_id(selector: &str) -> Option<&str> {
-    let bytes = selector.as_bytes();
-    let valid = bytes.len() == 36
-        && bytes.iter().enumerate().all(|(index, byte)| match index {
-            8 | 13 | 18 | 23 => *byte == b'-',
-            _ => byte.is_ascii_hexdigit(),
-        });
-    valid.then_some(selector)
-}
-
-fn codex_session_id_from_path(path: &Path) -> Option<String> {
-    let stem = path.file_stem().and_then(|stem| stem.to_str())?;
-    if full_codex_session_id(stem).is_some() {
-        return Some(stem.to_string());
-    }
-    stem.split('-')
-        .collect::<Vec<_>>()
-        .windows(5)
-        .map(|parts| parts.join("-"))
-        .find(|candidate| full_codex_session_id(candidate).is_some())
 }
 
 fn prodex_debug_resume_repair_enabled() -> bool {
