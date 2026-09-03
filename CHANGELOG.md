@@ -2,36 +2,61 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.426.0 - 2026-09-03
+
+### Runtime
+
+- Use a bounded private session socket (`4275200`)
+- Make local catalogs queueable (`d31b222`)
+- Allow app-server startup time (`6cafa93`)
+- Checkpoint direct runtime throughput visibility (`552edac`)
+
+### Claude
+
+- Checkpoint bidirectional session MCP (`4a902f3`)
+
+### Misc
+
+- Verify consumed session queue (`0c17644`)
+- Require canonical process birth identity (`47db13a`)
+- Harden session control socket path (`2debe2c`)
+- Bridge existing Codex sessions (`72862fc`)
+# Prodex 0.426.0
+
+## New Features
+
+- Enabled default MCP existing-session prompt injection in `prodex s expose`.
+- Added no-copy/paste bidirectional MCP control and observation for an existing
+  plain `prodex s` session.
+- Added direct runtime live-log source discovery so separate `prodex log`
+  processes can observe authoritative throughput without disk recording.
+
+## Bug Fixes
+
+- Normal plain Super sessions use a persisted, queue-addressable Codex
+  app-server lifecycle where supported.
+- `prodex log` now includes direct/dedicated runtime proxy live token usage;
+  t/s remains the measured output-token rate and never uses rollout timestamps.
+
+## Compatibility
+
+- Modern Codex thread identity uses an open
+  `thread-writer-locks/<UUID>.lock`; legacy compatibility uses an open
+  `rollout-...-<UUID>.jsonl`, and both signals must agree when present.
+- Prompt delivery uses the supported Codex queue/app-server transport. No PTY
+  injection and no direct SQLite queue-payload insertion are used.
+- Output reads are bounded, cursor-based, sanitized transcript reads tied to
+  the exact writer/thread.
+
+## Changelog
+
+Full Changelog: [`0.425.0...0.426.0`](https://github.com/christiandoxa/prodex/compare/0.425.0...0.426.0)
+
 ## 0.425.0 - 2026-09-03
 
 ### Misc
 
 - Restore measured output throughput (`3d0bba7`)
-# Prodex 0.425.0
-
-## New Features
-
-- Add the exact-tree Codex 0.153.0 compatibility audit and current Responses
-  protocol fixture.
-
-## Bug Fixes
-
-- Restore measured output tokens/second for current Codex reasoning and MCP
-  generation events. Rates use only authoritative output-token usage and a
-  positive monotonic generation interval; unknown samples remain `— t/s`.
-- Keep completed throughput values visible across idle time, profile rotation,
-  live/disk duplicate delivery, and high-volume operational log activity.
-
-## Compatibility
-
-- Update the bundled Codex runtime to `rust-v0.153.0` / `@openai/codex@0.153.0`.
-- Preserve Codex 0.153 raw response usage metadata, app-server additions,
-  rollout/session behavior, MCP event streams, Guardian behavior, and config
-  ownership without reimplementing upstream semantics.
-
-## Changelog
-
-Full Changelog: [`0.424.0...0.425.0`](https://github.com/christiandoxa/prodex/compare/0.424.0...0.425.0)
 
 ## 0.424.0 - 2026-09-03
 
@@ -71,6 +96,19 @@ Full Changelog: [`0.424.0...0.425.0`](https://github.com/christiandoxa/prodex/co
 
 ## 0.423.0 - 2026-09-01
 
+### Misc
+
+- Resolve release CI blockers (`392aa3a`)
+- Ship 0.423.0 stability train (`0862b70`)
+- Support Python tunnel fixtures on Windows (`3902174`)
+- Invoke Windows tunnel fixture through cmd (`003439b`)
+- Execute Windows tunnel fixtures directly (`a3550d1`)
+- Split operational stream parsing (`46212a2`)
+- Contain existing tunnel jobs on Windows (`af3bc42`)
+- Add connection modes and signal-rich status (`d30e684`)
+
+## 0.421.0 - 2026-08-31
+
 ### Runtime
 
 - Stabilize broker working directory (`7340f6b`)
@@ -79,6 +117,45 @@ Full Changelog: [`0.424.0...0.425.0`](https://github.com/christiandoxa/prodex/co
 - Make OpenAI capacity model-aware (`9fc53e3`)
 - Batch runtime profile health scoring (`40fcb78`)
 - Harden expose and provider runtime paths (`27cf042`)
+
+### CLI
+
+- Preserve Luna reserve capacity (`028c1e2`)
+- Add expose tunnel providers (`7859b34`)
+
+### Claude
+
+- Supervise OpenAI Secure MCP tunnel client (`118927d`)
+- Add OpenAI MCP tunnel provider (`6d59243`)
+
+### Docs
+
+- Reflect public Cloudflare browser access (`bbd7ea0`)
+- Add canonical root guide (`8334efe`)
+- Document 0.421.0 runtime semantics (`e722539`)
+- Document local and tunneled modes (`642e412`)
+
+### Deps
+
+- Bump argon2 in /fuzz in the fuzz-cargo group (`6674044`)
+- Bump the cargo group with 4 updates (`b8afd47`)
+
+### Misc
+
+- Contain command output descendants (`fb40fbd`)
+- Preserve bounded child failure detail (`0814e3a`)
+- Close exact CI regressions (`f3f74c6`)
+- Publish Cloudflare browser route (`3928fb5`)
+- Move Kiro request capability policy (`1d0bdbb`)
+- Validate official tunnel identifier (`e96ab94`)
+- Keep tunnel readiness probe local (`b4e1d91`)
+- Keep live ACP tasks alive while quiet (`83641b2`)
+- Use canonical OpenAI application request (`dceefac`)
+
+## 0.420.0 - 2026-08-31
+
+### Runtime
+
 - Use route-aware probe wait budget (`c1c4c4b`)
 - Migrate runtime Anthropic shaping (`dba5484`)
 - Migrate runtime doctor planning (`01fdc02`)
@@ -94,8 +171,6 @@ Full Changelog: [`0.424.0...0.425.0`](https://github.com/christiandoxa/prodex/co
 
 ### CLI
 
-- Preserve Luna reserve capacity (`028c1e2`)
-- Add expose tunnel providers (`7859b34`)
 - Gate Mojo-only selection oracle imports (`8d28d1f`)
 - Migrate profile rotation planning (`4992559`)
 - Migrate profile order planning (`1e23a74`)
@@ -103,8 +178,6 @@ Full Changelog: [`0.424.0...0.425.0`](https://github.com/christiandoxa/prodex/co
 
 ### Claude
 
-- Supervise OpenAI Secure MCP tunnel client (`118927d`)
-- Add OpenAI MCP tunnel provider (`6d59243`)
 - Retain compatibility stream oracle (`2b09bca`)
 - Remove obsolete stream helper (`a66c7ab`)
 - Migrate Anthropic stream shaping (`095f519`)
@@ -113,10 +186,6 @@ Full Changelog: [`0.424.0...0.425.0`](https://github.com/christiandoxa/prodex/co
 
 ### Docs
 
-- Reflect public Cloudflare browser access (`bbd7ea0`)
-- Add canonical root guide (`8334efe`)
-- Document 0.421.0 runtime semantics (`e722539`)
-- Document local and tunneled modes (`642e412`)
 - Update Caveman freshness pin (`b6aac0f`)
 - Require temporary artifact cleanup (`4caa6ca`)
 - Require Mojo-first development (`2d6963c`)
@@ -125,30 +194,8 @@ Full Changelog: [`0.424.0...0.425.0`](https://github.com/christiandoxa/prodex/co
 - Document 0.420.0 ABI planning (`371f0df`)
 - Align rich ABI documentation (`2531c7a`)
 
-### Deps
-
-- Bump argon2 in /fuzz in the fuzz-cargo group (`6674044`)
-- Bump the cargo group with 4 updates (`b8afd47`)
-
 ### Misc
 
-- Resolve release CI blockers (`392aa3a`)
-- Ship 0.423.0 stability train (`0862b70`)
-- Support Python tunnel fixtures on Windows (`3902174`)
-- Invoke Windows tunnel fixture through cmd (`003439b`)
-- Execute Windows tunnel fixtures directly (`a3550d1`)
-- Split operational stream parsing (`46212a2`)
-- Contain existing tunnel jobs on Windows (`af3bc42`)
-- Add connection modes and signal-rich status (`d30e684`)
-- Contain command output descendants (`fb40fbd`)
-- Preserve bounded child failure detail (`0814e3a`)
-- Close exact CI regressions (`f3f74c6`)
-- Publish Cloudflare browser route (`3928fb5`)
-- Move Kiro request capability policy (`1d0bdbb`)
-- Validate official tunnel identifier (`e96ab94`)
-- Keep tunnel readiness probe local (`b4e1d91`)
-- Keep live ACP tasks alive while quiet (`83641b2`)
-- Use canonical OpenAI application request (`dceefac`)
 - Correct rich self-test JSON (`7c1d5f3`)
 - Handle optional pty process handles (`2ddc507`)
 - Repair exposed process job handles (`3a994da`)
