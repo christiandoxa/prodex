@@ -2,7 +2,7 @@
   "codex": {
     "compatibility": {
       "upstream_repository": "https://github.com/openai/codex",
-      "baseline_source": "openai/codex rust-v0.152.1 release",
+      "baseline_source": "openai/codex rust-v0.153.0 release",
       "guard_command": "node scripts/compat/check-upstream-baseline.mjs",
       "format_version": 2,
       "critical_files": [
@@ -312,6 +312,24 @@
             "treatment_from_headers",
             "SafetyBufferingTreatment",
             "with_treatment"
+          ]
+        },
+        {
+          "path": "codex-rs/protocol/src/response_usage.rs",
+          "reason": "Codex 0.153 preserves raw per-response usage metadata separately from token counts; Prodex keeps this upstream-owned data opaque while deriving t/s only from its own measured stream boundary.",
+          "required_contains": [
+            "ResponseUsageMetadata",
+            "pub amount: Option<String>",
+            "pub metadata: Option<Value>"
+          ]
+        },
+        {
+          "path": "codex-rs/app-server-protocol/schema/json/v2/RawResponseCompletedNotification.json",
+          "reason": "App-server raw response completion notifications preserve upstream response usage metadata without changing Prodex token accounting ownership.",
+          "required_contains": [
+            "RawResponseCompletedNotification",
+            "ResponseUsageMetadata",
+            "metadata"
           ]
         },
         {
@@ -727,6 +745,8 @@
         "response.output_item.added",
         "response.content_part.added",
         "response.reasoning_summary_part.added",
+        "response.reasoning_text.delta",
+        "response.mcp_call_arguments.delta",
         "response.completed",
         "response.failed",
         "response.metadata",
@@ -771,6 +791,8 @@
           ],
           "expected_stream_events_all": [
             "response.created",
+            "response.reasoning_text.delta",
+            "response.mcp_call_arguments.delta",
             "response.completed",
             "response.failed",
             "response.metadata"
@@ -1229,6 +1251,8 @@
             "response.output_item.added",
             "response.content_part.added",
             "response.reasoning_summary_part.added",
+            "response.reasoning_text.delta",
+            "response.mcp_call_arguments.delta",
             "response.completed",
             "response.failed",
             "codex.rate_limits"
@@ -1527,7 +1551,7 @@
           ]
         }
       ],
-      "tested_codex_release": "rust-v0.152.1",
+      "tested_codex_release": "rust-v0.153.0",
       "patch_deltas": [
         {
           "from": "rust-v0.150.0",
@@ -1578,6 +1602,22 @@
           ],
           "prodex_action": "Use the 0.152.1 package, preserve auto_review.node_repl_policy and related additive metadata opaquely, and do not duplicate Codex Guardian semantics or policy injection.",
           "compatibility_evidence": "Audited the exact rust-v0.152.0...rust-v0.152.1 comparison: 3 commits and 12 files, with substantive PR #41919 at 796a15132358f30a24f342e7a8956f77e5d13ca3; release preparation and chores have no Prodex runtime impact. Existing ping/app-server/transport/MCP/auth boundary tests remain applicable."
+        },
+        {
+          "from": "rust-v0.152.1",
+          "to": "rust-v0.153.0",
+          "upstream_commit": "41e22fee981a63b3698df7ed36bad393cda24715",
+          "upstream_tag_object": "6bc50f104dcc0192e696cdeae721dfc19b507391",
+          "upstream_release_date": "2026-09-03T01:37:38Z",
+          "tree_comparison": "refs/tags/rust-v0.152.1^{} to refs/tags/rust-v0.153.0^{}; non-linear history; 735 changed files, 36379 additions, 8616 deletions",
+          "runtime_changes": [
+            "Responses completed payloads preserve raw usage under ResponseUsageMetadata.metadata.",
+            "Rollout and app-server histories persist upstream response usage and raw completion notifications.",
+            "App-server adds model/reasoningEffort thread metadata and structured asynchronous user-input requests.",
+            "MCP event streams, coordinated OAuth refresh, app-account approval scope, symlinked thread forks, Guardian modes, plugin reconciliation, and experimental context-management controls are upstream-owned."
+          ],
+          "prodex_action": "Pin Codex 0.153.0, preserve additive payloads and metadata, extend the shared measured-generation classifier for current reasoning/tool delta events, and keep unary responses untimed without an authoritative generation interval.",
+          "compatibility_evidence": "Exact tagged-tree diff from an isolated mirror; relevant Responses SSE/WebSocket, app-server, MCP, session, Guardian, config, and release boundary checks remain green or are covered by the 0.153.0 audit."
         }
       ],
       "app_server_protocol": {
@@ -1600,14 +1640,14 @@
       }
     },
     "latestRelease": {
-      "tag_name": "rust-v0.152.1",
-      "name": "0.152.1",
-      "published_at": "2026-09-01T22:33:02Z",
-      "html_url": "https://github.com/openai/codex/releases/tag/rust-v0.152.1",
+      "tag_name": "rust-v0.153.0",
+      "name": "0.153.0",
+      "published_at": "2026-09-03T01:37:38Z",
+      "html_url": "https://github.com/openai/codex/releases/tag/rust-v0.153.0",
       "body_head": [
-        "## Bug Fixes",
-        "- Guardian approval review now honors Node REPL policies provided through model metadata.",
-        "**Full Changelog**: https://github.com/openai/codex/compare/rust-v0.152.0...rust-v0.152.1"
+        "## New Features",
+        "- Persist response token usage and preserve raw response usage metadata.",
+        "**Full Changelog**: https://github.com/openai/codex/compare/rust-v0.152.1...rust-v0.153.0"
       ]
     }
   },
