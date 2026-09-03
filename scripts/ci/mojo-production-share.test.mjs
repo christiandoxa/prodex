@@ -215,8 +215,8 @@ test("canonical report exposes separate statuses and --check enforces only floor
   const report = JSON.parse(runShare("--json"));
   assert.equal(report.current_prodex_version, await readCargoVersion());
   assert.equal(report.final.broad_mojo_production_loc, 26_420);
-  assert.equal(report.final.broad_total_production_loc, 367_616);
-  assert.equal(report.final.broad_mojo_percent, 7.186847144846797);
+  assert.equal(report.final.broad_total_production_loc, 367_618);
+  assert.equal(report.final.broad_mojo_percent, 7.1868080453079015);
   assert.equal(report.release_floor_percent, 7);
   assert.equal(report.release_floor_met, true);
   assert.equal(report.release_floor_status, "PASS");
