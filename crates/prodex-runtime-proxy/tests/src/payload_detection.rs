@@ -267,37 +267,6 @@ fn runtime_sse_event_extracts_response_token_usage() {
 }
 
 #[test]
-fn current_codex_raw_usage_metadata_does_not_replace_completion_usage() {
-    let value = serde_json::json!({
-        "type": "response.completed",
-        "response": {
-            "id": "resp-raw-usage",
-            "usage": {
-                "input_tokens": 10,
-                "output_tokens": 7,
-                "output_tokens_details": {"reasoning_tokens": 3},
-                "total_tokens": 17,
-                "extra": {"label": "example"}
-            },
-            "usage_metadata": {
-                "amount": "0.125",
-                "metadata": {"output_tokens": 999}
-            }
-        }
-    });
-
-    assert_eq!(
-        extract_runtime_token_usage_from_value(&value),
-        Some(RuntimeTokenUsage {
-            input_tokens: 10,
-            output_tokens: 7,
-            reasoning_tokens: 3,
-            ..RuntimeTokenUsage::default()
-        })
-    );
-}
-
-#[test]
 fn responses_stream_compaction_v2_request_shape_is_context_dependent() {
     let value = serde_json::json!({
         "previous_response_id": "resp-before-compact",

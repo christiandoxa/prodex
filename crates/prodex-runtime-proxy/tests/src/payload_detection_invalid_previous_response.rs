@@ -1,6 +1,37 @@
 use super::*;
 
 #[test]
+fn current_codex_raw_usage_metadata_does_not_replace_completion_usage() {
+    let value = serde_json::json!({
+        "type": "response.completed",
+        "response": {
+            "id": "resp-raw-usage",
+            "usage": {
+                "input_tokens": 10,
+                "output_tokens": 7,
+                "output_tokens_details": {"reasoning_tokens": 3},
+                "total_tokens": 17,
+                "extra": {"label": "example"}
+            },
+            "usage_metadata": {
+                "amount": "0.125",
+                "metadata": {"output_tokens": 999}
+            }
+        }
+    });
+
+    assert_eq!(
+        extract_runtime_token_usage_from_value(&value),
+        Some(RuntimeTokenUsage {
+            input_tokens: 10,
+            output_tokens: 7,
+            reasoning_tokens: 3,
+            ..RuntimeTokenUsage::default()
+        })
+    );
+}
+
+#[test]
 fn previous_response_message_detects_invalid_request_id_shape() {
     let payload = serde_json::json!({
         "type": "error",
