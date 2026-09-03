@@ -45,3 +45,21 @@ test("release prep checks the gateway SDK package-lock entry", () => {
     /@christiandoxa\/prodex-gateway-sdk lock version/,
   );
 });
+
+test("release prep checks the canonical Codex package-lock entries", () => {
+  const lock = {
+    packages: {
+      "node_modules/@openai/codex": {
+        name: "@openai/codex",
+        version: "0.152.1",
+      },
+      "node_modules/@openai/codex-linux-x64": {
+        name: "@openai/codex",
+        version: "0.152.1-linux-x64",
+      },
+    },
+  };
+  const errors = npmLockVersionErrors(lock, "package-lock.json", "0.425.0").join("\n");
+  assert.match(errors, /node_modules\/@openai\/codex Codex lock version/u);
+  assert.match(errors, /node_modules\/@openai\/codex-linux-x64 Codex lock version/u);
+});
