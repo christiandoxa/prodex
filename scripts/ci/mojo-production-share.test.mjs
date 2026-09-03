@@ -17,7 +17,7 @@ import {
 } from "./mojo-production-share.mjs";
 
 const BASE_SHA = "2531c7a345f1607a18aa926e204b4d02cc322167";
-const NON_REGRESSION_BASELINE_SHA = "43768659073cc1ab5c5686d3d58f2af68eebdef2";
+const NON_REGRESSION_BASELINE_SHA = "731d7a776527ac65c72384cc68459200715d8793";
 
 function manifest(overrides = {}) {
   return {
@@ -110,7 +110,7 @@ test("manifest separates general release floor, project target, and frozen polic
       ...current,
       mojo_non_regression: { ...current.mojo_non_regression, baseline_sha: BASE_SHA },
     }),
-    /non-regression baseline must be 43768659073cc1ab5c5686d3d58f2af68eebdef2/u,
+    /non-regression baseline must be 731d7a776527ac65c72384cc68459200715d8793/u,
   );
 });
 

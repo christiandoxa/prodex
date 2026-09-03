@@ -7,7 +7,7 @@
   "release_floor_percent": 7,
   "project_target_percent": 10,
   "mojo_non_regression": {
-    "baseline_sha": "43768659073cc1ab5c5686d3d58f2af68eebdef2",
+    "baseline_sha": "731d7a776527ac65c72384cc68459200715d8793",
     "baseline_source_inventory_sha256": "48cddc617b019666bd72efa5c2fb91c2e1b40400ded1dfeee73877240662c27e",
     "baseline_mojo_production_loc": 26420,
     "approved_reductions": []

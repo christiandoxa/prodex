@@ -11,7 +11,7 @@ import { cargoTomlPath, parseCargoVersion, repoRoot } from "../npm/common.mjs";
 const manifestPath = path.join(repoRoot, "migration", "mojo-production-share.json");
 const COUNTING_RULES_VERSION = 1;
 const REQUIRED_BASELINE_SHA = "2531c7a345f1607a18aa926e204b4d02cc322167";
-const REQUIRED_MOJO_NON_REGRESSION_BASELINE_SHA = "43768659073cc1ab5c5686d3d58f2af68eebdef2";
+const REQUIRED_MOJO_NON_REGRESSION_BASELINE_SHA = "731d7a776527ac65c72384cc68459200715d8793";
 const REQUIRED_HISTORICAL_RELEASE_TARGET = "0.421.0";
 const REQUIRED_RELEASE_FLOOR_PERCENT = 7;
 const REQUIRED_PROJECT_TARGET_PERCENT = 10;
@@ -778,7 +778,7 @@ function selfTest() {
     release_floor_percent: REQUIRED_RELEASE_FLOOR_PERCENT,
     project_target_percent: REQUIRED_PROJECT_TARGET_PERCENT,
     mojo_non_regression: {
-      baseline_sha: "43768659073cc1ab5c5686d3d58f2af68eebdef2",
+      baseline_sha: REQUIRED_MOJO_NON_REGRESSION_BASELINE_SHA,
       baseline_source_inventory_sha256: "0".repeat(64),
       baseline_mojo_production_loc: 0,
       approved_reductions: [],
