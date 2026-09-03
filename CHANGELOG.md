@@ -4,23 +4,13 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 
 ## 0.426.0 - 2026-09-03
 
-### Runtime
+### Docs
 
-- Use a bounded private session socket (`4275200`)
-- Make local catalogs queueable (`d31b222`)
-- Allow app-server startup time (`6cafa93`)
-- Checkpoint direct runtime throughput visibility (`552edac`)
-
-### Claude
-
-- Checkpoint bidirectional session MCP (`4a902f3`)
+- Document 0.426.0 session bridge (`0a5e4d3`)
 
 ### Misc
 
-- Verify consumed session queue (`0c17644`)
-- Require canonical process birth identity (`47db13a`)
-- Harden session control socket path (`2debe2c`)
-- Bridge existing Codex sessions (`72862fc`)
+- Ship session bridge and live observability (`00d7fd5`)
 # Prodex 0.426.0
 
 ## New Features
