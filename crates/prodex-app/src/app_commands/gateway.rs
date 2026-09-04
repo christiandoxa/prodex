@@ -141,6 +141,9 @@ fn gateway_kiro_model_catalog_json_from_paths(paths: &AppPaths) -> Result<Vec<se
         if !matches!(profile.provider, ProfileProvider::Kiro { .. }) {
             continue;
         }
+        if !profile.codex_home.exists() {
+            continue;
+        }
         let path = profile.codex_home.join(KIRO_MODEL_CATALOG_FILE);
         let Some(text) = read_provider_model_catalog_text(&path)? else {
             continue;

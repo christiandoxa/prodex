@@ -1,6 +1,7 @@
 use anyhow::{Context, Result, bail};
 use prodex_provider_core::ProviderId;
 use serde_json::Value;
+use std::collections::BTreeSet;
 use std::env;
 use std::ffi::OsString;
 use std::fmt;
@@ -229,6 +230,7 @@ fn normalize_kiro_model_catalog_value(value: &Value) -> Result<Vec<Value>> {
             prodex_provider_core::PROVIDER_MODEL_CATALOG_HARD_LIMIT
         );
     }
+    let mut seen = BTreeSet::new();
     let models = models
         .iter()
         .filter_map(|model| {
@@ -245,6 +247,9 @@ fn normalize_kiro_model_catalog_value(value: &Value) -> Result<Vec<Value>> {
                 .map(str::trim)
                 .filter(|name| !name.is_empty())
                 .unwrap_or(id);
+            if !seen.insert(id.to_ascii_lowercase()) {
+                return None;
+            }
             let mut normalized = serde_json::json!({
                 "id": id,
                 "name": name,
@@ -328,8 +333,7 @@ fn write_kiro_model_catalog_snapshot_with_command(
     })?;
     let path = codex_home.join(KIRO_MODEL_CATALOG_FILE);
     if models.is_empty() {
-        let _ = std::fs::remove_file(&path);
-        return Ok(());
+        bail!("Kiro model catalog returned no usable models");
     }
     let contents = serde_json::to_string_pretty(&serde_json::json!({ "models": models }))
         .context("failed to serialize Kiro model catalog")?;
@@ -494,24 +498,40 @@ mod tests {
     }
 
     #[test]
-    fn kiro_model_catalog_parser_normalizes_native_and_acp_shapes() {
+    fn kiro_model_catalog_parser_normalizes_supported_shapes_and_dedupes() {
         for (value, expected) in [
             (
                 serde_json::json!({
                     "models": [
-                        {"model_id": "claude-sonnet-4.5", "model_name": "Sonnet 4.5"},
-                        {"modelId": "claude-sonnet-4", "modelName": "Sonnet 4"}
+                        {"model_id": "snake-id", "model_name": "Snake", "context_window_tokens": 123},
+                        {"modelId": "camel-id", "modelName": "Camel", "contextWindowTokens": 456}
                     ]
                 }),
-                vec!["claude-sonnet-4.5", "claude-sonnet-4"],
+                vec!["snake-id", "camel-id"],
+            ),
+            (
+                serde_json::json!({
+                    "availableModels": [{"slug": "top-level-id", "name": "Top level"}]
+                }),
+                vec!["top-level-id"],
             ),
             (
                 serde_json::json!({
                     "models": {"availableModels": [
-                        {"modelId": "claude-sonnet-4.5", "name": "Sonnet 4.5"}
+                        {"model": "nested-id", "modelName": "Nested"}
                     ]}
                 }),
-                vec!["claude-sonnet-4.5"],
+                vec!["nested-id"],
+            ),
+            (
+                serde_json::json!({
+                    "models": [
+                        {"id": "Case-Id"},
+                        {"modelId": "case-id"},
+                        {"slug": "other-id"}
+                    ]
+                }),
+                vec!["Case-Id", "other-id"],
             ),
         ] {
             let models = parse_kiro_model_catalog_text(&value.to_string()).unwrap();
@@ -745,6 +765,51 @@ sys.exit(1)
         assert_eq!(value["models"][0]["id"], "auto");
         assert_eq!(value["models"][0]["context_window_tokens"], 1_000_000);
         assert_eq!(value["models"][1]["id"], "claude-sonnet-4.5");
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn failed_kiro_catalog_refresh_preserves_previous_snapshot() {
+        let root = std::env::temp_dir().join(format!(
+            "prodex-kiro-model-catalog-preserve-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::create_dir_all(&root).unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(&root, fs::Permissions::from_mode(0o700)).unwrap();
+        }
+        let codex_home = root.join("codex-home");
+        create_codex_home_if_missing(&codex_home).unwrap();
+        let secret = KiroAuthSecret {
+            auth_key: "codewhisperer:odic:token".to_string(),
+            auth_kind: "builder-id".to_string(),
+            auth_json: serde_json::json!({"access_token":"kiro-access-token"}).to_string(),
+            email: Some("kiro@example.com".to_string()),
+            profile_arn: None,
+            profile_name: None,
+            start_url: None,
+            region: None,
+        };
+        write_kiro_auth_secret(&codex_home, &secret).unwrap();
+        let catalog_path = codex_home.join(KIRO_MODEL_CATALOG_FILE);
+        let previous = r#"{"models":[{"id":"known-model"}]}"#;
+        fs::write(&catalog_path, previous).unwrap();
+
+        assert!(
+            write_kiro_model_catalog_snapshot_with_command(
+                &codex_home,
+                &secret,
+                std::ffi::OsStr::new("false"),
+            )
+            .is_err()
+        );
+        assert_eq!(fs::read_to_string(catalog_path).unwrap(), previous);
         let _ = fs::remove_dir_all(root);
     }
 }

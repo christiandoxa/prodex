@@ -12,6 +12,9 @@ pub(crate) fn runtime_kiro_acp_model_catalog(
         .as_ref()
         .map(|models| models.available_models.as_slice())
         .unwrap_or_default();
+    if available.is_empty() {
+        anyhow::bail!("Kiro ACP model catalog returned no usable models");
+    }
     if available.len() > prodex_provider_core::PROVIDER_MODEL_CATALOG_HARD_LIMIT {
         anyhow::bail!(
             "Kiro ACP model catalog exceeds the hard limit of {} entries",

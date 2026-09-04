@@ -178,6 +178,19 @@ fn kiro_acp_model_catalog_maps_session_models() {
 }
 
 #[test]
+fn kiro_acp_model_catalog_rejects_missing_dynamic_models() {
+    let session = RuntimeKiroAcpNewSessionResult {
+        session_id: "session-empty".to_string(),
+        modes: None,
+        models: None,
+    };
+
+    let error = runtime_kiro_acp_model_catalog(&session).unwrap_err();
+
+    assert!(error.to_string().contains("no usable models"));
+}
+
+#[test]
 fn kiro_acp_model_catalog_rejects_oversized_sessions() {
     let session = RuntimeKiroAcpNewSessionResult {
         session_id: "session-example".to_string(),
