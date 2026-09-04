@@ -10,6 +10,8 @@ use std::sync::Mutex;
 use std::thread;
 use std::time::{Duration, Instant};
 
+#[path = "session_prompt_injection/injection.rs"]
+mod injection;
 #[path = "session_prompt_injection/output.rs"]
 mod output;
 #[path = "session_prompt_injection/process.rs"]
@@ -190,53 +192,10 @@ where
         &self,
         request: PromptInjectionRequest,
     ) -> std::result::Result<PromptInjectionSuccess, PromptInjectionError> {
-        let workspace_root = request
-            .workspace_root
-            .canonicalize()
-            .map_err(|_| PromptInjectionError::NoSession)?;
-        if let Some(cwd) = request.cwd.as_deref() {
-            let cwd = Path::new(cwd)
-                .canonicalize()
-                .map_err(|_| PromptInjectionError::NoSession)?;
-            if cwd != workspace_root {
-                return Err(PromptInjectionError::NoSession);
-            }
-        }
-
+        let workspace_root = injection::canonical_injection_workspace(&request)?;
         let binding = self.binding(&request.binding_key)?;
-        let requested_pid = request
-            .prodex_pid
-            .or_else(|| binding.as_ref().map(|binding| binding.target.prodex.pid));
-        let target = self
-            .resolve_target(&workspace_root, requested_pid)
-            .map_err(|error| {
-                if binding.is_some() && error == PromptInjectionError::NoSession {
-                    PromptInjectionError::StaleTarget
-                } else {
-                    error
-                }
-            })?;
-        let mut target = self.resolve_writer(target, &workspace_root)?;
-        self.verify_binding(binding.as_ref(), &target)?;
-        if let Some(bound_source) = binding
-            .as_ref()
-            .and_then(|binding| binding.source_id.as_deref())
-        {
-            let path = self.output_source(&target)?;
-            if output_source_id(&path, &target.thread_id)?.as_str() != bound_source {
-                return Err(PromptInjectionError::StaleTarget);
-            }
-        }
-        if request
-            .thread_id
-            .as_deref()
-            .is_some_and(|thread_id| thread_id != target.thread_id)
-        {
-            return Err(PromptInjectionError::StaleTarget);
-        }
-        self.queue
-            .check_capability(&target)
-            .map_err(|_| PromptInjectionError::QueueUnsupported)?;
+        let mut target =
+            self.resolve_injection_target(&request, &workspace_root, binding.as_ref())?;
         let rollout_before = self.output_source(&target).ok().and_then(|path| {
             std::fs::metadata(&path)
                 .ok()
@@ -249,32 +208,14 @@ where
             .queue
             .snapshot(&target.queue_db, &target.thread_id)
             .map_err(|_| PromptInjectionError::VerificationInconclusive)?;
-        if !invocation.succeeded {
-            return Err(PromptInjectionError::QueueFailed);
-        }
-
-        let verification = if invocation
-            .message_id
-            .as_deref()
-            .is_some_and(|id| after.item_ids.contains(id))
-        {
-            "queued_item_present"
-        } else if rollout_before.as_ref().is_some_and(|(path, offset)| {
-            read_output_events(path, *offset, 0, 64).is_ok_and(|read| {
-                read.events
-                    .iter()
-                    .any(|event| event.kind == "user" && event.text == request.message)
-            })
-        }) && self.revalidate(&target, &workspace_root).is_ok()
-        {
-            "consumed_rollout"
-        } else if invocation.message_id.is_some()
-            && self.revalidate(&target, &workspace_root).is_ok()
-        {
-            "queue_acknowledged"
-        } else {
-            return Err(PromptInjectionError::VerificationInconclusive);
-        };
+        let verification = self.verify_queue_invocation(
+            &request,
+            &workspace_root,
+            &target,
+            rollout_before.as_ref(),
+            &invocation,
+            &after,
+        )?;
 
         let result = PromptInjectionSuccess {
             prodex_pid: target.prodex.pid,

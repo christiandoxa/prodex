@@ -163,6 +163,14 @@ pub(crate) fn read_output_events(
     event_index: usize,
     limit: usize,
 ) -> std::result::Result<OutputReadBatch, PromptInjectionError> {
+    let (source_len, complete) = read_complete_output(path, offset)?;
+    read_output_lines(&complete, offset, event_index, limit, source_len)
+}
+
+fn read_complete_output(
+    path: &Path,
+    offset: u64,
+) -> std::result::Result<(u64, Vec<u8>), PromptInjectionError> {
     let metadata = fs::metadata(path).map_err(|_| PromptInjectionError::OutputSourceUnavailable)?;
     if !metadata.is_file() || offset > metadata.len() {
         return Err(PromptInjectionError::OutputSourceChanged);
@@ -188,7 +196,16 @@ pub(crate) fn read_output_events(
     if !bounded && complete_len == 0 {
         return Err(PromptInjectionError::OutputReadFailed);
     }
-    let complete = &bytes[..complete_len];
+    Ok((metadata.len(), bytes[..complete_len].to_vec()))
+}
+
+fn read_output_lines(
+    complete: &[u8],
+    offset: u64,
+    event_index: usize,
+    limit: usize,
+    source_len: u64,
+) -> std::result::Result<OutputReadBatch, PromptInjectionError> {
     let mut events = Vec::new();
     let mut total_text_bytes = 0_usize;
     let mut consumed = 0_usize;
@@ -203,50 +220,15 @@ pub(crate) fn read_output_events(
                 has_more: true,
             });
         }
-        if line.len() > OUTPUT_READ_MAX_LINE_BYTES {
-            consumed = consumed.saturating_add(raw_len);
-            continue;
-        }
-        let line = line.strip_suffix(b"\n").unwrap_or(line);
-        let Ok(line) = std::str::from_utf8(line) else {
-            consumed = consumed.saturating_add(raw_len);
-            continue;
-        };
-        let parsed = crate::app_commands::transcript_events_from_session_line(line)
-            .into_iter()
-            .filter(mcp_visible_transcript_event)
-            .collect::<Vec<_>>();
-        let start_index = if consumed == 0 { event_index } else { 0 };
-        if start_index > parsed.len() {
-            return Err(PromptInjectionError::OutputSourceChanged);
-        }
-        for (index, event) in parsed.iter().enumerate().skip(start_index) {
-            if events.len() >= limit {
-                return Ok(OutputReadBatch {
-                    events,
-                    next_offset: line_start,
-                    next_event_index: index,
-                    has_more: true,
-                });
-            }
-            let output_event = output_event_from_transcript(
-                line_start
-                    .saturating_mul(65_536)
-                    .saturating_add(index as u64),
-                event.clone(),
-            );
-            if total_text_bytes.saturating_add(output_event.text.len())
-                > OUTPUT_READ_MAX_TOTAL_TEXT_BYTES
-            {
-                return Ok(OutputReadBatch {
-                    events,
-                    next_offset: line_start,
-                    next_event_index: index,
-                    has_more: true,
-                });
-            }
-            total_text_bytes = total_text_bytes.saturating_add(output_event.text.len());
-            events.push(output_event);
+        if let Some(batch) = read_output_line(
+            line,
+            line_start,
+            if consumed == 0 { event_index } else { 0 },
+            limit,
+            &mut events,
+            &mut total_text_bytes,
+        )? {
+            return Ok(batch);
         }
         consumed = consumed.saturating_add(raw_len);
     }
@@ -255,8 +237,61 @@ pub(crate) fn read_output_events(
         events,
         next_offset,
         next_event_index: 0,
-        has_more: next_offset < metadata.len(),
+        has_more: next_offset < source_len,
     })
+}
+
+fn read_output_line(
+    raw_line: &[u8],
+    line_start: u64,
+    start_index: usize,
+    limit: usize,
+    events: &mut Vec<PromptOutputEvent>,
+    total_text_bytes: &mut usize,
+) -> std::result::Result<Option<OutputReadBatch>, PromptInjectionError> {
+    if raw_line.len() > OUTPUT_READ_MAX_LINE_BYTES {
+        return Ok(None);
+    }
+    let line = raw_line.strip_suffix(b"\n").unwrap_or(raw_line);
+    let Ok(line) = std::str::from_utf8(line) else {
+        return Ok(None);
+    };
+    let parsed = crate::app_commands::transcript_events_from_session_line(line)
+        .into_iter()
+        .filter(mcp_visible_transcript_event)
+        .collect::<Vec<_>>();
+    if start_index > parsed.len() {
+        return Err(PromptInjectionError::OutputSourceChanged);
+    }
+    for (index, event) in parsed.iter().enumerate().skip(start_index) {
+        if events.len() >= limit {
+            return Ok(Some(OutputReadBatch {
+                events: std::mem::take(events),
+                next_offset: line_start,
+                next_event_index: index,
+                has_more: true,
+            }));
+        }
+        let output_event = output_event_from_transcript(
+            line_start
+                .saturating_mul(65_536)
+                .saturating_add(index as u64),
+            event.clone(),
+        );
+        if total_text_bytes.saturating_add(output_event.text.len())
+            > OUTPUT_READ_MAX_TOTAL_TEXT_BYTES
+        {
+            return Ok(Some(OutputReadBatch {
+                events: std::mem::take(events),
+                next_offset: line_start,
+                next_event_index: index,
+                has_more: true,
+            }));
+        }
+        *total_text_bytes = total_text_bytes.saturating_add(output_event.text.len());
+        events.push(output_event);
+    }
+    Ok(None)
 }
 
 fn mcp_visible_transcript_event(event: &crate::app_commands::TranscriptEvent) -> bool {
