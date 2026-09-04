@@ -11,12 +11,13 @@
       "tag_object": "09715751c1b30bb7142304086a6375d50d3c4cee",
       "commit": "b82c0ad42c2bedc1f2cd78e414dadfaffbaaeec3",
       "git_tree": "a913ce88c98dfe29342e32382a1f0bcf7567b7ab",
+      "source_archive_sha256": "c4d2549b3a26610edee530418471b576c7abef643d56e5f8eb2b86aa176ed782",
       "prodex_tree_sha256": "ddac7f7a89ae5a8d80d1b606620589e8ade7897d536663537bc82b8f6322d4a6",
       "license": "MIT",
       "runtime": "Node.js >=18; externally managed immutable checkout",
       "platforms": ["linux", "macos", "windows"],
       "decision": "ADOPT_PACKAGE",
-      "notes": "v2.6.0 is the latest stable release; the exact commit, Git tree, and complete Prodex tree digest are pinned."
+      "notes": "v2.6.0 is the latest stable release; the exact commit, Git tree, source archive, and complete Prodex tree digest are pinned."
     },
     {
       "id": "rtk",
