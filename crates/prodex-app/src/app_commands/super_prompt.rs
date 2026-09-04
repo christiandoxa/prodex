@@ -5,6 +5,7 @@ use crate::{
     canonical_sub_agent_providers, provider_display_name, resolve_super_launch_target,
     resolve_super_sub_agent_config, sub_agent_recursion_policy,
 };
+use crate::{parse_kiro_model_catalog_text, read_provider_model_catalog_text};
 use anyhow::{Result, bail};
 use crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
 use prodex_cli::{
@@ -16,8 +17,7 @@ use ratatui::style::Modifier;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
 use std::collections::BTreeSet;
-use std::fs;
-use std::io::{self, IsTerminal, Read as IoRead};
+use std::io::{self, IsTerminal};
 use terminal_ui::{
     fit_cell, tui_border_style, tui_connected_footer_block, tui_connected_header_block,
     tui_detail_style, tui_hint_style, tui_primary_style, tui_secondary_style, tui_success_style,
@@ -25,7 +25,6 @@ use terminal_ui::{
 };
 
 const SUPER_PROMPT_MAX_TEXT_CHARS: usize = 256;
-const SUPER_CONFIGURED_MODEL_CATALOG_MAX_BYTES: u64 = 1024 * 1024;
 const SUPER_CONFIGURED_MODEL_PROFILE_LIMIT: usize = 128;
 pub(super) const SUPER_CONFIGURED_MODEL_LIMIT: usize =
     prodex_provider_core::PROVIDER_MODEL_CATALOG_HARD_LIMIT;
@@ -303,13 +302,20 @@ pub(super) fn run_super_sub_agent_prompt_steps(
 pub(super) fn configured_sub_agent_models(
     provider: prodex_provider_core::ProviderId,
 ) -> Vec<String> {
+    let Ok(paths) = AppPaths::discover() else {
+        return Vec::new();
+    };
+    configured_sub_agent_models_from_paths(&paths, provider)
+}
+
+pub(super) fn configured_sub_agent_models_from_paths(
+    paths: &AppPaths,
+    provider: prodex_provider_core::ProviderId,
+) -> Vec<String> {
     let catalog_file = match provider {
         prodex_provider_core::ProviderId::Copilot => COPILOT_RUNTIME_MODEL_CATALOG_FILE,
         prodex_provider_core::ProviderId::Kiro => KIRO_MODEL_CATALOG_FILE,
         _ => return Vec::new(),
-    };
-    let Ok(paths) = AppPaths::discover() else {
-        return Vec::new();
     };
     let Ok(state) = AppState::load(&paths) else {
         return Vec::new();
@@ -335,18 +341,21 @@ pub(super) fn configured_sub_agent_models(
         if !matches_provider {
             continue;
         }
-        let Ok(file) = fs::File::open(profile.codex_home.join(catalog_file)) else {
+        let Ok(Some(contents)) =
+            read_provider_model_catalog_text(&profile.codex_home.join(catalog_file))
+        else {
             continue;
         };
-        let mut contents = String::new();
-        let mut bounded = IoRead::take(file, SUPER_CONFIGURED_MODEL_CATALOG_MAX_BYTES + 1);
-        if IoRead::read_to_string(&mut bounded, &mut contents).is_err()
-            || contents.len() as u64 > SUPER_CONFIGURED_MODEL_CATALOG_MAX_BYTES
-        {
-            continue;
-        }
-        let Ok(value) = serde_json::from_str::<serde_json::Value>(&contents) else {
-            continue;
+        let value = if provider == prodex_provider_core::ProviderId::Kiro {
+            let Ok(models) = parse_kiro_model_catalog_text(&contents) else {
+                continue;
+            };
+            serde_json::json!({"models": models})
+        } else {
+            let Ok(value) = serde_json::from_str::<serde_json::Value>(&contents) else {
+                continue;
+            };
+            value
         };
         configured_sub_agent_model_ids(&value, &mut models, model_limit);
         if models.len() >= model_limit {
@@ -373,7 +382,7 @@ pub(super) fn configured_sub_agent_model_ids(
         if models.len() >= model_limit {
             break;
         }
-        let Some(id) = ["id", "model_id", "slug", "model"]
+        let Some(id) = ["id", "model_id", "modelId", "slug", "model"]
             .into_iter()
             .find_map(|key| entry.get(key))
             .and_then(serde_json::Value::as_str)

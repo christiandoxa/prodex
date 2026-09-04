@@ -218,18 +218,188 @@ pub(crate) fn resolve_runtime_launch_profile_name(
 mod sub_agent_prompt_tests {
     use super::super_prompt::{
         SUPER_CONFIGURED_MODEL_LIMIT, SuperSubAgentPromptStep, bounded_tui_text,
-        configured_sub_agent_model_ids, run_super_sub_agent_prompt_steps,
-        super_sub_agent_concurrency_choices, super_sub_agent_prompt_steps, visible_choice_range,
+        configured_sub_agent_model_ids, configured_sub_agent_models_from_paths,
+        run_super_sub_agent_prompt_steps, super_sub_agent_concurrency_choices,
+        super_sub_agent_prompt_steps, visible_choice_range,
     };
     use super::{
         ResolvedMainAgentConfig, SUB_AGENT_RECURSION_MARKER, codex_cli_config_override_value,
         resolve_super_launch_decisions_with_prompts, resolve_super_sub_agent,
     };
+    use crate::app_state::AppStateIoExt;
     use prodex_cli::{SubAgentConfig, SubAgentReasoningEffort, SuperLaunchTarget};
     use prodex_provider_core::ProviderId;
     use std::cell::RefCell;
+    use std::collections::BTreeMap;
+    use std::fs;
+    use std::path::{Path, PathBuf};
 
     const SESSION_ID: &str = "00000000-0000-7000-8000-000000000042";
+
+    fn catalog_test_paths(root: &Path) -> crate::AppPaths {
+        crate::AppPaths {
+            root: root.to_path_buf(),
+            state_file: root.join("state.json"),
+            managed_profiles_root: root.join("profiles"),
+            shared_codex_root: root.join("shared"),
+            legacy_shared_codex_root: root.join("legacy"),
+        }
+    }
+
+    fn kiro_profile(home: PathBuf) -> crate::ProfileEntry {
+        crate::ProfileEntry {
+            codex_home: home,
+            managed: true,
+            email: Some("kiro@example.com".to_string()),
+            provider: crate::ProfileProvider::Kiro {
+                auth_key: "test-key".to_string(),
+                auth_kind: Some("builder-id".to_string()),
+                profile_arn: None,
+                profile_name: None,
+                start_url: None,
+                region: Some("us-east-1".to_string()),
+            },
+        }
+    }
+
+    fn save_kiro_catalog_state(
+        root_name: &str,
+        catalogs: &[(&str, serde_json::Value)],
+    ) -> (crate::AppPaths, PathBuf) {
+        let root = crate::test_support::test_temp_root().join(format!(
+            "prodex-kiro-sub-agent-catalog-{root_name}-{}",
+            std::process::id()
+        ));
+        fs::create_dir_all(root.join("profiles")).unwrap();
+        let paths = catalog_test_paths(&root);
+        let mut profiles = BTreeMap::new();
+        for (name, catalog) in catalogs {
+            let home = paths.managed_profiles_root.join(name);
+            fs::create_dir_all(&home).unwrap();
+            fs::write(
+                home.join(crate::KIRO_MODEL_CATALOG_FILE),
+                catalog.to_string(),
+            )
+            .unwrap();
+            profiles.insert((*name).to_string(), kiro_profile(home));
+        }
+        crate::AppState {
+            active_profile: catalogs.first().map(|(name, _)| (*name).to_string()),
+            profiles,
+            ..crate::AppState::default()
+        }
+        .save(&paths)
+        .unwrap();
+        (paths, root)
+    }
+
+    fn picker_model_ids(configured: &[String]) -> Vec<String> {
+        prodex_provider_core::resolve_provider_model_choices(ProviderId::Kiro, configured, None)
+            .into_iter()
+            .filter_map(|choice| match choice {
+                prodex_provider_core::ProviderModelChoice::Model(model) => Some(model),
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn imported_kiro_snapshot_populates_sub_agent_picker() {
+        let (paths, root) = save_kiro_catalog_state(
+            "single",
+            &[(
+                "kiro-a",
+                serde_json::json!({
+                    "models": [
+                        {"model_id": "claude-sonnet-4.5", "model_name": "Claude Sonnet 4.5"}
+                    ]
+                }),
+            )],
+        );
+        let configured = configured_sub_agent_models_from_paths(&paths, ProviderId::Kiro);
+        assert_eq!(configured, ["claude-sonnet-4.5"]);
+        assert_eq!(
+            picker_model_ids(&configured),
+            ["gpt-5.6-luna", "auto", "claude-sonnet-4.5"]
+        );
+        assert_eq!(
+            prodex_provider_core::resolve_provider_model_choices(
+                ProviderId::Kiro,
+                &configured,
+                None
+            )
+            .last(),
+            Some(&prodex_provider_core::ProviderModelChoice::Custom)
+        );
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn multiple_kiro_snapshots_merge_case_insensitively_in_state_order() {
+        let (paths, root) = save_kiro_catalog_state(
+            "multiple",
+            &[
+                (
+                    "kiro-a",
+                    serde_json::json!({
+                        "models": [{"id": "Claude-Sonnet-4.5"}, {"id": "claude-sonnet-4"}]
+                    }),
+                ),
+                (
+                    "kiro-b",
+                    serde_json::json!({
+                        "models": [{"id": "claude-sonnet-4.5"}, {"id": "CLAUDE-SONNET-4"}]
+                    }),
+                ),
+            ],
+        );
+        assert_eq!(
+            configured_sub_agent_models_from_paths(&paths, ProviderId::Kiro),
+            ["Claude-Sonnet-4.5", "claude-sonnet-4"]
+        );
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn missing_or_malformed_kiro_snapshot_keeps_static_picker_safe() {
+        let (paths, root) = save_kiro_catalog_state(
+            "fallback",
+            &[(
+                "kiro-a",
+                serde_json::json!({
+                    "models": [{"id": "dynamic-before-malformed"}]
+                }),
+            )],
+        );
+        fs::remove_file(
+            paths
+                .managed_profiles_root
+                .join("kiro-a")
+                .join(crate::KIRO_MODEL_CATALOG_FILE),
+        )
+        .unwrap();
+        assert!(configured_sub_agent_models_from_paths(&paths, ProviderId::Kiro).is_empty());
+        assert_eq!(picker_model_ids(&[]), ["gpt-5.6-luna", "auto"]);
+        fs::write(
+            paths
+                .managed_profiles_root
+                .join("kiro-a")
+                .join(crate::KIRO_MODEL_CATALOG_FILE),
+            r#"{"models":[{"id":"secret-marker"}]} trailing"#,
+        )
+        .unwrap();
+        assert!(configured_sub_agent_models_from_paths(&paths, ProviderId::Kiro).is_empty());
+        fs::write(
+            paths
+                .managed_profiles_root
+                .join("kiro-a")
+                .join(crate::KIRO_MODEL_CATALOG_FILE),
+            vec![b'x'; crate::PROVIDER_MODEL_CATALOG_MAX_BYTES as usize + 1],
+        )
+        .unwrap();
+        assert!(configured_sub_agent_models_from_paths(&paths, ProviderId::Kiro).is_empty());
+        let _ = fs::remove_dir_all(root);
+    }
 
     fn super_args(values: &[&str]) -> prodex_cli::SuperArgs {
         let mut argv = vec!["prodex", "s"];

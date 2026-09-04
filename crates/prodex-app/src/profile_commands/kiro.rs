@@ -207,9 +207,21 @@ pub(crate) fn parse_kiro_auth_secret_text(text: &str) -> Result<KiroAuthSecret> 
 pub(crate) fn parse_kiro_model_catalog_text(text: &str) -> Result<Vec<Value>> {
     let value: Value =
         serde_json::from_str(text).context("failed to parse Kiro model catalog JSON")?;
+    normalize_kiro_model_catalog_value(&value)
+}
+
+fn normalize_kiro_model_catalog_value(value: &Value) -> Result<Vec<Value>> {
     let models = value
         .get("models")
         .and_then(Value::as_array)
+        .or_else(|| value.get("availableModels").and_then(Value::as_array))
+        .or_else(|| {
+            value
+                .get("models")
+                .and_then(Value::as_object)
+                .and_then(|models| models.get("availableModels"))
+                .and_then(Value::as_array)
+        })
         .context("Kiro model catalog is missing models array")?;
     if models.len() > prodex_provider_core::PROVIDER_MODEL_CATALOG_HARD_LIMIT {
         bail!(
@@ -217,9 +229,47 @@ pub(crate) fn parse_kiro_model_catalog_text(text: &str) -> Result<Vec<Value>> {
             prodex_provider_core::PROVIDER_MODEL_CATALOG_HARD_LIMIT
         );
     }
-    prodex_provider_core::merge_provider_model_catalog_json(ProviderId::Kiro, models)
+    let models = models
+        .iter()
+        .filter_map(|model| {
+            let id = ["id", "model_id", "modelId", "slug", "model"]
+                .into_iter()
+                .find_map(|key| model.get(key))
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|id| !id.is_empty())?;
+            let name = ["name", "model_name", "modelName"]
+                .into_iter()
+                .find_map(|key| model.get(key))
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|name| !name.is_empty())
+                .unwrap_or(id);
+            let mut normalized = serde_json::json!({
+                "id": id,
+                "name": name,
+                "object": "model",
+                "owned_by": "kiro-cli",
+            });
+            if let Some(description) = model.get("description").and_then(Value::as_str) {
+                normalized["description"] = Value::String(description.to_string());
+            }
+            if let Some(context_window) = ["context_window_tokens", "contextWindowTokens"]
+                .into_iter()
+                .find_map(|key| model.get(key))
+                .and_then(Value::as_u64)
+            {
+                normalized["context_window_tokens"] = Value::from(context_window);
+            }
+            Some(normalized)
+        })
+        .collect::<Vec<_>>();
+    if models.is_empty() {
+        bail!("Kiro model catalog returned no usable models");
+    }
+    prodex_provider_core::merge_provider_model_catalog_json(ProviderId::Kiro, &models)
         .map_err(anyhow::Error::new)?;
-    Ok(models.clone())
+    Ok(models)
 }
 
 pub(crate) fn read_kiro_auth_secret(codex_home: &Path) -> Result<KiroAuthSecret> {
@@ -309,56 +359,7 @@ fn native_kiro_model_catalog(
     }
     let value: Value =
         serde_json::from_slice(&output.stdout).context("failed to parse the Kiro model catalog")?;
-    let models = value
-        .get("models")
-        .and_then(Value::as_array)
-        .context("Kiro model catalog is missing models")?;
-    if models.len() > prodex_provider_core::PROVIDER_MODEL_CATALOG_HARD_LIMIT {
-        bail!(
-            "Kiro model catalog exceeds the hard limit of {} entries",
-            prodex_provider_core::PROVIDER_MODEL_CATALOG_HARD_LIMIT
-        );
-    }
-    let models = models
-        .iter()
-        .filter_map(|model| {
-            let id = model
-                .get("model_id")
-                .or_else(|| model.get("id"))
-                .and_then(Value::as_str)?
-                .trim();
-            if id.is_empty() {
-                return None;
-            }
-            let name = model
-                .get("model_name")
-                .or_else(|| model.get("name"))
-                .and_then(Value::as_str)
-                .map(str::trim)
-                .filter(|name| !name.is_empty())
-                .unwrap_or(id);
-            let mut normalized = serde_json::json!({
-                "id": id,
-                "name": name,
-                "object": "model",
-                "owned_by": "kiro-cli",
-            });
-            if let Some(description) = model.get("description").and_then(Value::as_str) {
-                normalized["description"] = Value::String(description.to_string());
-            }
-            if let Some(context_window) = model.get("context_window_tokens").and_then(Value::as_u64)
-            {
-                normalized["context_window_tokens"] = Value::from(context_window);
-            }
-            Some(normalized)
-        })
-        .collect::<Vec<_>>();
-    if models.is_empty() {
-        bail!("Kiro model catalog returned no usable models");
-    }
-    prodex_provider_core::merge_provider_model_catalog_json(ProviderId::Kiro, &models)
-        .map_err(anyhow::Error::new)?;
-    Ok(models)
+    normalize_kiro_model_catalog_value(&value)
 }
 
 fn read_kiro_whoami_json() -> Result<Value> {
@@ -490,6 +491,38 @@ mod tests {
         let error = parse_kiro_model_catalog_text(&text).unwrap_err();
 
         assert!(error.to_string().contains("hard limit of 1024 entries"));
+    }
+
+    #[test]
+    fn kiro_model_catalog_parser_normalizes_native_and_acp_shapes() {
+        for (value, expected) in [
+            (
+                serde_json::json!({
+                    "models": [
+                        {"model_id": "claude-sonnet-4.5", "model_name": "Sonnet 4.5"},
+                        {"modelId": "claude-sonnet-4", "modelName": "Sonnet 4"}
+                    ]
+                }),
+                vec!["claude-sonnet-4.5", "claude-sonnet-4"],
+            ),
+            (
+                serde_json::json!({
+                    "models": {"availableModels": [
+                        {"modelId": "claude-sonnet-4.5", "name": "Sonnet 4.5"}
+                    ]}
+                }),
+                vec!["claude-sonnet-4.5"],
+            ),
+        ] {
+            let models = parse_kiro_model_catalog_text(&value.to_string()).unwrap();
+            assert_eq!(
+                models
+                    .iter()
+                    .filter_map(|model| model.get("id").and_then(Value::as_str))
+                    .collect::<Vec<_>>(),
+                expected
+            );
+        }
     }
 
     fn write_fake_kiro_binary(root: &Path) -> PathBuf {
