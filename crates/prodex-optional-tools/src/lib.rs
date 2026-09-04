@@ -31,10 +31,10 @@ pub use super_optimizers::{
 };
 
 pub const PRODEX_OPTIMIZERS_HOME_ENV: &str = "PRODEX_OPTIMIZERS_HOME";
-pub const CAVEMAN_VETTED_VERSION: &str = "2.5.0";
-pub const CAVEMAN_VETTED_COMMIT: &str = "f9a039a93d249f3fcdb47a9e02544cd1ce37ba4a";
+pub const CAVEMAN_VETTED_VERSION: &str = "2.6.0";
+pub const CAVEMAN_VETTED_COMMIT: &str = "b82c0ad42c2bedc1f2cd78e414dadfaffbaaeec3";
 pub const CAVEMAN_VETTED_TREE_SHA256: &str =
-    "7b7a90ab252a09f200ea46ad719ad52d36c0b3fbdcbf33769fd7c872f9548dda";
+    "ddac7f7a89ae5a8d80d1b606620589e8ade7897d536663537bc82b8f6322d4a6";
 pub const PONYTAIL_VETTED_VERSION: &str = "4.9.0";
 pub const PONYTAIL_VETTED_COMMIT: &str = "0a4dd63ad4541f4f655c4108a295916f3c1d8fda";
 pub const PONYTAIL_VETTED_TREE_SHA256: &str =

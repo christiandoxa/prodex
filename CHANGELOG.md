@@ -10,6 +10,7 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 
 ### Misc
 
+- Normalize cross-platform cwd identity (`bfb2a2b`)
 - Bind rollout reads to writer authority (`e068308`)
 - Resolve managed session rollout symlinks (`ed0621e`)
 - Ship session bridge and live observability (`00d7fd5`)

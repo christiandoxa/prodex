@@ -185,24 +185,24 @@ Caveman is externally installed and validated; Smart Context is built into the C
 <details>
 <summary>Install and verify the Super tools</summary>
 
-Caveman (Prodex-vetted `2.5.0` checkout):
+Caveman (Prodex-vetted `2.6.0` checkout):
 
 ```bash
 export PRODEX_OPTIMIZERS_HOME="${PRODEX_OPTIMIZERS_HOME:-${XDG_DATA_HOME:-$HOME/.local/share}/prodex-optimizers}"
 install -d "$PRODEX_OPTIMIZERS_HOME/caveman"
 git clone --no-checkout https://github.com/JuliusBrussee/caveman \
-  "$PRODEX_OPTIMIZERS_HOME/caveman/2.5.0"
-git -C "$PRODEX_OPTIMIZERS_HOME/caveman/2.5.0" config core.autocrlf false
-git -C "$PRODEX_OPTIMIZERS_HOME/caveman/2.5.0" checkout --detach \
-  f9a039a93d249f3fcdb47a9e02544cd1ce37ba4a
-cat >"$PRODEX_OPTIMIZERS_HOME/caveman/2.5.0/prodex-tool.json" <<'JSON'
+  "$PRODEX_OPTIMIZERS_HOME/caveman/2.6.0"
+git -C "$PRODEX_OPTIMIZERS_HOME/caveman/2.6.0" config core.autocrlf false
+git -C "$PRODEX_OPTIMIZERS_HOME/caveman/2.6.0" checkout --detach \
+  b82c0ad42c2bedc1f2cd78e414dadfaffbaaeec3
+cat >"$PRODEX_OPTIMIZERS_HOME/caveman/2.6.0/prodex-tool.json" <<'JSON'
 {
   "schema_version": 1,
   "id": "caveman",
-  "version": "2.5.0",
+  "version": "2.6.0",
   "source": "https://github.com/JuliusBrussee/caveman",
-  "commit": "f9a039a93d249f3fcdb47a9e02544cd1ce37ba4a",
-  "tree_sha256": "7b7a90ab252a09f200ea46ad719ad52d36c0b3fbdcbf33769fd7c872f9548dda"
+  "commit": "b82c0ad42c2bedc1f2cd78e414dadfaffbaaeec3",
+  "tree_sha256": "ddac7f7a89ae5a8d80d1b606620589e8ade7897d536663537bc82b8f6322d4a6"
 }
 JSON
 
