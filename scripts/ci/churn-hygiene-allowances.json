@@ -1803,5 +1803,23 @@
       "maxFileLines": 689
     },
     "reason": "Reviewed the exact 0.426.0 forward promotion: the already-qualified session-control and direct live-observability tree is carried from the stale integration history into three policy-compliant commits, with release notes separated from version metadata and the final release metadata coupled to CHANGELOG.md. These measured caps apply only to the listed subjects; global churn thresholds and all correctness, security, release, and qualification gates remain enforced."
+  },
+  {
+    "id": "audited-prodex-0.426.0-codex-01532-forward",
+    "requiredSubjects": [
+      "feat(expose): ship session bridge and live observability",
+      "docs(expose): document 0.426.0 session bridge",
+      "chore(release): release 0.426.0",
+      "ci(churn): record audited 0.426.0 forward promotion",
+      "chore(release): refresh 0.426.0 changelog",
+      "chore(codex): advance compatibility to 0.153.2"
+    ],
+    "caps": {
+      "maxFiles": 59,
+      "maxBehaviorFiles": 36,
+      "maxLines": 4870,
+      "maxFileLines": 689
+    },
+    "reason": "Reviewed the exact 0.426.0 forward promotion plus the required Codex rust-v0.153.2 compatibility pin, lockfile, baseline, documentation, and tagged-tree audit. The measured range is 59 files, 36 behavior files, 4,870 changed lines, and 689 changed lines in the largest file; these exact caps cover only the named subjects while global thresholds and all correctness, security, release, and qualification gates remain enforced."
   }
 ]
