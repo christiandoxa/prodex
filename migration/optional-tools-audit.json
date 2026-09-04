@@ -1,22 +1,22 @@
 {
   "schema_version": 1,
-  "audited_at": "2026-09-02T14:58:41Z",
-  "release": "0.424.0",
+  "audited_at": "2026-09-04T05:26:30Z",
+  "release": "0.426.0",
   "tools": [
     {
       "id": "caveman",
       "repository": "https://github.com/JuliusBrussee/caveman",
-      "latest_stable": "2.5.0",
-      "release": "v2.5.0",
-      "tag_object": "58d8b30d6bf215f9f47ca07f3d5e4d902bef14c1",
-      "commit": "f9a039a93d249f3fcdb47a9e02544cd1ce37ba4a",
-      "git_tree": "480331ca7ed79e4c5a3d65399904ac5f18d75e4c",
-      "prodex_tree_sha256": "7b7a90ab252a09f200ea46ad719ad52d36c0b3fbdcbf33769fd7c872f9548dda",
+      "latest_stable": "2.6.0",
+      "release": "v2.6.0",
+      "tag_object": "09715751c1b30bb7142304086a6375d50d3c4cee",
+      "commit": "b82c0ad42c2bedc1f2cd78e414dadfaffbaaeec3",
+      "git_tree": "a913ce88c98dfe29342e32382a1f0bcf7567b7ab",
+      "prodex_tree_sha256": "ddac7f7a89ae5a8d80d1b606620589e8ade7897d536663537bc82b8f6322d4a6",
       "license": "MIT",
       "runtime": "Node.js >=18; externally managed immutable checkout",
       "platforms": ["linux", "macos", "windows"],
       "decision": "ADOPT_PACKAGE",
-      "notes": "v2.5.0 is the latest stable release; the exact commit, Git tree, and complete Prodex tree digest are pinned."
+      "notes": "v2.6.0 is the latest stable release; the exact commit, Git tree, and complete Prodex tree digest are pinned."
     },
     {
       "id": "rtk",
