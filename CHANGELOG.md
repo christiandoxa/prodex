@@ -10,6 +10,7 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 
 ### Misc
 
+- Accommodate Windows tunnel startup latency (`0fd173b`)
 - Normalize cross-platform cwd identity (`bfb2a2b`)
 - Bind rollout reads to writer authority (`e068308`)
 - Resolve managed session rollout symlinks (`ed0621e`)
