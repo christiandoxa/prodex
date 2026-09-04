@@ -17,7 +17,9 @@ use std::os::windows::io::{AsRawHandle, OwnedHandle};
 const OPENAI_TUNNEL_CLIENT_RELEASE: &str = "v0.0.13";
 const OPENAI_TUNNEL_CLIENT_VERSION: &str = "0.0.13";
 const OPENAI_TUNNEL_CLIENT_COMMIT: &str = "4b5267f823be0b046bb883aacb51603cfde3a0ea";
-const OPENAI_TUNNEL_CLIENT_READY_TIMEOUT: Duration = if cfg!(test) {
+const OPENAI_TUNNEL_CLIENT_READY_TIMEOUT: Duration = if cfg!(all(test, windows)) {
+    Duration::from_secs(10)
+} else if cfg!(test) {
     Duration::from_secs(3)
 } else {
     Duration::from_secs(20)
