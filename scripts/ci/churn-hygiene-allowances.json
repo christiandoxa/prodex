@@ -1812,14 +1812,14 @@
       "chore(release): release 0.426.0",
       "ci(churn): record audited 0.426.0 forward promotion",
       "chore(release): refresh 0.426.0 changelog",
-      "chore(codex): advance compatibility to 0.153.2", "fix(expose): resolve managed session rollout symlinks"
+      "chore(codex): advance compatibility to 0.153.2", "fix(expose): resolve managed session rollout symlinks", "fix(expose): bind rollout reads to writer authority"
     ],
     "caps": {
       "maxFiles": 59,
       "maxBehaviorFiles": 36,
-      "maxLines": 4932,
-      "maxFileLines": 689
+      "maxLines": 4983,
+      "maxFileLines": 704
     },
-    "reason": "Reviewed the exact 0.426.0 forward promotion plus the required Codex rust-v0.153.2 compatibility pin, lockfile, baseline, tagged-tree audit, and managed-overlay rollout symlink repair. The measured range is 59 files, 36 behavior files, 4,932 changed lines, and 689 changed lines in the largest file; these exact caps cover only the named subjects while global thresholds and all correctness, security, release, and qualification gates remain enforced."
+    "reason": "Reviewed the exact 0.426.0 forward promotion plus the required Codex rust-v0.153.2 compatibility pin, lockfile, baseline, tagged-tree audit, managed-overlay rollout symlink repair, and writer-authorized rollout consumption check. The measured range is 59 files, 36 behavior files, 4,983 changed lines, and 704 changed lines in the largest file; these exact caps cover only the named subjects while global thresholds and all correctness, security, release, and qualification gates remain enforced."
   }
 ]

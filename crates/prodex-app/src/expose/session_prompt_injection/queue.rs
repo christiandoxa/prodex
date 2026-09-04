@@ -161,7 +161,6 @@ fn valid_unix_endpoint(value: &str, codex_home: &Path) -> Option<String> {
 #[derive(Clone, Debug, Default)]
 pub(crate) struct QueueSnapshot {
     pub(crate) item_ids: BTreeSet<String>,
-    pub(crate) revision: Option<i64>,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -284,15 +283,7 @@ impl QueueControl for SystemQueueControl {
             }
             item_ids.insert(id);
         }
-        let revision = connection
-            .query_row(
-                "SELECT revision FROM queued_thread_revisions WHERE thread_id = ?1 LIMIT 1",
-                params![thread_id],
-                |row| row.get::<_, i64>(0),
-            )
-            .optional()
-            .map_err(|_| PromptInjectionError::VerificationInconclusive)?;
-        Ok(QueueSnapshot { item_ids, revision })
+        Ok(QueueSnapshot { item_ids })
     }
 
     fn queue_once(&self, target: &ResolvedTarget, message: &str) -> QueueInvocation {

@@ -237,10 +237,11 @@ where
         self.queue
             .check_capability(&target)
             .map_err(|_| PromptInjectionError::QueueUnsupported)?;
-        let before = self
-            .queue
-            .snapshot(&target.queue_db, &target.thread_id)
-            .map_err(|_| PromptInjectionError::VerificationInconclusive)?;
+        let rollout_before = self.output_source(&target).ok().and_then(|path| {
+            std::fs::metadata(&path)
+                .ok()
+                .map(|metadata| (path, metadata.len()))
+        });
         target = self.revalidate(&target, &workspace_root)?;
 
         let invocation = self.queue.queue_once(&target, &request.message);
@@ -258,12 +259,15 @@ where
             .is_some_and(|id| after.item_ids.contains(id))
         {
             "queued_item_present"
-        } else if after
-            .revision
-            .is_some_and(|revision| before.revision.is_none_or(|previous| revision > previous))
-            && self.revalidate(&target, &workspace_root).is_ok()
+        } else if rollout_before.as_ref().is_some_and(|(path, offset)| {
+            read_output_events(path, *offset, 0, 64).is_ok_and(|read| {
+                read.events
+                    .iter()
+                    .any(|event| event.kind == "user" && event.text == request.message)
+            })
+        }) && self.revalidate(&target, &workspace_root).is_ok()
         {
-            "already_consumed_revision"
+            "consumed_rollout"
         } else if invocation.message_id.is_some()
             && self.revalidate(&target, &workspace_root).is_ok()
         {
@@ -663,6 +667,17 @@ where
         if let Some(path) = stored
             .as_deref()
             .and_then(|path| valid_rollout_path_in_roots(path, &roots, &target.thread_id))
+        {
+            return Ok(path);
+        }
+        if let Some(stored) = stored.as_deref()
+            && let Some(details) = self.process.inspect(target.writer.pid).ok().flatten()
+            && let Some(path) = valid_rollout_path_in_authoritative_open_files(
+                stored,
+                &roots,
+                &details.open_files,
+                &target.thread_id,
+            )
         {
             return Ok(path);
         }
