@@ -17,9 +17,7 @@ use std::os::windows::io::{AsRawHandle, OwnedHandle};
 const OPENAI_TUNNEL_CLIENT_RELEASE: &str = "v0.0.13";
 const OPENAI_TUNNEL_CLIENT_VERSION: &str = "0.0.13";
 const OPENAI_TUNNEL_CLIENT_COMMIT: &str = "4b5267f823be0b046bb883aacb51603cfde3a0ea";
-const OPENAI_TUNNEL_CLIENT_READY_TIMEOUT: Duration = if cfg!(all(test, windows)) {
-    Duration::from_secs(10)
-} else if cfg!(test) {
+const OPENAI_TUNNEL_CLIENT_READY_TIMEOUT: Duration = if cfg!(test) {
     Duration::from_secs(3)
 } else {
     Duration::from_secs(20)
@@ -484,6 +482,15 @@ fn wait_for_openai_tunnel_ready(
             return Ok(base_url.clone());
         }
         if Instant::now() >= deadline {
+            if let Some(status) = child
+                .try_wait()
+                .context("failed to inspect tunnel-client after readiness deadline")?
+            {
+                bail!(
+                    "tunnel-client exited before local readiness (status {})",
+                    exit_status_label(status)
+                )
+            }
             bail!(
                 "tunnel-client did not become locally ready within {} seconds; verify outbound HTTPS/TCP 443, tunnel permissions, and the configured MCP endpoint",
                 OPENAI_TUNNEL_CLIENT_READY_TIMEOUT.as_secs()
