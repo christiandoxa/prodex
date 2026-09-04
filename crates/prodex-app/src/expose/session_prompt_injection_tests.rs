@@ -340,6 +340,19 @@ fn process_matching_requires_user_cwd_and_plain_s() {
 }
 
 #[test]
+fn injection_accepts_equivalent_cwd_path_spellings() {
+    let mut fixture = fixture();
+    fixture.records[0].cwd = fixture.workspace.join("..").join("workspace");
+    let message_id = "019f3b59-7771-7ea1-a9a1-3cd638f216c5";
+
+    let result = service(&fixture, queue(&fixture, Some(message_id)))
+        .inject(request(&fixture, "hello"))
+        .expect("equivalent cwd should resolve to the session");
+
+    assert_eq!(result.thread_id, THREAD);
+}
+
+#[test]
 fn writer_requires_codex_role_and_prodex_ancestry() {
     let cwd = PathBuf::from("/home/test-user/project");
     let prodex = process(10, 1, "/usr/bin/prodex", vec!["prodex", "s"], &cwd, 1);

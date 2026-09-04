@@ -421,7 +421,7 @@ where
             .filter(|process| {
                 process.uid == uid
                     && process.state.live()
-                    && process.cwd == workspace_root
+                    && prodex_core::same_path(&process.cwd, workspace_root)
                     && is_plain_prodex_session(process)
                     && requested_pid.is_none_or(|pid| process.pid == pid)
             })
@@ -452,7 +452,7 @@ where
             .filter(|process| {
                 process.uid == prodex.uid
                     && process.state.live()
-                    && process.cwd == workspace_root
+                    && prodex_core::same_path(&process.cwd, workspace_root)
                     && process.pid != prodex.pid
                     && is_codex_writer(process)
                     && is_descendant_of(process.pid, prodex.pid, &by_pid)
@@ -519,7 +519,7 @@ where
             process.pid == target.prodex.pid
                 && process.uid == uid
                 && process.state.live()
-                && process.cwd == workspace_root
+                && prodex_core::same_path(&process.cwd, workspace_root)
                 && is_plain_prodex_session(process)
                 && same_process_identity(process, &target.prodex)
         }) else {
@@ -529,7 +529,7 @@ where
             process.pid == target.writer.pid
                 && process.uid == uid
                 && process.state.live()
-                && process.cwd == workspace_root
+                && prodex_core::same_path(&process.cwd, workspace_root)
                 && is_codex_writer(process)
                 && same_process_identity(process, &target.writer)
                 && is_descendant_of(process.pid, prodex.pid, &by_pid)
