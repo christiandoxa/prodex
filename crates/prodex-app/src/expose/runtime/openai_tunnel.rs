@@ -470,27 +470,19 @@ fn wait_for_openai_tunnel_ready(
         if let Some((client, base_url)) = health.as_ref()
             && tunnel_health_ready(client, base_url)
         {
-            if let Some(status) = child
-                .try_wait()
-                .context("failed to inspect tunnel-client after readiness")?
-            {
-                bail!(
-                    "tunnel-client exited before local readiness completed (status {})",
-                    exit_status_label(status)
-                )
-            }
+            ensure_openai_tunnel_child_alive(
+                child,
+                "failed to inspect tunnel-client after readiness",
+                " completed",
+            )?;
             return Ok(base_url.clone());
         }
         if Instant::now() >= deadline {
-            if let Some(status) = child
-                .try_wait()
-                .context("failed to inspect tunnel-client after readiness deadline")?
-            {
-                bail!(
-                    "tunnel-client exited before local readiness (status {})",
-                    exit_status_label(status)
-                )
-            }
+            ensure_openai_tunnel_child_alive(
+                child,
+                "failed to inspect tunnel-client after readiness deadline",
+                "",
+            )?;
             bail!(
                 "tunnel-client did not become locally ready within {} seconds; verify outbound HTTPS/TCP 443, tunnel permissions, and the configured MCP endpoint",
                 OPENAI_TUNNEL_CLIENT_READY_TIMEOUT.as_secs()
@@ -498,6 +490,20 @@ fn wait_for_openai_tunnel_ready(
         }
         thread::sleep(OPENAI_TUNNEL_CLIENT_READY_POLL);
     }
+}
+
+fn ensure_openai_tunnel_child_alive(
+    child: &mut std::process::Child,
+    context: &'static str,
+    completed_suffix: &str,
+) -> Result<()> {
+    if let Some(status) = child.try_wait().context(context)? {
+        bail!(
+            "tunnel-client exited before local readiness{completed_suffix} (status {})",
+            exit_status_label(status)
+        )
+    }
+    Ok(())
 }
 
 fn read_health_base_url(path: &Path) -> Result<Option<String>> {
