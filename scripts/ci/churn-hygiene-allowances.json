@@ -1812,7 +1812,7 @@
       "chore(release): release 0.426.0",
       "ci(churn): record audited 0.426.0 forward promotion",
       "chore(release): refresh 0.426.0 changelog",
-      "chore(codex): advance compatibility to 0.153.2", "fix(expose): resolve managed session rollout symlinks", "fix(expose): bind rollout reads to writer authority"
+      "chore(codex): advance compatibility to 0.153.2", "fix(expose): resolve managed session rollout symlinks", "fix(expose): bind rollout reads to writer authority", "test(ci): update production share expectations"
     ],
     "caps": {
       "maxFiles": 59,
