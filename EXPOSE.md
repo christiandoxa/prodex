@@ -232,9 +232,11 @@ credentials are not returned.
 Thread identity authority is the open
 `thread-writer-locks/<UUID>.lock` held by the current writer. Older Codex
 versions may use exactly one open `rollout-...-<UUID>.jsonl`; when both are
-open, their UUIDs must agree. The normal `prodex s` lifecycle uses a persisted,
-queue-addressable local Codex app-server session so the supported queue path
-can address the existing writer without attaching a second writer.
+open, their UUIDs must agree. With Codex 0.153.2, a fresh idle `prodex s` can
+hold its exact thread in the live app-server before its first rollout row
+exists. The bridge verifies that loaded thread through the writer's socket,
+queues through Codex, and requires persistence after queueing without attaching
+a second writer.
 
 This is separate from the runtime/model proxy, which handles provider traffic
 and measured token throughput, and from Expose's browser PTY plus

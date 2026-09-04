@@ -545,6 +545,11 @@ assistant/tool output. Both bind to the same process-bound Codex writer and
 thread, so this is a no-copy/paste bridge to the existing session and never
 starts another solver. The transport is Codex's supported queue/app-server
 control plane; it does not write the PTY or SQLite queue payloads.
+For `@pdx` requests, use this bridge when exactly one compatible session exists,
+then keep using its returned PID, thread, and cursor. Start one
+`prodex_super_start` fallback only after authoritative `no_session`; ambiguity,
+stale identity, addressability, queue, source, or verification errors fail
+closed and never authorize a fallback.
 
 </details>
 

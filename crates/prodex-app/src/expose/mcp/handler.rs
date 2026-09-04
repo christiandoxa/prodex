@@ -312,7 +312,7 @@ impl ExposeMcpEndpoint {
 
     fn instructions(&self) -> String {
         format!(
-            "This is a local full-access Prodex Super runtime starting in {:?} (instance {}). The initial directory is context, not a filesystem jail: runs retain normal OS-user filesystem, process, network, Git, and local-tool authority. Use prodex_super_start only for explicit user-requested development work, include consequential external actions in the user's task, and poll an existing run instead of starting duplicates. The expose URL is ephemeral capability authentication; anyone with it can control this instance.",
+            "This is a local full-access Prodex Super runtime starting in {:?} (instance {}). The initial directory is context, not a filesystem jail: runs retain normal OS-user filesystem, process, network, Git, and local-tool authority. For @pdx development requests, resolve one compatible existing plain prodex s with prodex_session_prompt_inject first, then read its exact returned PID, thread_id, and cursor. Start one prodex_super_start fallback only after authoritative no_session; never run both paths in parallel or treat ambiguity, stale identity, addressability, queue, source, or verification errors as no_session. A fresh idle prodex s needs no manual bootstrap prompt. Include consequential external actions in the user's task, and poll an existing run instead of starting duplicates. The expose URL is ephemeral capability authentication; anyone with it can control this instance.",
             self.workspace_name, self.instance_id
         )
     }

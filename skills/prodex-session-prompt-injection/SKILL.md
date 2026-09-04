@@ -12,6 +12,16 @@ Use `prodex s expose` from the same canonical workspace as the one plain
 - `prodex_session_output_read({"cursor":"...","wait_ms":5000})` to read
   later sanitized visible output.
 
+For `@pdx` development requests, resolve the existing session first. Use
+`prodex_session_prompt_inject` exactly once when one compatible plain `prodex s`
+exists, then read output with the returned `prodex_pid`, `thread_id`, and
+`next_cursor`. A fresh idle session is valid before its first manual prompt;
+the bridge verifies its live app-server thread and queues the requested message
+through Codex. Start one `prodex_super_start` fallback only after an authoritative
+`no_session` result. Never start the existing-session and fallback paths in
+parallel, and never treat addressability, ambiguity, stale identity, queue,
+source, or verification errors as `no_session`.
+
 The two tools share one target identity. Require the same live OS user,
 canonical cwd, plain-session command, Prodex process birth identity, actual
 Codex writer ancestry/birth identity, Codex home authority, source identity,
@@ -21,8 +31,10 @@ fail-closed error; never guess from the newest rollout.
 Modern Codex thread authority is the writer's open
 `thread-writer-locks/<UUID>.lock`. Legacy authority is exactly one open
 `rollout-...-<UUID>.jsonl`. If both are present, their UUIDs must agree. A
-normal session must be persisted and queue-addressable before using the
-supported Codex queue/app-server transport.
+A normal persisted session is required after queueing. A fresh Codex 0.153.2
+session may be held in the writer's live app-server until its first queued
+message; the bridge verifies that exact live thread before queueing and then
+revalidates persistence.
 
 Output reads are bounded and cursor-based. Return only existing sanitized
 user-visible assistant/tool/status transcript events. Never expose hidden

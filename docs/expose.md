@@ -51,9 +51,11 @@ write a PTY, insert SQLite queue payloads, or create a second solver.
 
 Modern Codex authority is an open
 `thread-writer-locks/<UUID>.lock`; legacy authority is one open
-`rollout-...-<UUID>.jsonl`. If both exist, UUIDs must agree. The active session
-must be persisted/queue-addressable; possession of a queue database and UUID
-alone is not sufficient.
+`rollout-...-<UUID>.jsonl`. If both exist, UUIDs must agree. A fresh Codex
+0.153.2 session can have its thread lock before its first rollout row exists.
+The bridge verifies that exact loaded thread through the writer's app-server
+socket, queues through Codex, and requires persistence after queueing; a queue
+database and UUID alone are never sufficient.
 
 ## Security and readiness
 

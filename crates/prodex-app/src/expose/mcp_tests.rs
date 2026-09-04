@@ -344,6 +344,8 @@ fn mcp_json_protocol_and_public_route_isolation_are_enforced() {
     assert!(init.starts_with("HTTP/1.1 200"));
     assert!(init.contains("Content-Type: application/json\r\n"));
     assert!(!init.contains("text/event-stream"));
+    assert!(init.contains("authoritative no_session"));
+    assert!(init.contains("never run both paths in parallel"));
 
     let discover = expose_mcp_request(
         listen_addr,
