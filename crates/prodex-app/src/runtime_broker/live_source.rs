@@ -105,7 +105,10 @@ mod tests {
 
     #[test]
     fn live_source_guard_removes_private_registry_artifacts() {
-        let root = std::env::temp_dir().join(format!(
+        let temp_root = std::env::temp_dir();
+        #[cfg(target_os = "macos")]
+        let temp_root = temp_root.canonicalize().unwrap();
+        let root = temp_root.join(format!(
             "prodex-live-source-cleanup-{}-{}",
             std::process::id(),
             SystemTime::now()
