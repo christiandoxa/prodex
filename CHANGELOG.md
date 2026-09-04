@@ -10,6 +10,7 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 
 ### Misc
 
+- Reduce tunnel readiness complexity (`d54cd62`)
 - Classify late tunnel child exits (`3a0134c`)
 - Accommodate Windows tunnel startup latency (`0fd173b`)
 - Normalize cross-platform cwd identity (`bfb2a2b`)
