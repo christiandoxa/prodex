@@ -157,7 +157,8 @@ impl ProcessInspector for FakeProcessInspector {
 
 struct FakeQueueControl {
     capability: bool,
-    persisted: bool,
+    persisted: std::sync::atomic::AtomicBool,
+    loaded_addressable: std::sync::atomic::AtomicBool,
     rollout: Option<PathBuf>,
     snapshots: Mutex<VecDeque<QueueSnapshot>>,
     invocation: QueueInvocation,
@@ -177,7 +178,14 @@ impl QueueControl for FakeQueueControl {
         _state_db: &Path,
         _thread_id: &str,
     ) -> Result<bool, PromptInjectionError> {
-        Ok(self.persisted)
+        Ok(self.persisted.load(Ordering::SeqCst))
+    }
+
+    fn loaded_thread_addressable(
+        &self,
+        _target: &ResolvedTarget,
+    ) -> Result<bool, PromptInjectionError> {
+        Ok(self.loaded_addressable.load(Ordering::SeqCst))
     }
 
     fn rollout_path(
@@ -206,6 +214,7 @@ impl QueueControl for FakeQueueControl {
             .lock()
             .unwrap()
             .push((target.thread_id.clone(), message.to_string()));
+        self.persisted.store(true, Ordering::SeqCst);
         if let (Some(path), Some(consumed_message)) = (&self.rollout, &self.consumed_message) {
             let line = serde_json::json!({
                 "timestamp": "2026-09-03T10:00:03Z",
@@ -256,7 +265,8 @@ fn request(fixture: &Fixture, message: &str) -> PromptInjectionRequest {
 fn queue(fixture: &Fixture, message_id: Option<&str>) -> FakeQueueControl {
     FakeQueueControl {
         capability: true,
-        persisted: true,
+        persisted: std::sync::atomic::AtomicBool::new(true),
+        loaded_addressable: std::sync::atomic::AtomicBool::new(false),
         rollout: Some(fixture.rollout.clone()),
         snapshots: Mutex::new(VecDeque::from([
             QueueSnapshot::default(),
@@ -431,6 +441,24 @@ fn queue_success_preserves_multiline_message_and_same_thread() {
 }
 
 #[test]
+fn fresh_idle_thread_uses_live_app_server_before_first_persisted_row() {
+    let fixture = fixture();
+    let queue_control = queue(&fixture, Some("019f3b59-7771-7ea1-a9a1-3cd638f216c5"));
+    queue_control.persisted.store(false, Ordering::SeqCst);
+    queue_control
+        .loaded_addressable
+        .store(true, Ordering::SeqCst);
+
+    let calls = Arc::clone(&queue_control.calls);
+    let result = service(&fixture, queue_control)
+        .inject(request(&fixture, "first prompt before manual input"))
+        .expect("live app-server thread should be queueable before persisted rollout");
+
+    assert_eq!(result.thread_id, THREAD);
+    assert_eq!(calls.lock().unwrap().len(), 1);
+}
+
+#[test]
 fn queue_acknowledgement_is_valid_when_item_is_consumed_before_snapshot() {
     let fixture = fixture();
     let message_id = "019f3b59-7771-7ea1-a9a1-3cd638f216c5";
@@ -490,8 +518,8 @@ fn system_queue_snapshot_reads_current_queue_schema() {
 #[test]
 fn unpersisted_thread_reproduces_codex_0153_regression_without_queue_mutation() {
     let fixture = fixture();
-    let mut queue_control = queue(&fixture, Some("019f3b59-7771-7ea1-a9a1-3cd638f216c5"));
-    queue_control.persisted = false;
+    let queue_control = queue(&fixture, Some("019f3b59-7771-7ea1-a9a1-3cd638f216c5"));
+    queue_control.persisted.store(false, Ordering::SeqCst);
     let calls = Arc::clone(&queue_control.calls);
     let error = service(&fixture, queue_control).inject(request(&fixture, "must not send"));
     assert_eq!(

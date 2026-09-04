@@ -6,9 +6,23 @@ use super::{
 use rusqlite::{Connection, OpenFlags, OptionalExtension, params};
 use std::collections::BTreeSet;
 use std::ffi::OsString;
+#[cfg(unix)]
+use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use uuid::Uuid;
+
+#[cfg(unix)]
+use tungstenite::client::{IntoClientRequest, client_with_config};
+#[cfg(unix)]
+use tungstenite::{Message as WsMessage, WebSocket as WsSocket};
+
+#[cfg(unix)]
+const APP_SERVER_PROBE_MAX_MESSAGES: usize = 64;
+#[cfg(unix)]
+const APP_SERVER_PROBE_MAX_MESSAGE_BYTES: usize = 64 * 1024;
+#[cfg(unix)]
+const APP_SERVER_PROBE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(3);
 pub(crate) fn resolve_thread_identity(
     files: &[OpenProcessFile],
 ) -> std::result::Result<String, PromptInjectionError> {
@@ -191,6 +205,13 @@ pub(crate) trait QueueControl {
         thread_id: &str,
     ) -> std::result::Result<QueueSnapshot, PromptInjectionError>;
     fn queue_once(&self, target: &ResolvedTarget, message: &str) -> QueueInvocation;
+    fn loaded_thread_addressable(
+        &self,
+        target: &ResolvedTarget,
+    ) -> std::result::Result<bool, PromptInjectionError> {
+        let _ = target;
+        Ok(false)
+    }
 }
 
 #[derive(Clone, Copy, Default)]
@@ -307,6 +328,154 @@ impl QueueControl for SystemQueueControl {
             message_id,
         }
     }
+
+    #[cfg(unix)]
+    fn loaded_thread_addressable(
+        &self,
+        target: &ResolvedTarget,
+    ) -> std::result::Result<bool, PromptInjectionError> {
+        let Some(endpoint) = target.remote_endpoint.as_deref() else {
+            return Ok(false);
+        };
+        let Some(socket_path) = endpoint.strip_prefix("unix://") else {
+            return Ok(false);
+        };
+        let socket_path = Path::new(socket_path);
+        if !socket_path.is_absolute() {
+            return Ok(false);
+        }
+        let stream = UnixStream::connect(socket_path)
+            .map_err(|_| PromptInjectionError::SessionNotQueueAddressable)?;
+        stream
+            .set_read_timeout(Some(APP_SERVER_PROBE_TIMEOUT))
+            .map_err(|_| PromptInjectionError::SessionNotQueueAddressable)?;
+        stream
+            .set_write_timeout(Some(APP_SERVER_PROBE_TIMEOUT))
+            .map_err(|_| PromptInjectionError::SessionNotQueueAddressable)?;
+        let request = "ws://localhost/rpc"
+            .into_client_request()
+            .map_err(|_| PromptInjectionError::SessionNotQueueAddressable)?;
+        let config = tungstenite::protocol::WebSocketConfig::default()
+            .max_message_size(Some(APP_SERVER_PROBE_MAX_MESSAGE_BYTES))
+            .max_frame_size(Some(APP_SERVER_PROBE_MAX_MESSAGE_BYTES));
+        let (mut socket, _) = client_with_config(request, stream, Some(config))
+            .map_err(|_| PromptInjectionError::SessionNotQueueAddressable)?;
+
+        let Some(initialize) = app_server_request_result(
+            &mut socket,
+            1,
+            "initialize",
+            serde_json::json!({
+                "clientInfo": {
+                    "name": "prodex-session-bridge",
+                    "version": env!("CARGO_PKG_VERSION"),
+                },
+                "capabilities": {"experimentalApi": true},
+            }),
+        )?
+        else {
+            return Ok(false);
+        };
+        let Some(server_home) = initialize
+            .get("codexHome")
+            .and_then(serde_json::Value::as_str)
+        else {
+            return Ok(false);
+        };
+        if !prodex_core::same_path(Path::new(server_home), &target.environment.codex_home) {
+            return Ok(false);
+        }
+        socket
+            .send(WsMessage::Text(
+                serde_json::json!({"method": "initialized"})
+                    .to_string()
+                    .into(),
+            ))
+            .map_err(|_| PromptInjectionError::SessionNotQueueAddressable)?;
+        let Some(result) = app_server_request_result(
+            &mut socket,
+            2,
+            "thread/read",
+            serde_json::json!({
+                "threadId": target.thread_id,
+                "includeTurns": false,
+            }),
+        )?
+        else {
+            return Ok(false);
+        };
+        let Some(thread) = result.get("thread") else {
+            return Ok(false);
+        };
+        if thread.get("id").and_then(serde_json::Value::as_str) != Some(&target.thread_id)
+            || thread
+                .get("sessionId")
+                .and_then(serde_json::Value::as_str)
+                .is_some_and(|session_id| session_id != target.thread_id)
+            || thread.get("ephemeral").and_then(serde_json::Value::as_bool) == Some(true)
+            || thread
+                .get("canAcceptDirectInput")
+                .and_then(serde_json::Value::as_bool)
+                == Some(false)
+        {
+            return Ok(false);
+        }
+        let Some(thread_cwd) = thread.get("cwd").and_then(serde_json::Value::as_str) else {
+            return Ok(false);
+        };
+        Ok(prodex_core::same_path(
+            Path::new(thread_cwd),
+            Path::new(&target.environment.pwd),
+        ))
+    }
+}
+
+#[cfg(unix)]
+fn app_server_request_result(
+    socket: &mut WsSocket<UnixStream>,
+    request_id: u64,
+    method: &str,
+    params: serde_json::Value,
+) -> std::result::Result<Option<serde_json::Value>, PromptInjectionError> {
+    socket
+        .send(WsMessage::Text(
+            serde_json::json!({
+                "id": request_id,
+                "method": method,
+                "params": params,
+            })
+            .to_string()
+            .into(),
+        ))
+        .map_err(|_| PromptInjectionError::SessionNotQueueAddressable)?;
+    for _ in 0..APP_SERVER_PROBE_MAX_MESSAGES {
+        match socket
+            .read()
+            .map_err(|_| PromptInjectionError::SessionNotQueueAddressable)?
+        {
+            WsMessage::Text(text) => {
+                let value = serde_json::from_str::<serde_json::Value>(text.as_ref())
+                    .map_err(|_| PromptInjectionError::SessionNotQueueAddressable)?;
+                if value.get("id").and_then(serde_json::Value::as_u64) != Some(request_id) {
+                    continue;
+                }
+                return Ok(value.get("error").is_none().then(|| {
+                    value
+                        .get("result")
+                        .cloned()
+                        .unwrap_or(serde_json::Value::Null)
+                }));
+            }
+            WsMessage::Ping(payload) => {
+                socket
+                    .send(WsMessage::Pong(payload))
+                    .map_err(|_| PromptInjectionError::SessionNotQueueAddressable)?;
+            }
+            WsMessage::Close(_) => return Ok(None),
+            WsMessage::Binary(_) | WsMessage::Pong(_) | WsMessage::Frame(_) => {}
+        }
+    }
+    Ok(None)
 }
 
 fn open_read_only_database(path: &Path) -> std::result::Result<Connection, PromptInjectionError> {

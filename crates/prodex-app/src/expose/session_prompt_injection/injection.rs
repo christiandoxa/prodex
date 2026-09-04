@@ -70,12 +70,15 @@ where
             .as_deref()
             .is_some_and(|id| after.item_ids.contains(id))
         {
+            self.revalidate_persisted(target, workspace_root)?;
             return Ok("queued_item_present");
         }
         if self.rollout_was_consumed(request, workspace_root, target, rollout_before) {
             return Ok("consumed_rollout");
         }
-        if invocation.message_id.is_some() && self.revalidate(target, workspace_root).is_ok() {
+        if invocation.message_id.is_some()
+            && self.revalidate_persisted(target, workspace_root).is_ok()
+        {
             return Ok("queue_acknowledged");
         }
         Err(PromptInjectionError::VerificationInconclusive)
@@ -94,7 +97,7 @@ where
                     .iter()
                     .any(|event| event.kind == "user" && event.text == request.message)
             })
-        }) && self.revalidate(target, workspace_root).is_ok()
+        }) && self.revalidate_persisted(target, workspace_root).is_ok()
     }
 }
 

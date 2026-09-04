@@ -382,6 +382,36 @@ where
         Ok(())
     }
 
+    fn target_session_is_addressable(
+        &self,
+        target: &ResolvedTarget,
+    ) -> std::result::Result<bool, PromptInjectionError> {
+        if self
+            .queue
+            .persisted_thread(&target.state_db, &target.thread_id)?
+        {
+            return Ok(true);
+        }
+        self.queue.loaded_thread_addressable(target)
+    }
+
+    fn revalidate_persisted(
+        &self,
+        target: &ResolvedTarget,
+        workspace_root: &Path,
+    ) -> std::result::Result<ResolvedTarget, PromptInjectionError> {
+        let target = self.revalidate(target, workspace_root)?;
+        if self
+            .queue
+            .persisted_thread(&target.state_db, &target.thread_id)
+            .map_err(|_| PromptInjectionError::StaleTarget)?
+        {
+            Ok(target)
+        } else {
+            Err(PromptInjectionError::StaleTarget)
+        }
+    }
+
     fn remember_binding(
         &self,
         key: &str,
@@ -477,9 +507,6 @@ where
             .ok_or(PromptInjectionError::QueueDbUnavailable)?;
         let state_db = exact_open_database(&details.open_files, DatabaseKind::State)?
             .ok_or(PromptInjectionError::SessionNotQueueAddressable)?;
-        if !self.queue.persisted_thread(&state_db, &thread_id)? {
-            return Err(PromptInjectionError::SessionNotQueueAddressable);
-        }
         let environment = TargetEnvironment::from_details(&details, workspace_root)?;
         let expected_queue_db = environment.codex_sqlite_home.join("queue_1.sqlite");
         if expected_queue_db.canonicalize().ok().as_ref() != Some(&queue_db) {
@@ -490,7 +517,7 @@ where
             &details.open_files,
             &environment.codex_home,
         );
-        Ok(ResolvedTarget {
+        let target = ResolvedTarget {
             prodex,
             writer: details.record,
             thread_id,
@@ -498,7 +525,11 @@ where
             state_db,
             environment,
             remote_endpoint,
-        })
+        };
+        if !self.target_session_is_addressable(&target)? {
+            return Err(PromptInjectionError::SessionNotQueueAddressable);
+        }
+        Ok(target)
     }
 
     fn revalidate(
@@ -553,12 +584,7 @@ where
         let current_state_db = exact_open_database(&details.open_files, DatabaseKind::State)
             .map_err(|_| PromptInjectionError::StaleTarget)?
             .ok_or(PromptInjectionError::StaleTarget)?;
-        if current_state_db != target.state_db
-            || !self
-                .queue
-                .persisted_thread(&current_state_db, &current_thread)
-                .map_err(|_| PromptInjectionError::StaleTarget)?
-        {
+        if current_state_db != target.state_db {
             return Err(PromptInjectionError::StaleTarget);
         }
         let environment = TargetEnvironment::from_details(&details, workspace_root)
@@ -583,7 +609,7 @@ where
         if current_endpoint != target.remote_endpoint {
             return Err(PromptInjectionError::StaleTarget);
         }
-        Ok(ResolvedTarget {
+        let current_target = ResolvedTarget {
             prodex: prodex.clone(),
             writer: details.record,
             thread_id: current_thread,
@@ -591,7 +617,14 @@ where
             state_db: current_state_db,
             environment,
             remote_endpoint: current_endpoint,
-        })
+        };
+        if !self
+            .target_session_is_addressable(&current_target)
+            .map_err(|_| PromptInjectionError::StaleTarget)?
+        {
+            return Err(PromptInjectionError::StaleTarget);
+        }
+        Ok(current_target)
     }
 
     fn output_source(

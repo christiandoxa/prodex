@@ -73,6 +73,9 @@ mod mcp_tests;
 #[cfg(test)]
 #[path = "expose/run_manager_tests.rs"]
 mod run_manager_tests;
+#[cfg(all(test, unix))]
+#[path = "expose/session_prompt_injection_live_tests.rs"]
+mod session_prompt_injection_live_tests;
 #[cfg(test)]
 #[path = "expose/session_prompt_injection_tests.rs"]
 mod session_prompt_injection_tests;
