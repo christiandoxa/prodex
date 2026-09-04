@@ -307,21 +307,35 @@ pub(crate) fn valid_rollout_path_in_roots(
     roots: &[PathBuf],
     thread_id: &str,
 ) -> Option<PathBuf> {
-    let roots = roots
+    // Managed Codex overlays link their sessions directory back to the profile home. Validate the
+    // stored lexical path against the process-bound root before resolving that parent symlink.
+    let raw_roots = roots;
+    let roots = raw_roots
         .iter()
         .filter_map(|root| root.canonicalize().ok())
         .collect::<Vec<_>>();
-    let paths = if path.is_absolute() {
-        vec![path.to_path_buf()]
+    let paths: Vec<PathBuf> = if path.is_absolute() {
+        let lexical_under_root = !path
+            .components()
+            .any(|component| matches!(component, std::path::Component::ParentDir))
+            && raw_roots.iter().any(|root| path.starts_with(root));
+        lexical_under_root
+            .then_some(path.to_path_buf())
+            .into_iter()
+            .collect()
     } else {
-        roots.iter().map(|root| root.join(path)).collect()
+        raw_roots.iter().map(|root| root.join(path)).collect()
     };
     paths.into_iter().find_map(|path| {
         if path.symlink_metadata().ok()?.file_type().is_symlink() {
             return None;
         }
         let canonical = path.canonicalize().ok()?;
-        if !roots.iter().any(|root| canonical.starts_with(root)) {
+        let lexical_under_root = !path
+            .components()
+            .any(|component| matches!(component, std::path::Component::ParentDir))
+            && raw_roots.iter().any(|root| path.starts_with(root));
+        if !lexical_under_root && !roots.iter().any(|root| canonical.starts_with(root)) {
             return None;
         }
         let name = canonical.file_name()?.to_str()?;

@@ -603,6 +603,36 @@ fn output_page_does_not_drop_events_from_one_rollout_line() {
 }
 
 #[test]
+fn output_source_accepts_managed_session_directory_symlink() {
+    let fixture = fixture();
+    let overlay = fixture.root.join("overlay");
+    std::fs::create_dir_all(&overlay).unwrap();
+    #[cfg(unix)]
+    std::os::unix::fs::symlink(
+        fixture.root.join("target-codex-home/sessions"),
+        overlay.join("sessions"),
+    )
+    .unwrap();
+    #[cfg(windows)]
+    std::os::windows::fs::symlink_dir(
+        fixture.root.join("target-codex-home/sessions"),
+        overlay.join("sessions"),
+    )
+    .unwrap();
+
+    let stored = overlay.join("sessions/2026/09/03").join(
+        fixture
+            .rollout
+            .file_name()
+            .expect("fixture rollout should have a filename"),
+    );
+    assert_eq!(
+        valid_rollout_path_in_roots(&stored, &[overlay], THREAD),
+        Some(fixture.rollout.canonicalize().unwrap())
+    );
+}
+
+#[test]
 fn output_source_rejects_symlink_and_hidden_instruction_rollout() {
     let fixture = fixture();
     let outside = fixture.root.join("outside.jsonl");
