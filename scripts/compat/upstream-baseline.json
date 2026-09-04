@@ -2,7 +2,7 @@
   "codex": {
     "compatibility": {
       "upstream_repository": "https://github.com/openai/codex",
-      "baseline_source": "openai/codex rust-v0.153.0 release",
+      "baseline_source": "openai/codex rust-v0.153.2 release",
       "guard_command": "node scripts/compat/check-upstream-baseline.mjs",
       "format_version": 2,
       "critical_files": [
@@ -1551,7 +1551,7 @@
           ]
         }
       ],
-      "tested_codex_release": "rust-v0.153.0",
+      "tested_codex_release": "rust-v0.153.2",
       "patch_deltas": [
         {
           "from": "rust-v0.150.0",
@@ -1618,6 +1618,34 @@
           ],
           "prodex_action": "Pin Codex 0.153.0, preserve additive payloads and metadata, extend the shared measured-generation classifier for current reasoning/tool delta events, and keep unary responses untimed without an authoritative generation interval.",
           "compatibility_evidence": "Exact tagged-tree diff from an isolated mirror; relevant Responses SSE/WebSocket, app-server, MCP, session, Guardian, config, and release boundary checks remain green or are covered by the 0.153.0 audit."
+        },
+        {
+          "from": "rust-v0.153.0",
+          "to": "rust-v0.153.1",
+          "upstream_commit": "985641272869835d01d025ed2a218fbbce35fa9f",
+          "upstream_tag_object": "f5c2c463f1a92d62faf57da7516f72d4351afb6e",
+          "upstream_release_date": "2026-09-03T21:05:14Z",
+          "tree_comparison": "exact tagged trees; 11 changed paths (10 modified, 1 added), 395 additions, 21 deletions",
+          "runtime_changes": [
+            "The model catalog adds hidden GPT-6-Astra API configuration, shifts catalog priorities, and adds model-driven Guardian auto-review metadata; defaults remain unchanged.",
+            "Guardian scoring and elicitation-decline handling use upstream model/security policy; the remaining changes are tests, fixtures, and an allowlist entry."
+          ],
+          "prodex_action": "Pin the 0.153.2 package after the complete patch audit, preserve additive model and Guardian metadata opaquely, and do not change Prodex defaults or duplicate upstream policy.",
+          "compatibility_evidence": "Exact codeload archives and per-file diff from rust-v0.153.0 to rust-v0.153.1 are recorded in migration/codex-rust-v0.153.2-audit.md; no Prodex-owned transport, session, MCP, or TPS source changed."
+        },
+        {
+          "from": "rust-v0.153.1",
+          "to": "rust-v0.153.2",
+          "upstream_commit": "657a993cbee87acf52d14b758ce49dbd46d1b8eb",
+          "upstream_tag_object": "79016fcca2c514d9c38643d8b7970a021e829b3b",
+          "upstream_release_date": "2026-09-03T23:54:50Z",
+          "tree_comparison": "exact tagged trees; 2 modified paths, 1 addition, 1 deletion",
+          "runtime_changes": [
+            "The workspace package version changes to 0.153.2.",
+            "The GPT-6-Astra Fast-tier description changes from 1.5x to 2x speed; request behavior is unchanged."
+          ],
+          "prodex_action": "Use the 0.153.2 package and preserve the model catalog as upstream-owned metadata; no compatibility repair or default change is required.",
+          "compatibility_evidence": "Exact codeload archive and per-file diff are recorded in migration/codex-rust-v0.153.2-audit.md; all Prodex contract source areas are unchanged."
         }
       ],
       "app_server_protocol": {
@@ -1640,14 +1668,15 @@
       }
     },
     "latestRelease": {
-      "tag_name": "rust-v0.153.0",
-      "name": "0.153.0",
-      "published_at": "2026-09-03T01:37:38Z",
-      "html_url": "https://github.com/openai/codex/releases/tag/rust-v0.153.0",
+      "tag_name": "rust-v0.153.2",
+      "name": "0.153.2",
+      "published_at": "2026-09-03T23:54:50Z",
+      "html_url": "https://github.com/openai/codex/releases/tag/rust-v0.153.2",
       "body_head": [
-        "## New Features",
-        "- Persist response token usage and preserve raw response usage metadata.",
-        "**Full Changelog**: https://github.com/openai/codex/compare/rust-v0.152.1...rust-v0.153.0"
+        "## Bug Fixes",
+        "- Corrected the GPT-6-Astra Fast tier description to say “2x speed, increased usage” instead of “1.5x.” This changes only the displayed text, not how requests run. (#42632)",
+        "## Changelog",
+        "Full Changelog: https://github.com/openai/codex/compare/rust-v0.153.1...rust-v0.153.2"
       ]
     }
   },
