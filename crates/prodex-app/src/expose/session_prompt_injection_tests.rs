@@ -4,9 +4,11 @@ use super::session_prompt_injection::{
     PromptOutputReadRequest, QueueControl, QueueInvocation, QueueSnapshot, ResolvedTarget,
     SessionPromptInjectionService, SystemQueueControl, exact_open_database, is_codex_writer,
     is_descendant_of, is_plain_prodex_session, legacy_thread_id, modern_thread_id,
-    read_output_events, resolve_thread_identity, valid_rollout_path_in_roots,
+    read_output_events, resolve_thread_identity, valid_rollout_path_in_authoritative_open_files,
+    valid_rollout_path_in_roots,
 };
 use std::collections::{BTreeMap, HashMap, VecDeque};
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
@@ -159,6 +161,7 @@ struct FakeQueueControl {
     rollout: Option<PathBuf>,
     snapshots: Mutex<VecDeque<QueueSnapshot>>,
     invocation: QueueInvocation,
+    consumed_message: Option<String>,
     calls: Arc<Mutex<Vec<(String, String)>>>,
 }
 
@@ -203,6 +206,22 @@ impl QueueControl for FakeQueueControl {
             .lock()
             .unwrap()
             .push((target.thread_id.clone(), message.to_string()));
+        if let (Some(path), Some(consumed_message)) = (&self.rollout, &self.consumed_message) {
+            let line = serde_json::json!({
+                "timestamp": "2026-09-03T10:00:03Z",
+                "type": "response_item",
+                "payload": {
+                    "type": "message",
+                    "role": "user",
+                    "content": [{"type": "input_text", "text": consumed_message}]
+                }
+            });
+            writeln!(
+                std::fs::OpenOptions::new().append(true).open(path).unwrap(),
+                "{line}"
+            )
+            .unwrap();
+        }
         self.invocation.clone()
     }
 }
@@ -243,7 +262,6 @@ fn queue(fixture: &Fixture, message_id: Option<&str>) -> FakeQueueControl {
             QueueSnapshot::default(),
             QueueSnapshot {
                 item_ids: message_id.into_iter().map(str::to_string).collect(),
-                revision: Some(1),
             },
         ])),
         invocation: QueueInvocation {
@@ -251,6 +269,7 @@ fn queue(fixture: &Fixture, message_id: Option<&str>) -> FakeQueueControl {
             exit_code: Some(0),
             message_id: message_id.map(str::to_string),
         },
+        consumed_message: None,
         calls: Arc::new(Mutex::new(Vec::new())),
     }
 }
@@ -403,6 +422,7 @@ fn queue_acknowledgement_is_valid_when_item_is_consumed_before_snapshot() {
     let fixture = fixture();
     let message_id = "019f3b59-7771-7ea1-a9a1-3cd638f216c5";
     let mut queue_control = queue(&fixture, Some(message_id));
+    queue_control.consumed_message = Some("already consumed".to_string());
     queue_control.snapshots = Mutex::new(VecDeque::from([
         QueueSnapshot::default(),
         QueueSnapshot::default(),
@@ -410,7 +430,7 @@ fn queue_acknowledgement_is_valid_when_item_is_consumed_before_snapshot() {
     let result = service(&fixture, queue_control)
         .inject(request(&fixture, "already consumed"))
         .unwrap();
-    assert_eq!(result.verification, "queue_acknowledged");
+    assert_eq!(result.verification, "consumed_rollout");
 }
 
 #[test]
@@ -436,10 +456,7 @@ fn system_queue_snapshot_reads_current_queue_schema() {
                 created_at_ms INTEGER NOT NULL,
                 updated_at_ms INTEGER NOT NULL
             );
-            CREATE TABLE queued_thread_revisions (
-                revision INTEGER NOT NULL,
-                thread_id TEXT NOT NULL
-            );",
+            ",
         )
         .unwrap();
     connection
@@ -450,17 +467,10 @@ fn system_queue_snapshot_reads_current_queue_schema() {
             rusqlite::params!["message-id", THREAD],
         )
         .unwrap();
-    connection
-        .execute(
-            "INSERT INTO queued_thread_revisions (revision, thread_id) VALUES (3, ?1)",
-            rusqlite::params![THREAD],
-        )
-        .unwrap();
     drop(connection);
 
     let snapshot = SystemQueueControl.snapshot(&queue_db, THREAD).unwrap();
     assert!(snapshot.item_ids.contains("message-id"));
-    assert_eq!(snapshot.revision, Some(3));
     let _ = std::fs::remove_dir_all(root);
 }
 
@@ -627,8 +637,23 @@ fn output_source_accepts_managed_session_directory_symlink() {
             .expect("fixture rollout should have a filename"),
     );
     assert_eq!(
-        valid_rollout_path_in_roots(&stored, &[overlay], THREAD),
+        valid_rollout_path_in_roots(&stored, std::slice::from_ref(&overlay), THREAD),
+        None
+    );
+    assert_eq!(
+        valid_rollout_path_in_authoritative_open_files(
+            &stored,
+            std::slice::from_ref(&overlay),
+            &[OpenProcessFile {
+                path: fixture.rollout.clone(),
+            }],
+            THREAD,
+        ),
         Some(fixture.rollout.canonicalize().unwrap())
+    );
+    assert_eq!(
+        valid_rollout_path_in_authoritative_open_files(&stored, &[overlay], &[], THREAD),
+        None
     );
 }
 

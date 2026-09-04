@@ -32,7 +32,8 @@ diff -qr codex-rust-v0.153.0 codex-rust-v0.153.2
 `rust-v0.153.0 → rust-v0.153.1` changes 11 paths: the Codex workspace version,
 the model-size allowlist, Guardian production/tests, one MCP Guardian test,
 the model catalog, and two TUI test helpers; it adds the 137-line
-`guardian_v2_model_tests.rs`. The model catalog adds hidden GPT-6-Astra API
+`guardian_v2_model_tests.rs`. The exact text delta is 397 additions and 21
+deletions. The model catalog adds hidden GPT-6-Astra API
 configuration, changes catalog priorities, and adds model-specific
 `auto_review` metadata. The Guardian changes make computer-use review depend on
 the model requirement and surface a declined elicitation as a tool error.

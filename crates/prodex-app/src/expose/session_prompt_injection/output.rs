@@ -1,7 +1,7 @@
 use super::{
     OUTPUT_CURSOR_VERSION, OUTPUT_READ_MAX_BYTES, OUTPUT_READ_MAX_LINE_BYTES,
     OUTPUT_READ_MAX_TEXT_BYTES, OUTPUT_READ_MAX_TOTAL_TEXT_BYTES, OUTPUT_SOURCE_PROBE_BYTES,
-    PromptInjectionError, PromptOutputEvent, ResolvedTarget, legacy_thread_id,
+    OpenProcessFile, PromptInjectionError, PromptOutputEvent, ResolvedTarget, legacy_thread_id,
 };
 use base64::Engine;
 use sha2::{Digest, Sha256};
@@ -307,35 +307,21 @@ pub(crate) fn valid_rollout_path_in_roots(
     roots: &[PathBuf],
     thread_id: &str,
 ) -> Option<PathBuf> {
-    // Managed Codex overlays link their sessions directory back to the profile home. Validate the
-    // stored lexical path against the process-bound root before resolving that parent symlink.
-    let raw_roots = roots;
-    let roots = raw_roots
+    let roots = roots
         .iter()
         .filter_map(|root| root.canonicalize().ok())
         .collect::<Vec<_>>();
-    let paths: Vec<PathBuf> = if path.is_absolute() {
-        let lexical_under_root = !path
-            .components()
-            .any(|component| matches!(component, std::path::Component::ParentDir))
-            && raw_roots.iter().any(|root| path.starts_with(root));
-        lexical_under_root
-            .then_some(path.to_path_buf())
-            .into_iter()
-            .collect()
+    let paths = if path.is_absolute() {
+        vec![path.to_path_buf()]
     } else {
-        raw_roots.iter().map(|root| root.join(path)).collect()
+        roots.iter().map(|root| root.join(path)).collect()
     };
     paths.into_iter().find_map(|path| {
         if path.symlink_metadata().ok()?.file_type().is_symlink() {
             return None;
         }
         let canonical = path.canonicalize().ok()?;
-        let lexical_under_root = !path
-            .components()
-            .any(|component| matches!(component, std::path::Component::ParentDir))
-            && raw_roots.iter().any(|root| path.starts_with(root));
-        if !lexical_under_root && !roots.iter().any(|root| canonical.starts_with(root)) {
+        if !roots.iter().any(|root| canonical.starts_with(root)) {
             return None;
         }
         let name = canonical.file_name()?.to_str()?;
@@ -343,6 +329,39 @@ pub(crate) fn valid_rollout_path_in_roots(
             && legacy_thread_id(&canonical).as_deref() == Some(thread_id)
             && fs::metadata(&canonical).ok()?.is_file())
         .then_some(canonical)
+    })
+}
+
+pub(crate) fn valid_rollout_path_in_authoritative_open_files(
+    stored_path: &Path,
+    roots: &[PathBuf],
+    open_files: &[OpenProcessFile],
+    thread_id: &str,
+) -> Option<PathBuf> {
+    let paths = if stored_path.is_absolute() {
+        vec![stored_path.to_path_buf()]
+    } else {
+        roots.iter().map(|root| root.join(stored_path)).collect()
+    };
+    paths.into_iter().find_map(|path| {
+        if path
+            .components()
+            .any(|component| matches!(component, std::path::Component::ParentDir))
+            || !roots.iter().any(|root| path.starts_with(root))
+            || path.symlink_metadata().ok()?.file_type().is_symlink()
+        {
+            return None;
+        }
+        let canonical = path.canonicalize().ok()?;
+        open_files.iter().find_map(|file| {
+            let open_path = file.path.canonicalize().ok()?;
+            let name = open_path.file_name()?.to_str()?;
+            (open_path == canonical
+                && is_uncompressed_rollout_file_name(name)
+                && legacy_thread_id(&open_path).as_deref() == Some(thread_id)
+                && fs::metadata(&open_path).ok()?.is_file())
+            .then_some(open_path)
+        })
     })
 }
 

@@ -1625,7 +1625,7 @@
           "upstream_commit": "985641272869835d01d025ed2a218fbbce35fa9f",
           "upstream_tag_object": "f5c2c463f1a92d62faf57da7516f72d4351afb6e",
           "upstream_release_date": "2026-09-03T21:05:14Z",
-          "tree_comparison": "exact tagged trees; 11 changed paths (10 modified, 1 added), 395 additions, 21 deletions",
+          "tree_comparison": "exact tagged trees; 11 changed paths (10 modified, 1 added), 397 additions, 21 deletions",
           "runtime_changes": [
             "The model catalog adds hidden GPT-6-Astra API configuration, shifts catalog priorities, and adds model-driven Guardian auto-review metadata; defaults remain unchanged.",
             "Guardian scoring and elicitation-decline handling use upstream model/security policy; the remaining changes are tests, fixtures, and an allowlist entry."
