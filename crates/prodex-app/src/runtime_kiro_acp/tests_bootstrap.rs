@@ -51,7 +51,7 @@ fn kiro_acp_parses_initialize_result_from_captured_agent_line() {
 #[test]
 fn kiro_acp_parses_new_session_result_and_model_ids() {
     let envelope = RuntimeKiroAcpEnvelope::parse(
-        r#"{"jsonrpc":"2.0","result":{"sessionId":"00000000-0000-4000-8000-000000000001","modes":{"currentModeId":"kiro_default","availableModes":[{"id":"kiro_default","name":"kiro_default","description":"The default agent for Kiro CLI"}]},"models":{"currentModelId":"claude-sonnet-4","availableModels":[{"modelId":"claude-sonnet-4","name":"claude-sonnet-4"},{"modelId":"claude-sonnet-4.5","name":"claude-sonnet-4.5"}]}},"id":1}"#,
+        r#"{"jsonrpc":"2.0","result":{"sessionId":"00000000-0000-4000-8000-000000000001","modes":{"currentModeId":"kiro_default","availableModes":[{"id":"kiro_default","name":"kiro_default","description":"The default agent for Kiro CLI"}]},"models":{"currentModelId":"catalog-model-a","availableModels":[{"modelId":"catalog-model-a","name":"Catalog Model A"},{"modelId":"catalog-model-b","name":"Catalog Model B"}]}},"id":1}"#,
     )
     .expect("session/new envelope should parse");
     let result = envelope
@@ -60,7 +60,7 @@ fn kiro_acp_parses_new_session_result_and_model_ids() {
     assert_eq!(result.session_id, "00000000-0000-4000-8000-000000000001");
     assert_eq!(
         result.model_ids(),
-        vec!["claude-sonnet-4", "claude-sonnet-4.5"]
+        vec!["catalog-model-a", "catalog-model-b"]
     );
     assert_eq!(
         result
@@ -116,7 +116,7 @@ fn kiro_acp_bootstrap_reads_initialize_session_and_notifications() {
     assert_eq!(result.session.session_id, "session-1");
     assert_eq!(
         result.session.model_ids(),
-        vec!["claude-sonnet-4", "claude-sonnet-4.5"]
+        vec!["catalog-model-a", "catalog-model-b"]
     );
     assert_eq!(result.notifications.len(), 1);
     assert_eq!(
@@ -158,23 +158,36 @@ fn kiro_acp_model_catalog_maps_session_models() {
         session_id: "session-1".to_string(),
         modes: None,
         models: Some(RuntimeKiroAcpModelState {
-            current_model_id: "claude-sonnet-4".to_string(),
+            current_model_id: "catalog-model-a".to_string(),
             available_models: vec![
                 RuntimeKiroAcpModelInfo {
-                    model_id: "claude-sonnet-4".to_string(),
-                    name: "claude-sonnet-4".to_string(),
+                    model_id: "catalog-model-a".to_string(),
+                    name: "Catalog Model A".to_string(),
                 },
                 RuntimeKiroAcpModelInfo {
-                    model_id: "claude-sonnet-4.5".to_string(),
-                    name: "claude-sonnet-4.5".to_string(),
+                    model_id: "catalog-model-b".to_string(),
+                    name: "Catalog Model B".to_string(),
                 },
             ],
         }),
     };
     let catalog = runtime_kiro_acp_model_catalog(&session).unwrap();
     assert_eq!(catalog.len(), 2);
-    assert_eq!(catalog[0]["id"], "claude-sonnet-4");
+    assert_eq!(catalog[0]["id"], "catalog-model-a");
     assert_eq!(catalog[0]["owned_by"], "kiro-cli");
+}
+
+#[test]
+fn kiro_acp_model_catalog_rejects_missing_dynamic_models() {
+    let session = RuntimeKiroAcpNewSessionResult {
+        session_id: "session-empty".to_string(),
+        modes: None,
+        models: None,
+    };
+
+    let error = runtime_kiro_acp_model_catalog(&session).unwrap_err();
+
+    assert!(error.to_string().contains("no usable models"));
 }
 
 #[test]
@@ -196,6 +209,41 @@ fn kiro_acp_model_catalog_rejects_oversized_sessions() {
     let error = runtime_kiro_acp_model_catalog(&session).unwrap_err();
 
     assert!(error.to_string().contains("hard limit of 1024 entries"));
+}
+
+#[test]
+fn kiro_acp_model_catalog_dedupes_case_insensitively() {
+    let session = RuntimeKiroAcpNewSessionResult {
+        session_id: "session-dedupe".to_string(),
+        modes: None,
+        models: Some(RuntimeKiroAcpModelState {
+            current_model_id: "catalog-model-a".to_string(),
+            available_models: vec![
+                RuntimeKiroAcpModelInfo {
+                    model_id: "Catalog-Model-A".to_string(),
+                    name: "Catalog Model A".to_string(),
+                },
+                RuntimeKiroAcpModelInfo {
+                    model_id: "catalog-model-a".to_string(),
+                    name: "Duplicate".to_string(),
+                },
+                RuntimeKiroAcpModelInfo {
+                    model_id: "catalog-model-b".to_string(),
+                    name: "Catalog Model B".to_string(),
+                },
+            ],
+        }),
+    };
+
+    let catalog = runtime_kiro_acp_model_catalog(&session).unwrap();
+
+    assert_eq!(
+        catalog
+            .iter()
+            .filter_map(|model| model.get("id").and_then(serde_json::Value::as_str))
+            .collect::<Vec<_>>(),
+        ["Catalog-Model-A", "catalog-model-b"]
+    );
 }
 
 #[test]
@@ -376,7 +424,7 @@ fn kiro_acp_prompt_turn_passes_selected_model_to_agent() {
         fake_agent.as_os_str(),
         &root,
         &[(OsString::from("EXPECT_MODEL"), OsString::from("1"))],
-        Some("claude-sonnet-4.5"),
+        Some("catalog-model-b"),
         Some("medium"),
         "hello from prodex",
     )

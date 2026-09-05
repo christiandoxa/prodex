@@ -308,8 +308,7 @@ fn external_dynamic_catalog_models(
     let Some(contents) = read_provider_model_catalog_text(&catalog_path)? else {
         return Ok(Vec::new());
     };
-    let value = serde_json::from_str::<serde_json::Value>(&contents)
-        .context("failed to parse provider model catalog")?;
+    let value = catalog_model::read_external_model_catalog(provider, &contents)?;
     let models = value
         .get("models")
         .and_then(serde_json::Value::as_array)

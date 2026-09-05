@@ -34,7 +34,7 @@ assert first["method"] == "initialize"
 assert second["method"] == "session/new"
 print(json.dumps({"jsonrpc":"2.0","result":{"protocolVersion":1,"agentCapabilities":{"loadSession":True,"promptCapabilities":{"image":True,"audio":False,"embeddedContext":False},"mcpCapabilities":{"http":True,"sse":False},"sessionCapabilities":{},"auth":{}},"authMethods":[{"id":"kiro-login","name":"Kiro Login","description":"Run 'kiro-cli login'."}],"agentInfo":{"name":"Kiro CLI Agent","title":"Kiro CLI Agent","version":"2.10.0"}},"id":0}), flush=True)
 print(json.dumps({"jsonrpc":"2.0","method":"_kiro.dev/subagent/list_update","params":{"subagents":[],"pendingStages":[]}}), flush=True)
-print(json.dumps({"jsonrpc":"2.0","result":{"sessionId":"session-1","modes":{"currentModeId":"kiro_default","availableModes":[{"id":"kiro_default","name":"kiro_default","description":"The default agent for Kiro CLI"}]},"models":{"currentModelId":"claude-sonnet-4","availableModels":[{"modelId":"claude-sonnet-4","name":"claude-sonnet-4"},{"modelId":"claude-sonnet-4.5","name":"claude-sonnet-4.5"}]}},"id":1}), flush=True)
+print(json.dumps({"jsonrpc":"2.0","result":{"sessionId":"session-1","modes":{"currentModeId":"kiro_default","availableModes":[{"id":"kiro_default","name":"kiro_default","description":"The default agent for Kiro CLI"}]},"models":{"currentModelId":"catalog-model-a","availableModels":[{"modelId":"catalog-model-a","name":"Catalog Model A"},{"modelId":"catalog-model-b","name":"Catalog Model B"}]}},"id":1}), flush=True)
 "#,
     )
 }
@@ -46,13 +46,13 @@ fn write_fake_kiro_prompt_agent(root: &Path) -> std::path::PathBuf {
         r#"#!/usr/bin/env python3
 import json, os, sys
 if os.environ.get("EXPECT_MODEL"):
-    assert sys.argv[1:] == ["acp", "--model", "claude-sonnet-4.5", "--effort", "medium"]
+    assert sys.argv[1:] == ["acp", "--model", "catalog-model-b", "--effort", "medium"]
 first = json.loads(sys.stdin.readline())
 second = json.loads(sys.stdin.readline())
 assert first["method"] == "initialize"
 assert second["method"] == "session/new"
 print(json.dumps({"jsonrpc":"2.0","result":{"protocolVersion":1,"agentCapabilities":{"loadSession":True,"promptCapabilities":{"image":True,"audio":False,"embeddedContext":False},"mcpCapabilities":{"http":True,"sse":False},"sessionCapabilities":{},"auth":{}},"authMethods":[{"id":"kiro-login","name":"Kiro Login","description":"Run 'kiro-cli login'."}],"agentInfo":{"name":"Kiro CLI Agent","title":"Kiro CLI Agent","version":"2.10.0"}},"id":0}), flush=True)
-print(json.dumps({"jsonrpc":"2.0","result":{"sessionId":"session-1","models":{"currentModelId":"claude-sonnet-4","availableModels":[{"modelId":"claude-sonnet-4","name":"claude-sonnet-4"}]}},"id":1}), flush=True)
+print(json.dumps({"jsonrpc":"2.0","result":{"sessionId":"session-1","models":{"currentModelId":"catalog-model-a","availableModels":[{"modelId":"catalog-model-a","name":"Catalog Model A"}]}},"id":1}), flush=True)
 third = json.loads(sys.stdin.readline())
 assert third["method"] == "session/prompt"
 assert third["params"]["sessionId"] == "session-1"

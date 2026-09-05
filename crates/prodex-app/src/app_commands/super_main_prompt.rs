@@ -403,15 +403,7 @@ pub(super) fn prompt_super_model(
     current_model: Option<&str>,
     configured_models: Vec<String>,
 ) -> anyhow::Result<Option<String>> {
-    let models = if configured_models.is_empty() {
-        canonical_sub_agent_model_choices(provider, current_model)
-    } else {
-        prodex_provider_core::resolve_provider_model_choices(
-            provider,
-            &configured_models,
-            current_model,
-        )
-    };
+    let models = super_sub_agent_model_choices(provider, current_model, &configured_models);
     let choices = models
         .iter()
         .map(|choice| match choice {
@@ -438,6 +430,22 @@ pub(super) fn prompt_super_model(
             current_model.unwrap_or_default(),
         )?),
     })
+}
+
+pub(super) fn super_sub_agent_model_choices(
+    provider: prodex_provider_core::ProviderId,
+    current_model: Option<&str>,
+    configured_models: &[String],
+) -> Vec<prodex_provider_core::ProviderModelChoice> {
+    if configured_models.is_empty() {
+        canonical_sub_agent_model_choices(provider, current_model)
+    } else {
+        prodex_provider_core::resolve_provider_model_choices(
+            provider,
+            configured_models,
+            current_model,
+        )
+    }
 }
 
 pub(super) fn prompt_super_reasoning_effort(

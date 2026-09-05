@@ -35,6 +35,9 @@ mod selection;
 mod session;
 mod shared;
 mod status;
+#[cfg(test)]
+#[path = "app_commands/sub_agent_catalog_tests.rs"]
+mod sub_agent_catalog_tests;
 mod super_config;
 mod super_doctor;
 mod super_main_prompt;
