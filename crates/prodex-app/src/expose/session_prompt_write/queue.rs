@@ -168,6 +168,7 @@ pub(crate) struct QueueInvocation {
     pub(crate) succeeded: bool,
     pub(crate) exit_code: Option<i32>,
     pub(crate) message_id: Option<String>,
+    pub(crate) queued: bool,
 }
 
 pub(crate) trait QueueControl {
@@ -289,6 +290,7 @@ impl QueueControl for SystemQueueControl {
             succeeded: true,
             exit_code: Some(0),
             message_id,
+            queued: false,
         }
     }
 
@@ -309,10 +311,13 @@ fn app_server_turn_start_once(target: &ResolvedTarget, message: &str) -> QueueIn
     let Ok(Some(mut socket)) = app_server_socket(target) else {
         return QueueInvocation::default();
     };
-    let Ok(true) = app_server_thread_is_addressable(&mut socket, target) else {
+    let Ok(Some(activity)) = app_server_thread_activity(&mut socket, target) else {
         return QueueInvocation::default();
     };
     let message_id = Uuid::now_v7().to_string();
+    if activity == AppServerThreadActivity::Active {
+        return app_server_queue_add_once(&mut socket, target, message, message_id);
+    }
     let Ok(Some(result)) = app_server_request_result(
         &mut socket,
         3,
@@ -340,6 +345,57 @@ fn app_server_turn_start_once(target: &ResolvedTarget, message: &str) -> QueueIn
         succeeded: true,
         exit_code: Some(0),
         message_id: Some(message_id),
+        queued: false,
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum AppServerThreadActivity {
+    Idle,
+    Active,
+}
+
+#[cfg(unix)]
+fn app_server_queue_add_once(
+    socket: &mut UnixAppServerSocket,
+    target: &ResolvedTarget,
+    message: &str,
+    message_id: String,
+) -> QueueInvocation {
+    let Ok(Some(result)) = app_server_request_result(
+        socket,
+        3,
+        "thread/queue/add",
+        serde_json::json!({
+            "threadId": target.thread_id,
+            "clientUserMessageId": message_id,
+            "input": [{"type": "text", "text": message, "textElements": []}],
+        }),
+    ) else {
+        return QueueInvocation::default();
+    };
+    let Some(queued_submission) = result.get("queuedSubmission") else {
+        return QueueInvocation::default();
+    };
+    let Some(queued_id) = queued_submission
+        .get("id")
+        .and_then(serde_json::Value::as_str)
+    else {
+        return QueueInvocation::default();
+    };
+    if queued_id.is_empty()
+        || queued_submission
+            .get("clientUserMessageId")
+            .and_then(serde_json::Value::as_str)
+            != Some(message_id.as_str())
+    {
+        return QueueInvocation::default();
+    }
+    QueueInvocation {
+        succeeded: true,
+        exit_code: Some(0),
+        message_id: Some(message_id),
+        queued: true,
     }
 }
 
@@ -367,6 +423,14 @@ fn app_server_thread_is_addressable(
     socket: &mut UnixAppServerSocket,
     target: &ResolvedTarget,
 ) -> std::result::Result<bool, SessionPromptWriteError> {
+    Ok(app_server_thread_activity(socket, target)?.is_some())
+}
+
+#[cfg(unix)]
+fn app_server_thread_activity(
+    socket: &mut UnixAppServerSocket,
+    target: &ResolvedTarget,
+) -> std::result::Result<Option<AppServerThreadActivity>, SessionPromptWriteError> {
     let Some(initialize) = app_server_request_result(
         socket,
         1,
@@ -380,16 +444,16 @@ fn app_server_thread_is_addressable(
         }),
     )?
     else {
-        return Ok(false);
+        return Ok(None);
     };
     let Some(server_home) = initialize
         .get("codexHome")
         .and_then(serde_json::Value::as_str)
     else {
-        return Ok(false);
+        return Ok(None);
     };
     if !prodex_core::same_path(Path::new(server_home), &target.environment.codex_home) {
-        return Ok(false);
+        return Ok(None);
     }
     socket
         .send(WsMessage::Text(
@@ -408,10 +472,10 @@ fn app_server_thread_is_addressable(
         }),
     )?
     else {
-        return Ok(false);
+        return Ok(None);
     };
     let Some(thread) = result.get("thread") else {
-        return Ok(false);
+        return Ok(None);
     };
     let id_matches =
         thread.get("id").and_then(serde_json::Value::as_str) == Some(&target.thread_id);
@@ -423,15 +487,23 @@ fn app_server_thread_is_addressable(
         .and_then(serde_json::Value::as_bool)
         != Some(false);
     if !(id_matches && session_matches && non_ephemeral && accepts_input) {
-        return Ok(false);
+        return Ok(None);
     }
     let Some(thread_cwd) = thread.get("cwd").and_then(serde_json::Value::as_str) else {
-        return Ok(false);
+        return Ok(None);
     };
-    Ok(prodex_core::same_path(
-        Path::new(thread_cwd),
-        Path::new(&target.environment.pwd),
-    ))
+    if !prodex_core::same_path(Path::new(thread_cwd), Path::new(&target.environment.pwd)) {
+        return Ok(None);
+    }
+    let activity = match thread
+        .get("status")
+        .and_then(|status| status.get("type"))
+        .and_then(serde_json::Value::as_str)
+    {
+        Some("active") => AppServerThreadActivity::Active,
+        _ => AppServerThreadActivity::Idle,
+    };
+    Ok(Some(activity))
 }
 
 #[cfg(unix)]

@@ -80,6 +80,9 @@ where
         if !invocation.succeeded {
             return Err(SessionPromptWriteError::QueueFailed);
         }
+        if invocation.queued {
+            return Ok("queue_pending_observed");
+        }
         self.wait_for_rollout_user_message(request, workspace_root, target, rollout_before)?;
         Ok("rollout_user_event_observed")
     }

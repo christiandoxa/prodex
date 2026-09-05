@@ -170,3 +170,130 @@ fn live_app_server_probe_and_turn_control_require_exact_thread_and_workspace() {
     );
     let _ = std::fs::remove_dir_all(root);
 }
+
+#[test]
+fn live_app_server_busy_prompt_write_uses_authoritative_queue() {
+    use std::os::unix::net::UnixListener;
+
+    let root = std::env::temp_dir().join(format!(
+        "prodex-session-app-server-queue-{}-{}",
+        std::process::id(),
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos()
+    ));
+    let codex_home = root.join("codex-home");
+    let workspace = root.join("workspace");
+    let socket_path = root.join(".s");
+    std::fs::create_dir_all(&codex_home).unwrap();
+    std::fs::create_dir_all(&workspace).unwrap();
+    let listener = UnixListener::bind(&socket_path).unwrap();
+    let server_codex_home = codex_home.display().to_string();
+    let server_workspace = workspace.display().to_string();
+    let methods = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    let server_methods = std::sync::Arc::clone(&methods);
+    let server = std::thread::spawn(move || {
+        let (stream, _) = listener.accept().unwrap();
+        let mut socket = tungstenite::accept(stream).unwrap();
+        loop {
+            let Message::Text(text) = socket.read().unwrap() else {
+                continue;
+            };
+            let request: serde_json::Value = serde_json::from_str(text.as_ref()).unwrap();
+            let Some(id) = request.get("id") else {
+                continue;
+            };
+            let method = request["method"].as_str().unwrap();
+            server_methods.lock().unwrap().push(method.to_string());
+            let result = match method {
+                "initialize" => serde_json::json!({
+                    "codexHome": server_codex_home.clone(),
+                    "platformFamily": "unix",
+                    "platformOs": "linux",
+                    "userAgent": "probe"
+                }),
+                "thread/read" => serde_json::json!({
+                    "thread": {
+                        "id": THREAD,
+                        "sessionId": THREAD,
+                        "ephemeral": false,
+                        "canAcceptDirectInput": true,
+                        "cwd": server_workspace.clone(),
+                        "status": {"type": "active", "activeFlags": []}
+                    }
+                }),
+                "thread/queue/add" => {
+                    assert_eq!(request["params"]["threadId"], THREAD);
+                    assert_eq!(request["params"]["input"][0]["type"], "text");
+                    assert_eq!(
+                        request["params"]["input"][0]["text"],
+                        "busy visible message"
+                    );
+                    let client_id = request["params"]["clientUserMessageId"]
+                        .as_str()
+                        .unwrap()
+                        .to_string();
+                    serde_json::json!({
+                        "queuedSubmission": {
+                            "id": "019f3b59-7771-7ea1-a9a1-3cd638f216c6",
+                            "clientUserMessageId": client_id,
+                            "input": request["params"]["input"].clone()
+                        }
+                    })
+                }
+                _ => continue,
+            };
+            socket
+                .send(Message::Text(
+                    serde_json::json!({"id": id, "result": result})
+                        .to_string()
+                        .into(),
+                ))
+                .unwrap();
+            if method == "thread/queue/add" {
+                break;
+            }
+        }
+    });
+    let endpoint = format!("unix://{}", socket_path.display());
+    let target = ResolvedTarget {
+        prodex: process(
+            100,
+            1,
+            "/usr/bin/prodex",
+            vec!["prodex", "s"],
+            &workspace,
+            10,
+        ),
+        writer: process(
+            200,
+            100,
+            "/usr/bin/codex",
+            vec!["codex", "app-server", "--listen", &endpoint],
+            &workspace,
+            20,
+        ),
+        thread_id: THREAD.to_string(),
+        queue_db: root.join("queue_1.sqlite"),
+        state_db: root.join("state_5.sqlite"),
+        environment: TargetEnvironment {
+            home: "/home/test-user".to_string(),
+            codex_home,
+            codex_sqlite_home: root.clone(),
+            pwd: workspace.display().to_string(),
+        },
+        remote_endpoint: Some(endpoint),
+    };
+
+    let invocation = SystemQueueControl.queue_once(&target, "busy visible message");
+    server.join().unwrap();
+    assert!(invocation.succeeded);
+    assert!(invocation.queued);
+    assert!(invocation.message_id.is_some());
+    assert_eq!(
+        methods.lock().unwrap().as_slice(),
+        ["initialize", "thread/read", "thread/queue/add"]
+    );
+    let _ = std::fs::remove_dir_all(root);
+}

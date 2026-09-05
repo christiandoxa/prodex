@@ -265,6 +265,7 @@ fn queue(fixture: &Fixture, message_id: Option<&str>) -> FakeQueueControl {
             succeeded: true,
             exit_code: Some(0),
             message_id: message_id.map(str::to_string),
+            queued: false,
         },
         consumed_message: None,
         calls: Arc::new(Mutex::new(Vec::new())),
