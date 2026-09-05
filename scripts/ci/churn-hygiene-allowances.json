@@ -1827,6 +1827,7 @@
     "requiredSubjects": [
       "feat(kiro): normalize dynamic model catalogs",
       "fix(expose): route Prompt Write through existing sessions",
+      "fix(expose): surface busy session writes in the TUI queue",
       "fix(compat): bundle patched Codex TUI runtime",
       "ci(churn): record audited 0.426.1 clean product fixes"
     ],
@@ -1836,6 +1837,6 @@
       "maxLines": 5200,
       "maxFileLines": 550
     },
-    "reason": "Reviewed the clean 0.426.1 product line rooted directly at origin/main: dynamic Kiro catalog normalization and picker propagation, fail-closed existing-session Prompt Write/output binding with cursor regressions, and the checksum-pinned Codex 0.153.4 queued-input TUI compatibility patch. The narrow caps cover only these named product commits, the audited churn record, and the final release metadata commit; all correctness, security, boundary, terminology, genericity, and release guards remain enforced."
+    "reason": "Reviewed the clean 0.426.1 product line rooted directly at origin/main: dynamic Kiro catalog normalization and picker propagation, fail-closed existing-session Prompt Write/output binding with cursor regressions, busy-session Prompt Write routing through the authoritative queue, and the checksum-pinned Codex 0.153.4 queued-input TUI compatibility patch. The narrow caps cover only these named product commits, the audited churn record, and the final release metadata commit; all correctness, security, boundary, terminology, genericity, and release guards remain enforced."
   }
 ]

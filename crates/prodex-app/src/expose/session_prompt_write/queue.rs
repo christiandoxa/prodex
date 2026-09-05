@@ -302,7 +302,7 @@ impl QueueControl for SystemQueueControl {
         let Some(mut socket) = app_server_socket(target)? else {
             return Ok(false);
         };
-        app_server_thread_is_addressable(&mut socket, target)
+        Ok(app_server_thread_activity(&mut socket, target)?.is_some())
     }
 }
 
@@ -311,11 +311,11 @@ fn app_server_turn_start_once(target: &ResolvedTarget, message: &str) -> QueueIn
     let Ok(Some(mut socket)) = app_server_socket(target) else {
         return QueueInvocation::default();
     };
-    let Ok(Some(activity)) = app_server_thread_activity(&mut socket, target) else {
+    let Ok(Some(active)) = app_server_thread_activity(&mut socket, target) else {
         return QueueInvocation::default();
     };
     let message_id = Uuid::now_v7().to_string();
-    if activity == AppServerThreadActivity::Active {
+    if active {
         return app_server_queue_add_once(&mut socket, target, message, message_id);
     }
     let Ok(Some(result)) = app_server_request_result(
@@ -348,13 +348,6 @@ fn app_server_turn_start_once(target: &ResolvedTarget, message: &str) -> QueueIn
         queued: false,
     }
 }
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum AppServerThreadActivity {
-    Idle,
-    Active,
-}
-
 #[cfg(unix)]
 fn app_server_queue_add_once(
     socket: &mut UnixAppServerSocket,
@@ -377,13 +370,10 @@ fn app_server_queue_add_once(
     let Some(queued_submission) = result.get("queuedSubmission") else {
         return QueueInvocation::default();
     };
-    let Some(queued_id) = queued_submission
+    if queued_submission
         .get("id")
         .and_then(serde_json::Value::as_str)
-    else {
-        return QueueInvocation::default();
-    };
-    if queued_id.is_empty()
+        .is_none_or(str::is_empty)
         || queued_submission
             .get("clientUserMessageId")
             .and_then(serde_json::Value::as_str)
@@ -419,18 +409,10 @@ fn app_server_socket(
 }
 
 #[cfg(unix)]
-fn app_server_thread_is_addressable(
-    socket: &mut UnixAppServerSocket,
-    target: &ResolvedTarget,
-) -> std::result::Result<bool, SessionPromptWriteError> {
-    Ok(app_server_thread_activity(socket, target)?.is_some())
-}
-
-#[cfg(unix)]
 fn app_server_thread_activity(
     socket: &mut UnixAppServerSocket,
     target: &ResolvedTarget,
-) -> std::result::Result<Option<AppServerThreadActivity>, SessionPromptWriteError> {
+) -> std::result::Result<Option<bool>, SessionPromptWriteError> {
     let Some(initialize) = app_server_request_result(
         socket,
         1,
@@ -495,15 +477,12 @@ fn app_server_thread_activity(
     if !prodex_core::same_path(Path::new(thread_cwd), Path::new(&target.environment.pwd)) {
         return Ok(None);
     }
-    let activity = match thread
+    let active = thread
         .get("status")
         .and_then(|status| status.get("type"))
         .and_then(serde_json::Value::as_str)
-    {
-        Some("active") => AppServerThreadActivity::Active,
-        _ => AppServerThreadActivity::Idle,
-    };
-    Ok(Some(activity))
+        == Some("active");
+    Ok(Some(active))
 }
 
 #[cfg(unix)]
