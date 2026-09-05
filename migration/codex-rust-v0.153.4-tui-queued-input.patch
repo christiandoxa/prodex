@@ -1,0 +1,245 @@
+diff --git a/codex-rs/tui/src/app/app_server_events.rs b/codex-rs/tui/src/app/app_server_events.rs
+index 5783787dd5..5bab7a766c 100644
+--- a/codex-rs/tui/src/app/app_server_events.rs
++++ b/codex-rs/tui/src/app/app_server_events.rs
+@@ -93,6 +93,20 @@ impl App {
+         app_server_client: &AppServerSession,
+         notification: ServerNotification,
+     ) {
++        if let ServerNotification::ThreadQueueChanged(queue_changed) = &notification
++            && let Ok(thread_id) = ThreadId::from_string(&queue_changed.thread_id)
++            && self.primary_thread_id == Some(thread_id)
++        {
++            match app_server_client.thread_queue_list(thread_id).await {
++                Ok(queue) => self.chat_widget.set_external_queued_messages(queue.data),
++                Err(error) => tracing::warn!(
++                    %error,
++                    thread_id = %thread_id,
++                    "failed to refresh externally queued TUI input"
++                ),
++            }
++        }
++
+         if let ServerNotification::ThreadStatusChanged(status) = &notification {
+             let _ = self.dynamic_tool_status_updates.send(status.clone());
+         }
+diff --git a/codex-rs/tui/src/app_server_session.rs b/codex-rs/tui/src/app_server_session.rs
+index a29cc9a647..a57b847391 100644
+--- a/codex-rs/tui/src/app_server_session.rs
++++ b/codex-rs/tui/src/app_server_session.rs
+@@ -93,6 +93,8 @@ use codex_app_server_protocol::ThreadMemoryModeSetResponse;
+ use codex_app_server_protocol::ThreadMetadataGitInfoUpdateParams;
+ use codex_app_server_protocol::ThreadMetadataUpdateParams;
+ use codex_app_server_protocol::ThreadMetadataUpdateResponse;
++use codex_app_server_protocol::ThreadQueueListParams;
++use codex_app_server_protocol::ThreadQueueListResponse;
+ use codex_app_server_protocol::ThreadReadParams;
+ use codex_app_server_protocol::ThreadReadResponse;
+ use codex_app_server_protocol::ThreadResumeParams;
+@@ -1069,6 +1071,24 @@ impl AppServerSession {
+         Ok(response.thread)
+     }
+ 
++    pub(crate) async fn thread_queue_list(
++        &self,
++        thread_id: ThreadId,
++    ) -> Result<ThreadQueueListResponse> {
++        let request_id = RequestId::String(format!("tui-thread-queue-list-{}", Uuid::new_v4()));
++        self.client
++            .request_typed(ClientRequest::ThreadQueueList {
++                request_id,
++                params: ThreadQueueListParams {
++                    thread_id: thread_id.to_string(),
++                    cursor: None,
++                    limit: Some(32),
++                },
++            })
++            .await
++            .wrap_err("thread/queue/list failed during TUI pending-input refresh")
++    }
++
+     pub(crate) async fn thread_archive(&mut self, thread_id: ThreadId) -> Result<()> {
+         let request_id = self.next_request_id();
+         let _: ThreadArchiveResponse = self
+diff --git a/codex-rs/tui/src/chatwidget/input_flow.rs b/codex-rs/tui/src/chatwidget/input_flow.rs
+index 74d872d6c0..a580b12fab 100644
+--- a/codex-rs/tui/src/chatwidget/input_flow.rs
++++ b/codex-rs/tui/src/chatwidget/input_flow.rs
+@@ -7,6 +7,14 @@
+ use super::*;
+ 
+ impl ChatWidget {
++    pub(crate) fn set_external_queued_messages(
++        &mut self,
++        submissions: Vec<codex_app_server_protocol::QueuedSubmission>,
++    ) {
++        self.input_queue.set_external_queued_messages(submissions);
++        self.refresh_pending_input_preview();
++    }
++
+     pub(crate) fn set_parent_owned_thread(&mut self) {
+         self.blocks_direct_input = true;
+         self.bottom_pane.set_parent_owned_thread();
+diff --git a/codex-rs/tui/src/chatwidget/input_queue.rs b/codex-rs/tui/src/chatwidget/input_queue.rs
+index 249cade908..0b7ba72562 100644
+--- a/codex-rs/tui/src/chatwidget/input_queue.rs
++++ b/codex-rs/tui/src/chatwidget/input_queue.rs
+@@ -10,6 +10,10 @@ use super::QueuedUserMessage;
+ use super::UserMessage;
+ use super::UserMessageHistoryRecord;
+ use super::user_message_preview_text;
++use codex_app_server_protocol::QueuedSubmission;
++use codex_app_server_protocol::UserInput;
++
++const MAX_EXTERNAL_QUEUE_PREVIEW_CHARS: usize = 4 * 1024;
+ 
+ #[derive(Debug, Default, PartialEq, Eq)]
+ pub(super) struct PendingInputPreview {
+@@ -27,6 +31,8 @@ pub(super) struct InputQueueState {
+     /// stays in lockstep with `queued_user_messages`, with missing entries
+     /// treated as user-message text.
+     pub(super) queued_user_message_history_records: VecDeque<UserMessageHistoryRecord>,
++    /// Follow-up messages persisted by another app-server client.
++    pub(super) external_queued_messages: Vec<ExternalQueuedMessage>,
+     /// A user turn has been submitted to core, but `TurnStarted` has not arrived yet.
+     pub(super) user_turn_pending_start: bool,
+     /// User messages that tried to steer a non-regular turn and must be retried first.
+@@ -56,6 +62,7 @@ impl InputQueueState {
+         self.recovered_queue = false;
+         self.queued_user_messages.clear();
+         self.queued_user_message_history_records.clear();
++        self.external_queued_messages.clear();
+         self.user_turn_pending_start = false;
+         self.rejected_steers_queue.clear();
+         self.rejected_steer_history_records.clear();
+@@ -65,7 +72,7 @@ impl InputQueueState {
+     }
+ 
+     pub(super) fn preview(&self) -> PendingInputPreview {
+-        let queued_messages = self
++        let mut queued_messages = self
+             .queued_user_messages
+             .iter()
+             .enumerate()
+@@ -75,7 +82,12 @@ impl InputQueueState {
+                     self.queued_user_message_history_records.get(idx),
+                 )
+             })
+-            .collect();
++            .collect::<Vec<_>>();
++        queued_messages.extend(
++            self.external_queued_messages
++                .iter()
++                .map(|message| message.text.clone()),
++        );
+         let pending_steers = self
+             .pending_steers
+             .iter()
+@@ -98,6 +110,47 @@ impl InputQueueState {
+             rejected_steers,
+         }
+     }
++
++    pub(super) fn set_external_queued_messages(&mut self, submissions: Vec<QueuedSubmission>) {
++        self.external_queued_messages = submissions
++            .into_iter()
++            .map(ExternalQueuedMessage::from_submission)
++            .collect();
++    }
++}
++
++#[derive(Debug, Clone, PartialEq, Eq)]
++pub(super) struct ExternalQueuedMessage {
++    pub(super) id: String,
++    pub(super) text: String,
++}
++
++impl ExternalQueuedMessage {
++    fn from_submission(submission: QueuedSubmission) -> Self {
++        let mut text = submission
++            .input
++            .into_iter()
++            .filter_map(|input| match input {
++                UserInput::Text { text, .. } => Some(text),
++                _ => None,
++            })
++            .collect::<Vec<_>>()
++            .join("\n");
++        if text.chars().count() > MAX_EXTERNAL_QUEUE_PREVIEW_CHARS {
++            text = text
++                .chars()
++                .take(MAX_EXTERNAL_QUEUE_PREVIEW_CHARS)
++                .collect();
++            text.push('…');
++        }
++        if text.is_empty() {
++            text = "[queued input]".to_string();
++        }
++        Self {
++            id: submission.id,
++            text,
++        }
++    }
+ }
+ 
+ #[cfg(test)]
+@@ -134,6 +187,59 @@ mod tests {
+         );
+     }
+ 
++    #[test]
++    fn preview_includes_external_queue_in_server_order() {
++        let mut state = InputQueueState::default();
++        state.set_external_queued_messages(vec![
++            QueuedSubmission {
++                id: "a".to_string(),
++                input: vec![UserInput::Text {
++                    text: "first".to_string(),
++                    text_elements: Vec::new(),
++                }],
++                client_user_message_id: "client-a".to_string(),
++            },
++            QueuedSubmission {
++                id: "b".to_string(),
++                input: vec![UserInput::Text {
++                    text: "second".to_string(),
++                    text_elements: Vec::new(),
++                }],
++                client_user_message_id: "client-b".to_string(),
++            },
++        ]);
++
++        assert_eq!(state.preview().queued_messages, ["first", "second"]);
++        assert_eq!(state.external_queued_messages[0].id, "a");
++    }
++
++    #[test]
++    fn external_preview_is_bounded_and_does_not_expose_non_text_inputs() {
++        let mut state = InputQueueState::default();
++        state.set_external_queued_messages(vec![QueuedSubmission {
++            id: "bounded".to_string(),
++            input: vec![
++                UserInput::Text {
++                    text: "x".repeat(MAX_EXTERNAL_QUEUE_PREVIEW_CHARS + 1),
++                    text_elements: Vec::new(),
++                },
++                UserInput::Image {
++                    detail: None,
++                    url: "https://example.com/private-image".to_string(),
++                },
++            ],
++            client_user_message_id: "client-bounded".to_string(),
++        }]);
++
++        let preview = &state.preview().queued_messages[0];
++        assert_eq!(
++            preview.chars().count(),
++            MAX_EXTERNAL_QUEUE_PREVIEW_CHARS + 1
++        );
++        assert!(preview.ends_with('…'));
++        assert!(!preview.contains("private-image"));
++    }
++
+     #[test]
+     fn clear_resets_all_input_queues() {
+         let mut state = InputQueueState::default();

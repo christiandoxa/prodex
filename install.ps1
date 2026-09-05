@@ -22,7 +22,7 @@ $NonInteractive = $env:PRODEX_NON_INTERACTIVE -match "^(?i:1|true|yes)$"
 $Migrate = $env:PRODEX_MIGRATE -match "^(?i:1|true|yes)$"
 $NoPathUpdate = $env:PRODEX_NO_PATH_UPDATE -match "^(?i:1|true|yes)$"
 $RequireMojo = $env:PRODEX_INSTALL_REQUIRE_MOJO -match "^(?i:1|true|yes)$"
-$CodexNpmVersion = "0.153.2"
+$CodexNpmVersion = "0.153.4"
 
 function Write-Step {
     param([string]$Message)
@@ -309,6 +309,7 @@ function Set-ActiveRelease {
 Assert-ValidRelease
 $Target = Get-Target
 $Asset = "prodex-$Target.exe"
+$CodexAsset = "codex-$Target.exe"
 
 if ([string]::IsNullOrWhiteSpace($env:PRODEX_INSTALL_DIR)) {
     if ([string]::IsNullOrWhiteSpace($env:LOCALAPPDATA)) {
@@ -339,6 +340,7 @@ try {
     $ChecksumsPath = Join-Path $TempDir "SHA256SUMS"
     $ManifestPath = Join-Path $TempDir "release-manifest.tsv"
     $DownloadPath = Join-Path $TempDir $Asset
+    $CodexDownloadPath = Join-Path $TempDir $CodexAsset
     Write-Step "Downloading Prodex $Release for $Target"
     Copy-Download -Source (Join-DownloadSource -Base $BaseUrl -Leaf "SHA256SUMS") -Destination $ChecksumsPath
     $ManifestAvailable = $true
@@ -381,7 +383,8 @@ try {
         Write-Step "Legacy release without Mojo capability metadata"
     }
     if ($Migrate -and $ManifestAvailable -and
-        (Test-Path -LiteralPath (Join-Path $BinDir "prodex.exe"))) {
+        (Test-Path -LiteralPath (Join-Path $BinDir "prodex.exe")) -and
+        (Test-Path -LiteralPath (Join-Path $BinDir "codex.exe"))) {
         $installedVersionBefore = Get-ProdexVersion -BinaryPath (Join-Path $BinDir "prodex.exe")
         if ($installedVersionBefore -ceq $ManifestVersion) {
             Write-Step "Prodex $ManifestVersion is already up to date."
@@ -393,6 +396,17 @@ try {
     $ActualDigest = Get-Sha256Digest -Path $DownloadPath
     if ($ActualDigest -ne $ExpectedDigest) {
         throw "Downloaded Prodex checksum did not match. Expected $ExpectedDigest but got $ActualDigest."
+    }
+
+    $CodexExpectedDigest = Get-ExpectedDigest -ManifestPath $ChecksumsPath -AssetName $CodexAsset
+    Copy-Download -Source (Join-DownloadSource -Base $BaseUrl -Leaf $CodexAsset) -Destination $CodexDownloadPath
+    $CodexActualDigest = Get-Sha256Digest -Path $CodexDownloadPath
+    if ($CodexActualDigest -ne $CodexExpectedDigest) {
+        throw "Downloaded Codex checksum did not match. Expected $CodexExpectedDigest but got $CodexActualDigest."
+    }
+    $CodexVersion = (& $CodexDownloadPath --version 2>$null | Out-String).Trim()
+    if ($CodexVersion -notmatch "^codex(?:-cli)? 0\.153\.4") {
+        throw "Downloaded Codex asset did not report version 0.153.4."
     }
 
     $InstalledVersion = Get-ProdexVersion -BinaryPath $DownloadPath
@@ -411,16 +425,21 @@ try {
 
     New-Item -ItemType Directory -Force -Path $ReleasesDir | Out-Null
     $ReleaseDir = Join-Path $ReleasesDir "$InstalledVersion-$Target"
-    $ReleaseBinary = Join-Path $ReleaseDir "prodex.exe"
-    if (Test-Path -LiteralPath $ReleaseBinary) {
+        $ReleaseBinary = Join-Path $ReleaseDir "prodex.exe"
+    $ReleaseCodex = Join-Path $ReleaseDir "codex.exe"
+    if ((Test-Path -LiteralPath $ReleaseBinary) -and (Test-Path -LiteralPath $ReleaseCodex)) {
         $ExistingDigest = Get-Sha256Digest -Path $ReleaseBinary
         if ($ExistingDigest -ne $ExpectedDigest) {
             throw "Existing release $ReleaseDir does not match the published checksum."
+        }
+        if ((Get-Sha256Digest -Path $ReleaseCodex) -ne $CodexExpectedDigest) {
+            throw "Existing release $ReleaseDir Codex does not match the published checksum."
         }
     } else {
         $StagingDir = Join-Path $ReleasesDir (".staging." + [guid]::NewGuid().ToString("N"))
         New-Item -ItemType Directory -Path $StagingDir | Out-Null
         Copy-Item -LiteralPath $DownloadPath -Destination (Join-Path $StagingDir "prodex.exe")
+        Copy-Item -LiteralPath $CodexDownloadPath -Destination (Join-Path $StagingDir "codex.exe")
         Move-Item -LiteralPath $StagingDir -Destination $ReleaseDir
     }
 

@@ -126,12 +126,14 @@ if (!platformPackage) {
 }
 
 let nativeBinaryPath;
+let nativePackageRoot;
 try {
   const platformPackageJsonPath = requireFromHere.resolve(
     `${platformPackage.packageName}/package.json`,
   );
+  nativePackageRoot = path.dirname(platformPackageJsonPath);
   nativeBinaryPath = path.join(
-    path.dirname(platformPackageJsonPath),
+    nativePackageRoot,
     "vendor",
     platformPackage.binaryFileName,
   );
@@ -150,6 +152,14 @@ if (!fs.existsSync(nativeBinaryPath)) {
 let cleanup = () => {};
 let codexBin = resolveExternalCodexBin();
 let childPath = process.env.PATH ?? "";
+
+if (!codexBin) {
+  const bundledCodexName = process.platform === "win32" ? "codex.exe" : "codex";
+  const bundledCodexPath = path.join(nativePackageRoot, "vendor", bundledCodexName);
+  if (isExecutableFile(bundledCodexPath)) {
+    codexBin = bundledCodexPath;
+  }
+}
 
 if (!codexBin) {
   const shimDir = fs.mkdtempSync(path.join(os.tmpdir(), "prodex-codex-"));
