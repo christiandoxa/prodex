@@ -420,6 +420,7 @@ if ! printf '%s\n' "$codex_expected_digest" | grep -Eq '^[0-9a-f]{64}$'; then
   exit 1
 fi
 download_file "$base_url/$codex_asset" "$codex_download_path"
+chmod 0755 "$codex_download_path"
 codex_actual_digest="$(file_sha256 "$codex_download_path")"
 if [ "$codex_actual_digest" != "$codex_expected_digest" ]; then
   echo "Downloaded Codex checksum did not match." >&2
