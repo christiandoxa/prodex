@@ -58,13 +58,16 @@ async function fixture(
       `#!/bin/sh\nprintf 'prodex ${existingVersion}\\n'\n`,
       { mode: 0o755 },
     );
+    await fs.writeFile(path.join(binDir, "codex"), "#!/bin/sh\nprintf 'codex-cli 0.153.4\\n'\n", { mode: 0o755 });
   }
   const asset = `prodex-${target}`;
+  const codexAsset = `codex-${target}`;
   const binary = Buffer.from(
     manifestImplementation === null
       ? `#!/bin/sh\nprintf 'prodex ${version}\\n'\n`
       : `#!/bin/sh\nif [ "$1" = "doctor" ]; then\nprintf '%s\\n' '{'\nprintf '%s\\n' '  "implementation": "${manifestImplementation}",'\nprintf '%s\\n' '  "fallback": false,'\nprintf '%s\\n' '  "compiler_required": ${compilerRequired},'\nprintf '%s\\n' '  "self_test": "passed"'\nprintf '%s\\n' '}'\nelse\nprintf 'prodex ${version}\\n'\nfi\n`,
   );
+  const codexBinary = Buffer.from("#!/bin/sh\nprintf 'codex-cli 0.153.4\\n'\n");
   const manifest =
     manifestImplementation === null
       ? null
@@ -79,15 +82,22 @@ async function fixture(
   const digest = validChecksum
     ? crypto.createHash("sha256").update(binary).digest("hex")
     : "0".repeat(64);
+  const codexDigest = validChecksum
+    ? crypto.createHash("sha256").update(codexBinary).digest("hex")
+    : "0".repeat(64);
   const manifestDigest = manifest === null ? null : crypto.createHash("sha256").update(manifest).digest("hex");
   const server = http.createServer((request, response) => {
     requests.push(request.url);
     if (request.url === "/release/SHA256SUMS") {
-      response.end(`${digest}  ${asset}\n${manifestDigest ?? ""}${manifestDigest === null ? "" : `  release-manifest.tsv\n`}`);
+      response.end(
+        `${digest}  ${asset}\n${codexDigest}  ${codexAsset}\n${manifestDigest ?? ""}${manifestDigest === null ? "" : `  release-manifest.tsv\n`}`,
+      );
     } else if (request.url === "/release/release-manifest.tsv" && manifest !== null) {
       response.end(manifest);
     } else if (request.url === `/release/${asset}`) {
       response.end(binary);
+    } else if (request.url === `/release/${codexAsset}`) {
+      response.end(codexBinary);
     } else {
       response.writeHead(404).end();
     }
@@ -112,7 +122,7 @@ async function fixture(
     TEST_MANAGER_LOG: managerLog,
     npm_package_name: "",
   };
-  return { root, binDir, fakeBin, managerLog, requests, asset, env };
+  return { root, binDir, fakeBin, managerLog, requests, asset, codexAsset, env };
 }
 
 async function runInstaller(fixtureState, extraEnv = {}) {
@@ -176,12 +186,25 @@ test("install.ps1 installs the native Windows binary", { skip: process.platform 
   const releaseDir = path.join(root, "release");
   const binDir = path.join(root, "bin");
   const asset = `prodex-${target}.exe`;
+  const codexAsset = `codex-${target}.exe`;
   await fs.mkdir(releaseDir, { recursive: true });
   const binary = await fs.readFile(sourceBinary);
+  const codexSource = path.join(root, "codex-fixture.rs");
+  const codexPath = path.join(root, "codex-fixture.exe");
+  await fs.writeFile(codexSource, 'fn main() { println!("codex-cli 0.153.4"); }\n');
+  const codexBuild = await run("rustc", ["--edition", "2021", codexSource, "-o", codexPath], {
+    cwd: repoRoot,
+  });
+  assert.equal(codexBuild.code, 0, codexBuild.stderr);
+  const codexBinary = await fs.readFile(codexPath);
   await fs.writeFile(path.join(releaseDir, asset), binary);
+  await fs.writeFile(path.join(releaseDir, codexAsset), codexBinary);
   await fs.writeFile(
     path.join(releaseDir, "SHA256SUMS"),
-    `${crypto.createHash("sha256").update(binary).digest("hex")}  ${asset}\n`,
+    `${crypto.createHash("sha256").update(binary).digest("hex")}  ${asset}\n${crypto
+      .createHash("sha256")
+      .update(codexBinary)
+      .digest("hex")}  ${codexAsset}\n`,
   );
   t.after(() => fs.rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }));
 

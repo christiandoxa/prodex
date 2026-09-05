@@ -1,6 +1,7 @@
 use super::ExternalCatalogProvider;
+use anyhow::{Context, Result};
 use prodex_provider_core::{ProviderReasoningEffort, provider_catalog_entry};
-use serde_json::json;
+use serde_json::{Value, json};
 
 const DEFAULT_REASONING_EFFORTS: [ProviderReasoningEffort; 4] = [
     ProviderReasoningEffort::Low,
@@ -8,6 +9,19 @@ const DEFAULT_REASONING_EFFORTS: [ProviderReasoningEffort; 4] = [
     ProviderReasoningEffort::High,
     ProviderReasoningEffort::XHigh,
 ];
+
+pub(super) fn read_external_model_catalog(
+    provider: ExternalCatalogProvider,
+    contents: &str,
+) -> Result<Value> {
+    if matches!(provider, ExternalCatalogProvider::Kiro) {
+        return Ok(json!({
+            "models": crate::profile_commands::parse_kiro_model_catalog_text(contents)
+                .context("failed to parse Kiro model catalog")?,
+        }));
+    }
+    serde_json::from_str(contents).context("failed to parse provider model catalog")
+}
 
 pub(super) fn external_catalog_model(
     provider: ExternalCatalogProvider,

@@ -2,9 +2,10 @@ use super::mcp::{ExposeMcpEndpoint, ExposeMcpEndpointInit, PublicMcpEndpoint};
 use super::run_manager::{ExposeRunManager, ExposeRunState};
 use super::runtime::{ExposeHttpServer, ExposePty, ExposeShared};
 use super::session::ExposeSessionStore;
-use super::session_prompt_injection::{
-    ExistingSessionPromptInjector, PromptInjectionError, PromptInjectionRequest,
-    PromptInjectionSuccess, PromptOutputEvent, PromptOutputReadRequest, PromptOutputReadSuccess,
+use super::session_prompt_write::{
+    ExistingSessionPromptWrite, PromptOutputEvent, PromptOutputReadRequest,
+    PromptOutputReadSuccess, SessionPromptWriteError, SessionPromptWriteRequest,
+    SessionPromptWriteSuccess,
 };
 use crate::ExposeArgs;
 use std::collections::BTreeSet;
@@ -121,29 +122,29 @@ pub(super) fn expose_mcp_request(
 
 #[derive(Default)]
 struct SyntheticSessionBridge {
-    injected: Mutex<Vec<PromptInjectionRequest>>,
+    written: Mutex<Vec<SessionPromptWriteRequest>>,
 }
 
-impl ExistingSessionPromptInjector for SyntheticSessionBridge {
-    fn inject(
+impl ExistingSessionPromptWrite for SyntheticSessionBridge {
+    fn write(
         &self,
-        request: PromptInjectionRequest,
-    ) -> Result<PromptInjectionSuccess, PromptInjectionError> {
-        self.injected.lock().unwrap().push(request);
-        Ok(PromptInjectionSuccess {
+        request: SessionPromptWriteRequest,
+    ) -> Result<SessionPromptWriteSuccess, SessionPromptWriteError> {
+        self.written.lock().unwrap().push(request);
+        Ok(SessionPromptWriteSuccess {
             prodex_pid: 123,
             codex_pid: 456,
             thread_id: "019f3b59-7771-7ea1-a9a1-3cd638f216c4".to_string(),
             message_id: Some("019f3b59-7771-7ea1-a9a1-3cd638f216c5".to_string()),
             queue_exit: 0,
-            verification: "queued_item_present",
+            verification: "rollout_user_event_observed",
         })
     }
 
     fn read_output(
         &self,
         _request: PromptOutputReadRequest,
-    ) -> Result<PromptOutputReadSuccess, PromptInjectionError> {
+    ) -> Result<PromptOutputReadSuccess, SessionPromptWriteError> {
         Ok(PromptOutputReadSuccess {
             prodex_pid: 123,
             codex_pid: 456,
@@ -164,7 +165,7 @@ impl ExistingSessionPromptInjector for SyntheticSessionBridge {
 }
 
 #[test]
-fn mcp_session_bridge_routes_default_input_and_output_tools() {
+fn mcp_session_bridge_routes_prompt_write_and_output_read_tools() {
     let capability = "abcdefghijklmnopqrstuvwxyz0123456789ABCDEFG";
     let crate::Commands::Super(defaults) =
         crate::parse_cli_command_from(["prodex", "s"]).expect("Super args should parse")
@@ -178,7 +179,7 @@ fn mcp_session_bridge_routes_default_input_and_output_tools() {
         "pdxi_bridge".to_string(),
         "bridge".to_string(),
     );
-    let endpoint = ExposeMcpEndpoint::new_with_run_manager_and_injector(ExposeMcpEndpointInit {
+    let endpoint = ExposeMcpEndpoint::new_with_run_manager_and_writer(ExposeMcpEndpointInit {
         capability: capability.to_string(),
         instance_id: "pdxi_bridge".to_string(),
         workspace_name: "bridge".to_string(),
@@ -186,7 +187,7 @@ fn mcp_session_bridge_routes_default_input_and_output_tools() {
         defaults,
         run_manager: manager,
         workspace_root: workspace,
-        session_injector: bridge.clone(),
+        session_prompt_write: bridge.clone(),
     });
     let (listen_addr, shared, mut server) = expose_start_mcp_test_server_with_endpoint(
         endpoint,
@@ -194,18 +195,16 @@ fn mcp_session_bridge_routes_default_input_and_output_tools() {
         expose_test_args(),
     );
     let target = format!("/pdx/v1/{capability}/mcp");
-    let inject = expose_mcp_request(
+    let write = expose_mcp_request(
         listen_addr,
         "bridge.trycloudflare.com",
         &target,
-        r#"{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"prodex_session_prompt_inject","arguments":{"message":"continue fixing"}}}"#,
-        "Mcp-Session-Id: bridge-session\r\nMcp-Method: tools/call\r\nMcp-Name: prodex_session_prompt_inject\r\n",
+        r#"{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"prodex_session_prompt_write","arguments":{"message":"continue fixing"}}}"#,
+        "Mcp-Session-Id: bridge-session\r\nMcp-Method: tools/call\r\nMcp-Name: prodex_session_prompt_write\r\n",
     );
-    assert!(inject.contains("queued_item_present"));
-    assert_eq!(
-        bridge.injected.lock().unwrap()[0].message,
-        "continue fixing"
-    );
+    assert!(write.contains("\"status\":\"written\""));
+    assert!(write.contains("rollout_user_event_observed"));
+    assert_eq!(bridge.written.lock().unwrap()[0].message, "continue fixing");
     let output = expose_mcp_request(
         listen_addr,
         "bridge.trycloudflare.com",
@@ -370,7 +369,7 @@ fn mcp_json_protocol_and_public_route_isolation_are_enforced() {
         "prodex_super_result",
         "prodex_super_cancel",
         "prodex_super_list",
-        "prodex_session_prompt_inject",
+        "prodex_session_prompt_write",
         "prodex_session_output_read",
     ] {
         assert!(tools.contains(name), "missing tool {name}");

@@ -1,0 +1,268 @@
+use super::super_main_prompt::super_sub_agent_model_choices;
+use super::super_prompt::{
+    SUPER_CONFIGURED_MODEL_LIMIT, configured_sub_agent_model_ids,
+    configured_sub_agent_models_from_paths,
+};
+use crate::app_state::AppStateIoExt;
+use prodex_provider_core::ProviderId;
+use std::collections::BTreeMap;
+use std::fs;
+use std::path::{Path, PathBuf};
+
+fn catalog_test_paths(root: &Path) -> crate::AppPaths {
+    crate::AppPaths {
+        root: root.to_path_buf(),
+        state_file: root.join("state.json"),
+        managed_profiles_root: root.join("profiles"),
+        shared_codex_root: root.join("shared"),
+        legacy_shared_codex_root: root.join("legacy"),
+    }
+}
+
+fn kiro_profile(home: PathBuf) -> crate::ProfileEntry {
+    crate::ProfileEntry {
+        codex_home: home,
+        managed: true,
+        email: Some("example@example.test".to_string()),
+        provider: crate::ProfileProvider::Kiro {
+            auth_key: "test-key".to_string(),
+            auth_kind: Some("builder-id".to_string()),
+            profile_arn: None,
+            profile_name: None,
+            start_url: None,
+            region: Some("us-east-1".to_string()),
+        },
+    }
+}
+
+fn save_kiro_catalog_state(
+    root_name: &str,
+    catalogs: &[(&str, serde_json::Value)],
+) -> (crate::AppPaths, PathBuf) {
+    let root = crate::test_support::test_temp_root().join(format!(
+        "prodex-kiro-sub-agent-catalog-{root_name}-{}",
+        std::process::id()
+    ));
+    fs::create_dir_all(root.join("profiles")).unwrap();
+    let paths = catalog_test_paths(&root);
+    let mut profiles = BTreeMap::new();
+    for (name, catalog) in catalogs {
+        let home = paths.managed_profiles_root.join(name);
+        fs::create_dir_all(&home).unwrap();
+        fs::write(
+            home.join(crate::KIRO_MODEL_CATALOG_FILE),
+            catalog.to_string(),
+        )
+        .unwrap();
+        profiles.insert((*name).to_string(), kiro_profile(home));
+    }
+    crate::AppState {
+        active_profile: catalogs.first().map(|(name, _)| (*name).to_string()),
+        profiles,
+        ..crate::AppState::default()
+    }
+    .save(&paths)
+    .unwrap();
+    (paths, root)
+}
+
+fn picker_model_ids(configured: &[String]) -> Vec<String> {
+    super_sub_agent_model_choices(ProviderId::Kiro, None, configured)
+        .into_iter()
+        .filter_map(|choice| match choice {
+            prodex_provider_core::ProviderModelChoice::Model(model) => Some(model),
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn imported_kiro_snapshot_populates_sub_agent_picker() {
+    let (paths, root) = save_kiro_catalog_state(
+        "single",
+        &[(
+            "kiro-a",
+            serde_json::json!({
+                "models": [
+                    {"model_id": "catalog-model-a", "model_name": "Catalog Model A"}
+                ]
+            }),
+        )],
+    );
+    let configured = configured_sub_agent_models_from_paths(&paths, ProviderId::Kiro);
+    assert_eq!(configured, ["catalog-model-a"]);
+    assert_eq!(
+        picker_model_ids(&configured),
+        ["gpt-5.6-luna", "auto", "catalog-model-a"]
+    );
+    assert_eq!(
+        prodex_provider_core::resolve_provider_model_choices(ProviderId::Kiro, &configured, None)
+            .last(),
+        Some(&prodex_provider_core::ProviderModelChoice::Custom)
+    );
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn multiple_kiro_snapshots_merge_case_insensitively_in_state_order() {
+    let (paths, root) = save_kiro_catalog_state(
+        "multiple",
+        &[
+            (
+                "kiro-a",
+                serde_json::json!({
+                    "models": [{"id": "Catalog-Model-A"}, {"id": "catalog-model-b"}]
+                }),
+            ),
+            (
+                "kiro-b",
+                serde_json::json!({
+                    "models": [{"id": "catalog-model-a"}, {"id": "CATALOG-MODEL-B"}]
+                }),
+            ),
+        ],
+    );
+    assert_eq!(
+        configured_sub_agent_models_from_paths(&paths, ProviderId::Kiro),
+        ["Catalog-Model-A", "catalog-model-b"]
+    );
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn stale_kiro_profile_home_does_not_hide_healthy_catalog() {
+    let root = crate::test_support::test_temp_root()
+        .join(format!("prodex-kiro-stale-profile-{}", std::process::id()));
+    let paths = catalog_test_paths(&root);
+    let healthy_home = paths.managed_profiles_root.join("kiro-healthy");
+    fs::create_dir_all(&healthy_home).unwrap();
+    fs::write(
+        healthy_home.join(crate::KIRO_MODEL_CATALOG_FILE),
+        serde_json::json!({
+            "availableModels": [{"modelId": "healthy-model"}]
+        })
+        .to_string(),
+    )
+    .unwrap();
+    let mut profiles = BTreeMap::new();
+    for index in 0..super::super_prompt::SUPER_CONFIGURED_MODEL_PROFILE_LIMIT {
+        profiles.insert(
+            format!("kiro-000-stale-{index:03}"),
+            kiro_profile(
+                paths
+                    .managed_profiles_root
+                    .join(format!("missing-{index:03}")),
+            ),
+        );
+    }
+    profiles.insert("kiro-healthy".to_string(), kiro_profile(healthy_home));
+    crate::AppState {
+        active_profile: Some("kiro-000-stale-000".to_string()),
+        profiles,
+        ..crate::AppState::default()
+    }
+    .save(&paths)
+    .unwrap();
+
+    assert_eq!(
+        configured_sub_agent_models_from_paths(&paths, ProviderId::Kiro),
+        ["healthy-model"]
+    );
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn missing_or_malformed_kiro_snapshot_keeps_static_picker_safe() {
+    let (paths, root) = save_kiro_catalog_state(
+        "fallback",
+        &[(
+            "kiro-a",
+            serde_json::json!({
+                "models": [{"id": "dynamic-before-malformed"}]
+            }),
+        )],
+    );
+    fs::remove_file(
+        paths
+            .managed_profiles_root
+            .join("kiro-a")
+            .join(crate::KIRO_MODEL_CATALOG_FILE),
+    )
+    .unwrap();
+    assert!(configured_sub_agent_models_from_paths(&paths, ProviderId::Kiro).is_empty());
+    assert_eq!(picker_model_ids(&[]), ["gpt-5.6-luna", "auto"]);
+    fs::write(
+        paths
+            .managed_profiles_root
+            .join("kiro-a")
+            .join(crate::KIRO_MODEL_CATALOG_FILE),
+        r#"{"models":[{"id":"secret-marker"}]} trailing"#,
+    )
+    .unwrap();
+    assert!(configured_sub_agent_models_from_paths(&paths, ProviderId::Kiro).is_empty());
+    fs::write(
+        paths
+            .managed_profiles_root
+            .join("kiro-a")
+            .join(crate::KIRO_MODEL_CATALOG_FILE),
+        vec![b'x'; crate::PROVIDER_MODEL_CATALOG_MAX_BYTES as usize + 1],
+    )
+    .unwrap();
+    assert!(configured_sub_agent_models_from_paths(&paths, ProviderId::Kiro).is_empty());
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn configured_model_ids_keep_case_insensitive_limit() {
+    let mut models = Vec::new();
+    configured_sub_agent_model_ids(
+        &serde_json::json!({
+            "models": [
+                {"id": null, "modelId": "fallback-model"},
+                {"modelId": "Model-A"},
+                {"id": "model-a"},
+                {"slug": "Model-B"}
+            ]
+        }),
+        &mut models,
+        SUPER_CONFIGURED_MODEL_LIMIT,
+    );
+    assert_eq!(models, ["fallback-model", "Model-A", "Model-B"]);
+}
+
+#[test]
+fn kiro_catalog_parser_preserves_normalized_metadata() {
+    let models = crate::parse_kiro_model_catalog_text(
+        &serde_json::json!({
+            "supportedModels": [
+                {"id": "supported-id", "name": "Supported", "context_window_tokens": 123},
+                {"model_id": "snake-id", "model_name": "Snake", "contextWindowTokens": 456},
+                {"modelId": "camel-id", "modelName": "Camel"},
+                {"slug": "slug-id"},
+                {"model": "model-id"}
+            ]
+        })
+        .to_string(),
+    )
+    .unwrap();
+    assert_eq!(
+        models
+            .iter()
+            .filter_map(|model| model.get("id").and_then(serde_json::Value::as_str))
+            .collect::<Vec<_>>(),
+        [
+            "supported-id",
+            "snake-id",
+            "camel-id",
+            "slug-id",
+            "model-id"
+        ]
+    );
+    assert_eq!(models[0]["name"], "Supported");
+    assert_eq!(models[0]["context_window_tokens"], 123);
+    assert_eq!(models[1]["name"], "Snake");
+    assert_eq!(models[1]["context_window_tokens"], 456);
+    assert_eq!(models[2]["name"], "Camel");
+    assert_eq!(models[3]["name"], "slug-id");
+    assert_eq!(models[4]["name"], "model-id");
+}
