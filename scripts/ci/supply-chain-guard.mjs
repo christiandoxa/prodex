@@ -351,7 +351,7 @@ export function validateReleaseContainerPublication(contents) {
     );
   }
   for (const [name, job, timeout] of [
-    ["build", build, 120],
+    ["build", build, 180],
     ["attest-binaries", attestBinaries, 15],
     ["prepare-release", prepare, 30],
     ["sync-release-docs", syncDocs, 15],
