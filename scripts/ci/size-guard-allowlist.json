@@ -146,7 +146,7 @@
   },
   {
     "file": "crates/prodex-app/src/runtime_external_provider_config.rs",
-    "maxLines": 971,
+    "maxLines": 970,
     "reason": "External provider configuration preserves exact secret validation while bounded canonical-plus-configured model catalog loading remains shared at this profile boundary; catalog row rendering lives in a focused sibling."
   },
   {
