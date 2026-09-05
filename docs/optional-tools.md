@@ -97,7 +97,7 @@ Ponytail uses the same manifest and tree-validation contract at
 - commit: `0a4dd63ad4541f4f655c4108a295916f3c1d8fda`
 - tree SHA-256: `88c6dfa10bc0a63385a8f3f01bc4a3e51963c8fd76a0ebc0426bd889f0705970`
 
-RTK `0.47.0` is the latest stable release validated for this Prodex release; it remains
+RTK `0.48.0` is the latest stable release validated for this Prodex release; it remains
 externally managed and version-compatible rather than latest-only. Codebase Memory MCP
 `0.10.8` is the latest stable release validated for this Prodex release. Both resolve from
 managed roots first and then `PATH`.

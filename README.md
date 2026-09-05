@@ -212,7 +212,7 @@ prodex caveman --dry-run
 
 The target directory must not already exist. Prodex validates the commit metadata and complete tree digest before activating Caveman.
 
-RTK (latest stable `0.47.0`, externally managed):
+RTK (latest stable `0.48.0`, externally managed):
 
 ```bash
 brew install rtk

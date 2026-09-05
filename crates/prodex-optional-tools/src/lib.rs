@@ -40,7 +40,7 @@ pub const PONYTAIL_VETTED_COMMIT: &str = "0a4dd63ad4541f4f655c4108a295916f3c1d8f
 pub const PONYTAIL_VETTED_TREE_SHA256: &str =
     "88c6dfa10bc0a63385a8f3f01bc4a3e51963c8fd76a0ebc0426bd889f0705970";
 pub(crate) const PLAYWRIGHT_MCP_PACKAGE: &str = "@playwright/mcp@0.0.80";
-pub(crate) const RTK_RECOMMENDED_VERSION: &str = "0.47.0";
+pub(crate) const RTK_RECOMMENDED_VERSION: &str = "0.48.0";
 pub(crate) const CODEBASE_MEMORY_RECOMMENDED_VERSION: &str = "0.10.8";
 pub(crate) const PRESIDIO_RECOMMENDED_VERSION: &str = "2.2.364";
 
