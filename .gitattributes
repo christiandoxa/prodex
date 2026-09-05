@@ -1,1 +1,2 @@
 *.patch whitespace=-blank-at-eol
+migration/codex-rust-v0.153.4-tui-queued-input.patch -text
