@@ -186,12 +186,25 @@ test("install.ps1 installs the native Windows binary", { skip: process.platform 
   const releaseDir = path.join(root, "release");
   const binDir = path.join(root, "bin");
   const asset = `prodex-${target}.exe`;
+  const codexAsset = `codex-${target}.exe`;
   await fs.mkdir(releaseDir, { recursive: true });
   const binary = await fs.readFile(sourceBinary);
+  const codexSource = path.join(root, "codex-fixture.rs");
+  const codexPath = path.join(root, "codex-fixture.exe");
+  await fs.writeFile(codexSource, 'fn main() { println!("codex-cli 0.153.4"); }\n');
+  const codexBuild = await run("rustc", ["--edition", "2021", codexSource, "-o", codexPath], {
+    cwd: repoRoot,
+  });
+  assert.equal(codexBuild.code, 0, codexBuild.stderr);
+  const codexBinary = await fs.readFile(codexPath);
   await fs.writeFile(path.join(releaseDir, asset), binary);
+  await fs.writeFile(path.join(releaseDir, codexAsset), codexBinary);
   await fs.writeFile(
     path.join(releaseDir, "SHA256SUMS"),
-    `${crypto.createHash("sha256").update(binary).digest("hex")}  ${asset}\n`,
+    `${crypto.createHash("sha256").update(binary).digest("hex")}  ${asset}\n${crypto
+      .createHash("sha256")
+      .update(codexBinary)
+      .digest("hex")}  ${codexAsset}\n`,
   );
   t.after(() => fs.rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }));
 
