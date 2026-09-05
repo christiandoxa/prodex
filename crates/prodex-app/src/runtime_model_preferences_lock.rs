@@ -8,6 +8,7 @@ pub(super) fn try_acquire_model_preference_lock(
     path: &Path,
     deadline: Instant,
 ) -> Result<Option<fs::File>> {
+    let deadline = deadline + Duration::from_millis(750 * cfg!(windows) as u64);
     let lock_path = crate::runtime_store::json_lock_file_path(path);
     let file = fs::OpenOptions::new()
         .create(true)
