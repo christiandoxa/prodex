@@ -551,6 +551,10 @@ jobs:
             && rm -rf /var/lib/apt/lists/*
           EOF
           fi
+          if [ "${{ matrix.target }}" = "x86_64-unknown-linux-gnu" ]; then
+            sudo apt-get update
+            sudo apt-get install --assume-yes --no-install-recommends libssl-dev
+          fi
           build_args=(--release --target "${{ matrix.target }}" -p codex-cli --bin codex)
           if [ "${{ matrix.use-cross }}" = "true" ]; then
             (cd "${codex_source}/codex-rs" && CARGO_TARGET_DIR="${codex_target}" cross build --locked "${build_args[@]}")
