@@ -9,11 +9,7 @@ const MODEL_PREFERENCE_SCHEMA_VERSION: u32 = 1;
 const MODEL_PREFERENCE_FILE: &str = "model-preferences.json";
 const OPENAI_PROVIDER_ID: &str = "openai";
 const GOVERNED_OPENAI_TRANSPORT_PROVIDER_ID: &str = "prodex-openai-governed-http";
-const MODEL_PREFERENCE_LOCK_WAIT: Duration = if cfg!(windows) {
-    Duration::from_secs(2)
-} else {
-    Duration::from_millis(250)
-};
+const MODEL_PREFERENCE_LOCK_WAIT: Duration = Duration::from_millis(250);
 #[path = "runtime_model_preferences_launch.rs"]
 mod launch;
 #[path = "runtime_model_preferences_lock.rs"]
