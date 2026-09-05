@@ -1,6 +1,6 @@
 use super::{
-    OpenProcessFile, ProcessRecord, PromptInjectionError, QUEUE_COMMAND_OUTPUT_LIMIT,
-    QUEUE_COMMAND_TIMEOUT, ResolvedTarget, first_codex_positional_arg, is_control_socket,
+    OpenProcessFile, ProcessRecord, QUEUE_COMMAND_OUTPUT_LIMIT, QUEUE_COMMAND_TIMEOUT,
+    ResolvedTarget, SessionPromptWriteError, first_codex_positional_arg, is_control_socket,
     is_rollout_file_name,
 };
 use rusqlite::{Connection, OpenFlags, OptionalExtension, params};
@@ -9,9 +9,14 @@ use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use uuid::Uuid;
+
+#[cfg(unix)]
+use crate::app_server_control::{UnixAppServerSocket, connect_unix_socket, request_result};
+#[cfg(unix)]
+use tungstenite::Message as WsMessage;
 pub(crate) fn resolve_thread_identity(
     files: &[OpenProcessFile],
-) -> std::result::Result<String, PromptInjectionError> {
+) -> std::result::Result<String, SessionPromptWriteError> {
     let modern = files
         .iter()
         .filter_map(|file| modern_thread_id(&file.path))
@@ -21,14 +26,14 @@ pub(crate) fn resolve_thread_identity(
         .filter_map(|file| legacy_thread_id(&file.path))
         .collect::<BTreeSet<_>>();
     if modern.len() > 1 || legacy.len() > 1 {
-        return Err(PromptInjectionError::ThreadIdentityUnavailable);
+        return Err(SessionPromptWriteError::ThreadIdentityConflict);
     }
     match (modern.into_iter().next(), legacy.into_iter().next()) {
         (Some(modern), Some(legacy)) if modern != legacy => {
-            Err(PromptInjectionError::ThreadIdentityConflict)
+            Err(SessionPromptWriteError::ThreadIdentityConflict)
         }
         (Some(thread_id), _) | (_, Some(thread_id)) => Ok(thread_id),
-        (None, None) => Err(PromptInjectionError::ThreadIdentityUnavailable),
+        (None, None) => Err(SessionPromptWriteError::ThreadIdentityUnavailable),
     }
 }
 
@@ -72,7 +77,7 @@ pub(crate) enum DatabaseKind {
 pub(crate) fn exact_open_database(
     files: &[OpenProcessFile],
     kind: DatabaseKind,
-) -> std::result::Result<Option<PathBuf>, PromptInjectionError> {
+) -> std::result::Result<Option<PathBuf>, SessionPromptWriteError> {
     let mut paths = BTreeSet::new();
     for file in files {
         let Some(name) = file.path.file_name().and_then(|value| value.to_str()) else {
@@ -86,18 +91,18 @@ pub(crate) fn exact_open_database(
             continue;
         }
         if file.path.to_string_lossy().ends_with(" (deleted)") {
-            return Err(PromptInjectionError::QueueDbUnavailable);
+            return Err(SessionPromptWriteError::QueueDbUnavailable);
         }
         let path = file
             .path
             .canonicalize()
-            .map_err(|_| PromptInjectionError::QueueDbUnavailable)?;
+            .map_err(|_| SessionPromptWriteError::QueueDbUnavailable)?;
         paths.insert(path);
     }
     match paths.len() {
         0 => Ok(None),
         1 => Ok(paths.into_iter().next()),
-        _ => Err(PromptInjectionError::QueueDbUnavailable),
+        _ => Err(SessionPromptWriteError::QueueDbUnavailable),
     }
 }
 
@@ -159,11 +164,6 @@ fn valid_unix_endpoint(value: &str, codex_home: &Path) -> Option<String> {
 }
 
 #[derive(Clone, Debug, Default)]
-pub(crate) struct QueueSnapshot {
-    pub(crate) item_ids: BTreeSet<String>,
-}
-
-#[derive(Clone, Debug, Default)]
 pub(crate) struct QueueInvocation {
     pub(crate) succeeded: bool,
     pub(crate) exit_code: Option<i32>,
@@ -174,23 +174,25 @@ pub(crate) trait QueueControl {
     fn check_capability(
         &self,
         target: &ResolvedTarget,
-    ) -> std::result::Result<(), PromptInjectionError>;
+    ) -> std::result::Result<(), SessionPromptWriteError>;
     fn persisted_thread(
         &self,
         state_db: &Path,
         thread_id: &str,
-    ) -> std::result::Result<bool, PromptInjectionError>;
+    ) -> std::result::Result<bool, SessionPromptWriteError>;
     fn rollout_path(
         &self,
         state_db: &Path,
         thread_id: &str,
-    ) -> std::result::Result<Option<PathBuf>, PromptInjectionError>;
-    fn snapshot(
-        &self,
-        queue_db: &Path,
-        thread_id: &str,
-    ) -> std::result::Result<QueueSnapshot, PromptInjectionError>;
+    ) -> std::result::Result<Option<PathBuf>, SessionPromptWriteError>;
     fn queue_once(&self, target: &ResolvedTarget, message: &str) -> QueueInvocation;
+    fn loaded_thread_addressable(
+        &self,
+        target: &ResolvedTarget,
+    ) -> std::result::Result<bool, SessionPromptWriteError> {
+        let _ = target;
+        Ok(false)
+    }
 }
 
 #[derive(Clone, Copy, Default)]
@@ -200,14 +202,21 @@ impl QueueControl for SystemQueueControl {
     fn check_capability(
         &self,
         target: &ResolvedTarget,
-    ) -> std::result::Result<(), PromptInjectionError> {
+    ) -> std::result::Result<(), SessionPromptWriteError> {
+        if target
+            .remote_endpoint
+            .as_deref()
+            .is_some_and(|endpoint| endpoint.starts_with("unix://"))
+        {
+            return Ok(());
+        }
         let output = run_codex_command(target, ["queue", "--help"])
-            .map_err(|_| PromptInjectionError::QueueUnsupported)?;
+            .map_err(|_| SessionPromptWriteError::QueueUnsupported)?;
         let text = String::from_utf8_lossy(&output);
         if text.contains("--thread") && text.contains("--message") {
             Ok(())
         } else {
-            Err(PromptInjectionError::QueueUnsupported)
+            Err(SessionPromptWriteError::QueueUnsupported)
         }
     }
 
@@ -215,7 +224,7 @@ impl QueueControl for SystemQueueControl {
         &self,
         state_db: &Path,
         thread_id: &str,
-    ) -> std::result::Result<bool, PromptInjectionError> {
+    ) -> std::result::Result<bool, SessionPromptWriteError> {
         let connection = open_read_only_database(state_db)?;
         let legacy_thread_id = format!("thread_{thread_id}");
         connection
@@ -230,16 +239,16 @@ impl QueueControl for SystemQueueControl {
                     .then_some(false)
                     .ok_or(error)
             })
-            .map_err(|_| PromptInjectionError::SessionNotQueueAddressable)
+            .map_err(|_| SessionPromptWriteError::SessionNotQueueAddressable)
     }
 
     fn rollout_path(
         &self,
         state_db: &Path,
         thread_id: &str,
-    ) -> std::result::Result<Option<PathBuf>, PromptInjectionError> {
+    ) -> std::result::Result<Option<PathBuf>, SessionPromptWriteError> {
         let connection = open_read_only_database(state_db)
-            .map_err(|_| PromptInjectionError::OutputSourceUnavailable)?;
+            .map_err(|_| SessionPromptWriteError::OutputSourceUnavailable)?;
         let legacy_thread_id = format!("thread_{thread_id}");
         connection
             .query_row(
@@ -249,44 +258,19 @@ impl QueueControl for SystemQueueControl {
             )
             .optional()
             .map(|path| path.map(PathBuf::from))
-            .map_err(|_| PromptInjectionError::OutputSourceUnavailable)
-    }
-
-    fn snapshot(
-        &self,
-        queue_db: &Path,
-        thread_id: &str,
-    ) -> std::result::Result<QueueSnapshot, PromptInjectionError> {
-        let connection = open_read_only_database(queue_db)?;
-        let mut statement = connection
-            .prepare(
-                "SELECT id, thread_id, queue_order, created_at_ms, updated_at_ms \
-                 FROM queued_items WHERE thread_id = ?1 ORDER BY queue_order LIMIT 101",
-            )
-            .map_err(|_| PromptInjectionError::VerificationInconclusive)?;
-        let rows = statement
-            .query_map(params![thread_id], |row| {
-                let id = row.get::<_, String>(0)?;
-                let stored_thread_id = row.get::<_, String>(1)?;
-                let _queue_order = row.get::<_, i64>(2)?;
-                let _created_at_ms = row.get::<_, i64>(3)?;
-                let _updated_at_ms = row.get::<_, i64>(4)?;
-                Ok((id, stored_thread_id))
-            })
-            .map_err(|_| PromptInjectionError::VerificationInconclusive)?;
-        let mut item_ids = BTreeSet::new();
-        for row in rows {
-            let (id, stored_thread_id) =
-                row.map_err(|_| PromptInjectionError::VerificationInconclusive)?;
-            if stored_thread_id != thread_id {
-                return Err(PromptInjectionError::VerificationInconclusive);
-            }
-            item_ids.insert(id);
-        }
-        Ok(QueueSnapshot { item_ids })
+            .map_err(|_| SessionPromptWriteError::OutputSourceUnavailable)
     }
 
     fn queue_once(&self, target: &ResolvedTarget, message: &str) -> QueueInvocation {
+        #[cfg(unix)]
+        if target
+            .remote_endpoint
+            .as_deref()
+            .is_some_and(|endpoint| endpoint.starts_with("unix://"))
+        {
+            return app_server_turn_start_once(target, message);
+        }
+
         let mut arguments = vec![
             OsString::from("queue"),
             OsString::from("--thread"),
@@ -307,14 +291,168 @@ impl QueueControl for SystemQueueControl {
             message_id,
         }
     }
+
+    #[cfg(unix)]
+    fn loaded_thread_addressable(
+        &self,
+        target: &ResolvedTarget,
+    ) -> std::result::Result<bool, SessionPromptWriteError> {
+        let Some(mut socket) = app_server_socket(target)? else {
+            return Ok(false);
+        };
+        app_server_thread_is_addressable(&mut socket, target)
+    }
 }
 
-fn open_read_only_database(path: &Path) -> std::result::Result<Connection, PromptInjectionError> {
+#[cfg(unix)]
+fn app_server_turn_start_once(target: &ResolvedTarget, message: &str) -> QueueInvocation {
+    let Ok(Some(mut socket)) = app_server_socket(target) else {
+        return QueueInvocation::default();
+    };
+    let Ok(true) = app_server_thread_is_addressable(&mut socket, target) else {
+        return QueueInvocation::default();
+    };
+    let message_id = Uuid::now_v7().to_string();
+    let Ok(Some(result)) = app_server_request_result(
+        &mut socket,
+        3,
+        "turn/start",
+        serde_json::json!({
+            "threadId": target.thread_id,
+            "clientUserMessageId": message_id,
+            "input": [{"type": "text", "text": message, "textElements": []}],
+        }),
+    ) else {
+        return QueueInvocation::default();
+    };
+    let Some(turn) = result.get("turn") else {
+        return QueueInvocation::default();
+    };
+    if turn
+        .get("id")
+        .and_then(serde_json::Value::as_str)
+        .is_none_or(str::is_empty)
+        || turn.get("status").and_then(serde_json::Value::as_str) != Some("inProgress")
+    {
+        return QueueInvocation::default();
+    }
+    QueueInvocation {
+        succeeded: true,
+        exit_code: Some(0),
+        message_id: Some(message_id),
+    }
+}
+
+#[cfg(unix)]
+fn app_server_socket(
+    target: &ResolvedTarget,
+) -> std::result::Result<Option<UnixAppServerSocket>, SessionPromptWriteError> {
+    let Some(endpoint) = target.remote_endpoint.as_deref() else {
+        return Ok(None);
+    };
+    let Some(socket_path) = endpoint.strip_prefix("unix://") else {
+        return Ok(None);
+    };
+    let socket_path = Path::new(socket_path);
+    if !socket_path.is_absolute() {
+        return Ok(None);
+    }
+    let socket = connect_unix_socket(socket_path)
+        .map_err(|_| SessionPromptWriteError::SessionNotQueueAddressable)?;
+    Ok(Some(socket))
+}
+
+#[cfg(unix)]
+fn app_server_thread_is_addressable(
+    socket: &mut UnixAppServerSocket,
+    target: &ResolvedTarget,
+) -> std::result::Result<bool, SessionPromptWriteError> {
+    let Some(initialize) = app_server_request_result(
+        socket,
+        1,
+        "initialize",
+        serde_json::json!({
+            "clientInfo": {
+                "name": "prodex-session-bridge",
+                "version": env!("CARGO_PKG_VERSION"),
+            },
+            "capabilities": {"experimentalApi": true},
+        }),
+    )?
+    else {
+        return Ok(false);
+    };
+    let Some(server_home) = initialize
+        .get("codexHome")
+        .and_then(serde_json::Value::as_str)
+    else {
+        return Ok(false);
+    };
+    if !prodex_core::same_path(Path::new(server_home), &target.environment.codex_home) {
+        return Ok(false);
+    }
+    socket
+        .send(WsMessage::Text(
+            serde_json::json!({"method": "initialized"})
+                .to_string()
+                .into(),
+        ))
+        .map_err(|_| SessionPromptWriteError::SessionNotQueueAddressable)?;
+    let Some(result) = app_server_request_result(
+        socket,
+        2,
+        "thread/read",
+        serde_json::json!({
+            "threadId": target.thread_id,
+            "includeTurns": false,
+        }),
+    )?
+    else {
+        return Ok(false);
+    };
+    let Some(thread) = result.get("thread") else {
+        return Ok(false);
+    };
+    let id_matches =
+        thread.get("id").and_then(serde_json::Value::as_str) == Some(&target.thread_id);
+    let session_matches = thread.get("sessionId").and_then(serde_json::Value::as_str)
+        == Some(target.thread_id.as_str());
+    let non_ephemeral = thread.get("ephemeral").and_then(serde_json::Value::as_bool) != Some(true);
+    let accepts_input = thread
+        .get("canAcceptDirectInput")
+        .and_then(serde_json::Value::as_bool)
+        != Some(false);
+    if !(id_matches && session_matches && non_ephemeral && accepts_input) {
+        return Ok(false);
+    }
+    let Some(thread_cwd) = thread.get("cwd").and_then(serde_json::Value::as_str) else {
+        return Ok(false);
+    };
+    Ok(prodex_core::same_path(
+        Path::new(thread_cwd),
+        Path::new(&target.environment.pwd),
+    ))
+}
+
+#[cfg(unix)]
+fn app_server_request_result(
+    socket: &mut UnixAppServerSocket,
+    request_id: u64,
+    method: &str,
+    params: serde_json::Value,
+) -> std::result::Result<Option<serde_json::Value>, SessionPromptWriteError> {
+    request_result(socket, request_id, method, params)
+        .map_err(|_| SessionPromptWriteError::SessionNotQueueAddressable)
+}
+
+fn open_read_only_database(
+    path: &Path,
+) -> std::result::Result<Connection, SessionPromptWriteError> {
     Connection::open_with_flags(
         path,
         OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
     )
-    .map_err(|_| PromptInjectionError::VerificationInconclusive)
+    .map_err(|_| SessionPromptWriteError::VerificationInconclusive)
 }
 
 fn run_codex_command<I, S>(target: &ResolvedTarget, arguments: I) -> anyhow::Result<Vec<u8>>

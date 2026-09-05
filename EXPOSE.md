@@ -215,31 +215,36 @@ MCP primitive:
 When a separate plain `prodex s` already exists in the captured workspace, the
 default tool list additionally contains:
 
-- `prodex_session_prompt_inject`: queue a message into that exact existing
-  Codex thread using the supported Codex queue/app-server control plane;
-- `prodex_session_output_read`: read bounded sanitized visible output from that
-  same thread with an opaque monotonic cursor.
+- `prodex_session_prompt_write`: deliver one session input to that exact existing
+  Codex thread using the supported Codex app-server control plane;
+- `prodex_session_output_read`: read bounded sanitized visible user, assistant,
+  tool, MCP/agent, and session/turn-status events from that same thread with an
+  opaque monotonic cursor.
 
 The common calls are `{"message":"continue fixing the issue"}` and `{}`. A
-read returns `next_cursor`; pass it as `cursor` to receive only later output.
+prompt write is handled by the already-open parent session; its visible
+TUI remains the human-facing view. A read returns `next_cursor`; pass it as
+`cursor` to receive only later output.
 Both directions use one shared process identity resolver: same OS user and
 canonical cwd, one live plain `prodex s`, its actual live Codex writer, and the
 writer's process-bound thread identity. Ambiguous or stale targets fail closed.
-Neither tool reads `/dev/pts`, injects terminal keystrokes, starts a solver, or
+Neither tool reads `/dev/pts`, sends terminal keystrokes, starts a solver, or
 writes SQLite queue payloads. Raw hidden reasoning, prompt instructions, and
 credentials are not returned.
 
 Thread identity authority is the open
 `thread-writer-locks/<UUID>.lock` held by the current writer. Older Codex
 versions may use exactly one open `rollout-...-<UUID>.jsonl`; when both are
-open, their UUIDs must agree. The normal `prodex s` lifecycle uses a persisted,
-queue-addressable local Codex app-server session so the supported queue path
-can address the existing writer without attaching a second writer.
+open, their UUIDs must agree. With Codex 0.153.2, a fresh idle `prodex s` can
+hold its exact thread in the live app-server before its first rollout row
+exists. The bridge verifies that loaded thread through the writer's socket,
+writes through Codex, and requires persistence after writing without attaching
+a second writer.
 
 This is separate from the runtime/model proxy, which handles provider traffic
 and measured token throughput, and from Expose's browser PTY plus
 `/expose/input`, which is only for the PTY owned by that Expose instance. The
-existing-session MCP bridge is a third, Codex-supported queue/history control
+existing-session MCP bridge is a third, Codex-supported session/history control
 plane for the original plain `prodex s` thread.
 
 The run manager permits four active runs, sixteen queued runs, thirty-two

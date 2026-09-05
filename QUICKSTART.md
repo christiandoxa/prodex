@@ -193,10 +193,15 @@ Settings → Security and login → Developer mode → Plugins → + → Public 
 
 With one plain `prodex s` already running in this workspace, MCP also exposes
 the existing-session bridge by default. Call
-`prodex_session_prompt_inject({"message":"inspect the failing test"})`, then
+`prodex_session_prompt_write({"message":"inspect the failing test"})`, then
 call `prodex_session_output_read({})`. Save `next_cursor` and pass it as
 `cursor` on the next read; output is bounded and never consumes the TUI stream.
+The prompt write is processed and shown in the already-open parent TUI.
 These tools use the same proven Codex thread and do not start another solver.
+For development requests, start `prodex_super_start` only after the bridge returns
+authoritative `no_session`; ambiguity, stale identity, addressability, queue,
+source, or verification errors must fail closed. A fresh idle session needs no
+manual bootstrap prompt.
 
 Cloudflare mode prints a public URL ending in `/mcp` and containing a fresh
 ephemeral full-Super capability.

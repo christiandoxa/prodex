@@ -41,6 +41,8 @@ use tungstenite::{
 
 mod app_commands;
 mod app_server_broker;
+#[cfg(unix)]
+mod app_server_control;
 mod app_state;
 mod audit_log;
 mod cli_args;
@@ -582,7 +584,15 @@ where
 }
 
 fn codex_bin() -> OsString {
-    env::var_os("PRODEX_CODEX_BIN").unwrap_or_else(|| OsString::from("codex"))
+    env::var_os("PRODEX_CODEX_BIN")
+        .or_else(bundled_codex_sibling)
+        .unwrap_or_else(|| OsString::from("codex"))
+}
+
+fn bundled_codex_sibling() -> Option<OsString> {
+    let binary_name = if cfg!(windows) { "codex.exe" } else { "codex" };
+    let path = env::current_exe().ok()?.parent()?.join(binary_name);
+    path.is_file().then(|| path.into_os_string())
 }
 
 fn claude_bin() -> OsString {

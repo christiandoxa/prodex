@@ -48,7 +48,7 @@ The release explicitly says request behavior is unchanged.
 | Area | Exact source result | Decision |
 | --- | --- | --- |
 | App-server lifecycle, schema, thread start/resume/fork/queue, existing-session queue | No Prodex-relevant upstream source change; the new app-server file is Guardian tests only. | Keep the existing session bridge and opaque additive-frame passthrough. |
-| MCP lifecycle/event stream, prompt injection, output reads, process/thread identity, writer locks, command-server passthrough | No source diff in the owning upstream files. | No compatibility patch. Existing identity and queue proofs remain the authority. |
+| MCP lifecycle/event stream, Prompt Write, output reads, process/thread identity, writer locks, command-server passthrough | No source diff in the owning upstream files. | No compatibility patch. Existing identity and queue proofs remain the authority. |
 | Responses HTTP/SSE/WebSocket, raw usage, completion metadata, and TPS event boundaries | No source diff in Responses, compact, usage, or transport files. | Keep the measured-generation classifier and raw metadata passthrough unchanged. |
 | Model catalog and model metadata | Additive hidden GPT-6-Astra configuration, priority changes, and Guardian metadata; `.153.2` changes display text only. | Keep upstream-owned metadata opaque; retain Prodex defaults. |
 | Config, approvals, security, auth/provider transport | Guardian policy behavior changes only; no Prodex-owned config or provider source changes. | Preserve upstream launch/config arguments and do not duplicate Guardian policy. |
