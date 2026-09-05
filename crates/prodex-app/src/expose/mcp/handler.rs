@@ -1,9 +1,9 @@
 use super::super::http::ExposeHttpRequest;
 use super::super::run_manager::ExposeRunManager;
 use super::super::session::{expose_digest_eq, expose_token_digest};
-use super::super::session_prompt_injection::{
-    PROMPT_INJECTION_MAX_MESSAGE_BYTES, PromptInjectionRequest, PromptOutputReadRequest,
-    SessionPromptInjectionService,
+use super::super::session_prompt_write::{
+    PromptOutputReadRequest, SESSION_PROMPT_WRITE_MAX_MESSAGE_BYTES, SessionPromptWriteRequest,
+    SessionPromptWriteService,
 };
 use super::super::ui::{ExposeHttpResponse, expose_mcp_empty_response, expose_text_response};
 use super::protocol::{
@@ -46,7 +46,7 @@ impl ExposeMcpEndpoint {
         display_name: String,
         defaults: SuperArgs,
     ) -> Arc<Self> {
-        let injector_workspace_root = workspace_root.clone();
+        let writer_workspace_root = workspace_root.clone();
         let run_manager =
             ExposeRunManager::new(workspace_root, instance_id.clone(), workspace_name.clone());
         Self::from_run_manager(ExposeMcpEndpointInit {
@@ -56,8 +56,8 @@ impl ExposeMcpEndpoint {
             display_name,
             defaults,
             run_manager,
-            workspace_root: injector_workspace_root,
-            session_injector: Arc::new(SessionPromptInjectionService::default()),
+            workspace_root: writer_workspace_root,
+            session_prompt_write: Arc::new(SessionPromptWriteService::default()),
         })
     }
 
@@ -78,12 +78,12 @@ impl ExposeMcpEndpoint {
             defaults,
             run_manager,
             workspace_root: std::env::current_dir().unwrap_or_default(),
-            session_injector: Arc::new(SessionPromptInjectionService::default()),
+            session_prompt_write: Arc::new(SessionPromptWriteService::default()),
         })
     }
 
     #[cfg(test)]
-    pub(crate) fn new_with_run_manager_and_injector(init: ExposeMcpEndpointInit) -> Arc<Self> {
+    pub(crate) fn new_with_run_manager_and_writer(init: ExposeMcpEndpointInit) -> Arc<Self> {
         Self::from_run_manager(init)
     }
 
@@ -97,7 +97,7 @@ impl ExposeMcpEndpoint {
             instance_id: init.instance_id,
             defaults: init.defaults,
             workspace_root: init.workspace_root,
-            session_injector: init.session_injector,
+            session_prompt_write: init.session_prompt_write,
             rate: Mutex::new(McpRateLimit {
                 started: Instant::now(),
                 requests: 0,
@@ -312,7 +312,7 @@ impl ExposeMcpEndpoint {
 
     fn instructions(&self) -> String {
         format!(
-            "This is a local full-access Prodex Super runtime starting in {:?} (instance {}). The initial directory is context, not a filesystem jail: runs retain normal OS-user filesystem, process, network, Git, and local-tool authority. Use prodex_super_start only for explicit user-requested development work, include consequential external actions in the user's task, and poll an existing run instead of starting duplicates. The expose URL is ephemeral capability authentication; anyone with it can control this instance.",
+            "This is a local full-access Prodex Super runtime starting in {:?} (instance {}). The initial directory is context, not a filesystem jail: runs retain normal OS-user filesystem, process, network, Git, and local-tool authority. For development requests, resolve one compatible existing plain prodex s with prodex_session_prompt_write first, then read its exact returned PID, thread_id, and cursor. Start one prodex_super_start fallback only after authoritative no_session; never run both paths in parallel or treat ambiguity, stale identity, addressability, queue, source, or verification errors as no_session. A fresh idle prodex s needs no manual bootstrap prompt. Include consequential external actions in the user's task, and poll an existing run instead of starting duplicates. The expose URL is ephemeral capability authentication; anyone with it can control this instance.",
             self.workspace_name, self.instance_id
         )
     }
@@ -359,7 +359,7 @@ impl ExposeMcpEndpoint {
             "prodex_super_events" => self.events_tool(arguments),
             "prodex_super_result" => self.result_tool(arguments),
             "prodex_super_cancel" => self.cancel_tool(arguments),
-            "prodex_session_prompt_inject" => self.prompt_inject_tool(arguments, binding_key),
+            "prodex_session_prompt_write" => self.session_prompt_write_tool(arguments, binding_key),
             "prodex_session_output_read" => self.output_read_tool(arguments, binding_key),
             "prodex_super_list" => Ok(json!({
                 "instance_id": self.instance_id,
@@ -381,16 +381,17 @@ impl ExposeMcpEndpoint {
         }
     }
 
-    fn prompt_inject_tool(
+    fn session_prompt_write_tool(
         &self,
         arguments: &Value,
         binding_key: &str,
     ) -> std::result::Result<Value, String> {
-        let message = required_string(arguments, "message", PROMPT_INJECTION_MAX_MESSAGE_BYTES)?;
+        let message =
+            required_string(arguments, "message", SESSION_PROMPT_WRITE_MAX_MESSAGE_BYTES)?;
         if message.as_bytes().contains(&0) {
             return Err("message must not contain NUL".to_string());
         }
-        let request = PromptInjectionRequest {
+        let request = SessionPromptWriteRequest {
             workspace_root: self.workspace_root.clone(),
             message,
             cwd: optional_string(arguments, "cwd", 4096)?,
@@ -399,11 +400,11 @@ impl ExposeMcpEndpoint {
             binding_key: binding_key.to_string(),
         };
         let result = self
-            .session_injector
-            .inject(request)
+            .session_prompt_write
+            .write(request)
             .map_err(|error| error.as_str().to_string())?;
         Ok(json!({
-            "status": "queued",
+            "status": "written",
             "prodex_pid": result.prodex_pid,
             "codex_pid": result.codex_pid,
             "thread_id": result.thread_id,
@@ -448,7 +449,7 @@ impl ExposeMcpEndpoint {
             binding_key: binding_key.to_string(),
         };
         let result = self
-            .session_injector
+            .session_prompt_write
             .read_output(request)
             .map_err(|error| error.as_str().to_string())?;
         Ok(json!({

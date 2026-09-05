@@ -2,7 +2,7 @@ use super::http::ExposeHttpRequest;
 use super::run_manager::ExposeRunManager;
 use super::runtime::ExposeShared;
 use super::session::ExposeDigest;
-use super::session_prompt_injection::ExistingSessionPromptInjector;
+use super::session_prompt_write::ExistingSessionPromptWrite;
 use super::ui::expose_text_response;
 use anyhow::{Context, Result};
 use base64::Engine;
@@ -58,7 +58,7 @@ pub(super) struct ExposeMcpEndpointInit {
     pub(super) defaults: SuperArgs,
     pub(super) run_manager: ExposeRunManager,
     pub(super) workspace_root: PathBuf,
-    pub(super) session_injector: Arc<dyn ExistingSessionPromptInjector>,
+    pub(super) session_prompt_write: Arc<dyn ExistingSessionPromptWrite>,
 }
 
 pub(super) struct ExposeMcpEndpoint {
@@ -70,7 +70,7 @@ pub(super) struct ExposeMcpEndpoint {
     pub(super) instance_id: String,
     pub(super) defaults: SuperArgs,
     pub(super) workspace_root: PathBuf,
-    pub(super) session_injector: Arc<dyn ExistingSessionPromptInjector>,
+    pub(super) session_prompt_write: Arc<dyn ExistingSessionPromptWrite>,
     rate: Mutex<McpRateLimit>,
 }
 

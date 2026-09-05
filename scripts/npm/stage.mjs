@@ -63,6 +63,13 @@ async function stagePlatformPackage(version, inputDir, outputDir, spec) {
   await ensureDir(path.join(packageDir, "vendor"));
   await fs.copyFile(artifactBinary, path.join(packageDir, "vendor", spec.binaryFileName));
   await fs.chmod(path.join(packageDir, "vendor", spec.binaryFileName), 0o755);
+  const codexBinaryName = spec.target.endsWith("-msvc") ? "codex.exe" : "codex";
+  const artifactCodexBinary = path.join(inputDir, spec.target, codexBinaryName);
+  if (await pathExists(artifactCodexBinary)) {
+    await ensureDir(path.join(packageDir, "vendor"));
+    await fs.copyFile(artifactCodexBinary, path.join(packageDir, "vendor", codexBinaryName));
+    await fs.chmod(path.join(packageDir, "vendor", codexBinaryName), 0o755);
+  }
   await writeJsonFile(path.join(packageDir, "package.json"), platformPackageManifest(spec, version));
   await copyRepoFile("LICENSE", path.join(packageDir, "LICENSE"));
 

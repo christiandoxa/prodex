@@ -86,7 +86,23 @@ fn json_nesting_is_bounded_before_deserialization() {
 #[test]
 fn tool_list_is_focused_and_annotations_are_present() {
     let tools = mcp_tools();
-    assert_eq!(tools.len(), 8);
+    let names = tools
+        .iter()
+        .map(|tool| tool["name"].as_str().expect("tool names are strings"))
+        .collect::<Vec<_>>();
+    assert_eq!(
+        names,
+        vec![
+            "prodex_super_start",
+            "prodex_super_status",
+            "prodex_super_events",
+            "prodex_super_result",
+            "prodex_super_cancel",
+            "prodex_super_list",
+            "prodex_session_prompt_write",
+            "prodex_session_output_read",
+        ]
+    );
     assert!(tools.iter().all(|tool| tool.get("annotations").is_some()));
     assert!(tools.iter().all(|tool| {
         tool.get("name")

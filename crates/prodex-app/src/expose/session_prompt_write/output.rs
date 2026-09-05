@@ -1,7 +1,8 @@
 use super::{
     OUTPUT_CURSOR_VERSION, OUTPUT_READ_MAX_BYTES, OUTPUT_READ_MAX_LINE_BYTES,
-    OUTPUT_READ_MAX_TEXT_BYTES, OUTPUT_READ_MAX_TOTAL_TEXT_BYTES, OUTPUT_SOURCE_PROBE_BYTES,
-    OpenProcessFile, PromptInjectionError, PromptOutputEvent, ResolvedTarget, legacy_thread_id,
+    OUTPUT_READ_MAX_TEXT_BYTES, OUTPUT_READ_MAX_TOTAL_TEXT_BYTES, OUTPUT_SKIP_MAX_BYTES,
+    OUTPUT_SOURCE_PROBE_BYTES, OpenProcessFile, PromptOutputEvent, ResolvedTarget,
+    SessionPromptWriteError, legacy_thread_id,
 };
 use base64::Engine;
 use sha2::{Digest, Sha256};
@@ -37,23 +38,24 @@ impl OutputCursor {
 
 pub(crate) fn encode_output_cursor(
     mut cursor: OutputCursor,
-) -> std::result::Result<String, PromptInjectionError> {
+) -> std::result::Result<String, SessionPromptWriteError> {
     cursor.version = OUTPUT_CURSOR_VERSION;
-    let bytes = serde_json::to_vec(&cursor).map_err(|_| PromptInjectionError::OutputReadFailed)?;
+    let bytes =
+        serde_json::to_vec(&cursor).map_err(|_| SessionPromptWriteError::OutputReadFailed)?;
     Ok(base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(bytes))
 }
 
 pub(crate) fn decode_output_cursor(
     value: &str,
-) -> std::result::Result<OutputCursor, PromptInjectionError> {
+) -> std::result::Result<OutputCursor, SessionPromptWriteError> {
     if value.is_empty() || value.len() > 16 * 1024 {
-        return Err(PromptInjectionError::InvalidCursor);
+        return Err(SessionPromptWriteError::InvalidCursor);
     }
     let bytes = base64::engine::general_purpose::URL_SAFE_NO_PAD
         .decode(value)
-        .map_err(|_| PromptInjectionError::InvalidCursor)?;
+        .map_err(|_| SessionPromptWriteError::InvalidCursor)?;
     let cursor = serde_json::from_slice::<OutputCursor>(&bytes)
-        .map_err(|_| PromptInjectionError::InvalidCursor)?;
+        .map_err(|_| SessionPromptWriteError::InvalidCursor)?;
     (cursor.version == OUTPUT_CURSOR_VERSION
         && cursor.prodex_pid > 0
         && cursor.codex_pid > 0
@@ -64,24 +66,28 @@ pub(crate) fn decode_output_cursor(
         && !cursor.checkpoint_id.is_empty()
         && cursor.event_index <= 65_536)
         .then_some(cursor)
-        .ok_or(PromptInjectionError::InvalidCursor)
+        .ok_or(SessionPromptWriteError::InvalidCursor)
 }
 
 pub(crate) fn output_source_id(
     path: &Path,
     thread_id: &str,
-) -> std::result::Result<String, PromptInjectionError> {
-    let metadata = fs::metadata(path).map_err(|_| PromptInjectionError::OutputSourceUnavailable)?;
+) -> std::result::Result<String, SessionPromptWriteError> {
+    let metadata =
+        fs::metadata(path).map_err(|_| SessionPromptWriteError::OutputSourceUnavailable)?;
     if !metadata.is_file() {
-        return Err(PromptInjectionError::OutputSourceUnavailable);
+        return Err(SessionPromptWriteError::OutputSourceUnavailable);
     }
-    let mut file = prodex_core::open_regular_file_no_follow(path)
-        .map_err(|_| PromptInjectionError::OutputSourceUnavailable)?;
+    let file = prodex_core::open_regular_file_no_follow(path)
+        .map_err(|_| SessionPromptWriteError::OutputSourceUnavailable)?;
     if !prodex_core::opened_file_matches_path(&metadata, path, &file)
-        .map_err(|_| PromptInjectionError::OutputSourceUnavailable)?
+        .map_err(|_| SessionPromptWriteError::OutputSourceUnavailable)?
     {
-        return Err(PromptInjectionError::OutputSourceChanged);
+        return Err(SessionPromptWriteError::OutputSourceChanged);
     }
+    // A rollout is append-only while its owning Codex session is alive. Content belongs in the
+    // cursor checkpoint below; including a variable-length prefix here would make normal growth
+    // look like a source replacement when a file crosses the probe-size boundary.
     let mut hasher = Sha256::new();
     hasher.update(thread_id.as_bytes());
     hasher.update(path.as_os_str().to_string_lossy().as_bytes());
@@ -93,21 +99,15 @@ pub(crate) fn output_source_id(
     }
     #[cfg(not(unix))]
     {
-        hasher.update(metadata.len().to_le_bytes());
         hasher.update(
             metadata
-                .modified()
+                .created()
                 .ok()
                 .and_then(|value| value.duration_since(std::time::UNIX_EPOCH).ok())
                 .map_or(0, |value| value.as_nanos() as u64)
                 .to_le_bytes(),
         );
     }
-    let mut prefix = vec![0; OUTPUT_SOURCE_PROBE_BYTES];
-    let count = file
-        .read(&mut prefix)
-        .map_err(|_| PromptInjectionError::OutputSourceUnavailable)?;
-    hasher.update(&prefix[..count]);
     Ok(hasher
         .finalize()
         .iter()
@@ -118,29 +118,29 @@ pub(crate) fn output_source_id(
 pub(crate) fn source_checkpoint_id(
     path: &Path,
     offset: u64,
-) -> std::result::Result<String, PromptInjectionError> {
-    let metadata = fs::metadata(path).map_err(|_| PromptInjectionError::OutputSourceChanged)?;
+) -> std::result::Result<String, SessionPromptWriteError> {
+    let metadata = fs::metadata(path).map_err(|_| SessionPromptWriteError::OutputSourceChanged)?;
     let mut file = prodex_core::open_regular_file_no_follow(path)
-        .map_err(|_| PromptInjectionError::OutputSourceChanged)?;
+        .map_err(|_| SessionPromptWriteError::OutputSourceChanged)?;
     if !prodex_core::opened_file_matches_path(&metadata, path, &file)
-        .map_err(|_| PromptInjectionError::OutputSourceChanged)?
+        .map_err(|_| SessionPromptWriteError::OutputSourceChanged)?
     {
-        return Err(PromptInjectionError::OutputSourceChanged);
+        return Err(SessionPromptWriteError::OutputSourceChanged);
     }
     let prefix_len = offset.min(OUTPUT_SOURCE_PROBE_BYTES as u64);
     let mut bytes = vec![0; prefix_len as usize];
     file.read_exact(&mut bytes)
-        .map_err(|_| PromptInjectionError::OutputSourceChanged)?;
+        .map_err(|_| SessionPromptWriteError::OutputSourceChanged)?;
     let mut hasher = Sha256::new();
     hasher.update(offset.to_le_bytes());
     hasher.update(&bytes);
     if offset > 0 {
         let window_start = offset.saturating_sub(4096);
         file.seek(SeekFrom::Start(window_start))
-            .map_err(|_| PromptInjectionError::OutputSourceChanged)?;
+            .map_err(|_| SessionPromptWriteError::OutputSourceChanged)?;
         let mut window = vec![0; (offset - window_start) as usize];
         file.read_exact(&mut window)
-            .map_err(|_| PromptInjectionError::OutputSourceChanged)?;
+            .map_err(|_| SessionPromptWriteError::OutputSourceChanged)?;
         hasher.update(&window);
     }
     Ok(hasher
@@ -162,41 +162,88 @@ pub(crate) fn read_output_events(
     offset: u64,
     event_index: usize,
     limit: usize,
-) -> std::result::Result<OutputReadBatch, PromptInjectionError> {
-    let (source_len, complete) = read_complete_output(path, offset)?;
+) -> std::result::Result<OutputReadBatch, SessionPromptWriteError> {
+    let (source_len, complete, skipped_to) = read_complete_output(path, offset)?;
+    if let Some(next_offset) = skipped_to {
+        return Ok(OutputReadBatch {
+            events: Vec::new(),
+            next_offset,
+            next_event_index: 0,
+            has_more: next_offset < source_len,
+        });
+    }
     read_output_lines(&complete, offset, event_index, limit, source_len)
 }
 
 fn read_complete_output(
     path: &Path,
     offset: u64,
-) -> std::result::Result<(u64, Vec<u8>), PromptInjectionError> {
-    let metadata = fs::metadata(path).map_err(|_| PromptInjectionError::OutputSourceUnavailable)?;
+) -> std::result::Result<(u64, Vec<u8>, Option<u64>), SessionPromptWriteError> {
+    let metadata =
+        fs::metadata(path).map_err(|_| SessionPromptWriteError::OutputSourceUnavailable)?;
     if !metadata.is_file() || offset > metadata.len() {
-        return Err(PromptInjectionError::OutputSourceChanged);
+        return Err(SessionPromptWriteError::OutputSourceChanged);
     }
     let mut file = prodex_core::open_regular_file_no_follow(path)
-        .map_err(|_| PromptInjectionError::OutputReadFailed)?;
+        .map_err(|_| SessionPromptWriteError::OutputReadFailed)?;
     if !prodex_core::opened_file_matches_path(&metadata, path, &file)
-        .map_err(|_| PromptInjectionError::OutputReadFailed)?
+        .map_err(|_| SessionPromptWriteError::OutputReadFailed)?
     {
-        return Err(PromptInjectionError::OutputSourceChanged);
+        return Err(SessionPromptWriteError::OutputSourceChanged);
     }
     file.seek(SeekFrom::Start(offset))
-        .map_err(|_| PromptInjectionError::OutputReadFailed)?;
+        .map_err(|_| SessionPromptWriteError::OutputReadFailed)?;
     let mut bytes = Vec::new();
-    file.take((OUTPUT_READ_MAX_BYTES + 1) as u64)
+    (&mut file)
+        .take((OUTPUT_READ_MAX_BYTES + 1) as u64)
         .read_to_end(&mut bytes)
-        .map_err(|_| PromptInjectionError::OutputReadFailed)?;
+        .map_err(|_| SessionPromptWriteError::OutputReadFailed)?;
     let bounded = bytes.len() <= OUTPUT_READ_MAX_BYTES;
     let complete_len = bytes
         .iter()
         .rposition(|byte| *byte == b'\n')
         .map_or(0, |index| index + 1);
     if !bounded && complete_len == 0 {
-        return Err(PromptInjectionError::OutputReadFailed);
+        let Some(next_offset) = skip_oversized_line(&mut file, offset, metadata.len())? else {
+            return Ok((metadata.len(), Vec::new(), None));
+        };
+        return Ok((metadata.len(), Vec::new(), Some(next_offset)));
     }
-    Ok((metadata.len(), bytes[..complete_len].to_vec()))
+    Ok((metadata.len(), bytes[..complete_len].to_vec(), None))
+}
+
+fn skip_oversized_line(
+    file: &mut fs::File,
+    offset: u64,
+    source_len: u64,
+) -> std::result::Result<Option<u64>, SessionPromptWriteError> {
+    let mut skipped = 0_usize;
+    let mut chunk = vec![0_u8; 64 * 1024];
+    file.seek(SeekFrom::Start(offset))
+        .map_err(|_| SessionPromptWriteError::OutputReadFailed)?;
+    while skipped < OUTPUT_SKIP_MAX_BYTES {
+        let remaining = OUTPUT_SKIP_MAX_BYTES - skipped;
+        let chunk_len = chunk.len().min(remaining);
+        let count = file
+            .read(&mut chunk[..chunk_len])
+            .map_err(|_| SessionPromptWriteError::OutputReadFailed)?;
+        if count == 0 {
+            return Ok(None);
+        }
+        if let Some(index) = chunk[..count].iter().position(|byte| *byte == b'\n') {
+            return Ok(Some(
+                offset
+                    .saturating_add(skipped as u64)
+                    .saturating_add(index as u64 + 1),
+            ));
+        }
+        skipped = skipped.saturating_add(count);
+    }
+    if offset.saturating_add(skipped as u64) >= source_len {
+        Ok(None)
+    } else {
+        Err(SessionPromptWriteError::OutputReadFailed)
+    }
 }
 
 fn read_output_lines(
@@ -205,7 +252,7 @@ fn read_output_lines(
     event_index: usize,
     limit: usize,
     source_len: u64,
-) -> std::result::Result<OutputReadBatch, PromptInjectionError> {
+) -> std::result::Result<OutputReadBatch, SessionPromptWriteError> {
     let mut events = Vec::new();
     let mut total_text_bytes = 0_usize;
     let mut consumed = 0_usize;
@@ -248,7 +295,7 @@ fn read_output_line(
     limit: usize,
     events: &mut Vec<PromptOutputEvent>,
     total_text_bytes: &mut usize,
-) -> std::result::Result<Option<OutputReadBatch>, PromptInjectionError> {
+) -> std::result::Result<Option<OutputReadBatch>, SessionPromptWriteError> {
     if raw_line.len() > OUTPUT_READ_MAX_LINE_BYTES {
         return Ok(None);
     }
@@ -261,7 +308,7 @@ fn read_output_line(
         .filter(mcp_visible_transcript_event)
         .collect::<Vec<_>>();
     if start_index > parsed.len() {
-        return Err(PromptInjectionError::OutputSourceChanged);
+        return Err(SessionPromptWriteError::OutputSourceChanged);
     }
     for (index, event) in parsed.iter().enumerate().skip(start_index) {
         if events.len() >= limit {
@@ -405,9 +452,9 @@ pub(crate) fn collect_exact_rollouts(
     thread_id: &str,
     output: &mut Vec<PathBuf>,
     depth: usize,
-) -> std::result::Result<(), PromptInjectionError> {
+) -> std::result::Result<(), SessionPromptWriteError> {
     if depth > 8 {
-        return Err(PromptInjectionError::OutputReadFailed);
+        return Err(SessionPromptWriteError::OutputReadFailed);
     }
     let Ok(entries) = fs::read_dir(root) else {
         return Ok(());
@@ -432,7 +479,7 @@ pub(crate) fn collect_exact_rollouts(
             output.push(path);
         }
         if output.len() > 2 {
-            return Err(PromptInjectionError::OutputSourceAmbiguous);
+            return Err(SessionPromptWriteError::OutputSourceAmbiguous);
         }
     }
     Ok(())
@@ -440,4 +487,13 @@ pub(crate) fn collect_exact_rollouts(
 
 fn is_uncompressed_rollout_file_name(name: &str) -> bool {
     name.starts_with("rollout-") && name.ends_with(".jsonl")
+}
+
+pub(crate) fn rollout_path_exists_in_roots(path: &Path, roots: &[PathBuf]) -> bool {
+    if path.is_absolute() {
+        return fs::symlink_metadata(path).is_ok();
+    }
+    roots
+        .iter()
+        .any(|root| fs::symlink_metadata(root.join(path)).is_ok())
 }

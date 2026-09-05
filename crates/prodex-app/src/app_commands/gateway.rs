@@ -141,12 +141,16 @@ fn gateway_kiro_model_catalog_json_from_paths(paths: &AppPaths) -> Result<Vec<se
         if !matches!(profile.provider, ProfileProvider::Kiro { .. }) {
             continue;
         }
+        if !profile.codex_home.exists() {
+            continue;
+        }
         let path = profile.codex_home.join(KIRO_MODEL_CATALOG_FILE);
-        let Some(text) = read_provider_model_catalog_text(&path)? else {
+        let Ok(Some(text)) = read_provider_model_catalog_text(&path) else {
             continue;
         };
-        let catalog = parse_kiro_model_catalog_text(&text)
-            .context("failed to parse a Kiro profile model catalog")?;
+        let Ok(catalog) = parse_kiro_model_catalog_text(&text) else {
+            continue;
+        };
         let previous = std::mem::take(&mut models);
         models = prodex_provider_core::merge_provider_model_catalog_json(
             ProviderId::Kiro,
@@ -239,7 +243,7 @@ mod tests {
             first_home.join(KIRO_MODEL_CATALOG_FILE),
             serde_json::json!({
                 "models": [
-                    { "id": "claude-sonnet-4", "name": "claude-sonnet-4", "owned_by": "kiro-cli" }
+                    { "id": "catalog-model-a", "name": "Catalog Model A", "owned_by": "kiro-cli" }
                 ]
             })
             .to_string(),
@@ -249,8 +253,8 @@ mod tests {
             second_home.join(KIRO_MODEL_CATALOG_FILE),
             serde_json::json!({
                 "models": [
-                    { "id": "claude-sonnet-4", "name": "claude-sonnet-4", "owned_by": "kiro-cli" },
-                    { "id": "claude-sonnet-4.5", "name": "claude-sonnet-4.5", "owned_by": "kiro-cli" }
+                    { "id": "catalog-model-a", "name": "Catalog Model A", "owned_by": "kiro-cli" },
+                    { "id": "catalog-model-b", "name": "Catalog Model B", "owned_by": "kiro-cli" }
                 ]
             })
             .to_string(),
@@ -302,8 +306,8 @@ mod tests {
         assert_eq!(models.len(), 4);
         assert_eq!(models[0]["id"], "gpt-5.6-luna");
         assert_eq!(models[1]["id"], "auto");
-        assert_eq!(models[2]["id"], "claude-sonnet-4");
-        assert_eq!(models[3]["id"], "claude-sonnet-4.5");
+        assert_eq!(models[2]["id"], "catalog-model-a");
+        assert_eq!(models[3]["id"], "catalog-model-b");
 
         fs::write(
             first_home.join(KIRO_MODEL_CATALOG_FILE),
@@ -315,8 +319,63 @@ mod tests {
             .to_string(),
         )
         .expect("oversized catalog should be written");
-        let error = gateway_kiro_model_catalog_json_from_paths(&paths).unwrap_err();
-        assert!(format!("{error:#}").contains("hard limit of 1024 entries"));
+        let models = gateway_kiro_model_catalog_json_from_paths(&paths)
+            .expect("healthy profile catalog should remain available");
+        assert!(models.iter().any(|model| model["id"] == "catalog-model-a"));
+        assert!(models.iter().any(|model| model["id"] == "catalog-model-b"));
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn gateway_kiro_catalog_skips_stale_and_malformed_profiles() {
+        let root = temp_dir("stale-profile");
+        let paths = test_paths(&root);
+        let malformed_home = paths.managed_profiles_root.join("kiro-malformed");
+        let healthy_home = paths.managed_profiles_root.join("kiro-healthy");
+        fs::create_dir_all(&malformed_home).expect("malformed home should exist");
+        fs::create_dir_all(&healthy_home).expect("healthy home should exist");
+        fs::write(malformed_home.join(KIRO_MODEL_CATALOG_FILE), "not-json")
+            .expect("malformed catalog should be written");
+        fs::write(
+            healthy_home.join(KIRO_MODEL_CATALOG_FILE),
+            serde_json::json!({
+                "availableModels": [{"modelId": "healthy-model"}]
+            })
+            .to_string(),
+        )
+        .expect("healthy catalog should be written");
+        let profile = |codex_home| crate::ProfileEntry {
+            codex_home,
+            managed: true,
+            email: Some("example@example.test".to_string()),
+            provider: ProfileProvider::Kiro {
+                auth_key: "test-key".to_string(),
+                auth_kind: Some("builder-id".to_string()),
+                profile_arn: None,
+                profile_name: None,
+                start_url: None,
+                region: None,
+            },
+        };
+        AppState {
+            active_profile: Some("kiro-stale".to_string()),
+            profiles: BTreeMap::from([
+                (
+                    "kiro-stale".to_string(),
+                    profile(paths.managed_profiles_root.join("missing")),
+                ),
+                ("kiro-malformed".to_string(), profile(malformed_home)),
+                ("kiro-healthy".to_string(), profile(healthy_home)),
+            ]),
+            ..Default::default()
+        }
+        .save(&paths)
+        .expect("state should save");
+
+        let models = gateway_kiro_model_catalog_json_from_paths(&paths)
+            .expect("healthy catalog should remain available");
+        assert!(models.iter().any(|model| model["id"] == "healthy-model"));
+        assert!(!models.iter().any(|model| model["id"] == "missing"));
         let _ = fs::remove_dir_all(root);
     }
 
@@ -330,7 +389,7 @@ mod tests {
             kiro_home.join(KIRO_MODEL_CATALOG_FILE),
             serde_json::json!({
                 "models": [
-                    { "id": "claude-sonnet-4", "name": "claude-sonnet-4", "owned_by": "kiro-cli" }
+                    { "id": "catalog-model-a", "name": "Catalog Model A", "owned_by": "kiro-cli" }
                 ]
             })
             .to_string(),
@@ -343,7 +402,7 @@ mod tests {
                 crate::ProfileEntry {
                     codex_home: kiro_home,
                     managed: true,
-                    email: Some("kiro@example.com".to_string()),
+                    email: Some("example@example.test".to_string()),
                     provider: ProfileProvider::Kiro {
                         auth_key: "key-cap".to_string(),
                         auth_kind: Some("builder-id".to_string()),

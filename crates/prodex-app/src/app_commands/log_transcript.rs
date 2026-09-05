@@ -224,6 +224,9 @@ fn response_item_transcript_event(
                 .and_then(serde_json::Value::as_str)
                 .unwrap_or("message")
                 .to_string();
+            if source == "user" && !transcript_user_message_is_visible(payload) {
+                return None;
+            }
             let text = transcript_text_from_content(payload.get("content")?)?;
             Some(TranscriptEvent {
                 timestamp,
@@ -304,6 +307,17 @@ fn response_item_transcript_event(
         _ => None,
     }
     .filter(|event| !event.text.trim().is_empty())
+}
+
+fn transcript_user_message_is_visible(payload: &serde_json::Value) -> bool {
+    let Some(kinds) = payload
+        .get("internal_chat_message_metadata_passthrough")
+        .and_then(|metadata| metadata.get("content_item_kinds"))
+        .and_then(serde_json::Value::as_array)
+    else {
+        return true;
+    };
+    !kinds.is_empty() && kinds.iter().all(|kind| kind.as_str() == Some("user.text"))
 }
 
 fn protocol_operation_transcript_event(

@@ -70,7 +70,7 @@ pub(super) fn validate_tool_arguments(
         }
         "prodex_super_events" => ["run_id", "after_seq", "limit"].as_slice(),
         "prodex_super_list" => [].as_slice(),
-        "prodex_session_prompt_inject" => ["message", "cwd", "prodex_pid", "thread_id"].as_slice(),
+        "prodex_session_prompt_write" => ["message", "cwd", "prodex_pid", "thread_id"].as_slice(),
         "prodex_session_output_read" => {
             ["cursor", "limit", "wait_ms", "prodex_pid", "thread_id"].as_slice()
         }
@@ -241,7 +241,7 @@ pub(super) fn mcp_tool_names() -> [&'static str; 8] {
         "prodex_super_result",
         "prodex_super_cancel",
         "prodex_super_list",
-        "prodex_session_prompt_inject",
+        "prodex_session_prompt_write",
         "prodex_session_output_read",
     ]
 }
@@ -315,8 +315,8 @@ pub(super) fn mcp_tools() -> Vec<Value> {
             false,
         ),
         tool_definition(
-            "prodex_session_prompt_inject",
-            "Queue a user message into an already-running plain `prodex s` interactive session. This tool does not start another solver.",
+            "prodex_session_prompt_write",
+            "Prompt Write: deliver one session input to an already-running plain `prodex s` through the supported Codex control plane. It uses the same fail-closed identity checks as output reads and never starts another solver.",
             json!({
                 "type": "object",
                 "properties": {
