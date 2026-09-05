@@ -1,4 +1,4 @@
-use super::{PROCESS_ANCESTRY_LIMIT, PromptInjectionError, TARGET_ENV_KEYS};
+use super::{PROCESS_ANCESTRY_LIMIT, SessionPromptWriteError, TARGET_ENV_KEYS};
 use std::collections::{BTreeMap, HashMap};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -14,14 +14,14 @@ impl TargetEnvironment {
     pub(crate) fn from_details(
         details: &ProcessDetails,
         workspace_root: &Path,
-    ) -> std::result::Result<Self, PromptInjectionError> {
+    ) -> std::result::Result<Self, SessionPromptWriteError> {
         let value = |key: &str| {
             details
                 .environment
                 .get(key)
                 .filter(|value| !value.is_empty() && !value.as_bytes().contains(&0))
                 .cloned()
-                .ok_or(PromptInjectionError::TargetEnvironmentUnavailable)
+                .ok_or(SessionPromptWriteError::TargetEnvironmentUnavailable)
         };
         let home = value("HOME")?;
         let codex_home = absolute_environment_path(&value("CODEX_HOME")?)?;
@@ -29,9 +29,9 @@ impl TargetEnvironment {
         let pwd = value("PWD")?;
         let pwd_path = Path::new(&pwd)
             .canonicalize()
-            .map_err(|_| PromptInjectionError::TargetEnvironmentUnavailable)?;
+            .map_err(|_| SessionPromptWriteError::TargetEnvironmentUnavailable)?;
         if pwd_path != workspace_root {
-            return Err(PromptInjectionError::TargetEnvironmentUnavailable);
+            return Err(SessionPromptWriteError::TargetEnvironmentUnavailable);
         }
         Ok(Self {
             home,
@@ -42,11 +42,11 @@ impl TargetEnvironment {
     }
 }
 
-fn absolute_environment_path(value: &str) -> std::result::Result<PathBuf, PromptInjectionError> {
+fn absolute_environment_path(value: &str) -> std::result::Result<PathBuf, SessionPromptWriteError> {
     let path = PathBuf::from(value);
     path.is_absolute()
         .then_some(path)
-        .ok_or(PromptInjectionError::TargetEnvironmentUnavailable)
+        .ok_or(SessionPromptWriteError::TargetEnvironmentUnavailable)
 }
 
 #[derive(Clone, Debug)]
@@ -100,12 +100,12 @@ pub(crate) struct ProcessDetails {
 }
 
 pub(crate) trait ProcessInspector {
-    fn current_uid(&self) -> std::result::Result<u32, PromptInjectionError>;
-    fn list(&self) -> std::result::Result<Vec<ProcessRecord>, PromptInjectionError>;
+    fn current_uid(&self) -> std::result::Result<u32, SessionPromptWriteError>;
+    fn list(&self) -> std::result::Result<Vec<ProcessRecord>, SessionPromptWriteError>;
     fn inspect(
         &self,
         pid: u32,
-    ) -> std::result::Result<Option<ProcessDetails>, PromptInjectionError>;
+    ) -> std::result::Result<Option<ProcessDetails>, SessionPromptWriteError>;
 }
 
 #[derive(Clone, Copy, Default)]
@@ -113,14 +113,14 @@ pub(crate) struct SystemProcessInspector;
 
 #[cfg(target_os = "linux")]
 impl ProcessInspector for SystemProcessInspector {
-    fn current_uid(&self) -> std::result::Result<u32, PromptInjectionError> {
+    fn current_uid(&self) -> std::result::Result<u32, SessionPromptWriteError> {
         // SAFETY: geteuid has no preconditions and only reads process credentials.
         Ok(unsafe { libc::geteuid() })
     }
 
-    fn list(&self) -> std::result::Result<Vec<ProcessRecord>, PromptInjectionError> {
+    fn list(&self) -> std::result::Result<Vec<ProcessRecord>, SessionPromptWriteError> {
         let entries =
-            fs::read_dir("/proc").map_err(|_| PromptInjectionError::VerificationInconclusive)?;
+            fs::read_dir("/proc").map_err(|_| SessionPromptWriteError::VerificationInconclusive)?;
         Ok(entries
             .flatten()
             .filter_map(|entry| {
@@ -133,7 +133,7 @@ impl ProcessInspector for SystemProcessInspector {
     fn inspect(
         &self,
         pid: u32,
-    ) -> std::result::Result<Option<ProcessDetails>, PromptInjectionError> {
+    ) -> std::result::Result<Option<ProcessDetails>, SessionPromptWriteError> {
         let Some(record) = read_linux_process_record(pid).ok() else {
             return Ok(None);
         };
@@ -149,19 +149,19 @@ impl ProcessInspector for SystemProcessInspector {
 
 #[cfg(not(target_os = "linux"))]
 impl ProcessInspector for SystemProcessInspector {
-    fn current_uid(&self) -> std::result::Result<u32, PromptInjectionError> {
-        Err(PromptInjectionError::VerificationInconclusive)
+    fn current_uid(&self) -> std::result::Result<u32, SessionPromptWriteError> {
+        Err(SessionPromptWriteError::VerificationInconclusive)
     }
 
-    fn list(&self) -> std::result::Result<Vec<ProcessRecord>, PromptInjectionError> {
-        Err(PromptInjectionError::VerificationInconclusive)
+    fn list(&self) -> std::result::Result<Vec<ProcessRecord>, SessionPromptWriteError> {
+        Err(SessionPromptWriteError::VerificationInconclusive)
     }
 
     fn inspect(
         &self,
         _pid: u32,
-    ) -> std::result::Result<Option<ProcessDetails>, PromptInjectionError> {
-        Err(PromptInjectionError::VerificationInconclusive)
+    ) -> std::result::Result<Option<ProcessDetails>, SessionPromptWriteError> {
+        Err(SessionPromptWriteError::VerificationInconclusive)
     }
 }
 
@@ -230,9 +230,9 @@ fn linux_process_state(value: char) -> ProcessState {
 #[cfg(target_os = "linux")]
 fn read_linux_target_environment(
     pid: u32,
-) -> std::result::Result<BTreeMap<String, String>, PromptInjectionError> {
+) -> std::result::Result<BTreeMap<String, String>, SessionPromptWriteError> {
     let raw = fs::read(PathBuf::from("/proc").join(pid.to_string()).join("environ"))
-        .map_err(|_| PromptInjectionError::TargetEnvironmentUnavailable)?;
+        .map_err(|_| SessionPromptWriteError::TargetEnvironmentUnavailable)?;
     let mut environment = BTreeMap::new();
     for entry in raw.split(|byte| *byte == 0) {
         let Some(separator) = entry.iter().position(|byte| *byte == b'=') else {
@@ -247,7 +247,7 @@ fn read_linux_target_environment(
             continue;
         }
         let value = std::str::from_utf8(value)
-            .map_err(|_| PromptInjectionError::TargetEnvironmentUnavailable)?;
+            .map_err(|_| SessionPromptWriteError::TargetEnvironmentUnavailable)?;
         environment.insert(key.to_string(), value.to_string());
     }
     Ok(environment)
@@ -256,9 +256,9 @@ fn read_linux_target_environment(
 #[cfg(target_os = "linux")]
 fn read_linux_authoritative_open_files(
     pid: u32,
-) -> std::result::Result<Vec<OpenProcessFile>, PromptInjectionError> {
+) -> std::result::Result<Vec<OpenProcessFile>, SessionPromptWriteError> {
     let directory = fs::read_dir(PathBuf::from("/proc").join(pid.to_string()).join("fd"))
-        .map_err(|_| PromptInjectionError::ThreadIdentityUnavailable)?;
+        .map_err(|_| SessionPromptWriteError::ThreadIdentityUnavailable)?;
     let unix_sockets = read_linux_unix_socket_paths();
     Ok(directory
         .flatten()

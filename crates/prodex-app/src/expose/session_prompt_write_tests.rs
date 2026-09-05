@@ -1,18 +1,19 @@
-use super::session_prompt_injection::{
-    ExistingSessionPromptInjector, OpenProcessFile, ProcessDetails, ProcessInspector,
-    ProcessRecord, ProcessState, PromptInjectionError, PromptInjectionRequest,
-    PromptOutputReadRequest, QueueControl, QueueInvocation, QueueSnapshot, ResolvedTarget,
-    SessionPromptInjectionService, SystemQueueControl, exact_open_database, is_codex_writer,
+use super::session_prompt_write::{
+    ExistingSessionPromptWrite, OpenProcessFile, ProcessDetails, ProcessInspector, ProcessRecord,
+    ProcessState, QueueControl, QueueInvocation, ResolvedTarget, SessionPromptWriteError,
+    SessionPromptWriteRequest, SessionPromptWriteService, exact_open_database, is_codex_writer,
     is_descendant_of, is_plain_prodex_session, legacy_thread_id, modern_thread_id,
-    read_output_events, resolve_thread_identity, valid_rollout_path_in_authoritative_open_files,
-    valid_rollout_path_in_roots,
+    resolve_thread_identity,
 };
-use std::collections::{BTreeMap, HashMap, VecDeque};
+use std::collections::{BTreeMap, HashMap};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
+
+#[path = "session_prompt_write_output_tests.rs"]
+mod output_tests;
 
 const THREAD: &str = "019f3b59-7771-7ea1-a9a1-3cd638f216c4";
 
@@ -34,7 +35,7 @@ impl Drop for Fixture {
 
 fn fixture() -> Fixture {
     let root = std::env::temp_dir().join(format!(
-        "prodex-session-injection-test-{}-{}",
+        "prodex-session-prompt-write-test-{}-{}",
         std::process::id(),
         SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -135,11 +136,11 @@ struct FakeProcessInspector {
 }
 
 impl ProcessInspector for FakeProcessInspector {
-    fn current_uid(&self) -> Result<u32, PromptInjectionError> {
+    fn current_uid(&self) -> Result<u32, SessionPromptWriteError> {
         Ok(self.uid)
     }
 
-    fn list(&self) -> Result<Vec<ProcessRecord>, PromptInjectionError> {
+    fn list(&self) -> Result<Vec<ProcessRecord>, SessionPromptWriteError> {
         let list = self.lists.fetch_add(1, Ordering::SeqCst);
         Ok(if list >= 2 {
             self.changed_records
@@ -150,55 +151,53 @@ impl ProcessInspector for FakeProcessInspector {
         })
     }
 
-    fn inspect(&self, _pid: u32) -> Result<Option<ProcessDetails>, PromptInjectionError> {
+    fn inspect(&self, _pid: u32) -> Result<Option<ProcessDetails>, SessionPromptWriteError> {
         Ok(Some(self.details.clone()))
     }
 }
 
 struct FakeQueueControl {
     capability: bool,
-    persisted: bool,
+    persisted: std::sync::atomic::AtomicBool,
+    loaded_addressable: std::sync::atomic::AtomicBool,
+    addressable_after: Option<usize>,
+    addressability_checks: AtomicUsize,
     rollout: Option<PathBuf>,
-    snapshots: Mutex<VecDeque<QueueSnapshot>>,
     invocation: QueueInvocation,
     consumed_message: Option<String>,
     calls: Arc<Mutex<Vec<(String, String)>>>,
 }
 
 impl QueueControl for FakeQueueControl {
-    fn check_capability(&self, _target: &ResolvedTarget) -> Result<(), PromptInjectionError> {
+    fn check_capability(&self, _target: &ResolvedTarget) -> Result<(), SessionPromptWriteError> {
         self.capability
             .then_some(())
-            .ok_or(PromptInjectionError::QueueUnsupported)
+            .ok_or(SessionPromptWriteError::QueueUnsupported)
     }
 
     fn persisted_thread(
         &self,
         _state_db: &Path,
         _thread_id: &str,
-    ) -> Result<bool, PromptInjectionError> {
-        Ok(self.persisted)
+    ) -> Result<bool, SessionPromptWriteError> {
+        Ok(self.persisted.load(Ordering::SeqCst))
+    }
+
+    fn loaded_thread_addressable(
+        &self,
+        _target: &ResolvedTarget,
+    ) -> Result<bool, SessionPromptWriteError> {
+        let check = self.addressability_checks.fetch_add(1, Ordering::SeqCst) + 1;
+        Ok(self.loaded_addressable.load(Ordering::SeqCst)
+            || self.addressable_after.is_some_and(|after| check >= after))
     }
 
     fn rollout_path(
         &self,
         _state_db: &Path,
         _thread_id: &str,
-    ) -> Result<Option<PathBuf>, PromptInjectionError> {
+    ) -> Result<Option<PathBuf>, SessionPromptWriteError> {
         Ok(self.rollout.clone())
-    }
-
-    fn snapshot(
-        &self,
-        _queue_db: &Path,
-        _thread_id: &str,
-    ) -> Result<QueueSnapshot, PromptInjectionError> {
-        Ok(self
-            .snapshots
-            .lock()
-            .unwrap()
-            .pop_front()
-            .unwrap_or_default())
     }
 
     fn queue_once(&self, target: &ResolvedTarget, message: &str) -> QueueInvocation {
@@ -206,6 +205,7 @@ impl QueueControl for FakeQueueControl {
             .lock()
             .unwrap()
             .push((target.thread_id.clone(), message.to_string()));
+        self.persisted.store(true, Ordering::SeqCst);
         if let (Some(path), Some(consumed_message)) = (&self.rollout, &self.consumed_message) {
             let line = serde_json::json!({
                 "timestamp": "2026-09-03T10:00:03Z",
@@ -229,8 +229,8 @@ impl QueueControl for FakeQueueControl {
 fn service(
     fixture: &Fixture,
     queue: FakeQueueControl,
-) -> SessionPromptInjectionService<FakeProcessInspector, FakeQueueControl> {
-    SessionPromptInjectionService::with_adapters(
+) -> SessionPromptWriteService<FakeProcessInspector, FakeQueueControl> {
+    SessionPromptWriteService::with_adapters(
         FakeProcessInspector {
             uid: 1000,
             records: fixture.records.clone(),
@@ -242,8 +242,8 @@ fn service(
     )
 }
 
-fn request(fixture: &Fixture, message: &str) -> PromptInjectionRequest {
-    PromptInjectionRequest {
+fn request(fixture: &Fixture, message: &str) -> SessionPromptWriteRequest {
+    SessionPromptWriteRequest {
         workspace_root: fixture.workspace.clone(),
         message: message.to_string(),
         cwd: None,
@@ -256,14 +256,11 @@ fn request(fixture: &Fixture, message: &str) -> PromptInjectionRequest {
 fn queue(fixture: &Fixture, message_id: Option<&str>) -> FakeQueueControl {
     FakeQueueControl {
         capability: true,
-        persisted: true,
+        persisted: std::sync::atomic::AtomicBool::new(true),
+        loaded_addressable: std::sync::atomic::AtomicBool::new(false),
+        addressable_after: None,
+        addressability_checks: AtomicUsize::new(0),
         rollout: Some(fixture.rollout.clone()),
-        snapshots: Mutex::new(VecDeque::from([
-            QueueSnapshot::default(),
-            QueueSnapshot {
-                item_ids: message_id.into_iter().map(str::to_string).collect(),
-            },
-        ])),
         invocation: QueueInvocation {
             succeeded: true,
             exit_code: Some(0),
@@ -301,10 +298,10 @@ fn mismatched_lock_and_rollout_fail_closed_without_inference() {
         },
     ])
     .unwrap_err();
-    assert_eq!(error, PromptInjectionError::ThreadIdentityConflict);
+    assert_eq!(error, SessionPromptWriteError::ThreadIdentityConflict);
     assert_eq!(
         resolve_thread_identity(&[]),
-        Err(PromptInjectionError::ThreadIdentityUnavailable)
+        Err(SessionPromptWriteError::ThreadIdentityUnavailable)
     );
 }
 
@@ -340,16 +337,55 @@ fn process_matching_requires_user_cwd_and_plain_s() {
 }
 
 #[test]
-fn injection_accepts_equivalent_cwd_path_spellings() {
+fn session_prompt_write_accepts_equivalent_cwd_path_spellings() {
     let mut fixture = fixture();
     fixture.records[0].cwd = fixture.workspace.join("..").join("workspace");
     let message_id = "019f3b59-7771-7ea1-a9a1-3cd638f216c5";
+    let mut queue_control = queue(&fixture, Some(message_id));
+    queue_control.consumed_message = Some("hello".to_string());
 
-    let result = service(&fixture, queue(&fixture, Some(message_id)))
-        .inject(request(&fixture, "hello"))
+    let result = service(&fixture, queue_control)
+        .write(request(&fixture, "hello"))
         .expect("equivalent cwd should resolve to the session");
 
     assert_eq!(result.thread_id, THREAD);
+}
+
+#[test]
+fn session_prompt_write_rejects_mismatched_cwd_without_no_session_fallback() {
+    let fixture = fixture();
+    let mut prompt = request(&fixture, "wrong workspace");
+    prompt.cwd = Some(fixture.root.display().to_string());
+
+    assert_eq!(
+        service(&fixture, queue(&fixture, None))
+            .write(prompt)
+            .unwrap_err(),
+        SessionPromptWriteError::StaleTarget
+    );
+}
+
+#[test]
+fn stale_rollout_path_is_rejected_before_prompt_write() {
+    let fixture = fixture();
+    let stale = fixture
+        .root
+        .parent()
+        .unwrap()
+        .join(format!("rollout-stale-{THREAD}.jsonl"));
+    std::fs::write(&stale, b"stale\n").unwrap();
+    let mut queue_control = queue(&fixture, None);
+    queue_control.rollout = Some(stale.clone());
+    let calls = Arc::clone(&queue_control.calls);
+
+    assert_eq!(
+        service(&fixture, queue_control)
+            .write(request(&fixture, "must not write"))
+            .unwrap_err(),
+        SessionPromptWriteError::OutputSourceChanged
+    );
+    assert!(calls.lock().unwrap().is_empty());
+    let _ = std::fs::remove_file(stale);
 }
 
 #[test]
@@ -392,8 +428,11 @@ fn ambiguous_session_and_writer_never_call_queue() {
         &session_fixture,
         Some("019f3b59-7771-7ea1-a9a1-3cd638f216c5"),
     );
-    let error = service(&session_fixture, queue_control).inject(request(&session_fixture, "hello"));
-    assert_eq!(error.unwrap_err(), PromptInjectionError::AmbiguousSession);
+    let error = service(&session_fixture, queue_control).write(request(&session_fixture, "hello"));
+    assert_eq!(
+        error.unwrap_err(),
+        SessionPromptWriteError::AmbiguousSession
+    );
 
     let mut writer_fixture = fixture();
     let second = process(
@@ -409,10 +448,10 @@ fn ambiguous_session_and_writer_never_call_queue() {
         &writer_fixture,
         Some("019f3b59-7771-7ea1-a9a1-3cd638f216c5"),
     );
-    let error = service(&writer_fixture, queue_control).inject(request(&writer_fixture, "hello"));
+    let error = service(&writer_fixture, queue_control).write(request(&writer_fixture, "hello"));
     assert_eq!(
         error.unwrap_err(),
-        PromptInjectionError::AmbiguousCodexWriter
+        SessionPromptWriteError::AmbiguousCodexWriter
     );
 }
 
@@ -420,9 +459,10 @@ fn ambiguous_session_and_writer_never_call_queue() {
 fn queue_success_preserves_multiline_message_and_same_thread() {
     let fixture = fixture();
     let message_id = "019f3b59-7771-7ea1-a9a1-3cd638f216c5";
-    let queue_control = queue(&fixture, Some(message_id));
+    let mut queue_control = queue(&fixture, Some(message_id));
+    queue_control.consumed_message = Some("line one\nline two".to_string());
     let calls = Arc::clone(&queue_control.calls);
-    let result = service(&fixture, queue_control).inject(request(&fixture, "line one\nline two"));
+    let result = service(&fixture, queue_control).write(request(&fixture, "line one\nline two"));
     assert_eq!(result.unwrap().thread_id, THREAD);
     assert_eq!(
         calls.lock().unwrap()[0],
@@ -431,72 +471,77 @@ fn queue_success_preserves_multiline_message_and_same_thread() {
 }
 
 #[test]
-fn queue_acknowledgement_is_valid_when_item_is_consumed_before_snapshot() {
+fn fresh_idle_thread_uses_live_app_server_before_first_persisted_row() {
+    let fixture = fixture();
+    let mut queue_control = queue(&fixture, Some("019f3b59-7771-7ea1-a9a1-3cd638f216c5"));
+    queue_control.persisted.store(false, Ordering::SeqCst);
+    queue_control
+        .loaded_addressable
+        .store(true, Ordering::SeqCst);
+    queue_control.consumed_message = Some("first prompt before manual input".to_string());
+
+    let calls = Arc::clone(&queue_control.calls);
+    let result = service(&fixture, queue_control)
+        .write(request(&fixture, "first prompt before manual input"))
+        .expect("live app-server thread should be queueable before persisted rollout");
+
+    assert_eq!(result.thread_id, THREAD);
+    assert_eq!(calls.lock().unwrap().len(), 1);
+}
+
+#[test]
+fn addressability_race_waits_without_becoming_no_session() {
+    let fixture = fixture();
+    let mut queue_control = queue(&fixture, Some("019f3b59-7771-7ea1-a9a1-3cd638f216c5"));
+    queue_control.persisted.store(false, Ordering::SeqCst);
+    queue_control.addressable_after = Some(2);
+    queue_control.consumed_message = Some("hello".to_string());
+
+    let result = service(&fixture, queue_control).write(request(&fixture, "hello"));
+
+    assert_eq!(result.unwrap().thread_id, THREAD);
+}
+
+#[test]
+fn queue_success_requires_the_same_rollout_user_event() {
     let fixture = fixture();
     let message_id = "019f3b59-7771-7ea1-a9a1-3cd638f216c5";
     let mut queue_control = queue(&fixture, Some(message_id));
     queue_control.consumed_message = Some("already consumed".to_string());
-    queue_control.snapshots = Mutex::new(VecDeque::from([
-        QueueSnapshot::default(),
-        QueueSnapshot::default(),
-    ]));
     let result = service(&fixture, queue_control)
-        .inject(request(&fixture, "already consumed"))
+        .write(request(&fixture, "already consumed"))
         .unwrap();
-    assert_eq!(result.verification, "consumed_rollout");
+    assert_eq!(result.verification, "rollout_user_event_observed");
 }
 
 #[test]
-fn system_queue_snapshot_reads_current_queue_schema() {
-    let root = std::env::temp_dir().join(format!(
-        "prodex-session-queue-snapshot-test-{}-{}",
-        std::process::id(),
-        SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_nanos()
-    ));
-    std::fs::create_dir_all(&root).unwrap();
-    let queue_db = root.join("queue_1.sqlite");
-    let connection = rusqlite::Connection::open(&queue_db).unwrap();
-    connection
-        .execute_batch(
-            "CREATE TABLE queued_items (
-                id TEXT NOT NULL,
-                thread_id TEXT NOT NULL,
-                payload_json TEXT NOT NULL,
-                queue_order INTEGER NOT NULL,
-                created_at_ms INTEGER NOT NULL,
-                updated_at_ms INTEGER NOT NULL
-            );
-            ",
-        )
-        .unwrap();
-    connection
-        .execute(
-            "INSERT INTO queued_items
-                (id, thread_id, payload_json, queue_order, created_at_ms, updated_at_ms)
-             VALUES (?1, ?2, '{}', 1, 1, 1)",
-            rusqlite::params!["message-id", THREAD],
-        )
-        .unwrap();
-    drop(connection);
+fn app_server_turn_control_requires_the_rollout_user_event_before_success() {
+    let fixture = fixture();
+    let message = "visible user message";
+    let mut queue_control = queue(&fixture, None);
+    queue_control.persisted.store(false, Ordering::SeqCst);
+    queue_control
+        .loaded_addressable
+        .store(true, Ordering::SeqCst);
+    queue_control.consumed_message = Some(message.to_string());
 
-    let snapshot = SystemQueueControl.snapshot(&queue_db, THREAD).unwrap();
-    assert!(snapshot.item_ids.contains("message-id"));
-    let _ = std::fs::remove_dir_all(root);
+    let result = service(&fixture, queue_control)
+        .write(request(&fixture, message))
+        .expect("turn control must wait for the same rollout user event");
+
+    assert_eq!(result.verification, "rollout_user_event_observed");
 }
 
 #[test]
 fn unpersisted_thread_reproduces_codex_0153_regression_without_queue_mutation() {
     let fixture = fixture();
-    let mut queue_control = queue(&fixture, Some("019f3b59-7771-7ea1-a9a1-3cd638f216c5"));
-    queue_control.persisted = false;
+    let queue_control = queue(&fixture, Some("019f3b59-7771-7ea1-a9a1-3cd638f216c5"));
+    queue_control.persisted.store(false, Ordering::SeqCst);
     let calls = Arc::clone(&queue_control.calls);
-    let error = service(&fixture, queue_control).inject(request(&fixture, "must not send"));
+    let error = service(&fixture, queue_control).write(request(&fixture, "must not send"));
     assert_eq!(
         error.unwrap_err(),
-        PromptInjectionError::SessionNotQueueAddressable
+        SessionPromptWriteError::SessionNotQueueAddressable
     );
     assert!(calls.lock().unwrap().is_empty());
 }
@@ -509,191 +554,8 @@ fn missing_main_queue_db_and_wal_only_are_rejected() {
         path: root.join("queue_1.sqlite-wal"),
     }];
     assert_eq!(
-        exact_open_database(&files, super::session_prompt_injection::DatabaseKind::Queue).unwrap(),
+        exact_open_database(&files, super::session_prompt_write::DatabaseKind::Queue).unwrap(),
         None
     );
     let _ = std::fs::remove_dir_all(root);
-}
-
-#[test]
-fn output_read_uses_exact_rollout_cursor_and_repeated_cursor_is_safe() {
-    let fixture = fixture();
-    let service = service(&fixture, queue(&fixture, None));
-    let first = service
-        .read_output(PromptOutputReadRequest {
-            workspace_root: fixture.workspace.clone(),
-            cursor: None,
-            limit: 10,
-            wait_ms: 0,
-            prodex_pid: None,
-            thread_id: None,
-            binding_key: "test".to_string(),
-        })
-        .unwrap();
-    assert_eq!(first.thread_id, THREAD);
-    assert_eq!(first.events[0].kind, "assistant");
-    assert_eq!(first.events[1].kind, "tool");
-    let repeated = service
-        .read_output(PromptOutputReadRequest {
-            workspace_root: fixture.workspace.clone(),
-            cursor: Some(first.next_cursor.clone()),
-            limit: 10,
-            wait_ms: 0,
-            prodex_pid: None,
-            thread_id: None,
-            binding_key: "test".to_string(),
-        })
-        .unwrap();
-    let repeated_again = service
-        .read_output(PromptOutputReadRequest {
-            workspace_root: fixture.workspace.clone(),
-            cursor: Some(first.next_cursor),
-            limit: 10,
-            wait_ms: 0,
-            prodex_pid: None,
-            thread_id: None,
-            binding_key: "test".to_string(),
-        })
-        .unwrap();
-    assert_eq!(repeated, repeated_again);
-}
-
-#[test]
-fn output_cursor_rejects_changed_process_identity_and_invalid_values() {
-    let fixture = fixture();
-    let service = service(&fixture, queue(&fixture, None));
-    let first = service
-        .read_output(PromptOutputReadRequest {
-            workspace_root: fixture.workspace.clone(),
-            cursor: None,
-            limit: 10,
-            wait_ms: 0,
-            prodex_pid: None,
-            thread_id: None,
-            binding_key: "test".to_string(),
-        })
-        .unwrap();
-    assert_eq!(
-        service.read_output(PromptOutputReadRequest {
-            workspace_root: fixture.workspace.clone(),
-            cursor: Some("not-a-cursor".to_string()),
-            limit: 1,
-            wait_ms: 0,
-            prodex_pid: None,
-            thread_id: None,
-            binding_key: "test".to_string(),
-        }),
-        Err(PromptInjectionError::InvalidCursor)
-    );
-    assert!(!first.next_cursor.is_empty());
-}
-
-#[test]
-fn implementation_has_no_direct_queue_payload_or_pty_injection_path() {
-    let source = include_str!("session_prompt_injection.rs");
-    for forbidden in [
-        "payload_json",
-        "INSERT INTO queued_items",
-        "xdotool",
-        "TIOCSTI",
-        "/dev/pts/",
-        "prodex_super_start",
-        "/expose/input",
-    ] {
-        assert!(
-            !source.contains(forbidden),
-            "forbidden mechanism: {forbidden}"
-        );
-    }
-}
-
-#[test]
-fn output_page_does_not_drop_events_from_one_rollout_line() {
-    let fixture = fixture();
-    let first = read_output_events(&fixture.rollout, 0, 0, 1).unwrap();
-    assert_eq!(first.events.len(), 1);
-    assert!(first.next_offset > 0);
-    assert_eq!(first.next_event_index, 0);
-    let second = read_output_events(
-        &fixture.rollout,
-        first.next_offset,
-        first.next_event_index,
-        10,
-    )
-    .unwrap();
-    assert_eq!(second.events.len(), 2);
-    assert!(second.next_offset > 0);
-}
-
-#[test]
-fn output_source_accepts_managed_session_directory_symlink() {
-    let fixture = fixture();
-    let overlay = fixture.root.join("overlay");
-    std::fs::create_dir_all(&overlay).unwrap();
-    #[cfg(unix)]
-    std::os::unix::fs::symlink(
-        fixture.root.join("target-codex-home/sessions"),
-        overlay.join("sessions"),
-    )
-    .unwrap();
-    #[cfg(windows)]
-    std::os::windows::fs::symlink_dir(
-        fixture.root.join("target-codex-home/sessions"),
-        overlay.join("sessions"),
-    )
-    .unwrap();
-
-    let stored = overlay.join("sessions/2026/09/03").join(
-        fixture
-            .rollout
-            .file_name()
-            .expect("fixture rollout should have a filename"),
-    );
-    assert_eq!(
-        valid_rollout_path_in_roots(&stored, std::slice::from_ref(&overlay), THREAD),
-        None
-    );
-    assert_eq!(
-        valid_rollout_path_in_authoritative_open_files(
-            &stored,
-            std::slice::from_ref(&overlay),
-            &[OpenProcessFile {
-                path: fixture.rollout.clone(),
-            }],
-            THREAD,
-        ),
-        Some(fixture.rollout.canonicalize().unwrap())
-    );
-    assert_eq!(
-        valid_rollout_path_in_authoritative_open_files(&stored, &[overlay], &[], THREAD),
-        None
-    );
-}
-
-#[test]
-fn output_source_rejects_symlink_and_hidden_instruction_rollout() {
-    let fixture = fixture();
-    let outside = fixture.root.join("outside.jsonl");
-    std::fs::write(&outside, "secret\n").unwrap();
-    let link = fixture
-        .rollout
-        .parent()
-        .unwrap()
-        .join(format!("rollout-{THREAD}-link.jsonl"));
-    #[cfg(unix)]
-    {
-        std::os::unix::fs::symlink(&outside, &link).unwrap();
-        assert!(
-            valid_rollout_path_in_roots(&link, &[fixture.root.join("target-codex-home")], THREAD,)
-                .is_none()
-        );
-    }
-    let hidden = fixture.root.join("hidden.jsonl");
-    std::fs::write(
-        &hidden,
-        "{\"timestamp\":\"2026-09-03T10:00:00Z\",\"type\":\"session_meta\",\"payload\":{\"base_instructions\":{\"text\":\"do not disclose\"}}}\n",
-    )
-    .unwrap();
-    let batch = read_output_events(&hidden, 0, 0, 10).unwrap();
-    assert!(batch.events.is_empty());
 }
