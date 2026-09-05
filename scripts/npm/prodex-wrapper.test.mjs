@@ -196,6 +196,7 @@ async function stageWrapperInstall(version) {
   return {
     root,
     launcherPath: path.join(mainPackageDir, "prodex"),
+    platformPackageDir,
     externalDir,
     externalCodex,
   };
@@ -238,6 +239,29 @@ test("prodex npm wrapper uses bundled Codex shim by default", async (t) => {
   assert.equal(output.codexBin, "codex");
   assert.match(output.pathEntries[0], /prodex-codex-/);
   assert.notEqual(output.pathEntries[0], install.externalDir);
+});
+
+test("prodex npm wrapper prefers the bundled patched Codex runtime", async (t) => {
+  const install = await stageWrapperInstall("0.0.0-test");
+  if (!install) {
+    t.skip("wrapper fake native binary test is only implemented for POSIX runners");
+    return;
+  }
+  t.after(() => fs.rm(install.root, { recursive: true, force: true }));
+
+  const bundledCodex = path.join(install.platformPackageDir, "vendor", "codex");
+  await writeExecutable(bundledCodex, ["#!/bin/sh", "exit 0", ""].join("\n"));
+  const output = runWrapper(
+    install,
+    cleanEnv({
+      PATH: `${install.externalDir}${path.delimiter}${process.env.PATH || ""}`,
+      PRODEX_CODEX_BIN: undefined,
+      PRODEX_CODEX_RESOLUTION: undefined,
+    }),
+  );
+
+  assert.equal(output.codexBin, bundledCodex);
+  assert.equal(output.pathEntries[0], install.externalDir);
 });
 
 test("prodex npm wrapper can opt into external Codex explicitly", async (t) => {

@@ -10,7 +10,7 @@ RUNNING_EXE="${PRODEX_RUNNING_EXE:-}"
 BASE_URL_OVERRIDE="${PRODEX_RELEASE_BASE_URL:-}"
 NO_PATH_UPDATE="${PRODEX_NO_PATH_UPDATE:-false}"
 REQUIRE_MOJO="${PRODEX_INSTALL_REQUIRE_MOJO:-false}"
-CODEX_NPM_VERSION="0.153.2"
+CODEX_NPM_VERSION="0.153.4"
 
 if [ -n "${PRODEX_INSTALL_DIR:-}" ]; then
   BIN_DIR="$PRODEX_INSTALL_DIR"
@@ -222,6 +222,7 @@ maybe_add_to_path() {
 
 cleanup() {
   [ -z "$staged_path" ] || rm -f "$staged_path"
+  [ -z "${staged_codex_path:-}" ] || rm -f "$staged_codex_path"
   [ -z "$tmp_dir" ] || rm -rf "$tmp_dir"
 }
 
@@ -304,6 +305,7 @@ else
   target="$arch-unknown-linux-gnu"
 fi
 asset="prodex-$target"
+codex_asset="codex-$target"
 
 if [ -n "$BASE_URL_OVERRIDE" ]; then
   base_url="${BASE_URL_OVERRIDE%/}"
@@ -319,6 +321,7 @@ trap 'exit 1' 1 2 15
 checksums_path="$tmp_dir/SHA256SUMS"
 manifest_path="$tmp_dir/release-manifest.tsv"
 download_path="$tmp_dir/$asset"
+codex_download_path="$tmp_dir/$codex_asset"
 manifest_version=""
 
 step "Downloading Prodex $RELEASE for $target"
@@ -390,7 +393,7 @@ case "$MIGRATE" in
   1 | [Tt][Rr][Uu][Ee] | [Yy][Ee][Ss])
     if [ -x "$BIN_PATH" ]; then
       installed_version_before="$($BIN_PATH --version 2>/dev/null || true)"
-      if [ "$installed_version_before" = "prodex $manifest_version" ]; then
+      if [ "$installed_version_before" = "prodex $manifest_version" ] && [ -x "$BIN_DIR/codex" ]; then
         step "Prodex $manifest_version is already up to date."
         exit 0
       fi
@@ -411,10 +414,33 @@ if [ "$actual_digest" != "$expected_digest" ]; then
   exit 1
 fi
 
+codex_expected_digest="$(awk -v asset="$codex_asset" '$2 == asset && length($1) == 64 { print tolower($1); exit }' "$checksums_path")"
+if ! printf '%s\n' "$codex_expected_digest" | grep -Eq '^[0-9a-f]{64}$'; then
+  echo "Could not find a valid checksum for $codex_asset." >&2
+  exit 1
+fi
+download_file "$base_url/$codex_asset" "$codex_download_path"
+codex_actual_digest="$(file_sha256 "$codex_download_path")"
+if [ "$codex_actual_digest" != "$codex_expected_digest" ]; then
+  echo "Downloaded Codex checksum did not match." >&2
+  exit 1
+fi
+codex_version="$($codex_download_path --version 2>/dev/null || true)"
+case "$codex_version" in
+  "codex-cli 0.153.4"* | "codex 0.153.4"*) ;;
+  *)
+    echo "Downloaded Codex asset did not report version 0.153.4." >&2
+    exit 1
+    ;;
+esac
+
 mkdir -p "$BIN_DIR"
 staged_path="$BIN_DIR/.prodex.$$.new"
+staged_codex_path="$BIN_DIR/.codex.$$.new"
 cp "$download_path" "$staged_path"
+cp "$codex_download_path" "$staged_codex_path"
 chmod 0755 "$staged_path"
+chmod 0755 "$staged_codex_path"
 installed_version="$("$staged_path" --version 2>/dev/null || true)"
 case "$installed_version" in
   'prodex '*) ;;
@@ -452,6 +478,8 @@ fi
 
 mv -f "$staged_path" "$BIN_PATH"
 staged_path=""
+mv -f "$staged_codex_path" "$BIN_DIR/codex"
+staged_codex_path=""
 maybe_add_to_path
 
 step "$installed_version installed at $BIN_PATH"

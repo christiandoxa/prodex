@@ -521,6 +521,32 @@ jobs:
             sleep "$((attempt * 10))"
           done
 
+      - name: Build patched Codex runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          codex_source="${RUNNER_TEMP}/codex-rust-v0.153.4"
+          codex_target="${RUNNER_TEMP}/codex-target"
+          rm -rf "${codex_source}" "${codex_target}"
+          git init --quiet "${codex_source}"
+          git -C "${codex_source}" remote add origin https://github.com/openai/codex.git
+          git -C "${codex_source}" fetch --quiet --depth 1 origin 3d2ee51ca2d5db578f328aa75e20aa22c0197c9a
+          git -C "${codex_source}" checkout --quiet --detach 3d2ee51ca2d5db578f328aa75e20aa22c0197c9a
+          node scripts/compat/apply-codex-tui-patch.mjs --source "${codex_source}" --apply
+          build_args=(--release --target "${{ matrix.target }}" -p codex-cli --bin codex)
+          if [ "${{ matrix.use-cross }}" = "true" ]; then
+            CARGO_TARGET_DIR="${codex_target}" cross build "${build_args[@]}"
+          else
+            CARGO_TARGET_DIR="${codex_target}" cargo build "${build_args[@]}"
+          fi
+          codex_name=codex
+          if [ "${{ matrix.binary-name }}" = "prodex.exe" ]; then
+            codex_name=codex.exe
+          fi
+          mkdir -p "dist/${{ matrix.artifact-name }}"
+          cp "${codex_target}/${{ matrix.target }}/release/${codex_name}" "dist/${{ matrix.artifact-name }}/${codex_name}"
+          chmod 0755 "dist/${{ matrix.artifact-name }}/${codex_name}"
+
       - name: Verify compiled-in Mojo release
         if: ${{ matrix.mojo-release && matrix.can-mojo-runtime-smoke }}
         shell: bash
@@ -665,7 +691,7 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: ${{ matrix.artifact-name }}
-          path: dist/${{ matrix.artifact-name }}/${{ matrix.binary-name }}
+          path: dist/${{ matrix.artifact-name }}
           if-no-files-found: error
           overwrite: true
           retention-days: 7
@@ -853,11 +879,17 @@ jobs:
         with:
           subject-path: |
             artifacts/x86_64-unknown-linux-gnu/prodex
+            artifacts/x86_64-unknown-linux-gnu/codex
             artifacts/aarch64-unknown-linux-gnu/prodex
+            artifacts/aarch64-unknown-linux-gnu/codex
             artifacts/x86_64-apple-darwin/prodex
+            artifacts/x86_64-apple-darwin/codex
             artifacts/aarch64-apple-darwin/prodex
+            artifacts/aarch64-apple-darwin/codex
             artifacts/x86_64-pc-windows-msvc/prodex.exe
+            artifacts/x86_64-pc-windows-msvc/codex.exe
             artifacts/aarch64-pc-windows-msvc/prodex.exe
+            artifacts/aarch64-pc-windows-msvc/codex.exe
 
   publish-container:
     name: Publish container and deployment manifest
@@ -1194,7 +1226,7 @@ jobs:
               stem="${base%.*}"
             fi
             cp "${file}" "release-assets/${stem}-${parent}${ext}"
-          done < <(find artifacts -mindepth 2 -maxdepth 2 -type f \( -name 'prodex' -o -name 'prodex.exe' \) -print0)
+          done < <(find artifacts -mindepth 2 -maxdepth 2 -type f \( -name 'prodex' -o -name 'prodex.exe' -o -name 'codex' -o -name 'codex.exe' \) -print0)
           cp artifacts/release-sbom/release-sbom.spdx.json release-assets/release-sbom.spdx.json
           cp artifacts/kubernetes-manifest/prodex-* release-assets/
           cp install.sh release-assets/install.sh
@@ -1223,7 +1255,7 @@ jobs:
           set -euo pipefail
           (
             cd release-assets
-            sha256sum install.sh install.ps1 release-manifest.tsv release-manifest.json prodex-* release-sbom.spdx.json > SHA256SUMS
+            sha256sum install.sh install.ps1 release-manifest.tsv release-manifest.json prodex-* codex-* release-sbom.spdx.json > SHA256SUMS
             sha256sum --check SHA256SUMS
           )
 

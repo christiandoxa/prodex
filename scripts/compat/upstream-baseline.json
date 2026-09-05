@@ -1551,7 +1551,7 @@
           ]
         }
       ],
-      "tested_codex_release": "rust-v0.153.2",
+      "tested_codex_release": "rust-v0.153.4",
       "patch_deltas": [
         {
           "from": "rust-v0.150.0",
@@ -1646,6 +1646,19 @@
           ],
           "prodex_action": "Use the 0.153.2 package and preserve the model catalog as upstream-owned metadata; no compatibility repair or default change is required.",
           "compatibility_evidence": "Exact codeload archive and per-file diff are recorded in migration/codex-rust-v0.153.2-audit.md; all Prodex contract source areas are unchanged."
+        },
+        {
+          "from": "rust-v0.153.2",
+          "to": "rust-v0.153.4",
+          "upstream_commit": "3d2ee51ca2d5db578f328aa75e20aa22c0197c9a",
+          "upstream_tag_object": "042fb41b7c813ac7999105e886b2b7aa715b5081",
+          "tree_comparison": "exact tagged trees; model catalog and TUI metadata changes, with no app-server protocol or rollout persistence change",
+          "runtime_changes": [
+            "The 0.153.4 model catalog and picker metadata are additive and remain upstream-owned.",
+            "The pinned TUI emits supported thread/queue/changed state but does not render externally queued follow-ups."
+          ],
+          "prodex_action": "Apply the reproducible TUI compatibility patch from migration/codex-rust-v0.153.4-tui-queued-input.patch when building the bundled Codex runtime; preserve the official queue and thread identity semantics.",
+          "compatibility_evidence": "The exact upstream source patch is checksum-pinned and covered by the upstream TUI input-queue tests plus real idle and busy same-TUI lifecycle evidence."
         }
       ],
       "app_server_protocol": {
@@ -1668,15 +1681,16 @@
       }
     },
     "latestRelease": {
-      "tag_name": "rust-v0.153.2",
-      "name": "0.153.2",
-      "published_at": "2026-09-03T23:54:50Z",
-      "html_url": "https://github.com/openai/codex/releases/tag/rust-v0.153.2",
+      "tag_name": "rust-v0.153.4",
+      "name": "0.153.4",
+      "published_at": "2026-09-04T23:25:48Z",
+      "html_url": "https://github.com/openai/codex/releases/tag/rust-v0.153.4",
       "body_head": [
         "## Bug Fixes",
-        "- Corrected the GPT-6-Astra Fast tier description to say “2x speed, increased usage” instead of “1.5x.” This changes only the displayed text, not how requests run. (#42632)",
+        "- Fixed Astra’s visibility in the bundled model picker and made it the bundled default when no model is explicitly configured. (#42874)",
+        "- Updated Astra’s guidance to use asynchronous questions only when the tool is available in the session. (#42878)",
         "## Changelog",
-        "Full Changelog: https://github.com/openai/codex/compare/rust-v0.153.1...rust-v0.153.2"
+        "Full Changelog: https://github.com/openai/codex/compare/rust-v0.153.2...rust-v0.153.4"
       ]
     }
   },
