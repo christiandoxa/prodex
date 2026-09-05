@@ -308,7 +308,7 @@ jobs:
       - verify-ci
       - build-mojo-archives
     runs-on: ${{ matrix.runs-on }}
-    timeout-minutes: 120
+    timeout-minutes: 180
     permissions:
       contents: read
     strategy:
@@ -552,7 +552,8 @@ jobs:
           EOF
             cat > "${codex_source}/codex-rs/Dockerfile.prodex-cross-aarch64" <<'EOF'
           FROM ghcr.io/cross-rs/aarch64-unknown-linux-gnu:0.2.5@sha256:7f8308a8734d9fcd2ebbe9a3e4bdea74af293f0799d80c3cc341e340cda49a4c
-          RUN apt-get update \
+          RUN dpkg --add-architecture arm64 \
+            && apt-get update \
             && apt-get install --assume-yes --no-install-recommends \
               libssl-dev:arm64 pkg-config \
             && rm -rf /var/lib/apt/lists/*
@@ -569,13 +570,8 @@ jobs:
             exit 1
           fi
           codex_lock="${codex_source}/codex-rs/Cargo.lock"
-          test -s "${codex_lock}"
           sha256_file() {
-            if command -v sha256sum >/dev/null 2>&1; then
-              sha256sum "$1" | awk '{print $1}'
-            else
-              shasum -a 256 "$1" | awk '{print $1}'
-            fi
+            node -e 'const crypto = require("node:crypto"); const fs = require("node:fs"); process.stdout.write(crypto.createHash("sha256").update(fs.readFileSync(process.argv[1])).digest("hex"));' "$1"
           }
           codex_lock_sha_before="$(sha256_file "${codex_lock}")"
           test "${codex_lock_sha_before}" = "a2cb91dfb2e8112bc81d05158fa00b9698e2df8cc1ae0547b5dc5606a44904d3"
