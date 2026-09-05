@@ -529,38 +529,69 @@ jobs:
           codex_target="${RUNNER_TEMP}/codex-target"
           rm -rf "${codex_source}" "${codex_target}"
           git init --quiet "${codex_source}"
+          git -C "${codex_source}" config core.autocrlf false
           git -C "${codex_source}" remote add origin https://github.com/openai/codex.git
           git -C "${codex_source}" fetch --quiet --depth 1 origin 3d2ee51ca2d5db578f328aa75e20aa22c0197c9a
           git -C "${codex_source}" checkout --quiet --detach 3d2ee51ca2d5db578f328aa75e20aa22c0197c9a
           node scripts/compat/apply-codex-tui-patch.mjs --source "${codex_source}" --apply
-          if [ "${{ matrix.use-cross }}" != "true" ]; then
-            export RUSTUP_TOOLCHAIN=1.98.0
-            CARGO_BUILD_TARGET="${{ matrix.target }}" \
-              cargo generate-lockfile --manifest-path "${codex_source}/codex-rs/Cargo.toml"
-          fi
-          if [ "${{ matrix.target }}" = "aarch64-unknown-linux-gnu" ] && [ "${{ matrix.use-cross }}" = "true" ]; then
+          if [ "${{ matrix.use-cross }}" = "true" ]; then
             cat > "${codex_source}/codex-rs/Cross.toml" <<'EOF'
+          [target.x86_64-unknown-linux-gnu]
+          dockerfile = "Dockerfile.prodex-cross-x86_64"
           [target.aarch64-unknown-linux-gnu]
-          dockerfile = "Dockerfile.prodex-cross"
+          dockerfile = "Dockerfile.prodex-cross-aarch64"
           EOF
-            cat > "${codex_source}/codex-rs/Dockerfile.prodex-cross" <<'EOF'
-          FROM ghcr.io/cross-rs/aarch64-unknown-linux-gnu:0.2.5@sha256:7f8308a8734d9fcd2ebbe9a3e4bdea74af293f0799d80c3cc341e340cda49a4c
-          RUN dpkg --add-architecture arm64 \
-            && apt-get update \
-            && apt-get install --assume-yes --no-install-recommends libssl-dev:arm64 \
+            cat > "${codex_source}/codex-rs/Dockerfile.prodex-cross-x86_64" <<'EOF'
+          FROM ghcr.io/cross-rs/x86_64-unknown-linux-gnu:0.2.5@sha256:9e5b39c09874bc1816c675ed11afca2c2ed6cee0c4ed2b3c1d5763c346c9ae3f
+          RUN apt-get update \
+            && apt-get install --assume-yes --no-install-recommends \
+              libssl-dev pkg-config \
             && rm -rf /var/lib/apt/lists/*
+          ENV PKG_CONFIG_LIBDIR_x86_64_unknown_linux_gnu=/usr/lib/x86_64-linux-gnu/pkgconfig:/usr/lib/pkgconfig:/usr/share/pkgconfig
+          RUN PKG_CONFIG_LIBDIR=/usr/lib/x86_64-linux-gnu/pkgconfig:/usr/lib/pkgconfig:/usr/share/pkgconfig pkg-config --modversion openssl
+          EOF
+            cat > "${codex_source}/codex-rs/Dockerfile.prodex-cross-aarch64" <<'EOF'
+          FROM ghcr.io/cross-rs/aarch64-unknown-linux-gnu:0.2.5@sha256:7f8308a8734d9fcd2ebbe9a3e4bdea74af293f0799d80c3cc341e340cda49a4c
+          RUN apt-get update \
+            && apt-get install --assume-yes --no-install-recommends \
+              libssl-dev:arm64 pkg-config \
+            && rm -rf /var/lib/apt/lists/*
+          ENV CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc \
+              CC_aarch64_unknown_linux_gnu=aarch64-linux-gnu-gcc \
+              CXX_aarch64_unknown_linux_gnu=aarch64-linux-gnu-g++ \
+              PKG_CONFIG_ALLOW_CROSS=1 \
+              PKG_CONFIG_LIBDIR_aarch64_unknown_linux_gnu=/usr/lib/aarch64-linux-gnu/pkgconfig:/usr/lib/pkgconfig:/usr/share/pkgconfig
+          RUN PKG_CONFIG_LIBDIR=/usr/lib/aarch64-linux-gnu/pkgconfig:/usr/lib/pkgconfig:/usr/share/pkgconfig pkg-config --modversion openssl
           EOF
           fi
-          if [ "${{ matrix.target }}" = "x86_64-unknown-linux-gnu" ]; then
-            sudo apt-get update
-            sudo apt-get install --assume-yes --no-install-recommends libssl-dev
+          if git -C "${codex_source}" diff --name-only | grep -E '(^|/)Cargo.toml$'; then
+            echo "Prodex Codex patch unexpectedly changes Cargo manifests" >&2
+            exit 1
           fi
+          codex_lock="${codex_source}/codex-rs/Cargo.lock"
+          test -s "${codex_lock}"
+          sha256_file() {
+            if command -v sha256sum >/dev/null 2>&1; then
+              sha256sum "$1" | awk '{print $1}'
+            else
+              shasum -a 256 "$1" | awk '{print $1}'
+            fi
+          }
+          codex_lock_sha_before="$(sha256_file "${codex_lock}")"
+          test "${codex_lock_sha_before}" = "a2cb91dfb2e8112bc81d05158fa00b9698e2df8cc1ae0547b5dc5606a44904d3"
+          echo "patched_codex_source_sha=3d2ee51ca2d5db578f328aa75e20aa22c0197c9a"
+          echo "patched_codex_lock_sha256=${codex_lock_sha_before}"
+          export RUSTUP_TOOLCHAIN=1.98.0
+          rustc --version | grep -F 'rustc 1.98.0'
+          cargo --version
           build_args=(--release --target "${{ matrix.target }}" -p codex-cli --bin codex)
           if [ "${{ matrix.use-cross }}" = "true" ]; then
             (cd "${codex_source}/codex-rs" && CARGO_TARGET_DIR="${codex_target}" cross build --locked "${build_args[@]}")
           else
             (cd "${codex_source}/codex-rs" && CARGO_TARGET_DIR="${codex_target}" cargo build --locked "${build_args[@]}")
           fi
+          codex_lock_sha_after="$(sha256_file "${codex_lock}")"
+          test "${codex_lock_sha_before}" = "${codex_lock_sha_after}"
           codex_name=codex
           if [ "${{ matrix.binary-name }}" = "prodex.exe" ]; then
             codex_name=codex.exe
@@ -680,19 +711,22 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          binary="target/${{ matrix.target }}/release/${{ matrix.binary-name }}"
-          versions="$(readelf --version-info "${binary}" | grep -oE 'GLIBC_[0-9]+\.[0-9]+' | sort -Vu || true)"
-          if [ -z "${versions}" ]; then
-            echo "failed to detect GLIBC symbol versions for ${binary}" >&2
-            exit 1
-          fi
-          max_required="$(printf '%s\n' "${versions}" | tail -n1)"
-          echo "detected GLIBC requirements for ${binary}:"
-          printf '%s\n' "${versions}"
-          if [ "$(printf '%s\n%s\n' "${max_required}" "${{ matrix.max-glibc }}" | sort -V | tail -n1)" != "${{ matrix.max-glibc }}" ]; then
-            echo "binary requires ${max_required}, which exceeds allowed baseline ${{ matrix.max-glibc }}" >&2
-            exit 1
-          fi
+          for binary in \
+            "target/${{ matrix.target }}/release/${{ matrix.binary-name }}" \
+            "dist/${{ matrix.artifact-name }}/codex"; do
+            versions="$(readelf --version-info "${binary}" | grep -oE 'GLIBC_[0-9]+\.[0-9]+' | sort -Vu || true)"
+            if [ -z "${versions}" ]; then
+              echo "failed to detect GLIBC symbol versions for ${binary}" >&2
+              exit 1
+            fi
+            max_required="$(printf '%s\n' "${versions}" | tail -n1)"
+            echo "detected GLIBC requirements for ${binary}:"
+            printf '%s\n' "${versions}"
+            if [ "$(printf '%s\n%s\n' "${max_required}" "${{ matrix.max-glibc }}" | sort -V | tail -n1)" != "${{ matrix.max-glibc }}" ]; then
+              echo "binary requires ${max_required}, which exceeds allowed baseline ${{ matrix.max-glibc }}" >&2
+              exit 1
+            fi
+          done
 
       - name: Native smoke test
         if: ${{ matrix.can-native-smoke }}

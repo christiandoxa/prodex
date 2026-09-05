@@ -237,6 +237,28 @@ test("release validates the Kiro pin before build fan-out", () => {
   assert.match(build, /needs:\s*[\s\S]*?- verify-ci/);
 });
 
+test("release builds patched Codex from one immutable dependency identity", () => {
+  const workflow = readFileSync(".github/workflows/standalone-release.yml", "utf8");
+  const build = workflow.match(/\n  build:\n([\s\S]*?)\n  attest-binaries:/)?.[1];
+
+  assert.ok(build, "release build job missing");
+  assert.doesNotMatch(build, /cargo generate-lockfile/);
+  assert.match(build, /core\.autocrlf false/);
+  assert.match(build, /RUSTUP_TOOLCHAIN=1\.98\.0/);
+  assert.match(build, /cross-rs\/x86_64-unknown-linux-gnu:0\.2\.5@sha256:[0-9a-f]{64}/);
+  assert.match(build, /cross-rs\/aarch64-unknown-linux-gnu:0\.2\.5@sha256:[0-9a-f]{64}/);
+  assert.match(build, /libssl-dev pkg-config/);
+  assert.match(build, /libssl-dev:arm64 pkg-config/);
+  assert.match(build, /PKG_CONFIG_LIBDIR_aarch64_unknown_linux_gnu/);
+  assert.match(build, /PKG_CONFIG_LIBDIR_x86_64_unknown_linux_gnu/);
+  assert.match(build, /a2cb91dfb2e8112bc81d05158fa00b9698e2df8cc1ae0547b5dc5606a44904d3/);
+  assert.match(build, /patched_codex_lock_sha256=/);
+  assert.match(build, /codex_lock_sha_before[\s\S]*codex_lock_sha_after/);
+  assert.match(build, /cross build --locked/);
+  assert.match(build, /cargo build --locked/);
+  assert.match(build, /Verify Linux GLIBC baseline[\s\S]*dist\/\$\{\{ matrix\.artifact-name \}\}\/codex/);
+});
+
 test("release verifies optional-tool freshness on the exact release SHA", () => {
   const workflow = readFileSync(".github/workflows/standalone-release.yml", "utf8");
   const verifyCi = workflow.match(/\n  verify-ci:\n([\s\S]*?)\n  build:/)?.[1];
