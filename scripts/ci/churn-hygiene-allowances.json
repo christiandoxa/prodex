@@ -1828,8 +1828,7 @@
       "feat(kiro): normalize dynamic model catalogs",
       "fix(expose): route Prompt Write through existing sessions",
       "fix(compat): bundle patched Codex TUI runtime",
-      "ci(churn): record audited 0.426.1 clean product fixes",
-      "chore(release): release 0.426.1"
+      "ci(churn): record audited 0.426.1 clean product fixes"
     ],
     "caps": {
       "maxFiles": 72,
