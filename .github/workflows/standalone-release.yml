@@ -533,6 +533,19 @@ jobs:
           git -C "${codex_source}" fetch --quiet --depth 1 origin 3d2ee51ca2d5db578f328aa75e20aa22c0197c9a
           git -C "${codex_source}" checkout --quiet --detach 3d2ee51ca2d5db578f328aa75e20aa22c0197c9a
           node scripts/compat/apply-codex-tui-patch.mjs --source "${codex_source}" --apply
+          if [ "${{ matrix.target }}" = "aarch64-unknown-linux-gnu" ] && [ "${{ matrix.use-cross }}" = "true" ]; then
+            cat > "${codex_source}/codex-rs/Cross.toml" <<'EOF'
+          [target.aarch64-unknown-linux-gnu]
+          dockerfile = "Dockerfile.prodex-cross"
+          EOF
+            cat > "${codex_source}/codex-rs/Dockerfile.prodex-cross" <<'EOF'
+          FROM ghcr.io/cross-rs/aarch64-unknown-linux-gnu:0.2.5@sha256:7f8308a8734d9fcd2ebbe9a3e4bdea74af293f0799d80c3cc341e340cda49a4c
+          RUN dpkg --add-architecture arm64 \
+            && apt-get update \
+            && apt-get install --assume-yes --no-install-recommends libssl-dev:arm64 \
+            && rm -rf /var/lib/apt/lists/*
+          EOF
+          fi
           build_args=(--release --target "${{ matrix.target }}" -p codex-cli --bin codex)
           if [ "${{ matrix.use-cross }}" = "true" ]; then
             (cd "${codex_source}/codex-rs" && CARGO_TARGET_DIR="${codex_target}" cross build --locked "${build_args[@]}")
