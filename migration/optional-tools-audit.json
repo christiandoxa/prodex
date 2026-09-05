@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
-  "audited_at": "2026-09-04T05:26:30Z",
-  "release": "0.426.0",
+  "audited_at": "2026-09-05T07:58:38Z",
+  "release": "0.426.1",
   "tools": [
     {
       "id": "caveman",
@@ -22,16 +22,16 @@
     {
       "id": "rtk",
       "repository": "https://github.com/rtk-ai/rtk",
-      "latest_stable": "0.47.0",
-      "release": "v0.47.0",
-      "commit": "34fe2553192aef5f6ca19944cb52a272a5294c27",
-      "git_tree": "ac0e604b5f1809ce2b1f717db65c3f620cc28ad2",
-      "checksums_asset": "sha256:ecb918b8ec017d3604981097f1b9a69dd50e8eaa6806580b0b852e24c5961df5",
+      "latest_stable": "0.48.0",
+      "release": "v0.48.0",
+      "commit": "fde0a8f185945556f51718de0f4c430bb62b3df6",
+      "git_tree": "183f99b26ac0b945119f42a589d8e9257fe7eec8",
+      "checksums_asset": "sha256:5dfd96e853c11e8becf0e11be2535676f497a5949266824e331ddafecb406265",
       "license": "Apache-2.0",
       "runtime": "Externally managed executable; recommended, not latest-only",
       "platforms": ["linux", "macos", "windows"],
       "decision": "ADOPT_PACKAGE",
-      "notes": "Latest release audited for find, git, stream decoding, and Windows console behavior."
+      "notes": "v0.48.0 is the latest stable release; the exact release commit, Git tree, and checksum manifest digest are pinned."
     },
     {
       "id": "codebase-memory-mcp",
