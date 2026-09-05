@@ -534,11 +534,11 @@ jobs:
           git -C "${codex_source}" checkout --quiet --detach 3d2ee51ca2d5db578f328aa75e20aa22c0197c9a
           node scripts/compat/apply-codex-tui-patch.mjs --source "${codex_source}" --apply
           cargo generate-lockfile --manifest-path "${codex_source}/codex-rs/Cargo.toml"
-          build_args=(--locked --release --target "${{ matrix.target }}" -p codex-cli --bin codex)
+          build_args=(--release --target "${{ matrix.target }}" -p codex-cli --bin codex)
           if [ "${{ matrix.use-cross }}" = "true" ]; then
-            CARGO_TARGET_DIR="${codex_target}" cross build "${build_args[@]}"
+            CARGO_TARGET_DIR="${codex_target}" cross build --locked "${build_args[@]}"
           else
-            CARGO_TARGET_DIR="${codex_target}" cargo build "${build_args[@]}"
+            CARGO_TARGET_DIR="${codex_target}" cargo build --locked "${build_args[@]}"
           fi
           codex_name=codex
           if [ "${{ matrix.binary-name }}" = "prodex.exe" ]; then
