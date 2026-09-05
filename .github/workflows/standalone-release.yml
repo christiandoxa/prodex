@@ -536,9 +536,9 @@ jobs:
           cargo generate-lockfile --manifest-path "${codex_source}/codex-rs/Cargo.toml"
           build_args=(--release --target "${{ matrix.target }}" -p codex-cli --bin codex)
           if [ "${{ matrix.use-cross }}" = "true" ]; then
-            CARGO_TARGET_DIR="${codex_target}" cross build --locked "${build_args[@]}"
+            (cd "${codex_source}/codex-rs" && CARGO_TARGET_DIR="${codex_target}" cross build --locked "${build_args[@]}")
           else
-            CARGO_TARGET_DIR="${codex_target}" cargo build --locked "${build_args[@]}"
+            (cd "${codex_source}/codex-rs" && CARGO_TARGET_DIR="${codex_target}" cargo build --locked "${build_args[@]}")
           fi
           codex_name=codex
           if [ "${{ matrix.binary-name }}" = "prodex.exe" ]; then
