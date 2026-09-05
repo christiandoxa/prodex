@@ -1821,5 +1821,22 @@
       "maxFileLines": 704
     },
     "reason": "Reviewed the exact 0.426.0 forward promotion plus the required Codex rust-v0.153.2 compatibility pin, lockfile, baseline, tagged-tree audit, managed-overlay rollout symlink repair, and writer-authorized rollout consumption check. The measured range is 59 files, 36 behavior files, 4,983 changed lines, and 704 changed lines in the largest file; these exact caps cover only the named subjects while global thresholds and all correctness, security, release, and qualification gates remain enforced."
+  },
+  {
+    "id": "audited-prodex-0.426.1-clean-product-fixes",
+    "requiredSubjects": [
+      "feat(kiro): normalize dynamic model catalogs",
+      "fix(expose): route Prompt Write through existing sessions",
+      "fix(compat): bundle patched Codex TUI runtime",
+      "ci(churn): record audited 0.426.1 clean product fixes",
+      "chore(release): release 0.426.1"
+    ],
+    "caps": {
+      "maxFiles": 72,
+      "maxBehaviorFiles": 48,
+      "maxLines": 5200,
+      "maxFileLines": 550
+    },
+    "reason": "Reviewed the clean 0.426.1 product line rooted directly at origin/main: dynamic Kiro catalog normalization and picker propagation, fail-closed existing-session Prompt Write/output binding with cursor regressions, and the checksum-pinned Codex 0.153.4 queued-input TUI compatibility patch. The narrow caps cover only these named product commits, the audited churn record, and the final release metadata commit; all correctness, security, boundary, terminology, genericity, and release guards remain enforced."
   }
 ]
