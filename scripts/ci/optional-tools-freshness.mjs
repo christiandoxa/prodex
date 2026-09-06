@@ -6,6 +6,7 @@ import { pathToFileURL } from "node:url";
 import { repoRoot } from "../npm/common.mjs";
 
 const auditPath = path.join(repoRoot, "migration", "optional-tools-audit.json");
+const runtimeInventoryPath = path.join(repoRoot, "crates/prodex-optional-tools/src/lib.rs");
 const FRESHNESS_SCHEMA_VERSION = 1;
 const VALID_CHECKPOINTS = new Set(["B"]);
 const RELEASE_SHA_PATTERN = /^[0-9a-f]{40}$/u;
@@ -65,6 +66,26 @@ function normalizeVersion(value) {
   return match?.[1] ?? null;
 }
 
+export function runtimePinnedVersions(source) {
+  const constants = new Map([
+    ["caveman", ["CAVEMAN_VETTED_VERSION", ""]],
+    ["rtk", ["RTK_RECOMMENDED_VERSION", ""]],
+    ["codebase-memory-mcp", ["CODEBASE_MEMORY_RECOMMENDED_VERSION", ""]],
+    ["playwright-mcp", ["PLAYWRIGHT_MCP_PACKAGE", "@playwright/mcp@"]],
+    ["ponytail", ["PONYTAIL_VETTED_VERSION", ""]],
+    ["presidio", ["PRESIDIO_RECOMMENDED_VERSION", ""]],
+  ]);
+  return Object.fromEntries([...constants].map(([id, [name, prefix]]) => {
+    const match = source.match(
+      new RegExp(`^pub(?:\\(crate\\))? const ${name}: &str = "([^"]+)";`, "mu"),
+    );
+    if (!match || !match[1].startsWith(prefix)) {
+      throw new Error(`runtime optional-tool inventory is missing ${name}`);
+    }
+    return [id, match[1].slice(prefix.length)];
+  }));
+}
+
 export function releaseTagPrefix(value) {
   return String(value ?? "")
     .trim()
@@ -90,16 +111,20 @@ export function latestStableReleaseTag(releases, componentPrefix = null) {
   );
 }
 
-export function compareFreshness(audit, observed) {
+export function compareFreshness(audit, observed, pinned) {
   if (!Array.isArray(audit?.tools)) throw new Error("optional-tool audit tools must be an array");
   if (!observed || typeof observed !== "object" || Array.isArray(observed)) {
     throw new Error("optional-tool observations must be an object");
+  }
+  if (!pinned || typeof pinned !== "object" || Array.isArray(pinned)) {
+    throw new Error("runtime optional-tool pins must be an object");
   }
   return audit.tools.map((tool) => {
     const actual = Object.hasOwn(observed, tool.id) ? observed[tool.id] : undefined;
     const expected = normalizeVersion(tool.latest_stable);
     const versions = Array.isArray(actual) ? actual : actual == null ? [] : [actual];
     const normalized = versions.map(normalizeVersion);
+    const runtimePin = normalizeVersion(pinned[tool.id]);
     const consistent =
       normalized.length > 0 &&
       normalized.every((version) => version !== null && version === normalized[0]);
@@ -107,7 +132,9 @@ export function compareFreshness(audit, observed) {
       id: tool.id,
       expected,
       observed: normalized,
-      status: consistent && normalized[0] === expected ? "latest" : "drift",
+      pinned: runtimePin,
+      status:
+        consistent && normalized[0] === expected && runtimePin === expected ? "latest" : "drift",
     };
   });
 }
@@ -143,16 +170,39 @@ function validateAudit(audit) {
   }
 }
 
-async function fetchJson(url) {
-  const response = await fetch(url, {
-    headers: {
-      accept: "application/json",
-      "user-agent": "prodex-optional-tools-freshness",
-    },
-    signal: AbortSignal.timeout(10_000),
-  });
-  if (!response.ok) throw new Error(`${url} returned HTTP ${response.status}`);
-  return response.json();
+export async function fetchJson(
+  url,
+  {
+    fetchImpl = fetch,
+    delay = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds)),
+  } = {},
+) {
+  for (let attempt = 1; attempt <= 2; attempt += 1) {
+    let response;
+    try {
+      response = await fetchImpl(url, {
+        headers: {
+          accept: "application/json",
+          "user-agent": "prodex-optional-tools-freshness",
+        },
+        signal: AbortSignal.timeout(10_000),
+      });
+    } catch (error) {
+      if (attempt === 2) throw error;
+      await delay(250);
+      continue;
+    }
+    if (response.ok) return response.json();
+    const error = new Error(`${url} returned HTTP ${response.status}`);
+    if (
+      attempt === 2 ||
+      ![408, 425, 429].includes(response.status) && response.status < 500
+    ) {
+      throw error;
+    }
+    await delay(250);
+  }
+  throw new Error(`${url} could not be checked`);
 }
 
 async function observedLatest(audit) {
@@ -189,6 +239,7 @@ async function observedLatest(audit) {
 
 export async function runFreshnessCheck({
   fetchLatest = observedLatest,
+  inventorySource = null,
   json = false,
   checkpoint = null,
   releaseSha = null,
@@ -209,7 +260,10 @@ export async function runFreshnessCheck({
   if (json && checkpoint === null) {
     throw new Error("--json requires --checkpoint and --release-sha");
   }
-  const results = compareFreshness(audit, await fetchLatest(audit));
+  const pinned = runtimePinnedVersions(
+    inventorySource ?? await fs.readFile(runtimeInventoryPath, "utf8"),
+  );
+  const results = compareFreshness(audit, await fetchLatest(audit), pinned);
   const evidence = {
     schema_version: FRESHNESS_SCHEMA_VERSION,
     checkpoint,
@@ -242,13 +296,36 @@ function selfTest() {
     ],
   };
   assert.deepEqual(
-    compareFreshness(audit, { one: "1.2.3", two: ["v0.4.5", "0.4.5"] }),
+    compareFreshness(
+      audit,
+      { one: "1.2.3", two: ["v0.4.5", "0.4.5"] },
+      { one: "1.2.3", two: "0.4.5" },
+    ),
     [
-      { id: "one", expected: "1.2.3", observed: ["1.2.3"], status: "latest" },
-      { id: "two", expected: "0.4.5", observed: ["0.4.5", "0.4.5"], status: "latest" },
+      {
+        id: "one",
+        expected: "1.2.3",
+        observed: ["1.2.3"],
+        pinned: "1.2.3",
+        status: "latest",
+      },
+      {
+        id: "two",
+        expected: "0.4.5",
+        observed: ["0.4.5", "0.4.5"],
+        pinned: "0.4.5",
+        status: "latest",
+      },
     ],
   );
-  assert.equal(compareFreshness(audit, { one: "1.2.4", two: "0.4.5" })[0].status, "drift");
+  assert.equal(
+    compareFreshness(
+      audit,
+      { one: "1.2.4", two: "0.4.5" },
+      { one: "1.2.3", two: "0.4.5" },
+    )[0].status,
+    "drift",
+  );
   assert.equal(normalizeVersion("v1.2.3+build.4"), "1.2.3");
   assert.equal(normalizeVersion("latest"), null);
   assert.equal(

@@ -3,9 +3,11 @@ import { execFileSync } from "node:child_process";
 import fs from "node:fs/promises";
 import test from "node:test";
 import {
+  fetchJson,
   latestStableReleaseTag,
   parseArgs,
   runFreshnessCheck,
+  runtimePinnedVersions,
 } from "./optional-tools-freshness.mjs";
 
 const auditPath = "migration/optional-tools-audit.json";
@@ -16,7 +18,9 @@ async function auditedFixture() {
   const observed = Object.fromEntries(
     audit.tools.map((tool) => [tool.id, tool.latest_stable]),
   );
-  return { audit, observed };
+  const inventorySource = await fs.readFile("crates/prodex-optional-tools/src/lib.rs", "utf8");
+  const pinned = runtimePinnedVersions(inventorySource);
+  return { audit, inventorySource, observed, pinned };
 }
 
 function outputBuffer() {
@@ -44,10 +48,11 @@ test("stable component selector ignores prereleases and unrelated monorepo relea
 });
 
 test("JSON evidence is real JSON and contains all six results", async () => {
-  const { observed } = await auditedFixture();
+  const { inventorySource, observed } = await auditedFixture();
   const { chunks, output } = outputBuffer();
   const evidence = await runFreshnessCheck({
     fetchLatest: async () => observed,
+    inventorySource,
     json: true,
     checkpoint: "B",
     releaseSha,
@@ -75,9 +80,9 @@ test("JSON evidence is real JSON and contains all six results", async () => {
 });
 
 test("default output remains the existing human TSV", async () => {
-  const { audit, observed } = await auditedFixture();
+  const { audit, inventorySource, observed } = await auditedFixture();
   const { chunks, output } = outputBuffer();
-  await runFreshnessCheck({ fetchLatest: async () => observed, output });
+  await runFreshnessCheck({ fetchLatest: async () => observed, inventorySource, output });
   assert.equal(
     chunks.join(""),
     audit.tools
@@ -87,20 +92,36 @@ test("default output remains the existing human TSV", async () => {
 });
 
 test("missing observed tool fails closed", async () => {
-  const { observed } = await auditedFixture();
+  const { inventorySource, observed } = await auditedFixture();
   delete observed.ponytail;
   await assert.rejects(
-    runFreshnessCheck({ fetchLatest: async () => observed, output: null }),
+    runFreshnessCheck({ fetchLatest: async () => observed, inventorySource, output: null }),
     /optional-tool freshness drift: ponytail/u,
   );
 });
 
 test("inconsistent registry versions fail closed", async () => {
-  const { observed } = await auditedFixture();
+  const { inventorySource, observed } = await auditedFixture();
   observed.presidio = ["2.2.364", "2.2.364", "2.2.365"];
   await assert.rejects(
-    runFreshnessCheck({ fetchLatest: async () => observed, output: null }),
+    runFreshnessCheck({ fetchLatest: async () => observed, inventorySource, output: null }),
     /optional-tool freshness drift: presidio/u,
+  );
+});
+
+test("runtime pin drift fails even when online and audit versions agree", async () => {
+  const { inventorySource, observed } = await auditedFixture();
+  const staleInventory = inventorySource.replace(
+    'pub(crate) const RTK_RECOMMENDED_VERSION: &str = "0.48.0";',
+    'pub(crate) const RTK_RECOMMENDED_VERSION: &str = "0.47.0";',
+  );
+  await assert.rejects(
+    runFreshnessCheck({
+      fetchLatest: async () => observed,
+      inventorySource: staleInventory,
+      output: null,
+    }),
+    /optional-tool freshness drift: rtk/u,
   );
 });
 
@@ -114,6 +135,33 @@ test("network or registry errors remain failures", async () => {
     }),
     /registry unavailable/u,
   );
+});
+
+test("registry fetch retries transient failures once and fails permanent errors immediately", async () => {
+  let calls = 0;
+  const value = await fetchJson("https://example.com/tool", {
+    fetchImpl: async () => {
+      calls += 1;
+      if (calls === 1) throw new Error("temporary transport failure");
+      return { ok: true, json: async () => ({ version: "1.2.3" }) };
+    },
+    delay: async () => {},
+  });
+  assert.deepEqual(value, { version: "1.2.3" });
+  assert.equal(calls, 2);
+
+  calls = 0;
+  await assert.rejects(
+    fetchJson("https://example.com/missing", {
+      fetchImpl: async () => {
+        calls += 1;
+        return { ok: false, status: 404 };
+      },
+      delay: async () => {},
+    }),
+    /HTTP 404/u,
+  );
+  assert.equal(calls, 1);
 });
 
 test("bad release SHA and checkpoint are rejected before checking", () => {
