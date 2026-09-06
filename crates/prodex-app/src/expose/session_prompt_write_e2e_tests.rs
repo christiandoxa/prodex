@@ -8,7 +8,10 @@ use super::session_prompt_write::{
     ExistingSessionPromptWrite, PromptOutputReadRequest, PromptOutputReadSuccess,
     SessionPromptWriteError, SessionPromptWriteRequest, SessionPromptWriteSuccess,
 };
+use super::session_prompt_write_tests::{fixture, queue, service};
 use serde_json::Value;
+use std::io::Write;
+use std::path::PathBuf;
 use std::sync::Arc;
 
 fn structured(response: &str) -> Value {
@@ -25,11 +28,28 @@ fn endpoint(
     Arc<super::runtime::ExposeShared>,
     super::runtime::ExposeHttpServer,
 ) {
+    endpoint_at(
+        instance_id,
+        capability,
+        std::env::current_dir().unwrap(),
+        bridge,
+    )
+}
+
+fn endpoint_at(
+    instance_id: &str,
+    capability: &str,
+    workspace: PathBuf,
+    bridge: Arc<dyn ExistingSessionPromptWrite>,
+) -> (
+    std::net::SocketAddr,
+    Arc<super::runtime::ExposeShared>,
+    super::runtime::ExposeHttpServer,
+) {
     let crate::Commands::Super(defaults) = crate::parse_cli_command_from(["prodex", "s"]).unwrap()
     else {
         panic!("expected Super defaults");
     };
-    let workspace = std::env::current_dir().unwrap();
     let endpoint = ExposeMcpEndpoint::new_with_run_manager_and_writer(ExposeMcpEndpointInit {
         capability: capability.to_string(),
         instance_id: instance_id.to_string(),
@@ -49,6 +69,37 @@ fn endpoint(
         "e2e.trycloudflare.com",
         expose_test_args(),
     )
+}
+
+fn call_tool(
+    address: std::net::SocketAddr,
+    target: &str,
+    id: u64,
+    name: &str,
+    arguments: Value,
+    session: &str,
+) -> Value {
+    let body = serde_json::json!({
+        "jsonrpc": "2.0",
+        "id": id,
+        "method": "tools/call",
+        "params": {"name": name, "arguments": arguments}
+    })
+    .to_string();
+    structured(&expose_mcp_request(
+        address,
+        "e2e.trycloudflare.com",
+        target,
+        &body,
+        &format!("Mcp-Session-Id: {session}\r\nMcp-Method: tools/call\r\nMcp-Name: {name}\r\n"),
+    ))
+}
+
+fn append_records(path: &std::path::Path, records: &[Value]) {
+    let mut output = std::fs::OpenOptions::new().append(true).open(path).unwrap();
+    for record in records {
+        writeln!(output, "{record}").unwrap();
+    }
 }
 
 #[derive(Default)]
@@ -295,4 +346,246 @@ fn mcp_prompt_write_output_read_is_deterministic_and_fail_closed() {
     stale_server.shutdown();
     stale_shared.pty.shutdown();
     stale_shared.mcp.as_ref().unwrap().run_manager.shutdown();
+}
+
+#[test]
+fn mcp_prompt_write_and_output_read_follow_the_real_session_service() {
+    let fixture = fixture();
+    let message = format!("real-session-e2e-{}", std::process::id());
+    let queue_db_before = std::fs::read(&fixture._queue_db).unwrap();
+    let mut queue_control = queue(&fixture, Some("019f3b59-7771-7ea1-a9a1-3cd638f216c5"));
+    queue_control.consumed_message = Some(message.clone());
+    let calls = Arc::clone(&queue_control.calls);
+    let bridge = Arc::new(service(&fixture, queue_control));
+    let capability = "RRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRR";
+    let target = format!("/pdx/v1/{capability}/mcp");
+    let (address, shared, mut server) = endpoint_at(
+        "pdxi_real_e2e",
+        capability,
+        fixture.workspace.clone(),
+        bridge,
+    );
+
+    let initialize = expose_mcp_request(
+        address,
+        "e2e.trycloudflare.com",
+        &target,
+        r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"e2e","version":"1"}}}"#,
+        "MCP-Protocol-Version: 2025-06-18\r\nMcp-Method: initialize\r\n",
+    );
+    assert!(initialize.starts_with("HTTP/1.1 200"), "{initialize}");
+    let tools = expose_mcp_request(
+        address,
+        "e2e.trycloudflare.com",
+        &target,
+        r#"{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}"#,
+        "Mcp-Method: tools/list\r\n",
+    );
+    assert!(tools.contains("prodex_session_prompt_write"));
+    assert!(tools.contains("prodex_session_output_read"));
+
+    let written = call_tool(
+        address,
+        &target,
+        3,
+        "prodex_session_prompt_write",
+        serde_json::json!({"message": message}),
+        "writer-a",
+    );
+    assert_eq!(written["status"], "written");
+    assert_eq!(written["prodex_pid"], 100);
+    assert_eq!(written["codex_pid"], 200);
+    assert_eq!(written["thread_id"], "019f3b59-7771-7ea1-a9a1-3cd638f216c4");
+    assert_eq!(written["verification"], "rollout_user_event_observed");
+    let cursor = written["output_cursor"].as_str().unwrap();
+    assert_eq!(
+        calls.lock().unwrap().as_slice(),
+        [(
+            "019f3b59-7771-7ea1-a9a1-3cd638f216c4".to_string(),
+            message.clone()
+        )]
+    );
+
+    append_records(
+        &fixture.rollout,
+        &[
+            serde_json::json!({
+                "timestamp": "2026-09-03T10:00:04Z",
+                "type": "session_meta",
+                "payload": {"base_instructions": {"text": "hidden-system-secret"}}
+            }),
+            serde_json::json!({
+                "timestamp": "2026-09-03T10:00:05Z",
+                "type": "response_item",
+                "payload": {
+                    "type": "message",
+                    "role": "user",
+                    "content": [{"type": "input_text", "text": "hidden-context-secret"}],
+                    "internal_chat_message_metadata_passthrough": {
+                        "content_item_kinds": ["agents_md.instructions"]
+                    }
+                }
+            }),
+            serde_json::json!({
+                "timestamp": "2026-09-03T10:00:06Z",
+                "type": "event_msg",
+                "payload": {"type": "agent_message", "message": "assistant visible"}
+            }),
+            serde_json::json!({
+                "timestamp": "2026-09-03T10:00:07Z",
+                "type": "response_item",
+                "payload": {"type": "function_call", "name": "shell", "arguments": "{\"cmd\":\"true\"}"}
+            }),
+            serde_json::json!({
+                "timestamp": "2026-09-03T10:00:08Z",
+                "type": "response_item",
+                "payload": {"type": "function_call_output", "output": "tool visible"}
+            }),
+            serde_json::json!({
+                "timestamp": "2026-09-03T10:00:09Z",
+                "type": "event_msg",
+                "payload": {"type": "turn_completed", "status": "completed"}
+            }),
+        ],
+    );
+    let other_thread = "019f3b59-7771-7ea1-a9a1-3cd638f216d0";
+    let other_rollout = fixture
+        .rollout
+        .parent()
+        .unwrap()
+        .join(format!("rollout-{other_thread}.jsonl"));
+    std::fs::write(
+        other_rollout,
+        "{\"timestamp\":\"2026-09-03T10:00:10Z\",\"type\":\"event_msg\",\"payload\":{\"type\":\"agent_message\",\"message\":\"other-session-secret\"}}\n",
+    )
+    .unwrap();
+
+    let first = call_tool(
+        address,
+        &target,
+        4,
+        "prodex_session_output_read",
+        serde_json::json!({"cursor": cursor, "limit": 2}),
+        "reader-a",
+    );
+    let repeated = call_tool(
+        address,
+        &target,
+        5,
+        "prodex_session_output_read",
+        serde_json::json!({"cursor": cursor, "limit": 2}),
+        "reader-reconnected",
+    );
+    assert_eq!(first, repeated);
+    assert_eq!(first["events"][0]["kind"], "user");
+    assert_eq!(first["events"][0]["text"], message);
+    assert_eq!(first["events"][1]["text"], "assistant visible");
+    let second = call_tool(
+        address,
+        &target,
+        6,
+        "prodex_session_output_read",
+        serde_json::json!({"cursor": first["next_cursor"], "limit": 2}),
+        "reader-b",
+    );
+    assert_eq!(second["events"][0]["kind"], "tool");
+    assert_eq!(second["events"][0]["status"], "started");
+    assert_eq!(second["events"][1]["text"], "tool visible");
+    let third = call_tool(
+        address,
+        &target,
+        7,
+        "prodex_session_output_read",
+        serde_json::json!({"cursor": second["next_cursor"], "limit": 2}),
+        "reader-c",
+    );
+    assert_eq!(third["events"][0]["kind"], "terminal");
+    let visible = format!("{first}{second}{third}");
+    assert!(!visible.contains("hidden-system-secret"));
+    assert!(!visible.contains("hidden-context-secret"));
+    assert!(!visible.contains("other-session-secret"));
+    assert_eq!(std::fs::read(&fixture._queue_db).unwrap(), queue_db_before);
+    assert!(shared.mcp.as_ref().unwrap().run_manager.list().is_empty());
+
+    server.shutdown();
+    shared.pty.shutdown();
+    shared.mcp.as_ref().unwrap().run_manager.shutdown();
+}
+
+#[test]
+fn mcp_busy_prompt_is_queued_once_and_read_in_rollout_order() {
+    let fixture = fixture();
+    let message = "queued while turn A is active";
+    let mut queue_control = queue(&fixture, Some("019f3b59-7771-7ea1-a9a1-3cd638f216c6"));
+    queue_control.invocation.queued = true;
+    let calls = Arc::clone(&queue_control.calls);
+    let capability = "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB";
+    let target = format!("/pdx/v1/{capability}/mcp");
+    let (address, shared, mut server) = endpoint_at(
+        "pdxi_busy_e2e",
+        capability,
+        fixture.workspace.clone(),
+        Arc::new(service(&fixture, queue_control)),
+    );
+
+    let written = call_tool(
+        address,
+        &target,
+        20,
+        "prodex_session_prompt_write",
+        serde_json::json!({"message": message}),
+        "busy-writer",
+    );
+    assert_eq!(written["verification"], "queue_pending_observed");
+    let cursor = written["output_cursor"].as_str().unwrap();
+    append_records(
+        &fixture.rollout,
+        &[
+            serde_json::json!({
+                "timestamp": "2026-09-03T10:01:00Z",
+                "type": "event_msg",
+                "payload": {"type": "turn_completed", "status": "completed"}
+            }),
+            serde_json::json!({
+                "timestamp": "2026-09-03T10:01:01Z",
+                "type": "event_msg",
+                "payload": {"type": "user_message", "message": message}
+            }),
+            serde_json::json!({
+                "timestamp": "2026-09-03T10:01:02Z",
+                "type": "event_msg",
+                "payload": {"type": "agent_message", "message": "turn B output"}
+            }),
+            serde_json::json!({
+                "timestamp": "2026-09-03T10:01:03Z",
+                "type": "event_msg",
+                "payload": {"type": "turn_completed", "status": "completed"}
+            }),
+        ],
+    );
+    let output = call_tool(
+        address,
+        &target,
+        21,
+        "prodex_session_output_read",
+        serde_json::json!({"cursor": cursor, "limit": 10}),
+        "busy-reader",
+    );
+    assert_eq!(
+        output["events"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|event| event["kind"].as_str().unwrap())
+            .collect::<Vec<_>>(),
+        ["terminal", "user", "assistant", "terminal"]
+    );
+    assert_eq!(output["events"][1]["text"], message);
+    assert_eq!(output["events"][2]["text"], "turn B output");
+    assert_eq!(calls.lock().unwrap().len(), 1);
+    assert!(shared.mcp.as_ref().unwrap().run_manager.list().is_empty());
+
+    server.shutdown();
+    shared.pty.shutdown();
+    shared.mcp.as_ref().unwrap().run_manager.shutdown();
 }

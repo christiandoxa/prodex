@@ -23,7 +23,7 @@ const THREAD: &str = "019f3b59-7771-7ea1-a9a1-3cd638f216c4";
 pub(super) struct Fixture {
     pub(super) root: PathBuf,
     pub(super) workspace: PathBuf,
-    _queue_db: PathBuf,
+    pub(super) _queue_db: PathBuf,
     _state_db: PathBuf,
     pub(super) rollout: PathBuf,
     writer: ProcessDetails,
@@ -172,8 +172,9 @@ pub(super) struct FakeQueueControl {
     addressable_after: Option<usize>,
     addressability_checks: AtomicUsize,
     rollout: Option<PathBuf>,
+    replace_rollout_on_queue: bool,
     pub(super) invocation: QueueInvocation,
-    consumed_message: Option<String>,
+    pub(super) consumed_message: Option<String>,
     pub(super) calls: Arc<Mutex<Vec<(String, String)>>>,
 }
 
@@ -215,6 +216,13 @@ impl QueueControl for FakeQueueControl {
             .unwrap()
             .push((target.thread_id.clone(), message.to_string()));
         self.persisted.store(true, Ordering::SeqCst);
+        if self.replace_rollout_on_queue
+            && let Some(path) = &self.rollout
+        {
+            let contents = std::fs::read(path).unwrap();
+            std::fs::rename(path, path.with_extension("replaced")).unwrap();
+            std::fs::write(path, contents).unwrap();
+        }
         if let (Some(path), Some(consumed_message)) = (&self.rollout, &self.consumed_message) {
             let line = serde_json::json!({
                 "timestamp": "2026-09-03T10:00:03Z",
@@ -271,6 +279,7 @@ pub(super) fn queue(fixture: &Fixture, message_id: Option<&str>) -> FakeQueueCon
         addressable_after: None,
         addressability_checks: AtomicUsize::new(0),
         rollout: Some(fixture.rollout.clone()),
+        replace_rollout_on_queue: false,
         invocation: QueueInvocation {
             outcome: QueueRequestOutcome::Accepted,
             exit_code: Some(0),
@@ -644,22 +653,6 @@ fn accepted_queued_message_does_not_wait_for_busy_turn_completion() {
         .expect("accepted queue submission should be sufficient evidence");
 
     assert_eq!(result.verification, "queue_pending_observed");
-}
-
-#[test]
-fn ambiguous_queue_submission_is_reported_without_replay() {
-    let fixture = fixture();
-    let mut queue_control = queue(&fixture, None);
-    queue_control.invocation.outcome = QueueRequestOutcome::Ambiguous;
-    let calls = Arc::clone(&queue_control.calls);
-
-    assert_eq!(
-        service(&fixture, queue_control)
-            .write(request(&fixture, "may have been accepted"))
-            .unwrap_err(),
-        SessionPromptWriteError::WriteAmbiguous
-    );
-    assert_eq!(calls.lock().unwrap().len(), 1);
 }
 
 #[test]

@@ -130,6 +130,7 @@ fn prompt_write_stays_responsive_and_append_wakes_long_poll() {
         "type": "event_msg",
         "payload": {"type": "agent_message", "message": "wakeup"}
     });
+    let append_started = Instant::now();
     writeln!(
         std::fs::OpenOptions::new()
             .append(true)
@@ -139,6 +140,7 @@ fn prompt_write_stays_responsive_and_append_wakes_long_poll() {
     )
     .unwrap();
     let result = waiter.join().unwrap().unwrap();
+    assert!(append_started.elapsed() < Duration::from_millis(250));
     assert_eq!(result.events[0].text, "wakeup");
     shutdown.store(true, std::sync::atomic::Ordering::SeqCst);
     assert_ne!(result.events[0].kind, "error");
