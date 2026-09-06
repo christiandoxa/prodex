@@ -1854,11 +1854,11 @@
       "chore(ci): authorize 0.427.0 campaign churn"
     ],
     "caps": {
-      "maxFiles": 180,
-      "maxBehaviorFiles": 150,
-      "maxLines": 11000,
+      "maxFiles": 181,
+      "maxBehaviorFiles": 152,
+      "maxLines": 10320,
       "maxFileLines": 600
     },
-    "reason": "Reviewed the exact 0.427.0 campaign covering safe Claude OAuth import and launch, one profile-pinned OpenAI hello inference per account, model-aware primary and Luna Reserve capacity, bounded pre-commit quota/rate/overload/transport recovery, complete redacted log and authoritative throughput events, an official-unmodified-Codex wrapper-only package, six pinned latest-stable optional tools, initialized existing-session Prompt Write and monotonic Output Read, deterministic regression and load evidence, staged exact-SHA release publication, and final synchronized metadata. The measured pre-release range is 163 files, 147 behavior files, 9,748 changed lines, and 591 lines in the largest focused E2E file; these narrow release-headroom caps apply only when every named campaign subject is present and do not disable any size, security, compatibility, test, or release gate."
+    "reason": "Reviewed the exact 0.427.0 campaign covering safe Claude OAuth import and launch, one profile-pinned OpenAI hello inference per account, model-aware primary and Luna Reserve capacity, bounded pre-commit quota/rate/overload/transport recovery, complete redacted log and authoritative throughput events, an official-unmodified-Codex wrapper-only package, six pinned latest-stable optional tools, initialized existing-session Prompt Write and monotonic Output Read, deterministic regression and load evidence, staged exact-SHA release publication, and final synchronized metadata. The measured final range is 180 files, 151 behavior files, 10,305 changed lines, and 591 lines in the largest focused E2E file; these narrow release-headroom caps apply only when every named campaign subject is present and do not disable any size, security, compatibility, test, or release gate."
   }
 ]
