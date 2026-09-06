@@ -1,9 +1,10 @@
 use super::session_prompt_write::{
     ExistingSessionPromptWrite, OpenProcessFile, ProcessDetails, ProcessInspector, ProcessRecord,
-    ProcessState, QueueControl, QueueInvocation, ResolvedTarget,
-    SESSION_PROMPT_WRITE_MAX_MESSAGE_BYTES, SessionPromptWriteError, SessionPromptWriteRequest,
-    SessionPromptWriteService, exact_open_database, is_codex_writer, is_descendant_of,
-    is_plain_prodex_session, legacy_thread_id, modern_thread_id, resolve_thread_identity,
+    ProcessState, PromptOutputReadRequest, QueueControl, QueueInvocation, QueueRequestOutcome,
+    ResolvedTarget, SESSION_PROMPT_WRITE_MAX_MESSAGE_BYTES, SessionPromptWriteError,
+    SessionPromptWriteRequest, SessionPromptWriteService, exact_open_database, is_codex_writer,
+    is_descendant_of, is_plain_prodex_session, legacy_thread_id, modern_thread_id,
+    resolve_thread_identity,
 };
 use std::collections::{BTreeMap, HashMap};
 use std::io::Write;
@@ -12,17 +13,19 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+#[path = "session_prompt_write_output_recovery_tests.rs"]
+mod output_recovery_tests;
 #[path = "session_prompt_write_output_tests.rs"]
 mod output_tests;
 
 const THREAD: &str = "019f3b59-7771-7ea1-a9a1-3cd638f216c4";
 
-struct Fixture {
-    root: PathBuf,
-    workspace: PathBuf,
+pub(super) struct Fixture {
+    pub(super) root: PathBuf,
+    pub(super) workspace: PathBuf,
     _queue_db: PathBuf,
     _state_db: PathBuf,
-    rollout: PathBuf,
+    pub(super) rollout: PathBuf,
     writer: ProcessDetails,
     records: Vec<ProcessRecord>,
 }
@@ -33,7 +36,7 @@ impl Drop for Fixture {
     }
 }
 
-fn fixture() -> Fixture {
+pub(super) fn fixture() -> Fixture {
     let root = std::env::temp_dir().join(format!(
         "prodex-session-prompt-write-test-{}-{}",
         std::process::id(),
@@ -127,10 +130,11 @@ fn process(
     }
 }
 
-struct FakeProcessInspector {
+pub(super) struct FakeProcessInspector {
     uid: u32,
     records: Vec<ProcessRecord>,
     details: ProcessDetails,
+    details_by_pid: HashMap<u32, ProcessDetails>,
     changed_records: Option<Vec<ProcessRecord>>,
     lists: AtomicUsize,
 }
@@ -151,21 +155,26 @@ impl ProcessInspector for FakeProcessInspector {
         })
     }
 
-    fn inspect(&self, _pid: u32) -> Result<Option<ProcessDetails>, SessionPromptWriteError> {
-        Ok(Some(self.details.clone()))
+    fn inspect(&self, pid: u32) -> Result<Option<ProcessDetails>, SessionPromptWriteError> {
+        Ok(Some(
+            self.details_by_pid
+                .get(&pid)
+                .cloned()
+                .unwrap_or_else(|| self.details.clone()),
+        ))
     }
 }
 
-struct FakeQueueControl {
+pub(super) struct FakeQueueControl {
     capability: bool,
     persisted: std::sync::atomic::AtomicBool,
     loaded_addressable: std::sync::atomic::AtomicBool,
     addressable_after: Option<usize>,
     addressability_checks: AtomicUsize,
     rollout: Option<PathBuf>,
-    invocation: QueueInvocation,
+    pub(super) invocation: QueueInvocation,
     consumed_message: Option<String>,
-    calls: Arc<Mutex<Vec<(String, String)>>>,
+    pub(super) calls: Arc<Mutex<Vec<(String, String)>>>,
 }
 
 impl QueueControl for FakeQueueControl {
@@ -226,7 +235,7 @@ impl QueueControl for FakeQueueControl {
     }
 }
 
-fn service(
+pub(super) fn service(
     fixture: &Fixture,
     queue: FakeQueueControl,
 ) -> SessionPromptWriteService<FakeProcessInspector, FakeQueueControl> {
@@ -235,6 +244,7 @@ fn service(
             uid: 1000,
             records: fixture.records.clone(),
             details: fixture.writer.clone(),
+            details_by_pid: HashMap::new(),
             changed_records: None,
             lists: AtomicUsize::new(0),
         },
@@ -242,7 +252,7 @@ fn service(
     )
 }
 
-fn request(fixture: &Fixture, message: &str) -> SessionPromptWriteRequest {
+pub(super) fn request(fixture: &Fixture, message: &str) -> SessionPromptWriteRequest {
     SessionPromptWriteRequest {
         workspace_root: fixture.workspace.clone(),
         message: message.to_string(),
@@ -253,7 +263,7 @@ fn request(fixture: &Fixture, message: &str) -> SessionPromptWriteRequest {
     }
 }
 
-fn queue(fixture: &Fixture, message_id: Option<&str>) -> FakeQueueControl {
+pub(super) fn queue(fixture: &Fixture, message_id: Option<&str>) -> FakeQueueControl {
     FakeQueueControl {
         capability: true,
         persisted: std::sync::atomic::AtomicBool::new(true),
@@ -262,9 +272,10 @@ fn queue(fixture: &Fixture, message_id: Option<&str>) -> FakeQueueControl {
         addressability_checks: AtomicUsize::new(0),
         rollout: Some(fixture.rollout.clone()),
         invocation: QueueInvocation {
-            succeeded: true,
+            outcome: QueueRequestOutcome::Accepted,
             exit_code: Some(0),
             message_id: message_id.map(str::to_string),
+            submission_id: None,
             queued: false,
         },
         consumed_message: None,
@@ -474,6 +485,15 @@ fn ambiguous_session_and_writer_never_call_queue() {
 #[test]
 fn explicit_thread_selector_disambiguates_sessions_in_one_workspace() {
     let mut fixture = fixture();
+    let other_thread = "019f3b59-7771-7ea1-a9a1-3cd638f216c5";
+    let other_writer = process(
+        201,
+        101,
+        "/usr/bin/codex",
+        vec!["codex"],
+        &fixture.workspace,
+        21,
+    );
     fixture.records.insert(
         1,
         process(
@@ -485,16 +505,80 @@ fn explicit_thread_selector_disambiguates_sessions_in_one_workspace() {
             11,
         ),
     );
+    fixture.records.push(other_writer.clone());
+    let mut other_details = fixture.writer.clone();
+    other_details.record = other_writer;
+    other_details.open_files[0].path = fixture
+        .root
+        .join("target-codex-home/thread-writer-locks")
+        .join(format!("{other_thread}.lock"));
     let mut queue_control = queue(&fixture, None);
     queue_control.consumed_message = Some("selected thread".to_string());
     let mut prompt = request(&fixture, "selected thread");
     prompt.thread_id = Some(THREAD.to_string());
 
-    let result = service(&fixture, queue_control)
+    let process = FakeProcessInspector {
+        uid: 1000,
+        records: fixture.records.clone(),
+        details: fixture.writer.clone(),
+        details_by_pid: HashMap::from([(201, other_details)]),
+        changed_records: None,
+        lists: AtomicUsize::new(0),
+    };
+    let result = SessionPromptWriteService::with_adapters(process, queue_control)
         .write(prompt)
         .expect("thread selector should select its exact session");
 
     assert_eq!(result.thread_id, THREAD);
+}
+
+#[test]
+fn thread_selector_fails_closed_when_sibling_identity_is_unresolved() {
+    let mut fixture = fixture();
+    let other_thread = "019f3b59-7771-7ea1-a9a1-3cd638f216c5";
+    let second = process(
+        101,
+        1,
+        "/usr/bin/prodex",
+        vec!["prodex", "s"],
+        &fixture.workspace,
+        11,
+    );
+    let second_writer = process(
+        201,
+        101,
+        "/usr/bin/codex",
+        vec!["codex"],
+        &fixture.workspace,
+        21,
+    );
+    fixture.records.extend([second, second_writer.clone()]);
+    let mut details = fixture.writer.clone();
+    details.record = second_writer;
+    details.open_files.extend([OpenProcessFile {
+        path: fixture
+            .root
+            .join("target-codex-home/thread-writer-locks")
+            .join(format!("{other_thread}.lock")),
+    }]);
+    let service = SessionPromptWriteService::with_adapters(
+        FakeProcessInspector {
+            uid: 1000,
+            records: fixture.records.clone(),
+            details: fixture.writer.clone(),
+            details_by_pid: HashMap::from([(201, details)]),
+            changed_records: None,
+            lists: AtomicUsize::new(0),
+        },
+        queue(&fixture, None),
+    );
+    let mut prompt = request(&fixture, "must not select while sibling is unresolved");
+    prompt.thread_id = Some(THREAD.to_string());
+
+    assert_eq!(
+        service.write(prompt).unwrap_err(),
+        SessionPromptWriteError::ThreadIdentityConflict
+    );
 }
 
 #[test]
@@ -515,17 +599,38 @@ fn queue_success_preserves_multiline_message_and_same_thread() {
 #[test]
 fn queue_success_verifies_exact_message_whitespace_and_escaping() {
     let fixture = fixture();
+    let before_len = std::fs::metadata(&fixture.rollout).unwrap().len();
     let message = "  leading\nline with \\\\ and \"quotes\"  \n\n";
     let mut queue_control = queue(&fixture, None);
     queue_control.consumed_message = Some(message.to_string());
     let calls = Arc::clone(&queue_control.calls);
 
-    let result = service(&fixture, queue_control)
+    let service = service(&fixture, queue_control);
+    let result = service
         .write(request(&fixture, message))
         .expect("the exact rollout message should verify");
 
     assert_eq!(result.verification, "rollout_user_event_observed");
     assert_eq!(calls.lock().unwrap()[0].1, message);
+    let cursor = result
+        .output_cursor
+        .expect("existing rollout has an anchor");
+    let decoded = super::session_prompt_write::decode_output_cursor(&cursor).unwrap();
+    assert_eq!(decoded.offset, before_len);
+    let output = service
+        .read_output(PromptOutputReadRequest {
+            workspace_root: fixture.workspace.clone(),
+            cursor: Some(cursor),
+            limit: 10,
+            wait_ms: 0,
+            prodex_pid: None,
+            thread_id: None,
+            binding_key: "different-reconnect".to_string(),
+            shutdown: None,
+        })
+        .unwrap();
+    assert_eq!(output.events[0].kind, "user");
+    assert!(output.events[0].text.starts_with("  leading\nline with"));
 }
 
 #[test]
@@ -539,6 +644,22 @@ fn accepted_queued_message_does_not_wait_for_busy_turn_completion() {
         .expect("accepted queue submission should be sufficient evidence");
 
     assert_eq!(result.verification, "queue_pending_observed");
+}
+
+#[test]
+fn ambiguous_queue_submission_is_reported_without_replay() {
+    let fixture = fixture();
+    let mut queue_control = queue(&fixture, None);
+    queue_control.invocation.outcome = QueueRequestOutcome::Ambiguous;
+    let calls = Arc::clone(&queue_control.calls);
+
+    assert_eq!(
+        service(&fixture, queue_control)
+            .write(request(&fixture, "may have been accepted"))
+            .unwrap_err(),
+        SessionPromptWriteError::WriteAmbiguous
+    );
+    assert_eq!(calls.lock().unwrap().len(), 1);
 }
 
 #[test]

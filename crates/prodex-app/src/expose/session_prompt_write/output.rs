@@ -24,6 +24,28 @@ pub(crate) struct OutputCursor {
     pub(crate) checkpoint_id: String,
 }
 
+pub(crate) fn output_cursor_anchor(
+    target: &ResolvedTarget,
+    (path, offset, source_id): &(PathBuf, u64, String),
+) -> Option<String> {
+    let prodex_birth = target.prodex.birth_identity.clone()?;
+    let codex_birth = target.writer.birth_identity.clone()?;
+    let checkpoint_id = source_checkpoint_id(path, *offset).ok()?;
+    encode_output_cursor(OutputCursor {
+        version: OUTPUT_CURSOR_VERSION,
+        prodex_pid: target.prodex.pid,
+        prodex_birth,
+        codex_pid: target.writer.pid,
+        codex_birth,
+        thread_id: target.thread_id.clone(),
+        source_id: source_id.clone(),
+        offset: *offset,
+        event_index: 0,
+        checkpoint_id,
+    })
+    .ok()
+}
+
 impl OutputCursor {
     pub(crate) fn matches(&self, target: &ResolvedTarget, source_id: &str) -> bool {
         self.version == OUTPUT_CURSOR_VERSION
@@ -54,14 +76,18 @@ pub(crate) fn decode_output_cursor(
     let bytes = base64::engine::general_purpose::URL_SAFE_NO_PAD
         .decode(value)
         .map_err(|_| SessionPromptWriteError::InvalidCursor)?;
-    let cursor = serde_json::from_slice::<OutputCursor>(&bytes)
+    let mut cursor = serde_json::from_slice::<OutputCursor>(&bytes)
         .map_err(|_| SessionPromptWriteError::InvalidCursor)?;
+    let Ok(thread_id) = Uuid::parse_str(&cursor.thread_id) else {
+        return Err(SessionPromptWriteError::InvalidCursor);
+    };
+    cursor.thread_id = thread_id.to_string();
     (cursor.version == OUTPUT_CURSOR_VERSION
         && cursor.prodex_pid > 0
         && cursor.codex_pid > 0
         && !cursor.prodex_birth.is_empty()
         && !cursor.codex_birth.is_empty()
-        && Uuid::parse_str(&cursor.thread_id).is_ok()
+        && !cursor.thread_id.is_empty()
         && !cursor.source_id.is_empty()
         && !cursor.checkpoint_id.is_empty()
         && cursor.event_index <= 65_536)
@@ -166,7 +192,10 @@ pub(crate) fn read_output_events(
     let (source_len, complete, skipped_to) = read_complete_output(path, offset)?;
     if let Some(next_offset) = skipped_to {
         return Ok(OutputReadBatch {
-            events: Vec::new(),
+            events: (limit > 0)
+                .then(|| output_gap_event(offset, "oversized_record"))
+                .into_iter()
+                .collect(),
             next_offset,
             next_event_index: 0,
             has_more: next_offset < source_len,
@@ -313,7 +342,7 @@ fn skip_oversized_line(
     if offset.saturating_add(skipped as u64) >= source_len {
         Ok(None)
     } else {
-        Err(SessionPromptWriteError::OutputReadFailed)
+        Err(SessionPromptWriteError::RecoveryFailed)
     }
 }
 
@@ -340,12 +369,17 @@ fn read_output_lines(
         }
         if raw_len > OUTPUT_READ_MAX_LINE_BYTES && !raw_line_is_visible_user_message(line) {
             let next_offset = line_start.saturating_add(raw_len as u64);
-            return Ok(OutputReadBatch {
-                events,
-                next_offset,
-                next_event_index: 0,
-                has_more: next_offset < source_len,
-            });
+            events.push(output_gap_event(line_start, "oversized_record"));
+            consumed = consumed.saturating_add(raw_len);
+            if events.len() >= limit {
+                return Ok(OutputReadBatch {
+                    events,
+                    next_offset,
+                    next_event_index: 0,
+                    has_more: next_offset < source_len,
+                });
+            }
+            continue;
         }
         if let Some(batch) = read_output_line(
             line,
@@ -384,8 +418,17 @@ fn read_output_line(
     }
     let line = raw_line.strip_suffix(b"\n").unwrap_or(raw_line);
     let Ok(line) = std::str::from_utf8(line) else {
+        events.push(output_gap_event(line_start, "invalid_utf8"));
         return Ok(None);
     };
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(line) else {
+        events.push(output_gap_event(line_start, "malformed_record"));
+        return Ok(None);
+    };
+    if !transcript_record_shape_is_valid(&value) {
+        events.push(output_gap_event(line_start, "malformed_record"));
+        return Ok(None);
+    }
     let parsed = crate::app_commands::transcript_events_from_session_line(line)
         .into_iter()
         .filter(mcp_visible_transcript_event)
@@ -457,7 +500,37 @@ fn mcp_visible_transcript_event(event: &crate::app_commands::TranscriptEvent) ->
         || event.source == "mcp"
         || event.source == "agent"
         || event.source == "tool"
+        || event.source == "terminal"
+        || event.source == "error"
         || event.source.starts_with("tool-call:")
+}
+
+fn transcript_record_shape_is_valid(value: &serde_json::Value) -> bool {
+    let Some(record_type) = value.get("type").and_then(serde_json::Value::as_str) else {
+        return false;
+    };
+    let Some(payload) = value.get("payload") else {
+        return false;
+    };
+    match record_type {
+        "event_msg" | "response_item" => payload
+            .get("type")
+            .and_then(serde_json::Value::as_str)
+            .is_some(),
+        "session_meta" | "turn_context" => payload.is_object(),
+        _ => true,
+    }
+}
+
+fn output_gap_event(sequence: u64, reason: &'static str) -> PromptOutputEvent {
+    PromptOutputEvent {
+        sequence: sequence.saturating_mul(65_536),
+        timestamp: "-".to_string(),
+        kind: "gap".to_string(),
+        name: Some(reason.to_string()),
+        status: Some("skipped".to_string()),
+        text: format!("output gap: {reason}; record omitted"),
+    }
 }
 
 fn output_event_from_transcript(
@@ -475,20 +548,31 @@ fn output_event_from_transcript(
     } else {
         (event.source.as_str(), None, None)
     };
+    let text = redaction::redaction_redact_secret_like_text(&event.text);
+    let text = bounded_output_text(&text);
     PromptOutputEvent {
         sequence,
         timestamp: event.timestamp.chars().take(128).collect(),
         kind: kind.to_string(),
         name: name.map(|name| name.chars().take(256).collect()),
         status,
-        text: redaction::redaction_redact_secret_like_text(
-            &event
-                .text
-                .chars()
-                .take(OUTPUT_READ_MAX_TEXT_BYTES)
-                .collect::<String>(),
-        ),
+        text,
     }
+}
+
+fn bounded_output_text(text: &str) -> String {
+    const MARKER: &str = " …[text_truncated]";
+    if text.len() <= OUTPUT_READ_MAX_TEXT_BYTES {
+        return text.to_string();
+    }
+    let budget = OUTPUT_READ_MAX_TEXT_BYTES.saturating_sub(MARKER.len());
+    let end = text
+        .char_indices()
+        .take_while(|(index, character)| index.saturating_add(character.len_utf8()) <= budget)
+        .map(|(index, character)| index + character.len_utf8())
+        .last()
+        .unwrap_or(0);
+    format!("{}{}", &text[..end], MARKER)
 }
 
 pub(crate) fn valid_rollout_path_in_roots(

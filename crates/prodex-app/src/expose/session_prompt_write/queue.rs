@@ -11,7 +11,9 @@ use std::process::Command;
 use uuid::Uuid;
 
 #[cfg(unix)]
-use crate::app_server_control::{UnixAppServerSocket, connect_unix_socket, request_result};
+use crate::app_server_control::{
+    AppServerRequestOutcome, UnixAppServerSocket, connect_unix_socket, request_result,
+};
 #[cfg(unix)]
 use tungstenite::Message as WsMessage;
 pub(crate) fn resolve_thread_identity(
@@ -163,12 +165,53 @@ fn valid_unix_endpoint(value: &str, codex_home: &Path) -> Option<String> {
     Some(format!("unix://{}", path.display()))
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) enum QueueRequestOutcome {
+    #[default]
+    Rejected,
+    Preflight,
+    Accepted,
+    Ambiguous,
+}
+
 #[derive(Clone, Debug, Default)]
 pub(crate) struct QueueInvocation {
-    pub(crate) succeeded: bool,
+    pub(crate) outcome: QueueRequestOutcome,
     pub(crate) exit_code: Option<i32>,
     pub(crate) message_id: Option<String>,
+    pub(crate) submission_id: Option<String>,
     pub(crate) queued: bool,
+}
+
+impl QueueInvocation {
+    pub(crate) fn accepted(
+        exit_code: Option<i32>,
+        message_id: Option<String>,
+        submission_id: Option<String>,
+        queued: bool,
+    ) -> Self {
+        Self {
+            outcome: QueueRequestOutcome::Accepted,
+            exit_code,
+            message_id,
+            submission_id,
+            queued,
+        }
+    }
+
+    pub(crate) fn ambiguous() -> Self {
+        Self {
+            outcome: QueueRequestOutcome::Ambiguous,
+            ..Self::default()
+        }
+    }
+
+    pub(crate) fn preflight() -> Self {
+        Self {
+            outcome: QueueRequestOutcome::Preflight,
+            ..Self::default()
+        }
+    }
 }
 
 pub(crate) trait QueueControl {
@@ -269,7 +312,7 @@ impl QueueControl for SystemQueueControl {
             .as_deref()
             .is_some_and(|endpoint| endpoint.starts_with("unix://"))
         {
-            return app_server_turn_start_once(target, message);
+            return app_server_queue_add_once(target, message);
         }
 
         let mut arguments = vec![
@@ -283,15 +326,12 @@ impl QueueControl for SystemQueueControl {
             arguments.extend([OsString::from("--remote"), OsString::from(remote_endpoint)]);
         }
         let Ok(output) = run_codex_command(target, arguments) else {
-            return QueueInvocation::default();
+            return QueueInvocation::ambiguous();
         };
-        let message_id = parse_message_id(&output);
-        QueueInvocation {
-            succeeded: true,
-            exit_code: Some(0),
-            message_id,
-            queued: true,
-        }
+        let Some(message_id) = parse_message_id(&output) else {
+            return QueueInvocation::ambiguous();
+        };
+        QueueInvocation::accepted(Some(0), Some(message_id), None, true)
     }
 
     #[cfg(unix)]
@@ -307,77 +347,39 @@ impl QueueControl for SystemQueueControl {
 }
 
 #[cfg(unix)]
-fn app_server_turn_start_once(target: &ResolvedTarget, message: &str) -> QueueInvocation {
+fn app_server_queue_add_once(target: &ResolvedTarget, message: &str) -> QueueInvocation {
     let Ok(Some(mut socket)) = app_server_socket(target) else {
-        return QueueInvocation::default();
-    };
-    let Ok(Some(active)) = app_server_thread_activity(&mut socket, target) else {
-        return QueueInvocation::default();
+        return QueueInvocation::preflight();
     };
     let message_id = Uuid::now_v7().to_string();
-    if active {
-        return app_server_queue_add_once(&mut socket, target, message, message_id);
-    }
-    let Ok(Some(result)) = app_server_request_result(
-        &mut socket,
-        3,
-        "turn/start",
-        serde_json::json!({
-            "threadId": target.thread_id,
-            "clientUserMessageId": message_id,
-            "input": [{"type": "text", "text": message, "textElements": []}],
-        }),
-    ) else {
-        return QueueInvocation::default();
-    };
-    let Some(turn) = result.get("turn") else {
-        return QueueInvocation::default();
-    };
-    if turn
-        .get("id")
-        .and_then(serde_json::Value::as_str)
-        .is_none_or(str::is_empty)
-        || turn.get("status").and_then(serde_json::Value::as_str) != Some("inProgress")
-    {
-        return QueueInvocation::default();
-    }
-    QueueInvocation {
-        succeeded: true,
-        exit_code: Some(0),
-        message_id: Some(message_id),
-        queued: false,
-    }
-}
-#[cfg(unix)]
-fn app_server_queue_add_once(
-    socket: &mut UnixAppServerSocket,
-    target: &ResolvedTarget,
-    message: &str,
-    message_id: String,
-) -> QueueInvocation {
-    let Ok(Some(result)) = app_server_request_result(
-        socket,
-        3,
-        "thread/queue/add",
-        serde_json::json!({
-            "threadId": target.thread_id,
-            "clientUserMessageId": message_id,
-            "input": [{"type": "text", "text": message, "textElements": []}],
-        }),
-    ) else {
-        return QueueInvocation::default();
+    let params = serde_json::json!({
+        "threadId": target.thread_id,
+        "clientUserMessageId": message_id,
+        "input": [{"type": "text", "text": message, "textElements": []}],
+    });
+    let outcome = request_result(&mut socket, 3, "thread/queue/add", params);
+    let AppServerRequestOutcome::Accepted(result) = outcome else {
+        return match outcome {
+            AppServerRequestOutcome::Rejected => QueueInvocation::default(),
+            AppServerRequestOutcome::Ambiguous => QueueInvocation::ambiguous(),
+            AppServerRequestOutcome::Accepted(_) => unreachable!(),
+        };
     };
     let Some(queued_submission) = result.get("queuedSubmission") else {
-        return QueueInvocation::default();
+        return QueueInvocation::ambiguous();
     };
-    if queued_submission
+    let Some(submission_id) = queued_submission
         .get("id")
         .and_then(serde_json::Value::as_str)
-        .is_none_or(str::is_empty)
-        || queued_submission
-            .get("clientUserMessageId")
-            .and_then(serde_json::Value::as_str)
-            != Some(message_id.as_str())
+        .filter(|id| !id.is_empty())
+        .map(str::to_string)
+    else {
+        return QueueInvocation::ambiguous();
+    };
+    if queued_submission
+        .get("clientUserMessageId")
+        .and_then(serde_json::Value::as_str)
+        != Some(message_id.as_str())
         || !queued_submission
             .get("input")
             .and_then(serde_json::Value::as_array)
@@ -392,14 +394,9 @@ fn app_server_queue_add_once(
                         .is_none_or(|elements| elements.as_array().is_some_and(Vec::is_empty))
             })
     {
-        return QueueInvocation::default();
+        return QueueInvocation::ambiguous();
     }
-    QueueInvocation {
-        succeeded: true,
-        exit_code: Some(0),
-        message_id: Some(message_id),
-        queued: true,
-    }
+    QueueInvocation::accepted(Some(0), Some(message_id), Some(submission_id), true)
 }
 
 #[cfg(unix)]
@@ -512,8 +509,10 @@ fn app_server_request_result(
     method: &str,
     params: serde_json::Value,
 ) -> std::result::Result<Option<serde_json::Value>, SessionPromptWriteError> {
-    request_result(socket, request_id, method, params)
-        .map_err(|_| SessionPromptWriteError::SessionNotQueueAddressable)
+    match request_result(socket, request_id, method, params) {
+        AppServerRequestOutcome::Accepted(value) => Ok(Some(value)),
+        AppServerRequestOutcome::Rejected | AppServerRequestOutcome::Ambiguous => Ok(None),
+    }
 }
 
 fn open_read_only_database(

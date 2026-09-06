@@ -88,6 +88,7 @@ fn output_cursor_rejects_recycled_prodex_process_identity() {
             uid: 1000,
             records: fixture.records.clone(),
             details: fixture.writer.clone(),
+            details_by_pid: std::collections::HashMap::new(),
             changed_records: Some(changed_records),
             lists: AtomicUsize::new(0),
         },
@@ -117,7 +118,7 @@ fn output_cursor_rejects_recycled_prodex_process_identity() {
             binding_key: "recycled-process".to_string(),
             shutdown: None,
         }),
-        Err(SessionPromptWriteError::StaleTarget)
+        Err(SessionPromptWriteError::StaleCursor)
     );
 }
 
@@ -220,6 +221,50 @@ fn output_read_hides_session_and_turn_context() {
 }
 
 #[test]
+fn output_read_keeps_terminal_and_error_events_in_rollout_order() {
+    let fixture = fixture();
+    let path = fixture.root.join("status-records.jsonl");
+    let records = [
+        serde_json::json!({
+            "timestamp": "2026-09-03T10:00:00Z",
+            "type": "event_msg",
+            "payload": {"type": "turn_completed", "status": "completed"}
+        }),
+        serde_json::json!({
+            "timestamp": "2026-09-03T10:00:01Z",
+            "type": "event_msg",
+            "payload": {"type": "turn_failed", "message": "failed"}
+        }),
+        serde_json::json!({
+            "timestamp": "2026-09-03T10:00:02Z",
+            "type": "event_msg",
+            "payload": {"type": "agent_message", "message": "after failure"}
+        }),
+    ];
+    std::fs::write(
+        &path,
+        records
+            .iter()
+            .map(|record| record.to_string())
+            .collect::<Vec<_>>()
+            .join("\n")
+            + "\n",
+    )
+    .unwrap();
+
+    let batch = read_output_events(&path, 0, 0, 10).unwrap();
+
+    assert_eq!(
+        batch
+            .events
+            .iter()
+            .map(|event| event.kind.as_str())
+            .collect::<Vec<_>>(),
+        ["terminal", "error", "assistant"]
+    );
+}
+
+#[test]
 fn output_read_keeps_near_limit_user_message_records_bounded() {
     let fixture = fixture();
     let path = fixture.root.join("near-limit-user.jsonl");
@@ -240,6 +285,7 @@ fn output_read_keeps_near_limit_user_message_records_bounded() {
     assert_eq!(batch.events.len(), 1);
     assert_eq!(batch.events[0].kind, "user");
     assert!(batch.events[0].text.len() <= 8 * 1024);
+    assert!(batch.events[0].text.contains("[text_truncated]"));
 }
 
 #[test]
@@ -368,24 +414,11 @@ fn session_output_read_cursor_continues_after_oversized_rollout_line() {
             shutdown: None,
         })
         .unwrap();
-    assert!(skipped.events.is_empty());
-    assert!(skipped.has_more);
-
-    let next = service
-        .read_output(PromptOutputReadRequest {
-            workspace_root: fixture.workspace.clone(),
-            cursor: Some(skipped.next_cursor),
-            limit: 10,
-            wait_ms: 0,
-            prodex_pid: None,
-            thread_id: None,
-            binding_key: "cursor-regression".to_string(),
-            shutdown: None,
-        })
-        .unwrap();
-    assert_eq!(next.events.len(), 1);
-    assert_eq!(next.events[0].text, "after oversized output");
-    assert!(!next.has_more);
+    assert_eq!(skipped.events[0].kind, "gap");
+    assert_eq!(skipped.events[0].name.as_deref(), Some("oversized_record"));
+    assert!(!skipped.events[0].text.contains("x"));
+    assert_eq!(skipped.events[1].text, "after oversized output");
+    assert!(!skipped.has_more);
 }
 
 #[test]
@@ -463,24 +496,9 @@ fn session_output_read_cursor_continues_at_reported_oversized_line_offset() {
             shutdown: None,
         })
         .unwrap();
-    assert!(skipped_line.events.is_empty());
-    assert!(skipped_line.has_more);
-
-    let next = service
-        .read_output(PromptOutputReadRequest {
-            workspace_root: fixture.workspace.clone(),
-            cursor: Some(skipped_line.next_cursor),
-            limit: 10,
-            wait_ms: 0,
-            prodex_pid: None,
-            thread_id: None,
-            binding_key: "reported-offset".to_string(),
-            shutdown: None,
-        })
-        .unwrap();
-    assert_eq!(next.events.len(), 1);
-    assert_eq!(next.events[0].text, "after reported offset");
-    assert!(!next.has_more);
+    assert_eq!(skipped_line.events[0].kind, "gap");
+    assert_eq!(skipped_line.events[1].text, "after reported offset");
+    assert!(!skipped_line.has_more);
 }
 
 #[test]
@@ -567,6 +585,58 @@ fn session_output_read_cursor_continues_after_rollout_append() {
     assert_eq!(next.events.len(), 1);
     assert_eq!(next.events[0].text, "after append");
     assert!(!next.has_more);
+}
+
+#[test]
+fn output_read_recovers_malformed_utf8_and_oversized_records_without_payload() {
+    let fixture = fixture();
+    let service = service(&fixture, queue(&fixture, None));
+    let first = service
+        .read_output(PromptOutputReadRequest {
+            workspace_root: fixture.workspace.clone(),
+            cursor: None,
+            limit: 10,
+            wait_ms: 0,
+            prodex_pid: None,
+            thread_id: None,
+            binding_key: "recovery".to_string(),
+            shutdown: None,
+        })
+        .unwrap();
+    let malformed = b"not-json\n\xff\n";
+    let valid = serde_json::json!({
+        "timestamp": "2026-09-03T10:00:04Z",
+        "type": "event_msg",
+        "payload": {"type": "agent_message", "message": "recovered"}
+    });
+    let mut file = std::fs::OpenOptions::new()
+        .append(true)
+        .open(&fixture.rollout)
+        .unwrap();
+    file.write_all(malformed).unwrap();
+    writeln!(file, "{valid}").unwrap();
+
+    let next = service
+        .read_output(PromptOutputReadRequest {
+            workspace_root: fixture.workspace.clone(),
+            cursor: Some(first.next_cursor),
+            limit: 10,
+            wait_ms: 0,
+            prodex_pid: None,
+            thread_id: None,
+            binding_key: "recovery".to_string(),
+            shutdown: None,
+        })
+        .unwrap();
+    assert_eq!(next.events[0].name.as_deref(), Some("malformed_record"));
+    assert_eq!(next.events[1].name.as_deref(), Some("invalid_utf8"));
+    assert_eq!(next.events[2].text, "recovered");
+    assert!(
+        !next
+            .events
+            .iter()
+            .any(|event| event.text.contains("not-json"))
+    );
 }
 
 #[test]

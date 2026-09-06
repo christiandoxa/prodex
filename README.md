@@ -562,12 +562,18 @@ user-visible user, assistant, tool, MCP/agent, and session/turn-status events.
 Both bind to the same process-bound Codex writer and
 thread, so this is a no-copy/paste bridge to the existing session and never
 starts another solver. The transport is Codex's supported app-server
-control plane; it does not write the PTY or SQLite queue payloads.
+control plane; it does not write the PTY or SQLite queue payloads. An accepted
+write may return an optional `output_cursor` anchor for the exact pre-write
+rollout source; fresh sessions without a source return `null`. Output pages
+use bounded generic gap markers for safely skipped malformed, invalid-UTF-8,
+or oversized records, and mark bounded text with `[text_truncated]`.
 For development requests, use this bridge when exactly one compatible session exists,
 then keep using its returned PID, thread, and cursor. Start one
 `prodex_super_start` fallback only after authoritative `no_session`; ambiguity,
 stale identity, addressability, queue, source, or verification errors fail
-closed and never authorize a fallback.
+closed and never authorize a fallback. `write_ambiguous` means the queue request
+may have been accepted after a close, timeout, or malformed response; do not
+automatically replay it and do not treat it as exactly-once delivery.
 
 </details>
 

@@ -48,9 +48,21 @@ Prodex PID, Codex writer PID, canonical cwd, and thread UUID. They observe only
 sanitized visible user, assistant, tool, MCP/agent, and session/turn-status
 events, use bounded cursor reads, and use the
 supported Codex app-server control plane for input. They never scrape or
-write a PTY, insert SQLite queue payloads, or create a second solver. Prompt
-Write is observable in the already-open parent TUI; output read is a
-complementary machine-readable mirror.
+write a PTY, insert SQLite queue payloads, or create a second solver. The
+unmodified Codex TUI is not required to render externally queued follow-ups;
+Output Read is the authoritative machine-readable mirror. Prompt Write may
+return an optional `output_cursor` only when the exact pre-write rollout
+source and checkpoint are known.
+
+Prompt Write returns machine statuses such as `written`, `no_session`,
+`ambiguous_session`, `stale_target`, `queue_failed`, and `write_ambiguous`.
+Only authoritative `no_session` permits a `prodex_super_start` fallback.
+`write_ambiguous` means the request may have been accepted after a transport
+close, timeout, or malformed response; never replay it automatically and make
+no exactly-once claim. Output pages may contain bounded generic `gap` markers
+for malformed, invalid-UTF-8, or oversized records. Bounded text carries a
+`[text_truncated]` marker; impossible bounded recovery returns
+`recovery_failed`.
 
 Modern Codex authority is an open
 `thread-writer-locks/<UUID>.lock`; legacy authority is one open
