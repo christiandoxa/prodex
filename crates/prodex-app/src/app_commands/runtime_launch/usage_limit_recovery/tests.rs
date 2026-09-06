@@ -107,11 +107,23 @@ fn append_usage_limit(path: &Path) {
     .unwrap();
 }
 
+fn append_user_event(path: &Path) {
+    writeln!(
+        fs::OpenOptions::new().append(true).open(path).unwrap(),
+        "{}",
+        serde_json::json!({
+            "type": "response_item",
+            "payload": {"type": "message", "role": "user", "content": []}
+        })
+    )
+    .unwrap();
+}
+
 fn append_compressed_usage_limit(path: &Path) {
     let mut contents = zstd::stream::decode_all(fs::File::open(path).unwrap()).unwrap();
     contents.extend_from_slice(
         format!(
-            "{{\"timestamp\":\"2026-08-29T01:00:01Z\",\"type\":\"event_msg\",\"payload\":{{\"message\":{}}}}}\n",
+            "{{\"type\":\"response_item\",\"payload\":{{\"type\":\"message\",\"role\":\"user\",\"content\":[]}}}}\n{{\"timestamp\":\"2026-08-29T01:00:01Z\",\"type\":\"event_msg\",\"payload\":{{\"message\":{}}}}}\n",
             serde_json::to_string(OBSERVED_USAGE_LIMIT_MESSAGE).unwrap()
         )
         .as_bytes(),
@@ -121,6 +133,45 @@ fn append_compressed_usage_limit(path: &Path) {
         zstd::stream::encode_all(contents.as_slice(), 3).unwrap(),
     )
     .unwrap();
+}
+
+#[test]
+fn ambiguous_legacy_usage_limit_does_not_replay_a_non_goal_session() {
+    let root = fixture_root("legacy-ambiguous");
+    let (_home, _shared) = configured_env(&root);
+    let paths = AppPaths::discover().unwrap();
+    let session_path = populate_fixture(&root, &paths, &["a", "b"]);
+    let mut monitor = prepare_runtime_usage_limit_monitor(
+        &[OsString::from("exec"), OsString::from("work")],
+        false,
+    )
+    .unwrap()
+    .unwrap();
+    super::super::goal_resume::write_runtime_goal_session_marker(
+        &monitor.marker_path,
+        std::ffi::OsStr::new(&format!(r#"{{"session_id":"{SESSION_ID}"}}"#)),
+    )
+    .unwrap();
+    writeln!(
+        fs::OpenOptions::new()
+            .append(true)
+            .open(session_path)
+            .unwrap(),
+        "{{\"type\":\"event_msg\",\"payload\":{{\"message\":{}}}}}",
+        serde_json::to_string(OBSERVED_USAGE_LIMIT_MESSAGE).unwrap()
+    )
+    .unwrap();
+    let attempted = BTreeSet::new();
+    assert!(
+        plan_runtime_usage_limit_relaunch(
+            &mut monitor,
+            &exit_status(1),
+            &resume_options(&attempted, false, Some("a")),
+        )
+        .unwrap()
+        .is_none()
+    );
+    let _ = fs::remove_dir_all(root);
 }
 
 fn resume_options<'a>(
@@ -135,6 +186,10 @@ fn resume_options<'a>(
         base_url: None,
         include_code_review: false,
         no_proxy: false,
+        requested_model: None,
+        failure_class: "usage_limit",
+        allow_failed_profile: false,
+        resume_goal: false,
         attempted_profiles,
     }
 }
@@ -311,6 +366,7 @@ fn exact_post_child_usage_limit_rotates_and_old_bytes_are_not_replayed() {
         std::ffi::OsStr::new(&format!(r#"{{"session_id":"{SESSION_ID}"}}"#)),
     )
     .unwrap();
+    append_user_event(&session_path);
     append_usage_limit(&session_path);
     let attempted = BTreeSet::new();
     let options = resume_options(&attempted, false, Some("a"));
@@ -322,6 +378,7 @@ fn exact_post_child_usage_limit_rotates_and_old_bytes_are_not_replayed() {
 
     monitor.prepare_for_resume();
     assert!(monitor.detect_usage_limit_after_child().unwrap().is_none());
+    append_user_event(&session_path);
     append_usage_limit(&session_path);
     assert_eq!(
         monitor.detect_usage_limit_after_child().unwrap().as_deref(),
@@ -433,6 +490,7 @@ fn usage_limit_recovery_reaches_a_late_ready_profile() {
         std::ffi::OsStr::new(&format!(r#"{{"session_id":"{SESSION_ID}"}}"#)),
     )
     .unwrap();
+    append_user_event(&session_path);
     append_usage_limit(&session_path);
     let attempted = BTreeSet::from(["b".to_string(), "c".to_string()]);
     let options = resume_options(&attempted, false, Some("a"));
@@ -453,7 +511,7 @@ fn sequential_usage_limit_recovery_moves_from_b_to_c() {
     let (_home, _shared) = configured_env(&root);
     let paths = AppPaths::discover().unwrap();
     let _session_path = populate_fixture(&root, &paths, &["a", "b", "c"]);
-    let state = AppState::load_and_repair(&paths).unwrap();
+    let mut state = AppState::load_and_repair(&paths).unwrap();
     let first_attempts = BTreeSet::new();
     let first = next_runtime_usage_limit_plan(
         &state,
@@ -462,16 +520,41 @@ fn sequential_usage_limit_recovery_moves_from_b_to_c() {
     )
     .unwrap();
     assert_eq!(first.profile_name, "b");
+    assert_eq!(first.failed_profile_name, "a");
 
-    let second_attempts = BTreeSet::from([first.profile_name.clone()]);
+    let second_attempts = BTreeSet::from([first.failed_profile_name, first.profile_name.clone()]);
+    state
+        .session_profile_bindings
+        .get_mut(SESSION_ID)
+        .unwrap()
+        .profile_name = first.profile_name;
     let second = next_runtime_usage_limit_plan(
         &state,
         SESSION_ID,
-        &resume_options(&second_attempts, false, Some("a")),
+        &resume_options(&second_attempts, false, Some("b")),
     )
     .unwrap();
     assert_eq!(second.profile_name, "c");
+    assert_eq!(second.failed_profile_name, "b");
     assert_eq!(second.session_id, SESSION_ID);
+    let all_attempts = BTreeSet::from([
+        "a".to_string(),
+        "b".to_string(),
+        second.profile_name.clone(),
+    ]);
+    state
+        .session_profile_bindings
+        .get_mut(SESSION_ID)
+        .unwrap()
+        .profile_name = second.profile_name;
+    assert!(
+        next_runtime_usage_limit_plan(
+            &state,
+            SESSION_ID,
+            &resume_options(&all_attempts, false, Some("c")),
+        )
+        .is_none()
+    );
     let _ = fs::remove_dir_all(root);
 }
 
@@ -495,5 +578,102 @@ fn no_auto_rotate_keeps_usage_limit_terminal() {
             .is_none()
     );
     drop(monitor);
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn explicit_cancellation_does_not_resume_a_pending_session() {
+    let root = fixture_root("cancelled");
+    let (_home, _shared) = configured_env(&root);
+    let paths = AppPaths::discover().unwrap();
+    let session_path = populate_fixture(&root, &paths, &["a", "b"]);
+    let mut monitor = prepare_runtime_usage_limit_monitor(
+        &[OsString::from("exec"), OsString::from("work")],
+        false,
+    )
+    .unwrap()
+    .unwrap();
+    super::super::goal_resume::write_runtime_goal_session_marker(
+        &monitor.marker_path,
+        std::ffi::OsStr::new(&format!(r#"{{"session_id":"{SESSION_ID}"}}"#)),
+    )
+    .unwrap();
+    append_usage_limit(&session_path);
+    let attempted = BTreeSet::new();
+    let options = resume_options(&attempted, false, Some("a"));
+
+    assert!(
+        plan_runtime_usage_limit_relaunch(&mut monitor, &exit_status(130), &options)
+            .unwrap()
+            .is_none()
+    );
+    drop(monitor);
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn session_recovery_telemetry_uses_observed_state_without_raw_profile_identity() {
+    let _runtime_lock = crate::acquire_test_runtime_lock();
+    let root = fixture_root("telemetry");
+    let log_path = root.join("prodex-runtime-recovery.log");
+    crate::open_runtime_proxy_private_file(&log_path).unwrap();
+    let plan = GoalResumeRelaunchPlan {
+        session_id: SESSION_ID.to_string(),
+        failed_profile_name: "profile-a".to_string(),
+        profile_name: "profile-b".to_string(),
+        failure_class: "transport",
+        resume_goal: false,
+        evidence: RuntimeWorkflowEvidence {
+            acceptance_state: "side_effect_observed",
+            stream_committed: Some(true),
+            side_effect_state: "observed",
+        },
+    };
+
+    crate::runtime_proxy_log_to_path(
+        &log_path,
+        &runtime_session_recovery_message(&plan, 2, Some("gpt-5.6-luna"), Some("gpt-5.2")),
+    );
+    crate::runtime_proxy_flush_logs_for_path(&log_path).unwrap();
+    let log = fs::read_to_string(&log_path).unwrap();
+    for expected in [
+        "retry_layer=session",
+        "recovery_generation=2",
+        "failure_class=transport",
+        "requested_model=gpt-5.6-luna",
+        "effective_model=gpt-5.2",
+        "acceptance_state=side_effect_observed",
+        "stream_committed=true",
+        "side_effect_state=observed",
+        "last_prompt_requeued=false",
+    ] {
+        assert!(log.contains(expected), "missing {expected}: {log}");
+    }
+    assert!(!log.contains("profile-b"));
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn large_historical_rollout_keeps_incremental_monitor_available() {
+    let root = fixture_root("oversized-monitor");
+    let (_home, _shared) = configured_env(&root);
+    let paths = AppPaths::discover().unwrap();
+    let session_path = populate_fixture(&root, &paths, &["a", "b"]);
+    let offset = 65 * 1024 * 1024;
+    fs::OpenOptions::new()
+        .write(true)
+        .open(&session_path)
+        .unwrap()
+        .set_len(offset)
+        .unwrap();
+    let marker = root.join("monitor.id");
+    fs::write(&marker, format!("{SESSION_ID}\n")).unwrap();
+    let mut monitor = GoalUsageLimitMonitor::new(paths, None, marker, Some(SESSION_ID.to_string()));
+    monitor.session_path = Some(session_path);
+    monitor.session_scan_offset = offset;
+
+    assert_eq!(monitor.take_usage_limit_signal().unwrap(), None);
+    assert!(!monitor.workflow_scan_disabled);
+    assert_eq!(monitor.take_usage_limit_signal().unwrap(), None);
     let _ = fs::remove_dir_all(root);
 }

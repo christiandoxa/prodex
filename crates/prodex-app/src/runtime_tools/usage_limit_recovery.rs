@@ -1,44 +1,90 @@
 use super::RuntimeToolLaunchStrategy;
 use crate::app_commands::runtime_launch::{
-    GoalResumeRelaunchPlan, RuntimeUsageLimitResumeOptions, next_runtime_usage_limit_plan,
-    plan_runtime_usage_limit_relaunch,
+    GoalResumeRelaunchPlan, RUNTIME_SESSION_CONTINUATION_PROMPT, RuntimeUsageLimitResumeOptions,
+    next_observed_runtime_recovery_plan, next_runtime_usage_limit_plan,
+    plan_runtime_usage_limit_relaunch, runtime_exit_status_is_cancelled,
+    runtime_session_recovery_wait_message, wait_for_runtime_recovery_round,
 };
 use crate::app_state::AppStateIoExt;
 use crate::{AppState, codex_cli_config_override_value, runtime_launch_cli_model};
 use anyhow::Result;
 use std::ffi::OsString;
 
-const RUNTIME_USAGE_LIMIT_CONTINUATION_PROMPT: &str = "Continue the interrupted task from the persisted session. Preserve completed work and do not repeat completed tool calls.";
-
 impl RuntimeToolLaunchStrategy {
     pub(super) fn observe_child_exit_request(&mut self) -> Result<bool> {
-        let (session_id, paths) = {
+        if self.pending_goal_resume_plan.is_some() {
+            return Ok(true);
+        }
+        let (session_id, paths, failure_class, retry_pool, resume_goal, observed_model, evidence) = {
             let Some(monitor) = self.goal_usage_limit_monitor.as_mut() else {
                 return Ok(false);
             };
-            (monitor.take_usage_limit_signal()?, monitor.paths.clone())
+            (
+                monitor.take_usage_limit_signal()?,
+                monitor.paths.clone(),
+                monitor.recovery_failure_class(),
+                monitor.recovery_retries_after_pool_round(),
+                monitor.has_session_goal(),
+                monitor.recovery_model().map(ToOwned::to_owned),
+                monitor.recovery_evidence(),
+            )
         };
+        if observed_model.is_some() {
+            self.recovery_model = observed_model;
+        }
         let Some(session_id) = session_id else {
             return Ok(false);
         };
         let state = AppState::load_and_repair(&paths)?;
-        let options = RuntimeUsageLimitResumeOptions {
-            requested_profile: self.args.profile.as_deref(),
-            no_auto_rotate: self.args.no_auto_rotate,
-            skip_quota_check: self.args.skip_quota_check,
-            base_url: self.args.base_url.as_deref(),
-            include_code_review: self.include_code_review,
-            no_proxy: self.args.no_proxy,
-            attempted_profiles: &self.auto_goal_resume_attempted_profiles,
+        let requested_model = self.recovery_model.clone().or_else(|| {
+            runtime_launch_cli_model(&self.codex_args)
+                .or_else(|| codex_cli_config_override_value(&self.codex_args, "model"))
+        });
+        let plan = {
+            let options = RuntimeUsageLimitResumeOptions {
+                requested_profile: self.args.profile.as_deref(),
+                no_auto_rotate: self.args.no_auto_rotate,
+                skip_quota_check: self.args.skip_quota_check,
+                base_url: self.args.base_url.as_deref(),
+                include_code_review: self.include_code_review,
+                no_proxy: self.args.no_proxy,
+                requested_model: requested_model.as_deref(),
+                failure_class,
+                allow_failed_profile: self.allow_failed_profile_recovery,
+                resume_goal,
+                attempted_profiles: &self.auto_goal_resume_attempted_profiles,
+            };
+            next_runtime_usage_limit_plan(&state, &session_id, &options)
         };
-        let Some(plan) = next_runtime_usage_limit_plan(&state, &session_id, &options) else {
+        if plan.is_none() && retry_pool {
+            if !self.auto_goal_resume_attempted_profiles.is_empty() {
+                self.transient_recovery_rounds = self.transient_recovery_rounds.saturating_add(1);
+                self.auto_goal_resume_attempted_profiles.clear();
+            }
+            if let Some(target) = self.runtime_recovery_log_target.as_ref() {
+                target.log(&runtime_session_recovery_wait_message(
+                    self.transient_recovery_rounds,
+                    failure_class,
+                ));
+            }
+            self.allow_failed_profile_recovery = true;
+            return Ok(false);
+        }
+        let Some(mut plan) = plan else {
             return Ok(false);
         };
+        plan.evidence = evidence;
         self.pending_goal_resume_plan = Some(plan);
         Ok(true)
     }
 
     fn apply_goal_resume_relaunch(&mut self, plan: GoalResumeRelaunchPlan) -> Result<()> {
+        let requested_model = runtime_launch_cli_model(&self.codex_args)
+            .or_else(|| codex_cli_config_override_value(&self.codex_args, "model"));
+        let effective_model = self
+            .recovery_model
+            .clone()
+            .or_else(|| requested_model.clone());
         let session_settings =
             crate::app_commands::runtime_launch::runtime_resume_session_settings_from_codex_args(
                 &self.codex_args,
@@ -73,13 +119,28 @@ impl RuntimeToolLaunchStrategy {
             effort_is_explicit,
         );
         self.auto_goal_resume_attempted_profiles
+            .insert(plan.failed_profile_name.clone());
+        self.auto_goal_resume_attempted_profiles
             .insert(plan.profile_name.clone());
+        self.recovery_generation = self.recovery_generation.saturating_add(1);
+        if let Some(target) = self.runtime_recovery_log_target.as_ref() {
+            target.log(
+                &crate::app_commands::runtime_launch::runtime_session_recovery_message(
+                    &plan,
+                    self.recovery_generation,
+                    requested_model.as_deref(),
+                    effective_model.as_deref(),
+                ),
+            );
+        }
+        let resume_goal = plan.resume_goal;
         self.args.profile = Some(plan.profile_name);
+        self.allow_failed_profile_recovery = false;
         if let Some(monitor) = self.goal_usage_limit_monitor.as_mut() {
             monitor.prepare_for_resume();
         }
-        self.codex_args.push(if exec_mode {
-            OsString::from(RUNTIME_USAGE_LIMIT_CONTINUATION_PROMPT)
+        self.codex_args.push(if exec_mode || !resume_goal {
+            OsString::from(RUNTIME_SESSION_CONTINUATION_PROMPT)
         } else {
             OsString::from("/goal resume")
         });
@@ -90,31 +151,96 @@ impl RuntimeToolLaunchStrategy {
         &mut self,
         status: &std::process::ExitStatus,
     ) -> Result<bool> {
-        if self.args.no_auto_rotate {
+        if self.args.no_auto_rotate || runtime_exit_status_is_cancelled(status) {
             self.pending_goal_resume_plan = None;
             return Ok(false);
         }
         let plan = match self.pending_goal_resume_plan.take() {
             Some(plan) => Some(plan),
             None => {
-                let options = RuntimeUsageLimitResumeOptions {
-                    requested_profile: self.args.profile.as_deref(),
-                    no_auto_rotate: self.args.no_auto_rotate,
-                    skip_quota_check: self.args.skip_quota_check,
-                    base_url: self.args.base_url.as_deref(),
-                    include_code_review: self.include_code_review,
-                    no_proxy: self.args.no_proxy,
-                    attempted_profiles: &self.auto_goal_resume_attempted_profiles,
+                let requested_model = self.recovery_model.clone().or_else(|| {
+                    runtime_launch_cli_model(&self.codex_args)
+                        .or_else(|| codex_cli_config_override_value(&self.codex_args, "model"))
+                });
+                let resume_goal = self
+                    .goal_usage_limit_monitor
+                    .as_ref()
+                    .is_some_and(|monitor| monitor.has_session_goal());
+                let mut plan = {
+                    let options = RuntimeUsageLimitResumeOptions {
+                        requested_profile: self.args.profile.as_deref(),
+                        no_auto_rotate: self.args.no_auto_rotate,
+                        skip_quota_check: self.args.skip_quota_check,
+                        base_url: self.args.base_url.as_deref(),
+                        include_code_review: self.include_code_review,
+                        no_proxy: self.args.no_proxy,
+                        requested_model: requested_model.as_deref(),
+                        failure_class: "usage_limit",
+                        allow_failed_profile: self.allow_failed_profile_recovery,
+                        resume_goal,
+                        attempted_profiles: &self.auto_goal_resume_attempted_profiles,
+                    };
+                    match self.goal_usage_limit_monitor.as_mut() {
+                        Some(monitor) => {
+                            plan_runtime_usage_limit_relaunch(monitor, status, &options)?
+                        }
+                        None => None,
+                    }
                 };
-                match self.goal_usage_limit_monitor.as_mut() {
-                    Some(monitor) => plan_runtime_usage_limit_relaunch(monitor, status, &options)?,
-                    None => None,
+                let retry_pool = self
+                    .goal_usage_limit_monitor
+                    .as_ref()
+                    .is_some_and(|monitor| monitor.recovery_retries_after_pool_round());
+                let failure_class = self
+                    .goal_usage_limit_monitor
+                    .as_ref()
+                    .map(|monitor| monitor.recovery_failure_class())
+                    .unwrap_or("usage_limit");
+                if plan.is_none() && retry_pool {
+                    if let Some(target) = self.runtime_recovery_log_target.as_ref() {
+                        target.log(&runtime_session_recovery_wait_message(
+                            self.transient_recovery_rounds.saturating_add(1),
+                            failure_class,
+                        ));
+                    }
+                    if !wait_for_runtime_recovery_round() {
+                        return Ok(false);
+                    }
+                    self.transient_recovery_rounds =
+                        self.transient_recovery_rounds.saturating_add(1);
+                    self.auto_goal_resume_attempted_profiles.clear();
+                    self.allow_failed_profile_recovery = true;
+                    let options = RuntimeUsageLimitResumeOptions {
+                        requested_profile: self.args.profile.as_deref(),
+                        no_auto_rotate: self.args.no_auto_rotate,
+                        skip_quota_check: self.args.skip_quota_check,
+                        base_url: self.args.base_url.as_deref(),
+                        include_code_review: self.include_code_review,
+                        no_proxy: self.args.no_proxy,
+                        requested_model: requested_model.as_deref(),
+                        failure_class,
+                        allow_failed_profile: self.allow_failed_profile_recovery,
+                        resume_goal,
+                        attempted_profiles: &self.auto_goal_resume_attempted_profiles,
+                    };
+                    plan = match self.goal_usage_limit_monitor.as_mut() {
+                        Some(monitor) => next_observed_runtime_recovery_plan(monitor, &options)?,
+                        None => None,
+                    };
                 }
+                plan
             }
         };
         let Some(plan) = plan else {
             return Ok(false);
         };
+        if let Some(model) = self
+            .goal_usage_limit_monitor
+            .as_ref()
+            .and_then(|monitor| monitor.recovery_model())
+        {
+            self.recovery_model = Some(model.to_string());
+        }
         self.apply_goal_resume_relaunch(plan)?;
         Ok(true)
     }
@@ -159,7 +285,11 @@ mod tests {
         strategy
             .apply_goal_resume_relaunch(GoalResumeRelaunchPlan {
                 session_id: "019c9e3d-45a0-7ad0-a6ee-b194ac2d44f9".to_string(),
+                failed_profile_name: "profile-a".to_string(),
                 profile_name: "profile-b".to_string(),
+                failure_class: "usage_limit",
+                resume_goal: false,
+                evidence: Default::default(),
             })
             .unwrap();
 
@@ -178,7 +308,7 @@ mod tests {
         );
         assert_eq!(
             strategy.codex_args.last().and_then(|arg| arg.to_str()),
-            Some(RUNTIME_USAGE_LIMIT_CONTINUATION_PROMPT)
+            Some(RUNTIME_SESSION_CONTINUATION_PROMPT)
         );
         assert_eq!(strategy.args.profile.as_deref(), Some("profile-b"));
         let _ = fs::remove_dir_all(root);
@@ -216,7 +346,11 @@ mod tests {
         strategy
             .apply_goal_resume_relaunch(GoalResumeRelaunchPlan {
                 session_id: "019c9e3d-45a0-7ad0-a6ee-b194ac2d44f9".to_string(),
+                failed_profile_name: "profile-a".to_string(),
                 profile_name: "profile-b".to_string(),
+                failure_class: "usage_limit",
+                resume_goal: false,
+                evidence: Default::default(),
             })
             .unwrap();
 
@@ -232,7 +366,7 @@ mod tests {
         );
         assert_eq!(
             strategy.codex_args.last().and_then(|arg| arg.to_str()),
-            Some("/goal resume")
+            Some(RUNTIME_SESSION_CONTINUATION_PROMPT)
         );
         let _ = fs::remove_dir_all(root);
     }
@@ -256,12 +390,49 @@ mod tests {
             RuntimeToolLaunchStrategy::new(args.into_runtime_tool_args_with_presidio(false));
         strategy.pending_goal_resume_plan = Some(GoalResumeRelaunchPlan {
             session_id: "019c9e3d-45a0-7ad0-a6ee-b194ac2d44f9".to_string(),
+            failed_profile_name: "profile-a".to_string(),
             profile_name: "profile-b".to_string(),
+            failure_class: "usage_limit",
+            resume_goal: false,
+            evidence: Default::default(),
         });
 
         assert!(
             !strategy
                 .relaunch_after_usage_limit(&exit_status(1))
+                .unwrap()
+        );
+        assert!(strategy.pending_goal_resume_plan.is_none());
+    }
+
+    #[test]
+    fn cancellation_drops_pending_runtime_recovery() {
+        let command = parse_cli_command_from([
+            "prodex",
+            "s",
+            "--no-presidio",
+            "--no-sub-agent",
+            "exec",
+            "work",
+        ])
+        .unwrap();
+        let Commands::Super(args) = command else {
+            panic!("expected Super command");
+        };
+        let mut strategy =
+            RuntimeToolLaunchStrategy::new(args.into_runtime_tool_args_with_presidio(false));
+        strategy.pending_goal_resume_plan = Some(GoalResumeRelaunchPlan {
+            session_id: "019c9e3d-45a0-7ad0-a6ee-b194ac2d44f9".to_string(),
+            failed_profile_name: "profile-a".to_string(),
+            profile_name: "profile-b".to_string(),
+            failure_class: "transport",
+            resume_goal: false,
+            evidence: Default::default(),
+        });
+
+        assert!(
+            !strategy
+                .relaunch_after_usage_limit(&exit_status(130))
                 .unwrap()
         );
         assert!(strategy.pending_goal_resume_plan.is_none());
