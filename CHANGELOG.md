@@ -27,6 +27,7 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 
 ### Misc
 
+- Follow upstream schema module split (`c55c229`)
 - Align final release source inventories (`1448a60`)
 - Validate extracted log reachability (`48b5e95`)
 - Verify official app-server session bridge (`caa21dd`)
