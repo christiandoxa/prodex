@@ -328,7 +328,7 @@ pub(super) fn mcp_tools() -> Vec<Value> {
                 "required": ["message"],
                 "additionalProperties": false
             }),
-            json!({"type": "object", "properties": {"status": {"type": "string"}, "prodex_pid": {"type": "integer"}, "codex_pid": {"type": "integer"}, "thread_id": {"type": "string"}, "message_id": {"type": ["string", "null"]}, "submission_id": {"type": ["string", "null"]}, "output_cursor": {"type": ["string", "null"]}, "queue_exit": {"type": "integer"}, "verification": {"type": "string"}}, "required": ["status", "prodex_pid", "codex_pid", "thread_id", "message_id", "submission_id", "output_cursor", "queue_exit", "verification"]}),
+            json!({"type": "object", "properties": {"status": {"type": "string"}, "prodex_pid": {"type": "integer"}, "codex_pid": {"type": "integer"}, "thread_id": {"type": "string"}, "message_id": {"type": ["string", "null"]}, "submission_id": {"type": ["string", "null"]}, "output_cursor": {"type": ["string", "null"]}, "queue_exit": {"type": "integer"}, "verification": {"type": "string"}, "recovery_generation": {"type": "integer"}, "last_prompt_requeued": {"type": "boolean"}, "requeue_reason": {"type": ["string", "null"]}}, "required": ["status", "prodex_pid", "codex_pid", "thread_id", "message_id", "submission_id", "output_cursor", "queue_exit", "verification", "recovery_generation", "last_prompt_requeued", "requeue_reason"]}),
             false,
             false,
             false,

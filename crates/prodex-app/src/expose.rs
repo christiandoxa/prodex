@@ -83,6 +83,9 @@ mod session_prompt_write_e2e_tests;
 #[path = "expose/session_prompt_write_live_tests.rs"]
 mod session_prompt_write_live_tests;
 #[cfg(test)]
+#[path = "expose/session_prompt_write_recovery_tests.rs"]
+mod session_prompt_write_recovery_tests;
+#[cfg(test)]
 #[path = "expose/session_prompt_write_tests.rs"]
 mod session_prompt_write_tests;
 #[cfg(test)]

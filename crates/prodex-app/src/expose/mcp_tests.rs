@@ -141,6 +141,9 @@ impl ExistingSessionPromptWrite for SyntheticSessionBridge {
             output_cursor: Some("cursor-anchor".to_string()),
             queue_exit: 0,
             verification: "rollout_user_event_observed",
+            recovery_generation: 0,
+            last_prompt_requeued: false,
+            requeue_reason: None,
         })
     }
 

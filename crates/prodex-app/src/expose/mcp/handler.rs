@@ -423,6 +423,9 @@ impl ExposeMcpEndpoint {
             "output_cursor": result.output_cursor,
             "queue_exit": result.queue_exit,
             "verification": result.verification,
+            "recovery_generation": result.recovery_generation,
+            "last_prompt_requeued": result.last_prompt_requeued,
+            "requeue_reason": result.requeue_reason,
         }))
     }
 
