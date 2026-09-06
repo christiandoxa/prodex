@@ -25,6 +25,10 @@
     },
     "critical_signal_line_classification": {
       "expanded_in": "0.420.0"
+    },
+    "log_event_classification": {
+      "production_reachability_test": "crates/prodex-app/src/app_commands/log_event_source.rs",
+      "expanded_in": "0.427.0"
     }
   },
   "classification_legend": {
