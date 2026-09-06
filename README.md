@@ -469,8 +469,10 @@ and exits non-zero unless every requested profile succeeds. A valid completed
 model response is enough; the response does not need to say `pong`. Use
 `prodex ping openai --profile NAME` for one explicit profile or
 `prodex ping openai --json` for the aggregate machine-readable result. This
-is an application-level provider diagnostic, not ICMP, DNS, TCP, TLS, or
-`/models` connectivity testing.
+report keeps requested and effective model fields separate; when Codex JSONL
+does not expose the effective model, it reports `unavailable` instead of
+guessing. This is an application-level provider diagnostic, not ICMP, DNS,
+TCP, TLS, or `/models` connectivity testing.
 
 ## ChatGPT MCP expose
 
