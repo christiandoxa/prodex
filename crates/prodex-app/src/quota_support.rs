@@ -10,7 +10,7 @@ mod watch;
 
 pub(super) use self::adaptive_refresh::*;
 pub(super) use self::auth::*;
-pub(crate) use self::codex_openai_auth::codex_cli_version;
+pub(crate) use self::codex_openai_auth::{codex_cli_version, parse_codex_cli_version_output};
 use self::external_provider::{
     custom_model_provider_quota_info, fetch_agy_quota_info, fetch_anthropic_quota_info,
     fetch_kiro_quota_info,

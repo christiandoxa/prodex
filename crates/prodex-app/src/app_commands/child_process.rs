@@ -91,6 +91,7 @@ fn run_child_plan_inner(
     runtime_proxy: Option<&RuntimeProxyEndpoint>,
     mut monitor: Option<&mut dyn FnMut() -> Result<bool>>,
 ) -> Result<ExitStatus> {
+    crate::validate_selected_codex_binary(&plan.binary)?;
     cleanup_codex_arg0_temp_dirs_best_effort(&plan.codex_home);
     let _session_lock = prodex_shared_codex_fs::lock_codex_sessions_for_child(&plan.codex_home)?;
     let mut command = Command::new(&plan.binary);

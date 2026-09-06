@@ -82,6 +82,7 @@ fn spawn_companion(
     plan: &ChildProcessPlan,
     private_process_group: bool,
 ) -> Result<std::process::Child> {
+    crate::validate_selected_codex_binary(&plan.binary)?;
     super::cleanup_codex_arg0_temp_dirs_best_effort(&plan.codex_home);
     let mut command = std::process::Command::new(&plan.binary);
     command

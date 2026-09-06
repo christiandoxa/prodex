@@ -288,6 +288,14 @@ async function main() {
       fakeCodex,
       `#!/bin/sh
 set -eu
+if [ "$1" = "--version" ]; then
+  printf '%s\\n' 'codex-cli 0.153.4'
+  exit 0
+fi
+if [ "$1" = "app-server" ] && [ "\${2:-}" = "--help" ]; then
+  printf '%s\\n' 'Codex app-server'
+  exit 0
+fi
 printf '%s\\n' "$@" > "$SMOKE_CODEX_ARGS"
 [ "$1" = exec ]
 case " $* " in

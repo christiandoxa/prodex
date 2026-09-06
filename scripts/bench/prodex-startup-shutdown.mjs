@@ -28,8 +28,9 @@ import { join } from "node:path";
 const log = process.env.PRODEX_BENCH_LOG;
 const record = (event) => log && appendFileSync(log, event + "|" + Number(process.hrtime.bigint()) + "\\n");
 const args = process.argv.slice(2);
+if (args[0] === "--version") { console.log("codex-cli 0.153.4"); process.exit(0); }
+if (args[0] === "app-server" && args[1] === "--help") { console.log("Codex app-server"); process.exit(0); }
 record(args[0] === "app-server" ? "app-server" : "interactive");
-if (args.includes("--version")) process.exit(0);
 if (args[0] !== "app-server") { record("ui"); record("child-exit"); process.exit(0); }
 const pages = Number(process.env.PRODEX_BENCH_PAGES || 1), shared = process.env.PRODEX_BENCH_SHARED;
 const scan = (root) => { record("directory-walk:" + root.split("/").at(-4)); for (const entry of readdirSync(root, { withFileTypes: true })) { const path = join(root, entry.name); if (entry.isDirectory()) scan(path); else if (entry.name.endsWith(".jsonl")) readFileSync(path); } };

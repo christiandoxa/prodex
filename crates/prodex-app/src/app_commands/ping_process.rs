@@ -104,6 +104,7 @@ pub(super) fn run_ping_command(target: &PingTarget, options: &PingProbeOptions) 
 }
 
 pub(super) fn run_ping_child(plan: &ChildProcessPlan, timeout: Duration) -> Result<Output> {
+    crate::validate_selected_codex_binary(&plan.binary)?;
     let cwd = create_ping_cwd()?;
     let result = {
         let mut command = Command::new(&plan.binary);
