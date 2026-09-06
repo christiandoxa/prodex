@@ -3436,6 +3436,7 @@ dependencies = [
  "chrono",
  "filetime",
  "prodex-core",
+ "prodex-secret-store",
  "prodex-session-store",
  "rusqlite",
  "serde",

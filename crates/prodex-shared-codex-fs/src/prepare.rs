@@ -18,6 +18,7 @@ use std::time::UNIX_EPOCH;
 mod goal_attachments;
 
 const SESSION_TIMESTAMP_PREFIX: &str = "\"timestamp\":\"";
+const CLAUDE_CREDENTIALS_MAX_BYTES: u64 = 64 * 1024;
 const SESSION_MAINTENANCE_CACHE_VERSION: u8 = 4;
 const SESSION_MAINTENANCE_CACHE_FILE: &str = "shared-codex-session-maintenance-v1.json";
 const RECENT_SESSION_MAINTENANCE_CACHE_VERSION: u8 = 2;
@@ -49,20 +50,37 @@ struct RecentSessionMaintenanceCache {
 }
 
 pub fn prepare_managed_codex_home(paths: &AppPaths, codex_home: &Path) -> Result<()> {
-    prepare_managed_codex_home_internal(paths, codex_home, true)
+    prepare_managed_codex_home_internal(paths, codex_home, true, false)
+}
+
+/// Prepares a managed Codex home while keeping `.credentials.json` local to the profile.
+pub fn prepare_managed_codex_home_with_local_credentials(
+    paths: &AppPaths,
+    codex_home: &Path,
+) -> Result<()> {
+    prepare_managed_codex_home_internal(paths, codex_home, true, true)
 }
 
 pub fn prepare_managed_codex_home_for_runtime_launch(
     paths: &AppPaths,
     codex_home: &Path,
 ) -> Result<()> {
-    prepare_managed_codex_home_internal(paths, codex_home, false)
+    prepare_managed_codex_home_internal(paths, codex_home, false, false)
+}
+
+/// Prepares a managed runtime home while keeping `.credentials.json` local to the profile.
+pub fn prepare_managed_codex_home_for_runtime_launch_with_local_credentials(
+    paths: &AppPaths,
+    codex_home: &Path,
+) -> Result<()> {
+    prepare_managed_codex_home_internal(paths, codex_home, false, true)
 }
 
 fn prepare_managed_codex_home_internal(
     paths: &AppPaths,
     codex_home: &Path,
     maintain_sessions: bool,
+    keep_credentials_local: bool,
 ) -> Result<()> {
     ensure_managed_profiles_root(paths)?;
     ensure_managed_codex_home_is_not_symlink(codex_home)?;
@@ -74,12 +92,64 @@ fn prepare_managed_codex_home_internal(
     migrate_legacy_shared_codex_roots(paths)?;
 
     for entry in shared_codex_entries(paths, codex_home)? {
-        ensure_shared_codex_entry(paths, codex_home, &entry)?;
+        if keep_credentials_local && entry.name == ".credentials.json" {
+            keep_managed_credentials_local(paths, codex_home)?;
+        } else {
+            ensure_shared_codex_entry(paths, codex_home, &entry)?;
+        }
     }
     if maintain_sessions {
         maintain_managed_codex_sessions(paths)?;
     }
 
+    Ok(())
+}
+
+fn keep_managed_credentials_local(paths: &AppPaths, codex_home: &Path) -> Result<()> {
+    let local_path = codex_home.join(".credentials.json");
+    let Some(metadata) = load_shared_codex_entry_metadata(&local_path)? else {
+        return Ok(());
+    };
+    if !metadata.file_type().is_symlink() {
+        if !metadata.is_file() {
+            bail!(
+                "expected {} to be a file for local profile state",
+                local_path.display()
+            );
+        }
+        return Ok(());
+    }
+
+    let shared_path = paths.shared_codex_root.join(".credentials.json");
+    let target = shared_codex_symlink_target_path(&local_path)?;
+    if !same_path(&target, &shared_path) {
+        bail!(
+            "managed local profile state {} points to an unexpected target",
+            local_path.display()
+        );
+    }
+    if !shared_path.exists() {
+        return remove_path(&local_path);
+    }
+
+    let credentials = secret_store::FileSecretBackend::new()
+        .read_external_text_bounded(&shared_path, CLAUDE_CREDENTIALS_MAX_BYTES)
+        .map_err(anyhow::Error::new)
+        .with_context(|| {
+            format!(
+                "failed to read shared Claude credentials at {}",
+                shared_path.display()
+            )
+        })?
+        .context("shared Claude credentials are missing")?;
+    secret_store::write_private_file_atomic(&local_path, credentials.as_bytes())
+        .map_err(anyhow::Error::new)
+        .with_context(|| {
+            format!(
+                "failed to detach shared Claude credentials at {}",
+                local_path.display()
+            )
+        })?;
     Ok(())
 }
 

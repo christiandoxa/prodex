@@ -35,9 +35,10 @@ fn assert_ping_args(fixture: &Fixture, expected_count: usize) {
         expected_count
     );
     assert_eq!(
-        args.iter().filter(|arg| arg.as_str() == "ping").count(),
+        args.iter().filter(|arg| arg.as_str() == "hello").count(),
         expected_count
     );
+    assert!(!args.iter().any(|arg| arg == "ping"));
     assert!(args.iter().any(|arg| arg == "--sandbox"));
     assert!(args.iter().any(|arg| arg == "read-only"));
     assert!(args.iter().any(|arg| arg == "--ephemeral"));

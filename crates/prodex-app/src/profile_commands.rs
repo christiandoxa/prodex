@@ -99,6 +99,9 @@ pub(super) fn managed_profile_home_path(paths: &AppPaths, profile_name: &str) ->
 
 pub(super) fn prepare_profile_codex_home(paths: &AppPaths, profile: &ProfileEntry) -> Result<()> {
     if profile.managed {
+        if matches!(&profile.provider, ProfileProvider::Anthropic { .. }) {
+            return prepare_claude_profile_codex_home(paths, profile);
+        }
         ensure_managed_profiles_root(paths)?;
         if !prodex_core::path_is_strictly_under_root(
             &paths.managed_profiles_root,
@@ -111,6 +114,28 @@ pub(super) fn prepare_profile_codex_home(paths: &AppPaths, profile: &ProfileEntr
             );
         }
         prepare_managed_codex_home(paths, &profile.codex_home)
+    } else {
+        create_codex_home_if_missing(&profile.codex_home)
+    }
+}
+
+pub(super) fn prepare_claude_profile_codex_home(
+    paths: &AppPaths,
+    profile: &ProfileEntry,
+) -> Result<()> {
+    if profile.managed {
+        ensure_managed_profiles_root(paths)?;
+        if !prodex_core::path_is_strictly_under_root(
+            &paths.managed_profiles_root,
+            &profile.codex_home,
+        ) {
+            bail!(
+                "managed profile home {} is outside {}",
+                profile.codex_home.display(),
+                paths.managed_profiles_root.display()
+            );
+        }
+        prepare_managed_codex_home_with_local_credentials(paths, &profile.codex_home)
     } else {
         create_codex_home_if_missing(&profile.codex_home)
     }

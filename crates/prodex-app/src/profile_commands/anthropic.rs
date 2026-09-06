@@ -12,7 +12,7 @@ use crate::{
     AppPaths, AppState, AppStateIoExt, ImportProfileArgs, ProfileEntry, ProfileProvider,
     activate_profile, claude_config_dir_from_env_or_default,
     claude_external_oauth_profile_identity, copy_claude_oauth_credentials, ensure_path_is_unique,
-    managed_profile_home_path, prepare_managed_codex_home, prepare_profile_codex_home,
+    managed_profile_home_path, prepare_claude_profile_codex_home,
     read_external_claude_credentials_text,
 };
 
@@ -141,7 +141,7 @@ fn update_existing_claude_profile(
             temporary_home: None,
         },
     )?;
-    prepare_profile_codex_home(paths, &profile)?;
+    prepare_claude_profile_codex_home(paths, &profile)?;
     copy_claude_oauth_credentials(source_config_dir, &profile.codex_home)?;
     let profile = state
         .profiles
@@ -217,7 +217,7 @@ fn add_new_claude_profile(
             auth_journal_paths: Vec::new(),
         },
     )?;
-    prepare_managed_codex_home(paths, &codex_home)?;
+    prepare_claude_profile_codex_home(paths, &desired_profile)?;
     copy_claude_oauth_credentials(source_config_dir, &codex_home)?;
     state.profiles.insert(profile_name.clone(), desired_profile);
     if activate || state.active_profile.is_none() {

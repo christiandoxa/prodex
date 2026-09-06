@@ -730,7 +730,11 @@ fn stage_new_profile(
         provider: exported.provider.clone(),
     });
     create_codex_home_if_missing(&staging_home)?;
-    prepare_managed_codex_home(paths, &staging_home)?;
+    if matches!(&exported.provider, ProfileProvider::Anthropic { .. }) {
+        prepare_managed_codex_home_with_local_credentials(paths, &staging_home)?;
+    } else {
+        prepare_managed_codex_home(paths, &staging_home)?;
+    }
     if plan_inputs[source_index].supports_codex_runtime {
         write_secret_text_file(&staging_home.join("auth.json"), &exported.auth_json)?;
     }
