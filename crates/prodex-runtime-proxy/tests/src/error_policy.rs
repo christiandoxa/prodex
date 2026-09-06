@@ -1,6 +1,9 @@
 use super::*;
 use std::time::Duration;
 
+#[path = "error_policy/rate_limit_header.rs"]
+mod rate_limit_header_tests;
+
 fn json_body(value: serde_json::Value) -> Vec<u8> {
     serde_json::to_vec(&value).expect("test json should serialize")
 }

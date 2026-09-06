@@ -580,9 +580,13 @@ fn handle_runtime_responses_non_success(
     {
         return Ok(None);
     }
-    let error_policy = runtime_proxy_crate::runtime_http_error_policy(
+    let error_policy = runtime_proxy_crate::runtime_http_error_policy_with_headers(
         status,
         &parts.body,
+        parts
+            .headers
+            .iter()
+            .map(|(name, value)| (name.as_str(), value.as_slice())),
         runtime_proxy_crate::RuntimeHttpErrorPhase::PreCommit,
     );
     let retry_after = error_policy.retry_after.or_else(|| {
@@ -645,7 +649,7 @@ fn handle_runtime_responses_non_success(
             invalid_previous_response_id,
         }));
     }
-    if matches!(status, 401 | 403) || token_invalidated {
+    if status == 401 || token_invalidated {
         note_runtime_profile_auth_failure(
             shared,
             profile_name,
