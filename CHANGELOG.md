@@ -27,6 +27,7 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 
 ### Misc
 
+- Validate extracted log reachability (`48b5e95`)
 - Verify official app-server session bridge (`caa21dd`)
 - Harden session bridge follow-up (`02766c0`)
 - Harden session bridge (`2e99c33`)
