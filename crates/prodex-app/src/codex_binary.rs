@@ -28,7 +28,7 @@ pub(crate) fn codex_bin() -> OsString {
     #[cfg(not(test))]
     {
         static RESOLVED: std::sync::OnceLock<OsString> = std::sync::OnceLock::new();
-        return RESOLVED.get_or_init(resolve_codex_binary).clone();
+        RESOLVED.get_or_init(resolve_codex_binary).clone()
     }
     #[cfg(test)]
     resolve_codex_binary()
@@ -57,7 +57,7 @@ pub(crate) fn validate_selected_codex_binary(binary: &OsStr) -> Result<()> {
         if env::var_os("PRODEX_TEST_VALIDATE_CODEX_BINARY").is_some() {
             return validate_codex_binary(binary);
         }
-        return Ok(());
+        Ok(())
     }
     #[cfg(not(test))]
     {
