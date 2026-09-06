@@ -16,3 +16,12 @@ Patch SHA-256:
 
 The patch is reproducible from the pinned upstream commit and contains no
 transport, terminal, transcript, or persistence workaround.
+
+Linux release builds also apply
+`codex-rust-v0.153.4-linux-openssl.patch`. It enables the lockfile-pinned
+vendored OpenSSL source for portable GNU/Linux binaries without a system
+OpenSSL runtime dependency.
+
+Linux OpenSSL patch SHA-256:
+
+`f1958eb45138a5c3ca0a03d0976f22c6d59ab1fc18f2fbda9b68a59c3ec40e12`

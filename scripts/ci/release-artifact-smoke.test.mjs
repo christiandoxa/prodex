@@ -34,6 +34,8 @@ test("standalone release runs the downloaded artifact smoke before SBOM preparat
   assert.match(smoke, /- build/);
   assert.match(smoke, /name: x86_64-unknown-linux-gnu/);
   assert.match(smoke, /binary="artifact\/prodex"/u);
+  assert.match(smoke, /codex_binary="artifact\/codex"/u);
+  assert.match(smoke, /"\$\{codex_binary\}" --version \| grep -Fx 'codex-cli 0\.153\.4'/u);
   assert.match(smoke, /node scripts\/ci\/release-artifact-smoke\.mjs \\\n\s+--binary/u);
   assert.match(prepare, /- artifact-smoke/);
   assert.doesNotMatch(smoke, /cargo\s+(run|build)/u);

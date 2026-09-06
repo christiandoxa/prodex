@@ -534,39 +534,23 @@ jobs:
           git -C "${codex_source}" fetch --quiet --depth 1 origin 3d2ee51ca2d5db578f328aa75e20aa22c0197c9a
           git -C "${codex_source}" checkout --quiet --detach 3d2ee51ca2d5db578f328aa75e20aa22c0197c9a
           node scripts/compat/apply-codex-tui-patch.mjs --source "${codex_source}" --apply
+          openssl_patch="${GITHUB_WORKSPACE}/migration/codex-rust-v0.153.4-linux-openssl.patch"
+          openssl_patch_sha="$(node -e 'const crypto = require("node:crypto"); const fs = require("node:fs"); process.stdout.write(crypto.createHash("sha256").update(fs.readFileSync(process.argv[1])).digest("hex"));' "${openssl_patch}")"
+          test "${openssl_patch_sha}" = "f1958eb45138a5c3ca0a03d0976f22c6d59ab1fc18f2fbda9b68a59c3ec40e12"
+          git -C "${codex_source}" apply --check -p1 "${openssl_patch}"
+          git -C "${codex_source}" apply -p1 "${openssl_patch}"
           if [ "${{ matrix.use-cross }}" = "true" ]; then
             cat > "${codex_source}/codex-rs/Cross.toml" <<'EOF'
           [target.x86_64-unknown-linux-gnu]
-          dockerfile = "Dockerfile.prodex-cross-x86_64"
+          image = "ghcr.io/cross-rs/x86_64-unknown-linux-gnu:0.2.5@sha256:9e5b39c09874bc1816c675ed11afca2c2ed6cee0c4ed2b3c1d5763c346c9ae3f"
           [target.aarch64-unknown-linux-gnu]
-          dockerfile = "Dockerfile.prodex-cross-aarch64"
-          EOF
-            cat > "${codex_source}/codex-rs/Dockerfile.prodex-cross-x86_64" <<'EOF'
-          FROM ghcr.io/cross-rs/x86_64-unknown-linux-gnu:0.2.5@sha256:9e5b39c09874bc1816c675ed11afca2c2ed6cee0c4ed2b3c1d5763c346c9ae3f
-          RUN apt-get update \
-            && apt-get install --assume-yes --no-install-recommends \
-              libssl-dev pkg-config \
-            && rm -rf /var/lib/apt/lists/*
-          ENV PKG_CONFIG_LIBDIR_x86_64_unknown_linux_gnu=/usr/lib/x86_64-linux-gnu/pkgconfig:/usr/lib/pkgconfig:/usr/share/pkgconfig
-          RUN PKG_CONFIG_LIBDIR=/usr/lib/x86_64-linux-gnu/pkgconfig:/usr/lib/pkgconfig:/usr/share/pkgconfig pkg-config --modversion openssl
-          EOF
-            cat > "${codex_source}/codex-rs/Dockerfile.prodex-cross-aarch64" <<'EOF'
-          FROM ghcr.io/cross-rs/aarch64-unknown-linux-gnu:0.2.5@sha256:7f8308a8734d9fcd2ebbe9a3e4bdea74af293f0799d80c3cc341e340cda49a4c
-          RUN dpkg --add-architecture arm64 \
-            && apt-get update \
-            && apt-get install --assume-yes --no-install-recommends \
-              libssl-dev:arm64 pkg-config \
-            && rm -rf /var/lib/apt/lists/*
-          ENV CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc \
-              CC_aarch64_unknown_linux_gnu=aarch64-linux-gnu-gcc \
-              CXX_aarch64_unknown_linux_gnu=aarch64-linux-gnu-g++ \
-              PKG_CONFIG_ALLOW_CROSS=1 \
-              PKG_CONFIG_LIBDIR_aarch64_unknown_linux_gnu=/usr/lib/aarch64-linux-gnu/pkgconfig:/usr/lib/pkgconfig:/usr/share/pkgconfig
-          RUN PKG_CONFIG_LIBDIR=/usr/lib/aarch64-linux-gnu/pkgconfig:/usr/lib/pkgconfig:/usr/share/pkgconfig pkg-config --modversion openssl
+          image = "ghcr.io/cross-rs/aarch64-unknown-linux-gnu:0.2.5@sha256:7f8308a8734d9fcd2ebbe9a3e4bdea74af293f0799d80c3cc341e340cda49a4c"
           EOF
           fi
-          if git -C "${codex_source}" diff --name-only | grep -E '(^|/)Cargo.toml$'; then
-            echo "Prodex Codex patch unexpectedly changes Cargo manifests" >&2
+          cargo_changes="$(git -C "${codex_source}" diff --name-only | grep -E '(^|/)(Cargo.toml|Cargo.lock)$' || true)"
+          expected_cargo_changes=$'codex-rs/Cargo.lock\ncodex-rs/core/Cargo.toml'
+          if [ "${cargo_changes}" != "${expected_cargo_changes}" ]; then
+            echo "Prodex Codex patches changed unexpected Cargo metadata: ${cargo_changes}" >&2
             exit 1
           fi
           codex_lock="${codex_source}/codex-rs/Cargo.lock"
@@ -723,6 +707,11 @@ jobs:
               exit 1
             fi
           done
+          codex_binary="dist/${{ matrix.artifact-name }}/codex"
+          if readelf --dynamic "${codex_binary}" | grep -Eq 'Shared library: \[lib(ssl|crypto)\.so'; then
+            echo "${codex_binary} must not depend on a system OpenSSL runtime" >&2
+            exit 1
+          fi
 
       - name: Native smoke test
         if: ${{ matrix.can-native-smoke }}
@@ -900,8 +889,10 @@ jobs:
         run: |
           set -euo pipefail
           binary="artifact/prodex"
-          test -f "${binary}"
-          chmod 0755 "${binary}"
+          codex_binary="artifact/codex"
+          test -f "${binary}" && test -f "${codex_binary}"
+          chmod 0755 "${binary}" "${codex_binary}"
+          "${codex_binary}" --version | grep -Fx 'codex-cli 0.153.4'
           node scripts/ci/release-artifact-smoke.mjs \
             --binary "${binary}" \
             --version "${RELEASE_VERSION}"

@@ -1,0 +1,17 @@
+diff --git a/codex-rs/core/Cargo.toml b/codex-rs/core/Cargo.toml
+index eb0137c..9715363 100644
+--- a/codex-rs/core/Cargo.toml
++++ b/codex-rs/core/Cargo.toml
+@@ -132,5 +132,12 @@ openssl-sys = { workspace = true, features = ["vendored"] }
+ [target.aarch64-unknown-linux-musl.dependencies]
+ openssl-sys = { workspace = true, features = ["vendored"] }
+ 
++# Build OpenSSL from source for portable GNU/Linux release binaries.
++[target.x86_64-unknown-linux-gnu.dependencies]
++openssl-sys = { workspace = true, features = ["vendored"] }
++
++[target.aarch64-unknown-linux-gnu.dependencies]
++openssl-sys = { workspace = true, features = ["vendored"] }
++
+ [target.'cfg(unix)'.dependencies]
+ codex-shell-escalation = { workspace = true }
