@@ -159,3 +159,44 @@ pub(super) fn prepare_runtime_responses_quota_fallback(
     *quota_last_chance_profile = Some(fallback_profile);
     Ok(true)
 }
+
+pub(super) fn handle_runtime_responses_quota_attempt(
+    context: &mut RuntimeResponsesRequestContext<'_>,
+    affinity_state: &mut RuntimeResponsesAffinityState,
+    auto_redeemed_profiles: &mut BTreeSet<String>,
+    quota_last_chance_profile: &mut Option<String>,
+    loop_state: &mut RuntimePrecommitLoopState<RuntimeUpstreamFailureResponse>,
+    profile_name: String,
+    response: RuntimeResponsesReply,
+) -> Result<Option<RuntimeResponsesReply>> {
+    let result = handle_runtime_responses_quota_blocked(RuntimeResponsesQuotaBlocked {
+        request_id: context.request_id,
+        shared: context.shared,
+        profile_name,
+        response,
+        request_model_name: context.request_model_name.as_deref(),
+        prompt_cache_key: context.prompt_cache_key,
+        previous_response_id: context.previous_response_id,
+        request_turn_state: context.request_turn_state,
+        request_session_id: context.request_session_id,
+        request_requires_previous_response_affinity: context
+            .request_requires_previous_response_affinity,
+        previous_response_fresh_fallback_shape: context.previous_response_fresh_fallback_shape,
+        affinity_state,
+        auto_redeemed_profiles,
+        quota_last_chance_profile,
+        excluded_profiles: &mut loop_state.excluded_profiles,
+        last_failure: &mut loop_state.last_failure,
+    })?;
+    if result.is_some()
+        && try_runtime_responses_luna_spark_fallback(
+            context,
+            affinity_state,
+            loop_state,
+            quota_last_chance_profile,
+        )?
+    {
+        return Ok(None);
+    }
+    Ok(result)
+}

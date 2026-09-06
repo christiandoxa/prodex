@@ -2,8 +2,9 @@ use super::super::{
     RuntimeInflightReliefWait, RuntimeInflightReliefWaitResult, RuntimeResponseCandidateSelection,
     await_runtime_proxy_async_task, build_runtime_proxy_json_error_response,
     clear_runtime_recovered_profiles, mark_runtime_profile_retry_backoff,
-    runtime_compact_route_followup_bound_profile, runtime_profile_recovery_wait_for_route,
-    runtime_proxy_current_profile, runtime_proxy_local_capacity_timeout_message, runtime_proxy_log,
+    mark_runtime_profile_retry_backoff_for_delay, runtime_compact_route_followup_bound_profile,
+    runtime_profile_recovery_wait_for_route, runtime_proxy_current_profile,
+    runtime_proxy_local_capacity_timeout_message, runtime_proxy_log,
     runtime_proxy_maybe_wait_for_interactive_inflight_relief,
     runtime_proxy_precommit_budget_exhausted_for_route,
     runtime_proxy_pressure_mode_active_for_route, runtime_proxy_probe_refresh_pause,
@@ -43,7 +44,9 @@ use commit::commit_runtime_proxy_compact_success;
 use fallback::RuntimeProxyCompactSelectionExhausted;
 use fallback::finish_runtime_proxy_compact_selection_exhausted;
 use flow::RuntimeCompactFailureFlow;
-use logging::log_runtime_proxy_compact_candidate;
+use logging::{
+    RuntimeCompactFailureKind, RuntimeCompactLastFailure, log_runtime_proxy_compact_candidate,
+};
 use recovery::wait_for_compact_overload_recovery;
 use retryable::RuntimeProxyCompactRetryableFailure;
 use retryable::handle_runtime_proxy_compact_retryable_failure;
@@ -126,7 +129,7 @@ pub(super) fn proxy_runtime_compact_request(
     let excluded_profiles = BTreeSet::new();
     let auto_redeemed_profiles = BTreeSet::new();
     let conservative_overload_retried_profiles = BTreeSet::new();
-    let last_failure: Option<(tiny_http::ResponseBox, bool)> = None;
+    let last_failure: Option<RuntimeCompactLastFailure> = None;
     let saw_inflight_saturation = false;
     let saw_transport_failure = false;
     run_runtime_compact_selection(RuntimeCompactSelectionContext {
@@ -179,7 +182,7 @@ struct RuntimeCompactSelectionContext<'a> {
     excluded_profiles: BTreeSet<String>,
     auto_redeemed_profiles: BTreeSet<String>,
     conservative_overload_retried_profiles: BTreeSet<String>,
-    last_failure: Option<(tiny_http::ResponseBox, bool)>,
+    last_failure: Option<RuntimeCompactLastFailure>,
     saw_inflight_saturation: bool,
     saw_transport_failure: bool,
     saw_overload_failure: bool,
@@ -571,7 +574,7 @@ struct RuntimeCompactAttemptContext<'a> {
     auto_redeemed_profiles: &'a mut BTreeSet<String>,
     conservative_overload_retried_profiles: &'a mut BTreeSet<String>,
     excluded_profiles: &'a mut BTreeSet<String>,
-    last_failure: &'a mut Option<(tiny_http::ResponseBox, bool)>,
+    last_failure: &'a mut Option<RuntimeCompactLastFailure>,
     selection_attempts: usize,
     selection_started_at: Instant,
     pressure_mode: bool,
@@ -617,6 +620,26 @@ fn handle_runtime_compact_attempt(
             response,
         )?)),
         RuntimeStandardAttempt::StaleContinuation { response } => Ok(Some(response)),
+        RuntimeStandardAttempt::RateLimited {
+            profile_name,
+            response,
+            retry_after,
+        } => {
+            runtime_proxy_log(
+                shared,
+                format!(
+                    "request={request_id} transport=http compact_rate_limited profile={profile_name} retry_after_ms={}",
+                    retry_after.map_or(0, |delay| delay.as_millis()),
+                ),
+            );
+            mark_runtime_profile_retry_backoff_for_delay(shared, &profile_name, retry_after)?;
+            if candidate_has_hard_affinity {
+                return Ok(Some(response));
+            }
+            excluded_profiles.insert(profile_name);
+            *last_failure = Some((response, RuntimeCompactFailureKind::RateLimited));
+            Ok(None)
+        }
         RuntimeStandardAttempt::TransportFailed {
             profile_name,
             stage,
@@ -696,7 +719,7 @@ fn handle_runtime_compact_attempt(
             }
             mark_runtime_profile_retry_backoff(shared, &profile_name)?;
             excluded_profiles.insert(profile_name);
-            *last_failure = Some((response, false));
+            *last_failure = Some((response, RuntimeCompactFailureKind::ProfileUnavailable));
             *saw_transport_failure = true;
             Ok(None)
         }

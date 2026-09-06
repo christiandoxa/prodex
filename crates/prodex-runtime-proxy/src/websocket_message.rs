@@ -17,6 +17,7 @@ pub struct RuntimeBufferedWebsocketTextFrame {
 pub enum RuntimeWebsocketRetryInspectionKind {
     ConnectionLimitReached,
     QuotaBlocked,
+    RateLimited,
     Overloaded,
     PreviousResponseNotFound,
 }
@@ -30,6 +31,7 @@ pub struct RuntimeInspectedWebsocketTextFrame {
     pub retry_kind: Option<RuntimeWebsocketRetryInspectionKind>,
     pub precommit_hold: bool,
     pub terminal_event: bool,
+    pub retry_after: Option<std::time::Duration>,
 }
 
 pub fn runtime_websocket_should_promote_committed_profile(
@@ -191,12 +193,14 @@ pub fn inspect_runtime_websocket_text_frame_with_phase(
         Some(RuntimeWebsocketRetryInspectionKind::ConnectionLimitReached)
     } else if extract_runtime_proxy_previous_response_message_from_value(&value).is_some() {
         Some(RuntimeWebsocketRetryInspectionKind::PreviousResponseNotFound)
+    } else if error_policy.action == RuntimeHttpErrorAction::RetryProfile
+        && error_policy.class == RuntimeHttpErrorClass::RateLimited
+    {
+        Some(RuntimeWebsocketRetryInspectionKind::RateLimited)
     } else if (error_policy.action == RuntimeHttpErrorAction::RetryProfile
         && matches!(
             error_policy.class,
-            RuntimeHttpErrorClass::RateLimited
-                | RuntimeHttpErrorClass::Overload
-                | RuntimeHttpErrorClass::TransientServer
+            RuntimeHttpErrorClass::Overload | RuntimeHttpErrorClass::TransientServer
         ))
         || error_policy.action == RuntimeHttpErrorAction::RotateProfile
             && error_policy.class == RuntimeHttpErrorClass::ProfileUnavailable
@@ -225,6 +229,7 @@ pub fn inspect_runtime_websocket_text_frame_with_phase(
         retry_kind,
         precommit_hold,
         terminal_event,
+        retry_after: error_policy.retry_after,
     }
 }
 

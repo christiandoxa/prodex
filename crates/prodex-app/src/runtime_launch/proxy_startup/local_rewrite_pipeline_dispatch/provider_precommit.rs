@@ -164,6 +164,9 @@ fn runtime_local_rewrite_live_fallback_class(
                 .unwrap_or(ProviderErrorClass::Quota),
             )
         }
+        runtime_proxy_crate::RuntimeSseInspectionProgress::RateLimited { .. } => {
+            Some(ProviderErrorClass::RateLimit)
+        }
         runtime_proxy_crate::RuntimeSseInspectionProgress::Overloaded => {
             let class = runtime_provider_error_class(provider, live.status, &live.prefix);
             Some(
@@ -325,6 +328,13 @@ fn runtime_local_rewrite_sse_event_progress(
 ) -> Option<runtime_proxy_crate::RuntimeSseInspectionProgress> {
     if event.quota_blocked {
         return Some(runtime_proxy_crate::RuntimeSseInspectionProgress::QuotaBlocked);
+    }
+    if event.rate_limited {
+        return Some(
+            runtime_proxy_crate::RuntimeSseInspectionProgress::RateLimited {
+                retry_after: event.retry_after,
+            },
+        );
     }
     if event.overloaded {
         return Some(runtime_proxy_crate::RuntimeSseInspectionProgress::Overloaded);

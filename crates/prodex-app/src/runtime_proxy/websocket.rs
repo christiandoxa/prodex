@@ -393,6 +393,7 @@ fn handle_runtime_proxy_websocket_connect_attempt(
                 profile_name,
                 status,
                 body,
+                response.headers(),
                 recovery_steps,
             )
         }
@@ -411,6 +412,7 @@ fn handle_runtime_proxy_websocket_http_response(
     profile_name: &str,
     status: u16,
     body: Vec<u8>,
+    headers: &tungstenite::http::HeaderMap,
     recovery_steps: &mut RuntimeProfileUnauthorizedRecoverySteps,
 ) -> Result<Option<RuntimeWebsocketConnectResult>> {
     if status == 401
@@ -429,6 +431,13 @@ fn handle_runtime_proxy_websocket_http_response(
         &body,
         runtime_proxy_crate::RuntimeHttpErrorPhase::PreCommit,
     );
+    let retry_after = error_policy.retry_after.or_else(|| {
+        runtime_proxy_crate::runtime_retry_after_from_headers(
+            headers
+                .iter()
+                .map(|(name, value)| (name.as_str(), value.as_bytes())),
+        )
+    });
     if (matches!(status, 401 | 403)
         && (status == 401
             || error_policy.action != runtime_proxy_crate::RuntimeHttpErrorAction::RotateProfile))
@@ -454,11 +463,24 @@ fn handle_runtime_proxy_websocket_http_response(
             ],
         ),
     );
+    if status == 401 {
+        return Ok(Some(RuntimeWebsocketConnectResult::AuthFailed(
+            runtime_websocket_error_payload_from_http_body(&body),
+        )));
+    }
     if error_policy.action == runtime_proxy_crate::RuntimeHttpErrorAction::RotateProfile
         && error_policy.class == runtime_proxy_crate::RuntimeHttpErrorClass::Quota
     {
         return Ok(Some(RuntimeWebsocketConnectResult::QuotaBlocked(
             runtime_websocket_error_payload_from_http_body(&body),
+        )));
+    }
+    if error_policy.action == runtime_proxy_crate::RuntimeHttpErrorAction::RetryProfile
+        && error_policy.class == runtime_proxy_crate::RuntimeHttpErrorClass::RateLimited
+    {
+        return Ok(Some(RuntimeWebsocketConnectResult::RateLimited(
+            runtime_websocket_error_payload_from_http_body(&body),
+            retry_after,
         )));
     }
     if error_policy.action == runtime_proxy_crate::RuntimeHttpErrorAction::RetryProfile

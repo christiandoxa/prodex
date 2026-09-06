@@ -9,7 +9,8 @@ use super::super::super::{
 use super::{
     flow::RuntimeCompactFailureFlow,
     logging::{
-        RuntimeProxyCompactAttemptFailureLog, log_runtime_proxy_compact_attempt_final_failure,
+        RuntimeCompactLastFailure, RuntimeProxyCompactAttemptFailureLog,
+        log_runtime_proxy_compact_attempt_final_failure,
     },
 };
 use crate::runtime_state_shared::RuntimeRotationProxyShared;
@@ -23,7 +24,7 @@ pub(super) struct RuntimeProxyCompactTransportFailure<'a> {
     pub(super) selection_attempts: usize,
     pub(super) selection_started_at: Instant,
     pub(super) pressure_mode: bool,
-    pub(super) last_failure: Option<&'a (tiny_http::ResponseBox, bool)>,
+    pub(super) last_failure: Option<&'a RuntimeCompactLastFailure>,
     pub(super) saw_inflight_saturation: bool,
     pub(super) saw_transport_failure: bool,
 }

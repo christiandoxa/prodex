@@ -417,7 +417,7 @@ fn runtime_sse_inspection_waits_for_complete_event_across_every_split() {
         (
             "rate_limit_exceeded",
             "data: {\"error\":{\"code\":\"rate_limit_exceeded\"}}\n\n",
-            RuntimeSseInspectionProgress::Overloaded,
+            RuntimeSseInspectionProgress::RateLimited { retry_after: None },
         ),
         (
             "server_is_overloaded",

@@ -104,6 +104,10 @@ fn compat_replay_sse_inspection_value(progress: RuntimeSseInspectionProgress) ->
         RuntimeSseInspectionProgress::QuotaBlocked => serde_json::json!({
             "kind": "quota_blocked",
         }),
+        RuntimeSseInspectionProgress::RateLimited { retry_after } => serde_json::json!({
+            "kind": "rate_limited",
+            "retry_after_ms": retry_after.map(|delay| delay.as_millis()),
+        }),
         RuntimeSseInspectionProgress::Overloaded => serde_json::json!({
             "kind": "overloaded",
         }),

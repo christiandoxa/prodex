@@ -121,6 +121,100 @@ pub(crate) fn runtime_response_trace_provider_labels(
     (logical_provider, transport_provider_hash)
 }
 
+pub(super) fn handle_runtime_responses_success(
+    context: &RuntimeResponsesRequestContext<'_>,
+    affinity_state: &mut RuntimeResponsesAffinityState,
+    profile_name: String,
+    response: RuntimeResponsesReply,
+) -> Result<Option<RuntimeResponsesReply>> {
+    affinity_state.remember_successful_previous_response_owner(
+        context.shared,
+        &profile_name,
+        context.previous_response_id,
+    )?;
+    commit_runtime_proxy_profile_selection_with_notice(
+        context.shared,
+        &profile_name,
+        RuntimeRouteKind::Responses,
+    )?;
+    runtime_proxy_log(
+        context.shared,
+        format!(
+            "request={} transport=http committed profile={profile_name}",
+            context.request_id
+        ),
+    );
+    Ok(Some(response))
+}
+
+pub(super) fn handle_runtime_responses_overloaded_attempt(
+    context: &RuntimeResponsesRequestContext<'_>,
+    affinity_state: &RuntimeResponsesAffinityState,
+    loop_state: &mut RuntimePrecommitLoopState<RuntimeUpstreamFailureResponse>,
+    profile_name: String,
+    response: RuntimeResponsesReply,
+) -> Result<Option<RuntimeResponsesReply>> {
+    handle_runtime_responses_overloaded(RuntimeResponsesOverloaded {
+        request_id: context.request_id,
+        shared: context.shared,
+        profile_name,
+        response,
+        affinity_state,
+        excluded_profiles: &mut loop_state.excluded_profiles,
+        last_failure: &mut loop_state.last_failure,
+    })
+}
+
+pub(super) fn handle_runtime_responses_auth_failed(
+    context: &RuntimeResponsesRequestContext<'_>,
+    affinity_state: &mut RuntimeResponsesAffinityState,
+    loop_state: &mut RuntimePrecommitLoopState<RuntimeUpstreamFailureResponse>,
+    profile_name: String,
+    response: RuntimeResponsesReply,
+) -> Result<Option<RuntimeResponsesReply>> {
+    runtime_proxy_log(
+        context.shared,
+        format!(
+            "request={} transport=http auth_failed profile={profile_name}",
+            context.request_id
+        ),
+    );
+    if !affinity_state.quota_blocked_affinity_is_releasable(
+        &profile_name,
+        context.request_requires_previous_response_affinity,
+        context.previous_response_fresh_fallback_shape,
+    ) {
+        runtime_proxy_log(
+            context.shared,
+            format!(
+                "request={} transport=http upstream_auth_failure_passthrough route=responses profile={profile_name} reason=hard_affinity",
+                context.request_id
+            ),
+        );
+        return Ok(Some(response));
+    }
+    let released_affinity = release_runtime_auth_failed_affinity(
+        context.shared,
+        &profile_name,
+        context.previous_response_id,
+        context.request_turn_state,
+        context.request_session_id,
+    )?;
+    affinity_state.clear_profile_affinity(&profile_name, true);
+    if released_affinity {
+        runtime_proxy_log(
+            context.shared,
+            format!(
+                "request={} transport=http auth_failed_affinity_released profile={profile_name}",
+                context.request_id
+            ),
+        );
+    }
+    loop_state.excluded_profiles.insert(profile_name);
+    loop_state.last_failure = Some((RuntimeUpstreamFailureResponse::Http(response), true));
+    Ok(None)
+}
+
 pub(crate) struct RuntimeResponsesAttemptOptions<'a> {
     pub(crate) turn_state_override: Option<&'a str>,
     pub(crate) prompt_cache_key: Option<&'a str>,
@@ -491,6 +585,14 @@ fn handle_runtime_responses_non_success(
         &parts.body,
         runtime_proxy_crate::RuntimeHttpErrorPhase::PreCommit,
     );
+    let retry_after = error_policy.retry_after.or_else(|| {
+        runtime_proxy_crate::runtime_retry_after_from_headers(
+            parts
+                .headers
+                .iter()
+                .map(|(name, value)| (name.as_str(), value.as_slice())),
+        )
+    });
     let token_invalidated = runtime_proxy_body_indicates_token_invalidated(&parts.body);
     let invalid_previous_response_id =
         runtime_proxy_crate::runtime_proxy_body_is_invalid_previous_response_id(&parts.body);
@@ -515,6 +617,15 @@ fn handle_runtime_responses_non_success(
         return Ok(Some(RuntimeResponsesAttempt::QuotaBlocked {
             profile_name: profile_name.to_string(),
             response,
+        }));
+    }
+    if error_policy.action == runtime_proxy_crate::RuntimeHttpErrorAction::RetryProfile
+        && error_policy.class == runtime_proxy_crate::RuntimeHttpErrorClass::RateLimited
+    {
+        return Ok(Some(RuntimeResponsesAttempt::RateLimited {
+            profile_name: profile_name.to_string(),
+            response,
+            retry_after,
         }));
     }
     if error_policy.action == runtime_proxy_crate::RuntimeHttpErrorAction::RetryProfile

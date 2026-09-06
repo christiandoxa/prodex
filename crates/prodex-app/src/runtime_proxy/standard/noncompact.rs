@@ -63,6 +63,7 @@ fn proxy_runtime_noncompact_realtime_request(
         }
         RuntimeStandardAttempt::StaleContinuation { response }
         | RuntimeStandardAttempt::RetryableFailure { response, .. }
+        | RuntimeStandardAttempt::RateLimited { response, .. }
         | RuntimeStandardAttempt::ProfileUnavailable { response, .. }
         | RuntimeStandardAttempt::AuthFailed { response, .. } => Ok(response),
         RuntimeStandardAttempt::LocalSelectionBlocked { .. }
@@ -506,6 +507,19 @@ fn handle_runtime_noncompact_attempt(
             Ok(Some(response))
         }
         RuntimeStandardAttempt::StaleContinuation { response } => Ok(Some(response)),
+        RuntimeStandardAttempt::RateLimited {
+            profile_name,
+            response,
+            retry_after,
+        } => handle_runtime_noncompact_rate_limited(
+            request_id,
+            shared,
+            session_profile,
+            loop_state,
+            profile_name,
+            response,
+            retry_after,
+        ),
         RuntimeStandardAttempt::RetryableFailure {
             profile_name,
             response,
@@ -585,6 +599,31 @@ fn handle_runtime_noncompact_attempt(
             Ok(None)
         }
     }
+}
+
+fn handle_runtime_noncompact_rate_limited(
+    request_id: u64,
+    shared: &RuntimeRotationProxyShared,
+    session_profile: &mut Option<String>,
+    loop_state: &mut RuntimePrecommitLoopState<tiny_http::ResponseBox>,
+    profile_name: String,
+    response: tiny_http::ResponseBox,
+    retry_after: Option<Duration>,
+) -> Result<Option<tiny_http::ResponseBox>> {
+    runtime_proxy_log(
+        shared,
+        format!(
+            "request={request_id} transport=http standard_rate_limited profile={profile_name} retry_after_ms={}",
+            retry_after.map_or(0, |delay| delay.as_millis()),
+        ),
+    );
+    mark_runtime_profile_retry_backoff_for_delay(shared, &profile_name, retry_after)?;
+    if session_profile.as_deref() == Some(profile_name.as_str()) {
+        return Ok(Some(response));
+    }
+    loop_state.excluded_profiles.insert(profile_name);
+    loop_state.last_failure = Some((response, false));
+    Ok(None)
 }
 
 struct RuntimeNoncompactRetryableContext<'a> {

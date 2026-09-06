@@ -227,6 +227,23 @@ pub(super) fn start_runtime_websocket_upstream_session(
                     },
                 ));
             }
+            Ok(RuntimeWebsocketConnectResult::RateLimited(payload, retry_after)) => {
+                return Ok(RuntimeWebsocketSessionStartDecision::Attempt(
+                    RuntimeWebsocketAttempt::RateLimited {
+                        profile_name: profile_name.to_string(),
+                        payload,
+                        retry_after,
+                    },
+                ));
+            }
+            Ok(RuntimeWebsocketConnectResult::AuthFailed(payload)) => {
+                return Ok(RuntimeWebsocketSessionStartDecision::Attempt(
+                    RuntimeWebsocketAttempt::AuthFailed {
+                        profile_name: profile_name.to_string(),
+                        payload,
+                    },
+                ));
+            }
             Ok(RuntimeWebsocketConnectResult::Overloaded(payload)) => {
                 return Ok(RuntimeWebsocketSessionStartDecision::Attempt(
                     RuntimeWebsocketAttempt::Overloaded {

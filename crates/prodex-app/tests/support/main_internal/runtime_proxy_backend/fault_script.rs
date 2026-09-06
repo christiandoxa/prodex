@@ -112,6 +112,27 @@ impl RuntimeProxyBackendFaultStep {
         }
     }
 
+    pub(crate) fn sse_rate_limited(
+        route: RuntimeProxyBackendFaultRoute,
+        account_id: &str,
+    ) -> Self {
+        Self {
+            route,
+            account_id: Some(account_id.to_string()),
+            status_line: "HTTP/1.1 200 OK",
+            content_type: "text/event-stream",
+            body: concat!(
+                "event: response.failed\r\n",
+                "data: {\"type\":\"response.failed\",\"response\":{\"error\":{\"code\":\"rate_limit_exceeded\",\"message\":\"Please try again in 1s.\"}}}\r\n",
+                "\r\n"
+            )
+            .to_string(),
+            response_turn_state: None,
+            initial_body_stall: None,
+            chunk_delay: None,
+        }
+    }
+
     pub(crate) fn sse_success(
         route: RuntimeProxyBackendFaultRoute,
         account_id: &str,
@@ -208,6 +229,28 @@ impl RuntimeProxyBackendFaultStep {
                     "message": "scripted quota exhausted"
                 },
                 "status": 429
+            })
+            .to_string(),
+            response_turn_state: None,
+            initial_body_stall: None,
+            chunk_delay: None,
+        }
+    }
+
+    pub(crate) fn rate_limited_429(
+        route: RuntimeProxyBackendFaultRoute,
+        account_id: &str,
+    ) -> Self {
+        Self {
+            route,
+            account_id: Some(account_id.to_string()),
+            status_line: "HTTP/1.1 429 Too Many Requests",
+            content_type: "application/json",
+            body: serde_json::json!({
+                "error": {
+                    "code": "rate_limit_exceeded",
+                    "message": "Please try again in 1s."
+                }
             })
             .to_string(),
             response_turn_state: None,

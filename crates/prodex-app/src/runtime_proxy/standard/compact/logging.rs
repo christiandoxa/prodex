@@ -1,5 +1,16 @@
 use std::time::Instant;
 
+#[derive(Clone, Copy)]
+pub(super) enum RuntimeCompactFailureKind {
+    Quota,
+    RateLimited,
+    Overload,
+    ProfileUnavailable,
+    Auth,
+}
+
+pub(super) type RuntimeCompactLastFailure = (tiny_http::ResponseBox, RuntimeCompactFailureKind);
+
 pub(super) fn log_runtime_proxy_compact_candidate(
     request_id: u64,
     shared: &RuntimeRotationProxyShared,
@@ -32,26 +43,38 @@ pub(super) fn log_runtime_proxy_compact_followup_owner(
 }
 
 pub(super) fn runtime_proxy_compact_last_failure_kind(
-    last_failure: Option<&(tiny_http::ResponseBox, bool)>,
+    last_failure: Option<&RuntimeCompactLastFailure>,
     saw_transport_failure: bool,
 ) -> &'static str {
     match last_failure {
-        Some((_response, true)) => "quota",
-        Some((_response, false)) => "overload",
+        Some((_response, kind)) => match kind {
+            RuntimeCompactFailureKind::Quota => "quota",
+            RuntimeCompactFailureKind::RateLimited => "rate_limited",
+            RuntimeCompactFailureKind::Overload => "overload",
+            RuntimeCompactFailureKind::ProfileUnavailable => "profile_unavailable",
+            RuntimeCompactFailureKind::Auth => "auth",
+        },
         None if saw_transport_failure => "transport",
         None => "none",
     }
 }
 
 pub(super) fn runtime_proxy_compact_final_failure_reason(
-    last_failure: Option<&(tiny_http::ResponseBox, bool)>,
+    last_failure: Option<&RuntimeCompactLastFailure>,
     saw_inflight_saturation: bool,
     saw_transport_failure: bool,
 ) -> Option<&'static str> {
     match last_failure {
-        Some((_response, false)) => Some("overload"),
-        Some((_response, true)) if saw_inflight_saturation => Some("inflight_saturation"),
-        Some((_response, true)) => Some("quota"),
+        Some((_response, RuntimeCompactFailureKind::RateLimited)) => Some("rate_limited"),
+        Some((_response, RuntimeCompactFailureKind::Overload)) => Some("overload"),
+        Some((_response, RuntimeCompactFailureKind::ProfileUnavailable)) => {
+            Some("profile_unavailable")
+        }
+        Some((_response, RuntimeCompactFailureKind::Auth)) => Some("auth"),
+        Some((_response, RuntimeCompactFailureKind::Quota)) if saw_inflight_saturation => {
+            Some("inflight_saturation")
+        }
+        Some((_response, RuntimeCompactFailureKind::Quota)) => Some("quota"),
         None if saw_inflight_saturation => Some("inflight_saturation"),
         None if saw_transport_failure => Some("transport"),
         None => None,
@@ -78,7 +101,7 @@ pub(super) struct RuntimeProxyCompactAttemptFailureLog<'a> {
     pub(super) selection_attempts: usize,
     pub(super) selection_started_at: Instant,
     pub(super) pressure_mode: bool,
-    pub(super) last_failure: Option<&'a (tiny_http::ResponseBox, bool)>,
+    pub(super) last_failure: Option<&'a RuntimeCompactLastFailure>,
     pub(super) saw_inflight_saturation: bool,
     pub(super) saw_transport_failure: bool,
     pub(super) profile_name: &'a str,

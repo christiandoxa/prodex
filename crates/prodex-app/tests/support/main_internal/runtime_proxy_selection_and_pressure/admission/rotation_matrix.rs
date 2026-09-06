@@ -319,6 +319,115 @@ fn fresh_responses_pass_through_generic_429_without_rotation() {
 }
 
 #[test]
+fn fresh_responses_rate_limit_rotates_without_overload_penalty() {
+    let backend = RuntimeProxyBackend::start_with_fault_script(RuntimeProxyBackendFaultScript::new([
+        RuntimeProxyBackendFaultStep::rate_limited_429(
+            RuntimeProxyBackendFaultRoute::Responses,
+            "main-account",
+        ),
+    ]));
+    let harness = ready_profiles(&backend);
+
+    let reply = proxy_runtime_responses_request(
+        114,
+        &responses_request(br#"{"input":[]}"#),
+        harness.shared(),
+    )
+    .expect("explicit rate limit should rotate to the next profile");
+    let (status, body, profile) = consume_responses_reply(reply);
+
+    assert_eq!(status, 200, "{body}");
+    assert_eq!(profile.as_deref(), Some("second"));
+    assert_eq!(backend.responses_accounts(), ["main-account", "second-account"]);
+    let log = read_runtime_proxy_test_log(&harness.shared().log_path);
+    assert!(log.contains("rate_limited"), "rate-limit classification should be visible: {log}");
+    assert!(
+        !log.contains("upstream_overloaded route=responses profile=main"),
+        "rate limits must not receive overload health treatment: {log}"
+    );
+}
+
+#[test]
+fn fresh_responses_sse_rate_limit_rotates_without_overload_penalty() {
+    let backend = RuntimeProxyBackend::start_with_fault_script(RuntimeProxyBackendFaultScript::new([
+        RuntimeProxyBackendFaultStep::sse_rate_limited(
+            RuntimeProxyBackendFaultRoute::Responses,
+            "main-account",
+        ),
+    ]));
+    let harness = ready_profiles(&backend);
+
+    let reply = proxy_runtime_responses_request(
+        115,
+        &responses_request(br#"{"input":[]}"#),
+        harness.shared(),
+    )
+    .expect("SSE rate limit should rotate to the next profile");
+    let (status, body, profile) = consume_responses_reply(reply);
+
+    assert_eq!(status, 200, "{body}");
+    assert_eq!(profile.as_deref(), Some("second"));
+    assert_eq!(backend.responses_accounts(), ["main-account", "second-account"]);
+    let log = read_runtime_proxy_test_log(&harness.shared().log_path);
+    assert!(log.contains("sse_rate_limited"), "SSE rate-limit classification should be visible: {log}");
+    assert!(
+        !log.contains("upstream_overloaded route=responses profile=main"),
+        "SSE rate limits must not receive overload health treatment: {log}"
+    );
+}
+
+#[test]
+fn compact_rate_limit_rotates_without_overload_penalty() {
+    let backend = RuntimeProxyBackend::start_with_fault_script(RuntimeProxyBackendFaultScript::new([
+        RuntimeProxyBackendFaultStep::rate_limited_429(
+            RuntimeProxyBackendFaultRoute::Compact,
+            "main-account",
+        ),
+    ]));
+    let harness = ready_profiles(&backend);
+
+    let response = proxy_runtime_standard_request(116, &compact_request(), harness.shared())
+        .expect("compact rate limit should rotate to the next profile");
+    let (status, body) = tiny_http_response_status_and_body(response);
+
+    assert_eq!(status, 200, "{body}");
+    assert_eq!(backend.responses_accounts(), ["main-account", "second-account"]);
+    let log = read_runtime_proxy_test_log(&harness.shared().log_path);
+    assert!(log.contains("compact_rate_limited"), "compact rate-limit classification should be visible: {log}");
+    assert!(
+        !log.contains("compact_retryable_failure profile=main reason=overload"),
+        "compact rate limits must not receive overload handling: {log}"
+    );
+}
+
+#[test]
+fn compact_rate_limit_exhaustion_preserves_rate_limit_classification() {
+    let backend = RuntimeProxyBackend::start_with_fault_script(RuntimeProxyBackendFaultScript::new([
+        RuntimeProxyBackendFaultStep::rate_limited_429(
+            RuntimeProxyBackendFaultRoute::Compact,
+            "main-account",
+        ),
+        RuntimeProxyBackendFaultStep::rate_limited_429(
+            RuntimeProxyBackendFaultRoute::Compact,
+            "second-account",
+        ),
+    ]));
+    let harness = ready_profiles(&backend);
+
+    let response = proxy_runtime_standard_request(117, &compact_request(), harness.shared())
+        .expect("compact rate-limit exhaustion should preserve the upstream response");
+    let (status, body) = tiny_http_response_status_and_body(response);
+
+    assert_eq!(status, 429, "{body}");
+    assert_eq!(backend.responses_accounts(), ["main-account", "second-account"]);
+    let log = read_runtime_proxy_test_log(&harness.shared().log_path);
+    assert!(
+        log.contains("compact_final_failure") && log.contains("last_failure=rate_limited"),
+        "rate-limit exhaustion should remain visibly distinct from overload: {log}"
+    );
+}
+
+#[test]
 fn fresh_responses_do_not_rotate_invalid_requests() {
     let backend = RuntimeProxyBackend::start_with_fault_script(RuntimeProxyBackendFaultScript::new([
         RuntimeProxyBackendFaultStep::invalid_request(

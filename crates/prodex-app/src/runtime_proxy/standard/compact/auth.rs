@@ -7,7 +7,8 @@ use super::super::super::{
 use super::{
     flow::RuntimeCompactFailureFlow,
     logging::{
-        RuntimeProxyCompactAttemptFailureLog, log_runtime_proxy_compact_attempt_final_failure,
+        RuntimeCompactFailureKind, RuntimeCompactLastFailure, RuntimeProxyCompactAttemptFailureLog,
+        log_runtime_proxy_compact_attempt_final_failure,
     },
 };
 use crate::runtime_state_shared::RuntimeRotationProxyShared;
@@ -24,7 +25,7 @@ pub(super) struct RuntimeProxyCompactAuthFailure<'a> {
     pub(super) compact_followup_profile: &'a mut Option<(String, &'static str)>,
     pub(super) session_profile: &'a mut Option<String>,
     pub(super) excluded_profiles: &'a mut BTreeSet<String>,
-    pub(super) last_failure: &'a mut Option<(tiny_http::ResponseBox, bool)>,
+    pub(super) last_failure: &'a mut Option<RuntimeCompactLastFailure>,
     pub(super) selection_attempts: usize,
     pub(super) selection_started_at: Instant,
     pub(super) pressure_mode: bool,
@@ -115,6 +116,6 @@ pub(super) fn handle_runtime_proxy_compact_auth_failure(
         );
     }
     excluded_profiles.insert(profile_name);
-    *last_failure = Some((response, true));
+    *last_failure = Some((response, RuntimeCompactFailureKind::Auth));
     Ok(RuntimeCompactFailureFlow::Retry)
 }

@@ -45,6 +45,7 @@ impl RuntimeProxySseInspectBenchCase {
                 turn_state,
             } => response_ids.len() + usize::from(turn_state.is_some()),
             RuntimeSseInspectionProgress::QuotaBlocked
+            | RuntimeSseInspectionProgress::RateLimited { .. }
             | RuntimeSseInspectionProgress::Overloaded
             | RuntimeSseInspectionProgress::PreviousResponseNotFound => 0,
         }

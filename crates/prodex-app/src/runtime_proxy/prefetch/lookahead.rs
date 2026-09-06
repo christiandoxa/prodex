@@ -120,6 +120,12 @@ fn runtime_sse_lookahead_finish(
         RuntimeSseInspectionProgress::QuotaBlocked => {
             Ok(RuntimeSseInspection::QuotaBlocked(buffered))
         }
+        RuntimeSseInspectionProgress::RateLimited { retry_after } => {
+            Ok(RuntimeSseInspection::RateLimited {
+                prelude: buffered,
+                retry_after,
+            })
+        }
         RuntimeSseInspectionProgress::Overloaded => Ok(RuntimeSseInspection::Overloaded(buffered)),
         RuntimeSseInspectionProgress::PreviousResponseNotFound => {
             Ok(RuntimeSseInspection::PreviousResponseNotFound(buffered))
@@ -172,6 +178,20 @@ fn runtime_sse_lookahead_progress(
                 ),
             );
             Some(RuntimeSseInspection::QuotaBlocked(std::mem::take(buffered)))
+        }
+        RuntimeSseInspectionProgress::RateLimited { retry_after } => {
+            runtime_proxy_log_to_path(
+                log_path,
+                &format!(
+                    "request={request_id} transport=http lookahead_rate_limited bytes={} retry_after_ms={}",
+                    buffered.len(),
+                    retry_after.map_or(0, |delay| delay.as_millis()),
+                ),
+            );
+            Some(RuntimeSseInspection::RateLimited {
+                prelude: std::mem::take(buffered),
+                retry_after,
+            })
         }
         RuntimeSseInspectionProgress::Overloaded => {
             runtime_proxy_log_to_path(

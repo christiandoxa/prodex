@@ -1,3 +1,4 @@
+use super::quota_blocked::prepare_runtime_responses_quota_fallback;
 use super::*;
 
 #[derive(Clone, Copy)]
@@ -133,6 +134,25 @@ fn handle_runtime_responses_direct_attempt(
             profile_name,
             response,
         ),
+        RuntimeResponsesAttempt::RateLimited {
+            profile_name,
+            response,
+            retry_after,
+        } => {
+            mark_runtime_profile_retry_backoff_for_delay(
+                fallback.shared,
+                &profile_name,
+                retry_after,
+            )?;
+            if affinity_state.candidate_has_hard_affinity(&profile_name) {
+                return Ok(Some(RuntimeResponsesDirectCurrentFallbackAction::Return(
+                    Box::new(response),
+                )));
+            }
+            excluded_profiles.insert(profile_name);
+            *last_failure = Some((RuntimeUpstreamFailureResponse::Http(response), false));
+            Ok(Some(RuntimeResponsesDirectCurrentFallbackAction::Continue))
+        }
         RuntimeResponsesAttempt::Overloaded {
             profile_name,
             response,
