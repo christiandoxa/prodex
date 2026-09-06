@@ -48,12 +48,9 @@ fn luna_compact_falls_back_to_actual_spark_model_after_luna_capacity_exhausts() 
     let (status, body) = tiny_http_response_status_and_body(response);
 
     assert_eq!(status, 200, "{body}");
-    assert_eq!(
-        backend.responses_accounts(),
-        ["second-account", "second-account"]
-    );
+    assert_eq!(backend.responses_accounts(), ["second-account"]);
     let request_bodies = backend.responses_bodies();
-    assert_eq!(request_bodies.len(), 2);
+    assert_eq!(request_bodies.len(), 1);
     let request: serde_json::Value = serde_json::from_str(
         request_bodies
             .last()

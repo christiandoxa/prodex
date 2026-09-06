@@ -105,6 +105,94 @@ fn selection_score_at_is_deterministic() {
     assert_eq!(first.weekly_reset_at, now + 86_400);
 }
 
+#[test]
+fn model_aware_scheduler_scores_luna_reserve_instead_of_spark() {
+    let now = chrono::Local::now().timestamp();
+    let mut reserve_usage = selection_usage(now, 0);
+    let reserve_pair = reserve_usage.rate_limit.clone().unwrap();
+    reserve_usage
+        .additional_rate_limits
+        .push(AdditionalRateLimit {
+            limit_id: Some("base_model_inference".to_string()),
+            limit_name: Some("gpt-luna-reserve".to_string()),
+            metered_feature: None,
+            rate_limit: WindowPair {
+                primary_window: Some(UsageWindow {
+                    used_percent: Some(90),
+                    reset_at: Some(now + 7_200),
+                    limit_window_seconds: Some(18_000),
+                }),
+                secondary_window: Some(UsageWindow {
+                    used_percent: Some(90),
+                    reset_at: Some(now + 172_800),
+                    limit_window_seconds: Some(604_800),
+                }),
+                ..reserve_pair.clone()
+            },
+            allowed: None,
+            limit_reached: None,
+            extra: std::collections::BTreeMap::new(),
+        });
+    let mut spark = spark_limit(100, 100, now);
+    spark
+        .rate_limit
+        .primary_window
+        .as_mut()
+        .unwrap()
+        .used_percent = Some(0);
+    spark
+        .rate_limit
+        .secondary_window
+        .as_mut()
+        .unwrap()
+        .used_percent = Some(0);
+    reserve_usage.additional_rate_limits.push(spark);
+
+    let regular_usage = selection_usage(now, 20);
+    let candidates = vec![
+        ReadyProfileCandidate {
+            name: "reserve".to_string(),
+            usage: reserve_usage,
+            order_index: 0,
+            preferred: false,
+            provider_priority: 0,
+            quota_source: RuntimeQuotaSource::LiveProbe,
+        },
+        ReadyProfileCandidate {
+            name: "regular".to_string(),
+            usage: regular_usage,
+            order_index: 1,
+            preferred: false,
+            provider_priority: 0,
+            quota_source: RuntimeQuotaSource::LiveProbe,
+        },
+    ];
+    let entries = [
+        SelectionEntry {
+            name: "reserve",
+            provider_priority: 0,
+            last_run_selected_at: None,
+        },
+        SelectionEntry {
+            name: "regular",
+            provider_priority: 0,
+            last_run_selected_at: None,
+        },
+    ];
+
+    let model_aware = schedule_ready_profile_candidates_with_view_for_model(
+        candidates,
+        SelectionView { entries: &entries },
+        None,
+        Some("gpt-5.6-luna"),
+    );
+
+    assert_eq!(
+        model_aware.first().map(|candidate| candidate.name.as_str()),
+        Some("regular")
+    );
+}
+
 #[cfg(feature = "mojo")]
 #[test]
 fn route_score_contract_matches_shared_score_for_normalized_input() {

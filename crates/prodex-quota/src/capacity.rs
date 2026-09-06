@@ -3,6 +3,9 @@ use crate::AdditionalRateLimit;
 use crate::{UsageResponse, WindowPair, find_main_window};
 
 pub(crate) fn additional_rate_limit_is_spark(additional: &AdditionalRateLimit) -> bool {
+    if let Some(model) = crate::render::additional_rate_limit_model_slug(additional) {
+        return crate::render::openai_model_is_spark(Some(model));
+    }
     [
         additional.limit_name.as_deref(),
         additional.metered_feature.as_deref(),
@@ -10,8 +13,10 @@ pub(crate) fn additional_rate_limit_is_spark(additional: &AdditionalRateLimit) -
     .into_iter()
     .flatten()
     .any(|value| {
-        let normalized = value.to_ascii_lowercase();
-        normalized.contains("spark")
+        matches!(
+            crate::render::normalized_identifier(value).as_str(),
+            "spark" | "gpt53codexspark" | "gpt53spark"
+        )
     })
 }
 
@@ -19,7 +24,8 @@ pub(crate) fn additional_rate_limit_is_spark(additional: &AdditionalRateLimit) -
 pub fn additional_rate_limit_is_usable(additional: &AdditionalRateLimit) -> bool {
     #[cfg(feature = "mojo")]
     {
-        classify_additional_rate_limit_is_usable(additional)
+        !crate::render::window_pair_has_blocking_admission(&additional.rate_limit)
+            && classify_additional_rate_limit_is_usable(additional)
     }
 
     #[cfg(not(feature = "mojo"))]
@@ -125,7 +131,11 @@ fn quota_capacity_input_for_pair(
         quota_capacity_window_input(pair, "weekly", now);
     prodex_mojo_core::quota::QuotaCapacityInput {
         lane,
-        allowed: admission_allowed_tag(pair.allowed, allowed),
+        allowed: admission_allowed_tag(
+            pair.allowed,
+            allowed,
+            crate::render::window_pair_has_blocking_admission(pair),
+        ),
         limit_reached: limit_reached_tag(pair.limit_reached, limit_reached),
         five_hour_used_percent,
         five_hour_has_value,
@@ -157,8 +167,8 @@ fn quota_capacity_window_input(pair: &WindowPair, label: &str, now: i64) -> (i64
 }
 
 #[cfg(feature = "mojo")]
-fn admission_allowed_tag(pair: Option<bool>, outer: Option<bool>) -> i64 {
-    if pair == Some(false) || outer == Some(false) {
+fn admission_allowed_tag(pair: Option<bool>, outer: Option<bool>, pair_blocked: bool) -> i64 {
+    if pair == Some(false) || outer == Some(false) || pair_blocked {
         2
     } else if pair == Some(true) || outer == Some(true) {
         1

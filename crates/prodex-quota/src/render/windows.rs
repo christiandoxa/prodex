@@ -30,7 +30,15 @@ pub(super) fn required_window_snapshot_at(
     now: i64,
 ) -> Option<MainWindowSnapshot> {
     let window = find_main_window(pair, label)?;
-    let remaining_percent = remaining_percent(window.used_percent);
+    if window_pair_has_blocking_admission(pair)
+        && ![pair.primary_window.as_ref(), pair.secondary_window.as_ref()]
+            .into_iter()
+            .flatten()
+            .any(|window| window.used_percent.is_some_and(|used| used >= 100))
+    {
+        return None;
+    }
+    let remaining_percent = remaining_percent(Some(window.used_percent?));
     let reset_at = window.reset_at.unwrap_or(i64::MAX);
 
     #[cfg(feature = "mojo")]
@@ -97,7 +105,7 @@ pub fn spark_window_snapshot(usage: &UsageResponse, label: &str) -> Option<MainW
 }
 
 pub fn window_pair_has_ready_limit(pair: &WindowPair) -> bool {
-    if pair.allowed == Some(false) || pair.limit_reached == Some(true) {
+    if window_pair_has_blocking_admission(pair) {
         return false;
     }
     let first_used_percent = find_main_window(pair, "5h").and_then(|window| window.used_percent);
@@ -120,6 +128,21 @@ pub fn window_pair_has_ready_limit(pair: &WindowPair) -> bool {
                 .into_iter()
                 .all(|used_percent| used_percent < 100)
     }
+}
+
+pub(crate) fn window_pair_has_blocking_admission(pair: &WindowPair) -> bool {
+    pair.allowed == Some(false)
+        || pair.limit_reached == Some(true)
+        || ["rate_limit_reached_type", "rateLimitReachedType"]
+            .into_iter()
+            .any(|key| pair.extra.get(key).is_some_and(|value| !value.is_null()))
+        || ["spend_control_reached", "spendControlReached"]
+            .into_iter()
+            .any(|key| pair.extra.get(key).and_then(serde_json::Value::as_bool) == Some(true))
+        || pair
+            .extra
+            .get("ordinaryUsageAllowed")
+            .is_some_and(|value| value.as_bool() != Some(true))
 }
 
 pub fn openai_quota_runtime_window_pair(usage: &UsageResponse) -> Option<&WindowPair> {

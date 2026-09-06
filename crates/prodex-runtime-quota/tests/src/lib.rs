@@ -146,10 +146,13 @@ fn quota_summary_uses_spark_windows_when_main_is_exhausted() {
     assert_eq!(summary.five_hour.remaining_percent, 89);
     assert_eq!(summary.weekly.status, RuntimeQuotaWindowStatus::Ready);
     assert_eq!(summary.weekly.remaining_percent, 97);
-    assert_eq!(snapshot.five_hour_status, RuntimeQuotaWindowStatus::Ready);
-    assert_eq!(snapshot.five_hour_remaining_percent, 89);
-    assert_eq!(snapshot.weekly_status, RuntimeQuotaWindowStatus::Ready);
-    assert_eq!(snapshot.weekly_remaining_percent, 97);
+    assert_eq!(
+        snapshot.five_hour_status,
+        RuntimeQuotaWindowStatus::Exhausted
+    );
+    assert_eq!(snapshot.five_hour_remaining_percent, 0);
+    assert_eq!(snapshot.weekly_status, RuntimeQuotaWindowStatus::Exhausted);
+    assert_eq!(snapshot.weekly_remaining_percent, 0);
 }
 
 #[test]
@@ -168,8 +171,12 @@ fn quota_summary_uses_weekly_only_spark_window_when_main_is_exhausted() {
     assert_eq!(summary.weekly.status, RuntimeQuotaWindowStatus::Ready);
     assert_eq!(summary.weekly.remaining_percent, 97);
     assert_eq!(summary.route_band, RuntimeQuotaPressureBand::Healthy);
-    assert_eq!(snapshot.five_hour_status, RuntimeQuotaWindowStatus::Ready);
-    assert_eq!(snapshot.weekly_remaining_percent, 97);
+    assert_eq!(
+        snapshot.five_hour_status,
+        RuntimeQuotaWindowStatus::Exhausted
+    );
+    assert_eq!(snapshot.five_hour_remaining_percent, 0);
+    assert_eq!(snapshot.weekly_remaining_percent, 0);
 }
 
 #[test]
@@ -189,6 +196,60 @@ fn quota_summary_ignores_exhausted_spark_when_main_is_ready() {
     assert_eq!(snapshot.five_hour_remaining_percent, 100);
     assert_eq!(snapshot.weekly_status, RuntimeQuotaWindowStatus::Ready);
     assert_eq!(snapshot.weekly_remaining_percent, 35);
+}
+
+#[test]
+fn model_summary_uses_the_bucket_for_luna_and_not_spark_or_regular() {
+    let now = 1_700_000_000;
+    let mut usage = usage_response(100, 100, now);
+    let mut reserve = spark_limit(80, 90, now);
+    reserve.limit_name = Some("gpt-luna-reserve".to_string());
+    reserve.metered_feature = None;
+    usage.additional_rate_limits.push(reserve);
+    usage.additional_rate_limits.push(spark_limit(10, 20, now));
+
+    let luna = runtime_quota_summary_for_route_with_model_at(
+        &usage,
+        RuntimeRouteKind::Responses,
+        Some("gpt-5.6-luna"),
+        now,
+    );
+    assert_eq!(luna.five_hour.status, RuntimeQuotaWindowStatus::Ready);
+    assert_eq!(luna.five_hour.remaining_percent, 80);
+
+    let sol = runtime_quota_summary_for_route_with_model_at(
+        &usage,
+        RuntimeRouteKind::Responses,
+        Some("gpt-5.6-sol"),
+        now,
+    );
+    assert_eq!(sol.route_band, RuntimeQuotaPressureBand::Exhausted);
+}
+
+#[test]
+fn cached_summary_does_not_reuse_regular_quota_for_unsupported_model() {
+    let snapshot = RuntimeProfileUsageSnapshot {
+        checked_at: 1_700_000_000,
+        plan_type: None,
+        five_hour_status: RuntimeQuotaWindowStatus::Ready,
+        five_hour_remaining_percent: 80,
+        five_hour_reset_at: 1_700_003_600,
+        weekly_status: RuntimeQuotaWindowStatus::Ready,
+        weekly_remaining_percent: 80,
+        weekly_reset_at: 1_700_086_400,
+    };
+
+    let (summary, source) = runtime_quota_summary_from_cached_sources_for_model(
+        None,
+        Some(&snapshot),
+        RuntimeRouteKind::Responses,
+        Some("gpt-unsupported"),
+        1_700_000_000,
+        900,
+    );
+
+    assert_eq!(source, None);
+    assert_eq!(summary.route_band, RuntimeQuotaPressureBand::Unknown);
 }
 
 #[test]

@@ -4,7 +4,7 @@ use crate::pressure::{
 };
 use crate::snapshot::{
     RuntimeProfileUsageSnapshot, runtime_quota_summary_from_usage_snapshot_at,
-    runtime_usage_snapshot_is_usable,
+    runtime_usage_snapshot_is_usable, usage_from_runtime_usage_snapshot,
 };
 use crate::source::runtime_quota_source_option_to_proxy;
 use crate::window::{
@@ -91,11 +91,6 @@ pub fn runtime_quota_summary_for_route_with_model(
     route_kind: RuntimeRouteKind,
     requested_model: Option<&str>,
 ) -> RuntimeQuotaSummary {
-    if prodex_quota::openai_model_is_luna(requested_model)
-        && prodex_quota::openai_usage_has_unknown_luna_capacity(usage)
-    {
-        return unknown_runtime_quota_summary();
-    }
     runtime_quota_summary_for_route_with_model_at(
         usage,
         route_kind,
@@ -179,20 +174,24 @@ pub fn runtime_quota_summary_from_cached_sources_for_model(
     stale_grace_seconds: i64,
 ) -> (RuntimeQuotaSummary, Option<RuntimeQuotaSource>) {
     if let Some(usage) = live_probe_usage {
-        if prodex_quota::openai_model_is_luna(requested_model)
-            && prodex_quota::openai_usage_has_unknown_luna_capacity(usage)
-        {
-            return (
-                unknown_runtime_quota_summary(),
-                Some(RuntimeQuotaSource::LiveProbe),
-            );
-        }
         return (
             runtime_quota_summary_for_route_with_model(usage, route_kind, requested_model),
             Some(RuntimeQuotaSource::LiveProbe),
         );
     }
-    if prodex_quota::openai_model_is_spark(requested_model) {
+    if prodex_quota::openai_model_is_spark(requested_model)
+        || prodex_quota::openai_model_is_luna_reserve(requested_model)
+    {
+        return (unknown_runtime_quota_summary(), None);
+    }
+    if let Some(model) = requested_model
+        && let Some(snapshot) = persisted_snapshot
+        && prodex_quota::openai_quota_runtime_window_pair_for_model(
+            &usage_from_runtime_usage_snapshot(snapshot),
+            Some(model),
+        )
+        .is_none()
+    {
         return (unknown_runtime_quota_summary(), None);
     }
     let summary = runtime_quota_summary_from_cached_sources(

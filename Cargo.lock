@@ -3196,6 +3196,7 @@ dependencies = [
  "chrono",
  "prodex-mojo-core",
  "prodex-profile-identity",
+ "prodex-provider-core",
  "prodex-runtime-state",
  "prodex-terminal-ui",
  "serde",
