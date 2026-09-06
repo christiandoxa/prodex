@@ -142,16 +142,9 @@ fn luna_request_falls_back_to_actual_spark_model_after_luna_capacity_exhausts() 
 
     assert_eq!(status, 200, "{body}");
     assert_eq!(profile.as_deref(), Some("spark-profile"));
-    assert_eq!(
-        backend.responses_accounts(),
-        ["second-account", "second-account"]
-    );
+    assert_eq!(backend.responses_accounts(), ["second-account"]);
     let request_bodies = backend.responses_bodies();
-    assert_eq!(
-        request_bodies.len(),
-        2,
-        "Luna should fail before Spark fallback: {request_bodies:?}"
-    );
+    assert_eq!(request_bodies.len(), 1, "Spark fallback should preselect Spark");
     let request_body = request_bodies
         .into_iter()
         .last()

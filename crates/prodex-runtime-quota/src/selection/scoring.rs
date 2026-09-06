@@ -25,6 +25,20 @@ pub fn schedule_ready_profile_candidates_with_view<S: ProfileSelectionRead>(
     selection: S,
     preferred_profile: Option<&str>,
 ) -> Vec<ReadyProfileCandidate> {
+    schedule_ready_profile_candidates_with_view_for_model(
+        candidates,
+        selection,
+        preferred_profile,
+        None,
+    )
+}
+
+pub fn schedule_ready_profile_candidates_with_view_for_model<S: ProfileSelectionRead>(
+    candidates: Vec<ReadyProfileCandidate>,
+    selection: S,
+    preferred_profile: Option<&str>,
+    requested_model: Option<&str>,
+) -> Vec<ReadyProfileCandidate> {
     if candidates.len() <= 1 {
         return candidates;
     }
@@ -36,8 +50,14 @@ pub fn schedule_ready_profile_candidates_with_view<S: ProfileSelectionRead>(
         let inputs = candidates
             .iter()
             .map(|candidate| {
-                let weekly = required_main_window_snapshot_at(&candidate.usage, "weekly", now);
-                let five_hour = required_main_window_snapshot_at(&candidate.usage, "5h", now);
+                let weekly = ready_profile_window_snapshot_at(
+                    &candidate.usage,
+                    "weekly",
+                    requested_model,
+                    now,
+                );
+                let five_hour =
+                    ready_profile_window_snapshot_at(&candidate.usage, "5h", requested_model, now);
                 let score = MojoProfileScoreInput {
                     weekly_pressure: weekly.map_or(i64::MAX, |window| window.pressure_score),
                     five_hour_pressure: five_hour.map_or(i64::MAX, |window| window.pressure_score),
@@ -88,8 +108,12 @@ pub fn schedule_ready_profile_candidates_with_view<S: ProfileSelectionRead>(
 
     #[cfg(not(feature = "mojo"))]
     {
-        let scores =
-            ready_profile_scores_for_candidates(&candidates, RuntimeRouteKind::Responses, now);
+        let scores = ready_profile_scores_for_candidates(
+            &candidates,
+            RuntimeRouteKind::Responses,
+            now,
+            requested_model,
+        );
         let mut scored_candidates = candidates.into_iter().zip(scores).collect::<Vec<_>>();
         let best_provider_priority = scored_candidates
             .iter()
@@ -242,11 +266,69 @@ fn ready_profile_scores_for_candidates(
     candidates: &[ReadyProfileCandidate],
     route_kind: RuntimeRouteKind,
     now: i64,
+    requested_model: Option<&str>,
 ) -> Vec<ReadyProfileScore> {
     candidates
         .iter()
-        .map(|candidate| ready_profile_score_for_route_at(&candidate.usage, route_kind, now))
+        .map(|candidate| {
+            if let Some(model) = requested_model {
+                let usages = [&candidate.usage];
+                let sort_key =
+                    crate::pressure::runtime_quota_pressure_sort_keys_for_route_at_with_model(
+                        &usages,
+                        route_kind,
+                        Some(model),
+                        now,
+                    )
+                    .into_iter()
+                    .next()
+                    .expect("model-aware quota score returned no score");
+                return ready_profile_score_from_pressure_sort_key(sort_key);
+            }
+            ready_profile_score_for_route_at(&candidate.usage, route_kind, now)
+        })
         .collect()
+}
+
+#[cfg(not(feature = "mojo"))]
+fn ready_profile_score_from_pressure_sort_key(
+    sort_key: crate::pressure::RuntimeQuotaPressureSortKey,
+) -> ReadyProfileScore {
+    let (
+        _,
+        total_pressure,
+        weekly_pressure,
+        five_hour_pressure,
+        Reverse(reserve_floor),
+        Reverse(weekly_remaining),
+        Reverse(five_hour_remaining),
+        weekly_reset_at,
+        five_hour_reset_at,
+    ) = sort_key;
+    ReadyProfileScore {
+        total_pressure,
+        weekly_pressure,
+        five_hour_pressure,
+        reserve_floor,
+        weekly_remaining,
+        five_hour_remaining,
+        weekly_reset_at,
+        five_hour_reset_at,
+    }
+}
+
+#[cfg(feature = "mojo")]
+fn ready_profile_window_snapshot_at(
+    usage: &UsageResponse,
+    label: &str,
+    requested_model: Option<&str>,
+    now: i64,
+) -> Option<prodex_quota::MainWindowSnapshot> {
+    let pair = match requested_model {
+        Some(model) => prodex_quota::openai_quota_runtime_window_pair_for_model(usage, Some(model)),
+        None => prodex_quota::openai_quota_runtime_window_pair(usage),
+    }?;
+    prodex_quota::required_window_snapshot_for_pair_at(pair, label, now)
 }
 
 pub fn ready_profile_score(candidate: &ReadyProfileCandidate) -> ReadyProfileScore {

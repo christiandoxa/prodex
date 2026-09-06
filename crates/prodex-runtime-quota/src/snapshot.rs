@@ -1,6 +1,6 @@
 use crate::summary::runtime_quota_summary_from_proxy;
 use crate::window::{
-    runtime_quota_window_observation, runtime_quota_window_status_from_proxy,
+    runtime_quota_window_observation_for_model_at, runtime_quota_window_status_from_proxy,
     runtime_quota_window_status_to_proxy,
 };
 use chrono::Local;
@@ -46,11 +46,17 @@ pub fn runtime_usage_snapshot_from_proxy(
 pub fn runtime_profile_usage_snapshot_from_usage(
     usage: &UsageResponse,
 ) -> RuntimeProfileUsageSnapshot {
+    let now = Local::now().timestamp();
     let mut snapshot = runtime_usage_snapshot_from_proxy(
         runtime_proxy::runtime_proxy_usage_snapshot_from_observations_at(
-            runtime_quota_window_observation(usage, "5h"),
-            runtime_quota_window_observation(usage, "weekly"),
-            Local::now().timestamp(),
+            runtime_quota_window_observation_for_model_at(usage, "5h", Some("gpt-5.6-sol"), now),
+            runtime_quota_window_observation_for_model_at(
+                usage,
+                "weekly",
+                Some("gpt-5.6-sol"),
+                now,
+            ),
+            now,
         ),
     );
     snapshot.plan_type = usage.plan_type.clone();

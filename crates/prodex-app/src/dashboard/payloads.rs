@@ -96,10 +96,27 @@ pub(super) fn quota_summary(snapshot: &ProviderQuotaSnapshot) -> Value {
                 },
                 "main": format_main_windows(usage),
                 "reset": prodex_quota::format_main_reset_summary(usage),
+                "allowed": usage.rate_limit.as_ref().and_then(|rate| rate.allowed),
+                "limitReached": usage.rate_limit.as_ref().and_then(|rate| rate.limit_reached),
+                "rateLimitReachedType": (usage.rate_limit.as_ref().and_then(|rate| {
+                    ["rateLimitReachedType", "rate_limit_reached_type"]
+                        .into_iter()
+                        .find_map(|key| rate.extra.get(key))
+                })),
+                "spendControlReached": (usage.rate_limit.as_ref().and_then(|rate| {
+                    ["spendControlReached", "spend_control_reached"]
+                        .into_iter()
+                        .find_map(|key| rate.extra.get(key))
+                })),
                 "windows": {
                     "fiveHour": usage.rate_limit.as_ref().and_then(|rate| rate.primary_window.as_ref()).map(window_json),
                     "weekly": usage.rate_limit.as_ref().and_then(|rate| rate.secondary_window.as_ref()).map(window_json),
-                }
+                },
+                "additionalRateLimits": usage
+                    .additional_rate_limits
+                    .iter()
+                    .map(additional_rate_limit_json)
+                    .collect::<Vec<_>>(),
             })
         }
         ProviderQuotaSnapshot::Copilot(info) => json!({
@@ -131,8 +148,106 @@ pub(super) fn quota_summary(snapshot: &ProviderQuotaSnapshot) -> Value {
 fn window_json(window: &prodex_quota::UsageWindow) -> Value {
     json!({
         "usedPercent": window.used_percent,
-        "remainingPercent": prodex_quota::remaining_percent(window.used_percent),
+        "remainingPercent": window
+            .used_percent
+            .map(|used_percent| prodex_quota::remaining_percent(Some(used_percent))),
         "resetAt": window.reset_at,
         "windowSeconds": window.limit_window_seconds,
     })
+}
+
+fn additional_rate_limit_json(additional: &prodex_quota::AdditionalRateLimit) -> Value {
+    let pair = &additional.rate_limit;
+    let normal_model = ["normalModelSlug", "normal_model_slug"]
+        .into_iter()
+        .find_map(|key| {
+            additional
+                .extra
+                .get(key)
+                .or_else(|| pair.extra.get(key))
+                .and_then(Value::as_str)
+        });
+    json!({
+        "limitId": additional.limit_id,
+        "limitName": additional.limit_name,
+        "meteredFeature": additional.metered_feature,
+        "normalModelSlug": normal_model,
+        "allowed": additional.allowed.or(pair.allowed),
+        "limitReached": additional.limit_reached.or(pair.limit_reached),
+        "rateLimitReachedType": (["rateLimitReachedType", "rate_limit_reached_type"]
+            .into_iter()
+            .find_map(|key| additional.extra.get(key).or_else(|| pair.extra.get(key)))),
+        "spendControlReached": (["spendControlReached", "spend_control_reached"]
+            .into_iter()
+            .find_map(|key| additional.extra.get(key).or_else(|| pair.extra.get(key)))),
+        "windows": {
+            "fiveHour": pair.primary_window.as_ref().map(window_json),
+            "weekly": pair.secondary_window.as_ref().map(window_json),
+        },
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use prodex_quota::{UsageResponse, UsageWindow, WindowPair};
+    use std::collections::BTreeMap;
+
+    #[test]
+    fn quota_json_keeps_unknown_and_additional_bucket_metadata() {
+        let usage = UsageResponse {
+            email: None,
+            plan_type: None,
+            rate_limit: Some(WindowPair {
+                allowed: None,
+                limit_reached: None,
+                primary_window: Some(UsageWindow {
+                    used_percent: None,
+                    reset_at: Some(1_700_000_000),
+                    limit_window_seconds: Some(18_000),
+                }),
+                secondary_window: None,
+                extra: BTreeMap::new(),
+            }),
+            code_review_rate_limit: None,
+            rate_limit_reset_credits: None,
+            additional_rate_limits: vec![prodex_quota::AdditionalRateLimit {
+                limit_id: Some("base_model_inference".to_string()),
+                limit_name: Some("gpt-luna-reserve".to_string()),
+                metered_feature: None,
+                rate_limit: WindowPair {
+                    allowed: None,
+                    limit_reached: None,
+                    primary_window: None,
+                    secondary_window: Some(UsageWindow {
+                        used_percent: Some(10),
+                        reset_at: Some(1_700_000_100),
+                        limit_window_seconds: Some(604_800),
+                    }),
+                    extra: BTreeMap::from([(
+                        "normalModelSlug".to_string(),
+                        serde_json::json!("gpt-5.6-luna"),
+                    )]),
+                },
+                allowed: None,
+                limit_reached: None,
+                extra: BTreeMap::new(),
+            }],
+        };
+
+        let payload = quota_summary(&ProviderQuotaSnapshot::OpenAi(usage));
+        assert!(payload["windows"]["fiveHour"]["remainingPercent"].is_null());
+        assert_eq!(
+            payload["additionalRateLimits"][0]["limitId"],
+            "base_model_inference"
+        );
+        assert_eq!(
+            payload["additionalRateLimits"][0]["normalModelSlug"],
+            "gpt-5.6-luna"
+        );
+        assert_eq!(
+            payload["additionalRateLimits"][0]["windows"]["weekly"]["remainingPercent"],
+            90
+        );
+    }
 }
