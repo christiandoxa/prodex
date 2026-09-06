@@ -25,8 +25,10 @@ use repair_candidates::{
     unrepairable_candidate_path,
 };
 use repair_transaction::SessionRepairTransaction;
+pub use session_file::{
+    SessionFileScan, session_file_has_line_since, session_file_logical_len, session_file_scan_since,
+};
 use session_file::{read_session_file_to_string, visit_session_lines};
-pub use session_file::{session_file_has_line_since, session_file_logical_len};
 use session_selector::{
     codex_session_id_from_path, full_codex_session_id, session_id_matches_selector,
     session_line_is_valid_json, session_line_resume_id_matches,

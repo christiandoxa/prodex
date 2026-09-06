@@ -74,26 +74,36 @@ pub fn session_file_logical_len(path: &Path) -> Result<u64> {
     Ok(read_session_file_to_string(path)?.len() as u64)
 }
 
-/// Returns whether a predicate matched a decoded session line after a decoded byte offset.
-pub fn session_file_has_line_since(
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// Result of scanning newline-complete session records.
+pub struct SessionFileScan {
+    /// Whether the visitor accepted a complete record.
+    pub matched: bool,
+    /// Decoded byte offset immediately after the last complete record read.
+    pub complete_offset: u64,
+}
+
+/// Scans complete decoded session lines after a decoded byte offset.
+pub fn session_file_scan_since(
     path: &Path,
     offset: u64,
     visit: impl FnMut(&str) -> bool,
-) -> Result<bool> {
+) -> Result<SessionFileScan> {
     let file = open_session_regular_file(path)?;
     if !is_compressed_session_file(path) {
         let file_len = file.metadata()?.len();
-        if file_len > SESSION_STORE_FILE_MAX_BYTES {
+        let start = offset.min(file_len);
+        if file_len.saturating_sub(start) > SESSION_STORE_FILE_MAX_BYTES {
             bail!(
-                "session {} exceeds safe size limit ({} bytes)",
+                "session tail {} exceeds safe size limit ({} bytes)",
                 path.display(),
                 SESSION_STORE_FILE_MAX_BYTES
             );
         }
         let mut file = file;
-        file.seek(SeekFrom::Start(offset.min(file_len)))?;
+        file.seek(SeekFrom::Start(start))?;
         let mut reader = BufReader::new(file);
-        return visit_session_lines_from_reader(path, &mut reader, offset.min(file_len), visit);
+        return visit_session_lines_from_reader(path, &mut reader, start, start, visit);
     }
 
     if offset > SESSION_STORE_FILE_MAX_BYTES {
@@ -111,22 +121,35 @@ pub fn session_file_has_line_since(
             let chunk_len = remaining.min(discarded.len() as u64) as usize;
             let read = decoder.read(&mut discarded[..chunk_len])?;
             if read == 0 {
-                return Ok(false);
+                return Ok(SessionFileScan {
+                    matched: false,
+                    complete_offset: offset.saturating_sub(remaining),
+                });
             }
             remaining = remaining.saturating_sub(read as u64);
         }
     }
 
     let mut reader = BufReader::new(decoder);
-    visit_session_lines_from_reader(path, &mut reader, offset, visit)
+    visit_session_lines_from_reader(path, &mut reader, offset, offset, visit)
+}
+
+/// Returns whether a predicate matched a decoded complete session line after an offset.
+pub fn session_file_has_line_since(
+    path: &Path,
+    offset: u64,
+    visit: impl FnMut(&str) -> bool,
+) -> Result<bool> {
+    Ok(session_file_scan_since(path, offset, visit)?.matched)
 }
 
 fn visit_session_lines_from_reader<R: Read>(
     path: &Path,
     reader: &mut BufReader<R>,
     mut decoded_bytes: u64,
+    scan_start: u64,
     mut visit: impl FnMut(&str) -> bool,
-) -> Result<bool> {
+) -> Result<SessionFileScan> {
     let mut line = String::new();
     loop {
         line.clear();
@@ -134,17 +157,29 @@ fn visit_session_lines_from_reader<R: Read>(
             .read_line(&mut line)
             .with_context(|| format!("failed to read session {}", path.display()))?;
         if read == 0 {
-            return Ok(false);
+            return Ok(SessionFileScan {
+                matched: false,
+                complete_offset: decoded_bytes,
+            });
         }
         decoded_bytes = decoded_bytes.saturating_add(read as u64);
-        if decoded_bytes > SESSION_STORE_FILE_MAX_BYTES {
+        if decoded_bytes.saturating_sub(scan_start) > SESSION_STORE_FILE_MAX_BYTES {
             bail!(
                 "session exceeds safe size limit ({} bytes)",
                 SESSION_STORE_FILE_MAX_BYTES
             );
         }
+        if !line.ends_with('\n') {
+            return Ok(SessionFileScan {
+                matched: false,
+                complete_offset: decoded_bytes.saturating_sub(read as u64),
+            });
+        }
         if visit(&line) {
-            return Ok(true);
+            return Ok(SessionFileScan {
+                matched: true,
+                complete_offset: decoded_bytes,
+            });
         }
     }
 }
@@ -277,6 +312,63 @@ mod tests {
             .unwrap()
         );
         assert!(!session_file_has_line_since(&path, contents.len() as u64, |_| true).unwrap());
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn line_scan_keeps_cursor_before_an_incomplete_record() {
+        let root = std::env::temp_dir().join(format!(
+            "prodex-session-file-partial-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::create_dir_all(&root).unwrap();
+        let path = root.join("rollout-00000000-0000-0000-0000-000000000001.jsonl");
+        fs::write(&path, b"{\"type\":\"session_meta\"}\n{\"type\":\"error\"").unwrap();
+        let first = session_file_scan_since(&path, 0, |line| line.contains("error")).unwrap();
+        assert!(!first.matched);
+        assert_eq!(
+            first.complete_offset,
+            b"{\"type\":\"session_meta\"}\n".len() as u64
+        );
+
+        let mut file = fs::OpenOptions::new().append(true).open(&path).unwrap();
+        use std::io::Write as _;
+        file.write_all(b"}\n").unwrap();
+        let second =
+            session_file_scan_since(&path, first.complete_offset, |line| line.contains("error"))
+                .unwrap();
+        assert!(second.matched);
+        assert_eq!(second.complete_offset, fs::metadata(&path).unwrap().len());
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn line_scan_tails_a_large_sparse_rollout_without_reading_history() {
+        let root = std::env::temp_dir().join(format!(
+            "prodex-session-file-large-tail-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::create_dir_all(&root).unwrap();
+        let path = root.join("rollout-00000000-0000-0000-0000-000000000001.jsonl");
+        let offset = SESSION_STORE_FILE_MAX_BYTES + 1;
+        let file = fs::File::create(&path).unwrap();
+        file.set_len(offset).unwrap();
+        drop(file);
+        let mut file = fs::OpenOptions::new().append(true).open(&path).unwrap();
+        use std::io::Write as _;
+        file.write_all(b"{\"type\":\"error\"}\n").unwrap();
+
+        let scan = session_file_scan_since(&path, offset, |line| line.contains("error")).unwrap();
+        assert!(scan.matched);
+        assert_eq!(scan.complete_offset, fs::metadata(&path).unwrap().len());
         let _ = fs::remove_dir_all(root);
     }
 }
