@@ -334,13 +334,21 @@ printf '%s\\n' '{"type":"turn.completed","usage":{"input_tokens":10,"output_toke
     assert.equal(pingReport.status, "ok");
     assert.deepEqual(pingReport.profiles, [
       {
+        completion_latency_ms: pingReport.profiles[0].completion_latency_ms,
+        credential_validation: "valid",
         detail: "valid model response received",
+        effective_model: null,
+        first_response_latency_ms: pingReport.profiles[0].first_response_latency_ms,
         latency_ms: pingReport.profiles[0].latency_ms,
         model: null,
         profile: "main",
+        requested_model: null,
         status: "ok",
       },
     ]);
+    assert.ok(
+      pingReport.profiles[0].completion_latency_ms >= pingReport.profiles[0].first_response_latency_ms,
+    );
     const codexArgs = await fs.readFile(fakeCodexArgs, "utf8");
     assert.match(codexArgs, /^exec$/m);
     assert.match(codexArgs, /^--json$/m);
