@@ -590,6 +590,31 @@ full request for normal ready-profile selection. Prodex never forwards the
 delta-only continuation to a different account. If no eligible profile remains,
 the original usage-limit response is preserved.
 
+If Codex has already exhausted its bounded request retries and records a
+terminal structured usage-limit, rate-limit, overload, authentication, or
+transient transport error, the launch supervisor continues at the session
+boundary. It selects the next model-compatible ready profile through the same
+quota policy, releases the old affinity, and resumes the exact persisted thread
+with its full history. The original command-line prompt is removed before the
+resume, so the recovery layer neither inserts a second copy of accepted input
+nor executes tools itself; persisted completed effects remain authoritative.
+Failed and replacement profiles are recorded for the recovery round so an unusable
+profile is not selected again before the remaining pool is checked. A transient
+round with no untried candidate waits five seconds, remains cancellable, and may
+retry the failed profile only when the model-aware quota check still reports it
+ready; a definitively incompatible or exhausted pool does not wait forever. The
+effective model comes from the exact rollout turn context and any official
+model-reroute event, with launch configuration as the pre-turn fallback.
+
+The supervisor classifies persisted user input, committed assistant output, and
+observed tool results before relaunch. It never re-injects the original prompt
+when acceptance is ambiguous or output/effects are committed. A non-goal session
+gets a normal continuation prompt; `/goal resume` is reserved for a session with
+an actual goal store. Cancellation, policy/request errors, intermediate
+stream-retry events, incomplete rollout records, and errors for another session
+do not trigger recovery. A control-plane write that is proven rejected before
+acceptance is handled separately by the Expose bridge's one bounded retry.
+
 On HTTP, at most one same-profile retry removes the stale id only when the
 session metadata, an owner-bound response id, and a reconstructable multi-item
 full-history input are all present. The original input, tool results, turn
@@ -621,7 +646,9 @@ shared-state integration around those operations.
   endpoint backoff to expire, then perform at most two recovery sweeps within the bounded
   recovery budget. Pre-commit transport failures still rotate through the ready pool without
   being converted into quota exhaustion; an exhausted transport pool keeps its bounded local
-  failure behavior.
+  failure behavior. A terminal Codex retry-exhaustion event can then hand off to the exact-session
+  supervisor described above; the per-request proxy budget is not treated as profile-pool
+  exhaustion.
 - Runtime hot paths must avoid broad disk reads, quota probes, or blocking state saves.
 - Quota, budget, transport, and local pressure signals must stay classified separately.
 - An available weekly quota window remains eligible when the 5-hour window is absent or unknown; explicit exhaustion still blocks selection.
