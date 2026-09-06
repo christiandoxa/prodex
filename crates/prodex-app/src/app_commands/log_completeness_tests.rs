@@ -1,5 +1,10 @@
 use super::log_stream::collect_runtime_log_line;
-use super::*;
+use super::{
+    FollowedLog, LogStreamItem, TranscriptEvent, collect_new_transcript_events,
+    local_log_timestamp, transcript_events_from_session_line,
+};
+use std::time::{SystemTime, UNIX_EPOCH};
+use std::{env, fs};
 
 #[test]
 fn parses_status_exit_and_exposed_output_events() {
