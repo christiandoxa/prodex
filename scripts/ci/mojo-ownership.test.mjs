@@ -155,6 +155,18 @@ test("release operation overrides evolve an entry without rewriting the frozen b
   );
 });
 
+test("log reachability follows the extracted Mojo adapter", () => {
+  const result = calculateOwnership(releaseManifest(), BASE_SHA, "WORKTREE");
+  const operation = result.authoritative_operations.find(
+    (candidate) => candidate.name === "log_event_classification",
+  );
+  assert.equal(
+    operation.production_reachability_test,
+    "crates/prodex-app/src/app_commands/log_event_source.rs",
+  );
+  assert.match(fs.readFileSync(operation.production_reachability_test, "utf8"), /prodex_mojo_core/u);
+});
+
 test("Rust reductions are traceable in both baseline and release source", () => {
   const manifest = releaseManifest();
   manifest.rust_semantic_reductions[0].symbol = "missing_reduction_symbol";
