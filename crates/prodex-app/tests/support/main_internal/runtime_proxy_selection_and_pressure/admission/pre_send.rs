@@ -46,6 +46,9 @@ fn attempt_runtime_responses_request_allows_weekly_exhausted_profile_before_send
         RuntimeResponsesAttempt::QuotaBlocked { profile_name, .. } => {
             assert_eq!(profile_name, "main");
         }
+        RuntimeResponsesAttempt::RateLimited { profile_name, .. } => {
+            assert_eq!(profile_name, "main");
+        }
         RuntimeResponsesAttempt::Overloaded { profile_name, .. } => {
             assert_eq!(profile_name, "main");
         }

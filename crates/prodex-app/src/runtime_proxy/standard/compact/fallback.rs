@@ -1,13 +1,13 @@
 use super::super::super::{
     build_runtime_proxy_json_error_response, commit_runtime_proxy_profile_selection_with_notice,
-    runtime_proxy_final_retryable_http_failure_response,
-    runtime_proxy_local_selection_failure_message,
+    mark_runtime_profile_retry_backoff_for_delay, runtime_proxy_local_selection_failure_message,
 };
 use super::super::attempt_runtime_standard_request;
 use super::affinity::runtime_compact_candidate_has_hard_affinity;
 use super::logging::{
-    RuntimeProxyCompactFinalFailureLog, log_runtime_proxy_compact_final_failure,
-    runtime_proxy_compact_final_failure_reason, runtime_proxy_compact_last_failure_kind,
+    RuntimeCompactLastFailure, RuntimeProxyCompactFinalFailureLog,
+    log_runtime_proxy_compact_final_failure, runtime_proxy_compact_final_failure_reason,
+    runtime_proxy_compact_last_failure_kind,
 };
 use crate::runtime_proxy_shared::RuntimeStandardAttempt;
 use crate::runtime_state_shared::{RuntimeRotationProxyShared, RuntimeRouteKind};
@@ -34,7 +34,7 @@ pub(super) struct RuntimeProxyCompactSelectionExhausted<'a> {
 
 pub(super) fn finish_runtime_proxy_compact_selection_exhausted(
     exhausted: RuntimeProxyCompactSelectionExhausted<'_>,
-    last_failure: Option<(tiny_http::ResponseBox, bool)>,
+    last_failure: Option<RuntimeCompactLastFailure>,
     saw_inflight_saturation: bool,
 ) -> Result<tiny_http::ResponseBox> {
     let final_reason = runtime_proxy_compact_final_failure_reason(
@@ -46,11 +46,18 @@ pub(super) fn finish_runtime_proxy_compact_selection_exhausted(
         last_failure.as_ref(),
         exhausted.saw_transport_failure,
     );
-    if let Some(response) = runtime_proxy_final_retryable_http_failure_response(
-        last_failure,
-        saw_inflight_saturation,
-        true,
-    ) {
+    if let Some(response) = last_failure.map(|(response, _)| response).or_else(|| {
+        saw_inflight_saturation.then(|| {
+            build_runtime_proxy_json_error_response(
+                503,
+                "service_unavailable",
+                runtime_proxy_crate::runtime_proxy_final_retryable_failure_message(
+                    saw_inflight_saturation,
+                    runtime_proxy_local_selection_failure_message(),
+                ),
+            )
+        })
+    }) {
         log_runtime_proxy_compact_final_failure(
             exhausted.shared,
             RuntimeProxyCompactFinalFailureLog {
@@ -133,6 +140,25 @@ fn attempt_runtime_compact_owner_fallback(
             Ok(response)
         }
         RuntimeStandardAttempt::StaleContinuation { response } => Ok(response),
+        RuntimeStandardAttempt::RateLimited {
+            profile_name,
+            response,
+            retry_after,
+        } => {
+            mark_runtime_profile_retry_backoff_for_delay(
+                exhausted.shared,
+                &profile_name,
+                retry_after,
+            )?;
+            log_runtime_proxy_compact_fallback_failure(
+                &exhausted,
+                "rate_limited",
+                last_failure_kind,
+                saw_inflight_saturation,
+                &profile_name,
+            );
+            Ok(response)
+        }
         RuntimeStandardAttempt::RetryableFailure {
             profile_name,
             response,

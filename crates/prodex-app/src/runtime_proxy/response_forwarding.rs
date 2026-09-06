@@ -276,6 +276,39 @@ pub(crate) async fn prepare_runtime_proxy_responses_success(
                 }),
             });
         }
+        RuntimeSseInspection::RateLimited {
+            prelude,
+            retry_after,
+        } => {
+            runtime_proxy_log(
+                shared,
+                format!(
+                    "request={request_id} transport=http sse_rate_limited profile={profile_name} prelude_bytes={} retry_after_ms={}",
+                    prelude.len(),
+                    retry_after.map_or(0, |delay| delay.as_millis()),
+                ),
+            );
+            return Ok(RuntimeResponsesAttempt::RateLimited {
+                profile_name: profile_name.to_string(),
+                response: RuntimeResponsesReply::Streaming(RuntimeStreamingResponse {
+                    status,
+                    headers: headers.clone(),
+                    body: Box::new(prefetch.into_reader(prelude)?),
+                    request_id,
+                    profile_name: profile_name.to_string(),
+                    log_path: shared.log_path.clone(),
+                    shared: shared.clone(),
+                    _inflight_guard: Some(inflight_guard),
+                }),
+                retry_after: retry_after.or_else(|| {
+                    runtime_proxy_crate::runtime_retry_after_from_headers(
+                        headers
+                            .iter()
+                            .map(|(name, value)| (name.as_str(), value.as_bytes())),
+                    )
+                }),
+            });
+        }
         RuntimeSseInspection::Overloaded(prelude) => {
             runtime_proxy_log(
                 shared,

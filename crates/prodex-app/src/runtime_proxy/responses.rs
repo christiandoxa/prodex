@@ -17,6 +17,10 @@ pub(crate) use self::attempt::{
     attempt_runtime_responses_request, log_runtime_responses_continuation_trace,
     runtime_response_trace_provider_labels,
 };
+use self::attempt::{
+    handle_runtime_responses_auth_failed, handle_runtime_responses_overloaded_attempt,
+    handle_runtime_responses_success,
+};
 use self::fallback::{
     RuntimeResponsesDirectCurrentFallback, RuntimeResponsesDirectCurrentFallbackAction,
     RuntimeResponsesDirectCurrentFallbackReason,
@@ -33,10 +37,7 @@ use self::previous_response::{
     handle_runtime_responses_previous_response_attempt,
     runtime_responses_previous_response_not_found_context,
 };
-use self::quota_blocked::{
-    RuntimeResponsesQuotaBlocked, handle_runtime_responses_quota_blocked,
-    prepare_runtime_responses_quota_fallback,
-};
+use self::quota_blocked::handle_runtime_responses_quota_attempt;
 
 fn runtime_responses_stale_continuation_reply() -> RuntimeResponsesReply {
     RuntimeResponsesReply::Buffered(RuntimeHeapTrimmedBufferedResponseParts::from_crate_parts(
@@ -588,6 +589,18 @@ fn handle_runtime_responses_attempt(
             profile_name,
             response,
         ),
+        RuntimeResponsesAttempt::RateLimited {
+            profile_name,
+            response,
+            retry_after,
+        } => handle_runtime_responses_rate_limited_attempt(
+            context,
+            affinity_state,
+            loop_state,
+            profile_name,
+            response,
+            retry_after,
+        ),
         RuntimeResponsesAttempt::Overloaded {
             profile_name,
             response,
@@ -656,138 +669,29 @@ fn handle_runtime_responses_attempt(
     }
 }
 
-fn handle_runtime_responses_success(
-    context: &RuntimeResponsesRequestContext<'_>,
-    affinity_state: &mut RuntimeResponsesAffinityState,
-    profile_name: String,
-    response: RuntimeResponsesReply,
-) -> Result<Option<RuntimeResponsesReply>> {
-    affinity_state.remember_successful_previous_response_owner(
-        context.shared,
-        &profile_name,
-        context.previous_response_id,
-    )?;
-    commit_runtime_proxy_profile_selection_with_notice(
-        context.shared,
-        &profile_name,
-        RuntimeRouteKind::Responses,
-    )?;
-    runtime_proxy_log(
-        context.shared,
-        format!(
-            "request={} transport=http committed profile={profile_name}",
-            context.request_id
-        ),
-    );
-    Ok(Some(response))
-}
-
-fn handle_runtime_responses_quota_attempt(
-    context: &mut RuntimeResponsesRequestContext<'_>,
-    affinity_state: &mut RuntimeResponsesAffinityState,
-    auto_redeemed_profiles: &mut BTreeSet<String>,
-    quota_last_chance_profile: &mut Option<String>,
-    loop_state: &mut RuntimePrecommitLoopState<RuntimeUpstreamFailureResponse>,
-    profile_name: String,
-    response: RuntimeResponsesReply,
-) -> Result<Option<RuntimeResponsesReply>> {
-    let result = handle_runtime_responses_quota_blocked(RuntimeResponsesQuotaBlocked {
-        request_id: context.request_id,
-        shared: context.shared,
-        profile_name,
-        response,
-        request_model_name: context.request_model_name.as_deref(),
-        prompt_cache_key: context.prompt_cache_key,
-        previous_response_id: context.previous_response_id,
-        request_turn_state: context.request_turn_state,
-        request_session_id: context.request_session_id,
-        request_requires_previous_response_affinity: context
-            .request_requires_previous_response_affinity,
-        previous_response_fresh_fallback_shape: context.previous_response_fresh_fallback_shape,
-        affinity_state,
-        auto_redeemed_profiles,
-        quota_last_chance_profile,
-        excluded_profiles: &mut loop_state.excluded_profiles,
-        last_failure: &mut loop_state.last_failure,
-    })?;
-    if result.is_some()
-        && try_runtime_responses_luna_spark_fallback(
-            context,
-            affinity_state,
-            loop_state,
-            quota_last_chance_profile,
-        )?
-    {
-        return Ok(None);
-    }
-    Ok(result)
-}
-
-fn handle_runtime_responses_overloaded_attempt(
+fn handle_runtime_responses_rate_limited_attempt(
     context: &RuntimeResponsesRequestContext<'_>,
     affinity_state: &RuntimeResponsesAffinityState,
     loop_state: &mut RuntimePrecommitLoopState<RuntimeUpstreamFailureResponse>,
     profile_name: String,
     response: RuntimeResponsesReply,
-) -> Result<Option<RuntimeResponsesReply>> {
-    handle_runtime_responses_overloaded(RuntimeResponsesOverloaded {
-        request_id: context.request_id,
-        shared: context.shared,
-        profile_name,
-        response,
-        affinity_state,
-        excluded_profiles: &mut loop_state.excluded_profiles,
-        last_failure: &mut loop_state.last_failure,
-    })
-}
-
-fn handle_runtime_responses_auth_failed(
-    context: &RuntimeResponsesRequestContext<'_>,
-    affinity_state: &mut RuntimeResponsesAffinityState,
-    loop_state: &mut RuntimePrecommitLoopState<RuntimeUpstreamFailureResponse>,
-    profile_name: String,
-    response: RuntimeResponsesReply,
+    retry_after: Option<Duration>,
 ) -> Result<Option<RuntimeResponsesReply>> {
     runtime_proxy_log(
         context.shared,
         format!(
-            "request={} transport=http auth_failed profile={profile_name}",
-            context.request_id
+            "request={} transport=http rate_limited route=responses profile={} retry_after_ms={}",
+            context.request_id,
+            profile_name,
+            retry_after.map_or(0, |delay| delay.as_millis()),
         ),
     );
-    if !affinity_state.quota_blocked_affinity_is_releasable(
-        &profile_name,
-        context.request_requires_previous_response_affinity,
-        context.previous_response_fresh_fallback_shape,
-    ) {
-        runtime_proxy_log(
-            context.shared,
-            format!(
-                "request={} transport=http upstream_auth_failure_passthrough route=responses profile={profile_name} reason=hard_affinity",
-                context.request_id
-            ),
-        );
+    mark_runtime_profile_retry_backoff_for_delay(context.shared, &profile_name, retry_after)?;
+    if affinity_state.candidate_has_hard_affinity(&profile_name) {
         return Ok(Some(response));
     }
-    let released_affinity = release_runtime_auth_failed_affinity(
-        context.shared,
-        &profile_name,
-        context.previous_response_id,
-        context.request_turn_state,
-        context.request_session_id,
-    )?;
-    affinity_state.clear_profile_affinity(&profile_name, true);
-    if released_affinity {
-        runtime_proxy_log(
-            context.shared,
-            format!(
-                "request={} transport=http auth_failed_affinity_released profile={profile_name}",
-                context.request_id
-            ),
-        );
-    }
     loop_state.excluded_profiles.insert(profile_name);
-    loop_state.last_failure = Some((RuntimeUpstreamFailureResponse::Http(response), true));
+    loop_state.last_failure = Some((RuntimeUpstreamFailureResponse::Http(response), false));
     Ok(None)
 }
 

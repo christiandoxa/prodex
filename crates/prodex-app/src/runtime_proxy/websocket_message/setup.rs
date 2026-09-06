@@ -400,7 +400,7 @@ impl<'a> RuntimeWebsocketTextMessageFlow<'a> {
         }
     }
 
-    fn candidate_has_hard_affinity(&self, profile_name: &str) -> bool {
+    pub(super) fn candidate_has_hard_affinity(&self, profile_name: &str) -> bool {
         self.bound_profile.as_deref() == Some(profile_name)
             || runtime_candidate_has_hard_affinity(self.candidate_affinity(profile_name))
     }

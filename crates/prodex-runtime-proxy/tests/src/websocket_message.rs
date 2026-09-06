@@ -1,4 +1,5 @@
 use super::*;
+use std::time::Duration;
 
 #[test]
 fn promote_committed_profile_only_without_existing_affinity() {
@@ -204,6 +205,26 @@ fn websocket_profile_unavailable_is_retryable_without_quota_classification() {
         Some(RuntimeWebsocketRetryInspectionKind::Overloaded)
     );
     assert!(inspected.terminal_event);
+}
+
+#[test]
+fn websocket_rate_limit_is_not_classified_as_overload() {
+    let payload = serde_json::json!({
+        "type": "response.failed",
+        "error": {
+            "code": "rate_limit_exceeded",
+            "message": "Please try again in 1s."
+        }
+    })
+    .to_string();
+
+    let inspected = inspect_runtime_websocket_text_frame(&payload);
+
+    assert_eq!(
+        inspected.retry_kind,
+        Some(RuntimeWebsocketRetryInspectionKind::RateLimited)
+    );
+    assert_eq!(inspected.retry_after, Some(Duration::from_secs(1)));
 }
 
 #[test]

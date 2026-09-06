@@ -8,12 +8,14 @@ use crate::{
     RuntimeHttpErrorAction, RuntimeHttpErrorClass, RuntimeHttpErrorPhase,
     runtime_stream_error_policy_from_value,
 };
+use std::time::Duration;
 
 const RUNTIME_SSE_INVALID_DATA_MARKER: &str = "\u{0}prodex-invalid-sse-data";
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct RuntimeParsedSseEvent {
     pub quota_blocked: bool,
+    pub rate_limited: bool,
     pub overloaded: bool,
     pub previous_response_not_found: bool,
     pub invalid_previous_response_id: bool,
@@ -21,6 +23,7 @@ pub struct RuntimeParsedSseEvent {
     pub event_type: Option<String>,
     pub turn_state: Option<String>,
     pub token_usage: Option<RuntimeTokenUsage>,
+    pub retry_after: Option<Duration>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -34,6 +37,9 @@ pub enum RuntimeSseInspectionProgress {
         turn_state: Option<String>,
     },
     QuotaBlocked,
+    RateLimited {
+        retry_after: Option<Duration>,
+    },
     Overloaded,
     PreviousResponseNotFound,
 }
@@ -242,6 +248,11 @@ impl RuntimeSseInspectionState {
         if !committed && event.quota_blocked {
             return Some(RuntimeSseInspectionProgress::QuotaBlocked);
         }
+        if !committed && event.rate_limited {
+            return Some(RuntimeSseInspectionProgress::RateLimited {
+                retry_after: event.retry_after,
+            });
+        }
         if !committed && event.overloaded {
             return Some(RuntimeSseInspectionProgress::Overloaded);
         }
@@ -311,7 +322,13 @@ pub fn parse_runtime_sse_event(data_lines: &[String]) -> RuntimeParsedSseEvent {
     RuntimeParsedSseEvent {
         quota_blocked: error_policy.action == RuntimeHttpErrorAction::RotateProfile
             && error_policy.class == RuntimeHttpErrorClass::Quota,
+        rate_limited: error_policy.action == RuntimeHttpErrorAction::RetryProfile
+            && error_policy.class == RuntimeHttpErrorClass::RateLimited,
         overloaded: error_policy.action == RuntimeHttpErrorAction::RetryProfile
+            && matches!(
+                error_policy.class,
+                RuntimeHttpErrorClass::Overload | RuntimeHttpErrorClass::TransientServer
+            )
             || (error_policy.action == RuntimeHttpErrorAction::RotateProfile
                 && error_policy.class == RuntimeHttpErrorClass::ProfileUnavailable),
         previous_response_not_found: extract_runtime_proxy_previous_response_message_from_value(
@@ -323,6 +340,7 @@ pub fn parse_runtime_sse_event(data_lines: &[String]) -> RuntimeParsedSseEvent {
         event_type: runtime_response_event_type_from_value(&value),
         turn_state: extract_runtime_turn_state_from_value(&value),
         token_usage: extract_runtime_token_usage_from_value(&value),
+        retry_after: error_policy.retry_after,
     }
 }
 

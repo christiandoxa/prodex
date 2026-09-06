@@ -227,6 +227,14 @@ pub(crate) fn mark_runtime_profile_retry_backoff(
     shared: &RuntimeRotationProxyShared,
     profile_name: &str,
 ) -> Result<()> {
+    mark_runtime_profile_retry_backoff_for_delay(shared, profile_name, None)
+}
+
+pub(crate) fn mark_runtime_profile_retry_backoff_for_delay(
+    shared: &RuntimeRotationProxyShared,
+    profile_name: &str,
+    retry_after: Option<std::time::Duration>,
+) -> Result<()> {
     let mut runtime = shared
         .runtime
         .lock()
@@ -234,7 +242,12 @@ pub(crate) fn mark_runtime_profile_retry_backoff(
     let now = Local::now().timestamp();
     prune_runtime_profile_selection_backoff(&mut runtime, now);
     runtime.profile_probe_cache.remove(profile_name);
-    let until = now.saturating_add(RUNTIME_PROFILE_RETRY_BACKOFF_SECONDS);
+    let retry_after_seconds = retry_after
+        .map(|delay| delay.as_millis().saturating_add(999) / 1_000)
+        .and_then(|seconds| i64::try_from(seconds).ok())
+        .unwrap_or_default();
+    let backoff_seconds = RUNTIME_PROFILE_RETRY_BACKOFF_SECONDS.max(retry_after_seconds);
+    let until = now.saturating_add(backoff_seconds);
     runtime
         .profile_retry_backoff_until
         .insert(profile_name.to_string(), until);
@@ -255,6 +268,10 @@ pub(crate) fn mark_runtime_profile_retry_backoff(
             [
                 runtime_proxy_log_field("profile", profile_name),
                 runtime_proxy_log_field("until", until.to_string()),
+                runtime_proxy_log_field(
+                    "retry_after_ms",
+                    retry_after.map_or(0, |delay| delay.as_millis()).to_string(),
+                ),
             ],
         ),
     );

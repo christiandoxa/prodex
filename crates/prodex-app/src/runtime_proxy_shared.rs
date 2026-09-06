@@ -9,6 +9,11 @@ pub(super) enum RuntimeResponsesAttempt {
         profile_name: String,
         response: RuntimeResponsesReply,
     },
+    RateLimited {
+        profile_name: String,
+        response: RuntimeResponsesReply,
+        retry_after: Option<Duration>,
+    },
     Overloaded {
         profile_name: String,
         response: RuntimeResponsesReply,
@@ -46,6 +51,11 @@ pub(super) enum RuntimeStandardAttempt {
         response: tiny_http::ResponseBox,
         overload: bool,
     },
+    RateLimited {
+        profile_name: String,
+        response: tiny_http::ResponseBox,
+        retry_after: Option<Duration>,
+    },
     ProfileUnavailable {
         profile_name: String,
         response: tiny_http::ResponseBox,
@@ -74,6 +84,10 @@ pub(super) enum RuntimeSseInspection {
         turn_state: Option<String>,
     },
     QuotaBlocked(Vec<u8>),
+    RateLimited {
+        prelude: Vec<u8>,
+        retry_after: Option<Duration>,
+    },
     Overloaded(Vec<u8>),
     PreviousResponseNotFound(Vec<u8>),
 }
@@ -187,6 +201,15 @@ pub(super) enum RuntimeWebsocketAttempt {
         profile_name: String,
         payload: RuntimeWebsocketErrorPayload,
     },
+    RateLimited {
+        profile_name: String,
+        payload: RuntimeWebsocketErrorPayload,
+        retry_after: Option<Duration>,
+    },
+    AuthFailed {
+        profile_name: String,
+        payload: RuntimeWebsocketErrorPayload,
+    },
     Overloaded {
         profile_name: String,
         payload: RuntimeWebsocketErrorPayload,
@@ -229,6 +252,8 @@ pub(super) enum RuntimeWebsocketConnectResult {
         turn_state: Option<String>,
     },
     QuotaBlocked(RuntimeWebsocketErrorPayload),
+    RateLimited(RuntimeWebsocketErrorPayload, Option<Duration>),
+    AuthFailed(RuntimeWebsocketErrorPayload),
     Overloaded(RuntimeWebsocketErrorPayload),
     Rejected(RuntimeWebsocketErrorPayload),
 }

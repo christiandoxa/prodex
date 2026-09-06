@@ -284,6 +284,23 @@ fn handle_runtime_noncompact_usage_parts(
         &parts.body,
         runtime_proxy_crate::RuntimeHttpErrorPhase::PreCommit,
     );
+    let retry_after = error_policy.retry_after.or_else(|| {
+        runtime_proxy_crate::runtime_retry_after_from_headers(
+            parts
+                .headers
+                .iter()
+                .map(|(name, value)| (name.as_str(), value.as_slice())),
+        )
+    });
+    if error_policy.action == runtime_proxy_crate::RuntimeHttpErrorAction::RetryProfile
+        && error_policy.class == runtime_proxy_crate::RuntimeHttpErrorClass::RateLimited
+    {
+        return Ok(RuntimeStandardAttempt::RateLimited {
+            profile_name: profile_name.to_string(),
+            response: build_runtime_proxy_response_from_parts(parts),
+            retry_after,
+        });
+    }
     if error_policy.may_retry_or_rotate() {
         runtime_proxy_log(
             shared,
@@ -307,6 +324,11 @@ fn handle_runtime_noncompact_usage_parts(
             response,
             overload: error_policy.action
                 == runtime_proxy_crate::RuntimeHttpErrorAction::RetryProfile
+                && matches!(
+                    error_policy.class,
+                    runtime_proxy_crate::RuntimeHttpErrorClass::Overload
+                        | runtime_proxy_crate::RuntimeHttpErrorClass::TransientServer
+                )
                 || (error_policy.action
                     == runtime_proxy_crate::RuntimeHttpErrorAction::RotateProfile
                     && error_policy.class
@@ -344,11 +366,24 @@ fn handle_runtime_noncompact_error_parts(
         &parts.body,
         runtime_proxy_crate::RuntimeHttpErrorPhase::PreCommit,
     );
+    let retry_after = error_policy.retry_after.or_else(|| {
+        runtime_proxy_crate::runtime_retry_after_from_headers(
+            parts
+                .headers
+                .iter()
+                .map(|(name, value)| (name.as_str(), value.as_slice())),
+        )
+    });
     let retryable_quota = error_policy.action
         == runtime_proxy_crate::RuntimeHttpErrorAction::RotateProfile
         && error_policy.class == runtime_proxy_crate::RuntimeHttpErrorClass::Quota;
     let retryable_overload = error_policy.action
         == runtime_proxy_crate::RuntimeHttpErrorAction::RetryProfile
+        && matches!(
+            error_policy.class,
+            runtime_proxy_crate::RuntimeHttpErrorClass::Overload
+                | runtime_proxy_crate::RuntimeHttpErrorClass::TransientServer
+        )
         || (error_policy.action == runtime_proxy_crate::RuntimeHttpErrorAction::RotateProfile
             && error_policy.class
                 == runtime_proxy_crate::RuntimeHttpErrorClass::ProfileUnavailable);
@@ -395,6 +430,15 @@ fn handle_runtime_noncompact_error_parts(
             profile_name: profile_name.to_string(),
             response,
             overload: retryable_overload,
+        });
+    }
+    if error_policy.action == runtime_proxy_crate::RuntimeHttpErrorAction::RetryProfile
+        && error_policy.class == runtime_proxy_crate::RuntimeHttpErrorClass::RateLimited
+    {
+        return Ok(RuntimeStandardAttempt::RateLimited {
+            profile_name: profile_name.to_string(),
+            response,
+            retry_after,
         });
     }
     if matches!(status, 401 | 403) || token_invalidated {

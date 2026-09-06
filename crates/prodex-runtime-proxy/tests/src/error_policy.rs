@@ -1,4 +1,5 @@
 use super::*;
+use std::time::Duration;
 
 fn json_body(value: serde_json::Value) -> Vec<u8> {
     serde_json::to_vec(&value).expect("test json should serialize")
@@ -410,6 +411,49 @@ data: {"type":"response.failed","response":{"error":{"message":"The usage limit 
         runtime_http_error_policy(429, message_only, RuntimeHttpErrorPhase::PreCommit);
     assert_eq!(passthrough.class, RuntimeHttpErrorClass::Other);
     assert_eq!(passthrough.action, RuntimeHttpErrorAction::PassThrough);
+}
+
+#[test]
+fn rate_limit_policy_preserves_retry_after_from_body_and_header() {
+    let body =
+        br#"{"error":{"code":"rate_limit_exceeded","message":"Please try again in 11.054s."}}"#;
+    let policy = runtime_http_error_policy(429, body, RuntimeHttpErrorPhase::PreCommit);
+
+    assert_eq!(policy.class, RuntimeHttpErrorClass::RateLimited);
+    assert_eq!(policy.action, RuntimeHttpErrorAction::RetryProfile);
+    assert_eq!(policy.retry_after, Some(Duration::from_millis(11_054)));
+    assert_eq!(
+        runtime_retry_after_from_headers([("Retry-After", b"301".as_slice())]),
+        Some(Duration::from_secs(300))
+    );
+}
+
+#[test]
+fn runtime_sse_rate_limit_is_not_classified_as_overload() {
+    let event = crate::parse_runtime_sse_event(&[
+        r#"{"type":"response.failed","response":{"error":{"code":"rate_limit_exceeded","message":"Please try again in 1s."}}}"#.to_string(),
+    ]);
+
+    assert!(!event.quota_blocked);
+    assert!(event.rate_limited);
+    assert!(!event.overloaded);
+    assert_eq!(event.retry_after, Some(Duration::from_secs(1)));
+}
+
+#[test]
+fn retry_after_parser_rejects_untrusted_or_zero_values() {
+    for message in [
+        "Please try again later.",
+        "Please try again in 0s.",
+        "Please try again in 1 minute.",
+        "Please try again in NaNs.",
+    ] {
+        assert_eq!(runtime_retry_after_from_message(message), None, "{message}");
+    }
+    assert_eq!(
+        runtime_retry_after_from_headers([("Retry-After", b"0".as_slice())]),
+        None
+    );
 }
 
 #[test]

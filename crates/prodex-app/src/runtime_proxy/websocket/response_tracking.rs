@@ -372,6 +372,14 @@ impl RuntimeWebsocketResponseLoop<'_> {
                     payload: RuntimeWebsocketErrorPayload::Text(text.to_string()),
                 })
             }
+            Some(RuntimeWebsocketRetryInspectionKind::RateLimited) => {
+                self.close_and_reset();
+                Some(RuntimeWebsocketAttempt::RateLimited {
+                    profile_name: self.profile_name.to_string(),
+                    payload: RuntimeWebsocketErrorPayload::Text(text.to_string()),
+                    retry_after: inspected.retry_after,
+                })
+            }
             Some(RuntimeWebsocketRetryInspectionKind::Overloaded) => {
                 self.close_and_reset();
                 Some(RuntimeWebsocketAttempt::Overloaded {
