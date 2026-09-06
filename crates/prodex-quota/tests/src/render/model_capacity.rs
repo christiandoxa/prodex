@@ -103,13 +103,22 @@ fn luna_reserve_requires_its_explicit_bucket_and_never_regularizes_sol() {
         &usage,
         Some("gpt-5.6-luna")
     ));
-    assert!(openai_quota_has_ready_limit_for_model(
-        &usage,
-        Some("gpt-luna-reserve")
-    ));
+    for model in ["gpt-reserve", "gpt-luna-reserve"] {
+        assert!(!openai_quota_has_ready_limit_for_model(&usage, Some(model)));
+        assert!(std::ptr::eq(
+            openai_quota_runtime_window_pair_for_model(&usage, Some(model)).unwrap(),
+            usage.rate_limit.as_ref().unwrap(),
+        ));
+    }
     assert!(!openai_quota_has_ready_limit_for_model(
         &usage,
         Some("gpt-5.6-sol")
+    ));
+
+    let mut unlabeled = usage.clone();
+    unlabeled.additional_rate_limits[0].limit_name = None;
+    assert!(!additional_rate_limit_is_luna_reserve(
+        &unlabeled.additional_rate_limits[0]
     ));
 
     usage.additional_rate_limits[0]
@@ -144,19 +153,22 @@ fn unlabeled_additional_bucket_does_not_grant_luna_or_spark() {
 }
 
 #[test]
-fn unsupported_model_does_not_inherit_regular_quota() {
+fn unrecognized_model_uses_only_regular_quota() {
     let usage = main_windows(80, 1_700_001_800, 95, 1_700_259_200);
 
-    assert!(!openai_quota_has_ready_limit_for_model(
+    assert!(openai_quota_has_ready_limit_for_model(
         &usage,
         Some("gpt-unsupported")
     ));
-    assert!(!openai_usage_supports_model(
+    assert!(openai_usage_supports_model(
         &usage,
         false,
         Some("gpt-unsupported")
     ));
-    assert!(openai_quota_runtime_window_pair_for_model(&usage, Some("gpt-unsupported")).is_none());
+    assert!(std::ptr::eq(
+        openai_quota_runtime_window_pair_for_model(&usage, Some("gpt-unsupported")).unwrap(),
+        usage.rate_limit.as_ref().unwrap()
+    ));
 }
 
 #[test]

@@ -138,7 +138,7 @@ fn app_server_rate_limits_payload_keeps_regular_and_reserve_buckets_separate() {
         &usage,
         Some("gpt-5.6-luna")
     ));
-    assert!(openai_quota_has_ready_limit_for_model(
+    assert!(!openai_quota_has_ready_limit_for_model(
         &usage,
         Some("gpt-luna-reserve")
     ));

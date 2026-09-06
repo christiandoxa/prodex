@@ -613,6 +613,10 @@ shared-state integration around those operations.
 - Prodex stays a scoped Codex gateway, not a general-purpose LLM SDK.
 - Profile selection must be visible through policy, `prodex info`, `prodex doctor`, and runtime logs.
 - Pre-commit retry and fallback paths must stay bounded per request.
+- An explicit `rate_limit_exceeded` response uses its bounded `Retry-After` signal and remains
+  distinct from provider overload. Generic 429 responses pass through unless their structured
+  payload proves a retry or quota class; 503 remains overload/service availability, never proof
+  that an account bucket is empty. Hard-affinity and post-commit responses are not replayed.
 - Fresh requests that exhaust a sweep on retryable upstream overload wait asynchronously for
   endpoint backoff to expire, then perform at most two recovery sweeps within the bounded
   recovery budget. Pre-commit transport failures still rotate through the ready pool without
@@ -623,9 +627,11 @@ shared-state integration around those operations.
 - An available weekly quota window remains eligible when the 5-hour window is absent or unknown; explicit exhaustion still blocks selection.
 - OpenAI `additional_rate_limits` are preserved as independent backend buckets, including their
   explicit `allowed` and `limit_reached` fields and unknown future fields. The pinned Codex
-  `rust-v0.153.2` contract does not identify a Luna Reserve bucket or map it to a model, so Prodex
+  `rust-v0.153.4` contract does not identify a Luna Reserve bucket or map it to a model, so Prodex
   reports unknown Reserve data generically. When an upstream bucket explicitly identifies itself
-  as `Luna Reserve`, it is applicable only to Luna requests; Sol and Terra never use it. When all
+  as `Luna Reserve`, it is applicable only to Luna requests; Sol and Terra never use it. Reserve
+  is a fallback capacity mode, not a model identifier accepted from requests, and an unlabeled
+  `base_model_inference` bucket does not establish entitlement. When all
   supported Luna capacity is unavailable, a Luna request may make one model-aware pre-commit
   fallback to catalog-advertised `gpt-5.3-codex-spark` capacity. Requested and effective models
   remain distinct in runtime state and diagnostics. A 429/503 or transport error never zeros

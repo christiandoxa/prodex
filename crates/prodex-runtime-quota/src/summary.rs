@@ -15,7 +15,7 @@ use crate::window::{
 };
 use prodex_quota::{
     RuntimeQuotaPressureBand, RuntimeQuotaSummary, RuntimeQuotaWindowStatus,
-    RuntimeQuotaWindowSummary, UsageResponse,
+    RuntimeQuotaWindowSummary, UsageResponse, WindowPair, find_main_window,
 };
 use prodex_runtime_state::RuntimeRouteKind;
 use prodex_shared_types::RuntimeQuotaSource;
@@ -79,11 +79,15 @@ pub fn runtime_quota_summary_for_route(
     usage: &UsageResponse,
     route_kind: RuntimeRouteKind,
 ) -> RuntimeQuotaSummary {
-    runtime_quota_summary_from_proxy(runtime_proxy::runtime_proxy_quota_summary_for_route(
-        runtime_quota_window_observation(usage, "5h"),
-        runtime_quota_window_observation(usage, "weekly"),
-        route_kind,
-    ))
+    let summary =
+        runtime_quota_summary_from_proxy(runtime_proxy::runtime_proxy_quota_summary_for_route(
+            runtime_quota_window_observation(usage, "5h"),
+            runtime_quota_window_observation(usage, "weekly"),
+            route_kind,
+        ));
+    prodex_quota::openai_quota_runtime_window_pair(usage).map_or(summary, |pair| {
+        preserve_unknown_window_status(summary, pair)
+    })
 }
 
 pub fn runtime_quota_summary_for_route_with_model(
@@ -105,11 +109,35 @@ pub fn runtime_quota_summary_for_route_with_model_at(
     requested_model: Option<&str>,
     now: i64,
 ) -> RuntimeQuotaSummary {
-    runtime_quota_summary_from_proxy(runtime_proxy::runtime_proxy_quota_summary_for_route(
-        runtime_quota_window_observation_for_model_at(usage, "5h", requested_model, now),
-        runtime_quota_window_observation_for_model_at(usage, "weekly", requested_model, now),
-        route_kind,
-    ))
+    let summary =
+        runtime_quota_summary_from_proxy(runtime_proxy::runtime_proxy_quota_summary_for_route(
+            runtime_quota_window_observation_for_model_at(usage, "5h", requested_model, now),
+            runtime_quota_window_observation_for_model_at(usage, "weekly", requested_model, now),
+            route_kind,
+        ));
+    prodex_quota::openai_quota_runtime_window_pair_for_model(usage, requested_model)
+        .map_or(summary, |pair| {
+            preserve_unknown_window_status(summary, pair)
+        })
+}
+
+fn preserve_unknown_window_status(
+    mut summary: RuntimeQuotaSummary,
+    pair: &WindowPair,
+) -> RuntimeQuotaSummary {
+    for (label, output) in [
+        ("5h", &mut summary.five_hour),
+        ("weekly", &mut summary.weekly),
+    ] {
+        if let Some(window) = find_main_window(pair, label)
+            && window.used_percent.is_none()
+        {
+            output.status = RuntimeQuotaWindowStatus::Unknown;
+            output.remaining_percent = 0;
+            output.reset_at = window.reset_at.unwrap_or(i64::MAX);
+        }
+    }
+    summary
 }
 
 pub fn runtime_quota_summary_blocking_reset_at(
@@ -179,9 +207,7 @@ pub fn runtime_quota_summary_from_cached_sources_for_model(
             Some(RuntimeQuotaSource::LiveProbe),
         );
     }
-    if prodex_quota::openai_model_is_spark(requested_model)
-        || prodex_quota::openai_model_is_luna_reserve(requested_model)
-    {
+    if prodex_quota::openai_model_is_spark(requested_model) {
         return (unknown_runtime_quota_summary(), None);
     }
     if let Some(model) = requested_model

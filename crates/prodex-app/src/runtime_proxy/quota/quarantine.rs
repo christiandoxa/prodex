@@ -92,16 +92,6 @@ pub(crate) fn mark_runtime_profile_quota_quarantine_for_request_model(
     quota_message: Option<&str>,
     request_model_name: Option<&str>,
 ) -> Result<()> {
-    if prodex_quota::openai_model_is_luna_reserve(request_model_name) {
-        runtime_proxy_log(
-            shared,
-            format!(
-                "profile_luna_reserve_quota_quarantine_skipped profile={profile_name} route={} reason=reserve_is_model_scoped",
-                runtime_route_kind_label(route_kind),
-            ),
-        );
-        return Ok(());
-    }
     if prodex_quota::openai_model_is_luna(request_model_name)
         && runtime_luna_quota_block_has_spark_capacity(shared, profile_name)
     {

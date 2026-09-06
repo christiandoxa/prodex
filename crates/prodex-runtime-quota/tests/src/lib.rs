@@ -126,8 +126,8 @@ fn unknown_five_hour_usage_does_not_exhaust_known_weekly_quota() {
 
     let summary = runtime_quota_summary_for_route(&usage, RuntimeRouteKind::Responses);
 
-    assert_eq!(summary.five_hour.status, RuntimeQuotaWindowStatus::Ready);
-    assert_eq!(summary.five_hour.remaining_percent, 100);
+    assert_eq!(summary.five_hour.status, RuntimeQuotaWindowStatus::Unknown);
+    assert_eq!(summary.five_hour.remaining_percent, 0);
     assert_eq!(summary.weekly.status, RuntimeQuotaWindowStatus::Ready);
     assert_eq!(summary.weekly.remaining_percent, 80);
     assert_eq!(summary.route_band, RuntimeQuotaPressureBand::Healthy);
@@ -227,7 +227,7 @@ fn model_summary_uses_the_bucket_for_luna_and_not_spark_or_regular() {
 }
 
 #[test]
-fn cached_summary_does_not_reuse_regular_quota_for_unsupported_model() {
+fn cached_summary_preserves_regular_quota_for_opaque_model() {
     let snapshot = RuntimeProfileUsageSnapshot {
         checked_at: 1_700_000_000,
         plan_type: None,
@@ -248,8 +248,8 @@ fn cached_summary_does_not_reuse_regular_quota_for_unsupported_model() {
         900,
     );
 
-    assert_eq!(source, None);
-    assert_eq!(summary.route_band, RuntimeQuotaPressureBand::Unknown);
+    assert_eq!(source, Some(RuntimeQuotaSource::PersistedSnapshot));
+    assert_eq!(summary.route_band, RuntimeQuotaPressureBand::Healthy);
 }
 
 #[test]

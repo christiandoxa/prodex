@@ -246,10 +246,9 @@ fn runtime_compact_mark_retry_backoff_if_needed(
     overload: bool,
     request_model_name: Option<&str>,
 ) -> Result<()> {
-    if !prodex_quota::openai_model_is_luna_reserve(request_model_name)
-        && (!prodex_quota::openai_model_is_luna(request_model_name)
-            || overload
-            || !runtime_luna_quota_block_has_spark_capacity(shared, profile_name))
+    if !prodex_quota::openai_model_is_luna(request_model_name)
+        || overload
+        || !runtime_luna_quota_block_has_spark_capacity(shared, profile_name)
     {
         mark_runtime_profile_retry_backoff(shared, profile_name)?;
     }
