@@ -2,7 +2,86 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
-## 0.426.1 - 2026-09-05
+## 0.427.0 - 2026-09-06
+
+### Runtime
+
+- Separate rate-limit recovery from overload (`765dc56`)
+- Require official external Codex (`0ddccaf`)
+
+### CLI
+
+- Require explicit Luna reserve evidence (`e69dfa0`)
+- Isolate model-specific capacity (`a87e7cb`)
+
+### Claude
+
+- Avoid copying ambiguous Claude state (`811cad0`)
+- Isolate OAuth and send hello (`14a4191`)
+
+### Docs
+
+- Describe official Codex baseline (`3e5b904`)
+- Explain gaps and idle throughput (`cfaf689`)
+- Record verified release metadata (`f16dd6a`)
+
+### Misc
+
+- Verify official app-server session bridge (`caa21dd`)
+- Harden session bridge follow-up (`02766c0`)
+- Harden session bridge (`2e99c33`)
+- Satisfy Codex resolver lint (`6451f54`)
+- Complete event telemetry (`bfd8d57`)
+- Measure first model response (`e031bc4`)
+- Report model identity honestly (`15c8990`)
+# Prodex 0.427.0
+
+## New Features
+
+- Restores the wrapper-only boundary: standalone and npm artifacts contain
+  Prodex only and discover an official, unmodified Codex CLI 0.153.2 or newer.
+- Makes `prodex ping openai` send one exact `hello` inference probe per selected
+  profile, with profile-pinned credentials, bounded concurrency, truthful model
+  identity and latency stages, and aggregate failure reporting.
+- Pins the latest stable audited releases of Caveman 2.6.0, RTK 0.48.0,
+  Codebase Memory MCP 0.10.8, Playwright MCP 0.0.80, Ponytail 4.9.0, and Presidio
+  2.2.364 without making optional tools automatic startup dependencies.
+
+## Bug Fixes
+
+- Fixes Claude OAuth import and login-to-launch flows while retaining regular-file,
+  ownership, permission, symlink, and race protections around credential input.
+- Makes OpenAI readiness and routing model-aware. Primary, Luna Reserve, Spark,
+  cooldown, stale, exhausted, and authentication states remain separate, and
+  fallback never silently changes Sol or Terra requests.
+- Separates explicit quota exhaustion, temporary rate limits, overload, transport
+  failures, and hard-affinity continuations across HTTP, SSE, WebSocket, and
+  compact paths. Rotation remains pre-commit and bounded.
+- Completes `prodex log` event visibility with redacted gap markers and derives
+  output throughput only from authoritative token counters and monotonic time;
+  idle values are labelled as the last observed rate.
+- Hardens `prodex s expose` Prompt Write and Output Read. Writes target one exact
+  existing process, writer, and thread through the initialized Codex app-server
+  control plane; output cursors are source-bound, monotonic, replay-safe, and
+  independent across readers. Ambiguous writes are never replayed automatically.
+
+## Upgrade Notes
+
+- Install the official Codex CLI separately and make `codex` available on
+  `PATH`, or set `PRODEX_CODEX_BIN` to its executable. Prodex does not modify or
+  delete an existing Codex installation, including binaries previously installed
+  by Prodex 0.426.1.
+- `prodex update` preserves profiles, sessions, and configuration. Optional tools
+  remain explicit installations; user overrides and disabled tools are retained.
+- The unmodified Codex TUI is not required to render externally queued follow-up
+  prompts. Use `prodex_session_output_read` as the authoritative machine-readable
+  view after `prodex_session_prompt_write`.
+
+## Changelog
+
+Full Changelog: [`0.426.1...0.427.0`](https://github.com/christiandoxa/prodex/compare/0.426.1...0.427.0)
+
+## 0.426.1 - 2026-09-06
 
 ### Runtime
 
@@ -10,34 +89,16 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 
 ### Misc
 
+- Merge pull request #65 from christiandoxa/integration/0.426.1-final (`caeee51`)
+- Tighten active session queue routing (`afdaeb6`)
+- Surface busy session writes in the TUI queue (`f909625`)
+- Preserve bounded preference timeout (`5ecb2b0`)
+- Bound preference lock retries (`81255bd`)
+- Stabilize release qualification fixtures (`8788fb2`)
 - Refresh Codex lock and inventory baselines (`3853bd8`)
 - Build patched Codex with locked dependencies (`3b96eac`)
 - Normalize dynamic model catalogs (`a9984b6`)
 - Route Prompt Write through existing sessions (`c6cc410`)
-# Prodex 0.426.1
-
-## New Features
-
-- Bundles the pinned Codex compatibility runtime with the supported queued-input
-  visibility needed for busy existing sessions.
-
-## Bug Fixes
-
-- Existing-session Prompt Write now prefers exactly one compatible active plain
-  `prodex s`, delivers input through the supported Codex control plane, and
-  reads bounded output from that same returned session and cursor.
-- Fresh idle `prodex s` sessions are addressable before any manual prompt.
-- A new Super worker is permitted only after authoritative `no_session`; stale,
-  ambiguous, or inconclusive session identity fails closed.
-- Output reads advance past oversized rollout records within bounded limits while
-  preserving source, process, thread, cursor, redaction, and path checks.
-- The Kiro sub-agent model picker preserves dynamic imported/account catalogs,
-  skips stale profile homes, and retains a valid prior snapshot when refresh
-  fails.
-
-## Changelog
-
-Full Changelog: [`0.426.0...0.426.1`](https://github.com/christiandoxa/prodex/compare/0.426.0...0.426.1)
 
 ## 0.426.0 - 2026-09-04
 
