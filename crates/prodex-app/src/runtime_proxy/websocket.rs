@@ -426,9 +426,12 @@ fn handle_runtime_proxy_websocket_http_response(
     {
         return Ok(None);
     }
-    let error_policy = runtime_proxy_crate::runtime_http_error_policy(
+    let error_policy = runtime_proxy_crate::runtime_http_error_policy_with_headers(
         status,
         &body,
+        headers
+            .iter()
+            .map(|(name, value)| (name.as_str(), value.as_bytes())),
         runtime_proxy_crate::RuntimeHttpErrorPhase::PreCommit,
     );
     let retry_after = error_policy.retry_after.or_else(|| {
