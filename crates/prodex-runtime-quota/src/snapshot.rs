@@ -1,8 +1,7 @@
-use crate::summary::runtime_quota_summary_from_proxy;
-use crate::window::{
-    runtime_quota_window_observation_for_model_at, runtime_quota_window_status_from_proxy,
-    runtime_quota_window_status_to_proxy,
+use crate::summary::{
+    runtime_quota_summary_for_route_with_model_at, runtime_quota_summary_from_proxy,
 };
+use crate::window::{runtime_quota_window_status_from_proxy, runtime_quota_window_status_to_proxy};
 use chrono::Local;
 use prodex_quota::{
     RuntimeQuotaSummary, RuntimeQuotaWindowStatus, UsageResponse, UsageWindow, WindowPair,
@@ -47,20 +46,22 @@ pub fn runtime_profile_usage_snapshot_from_usage(
     usage: &UsageResponse,
 ) -> RuntimeProfileUsageSnapshot {
     let now = Local::now().timestamp();
-    let mut snapshot = runtime_usage_snapshot_from_proxy(
-        runtime_proxy::runtime_proxy_usage_snapshot_from_observations_at(
-            runtime_quota_window_observation_for_model_at(usage, "5h", Some("gpt-5.6-sol"), now),
-            runtime_quota_window_observation_for_model_at(
-                usage,
-                "weekly",
-                Some("gpt-5.6-sol"),
-                now,
-            ),
-            now,
-        ),
+    let summary = runtime_quota_summary_for_route_with_model_at(
+        usage,
+        RuntimeRouteKind::Responses,
+        Some("gpt-5.6-sol"),
+        now,
     );
-    snapshot.plan_type = usage.plan_type.clone();
-    snapshot
+    RuntimeProfileUsageSnapshot {
+        checked_at: now,
+        plan_type: usage.plan_type.clone(),
+        five_hour_status: summary.five_hour.status,
+        five_hour_remaining_percent: summary.five_hour.remaining_percent,
+        five_hour_reset_at: summary.five_hour.reset_at,
+        weekly_status: summary.weekly.status,
+        weekly_remaining_percent: summary.weekly.remaining_percent,
+        weekly_reset_at: summary.weekly.reset_at,
+    }
 }
 
 pub fn usage_from_runtime_usage_snapshot(snapshot: &RuntimeProfileUsageSnapshot) -> UsageResponse {

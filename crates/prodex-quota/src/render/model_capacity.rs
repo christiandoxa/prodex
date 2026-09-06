@@ -13,31 +13,18 @@ pub fn required_window_snapshot_for_pair_at(
 }
 
 pub const OPENAI_LUNA_MODEL: &str = "gpt-5.6-luna";
-pub const OPENAI_LUNA_RESERVE_MODEL: &str = "gpt-reserve";
 pub const OPENAI_SPARK_MODEL: &str = "gpt-5.3-codex-spark";
 
 pub fn openai_luna_spark_fallback_model(
     requested_model: Option<&str>,
     effective_model: Option<&str>,
 ) -> Option<&'static str> {
-    (openai_model_is_luna(requested_model)
-        && !openai_model_is_luna_reserve(effective_model)
-        && !openai_model_is_spark(effective_model))
-    .then_some(OPENAI_SPARK_MODEL)
+    (openai_model_is_luna(requested_model) && !openai_model_is_spark(effective_model))
+        .then_some(OPENAI_SPARK_MODEL)
 }
 
 pub fn openai_model_is_luna(model: Option<&str>) -> bool {
     model.is_some_and(|model| matches!(normalized_identifier(model).as_str(), "luna" | "gpt56luna"))
-}
-
-/// Recognizes the effective upstream slug used while the Luna Reserve fallback is active.
-pub fn openai_model_is_luna_reserve(model: Option<&str>) -> bool {
-    model.is_some_and(|model| {
-        matches!(
-            normalized_identifier(model).as_str(),
-            "gptreserve" | "gptlunareserve" | "lunareserve"
-        )
-    })
 }
 
 pub fn openai_model_is_spark(model: Option<&str>) -> bool {
@@ -53,9 +40,6 @@ pub fn openai_quota_runtime_window_pair_for_model<'a>(
     usage: &'a UsageResponse,
     model: Option<&str>,
 ) -> Option<&'a WindowPair> {
-    if model.is_some_and(|model| !openai_model_is_supported(model)) {
-        return None;
-    }
     if openai_model_is_spark(model) {
         return usage
             .additional_rate_limits
@@ -67,20 +51,6 @@ pub fn openai_quota_runtime_window_pair_for_model<'a>(
                     .additional_rate_limits
                     .iter()
                     .find(|additional| crate::capacity::additional_rate_limit_is_spark(additional))
-            })
-            .map(|additional| &additional.rate_limit);
-    }
-    if openai_model_is_luna_reserve(model) {
-        return usage
-            .additional_rate_limits
-            .iter()
-            .filter(|additional| additional_rate_limit_is_luna_reserve(additional))
-            .find(|additional| super::additional_rate_limit_is_usable(additional))
-            .or_else(|| {
-                usage
-                    .additional_rate_limits
-                    .iter()
-                    .find(|additional| additional_rate_limit_is_luna_reserve(additional))
             })
             .map(|additional| &additional.rate_limit);
     }
@@ -109,9 +79,6 @@ pub fn openai_quota_runtime_window_pair_for_model<'a>(
 }
 
 pub fn openai_quota_has_ready_limit_for_model(usage: &UsageResponse, model: Option<&str>) -> bool {
-    if model.is_some_and(|model| !openai_model_is_supported(model)) {
-        return false;
-    }
     if openai_model_is_spark(model) {
         return usage
             .additional_rate_limits
@@ -121,9 +88,6 @@ pub fn openai_quota_has_ready_limit_for_model(usage: &UsageResponse, model: Opti
                 super::additional_rate_limit_is_usable(additional)
                     && window_pair_has_ready_limit(&additional.rate_limit)
             });
-    }
-    if openai_model_is_luna_reserve(model) {
-        return openai_quota_has_ready_luna_reserve(usage);
     }
     if openai_model_is_luna(model)
         && (openai_quota_has_ready_regular_limit(usage)
@@ -153,13 +117,10 @@ pub fn openai_quota_has_ready_regular_limit(usage: &UsageResponse) -> bool {
 }
 
 pub fn additional_rate_limit_is_luna_reserve(additional: &super::AdditionalRateLimit) -> bool {
-    if let Some(model) = additional_rate_limit_model_slug(additional) {
-        if openai_model_is_luna_reserve(Some(model)) {
-            return true;
-        }
-        if openai_model_is_spark(Some(model)) {
-            return false;
-        }
+    if additional_rate_limit_model_slug(additional)
+        .is_some_and(|model| openai_model_is_spark(Some(model)))
+    {
+        return false;
     }
     [
         additional.limit_id.as_deref(),
@@ -237,21 +198,8 @@ pub(crate) fn additional_rate_limit_model_slug(
 }
 
 fn is_luna_reserve_identifier(value: &str) -> bool {
-    matches!(
-        normalized_identifier(value).as_str(),
-        "gptreserve" | "gptlunareserve" | "lunareserve" | "basemodelinference"
-    )
-}
-
-fn openai_model_is_supported(model: &str) -> bool {
-    openai_model_is_luna(Some(model))
-        || openai_model_is_luna_reserve(Some(model))
-        || openai_model_is_spark(Some(model))
-        || prodex_provider_core::provider_model_spec(
-            prodex_provider_core::ProviderId::OpenAi,
-            model,
-        )
-        .is_some()
+    let normalized = normalized_identifier(value);
+    normalized.contains("luna") && normalized.contains("reserve")
 }
 
 pub(crate) fn normalized_identifier(value: &str) -> String {
