@@ -106,6 +106,7 @@ impl PingStatus {
 struct PingResult {
     profile: String,
     model: Option<String>,
+    effective_model: Option<String>,
     status: PingStatus,
     detail: String,
     latency_ms: Option<u128>,
@@ -233,6 +234,7 @@ fn probe_ping_target(target: PingTarget, options: &PingProbeOptions) -> PingResu
     PingResult {
         profile: target.name,
         model: options.model.clone(),
+        effective_model: None,
         status,
         detail,
         latency_ms: Some(started.elapsed().as_millis()),
@@ -285,6 +287,7 @@ fn ping_result_from_output(output: &Output, model: Option<String>, started: Inst
     PingResult {
         profile: String::new(),
         model,
+        effective_model: None,
         status,
         detail,
         latency_ms: Some(started.elapsed().as_millis()),

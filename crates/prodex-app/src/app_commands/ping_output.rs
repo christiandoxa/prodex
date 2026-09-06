@@ -5,11 +5,12 @@ use terminal_ui::print_stdout_line;
 
 pub(super) fn render_ping_result(result: &PingResult) -> Result<()> {
     print_stdout_line(&format!(
-        "{}  {:<20} {:>6}ms  {}",
+        "{}  {:<20} {:>6}ms  requested={} effective={}",
         result.profile,
         result.status.label(),
         result.latency_ms.unwrap_or_default(),
-        result.model.as_deref().unwrap_or("configured/default")
+        result.model.as_deref().unwrap_or("configured/default"),
+        result.effective_model.as_deref().unwrap_or("unavailable")
     ))?;
     if result.status.is_failure() {
         print_stdout_line(&format!("  reason: {}", result.detail))?;
@@ -47,12 +48,16 @@ pub(super) fn render_ping_summary(
             "provider": "openai",
             "status": if healthy == total && total > 0 { "ok" } else { "failed" },
             "model": results.first().and_then(|result| result.model.clone()),
+            "requested_model": results.first().and_then(|result| result.model.clone()),
+            "effective_model": results.first().and_then(|result| result.effective_model.clone()),
             "latency_ms": elapsed.as_millis(),
             "detail": format!("{healthy}/{total} profiles healthy"),
             "profiles": results.iter().map(|result| serde_json::json!({
                 "profile": result.profile,
                 "status": result.status.json_label(),
                 "model": result.model,
+                "requested_model": result.model,
+                "effective_model": result.effective_model,
                 "latency_ms": result.latency_ms,
                 "detail": result.detail,
             })).collect::<Vec<_>>(),

@@ -356,7 +356,10 @@ fn ping_openai_reports_fast_nonzero_exit_detail_and_continues() {
 #[test]
 fn ping_openai_json_contains_per_profile_results() {
     let fixture = setup_fixture();
-    let output = run_prodex(&fixture, &["ping", "openai", "--json"]);
+    let output = run_prodex(
+        &fixture,
+        &["ping", "openai", "--json", "--model", "gpt-5.6-luna"],
+    );
     assert!(
         output.status.success(),
         "prodex ping openai --json failed: {}",
@@ -366,6 +369,17 @@ fn ping_openai_json_contains_per_profile_results() {
     assert_eq!(value["provider"], "openai");
     assert_eq!(value["status"], "ok");
     assert_eq!(value["profiles"].as_array().unwrap().len(), 2);
+    assert_eq!(value["model"], "gpt-5.6-luna");
+    assert_eq!(value["requested_model"], "gpt-5.6-luna");
+    assert!(value["effective_model"].is_null());
+    assert!(
+        value["profiles"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|profile| profile["requested_model"] == "gpt-5.6-luna"
+                && profile["effective_model"].is_null())
+    );
     assert_eq!(value["summary"]["profiles_discovered"], 2);
     assert_eq!(value["summary"]["profiles_tested"], 2);
     assert_eq!(value["summary"]["pool_usable"], true);
