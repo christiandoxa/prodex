@@ -101,6 +101,24 @@ fn info_token_usage_event_from_line_with_event(
         None if event_name == "token_usage_progress" => return None,
         None => 0,
     };
+    let generation_ms = fields
+        .get("generation_ms")
+        .and_then(|value| value.parse::<u64>().ok())
+        .filter(|value| *value > 0);
+    let reported_rate_is_valid = fields.get("output_tokens_per_second").is_none_or(|value| {
+        value
+            .parse::<f64>()
+            .ok()
+            .is_some_and(|rate| rate.is_finite() && rate > 0.0)
+    });
+    let generation_ms = reported_rate_is_valid.then_some(generation_ms).flatten();
+    let output_tokens_per_second = reported_rate_is_valid
+        .then(|| generation_ms.filter(|_| output_tokens > 0))
+        .flatten()
+        .and_then(|duration| {
+            let rate = output_tokens as f64 * 1_000.0 / duration as f64;
+            rate.is_finite().then_some(rate)
+        });
     Some(InfoTokenUsageEvent {
         timestamp: info_token_usage_timestamp(line),
         request: fields.get("request").and_then(|value| value.parse().ok()),
@@ -126,13 +144,8 @@ fn info_token_usage_event_from_line_with_event(
             .get("reasoning_tokens")
             .and_then(|value| value.parse::<u64>().ok())
             .unwrap_or_default(),
-        generation_ms: fields
-            .get("generation_ms")
-            .and_then(|value| value.parse::<u64>().ok()),
-        output_tokens_per_second: fields
-            .get("output_tokens_per_second")
-            .and_then(|value| value.parse::<f64>().ok())
-            .filter(|value| value.is_finite() && *value > 0.0),
+        generation_ms,
+        output_tokens_per_second,
     })
 }
 

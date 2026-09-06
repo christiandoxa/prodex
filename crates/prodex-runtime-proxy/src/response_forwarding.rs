@@ -254,7 +254,10 @@ pub enum RuntimeSseTapEffect {
         response_ids: Vec<String>,
     },
     LogTokenUsage(RuntimeTokenUsage),
-    LogTokenUsageProgress(RuntimeTokenUsage),
+    LogTokenUsageProgress {
+        usage: RuntimeTokenUsage,
+        generation_ms: u64,
+    },
     LogTokenUsageWithGeneration {
         usage: RuntimeTokenUsage,
         generation_ms: u64,
@@ -339,7 +342,7 @@ impl RuntimeSseTapState {
         {
             self.generation_started_at = Some(Instant::now());
         }
-        let generation_ms = (event_type == Some("response.completed"))
+        let final_generation_ms = (event_type == Some("response.completed"))
             .then(|| runtime_generation_elapsed_ms(self.generation_started_at))
             .flatten();
         if runtime_token_usage_event_is_live(event_type, event.token_usage)
@@ -347,10 +350,14 @@ impl RuntimeSseTapState {
             && let Some(token_usage) = self
                 .output_token_usage_progress
                 .observe(token_usage, Instant::now())
+            && let Some(generation_ms) = runtime_generation_elapsed_ms(self.generation_started_at)
         {
-            effects.push(RuntimeSseTapEffect::LogTokenUsageProgress(token_usage));
+            effects.push(RuntimeSseTapEffect::LogTokenUsageProgress {
+                usage: token_usage,
+                generation_ms,
+            });
         }
-        self.log_token_usage(event_type, event.token_usage, generation_ms, effects);
+        self.log_token_usage(event_type, event.token_usage, final_generation_ms, effects);
     }
 
     fn remember_response_ids(

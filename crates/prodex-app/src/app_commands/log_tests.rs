@@ -474,6 +474,7 @@ fn untimed_terminal_token_usage_closes_live_throughput_stream() {
                 profile: "main".to_string(),
                 request: Some(29),
                 output_tokens,
+                generation_ms: Some(output_tokens * 10),
                 ..InfoTokenUsageEvent::default()
             },
             observed_at,
@@ -532,6 +533,7 @@ fn live_progress_selects_current_profile_over_historical_rate() {
                 profile: "profile-b".to_string(),
                 request: Some(2),
                 output_tokens,
+                generation_ms: Some(output_tokens * 10),
                 ..InfoTokenUsageEvent::default()
             },
             observed_at,

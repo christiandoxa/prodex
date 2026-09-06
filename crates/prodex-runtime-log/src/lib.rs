@@ -36,7 +36,7 @@ pub fn runtime_log_recording_enabled() -> bool {
 }
 
 /// Returns whether a runtime message is routine capacity telemetry rather than a user-facing
-/// operational event. These messages are intentionally admitted only to bounded diagnostics.
+/// operational event. Human renderers may filter these after JSON/live capture.
 pub fn runtime_log_message_is_routine_load(message: &str) -> bool {
     let event = runtime_proxy::runtime_proxy_parse_log_message(message);
     matches!(
@@ -74,7 +74,8 @@ pub fn runtime_format_log_line(
     timestamp: &str,
     pid: u32,
 ) -> String {
-    let sanitized = message.replace(['\r', '\n'], " ");
+    let sanitized =
+        runtime_proxy::runtime_proxy_redact_log_text(message).replace(['\r', '\n'], " ");
     match format {
         RuntimeLogFormat::Text => format!("[{timestamp}] {sanitized}\n"),
         RuntimeLogFormat::Json => {
@@ -562,6 +563,21 @@ mod tests {
         assert_eq!(value["fields"]["request"], "7");
         assert_eq!(value["fields"]["error"], "failed with spaces");
         assert_eq!(value["fields"]["empty"], "");
+    }
+
+    #[test]
+    fn runtime_log_format_redacts_unstructured_messages_before_storage() {
+        let line = runtime_format_log_line(
+            "upstream failed Authorization: Bearer fixture-token api_key=fixture-key",
+            RuntimeLogFormat::Text,
+            "2026-05-12T00:00:00Z",
+            42,
+        );
+
+        assert!(line.contains("Authorization: Bearer <redacted>"));
+        assert!(line.contains("api_key=<redacted>"));
+        assert!(!line.contains("fixture-token"));
+        assert!(!line.contains("fixture-key"));
     }
 
     #[test]

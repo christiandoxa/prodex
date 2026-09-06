@@ -6,8 +6,8 @@ use super::log::{
 use super::log_format::{current_log_width, render_log_block};
 use super::log_tui::{
     LOG_TUI_TITLE, LogTuiHeaderDetail, LogTuiInput, LogTuiState, LogTuiTerminal, OutputThroughput,
-    contains_ignore_ascii_case, log_tui_header_detail, log_tui_header_next_refresh_at,
-    visible_text,
+    OutputThroughputDisplay, contains_ignore_ascii_case, log_tui_header_detail,
+    log_tui_header_next_refresh_at, visible_text,
 };
 use super::log_upstream_payload::{
     UpstreamPayloadEvent, render_upstream_payload_lines, upstream_payload_event_from_runtime_line,
@@ -33,7 +33,7 @@ use terminal_ui::{
     tui_primary_style, tui_secondary_style, tui_success_style, tui_title_style,
 };
 
-const LOG_STREAM_POLL_INTERVAL: Duration = Duration::from_millis(250);
+const LOG_STREAM_POLL_INTERVAL: Duration = Duration::from_millis(100);
 const LOG_SNAPSHOT_TAIL_BYTES: usize = 1024 * 1024;
 const UPSTREAM_TUI_EVENT_LIMIT: usize = 100;
 
@@ -144,7 +144,7 @@ fn stream_upstream_payload_events_tui() -> Result<()> {
                 &events,
                 &view,
                 header_detail.as_ref(),
-                throughput.display_rate_for_profile(now, header_profile.as_deref()),
+                throughput.display_for_profile(now, header_profile.as_deref()),
             );
         })?;
         if event::poll(LOG_STREAM_POLL_INTERVAL)?
@@ -255,7 +255,7 @@ fn render_upstream_payload_tui(
     events: &VecDeque<UpstreamPayloadEvent>,
     state: &LogTuiState,
     header_detail: Option<&LogTuiHeaderDetail>,
-    throughput_rate: Option<f64>,
+    throughput_display: Option<OutputThroughputDisplay>,
 ) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
@@ -271,11 +271,11 @@ fn render_upstream_payload_tui(
         None => format!("{} event(s)", events.len()),
     };
     let header = Paragraph::new(Line::styled(
-        crate::app_commands::log_tui::render_log_header(
+        crate::app_commands::log_tui::render_log_header_with_display(
             LOG_TUI_TITLE,
             &count,
             header_detail,
-            throughput_rate,
+            throughput_display,
             chunks[0].width as usize,
         ),
         tui_title_style(),

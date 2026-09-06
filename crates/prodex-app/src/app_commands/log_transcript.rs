@@ -6,6 +6,8 @@ use crate::app_commands::log_format::local_log_timestamp;
 use prodex_runtime_doctor::read_runtime_log_tail;
 use std::path::Path;
 
+const MAX_TRANSCRIPT_EVENT_TEXT_BYTES: usize = 64 * 1024;
+
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub(crate) struct TranscriptEvent {
     pub(crate) timestamp: String,
@@ -30,7 +32,9 @@ pub(crate) fn collect_new_transcript_events(
         for event in transcript_events_from_session_line(&line) {
             let event = local_transcript_event(event);
             if events.last().is_some_and(|last: &TranscriptEvent| {
-                last.source == event.source && last.text == event.text
+                last.timestamp == event.timestamp
+                    && last.source == event.source
+                    && last.text == event.text
             }) {
                 continue;
             }
@@ -87,7 +91,7 @@ pub(crate) fn transcript_events_from_session_line(line: &str) -> Vec<TranscriptE
         return Vec::new();
     };
 
-    match record_type {
+    let events = match record_type {
         "event_msg" => event_msg_transcript_event(timestamp, payload)
             .into_iter()
             .collect(),
@@ -99,7 +103,39 @@ pub(crate) fn transcript_events_from_session_line(line: &str) -> Vec<TranscriptE
             .into_iter()
             .collect(),
         _ => Vec::new(),
+    };
+    events
+        .into_iter()
+        .map(|mut event| {
+            event.text = transcript_safe_text(&event.text);
+            event
+        })
+        .filter(|event| !event.text.trim().is_empty())
+        .collect()
+}
+
+fn transcript_safe_text(text: &str) -> String {
+    let redacted = redaction::redaction_redact_secret_like_text(text);
+    let redacted = redacted
+        .chars()
+        .map(|character| {
+            if character.is_control() && !matches!(character, '\n' | '\r' | '\t') {
+                ' '
+            } else {
+                character
+            }
+        })
+        .collect::<String>();
+    if redacted.len() <= MAX_TRANSCRIPT_EVENT_TEXT_BYTES {
+        return redacted;
     }
+    let end = redacted
+        .char_indices()
+        .take_while(|(index, _)| *index < MAX_TRANSCRIPT_EVENT_TEXT_BYTES.saturating_sub(16))
+        .map(|(index, character)| index + character.len_utf8())
+        .last()
+        .unwrap_or(0);
+    format!("{} …[truncated]", &redacted[..end])
 }
 
 fn session_meta_transcript_events(
@@ -162,6 +198,9 @@ fn event_msg_transcript_event(
     {
         return protocol_operation_transcript_event(timestamp, payload, event_type);
     }
+    if event_msg_is_status(event_type) {
+        return status_transcript_event(timestamp, payload, event_type);
+    }
     let text_field = match event_type {
         "agent_reasoning" => "text",
         _ => "message",
@@ -180,6 +219,101 @@ fn event_msg_transcript_event(
         timestamp,
         source: source.to_string(),
         text: text.to_string(),
+    })
+}
+
+fn event_msg_is_status(event_type: &str) -> bool {
+    matches!(
+        event_type,
+        "task_started"
+            | "task_complete"
+            | "task_completed"
+            | "turn_started"
+            | "turn_complete"
+            | "turn_completed"
+            | "turn_aborted"
+            | "turn_cancelled"
+            | "turn_interrupted"
+            | "turn_failed"
+            | "command_execution_started"
+            | "command_execution_completed"
+            | "command_execution_finished"
+            | "command_execution_output"
+            | "exec_command_begin"
+            | "exec_command_end"
+            | "error"
+    ) || (event_type.contains("command") && event_type.contains("status"))
+}
+
+fn status_transcript_event(
+    timestamp: String,
+    payload: &serde_json::Value,
+    event_type: &str,
+) -> Option<TranscriptEvent> {
+    let source = if event_type.contains("fail")
+        || event_type.contains("abort")
+        || event_type == "error"
+        || payload
+            .get("status")
+            .and_then(serde_json::Value::as_str)
+            .is_some_and(|status| status.contains("fail") || status.contains("error"))
+    {
+        "error"
+    } else {
+        "terminal"
+    };
+    let mut details = Vec::new();
+    for key in [
+        "status",
+        "exit_code",
+        "exit_status",
+        "reason",
+        "duration_ms",
+        "message",
+    ] {
+        if let Some(value) = payload.get(key).and_then(transcript_json_scalar) {
+            details.push(format!("{key}={value}"));
+        }
+    }
+    for key in ["stdout", "stderr", "output"] {
+        if let Some(value) = payload
+            .get(key)
+            .and_then(transcript_json_text)
+            .filter(|value| !value.trim().is_empty())
+        {
+            details.push(format!("{key}:\n{}", transcript_safe_text(&value)));
+        }
+    }
+    let text = if details.is_empty() {
+        event_type.replace('_', " ")
+    } else {
+        details.join(" ")
+    };
+    Some(TranscriptEvent {
+        timestamp,
+        source: source.to_string(),
+        text,
+    })
+}
+
+fn transcript_json_scalar(value: &serde_json::Value) -> Option<String> {
+    match value {
+        serde_json::Value::String(value) => transcript_safe_operation_value(value),
+        serde_json::Value::Number(value) => Some(value.to_string()),
+        serde_json::Value::Bool(value) => Some(value.to_string()),
+        _ => None,
+    }
+}
+
+fn transcript_json_text(value: &serde_json::Value) -> Option<String> {
+    transcript_json_scalar(value).or_else(|| match value {
+        serde_json::Value::Array(_) | serde_json::Value::Object(_) => {
+            serde_json::to_string(value).ok()
+        }
+        serde_json::Value::Null
+        | serde_json::Value::Bool(_)
+        | serde_json::Value::Number(_)
+        | serde_json::Value::String(_) => None,
     })
 }
 
@@ -238,7 +372,8 @@ fn response_item_transcript_event(
             let name = payload
                 .get("name")
                 .and_then(serde_json::Value::as_str)
-                .unwrap_or("tool");
+                .map(transcript_tool_name)
+                .unwrap_or_else(|| "tool".to_string());
             let arguments = payload
                 .get("arguments")
                 .and_then(serde_json::Value::as_str)
@@ -263,7 +398,8 @@ fn response_item_transcript_event(
             let name = payload
                 .get("name")
                 .and_then(serde_json::Value::as_str)
-                .unwrap_or("custom-tool");
+                .map(transcript_tool_name)
+                .unwrap_or_else(|| "custom-tool".to_string());
             let input = payload
                 .get("input")
                 .and_then(serde_json::Value::as_str)
@@ -283,6 +419,10 @@ fn response_item_transcript_event(
                 source: "tool-output".to_string(),
                 text: output,
             })
+        }
+        "local_shell_call" | "shell_call" => shell_call_transcript_event(timestamp, payload),
+        "local_shell_call_output" | "shell_call_output" => {
+            shell_output_transcript_event(timestamp, payload)
         }
         "reasoning" => transcript_text_from_reasoning(payload).map(|text| TranscriptEvent {
             timestamp,
@@ -307,6 +447,64 @@ fn response_item_transcript_event(
         _ => None,
     }
     .filter(|event| !event.text.trim().is_empty())
+}
+
+fn shell_call_transcript_event(
+    timestamp: String,
+    payload: &serde_json::Value,
+) -> Option<TranscriptEvent> {
+    let name = payload
+        .get("name")
+        .and_then(serde_json::Value::as_str)
+        .map(transcript_tool_name)
+        .unwrap_or_else(|| "shell".to_string());
+    let command = payload
+        .get("command")
+        .or_else(|| payload.get("arguments"))
+        .or_else(|| payload.get("action"))
+        .and_then(transcript_json_text)
+        .unwrap_or_default();
+    Some(TranscriptEvent {
+        timestamp,
+        source: format!("tool-call:{name}"),
+        text: command,
+    })
+}
+
+fn transcript_tool_name(value: &str) -> String {
+    let value = redaction::redaction_redact_secret_like_text(value);
+    let mut name = value
+        .chars()
+        .take(96)
+        .map(|character| {
+            if character.is_ascii_alphanumeric() || matches!(character, '_' | '-' | '.' | ':') {
+                character
+            } else {
+                '_'
+            }
+        })
+        .collect::<String>();
+    if name.is_empty() {
+        name.push_str("tool");
+    }
+    name
+}
+
+fn shell_output_transcript_event(
+    timestamp: String,
+    payload: &serde_json::Value,
+) -> Option<TranscriptEvent> {
+    let output = payload
+        .get("output")
+        .or_else(|| payload.get("aggregated_output"))
+        .or_else(|| payload.get("stdout"))
+        .and_then(transcript_json_text)
+        .and_then(|output| transcript_visible_tool_output(&output))?;
+    Some(TranscriptEvent {
+        timestamp,
+        source: "tool-output".to_string(),
+        text: output,
+    })
 }
 
 fn transcript_user_message_is_visible(payload: &serde_json::Value) -> bool {

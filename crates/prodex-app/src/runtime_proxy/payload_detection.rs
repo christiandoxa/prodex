@@ -219,8 +219,7 @@ fn log_runtime_token_usage_event(
         runtime_proxy_log_field("output_tokens", usage.output_tokens.to_string()),
         runtime_proxy_log_field("reasoning_tokens", usage.reasoning_tokens.to_string()),
     ];
-    if matches!(event, RuntimeTokenUsageLogEvent::Final)
-        && usage.output_tokens > 0
+    if usage.output_tokens > 0
         && let Some(generation_ms) = generation_ms.filter(|value| *value > 0)
     {
         fields.push(runtime_proxy_log_field(

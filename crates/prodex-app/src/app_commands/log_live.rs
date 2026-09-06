@@ -15,7 +15,7 @@ use std::path::PathBuf;
 pub(crate) struct LiveRuntimeLogSource {
     paths: AppPaths,
     client: Client,
-    cursors: BTreeMap<String, (String, u64)>,
+    cursors: BTreeMap<String, (String, u64, u64)>,
     verified_source_identities: BTreeMap<(String, String), bool>,
 }
 
@@ -70,12 +70,12 @@ impl LiveRuntimeLogSource {
             if !identity_valid {
                 continue;
             }
-            let cursor = self
+            let (cursor, dropped_before) = self
                 .cursors
                 .get(&broker_key)
-                .filter(|(instance_id, _)| instance_id == &registry.instance_id)
-                .map(|(_, cursor)| *cursor)
-                .unwrap_or(0);
+                .filter(|(instance_id, _, _)| instance_id == &registry.instance_id)
+                .map(|(_, cursor, dropped)| (*cursor, *dropped))
+                .unwrap_or((0, 0));
             let Ok(Some(snapshot)) = probe_runtime_broker_log_snapshot(
                 &self.client,
                 &self.paths,
@@ -85,10 +85,6 @@ impl LiveRuntimeLogSource {
             ) else {
                 continue;
             };
-            self.cursors.insert(
-                broker_key.clone(),
-                (registry.instance_id.clone(), snapshot.cursor),
-            );
             let source_kind = if direct_keys.contains(&broker_key) {
                 "direct"
             } else {
@@ -98,6 +94,21 @@ impl LiveRuntimeLogSource {
                 "{source_kind}:{broker_key}:{}",
                 registry.instance_id
             ));
+            let dropped = snapshot.dropped.saturating_sub(dropped_before);
+            self.cursors.insert(
+                broker_key.clone(),
+                (
+                    registry.instance_id.clone(),
+                    snapshot.cursor,
+                    snapshot.dropped,
+                ),
+            );
+            if dropped > 0 {
+                lines.push((
+                    source_path.clone(),
+                    format!("[live] runtime_log_gap dropped={dropped} reason=bounded_buffer"),
+                ));
+            }
             lines.extend(
                 snapshot
                     .entries
@@ -160,6 +171,9 @@ pub(crate) fn collect_live_log_items(
     let Some(live_source) = live_source.as_mut() else {
         return Ok(Vec::new());
     };
+    if runtime_log::runtime_log_recording_enabled() {
+        return Ok(Vec::new());
+    }
     let mut items = Vec::new();
     for (path, line) in live_source.poll() {
         items.extend(collect_runtime_log_line(
@@ -236,13 +250,20 @@ mod tests {
     }
 
     fn snapshot_server(line: &'static str) -> (String, thread::JoinHandle<()>) {
+        snapshot_server_with_dropped(line, 0)
+    }
+
+    fn snapshot_server_with_dropped(
+        line: &'static str,
+        dropped: u64,
+    ) -> (String, thread::JoinHandle<()>) {
         let server = Server::http("127.0.0.1:0").unwrap();
         let address = server.server_addr().to_ip().unwrap();
         let handle = thread::spawn(move || {
             let request = server.recv().unwrap();
             let body = serde_json::json!({
                 "cursor": 1,
-                "dropped": 0,
+                "dropped": dropped,
                 "entries": [{"sequence": 1, "line": line}],
             });
             let response = Response::from_string(body.to_string())
@@ -250,6 +271,34 @@ mod tests {
             request.respond(response).unwrap();
         });
         (address.to_string(), handle)
+    }
+
+    #[test]
+    fn live_source_surfaces_bounded_buffer_gaps() {
+        let paths = test_paths("gap");
+        let (address, server) = snapshot_server_with_dropped("visible\n", 3);
+        let registry = test_registry("broker", "gap-instance", &address);
+        let secret = RuntimeBrokerSecret::new("gap-capability").unwrap();
+        save_runtime_broker_artifacts(&paths, "broker", "gap-instance", &secret, &registry)
+            .unwrap();
+
+        let client = Client::builder()
+            .no_proxy()
+            .timeout(Duration::from_secs(1))
+            .build()
+            .unwrap();
+        let mut source = LiveRuntimeLogSource::with_paths(paths.clone(), client);
+        source
+            .verified_source_identities
+            .insert(("broker".to_string(), "gap-instance".to_string()), true);
+
+        let lines = source.poll();
+        assert_eq!(lines.len(), 2);
+        assert!(lines[0].1.contains("runtime_log_gap dropped=3"));
+        assert_eq!(lines[1].1, "visible\n");
+
+        server.join().unwrap();
+        fs::remove_dir_all(paths.root).unwrap();
     }
 
     #[test]

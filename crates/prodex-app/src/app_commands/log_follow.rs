@@ -7,6 +7,11 @@ use std::time::{Duration, Instant};
 
 const LOG_FOLLOW_READ_CHUNK_BYTES: usize = 1024 * 1024;
 const LOG_FOLLOW_PENDING_MAX_BYTES: usize = 1024 * 1024;
+const LOG_FOLLOW_MAX_LINE_BYTES: usize = 2 * 1024 * 1024;
+
+fn log_follow_gap_marker(dropped: usize, reason: &str) -> String {
+    format!("[log] runtime_log_gap dropped={dropped} reason={reason}")
+}
 
 #[derive(Default)]
 pub(crate) struct FollowedLog {
@@ -201,15 +206,29 @@ pub(crate) fn collect_new_followed_lines(
     if complete_len == 0 {
         if state.pending.len() > LOG_FOLLOW_PENDING_MAX_BYTES {
             state.pending.clear();
+            return Ok(vec![log_follow_gap_marker(1, "oversized_partial_line")]);
         }
         return Ok(Vec::new());
     }
     let complete = String::from_utf8_lossy(&state.pending[..complete_len]).into_owned();
     state.pending.drain(..complete_len);
+    let mut lines = Vec::new();
+    let mut dropped = 0;
+    for line in complete.split_inclusive('\n') {
+        if line.len() > LOG_FOLLOW_MAX_LINE_BYTES {
+            dropped += 1;
+        } else {
+            lines.extend(line.lines().map(str::to_string));
+        }
+    }
+    if dropped > 0 {
+        lines.insert(0, log_follow_gap_marker(dropped, "oversized_line"));
+    }
     if state.pending.len() > LOG_FOLLOW_PENDING_MAX_BYTES {
         state.pending.clear();
+        lines.push(log_follow_gap_marker(1, "oversized_partial_line"));
     }
-    Ok(complete.lines().map(str::to_string).collect())
+    Ok(lines)
 }
 
 #[cfg(test)]
@@ -267,10 +286,10 @@ mod tests {
                 .is_empty()
         );
         assert_eq!(state.pending.len(), LOG_FOLLOW_PENDING_MAX_BYTES);
-        assert!(
-            collect_new_followed_lines(&path, &mut state)
-                .unwrap()
-                .is_empty()
+        let gap = collect_new_followed_lines(&path, &mut state).unwrap();
+        assert_eq!(
+            gap,
+            ["[log] runtime_log_gap dropped=1 reason=oversized_partial_line"]
         );
         assert!(state.pending.is_empty());
 

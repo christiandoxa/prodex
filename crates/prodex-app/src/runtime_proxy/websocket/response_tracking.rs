@@ -504,6 +504,8 @@ impl RuntimeWebsocketResponseLoop<'_> {
             && let Some(token_usage) = self
                 .output_token_usage_progress
                 .observe(token_usage, Instant::now())
+            && let Some(generation_ms) =
+                runtime_proxy_crate::runtime_generation_elapsed_ms(self.generation_started_at)
         {
             log_runtime_token_usage_progress(RuntimeTokenUsageLog {
                 shared: self.shared,
@@ -514,7 +516,7 @@ impl RuntimeWebsocketResponseLoop<'_> {
                 prompt_cache_key: self.request_prompt_cache_key,
                 model_name: self.request_model_name,
                 usage: Some(token_usage),
-                generation_ms: None,
+                generation_ms: Some(generation_ms),
             });
         }
         if self.committed && runtime_token_usage_event_is_loggable(event_type) {

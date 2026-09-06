@@ -35,6 +35,9 @@ use std::time::SystemTime;
 #[cfg(test)]
 use std::time::UNIX_EPOCH;
 
+#[cfg(test)]
+#[path = "log_completeness_tests.rs"]
+mod completeness_tests;
 #[path = "log_command_tui.rs"]
 mod log_command_tui;
 #[path = "log_follow.rs"]
