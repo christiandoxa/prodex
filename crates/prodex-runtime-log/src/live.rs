@@ -121,18 +121,19 @@ impl RuntimeLiveLogStore {
                 entries: Vec::new(),
             };
         };
-        let mut entries = bucket
+        let entries = bucket
             .entries
             .iter()
             .filter(|entry| entry.sequence > after)
+            .take(limit.min(DEFAULT_RUNTIME_LIVE_LOG_MAX_ENTRIES))
             .cloned()
             .collect::<Vec<_>>();
-        let keep = limit.min(DEFAULT_RUNTIME_LIVE_LOG_MAX_ENTRIES);
-        if entries.len() > keep {
-            entries.drain(..entries.len() - keep);
-        }
+        let cursor = entries
+            .last()
+            .map(|entry| entry.sequence)
+            .unwrap_or(state.next_sequence);
         RuntimeLiveLogSnapshot {
-            cursor: state.next_sequence,
+            cursor,
             dropped: bucket.dropped,
             entries,
         }
@@ -309,6 +310,24 @@ mod tests {
         assert_eq!(snapshot.entries.len(), DEFAULT_RUNTIME_LIVE_LOG_MAX_ENTRIES);
         assert!(snapshot.entries.iter().all(|entry| entry.line == "event\n"));
         assert_eq!(snapshot.dropped, 10);
+    }
+
+    #[test]
+    fn live_log_snapshot_pages_oldest_unread_entries_without_skipping() {
+        let store = RuntimeLiveLogStore::default();
+        let path = Path::new("runtime.log");
+        for index in 0..3 {
+            store.append(path, &format!("event-{index}\n"));
+        }
+
+        let first = store.snapshot_after(path, 0, 2);
+        assert_eq!(first.entries[0].line, "event-0\n");
+        assert_eq!(first.entries[1].line, "event-1\n");
+        assert_eq!(first.cursor, first.entries[1].sequence);
+
+        let second = store.snapshot_after(path, first.cursor, 2);
+        assert_eq!(second.entries.len(), 1);
+        assert_eq!(second.entries[0].line, "event-2\n");
     }
 
     #[test]

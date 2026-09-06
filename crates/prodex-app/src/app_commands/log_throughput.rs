@@ -1,6 +1,4 @@
-#[cfg(test)]
-use super::log_throughput_state::OUTPUT_THROUGHPUT_MIN_SAMPLE;
-pub(crate) use super::log_throughput_state::OutputThroughput;
+pub(crate) use super::log_throughput_state::{OutputThroughput, OutputThroughputDisplay};
 #[cfg(test)]
 use crate::reports::InfoTokenUsageEvent;
 pub(super) fn format_output_tokens_per_second(rate: Option<f64>) -> String {
@@ -21,10 +19,7 @@ pub(super) fn format_output_tokens_per_second(rate: Option<f64>) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        InfoTokenUsageEvent, OUTPUT_THROUGHPUT_MIN_SAMPLE, OutputThroughput,
-        format_output_tokens_per_second,
-    };
+    use super::{InfoTokenUsageEvent, OutputThroughput, format_output_tokens_per_second};
     use std::path::Path;
     use std::time::{Duration, Instant};
 
@@ -46,14 +41,24 @@ mod tests {
     }
 
     #[test]
-    fn output_throughput_uses_recent_output_deltas_only() {
+    fn output_throughput_uses_authoritative_generation_rate() {
         let path = Path::new("/tmp/runtime-a.log");
         let start = Instant::now();
         let mut throughput = OutputThroughput::default();
-        throughput.observe_token_usage(path, &usage("main", Some(7), 50), start);
         throughput.observe_token_usage(
             path,
-            &usage("main", Some(7), 150),
+            &InfoTokenUsageEvent {
+                generation_ms: Some(1_000),
+                ..usage("main", Some(7), 50)
+            },
+            start,
+        );
+        throughput.observe_token_usage(
+            path,
+            &InfoTokenUsageEvent {
+                generation_ms: Some(1_500),
+                ..usage("main", Some(7), 150)
+            },
             start + Duration::from_secs(1),
         );
 
@@ -65,7 +70,7 @@ mod tests {
     }
 
     #[test]
-    fn output_throughput_stays_blank_until_a_valid_sample_window() {
+    fn output_throughput_stays_blank_until_authoritative_sample() {
         let path = Path::new("/tmp/runtime-b.log");
         let start = Instant::now();
         let mut throughput = OutputThroughput::default();
@@ -75,13 +80,15 @@ mod tests {
 
         throughput.observe_token_usage(
             path,
-            &usage("main", Some(8), 2),
-            start + OUTPUT_THROUGHPUT_MIN_SAMPLE,
+            &InfoTokenUsageEvent {
+                generation_ms: Some(1_000),
+                ..usage("main", Some(8), 2)
+            },
+            start + Duration::from_millis(1),
         );
-        assert!(
-            throughput
-                .active_rate_for_profile(start + OUTPUT_THROUGHPUT_MIN_SAMPLE, None)
-                .is_some()
+        assert_eq!(
+            throughput.active_rate_for_profile(start + Duration::from_millis(1), None),
+            Some(2.0)
         );
     }
 
@@ -145,7 +152,7 @@ mod tests {
         };
         let second = InfoTokenUsageEvent {
             timestamp: "2026-08-28 12:00:01.000 +07:00".to_string(),
-            generation_ms: Some(1_000),
+            generation_ms: Some(2_000),
             output_tokens_per_second: Some(100.0),
             ..usage("main", Some(12), 200)
         };
@@ -178,10 +185,20 @@ mod tests {
         let path = Path::new("/tmp/runtime-later-turn.log");
         let start = Instant::now();
         let mut throughput = OutputThroughput::default();
-        throughput.observe_token_usage(path, &usage("main", Some(1), 100), start);
         throughput.observe_token_usage(
             path,
-            &usage("main", Some(1), 200),
+            &InfoTokenUsageEvent {
+                generation_ms: Some(1_000),
+                ..usage("main", Some(1), 100)
+            },
+            start,
+        );
+        throughput.observe_token_usage(
+            path,
+            &InfoTokenUsageEvent {
+                generation_ms: Some(2_000),
+                ..usage("main", Some(1), 200)
+            },
             start + Duration::from_secs(1),
         );
         throughput.finish(
@@ -190,6 +207,7 @@ mod tests {
                 profile: "main".to_string(),
                 request: Some(1),
                 output_tokens: 200,
+                generation_ms: Some(2_000),
                 output_tokens_per_second: Some(100.0),
                 ..InfoTokenUsageEvent::default()
             },
@@ -197,18 +215,24 @@ mod tests {
 
         throughput.observe_token_usage(
             path,
-            &usage("main", Some(2), 10),
+            &InfoTokenUsageEvent {
+                generation_ms: Some(500),
+                ..usage("main", Some(2), 10)
+            },
             start + Duration::from_secs(2),
         );
         throughput.observe_token_usage(
             path,
-            &usage("main", Some(2), 40),
+            &InfoTokenUsageEvent {
+                generation_ms: Some(2_000),
+                ..usage("main", Some(2), 40)
+            },
             start + Duration::from_secs(3),
         );
 
         assert_eq!(
             display_rate(&mut throughput, start + Duration::from_secs(3)),
-            Some(30.0)
+            Some(20.0)
         );
     }
 
@@ -217,10 +241,20 @@ mod tests {
         let path = Path::new("/tmp/runtime-profile-rotation.log");
         let start = Instant::now();
         let mut throughput = OutputThroughput::default();
-        throughput.observe_token_usage(path, &usage("main", Some(3), 100), start);
         throughput.observe_token_usage(
             path,
-            &usage("main", Some(3), 200),
+            &InfoTokenUsageEvent {
+                generation_ms: Some(1_000),
+                ..usage("main", Some(3), 100)
+            },
+            start,
+        );
+        throughput.observe_token_usage(
+            path,
+            &InfoTokenUsageEvent {
+                generation_ms: Some(2_000),
+                ..usage("main", Some(3), 200)
+            },
             start + Duration::from_secs(1),
         );
         throughput.finish(
@@ -229,6 +263,7 @@ mod tests {
                 profile: "main".to_string(),
                 request: Some(3),
                 output_tokens: 200,
+                generation_ms: Some(2_000),
                 output_tokens_per_second: Some(100.0),
                 ..InfoTokenUsageEvent::default()
             },
@@ -236,12 +271,18 @@ mod tests {
 
         throughput.observe_token_usage(
             path,
-            &usage("backup", Some(4), 5),
+            &InfoTokenUsageEvent {
+                generation_ms: Some(500),
+                ..usage("backup", Some(4), 5)
+            },
             start + Duration::from_secs(2),
         );
         throughput.observe_token_usage(
             path,
-            &usage("backup", Some(4), 25),
+            &InfoTokenUsageEvent {
+                generation_ms: Some(1_250),
+                ..usage("backup", Some(4), 25)
+            },
             start + Duration::from_secs(3),
         );
 
@@ -312,12 +353,13 @@ mod tests {
                 profile: "main".to_string(),
                 request: Some(13),
                 output_tokens: 500,
-                output_tokens_per_second: Some(66.3),
+                generation_ms: Some(10_000),
+                output_tokens_per_second: Some(50.0),
                 ..InfoTokenUsageEvent::default()
             },
         );
 
-        assert_eq!(display_rate(&mut throughput, Instant::now()), Some(66.3));
+        assert_eq!(display_rate(&mut throughput, Instant::now()), Some(50.0));
     }
 
     #[test]
@@ -331,6 +373,7 @@ mod tests {
                 profile: "backup".to_string(),
                 request: Some(14),
                 output_tokens: 200,
+                generation_ms: Some(10_000),
                 output_tokens_per_second: Some(20.0),
                 ..InfoTokenUsageEvent::default()
             },
@@ -342,6 +385,7 @@ mod tests {
                 profile: "main".to_string(),
                 request: Some(15),
                 output_tokens: 100,
+                generation_ms: Some(10_000),
                 output_tokens_per_second: Some(10.0),
                 ..InfoTokenUsageEvent::default()
             },

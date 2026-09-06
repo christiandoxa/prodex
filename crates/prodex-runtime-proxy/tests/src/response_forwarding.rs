@@ -342,16 +342,24 @@ fn sse_tap_state_emits_cumulative_live_usage_and_final_average() {
         br#"data: {"type":"response.output_text.delta","usage":{"input_tokens":1,"output_tokens":10}}"#,
     );
     effects.extend(state.observe_chunk(b"\r\n\r\n"));
+    let [
+        RuntimeSseTapEffect::LogTokenUsageProgress {
+            usage,
+            generation_ms,
+        },
+    ] = effects.as_slice()
+    else {
+        panic!("first output usage should emit live progress");
+    };
     assert_eq!(
-        effects,
-        vec![RuntimeSseTapEffect::LogTokenUsageProgress(
-            RuntimeTokenUsage {
-                input_tokens: 1,
-                output_tokens: 10,
-                ..RuntimeTokenUsage::default()
-            }
-        )]
+        *usage,
+        RuntimeTokenUsage {
+            input_tokens: 1,
+            output_tokens: 10,
+            ..RuntimeTokenUsage::default()
+        }
     );
+    assert!(*generation_ms > 0);
 
     let mut completion = state.observe_chunk(
         br#"data: {"type":"response.completed","response":{"usage":{"input_tokens":1,"output_tokens":20}}}"#,

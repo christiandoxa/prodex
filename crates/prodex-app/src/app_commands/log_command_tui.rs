@@ -12,7 +12,7 @@ use super::{
 use crate::app_commands::collect_recent_runtime_log_paths;
 use crate::app_commands::log_tui::{
     LogTuiHeaderDetail, LogTuiInput, LogTuiState, LogTuiTerminal, OutputThroughput,
-    log_tui_header_detail, log_tui_header_next_refresh_at,
+    OutputThroughputDisplay, log_tui_header_detail, log_tui_header_next_refresh_at,
 };
 use crate::app_commands::log_upstream::{
     latest_upstream_payload_event, stream_upstream_payload_events,
@@ -33,7 +33,7 @@ use std::time::{Duration, Instant};
 #[path = "log_tui_render.rs"]
 mod render;
 
-const LOG_STREAM_POLL_INTERVAL: Duration = Duration::from_millis(250);
+const LOG_STREAM_POLL_INTERVAL: Duration = Duration::from_millis(100);
 const SESSION_PATH_RECONCILE_INTERVAL: Duration = Duration::from_secs(10);
 const LOG_TUI_EVENT_LIMIT: usize = 200;
 const LOG_LOAD_COALESCE_WINDOW: Duration = Duration::from_secs(5);
@@ -185,7 +185,7 @@ fn stream_token_usage_events_tui() -> Result<()> {
                     &items,
                     &view,
                     header_detail.as_ref(),
-                    throughput.display_rate_for_profile(Instant::now(), header_profile.as_deref()),
+                    throughput.display_for_profile(Instant::now(), header_profile.as_deref()),
                 )
             })
             .context("failed to draw log stream TUI")?;
@@ -557,9 +557,9 @@ fn render_log_stream_tui(
     items: &VecDeque<LogStreamItem>,
     state: &LogTuiState,
     header_detail: Option<&LogTuiHeaderDetail>,
-    throughput_rate: Option<f64>,
+    throughput_display: Option<OutputThroughputDisplay>,
 ) {
-    render::render_log_stream_tui(frame, items, state, header_detail, throughput_rate);
+    render::render_log_stream_tui(frame, items, state, header_detail, throughput_display);
 }
 
 #[cfg(test)]

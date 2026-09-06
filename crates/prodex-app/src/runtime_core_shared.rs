@@ -404,9 +404,6 @@ fn runtime_proxy_format_dropped_log_marker(marker: runtime_log::RuntimeDroppedLo
 }
 
 pub(super) fn runtime_proxy_log_to_path(log_path: &Path, message: &str) {
-    if runtime_log::runtime_log_message_is_routine_load(message) {
-        return;
-    }
     let Ok(logger) = runtime_proxy_async_logger() else {
         return;
     };

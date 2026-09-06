@@ -84,6 +84,11 @@ fn token_usage_rejects_invalid_or_zero_output_rates() {
         .expect("token event");
         assert_eq!(event.output_tokens_per_second, None, "rate={rate}");
     }
+    let untimed = info_token_usage_event_from_line(
+        "[2026-06-19 20:00:00.000 +07:00] token_usage profile=main input_tokens=1 output_tokens=10 output_tokens_per_second=100",
+    )
+    .expect("untimed token event");
+    assert_eq!(untimed.output_tokens_per_second, None);
 }
 
 #[test]

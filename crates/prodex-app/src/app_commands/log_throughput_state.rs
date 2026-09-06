@@ -4,6 +4,7 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 const OUTPUT_THROUGHPUT_WINDOW: Duration = Duration::from_secs(2);
+#[cfg(test)]
 pub(super) const OUTPUT_THROUGHPUT_MIN_SAMPLE: Duration = Duration::from_millis(250);
 const OUTPUT_THROUGHPUT_MAX_STREAMS: usize = 64;
 const OUTPUT_THROUGHPUT_MAX_OBSERVATIONS: usize = 256;
@@ -34,11 +35,25 @@ struct OutputThroughputStream {
     last_event_at: Option<Instant>,
 }
 
-/// Tracks authoritative output-token deltas for active log streams.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) enum OutputThroughputDisplay {
+    Active(f64),
+    Last(f64),
+}
+
+impl OutputThroughputDisplay {
+    #[cfg(test)]
+    pub(crate) fn rate(self) -> f64 {
+        match self {
+            Self::Active(rate) | Self::Last(rate) => rate,
+        }
+    }
+}
+
+/// Tracks authoritative output-token usage and generation timing for log streams.
 ///
-/// The viewer only renders this value when at least two monotonic samples span the minimum
-/// interval. Final-only usage records therefore remain a completion metric, not a fabricated
-/// live rate.
+/// Local receipt times never produce a rate. A numeric rate requires output tokens and the
+/// producer's positive monotonic generation duration.
 #[derive(Debug, Default, Clone)]
 pub(crate) struct OutputThroughput {
     streams: BTreeMap<OutputThroughputKey, OutputThroughputStream>,
@@ -78,7 +93,8 @@ impl OutputThroughput {
             }
             self.remember_observation(observation, log_path);
         }
-        let rate = {
+        let rate = valid_output_rate(event);
+        {
             let stream = self.stream(&key);
             stream.last_event_at = Some(observed_at);
             if stream
@@ -95,12 +111,14 @@ impl OutputThroughput {
                 .is_none_or(|(_, previous)| event.output_tokens > *previous)
             {
                 stream.samples.push_back((observed_at, event.output_tokens));
-                stream.active = event.output_tokens > 0;
             }
             prune_output_throughput_samples(stream, observed_at);
-            output_throughput_stream_rate(stream)
-        };
-        if let Some(rate) = rate.filter(|rate| rate.is_finite() && *rate > 0.0) {
+            if let Some(rate) = rate {
+                stream.active = true;
+                stream.last_known_rate = Some(rate);
+            }
+        }
+        if let Some(rate) = rate {
             self.record_rate(&key, rate);
         }
     }
@@ -140,6 +158,9 @@ impl OutputThroughput {
             output_throughput_stream_rate(stream)
         };
         if let Some(rate) = rate.filter(|rate| rate.is_finite() && *rate > 0.0) {
+            if let Some(stream) = self.streams.get_mut(&key) {
+                stream.last_known_rate = Some(rate);
+            }
             self.record_rate(&key, rate);
         }
     }
@@ -166,7 +187,6 @@ impl OutputThroughput {
             stream.active = false;
             let rate = duplicate_rate
                 .or_else(|| valid_output_rate(event))
-                .or_else(|| output_throughput_stream_rate(stream))
                 .or(stream.last_known_rate)
                 .or_else(|| self.last_known_rates.get(&key).copied());
             if let Some(rate) = rate.filter(|rate| rate.is_finite() && *rate > 0.0) {
@@ -186,7 +206,12 @@ impl OutputThroughput {
     pub(super) fn active_profile(&self) -> Option<String> {
         self.streams
             .iter()
-            .filter(|(_, stream)| stream.active)
+            .filter(|(_, stream)| {
+                stream.active
+                    && stream
+                        .last_event_at
+                        .is_some_and(|at| at.elapsed() <= OUTPUT_THROUGHPUT_WINDOW)
+            })
             .max_by_key(|(_, stream)| stream.last_event_at)
             .map(|(key, _)| key.profile.clone())
     }
@@ -201,11 +226,14 @@ impl OutputThroughput {
             if preferred_profile.is_some_and(|profile| profile != key.profile) {
                 continue;
             }
-            if !stream.active {
+            if !stream.active
+                || !stream
+                    .last_event_at
+                    .is_some_and(|at| now.saturating_duration_since(at) <= OUTPUT_THROUGHPUT_WINDOW)
+            {
                 continue;
             }
-            prune_output_throughput_samples(stream, now);
-            if let Some(rate) = output_throughput_stream_rate(stream) {
+            if let Some(rate) = stream.last_known_rate {
                 active.push((key.clone(), stream.last_event_at, rate));
             }
         }
@@ -213,10 +241,7 @@ impl OutputThroughput {
             .into_iter()
             .max_by_key(|(_, last_event_at, _)| *last_event_at)
             .map(|(key, _, _)| key)?;
-        let rate = self
-            .streams
-            .get(&selected_key)
-            .and_then(output_throughput_stream_rate)?;
+        let rate = self.streams.get(&selected_key)?.last_known_rate?;
         if rate.is_finite() && rate > 0.0 {
             self.record_rate(&selected_key, rate);
             Some(rate)
@@ -225,19 +250,30 @@ impl OutputThroughput {
         }
     }
 
+    #[cfg(test)]
     pub(super) fn display_rate_for_profile(
         &mut self,
         now: Instant,
         preferred_profile: Option<&str>,
     ) -> Option<f64> {
+        self.display_for_profile(now, preferred_profile)
+            .map(OutputThroughputDisplay::rate)
+    }
+
+    pub(super) fn display_for_profile(
+        &mut self,
+        now: Instant,
+        preferred_profile: Option<&str>,
+    ) -> Option<OutputThroughputDisplay> {
         if let Some(rate) = self.active_rate_for_profile(now, preferred_profile) {
-            return Some(rate);
+            return Some(OutputThroughputDisplay::Active(rate));
         }
         let key = match preferred_profile {
             Some(profile) => self.last_event_keys.get(profile),
             None => self.last_event_key.as_ref(),
         };
         key.and_then(|key| self.last_known_rates.get(key).copied())
+            .map(OutputThroughputDisplay::Last)
     }
 
     pub(super) fn observe_historical(&mut self, log_path: &Path, event: &InfoTokenUsageEvent) {
@@ -385,21 +421,22 @@ fn output_throughput_observation(event: &InfoTokenUsageEvent) -> OutputThroughpu
         transport: event.transport.clone(),
         source: event.source.clone(),
         output_tokens: event.output_tokens,
-        completion: event.generation_ms.is_some() || event.output_tokens_per_second.is_some(),
+        completion: event.generation_ms.is_some(),
     }
 }
 
 fn is_live_log_path(path: &Path) -> bool {
     path.to_str()
-        .is_some_and(|path| path.starts_with("broker:"))
+        .is_some_and(|path| path.starts_with("broker:") || path.starts_with("direct:"))
 }
 
 fn valid_output_rate(event: &InfoTokenUsageEvent) -> Option<f64> {
-    event
-        .output_tokens_per_second
-        .filter(|rate| rate.is_finite() && *rate > 0.0)
-        .filter(|_| event.output_tokens > 0)
-        .filter(|_| event.generation_ms.is_none_or(|duration| duration > 0))
+    let duration = event.generation_ms.filter(|duration| *duration > 0)?;
+    if event.output_tokens == 0 {
+        return None;
+    }
+    let rate = event.output_tokens as f64 * 1_000.0 / duration as f64;
+    rate.is_finite().then_some(rate)
 }
 
 fn prune_output_throughput_samples(stream: &mut OutputThroughputStream, now: Instant) {
@@ -410,6 +447,7 @@ fn prune_output_throughput_samples(stream: &mut OutputThroughputStream, now: Ins
     }
 }
 
+#[cfg(test)]
 fn output_throughput_stream_rate(stream: &OutputThroughputStream) -> Option<f64> {
     let (first_at, first_tokens) = stream.samples.front()?;
     let (last_at, last_tokens) = stream.samples.back()?;
@@ -472,15 +510,15 @@ mod tests {
             profile: "main".to_string(),
             request: Some(11),
             output_tokens: 100,
-            generation_ms: Some(1_500),
-            output_tokens_per_second: Some(66.3),
+            generation_ms: Some(2_000),
+            output_tokens_per_second: Some(50.0),
             ..InfoTokenUsageEvent::default()
         };
         throughput.observe_token_usage(path, &completed, start + Duration::from_secs(1));
         throughput.finish(path, &completed);
         assert_eq!(
             display_rate(&mut throughput, start + Duration::from_secs(60)),
-            Some(66.3)
+            Some(50.0)
         );
 
         let warming = InfoTokenUsageEvent {
@@ -492,7 +530,7 @@ mod tests {
         throughput.observe_token_usage(path, &warming, start + Duration::from_secs(61));
         assert_eq!(
             display_rate(&mut throughput, start + Duration::from_secs(61)),
-            Some(66.3)
+            Some(50.0)
         );
     }
 
@@ -524,7 +562,8 @@ mod tests {
                     timestamp: format!("2026-08-28T00:00:{index:03}Z"),
                     profile: format!("profile-{index:03}"),
                     request: Some(index),
-                    output_tokens: 1,
+                    output_tokens: index,
+                    generation_ms: Some(1_000),
                     output_tokens_per_second: Some(index as f64),
                     ..InfoTokenUsageEvent::default()
                 },
@@ -536,7 +575,8 @@ mod tests {
                 timestamp: "2026-08-28T00:00:100Z".to_string(),
                 profile: "profile-000".to_string(),
                 request: Some(100),
-                output_tokens: 1,
+                output_tokens: 100,
+                generation_ms: Some(1_000),
                 output_tokens_per_second: Some(100.0),
                 ..InfoTokenUsageEvent::default()
             },
@@ -547,7 +587,8 @@ mod tests {
                 timestamp: "2026-08-28T00:00:090Z".to_string(),
                 profile: "profile-064".to_string(),
                 request: Some(64),
-                output_tokens: 1,
+                output_tokens: 64,
+                generation_ms: Some(1_000),
                 output_tokens_per_second: Some(64.0),
                 ..InfoTokenUsageEvent::default()
             },

@@ -1,6 +1,7 @@
 use crate::app_commands::log_format::render_text_body;
 use crate::app_commands::log_tui::{
-    LOG_TUI_TITLE, LogTuiHeaderDetail, LogTuiState, contains_ignore_ascii_case, visible_text,
+    LOG_TUI_TITLE, LogTuiHeaderDetail, LogTuiState, OutputThroughputDisplay,
+    contains_ignore_ascii_case, render_log_header_with_display, visible_text,
 };
 use crate::app_commands::log_upstream_payload::{
     UpstreamPayloadEvent, render_upstream_payload_lines,
@@ -98,7 +99,7 @@ pub(super) fn render_log_stream_tui(
     items: &VecDeque<LogStreamItem>,
     state: &LogTuiState,
     header_detail: Option<&LogTuiHeaderDetail>,
-    throughput_rate: Option<f64>,
+    throughput_display: Option<OutputThroughputDisplay>,
 ) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
@@ -109,11 +110,11 @@ pub(super) fn render_log_stream_tui(
         ])
         .split(frame.area());
     let header = Paragraph::new(Line::styled(
-        crate::app_commands::log_tui::render_log_header(
+        render_log_header_with_display(
             LOG_TUI_TITLE,
             "",
             header_detail,
-            throughput_rate,
+            throughput_display,
             chunks[0].width as usize,
         ),
         tui_title_style(),
@@ -300,8 +301,18 @@ fn push_log_stream_item_lines(
                 Span::styled(event.output_tokens.to_string(), tui_metric_style()),
                 Span::styled(" reasoning ", tui_muted_style()),
                 Span::styled(event.reasoning_tokens.to_string(), tui_tool_style()),
+                Span::styled(" generation ", tui_muted_style()),
+                Span::styled(
+                    event
+                        .generation_ms
+                        .map(|duration| format!("{duration}ms"))
+                        .unwrap_or_else(|| "unavailable".to_string()),
+                    tui_metric_style(),
+                ),
             ]));
-            if let Some(rate) = event.output_tokens_per_second {
+            if event.generation_ms.is_some_and(|duration| duration > 0)
+                && let Some(rate) = event.output_tokens_per_second
+            {
                 lines.push(Line::from(vec![
                     Span::styled("average ", tui_muted_style()),
                     Span::styled(

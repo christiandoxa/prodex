@@ -1,4 +1,6 @@
-pub(super) use super::log_throughput::{OutputThroughput, format_output_tokens_per_second};
+pub(super) use super::log_throughput::{
+    OutputThroughput, OutputThroughputDisplay, format_output_tokens_per_second,
+};
 use crate::{
     AppPaths, AppState, AppStateIoExt, LiveQuotaWatchRuntimeUsageCache,
     RuntimeProfileUsageSnapshot, load_live_quota_watch_runtime_usage_cache,
@@ -41,6 +43,7 @@ pub(super) struct LogTuiHeaderDetail {
     refresh_interval: Duration,
 }
 
+#[cfg(test)]
 pub(super) fn render_log_header(
     title: &str,
     _count: &str,
@@ -48,8 +51,30 @@ pub(super) fn render_log_header(
     throughput_rate: Option<f64>,
     width: usize,
 ) -> String {
+    render_log_header_with_display(
+        title,
+        _count,
+        detail,
+        throughput_rate.map(OutputThroughputDisplay::Last),
+        width,
+    )
+}
+
+pub(super) fn render_log_header_with_display(
+    title: &str,
+    _count: &str,
+    detail: Option<&LogTuiHeaderDetail>,
+    throughput_display: Option<OutputThroughputDisplay>,
+    width: usize,
+) -> String {
     let inner_width = width.saturating_sub(2);
-    let throughput = format_output_tokens_per_second(throughput_rate);
+    let throughput = match throughput_display {
+        Some(OutputThroughputDisplay::Active(rate)) => format_output_tokens_per_second(Some(rate)),
+        Some(OutputThroughputDisplay::Last(rate)) => {
+            format!("last {}", format_output_tokens_per_second(Some(rate)))
+        }
+        None => format_output_tokens_per_second(None),
+    };
     let throughput_width = terminal_ui::text_width(&throughput);
     if inner_width <= throughput_width {
         return terminal_ui::fit_cell(&throughput, inner_width);

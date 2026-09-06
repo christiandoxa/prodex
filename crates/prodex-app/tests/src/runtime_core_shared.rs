@@ -337,6 +337,27 @@ fn runtime_proxy_log_to_path_preserves_valid_json_format() {
 }
 
 #[test]
+fn runtime_proxy_log_to_path_keeps_routine_events_for_json_consumers() {
+    let _runtime_lock = acquire_test_runtime_lock();
+    set_runtime_proxy_log_format(RuntimeLogFormat::Text);
+    let dir = RuntimeProxyLogTestDir::new();
+    let log_path = dir.log_path("routine.log");
+    open_runtime_proxy_private_file(&log_path).expect("private runtime log should create");
+
+    runtime_proxy_log_to_path(
+        &log_path,
+        "profile_inflight_saturated request=7 profile=main active=8 hard_limit=8",
+    );
+    runtime_proxy_flush_logs_for_path(&log_path).expect("routine event should flush");
+
+    assert!(
+        fs::read_to_string(&log_path)
+            .unwrap()
+            .contains("profile_inflight_saturated")
+    );
+}
+
+#[test]
 fn runtime_proxy_structured_log_message_quotes_spaced_field_values() {
     let message = runtime_proxy_structured_log_message(
         "dispatch_error",
