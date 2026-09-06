@@ -103,6 +103,8 @@ test("parseArgs supports dry-run resume and bounded step selection", () => {
     "--resume",
     "--version",
     "0.93.0",
+    "--publish-at",
+    "2026-09-06T20:00:00Z",
     "--from",
     "watch-ci",
     "--to",
@@ -114,8 +116,16 @@ test("parseArgs supports dry-run resume and bounded step selection", () => {
   assert.equal(args.dryRun, true);
   assert.equal(args.resume, true);
   assert.equal(args.version, "0.93.0");
+  assert.equal(args.publishAt, "2026-09-06T20:00:00Z");
   assert.deepEqual(args.steps, ["watch-ci", "trigger-publish", "watch-publish", "verify"]);
   assert.equal(args.pollSeconds, 1);
+});
+
+test("parseArgs rejects a publication time without an explicit timezone", () => {
+  assert.throws(
+    () => parseArgs(["node", "release-run.mjs", "--publish-at", "2026-09-06T20:00:00"]),
+    /absolute ISO 8601 timestamp/u,
+  );
 });
 
 test("unsupported remote diagnostics redact URL userinfo", () => {
@@ -297,6 +307,8 @@ test("release-run dry-run covers mandatory release order without mutation or net
       "1",
       "--publish-timeout-minutes",
       "1",
+      "--publish-at",
+      "2026-09-06T20:00:00Z",
     ]);
 
     assert.equal(stderr, "");
@@ -325,7 +337,8 @@ test("release-run dry-run covers mandatory release order without mutation or net
       "dry-run: gh api --method GET /repos/example/prodex/actions/workflows/standalone-release.yml/runs?branch=main&event=workflow_dispatch&per_page=20",
       "dry-run: gh api --method POST /repos/example/prodex/actions/workflows/standalone-release.yml/dispatches -f ref=main -f inputs[target_sha]=",
       "-f inputs[version]=0.2.0",
-      "trigger-publish: would dispatch standalone-release.yml for main (0.2.0)",
+      "-f inputs[publish_at]=2026-09-06T20:00:00Z",
+      "trigger-publish: would dispatch standalone-release.yml for main (0.2.0) for publication at 2026-09-06T20:00:00Z",
       "release-run: watch-publish (0.2.0)",
       "dry-run: watch standalone-release.yml event=workflow_dispatch for ",
       "release-run: verify (0.2.0)",

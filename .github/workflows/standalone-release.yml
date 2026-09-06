@@ -11,6 +11,11 @@ on:
         description: Exact Cargo package version to release
         required: true
         type: string
+      publish_at:
+        description: Optional absolute UTC publication time (ISO 8601)
+        required: false
+        default: ""
+        type: string
 
 concurrency:
   group: standalone-release
@@ -39,6 +44,7 @@ jobs:
     outputs:
       target_sha: ${{ steps.target.outputs.target_sha }}
       version: ${{ steps.target.outputs.version }}
+      publish_at: ${{ steps.target.outputs.publish_at }}
 
     steps:
       - name: Check out release ref
@@ -50,6 +56,8 @@ jobs:
       - name: Resolve release target
         id: target
         env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_PUBLISH_AT: ${{ inputs.publish_at }}
           RELEASE_TARGET_SHA: ${{ inputs.target_sha }}
           RELEASE_VERSION: ${{ inputs.version }}
         shell: bash
@@ -76,6 +84,26 @@ jobs:
             echo "release version ${RELEASE_VERSION} does not match Cargo.toml ${version}" >&2
             exit 1
           fi
+          publish_at="$(RELEASE_PUBLISH_AT="${RELEASE_PUBLISH_AT}" python - <<'PY'
+          from datetime import datetime, timezone
+          import os
+
+          value = os.environ["RELEASE_PUBLISH_AT"].strip()
+          if not value:
+              print("")
+          else:
+              parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+              if parsed.tzinfo is None:
+                  raise SystemExit("publish_at must include an explicit timezone")
+              print(parsed.astimezone(timezone.utc).isoformat().replace("+00:00", "Z"))
+          PY
+          )"
+          release_status="$(gh api --include "repos/${GITHUB_REPOSITORY}/releases/tags/${version}" 2>&1 | awk '/^HTTP\// { code = $2 } END { print code }')" || true
+          case "${release_status}" in
+            404) ;;
+            200) echo "release ${version} already exists; refusing to overwrite it" >&2; exit 1 ;;
+            *) echo "could not verify whether release ${version} exists" >&2; exit 1 ;;
+          esac
           git fetch origin --tags --force
           if release_tag_sha="$(git rev-list -n1 "${version}" 2>/dev/null)" \
             && [ "${release_tag_sha}" != "${target_sha}" ]; then
@@ -94,6 +122,7 @@ jobs:
           {
             echo "target_sha=${target_sha}"
             echo "version=${version}"
+            echo "publish_at=${publish_at}"
           } >> "${GITHUB_OUTPUT}"
 
       - name: Install Node.js for release metadata checks
@@ -873,6 +902,9 @@ jobs:
       contents: read
       id-token: write
       packages: write
+    outputs:
+      image_name: ${{ steps.image.outputs.name }}
+      image_digest: ${{ steps.image.outputs.digest }}
 
     steps:
       - name: Check out release ref
@@ -905,21 +937,23 @@ jobs:
       - name: Build, scan, and push container
         id: image
         env:
+          TARGET_SHA: ${{ needs.verify-ci.outputs.target_sha }}
           VERSION: ${{ steps.release.outputs.version }}
         shell: bash
         run: |
           set -euo pipefail
           image="ghcr.io/${GITHUB_REPOSITORY,,}"
+          candidate_tag="sha-${TARGET_SHA}"
           docker build --pull \
             --label "org.opencontainers.image.revision=${GITHUB_SHA}" \
             --label "org.opencontainers.image.source=https://github.com/${GITHUB_REPOSITORY}" \
             --label "org.opencontainers.image.version=${VERSION}" \
-            --tag "${image}:${VERSION}" \
+            --tag "${image}:${candidate_tag}" \
             .
 
           trivy_image="docker.io/aquasec/trivy:0.72.0@sha256:cffe3f5161a47a6823fbd23d985795b3ed72a4c806da4c4df16266c02accdd6f"
           mkdir -p dist "${RUNNER_TEMP}/trivy-cache" "${RUNNER_TEMP}/trivy-input"
-          docker save "${image}:${VERSION}" --output "${RUNNER_TEMP}/trivy-input/image.tar"
+          docker save "${image}:${candidate_tag}" --output "${RUNNER_TEMP}/trivy-input/image.tar"
           docker run --rm \
             -v "${RUNNER_TEMP}/trivy-cache:/root/.cache/trivy" \
             -v "${RUNNER_TEMP}/trivy-input:/input:ro" \
@@ -930,8 +964,8 @@ jobs:
             --output "/output/prodex-container-vulnerability-${VERSION}.json"
           rm -f "${RUNNER_TEMP}/trivy-input/image.tar"
 
-          docker push "${image}:${VERSION}"
-          repository_digest="$(docker inspect --format='{{index .RepoDigests 0}}' "${image}:${VERSION}")"
+          docker push "${image}:${candidate_tag}"
+          repository_digest="$(docker inspect --format='{{index .RepoDigests 0}}' "${image}:${candidate_tag}")"
           digest="${repository_digest#*@}"
           if [[ ! "${digest}" =~ ^sha256:[0-9a-f]{64}$ ]]; then
             echo "registry returned an invalid image digest" >&2
@@ -1145,12 +1179,13 @@ jobs:
       - publish-container
       - sync-release-docs
       - verify-ci
-    timeout-minutes: 60
+    timeout-minutes: 360
     permissions:
       artifact-metadata: write
       attestations: write
       contents: write
       id-token: write
+      packages: write
 
     steps:
       - name: Check out repository
@@ -1368,6 +1403,94 @@ jobs:
             }
           done
 
+      - name: Wait for the absolute publication target and revalidate
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PUBLISH_AT: ${{ needs.verify-ci.outputs.publish_at }}
+          RELEASE_SHA: ${{ steps.release.outputs.target_sha }}
+          RELEASE_VERSION: ${{ steps.release.outputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -n "${PUBLISH_AT}" ]; then
+            target_epoch="$(PUBLISH_AT="${PUBLISH_AT}" python - <<'PY'
+          from datetime import datetime
+          import os
+
+          print(int(datetime.fromisoformat(os.environ["PUBLISH_AT"].replace("Z", "+00:00")).timestamp()))
+          PY
+            )"
+            now_epoch="$(date -u +%s)"
+            remaining="$((target_epoch - now_epoch))"
+            if [ "${remaining}" -gt 18900 ]; then
+              echo "publication target is more than 5h15m away; dispatch this workflow later" >&2
+              exit 1
+            fi
+            while [ "${remaining}" -gt 0 ]; do
+              delay=15
+              if [ "${remaining}" -lt "${delay}" ]; then
+                delay="${remaining}"
+              fi
+              echo "publication target ${PUBLISH_AT}: ${remaining}s remaining"
+              sleep "${delay}"
+              now_epoch="$(date -u +%s)"
+              remaining="$((target_epoch - now_epoch))"
+            done
+          fi
+
+          test "$(git rev-parse HEAD)" = "${RELEASE_SHA}"
+          source_version="$(python - <<'PY'
+          import tomllib
+          with open("Cargo.toml", "rb") as handle:
+              print(tomllib.load(handle)["package"]["version"])
+          PY
+          )"
+          test "${source_version}" = "${RELEASE_VERSION}"
+          git fetch origin --tags --force
+          release_status="$(gh api --include "repos/${GITHUB_REPOSITORY}/releases/tags/${RELEASE_VERSION}" 2>&1 | awk '/^HTTP\// { code = $2 } END { print code }')" || true
+          case "${release_status}" in
+            404) ;;
+            200) echo "release ${RELEASE_VERSION} already exists; refusing to overwrite it" >&2; exit 1 ;;
+            *) echo "could not verify whether release ${RELEASE_VERSION} exists" >&2; exit 1 ;;
+          esac
+          node scripts/ci/optional-tools-freshness.mjs \
+            --check --json --checkpoint P --release-sha "${RELEASE_SHA}" \
+            | tee "${RUNNER_TEMP}/optional-tools-freshness-P.json"
+          test -s "${RUNNER_TEMP}/optional-tools-freshness-P.json"
+
+      - name: Upload pre-publication freshness evidence
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: optional-tools-freshness-publish-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/optional-tools-freshness-P.json
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Publish the verified container version tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+          IMAGE_DIGEST: ${{ needs.publish-container.outputs.image_digest }}
+          IMAGE_NAME: ${{ needs.publish-container.outputs.image_name }}
+          RELEASE_VERSION: ${{ steps.release.outputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "${IMAGE_DIGEST}" =~ ^sha256:[0-9a-f]{64}$ ]]
+          echo "${GH_TOKEN}" | docker login ghcr.io --username "${GITHUB_ACTOR}" --password-stdin
+          existing_digest="$(docker buildx imagetools inspect "${IMAGE_NAME}:${RELEASE_VERSION}" 2>/dev/null | awk '$1 == "Digest:" { print $2; exit }' || true)"
+          if [ -n "${existing_digest}" ] && [ "${existing_digest}" != "${IMAGE_DIGEST}" ]; then
+            echo "container tag ${RELEASE_VERSION} already points to ${existing_digest}; refusing to move it" >&2
+            exit 1
+          fi
+          if [ -z "${existing_digest}" ]; then
+            docker buildx imagetools create \
+              --prefer-index=false \
+              --tag "${IMAGE_NAME}:${RELEASE_VERSION}" \
+              "${IMAGE_NAME}@${IMAGE_DIGEST}"
+          fi
+          published_digest="$(docker buildx imagetools inspect "${IMAGE_NAME}:${RELEASE_VERSION}" | awk '$1 == "Digest:" { print $2; exit }')"
+          test "${published_digest}" = "${IMAGE_DIGEST}"
+
       - name: Create release tag
         env:
           GH_TOKEN: ${{ github.token }}
@@ -1435,17 +1558,16 @@ jobs:
 
           All published assets passed the release malware gate.
           EOF
-          if gh release view "${tag}" >/dev/null 2>&1; then
-            gh release edit "${tag}" \
-              --title "${title}" \
-              --notes-file "${notes_file}"
-            gh release upload "${tag}" release-assets/* --clobber
-          else
-            gh release create "${tag}" release-assets/* \
-              --title "${title}" \
-              --notes-file "${notes_file}" \
-              --latest
-          fi
+          release_status="$(gh api --include "repos/${GITHUB_REPOSITORY}/releases/tags/${tag}" 2>&1 | awk '/^HTTP\// { code = $2 } END { print code }')" || true
+          case "${release_status}" in
+            404) ;;
+            200) echo "release ${tag} already exists; refusing to overwrite it" >&2; exit 1 ;;
+            *) echo "could not verify whether release ${tag} exists" >&2; exit 1 ;;
+          esac
+          gh release create "${tag}" release-assets/* \
+            --title "${title}" \
+            --notes-file "${notes_file}" \
+            --latest
 
   publish-duration-telemetry:
     name: Publish duration telemetry

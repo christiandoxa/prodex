@@ -63,6 +63,27 @@ test("release manifest, checksums, and SBOM accept Prodex assets only", () => {
   assert.match(release, /release assets must not contain Codex executables or bundles/u);
 });
 
+test("release stages immutable artifacts and waits before public version mutations", () => {
+  const workflow = readFileSync(".github/workflows/standalone-release.yml", "utf8");
+  const container = workflow.match(/\n  publish-container:\n([\s\S]*?)\n  prepare-release:/u)?.[1];
+  const publish = workflow.match(/\n  publish-github-release:\n([\s\S]*?)\n  publish-duration-telemetry:/u)?.[1];
+
+  assert.ok(container, "container staging job missing");
+  assert.ok(publish, "release publication job missing");
+  assert.match(workflow, /publish_at:/u);
+  assert.match(container, /candidate_tag="sha-\$\{TARGET_SHA\}"/u);
+  assert.doesNotMatch(container, /docker push "\$\{image\}:\$\{VERSION\}"/u);
+  assert.match(publish, /--checkpoint P --release-sha/u);
+  assert.match(publish, /docker buildx imagetools create/u);
+  assert.match(publish, /--prefer-index=false/u);
+  assert.match(publish, /refusing to move it/u);
+  assert.doesNotMatch(publish, /--clobber|gh release edit/u);
+  assert.ok(
+    publish.indexOf("Wait for the absolute publication target") <
+      publish.indexOf("Create release tag"),
+  );
+});
+
 test("release manifest renderer rejects Codex executable names", async (t) => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "prodex-release-manifest-test-"));
   t.after(() => fs.rm(root, { recursive: true, force: true }));
