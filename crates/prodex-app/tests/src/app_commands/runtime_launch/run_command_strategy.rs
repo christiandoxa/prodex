@@ -6,6 +6,8 @@ mod live_goal_resume;
 mod model_resume;
 #[path = "run_command_strategy/session_binding.rs"]
 mod session_binding;
+#[path = "run_command_strategy/workflow_recovery.rs"]
+mod workflow_recovery;
 
 fn exit_status(code: i32) -> std::process::ExitStatus {
     #[cfg(unix)]
