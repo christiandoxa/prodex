@@ -217,7 +217,7 @@
           "required_contains": [
             "static_model_catalog",
             "normalize_bedrock_catalog",
-            "gpt_5_6_bedrock_model",
+            "fn bedrock_model(",
             "AMAZON_BEDROCK_GPT_5_6_SOL_MODEL_ID",
             "AMAZON_BEDROCK_GPT_5_6_TERRA_MODEL_ID",
             "AMAZON_BEDROCK_GPT_5_6_LUNA_MODEL_ID",
@@ -514,11 +514,21 @@
         },
         {
           "path": "codex-rs/tools/src/json_schema.rs",
-          "reason": "Owns normalized tool schema composition preservation and large-schema compaction behavior consumed by richer MCP tools.",
+          "reason": "Owns normalized tool schema composition preservation and delegates large-schema compaction consumed by richer MCP tools.",
           "required_contains": [
             "anyOf",
             "oneOf",
             "allOf",
+            "compact_large_tool_schema"
+          ]
+        },
+        {
+          "path": "codex-rs/tools/src/json_schema/compaction.rs",
+          "reason": "Owns the bounded, ordered large-tool-schema compaction passes after the 0.153.4 module split.",
+          "required_contains": [
+            "compact_large_tool_schema",
+            "LARGE_SCHEMA_COMPACTION_PASSES",
+            "MAX_COMPACT_TOOL_SCHEMA_BYTES",
             "MAX_COMPACT_TOOL_SCHEMA_DEPTH",
             "prune_schema_compositions"
           ]
@@ -1110,7 +1120,7 @@
           "file_contains_all": [
             "static_model_catalog",
             "normalize_bedrock_catalog",
-            "gpt_5_6_bedrock_model",
+            "fn bedrock_model(",
             "AMAZON_BEDROCK_GPT_5_6_SOL_MODEL_ID",
             "AMAZON_BEDROCK_GPT_5_6_TERRA_MODEL_ID",
             "AMAZON_BEDROCK_GPT_5_6_LUNA_MODEL_ID",
@@ -1122,6 +1132,19 @@
             "WebSearchToolType::Text",
             "model.use_responses_lite = false",
             "model.tool_mode = None"
+          ]
+        },
+        {
+          "id": "tools.large-schema-compaction",
+          "kind": "tool_schema",
+          "file": "codex-rs/tools/src/json_schema/compaction.rs",
+          "reason": "Codex 0.153.4 moved bounded large-tool-schema compaction into its focused module without changing the ordered best-effort policy.",
+          "file_contains_all": [
+            "compact_large_tool_schema",
+            "LARGE_SCHEMA_COMPACTION_PASSES",
+            "MAX_COMPACT_TOOL_SCHEMA_BYTES",
+            "MAX_COMPACT_TOOL_SCHEMA_DEPTH",
+            "prune_schema_compositions"
           ]
         },
         {
@@ -1696,10 +1719,10 @@
   },
   "claude": {
     "latestRelease": {
-      "tag_name": "v2.1.252",
-      "name": "v2.1.252",
-      "published_at": "2026-08-31T19:46:55Z",
-      "html_url": "https://github.com/anthropics/claude-code/releases/tag/v2.1.252"
+      "tag_name": "v2.1.263",
+      "name": "v2.1.263",
+      "published_at": "2026-09-06T02:54:20Z",
+      "html_url": "https://github.com/anthropics/claude-code/releases/tag/v2.1.263"
     },
     "docs": [
       {
