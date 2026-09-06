@@ -66,12 +66,21 @@ fn live_app_server_probe_and_turn_control_require_exact_thread_and_workspace() {
                 let method = request["method"].as_str().unwrap();
                 server_methods.lock().unwrap().push(method.to_string());
                 let result = match method {
-                    "initialize" => serde_json::json!({
-                        "codexHome": server_codex_home.clone(),
-                        "platformFamily": "unix",
-                        "platformOs": "linux",
-                        "userAgent": "probe"
-                    }),
+                    "initialize" => {
+                        assert_eq!(request["params"]["capabilities"]["experimentalApi"], true);
+                        assert!(
+                            !request["params"]["clientInfo"]["version"]
+                                .as_str()
+                                .unwrap_or_default()
+                                .is_empty()
+                        );
+                        serde_json::json!({
+                            "codexHome": server_codex_home.clone(),
+                            "platformFamily": "unix",
+                            "platformOs": "linux",
+                            "userAgent": "probe"
+                        })
+                    }
                     "thread/read" => serde_json::json!({
                         "thread": if connection == 2 {
                             serde_json::json!({
@@ -92,22 +101,19 @@ fn live_app_server_probe_and_turn_control_require_exact_thread_and_workspace() {
                             })
                         }
                     }),
-                    "turn/start" => {
+                    "thread/queue/add" => {
                         assert_eq!(request["params"]["threadId"], THREAD);
                         assert_eq!(request["params"]["input"][0]["type"], "text");
                         assert_eq!(request["params"]["input"][0]["text"], "visible message");
-                        assert!(
-                            uuid::Uuid::parse_str(
-                                request["params"]["clientUserMessageId"]
-                                    .as_str()
-                                    .unwrap_or_default()
-                            )
-                            .is_ok()
-                        );
+                        let client_id = request["params"]["clientUserMessageId"]
+                            .as_str()
+                            .unwrap_or_default();
+                        assert!(uuid::Uuid::parse_str(client_id).is_ok());
                         serde_json::json!({
-                            "turn": {
+                            "queuedSubmission": {
                                 "id": "019f3b59-7771-7ea1-a9a1-3cd638f216c5",
-                                "status": "inProgress"
+                                "clientUserMessageId": client_id,
+                                "input": request["params"]["input"].clone()
                             }
                         })
                     }
@@ -120,7 +126,7 @@ fn live_app_server_probe_and_turn_control_require_exact_thread_and_workspace() {
                             .into(),
                     ))
                     .unwrap();
-                if method == "turn/start"
+                if method == "thread/queue/add"
                     || (connection == 0 && method == "thread/read")
                     || (connection == 2 && method == "thread/read")
                 {
@@ -166,20 +172,14 @@ fn live_app_server_probe_and_turn_control_require_exact_thread_and_workspace() {
     );
     let invocation = SystemQueueControl.queue_once(&target, "visible message");
     assert!(
-        invocation.succeeded,
+        invocation.outcome == super::session_prompt_write::QueueRequestOutcome::Accepted,
         "app-server methods: {:?}",
         methods.lock().unwrap()
     );
     assert!(invocation.message_id.is_some());
     assert_eq!(
         methods.lock().unwrap().as_slice(),
-        [
-            "initialize",
-            "thread/read",
-            "initialize",
-            "thread/read",
-            "turn/start"
-        ]
+        ["initialize", "thread/read", "thread/queue/add"]
     );
     assert!(
         !SystemQueueControl
@@ -191,9 +191,7 @@ fn live_app_server_probe_and_turn_control_require_exact_thread_and_workspace() {
         [
             "initialize",
             "thread/read",
-            "initialize",
-            "thread/read",
-            "turn/start",
+            "thread/queue/add",
             "initialize",
             "thread/read"
         ]
@@ -321,12 +319,16 @@ fn live_app_server_busy_prompt_write_uses_authoritative_queue() {
 
     let invocation = SystemQueueControl.queue_once(&target, &expected_message);
     server.join().unwrap();
-    assert!(invocation.succeeded);
+    assert_eq!(
+        invocation.outcome,
+        super::session_prompt_write::QueueRequestOutcome::Accepted
+    );
     assert!(invocation.queued);
     assert!(invocation.message_id.is_some());
     assert_eq!(
-        methods.lock().unwrap().as_slice(),
-        ["initialize", "thread/read", "thread/queue/add"]
+        invocation.submission_id.as_deref(),
+        Some("019f3b59-7771-7ea1-a9a1-3cd638f216c6")
     );
+    assert_eq!(methods.lock().unwrap().as_slice(), ["thread/queue/add"]);
     let _ = std::fs::remove_dir_all(root);
 }

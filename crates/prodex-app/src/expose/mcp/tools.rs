@@ -316,7 +316,7 @@ pub(super) fn mcp_tools() -> Vec<Value> {
         ),
         tool_definition(
             "prodex_session_prompt_write",
-            "Prompt Write: deliver one session input to an already-running plain `prodex s` through the supported Codex control plane. It uses the same fail-closed identity checks as output reads and never starts another solver.",
+            "Prompt Write: deliver one session input to an already-running plain `prodex s` through the supported Codex control plane. It uses the same fail-closed identity checks as output reads and never starts another solver. A returned output_cursor is an optional pre-write rollout anchor; write_ambiguous means delivery may have happened and must not be replayed.",
             json!({
                 "type": "object",
                 "properties": {
@@ -328,14 +328,14 @@ pub(super) fn mcp_tools() -> Vec<Value> {
                 "required": ["message"],
                 "additionalProperties": false
             }),
-            json!({"type": "object", "properties": {"status": {"type": "string"}, "prodex_pid": {"type": "integer"}, "codex_pid": {"type": "integer"}, "thread_id": {"type": "string"}, "message_id": {"type": ["string", "null"]}, "queue_exit": {"type": "integer"}, "verification": {"type": "string"}}, "required": ["status", "prodex_pid", "codex_pid", "thread_id", "queue_exit", "verification"]}),
+            json!({"type": "object", "properties": {"status": {"type": "string"}, "prodex_pid": {"type": "integer"}, "codex_pid": {"type": "integer"}, "thread_id": {"type": "string"}, "message_id": {"type": ["string", "null"]}, "submission_id": {"type": ["string", "null"]}, "output_cursor": {"type": ["string", "null"]}, "queue_exit": {"type": "integer"}, "verification": {"type": "string"}}, "required": ["status", "prodex_pid", "codex_pid", "thread_id", "message_id", "submission_id", "output_cursor", "queue_exit", "verification"]}),
             false,
             false,
             false,
         ),
         tool_definition(
             "prodex_session_output_read",
-            "Read bounded user-visible output from the same already-running plain `prodex s` interactive session; it never starts another solver or reads its PTY.",
+            "Read bounded user-visible output from the same already-running plain `prodex s` interactive session; it never starts another solver or reads its PTY. Pages may contain generic gap markers for safely skipped malformed records and text_truncated markers for bounded text.",
             json!({
                 "type": "object",
                 "properties": {

@@ -222,15 +222,28 @@ default tool list additionally contains:
   opaque monotonic cursor.
 
 The common calls are `{"message":"continue fixing the issue"}` and `{}`. A
-prompt write is handled by the already-open parent session; its visible
-TUI remains the human-facing view. A read returns `next_cursor`; pass it as
-`cursor` to receive only later output.
+prompt write is handled by the already-open parent session. The unmodified
+Codex TUI is not required to render externally queued follow-ups; use Output
+Read for the authoritative machine-readable result. Prompt Write may return
+an optional `output_cursor` only when it can bind to the exact pre-write
+rollout source. A read returns `next_cursor`; pass it as `cursor` to receive
+only later output.
 Both directions use one shared process identity resolver: same OS user and
 canonical cwd, one live plain `prodex s`, its actual live Codex writer, and the
 writer's process-bound thread identity. Ambiguous or stale targets fail closed.
 Neither tool reads `/dev/pts`, sends terminal keystrokes, starts a solver, or
 writes SQLite queue payloads. Raw hidden reasoning, prompt instructions, and
 credentials are not returned.
+
+Machine statuses distinguish `written`, `no_session`, `ambiguous_session`,
+`stale_target`, `queue_failed`, and `write_ambiguous`. Only authoritative
+`no_session` permits a `prodex_super_start` fallback. `write_ambiguous` means
+the request may already be accepted after a close, timeout, or malformed
+response; never replay it automatically and make no exactly-once claim.
+Output pages may contain bounded generic `gap` markers for malformed,
+invalid-UTF-8, or oversized records. Text bounded by the bridge is marked
+`[text_truncated]`; if safe bounded recovery is impossible, the error status is
+`recovery_failed`.
 
 Thread identity authority is the open
 `thread-writer-locks/<UUID>.lock` held by the current writer. Older Codex

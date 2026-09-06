@@ -1,6 +1,6 @@
 use super::{
-    QUEUE_COMMAND_TIMEOUT, QueueControl, QueueInvocation, ResolvedTarget, SessionBinding,
-    SessionPromptWriteError, SessionPromptWriteRequest, SessionPromptWriteService,
+    QUEUE_COMMAND_TIMEOUT, QueueControl, QueueInvocation, QueueRequestOutcome, ResolvedTarget,
+    SessionBinding, SessionPromptWriteError, SessionPromptWriteRequest, SessionPromptWriteService,
     output_source_id, rollout_contains_exact_user_message,
 };
 use std::path::{Path, PathBuf};
@@ -81,14 +81,23 @@ where
         rollout_before: Option<&(PathBuf, u64, String)>,
         invocation: &QueueInvocation,
     ) -> std::result::Result<&'static str, SessionPromptWriteError> {
-        if !invocation.succeeded {
-            return Err(SessionPromptWriteError::QueueFailed);
+        match invocation.outcome {
+            QueueRequestOutcome::Rejected => Err(SessionPromptWriteError::QueueFailed),
+            QueueRequestOutcome::Preflight => {
+                Err(SessionPromptWriteError::SessionNotQueueAddressable)
+            }
+            QueueRequestOutcome::Ambiguous => Err(SessionPromptWriteError::WriteAmbiguous),
+            QueueRequestOutcome::Accepted if invocation.queued => Ok("queue_pending_observed"),
+            QueueRequestOutcome::Accepted => {
+                self.wait_for_rollout_user_message(
+                    request,
+                    workspace_root,
+                    target,
+                    rollout_before,
+                )?;
+                Ok("rollout_user_event_observed")
+            }
         }
-        if invocation.queued {
-            return Ok("queue_pending_observed");
-        }
-        self.wait_for_rollout_user_message(request, workspace_root, target, rollout_before)?;
-        Ok("rollout_user_event_observed")
     }
 
     fn wait_for_rollout_user_message(

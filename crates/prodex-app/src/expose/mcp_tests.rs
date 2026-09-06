@@ -29,7 +29,7 @@ fn expose_send_test_request(listen_addr: SocketAddr, request: &str) -> String {
     response
 }
 
-fn expose_test_args() -> ExposeArgs {
+pub(super) fn expose_test_args() -> ExposeArgs {
     ExposeArgs {
         command: None,
         cols: 80,
@@ -121,8 +121,9 @@ pub(super) fn expose_mcp_request(
 }
 
 #[derive(Default)]
-struct SyntheticSessionBridge {
-    written: Mutex<Vec<SessionPromptWriteRequest>>,
+pub(super) struct SyntheticSessionBridge {
+    pub(super) written: Mutex<Vec<SessionPromptWriteRequest>>,
+    pub(super) read: Mutex<Vec<PromptOutputReadRequest>>,
 }
 
 impl ExistingSessionPromptWrite for SyntheticSessionBridge {
@@ -136,6 +137,8 @@ impl ExistingSessionPromptWrite for SyntheticSessionBridge {
             codex_pid: 456,
             thread_id: "019f3b59-7771-7ea1-a9a1-3cd638f216c4".to_string(),
             message_id: Some("019f3b59-7771-7ea1-a9a1-3cd638f216c5".to_string()),
+            submission_id: Some("019f3b59-7771-7ea1-a9a1-3cd638f216c6".to_string()),
+            output_cursor: Some("cursor-anchor".to_string()),
             queue_exit: 0,
             verification: "rollout_user_event_observed",
         })
@@ -143,8 +146,17 @@ impl ExistingSessionPromptWrite for SyntheticSessionBridge {
 
     fn read_output(
         &self,
-        _request: PromptOutputReadRequest,
+        request: PromptOutputReadRequest,
     ) -> Result<PromptOutputReadSuccess, SessionPromptWriteError> {
+        let cursor = request.cursor.clone();
+        self.read.lock().unwrap().push(request);
+        let (text, next_cursor, has_more) = match cursor.as_deref() {
+            None => ("synthetic output", "cursor-anchor", true),
+            Some("cursor-anchor") => ("assistant output", "cursor-1", true),
+            Some("cursor-1") => ("tool result", "cursor-2", true),
+            Some("cursor-2") => ("turn completed", "cursor-3", false),
+            _ => ("synthetic output", "cursor-3", false),
+        };
         Ok(PromptOutputReadSuccess {
             prodex_pid: 123,
             codex_pid: 456,
@@ -156,10 +168,10 @@ impl ExistingSessionPromptWrite for SyntheticSessionBridge {
                 kind: "assistant".to_string(),
                 name: None,
                 status: None,
-                text: "synthetic output".to_string(),
+                text: text.to_string(),
             }],
-            next_cursor: "cursor-1".to_string(),
-            has_more: false,
+            next_cursor: next_cursor.to_string(),
+            has_more,
         })
     }
 }

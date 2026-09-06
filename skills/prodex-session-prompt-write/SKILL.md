@@ -15,13 +15,19 @@ Use `prodex s expose` from the same canonical workspace as the one plain
 For development requests, resolve the existing session first. Use
 `prodex_session_prompt_write` exactly once when one compatible plain `prodex s`
 exists, then read output with the returned `prodex_pid`, `thread_id`, and
-`next_cursor`. The prompt write is observable in the already-open parent
-TUI. A fresh idle session is valid before its first manual prompt;
+`next_cursor`. The unmodified Codex TUI is not required to render an externally
+queued follow-up; use Output Read for the authoritative machine-readable result.
+A fresh idle session is valid before its first manual prompt;
 the bridge verifies its live app-server thread and delivers the requested message
 through Codex. Start one `prodex_super_start` fallback only after an authoritative
 `no_session` result. Never start the existing-session and fallback paths in
 parallel, and never treat addressability, ambiguity, stale identity, queue,
 source, or verification errors as `no_session`.
+
+Prompt Write may return an optional `output_cursor` anchor when the exact
+pre-write rollout source is known; fresh no-source sessions may return `null`.
+`write_ambiguous` means delivery may have happened after a close, timeout, or
+malformed response. Never replay it automatically and make no exactly-once claim.
 
 The two tools share one target identity. Require the same live OS user,
 canonical cwd, plain-session command, Prodex process birth identity, actual
@@ -38,7 +44,10 @@ message; the bridge verifies that exact live thread before writing and then
 revalidates persistence.
 
 Output reads are bounded and cursor-based. Return only existing sanitized
-user-visible assistant/tool/status transcript events. Never expose hidden
-reasoning, instructions, credentials, queue payloads, or raw rollout JSON.
+user-visible assistant/tool/status transcript events. Pages may contain bounded
+generic `gap` markers for malformed, invalid-UTF-8, or oversized records, and
+`[text_truncated]` when text is bounded. Impossible recovery returns
+`recovery_failed`. Never expose hidden reasoning, instructions, credentials,
+queue payloads, or raw rollout JSON.
 Never read a target PTY or `/dev/pts`, synthesize keystrokes, write SQLite
 queue rows, or start another solver/writer.

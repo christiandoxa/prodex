@@ -30,12 +30,12 @@ use std::sync::{Arc, Mutex};
 use std::time::Instant;
 use uuid::Uuid;
 
-fn mcp_binding_key(request: &ExposeHttpRequest) -> String {
-    let session = request.header("Mcp-Session-Id").unwrap_or("stateless");
-    expose_token_digest(session)
-        .iter()
-        .map(|byte| format!("{byte:02x}"))
-        .collect()
+fn normalized_thread_id(arguments: &Value) -> std::result::Result<Option<String>, String> {
+    optional_string(arguments, "thread_id", 128)?.map_or(Ok(None), |thread_id| {
+        Uuid::parse_str(&thread_id)
+            .map(|thread_id| Some(thread_id.to_string()))
+            .map_err(|_| "thread_id is invalid".to_string())
+    })
 }
 
 impl ExposeMcpEndpoint {
@@ -252,7 +252,7 @@ impl ExposeMcpEndpoint {
             "initialize" => self.initialize(id, params, request.header("MCP-Protocol-Version")),
             "ping" => mcp_json_response(200, jsonrpc_result(id, json!({}))),
             "tools/list" => self.tools_list(id),
-            "tools/call" => self.tools_call(id, params, &mcp_binding_key(request), shutdown),
+            "tools/call" => self.tools_call(id, params, shutdown),
             _ => mcp_error_response(404, id, -32601, "method not found"),
         }
     }
@@ -348,7 +348,6 @@ impl ExposeMcpEndpoint {
         &self,
         id: Option<Value>,
         params: &Value,
-        binding_key: &str,
         shutdown: &std::sync::Arc<std::sync::atomic::AtomicBool>,
     ) -> ExposeHttpResponse {
         let Some(params) = params.as_object() else {
@@ -371,8 +370,8 @@ impl ExposeMcpEndpoint {
             "prodex_super_events" => self.events_tool(arguments),
             "prodex_super_result" => self.result_tool(arguments),
             "prodex_super_cancel" => self.cancel_tool(arguments),
-            "prodex_session_prompt_write" => self.session_prompt_write_tool(arguments, binding_key),
-            "prodex_session_output_read" => self.output_read_tool(arguments, binding_key, shutdown),
+            "prodex_session_prompt_write" => self.session_prompt_write_tool(arguments),
+            "prodex_session_output_read" => self.output_read_tool(arguments, shutdown),
             "prodex_super_list" => Ok(json!({
                 "instance_id": self.instance_id,
                 "runs": self.run_manager.list().iter().map(run_summary_json).collect::<Vec<_>>()
@@ -393,30 +392,22 @@ impl ExposeMcpEndpoint {
         }
     }
 
-    fn session_prompt_write_tool(
-        &self,
-        arguments: &Value,
-        binding_key: &str,
-    ) -> std::result::Result<Value, String> {
+    fn session_prompt_write_tool(&self, arguments: &Value) -> std::result::Result<Value, String> {
         let message =
             required_string(arguments, "message", SESSION_PROMPT_WRITE_MAX_MESSAGE_BYTES)?;
         if message.as_bytes().contains(&0) {
             return Err("message must not contain NUL".to_string());
         }
-        let thread_id = optional_string(arguments, "thread_id", 128)?;
-        if thread_id
-            .as_deref()
-            .is_some_and(|thread_id| Uuid::parse_str(thread_id).is_err())
-        {
-            return Err("thread_id is invalid".to_string());
-        }
+        let prodex_pid = optional_process_id(arguments)?;
+        let thread_id = normalized_thread_id(arguments)?;
+        let binding_key = self.session_binding_key(prodex_pid, thread_id.as_deref());
         let request = SessionPromptWriteRequest {
             workspace_root: self.workspace_root.clone(),
             message,
             cwd: optional_string(arguments, "cwd", 4096)?,
-            prodex_pid: optional_process_id(arguments)?,
+            prodex_pid,
             thread_id,
-            binding_key: binding_key.to_string(),
+            binding_key,
         };
         let result = self
             .session_prompt_write
@@ -428,6 +419,8 @@ impl ExposeMcpEndpoint {
             "codex_pid": result.codex_pid,
             "thread_id": result.thread_id,
             "message_id": result.message_id,
+            "submission_id": result.submission_id,
+            "output_cursor": result.output_cursor,
             "queue_exit": result.queue_exit,
             "verification": result.verification,
         }))
@@ -436,7 +429,6 @@ impl ExposeMcpEndpoint {
     fn output_read_tool(
         &self,
         arguments: &Value,
-        binding_key: &str,
         shutdown: &std::sync::Arc<std::sync::atomic::AtomicBool>,
     ) -> std::result::Result<Value, String> {
         let limit = arguments
@@ -459,21 +451,17 @@ impl ExposeMcpEndpoint {
                 "wait_ms must be between 0 and {MCP_MAX_OUTPUT_WAIT_MS}"
             ));
         }
-        let thread_id = optional_string(arguments, "thread_id", 128)?;
-        if thread_id
-            .as_deref()
-            .is_some_and(|thread_id| Uuid::parse_str(thread_id).is_err())
-        {
-            return Err("thread_id is invalid".to_string());
-        }
+        let prodex_pid = optional_process_id(arguments)?;
+        let thread_id = normalized_thread_id(arguments)?;
+        let binding_key = self.session_binding_key(prodex_pid, thread_id.as_deref());
         let request = PromptOutputReadRequest {
             workspace_root: self.workspace_root.clone(),
             cursor: optional_string(arguments, "cursor", MCP_MAX_CURSOR_BYTES)?,
             limit,
             wait_ms,
-            prodex_pid: optional_process_id(arguments)?,
+            prodex_pid,
             thread_id,
-            binding_key: binding_key.to_string(),
+            binding_key,
             shutdown: Some(std::sync::Arc::clone(shutdown)),
         };
         let result = self
@@ -497,6 +485,15 @@ impl ExposeMcpEndpoint {
             "next_cursor": result.next_cursor,
             "has_more": result.has_more,
         }))
+    }
+
+    fn session_binding_key(&self, prodex_pid: Option<u32>, thread_id: Option<&str>) -> String {
+        format!(
+            "{}:pid={}:thread={}",
+            self.instance_id,
+            prodex_pid.map_or_else(|| "*".to_string(), |pid| pid.to_string()),
+            thread_id.unwrap_or("*")
+        )
     }
 
     pub(crate) fn start_tool(&self, arguments: &Value) -> std::result::Result<Value, String> {
