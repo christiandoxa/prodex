@@ -177,6 +177,11 @@ test("bad release SHA and checkpoint are rejected before checking", () => {
     () => parseArgs(["node", "checker", "--checkpoint", "A", "--release-sha", releaseSha]),
     /invalid checkpoint: A/u,
   );
+  assert.equal(
+    parseArgs(["node", "checker", "--checkpoint", "P", "--release-sha", releaseSha])
+      .checkpoint,
+    "P",
+  );
   assert.throws(
     () => parseArgs(["node", "checker", "--json"]),
     /--json requires --checkpoint and --release-sha/u,

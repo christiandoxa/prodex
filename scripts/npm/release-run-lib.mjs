@@ -51,6 +51,7 @@ function usage() {
     "  --remote <name>            git remote for push (default: origin)",
     "  --ci-workflow <file>       workflow to watch after push (default: ci.yml)",
     "  --publish-workflow <file>  workflow to dispatch/watch (default: standalone-release.yml)",
+    "  --publish-at <timestamp>    optional absolute ISO 8601 publication time",
     "  --ci-timeout-minutes <n>   CI watch timeout (default: 90)",
     "  --publish-timeout-minutes <n> publish workflow watch timeout (default: 120)",
     "  --poll-seconds <n>         workflow polling interval (default: 30)",
@@ -76,6 +77,7 @@ export function parseArgs(argv) {
     remote: "origin",
     ciWorkflow: defaultCiWorkflow,
     publishWorkflow: defaultPublishWorkflow,
+    publishAt: null,
     ciTimeoutMinutes: 90,
     publishTimeoutMinutes: 120,
     pollSeconds: 30,
@@ -132,6 +134,7 @@ export function parseArgs(argv) {
       ["--remote", "remote"],
       ["--ci-workflow", "ciWorkflow"],
       ["--publish-workflow", "publishWorkflow"],
+      ["--publish-at", "publishAt"],
       ["--from", "from"],
       ["--to", "to"],
       ["--only", "only"],
@@ -177,6 +180,12 @@ export function parseArgs(argv) {
 
   if (args.version && !packageVersionPattern.test(args.version)) {
     throw new Error(`invalid --version: ${args.version}`);
+  }
+  if (
+    args.publishAt !== null &&
+    (!/(?:Z|[+-]\d{2}:\d{2})$/u.test(args.publishAt) || Number.isNaN(Date.parse(args.publishAt)))
+  ) {
+    throw new Error("--publish-at requires an absolute ISO 8601 timestamp with timezone");
   }
 
   args.steps = selectSteps({ fromStep, toStep, onlySteps });
@@ -749,18 +758,23 @@ async function triggerPublish(repo, version, args) {
     process.stdout.write(`trigger-publish: existing run for ${headSha}: ${existing.html_url}\n`);
     return;
   }
+  const fields = {
+    ref: args.branch,
+    "inputs[target_sha]": headSha,
+    "inputs[version]": version,
+  };
+  if (args.publishAt) fields["inputs[publish_at]"] = args.publishAt;
   await ghApi(`/repos/${repo}/actions/workflows/${args.publishWorkflow}/dispatches`, {
     method: "POST",
-    fields: {
-      ref: args.branch,
-      "inputs[target_sha]": headSha,
-      "inputs[version]": version,
-    },
+    fields,
     retries: args.ghRetries,
     dryRun: args.dryRun,
   });
   const action = args.dryRun ? "would dispatch" : "dispatched";
-  process.stdout.write(`trigger-publish: ${action} ${args.publishWorkflow} for ${args.branch} (${version})\n`);
+  const schedule = args.publishAt ? ` for publication at ${args.publishAt}` : "";
+  process.stdout.write(
+    `trigger-publish: ${action} ${args.publishWorkflow} for ${args.branch} (${version})${schedule}\n`,
+  );
 }
 
 async function verifyGithubRelease(repo, version, args) {

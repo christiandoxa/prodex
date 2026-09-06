@@ -351,7 +351,7 @@ export function validateReleaseContainerPublication(contents) {
     ["attest-binaries", attestBinaries, 15],
     ["prepare-release", prepare, 30],
     ["sync-release-docs", syncDocs, 15],
-    ["publish-github-release", release, 60],
+    ["publish-github-release", release, 360],
   ]) {
     if (!job.includes(`timeout-minutes: ${timeout}`)) {
       violations.push(`.github/workflows/standalone-release.yml: ${name} timeout must be ${timeout} minutes`);
@@ -371,7 +371,7 @@ export function validateReleaseContainerPublication(contents) {
       violations.push(`.github/workflows/standalone-release.yml: binary attestation missing ${marker}`);
     }
   }
-  for (const marker of ["target_sha:", "version:", "required: true"]) {
+  for (const marker of ["target_sha:", "version:", "publish_at:", "required: true"]) {
     if (!workflowHeader.includes(marker)) {
       violations.push(`.github/workflows/standalone-release.yml: release dispatch input missing ${marker}`);
     }
@@ -469,10 +469,19 @@ export function validateReleaseContainerPublication(contents) {
     "find release-assets -maxdepth 1 -type f -print0",
     'git tag "${version}" "${TARGET_SHA}"',
     'push origin "refs/tags/${version}"',
+    "--checkpoint P --release-sha",
+    "docker buildx imagetools create",
+    "refusing to move it",
+    "refusing to overwrite it",
   ]) {
     if (!release.includes(marker)) {
       violations.push(`.github/workflows/standalone-release.yml: release publication missing ${marker}`);
     }
+  }
+  if (release.includes("--clobber") || release.includes("gh release edit")) {
+    violations.push(
+      ".github/workflows/standalone-release.yml: existing public releases must not be overwritten",
+    );
   }
   return violations;
 }

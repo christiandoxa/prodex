@@ -8,7 +8,7 @@ import { repoRoot } from "../npm/common.mjs";
 const auditPath = path.join(repoRoot, "migration", "optional-tools-audit.json");
 const runtimeInventoryPath = path.join(repoRoot, "crates/prodex-optional-tools/src/lib.rs");
 const FRESHNESS_SCHEMA_VERSION = 1;
-const VALID_CHECKPOINTS = new Set(["B"]);
+const VALID_CHECKPOINTS = new Set(["B", "P"]);
 const RELEASE_SHA_PATTERN = /^[0-9a-f]{40}$/u;
 
 export function parseArgs(argv) {
