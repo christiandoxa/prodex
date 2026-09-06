@@ -109,6 +109,7 @@ struct PingResult {
     effective_model: Option<String>,
     status: PingStatus,
     detail: String,
+    first_response_latency_ms: Option<u128>,
     latency_ms: Option<u128>,
 }
 
@@ -223,7 +224,14 @@ fn probe_ping_target(target: PingTarget, options: &PingProbeOptions) -> PingResu
     let started = Instant::now();
     let (status, detail) = match run_ping_command(&target, options) {
         Ok(output) => {
-            let result = ping_result_from_output(&output, options.model.clone(), started);
+            let result = ping_result_from_output(
+                &output.output,
+                options.model.clone(),
+                output
+                    .first_stdout_match_latency
+                    .map(|value| value.as_millis()),
+                started,
+            );
             return PingResult {
                 profile: target.name,
                 ..result
@@ -237,6 +245,7 @@ fn probe_ping_target(target: PingTarget, options: &PingProbeOptions) -> PingResu
         effective_model: None,
         status,
         detail,
+        first_response_latency_ms: None,
         latency_ms: Some(started.elapsed().as_millis()),
     }
 }
@@ -257,7 +266,12 @@ fn validate_ping_args(args: &PingOpenaiArgs) -> Result<()> {
     Ok(())
 }
 
-fn ping_result_from_output(output: &Output, model: Option<String>, started: Instant) -> PingResult {
+fn ping_result_from_output(
+    output: &Output,
+    model: Option<String>,
+    first_response_latency_ms: Option<u128>,
+    started: Instant,
+) -> PingResult {
     let no_stdout = output.stdout.iter().all(u8::is_ascii_whitespace);
     let (status, detail) = match validate_ping_output(output) {
         Ok(()) if output.status.success() => (
@@ -290,6 +304,7 @@ fn ping_result_from_output(output: &Output, model: Option<String>, started: Inst
         effective_model: None,
         status,
         detail,
+        first_response_latency_ms,
         latency_ms: Some(started.elapsed().as_millis()),
     }
 }

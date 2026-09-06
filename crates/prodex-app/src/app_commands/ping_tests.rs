@@ -160,6 +160,7 @@ fn authoritative_error_is_classified_when_child_emits_no_json() {
     let result = ping_result_from_output(
         &output_with_stderr("", "HTTP 503 upstream unavailable", false),
         None,
+        None,
         std::time::Instant::now(),
     );
     assert_eq!(result.status, PingStatus::UpstreamOverloaded);
@@ -186,6 +187,7 @@ fn structured_failure_detail_preserves_authoritative_message() {
             false,
         ),
         None,
+        None,
         Instant::now(),
     );
 
@@ -206,6 +208,7 @@ fn fast_nonzero_exit_preserves_bounded_redacted_stderr_detail() {
             &format!("fast child failure {secret}\n{}", "x".repeat(8_000)),
             false,
         ),
+        None,
         None,
         Instant::now(),
     );
@@ -280,5 +283,31 @@ fn ping_timeout_cleans_diagnostic_directory_and_child_process() {
     assert!(result.unwrap_err().to_string().contains("timed out"));
     assert!(started.elapsed() < Duration::from_secs(2));
     assert_eq!(temp_entries(), before);
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[cfg(unix)]
+#[test]
+fn ping_records_first_model_response_from_fragmented_jsonl() {
+    let root = std::env::temp_dir().join(format!(
+        "prodex-ping-first-response-test-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos(),
+    ));
+    fs::create_dir_all(&root).unwrap();
+    let script = r#"printf '%s' '{"type":"item.completed","item":{"type":"agent_message","text":"hel'; sleep 0.05; printf '%s\n' 'lo"}}'; sleep 0.05; printf '%s\n' '{"type":"turn.completed","usage":{}}'"#;
+    let plan = ChildProcessPlan::new(OsString::from("sh"), root.clone())
+        .with_args(vec![OsString::from("-c"), OsString::from(script)]);
+
+    let observed = run_ping_child(&plan, Duration::from_secs(2)).unwrap();
+    let first = observed
+        .first_stdout_match_latency
+        .expect("agent message should be observed");
+
+    assert!(observed.output.status.success());
+    assert!(first >= Duration::from_millis(25));
     fs::remove_dir_all(root).unwrap();
 }

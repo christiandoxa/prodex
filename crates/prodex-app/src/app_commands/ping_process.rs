@@ -1,5 +1,6 @@
 use super::super::{
-    ChildProcessPlan, codex_child_plan, command_output_with_timeout, prepare_codex_launch_args,
+    ChildProcessPlan, ObservedCommandOutput, codex_child_plan,
+    command_output_with_timeout_matching_stdout_line, prepare_codex_launch_args,
     profile_openai_compatible_codex_args, remove_provider_secret_env, remove_upstream_proxy_env,
     runtime_launch_openai_spark_context_codex_args,
 };
@@ -98,12 +99,18 @@ fn ping_child_plan(target: &PingTarget, options: &PingProbeOptions) -> Result<Ch
     Ok(plan)
 }
 
-pub(super) fn run_ping_command(target: &PingTarget, options: &PingProbeOptions) -> Result<Output> {
+pub(super) fn run_ping_command(
+    target: &PingTarget,
+    options: &PingProbeOptions,
+) -> Result<ObservedCommandOutput> {
     let plan = ping_child_plan(target, options)?;
     run_ping_child(&plan, PING_TIMEOUT)
 }
 
-pub(super) fn run_ping_child(plan: &ChildProcessPlan, timeout: Duration) -> Result<Output> {
+pub(super) fn run_ping_child(
+    plan: &ChildProcessPlan,
+    timeout: Duration,
+) -> Result<ObservedCommandOutput> {
     crate::validate_selected_codex_binary(&plan.binary)?;
     let cwd = create_ping_cwd()?;
     let result = {
@@ -118,11 +125,12 @@ pub(super) fn run_ping_child(plan: &ChildProcessPlan, timeout: Duration) -> Resu
         for (key, value) in &plan.extra_env {
             command.env(key, value);
         }
-        command_output_with_timeout(
+        command_output_with_timeout_matching_stdout_line(
             &mut command,
             timeout,
             PING_OUTPUT_MAX_BYTES,
             "OpenAI application ping",
+            Some(ping_stdout_line_is_model_response),
         )
     };
     let cleanup = cleanup_ping_cwd(&cwd);
@@ -134,6 +142,21 @@ pub(super) fn run_ping_child(plan: &ChildProcessPlan, timeout: Duration) -> Resu
             "failed to clean the diagnostic directory: {cleanup_error}"
         )),
     }
+}
+
+fn ping_stdout_line_is_model_response(line: &[u8]) -> bool {
+    let Ok(event) = serde_json::from_slice::<serde_json::Value>(line) else {
+        return false;
+    };
+    event.get("type").and_then(serde_json::Value::as_str) == Some("item.completed")
+        && event
+            .pointer("/item/type")
+            .and_then(serde_json::Value::as_str)
+            == Some("agent_message")
+        && event
+            .pointer("/item/text")
+            .and_then(serde_json::Value::as_str)
+            .is_some_and(|text| !text.trim().is_empty())
 }
 
 pub(super) fn ping_output_failure_detail(base: &str, output: &Output) -> String {

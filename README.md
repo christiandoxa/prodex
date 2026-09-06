@@ -484,7 +484,9 @@ model response is enough; the response does not need to say `pong`. Use
 `prodex ping openai --json` for the aggregate machine-readable result. This
 report keeps requested and effective model fields separate; when Codex JSONL
 does not expose the effective model, it reports `unavailable` instead of
-guessing. This is an application-level provider diagnostic, not ICMP, DNS,
+guessing. It reports credential validation, first completed model-message
+latency, and terminal completion latency separately. This is an
+application-level provider diagnostic, not ICMP, DNS,
 TCP, TLS, or `/models` connectivity testing.
 
 ## ChatGPT MCP expose
