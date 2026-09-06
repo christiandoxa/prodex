@@ -6,6 +6,7 @@ import {
   platformPackages,
   repoRoot,
 } from "../npm/common.mjs";
+import { validateCodexPackageLock } from "./codex-purity-guard.mjs";
 
 const ACTION = /^\s*uses:\s*([^\s#]+)(?:\s+#\s*(\S+))?\s*$/gmu;
 const CONTAINER = /\b((?:ghcr\.io|quay\.io|docker\.io)\/[a-z0-9._/-]+|anchore\/[a-z0-9._/-]+):([a-z0-9._-]+)(?:@sha256:([a-f0-9]{64}))?/giu;
@@ -591,6 +592,22 @@ export function validateReleaseCodexExclusion(contents) {
   if (!contents.includes("find release-assets -maxdepth 1 -type f")) {
     violations.push(".github/workflows/standalone-release.yml: release asset scope must be explicit");
   }
+  const artifactSmoke = workflowJob(contents, "artifact-smoke") ?? "";
+  const container = workflowJob(contents, "publish-container") ?? "";
+  const prepare = workflowJob(contents, "prepare-release") ?? "";
+  const release = workflowJob(contents, "publish-github-release") ?? "";
+  for (const [surface, job, marker] of [
+    ["artifact and installer", artifactSmoke, "codex-purity-guard.mjs package-lock.json install.sh install.ps1 artifact"],
+    ["staged npm package", artifactSmoke, "npm-package-smoke.mjs --binary-dir artifact"],
+    ["container filesystem", container, 'codex-purity-guard.mjs "${container_rootfs}"'],
+    ["SBOM input", prepare, "codex-purity-guard.mjs sbom-input"],
+    ["SBOM output", prepare, "codex-purity-guard.mjs release-sbom.spdx.json"],
+    ["GitHub release assets", release, "codex-purity-guard.mjs release-assets"],
+  ]) {
+    if (!job.includes(marker)) {
+      violations.push(`.github/workflows/standalone-release.yml: ${surface} lacks the Codex purity guard`);
+    }
+  }
   return violations;
 }
 
@@ -653,8 +670,30 @@ function selfTest() {
     ).length > 0,
     true,
   );
-  assert.deepEqual(validateReleaseCodexExclusion("find release-assets -maxdepth 1 -type f"), []);
-  assert.equal(validateReleaseCodexExclusion("codex-asset").length, 1);
+  assert.equal(
+    validateCodexPackageLock({ packages: { "node_modules/@openai/codex": { name: "@openai/codex" } } }).length > 0,
+    true,
+  );
+  const releasePurityFixture = `
+  artifact-smoke:
+    run: node scripts/ci/codex-purity-guard.mjs package-lock.json install.sh install.ps1 artifact
+    npm: node scripts/ci/npm-package-smoke.mjs --binary-dir artifact
+  publish-container:
+    run: node scripts/ci/codex-purity-guard.mjs "\${container_rootfs}"
+  prepare-release:
+    input: node scripts/ci/codex-purity-guard.mjs sbom-input
+    output: node scripts/ci/codex-purity-guard.mjs release-sbom.spdx.json
+  publish-github-release:
+    scope: find release-assets -maxdepth 1 -type f
+    run: node scripts/ci/codex-purity-guard.mjs release-assets
+`;
+  assert.deepEqual(validateReleaseCodexExclusion(releasePurityFixture), []);
+  assert.equal(
+    validateReleaseCodexExclusion(releasePurityFixture.replace("codex-purity-guard.mjs sbom-input", "missing"))
+      .length,
+    1,
+  );
+  assert.equal(validateReleaseCodexExclusion("codex-asset").length > 0, true);
   const windowsJobs = `jobs:
   windows-workspace:
     steps:
@@ -946,7 +985,11 @@ async function main() {
   const npmWorkspaceManifest = JSON.parse(
     await fs.readFile(path.join(repoRoot, "package.json"), "utf8"),
   );
+  const npmLock = JSON.parse(
+    await fs.readFile(path.join(repoRoot, "package-lock.json"), "utf8"),
+  );
   violations.push(
+    ...validateCodexPackageLock(npmLock),
     ...validateProdexPackaging(
       npmWorkspaceManifest,
       npmManifest,

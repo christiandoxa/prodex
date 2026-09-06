@@ -854,6 +854,8 @@ jobs:
           binary="artifact/prodex"
           test -f "${binary}"
           chmod 0755 "${binary}"
+          node scripts/ci/codex-purity-guard.mjs package-lock.json install.sh install.ps1 artifact
+          node scripts/ci/npm-package-smoke.mjs --binary-dir artifact
           node scripts/ci/release-artifact-smoke.mjs \
             --binary "${binary}" \
             --version "${RELEASE_VERSION}"
@@ -974,6 +976,15 @@ jobs:
               .
           fi
 
+          container_id="$(docker create "${image}:${candidate_tag}")"
+          container_rootfs="${RUNNER_TEMP}/prodex-container-rootfs.tar"
+          trap 'docker rm -f "${container_id}" >/dev/null 2>&1; rm -f "${container_rootfs}"' EXIT
+          docker export "${container_id}" --output "${container_rootfs}"
+          node scripts/ci/codex-purity-guard.mjs "${container_rootfs}"
+          docker rm -f "${container_id}" >/dev/null
+          rm -f "${container_rootfs}"
+          trap - EXIT
+
           trivy_image="docker.io/aquasec/trivy:0.72.0@sha256:cffe3f5161a47a6823fbd23d985795b3ed72a4c806da4c4df16266c02accdd6f"
           mkdir -p dist "${RUNNER_TEMP}/trivy-cache" "${RUNNER_TEMP}/trivy-input"
           docker save "${image}:${candidate_tag}" --output "${RUNNER_TEMP}/trivy-input/image.tar"
@@ -1085,10 +1096,7 @@ jobs:
             mkdir -p "sbom-input/${parent}"
             cp "${file}" "sbom-input/${parent}/$(basename "${file}")"
           done < <(find artifacts -mindepth 2 -maxdepth 2 -type f \( -name 'prodex' -o -name 'prodex.exe' \) -print0)
-          if find sbom-input -type f -iname '*codex*' -print -quit | grep -q .; then
-            echo "release SBOM input must not contain Codex executables or bundles" >&2
-            exit 1
-          fi
+          node scripts/ci/codex-purity-guard.mjs sbom-input
           if ! find sbom-input -maxdepth 2 -type f -print -quit | grep -q .; then
             echo "release SBOM input is empty" >&2
             exit 1
@@ -1107,6 +1115,7 @@ jobs:
             -v "${PWD}/sbom-input:/source:ro" \
             "$syft_image" \
             dir:/source -o spdx-json > release-sbom.spdx.json
+          node scripts/ci/codex-purity-guard.mjs release-sbom.spdx.json
 
       - name: Attest release SBOM provenance
         uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4
@@ -1299,6 +1308,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          node scripts/ci/codex-purity-guard.mjs release-assets
           if find release-assets -type f -iname '*codex*' -print -quit | grep -q .; then
             echo "release assets must not contain Codex executables or bundles" >&2
             exit 1

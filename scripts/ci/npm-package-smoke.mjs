@@ -6,6 +6,7 @@ import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { pathToFileURL } from "node:url";
 import { stagePackages } from "../npm/stage.mjs";
+import { inspectCodexPurity } from "./codex-purity-guard.mjs";
 import {
   ensureDir,
   gatewaySdkPackageName,
@@ -114,6 +115,8 @@ async function main() {
     outputDir: stagingDir,
     platformSpecs: [spec],
   });
+  const purity = await inspectCodexPurity([stagingDir]);
+  assert.deepEqual(purity.violations, [], purity.violations.join("\n"));
   const packagesManifest = JSON.parse(
     await fs.readFile(path.join(stagingDir, "packages.json"), "utf8"),
   );
