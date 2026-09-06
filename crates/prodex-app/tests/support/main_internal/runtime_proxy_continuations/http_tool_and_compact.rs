@@ -829,11 +829,11 @@ fn runtime_proxy_http_compaction_v2_stream_uses_session_bound_profile() {
             && !body.contains("stale_continuation"),
         "compaction v2 stream should not be translated into retry failure: {body}"
     );
-
     assert_eq!(
         backend.responses_accounts(),
         vec!["second-account".to_string()],
-        "session-bound compaction stream should stay on the owning profile"
+        "session-bound compaction stream should stay on the owning profile; log={}",
+        String::from_utf8_lossy(&fs::read(&proxy.log_path).unwrap_or_default())
     );
     let responses_headers = backend.responses_headers();
     assert_eq!(
