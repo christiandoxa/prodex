@@ -18,7 +18,6 @@ use std::time::UNIX_EPOCH;
 mod goal_attachments;
 
 const SESSION_TIMESTAMP_PREFIX: &str = "\"timestamp\":\"";
-const CLAUDE_CREDENTIALS_MAX_BYTES: u64 = 64 * 1024;
 const SESSION_MAINTENANCE_CACHE_VERSION: u8 = 4;
 const SESSION_MAINTENANCE_CACHE_FILE: &str = "shared-codex-session-maintenance-v1.json";
 const RECENT_SESSION_MAINTENANCE_CACHE_VERSION: u8 = 2;
@@ -128,29 +127,9 @@ fn keep_managed_credentials_local(paths: &AppPaths, codex_home: &Path) -> Result
             local_path.display()
         );
     }
-    if !shared_path.exists() {
-        return remove_path(&local_path);
-    }
-
-    let credentials = secret_store::FileSecretBackend::new()
-        .read_external_text_bounded(&shared_path, CLAUDE_CREDENTIALS_MAX_BYTES)
-        .map_err(anyhow::Error::new)
-        .with_context(|| {
-            format!(
-                "failed to read shared Claude credentials at {}",
-                shared_path.display()
-            )
-        })?
-        .context("shared Claude credentials are missing")?;
-    secret_store::write_private_file_atomic(&local_path, credentials.as_bytes())
-        .map_err(anyhow::Error::new)
-        .with_context(|| {
-            format!(
-                "failed to detach shared Claude credentials at {}",
-                local_path.display()
-            )
-        })?;
-    Ok(())
+    // A legacy shared file may belong to Codex MCP or another Anthropic profile. Keep the
+    // source intact and require the caller to establish fresh profile-local credentials.
+    remove_path(&local_path)
 }
 
 fn ensure_managed_codex_home_is_not_symlink(codex_home: &Path) -> Result<()> {

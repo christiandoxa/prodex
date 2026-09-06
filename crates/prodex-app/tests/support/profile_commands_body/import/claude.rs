@@ -94,7 +94,7 @@ fn profile_import_claude_supports_isolated_source_and_private_destination() {
 fn profile_import_claude_supports_custom_source_and_updates_duplicate_profile() {
     let sandbox_dir = ProfileCommandsTestDir::new("claude-custom-import");
     let _env = ProfileCommandsTestEnv::new(&sandbox_dir.path);
-    let source_dir = sandbox_dir.path.join("external-claude");
+    let source_dir = sandbox_dir.path.join("external claude credentials");
     write_claude_import_source(&source_dir, "old-claude-access-token");
     let _source_override = TestEnvVarGuard::set(
         "CLAUDE_CONFIG_DIR",
@@ -158,6 +158,11 @@ fn profile_import_claude_credentials_survive_managed_runtime_preparation() {
         &profile.codex_home,
     )
     .expect("managed runtime home should prepare");
+    prodex_shared_codex_fs::prepare_managed_codex_home_for_runtime_launch_with_local_credentials(
+        &paths,
+        &profile.codex_home,
+    )
+    .expect("managed runtime home should prepare again after restart");
     assert!(
         fs::symlink_metadata(profile.codex_home.join(CLAUDE_CREDENTIALS_FILE))
             .expect("managed Claude credentials metadata should exist")
@@ -175,7 +180,7 @@ fn profile_import_claude_credentials_survive_managed_runtime_preparation() {
 
 #[cfg(unix)]
 #[test]
-fn managed_claude_credentials_detach_legacy_shared_link() {
+fn managed_claude_credentials_do_not_copy_unattributed_legacy_shared_state() {
     use std::os::unix::fs::{PermissionsExt as _, symlink};
 
     let sandbox_dir = ProfileCommandsTestDir::new("claude-legacy-shared-credentials");
@@ -186,11 +191,9 @@ fn managed_claude_credentials_detach_legacy_shared_link() {
         .join(CLAUDE_CREDENTIALS_FILE);
     create_codex_home_if_missing(&codex_home).expect("profile home should exist");
     create_codex_home_if_missing(&paths.shared_codex_root).expect("shared home should exist");
-    write_secret_text_file(
-        &shared_credentials,
-        &claude_import_credentials("legacy-shared-access-token"),
-    )
-    .expect("legacy shared credentials should be written");
+    let shared_state = r#"{"mcpServers":{"example":{"accessToken":"mcp-token"}}}"#;
+    write_secret_text_file(&shared_credentials, shared_state)
+        .expect("legacy shared state should be written");
     fs::set_permissions(
         &shared_credentials,
         fs::Permissions::from_mode(0o644),
@@ -200,18 +203,22 @@ fn managed_claude_credentials_detach_legacy_shared_link() {
         .expect("legacy credential link should be created");
 
     prodex_shared_codex_fs::prepare_managed_codex_home_with_local_credentials(&paths, &codex_home)
-        .expect("managed Claude home should detach legacy credentials");
+        .expect("managed Claude home should remove its legacy link");
 
     let local_path = codex_home.join(CLAUDE_CREDENTIALS_FILE);
-    assert!(
-        fs::symlink_metadata(&local_path)
-            .expect("detached credentials metadata should exist")
-            .file_type()
-            .is_file()
+    assert!(!local_path.exists());
+    assert_eq!(
+        fs::read_to_string(&shared_credentials).expect("shared state should remain readable"),
+        shared_state
     );
+
+    let source_dir = sandbox_dir.path.join("fresh claude login");
+    write_claude_import_source(&source_dir, "fresh-profile-access-token");
+    crate::copy_claude_oauth_credentials(&source_dir, &codex_home)
+        .expect("fresh Claude credentials should replace the removed link");
     assert_eq!(
         fs::metadata(&local_path)
-            .expect("detached credentials metadata should read")
+            .expect("fresh credentials metadata should read")
             .permissions()
             .mode()
             & 0o777,
@@ -219,18 +226,13 @@ fn managed_claude_credentials_detach_legacy_shared_link() {
     );
     assert_eq!(
         read_claude_oauth_secret(&codex_home)
-            .expect("detached credentials should remain readable")
+            .expect("fresh credentials should remain readable")
             .access_token,
-        "legacy-shared-access-token"
+        "fresh-profile-access-token"
     );
     assert_eq!(
-        parse_claude_oauth_secret_text(
-            &read_external_claude_credentials_text(&paths.shared_codex_root)
-                .expect("shared credentials should remain readable"),
-        )
-            .expect("shared credentials should parse")
-            .access_token,
-        "legacy-shared-access-token"
+        fs::read_to_string(shared_credentials).expect("shared state should stay unchanged"),
+        shared_state
     );
 }
 
