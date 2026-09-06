@@ -284,6 +284,14 @@ async function testRejectsAmbiguousExistingVersion() {
   }
 }
 
+async function testFuzzRefreshIsWorkspaceOnly() {
+  const source = await fs.readFile(releaseCutPath, "utf8");
+  assert(
+    source.includes('["update", "-w", "--manifest-path", "fuzz/Cargo.toml"]'),
+    "fuzz release refresh must not update unrelated locked dependencies",
+  );
+}
+
 async function cleanupFixture(fixtureRoot) {
   if (process.env.PRODEX_KEEP_RELEASE_CUT_FIXTURES === "1") {
     process.stdout.write(`release cut fixture kept at ${fixtureRoot}\n`);
@@ -296,6 +304,7 @@ const tests = [
   ["cuts release without tag and is idempotent", testCutsReleaseWithoutTagAndIsIdempotent],
   ["rejects dirty worktree before mutation", testRejectsDirtyWorktreeBeforeMutation],
   ["rejects ambiguous existing version", testRejectsAmbiguousExistingVersion],
+  ["keeps fuzz refresh workspace-only", testFuzzRefreshIsWorkspaceOnly],
 ];
 
 let failures = 0;
