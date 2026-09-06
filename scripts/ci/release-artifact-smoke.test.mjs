@@ -40,9 +40,11 @@ test("standalone release runs the downloaded artifact smoke before SBOM preparat
   assert.match(smoke, /node scripts\/ci\/release-artifact-smoke\.mjs \\\n\s+--binary/u);
   assert.match(prepare, /- artifact-smoke/);
   assert.doesNotMatch(smoke, /cargo\s+(run|build)/u);
-  assert.doesNotMatch(smoke, /codex/iu);
-  assert.doesNotMatch(workflow, /Build patched Codex runtime|codex_binary|codex-[^*]/u);
+  assert.doesNotMatch(smoke, /Build patched Codex runtime|release-assets\/codex|codex_binary/iu);
+  assert.doesNotMatch(workflow, /Build patched Codex runtime|codex_binary|release-assets\/codex/u);
   assert.match(workflow, /-iname '\*codex\*'/u);
+  assert.match(smoke, /codex-purity-guard\.mjs package-lock\.json install\.sh install\.ps1 artifact/u);
+  assert.match(smoke, /npm-package-smoke\.mjs --binary-dir artifact/u);
   assert.doesNotMatch(source, /target\/(?:debug|release)/u);
 });
 
@@ -58,9 +60,12 @@ test("release manifest, checksums, and SBOM accept Prodex assets only", () => {
   assert.match(renderer, /codex/iu);
   assert.match(prepare, /find artifacts .* -name 'prodex' .* -name 'prodex\.exe'/u);
   assert.match(prepare, /sbom-input:\/source:ro/u);
+  assert.match(prepare, /codex-purity-guard\.mjs sbom-input/u);
+  assert.match(prepare, /codex-purity-guard\.mjs release-sbom\.spdx\.json/u);
   assert.match(release, /find artifacts .* -name 'prodex' .* -name 'prodex\.exe'/u);
   assert.match(release, /sha256sum install\.sh install\.ps1 release-manifest\.tsv release-manifest\.json prodex-\* release-sbom\.spdx\.json/u);
   assert.match(release, /release assets must not contain Codex executables or bundles/u);
+  assert.match(release, /codex-purity-guard\.mjs release-assets/u);
 });
 
 test("release stages immutable artifacts and waits before public version mutations", () => {
@@ -74,6 +79,8 @@ test("release stages immutable artifacts and waits before public version mutatio
   assert.match(container, /candidate_tag="sha-\$\{TARGET_SHA\}"/u);
   assert.match(container, /existing SHA-tagged candidate does not match/u);
   assert.match(container, /org\.opencontainers\.image\.revision/u);
+  assert.match(container, /docker export/u);
+  assert.match(container, /codex-purity-guard\.mjs "\$\{container_rootfs\}"/u);
   assert.doesNotMatch(container, /docker push "\$\{image\}:\$\{VERSION\}"/u);
   assert.match(publish, /--checkpoint P --release-sha/u);
   assert.match(publish, /docker buildx imagetools create/u);
