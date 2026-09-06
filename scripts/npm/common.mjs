@@ -1,11 +1,8 @@
 import fs from "node:fs/promises";
-import { createRequire } from "node:module";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
-const require = createRequire(import.meta.url);
-const codexCompatibility = require("../../npm/prodex/lib/codex-compat.cjs");
 
 export const repoRoot = process.env.PRODEX_REPO_ROOT
   ? path.resolve(process.env.PRODEX_REPO_ROOT)
@@ -14,8 +11,6 @@ export const cargoTomlPath = path.join(repoRoot, "Cargo.toml");
 export const npmScope = "@christiandoxa";
 export const mainPackageName = `${npmScope}/prodex`;
 export const gatewaySdkPackageName = `${npmScope}/prodex-gateway-sdk`;
-export const openaiCodexVersion = codexCompatibility.version;
-export const openaiCodexDependencySpecifier = codexCompatibility.version;
 export const packageVersionPattern = /^[0-9]+\.[0-9]+\.[0-9]+(?:[-+][0-9A-Za-z.-]+)?$/;
 
 export const platformPackages = [
@@ -63,37 +58,6 @@ export const platformPackages = [
   },
 ];
 
-export const openaiCodexPlatformPackages = [
-  {
-    packageName: "@openai/codex-linux-x64",
-    distTag: "linux-x64",
-  },
-  {
-    packageName: "@openai/codex-linux-arm64",
-    distTag: "linux-arm64",
-  },
-  {
-    packageName: "@openai/codex-darwin-x64",
-    distTag: "darwin-x64",
-  },
-  {
-    packageName: "@openai/codex-darwin-arm64",
-    distTag: "darwin-arm64",
-  },
-  {
-    packageName: "@openai/codex-win32-x64",
-    distTag: "win32-x64",
-  },
-  {
-    packageName: "@openai/codex-win32-arm64",
-    distTag: "win32-arm64",
-  },
-];
-
-export function openaiCodexPlatformDependencySpecifier(spec) {
-  return codexCompatibility.platformSpecifier(spec.distTag);
-}
-
 export function packageSlug(packageName) {
   return packageName.replace(/^@[^/]+\//, "");
 }
@@ -138,13 +102,7 @@ export function parseCargoVersion(contents) {
 
 export function mainPackageManifest(version) {
   const optionalDependencies = Object.fromEntries(
-    [
-      ...platformPackages.map((spec) => [spec.packageName, version]),
-      ...openaiCodexPlatformPackages.map((spec) => [
-        spec.packageName,
-        openaiCodexPlatformDependencySpecifier(spec),
-      ]),
-    ],
+    platformPackages.map((spec) => [spec.packageName, version]),
   );
 
   return {
@@ -156,10 +114,7 @@ export function mainPackageManifest(version) {
     bin: {
       prodex: "prodex",
     },
-    files: ["prodex", "lib", "README.md", "LICENSE"],
-    dependencies: {
-      "@openai/codex": openaiCodexDependencySpecifier,
-    },
+    files: ["prodex", "README.md", "LICENSE"],
     optionalDependencies,
     engines: {
       node: ">=18",

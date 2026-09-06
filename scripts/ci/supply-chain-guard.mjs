@@ -3,10 +3,6 @@ import assert from "node:assert/strict";
 import fs from "node:fs/promises";
 import path from "node:path";
 import {
-  openaiCodexDependencySpecifier,
-  openaiCodexPlatformDependencySpecifier,
-  openaiCodexPlatformPackages,
-  openaiCodexVersion,
   platformPackages,
   repoRoot,
 } from "../npm/common.mjs";
@@ -534,17 +530,23 @@ export function validateCompose(contents) {
     .map((line) => `compose.yaml: service image is not tag-and-digest pinned: ${line.trim()}`);
 }
 
-export function validateCodexPins(workspaceManifest, manifest, installer, windowsInstaller, shim, lockfile) {
+export function validateProdexPackaging(
+  workspaceManifest,
+  manifest,
+  installer,
+  windowsInstaller,
+  npmLauncher,
+) {
   const violations = [];
-  if (manifest.dependencies?.["@openai/codex"] !== openaiCodexDependencySpecifier) {
-    violations.push(`npm/prodex/package.json: @openai/codex must equal ${openaiCodexVersion}`);
-  }
-  for (const spec of openaiCodexPlatformPackages) {
-    if (
-      manifest.optionalDependencies?.[spec.packageName] !==
-      openaiCodexPlatformDependencySpecifier(spec)
-    ) {
-      violations.push(`npm/prodex/package.json: ${spec.packageName} is not exact-version pinned`);
+  for (const dependencies of [manifest.dependencies, manifest.optionalDependencies]) {
+    for (const [dependencyName, specifier] of Object.entries(dependencies ?? {})) {
+      if (
+        dependencyName === "@openai/codex" ||
+        dependencyName.startsWith("@openai/codex-") ||
+        String(specifier).includes("@openai/codex")
+      ) {
+        violations.push(`npm/prodex/package.json: Codex dependency is not allowed (${dependencyName})`);
+      }
     }
   }
   for (const spec of platformPackages) {
@@ -556,26 +558,29 @@ export function validateCodexPins(workspaceManifest, manifest, installer, window
       violations.push(`package.json: ${spec.packageName} must be a local optional lock input`);
     }
   }
-  if (/@openai\/codex@latest\b/u.test(`${installer}\n${windowsInstaller}\n${shim}`)) {
-    violations.push("Codex install paths must not use @openai/codex@latest");
+  if (/codex/iu.test(`${installer}\n${windowsInstaller}\n${npmLauncher}`)) {
+    violations.push("Prodex installers and npm launcher must not contain Codex packaging logic");
   }
-  if (!installer.includes(`CODEX_NPM_VERSION="${openaiCodexVersion}"`)) {
-    violations.push("install.sh: Codex migration version is not synchronized");
+  if (manifest.files?.includes("lib")) {
+    violations.push("npm/prodex/package.json: release package must not include a runtime shim directory");
   }
-  if (!windowsInstaller.includes(`$CodexNpmVersion = "${openaiCodexVersion}"`)) {
-    violations.push("install.ps1: Codex migration version is not synchronized");
+  return violations;
+}
+
+export function validateReleaseCodexExclusion(contents) {
+  const violations = [];
+  for (const marker of [
+    "Build patched Codex runtime",
+    "codex-*",
+    "codex_binary",
+    "release-assets/codex",
+  ]) {
+    if (contents.includes(marker)) {
+      violations.push(`.github/workflows/standalone-release.yml: release contains forbidden Codex packaging marker ${marker}`);
+    }
   }
-  if (!windowsInstaller.includes('"@openai/codex@$CodexNpmVersion"')) {
-    violations.push("install.ps1: Codex migration must use the synchronized version");
-  }
-  if (!shim.includes('require("./codex-compat.cjs")')) {
-    violations.push("npm/prodex/lib/codex-shim.cjs: missing canonical compatibility metadata");
-  }
-  if (
-    lockfile.packages?.["npm/prodex"]?.dependencies?.["@openai/codex"] !==
-    openaiCodexDependencySpecifier
-  ) {
-    violations.push("package-lock.json: Prodex Codex dependency is not exact-version locked");
+  if (!contents.includes("find release-assets -maxdepth 1 -type f")) {
+    violations.push(".github/workflows/standalone-release.yml: release asset scope must be explicit");
   }
   return violations;
 }
@@ -605,19 +610,11 @@ function selfTest() {
     [],
   );
   assert.equal(validateCompose("services:\n  db:\n    image: postgres:16\n").length, 1);
-  const codexManifest = {
-    dependencies: { "@openai/codex": openaiCodexDependencySpecifier },
+  const prodexManifest = {
+    files: ["prodex", "README.md", "LICENSE"],
     optionalDependencies: Object.fromEntries(
-      openaiCodexPlatformPackages.map((spec) => [
-        spec.packageName,
-        openaiCodexPlatformDependencySpecifier(spec),
-      ]),
+      platformPackages.map((spec) => [spec.packageName, "0.2.0"]),
     ),
-  };
-  const codexLock = {
-    packages: {
-      "npm/prodex": { dependencies: { "@openai/codex": openaiCodexDependencySpecifier } },
-    },
   };
   const workspaceManifest = {
     optionalDependencies: Object.fromEntries(
@@ -628,27 +625,27 @@ function selfTest() {
     ),
   };
   assert.deepEqual(
-    validateCodexPins(
+    validateProdexPackaging(
       workspaceManifest,
-      codexManifest,
-      `CODEX_NPM_VERSION="${openaiCodexVersion}"`,
-      `$CodexNpmVersion = "${openaiCodexVersion}"\n"@openai/codex@$CodexNpmVersion"`,
-      'require("./codex-compat.cjs")',
-      codexLock,
+      prodexManifest,
+      "standalone installer",
+      "standalone installer",
+      "prodex npm launcher",
     ),
     [],
   );
   assert.equal(
-    validateCodexPins(
+    validateProdexPackaging(
       workspaceManifest,
-      { ...codexManifest, dependencies: { "@openai/codex": "latest" } },
-      "npm install -g @openai/codex@latest",
-      "npm install -g @openai/codex@latest",
+      { ...prodexManifest, dependencies: { "@openai/codex": "latest" } },
+      "standalone installer",
+      "standalone installer",
       "",
-      { packages: {} },
     ).length > 0,
     true,
   );
+  assert.deepEqual(validateReleaseCodexExclusion("find release-assets -maxdepth 1 -type f"), []);
+  assert.equal(validateReleaseCodexExclusion("codex-asset").length, 1);
   const windowsJobs = `jobs:
   windows-workspace:
     steps:
@@ -912,6 +909,7 @@ async function main() {
       violations.push(
         ...validateReleaseMalwareGate(contents),
         ...validateReleaseContainerPublication(contents),
+        ...validateReleaseCodexExclusion(contents),
       );
     }
   }
@@ -939,15 +937,13 @@ async function main() {
   const npmWorkspaceManifest = JSON.parse(
     await fs.readFile(path.join(repoRoot, "package.json"), "utf8"),
   );
-  const npmLock = JSON.parse(await fs.readFile(path.join(repoRoot, "package-lock.json"), "utf8"));
   violations.push(
-    ...validateCodexPins(
+    ...validateProdexPackaging(
       npmWorkspaceManifest,
       npmManifest,
       await fs.readFile(path.join(repoRoot, "install.sh"), "utf8"),
       await fs.readFile(path.join(repoRoot, "install.ps1"), "utf8"),
-      await fs.readFile(path.join(repoRoot, "npm/prodex/lib/codex-shim.cjs"), "utf8"),
-      npmLock,
+      await fs.readFile(path.join(repoRoot, "npm/prodex/prodex"), "utf8"),
     ),
   );
 

@@ -7,7 +7,6 @@ import path from "node:path";
 import { spawn } from "node:child_process";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
-import { openaiCodexDependencySpecifier } from "./npm/common.mjs";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const installerPath = path.join(repoRoot, "install.sh");
@@ -58,16 +57,13 @@ async function fixture(
       `#!/bin/sh\nprintf 'prodex ${existingVersion}\\n'\n`,
       { mode: 0o755 },
     );
-    await fs.writeFile(path.join(binDir, "codex"), "#!/bin/sh\nprintf 'codex-cli 0.153.4\\n'\n", { mode: 0o755 });
   }
   const asset = `prodex-${target}`;
-  const codexAsset = `codex-${target}`;
   const binary = Buffer.from(
     manifestImplementation === null
       ? `#!/bin/sh\nprintf 'prodex ${version}\\n'\n`
       : `#!/bin/sh\nif [ "$1" = "doctor" ]; then\nprintf '%s\\n' '{'\nprintf '%s\\n' '  "implementation": "${manifestImplementation}",'\nprintf '%s\\n' '  "fallback": false,'\nprintf '%s\\n' '  "compiler_required": ${compilerRequired},'\nprintf '%s\\n' '  "self_test": "passed"'\nprintf '%s\\n' '}'\nelse\nprintf 'prodex ${version}\\n'\nfi\n`,
   );
-  const codexBinary = Buffer.from("#!/bin/sh\nprintf 'codex-cli 0.153.4\\n'\n");
   const manifest =
     manifestImplementation === null
       ? null
@@ -82,22 +78,17 @@ async function fixture(
   const digest = validChecksum
     ? crypto.createHash("sha256").update(binary).digest("hex")
     : "0".repeat(64);
-  const codexDigest = validChecksum
-    ? crypto.createHash("sha256").update(codexBinary).digest("hex")
-    : "0".repeat(64);
   const manifestDigest = manifest === null ? null : crypto.createHash("sha256").update(manifest).digest("hex");
   const server = http.createServer((request, response) => {
     requests.push(request.url);
     if (request.url === "/release/SHA256SUMS") {
       response.end(
-        `${digest}  ${asset}\n${codexDigest}  ${codexAsset}\n${manifestDigest ?? ""}${manifestDigest === null ? "" : `  release-manifest.tsv\n`}`,
+        `${digest}  ${asset}\n${manifestDigest ?? ""}${manifestDigest === null ? "" : `  release-manifest.tsv\n`}`,
       );
     } else if (request.url === "/release/release-manifest.tsv" && manifest !== null) {
       response.end(manifest);
     } else if (request.url === `/release/${asset}`) {
       response.end(binary);
-    } else if (request.url === `/release/${codexAsset}`) {
-      response.end(codexBinary);
     } else {
       response.writeHead(404).end();
     }
@@ -122,7 +113,7 @@ async function fixture(
     TEST_MANAGER_LOG: managerLog,
     npm_package_name: "",
   };
-  return { root, binDir, fakeBin, managerLog, requests, asset, codexAsset, env };
+  return { root, binDir, fakeBin, managerLog, requests, asset, env };
 }
 
 async function runInstaller(fixtureState, extraEnv = {}) {
@@ -137,16 +128,13 @@ test("install.sh has valid POSIX shell syntax", { skip: process.platform === "wi
   assert.equal(result.code, 0, result.stderr);
 });
 
-test("Unix and Windows Codex migration pins stay synchronized", async () => {
+test("installers do not install or download Codex", async () => {
   const [unixInstaller, windowsInstaller] = await Promise.all([
     fs.readFile(installerPath, "utf8"),
     fs.readFile(windowsInstallerPath, "utf8"),
   ]);
-  const unixVersion = unixInstaller.match(/^CODEX_NPM_VERSION="([^"]+)"$/m)?.[1];
-  const windowsVersion = windowsInstaller.match(/^\$CodexNpmVersion = "([^"]+)"$/m)?.[1];
-
-  assert.equal(unixVersion, windowsVersion);
-  assert.equal(unixVersion, openaiCodexDependencySpecifier);
+  assert.doesNotMatch(unixInstaller, /codex/i);
+  assert.doesNotMatch(windowsInstaller, /codex/i);
 });
 
 test("install.ps1 verifies Windows release assets", async () => {
@@ -157,9 +145,7 @@ test("install.ps1 verifies Windows release assets", async () => {
   assert.match(source, /x86_64-pc-windows-msvc/);
   assert.match(source, /aarch64-pc-windows-msvc/);
   assert.match(source, /New-Item -ItemType Junction/);
-  assert.match(source, new RegExp(`\\$CodexNpmVersion = "${openaiCodexDependencySpecifier}"`));
-  assert.match(source, /"@openai\/codex@\$CodexNpmVersion"/);
-  assert.doesNotMatch(source, /@openai\/codex@latest\b/);
+  assert.doesNotMatch(source, /codex/i);
 });
 
 test("install.ps1 prefers the OS architecture under emulation", async () => {
@@ -186,25 +172,12 @@ test("install.ps1 installs the native Windows binary", { skip: process.platform 
   const releaseDir = path.join(root, "release");
   const binDir = path.join(root, "bin");
   const asset = `prodex-${target}.exe`;
-  const codexAsset = `codex-${target}.exe`;
   await fs.mkdir(releaseDir, { recursive: true });
   const binary = await fs.readFile(sourceBinary);
-  const codexSource = path.join(root, "codex-fixture.rs");
-  const codexPath = path.join(root, "codex-fixture.exe");
-  await fs.writeFile(codexSource, 'fn main() { println!("codex-cli 0.153.4"); }\n');
-  const codexBuild = await run("rustc", ["--edition", "2021", codexSource, "-o", codexPath], {
-    cwd: repoRoot,
-  });
-  assert.equal(codexBuild.code, 0, codexBuild.stderr);
-  const codexBinary = await fs.readFile(codexPath);
   await fs.writeFile(path.join(releaseDir, asset), binary);
-  await fs.writeFile(path.join(releaseDir, codexAsset), codexBinary);
   await fs.writeFile(
     path.join(releaseDir, "SHA256SUMS"),
-    `${crypto.createHash("sha256").update(binary).digest("hex")}  ${asset}\n${crypto
-      .createHash("sha256")
-      .update(codexBinary)
-      .digest("hex")}  ${codexAsset}\n`,
+    `${crypto.createHash("sha256").update(binary).digest("hex")}  ${asset}\n`,
   );
   t.after(() => fs.rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }));
 
@@ -234,8 +207,11 @@ test("installer verifies and installs the host release binary", async (t) => {
   if (!state) return;
   const result = await runInstaller(state);
   assert.equal(result.code, 0, result.stderr);
+  assert.ok(state.requests.includes(`/release/${state.asset}`));
+  assert.ok(state.requests.every((request) => !/codex/iu.test(request)));
   const installed = path.join(state.binDir, "prodex");
   assert.equal((await run(installed, ["--version"])).stdout, `prodex ${version}\n`);
+  await assert.rejects(fs.access(path.join(state.binDir, "codex")));
 });
 
 test("updater skips the same release before downloading its asset", async (t) => {
@@ -285,9 +261,19 @@ test("installer rejects a release binary with the wrong checksum", async (t) => 
   await assert.rejects(fs.access(path.join(state.binDir, "prodex")));
 });
 
-test("updater migrates npm Prodex and preserves Codex", async (t) => {
+test("updater migrates npm Prodex without touching Codex", async (t) => {
   const state = await fixture(t);
   if (!state) return;
+  const codexPath = path.join(state.binDir, "codex");
+  const codexContents = "official Codex installation\n";
+  await fs.mkdir(state.binDir, { recursive: true });
+  await fs.writeFile(codexPath, codexContents, { mode: 0o755 });
+  const codexHome = path.join(state.root, "home", ".codex");
+  const codexConfig = path.join(codexHome, "config.toml");
+  const codexSession = path.join(codexHome, "sessions", "session.jsonl");
+  await fs.mkdir(path.dirname(codexSession), { recursive: true });
+  await fs.writeFile(codexConfig, "model = \"gpt-5.6\"\n");
+  await fs.writeFile(codexSession, "session\n");
   const npm = path.join(state.fakeBin, "npm");
   await fs.writeFile(npm, "#!/bin/sh\nprintf '%s\\n' \"$*\" >>\"$TEST_MANAGER_LOG\"\n", {
     mode: 0o755,
@@ -300,9 +286,11 @@ test("updater migrates npm Prodex and preserves Codex", async (t) => {
   });
   assert.equal(result.code, 0, result.stderr);
   assert.deepEqual((await fs.readFile(state.managerLog, "utf8")).trim().split("\n"), [
-    `install -g @openai/codex@${openaiCodexDependencySpecifier}`,
     "uninstall -g @christiandoxa/prodex",
   ]);
+  assert.equal(await fs.readFile(codexPath, "utf8"), codexContents);
+  assert.equal(await fs.readFile(codexConfig, "utf8"), "model = \"gpt-5.6\"\n");
+  assert.equal(await fs.readFile(codexSession, "utf8"), "session\n");
 });
 
 test("updater migrates cargo-installed Prodex", async (t) => {

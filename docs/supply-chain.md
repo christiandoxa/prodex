@@ -20,14 +20,18 @@ building every fuzz target.
 
 ## Immutable inputs
 
-The npm wrapper pins Codex to the exact release recorded in
-`npm/prodex/lib/codex-compat.cjs`; release metadata generation derives the main
-dependency and every platform alias from it. `package-lock.json` records the
-registry integrity values. Opt-in `PRODEX_CODEX_AUTO_INSTALL` installs that
-exact version and rejects a post-install `codex --version` mismatch. Update the
-canonical file, the standalone installer marker, and the lockfile together,
-then run `npm run npm:sync-version`, `npm ci`, and
-`node scripts/ci/supply-chain-guard.mjs --self-test`.
+Release packages contain only Prodex executables and metadata. They do not
+depend on, download, compile, bundle, or publish Codex. Standalone and npm
+launches resolve the official Codex CLI from `PATH`, or from
+`PRODEX_CODEX_BIN`, and reject Prodex/npm wrapper recursion. Install Codex from
+the [official Codex CLI instructions](https://developers.openai.com/codex/cli)
+before launching a Codex-backed Prodex command.
+
+The release workflow attests and checksums only Prodex executables alongside
+release metadata. Its SBOM input is restricted to those executables, and the
+final asset gate rejects Codex-named files. Run
+`node scripts/ci/supply-chain-guard.mjs --self-test` to check the packaging
+boundary.
 
 Third-party Actions use full 40-character commit SHAs with the corresponding
 major tag in a comment. The tag comment lets Dependabot retain and update the

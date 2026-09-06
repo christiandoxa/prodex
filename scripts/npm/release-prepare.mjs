@@ -7,9 +7,6 @@ import {
   cargoTomlPath,
   gatewaySdkPackageName,
   mainPackageName,
-  openaiCodexDependencySpecifier,
-  openaiCodexPlatformDependencySpecifier,
-  openaiCodexPlatformPackages,
   packageSlug,
   packageVersionPattern,
   platformPackages,
@@ -143,13 +140,6 @@ async function checkPackageManifests(version, errors) {
   const mainManifest = await readJsonFile(path.join(repoRoot, "npm/prodex/package.json"));
   expectEqual(errors, `${mainPackageName} version`, mainManifest.version, version);
   expectEqual(errors, `${mainPackageName} private`, mainManifest.private, true);
-  expectEqual(
-    errors,
-    `${mainPackageName} dependency @openai/codex`,
-    mainManifest.dependencies?.["@openai/codex"],
-    openaiCodexDependencySpecifier,
-  );
-
   for (const spec of platformPackages) {
     expectEqual(
       errors,
@@ -158,15 +148,6 @@ async function checkPackageManifests(version, errors) {
       version,
     );
   }
-  for (const spec of openaiCodexPlatformPackages) {
-    expectEqual(
-      errors,
-      `${mainPackageName} optional dependency ${spec.packageName}`,
-      mainManifest.optionalDependencies?.[spec.packageName],
-      openaiCodexPlatformDependencySpecifier(spec),
-    );
-  }
-
   for (const spec of platformPackages) {
     const relativePath = `npm/platforms/${platformRepoDir(spec)}/package.json`;
     const manifest = await readJsonFile(path.join(repoRoot, relativePath));
@@ -299,25 +280,10 @@ function validateNpmLockEntry(relativePath, packageName, entry, version, errors)
   }
 }
 
-function openaiCodexLockVersion(lockPath, packageName) {
-  const platform = openaiCodexPlatformPackages.find((spec) =>
-    packageName === spec.packageName || lockPath === `node_modules/${spec.packageName}`,
-  );
-  if (platform) {
-    return openaiCodexPlatformDependencySpecifier(platform).replace(/^npm:@openai\/codex@/u, "");
-  }
-  if (packageName === "@openai/codex") return openaiCodexDependencySpecifier;
-  return null;
-}
-
 function validateNpmLock(lock, relativePath, version, errors) {
   if (lock.packages && typeof lock.packages === "object") {
     for (const [lockPath, entry] of Object.entries(lock.packages)) {
       const packageName = packageNameForLockEntry(lockPath, entry);
-      const codexVersion = openaiCodexLockVersion(lockPath, packageName);
-      if (codexVersion) {
-        expectEqual(errors, `${relativePath} ${lockPath} Codex lock version`, entry.version, codexVersion);
-      }
       if (packageName) {
         validateNpmLockEntry(relativePath, packageName, entry, version, errors);
       }
@@ -326,10 +292,6 @@ function validateNpmLock(lock, relativePath, version, errors) {
 
   if (lock.dependencies && typeof lock.dependencies === "object") {
     for (const [packageName, entry] of Object.entries(lock.dependencies)) {
-      const codexVersion = openaiCodexLockVersion(packageName, packageName);
-      if (codexVersion) {
-        expectEqual(errors, `${relativePath} ${packageName} Codex lock version`, entry.version, codexVersion);
-      }
       validateNpmLockEntry(relativePath, packageName, entry, version, errors);
     }
   }

@@ -5,9 +5,6 @@ import {
   cargoTomlPath,
   gatewaySdkPackageName,
   mainPackageName,
-  openaiCodexDependencySpecifier,
-  openaiCodexPlatformDependencySpecifier,
-  openaiCodexPlatformPackages,
   platformPackages,
   readCargoVersion,
   readJsonFile,
@@ -61,21 +58,6 @@ function updatePackageMetadata(packageJson, version) {
         packageJson.optionalDependencies[spec.packageName] = version;
         changed = true;
       }
-    }
-    for (const spec of openaiCodexPlatformPackages) {
-      const expected = openaiCodexPlatformDependencySpecifier(spec);
-      if (packageJson.optionalDependencies[spec.packageName] !== expected) {
-        packageJson.optionalDependencies[spec.packageName] = expected;
-        changed = true;
-      }
-    }
-  }
-
-  if (packageJson.name === mainPackageName) {
-    packageJson.dependencies ??= {};
-    if (packageJson.dependencies["@openai/codex"] !== openaiCodexDependencySpecifier) {
-      packageJson.dependencies["@openai/codex"] = openaiCodexDependencySpecifier;
-      changed = true;
     }
   }
 

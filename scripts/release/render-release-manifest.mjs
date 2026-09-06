@@ -21,7 +21,11 @@ for (const rawLine of fs.readFileSync(input, "utf8").split(/\r?\n/)) {
   if (fields.length !== 7) throw new Error(`invalid release target row: ${rawLine}`);
   const [target, asset, implementation, mojoVersion, mojoFeatures, runtimeBundle, minimumGlibcValue] = fields;
   const minimumGlibc = minimumGlibcValue === "-" ? "" : minimumGlibcValue;
-  if (!/^[A-Za-z0-9._-]+$/.test(target) || !asset.startsWith("prodex-")) {
+  if (
+    !/^[A-Za-z0-9._-]+$/.test(target) ||
+    !/^prodex-[A-Za-z0-9._-]+(?:\.exe)?$/.test(asset) ||
+    /codex/i.test(asset)
+  ) {
     throw new Error(`invalid target or asset: ${rawLine}`);
   }
   if (!["rust", "mojo-compiled-in", "mojo-bundled-runtime"].includes(implementation)) {

@@ -163,9 +163,9 @@ profile state and reports an actionable error when permission is unavailable.
 
 Both installers verify their downloaded assets against the release `SHA256SUMS` file. The release workflow malware-scans final assets and verifies installer provenance.
 
-Set `PRODEX_INSTALL_DIR` to choose another binary directory. Standalone installs use the `codex` command on `PATH`; install Codex first if it is not already available. Existing npm or Cargo installations can run `prodex update` once to migrate.
+Set `PRODEX_INSTALL_DIR` to choose another binary directory. Standalone installs do not include or install Codex: install the [official Codex CLI](https://developers.openai.com/codex/cli) and verify `codex --version`, or set `PRODEX_CODEX_BIN` to its executable. Existing npm or Cargo installations can run `prodex update` once to migrate; the migration leaves Codex files untouched.
 
-npm and Cargo installations are no longer supported; contributors should use normal workspace commands such as `cargo build` instead of treating a source build as a supported installation channel.
+The npm package installs the Prodex wrapper and platform binary only; it requires the official Codex CLI separately. Cargo installations are not a supported user installation channel; contributors should use normal workspace commands such as `cargo build`.
 
 </details>
 
