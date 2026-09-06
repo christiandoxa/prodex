@@ -1,5 +1,16 @@
 use super::*;
 
+fn attempt_runtime_websocket_request(
+    attempt: RuntimeWebsocketAttemptRequest<'_>,
+) -> Result<RuntimeWebsocketAttempt> {
+    let hard_affinity = attempt.request_previous_response_id.is_some()
+        || attempt.request_session_id.is_some()
+        || attempt.request_turn_state.is_some()
+        || attempt.turn_state_override.is_some()
+        || attempt.websocket_session.profile_name.as_deref() == Some(attempt.profile_name);
+    attempt_runtime_websocket_request_with_hard_affinity(attempt, hard_affinity)
+}
+
 #[path = "websocket/connect.rs"]
 mod connect;
 #[path = "websocket/precommit_hold.rs"]
