@@ -944,12 +944,35 @@ jobs:
           set -euo pipefail
           image="ghcr.io/${GITHUB_REPOSITORY,,}"
           candidate_tag="sha-${TARGET_SHA}"
-          docker build --pull \
-            --label "org.opencontainers.image.revision=${GITHUB_SHA}" \
-            --label "org.opencontainers.image.source=https://github.com/${GITHUB_REPOSITORY}" \
-            --label "org.opencontainers.image.version=${VERSION}" \
-            --tag "${image}:${candidate_tag}" \
-            .
+          set +e
+          candidate_inspect="$(docker buildx imagetools inspect "${image}:${candidate_tag}" 2>&1)"
+          candidate_status=$?
+          set -e
+          if [ "${candidate_status}" -eq 0 ]; then
+            existing_digest="$(printf '%s\n' "${candidate_inspect}" | awk '$1 == "Digest:" { print $2; exit }')"
+            test -n "${existing_digest}"
+          elif grep -Eqi 'manifest unknown|not found' <<<"${candidate_inspect}"; then
+            existing_digest=""
+          else
+            echo "could not verify the staged container candidate" >&2
+            exit 1
+          fi
+          if [ -n "${existing_digest}" ]; then
+            docker pull "${image}:${candidate_tag}"
+            revision="$(docker inspect --format='{{index .Config.Labels "org.opencontainers.image.revision"}}' "${image}:${candidate_tag}")"
+            image_version="$(docker inspect --format='{{index .Config.Labels "org.opencontainers.image.version"}}' "${image}:${candidate_tag}")"
+            if [ "${revision}" != "${TARGET_SHA}" ] || [ "${image_version}" != "${VERSION}" ]; then
+              echo "existing SHA-tagged candidate does not match this release configuration" >&2
+              exit 1
+            fi
+          else
+            docker build --pull \
+              --label "org.opencontainers.image.revision=${GITHUB_SHA}" \
+              --label "org.opencontainers.image.source=https://github.com/${GITHUB_REPOSITORY}" \
+              --label "org.opencontainers.image.version=${VERSION}" \
+              --tag "${image}:${candidate_tag}" \
+              .
+          fi
 
           trivy_image="docker.io/aquasec/trivy:0.72.0@sha256:cffe3f5161a47a6823fbd23d985795b3ed72a4c806da4c4df16266c02accdd6f"
           mkdir -p dist "${RUNNER_TEMP}/trivy-cache" "${RUNNER_TEMP}/trivy-input"
@@ -964,9 +987,13 @@ jobs:
             --output "/output/prodex-container-vulnerability-${VERSION}.json"
           rm -f "${RUNNER_TEMP}/trivy-input/image.tar"
 
-          docker push "${image}:${candidate_tag}"
-          repository_digest="$(docker inspect --format='{{index .RepoDigests 0}}' "${image}:${candidate_tag}")"
-          digest="${repository_digest#*@}"
+          if [ -z "${existing_digest}" ]; then
+            docker push "${image}:${candidate_tag}"
+            repository_digest="$(docker inspect --format='{{index .RepoDigests 0}}' "${image}:${candidate_tag}")"
+            digest="${repository_digest#*@}"
+          else
+            digest="${existing_digest}"
+          fi
           if [[ ! "${digest}" =~ ^sha256:[0-9a-f]{64}$ ]]; then
             echo "registry returned an invalid image digest" >&2
             exit 1
@@ -1477,7 +1504,19 @@ jobs:
           set -euo pipefail
           [[ "${IMAGE_DIGEST}" =~ ^sha256:[0-9a-f]{64}$ ]]
           echo "${GH_TOKEN}" | docker login ghcr.io --username "${GITHUB_ACTOR}" --password-stdin
-          existing_digest="$(docker buildx imagetools inspect "${IMAGE_NAME}:${RELEASE_VERSION}" 2>/dev/null | awk '$1 == "Digest:" { print $2; exit }' || true)"
+          set +e
+          version_inspect="$(docker buildx imagetools inspect "${IMAGE_NAME}:${RELEASE_VERSION}" 2>&1)"
+          version_status=$?
+          set -e
+          if [ "${version_status}" -eq 0 ]; then
+            existing_digest="$(printf '%s\n' "${version_inspect}" | awk '$1 == "Digest:" { print $2; exit }')"
+            test -n "${existing_digest}"
+          elif grep -Eqi 'manifest unknown|not found' <<<"${version_inspect}"; then
+            existing_digest=""
+          else
+            echo "could not verify whether container tag ${RELEASE_VERSION} exists" >&2
+            exit 1
+          fi
           if [ -n "${existing_digest}" ] && [ "${existing_digest}" != "${IMAGE_DIGEST}" ]; then
             echo "container tag ${RELEASE_VERSION} already points to ${existing_digest}; refusing to move it" >&2
             exit 1

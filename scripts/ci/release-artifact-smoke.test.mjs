@@ -72,6 +72,8 @@ test("release stages immutable artifacts and waits before public version mutatio
   assert.ok(publish, "release publication job missing");
   assert.match(workflow, /publish_at:/u);
   assert.match(container, /candidate_tag="sha-\$\{TARGET_SHA\}"/u);
+  assert.match(container, /existing SHA-tagged candidate does not match/u);
+  assert.match(container, /org\.opencontainers\.image\.revision/u);
   assert.doesNotMatch(container, /docker push "\$\{image\}:\$\{VERSION\}"/u);
   assert.match(publish, /--checkpoint P --release-sha/u);
   assert.match(publish, /docker buildx imagetools create/u);
