@@ -187,9 +187,12 @@ Observability rules:
   title `Prodex Log`. Their right-aligned t/s field is output tokens per active generation second,
   sourced from existing token-usage timing; prompt/cache tokens, payload bytes, TTFT, and unrelated
   processes are not included. After a valid measurement the latest numeric rate remains visible
-  while idle; before any measurement the field is `— t/s`. The human stream view coalesces
+  as `last N t/s` while idle; before any measurement the field is `— t/s`. The human stream view coalesces
   repeated low-signal profile-load observations into bounded episodes with occurrence/run counts;
-  `--json` remains an individual-event output path.
+  `--json` remains an individual-event output path. Bounded live-buffer or oversized-line loss is
+  surfaced as a `runtime_log_gap` event instead of advancing the subscriber cursor silently. The
+  local receive-to-render fixture uses 128 mixed events and requires p95 at or below 250 ms; live
+  viewers poll at 100 ms without a busy loop.
 
 ## Session, Profile, And Shared Codex FS
 
