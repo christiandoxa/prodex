@@ -1612,12 +1612,12 @@ function validateBaseline(baseline) {
 
   if (compat.tested_codex_release !== EXPECTED_CODEX_RELEASE) {
     errors.push(
-      `codex.compatibility.tested_codex_release must match bundled Codex ${EXPECTED_CODEX_RELEASE}`,
+      `codex.compatibility.tested_codex_release must match tested official Codex ${EXPECTED_CODEX_RELEASE}`,
     );
   }
 
   if (baseline?.codex?.latestRelease?.tag_name !== EXPECTED_CODEX_RELEASE) {
-    errors.push(`codex.latestRelease.tag_name must match bundled Codex ${EXPECTED_CODEX_RELEASE}`);
+    errors.push(`codex.latestRelease.tag_name must match tested official Codex ${EXPECTED_CODEX_RELEASE}`);
   }
 
   const appServerProtocol = compat.app_server_protocol;
@@ -1748,7 +1748,7 @@ function runSelfTest() {
     mutate: (compat) => {
       compat.tested_codex_release = "rust-v0.0.0";
     },
-    expectedMessage: `codex.compatibility.tested_codex_release must match bundled Codex ${EXPECTED_CODEX_RELEASE}`,
+    expectedMessage: `codex.compatibility.tested_codex_release must match tested official Codex ${EXPECTED_CODEX_RELEASE}`,
   });
 
   assertSelfTestError({
@@ -1756,7 +1756,7 @@ function runSelfTest() {
     mutate: (_compat, baseline) => {
       baseline.codex.latestRelease.tag_name = "rust-v0.0.0";
     },
-    expectedMessage: `codex.latestRelease.tag_name must match bundled Codex ${EXPECTED_CODEX_RELEASE}`,
+    expectedMessage: `codex.latestRelease.tag_name must match tested official Codex ${EXPECTED_CODEX_RELEASE}`,
   });
 
   assertSelfTestError({
