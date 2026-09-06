@@ -11,6 +11,7 @@ use crate::app_server_broker::{AppServerBrokerLiveValidator, app_server_broker_p
 pub(super) fn run_app_server_broker_process(profile: Option<&str>) -> Result<()> {
     let (plan, runtime_proxy) =
         super::super::runtime_launch::codex_app_server_broker_launch(profile)?;
+    crate::validate_selected_codex_binary(&plan.binary)?;
     let plan = &plan;
     let _session_lock = prodex_shared_codex_fs::lock_codex_sessions_for_child(&plan.codex_home)?;
     let mut command = Command::new(&plan.binary);

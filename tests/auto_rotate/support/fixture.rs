@@ -81,6 +81,14 @@ pub(crate) fn setup_fixture() -> Fixture {
     write_executable(
         &codex_bin,
         r#"#!/bin/sh
+if [ "$1" = "--version" ]; then
+  printf '%s\n' 'codex-cli 0.153.4'
+  exit 0
+fi
+if [ "$1" = "app-server" ] && [ "${2:-}" = "--help" ]; then
+  printf '%s\n' 'Codex app-server'
+  exit 0
+fi
 printf '%s\n' "$CODEX_HOME" > "$TEST_CODEX_LOG"
 if [ -n "$TEST_CODEX_LOG_APPEND" ]; then
   printf '%s\n' "$CODEX_HOME" >> "$TEST_CODEX_LOG_APPEND"
@@ -201,6 +209,8 @@ exit 0
         &codex_bin,
         r#"@echo off
 setlocal EnableExtensions
+if /I "%~1"=="--version" echo codex-cli 0.153.4& exit /b 0
+if /I "%~1"=="app-server" if /I "%~2"=="--help" echo Codex app-server& exit /b 0
 > "%TEST_CODEX_LOG%" echo %CODEX_HOME%
 if defined TEST_CODEX_LOG_APPEND call :prodex_append_line "%TEST_CODEX_LOG_APPEND%" "%CODEX_HOME%"
 set "prodex_first_arg=%~1"

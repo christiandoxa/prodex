@@ -66,6 +66,7 @@ fn reconcile_codex_thread_index_with_scope(
     scope: ThreadIndexRepairScope,
     timeout: Duration,
 ) -> Result<()> {
+    crate::validate_selected_codex_binary(codex_binary)?;
     let mut command = Command::new(codex_binary);
     command
         .arg("app-server")

@@ -23,7 +23,10 @@ building every fuzz target.
 Release packages contain only Prodex executables and metadata. They do not
 depend on, download, compile, bundle, or publish Codex. Standalone and npm
 launches resolve the official Codex CLI from `PATH`, or from
-`PRODEX_CODEX_BIN`, and reject Prodex/npm wrapper recursion. Install Codex from
+`PRODEX_CODEX_BIN`, reject Prodex/npm wrapper recursion and the exact six
+Codex binaries previously shipped by Prodex 0.426.1, and require Codex 0.153.2
+or newer with the `app-server` command. Legacy bundled files remain untouched.
+Install Codex from
 the [official Codex CLI instructions](https://developers.openai.com/codex/cli)
 before launching a Codex-backed Prodex command.
 

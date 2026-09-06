@@ -101,7 +101,7 @@ fn resolve_codex_cli_version() -> Option<String> {
     parse_codex_cli_version_output(&String::from_utf8(output.stdout).ok()?)
 }
 
-pub(super) fn parse_codex_cli_version_output(output: &str) -> Option<String> {
+pub(crate) fn parse_codex_cli_version_output(output: &str) -> Option<String> {
     output
         .split_whitespace()
         .rev()

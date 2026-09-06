@@ -8,7 +8,8 @@ Prodex. The current local version in this repo is `0.426.1`.
 You need:
 
 - a supported macOS, Linux, or Windows host;
-- the [official Codex CLI](https://developers.openai.com/codex/cli) available as `codex` on `PATH`;
+- the [official Codex CLI](https://developers.openai.com/codex/cli) 0.153.2 or newer, with
+  `app-server`, available as `codex` on `PATH`;
 - one logged-in Codex account for quota-aware routing.
 
 Windows must permit symbolic-link creation for managed profiles. Enable

@@ -46,6 +46,7 @@ mod app_server_control;
 mod app_state;
 mod audit_log;
 mod cli_args;
+mod codex_binary;
 mod command_dispatch;
 mod core_constants;
 mod dashboard;
@@ -121,6 +122,7 @@ use app_commands::*;
 pub(crate) use app_state::*;
 use audit_log::*;
 pub(crate) use cli_args::*;
+pub(crate) use codex_binary::{codex_bin, validate_selected_codex_binary};
 pub(crate) use codex_config::*;
 pub(crate) use core_constants::*;
 use dashboard::*;
@@ -581,18 +583,6 @@ where
     T: Into<OsString>,
 {
     prodex_cli::parse_cli_command_from(args)
-}
-
-fn codex_bin() -> OsString {
-    env::var_os("PRODEX_CODEX_BIN")
-        .or_else(bundled_codex_sibling)
-        .unwrap_or_else(|| OsString::from("codex"))
-}
-
-fn bundled_codex_sibling() -> Option<OsString> {
-    let binary_name = if cfg!(windows) { "codex.exe" } else { "codex" };
-    let path = env::current_exe().ok()?.parent()?.join(binary_name);
-    path.is_file().then(|| path.into_os_string())
 }
 
 fn claude_bin() -> OsString {
