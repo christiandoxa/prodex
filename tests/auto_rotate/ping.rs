@@ -380,6 +380,12 @@ fn ping_openai_json_contains_per_profile_results() {
             .all(|profile| profile["requested_model"] == "gpt-5.6-luna"
                 && profile["effective_model"].is_null())
     );
+    assert!(value["profiles"].as_array().unwrap().iter().all(|profile| {
+        profile["credential_validation"] == "valid"
+            && profile["first_response_latency_ms"].is_number()
+            && profile["completion_latency_ms"].as_u64().unwrap()
+                >= profile["first_response_latency_ms"].as_u64().unwrap()
+    }));
     assert_eq!(value["summary"]["profiles_discovered"], 2);
     assert_eq!(value["summary"]["profiles_tested"], 2);
     assert_eq!(value["summary"]["pool_usable"], true);

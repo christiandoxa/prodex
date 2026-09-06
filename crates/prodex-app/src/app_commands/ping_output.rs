@@ -4,10 +4,15 @@ use std::time::Duration;
 use terminal_ui::print_stdout_line;
 
 pub(super) fn render_ping_result(result: &PingResult) -> Result<()> {
+    let first_response = result.first_response_latency_ms.map_or_else(
+        || "unavailable".to_string(),
+        |latency| format!("{latency}ms"),
+    );
     print_stdout_line(&format!(
-        "{}  {:<20} {:>6}ms  requested={} effective={}",
+        "{}  {:<20} first={} completion={}ms  requested={} effective={}",
         result.profile,
         result.status.label(),
+        first_response,
         result.latency_ms.unwrap_or_default(),
         result.model.as_deref().unwrap_or("configured/default"),
         result.effective_model.as_deref().unwrap_or("unavailable")
@@ -58,6 +63,9 @@ pub(super) fn render_ping_summary(
                 "model": result.model,
                 "requested_model": result.model,
                 "effective_model": result.effective_model,
+                "credential_validation": if result.status == PingStatus::AuthFailed { "failed" } else if result.status == PingStatus::Pass { "valid" } else { "unknown" },
+                "first_response_latency_ms": result.first_response_latency_ms,
+                "completion_latency_ms": result.latency_ms,
                 "latency_ms": result.latency_ms,
                 "detail": result.detail,
             })).collect::<Vec<_>>(),

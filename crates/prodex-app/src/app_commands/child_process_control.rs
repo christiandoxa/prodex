@@ -186,12 +186,36 @@ pub(crate) fn command_output_with_timeout(
     max_output_bytes: usize,
     label: &str,
 ) -> Result<Output> {
+    Ok(command_output_with_timeout_matching_stdout_line(
+        command,
+        timeout,
+        max_output_bytes,
+        label,
+        None,
+    )?
+    .output)
+}
+
+#[derive(Debug)]
+pub(crate) struct ObservedCommandOutput {
+    pub(crate) output: Output,
+    pub(crate) first_stdout_match_latency: Option<Duration>,
+}
+
+pub(crate) fn command_output_with_timeout_matching_stdout_line(
+    command: &mut Command,
+    timeout: Duration,
+    max_output_bytes: usize,
+    label: &str,
+    stdout_match: Option<fn(&[u8]) -> bool>,
+) -> Result<ObservedCommandOutput> {
     command
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
     configure_child_process_group(command, true);
     configure_child_parent_death(command);
+    let started = Instant::now();
     let mut child = command
         .spawn()
         .with_context(|| format!("failed to start {label}"))?;
@@ -199,8 +223,8 @@ pub(crate) fn command_output_with_timeout(
     let child_job = assign_command_output_job(&child).ok();
     let stdout = child.stdout.take().context("failed to capture stdout")?;
     let stderr = child.stderr.take().context("failed to capture stderr")?;
-    let stdout_reader = bounded_output_reader(stdout, max_output_bytes);
-    let stderr_reader = bounded_output_reader(stderr, max_output_bytes);
+    let stdout_reader = bounded_output_reader(stdout, max_output_bytes, started, stdout_match);
+    let stderr_reader = bounded_output_reader(stderr, max_output_bytes, started, None);
     let deadline = Instant::now() + timeout;
     let status = loop {
         match child.try_wait() {
@@ -224,15 +248,19 @@ pub(crate) fn command_output_with_timeout(
     };
     #[cfg(windows)]
     drop(child_job);
-    let stdout = join_bounded_output_reader(stdout_reader, &mut child, label)?;
-    let stderr = join_bounded_output_reader(stderr_reader, &mut child, label)?;
+    let (stdout, first_stdout_match_latency) =
+        join_bounded_output_reader(stdout_reader, &mut child, label)?;
+    let (stderr, _) = join_bounded_output_reader(stderr_reader, &mut child, label)?;
     if stdout.len() > max_output_bytes || stderr.len() > max_output_bytes {
         anyhow::bail!("{label} output exceeded the limit");
     }
-    Ok(Output {
-        status,
-        stdout,
-        stderr,
+    Ok(ObservedCommandOutput {
+        output: Output {
+            status,
+            stdout,
+            stderr,
+        },
+        first_stdout_match_latency,
     })
 }
 
@@ -297,22 +325,50 @@ pub(crate) fn join_thread_with_timeout<T>(
 fn bounded_output_reader(
     mut reader: impl Read + Send + 'static,
     max_output_bytes: usize,
-) -> thread::JoinHandle<io::Result<Vec<u8>>> {
+    started: Instant,
+    line_match: Option<fn(&[u8]) -> bool>,
+) -> thread::JoinHandle<io::Result<(Vec<u8>, Option<Duration>)>> {
     thread::spawn(move || {
         let mut bytes = Vec::new();
-        reader
+        let mut first_match = None;
+        let mut line_start = 0;
+        let mut limited = reader
             .by_ref()
-            .take(max_output_bytes.saturating_add(1) as u64)
-            .read_to_end(&mut bytes)?;
-        Ok(bytes)
+            .take(max_output_bytes.saturating_add(1) as u64);
+        let mut chunk = [0_u8; 8192];
+        loop {
+            let read = limited.read(&mut chunk)?;
+            if read == 0 {
+                break;
+            }
+            bytes.extend_from_slice(&chunk[..read]);
+            while let Some(relative_end) =
+                bytes[line_start..].iter().position(|byte| *byte == b'\n')
+            {
+                let line_end = line_start + relative_end;
+                if first_match.is_none()
+                    && line_match.is_some_and(|matches| matches(&bytes[line_start..line_end]))
+                {
+                    first_match = Some(started.elapsed());
+                }
+                line_start = line_end + 1;
+            }
+        }
+        if first_match.is_none()
+            && line_start < bytes.len()
+            && line_match.is_some_and(|matches| matches(&bytes[line_start..]))
+        {
+            first_match = Some(started.elapsed());
+        }
+        Ok((bytes, first_match))
     })
 }
 
 fn join_bounded_output_reader(
-    reader: thread::JoinHandle<io::Result<Vec<u8>>>,
+    reader: thread::JoinHandle<io::Result<(Vec<u8>, Option<Duration>)>>,
     child: &mut Child,
     label: &str,
-) -> Result<Vec<u8>> {
+) -> Result<(Vec<u8>, Option<Duration>)> {
     let deadline = Instant::now() + Duration::from_millis(250);
     while !reader.is_finished() && Instant::now() < deadline {
         thread::sleep(Duration::from_millis(10));
