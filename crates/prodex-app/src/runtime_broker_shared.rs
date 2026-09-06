@@ -1,5 +1,6 @@
 use crate::runtime_broker::{
     create_runtime_broker_lease_in_dir_for_pid, release_runtime_broker_session_affinity,
+    send_runtime_broker_log_event,
 };
 use crate::{AppPaths, RuntimeKiroConnectProxy, RuntimeRotationProxy};
 use anyhow::Result;
@@ -82,11 +83,35 @@ impl std::fmt::Debug for RuntimeProxyEndpoint {
     }
 }
 
+#[derive(Clone)]
 pub(super) struct RuntimeBrokerSessionAffinityControl {
     pub(super) client: reqwest::blocking::Client,
     pub(super) paths: AppPaths,
     pub(super) broker_key: String,
     pub(super) registry: RuntimeBrokerRegistry,
+}
+
+#[derive(Clone)]
+pub(super) enum RuntimeRecoveryLogTarget {
+    Direct(PathBuf),
+    Broker(RuntimeBrokerSessionAffinityControl),
+}
+
+impl RuntimeRecoveryLogTarget {
+    pub(super) fn log(&self, message: &str) {
+        match self {
+            Self::Direct(path) => crate::runtime_proxy_log_to_path(path, message),
+            Self::Broker(control) => {
+                let _ = send_runtime_broker_log_event(
+                    &control.client,
+                    &control.paths,
+                    &control.broker_key,
+                    &control.registry,
+                    message,
+                );
+            }
+        }
+    }
 }
 
 impl Drop for RuntimeBrokerLease {
@@ -96,6 +121,18 @@ impl Drop for RuntimeBrokerLease {
 }
 
 impl RuntimeProxyEndpoint {
+    pub(super) fn recovery_log_target(&self) -> Option<RuntimeRecoveryLogTarget> {
+        self._direct_proxy
+            .as_ref()
+            .map(|proxy| RuntimeRecoveryLogTarget::Direct(proxy.log_path.clone()))
+            .or_else(|| {
+                self.broker_session_affinity_control
+                    .as_ref()
+                    .cloned()
+                    .map(RuntimeRecoveryLogTarget::Broker)
+            })
+    }
+
     pub(super) fn kiro_connect_proxy_url(&self) -> Option<&str> {
         self._kiro_connect_proxy
             .as_ref()

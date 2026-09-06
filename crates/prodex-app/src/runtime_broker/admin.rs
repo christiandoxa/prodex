@@ -12,6 +12,7 @@ use std::sync::atomic::Ordering;
 use tiny_http::{Header as TinyHeader, Response as TinyResponse};
 
 const RUNTIME_BROKER_ACTIVATION_MAX_BODY_BYTES: usize = 64 * 1024;
+const RUNTIME_BROKER_LOG_EVENT_MAX_BODY_BYTES: usize = 8 * 1024;
 
 #[derive(Debug)]
 struct RuntimeBrokerActivationBodyTooLarge {
@@ -77,6 +78,68 @@ pub(crate) fn build_runtime_proxy_prometheus_response(
     body: String,
 ) -> tiny_http::ResponseBox {
     build_runtime_proxy_string_response(status, body, "text/plain; version=0.0.4; charset=utf-8")
+}
+
+fn runtime_broker_log_event_response(
+    request: &mut tiny_http::Request,
+    shared: &RuntimeRotationProxyShared,
+) -> Option<tiny_http::ResponseBox> {
+    if request.method().as_str() != "POST" {
+        return Some(build_runtime_proxy_json_error_response(
+            405,
+            "method_not_allowed",
+            "runtime broker log event requires POST",
+        ));
+    }
+    let mut body = String::new();
+    if request
+        .as_reader()
+        .take((RUNTIME_BROKER_LOG_EVENT_MAX_BODY_BYTES + 1) as u64)
+        .read_to_string(&mut body)
+        .is_err()
+        || body.len() > RUNTIME_BROKER_LOG_EVENT_MAX_BODY_BYTES
+    {
+        return Some(build_runtime_proxy_json_error_response(
+            400,
+            "invalid_request",
+            "runtime broker log event is invalid",
+        ));
+    }
+    let value: serde_json::Value = match serde_json::from_str(&body) {
+        Ok(value) => value,
+        Err(_) => {
+            return Some(build_runtime_proxy_json_error_response(
+                400,
+                "invalid_request",
+                "runtime broker log event is invalid",
+            ));
+        }
+    };
+    let Some(message) = value
+        .get("message")
+        .and_then(serde_json::Value::as_str)
+        .filter(|message| message.len() <= 4 * 1024)
+    else {
+        return Some(build_runtime_proxy_json_error_response(
+            400,
+            "invalid_request",
+            "runtime broker log event is invalid",
+        ));
+    };
+    let Some(event) = runtime_proxy_crate::runtime_proxy_parse_log_event(message)
+        .filter(|event| event.event() == "runtime_recovery")
+    else {
+        return Some(build_runtime_proxy_json_error_response(
+            400,
+            "invalid_request",
+            "runtime broker log event is invalid",
+        ));
+    };
+    runtime_proxy_log(shared, event.render_message());
+    Some(build_runtime_proxy_json_response(
+        200,
+        "{\"ok\":true}".to_string(),
+    ))
 }
 
 pub(crate) fn update_runtime_broker_current_profile(log_path: &Path, current_profile: &str) {
@@ -410,6 +473,9 @@ pub(crate) fn handle_runtime_proxy_admin_request(
         }
         prodex_runtime_broker::RuntimeBrokerAdminRoute::LogSnapshot => {
             runtime_broker_log_snapshot_response(request, shared)
+        }
+        prodex_runtime_broker::RuntimeBrokerAdminRoute::LogEvent => {
+            runtime_broker_log_event_response(request, shared)
         }
     }
 }

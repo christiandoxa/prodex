@@ -33,6 +33,14 @@ fn registry_builds_admin_urls_and_matches_launch_config() {
         RuntimeBrokerAdminRoute::from_path("/__prodex/runtime/log/snapshot"),
         Some(RuntimeBrokerAdminRoute::LogSnapshot)
     );
+    assert_eq!(
+        RuntimeBrokerAdminRoute::from_path("/__prodex/runtime/log/event"),
+        Some(RuntimeBrokerAdminRoute::LogEvent)
+    );
+    assert_eq!(
+        registry.log_event_url(),
+        "http://127.0.0.1:4567/__prodex/runtime/log/event"
+    );
     assert!(registry.matches_launch_config("https://upstream.example", true, false, false));
     assert!(!registry.matches_launch_config("https://other.example", true, false, false));
     assert!(!registry.matches_launch_config("https://upstream.example", true, false, true));
