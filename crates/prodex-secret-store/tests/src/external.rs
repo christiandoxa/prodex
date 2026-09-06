@@ -82,6 +82,30 @@ fn external_file_backend_rejects_fifo_without_blocking() {
 
 #[cfg(unix)]
 #[test]
+fn external_file_backend_rejects_directories_and_devices() {
+    let root = temp_dir("external-source-special-files");
+    let directory = root.join(".credentials.json");
+    fs::create_dir(&directory).unwrap();
+    let backend = FileSecretBackend::new();
+
+    assert!(
+        backend
+            .read_external_text_bounded(&directory, 64)
+            .unwrap_err()
+            .is_unsafe_file()
+    );
+    assert!(
+        backend
+            .read_external_text_bounded(std::path::Path::new("/dev/null"), 64)
+            .unwrap_err()
+            .is_unsafe_file()
+    );
+
+    let _ = fs::remove_dir_all(root);
+}
+
+#[cfg(unix)]
+#[test]
 fn external_file_backend_rejects_symlink_parent_traversal_and_oversized_files() {
     use std::os::unix::fs::{PermissionsExt as _, symlink};
 
