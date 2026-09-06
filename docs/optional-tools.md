@@ -121,7 +121,14 @@ to verify it explicitly.
 Presidio remains an explicit service selection and is checked by its existing
 doctor path. `--require-tool presidio` additionally requires healthy services
 and `fail_mode = "closed"`, so an inspection failure cannot silently bypass
-redaction.
+redaction. Presidio 2.2.364 currently constrains `cryptography` below the
+50.0.0 fix for
+[GHSA-g6cj-pr64-35w5](https://github.com/advisories/GHSA-g6cj-pr64-35w5).
+The affected PKCS#7 EnvelopedData decrypt
+API is not used by Prodex's tested anonymize route, but the optional image is
+not reported as dependency-clean while
+[upstream issue #2229](https://github.com/data-privacy-stack/presidio/issues/2229)
+remains open.
 
 Native Gemini, Copilot, Kiro, and Antigravity frontends do not consume Codex
 overlays, so they reject `--tool` and `--require-tool` instead of claiming the
