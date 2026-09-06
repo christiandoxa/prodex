@@ -37,6 +37,7 @@ const REQUIRED_CRITICAL_FILES = [
   "codex-rs/ext/web-search/src/tool.rs",
   "codex-rs/codex-api/src/endpoint/search.rs",
   "codex-rs/tools/src/json_schema.rs",
+  "codex-rs/tools/src/json_schema/compaction.rs",
   "codex-rs/exec/src/cli.rs",
   "codex-rs/exec/src/lib.rs",
   "codex-rs/protocol/src/protocol.rs",
@@ -217,7 +218,7 @@ const REQUIRED_FILE_CONTAINS = {
   "codex-rs/model-provider/src/amazon_bedrock/catalog.rs": [
     "static_model_catalog",
     "normalize_bedrock_catalog",
-    "gpt_5_6_bedrock_model",
+    "fn bedrock_model(",
     "AMAZON_BEDROCK_GPT_5_6_SOL_MODEL_ID",
     "AMAZON_BEDROCK_GPT_5_6_TERRA_MODEL_ID",
     "AMAZON_BEDROCK_GPT_5_6_LUNA_MODEL_ID",
@@ -442,6 +443,12 @@ const REQUIRED_FILE_CONTAINS = {
     "anyOf",
     "oneOf",
     "allOf",
+    "compact_large_tool_schema",
+  ],
+  "codex-rs/tools/src/json_schema/compaction.rs": [
+    "compact_large_tool_schema",
+    "LARGE_SCHEMA_COMPACTION_PASSES",
+    "MAX_COMPACT_TOOL_SCHEMA_BYTES",
     "MAX_COMPACT_TOOL_SCHEMA_DEPTH",
     "prune_schema_compositions",
   ],
@@ -903,7 +910,7 @@ const REQUIRED_SEMANTIC_CHECKS = [
     file_contains_all: [
       "static_model_catalog",
       "normalize_bedrock_catalog",
-      "gpt_5_6_bedrock_model",
+      "fn bedrock_model(",
       "AMAZON_BEDROCK_GPT_5_6_SOL_MODEL_ID",
       "AMAZON_BEDROCK_GPT_5_6_TERRA_MODEL_ID",
       "AMAZON_BEDROCK_GPT_5_6_LUNA_MODEL_ID",
@@ -915,6 +922,18 @@ const REQUIRED_SEMANTIC_CHECKS = [
       "WebSearchToolType::Text",
       "model.use_responses_lite = false",
       "model.tool_mode = None",
+    ],
+  },
+  {
+    id: "tools.large-schema-compaction",
+    kind: "tool_schema",
+    file: "codex-rs/tools/src/json_schema/compaction.rs",
+    file_contains_all: [
+      "compact_large_tool_schema",
+      "LARGE_SCHEMA_COMPACTION_PASSES",
+      "MAX_COMPACT_TOOL_SCHEMA_BYTES",
+      "MAX_COMPACT_TOOL_SCHEMA_DEPTH",
+      "prune_schema_compositions",
     ],
   },
   {
