@@ -286,7 +286,7 @@ process-local capability. Quick Tunnel owns an isolated `cloudflared --protocol 
 uses one bounded explicit HTTP/2 compatibility retry only after auto transport registration stalls;
 existing Cloudflare hostname mode validates but never owns the user's tunnel.
 
-`prodex ping openai` is an application-level diagnostic: it sends the user text `ping` through
+`prodex ping openai` is an application-level diagnostic: it sends the user text `hello` through
 the normal Prodex OpenAI/Codex request path and requires a valid completed model response. It is
 not a network/server probe and does not require exact `PONG` wording. Global provider-secret
 environment variables are removed from that child so its result remains bound to the selected

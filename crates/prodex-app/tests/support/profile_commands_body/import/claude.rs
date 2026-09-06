@@ -129,6 +129,111 @@ fn profile_import_claude_supports_custom_source_and_updates_duplicate_profile() 
     );
 }
 
+#[test]
+fn profile_import_claude_credentials_survive_managed_runtime_preparation() {
+    let sandbox_dir = ProfileCommandsTestDir::new("claude-runtime-preparation");
+    let _env = ProfileCommandsTestEnv::new(&sandbox_dir.path);
+    let source_dir = sandbox_dir.path.join("external-claude");
+    write_claude_import_source(&source_dir, "runtime-claude-access-token");
+    let _source_override = TestEnvVarGuard::set(
+        "CLAUDE_CONFIG_DIR",
+        &source_dir.display().to_string(),
+    );
+    let _claude_bin = TestEnvVarGuard::set(
+        "CLAUDE_BIN",
+        &sandbox_dir.path.join("missing-claude").display().to_string(),
+    );
+
+    handle_import_claude_profile(&claude_import_args(Some("claude-runtime"), true))
+        .expect("Claude credentials should import");
+
+    let paths = AppPaths::discover().expect("Prodex paths should resolve");
+    let profile = AppState::load(&paths)
+        .expect("profile state should load")
+        .profiles
+        .remove("claude-runtime")
+        .expect("imported Claude profile should exist");
+    prodex_shared_codex_fs::prepare_managed_codex_home_for_runtime_launch_with_local_credentials(
+        &paths,
+        &profile.codex_home,
+    )
+    .expect("managed runtime home should prepare");
+    assert!(
+        fs::symlink_metadata(profile.codex_home.join(CLAUDE_CREDENTIALS_FILE))
+            .expect("managed Claude credentials metadata should exist")
+            .file_type()
+            .is_file()
+    );
+
+    assert_eq!(
+        read_claude_oauth_secret(&profile.codex_home)
+            .expect("managed Claude credentials should remain private")
+            .access_token,
+        "runtime-claude-access-token"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn managed_claude_credentials_detach_legacy_shared_link() {
+    use std::os::unix::fs::{PermissionsExt as _, symlink};
+
+    let sandbox_dir = ProfileCommandsTestDir::new("claude-legacy-shared-credentials");
+    let paths = profile_commands_test_paths(&sandbox_dir.path);
+    let codex_home = paths.managed_profiles_root.join("claude-runtime");
+    let shared_credentials = paths
+        .shared_codex_root
+        .join(CLAUDE_CREDENTIALS_FILE);
+    create_codex_home_if_missing(&codex_home).expect("profile home should exist");
+    create_codex_home_if_missing(&paths.shared_codex_root).expect("shared home should exist");
+    write_secret_text_file(
+        &shared_credentials,
+        &claude_import_credentials("legacy-shared-access-token"),
+    )
+    .expect("legacy shared credentials should be written");
+    fs::set_permissions(
+        &shared_credentials,
+        fs::Permissions::from_mode(0o644),
+    )
+    .expect("legacy shared credentials permissions should be set");
+    symlink(&shared_credentials, codex_home.join(CLAUDE_CREDENTIALS_FILE))
+        .expect("legacy credential link should be created");
+
+    prodex_shared_codex_fs::prepare_managed_codex_home_with_local_credentials(&paths, &codex_home)
+        .expect("managed Claude home should detach legacy credentials");
+
+    let local_path = codex_home.join(CLAUDE_CREDENTIALS_FILE);
+    assert!(
+        fs::symlink_metadata(&local_path)
+            .expect("detached credentials metadata should exist")
+            .file_type()
+            .is_file()
+    );
+    assert_eq!(
+        fs::metadata(&local_path)
+            .expect("detached credentials metadata should read")
+            .permissions()
+            .mode()
+            & 0o777,
+        0o600
+    );
+    assert_eq!(
+        read_claude_oauth_secret(&codex_home)
+            .expect("detached credentials should remain readable")
+            .access_token,
+        "legacy-shared-access-token"
+    );
+    assert_eq!(
+        parse_claude_oauth_secret_text(
+            &read_external_claude_credentials_text(&paths.shared_codex_root)
+                .expect("shared credentials should remain readable"),
+        )
+            .expect("shared credentials should parse")
+            .access_token,
+        "legacy-shared-access-token"
+    );
+}
+
 #[cfg(unix)]
 #[test]
 fn profile_import_claude_rejects_symlinked_source_root_and_credentials() {

@@ -228,7 +228,24 @@ impl<'a> RuntimeLaunchPreparationBuilder<'a> {
             ensure_managed_runtime_launch_home_under_root(&self.paths, &self.selection.codex_home)?;
             // ponytail: runtime launch only prepares links; full maintenance is explicit.
             let shared_fs_started = Instant::now();
-            prepare_managed_codex_home_for_runtime_launch(&self.paths, &self.selection.codex_home)?;
+            if self
+                .state
+                .profiles
+                .get(&self.selection.selected_profile_name)
+                .is_some_and(|profile| {
+                    matches!(&profile.provider, ProfileProvider::Anthropic { .. })
+                })
+            {
+                prepare_managed_codex_home_for_runtime_launch_with_local_credentials(
+                    &self.paths,
+                    &self.selection.codex_home,
+                )?;
+            } else {
+                prepare_managed_codex_home_for_runtime_launch(
+                    &self.paths,
+                    &self.selection.codex_home,
+                )?;
+            }
             emit_timing("startup.managed_home_prepare_ms", shared_fs_started);
             emit_timing("startup.shared_fs_prepare_ms", shared_fs_started);
         }

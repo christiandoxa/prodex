@@ -462,7 +462,7 @@ Managed optimizer roots are checked in this order: `PRODEX_OPTIMIZERS_HOME`, `$X
 ## OpenAI profile diagnostic
 
 `prodex ping openai` snapshots every configured eligible OpenAI profile and
-sends the minimal user text `ping` through the normal Prodex OpenAI/Codex
+sends the minimal user text `hello` through the normal Prodex OpenAI/Codex
 request path, pinning each probe so one account cannot hide behind another.
 It reports each completed response or typed failure, continues after failures,
 and exits non-zero unless every requested profile succeeds. A valid completed
@@ -1238,9 +1238,9 @@ On Unix-like systems, this is usually:
 ~/.codex
 ```
 
-In practice, profile `history.jsonl`, `sessions`, `archived_sessions`, `config.toml`, `managed_config.toml`, `environments.toml`, `.credentials.json`, plugins, skills, app-server plugin state, memory-extension state, remote-control enrollment, and Codex runtime SQLite files such as `state_*`, `goals_*`, `logs_*`, and `memories_*` link to the same Codex home that direct Codex uses.
+In practice, profile `history.jsonl`, `sessions`, `archived_sessions`, `config.toml`, `managed_config.toml`, `environments.toml`, plugins, skills, app-server plugin state, memory-extension state, remote-control enrollment, and Codex runtime SQLite files such as `state_*`, `goals_*`, `logs_*`, and `memories_*` link to the same Codex home that direct Codex uses. OpenAI/Codex profiles also share `.credentials.json`; Anthropic Claude profiles keep their Claude OAuth `.credentials.json` local to the profile.
 
-Codex 0.140.0 defaults CLI auth credentials to the file store, so managed Prodex profiles continue to keep `auth.json` isolated per profile, including OpenAI, API-key, and Bedrock API-key auth JSON. MCP OAuth defaults to Codex `auto`; when it falls back to the file store, `.credentials.json` is shared with direct Codex. OS keyring-backed MCP OAuth credentials remain Codex/OS-owned and are not part of Prodex profile export bundles.
+Codex 0.140.0 defaults CLI auth credentials to the file store, so managed Prodex profiles continue to keep `auth.json` isolated per profile, including OpenAI, API-key, and Bedrock API-key auth JSON. MCP OAuth defaults to Codex `auto`; when it falls back to the file store, `.credentials.json` is shared with direct Codex for OpenAI/Codex profiles. Claude OAuth imports and logins retain `.credentials.json` as a private regular file in each Anthropic profile. OS keyring-backed MCP OAuth credentials remain Codex/OS-owned and are not part of Prodex profile export bundles.
 
 Prodex-owned runtime broker capability secrets default to files and can use the native OS keyring instead:
 

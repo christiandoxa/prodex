@@ -631,7 +631,7 @@ shared-state integration around those operations.
   remain distinct in runtime state and diagnostics. A 429/503 or transport error never zeros
   Reserve or Spark capacity without authoritative provider evidence.
 - `prodex ping openai` is an all-account application-level diagnostic: it snapshots configured
-  eligible OpenAI profiles, sends the text `ping` through the normal OpenAI/Codex runtime path
+  eligible OpenAI profiles, sends the text `hello` through the normal OpenAI/Codex runtime path
   with each probe pinned to its profile and cross-profile fallback disabled, and records every
   terminal result. A valid completed model response is sufficient; exact response wording is not
   a contract. It is not a DNS, TCP, TLS, ICMP, `/models`, or server-health probe. The command

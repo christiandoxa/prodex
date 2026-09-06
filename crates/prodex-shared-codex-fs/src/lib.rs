@@ -29,6 +29,8 @@ pub use self::prepare::{
     maintain_managed_codex_session_file, maintain_managed_codex_sessions,
     maintain_recent_managed_codex_sessions, prepare_managed_codex_home,
     prepare_managed_codex_home_for_runtime_launch,
+    prepare_managed_codex_home_for_runtime_launch_with_local_credentials,
+    prepare_managed_codex_home_with_local_credentials,
 };
 
 const SHARED_CODEX_DIR_NAMES: &[&str] = &[

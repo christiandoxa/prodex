@@ -311,6 +311,108 @@ mod tests {
     }
 
     #[test]
+    fn named_claude_login_keeps_managed_credentials_private() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let root = std::env::temp_dir().join(format!(
+            "prodex-claude-login-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        fs::create_dir_all(&root).expect("test root should be created");
+        fs::set_permissions(&root, fs::Permissions::from_mode(0o700))
+            .expect("test root should be private");
+        let paths = AppPaths {
+            root: root.clone(),
+            state_file: root.join("state.json"),
+            managed_profiles_root: root.join("profiles"),
+            shared_codex_root: root.join("shared"),
+            legacy_shared_codex_root: root.join("legacy"),
+        };
+        fs::create_dir_all(&paths.managed_profiles_root)
+            .expect("managed profiles root should be created");
+        let profile_home = paths.managed_profiles_root.join("main");
+        create_codex_home_if_missing(&profile_home).expect("profile home should be created");
+        AppState {
+            active_profile: Some("main".to_string()),
+            profiles: std::collections::BTreeMap::from([(
+                "main".to_string(),
+                ProfileEntry {
+                    codex_home: profile_home.clone(),
+                    managed: true,
+                    email: None,
+                    provider: ProfileProvider::Openai,
+                },
+            )]),
+            ..AppState::default()
+        }
+        .save(&paths)
+        .expect("initial state should save");
+
+        let script = root.join("fake-claude.sh");
+        fs::write(
+            &script,
+            r#"#!/bin/sh
+if [ "$2" = "login" ]; then
+  printf '%s' '{"claudeAiOauth":{"accessToken":"login-access-token","expiresAt":1900000000000,"subscriptionType":"pro","email":"claude@example.com"}}' > "$CLAUDE_CONFIG_DIR/.credentials.json"
+  chmod 644 "$CLAUDE_CONFIG_DIR/.credentials.json"
+  exit 0
+fi
+if [ "$2" = "status" ]; then
+  printf '%s' '{"loggedIn":true,"authMethod":"claude-ai-oauth","email":"claude@example.com"}'
+  exit 0
+fi
+exit 1
+"#,
+        )
+        .expect("fake Claude command should be written");
+        fs::set_permissions(&script, fs::Permissions::from_mode(0o700))
+            .expect("fake Claude command should be executable");
+        let _claude_guard = TestEnvVarGuard::set("CLAUDE_BIN", &script.display().to_string());
+
+        let status = login_into_profile(
+            &paths,
+            "main",
+            &LoginRequest {
+                method: LoginMethod::Claude,
+                codex_args: Vec::new(),
+                api_key: None,
+                openai_base_url: None,
+                openai_base_url_specified: false,
+                api_key_profile_name: None,
+            },
+        )
+        .expect("Claude login should commit to the managed profile");
+
+        assert!(status.success());
+        let credentials_path = profile_home.join(crate::CLAUDE_CREDENTIALS_FILE);
+        assert!(
+            fs::symlink_metadata(&credentials_path)
+                .expect("managed credentials metadata should exist")
+                .file_type()
+                .is_file()
+        );
+        assert_eq!(
+            fs::metadata(&credentials_path)
+                .expect("managed credentials metadata should read")
+                .permissions()
+                .mode()
+                & 0o777,
+            0o600
+        );
+        assert_eq!(
+            crate::read_claude_oauth_secret(&profile_home)
+                .expect("managed credentials should be readable")
+                .access_token,
+            "login-access-token"
+        );
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
     fn named_login_rejects_profile_recreated_during_external_login() {
         use std::os::unix::fs::PermissionsExt;
 

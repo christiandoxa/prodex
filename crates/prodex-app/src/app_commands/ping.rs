@@ -21,7 +21,7 @@ use ping_output::{render_ping_result, render_ping_summary};
 use ping_process::{classify_ping_process_error, ping_output_failure_detail, run_ping_command};
 use ping_workers::{collect_ping_results, probe_ping_worker};
 
-const PING_PROMPT: &str = "ping";
+const PING_PROMPT: &str = "hello";
 const PING_TIMEOUT: Duration = Duration::from_secs(45);
 const PING_OUTPUT_MAX_BYTES: usize = 1024 * 1024;
 const PING_MAX_CONCURRENCY: usize = 4;

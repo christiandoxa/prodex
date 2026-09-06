@@ -76,6 +76,7 @@ fn exact_ping_text_uses_the_canonical_codex_exec_path() {
         .map(|value| value.to_string_lossy().into_owned())
         .collect::<Vec<_>>();
     assert_eq!(values.first().map(String::as_str), Some("exec"));
+    assert_eq!(PING_PROMPT, "hello");
     assert_eq!(values.last().map(String::as_str), Some(PING_PROMPT));
     assert!(!values.iter().any(|value| value == "run"));
     assert!(!values.iter().any(|value| value == "--profile"));

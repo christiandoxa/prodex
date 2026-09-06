@@ -8,8 +8,8 @@ use super::unique_profile_name_for_slug;
 use crate::{
     AppPaths, AppState, AppStateIoExt, ProfileEntry, ProfileProvider, activate_profile,
     claude_external_oauth_profile_identity, claude_oauth_profile_identity,
-    copy_claude_oauth_credentials, managed_profile_home_path, prepare_managed_codex_home,
-    prepare_profile_codex_home, read_external_claude_credentials_text, remove_dir_if_exists,
+    copy_claude_oauth_credentials, managed_profile_home_path, prepare_claude_profile_codex_home,
+    read_external_claude_credentials_text, remove_dir_if_exists,
 };
 use anyhow::{Context, Result, bail};
 use std::path::{Path, PathBuf};
@@ -33,7 +33,7 @@ pub(super) fn prepare_anthropic_profile_login_home(
             profile.provider.display_name()
         );
     }
-    prepare_profile_codex_home(paths, profile)?;
+    prepare_claude_profile_codex_home(paths, profile)?;
     Ok(profile.codex_home.clone())
 }
 
@@ -207,7 +207,7 @@ fn finish_anthropic_login_for_new_profile(
             auth_journal_paths: Vec::new(),
         },
     )?;
-    prepare_managed_codex_home(paths, &codex_home)?;
+    prepare_claude_profile_codex_home(paths, &desired_profile)?;
     copy_claude_oauth_credentials(login_home, &codex_home)?;
 
     state.profiles.insert(profile_name.clone(), desired_profile);
