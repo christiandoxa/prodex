@@ -6,18 +6,28 @@ use std::time::{Duration, Instant};
 
 #[cfg(windows)]
 use std::os::windows::io::{AsRawHandle, FromRawHandle, OwnedHandle};
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 const COMMAND_PROBE_TIMEOUT: Duration = Duration::from_secs(15);
 const COMMAND_PROBE_OUTPUT_MAX_BYTES: usize = 1024 * 1024;
 
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 static INTERACTIVE_SIGINT_COUNT: AtomicUsize = AtomicUsize::new(0);
 
 #[cfg(unix)]
 extern "C" fn interactive_sigint_handler(_signal: libc::c_int) {
     INTERACTIVE_SIGINT_COUNT.fetch_add(1, Ordering::Relaxed);
+}
+
+#[cfg(windows)]
+unsafe extern "system" fn interactive_sigint_handler(control: u32) -> windows_sys::core::BOOL {
+    if control == windows_sys::Win32::System::Console::CTRL_C_EVENT {
+        INTERACTIVE_SIGINT_COUNT.fetch_add(1, Ordering::Relaxed);
+        1
+    } else {
+        0
+    }
 }
 
 #[cfg(unix)]
@@ -51,6 +61,43 @@ impl InteractiveSigintGuard {
 impl Drop for InteractiveSigintGuard {
     fn drop(&mut self) {
         let _ = unsafe { libc::sigaction(libc::SIGINT, &self.previous, std::ptr::null_mut()) };
+        INTERACTIVE_SIGINT_COUNT.store(0, Ordering::Relaxed);
+    }
+}
+
+#[cfg(windows)]
+pub(crate) struct InteractiveSigintGuard;
+
+#[cfg(windows)]
+impl InteractiveSigintGuard {
+    pub(crate) fn install() -> io::Result<Self> {
+        let installed = unsafe {
+            windows_sys::Win32::System::Console::SetConsoleCtrlHandler(
+                Some(interactive_sigint_handler),
+                1,
+            )
+        };
+        if installed == 0 {
+            return Err(io::Error::last_os_error());
+        }
+        INTERACTIVE_SIGINT_COUNT.store(0, Ordering::Relaxed);
+        Ok(Self)
+    }
+
+    pub(crate) fn count() -> usize {
+        INTERACTIVE_SIGINT_COUNT.load(Ordering::Relaxed)
+    }
+}
+
+#[cfg(windows)]
+impl Drop for InteractiveSigintGuard {
+    fn drop(&mut self) {
+        let _ = unsafe {
+            windows_sys::Win32::System::Console::SetConsoleCtrlHandler(
+                Some(interactive_sigint_handler),
+                0,
+            )
+        };
         INTERACTIVE_SIGINT_COUNT.store(0, Ordering::Relaxed);
     }
 }
