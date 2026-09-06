@@ -2,99 +2,53 @@ use crate::app_state::{AppStateIoExt, ProfileProviderExt};
 use crate::{AppPaths, AppState};
 use anyhow::{Context, Result};
 use rusqlite::OptionalExtension;
-use std::collections::BTreeSet;
 use std::fs::{self};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
+#[path = "usage_limit_recovery/monitor_workflow.rs"]
+mod monitor_workflow;
+#[path = "usage_limit_recovery/plan.rs"]
+mod plan;
+#[path = "usage_limit_recovery/telemetry.rs"]
+mod telemetry;
+#[path = "usage_limit_recovery/workflow.rs"]
+mod workflow;
+pub(crate) use monitor_workflow::wait_for_runtime_recovery_round;
+pub(crate) use plan::{
+    GoalResumeRelaunchPlan, RuntimeUsageLimitResumeOptions, next_observed_runtime_recovery_plan,
+    next_runtime_usage_limit_plan, plan_runtime_usage_limit_relaunch,
+    runtime_exit_status_is_cancelled,
+};
+pub(crate) use telemetry::{
+    runtime_session_recovery_message, runtime_session_recovery_wait_message,
+};
+use workflow::{
+    RuntimeWorkflowEvidence, RuntimeWorkflowRecoveryClass, observe_runtime_workflow_evidence,
+    runtime_workflow_effective_model, runtime_workflow_recovery_class,
+};
+
 const GOAL_USAGE_LIMIT_RETRY_INTERVAL: Duration = Duration::from_secs(5);
+pub(crate) const RUNTIME_SESSION_CONTINUATION_PROMPT: &str = "Continue the interrupted task from the persisted session. Preserve completed work and do not repeat completed tool calls.";
 const OBSERVED_USAGE_LIMIT_MESSAGE: &str = "You've hit your usage limit. Upgrade to Pro (https://chatgpt.com/explore/pro), visit https://chatgpt.com/codex/settings/usage to purchase more credits or try again at 5:08 PM.";
 const GOAL_USAGE_LIMIT_JSON_SCAN_LIMIT: usize = 2_048;
 static RUNTIME_USAGE_LIMIT_MONITOR_SEQUENCE: AtomicU64 = AtomicU64::new(0);
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct GoalResumeRelaunchPlan {
-    pub(crate) session_id: String,
-    pub(crate) profile_name: String,
-}
-
-#[derive(Clone, Copy)]
-pub(crate) struct RuntimeUsageLimitResumeOptions<'a> {
-    pub(crate) requested_profile: Option<&'a str>,
-    pub(crate) no_auto_rotate: bool,
-    pub(crate) skip_quota_check: bool,
-    pub(crate) base_url: Option<&'a str>,
-    pub(crate) include_code_review: bool,
-    pub(crate) no_proxy: bool,
-    pub(crate) attempted_profiles: &'a BTreeSet<String>,
-}
-
-pub(crate) fn next_runtime_usage_limit_plan(
-    state: &AppState,
-    session_id: &str,
-    options: &RuntimeUsageLimitResumeOptions<'_>,
-) -> Option<GoalResumeRelaunchPlan> {
-    let failed_profile = state
-        .session_profile_bindings
-        .get(session_id)
-        .map(|binding| binding.profile_name.clone())
-        .or_else(|| options.requested_profile.map(ToOwned::to_owned))
-        .or_else(|| state.active_profile.clone())
-        .unwrap_or_default();
-    let candidates = if options.skip_quota_check {
-        super::active_profile_selection_order(state, &failed_profile)
-    } else {
-        super::find_ready_profiles(
-            state,
-            &failed_profile,
-            options.base_url,
-            options.include_code_review,
-            options.no_proxy,
-        )
-    };
-    candidates
-        .into_iter()
-        .filter(|candidate| candidate != &failed_profile)
-        .filter(|candidate| !options.attempted_profiles.contains(candidate))
-        .find(|candidate| {
-            state.profiles.get(candidate).is_some_and(|profile| {
-                profile.provider.supports_codex_runtime()
-                    && profile
-                        .provider
-                        .auth_summary(&profile.codex_home)
-                        .quota_compatible
-            })
-        })
-        .map(|profile_name| GoalResumeRelaunchPlan {
-            session_id: session_id.to_string(),
-            profile_name,
-        })
-}
-
-pub(crate) fn plan_runtime_usage_limit_relaunch(
-    monitor: &mut GoalUsageLimitMonitor,
-    status: &std::process::ExitStatus,
-    options: &RuntimeUsageLimitResumeOptions<'_>,
-) -> Result<Option<GoalResumeRelaunchPlan>> {
-    if status.success() || options.no_auto_rotate {
-        return Ok(None);
-    }
-    let Some(session_id) = monitor.detect_usage_limit_after_child()? else {
-        return Ok(None);
-    };
-    let state = AppState::load_and_repair(&monitor.paths)?;
-    Ok(next_runtime_usage_limit_plan(&state, &session_id, options))
-}
 
 pub(crate) struct GoalUsageLimitMonitor {
     pub(crate) paths: AppPaths,
     db_path: Option<PathBuf>,
     pub(crate) marker_path: PathBuf,
     session_id: Option<String>,
+    session_path: Option<PathBuf>,
     connection: Option<rusqlite::Connection>,
     armed: bool,
     usage_limit_pending: bool,
+    workflow_recovery_class: Option<RuntimeWorkflowRecoveryClass>,
+    workflow_model: Option<String>,
+    workflow_evidence: RuntimeWorkflowEvidence,
+    session_goal_present: bool,
+    workflow_scan_disabled: bool,
     session_usage_limit_reported: bool,
     session_scan_offset: u64,
     next_retry_at: Instant,
@@ -113,9 +67,15 @@ impl GoalUsageLimitMonitor {
             db_path,
             marker_path,
             session_id,
+            session_path: None,
             connection: None,
             armed: false,
             usage_limit_pending: false,
+            workflow_recovery_class: None,
+            workflow_model: None,
+            workflow_evidence: RuntimeWorkflowEvidence::default(),
+            session_goal_present: false,
+            workflow_scan_disabled: false,
             session_usage_limit_reported: false,
             session_scan_offset: 0,
             next_retry_at: Instant::now(),
@@ -129,39 +89,48 @@ impl GoalUsageLimitMonitor {
 
     pub(crate) fn take_usage_limit_signal(&mut self) -> Result<Option<String>> {
         self.refresh_session_id()?;
-        let Some(db_path) = self.db_path.as_ref() else {
-            return Ok(None);
-        };
         let Some(session_id) = self.session_id.clone() else {
             return Ok(None);
         };
-        if self.connection.is_none() {
-            self.connection = Some(
-                rusqlite::Connection::open_with_flags(
-                    db_path,
-                    rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY
-                        | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
+        let workflow_recovery = self.observe_workflow_recovery(&session_id)?;
+        let status = if let Some(db_path) = self.db_path.as_ref() {
+            if self.connection.is_none() {
+                self.connection = Some(
+                    rusqlite::Connection::open_with_flags(
+                        db_path,
+                        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY
+                            | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
+                    )
+                    .with_context(|| format!("failed to open {}", db_path.display()))?,
+                );
+            }
+            self.connection
+                .as_ref()
+                .context("goal usage monitor connection is unavailable")?
+                .query_row(
+                    "SELECT status, updated_at_ms FROM thread_goals WHERE thread_id = ? ORDER BY updated_at_ms DESC LIMIT 1",
+                    [&session_id],
+                    |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?)),
                 )
-                .with_context(|| format!("failed to open {}", db_path.display()))?,
-            );
-        }
-        let status = self
-            .connection
-            .as_ref()
-            .context("goal usage monitor connection is unavailable")?
-            .query_row(
-                "SELECT status, updated_at_ms FROM thread_goals WHERE thread_id = ? ORDER BY updated_at_ms DESC LIMIT 1",
-                [&session_id],
-                |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?)),
-            )
-            .optional()
-            .with_context(|| format!("failed to read goal status from {}", db_path.display()))?;
+                .optional()
+                .with_context(|| format!("failed to read goal status from {}", db_path.display()))?
+        } else {
+            None
+        };
         let normalized = status
             .as_ref()
             .map(|(status, _)| status.trim().to_ascii_lowercase());
-        if normalized.as_deref() == Some("active") {
+        self.session_goal_present = status.is_some();
+        if let Some(class) = workflow_recovery
+            && self.workflow_evidence.safe_to_resume()
+            && normalized.as_deref().is_none_or(goal_status_is_resumable)
+        {
+            self.workflow_recovery_class = Some(class);
+            self.usage_limit_pending = true;
+            self.next_retry_at = Instant::now();
+        }
+        if normalized.as_deref() == Some("active") && !self.usage_limit_pending {
             self.armed = true;
-            self.usage_limit_pending = false;
             return Ok(None);
         }
         let current_attempt_hit_limit = status
@@ -200,6 +169,9 @@ impl GoalUsageLimitMonitor {
             Err(prodex_session_store::SessionResolveError::Missing { .. }) => return Ok(None),
             Err(error) => return Err(error.into()),
         };
+        if let Some(model) = report.last_model() {
+            self.workflow_model = Some(model.to_string());
+        }
         let path = Path::new(&report.path);
         if !self.session_is_resumable(path, &session_id)? {
             return Ok(None);
@@ -214,10 +186,41 @@ impl GoalUsageLimitMonitor {
         } else {
             self.session_scan_offset
         };
-        let saw_usage_limit = session_file_has_usage_limit_since(path, scan_offset)?;
-        self.session_scan_offset =
-            prodex_session_store::session_file_logical_len(path).unwrap_or(file_len);
-        if saw_usage_limit {
+        let mut workflow_class = None;
+        let mut legacy_usage_limit = false;
+        let mut model = self.workflow_model.clone();
+        let mut evidence = self.workflow_evidence;
+        let scan = match prodex_session_store::session_file_scan_since(path, scan_offset, |line| {
+            let Ok(value) = serde_json::from_str::<serde_json::Value>(line) else {
+                return false;
+            };
+            if let Some(observed) = runtime_workflow_effective_model(&value) {
+                model = Some(observed);
+            }
+            observe_runtime_workflow_evidence(&value, &mut evidence);
+            workflow_class = runtime_workflow_recovery_class(&value, &session_id);
+            if workflow_class.is_some() {
+                return true;
+            }
+            legacy_usage_limit = goal_resume_line_has_usage_limit(line);
+            legacy_usage_limit
+        }) {
+            Ok(scan) => scan,
+            Err(_) => {
+                self.workflow_scan_disabled = true;
+                return Ok(None);
+            }
+        };
+        let saw_usage_limit = scan.matched;
+        self.session_scan_offset = scan.complete_offset;
+        self.workflow_model = model;
+        self.workflow_evidence = evidence;
+        if saw_usage_limit
+            && (legacy_usage_limit
+                && (self.session_goal_present || self.workflow_evidence.safe_to_resume())
+                || workflow_class.is_some() && self.workflow_evidence.safe_to_resume())
+        {
+            self.workflow_recovery_class = workflow_class;
             self.session_usage_limit_reported = true;
             return Ok(Some(session_id));
         }
@@ -244,7 +247,8 @@ impl GoalUsageLimitMonitor {
             .context("goal usage monitor connection is unavailable")?;
         let thread_id = session_file_thread_id(path)?.unwrap_or_else(|| session_id.to_string());
         let status = goal_status_for_thread(connection, &db_path, &thread_id)?;
-        Ok(status.is_some_and(|status| goal_status_is_resumable(&status)))
+        self.session_goal_present = status.is_some();
+        Ok(status.is_none_or(|status| goal_status_is_resumable(&status)))
     }
 
     fn refresh_session_id(&mut self) -> Result<()> {
@@ -262,8 +266,14 @@ impl GoalUsageLimitMonitor {
             return Ok(());
         }
         self.session_id = Some(session_id.to_string());
+        self.session_path = None;
         self.armed = false;
         self.usage_limit_pending = false;
+        self.workflow_recovery_class = None;
+        self.workflow_model = None;
+        self.workflow_evidence = RuntimeWorkflowEvidence::default();
+        self.session_goal_present = false;
+        self.workflow_scan_disabled = false;
         self.session_usage_limit_reported = false;
         self.session_scan_offset =
             fs::read_to_string(runtime_goal_session_offset_path(&self.marker_path))
@@ -277,6 +287,10 @@ impl GoalUsageLimitMonitor {
     pub(crate) fn prepare_for_resume(&mut self) {
         self.armed = false;
         self.usage_limit_pending = false;
+        self.workflow_recovery_class = None;
+        self.workflow_evidence = RuntimeWorkflowEvidence::default();
+        self.workflow_scan_disabled = false;
+        self.session_path = None;
         self.session_usage_limit_reported = false;
         self.session_scan_offset = self.session_file_size();
         self.next_retry_at = Instant::now();
@@ -543,12 +557,6 @@ fn goal_resume_usage_limit_text(message: &str) -> bool {
         || lower == "usage limit has been reached"
         || lower.starts_with("your workspace is out of credits")
         || lower.starts_with("you hit your spend cap")
-}
-
-fn session_file_has_usage_limit_since(path: &Path, offset: u64) -> Result<bool> {
-    prodex_session_store::session_file_has_line_since(path, offset, |line| {
-        goal_resume_line_has_usage_limit(line)
-    })
 }
 
 pub(crate) fn goal_database_is_file(path: &Path) -> Result<bool> {

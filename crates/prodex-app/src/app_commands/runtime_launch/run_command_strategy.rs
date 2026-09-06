@@ -10,11 +10,12 @@ use super::{
     profile_openai_compatible_codex_args, remove_first_codex_config_override_pair,
     remove_upstream_proxy_env, repair_resume_session_in_home,
     repair_resume_session_metadata_prefix_from_codex_args, resolve_codex_delete_session_id,
-    restore_resume_session_settings, runtime_launch_cli_gemini_thinking_budget_tokens,
-    runtime_launch_cli_model, runtime_launch_cli_model_context_window_tokens,
-    runtime_launch_openai_spark_context_codex_args, runtime_proxy_codex_passthrough_args,
-    runtime_resume_external_provider_from_codex_args,
-    runtime_resume_session_settings_from_codex_args, super_external_provider_codex_args,
+    restore_resume_session_settings, runtime_exit_status_is_cancelled,
+    runtime_launch_cli_gemini_thinking_budget_tokens, runtime_launch_cli_model,
+    runtime_launch_cli_model_context_window_tokens, runtime_launch_openai_spark_context_codex_args,
+    runtime_proxy_codex_passthrough_args, runtime_resume_external_provider_from_codex_args,
+    runtime_resume_session_settings_from_codex_args, runtime_session_recovery_wait_message,
+    super_external_provider_codex_args, wait_for_runtime_recovery_round,
 };
 use anyhow::Result;
 use std::collections::BTreeSet;
@@ -38,6 +39,11 @@ pub(super) struct RunCommandStrategy {
     pub(super) goal_usage_limit_monitor: Option<GoalUsageLimitMonitor>,
     pub(super) pending_goal_resume_plan: Option<GoalResumeRelaunchPlan>,
     pub(super) goal_resume_session_affinity_release: Option<String>,
+    pub(super) recovery_model: Option<String>,
+    pub(super) runtime_recovery_log_target: Option<crate::RuntimeRecoveryLogTarget>,
+    pub(super) transient_recovery_rounds: usize,
+    pub(super) recovery_generation: usize,
+    pub(super) allow_failed_profile_recovery: bool,
     pub(super) model_preference_sync: Option<crate::ModelPreferenceSync>,
     pub(super) resume_session_path: Option<PathBuf>,
 }
@@ -128,6 +134,11 @@ impl RunCommandStrategy {
             goal_usage_limit_monitor,
             pending_goal_resume_plan: None,
             goal_resume_session_affinity_release: None,
+            recovery_model: None,
+            runtime_recovery_log_target: None,
+            transient_recovery_rounds: 0,
+            recovery_generation: 0,
+            allow_failed_profile_recovery: false,
             model_preference_sync: None,
             resume_session_path,
         })
@@ -229,6 +240,10 @@ impl RuntimeLaunchStrategy for RunCommandStrategy {
             false,
             true,
         );
+        self.recovery_model =
+            crate::codex_effective_config_value(&prepared.codex_home, &codex_args, "model")?;
+        self.runtime_recovery_log_target =
+            runtime_proxy.and_then(RuntimeProxyEndpoint::recovery_log_target);
         self.project_in_app_resume_settings(prepared, &mut codex_args, &preference_context)?;
         if let Some(monitor) = self.goal_usage_limit_monitor.as_ref() {
             add_runtime_goal_session_tracking(
@@ -281,16 +296,46 @@ impl RuntimeLaunchStrategy for RunCommandStrategy {
     }
 
     fn child_exit_requested(&mut self) -> Result<bool> {
-        let session_id = match self.goal_usage_limit_monitor.as_mut() {
-            Some(monitor) => monitor.take_usage_limit_signal()?,
-            None => return Ok(false),
-        };
+        if self.pending_goal_resume_plan.is_some() {
+            return Ok(true);
+        }
+        let (session_id, failure_class, retry_pool, observed_model, evidence) =
+            match self.goal_usage_limit_monitor.as_mut() {
+                Some(monitor) => (
+                    monitor.take_usage_limit_signal()?,
+                    monitor.recovery_failure_class(),
+                    monitor.recovery_retries_after_pool_round(),
+                    monitor.recovery_model().map(ToOwned::to_owned),
+                    monitor.recovery_evidence(),
+                ),
+                None => return Ok(false),
+            };
+        if observed_model.is_some() {
+            self.recovery_model = observed_model;
+        }
         let Some(session_id) = session_id else {
             return Ok(false);
         };
-        let Some(plan) = self.plan_live_goal_resume_relaunch(&session_id)? else {
+        let plan = self.plan_live_goal_resume_relaunch(&session_id)?;
+        if plan.is_none() && retry_pool {
+            if !self.auto_goal_resume_attempted_profiles.is_empty() {
+                self.transient_recovery_rounds = self.transient_recovery_rounds.saturating_add(1);
+                self.auto_goal_resume_attempted_profiles.clear();
+            }
+            if let Some(target) = self.runtime_recovery_log_target.as_ref() {
+                target.log(&runtime_session_recovery_wait_message(
+                    self.transient_recovery_rounds,
+                    failure_class,
+                ));
+            }
+            self.allow_failed_profile_recovery = true;
+            return Ok(false);
+        }
+        let Some(mut plan) = plan else {
             return Ok(false);
         };
+        plan.failure_class = failure_class;
+        plan.evidence = evidence;
         self.pending_goal_resume_plan = Some(plan);
         Ok(true)
     }
@@ -304,13 +349,52 @@ impl RuntimeLaunchStrategy for RunCommandStrategy {
     }
 
     fn relaunch_after_child_exit(&mut self, status: &std::process::ExitStatus) -> Result<bool> {
+        if runtime_exit_status_is_cancelled(status) {
+            self.pending_goal_resume_plan = None;
+            return Ok(false);
+        }
         let plan = match self.pending_goal_resume_plan.take() {
             Some(plan) => Some(plan),
-            None => self.plan_goal_resume_relaunch(status)?,
+            None => {
+                let mut plan = self.plan_goal_resume_relaunch(status)?;
+                let retry_pool = self
+                    .goal_usage_limit_monitor
+                    .as_ref()
+                    .is_some_and(GoalUsageLimitMonitor::recovery_retries_after_pool_round);
+                if plan.is_none() && retry_pool {
+                    let failure_class = self
+                        .goal_usage_limit_monitor
+                        .as_ref()
+                        .map(GoalUsageLimitMonitor::recovery_failure_class)
+                        .unwrap_or("transport");
+                    if let Some(target) = self.runtime_recovery_log_target.as_ref() {
+                        target.log(&runtime_session_recovery_wait_message(
+                            self.transient_recovery_rounds.saturating_add(1),
+                            failure_class,
+                        ));
+                    }
+                    if !wait_for_runtime_recovery_round() {
+                        return Ok(false);
+                    }
+                    self.transient_recovery_rounds =
+                        self.transient_recovery_rounds.saturating_add(1);
+                    self.auto_goal_resume_attempted_profiles.clear();
+                    self.allow_failed_profile_recovery = true;
+                    plan = self.next_observed_goal_resume_relaunch()?;
+                }
+                plan
+            }
         };
         let Some(plan) = plan else {
             return Ok(false);
         };
+        if let Some(model) = self
+            .goal_usage_limit_monitor
+            .as_ref()
+            .and_then(GoalUsageLimitMonitor::recovery_model)
+        {
+            self.recovery_model = Some(model.to_string());
+        }
         self.apply_goal_resume_relaunch(plan)?;
         Ok(true)
     }

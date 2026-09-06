@@ -122,6 +122,8 @@ pub(super) fn build_plan(
     prepared: &PreparedRuntimeLaunch,
     runtime_proxy: Option<&RuntimeProxyEndpoint>,
 ) -> Result<RuntimeLaunchPlan> {
+    strategy.runtime_recovery_log_target =
+        runtime_proxy.and_then(RuntimeProxyEndpoint::recovery_log_target);
     let PreparedOverlayLaunch {
         cleanup,
         overlay_home,
@@ -198,6 +200,8 @@ fn prepare_overlay_launch(
     let stage_started = Instant::now();
     let mut runtime_args =
         strategy.prepare_runtime_codex_args(&overlay_home, runtime_proxy, &preference_context)?;
+    strategy.recovery_model =
+        crate::codex_effective_config_value(&overlay_home, &runtime_args, "model")?;
     if strategy.desktop_command.is_none()
         && let Some(monitor) = strategy.goal_usage_limit_monitor.as_ref()
     {

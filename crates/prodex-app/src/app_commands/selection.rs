@@ -243,17 +243,68 @@ pub(crate) fn find_ready_profiles(
     include_code_review: bool,
     upstream_no_proxy: bool,
 ) -> Vec<String> {
-    ready_profile_candidates(
-        &collect_run_profile_reports(
-            state,
-            profile_rotation_order(state, current_profile),
-            base_url,
-            upstream_no_proxy,
-        ),
+    find_ready_profiles_for_model(
+        state,
+        current_profile,
+        base_url,
+        include_code_review,
+        upstream_no_proxy,
+        None,
+    )
+}
+
+pub(crate) fn find_ready_profiles_for_model(
+    state: &AppState,
+    current_profile: &str,
+    base_url: Option<&str>,
+    include_code_review: bool,
+    upstream_no_proxy: bool,
+    requested_model: Option<&str>,
+) -> Vec<String> {
+    find_ready_profiles_for_model_order(
+        state,
+        profile_rotation_order(state, current_profile),
+        base_url,
+        include_code_review,
+        upstream_no_proxy,
+        requested_model,
+    )
+}
+
+pub(crate) fn find_ready_current_profile_for_model(
+    state: &AppState,
+    current_profile: &str,
+    base_url: Option<&str>,
+    include_code_review: bool,
+    upstream_no_proxy: bool,
+    requested_model: Option<&str>,
+) -> Vec<String> {
+    find_ready_profiles_for_model_order(
+        state,
+        vec![current_profile.to_string()],
+        base_url,
+        include_code_review,
+        upstream_no_proxy,
+        requested_model,
+    )
+}
+
+fn find_ready_profiles_for_model_order(
+    state: &AppState,
+    profile_names: Vec<String>,
+    base_url: Option<&str>,
+    include_code_review: bool,
+    upstream_no_proxy: bool,
+    requested_model: Option<&str>,
+) -> Vec<String> {
+    prodex_runtime_quota::ready_profile_candidates_with_view_for_model(
+        &collect_run_profile_reports(state, profile_names, base_url, upstream_no_proxy),
         include_code_review,
         None,
-        state,
+        app_state_profile_selection_view(state),
         None,
+        RUNTIME_PROFILE_USAGE_CACHE_STALE_GRACE_SECONDS,
+        requested_model,
     )
     .into_iter()
     .map(|candidate| candidate.name)

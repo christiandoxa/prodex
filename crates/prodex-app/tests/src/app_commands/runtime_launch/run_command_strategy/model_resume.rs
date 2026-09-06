@@ -70,6 +70,7 @@ fn run_strategy_projects_automatic_model_preferences_for_in_app_resume() {
     let plan = strategy
         .build_plan(&prepared, prepared.runtime_proxy.as_ref())
         .unwrap();
+    assert_eq!(strategy.recovery_model.as_deref(), Some("remembered-model"));
 
     for key in ["model", "model_provider", "model_reasoning_effort"] {
         assert!(

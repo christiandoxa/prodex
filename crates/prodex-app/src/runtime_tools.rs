@@ -61,6 +61,11 @@ pub(crate) struct RuntimeToolLaunchStrategy {
     goal_usage_limit_monitor: Option<GoalUsageLimitMonitor>,
     pending_goal_resume_plan: Option<GoalResumeRelaunchPlan>,
     goal_resume_session_affinity_release: Option<String>,
+    recovery_model: Option<String>,
+    runtime_recovery_log_target: Option<RuntimeRecoveryLogTarget>,
+    transient_recovery_rounds: usize,
+    recovery_generation: usize,
+    allow_failed_profile_recovery: bool,
 }
 
 impl RuntimeToolLaunchStrategy {
@@ -106,6 +111,11 @@ impl RuntimeToolLaunchStrategy {
             goal_usage_limit_monitor: None,
             pending_goal_resume_plan: None,
             goal_resume_session_affinity_release: None,
+            recovery_model: None,
+            runtime_recovery_log_target: None,
+            transient_recovery_rounds: 0,
+            recovery_generation: 0,
+            allow_failed_profile_recovery: false,
         }
     }
 

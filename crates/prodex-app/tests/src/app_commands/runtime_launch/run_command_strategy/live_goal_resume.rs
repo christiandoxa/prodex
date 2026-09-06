@@ -140,7 +140,11 @@ fn run_strategy_plans_goal_resume_relaunch_after_usage_limit_with_active_goal() 
         plan,
         Some(GoalResumeRelaunchPlan {
             session_id: session_id.to_string(),
+            failed_profile_name: "main".to_string(),
             profile_name: "second".to_string(),
+            failure_class: "usage_limit",
+            resume_goal: true,
+            evidence: Default::default(),
         })
     );
 
@@ -197,12 +201,16 @@ fn run_strategy_plans_goal_resume_relaunch_after_usage_limit_with_active_goal() 
     )
     .unwrap();
     assert!(fresh_strategy.child_exit_requested().unwrap());
-    assert!(!fresh_strategy.child_exit_requested().unwrap());
+    assert!(fresh_strategy.child_exit_requested().unwrap());
     assert_eq!(
         fresh_strategy.pending_goal_resume_plan,
         Some(GoalResumeRelaunchPlan {
             session_id: session_id.to_string(),
+            failed_profile_name: "main".to_string(),
             profile_name: "second".to_string(),
+            failure_class: "usage_limit",
+            resume_goal: true,
+            evidence: Default::default(),
         })
     );
     assert!(
@@ -322,6 +330,7 @@ fn run_strategy_recovers_exact_codex_0151_usage_limit_after_compaction_without_r
     session
         .write_all(
             concat!(
+                "{\"timestamp\":\"2026-08-29T01:00:00Z\",\"type\":\"response_item\",\"payload\":{\"type\":\"message\",\"role\":\"user\",\"content\":[]}}\n",
                 "{\"timestamp\":\"2026-08-29T01:00:01Z\",\"type\":\"progress\",\"payload\":{\"message\":\"migration applied\"}}\n",
                 "{\"timestamp\":\"2026-08-29T01:00:02Z\",\"type\":\"compacted\",\"payload\":{\"window_id\":\"window-2\"}}\n",
                 "{\"timestamp\":\"2026-08-29T01:00:03Z\",\"type\":\"tool_completed\",\"payload\":{\"call_id\":\"side-effect-1\",\"status\":\"completed\"}}\n"
@@ -640,6 +649,11 @@ fn run_strategy_relaunch_after_child_exit_appends_goal_resume_and_releases_bindi
 fn runtime_goal_session_tracking_uses_session_start_before_first_completed_turn() {
     let root = temp_dir("goal-session-start-tracking");
     let _env = TestEnvVarGuard::set("PRODEX_HOME", root.to_str().unwrap());
+    let shared_codex_home = root.join("shared-codex-home");
+    let _shared_env = TestEnvVarGuard::set(
+        "PRODEX_SHARED_CODEX_HOME",
+        shared_codex_home.to_str().unwrap(),
+    );
     let main_home = root.join("profiles").join("main");
     fs::create_dir_all(&main_home).unwrap();
     fs::write(

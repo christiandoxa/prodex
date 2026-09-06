@@ -1,7 +1,6 @@
-#[cfg(test)]
-use super::usage_limit_recovery::GoalUsageLimitMonitor;
 use super::usage_limit_recovery::{
-    GoalResumeRelaunchPlan, RuntimeUsageLimitResumeOptions, next_runtime_usage_limit_plan,
+    GoalResumeRelaunchPlan, GoalUsageLimitMonitor, RuntimeUsageLimitResumeOptions,
+    next_observed_runtime_recovery_plan, next_runtime_usage_limit_plan,
     plan_runtime_usage_limit_relaunch, runtime_goal_monitor_dir, runtime_goal_session_offset_path,
 };
 #[cfg(test)]
@@ -54,9 +53,14 @@ impl RunCommandStrategy {
         &mut self,
         status: &std::process::ExitStatus,
     ) -> Result<Option<GoalResumeRelaunchPlan>> {
+        let requested_model = self.recovery_model.clone().or_else(|| {
+            runtime_launch_cli_model(&self.codex_args)
+                .or_else(|| codex_cli_config_override_value(&self.codex_args, "model"))
+        });
         let Some(monitor) = self.goal_usage_limit_monitor.as_mut() else {
             return Ok(None);
         };
+        let resume_goal = monitor.has_session_goal();
         plan_runtime_usage_limit_relaunch(
             monitor,
             status,
@@ -67,6 +71,38 @@ impl RunCommandStrategy {
                 base_url: self.args.base_url.as_deref(),
                 include_code_review: self.include_code_review,
                 no_proxy: self.args.no_proxy,
+                requested_model: requested_model.as_deref(),
+                failure_class: "usage_limit",
+                allow_failed_profile: self.allow_failed_profile_recovery,
+                resume_goal,
+                attempted_profiles: &self.auto_goal_resume_attempted_profiles,
+            },
+        )
+    }
+
+    pub(super) fn next_observed_goal_resume_relaunch(
+        &mut self,
+    ) -> Result<Option<GoalResumeRelaunchPlan>> {
+        let requested_model = self.recovery_model.clone().or_else(|| {
+            runtime_launch_cli_model(&self.codex_args)
+                .or_else(|| codex_cli_config_override_value(&self.codex_args, "model"))
+        });
+        let Some(monitor) = self.goal_usage_limit_monitor.as_ref() else {
+            return Ok(None);
+        };
+        next_observed_runtime_recovery_plan(
+            monitor,
+            &RuntimeUsageLimitResumeOptions {
+                requested_profile: self.args.profile.as_deref(),
+                no_auto_rotate: self.args.no_auto_rotate,
+                skip_quota_check: self.args.skip_quota_check,
+                base_url: self.args.base_url.as_deref(),
+                include_code_review: self.include_code_review,
+                no_proxy: self.args.no_proxy,
+                requested_model: requested_model.as_deref(),
+                failure_class: monitor.recovery_failure_class(),
+                allow_failed_profile: self.allow_failed_profile_recovery,
+                resume_goal: monitor.has_session_goal(),
                 attempted_profiles: &self.auto_goal_resume_attempted_profiles,
             },
         )
@@ -77,6 +113,10 @@ impl RunCommandStrategy {
         state: &AppState,
         session_id: &str,
     ) -> Option<GoalResumeRelaunchPlan> {
+        let requested_model = self.recovery_model.clone().or_else(|| {
+            runtime_launch_cli_model(&self.codex_args)
+                .or_else(|| codex_cli_config_override_value(&self.codex_args, "model"))
+        });
         next_runtime_usage_limit_plan(
             state,
             session_id,
@@ -87,6 +127,13 @@ impl RunCommandStrategy {
                 base_url: self.args.base_url.as_deref(),
                 include_code_review: self.include_code_review,
                 no_proxy: self.args.no_proxy,
+                requested_model: requested_model.as_deref(),
+                failure_class: "usage_limit",
+                allow_failed_profile: self.allow_failed_profile_recovery,
+                resume_goal: self
+                    .goal_usage_limit_monitor
+                    .as_ref()
+                    .is_some_and(GoalUsageLimitMonitor::has_session_goal),
                 attempted_profiles: &self.auto_goal_resume_attempted_profiles,
             },
         )
@@ -96,6 +143,12 @@ impl RunCommandStrategy {
         &mut self,
         plan: GoalResumeRelaunchPlan,
     ) -> Result<()> {
+        let requested_model = runtime_launch_cli_model(&self.codex_args)
+            .or_else(|| codex_cli_config_override_value(&self.codex_args, "model"));
+        let effective_model = self
+            .recovery_model
+            .clone()
+            .or_else(|| requested_model.clone());
         let session_settings = runtime_resume_session_settings_from_codex_args(&self.codex_args);
         let model_is_explicit = runtime_launch_cli_model(&self.codex_args).is_some()
             || codex_cli_config_override_value(&self.codex_args, "model").is_some();
@@ -149,15 +202,27 @@ impl RunCommandStrategy {
                 super::runtime_launch_cli_gemini_thinking_budget_tokens(&self.codex_args);
         }
         self.auto_goal_resume_attempted_profiles
+            .insert(plan.failed_profile_name.clone());
+        self.auto_goal_resume_attempted_profiles
             .insert(plan.profile_name.clone());
+        self.recovery_generation = self.recovery_generation.saturating_add(1);
+        if let Some(target) = self.runtime_recovery_log_target.as_ref() {
+            target.log(&super::runtime_session_recovery_message(
+                &plan,
+                self.recovery_generation,
+                requested_model.as_deref(),
+                effective_model.as_deref(),
+            ));
+        }
+        let resume_goal = plan.resume_goal;
         self.args.profile = Some(plan.profile_name);
+        self.allow_failed_profile_recovery = false;
         if let Some(monitor) = self.goal_usage_limit_monitor.as_mut() {
             monitor.prepare_for_resume();
         }
-        if exec_mode {
-            self.codex_args.push(OsString::from(
-                "Continue the interrupted task from the persisted session. Preserve completed work and do not repeat completed tool calls.",
-            ));
+        if exec_mode || !resume_goal {
+            self.codex_args
+                .push(OsString::from(super::RUNTIME_SESSION_CONTINUATION_PROMPT));
         } else if !codex_args_include_goal_resume(&self.codex_args) {
             self.codex_args.push(OsString::from("/goal resume"));
         }
