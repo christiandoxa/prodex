@@ -68,6 +68,10 @@ impl RuntimeBrokerRegistry {
         self.admin_url(RuntimeBrokerAdminRoute::LogSnapshot)
     }
 
+    pub fn log_event_url(&self) -> String {
+        self.admin_url(RuntimeBrokerAdminRoute::LogEvent)
+    }
+
     pub fn matches_launch_config(
         &self,
         upstream_base_url: &str,
@@ -138,6 +142,7 @@ pub enum RuntimeBrokerAdminRoute {
     Activate,
     ReleaseSessionAffinity,
     LogSnapshot,
+    LogEvent,
 }
 
 impl RuntimeBrokerAdminRoute {
@@ -149,6 +154,7 @@ impl RuntimeBrokerAdminRoute {
             Self::Activate => RUNTIME_BROKER_ACTIVATE_PATH,
             Self::ReleaseSessionAffinity => RUNTIME_BROKER_RELEASE_SESSION_AFFINITY_PATH,
             Self::LogSnapshot => RUNTIME_BROKER_LOG_SNAPSHOT_PATH,
+            Self::LogEvent => RUNTIME_BROKER_LOG_EVENT_PATH,
         }
     }
 
@@ -160,6 +166,7 @@ impl RuntimeBrokerAdminRoute {
             RUNTIME_BROKER_ACTIVATE_PATH => Some(Self::Activate),
             RUNTIME_BROKER_RELEASE_SESSION_AFFINITY_PATH => Some(Self::ReleaseSessionAffinity),
             RUNTIME_BROKER_LOG_SNAPSHOT_PATH => Some(Self::LogSnapshot),
+            RUNTIME_BROKER_LOG_EVENT_PATH => Some(Self::LogEvent),
             _ => None,
         }
     }

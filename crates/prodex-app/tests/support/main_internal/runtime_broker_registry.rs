@@ -310,6 +310,13 @@ fn runtime_broker_command_registers_follower_when_owner_lock_is_busy() {
         .expect("runtime broker registry should load")
         .expect("follower runtime broker registry should be present");
     let client = runtime_broker_client().expect("runtime broker client should build");
+    let endpoint = runtime_proxy_endpoint_from_registry(&paths, &broker_key, &registry, &client)
+        .expect("published broker endpoint should resolve");
+    let log_target = endpoint
+        .recovery_log_target()
+        .expect("broker endpoint should expose an authenticated recovery log target");
+    assert!(matches!(&log_target, RuntimeRecoveryLogTarget::Broker(_)));
+    log_target.log("runtime_recovery retry_layer=session recovery_outcome=test");
     let health = probe_runtime_broker_health(&client, &paths, &broker_key, &registry)
         .expect("follower runtime broker health probe should succeed")
         .expect("follower runtime broker should respond");
@@ -322,6 +329,10 @@ fn runtime_broker_command_registers_follower_when_owner_lock_is_busy() {
             .contains("follower-ready-admin")
     );
     assert!(!crate::read_runtime_proxy_test_log(&proxy.log_path).contains("follower-ready-admin"));
+    assert!(
+        crate::read_runtime_proxy_test_log(&proxy.log_path)
+            .contains("runtime_recovery retry_layer=session recovery_outcome=test")
+    );
 }
 
 #[test]

@@ -328,6 +328,31 @@ pub(crate) fn release_runtime_broker_session_affinity(
     Ok(())
 }
 
+pub(crate) fn send_runtime_broker_log_event(
+    client: &Client,
+    paths: &AppPaths,
+    broker_key: &str,
+    registry: &RuntimeBrokerRegistry,
+    message: &str,
+) -> Result<()> {
+    let capability = load_runtime_broker_capability(paths, broker_key, &registry.instance_id)?;
+    let response = client
+        .post(registry.log_event_url())
+        .header(
+            prodex_runtime_broker::RUNTIME_BROKER_ADMIN_TOKEN_HEADER,
+            runtime_broker_admin_header(&capability)?,
+        )
+        .json(&serde_json::json!({"message": message}))
+        .send()
+        .context("failed to send runtime broker log event")?;
+    anyhow::ensure!(
+        response.status().is_success(),
+        "runtime broker log event failed with HTTP {}",
+        response.status()
+    );
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
