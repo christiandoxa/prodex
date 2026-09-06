@@ -827,7 +827,7 @@ Detached memory traffic carries `thread_source: "memory_consolidation"` in `x-co
 
 `--current-time-reminder` enables Codex's `[features.current_time_reminder]` config. The default system clock source is owned by Codex. `--current-time-clock-source external` is intended for Codex app-server clients that implement the upstream `currentTime/read` request.
 
-`--respect-system-proxy` enables Codex's `[features.respect_system_proxy]` config when the bundled/upstream Codex supports it. Codex 0.148.0 routes auth, model, plugin, MCP, remote-exec, and Responses traffic through its shared proxy-aware HTTP client path so supported system proxy, PAC, WPAD, static proxy, and bypass decisions can be honored. `--no-respect-system-proxy` renders an explicit false override for sessions that need the upstream default direct/env-proxy behavior.
+`--respect-system-proxy` enables Codex's `[features.respect_system_proxy]` config when the official upstream Codex supports it. Codex 0.148.0 routes auth, model, plugin, MCP, remote-exec, and Responses traffic through its shared proxy-aware HTTP client path so supported system proxy, PAC, WPAD, static proxy, and bypass decisions can be honored. `--no-respect-system-proxy` renders an explicit false override for sessions that need the upstream default direct/env-proxy behavior.
 
 Codex `multiAgentMode` is an app-server/thread setting, not a normal TUI `config.toml` launch override. Prodex therefore does not invent a competing CLI config flag. Launch `prodex app-server` or `prodex run app-server` and pass upstream `multiAgentMode` values (`none`, `explicitRequestOnly`, or `proactive`) through the Codex app-server API.
 

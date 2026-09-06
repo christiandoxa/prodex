@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
-  "audited_at": "2026-09-05T07:58:38Z",
-  "release": "0.426.1",
+  "audited_at": "2026-09-06T11:14:33Z",
+  "release": "0.427.0",
   "tools": [
     {
       "id": "caveman",
