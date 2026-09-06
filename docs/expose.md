@@ -53,6 +53,11 @@ unmodified Codex TUI is not required to render externally queued follow-ups;
 Output Read is the authoritative machine-readable mirror. Prompt Write may
 return an optional `output_cursor` only when the exact pre-write rollout
 source and checkpoint are known.
+When the app-server control plane proves that the first attempt was rejected
+before acceptance or failed during preflight, Prompt Write revalidates the same
+process/writer/thread and retries once. Its result reports
+`recovery_generation`, `last_prompt_requeued`, and `requeue_reason`. Accepted
+and ambiguous outcomes are never retried.
 
 Prompt Write returns machine statuses such as `written`, `no_session`,
 `ambiguous_session`, `stale_target`, `queue_failed`, and `write_ambiguous`.

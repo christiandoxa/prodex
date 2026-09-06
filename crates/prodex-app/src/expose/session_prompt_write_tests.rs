@@ -6,7 +6,7 @@ use super::session_prompt_write::{
     is_descendant_of, is_plain_prodex_session, legacy_thread_id, modern_thread_id,
     resolve_thread_identity,
 };
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, VecDeque};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -17,7 +17,6 @@ use std::time::{SystemTime, UNIX_EPOCH};
 mod output_recovery_tests;
 #[path = "session_prompt_write_output_tests.rs"]
 mod output_tests;
-
 const THREAD: &str = "019f3b59-7771-7ea1-a9a1-3cd638f216c4";
 
 pub(super) struct Fixture {
@@ -174,6 +173,7 @@ pub(super) struct FakeQueueControl {
     rollout: Option<PathBuf>,
     replace_rollout_on_queue: bool,
     pub(super) invocation: QueueInvocation,
+    pub(super) invocations: Mutex<VecDeque<QueueInvocation>>,
     pub(super) consumed_message: Option<String>,
     pub(super) calls: Arc<Mutex<Vec<(String, String)>>>,
 }
@@ -215,6 +215,14 @@ impl QueueControl for FakeQueueControl {
             .lock()
             .unwrap()
             .push((target.thread_id.clone(), message.to_string()));
+        let mut invocations = self.invocations.lock().unwrap();
+        let invocation = invocations
+            .pop_front()
+            .unwrap_or_else(|| self.invocation.clone());
+        drop(invocations);
+        if invocation.outcome != QueueRequestOutcome::Accepted {
+            return invocation;
+        }
         self.persisted.store(true, Ordering::SeqCst);
         if self.replace_rollout_on_queue
             && let Some(path) = &self.rollout
@@ -239,7 +247,7 @@ impl QueueControl for FakeQueueControl {
             )
             .unwrap();
         }
-        self.invocation.clone()
+        invocation
     }
 }
 
@@ -287,6 +295,7 @@ pub(super) fn queue(fixture: &Fixture, message_id: Option<&str>) -> FakeQueueCon
             submission_id: None,
             queued: false,
         },
+        invocations: Mutex::new(VecDeque::new()),
         consumed_message: None,
         calls: Arc::new(Mutex::new(Vec::new())),
     }

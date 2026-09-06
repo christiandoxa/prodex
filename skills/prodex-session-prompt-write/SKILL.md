@@ -26,6 +26,10 @@ source, or verification errors as `no_session`.
 
 Prompt Write may return an optional `output_cursor` anchor when the exact
 pre-write rollout source is known; fresh no-source sessions may return `null`.
+It may revalidate and retry once only when the control plane proves the first
+attempt was rejected before acceptance or failed during preflight. Inspect
+`recovery_generation`, `last_prompt_requeued`, and `requeue_reason` in the
+result. Accepted and ambiguous writes are never retried.
 `write_ambiguous` means delivery may have happened after a close, timeout, or
 malformed response. Never replay it automatically and make no exactly-once claim.
 

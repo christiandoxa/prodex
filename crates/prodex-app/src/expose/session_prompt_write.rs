@@ -113,6 +113,9 @@ pub(super) struct SessionPromptWriteSuccess {
     pub(super) output_cursor: Option<String>,
     pub(super) queue_exit: i32,
     pub(super) verification: &'static str,
+    pub(super) recovery_generation: u8,
+    pub(super) last_prompt_requeued: bool,
+    pub(super) requeue_reason: Option<&'static str>,
 }
 
 #[derive(Clone, Debug)]
@@ -217,7 +220,15 @@ where
         };
         target = self.revalidate(&target, &workspace_root)?;
 
-        let invocation = self.queue.queue_once(&target, &request.message);
+        let mut invocation = self.queue.queue_once(&target, &request.message);
+        let last_prompt_requeued = matches!(
+            invocation.outcome,
+            QueueRequestOutcome::Rejected | QueueRequestOutcome::Preflight
+        );
+        if last_prompt_requeued {
+            target = self.revalidate(&target, &workspace_root)?;
+            invocation = self.queue.queue_once(&target, &request.message);
+        }
         let verification = self.verify_queue_invocation(
             &request,
             &workspace_root,
@@ -238,6 +249,9 @@ where
             output_cursor,
             queue_exit: invocation.exit_code.unwrap_or_default(),
             verification,
+            recovery_generation: u8::from(last_prompt_requeued),
+            last_prompt_requeued,
+            requeue_reason: last_prompt_requeued.then_some("definitely_not_accepted"),
         };
         self.remember_binding(
             &request.binding_key,

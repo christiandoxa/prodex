@@ -228,6 +228,10 @@ Read for the authoritative machine-readable result. Prompt Write may return
 an optional `output_cursor` only when it can bind to the exact pre-write
 rollout source. A read returns `next_cursor`; pass it as `cursor` to receive
 only later output.
+If the control plane proves that a write was rejected before acceptance or
+failed during preflight, Prompt Write revalidates the exact target and makes one
+retry. The result reports `recovery_generation`, `last_prompt_requeued`, and
+`requeue_reason`. An accepted or ambiguous write is never retried.
 Both directions use one shared process identity resolver: same OS user and
 canonical cwd, one live plain `prodex s`, its actual live Codex writer, and the
 writer's process-bound thread identity. Ambiguous or stale targets fail closed.
