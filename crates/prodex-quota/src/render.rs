@@ -22,6 +22,7 @@ mod pool;
 mod quota_policy;
 mod remaining_percent;
 mod reports;
+mod time;
 mod windows;
 
 #[cfg(feature = "mojo")]
@@ -42,6 +43,7 @@ pub use pool::*;
 pub use quota_policy::*;
 pub use remaining_percent::*;
 pub use reports::*;
+pub use time::*;
 pub use windows::*;
 #[cfg(test)]
 #[path = "../tests/src/render.rs"]
