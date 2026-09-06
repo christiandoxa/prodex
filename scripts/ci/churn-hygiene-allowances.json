@@ -1838,5 +1838,27 @@
       "maxFileLines": 550
     },
     "reason": "Reviewed the clean 0.426.1 product line rooted directly at origin/main: dynamic Kiro catalog normalization and picker propagation, fail-closed existing-session Prompt Write/output binding with cursor regressions, busy-session Prompt Write routing through the authoritative queue, and the checksum-pinned Codex 0.153.4 queued-input TUI compatibility patch. The narrow caps cover only these named product commits, the audited churn record, and the final release metadata commit; all correctness, security, boundary, terminology, genericity, and release guards remain enforced."
+  },
+  {
+    "id": "audited-prodex-0.427.0-campaign",
+    "requiredSubjects": [
+      "fix(ci): emit optional-tool freshness JSON",
+      "fix(claude,ping): isolate OAuth and send hello",
+      "build(release): remove bundled Codex assets",
+      "fix(log): complete event telemetry",
+      "fix(runtime): separate rate-limit recovery from overload",
+      "fix(quota): isolate model-specific capacity",
+      "fix(expose): harden session bridge",
+      "fix(expose): harden session bridge follow-up",
+      "fix(expose): verify official app-server session bridge",
+      "chore(ci): authorize 0.427.0 campaign churn"
+    ],
+    "caps": {
+      "maxFiles": 180,
+      "maxBehaviorFiles": 150,
+      "maxLines": 11000,
+      "maxFileLines": 600
+    },
+    "reason": "Reviewed the exact 0.427.0 campaign covering safe Claude OAuth import and launch, one profile-pinned OpenAI hello inference per account, model-aware primary and Luna Reserve capacity, bounded pre-commit quota/rate/overload/transport recovery, complete redacted log and authoritative throughput events, an official-unmodified-Codex wrapper-only package, six pinned latest-stable optional tools, initialized existing-session Prompt Write and monotonic Output Read, deterministic regression and load evidence, staged exact-SHA release publication, and final synchronized metadata. The measured pre-release range is 163 files, 147 behavior files, 9,748 changed lines, and 591 lines in the largest focused E2E file; these narrow release-headroom caps apply only when every named campaign subject is present and do not disable any size, security, compatibility, test, or release gate."
   }
 ]
