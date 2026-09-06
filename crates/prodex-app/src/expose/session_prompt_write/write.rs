@@ -1,7 +1,7 @@
 use super::{
     QUEUE_COMMAND_TIMEOUT, QueueControl, QueueInvocation, ResolvedTarget, SessionBinding,
     SessionPromptWriteError, SessionPromptWriteRequest, SessionPromptWriteService,
-    output_source_id, read_output_events,
+    output_source_id, rollout_contains_exact_user_message,
 };
 use std::path::{Path, PathBuf};
 use std::thread;
@@ -24,9 +24,13 @@ where
         let deadline = Instant::now() + QUEUE_COMMAND_TIMEOUT;
         loop {
             let result = self
-                .resolve_target(workspace_root, requested_pid)
-                .map_err(|error| session_prompt_write_resolution_error(binding, error))
-                .and_then(|target| self.resolve_writer(target, workspace_root));
+                .resolve_target_for_request(
+                    workspace_root,
+                    requested_pid,
+                    request.thread_id.as_deref(),
+                    binding.is_some(),
+                )
+                .map_err(|error| session_prompt_write_resolution_error(request, binding, error));
             match result {
                 Ok(target) => {
                     self.verify_binding(binding, &target)?;
@@ -74,7 +78,7 @@ where
         request: &SessionPromptWriteRequest,
         workspace_root: &Path,
         target: &ResolvedTarget,
-        rollout_before: Option<&(PathBuf, u64)>,
+        rollout_before: Option<&(PathBuf, u64, String)>,
         invocation: &QueueInvocation,
     ) -> std::result::Result<&'static str, SessionPromptWriteError> {
         if !invocation.succeeded {
@@ -92,23 +96,28 @@ where
         request: &SessionPromptWriteRequest,
         workspace_root: &Path,
         target: &ResolvedTarget,
-        rollout_before: Option<&(PathBuf, u64)>,
+        rollout_before: Option<&(PathBuf, u64, String)>,
     ) -> std::result::Result<(), SessionPromptWriteError> {
         let deadline = Instant::now() + QUEUE_COMMAND_TIMEOUT;
         loop {
             let current_target = self.revalidate(target, workspace_root)?;
             match self.output_source(&current_target) {
                 Ok(path) => {
-                    let offset = rollout_before.map_or(Ok(0), |(before_path, offset)| {
-                        (before_path == &path)
-                            .then_some(*offset)
-                            .ok_or(SessionPromptWriteError::OutputSourceChanged)
-                    })?;
-                    let visible = match read_output_events(&path, offset, 0, 64) {
-                        Ok(read) => read
-                            .events
-                            .iter()
-                            .any(|event| event.kind == "user" && event.text == request.message),
+                    let offset =
+                        rollout_before.map_or(Ok(0), |(before_path, offset, source_id)| {
+                            if before_path != &path
+                                || output_source_id(&path, &target.thread_id)? != *source_id
+                            {
+                                return Err(SessionPromptWriteError::OutputSourceChanged);
+                            }
+                            Ok(*offset)
+                        })?;
+                    let visible = match rollout_contains_exact_user_message(
+                        &path,
+                        offset,
+                        &request.message,
+                    ) {
+                        Ok(visible) => visible,
                         Err(SessionPromptWriteError::OutputSourceUnavailable) => false,
                         Err(error) => return Err(error),
                     };
@@ -147,17 +156,20 @@ pub(super) fn canonical_session_prompt_write_workspace(
 }
 
 fn session_prompt_write_resolution_error(
+    request: &SessionPromptWriteRequest,
     binding: Option<&SessionBinding>,
     error: SessionPromptWriteError,
 ) -> SessionPromptWriteError {
-    if binding.is_some() && error == SessionPromptWriteError::NoSession {
+    if error == SessionPromptWriteError::NoSession
+        && (binding.is_some() || request.prodex_pid.is_some() || request.thread_id.is_some())
+    {
         SessionPromptWriteError::StaleTarget
     } else {
         error
     }
 }
 
-fn session_prompt_write_resolution_retryable(error: SessionPromptWriteError) -> bool {
+pub(super) fn session_prompt_write_resolution_retryable(error: SessionPromptWriteError) -> bool {
     matches!(
         error,
         SessionPromptWriteError::NoCodexWriter

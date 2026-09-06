@@ -3,12 +3,17 @@ use super::http::{
     handle_expose_session_exchange, handle_expose_session_revoke, handle_expose_session_rotate,
     handle_expose_stream,
 };
-use super::runtime::ExposeShared;
+use super::runtime::{ExposeOutputWaitJob, ExposeShared};
 use super::ui::{expose_html_response, expose_js_response, expose_text_response};
-use super::{EXPOSE_BASE_PATH, handle_mcp_route};
+use super::{EXPOSE_BASE_PATH, handle_mcp_route, mcp_output_read_wait_requested};
 use std::sync::Arc;
+use std::sync::mpsc::{SyncSender, TrySendError};
 
-pub(super) fn handle_expose_request(request: ExposeHttpRequest, shared: &Arc<ExposeShared>) {
+pub(super) fn handle_expose_request(
+    request: ExposeHttpRequest,
+    shared: &Arc<ExposeShared>,
+    output_wait_tx: Option<&SyncSender<ExposeOutputWaitJob>>,
+) {
     if !expose_request_host_allowed(&request, shared) {
         let _ = request.respond(expose_text_response(403, "forbidden"));
         return;
@@ -24,6 +29,33 @@ pub(super) fn handle_expose_request(request: ExposeHttpRequest, shared: &Arc<Exp
     }
     let path = request.target().to_string();
     if shared.is_mcp_only_host(&host) || request.target().starts_with("/pdx/v1/") {
+        if let Some(output_wait_tx) = output_wait_tx
+            && shared
+                .mcp
+                .as_ref()
+                .is_some_and(|mcp| mcp.matches_target(request.target()))
+            && mcp_output_read_wait_requested(request.body())
+        {
+            let job = ExposeOutputWaitJob {
+                request,
+                shared: Arc::clone(shared),
+            };
+            match output_wait_tx.try_send(job) {
+                Ok(()) => return,
+                Err(TrySendError::Full(job)) => {
+                    let _ = job
+                        .request
+                        .respond(expose_text_response(503, "output waiters busy"));
+                    return;
+                }
+                Err(TrySendError::Disconnected(job)) => {
+                    let _ = job
+                        .request
+                        .respond(expose_text_response(503, "server stopping"));
+                    return;
+                }
+            }
+        }
         handle_mcp_route(request, shared, &host);
         return;
     }

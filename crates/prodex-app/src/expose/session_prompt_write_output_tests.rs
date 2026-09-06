@@ -5,7 +5,9 @@ use super::super::session_prompt_write::{
 };
 use super::{FakeProcessInspector, fixture, queue, service};
 use std::io::{Seek, SeekFrom, Write};
-use std::sync::atomic::AtomicUsize;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::time::{Duration, Instant};
 
 const THREAD: &str = "019f3b59-7771-7ea1-a9a1-3cd638f216c4";
 const REPORTED_FAILURE_OFFSET: usize = 362_937;
@@ -23,6 +25,7 @@ fn output_read_uses_exact_rollout_cursor_and_repeated_cursor_is_safe() {
             prodex_pid: None,
             thread_id: None,
             binding_key: "test".to_string(),
+            shutdown: None,
         })
         .unwrap();
     assert_eq!(first.thread_id, THREAD);
@@ -37,6 +40,7 @@ fn output_read_uses_exact_rollout_cursor_and_repeated_cursor_is_safe() {
             prodex_pid: None,
             thread_id: None,
             binding_key: "test".to_string(),
+            shutdown: None,
         })
         .unwrap();
     let repeated_again = service
@@ -48,6 +52,7 @@ fn output_read_uses_exact_rollout_cursor_and_repeated_cursor_is_safe() {
             prodex_pid: None,
             thread_id: None,
             binding_key: "test".to_string(),
+            shutdown: None,
         })
         .unwrap();
     assert_eq!(repeated, repeated_again);
@@ -66,6 +71,7 @@ fn output_cursor_rejects_invalid_values() {
             prodex_pid: None,
             thread_id: None,
             binding_key: "test".to_string(),
+            shutdown: None,
         }),
         Err(SessionPromptWriteError::InvalidCursor)
     );
@@ -96,6 +102,7 @@ fn output_cursor_rejects_recycled_prodex_process_identity() {
             prodex_pid: None,
             thread_id: None,
             binding_key: "recycled-process".to_string(),
+            shutdown: None,
         })
         .unwrap();
 
@@ -108,6 +115,7 @@ fn output_cursor_rejects_recycled_prodex_process_identity() {
             prodex_pid: None,
             thread_id: None,
             binding_key: "recycled-process".to_string(),
+            shutdown: None,
         }),
         Err(SessionPromptWriteError::StaleTarget)
     );
@@ -175,6 +183,140 @@ fn output_read_hides_internal_user_context_but_keeps_real_user_input() {
 }
 
 #[test]
+fn output_read_hides_session_and_turn_context() {
+    let fixture = fixture();
+    let path = fixture.root.join("context-records.jsonl");
+    let session_meta = serde_json::json!({
+        "timestamp": "2026-09-03T10:00:00Z",
+        "type": "session_meta",
+        "payload": {
+            "base_instructions": {"text": "hidden system instructions"},
+            "model_provider": "hidden-provider",
+            "cwd": "/home/test-user/hidden"
+        }
+    });
+    let turn_context = serde_json::json!({
+        "timestamp": "2026-09-03T10:00:01Z",
+        "type": "turn_context",
+        "payload": {
+            "model": "hidden-model",
+            "approval_policy": "never",
+            "cwd": "/home/test-user/hidden"
+        }
+    });
+    let user = serde_json::json!({
+        "timestamp": "2026-09-03T10:00:02Z",
+        "type": "event_msg",
+        "payload": {"type": "user_message", "message": "visible prompt"}
+    });
+    std::fs::write(&path, format!("{session_meta}\n{turn_context}\n{user}\n")).unwrap();
+
+    let batch = read_output_events(&path, 0, 0, 10).unwrap();
+
+    assert_eq!(batch.events.len(), 1);
+    assert_eq!(batch.events[0].kind, "user");
+    assert_eq!(batch.events[0].text, "visible prompt");
+    assert!(!batch.events[0].text.contains("hidden"));
+}
+
+#[test]
+fn output_read_keeps_near_limit_user_message_records_bounded() {
+    let fixture = fixture();
+    let path = fixture.root.join("near-limit-user.jsonl");
+    let message = "\\".repeat(64 * 1024 - 1024);
+    let record = serde_json::json!({
+        "timestamp": "2026-09-03T10:00:00Z",
+        "type": "response_item",
+        "payload": {
+            "type": "message",
+            "role": "user",
+            "content": [{"type": "input_text", "text": message}]
+        }
+    });
+    std::fs::write(&path, format!("{record}\n")).unwrap();
+
+    let batch = read_output_events(&path, 0, 0, 10).unwrap();
+
+    assert_eq!(batch.events.len(), 1);
+    assert_eq!(batch.events[0].kind, "user");
+    assert!(batch.events[0].text.len() <= 8 * 1024);
+}
+
+#[test]
+fn output_read_wait_timeout_returns_empty_success() {
+    let fixture = fixture();
+    let service = service(&fixture, queue(&fixture, None));
+    let first = service
+        .read_output(PromptOutputReadRequest {
+            workspace_root: fixture.workspace.clone(),
+            cursor: None,
+            limit: 10,
+            wait_ms: 0,
+            prodex_pid: None,
+            thread_id: None,
+            binding_key: "wait-timeout".to_string(),
+            shutdown: None,
+        })
+        .unwrap();
+    let started = Instant::now();
+
+    let result = service
+        .read_output(PromptOutputReadRequest {
+            workspace_root: fixture.workspace.clone(),
+            cursor: Some(first.next_cursor),
+            limit: 10,
+            wait_ms: 120,
+            prodex_pid: None,
+            thread_id: None,
+            binding_key: "wait-timeout".to_string(),
+            shutdown: None,
+        })
+        .unwrap();
+
+    assert!(result.events.is_empty());
+    assert!(started.elapsed() >= Duration::from_millis(100));
+}
+
+#[test]
+fn output_read_wait_cancels_on_shutdown() {
+    let fixture = fixture();
+    let service = service(&fixture, queue(&fixture, None));
+    let first = service
+        .read_output(PromptOutputReadRequest {
+            workspace_root: fixture.workspace.clone(),
+            cursor: None,
+            limit: 10,
+            wait_ms: 0,
+            prodex_pid: None,
+            thread_id: None,
+            binding_key: "wait-cancel".to_string(),
+            shutdown: None,
+        })
+        .unwrap();
+    let shutdown = Arc::new(AtomicBool::new(false));
+    let worker_shutdown = Arc::clone(&shutdown);
+    let worker = std::thread::spawn(move || {
+        service.read_output(PromptOutputReadRequest {
+            workspace_root: fixture.workspace.clone(),
+            cursor: Some(first.next_cursor),
+            limit: 10,
+            wait_ms: 10_000,
+            prodex_pid: None,
+            thread_id: None,
+            binding_key: "wait-cancel".to_string(),
+            shutdown: Some(worker_shutdown),
+        })
+    });
+    std::thread::sleep(Duration::from_millis(20));
+    shutdown.store(true, Ordering::SeqCst);
+
+    assert_eq!(
+        worker.join().unwrap(),
+        Err(SessionPromptWriteError::OutputReadFailed)
+    );
+}
+
+#[test]
 fn session_output_read_cursor_continues_after_oversized_rollout_line() {
     let fixture = fixture();
     let service = service(&fixture, queue(&fixture, None));
@@ -187,6 +329,7 @@ fn session_output_read_cursor_continues_after_oversized_rollout_line() {
             prodex_pid: None,
             thread_id: None,
             binding_key: "cursor-regression".to_string(),
+            shutdown: None,
         })
         .unwrap();
     let offset = std::fs::metadata(&fixture.rollout).unwrap().len();
@@ -222,6 +365,7 @@ fn session_output_read_cursor_continues_after_oversized_rollout_line() {
             prodex_pid: None,
             thread_id: None,
             binding_key: "cursor-regression".to_string(),
+            shutdown: None,
         })
         .unwrap();
     assert!(skipped.events.is_empty());
@@ -236,6 +380,7 @@ fn session_output_read_cursor_continues_after_oversized_rollout_line() {
             prodex_pid: None,
             thread_id: None,
             binding_key: "cursor-regression".to_string(),
+            shutdown: None,
         })
         .unwrap();
     assert_eq!(next.events.len(), 1);
@@ -266,6 +411,7 @@ fn session_output_read_cursor_continues_at_reported_oversized_line_offset() {
             prodex_pid: None,
             thread_id: None,
             binding_key: "reported-offset".to_string(),
+            shutdown: None,
         })
         .unwrap();
     let skipped_prefix = service
@@ -277,6 +423,7 @@ fn session_output_read_cursor_continues_at_reported_oversized_line_offset() {
             prodex_pid: None,
             thread_id: None,
             binding_key: "reported-offset".to_string(),
+            shutdown: None,
         })
         .unwrap();
     let prefix_cursor =
@@ -313,6 +460,7 @@ fn session_output_read_cursor_continues_at_reported_oversized_line_offset() {
             prodex_pid: None,
             thread_id: None,
             binding_key: "reported-offset".to_string(),
+            shutdown: None,
         })
         .unwrap();
     assert!(skipped_line.events.is_empty());
@@ -327,6 +475,7 @@ fn session_output_read_cursor_continues_at_reported_oversized_line_offset() {
             prodex_pid: None,
             thread_id: None,
             binding_key: "reported-offset".to_string(),
+            shutdown: None,
         })
         .unwrap();
     assert_eq!(next.events.len(), 1);
@@ -347,6 +496,7 @@ fn session_output_read_rejects_changed_rollout_before_cursor() {
             prodex_pid: None,
             thread_id: None,
             binding_key: "changed-source".to_string(),
+            shutdown: None,
         })
         .unwrap();
 
@@ -366,6 +516,7 @@ fn session_output_read_rejects_changed_rollout_before_cursor() {
             prodex_pid: None,
             thread_id: None,
             binding_key: "changed-source".to_string(),
+            shutdown: None,
         }),
         Err(SessionPromptWriteError::OutputSourceChanged)
     );
@@ -384,6 +535,7 @@ fn session_output_read_cursor_continues_after_rollout_append() {
             prodex_pid: None,
             thread_id: None,
             binding_key: "append-source".to_string(),
+            shutdown: None,
         })
         .unwrap();
     let appended = serde_json::json!({
@@ -409,6 +561,7 @@ fn session_output_read_cursor_continues_after_rollout_append() {
             prodex_pid: None,
             thread_id: None,
             binding_key: "append-source".to_string(),
+            shutdown: None,
         })
         .unwrap();
     assert_eq!(next.events.len(), 1);

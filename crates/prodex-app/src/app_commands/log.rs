@@ -16,7 +16,9 @@ pub(crate) use self::log_stream::{
     print_log_stream_item, print_token_usage_event, print_transcript_event,
     print_upstream_payload_event,
 };
-pub(crate) use self::log_transcript::{TranscriptEvent, transcript_events_from_session_line};
+pub(crate) use self::log_transcript::{
+    TranscriptEvent, transcript_events_from_session_line, transcript_exact_visible_user_message,
+};
 #[cfg(test)]
 use crate::app_commands::log_format::local_log_timestamp;
 #[cfg(test)]

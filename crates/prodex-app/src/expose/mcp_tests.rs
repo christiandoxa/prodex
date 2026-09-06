@@ -164,6 +164,34 @@ impl ExistingSessionPromptWrite for SyntheticSessionBridge {
     }
 }
 
+struct BlockingSessionBridge {
+    started: Arc<AtomicUsize>,
+}
+
+impl ExistingSessionPromptWrite for BlockingSessionBridge {
+    fn write(
+        &self,
+        _request: SessionPromptWriteRequest,
+    ) -> Result<SessionPromptWriteSuccess, SessionPromptWriteError> {
+        Err(SessionPromptWriteError::QueueFailed)
+    }
+
+    fn read_output(
+        &self,
+        request: PromptOutputReadRequest,
+    ) -> Result<PromptOutputReadSuccess, SessionPromptWriteError> {
+        self.started.fetch_add(1, Ordering::SeqCst);
+        while !request
+            .shutdown
+            .as_ref()
+            .is_some_and(|shutdown| shutdown.load(Ordering::SeqCst))
+        {
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        Err(SessionPromptWriteError::OutputReadFailed)
+    }
+}
+
 #[test]
 fn mcp_session_bridge_routes_prompt_write_and_output_read_tools() {
     let capability = "abcdefghijklmnopqrstuvwxyz0123456789ABCDEFG";
@@ -214,6 +242,88 @@ fn mcp_session_bridge_routes_prompt_write_and_output_read_tools() {
     );
     assert!(output.contains("synthetic output"));
     server.shutdown();
+    shared.pty.shutdown();
+    shared.mcp.as_ref().unwrap().run_manager.shutdown();
+}
+
+#[test]
+fn output_waits_do_not_starve_mcp_requests_or_shutdown() {
+    let capability = "abcdefghijklmnopqrstuvwxyz0123456789ABCDEFG";
+    let crate::Commands::Super(defaults) =
+        crate::parse_cli_command_from(["prodex", "s"]).expect("Super args should parse")
+    else {
+        panic!("expected Super args");
+    };
+    let started = Arc::new(AtomicUsize::new(0));
+    let manager = ExposeRunManager::new(
+        std::env::current_dir().unwrap(),
+        "pdxi_waiters".to_string(),
+        "waiters".to_string(),
+    );
+    let endpoint = ExposeMcpEndpoint::new_with_run_manager_and_writer(ExposeMcpEndpointInit {
+        capability: capability.to_string(),
+        instance_id: "pdxi_waiters".to_string(),
+        workspace_name: "waiters".to_string(),
+        display_name: "waiters".to_string(),
+        defaults,
+        run_manager: manager,
+        workspace_root: std::env::current_dir().unwrap(),
+        session_prompt_write: Arc::new(BlockingSessionBridge {
+            started: Arc::clone(&started),
+        }),
+    });
+    let (listen_addr, shared, mut server) = expose_start_mcp_test_server_with_endpoint(
+        endpoint,
+        "waiters.trycloudflare.com",
+        expose_test_args(),
+    );
+    let target = format!("/pdx/v1/{capability}/mcp");
+    let wait_body = r#"{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"prodex_session_output_read","arguments":{"wait_ms":10000}}}"#;
+    let wait_count = super::runtime::expose_worker_count(4);
+    let waiters = (0..wait_count)
+        .map(|_| {
+            let request = format!(
+                "POST {target} HTTP/1.1\r\nHost: waiters.trycloudflare.com\r\nContent-Type: application/json\r\nAccept: application/json\r\nContent-Length: {}\r\n\r\n{wait_body}",
+                wait_body.len()
+            );
+            std::thread::spawn(move || {
+                let Ok(mut stream) = TcpStream::connect(listen_addr) else {
+                    return String::new();
+                };
+                let _ = stream.set_read_timeout(Some(Duration::from_secs(3)));
+                let _ = stream.write_all(request.as_bytes());
+                let _ = stream.shutdown(Shutdown::Write);
+                let mut response = String::new();
+                let _ = stream.read_to_string(&mut response);
+                response
+            })
+        })
+        .collect::<Vec<_>>();
+    for _ in 0..100 {
+        if started.load(Ordering::SeqCst) >= 2 {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+
+    let before = Instant::now();
+    let list = expose_mcp_request(
+        listen_addr,
+        "waiters.trycloudflare.com",
+        &target,
+        r#"{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}"#,
+        "",
+    );
+    assert!(list.starts_with("HTTP/1.1 200"));
+    assert!(before.elapsed() < Duration::from_secs(1));
+
+    shared.shutdown.store(true, Ordering::SeqCst);
+    let before_shutdown = Instant::now();
+    server.shutdown();
+    assert!(before_shutdown.elapsed() < Duration::from_secs(1));
+    for waiter in waiters {
+        let _ = waiter.join();
+    }
     shared.pty.shutdown();
     shared.mcp.as_ref().unwrap().run_manager.shutdown();
 }

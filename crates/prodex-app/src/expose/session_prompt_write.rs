@@ -6,7 +6,8 @@
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -29,8 +30,10 @@ const QUEUE_COMMAND_TIMEOUT: Duration = Duration::from_secs(15);
 const QUEUE_COMMAND_OUTPUT_LIMIT: usize = 64 * 1024;
 const PROCESS_ANCESTRY_LIMIT: usize = 64;
 const OUTPUT_CURSOR_VERSION: u8 = 1;
-const OUTPUT_READ_MAX_BYTES: usize = 128 * 1024;
+// JSON escaping can expand a bounded bridge prompt beyond 128 KiB.
+const OUTPUT_READ_MAX_BYTES: usize = 512 * 1024;
 const OUTPUT_READ_MAX_LINE_BYTES: usize = 64 * 1024;
+const OUTPUT_VERIFY_MAX_LINE_BYTES: usize = 512 * 1024;
 const OUTPUT_READ_MAX_TEXT_BYTES: usize = 8 * 1024;
 const OUTPUT_READ_MAX_TOTAL_TEXT_BYTES: usize = 256 * 1024;
 const OUTPUT_SOURCE_PROBE_BYTES: usize = 64 * 1024;
@@ -116,6 +119,7 @@ pub(super) struct PromptOutputReadRequest {
     pub(super) prodex_pid: Option<u32>,
     pub(super) thread_id: Option<String>,
     pub(super) binding_key: String,
+    pub(super) shutdown: Option<Arc<AtomicBool>>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -200,7 +204,8 @@ where
             Ok(path) => {
                 let metadata = std::fs::metadata(&path)
                     .map_err(|_| SessionPromptWriteError::OutputSourceChanged)?;
-                Some((path, metadata.len()))
+                let source_id = output_source_id(&path, &target.thread_id)?;
+                Some((path, metadata.len(), source_id))
             }
             Err(SessionPromptWriteError::OutputSourceUnavailable) => None,
             Err(error) => return Err(error),
@@ -224,7 +229,13 @@ where
             queue_exit: invocation.exit_code.unwrap_or_default(),
             verification,
         };
-        self.remember_binding(&request.binding_key, target, None)?;
+        self.remember_binding(
+            &request.binding_key,
+            target,
+            rollout_before
+                .as_ref()
+                .map(|(_, _, source_id)| source_id.clone()),
+        )?;
         Ok(result)
     }
 
@@ -246,16 +257,26 @@ where
             .prodex_pid
             .or_else(|| cursor.as_ref().map(|cursor| cursor.prodex_pid))
             .or_else(|| binding.as_ref().map(|binding| binding.target.prodex.pid));
-        let target = match self.resolve_target(&workspace_root, requested_pid) {
+        let target = match self.resolve_target_for_request(
+            &workspace_root,
+            requested_pid,
+            request.thread_id.as_deref(),
+            cursor.is_some() || binding.is_some(),
+        ) {
             Err(SessionPromptWriteError::NoSession) if cursor.is_some() => {
                 return Err(SessionPromptWriteError::StaleCursor);
             }
-            Err(SessionPromptWriteError::NoSession) if binding.is_some() => {
+            Err(SessionPromptWriteError::NoSession)
+                if cursor.is_some()
+                    || binding.is_some()
+                    || request.prodex_pid.is_some()
+                    || request.thread_id.is_some() =>
+            {
                 return Err(SessionPromptWriteError::StaleTarget);
             }
             result => result,
         };
-        let mut target = self.resolve_writer(target?, &workspace_root)?;
+        let mut target = target?;
         self.verify_binding(binding.as_ref(), &target)?;
         if request
             .thread_id
@@ -300,6 +321,13 @@ where
         let wait = Duration::from_millis(request.wait_ms).min(OUTPUT_READ_MAX_WAIT);
         let deadline = Instant::now() + wait;
         loop {
+            if request
+                .shutdown
+                .as_ref()
+                .is_some_and(|shutdown| shutdown.load(Ordering::SeqCst))
+            {
+                return Err(SessionPromptWriteError::OutputReadFailed);
+            }
             let read = read_output_events(&output_path, offset, event_index, request.limit)?;
             offset = read.next_offset;
             event_index = read.next_event_index;
@@ -385,6 +413,9 @@ where
         &self,
         target: &ResolvedTarget,
     ) -> std::result::Result<bool, SessionPromptWriteError> {
+        if first_codex_positional_arg(&target.writer.argv) == Some("app-server") {
+            return self.queue.loaded_thread_addressable(target);
+        }
         if self
             .queue
             .persisted_thread(&target.state_db, &target.thread_id)?
@@ -442,6 +473,22 @@ where
         workspace_root: &Path,
         requested_pid: Option<u32>,
     ) -> std::result::Result<ProcessRecord, SessionPromptWriteError> {
+        let candidates = self.session_candidates(workspace_root, requested_pid)?;
+        match candidates.as_slice() {
+            [candidate] if candidate.birth_identity.is_some() => Ok(candidate.clone()),
+            [candidate] => {
+                let _ = candidate;
+                Err(SessionPromptWriteError::VerificationInconclusive)
+            }
+            _ => Err(SessionPromptWriteError::AmbiguousSession),
+        }
+    }
+
+    fn session_candidates(
+        &self,
+        workspace_root: &Path,
+        requested_pid: Option<u32>,
+    ) -> std::result::Result<Vec<ProcessRecord>, SessionPromptWriteError> {
         let uid = self.process.current_uid()?;
         let candidates = self
             .process
@@ -455,13 +502,54 @@ where
                     && requested_pid.is_none_or(|pid| process.pid == pid)
             })
             .collect::<Vec<_>>();
-        match candidates.as_slice() {
-            [] => Err(SessionPromptWriteError::NoSession),
-            [candidate] if candidate.birth_identity.is_some() => Ok(candidate.clone()),
-            [candidate] => {
-                let _ = candidate;
-                Err(SessionPromptWriteError::VerificationInconclusive)
+        (!candidates.is_empty())
+            .then_some(candidates)
+            .ok_or(SessionPromptWriteError::NoSession)
+    }
+
+    fn resolve_target_for_request(
+        &self,
+        workspace_root: &Path,
+        requested_pid: Option<u32>,
+        requested_thread_id: Option<&str>,
+        already_narrowed: bool,
+    ) -> std::result::Result<ResolvedTarget, SessionPromptWriteError> {
+        if !already_narrowed
+            && requested_pid.is_none()
+            && let Some(thread_id) = requested_thread_id
+        {
+            return self.resolve_target_for_thread(workspace_root, thread_id);
+        }
+        self.resolve_target(workspace_root, requested_pid)
+            .and_then(|target| self.resolve_writer(target, workspace_root))
+    }
+
+    fn resolve_target_for_thread(
+        &self,
+        workspace_root: &Path,
+        requested_thread_id: &str,
+    ) -> std::result::Result<ResolvedTarget, SessionPromptWriteError> {
+        let candidates = self.session_candidates(workspace_root, None)?;
+        let mut matches = Vec::new();
+        let mut retryable = None;
+        let mut definitive = None;
+        for candidate in candidates {
+            match self.resolve_writer(candidate, workspace_root) {
+                Ok(target) if target.thread_id == requested_thread_id => matches.push(target),
+                Ok(_) => {}
+                Err(error) if write::session_prompt_write_resolution_retryable(error) => {
+                    retryable.get_or_insert(error);
+                }
+                Err(error) => {
+                    definitive.get_or_insert(error);
+                }
             }
+        }
+        match matches.as_slice() {
+            [target] => Ok(target.clone()),
+            [] => Err(retryable
+                .or(definitive)
+                .unwrap_or(SessionPromptWriteError::StaleTarget)),
             _ => Err(SessionPromptWriteError::AmbiguousSession),
         }
     }
