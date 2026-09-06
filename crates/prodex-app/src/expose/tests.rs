@@ -374,6 +374,29 @@ fn expose_http_parser_bounds_and_rejects_ambiguous_framing() {
 }
 
 #[test]
+fn expose_http_parser_accepts_escaped_near_limit_mcp_messages() {
+    let message = "\\".repeat(64 * 1024 - 1024);
+    let body = serde_json::json!({
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "tools/call",
+        "params": {
+            "name": "prodex_session_prompt_write",
+            "arguments": {"message": message}
+        }
+    })
+    .to_string();
+    let request = format!(
+        "POST /pdx/v1/capability/mcp HTTP/1.1\r\nHost: 127.0.0.1:7777\r\nContent-Length: {}\r\n\r\n{body}",
+        body.len()
+    );
+
+    let parsed = expose_parse_test_request(request.as_bytes()).unwrap();
+
+    assert_eq!(parsed.body, body.as_bytes());
+}
+
+#[test]
 fn expose_connection_flood_keeps_fixed_worker_count() {
     let (listen_addr, shared, mut server) =
         expose_start_test_server("bootstrap_capability_for_expose_test_0001", 1);

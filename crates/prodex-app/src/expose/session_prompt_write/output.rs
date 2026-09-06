@@ -1,8 +1,8 @@
 use super::{
     OUTPUT_CURSOR_VERSION, OUTPUT_READ_MAX_BYTES, OUTPUT_READ_MAX_LINE_BYTES,
     OUTPUT_READ_MAX_TEXT_BYTES, OUTPUT_READ_MAX_TOTAL_TEXT_BYTES, OUTPUT_SKIP_MAX_BYTES,
-    OUTPUT_SOURCE_PROBE_BYTES, OpenProcessFile, PromptOutputEvent, ResolvedTarget,
-    SessionPromptWriteError, legacy_thread_id,
+    OUTPUT_SOURCE_PROBE_BYTES, OUTPUT_VERIFY_MAX_LINE_BYTES, OpenProcessFile, PromptOutputEvent,
+    ResolvedTarget, SessionPromptWriteError, legacy_thread_id,
 };
 use base64::Engine;
 use sha2::{Digest, Sha256};
@@ -175,9 +175,80 @@ pub(crate) fn read_output_events(
     read_output_lines(&complete, offset, event_index, limit, source_len)
 }
 
+pub(crate) fn rollout_contains_exact_user_message(
+    path: &Path,
+    mut offset: u64,
+    expected: &str,
+) -> std::result::Result<bool, SessionPromptWriteError> {
+    let mut scanned = 0_u64;
+    loop {
+        let (source_len, complete, skipped_to) = read_complete_output(path, offset)?;
+        if let Some(next_offset) = skipped_to {
+            let skipped = next_offset.saturating_sub(offset);
+            scanned = scanned.saturating_add(skipped);
+            if scanned > OUTPUT_SKIP_MAX_BYTES as u64 {
+                return Ok(false);
+            }
+            offset = next_offset;
+            continue;
+        }
+
+        let mut consumed = 0_u64;
+        for line in complete.split_inclusive(|byte| *byte == b'\n') {
+            if exact_user_message_line(line, expected) {
+                return Ok(true);
+            }
+            consumed = consumed.saturating_add(line.len() as u64);
+        }
+        if consumed == 0 {
+            return Ok(false);
+        }
+        scanned = scanned.saturating_add(consumed);
+        if scanned > OUTPUT_SKIP_MAX_BYTES as u64 {
+            return Ok(false);
+        }
+        offset = offset.saturating_add(consumed);
+        if offset >= source_len {
+            return Ok(false);
+        }
+    }
+}
+
+fn exact_user_message_line(raw_line: &[u8], expected: &str) -> bool {
+    if raw_line.len() > OUTPUT_VERIFY_MAX_LINE_BYTES {
+        return false;
+    }
+    let line = raw_line.strip_suffix(b"\n").unwrap_or(raw_line);
+    let Ok(value) = serde_json::from_slice::<serde_json::Value>(line) else {
+        return false;
+    };
+    let Some(payload) = value.get("payload") else {
+        return false;
+    };
+    match value.get("type").and_then(serde_json::Value::as_str) {
+        Some("event_msg") => {
+            payload.get("type").and_then(serde_json::Value::as_str) == Some("user_message")
+                && payload.get("message").and_then(serde_json::Value::as_str) == Some(expected)
+        }
+        Some("response_item") => {
+            crate::app_commands::transcript_exact_visible_user_message(payload)
+                .is_some_and(|message| message == expected)
+        }
+        _ => false,
+    }
+}
+
 fn read_complete_output(
     path: &Path,
     offset: u64,
+) -> std::result::Result<(u64, Vec<u8>, Option<u64>), SessionPromptWriteError> {
+    read_complete_output_with_limit(path, offset, OUTPUT_READ_MAX_BYTES)
+}
+
+fn read_complete_output_with_limit(
+    path: &Path,
+    offset: u64,
+    max_bytes: usize,
 ) -> std::result::Result<(u64, Vec<u8>, Option<u64>), SessionPromptWriteError> {
     let metadata =
         fs::metadata(path).map_err(|_| SessionPromptWriteError::OutputSourceUnavailable)?;
@@ -195,10 +266,10 @@ fn read_complete_output(
         .map_err(|_| SessionPromptWriteError::OutputReadFailed)?;
     let mut bytes = Vec::new();
     (&mut file)
-        .take((OUTPUT_READ_MAX_BYTES + 1) as u64)
+        .take((max_bytes + 1) as u64)
         .read_to_end(&mut bytes)
         .map_err(|_| SessionPromptWriteError::OutputReadFailed)?;
-    let bounded = bytes.len() <= OUTPUT_READ_MAX_BYTES;
+    let bounded = bytes.len() <= max_bytes;
     let complete_len = bytes
         .iter()
         .rposition(|byte| *byte == b'\n')
@@ -267,6 +338,15 @@ fn read_output_lines(
                 has_more: true,
             });
         }
+        if raw_len > OUTPUT_READ_MAX_LINE_BYTES && !raw_line_is_visible_user_message(line) {
+            let next_offset = line_start.saturating_add(raw_len as u64);
+            return Ok(OutputReadBatch {
+                events,
+                next_offset,
+                next_event_index: 0,
+                has_more: next_offset < source_len,
+            });
+        }
         if let Some(batch) = read_output_line(
             line,
             line_start,
@@ -296,7 +376,10 @@ fn read_output_line(
     events: &mut Vec<PromptOutputEvent>,
     total_text_bytes: &mut usize,
 ) -> std::result::Result<Option<OutputReadBatch>, SessionPromptWriteError> {
-    if raw_line.len() > OUTPUT_READ_MAX_LINE_BYTES {
+    let large_visible_user_message = raw_line.len() > OUTPUT_READ_MAX_LINE_BYTES
+        && raw_line.len() <= OUTPUT_VERIFY_MAX_LINE_BYTES
+        && raw_line_is_visible_user_message(raw_line);
+    if raw_line.len() > OUTPUT_READ_MAX_LINE_BYTES && !large_visible_user_message {
         return Ok(None);
     }
     let line = raw_line.strip_suffix(b"\n").unwrap_or(raw_line);
@@ -341,6 +424,32 @@ fn read_output_line(
     Ok(None)
 }
 
+fn raw_line_is_visible_user_message(raw_line: &[u8]) -> bool {
+    if raw_line.len() > OUTPUT_VERIFY_MAX_LINE_BYTES {
+        return false;
+    }
+    let line = raw_line.strip_suffix(b"\n").unwrap_or(raw_line);
+    let Ok(value) = serde_json::from_slice::<serde_json::Value>(line) else {
+        return false;
+    };
+    let Some(payload) = value.get("payload") else {
+        return false;
+    };
+    match value.get("type").and_then(serde_json::Value::as_str) {
+        Some("event_msg") => {
+            payload.get("type").and_then(serde_json::Value::as_str) == Some("user_message")
+                && payload
+                    .get("message")
+                    .and_then(serde_json::Value::as_str)
+                    .is_some()
+        }
+        Some("response_item") => {
+            crate::app_commands::transcript_exact_visible_user_message(payload).is_some()
+        }
+        _ => false,
+    }
+}
+
 fn mcp_visible_transcript_event(event: &crate::app_commands::TranscriptEvent) -> bool {
     event.source == "assistant"
         || event.source == "user"
@@ -348,8 +457,6 @@ fn mcp_visible_transcript_event(event: &crate::app_commands::TranscriptEvent) ->
         || event.source == "mcp"
         || event.source == "agent"
         || event.source == "tool"
-        || event.source == "session-context"
-        || event.source == "turn-context"
         || event.source.starts_with("tool-call:")
 }
 

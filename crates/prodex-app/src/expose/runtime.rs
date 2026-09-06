@@ -202,6 +202,14 @@ pub(super) struct ExposeShared {
     pub(super) max_clients: usize,
 }
 
+const EXPOSE_OUTPUT_WAIT_WORKERS: usize = 2;
+const EXPOSE_OUTPUT_WAIT_QUEUE_CAPACITY: usize = 16;
+
+pub(super) struct ExposeOutputWaitJob {
+    pub(super) request: ExposeHttpRequest,
+    pub(super) shared: Arc<ExposeShared>,
+}
+
 impl ExposeShared {
     pub(super) fn allow_host(&self, host: String) {
         if let Ok(mut hosts) = self.allowed_hosts.lock() {
@@ -221,6 +229,7 @@ pub(super) struct ExposeHttpServer {
     pub(super) shutdown: Arc<AtomicBool>,
     pub(super) accept_thread: Option<JoinHandle<()>>,
     pub(super) worker_threads: Vec<JoinHandle<()>>,
+    pub(super) output_wait_threads: Vec<JoinHandle<()>>,
 }
 
 impl ExposeHttpServer {
@@ -229,12 +238,24 @@ impl ExposeHttpServer {
         let (request_tx, request_rx) =
             mpsc::sync_channel::<TcpStream>(EXPOSE_REQUEST_QUEUE_CAPACITY);
         let request_rx = Arc::new(Mutex::new(request_rx));
+        let (output_wait_tx, output_wait_rx) =
+            mpsc::sync_channel::<ExposeOutputWaitJob>(EXPOSE_OUTPUT_WAIT_QUEUE_CAPACITY);
+        let output_wait_rx = Arc::new(Mutex::new(output_wait_rx));
+        let mut output_wait_threads = Vec::with_capacity(EXPOSE_OUTPUT_WAIT_WORKERS);
+        for _ in 0..EXPOSE_OUTPUT_WAIT_WORKERS {
+            let output_wait_rx = Arc::clone(&output_wait_rx);
+            let shutdown = Arc::clone(&shared.shutdown);
+            output_wait_threads.push(thread::spawn(move || {
+                expose_output_wait_loop(&output_wait_rx, &shutdown)
+            }));
+        }
         let mut worker_threads = Vec::with_capacity(expose_worker_count(shared.max_clients));
         for _ in 0..expose_worker_count(shared.max_clients) {
             let request_rx = Arc::clone(&request_rx);
             let shared = Arc::clone(&shared);
+            let output_wait_tx = output_wait_tx.clone();
             worker_threads.push(thread::spawn(move || {
-                expose_worker_loop(&request_rx, &shared)
+                expose_worker_loop(&request_rx, &shared, &output_wait_tx)
             }));
         }
         let shutdown = Arc::clone(&shared.shutdown);
@@ -273,6 +294,7 @@ impl ExposeHttpServer {
             shutdown,
             accept_thread: Some(accept_thread),
             worker_threads,
+            output_wait_threads,
         })
     }
 
@@ -282,6 +304,9 @@ impl ExposeHttpServer {
             let _ = thread.join();
         }
         for thread in self.worker_threads.drain(..) {
+            let _ = thread.join();
+        }
+        for thread in self.output_wait_threads.drain(..) {
             let _ = thread.join();
         }
     }
@@ -300,6 +325,7 @@ pub(super) fn expose_worker_count(max_clients: usize) -> usize {
 pub(super) fn expose_worker_loop(
     request_rx: &Arc<Mutex<Receiver<TcpStream>>>,
     shared: &Arc<ExposeShared>,
+    output_wait_tx: &mpsc::SyncSender<ExposeOutputWaitJob>,
 ) {
     while !shared.shutdown.load(Ordering::SeqCst) {
         let received = match request_rx.lock() {
@@ -313,9 +339,11 @@ pub(super) fn expose_worker_loop(
                 let _ = stream.set_read_timeout(Some(timeout));
                 let _ = stream.set_write_timeout(Some(timeout));
                 match expose_read_http_request(&mut stream) {
-                    Ok(request) => {
-                        handle_expose_request(ExposeHttpRequest { request, stream }, shared)
-                    }
+                    Ok(request) => handle_expose_request(
+                        ExposeHttpRequest { request, stream },
+                        shared,
+                        Some(output_wait_tx),
+                    ),
                     Err(error) => {
                         let _ = expose_write_http_response(
                             &mut stream,
@@ -323,6 +351,28 @@ pub(super) fn expose_worker_loop(
                         );
                     }
                 }
+            }
+            Err(mpsc::RecvTimeoutError::Timeout) => {}
+            Err(mpsc::RecvTimeoutError::Disconnected) => break,
+        }
+    }
+}
+
+fn expose_output_wait_loop(
+    output_wait_rx: &Arc<Mutex<Receiver<ExposeOutputWaitJob>>>,
+    shutdown: &Arc<AtomicBool>,
+) {
+    while !shutdown.load(Ordering::SeqCst) {
+        let received = match output_wait_rx.lock() {
+            Ok(rx) => rx.recv_timeout(Duration::from_millis(250)),
+            Err(_) => break,
+        };
+        match received {
+            Ok(job) => {
+                if job.shared.shutdown.load(Ordering::SeqCst) {
+                    break;
+                }
+                super::routes::handle_expose_request(job.request, &job.shared, None);
             }
             Err(mpsc::RecvTimeoutError::Timeout) => {}
             Err(mpsc::RecvTimeoutError::Disconnected) => break,

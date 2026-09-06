@@ -114,6 +114,29 @@ pub(crate) fn transcript_events_from_session_line(line: &str) -> Vec<TranscriptE
         .collect()
 }
 
+/// Returns exact visible user-message text from a raw response-item payload.
+///
+/// Output rendering normalizes whitespace. Prompt delivery verification cannot use that
+/// projection because trailing whitespace and newlines are part of the submitted message.
+pub(crate) fn transcript_exact_visible_user_message(payload: &serde_json::Value) -> Option<String> {
+    if payload.get("type").and_then(serde_json::Value::as_str) != Some("message")
+        || payload.get("role").and_then(serde_json::Value::as_str) != Some("user")
+        || !transcript_user_message_is_visible(payload)
+    {
+        return None;
+    }
+    let content = payload.get("content")?.as_array()?;
+    let parts = content
+        .iter()
+        .map(|item| {
+            item.get("text")
+                .or_else(|| item.get("content"))
+                .and_then(serde_json::Value::as_str)
+        })
+        .collect::<Option<Vec<_>>>()?;
+    (!parts.is_empty()).then(|| parts.join("\n"))
+}
+
 fn transcript_safe_text(text: &str) -> String {
     let redacted = redaction::redaction_redact_secret_like_text(text);
     let redacted = redacted

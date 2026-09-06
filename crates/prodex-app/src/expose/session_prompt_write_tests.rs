@@ -1,9 +1,9 @@
 use super::session_prompt_write::{
     ExistingSessionPromptWrite, OpenProcessFile, ProcessDetails, ProcessInspector, ProcessRecord,
-    ProcessState, QueueControl, QueueInvocation, ResolvedTarget, SessionPromptWriteError,
-    SessionPromptWriteRequest, SessionPromptWriteService, exact_open_database, is_codex_writer,
-    is_descendant_of, is_plain_prodex_session, legacy_thread_id, modern_thread_id,
-    resolve_thread_identity,
+    ProcessState, QueueControl, QueueInvocation, ResolvedTarget,
+    SESSION_PROMPT_WRITE_MAX_MESSAGE_BYTES, SessionPromptWriteError, SessionPromptWriteRequest,
+    SessionPromptWriteService, exact_open_database, is_codex_writer, is_descendant_of,
+    is_plain_prodex_session, legacy_thread_id, modern_thread_id, resolve_thread_identity,
 };
 use std::collections::{BTreeMap, HashMap};
 use std::io::Write;
@@ -367,6 +367,21 @@ fn session_prompt_write_rejects_mismatched_cwd_without_no_session_fallback() {
 }
 
 #[test]
+fn explicit_missing_process_selector_is_stale_without_queue_fallback() {
+    let fixture = fixture();
+    let mut prompt = request(&fixture, "must not write");
+    prompt.prodex_pid = Some(999);
+    let queue_control = queue(&fixture, None);
+    let calls = Arc::clone(&queue_control.calls);
+
+    assert_eq!(
+        service(&fixture, queue_control).write(prompt).unwrap_err(),
+        SessionPromptWriteError::StaleTarget
+    );
+    assert!(calls.lock().unwrap().is_empty());
+}
+
+#[test]
 fn stale_rollout_path_is_rejected_before_prompt_write() {
     let fixture = fixture();
     let stale = fixture
@@ -457,6 +472,32 @@ fn ambiguous_session_and_writer_never_call_queue() {
 }
 
 #[test]
+fn explicit_thread_selector_disambiguates_sessions_in_one_workspace() {
+    let mut fixture = fixture();
+    fixture.records.insert(
+        1,
+        process(
+            101,
+            1,
+            "/usr/bin/prodex",
+            vec!["prodex", "s"],
+            &fixture.workspace,
+            11,
+        ),
+    );
+    let mut queue_control = queue(&fixture, None);
+    queue_control.consumed_message = Some("selected thread".to_string());
+    let mut prompt = request(&fixture, "selected thread");
+    prompt.thread_id = Some(THREAD.to_string());
+
+    let result = service(&fixture, queue_control)
+        .write(prompt)
+        .expect("thread selector should select its exact session");
+
+    assert_eq!(result.thread_id, THREAD);
+}
+
+#[test]
 fn queue_success_preserves_multiline_message_and_same_thread() {
     let fixture = fixture();
     let message_id = "019f3b59-7771-7ea1-a9a1-3cd638f216c5";
@@ -469,6 +510,49 @@ fn queue_success_preserves_multiline_message_and_same_thread() {
         calls.lock().unwrap()[0],
         (THREAD.to_string(), "line one\nline two".to_string())
     );
+}
+
+#[test]
+fn queue_success_verifies_exact_message_whitespace_and_escaping() {
+    let fixture = fixture();
+    let message = "  leading\nline with \\\\ and \"quotes\"  \n\n";
+    let mut queue_control = queue(&fixture, None);
+    queue_control.consumed_message = Some(message.to_string());
+    let calls = Arc::clone(&queue_control.calls);
+
+    let result = service(&fixture, queue_control)
+        .write(request(&fixture, message))
+        .expect("the exact rollout message should verify");
+
+    assert_eq!(result.verification, "rollout_user_event_observed");
+    assert_eq!(calls.lock().unwrap()[0].1, message);
+}
+
+#[test]
+fn accepted_queued_message_does_not_wait_for_busy_turn_completion() {
+    let fixture = fixture();
+    let mut queue_control = queue(&fixture, None);
+    queue_control.invocation.queued = true;
+
+    let result = service(&fixture, queue_control)
+        .write(request(&fixture, "queued while busy"))
+        .expect("accepted queue submission should be sufficient evidence");
+
+    assert_eq!(result.verification, "queue_pending_observed");
+}
+
+#[test]
+fn queue_success_verifies_near_limit_escaped_message() {
+    let fixture = fixture();
+    let message = "\\".repeat(SESSION_PROMPT_WRITE_MAX_MESSAGE_BYTES - 1024);
+    let mut queue_control = queue(&fixture, None);
+    queue_control.consumed_message = Some(message.clone());
+
+    let result = service(&fixture, queue_control)
+        .write(request(&fixture, &message))
+        .expect("near-limit rollout message should verify");
+
+    assert_eq!(result.verification, "rollout_user_event_observed");
 }
 
 #[test]

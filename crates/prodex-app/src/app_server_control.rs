@@ -9,7 +9,7 @@ use tungstenite::{Message, WebSocket};
 pub(crate) type UnixAppServerSocket = WebSocket<UnixStream>;
 
 const MAX_MESSAGES: usize = 64;
-const MAX_MESSAGE_BYTES: usize = 64 * 1024;
+const MAX_MESSAGE_BYTES: usize = 512 * 1024;
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(3);
 
 pub(crate) fn connect_unix_socket(path: &Path) -> Result<UnixAppServerSocket> {

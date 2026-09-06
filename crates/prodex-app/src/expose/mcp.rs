@@ -7,6 +7,7 @@ use super::ui::expose_text_response;
 use anyhow::{Context, Result};
 use base64::Engine;
 use prodex_cli::SuperArgs;
+use serde_json::Value;
 use std::fmt;
 use std::net::IpAddr;
 use std::path::PathBuf;
@@ -129,7 +130,7 @@ pub(super) fn handle_mcp_route(request: ExposeHttpRequest, shared: &Arc<ExposeSh
         return;
     }
     if let Some(mcp) = shared.mcp.as_ref() {
-        mcp.handle(request, host);
+        mcp.handle(request, host, &shared.shutdown);
     } else {
         let _ = request.respond(expose_text_response(404, "not found"));
     }
@@ -137,6 +138,27 @@ pub(super) fn handle_mcp_route(request: ExposeHttpRequest, shared: &Arc<ExposeSh
 
 pub(super) fn expose_main_provider(args: &SuperArgs) -> prodex_provider_core::ProviderId {
     main_provider(args)
+}
+
+pub(super) fn mcp_output_read_wait_requested(body: &[u8]) -> bool {
+    let Ok(value) = serde_json::from_slice::<Value>(body) else {
+        return false;
+    };
+    value.get("method").and_then(Value::as_str) == Some("tools/call")
+        && value
+            .get("params")
+            .and_then(Value::as_object)
+            .and_then(|params| params.get("name"))
+            .and_then(Value::as_str)
+            == Some("prodex_session_output_read")
+        && value
+            .get("params")
+            .and_then(Value::as_object)
+            .and_then(|params| params.get("arguments"))
+            .and_then(Value::as_object)
+            .and_then(|arguments| arguments.get("wait_ms"))
+            .and_then(Value::as_u64)
+            .is_some_and(|wait_ms| (1..=MCP_MAX_OUTPUT_WAIT_MS).contains(&wait_ms))
 }
 
 /// The complete bearer-style MCP endpoint kept as one logical value.

@@ -290,7 +290,7 @@ impl QueueControl for SystemQueueControl {
             succeeded: true,
             exit_code: Some(0),
             message_id,
-            queued: false,
+            queued: true,
         }
     }
 
@@ -378,6 +378,19 @@ fn app_server_queue_add_once(
             .get("clientUserMessageId")
             .and_then(serde_json::Value::as_str)
             != Some(message_id.as_str())
+        || !queued_submission
+            .get("input")
+            .and_then(serde_json::Value::as_array)
+            .is_some_and(|input| {
+                let [text] = input.as_slice() else {
+                    return false;
+                };
+                text.get("type").and_then(serde_json::Value::as_str) == Some("text")
+                    && text.get("text").and_then(serde_json::Value::as_str) == Some(message)
+                    && text
+                        .get("textElements")
+                        .is_none_or(|elements| elements.as_array().is_some_and(Vec::is_empty))
+            })
     {
         return QueueInvocation::default();
     }
@@ -463,11 +476,11 @@ fn app_server_thread_activity(
         thread.get("id").and_then(serde_json::Value::as_str) == Some(&target.thread_id);
     let session_matches = thread.get("sessionId").and_then(serde_json::Value::as_str)
         == Some(target.thread_id.as_str());
-    let non_ephemeral = thread.get("ephemeral").and_then(serde_json::Value::as_bool) != Some(true);
+    let non_ephemeral = thread.get("ephemeral").and_then(serde_json::Value::as_bool) == Some(false);
     let accepts_input = thread
         .get("canAcceptDirectInput")
         .and_then(serde_json::Value::as_bool)
-        != Some(false);
+        == Some(true);
     if !(id_matches && session_matches && non_ephemeral && accepts_input) {
         return Ok(None);
     }
@@ -477,11 +490,18 @@ fn app_server_thread_activity(
     if !prodex_core::same_path(Path::new(thread_cwd), Path::new(&target.environment.pwd)) {
         return Ok(None);
     }
-    let active = thread
+    let Some(status) = thread
         .get("status")
         .and_then(|status| status.get("type"))
         .and_then(serde_json::Value::as_str)
-        == Some("active");
+    else {
+        return Ok(None);
+    };
+    let active = match status {
+        "active" => true,
+        "idle" => false,
+        _ => return Ok(None),
+    };
     Ok(Some(active))
 }
 

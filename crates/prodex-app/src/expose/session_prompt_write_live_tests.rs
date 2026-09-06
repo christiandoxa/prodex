@@ -52,7 +52,7 @@ fn live_app_server_probe_and_turn_control_require_exact_thread_and_workspace() {
     let methods = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
     let server_methods = std::sync::Arc::clone(&methods);
     let server = std::thread::spawn(move || {
-        for connection in 0..2 {
+        for connection in 0..3 {
             let (stream, _) = listener.accept().unwrap();
             let mut socket = tungstenite::accept(stream).unwrap();
             loop {
@@ -73,12 +73,23 @@ fn live_app_server_probe_and_turn_control_require_exact_thread_and_workspace() {
                         "userAgent": "probe"
                     }),
                     "thread/read" => serde_json::json!({
-                        "thread": {
-                            "id": THREAD,
-                            "sessionId": THREAD,
-                            "ephemeral": false,
-                            "canAcceptDirectInput": true,
-                            "cwd": server_workspace.clone()
+                        "thread": if connection == 2 {
+                            serde_json::json!({
+                                "id": THREAD,
+                                "sessionId": THREAD,
+                                "ephemeral": false,
+                                "cwd": server_workspace.clone(),
+                                "status": {"type": "notLoaded"}
+                            })
+                        } else {
+                            serde_json::json!({
+                                "id": THREAD,
+                                "sessionId": THREAD,
+                                "ephemeral": false,
+                                "canAcceptDirectInput": true,
+                                "cwd": server_workspace.clone(),
+                                "status": {"type": "idle"}
+                            })
                         }
                     }),
                     "turn/start" => {
@@ -109,7 +120,10 @@ fn live_app_server_probe_and_turn_control_require_exact_thread_and_workspace() {
                             .into(),
                     ))
                     .unwrap();
-                if method == "turn/start" || (connection == 0 && method == "thread/read") {
+                if method == "turn/start"
+                    || (connection == 0 && method == "thread/read")
+                    || (connection == 2 && method == "thread/read")
+                {
                     break;
                 }
             }
@@ -151,7 +165,6 @@ fn live_app_server_probe_and_turn_control_require_exact_thread_and_workspace() {
             .unwrap()
     );
     let invocation = SystemQueueControl.queue_once(&target, "visible message");
-    server.join().unwrap();
     assert!(
         invocation.succeeded,
         "app-server methods: {:?}",
@@ -168,6 +181,24 @@ fn live_app_server_probe_and_turn_control_require_exact_thread_and_workspace() {
             "turn/start"
         ]
     );
+    assert!(
+        !SystemQueueControl
+            .loaded_thread_addressable(&target)
+            .unwrap()
+    );
+    assert_eq!(
+        methods.lock().unwrap().as_slice(),
+        [
+            "initialize",
+            "thread/read",
+            "initialize",
+            "thread/read",
+            "turn/start",
+            "initialize",
+            "thread/read"
+        ]
+    );
+    server.join().unwrap();
     let _ = std::fs::remove_dir_all(root);
 }
 
@@ -191,6 +222,8 @@ fn live_app_server_busy_prompt_write_uses_authoritative_queue() {
     let listener = UnixListener::bind(&socket_path).unwrap();
     let server_codex_home = codex_home.display().to_string();
     let server_workspace = workspace.display().to_string();
+    let expected_message = "\\".repeat(32 * 1024);
+    let server_expected_message = expected_message.clone();
     let methods = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
     let server_methods = std::sync::Arc::clone(&methods);
     let server = std::thread::spawn(move || {
@@ -228,7 +261,7 @@ fn live_app_server_busy_prompt_write_uses_authoritative_queue() {
                     assert_eq!(request["params"]["input"][0]["type"], "text");
                     assert_eq!(
                         request["params"]["input"][0]["text"],
-                        "busy visible message"
+                        server_expected_message
                     );
                     let client_id = request["params"]["clientUserMessageId"]
                         .as_str()
@@ -286,7 +319,7 @@ fn live_app_server_busy_prompt_write_uses_authoritative_queue() {
         remote_endpoint: Some(endpoint),
     };
 
-    let invocation = SystemQueueControl.queue_once(&target, "busy visible message");
+    let invocation = SystemQueueControl.queue_once(&target, &expected_message);
     server.join().unwrap();
     assert!(invocation.succeeded);
     assert!(invocation.queued);

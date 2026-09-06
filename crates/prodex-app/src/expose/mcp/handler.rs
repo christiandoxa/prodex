@@ -28,6 +28,7 @@ use serde_json::{Value, json};
 use std::ffi::OsString;
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
+use uuid::Uuid;
 
 fn mcp_binding_key(request: &ExposeHttpRequest) -> String {
     let session = request.header("Mcp-Session-Id").unwrap_or("stateless");
@@ -105,7 +106,7 @@ impl ExposeMcpEndpoint {
         })
     }
 
-    pub(super) fn matches_target(&self, target: &str) -> bool {
+    pub(crate) fn matches_target(&self, target: &str) -> bool {
         let Some(capability) = mcp_capability_segment(target) else {
             return false;
         };
@@ -138,7 +139,12 @@ impl ExposeMcpEndpoint {
         let _ = self.openai_relay.lock().map(|mut relay| *relay = None);
     }
 
-    pub(super) fn handle(&self, request: ExposeHttpRequest, host: &str) {
+    pub(super) fn handle(
+        &self,
+        request: ExposeHttpRequest,
+        host: &str,
+        shutdown: &std::sync::Arc<std::sync::atomic::AtomicBool>,
+    ) {
         if !self.matches_target(request.target()) {
             let _ = request.respond(expose_text_response(404, "not found"));
             return;
@@ -180,7 +186,7 @@ impl ExposeMcpEndpoint {
             ));
             return;
         }
-        let response = self.dispatch(request.body(), &request);
+        let response = self.dispatch(request.body(), &request, shutdown);
         let _ = request.respond(response);
     }
 
@@ -199,7 +205,12 @@ impl ExposeMcpEndpoint {
         true
     }
 
-    fn dispatch(&self, body: &[u8], request: &ExposeHttpRequest) -> ExposeHttpResponse {
+    fn dispatch(
+        &self,
+        body: &[u8],
+        request: &ExposeHttpRequest,
+        shutdown: &std::sync::Arc<std::sync::atomic::AtomicBool>,
+    ) -> ExposeHttpResponse {
         if !mcp_json_nesting_within_limit(body, MCP_MAX_JSON_NESTING) {
             return mcp_error_response(400, None, -32700, "parse error");
         }
@@ -241,7 +252,7 @@ impl ExposeMcpEndpoint {
             "initialize" => self.initialize(id, params, request.header("MCP-Protocol-Version")),
             "ping" => mcp_json_response(200, jsonrpc_result(id, json!({}))),
             "tools/list" => self.tools_list(id),
-            "tools/call" => self.tools_call(id, params, &mcp_binding_key(request)),
+            "tools/call" => self.tools_call(id, params, &mcp_binding_key(request), shutdown),
             _ => mcp_error_response(404, id, -32601, "method not found"),
         }
     }
@@ -338,6 +349,7 @@ impl ExposeMcpEndpoint {
         id: Option<Value>,
         params: &Value,
         binding_key: &str,
+        shutdown: &std::sync::Arc<std::sync::atomic::AtomicBool>,
     ) -> ExposeHttpResponse {
         let Some(params) = params.as_object() else {
             return mcp_error_response(400, id, -32602, "tool parameters are required");
@@ -360,7 +372,7 @@ impl ExposeMcpEndpoint {
             "prodex_super_result" => self.result_tool(arguments),
             "prodex_super_cancel" => self.cancel_tool(arguments),
             "prodex_session_prompt_write" => self.session_prompt_write_tool(arguments, binding_key),
-            "prodex_session_output_read" => self.output_read_tool(arguments, binding_key),
+            "prodex_session_output_read" => self.output_read_tool(arguments, binding_key, shutdown),
             "prodex_super_list" => Ok(json!({
                 "instance_id": self.instance_id,
                 "runs": self.run_manager.list().iter().map(run_summary_json).collect::<Vec<_>>()
@@ -391,12 +403,19 @@ impl ExposeMcpEndpoint {
         if message.as_bytes().contains(&0) {
             return Err("message must not contain NUL".to_string());
         }
+        let thread_id = optional_string(arguments, "thread_id", 128)?;
+        if thread_id
+            .as_deref()
+            .is_some_and(|thread_id| Uuid::parse_str(thread_id).is_err())
+        {
+            return Err("thread_id is invalid".to_string());
+        }
         let request = SessionPromptWriteRequest {
             workspace_root: self.workspace_root.clone(),
             message,
             cwd: optional_string(arguments, "cwd", 4096)?,
             prodex_pid: optional_process_id(arguments)?,
-            thread_id: optional_string(arguments, "thread_id", 128)?,
+            thread_id,
             binding_key: binding_key.to_string(),
         };
         let result = self
@@ -418,6 +437,7 @@ impl ExposeMcpEndpoint {
         &self,
         arguments: &Value,
         binding_key: &str,
+        shutdown: &std::sync::Arc<std::sync::atomic::AtomicBool>,
     ) -> std::result::Result<Value, String> {
         let limit = arguments
             .get("limit")
@@ -439,14 +459,22 @@ impl ExposeMcpEndpoint {
                 "wait_ms must be between 0 and {MCP_MAX_OUTPUT_WAIT_MS}"
             ));
         }
+        let thread_id = optional_string(arguments, "thread_id", 128)?;
+        if thread_id
+            .as_deref()
+            .is_some_and(|thread_id| Uuid::parse_str(thread_id).is_err())
+        {
+            return Err("thread_id is invalid".to_string());
+        }
         let request = PromptOutputReadRequest {
             workspace_root: self.workspace_root.clone(),
             cursor: optional_string(arguments, "cursor", MCP_MAX_CURSOR_BYTES)?,
             limit,
             wait_ms,
             prodex_pid: optional_process_id(arguments)?,
-            thread_id: optional_string(arguments, "thread_id", 128)?,
+            thread_id,
             binding_key: binding_key.to_string(),
+            shutdown: Some(std::sync::Arc::clone(shutdown)),
         };
         let result = self
             .session_prompt_write
