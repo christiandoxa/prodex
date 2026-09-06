@@ -27,6 +27,7 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 
 ### Misc
 
+- Align final release source inventories (`1448a60`)
 - Validate extracted log reachability (`48b5e95`)
 - Verify official app-server session bridge (`caa21dd`)
 - Harden session bridge follow-up (`02766c0`)
