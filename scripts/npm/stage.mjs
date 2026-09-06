@@ -63,13 +63,6 @@ async function stagePlatformPackage(version, inputDir, outputDir, spec) {
   await ensureDir(path.join(packageDir, "vendor"));
   await fs.copyFile(artifactBinary, path.join(packageDir, "vendor", spec.binaryFileName));
   await fs.chmod(path.join(packageDir, "vendor", spec.binaryFileName), 0o755);
-  const codexBinaryName = spec.target.endsWith("-msvc") ? "codex.exe" : "codex";
-  const artifactCodexBinary = path.join(inputDir, spec.target, codexBinaryName);
-  if (await pathExists(artifactCodexBinary)) {
-    await ensureDir(path.join(packageDir, "vendor"));
-    await fs.copyFile(artifactCodexBinary, path.join(packageDir, "vendor", codexBinaryName));
-    await fs.chmod(path.join(packageDir, "vendor", codexBinaryName), 0o755);
-  }
   await writeJsonFile(path.join(packageDir, "package.json"), platformPackageManifest(spec, version));
   await copyRepoFile("LICENSE", path.join(packageDir, "LICENSE"));
 
@@ -78,13 +71,10 @@ async function stagePlatformPackage(version, inputDir, outputDir, spec) {
 
 async function stageMainPackage(version, outputDir) {
   const packageDir = path.join(outputDir, "packages", packageSlug("@christiandoxa/prodex"));
-  await ensureDir(path.join(packageDir, "lib"));
   await copyRepoFile("LICENSE", path.join(packageDir, "LICENSE"));
   await copyRepoFile("README.md", path.join(packageDir, "README.md"));
   await copyRepoFile("npm/prodex/prodex", path.join(packageDir, "prodex"));
-  await copyRepoFile("npm/prodex/lib/codex-shim.cjs", path.join(packageDir, "lib", "codex-shim.cjs"));
   await fs.chmod(path.join(packageDir, "prodex"), 0o755);
-  await fs.chmod(path.join(packageDir, "lib", "codex-shim.cjs"), 0o755);
   await writeJsonFile(path.join(packageDir, "package.json"), mainPackageManifest(version));
   return packageDir;
 }

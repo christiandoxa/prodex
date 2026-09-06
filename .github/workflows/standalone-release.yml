@@ -521,65 +521,6 @@ jobs:
             sleep "$((attempt * 10))"
           done
 
-      - name: Build patched Codex runtime
-        shell: bash
-        run: |
-          set -euo pipefail
-          codex_source="${RUNNER_TEMP}/codex-rust-v0.153.4"
-          codex_target="${RUNNER_TEMP}/codex-target"
-          rm -rf "${codex_source}" "${codex_target}"
-          git init --quiet "${codex_source}"
-          git -C "${codex_source}" config core.autocrlf false
-          git -C "${codex_source}" remote add origin https://github.com/openai/codex.git
-          git -C "${codex_source}" fetch --quiet --depth 1 origin 3d2ee51ca2d5db578f328aa75e20aa22c0197c9a
-          git -C "${codex_source}" checkout --quiet --detach 3d2ee51ca2d5db578f328aa75e20aa22c0197c9a
-          node scripts/compat/apply-codex-tui-patch.mjs --source "${codex_source}" --apply
-          openssl_patch="${GITHUB_WORKSPACE}/migration/codex-rust-v0.153.4-linux-openssl.patch"
-          openssl_patch_sha="$(node -e 'const crypto = require("node:crypto"); const fs = require("node:fs"); process.stdout.write(crypto.createHash("sha256").update(fs.readFileSync(process.argv[1])).digest("hex"));' "${openssl_patch}")"
-          test "${openssl_patch_sha}" = "f1958eb45138a5c3ca0a03d0976f22c6d59ab1fc18f2fbda9b68a59c3ec40e12"
-          git -C "${codex_source}" apply --check -p1 "${openssl_patch}"
-          git -C "${codex_source}" apply -p1 "${openssl_patch}"
-          if [ "${{ matrix.use-cross }}" = "true" ]; then
-            cat > "${codex_source}/codex-rs/Cross.toml" <<'EOF'
-          [target.x86_64-unknown-linux-gnu]
-          image = "ghcr.io/cross-rs/x86_64-unknown-linux-gnu:0.2.5@sha256:9e5b39c09874bc1816c675ed11afca2c2ed6cee0c4ed2b3c1d5763c346c9ae3f"
-          [target.aarch64-unknown-linux-gnu]
-          image = "ghcr.io/cross-rs/aarch64-unknown-linux-gnu:0.2.5@sha256:7f8308a8734d9fcd2ebbe9a3e4bdea74af293f0799d80c3cc341e340cda49a4c"
-          EOF
-          fi
-          cargo_changes="$(git -C "${codex_source}" diff --name-only | grep -E '(^|/)(Cargo.toml|Cargo.lock)$' || true)"
-          expected_cargo_changes=$'codex-rs/Cargo.lock\ncodex-rs/core/Cargo.toml'
-          if [ "${cargo_changes}" != "${expected_cargo_changes}" ]; then
-            echo "Prodex Codex patches changed unexpected Cargo metadata: ${cargo_changes}" >&2
-            exit 1
-          fi
-          codex_lock="${codex_source}/codex-rs/Cargo.lock"
-          sha256_file() {
-            node -e 'const crypto = require("node:crypto"); const fs = require("node:fs"); process.stdout.write(crypto.createHash("sha256").update(fs.readFileSync(process.argv[1])).digest("hex"));' "$1"
-          }
-          codex_lock_sha_before="$(sha256_file "${codex_lock}")"
-          test "${codex_lock_sha_before}" = "a2cb91dfb2e8112bc81d05158fa00b9698e2df8cc1ae0547b5dc5606a44904d3"
-          echo "patched_codex_source_sha=3d2ee51ca2d5db578f328aa75e20aa22c0197c9a"
-          echo "patched_codex_lock_sha256=${codex_lock_sha_before}"
-          export RUSTUP_TOOLCHAIN=1.98.0
-          rustc --version | grep -F 'rustc 1.98.0'
-          cargo --version
-          build_args=(--release --target "${{ matrix.target }}" -p codex-cli --bin codex)
-          if [ "${{ matrix.use-cross }}" = "true" ]; then
-            (cd "${codex_source}/codex-rs" && CARGO_TARGET_DIR="${codex_target}" cross build --locked "${build_args[@]}")
-          else
-            (cd "${codex_source}/codex-rs" && CARGO_TARGET_DIR="${codex_target}" cargo build --locked "${build_args[@]}")
-          fi
-          codex_lock_sha_after="$(sha256_file "${codex_lock}")"
-          test "${codex_lock_sha_before}" = "${codex_lock_sha_after}"
-          codex_name=codex
-          if [ "${{ matrix.binary-name }}" = "prodex.exe" ]; then
-            codex_name=codex.exe
-          fi
-          mkdir -p "dist/${{ matrix.artifact-name }}"
-          cp "${codex_target}/${{ matrix.target }}/release/${codex_name}" "dist/${{ matrix.artifact-name }}/${codex_name}"
-          chmod 0755 "dist/${{ matrix.artifact-name }}/${codex_name}"
-
       - name: Verify compiled-in Mojo release
         if: ${{ matrix.mojo-release && matrix.can-mojo-runtime-smoke }}
         shell: bash
@@ -692,8 +633,7 @@ jobs:
         run: |
           set -euo pipefail
           for binary in \
-            "target/${{ matrix.target }}/release/${{ matrix.binary-name }}" \
-            "dist/${{ matrix.artifact-name }}/codex"; do
+            "target/${{ matrix.target }}/release/${{ matrix.binary-name }}"; do
             versions="$(readelf --version-info "${binary}" | grep -oE 'GLIBC_[0-9]+\.[0-9]+' | sort -Vu || true)"
             if [ -z "${versions}" ]; then
               echo "failed to detect GLIBC symbol versions for ${binary}" >&2
@@ -707,12 +647,6 @@ jobs:
               exit 1
             fi
           done
-          codex_binary="dist/${{ matrix.artifact-name }}/codex"
-          if readelf --dynamic "${codex_binary}" | grep -Eq 'Shared library: \[lib(ssl|crypto)\.so'; then
-            echo "${codex_binary} must not depend on a system OpenSSL runtime" >&2
-            exit 1
-          fi
-
       - name: Native smoke test
         if: ${{ matrix.can-native-smoke }}
         shell: bash
@@ -889,10 +823,8 @@ jobs:
         run: |
           set -euo pipefail
           binary="artifact/prodex"
-          codex_binary="artifact/codex"
-          test -f "${binary}" && test -f "${codex_binary}"
-          chmod 0755 "${binary}" "${codex_binary}"
-          "${codex_binary}" --version | grep -Fx 'codex-cli 0.153.4'
+          test -f "${binary}"
+          chmod 0755 "${binary}"
           node scripts/ci/release-artifact-smoke.mjs \
             --binary "${binary}" \
             --version "${RELEASE_VERSION}"
@@ -922,17 +854,11 @@ jobs:
         with:
           subject-path: |
             artifacts/x86_64-unknown-linux-gnu/prodex
-            artifacts/x86_64-unknown-linux-gnu/codex
             artifacts/aarch64-unknown-linux-gnu/prodex
-            artifacts/aarch64-unknown-linux-gnu/codex
             artifacts/x86_64-apple-darwin/prodex
-            artifacts/x86_64-apple-darwin/codex
             artifacts/aarch64-apple-darwin/prodex
-            artifacts/aarch64-apple-darwin/codex
             artifacts/x86_64-pc-windows-msvc/prodex.exe
-            artifacts/x86_64-pc-windows-msvc/codex.exe
             artifacts/aarch64-pc-windows-msvc/prodex.exe
-            artifacts/aarch64-pc-windows-msvc/codex.exe
 
   publish-container:
     name: Publish container and deployment manifest
@@ -1091,6 +1017,21 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          rm -rf sbom-input
+          mkdir -p sbom-input
+          while IFS= read -r -d '' file; do
+            parent="$(basename "$(dirname "${file}")")"
+            mkdir -p "sbom-input/${parent}"
+            cp "${file}" "sbom-input/${parent}/$(basename "${file}")"
+          done < <(find artifacts -mindepth 2 -maxdepth 2 -type f \( -name 'prodex' -o -name 'prodex.exe' \) -print0)
+          if find sbom-input -type f -iname '*codex*' -print -quit | grep -q .; then
+            echo "release SBOM input must not contain Codex executables or bundles" >&2
+            exit 1
+          fi
+          if ! find sbom-input -maxdepth 2 -type f -print -quit | grep -q .; then
+            echo "release SBOM input is empty" >&2
+            exit 1
+          fi
           syft_image="anchore/syft:v1.41.2@sha256:962c5626d30cdfb814802598cbb7b63cb690bf979a4bc0ff1d9c6e0cb441db7f"
           for attempt in 1 2 3; do
             if docker pull "$syft_image"; then
@@ -1102,7 +1043,7 @@ jobs:
             sleep "$((attempt * 5))"
           done
           docker run --rm \
-            -v "${PWD}/artifacts:/source:ro" \
+            -v "${PWD}/sbom-input:/source:ro" \
             "$syft_image" \
             dir:/source -o spdx-json > release-sbom.spdx.json
 
@@ -1269,7 +1210,7 @@ jobs:
               stem="${base%.*}"
             fi
             cp "${file}" "release-assets/${stem}-${parent}${ext}"
-          done < <(find artifacts -mindepth 2 -maxdepth 2 -type f \( -name 'prodex' -o -name 'prodex.exe' -o -name 'codex' -o -name 'codex.exe' \) -print0)
+          done < <(find artifacts -mindepth 2 -maxdepth 2 -type f \( -name 'prodex' -o -name 'prodex.exe' \) -print0)
           cp artifacts/release-sbom/release-sbom.spdx.json release-assets/release-sbom.spdx.json
           cp artifacts/kubernetes-manifest/prodex-* release-assets/
           cp install.sh release-assets/install.sh
@@ -1296,9 +1237,13 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          if find release-assets -type f -iname '*codex*' -print -quit | grep -q .; then
+            echo "release assets must not contain Codex executables or bundles" >&2
+            exit 1
+          fi
           (
             cd release-assets
-            sha256sum install.sh install.ps1 release-manifest.tsv release-manifest.json prodex-* codex-* release-sbom.spdx.json > SHA256SUMS
+            sha256sum install.sh install.ps1 release-manifest.tsv release-manifest.json prodex-* release-sbom.spdx.json > SHA256SUMS
             sha256sum --check SHA256SUMS
           )
 

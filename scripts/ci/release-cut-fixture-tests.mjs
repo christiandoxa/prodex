@@ -6,9 +6,6 @@ import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import {
   mainPackageName,
-  openaiCodexDependencySpecifier,
-  openaiCodexPlatformDependencySpecifier,
-  openaiCodexPlatformPackages,
   platformPackages,
   packageSlug,
 } from "../npm/common.mjs";
@@ -105,13 +102,7 @@ function docs(version, label) {
 
 async function writePackageManifests(fixtureRoot, version) {
   const optionalDependencies = Object.fromEntries(
-    [
-      ...platformPackages.map((spec) => [spec.packageName, version]),
-      ...openaiCodexPlatformPackages.map((spec) => [
-        spec.packageName,
-        openaiCodexPlatformDependencySpecifier(spec),
-      ]),
-    ],
+    platformPackages.map((spec) => [spec.packageName, version]),
   );
   await writeFile(
     fixtureRoot,
@@ -120,9 +111,6 @@ async function writePackageManifests(fixtureRoot, version) {
       {
         name: mainPackageName,
         version,
-        dependencies: {
-          "@openai/codex": "0.0.0-fixture",
-        },
         optionalDependencies,
       },
       null,
@@ -213,10 +201,6 @@ async function assertVersionSynced(fixtureRoot, version) {
 
   const mainManifest = await readJson(fixtureRoot, "npm/prodex/package.json");
   assert(mainManifest.version === version, `npm/prodex/package.json version mismatch: ${mainManifest.version}`);
-  assert(
-    mainManifest.dependencies?.["@openai/codex"] === openaiCodexDependencySpecifier,
-    "npm/prodex/package.json @openai/codex dependency was not normalized",
-  );
   for (const spec of platformPackages) {
     assert(
       mainManifest.optionalDependencies?.[spec.packageName] === version,
@@ -226,13 +210,6 @@ async function assertVersionSynced(fixtureRoot, version) {
     const platformManifest = await readJson(fixtureRoot, `npm/platforms/${platformDir}/package.json`);
     assert(platformManifest.version === version, `${spec.packageName} version mismatch: ${platformManifest.version}`);
   }
-  for (const spec of openaiCodexPlatformPackages) {
-    assert(
-      mainManifest.optionalDependencies?.[spec.packageName] === openaiCodexPlatformDependencySpecifier(spec),
-      `optional dependency ${spec.packageName} mismatch`,
-    );
-  }
-
   const changelog = await fs.readFile(path.join(fixtureRoot, "CHANGELOG.md"), "utf8");
   assert(new RegExp(`^## ${version} - `, "m").test(changelog), `CHANGELOG.md missing ${version} release heading`);
 }

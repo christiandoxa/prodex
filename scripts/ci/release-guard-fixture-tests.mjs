@@ -131,8 +131,8 @@ async function setupFixtureRepo() {
         name: "prodex-fixture",
         lockfileVersion: 3,
         packages: {
-          "": { dependencies: { "@openai/codex": "0.145.0" } },
-          "node_modules/@openai/codex": { version: "0.145.0" },
+          "": { dependencies: { "fixture-dependency": "0.145.0" } },
+          "node_modules/fixture-dependency": { version: "0.145.0" },
         },
       },
       null,
@@ -185,8 +185,8 @@ async function buildFixtures(fixtureRoot) {
         name: "prodex-fixture",
         lockfileVersion: 3,
         packages: {
-          "": { dependencies: { "@openai/codex": "0.146.0" } },
-          "node_modules/@openai/codex": { version: "0.146.0" },
+          "": { dependencies: { "fixture-dependency": "0.146.0" } },
+          "node_modules/fixture-dependency": { version: "0.146.0" },
         },
       },
       null,
@@ -195,7 +195,7 @@ async function buildFixtures(fixtureRoot) {
   );
   const lockfileDependencyBump = await commit(
     fixtureRoot,
-    "chore(deps): bump Codex from 0.145.0 to 0.146.0",
+    "chore(deps): bump fixture dependency from 0.145.0 to 0.146.0",
   );
   await writeFile(
     fixtureRoot,

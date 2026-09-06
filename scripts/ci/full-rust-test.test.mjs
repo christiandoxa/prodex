@@ -238,29 +238,15 @@ test("release validates the Kiro pin before build fan-out", () => {
   assert.match(build, /needs:\s*[\s\S]*?- verify-ci/);
 });
 
-test("release builds patched Codex from one immutable dependency identity", () => {
+test("release builds Prodex only and leaves Codex external", () => {
   const workflow = readFileSync(".github/workflows/standalone-release.yml", "utf8");
-  const attributes = readFileSync(".gitattributes", "utf8");
   const build = workflow.match(/\n  build:\n([\s\S]*?)\n  attest-binaries:/)?.[1];
 
   assert.ok(build, "release build job missing");
-  assert.doesNotMatch(build, /cargo generate-lockfile/);
-  assert.match(build, /core\.autocrlf false/);
-  assert.match(build, /RUSTUP_TOOLCHAIN=1\.98\.0/);
-  assert.match(build, /cross-rs\/x86_64-unknown-linux-gnu:0\.2\.5@sha256:[0-9a-f]{64}/);
-  assert.match(build, /cross-rs\/aarch64-unknown-linux-gnu:0\.2\.5@sha256:[0-9a-f]{64}/);
-  assert.match(build, /codex-rust-v0\.153\.4-linux-openssl\.patch/);
-  assert.match(build, /f1958eb45138a5c3ca0a03d0976f22c6d59ab1fc18f2fbda9b68a59c3ec40e12/);
-  assert.match(attributes, /codex-rust-v0\.153\.4-linux-openssl\.patch -text/);
-  assert.doesNotMatch(build, /libssl-dev/);
-  assert.match(build, /a2cb91dfb2e8112bc81d05158fa00b9698e2df8cc1ae0547b5dc5606a44904d3/);
-  assert.match(build, /patched_codex_lock_sha256=/);
-  assert.match(build, /require\("node:crypto"\)/);
-  assert.match(build, /codex_lock_sha_before[\s\S]*codex_lock_sha_after/);
+  assert.doesNotMatch(build, /Codex|codex/);
   assert.match(build, /cross build --locked/);
   assert.match(build, /cargo build --locked/);
-  assert.match(build, /Verify Linux GLIBC baseline[\s\S]*dist\/\$\{\{ matrix\.artifact-name \}\}\/codex/);
-  assert.match(build, /readelf --dynamic[\s\S]*lib\(ssl\|crypto\)\\\.so/);
+  assert.match(build, /Prepare binary artifact/);
 });
 
 test("release verifies optional-tool freshness on the exact release SHA", () => {

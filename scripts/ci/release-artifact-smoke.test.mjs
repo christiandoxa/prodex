@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
+import fs from "node:fs/promises";
 import { readFileSync } from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import test from "node:test";
 
 const script = "scripts/ci/release-artifact-smoke.mjs";
@@ -34,10 +37,57 @@ test("standalone release runs the downloaded artifact smoke before SBOM preparat
   assert.match(smoke, /- build/);
   assert.match(smoke, /name: x86_64-unknown-linux-gnu/);
   assert.match(smoke, /binary="artifact\/prodex"/u);
-  assert.match(smoke, /codex_binary="artifact\/codex"/u);
-  assert.match(smoke, /"\$\{codex_binary\}" --version \| grep -Fx 'codex-cli 0\.153\.4'/u);
   assert.match(smoke, /node scripts\/ci\/release-artifact-smoke\.mjs \\\n\s+--binary/u);
   assert.match(prepare, /- artifact-smoke/);
   assert.doesNotMatch(smoke, /cargo\s+(run|build)/u);
+  assert.doesNotMatch(smoke, /codex/iu);
+  assert.doesNotMatch(workflow, /Build patched Codex runtime|codex_binary|codex-[^*]/u);
+  assert.match(workflow, /-iname '\*codex\*'/u);
   assert.doesNotMatch(source, /target\/(?:debug|release)/u);
+});
+
+test("release manifest, checksums, and SBOM accept Prodex assets only", () => {
+  const renderer = readFileSync("scripts/release/render-release-manifest.mjs", "utf8");
+  const workflow = readFileSync(".github/workflows/standalone-release.yml", "utf8");
+  const prepare = workflow.match(/\n  prepare-release:\n([\s\S]*?)\n  sync-release-docs:/u)?.[1];
+  const release = workflow.match(/\n  publish-github-release:\n([\s\S]*)/u)?.[1];
+
+  assert.ok(prepare, "release preparation job missing");
+  assert.ok(release, "release publication job missing");
+  assert.match(renderer, /\^prodex-\[A-Za-z0-9\._-\]\+/u);
+  assert.match(renderer, /codex/iu);
+  assert.match(prepare, /find artifacts .* -name 'prodex' .* -name 'prodex\.exe'/u);
+  assert.match(prepare, /sbom-input:\/source:ro/u);
+  assert.match(release, /find artifacts .* -name 'prodex' .* -name 'prodex\.exe'/u);
+  assert.match(release, /sha256sum install\.sh install\.ps1 release-manifest\.tsv release-manifest\.json prodex-\* release-sbom\.spdx\.json/u);
+  assert.match(release, /release assets must not contain Codex executables or bundles/u);
+});
+
+test("release manifest renderer rejects Codex executable names", async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "prodex-release-manifest-test-"));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const input = path.join(root, "matrix.tsv");
+  await fs.writeFile(
+    input,
+    "x86_64-unknown-linux-gnu\tcodex-x86_64-unknown-linux-gnu\trust\t\t\tfalse\tGLIBC_2.23\n",
+  );
+  const result = spawnSync(
+    process.execPath,
+    [
+      "scripts/release/render-release-manifest.mjs",
+      "--version",
+      "0.426.1",
+      "--commit",
+      "0".repeat(40),
+      "--input",
+      input,
+      "--output-tsv",
+      path.join(root, "release-manifest.tsv"),
+      "--output-json",
+      path.join(root, "release-manifest.json"),
+    ],
+    { cwd: process.cwd(), encoding: "utf8" },
+  );
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /invalid target or asset/iu);
 });

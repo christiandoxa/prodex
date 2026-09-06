@@ -2,7 +2,6 @@
 "use strict";
 
 const fs = require("node:fs");
-const os = require("node:os");
 const path = require("node:path");
 const { spawn } = require("node:child_process");
 const { createRequire } = require("node:module");
@@ -42,81 +41,7 @@ const PLATFORM_PACKAGES = {
 
 const requireFromHere = createRequire(__filename);
 const packageJson = requireFromHere("./package.json");
-const packageRoot = path.dirname(requireFromHere.resolve("./package.json"));
-const codexShimPath = path.join(packageRoot, "lib", "codex-shim.cjs");
 const platformPackage = PLATFORM_PACKAGES[process.platform]?.[process.arch];
-
-function candidateCommandNames(command) {
-  if (process.platform !== "win32") {
-    return [command];
-  }
-  const extensions = (process.env.PATHEXT || ".COM;.EXE;.BAT;.CMD")
-    .split(";")
-    .filter(Boolean);
-  const lowerCommand = command.toLowerCase();
-  if (extensions.some((extension) => lowerCommand.endsWith(extension.toLowerCase()))) {
-    return [command];
-  }
-  return [command, ...extensions.map((extension) => `${command}${extension.toLowerCase()}`)];
-}
-
-function isExecutableFile(filePath) {
-  try {
-    const stats = fs.statSync(filePath);
-    if (!stats.isFile()) {
-      return false;
-    }
-    fs.accessSync(filePath, fs.constants.X_OK);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-function resolveCommandFromPath(command, pathValue) {
-  const hasPathSeparator = command.includes("/") || command.includes("\\");
-  if (path.isAbsolute(command) || hasPathSeparator) {
-    return isExecutableFile(command) ? command : null;
-  }
-
-  for (const entry of (pathValue || "").split(path.delimiter)) {
-    if (!entry) {
-      continue;
-    }
-    for (const candidateName of candidateCommandNames(command)) {
-      const candidate = path.join(entry, candidateName);
-      if (isExecutableFile(candidate)) {
-        return candidate;
-      }
-    }
-  }
-  return null;
-}
-
-function resolveExternalCodexBin() {
-  if (process.env.PRODEX_CODEX_BIN) {
-    return process.env.PRODEX_CODEX_BIN;
-  }
-  const resolution = (process.env.PRODEX_CODEX_RESOLUTION || "bundled").toLowerCase();
-  if (resolution === "bundled") {
-    return null;
-  }
-  if (resolution !== "external") {
-    process.stderr.write(
-      `Unsupported PRODEX_CODEX_RESOLUTION=${JSON.stringify(process.env.PRODEX_CODEX_RESOLUTION)}; expected "bundled" or "external".\n`,
-    );
-    process.exit(1);
-  }
-
-  const externalCodex = resolveCommandFromPath("codex", process.env.PATH || "");
-  if (!externalCodex) {
-    process.stderr.write(
-      "PRODEX_CODEX_RESOLUTION=external was set, but no executable codex was found on PATH.\n",
-    );
-    process.exit(1);
-  }
-  return externalCodex;
-}
 
 if (!platformPackage) {
   process.stderr.write(
@@ -149,50 +74,9 @@ if (!fs.existsSync(nativeBinaryPath)) {
   process.exit(1);
 }
 
-let cleanup = () => {};
-let codexBin = resolveExternalCodexBin();
-let childPath = process.env.PATH ?? "";
-
-if (!codexBin) {
-  const bundledCodexName = process.platform === "win32" ? "codex.exe" : "codex";
-  const bundledCodexPath = path.join(nativePackageRoot, "vendor", bundledCodexName);
-  if (isExecutableFile(bundledCodexPath)) {
-    codexBin = bundledCodexPath;
-  }
-}
-
-if (!codexBin) {
-  const shimDir = fs.mkdtempSync(path.join(os.tmpdir(), "prodex-codex-"));
-  const codexCmd = path.join(shimDir, "codex");
-  const codexCmdWindows = path.join(shimDir, "codex.cmd");
-
-  fs.writeFileSync(
-    codexCmd,
-    `#!/bin/sh\nexec node ${JSON.stringify(codexShimPath)} "$@"\n`,
-    { mode: 0o755 },
-  );
-  fs.writeFileSync(
-    codexCmdWindows,
-    `@echo off\r\nnode ${JSON.stringify(codexShimPath)} %*\r\n`,
-    { mode: 0o755 },
-  );
-
-  childPath = `${shimDir}${path.delimiter}${childPath}`;
-  codexBin = process.platform === "win32" ? "codex.cmd" : "codex";
-  cleanup = () => {
-    try {
-      fs.rmSync(shimDir, { recursive: true, force: true });
-    } catch {
-      // Best-effort cleanup only.
-    }
-  };
-}
-
 const child = spawn(nativeBinaryPath, process.argv.slice(2), {
   env: {
     ...process.env,
-    PATH: childPath,
-    PRODEX_CODEX_BIN: codexBin,
     npm_package_name: packageJson.name,
     npm_package_version: packageJson.version,
   },
@@ -206,13 +90,11 @@ for (const signalName of ["SIGINT", "SIGTERM", "SIGHUP"]) {
 }
 
 child.on("error", (error) => {
-  cleanup();
   process.stderr.write(`${error.message}\n`);
   process.exit(1);
 });
 
 child.on("exit", (code, signal) => {
-  cleanup();
   if (signal) {
     process.kill(process.pid, signal);
     return;

@@ -1657,8 +1657,8 @@
             "The 0.153.4 model catalog and picker metadata are additive and remain upstream-owned.",
             "The pinned TUI emits supported thread/queue/changed state but does not render externally queued follow-ups."
           ],
-          "prodex_action": "Apply the reproducible TUI compatibility patch from migration/codex-rust-v0.153.4-tui-queued-input.patch when building the bundled Codex runtime; preserve the official queue and thread identity semantics.",
-          "compatibility_evidence": "The exact upstream source patch is checksum-pinned and covered by the upstream TUI input-queue tests plus real idle and busy same-TUI lifecycle evidence."
+          "prodex_action": "Use the official unmodified Codex release through its supported interfaces; preserve the official queue and thread identity semantics.",
+          "compatibility_evidence": "The official tagged release is consumed unmodified; queue behavior remains covered by capability-probed upstream interfaces and the existing session-queue tests."
         }
       ],
       "app_server_protocol": {
