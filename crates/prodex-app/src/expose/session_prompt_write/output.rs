@@ -30,7 +30,13 @@ pub(crate) fn output_cursor_anchor(
 ) -> Option<String> {
     let prodex_birth = target.prodex.birth_identity.clone()?;
     let codex_birth = target.writer.birth_identity.clone()?;
+    if output_source_id(path, &target.thread_id).ok().as_deref() != Some(source_id) {
+        return None;
+    }
     let checkpoint_id = source_checkpoint_id(path, *offset).ok()?;
+    if output_source_id(path, &target.thread_id).ok().as_deref() != Some(source_id) {
+        return None;
+    }
     encode_output_cursor(OutputCursor {
         version: OUTPUT_CURSOR_VERSION,
         prodex_pid: target.prodex.pid,

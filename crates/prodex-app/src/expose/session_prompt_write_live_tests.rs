@@ -179,7 +179,13 @@ fn live_app_server_probe_and_turn_control_require_exact_thread_and_workspace() {
     assert!(invocation.message_id.is_some());
     assert_eq!(
         methods.lock().unwrap().as_slice(),
-        ["initialize", "thread/read", "thread/queue/add"]
+        [
+            "initialize",
+            "thread/read",
+            "initialize",
+            "thread/read",
+            "thread/queue/add"
+        ]
     );
     assert!(
         !SystemQueueControl
@@ -189,6 +195,8 @@ fn live_app_server_probe_and_turn_control_require_exact_thread_and_workspace() {
     assert_eq!(
         methods.lock().unwrap().as_slice(),
         [
+            "initialize",
+            "thread/read",
             "initialize",
             "thread/read",
             "thread/queue/add",
@@ -227,23 +235,47 @@ fn live_app_server_busy_prompt_write_uses_authoritative_queue() {
     let server = std::thread::spawn(move || {
         let (stream, _) = listener.accept().unwrap();
         let mut socket = tungstenite::accept(stream).unwrap();
+        let mut initialize_seen = false;
+        let mut initialized = false;
         loop {
             let Message::Text(text) = socket.read().unwrap() else {
                 continue;
             };
             let request: serde_json::Value = serde_json::from_str(text.as_ref()).unwrap();
+            let method = request["method"].as_str().unwrap();
+            if request.get("id").is_none() {
+                if method == "initialized" && initialize_seen {
+                    initialized = true;
+                }
+                continue;
+            }
             let Some(id) = request.get("id") else {
                 continue;
             };
-            let method = request["method"].as_str().unwrap();
             server_methods.lock().unwrap().push(method.to_string());
+            if method != "initialize" && !initialized {
+                socket
+                    .send(Message::Text(
+                        serde_json::json!({
+                            "id": id,
+                            "error": {"code": -32600, "message": "Not initialized"}
+                        })
+                        .to_string()
+                        .into(),
+                    ))
+                    .unwrap();
+                continue;
+            }
             let result = match method {
-                "initialize" => serde_json::json!({
-                    "codexHome": server_codex_home.clone(),
-                    "platformFamily": "unix",
-                    "platformOs": "linux",
-                    "userAgent": "probe"
-                }),
+                "initialize" => {
+                    initialize_seen = true;
+                    serde_json::json!({
+                        "codexHome": server_codex_home.clone(),
+                        "platformFamily": "unix",
+                        "platformOs": "linux",
+                        "userAgent": "probe"
+                    })
+                }
                 "thread/read" => serde_json::json!({
                     "thread": {
                         "id": THREAD,
@@ -329,6 +361,9 @@ fn live_app_server_busy_prompt_write_uses_authoritative_queue() {
         invocation.submission_id.as_deref(),
         Some("019f3b59-7771-7ea1-a9a1-3cd638f216c6")
     );
-    assert_eq!(methods.lock().unwrap().as_slice(), ["thread/queue/add"]);
+    assert_eq!(
+        methods.lock().unwrap().as_slice(),
+        ["initialize", "thread/read", "thread/queue/add"]
+    );
     let _ = std::fs::remove_dir_all(root);
 }

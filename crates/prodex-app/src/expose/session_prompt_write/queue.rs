@@ -351,19 +351,19 @@ fn app_server_queue_add_once(target: &ResolvedTarget, message: &str) -> QueueInv
     let Ok(Some(mut socket)) = app_server_socket(target) else {
         return QueueInvocation::preflight();
     };
+    if !matches!(app_server_thread_activity(&mut socket, target), Ok(Some(_))) {
+        return QueueInvocation::preflight();
+    }
     let message_id = Uuid::now_v7().to_string();
     let params = serde_json::json!({
         "threadId": target.thread_id,
         "clientUserMessageId": message_id,
         "input": [{"type": "text", "text": message, "textElements": []}],
     });
-    let outcome = request_result(&mut socket, 3, "thread/queue/add", params);
-    let AppServerRequestOutcome::Accepted(result) = outcome else {
-        return match outcome {
-            AppServerRequestOutcome::Rejected => QueueInvocation::default(),
-            AppServerRequestOutcome::Ambiguous => QueueInvocation::ambiguous(),
-            AppServerRequestOutcome::Accepted(_) => unreachable!(),
-        };
+    let result = match request_result(&mut socket, 3, "thread/queue/add", params) {
+        AppServerRequestOutcome::Accepted(result) => result,
+        AppServerRequestOutcome::Rejected => return QueueInvocation::default(),
+        AppServerRequestOutcome::Ambiguous => return QueueInvocation::ambiguous(),
     };
     let Some(queued_submission) = result.get("queuedSubmission") else {
         return QueueInvocation::ambiguous();

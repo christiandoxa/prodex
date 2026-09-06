@@ -135,11 +135,13 @@ where
                     })?,
                     has_more: read.has_more,
                 };
-                self.remember_binding(
-                    &request.binding_key,
-                    target.clone(),
-                    Some(source_id.clone()),
-                )?;
+                if cursor.is_none() {
+                    self.remember_binding(
+                        &request.binding_key,
+                        target.clone(),
+                        Some(source_id.clone()),
+                    )?;
+                }
                 return Ok(result);
             }
             thread::sleep(
