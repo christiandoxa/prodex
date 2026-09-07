@@ -39,6 +39,7 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 
 ### Misc
 
+- Restore Windows tunnel timeout (`afbe0a4`)
 - Use stable Windows rollout identity (`3a422a6`)
 - Simplify bounded output reader (`db01ee4`)
 - Remove needless returns (`27b59b1`)
