@@ -18,6 +18,23 @@ pub(crate) fn select_runtime_response_candidate_for_route(
     select_runtime_response_candidate_for_route_with_request(shared, selection, None, None)
 }
 
+#[cfg(feature = "bench-support")]
+pub(crate) fn select_runtime_response_candidate_for_route_without_trace(
+    shared: &RuntimeRotationProxyShared,
+    selection: RuntimeResponseCandidateSelection<'_>,
+) -> Result<Option<String>> {
+    let mut trace = runtime_proxy_crate::RuntimeRouteDecisionTraceBuilder::without_recording(
+        selection.route_kind.into(),
+    );
+    let mut affinity_exhausted = false;
+    select_runtime_response_candidate_for_route_inner(
+        shared,
+        selection,
+        &mut trace,
+        &mut affinity_exhausted,
+    )
+}
+
 pub(crate) fn select_runtime_response_candidate_for_route_with_request(
     shared: &RuntimeRotationProxyShared,
     selection: RuntimeResponseCandidateSelection<'_>,
