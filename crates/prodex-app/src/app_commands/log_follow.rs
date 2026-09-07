@@ -202,16 +202,14 @@ fn inspect_followed_log_metadata(
         Ok(_) => {
             state.file = None;
             state.file_identity = None;
-            return Ok(None);
+            Ok(None)
         }
         Err(err) if err.kind() == io::ErrorKind::NotFound => {
             state.file = None;
             state.file_identity = None;
-            return Ok(None);
+            Ok(None)
         }
-        Err(err) => {
-            return Err(err).with_context(|| format!("failed to inspect {}", path.display()));
-        }
+        Err(err) => Err(err).with_context(|| format!("failed to inspect {}", path.display())),
     }
 }
 
