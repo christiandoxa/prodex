@@ -94,7 +94,7 @@ pub(super) struct RuntimeBrokerSessionAffinityControl {
 #[derive(Clone)]
 pub(super) enum RuntimeRecoveryLogTarget {
     Direct(PathBuf),
-    Broker(RuntimeBrokerSessionAffinityControl),
+    Broker(Box<RuntimeBrokerSessionAffinityControl>),
 }
 
 impl RuntimeRecoveryLogTarget {
@@ -129,7 +129,7 @@ impl RuntimeProxyEndpoint {
                 self.broker_session_affinity_control
                     .as_ref()
                     .cloned()
-                    .map(RuntimeRecoveryLogTarget::Broker)
+                    .map(|control| RuntimeRecoveryLogTarget::Broker(Box::new(control)))
             })
     }
 
