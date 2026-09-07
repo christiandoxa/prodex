@@ -160,7 +160,6 @@ pub(super) fn handle_super_expose(mut args: ExposeArgs) -> anyhow::Result<()> {
         .super_args
         .take()
         .context("Super expose configuration is unavailable")?;
-    validate_expose_launch_args(&super_args)?;
     super_args
         .extract_provider_overrides_from_codex_args()
         .map_err(anyhow::Error::msg)?;
@@ -222,11 +221,6 @@ pub(super) fn handle_super_expose(mut args: ExposeArgs) -> anyhow::Result<()> {
         None,
         Arc::new(AtomicBool::new(false)),
     )
-}
-
-pub(super) fn validate_expose_launch_args(args: &SuperArgs) -> anyhow::Result<()> {
-    let _ = args;
-    Ok(())
 }
 
 pub(super) struct ExposeEngineRequest {
