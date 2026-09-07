@@ -26,6 +26,12 @@ function forbiddenArtifactPath(value) {
   );
 }
 
+function forbiddenPackageReference(value) {
+  const reference = String(value ?? "").trim();
+  return /^(?:npm:)?(?:@openai\/)?codex(?:$|[-@])/iu.test(reference) ||
+    forbiddenArtifactPath(reference);
+}
+
 function inspectPackageJson(value, label, violations) {
   for (const section of [
     "dependencies",
@@ -39,7 +45,7 @@ function inspectPackageJson(value, label, violations) {
       ? dependencies.map((name) => [name, ""])
       : Object.entries(dependencies ?? {});
     for (const [name, specifier] of entries) {
-      if (forbiddenPackageName(name) || /(?:npm:)?@openai\/codex(?:$|[-@])/iu.test(String(specifier))) {
+      if (forbiddenPackageName(name) || forbiddenPackageReference(specifier)) {
         violations.push(`${label}: forbidden Codex runtime package in ${section}`);
       }
     }
@@ -51,6 +57,9 @@ function inspectPackageLock(value, label, violations) {
   for (const [packagePath, entry] of Object.entries(value?.packages ?? {})) {
     if (forbiddenArtifactPath(packagePath) || forbiddenPackageName(entry?.name)) {
       violations.push(`${label}: forbidden Codex runtime package lock entry`);
+    }
+    if (forbiddenPackageReference(entry?.resolved)) {
+      violations.push(`${label}: forbidden Codex runtime package lock source`);
     }
     inspectPackageJson(entry, `${label}:${packagePath || "root"}`, violations);
   }
@@ -69,7 +78,7 @@ function inspectSbom(value, label, violations) {
     }
     for (const reference of entry?.externalRefs ?? []) {
       const locator = String(reference?.referenceLocator ?? "");
-      if (/pkg:npm\/(?:%40|@)openai(?:%2f|\/)codex(?:$|[-@])/iu.test(locator)) {
+      if (/pkg:npm\/(?:%40|@)openai(?:%2f|\/)codex(?:$|[-@])|pkg:npm\/codex(?:$|[-@/])/iu.test(locator)) {
         violations.push(`${label}: forbidden Codex npm package reference in SBOM`);
       }
     }
@@ -184,6 +193,18 @@ async function selfTest() {
     await fs.mkdir(safe);
     await fs.writeFile(path.join(safe, "package-lock.json"), JSON.stringify({ packages: {} }));
     assert.deepEqual((await inspectCodexPurity([safe])).violations, []);
+
+    const badAliasLock = path.join(root, "bad-alias", "package-lock.json");
+    await fs.mkdir(path.dirname(badAliasLock));
+    await fs.writeFile(badAliasLock, JSON.stringify({
+      packages: {
+        "node_modules/runtime": {
+          name: "runtime",
+          dependencies: { runtime: "npm:codex@1.0.0" },
+        },
+      },
+    }));
+    assert.equal((await inspectCodexPurity([badAliasLock])).violations.length, 1);
 
     const badManifest = path.join(root, "bad", "package.json");
     await fs.mkdir(path.dirname(badManifest));
