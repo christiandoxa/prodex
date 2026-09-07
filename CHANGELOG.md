@@ -2,6 +2,16 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.428.0 - 2026-09-07
+
+### Deps
+
+- Bump toml (`6112ed0`)
+
+### Misc
+
+- Merge pull request #68 from christiandoxa/dependabot/cargo/fuzz/fuzz-cargo-fe1561a707 (`d76fd1e`)
+
 ## 0.427.0 - 2026-09-07
 
 ### Runtime
@@ -16,6 +26,7 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 - Classify official capacity signals (`ee43913`)
 - Separate rate-limit recovery from overload (`765dc56`)
 - Require official external Codex (`0ddccaf`)
+- Bundle patched Codex TUI runtime (`fd7d890`)
 
 ### CLI
 
@@ -58,66 +69,6 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 - Complete event telemetry (`bfd8d57`)
 - Measure first model response (`e031bc4`)
 - Report model identity honestly (`15c8990`)
-# Prodex 0.427.0
-
-## New Features
-
-- Restores the wrapper-only boundary: standalone and npm artifacts contain
-  Prodex only and discover an official, unmodified Codex CLI 0.153.2 or newer.
-- Makes `prodex ping openai` send one exact `hello` inference probe per selected
-  profile, with profile-pinned credentials, bounded concurrency, truthful model
-  identity and latency stages, and aggregate failure reporting.
-- Pins the latest stable audited releases of Caveman 2.6.0, RTK 0.48.0,
-  Codebase Memory MCP 0.10.8, Playwright MCP 0.0.80, Ponytail 4.9.0, and Presidio
-  2.2.364 without making optional tools automatic startup dependencies.
-
-## Bug Fixes
-
-- Fixes Claude OAuth import and login-to-launch flows while retaining regular-file,
-  ownership, permission, symlink, and race protections around credential input.
-- Makes OpenAI readiness and routing model-aware. Primary, Luna Reserve, Spark,
-  cooldown, stale, exhausted, and authentication states remain separate, and
-  fallback never silently changes Sol or Terra requests.
-- Separates explicit quota exhaustion, temporary rate limits, overload, transport
-  failures, and hard-affinity continuations across HTTP, SSE, WebSocket, and
-  compact paths. Rotation remains pre-commit and bounded; terminal Codex retry
-  exhaustion can resume the exact persisted session on the next model-compatible
-  ready profile without inserting a duplicate original prompt or executing tools
-  in the recovery layer. Transient pool recovery is cancellable and delayed;
-  non-goal sessions receive a normal continuation rather than `/goal resume`.
-- Completes `prodex log` event visibility with redacted gap markers and derives
-  output throughput only from authoritative token counters and monotonic time;
-  idle values are labelled as the last observed rate.
-- Hardens `prodex s expose` Prompt Write and Output Read. Writes target one exact
-  existing process, writer, and thread through the initialized Codex app-server
-  control plane; output cursors are source-bound, monotonic, replay-safe, and
-  independent across readers. A definitely rejected/preflight write is retried
-  once after exact-target revalidation; ambiguous writes are never replayed.
-
-## Upgrade Notes
-
-- Install the official Codex CLI separately and make `codex` available on
-  `PATH`, or set `PRODEX_CODEX_BIN` to its executable. Prodex does not modify or
-  delete an existing Codex installation, including binaries previously installed
-  by Prodex 0.426.1.
-- `prodex update` preserves profiles, sessions, and configuration. Optional tools
-  remain explicit installations; user overrides and disabled tools are retained.
-- The unmodified Codex TUI is not required to render externally queued follow-up
-  prompts. Use `prodex_session_output_read` as the authoritative machine-readable
-  view after `prodex_session_prompt_write`.
-
-## Changelog
-
-Full Changelog: [`0.426.1...0.427.0`](https://github.com/christiandoxa/prodex/compare/0.426.1...0.427.0)
-
-## 0.426.1 - 2026-09-06
-
-### Runtime
-
-- Bundle patched Codex TUI runtime (`fd7d890`)
-
-### Misc
-
 - Merge pull request #65 from christiandoxa/integration/0.426.1-final (`caeee51`)
 - Tighten active session queue routing (`afdaeb6`)
 - Surface busy session writes in the TUI queue (`f909625`)
@@ -131,77 +82,6 @@ Full Changelog: [`0.426.1...0.427.0`](https://github.com/christiandoxa/prodex/co
 
 ## 0.426.0 - 2026-09-04
 
-### Docs
-
-- Document 0.426.0 session bridge (`0a5e4d3`)
-
-### Misc
-
-- Reduce tunnel readiness complexity (`d54cd62`)
-- Classify late tunnel child exits (`3a0134c`)
-- Accommodate Windows tunnel startup latency (`0fd173b`)
-- Normalize cross-platform cwd identity (`bfb2a2b`)
-- Bind rollout reads to writer authority (`e068308`)
-- Resolve managed session rollout symlinks (`ed0621e`)
-- Ship session bridge and live observability (`00d7fd5`)
-
-## 0.425.0 - 2026-09-03
-
-### Misc
-
-- Restore measured output throughput (`3d0bba7`)
-
-## 0.424.0 - 2026-09-03
-
-### Claude
-
-- Reject unsafe external credential files (`190e699`)
-- Import existing OAuth credentials (`5f66a68`)
-
-### Misc
-
-- Scrub graceful taskkill environment (`4b8ef61`)
-- Close credential inheritance gaps (`56071bf`)
-- Enforce tunnel setup contracts (`b81af1e`)
-- Redact local capability status only when validation is green (`0401b04`)
-- Isolate tunnel-client capability data (`42cd209`)
-- Contain tunnel-client capability logs (`c3cfb0f`)
-- Harden interactive tunnel setup (`f8408b5`)
-- Prompt for OpenAI tunnel setup (`2ac40b1`)
-- Repair throughput eviction ownership (`fd35f20`)
-- Bound throughput identity state (`2b1246d`)
-- Complete throughput state lifecycle (`4c1cb9e`)
-- Close duplicate final throughput streams (`f252f9c`)
-- Retain live throughput samples (`ca1455a`)
-- Measure completed generation throughput (`13081d1`)
-- Prevent silent live event loss (`75288d9`)
-
-## 0.423.1 - 2026-09-01
-
-### Misc
-
-- Keep cross-platform test timing import (`124de59`)
-- Make exit fixture portable (`9223fe4`)
-- Preserve structured failure details (`a91a72c`)
-- Use supported Codex exec invocation (`32b37cc`)
-- Skip diagnostic startup side effects (`1ce2730`)
-- Capture initial live throughput samples (`e162d11`)
-
-## 0.423.0 - 2026-09-01
-
-### Misc
-
-- Resolve release CI blockers (`392aa3a`)
-- Ship 0.423.0 stability train (`0862b70`)
-- Support Python tunnel fixtures on Windows (`3902174`)
-- Invoke Windows tunnel fixture through cmd (`003439b`)
-- Execute Windows tunnel fixtures directly (`a3550d1`)
-- Split operational stream parsing (`46212a2`)
-- Contain existing tunnel jobs on Windows (`af3bc42`)
-- Add connection modes and signal-rich status (`d30e684`)
-
-## 0.421.0 - 2026-08-31
-
 ### Runtime
 
 - Stabilize broker working directory (`7340f6b`)
@@ -210,45 +90,6 @@ Full Changelog: [`0.426.1...0.427.0`](https://github.com/christiandoxa/prodex/co
 - Make OpenAI capacity model-aware (`9fc53e3`)
 - Batch runtime profile health scoring (`40fcb78`)
 - Harden expose and provider runtime paths (`27cf042`)
-
-### CLI
-
-- Preserve Luna reserve capacity (`028c1e2`)
-- Add expose tunnel providers (`7859b34`)
-
-### Claude
-
-- Supervise OpenAI Secure MCP tunnel client (`118927d`)
-- Add OpenAI MCP tunnel provider (`6d59243`)
-
-### Docs
-
-- Reflect public Cloudflare browser access (`bbd7ea0`)
-- Add canonical root guide (`8334efe`)
-- Document 0.421.0 runtime semantics (`e722539`)
-- Document local and tunneled modes (`642e412`)
-
-### Deps
-
-- Bump argon2 in /fuzz in the fuzz-cargo group (`6674044`)
-- Bump the cargo group with 4 updates (`b8afd47`)
-
-### Misc
-
-- Contain command output descendants (`fb40fbd`)
-- Preserve bounded child failure detail (`0814e3a`)
-- Close exact CI regressions (`f3f74c6`)
-- Publish Cloudflare browser route (`3928fb5`)
-- Move Kiro request capability policy (`1d0bdbb`)
-- Validate official tunnel identifier (`e96ab94`)
-- Keep tunnel readiness probe local (`b4e1d91`)
-- Keep live ACP tasks alive while quiet (`83641b2`)
-- Use canonical OpenAI application request (`dceefac`)
-
-## 0.420.0 - 2026-08-31
-
-### Runtime
-
 - Use route-aware probe wait budget (`c1c4c4b`)
 - Migrate runtime Anthropic shaping (`dba5484`)
 - Migrate runtime doctor planning (`01fdc02`)
@@ -261,94 +102,6 @@ Full Changelog: [`0.426.1...0.427.0`](https://github.com/christiandoxa/prodex/co
 - Harden native and tunnel runtime (`5f1b7a1`)
 - Resume usage-limited sessions (`6ca36b6`)
 - Recover temporary profile saturation (`987daa4`)
-
-### CLI
-
-- Gate Mojo-only selection oracle imports (`8d28d1f`)
-- Migrate profile rotation planning (`4992559`)
-- Migrate profile order planning (`1e23a74`)
-- Delegate capacity planning to Mojo (`54362c1`)
-
-### Claude
-
-- Retain compatibility stream oracle (`2b09bca`)
-- Remove obsolete stream helper (`a66c7ab`)
-- Migrate Anthropic stream shaping (`095f519`)
-- Migrate Anthropic request shaping (`02e7790`)
-- Migrate Anthropic response planning (`eef0699`)
-
-### Docs
-
-- Update Caveman freshness pin (`b6aac0f`)
-- Require temporary artifact cleanup (`4caa6ca`)
-- Require Mojo-first development (`2d6963c`)
-- Track split runtime policy types (`12ae730`)
-- Document runtime planning ABIs (`5a2a08d`)
-- Document 0.420.0 ABI planning (`371f0df`)
-- Align rich ABI documentation (`2531c7a`)
-
-### Misc
-
-- Correct rich self-test JSON (`7c1d5f3`)
-- Handle optional pty process handles (`2ddc507`)
-- Repair exposed process job handles (`3a994da`)
-- Use typed Gemini bridge inputs (`8079949`)
-- Retain default test classification oracles (`6a331de`)
-- Keep feature test oracles available (`9a1e77e`)
-- Move broker sequence validation (`8074983`)
-- Move application plan kernels (`4e98c9a`)
-- Migrate gateway trace planning (`d5e9a08`)
-- Migrate Gemini tool response shaping (`2e37203`)
-- Migrate Kiro response stream (`cb2b7bd`)
-- Satisfy Mojo guard and size limits (`eae622f`)
-- Migrate Gemini response shaping (`556f52f`)
-- Migrate Gemini generation config planning (`1c38df3`)
-- Gate route oracle import (`6c1b755`)
-- Keep context and route tests lint-clean (`8728949`)
-- Move control-plane route validation (`84c7073`)
-- Extend context output classification (`81cb571`)
-- Migrate domain accounting arithmetic (`b8516c4`)
-- Migrate command output framework labels (`91a1614`)
-- Migrate command output noise labels (`68cad82`)
-- Migrate smart context normalization (`b989ecb`)
-- Move dot-progress leaf (`d5c3698`)
-- Migrate Kiro request shaping (`a833d8b`)
-- Migrate Gemini bridge request shaping (`2a92904`)
-- Preserve Gemini raw stream event shape (`ad6ca7a`)
-- Migrate OpenAI compatibility shaping (`098a26a`)
-- Preserve Gemini stream event shape (`1bda1ca`)
-- Migrate DeepSeek bridge planning (`f237509`)
-- Migrate Git search parsing (`5902dea`)
-- Migrate Gemini request content shaping (`fde0a4f`)
-- Migrate DeepSeek transformation kernel (`fdc0a01`)
-- Compile app-server broker bounds (`b24bdb8`)
-- Move broker protocol to Mojo (`de0318b`)
-- Migrate Gemini response stream kernel (`bc1d112`)
-- Migrate Gemini response part planning (`521646c`)
-- Map Gemini SSE tool-call indexes (`7400727`)
-- Migrate Gemini request field planning (`6e56b37`)
-- Migrate gateway billing summary (`0c68a1e`)
-- Migrate Gemini glob matching (`5b5ad88`)
-- Fall back from incompatible web search (`dff2b74`)
-- Gate Mojo-only cache adapter (`fd801f6`)
-- Move CI log semantics to Mojo (`41babf2`)
-- Gate Mojo-only kind mapping (`0830dbb`)
-- Move log level classification to Mojo (`71e6ae6`)
-- Keep Mojo diagnostics lint-clean (`32b7c2f`)
-- Gate Mojo-only oracle import (`a57c3ac`)
-- Keep feature builds lint-clean (`e4d5f9c`)
-- Pin Codex 0.151.0 (`4ce9c87`)
-- Migrate provider planning (`6a805b4`)
-- Migrate Smart Context calibration (`b4457ba`)
-- Migrate signal and command classification to Mojo (`987bc57`)
-- Delegate token accounting to Mojo (`a39e1ec`)
-- Move model planning into Mojo (`c7c38a4`)
-- Audit Codex rust-v0.151.0 (`2d93cf5`)
-
-## 0.419.1 - 2026-08-29
-
-### Runtime
-
 - Satisfy default lint paths (`5630027`)
 - Rotate past unavailable profiles safely (`dd64959`)
 - Deepen runtime selection semantics (`6ca3fd6`)
@@ -356,46 +109,6 @@ Full Changelog: [`0.426.1...0.427.0`](https://github.com/christiandoxa/prodex/co
 - Move gateway route policy into Mojo (`7d42d1b`)
 - Move capacity defaults into Mojo (`d899b32`)
 - Distinguish temporary profile failures from quota (`da727b1`)
-
-### CLI
-
-- Harden expose DNS and profile recovery (`f38bd66`)
-- Validate header profile identity (`b725fbd`)
-- Batch context and quota semantics (`d3b0ca7`)
-- Plan capacity lanes through Mojo (`337e6f7`)
-
-### Claude
-
-- Budget public MCP phases independently (`3b13b19`)
-- Separate tunnel and public MCP readiness (`d0d6dd0`)
-
-### Docs
-
-- Clarify migration accounting (`5e7dac8`)
-- Align rich ABI six evidence (`e1f3bab`)
-- Record differential corpus (`794e541`)
-- Document 0.419.1 log and migration ownership (`05ec545`)
-
-### Misc
-
-- Clarify public readiness phases (`16aa3df`)
-- Preserve upstream throughput state (`e9489ba`)
-- Use idiomatic empty-rate handling (`33205fe`)
-- Satisfy all-features quality gates (`b0c00a6`)
-- Clean feature-specific imports (`00081d8`)
-- Avoid unused parity oracle exports (`80b2e7a`)
-- Complete the 0.419.1 ownership wave (`a415724`)
-- Keep production adapter exports visible (`2d4ce3b`)
-- Make bare log use the stream view (`3e16cdf`)
-- Expose internal Mojo parity oracles only to tests (`1630c16`)
-- Add Mojo reasoning resolution adapter (`641aa94`)
-- Move adaptive planning into Mojo (`c120df7`)
-- Retain measured output throughput (`46c45af`)
-
-## 0.419.0 - 2026-08-28
-
-### Runtime
-
 - Preserve bounded selection and token accounting (`407c57b`)
 - Harden 0.418.1 diagnostics and expose (`269d3b9`)
 - Migrate deterministic runtime ownership (`43cfb19`)
@@ -506,6 +219,16 @@ Full Changelog: [`0.426.1...0.427.0`](https://github.com/christiandoxa/prodex/co
 
 ### CLI
 
+- Preserve Luna reserve capacity (`028c1e2`)
+- Add expose tunnel providers (`7859b34`)
+- Gate Mojo-only selection oracle imports (`8d28d1f`)
+- Migrate profile rotation planning (`4992559`)
+- Migrate profile order planning (`1e23a74`)
+- Delegate capacity planning to Mojo (`54362c1`)
+- Harden expose DNS and profile recovery (`f38bd66`)
+- Validate header profile identity (`b725fbd`)
+- Batch context and quota semantics (`d3b0ca7`)
+- Plan capacity lanes through Mojo (`337e6f7`)
 - Add bounded expose run manager (`b485f02`)
 - Configure expose model and reasoning effort (`6216e4a`)
 - Preserve Super expose invocation context (`3def38a`)
@@ -574,6 +297,17 @@ Full Changelog: [`0.426.1...0.427.0`](https://github.com/christiandoxa/prodex/co
 
 ### Claude
 
+- Reject unsafe external credential files (`190e699`)
+- Import existing OAuth credentials (`5f66a68`)
+- Supervise OpenAI Secure MCP tunnel client (`118927d`)
+- Add OpenAI MCP tunnel provider (`6d59243`)
+- Retain compatibility stream oracle (`2b09bca`)
+- Remove obsolete stream helper (`a66c7ab`)
+- Migrate Anthropic stream shaping (`095f519`)
+- Migrate Anthropic request shaping (`02e7790`)
+- Migrate Anthropic response planning (`eef0699`)
+- Budget public MCP phases independently (`3b13b19`)
+- Separate tunnel and public MCP readiness (`d0d6dd0`)
 - Harden ChatGPT MCP expose readiness (`4805e3d`)
 - Expose MCP through a Quick Tunnel (`21478e6`)
 - Add Streamable HTTP MCP contract (`9392948`)
@@ -582,6 +316,22 @@ Full Changelog: [`0.426.1...0.427.0`](https://github.com/christiandoxa/prodex/co
 
 ### Docs
 
+- Document 0.426.0 session bridge (`0a5e4d3`)
+- Reflect public Cloudflare browser access (`bbd7ea0`)
+- Add canonical root guide (`8334efe`)
+- Document 0.421.0 runtime semantics (`e722539`)
+- Document local and tunneled modes (`642e412`)
+- Update Caveman freshness pin (`b6aac0f`)
+- Require temporary artifact cleanup (`4caa6ca`)
+- Require Mojo-first development (`2d6963c`)
+- Track split runtime policy types (`12ae730`)
+- Document runtime planning ABIs (`5a2a08d`)
+- Document 0.420.0 ABI planning (`371f0df`)
+- Align rich ABI documentation (`2531c7a`)
+- Clarify migration accounting (`5e7dac8`)
+- Align rich ABI six evidence (`e1f3bab`)
+- Record differential corpus (`794e541`)
+- Document 0.419.1 log and migration ownership (`05ec545`)
 - Document 0.418.1 runtime and quota contracts (`ed4bf01`)
 - Refresh release-cut audit (`d48d7d0`)
 - Record final freshness audit (`dc9d715`)
@@ -618,6 +368,8 @@ Full Changelog: [`0.426.1...0.427.0`](https://github.com/christiandoxa/prodex/co
 
 ### Deps
 
+- Bump argon2 in /fuzz in the fuzz-cargo group (`6674044`)
+- Bump the cargo group with 4 updates (`b8afd47`)
 - Include dependabot uuid update (`94a0364`)
 - Bump debian from `7b140f3` to `abd67ff` (`b16425a`)
 - Bump rust from `77fac8b` to `14bc9c5` (`7fc6998`)
@@ -652,6 +404,120 @@ Full Changelog: [`0.426.1...0.427.0`](https://github.com/christiandoxa/prodex/co
 
 ### Misc
 
+- Reduce tunnel readiness complexity (`d54cd62`)
+- Classify late tunnel child exits (`3a0134c`)
+- Accommodate Windows tunnel startup latency (`0fd173b`)
+- Normalize cross-platform cwd identity (`bfb2a2b`)
+- Bind rollout reads to writer authority (`e068308`)
+- Resolve managed session rollout symlinks (`ed0621e`)
+- Ship session bridge and live observability (`00d7fd5`)
+- Restore measured output throughput (`3d0bba7`)
+- Scrub graceful taskkill environment (`4b8ef61`)
+- Close credential inheritance gaps (`56071bf`)
+- Enforce tunnel setup contracts (`b81af1e`)
+- Redact local capability status only when validation is green (`0401b04`)
+- Isolate tunnel-client capability data (`42cd209`)
+- Contain tunnel-client capability logs (`c3cfb0f`)
+- Harden interactive tunnel setup (`f8408b5`)
+- Prompt for OpenAI tunnel setup (`2ac40b1`)
+- Repair throughput eviction ownership (`fd35f20`)
+- Bound throughput identity state (`2b1246d`)
+- Complete throughput state lifecycle (`4c1cb9e`)
+- Close duplicate final throughput streams (`f252f9c`)
+- Retain live throughput samples (`ca1455a`)
+- Measure completed generation throughput (`13081d1`)
+- Prevent silent live event loss (`75288d9`)
+- Keep cross-platform test timing import (`124de59`)
+- Make exit fixture portable (`9223fe4`)
+- Preserve structured failure details (`a91a72c`)
+- Use supported Codex exec invocation (`32b37cc`)
+- Skip diagnostic startup side effects (`1ce2730`)
+- Capture initial live throughput samples (`e162d11`)
+- Resolve release CI blockers (`392aa3a`)
+- Ship 0.423.0 stability train (`0862b70`)
+- Support Python tunnel fixtures on Windows (`3902174`)
+- Invoke Windows tunnel fixture through cmd (`003439b`)
+- Execute Windows tunnel fixtures directly (`a3550d1`)
+- Split operational stream parsing (`46212a2`)
+- Contain existing tunnel jobs on Windows (`af3bc42`)
+- Add connection modes and signal-rich status (`d30e684`)
+- Contain command output descendants (`fb40fbd`)
+- Preserve bounded child failure detail (`0814e3a`)
+- Close exact CI regressions (`f3f74c6`)
+- Publish Cloudflare browser route (`3928fb5`)
+- Move Kiro request capability policy (`1d0bdbb`)
+- Validate official tunnel identifier (`e96ab94`)
+- Keep tunnel readiness probe local (`b4e1d91`)
+- Keep live ACP tasks alive while quiet (`83641b2`)
+- Use canonical OpenAI application request (`dceefac`)
+- Correct rich self-test JSON (`7c1d5f3`)
+- Handle optional pty process handles (`2ddc507`)
+- Repair exposed process job handles (`3a994da`)
+- Use typed Gemini bridge inputs (`8079949`)
+- Retain default test classification oracles (`6a331de`)
+- Keep feature test oracles available (`9a1e77e`)
+- Move broker sequence validation (`8074983`)
+- Move application plan kernels (`4e98c9a`)
+- Migrate gateway trace planning (`d5e9a08`)
+- Migrate Gemini tool response shaping (`2e37203`)
+- Migrate Kiro response stream (`cb2b7bd`)
+- Satisfy Mojo guard and size limits (`eae622f`)
+- Migrate Gemini response shaping (`556f52f`)
+- Migrate Gemini generation config planning (`1c38df3`)
+- Gate route oracle import (`6c1b755`)
+- Keep context and route tests lint-clean (`8728949`)
+- Move control-plane route validation (`84c7073`)
+- Extend context output classification (`81cb571`)
+- Migrate domain accounting arithmetic (`b8516c4`)
+- Migrate command output framework labels (`91a1614`)
+- Migrate command output noise labels (`68cad82`)
+- Migrate smart context normalization (`b989ecb`)
+- Move dot-progress leaf (`d5c3698`)
+- Migrate Kiro request shaping (`a833d8b`)
+- Migrate Gemini bridge request shaping (`2a92904`)
+- Preserve Gemini raw stream event shape (`ad6ca7a`)
+- Migrate OpenAI compatibility shaping (`098a26a`)
+- Preserve Gemini stream event shape (`1bda1ca`)
+- Migrate DeepSeek bridge planning (`f237509`)
+- Migrate Git search parsing (`5902dea`)
+- Migrate Gemini request content shaping (`fde0a4f`)
+- Migrate DeepSeek transformation kernel (`fdc0a01`)
+- Compile app-server broker bounds (`b24bdb8`)
+- Move broker protocol to Mojo (`de0318b`)
+- Migrate Gemini response stream kernel (`bc1d112`)
+- Migrate Gemini response part planning (`521646c`)
+- Map Gemini SSE tool-call indexes (`7400727`)
+- Migrate Gemini request field planning (`6e56b37`)
+- Migrate gateway billing summary (`0c68a1e`)
+- Migrate Gemini glob matching (`5b5ad88`)
+- Fall back from incompatible web search (`dff2b74`)
+- Gate Mojo-only cache adapter (`fd801f6`)
+- Move CI log semantics to Mojo (`41babf2`)
+- Gate Mojo-only kind mapping (`0830dbb`)
+- Move log level classification to Mojo (`71e6ae6`)
+- Keep Mojo diagnostics lint-clean (`32b7c2f`)
+- Gate Mojo-only oracle import (`a57c3ac`)
+- Keep feature builds lint-clean (`e4d5f9c`)
+- Pin Codex 0.151.0 (`4ce9c87`)
+- Migrate provider planning (`6a805b4`)
+- Migrate Smart Context calibration (`b4457ba`)
+- Migrate signal and command classification to Mojo (`987bc57`)
+- Delegate token accounting to Mojo (`a39e1ec`)
+- Move model planning into Mojo (`c7c38a4`)
+- Audit Codex rust-v0.151.0 (`2d93cf5`)
+- Clarify public readiness phases (`16aa3df`)
+- Preserve upstream throughput state (`e9489ba`)
+- Use idiomatic empty-rate handling (`33205fe`)
+- Satisfy all-features quality gates (`b0c00a6`)
+- Clean feature-specific imports (`00081d8`)
+- Avoid unused parity oracle exports (`80b2e7a`)
+- Complete the 0.419.1 ownership wave (`a415724`)
+- Keep production adapter exports visible (`2d4ce3b`)
+- Make bare log use the stream view (`3e16cdf`)
+- Expose internal Mojo parity oracles only to tests (`1630c16`)
+- Add Mojo reasoning resolution adapter (`641aa94`)
+- Move adaptive planning into Mojo (`c120df7`)
+- Retain measured output throughput (`46c45af`)
 - Allocate unique tunnel config paths (`fdb20bc`)
 - Make tunnel cleanup cross-platform (`318609b`)
 - Split endpoint startup lifecycle (`861aa16`)
