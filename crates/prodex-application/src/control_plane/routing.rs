@@ -258,7 +258,19 @@ pub fn plan_application_control_plane_idempotency_error_response(
             }
         }
         ApplicationControlPlaneIdempotencyError::HttpRoute(error) => {
-            application_control_plane_route_response_from_gateway(error)
+            let response = gateway_control_plane_route_error_response(error);
+            ApplicationControlPlaneIdempotencyErrorResponsePlan {
+                status: match response.status {
+                    GatewayControlPlaneRouteErrorStatus::BadRequest => {
+                        ApplicationControlPlaneIdempotencyErrorStatus::BadRequest
+                    }
+                    GatewayControlPlaneRouteErrorStatus::MethodNotAllowed => {
+                        ApplicationControlPlaneIdempotencyErrorStatus::MethodNotAllowed
+                    }
+                },
+                code: response.code,
+                message: response.message,
+            }
         }
         ApplicationControlPlaneIdempotencyError::OperationMismatch { .. } => {
             ApplicationControlPlaneIdempotencyErrorResponsePlan {
@@ -295,31 +307,13 @@ pub fn plan_application_control_plane_idempotency_error_response(
     }
 }
 
-fn application_control_plane_route_response_from_gateway(
+fn gateway_control_plane_route_error_response(
     error: &ApplicationControlPlaneHttpRouteError,
-) -> ApplicationControlPlaneIdempotencyErrorResponsePlan {
-    let response = match error {
+) -> GatewayControlPlaneRouteErrorResponsePlan {
+    match error {
         ApplicationControlPlaneHttpRouteError::Route(error) => {
             plan_gateway_control_plane_route_error_response(error)
         }
-    };
-    application_control_plane_route_response_from_gateway_plan(response)
-}
-
-fn application_control_plane_route_response_from_gateway_plan(
-    response: GatewayControlPlaneRouteErrorResponsePlan,
-) -> ApplicationControlPlaneIdempotencyErrorResponsePlan {
-    ApplicationControlPlaneIdempotencyErrorResponsePlan {
-        status: match response.status {
-            GatewayControlPlaneRouteErrorStatus::BadRequest => {
-                ApplicationControlPlaneIdempotencyErrorStatus::BadRequest
-            }
-            GatewayControlPlaneRouteErrorStatus::MethodNotAllowed => {
-                ApplicationControlPlaneIdempotencyErrorStatus::MethodNotAllowed
-            }
-        },
-        code: response.code,
-        message: response.message,
     }
 }
 
@@ -328,11 +322,7 @@ pub fn plan_application_control_plane_page_request_error_response(
 ) -> ApplicationControlPlanePageRequestErrorResponsePlan {
     match error {
         ApplicationControlPlanePageRequestError::HttpRoute(error) => {
-            let response = match error {
-                ApplicationControlPlaneHttpRouteError::Route(error) => {
-                    plan_gateway_control_plane_route_error_response(error)
-                }
-            };
+            let response = gateway_control_plane_route_error_response(error);
             ApplicationControlPlanePageRequestErrorResponsePlan {
                 status: match response.status {
                     GatewayControlPlaneRouteErrorStatus::BadRequest => {
@@ -373,11 +363,7 @@ pub fn plan_application_control_plane_precondition_error_response(
 ) -> ApplicationControlPlanePreconditionErrorResponsePlan {
     match error {
         ApplicationControlPlanePreconditionError::HttpRoute(error) => {
-            let response = match error {
-                ApplicationControlPlaneHttpRouteError::Route(error) => {
-                    plan_gateway_control_plane_route_error_response(error)
-                }
-            };
+            let response = gateway_control_plane_route_error_response(error);
             ApplicationControlPlanePreconditionErrorResponsePlan {
                 status: match response.status {
                     GatewayControlPlaneRouteErrorStatus::BadRequest => {
@@ -458,11 +444,7 @@ pub fn plan_application_control_plane_http_route(
 pub fn plan_application_control_plane_http_route_error_response(
     error: &ApplicationControlPlaneHttpRouteError,
 ) -> ApplicationControlPlaneHttpRouteErrorResponsePlan {
-    let response = match error {
-        ApplicationControlPlaneHttpRouteError::Route(error) => {
-            plan_gateway_control_plane_route_error_response(error)
-        }
-    };
+    let response = gateway_control_plane_route_error_response(error);
     ApplicationControlPlaneHttpRouteErrorResponsePlan {
         status: match response.status {
             GatewayControlPlaneRouteErrorStatus::BadRequest => {
