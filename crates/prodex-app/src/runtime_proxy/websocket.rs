@@ -487,11 +487,7 @@ fn handle_runtime_proxy_websocket_http_response(
                 .map(|(name, value)| (name.as_str(), value.as_bytes())),
         )
     });
-    if (status == 401
-        || (status == 403
-            && error_policy.action != runtime_proxy_crate::RuntimeHttpErrorAction::RotateProfile))
-        || runtime_proxy_body_indicates_token_invalidated(&body)
-    {
+    if runtime_websocket_should_note_profile_auth_failure(status, &error_policy.action, &body) {
         note_runtime_profile_auth_failure(
             shared,
             profile_name,
@@ -550,6 +546,16 @@ fn handle_runtime_proxy_websocket_http_response(
         runtime_websocket_error_payload_from_http_body(&body)
     };
     Ok(Some(RuntimeWebsocketConnectResult::Rejected(payload)))
+}
+
+fn runtime_websocket_should_note_profile_auth_failure(
+    status: u16,
+    action: &runtime_proxy_crate::RuntimeHttpErrorAction,
+    body: &[u8],
+) -> bool {
+    status == 401
+        || (status == 403 && action != &runtime_proxy_crate::RuntimeHttpErrorAction::RotateProfile)
+        || runtime_proxy_body_indicates_token_invalidated(body)
 }
 
 fn runtime_websocket_connect_transport_error(
