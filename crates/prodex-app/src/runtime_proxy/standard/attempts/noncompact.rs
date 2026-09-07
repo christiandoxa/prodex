@@ -460,10 +460,7 @@ fn handle_runtime_noncompact_error_parts(
             error_policy.class,
             runtime_proxy_crate::RuntimeHttpErrorClass::Overload
                 | runtime_proxy_crate::RuntimeHttpErrorClass::TransientServer
-        )
-        || (error_policy.action == runtime_proxy_crate::RuntimeHttpErrorAction::RotateProfile
-            && error_policy.class
-                == runtime_proxy_crate::RuntimeHttpErrorClass::ProfileUnavailable);
+        );
     if matches!(status, 402 | 403 | 429) && !retryable_quota {
         runtime_proxy_log(
             shared,
@@ -518,7 +515,7 @@ fn handle_runtime_noncompact_error_parts(
             retry_after,
         });
     }
-    if status == 401 || token_invalidated {
+    if token_invalidated {
         note_runtime_profile_auth_failure(shared, profile_name, RuntimeRouteKind::Standard, status);
     }
     remember_runtime_session_id(
