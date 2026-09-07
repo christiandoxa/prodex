@@ -1,5 +1,7 @@
 use super::*;
 
+#[path = "routing/keys.rs"]
+mod keys;
 #[path = "routing/legal_hold.rs"]
 mod legal_hold;
 #[path = "routing/scim.rs"]

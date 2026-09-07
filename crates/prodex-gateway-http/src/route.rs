@@ -363,7 +363,7 @@ fn control_plane_operation_for_path(
     if let Some(route) = parse_gateway_admin_route("", &canonical_admin_path) {
         return route.operation(method);
     }
-    admin_operation_for_path(admin_path, method)
+    admin_operation_for_path(admin_path)
 }
 
 fn scim_operation_for_path(
@@ -386,10 +386,7 @@ fn scim_operation_for_path(
     }
 }
 
-fn admin_operation_for_path(
-    path: &str,
-    method: GatewayHttpMethod,
-) -> Option<GatewayControlPlaneOperation> {
+fn admin_operation_for_path(path: &str) -> Option<GatewayControlPlaneOperation> {
     match normalized_segments(path).as_slice() {
         []
         | ["openapi.json"]
@@ -405,22 +402,6 @@ fn admin_operation_for_path(
         ["role-bindings"] => Some(GatewayControlPlaneOperation::RoleBindingGrant),
         ["role-bindings", ..] => Some(GatewayControlPlaneOperation::RoleBindingRevoke),
         ["service-identities"] => Some(GatewayControlPlaneOperation::ServiceIdentityCreate),
-        ["keys", _, "secret"] | ["keys", _, "secrets"] => {
-            Some(GatewayControlPlaneOperation::VirtualKeyRotateSecret)
-        }
-        ["keys"] if method == GatewayHttpMethod::Get => {
-            Some(GatewayControlPlaneOperation::VirtualKeyRead)
-        }
-        ["keys"] => Some(GatewayControlPlaneOperation::VirtualKeyCreate),
-        ["keys", ..] if method == GatewayHttpMethod::Get => {
-            Some(GatewayControlPlaneOperation::VirtualKeyRead)
-        }
-        ["keys", ..] if method == GatewayHttpMethod::Patch => {
-            Some(GatewayControlPlaneOperation::VirtualKeyUpdate)
-        }
-        ["keys", ..] if method == GatewayHttpMethod::Delete => {
-            Some(GatewayControlPlaneOperation::VirtualKeyDelete)
-        }
         ["provider-credentials", _, "secret"] | ["provider-credentials", _, "secrets"] => {
             Some(GatewayControlPlaneOperation::ProviderCredentialRotate)
         }
