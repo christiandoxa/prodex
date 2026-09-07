@@ -435,10 +435,13 @@ fn runtime_proxy_broker_live_log_snapshot_is_authenticated_and_bounded() {
             executable_sha256: None,
         },
     );
+    let baseline_cursor = runtime_proxy_live_log_snapshot(&proxy.log_path, 0, 0)
+        .expect("live log baseline should exist")
+        .cursor;
     runtime_proxy_log_to_path(&proxy.log_path, "live_log_snapshot_test event=visible");
     runtime_proxy_flush_logs_for_path(&proxy.log_path).expect("live log should flush");
-    let live_snapshot =
-        runtime_proxy_live_log_snapshot(&proxy.log_path, 0, 8).expect("live log should exist");
+    let live_snapshot = runtime_proxy_live_log_snapshot(&proxy.log_path, baseline_cursor, 8)
+        .expect("live log should exist");
     assert!(
         live_snapshot
             .entries
@@ -458,8 +461,8 @@ fn runtime_proxy_broker_live_log_snapshot_is_authenticated_and_bounded() {
 
     let response = client
         .get(format!(
-            "http://{}/__prodex/runtime/log/snapshot?after=0&limit=8",
-            proxy.listen_addr
+            "http://{}/__prodex/runtime/log/snapshot?after={baseline_cursor}&limit=8",
+            proxy.listen_addr,
         ))
         .header("X-Prodex-Admin-Token", "secret")
         .send()
