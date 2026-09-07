@@ -158,6 +158,16 @@ fn ensure_opened_regular_file(file: &fs::File) -> std::io::Result<()> {
     ))
 }
 
+#[cfg(windows)]
+/// Returns a stable identity hash for an opened file handle.
+pub fn opened_file_identity(file: &fs::File) -> std::io::Result<u64> {
+    use std::hash::{Hash, Hasher};
+
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    same_file::Handle::from_file(file.try_clone()?)?.hash(&mut hasher);
+    Ok(hasher.finish())
+}
+
 pub fn opened_file_matches_path(
     before: &fs::Metadata,
     path: &Path,

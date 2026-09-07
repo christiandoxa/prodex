@@ -129,7 +129,13 @@ pub(crate) fn output_source_id(
         hasher.update(metadata.dev().to_le_bytes());
         hasher.update(metadata.ino().to_le_bytes());
     }
-    #[cfg(not(unix))]
+    #[cfg(windows)]
+    {
+        let identity = prodex_core::opened_file_identity(&file)
+            .map_err(|_| SessionPromptWriteError::OutputSourceUnavailable)?;
+        hasher.update(identity.to_le_bytes());
+    }
+    #[cfg(not(any(unix, windows)))]
     {
         hasher.update(
             metadata
