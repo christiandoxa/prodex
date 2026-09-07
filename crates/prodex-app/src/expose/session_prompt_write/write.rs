@@ -110,33 +110,14 @@ where
         let deadline = Instant::now() + QUEUE_COMMAND_TIMEOUT;
         loop {
             let current_target = self.revalidate(target, workspace_root)?;
-            match self.output_source(&current_target) {
-                Ok(path) => {
-                    let offset =
-                        rollout_before.map_or(Ok(0), |(before_path, offset, source_id)| {
-                            if before_path != &path
-                                || output_source_id(&path, &target.thread_id)? != *source_id
-                            {
-                                return Err(SessionPromptWriteError::OutputSourceChanged);
-                            }
-                            Ok(*offset)
-                        })?;
-                    let visible = match rollout_contains_exact_user_message(
-                        &path,
-                        offset,
-                        &request.message,
-                    ) {
-                        Ok(visible) => visible,
-                        Err(SessionPromptWriteError::OutputSourceUnavailable) => false,
-                        Err(error) => return Err(error),
-                    };
-                    if visible {
-                        self.revalidate_persisted(&current_target, workspace_root)?;
-                        return Ok(());
-                    }
-                }
-                Err(SessionPromptWriteError::OutputSourceUnavailable) => {}
-                Err(error) => return Err(error),
+            if self.rollout_user_message_visible(
+                &current_target,
+                &target.thread_id,
+                rollout_before,
+                &request.message,
+            )? {
+                self.revalidate_persisted(&current_target, workspace_root)?;
+                return Ok(());
             }
             if Instant::now() >= deadline {
                 return Err(SessionPromptWriteError::VerificationInconclusive);
@@ -144,6 +125,39 @@ where
             thread::sleep(Duration::from_millis(50));
         }
     }
+
+    fn rollout_user_message_visible(
+        &self,
+        target: &ResolvedTarget,
+        thread_id: &str,
+        rollout_before: Option<&(PathBuf, u64, String)>,
+        expected: &str,
+    ) -> std::result::Result<bool, SessionPromptWriteError> {
+        let path = match self.output_source(target) {
+            Ok(path) => path,
+            Err(SessionPromptWriteError::OutputSourceUnavailable) => return Ok(false),
+            Err(error) => return Err(error),
+        };
+        let offset = rollout_before_offset(rollout_before, &path, thread_id)?;
+        match rollout_contains_exact_user_message(&path, offset, expected) {
+            Ok(visible) => Ok(visible),
+            Err(SessionPromptWriteError::OutputSourceUnavailable) => Ok(false),
+            Err(error) => Err(error),
+        }
+    }
+}
+
+fn rollout_before_offset(
+    rollout_before: Option<&(PathBuf, u64, String)>,
+    path: &Path,
+    thread_id: &str,
+) -> std::result::Result<u64, SessionPromptWriteError> {
+    rollout_before.map_or(Ok(0), |(before_path, offset, source_id)| {
+        if before_path.as_path() != path || output_source_id(path, thread_id)? != *source_id {
+            return Err(SessionPromptWriteError::OutputSourceChanged);
+        }
+        Ok(*offset)
+    })
 }
 
 pub(super) fn canonical_session_prompt_write_workspace(

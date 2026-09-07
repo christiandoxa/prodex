@@ -228,12 +228,9 @@ pub(crate) fn rollout_contains_exact_user_message(
             continue;
         }
 
-        let mut consumed = 0_u64;
-        for line in complete.split_inclusive(|byte| *byte == b'\n') {
-            if exact_user_message_line(line, expected) {
-                return Ok(true);
-            }
-            consumed = consumed.saturating_add(line.len() as u64);
+        let (found, consumed) = scan_exact_user_message_lines(&complete, expected);
+        if found {
+            return Ok(true);
         }
         if consumed == 0 {
             return Ok(false);
@@ -247,6 +244,17 @@ pub(crate) fn rollout_contains_exact_user_message(
             return Ok(false);
         }
     }
+}
+
+fn scan_exact_user_message_lines(complete: &[u8], expected: &str) -> (bool, u64) {
+    let mut consumed = 0_u64;
+    for line in complete.split_inclusive(|byte| *byte == b'\n') {
+        if exact_user_message_line(line, expected) {
+            return (true, consumed);
+        }
+        consumed = consumed.saturating_add(line.len() as u64);
+    }
+    (false, consumed)
 }
 
 fn exact_user_message_line(raw_line: &[u8], expected: &str) -> bool {
