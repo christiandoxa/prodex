@@ -487,9 +487,9 @@ fn handle_runtime_proxy_websocket_http_response(
                 .map(|(name, value)| (name.as_str(), value.as_bytes())),
         )
     });
-    if (matches!(status, 401 | 403)
-        && (status == 401
-            || error_policy.action != runtime_proxy_crate::RuntimeHttpErrorAction::RotateProfile))
+    if (status == 401
+        || (status == 403
+            && error_policy.action != runtime_proxy_crate::RuntimeHttpErrorAction::RotateProfile))
         || runtime_proxy_body_indicates_token_invalidated(&body)
     {
         note_runtime_profile_auth_failure(
