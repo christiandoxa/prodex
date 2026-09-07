@@ -227,21 +227,27 @@ fn runtime_launch_config_model_auto_compact_token_limit_with_profile_v2(
 }
 
 fn runtime_launch_config_file_model_context_window_tokens(config_path: &Path) -> Option<u64> {
-    let raw = fs::read_to_string(config_path).ok()?;
-    let value = toml::from_str::<toml::Value>(&raw).ok()?;
-    runtime_launch_toml_model_context_window_tokens(value.get("model_context_window")?)
+    runtime_launch_config_file_value(config_path, "model_context_window")
+        .as_ref()
+        .and_then(runtime_launch_toml_model_context_window_tokens)
 }
 
 fn runtime_launch_config_file_model_auto_compact_token_limit(config_path: &Path) -> Option<u64> {
-    let raw = fs::read_to_string(config_path).ok()?;
-    let value = toml::from_str::<toml::Value>(&raw).ok()?;
-    runtime_launch_toml_model_context_window_tokens(value.get("model_auto_compact_token_limit")?)
+    runtime_launch_config_file_value(config_path, "model_auto_compact_token_limit")
+        .as_ref()
+        .and_then(runtime_launch_toml_model_context_window_tokens)
 }
 
 fn runtime_launch_config_file_gemini_thinking_budget_tokens(config_path: &Path) -> Option<u64> {
+    runtime_launch_config_file_value(config_path, "model_thinking_budget")
+        .as_ref()
+        .and_then(runtime_launch_toml_gemini_thinking_budget_tokens)
+}
+
+fn runtime_launch_config_file_value(config_path: &Path, key: &str) -> Option<toml::Value> {
     let raw = fs::read_to_string(config_path).ok()?;
     let value = toml::from_str::<toml::Value>(&raw).ok()?;
-    runtime_launch_toml_gemini_thinking_budget_tokens(value.get("model_thinking_budget")?)
+    value.get(key).cloned()
 }
 
 fn runtime_launch_toml_model_context_window_tokens(value: &toml::Value) -> Option<u64> {
