@@ -72,7 +72,6 @@ pub(crate) use self::super_config::ResolvedMainAgentConfig;
 pub(super) use self::super_prompt::prompt_super_presidio_opt_in;
 
 pub(super) fn handle_super(mut args: SuperArgs) -> Result<()> {
-    args.validate_urls().map_err(anyhow::Error::msg)?;
     super_prompt::reject_sub_agent_recursion_reenable(&args)?;
     runtime_launch::resume_repair::repair_super_resume_session_metadata(&args)?;
     let interactive = super_prompt::super_prompt_is_interactive()

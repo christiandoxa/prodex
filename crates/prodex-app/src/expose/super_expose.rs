@@ -164,7 +164,6 @@ pub(super) fn handle_super_expose(mut args: ExposeArgs) -> anyhow::Result<()> {
         .extract_provider_overrides_from_codex_args()
         .map_err(anyhow::Error::msg)?;
     crate::runtime_gemini_cli::validate_super_native_cli_preflight(&super_args)?;
-    super_args.validate_urls().map_err(anyhow::Error::msg)?;
     let interactive =
         io::stdin().is_terminal() && io::stdout().is_terminal() && io::stderr().is_terminal();
     crate::resolve_super_expose_configuration(&mut super_args, interactive)?;
