@@ -202,6 +202,47 @@ pub(super) fn handle_runtime_proxy_compact_retryable_failure(
         return Ok(RuntimeCompactFailureFlow::Return(response));
     }
 
+    Ok(finish_runtime_compact_retryable_failure(
+        RuntimeCompactRetryableFailureFinalization {
+            request_id,
+            shared,
+            profile_name,
+            response,
+            overload,
+            released_affinity,
+            released_compact_lineage,
+            excluded_profiles,
+            last_failure,
+        },
+    ))
+}
+
+struct RuntimeCompactRetryableFailureFinalization<'a> {
+    request_id: u64,
+    shared: &'a RuntimeRotationProxyShared,
+    profile_name: String,
+    response: tiny_http::ResponseBox,
+    overload: bool,
+    released_affinity: bool,
+    released_compact_lineage: bool,
+    excluded_profiles: &'a mut BTreeSet<String>,
+    last_failure: &'a mut Option<RuntimeCompactLastFailure>,
+}
+
+fn finish_runtime_compact_retryable_failure(
+    finalization: RuntimeCompactRetryableFailureFinalization<'_>,
+) -> RuntimeCompactFailureFlow {
+    let RuntimeCompactRetryableFailureFinalization {
+        request_id,
+        shared,
+        profile_name,
+        response,
+        overload,
+        released_affinity,
+        released_compact_lineage,
+        excluded_profiles,
+        last_failure,
+    } = finalization;
     if released_affinity {
         runtime_proxy_log(
             shared,
@@ -231,7 +272,7 @@ pub(super) fn handle_runtime_proxy_compact_retryable_failure(
             RuntimeCompactFailureKind::Quota
         },
     ));
-    Ok(RuntimeCompactFailureFlow::Retry)
+    RuntimeCompactFailureFlow::Retry
 }
 
 struct RuntimeCompactAffinityOwners<'a> {
