@@ -221,17 +221,13 @@ pub(crate) fn collect_recent_runtime_log_paths(limit: usize) -> Vec<PathBuf> {
         prodex_runtime_log_paths_in_dir(&runtime_proxy_log_dir())
             .into_iter()
             .map(|path| {
-                let modified = runtime_log_modified(&path);
+                let modified = fs::metadata(&path)
+                    .and_then(|metadata| metadata.modified())
+                    .unwrap_or(UNIX_EPOCH);
                 (path, modified)
             }),
         limit,
     )
-}
-
-fn runtime_log_modified(path: &Path) -> SystemTime {
-    fs::metadata(path)
-        .and_then(|metadata| metadata.modified())
-        .unwrap_or(UNIX_EPOCH)
 }
 
 pub(crate) fn collect_info_token_usage_summary(log_paths: &[PathBuf]) -> InfoTokenUsageSummary {
