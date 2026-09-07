@@ -7,6 +7,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   DEFAULT_THRESHOLDS,
+  commitSubjectIssues,
   matchingChurnAllowance,
   mechanicalOnlyDeclared,
   structuralExtractionApplies,
@@ -107,6 +108,22 @@ assert.equal(mechanicalOnlyDeclared("refactor: split module\n\nMechanical-only: 
 assert.equal(mechanicalOnlyDeclared("refactor: split module\n\nMechanical-only: true\n"), true);
 assert.equal(mechanicalOnlyDeclared("refactor: split module [mechanical-only]\n"), true);
 assert.equal(mechanicalOnlyDeclared("refactor: split module\n"), false);
+
+{
+  const repeatedSubjects = [
+    { hash: "1111111", subject: "test(ci): refresh production share expectations" },
+    { hash: "2222222", subject: "test(ci): refresh production share expectations" },
+    { hash: "3333333", subject: "test(ci): refresh production share expectations" },
+  ];
+  assert.equal(commitSubjectIssues(repeatedSubjects).length, 1, "repeated subjects remain guarded by default");
+  assert.deepEqual(
+    commitSubjectIssues(repeatedSubjects, {
+      allowedRepeatedSubjects: ["test(ci): refresh production share expectations"],
+    }),
+    [],
+    "only an explicitly allowed exact subject is exempt",
+  );
+}
 
 {
   const allowance = {
