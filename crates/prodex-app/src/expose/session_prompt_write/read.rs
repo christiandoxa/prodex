@@ -4,14 +4,31 @@ use super::output::{
 };
 use super::{
     OUTPUT_CURSOR_VERSION, ProcessInspector, PromptOutputReadRequest, PromptOutputReadSuccess,
-    QueueControl, SessionPromptWriteError, SessionPromptWriteService,
+    QueueControl, ResolvedTarget, SessionBinding, SessionPromptWriteError,
+    SessionPromptWriteService,
 };
+use std::path::{Path, PathBuf};
 use std::sync::atomic::Ordering;
 use std::thread;
 use std::time::{Duration, Instant};
 
 const OUTPUT_READ_MAX_WAIT: Duration = Duration::from_secs(10);
 const OUTPUT_READ_POLL_INTERVAL: Duration = Duration::from_millis(100);
+
+struct OutputReadState<'a> {
+    request: &'a PromptOutputReadRequest,
+    workspace_root: &'a Path,
+    target: ResolvedTarget,
+    output_path: PathBuf,
+    source_id: String,
+    prodex_birth: String,
+    codex_birth: String,
+    offset: u64,
+    event_index: usize,
+    wait: Duration,
+    deadline: Instant,
+    cursor: Option<&'a OutputCursor>,
+}
 
 impl<P, Q> SessionPromptWriteService<P, Q>
 where
@@ -36,30 +53,12 @@ where
         } else {
             self.binding(&request.binding_key)?
         };
-        let requested_pid = request
-            .prodex_pid
-            .or_else(|| cursor.as_ref().map(|cursor| cursor.prodex_pid))
-            .or_else(|| binding.as_ref().map(|binding| binding.target.prodex.pid));
-        let target = match self.resolve_target_for_request(
+        let target = self.resolve_output_read_target(
+            &request,
             &workspace_root,
-            requested_pid,
-            request.thread_id.as_deref(),
-            cursor.is_some() || binding.is_some(),
-        ) {
-            Err(SessionPromptWriteError::NoSession) if cursor.is_some() => {
-                return Err(SessionPromptWriteError::StaleCursor);
-            }
-            Err(SessionPromptWriteError::NoSession)
-                if cursor.is_some()
-                    || binding.is_some()
-                    || request.prodex_pid.is_some()
-                    || request.thread_id.is_some() =>
-            {
-                return Err(SessionPromptWriteError::StaleTarget);
-            }
-            result => result,
-        }?;
-        let mut target = target;
+            cursor.as_ref(),
+            binding.as_ref(),
+        )?;
         self.verify_binding(binding.as_ref(), &target)?;
         if request
             .thread_id
@@ -94,7 +93,7 @@ where
         if checkpoint_id == Some(false) {
             return Err(SessionPromptWriteError::OutputSourceChanged);
         }
-        let (mut offset, mut event_index) = match cursor.as_ref() {
+        let (offset, event_index) = match cursor.as_ref() {
             Some(cursor) if cursor.matches(&target, &source_id) => {
                 (cursor.offset, cursor.event_index)
             }
@@ -103,6 +102,40 @@ where
         };
         let wait = Duration::from_millis(request.wait_ms).min(OUTPUT_READ_MAX_WAIT);
         let deadline = Instant::now() + wait;
+        self.read_output_loop(OutputReadState {
+            request: &request,
+            workspace_root: &workspace_root,
+            target,
+            output_path,
+            source_id,
+            prodex_birth,
+            codex_birth,
+            offset,
+            event_index,
+            wait,
+            deadline,
+            cursor: cursor.as_ref(),
+        })
+    }
+
+    fn read_output_loop(
+        &self,
+        state: OutputReadState<'_>,
+    ) -> std::result::Result<PromptOutputReadSuccess, SessionPromptWriteError> {
+        let OutputReadState {
+            request,
+            workspace_root,
+            mut target,
+            output_path,
+            source_id,
+            prodex_birth,
+            codex_birth,
+            mut offset,
+            mut event_index,
+            wait,
+            deadline,
+            cursor,
+        } = state;
         loop {
             if request
                 .shutdown
@@ -147,12 +180,45 @@ where
             thread::sleep(
                 OUTPUT_READ_POLL_INTERVAL.min(deadline.saturating_duration_since(Instant::now())),
             );
-            target = self.revalidate(&target, &workspace_root)?;
+            target = self.revalidate(&target, workspace_root)?;
             let current_path = self.output_source(&target)?;
             let current_source_id = output_source_id(&current_path, &target.thread_id)?;
             if current_source_id != source_id || current_path != output_path {
                 return Err(SessionPromptWriteError::OutputSourceChanged);
             }
         }
+    }
+
+    fn resolve_output_read_target(
+        &self,
+        request: &PromptOutputReadRequest,
+        workspace_root: &Path,
+        cursor: Option<&OutputCursor>,
+        binding: Option<&SessionBinding>,
+    ) -> std::result::Result<ResolvedTarget, SessionPromptWriteError> {
+        let requested_pid = request
+            .prodex_pid
+            .or_else(|| cursor.map(|cursor| cursor.prodex_pid))
+            .or_else(|| binding.map(|binding| binding.target.prodex.pid));
+        let target = match self.resolve_target_for_request(
+            workspace_root,
+            requested_pid,
+            request.thread_id.as_deref(),
+            cursor.is_some() || binding.is_some(),
+        ) {
+            Err(SessionPromptWriteError::NoSession) if cursor.is_some() => {
+                return Err(SessionPromptWriteError::StaleCursor);
+            }
+            Err(SessionPromptWriteError::NoSession)
+                if cursor.is_some()
+                    || binding.is_some()
+                    || request.prodex_pid.is_some()
+                    || request.thread_id.is_some() =>
+            {
+                return Err(SessionPromptWriteError::StaleTarget);
+            }
+            result => result,
+        }?;
+        Ok(target)
     }
 }
