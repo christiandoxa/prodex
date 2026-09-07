@@ -132,21 +132,37 @@ pub(crate) fn collect_new_followed_lines(
     path: &Path,
     state: &mut FollowedLog,
 ) -> Result<Vec<String>> {
-    let path_metadata = match fs::metadata(path) {
-        Ok(metadata) if metadata.is_file() => metadata,
-        Ok(_) => {
-            state.file = None;
-            state.file_identity = None;
-            return Ok(Vec::new());
-        }
-        Err(err) if err.kind() == io::ErrorKind::NotFound => {
-            state.file = None;
-            state.file_identity = None;
-            return Ok(Vec::new());
-        }
-        Err(err) => {
-            return Err(err).with_context(|| format!("failed to inspect {}", path.display()));
-        }
+    let Some(path_metadata) = prepare_followed_log_file(path, state)? else {
+        return Ok(Vec::new());
+    };
+    let file_len = path_metadata.len();
+    if file_len < state.offset {
+        state.offset = 0;
+        state.pending.clear();
+    }
+    if file_len == state.offset {
+        return Ok(Vec::new());
+    }
+    let file = state
+        .file
+        .as_mut()
+        .context("followed log file was not opened")?;
+    file.seek(SeekFrom::Start(state.offset))?;
+    let pending_len = state.pending.len();
+    (&mut *file)
+        .take(LOG_FOLLOW_READ_CHUNK_BYTES as u64)
+        .read_to_end(&mut state.pending)?;
+    let bytes_read = state.pending.len().saturating_sub(pending_len);
+    state.offset = state.offset.saturating_add(bytes_read as u64);
+    if bytes_read == 0 {
+        return Ok(Vec::new());
+    }
+    Ok(drain_followed_log_lines(state))
+}
+
+fn prepare_followed_log_file(path: &Path, state: &mut FollowedLog) -> Result<Option<fs::Metadata>> {
+    let Some(path_metadata) = inspect_followed_log_metadata(path, state)? else {
+        return Ok(None);
     };
 
     #[cfg(windows)]
@@ -174,29 +190,32 @@ pub(crate) fn collect_new_followed_lines(
             state.pending.clear();
         }
     }
-    let file_len = path_metadata.len();
-    if file_len < state.offset {
-        state.offset = 0;
-        state.pending.clear();
-    }
-    if file_len == state.offset {
-        return Ok(Vec::new());
-    }
-    let file = state
-        .file
-        .as_mut()
-        .context("followed log file was not opened")?;
-    file.seek(SeekFrom::Start(state.offset))?;
-    let pending_len = state.pending.len();
-    (&mut *file)
-        .take(LOG_FOLLOW_READ_CHUNK_BYTES as u64)
-        .read_to_end(&mut state.pending)?;
-    let bytes_read = state.pending.len().saturating_sub(pending_len);
-    state.offset = state.offset.saturating_add(bytes_read as u64);
-    if bytes_read == 0 {
-        return Ok(Vec::new());
-    }
+    Ok(Some(path_metadata))
+}
 
+fn inspect_followed_log_metadata(
+    path: &Path,
+    state: &mut FollowedLog,
+) -> Result<Option<fs::Metadata>> {
+    match fs::metadata(path) {
+        Ok(metadata) if metadata.is_file() => Ok(Some(metadata)),
+        Ok(_) => {
+            state.file = None;
+            state.file_identity = None;
+            return Ok(None);
+        }
+        Err(err) if err.kind() == io::ErrorKind::NotFound => {
+            state.file = None;
+            state.file_identity = None;
+            return Ok(None);
+        }
+        Err(err) => {
+            return Err(err).with_context(|| format!("failed to inspect {}", path.display()));
+        }
+    }
+}
+
+fn drain_followed_log_lines(state: &mut FollowedLog) -> Vec<String> {
     let complete_len = state
         .pending
         .iter()
@@ -206,9 +225,9 @@ pub(crate) fn collect_new_followed_lines(
     if complete_len == 0 {
         if state.pending.len() > LOG_FOLLOW_PENDING_MAX_BYTES {
             state.pending.clear();
-            return Ok(vec![log_follow_gap_marker(1, "oversized_partial_line")]);
+            return vec![log_follow_gap_marker(1, "oversized_partial_line")];
         }
-        return Ok(Vec::new());
+        return Vec::new();
     }
     let complete = String::from_utf8_lossy(&state.pending[..complete_len]).into_owned();
     state.pending.drain(..complete_len);
@@ -228,7 +247,7 @@ pub(crate) fn collect_new_followed_lines(
         state.pending.clear();
         lines.push(log_follow_gap_marker(1, "oversized_partial_line"));
     }
-    Ok(lines)
+    lines
 }
 
 #[cfg(test)]
