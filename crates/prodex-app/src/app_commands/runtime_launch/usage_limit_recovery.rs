@@ -176,6 +176,14 @@ impl GoalUsageLimitMonitor {
         if !self.session_is_resumable(path, &session_id)? {
             return Ok(None);
         }
+        if self.scan_usage_limit_session(path, &session_id)? {
+            self.session_usage_limit_reported = true;
+            return Ok(Some(session_id));
+        }
+        Ok(None)
+    }
+
+    fn scan_usage_limit_session(&mut self, path: &Path, session_id: &str) -> Result<bool> {
         let file_len = prodex_session_store::session_file_logical_len(path).unwrap_or_else(|_| {
             fs::metadata(path)
                 .map(|metadata| metadata.len())
@@ -191,40 +199,36 @@ impl GoalUsageLimitMonitor {
         let mut model = self.workflow_model.clone();
         let mut evidence = self.workflow_evidence;
         let scan = match prodex_session_store::session_file_scan_since(path, scan_offset, |line| {
-            let Ok(value) = serde_json::from_str::<serde_json::Value>(line) else {
-                return false;
-            };
-            if let Some(observed) = runtime_workflow_effective_model(&value) {
-                model = Some(observed);
-            }
-            observe_runtime_workflow_evidence(&value, &mut evidence);
-            workflow_class = runtime_workflow_recovery_class(&value, &session_id);
-            if workflow_class.is_some() {
-                return true;
-            }
-            legacy_usage_limit = goal_resume_line_has_usage_limit(line);
-            legacy_usage_limit
+            observe_usage_limit_scan_line(
+                line,
+                session_id,
+                &mut model,
+                &mut evidence,
+                &mut workflow_class,
+                &mut legacy_usage_limit,
+            )
         }) {
             Ok(scan) => scan,
             Err(_) => {
                 self.workflow_scan_disabled = true;
-                return Ok(None);
+                return Ok(false);
             }
         };
         let saw_usage_limit = scan.matched;
         self.session_scan_offset = scan.complete_offset;
         self.workflow_model = model;
         self.workflow_evidence = evidence;
-        if saw_usage_limit
-            && (legacy_usage_limit
-                && (self.session_goal_present || self.workflow_evidence.safe_to_resume())
-                || workflow_class.is_some() && self.workflow_evidence.safe_to_resume())
-        {
+        if usage_limit_recovery_is_ready(
+            saw_usage_limit,
+            legacy_usage_limit,
+            self.session_goal_present,
+            workflow_class,
+            self.workflow_evidence,
+        ) {
             self.workflow_recovery_class = workflow_class;
-            self.session_usage_limit_reported = true;
-            return Ok(Some(session_id));
+            return Ok(true);
         }
-        Ok(None)
+        Ok(false)
     }
 
     fn session_is_resumable(&mut self, path: &Path, session_id: &str) -> Result<bool> {
@@ -480,64 +484,106 @@ fn goal_resume_structured_usage_limit(value: &serde_json::Value) -> bool {
         if visited > GOAL_USAGE_LIMIT_JSON_SCAN_LIMIT {
             return false;
         }
-        match value {
-            serde_json::Value::Array(values) => stack.extend(values.iter().rev()),
-            serde_json::Value::Object(object) => {
-                if object.contains_key("role")
-                    || matches!(
-                        object.get("type").and_then(serde_json::Value::as_str),
-                        Some(
-                            "message"
-                                | "user_message"
-                                | "assistant_message"
-                                | "agent_message"
-                                | "response.output_text.delta"
-                                | "response.output_text.done"
-                        )
-                    )
-                {
-                    continue;
-                }
-
-                let is_quota_code = |key: &str| {
-                    object
-                        .get(key)
-                        .and_then(serde_json::Value::as_str)
-                        .is_some_and(goal_resume_quota_code)
-                };
-                if [
-                    "code",
-                    "type",
-                    "status",
-                    "reason",
-                    "error",
-                    "codex_error_info",
-                ]
-                .into_iter()
-                .any(is_quota_code)
-                    || ["message", "detail", "error"].into_iter().any(|key| {
-                        object
-                            .get(key)
-                            .and_then(serde_json::Value::as_str)
-                            .is_some_and(goal_resume_usage_limit_text)
-                    })
-                {
-                    return true;
-                }
-                stack.extend(
-                    object
-                        .iter()
-                        .filter(|(key, _)| !matches!(key.as_str(), "content" | "text" | "delta"))
-                        .map(|(_, value)| value),
-                );
-            }
-            serde_json::Value::Null
-            | serde_json::Value::Bool(_)
-            | serde_json::Value::Number(_)
-            | serde_json::Value::String(_) => {}
+        if let serde_json::Value::Array(values) = value {
+            stack.extend(values.iter().rev());
+            continue;
         }
+        let serde_json::Value::Object(object) = value else {
+            continue;
+        };
+        if goal_resume_ignored_structured_object(object) {
+            continue;
+        }
+        if goal_resume_structured_object_usage_limit(object) {
+            return true;
+        }
+        stack.extend(
+            object
+                .iter()
+                .filter(|(key, _)| !matches!(key.as_str(), "content" | "text" | "delta"))
+                .map(|(_, value)| value),
+        );
     }
     false
+}
+
+fn observe_usage_limit_scan_line(
+    line: &str,
+    session_id: &str,
+    model: &mut Option<String>,
+    evidence: &mut RuntimeWorkflowEvidence,
+    workflow_class: &mut Option<RuntimeWorkflowRecoveryClass>,
+    legacy_usage_limit: &mut bool,
+) -> bool {
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(line) else {
+        return false;
+    };
+    if let Some(observed) = runtime_workflow_effective_model(&value) {
+        *model = Some(observed);
+    }
+    observe_runtime_workflow_evidence(&value, evidence);
+    *workflow_class = runtime_workflow_recovery_class(&value, session_id);
+    if workflow_class.is_some() {
+        return true;
+    }
+    *legacy_usage_limit = goal_resume_line_has_usage_limit(line);
+    *legacy_usage_limit
+}
+
+fn goal_resume_structured_object_usage_limit(
+    object: &serde_json::Map<String, serde_json::Value>,
+) -> bool {
+    let is_quota_code = |key: &str| {
+        object
+            .get(key)
+            .and_then(serde_json::Value::as_str)
+            .is_some_and(goal_resume_quota_code)
+    };
+    [
+        "code",
+        "type",
+        "status",
+        "reason",
+        "error",
+        "codex_error_info",
+    ]
+    .into_iter()
+    .any(is_quota_code)
+        || ["message", "detail", "error"].into_iter().any(|key| {
+            object
+                .get(key)
+                .and_then(serde_json::Value::as_str)
+                .is_some_and(goal_resume_usage_limit_text)
+        })
+}
+
+fn goal_resume_ignored_structured_object(
+    object: &serde_json::Map<String, serde_json::Value>,
+) -> bool {
+    object.contains_key("role")
+        || matches!(
+            object.get("type").and_then(serde_json::Value::as_str),
+            Some(
+                "message"
+                    | "user_message"
+                    | "assistant_message"
+                    | "agent_message"
+                    | "response.output_text.delta"
+                    | "response.output_text.done"
+            )
+        )
+}
+
+fn usage_limit_recovery_is_ready(
+    saw_usage_limit: bool,
+    legacy_usage_limit: bool,
+    session_goal_present: bool,
+    workflow_class: Option<RuntimeWorkflowRecoveryClass>,
+    evidence: RuntimeWorkflowEvidence,
+) -> bool {
+    saw_usage_limit
+        && (legacy_usage_limit && (session_goal_present || evidence.safe_to_resume())
+            || workflow_class.is_some() && evidence.safe_to_resume())
 }
 
 fn goal_resume_quota_code(code: &str) -> bool {

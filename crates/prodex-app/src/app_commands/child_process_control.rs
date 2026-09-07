@@ -273,24 +273,12 @@ pub(crate) fn command_output_with_timeout_matching_stdout_line(
     let stdout_reader = bounded_output_reader(stdout, max_output_bytes, started, stdout_match);
     let stderr_reader = bounded_output_reader(stderr, max_output_bytes, started, None);
     let deadline = Instant::now() + timeout;
-    let status = loop {
-        match child.try_wait() {
-            Ok(Some(status)) => break status,
-            Ok(None) if Instant::now() < deadline => thread::sleep(Duration::from_millis(20)),
-            Ok(None) => {
-                let _ = terminate_child_process_tree(&mut child, true);
-                let _ = child.wait();
-                #[cfg(windows)]
-                drop(child_job);
-                anyhow::bail!("{label} timed out");
-            }
-            Err(error) => {
-                let _ = terminate_child_process_tree(&mut child, true);
-                let _ = child.wait();
-                #[cfg(windows)]
-                drop(child_job);
-                return Err(error).with_context(|| format!("failed to poll {label}"));
-            }
+    let status = match wait_for_child(&mut child, deadline, label) {
+        Ok(status) => status,
+        Err(error) => {
+            #[cfg(windows)]
+            drop(child_job);
+            return Err(error);
         }
     };
     #[cfg(windows)]
@@ -309,6 +297,29 @@ pub(crate) fn command_output_with_timeout_matching_stdout_line(
         },
         first_stdout_match_latency,
     })
+}
+
+fn wait_for_child(
+    child: &mut Child,
+    deadline: Instant,
+    label: &str,
+) -> Result<std::process::ExitStatus> {
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) => return Ok(status),
+            Ok(None) if Instant::now() < deadline => thread::sleep(Duration::from_millis(20)),
+            Ok(None) => {
+                let _ = terminate_child_process_tree(child, true);
+                let _ = child.wait();
+                anyhow::bail!("{label} timed out");
+            }
+            Err(error) => {
+                let _ = terminate_child_process_tree(child, true);
+                let _ = child.wait();
+                return Err(error).with_context(|| format!("failed to poll {label}"));
+            }
+        }
+    }
 }
 
 #[cfg(windows)]

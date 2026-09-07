@@ -157,79 +157,7 @@ impl RuntimeToolLaunchStrategy {
         }
         let plan = match self.pending_goal_resume_plan.take() {
             Some(plan) => Some(plan),
-            None => {
-                let requested_model = self.recovery_model.clone().or_else(|| {
-                    runtime_launch_cli_model(&self.codex_args)
-                        .or_else(|| codex_cli_config_override_value(&self.codex_args, "model"))
-                });
-                let resume_goal = self
-                    .goal_usage_limit_monitor
-                    .as_ref()
-                    .is_some_and(|monitor| monitor.has_session_goal());
-                let mut plan = {
-                    let options = RuntimeUsageLimitResumeOptions {
-                        requested_profile: self.args.profile.as_deref(),
-                        no_auto_rotate: self.args.no_auto_rotate,
-                        skip_quota_check: self.args.skip_quota_check,
-                        base_url: self.args.base_url.as_deref(),
-                        include_code_review: self.include_code_review,
-                        no_proxy: self.args.no_proxy,
-                        requested_model: requested_model.as_deref(),
-                        failure_class: "usage_limit",
-                        allow_failed_profile: self.allow_failed_profile_recovery,
-                        resume_goal,
-                        attempted_profiles: &self.auto_goal_resume_attempted_profiles,
-                    };
-                    match self.goal_usage_limit_monitor.as_mut() {
-                        Some(monitor) => {
-                            plan_runtime_usage_limit_relaunch(monitor, status, &options)?
-                        }
-                        None => None,
-                    }
-                };
-                let retry_pool = self
-                    .goal_usage_limit_monitor
-                    .as_ref()
-                    .is_some_and(|monitor| monitor.recovery_retries_after_pool_round());
-                let failure_class = self
-                    .goal_usage_limit_monitor
-                    .as_ref()
-                    .map(|monitor| monitor.recovery_failure_class())
-                    .unwrap_or("usage_limit");
-                if plan.is_none() && retry_pool {
-                    if let Some(target) = self.runtime_recovery_log_target.as_ref() {
-                        target.log(&runtime_session_recovery_wait_message(
-                            self.transient_recovery_rounds.saturating_add(1),
-                            failure_class,
-                        ));
-                    }
-                    if !wait_for_runtime_recovery_round() {
-                        return Ok(false);
-                    }
-                    self.transient_recovery_rounds =
-                        self.transient_recovery_rounds.saturating_add(1);
-                    self.auto_goal_resume_attempted_profiles.clear();
-                    self.allow_failed_profile_recovery = true;
-                    let options = RuntimeUsageLimitResumeOptions {
-                        requested_profile: self.args.profile.as_deref(),
-                        no_auto_rotate: self.args.no_auto_rotate,
-                        skip_quota_check: self.args.skip_quota_check,
-                        base_url: self.args.base_url.as_deref(),
-                        include_code_review: self.include_code_review,
-                        no_proxy: self.args.no_proxy,
-                        requested_model: requested_model.as_deref(),
-                        failure_class,
-                        allow_failed_profile: self.allow_failed_profile_recovery,
-                        resume_goal,
-                        attempted_profiles: &self.auto_goal_resume_attempted_profiles,
-                    };
-                    plan = match self.goal_usage_limit_monitor.as_mut() {
-                        Some(monitor) => next_observed_runtime_recovery_plan(monitor, &options)?,
-                        None => None,
-                    };
-                }
-                plan
-            }
+            None => self.plan_runtime_usage_limit_relaunch_after_child(status)?,
         };
         let Some(plan) = plan else {
             return Ok(false);
@@ -243,6 +171,96 @@ impl RuntimeToolLaunchStrategy {
         }
         self.apply_goal_resume_relaunch(plan)?;
         Ok(true)
+    }
+
+    fn plan_runtime_usage_limit_relaunch_after_child(
+        &mut self,
+        status: &std::process::ExitStatus,
+    ) -> Result<Option<GoalResumeRelaunchPlan>> {
+        let requested_model = self.recovery_model.clone().or_else(|| {
+            runtime_launch_cli_model(&self.codex_args)
+                .or_else(|| codex_cli_config_override_value(&self.codex_args, "model"))
+        });
+        let resume_goal = self
+            .goal_usage_limit_monitor
+            .as_ref()
+            .is_some_and(|monitor| monitor.has_session_goal());
+        let mut plan =
+            self.initial_runtime_usage_limit_plan(status, requested_model.as_deref(), resume_goal)?;
+        let retry_pool = self
+            .goal_usage_limit_monitor
+            .as_ref()
+            .is_some_and(|monitor| monitor.recovery_retries_after_pool_round());
+        if plan.is_none() && retry_pool {
+            plan = self.retry_runtime_usage_limit_plan(requested_model.as_deref(), resume_goal)?;
+        }
+        Ok(plan)
+    }
+
+    fn initial_runtime_usage_limit_plan(
+        &mut self,
+        status: &std::process::ExitStatus,
+        requested_model: Option<&str>,
+        resume_goal: bool,
+    ) -> Result<Option<GoalResumeRelaunchPlan>> {
+        let options = RuntimeUsageLimitResumeOptions {
+            requested_profile: self.args.profile.as_deref(),
+            no_auto_rotate: self.args.no_auto_rotate,
+            skip_quota_check: self.args.skip_quota_check,
+            base_url: self.args.base_url.as_deref(),
+            include_code_review: self.include_code_review,
+            no_proxy: self.args.no_proxy,
+            requested_model,
+            failure_class: "usage_limit",
+            allow_failed_profile: self.allow_failed_profile_recovery,
+            resume_goal,
+            attempted_profiles: &self.auto_goal_resume_attempted_profiles,
+        };
+        match self.goal_usage_limit_monitor.as_mut() {
+            Some(monitor) => plan_runtime_usage_limit_relaunch(monitor, status, &options),
+            None => Ok(None),
+        }
+    }
+
+    fn retry_runtime_usage_limit_plan(
+        &mut self,
+        requested_model: Option<&str>,
+        resume_goal: bool,
+    ) -> Result<Option<GoalResumeRelaunchPlan>> {
+        let failure_class = self
+            .goal_usage_limit_monitor
+            .as_ref()
+            .map(|monitor| monitor.recovery_failure_class())
+            .unwrap_or("usage_limit");
+        if let Some(target) = self.runtime_recovery_log_target.as_ref() {
+            target.log(&runtime_session_recovery_wait_message(
+                self.transient_recovery_rounds.saturating_add(1),
+                failure_class,
+            ));
+        }
+        if !wait_for_runtime_recovery_round() {
+            return Ok(None);
+        }
+        self.transient_recovery_rounds = self.transient_recovery_rounds.saturating_add(1);
+        self.auto_goal_resume_attempted_profiles.clear();
+        self.allow_failed_profile_recovery = true;
+        let options = RuntimeUsageLimitResumeOptions {
+            requested_profile: self.args.profile.as_deref(),
+            no_auto_rotate: self.args.no_auto_rotate,
+            skip_quota_check: self.args.skip_quota_check,
+            base_url: self.args.base_url.as_deref(),
+            include_code_review: self.include_code_review,
+            no_proxy: self.args.no_proxy,
+            requested_model,
+            failure_class,
+            allow_failed_profile: self.allow_failed_profile_recovery,
+            resume_goal,
+            attempted_profiles: &self.auto_goal_resume_attempted_profiles,
+        };
+        match self.goal_usage_limit_monitor.as_mut() {
+            Some(monitor) => next_observed_runtime_recovery_plan(monitor, &options),
+            None => Ok(None),
+        }
     }
 }
 
