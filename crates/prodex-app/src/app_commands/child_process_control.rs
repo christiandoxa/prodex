@@ -384,7 +384,7 @@ fn bounded_output_reader(
     mut reader: impl Read + Send + 'static,
     max_output_bytes: usize,
     started: Instant,
-    line_match: Option<fn(&[u8]) -> bool>,
+    mut line_match: Option<fn(&[u8]) -> bool>,
 ) -> thread::JoinHandle<io::Result<(Vec<u8>, Option<Duration>)>> {
     thread::spawn(move || {
         let mut bytes = Vec::new();
@@ -404,16 +404,14 @@ fn bounded_output_reader(
                 bytes[line_start..].iter().position(|byte| *byte == b'\n')
             {
                 let line_end = line_start + relative_end;
-                if first_match.is_none()
-                    && line_match.is_some_and(|matches| matches(&bytes[line_start..line_end]))
-                {
+                if line_match.is_some_and(|matches| matches(&bytes[line_start..line_end])) {
                     first_match = Some(started.elapsed());
+                    line_match = None;
                 }
                 line_start = line_end + 1;
             }
         }
-        if first_match.is_none()
-            && line_start < bytes.len()
+        if line_start < bytes.len()
             && line_match.is_some_and(|matches| matches(&bytes[line_start..]))
         {
             first_match = Some(started.elapsed());
