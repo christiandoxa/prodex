@@ -28,6 +28,23 @@ test("npm lock workspace versions, not dependency versions, count as release met
   assert.equal(isVersionMetadataChangePath(change('      "version": "0.146.0",'), filePath), false);
 });
 
+test("npm lock comma-only workspace line edits do not count as version metadata", () => {
+  const filePath = "package-lock.json";
+  const change = {
+    changedLinesByFile: new Map([
+      [
+        filePath,
+        [
+          { type: "delete", text: '        "@christiandoxa/prodex-win32-x64": "0.427.0",' },
+          { type: "add", text: '        "@christiandoxa/prodex-win32-x64": "0.427.0"' },
+        ],
+      ],
+    ]),
+  };
+
+  assert.equal(isVersionMetadataChangePath(change, filePath), false);
+});
+
 test("release hygiene policy keeps ordered mandatory guards and fixtures", () => {
   assert.deepEqual(
     RELEASE_HYGIENE_POLICY.map((entry) => entry.label),
