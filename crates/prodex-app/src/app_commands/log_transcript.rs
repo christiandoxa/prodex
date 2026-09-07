@@ -30,7 +30,6 @@ pub(crate) fn collect_new_transcript_events(
     let mut events = Vec::new();
     for line in collect_new_followed_lines(path, state)? {
         for event in transcript_events_from_session_line(&line) {
-            let event = local_transcript_event(event);
             if events.last().is_some_and(|last: &TranscriptEvent| {
                 last.timestamp == event.timestamp
                     && last.source == event.source
@@ -44,11 +43,6 @@ pub(crate) fn collect_new_transcript_events(
     Ok(events)
 }
 
-pub(crate) fn local_transcript_event(mut event: TranscriptEvent) -> TranscriptEvent {
-    event.timestamp = local_log_timestamp(&event.timestamp);
-    event
-}
-
 pub(crate) fn latest_transcript_event() -> Result<Option<TranscriptEvent>> {
     for path in recent_session_log_paths()? {
         let tail = match read_runtime_log_tail(&path, SESSION_SNAPSHOT_TAIL_BYTES) {
@@ -58,7 +52,6 @@ pub(crate) fn latest_transcript_event() -> Result<Option<TranscriptEvent>> {
         let mut latest = None;
         for line in String::from_utf8_lossy(&tail).lines() {
             for event in transcript_events_from_session_line(line) {
-                let event = local_transcript_event(event);
                 if latest
                     .as_ref()
                     .is_none_or(|current: &TranscriptEvent| event.timestamp >= current.timestamp)
