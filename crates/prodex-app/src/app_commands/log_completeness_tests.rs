@@ -103,5 +103,13 @@ fn keeps_repeated_transcript_text_when_timestamps_differ() {
 
     let events = collect_new_transcript_events(&path, &mut FollowedLog::default()).unwrap();
     assert_eq!(events.len(), 2);
+    assert_eq!(
+        events[0].timestamp,
+        local_log_timestamp("2026-07-01T13:08:43.923Z")
+    );
+    assert_eq!(
+        events[1].timestamp,
+        local_log_timestamp("2026-07-01T13:08:44.923Z")
+    );
     fs::remove_dir_all(root).unwrap();
 }
