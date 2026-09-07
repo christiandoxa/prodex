@@ -21,6 +21,11 @@ fn opened_file_identity_matches_only_its_named_path() {
 
     assert!(opened_file_matches_path(&metadata, &first, &opened).unwrap());
     assert!(!opened_file_matches_path(&metadata, &second, &replaced).unwrap());
+    #[cfg(windows)]
+    assert_ne!(
+        opened_file_identity(&opened).unwrap(),
+        opened_file_identity(&replaced).unwrap()
+    );
 
     let _ = fs::remove_dir_all(root);
 }

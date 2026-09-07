@@ -1,6 +1,6 @@
 use super::super::session_prompt_write::{
     ExistingSessionPromptWrite, OpenProcessFile, ProcessDetails, PromptOutputReadRequest,
-    QueueRequestOutcome, SessionPromptWriteError, SessionPromptWriteService,
+    QueueRequestOutcome, SessionPromptWriteError, SessionPromptWriteService, output_source_id,
 };
 use super::{FakeProcessInspector, fixture, process, queue, request, service};
 use std::collections::{BTreeMap, HashMap};
@@ -71,6 +71,7 @@ fn incomplete_final_append_waits_for_newline_before_advancing() {
 #[test]
 fn accepted_write_omits_cursor_when_the_rollout_source_was_replaced() {
     let fixture = fixture();
+    let source_id_before = output_source_id(&fixture.rollout, super::THREAD).unwrap();
     let mut queue_control = queue(&fixture, None);
     queue_control.invocation.queued = true;
     queue_control.replace_rollout_on_queue = true;
@@ -80,6 +81,8 @@ fn accepted_write_omits_cursor_when_the_rollout_source_was_replaced() {
         .expect("an already accepted write must not fail with its optional cursor");
 
     assert_eq!(result.verification, "queue_pending_observed");
+    let source_id_after = output_source_id(&fixture.rollout, super::THREAD).unwrap();
+    assert_ne!(source_id_before, source_id_after);
     assert!(result.output_cursor.is_none());
 }
 
