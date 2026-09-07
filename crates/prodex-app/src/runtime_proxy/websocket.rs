@@ -130,14 +130,6 @@ fn handle_runtime_proxy_websocket_read(
             let _ = local_socket.close(frame);
             Ok(RuntimeWebsocketSessionReadAction::Break)
         }
-        Err(WsError::ConnectionClosed) | Err(WsError::AlreadyClosed) => {
-            runtime_proxy_log(
-                shared,
-                format!("websocket_session={session_id} local_connection_closed"),
-            );
-            websocket_session.close();
-            Ok(RuntimeWebsocketSessionReadAction::Break)
-        }
         Err(err) => {
             handle_runtime_proxy_websocket_read_error(session_id, shared, websocket_session, &err)
         }
