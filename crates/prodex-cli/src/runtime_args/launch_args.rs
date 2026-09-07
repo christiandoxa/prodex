@@ -375,8 +375,7 @@ pub(super) fn parse_harness_mode(
 }
 
 pub(super) fn parse_runtime_base_url(url: &str) -> std::result::Result<String, String> {
-    super::parse_credential_free_http_url(url, "--base-url")?;
-    Ok(url.to_string())
+    super::parse_credential_free_http_url(url, "--base-url").map(|_| url.to_string())
 }
 
 impl SuperArgs {
