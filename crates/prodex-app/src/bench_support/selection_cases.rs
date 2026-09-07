@@ -275,7 +275,7 @@ impl RuntimeProxyMixedPoolSelectionBenchCase {
     }
 
     pub fn select_fresh_response_candidate(&self) -> Option<String> {
-        select_runtime_response_candidate_for_route(
+        select_runtime_response_candidate_for_route_without_trace(
             &self.shared,
             RuntimeResponseCandidateSelection::fresh(
                 &self.excluded_profiles,
@@ -370,7 +370,7 @@ impl RuntimeProxyCompactSessionSelectionBenchCase {
     pub fn select_compact_session_candidate(&self) -> Option<String> {
         let session_profile = runtime_session_bound_profile(&self.shared, &self.session_id)
             .expect("benchmark compact session lookup should succeed");
-        select_runtime_response_candidate_for_route(
+        select_runtime_response_candidate_for_route_without_trace(
             &self.shared,
             RuntimeResponseCandidateSelection {
                 session_profile: session_profile.as_deref(),

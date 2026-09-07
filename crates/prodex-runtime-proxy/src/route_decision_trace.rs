@@ -322,6 +322,7 @@ pub struct RuntimeRouteDecisionTrace {
 pub struct RuntimeRouteDecisionTraceBuilder {
     trace: RuntimeRouteDecisionTrace,
     candidate_indexes: BTreeMap<String, usize>,
+    enabled: bool,
 }
 
 impl RuntimeRouteDecisionTraceBuilder {
@@ -348,7 +349,16 @@ impl RuntimeRouteDecisionTraceBuilder {
                 truncation,
             },
             candidate_indexes: BTreeMap::new(),
+            enabled: true,
         }
+    }
+
+    /// Creates a recorder that preserves selection call contracts without retaining diagnostics.
+    #[doc(hidden)]
+    pub fn without_recording(route: RuntimeRouteDecisionRoute) -> Self {
+        let mut builder = Self::new(route, None);
+        builder.enabled = false;
+        builder
     }
 
     pub fn set_resolved_model(&mut self, model: Option<&str>) {
@@ -362,6 +372,9 @@ impl RuntimeRouteDecisionTraceBuilder {
         stage: RuntimeRouteDecisionStage,
         outcome: RuntimeRouteDecisionStageOutcome,
     ) {
+        if !self.enabled {
+            return;
+        }
         if let Some(existing) = self
             .trace
             .stages
@@ -391,6 +404,9 @@ impl RuntimeRouteDecisionTraceBuilder {
         hard: bool,
         outcome: RuntimeRouteAffinityOutcome,
     ) {
+        if !self.enabled {
+            return;
+        }
         let candidate_id = candidate_key.and_then(|key| self.candidate_id(key));
         self.trace.affinity = RuntimeRouteAffinityDecision {
             kind,
@@ -417,6 +433,9 @@ impl RuntimeRouteDecisionTraceBuilder {
         candidate_key: &str,
         mut input: RuntimeRouteCandidateDecisionInput,
     ) -> Option<String> {
+        if !self.enabled {
+            return None;
+        }
         let index = if let Some(index) = self.candidate_indexes.get(candidate_key).copied() {
             index
         } else {
@@ -498,6 +517,9 @@ impl RuntimeRouteDecisionTraceBuilder {
     }
 
     pub fn mark_selected(&mut self, candidate_key: &str) {
+        if !self.enabled {
+            return;
+        }
         let Some(candidate_id) = self.candidate_id(candidate_key) else {
             return;
         };
