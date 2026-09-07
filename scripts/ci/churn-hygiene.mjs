@@ -479,6 +479,15 @@ function matchingChurnAllowance(allowances, summary, commits) {
   return (
     allowances.find((allowance) => {
       const caps = allowance?.caps;
+      const allowedRepeatedSubjects = allowance?.allowedRepeatedSubjects;
+      const requiredSubjects = allowance?.requiredSubjects;
+      const validAllowedRepeatedSubjects =
+        allowedRepeatedSubjects === undefined ||
+        (Array.isArray(requiredSubjects) &&
+          Array.isArray(allowedRepeatedSubjects) &&
+          allowedRepeatedSubjects.every(
+            (subject) => typeof subject === "string" && requiredSubjects.includes(subject),
+          ));
       return (
         typeof allowance?.id === "string" &&
         allowance.id.trim() !== "" &&
@@ -489,6 +498,7 @@ function matchingChurnAllowance(allowances, summary, commits) {
         allowance.requiredSubjects.every(
           (subject) => typeof subject === "string" && subjects.has(subject),
         ) &&
+        validAllowedRepeatedSubjects &&
         Number.isSafeInteger(caps?.maxFiles) &&
         Number.isSafeInteger(caps?.maxBehaviorFiles) &&
         Number.isSafeInteger(caps?.maxLines) &&
@@ -600,8 +610,9 @@ function normalizedSubjectTitle(title) {
     .trim();
 }
 
-function commitSubjectIssues(commits) {
+function commitSubjectIssues(commits, options = {}) {
   const issues = [];
+  const allowedRepeatedSubjects = new Set(options.allowedRepeatedSubjects ?? []);
   const titles = new Map();
   for (const commit of commits) {
     const parsed = parseConventionalSubject(commit.subject);
@@ -624,7 +635,7 @@ function commitSubjectIssues(commits) {
   }
 
   for (const bucket of titles.values()) {
-    if (bucket.length < 3) {
+    if (bucket.length < 3 || bucket.every((commit) => allowedRepeatedSubjects.has(commit.subject))) {
       continue;
     }
     issues.push(
@@ -777,7 +788,9 @@ async function main() {
     structuralExtractionAccepted,
     commits,
   );
-  const subjectIssues = commitSubjectIssues(commits);
+  const subjectIssues = commitSubjectIssues(commits, {
+    allowedRepeatedSubjects: churnAllowance?.allowedRepeatedSubjects,
+  });
   const checkIssues = [...issues, ...declarationIssues, ...subjectIssues];
 
   if (args.json) {
@@ -823,6 +836,7 @@ async function main() {
 
 export {
   DEFAULT_THRESHOLDS,
+  commitSubjectIssues,
   mechanicalOnlyDeclared,
   matchingChurnAllowance,
   structuralExtractionApplies,
