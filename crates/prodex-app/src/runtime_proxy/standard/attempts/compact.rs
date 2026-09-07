@@ -48,6 +48,24 @@ pub(in crate::runtime_proxy::standard) fn attempt_runtime_standard_request(
         });
     };
     let mut recovery_steps = RuntimeProfileUnauthorizedRecoveryStep::ordered();
+    run_runtime_compact_request_loop(
+        request_id,
+        request,
+        shared,
+        profile_name,
+        request_session_id.as_deref(),
+        &mut recovery_steps,
+    )
+}
+
+fn run_runtime_compact_request_loop(
+    request_id: u64,
+    request: &RuntimeProxyRequest,
+    shared: &RuntimeRotationProxyShared,
+    profile_name: &str,
+    request_session_id: Option<&str>,
+    recovery_steps: &mut std::array::IntoIter<RuntimeProfileUnauthorizedRecoveryStep, 2>,
+) -> Result<RuntimeStandardAttempt> {
     loop {
         let upstream_auth =
             runtime_profile_usage_auth(shared, profile_name).inspect_err(|err| {
@@ -85,55 +103,97 @@ pub(in crate::runtime_proxy::standard) fn attempt_runtime_standard_request(
                     );
                 }
             };
-        let compact_request = is_runtime_compact_path(&request.path_and_query);
-        if !compact_request || response.status().is_success() {
-            return forward_runtime_compact_success_attempt(
-                request_id,
-                shared,
-                profile_name,
-                request_session_id.as_deref(),
-                response,
-                compact_request,
-            );
-        }
-
-        let status = response.status().as_u16();
-        let parts = match await_runtime_proxy_async_task(
+        if let Some(attempt) = handle_runtime_compact_response(
+            request_id,
+            request,
             shared,
-            "compact_buffer_response",
-            buffer_runtime_proxy_async_response_parts(response, Vec::new()),
-        ) {
-            Ok(parts) => parts,
-            Err(err) => {
-                return handle_runtime_standard_upstream_error(
-                    shared,
-                    profile_name,
-                    RuntimeRouteKind::Compact,
-                    "compact_buffer_response",
-                    err,
-                );
-            }
-        };
-        if status == 401
-            && runtime_try_recover_profile_auth_from_unauthorized_steps(
-                request_id,
-                shared,
-                profile_name,
-                RuntimeRouteKind::Compact,
-                &mut recovery_steps,
-            )
-        {
-            continue;
+            profile_name,
+            request_session_id,
+            recovery_steps,
+            response,
+        )? {
+            return Ok(attempt);
         }
-        return handle_runtime_compact_error_parts(
+    }
+}
+
+fn handle_runtime_compact_response(
+    request_id: u64,
+    request: &RuntimeProxyRequest,
+    shared: &RuntimeRotationProxyShared,
+    profile_name: &str,
+    request_session_id: Option<&str>,
+    recovery_steps: &mut std::array::IntoIter<RuntimeProfileUnauthorizedRecoveryStep, 2>,
+    response: reqwest::Response,
+) -> Result<Option<RuntimeStandardAttempt>> {
+    let compact_request = is_runtime_compact_path(&request.path_and_query);
+    if !compact_request || response.status().is_success() {
+        return forward_runtime_compact_success_attempt(
             request_id,
             shared,
             profile_name,
+            request_session_id,
+            response,
             compact_request,
-            status,
-            parts,
-        );
+        )
+        .map(Some);
     }
+    handle_runtime_compact_non_success_response(
+        request_id,
+        shared,
+        profile_name,
+        compact_request,
+        recovery_steps,
+        response,
+    )
+}
+
+fn handle_runtime_compact_non_success_response(
+    request_id: u64,
+    shared: &RuntimeRotationProxyShared,
+    profile_name: &str,
+    compact_request: bool,
+    recovery_steps: &mut std::array::IntoIter<RuntimeProfileUnauthorizedRecoveryStep, 2>,
+    response: reqwest::Response,
+) -> Result<Option<RuntimeStandardAttempt>> {
+    let status = response.status().as_u16();
+    let parts = match await_runtime_proxy_async_task(
+        shared,
+        "compact_buffer_response",
+        buffer_runtime_proxy_async_response_parts(response, Vec::new()),
+    ) {
+        Ok(parts) => parts,
+        Err(err) => {
+            return handle_runtime_standard_upstream_error(
+                shared,
+                profile_name,
+                RuntimeRouteKind::Compact,
+                "compact_buffer_response",
+                err,
+            )
+            .map(Some);
+        }
+    };
+    if status == 401
+        && runtime_try_recover_profile_auth_from_unauthorized_steps(
+            request_id,
+            shared,
+            profile_name,
+            RuntimeRouteKind::Compact,
+            recovery_steps,
+        )
+    {
+        return Ok(None);
+    }
+    handle_runtime_compact_error_parts(
+        request_id,
+        shared,
+        profile_name,
+        compact_request,
+        status,
+        parts,
+    )
+    .map(Some)
 }
 
 fn handle_runtime_compact_error_parts(

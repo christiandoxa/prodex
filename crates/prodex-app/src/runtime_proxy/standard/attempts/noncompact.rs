@@ -62,6 +62,24 @@ pub(in crate::runtime_proxy::standard) fn attempt_runtime_noncompact_standard_re
         });
     };
     let mut recovery_steps = RuntimeProfileUnauthorizedRecoveryStep::ordered();
+    run_runtime_noncompact_request_loop(
+        request_id,
+        request,
+        shared,
+        profile_name,
+        request_session_id.as_deref(),
+        &mut recovery_steps,
+    )
+}
+
+fn run_runtime_noncompact_request_loop(
+    request_id: u64,
+    request: &RuntimeProxyRequest,
+    shared: &RuntimeRotationProxyShared,
+    profile_name: &str,
+    request_session_id: Option<&str>,
+    recovery_steps: &mut std::array::IntoIter<RuntimeProfileUnauthorizedRecoveryStep, 2>,
+) -> Result<RuntimeStandardAttempt> {
     loop {
         let upstream_auth =
             runtime_profile_usage_auth(shared, profile_name).inspect_err(|err| {
@@ -105,8 +123,8 @@ pub(in crate::runtime_proxy::standard) fn attempt_runtime_noncompact_standard_re
                 request,
                 shared,
                 profile_name,
-                request_session_id: request_session_id.as_deref(),
-                recovery_steps: &mut recovery_steps,
+                request_session_id,
+                recovery_steps,
             },
             response,
         )? {
@@ -137,69 +155,120 @@ fn handle_runtime_noncompact_response(
         recovery_steps,
     } = context;
     if runtime_wham_usage_path(&request.path_and_query) {
-        let status = response.status().as_u16();
-        let parts = match buffer_runtime_noncompact_response(
-            shared,
-            "standard_buffer_usage_response",
-            response,
-        ) {
-            Ok(parts) => parts,
-            Err(err) => {
-                return handle_runtime_standard_upstream_error(
-                    shared,
-                    profile_name,
-                    RuntimeRouteKind::Standard,
-                    "standard_buffer_usage_response",
-                    err,
-                )
-                .map(Some);
-            }
-        };
-        if runtime_noncompact_should_recover_auth(
-            request_id,
-            shared,
-            profile_name,
-            status,
-            recovery_steps,
-        ) {
-            return Ok(None);
-        }
-        return handle_runtime_noncompact_usage_parts(
+        return handle_runtime_noncompact_usage_response(
             request_id,
             shared,
             profile_name,
             request_session_id,
-            status,
-            parts,
-        )
-        .map(Some);
+            recovery_steps,
+            response,
+        );
     }
     if response.status().is_success() {
-        remember_runtime_session_id(
+        return handle_runtime_noncompact_success_response(
             shared,
             profile_name,
             request_session_id,
-            RuntimeRouteKind::Standard,
-        )?;
-        let response = match forward_runtime_standard_success_response(shared, request, response) {
-            Ok(response) => response,
-            Err(err) => {
-                return handle_runtime_standard_upstream_error(
-                    shared,
-                    profile_name,
-                    RuntimeRouteKind::Standard,
-                    "standard_forward_response",
-                    err,
-                )
-                .map(Some);
-            }
-        };
-        return Ok(Some(RuntimeStandardAttempt::Success {
-            profile_name: profile_name.to_string(),
+            request,
             response,
-        }));
+        );
     }
+    handle_runtime_noncompact_error_response(
+        request_id,
+        shared,
+        profile_name,
+        request_session_id,
+        recovery_steps,
+        response,
+    )
+}
 
+fn handle_runtime_noncompact_usage_response(
+    request_id: u64,
+    shared: &RuntimeRotationProxyShared,
+    profile_name: &str,
+    request_session_id: Option<&str>,
+    recovery_steps: &mut std::array::IntoIter<RuntimeProfileUnauthorizedRecoveryStep, 2>,
+    response: reqwest::Response,
+) -> Result<Option<RuntimeStandardAttempt>> {
+    let status = response.status().as_u16();
+    let parts = match buffer_runtime_noncompact_response(
+        shared,
+        "standard_buffer_usage_response",
+        response,
+    ) {
+        Ok(parts) => parts,
+        Err(err) => {
+            return handle_runtime_standard_upstream_error(
+                shared,
+                profile_name,
+                RuntimeRouteKind::Standard,
+                "standard_buffer_usage_response",
+                err,
+            )
+            .map(Some);
+        }
+    };
+    if runtime_noncompact_should_recover_auth(
+        request_id,
+        shared,
+        profile_name,
+        status,
+        recovery_steps,
+    ) {
+        return Ok(None);
+    }
+    handle_runtime_noncompact_usage_parts(
+        request_id,
+        shared,
+        profile_name,
+        request_session_id,
+        status,
+        parts,
+    )
+    .map(Some)
+}
+
+fn handle_runtime_noncompact_success_response(
+    shared: &RuntimeRotationProxyShared,
+    profile_name: &str,
+    request_session_id: Option<&str>,
+    request: &RuntimeProxyRequest,
+    response: reqwest::Response,
+) -> Result<Option<RuntimeStandardAttempt>> {
+    remember_runtime_session_id(
+        shared,
+        profile_name,
+        request_session_id,
+        RuntimeRouteKind::Standard,
+    )?;
+    let response = match forward_runtime_standard_success_response(shared, request, response) {
+        Ok(response) => response,
+        Err(err) => {
+            return handle_runtime_standard_upstream_error(
+                shared,
+                profile_name,
+                RuntimeRouteKind::Standard,
+                "standard_forward_response",
+                err,
+            )
+            .map(Some);
+        }
+    };
+    Ok(Some(RuntimeStandardAttempt::Success {
+        profile_name: profile_name.to_string(),
+        response,
+    }))
+}
+
+fn handle_runtime_noncompact_error_response(
+    request_id: u64,
+    shared: &RuntimeRotationProxyShared,
+    profile_name: &str,
+    request_session_id: Option<&str>,
+    recovery_steps: &mut std::array::IntoIter<RuntimeProfileUnauthorizedRecoveryStep, 2>,
+    response: reqwest::Response,
+) -> Result<Option<RuntimeStandardAttempt>> {
     let status = response.status().as_u16();
     let parts =
         match buffer_runtime_noncompact_response(shared, "standard_buffer_response", response) {
