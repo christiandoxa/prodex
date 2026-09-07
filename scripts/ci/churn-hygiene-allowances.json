@@ -1866,7 +1866,8 @@
       "refactor(prodex-app): simplify websocket response branches",
       "perf(runtime): skip diagnostic traces in selection benches",
       "test(ci): align production share with selection instrumentation",
-      "fix(ci): allow explicitly audited repeated subjects"
+      "fix(ci): allow explicitly audited repeated subjects",
+      "chore(ci): record exact 0.427.0 churn measurements"
     ],
     "allowedRepeatedSubjects": [
       "test(ci): refresh production share expectations"
@@ -1877,6 +1878,6 @@
       "maxLines": 15250,
       "maxFileLines": 600
     },
-    "reason": "Reviewed the exact 0.427.0 campaign covering safe Claude OAuth import and launch, one profile-pinned OpenAI hello inference per account, model-aware primary and Luna Reserve capacity, bounded pre-commit quota/rate/overload/transport recovery, complete redacted log and authoritative throughput events, an official-unmodified-Codex wrapper-only package, six pinned latest-stable optional tools, initialized existing-session Prompt Write and monotonic Output Read, deterministic regression and load evidence, Codex-purity checks across npm/package-lock, installers, binaries, SBOM, container rootfs, and release assets, staged exact-SHA release publication, synchronized metadata, and the later bounded recovery, purity-alias, CI-hygiene, production-share, npm-lock guard, Sonar-complexity, benchmark hot-path, and Windows compatibility repairs. The measured final range is currently 225 files, 195 behavior files, and 14,947 changed lines, with 591 lines in the largest focused E2E file. The caps provide only narrow headroom for these named release-critical repairs; the exact repeated production-share subject is explicitly accepted because its earlier two instances were already audited and history cannot be rewritten. Global churn thresholds and all correctness, security, compatibility, test, and release gates remain enforced."
+    "reason": "Reviewed the exact 0.427.0 campaign covering safe Claude OAuth import and launch, one profile-pinned OpenAI hello inference per account, model-aware primary and Luna Reserve capacity, bounded pre-commit quota/rate/overload/transport recovery, complete redacted log and authoritative throughput events, an official-unmodified-Codex wrapper-only package, six pinned latest-stable optional tools, initialized existing-session Prompt Write and monotonic Output Read, deterministic regression and load evidence, Codex-purity checks across npm/package-lock, installers, binaries, SBOM, container rootfs, and release assets, staged exact-SHA release publication, synchronized metadata, and the later bounded recovery, purity-alias, CI-hygiene, production-share, npm-lock guard, Sonar-complexity, benchmark hot-path, and Windows compatibility repairs. The measured final range is 227 files, 197 behavior files, and 14,992 changed lines, with 591 lines in the largest focused E2E file. The caps provide only narrow headroom for these named release-critical repairs; the exact repeated production-share subject is explicitly accepted because its earlier two instances were already audited and history cannot be rewritten. Global churn thresholds and all correctness, security, compatibility, test, and release gates remain enforced."
   }
 ]
