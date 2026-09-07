@@ -112,9 +112,7 @@ impl<F> RuntimePrecommitLoopState<F> {
     }
 
     pub fn recovery_budget_exhausted(&self) -> bool {
-        (!self.saw_overload_failure
-            && self.recovery_sweeps
-                >= runtime_proxy_crate::RUNTIME_PROXY_PRECOMMIT_RECOVERY_SWEEP_LIMIT)
+        self.recovery_sweeps >= runtime_proxy_crate::RUNTIME_PROXY_PRECOMMIT_RECOVERY_SWEEP_LIMIT
             || self.recovery_started_at.is_some_and(|started_at| {
                 started_at.elapsed()
                     >= Duration::from_millis(
@@ -284,6 +282,18 @@ mod tests {
         state.record_transport_failure_at("responses_upstream_request");
 
         assert!(state.saw_transient_failure());
+    }
+
+    #[test]
+    fn overload_recovery_sweeps_are_bounded() {
+        let mut state = RuntimePrecommitLoopState::<()>::new();
+
+        state.record_overload_failure();
+        state.record_recovery_sweep();
+        assert!(!state.recovery_budget_exhausted());
+        state.record_recovery_sweep();
+
+        assert!(state.recovery_budget_exhausted());
     }
 
     #[test]
