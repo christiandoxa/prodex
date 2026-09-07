@@ -1,6 +1,5 @@
 use super::super_expose::{
     ExposeEndpointMode, bind_expose_listener, validate_existing_cloudflare_hostname,
-    validate_expose_launch_args,
 };
 use super::*;
 use std::net::{Shutdown, SocketAddr};
@@ -142,21 +141,27 @@ fn explicit_super_tunnel_keeps_the_quick_tunnel_backend_contract() {
 }
 
 #[test]
-fn super_expose_accepts_dry_run_before_startup_side_effects() {
-    let crate::Commands::Super(mut args) =
-        crate::parse_cli_command_from(["prodex", "s"]).expect("Super args should parse")
-    else {
-        panic!("expected Super args");
+fn super_expose_dry_run_skips_external_client_probe() {
+    let crate::Commands::Expose(args) = crate::parse_cli_command_from([
+        "prodex",
+        "s",
+        "expose",
+        "--tunnel-provider",
+        "openai",
+        "--openai-tunnel-id",
+        "tunnel_0123456789abcdef0123456789abcdef",
+        "--dry-run",
+    ])
+    .expect("Super expose dry-run should parse") else {
+        panic!("expected expose command");
     };
-    args.dry_run = true;
-    assert!(validate_expose_launch_args(&args).is_ok());
+    assert!(args.super_args.as_ref().is_some_and(|args| args.dry_run));
     let _env_lock = crate::TestEnvVarGuard::lock();
     let _key = crate::TestEnvVarGuard::unset("CONTROL_PLANE_API_KEY");
     let _binary = crate::TestEnvVarGuard::set(
         "PRODEX_TUNNEL_CLIENT_BIN",
         "/home/test-user/missing/tunnel-client",
     );
-    let args = openai_args();
     assert!(matches!(
         super::super_expose::select_expose_endpoint(&args, false),
         Ok(ExposeEndpointMode::OpenAiSecureMcp { tunnel_id, client_version })
