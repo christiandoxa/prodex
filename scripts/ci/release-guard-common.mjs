@@ -153,11 +153,20 @@ function isNpmLockWorkspaceVersionMetadataChange(change, filePath) {
   if (normalizeGitPath(filePath) !== "package-lock.json") {
     return false;
   }
-  return changedLinesForPath(change, filePath).some((line) =>
+  const metadataLines = changedLinesForPath(change, filePath).filter((line) =>
     /^[ \t]*"@christiandoxa\/prodex(?:-[^"]+)?"[ \t]*:[ \t]*"v?\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?"[, \t]*$/.test(
       line.text,
     ),
   );
+  const normalizedLines = (type) =>
+    new Set(
+      metadataLines
+        .filter((line) => (line.type ?? "add") === type)
+        .map((line) => line.text.trim().replace(/,[ \t]*$/, "")),
+    );
+  const added = normalizedLines("add");
+  const deleted = normalizedLines("delete");
+  return [...added].some((line) => !deleted.has(line)) || [...deleted].some((line) => !added.has(line));
 }
 
 export function isVersionMetadataChangePath(change, filePath) {
