@@ -13,17 +13,26 @@ transport semantics. This is an implementation campaign, not a line-count exerci
 - `LAST_EXACT_GREEN_SOURCE_ANCHOR`: `8ba7d893fd1385593ae589f97f0c37949835c156`
 - Baseline ancestry: `origin/main` (`ff7976858c048269d73e970356aa41f4d0b4cafb`) is an ancestor.
 - Integration branch: `refactor/parallel-integration-20260908`
-- Baseline source: historical `origin/refactor/428-integration-20260907`; no active PR or descendant campaign was found.
+- Baseline source: historical `origin/refactor/428-integration-20260907`.
+- At the d253 qualification boundary, `origin/refactor/parallel-integration-20260908` resolved to
+  `d253232e32f92c56b9f49b9fa68ee00f28d1ac35`; no current integration worktree was registered.
 - Main write authorization: not granted. Release hold: true. Checkpoint push scope: campaign branch only.
-- Protected main-worktree WIP: `.playwright-mcp/`; `crates/prodex-app/src/runtime_broker/registry/direct.rs`.
+- Protected main-worktree WIP: `crates/prodex-app/build.rs`;
+  `crates/prodex-app/src/runtime_launch/proxy_startup/gemini_sse_state/mojo.rs`;
+  `crates/prodex-mojo-core/src/rich/anthropic.rs`;
+  `migration/mojo-0.419.2-candidate-backlog.md`;
+  `migration/mojo-catalog-ownership.md`; `migration/retry-ownership-0.419.2.md`;
+  `mojo/prodex_app/`; `mojo/prodex_core/rich_anthropic.mojo`.
 
 ## Status
 
 `CAMPAIGN_PARTIAL`; B's catalog, C's throughput, A's general refactor checkpoints, Wave 4, and
 Wave 5 are integrated. Exact CI `34205078378` passed on integration checkpoint
 `8ba7d893fd1385593ae589f97f0c37949835c156` with 72 successful, 3 skipped, and 0 failed jobs; that
-SHA is the latest exact-green source anchor. Wave 6 has two reviewed source checkpoints and one
-audit-only disposition pending serial integration in the next substantive checkpoint. Provider
+SHA is the latest exact-green source anchor. Wave 6 source checkpoints and its audit disposition
+are integrated into `d253232e32f92c56b9f49b9fa68ee00f28d1ac35`; exact CI `34209154761` completed
+with failure, so d253 is not exact-green and qualification repair is active. No next
+implementation wave may start until the resulting integration SHA is exact-green. Provider
 catalog and throughput surfaces remain protected. The wider domain audit remains open and this
 campaign is partial.
 
@@ -68,6 +77,13 @@ integration branch. Heavy full-workspace, Mojo, and campaign integration gates r
 - Draft integration PR: `#71`, base `refactor/lean-campaign-20260908-core`, head
   `refactor/parallel-integration-20260908`; its body records verified checkpoints and SHA-scoped
   gate evidence, with the latest integration head resolved separately from the last exact green source anchor.
+- d253 qualification CI `34209154761` failed only in Process guard (node) job `102005744408` and
+  prodex-app local-rewrite job `102005810510`. The exact-d253 canonical report is total `374,546`
+  production LOC with release-floor and Mojo non-regression PASS; the gateway focused test passed
+  three times on clean d253, its path is unchanged since `8ba7d893`, and no gateway source repair
+  is tied to that timing-sensitive 502 result.
+- Qualification repair checkpoint `b41281fb8f6ef0a2cce313936788b0d4d16c7249` is remote-verified;
+  its independent exact-diff review returned NO_FINDING.
 - B1 repair CI run `34184199873` completed with failure on the exact SHA `a32b107d`: Sonar
   reported `rust:S3776` cognitive complexity `27` at
   `crates/prodex-app/src/runtime_tools/sub_agent_catalog.rs:66`, and the Windows prodex-app
@@ -119,8 +135,9 @@ integration branch. Heavy full-workspace, Mojo, and campaign integration gates r
 - Storage cleanup checkpoint: before cleanup the host was `68%` used / `145G` available; after
   cleanup it was `62%` used / `173G` available. Removed exact campaign-owned predecessor and
   completed worker/B2 worktrees after clean/remote/process verification, reclaiming approximately
-  `28G`. Main `target/` (`5.7G`) and integration `target/` (`21G`) are retained as protected or
-  reusable caches; A2's clean handoff worktree is retained without a build target.
+  `28G`. At the qualification recheck, main and integration targets were absent and no A2 handoff
+  worktree/cache was retained. Historical campaign/release/issue64 worktrees include dirty or
+  unknown ownership, and two prunable records remain protected and untouched.
 - Local no-tests gate evidence: `npm run ci -- --no-tests --jobs 1` exited `0` after release hygiene,
   metadata, workspace all-target/all-feature check, strict clippy, and all non-test guards passed.
   The preceding `npm run ci -- --serial --jobs 1` logged PASS for test-fast and test-serial but
@@ -212,23 +229,23 @@ and 0 BLOCKED; it is not the current post-Wave-5 inventory.
 | --- | --- | --- | --- | --- | --- | --- |
 | authn | `585f6b3cc5b98c230e68c9a31de8d199822fc650` | `worker/refactor-authn-wave5-20260908` | worker worktree | `crates/prodex-authn` B0-004 | authz, application, runtime-policy, ledger/docs | audit-only KEEP_WITH_REASON; no source change; reviewer NO_FINDING; stopped |
 | authz | `585f6b3cc5b98c230e68c9a31de8d199822fc650` | `worker/refactor-authz-wave5-20260908` | worker worktree | `crates/prodex-authz` B0-005 | authn, application, runtime-policy, ledger/docs | audit-only KEEP_WITH_REASON; no source change; reviewer NO_FINDING; stopped |
-| runtime-policy | `585f6b3cc5b98c230e68c9a31de8d199822fc650` | `worker/refactor-runtime-policy-wave5-20260908` | worker worktree | `crates/prodex-runtime-policy` B0-029 | authn, authz, application, Mojo source/ABI, ledger/docs | checkpoint `696ab0befdb0b5246f49cc87b454aef3b3ac02eb` pushed; reviewer NO_FINDING; serial integration in this checkpoint |
+| runtime-policy | `585f6b3cc5b98c230e68c9a31de8d199822fc650` | `worker/refactor-runtime-policy-wave5-20260908` | worker worktree | `crates/prodex-runtime-policy` B0-029 | authn, authz, application, Mojo source/ABI, ledger/docs | checkpoint `696ab0befdb0b5246f49cc87b454aef3b3ac02eb` pushed; reviewer NO_FINDING; integrated as `8ba7d893fd1385593ae589f97f0c37949835c156` |
 
 Wave 5 evidence changes the inventory to 56 UNREVIEWED, 0 IN_PROGRESS, 20 REFACTORED,
-13 KEEP_WITH_REASON, and 0 BLOCKED. The resulting integration SHA is resolved externally after
-this substantive checkpoint; it is not recorded inside its own commit.
+13 KEEP_WITH_REASON, and 0 BLOCKED; its source checkpoint is integrated at
+`8ba7d893fd1385593ae589f97f0c37949835c156`.
 
 ## Wave 6 ownership
 
 | Worker | Base SHA | Branch | Worktree | Owns | Excludes | Status |
 | --- | --- | --- | --- | --- | --- | --- |
-| CLI | `8ba7d893fd1385593ae589f97f0c37949835c156` | `worker/refactor-cli-wave6-20260908` | worker worktree | `crates/prodex-cli` B0-007 | filesystem, session-store, runtime, ledger/docs | checkpoint `d9ab67d7` pushed; reviewer NO_FINDING; serial integration in this checkpoint |
+| CLI | `8ba7d893fd1385593ae589f97f0c37949835c156` | `worker/refactor-cli-wave6-20260908` | worker worktree | `crates/prodex-cli` B0-007 | filesystem, session-store, runtime, ledger/docs | checkpoint `d9ab67d7` pushed; reviewer NO_FINDING; integrated into `d253232e32f92c56b9f49b9fa68ee00f28d1ac35` |
 | shared-fs | `8ba7d893fd1385593ae589f97f0c37949835c156` | `worker/refactor-shared-fs-wave6-20260908` | worker worktree | `crates/prodex-shared-codex-fs` B0-013 | CLI, session-store, runtime, ledger/docs | audit-only KEEP_WITH_REASON; no source checkpoint; stopped |
-| session-store | `8ba7d893fd1385593ae589f97f0c37949835c156` | `worker/refactor-session-store-wave6-20260908` | worker worktree | `crates/prodex-session-store` B0-014 | CLI, shared-fs, runtime, ledger/docs | checkpoint `bce0f1d5` pushed; reviewer NO_FINDING; serial integration in this checkpoint |
+| session-store | `8ba7d893fd1385593ae589f97f0c37949835c156` | `worker/refactor-session-store-wave6-20260908` | worker worktree | `crates/prodex-session-store` B0-014 | CLI, shared-fs, runtime, ledger/docs | checkpoint `bce0f1d5` pushed; reviewer NO_FINDING; integrated into `d253232e32f92c56b9f49b9fa68ee00f28d1ac35` |
 
 Wave 6 evidence changes the inventory to 53 UNREVIEWED, 0 IN_PROGRESS, 22 REFACTORED,
-14 KEEP_WITH_REASON, and 0 BLOCKED. The resulting integration SHA is resolved externally after
-this substantive checkpoint; it is not recorded inside its own commit.
+14 KEEP_WITH_REASON, and 0 BLOCKED; its source checkpoints and ledger disposition are integrated
+into `d253232e32f92c56b9f49b9fa68ee00f28d1ac35`, whose exact qualification failed pending repair.
 
 ## Known checkpoints and blockers
 
@@ -238,16 +255,12 @@ this substantive checkpoint; it is not recorded inside its own commit.
 
 ## Cleanup and next action
 
-- Campaign worktree is owned by this campaign. Its `target/` build cache is retained while validation continues.
-- All workers from the previous completed waves were stopped and cleaned up. Wave 4 workers A2
-  and E were stopped after their checkpoint/disposition, and reviewer D was stopped after the
-  exact A2 review. No campaign-created server or watcher remains active. Removed worktrees:
-  predecessor lean campaign, A/B/C completed worker worktrees, and B2 audit-only worktree; four
-  stale prunable records were removed after verifying their directories were absent. Retained:
-  integration worktree/cache for campaign validation, the clean A2 checkpoint worktree pending
-  safe post-integration removal, and remote worker branches/checkpoints. No scratch fixture,
-  server, watcher, credential, or raw log was created for commit.
-- Next action: push this substantive checkpoint, resolve its exact CI, clean completed Wave 6
-  worktrees and worker targets, then launch the next parallel non-overlapping audit wave for
-  unresolved production domains; do not claim campaign completion while any `UNREVIEWED`,
-  `IN_PROGRESS`, or `BLOCKED` row remains.
+- No current integration or A2 handoff worktree/cache is retained. Historical campaign,
+  release, and issue64 worktrees with dirty or unknown ownership remain protected; two prunable
+  records remain untouched. Remote worker branches/checkpoints remain as evidence. No
+  campaign-created server or watcher remains active, and no scratch fixture, credential, or raw
+  log was created for this repair.
+- Next action at this boundary: serially integrate the verified repair checkpoint, run exact CI,
+  clean only completed LEAN-CAMPAIGN-owned artifacts after handoff, and do not launch the next
+  implementation wave until the resulting integration SHA is exact-green. Do not claim campaign
+  completion while any `UNREVIEWED`, `IN_PROGRESS`, or `BLOCKED` row remains.
