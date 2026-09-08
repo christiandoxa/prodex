@@ -17,9 +17,11 @@ transport semantics. This is an implementation campaign, not a line-count exerci
 
 ## Status
 
-`IN_PROGRESS`; parallel first wave is active from integration base `a32b107d…`. B1 catalog repair
-CI is pending; workers may audit/read independent surfaces, but integration remains blocked on any
-failed checkpoint. The wider domain audit remains open.
+`IN_PROGRESS`; first-wave implementation is held at integration base `a32b107d…` because its
+repair CI failed. A and C are paused with clean worktrees; B is repairing the reported catalog
+complexity guard issue; D is completing the read-only review. No worker checkpoint is accepted
+until the failed CI state has a deliberate repair or a reproduced, separately classified blocker.
+The wider domain audit remains open.
 
 ## Parallel ownership ledger
 
@@ -27,10 +29,10 @@ Integration branch: `refactor/parallel-integration-20260908`.
 
 | Worker | Workstream | Base SHA | Branch | Worktree | Owns | Excludes | Status |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| A | General lean refactor | `a32b107df02d9b5b503b8d545a4fb24b7754e997` | `worker/refactor-general-20260908` | worker worktree | CLI, orchestration, profile/auth, session, runtime support, gateway, storage, config, reports, tooling outside B/C | provider catalog surfaces; throughput/log-throughput surfaces | active |
-| B | Provider model catalog | `a32b107df02d9b5b503b8d545a4fb24b7754e997` | `worker/provider-catalog-20260908` | worker worktree | provider catalog, Super model pickers, Kiro/Copilot/Gemini/OpenAI catalog consumers and tests | throughput/log-throughput; unrelated refactor | active |
-| C | Throughput observability | `a32b107df02d9b5b503b8d545a4fb24b7754e997` | `worker/throughput-observability-20260908` | worker worktree | generation timing, token usage, throughput state, log TUI, history, throughput docs/tests | provider catalog; unrelated refactor | active |
-| D | Read-only review | `a32b107df02d9b5b503b8d545a4fb24b7754e997` | none | none | exact checkpoint review only | all writes | active |
+| A | General lean refactor | `a32b107df02d9b5b503b8d545a4fb24b7754e997` | `worker/refactor-general-20260908` | worker worktree | CLI, orchestration, profile/auth, session, runtime support, gateway, storage, config, reports, tooling outside B/C | provider catalog surfaces; throughput/log-throughput surfaces | paused; clean, no checkpoint |
+| B | Provider model catalog | `a32b107df02d9b5b503b8d545a4fb24b7754e997` | `worker/provider-catalog-20260908` | worker worktree | provider catalog, Super model pickers, Kiro/Copilot/Gemini/OpenAI catalog consumers and tests | throughput/log-throughput; unrelated refactor | repair in progress; uncommitted one-file patch |
+| C | Throughput observability | `a32b107df02d9b5b503b8d545a4fb24b7754e997` | `worker/throughput-observability-20260908` | worker worktree | generation timing, token usage, throughput state, log TUI, history, throughput docs/tests | provider catalog; unrelated refactor | paused; clean, no checkpoint |
+| D | Read-only review | `a32b107df02d9b5b503b8d545a4fb24b7754e997` | none | none | exact checkpoint review only | all writes | complete; P1/P2 findings recorded |
 
 Worker contract: each worker commits only reviewed paths to its worker branch, pushes that branch,
 verifies its remote SHA, and reports focused tests/cleanup. Workers do not merge or push the
@@ -62,8 +64,15 @@ integration branch. Heavy full-workspace, Mojo, and final integration gates rema
 - Draft integration PR: `#71`, base `refactor/428-integration-20260907`, head
   `refactor/parallel-integration-20260908`; its body will be updated with reviewed checkpoints
   and final gate evidence.
-- B1 repair CI is still in progress/pending on `a32b107d`; `compat-replay-gate` was successful
-  and optional-tools freshness was skipped by CI.
+- B1 repair CI run `34184199873` completed with failure on the exact SHA `a32b107d`: Sonar
+  reported `rust:S3776` cognitive complexity `27` at
+  `crates/prodex-app/src/runtime_tools/sub_agent_catalog.rs:66`, and the Windows prodex-app
+  shard reported `544 passed; 1 failed; 2 ignored`, with a websocket pre-commit continuation
+  timeout. `compat-replay-gate` was successful and optional-tools freshness was skipped by CI.
+- Read-only reviewer D found no P0, but marked both the Sonar issue and unchanged Windows timeout
+  as P1 blockers. Two P2 catalog findings remain queued for B: the main OpenAI regression expects
+  dynamic-before-canonical order despite the B1 contract, and the main picker currently discards
+  degraded status that the sub-agent picker reports.
 - Parallel integration baseline: local and remote `a32b107df02d9b5b503b8d545a4fb24b7754e997` on
   `refactor/parallel-integration-20260908`; first-wave worker branches all start at this SHA.
 
@@ -105,6 +114,7 @@ order and `Custom` remains last.
 ## Cleanup and next action
 
 - Campaign worktree is owned by this campaign. Its `target/` build cache is retained while validation continues.
-- No campaign-created server or watcher remains active after baseline testing.
-- Next action: launch A/B/C plus D, record their exact branch/worktree state, then review each worker
-  checkpoint serially before cherry-picking accepted commits into the integration branch.
+- No campaign-created server or watcher remains active after baseline testing. A and C worktrees
+  are clean and their agents are stopped; B's one-file repair WIP is retained for its owner.
+- Next action: validate and checkpoint B's complexity repair, then rerun the failed Windows job
+  against the repaired SHA before resuming the paused implementation streams.
