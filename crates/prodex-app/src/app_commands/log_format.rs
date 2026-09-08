@@ -1,10 +1,6 @@
 use chrono::{DateTime, Local};
 use std::borrow::Cow;
 
-pub(super) fn current_log_width() -> usize {
-    terminal_ui::current_cli_width()
-}
-
 pub(super) fn local_log_timestamp(timestamp: &str) -> String {
     parse_log_timestamp(timestamp)
         .map(|datetime| {
