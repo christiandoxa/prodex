@@ -1,11 +1,9 @@
 use super::ResolvedMainAgentConfig;
 use crate::{
-    AppPaths, AppState, AppStateIoExt, COPILOT_RUNTIME_MODEL_CATALOG_FILE, KIRO_MODEL_CATALOG_FILE,
-    ProfileProvider, ResolvedSuperSubAgent, SUB_AGENT_RECURSION_MARKER, SubAgentRecursionPolicy,
-    canonical_sub_agent_providers, provider_display_name, resolve_super_launch_target,
-    resolve_super_sub_agent_config, sub_agent_recursion_policy,
+    ResolvedSuperSubAgent, SUB_AGENT_RECURSION_MARKER, SubAgentRecursionPolicy,
+    canonical_sub_agent_providers, effective_provider_model_catalog, provider_display_name,
+    resolve_super_launch_target, resolve_super_sub_agent_config, sub_agent_recursion_policy,
 };
-use crate::{parse_kiro_model_catalog_text, read_provider_model_catalog_text};
 use anyhow::{Result, bail};
 use crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
 use prodex_cli::{
@@ -16,7 +14,6 @@ use ratatui::layout::{Constraint, Direction, Layout};
 use ratatui::style::Modifier;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
-use std::collections::BTreeSet;
 use std::io::{self, IsTerminal};
 use terminal_ui::{
     fit_cell, tui_border_style, tui_connected_footer_block, tui_connected_header_block,
@@ -25,9 +22,6 @@ use terminal_ui::{
 };
 
 const SUPER_PROMPT_MAX_TEXT_CHARS: usize = 256;
-pub(super) const SUPER_CONFIGURED_MODEL_PROFILE_LIMIT: usize = 128;
-pub(super) const SUPER_CONFIGURED_MODEL_LIMIT: usize =
-    prodex_provider_core::PROVIDER_MODEL_CATALOG_HARD_LIMIT;
 
 pub(super) fn prompt_super_main_agent_configuration(
     args: &SuperArgs,
@@ -258,11 +252,20 @@ fn prompt_super_sub_agent_config(
                     )?);
                 }
                 SuperSubAgentPromptStep::Model => {
+                    let catalog = effective_provider_model_catalog(config.provider);
+                    let title = if catalog.is_degraded() {
+                        format!(
+                            "Sub-agent model ({} account catalog degraded; available models shown)",
+                            provider_display_name(config.provider)
+                        )
+                    } else {
+                        "Sub-agent model".to_string()
+                    };
                     config.model = super::super_main_prompt::prompt_super_model(
-                        "Sub-agent model",
+                        &title,
                         config.provider,
                         config.model.as_deref(),
-                        configured_sub_agent_models(config.provider),
+                        catalog.model_ids(),
                     )?;
                 }
                 SuperSubAgentPromptStep::ReasoningEffort => {
@@ -297,100 +300,6 @@ pub(super) fn run_super_sub_agent_prompt_steps(
         prompt(step, &mut config)?;
     }
     Ok(config)
-}
-
-pub(super) fn configured_sub_agent_models(
-    provider: prodex_provider_core::ProviderId,
-) -> Vec<String> {
-    let Ok(paths) = AppPaths::discover() else {
-        return Vec::new();
-    };
-    configured_sub_agent_models_from_paths(&paths, provider)
-}
-
-pub(super) fn configured_sub_agent_models_from_paths(
-    paths: &AppPaths,
-    provider: prodex_provider_core::ProviderId,
-) -> Vec<String> {
-    let catalog_file = match provider {
-        prodex_provider_core::ProviderId::Copilot => COPILOT_RUNTIME_MODEL_CATALOG_FILE,
-        prodex_provider_core::ProviderId::Kiro => KIRO_MODEL_CATALOG_FILE,
-        _ => return Vec::new(),
-    };
-    let Ok(state) = AppState::load(paths) else {
-        return Vec::new();
-    };
-    let model_limit = SUPER_CONFIGURED_MODEL_LIMIT
-        .saturating_sub(prodex_provider_core::provider_model_catalog_json(provider).len());
-    let mut models = Vec::new();
-    let mut usable_catalog_count = 0;
-    for profile in state.profiles.values().filter(|profile| {
-        matches!(
-            (&profile.provider, provider),
-            (
-                ProfileProvider::Copilot { .. },
-                prodex_provider_core::ProviderId::Copilot
-            ) | (
-                ProfileProvider::Kiro { .. },
-                prodex_provider_core::ProviderId::Kiro
-            )
-        )
-    }) {
-        if usable_catalog_count >= SUPER_CONFIGURED_MODEL_PROFILE_LIMIT {
-            break;
-        }
-        let Ok(Some(contents)) =
-            read_provider_model_catalog_text(&profile.codex_home.join(catalog_file))
-        else {
-            continue;
-        };
-        let value = if provider == prodex_provider_core::ProviderId::Kiro {
-            let Ok(models) = parse_kiro_model_catalog_text(&contents) else {
-                continue;
-            };
-            serde_json::json!({"models": models})
-        } else {
-            let Ok(value) = serde_json::from_str::<serde_json::Value>(&contents) else {
-                continue;
-            };
-            value
-        };
-        usable_catalog_count += 1;
-        configured_sub_agent_model_ids(&value, &mut models, model_limit);
-        if models.len() >= model_limit {
-            models.truncate(model_limit);
-            break;
-        }
-    }
-    models
-}
-
-pub(super) fn configured_sub_agent_model_ids(
-    value: &serde_json::Value,
-    models: &mut Vec<String>,
-    model_limit: usize,
-) {
-    let Some(entries) = value.get("models").and_then(serde_json::Value::as_array) else {
-        return;
-    };
-    let mut seen = models
-        .iter()
-        .map(|model| model.trim().to_ascii_lowercase())
-        .collect::<BTreeSet<_>>();
-    for entry in entries {
-        if models.len() >= model_limit {
-            break;
-        }
-        let Some(id) = ["id", "model_id", "modelId", "slug", "model"]
-            .into_iter()
-            .find_map(|key| entry.get(key).and_then(serde_json::Value::as_str))
-        else {
-            continue;
-        };
-        if !id.trim().is_empty() && seen.insert(id.trim().to_ascii_lowercase()) {
-            models.push(id.trim().to_string());
-        }
-    }
 }
 
 fn prompt_super_sub_agent_max_concurrency() -> Result<SubAgentMaxConcurrency> {

@@ -578,18 +578,24 @@ mod tests {
             catalog_model("gpt-5.6-luna", "GPT-5.6 Luna", 3, &["medium"]),
         ])
         .unwrap();
-        let mut sub_agent = Vec::new();
-        super_prompt::configured_sub_agent_model_ids(
-            &json!({"models": [{"slug": "gpt-5.6-sol"}, {"slug": "gpt-5.6-terra"}]}),
-            &mut sub_agent,
-            3,
-        );
+        let sub_agent: Vec<String> = super_sub_agent_model_choices(
+            prodex_provider_core::ProviderId::OpenAi,
+            None,
+            &["gpt-5.6-sol".to_string(), "gpt-5.6-terra".to_string()],
+        )
+        .into_iter()
+        .filter_map(|choice| match choice {
+            prodex_provider_core::ProviderModelChoice::Model(model) => Some(model),
+            _ => None,
+        })
+        .collect();
 
         assert!(main.iter().any(|choice| matches!(
             &choice.choice,
             prodex_provider_core::ProviderModelChoice::Model(model) if model == "gpt-5.6-luna"
         )));
-        assert_eq!(sub_agent, ["gpt-5.6-sol", "gpt-5.6-terra"]);
+        assert!(sub_agent.contains(&"gpt-5.6-sol".to_string()));
+        assert!(sub_agent.contains(&"gpt-5.6-terra".to_string()));
     }
 
     #[test]

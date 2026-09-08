@@ -35,13 +35,21 @@ The canonical provider registry currently exposes:
 - Kiro
 - Prodex Local
 
-Provider model pickers use the checked-in canonical catalog without requiring a network request. They include provider default, built-in models in recommendation order, configured/current models when present, and a custom-model entry. Lists scroll on short terminals. A nonempty custom model ID is preserved exactly even when it is absent from the catalog.
+Provider model pickers use one effective provider catalog assembled from checked-in canonical metadata,
+safe persisted/discovered snapshots, configured/current model state, and a custom-model entry. The
+loader reads existing OpenAI `models_cache.json`, imported Kiro and Copilot snapshots, and existing
+cached/configured Gemini, DeepSeek, and Local catalogs without making a picker network request.
+Lists scroll on short terminals. A nonempty custom model ID is preserved exactly even when it is absent
+from the catalog.
 
-The main-agent OpenAI picker consumes the current top-level Codex catalog, including
-catalog-visible `gpt-5.6-sol`, `gpt-5.6-terra`, and `gpt-5.6-luna` when the active
-catalog exposes them. Prodex child selection remains a separate child-provider catalog;
-it is not inferred from a truncated native task-tool description. Effort options are
-resolved from the selected model's catalog metadata.
+The main-agent and child pickers share this source authority while retaining their role-specific
+presentation. The OpenAI catalog keeps canonical `gpt-5.6-sol`, `gpt-5.6-terra`, and `gpt-5.6-luna`
+available when a current top-level cache is partial. Imported Kiro and Copilot profile catalogs are
+merged across usable profiles with case-insensitive identity. If an expected account snapshot is
+missing or malformed, available canonical/healthy models remain usable and the interactive prompt
+shows a bounded degraded-catalog notice; source errors and credentials are not displayed. Effort
+options remain model-scoped: canonical metadata is used for known models and provider-safe fallback
+choices are used for dynamic or custom models.
 
 ## Resume and affinity
 
