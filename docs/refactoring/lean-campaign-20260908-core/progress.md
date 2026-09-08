@@ -21,7 +21,8 @@ transport semantics. This is an implementation campaign, not a line-count exerci
 Full CI run `34190204961` passed on exact `5c42efee`, including Sonar, Real Mojo/parity, macOS,
 all Windows shards, runtime stress, app shards, and relevant guards. B2 completed an audit-only
 catalog consumer review with a concrete KEEP_WITH_REASON; A2 produced no result and remains
-UNREVIEWED. The wider domain audit and final integration qualification remain open.
+UNREVIEWED. Final reviewer D returned NO_FINDING on exact `34800090`. The wider domain audit and
+final integration qualification remain open; CI for `34800090` is the last pending gate.
 
 ## Parallel ownership ledger
 
@@ -104,7 +105,8 @@ integration branch. Heavy full-workspace, Mojo, and final integration gates rema
   update-notice (11), and core (12).
 - Current integration tree contains both worker streams through `f9d8a05c` plus guard repair
   `32daf41b`; local static guards and focused tests pass. Full CI `34190204961` passed on exact
-  `5c42efee`, the audit-only wave checkpoint before the latest ledger updates.
+  `5c42efee`, the audit-only wave checkpoint before the latest ledger updates. The final clean
+  integration SHA is `348000908d6f868cdbc2f778fb84ca5cf99bdee2`.
 - Wave 3 ownership was disjoint: B2 owned only the gateway/dashboard catalog consumers in B1-007;
   A2 owned one general-domain candidate outside provider catalog and throughput files. B2 completed
   its audit-only review; A2 stopped before producing symbol-level evidence.
@@ -116,6 +118,12 @@ integration branch. Heavy full-workspace, Mojo, and final integration gates rema
   completed worker/B2 worktrees after clean/remote/process verification, reclaiming approximately
   `28G`. Main `target/` (`5.7G`) and integration `target/` (`21G`) are retained as protected or
   reusable caches; A2's clean handoff worktree is retained without a build target.
+- Final local gate evidence: `npm run ci -- --no-tests --jobs 1` exited `0` after release hygiene,
+  metadata, workspace all-target/all-feature check, strict clippy, and all non-test guards passed.
+  The preceding `npm run ci -- --serial --jobs 1` logged PASS for test-fast and test-serial but
+  did not expose a final parent exit line; it is not used as the sole completion claim.
+- Final reviewer D checked exact `348000908d6f868cdbc2f778fb84ca5cf99bdee2` and reported NO_FINDING;
+  no P0/P1/P2/P3 remains in the reviewed integrated diff.
 
 ## Batch B1: provider catalog authority
 
@@ -196,4 +204,4 @@ branches remain unchanged while duplicate naming logic uses the existing core ow
   worker branches/checkpoints. No scratch fixture, server, watcher, credential, or raw log was
   created for commit.
 - Next action: perform the next symbol-level general-domain audit from the current integration
-  SHA `da85fa49`, or hand off the remaining UNREVIEWED inventory without claiming campaign completion.
+  SHA `34800090`, or hand off the remaining UNREVIEWED inventory without claiming campaign completion.
