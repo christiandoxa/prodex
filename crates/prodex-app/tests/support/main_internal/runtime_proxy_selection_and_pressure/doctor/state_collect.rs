@@ -23,7 +23,7 @@ fn runtime_doctor_collect_state_flags_runtime_broker_binary_mismatch() {
         "doctor-mismatch",
         &RuntimeBrokerRegistry {
             pid: std::process::id(),
-            process_birth_identity: None,
+            process_birth_identity: runtime_process_birth_identity(std::process::id()),
             listen_addr: listen_addr.to_string(),
             started_at: Local::now().timestamp(),
             upstream_base_url: "https://chatgpt.com/backend-api".to_string(),
@@ -33,7 +33,9 @@ fn runtime_doctor_collect_state_flags_runtime_broker_binary_mismatch() {
             current_profile: "main".to_string(),
             instance_id: "instance".to_string(),
             prodex_version: None,
-            executable_path: None,
+            executable_path: env::current_exe()
+                .ok()
+                .map(|path| path.display().to_string()),
             executable_sha256: None,
             openai_mount_path: Some(RUNTIME_PROXY_OPENAI_MOUNT_PATH.to_string()),
             realtime_ws_addr: None,
@@ -191,7 +193,7 @@ fn runtime_doctor_collect_state_surfaces_unreachable_live_broker_health() {
         "doctor-timeout",
         &RuntimeBrokerRegistry {
             pid: std::process::id(),
-            process_birth_identity: None,
+            process_birth_identity: runtime_process_birth_identity(std::process::id()),
             listen_addr: listen_addr.to_string(),
             started_at: Local::now().timestamp(),
             upstream_base_url: "https://chatgpt.com/backend-api".to_string(),
@@ -244,6 +246,132 @@ fn runtime_doctor_collect_state_surfaces_unreachable_live_broker_health() {
         "doctor should surface timeout-specific action text: {}",
         summary.diagnosis
     );
+}
+
+#[test]
+fn runtime_doctor_does_not_probe_registry_without_process_identity() {
+    let _test_guard = crate::acquire_test_runtime_lock();
+    let temp_dir = TestDir::isolated();
+    let paths = AppPaths {
+        root: temp_dir.path.join("prodex"),
+        state_file: temp_dir.path.join("prodex/state.json"),
+        managed_profiles_root: temp_dir.path.join("prodex/profiles"),
+        shared_codex_root: temp_dir.path.join("shared"),
+        legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
+    };
+    fs::create_dir_all(&paths.root).expect("prodex root should exist");
+
+    let server = TinyServer::http("127.0.0.1:0").expect("identity trap server should bind");
+    let listen_addr = server
+        .server_addr()
+        .to_ip()
+        .expect("identity trap server should expose a TCP address");
+    save_runtime_broker_registry(
+        &paths,
+        "doctor-unproven",
+        &RuntimeBrokerRegistry {
+            pid: std::process::id(),
+            process_birth_identity: None,
+            listen_addr: listen_addr.to_string(),
+            started_at: Local::now().timestamp(),
+            upstream_base_url: "https://chatgpt.com/backend-api".to_string(),
+            include_code_review: false,
+            upstream_no_proxy: false,
+            smart_context_enabled: false,
+            current_profile: "main".to_string(),
+            instance_id: "instance".to_string(),
+            prodex_version: None,
+            executable_path: None,
+            executable_sha256: None,
+            openai_mount_path: Some(RUNTIME_PROXY_OPENAI_MOUNT_PATH.to_string()),
+            realtime_ws_addr: None,
+        },
+    )
+    .expect("unproven broker registry should save");
+    save_runtime_broker_test_capability(&paths, "doctor-unproven", "instance", "secret");
+
+    let probed = Arc::new(AtomicBool::new(false));
+    let probed_for_thread = Arc::clone(&probed);
+    let server_thread = thread::spawn(move || {
+        if let Ok(Some(request)) = server.recv_timeout(Duration::from_millis(250)) {
+            probed_for_thread.store(true, Ordering::SeqCst);
+            let _ = request.respond(TinyResponse::from_string("{}").with_status_code(200));
+        }
+    });
+
+    let mut summary = RuntimeDoctorSummary::default();
+    collect_runtime_doctor_state(&paths, &mut summary);
+    server_thread
+        .join()
+        .expect("identity trap server thread should join");
+
+    assert!(!probed.load(Ordering::SeqCst));
+    assert!(
+        summary
+            .runtime_broker_identities
+            .iter()
+            .any(|line| line.contains("broker_key=doctor-unproven")),
+        "unexpected doctor identities: {:?}",
+        summary.runtime_broker_identities
+    );
+}
+
+#[test]
+fn live_broker_metrics_skip_registry_without_process_identity() {
+    let _test_guard = crate::acquire_test_runtime_lock();
+    let temp_dir = TestDir::isolated();
+    let paths = AppPaths {
+        root: temp_dir.path.join("prodex"),
+        state_file: temp_dir.path.join("prodex/state.json"),
+        managed_profiles_root: temp_dir.path.join("prodex/profiles"),
+        shared_codex_root: temp_dir.path.join("shared"),
+        legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
+    };
+    fs::create_dir_all(&paths.root).expect("prodex root should exist");
+    let _prodex_home_guard = TestEnvVarGuard::set("PRODEX_HOME", &paths.root.display().to_string());
+
+    let server = TinyServer::http("127.0.0.1:0").expect("metrics trap server should bind");
+    let listen_addr = server
+        .server_addr()
+        .to_ip()
+        .expect("metrics trap server should expose a TCP address");
+    let registry = RuntimeBrokerRegistry {
+        pid: std::process::id(),
+        process_birth_identity: None,
+        listen_addr: listen_addr.to_string(),
+        started_at: Local::now().timestamp(),
+        upstream_base_url: "https://chatgpt.com/backend-api".to_string(),
+        include_code_review: false,
+        upstream_no_proxy: false,
+        smart_context_enabled: false,
+        current_profile: "main".to_string(),
+        instance_id: "instance".to_string(),
+        prodex_version: None,
+        executable_path: None,
+        executable_sha256: None,
+        openai_mount_path: Some(RUNTIME_PROXY_OPENAI_MOUNT_PATH.to_string()),
+        realtime_ws_addr: None,
+    };
+    save_runtime_broker_registry(&paths, "metrics-unproven", &registry)
+        .expect("unproven metrics registry should save");
+    save_runtime_broker_test_capability(&paths, "metrics-unproven", "instance", "secret");
+
+    let probed = Arc::new(AtomicBool::new(false));
+    let probed_for_thread = Arc::clone(&probed);
+    let server_thread = thread::spawn(move || {
+        if let Ok(Some(request)) = server.recv_timeout(Duration::from_millis(250)) {
+            probed_for_thread.store(true, Ordering::SeqCst);
+            let _ = request.respond(TinyResponse::from_string("{}").with_status_code(200));
+        }
+    });
+
+    let observations = collect_live_runtime_broker_observations(&paths);
+    server_thread
+        .join()
+        .expect("metrics trap server thread should join");
+
+    assert!(observations.is_empty());
+    assert!(!probed.load(Ordering::SeqCst));
 }
 
 #[test]

@@ -1,4 +1,4 @@
-use anyhow::Result;
+use anyhow::{Context, Result};
 use prodex_runtime_broker::RuntimeBrokerSecret;
 use serde::Deserialize;
 use std::fs;
@@ -64,30 +64,51 @@ pub(super) fn remove_artifacts_unlocked(
     Ok(())
 }
 
-pub(super) fn registry_has_legacy_secrets(path: &Path) -> bool {
-    read_registry_bytes(path).is_some_and(|bytes| {
+pub(super) fn registry_has_legacy_secrets(path: &Path) -> Result<bool> {
+    Ok(read_registry_bytes(path)?.is_some_and(|bytes| {
         prodex_runtime_broker::runtime_broker_registry_contains_legacy_secrets(bytes)
-    })
+    }))
 }
 
-pub(super) fn registry_file_is_current(path: &Path) -> bool {
-    read_registry_bytes(path)
-        .and_then(|bytes| serde_json::from_slice::<RuntimeBrokerRegistry>(&bytes).ok())
-        .is_some()
+pub(super) fn registry_file_is_current(path: &Path) -> Result<bool> {
+    Ok(read_registry_bytes(path)?
+        .is_some_and(|bytes| serde_json::from_slice::<RuntimeBrokerRegistry>(&bytes).is_ok()))
 }
 
-fn read_registry_bytes(path: &Path) -> Option<Vec<u8>> {
-    let metadata = fs::symlink_metadata(path).ok()?;
-    if !metadata.file_type().is_file() || metadata.len() > RUNTIME_BROKER_REGISTRY_MAX_BYTES {
-        return None;
-    }
-    let file = prodex_core::open_regular_file_no_follow(path).ok()?;
-    if !prodex_core::opened_file_matches_path(&metadata, path, &file).ok()? {
-        return None;
-    }
+fn read_registry_bytes(path: &Path) -> Result<Option<Vec<u8>>> {
+    let metadata = match fs::symlink_metadata(path) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => {
+            return Err(error).with_context(|| format!("failed to inspect {}", path.display()));
+        }
+    };
+    anyhow::ensure!(
+        metadata.file_type().is_file(),
+        "runtime broker registry is not a regular file: {}",
+        path.display()
+    );
+    anyhow::ensure!(
+        metadata.len() <= RUNTIME_BROKER_REGISTRY_MAX_BYTES,
+        "runtime broker registry exceeds legacy scan size limit: {}",
+        path.display()
+    );
+    let file = prodex_core::open_regular_file_no_follow(path)
+        .with_context(|| format!("failed to open {}", path.display()))?;
+    anyhow::ensure!(
+        prodex_core::opened_file_matches_path(&metadata, path, &file)
+            .with_context(|| format!("failed to inspect {}", path.display()))?,
+        "runtime broker registry changed while reading: {}",
+        path.display()
+    );
     let mut bytes = Vec::new();
     file.take(RUNTIME_BROKER_REGISTRY_MAX_BYTES + 1)
         .read_to_end(&mut bytes)
-        .ok()?;
-    (bytes.len() as u64 <= RUNTIME_BROKER_REGISTRY_MAX_BYTES).then_some(bytes)
+        .with_context(|| format!("failed to read {}", path.display()))?;
+    anyhow::ensure!(
+        bytes.len() as u64 <= RUNTIME_BROKER_REGISTRY_MAX_BYTES,
+        "runtime broker registry exceeds legacy scan size limit: {}",
+        path.display()
+    );
+    Ok(Some(bytes))
 }

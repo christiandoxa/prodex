@@ -232,6 +232,22 @@ pub(crate) fn runtime_process_executable_path(pid: u32) -> Option<PathBuf> {
     RuntimeProcessPlatformImpl::executable_path(pid)
 }
 
+pub(crate) fn runtime_broker_registry_identity_is_valid(registry: &RuntimeBrokerRegistry) -> bool {
+    let Some(expected_path) = registry.executable_path.as_deref() else {
+        return false;
+    };
+    runtime_process_pid_alive(registry.pid)
+        && !runtime_process_absence_proven(registry.pid)
+        && registry
+            .process_birth_identity
+            .as_deref()
+            .zip(runtime_process_birth_identity(registry.pid).as_deref())
+            .is_some_and(|(expected, actual)| expected == actual)
+        && runtime_process_executable_path(registry.pid)
+            .as_deref()
+            .is_some_and(|actual| prodex_core::same_path(Path::new(expected_path), actual))
+}
+
 pub(crate) fn read_prodex_sha256_from_executable(executable: &Path) -> Result<String> {
     runtime_executable_sha256(executable)
 }

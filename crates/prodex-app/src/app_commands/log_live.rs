@@ -2,10 +2,8 @@ use super::super::log_throughput::OutputThroughput;
 use super::log_stream::{LogStreamItem, collect_runtime_log_line};
 use crate::{
     AppPaths, RuntimeConfig, load_runtime_broker_registry, probe_runtime_broker_log_snapshot,
-    runtime_broker_registry_keys, runtime_live_log_source_registry_keys,
-    runtime_process_absence_proven, runtime_process_birth_identity,
-    runtime_process_executable_path, runtime_process_pid_alive,
-    runtime_process_prodex_binary_identity,
+    runtime_broker_registry_identity_is_valid, runtime_broker_registry_keys,
+    runtime_live_log_source_registry_keys, runtime_process_prodex_binary_identity,
 };
 use anyhow::Result;
 use reqwest::blocking::Client;
@@ -59,7 +57,7 @@ impl LiveRuntimeLogSource {
             let Ok(Some(registry)) = load_runtime_broker_registry(&self.paths, &broker_key) else {
                 continue;
             };
-            if !runtime_live_source_identity_is_valid(&registry) {
+            if !runtime_broker_registry_identity_is_valid(&registry) {
                 continue;
             }
             let source_identity_key = (broker_key.clone(), registry.instance_id.clone());
@@ -118,26 +116,6 @@ impl LiveRuntimeLogSource {
         }
         lines
     }
-}
-
-fn runtime_live_source_identity_is_valid(
-    registry: &prodex_runtime_broker::RuntimeBrokerRegistry,
-) -> bool {
-    let Some(expected_path) = registry.executable_path.as_deref() else {
-        return false;
-    };
-    runtime_process_pid_alive(registry.pid)
-        && !runtime_process_absence_proven(registry.pid)
-        && registry
-            .process_birth_identity
-            .as_deref()
-            .zip(runtime_process_birth_identity(registry.pid).as_deref())
-            .is_some_and(|(expected, actual)| expected == actual)
-        && runtime_process_executable_path(registry.pid)
-            .as_deref()
-            .is_some_and(|actual| {
-                prodex_core::same_path(std::path::Path::new(expected_path), actual)
-            })
 }
 
 fn runtime_live_source_binary_identity_is_valid(
@@ -365,7 +343,7 @@ mod tests {
     fn stale_pid_birth_and_binary_mismatch_sources_are_rejected_before_http() {
         let paths = test_paths("identity");
         let valid = test_registry("broker", "instance", "127.0.0.1:1");
-        assert!(runtime_live_source_identity_is_valid(&valid));
+        assert!(runtime_broker_registry_identity_is_valid(&valid));
         assert!(runtime_live_source_binary_identity_matches(
             &valid,
             &runtime_current_prodex_binary_identity()
@@ -373,11 +351,11 @@ mod tests {
 
         let mut stale = valid.clone();
         stale.pid = u32::MAX;
-        assert!(!runtime_live_source_identity_is_valid(&stale));
+        assert!(!runtime_broker_registry_identity_is_valid(&stale));
 
         let mut reused = valid.clone();
         reused.process_birth_identity = Some("different-birth".to_string());
-        assert!(!runtime_live_source_identity_is_valid(&reused));
+        assert!(!runtime_broker_registry_identity_is_valid(&reused));
 
         let mut other_binary = valid;
         other_binary.executable_path = Some("/opt/other/prodex".to_string());
