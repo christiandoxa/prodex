@@ -24,7 +24,7 @@ pub struct IdParseError {
 }
 
 impl IdParseError {
-    fn new(kind: &'static str) -> Self {
+    fn new(kind: &'static str, _value: &str) -> Self {
         Self { kind }
     }
 
@@ -116,7 +116,7 @@ macro_rules! domain_id {
             fn from_str(value: &str) -> Result<Self, Self::Err> {
                 Uuid::parse_str(value)
                     .map(Self)
-                    .map_err(|_| IdParseError::new($kind))
+                    .map_err(|_| IdParseError::new($kind, value))
             }
         }
 
