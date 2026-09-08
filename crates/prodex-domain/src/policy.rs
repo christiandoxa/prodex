@@ -346,32 +346,6 @@ impl<T: Clone> PolicyActivationState<T> {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum PolicyAuditAction {
-    Validated,
-    Activated,
-    Rejected,
-    RolledBackToLastKnownGood,
-}
-
-#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct PolicyAuditRecord {
-    pub revision_id: Option<PolicyRevisionId>,
-    pub action: PolicyAuditAction,
-    pub reason: Option<String>,
-}
-
-impl fmt::Debug for PolicyAuditRecord {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("PolicyAuditRecord")
-            .field("revision_id", &self.revision_id.map(|_| "<redacted>"))
-            .field("action", &self.action)
-            .field("reason", &self.reason.as_deref().map(|_| "<redacted>"))
-            .finish()
-    }
-}
-
 #[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PolicyRefreshWindow {
     pub refresh_after_unix_ms: u64,
