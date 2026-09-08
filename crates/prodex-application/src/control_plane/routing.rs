@@ -465,6 +465,18 @@ pub fn plan_application_control_plane_idempotency_from_http(
     request_fingerprint: impl Into<String>,
 ) -> Result<ApplicationControlPlaneIdempotencyPlan, ApplicationControlPlaneIdempotencyError> {
     validate_control_plane_http_action(&action, http)?;
+    plan_application_control_plane_idempotency_from_http_validated(
+        action,
+        http,
+        request_fingerprint,
+    )
+}
+
+fn plan_application_control_plane_idempotency_from_http_validated(
+    action: ControlPlaneActionRequest,
+    http: &GatewayHttpRequestMeta,
+    request_fingerprint: impl Into<String>,
+) -> Result<ApplicationControlPlaneIdempotencyPlan, ApplicationControlPlaneIdempotencyError> {
     let idempotency_key = idempotency_key_from_headers(&http.headers)
         .map_err(ApplicationControlPlaneIdempotencyError::IdempotencyKeyInvalid)?;
     plan_application_control_plane_idempotency(ApplicationControlPlaneIdempotencyRequest {
@@ -482,7 +494,11 @@ pub fn plan_application_control_plane_idempotency_from_http_digest(
     validate_control_plane_http_action(&action, http)?;
     let request_fingerprint = control_plane_request_fingerprint(http, body_digest)
         .map_err(ApplicationControlPlaneIdempotencyError::RequestFingerprintInvalid)?;
-    plan_application_control_plane_idempotency_from_http(action, http, request_fingerprint)
+    plan_application_control_plane_idempotency_from_http_validated(
+        action,
+        http,
+        request_fingerprint,
+    )
 }
 
 pub fn plan_application_control_plane_page_request_from_http_query(
