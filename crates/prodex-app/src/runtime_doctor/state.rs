@@ -252,15 +252,23 @@ fn runtime_doctor_probe_runtime_broker_health_status(
     broker_key: &str,
     registry: &RuntimeBrokerRegistry,
 ) -> (&'static str, Option<RuntimeBrokerHealth>) {
+    if !prodex_runtime_broker::runtime_broker_listen_addr_is_loopback(&registry.listen_addr)
+        || !runtime_broker_registry_identity_is_valid(registry)
+    {
+        return ("health_unreachable", None);
+    }
     let Ok(capability) = load_runtime_broker_capability(paths, broker_key, &registry.instance_id)
     else {
+        return ("health_unreachable", None);
+    };
+    let Ok(admin_header) = runtime_broker_admin_header(&registry.listen_addr, &capability) else {
         return ("health_unreachable", None);
     };
     let response = client
         .get(runtime_broker_health_url(registry))
         .header(
             prodex_runtime_broker::RUNTIME_BROKER_ADMIN_TOKEN_HEADER,
-            capability.expose(),
+            admin_header,
         )
         .send();
     match response {
