@@ -75,10 +75,10 @@ impl CodexModelProviderSetting {
     }
 }
 
-fn parse_toml_document_string_value(
+fn parse_toml_document_value(
     contents: &str,
     key: &str,
-) -> Result<Option<String>, toml::de::Error> {
+) -> Result<Option<toml::Value>, toml::de::Error> {
     let value = toml::from_str::<toml::Value>(contents)?;
     let mut current = &value;
     for part in key.split('.') {
@@ -87,9 +87,32 @@ fn parse_toml_document_string_value(
         };
         current = value;
     }
-    Ok(match current {
-        toml::Value::String(value) => Some(value.clone()),
-        _ => None,
+    Ok(Some(current.clone()))
+}
+
+fn parse_toml_document_string_value(
+    contents: &str,
+    key: &str,
+) -> Result<Option<String>, toml::de::Error> {
+    Ok(
+        parse_toml_document_value(contents, key)?.and_then(|value| match value {
+            toml::Value::String(value) => Some(value),
+            _ => None,
+        }),
+    )
+}
+
+/// Reads a bounded TOML config file and returns the value at a dotted key.
+pub fn codex_config_file_toml_value(
+    config_path: &Path,
+    key: &str,
+) -> CodexConfigResult<Option<toml::Value>> {
+    let Some(contents) = read_codex_config_file(config_path)? else {
+        return Ok(None);
+    };
+    parse_toml_document_value(&contents, key).map_err(|source| CodexConfigError::Parse {
+        path: config_path.to_path_buf(),
+        source,
     })
 }
 
@@ -97,13 +120,12 @@ fn codex_config_file_exact_value(
     config_path: &Path,
     key: &str,
 ) -> CodexConfigResult<Option<String>> {
-    let Some(contents) = read_codex_config_file(config_path)? else {
-        return Ok(None);
-    };
-    parse_toml_document_string_value(&contents, key).map_err(|source| CodexConfigError::Parse {
-        path: config_path.to_path_buf(),
-        source,
-    })
+    Ok(
+        codex_config_file_toml_value(config_path, key)?.and_then(|value| match value {
+            toml::Value::String(value) => Some(value),
+            _ => None,
+        }),
+    )
 }
 
 fn read_codex_config_file(config_path: &Path) -> CodexConfigResult<Option<String>> {
