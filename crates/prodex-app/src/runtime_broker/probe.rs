@@ -1,5 +1,6 @@
 use super::{
-    load_runtime_broker_capability, load_runtime_broker_registry, runtime_broker_registry_keys,
+    load_runtime_broker_capability, load_runtime_broker_registry,
+    runtime_broker_registry_identity_is_valid, runtime_broker_registry_keys,
     runtime_process_pid_alive,
 };
 use crate::{
@@ -30,7 +31,7 @@ struct RuntimeBrokerLogSnapshotResponse {
     entries: Vec<RuntimeBrokerLogSnapshotEntry>,
 }
 
-fn runtime_broker_admin_header(
+pub(crate) fn runtime_broker_admin_header(
     listen_addr: &str,
     capability: &RuntimeBrokerSecret,
 ) -> Result<HeaderValue> {
@@ -229,7 +230,9 @@ pub(crate) fn collect_live_runtime_broker_observations(
         let Ok(Some(registry)) = load_runtime_broker_registry(paths, &broker_key) else {
             continue;
         };
-        if !prodex_runtime_broker::runtime_broker_listen_addr_is_loopback(&registry.listen_addr) {
+        if !prodex_runtime_broker::runtime_broker_listen_addr_is_loopback(&registry.listen_addr)
+            || !runtime_broker_registry_identity_is_valid(&registry)
+        {
             continue;
         }
         if !runtime_process_pid_alive(registry.pid) {

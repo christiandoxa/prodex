@@ -54,11 +54,11 @@ fn load_runtime_broker_registry_unlocked(
     if !path.exists() && !backup_path.exists() {
         return Ok(None);
     }
-    let primary_has_legacy_secrets = legacy::registry_has_legacy_secrets(&path);
-    let backup_has_legacy_secrets = legacy::registry_has_legacy_secrets(&backup_path);
+    let primary_has_legacy_secrets = legacy::registry_has_legacy_secrets(&path)?;
+    let backup_has_legacy_secrets = legacy::registry_has_legacy_secrets(&backup_path)?;
     if backup_has_legacy_secrets
         && !primary_has_legacy_secrets
-        && legacy::registry_file_is_current(&path)
+        && legacy::registry_file_is_current(&path)?
     {
         remove_runtime_broker_file_checked(&backup_path)?;
     } else if primary_has_legacy_secrets || backup_has_legacy_secrets {
@@ -626,6 +626,52 @@ mod tests {
         assert!(registry_path.exists());
         assert!(!backup_path.exists());
 
+        let _ = fs::remove_dir_all(paths.root);
+    }
+
+    #[test]
+    fn bounded_current_registry_with_unknown_fields_remains_compatible() {
+        let paths = test_paths("current-unknown-fields");
+        let broker_key = "broker";
+        let registry_path = runtime_broker_registry_file_path(&paths, broker_key);
+        let mut payload = serde_json::to_value(test_registry("current-instance")).unwrap();
+        payload.as_object_mut().unwrap().insert(
+            "future_field".to_string(),
+            serde_json::json!({"enabled": true}),
+        );
+        fs::write(registry_path, serde_json::to_vec(&payload).unwrap()).unwrap();
+
+        let loaded = load_runtime_broker_registry(&paths, broker_key)
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(loaded.instance_id, "current-instance");
+        let _ = fs::remove_dir_all(paths.root);
+    }
+
+    #[test]
+    fn oversized_legacy_registry_is_rejected_before_current_parsing() {
+        let paths = test_paths("oversized-legacy");
+        let broker_key = "broker";
+        let registry_path = runtime_broker_registry_file_path(&paths, broker_key);
+        let mut payload = serde_json::to_value(test_registry("legacy-instance")).unwrap();
+        let object = payload.as_object_mut().unwrap();
+        object.insert(
+            "instance_token".to_string(),
+            serde_json::json!("legacy-instance-secret"),
+        );
+        object.insert(
+            "padding".to_string(),
+            serde_json::Value::String("x".repeat(64 * 1024)),
+        );
+        let serialized = serde_json::to_vec(&payload).unwrap();
+        assert!(serialized.len() > 64 * 1024);
+        fs::write(registry_path, serialized).unwrap();
+
+        let error = load_runtime_broker_registry(&paths, broker_key)
+            .expect_err("oversized legacy scan should fail closed");
+
+        assert!(format!("{error:#}").contains("legacy scan size limit"));
         let _ = fs::remove_dir_all(paths.root);
     }
 
