@@ -257,28 +257,30 @@ passed.
   worktree, release worktrees, and unrelated processes were not stopped. The secondary ext4 SSD
   remained mounted at its verified device identity and campaign-owned cleanup reclaimed completed
   build/review targets only.
-- Current local integration head: `33bc6795b248efa46504ebf745383d213251ef76`, on
+- Current source integration tip: `33bc6795b248efa46504ebf745383d213251ef76`, on
   `refactor/successor-integration-20260908`. The qualifying source tree retains reviewed
-  checkpoints `1556875d` (overlay entrypoint reuse), `38077452` (private Copilot passthrough
-  wrapper), and `33bc6795` (private idempotency route validation). `8d015e6e` (uncalled npm
-  script surfaces) was independently reviewed and integrated earlier, then reverted as
-  `81380514` so the higher-priority B0-003 checkpoint could enter without exceeding churn; its
-  branch, log, review, and validation evidence remain durable. Ledger/documentation commits are
-  also present; no main or release worktree was changed.
+  checkpoints `38077452` (private Copilot passthrough wrapper) and `33bc6795` (private
+  idempotency route validation). `1556875d` (overlay entrypoint reuse) was independently reviewed
+  and integrated earlier, then reverted as `b83f8eff` to make room for the production-share
+  fixture correction and the higher-priority routing/provider changes; `8d015e6e` (uncalled npm
+  script surfaces) was similarly reverted as `81380514`. Both branches, logs, reviews, and
+  validation evidence remain durable. Ledger/documentation commits are also present; no main or
+  release worktree was changed.
 - Churn evidence: CI run `34246900868` correctly rejected the wider `09212cf1` tree because the
   PR base `a32b107d` range reached 31 behavior files, above the enforced 25-file limit. No guard,
   threshold, or allowlist was weakened. The wider reviewed checkpoints `5c3aa588` (bounded TOML
   lookups), `09212cf1` (private domain cleanup), and `edcca0b4` (private terminal aliases) were
   reverted from the integration tree with ordinary revert commits, while their remote branches,
   logs, reviews, and source evidence remain durable for later qualifying batches. The current
-  local range is 29 files, 25 behavior files, and 990 changed lines.
+  local range is 26 files, 22 behavior files, and 961 changed lines.
 - Held checkpoints: `84512e22` (review `NO_FINDING`, config 19 plus app 4+6+1+176 tests and
   workspace Clippy), `c92851d8` (replacement exact-SHA review `NO_FINDING`, IDs 8 and governance
   policy 10), `932863af` (replacement exact-SHA review `NO_FINDING`, app alias tests 3+1+11+48),
   and `a9a9024c` (review `NO_FINDING`, npm 27, installer 12+1 Windows skip, SDK 17, release 10,
-  and fixture/guard checks) are ledgered `IN_PROGRESS` because integrating them now would exceed
-  the churn range. `87df35a2` (runtime model scanner) and `c56c4ab7` (CI script cleanup) remain
-  under independent review. The model writer's full app aggregate stopped after 1,446 of 3,452
+  and fixture/guard checks), plus `e3f947b3` (review `NO_FINDING`, optional-tools 51 and app
+  desktop/overlay 5+5), are ledgered `IN_PROGRESS` because integrating them now would exceed the
+  churn range. `87df35a2` (runtime model scanner) and `c56c4ab7` (CI script cleanup) remain under
+  independent review. The model writer's full app aggregate stopped after 1,446 of 3,452
   tests with 16 unrelated runtime-synchronization failures, so it is not full-suite-green
   evidence. B0-003's exact-SHA review returned `NO_FINDING`; integrated default/Mojo boundary
   tests, app admin tests, Clippy, and guards passed.
@@ -286,14 +288,15 @@ passed.
   B0-024 provider SPI, and B0-025 quota; no source change was admitted from those reports. Their
   logs contain exact-base graph/source evidence and no live-provider tests. Active exact workers
   remain for B0-021, B0-026, B0-027, B0-033, B0-034, B0-028, and the three reviews above.
-- Coverage: the ledger has 64 unique B0 domains with 37 `UNREVIEWED`, 4 `IN_PROGRESS`, 7
+- Coverage: the ledger has 64 unique B0 domains with 37 `UNREVIEWED`, 5 `IN_PROGRESS`, 6
   `REFACTORED`, and 16 `KEEP_WITH_REASON`; all changes are evidence-backed and no row was closed
   by worker launch alone. Completed audits also recorded explicit public-API holds for control
   plane, state, context blob-noise, housekeeping, shared types, provider SPI, and gateway
   surfaces, plus semantic-difference holds for storage reservation validators and quota planning.
-- Current CI: the previously queued run `34251095095` targeted the pre-routing `81347add` head and
-  was superseded by the current integration commits. The current `33bc6795` push and its CI run
-  must finish successfully before this head can be treated as an exact-green anchor.
+- Current CI: the previously queued runs `34251095095` and `34253013562` targeted superseded heads;
+  the former exposed the stale production-share expectation and was fixed in `3b2d0bd3`. The
+  current successor push and its CI run must finish successfully before the source tip can be
+  treated as an exact-green anchor.
 
 ## Known checkpoints and blockers
 
