@@ -5,8 +5,9 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::Ordering;
 use std::sync::{Mutex, OnceLock};
+
+#[cfg(test)]
 use std::time::{SystemTime, UNIX_EPOCH};
 
 #[cfg(test)]
@@ -372,7 +373,8 @@ pub(crate) fn write_private_file_atomic(path: &Path, bytes: &[u8]) -> Result<()>
             .with_context(|| format!("failed to atomically write {}", path.display()));
     }
 
-    let temp_file = unique_state_temp_file_path(path);
+    let temp_file =
+        prodex_core::unique_root_temp_file_path(path, "state.json", &STATE_SAVE_SEQUENCE);
     let result = (|| -> io::Result<()> {
         let mut file = open_private_file(&temp_file)?;
         file.write_all(bytes)?;
@@ -550,26 +552,6 @@ pub(crate) fn read_json_file_to_string(path: &Path) -> io::Result<String> {
         )));
     }
     String::from_utf8(bytes).map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))
-}
-
-pub(crate) fn unique_state_temp_file_path(state_file: &Path) -> PathBuf {
-    let nanos = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_nanos();
-    let sequence = STATE_SAVE_SEQUENCE.fetch_add(1, Ordering::Relaxed);
-    let file_name = format!(
-        "{}.{}.{}.{}.tmp",
-        state_file
-            .file_name()
-            .and_then(|name| name.to_str())
-            .unwrap_or("state.json"),
-        std::process::id(),
-        nanos,
-        sequence
-    );
-
-    state_file.with_file_name(file_name)
 }
 
 pub(crate) fn state_last_good_file_path(paths: &AppPaths) -> PathBuf {

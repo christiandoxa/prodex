@@ -5,6 +5,7 @@ use std::ffi::OsString;
 use std::fs;
 use std::path::Component;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 pub const DEFAULT_PRODEX_DIR: &str = ".prodex";
@@ -282,6 +283,31 @@ pub fn system_time_to_unix_seconds(time: SystemTime) -> Option<i64> {
     time.duration_since(UNIX_EPOCH)
         .ok()
         .map(|duration| duration.as_secs() as i64)
+}
+
+/// Builds the unique temporary sibling path used by atomic root-file writes.
+pub fn unique_root_temp_file_path(
+    target: &Path,
+    fallback_file_name: &str,
+    sequence: &AtomicU64,
+) -> PathBuf {
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
+    let sequence = sequence.fetch_add(1, Ordering::Relaxed);
+    let file_name = format!(
+        "{}.{}.{}.{}.tmp",
+        target
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or(fallback_file_name),
+        std::process::id(),
+        nanos,
+        sequence
+    );
+
+    target.with_file_name(file_name)
 }
 
 pub fn owned_root_temp_file_name(name: &str) -> bool {
