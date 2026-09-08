@@ -16,7 +16,7 @@ pub use anthropic::{
     translate_openai_chat_request_to_anthropic_messages,
 };
 pub use copilot::{
-    copilot_provider_core_request_body_with_canonical_model,
+    CopilotTranslator, copilot_provider_core_request_body_with_canonical_model,
     copilot_provider_core_request_body_without_encrypted_content,
     copilot_provider_core_request_has_agent_input, copilot_provider_core_request_has_vision_input,
     copilot_provider_core_response_id_from_value,
