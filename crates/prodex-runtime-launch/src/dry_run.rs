@@ -184,7 +184,7 @@ fn dry_run_config_value(
     key: &str,
 ) -> codex_config::CodexConfigResult<Option<String>> {
     if key == "model"
-        && let Some(model) = dry_run_cli_model(args)
+        && let Some(model) = runtime_launch_cli_model(args)
     {
         return Ok(Some(model));
     }
@@ -192,29 +192,4 @@ fn dry_run_config_value(
         return Ok(Some(value));
     }
     codex_config::codex_config_value_for_args(codex_home, args, key)
-}
-
-fn dry_run_cli_model(args: &[OsString]) -> Option<String> {
-    let mut index = 0;
-    while index < args.len() {
-        let Some(arg) = args[index].to_str() else {
-            index += 1;
-            continue;
-        };
-        let model = if matches!(arg, "--model" | "-m") {
-            index += 1;
-            args.get(index).and_then(|value| value.to_str())
-        } else if let Some(value) = arg.strip_prefix("--model=") {
-            Some(value)
-        } else if let Some(value) = arg.strip_prefix("-m") {
-            (!value.is_empty()).then_some(value.trim_start_matches('='))
-        } else {
-            None
-        };
-        if let Some(model) = model.filter(|model| !model.trim().is_empty()) {
-            return Some(model.to_string());
-        }
-        index += 1;
-    }
-    None
 }
