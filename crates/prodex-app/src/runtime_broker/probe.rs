@@ -375,7 +375,7 @@ mod tests {
     use std::time::{SystemTime, UNIX_EPOCH};
 
     fn test_paths(label: &str) -> AppPaths {
-        let root = std::env::temp_dir().join(format!(
+        let root = crate::test_temp_root().join(format!(
             "prodex-runtime-broker-probe-{label}-{}-{}",
             std::process::id(),
             SystemTime::now()
