@@ -228,32 +228,41 @@ fn preferred_runtime_broker_listen_addr_only_reuses_dead_registry_ports() {
         Some("127.0.0.1:33475".to_string())
     );
 
-    save_runtime_broker_registry(
-        &paths,
-        broker_key,
-        &RuntimeBrokerRegistry {
-            pid: std::process::id(),
-            process_birth_identity: None,
-            listen_addr: "127.0.0.1:33475".to_string(),
-            started_at: Local::now().timestamp(),
-            upstream_base_url: "https://chatgpt.com/backend-api".to_string(),
-            include_code_review: false,
-            upstream_no_proxy: false,
-            smart_context_enabled: false,
-            current_profile: "main".to_string(),
-            instance_id: "live-instance".to_string(),
-            prodex_version: None,
-            executable_path: None,
-            executable_sha256: None,
-            openai_mount_path: Some(RUNTIME_PROXY_OPENAI_MOUNT_PATH.to_string()),
-            realtime_ws_addr: None,
-        },
-    )
-    .expect("live broker registry should save");
+    let live_registry = RuntimeBrokerRegistry {
+        pid: std::process::id(),
+        process_birth_identity: None,
+        listen_addr: "127.0.0.1:33475".to_string(),
+        started_at: Local::now().timestamp(),
+        upstream_base_url: "https://chatgpt.com/backend-api".to_string(),
+        include_code_review: false,
+        upstream_no_proxy: false,
+        smart_context_enabled: false,
+        current_profile: "main".to_string(),
+        instance_id: "live-instance".to_string(),
+        prodex_version: None,
+        executable_path: None,
+        executable_sha256: None,
+        openai_mount_path: Some(RUNTIME_PROXY_OPENAI_MOUNT_PATH.to_string()),
+        realtime_ws_addr: None,
+    };
+    save_runtime_broker_registry(&paths, broker_key, &live_registry)
+        .expect("live broker registry should save");
 
     assert_eq!(
         preferred_runtime_broker_listen_addr(&paths, broker_key)
             .expect("live broker port lookup should succeed"),
+        None
+    );
+
+    let mut tampered_registry = live_registry;
+    tampered_registry.pid = 999_999_999;
+    tampered_registry.listen_addr = "192.0.2.10:33475".to_string();
+    save_runtime_broker_registry(&paths, broker_key, &tampered_registry)
+        .expect("tampered broker registry should save");
+
+    assert_eq!(
+        preferred_runtime_broker_listen_addr(&paths, broker_key)
+            .expect("tampered broker port lookup should succeed"),
         None
     );
 }

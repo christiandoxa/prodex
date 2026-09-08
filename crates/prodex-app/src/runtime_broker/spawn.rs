@@ -288,7 +288,11 @@ pub(crate) fn preferred_runtime_broker_listen_addr(
 ) -> Result<Option<String>> {
     Ok(
         load_runtime_broker_registry(paths, broker_key)?.and_then(|registry| {
-            runtime_process_absence_proven(registry.pid).then_some(registry.listen_addr)
+            runtime_process_absence_proven(registry.pid)
+                .then_some(registry.listen_addr)
+                .filter(|listen_addr| {
+                    prodex_runtime_broker::runtime_broker_listen_addr_is_loopback(listen_addr)
+                })
         }),
     )
 }

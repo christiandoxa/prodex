@@ -1,13 +1,41 @@
 use super::*;
 use zeroize::Zeroize;
 
+pub fn runtime_broker_listen_addr_is_loopback(listen_addr: &str) -> bool {
+    listen_addr
+        .parse::<std::net::SocketAddr>()
+        .is_ok_and(|address| address.ip().is_loopback())
+}
+
 pub fn runtime_broker_registry_contains_legacy_secrets(mut bytes: Vec<u8>) -> bool {
-    let contains = [
-        b"\"instance_token\"".as_slice(),
-        b"\"admin_token\"".as_slice(),
-    ]
-    .into_iter()
-    .any(|field| bytes.windows(field.len()).any(|window| window == field));
+    struct LegacySecretKeyVisitor;
+
+    impl<'de> serde::de::Visitor<'de> for LegacySecretKeyVisitor {
+        type Value = bool;
+
+        fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            formatter.write_str("a JSON object")
+        }
+
+        fn visit_map<A>(self, mut map: A) -> Result<Self::Value, A::Error>
+        where
+            A: serde::de::MapAccess<'de>,
+        {
+            let mut contains = false;
+            while let Some(key) = map.next_key::<String>()? {
+                contains |= matches!(key.as_str(), "instance_token" | "admin_token");
+                map.next_value::<serde::de::IgnoredAny>()?;
+            }
+            Ok(contains)
+        }
+    }
+
+    let mut deserializer = serde_json::Deserializer::from_slice(&bytes);
+    let contains =
+        match serde::de::Deserializer::deserialize_map(&mut deserializer, LegacySecretKeyVisitor) {
+            Ok(contains) => contains && deserializer.end().is_ok(),
+            Err(_) => false,
+        };
     bytes.zeroize();
     contains
 }
