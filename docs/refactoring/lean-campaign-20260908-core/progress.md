@@ -29,10 +29,10 @@ Integration branch: `refactor/parallel-integration-20260908`.
 
 | Worker | Workstream | Base SHA | Branch | Worktree | Owns | Excludes | Status |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| A | General lean refactor | `a32b107df02d9b5b503b8d545a4fb24b7754e997` | `worker/refactor-general-20260908` | worker worktree | CLI, orchestration, profile/auth, session, runtime support, gateway, storage, config, reports, tooling outside B/C | provider catalog surfaces; throughput/log-throughput surfaces | paused; clean, no checkpoint |
-| B | Provider model catalog | `a32b107df02d9b5b503b8d545a4fb24b7754e997` | `worker/provider-catalog-20260908` | worker worktree | provider catalog, Super model pickers, Kiro/Copilot/Gemini/OpenAI catalog consumers and tests | throughput/log-throughput; unrelated refactor | repair in progress; uncommitted one-file patch |
-| C | Throughput observability | `a32b107df02d9b5b503b8d545a4fb24b7754e997` | `worker/throughput-observability-20260908` | worker worktree | generation timing, token usage, throughput state, log TUI, history, throughput docs/tests | provider catalog; unrelated refactor | paused; clean, no checkpoint |
-| D | Read-only review | `a32b107df02d9b5b503b8d545a4fb24b7754e997` | none | none | exact checkpoint review only | all writes | complete; P1/P2 findings recorded |
+| A | General lean refactor | `a32b107df02d9b5b503b8d545a4fb24b7754e997` | `worker/refactor-general-20260908` | worker worktree | CLI, orchestration, profile/auth, session, runtime support, gateway, storage, config, reports, tooling outside B/C | provider catalog surfaces; throughput/log-throughput surfaces | stopped; clean, no checkpoint |
+| B | Provider model catalog | `a32b107df02d9b5b503b8d545a4fb24b7754e997` | `worker/provider-catalog-20260908` | worker worktree | provider catalog, Super model pickers, Kiro/Copilot/Gemini/OpenAI catalog consumers and tests | throughput/log-throughput; unrelated refactor | checkpoint pushed/integrated; worker stopped |
+| C | Throughput observability | `a32b107df02d9b5b503b8d545a4fb24b7754e997` | `worker/throughput-observability-20260908` | worker worktree | generation timing, token usage, throughput state, log TUI, history, throughput docs/tests | provider catalog; unrelated refactor | stopped; clean, no checkpoint |
+| D | Read-only review | `a32b107df02d9b5b503b8d545a4fb24b7754e997` | none | none | exact checkpoint review only | all writes | complete; B checkpoint no finding |
 
 Worker contract: each worker commits only reviewed paths to its worker branch, pushes that branch,
 verifies its remote SHA, and reports focused tests/cleanup. Workers do not merge or push the
@@ -75,6 +75,10 @@ integration branch. Heavy full-workspace, Mojo, and final integration gates rema
   degraded status that the sub-agent picker reports.
 - Parallel integration baseline: local and remote `a32b107df02d9b5b503b8d545a4fb24b7754e997` on
   `refactor/parallel-integration-20260908`; first-wave worker branches all start at this SHA.
+- B repair checkpoint: local and remote `61f33d58f47f2ebef0b5ad104a14aaf407676382`; reviewer D
+  found no P0-P3 issue. It was integrated without conflict as `0cec9519` on the integration branch.
+- Integration focused tests on `0cec9519`: `super_main_prompt` 8 passed and `sub_agent_catalog`
+  14 passed, both serial; `cargo fmt --check` and `git diff --check` passed.
 
 ## Batch B1: provider catalog authority
 
@@ -115,6 +119,6 @@ order and `Custom` remains last.
 
 - Campaign worktree is owned by this campaign. Its `target/` build cache is retained while validation continues.
 - No campaign-created server or watcher remains active after baseline testing. A and C worktrees
-  are clean and their agents are stopped; B's one-file repair WIP is retained for its owner.
-- Next action: validate and checkpoint B's complexity repair, then rerun the failed Windows job
-  against the repaired SHA before resuming the paused implementation streams.
+  are clean and their agents are stopped; B's worktree is clean after its pushed checkpoint.
+- Next action: push the documented integration checkpoint, then rerun the failed Windows job and
+  confirm Sonar on `0cec9519` before resuming A and C from the new integration head.
