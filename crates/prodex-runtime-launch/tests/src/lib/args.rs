@@ -2,6 +2,18 @@ use super::*;
 use runtime_proxy_crate as runtime_proxy;
 
 #[test]
+fn runtime_launch_cli_model_accepts_inline_and_short_forms() {
+    assert_eq!(
+        runtime_launch_cli_model(&[OsString::from("--model=gpt-5.6")]).as_deref(),
+        Some("gpt-5.6")
+    );
+    assert_eq!(
+        runtime_launch_cli_model(&[OsString::from("-mgpt-5.6")]).as_deref(),
+        Some("gpt-5.6")
+    );
+}
+
+#[test]
 fn runtime_proxy_codex_args_preserve_user_overrides_after_proxy_overrides() {
     let args = runtime_proxy_codex_args(
         "127.0.0.1:4455".parse().expect("socket addr"),
