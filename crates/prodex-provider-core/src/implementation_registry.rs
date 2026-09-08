@@ -11,7 +11,7 @@ use crate::runtime_metadata::{
     GEMINI_RUNTIME_METADATA, KIRO_RUNTIME_METADATA, LOCAL_RUNTIME_METADATA,
 };
 use crate::translators::{
-    AnthropicTranslator, CopilotTranslator, DeepSeekTranslator, GeminiTranslator, KiroTranslator,
+    AnthropicTranslator, DeepSeekTranslator, GeminiTranslator, KiroTranslator,
     PassthroughTranslator,
 };
 use crate::{
@@ -215,7 +215,7 @@ const GEMINI_PASSTHROUGH_ENDPOINTS: &[ProviderEndpoint] = &[
 
 static OPENAI_TRANSLATOR: PassthroughTranslator = PassthroughTranslator::new(ProviderId::OpenAi);
 static ANTHROPIC_TRANSLATOR: AnthropicTranslator = AnthropicTranslator;
-static COPILOT_TRANSLATOR: CopilotTranslator = CopilotTranslator;
+static COPILOT_TRANSLATOR: PassthroughTranslator = PassthroughTranslator::new(ProviderId::Copilot);
 static DEEPSEEK_TRANSLATOR: DeepSeekTranslator = DeepSeekTranslator;
 static GEMINI_TRANSLATOR: GeminiTranslator = GeminiTranslator;
 static KIRO_TRANSLATOR: KiroTranslator = KiroTranslator;
