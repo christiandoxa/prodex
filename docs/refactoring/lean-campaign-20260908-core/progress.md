@@ -10,7 +10,7 @@ transport semantics. This is an implementation campaign, not a line-count exerci
 
 - `HISTORICAL_RELEASE_BASE`: `e835c1699f0960865c8cacabea6a109bd3500499` (release 0.427.0)
 - `CAMPAIGN_BASE`: `afe20dfd9f813eb217f78b63de517c7e8e52e8b7`
-- `LAST_EXACT_GREEN_SOURCE_ANCHOR`: `8ba7d893fd1385593ae589f97f0c37949835c156`
+- `LAST_EXACT_GREEN_SOURCE_ANCHOR`: `de244d631aa3bca0db4602b323568961c92f2222`
 - Baseline ancestry: `origin/main` (`ff7976858c048269d73e970356aa41f4d0b4cafb`) is an ancestor.
 - Integration branch: `refactor/parallel-integration-20260908`
 - Baseline source: historical `origin/refactor/428-integration-20260907`.
@@ -27,12 +27,12 @@ transport semantics. This is an implementation campaign, not a line-count exerci
 ## Status
 
 `CAMPAIGN_PARTIAL`; B's catalog, C's throughput, A's general refactor checkpoints, Wave 4, and
-Wave 5 are integrated. Exact CI `34205078378` passed on integration checkpoint
-`8ba7d893fd1385593ae589f97f0c37949835c156` with 72 successful, 3 skipped, and 0 failed jobs; that
+Wave 5 are integrated. Exact CI `34224751563` passed on integration checkpoint
+`de244d631aa3bca0db4602b323568961c92f2222` with 72 successful, 3 skipped, and 0 failed jobs; that
 SHA is the latest exact-green source anchor. Wave 6 source checkpoints and its audit disposition
-are integrated into `d253232e32f92c56b9f49b9fa68ee00f28d1ac35`; exact CI `34209154761` completed
-with failure, so d253 is not exact-green and qualification repair is active. No next
-implementation wave may start until the resulting integration SHA is exact-green. Provider
+are integrated into `d253232e32f92c56b9f49b9fa68ee00f28d1ac35`; its failed exact CI
+`34209154761` was repaired by the frozen-expectation checkpoint and integrated as de244. The
+next implementation wave is eligible but not started. Provider
 catalog and throughput surfaces remain protected. The wider domain audit remains open and this
 campaign is partial.
 
@@ -83,7 +83,8 @@ integration branch. Heavy full-workspace, Mojo, and campaign integration gates r
   three times on clean d253, its path is unchanged since `8ba7d893`, and no gateway source repair
   is tied to that timing-sensitive 502 result.
 - Qualification repair checkpoint `b41281fb8f6ef0a2cce313936788b0d4d16c7249` is remote-verified;
-  its independent exact-diff review returned NO_FINDING.
+  its independent exact-diff review returned NO_FINDING, it integrated as
+  `de244d631aa3bca0db4602b323568961c92f2222`, and exact CI `34224751563` passed.
 - B1 repair CI run `34184199873` completed with failure on the exact SHA `a32b107d`: Sonar
   reported `rust:S3776` cognitive complexity `27` at
   `crates/prodex-app/src/runtime_tools/sub_agent_catalog.rs:66`, and the Windows prodex-app
@@ -245,7 +246,9 @@ Wave 5 evidence changes the inventory to 56 UNREVIEWED, 0 IN_PROGRESS, 20 REFACT
 
 Wave 6 evidence changes the inventory to 53 UNREVIEWED, 0 IN_PROGRESS, 22 REFACTORED,
 14 KEEP_WITH_REASON, and 0 BLOCKED; its source checkpoints and ledger disposition are integrated
-into `d253232e32f92c56b9f49b9fa68ee00f28d1ac35`, whose exact qualification failed pending repair.
+into `d253232e32f92c56b9f49b9fa68ee00f28d1ac35`. That boundary failed CI `34209154761`; repair
+checkpoint `b41281fb8f6ef0a2cce313936788b0d4d16c7249` integrated as de244, and CI `34224751563`
+passed.
 
 ## Known checkpoints and blockers
 
@@ -260,7 +263,7 @@ into `d253232e32f92c56b9f49b9fa68ee00f28d1ac35`, whose exact qualification faile
   records remain untouched. Remote worker branches/checkpoints remain as evidence. No
   campaign-created server or watcher remains active, and no scratch fixture, credential, or raw
   log was created for this repair.
-- Next action at this boundary: serially integrate the verified repair checkpoint, run exact CI,
-  clean only completed LEAN-CAMPAIGN-owned artifacts after handoff, and do not launch the next
-  implementation wave until the resulting integration SHA is exact-green. Do not claim campaign
-  completion while any `UNREVIEWED`, `IN_PROGRESS`, or `BLOCKED` row remains.
+- Next action at this boundary: keep historical and unknown-ownership worktrees protected, clean
+  only completed LEAN-CAMPAIGN-owned artifacts after handoff, and begin the next implementation
+  wave only after explicit scope selection. Do not claim campaign completion while any
+  `UNREVIEWED`, `IN_PROGRESS`, or `BLOCKED` row remains.
