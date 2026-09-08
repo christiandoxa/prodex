@@ -59,8 +59,8 @@ integration branch. Heavy full-workspace, Mojo, and final integration gates rema
 - Codebase Memory index: 59,103 nodes and 324,553 edges; five partial files and one ignored example
   asset are recorded as coverage limits. Graph results remain discovery evidence, not completeness proof.
 - B1 checkpoint: local and remote `b8064149b615b60c56fd38302cdcf113a8c33890`.
-- Predecessor catalog PR: `#70`, base `refactor/428-integration-20260907`; it remains the
-  pre-orchestration checkpoint and is not the integration review surface.
+- Predecessor catalog PR: `#70`, base `refactor/428-integration-20260907`; it is closed as
+  superseded, while its branch and commits remain available as pre-orchestration evidence.
 - Draft integration PR: `#71`, base `refactor/lean-campaign-20260908-core`, head
   `refactor/parallel-integration-20260908`; its body will be updated with reviewed checkpoints
   and final gate evidence.
@@ -104,10 +104,13 @@ integration branch. Heavy full-workspace, Mojo, and final integration gates rema
   update-notice (11), and core (12).
 - Current integration tree contains both worker streams through `f9d8a05c` plus guard repair
   `32daf41b`; local static guards and focused tests pass. Full CI `34190204961` passed on exact
-  `5c42efee`, the audit-only wave checkpoint before the latest ledger update.
+  `5c42efee`, the audit-only wave checkpoint before the latest ledger updates.
 - Wave 3 ownership was disjoint: B2 owned only the gateway/dashboard catalog consumers in B1-007;
   A2 owned one general-domain candidate outside provider catalog and throughput files. B2 completed
   its audit-only review; A2 stopped before producing symbol-level evidence.
+- B2 evidence: gateway focused tests passed `503`, with `17` ignored; dashboard focused tests passed
+  `20`. The public metadata/availability contract is retained separately from picker catalog
+  planning, with the concrete KEEP_WITH_REASON recorded in `audit.csv`.
 
 ## Batch B1: provider catalog authority
 
@@ -186,4 +189,4 @@ branches remain unchanged while duplicate naming logic uses the existing core ow
   are retained for final gates; no scratch fixture, server, watcher, credential, or raw log was
   created for commit.
 - Next action: perform the next symbol-level general-domain audit from the current integration
-  SHA, or hand off the remaining UNREVIEWED inventory without claiming campaign completion.
+  SHA `394ef887`, or hand off the remaining UNREVIEWED inventory without claiming campaign completion.
