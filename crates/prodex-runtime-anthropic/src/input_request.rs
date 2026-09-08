@@ -125,6 +125,16 @@ pub fn translate_runtime_anthropic_messages_request(
     if let Some(session_id) = runtime_proxy_claude_session_id(request) {
         translated_headers.push(("session_id".to_string(), session_id));
     }
+    for name in [
+        "x-openai-subagent",
+        "x-codex-turn-state",
+        "x-codex-turn-metadata",
+        "x-codex-beta-features",
+    ] {
+        if let Some(value) = runtime_proxy_request_header_value(&request.headers, name) {
+            translated_headers.push((name.to_string(), value.to_string()));
+        }
+    }
     translated_headers.push((
         PRODEX_INTERNAL_REQUEST_ORIGIN_HEADER.to_string(),
         PRODEX_INTERNAL_REQUEST_ORIGIN_ANTHROPIC_MESSAGES.to_string(),

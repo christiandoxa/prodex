@@ -320,6 +320,95 @@ fn translate_runtime_anthropic_messages_request_keeps_upstream_streaming_for_non
 }
 
 #[test]
+fn translate_runtime_anthropic_messages_request_forwards_safe_metadata_only() {
+    let request = RuntimeProxyRequest {
+        method: "POST".to_string(),
+        path_and_query: "/v1/messages".to_string(),
+        headers: vec![
+            ("User-Agent".to_string(), "claude-cli/test".to_string()),
+            (
+                "X-Claude-Code-Session-Id".to_string(),
+                "claude-session-123".to_string(),
+            ),
+            ("X-OpenAI-Subagent".to_string(), "subagent-example".to_string()),
+            ("X-Codex-Turn-State".to_string(), "turn-state-example".to_string()),
+            (
+                "X-Codex-Turn-Metadata".to_string(),
+                "turn-metadata-example".to_string(),
+            ),
+            (
+                "X-Codex-Beta-Features".to_string(),
+                "beta-example".to_string(),
+            ),
+            (
+                "Authorization".to_string(),
+                "Bearer should-not-forward".to_string(),
+            ),
+            ("Cookie".to_string(), "session=should-not-forward".to_string()),
+            ("x-api-key".to_string(), "api-key-should-not-forward".to_string()),
+            (
+                "X-Prodex-Internal-Request-Origin".to_string(),
+                "spoofed-origin".to_string(),
+            ),
+            ("Host".to_string(), "example.com".to_string()),
+            ("Connection".to_string(), "keep-alive".to_string()),
+            ("Content-Length".to_string(), "123".to_string()),
+            ("Transfer-Encoding".to_string(), "chunked".to_string()),
+            ("Upgrade".to_string(), "websocket".to_string()),
+            ("sec-websocket-key".to_string(), "key-example".to_string()),
+        ],
+        body: serde_json::json!({
+            "model": "claude-sonnet-4-6",
+            "messages": [{"role": "user", "content": "Hello"}]
+        })
+        .to_string()
+        .into_bytes(),
+    };
+
+    let translated =
+        translate_runtime_anthropic_messages_request(&request).expect("translation should succeed");
+    let headers = &translated.translated_request.headers;
+
+    for (name, value) in [
+        ("x-openai-subagent", "subagent-example"),
+        ("x-codex-turn-state", "turn-state-example"),
+        ("x-codex-turn-metadata", "turn-metadata-example"),
+        ("x-codex-beta-features", "beta-example"),
+    ] {
+        assert_eq!(runtime_proxy_request_header_value(headers, name), Some(value));
+    }
+    assert_eq!(
+        runtime_proxy_request_header_value(headers, "User-Agent"),
+        Some("claude-cli/test")
+    );
+    assert_eq!(
+        runtime_proxy_request_header_value(headers, "session_id"),
+        Some("claude-session-123")
+    );
+    assert_eq!(
+        runtime_proxy_request_header_value(headers, "X-Prodex-Internal-Request-Origin"),
+        Some("anthropic_messages")
+    );
+
+    for name in [
+        "Authorization",
+        "Cookie",
+        "x-api-key",
+        "Host",
+        "Connection",
+        "Content-Length",
+        "Transfer-Encoding",
+        "Upgrade",
+        "sec-websocket-key",
+    ] {
+        assert!(
+            runtime_proxy_request_header_value(headers, name).is_none(),
+            "translated request should omit {name}"
+        );
+    }
+}
+
+#[test]
 fn runtime_request_for_anthropic_server_tool_followup_defaults_stream_to_true() {
     let request = RuntimeProxyRequest {
         method: "POST".to_string(),
@@ -364,4 +453,3 @@ fn runtime_request_for_anthropic_server_tool_followup_defaults_stream_to_true() 
         "follow-up request must request a streaming Responses transport"
     );
 }
-
