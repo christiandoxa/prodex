@@ -19,7 +19,7 @@ pub use principal_attributes::{MAX_POLICY_PRINCIPAL_GROUPS, PrincipalPolicyAttri
 pub const MAX_GOVERNANCE_POLICY_RULES: usize = 256;
 pub const MAX_POLICY_OBLIGATIONS: usize = 64;
 pub const MAX_POLICY_REASON_CODES: usize = 32;
-pub const MAX_POLICY_REQUESTED_TOOLS: usize = 128;
+const MAX_POLICY_REQUESTED_TOOLS: usize = 128;
 const MAX_POLICY_TOKEN_BYTES: usize = 128;
 
 macro_rules! policy_token {
