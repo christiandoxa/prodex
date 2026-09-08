@@ -252,55 +252,15 @@ passed.
 
 ## Wave 7 manual successor execution
 
-- Handoff: the verified legacy coordinator/runner/controller and all 20 legacy worker trees were
-  stopped gracefully; the protected manual session, user expose, Codebase Memory daemon, main
-  worktree, release worktrees, and unrelated processes were not stopped. The secondary ext4 SSD
-  remained mounted at its verified device identity and campaign-owned cleanup reclaimed completed
-  build/review targets only.
-- Current source integration tip: `58c6154d` (B0-061 guard repair), on
-  `refactor/successor-integration-20260908`. The qualifying source tree retains reviewed
-  checkpoints `478333f7` (cookie relay hardening) and `58c6154d` (CI protected-path guard).
-  `be9b6452` (shared CLI model parser) was reviewed and reverted as `40d3ac07` to make room;
-  `38077452` (private Copilot passthrough) was reverted as `a65c3f96`, `33bc6795` (private
-  idempotency route validation) as `272c4b13`, `1556875d` (overlay entrypoint reuse) as
-  `b83f8eff`, and `8d015e6e` (uncalled npm scripts) as `81380514`. All held branches, logs,
-  reviews, and validation evidence remain durable; no main or release worktree was changed.
-- Churn evidence: CI run `34246900868` correctly rejected the wider `09212cf1` tree because the
-  PR base `a32b107d` range reached 31 behavior files, above the enforced 25-file limit. No guard,
-  threshold, or allowlist was weakened. The wider reviewed checkpoints `5c3aa588` (bounded TOML
-  lookups), `09212cf1` (private domain cleanup), and `edcca0b4` (private terminal aliases) were
-  reverted from the integration tree with ordinary revert commits, while their remote branches,
-  logs, reviews, and source evidence remain durable for later qualifying batches. The current
-  range is 28 files, 24 behavior files, and 1,192 changed lines.
-- Held checkpoints: `84512e22` (review `NO_FINDING`, config 19 plus app 4+6+1+176 tests and
-  workspace Clippy), `c92851d8` (replacement exact-SHA review `NO_FINDING`, IDs 8 and governance
-  policy 10), `932863af` (replacement exact-SHA review `NO_FINDING`, app alias tests 3+1+11+48),
-  `a9a9024c` (review `NO_FINDING`, npm 27, installer 12+1 Windows skip, SDK 17, release 10, and
-  fixture/guard checks), `e3f947b3` (review `NO_FINDING`, optional-tools 51 and app desktop/overlay
-  5+5), `38077452` (provider-core review `NO_FINDING`), and `87df35a2` (runtime model scanner,
-  exact-SHA review `NO_FINDING`) are ledgered `IN_PROGRESS` because integrating them now would
-  exceed the churn range. B0-003's exact-SHA review returned `NO_FINDING` and its checkpoint is
-  held; B0-061 repair `a0a11310` restored the independent always-heavy invariant and is
-  integrated. The model writer's full app aggregate stopped after 1,446 of 3,452 tests with 16
-  unrelated runtime-synchronization failures, so that aggregate is not full-suite-green evidence.
-  B0-034 repair `76a7e98f` received exact-SHA `NO_FINDING` and is integrated.
-- Completed new audits added public-compatibility or semantic-risk holds for B0-022 shared types,
-  B0-024 provider SPI, B0-025 quota, B0-027 observability, B0-033 Gemini compatibility, B0-035
-  runtime log, and B0-037 broker log; no source change was admitted from those audit reports.
-  Their logs contain exact-base graph/source evidence and no live-provider tests. B0-027, B0-033,
-  B0-035, B0-037, and B0-028 audit worktrees were harvested and cleaned. B0-036 remains active;
-  B0-034 and B0-061 predecessor/review/repair evidence is retained in logs and branches, with
-  eligible implementation/review worktrees and targets cleaned.
-- Coverage: the ledger has 64 unique B0 domains with 27 `UNREVIEWED`, 8 `IN_PROGRESS`, 6
-  `REFACTORED`, and 23 `KEEP_WITH_REASON`; all changes are evidence-backed and no row was closed
-  by worker launch alone. Completed audits also recorded explicit public-API holds for control
-  plane, state, context blob-noise, housekeeping, shared types, provider SPI, and gateway
-  surfaces, plus semantic-difference holds for storage reservation validators and quota planning.
-- Current CI: run `34257479255` passed for the pre-cookie source tip `6d690f3f`. Run `34267239512`
-  for the cookie/CI-guard predecessor failed only the Windows foundation shard's unrelated
-  `prodex-secret-store` concurrency test; all campaign-relevant jobs were otherwise green. The
-  current push must receive a fresh CI result. Earlier run `34251095095` exposed the stale
-  production-share expectation, corrected in the measured fixture updates.
+- Handoff completed: the legacy coordinator, controller, and worker trees were stopped gracefully; the protected manual session, user expose, Codebase Memory daemon, main worktree, release worktrees, and unrelated processes were not stopped.
+- Current qualifying source tip: `f1f07236` on `refactor/successor-integration-20260908`. Approved B0-036 commits `659cdc4e`, `18bd36a5`, and `f1f07236` were reviewed at exact worker SHA `3712bbbe`; reviewer `R-B0-036-security-final` returned `NO_FINDING`.
+- B0-036 validation passed broker 33, app `runtime_broker` 59, `runtime_doctor` 21, URL-boundary regressions, runtime smoke, runtime hot-path and manifest guards, auth/secret/application/crate boundary guards, workspace Clippy, fmt, and diff checks.
+- Commit `208aa412` mechanically holds 24 lower-priority behavior-file checkpoints so the enforced churn range can admit the critical broker repair. Their remote branches, reviews, logs, and source evidence remain retained; no main or release worktree was changed.
+- Held source domains are recorded as `IN_PROGRESS` in `audit.csv`, including CLI, session-store, runtime policy, runtime cookies, CI guards, provider picker repairs, throughput observability, temp-file naming, update notice, and test-import cleanups. B0-036 is the current `REFACTORED` source row.
+- The official share report on the integrated source reports Rust `348,160`, Mojo `26,420`, total `374,580`, and share `7.053232954242085%`; the release floor and Mojo non-regression pass, the project target remains unmet, and the historical waiver is expired. The frozen fixture is aligned to that measured report.
+- Current ledger counts are 64 unique B0 domains: 26 `UNREVIEWED`, 13 `IN_PROGRESS`, 2 `REFACTORED`, and 23 `KEEP_WITH_REASON`. B0-036 is closed only after exact-SHA review and focused validation.
+- Previous CI runs `34257479255` and `34267239512` remain historical evidence; the latter failed only on an unrelated Windows secret-store concurrency test. A fresh CI run is required for the current source tip.
+- Final B0-036 writer/reviewer worktrees and build targets are eligible for exact cleanup after report harvest; campaign logs remain retained.
 
 ## Known checkpoints and blockers
 
