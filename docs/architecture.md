@@ -184,10 +184,11 @@ Observability rules:
 - If runtime stalls, inspect latest runtime log markers before changing selection or transport behavior.
 - `prodex log` is the canonical short form of `prodex log stream`; both use one live handler.
   `prodex log upstream` remains the explicit upstream-payload mode. All three share the human TUI
-  title `Prodex Log`. Their right-aligned t/s field is output tokens per active generation second,
+  title `Prodex Log`. Their right-aligned t/s field is `gen N t/s` during active output generation,
   sourced from existing token-usage timing; prompt/cache tokens, payload bytes, TTFT, and unrelated
   processes are not included. After a valid measurement the latest numeric rate remains visible
-  as `last N t/s` while idle; before any measurement the field is `— t/s`. The human stream view coalesces
+  as `last gen N t/s` while idle, with coarse monotonic age when the viewer observed the sample;
+  historical samples omit age. Before any measurement the field is `— gen t/s`. The human stream view coalesces
   repeated low-signal profile-load observations into bounded episodes with occurrence/run counts;
   `--json` remains an individual-event output path. Bounded live-buffer or oversized-line loss is
   surfaced as a `runtime_log_gap` event instead of advancing the subscriber cursor silently. The

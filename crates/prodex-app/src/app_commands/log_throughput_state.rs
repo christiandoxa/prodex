@@ -32,20 +32,21 @@ struct OutputThroughputStream {
     samples: VecDeque<(Instant, u64)>,
     active: bool,
     last_known_rate: Option<f64>,
+    last_rate_at: Option<Instant>,
     last_event_at: Option<Instant>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) enum OutputThroughputDisplay {
     Active(f64),
-    Last(f64),
+    Last { rate: f64, age: Option<Duration> },
 }
 
 impl OutputThroughputDisplay {
     #[cfg(test)]
     pub(crate) fn rate(self) -> f64 {
         match self {
-            Self::Active(rate) | Self::Last(rate) => rate,
+            Self::Active(rate) | Self::Last { rate, .. } => rate,
         }
     }
 }
@@ -116,6 +117,7 @@ impl OutputThroughput {
             if let Some(rate) = rate {
                 stream.active = true;
                 stream.last_known_rate = Some(rate);
+                stream.last_rate_at = Some(observed_at);
             }
         }
         if let Some(rate) = rate {
@@ -155,7 +157,11 @@ impl OutputThroughput {
             stream.samples.push_back((observed_at, cumulative));
             stream.active = output_tokens > 0;
             prune_output_throughput_samples(stream, observed_at);
-            output_throughput_stream_rate(stream)
+            let rate = output_throughput_stream_rate(stream);
+            if rate.is_some() {
+                stream.last_rate_at = Some(observed_at);
+            }
+            rate
         };
         if let Some(rate) = rate.filter(|rate| rate.is_finite() && *rate > 0.0) {
             if let Some(stream) = self.streams.get_mut(&key) {
@@ -272,14 +278,30 @@ impl OutputThroughput {
             Some(profile) => self.last_event_keys.get(profile),
             None => self.last_event_key.as_ref(),
         };
-        key.and_then(|key| self.last_known_rates.get(key).copied())
-            .map(OutputThroughputDisplay::Last)
+        key.and_then(|key| {
+            let rate = self.last_known_rates.get(key).copied()?;
+            Some(OutputThroughputDisplay::Last {
+                rate,
+                age: self
+                    .streams
+                    .get(key)
+                    .and_then(|stream| stream.last_rate_at)
+                    .and_then(|at| now.checked_duration_since(at)),
+            })
+        })
     }
 
     pub(super) fn observe_historical(&mut self, log_path: &Path, event: &InfoTokenUsageEvent) {
         let Some(rate) = valid_output_rate(event) else {
             return;
         };
+        let observation = output_throughput_observation(event);
+        if self
+            .duplicate_observation_path(&observation, log_path)
+            .is_some()
+        {
+            return;
+        }
         if self
             .historical_rate_timestamps
             .get(&event.profile)
@@ -296,12 +318,13 @@ impl OutputThroughput {
             let stream = self.stream(&key);
             stream.active = false;
             stream.last_known_rate = Some(rate);
+            stream.last_rate_at = None;
         }
         let global_latest = self
             .historical_rate_timestamp
             .as_deref()
             .is_none_or(|timestamp| timestamp <= event.timestamp.as_str());
-        self.remember_observation(output_throughput_observation(event), log_path);
+        self.remember_observation(observation, log_path);
         self.last_known_rates.insert(key.clone(), rate);
         self.last_event_keys
             .insert(event.profile.clone(), key.clone());
@@ -531,6 +554,67 @@ mod tests {
         assert_eq!(
             display_rate(&mut throughput, start + Duration::from_secs(61)),
             Some(50.0)
+        );
+    }
+
+    #[test]
+    fn retained_rate_reports_monotonic_age_but_history_age_is_unknown() {
+        let path = Path::new("/tmp/runtime-age.log");
+        let history = Path::new("/tmp/runtime-age-history.log");
+        let start = Instant::now();
+        let event = InfoTokenUsageEvent {
+            profile: "main".to_string(),
+            request: Some(12),
+            output_tokens: 100,
+            generation_ms: Some(1_000),
+            ..InfoTokenUsageEvent::default()
+        };
+        let mut throughput = OutputThroughput::default();
+        throughput.observe_token_usage(path, &event, start);
+        throughput.finish(path, &event);
+
+        assert_eq!(
+            throughput.display_for_profile(start + Duration::from_secs(61), Some("main"),),
+            Some(super::OutputThroughputDisplay::Last {
+                rate: 100.0,
+                age: Some(Duration::from_secs(61)),
+            })
+        );
+
+        let mut historical_throughput = OutputThroughput::default();
+        historical_throughput.observe_historical(history, &event);
+        assert_eq!(
+            historical_throughput.display_for_profile(Instant::now(), Some("main")),
+            Some(super::OutputThroughputDisplay::Last {
+                rate: 100.0,
+                age: None,
+            })
+        );
+    }
+
+    #[test]
+    fn late_duplicate_history_does_not_erase_live_monotonic_age() {
+        let live = Path::new("broker:runtime-age:instance");
+        let history = Path::new("/tmp/runtime-age-replay.log");
+        let start = Instant::now();
+        let event = InfoTokenUsageEvent {
+            profile: "main".to_string(),
+            request: Some(13),
+            output_tokens: 100,
+            generation_ms: Some(1_000),
+            ..InfoTokenUsageEvent::default()
+        };
+        let mut throughput = OutputThroughput::default();
+        throughput.observe_token_usage(live, &event, start);
+        throughput.finish(live, &event);
+        throughput.observe_historical(history, &event);
+
+        assert_eq!(
+            throughput.display_for_profile(start + Duration::from_secs(61), Some("main")),
+            Some(super::OutputThroughputDisplay::Last {
+                rate: 100.0,
+                age: Some(Duration::from_secs(61)),
+            })
         );
     }
 

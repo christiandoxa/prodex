@@ -70,6 +70,35 @@ mod tests {
     }
 
     #[test]
+    fn output_throughput_formula_matches_authoritative_generation_samples() {
+        for (request, output_tokens, generation_ms, expected_rate) in [
+            (1, 100, 2_000, 50.0),
+            (2, 120, 3_000, 40.0),
+            (3, 500, 10_000, 50.0),
+            (4, 200, 2_500, 80.0),
+        ] {
+            let start = Instant::now();
+            let mut throughput = OutputThroughput::default();
+            throughput.observe_token_usage(
+                Path::new("/tmp/runtime-formula.log"),
+                &InfoTokenUsageEvent {
+                    request: Some(request),
+                    output_tokens,
+                    generation_ms: Some(generation_ms),
+                    ..usage("main", Some(request), output_tokens)
+                },
+                start,
+            );
+
+            assert_eq!(
+                active_rate(&mut throughput, start),
+                Some(expected_rate),
+                "output_tokens={output_tokens} generation_ms={generation_ms}"
+            );
+        }
+    }
+
+    #[test]
     fn output_throughput_stays_blank_until_authoritative_sample() {
         let path = Path::new("/tmp/runtime-b.log");
         let start = Instant::now();

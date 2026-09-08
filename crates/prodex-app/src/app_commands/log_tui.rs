@@ -55,7 +55,7 @@ pub(super) fn render_log_header(
         title,
         _count,
         detail,
-        throughput_rate.map(OutputThroughputDisplay::Last),
+        throughput_rate.map(|rate| OutputThroughputDisplay::Last { rate, age: None }),
         width,
     )
 }
@@ -69,11 +69,26 @@ pub(super) fn render_log_header_with_display(
 ) -> String {
     let inner_width = width.saturating_sub(2);
     let throughput = match throughput_display {
-        Some(OutputThroughputDisplay::Active(rate)) => format_output_tokens_per_second(Some(rate)),
-        Some(OutputThroughputDisplay::Last(rate)) => {
-            format!("last {}", format_output_tokens_per_second(Some(rate)))
+        Some(OutputThroughputDisplay::Active(rate)) => {
+            format!("gen {}", format_output_tokens_per_second(Some(rate)))
         }
-        None => format_output_tokens_per_second(None),
+        Some(OutputThroughputDisplay::Last { rate, age }) => {
+            let age = age
+                .map(|age| {
+                    format!(
+                        " (age {})",
+                        terminal_ui::format_relative_duration(
+                            age.as_secs().min(i64::MAX as u64) as i64
+                        )
+                    )
+                })
+                .unwrap_or_default();
+            format!(
+                "last gen {}{age}",
+                format_output_tokens_per_second(Some(rate))
+            )
+        }
+        None => "— gen t/s".to_string(),
     };
     let throughput_width = terminal_ui::text_width(&throughput);
     if inner_width <= throughput_width {
@@ -521,6 +536,37 @@ mod tests {
     }
 
     #[test]
+    fn log_header_labels_active_generation_rate() {
+        let header = render_log_header_with_display(
+            LOG_TUI_TITLE,
+            "",
+            None,
+            Some(OutputThroughputDisplay::Active(100.0)),
+            80,
+        );
+
+        assert!(header.contains("gen 100 t/s"));
+        assert!(!header.contains("last gen"));
+    }
+
+    #[test]
+    fn log_header_labels_retained_rate_and_coarse_age() {
+        let header = render_log_header_with_display(
+            LOG_TUI_TITLE,
+            "",
+            None,
+            Some(OutputThroughputDisplay::Last {
+                rate: 100.0,
+                age: Some(Duration::from_secs(7)),
+            }),
+            80,
+        );
+
+        assert!(header.contains("last gen 100 t/s (age <1m)"));
+        assert!(!header.contains("age 7s"));
+    }
+
+    #[test]
     fn log_header_prioritizes_quota_over_buffer_counts() {
         let snapshot = RuntimeProfileUsageSnapshot {
             checked_at: 0,
@@ -558,7 +604,7 @@ mod tests {
         let header = render_log_header(LOG_TUI_TITLE, "200 event(s)", None, None, 30);
 
         assert!(header.contains(LOG_TUI_TITLE));
-        assert!(header.ends_with("— t/s"));
+        assert!(header.ends_with("— gen t/s"));
     }
 
     #[test]

@@ -19,7 +19,7 @@ fn completed_rate_reaches_tui_header_and_survives_log_flood() {
         throughput.display_rate_for_profile(Instant::now(), Some("main")),
         80,
     );
-    assert!(initial.ends_with("— t/s"));
+    assert!(initial.ends_with("— gen t/s"));
 
     let completed = collect_runtime_log_line(
         path,
@@ -48,10 +48,16 @@ fn completed_rate_reaches_tui_header_and_survives_log_flood() {
     let rate = throughput.display_rate_for_profile(Instant::now(), Some("main"));
     let display = throughput.display_for_profile(Instant::now(), Some("main"));
     assert_eq!(rate, Some(100.0));
-    assert_eq!(display, Some(OutputThroughputDisplay::Last(100.0)));
+    assert!(matches!(
+        display,
+        Some(OutputThroughputDisplay::Last {
+            rate: 100.0,
+            age: Some(_),
+        })
+    ));
     let rendered = render_log_header_with_display(LOG_TUI_TITLE, "", None, display, 80);
-    assert!(rendered.contains("last 100 t/s"));
-    assert!(render_log_header(LOG_TUI_TITLE, "", None, rate, 80).contains("last 100 t/s"));
+    assert!(rendered.contains("last gen 100 t/s"));
+    assert!(render_log_header(LOG_TUI_TITLE, "", None, rate, 80).contains("last gen 100 t/s"));
 }
 
 #[test]
