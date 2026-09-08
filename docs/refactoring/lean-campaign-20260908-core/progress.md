@@ -17,8 +17,8 @@ transport semantics. This is an implementation campaign, not a line-count exerci
 
 ## Status
 
-`IN_PROGRESS`; batch `B1-provider-catalog` is implementation-complete locally and awaits its
-focused checkpoint. The wider domain audit remains open.
+`IN_PROGRESS`; B1 is pushed and CI is pending on the exact SHA. No batch is active while B2 is
+being prepared. The wider domain audit remains open.
 
 ## Invariants
 
@@ -40,6 +40,9 @@ focused checkpoint. The wider domain audit remains open.
 - Dependency duplicate guard: 21/21 budgeted families, exit `0`.
 - Codebase Memory index: 59,103 nodes and 324,553 edges; five partial files and one ignored example
   asset are recorded as coverage limits. Graph results remain discovery evidence, not completeness proof.
+- B1 checkpoint: local and remote `b8064149b615b60c56fd38302cdcf113a8c33890`.
+- Draft PR: `#70`, base `refactor/428-integration-20260907`; CI is in progress/pending for B1,
+  with `compat-replay-gate` successful and optional-tools freshness skipped by CI.
 
 ## Batch B1: provider catalog authority
 
@@ -65,6 +68,10 @@ order and `Custom` remains last.
 - Static guards after B1: application boundary, crate boundary, size, secret boundary, Mojo share,
   Mojo authority/no-fallback, and runtime test manifest all passed. All-feature workspace clippy
   passed on the final B1 source tree.
+- Measurement with the repository size guard: baseline `512,038` production Rust lines across
+  `1,817` files; B1 `512,426` lines across the same file count. The increase is bounded loader and
+  regression coverage; semantic ownership reduced by deleting the old picker-only loader and its
+  test-only forwarding helpers. No dependency or runtime transport change.
 
 ## Known checkpoints and blockers
 
@@ -76,6 +83,6 @@ order and `Custom` remains last.
 
 - Campaign worktree is owned by this campaign. Its `target/` build cache is retained while validation continues.
 - No campaign-created server or watcher remains active after baseline testing.
-- Next action: rerun clippy and final B1 guards, stage only reviewed B1 paths, commit and push B1 to
-  the campaign branch, verify remote SHA and CI status, then start B2 for gateway/dashboard consumer
-  consolidation only after synchronization.
+- Next action: verify B1 CI completion on `b8064149…`; if green, begin B2 by reading the remaining
+  gateway Kiro and dashboard catalog loaders, preserving runtime dispatch behavior and keeping the
+  size-safe extraction in a separate focused batch.
