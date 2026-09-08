@@ -2,7 +2,7 @@ use super::super::log_throughput::OutputThroughput;
 use super::log_stream::{LogStreamItem, collect_runtime_log_line};
 use crate::{
     AppPaths, RuntimeConfig, load_runtime_broker_registry, probe_runtime_broker_log_snapshot,
-    runtime_broker_registry_identity_is_valid, runtime_broker_registry_keys,
+    runtime_broker_registry_admission, runtime_broker_registry_keys,
     runtime_live_log_source_registry_keys, runtime_process_prodex_binary_identity,
 };
 use anyhow::Result;
@@ -57,7 +57,7 @@ impl LiveRuntimeLogSource {
             let Ok(Some(registry)) = load_runtime_broker_registry(&self.paths, &broker_key) else {
                 continue;
             };
-            if !runtime_broker_registry_identity_is_valid(&registry) {
+            if runtime_broker_registry_admission(&registry).is_err() {
                 continue;
             }
             let source_identity_key = (broker_key.clone(), registry.instance_id.clone());
@@ -170,8 +170,8 @@ mod tests {
     use super::*;
     use crate::{
         RUNTIME_PROXY_OPENAI_MOUNT_PATH, RuntimeBrokerRegistry,
-        runtime_current_prodex_binary_identity, runtime_process_birth_identity,
-        save_runtime_broker_artifacts,
+        runtime_broker_registry_identity_is_valid, runtime_current_prodex_binary_identity,
+        runtime_process_birth_identity, save_runtime_broker_artifacts,
     };
     use prodex_runtime_broker::RuntimeBrokerSecret;
     use reqwest::blocking::Client;
