@@ -139,6 +139,6 @@ pub(super) fn validate_gateway_secret_ref(
     Ok(())
 }
 
-pub(crate) fn exact_identifier(value: &str) -> bool {
+fn exact_identifier(value: &str) -> bool {
     !value.is_empty() && !value.chars().any(char::is_whitespace)
 }

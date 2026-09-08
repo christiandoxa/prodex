@@ -4,7 +4,7 @@ import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { ciImpactCategory } from "./test-impact-manifest.mjs";
 
-const ALWAYS_HEAVY_PATHS = Object.freeze([
+const ALWAYS_HEAVY_PATHS = new Set([
   "scripts/ci/backup-restore-drill.mjs",
   "scripts/ci/backup-restore-drill.test.mjs",
   "scripts/ci/ci-impact.mjs",
@@ -59,6 +59,10 @@ export function requiresRuntimeProxyBench(changedPaths) {
   );
 }
 
+function pathCategory(filePath) {
+  return ALWAYS_HEAVY_PATHS.has(filePath) ? "heavy" : ciImpactCategory(filePath);
+}
+
 export function classifyChangedPaths(changedPaths) {
   if (!changedPaths || typeof changedPaths[Symbol.iterator] !== "function") {
     return {
@@ -88,7 +92,7 @@ export function classifyChangedPaths(changedPaths) {
   const unknownPaths = [];
 
   for (const filePath of paths) {
-    const category = ALWAYS_HEAVY_PATHS.includes(filePath) ? "heavy" : ciImpactCategory(filePath);
+    const category = pathCategory(filePath);
     if (category === "heavy") {
       heavyPaths.push(filePath);
     } else if (category === "light") {

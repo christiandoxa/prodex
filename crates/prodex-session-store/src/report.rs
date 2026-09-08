@@ -1,4 +1,3 @@
-use super::session_selector::session_value_resume_id;
 use chrono::{Local, TimeZone};
 use serde::Serialize;
 use std::path::{Path, PathBuf};
@@ -129,7 +128,15 @@ pub fn apply_session_value(report: &mut SessionReport, value: &serde_json::Value
         .get("type")
         .and_then(serde_json::Value::as_str)
         .is_none_or(|kind| kind == "session_meta")
-        && let Some(id) = session_value_resume_id(value)
+        && let Some(id) = first_string_value(
+            value,
+            &[
+                &["payload", "id"],
+                &["payload", "session_id"],
+                &["id"],
+                &["session_id"],
+            ],
+        )
     {
         report.id = id;
     }

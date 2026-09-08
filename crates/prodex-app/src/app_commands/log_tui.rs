@@ -55,7 +55,7 @@ pub(super) fn render_log_header(
         title,
         _count,
         detail,
-        throughput_rate.map(|rate| OutputThroughputDisplay::Last { rate, age: None }),
+        throughput_rate.map(OutputThroughputDisplay::Last),
         width,
     )
 }
@@ -69,26 +69,11 @@ pub(super) fn render_log_header_with_display(
 ) -> String {
     let inner_width = width.saturating_sub(2);
     let throughput = match throughput_display {
-        Some(OutputThroughputDisplay::Active(rate)) => {
-            format!("gen {}", format_output_tokens_per_second(Some(rate)))
+        Some(OutputThroughputDisplay::Active(rate)) => format_output_tokens_per_second(Some(rate)),
+        Some(OutputThroughputDisplay::Last(rate)) => {
+            format!("last {}", format_output_tokens_per_second(Some(rate)))
         }
-        Some(OutputThroughputDisplay::Last { rate, age }) => {
-            let age = age
-                .map(|age| {
-                    format!(
-                        " (age {})",
-                        terminal_ui::format_relative_duration(
-                            age.as_secs().min(i64::MAX as u64) as i64
-                        )
-                    )
-                })
-                .unwrap_or_default();
-            format!(
-                "last gen {}{age}",
-                format_output_tokens_per_second(Some(rate))
-            )
-        }
-        None => "— gen t/s".to_string(),
+        None => format_output_tokens_per_second(None),
     };
     let throughput_width = terminal_ui::text_width(&throughput);
     if inner_width <= throughput_width {
@@ -519,6 +504,23 @@ mod tests {
     }
 
     #[test]
+    fn log_header_keeps_throughput_at_the_right_edge() {
+        let detail = LogTuiHeaderDetail::profile_only("main".to_string(), Duration::from_secs(1));
+        let header = render_log_header(
+            LOG_TUI_TITLE,
+            "200 event(s)",
+            Some(&detail),
+            Some(100.0),
+            80,
+        );
+
+        assert_eq!(terminal_ui::text_width(&header), 78);
+        assert!(header.ends_with("100 t/s"));
+        assert!(header.starts_with(LOG_TUI_TITLE));
+        assert!(!header.contains("200 event(s)"));
+    }
+
+    #[test]
     fn log_header_prioritizes_quota_over_buffer_counts() {
         let snapshot = RuntimeProfileUsageSnapshot {
             checked_at: 0,
@@ -556,7 +558,7 @@ mod tests {
         let header = render_log_header(LOG_TUI_TITLE, "200 event(s)", None, None, 30);
 
         assert!(header.contains(LOG_TUI_TITLE));
-        assert!(header.ends_with("— gen t/s"));
+        assert!(header.ends_with("— t/s"));
     }
 
     #[test]

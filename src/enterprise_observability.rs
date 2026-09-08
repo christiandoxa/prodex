@@ -1,15 +1,12 @@
 mod http;
 
 pub(crate) use http::OtlpHttpLogSink;
+#[cfg(test)]
+use http::*;
 pub use http::{OtlpLogAttribute, export_otlp_http_log_if_configured, otlp_http_log_export_status};
 
 #[cfg(test)]
 mod tests {
-    use super::http::{
-        INVALID_OTLP_HTTP_ENDPOINT, OtlpHttpLogExportConfig, export_otlp_http_log,
-        export_otlp_http_log_with_config, otlp_http_log_export_config_from,
-        otlp_http_log_export_status_for, otlp_http_log_payload,
-    };
     use super::*;
     use std::io::{Read, Write};
     use std::net::TcpListener;

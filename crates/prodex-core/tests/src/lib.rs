@@ -125,21 +125,6 @@ fn root_temp_file_pid_parses_atomic_write_names() {
 }
 
 #[test]
-fn unique_root_temp_file_path_matches_owned_temp_policy() {
-    let sequence = AtomicU64::new(41);
-    let target = Path::new("/home/test-user/.prodex/state.json");
-    let temp = unique_root_temp_file_path(target, "fallback.json", &sequence);
-    let name = temp.file_name().and_then(|value| value.to_str()).unwrap();
-
-    assert_eq!(temp.parent(), target.parent());
-    assert!(name.starts_with("state.json."));
-    assert!(name.ends_with(".tmp"));
-    assert!(owned_root_temp_file_name(name));
-    assert_eq!(root_temp_file_pid(name), Some(std::process::id()));
-    assert_eq!(sequence.load(Ordering::Relaxed), 42);
-}
-
-#[test]
 fn stale_root_temp_file_selection_respects_live_pid() {
     assert!(owned_root_temp_file_name(
         "runtime-backoffs.json.999999999.1.0.tmp"

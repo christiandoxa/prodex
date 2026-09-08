@@ -1,5 +1,5 @@
 use super::super_prompt;
-use crate::{canonical_sub_agent_efforts, effective_provider_model_catalog, provider_display_name};
+use crate::{canonical_sub_agent_efforts, effective_provider_model_catalog};
 use prodex_cli::SubAgentReasoningEffort;
 #[cfg(feature = "mojo-core")]
 use prodex_mojo_core::rich::{CatalogPlanModel, plan_dynamic_catalog};
@@ -205,10 +205,10 @@ fn merge_bundled_openai_choices(choices: &mut Vec<MainModelChoice>) {
         .position(|choice| {
             matches!(
                 &choice.choice,
-                prodex_provider_core::ProviderModelChoice::ProviderDefault
+                prodex_provider_core::ProviderModelChoice::Custom
             )
         })
-        .map_or(0, |index| index + 1);
+        .unwrap_or(choices.len());
     let bundled = prodex_provider_core::resolve_provider_model_choices(
         prodex_provider_core::ProviderId::OpenAi,
         &[],
@@ -581,27 +581,11 @@ fn valid_default_effort(default_effort: Option<&str>, efforts: &[String]) -> Opt
         .map(str::to_string)
 }
 
-fn main_model_prompt_title(
-    title: &str,
-    provider: prodex_provider_core::ProviderId,
-    degraded: bool,
-) -> String {
-    if degraded {
-        format!(
-            "{title} ({} account catalog degraded; available models shown)",
-            provider_display_name(provider)
-        )
-    } else {
-        title.to_string()
-    }
-}
-
 pub(super) fn prompt_main_model(
     title: &str,
     provider: prodex_provider_core::ProviderId,
     current_model: Option<&str>,
 ) -> anyhow::Result<Option<String>> {
-    let degraded = effective_provider_model_catalog(provider).is_degraded();
     let models = main_model_choices(provider, current_model);
     let choices = models
         .iter()
@@ -614,8 +598,7 @@ pub(super) fn prompt_main_model(
             })
         })
         .unwrap_or(0);
-    let title = main_model_prompt_title(title, provider, degraded);
-    let selected = super_prompt::prompt_super_choice(&title, &choices, selected, false)?;
+    let selected = super_prompt::prompt_super_choice(title, &choices, selected, false)?;
     Ok(match &models[selected].choice {
         prodex_provider_core::ProviderModelChoice::ProviderDefault => None,
         prodex_provider_core::ProviderModelChoice::Model(model) => Some(model.clone()),
@@ -647,29 +630,4 @@ pub(super) fn main_model_efforts(
         .into_iter()
         .map(|effort| effort.as_str().to_string())
         .collect()
-}
-
-#[cfg(test)]
-mod tests {
-    use super::main_model_prompt_title;
-
-    #[test]
-    fn degraded_main_model_title_is_bounded_and_non_secret() {
-        assert_eq!(
-            main_model_prompt_title(
-                "Main-agent model",
-                prodex_provider_core::ProviderId::Kiro,
-                true,
-            ),
-            "Main-agent model (Kiro account catalog degraded; available models shown)"
-        );
-        assert_eq!(
-            main_model_prompt_title(
-                "Main-agent model",
-                prodex_provider_core::ProviderId::Kiro,
-                false,
-            ),
-            "Main-agent model"
-        );
-    }
 }

@@ -1,5 +1,7 @@
 import fs from "node:fs";
 
+export const TEST_IMPACT_MANIFEST_PATH = "scripts/ci/test-impact-manifest.mjs";
+export const TEST_IMPACT_MANIFEST_DATA_PATH = "scripts/ci/test-impact-manifest.json";
 export const RELEASE_RUN_TEST_PATH = "scripts/npm/release-run.test.mjs";
 
 export const SEMVER_SOURCE = String.raw`v?([0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?)`;
@@ -63,6 +65,14 @@ export const PATH_GROUP_NAMES = deepFreeze(
   Object.fromEntries(Object.keys(PATH_GROUPS).map((name) => [name, name])),
 );
 export const CI_IMPACT_GROUPS = manifestValue("ciImpactGroups");
+export const CI_IMPACT_PATHS = deepFreeze(
+  Object.fromEntries(
+    Object.entries(CI_IMPACT_GROUPS).map(([category, groupName]) => [
+      category,
+      requiredPathGroupSpec(groupName),
+    ]),
+  ),
+);
 
 function requiredPathGroupSpec(groupName) {
   const spec = PATH_GROUPS[groupName];
@@ -90,6 +100,15 @@ export function pathMatchesSpec(filePath, spec) {
 
 export function pathMatchesGroup(filePath, groupName) {
   return pathMatchesSpec(filePath, requiredPathGroupSpec(groupName));
+}
+
+export function firstMatchingPathGroup(filePath, groupNames) {
+  for (const groupName of groupNames) {
+    if (pathMatchesGroup(filePath, groupName)) {
+      return groupName;
+    }
+  }
+  return null;
 }
 
 export function ciImpactCategory(filePath) {

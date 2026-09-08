@@ -5,7 +5,6 @@ mod telemetry;
 
 use super::{RuntimePolicyValidationErrors, RuntimePolicyValidationSection};
 use crate::types::RuntimePolicyFile;
-use crate::validate_secrets::exact_identifier;
 use anyhow::{Result, bail};
 use std::path::Path;
 
@@ -57,7 +56,7 @@ pub(super) fn validate_gateway_exact_identifier(
     path: &Path,
     field: &str,
 ) -> Result<()> {
-    if !exact_identifier(value) {
+    if value.is_empty() || value.chars().any(char::is_whitespace) {
         bail!(
             "{field} in {} must be non-empty without whitespace",
             path.display()

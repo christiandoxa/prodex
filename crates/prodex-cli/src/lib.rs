@@ -286,7 +286,8 @@ where
     if let Some(command) = parse_super_expose_alias(&raw_args)? {
         return Ok(command);
     }
-    let raw_args = rewrite_super_compat_args(&raw_args);
+    let raw_args = rewrite_super_doctor_args(&raw_args);
+    let raw_args = rewrite_super_provider_alias_args(&raw_args);
     let parse_args = if should_default_cli_invocation_to_run(&raw_args) {
         rewrite_cli_args_as_run(&raw_args)
     } else {
@@ -513,38 +514,49 @@ fn restore_super_literal_boundary(args: &[OsString], command: &mut Commands) {
     }
 }
 
-fn rewrite_super_compat_args(args: &[OsString]) -> Vec<OsString> {
+fn rewrite_super_doctor_args(args: &[OsString]) -> Vec<OsString> {
     let Some(command) = args.get(1).and_then(|arg| arg.to_str()) else {
         return args.to_vec();
     };
-    if !matches!(command, "s" | "super") {
+    if command != "s" && command != "super" {
         return args.to_vec();
     }
     let Some(subcommand) = args.get(2).and_then(|arg| arg.to_str()) else {
         return args.to_vec();
     };
-
+    if subcommand != "doctor" {
+        return args.to_vec();
+    }
     let mut rewritten = Vec::with_capacity(args.len() + 1);
     rewritten.push(
         args.first()
             .cloned()
             .unwrap_or_else(|| OsString::from("prodex")),
     );
+    rewritten.push(OsString::from("capability"));
+    rewritten.push(OsString::from("super-doctor"));
+    rewritten.extend(args.iter().skip(3).cloned());
+    rewritten
+}
 
-    match subcommand {
-        "doctor" => {
-            rewritten.push(OsString::from("capability"));
-            rewritten.push(OsString::from("super-doctor"));
-            rewritten.extend(args.iter().skip(3).cloned());
-        }
-        "gemini" | "deepseek" => {
-            rewritten.push(args[1].clone());
-            rewritten.push(OsString::from("--provider"));
-            rewritten.extend(args.iter().skip(2).cloned());
-        }
-        _ => return args.to_vec(),
+fn rewrite_super_provider_alias_args(args: &[OsString]) -> Vec<OsString> {
+    let Some(command) = args.get(1).and_then(|arg| arg.to_str()) else {
+        return args.to_vec();
+    };
+    if command != "s" && command != "super" {
+        return args.to_vec();
+    }
+    let Some(provider) = args.get(2).and_then(|arg| arg.to_str()) else {
+        return args.to_vec();
+    };
+    if !matches!(provider, "gemini" | "deepseek") {
+        return args.to_vec();
     }
 
+    let mut rewritten = Vec::with_capacity(args.len() + 1);
+    rewritten.extend(args.iter().take(2).cloned());
+    rewritten.push(OsString::from("--provider"));
+    rewritten.extend(args.iter().skip(2).cloned());
     rewritten
 }
 

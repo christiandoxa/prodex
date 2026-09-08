@@ -19,7 +19,7 @@ fn completed_rate_reaches_tui_header_and_survives_log_flood() {
         throughput.display_rate_for_profile(Instant::now(), Some("main")),
         80,
     );
-    assert!(initial.ends_with("— gen t/s"));
+    assert!(initial.ends_with("— t/s"));
 
     let completed = collect_runtime_log_line(
         path,
@@ -48,57 +48,10 @@ fn completed_rate_reaches_tui_header_and_survives_log_flood() {
     let rate = throughput.display_rate_for_profile(Instant::now(), Some("main"));
     let display = throughput.display_for_profile(Instant::now(), Some("main"));
     assert_eq!(rate, Some(100.0));
-    assert!(matches!(
-        display,
-        Some(OutputThroughputDisplay::Last {
-            rate: 100.0,
-            age: Some(_),
-        })
-    ));
+    assert_eq!(display, Some(OutputThroughputDisplay::Last(100.0)));
     let rendered = render_log_header_with_display(LOG_TUI_TITLE, "", None, display, 80);
-    assert!(rendered.contains("last gen 100 t/s"));
-    assert!(render_log_header(LOG_TUI_TITLE, "", None, rate, 80).contains("last gen 100 t/s"));
-}
-
-#[test]
-fn log_header_keeps_throughput_at_the_right_edge() {
-    let header = render_log_header(LOG_TUI_TITLE, "200 event(s)", None, Some(100.0), 80);
-
-    assert_eq!(terminal_ui::text_width(&header), 78);
-    assert!(header.ends_with("100 t/s"));
-    assert!(header.starts_with(LOG_TUI_TITLE));
-    assert!(!header.contains("200 event(s)"));
-}
-
-#[test]
-fn log_header_labels_active_generation_rate() {
-    let header = render_log_header_with_display(
-        LOG_TUI_TITLE,
-        "",
-        None,
-        Some(OutputThroughputDisplay::Active(100.0)),
-        80,
-    );
-
-    assert!(header.contains("gen 100 t/s"));
-    assert!(!header.contains("last gen"));
-}
-
-#[test]
-fn log_header_labels_retained_rate_and_coarse_age() {
-    let header = render_log_header_with_display(
-        LOG_TUI_TITLE,
-        "",
-        None,
-        Some(OutputThroughputDisplay::Last {
-            rate: 100.0,
-            age: Some(Duration::from_secs(7)),
-        }),
-        80,
-    );
-
-    assert!(header.contains("last gen 100 t/s (age <1m)"));
-    assert!(!header.contains("age 7s"));
+    assert!(rendered.contains("last 100 t/s"));
+    assert!(render_log_header(LOG_TUI_TITLE, "", None, rate, 80).contains("last 100 t/s"));
 }
 
 #[test]

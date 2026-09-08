@@ -9,10 +9,8 @@ use std::env;
 use std::fs::{self, OpenOptions};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::AtomicU64;
-use std::time::Duration;
-#[cfg(test)]
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use terminal_ui::{print_wrapped_stderr, section_header};
 
 mod updater;
@@ -379,14 +377,30 @@ fn update_check_cache_file_path(paths: &AppPaths) -> PathBuf {
     paths.root.join("update-check.json")
 }
 
+fn unique_state_temp_file_path(state_file: &Path) -> PathBuf {
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
+    let sequence = UPDATE_CHECK_TEMP_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+    let file_name = format!(
+        "{}.{}.{}.{}.tmp",
+        state_file
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("update-check.json"),
+        std::process::id(),
+        nanos,
+        sequence
+    );
+
+    state_file.with_file_name(file_name)
+}
+
 fn save_update_check_cache(paths: &AppPaths, cache: &UpdateCheckCache) -> Result<()> {
     fs::create_dir_all(&paths.root).context("failed to create prodex state directory")?;
     let path = update_check_cache_file_path(paths);
-    let temp_file = prodex_core::unique_root_temp_file_path(
-        &path,
-        "update-check.json",
-        &UPDATE_CHECK_TEMP_SEQUENCE,
-    );
+    let temp_file = unique_state_temp_file_path(&path);
     let json =
         serde_json::to_string_pretty(cache).context("failed to serialize update check cache")?;
     let result = (|| {
