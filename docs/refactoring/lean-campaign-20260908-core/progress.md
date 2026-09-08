@@ -257,21 +257,22 @@ passed.
   worktree, release worktrees, and unrelated processes were not stopped. The secondary ext4 SSD
   remained mounted at its verified device identity and campaign-owned cleanup reclaimed completed
   build/review targets only.
-- Current source integration tip: `478333f7` (B0-034 cookie repair), on
+- Current source integration tip: `58c6154d` (B0-061 guard repair), on
   `refactor/successor-integration-20260908`. The qualifying source tree retains reviewed
-  checkpoints `be9b6452` (shared CLI model parser) and `478333f7` (cookie relay hardening).
-  `38077452` (private Copilot passthrough) was reviewed and reverted as `a65c3f96` to make room;
-  `33bc6795` (private idempotency route validation) was reverted as `272c4b13`, `1556875d`
-  (overlay entrypoint reuse) as `b83f8eff`, and `8d015e6e` (uncalled npm scripts) as `81380514`.
-  All held branches, logs, reviews, and validation evidence remain durable; no main or release
-  worktree was changed.
+  checkpoints `478333f7` (cookie relay hardening) and `58c6154d` (CI protected-path guard).
+  `be9b6452` (shared CLI model parser) was reviewed and reverted as `40d3ac07` to make room;
+  `38077452` (private Copilot passthrough) was reverted as `a65c3f96`, `33bc6795` (private
+  idempotency route validation) as `272c4b13`, `1556875d` (overlay entrypoint reuse) as
+  `b83f8eff`, and `8d015e6e` (uncalled npm scripts) as `81380514`. All held branches, logs,
+  reviews, and validation evidence remain durable; no main or release worktree was changed.
 - Churn evidence: CI run `34246900868` correctly rejected the wider `09212cf1` tree because the
   PR base `a32b107d` range reached 31 behavior files, above the enforced 25-file limit. No guard,
   threshold, or allowlist was weakened. The wider reviewed checkpoints `5c3aa588` (bounded TOML
   lookups), `09212cf1` (private domain cleanup), and `edcca0b4` (private terminal aliases) were
   reverted from the integration tree with ordinary revert commits, while their remote branches,
   logs, reviews, and source evidence remain durable for later qualifying batches. The current
-  local range is 28 files, 24 behavior files, and 1,181 changed lines.
+  source/ledger range is near the enforced ceiling; its exact counts are recorded by the churn
+  guard before each push.
 - Held checkpoints: `84512e22` (review `NO_FINDING`, config 19 plus app 4+6+1+176 tests and
   workspace Clippy), `c92851d8` (replacement exact-SHA review `NO_FINDING`, IDs 8 and governance
   policy 10), `932863af` (replacement exact-SHA review `NO_FINDING`, app alias tests 3+1+11+48),
@@ -279,30 +280,33 @@ passed.
   and fixture/guard checks), plus `e3f947b3` (review `NO_FINDING`, optional-tools 51 and app
   desktop/overlay 5+5), plus `38077452` (provider-core review `NO_FINDING`), are ledgered
   `IN_PROGRESS` because integrating them now would exceed the churn range. `87df35a2` (runtime
-  model scanner) is integrated as `be9b6452`; its independent
+  model scanner) is held as `IN_PROGRESS` after exact-SHA review `NO_FINDING`; `c56c4ab7` (CI
+  script cleanup) received `REQUEST_CHANGES` because it removed the independent always-heavy
+  protection, and repair `a0a11310` is integrated after exact-SHA review `NO_FINDING`. The model
+  writer's full app aggregate stopped after 1,446 of 3,452
   review returned `NO_FINDING`. `c56c4ab7` (CI script cleanup) received `REQUEST_CHANGES` because
   it removed the independent always-heavy protection and remains unintegrated. The model writer's
   full app aggregate stopped after 1,446 of 3,452
   tests with 16 unrelated runtime-synchronization failures, so it is not full-suite-green
   evidence. B0-003's exact-SHA review returned `NO_FINDING`; its integrated default/Mojo boundary
-  tests, app admin tests, Clippy, and guards passed before the checkpoint was held. B0-061's exact
-  review returned `REQUEST_CHANGES` for loss of independent always-heavy protection; its source
-  was not integrated. B0-034 repair `76a7e98f` received exact-SHA `NO_FINDING` and is integrated.
+  tests, app admin tests, Clippy, and guards passed before the checkpoint was held. B0-034 repair
+  `76a7e98f` received exact-SHA `NO_FINDING` and is integrated. B0-061 repair `a0a11310` restored
+  the independent protected-path invariant and is integrated.
 - Completed new audits added public-compatibility or semantic-risk holds for B0-022 shared types,
   B0-024 provider SPI, B0-025 quota, B0-027 observability, and B0-033 Gemini compatibility; no
   source change was admitted from those reports. Their logs contain exact-base graph/source
-  evidence and no live-provider tests. The B0-027 and B0-033 audit worktrees were harvested and
-  cleaned. B0-028 remains active; B0-034's predecessor rejection, repair, review, and eligible
-  worktree/target cleanup are complete.
-- Coverage: the ledger has 64 unique B0 domains with 30 `UNREVIEWED`, 6 `IN_PROGRESS`, 7
+  evidence and no live-provider tests. The B0-027, B0-033, and B0-028 audit worktrees were
+  harvested and cleaned. B0-034 and B0-061 predecessor/review/repair evidence is retained in
+  logs and branches; eligible implementation/review worktrees and targets were cleaned.
+- Coverage: the ledger has 64 unique B0 domains with 29 `UNREVIEWED`, 8 `IN_PROGRESS`, 6
   `REFACTORED`, and 21 `KEEP_WITH_REASON`; all changes are evidence-backed and no row was closed
   by worker launch alone. Completed audits also recorded explicit public-API holds for control
   plane, state, context blob-noise, housekeeping, shared types, provider SPI, and gateway
   surfaces, plus semantic-difference holds for storage reservation validators and quota planning.
-- Current CI: run `34257479255` passed for the pre-cookie source tip `6d690f3f`; the current
-  cookie integration push and its CI run must finish successfully before `478333f7` can be
-  treated as an exact-green anchor. Earlier run `34251095095` exposed the stale production-share
-  expectation, fixed in `3b2d0bd3`, `4f65da5d`, and `c62657e7`.
+- Current CI: run `34257479255` passed for the pre-cookie source tip `6d690f3f`; run
+  `34264415324` targets the cookie/CI-guard predecessor and must be checked after the current
+  push. Earlier run `34251095095` exposed the stale production-share expectation, fixed in
+  `3b2d0bd3`, `4f65da5d`, `c62657e7`, and the current measured fixture update.
 
 ## Known checkpoints and blockers
 
