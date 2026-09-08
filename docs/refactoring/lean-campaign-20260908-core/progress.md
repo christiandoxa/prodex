@@ -272,7 +272,7 @@ passed.
   lookups), `09212cf1` (private domain cleanup), and `edcca0b4` (private terminal aliases) were
   reverted from the integration tree with ordinary revert commits, while their remote branches,
   logs, reviews, and source evidence remain durable for later qualifying batches. The current
-  local range is 29 files, 25 behavior files, and 1,047 changed lines.
+  local range is 29 files, 25 behavior files, and 1,057 changed lines.
 - Held checkpoints: `84512e22` (review `NO_FINDING`, config 19 plus app 4+6+1+176 tests and
   workspace Clippy), `c92851d8` (replacement exact-SHA review `NO_FINDING`, IDs 8 and governance
   policy 10), `932863af` (replacement exact-SHA review `NO_FINDING`, app alias tests 3+1+11+48),
@@ -289,20 +289,20 @@ passed.
   review returned `REQUEST_CHANGES` for loss of independent always-heavy protection; its source
   was not integrated.
 - Completed new audits added public-compatibility or semantic-risk holds for B0-022 shared types,
-  B0-024 provider SPI, and B0-025 quota; no source change was admitted from those reports. Their
-  logs contain exact-base graph/source evidence and no live-provider tests. Active exact workers
-  remain for B0-027, B0-033, and B0-028; B0-034 has completed its audit and is queued for a
-  narrowly scoped implementation worker after resource admission. The three prior reviews are
-  harvested and their eligible worktrees/targets were cleaned.
-- Coverage: the ledger has 64 unique B0 domains with 32 `UNREVIEWED`, 7 `IN_PROGRESS`, 6
-  `REFACTORED`, and 19 `KEEP_WITH_REASON`; all changes are evidence-backed and no row was closed
+  B0-024 provider SPI, B0-025 quota, B0-027 observability, and B0-033 Gemini compatibility; no
+  source change was admitted from those reports. Their logs contain exact-base graph/source
+  evidence and no live-provider tests. The B0-027 and B0-033 audit worktrees were harvested and
+  cleaned. B0-028 remains active, and B0-034's writer checkpoint is under independent review.
+- Coverage: the ledger has 64 unique B0 domains with 30 `UNREVIEWED`, 7 `IN_PROGRESS`, 6
+  `REFACTORED`, and 21 `KEEP_WITH_REASON`; all changes are evidence-backed and no row was closed
   by worker launch alone. Completed audits also recorded explicit public-API holds for control
   plane, state, context blob-noise, housekeeping, shared types, provider SPI, and gateway
   surfaces, plus semantic-difference holds for storage reservation validators and quota planning.
-- Current CI: runs `34251095095`, `34253013562`, and `34253626777` targeted superseded heads;
+- Current CI: run `34254530245` passed for source tip `91eb94aa` after the production-share fixture
+  correction. Runs `34251095095`, `34253013562`, and `34253626777` targeted superseded heads;
   `34251095095` exposed the stale production-share expectation and was fixed in `3b2d0bd3` and
-  `4f65da5d`. The current successor push and its CI run must finish successfully before the
-  source tip can be treated as an exact-green anchor.
+  `4f65da5d`. The current successor push, which also carries the harvested audit ledger, and its
+  CI run must finish successfully before the source tip can be treated as an exact-green anchor.
 
 ## Known checkpoints and blockers
 
