@@ -116,9 +116,10 @@ fn runtime_broker_client_ignores_proxy_env_for_local_control_requests() {
     let _lower_all_proxy_guard = TestEnvVarGuard::set("all_proxy", &proxy_url);
 
     let client = runtime_broker_client().expect("broker client should build");
+    let identity = runtime_current_prodex_binary_identity();
     let registry = RuntimeBrokerRegistry {
         pid: std::process::id(),
-        process_birth_identity: None,
+        process_birth_identity: runtime_process_birth_identity(std::process::id()),
         listen_addr: target_addr.to_string(),
         started_at: Local::now().timestamp(),
         upstream_base_url: "https://chatgpt.com/backend-api".to_string(),
@@ -127,9 +128,11 @@ fn runtime_broker_client_ignores_proxy_env_for_local_control_requests() {
         smart_context_enabled: false,
         current_profile: "main".to_string(),
         instance_id: "instance".to_string(),
-        prodex_version: None,
-        executable_path: None,
-        executable_sha256: None,
+        prodex_version: identity.prodex_version,
+        executable_path: identity
+            .executable_path
+            .map(|path| path.display().to_string()),
+        executable_sha256: identity.executable_sha256,
         openai_mount_path: Some(RUNTIME_PROXY_OPENAI_MOUNT_PATH.to_string()),
         realtime_ws_addr: None,
     };
@@ -457,6 +460,8 @@ fn wait_for_existing_runtime_broker_recovery_or_exit_yields_mismatched_live_brok
         .expect("busy mismatched broker script should spawn");
     let child_pid = child.id();
     wait_for_runtime_process_alive(child_pid);
+    let child_executable_path = runtime_process_executable_path(child_pid)
+        .expect("busy broker executable path should be observable");
 
     let server = TinyServer::http("127.0.0.1:0").expect("busy health server should bind");
     let listen_addr = server
@@ -487,7 +492,7 @@ fn wait_for_existing_runtime_broker_recovery_or_exit_yields_mismatched_live_brok
 
     let registry = RuntimeBrokerRegistry {
         pid: child_pid,
-        process_birth_identity: None,
+        process_birth_identity: runtime_process_birth_identity(child_pid),
         listen_addr: listen_addr.to_string(),
         started_at: Local::now().timestamp(),
         upstream_base_url: "http://127.0.0.1:12345/backend-api".to_string(),
@@ -497,7 +502,7 @@ fn wait_for_existing_runtime_broker_recovery_or_exit_yields_mismatched_live_brok
         current_profile: "main".to_string(),
         instance_id: "instance".to_string(),
         prodex_version: Some("0.0.1".to_string()),
-        executable_path: Some(script_path.display().to_string()),
+        executable_path: Some(child_executable_path.display().to_string()),
         executable_sha256: None,
         openai_mount_path: Some(RUNTIME_PROXY_OPENAI_MOUNT_PATH.to_string()),
         realtime_ws_addr: None,
@@ -577,6 +582,8 @@ fn find_compatible_runtime_broker_registry_discovers_other_broker_key() {
         .spawn()
         .expect("current-version broker script should spawn");
     wait_for_runtime_process_alive(child.id());
+    let child_executable_path = runtime_process_executable_path(child.id())
+        .expect("current-version broker executable path should be observable");
 
     let server = TinyServer::http("127.0.0.1:0").expect("health server should bind");
     let listen_addr = server
@@ -585,7 +592,7 @@ fn find_compatible_runtime_broker_registry_discovers_other_broker_key() {
         .expect("health server should expose a TCP address");
     let registry = RuntimeBrokerRegistry {
         pid: child.id(),
-        process_birth_identity: None,
+        process_birth_identity: runtime_process_birth_identity(child.id()),
         listen_addr: listen_addr.to_string(),
         started_at: Local::now().timestamp(),
         upstream_base_url: "https://chatgpt.com/backend-api".to_string(),
@@ -595,7 +602,7 @@ fn find_compatible_runtime_broker_registry_discovers_other_broker_key() {
         current_profile: "main".to_string(),
         instance_id: "legacy-instance".to_string(),
         prodex_version: None,
-        executable_path: None,
+        executable_path: Some(child_executable_path.display().to_string()),
         executable_sha256: None,
         openai_mount_path: Some("/backend-api/prodex/v0.2.99".to_string()),
         realtime_ws_addr: None,
