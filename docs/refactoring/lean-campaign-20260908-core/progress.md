@@ -10,7 +10,7 @@ transport semantics. This is an implementation campaign, not a line-count exerci
 
 - `HISTORICAL_RELEASE_BASE`: `e835c1699f0960865c8cacabea6a109bd3500499` (release 0.427.0)
 - `CAMPAIGN_BASE`: `afe20dfd9f813eb217f78b63de517c7e8e52e8b7`
-- `LAST_EXACT_GREEN_SOURCE_ANCHOR`: `3b8be312ea29d74be922330df047459c7c2faf7c`
+- `LAST_EXACT_GREEN_SOURCE_ANCHOR`: `585f6b3cc5b98c230e68c9a31de8d199822fc650`
 - Baseline ancestry: `origin/main` (`ff7976858c048269d73e970356aa41f4d0b4cafb`) is an ancestor.
 - Integration branch: `refactor/parallel-integration-20260908`
 - Baseline source: historical `origin/refactor/428-integration-20260907`; no active PR or descendant campaign was found.
@@ -19,13 +19,13 @@ transport semantics. This is an implementation campaign, not a line-count exerci
 
 ## Status
 
-`CAMPAIGN_PARTIAL`; B's catalog, C's throughput, and A's general refactor checkpoints are integrated.
-Full CI run `34193695148` passed on exact source tree `3b8be312`, including Sonar, Real Mojo/parity,
-macOS, all Windows shards, runtime stress, app shards, and relevant guards. The subsequent exact
-integration-head run `34195533806` also passed on source head `7bd400cfa95c3068cdce5fcfd2346cf2002bd568`.
-Wave 4 completed its A2 source batch and E audit-only disposition; the next unresolved-domain wave
-must resolve its new integration head live. Provider catalog and throughput surfaces remain protected.
-The wider domain audit remains open and this campaign is partial.
+`CAMPAIGN_PARTIAL`; B's catalog, C's throughput, A's general refactor checkpoints, and Wave 4 are
+integrated. Exact CI `34198133041` passed on the Wave 4 ledger checkpoint
+`585f6b3cc5b98c230e68c9a31de8d199822fc650` with 72 successful, 3 skipped, and 0 failed jobs; that
+SHA remains the last exact-green source anchor while the next integration checkpoint qualifies.
+Wave 5 completed authn and authz audit-only dispositions and one runtime-policy source refactor.
+Provider catalog and throughput surfaces remain protected. The wider domain audit remains open and
+this campaign is partial.
 
 ## Parallel ownership ledger
 
@@ -200,10 +200,23 @@ branches remain unchanged while duplicate naming logic uses the existing core ow
 | E | `3b8be312ea29d74be922330df047459c7c2faf7c` | `worker/refactor-config-20260908` | worker worktree | `crates/prodex-config` B0-008 only | root CLI, provider catalog, throughput/log-throughput | audit-only KEEP_WITH_REASON; no source checkpoint; stopped clean |
 | D | `3b8be312ea29d74be922330df047459c7c2faf7c` | none | none | read-only exact Wave 4 checkpoint review | all writes | NO_FINDING on A2 checkpoint; stopped |
 
-Wave 4 source checkpoint: `e15ce10a` is the previous immutable integration anchor for this
-ledger update. It is not a claim that the wider campaign is complete. The live inventory after
-the audit dispositions is 59 UNREVIEWED, 0 IN_PROGRESS, 19 REFACTORED, 11 KEEP_WITH_REASON, and
-0 BLOCKED.
+Wave 4 source checkpoint: `e15ce10a` remains the prior source anchor for the Wave 4 ledger work.
+Wave 4 ledger checkpoint `585f6b3cc5b98c230e68c9a31de8d199822fc650` is the previous immutable
+exact-green anchor for Wave 5 after CI `34198133041` succeeded. The Wave 4 closeout inventory
+before Wave 5 dispositions was 59 UNREVIEWED, 0 IN_PROGRESS, 19 REFACTORED, 11 KEEP_WITH_REASON,
+and 0 BLOCKED; it is not the current post-Wave-5 inventory.
+
+## Wave 5 ownership
+
+| Worker | Base SHA | Branch | Worktree | Owns | Excludes | Status |
+| --- | --- | --- | --- | --- | --- | --- |
+| authn | `585f6b3cc5b98c230e68c9a31de8d199822fc650` | `worker/refactor-authn-wave5-20260908` | worker worktree | `crates/prodex-authn` B0-004 | authz, application, runtime-policy, ledger/docs | audit-only KEEP_WITH_REASON; no source change; reviewer NO_FINDING; stopped |
+| authz | `585f6b3cc5b98c230e68c9a31de8d199822fc650` | `worker/refactor-authz-wave5-20260908` | worker worktree | `crates/prodex-authz` B0-005 | authn, application, runtime-policy, ledger/docs | audit-only KEEP_WITH_REASON; no source change; reviewer NO_FINDING; stopped |
+| runtime-policy | `585f6b3cc5b98c230e68c9a31de8d199822fc650` | `worker/refactor-runtime-policy-wave5-20260908` | worker worktree | `crates/prodex-runtime-policy` B0-029 | authn, authz, application, Mojo source/ABI, ledger/docs | checkpoint `696ab0befdb0b5246f49cc87b454aef3b3ac02eb` pushed; reviewer NO_FINDING; serial integration in this checkpoint |
+
+Wave 5 evidence changes the inventory to 56 UNREVIEWED, 0 IN_PROGRESS, 20 REFACTORED,
+13 KEEP_WITH_REASON, and 0 BLOCKED. The resulting integration SHA is resolved externally after
+this substantive checkpoint; it is not recorded inside its own commit.
 
 ## Known checkpoints and blockers
 
@@ -222,6 +235,7 @@ the audit dispositions is 59 UNREVIEWED, 0 IN_PROGRESS, 19 REFACTORED, 11 KEEP_W
   integration worktree/cache for campaign validation, the clean A2 checkpoint worktree pending
   safe post-integration removal, and remote worker branches/checkpoints. No scratch fixture,
   server, watcher, credential, or raw log was created for commit.
-- Next action: after this ledger checkpoint is synchronized, resolve the resulting integration HEAD
-  live and launch the next non-overlapping audit wave for unresolved production domains; do not
-  claim campaign completion while any `UNREVIEWED`, `IN_PROGRESS`, or `BLOCKED` row remains.
+- Next action: push this substantive checkpoint, resolve its exact CI, clean completed Wave 5
+  worktrees and worker targets, then launch the next parallel non-overlapping audit wave for
+  unresolved production domains; do not claim campaign completion while any `UNREVIEWED`,
+  `IN_PROGRESS`, or `BLOCKED` row remains.
