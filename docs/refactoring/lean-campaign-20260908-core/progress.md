@@ -111,6 +111,11 @@ integration branch. Heavy full-workspace, Mojo, and final integration gates rema
 - B2 evidence: gateway focused tests passed `503`, with `17` ignored; dashboard focused tests passed
   `20`. The public metadata/availability contract is retained separately from picker catalog
   planning, with the concrete KEEP_WITH_REASON recorded in `audit.csv`.
+- Storage cleanup checkpoint: before cleanup the host was `68%` used / `145G` available; after
+  cleanup it was `62%` used / `173G` available. Removed exact campaign-owned predecessor and
+  completed worker/B2 worktrees after clean/remote/process verification, reclaiming approximately
+  `28G`. Main `target/` (`5.7G`) and integration `target/` (`21G`) are retained as protected or
+  reusable caches; A2's clean handoff worktree is retained without a build target.
 
 ## Batch B1: provider catalog authority
 
@@ -184,9 +189,11 @@ branches remain unchanged while duplicate naming logic uses the existing core ow
 ## Cleanup and next action
 
 - Campaign worktree is owned by this campaign. Its `target/` build cache is retained while validation continues.
-- No campaign-created server or watcher remains active. All agents are stopped; A, B, C, B2, and
-  A2 worktrees are clean after their remote checkpoints or audit disposition. Shared build caches
-  are retained for final gates; no scratch fixture, server, watcher, credential, or raw log was
+- No campaign-created server or watcher remains active. All agents are stopped. Removed worktrees:
+  predecessor lean campaign, A/B/C completed worker worktrees, and B2 audit-only worktree; four
+  stale prunable records were removed after verifying their directories were absent. Retained:
+  integration worktree/cache for final gates, A2 clean unreviewed handoff worktree, and remote
+  worker branches/checkpoints. No scratch fixture, server, watcher, credential, or raw log was
   created for commit.
 - Next action: perform the next symbol-level general-domain audit from the current integration
   SHA `394ef887`, or hand off the remaining UNREVIEWED inventory without claiming campaign completion.
