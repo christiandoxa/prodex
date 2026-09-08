@@ -5,6 +5,7 @@
 //! later requests without mixing profiles or runtime instances.
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::fmt;
 use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -21,7 +22,7 @@ struct RuntimeProxyCookieKey {
     host: String,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 struct RuntimeProxyCookieEntry {
     name: String,
     value: String,
@@ -31,13 +32,27 @@ struct RuntimeProxyCookieEntry {
     updated_at: SystemTime,
 }
 
+impl fmt::Debug for RuntimeProxyCookieEntry {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("RuntimeProxyCookieEntry")
+            .field("name", &self.name)
+            .field("value", &"<redacted>")
+            .field("path", &self.path)
+            .field("secure", &self.secure)
+            .field("expires_at", &self.expires_at)
+            .field("updated_at", &self.updated_at)
+            .finish()
+    }
+}
+
 #[derive(Debug, Clone, Eq, Ord, PartialEq, PartialOrd)]
 struct RuntimeProxyCookieIdentity {
     name: String,
     path: String,
 }
 
-#[derive(Debug, Default)]
+#[derive(Default)]
 pub struct RuntimeProxyCookieJar {
     entries: Mutex<
         BTreeMap<
@@ -45,6 +60,19 @@ pub struct RuntimeProxyCookieJar {
             BTreeMap<RuntimeProxyCookieIdentity, RuntimeProxyCookieEntry>,
         >,
     >,
+}
+
+impl fmt::Debug for RuntimeProxyCookieJar {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let entries = self
+            .entries
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        formatter
+            .debug_struct("RuntimeProxyCookieJar")
+            .field("entries", &*entries)
+            .finish()
+    }
 }
 
 impl RuntimeProxyCookieJar {
@@ -117,18 +145,19 @@ impl RuntimeProxyCookieJar {
             host: host.to_string(),
         };
         let default_path = runtime_proxy_cookie_default_path(request_path);
+        let changes = set_cookie_headers
+            .into_iter()
+            .filter_map(|header| {
+                RuntimeProxyCookieChange::parse(header, &default_path, secure_origin, now)
+            })
+            .collect::<Vec<_>>();
         let mut jar = self
             .entries
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         runtime_proxy_cookie_prune_expired_locked(&mut jar, now);
 
-        for header in set_cookie_headers {
-            let Some(change) =
-                RuntimeProxyCookieChange::parse(header, &default_path, secure_origin, now)
-            else {
-                continue;
-            };
+        for change in changes {
             let cookies = jar.entry(key.clone()).or_default();
             match change {
                 RuntimeProxyCookieChange::Set(entry) => {
@@ -288,6 +317,7 @@ impl RuntimeProxyCookieChange {
         let mut secure = false;
         let mut expires_at = None;
         let mut delete = false;
+        let mut max_age_seen = false;
         for attr in parts {
             runtime_proxy_cookie_apply_attribute(
                 attr.trim(),
@@ -295,6 +325,7 @@ impl RuntimeProxyCookieChange {
                 &mut secure,
                 &mut expires_at,
                 &mut delete,
+                &mut max_age_seen,
                 now,
             );
         }
@@ -327,6 +358,7 @@ fn runtime_proxy_cookie_apply_attribute(
     secure: &mut bool,
     expires_at: &mut Option<SystemTime>,
     delete: &mut bool,
+    max_age_seen: &mut bool,
     now: SystemTime,
 ) {
     if attr.eq_ignore_ascii_case("secure") {
@@ -347,17 +379,15 @@ fn runtime_proxy_cookie_apply_attribute(
         return;
     }
     if name.trim().eq_ignore_ascii_case("max-age") {
-        runtime_proxy_cookie_apply_max_age(value, expires_at, delete, now);
+        runtime_proxy_cookie_apply_max_age(value, expires_at, delete, max_age_seen, now);
         return;
     }
-    if name.trim().eq_ignore_ascii_case("expires")
+    if !*max_age_seen
+        && name.trim().eq_ignore_ascii_case("expires")
         && let Some(expires) = runtime_proxy_cookie_parse_expires(value)
     {
-        if expires <= now {
-            *delete = true;
-        } else {
-            *expires_at = Some(expires);
-        }
+        *delete = expires <= now;
+        *expires_at = (!*delete).then_some(expires);
     }
 }
 
@@ -365,19 +395,26 @@ fn runtime_proxy_cookie_apply_max_age(
     value: &str,
     expires_at: &mut Option<SystemTime>,
     delete: &mut bool,
+    max_age_seen: &mut bool,
     now: SystemTime,
 ) {
+    let digits = value.strip_prefix('-').unwrap_or(value);
+    if digits.is_empty() || !digits.bytes().all(|byte| byte.is_ascii_digit()) {
+        return;
+    }
     let Ok(seconds) = value.parse::<i64>() else {
         return;
     };
+    *max_age_seen = true;
+    *delete = seconds <= 0;
     if seconds <= 0 {
-        *delete = true;
-    } else {
-        *expires_at = Some(
-            now.checked_add(Duration::from_secs(seconds as u64))
-                .unwrap_or(now),
-        );
+        *expires_at = None;
+        return;
     }
+    *expires_at = Some(
+        now.checked_add(Duration::from_secs(seconds as u64))
+            .unwrap_or(now),
+    );
 }
 
 fn runtime_proxy_cookie_host_from_reqwest_url(url: &reqwest::Url) -> Option<String> {
@@ -438,7 +475,11 @@ fn runtime_proxy_cookie_parse_expires(value: &str) -> Option<SystemTime> {
         .ok()
         .and_then(|timestamp| {
             let seconds = timestamp.timestamp();
-            (seconds >= 0).then(|| UNIX_EPOCH + Duration::from_secs(seconds as u64))
+            if seconds >= 0 {
+                UNIX_EPOCH.checked_add(Duration::from_secs(seconds as u64))
+            } else {
+                UNIX_EPOCH.checked_sub(Duration::from_secs(seconds.unsigned_abs()))
+            }
         })
 }
 
