@@ -17,9 +17,10 @@ transport semantics. This is an implementation campaign, not a line-count exerci
 
 ## Status
 
-`IN_PROGRESS`; first-wave implementation is held after the B catalog checkpoint while the
-repaired integration CI completes. A and C remain stopped with clean worktrees; B's checkpoint is
-integrated and D reviewed it with no finding. The wider domain audit remains open.
+`IN_PROGRESS`; B's catalog checkpoint is integrated and the second implementation wave is active
+from integration SHA `08eafe5e` while CI run `34186531833` completes. A owns one general-refactor
+batch, C owns the throughput batch, and D's first-wave review found no issue in B's checkpoint.
+The wider domain audit remains open; no worker may overlap B's catalog files or C's throughput files.
 
 ## Parallel ownership ledger
 
@@ -27,9 +28,9 @@ Integration branch: `refactor/parallel-integration-20260908`.
 
 | Worker | Workstream | Base SHA | Branch | Worktree | Owns | Excludes | Status |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| A | General lean refactor | `a32b107df02d9b5b503b8d545a4fb24b7754e997` | `worker/refactor-general-20260908` | worker worktree | CLI, orchestration, profile/auth, session, runtime support, gateway, storage, config, reports, tooling outside B/C | provider catalog surfaces; throughput/log-throughput surfaces | stopped; clean, no checkpoint |
+| A | General lean refactor | `08eafe5eb22cf67cee9c301b186445154eb28cc0` | `worker/refactor-general-20260908` | worker worktree | CLI, orchestration, profile/auth, session, runtime support, gateway, storage, config, reports, tooling outside B/C | provider catalog surfaces; throughput/log-throughput surfaces | wave 2 active |
 | B | Provider model catalog | `a32b107df02d9b5b503b8d545a4fb24b7754e997` | `worker/provider-catalog-20260908` | worker worktree | provider catalog, Super model pickers, Kiro/Copilot/Gemini/OpenAI catalog consumers and tests | throughput/log-throughput; unrelated refactor | checkpoint pushed/integrated; worker stopped |
-| C | Throughput observability | `a32b107df02d9b5b503b8d545a4fb24b7754e997` | `worker/throughput-observability-20260908` | worker worktree | generation timing, token usage, throughput state, log TUI, history, throughput docs/tests | provider catalog; unrelated refactor | stopped; clean, no checkpoint |
+| C | Throughput observability | `08eafe5eb22cf67cee9c301b186445154eb28cc0` | `worker/throughput-observability-20260908` | worker worktree | generation timing, token usage, throughput state, log TUI, history, throughput docs/tests | provider catalog; unrelated refactor | wave 2 active |
 | D | Read-only review | `a32b107df02d9b5b503b8d545a4fb24b7754e997` | none | none | exact checkpoint review only | all writes | complete; B checkpoint no finding |
 
 Worker contract: each worker commits only reviewed paths to its worker branch, pushes that branch,
@@ -80,6 +81,9 @@ integration branch. Heavy full-workspace, Mojo, and final integration gates rema
   `26,420` LOC, total `374,538`, share `7.054023890766758%`, release-floor and non-regression
   PASS. The frozen Node expectation was repaired in `90a5b8b3`; local `npm run test:node` passed
   264 with 1 skipped. Integration CI run `34186438047` targets exact SHA `90a5b8b3` and is pending.
+- Wave 2 base: A and C worktrees were fast-forwarded cleanly to `08eafe5eb22cf67cee9c301b186445154eb28cc0`;
+  neither had prior WIP or a prior checkpoint. CI run `34186531833` is the active validation for
+  that integration SHA and has no reported failure at wave start.
 
 ## Batch B1: provider catalog authority
 
@@ -119,8 +123,7 @@ order and `Custom` remains last.
 ## Cleanup and next action
 
 - Campaign worktree is owned by this campaign. Its `target/` build cache is retained while validation continues.
-- No campaign-created server or watcher remains active after baseline testing. A and C worktrees
-  are clean and their agents are stopped; B's worktree is clean after its pushed checkpoint.
-- Next action: finish CI run `34186438047`, inspect its corresponding Windows continuation
-  coverage, classify the earlier timeout as reproduced or not reproduced, then resume A and C only
-  if the shared gates are clean.
+- No campaign-created server or watcher remains active after baseline testing. B's worktree is
+  clean after its pushed checkpoint; A and C worktrees are campaign-owned and active for wave 2.
+- Next action: monitor CI run `34186531833` for failures while A and C complete their bounded
+  batches, then review each remote checkpoint serially before integration.
