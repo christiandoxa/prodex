@@ -17,10 +17,10 @@ transport semantics. This is an implementation campaign, not a line-count exerci
 
 ## Status
 
-`IN_PROGRESS`; B's catalog checkpoint is integrated and the second implementation wave is active
-from integration SHA `08eafe5e` while CI run `34186531833` completes. A owns one general-refactor
-batch, C owns the throughput batch, and D's first-wave review found no issue in B's checkpoint.
-The wider domain audit remains open; no worker may overlap B's catalog files or C's throughput files.
+`IN_PROGRESS`; B's catalog checkpoint is integrated and the second implementation wave is held
+after CI run `34186705160` failed its Real Mojo/parity compile guard. The concrete test-module
+ordering repair is pushed at `071b8cbc`; A and C WIP is preserved and paused while CI run
+`34187490415` validates that repair. The wider domain audit remains open.
 
 ## Parallel ownership ledger
 
@@ -28,9 +28,9 @@ Integration branch: `refactor/parallel-integration-20260908`.
 
 | Worker | Workstream | Base SHA | Branch | Worktree | Owns | Excludes | Status |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| A | General lean refactor | `08eafe5eb22cf67cee9c301b186445154eb28cc0` | `worker/refactor-general-20260908` | worker worktree | CLI, orchestration, profile/auth, session, runtime support, gateway, storage, config, reports, tooling outside B/C | provider catalog surfaces; throughput/log-throughput surfaces | wave 2 active |
+| A | General lean refactor | `08eafe5eb22cf67cee9c301b186445154eb28cc0` | `worker/refactor-general-20260908` | worker worktree | CLI, orchestration, profile/auth, session, runtime support, gateway, storage, config, reports, tooling outside B/C | provider catalog surfaces; throughput/log-throughput surfaces | paused; clean, no checkpoint |
 | B | Provider model catalog | `a32b107df02d9b5b503b8d545a4fb24b7754e997` | `worker/provider-catalog-20260908` | worker worktree | provider catalog, Super model pickers, Kiro/Copilot/Gemini/OpenAI catalog consumers and tests | throughput/log-throughput; unrelated refactor | checkpoint pushed/integrated; worker stopped |
-| C | Throughput observability | `08eafe5eb22cf67cee9c301b186445154eb28cc0` | `worker/throughput-observability-20260908` | worker worktree | generation timing, token usage, throughput state, log TUI, history, throughput docs/tests | provider catalog; unrelated refactor | wave 2 active |
+| C | Throughput observability | `08eafe5eb22cf67cee9c301b186445154eb28cc0` | `worker/throughput-observability-20260908` | worker worktree | generation timing, token usage, throughput state, log TUI, history, throughput docs/tests | provider catalog; unrelated refactor | paused; 6-file uncommitted WIP retained |
 | D | Read-only review | `a32b107df02d9b5b503b8d545a4fb24b7754e997` | none | none | exact checkpoint review only | all writes | complete; B checkpoint no finding |
 
 Worker contract: each worker commits only reviewed paths to its worker branch, pushes that branch,
@@ -84,6 +84,11 @@ integration branch. Heavy full-workspace, Mojo, and final integration gates rema
 - Wave 2 base: A and C worktrees were fast-forwarded cleanly to `08eafe5eb22cf67cee9c301b186445154eb28cc0`;
   neither had prior WIP or a prior checkpoint. CI run `34186531833` is the active validation for
   that integration SHA and has no reported failure at wave start.
+- CI run `34186705160` failed on exact SHA `710f2401`: Sonar passed its source scan, but Real
+  Mojo/parity failed compilation with `clippy::items_after_test_module` at
+  `crates/prodex-app/src/app_commands/super_main_catalog.rs:630`; A/C were then paused. The test
+  module was moved after production items in `071b8cbc`, with local strict clippy and focused
+  tests passing. CI run `34187490415` targets `071b8cbc` and is pending.
 
 ## Batch B1: provider catalog authority
 
@@ -124,6 +129,7 @@ order and `Custom` remains last.
 
 - Campaign worktree is owned by this campaign. Its `target/` build cache is retained while validation continues.
 - No campaign-created server or watcher remains active after baseline testing. B's worktree is
-  clean after its pushed checkpoint; A and C worktrees are campaign-owned and active for wave 2.
-- Next action: monitor CI run `34186531833` for failures while A and C complete their bounded
-  batches, then review each remote checkpoint serially before integration.
+  clean after its pushed checkpoint; A's worktree is clean, and C's six-file WIP is retained in
+  its campaign worktree with no active test process.
+- Next action: finish CI run `34187490415`; if the repaired guards pass, resume C from its retained
+  WIP and A from the same integration SHA, otherwise hold and repair the reported failure only.
