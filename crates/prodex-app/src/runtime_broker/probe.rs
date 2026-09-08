@@ -1,7 +1,6 @@
 use super::{
     load_runtime_broker_capability, load_runtime_broker_registry,
     runtime_broker_registry_identity_is_valid, runtime_broker_registry_keys,
-    runtime_process_pid_alive,
 };
 use crate::{
     RUNTIME_PROXY_BUFFERED_RESPONSE_MAX_BYTES, RuntimeConfig,
@@ -11,7 +10,6 @@ use anyhow::{Context, Result, bail};
 use prodex_core::AppPaths;
 use prodex_runtime_broker::{
     RuntimeBrokerHealth, RuntimeBrokerMetrics, RuntimeBrokerObservation, RuntimeBrokerRegistry,
-    RuntimeBrokerSecret,
 };
 use reqwest::blocking::Client;
 use reqwest::header::HeaderValue;
@@ -31,14 +29,25 @@ struct RuntimeBrokerLogSnapshotResponse {
     entries: Vec<RuntimeBrokerLogSnapshotEntry>,
 }
 
-pub(crate) fn runtime_broker_admin_header(
-    listen_addr: &str,
-    capability: &RuntimeBrokerSecret,
-) -> Result<HeaderValue> {
+pub(crate) fn runtime_broker_registry_admission(registry: &RuntimeBrokerRegistry) -> Result<()> {
     anyhow::ensure!(
-        prodex_runtime_broker::runtime_broker_listen_addr_is_loopback(listen_addr),
+        prodex_runtime_broker::runtime_broker_listen_addr_is_loopback(&registry.listen_addr),
         "runtime broker listen address must be loopback"
     );
+    anyhow::ensure!(
+        runtime_broker_registry_identity_is_valid(registry),
+        "runtime broker process identity is not established"
+    );
+    Ok(())
+}
+
+pub(crate) fn runtime_broker_admin_header(
+    paths: &AppPaths,
+    broker_key: &str,
+    registry: &RuntimeBrokerRegistry,
+) -> Result<HeaderValue> {
+    runtime_broker_registry_admission(registry)?;
+    let capability = load_runtime_broker_capability(paths, broker_key, &registry.instance_id)?;
     let mut value = HeaderValue::from_str(capability.expose())
         .context("runtime broker capability is not a valid HTTP header value")?;
     value.set_sensitive(true);
@@ -93,18 +102,14 @@ pub(crate) fn probe_runtime_broker_health(
     broker_key: &str,
     registry: &RuntimeBrokerRegistry,
 ) -> Result<Option<RuntimeBrokerHealth>> {
-    if !prodex_runtime_broker::runtime_broker_listen_addr_is_loopback(&registry.listen_addr) {
-        return Ok(None);
-    }
-    let Ok(capability) = load_runtime_broker_capability(paths, broker_key, &registry.instance_id)
-    else {
+    let Ok(admin_header) = runtime_broker_admin_header(paths, broker_key, registry) else {
         return Ok(None);
     };
     let response = match client
         .get(runtime_broker_health_url(registry))
         .header(
             prodex_runtime_broker::RUNTIME_BROKER_ADMIN_TOKEN_HEADER,
-            runtime_broker_admin_header(&registry.listen_addr, &capability)?,
+            admin_header,
         )
         .send()
     {
@@ -130,18 +135,14 @@ pub(crate) fn probe_runtime_broker_metrics(
     broker_key: &str,
     registry: &RuntimeBrokerRegistry,
 ) -> Result<Option<RuntimeBrokerMetrics>> {
-    if !prodex_runtime_broker::runtime_broker_listen_addr_is_loopback(&registry.listen_addr) {
-        return Ok(None);
-    }
-    let Ok(capability) = load_runtime_broker_capability(paths, broker_key, &registry.instance_id)
-    else {
+    let Ok(admin_header) = runtime_broker_admin_header(paths, broker_key, registry) else {
         return Ok(None);
     };
     let response = match client
         .get(runtime_broker_metrics_url(registry))
         .header(
             prodex_runtime_broker::RUNTIME_BROKER_ADMIN_TOKEN_HEADER,
-            runtime_broker_admin_header(&registry.listen_addr, &capability)?,
+            admin_header,
         )
         .send()
     {
@@ -168,11 +169,7 @@ pub(crate) fn probe_runtime_broker_log_snapshot(
     registry: &RuntimeBrokerRegistry,
     after: u64,
 ) -> Result<Option<runtime_log::RuntimeLiveLogSnapshot>> {
-    if !prodex_runtime_broker::runtime_broker_listen_addr_is_loopback(&registry.listen_addr) {
-        return Ok(None);
-    }
-    let Ok(capability) = load_runtime_broker_capability(paths, broker_key, &registry.instance_id)
-    else {
+    let Ok(admin_header) = runtime_broker_admin_header(paths, broker_key, registry) else {
         return Ok(None);
     };
     let url = format!(
@@ -184,7 +181,7 @@ pub(crate) fn probe_runtime_broker_log_snapshot(
         .get(url)
         .header(
             prodex_runtime_broker::RUNTIME_BROKER_ADMIN_TOKEN_HEADER,
-            runtime_broker_admin_header(&registry.listen_addr, &capability)?,
+            admin_header,
         )
         .send()
     {
@@ -230,12 +227,7 @@ pub(crate) fn collect_live_runtime_broker_observations(
         let Ok(Some(registry)) = load_runtime_broker_registry(paths, &broker_key) else {
             continue;
         };
-        if !prodex_runtime_broker::runtime_broker_listen_addr_is_loopback(&registry.listen_addr)
-            || !runtime_broker_registry_identity_is_valid(&registry)
-        {
-            continue;
-        }
-        if !runtime_process_pid_alive(registry.pid) {
+        if runtime_broker_registry_admission(&registry).is_err() {
             continue;
         }
         let Ok(Some(metrics)) =
@@ -258,10 +250,7 @@ pub(crate) fn collect_runtime_broker_metrics_targets(paths: &AppPaths) -> Vec<St
         let Ok(Some(registry)) = load_runtime_broker_registry(paths, &broker_key) else {
             continue;
         };
-        if !prodex_runtime_broker::runtime_broker_listen_addr_is_loopback(&registry.listen_addr) {
-            continue;
-        }
-        if !runtime_process_pid_alive(registry.pid) {
+        if runtime_broker_registry_admission(&registry).is_err() {
             continue;
         }
         targets.push(runtime_broker_metrics_prometheus_url(&registry));
@@ -280,16 +269,12 @@ pub(crate) fn activate_runtime_broker_profile(
     registry: &RuntimeBrokerRegistry,
     current_profile: &str,
 ) -> Result<()> {
-    anyhow::ensure!(
-        prodex_runtime_broker::runtime_broker_listen_addr_is_loopback(&registry.listen_addr),
-        "runtime broker listen address must be loopback"
-    );
-    let capability = load_runtime_broker_capability(paths, broker_key, &registry.instance_id)?;
+    let admin_header = runtime_broker_admin_header(paths, broker_key, registry)?;
     let response = client
         .post(runtime_broker_activate_url(registry))
         .header(
             prodex_runtime_broker::RUNTIME_BROKER_ADMIN_TOKEN_HEADER,
-            runtime_broker_admin_header(&registry.listen_addr, &capability)?,
+            admin_header,
         )
         .json(&serde_json::json!({
             "current_profile": current_profile,
@@ -324,16 +309,12 @@ pub(crate) fn release_runtime_broker_session_affinity(
     registry: &RuntimeBrokerRegistry,
     session_id: &str,
 ) -> Result<()> {
-    anyhow::ensure!(
-        prodex_runtime_broker::runtime_broker_listen_addr_is_loopback(&registry.listen_addr),
-        "runtime broker listen address must be loopback"
-    );
-    let capability = load_runtime_broker_capability(paths, broker_key, &registry.instance_id)?;
+    let admin_header = runtime_broker_admin_header(paths, broker_key, registry)?;
     let response = client
         .post(runtime_broker_release_session_affinity_url(registry))
         .header(
             prodex_runtime_broker::RUNTIME_BROKER_ADMIN_TOKEN_HEADER,
-            runtime_broker_admin_header(&registry.listen_addr, &capability)?,
+            admin_header,
         )
         .json(&serde_json::json!({
             "session_id": session_id,
@@ -368,16 +349,12 @@ pub(crate) fn send_runtime_broker_log_event(
     registry: &RuntimeBrokerRegistry,
     message: &str,
 ) -> Result<()> {
-    anyhow::ensure!(
-        prodex_runtime_broker::runtime_broker_listen_addr_is_loopback(&registry.listen_addr),
-        "runtime broker listen address must be loopback"
-    );
-    let capability = load_runtime_broker_capability(paths, broker_key, &registry.instance_id)?;
+    let admin_header = runtime_broker_admin_header(paths, broker_key, registry)?;
     let response = client
         .post(registry.log_event_url())
         .header(
             prodex_runtime_broker::RUNTIME_BROKER_ADMIN_TOKEN_HEADER,
-            runtime_broker_admin_header(&registry.listen_addr, &capability)?,
+            admin_header,
         )
         .json(&serde_json::json!({"message": message}))
         .send()
@@ -393,22 +370,79 @@ pub(crate) fn send_runtime_broker_log_event(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{runtime_current_prodex_binary_identity, runtime_process_birth_identity};
+    use std::fs;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn test_paths(label: &str) -> AppPaths {
+        let root = std::env::temp_dir().join(format!(
+            "prodex-runtime-broker-probe-{label}-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        fs::create_dir_all(&root).unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt as _;
+            fs::set_permissions(&root, fs::Permissions::from_mode(0o700)).unwrap();
+        }
+        AppPaths {
+            state_file: root.join("state.json"),
+            managed_profiles_root: root.join("profiles"),
+            shared_codex_root: root.join("shared"),
+            legacy_shared_codex_root: root.join("legacy-shared"),
+            root,
+        }
+    }
+
+    fn current_process_registry(listen_addr: &str) -> RuntimeBrokerRegistry {
+        let pid = std::process::id();
+        let identity = runtime_current_prodex_binary_identity();
+        RuntimeBrokerRegistry {
+            pid,
+            process_birth_identity: runtime_process_birth_identity(pid),
+            listen_addr: listen_addr.to_string(),
+            started_at: 100,
+            upstream_base_url: "https://upstream.example".to_string(),
+            include_code_review: false,
+            upstream_no_proxy: false,
+            smart_context_enabled: false,
+            current_profile: "main".to_string(),
+            instance_id: "instance".to_string(),
+            prodex_version: identity.prodex_version,
+            executable_path: identity
+                .executable_path
+                .map(|path| path.display().to_string()),
+            executable_sha256: identity.executable_sha256,
+            openai_mount_path: None,
+            realtime_ws_addr: None,
+        }
+    }
 
     #[test]
     fn runtime_broker_admin_header_debug_is_redacted() {
-        let capability = RuntimeBrokerSecret::new("debug-secret-capability").unwrap();
-        let header = runtime_broker_admin_header("127.0.0.1:4567", &capability).unwrap();
+        let paths = test_paths("redacted");
+        let registry = current_process_registry("127.0.0.1:4567");
+        let capability =
+            prodex_runtime_broker::RuntimeBrokerSecret::new("debug-secret-capability").unwrap();
+        crate::save_runtime_broker_capability(&paths, "broker", "instance", &capability).unwrap();
+        let header = runtime_broker_admin_header(&paths, "broker", &registry).unwrap();
 
         assert!(header.is_sensitive());
         assert!(!format!("{header:?}").contains(capability.expose()));
+        let _ = fs::remove_dir_all(paths.root);
     }
 
     #[test]
     fn runtime_broker_admin_header_rejects_non_loopback_address() {
-        let capability = RuntimeBrokerSecret::new("debug-secret-capability").unwrap();
-
-        let error = runtime_broker_admin_header("192.0.2.10:4567", &capability).unwrap_err();
+        let paths = test_paths("non-loopback");
+        let registry = current_process_registry("192.0.2.10:4567");
+        let error = runtime_broker_admin_header(&paths, "broker", &registry).unwrap_err();
 
         assert!(error.to_string().contains("must be loopback"));
+        let _ = fs::remove_dir_all(paths.root);
     }
 }

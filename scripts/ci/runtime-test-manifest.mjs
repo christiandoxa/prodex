@@ -763,6 +763,10 @@ export const RUNTIME_CI_TEST_CASES = [
     tags: SERIALIZED_TAGS,
   },
   {
+    name: "runtime_broker_capability_operations_reject_missing_identity_before_http",
+    tags: SERIALIZED_TAGS,
+  },
+  {
     name: "runtime_proxy_waits_for_anthropic_inflight_relief_then_succeeds",
     tags: SERIALIZED_TAGS,
   },

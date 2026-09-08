@@ -228,24 +228,49 @@ pub(crate) fn runtime_process_birth_identity(pid: u32) -> Option<String> {
     RuntimeProcessPlatformImpl::process_birth_identity(pid)
 }
 
+#[cfg(test)]
 pub(crate) fn runtime_process_executable_path(pid: u32) -> Option<PathBuf> {
     RuntimeProcessPlatformImpl::executable_path(pid)
 }
 
-pub(crate) fn runtime_broker_registry_identity_is_valid(registry: &RuntimeBrokerRegistry) -> bool {
-    let Some(expected_path) = registry.executable_path.as_deref() else {
+fn runtime_broker_registry_identity_is_valid_for<P: RuntimeProcessPlatform>(
+    registry: &RuntimeBrokerRegistry,
+) -> bool {
+    let Some(expected_birth_identity) = registry
+        .process_birth_identity
+        .as_deref()
+        .filter(|identity| !identity.is_empty())
+    else {
         return false;
     };
-    runtime_process_pid_alive(registry.pid)
-        && !runtime_process_absence_proven(registry.pid)
-        && registry
-            .process_birth_identity
-            .as_deref()
-            .zip(runtime_process_birth_identity(registry.pid).as_deref())
-            .is_some_and(|(expected, actual)| expected == actual)
-        && runtime_process_executable_path(registry.pid)
-            .as_deref()
-            .is_some_and(|actual| prodex_core::same_path(Path::new(expected_path), actual))
+    let Some(expected_executable_path) = registry
+        .executable_path
+        .as_deref()
+        .filter(|path| !path.is_empty())
+    else {
+        return false;
+    };
+    if registry.pid == 0 || !P::pid_alive(registry.pid) || P::process_absence_proven(registry.pid) {
+        return false;
+    }
+    let Some(actual_birth_identity) = P::process_birth_identity(registry.pid) else {
+        return false;
+    };
+    if actual_birth_identity != expected_birth_identity {
+        return false;
+    }
+    let Some(actual_executable_path) = P::executable_path(registry.pid) else {
+        return false;
+    };
+    let Some(actual_birth_identity_after_path) = P::process_birth_identity(registry.pid) else {
+        return false;
+    };
+    actual_birth_identity_after_path == expected_birth_identity
+        && prodex_core::same_path(Path::new(expected_executable_path), &actual_executable_path)
+}
+
+pub(crate) fn runtime_broker_registry_identity_is_valid(registry: &RuntimeBrokerRegistry) -> bool {
+    runtime_broker_registry_identity_is_valid_for::<RuntimeProcessPlatformImpl>(registry)
 }
 
 pub(crate) fn read_prodex_sha256_from_executable(executable: &Path) -> Result<String> {
@@ -434,11 +459,12 @@ mod tests {
         }
 
         fn process_birth_identity(_pid: u32) -> Option<String> {
+            let read = FAKE_BIRTH_READS.fetch_add(1, Ordering::SeqCst);
             match FAKE_PROCESS_STATE.load(Ordering::SeqCst) {
                 FAKE_PERMISSION_DENIED => None,
                 FAKE_BIRTH_CHANGED => Some("birth-reused".to_string()),
                 FAKE_BIRTH_CHANGED_AFTER_PATH => {
-                    if FAKE_BIRTH_READS.fetch_add(1, Ordering::SeqCst) == 0 {
+                    if read == 0 {
                         Some("birth-expected".to_string())
                     } else {
                         Some("birth-reused".to_string())
@@ -606,6 +632,36 @@ mod tests {
     #[test]
     fn fake_probe_never_signals_absent_unrelated_or_unproven_processes() {
         let expected_path = Path::new("/opt/prodex/bin/prodex");
+        let registry = RuntimeBrokerRegistry {
+            pid: 4242,
+            process_birth_identity: Some("birth-expected".to_string()),
+            listen_addr: "127.0.0.1:4567".to_string(),
+            started_at: 100,
+            upstream_base_url: "https://upstream.example".to_string(),
+            include_code_review: false,
+            upstream_no_proxy: false,
+            smart_context_enabled: false,
+            current_profile: "main".to_string(),
+            instance_id: "instance".to_string(),
+            prodex_version: None,
+            executable_path: Some(expected_path.display().to_string()),
+            executable_sha256: None,
+            openai_mount_path: None,
+            realtime_ws_addr: None,
+        };
+        FAKE_PROCESS_STATE.store(FAKE_MATCH_TERMINATES, Ordering::SeqCst);
+        FAKE_BIRTH_READS.store(0, Ordering::SeqCst);
+        assert!(runtime_broker_registry_identity_is_valid_for::<
+            FakeRuntimeProcess,
+        >(&registry));
+        assert_eq!(FAKE_BIRTH_READS.load(Ordering::SeqCst), 2);
+        FAKE_PROCESS_STATE.store(FAKE_BIRTH_CHANGED_AFTER_PATH, Ordering::SeqCst);
+        FAKE_BIRTH_READS.store(0, Ordering::SeqCst);
+        assert!(!runtime_broker_registry_identity_is_valid_for::<
+            FakeRuntimeProcess,
+        >(&registry));
+        assert_eq!(FAKE_BIRTH_READS.load(Ordering::SeqCst), 2);
+
         let terminate = |state| {
             FAKE_PROCESS_STATE.store(state, Ordering::SeqCst);
             FAKE_BIRTH_READS.store(0, Ordering::SeqCst);
