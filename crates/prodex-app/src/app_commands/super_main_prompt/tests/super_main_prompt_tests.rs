@@ -88,7 +88,74 @@ fn openai_main_picker_reads_the_active_models_cache() {
             _ => None,
         })
         .collect::<Vec<_>>();
-    assert_eq!(models, ["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"]);
+    assert_eq!(
+        models,
+        [
+            "gpt-5.6-sol",
+            "gpt-5.6-terra",
+            "gpt-5.6-luna",
+            "gpt-5.4",
+            "gpt-5.4-mini",
+            "gpt-5.3-codex",
+            "gpt-5.3-codex-spark",
+            "gpt-5.2"
+        ]
+    );
+    drop(_codex_home);
+    drop(_prodex_home);
+    drop(_env_lock);
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn openai_main_picker_keeps_canonical_models_when_cache_is_partial() {
+    let root = crate::test_temp_root().join(format!(
+        "prodex-main-partial-model-cache-{}",
+        std::process::id()
+    ));
+    let codex_home = root.join("codex");
+    std::fs::create_dir_all(&codex_home).unwrap();
+    let _env_lock = crate::test_support::TestEnvVarGuard::lock();
+    let _prodex_home = crate::test_support::TestEnvVarGuard::set(
+        "PRODEX_HOME",
+        root.join("prodex").to_str().unwrap(),
+    );
+    let _codex_home = crate::test_support::TestEnvVarGuard::set(
+        "PRODEX_SHARED_CODEX_HOME",
+        codex_home.to_str().unwrap(),
+    );
+    std::fs::write(
+        codex_home.join("models_cache.json"),
+        json!({
+            "client_version": "0.150.1",
+            "models": [catalog_model("account-model", "Account Model", 1, &[])],
+        })
+        .to_string(),
+    )
+    .unwrap();
+
+    let choices = main_model_choices(prodex_provider_core::ProviderId::OpenAi, None);
+    let models = choices
+        .iter()
+        .filter_map(|choice| match &choice.choice {
+            prodex_provider_core::ProviderModelChoice::Model(model) => Some(model.as_str()),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        models,
+        [
+            "account-model",
+            "gpt-5.6-sol",
+            "gpt-5.6-terra",
+            "gpt-5.6-luna",
+            "gpt-5.4",
+            "gpt-5.4-mini",
+            "gpt-5.3-codex",
+            "gpt-5.3-codex-spark",
+            "gpt-5.2"
+        ]
+    );
     drop(_codex_home);
     drop(_prodex_home);
     drop(_env_lock);

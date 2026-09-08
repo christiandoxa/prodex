@@ -58,9 +58,13 @@ order and `Custom` remains last.
   consume the same app-owned source authority.
 - Degraded state is generic and non-secret; source errors are not rendered. A stale/missing profile
   does not consume the usable-catalog bound, so a later healthy Kiro profile remains visible.
-- Focused tests: sub-agent catalog `15/15`; main prompt `6/6`; provider-core catalog `24/24` real
-  tests plus one zero-test auxiliary binary; Gemini `9/9`, DeepSeek `4/4`, Local `5/5`, Kiro `14/14`,
-  Copilot `12/12`.
+- Focused tests: sub-agent catalog `14/14`; main prompt `7/7`; provider-core catalog `24/24` real
+  tests plus one zero-test auxiliary binary; Gemini `9/9`, DeepSeek `4/4`, Local `5/5`, Kiro
+  `14/14`, Copilot `12/12`. Dashboard `21/21` and gateway `503 passed, 17 ignored` were also
+  reproduced while evaluating the next consumer batch; those consumers are not part of B1.
+- Static guards after B1: application boundary, crate boundary, size, secret boundary, Mojo share,
+  Mojo authority/no-fallback, and runtime test manifest all passed. All-feature workspace clippy
+  passed on the final B1 source tree.
 
 ## Known checkpoints and blockers
 
@@ -72,6 +76,6 @@ order and `Custom` remains last.
 
 - Campaign worktree is owned by this campaign. Its `target/` build cache is retained while validation continues.
 - No campaign-created server or watcher remains active after baseline testing.
-- Next action: stage only the reviewed B0/B1 note and source paths, run cached-diff security/architecture
-  guards, create and push the focused checkpoint to the campaign branch, verify its remote SHA, then
-  continue the next domain only after synchronization.
+- Next action: rerun clippy and final B1 guards, stage only reviewed B1 paths, commit and push B1 to
+  the campaign branch, verify remote SHA and CI status, then start B2 for gateway/dashboard consumer
+  consolidation only after synchronization.
