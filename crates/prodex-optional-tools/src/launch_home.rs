@@ -25,7 +25,7 @@ pub fn prepare_prodex_overlay_home_from_prepared_base(
     managed_profiles_root: &Path,
     base_codex_home: &Path,
 ) -> Result<PathBuf> {
-    prepare_prodex_overlay_home_internal(managed_profiles_root, base_codex_home, true, true)
+    prepare_prodex_overlay_home(managed_profiles_root, base_codex_home)
 }
 
 pub fn prepare_runtime_overlay_home(
@@ -39,7 +39,7 @@ pub fn prepare_runtime_overlay_home_from_prepared_base(
     managed_profiles_root: &Path,
     base_codex_home: &Path,
 ) -> Result<PathBuf> {
-    prepare_prodex_overlay_home_internal(managed_profiles_root, base_codex_home, false, false)
+    prepare_runtime_overlay_home(managed_profiles_root, base_codex_home)
 }
 
 pub fn prepare_desktop_overlay_home(
@@ -60,12 +60,7 @@ pub fn prepare_desktop_overlay_home_from_prepared_base(
     base_codex_home: &Path,
     configure_prodex: bool,
 ) -> Result<PathBuf> {
-    prepare_prodex_overlay_home_internal(
-        managed_profiles_root,
-        base_codex_home,
-        configure_prodex,
-        true,
-    )
+    prepare_desktop_overlay_home(managed_profiles_root, base_codex_home, configure_prodex)
 }
 
 fn prepare_prodex_overlay_home_internal(
