@@ -4,7 +4,7 @@ use super::log::{
     collect_live_log_items, collect_new_runtime_log_stream_items_with_throughput, followed_log_map,
     retain_followed_logs, runtime_log_paths_for_follow,
 };
-use super::log_format::{current_log_width, render_log_block};
+use super::log_format::render_log_block;
 use super::log_tui::{
     LOG_TUI_TITLE, LogTuiHeaderDetail, LogTuiInput, LogTuiState, LogTuiTerminal, OutputThroughput,
     OutputThroughputDisplay, contains_ignore_ascii_case, log_tui_header_detail,
@@ -213,7 +213,7 @@ pub(crate) fn print_upstream_payload_event(event: &UpstreamPayloadEvent, json: b
             .request
             .map(|request| request.to_string())
             .unwrap_or_else(|| "-".to_string());
-        let width = current_log_width();
+        let width = terminal_ui::current_cli_width();
         let meta = [
             ("profile", event.profile.clone()),
             ("request", request),

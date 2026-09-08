@@ -11,8 +11,8 @@ use self::watch_tui::quota_watch_quit_key;
 use self::watch_tui::{
     AllQuotaWatchTuiRow, AllQuotaWatchTuiTable, build_all_quota_watch_tui_frame,
     build_profile_quota_watch_tui_frame, quota_human_tui_spans, quota_watch_overview_height,
-    quota_watch_separator_line, quota_watch_table_text,
-    quota_watch_tui_max_scroll_offset_for_snapshot, quota_watch_tui_table_lines,
+    quota_watch_table_text, quota_watch_tui_max_scroll_offset_for_snapshot,
+    quota_watch_tui_table_lines,
 };
 pub(crate) use self::watch_tui::{
     quota_watch_enabled, render_all_quota_reports_once_tui, render_profile_quota_once_tui,
