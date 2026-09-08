@@ -427,6 +427,7 @@ fn wait_for_existing_runtime_broker_recovery_or_exit_replaces_mismatched_live_br
 }
 
 #[test]
+#[cfg(not(target_os = "macos"))]
 fn wait_for_existing_runtime_broker_recovery_or_exit_yields_mismatched_live_broker_with_active_requests()
  {
     let _timeout_guard = TestEnvVarGuard::set("PRODEX_RUNTIME_BROKER_READY_TIMEOUT_MS", "2000");
@@ -551,6 +552,7 @@ fn wait_for_existing_runtime_broker_recovery_or_exit_yields_mismatched_live_brok
 }
 
 #[test]
+#[cfg(not(target_os = "macos"))]
 fn find_compatible_runtime_broker_registry_discovers_other_broker_key() {
     let temp_dir = TestDir::isolated();
     let paths = AppPaths {

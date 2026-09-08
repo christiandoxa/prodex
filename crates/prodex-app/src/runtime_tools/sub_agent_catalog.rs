@@ -83,43 +83,25 @@ pub(crate) fn effective_provider_model_catalog_from_paths(
             degraded = true;
             break;
         }
-        let contents = match read_provider_model_catalog_text(&source.path) {
-            Ok(Some(contents)) => contents,
-            Ok(None) => {
+        let entries = match load_catalog_source(source, provider) {
+            CatalogSourceLoad::Missing => {
                 degraded |= source.required;
                 continue;
             }
-            Err(_) => {
+            CatalogSourceLoad::Invalid => {
                 degraded = true;
                 continue;
             }
+            CatalogSourceLoad::Entries(entries) => entries,
         };
-        let Ok(entries) = parse_catalog(provider, &contents) else {
-            degraded = true;
-            continue;
-        };
-        if entries.len() > prodex_provider_core::PROVIDER_MODEL_CATALOG_HARD_LIMIT {
-            degraded = true;
-            continue;
-        }
-        let mut usable = false;
-        for entry in entries {
-            let Some(id) = catalog_entry_model_id(&entry).map(str::to_string) else {
-                continue;
-            };
-            if !catalog_entry_is_selectable(&entry) {
-                continue;
-            }
-            usable = true;
-            if !seen.insert(id.to_ascii_lowercase()) {
-                continue;
-            }
-            models.push(catalog_entry_with_id(entry, provider, &id));
-            if models.len() >= model_limit {
-                degraded = true;
-                break;
-            }
-        }
+        let usable = append_catalog_entries(
+            provider,
+            entries,
+            model_limit,
+            &mut seen,
+            &mut models,
+            &mut degraded,
+        );
         if !usable {
             degraded = true;
         } else if source.required {
@@ -130,14 +112,67 @@ pub(crate) fn effective_provider_model_catalog_from_paths(
         }
     }
 
-    let status = if degraded {
+    let status = dynamic_catalog_status(&models, degraded);
+    EffectiveProviderModelCatalog { models, status }
+}
+
+enum CatalogSourceLoad {
+    Missing,
+    Invalid,
+    Entries(Vec<Value>),
+}
+
+fn load_catalog_source(source: &CatalogSource, provider: ProviderId) -> CatalogSourceLoad {
+    let contents = match read_provider_model_catalog_text(&source.path) {
+        Ok(Some(contents)) => contents,
+        Ok(None) => return CatalogSourceLoad::Missing,
+        Err(_) => return CatalogSourceLoad::Invalid,
+    };
+    match parse_catalog(provider, &contents) {
+        Ok(entries) if entries.len() <= prodex_provider_core::PROVIDER_MODEL_CATALOG_HARD_LIMIT => {
+            CatalogSourceLoad::Entries(entries)
+        }
+        Ok(_) | Err(_) => CatalogSourceLoad::Invalid,
+    }
+}
+
+fn append_catalog_entries(
+    provider: ProviderId,
+    entries: Vec<Value>,
+    model_limit: usize,
+    seen: &mut BTreeSet<String>,
+    models: &mut Vec<Value>,
+    degraded: &mut bool,
+) -> bool {
+    let mut usable = false;
+    for entry in entries {
+        let Some(id) = catalog_entry_model_id(&entry).map(str::to_string) else {
+            continue;
+        };
+        if !catalog_entry_is_selectable(&entry) {
+            continue;
+        }
+        usable = true;
+        if !seen.insert(id.to_ascii_lowercase()) {
+            continue;
+        }
+        models.push(catalog_entry_with_id(entry, provider, &id));
+        if models.len() >= model_limit {
+            *degraded = true;
+            break;
+        }
+    }
+    usable
+}
+
+fn dynamic_catalog_status(models: &[Value], degraded: bool) -> DynamicCatalogStatus {
+    if degraded {
         DynamicCatalogStatus::Degraded
     } else if models.is_empty() {
         DynamicCatalogStatus::NoDynamicCatalog
     } else {
         DynamicCatalogStatus::Available
-    };
-    EffectiveProviderModelCatalog { models, status }
+    }
 }
 
 fn degraded_catalog() -> EffectiveProviderModelCatalog {
