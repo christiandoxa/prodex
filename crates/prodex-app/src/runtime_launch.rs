@@ -245,9 +245,9 @@ fn runtime_launch_config_file_gemini_thinking_budget_tokens(config_path: &Path) 
 }
 
 fn runtime_launch_config_file_value(config_path: &Path, key: &str) -> Option<toml::Value> {
-    let raw = fs::read_to_string(config_path).ok()?;
-    let value = toml::from_str::<toml::Value>(&raw).ok()?;
-    value.get(key).cloned()
+    codex_config_file_toml_value(config_path, key)
+        .ok()
+        .flatten()
 }
 
 fn runtime_launch_toml_model_context_window_tokens(value: &toml::Value) -> Option<u64> {
