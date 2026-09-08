@@ -1,7 +1,7 @@
 use crate::runtime_catalog_config::{parse_catalog_u64, toml_string_literal};
 use crate::{
-    RuntimeDeepSeekWebSearchMode, codex_cli_config_override_value, codex_config_file_toml_value,
-    codex_config_value, codex_effective_config_exact_value, codex_effective_config_value,
+    RuntimeDeepSeekWebSearchMode, codex_cli_config_override_value, codex_config_value,
+    codex_effective_config_exact_value, codex_effective_config_value,
 };
 use anyhow::{Context, Result, bail};
 use prodex_cli::{
@@ -11,7 +11,6 @@ use prodex_cli::{
 use serde_json::json;
 use std::collections::BTreeSet;
 use std::ffi::{OsStr, OsString};
-#[cfg(test)]
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -178,9 +177,13 @@ fn runtime_deepseek_gateway_web_search_value(
 }
 
 fn runtime_deepseek_gateway_toml_value(codex_home: &Path, key: &str) -> Option<toml::Value> {
-    codex_config_file_toml_value(&codex_home.join("config.toml"), key)
-        .ok()
-        .flatten()
+    let contents = fs::read_to_string(codex_home.join("config.toml")).ok()?;
+    let value = toml::from_str::<toml::Value>(&contents).ok()?;
+    let mut current = &value;
+    for part in key.split('.') {
+        current = current.get(part)?;
+    }
+    Some(current.clone())
 }
 
 fn runtime_deepseek_gateway_environment_text<'a>(name: &str, value: &'a OsStr) -> Result<&'a str> {

@@ -13,8 +13,7 @@ use super::{
 };
 use crate::app_state::AppStateIoExt;
 use crate::{
-    AppPaths, AppState, CodexConfigError, codex_cli_config_override_exact_value,
-    codex_config_file_toml_value, codex_profile_v2_config_path,
+    AppPaths, AppState, codex_cli_config_override_exact_value, codex_profile_v2_config_path,
 };
 use anyhow::{Context, Result, bail};
 #[cfg(test)]
@@ -256,15 +255,16 @@ fn codex_notify_is_configured(
         return Ok(true);
     }
     let config_has_notify = |path: &Path| -> Result<bool> {
-        let value = codex_config_file_toml_value(path, "notify").map_err(|error| match error {
-            CodexConfigError::Read { source, .. } => {
-                anyhow::Error::new(source).context(format!("failed to read {}", path.display()))
+        let raw = match fs::read_to_string(path) {
+            Ok(raw) => raw,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
+            Err(error) => {
+                return Err(error).with_context(|| format!("failed to read {}", path.display()));
             }
-            CodexConfigError::Parse { source, .. } => {
-                anyhow::Error::new(source).context(format!("failed to parse {}", path.display()))
-            }
-        })?;
-        Ok(value.is_some())
+        };
+        let value = toml::from_str::<toml::Value>(&raw)
+            .with_context(|| format!("failed to parse {}", path.display()))?;
+        Ok(value.get("notify").is_some())
     };
     Ok(profile_v2_name
         .and_then(|name| codex_profile_v2_config_path(codex_home, name))
