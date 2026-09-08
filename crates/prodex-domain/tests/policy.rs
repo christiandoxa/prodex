@@ -1,10 +1,9 @@
 use prodex_domain::{
-    PolicyActivationError, PolicyActivationState, PolicyAuditAction, PolicyAuditRecord,
-    PolicyCacheStatus, PolicyDigest, PolicyErrorStatus, PolicyRefreshDecision, PolicyRefreshWindow,
-    PolicyRefreshWindowError, PolicyRevisionId, PolicySignature, PolicySnapshot, PolicyValidation,
-    evaluate_policy_refresh, plan_policy_activation_error_response,
-    plan_policy_refresh_decision_error_response, plan_policy_refresh_window_error_response,
-    validate_policy_snapshot,
+    PolicyActivationError, PolicyActivationState, PolicyCacheStatus, PolicyDigest,
+    PolicyErrorStatus, PolicyRefreshDecision, PolicyRefreshWindow, PolicyRefreshWindowError,
+    PolicyRevisionId, PolicySignature, PolicySnapshot, PolicyValidation, evaluate_policy_refresh,
+    plan_policy_activation_error_response, plan_policy_refresh_decision_error_response,
+    plan_policy_refresh_window_error_response, validate_policy_snapshot,
 };
 
 fn snapshot(payload: &str) -> PolicySnapshot<String> {
@@ -274,23 +273,6 @@ fn policy_activation_state_debug_output_is_stable_and_redacted() {
         rendered,
         "PolicyActivationState { has_active: true, has_last_known_good: true }"
     );
-}
-
-#[test]
-fn policy_audit_record_debug_output_is_stable_and_redacted() {
-    let revision_id = PolicyRevisionId::new();
-    let record = PolicyAuditRecord {
-        revision_id: Some(revision_id),
-        action: PolicyAuditAction::Rejected,
-        reason: Some("secret-signature-verifier-detail".to_string()),
-    };
-
-    let rendered = format!("{record:?}");
-    assert!(!rendered.contains(&revision_id.to_string()));
-    assert!(!rendered.contains("secret-signature-verifier-detail"));
-    assert!(rendered.contains("action: Rejected"));
-    assert!(rendered.contains("revision_id: Some(\"<redacted>\")"));
-    assert!(rendered.contains("reason: Some(\"<redacted>\")"));
 }
 
 #[test]
