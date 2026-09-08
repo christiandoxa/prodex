@@ -250,6 +250,40 @@ into `d253232e32f92c56b9f49b9fa68ee00f28d1ac35`. That boundary failed CI `342091
 checkpoint `b41281fb8f6ef0a2cce313936788b0d4d16c7249` integrated as de244, and CI `34224751563`
 passed.
 
+## Wave 7 manual successor execution
+
+- Handoff: the verified legacy coordinator/runner/controller and all 20 legacy worker trees were
+  stopped gracefully; the protected manual session, user expose, Codebase Memory daemon, main
+  worktree, release worktrees, and unrelated processes were not stopped. The secondary ext4 SSD
+  remained mounted at its verified device identity and campaign-owned cleanup reclaimed completed
+  build/review targets only.
+- Current integration head: `66157ef6daffcb444ce7ba4cfbfb6f795fc2c993`, pushed to
+  `refactor/parallel-integration-20260908`. The qualifying tree retains reviewed checkpoints
+  `1556875d` (overlay entrypoint reuse), `38077452` (private Copilot passthrough wrapper), and
+  `8d015e6e` (uncalled npm script surfaces). Their independent reviews returned `NO_FINDING` and
+  exact integrated focused checks passed.
+- Churn evidence: CI run `34246900868` correctly rejected the wider `09212cf1` tree because the
+  PR base `a32b107d` range reached 31 behavior files, above the enforced 25-file limit. No guard,
+  threshold, or allowlist was weakened. The wider reviewed checkpoints `5c3aa588` (bounded TOML
+  lookups), `09212cf1` (private domain cleanup), and `edcca0b4` (private terminal aliases) were
+  reverted from the integration tree with ordinary revert commits, while their remote branches,
+  logs, reviews, and source evidence remain durable for a later qualifying batch.
+- Held checkpoints: `84512e22` (review `NO_FINDING`, config 19 plus app 4+6+1+176 tests and
+  workspace Clippy), `c92851d8` (replacement exact-SHA review `NO_FINDING`, IDs 8 and governance
+  policy 10), and `932863af` (replacement exact-SHA review `NO_FINDING`, app alias tests 3+1+11+48)
+  are ledgered `IN_PROGRESS` because integrating them now would exceed the churn range. `87df35a2`
+  (runtime model scanner) and `3d755723` (private idempotency validation) are pushed and under
+  independent review; the model writer's full app aggregate stopped after 1,446 of 3,452 tests
+  with 16 unrelated runtime-synchronization failures, so it is not full-suite-green evidence.
+- Coverage: the ledger now has 64 unique B0 domains with 41 `UNREVIEWED`, 3 `IN_PROGRESS`, 7
+  `REFACTORED`, and 13 `KEEP_WITH_REASON`; all changes are evidence-backed and no row was closed
+  by worker launch alone. Completed audits also recorded explicit public-API holds for control
+  plane, state, context blob-noise, housekeeping, and gateway surfaces, and a semantic-difference
+  hold for storage reservation validators.
+- Current CI: run `34250426817` targets the qualifying `66157ef6` head and remains pending at the
+  latest observation. It must finish successfully before this integration head can be treated as
+  an exact-green anchor.
+
 ## Known checkpoints and blockers
 
 - Historical candidate commits were inspected through `afe20dfd`; no campaign documentation or active PR was present.
