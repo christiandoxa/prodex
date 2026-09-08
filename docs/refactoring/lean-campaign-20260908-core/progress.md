@@ -104,6 +104,9 @@ integration branch. Heavy full-workspace, Mojo, and final integration gates rema
   update-notice (11), and core (12).
 - Current integration tree contains both worker streams through `f9d8a05c` plus guard repair
   `32daf41b`; local static guards and focused tests pass, and remote CI is pending on that SHA.
+- Wave 3 ownership is disjoint: B2 owns only the gateway/dashboard catalog consumers in B1-007;
+  A2 owns one general-domain candidate outside provider catalog and throughput files. Both new
+  worktrees start from the next ledger checkpoint derived from `3bfb043c`.
 
 ## Batch B1: provider catalog authority
 
@@ -159,6 +162,14 @@ branches remain unchanged while duplicate naming logic uses the existing core ow
   finding. Integrated as `2b0bb24d` and `f9d8a05c` without conflict.
 - Tests: app runtime-store 16, update-notice 11, core 12; owning-crate all-target clippy,
   `cargo fmt --check`, and `git diff --check` passed.
+
+## Wave 3 ownership
+
+| Worker | Base SHA | Branch | Worktree | Owns | Excludes | Status |
+| --- | --- | --- | --- | --- | --- | --- |
+| A2 | `3bfb043c03f6ea926bda6b7d6e8cb8790080a283` | `worker/refactor-general-b2-20260908` | worker worktree | one evidence-backed general-domain refactor outside B/C | all provider catalog and throughput/log-throughput paths | ready to start |
+| B2 | `3bfb043c03f6ea926bda6b7d6e8cb8790080a283` | `worker/provider-catalog-b2-20260908` | worker worktree | `gateway_kiro_model_catalog_json_from_paths`, dashboard models catalog consumer, and focused tests | throughput/log-throughput; A2 general refactor | ready to start |
+| D | current integration SHA | none | none | read-only exact-checkpoint review | all writes | resume for Wave 3 checkpoints |
 
 ## Known checkpoints and blockers
 
