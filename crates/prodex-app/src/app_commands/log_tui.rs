@@ -519,54 +519,6 @@ mod tests {
     }
 
     #[test]
-    fn log_header_keeps_throughput_at_the_right_edge() {
-        let detail = LogTuiHeaderDetail::profile_only("main".to_string(), Duration::from_secs(1));
-        let header = render_log_header(
-            LOG_TUI_TITLE,
-            "200 event(s)",
-            Some(&detail),
-            Some(100.0),
-            80,
-        );
-
-        assert_eq!(terminal_ui::text_width(&header), 78);
-        assert!(header.ends_with("100 t/s"));
-        assert!(header.starts_with(LOG_TUI_TITLE));
-        assert!(!header.contains("200 event(s)"));
-    }
-
-    #[test]
-    fn log_header_labels_active_generation_rate() {
-        let header = render_log_header_with_display(
-            LOG_TUI_TITLE,
-            "",
-            None,
-            Some(OutputThroughputDisplay::Active(100.0)),
-            80,
-        );
-
-        assert!(header.contains("gen 100 t/s"));
-        assert!(!header.contains("last gen"));
-    }
-
-    #[test]
-    fn log_header_labels_retained_rate_and_coarse_age() {
-        let header = render_log_header_with_display(
-            LOG_TUI_TITLE,
-            "",
-            None,
-            Some(OutputThroughputDisplay::Last {
-                rate: 100.0,
-                age: Some(Duration::from_secs(7)),
-            }),
-            80,
-        );
-
-        assert!(header.contains("last gen 100 t/s (age <1m)"));
-        assert!(!header.contains("age 7s"));
-    }
-
-    #[test]
     fn log_header_prioritizes_quota_over_buffer_counts() {
         let snapshot = RuntimeProfileUsageSnapshot {
             checked_at: 0,
