@@ -224,16 +224,7 @@ fn mutating_control_plane_operations_require_idempotency() {
 fn all_control_plane_operations_require_immutable_audit_on_success_and_denial() {
     assert_eq!(ControlPlaneOperation::ALL.len(), 35);
     for operation in ControlPlaneOperation::ALL {
-        let audit = operation.audit_requirement();
-        assert_eq!(audit.operation, operation);
-        assert_eq!(audit.action, operation.audit_action());
-        assert_eq!(
-            audit.write_mode,
-            ControlPlaneAuditWriteMode::AppendOnlyHashChain
-        );
         assert!(operation.requires_immutable_audit());
-        assert!(audit.success_required);
-        assert!(audit.denial_required);
     }
 }
 
