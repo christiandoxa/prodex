@@ -17,10 +17,10 @@ transport semantics. This is an implementation campaign, not a line-count exerci
 
 ## Status
 
-`IN_PROGRESS`; B's catalog checkpoint is integrated and the second implementation wave is held
-after CI run `34186705160` failed its Real Mojo/parity compile guard. The concrete test-module
-ordering repair is pushed at `071b8cbc`; A and C WIP is preserved and paused while CI run
-`34187490415` validates that repair. The wider domain audit remains open.
+`IN_PROGRESS`; B's catalog, C's throughput, and A's general refactor checkpoints are integrated.
+Full CI run `34187555697` passed on the repaired pre-C/A tree, including Sonar, Real Mojo/parity,
+macOS, all Windows shards, and the relevant guards. The wider domain audit and final integration
+qualification remain open.
 
 ## Parallel ownership ledger
 
@@ -28,10 +28,10 @@ Integration branch: `refactor/parallel-integration-20260908`.
 
 | Worker | Workstream | Base SHA | Branch | Worktree | Owns | Excludes | Status |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| A | General lean refactor | `08eafe5eb22cf67cee9c301b186445154eb28cc0` | `worker/refactor-general-20260908` | worker worktree | CLI, orchestration, profile/auth, session, runtime support, gateway, storage, config, reports, tooling outside B/C | provider catalog surfaces; throughput/log-throughput surfaces | paused; clean, no checkpoint |
+| A | General lean refactor | `34972926449f8201c925893ae5be3d8e5bb6976c` | `worker/refactor-general-20260908` | worker worktree | CLI, orchestration, profile/auth, session, runtime support, gateway, storage, config, reports, tooling outside B/C | provider catalog surfaces; throughput/log-throughput surfaces | d5f94dd3 + 16eb6830 pushed/integrated; stopped |
 | B | Provider model catalog | `a32b107df02d9b5b503b8d545a4fb24b7754e997` | `worker/provider-catalog-20260908` | worker worktree | provider catalog, Super model pickers, Kiro/Copilot/Gemini/OpenAI catalog consumers and tests | throughput/log-throughput; unrelated refactor | checkpoint pushed/integrated; worker stopped |
-| C | Throughput observability | `08eafe5eb22cf67cee9c301b186445154eb28cc0` | `worker/throughput-observability-20260908` | worker worktree | generation timing, token usage, throughput state, log TUI, history, throughput docs/tests | provider catalog; unrelated refactor | paused; 6-file uncommitted WIP retained |
-| D | Read-only review | `a32b107df02d9b5b503b8d545a4fb24b7754e997` | none | none | exact checkpoint review only | all writes | complete; B checkpoint no finding |
+| C | Throughput observability | `08eafe5eb22cf67cee9c301b186445154eb28cc0` | `worker/throughput-observability-20260908` | worker worktree | generation timing, token usage, throughput state, log TUI, history, throughput docs/tests | provider catalog; unrelated refactor | 88294302 pushed/integrated; stopped |
+| D | Read-only review | `a32b107df02d9b5b503b8d545a4fb24b7754e997` | none | none | exact checkpoint review only | all writes | complete; A/B/C checkpoints no findings |
 
 Worker contract: each worker commits only reviewed paths to its worker branch, pushes that branch,
 verifies its remote SHA, and reports focused tests/cleanup. Workers do not merge or push the
@@ -60,7 +60,7 @@ integration branch. Heavy full-workspace, Mojo, and final integration gates rema
 - B1 checkpoint: local and remote `b8064149b615b60c56fd38302cdcf113a8c33890`.
 - Predecessor catalog PR: `#70`, base `refactor/428-integration-20260907`; it remains the
   pre-orchestration checkpoint and is not the integration review surface.
-- Draft integration PR: `#71`, base `refactor/428-integration-20260907`, head
+- Draft integration PR: `#71`, base `refactor/lean-campaign-20260908-core`, head
   `refactor/parallel-integration-20260908`; its body will be updated with reviewed checkpoints
   and final gate evidence.
 - B1 repair CI run `34184199873` completed with failure on the exact SHA `a32b107d`: Sonar
@@ -68,9 +68,10 @@ integration branch. Heavy full-workspace, Mojo, and final integration gates rema
   `crates/prodex-app/src/runtime_tools/sub_agent_catalog.rs:66`, and the Windows prodex-app
   shard reported `544 passed; 1 failed; 2 ignored`, with a websocket pre-commit continuation
   timeout. `compat-replay-gate` was successful and optional-tools freshness was skipped by CI.
-- Read-only reviewer D found no P0, but marked both the Sonar issue and unchanged Windows timeout
-  as P1 blockers. The two initial P2 catalog findings—dynamic-before-canonical OpenAI ordering and
-  discarded main-picker degraded status—were fixed in B's reviewed checkpoint.
+- Read-only reviewer D found no P0. The initial P1 Sonar issue was fixed; the unchanged Windows
+  timeout was not reproduced in the later full run. The two initial P2 catalog findings—dynamic-
+  before-canonical OpenAI ordering and discarded main-picker degraded status—were fixed in B's
+  reviewed checkpoint.
 - Parallel integration baseline: local and remote `a32b107df02d9b5b503b8d545a4fb24b7754e997` on
   `refactor/parallel-integration-20260908`; first-wave worker branches all start at this SHA.
 - B repair checkpoint: local and remote `61f33d58f47f2ebef0b5ad104a14aaf407676382`; reviewer D
@@ -80,15 +81,28 @@ integration branch. Heavy full-workspace, Mojo, and final integration gates rema
 - The official Mojo share report on the integrated source tree produced Rust `348,118` LOC, Mojo
   `26,420` LOC, total `374,538`, share `7.054023890766758%`, release-floor and non-regression
   PASS. The frozen Node expectation was repaired in `90a5b8b3`; local `npm run test:node` passed
-  264 with 1 skipped. Integration CI run `34186438047` targets exact SHA `90a5b8b3` and is pending.
+  264 with 1 skipped. Integration CI run `34186438047` was superseded after its completed guard
+  jobs passed.
 - Wave 2 base: A and C worktrees were fast-forwarded cleanly to `08eafe5eb22cf67cee9c301b186445154eb28cc0`;
-  neither had prior WIP or a prior checkpoint. CI run `34186531833` is the active validation for
-  that integration SHA and has no reported failure at wave start.
+  neither had prior WIP or a prior checkpoint. C completed its bounded throughput batch; A
+  completed the bounded temp-file owner consolidation after the CI hold.
 - CI run `34186705160` failed on exact SHA `710f2401`: Sonar passed its source scan, but Real
   Mojo/parity failed compilation with `clippy::items_after_test_module` at
   `crates/prodex-app/src/app_commands/super_main_catalog.rs:630`; A/C were then paused. The test
   module was moved after production items in `071b8cbc`, with local strict clippy and focused
-  tests passing. CI run `34187490415` targets `071b8cbc` and is pending.
+  tests passing. CI run `34187490415` was superseded after its completed guards passed. Full run
+  `34187555697` passed on exact SHA `34972926449f8201c925893ae5be3d8e5bb6976c`, including the
+  prior failing Windows remaining-library shard; the earlier websocket timeout was not reproduced.
+- C worker checkpoint: local and remote `882943024a663e20ab0c27c470c6578a242c3ce7`; reviewer D
+  reported NO_FINDING. It was integrated without conflict as `679f53f3`; final-tree focused tests
+  passed for log throughput (19 combined), TUI (16), log integration (2), and runtime-proxy
+  response forwarding (21 plus one zero-test auxiliary target).
+- A worker checkpoints: local and remote `d5f94dd3be2dd9ae31a03832c19a0927920041c4` and
+  `16eb68309204cfe11447131aeb5220030d7cfc19`; reviewer D reported NO_FINDING. They were integrated
+  without conflict as `2b0bb24d` and `f9d8a05c`; final-tree tests passed for runtime-store (16),
+  update-notice (11), and core (12).
+- Current integration tree contains both worker streams through `f9d8a05c`; its next pushed
+  checkpoint is pending after the ledger update and cross-domain review.
 
 ## Batch B1: provider catalog authority
 
@@ -119,6 +133,31 @@ order and `Custom` remains last.
   regression coverage; semantic ownership reduced by deleting the old picker-only loader and its
   test-only forwarding helpers. No dependency or runtime transport change.
 
+## Batch C1: retained generation throughput observability
+
+Contract: authoritative output tokens plus positive provider-reported monotonic generation duration
+-> unchanged `output_tokens * 1000 / generation_ms`; active display -> `gen N t/s`; completed
+display -> `last gen N t/s` plus coarse monotonic age when available; historical age remains
+unknown; no TTFT, request timing, log receipt timing, content, credentials, or network discovery.
+
+- Worker checkpoint: local and remote `882943024a663e20ab0c27c470c6578a242c3ce7`; reviewer D
+  reported no finding; integrated without conflict as `679f53f3`.
+- Tests: log-throughput 13, state 6, TUI 16, log integration 2, runtime-proxy response-forwarding
+  21 plus one zero-test auxiliary target; all serial and passing. Formula cases cover 50, 40, 50,
+  and 80 t/s. `cargo fmt --check` and `git diff --check` passed.
+
+## Batch A1: shared atomic temp-file naming
+
+Contract: existing target basename/fallback, PID/timestamp/sequence/`.tmp` naming, separate atomic
+sequences, private permissions, durability sync, replacement order, cleanup, errors, and platform
+branches remain unchanged while duplicate naming logic uses the existing core owner.
+
+- Worker checkpoints: `d5f94dd3be2dd9ae31a03832c19a0927920041c4` and
+  `16eb68309204cfe11447131aeb5220030d7cfc19`, both remote verified; reviewer D reported no
+  finding. Integrated as `2b0bb24d` and `f9d8a05c` without conflict.
+- Tests: app runtime-store 16, update-notice 11, core 12; owning-crate all-target clippy,
+  `cargo fmt --check`, and `git diff --check` passed.
+
 ## Known checkpoints and blockers
 
 - Historical candidate commits were inspected through `afe20dfd`; no campaign documentation or active PR was present.
@@ -128,8 +167,9 @@ order and `Custom` remains last.
 ## Cleanup and next action
 
 - Campaign worktree is owned by this campaign. Its `target/` build cache is retained while validation continues.
-- No campaign-created server or watcher remains active after baseline testing. B's worktree is
-  clean after its pushed checkpoint; A's worktree is clean, and C's six-file WIP is retained in
-  its campaign worktree with no active test process.
-- Next action: finish CI run `34187490415`; if the repaired guards pass, resume C from its retained
-  WIP and A from the same integration SHA, otherwise hold and repair the reported failure only.
+- No campaign-created server or watcher remains active. A, B, C, and D agents are stopped; A, B,
+  and C worktrees are clean after their remote checkpoints. Shared build caches are retained for
+  final gates; no scratch fixture, server, watcher, credential, or raw log was created for commit.
+- Next action: update the ledger for the integrated C/A checkpoints, push one serial integration
+  checkpoint, run cross-domain guards/tests, then perform the second-pass audit of changed owners
+  and remaining domains.
