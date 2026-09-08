@@ -55,14 +55,21 @@ pub(crate) fn runtime_proxy_endpoint_from_registry(
     registry: &RuntimeBrokerRegistry,
     client: &reqwest::blocking::Client,
 ) -> Result<RuntimeProxyEndpoint> {
+    let listen_addr = registry
+        .listen_addr
+        .parse::<std::net::SocketAddr>()
+        .with_context(|| {
+            format!(
+                "invalid runtime broker listen address {}",
+                registry.listen_addr
+            )
+        })?;
+    anyhow::ensure!(
+        listen_addr.ip().is_loopback(),
+        "runtime broker listen address must be loopback"
+    );
     let lease = create_runtime_broker_lease(paths, broker_key)?;
     let lease_dir = runtime_broker_lease_dir(paths, broker_key);
-    let listen_addr = registry.listen_addr.parse().with_context(|| {
-        format!(
-            "invalid runtime broker listen address {}",
-            registry.listen_addr
-        )
-    })?;
     let openai_mount_path = runtime_broker_openai_mount_path(registry)?;
     let realtime_ws_base_url = runtime_broker_realtime_ws_base_url(registry, &openai_mount_path)?;
     Ok(RuntimeProxyEndpoint {
@@ -84,4 +91,47 @@ pub(crate) fn runtime_proxy_endpoint_from_registry(
         _direct_proxy: None,
         _kiro_connect_proxy: None,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn runtime_proxy_endpoint_rejects_non_loopback_listen_address() {
+        let paths = AppPaths {
+            root: "/home/test-user/prodex".into(),
+            state_file: "/home/test-user/prodex/state.json".into(),
+            managed_profiles_root: "/home/test-user/prodex/profiles".into(),
+            shared_codex_root: "/home/test-user/prodex/shared".into(),
+            legacy_shared_codex_root: "/home/test-user/prodex/legacy-shared".into(),
+        };
+        let registry = RuntimeBrokerRegistry {
+            pid: 42,
+            process_birth_identity: None,
+            listen_addr: "192.0.2.10:4567".to_string(),
+            started_at: 100,
+            upstream_base_url: "https://upstream.example".to_string(),
+            include_code_review: false,
+            upstream_no_proxy: false,
+            smart_context_enabled: false,
+            current_profile: "main".to_string(),
+            instance_id: "instance".to_string(),
+            prodex_version: None,
+            executable_path: None,
+            executable_sha256: None,
+            openai_mount_path: Some("/backend-api/prodex".to_string()),
+            realtime_ws_addr: None,
+        };
+
+        let error = runtime_proxy_endpoint_from_registry(
+            &paths,
+            "broker",
+            &registry,
+            &reqwest::blocking::Client::new(),
+        )
+        .unwrap_err();
+
+        assert!(error.to_string().contains("must be loopback"));
+    }
 }

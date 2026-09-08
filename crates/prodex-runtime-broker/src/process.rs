@@ -478,7 +478,9 @@ fn validate_runtime_broker_bootstrap_fields(
             .bytes()
             .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_'))
         && runtime_broker_instance_id_is_valid(instance_id)
-        && listen_addr.is_none_or(|value| !value.is_empty() && value.len() <= 256);
+        && listen_addr.is_none_or(|value| {
+            value.len() <= 256 && runtime_broker_listen_addr_is_loopback(value)
+        });
     if valid {
         Ok(())
     } else {
