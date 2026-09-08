@@ -189,9 +189,9 @@ pub(crate) fn render_all_quota_watch_tui(
         .split(frame.area());
 
     let body_block = Block::default()
-        .title(Line::styled(data.title.as_str(), quota_watch_title_style()))
+        .title(Line::styled(data.title.as_str(), tui_title_style()))
         .borders(Borders::TOP | Borders::LEFT | Borders::RIGHT)
-        .border_style(quota_watch_border_style());
+        .border_style(tui_border_style());
     let body_area = body_block.inner(chunks[0]);
     frame.render_widget(body_block, chunks[0]);
 
@@ -221,19 +221,16 @@ pub(crate) fn render_all_quota_watch_tui(
         frame.render_widget(body, body_area);
     }
 
-    let footer = Paragraph::new(Line::styled(
-        data.footer.as_str(),
-        quota_watch_footer_style(),
-    ))
-    .block(tui_connected_footer_block(quota_watch_border_style()));
+    let footer = Paragraph::new(Line::styled(data.footer.as_str(), tui_title_style()))
+        .block(tui_connected_footer_block(tui_border_style()));
     frame.render_widget(footer, chunks[1]);
 }
 
 fn render_quota_watch_connected_separator(frame: &mut ratatui::Frame<'_>, outer: Rect, y: u16) {
     frame.render_widget(
         Paragraph::new(Line::styled(
-            quota_watch_separator_line(outer.width),
-            quota_watch_border_style(),
+            tui_connected_separator_line(outer.width),
+            tui_border_style(),
         )),
         Rect {
             x: outer.x,
@@ -242,10 +239,6 @@ fn render_quota_watch_connected_separator(frame: &mut ratatui::Frame<'_>, outer:
             height: 1,
         },
     );
-}
-
-pub(crate) fn quota_watch_separator_line(width: u16) -> String {
-    tui_connected_separator_line(width)
 }
 
 fn render_all_quota_watch_tui_table(
@@ -281,7 +274,7 @@ pub(crate) fn quota_watch_table_text_with_width(
         }
         lines.push(quota_watch_table_main_line(row, columns));
         for detail in &row.detail {
-            lines.push(Line::styled(detail.clone(), quota_watch_detail_style()));
+            lines.push(Line::styled(detail.clone(), tui_detail_style()));
         }
     }
     Text::from(lines)
@@ -346,7 +339,7 @@ fn quota_watch_table_header_line(columns: QuotaWatchColumns) -> Line<'static> {
             quota_watch_table_cell_text("STATUS", columns.status),
             quota_watch_table_cell_text("REMAINING", columns.remaining),
         ),
-        quota_watch_title_style(),
+        tui_title_style(),
     )
 }
 
@@ -400,7 +393,7 @@ fn quota_watch_first_cell(lines: &[String]) -> &str {
 fn quota_watch_fields_text(title: &str, fields: &[(String, String)]) -> Text<'static> {
     let mut lines = Vec::new();
     if !title.is_empty() {
-        lines.push(Line::styled(title.to_string(), quota_watch_title_style()));
+        lines.push(Line::styled(title.to_string(), tui_title_style()));
     }
     lines.extend(fields.iter().map(|(label, value)| {
         Line::from(vec![
@@ -454,12 +447,12 @@ fn quota_human_tui_detail_spans(line: &str) -> Option<Vec<Span<'_>>> {
     ]
     .iter()
     .any(|prefix| line.starts_with(prefix) || label.starts_with(prefix));
-    is_detail.then(|| vec![Span::styled(line, quota_watch_detail_style())])
+    is_detail.then(|| vec![Span::styled(line, tui_detail_style())])
 }
 
 fn quota_human_tui_muted_spans(line: &str) -> Option<Vec<Span<'_>>> {
     let is_muted = line.starts_with("press ") || line.trim_start().starts_with("press ");
-    is_muted.then(|| vec![Span::styled(line, quota_watch_muted_style())])
+    is_muted.then(|| vec![Span::styled(line, tui_muted_style())])
 }
 
 fn quota_human_tui_header_spans(line: &str) -> Option<Vec<Span<'_>>> {
@@ -468,7 +461,7 @@ fn quota_human_tui_header_spans(line: &str) -> Option<Vec<Span<'_>>> {
         || line.starts_with("Quota ")
         || line.ends_with("profiles")
     {
-        return Some(vec![Span::styled(line, quota_watch_title_style())]);
+        return Some(vec![Span::styled(line, tui_title_style())]);
     }
     if quota_human_tui_compact_label(line).is_some() {
         let Some((label, value)) = line.split_once(':') else {
@@ -485,7 +478,7 @@ fn quota_human_tui_header_spans(line: &str) -> Option<Vec<Span<'_>>> {
 
 fn quota_human_tui_status_spans(line: &str) -> Option<Vec<Span<'_>>> {
     if line.chars().all(|ch| ch == '-' || ch.is_whitespace()) {
-        return Some(vec![Span::styled(line, quota_watch_muted_style())]);
+        return Some(vec![Span::styled(line, tui_muted_style())]);
     }
     let style = if line.contains("Blocked") || line.contains("Error") {
         Some(tui_error_style())
@@ -497,26 +490,6 @@ fn quota_human_tui_status_spans(line: &str) -> Option<Vec<Span<'_>>> {
         None
     };
     style.map(|style| vec![Span::styled(line, style)])
-}
-
-fn quota_watch_detail_style() -> Style {
-    tui_detail_style()
-}
-
-fn quota_watch_title_style() -> Style {
-    tui_title_style()
-}
-
-fn quota_watch_border_style() -> Style {
-    tui_border_style()
-}
-
-fn quota_watch_muted_style() -> Style {
-    tui_muted_style()
-}
-
-fn quota_watch_footer_style() -> Style {
-    tui_title_style()
 }
 
 pub(crate) fn quota_watch_tui_table_lines(

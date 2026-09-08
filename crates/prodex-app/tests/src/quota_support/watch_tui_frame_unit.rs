@@ -10,10 +10,10 @@
 
     #[test]
     fn quota_watch_separator_line_connects_outer_borders() {
-        assert_eq!(quota_watch_separator_line(0), "");
-        assert_eq!(quota_watch_separator_line(1), "─");
-        assert_eq!(quota_watch_separator_line(2), "├┤");
-        assert_eq!(quota_watch_separator_line(5), "├───┤");
+        assert_eq!(terminal_ui::tui_connected_separator_line(0), "");
+        assert_eq!(terminal_ui::tui_connected_separator_line(1), "─");
+        assert_eq!(terminal_ui::tui_connected_separator_line(2), "├┤");
+        assert_eq!(terminal_ui::tui_connected_separator_line(5), "├───┤");
     }
 
     #[test]
