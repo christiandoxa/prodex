@@ -79,6 +79,16 @@ pub(crate) fn prepare_runtime_overlay_home(
     paths: &AppPaths,
     base_codex_home: &Path,
 ) -> Result<PathBuf> {
+    let sessions_are_managed = prodex_core::same_path(
+        &base_codex_home.join("sessions"),
+        &paths.shared_codex_root.join("sessions"),
+    );
+    if sessions_are_managed {
+        return prodex_optional_tools::prepare_runtime_overlay_home_from_prepared_base(
+            &paths.managed_profiles_root,
+            base_codex_home,
+        );
+    }
     prodex_optional_tools::prepare_runtime_overlay_home(
         &paths.managed_profiles_root,
         base_codex_home,
@@ -90,6 +100,17 @@ pub(crate) fn prepare_desktop_overlay_home(
     base_codex_home: &Path,
     configure_prodex: bool,
 ) -> Result<PathBuf> {
+    let sessions_are_managed = prodex_core::same_path(
+        &base_codex_home.join("sessions"),
+        &paths.shared_codex_root.join("sessions"),
+    );
+    if sessions_are_managed {
+        return prodex_optional_tools::prepare_desktop_overlay_home_from_prepared_base(
+            &paths.managed_profiles_root,
+            base_codex_home,
+            configure_prodex,
+        );
+    }
     prodex_optional_tools::prepare_desktop_overlay_home(
         &paths.managed_profiles_root,
         base_codex_home,
