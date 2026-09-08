@@ -2,7 +2,7 @@ use super::log_follow::{FollowedLog, collect_new_followed_lines};
 use super::log_load::{LogLoadAggregate, LogLoadObservation, is_routine_load_event};
 use super::log_transcript::TranscriptEvent;
 use crate::app_commands::log_format::{
-    human_event_name, local_log_timestamp, render_log_block, render_text_body,
+    current_log_width, human_event_name, local_log_timestamp, render_log_block, render_text_body,
 };
 use crate::app_commands::log_throughput::OutputThroughput;
 use crate::app_commands::log_tui::format_output_tokens_per_second;
@@ -558,13 +558,7 @@ pub(crate) fn print_token_usage_event(event: &InfoTokenUsageEvent, json: bool) -
                     .unwrap_or_else(|| format_output_tokens_per_second(None)),
             ),
         ];
-        for line in render_log_block(
-            &event.timestamp,
-            "TOKENS",
-            &meta,
-            &[],
-            terminal_ui::current_cli_width(),
-        ) {
+        for line in render_log_block(&event.timestamp, "TOKENS", &meta, &[], current_log_width()) {
             println!("{line}");
         }
     }
@@ -579,7 +573,7 @@ pub(crate) fn local_token_usage_event(mut event: InfoTokenUsageEvent) -> InfoTok
 }
 
 pub(crate) fn print_transcript_event(event: &TranscriptEvent) -> Result<()> {
-    let width = terminal_ui::current_cli_width();
+    let width = current_log_width();
     let body = render_text_body(&event.text, width);
     for line in render_log_block(
         &event.timestamp,
