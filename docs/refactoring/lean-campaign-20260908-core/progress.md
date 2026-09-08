@@ -17,14 +17,13 @@ transport semantics. This is an implementation campaign, not a line-count exerci
 
 ## Status
 
-`IN_PROGRESS`; B's catalog, C's throughput, and A's general refactor checkpoints are integrated.
-Full CI run `34190204961` passed on exact `5c42efee`, including Sonar, Real Mojo/parity, macOS,
-all Windows shards, runtime stress, app shards, and relevant guards. B2 completed an audit-only
-catalog consumer review with a concrete KEEP_WITH_REASON; A2 produced no result and remains
-UNREVIEWED. Final reviewer D returned NO_FINDING on source tree `34800090`; the last ledger anchor
-before this note is `f9eb135d`. The wider domain audit and final integration qualification remain
-open; CI `34193580014` is pending on that anchor. The exact HEAD produced by this note is reported
-after commit/remote verification rather than written into the same commit.
+`CAMPAIGN_PARTIAL`; B's catalog, C's throughput, and A's general refactor checkpoints are integrated.
+Full CI run `34193695148` passed on exact source tree `3b8be312`, including Sonar, Real Mojo/parity,
+macOS, all Windows shards, runtime stress, app shards, and relevant guards. Wave 4 is now active
+from that frozen source anchor: A2 audits root CLI/entrypoints and E audits configuration in
+disjoint worktrees; provider catalog and throughput surfaces remain protected. B2 is KEEP_WITH_REASON;
+the earlier A2 attempt is resumed as an explicit IN_PROGRESS row. The wider domain audit remains
+open and this campaign is partial.
 
 ## Parallel ownership ledger
 
@@ -35,7 +34,7 @@ Integration branch: `refactor/parallel-integration-20260908`.
 | A | General lean refactor | `34972926449f8201c925893ae5be3d8e5bb6976c` | `worker/refactor-general-20260908` | worker worktree | CLI, orchestration, profile/auth, session, runtime support, gateway, storage, config, reports, tooling outside B/C | provider catalog surfaces; throughput/log-throughput surfaces | d5f94dd3 + 16eb6830 pushed/integrated; stopped |
 | B | Provider model catalog | `a32b107df02d9b5b503b8d545a4fb24b7754e997` | `worker/provider-catalog-20260908` | worker worktree | provider catalog, Super model pickers, Kiro/Copilot/Gemini/OpenAI catalog consumers and tests | throughput/log-throughput; unrelated refactor | checkpoint pushed/integrated; worker stopped |
 | C | Throughput observability | `08eafe5eb22cf67cee9c301b186445154eb28cc0` | `worker/throughput-observability-20260908` | worker worktree | generation timing, token usage, throughput state, log TUI, history, throughput docs/tests | provider catalog; unrelated refactor | 88294302 pushed/integrated; stopped |
-| D | Read-only review | `a32b107df02d9b5b503b8d545a4fb24b7754e997` | none | none | exact checkpoint review only | all writes | complete; A/B/C checkpoints no findings |
+| D | Read-only review | `a32b107df02d9b5b503b8d545a4fb24b7754e997` | none | none | exact checkpoint review only | all writes | complete; final integrated source no findings |
 
 Worker contract: each worker commits only reviewed paths to its worker branch, pushes that branch,
 verifies its remote SHA, and reports focused tests/cleanup. Workers do not merge or push the
@@ -106,12 +105,12 @@ integration branch. Heavy full-workspace, Mojo, and final integration gates rema
   without conflict as `2b0bb24d` and `f9d8a05c`; final-tree tests passed for runtime-store (16),
   update-notice (11), and core (12).
 - Current integration tree contains both worker streams through `f9d8a05c` plus guard repair
-  `32daf41b`; local static guards and focused tests pass. Full CI `34190204961` passed on exact
-  `5c42efee`, the audit-only wave checkpoint before the latest ledger updates. The final clean
-  integration SHA is `f9eb135d8f76a6decf8205424ada205cf332b693`.
+  `32daf41b`; local static guards and focused tests pass. Full CI `34193695148` passed on exact
+  source SHA `3b8be312ea29d74be922330df047459c7c2faf7c`; this final ledger update changes only
+  campaign records.
 - Wave 3 ownership was disjoint: B2 owned only the gateway/dashboard catalog consumers in B1-007;
   A2 owned one general-domain candidate outside provider catalog and throughput files. B2 completed
-  its audit-only review; A2 stopped before producing symbol-level evidence.
+  its audit-only review with KEEP_WITH_REASON; A2 stopped before producing symbol-level evidence.
 - B2 evidence: gateway focused tests passed `503`, with `17` ignored; dashboard focused tests passed
   `20`. The public metadata/availability contract is retained separately from picker catalog
   planning, with the concrete KEEP_WITH_REASON recorded in `audit.csv`.
@@ -191,6 +190,14 @@ branches remain unchanged while duplicate naming logic uses the existing core ow
 | B2 | `3bfb043c03f6ea926bda6b7d6e8cb8790080a283` | `worker/provider-catalog-b2-20260908` | worker worktree | `gateway_kiro_model_catalog_json_from_paths`, dashboard models catalog consumer, and focused tests | throughput/log-throughput; A2 general refactor | audit complete; KEEP_WITH_REASON |
 | D | current integration SHA | none | none | read-only exact-checkpoint review | all writes | resume for Wave 3 checkpoints |
 
+## Wave 4 ownership
+
+| Worker | Base SHA | Branch | Worktree | Owns | Excludes | Status |
+| --- | --- | --- | --- | --- | --- | --- |
+| A2 | `3b8be312ea29d74be922330df047459c7c2faf7c` | `worker/refactor-general-b2-20260908` | worker worktree | root CLI/entrypoints and compatibility facades in B0-001 | config, provider catalog, throughput/log-throughput | active; resumed from clean retained worktree |
+| E | `3b8be312ea29d74be922330df047459c7c2faf7c` | `worker/refactor-config-20260908` | worker worktree | `crates/prodex-config` B0-008 only | root CLI, provider catalog, throughput/log-throughput | active |
+| D | `3b8be312ea29d74be922330df047459c7c` | none | none | read-only exact Wave 4 checkpoint review | all writes | queued |
+
 ## Known checkpoints and blockers
 
 - Historical candidate commits were inspected through `afe20dfd`; no campaign documentation or active PR was present.
@@ -206,5 +213,6 @@ branches remain unchanged while duplicate naming logic uses the existing core ow
   integration worktree/cache for final gates, A2 clean unreviewed handoff worktree, and remote
   worker branches/checkpoints. No scratch fixture, server, watcher, credential, or raw log was
   created for commit.
-- Next action: perform the next symbol-level general-domain audit from the current integration
-  SHA `f9eb135d`, or hand off the remaining UNREVIEWED inventory without claiming campaign completion.
+- Next action: resume a symbol-level general-domain audit from the exact final ledger HEAD after
+  this checkpoint, starting with A2/B0 inventory rows; do not claim campaign completion while any
+  `UNREVIEWED` row remains.
