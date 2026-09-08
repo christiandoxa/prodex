@@ -10,7 +10,7 @@ transport semantics. This is an implementation campaign, not a line-count exerci
 
 - `HISTORICAL_RELEASE_BASE`: `e835c1699f0960865c8cacabea6a109bd3500499` (release 0.427.0)
 - `CAMPAIGN_BASE`: `afe20dfd9f813eb217f78b63de517c7e8e52e8b7`
-- `LAST_EXACT_GREEN_SOURCE_ANCHOR`: `585f6b3cc5b98c230e68c9a31de8d199822fc650`
+- `LAST_EXACT_GREEN_SOURCE_ANCHOR`: `8ba7d893fd1385593ae589f97f0c37949835c156`
 - Baseline ancestry: `origin/main` (`ff7976858c048269d73e970356aa41f4d0b4cafb`) is an ancestor.
 - Integration branch: `refactor/parallel-integration-20260908`
 - Baseline source: historical `origin/refactor/428-integration-20260907`; no active PR or descendant campaign was found.
@@ -19,13 +19,13 @@ transport semantics. This is an implementation campaign, not a line-count exerci
 
 ## Status
 
-`CAMPAIGN_PARTIAL`; B's catalog, C's throughput, A's general refactor checkpoints, and Wave 4 are
-integrated. Exact CI `34198133041` passed on the Wave 4 ledger checkpoint
-`585f6b3cc5b98c230e68c9a31de8d199822fc650` with 72 successful, 3 skipped, and 0 failed jobs; that
-SHA remains the last exact-green source anchor while the next integration checkpoint qualifies.
-Wave 5 completed authn and authz audit-only dispositions and one runtime-policy source refactor.
-Provider catalog and throughput surfaces remain protected. The wider domain audit remains open and
-this campaign is partial.
+`CAMPAIGN_PARTIAL`; B's catalog, C's throughput, A's general refactor checkpoints, Wave 4, and
+Wave 5 are integrated. Exact CI `34205078378` passed on integration checkpoint
+`8ba7d893fd1385593ae589f97f0c37949835c156` with 72 successful, 3 skipped, and 0 failed jobs; that
+SHA is the latest exact-green source anchor. Wave 6 has two reviewed source checkpoints and one
+audit-only disposition pending serial integration in the next substantive checkpoint. Provider
+catalog and throughput surfaces remain protected. The wider domain audit remains open and this
+campaign is partial.
 
 ## Parallel ownership ledger
 
@@ -218,6 +218,18 @@ Wave 5 evidence changes the inventory to 56 UNREVIEWED, 0 IN_PROGRESS, 20 REFACT
 13 KEEP_WITH_REASON, and 0 BLOCKED. The resulting integration SHA is resolved externally after
 this substantive checkpoint; it is not recorded inside its own commit.
 
+## Wave 6 ownership
+
+| Worker | Base SHA | Branch | Worktree | Owns | Excludes | Status |
+| --- | --- | --- | --- | --- | --- | --- |
+| CLI | `8ba7d893fd1385593ae589f97f0c37949835c156` | `worker/refactor-cli-wave6-20260908` | worker worktree | `crates/prodex-cli` B0-007 | filesystem, session-store, runtime, ledger/docs | checkpoint `d9ab67d7` pushed; reviewer NO_FINDING; serial integration in this checkpoint |
+| shared-fs | `8ba7d893fd1385593ae589f97f0c37949835c156` | `worker/refactor-shared-fs-wave6-20260908` | worker worktree | `crates/prodex-shared-codex-fs` B0-013 | CLI, session-store, runtime, ledger/docs | audit-only KEEP_WITH_REASON; no source checkpoint; stopped |
+| session-store | `8ba7d893fd1385593ae589f97f0c37949835c156` | `worker/refactor-session-store-wave6-20260908` | worker worktree | `crates/prodex-session-store` B0-014 | CLI, shared-fs, runtime, ledger/docs | checkpoint `bce0f1d5` pushed; reviewer NO_FINDING; serial integration in this checkpoint |
+
+Wave 6 evidence changes the inventory to 53 UNREVIEWED, 0 IN_PROGRESS, 22 REFACTORED,
+14 KEEP_WITH_REASON, and 0 BLOCKED. The resulting integration SHA is resolved externally after
+this substantive checkpoint; it is not recorded inside its own commit.
+
 ## Known checkpoints and blockers
 
 - Historical candidate commits were inspected through `afe20dfd`; no campaign documentation or active PR was present.
@@ -235,7 +247,7 @@ this substantive checkpoint; it is not recorded inside its own commit.
   integration worktree/cache for campaign validation, the clean A2 checkpoint worktree pending
   safe post-integration removal, and remote worker branches/checkpoints. No scratch fixture,
   server, watcher, credential, or raw log was created for commit.
-- Next action: push this substantive checkpoint, resolve its exact CI, clean completed Wave 5
+- Next action: push this substantive checkpoint, resolve its exact CI, clean completed Wave 6
   worktrees and worker targets, then launch the next parallel non-overlapping audit wave for
   unresolved production domains; do not claim campaign completion while any `UNREVIEWED`,
   `IN_PROGRESS`, or `BLOCKED` row remains.
