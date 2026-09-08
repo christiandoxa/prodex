@@ -219,6 +219,13 @@ Key crates:
   the Mojo-enabled build owns bounded UTF-8 duplicate grouping and critical-signal row planning
   through `prodex-mojo-core`.
 
+Provider-aware Super model choices use one `prodex-app::runtime_tools::sub_agent_catalog`
+effective-catalog loader. It assembles existing local sources (OpenAI cache, imported profile
+snapshots, and provider runtime catalogs), reports bounded degraded state without source errors,
+and leaves identity normalization, canonical ordering, deduplication, aliases, and known-model
+reasoning metadata to `prodex-provider-core`. Main-agent and sub-agent pickers consume this same
+source path; picker rendering never performs provider network discovery.
+
 The rich Mojo core is an additive ABI v6 boundary for deterministic domain work. The active
 context, provider fallback, route-alias policy, provider-routing, and Smart Context planning
 paths pass bounded non-secret UTF-8 views and caller-owned record/output arenas to Mojo. Mojo

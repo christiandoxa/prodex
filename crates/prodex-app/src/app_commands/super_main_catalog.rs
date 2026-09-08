@@ -1,14 +1,10 @@
 use super::super_prompt;
-use crate::{AppPaths, canonical_sub_agent_efforts};
+use crate::{canonical_sub_agent_efforts, effective_provider_model_catalog};
 use prodex_cli::SubAgentReasoningEffort;
 #[cfg(feature = "mojo-core")]
 use prodex_mojo_core::rich::{CatalogPlanModel, plan_dynamic_catalog};
 use std::collections::BTreeSet;
-use std::fs;
-use std::io::Read as IoRead;
 
-const OPENAI_MODEL_CACHE_MAX_BYTES: u64 = 1024 * 1024;
-const CODEX_MODEL_CACHE_MIN_VERSION: (u64, u64, u64) = (0, 150, 1);
 const CATALOG_MAX_PRIORITY: u64 = i64::MAX as u64;
 const CATALOG_MAX_IDENTIFIER_BYTES: usize = 4_096;
 const CATALOG_MAX_QUERY_BYTES: usize = 65_536;
@@ -35,7 +31,7 @@ pub(super) fn main_model_choices(
                 .collect()
         })
     } else {
-        let configured_models = super_prompt::configured_sub_agent_models(provider);
+        let configured_models = effective_provider_model_catalog(provider).model_ids();
         prodex_provider_core::resolve_provider_model_choices(
             provider,
             &configured_models,
@@ -205,27 +201,11 @@ fn sub_agent_effort(
 }
 
 pub(super) fn openai_main_model_choices() -> Option<Vec<MainModelChoice>> {
-    let paths = AppPaths::discover().ok()?;
-    let codex_home = prodex_core::default_codex_home(&paths).ok()?;
-    let file = fs::File::open(codex_home.join("models_cache.json")).ok()?;
-    let mut contents = String::new();
-    let mut bounded = IoRead::take(file, OPENAI_MODEL_CACHE_MAX_BYTES + 1);
-    if IoRead::read_to_string(&mut bounded, &mut contents).is_err()
-        || contents.len() as u64 > OPENAI_MODEL_CACHE_MAX_BYTES
-    {
-        return None;
-    }
-    let value = serde_json::from_str::<serde_json::Value>(&contents).ok()?;
+    let catalog = effective_provider_model_catalog(prodex_provider_core::ProviderId::OpenAi);
     // Dynamic cache input is optional. The caller keeps the bundled catalog when
     // this planner reports invalid input; ABI and output failures remain hard.
-    let mut choices = main_model_choices_from_catalog(value.get("models")?.as_array()?.to_vec())?;
-    if !model_cache_is_current(
-        value
-            .get("client_version")
-            .and_then(serde_json::Value::as_str),
-    ) {
-        merge_bundled_openai_choices(&mut choices);
-    }
+    let mut choices = main_model_choices_from_catalog(catalog.models)?;
+    merge_bundled_openai_choices(&mut choices);
     choices.retain(|choice| {
         !matches!(
             &choice.choice,
@@ -234,23 +214,6 @@ pub(super) fn openai_main_model_choices() -> Option<Vec<MainModelChoice>> {
         )
     });
     Some(choices)
-}
-
-fn model_cache_is_current(version: Option<&str>) -> bool {
-    let Some(version) = version else {
-        return false;
-    };
-    let mut parts = version.split('.');
-    let Some(major) = parts.next().and_then(|part| part.parse::<u64>().ok()) else {
-        return false;
-    };
-    let Some(minor) = parts.next().and_then(|part| part.parse::<u64>().ok()) else {
-        return false;
-    };
-    let Some(patch) = parts.next().and_then(|part| part.parse::<u64>().ok()) else {
-        return false;
-    };
-    (major, minor, patch) >= CODEX_MODEL_CACHE_MIN_VERSION
 }
 
 fn merge_bundled_openai_choices(choices: &mut Vec<MainModelChoice>) {

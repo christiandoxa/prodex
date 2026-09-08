@@ -220,8 +220,7 @@ pub(crate) fn resolve_runtime_launch_profile_name(
 #[cfg(test)]
 mod sub_agent_prompt_tests {
     use super::super_prompt::{
-        SUPER_CONFIGURED_MODEL_LIMIT, SuperSubAgentPromptStep, bounded_tui_text,
-        configured_sub_agent_model_ids, run_super_sub_agent_prompt_steps,
+        SuperSubAgentPromptStep, bounded_tui_text, run_super_sub_agent_prompt_steps,
         super_sub_agent_concurrency_choices, super_sub_agent_prompt_steps, visible_choice_range,
     };
     use super::{
@@ -400,25 +399,15 @@ mod sub_agent_prompt_tests {
     }
 
     #[test]
-    fn configured_model_ids_augment_the_canonical_picker_inputs() {
-        let mut configured = Vec::new();
-        configured_sub_agent_model_ids(
-            &serde_json::json!({
-                "models": [
-                    {"id": "profile-model"},
-                    {"model_id": " kiro-model "},
-                    {"slug": "slug-model"},
-                    {"model": "model-model"},
-                    {"id": "   "}
-                ]
-            }),
-            &mut configured,
-            SUPER_CONFIGURED_MODEL_LIMIT,
-        );
-        let choices = prodex_provider_core::resolve_provider_model_choices(
+    fn configured_models_augment_the_canonical_picker_inputs() {
+        let configured = ["profile-model", "kiro-model", "slug-model", "model-model"]
+            .into_iter()
+            .map(String::from)
+            .collect::<Vec<_>>();
+        let choices = super::super_main_prompt::super_sub_agent_model_choices(
             ProviderId::Kiro,
-            &configured,
             None,
+            &configured,
         );
         for expected in ["profile-model", "kiro-model", "slug-model", "model-model"] {
             assert!(choices.iter().any(|choice| matches!(
@@ -426,25 +415,6 @@ mod sub_agent_prompt_tests {
                 prodex_provider_core::ProviderModelChoice::Model(model) if model == expected
             )));
         }
-    }
-
-    #[test]
-    fn configured_model_budget_counts_only_valid_unique_ids() {
-        let mut configured = vec!["duplicate".to_string()];
-        configured_sub_agent_model_ids(
-            &serde_json::json!({
-                "models": [
-                    {},
-                    {"id": "duplicate"},
-                    {"id": "DUPLICATE"},
-                    {"id": "tail-model"}
-                ]
-            }),
-            &mut configured,
-            2,
-        );
-
-        assert_eq!(configured, ["duplicate", "tail-model"]);
     }
 
     #[test]
