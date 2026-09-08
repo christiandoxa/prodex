@@ -652,6 +652,29 @@ pub(super) fn prompt_main_model(
     })
 }
 
+pub(super) fn main_model_efforts(
+    provider: prodex_provider_core::ProviderId,
+    model: Option<&str>,
+) -> Vec<String> {
+    if let Some(efforts) = main_model_choices(provider, model)
+        .iter()
+        .find_map(|choice| {
+            let prodex_provider_core::ProviderModelChoice::Model(candidate) = &choice.choice else {
+                return None;
+            };
+            model
+                .is_some_and(|model| candidate.eq_ignore_ascii_case(model))
+                .then_some(choice.efforts.as_deref().unwrap_or_default())
+        })
+    {
+        return efforts.to_vec();
+    }
+    canonical_sub_agent_efforts(provider, model)
+        .into_iter()
+        .map(|effort| effort.as_str().to_string())
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::main_model_prompt_title;
@@ -675,27 +698,4 @@ mod tests {
             "Main-agent model"
         );
     }
-}
-
-pub(super) fn main_model_efforts(
-    provider: prodex_provider_core::ProviderId,
-    model: Option<&str>,
-) -> Vec<String> {
-    if let Some(efforts) = main_model_choices(provider, model)
-        .iter()
-        .find_map(|choice| {
-            let prodex_provider_core::ProviderModelChoice::Model(candidate) = &choice.choice else {
-                return None;
-            };
-            model
-                .is_some_and(|model| candidate.eq_ignore_ascii_case(model))
-                .then_some(choice.efforts.as_deref().unwrap_or_default())
-        })
-    {
-        return efforts.to_vec();
-    }
-    canonical_sub_agent_efforts(provider, model)
-        .into_iter()
-        .map(|effort| effort.as_str().to_string())
-        .collect()
 }
