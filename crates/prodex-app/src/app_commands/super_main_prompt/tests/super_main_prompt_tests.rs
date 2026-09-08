@@ -91,14 +91,14 @@ fn openai_main_picker_reads_the_active_models_cache() {
     assert_eq!(
         models,
         [
-            "gpt-5.6-sol",
-            "gpt-5.6-terra",
-            "gpt-5.6-luna",
             "gpt-5.4",
             "gpt-5.4-mini",
             "gpt-5.3-codex",
             "gpt-5.3-codex-spark",
-            "gpt-5.2"
+            "gpt-5.2",
+            "gpt-5.6-sol",
+            "gpt-5.6-terra",
+            "gpt-5.6-luna"
         ]
     );
     drop(_codex_home);
@@ -145,7 +145,6 @@ fn openai_main_picker_keeps_canonical_models_when_cache_is_partial() {
     assert_eq!(
         models,
         [
-            "account-model",
             "gpt-5.6-sol",
             "gpt-5.6-terra",
             "gpt-5.6-luna",
@@ -153,7 +152,8 @@ fn openai_main_picker_keeps_canonical_models_when_cache_is_partial() {
             "gpt-5.4-mini",
             "gpt-5.3-codex",
             "gpt-5.3-codex-spark",
-            "gpt-5.2"
+            "gpt-5.2",
+            "account-model"
         ]
     );
     drop(_codex_home);
