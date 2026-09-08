@@ -62,6 +62,10 @@ export function packageSlug(packageName) {
   return packageName.replace(/^@[^/]+\//, "");
 }
 
+export function platformSpecForTarget(target) {
+  return platformPackages.find((spec) => spec.target === target) ?? null;
+}
+
 export async function readCargoVersion(root = repoRoot) {
   const cargoToml = await fs.readFile(path.join(root, "Cargo.toml"), "utf8");
   return parseCargoVersion(cargoToml);
