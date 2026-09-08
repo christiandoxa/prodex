@@ -62,205 +62,30 @@ integration branch. Heavy full-workspace, Mojo, and campaign integration gates r
 
 ## Evidence
 
-- Baseline command: `rtk npm run test -- --jobs 1 --timings` — exit `0`.
-- The runner passed formatting, Markdown lint, workspace all-target/all-feature check, Node tests,
-  safe Rust shards, and auto-rotate integration coverage. Exact per-shard test counts are pending
-  a compact list/count capture; no failure was observed.
-- Baseline size measurement: 2,379 Rust files; repository size-guard classification reports
-  1,817 production files and 512,038 production lines, 32 near-limit files, no violations.
-- Dependency duplicate guard: 21/21 budgeted families, exit `0`.
-- Codebase Memory index: 59,103 nodes and 324,553 edges; five partial files and one ignored example
-  asset are recorded as coverage limits. Graph results remain discovery evidence, not completeness proof.
-- B1 checkpoint: local and remote `b8064149b615b60c56fd38302cdcf113a8c33890`.
-- Predecessor catalog PR: `#70`, base `refactor/428-integration-20260907`; it is closed as
-  superseded, while its branch and commits remain available as pre-orchestration evidence.
-- Draft integration PR: `#71`, base `refactor/lean-campaign-20260908-core`, head
-  `refactor/parallel-integration-20260908`; its body records verified checkpoints and SHA-scoped
-  gate evidence, with the latest integration head resolved separately from the last exact green source anchor.
-- d253 qualification CI `34209154761` failed only in Process guard (node) job `102005744408` and
-  prodex-app local-rewrite job `102005810510`. The exact-d253 canonical report is total `374,546`
-  production LOC with release-floor and Mojo non-regression PASS; the gateway focused test passed
-  three times on clean d253, its path is unchanged since `8ba7d893`, and no gateway source repair
-  is tied to that timing-sensitive 502 result.
-- Qualification repair checkpoint `b41281fb8f6ef0a2cce313936788b0d4d16c7249` is remote-verified;
-  its independent exact-diff review returned NO_FINDING, it integrated as
-  `de244d631aa3bca0db4602b323568961c92f2222`, and exact CI `34224751563` passed.
-- B1 repair CI run `34184199873` completed with failure on the exact SHA `a32b107d`: Sonar
-  reported `rust:S3776` cognitive complexity `27` at
-  `crates/prodex-app/src/runtime_tools/sub_agent_catalog.rs:66`, and the Windows prodex-app
-  shard reported `544 passed; 1 failed; 2 ignored`, with a websocket pre-commit continuation
-  timeout. `compat-replay-gate` was successful and optional-tools freshness was skipped by CI.
-- Read-only reviewer D found no P0. The initial P1 Sonar issue was fixed; the unchanged Windows
-  timeout was not reproduced in the later full run. The two initial P2 catalog findings—dynamic-
-  before-canonical OpenAI ordering and discarded main-picker degraded status—were fixed in B's
-  reviewed checkpoint.
-- Parallel integration baseline: local and remote `a32b107df02d9b5b503b8d545a4fb24b7754e997` on
-  `refactor/parallel-integration-20260908`; first-wave worker branches all started at this SHA.
-- B repair checkpoint: local and remote `61f33d58f47f2ebef0b5ad104a14aaf407676382`; reviewer D
-  found no P0-P3 issue. It was integrated without conflict as `0cec9519` on the integration branch.
-- Integration focused tests on `0cec9519`: `super_main_prompt` 8 passed and `sub_agent_catalog`
-  14 passed, both serial; `cargo fmt --check` and `git diff --check` passed.
-- The official Mojo share report on the integrated source tree produced Rust `348,118` LOC, Mojo
-  `26,420` LOC, total `374,538`, share `7.054023890766758%`, release-floor and non-regression
-  PASS. The frozen Node expectation was repaired in `90a5b8b3`; local `npm run test:node` passed
-  264 with 1 skipped. Integration CI run `34186438047` was superseded after its completed guard
-  jobs passed.
-- Wave 2 base: A and C worktrees were fast-forwarded cleanly to `08eafe5eb22cf67cee9c301b186445154eb28cc0`;
-  neither had prior WIP or a prior checkpoint. C completed its bounded throughput batch; A
-  completed the bounded temp-file owner consolidation after the CI hold.
-- CI run `34186705160` failed on exact SHA `710f2401`: Sonar passed its source scan, but Real
-  Mojo/parity failed compilation with `clippy::items_after_test_module` at
-  `crates/prodex-app/src/app_commands/super_main_catalog.rs:630`; A/C were then paused. The test
-  module was moved after production items in `071b8cbc`, with local strict clippy and focused
-  tests passing. CI run `34187490415` was superseded after its completed guards passed. Full run
-  `34187555697` passed on exact SHA `34972926449f8201c925893ae5be3d8e5bb6976c`, including the
-  prior failing Windows remaining-library shard; the earlier websocket timeout was not reproduced.
-- C worker checkpoint: local and remote `882943024a663e20ab0c27c470c6578a242c3ce7`; reviewer D
-  reported NO_FINDING. It was integrated without conflict as `679f53f3`; integrated-tree focused tests
-  passed for log throughput (19 combined), TUI (13), log integration (5), and runtime-proxy
-  response forwarding (21 plus one zero-test auxiliary target).
-- A worker checkpoints: local and remote `d5f94dd3be2dd9ae31a03832c19a0927920041c4` and
-  `16eb68309204cfe11447131aeb5220030d7cfc19`; reviewer D reported NO_FINDING. They were integrated
-  without conflict as `2b0bb24d` and `f9d8a05c`; integrated-tree tests passed for runtime-store (16),
-  update-notice (11), and core (12).
-- The source tree at `3b8be312ea29d74be922330df047459c7c` contained both worker streams through
-  `f9d8a05c` plus guard repair `32daf41b`; local static guards and focused tests passed. Full CI
-  `34193695148` passed on that exact source SHA. The later ledger-only setup commit was `7bd400cf`;
-  the current Wave 4 source checkpoint is recorded separately below.
-- Wave 3 ownership was disjoint: B2 owned only the gateway/dashboard catalog consumers in B1-007;
-  A2 owned one general-domain candidate outside provider catalog and throughput files. B2 completed
-  its audit-only review with KEEP_WITH_REASON; A2 stopped before producing symbol-level evidence.
-- B2 evidence: gateway focused tests passed `503`, with `17` ignored; dashboard focused tests passed
-  `20`. The public metadata/availability contract is retained separately from picker catalog
-  planning, with the concrete KEEP_WITH_REASON recorded in `audit.csv`.
-- Storage cleanup checkpoint: before cleanup the host was `68%` used / `145G` available; after
-  cleanup it was `62%` used / `173G` available. Removed exact campaign-owned predecessor and
-  completed worker/B2 worktrees after clean/remote/process verification, reclaiming approximately
-  `28G`. At the qualification recheck, main and integration targets were absent and no A2 handoff
-  worktree/cache was retained. Historical campaign/release/issue64 worktrees include dirty or
-  unknown ownership, and two prunable records remain protected and untouched.
-- Local no-tests gate evidence: `npm run ci -- --no-tests --jobs 1` exited `0` after release hygiene,
-  metadata, workspace all-target/all-feature check, strict clippy, and all non-test guards passed.
-  The preceding `npm run ci -- --serial --jobs 1` logged PASS for test-fast and test-serial but
-  did not expose a final parent exit line; it is not used as the sole completion claim.
-- Reviewer D checked exact `7dc21ac55ac80a68f1133fe36fde387bda9bbcdd` and reported NO_FINDING; the
-  later `fe28e4b8` and `f9eb135d` changes were ledger-only and preserve that source review. This
-  is historical evidence for that checkpoint, not a whole-campaign review result.
+- Baseline checks passed formatting, Markdown, workspace all-target/all-feature validation, Node, safe Rust shards, auto-rotate coverage, duplicate-budget guard, and the initial runtime graph inventory; graph results remain discovery evidence, not completeness proof.
+- Exact green anchor: qualification repair `de244d63`, CI `34224751563`; the current campaign branch is the successor of that source and keeps release hold/write scope on the campaign branch.
+- B1 provider catalog checkpoint `61f33d58` was independently reviewed and its complexity repair is restored by `f913ba60`; C1 throughput, A1 temp-file naming, Wave 4 root cleanup, Wave 5 policy, and Wave 6 CLI/session-store checkpoints remain retained but held by `208aa412`.
+- Historical CI `34184199873` exposed provider-picker complexity and an unrelated Windows timeout; the exact current CI `34287156704` also exposed the broker test size budget and platform fixture gaps, all repaired or explicitly recorded in the current wave.
+- Current local validation includes exact B0-036 security review `3712bbbe`, test extraction review `848e68fe`, provider/macOS review `f913ba60`, broker/app/runtime smoke, boundary guards, Node `264/1`, size `32/32`, Mojo share/non-regression, and workspace Clippy; full cross-platform/live-provider coverage is not claimed.
+- All worker/reviewer SHA, test, public-API, security, compatibility, and cleanup evidence remains in `audit.csv`, retained branches, and campaign logs.
 
-## Batch B1: provider catalog authority
+## Prior verified batches
 
-Contract: `ProviderId` plus existing bounded local catalog files -> canonical provider choices plus
-case-insensitive dynamic additions, `Custom` entry, or model-scoped effort fallback; malformed or
-missing expected sources -> canonical choices plus bounded `Degraded` status; reads only, no network,
-writes, profile mutation, or runtime transport changes; canonical order precedes first-seen dynamic
-order and `Custom` remains last.
-
-- Root cause: `super_prompt::configured_sub_agent_models_from_paths` only loaded Copilot/Kiro and
-  returned an empty vector for every read/parse failure, while `super_main_catalog` separately loaded
-  only OpenAI `models_cache.json`. A broken Kiro snapshot therefore looked like a complete Luna/auto catalog.
-- Refactor: `runtime_tools::sub_agent_catalog::effective_provider_model_catalog` now owns bounded
-  source assembly for OpenAI, Copilot, Gemini, Kiro, DeepSeek, and Local. `prodex-provider-core`
-  remains the single pure choice/identity/reasoning merge owner. Main and sub-agent picker callers
-  consume the same app-owned source authority.
-- Degraded state is generic and non-secret; source errors are not rendered. A stale/missing profile
-  does not consume the usable-catalog bound, so a later healthy Kiro profile remains visible.
-- Focused tests: sub-agent catalog `14/14`; main prompt `7/7`; provider-core catalog `24/24` real
-  tests plus one zero-test auxiliary binary; Gemini `9/9`, DeepSeek `4/4`, Local `5/5`, Kiro
-  `14/14`, Copilot `12/12`. Dashboard `21/21` and gateway `503 passed, 17 ignored` were also
-  reproduced while evaluating the next consumer batch; those consumers are not part of B1.
-- Static guards after B1: application boundary, crate boundary, size, secret boundary, Mojo share,
-  Mojo authority/no-fallback, and runtime test manifest all passed. All-feature workspace clippy
-  passed on the B1 integrated source tree.
-- Measurement with the repository size guard: baseline `512,038` production Rust lines across
-  `1,817` files; B1 `512,426` lines across the same file count. The increase is bounded loader and
-  regression coverage; semantic ownership reduced by deleting the old picker-only loader and its
-  test-only forwarding helpers. No dependency or runtime transport change.
-
-## Batch C1: retained generation throughput observability
-
-Contract: authoritative output tokens plus positive provider-reported monotonic generation duration
--> unchanged `output_tokens * 1000 / generation_ms`; active display -> `gen N t/s`; completed
-display -> `last gen N t/s` plus coarse monotonic age when available; historical age remains
-unknown; no TTFT, request timing, log receipt timing, content, credentials, or network discovery.
-
-- Worker checkpoint: local and remote `882943024a663e20ab0c27c470c6578a242c3ce7`; reviewer D
-  reported no finding; integrated without conflict as `679f53f3`.
-- Tests: log-throughput 13, state 6, TUI 13, log integration 5, runtime-proxy response-forwarding
-  21 plus one zero-test auxiliary target; all serial and passing. Formula cases cover 50, 40, 50,
-  and 80 t/s. `cargo fmt --check`, `git diff --check`, and the full static guard parallel runner
-  passed.
-
-## Batch A1: shared atomic temp-file naming
-
-Contract: existing target basename/fallback, PID/timestamp/sequence/`.tmp` naming, separate atomic
-sequences, private permissions, durability sync, replacement order, cleanup, errors, and platform
-branches remain unchanged while duplicate naming logic uses the existing core owner.
-
-- Worker checkpoints: `d5f94dd3be2dd9ae31a03832c19a0927920041c4` and
-  `16eb68309204cfe11447131aeb5220030d7cfc19`, both remote verified; reviewer D reported no
-  finding. Integrated as `2b0bb24d` and `f9d8a05c` without conflict.
-- Tests: app runtime-store 16, update-notice 11, core 12; owning-crate all-target clippy,
-  `cargo fmt --check`, and `git diff --check` passed.
-
-## Wave 3 ownership
-
-| Worker | Base SHA | Branch | Worktree | Owns | Excludes | Status |
-| --- | --- | --- | --- | --- | --- | --- |
-| A2 | `3bfb043c03f6ea926bda6b7d6e8cb8790080a283` | `worker/refactor-general-b2-20260908` | worker worktree | one evidence-backed general-domain refactor outside B/C | all provider catalog and throughput/log-throughput paths | stopped; clean, no result; UNREVIEWED |
-| B2 | `3bfb043c03f6ea926bda6b7d6e8cb8790080a283` | `worker/provider-catalog-b2-20260908` | worker worktree | `gateway_kiro_model_catalog_json_from_paths`, dashboard models catalog consumer, and focused tests | throughput/log-throughput; A2 general refactor | audit complete; KEEP_WITH_REASON |
-| D | verified Wave 3 integration anchor | none | none | read-only exact-checkpoint review | all writes | resumed for Wave 3 checkpoints |
-
-## Wave 4 ownership
-
-| Worker | Base SHA | Branch | Worktree | Owns | Excludes | Status |
-| --- | --- | --- | --- | --- | --- | --- |
-| A2 | `3b8be312ea29d74be922330df047459c7c2faf7c` | `worker/refactor-general-b2-20260908` | worker worktree | root CLI/entrypoints and compatibility facades in B0-001 | config, provider catalog, throughput/log-throughput | checkpoint `293b2f84` pushed and integrated as `e15ce10a`; stopped clean |
-| E | `3b8be312ea29d74be922330df047459c7c2faf7c` | `worker/refactor-config-20260908` | worker worktree | `crates/prodex-config` B0-008 only | root CLI, provider catalog, throughput/log-throughput | audit-only KEEP_WITH_REASON; no source checkpoint; stopped clean |
-| D | `3b8be312ea29d74be922330df047459c7c2faf7c` | none | none | read-only exact Wave 4 checkpoint review | all writes | NO_FINDING on A2 checkpoint; stopped |
-
-Wave 4 source checkpoint: `e15ce10a` remains the prior source anchor for the Wave 4 ledger work.
-Wave 4 ledger checkpoint `585f6b3cc5b98c230e68c9a31de8d199822fc650` is the previous immutable
-exact-green anchor for Wave 5 after CI `34198133041` succeeded. The Wave 4 closeout inventory
-before Wave 5 dispositions was 59 UNREVIEWED, 0 IN_PROGRESS, 19 REFACTORED, 11 KEEP_WITH_REASON,
-and 0 BLOCKED; it is not the current post-Wave-5 inventory.
-
-## Wave 5 ownership
-
-| Worker | Base SHA | Branch | Worktree | Owns | Excludes | Status |
-| --- | --- | --- | --- | --- | --- | --- |
-| authn | `585f6b3cc5b98c230e68c9a31de8d199822fc650` | `worker/refactor-authn-wave5-20260908` | worker worktree | `crates/prodex-authn` B0-004 | authz, application, runtime-policy, ledger/docs | audit-only KEEP_WITH_REASON; no source change; reviewer NO_FINDING; stopped |
-| authz | `585f6b3cc5b98c230e68c9a31de8d199822fc650` | `worker/refactor-authz-wave5-20260908` | worker worktree | `crates/prodex-authz` B0-005 | authn, application, runtime-policy, ledger/docs | audit-only KEEP_WITH_REASON; no source change; reviewer NO_FINDING; stopped |
-| runtime-policy | `585f6b3cc5b98c230e68c9a31de8d199822fc650` | `worker/refactor-runtime-policy-wave5-20260908` | worker worktree | `crates/prodex-runtime-policy` B0-029 | authn, authz, application, Mojo source/ABI, ledger/docs | checkpoint `696ab0befdb0b5246f49cc87b454aef3b3ac02eb` pushed; reviewer NO_FINDING; integrated as `8ba7d893fd1385593ae589f97f0c37949835c156` |
-
-Wave 5 evidence changes the inventory to 56 UNREVIEWED, 0 IN_PROGRESS, 20 REFACTORED,
-13 KEEP_WITH_REASON, and 0 BLOCKED; its source checkpoint is integrated at
-`8ba7d893fd1385593ae589f97f0c37949835c156`.
-
-## Wave 6 ownership
-
-| Worker | Base SHA | Branch | Worktree | Owns | Excludes | Status |
-| --- | --- | --- | --- | --- | --- | --- |
-| CLI | `8ba7d893fd1385593ae589f97f0c37949835c156` | `worker/refactor-cli-wave6-20260908` | worker worktree | `crates/prodex-cli` B0-007 | filesystem, session-store, runtime, ledger/docs | checkpoint `d9ab67d7` pushed; reviewer NO_FINDING; integrated into `d253232e32f92c56b9f49b9fa68ee00f28d1ac35` |
-| shared-fs | `8ba7d893fd1385593ae589f97f0c37949835c156` | `worker/refactor-shared-fs-wave6-20260908` | worker worktree | `crates/prodex-shared-codex-fs` B0-013 | CLI, session-store, runtime, ledger/docs | audit-only KEEP_WITH_REASON; no source checkpoint; stopped |
-| session-store | `8ba7d893fd1385593ae589f97f0c37949835c156` | `worker/refactor-session-store-wave6-20260908` | worker worktree | `crates/prodex-session-store` B0-014 | CLI, shared-fs, runtime, ledger/docs | checkpoint `bce0f1d5` pushed; reviewer NO_FINDING; integrated into `d253232e32f92c56b9f49b9fa68ee00f28d1ac35` |
-
-Wave 6 evidence changes the inventory to 53 UNREVIEWED, 0 IN_PROGRESS, 22 REFACTORED,
-14 KEEP_WITH_REASON, and 0 BLOCKED; its source checkpoints and ledger disposition are integrated
-into `d253232e32f92c56b9f49b9fa68ee00f28d1ac35`. That boundary failed CI `34209154761`; repair
-checkpoint `b41281fb8f6ef0a2cce313936788b0d4d16c7249` integrated as de244, and CI `34224751563`
-passed.
+- B1 provider catalog authority remains at the `a32b107d` baseline; its later ordering/degraded-status checkpoint is held for a later qualifying batch. The previously reviewed complexity-only repair is restored in the current CI repair checkpoint.
+- C1 generation-throughput observability, A1 shared temp-file naming, Wave 4 root-import cleanup, Wave 5 runtime-policy cleanup, and Wave 6 CLI/session-store cleanup retain their exact worker/reviewer evidence but are currently held by commit `208aa412` to admit the critical broker repair.
+- Waves 3–6 were executed with disjoint ownership and serial integration; their detailed checkpoints, tests, public-API decisions, and source evidence remain in `audit.csv`, retained worker branches, and campaign logs. No held checkpoint was deleted or treated as integrated without a qualifying source tree.
 
 ## Wave 7 manual successor execution
 
 - Handoff completed: the legacy coordinator, controller, and worker trees were stopped gracefully; the protected manual session, user expose, Codebase Memory daemon, main worktree, release worktrees, and unrelated processes were not stopped.
-- Current qualifying source tip: `f1f07236` on `refactor/successor-integration-20260908`. Approved B0-036 commits `659cdc4e`, `18bd36a5`, and `f1f07236` were reviewed at exact worker SHA `3712bbbe`; reviewer `R-B0-036-security-final` returned `NO_FINDING`.
-- B0-036 validation passed broker 33, app `runtime_broker` 59, `runtime_doctor` 21, URL-boundary regressions, runtime smoke, runtime hot-path and manifest guards, auth/secret/application/crate boundary guards, workspace Clippy, fmt, and diff checks.
+- Current qualifying source tip: `240aead2` on `refactor/successor-integration-20260908`. Approved B0-036 commits `659cdc4e`, `18bd36a5`, and `f1f07236` were reviewed at exact worker SHA `3712bbbe`; the size repair `1a5a28d9` and CI/provider/macOS repair `240aead2` were independently reviewed with `NO_FINDING`.
+- B0-036 validation passed broker 33, app `runtime_broker` 59, `runtime_doctor` 21, URL-boundary regressions, runtime smoke, size guard 32/32, runtime hot-path and manifest guards, auth/secret/application/crate boundary guards, workspace Clippy, fmt, and diff checks.
 - Commit `208aa412` mechanically holds 24 lower-priority behavior-file checkpoints so the enforced churn range can admit the critical broker repair. Their remote branches, reviews, logs, and source evidence remain retained; no main or release worktree was changed.
 - Held source domains are recorded as `IN_PROGRESS` in `audit.csv`, including CLI, session-store, runtime policy, runtime cookies, CI guards, provider picker repairs, throughput observability, temp-file naming, update notice, and test-import cleanups. B0-036 is the current `REFACTORED` source row.
 - The official share report on the integrated source reports Rust `348,160`, Mojo `26,420`, total `374,580`, and share `7.053232954242085%`; the release floor and Mojo non-regression pass, the project target remains unmet, and the historical waiver is expired. The frozen fixture is aligned to that measured report.
-- Current ledger counts are 64 unique B0 domains: 26 `UNREVIEWED`, 13 `IN_PROGRESS`, 2 `REFACTORED`, and 23 `KEEP_WITH_REASON`. B0-036 is closed only after exact-SHA review and focused validation.
-- Previous CI runs `34257479255` and `34267239512` remain historical evidence; the latter failed only on an unrelated Windows secret-store concurrency test. A fresh CI run is required for the current source tip.
-- Final B0-036 writer/reviewer worktrees and build targets are eligible for exact cleanup after report harvest; campaign logs remain retained.
+- Current ledger counts are 64 unique B0 domains: 23 `UNREVIEWED`, 14 `IN_PROGRESS`, 2 `REFACTORED`, and 25 `KEEP_WITH_REASON`. B0-036 is closed only after exact-SHA review and focused validation; B0-031 remains in progress for its safe-metadata repair.
+- Fresh CI run `34287156704` on `9484d4ae` failed static size budget before repair, Sonar complexity for the held picker source, and unrelated macOS/Windows tests; the first two are repaired locally and the platform failures are recorded in the retained evidence. A fresh run is required for `240aead2`.
+- Final B0-036 writer/reviewer worktrees and targets were cleaned after report harvest; campaign logs and remote checkpoints remain retained.
 
 ## Known checkpoints and blockers
 
