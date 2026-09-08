@@ -257,29 +257,29 @@ passed.
   worktree, release worktrees, and unrelated processes were not stopped. The secondary ext4 SSD
   remained mounted at its verified device identity and campaign-owned cleanup reclaimed completed
   build/review targets only.
-- Current source integration tip: `be9b6452da2f840dbba8c549c3bcad6e9c8f68d2`, on
+- Current source integration tip: `478333f7` (B0-034 cookie repair), on
   `refactor/successor-integration-20260908`. The qualifying source tree retains reviewed
-  checkpoints `38077452` (private Copilot passthrough wrapper) and `be9b6452` (shared CLI model
-  parser). `33bc6795` (private idempotency route validation) was independently reviewed and
-  integrated earlier, then reverted as `272c4b13` to make room under the churn ceiling;
-  `1556875d` (overlay entrypoint reuse) was reverted as `b83f8eff`, and `8d015e6e` (uncalled npm
-  script surfaces) as `81380514`. All held branches, logs, reviews, and validation evidence
-  remain durable. Ledger/documentation and production-share fixture commits are also present; no
-  main or release worktree was changed.
+  checkpoints `be9b6452` (shared CLI model parser) and `478333f7` (cookie relay hardening).
+  `38077452` (private Copilot passthrough) was reviewed and reverted as `a65c3f96` to make room;
+  `33bc6795` (private idempotency route validation) was reverted as `272c4b13`, `1556875d`
+  (overlay entrypoint reuse) as `b83f8eff`, and `8d015e6e` (uncalled npm scripts) as `81380514`.
+  All held branches, logs, reviews, and validation evidence remain durable; no main or release
+  worktree was changed.
 - Churn evidence: CI run `34246900868` correctly rejected the wider `09212cf1` tree because the
   PR base `a32b107d` range reached 31 behavior files, above the enforced 25-file limit. No guard,
   threshold, or allowlist was weakened. The wider reviewed checkpoints `5c3aa588` (bounded TOML
   lookups), `09212cf1` (private domain cleanup), and `edcca0b4` (private terminal aliases) were
   reverted from the integration tree with ordinary revert commits, while their remote branches,
   logs, reviews, and source evidence remain durable for later qualifying batches. The current
-  local range is 29 files, 25 behavior files, and 1,057 changed lines.
+  local range is 28 files, 24 behavior files, and 1,181 changed lines.
 - Held checkpoints: `84512e22` (review `NO_FINDING`, config 19 plus app 4+6+1+176 tests and
   workspace Clippy), `c92851d8` (replacement exact-SHA review `NO_FINDING`, IDs 8 and governance
   policy 10), `932863af` (replacement exact-SHA review `NO_FINDING`, app alias tests 3+1+11+48),
   and `a9a9024c` (review `NO_FINDING`, npm 27, installer 12+1 Windows skip, SDK 17, release 10,
   and fixture/guard checks), plus `e3f947b3` (review `NO_FINDING`, optional-tools 51 and app
-  desktop/overlay 5+5), are ledgered `IN_PROGRESS` because integrating them now would exceed the
-  churn range. `87df35a2` (runtime model scanner) is integrated as `be9b6452`; its independent
+  desktop/overlay 5+5), plus `38077452` (provider-core review `NO_FINDING`), are ledgered
+  `IN_PROGRESS` because integrating them now would exceed the churn range. `87df35a2` (runtime
+  model scanner) is integrated as `be9b6452`; its independent
   review returned `NO_FINDING`. `c56c4ab7` (CI script cleanup) received `REQUEST_CHANGES` because
   it removed the independent always-heavy protection and remains unintegrated. The model writer's
   full app aggregate stopped after 1,446 of 3,452
@@ -287,22 +287,22 @@ passed.
   evidence. B0-003's exact-SHA review returned `NO_FINDING`; its integrated default/Mojo boundary
   tests, app admin tests, Clippy, and guards passed before the checkpoint was held. B0-061's exact
   review returned `REQUEST_CHANGES` for loss of independent always-heavy protection; its source
-  was not integrated.
+  was not integrated. B0-034 repair `76a7e98f` received exact-SHA `NO_FINDING` and is integrated.
 - Completed new audits added public-compatibility or semantic-risk holds for B0-022 shared types,
   B0-024 provider SPI, B0-025 quota, B0-027 observability, and B0-033 Gemini compatibility; no
   source change was admitted from those reports. Their logs contain exact-base graph/source
   evidence and no live-provider tests. The B0-027 and B0-033 audit worktrees were harvested and
-  cleaned. B0-028 remains active, and B0-034's writer checkpoint is under independent review.
-- Coverage: the ledger has 64 unique B0 domains with 30 `UNREVIEWED`, 7 `IN_PROGRESS`, 6
+  cleaned. B0-028 remains active; B0-034's predecessor rejection, repair, review, and eligible
+  worktree/target cleanup are complete.
+- Coverage: the ledger has 64 unique B0 domains with 30 `UNREVIEWED`, 6 `IN_PROGRESS`, 7
   `REFACTORED`, and 21 `KEEP_WITH_REASON`; all changes are evidence-backed and no row was closed
   by worker launch alone. Completed audits also recorded explicit public-API holds for control
   plane, state, context blob-noise, housekeeping, shared types, provider SPI, and gateway
   surfaces, plus semantic-difference holds for storage reservation validators and quota planning.
-- Current CI: run `34254530245` passed for source tip `91eb94aa` after the production-share fixture
-  correction. Runs `34251095095`, `34253013562`, and `34253626777` targeted superseded heads;
-  `34251095095` exposed the stale production-share expectation and was fixed in `3b2d0bd3` and
-  `4f65da5d`. The current successor push, which also carries the harvested audit ledger, and its
-  CI run must finish successfully before the source tip can be treated as an exact-green anchor.
+- Current CI: run `34257479255` passed for the pre-cookie source tip `6d690f3f`; the current
+  cookie integration push and its CI run must finish successfully before `478333f7` can be
+  treated as an exact-green anchor. Earlier run `34251095095` exposed the stale production-share
+  expectation, fixed in `3b2d0bd3`, `4f65da5d`, and `c62657e7`.
 
 ## Known checkpoints and blockers
 
