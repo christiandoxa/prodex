@@ -57,8 +57,13 @@ integration branch. Heavy full-workspace, Mojo, and final integration gates rema
 - Codebase Memory index: 59,103 nodes and 324,553 edges; five partial files and one ignored example
   asset are recorded as coverage limits. Graph results remain discovery evidence, not completeness proof.
 - B1 checkpoint: local and remote `b8064149b615b60c56fd38302cdcf113a8c33890`.
-- Draft PR: `#70`, base `refactor/428-integration-20260907`; CI is in progress/pending for B1,
-  with `compat-replay-gate` successful and optional-tools freshness skipped by CI.
+- Predecessor catalog PR: `#70`, base `refactor/428-integration-20260907`; it remains the
+  pre-orchestration checkpoint and is not the integration review surface.
+- Draft integration PR: `#71`, base `refactor/428-integration-20260907`, head
+  `refactor/parallel-integration-20260908`; its body will be updated with reviewed checkpoints
+  and final gate evidence.
+- B1 repair CI is still in progress/pending on `a32b107d`; `compat-replay-gate` was successful
+  and optional-tools freshness was skipped by CI.
 - Parallel integration baseline: local and remote `a32b107df02d9b5b503b8d545a4fb24b7754e997` on
   `refactor/parallel-integration-20260908`; first-wave worker branches all start at this SHA.
 
