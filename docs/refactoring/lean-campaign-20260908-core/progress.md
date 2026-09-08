@@ -17,11 +17,9 @@ transport semantics. This is an implementation campaign, not a line-count exerci
 
 ## Status
 
-`IN_PROGRESS`; first-wave implementation is held at integration base `a32b107d…` because its
-repair CI failed. A and C are paused with clean worktrees; B is repairing the reported catalog
-complexity guard issue; D is completing the read-only review. No worker checkpoint is accepted
-until the failed CI state has a deliberate repair or a reproduced, separately classified blocker.
-The wider domain audit remains open.
+`IN_PROGRESS`; first-wave implementation is held after the B catalog checkpoint while the
+repaired integration CI completes. A and C remain stopped with clean worktrees; B's checkpoint is
+integrated and D reviewed it with no finding. The wider domain audit remains open.
 
 ## Parallel ownership ledger
 
@@ -70,15 +68,18 @@ integration branch. Heavy full-workspace, Mojo, and final integration gates rema
   shard reported `544 passed; 1 failed; 2 ignored`, with a websocket pre-commit continuation
   timeout. `compat-replay-gate` was successful and optional-tools freshness was skipped by CI.
 - Read-only reviewer D found no P0, but marked both the Sonar issue and unchanged Windows timeout
-  as P1 blockers. Two P2 catalog findings remain queued for B: the main OpenAI regression expects
-  dynamic-before-canonical order despite the B1 contract, and the main picker currently discards
-  degraded status that the sub-agent picker reports.
+  as P1 blockers. The two initial P2 catalog findings—dynamic-before-canonical OpenAI ordering and
+  discarded main-picker degraded status—were fixed in B's reviewed checkpoint.
 - Parallel integration baseline: local and remote `a32b107df02d9b5b503b8d545a4fb24b7754e997` on
   `refactor/parallel-integration-20260908`; first-wave worker branches all start at this SHA.
 - B repair checkpoint: local and remote `61f33d58f47f2ebef0b5ad104a14aaf407676382`; reviewer D
   found no P0-P3 issue. It was integrated without conflict as `0cec9519` on the integration branch.
 - Integration focused tests on `0cec9519`: `super_main_prompt` 8 passed and `sub_agent_catalog`
   14 passed, both serial; `cargo fmt --check` and `git diff --check` passed.
+- The official Mojo share report on the integrated source tree produced Rust `348,118` LOC, Mojo
+  `26,420` LOC, total `374,538`, share `7.054023890766758%`, release-floor and non-regression
+  PASS. The frozen Node expectation was repaired in `90a5b8b3`; local `npm run test:node` passed
+  264 with 1 skipped. Integration CI run `34186438047` targets exact SHA `90a5b8b3` and is pending.
 
 ## Batch B1: provider catalog authority
 
@@ -120,5 +121,6 @@ order and `Custom` remains last.
 - Campaign worktree is owned by this campaign. Its `target/` build cache is retained while validation continues.
 - No campaign-created server or watcher remains active after baseline testing. A and C worktrees
   are clean and their agents are stopped; B's worktree is clean after its pushed checkpoint.
-- Next action: push the documented integration checkpoint, then rerun the failed Windows job and
-  confirm Sonar on `0cec9519` before resuming A and C from the new integration head.
+- Next action: finish CI run `34186438047`, inspect its corresponding Windows continuation
+  coverage, classify the earlier timeout as reproduced or not reproduced, then resume A and C only
+  if the shared gates are clean.
