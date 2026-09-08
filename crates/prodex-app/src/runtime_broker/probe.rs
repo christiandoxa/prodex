@@ -30,7 +30,14 @@ struct RuntimeBrokerLogSnapshotResponse {
     entries: Vec<RuntimeBrokerLogSnapshotEntry>,
 }
 
-fn runtime_broker_admin_header(capability: &RuntimeBrokerSecret) -> Result<HeaderValue> {
+fn runtime_broker_admin_header(
+    listen_addr: &str,
+    capability: &RuntimeBrokerSecret,
+) -> Result<HeaderValue> {
+    anyhow::ensure!(
+        prodex_runtime_broker::runtime_broker_listen_addr_is_loopback(listen_addr),
+        "runtime broker listen address must be loopback"
+    );
     let mut value = HeaderValue::from_str(capability.expose())
         .context("runtime broker capability is not a valid HTTP header value")?;
     value.set_sensitive(true);
@@ -85,6 +92,9 @@ pub(crate) fn probe_runtime_broker_health(
     broker_key: &str,
     registry: &RuntimeBrokerRegistry,
 ) -> Result<Option<RuntimeBrokerHealth>> {
+    if !prodex_runtime_broker::runtime_broker_listen_addr_is_loopback(&registry.listen_addr) {
+        return Ok(None);
+    }
     let Ok(capability) = load_runtime_broker_capability(paths, broker_key, &registry.instance_id)
     else {
         return Ok(None);
@@ -93,7 +103,7 @@ pub(crate) fn probe_runtime_broker_health(
         .get(runtime_broker_health_url(registry))
         .header(
             prodex_runtime_broker::RUNTIME_BROKER_ADMIN_TOKEN_HEADER,
-            runtime_broker_admin_header(&capability)?,
+            runtime_broker_admin_header(&registry.listen_addr, &capability)?,
         )
         .send()
     {
@@ -119,6 +129,9 @@ pub(crate) fn probe_runtime_broker_metrics(
     broker_key: &str,
     registry: &RuntimeBrokerRegistry,
 ) -> Result<Option<RuntimeBrokerMetrics>> {
+    if !prodex_runtime_broker::runtime_broker_listen_addr_is_loopback(&registry.listen_addr) {
+        return Ok(None);
+    }
     let Ok(capability) = load_runtime_broker_capability(paths, broker_key, &registry.instance_id)
     else {
         return Ok(None);
@@ -127,7 +140,7 @@ pub(crate) fn probe_runtime_broker_metrics(
         .get(runtime_broker_metrics_url(registry))
         .header(
             prodex_runtime_broker::RUNTIME_BROKER_ADMIN_TOKEN_HEADER,
-            runtime_broker_admin_header(&capability)?,
+            runtime_broker_admin_header(&registry.listen_addr, &capability)?,
         )
         .send()
     {
@@ -154,6 +167,9 @@ pub(crate) fn probe_runtime_broker_log_snapshot(
     registry: &RuntimeBrokerRegistry,
     after: u64,
 ) -> Result<Option<runtime_log::RuntimeLiveLogSnapshot>> {
+    if !prodex_runtime_broker::runtime_broker_listen_addr_is_loopback(&registry.listen_addr) {
+        return Ok(None);
+    }
     let Ok(capability) = load_runtime_broker_capability(paths, broker_key, &registry.instance_id)
     else {
         return Ok(None);
@@ -167,7 +183,7 @@ pub(crate) fn probe_runtime_broker_log_snapshot(
         .get(url)
         .header(
             prodex_runtime_broker::RUNTIME_BROKER_ADMIN_TOKEN_HEADER,
-            runtime_broker_admin_header(&capability)?,
+            runtime_broker_admin_header(&registry.listen_addr, &capability)?,
         )
         .send()
     {
@@ -213,6 +229,9 @@ pub(crate) fn collect_live_runtime_broker_observations(
         let Ok(Some(registry)) = load_runtime_broker_registry(paths, &broker_key) else {
             continue;
         };
+        if !prodex_runtime_broker::runtime_broker_listen_addr_is_loopback(&registry.listen_addr) {
+            continue;
+        }
         if !runtime_process_pid_alive(registry.pid) {
             continue;
         }
@@ -236,6 +255,9 @@ pub(crate) fn collect_runtime_broker_metrics_targets(paths: &AppPaths) -> Vec<St
         let Ok(Some(registry)) = load_runtime_broker_registry(paths, &broker_key) else {
             continue;
         };
+        if !prodex_runtime_broker::runtime_broker_listen_addr_is_loopback(&registry.listen_addr) {
+            continue;
+        }
         if !runtime_process_pid_alive(registry.pid) {
             continue;
         }
@@ -255,12 +277,16 @@ pub(crate) fn activate_runtime_broker_profile(
     registry: &RuntimeBrokerRegistry,
     current_profile: &str,
 ) -> Result<()> {
+    anyhow::ensure!(
+        prodex_runtime_broker::runtime_broker_listen_addr_is_loopback(&registry.listen_addr),
+        "runtime broker listen address must be loopback"
+    );
     let capability = load_runtime_broker_capability(paths, broker_key, &registry.instance_id)?;
     let response = client
         .post(runtime_broker_activate_url(registry))
         .header(
             prodex_runtime_broker::RUNTIME_BROKER_ADMIN_TOKEN_HEADER,
-            runtime_broker_admin_header(&capability)?,
+            runtime_broker_admin_header(&registry.listen_addr, &capability)?,
         )
         .json(&serde_json::json!({
             "current_profile": current_profile,
@@ -295,12 +321,16 @@ pub(crate) fn release_runtime_broker_session_affinity(
     registry: &RuntimeBrokerRegistry,
     session_id: &str,
 ) -> Result<()> {
+    anyhow::ensure!(
+        prodex_runtime_broker::runtime_broker_listen_addr_is_loopback(&registry.listen_addr),
+        "runtime broker listen address must be loopback"
+    );
     let capability = load_runtime_broker_capability(paths, broker_key, &registry.instance_id)?;
     let response = client
         .post(runtime_broker_release_session_affinity_url(registry))
         .header(
             prodex_runtime_broker::RUNTIME_BROKER_ADMIN_TOKEN_HEADER,
-            runtime_broker_admin_header(&capability)?,
+            runtime_broker_admin_header(&registry.listen_addr, &capability)?,
         )
         .json(&serde_json::json!({
             "session_id": session_id,
@@ -335,12 +365,16 @@ pub(crate) fn send_runtime_broker_log_event(
     registry: &RuntimeBrokerRegistry,
     message: &str,
 ) -> Result<()> {
+    anyhow::ensure!(
+        prodex_runtime_broker::runtime_broker_listen_addr_is_loopback(&registry.listen_addr),
+        "runtime broker listen address must be loopback"
+    );
     let capability = load_runtime_broker_capability(paths, broker_key, &registry.instance_id)?;
     let response = client
         .post(registry.log_event_url())
         .header(
             prodex_runtime_broker::RUNTIME_BROKER_ADMIN_TOKEN_HEADER,
-            runtime_broker_admin_header(&capability)?,
+            runtime_broker_admin_header(&registry.listen_addr, &capability)?,
         )
         .json(&serde_json::json!({"message": message}))
         .send()
@@ -360,9 +394,18 @@ mod tests {
     #[test]
     fn runtime_broker_admin_header_debug_is_redacted() {
         let capability = RuntimeBrokerSecret::new("debug-secret-capability").unwrap();
-        let header = runtime_broker_admin_header(&capability).unwrap();
+        let header = runtime_broker_admin_header("127.0.0.1:4567", &capability).unwrap();
 
         assert!(header.is_sensitive());
         assert!(!format!("{header:?}").contains(capability.expose()));
+    }
+
+    #[test]
+    fn runtime_broker_admin_header_rejects_non_loopback_address() {
+        let capability = RuntimeBrokerSecret::new("debug-secret-capability").unwrap();
+
+        let error = runtime_broker_admin_header("192.0.2.10:4567", &capability).unwrap_err();
+
+        assert!(error.to_string().contains("must be loopback"));
     }
 }

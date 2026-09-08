@@ -241,6 +241,9 @@ pub(crate) fn start_runtime_rotation_proxy_with_options(
             ),
         );
     }
+    let preferred_listen_addr = preferred_listen_addr.filter(|listen_addr| {
+        prodex_runtime_broker::runtime_broker_listen_addr_is_loopback(listen_addr)
+    });
     let (server, listen_addr) = match preferred_listen_addr {
         Some(preferred) => match TinyServer::http(preferred) {
             Ok(server) => {

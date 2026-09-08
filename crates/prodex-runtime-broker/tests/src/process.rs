@@ -97,6 +97,43 @@ fn broker_bootstrap_round_trips_over_the_bounded_pipe_format() {
 }
 
 #[test]
+fn broker_bootstrap_accepts_ipv6_loopback_and_rejects_non_loopback() {
+    let admin_token = RuntimeBrokerSecret::new("admin-token").unwrap();
+    let config = RuntimeBrokerSpawnConfig {
+        current_profile: "default",
+        upstream_base_url: "https://upstream.example",
+        include_code_review: false,
+        upstream_no_proxy: false,
+        smart_context_enabled: false,
+        model_context_window_tokens: None,
+        broker_key: "key",
+        instance_id: "broker-instance",
+        admin_token: &admin_token,
+        listen_addr: Some("[::1]:4567"),
+    };
+    let mut payload = Vec::new();
+
+    write_runtime_broker_bootstrap(&mut payload, config).unwrap();
+    assert_eq!(
+        read_runtime_broker_bootstrap(Cursor::new(payload))
+            .unwrap()
+            .listen_addr
+            .as_deref(),
+        Some("[::1]:4567")
+    );
+
+    let err = write_runtime_broker_bootstrap(
+        Vec::new(),
+        RuntimeBrokerSpawnConfig {
+            listen_addr: Some("192.0.2.10:4567"),
+            ..config
+        },
+    )
+    .unwrap_err();
+    assert_eq!(err, RuntimeBrokerBootstrapError::Invalid);
+}
+
+#[test]
 fn broker_bootstrap_rejects_malformed_truncated_and_oversized_inputs_without_echoing_secrets() {
     let malformed = br#"{"admin_token":"do-not-echo",invalid}"#;
     let truncated = br#"{"version":1,"admin_token":"do-not-echo""#;
