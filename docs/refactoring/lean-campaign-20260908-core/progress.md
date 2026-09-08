@@ -19,8 +19,9 @@ transport semantics. This is an implementation campaign, not a line-count exerci
 
 `IN_PROGRESS`; B's catalog, C's throughput, and A's general refactor checkpoints are integrated.
 Full CI run `34187555697` passed on the repaired pre-C/A tree, including Sonar, Real Mojo/parity,
-macOS, all Windows shards, and the relevant guards. The wider domain audit and final integration
-qualification remain open.
+macOS, all Windows shards, and the relevant guards. A final local guard repair is pushed at
+`32daf41b`; CI run `34189949768` is pending on that exact tree. The wider domain audit and final
+integration qualification remain open.
 
 ## Parallel ownership ledger
 
@@ -95,14 +96,14 @@ integration branch. Heavy full-workspace, Mojo, and final integration gates rema
   prior failing Windows remaining-library shard; the earlier websocket timeout was not reproduced.
 - C worker checkpoint: local and remote `882943024a663e20ab0c27c470c6578a242c3ce7`; reviewer D
   reported NO_FINDING. It was integrated without conflict as `679f53f3`; final-tree focused tests
-  passed for log throughput (19 combined), TUI (16), log integration (2), and runtime-proxy
+  passed for log throughput (19 combined), TUI (13), log integration (5), and runtime-proxy
   response forwarding (21 plus one zero-test auxiliary target).
 - A worker checkpoints: local and remote `d5f94dd3be2dd9ae31a03832c19a0927920041c4` and
   `16eb68309204cfe11447131aeb5220030d7cfc19`; reviewer D reported NO_FINDING. They were integrated
   without conflict as `2b0bb24d` and `f9d8a05c`; final-tree tests passed for runtime-store (16),
   update-notice (11), and core (12).
-- Current integration tree contains both worker streams through `f9d8a05c`; its next pushed
-  checkpoint is pending after the ledger update and cross-domain review.
+- Current integration tree contains both worker streams through `f9d8a05c` plus guard repair
+  `32daf41b`; local static guards and focused tests pass, and remote CI is pending on that SHA.
 
 ## Batch B1: provider catalog authority
 
@@ -142,9 +143,10 @@ unknown; no TTFT, request timing, log receipt timing, content, credentials, or n
 
 - Worker checkpoint: local and remote `882943024a663e20ab0c27c470c6578a242c3ce7`; reviewer D
   reported no finding; integrated without conflict as `679f53f3`.
-- Tests: log-throughput 13, state 6, TUI 16, log integration 2, runtime-proxy response-forwarding
+- Tests: log-throughput 13, state 6, TUI 13, log integration 5, runtime-proxy response-forwarding
   21 plus one zero-test auxiliary target; all serial and passing. Formula cases cover 50, 40, 50,
-  and 80 t/s. `cargo fmt --check` and `git diff --check` passed.
+  and 80 t/s. `cargo fmt --check`, `git diff --check`, and the full static guard parallel runner
+  passed.
 
 ## Batch A1: shared atomic temp-file naming
 
