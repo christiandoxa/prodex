@@ -257,32 +257,43 @@ passed.
   worktree, release worktrees, and unrelated processes were not stopped. The secondary ext4 SSD
   remained mounted at its verified device identity and campaign-owned cleanup reclaimed completed
   build/review targets only.
-- Current integration head: `66157ef6daffcb444ce7ba4cfbfb6f795fc2c993`, pushed to
-  `refactor/parallel-integration-20260908`. The qualifying tree retains reviewed checkpoints
-  `1556875d` (overlay entrypoint reuse), `38077452` (private Copilot passthrough wrapper), and
-  `8d015e6e` (uncalled npm script surfaces). Their independent reviews returned `NO_FINDING` and
-  exact integrated focused checks passed.
+- Current local integration head: `33bc6795b248efa46504ebf745383d213251ef76`, on
+  `refactor/successor-integration-20260908`. The qualifying source tree retains reviewed
+  checkpoints `1556875d` (overlay entrypoint reuse), `38077452` (private Copilot passthrough
+  wrapper), and `33bc6795` (private idempotency route validation). `8d015e6e` (uncalled npm
+  script surfaces) was independently reviewed and integrated earlier, then reverted as
+  `81380514` so the higher-priority B0-003 checkpoint could enter without exceeding churn; its
+  branch, log, review, and validation evidence remain durable. Ledger/documentation commits are
+  also present; no main or release worktree was changed.
 - Churn evidence: CI run `34246900868` correctly rejected the wider `09212cf1` tree because the
   PR base `a32b107d` range reached 31 behavior files, above the enforced 25-file limit. No guard,
   threshold, or allowlist was weakened. The wider reviewed checkpoints `5c3aa588` (bounded TOML
   lookups), `09212cf1` (private domain cleanup), and `edcca0b4` (private terminal aliases) were
   reverted from the integration tree with ordinary revert commits, while their remote branches,
-  logs, reviews, and source evidence remain durable for a later qualifying batch.
+  logs, reviews, and source evidence remain durable for later qualifying batches. The current
+  local range is 29 files, 25 behavior files, and 990 changed lines.
 - Held checkpoints: `84512e22` (review `NO_FINDING`, config 19 plus app 4+6+1+176 tests and
   workspace Clippy), `c92851d8` (replacement exact-SHA review `NO_FINDING`, IDs 8 and governance
-  policy 10), and `932863af` (replacement exact-SHA review `NO_FINDING`, app alias tests 3+1+11+48)
-  are ledgered `IN_PROGRESS` because integrating them now would exceed the churn range. `87df35a2`
-  (runtime model scanner) and `3d755723` (private idempotency validation) are pushed and under
-  independent review; the model writer's full app aggregate stopped after 1,446 of 3,452 tests
-  with 16 unrelated runtime-synchronization failures, so it is not full-suite-green evidence.
-- Coverage: the ledger now has 64 unique B0 domains with 41 `UNREVIEWED`, 3 `IN_PROGRESS`, 7
-  `REFACTORED`, and 13 `KEEP_WITH_REASON`; all changes are evidence-backed and no row was closed
+  policy 10), `932863af` (replacement exact-SHA review `NO_FINDING`, app alias tests 3+1+11+48),
+  and `a9a9024c` (review `NO_FINDING`, npm 27, installer 12+1 Windows skip, SDK 17, release 10,
+  and fixture/guard checks) are ledgered `IN_PROGRESS` because integrating them now would exceed
+  the churn range. `87df35a2` (runtime model scanner) and `c56c4ab7` (CI script cleanup) remain
+  under independent review. The model writer's full app aggregate stopped after 1,446 of 3,452
+  tests with 16 unrelated runtime-synchronization failures, so it is not full-suite-green
+  evidence. B0-003's exact-SHA review returned `NO_FINDING`; integrated default/Mojo boundary
+  tests, app admin tests, Clippy, and guards passed.
+- Completed new audits added public-compatibility or semantic-risk holds for B0-022 shared types,
+  B0-024 provider SPI, and B0-025 quota; no source change was admitted from those reports. Their
+  logs contain exact-base graph/source evidence and no live-provider tests. Active exact workers
+  remain for B0-021, B0-026, B0-027, B0-033, B0-034, B0-028, and the three reviews above.
+- Coverage: the ledger has 64 unique B0 domains with 37 `UNREVIEWED`, 4 `IN_PROGRESS`, 7
+  `REFACTORED`, and 16 `KEEP_WITH_REASON`; all changes are evidence-backed and no row was closed
   by worker launch alone. Completed audits also recorded explicit public-API holds for control
-  plane, state, context blob-noise, housekeeping, and gateway surfaces, and a semantic-difference
-  hold for storage reservation validators.
-- Current CI: run `34250426817` targets the qualifying `66157ef6` head and remains pending at the
-  latest observation. It must finish successfully before this integration head can be treated as
-  an exact-green anchor.
+  plane, state, context blob-noise, housekeeping, shared types, provider SPI, and gateway
+  surfaces, plus semantic-difference holds for storage reservation validators and quota planning.
+- Current CI: the previously queued run `34251095095` targeted the pre-routing `81347add` head and
+  was superseded by the current integration commits. The current `33bc6795` push and its CI run
+  must finish successfully before this head can be treated as an exact-green anchor.
 
 ## Known checkpoints and blockers
 
@@ -292,12 +303,14 @@ passed.
 
 ## Cleanup and next action
 
-- No current integration or A2 handoff worktree/cache is retained. Historical campaign,
-  release, and issue64 worktrees with dirty or unknown ownership remain protected; two prunable
-  records remain untouched. Remote worker branches/checkpoints remain as evidence. No
-  campaign-created server or watcher remains active, and no scratch fixture, credential, or raw
-  log was created for this repair.
-- Next action at this boundary: keep historical and unknown-ownership worktrees protected, clean
-  only completed LEAN-CAMPAIGN-owned artifacts after handoff, and begin the next implementation
-  wave only after explicit scope selection. Do not claim campaign completion while any
-  `UNREVIEWED`, `IN_PROGRESS`, or `BLOCKED` row remains.
+- The successor integration worktree is retained. Clean stale audit worktrees from completed
+  exact-base audits were removed after checking clean status and process cwd; active audit/review
+  worktrees and their target caches remain protected until final reports are harvested. Historical
+  campaign, release, and issue64 worktrees with dirty or unknown ownership remain protected; two
+  prunable records remain untouched. Remote worker branches/checkpoints and campaign logs remain
+  as evidence. No campaign-created coordinator/server/watcher remains active, and no scratch
+  fixture or credential-bearing test was created.
+- Next action at this boundary: push and monitor the current successor head, harvest exact final
+  reports, clean only eligible campaign artifacts, and admit the next implementation wave only
+  after target/resource checks. Do not claim campaign completion while any `UNREVIEWED`,
+  `IN_PROGRESS`, or `BLOCKED` row remains.
