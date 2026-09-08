@@ -271,42 +271,36 @@ passed.
   lookups), `09212cf1` (private domain cleanup), and `edcca0b4` (private terminal aliases) were
   reverted from the integration tree with ordinary revert commits, while their remote branches,
   logs, reviews, and source evidence remain durable for later qualifying batches. The current
-  source/ledger range is near the enforced ceiling; its exact counts are recorded by the churn
-  guard before each push.
+  range is 28 files, 24 behavior files, and 1,192 changed lines.
 - Held checkpoints: `84512e22` (review `NO_FINDING`, config 19 plus app 4+6+1+176 tests and
   workspace Clippy), `c92851d8` (replacement exact-SHA review `NO_FINDING`, IDs 8 and governance
   policy 10), `932863af` (replacement exact-SHA review `NO_FINDING`, app alias tests 3+1+11+48),
-  and `a9a9024c` (review `NO_FINDING`, npm 27, installer 12+1 Windows skip, SDK 17, release 10,
-  and fixture/guard checks), plus `e3f947b3` (review `NO_FINDING`, optional-tools 51 and app
-  desktop/overlay 5+5), plus `38077452` (provider-core review `NO_FINDING`), are ledgered
-  `IN_PROGRESS` because integrating them now would exceed the churn range. `87df35a2` (runtime
-  model scanner) is held as `IN_PROGRESS` after exact-SHA review `NO_FINDING`; `c56c4ab7` (CI
-  script cleanup) received `REQUEST_CHANGES` because it removed the independent always-heavy
-  protection, and repair `a0a11310` is integrated after exact-SHA review `NO_FINDING`. The model
-  writer's full app aggregate stopped after 1,446 of 3,452
-  review returned `NO_FINDING`. `c56c4ab7` (CI script cleanup) received `REQUEST_CHANGES` because
-  it removed the independent always-heavy protection and remains unintegrated. The model writer's
-  full app aggregate stopped after 1,446 of 3,452
-  tests with 16 unrelated runtime-synchronization failures, so it is not full-suite-green
-  evidence. B0-003's exact-SHA review returned `NO_FINDING`; its integrated default/Mojo boundary
-  tests, app admin tests, Clippy, and guards passed before the checkpoint was held. B0-034 repair
-  `76a7e98f` received exact-SHA `NO_FINDING` and is integrated. B0-061 repair `a0a11310` restored
-  the independent protected-path invariant and is integrated.
+  `a9a9024c` (review `NO_FINDING`, npm 27, installer 12+1 Windows skip, SDK 17, release 10, and
+  fixture/guard checks), `e3f947b3` (review `NO_FINDING`, optional-tools 51 and app desktop/overlay
+  5+5), `38077452` (provider-core review `NO_FINDING`), and `87df35a2` (runtime model scanner,
+  exact-SHA review `NO_FINDING`) are ledgered `IN_PROGRESS` because integrating them now would
+  exceed the churn range. B0-003's exact-SHA review returned `NO_FINDING` and its checkpoint is
+  held; B0-061 repair `a0a11310` restored the independent always-heavy invariant and is
+  integrated. The model writer's full app aggregate stopped after 1,446 of 3,452 tests with 16
+  unrelated runtime-synchronization failures, so that aggregate is not full-suite-green evidence.
+  B0-034 repair `76a7e98f` received exact-SHA `NO_FINDING` and is integrated.
 - Completed new audits added public-compatibility or semantic-risk holds for B0-022 shared types,
-  B0-024 provider SPI, B0-025 quota, B0-027 observability, and B0-033 Gemini compatibility; no
-  source change was admitted from those reports. Their logs contain exact-base graph/source
-  evidence and no live-provider tests. The B0-027, B0-033, and B0-028 audit worktrees were
-  harvested and cleaned. B0-034 and B0-061 predecessor/review/repair evidence is retained in
-  logs and branches; eligible implementation/review worktrees and targets were cleaned.
-- Coverage: the ledger has 64 unique B0 domains with 29 `UNREVIEWED`, 8 `IN_PROGRESS`, 6
-  `REFACTORED`, and 21 `KEEP_WITH_REASON`; all changes are evidence-backed and no row was closed
+  B0-024 provider SPI, B0-025 quota, B0-027 observability, B0-033 Gemini compatibility, B0-035
+  runtime log, and B0-037 broker log; no source change was admitted from those audit reports.
+  Their logs contain exact-base graph/source evidence and no live-provider tests. B0-027, B0-033,
+  B0-035, B0-037, and B0-028 audit worktrees were harvested and cleaned. B0-036 remains active;
+  B0-034 and B0-061 predecessor/review/repair evidence is retained in logs and branches, with
+  eligible implementation/review worktrees and targets cleaned.
+- Coverage: the ledger has 64 unique B0 domains with 27 `UNREVIEWED`, 8 `IN_PROGRESS`, 6
+  `REFACTORED`, and 23 `KEEP_WITH_REASON`; all changes are evidence-backed and no row was closed
   by worker launch alone. Completed audits also recorded explicit public-API holds for control
   plane, state, context blob-noise, housekeeping, shared types, provider SPI, and gateway
   surfaces, plus semantic-difference holds for storage reservation validators and quota planning.
-- Current CI: run `34257479255` passed for the pre-cookie source tip `6d690f3f`; run
-  `34264415324` targets the cookie/CI-guard predecessor and must be checked after the current
-  push. Earlier run `34251095095` exposed the stale production-share expectation, fixed in
-  `3b2d0bd3`, `4f65da5d`, `c62657e7`, and the current measured fixture update.
+- Current CI: run `34257479255` passed for the pre-cookie source tip `6d690f3f`. Run `34267239512`
+  for the cookie/CI-guard predecessor failed only the Windows foundation shard's unrelated
+  `prodex-secret-store` concurrency test; all campaign-relevant jobs were otherwise green. The
+  current push must receive a fresh CI result. Earlier run `34251095095` exposed the stale
+  production-share expectation, corrected in the measured fixture updates.
 
 ## Known checkpoints and blockers
 
