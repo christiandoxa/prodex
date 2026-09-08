@@ -8,9 +8,11 @@ transport semantics. This is an implementation campaign, not a line-count exerci
 
 ## Baseline and branch
 
-- `BASE_SHA`: `afe20dfd9f813eb217f78b63de517c7e8e52e8b7`
+- `HISTORICAL_RELEASE_BASE`: `e835c1699f0960865c8cacabea6a109bd3500499` (release 0.427.0)
+- `CAMPAIGN_BASE`: `afe20dfd9f813eb217f78b63de517c7e8e52e8b7`
+- `LAST_EXACT_GREEN_SOURCE_ANCHOR`: `3b8be312ea29d74be922330df047459c7c2faf7c`
 - Baseline ancestry: `origin/main` (`ff7976858c048269d73e970356aa41f4d0b4cafb`) is an ancestor.
-- Branch: `refactor/lean-campaign-20260908-core`
+- Integration branch: `refactor/parallel-integration-20260908`
 - Baseline source: historical `origin/refactor/428-integration-20260907`; no active PR or descendant campaign was found.
 - Main write authorization: not granted. Release hold: true. Checkpoint push scope: campaign branch only.
 - Protected main-worktree WIP: `.playwright-mcp/`; `crates/prodex-app/src/runtime_broker/registry/direct.rs`.
@@ -19,11 +21,11 @@ transport semantics. This is an implementation campaign, not a line-count exerci
 
 `CAMPAIGN_PARTIAL`; B's catalog, C's throughput, and A's general refactor checkpoints are integrated.
 Full CI run `34193695148` passed on exact source tree `3b8be312`, including Sonar, Real Mojo/parity,
-macOS, all Windows shards, runtime stress, app shards, and relevant guards. Wave 4 is now active
-from that frozen source anchor: A2 audits root CLI/entrypoints and E audits configuration in
-disjoint worktrees; provider catalog and throughput surfaces remain protected. B2 is KEEP_WITH_REASON;
-the earlier A2 attempt is resumed as an explicit IN_PROGRESS row. The wider domain audit remains
-open and this campaign is partial.
+macOS, all Windows shards, runtime stress, app shards, and relevant guards. The subsequent exact
+integration-head run `34195533806` also passed on source head `7bd400cfa95c3068cdce5fcfd2346cf2002bd568`.
+Wave 4 completed its A2 source batch and E audit-only disposition; the next unresolved-domain wave
+must resolve its new integration head live. Provider catalog and throughput surfaces remain protected.
+The wider domain audit remains open and this campaign is partial.
 
 ## Parallel ownership ledger
 
@@ -34,11 +36,11 @@ Integration branch: `refactor/parallel-integration-20260908`.
 | A | General lean refactor | `34972926449f8201c925893ae5be3d8e5bb6976c` | `worker/refactor-general-20260908` | worker worktree | CLI, orchestration, profile/auth, session, runtime support, gateway, storage, config, reports, tooling outside B/C | provider catalog surfaces; throughput/log-throughput surfaces | d5f94dd3 + 16eb6830 pushed/integrated; stopped |
 | B | Provider model catalog | `a32b107df02d9b5b503b8d545a4fb24b7754e997` | `worker/provider-catalog-20260908` | worker worktree | provider catalog, Super model pickers, Kiro/Copilot/Gemini/OpenAI catalog consumers and tests | throughput/log-throughput; unrelated refactor | checkpoint pushed/integrated; worker stopped |
 | C | Throughput observability | `08eafe5eb22cf67cee9c301b186445154eb28cc0` | `worker/throughput-observability-20260908` | worker worktree | generation timing, token usage, throughput state, log TUI, history, throughput docs/tests | provider catalog; unrelated refactor | 88294302 pushed/integrated; stopped |
-| D | Read-only review | `a32b107df02d9b5b503b8d545a4fb24b7754e997` | none | none | exact checkpoint review only | all writes | complete; final integrated source no findings |
+| D | Read-only review | `a32b107df02d9b5b503b8d545a4fb24b7754e997` | none | none | exact checkpoint review only | all writes | completed exact-checkpoint reviews; no repository-wide claim |
 
 Worker contract: each worker commits only reviewed paths to its worker branch, pushes that branch,
 verifies its remote SHA, and reports focused tests/cleanup. Workers do not merge or push the
-integration branch. Heavy full-workspace, Mojo, and final integration gates remain serial here.
+integration branch. Heavy full-workspace, Mojo, and campaign integration gates remain serial here.
 
 ## Invariants
 
@@ -64,8 +66,8 @@ integration branch. Heavy full-workspace, Mojo, and final integration gates rema
 - Predecessor catalog PR: `#70`, base `refactor/428-integration-20260907`; it is closed as
   superseded, while its branch and commits remain available as pre-orchestration evidence.
 - Draft integration PR: `#71`, base `refactor/lean-campaign-20260908-core`, head
-  `refactor/parallel-integration-20260908`; its body will be updated with reviewed checkpoints
-  and final gate evidence.
+  `refactor/parallel-integration-20260908`; its body records verified checkpoints and SHA-scoped
+  gate evidence, with the latest integration head resolved separately from the last exact green source anchor.
 - B1 repair CI run `34184199873` completed with failure on the exact SHA `a32b107d`: Sonar
   reported `rust:S3776` cognitive complexity `27` at
   `crates/prodex-app/src/runtime_tools/sub_agent_catalog.rs:66`, and the Windows prodex-app
@@ -76,7 +78,7 @@ integration branch. Heavy full-workspace, Mojo, and final integration gates rema
   before-canonical OpenAI ordering and discarded main-picker degraded status—were fixed in B's
   reviewed checkpoint.
 - Parallel integration baseline: local and remote `a32b107df02d9b5b503b8d545a4fb24b7754e997` on
-  `refactor/parallel-integration-20260908`; first-wave worker branches all start at this SHA.
+  `refactor/parallel-integration-20260908`; first-wave worker branches all started at this SHA.
 - B repair checkpoint: local and remote `61f33d58f47f2ebef0b5ad104a14aaf407676382`; reviewer D
   found no P0-P3 issue. It was integrated without conflict as `0cec9519` on the integration branch.
 - Integration focused tests on `0cec9519`: `super_main_prompt` 8 passed and `sub_agent_catalog`
@@ -97,17 +99,17 @@ integration branch. Heavy full-workspace, Mojo, and final integration gates rema
   `34187555697` passed on exact SHA `34972926449f8201c925893ae5be3d8e5bb6976c`, including the
   prior failing Windows remaining-library shard; the earlier websocket timeout was not reproduced.
 - C worker checkpoint: local and remote `882943024a663e20ab0c27c470c6578a242c3ce7`; reviewer D
-  reported NO_FINDING. It was integrated without conflict as `679f53f3`; final-tree focused tests
+  reported NO_FINDING. It was integrated without conflict as `679f53f3`; integrated-tree focused tests
   passed for log throughput (19 combined), TUI (13), log integration (5), and runtime-proxy
   response forwarding (21 plus one zero-test auxiliary target).
 - A worker checkpoints: local and remote `d5f94dd3be2dd9ae31a03832c19a0927920041c4` and
   `16eb68309204cfe11447131aeb5220030d7cfc19`; reviewer D reported NO_FINDING. They were integrated
-  without conflict as `2b0bb24d` and `f9d8a05c`; final-tree tests passed for runtime-store (16),
+  without conflict as `2b0bb24d` and `f9d8a05c`; integrated-tree tests passed for runtime-store (16),
   update-notice (11), and core (12).
-- Current integration tree contains both worker streams through `f9d8a05c` plus guard repair
-  `32daf41b`; local static guards and focused tests pass. Full CI `34193695148` passed on exact
-  source SHA `3b8be312ea29d74be922330df047459c7c2faf7c`; this final ledger update changes only
-  campaign records.
+- The source tree at `3b8be312ea29d74be922330df047459c7c` contained both worker streams through
+  `f9d8a05c` plus guard repair `32daf41b`; local static guards and focused tests passed. Full CI
+  `34193695148` passed on that exact source SHA. The later ledger-only setup commit was `7bd400cf`;
+  the current Wave 4 source checkpoint is recorded separately below.
 - Wave 3 ownership was disjoint: B2 owned only the gateway/dashboard catalog consumers in B1-007;
   A2 owned one general-domain candidate outside provider catalog and throughput files. B2 completed
   its audit-only review with KEEP_WITH_REASON; A2 stopped before producing symbol-level evidence.
@@ -119,13 +121,13 @@ integration branch. Heavy full-workspace, Mojo, and final integration gates rema
   completed worker/B2 worktrees after clean/remote/process verification, reclaiming approximately
   `28G`. Main `target/` (`5.7G`) and integration `target/` (`21G`) are retained as protected or
   reusable caches; A2's clean handoff worktree is retained without a build target.
-- Final local gate evidence: `npm run ci -- --no-tests --jobs 1` exited `0` after release hygiene,
+- Local no-tests gate evidence: `npm run ci -- --no-tests --jobs 1` exited `0` after release hygiene,
   metadata, workspace all-target/all-feature check, strict clippy, and all non-test guards passed.
   The preceding `npm run ci -- --serial --jobs 1` logged PASS for test-fast and test-serial but
   did not expose a final parent exit line; it is not used as the sole completion claim.
-- Final reviewer D checked exact `7dc21ac55ac80a68f1133fe36fde387bda9bbcdd` and reported
-  NO_FINDING; the later `fe28e4b8` and `f9eb135d` changes are ledger-only and preserve that source
-  review. This note is the final ledger update before handoff.
+- Reviewer D checked exact `7dc21ac55ac80a68f1133fe36fde387bda9bbcdd` and reported NO_FINDING; the
+  later `fe28e4b8` and `f9eb135d` changes were ledger-only and preserve that source review. This
+  is historical evidence for that checkpoint, not a whole-campaign review result.
 
 ## Batch B1: provider catalog authority
 
@@ -150,7 +152,7 @@ order and `Custom` remains last.
   reproduced while evaluating the next consumer batch; those consumers are not part of B1.
 - Static guards after B1: application boundary, crate boundary, size, secret boundary, Mojo share,
   Mojo authority/no-fallback, and runtime test manifest all passed. All-feature workspace clippy
-  passed on the final B1 source tree.
+  passed on the B1 integrated source tree.
 - Measurement with the repository size guard: baseline `512,038` production Rust lines across
   `1,817` files; B1 `512,426` lines across the same file count. The increase is bounded loader and
   regression coverage; semantic ownership reduced by deleting the old picker-only loader and its
@@ -188,15 +190,20 @@ branches remain unchanged while duplicate naming logic uses the existing core ow
 | --- | --- | --- | --- | --- | --- | --- |
 | A2 | `3bfb043c03f6ea926bda6b7d6e8cb8790080a283` | `worker/refactor-general-b2-20260908` | worker worktree | one evidence-backed general-domain refactor outside B/C | all provider catalog and throughput/log-throughput paths | stopped; clean, no result; UNREVIEWED |
 | B2 | `3bfb043c03f6ea926bda6b7d6e8cb8790080a283` | `worker/provider-catalog-b2-20260908` | worker worktree | `gateway_kiro_model_catalog_json_from_paths`, dashboard models catalog consumer, and focused tests | throughput/log-throughput; A2 general refactor | audit complete; KEEP_WITH_REASON |
-| D | current integration SHA | none | none | read-only exact-checkpoint review | all writes | resume for Wave 3 checkpoints |
+| D | verified Wave 3 integration anchor | none | none | read-only exact-checkpoint review | all writes | resumed for Wave 3 checkpoints |
 
 ## Wave 4 ownership
 
 | Worker | Base SHA | Branch | Worktree | Owns | Excludes | Status |
 | --- | --- | --- | --- | --- | --- | --- |
-| A2 | `3b8be312ea29d74be922330df047459c7c2faf7c` | `worker/refactor-general-b2-20260908` | worker worktree | root CLI/entrypoints and compatibility facades in B0-001 | config, provider catalog, throughput/log-throughput | active; resumed from clean retained worktree |
-| E | `3b8be312ea29d74be922330df047459c7c2faf7c` | `worker/refactor-config-20260908` | worker worktree | `crates/prodex-config` B0-008 only | root CLI, provider catalog, throughput/log-throughput | active |
-| D | `3b8be312ea29d74be922330df047459c7c` | none | none | read-only exact Wave 4 checkpoint review | all writes | queued |
+| A2 | `3b8be312ea29d74be922330df047459c7c2faf7c` | `worker/refactor-general-b2-20260908` | worker worktree | root CLI/entrypoints and compatibility facades in B0-001 | config, provider catalog, throughput/log-throughput | checkpoint `293b2f84` pushed and integrated as `e15ce10a`; stopped clean |
+| E | `3b8be312ea29d74be922330df047459c7c2faf7c` | `worker/refactor-config-20260908` | worker worktree | `crates/prodex-config` B0-008 only | root CLI, provider catalog, throughput/log-throughput | audit-only KEEP_WITH_REASON; no source checkpoint; stopped clean |
+| D | `3b8be312ea29d74be922330df047459c7c2faf7c` | none | none | read-only exact Wave 4 checkpoint review | all writes | NO_FINDING on A2 checkpoint; stopped |
+
+Wave 4 source checkpoint: `e15ce10a` is the previous immutable integration anchor for this
+ledger update. It is not a claim that the wider campaign is complete. The live inventory after
+the audit dispositions is 59 UNREVIEWED, 0 IN_PROGRESS, 19 REFACTORED, 11 KEEP_WITH_REASON, and
+0 BLOCKED.
 
 ## Known checkpoints and blockers
 
@@ -207,12 +214,14 @@ branches remain unchanged while duplicate naming logic uses the existing core ow
 ## Cleanup and next action
 
 - Campaign worktree is owned by this campaign. Its `target/` build cache is retained while validation continues.
-- No campaign-created server or watcher remains active. All agents are stopped. Removed worktrees:
+- All workers from the previous completed waves were stopped and cleaned up. Wave 4 workers A2
+  and E were stopped after their checkpoint/disposition, and reviewer D was stopped after the
+  exact A2 review. No campaign-created server or watcher remains active. Removed worktrees:
   predecessor lean campaign, A/B/C completed worker worktrees, and B2 audit-only worktree; four
   stale prunable records were removed after verifying their directories were absent. Retained:
-  integration worktree/cache for final gates, A2 clean unreviewed handoff worktree, and remote
-  worker branches/checkpoints. No scratch fixture, server, watcher, credential, or raw log was
-  created for commit.
-- Next action: resume a symbol-level general-domain audit from the exact final ledger HEAD after
-  this checkpoint, starting with A2/B0 inventory rows; do not claim campaign completion while any
-  `UNREVIEWED` row remains.
+  integration worktree/cache for campaign validation, the clean A2 checkpoint worktree pending
+  safe post-integration removal, and remote worker branches/checkpoints. No scratch fixture,
+  server, watcher, credential, or raw log was created for commit.
+- Next action: after this ledger checkpoint is synchronized, resolve the resulting integration HEAD
+  live and launch the next non-overlapping audit wave for unresolved production domains; do not
+  claim campaign completion while any `UNREVIEWED`, `IN_PROGRESS`, or `BLOCKED` row remains.
