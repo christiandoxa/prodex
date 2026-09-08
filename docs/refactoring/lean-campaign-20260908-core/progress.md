@@ -17,8 +17,24 @@ transport semantics. This is an implementation campaign, not a line-count exerci
 
 ## Status
 
-`IN_PROGRESS`; B1 is pushed and CI is pending on the exact SHA. No batch is active while B2 is
-being prepared. The wider domain audit remains open.
+`IN_PROGRESS`; parallel first wave is active from integration base `a32b107d…`. B1 catalog repair
+CI is pending; workers may audit/read independent surfaces, but integration remains blocked on any
+failed checkpoint. The wider domain audit remains open.
+
+## Parallel ownership ledger
+
+Integration branch: `refactor/parallel-integration-20260908`.
+
+| Worker | Workstream | Base SHA | Branch | Worktree | Owns | Excludes | Status |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| A | General lean refactor | `a32b107df02d9b5b503b8d545a4fb24b7754e997` | `worker/refactor-general-20260908` | worker worktree | CLI, orchestration, profile/auth, session, runtime support, gateway, storage, config, reports, tooling outside B/C | provider catalog surfaces; throughput/log-throughput surfaces | active |
+| B | Provider model catalog | `a32b107df02d9b5b503b8d545a4fb24b7754e997` | `worker/provider-catalog-20260908` | worker worktree | provider catalog, Super model pickers, Kiro/Copilot/Gemini/OpenAI catalog consumers and tests | throughput/log-throughput; unrelated refactor | active |
+| C | Throughput observability | `a32b107df02d9b5b503b8d545a4fb24b7754e997` | `worker/throughput-observability-20260908` | worker worktree | generation timing, token usage, throughput state, log TUI, history, throughput docs/tests | provider catalog; unrelated refactor | active |
+| D | Read-only review | `a32b107df02d9b5b503b8d545a4fb24b7754e997` | none | none | exact checkpoint review only | all writes | pending |
+
+Worker contract: each worker commits only reviewed paths to its worker branch, pushes that branch,
+verifies its remote SHA, and reports focused tests/cleanup. Workers do not merge or push the
+integration branch. Heavy full-workspace, Mojo, and final integration gates remain serial here.
 
 ## Invariants
 
@@ -43,6 +59,8 @@ being prepared. The wider domain audit remains open.
 - B1 checkpoint: local and remote `b8064149b615b60c56fd38302cdcf113a8c33890`.
 - Draft PR: `#70`, base `refactor/428-integration-20260907`; CI is in progress/pending for B1,
   with `compat-replay-gate` successful and optional-tools freshness skipped by CI.
+- Parallel integration baseline: local and remote `a32b107df02d9b5b503b8d545a4fb24b7754e997` on
+  `refactor/parallel-integration-20260908`; first-wave worker branches all start at this SHA.
 
 ## Batch B1: provider catalog authority
 
@@ -83,6 +101,5 @@ order and `Custom` remains last.
 
 - Campaign worktree is owned by this campaign. Its `target/` build cache is retained while validation continues.
 - No campaign-created server or watcher remains active after baseline testing.
-- Next action: verify B1 CI completion on `b8064149…`; if green, begin B2 by reading the remaining
-  gateway Kiro and dashboard catalog loaders, preserving runtime dispatch behavior and keeping the
-  size-safe extraction in a separate focused batch.
+- Next action: launch A/B/C plus D, record their exact branch/worktree state, then review each worker
+  checkpoint serially before cherry-picking accepted commits into the integration branch.
