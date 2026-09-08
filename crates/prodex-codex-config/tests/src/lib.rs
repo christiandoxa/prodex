@@ -51,6 +51,27 @@ fn parses_nested_toml_table_string_value() {
 }
 
 #[test]
+fn parses_typed_nested_toml_value() {
+    let root = temp_dir("typed-nested-value");
+    fs::create_dir_all(&root).unwrap();
+    let config_path = root.join("config.toml");
+    fs::write(
+        &config_path,
+        "[deepseek]\nstrict_tools = true\nnotify = ['user-notifier']\n",
+    )
+    .unwrap();
+
+    assert_eq!(
+        codex_config_file_toml_value(&config_path, "deepseek.strict_tools").unwrap(),
+        Some(toml::Value::Boolean(true))
+    );
+    assert!(matches!(
+        codex_config_file_toml_value(&config_path, "deepseek.notify").unwrap(),
+        Some(toml::Value::Array(_))
+    ));
+}
+
+#[test]
 fn exact_config_value_preserves_empty_and_whitespace_strings() {
     let root = temp_dir("exact-config-values");
     fs::create_dir_all(&root).unwrap();
