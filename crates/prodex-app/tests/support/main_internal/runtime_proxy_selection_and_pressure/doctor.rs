@@ -4,5 +4,7 @@ use super::*;
 mod summary_fields;
 #[path = "doctor/finalize_guidance.rs"]
 mod finalize_guidance;
+#[path = "doctor/broker_security.rs"]
+mod broker_security;
 #[path = "doctor/state_collect.rs"]
 mod state_collect;

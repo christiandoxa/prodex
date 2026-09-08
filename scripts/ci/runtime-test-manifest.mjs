@@ -273,13 +273,13 @@ export const RUNTIME_CI_WORKFLOW_SHARDS = [
       {
         id: "doctor-state-unproven-identity",
         filter:
-          "main_internal_tests::runtime_proxy_selection_and_pressure::doctor::state_collect::runtime_doctor_does_not_probe_registry_without_process_identity",
+          "main_internal_tests::runtime_proxy_selection_and_pressure::doctor::broker_security::runtime_doctor_does_not_probe_registry_without_process_identity",
         label: "state-unproven-identity",
       },
       {
         id: "doctor-state-unproven-metrics",
         filter:
-          "main_internal_tests::runtime_proxy_selection_and_pressure::doctor::state_collect::live_broker_metrics_skip_registry_without_process_identity",
+          "main_internal_tests::runtime_proxy_selection_and_pressure::doctor::broker_security::live_broker_metrics_skip_registry_without_process_identity",
         label: "state-unproven-metrics",
       },
     ],
