@@ -18,10 +18,10 @@ transport semantics. This is an implementation campaign, not a line-count exerci
 ## Status
 
 `IN_PROGRESS`; B's catalog, C's throughput, and A's general refactor checkpoints are integrated.
-Full CI run `34187555697` passed on the repaired pre-C/A tree, including Sonar, Real Mojo/parity,
-macOS, all Windows shards, and the relevant guards. A final local guard repair is pushed at
-`32daf41b`; CI run `34189949768` is pending on that exact tree. The wider domain audit and final
-integration qualification remain open.
+Full CI run `34190204961` passed on exact `5c42efee`, including Sonar, Real Mojo/parity, macOS,
+all Windows shards, runtime stress, app shards, and relevant guards. B2 completed an audit-only
+catalog consumer review with a concrete KEEP_WITH_REASON; A2 produced no result and remains
+UNREVIEWED. The wider domain audit and final integration qualification remain open.
 
 ## Parallel ownership ledger
 
@@ -103,10 +103,11 @@ integration branch. Heavy full-workspace, Mojo, and final integration gates rema
   without conflict as `2b0bb24d` and `f9d8a05c`; final-tree tests passed for runtime-store (16),
   update-notice (11), and core (12).
 - Current integration tree contains both worker streams through `f9d8a05c` plus guard repair
-  `32daf41b`; local static guards and focused tests pass, and remote CI is pending on that SHA.
-- Wave 3 ownership is disjoint: B2 owns only the gateway/dashboard catalog consumers in B1-007;
-  A2 owns one general-domain candidate outside provider catalog and throughput files. Both new
-  worktrees start from the next ledger checkpoint derived from `3bfb043c`.
+  `32daf41b`; local static guards and focused tests pass. Full CI `34190204961` passed on exact
+  `5c42efee`, the audit-only wave checkpoint before the latest ledger update.
+- Wave 3 ownership was disjoint: B2 owned only the gateway/dashboard catalog consumers in B1-007;
+  A2 owned one general-domain candidate outside provider catalog and throughput files. B2 completed
+  its audit-only review; A2 stopped before producing symbol-level evidence.
 
 ## Batch B1: provider catalog authority
 
@@ -167,8 +168,8 @@ branches remain unchanged while duplicate naming logic uses the existing core ow
 
 | Worker | Base SHA | Branch | Worktree | Owns | Excludes | Status |
 | --- | --- | --- | --- | --- | --- | --- |
-| A2 | `3bfb043c03f6ea926bda6b7d6e8cb8790080a283` | `worker/refactor-general-b2-20260908` | worker worktree | one evidence-backed general-domain refactor outside B/C | all provider catalog and throughput/log-throughput paths | ready to start |
-| B2 | `3bfb043c03f6ea926bda6b7d6e8cb8790080a283` | `worker/provider-catalog-b2-20260908` | worker worktree | `gateway_kiro_model_catalog_json_from_paths`, dashboard models catalog consumer, and focused tests | throughput/log-throughput; A2 general refactor | ready to start |
+| A2 | `3bfb043c03f6ea926bda6b7d6e8cb8790080a283` | `worker/refactor-general-b2-20260908` | worker worktree | one evidence-backed general-domain refactor outside B/C | all provider catalog and throughput/log-throughput paths | stopped; clean, no result; UNREVIEWED |
+| B2 | `3bfb043c03f6ea926bda6b7d6e8cb8790080a283` | `worker/provider-catalog-b2-20260908` | worker worktree | `gateway_kiro_model_catalog_json_from_paths`, dashboard models catalog consumer, and focused tests | throughput/log-throughput; A2 general refactor | audit complete; KEEP_WITH_REASON |
 | D | current integration SHA | none | none | read-only exact-checkpoint review | all writes | resume for Wave 3 checkpoints |
 
 ## Known checkpoints and blockers
@@ -180,9 +181,9 @@ branches remain unchanged while duplicate naming logic uses the existing core ow
 ## Cleanup and next action
 
 - Campaign worktree is owned by this campaign. Its `target/` build cache is retained while validation continues.
-- No campaign-created server or watcher remains active. A, B, C, and D agents are stopped; A, B,
-  and C worktrees are clean after their remote checkpoints. Shared build caches are retained for
-  final gates; no scratch fixture, server, watcher, credential, or raw log was created for commit.
-- Next action: update the ledger for the integrated C/A checkpoints, push one serial integration
-  checkpoint, run cross-domain guards/tests, then perform the second-pass audit of changed owners
-  and remaining domains.
+- No campaign-created server or watcher remains active. All agents are stopped; A, B, C, B2, and
+  A2 worktrees are clean after their remote checkpoints or audit disposition. Shared build caches
+  are retained for final gates; no scratch fixture, server, watcher, credential, or raw log was
+  created for commit.
+- Next action: perform the next symbol-level general-domain audit from the current integration
+  SHA, or hand off the remaining UNREVIEWED inventory without claiming campaign completion.
