@@ -5,6 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { promisify } from "node:util";
+import { pathToFileURL } from "node:url";
 import {
   classifyChangedPaths,
   forceHeavyForCiEvent,
@@ -99,6 +100,58 @@ test("classifies PostgreSQL proof, backup, and impact classifier paths as heavy"
   assert.deepEqual(result.heavyPaths, paths.slice().sort());
   assert.deepEqual(result.lightPaths, []);
   assert.deepEqual(result.unknownPaths, []);
+});
+
+test("protected paths stay heavy when manifest marks them light", async () => {
+  const protectedPaths = [
+    "scripts/ci/storage-postgres-proof.mjs",
+    "scripts/ci/test-impact-manifest.json",
+  ];
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "prodex-ci-impact-manifest-"));
+
+  try {
+    const manifest = JSON.parse(
+      await fs.readFile(new URL("./test-impact-manifest.json", import.meta.url), "utf8"),
+    );
+    manifest.pathGroups.ciImpactHeavy.exact = manifest.pathGroups.ciImpactHeavy.exact.filter(
+      (filePath) => !protectedPaths.includes(filePath),
+    );
+    manifest.pathGroups.ciImpactLight.exact.push(...protectedPaths);
+
+    await Promise.all([
+      fs.copyFile(new URL("./ci-impact.mjs", import.meta.url), path.join(tempDir, "ci-impact.mjs")),
+      fs.copyFile(
+        new URL("./test-impact-manifest.mjs", import.meta.url),
+        path.join(tempDir, "test-impact-manifest.mjs"),
+      ),
+      fs.writeFile(
+        path.join(tempDir, "test-impact-manifest.json"),
+        `${JSON.stringify(manifest)}\n`,
+        "utf8",
+      ),
+    ]);
+
+    const { ciImpactCategory: tempCiImpactCategory } = await import(
+      pathToFileURL(path.join(tempDir, "test-impact-manifest.mjs")).href
+    );
+    assert.deepEqual(
+      protectedPaths.map((filePath) => tempCiImpactCategory(filePath)),
+      ["light", "light"],
+    );
+
+    const { stdout } = await execFileAsync(process.execPath, [
+      path.join(tempDir, "ci-impact.mjs"),
+      ...protectedPaths.flatMap((filePath) => ["--path", filePath]),
+      "--json",
+    ]);
+    const result = JSON.parse(stdout);
+
+    assert.equal(result.heavy, true);
+    assert.deepEqual(result.heavyPaths, protectedPaths.slice().sort());
+    assert.deepEqual(result.lightPaths, []);
+  } finally {
+    await fs.rm(tempDir, { recursive: true, force: true });
+  }
 });
 
 test("ci-impact uses canonical manifest impact groups", () => {

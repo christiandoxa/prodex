@@ -69,14 +69,6 @@ export function releaseEntryFromSubject(subject) {
   return null;
 }
 
-export function releaseEntryFromMessage(message) {
-  return releaseEntryFromSubject(messageSubject(message));
-}
-
-export function isVersionMetadataPath(filePath) {
-  return fileMatchesAnyPattern(filePath, VERSION_METADATA_PATTERNS);
-}
-
 export function isReleaseMetadataPath(filePath) {
   return fileMatchesAnyPattern(filePath, RELEASE_METADATA_PATTERNS);
 }
@@ -428,10 +420,6 @@ export async function messageOverride(args) {
     return fs.readFile(path.resolve(repoRoot, args.messageFile), "utf8");
   }
   return args.message;
-}
-
-export async function syntheticMessage(args) {
-  return (await messageOverride(args)) ?? "";
 }
 
 export async function changedFilesForSynthetic(args, options = {}) {
