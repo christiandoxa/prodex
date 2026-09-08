@@ -1,7 +1,5 @@
 use super::*;
 
-pub(crate) use prodex_runtime_launch::runtime_launch_cli_model;
-
 mod copilot_instructions;
 mod execution;
 mod plan;
@@ -344,4 +342,29 @@ fn runtime_launch_openai_model_context_from_models_cache(
                     .filter(|context_window| *context_window > 1)
             })
         })
+}
+
+pub(crate) fn runtime_launch_cli_model(args: &[OsString]) -> Option<String> {
+    let mut index = 0;
+    while index < args.len() {
+        let Some(arg) = args[index].to_str() else {
+            index += 1;
+            continue;
+        };
+        let model = if matches!(arg, "--model" | "-m") {
+            index += 1;
+            args.get(index).and_then(|value| value.to_str())
+        } else if let Some(value) = arg.strip_prefix("--model=") {
+            Some(value)
+        } else if let Some(value) = arg.strip_prefix("-m") {
+            (!value.is_empty()).then_some(value.trim_start_matches('='))
+        } else {
+            None
+        };
+        if let Some(model) = model.filter(|model| !model.trim().is_empty()) {
+            return Some(model.to_string());
+        }
+        index += 1;
+    }
+    None
 }

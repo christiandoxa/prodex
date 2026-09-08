@@ -216,31 +216,6 @@ pub fn is_codex_exec_invocation(codex_args: &[OsString]) -> bool {
         == Some("exec")
 }
 
-pub fn runtime_launch_cli_model(args: &[OsString]) -> Option<String> {
-    let mut index = 0;
-    while index < args.len() {
-        let Some(arg) = args[index].to_str() else {
-            index += 1;
-            continue;
-        };
-        let model = if matches!(arg, "--model" | "-m") {
-            index += 1;
-            args.get(index).and_then(|value| value.to_str())
-        } else if let Some(value) = arg.strip_prefix("--model=") {
-            Some(value)
-        } else if let Some(value) = arg.strip_prefix("-m") {
-            (!value.is_empty()).then_some(value.trim_start_matches('='))
-        } else {
-            None
-        };
-        if let Some(model) = model.filter(|model| !model.trim().is_empty()) {
-            return Some(model.to_string());
-        }
-        index += 1;
-    }
-    None
-}
-
 fn codex_option_takes_separate_value(arg: &str) -> bool {
     matches!(
         arg,
