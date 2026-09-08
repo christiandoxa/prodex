@@ -264,16 +264,6 @@ impl ControlPlaneOperation {
     pub const fn requires_immutable_audit(self) -> bool {
         true
     }
-
-    pub fn audit_requirement(self) -> ControlPlaneAuditRequirementPlan {
-        ControlPlaneAuditRequirementPlan {
-            operation: self,
-            action: self.audit_action(),
-            write_mode: ControlPlaneAuditWriteMode::AppendOnlyHashChain,
-            success_required: true,
-            denial_required: true,
-        }
-    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -382,15 +372,6 @@ pub struct ControlPlaneActionPlan {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ControlPlaneAuditWriteMode {
     AppendOnlyHashChain,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct ControlPlaneAuditRequirementPlan {
-    pub operation: ControlPlaneOperation,
-    pub action: AuditAction,
-    pub write_mode: ControlPlaneAuditWriteMode,
-    pub success_required: bool,
-    pub denial_required: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
