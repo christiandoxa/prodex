@@ -8,9 +8,6 @@ use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
 
 #[cfg(test)]
-use std::time::{SystemTime, UNIX_EPOCH};
-
-#[cfg(test)]
 use crate::runtime_take_fault_injection_budget;
 use crate::{
     JsonFileLock, LAST_GOOD_FILE_SUFFIX, RecoveredVersionedLoad, STATE_SAVE_SEQUENCE,
