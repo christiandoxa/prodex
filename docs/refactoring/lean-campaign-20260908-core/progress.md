@@ -22,8 +22,8 @@ Full CI run `34190204961` passed on exact `5c42efee`, including Sonar, Real Mojo
 all Windows shards, runtime stress, app shards, and relevant guards. B2 completed an audit-only
 catalog consumer review with a concrete KEEP_WITH_REASON; A2 produced no result and remains
 UNREVIEWED. Final reviewer D returned NO_FINDING on source tree `34800090`; the final ledger-only
-checkpoint is `7dc21ac5`. The wider domain audit and final integration qualification remain open;
-CI `34193214173` on exact `7dc21ac5` is the last pending gate.
+checkpoint is `fe28e4b8`. The wider domain audit and final integration qualification remain open;
+CI `34193384722` on exact `fe28e4b8` is the last pending gate.
 
 ## Parallel ownership ledger
 
@@ -107,7 +107,7 @@ integration branch. Heavy full-workspace, Mojo, and final integration gates rema
 - Current integration tree contains both worker streams through `f9d8a05c` plus guard repair
   `32daf41b`; local static guards and focused tests pass. Full CI `34190204961` passed on exact
   `5c42efee`, the audit-only wave checkpoint before the latest ledger updates. The final clean
-  integration SHA is `7dc21ac55ac80a68f1133fe36fde387bda9bbcdd`.
+  integration SHA is `fe28e4b8a5f798af429cb184b40726895578ed9d`.
 - Wave 3 ownership was disjoint: B2 owned only the gateway/dashboard catalog consumers in B1-007;
   A2 owned one general-domain candidate outside provider catalog and throughput files. B2 completed
   its audit-only review; A2 stopped before producing symbol-level evidence.
@@ -124,7 +124,7 @@ integration branch. Heavy full-workspace, Mojo, and final integration gates rema
   The preceding `npm run ci -- --serial --jobs 1` logged PASS for test-fast and test-serial but
   did not expose a final parent exit line; it is not used as the sole completion claim.
 - Final reviewer D checked exact `7dc21ac55ac80a68f1133fe36fde387bda9bbcdd` and reported
-  NO_FINDING; final CI is pending on that exact SHA.
+  NO_FINDING; this final ledger-only correction is pending exact review and CI.
 
 ## Batch B1: provider catalog authority
 
@@ -205,4 +205,4 @@ branches remain unchanged while duplicate naming logic uses the existing core ow
   worker branches/checkpoints. No scratch fixture, server, watcher, credential, or raw log was
   created for commit.
 - Next action: perform the next symbol-level general-domain audit from the current integration
-  SHA `7dc21ac5`, or hand off the remaining UNREVIEWED inventory without claiming campaign completion.
+  SHA `fe28e4b8`, or hand off the remaining UNREVIEWED inventory without claiming campaign completion.
