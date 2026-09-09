@@ -15,8 +15,8 @@ const ID_TOKEN_ASSOCIATED_DATA_PREFIX: &str = "prodex:gateway:browser:id-token:v
 
 #[derive(Default)]
 pub(crate) struct RuntimeGatewayBrowserState {
-    pub(super) transactions: Arc<Mutex<BTreeMap<String, RuntimeGatewayBrowserTransaction>>>,
-    pub(super) sessions: Arc<Mutex<BTreeMap<String, RuntimeGatewayBrowserSession>>>,
+    pub(super) transactions: Arc<Mutex<BTreeMap<String, Arc<RuntimeGatewayBrowserTransaction>>>>,
+    pub(super) sessions: Arc<Mutex<BTreeMap<String, Arc<RuntimeGatewayBrowserSession>>>>,
 }
 
 #[derive(Clone, serde::Serialize, serde::Deserialize)]
@@ -80,6 +80,9 @@ pub(super) fn browser_store_transaction(
     state: String,
     transaction: RuntimeGatewayBrowserTransaction,
 ) -> BrowserResult<()> {
+    let value = serde_json::to_string(&transaction)
+        .map_err(|_| RuntimeGatewayBrowserFailure::Unavailable)?;
+    let transaction = Arc::new(transaction);
     let now = runtime_gateway_unix_epoch_millis();
     let mut transactions = shared
         .gateway_browser
@@ -90,14 +93,12 @@ pub(super) fn browser_store_transaction(
     if transactions.len() >= MAX_BROWSER_TRANSACTIONS {
         return Err(RuntimeGatewayBrowserFailure::Unavailable);
     }
-    transactions.insert(state.clone(), transaction.clone());
+    let previous = transactions.insert(state.clone(), Arc::clone(&transaction));
     drop(transactions);
     let Some(executor) = shared.gateway_redis_rate_limit_executor.as_ref() else {
         return Ok(());
     };
-    let value = serde_json::to_string(&transaction)
-        .map_err(|_| RuntimeGatewayBrowserFailure::Unavailable)?;
-    let stored = shared
+    match shared
         .runtime_shared
         .async_runtime
         .handle()
@@ -105,18 +106,18 @@ pub(super) fn browser_store_transaction(
             &format!("{TRANSACTION_KEY_PREFIX}{state}"),
             &value,
             Duration::from_millis(BROWSER_TRANSACTION_TTL_MS),
-        ))
-        .map_err(|_| RuntimeGatewayBrowserFailure::Unavailable)?;
-    if !stored {
-        shared
-            .gateway_browser
-            .transactions
-            .lock()
-            .map_err(|_| RuntimeGatewayBrowserFailure::Unavailable)?
-            .remove(&state);
-        return Err(RuntimeGatewayBrowserFailure::Unavailable);
+        )) {
+        Ok(true) => Ok(()),
+        Ok(false) | Err(_) => {
+            let mut transactions = shared
+                .gateway_browser
+                .transactions
+                .lock()
+                .map_err(|_| RuntimeGatewayBrowserFailure::Unavailable)?;
+            restore_owned_entry(&mut transactions, &state, &transaction, previous);
+            Err(RuntimeGatewayBrowserFailure::Unavailable)
+        }
     }
-    Ok(())
 }
 
 pub(super) fn browser_take_transaction(
@@ -124,18 +125,27 @@ pub(super) fn browser_take_transaction(
     state: &str,
 ) -> BrowserResult<Option<RuntimeGatewayBrowserTransaction>> {
     if let Some(executor) = shared.gateway_redis_rate_limit_executor.as_ref() {
+        let local_owner = shared
+            .gateway_browser
+            .transactions
+            .lock()
+            .map_err(|_| RuntimeGatewayBrowserFailure::Unavailable)?
+            .get(state)
+            .cloned();
         let value = shared
             .runtime_shared
             .async_runtime
             .handle()
             .block_on(executor.take_ephemeral(&format!("{TRANSACTION_KEY_PREFIX}{state}")))
             .map_err(|_| RuntimeGatewayBrowserFailure::Unavailable)?;
-        shared
-            .gateway_browser
-            .transactions
-            .lock()
-            .map_err(|_| RuntimeGatewayBrowserFailure::Unavailable)?
-            .remove(state);
+        if let Some(local_owner) = local_owner {
+            let mut transactions = shared
+                .gateway_browser
+                .transactions
+                .lock()
+                .map_err(|_| RuntimeGatewayBrowserFailure::Unavailable)?;
+            restore_owned_entry(&mut transactions, state, &local_owner, None);
+        }
         return value
             .map(|value| {
                 serde_json::from_str(&value).map_err(|_| RuntimeGatewayBrowserFailure::Unavailable)
@@ -149,5 +159,83 @@ pub(super) fn browser_take_transaction(
         .lock()
         .map_err(|_| RuntimeGatewayBrowserFailure::Unavailable)?;
     transactions.retain(|_, transaction| transaction.expires_at_unix_ms > now);
-    Ok(transactions.remove(state))
+    Ok(transactions
+        .remove(state)
+        .map(|transaction| transaction.as_ref().clone()))
+}
+
+pub(super) fn browser_restore_session_shadow(
+    shared: &RuntimeLocalRewriteProxyShared,
+    session_id: &str,
+    owner: &Arc<RuntimeGatewayBrowserSession>,
+    previous: Option<Arc<RuntimeGatewayBrowserSession>>,
+) -> BrowserResult<()> {
+    let mut sessions = shared
+        .gateway_browser
+        .sessions
+        .lock()
+        .map_err(|_| RuntimeGatewayBrowserFailure::Unavailable)?;
+    restore_owned_entry(&mut sessions, session_id, owner, previous);
+    Ok(())
+}
+
+fn restore_owned_entry<T>(
+    entries: &mut BTreeMap<String, Arc<T>>,
+    key: &str,
+    owner: &Arc<T>,
+    previous: Option<Arc<T>>,
+) {
+    if entries
+        .get(key)
+        .is_some_and(|current| Arc::ptr_eq(current, owner))
+    {
+        if let Some(previous) = previous {
+            entries.insert(key.to_string(), previous);
+        } else {
+            entries.remove(key);
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn transaction(nonce: &str) -> Arc<RuntimeGatewayBrowserTransaction> {
+        Arc::new(RuntimeGatewayBrowserTransaction {
+            nonce: nonce.to_string(),
+            code_verifier: format!("verifier-{nonce}"),
+            expires_at_unix_ms: 1_000,
+        })
+    }
+
+    #[test]
+    fn browser_shadow_rollback_restores_only_its_owned_entry() {
+        let key = "synthetic-state".to_string();
+        let previous = transaction("previous");
+        let owner = transaction("owner");
+        let replacement = transaction("replacement");
+        let mut entries = BTreeMap::from([(key.clone(), Arc::clone(&previous))]);
+
+        entries.insert(key.clone(), Arc::clone(&owner));
+        restore_owned_entry(&mut entries, &key, &owner, Some(Arc::clone(&previous)));
+        assert!(
+            entries
+                .get(&key)
+                .is_some_and(|current| Arc::ptr_eq(current, &previous))
+        );
+
+        entries.insert(key.clone(), Arc::clone(&owner));
+        entries.insert(key.clone(), Arc::clone(&replacement));
+        restore_owned_entry(&mut entries, &key, &owner, None);
+        assert!(
+            entries
+                .get(&key)
+                .is_some_and(|current| Arc::ptr_eq(current, &replacement))
+        );
+
+        entries.insert(key.clone(), Arc::clone(&owner));
+        restore_owned_entry(&mut entries, &key, &owner, None);
+        assert!(!entries.contains_key(&key));
+    }
 }

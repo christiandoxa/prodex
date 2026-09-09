@@ -2,7 +2,7 @@ use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 use prodex_authn::{OidcBrowserFlowCapability, OidcBrowserFlowRequirement, OidcPkceMethod};
 use runtime_proxy_crate::path_without_query;
 use sha2::{Digest, Sha256};
-use std::collections::BTreeMap;
+use std::{collections::BTreeMap, sync::Arc};
 
 mod csrf;
 mod store;
@@ -11,8 +11,8 @@ use self::csrf::{CSRF_COOKIE, browser_session_csrf_valid};
 pub(super) use self::store::RuntimeGatewayBrowserState;
 use self::store::{
     BROWSER_TRANSACTION_TTL_MS, RuntimeGatewayBrowserSession, RuntimeGatewayBrowserTransaction,
-    browser_protect_id_token, browser_store_transaction, browser_take_transaction,
-    browser_unprotect_id_token,
+    browser_protect_id_token, browser_restore_session_shadow, browser_store_transaction,
+    browser_take_transaction, browser_unprotect_id_token,
 };
 
 use super::local_rewrite::RuntimeLocalRewriteProxyShared;
@@ -111,7 +111,7 @@ pub(super) fn runtime_gateway_browser_session_auth(
     let now = runtime_gateway_unix_epoch_millis();
     let session = browser_load_session(shared, session_id).ok().flatten()?;
     if session.expires_at_unix_ms <= now {
-        let _ = browser_delete_session_record(shared, session_id, Some(&session));
+        let _ = browser_delete_session_record(shared, session_id, Some(&session), None);
         return None;
     }
     if !browser_session_csrf_valid(request, &session) {
@@ -127,14 +127,14 @@ pub(super) fn runtime_gateway_browser_session_auth(
             }) {
             Ok(verified) => verified,
             Err(_) => {
-                let _ = browser_delete_session_record(shared, session_id, Some(&session));
+                let _ = browser_delete_session_record(shared, session_id, Some(&session), None);
                 return None;
             }
         };
     match runtime_gateway_oidc_admin_auth_from_verified(verified, oidc, shared) {
         Some(authentication) => Some(authentication),
         None => {
-            let _ = browser_delete_session_record(shared, session_id, Some(&session));
+            let _ = browser_delete_session_record(shared, session_id, Some(&session), None);
             None
         }
     }
@@ -337,7 +337,7 @@ fn runtime_gateway_browser_logout(
         {
             return Err(RuntimeGatewayBrowserFailure::Unauthorized);
         }
-        browser_delete_session_record(shared, session_id, session.as_ref())?;
+        browser_delete_session_record(shared, session_id, session.as_ref(), None)?;
     }
     Ok(redirect_response(
         303,
@@ -637,6 +637,9 @@ fn browser_store_session(
     session_id: String,
     session: RuntimeGatewayBrowserSession,
 ) -> BrowserResult<()> {
+    let value =
+        serde_json::to_string(&session).map_err(|_| RuntimeGatewayBrowserFailure::Unavailable)?;
+    let session = Arc::new(session);
     let now = runtime_gateway_unix_epoch_millis();
     let mut sessions = shared
         .gateway_browser
@@ -652,14 +655,12 @@ fn browser_store_session(
     {
         sessions.remove(&oldest);
     }
-    sessions.insert(session_id.clone(), session.clone());
+    let previous = sessions.insert(session_id.clone(), Arc::clone(&session));
     drop(sessions);
     let Some(executor) = shared.gateway_redis_rate_limit_executor.as_ref() else {
         return Ok(());
     };
-    let value =
-        serde_json::to_string(&session).map_err(|_| RuntimeGatewayBrowserFailure::Unavailable)?;
-    let stored = shared
+    match shared
         .runtime_shared
         .async_runtime
         .handle()
@@ -667,16 +668,12 @@ fn browser_store_session(
             &format!("{SESSION_KEY_PREFIX}{session_id}"),
             &value,
             std::time::Duration::from_millis(BROWSER_SESSION_TTL_MS),
-        ))
-        .map_err(|_| RuntimeGatewayBrowserFailure::Unavailable)?;
-    if !stored {
-        shared
-            .gateway_browser
-            .sessions
-            .lock()
-            .map_err(|_| RuntimeGatewayBrowserFailure::Unavailable)?
-            .remove(&session_id);
-        return Err(RuntimeGatewayBrowserFailure::Unavailable);
+        )) {
+        Ok(true) => {}
+        Ok(false) | Err(_) => {
+            browser_restore_session_shadow(shared, &session_id, &session, previous)?;
+            return Err(RuntimeGatewayBrowserFailure::Unavailable);
+        }
     }
     for logout_key in &session.logout_keys {
         if shared
@@ -690,7 +687,12 @@ fn browser_store_session(
             ))
             .is_err()
         {
-            let _ = browser_delete_session_record(shared, &session_id, Some(&session));
+            let _ = browser_delete_session_record(
+                shared,
+                &session_id,
+                Some(session.as_ref()),
+                Some(&session),
+            );
             return Err(RuntimeGatewayBrowserFailure::Unavailable);
         }
     }
@@ -721,7 +723,9 @@ fn browser_load_session(
         .lock()
         .map_err(|_| RuntimeGatewayBrowserFailure::Unavailable)?;
     sessions.retain(|_, session| session.expires_at_unix_ms > now);
-    Ok(sessions.get(session_id).cloned())
+    Ok(sessions
+        .get(session_id)
+        .map(|session| session.as_ref().clone()))
 }
 
 fn browser_delete_session(
@@ -729,14 +733,25 @@ fn browser_delete_session(
     session_id: &str,
 ) -> BrowserResult<()> {
     let session = browser_load_session(shared, session_id)?;
-    browser_delete_session_record(shared, session_id, session.as_ref())
+    browser_delete_session_record(shared, session_id, session.as_ref(), None)
 }
 
 fn browser_delete_session_record(
     shared: &RuntimeLocalRewriteProxyShared,
     session_id: &str,
     session: Option<&RuntimeGatewayBrowserSession>,
+    local_owner: Option<&Arc<RuntimeGatewayBrowserSession>>,
 ) -> BrowserResult<()> {
+    let local_owner = match local_owner {
+        Some(owner) => Some(Arc::clone(owner)),
+        None => shared
+            .gateway_browser
+            .sessions
+            .lock()
+            .map_err(|_| RuntimeGatewayBrowserFailure::Unavailable)?
+            .get(session_id)
+            .cloned(),
+    };
     if let Some(executor) = shared.gateway_redis_rate_limit_executor.as_ref() {
         shared
             .runtime_shared
@@ -755,12 +770,9 @@ fn browser_delete_session_record(
             }
         }
     }
-    shared
-        .gateway_browser
-        .sessions
-        .lock()
-        .map_err(|_| RuntimeGatewayBrowserFailure::Unavailable)?
-        .remove(session_id);
+    if let Some(local_owner) = local_owner {
+        browser_restore_session_shadow(shared, session_id, &local_owner, None)?;
+    }
     Ok(())
 }
 
