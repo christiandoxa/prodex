@@ -1,5 +1,6 @@
 use super::*;
-use zeroize::Zeroize;
+use serde::de::{Deserializer as _, IgnoredAny, MapAccess, Visitor};
+use std::{borrow::Cow, fmt};
 
 pub fn runtime_broker_listen_addr_is_loopback(listen_addr: &str) -> bool {
     listen_addr
@@ -7,37 +8,35 @@ pub fn runtime_broker_listen_addr_is_loopback(listen_addr: &str) -> bool {
         .is_ok_and(|address| address.ip().is_loopback())
 }
 
-pub fn runtime_broker_registry_contains_legacy_secrets(mut bytes: Vec<u8>) -> bool {
-    struct LegacySecretKeyVisitor;
+pub fn runtime_broker_registry_contains_legacy_secrets(
+    bytes: &[u8],
+) -> Result<bool, serde_json::Error> {
+    let mut deserializer = serde_json::Deserializer::from_slice(bytes);
+    let contains = deserializer.deserialize_map(LegacyRegistryKeyVisitor)?;
+    deserializer.end()?;
+    Ok(contains)
+}
 
-    impl<'de> serde::de::Visitor<'de> for LegacySecretKeyVisitor {
-        type Value = bool;
+struct LegacyRegistryKeyVisitor;
 
-        fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            formatter.write_str("a JSON object")
-        }
+impl<'de> Visitor<'de> for LegacyRegistryKeyVisitor {
+    type Value = bool;
 
-        fn visit_map<A>(self, mut map: A) -> Result<Self::Value, A::Error>
-        where
-            A: serde::de::MapAccess<'de>,
-        {
-            let mut contains = false;
-            while let Some(key) = map.next_key::<String>()? {
-                contains |= matches!(key.as_str(), "instance_token" | "admin_token");
-                map.next_value::<serde::de::IgnoredAny>()?;
-            }
-            Ok(contains)
-        }
+    fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("a runtime broker registry object")
     }
 
-    let mut deserializer = serde_json::Deserializer::from_slice(&bytes);
-    let contains =
-        match serde::de::Deserializer::deserialize_map(&mut deserializer, LegacySecretKeyVisitor) {
-            Ok(contains) => contains && deserializer.end().is_ok(),
-            Err(_) => false,
-        };
-    bytes.zeroize();
-    contains
+    fn visit_map<A>(self, mut map: A) -> Result<Self::Value, A::Error>
+    where
+        A: MapAccess<'de>,
+    {
+        let mut contains = false;
+        while let Some(key) = map.next_key::<Cow<'de, str>>()? {
+            contains |= matches!(key.as_ref(), "instance_token" | "admin_token");
+            map.next_value::<IgnoredAny>()?;
+        }
+        Ok(contains)
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
