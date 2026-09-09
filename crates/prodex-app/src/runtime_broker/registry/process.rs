@@ -116,13 +116,22 @@ pub(crate) fn runtime_process_identity_outcome(
 #[cfg(not(target_os = "macos"))]
 pub(crate) fn runtime_process_identity_outcome(
     pid: u32,
-    _expected_birth_identity: Option<&str>,
+    expected_birth_identity: Option<&str>,
     _expected_executable_path: Option<&Path>,
 ) -> RuntimeProcessIdentityOutcome {
     if RuntimeProcessPlatformImpl::process_absence_proven(pid) {
-        RuntimeProcessIdentityOutcome::Absent
-    } else {
-        RuntimeProcessIdentityOutcome::Proven
+        return RuntimeProcessIdentityOutcome::Absent;
+    }
+    let Some(expected_birth_identity) = expected_birth_identity else {
+        return RuntimeProcessIdentityOutcome::OwnershipUnproven;
+    };
+    match RuntimeProcessPlatformImpl::process_birth_identity(pid) {
+        Some(actual) if actual == expected_birth_identity => RuntimeProcessIdentityOutcome::Proven,
+        Some(_) => RuntimeProcessIdentityOutcome::OwnershipChanged,
+        None if RuntimeProcessPlatformImpl::process_absence_proven(pid) => {
+            RuntimeProcessIdentityOutcome::Absent
+        }
+        None => RuntimeProcessIdentityOutcome::OwnershipUnproven,
     }
 }
 
@@ -514,6 +523,31 @@ mod tests {
             }
         );
         assert!(runtime_process_pid_alive(pid));
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    #[test]
+    fn non_macos_identity_outcome_requires_process_proof() {
+        let pid = std::process::id();
+        let executable = env::current_exe().expect("current executable should be known");
+        let birth_identity = runtime_process_birth_identity(pid);
+
+        assert_eq!(
+            runtime_process_identity_outcome(pid, None, Some(&executable)),
+            RuntimeProcessIdentityOutcome::OwnershipUnproven
+        );
+        assert_ne!(
+            runtime_process_identity_outcome(pid, Some("not-this-process"), Some(&executable)),
+            RuntimeProcessIdentityOutcome::Proven
+        );
+
+        let Some(birth_identity) = birth_identity else {
+            return;
+        };
+        assert_eq!(
+            runtime_process_identity_outcome(pid, Some(&birth_identity), Some(&executable)),
+            RuntimeProcessIdentityOutcome::Proven
+        );
     }
 
     #[cfg(any(target_os = "linux", target_os = "macos", windows))]
