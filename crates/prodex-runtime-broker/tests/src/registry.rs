@@ -239,24 +239,32 @@ fn registry_backup_payload_snapshot_contains_metadata_only() {
 
 #[test]
 fn legacy_registry_secret_fields_are_detected() {
-    assert!(runtime_broker_registry_contains_legacy_secrets(
-        br#"{"admin_token":"secret"}"#.to_vec()
-    ));
-    assert!(runtime_broker_registry_contains_legacy_secrets(
-        br#"{"instance_token":"secret"}"#.to_vec()
-    ));
-    assert!(!runtime_broker_registry_contains_legacy_secrets(
-        br#"{"instance_id":"public"}"#.to_vec()
-    ));
-    assert!(!runtime_broker_registry_contains_legacy_secrets(
-        br#"{"current_profile":"contains \"admin_token\""}"#.to_vec()
-    ));
-    assert!(!runtime_broker_registry_contains_legacy_secrets(
-        br#"{"nested":{"admin_token":"secret"}}"#.to_vec()
-    ));
-    assert!(!runtime_broker_registry_contains_legacy_secrets(
-        br#"{"admin_token":"truncated""#.to_vec()
-    ));
+    assert!(
+        runtime_broker_registry_contains_legacy_secrets(br#"{"admin_token":"secret"}"#).unwrap()
+    );
+    assert!(
+        runtime_broker_registry_contains_legacy_secrets(br#"{"instance_token":"secret"}"#).unwrap()
+    );
+    assert!(
+        runtime_broker_registry_contains_legacy_secrets(br#"{"adm\u0069n_token":"secret"}"#)
+            .unwrap()
+    );
+    assert!(
+        !runtime_broker_registry_contains_legacy_secrets(br#"{"instance_id":"public"}"#).unwrap()
+    );
+    assert!(
+        !runtime_broker_registry_contains_legacy_secrets(
+            br#"{"current_profile":"contains \"admin_token\""}"#
+        )
+        .unwrap()
+    );
+    assert!(
+        !runtime_broker_registry_contains_legacy_secrets(br#"{"nested":{"admin_token":"secret"}}"#)
+            .unwrap()
+    );
+    assert!(
+        runtime_broker_registry_contains_legacy_secrets(br#"{"admin_token":"truncated""#).is_err()
+    );
 }
 
 #[test]

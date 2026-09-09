@@ -1,17 +1,36 @@
 use super::*;
-use zeroize::Zeroize;
+use serde::de::{Deserializer as _, IgnoredAny, MapAccess, Visitor};
+use std::{borrow::Cow, fmt};
 
-pub fn runtime_broker_registry_contains_legacy_secrets(mut bytes: Vec<u8>) -> bool {
-    let contains = serde_json::from_slice::<serde_json::Value>(&bytes)
-        .ok()
-        .and_then(|value| {
-            value.as_object().map(|object| {
-                object.contains_key("instance_token") || object.contains_key("admin_token")
-            })
-        })
-        .unwrap_or(false);
-    bytes.zeroize();
-    contains
+pub fn runtime_broker_registry_contains_legacy_secrets(
+    bytes: &[u8],
+) -> Result<bool, serde_json::Error> {
+    let mut deserializer = serde_json::Deserializer::from_slice(bytes);
+    let contains = deserializer.deserialize_map(LegacyRegistryKeyVisitor)?;
+    deserializer.end()?;
+    Ok(contains)
+}
+
+struct LegacyRegistryKeyVisitor;
+
+impl<'de> Visitor<'de> for LegacyRegistryKeyVisitor {
+    type Value = bool;
+
+    fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("a runtime broker registry object")
+    }
+
+    fn visit_map<A>(self, mut map: A) -> Result<Self::Value, A::Error>
+    where
+        A: MapAccess<'de>,
+    {
+        let mut contains = false;
+        while let Some(key) = map.next_key::<Cow<'de, str>>()? {
+            contains |= matches!(key.as_ref(), "instance_token" | "admin_token");
+            map.next_value::<IgnoredAny>()?;
+        }
+        Ok(contains)
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

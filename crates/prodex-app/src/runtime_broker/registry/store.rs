@@ -57,14 +57,16 @@ fn load_runtime_broker_registry_unlocked(
         return Ok(None);
     }
     let primary_exists = runtime_broker_file_exists(&path)?;
-    let primary_has_legacy_secrets = legacy::registry_has_legacy_secrets(&path);
-    let backup_has_legacy_secrets = legacy::registry_has_legacy_secrets(&backup_path);
-    if backup_has_legacy_secrets
-        && !primary_has_legacy_secrets
+    let primary_legacy_status = legacy::registry_legacy_status(&path)?;
+    let backup_legacy_status = legacy::registry_legacy_status(&backup_path)?;
+    if backup_legacy_status == legacy::RegistryLegacyStatus::ValidLegacy
+        && primary_legacy_status != legacy::RegistryLegacyStatus::ValidLegacy
         && legacy::registry_file_is_current(&path)
     {
         remove_runtime_broker_file_checked(&backup_path)?;
-    } else if primary_has_legacy_secrets || (backup_has_legacy_secrets && !primary_exists) {
+    } else if primary_legacy_status == legacy::RegistryLegacyStatus::ValidLegacy
+        || (backup_legacy_status == legacy::RegistryLegacyStatus::ValidLegacy && !primary_exists)
+    {
         legacy::remove_artifacts_unlocked(paths, broker_key, &path, &backup_path)?;
         return Ok(None);
     }
