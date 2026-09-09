@@ -91,6 +91,27 @@ fn quota_summary_for_route_matches_usage_windows() {
 }
 
 #[test]
+fn blocked_quota_window_does_not_produce_runtime_observation() {
+    let now = 10_000;
+
+    for (allowed, limit_reached) in [(Some(false), None), (None, Some(true))] {
+        let mut usage = usage_response(20, 30, now);
+        let pair = usage
+            .rate_limit
+            .as_mut()
+            .expect("test usage should have a main rate limit");
+        pair.allowed = allowed;
+        pair.limit_reached = limit_reached;
+
+        assert_eq!(
+            runtime_quota_window_observation_at(&usage, "5h", now),
+            None,
+            "blocked admission must not be scored as usable quota"
+        );
+    }
+}
+
+#[test]
 fn quota_pressure_score_batch_matches_each_clocked_scalar_score() {
     let now = 10_000;
     let first = usage_response(20, 30, now);
