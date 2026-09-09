@@ -653,11 +653,12 @@ shared-state integration around those operations.
 - Quota, budget, transport, and local pressure signals must stay classified separately.
 - An available weekly quota window remains eligible when the 5-hour window is absent or unknown; explicit exhaustion still blocks selection.
 - OpenAI `additional_rate_limits` are preserved as independent backend buckets, including their
-  explicit `allowed` and `limit_reached` fields and unknown future fields. The pinned Codex
-  `rust-v0.153.4` contract does not identify a Luna Reserve bucket or map it to a model, so Prodex
-  reports unknown Reserve data generically. When an upstream bucket explicitly identifies itself
-  as `Luna Reserve`, it is applicable only to Luna requests; Sol and Terra never use it. Reserve
-  is a fallback capacity mode, not a model identifier accepted from requests, and an unlabeled
+  explicit `allowed`, `limit_reached`, `ordinaryUsageAllowed`, `normalModelSlug`, and unknown
+  future fields. The pinned Codex `rust-v0.154.0` contract exposes backend admission and model
+  mapping metadata, but Prodex still requires an explicit source-backed Luna Reserve identifier
+  before routing on that bucket. When an upstream bucket explicitly identifies itself as `Luna
+  Reserve`, it is applicable only to Luna requests; Sol and Terra never use it. Reserve is a
+  fallback capacity mode, not a model identifier accepted from requests, and an unlabeled
   `base_model_inference` bucket does not establish entitlement. When all
   supported Luna capacity is unavailable, a Luna request may make one model-aware pre-commit
   fallback to catalog-advertised `gpt-5.3-codex-spark` capacity. Requested and effective models

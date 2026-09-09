@@ -57,9 +57,10 @@ identifies quota or rate-limit exhaustion.
 
 OpenAI regular usage, additional rate-limit buckets, credits, and reset credits
 remain separate. Additional buckets are retained with explicit backend admission
-state and unknown fields; the pinned Codex compatibility target provides no
-source-backed Luna Reserve identifier or model mapping, so unknown Reserve state
-is not promoted into automatic routing. An explicitly labelled `Luna Reserve`
+state, model mapping, and unknown fields; the pinned Codex `rust-v0.154.0`
+compatibility target exposes these fields, but an explicit source-backed Luna
+Reserve identifier is still required before unknown Reserve state is promoted
+into automatic routing. An explicitly labelled `Luna Reserve`
 bucket is considered only for Luna requests; it is never regular Sol/Terra
 capacity. Spark is a separate model-specific bucket. A Luna workflow keeps its
 requested model as Luna, but may use the actual `gpt-5.3-codex-spark` model at a
