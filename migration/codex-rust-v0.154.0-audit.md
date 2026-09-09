@@ -55,7 +55,7 @@ The release asset is 98,981,886 bytes and has upstream digest
 | --- | --- | --- |
 | Session/thread start | 0.154 adds `environments`, `originator`, and `daybreakEnabled` fields while preserving thread/session/cwd/status/direct-input fields. | Prodex parses the response as JSON values, validates the existing identity/cwd/status contract, and ignores additive fields safely. |
 | Resume/fork/lifecycle | 0.154 rechecks state after configuration work and reports closing-thread conditions; daemon/PID lifecycle work is upstream-owned. | Prodex uses the existing `thread/read` authority check and its own fail-closed process identity; no duplicate lifecycle implementation. |
-| Prompt queue | `thread/queue_processor.rs` and queued-submission protocol definitions are unchanged from 0.153.4 to 0.154.0. Both versions require `experimentalApi` for `thread/queue/add`. | Existing Prodex capability request and exact `queuedSubmission` validation remain correct. Queue acceptance remains `QUEUED`, never `APPLIED`. |
+| Prompt queue | `app-server/src/request_processors/thread_queue_processor.rs` and queued-submission protocol definitions are unchanged from 0.153.4 to 0.154.0. Both versions require `experimentalApi` for `thread/queue/add`. | Existing Prodex capability request and exact `queuedSubmission` validation remain correct. Queue acceptance remains `QUEUED`, never `APPLIED`. |
 | Quota/rate limits | 0.154 adds `supportsLunaReserve`, `excludeResetCreditDetails`, `ordinaryUsageAllowed`, and `normalModelSlug`. | Existing Prodex quota deserialization, explicit Reserve/model checks, unknown-field retention, and no-inference policy already cover these fields. |
 | Output/rollout | No Prodex-owned Responses/SSE/WebSocket contract was changed by the inspected app-server delta; 0.154 additive thread fields are not treated as new event semantics. | Keep opaque passthrough and bounded schema validation. Unknown events do not become equivalent to known events. |
 | Plugins/MCP/tools | 0.154 refreshes plugin/MCP capability behavior and adds optional user-verification/worktree APIs. | Prodex does not assume optional capabilities and does not enable experimental upstream behavior. |
@@ -68,11 +68,14 @@ Commands and outcomes:
 1. `git ls-remote https://github.com/openai/codex.git refs/tags/rust-v0.154.0 refs/tags/rust-v0.154.0^{}` — exact annotated tag and peeled commit matched the provenance above.
 2. Official isolated binary `codex-cli 0.154.0 --version` — pass.
 3. Isolated `codex app-server --listen stdio://` initialize and `thread/start` against both 0.153.4 and 0.154.0 — pass; both returned matching identity/cwd/status contracts. No model turn was sent.
-4. Isolated `initialize` with `capabilities.experimentalApi=true`, `thread/start`, `thread/queue/add`, `thread/queue/list`, and `thread/queue/delete` against both versions — pass. Both returned valid queued-submission IDs and matching synthetic input; neither emitted `turn/started` or `turn/completed`. Queue list/delete immediately returned no actionable item in both runs; this is retained as queue behavior, not application evidence.
+4. Isolated `initialize` with `capabilities.experimentalApi=true`, `thread/start`, `thread/queue/add`, `thread/queue/list`, and `thread/queue/delete` against both versions — pass. Both returned valid queued-submission IDs and matching synthetic input; neither emitted `turn/started` or `turn/completed`. Queue list/delete immediately returned no actionable item in both runs; this is retained as queue behavior, not application evidence. Sanitized observed frames are in `migration/codex-rust-v0.154.0-control-plane-smoke.jsonl`.
 5. `node scripts/compat/check-upstream-baseline.mjs` — pass after advancing the pinned baseline metadata to 0.154.0.
 6. `CARGO_TARGET_DIR=<isolated> node scripts/ci/runtime-test-manifest-guard.mjs` — pass: 55 manifest cases, 61 broad shard filters, 29 stress hints, 61 workflow filters, 854 enumerated Cargo tests.
 7. `CARGO_TARGET_DIR=<isolated> cargo test --locked -q -p prodex-app --lib app_server_broker_compat -- --test-threads=1` — pass, 8/8.
 8. `CARGO_TARGET_DIR=<isolated> cargo test --locked -q -p prodex-app --lib session_prompt_write -- --test-threads=1` — pass, 55/55.
+
+The tracked smoke transcript is sanitized: IDs, paths, and client message IDs
+are placeholders; it preserves only observed protocol shape and outcome fields.
 
 The broad Cargo enumeration is recorded as enumeration, not as executed test
 count. No live credential-bearing or cost-bearing turn was used.
