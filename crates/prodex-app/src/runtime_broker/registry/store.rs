@@ -8,7 +8,7 @@ mod legacy;
 
 use crate::{
     AppPaths, RuntimeBrokerRegistry, acquire_json_file_lock, delete_runtime_secret,
-    load_json_file_with_backup_unlocked, read_runtime_secret_bounded,
+    read_json_file_with_backup_unlocked, read_runtime_secret_bounded,
     runtime_broker_capability_file_path, runtime_broker_registry_file_path,
     runtime_broker_registry_last_good_file_path, write_json_file_with_backup,
     write_runtime_secret_bounded,
@@ -60,7 +60,7 @@ fn load_runtime_broker_registry_unlocked(
     let primary_legacy_status = legacy::registry_legacy_status(&path)?;
     let backup_legacy_status = legacy::registry_legacy_status(&backup_path)?;
     if backup_legacy_status == legacy::RegistryLegacyStatus::ValidLegacy
-        && primary_legacy_status != legacy::RegistryLegacyStatus::ValidLegacy
+        && primary_legacy_status == legacy::RegistryLegacyStatus::NotLegacy
         && legacy::registry_file_is_current(&path)
     {
         remove_runtime_broker_file_checked(&backup_path)?;
@@ -70,9 +70,25 @@ fn load_runtime_broker_registry_unlocked(
         legacy::remove_artifacts_unlocked(paths, broker_key, &path, &backup_path)?;
         return Ok(None);
     }
-    let current = load_json_file_with_backup_unlocked::<RuntimeBrokerRegistry>(&path, &backup_path);
+    let current = read_json_file_with_backup_unlocked::<RuntimeBrokerRegistry>(
+        &path,
+        &backup_path,
+        legacy::parse_current_registry,
+    );
     match current {
         Ok(loaded) => Ok(Some(loaded.value)),
+        Err(err) if primary_legacy_status == legacy::RegistryLegacyStatus::TooLarge => Err(err
+            .context(format!(
+                "runtime broker registry {} exceeds safe size limit ({} bytes)",
+                path.display(),
+                crate::runtime_store::RUNTIME_STORE_JSON_MAX_BYTES
+            ))),
+        Err(err) if backup_legacy_status == legacy::RegistryLegacyStatus::TooLarge => Err(err
+            .context(format!(
+                "runtime broker registry {} exceeds safe size limit ({} bytes)",
+                backup_path.display(),
+                crate::runtime_store::RUNTIME_STORE_JSON_MAX_BYTES
+            ))),
         Err(err) => Err(err),
     }
 }
