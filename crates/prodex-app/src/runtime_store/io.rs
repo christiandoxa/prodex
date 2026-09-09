@@ -165,7 +165,7 @@ fn is_versioned_json_envelope(value: &serde_json::Value) -> bool {
         .is_some_and(|object| object.contains_key("generation") || object.contains_key("value"))
 }
 
-fn read_json_file_with_backup_unlocked<T>(
+pub(crate) fn read_json_file_with_backup_unlocked<T>(
     path: &Path,
     backup_path: &Path,
     parse: impl Fn(&str) -> Result<T>,
@@ -177,8 +177,12 @@ fn read_json_file_with_backup_unlocked<T>(
             recovered_from_backup: false,
         }),
         Err(primary_err) => {
-            let backup_content = read_json_file_to_string(backup_path)
-                .with_context(|| format!("failed to read {}", backup_path.display()))?;
+            let backup_content = read_json_file_to_string(backup_path).with_context(|| {
+                format!(
+                    "failed to read {} after primary load error: {primary_err:#}",
+                    backup_path.display()
+                )
+            })?;
             let value = parse(&backup_content).with_context(|| {
                 format!(
                     "failed to parse {} after primary load error: {primary_err:#}",
