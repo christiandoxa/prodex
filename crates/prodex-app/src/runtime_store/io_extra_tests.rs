@@ -33,6 +33,112 @@ fn sidecar_generation_recovery_repairs_corrupt_primary() {
     let _ = fs::remove_dir_all(root);
 }
 
+#[test]
+fn cached_generation_with_missing_sidecars_does_not_relock() {
+    let root = temp_root("cached-generation-missing-sidecars");
+    let path = root.join("runtime.json");
+    let backup_path = root.join("runtime.json.last-good");
+    let value = serde_json::json!({"source": "initial"});
+    save_versioned_json_file_with_fence(&path, &backup_path, &value)
+        .expect("initial sidecar should save");
+    fs::remove_file(&path).expect("primary should be removed");
+    fs::remove_file(&backup_path).expect("last-good should be removed");
+
+    let (result_tx, result_rx) = std::sync::mpsc::channel();
+    let worker_path = path.clone();
+    let worker_backup_path = backup_path.clone();
+    let worker = std::thread::spawn(move || {
+        let result = save_versioned_json_file_with_fence(
+            &worker_path,
+            &worker_backup_path,
+            &serde_json::json!({"source": "recreated"}),
+        )
+        .map_err(|error| error.to_string());
+        result_tx.send(result).expect("save result should be sent");
+    });
+    result_rx
+        .recv_timeout(std::time::Duration::from_secs(1))
+        .expect("cached-generation recovery should not deadlock")
+        .expect("sidecar should save after both files disappear");
+    worker.join().expect("save worker should not panic");
+
+    assert_eq!(
+        runtime_sidecar_generation_from_disk(&path, &backup_path)
+            .expect("recreated sidecar should be readable"),
+        1
+    );
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn versioned_sidecar_cleanup_waits_for_primary_lock() {
+    let root = temp_root("sidecar-cleanup-lock");
+    let path = root.join("runtime.json");
+    let backup_path = root.join("runtime.json.last-good");
+    save_versioned_json_file_with_fence(&path, &backup_path, &serde_json::json!({"ok": true}))
+        .expect("sidecar should save");
+    let lock = acquire_json_file_lock(&path).expect("test should hold the sidecar lock");
+
+    let (started_tx, started_rx) = std::sync::mpsc::channel();
+    let (result_tx, result_rx) = std::sync::mpsc::channel();
+    let worker_root = root.clone();
+    let worker_path = path.clone();
+    let worker_backup_path = backup_path.clone();
+    let worker = std::thread::spawn(move || {
+        started_tx.send(()).expect("cleanup should start");
+        let result = remove_versioned_json_file_with_backup_under(
+            &worker_root,
+            &worker_path,
+            &worker_backup_path,
+        )
+        .map_err(|error| error.to_string());
+        result_tx
+            .send(result)
+            .expect("cleanup result should be sent");
+    });
+    started_rx
+        .recv()
+        .expect("cleanup worker should be scheduled");
+    assert!(
+        result_rx
+            .recv_timeout(std::time::Duration::from_millis(100))
+            .is_err(),
+        "cleanup should wait for the primary sidecar lock"
+    );
+
+    drop(lock);
+    let report = result_rx
+        .recv_timeout(std::time::Duration::from_secs(1))
+        .expect("cleanup should finish after lock release")
+        .expect("cleanup should remove sidecar pair");
+    assert_eq!(report.removed, 2);
+    assert!(report.failures.is_empty());
+    worker.join().expect("cleanup worker should not panic");
+    assert!(!path.exists());
+    assert!(!backup_path.exists());
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn versioned_sidecar_cleanup_keeps_backup_when_primary_removal_fails() {
+    let root = temp_root("sidecar-cleanup-primary-failure");
+    let path = root.join("runtime.json");
+    let backup_path = root.join("runtime.json.last-good");
+    fs::create_dir(&path).expect("primary directory should be created");
+    fs::write(&backup_path, "last-good").expect("backup should be writable");
+
+    let report = remove_versioned_json_file_with_backup_under(&root, &path, &backup_path)
+        .expect("cleanup should report deletion failures");
+
+    assert_eq!(report.removed, 0);
+    assert_eq!(report.missing, 0);
+    assert_eq!(report.failures.len(), 1);
+    assert_eq!(report.failures[0].path, path);
+    assert!(path.is_dir());
+    assert!(backup_path.exists());
+    let _ = fs::remove_dir_all(root);
+}
+
 fn reset_runtime_store_fault_budget(env_key: &'static str) {
     let _env_lock = TestEnvVarGuard::lock();
     let _ = runtime_take_fault_injection_budget(env_key, 0);

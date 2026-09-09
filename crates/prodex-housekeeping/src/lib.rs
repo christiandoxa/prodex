@@ -453,7 +453,7 @@ where
     report
 }
 
-fn path_is_contained_without_symlink_parents(root: &Path, path: &Path) -> bool {
+pub fn path_is_contained_without_symlink_parents(root: &Path, path: &Path) -> bool {
     let Ok(relative) = path.strip_prefix(root) else {
         return false;
     };
