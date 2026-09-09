@@ -251,6 +251,9 @@ fn legacy_registry_secret_fields_are_detected() {
     assert!(!runtime_broker_registry_contains_legacy_secrets(
         br#"{"description":"admin_token and instance_token"}"#.to_vec()
     ));
+    assert!(!runtime_broker_registry_contains_legacy_secrets(
+        br#"{"nested":{"admin_token":"secret"}}"#.to_vec()
+    ));
     assert!(runtime_broker_registry_contains_legacy_secrets(
         br#"{"\u0061dmin_token":"secret"}"#.to_vec()
     ));
