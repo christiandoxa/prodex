@@ -4,8 +4,14 @@ use std::sync::atomic::Ordering;
 
 #[cfg(test)]
 use crate::runtime_proxy_profile_inflight_soft_limit;
-use crate::{
-    RuntimeProfileHealth, RuntimeRotationProxyShared, RuntimeRotationState, RuntimeRouteKind,
+use crate::{RuntimeRotationProxyShared, RuntimeRotationState, RuntimeRouteKind};
+
+pub(crate) use prodex_runtime_store::{
+    runtime_profile_effective_health_score, runtime_profile_effective_health_score_from_map,
+    runtime_profile_effective_score_from_map, runtime_profile_health_sort_keys,
+    runtime_profile_route_bad_pairing_key, runtime_profile_route_health_key,
+    runtime_profile_route_performance_key, runtime_profile_route_performance_score,
+    runtime_profile_route_success_streak_key, runtime_route_kind_label,
 };
 
 pub(crate) fn runtime_proxy_current_profile(shared: &RuntimeRotationProxyShared) -> Result<String> {
@@ -53,67 +59,6 @@ pub(crate) fn runtime_profile_in_selection_backoff(
     )
 }
 
-pub(crate) fn runtime_route_kind_label(route_kind: RuntimeRouteKind) -> &'static str {
-    prodex_runtime_store::runtime_route_kind_label(route_kind)
-}
-
-pub(crate) fn runtime_profile_effective_health_score(
-    entry: &RuntimeProfileHealth,
-    now: i64,
-) -> u32 {
-    prodex_runtime_store::runtime_profile_effective_health_score(entry, now)
-}
-
-pub(crate) fn runtime_profile_effective_health_score_from_map(
-    profile_health: &BTreeMap<String, RuntimeProfileHealth>,
-    key: &str,
-    now: i64,
-) -> u32 {
-    prodex_runtime_store::runtime_profile_effective_health_score_from_map(profile_health, key, now)
-}
-
-pub(crate) fn runtime_profile_effective_score_from_map(
-    profile_health: &BTreeMap<String, RuntimeProfileHealth>,
-    key: &str,
-    now: i64,
-    decay_seconds: i64,
-) -> u32 {
-    prodex_runtime_store::runtime_profile_effective_score_from_map(
-        profile_health,
-        key,
-        now,
-        decay_seconds,
-    )
-}
-
-pub(crate) fn runtime_profile_route_health_key(
-    profile_name: &str,
-    route_kind: RuntimeRouteKind,
-) -> String {
-    prodex_runtime_store::runtime_profile_route_health_key(profile_name, route_kind)
-}
-
-pub(crate) fn runtime_profile_route_bad_pairing_key(
-    profile_name: &str,
-    route_kind: RuntimeRouteKind,
-) -> String {
-    prodex_runtime_store::runtime_profile_route_bad_pairing_key(profile_name, route_kind)
-}
-
-pub(crate) fn runtime_profile_route_success_streak_key(
-    profile_name: &str,
-    route_kind: RuntimeRouteKind,
-) -> String {
-    prodex_runtime_store::runtime_profile_route_success_streak_key(profile_name, route_kind)
-}
-
-pub(crate) fn runtime_profile_route_performance_key(
-    profile_name: &str,
-    route_kind: RuntimeRouteKind,
-) -> String {
-    prodex_runtime_store::runtime_profile_route_performance_key(profile_name, route_kind)
-}
-
 pub(crate) fn runtime_profile_route_health_score(
     runtime: &RuntimeRotationState,
     profile_name: &str,
@@ -122,20 +67,6 @@ pub(crate) fn runtime_profile_route_health_score(
 ) -> u32 {
     prodex_runtime_store::runtime_profile_route_health_score(
         &runtime.profile_health,
-        profile_name,
-        now,
-        route_kind,
-    )
-}
-
-pub(crate) fn runtime_profile_route_performance_score(
-    profile_health: &BTreeMap<String, RuntimeProfileHealth>,
-    profile_name: &str,
-    now: i64,
-    route_kind: RuntimeRouteKind,
-) -> u32 {
-    prodex_runtime_store::runtime_profile_route_performance_score(
-        profile_health,
         profile_name,
         now,
         route_kind,
@@ -164,20 +95,6 @@ pub(crate) fn runtime_profile_selection_jitter(
     runtime_proxy_crate::runtime_profile_selection_jitter(
         shared.request_sequence.load(Ordering::Relaxed),
         profile_name,
-        route_kind,
-    )
-}
-
-pub(crate) fn runtime_profile_health_sort_keys(
-    profile_names: &[&str],
-    profile_health: &BTreeMap<String, RuntimeProfileHealth>,
-    now: i64,
-    route_kind: RuntimeRouteKind,
-) -> Vec<u32> {
-    prodex_runtime_store::runtime_profile_health_sort_keys(
-        profile_names,
-        profile_health,
-        now,
         route_kind,
     )
 }

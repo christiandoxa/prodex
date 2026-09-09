@@ -13,11 +13,7 @@ use chrono::Local;
 use prodex_core::AppPaths;
 use std::collections::BTreeMap;
 
-pub(crate) fn runtime_continuation_store_from_app_state(
-    state: &AppState,
-) -> RuntimeContinuationStore {
-    prodex_runtime_store::runtime_continuation_store_from_app_state(state)
-}
+pub(crate) use prodex_runtime_store::runtime_continuation_store_from_app_state;
 
 pub(crate) fn compact_runtime_continuation_store(
     continuations: RuntimeContinuationStore,

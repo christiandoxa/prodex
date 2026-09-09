@@ -22,12 +22,12 @@ fn runtime_continuation_policy() -> prodex_runtime_store::RuntimeContinuationSta
     }
 }
 
-pub(crate) fn runtime_continuation_status_map(
-    statuses: &RuntimeContinuationStatuses,
-    kind: RuntimeContinuationBindingKind,
-) -> &BTreeMap<String, RuntimeContinuationBindingStatus> {
-    prodex_runtime_store::runtime_continuation_status_map(statuses, kind)
-}
+pub(crate) use prodex_runtime_store::{
+    runtime_compact_session_lineage_key, runtime_compact_turn_state_lineage_key,
+    runtime_continuation_status_label, runtime_continuation_status_map,
+    runtime_external_response_profile_bindings, runtime_external_session_id_bindings,
+    runtime_previous_response_negative_cache_key, runtime_response_turn_state_lineage_key,
+};
 
 pub(crate) fn runtime_mark_continuation_status_touched(
     statuses: &mut RuntimeContinuationStatuses,
@@ -130,39 +130,6 @@ pub(crate) fn runtime_continuation_status_recently_suspect(
         now,
         runtime_continuation_policy(),
     )
-}
-
-pub(crate) fn runtime_continuation_status_label(
-    status: &RuntimeContinuationBindingStatus,
-) -> &'static str {
-    prodex_runtime_store::runtime_continuation_status_label(status)
-}
-
-pub(crate) fn runtime_compact_session_lineage_key(session_id: &str) -> String {
-    prodex_runtime_store::runtime_compact_session_lineage_key(session_id)
-}
-
-pub(crate) fn runtime_compact_turn_state_lineage_key(turn_state: &str) -> String {
-    prodex_runtime_store::runtime_compact_turn_state_lineage_key(turn_state)
-}
-
-pub(crate) fn runtime_response_turn_state_lineage_key(
-    response_id: &str,
-    turn_state: &str,
-) -> String {
-    prodex_runtime_store::runtime_response_turn_state_lineage_key(response_id, turn_state)
-}
-
-pub(crate) fn runtime_external_response_profile_bindings(
-    bindings: &BTreeMap<String, ResponseProfileBinding>,
-) -> BTreeMap<String, ResponseProfileBinding> {
-    prodex_runtime_store::runtime_external_response_profile_bindings(bindings)
-}
-
-pub(crate) fn runtime_external_session_id_bindings(
-    bindings: &BTreeMap<String, ResponseProfileBinding>,
-) -> BTreeMap<String, ResponseProfileBinding> {
-    prodex_runtime_store::runtime_external_session_id_bindings(bindings)
 }
 
 pub(crate) fn runtime_dead_continuation_status_shadowed_by_live_binding(
@@ -495,18 +462,6 @@ pub(crate) fn runtime_compact_session_followup_bound_profile(
         session_id.map(|value| value.as_str()),
     )?
     .map(|(profile_name, _)| profile_name))
-}
-
-pub(crate) fn runtime_previous_response_negative_cache_key(
-    previous_response_id: &str,
-    profile_name: &str,
-    route_kind: RuntimeRouteKind,
-) -> String {
-    prodex_runtime_store::runtime_previous_response_negative_cache_key(
-        previous_response_id,
-        profile_name,
-        route_kind,
-    )
 }
 
 pub(crate) fn runtime_previous_response_negative_cache_active(
