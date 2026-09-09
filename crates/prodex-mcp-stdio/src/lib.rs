@@ -7,6 +7,9 @@ const MCP_MESSAGE_MAX_BYTES: usize = 64 * 1024 * 1024;
 // first-line buffer to the much larger JSON message limit.
 const MCP_FIRST_HEADER_LINE_MAX_BYTES: usize = 4 * 1024;
 const MCP_HEADER_LINE_MAX_BYTES: usize = 16 * 1024;
+// Bound the complete framing block, including blank preambles and separators,
+// without reducing the larger JSON message limit.
+const MCP_FRAMING_METADATA_MAX_BYTES: usize = 64 * 1024;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum McpMessageFraming {
@@ -15,7 +18,8 @@ pub enum McpMessageFraming {
 }
 
 pub fn read_mcp_message<R: BufRead>(reader: &mut R) -> Result<Option<(Value, McpMessageFraming)>> {
-    let Some(first) = read_mcp_first_line(reader)? else {
+    let mut framing_bytes = 0;
+    let Some(first) = read_mcp_first_line(reader, &mut framing_bytes)? else {
         return Ok(None);
     };
     if first.to_ascii_lowercase().starts_with("content-length:") {
@@ -27,6 +31,7 @@ pub fn read_mcp_message<R: BufRead>(reader: &mut R) -> Result<Option<(Value, Mcp
             );
         }
         while let Some(header) = read_limited_line(reader, MCP_HEADER_LINE_MAX_BYTES)? {
+            charge_mcp_framing_bytes(&mut framing_bytes, header.len())?;
             let trimmed = header.trim();
             if trimmed.is_empty() {
                 break;
@@ -44,15 +49,42 @@ pub fn read_mcp_message<R: BufRead>(reader: &mut R) -> Result<Option<(Value, Mcp
     Ok(Some((value, McpMessageFraming::JsonLine)))
 }
 
-fn read_mcp_first_line<R: BufRead>(reader: &mut R) -> io::Result<Option<String>> {
+fn read_mcp_first_line<R: BufRead>(
+    reader: &mut R,
+    framing_bytes: &mut usize,
+) -> io::Result<Option<String>> {
     loop {
         let Some(line) = read_mcp_physical_first_line(reader)? else {
             return Ok(None);
         };
+        let first_non_whitespace = line
+            .as_bytes()
+            .iter()
+            .find(|byte| !byte.is_ascii_whitespace())
+            .copied();
+        if line.trim().is_empty()
+            || first_non_whitespace.is_some_and(mcp_first_line_looks_like_header)
+        {
+            charge_mcp_framing_bytes(framing_bytes, line.len())?;
+        }
         if !line.trim().is_empty() {
             return Ok(Some(line));
         }
     }
+}
+
+fn charge_mcp_framing_bytes(total: &mut usize, bytes: usize) -> io::Result<()> {
+    let next = total.saturating_add(bytes);
+    if next > MCP_FRAMING_METADATA_MAX_BYTES {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!(
+                "MCP framing headers exceed safe size limit ({MCP_FRAMING_METADATA_MAX_BYTES} bytes)"
+            ),
+        ));
+    }
+    *total = next;
+    Ok(())
 }
 
 fn read_mcp_physical_first_line<R: BufRead>(reader: &mut R) -> io::Result<Option<String>> {
@@ -281,10 +313,67 @@ mod tests {
     fn first_header_line_accepts_exact_safe_limit() {
         let raw = format!("{}\n", "x".repeat(MCP_FIRST_HEADER_LINE_MAX_BYTES - 1));
         let mut reader = BufReader::new(raw.as_bytes());
+        let mut framing_bytes = 0;
 
-        let line = read_mcp_first_line(&mut reader).unwrap().unwrap();
+        let line = read_mcp_first_line(&mut reader, &mut framing_bytes)
+            .unwrap()
+            .unwrap();
 
         assert_eq!(line.len(), MCP_FIRST_HEADER_LINE_MAX_BYTES);
+    }
+
+    #[test]
+    fn framing_header_budget_bounds_repeated_continuation_headers() {
+        let body = br#"{}"#;
+        let continuation = "X: \r\n";
+        let separator = "\r\n";
+        let first = format!("Content-Length: {}\r\n", body.len());
+        let continuation_count =
+            (MCP_FRAMING_METADATA_MAX_BYTES - first.len() - separator.len()) / continuation.len();
+        assert_eq!(
+            first.len() + continuation_count * continuation.len() + separator.len(),
+            MCP_FRAMING_METADATA_MAX_BYTES
+        );
+        let frame = |count| {
+            let mut bytes = first.as_bytes().to_vec();
+            bytes.extend_from_slice(continuation.repeat(count).as_bytes());
+            bytes.extend_from_slice(separator.as_bytes());
+            bytes.extend_from_slice(body);
+            bytes
+        };
+
+        let exact = frame(continuation_count);
+        let mut reader = BufReader::new(exact.as_slice());
+        let (value, framing_type) = read_mcp_message(&mut reader)
+            .expect("exact framing metadata budget should be accepted")
+            .expect("message should be present");
+        assert_eq!(framing_type, McpMessageFraming::ContentLength);
+        assert_eq!(value, json!({}));
+
+        let over = frame(continuation_count + 1);
+        let mut reader = BufReader::new(over.as_slice());
+        let err = read_mcp_message(&mut reader).expect_err("metadata over budget should fail");
+        assert!(err.to_string().contains("framing headers"));
+    }
+
+    #[test]
+    fn framing_header_budget_bounds_repeated_blank_preamble() {
+        let body = br#"{"jsonrpc":"2.0","id":1}"#;
+        let mut exact = vec![b'\n'; MCP_FRAMING_METADATA_MAX_BYTES];
+        exact.extend_from_slice(body);
+        exact.push(b'\n');
+        let mut reader = BufReader::new(exact.as_slice());
+        let (value, framing) = read_mcp_message(&mut reader)
+            .expect("exact preamble budget should be accepted")
+            .expect("message should be present");
+        assert_eq!(framing, McpMessageFraming::JsonLine);
+        assert_eq!(value["id"], 1);
+
+        let mut over = vec![b'\n'; MCP_FRAMING_METADATA_MAX_BYTES + 1];
+        over.extend_from_slice(body);
+        let mut reader = BufReader::new(over.as_slice());
+        let err = read_mcp_message(&mut reader).expect_err("preamble over budget should fail");
+        assert!(err.to_string().contains("framing headers"));
     }
 
     #[test]
