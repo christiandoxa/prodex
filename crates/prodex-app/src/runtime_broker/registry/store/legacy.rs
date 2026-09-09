@@ -10,7 +10,7 @@ use super::{
     remove_runtime_broker_registry_files_checked,
 };
 use crate::{
-    AppPaths, RuntimeBrokerRegistry, load_json_file_with_backup_unlocked,
+    AppPaths, RuntimeBrokerRegistry, load_json_file_with_backup_unlocked, read_json_file_to_string,
     runtime_broker_capability_file_path,
 };
 
@@ -71,8 +71,9 @@ pub(super) fn registry_has_legacy_secrets(path: &Path) -> bool {
 }
 
 pub(super) fn registry_file_is_current(path: &Path) -> bool {
-    read_registry_bytes(path)
-        .and_then(|bytes| serde_json::from_slice::<RuntimeBrokerRegistry>(&bytes).ok())
+    read_json_file_to_string(path)
+        .ok()
+        .and_then(|content| serde_json::from_str::<RuntimeBrokerRegistry>(&content).ok())
         .is_some()
 }
 

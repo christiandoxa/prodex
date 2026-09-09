@@ -2,12 +2,14 @@ use super::*;
 use zeroize::Zeroize;
 
 pub fn runtime_broker_registry_contains_legacy_secrets(mut bytes: Vec<u8>) -> bool {
-    let contains = [
-        b"\"instance_token\"".as_slice(),
-        b"\"admin_token\"".as_slice(),
-    ]
-    .into_iter()
-    .any(|field| bytes.windows(field.len()).any(|window| window == field));
+    let contains = serde_json::from_slice::<serde_json::Value>(&bytes)
+        .ok()
+        .and_then(|value| {
+            value.as_object().map(|object| {
+                object.contains_key("instance_token") || object.contains_key("admin_token")
+            })
+        })
+        .unwrap_or(false);
     bytes.zeroize();
     contains
 }

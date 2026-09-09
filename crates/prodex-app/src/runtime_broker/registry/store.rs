@@ -26,7 +26,9 @@ pub(crate) fn load_runtime_broker_registry(
     let path = runtime_broker_registry_file_path(paths, broker_key);
     let backup_path = runtime_broker_registry_last_good_file_path(paths, broker_key);
     let capability_path = runtime_broker_capability_file_path(paths, broker_key);
-    if !path.exists() && !backup_path.exists() && !capability_path.exists() {
+    if runtime_broker_registry_files_absent(&path, &backup_path)?
+        && !runtime_broker_file_exists(&capability_path)?
+    {
         return Ok(None);
     }
     let _lock = acquire_runtime_broker_artifact_lock(paths, broker_key)?;
@@ -51,9 +53,10 @@ fn load_runtime_broker_registry_unlocked(
 ) -> Result<Option<RuntimeBrokerRegistry>> {
     let path = runtime_broker_registry_file_path(paths, broker_key);
     let backup_path = runtime_broker_registry_last_good_file_path(paths, broker_key);
-    if !path.exists() && !backup_path.exists() {
+    if runtime_broker_registry_files_absent(&path, &backup_path)? {
         return Ok(None);
     }
+    let primary_exists = runtime_broker_file_exists(&path)?;
     let primary_has_legacy_secrets = legacy::registry_has_legacy_secrets(&path);
     let backup_has_legacy_secrets = legacy::registry_has_legacy_secrets(&backup_path);
     if backup_has_legacy_secrets
@@ -61,15 +64,26 @@ fn load_runtime_broker_registry_unlocked(
         && legacy::registry_file_is_current(&path)
     {
         remove_runtime_broker_file_checked(&backup_path)?;
-    } else if primary_has_legacy_secrets || backup_has_legacy_secrets {
+    } else if primary_has_legacy_secrets || (backup_has_legacy_secrets && !primary_exists) {
         legacy::remove_artifacts_unlocked(paths, broker_key, &path, &backup_path)?;
         return Ok(None);
     }
     let current = load_json_file_with_backup_unlocked::<RuntimeBrokerRegistry>(&path, &backup_path);
     match current {
         Ok(loaded) => Ok(Some(loaded.value)),
-        Err(_err) if !path.exists() && !backup_path.exists() => Ok(None),
         Err(err) => Err(err),
+    }
+}
+
+fn runtime_broker_registry_files_absent(path: &Path, backup_path: &Path) -> Result<bool> {
+    Ok(!runtime_broker_file_exists(path)? && !runtime_broker_file_exists(backup_path)?)
+}
+
+fn runtime_broker_file_exists(path: &Path) -> Result<bool> {
+    match fs::symlink_metadata(path) {
+        Ok(_) => Ok(true),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
+        Err(error) => Err(error).with_context(|| format!("failed to inspect {}", path.display())),
     }
 }
 #[cfg(test)]
@@ -335,6 +349,9 @@ mod tests {
     use std::sync::{Arc, Barrier};
     use std::thread;
     use std::time::{SystemTime, UNIX_EPOCH};
+
+    #[path = "legacy_recovery_tests.rs"]
+    mod legacy_recovery_tests;
 
     fn test_paths(label: &str) -> AppPaths {
         let nonce = SystemTime::now()
