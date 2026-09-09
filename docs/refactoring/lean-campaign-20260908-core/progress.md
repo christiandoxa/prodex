@@ -75,15 +75,12 @@ order and `Custom` remains last.
 
 ## Current wave
 
-- Current source tip: `8cca48b0` on `refactor/successor-integration-20260908`; local and remote PR head match after the B0-031 integration.
-- B0-036 security checkpoint `3712bbbe` received exact-SHA `NO_FINDING`; size repair `848e68fe` and CI/provider/macOS repair `f913ba60` also received `NO_FINDING` and are integrated.
-- B0-031 safe metadata checkpoint `622ced1c` received exact-SHA `NO_FINDING` after runtime-Anthropic 11/15, app translation 45/45 in both modes, compat replay, smoke, guards, and Clippy; it is integrated as `e7de47db`.
-- B0-041 forwarder checkpoint `80ccb432` received exact-SHA `NO_FINDING` but is held because its 160-line cleanup would exceed the enforced churn cap; its branch and evidence remain retained.
-- Current source preserves loopback broker admission, race-safe process identity, bounded legacy detection, safe Anthropic metadata forwarding, and 32/32 size guard; no thresholds or allowlists changed.
-- B0-020, B0-032, B0-038, B0-039, B0-040, and B0-043 are `KEEP_WITH_REASON`; B0-041 is held `IN_PROGRESS`, and B0-031 is `REFACTORED`. Current B0 counts: 18 `UNREVIEWED`, 14 `IN_PROGRESS`, 3 `REFACTORED`, 29 `KEEP_WITH_REASON`.
-- The current official share report is Rust `348,201`, Mojo `26,420`, total `374,621`, and `7.052461020604825%`; release floor and Mojo non-regression pass, project target remains unmet, and the waiver is expired.
-- CI run `34295037209` is the current remote validation for `8cca48b0`; it failed only on the unrelated Windows continuation test (`547 passed, 1 failed, 2 ignored`). Full cross-platform, full-workspace, and live-provider coverage is not claimed locally.
-- The successor remains the only campaign publication scope; main, release worktrees, user WIP, worker branches, and campaign logs remain protected.
+- Current source tip: `ca28e755` on `refactor/successor-integration-20260908`; local and remote PR head match.
+- B0-036 security `3712bbbe`, size `848e68fe`, provider/macOS `f913ba60`, and B0-031 metadata `622ced1c` all received exact-SHA `NO_FINDING` reviews; approved changes are integrated.
+- B0-041 forwarders `80ccb432` also received `NO_FINDING` but is held because its 160-line cleanup exceeds the enforced churn cap; its branch and evidence remain retained.
+- B0-020/032/038/039/040/043/044/046 are `KEEP_WITH_REASON`; B0-041 is held `IN_PROGRESS`, B0-031 is `REFACTORED`. Current B0 counts: 16 `UNREVIEWED`, 14 `IN_PROGRESS`, 3 `REFACTORED`, 32 `KEEP_WITH_REASON`.
+- Current source preserves loopback broker admission, race-safe identity, bounded legacy detection, safe Anthropic metadata forwarding, size 32/32, and Mojo non-regression; measured share is Rust `348,201`, Mojo `26,420`, total `374,621`, `7.052461020604825%`.
+- CI `34300115905` for `ca28e755` failed only on unrelated Windows OIDC-refresh timing; prior `34295037209` failed only on unrelated Windows continuation timing. These are retained as residual risks; no campaign guard failed. The successor is the only publication scope; main, release worktrees, user WIP, worker branches, detailed audit logs, and exact review evidence remain protected. Full cross-platform, full-workspace, and live-provider coverage is not claimed.
 
 ## Known checkpoints and blockers
 
