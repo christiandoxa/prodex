@@ -75,12 +75,13 @@ order and `Custom` remains last.
 
 ## Current wave
 
-- Current source tip: `0e74e65e` on `refactor/successor-integration-20260908`; local and remote PR head match.
+- Current source tip: `030d57fb` on `refactor/successor-integration-20260908`; local and remote PR head match after the accepted B0-042 safety checkpoint.
 - B0-036 security `3712bbbe`, size `848e68fe`, provider/macOS `f913ba60`, and B0-031 metadata `622ced1c` all received exact-SHA `NO_FINDING` reviews; approved changes are integrated.
+- B0-042 worker `ece2f6bd` received exact-SHA `NO_FINDING` review R-B0-042-lock-coordination-2 and was integrated as `030d57fb` after focused post-integration validation; the rejected `b850a630` review and repair evidence remain retained.
 - B0-041 forwarders `80ccb432` also received `NO_FINDING` but is held because its 160-line cleanup exceeds the enforced churn cap; its branch and evidence remain retained.
-- B0-002/020/032/038/039/040/042/043/044/046/047/048/050/051/053/054/055/056/057/060/064 are `KEEP_WITH_REASON`; B0-041, reviewed B0-049, and reviewed B0-058 are held `IN_PROGRESS`, B0-010/011/017/019/023/031 are `REFACTORED`. Current B0 counts: 0 `UNREVIEWED`, 11 `IN_PROGRESS`, 8 `REFACTORED`, 45 `KEEP_WITH_REASON`.
-- Current source preserves loopback broker admission, race-safe identity, bounded legacy detection, safe Anthropic metadata forwarding, size 32/32, and Mojo non-regression; measured share is Rust `348,201`, Mojo `26,420`, total `374,621`, `7.052461020604825%`.
-- CI `34303455913` for `1f6fcd88` failed only on an order-sensitive Linux broker-registry test (five isolated reruns pass); prior `34300115905` and `34295037209` failed only on unrelated Windows OIDC/continuation timing. These are retained as residual risks; no campaign guard failed. The successor is the only publication scope; main, release worktrees, user WIP, worker branches, detailed audit logs, and exact review evidence remain protected. Full cross-platform, full-workspace, and live-provider coverage is not claimed.
+- B0-002/020/032/038/039/040/043/044/046/047/048/050/051/053/054/055/056/057/060/064 are `KEEP_WITH_REASON`; B0-041, reviewed B0-049, and reviewed B0-058 are held `IN_PROGRESS`, B0-010/011/017/019/023/031/042 are `REFACTORED`. Current B0 counts: 0 `UNREVIEWED`, 11 `IN_PROGRESS`, 9 `REFACTORED`, 44 `KEEP_WITH_REASON`.
+- Current source preserves loopback broker admission, race-safe identity, bounded legacy detection, safe Anthropic metadata forwarding, size 32/32, and Mojo non-regression; measured share is Rust `348,180`, Mojo `26,420`, total `374,600`, `7.052856380138815%` (release floor passes; project 10% target remains unmet).
+- CI `34303455913` for `1f6fcd88` failed only on an order-sensitive Linux broker-registry test (five isolated reruns pass); prior `34300115905` and `34295037209` failed only on unrelated Windows OIDC/continuation timing. The exact B0-042 checkpoint’s Windows compile was unavailable because MinGW `x86_64-w64-mingw32-gcc` is missing. Churn hygiene against `a32b107d` currently reports 50 files / 48 behavior files / 1,748 lines versus enforced 35 / 25 / 1,200 thresholds; guards and allowlists were not weakened. These are retained as qualification residuals; the successor is the only publication scope; main, release worktrees, user WIP, worker branches, detailed audit logs, and exact review evidence remain protected. Full cross-platform, full-workspace, and live-provider coverage is not claimed.
 
 ## Known checkpoints and blockers
 
