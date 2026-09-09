@@ -52,6 +52,41 @@ fn malformed_primary_without_backup_is_an_error_instead_of_empty_success() {
 }
 
 #[test]
+fn marker_only_legacy_data_is_an_error_instead_of_empty_success() {
+    let paths = test_paths("marker-only");
+    let broker_key = "broker";
+    let registry_path = runtime_broker_registry_file_path(&paths, broker_key);
+    fs::write(&registry_path, br#"{"admin_token":"legacy-admin"}"#).unwrap();
+
+    let error = load_runtime_broker_registry(&paths, broker_key)
+        .expect_err("marker-only legacy data must remain an error");
+
+    assert!(format!("{error:#}").contains("runtime-broker-broker.json"));
+    assert!(registry_path.exists());
+    let _ = fs::remove_dir_all(paths.root);
+}
+
+#[test]
+fn marker_only_primary_recovers_a_valid_last_good_registry() {
+    let paths = test_paths("marker-only-recovery");
+    let broker_key = "broker";
+    let registry_path = runtime_broker_registry_file_path(&paths, broker_key);
+    let backup_path = runtime_broker_registry_last_good_file_path(&paths, broker_key);
+    let backup = serde_json::to_vec(&test_registry("backup-instance")).unwrap();
+    fs::write(&registry_path, br#"{"admin_token":"legacy-admin"}"#).unwrap();
+    fs::write(&backup_path, &backup).unwrap();
+
+    let loaded = load_runtime_broker_registry(&paths, broker_key)
+        .unwrap()
+        .unwrap();
+
+    assert_eq!(loaded.instance_id, "backup-instance");
+    assert_eq!(fs::read(&registry_path).unwrap(), backup);
+    assert!(backup_path.exists());
+    let _ = fs::remove_dir_all(paths.root);
+}
+
+#[test]
 fn oversized_registry_without_backup_is_an_error_instead_of_empty_success() {
     let paths = test_paths("oversized");
     let broker_key = "broker";
@@ -64,11 +99,34 @@ fn oversized_registry_without_backup_is_an_error_instead_of_empty_success() {
     let error = load_runtime_broker_registry(&paths, broker_key)
         .expect_err("oversized primary must remain an error");
 
-    assert!(format!("{error:#}").contains("last-good"));
+    assert!(format!("{error:#}").contains("safe size limit"));
     assert_eq!(
         fs::metadata(&registry_path).unwrap().len(),
         64 * 1024 * 1024 + 1
     );
+    let _ = fs::remove_dir_all(paths.root);
+}
+
+#[test]
+fn oversized_mixed_legacy_registry_is_removed_without_reuse() {
+    let paths = test_paths("oversized-legacy");
+    let broker_key = "broker";
+    let registry_path = runtime_broker_registry_file_path(&paths, broker_key);
+    let backup_path = runtime_broker_registry_last_good_file_path(&paths, broker_key);
+    let padding = "x".repeat(64 * 1024 + 1);
+    let legacy = format!(
+        r#"{{"pid":999999999,"instance_id":"current-looking","instance_token":"legacy-instance","admin_token":"legacy-admin","padding":"{padding}"}}"#
+    );
+    fs::write(&registry_path, legacy.as_bytes()).unwrap();
+    fs::write(&backup_path, legacy.as_bytes()).unwrap();
+
+    assert!(
+        load_runtime_broker_registry(&paths, broker_key)
+            .unwrap()
+            .is_none()
+    );
+    assert!(!registry_path.exists());
+    assert!(!backup_path.exists());
     let _ = fs::remove_dir_all(paths.root);
 }
 
@@ -94,6 +152,38 @@ fn oversized_current_registry_survives_legacy_backup_cleanup() {
     assert_eq!(loaded.instance_id, "large-current");
     assert!(registry_path.exists());
     assert!(!backup_path.exists());
+    let _ = fs::remove_dir_all(paths.root);
+}
+
+#[test]
+fn legacy_cleanup_with_keyring_backend_has_no_capability_file() {
+    let _env_lock = crate::TestEnvVarGuard::lock();
+    let _backend = crate::TestEnvVarGuard::set(crate::PRODEX_SECRET_BACKEND_ENV, "keyring");
+    let _service =
+        crate::TestEnvVarGuard::set(crate::PRODEX_SECRET_KEYRING_SERVICE_ENV, "prodex-test");
+    let paths = test_paths("legacy-keyring");
+    let broker_key = "broker";
+    let legacy = br#"{
+        "instance_token":"legacy-instance",
+        "admin_token":"legacy-admin"
+    }"#;
+    fs::write(
+        runtime_broker_registry_file_path(&paths, broker_key),
+        legacy,
+    )
+    .unwrap();
+    fs::write(
+        runtime_broker_registry_last_good_file_path(&paths, broker_key),
+        legacy,
+    )
+    .unwrap();
+
+    assert!(
+        load_runtime_broker_registry(&paths, broker_key)
+            .unwrap()
+            .is_none()
+    );
+    assert!(!runtime_broker_capability_file_path(&paths, broker_key).exists());
     let _ = fs::remove_dir_all(paths.root);
 }
 

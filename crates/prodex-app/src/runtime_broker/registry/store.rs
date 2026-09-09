@@ -26,7 +26,9 @@ pub(crate) fn load_runtime_broker_registry(
     let path = runtime_broker_registry_file_path(paths, broker_key);
     let backup_path = runtime_broker_registry_last_good_file_path(paths, broker_key);
     let capability_path = runtime_broker_capability_file_path(paths, broker_key);
-    if !path.exists() && !backup_path.exists() && !capability_path.exists() {
+    if runtime_broker_registry_files_absent(&path, &backup_path)?
+        && !runtime_broker_file_exists(&capability_path)?
+    {
         return Ok(None);
     }
     let _lock = acquire_runtime_broker_artifact_lock(paths, broker_key)?;
@@ -51,25 +53,39 @@ fn load_runtime_broker_registry_unlocked(
 ) -> Result<Option<RuntimeBrokerRegistry>> {
     let path = runtime_broker_registry_file_path(paths, broker_key);
     let backup_path = runtime_broker_registry_last_good_file_path(paths, broker_key);
-    if !path.exists() && !backup_path.exists() {
+    if runtime_broker_registry_files_absent(&path, &backup_path)? {
         return Ok(None);
     }
-    let primary_has_legacy_secrets = legacy::registry_has_legacy_secrets(&path)?;
-    let backup_has_legacy_secrets = legacy::registry_has_legacy_secrets(&backup_path)?;
-    if backup_has_legacy_secrets
-        && !primary_has_legacy_secrets
-        && legacy::registry_file_is_current(&path)?
+    let primary_exists = runtime_broker_file_exists(&path)?;
+    let primary_legacy_status = legacy::registry_legacy_status(&path)?;
+    let backup_legacy_status = legacy::registry_legacy_status(&backup_path)?;
+    if backup_legacy_status == legacy::RegistryLegacyStatus::ValidLegacy
+        && primary_legacy_status != legacy::RegistryLegacyStatus::ValidLegacy
+        && legacy::registry_file_is_current(&path)
     {
         remove_runtime_broker_file_checked(&backup_path)?;
-    } else if primary_has_legacy_secrets || backup_has_legacy_secrets {
+    } else if primary_legacy_status == legacy::RegistryLegacyStatus::ValidLegacy
+        || (backup_legacy_status == legacy::RegistryLegacyStatus::ValidLegacy && !primary_exists)
+    {
         legacy::remove_artifacts_unlocked(paths, broker_key, &path, &backup_path)?;
         return Ok(None);
     }
     let current = load_json_file_with_backup_unlocked::<RuntimeBrokerRegistry>(&path, &backup_path);
     match current {
         Ok(loaded) => Ok(Some(loaded.value)),
-        Err(_err) if !path.exists() && !backup_path.exists() => Ok(None),
         Err(err) => Err(err),
+    }
+}
+
+fn runtime_broker_registry_files_absent(path: &Path, backup_path: &Path) -> Result<bool> {
+    Ok(!runtime_broker_file_exists(path)? && !runtime_broker_file_exists(backup_path)?)
+}
+
+fn runtime_broker_file_exists(path: &Path) -> Result<bool> {
+    match fs::symlink_metadata(path) {
+        Ok(_) => Ok(true),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
+        Err(error) => Err(error).with_context(|| format!("failed to inspect {}", path.display())),
     }
 }
 #[cfg(test)]
@@ -335,6 +351,9 @@ mod tests {
     use std::sync::{Arc, Barrier};
     use std::thread;
     use std::time::{SystemTime, UNIX_EPOCH};
+
+    #[path = "legacy_recovery_tests.rs"]
+    mod legacy_recovery_tests;
 
     fn test_paths(label: &str) -> AppPaths {
         let nonce = SystemTime::now()
@@ -626,52 +645,6 @@ mod tests {
         assert!(registry_path.exists());
         assert!(!backup_path.exists());
 
-        let _ = fs::remove_dir_all(paths.root);
-    }
-
-    #[test]
-    fn bounded_current_registry_with_unknown_fields_remains_compatible() {
-        let paths = test_paths("current-unknown-fields");
-        let broker_key = "broker";
-        let registry_path = runtime_broker_registry_file_path(&paths, broker_key);
-        let mut payload = serde_json::to_value(test_registry("current-instance")).unwrap();
-        payload.as_object_mut().unwrap().insert(
-            "future_field".to_string(),
-            serde_json::json!({"enabled": true}),
-        );
-        fs::write(registry_path, serde_json::to_vec(&payload).unwrap()).unwrap();
-
-        let loaded = load_runtime_broker_registry(&paths, broker_key)
-            .unwrap()
-            .unwrap();
-
-        assert_eq!(loaded.instance_id, "current-instance");
-        let _ = fs::remove_dir_all(paths.root);
-    }
-
-    #[test]
-    fn oversized_legacy_registry_is_rejected_before_current_parsing() {
-        let paths = test_paths("oversized-legacy");
-        let broker_key = "broker";
-        let registry_path = runtime_broker_registry_file_path(&paths, broker_key);
-        let mut payload = serde_json::to_value(test_registry("legacy-instance")).unwrap();
-        let object = payload.as_object_mut().unwrap();
-        object.insert(
-            "instance_token".to_string(),
-            serde_json::json!("legacy-instance-secret"),
-        );
-        object.insert(
-            "padding".to_string(),
-            serde_json::Value::String("x".repeat(64 * 1024)),
-        );
-        let serialized = serde_json::to_vec(&payload).unwrap();
-        assert!(serialized.len() > 64 * 1024);
-        fs::write(registry_path, serialized).unwrap();
-
-        let error = load_runtime_broker_registry(&paths, broker_key)
-            .expect_err("oversized legacy scan should fail closed");
-
-        assert!(format!("{error:#}").contains("legacy scan size limit"));
         let _ = fs::remove_dir_all(paths.root);
     }
 

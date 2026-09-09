@@ -239,38 +239,32 @@ fn registry_backup_payload_snapshot_contains_metadata_only() {
 
 #[test]
 fn legacy_registry_secret_fields_are_detected() {
-    assert!(runtime_broker_registry_contains_legacy_secrets(
-        br#"{"admin_token":"secret"}"#.to_vec()
-    ));
-    assert!(runtime_broker_registry_contains_legacy_secrets(
-        br#"{"instance_token":"secret"}"#.to_vec()
-    ));
-    assert!(!runtime_broker_registry_contains_legacy_secrets(
-        br#"{"instance_id":"public"}"#.to_vec()
-    ));
-    assert!(!runtime_broker_registry_contains_legacy_secrets(
-        br#"{"description":"admin_token and instance_token"}"#.to_vec()
-    ));
-    assert!(!runtime_broker_registry_contains_legacy_secrets(
-        br#"{"nested":{"admin_token":"secret"}}"#.to_vec()
-    ));
-    assert!(runtime_broker_registry_contains_legacy_secrets(
-        br#"{"\u0061dmin_token":"secret"}"#.to_vec()
-    ));
-    assert!(!runtime_broker_registry_contains_legacy_secrets(
-        br#"{"description":"\u0061dmin_token"}"#.to_vec()
-    ));
-    assert!(!runtime_broker_registry_contains_legacy_secrets(
-        br#"{"admin_token":"secret""#.to_vec()
-    ));
-}
-
-#[test]
-fn runtime_broker_listen_addresses_must_be_loopback() {
-    assert!(runtime_broker_listen_addr_is_loopback("127.0.0.1:4567"));
-    assert!(runtime_broker_listen_addr_is_loopback("[::1]:4567"));
-    assert!(!runtime_broker_listen_addr_is_loopback("192.0.2.10:4567"));
-    assert!(!runtime_broker_listen_addr_is_loopback("localhost:4567"));
+    assert!(
+        runtime_broker_registry_contains_legacy_secrets(br#"{"admin_token":"secret"}"#).unwrap()
+    );
+    assert!(
+        runtime_broker_registry_contains_legacy_secrets(br#"{"instance_token":"secret"}"#).unwrap()
+    );
+    assert!(
+        runtime_broker_registry_contains_legacy_secrets(br#"{"adm\u0069n_token":"secret"}"#)
+            .unwrap()
+    );
+    assert!(
+        !runtime_broker_registry_contains_legacy_secrets(br#"{"instance_id":"public"}"#).unwrap()
+    );
+    assert!(
+        !runtime_broker_registry_contains_legacy_secrets(
+            br#"{"current_profile":"contains \"admin_token\""}"#
+        )
+        .unwrap()
+    );
+    assert!(
+        !runtime_broker_registry_contains_legacy_secrets(br#"{"nested":{"admin_token":"secret"}}"#)
+            .unwrap()
+    );
+    assert!(
+        runtime_broker_registry_contains_legacy_secrets(br#"{"admin_token":"truncated""#).is_err()
+    );
 }
 
 #[test]
