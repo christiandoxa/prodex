@@ -2,7 +2,7 @@ use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 use prodex_authn::{OidcBrowserFlowCapability, OidcBrowserFlowRequirement, OidcPkceMethod};
 use runtime_proxy_crate::path_without_query;
 use sha2::{Digest, Sha256};
-use std::{collections::BTreeMap, sync::Arc};
+use std::collections::BTreeMap;
 
 mod csrf;
 mod store;
@@ -10,9 +10,10 @@ mod store;
 use self::csrf::{CSRF_COOKIE, browser_session_csrf_valid};
 pub(super) use self::store::RuntimeGatewayBrowserState;
 use self::store::{
-    BROWSER_TRANSACTION_TTL_MS, RuntimeGatewayBrowserSession, RuntimeGatewayBrowserTransaction,
-    browser_protect_id_token, browser_restore_session_shadow, browser_store_transaction,
-    browser_take_transaction, browser_unprotect_id_token,
+    BROWSER_SESSION_TTL_MS, BROWSER_TRANSACTION_TTL_MS, RuntimeGatewayBrowserSession,
+    RuntimeGatewayBrowserTransaction, browser_delete_session, browser_delete_session_record,
+    browser_load_session, browser_protect_id_token, browser_store_session,
+    browser_store_transaction, browser_take_transaction, browser_unprotect_id_token,
 };
 
 use super::local_rewrite::RuntimeLocalRewriteProxyShared;
@@ -32,15 +33,12 @@ use crate::{
 };
 
 const MAX_TOKEN_RESPONSE_BYTES: usize = 64 * 1_024;
-const BROWSER_SESSION_TTL_MS: u64 = 8 * 60 * 60 * 1_000;
-const MAX_BROWSER_SESSIONS: usize = 4_096;
 const MAX_BACKCHANNEL_LOGOUT_BYTES: u64 = 8 * 1_024;
 const BACKCHANNEL_LOGOUT_MAX_AGE_SECONDS: u64 = 5 * 60;
 const BACKCHANNEL_LOGOUT_EVENT: &str = "http://schemas.openid.net/event/backchannel-logout";
 const SESSION_COOKIE: &str = "prodex_gateway_session";
 const STATE_COOKIE: &str = "prodex_gateway_oidc_state";
 const LOGOUT_INDEX_KEY_PREFIX: &str = "prodex:gateway:browser:logout:";
-const SESSION_KEY_PREFIX: &str = "prodex:gateway:browser:session:";
 
 #[derive(Clone, Copy)]
 enum RuntimeGatewayBrowserRoute {
@@ -111,7 +109,7 @@ pub(super) fn runtime_gateway_browser_session_auth(
     let now = runtime_gateway_unix_epoch_millis();
     let session = browser_load_session(shared, session_id).ok().flatten()?;
     if session.expires_at_unix_ms <= now {
-        let _ = browser_delete_session_record(shared, session_id, Some(&session), None);
+        let _ = browser_delete_session_record(shared, session_id, Some(&session));
         return None;
     }
     if !browser_session_csrf_valid(request, &session) {
@@ -127,14 +125,14 @@ pub(super) fn runtime_gateway_browser_session_auth(
             }) {
             Ok(verified) => verified,
             Err(_) => {
-                let _ = browser_delete_session_record(shared, session_id, Some(&session), None);
+                let _ = browser_delete_session_record(shared, session_id, Some(&session));
                 return None;
             }
         };
     match runtime_gateway_oidc_admin_auth_from_verified(verified, oidc, shared) {
         Some(authentication) => Some(authentication),
         None => {
-            let _ = browser_delete_session_record(shared, session_id, Some(&session), None);
+            let _ = browser_delete_session_record(shared, session_id, Some(&session));
             None
         }
     }
@@ -337,7 +335,7 @@ fn runtime_gateway_browser_logout(
         {
             return Err(RuntimeGatewayBrowserFailure::Unauthorized);
         }
-        browser_delete_session_record(shared, session_id, session.as_ref(), None)?;
+        browser_delete_session_record(shared, session_id, session.as_ref())?;
     }
     Ok(redirect_response(
         303,
@@ -630,150 +628,6 @@ fn redirect_response(
         headers,
         body: Vec::new().into(),
     })
-}
-
-fn browser_store_session(
-    shared: &RuntimeLocalRewriteProxyShared,
-    session_id: String,
-    session: RuntimeGatewayBrowserSession,
-) -> BrowserResult<()> {
-    let value =
-        serde_json::to_string(&session).map_err(|_| RuntimeGatewayBrowserFailure::Unavailable)?;
-    let session = Arc::new(session);
-    let now = runtime_gateway_unix_epoch_millis();
-    let mut sessions = shared
-        .gateway_browser
-        .sessions
-        .lock()
-        .map_err(|_| RuntimeGatewayBrowserFailure::Unavailable)?;
-    sessions.retain(|_, session| session.expires_at_unix_ms > now);
-    if sessions.len() >= MAX_BROWSER_SESSIONS
-        && let Some(oldest) = sessions
-            .iter()
-            .min_by_key(|(_, session)| session.expires_at_unix_ms)
-            .map(|(id, _)| id.clone())
-    {
-        sessions.remove(&oldest);
-    }
-    let previous = sessions.insert(session_id.clone(), Arc::clone(&session));
-    drop(sessions);
-    let Some(executor) = shared.gateway_redis_rate_limit_executor.as_ref() else {
-        return Ok(());
-    };
-    match shared
-        .runtime_shared
-        .async_runtime
-        .handle()
-        .block_on(executor.put_ephemeral(
-            &format!("{SESSION_KEY_PREFIX}{session_id}"),
-            &value,
-            std::time::Duration::from_millis(BROWSER_SESSION_TTL_MS),
-        )) {
-        Ok(true) => {}
-        Ok(false) | Err(_) => {
-            browser_restore_session_shadow(shared, &session_id, &session, previous)?;
-            return Err(RuntimeGatewayBrowserFailure::Unavailable);
-        }
-    }
-    for logout_key in &session.logout_keys {
-        if shared
-            .runtime_shared
-            .async_runtime
-            .handle()
-            .block_on(executor.add_ephemeral_member(
-                logout_key,
-                &session_id,
-                std::time::Duration::from_millis(BROWSER_SESSION_TTL_MS),
-            ))
-            .is_err()
-        {
-            let _ = browser_delete_session_record(
-                shared,
-                &session_id,
-                Some(session.as_ref()),
-                Some(&session),
-            );
-            return Err(RuntimeGatewayBrowserFailure::Unavailable);
-        }
-    }
-    Ok(())
-}
-
-fn browser_load_session(
-    shared: &RuntimeLocalRewriteProxyShared,
-    session_id: &str,
-) -> BrowserResult<Option<RuntimeGatewayBrowserSession>> {
-    if let Some(executor) = shared.gateway_redis_rate_limit_executor.as_ref() {
-        let value = shared
-            .runtime_shared
-            .async_runtime
-            .handle()
-            .block_on(executor.get_ephemeral(&format!("{SESSION_KEY_PREFIX}{session_id}")))
-            .map_err(|_| RuntimeGatewayBrowserFailure::Unavailable)?;
-        return value
-            .map(|value| {
-                serde_json::from_str(&value).map_err(|_| RuntimeGatewayBrowserFailure::Unavailable)
-            })
-            .transpose();
-    }
-    let now = runtime_gateway_unix_epoch_millis();
-    let mut sessions = shared
-        .gateway_browser
-        .sessions
-        .lock()
-        .map_err(|_| RuntimeGatewayBrowserFailure::Unavailable)?;
-    sessions.retain(|_, session| session.expires_at_unix_ms > now);
-    Ok(sessions
-        .get(session_id)
-        .map(|session| session.as_ref().clone()))
-}
-
-fn browser_delete_session(
-    shared: &RuntimeLocalRewriteProxyShared,
-    session_id: &str,
-) -> BrowserResult<()> {
-    let session = browser_load_session(shared, session_id)?;
-    browser_delete_session_record(shared, session_id, session.as_ref(), None)
-}
-
-fn browser_delete_session_record(
-    shared: &RuntimeLocalRewriteProxyShared,
-    session_id: &str,
-    session: Option<&RuntimeGatewayBrowserSession>,
-    local_owner: Option<&Arc<RuntimeGatewayBrowserSession>>,
-) -> BrowserResult<()> {
-    let local_owner = match local_owner {
-        Some(owner) => Some(Arc::clone(owner)),
-        None => shared
-            .gateway_browser
-            .sessions
-            .lock()
-            .map_err(|_| RuntimeGatewayBrowserFailure::Unavailable)?
-            .get(session_id)
-            .cloned(),
-    };
-    if let Some(executor) = shared.gateway_redis_rate_limit_executor.as_ref() {
-        shared
-            .runtime_shared
-            .async_runtime
-            .handle()
-            .block_on(executor.delete_ephemeral(&format!("{SESSION_KEY_PREFIX}{session_id}")))
-            .map_err(|_| RuntimeGatewayBrowserFailure::Unavailable)?;
-        if let Some(session) = session {
-            for logout_key in &session.logout_keys {
-                shared
-                    .runtime_shared
-                    .async_runtime
-                    .handle()
-                    .block_on(executor.remove_ephemeral_member(logout_key, session_id))
-                    .map_err(|_| RuntimeGatewayBrowserFailure::Unavailable)?;
-            }
-        }
-    }
-    if let Some(local_owner) = local_owner {
-        browser_restore_session_shadow(shared, session_id, &local_owner, None)?;
-    }
-    Ok(())
 }
 
 #[cfg(test)]
