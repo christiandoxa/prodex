@@ -75,13 +75,14 @@ order and `Custom` remains last.
 
 ## Current wave
 
-- Current source tip: `e7de47db` on local `refactor/successor-integration-20260908`; the remote PR head is `17201db1` until this B0-031 checkpoint is pushed.
+- Current source tip: `8cca48b0` on `refactor/successor-integration-20260908`; local and remote PR head match after the B0-031 integration.
 - B0-036 security checkpoint `3712bbbe` received exact-SHA `NO_FINDING`; size repair `848e68fe` and CI/provider/macOS repair `f913ba60` also received `NO_FINDING` and are integrated.
-- B0-031 safe metadata checkpoint `622ced1c` received exact-SHA `NO_FINDING` after runtime-Anthropic 11/15, app translation 45/45 in both modes, compat replay, smoke, guards, and Clippy; it is integrated as `e7de47db`, with push/CI pending.
+- B0-031 safe metadata checkpoint `622ced1c` received exact-SHA `NO_FINDING` after runtime-Anthropic 11/15, app translation 45/45 in both modes, compat replay, smoke, guards, and Clippy; it is integrated as `e7de47db`.
 - Current source preserves loopback broker admission, race-safe process identity, bounded legacy detection, safe Anthropic metadata forwarding, and 32/32 size guard; no thresholds or allowlists changed.
-- B0-020 and B0-032 are `KEEP_WITH_REASON`; B0-031 is `REFACTORED` after its exact-SHA review. Current B0 counts: 23 `UNREVIEWED`, 13 `IN_PROGRESS`, 3 `REFACTORED`, 25 `KEEP_WITH_REASON`.
+- B0-020, B0-032, B0-038, B0-039, B0-040, B0-041, and B0-043 are `KEEP_WITH_REASON`; B0-031 is `REFACTORED` after its exact-SHA review. Current B0 counts: 18 `UNREVIEWED`, 13 `IN_PROGRESS`, 3 `REFACTORED`, 30 `KEEP_WITH_REASON`.
 - The current official share report is Rust `348,201`, Mojo `26,420`, total `374,621`, and `7.052461020604825%`; release floor and Mojo non-regression pass, project target remains unmet, and the waiver is expired.
-- The successor remains the only campaign publication scope; main, release worktrees, user WIP, worker branches, and campaign logs remain protected. Full cross-platform, full-workspace, and live-provider coverage is not claimed.
+- CI run `34295037209` is the current remote validation for `8cca48b0`; it failed only on the unrelated Windows continuation test (`547 passed, 1 failed, 2 ignored`). Full cross-platform, full-workspace, and live-provider coverage is not claimed locally.
+- The successor remains the only campaign publication scope; main, release worktrees, user WIP, worker branches, and campaign logs remain protected.
 
 ## Known checkpoints and blockers
 
@@ -93,6 +94,4 @@ order and `Custom` remains last.
 
 - Campaign worktree is owned by this campaign. Its `target/` build cache is retained while validation continues.
 - No campaign-created server or watcher remains active after baseline testing.
-- Next action: verify B1 CI completion on `b8064149…`; if green, begin B2 by reading the remaining
-  gateway Kiro and dashboard catalog loaders, preserving runtime dispatch behavior and keeping the
-  size-safe extraction in a separate focused batch.
+- Next action: continue the unresolved B0 audit queue, starting with storage/gateway/security domains; keep source writers and reviewers separate, preserve exact-base evidence, and admit only bounded qualifying batches.
