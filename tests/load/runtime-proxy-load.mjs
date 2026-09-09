@@ -18,6 +18,7 @@ const MAX_REQUEST_TIMEOUT_MS = 120_000;
 const MAX_SCENARIO_CONCURRENCY = 256;
 const MAX_SCENARIO_REQUESTS = 100_000;
 const MAX_SCENARIO_DURATION_SECONDS = 3_600;
+const MAX_PROFILES = 16;
 const BROKER_HEALTH_PATH = "/__prodex/runtime/health";
 const BROKER_METRICS_PATH = "/__prodex/runtime/metrics";
 const BROKER_ADMIN_TOKEN_HEADER = "X-Prodex-Admin-Token";
@@ -113,6 +114,7 @@ function parseArgs(argv) {
       args[key] = Number(args[key]);
     }
   }
+  args.profiles = boundedInteger(args.profiles, 1, MAX_PROFILES, "profiles");
   return args;
 }
 
@@ -381,6 +383,13 @@ function selfTestScenarios(scenarios) {
     parseArgs(["node", "load", "--gateway-binary", "./prodex-gateway"]).gatewayBinary,
     "./prodex-gateway",
   );
+  assert.equal(parseArgs(["node", "load", "--profiles", "4"]).profiles, 4);
+  for (const invalidProfiles of [0, MAX_PROFILES + 1, Number.POSITIVE_INFINITY, Number.NaN]) {
+    assert.throws(
+      () => parseArgs(["node", "load", "--profiles", String(invalidProfiles)]),
+      /profiles must be between/,
+    );
+  }
   assert.throws(
     () => validateLaunchMode({ gatewayBinary: "./prodex-gateway", startProxy: true }),
     /mutually exclusive/,
