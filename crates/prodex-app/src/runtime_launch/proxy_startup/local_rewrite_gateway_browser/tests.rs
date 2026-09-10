@@ -405,53 +405,62 @@ fn persistence_failure_preserves_evicted_replacement_owner() {
 #[test]
 fn session_persistence_failure_does_not_restore_concurrently_deleted_evicted_entry() {
     for outcome in [PutOutcome::NotStored, PutOutcome::Error] {
-        let state = RuntimeGatewayBrowserState::default();
-        let oldest = Arc::new(session("oldest", 100));
-        let mut sessions = state.sessions.lock().unwrap();
-        sessions.insert("oldest".to_string(), Arc::clone(&oldest));
-        for index in 1..MAX_BROWSER_SESSIONS {
-            sessions.insert(
-                format!("session-{index}"),
-                Arc::new(session(&format!("session-{index}"), 100 + index as u64)),
+        for recreate in [false, true] {
+            let state = RuntimeGatewayBrowserState::default();
+            let oldest = Arc::new(session("oldest", 100));
+            let mut sessions = state.sessions.lock().unwrap();
+            sessions.insert("oldest".to_string(), Arc::clone(&oldest));
+            for index in 1..MAX_BROWSER_SESSIONS {
+                sessions.insert(
+                    format!("session-{index}"),
+                    Arc::new(session(&format!("session-{index}"), 100 + index as u64)),
+                );
+            }
+            drop(sessions);
+
+            let recreated = Arc::new(session("recreated", 20_000));
+            let recreated_for_hook = Arc::clone(&recreated);
+            let state_for_hook = state.clone();
+            let mut persistence = FakePersistence::new(outcome, AddOutcome::Stored);
+            persistence.on_put = Some(Box::new(move || {
+                let _ = mark_session_mutation(&state_for_hook, "oldest");
+                if recreate {
+                    state_for_hook
+                        .sessions
+                        .lock()
+                        .unwrap()
+                        .insert("oldest".to_string(), Arc::clone(&recreated_for_hook));
+                }
+            }));
+
+            let result = browser_store_session_with_persistence(
+                &state,
+                "provisional".to_string(),
+                session("provisional", 10_000),
+                10,
+                Some(&mut persistence),
             );
+
+            assert!(result.is_err());
+            let sessions = state.sessions.lock().unwrap();
+            assert!(!sessions.contains_key("provisional"));
+            assert!(
+                sessions
+                    .values()
+                    .all(|current| !Arc::ptr_eq(current, &oldest))
+            );
+            if recreate {
+                assert_eq!(sessions.len(), MAX_BROWSER_SESSIONS);
+                assert!(
+                    sessions
+                        .get("oldest")
+                        .is_some_and(|current| Arc::ptr_eq(current, &recreated))
+                );
+            } else {
+                assert_eq!(sessions.len(), MAX_BROWSER_SESSIONS - 1);
+                assert!(!sessions.contains_key("oldest"));
+            }
         }
-        drop(sessions);
-
-        let recreated = Arc::new(session("recreated", 20_000));
-        let recreated_for_hook = Arc::clone(&recreated);
-        let state_for_hook = state.clone();
-        let mut persistence = FakePersistence::new(outcome, AddOutcome::Stored);
-        persistence.on_put = Some(Box::new(move || {
-            let _ = mark_session_mutation(&state_for_hook, "oldest");
-            state_for_hook
-                .sessions
-                .lock()
-                .unwrap()
-                .insert("oldest".to_string(), Arc::clone(&recreated_for_hook));
-        }));
-
-        let result = browser_store_session_with_persistence(
-            &state,
-            "provisional".to_string(),
-            session("provisional", 10_000),
-            10,
-            Some(&mut persistence),
-        );
-
-        assert!(result.is_err());
-        let sessions = state.sessions.lock().unwrap();
-        assert_eq!(sessions.len(), MAX_BROWSER_SESSIONS);
-        assert!(
-            sessions
-                .get("oldest")
-                .is_some_and(|current| Arc::ptr_eq(current, &recreated))
-        );
-        assert!(!sessions.contains_key("provisional"));
-        assert!(
-            sessions
-                .values()
-                .all(|current| !Arc::ptr_eq(current, &oldest))
-        );
     }
 }
 
