@@ -78,9 +78,11 @@ The bridge verifies that exact loaded thread through the writer's app-server
 socket, writes through Codex, and requires persistence after writing; a queue
 database and UUID alone are never sufficient.
 
-`prodex_session_preempt` uses the same fail-closed target checks. It sends
-`turn/interrupt` only for the active turn proved by that exact thread, then
-drains pending `thread/queue/*` submissions. Codex pauses queued submissions
+`prodex_session_preempt` uses the same fail-closed target checks. It verifies
+exact thread addressability and status with `thread/read`, obtains the exact
+in-progress turn ID with `thread/turns/list`, and sends `turn/interrupt` only
+for that turn. It then drains pending `thread/queue/*` submissions through
+`thread/queue/list` and `thread/queue/delete`. Codex pauses queued submissions
 when a turn is interrupted, so no pending submission starts between those two
 operations. The queue-empty observation is the linearization boundary: bridge
 Prompt Write calls before it are cancelled; calls accepted after it remain

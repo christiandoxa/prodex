@@ -243,10 +243,12 @@ writes SQLite queue payloads. Raw hidden reasoning, prompt instructions, and
 credentials are not returned.
 
 `prodex_session_preempt` accepts the same optional `cwd`, `prodex_pid`, and
-`thread_id` selectors. It sends `turn/interrupt` for the active turn ID proved
-by `thread/read` with turns included, then lists and deletes pending
-submissions for the exact thread. Codex pauses queued submissions when a turn
-is interrupted, so no pending submission starts between those operations. It
+`thread_id` selectors. It uses `thread/read` to prove exact thread
+addressability and status, obtains the exact in-progress turn ID through
+`thread/turns/list`, sends `turn/interrupt` for that exact turn, then lists and
+deletes pending submissions through `thread/queue/list` and
+`thread/queue/delete`. Codex pauses queued submissions when a turn is
+interrupted, so no pending submission starts between those operations. It
 repeats within a bounded drain budget until an empty queue is observed. That
 empty observation is the linearization boundary. Prompt Write operations
 serialized before the boundary are cancelled; an operation accepted after the
