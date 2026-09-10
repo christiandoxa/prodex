@@ -16,10 +16,11 @@ pub(super) const SESSION_KEY_PREFIX: &str = "prodex:gateway:browser:session:";
 const MAX_PROTECTED_ID_TOKEN_BYTES: usize = 128 * 1_024;
 const ID_TOKEN_ASSOCIATED_DATA_PREFIX: &str = "prodex:gateway:browser:id-token:v1:";
 
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub(crate) struct RuntimeGatewayBrowserState {
     pub(super) transactions: Arc<Mutex<BTreeMap<String, Arc<RuntimeGatewayBrowserTransaction>>>>,
     pub(super) sessions: Arc<Mutex<BTreeMap<String, Arc<RuntimeGatewayBrowserSession>>>>,
+    pub(super) session_generations: Arc<Mutex<BTreeMap<String, u64>>>,
 }
 
 #[derive(Clone, serde::Serialize, serde::Deserialize)]
@@ -271,6 +272,10 @@ pub(super) fn browser_store_session_with_persistence(
         .sessions
         .lock()
         .map_err(|_| RuntimeGatewayBrowserFailure::Unavailable)?;
+    let mut session_generations = state_store
+        .session_generations
+        .lock()
+        .map_err(|_| RuntimeGatewayBrowserFailure::Unavailable)?;
     sessions.retain(|_, session| session.expires_at_unix_ms > now);
     let evicted = if sessions.len() >= MAX_BROWSER_SESSIONS {
         sessions
@@ -280,10 +285,15 @@ pub(super) fn browser_store_session_with_persistence(
     } else {
         None
     };
-    if let Some((oldest, _)) = evicted.as_ref() {
-        sessions.remove(oldest);
-    }
+    let evicted = evicted.map(|(oldest, session)| {
+        sessions.remove(&oldest);
+        let generation = advance_session_generation(&mut session_generations, &oldest);
+        (oldest, session, generation)
+    });
     let previous = sessions.insert(session_id.clone(), Arc::clone(&session));
+    let provisional_generation = advance_session_generation(&mut session_generations, &session_id);
+    prune_session_generations(&sessions, &mut session_generations);
+    drop(session_generations);
     drop(sessions);
     let Some(persistence) = persistence else {
         return Ok(());
@@ -296,7 +306,14 @@ pub(super) fn browser_store_session_with_persistence(
         ),
         Ok(true)
     ) {
-        browser_restore_session_shadow(state_store, &session_id, &session, previous, evicted)?;
+        browser_restore_session_shadow(
+            state_store,
+            &session_id,
+            &session,
+            previous,
+            evicted,
+            provisional_generation,
+        )?;
         return Err(RuntimeGatewayBrowserFailure::Unavailable);
     }
     for logout_key in &session.logout_keys {
@@ -313,7 +330,14 @@ pub(super) fn browser_store_session_with_persistence(
             for logout_key in &session.logout_keys {
                 let _ = persistence.remove_ephemeral_member(logout_key, &session_id);
             }
-            browser_restore_session_shadow(state_store, &session_id, &session, previous, evicted)?;
+            browser_restore_session_shadow(
+                state_store,
+                &session_id,
+                &session,
+                previous,
+                evicted,
+                provisional_generation,
+            )?;
             return Err(RuntimeGatewayBrowserFailure::Unavailable);
         }
     }
@@ -362,13 +386,7 @@ pub(super) fn browser_delete_session_record(
     session_id: &str,
     session: Option<&RuntimeGatewayBrowserSession>,
 ) -> BrowserResult<()> {
-    let local_owner = shared
-        .gateway_browser
-        .sessions
-        .lock()
-        .map_err(|_| RuntimeGatewayBrowserFailure::Unavailable)?
-        .get(session_id)
-        .cloned();
+    let local_owner = mark_session_mutation(&shared.gateway_browser, session_id)?;
     if let Some(executor) = shared.gateway_redis_rate_limit_executor.as_ref() {
         // Redis executor has no compare-delete primitive; retain existing cleanup semantics.
         shared
@@ -389,13 +407,7 @@ pub(super) fn browser_delete_session_record(
         }
     }
     if let Some(local_owner) = local_owner {
-        browser_restore_session_shadow(
-            &shared.gateway_browser,
-            session_id,
-            &local_owner,
-            None,
-            None,
-        )?;
+        remove_owned_session_shadow(&shared.gateway_browser, session_id, &local_owner)?;
     }
     Ok(())
 }
@@ -405,14 +417,104 @@ fn browser_restore_session_shadow(
     session_id: &str,
     owner: &Arc<RuntimeGatewayBrowserSession>,
     previous: Option<Arc<RuntimeGatewayBrowserSession>>,
-    evicted: Option<(String, Arc<RuntimeGatewayBrowserSession>)>,
+    evicted: Option<(String, Arc<RuntimeGatewayBrowserSession>, u64)>,
+    provisional_generation: u64,
 ) -> BrowserResult<()> {
     let mut sessions = state_store
         .sessions
         .lock()
         .map_err(|_| RuntimeGatewayBrowserFailure::Unavailable)?;
-    restore_owned_entry(&mut sessions, session_id, owner, previous, evicted);
+    let mut session_generations = state_store
+        .session_generations
+        .lock()
+        .map_err(|_| RuntimeGatewayBrowserFailure::Unavailable)?;
+    let owns_provisional = sessions
+        .get(session_id)
+        .is_some_and(|current| Arc::ptr_eq(current, owner))
+        && session_generation(&session_generations, session_id) == provisional_generation;
+    if owns_provisional {
+        if let Some(previous) = previous {
+            sessions.insert(session_id.to_string(), previous);
+        } else {
+            sessions.remove(session_id);
+        }
+        advance_session_generation(&mut session_generations, session_id);
+        if let Some((evicted_key, evicted, evicted_generation)) = evicted {
+            let expected_generation = if evicted_key == session_id {
+                provisional_generation
+            } else {
+                evicted_generation
+            };
+            if session_generation(&session_generations, &evicted_key) == expected_generation {
+                sessions.entry(evicted_key.clone()).or_insert(evicted);
+                advance_session_generation(&mut session_generations, &evicted_key);
+            }
+        }
+        prune_session_generations(&sessions, &mut session_generations);
+    }
     Ok(())
+}
+
+pub(super) fn mark_session_mutation(
+    state_store: &RuntimeGatewayBrowserState,
+    session_id: &str,
+) -> BrowserResult<Option<Arc<RuntimeGatewayBrowserSession>>> {
+    let sessions = state_store
+        .sessions
+        .lock()
+        .map_err(|_| RuntimeGatewayBrowserFailure::Unavailable)?;
+    let owner = sessions.get(session_id).cloned();
+    let mut session_generations = state_store
+        .session_generations
+        .lock()
+        .map_err(|_| RuntimeGatewayBrowserFailure::Unavailable)?;
+    advance_session_generation(&mut session_generations, session_id);
+    prune_session_generations(&sessions, &mut session_generations);
+    Ok(owner)
+}
+
+fn remove_owned_session_shadow(
+    state_store: &RuntimeGatewayBrowserState,
+    session_id: &str,
+    owner: &Arc<RuntimeGatewayBrowserSession>,
+) -> BrowserResult<()> {
+    let mut sessions = state_store
+        .sessions
+        .lock()
+        .map_err(|_| RuntimeGatewayBrowserFailure::Unavailable)?;
+    if sessions
+        .get(session_id)
+        .is_some_and(|current| Arc::ptr_eq(current, owner))
+    {
+        sessions.remove(session_id);
+    }
+    Ok(())
+}
+
+fn session_generation(generations: &BTreeMap<String, u64>, session_id: &str) -> u64 {
+    generations.get(session_id).copied().unwrap_or_default()
+}
+
+fn advance_session_generation(generations: &mut BTreeMap<String, u64>, session_id: &str) -> u64 {
+    let generation = generations.entry(session_id.to_string()).or_default();
+    *generation = generation.saturating_add(1);
+    *generation
+}
+
+fn prune_session_generations(
+    sessions: &BTreeMap<String, Arc<RuntimeGatewayBrowserSession>>,
+    generations: &mut BTreeMap<String, u64>,
+) {
+    while generations.len() > MAX_BROWSER_SESSIONS * 2 {
+        let Some(key) = generations
+            .keys()
+            .find(|key| !sessions.contains_key(*key))
+            .cloned()
+        else {
+            break;
+        };
+        generations.remove(&key);
+    }
 }
 
 fn restore_owned_entry<T>(
