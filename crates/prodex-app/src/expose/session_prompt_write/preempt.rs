@@ -69,25 +69,7 @@ pub(super) fn app_server_preempt(
         return Err(SessionPromptWriteError::VerificationInconclusive);
     }
 
-    let mut current_turn_interrupted = false;
-    if let Some(turn_id) = activity.active_turn_id.as_deref() {
-        let outcome = request_result(
-            &mut socket,
-            next_request_id(&mut request_id),
-            "turn/interrupt",
-            serde_json::json!({"threadId": target.thread_id, "turnId": turn_id}),
-        );
-        match outcome {
-            AppServerRequestOutcome::Accepted(_) => current_turn_interrupted = true,
-            AppServerRequestOutcome::Rejected => {}
-            AppServerRequestOutcome::Ambiguous => {
-                return Err(SessionPromptWriteError::VerificationInconclusive);
-            }
-        }
-    }
-
     let mut cancelled_submission_ids = Vec::new();
-    let mut had_pending_submissions = false;
     let mut queue_empty_at_boundary = false;
     for _ in 0..super::PREEMPT_QUEUE_DRAIN_ATTEMPTS {
         let queued = app_server_queue_list(&mut socket, target, &mut request_id)?;
@@ -95,7 +77,6 @@ pub(super) fn app_server_preempt(
             queue_empty_at_boundary = true;
             break;
         }
-        had_pending_submissions = true;
         for submission_id in queued {
             if app_server_queue_delete(&mut socket, target, &mut request_id, &submission_id)? {
                 cancelled_submission_ids.push(submission_id);
@@ -106,20 +87,51 @@ pub(super) fn app_server_preempt(
         return Err(SessionPromptWriteError::VerificationInconclusive);
     }
 
+    let activity_at_boundary =
+        app_server_thread_activity(&mut socket, target, true, &mut request_id)?
+            .ok_or(SessionPromptWriteError::SessionNotQueueAddressable)?;
+    if activity_at_boundary.active && activity_at_boundary.active_turn_id.is_none() {
+        return Err(SessionPromptWriteError::VerificationInconclusive);
+    }
+
+    let turn_id_to_interrupt = match (
+        activity.active_turn_id.as_deref(),
+        activity_at_boundary.active_turn_id.as_deref(),
+    ) {
+        (Some(initial), Some(current)) if initial == current => Some(current.to_string()),
+        (Some(_), None) | (None, None) => None,
+        (Some(_), Some(_)) | (None, Some(_)) => {
+            return Err(SessionPromptWriteError::VerificationInconclusive);
+        }
+    };
+    let mut current_turn_interrupted = false;
+    if let Some(turn_id) = turn_id_to_interrupt.as_deref() {
+        match request_result(
+            &mut socket,
+            next_request_id(&mut request_id),
+            "turn/interrupt",
+            serde_json::json!({"threadId": target.thread_id, "turnId": turn_id}),
+        ) {
+            AppServerRequestOutcome::Accepted(_) => current_turn_interrupted = true,
+            AppServerRequestOutcome::Rejected => {}
+            AppServerRequestOutcome::Ambiguous => {
+                return Err(SessionPromptWriteError::VerificationInconclusive);
+            }
+        }
+    }
+
     let final_activity = app_server_thread_activity(&mut socket, target, true, &mut request_id)?
         .ok_or(SessionPromptWriteError::SessionNotQueueAddressable)?;
-    if current_turn_interrupted
-        && final_activity.active_turn_id.as_deref() == activity.active_turn_id.as_deref()
-    {
+    if final_activity.active && final_activity.active_turn_id.is_none() {
         return Err(SessionPromptWriteError::VerificationInconclusive);
     }
-    if !current_turn_interrupted && activity.active_turn_id.is_some() && final_activity.active {
-        return Err(SessionPromptWriteError::VerificationInconclusive);
-    }
-    if had_pending_submissions && final_activity.active {
+    if final_activity.active_turn_id.is_some() {
         return Err(SessionPromptWriteError::VerificationInconclusive);
     }
     let remaining_submission_ids = app_server_queue_list(&mut socket, target, &mut request_id)?;
+    if !remaining_submission_ids.is_empty() {
+        return Err(SessionPromptWriteError::VerificationInconclusive);
+    }
     let session_ready = !final_activity.active
         && final_activity.active_turn_id.is_none()
         && remaining_submission_ids.is_empty();
