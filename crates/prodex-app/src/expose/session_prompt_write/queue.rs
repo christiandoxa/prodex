@@ -510,7 +510,7 @@ pub(super) fn app_server_thread_activity(
         "thread/read",
         serde_json::json!({
             "threadId": target.thread_id,
-            "includeTurns": false,
+            "includeTurns": include_turns,
         }),
     )?
     else {
@@ -550,7 +550,7 @@ pub(super) fn app_server_thread_activity(
         _ => return Ok(None),
     };
     let active_turn_id = if include_turns {
-        app_server_active_turn_id(socket, target, request_id)?
+        thread_active_turn_id(thread)?
     } else {
         None
     };
@@ -561,27 +561,11 @@ pub(super) fn app_server_thread_activity(
 }
 
 #[cfg(unix)]
-fn app_server_active_turn_id(
-    socket: &mut UnixAppServerSocket,
-    target: &ResolvedTarget,
-    request_id: &mut u64,
+fn thread_active_turn_id(
+    thread: &serde_json::Value,
 ) -> std::result::Result<Option<String>, SessionPromptWriteError> {
-    let Some(result) = app_server_request_result(
-        socket,
-        super::preempt::next_request_id(request_id),
-        "thread/turns/list",
-        serde_json::json!({
-            "threadId": target.thread_id,
-            "limit": super::PREEMPT_QUEUE_LIMIT,
-            "sortDirection": "desc",
-            "itemsView": "notLoaded",
-        }),
-    )?
-    else {
-        return Ok(None);
-    };
-    let Some(turns) = result.get("data").and_then(serde_json::Value::as_array) else {
-        return Ok(None);
+    let Some(turns) = thread.get("turns").and_then(serde_json::Value::as_array) else {
+        return Err(SessionPromptWriteError::VerificationInconclusive);
     };
     let active_turns = turns
         .iter()
@@ -594,7 +578,7 @@ fn app_server_active_turn_id(
         .map(|turn| {
             turn.get("id")
                 .and_then(serde_json::Value::as_str)
-                .filter(|id| !id.is_empty())
+                .filter(|id| !id.is_empty() && id.len() <= 128 && !id.chars().any(char::is_control))
                 .map(str::to_string)
                 .ok_or(SessionPromptWriteError::VerificationInconclusive)
         })

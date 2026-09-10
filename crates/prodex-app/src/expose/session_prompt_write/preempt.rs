@@ -69,32 +69,48 @@ pub(super) fn app_server_preempt(
         return Err(SessionPromptWriteError::VerificationInconclusive);
     }
 
-    let current_turn_interrupted = interrupt_turn(
-        &mut socket,
-        target,
-        &mut request_id,
-        activity.active_turn_id.as_deref(),
-    )?;
-    let (cancelled_submission_ids, queue_empty_at_boundary, had_pending_submissions) =
+    let (cancelled_submission_ids, queue_empty_at_boundary, _had_pending_submissions) =
         drain_queue(&mut socket, target, &mut request_id)?;
     if !queue_empty_at_boundary {
         return Err(SessionPromptWriteError::VerificationInconclusive);
     }
 
+    let activity_at_boundary =
+        app_server_thread_activity(&mut socket, target, true, &mut request_id)?
+            .ok_or(SessionPromptWriteError::SessionNotQueueAddressable)?;
+    if activity_at_boundary.active && activity_at_boundary.active_turn_id.is_none() {
+        return Err(SessionPromptWriteError::VerificationInconclusive);
+    }
+
+    let turn_id_to_interrupt = match (
+        activity.active_turn_id.as_deref(),
+        activity_at_boundary.active_turn_id.as_deref(),
+    ) {
+        (Some(initial), Some(current)) if initial == current => Some(current.to_string()),
+        (Some(_), None) | (None, None) => None,
+        (Some(_), Some(_)) | (None, Some(_)) => {
+            return Err(SessionPromptWriteError::VerificationInconclusive);
+        }
+    };
+    let current_turn_interrupted = interrupt_turn(
+        &mut socket,
+        target,
+        &mut request_id,
+        turn_id_to_interrupt.as_deref(),
+    )?;
+
     let final_activity = app_server_thread_activity(&mut socket, target, true, &mut request_id)?
         .ok_or(SessionPromptWriteError::SessionNotQueueAddressable)?;
-    if current_turn_interrupted
-        && final_activity.active_turn_id.as_deref() == activity.active_turn_id.as_deref()
-    {
+    if final_activity.active && final_activity.active_turn_id.is_none() {
         return Err(SessionPromptWriteError::VerificationInconclusive);
     }
-    if !current_turn_interrupted && activity.active_turn_id.is_some() && final_activity.active {
-        return Err(SessionPromptWriteError::VerificationInconclusive);
-    }
-    if had_pending_submissions && final_activity.active {
+    if final_activity.active_turn_id.is_some() {
         return Err(SessionPromptWriteError::VerificationInconclusive);
     }
     let remaining_submission_ids = app_server_queue_list(&mut socket, target, &mut request_id)?;
+    if !remaining_submission_ids.is_empty() {
+        return Err(SessionPromptWriteError::VerificationInconclusive);
+    }
     let session_ready = !final_activity.active
         && final_activity.active_turn_id.is_none()
         && remaining_submission_ids.is_empty();
