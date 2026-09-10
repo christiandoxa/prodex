@@ -40,6 +40,7 @@ canonical workspace. MCP tools are enabled by default:
 ```json
 prodex_session_output_read({})
 prodex_session_prompt_write({"message":"inspect the failing test"})
+prodex_session_preempt({"thread_id":"<thread_id>"})
 prodex_session_output_read({"cursor":"<next_cursor>","wait_ms":5000})
 ```
 
@@ -76,6 +77,18 @@ Modern Codex authority is an open
 The bridge verifies that exact loaded thread through the writer's app-server
 socket, writes through Codex, and requires persistence after writing; a queue
 database and UUID alone are never sufficient.
+
+`prodex_session_preempt` uses the same fail-closed target checks. It sends
+`turn/interrupt` only for the active turn proved by that exact thread, then
+drains pending `thread/queue/*` submissions. Codex pauses queued submissions
+when a turn is interrupted, so no pending submission starts between those two
+operations. The queue-empty observation is the linearization boundary: bridge
+Prompt Write calls before it are cancelled; calls accepted after it remain
+valid. It returns cancelled and remaining submission IDs, interruption status,
+`session_ready`, and a monotonic in-process generation boundary. Codex owns
+persisted queue state, so reconnect must observe the queue through the app-server
+rather than replaying a request. Already-started submissions are never counted
+as cancelled. Ambiguous control responses fail closed.
 
 ## Security and readiness
 

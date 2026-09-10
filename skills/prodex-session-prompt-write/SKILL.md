@@ -9,6 +9,8 @@ Use `prodex s expose` from the same canonical workspace as the one plain
 `prodex s` session. The default MCP tools are:
 
 - `prodex_session_prompt_write({"message":"..."})` for Prompt Write;
+- `prodex_session_preempt({"thread_id":"..."})` to interrupt one exact
+  session turn and drain its still-pending queue;
 - `prodex_session_output_read({"cursor":"...","wait_ms":5000})` to read
   later sanitized visible user, assistant, tool, MCP/agent, and session/turn-status events.
 
@@ -55,3 +57,11 @@ generic `gap` markers for malformed, invalid-UTF-8, or oversized records, and
 queue payloads, or raw rollout JSON.
 Never read a target PTY or `/dev/pts`, synthesize keystrokes, write SQLite
 queue rows, or start another solver/writer.
+
+Preempt uses the exact resolved process/writer/thread identity, sends the
+Codex `turn/interrupt` for the proved active turn, then deletes pending queue
+submissions through Codex. An empty queue observation is the boundary: prompt
+writes serialized before it are cancelled, later accepted writes remain valid.
+Already-started submissions are not counted as cancelled. Ambiguous control
+responses fail closed; the returned generation is an in-process boundary and
+Codex remains the durable queue owner.

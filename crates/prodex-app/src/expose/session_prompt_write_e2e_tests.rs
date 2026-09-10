@@ -14,7 +14,7 @@ use std::io::Write;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-fn structured(response: &str) -> Value {
+pub(super) fn structured(response: &str) -> Value {
     let value: Value = serde_json::from_str(response.split_once("\r\n\r\n").unwrap().1).unwrap();
     value["result"]["structuredContent"].clone()
 }
@@ -36,7 +36,7 @@ fn endpoint(
     )
 }
 
-fn endpoint_at(
+pub(super) fn endpoint_at(
     instance_id: &str,
     capability: &str,
     workspace: PathBuf,
@@ -71,7 +71,7 @@ fn endpoint_at(
     )
 }
 
-fn call_tool(
+pub(super) fn call_tool(
     address: std::net::SocketAddr,
     target: &str,
     id: u64,

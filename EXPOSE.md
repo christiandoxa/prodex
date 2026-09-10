@@ -217,6 +217,9 @@ default tool list additionally contains:
 
 - `prodex_session_prompt_write`: deliver one session input to that exact existing
   Codex thread using the supported Codex app-server control plane;
+- `prodex_session_preempt`: interrupt that exact thread's current turn and drain
+  its pending queued submissions through the supported Codex app-server control
+  plane;
 - `prodex_session_output_read`: read bounded sanitized visible user, assistant,
   tool, MCP/agent, and session/turn-status events from that same thread with an
   opaque monotonic cursor.
@@ -238,6 +241,23 @@ writer's process-bound thread identity. Ambiguous or stale targets fail closed.
 Neither tool reads `/dev/pts`, sends terminal keystrokes, starts a solver, or
 writes SQLite queue payloads. Raw hidden reasoning, prompt instructions, and
 credentials are not returned.
+
+`prodex_session_preempt` accepts the same optional `cwd`, `prodex_pid`, and
+`thread_id` selectors. It sends `turn/interrupt` for the active turn ID proved
+by `thread/read` with turns included, then lists and deletes pending
+submissions for the exact thread. Codex pauses queued submissions when a turn
+is interrupted, so no pending submission starts between those operations. It
+repeats within a bounded drain budget until an empty queue is observed. That
+empty observation is the linearization boundary. Prompt Write operations
+serialized before the boundary are cancelled; an operation accepted after the
+boundary remains valid. A missing active turn is safe and idempotent. An
+accepted interrupt is reported as
+`current_turn_interrupted`; a submission that has already started is not counted
+as cancelled. The result includes cancelled and remaining submission IDs,
+`queue_empty_at_boundary`, `session_ready`, and an in-process `generation` /
+`generation_boundary`. Queue state remains Codex-owned and persisted; reconnect
+must re-read it through the control plane. Ambiguous queue or interrupt
+responses fail closed, and no process is killed.
 
 Machine statuses distinguish `written`, `no_session`, `ambiguous_session`,
 `stale_target`, `queue_failed`, and `write_ambiguous`. Only authoritative
