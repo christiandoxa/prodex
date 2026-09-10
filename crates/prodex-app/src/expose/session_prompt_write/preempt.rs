@@ -69,39 +69,14 @@ pub(super) fn app_server_preempt(
         return Err(SessionPromptWriteError::VerificationInconclusive);
     }
 
-    let mut current_turn_interrupted = false;
-    if let Some(turn_id) = activity.active_turn_id.as_deref() {
-        let outcome = request_result(
-            &mut socket,
-            next_request_id(&mut request_id),
-            "turn/interrupt",
-            serde_json::json!({"threadId": target.thread_id, "turnId": turn_id}),
-        );
-        match outcome {
-            AppServerRequestOutcome::Accepted(_) => current_turn_interrupted = true,
-            AppServerRequestOutcome::Rejected => {}
-            AppServerRequestOutcome::Ambiguous => {
-                return Err(SessionPromptWriteError::VerificationInconclusive);
-            }
-        }
-    }
-
-    let mut cancelled_submission_ids = Vec::new();
-    let mut had_pending_submissions = false;
-    let mut queue_empty_at_boundary = false;
-    for _ in 0..super::PREEMPT_QUEUE_DRAIN_ATTEMPTS {
-        let queued = app_server_queue_list(&mut socket, target, &mut request_id)?;
-        if queued.is_empty() {
-            queue_empty_at_boundary = true;
-            break;
-        }
-        had_pending_submissions = true;
-        for submission_id in queued {
-            if app_server_queue_delete(&mut socket, target, &mut request_id, &submission_id)? {
-                cancelled_submission_ids.push(submission_id);
-            }
-        }
-    }
+    let current_turn_interrupted = interrupt_turn(
+        &mut socket,
+        target,
+        &mut request_id,
+        activity.active_turn_id.as_deref(),
+    )?;
+    let (cancelled_submission_ids, queue_empty_at_boundary, had_pending_submissions) =
+        drain_queue(&mut socket, target, &mut request_id)?;
     if !queue_empty_at_boundary {
         return Err(SessionPromptWriteError::VerificationInconclusive);
     }
@@ -131,6 +106,53 @@ pub(super) fn app_server_preempt(
         queue_empty_at_boundary,
         session_ready,
     })
+}
+
+#[cfg(unix)]
+fn interrupt_turn(
+    socket: &mut UnixAppServerSocket,
+    target: &super::ResolvedTarget,
+    request_id: &mut u64,
+    turn_id: Option<&str>,
+) -> std::result::Result<bool, SessionPromptWriteError> {
+    let Some(turn_id) = turn_id else {
+        return Ok(false);
+    };
+    match request_result(
+        socket,
+        next_request_id(request_id),
+        "turn/interrupt",
+        serde_json::json!({"threadId": target.thread_id, "turnId": turn_id}),
+    ) {
+        AppServerRequestOutcome::Accepted(_) => Ok(true),
+        AppServerRequestOutcome::Rejected => Ok(false),
+        AppServerRequestOutcome::Ambiguous => {
+            Err(SessionPromptWriteError::VerificationInconclusive)
+        }
+    }
+}
+
+#[cfg(unix)]
+fn drain_queue(
+    socket: &mut UnixAppServerSocket,
+    target: &super::ResolvedTarget,
+    request_id: &mut u64,
+) -> std::result::Result<(Vec<String>, bool, bool), SessionPromptWriteError> {
+    let mut cancelled_submission_ids = Vec::new();
+    let mut had_pending_submissions = false;
+    for _ in 0..super::PREEMPT_QUEUE_DRAIN_ATTEMPTS {
+        let queued = app_server_queue_list(socket, target, request_id)?;
+        if queued.is_empty() {
+            return Ok((cancelled_submission_ids, true, had_pending_submissions));
+        }
+        had_pending_submissions = true;
+        for submission_id in queued {
+            if app_server_queue_delete(socket, target, request_id, &submission_id)? {
+                cancelled_submission_ids.push(submission_id);
+            }
+        }
+    }
+    Ok((cancelled_submission_ids, false, had_pending_submissions))
 }
 
 #[cfg(unix)]
