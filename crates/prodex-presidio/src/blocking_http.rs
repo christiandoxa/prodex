@@ -109,8 +109,13 @@ fn presidio_analyze_with_limit(
             presidio_redacted_message(body.trim())
         );
     }
-    read_presidio_json_response(response, max_response_bytes)
-        .context("failed to parse Presidio Analyzer response")
+    let results =
+        read_presidio_json_response::<Vec<PresidioAnalyzerResult>>(response, max_response_bytes)
+            .context("failed to parse Presidio Analyzer response")?;
+    if results.iter().any(|result| result.start > result.end) {
+        anyhow::bail!("Presidio Analyzer returned an invalid finding range");
+    }
+    Ok(results)
 }
 
 pub fn presidio_anonymize(

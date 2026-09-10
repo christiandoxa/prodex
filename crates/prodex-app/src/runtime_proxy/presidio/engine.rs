@@ -336,6 +336,9 @@ async fn presidio_analyze_async(
     .await?;
     let results = serde_json::from_slice::<Vec<PresidioAnalyzerResult>>(&body)
         .context("failed to parse Presidio Analyzer response")?;
+    if results.iter().any(|result| result.start > result.end) {
+        anyhow::bail!("Presidio Analyzer returned an invalid finding range");
+    }
     Ok(results)
 }
 
@@ -346,6 +349,8 @@ fn presidio_endpoint(base_url: &str, path: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tiny_http::{Header as TinyHeader, Response as TinyResponse, Server as TinyServer};
+    use tokio::runtime::Builder as TokioRuntimeBuilder;
 
     #[test]
     fn cross_field_findings_are_removed_before_anonymization() {
@@ -384,5 +389,53 @@ mod tests {
 
         assert_eq!(findings.len(), 1);
         assert_eq!(findings[0].entity_type, "EMAIL_ADDRESS");
+    }
+
+    #[test]
+    fn runtime_presidio_rejects_inverted_multi_language_range_before_merge() {
+        let server = TinyServer::http("127.0.0.1:0").unwrap();
+        let addr = server.server_addr().to_ip().unwrap();
+        let analyzer_handle = std::thread::spawn(move || {
+            for response_body in [
+                r#"[{"start":0,"end":1,"score":0.9,"entity_type":"PERSON"}]"#,
+                r#"[{"start":3,"end":1,"score":0.8,"entity_type":"PERSON"}]"#,
+            ] {
+                let request = server.recv().unwrap();
+                assert_eq!(request.url(), "/analyze");
+                let response = TinyResponse::from_string(response_body).with_header(
+                    TinyHeader::from_bytes("Content-Type", "application/json").unwrap(),
+                );
+                let _ = request.respond(response);
+            }
+        });
+        let analyzer_url = format!("http://{addr}");
+        let original = br#"{"input":"abc"}"#.to_vec();
+        let state = Arc::new(
+            RuntimePresidioRedactionState::new(RuntimePresidioRedactionConfig {
+                analyzer_url: analyzer_url.clone(),
+                anonymizer_url: analyzer_url,
+                languages: vec!["en".to_string(), "id".to_string()],
+                language_mode: PresidioLanguageMode::Multi,
+                fail_closed: true,
+                trusted_hosts: Vec::new(),
+                timeout_ms: 1_000,
+                max_response_bytes: 1024,
+                max_concurrency: 1,
+            })
+            .unwrap(),
+        );
+        let runtime = TokioRuntimeBuilder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let attempt = runtime
+            .block_on(runtime_presidio_redact_body(original.clone(), state))
+            .unwrap();
+        let InspectionExecutionOutcome::Failed(failure) = attempt else {
+            panic!("inverted Presidio range must fail closed");
+        };
+        assert_eq!(failure.body, original);
+        assert!(failure.error.to_string().contains("invalid finding range"));
+        analyzer_handle.join().unwrap();
     }
 }
