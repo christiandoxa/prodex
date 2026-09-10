@@ -2,8 +2,8 @@ use super::super::http::ExposeHttpRequest;
 use super::super::run_manager::ExposeRunManager;
 use super::super::session::{expose_digest_eq, expose_token_digest};
 use super::super::session_prompt_write::{
-    PromptOutputReadRequest, SESSION_PROMPT_WRITE_MAX_MESSAGE_BYTES, SessionPromptWriteRequest,
-    SessionPromptWriteService,
+    PromptOutputReadRequest, SESSION_PROMPT_WRITE_MAX_MESSAGE_BYTES, SessionPreemptRequest,
+    SessionPromptWriteRequest, SessionPromptWriteService,
 };
 use super::super::ui::{ExposeHttpResponse, expose_mcp_empty_response, expose_text_response};
 use super::protocol::{
@@ -323,7 +323,7 @@ impl ExposeMcpEndpoint {
 
     fn instructions(&self) -> String {
         format!(
-            "This is a local full-access Prodex Super runtime starting in {:?} (instance {}). The initial directory is context, not a filesystem jail: runs retain normal OS-user filesystem, process, network, Git, and local-tool authority. For development requests, resolve one compatible existing plain prodex s with prodex_session_prompt_write first, then read its exact returned PID, thread_id, and cursor. Start one prodex_super_start fallback only after authoritative no_session; never run both paths in parallel or treat ambiguity, stale identity, addressability, queue, source, or verification errors as no_session. A fresh idle prodex s needs no manual bootstrap prompt. Include consequential external actions in the user's task, and poll an existing run instead of starting duplicates. The expose URL is ephemeral capability authentication; anyone with it can control this instance.",
+            "This is a local full-access Prodex Super runtime starting in {:?} (instance {}). The initial directory is context, not a filesystem jail: runs retain normal OS-user filesystem, process, network, Git, and local-tool authority. For development requests, resolve one compatible existing plain prodex s with prodex_session_prompt_write first, then read its exact returned PID, thread_id, and cursor. Use prodex_session_preempt for one exact session when the current turn and all pending queued prompts must stop; it never kills a process. Start one prodex_super_start fallback only after authoritative no_session; never run both paths in parallel or treat ambiguity, stale identity, addressability, queue, source, or verification errors as no_session. A fresh idle prodex s needs no manual bootstrap prompt. Include consequential external actions in the user's task, and poll an existing run instead of starting duplicates. The expose URL is ephemeral capability authentication; anyone with it can control this instance.",
             self.workspace_name, self.instance_id
         )
     }
@@ -371,6 +371,7 @@ impl ExposeMcpEndpoint {
             "prodex_super_result" => self.result_tool(arguments),
             "prodex_super_cancel" => self.cancel_tool(arguments),
             "prodex_session_prompt_write" => self.session_prompt_write_tool(arguments),
+            "prodex_session_preempt" => self.session_preempt_tool(arguments),
             "prodex_session_output_read" => self.output_read_tool(arguments, shutdown),
             "prodex_super_list" => Ok(json!({
                 "instance_id": self.instance_id,
@@ -426,6 +427,43 @@ impl ExposeMcpEndpoint {
             "recovery_generation": result.recovery_generation,
             "last_prompt_requeued": result.last_prompt_requeued,
             "requeue_reason": result.requeue_reason,
+        }))
+    }
+
+    fn session_preempt_tool(&self, arguments: &Value) -> std::result::Result<Value, String> {
+        let prodex_pid = optional_process_id(arguments)?;
+        let thread_id = normalized_thread_id(arguments)?;
+        let binding_key = self.session_binding_key(prodex_pid, thread_id.as_deref());
+        let result = self
+            .session_prompt_write
+            .preempt(SessionPreemptRequest {
+                workspace_root: self.workspace_root.clone(),
+                cwd: optional_string(arguments, "cwd", 4096)?,
+                prodex_pid,
+                thread_id,
+                binding_key,
+            })
+            .map_err(|error| error.as_str().to_string())?;
+        let current_turn_found = result.current_turn_id.is_some();
+        let cancelled_count = result.cancelled_submission_ids.len();
+        let remaining_count = result.remaining_submission_ids.len();
+        Ok(json!({
+            "status": "preempted",
+            "preempted": true,
+            "prodex_pid": result.prodex_pid,
+            "codex_pid": result.codex_pid,
+            "thread_id": result.thread_id,
+            "current_turn_id": result.current_turn_id,
+            "current_turn_found": current_turn_found,
+            "current_turn_interrupted": result.current_turn_interrupted,
+            "cancelled_submission_ids": result.cancelled_submission_ids,
+            "cancelled_count": cancelled_count,
+            "remaining_submission_ids": result.remaining_submission_ids,
+            "remaining_count": remaining_count,
+            "queue_empty_at_boundary": result.queue_empty_at_boundary,
+            "session_ready": result.session_ready,
+            "generation": result.generation,
+            "generation_boundary": result.generation,
         }))
     }
 

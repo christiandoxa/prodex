@@ -18,23 +18,54 @@ where
         workspace_root: &Path,
         binding: Option<&SessionBinding>,
     ) -> std::result::Result<ResolvedTarget, SessionPromptWriteError> {
-        let requested_pid = request
-            .prodex_pid
-            .or_else(|| binding.map(|binding| binding.target.prodex.pid));
+        self.resolve_session_target(
+            workspace_root,
+            request.prodex_pid,
+            request.thread_id.as_deref(),
+            binding,
+        )
+    }
+
+    pub(super) fn resolve_session_preempt_target(
+        &self,
+        requested_pid: Option<u32>,
+        requested_thread_id: Option<&str>,
+        workspace_root: &Path,
+        binding: Option<&SessionBinding>,
+    ) -> std::result::Result<ResolvedTarget, SessionPromptWriteError> {
+        self.resolve_session_target(workspace_root, requested_pid, requested_thread_id, binding)
+    }
+
+    fn resolve_session_target(
+        &self,
+        workspace_root: &Path,
+        requested_pid: Option<u32>,
+        requested_thread_id: Option<&str>,
+        binding: Option<&SessionBinding>,
+    ) -> std::result::Result<ResolvedTarget, SessionPromptWriteError> {
+        let requested_pid =
+            requested_pid.or_else(|| binding.map(|binding| binding.target.prodex.pid));
         let deadline = Instant::now() + QUEUE_COMMAND_TIMEOUT;
         loop {
             let result = self
                 .resolve_target_for_request(
                     workspace_root,
                     requested_pid,
-                    request.thread_id.as_deref(),
+                    requested_thread_id,
                     binding.is_some(),
                 )
-                .map_err(|error| session_prompt_write_resolution_error(request, binding, error));
+                .map_err(|error| {
+                    session_target_resolution_error(
+                        binding,
+                        requested_pid,
+                        requested_thread_id,
+                        error,
+                    )
+                });
             match result {
                 Ok(target) => {
                     self.verify_binding(binding, &target)?;
-                    self.verify_session_prompt_write_identity(request, binding, &target)?;
+                    self.verify_session_target_identity(requested_thread_id, binding, &target)?;
                     self.queue
                         .check_capability(&target)
                         .map_err(|_| SessionPromptWriteError::QueueUnsupported)?;
@@ -51,9 +82,9 @@ where
         }
     }
 
-    fn verify_session_prompt_write_identity(
+    fn verify_session_target_identity(
         &self,
-        request: &SessionPromptWriteRequest,
+        requested_thread_id: Option<&str>,
         binding: Option<&SessionBinding>,
         target: &ResolvedTarget,
     ) -> std::result::Result<(), SessionPromptWriteError> {
@@ -63,11 +94,7 @@ where
                 return Err(SessionPromptWriteError::StaleTarget);
             }
         }
-        if request
-            .thread_id
-            .as_deref()
-            .is_some_and(|thread_id| thread_id != target.thread_id)
-        {
+        if requested_thread_id.is_some_and(|thread_id| thread_id != target.thread_id) {
             return Err(SessionPromptWriteError::StaleTarget);
         }
         Ok(())
@@ -163,11 +190,17 @@ fn rollout_before_offset(
 pub(super) fn canonical_session_prompt_write_workspace(
     request: &SessionPromptWriteRequest,
 ) -> std::result::Result<PathBuf, SessionPromptWriteError> {
-    let workspace_root = request
-        .workspace_root
+    canonical_session_workspace(&request.workspace_root, request.cwd.as_deref())
+}
+
+pub(super) fn canonical_session_workspace(
+    workspace_root: &Path,
+    cwd: Option<&str>,
+) -> std::result::Result<PathBuf, SessionPromptWriteError> {
+    let workspace_root = workspace_root
         .canonicalize()
         .map_err(|_| SessionPromptWriteError::VerificationInconclusive)?;
-    if let Some(cwd) = request.cwd.as_deref() {
+    if let Some(cwd) = cwd {
         let cwd = Path::new(cwd)
             .canonicalize()
             .map_err(|_| SessionPromptWriteError::StaleTarget)?;
@@ -178,13 +211,14 @@ pub(super) fn canonical_session_prompt_write_workspace(
     Ok(workspace_root)
 }
 
-fn session_prompt_write_resolution_error(
-    request: &SessionPromptWriteRequest,
+fn session_target_resolution_error(
     binding: Option<&SessionBinding>,
+    requested_pid: Option<u32>,
+    requested_thread_id: Option<&str>,
     error: SessionPromptWriteError,
 ) -> SessionPromptWriteError {
     if error == SessionPromptWriteError::NoSession
-        && (binding.is_some() || request.prodex_pid.is_some() || request.thread_id.is_some())
+        && (binding.is_some() || requested_pid.is_some() || requested_thread_id.is_some())
     {
         SessionPromptWriteError::StaleTarget
     } else {

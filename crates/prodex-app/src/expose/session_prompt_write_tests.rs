@@ -255,17 +255,18 @@ pub(super) fn service(
     fixture: &Fixture,
     queue: FakeQueueControl,
 ) -> SessionPromptWriteService<FakeProcessInspector, FakeQueueControl> {
-    SessionPromptWriteService::with_adapters(
-        FakeProcessInspector {
-            uid: 1000,
-            records: fixture.records.clone(),
-            details: fixture.writer.clone(),
-            details_by_pid: HashMap::new(),
-            changed_records: None,
-            lists: AtomicUsize::new(0),
-        },
-        queue,
-    )
+    SessionPromptWriteService::with_adapters(process_inspector(fixture), queue)
+}
+
+pub(super) fn process_inspector(fixture: &Fixture) -> FakeProcessInspector {
+    FakeProcessInspector {
+        uid: 1000,
+        records: fixture.records.clone(),
+        details: fixture.writer.clone(),
+        details_by_pid: HashMap::new(),
+        changed_records: None,
+        lists: AtomicUsize::new(0),
+    }
 }
 
 pub(super) fn request(fixture: &Fixture, message: &str) -> SessionPromptWriteRequest {
@@ -300,7 +301,6 @@ pub(super) fn queue(fixture: &Fixture, message_id: Option<&str>) -> FakeQueueCon
         calls: Arc::new(Mutex::new(Vec::new())),
     }
 }
-
 #[test]
 fn modern_lock_is_authoritative_and_legacy_rollout_is_supported() {
     let modern = PathBuf::from(format!("/tmp/thread-writer-locks/{THREAD}.lock"));

@@ -71,6 +71,7 @@ pub(super) fn validate_tool_arguments(
         "prodex_super_events" => ["run_id", "after_seq", "limit"].as_slice(),
         "prodex_super_list" => [].as_slice(),
         "prodex_session_prompt_write" => ["message", "cwd", "prodex_pid", "thread_id"].as_slice(),
+        "prodex_session_preempt" => ["cwd", "prodex_pid", "thread_id"].as_slice(),
         "prodex_session_output_read" => {
             ["cursor", "limit", "wait_ms", "prodex_pid", "thread_id"].as_slice()
         }
@@ -233,7 +234,7 @@ fn config_assignment_has_key(assignment: &str, key: &str) -> bool {
         .is_some_and(|(name, _)| name.trim() == key)
 }
 
-pub(super) fn mcp_tool_names() -> [&'static str; 8] {
+pub(super) fn mcp_tool_names() -> [&'static str; 9] {
     [
         "prodex_super_start",
         "prodex_super_status",
@@ -242,6 +243,7 @@ pub(super) fn mcp_tool_names() -> [&'static str; 8] {
         "prodex_super_cancel",
         "prodex_super_list",
         "prodex_session_prompt_write",
+        "prodex_session_preempt",
         "prodex_session_output_read",
     ]
 }
@@ -331,6 +333,23 @@ pub(super) fn mcp_tools() -> Vec<Value> {
             json!({"type": "object", "properties": {"status": {"type": "string"}, "prodex_pid": {"type": "integer"}, "codex_pid": {"type": "integer"}, "thread_id": {"type": "string"}, "message_id": {"type": ["string", "null"]}, "submission_id": {"type": ["string", "null"]}, "output_cursor": {"type": ["string", "null"]}, "queue_exit": {"type": "integer"}, "verification": {"type": "string"}, "recovery_generation": {"type": "integer"}, "last_prompt_requeued": {"type": "boolean"}, "requeue_reason": {"type": ["string", "null"]}}, "required": ["status", "prodex_pid", "codex_pid", "thread_id", "message_id", "submission_id", "output_cursor", "queue_exit", "verification", "recovery_generation", "last_prompt_requeued", "requeue_reason"]}),
             false,
             false,
+            false,
+        ),
+        tool_definition(
+            "prodex_session_preempt",
+            "Preempt the current turn for one exact existing plain `prodex s` session, then remove every still-pending queued prompt through Codex. It never kills a process or reports an already-started prompt as cancelled; ambiguous queue or interrupt state fails closed.",
+            json!({
+                "type": "object",
+                "properties": {
+                    "cwd": {"type": ["string", "null"], "maxLength": 4096},
+                    "prodex_pid": {"type": ["integer", "null"], "minimum": 1},
+                    "thread_id": {"type": ["string", "null"], "maxLength": 128}
+                },
+                "additionalProperties": false
+            }),
+            json!({"type": "object", "properties": {"status": {"type": "string"}, "preempted": {"type": "boolean"}, "prodex_pid": {"type": "integer"}, "codex_pid": {"type": "integer"}, "thread_id": {"type": "string"}, "current_turn_id": {"type": ["string", "null"]}, "current_turn_found": {"type": "boolean"}, "current_turn_interrupted": {"type": "boolean"}, "cancelled_submission_ids": {"type": "array", "items": {"type": "string"}}, "cancelled_count": {"type": "integer"}, "remaining_submission_ids": {"type": "array", "items": {"type": "string"}}, "remaining_count": {"type": "integer"}, "queue_empty_at_boundary": {"type": "boolean"}, "session_ready": {"type": "boolean"}, "generation": {"type": "integer"}, "generation_boundary": {"type": "integer"}}, "required": ["status", "preempted", "prodex_pid", "codex_pid", "thread_id", "current_turn_id", "current_turn_found", "current_turn_interrupted", "cancelled_submission_ids", "cancelled_count", "remaining_submission_ids", "remaining_count", "queue_empty_at_boundary", "session_ready", "generation", "generation_boundary"]}),
+            false,
+            true,
             false,
         ),
         tool_definition(

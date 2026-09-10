@@ -100,6 +100,7 @@ fn tool_list_is_focused_and_annotations_are_present() {
             "prodex_super_cancel",
             "prodex_super_list",
             "prodex_session_prompt_write",
+            "prodex_session_preempt",
             "prodex_session_output_read",
         ]
     );
