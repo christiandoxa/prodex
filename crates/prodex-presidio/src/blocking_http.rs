@@ -268,6 +268,37 @@ mod tests {
     }
 
     #[test]
+    fn presidio_analyze_rejects_inverted_finding_range() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut request = [0_u8; 4096];
+            let _ = stream.read(&mut request).unwrap();
+            let body = r#"[{"start":3,"end":1,"score":1.0,"entity_type":"PERSON"}]"#;
+            write!(
+                stream,
+                "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                body.len(),
+                body
+            )
+            .unwrap();
+        });
+
+        let error = presidio_analyze(
+            &presidio_http_client().unwrap(),
+            &format!("http://{address}"),
+            "synthetic-input",
+            "en",
+        )
+        .expect_err("inverted analyzer ranges must be rejected")
+        .to_string();
+
+        assert_eq!(error, "Presidio Analyzer returned an invalid finding range");
+        server.join().unwrap();
+    }
+
+    #[test]
     fn config_aware_blocking_client_enforces_timeout_and_response_limit() {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let address = listener.local_addr().unwrap();
