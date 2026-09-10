@@ -74,6 +74,9 @@ mod mcp_tests;
 #[path = "expose/run_manager_tests.rs"]
 mod run_manager_tests;
 #[cfg(all(test, unix))]
+#[path = "expose/session_preempt_tests.rs"]
+mod session_preempt_tests;
+#[cfg(all(test, unix))]
 #[path = "expose/session_prompt_write_concurrency_tests.rs"]
 mod session_prompt_write_concurrency_tests;
 #[cfg(all(test, unix))]

@@ -6,12 +6,14 @@
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::AtomicBool;
+use std::sync::atomic::{AtomicBool, AtomicU64};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 #[path = "session_prompt_write/output.rs"]
 mod output;
+#[path = "session_prompt_write/preempt.rs"]
+mod preempt;
 #[path = "session_prompt_write/process.rs"]
 mod process;
 #[path = "session_prompt_write/queue.rs"]
@@ -39,6 +41,8 @@ const OUTPUT_READ_MAX_TEXT_BYTES: usize = 8 * 1024;
 const OUTPUT_READ_MAX_TOTAL_TEXT_BYTES: usize = 256 * 1024;
 const OUTPUT_SOURCE_PROBE_BYTES: usize = 64 * 1024;
 const OUTPUT_SKIP_MAX_BYTES: usize = 4 * 1024 * 1024;
+const PREEMPT_QUEUE_DRAIN_ATTEMPTS: usize = 4;
+const PREEMPT_QUEUE_LIMIT: usize = 100;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum SessionPromptWriteError {
@@ -119,6 +123,29 @@ pub(super) struct SessionPromptWriteSuccess {
 }
 
 #[derive(Clone, Debug)]
+pub(super) struct SessionPreemptRequest {
+    pub(super) workspace_root: PathBuf,
+    pub(super) cwd: Option<String>,
+    pub(super) prodex_pid: Option<u32>,
+    pub(super) thread_id: Option<String>,
+    pub(super) binding_key: String,
+}
+
+#[derive(Debug)]
+pub(super) struct SessionPreemptSuccess {
+    pub(super) prodex_pid: u32,
+    pub(super) codex_pid: u32,
+    pub(super) thread_id: String,
+    pub(super) current_turn_id: Option<String>,
+    pub(super) current_turn_interrupted: bool,
+    pub(super) cancelled_submission_ids: Vec<String>,
+    pub(super) remaining_submission_ids: Vec<String>,
+    pub(super) queue_empty_at_boundary: bool,
+    pub(super) session_ready: bool,
+    pub(super) generation: u64,
+}
+
+#[derive(Clone, Debug)]
 pub(super) struct PromptOutputReadRequest {
     pub(super) workspace_root: PathBuf,
     pub(super) cursor: Option<String>,
@@ -160,12 +187,21 @@ pub(super) trait ExistingSessionPromptWrite: Send + Sync {
         &self,
         request: PromptOutputReadRequest,
     ) -> std::result::Result<PromptOutputReadSuccess, SessionPromptWriteError>;
+    fn preempt(
+        &self,
+        _request: SessionPreemptRequest,
+    ) -> std::result::Result<SessionPreemptSuccess, SessionPromptWriteError> {
+        Err(SessionPromptWriteError::QueueUnsupported)
+    }
 }
 
 pub(super) struct SessionPromptWriteService<P = SystemProcessInspector, Q = SystemQueueControl> {
     process: P,
     queue: Q,
     bindings: Mutex<HashMap<String, SessionBinding>>,
+    // ponytail: one endpoint-wide lock; use per-thread locks only if bridge throughput matters.
+    operation_lock: Mutex<()>,
+    preempt_generation: AtomicU64,
 }
 
 #[derive(Clone, Debug)]
@@ -180,6 +216,8 @@ impl Default for SessionPromptWriteService {
             process: SystemProcessInspector,
             queue: SystemQueueControl,
             bindings: Mutex::new(HashMap::new()),
+            operation_lock: Mutex::new(()),
+            preempt_generation: AtomicU64::new(0),
         }
     }
 }
@@ -191,6 +229,8 @@ impl<P, Q> SessionPromptWriteService<P, Q> {
             process,
             queue,
             bindings: Mutex::new(HashMap::new()),
+            operation_lock: Mutex::new(()),
+            preempt_generation: AtomicU64::new(0),
         }
     }
 }
@@ -204,6 +244,10 @@ where
         &self,
         request: SessionPromptWriteRequest,
     ) -> std::result::Result<SessionPromptWriteSuccess, SessionPromptWriteError> {
+        let _operation_guard = self
+            .operation_lock
+            .lock()
+            .map_err(|_| SessionPromptWriteError::VerificationInconclusive)?;
         let workspace_root = write::canonical_session_prompt_write_workspace(&request)?;
         let binding = self.binding(&request.binding_key)?;
         let mut target =
@@ -268,6 +312,13 @@ where
         request: PromptOutputReadRequest,
     ) -> std::result::Result<PromptOutputReadSuccess, SessionPromptWriteError> {
         SessionPromptWriteService::read_output(self, request)
+    }
+
+    fn preempt(
+        &self,
+        request: SessionPreemptRequest,
+    ) -> std::result::Result<SessionPreemptSuccess, SessionPromptWriteError> {
+        self.preempt_session(request)
     }
 }
 

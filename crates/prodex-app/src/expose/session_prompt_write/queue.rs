@@ -183,6 +183,16 @@ pub(crate) struct QueueInvocation {
     pub(crate) queued: bool,
 }
 
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub(crate) struct QueuePreemptResult {
+    pub(crate) current_turn_id: Option<String>,
+    pub(crate) current_turn_interrupted: bool,
+    pub(crate) cancelled_submission_ids: Vec<String>,
+    pub(crate) remaining_submission_ids: Vec<String>,
+    pub(crate) queue_empty_at_boundary: bool,
+    pub(crate) session_ready: bool,
+}
+
 impl QueueInvocation {
     pub(crate) fn accepted(
         exit_code: Option<i32>,
@@ -230,6 +240,12 @@ pub(crate) trait QueueControl {
         thread_id: &str,
     ) -> std::result::Result<Option<PathBuf>, SessionPromptWriteError>;
     fn queue_once(&self, target: &ResolvedTarget, message: &str) -> QueueInvocation;
+    fn preempt(
+        &self,
+        _target: &ResolvedTarget,
+    ) -> std::result::Result<QueuePreemptResult, SessionPromptWriteError> {
+        Err(SessionPromptWriteError::QueueUnsupported)
+    }
     fn loaded_thread_addressable(
         &self,
         target: &ResolvedTarget,
@@ -334,6 +350,21 @@ impl QueueControl for SystemQueueControl {
         QueueInvocation::accepted(Some(0), Some(message_id), None, true)
     }
 
+    fn preempt(
+        &self,
+        target: &ResolvedTarget,
+    ) -> std::result::Result<QueuePreemptResult, SessionPromptWriteError> {
+        #[cfg(unix)]
+        if target
+            .remote_endpoint
+            .as_deref()
+            .is_some_and(|endpoint| endpoint.starts_with("unix://"))
+        {
+            return super::preempt::app_server_preempt(target);
+        }
+        Err(SessionPromptWriteError::QueueUnsupported)
+    }
+
     #[cfg(unix)]
     fn loaded_thread_addressable(
         &self,
@@ -342,7 +373,8 @@ impl QueueControl for SystemQueueControl {
         let Some(mut socket) = app_server_socket(target)? else {
             return Ok(false);
         };
-        Ok(app_server_thread_activity(&mut socket, target)?.is_some())
+        let mut request_id = 1;
+        Ok(app_server_thread_activity(&mut socket, target, false, &mut request_id)?.is_some())
     }
 }
 
@@ -351,7 +383,11 @@ fn app_server_queue_add_once(target: &ResolvedTarget, message: &str) -> QueueInv
     let Ok(Some(mut socket)) = app_server_socket(target) else {
         return QueueInvocation::preflight();
     };
-    if !matches!(app_server_thread_activity(&mut socket, target), Ok(Some(_))) {
+    let mut request_id = 1;
+    if !matches!(
+        app_server_thread_activity(&mut socket, target, false, &mut request_id),
+        Ok(Some(_))
+    ) {
         return QueueInvocation::preflight();
     }
     let message_id = Uuid::now_v7().to_string();
@@ -360,7 +396,12 @@ fn app_server_queue_add_once(target: &ResolvedTarget, message: &str) -> QueueInv
         "clientUserMessageId": message_id,
         "input": [{"type": "text", "text": message, "textElements": []}],
     });
-    let result = match request_result(&mut socket, 3, "thread/queue/add", params) {
+    let result = match request_result(
+        &mut socket,
+        super::preempt::next_request_id(&mut request_id),
+        "thread/queue/add",
+        params,
+    ) {
         AppServerRequestOutcome::Accepted(result) => result,
         AppServerRequestOutcome::Rejected => return QueueInvocation::default(),
         AppServerRequestOutcome::Ambiguous => return QueueInvocation::ambiguous(),
@@ -400,7 +441,7 @@ fn app_server_queue_add_once(target: &ResolvedTarget, message: &str) -> QueueInv
 }
 
 #[cfg(unix)]
-fn app_server_socket(
+pub(super) fn app_server_socket(
     target: &ResolvedTarget,
 ) -> std::result::Result<Option<UnixAppServerSocket>, SessionPromptWriteError> {
     let Some(endpoint) = target.remote_endpoint.as_deref() else {
@@ -419,13 +460,22 @@ fn app_server_socket(
 }
 
 #[cfg(unix)]
-fn app_server_thread_activity(
+#[derive(Debug)]
+pub(super) struct AppServerThreadActivity {
+    pub(super) active: bool,
+    pub(super) active_turn_id: Option<String>,
+}
+
+#[cfg(unix)]
+pub(super) fn app_server_thread_activity(
     socket: &mut UnixAppServerSocket,
     target: &ResolvedTarget,
-) -> std::result::Result<Option<bool>, SessionPromptWriteError> {
+    include_turns: bool,
+    request_id: &mut u64,
+) -> std::result::Result<Option<AppServerThreadActivity>, SessionPromptWriteError> {
     let Some(initialize) = app_server_request_result(
         socket,
-        1,
+        super::preempt::next_request_id(request_id),
         "initialize",
         serde_json::json!({
             "clientInfo": {
@@ -456,7 +506,7 @@ fn app_server_thread_activity(
         .map_err(|_| SessionPromptWriteError::SessionNotQueueAddressable)?;
     let Some(result) = app_server_request_result(
         socket,
-        2,
+        super::preempt::next_request_id(request_id),
         "thread/read",
         serde_json::json!({
             "threadId": target.thread_id,
@@ -499,7 +549,60 @@ fn app_server_thread_activity(
         "idle" => false,
         _ => return Ok(None),
     };
-    Ok(Some(active))
+    let active_turn_id = if include_turns {
+        app_server_active_turn_id(socket, target, request_id)?
+    } else {
+        None
+    };
+    Ok(Some(AppServerThreadActivity {
+        active,
+        active_turn_id,
+    }))
+}
+
+#[cfg(unix)]
+fn app_server_active_turn_id(
+    socket: &mut UnixAppServerSocket,
+    target: &ResolvedTarget,
+    request_id: &mut u64,
+) -> std::result::Result<Option<String>, SessionPromptWriteError> {
+    let Some(result) = app_server_request_result(
+        socket,
+        super::preempt::next_request_id(request_id),
+        "thread/turns/list",
+        serde_json::json!({
+            "threadId": target.thread_id,
+            "limit": super::PREEMPT_QUEUE_LIMIT,
+            "sortDirection": "desc",
+            "itemsView": "notLoaded",
+        }),
+    )?
+    else {
+        return Ok(None);
+    };
+    let Some(turns) = result.get("data").and_then(serde_json::Value::as_array) else {
+        return Ok(None);
+    };
+    let active_turns = turns
+        .iter()
+        .filter(|turn| {
+            turn.get("status")
+                .and_then(|status| status.get("type"))
+                .and_then(serde_json::Value::as_str)
+                == Some("inProgress")
+        })
+        .map(|turn| {
+            turn.get("id")
+                .and_then(serde_json::Value::as_str)
+                .filter(|id| !id.is_empty())
+                .map(str::to_string)
+                .ok_or(SessionPromptWriteError::VerificationInconclusive)
+        })
+        .collect::<std::result::Result<Vec<_>, _>>()?;
+    if active_turns.len() > 1 {
+        return Err(SessionPromptWriteError::VerificationInconclusive);
+    }
+    Ok(active_turns.into_iter().next())
 }
 
 #[cfg(unix)]
