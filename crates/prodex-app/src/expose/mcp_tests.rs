@@ -495,6 +495,7 @@ fn mcp_json_protocol_and_public_route_isolation_are_enforced() {
         "prodex_super_cancel",
         "prodex_super_list",
         "prodex_session_prompt_write",
+        "prodex_session_preempt",
         "prodex_session_output_read",
     ] {
         assert!(tools.contains(name), "missing tool {name}");
@@ -658,7 +659,7 @@ fn official_rmcp_client_discovers_and_lists_tools_over_json() {
             .list_tools(None)
             .await
             .expect("official MCP client should list tools");
-        assert_eq!(tools.tools.len(), 8);
+        assert_eq!(tools.tools.len(), 9);
         assert!(
             tools
                 .tools
