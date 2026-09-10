@@ -109,8 +109,13 @@ fn presidio_analyze_with_limit(
             presidio_redacted_message(body.trim())
         );
     }
-    read_presidio_json_response(response, max_response_bytes)
-        .context("failed to parse Presidio Analyzer response")
+    let results =
+        read_presidio_json_response::<Vec<PresidioAnalyzerResult>>(response, max_response_bytes)
+            .context("failed to parse Presidio Analyzer response")?;
+    if results.iter().any(|result| result.start > result.end) {
+        anyhow::bail!("Presidio Analyzer returned an invalid finding range");
+    }
+    Ok(results)
 }
 
 pub fn presidio_anonymize(
@@ -259,6 +264,37 @@ mod tests {
         .to_string();
 
         assert!(error.contains("302"), "{error}");
+        server.join().unwrap();
+    }
+
+    #[test]
+    fn presidio_analyze_rejects_inverted_finding_range() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut request = [0_u8; 4096];
+            let _ = stream.read(&mut request).unwrap();
+            let body = r#"[{"start":3,"end":1,"score":1.0,"entity_type":"PERSON"}]"#;
+            write!(
+                stream,
+                "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                body.len(),
+                body
+            )
+            .unwrap();
+        });
+
+        let error = presidio_analyze(
+            &presidio_http_client().unwrap(),
+            &format!("http://{address}"),
+            "synthetic-input",
+            "en",
+        )
+        .expect_err("inverted analyzer ranges must be rejected")
+        .to_string();
+
+        assert_eq!(error, "Presidio Analyzer returned an invalid finding range");
         server.join().unwrap();
     }
 
