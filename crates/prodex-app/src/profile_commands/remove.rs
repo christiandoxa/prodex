@@ -13,11 +13,11 @@ use std::path::PathBuf;
 use crate::{
     AppPaths, AppState, AppStateIoExt, ProfileEntry, RemoveProfileArgs, audit_log_event,
     invalidate_pending_runtime_saves, load_runtime_continuation_journal_with_recovery,
-    load_runtime_continuations_with_recovery, rewrite_unavailable_profile_bindings,
-    runtime_continuation_journal_file_path, runtime_continuation_journal_last_good_file_path,
-    runtime_continuations_file_path, runtime_continuations_last_good_file_path,
-    runtime_random_token, save_runtime_continuation_journal_for_profiles,
-    save_runtime_continuations_for_profiles,
+    load_runtime_continuations_with_recovery, remove_versioned_json_file_with_backup_under,
+    rewrite_unavailable_profile_bindings, runtime_continuation_journal_file_path,
+    runtime_continuation_journal_last_good_file_path, runtime_continuations_file_path,
+    runtime_continuations_last_good_file_path, runtime_random_token,
+    save_runtime_continuation_journal_for_profiles, save_runtime_continuations_for_profiles,
 };
 
 #[derive(Debug)]
@@ -41,15 +41,17 @@ pub(crate) fn persist_pruned_profile_runtime_sidecars(
             &crate::RuntimeContinuationStore::default(),
             profiles,
         )?;
-        for path in [
-            runtime_continuation_journal_file_path(paths),
-            runtime_continuation_journal_last_good_file_path(paths),
-        ] {
-            match fs::remove_file(path) {
-                Ok(()) => {}
-                Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
-                Err(err) => return Err(err.into()),
-            }
+        let report = remove_versioned_json_file_with_backup_under(
+            &paths.root,
+            &runtime_continuation_journal_file_path(paths),
+            &runtime_continuation_journal_last_good_file_path(paths),
+        )?;
+        if let Some(failure) = report.failures.first() {
+            bail!(
+                "failed to remove {}: {:?}",
+                failure.path.display(),
+                failure.kind
+            );
         }
         return Ok(());
     }

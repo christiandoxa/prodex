@@ -22,24 +22,40 @@ impl Default for ProdexCleanupOptions {
     }
 }
 
-fn prodex_cleanup_transient_root_file_paths(paths: &AppPaths) -> Vec<PathBuf> {
-    vec![
-        runtime_scores_file_path(paths),
-        runtime_scores_last_good_file_path(paths),
-        runtime_usage_snapshots_file_path(paths),
-        runtime_usage_snapshots_last_good_file_path(paths),
-        runtime_backoffs_file_path(paths),
-        runtime_backoffs_last_good_file_path(paths),
-        update_check_cache_file_path(paths),
-    ]
-}
-
 fn cleanup_prodex_transient_root_files_with_counts(paths: &AppPaths) -> ProdexCleanupCounts {
-    prodex_housekeeping::cleanup_existing_files_under(
+    let mut counts = ProdexCleanupCounts::default();
+    for (path, backup_path) in [
+        (
+            runtime_scores_file_path(paths),
+            runtime_scores_last_good_file_path(paths),
+        ),
+        (
+            runtime_usage_snapshots_file_path(paths),
+            runtime_usage_snapshots_last_good_file_path(paths),
+        ),
+        (
+            runtime_backoffs_file_path(paths),
+            runtime_backoffs_last_good_file_path(paths),
+        ),
+    ] {
+        match remove_versioned_json_file_with_backup_under(&paths.root, &path, &backup_path) {
+            Ok(report) => {
+                counts.removed += report.removed;
+                counts.delete_failures += report.failures.len();
+            }
+            Err(_) => counts.delete_failures += 1,
+        }
+    }
+
+    let update_check = prodex_housekeeping::cleanup_existing_files_under(
         &paths.root,
-        prodex_cleanup_transient_root_file_paths(paths),
+        [update_check_cache_file_path(paths)],
     )
-    .counts()
+    .counts();
+    counts.removed += update_check.removed;
+    counts.scan_failures += update_check.scan_failures;
+    counts.delete_failures += update_check.delete_failures;
+    counts
 }
 
 fn cleanup_prodex_stale_root_temp_files_at_with_counts(

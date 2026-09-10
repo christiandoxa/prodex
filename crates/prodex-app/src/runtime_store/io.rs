@@ -117,6 +117,37 @@ fn forget_runtime_sidecar_generation(path: &Path) {
         .remove(path);
 }
 
+pub(crate) fn remove_versioned_json_file_with_backup_under(
+    root: &Path,
+    path: &Path,
+    backup_path: &Path,
+) -> Result<prodex_housekeeping::ProdexCleanupReport> {
+    if !prodex_housekeeping::path_is_contained_without_symlink_parents(root, path)
+        || !prodex_housekeeping::path_is_contained_without_symlink_parents(root, backup_path)
+    {
+        bail!("refusing to remove runtime sidecar outside its root");
+    }
+    let _lock = acquire_json_file_lock(path)?;
+    let mut report = prodex_housekeeping::cleanup_existing_files_under(root, [path.to_path_buf()]);
+    if report.failures.is_empty() {
+        let backup_report =
+            prodex_housekeeping::cleanup_existing_files_under(root, [backup_path.to_path_buf()]);
+        report.removed += backup_report.removed;
+        report.missing += backup_report.missing;
+        report.failures.extend(backup_report.failures);
+    }
+    let primary_exists = path
+        .try_exists()
+        .with_context(|| format!("failed to inspect {}", path.display()))?;
+    let backup_exists = backup_path
+        .try_exists()
+        .with_context(|| format!("failed to inspect {}", backup_path.display()))?;
+    if !primary_exists && !backup_exists {
+        forget_runtime_sidecar_generation(path);
+    }
+    Ok(report)
+}
+
 pub(crate) fn last_good_file_path(path: &Path) -> PathBuf {
     let file_name = path
         .file_name()
@@ -284,14 +315,14 @@ where
             && !backup_path.exists()
         {
             forget_runtime_sidecar_generation(path);
-            return save_versioned_json_file_with_fence(path, backup_path, value);
+        } else {
+            bail!(
+                "stale runtime sidecar generation for {} expected={} current={}",
+                path.display(),
+                expected_generation,
+                current_generation
+            );
         }
-        bail!(
-            "stale runtime sidecar generation for {} expected={} current={}",
-            path.display(),
-            expected_generation,
-            current_generation
-        );
     }
     let next_generation = current_generation.saturating_add(1);
     write_versioned_json_file_with_backup(path, backup_path, next_generation, value)?;
