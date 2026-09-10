@@ -8,15 +8,19 @@ use crate::runtime_launch::proxy_startup::local_rewrite::RuntimeLocalRewriteProx
 use crate::runtime_launch::proxy_startup::local_rewrite_gateway_util::runtime_gateway_unix_epoch_millis;
 
 pub(super) const BROWSER_TRANSACTION_TTL_MS: u64 = 5 * 60 * 1_000;
-const MAX_BROWSER_TRANSACTIONS: usize = 1_024;
+pub(super) const BROWSER_SESSION_TTL_MS: u64 = 8 * 60 * 60 * 1_000;
+pub(super) const MAX_BROWSER_TRANSACTIONS: usize = 1_024;
+pub(super) const MAX_BROWSER_SESSIONS: usize = 4_096;
 const TRANSACTION_KEY_PREFIX: &str = "prodex:gateway:browser:transaction:";
+pub(super) const SESSION_KEY_PREFIX: &str = "prodex:gateway:browser:session:";
 const MAX_PROTECTED_ID_TOKEN_BYTES: usize = 128 * 1_024;
 const ID_TOKEN_ASSOCIATED_DATA_PREFIX: &str = "prodex:gateway:browser:id-token:v1:";
 
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub(crate) struct RuntimeGatewayBrowserState {
-    pub(super) transactions: Arc<Mutex<BTreeMap<String, RuntimeGatewayBrowserTransaction>>>,
-    pub(super) sessions: Arc<Mutex<BTreeMap<String, RuntimeGatewayBrowserSession>>>,
+    pub(super) transactions: Arc<Mutex<BTreeMap<String, Arc<RuntimeGatewayBrowserTransaction>>>>,
+    pub(super) sessions: Arc<Mutex<BTreeMap<String, Arc<RuntimeGatewayBrowserSession>>>>,
+    pub(super) session_generations: Arc<Mutex<BTreeMap<String, u64>>>,
 }
 
 #[derive(Clone, serde::Serialize, serde::Deserialize)]
@@ -34,6 +38,45 @@ pub(super) struct RuntimeGatewayBrowserSession {
     #[serde(default)]
     pub(super) logout_keys: Vec<String>,
     pub(super) expires_at_unix_ms: u64,
+}
+
+/// Browser shadow persistence boundary; production maps Redis errors to failure and tests stay offline.
+pub(super) trait BrowserEphemeralPersistence {
+    fn put_ephemeral(&mut self, key: &str, value: &str, ttl: Duration) -> Result<bool, ()>;
+    fn add_ephemeral_member(&mut self, key: &str, member: &str, ttl: Duration) -> Result<(), ()>;
+    fn delete_ephemeral(&mut self, key: &str) -> Result<(), ()>;
+    fn remove_ephemeral_member(&mut self, key: &str, member: &str) -> Result<(), ()>;
+}
+
+struct RedisBrowserEphemeralPersistence<'a> {
+    handle: &'a tokio::runtime::Handle,
+    executor: &'a prodex_storage_redis_runtime::RedisRateLimitExecutor,
+}
+
+impl BrowserEphemeralPersistence for RedisBrowserEphemeralPersistence<'_> {
+    fn put_ephemeral(&mut self, key: &str, value: &str, ttl: Duration) -> Result<bool, ()> {
+        self.handle
+            .block_on(self.executor.put_ephemeral(key, value, ttl))
+            .map_err(|_| ())
+    }
+
+    fn add_ephemeral_member(&mut self, key: &str, member: &str, ttl: Duration) -> Result<(), ()> {
+        self.handle
+            .block_on(self.executor.add_ephemeral_member(key, member, ttl))
+            .map_err(|_| ())
+    }
+
+    fn delete_ephemeral(&mut self, key: &str) -> Result<(), ()> {
+        self.handle
+            .block_on(self.executor.delete_ephemeral(key))
+            .map_err(|_| ())
+    }
+
+    fn remove_ephemeral_member(&mut self, key: &str, member: &str) -> Result<(), ()> {
+        self.handle
+            .block_on(self.executor.remove_ephemeral_member(key, member))
+            .map_err(|_| ())
+    }
 }
 
 pub(super) fn browser_protect_id_token(
@@ -81,8 +124,39 @@ pub(super) fn browser_store_transaction(
     transaction: RuntimeGatewayBrowserTransaction,
 ) -> BrowserResult<()> {
     let now = runtime_gateway_unix_epoch_millis();
-    let mut transactions = shared
-        .gateway_browser
+    let Some(executor) = shared.gateway_redis_rate_limit_executor.as_ref() else {
+        return browser_store_transaction_with_persistence(
+            &shared.gateway_browser,
+            state,
+            transaction,
+            now,
+            None,
+        );
+    };
+    let mut persistence = RedisBrowserEphemeralPersistence {
+        handle: shared.runtime_shared.async_runtime.handle(),
+        executor,
+    };
+    browser_store_transaction_with_persistence(
+        &shared.gateway_browser,
+        state,
+        transaction,
+        now,
+        Some(&mut persistence),
+    )
+}
+
+pub(super) fn browser_store_transaction_with_persistence(
+    state_store: &RuntimeGatewayBrowserState,
+    state: String,
+    transaction: RuntimeGatewayBrowserTransaction,
+    now: u64,
+    persistence: Option<&mut dyn BrowserEphemeralPersistence>,
+) -> BrowserResult<()> {
+    let value = serde_json::to_string(&transaction)
+        .map_err(|_| RuntimeGatewayBrowserFailure::Unavailable)?;
+    let transaction = Arc::new(transaction);
+    let mut transactions = state_store
         .transactions
         .lock()
         .map_err(|_| RuntimeGatewayBrowserFailure::Unavailable)?;
@@ -90,33 +164,26 @@ pub(super) fn browser_store_transaction(
     if transactions.len() >= MAX_BROWSER_TRANSACTIONS {
         return Err(RuntimeGatewayBrowserFailure::Unavailable);
     }
-    transactions.insert(state.clone(), transaction.clone());
+    let previous = transactions.insert(state.clone(), Arc::clone(&transaction));
     drop(transactions);
-    let Some(executor) = shared.gateway_redis_rate_limit_executor.as_ref() else {
+    let Some(persistence) = persistence else {
         return Ok(());
     };
-    let value = serde_json::to_string(&transaction)
-        .map_err(|_| RuntimeGatewayBrowserFailure::Unavailable)?;
-    let stored = shared
-        .runtime_shared
-        .async_runtime
-        .handle()
-        .block_on(executor.put_ephemeral(
-            &format!("{TRANSACTION_KEY_PREFIX}{state}"),
-            &value,
-            Duration::from_millis(BROWSER_TRANSACTION_TTL_MS),
-        ))
-        .map_err(|_| RuntimeGatewayBrowserFailure::Unavailable)?;
-    if !stored {
-        shared
-            .gateway_browser
-            .transactions
-            .lock()
-            .map_err(|_| RuntimeGatewayBrowserFailure::Unavailable)?
-            .remove(&state);
-        return Err(RuntimeGatewayBrowserFailure::Unavailable);
+    match persistence.put_ephemeral(
+        &format!("{TRANSACTION_KEY_PREFIX}{state}"),
+        &value,
+        Duration::from_millis(BROWSER_TRANSACTION_TTL_MS),
+    ) {
+        Ok(true) => Ok(()),
+        Ok(false) | Err(_) => {
+            let mut transactions = state_store
+                .transactions
+                .lock()
+                .map_err(|_| RuntimeGatewayBrowserFailure::Unavailable)?;
+            restore_owned_entry(&mut transactions, &state, &transaction, previous, None);
+            Err(RuntimeGatewayBrowserFailure::Unavailable)
+        }
     }
-    Ok(())
 }
 
 pub(super) fn browser_take_transaction(
@@ -124,18 +191,27 @@ pub(super) fn browser_take_transaction(
     state: &str,
 ) -> BrowserResult<Option<RuntimeGatewayBrowserTransaction>> {
     if let Some(executor) = shared.gateway_redis_rate_limit_executor.as_ref() {
+        let local_owner = shared
+            .gateway_browser
+            .transactions
+            .lock()
+            .map_err(|_| RuntimeGatewayBrowserFailure::Unavailable)?
+            .get(state)
+            .cloned();
         let value = shared
             .runtime_shared
             .async_runtime
             .handle()
             .block_on(executor.take_ephemeral(&format!("{TRANSACTION_KEY_PREFIX}{state}")))
             .map_err(|_| RuntimeGatewayBrowserFailure::Unavailable)?;
-        shared
-            .gateway_browser
-            .transactions
-            .lock()
-            .map_err(|_| RuntimeGatewayBrowserFailure::Unavailable)?
-            .remove(state);
+        if let Some(local_owner) = local_owner {
+            let mut transactions = shared
+                .gateway_browser
+                .transactions
+                .lock()
+                .map_err(|_| RuntimeGatewayBrowserFailure::Unavailable)?;
+            restore_owned_entry(&mut transactions, state, &local_owner, None, None);
+        }
         return value
             .map(|value| {
                 serde_json::from_str(&value).map_err(|_| RuntimeGatewayBrowserFailure::Unavailable)
@@ -149,5 +225,316 @@ pub(super) fn browser_take_transaction(
         .lock()
         .map_err(|_| RuntimeGatewayBrowserFailure::Unavailable)?;
     transactions.retain(|_, transaction| transaction.expires_at_unix_ms > now);
-    Ok(transactions.remove(state))
+    Ok(transactions
+        .remove(state)
+        .map(|transaction| transaction.as_ref().clone()))
+}
+
+pub(super) fn browser_store_session(
+    shared: &RuntimeLocalRewriteProxyShared,
+    session_id: String,
+    session: RuntimeGatewayBrowserSession,
+) -> BrowserResult<()> {
+    let now = runtime_gateway_unix_epoch_millis();
+    let Some(executor) = shared.gateway_redis_rate_limit_executor.as_ref() else {
+        return browser_store_session_with_persistence(
+            &shared.gateway_browser,
+            session_id,
+            session,
+            now,
+            None,
+        );
+    };
+    let mut persistence = RedisBrowserEphemeralPersistence {
+        handle: shared.runtime_shared.async_runtime.handle(),
+        executor,
+    };
+    browser_store_session_with_persistence(
+        &shared.gateway_browser,
+        session_id,
+        session,
+        now,
+        Some(&mut persistence),
+    )
+}
+
+pub(super) fn browser_store_session_with_persistence(
+    state_store: &RuntimeGatewayBrowserState,
+    session_id: String,
+    session: RuntimeGatewayBrowserSession,
+    now: u64,
+    persistence: Option<&mut dyn BrowserEphemeralPersistence>,
+) -> BrowserResult<()> {
+    let value =
+        serde_json::to_string(&session).map_err(|_| RuntimeGatewayBrowserFailure::Unavailable)?;
+    let session = Arc::new(session);
+    let mut sessions = state_store
+        .sessions
+        .lock()
+        .map_err(|_| RuntimeGatewayBrowserFailure::Unavailable)?;
+    let mut session_generations = state_store
+        .session_generations
+        .lock()
+        .map_err(|_| RuntimeGatewayBrowserFailure::Unavailable)?;
+    sessions.retain(|_, session| session.expires_at_unix_ms > now);
+    let evicted = if sessions.len() >= MAX_BROWSER_SESSIONS {
+        sessions
+            .iter()
+            .min_by_key(|(_, session)| session.expires_at_unix_ms)
+            .map(|(id, session)| (id.clone(), Arc::clone(session)))
+    } else {
+        None
+    };
+    let evicted = evicted.map(|(oldest, session)| {
+        sessions.remove(&oldest);
+        let generation = advance_session_generation(&mut session_generations, &oldest);
+        (oldest, session, generation)
+    });
+    let previous = sessions.insert(session_id.clone(), Arc::clone(&session));
+    let provisional_generation = advance_session_generation(&mut session_generations, &session_id);
+    prune_session_generations(&sessions, &mut session_generations);
+    drop(session_generations);
+    drop(sessions);
+    let Some(persistence) = persistence else {
+        return Ok(());
+    };
+    if !matches!(
+        persistence.put_ephemeral(
+            &format!("{SESSION_KEY_PREFIX}{session_id}"),
+            &value,
+            Duration::from_millis(BROWSER_SESSION_TTL_MS),
+        ),
+        Ok(true)
+    ) {
+        browser_restore_session_shadow(
+            state_store,
+            &session_id,
+            &session,
+            previous,
+            evicted,
+            provisional_generation,
+        )?;
+        return Err(RuntimeGatewayBrowserFailure::Unavailable);
+    }
+    for logout_key in &session.logout_keys {
+        if persistence
+            .add_ephemeral_member(
+                logout_key,
+                &session_id,
+                Duration::from_millis(BROWSER_SESSION_TTL_MS),
+            )
+            .is_err()
+        {
+            // Redis executor has no compare-delete primitive; retain existing cleanup semantics.
+            let _ = persistence.delete_ephemeral(&format!("{SESSION_KEY_PREFIX}{session_id}"));
+            for logout_key in &session.logout_keys {
+                let _ = persistence.remove_ephemeral_member(logout_key, &session_id);
+            }
+            browser_restore_session_shadow(
+                state_store,
+                &session_id,
+                &session,
+                previous,
+                evicted,
+                provisional_generation,
+            )?;
+            return Err(RuntimeGatewayBrowserFailure::Unavailable);
+        }
+    }
+    Ok(())
+}
+
+pub(super) fn browser_load_session(
+    shared: &RuntimeLocalRewriteProxyShared,
+    session_id: &str,
+) -> BrowserResult<Option<RuntimeGatewayBrowserSession>> {
+    if let Some(executor) = shared.gateway_redis_rate_limit_executor.as_ref() {
+        let value = shared
+            .runtime_shared
+            .async_runtime
+            .handle()
+            .block_on(executor.get_ephemeral(&format!("{SESSION_KEY_PREFIX}{session_id}")))
+            .map_err(|_| RuntimeGatewayBrowserFailure::Unavailable)?;
+        return value
+            .map(|value| {
+                serde_json::from_str(&value).map_err(|_| RuntimeGatewayBrowserFailure::Unavailable)
+            })
+            .transpose();
+    }
+    let now = runtime_gateway_unix_epoch_millis();
+    let mut sessions = shared
+        .gateway_browser
+        .sessions
+        .lock()
+        .map_err(|_| RuntimeGatewayBrowserFailure::Unavailable)?;
+    sessions.retain(|_, session| session.expires_at_unix_ms > now);
+    Ok(sessions
+        .get(session_id)
+        .map(|session| session.as_ref().clone()))
+}
+
+pub(super) fn browser_delete_session(
+    shared: &RuntimeLocalRewriteProxyShared,
+    session_id: &str,
+) -> BrowserResult<()> {
+    let session = browser_load_session(shared, session_id)?;
+    browser_delete_session_record(shared, session_id, session.as_ref())
+}
+
+pub(super) fn browser_delete_session_record(
+    shared: &RuntimeLocalRewriteProxyShared,
+    session_id: &str,
+    session: Option<&RuntimeGatewayBrowserSession>,
+) -> BrowserResult<()> {
+    let local_owner = mark_session_mutation(&shared.gateway_browser, session_id)?;
+    if let Some(executor) = shared.gateway_redis_rate_limit_executor.as_ref() {
+        // Redis executor has no compare-delete primitive; retain existing cleanup semantics.
+        shared
+            .runtime_shared
+            .async_runtime
+            .handle()
+            .block_on(executor.delete_ephemeral(&format!("{SESSION_KEY_PREFIX}{session_id}")))
+            .map_err(|_| RuntimeGatewayBrowserFailure::Unavailable)?;
+        if let Some(session) = session {
+            for logout_key in &session.logout_keys {
+                shared
+                    .runtime_shared
+                    .async_runtime
+                    .handle()
+                    .block_on(executor.remove_ephemeral_member(logout_key, session_id))
+                    .map_err(|_| RuntimeGatewayBrowserFailure::Unavailable)?;
+            }
+        }
+    }
+    if let Some(local_owner) = local_owner {
+        remove_owned_session_shadow(&shared.gateway_browser, session_id, &local_owner)?;
+    }
+    Ok(())
+}
+
+fn browser_restore_session_shadow(
+    state_store: &RuntimeGatewayBrowserState,
+    session_id: &str,
+    owner: &Arc<RuntimeGatewayBrowserSession>,
+    previous: Option<Arc<RuntimeGatewayBrowserSession>>,
+    evicted: Option<(String, Arc<RuntimeGatewayBrowserSession>, u64)>,
+    provisional_generation: u64,
+) -> BrowserResult<()> {
+    let mut sessions = state_store
+        .sessions
+        .lock()
+        .map_err(|_| RuntimeGatewayBrowserFailure::Unavailable)?;
+    let mut session_generations = state_store
+        .session_generations
+        .lock()
+        .map_err(|_| RuntimeGatewayBrowserFailure::Unavailable)?;
+    let owns_provisional = sessions
+        .get(session_id)
+        .is_some_and(|current| Arc::ptr_eq(current, owner))
+        && session_generation(&session_generations, session_id) == provisional_generation;
+    if owns_provisional {
+        if let Some(previous) = previous {
+            sessions.insert(session_id.to_string(), previous);
+        } else {
+            sessions.remove(session_id);
+        }
+        advance_session_generation(&mut session_generations, session_id);
+        if let Some((evicted_key, evicted, evicted_generation)) = evicted {
+            let expected_generation = if evicted_key == session_id {
+                provisional_generation
+            } else {
+                evicted_generation
+            };
+            if session_generation(&session_generations, &evicted_key) == expected_generation {
+                sessions.entry(evicted_key.clone()).or_insert(evicted);
+                advance_session_generation(&mut session_generations, &evicted_key);
+            }
+        }
+        prune_session_generations(&sessions, &mut session_generations);
+    }
+    Ok(())
+}
+
+pub(super) fn mark_session_mutation(
+    state_store: &RuntimeGatewayBrowserState,
+    session_id: &str,
+) -> BrowserResult<Option<Arc<RuntimeGatewayBrowserSession>>> {
+    let sessions = state_store
+        .sessions
+        .lock()
+        .map_err(|_| RuntimeGatewayBrowserFailure::Unavailable)?;
+    let owner = sessions.get(session_id).cloned();
+    let mut session_generations = state_store
+        .session_generations
+        .lock()
+        .map_err(|_| RuntimeGatewayBrowserFailure::Unavailable)?;
+    advance_session_generation(&mut session_generations, session_id);
+    prune_session_generations(&sessions, &mut session_generations);
+    Ok(owner)
+}
+
+fn remove_owned_session_shadow(
+    state_store: &RuntimeGatewayBrowserState,
+    session_id: &str,
+    owner: &Arc<RuntimeGatewayBrowserSession>,
+) -> BrowserResult<()> {
+    let mut sessions = state_store
+        .sessions
+        .lock()
+        .map_err(|_| RuntimeGatewayBrowserFailure::Unavailable)?;
+    if sessions
+        .get(session_id)
+        .is_some_and(|current| Arc::ptr_eq(current, owner))
+    {
+        sessions.remove(session_id);
+    }
+    Ok(())
+}
+
+fn session_generation(generations: &BTreeMap<String, u64>, session_id: &str) -> u64 {
+    generations.get(session_id).copied().unwrap_or_default()
+}
+
+fn advance_session_generation(generations: &mut BTreeMap<String, u64>, session_id: &str) -> u64 {
+    let generation = generations.entry(session_id.to_string()).or_default();
+    *generation = generation.saturating_add(1);
+    *generation
+}
+
+fn prune_session_generations(
+    sessions: &BTreeMap<String, Arc<RuntimeGatewayBrowserSession>>,
+    generations: &mut BTreeMap<String, u64>,
+) {
+    while generations.len() > MAX_BROWSER_SESSIONS * 2 {
+        let Some(key) = generations
+            .keys()
+            .find(|key| !sessions.contains_key(*key))
+            .cloned()
+        else {
+            break;
+        };
+        generations.remove(&key);
+    }
+}
+
+fn restore_owned_entry<T>(
+    entries: &mut BTreeMap<String, Arc<T>>,
+    key: &str,
+    owner: &Arc<T>,
+    previous: Option<Arc<T>>,
+    evicted: Option<(String, Arc<T>)>,
+) {
+    if entries
+        .get(key)
+        .is_some_and(|current| Arc::ptr_eq(current, owner))
+    {
+        if let Some(previous) = previous {
+            entries.insert(key.to_string(), previous);
+        } else {
+            entries.remove(key);
+        }
+        if let Some((evicted_key, evicted)) = evicted {
+            let _ = entries.entry(evicted_key).or_insert(evicted);
+        }
+    }
 }
