@@ -719,7 +719,7 @@ jobs:
           curl --proto '=https' --tlsv1.2 --retry 5 --retry-all-errors --retry-delay 2 -fsSLo "${RUNNER_TEMP}/copilot-install.sh" https://gh.io/copilot-install
           curl --proto '=https' --tlsv1.2 --retry 5 --retry-all-errors --retry-delay 2 -fsSLo "${RUNNER_TEMP}/claude-install.sh" https://claude.ai/install.sh
           echo "91a21bfa05cd7b58601cb83e0f1f187a9d0084726e5b824d4a4cf60306250908  ${RUNNER_TEMP}/kiro-install.sh" | sha256sum --check --strict
-          echo "cd45508981a9baee5fb8f5e38495d315758cd7fea4a715b53a9f26c12544dc95  ${RUNNER_TEMP}/copilot-install.sh" | sha256sum --check --strict
+          echo "00efcc2e196f0793d097935d6230062fc66e8247dc01334d2ac3eae4e26a1c7f  ${RUNNER_TEMP}/copilot-install.sh" | sha256sum --check --strict
           echo "3a68d3406cf674e17bed1733a4dcf37805e2e47d87417700007d7e1aa766a944  ${RUNNER_TEMP}/claude-install.sh" | sha256sum --check --strict
           bash "${RUNNER_TEMP}/kiro-install.sh" --force --channel stable
           VERSION=v1.0.77 PREFIX="${HOME}/.local" bash "${RUNNER_TEMP}/copilot-install.sh"
