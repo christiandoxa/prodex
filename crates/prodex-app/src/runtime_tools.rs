@@ -294,7 +294,6 @@ impl RuntimeToolLaunchStrategy {
             child.args = desktop.args.clone();
             Ok(child)
         } else {
-            #[cfg(unix)]
             if session_app_server_companion_eligible(self, runtime_args) {
                 let mut child = codex_child_plan(overlay_home.to_path_buf(), runtime_args.to_vec());
                 child.reset_terminal_keyboard_enhancement = true;
