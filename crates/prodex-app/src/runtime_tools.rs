@@ -438,9 +438,11 @@ mod tests {
         );
         assert_eq!(
             socket.file_name().and_then(|name| name.to_str()),
-            Some("app-server-control.sock")
+            Some(".s")
         );
-        assert!(companion.args.iter().any(|arg| arg == "unix://"));
+        assert!(companion.args.iter().any(|arg| {
+            arg.to_string_lossy().starts_with("unix://") && arg.to_string_lossy().ends_with("/.s")
+        }));
         assert!(!companion.args.iter().any(|arg| {
             arg == "--dangerously-bypass-approvals-and-sandbox"
                 || arg == "--dangerously-bypass-hook-trust"

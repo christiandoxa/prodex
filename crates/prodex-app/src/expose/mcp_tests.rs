@@ -50,7 +50,7 @@ pub(super) fn expose_test_args() -> ExposeArgs {
     }
 }
 
-fn expose_start_mcp_test_server(
+pub(super) fn expose_start_mcp_test_server(
     capability: &str,
     instance_id: &str,
     workspace_name: &str,
@@ -494,6 +494,7 @@ fn mcp_json_protocol_and_public_route_isolation_are_enforced() {
         "prodex_super_result",
         "prodex_super_cancel",
         "prodex_super_list",
+        "prodex_super_exec",
         "prodex_session_prompt_write",
         "prodex_session_preempt",
         "prodex_session_output_read",
@@ -659,7 +660,7 @@ fn official_rmcp_client_discovers_and_lists_tools_over_json() {
             .list_tools(None)
             .await
             .expect("official MCP client should list tools");
-        assert_eq!(tools.tools.len(), 9);
+        assert_eq!(tools.tools.len(), 10);
         assert!(
             tools
                 .tools

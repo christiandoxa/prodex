@@ -127,7 +127,7 @@ fn super_overlay_applies_fresh_model_preference() {
                 .as_ref()
                 .and_then(|path| path.file_name())
                 .and_then(|name| name.to_str()),
-            Some("app-server-control.sock")
+            Some(".s")
         );
     }
     for key in ["model", "model_provider", "model_reasoning_effort"] {

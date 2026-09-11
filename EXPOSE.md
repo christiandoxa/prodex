@@ -202,8 +202,9 @@ The MCP endpoint supports JSON responses for `server/discover`, `initialize`,
 GET/SSE MCP endpoint; its readiness probes require JSON protocol responses.
 Notifications are accepted with `202 Accepted` and no response body.
 
-The endpoint exposes bounded Super operations rather than an arbitrary shell
-MCP primitive:
+The endpoint exposes bounded Super operations plus one explicit standalone OS
+process tool. The MCP capability is full authority as the current OS user, so
+only expose it to callers that are trusted with that authority:
 
 - `prodex_super_start`
 - `prodex_super_status`
@@ -211,6 +212,29 @@ MCP primitive:
 - `prodex_super_result`
 - `prodex_super_cancel`
 - `prodex_super_list`
+- `prodex_super_exec`
+
+`prodex_super_exec` runs one command synchronously without starting or using a
+Super run or a plain `prodex s` session. Its input is `program`, optional direct
+`args`, optional `cwd` (defaulting to the captured expose workspace), optional
+string-valued `env` overrides, optional `stdin`, and `timeout_ms` (1–120,000;
+the default is 30,000). No shell parsing is performed; use an explicit shell
+program when needed:
+
+```json
+{
+  "program": "python3",
+  "args": ["-c", "print('hello from Prodex')"],
+  "cwd": "/home/test-user/project",
+  "timeout_ms": 30000
+}
+```
+
+The result includes `status` (`completed`, `timed_out`, or `cancelled`),
+`success`, `pid`, `exit_code`, normalized `exit_status`, `signal` when
+available, duration, and separately bounded/redacted `stdout` and `stderr`
+with truncation flags. Direct child process groups are terminated on timeout
+or expose shutdown and are reaped before the result is returned.
 
 When a separate plain `prodex s` already exists in the captured workspace, the
 default tool list additionally contains:
@@ -289,7 +313,8 @@ plane for the original plain `prodex s` thread.
 The run manager permits four active runs, sixteen queued runs, thirty-two
 retained terminal runs, 256 events per run, 8 KiB per event, and 256 KiB of
 final output. Run task text is carried through bounded private task state and
-the normal Prodex child launch path.
+the normal Prodex child launch path. Standalone execution uses a 120-second
+maximum timeout and 128 KiB per output stream.
 
 ## Startup and readiness
 

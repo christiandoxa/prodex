@@ -6,6 +6,7 @@ use super::super::session_prompt_write::{
     SessionPromptWriteRequest, SessionPromptWriteService,
 };
 use super::super::ui::{ExposeHttpResponse, expose_mcp_empty_response, expose_text_response};
+use super::exec::execute_tool;
 use super::protocol::{
     jsonrpc_result, mcp_accept_allowed, mcp_capability_segment, mcp_content_type_allowed,
     mcp_error_response, mcp_json_error, mcp_json_nesting_within_limit, mcp_json_response,
@@ -370,6 +371,7 @@ impl ExposeMcpEndpoint {
             "prodex_super_events" => self.events_tool(arguments),
             "prodex_super_result" => self.result_tool(arguments),
             "prodex_super_cancel" => self.cancel_tool(arguments),
+            "prodex_super_exec" => execute_tool(arguments, shutdown, &self.workspace_root),
             "prodex_session_prompt_write" => self.session_prompt_write_tool(arguments),
             "prodex_session_preempt" => self.session_preempt_tool(arguments),
             "prodex_session_output_read" => self.output_read_tool(arguments, shutdown),

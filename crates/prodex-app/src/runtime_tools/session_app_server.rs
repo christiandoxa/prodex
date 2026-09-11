@@ -2,13 +2,8 @@ use super::{ChildProcessPlan, RuntimeToolLaunchStrategy};
 use anyhow::Result;
 use std::path::{Path, PathBuf};
 
-const APP_SERVER_CONTROL_SOCKET_DIR: &str = "app-server-control";
-const APP_SERVER_CONTROL_SOCKET_FILE: &str = "app-server-control.sock";
-
 pub(super) fn session_app_server_socket(overlay_home: &Path) -> PathBuf {
-    overlay_home
-        .join(APP_SERVER_CONTROL_SOCKET_DIR)
-        .join(APP_SERVER_CONTROL_SOCKET_FILE)
+    overlay_home.join(".s")
 }
 
 pub(super) fn build_session_app_server_companion(
@@ -23,7 +18,7 @@ pub(super) fn build_session_app_server_companion(
     let mut args = vec![
         std::ffi::OsString::from("app-server"),
         std::ffi::OsString::from("--listen"),
-        std::ffi::OsString::from("unix://"),
+        std::ffi::OsString::from(format!("unix://{}", socket.display())),
     ];
     let mut index = 0;
     while index < runtime_args.len() {

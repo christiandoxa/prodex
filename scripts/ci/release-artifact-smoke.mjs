@@ -255,8 +255,19 @@ async function main() {
   let upstream;
   let broker;
   try {
-    const prodexHome = path.join(smokeRoot, "prodex-home");
+    const prodexHome = path.join(smokeRoot, "p");
     const profileHome = path.join(prodexHome, "profiles", "main");
+    const fixtureOverlay = path.join(
+      prodexHome,
+      "profiles",
+      ".prodex-overlay-00000-0000000000000000000-0",
+    );
+    assert.ok(Buffer.byteLength(path.join(fixtureOverlay, ".s")) < 108);
+    assert.ok(
+      Buffer.byteLength(
+        path.join(fixtureOverlay, "app-server-control", "app-server-control.sock"),
+      ) >= 108,
+    );
     const runtimeLogDir = path.join(smokeRoot, "runtime-logs");
     const fakeBin = path.join(smokeRoot, "fake-bin");
     const fakeCodex = path.join(fakeBin, "codex");
@@ -288,16 +299,55 @@ async function main() {
       fakeCodex,
       `#!/bin/sh
 set -eu
-if [ "$1" = "--version" ]; then
+if [ "\${1:-}" = "--version" ]; then
   printf '%s\\n' 'codex-cli 0.153.4'
   exit 0
 fi
-if [ "$1" = "app-server" ] && [ "\${2:-}" = "--help" ]; then
+if [ "\${1:-}" = "app-server" ] && [ "\${2:-}" = "--help" ]; then
   printf '%s\\n' 'Codex app-server'
   exit 0
 fi
+if [ "\${1:-}" = "app-server" ] && [ "\${2:-}" = "--listen" ]; then
+  listen="\${3:-}"
+  if [ "$listen" = "unix://" ]; then
+    socket="\${CODEX_HOME}/app-server-control/app-server-control.sock"
+  else
+    socket="\${listen#unix://}"
+  fi
+  export SMOKE_CODEX_SOCKET="$socket"
+  exec python3 - <<'PY'
+import os
+import socket
+
+path = os.environ["SMOKE_CODEX_SOCKET"]
+os.makedirs(os.path.dirname(path), exist_ok=True)
+try:
+    os.unlink(path)
+except FileNotFoundError:
+    pass
+server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+server.bind(path)
+server.listen(8)
+try:
+    while True:
+        server.settimeout(0.25)
+        try:
+            client, _ = server.accept()
+        except socket.timeout:
+            continue
+        client.close()
+finally:
+    server.close()
+    try:
+        os.unlink(path)
+    except FileNotFoundError:
+        pass
+PY
+fi
 printf '%s\\n' "$@" > "$SMOKE_CODEX_ARGS"
-[ "$1" = exec ]
+if [ "\${1:-}" != exec ]; then
+  exit 0
+fi
 case " $* " in
   *" --json "*) ;;
   *) exit 91 ;;
@@ -352,6 +402,13 @@ printf '%s\\n' '{"type":"turn.completed","usage":{"input_tokens":10,"output_toke
     const codexArgs = await fs.readFile(fakeCodexArgs, "utf8");
     assert.match(codexArgs, /^exec$/m);
     assert.match(codexArgs, /^--json$/m);
+
+    const superLaunch = await run(
+      args.binary,
+      ["s", "--no-presidio", "--skip-quota-check", "--no-auto-rotate"],
+      { cwd: smokeRoot, env, timeoutMs: 30_000 },
+    );
+    assert.equal(superLaunch.code, 0, `${superLaunch.stdout}${superLaunch.stderr}`);
 
     upstream = await startUpstream();
     broker = (() => {
