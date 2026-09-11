@@ -61,7 +61,7 @@ impl<F> RuntimePrecommitLoopState<F> {
             pressure_mode,
         )?;
         if self.recovery_sweeps == 0 {
-            if self.selection_attempts < Self::profile_count(shared)? && !normal_budget_exhausted {
+            if self.selection_attempts < Self::profile_count(shared)? {
                 return Ok(false);
             }
             return Ok(normal_budget_exhausted);

@@ -40,6 +40,9 @@ use std::time::UNIX_EPOCH;
 #[cfg(test)]
 #[path = "log_completeness_tests.rs"]
 mod completeness_tests;
+#[cfg(test)]
+#[path = "log_descriptor_tests.rs"]
+mod descriptor_tests;
 #[path = "log_command_tui.rs"]
 mod log_command_tui;
 #[path = "log_follow.rs"]
@@ -65,6 +68,12 @@ mod throughput_tests;
 
 const LOG_SNAPSHOT_TAIL_BYTES: usize = 1024 * 1024;
 const SESSION_SNAPSHOT_TAIL_BYTES: usize = 2 * 1024 * 1024;
+// ponytail: cap retained file handles at 32; use live broker history for deeper history.
+pub(super) const LOG_FOLLOW_MAX_FILES: usize = 32;
+
+pub(super) fn runtime_log_paths_for_follow() -> Vec<std::path::PathBuf> {
+    super::collect_recent_runtime_log_paths(LOG_FOLLOW_MAX_FILES)
+}
 
 pub(crate) fn no_color_requested() -> bool {
     std::env::var_os("NO_COLOR").is_some()
