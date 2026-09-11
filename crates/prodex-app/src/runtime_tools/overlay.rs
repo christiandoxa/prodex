@@ -1,4 +1,3 @@
-#[cfg(unix)]
 use super::session_app_server_companion_eligible;
 use super::{
     AppPaths, PreparedRuntimeLaunch, RuntimeLaunchPlan, RuntimeProxyEndpoint,
@@ -305,7 +304,6 @@ fn prepare_overlay_launch(
             ],
         )?;
     }
-    #[cfg(unix)]
     if session_app_server_companion_eligible(strategy, &runtime_args) {
         project_fresh_super_config(strategy, &overlay_home, &mut runtime_args)?;
     }
