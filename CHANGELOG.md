@@ -2,6 +2,41 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.429.0 - 2026-09-11
+
+### Runtime
+
+- Bound precommit and log resources (`61b9825`)
+
+### Misc
+
+- Share descriptor budget across sources (`729a044`)
+- Satisfy executor complexity gate (`0835ed3`)
+- Add standalone exec and shorten companion socket (`6c77d95`)
+# Prodex 0.429.0
+
+## New Features
+
+- Add the standalone `prodex_super_exec` expose MCP tool for bounded direct
+  executable work with argv, cwd, environment overrides, stdin, timeout, and
+  redacted bounded output. It does not require a Super run or plain `prodex s`
+  session.
+
+## Bug Fixes
+
+- Fix Unix `prodex s` companion startup on long Linux profile paths by using an
+  explicit short app-server socket path instead of Codex's nested implicit
+  socket path.
+- Add official Linux release-artifact coverage for real Super companion startup
+  so the packaged layout and Unix socket limit are exercised before release.
+
+## Changelog
+
+- Release the standalone execution MCP surface and the Unix companion startup
+  regression fix with offline process-tree, bounds, and artifact coverage.
+
+Full Changelog: [0.428.1...0.429.0](https://github.com/christiandoxa/prodex/compare/0.428.1...0.429.0)
+
 ## 0.428.1 - 2026-09-11
 
 ### Runtime
@@ -17,30 +52,6 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 - Restore recent authoritative throughput (`6f8a1cd`)
 - Reject inverted blocking ranges (`d6a49ac`)
 - Fence session shadow rollback on main path (`efd5ba9`)
-# Prodex 0.428.1
-
-## New Features
-
-- None.
-
-## Bug Fixes
-
-- Bound fresh runtime-proxy candidate selection after a cold-start probe wait so
-  Responses, standard HTTP, and WebSocket requests fail closed instead of
-  spinning on a no-progress retry path.
-- Keep elapsed pre-commit budgets authoritative when WebSocket transport failure
-  recovery is still below the profile-attempt limit, while preserving the
-  intended one-shot pending-reuse retry.
-- Keep fresh Super launches on Codex's implicit LocalDaemon workspace path by
-  projecting companion settings into the ephemeral overlay, so `/resume`
-  retains local workspace semantics without changing the base config.
-
-## Changelog
-
-- Fix GitHub issue #86 with deterministic bounded-termination and WebSocket
-  elapsed-budget regression coverage.
-
-Full Changelog: [0.428.0...0.428.1](https://github.com/christiandoxa/prodex/compare/0.428.0...0.428.1)
 
 ## 0.428.0 - 2026-09-10
 
