@@ -259,9 +259,9 @@ checksum = "5e764a1d40d510daf35e07be9eb06e75770908c27d411ee6c92109c9840eaaf7"
 
 [[package]]
 name = "bitflags"
-version = "2.13.1"
+version = "2.13.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b588b76d00fde79687d7646a9b5bdf3cc0f655e0bbd080335a95d7e96f3587da"
+checksum = "3ded4057c258ba199e2d26386d3af3780957ecaee6c4ef4041c6b4b8b97c0b06"
 
 [[package]]
 name = "blake2"
@@ -706,9 +706,9 @@ dependencies = [
 
 [[package]]
 name = "hybrid-array"
-version = "0.4.14"
+version = "0.4.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "707114b52a152fa7bdb290cd7cd5912d9467273b6d74e21b8d81aca1f8533f6b"
+checksum = "27f864f10dfb56725ce5ce5472bc52252c8f93a4ab86327122cebf62c5f59a17"
 dependencies = [
  "typenum",
 ]
@@ -1157,7 +1157,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-authn"
-version = "0.428.0"
+version = "0.428.1"
 dependencies = [
  "prodex-domain",
  "url",
@@ -1165,14 +1165,14 @@ dependencies = [
 
 [[package]]
 name = "prodex-authz"
-version = "0.428.0"
+version = "0.428.1"
 dependencies = [
  "prodex-domain",
 ]
 
 [[package]]
 name = "prodex-core"
-version = "0.428.0"
+version = "0.428.1"
 dependencies = [
  "anyhow",
  "dirs",
@@ -1182,7 +1182,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-domain"
-version = "0.428.0"
+version = "0.428.1"
 dependencies = [
  "serde",
  "sha2",
@@ -1207,7 +1207,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-gateway-core"
-version = "0.428.0"
+version = "0.428.1"
 dependencies = [
  "prodex-authz",
  "prodex-domain",
@@ -1220,7 +1220,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-gateway-http"
-version = "0.428.0"
+version = "0.428.1"
 dependencies = [
  "prodex-domain",
  "prodex-gateway-core",
@@ -1229,14 +1229,14 @@ dependencies = [
 
 [[package]]
 name = "prodex-observability"
-version = "0.428.0"
+version = "0.428.1"
 dependencies = [
  "prodex-domain",
 ]
 
 [[package]]
 name = "prodex-profile-export"
-version = "0.428.0"
+version = "0.428.1"
 dependencies = [
  "aes-gcm-siv",
  "anyhow",
@@ -1253,7 +1253,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-provider-core"
-version = "0.428.0"
+version = "0.428.1"
 dependencies = [
  "base64 0.23.1",
  "serde",
@@ -1264,7 +1264,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-provider-spi"
-version = "0.428.0"
+version = "0.428.1"
 dependencies = [
  "prodex-domain",
  "prodex-provider-core",
@@ -1272,14 +1272,14 @@ dependencies = [
 
 [[package]]
 name = "prodex-redaction"
-version = "0.428.0"
+version = "0.428.1"
 dependencies = [
  "serde_json",
 ]
 
 [[package]]
 name = "prodex-runtime-anthropic"
-version = "0.428.0"
+version = "0.428.1"
 dependencies = [
  "anyhow",
  "base64 0.23.1",
@@ -1290,7 +1290,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-runtime-policy"
-version = "0.428.0"
+version = "0.428.1"
 dependencies = [
  "anyhow",
  "base64 0.23.1",
@@ -1306,7 +1306,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-runtime-proxy"
-version = "0.428.0"
+version = "0.428.1"
 dependencies = [
  "base64 0.23.1",
  "prodex-gateway-core",
@@ -1323,7 +1323,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-runtime-state"
-version = "0.428.0"
+version = "0.428.1"
 dependencies = [
  "prodex-provider-core",
  "serde",
@@ -1331,11 +1331,11 @@ dependencies = [
 
 [[package]]
 name = "prodex-runtime-tuning"
-version = "0.428.0"
+version = "0.428.1"
 
 [[package]]
 name = "prodex-secret-store"
-version = "0.428.0"
+version = "0.428.1"
 dependencies = [
  "aes-gcm-siv",
  "getrandom 0.4.3",
@@ -1349,7 +1349,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-storage"
-version = "0.428.0"
+version = "0.428.1"
 dependencies = [
  "prodex-domain",
 ]
@@ -1716,9 +1716,9 @@ dependencies = [
 
 [[package]]
 name = "toml_edit"
-version = "0.25.13+spec-1.1.0"
+version = "0.25.15+spec-1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6975367e4d2ef766d86af01ffad14b622fecc8d4357a998fbc4deb6e9bacaf9b"
+checksum = "1340ea94a5856333492c9064b02c778b191dd2c853778d9609debdcdfea3a614"
 dependencies = [
  "indexmap",
  "toml_datetime",
@@ -1825,9 +1825,9 @@ checksum = "b6c140620e7ffbb22c2dee59cafe6084a59b5ffc27a8859a5f0d494b5d52b6be"
 
 [[package]]
 name = "uuid"
-version = "1.26.0"
+version = "1.26.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b5772d71c9be8a8a6ac2117d949c5b224c1b72241bb611d9a3012edcf8af7812"
+checksum = "2ef6dac1e96601b4fb3acccccff2139741fcb757cb9a36089bf5be91cfb285ce"
 dependencies = [
  "getrandom 0.4.3",
  "js-sys",
