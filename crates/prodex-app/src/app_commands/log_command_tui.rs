@@ -3,7 +3,8 @@ pub(super) use self::render::log_snapshot_items;
 pub(super) use self::render::log_stream_tui_text;
 use super::{
     FollowedLog, FollowedLogPaths, LOG_SNAPSHOT_TAIL_BYTES, LiveRuntimeLogSource, LogLoadAggregate,
-    LogStreamItem, TranscriptEvent, collect_live_log_items, collect_new_runtime_log_stream_items,
+    LogStreamItem, TranscriptEvent, bounded_followed_log_paths, collect_live_log_items,
+    collect_new_runtime_log_stream_items,
     collect_new_runtime_log_stream_items_for_tui_with_throughput, collect_new_transcript_events,
     is_routine_load_event, latest_transcript_event, local_token_usage_event, print_log_stream_item,
     print_token_usage_event, print_transcript_event, print_upstream_payload_event,
@@ -122,9 +123,12 @@ fn stream_token_usage_events(json: bool) -> Result<()> {
         stream_session_log_paths(),
         SESSION_PATH_RECONCILE_INTERVAL,
     );
-    let mut followed_runtime_logs =
-        followed_logs(runtime_paths.refresh(runtime_log_paths_for_follow));
-    let mut followed_session_logs = followed_logs(session_paths.refresh(stream_session_log_paths));
+    let (initial_runtime_paths, initial_session_paths) = bounded_followed_log_paths(
+        runtime_paths.refresh(runtime_log_paths_for_follow),
+        session_paths.refresh(stream_session_log_paths),
+    );
+    let mut followed_runtime_logs = followed_logs(&initial_runtime_paths);
+    let mut followed_session_logs = followed_logs(&initial_session_paths);
     follow_token_usage_events(
         json,
         &mut followed_runtime_logs,
@@ -152,9 +156,12 @@ fn stream_token_usage_events_tui() -> Result<()> {
         stream_session_log_paths(),
         SESSION_PATH_RECONCILE_INTERVAL,
     );
-    let mut followed_runtime_logs =
-        followed_logs(runtime_paths.refresh(runtime_log_paths_for_follow));
-    let mut followed_session_logs = followed_logs(session_paths.refresh(stream_session_log_paths));
+    let (initial_runtime_paths, initial_session_paths) = bounded_followed_log_paths(
+        runtime_paths.refresh(runtime_log_paths_for_follow),
+        session_paths.refresh(stream_session_log_paths),
+    );
+    let mut followed_runtime_logs = followed_logs(&initial_runtime_paths);
+    let mut followed_session_logs = followed_logs(&initial_session_paths);
 
     loop {
         collect_log_stream_items_with_live(
@@ -268,9 +275,13 @@ fn read_token_usage_events_tick_with_live(
     for event in collect_live_log_items(live_source, true, None)? {
         print_log_stream_item(&event, json)?;
     }
-    let current_runtime_paths = runtime_paths.refresh(runtime_log_paths_for_follow);
-    retain_followed_logs(followed_runtime_logs, current_runtime_paths);
-    for path in current_runtime_paths {
+    let (current_runtime_paths, current_session_paths) = bounded_followed_log_paths(
+        runtime_paths.refresh(runtime_log_paths_for_follow),
+        session_paths.refresh(stream_session_log_paths),
+    );
+    retain_followed_logs(followed_runtime_logs, &current_runtime_paths);
+    retain_followed_logs(followed_session_logs, &current_session_paths);
+    for path in &current_runtime_paths {
         let state = followed_runtime_logs
             .entry(path.clone())
             .or_insert_with(|| FollowedLog::at_end(path));
@@ -278,9 +289,7 @@ fn read_token_usage_events_tick_with_live(
             print_log_stream_item(&event, json)?;
         }
     }
-    let current_session_paths = session_paths.refresh(stream_session_log_paths);
-    retain_followed_logs(followed_session_logs, current_session_paths);
-    for path in current_session_paths {
+    for path in &current_session_paths {
         let state = followed_session_logs
             .entry(path.clone())
             .or_insert_with(|| FollowedLog::at_end(path));
@@ -379,9 +388,13 @@ fn collect_log_stream_items_with_live(
     for event in collect_live_log_items(live_source, true, Some(throughput))? {
         push_log_stream_item(items, event);
     }
-    let current_runtime_paths = runtime_paths.refresh(runtime_log_paths_for_follow);
-    retain_followed_logs(followed_runtime_logs, current_runtime_paths);
-    for path in current_runtime_paths {
+    let (current_runtime_paths, current_session_paths) = bounded_followed_log_paths(
+        runtime_paths.refresh(runtime_log_paths_for_follow),
+        session_paths.refresh(stream_session_log_paths),
+    );
+    retain_followed_logs(followed_runtime_logs, &current_runtime_paths);
+    retain_followed_logs(followed_session_logs, &current_session_paths);
+    for path in &current_runtime_paths {
         let state = followed_runtime_logs
             .entry(path.clone())
             .or_insert_with(|| FollowedLog::at_end(path));
@@ -394,9 +407,7 @@ fn collect_log_stream_items_with_live(
             push_log_stream_item(items, event);
         }
     }
-    let current_session_paths = session_paths.refresh(stream_session_log_paths);
-    retain_followed_logs(followed_session_logs, current_session_paths);
-    for path in current_session_paths {
+    for path in &current_session_paths {
         let state = followed_session_logs
             .entry(path.clone())
             .or_insert_with(|| FollowedLog::at_end(path));

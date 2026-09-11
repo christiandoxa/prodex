@@ -24,18 +24,16 @@ use crate::app_commands::log_format::local_log_timestamp;
 #[cfg(test)]
 use crate::reports::InfoTokenUsageEvent;
 use anyhow::Result;
+use std::collections::BTreeSet;
 #[cfg(test)]
 use std::collections::VecDeque;
 #[cfg(test)]
 use std::env;
-#[cfg(test)]
 use std::fs;
 #[cfg(test)]
 use std::io::Write;
-#[cfg(test)]
-use std::time::SystemTime;
-#[cfg(test)]
-use std::time::UNIX_EPOCH;
+use std::path::{Path, PathBuf};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 #[cfg(test)]
 #[path = "log_completeness_tests.rs"]
@@ -68,11 +66,82 @@ mod throughput_tests;
 
 const LOG_SNAPSHOT_TAIL_BYTES: usize = 1024 * 1024;
 const SESSION_SNAPSHOT_TAIL_BYTES: usize = 2 * 1024 * 1024;
-// ponytail: cap retained file handles at 32; use live broker history for deeper history.
+// ponytail: one shared 32-file budget across runtime and session followers; raise only with
+// measured low-RLIMIT headroom.
 pub(super) const LOG_FOLLOW_MAX_FILES: usize = 32;
 
 pub(super) fn runtime_log_paths_for_follow() -> Vec<std::path::PathBuf> {
     super::collect_recent_runtime_log_paths(LOG_FOLLOW_MAX_FILES)
+}
+
+pub(super) fn bounded_followed_log_paths(
+    runtime_paths: &[PathBuf],
+    session_paths: &[PathBuf],
+) -> (Vec<PathBuf>, Vec<PathBuf>) {
+    if runtime_paths.len() + session_paths.len() <= LOG_FOLLOW_MAX_FILES {
+        return (runtime_paths.to_vec(), session_paths.to_vec());
+    }
+
+    let mut candidates = runtime_paths
+        .iter()
+        .cloned()
+        .map(|path| (path_modified_time(&path), path, 0_u8))
+        .chain(
+            session_paths
+                .iter()
+                .cloned()
+                .map(|path| (path_modified_time(&path), path, 1_u8)),
+        )
+        .collect::<Vec<_>>();
+    candidates.sort_by(
+        |(left_modified, left_path, left_source), (right_modified, right_path, right_source)| {
+            right_modified
+                .cmp(left_modified)
+                .then_with(|| left_path.cmp(right_path))
+                .then_with(|| left_source.cmp(right_source))
+        },
+    );
+    let minimums = [
+        if session_paths.is_empty() {
+            LOG_FOLLOW_MAX_FILES
+        } else {
+            LOG_FOLLOW_MAX_FILES.div_ceil(2)
+        },
+        if runtime_paths.is_empty() {
+            LOG_FOLLOW_MAX_FILES
+        } else {
+            LOG_FOLLOW_MAX_FILES / 2
+        },
+    ];
+    let mut selected = BTreeSet::new();
+    let mut selected_counts = [0; 2];
+    for (_, path, source) in &candidates {
+        if selected_counts[*source as usize] < minimums[*source as usize]
+            && selected.insert((*source, path.clone()))
+        {
+            selected_counts[*source as usize] += 1;
+        }
+    }
+    for (_, path, source) in candidates {
+        if selected.len() >= LOG_FOLLOW_MAX_FILES {
+            break;
+        }
+        selected.insert((source, path));
+    }
+    let select = |paths: &[PathBuf], source: u8| {
+        paths
+            .iter()
+            .filter(|path| selected.contains(&(source, (*path).clone())))
+            .cloned()
+            .collect()
+    };
+    (select(runtime_paths, 0), select(session_paths, 1))
+}
+
+fn path_modified_time(path: &Path) -> SystemTime {
+    fs::metadata(path)
+        .and_then(|metadata| metadata.modified())
+        .unwrap_or(UNIX_EPOCH)
 }
 
 pub(crate) fn no_color_requested() -> bool {

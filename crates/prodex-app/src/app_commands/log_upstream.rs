@@ -1,8 +1,8 @@
 use super::collect_recent_runtime_log_paths;
 use super::log::{
-    FollowedLog, FollowedLogPaths, LiveRuntimeLogSource, LogStreamItem, collect_live_log_items,
-    collect_new_runtime_log_stream_items_with_throughput, retain_followed_logs,
-    runtime_log_paths_for_follow,
+    FollowedLog, FollowedLogPaths, LiveRuntimeLogSource, LogStreamItem, bounded_followed_log_paths,
+    collect_live_log_items, collect_new_runtime_log_stream_items_with_throughput,
+    retain_followed_logs, runtime_log_paths_for_follow,
 };
 use super::log_format::{current_log_width, render_log_block};
 use super::log_tui::{
@@ -57,16 +57,18 @@ pub(super) fn stream_upstream_payload_events(json: bool) -> Result<()> {
     }
 
     let mut runtime_paths = FollowedLogPaths::new(runtime_log_paths_for_follow());
-    let mut followed_runtime_logs =
-        followed_logs(runtime_paths.refresh(runtime_log_paths_for_follow));
+    let (initial_runtime_paths, _) =
+        bounded_followed_log_paths(runtime_paths.refresh(runtime_log_paths_for_follow), &[]);
+    let mut followed_runtime_logs = followed_logs(&initial_runtime_paths);
 
     loop {
-        let current_runtime_paths = runtime_paths.refresh(runtime_log_paths_for_follow);
-        retain_followed_logs(&mut followed_runtime_logs, current_runtime_paths);
+        let (current_runtime_paths, _) =
+            bounded_followed_log_paths(runtime_paths.refresh(runtime_log_paths_for_follow), &[]);
+        retain_followed_logs(&mut followed_runtime_logs, &current_runtime_paths);
         for event in live_upstream_payload_events_with_throughput(&mut live_source, None)? {
             print_upstream_payload_event(&event, json)?;
         }
-        for path in current_runtime_paths {
+        for path in &current_runtime_paths {
             let state = followed_runtime_logs
                 .entry(path.clone())
                 .or_insert_with(|| FollowedLog::at_end(path));
@@ -100,18 +102,20 @@ fn stream_upstream_payload_events_tui() -> Result<()> {
     let mut header_refresh_at =
         log_tui_header_next_refresh_at(header_detail.as_ref(), Instant::now());
     let mut runtime_paths = FollowedLogPaths::new(runtime_log_paths_for_follow());
-    let mut followed_runtime_logs =
-        followed_logs(runtime_paths.refresh(runtime_log_paths_for_follow));
+    let (initial_runtime_paths, _) =
+        bounded_followed_log_paths(runtime_paths.refresh(runtime_log_paths_for_follow), &[]);
+    let mut followed_runtime_logs = followed_logs(&initial_runtime_paths);
 
     loop {
-        let current_runtime_paths = runtime_paths.refresh(runtime_log_paths_for_follow);
-        retain_followed_logs(&mut followed_runtime_logs, current_runtime_paths);
+        let (current_runtime_paths, _) =
+            bounded_followed_log_paths(runtime_paths.refresh(runtime_log_paths_for_follow), &[]);
+        retain_followed_logs(&mut followed_runtime_logs, &current_runtime_paths);
         for event in
             live_upstream_payload_events_with_throughput(&mut live_source, Some(&mut throughput))?
         {
             push_upstream_payload_event(&mut events, event);
         }
-        for path in current_runtime_paths {
+        for path in &current_runtime_paths {
             let state = followed_runtime_logs
                 .entry(path.clone())
                 .or_insert_with(|| FollowedLog::at_end(path));
