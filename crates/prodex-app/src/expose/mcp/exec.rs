@@ -57,35 +57,50 @@ fn parse_request(
         .ok_or_else(|| "program is required".to_string())?;
     validate_path_text(program, "program", EXEC_MAX_PROGRAM_BYTES, false)?;
 
+    Ok(ExecRequest {
+        program: program.to_string(),
+        args: parse_args(object.get("args"))?,
+        cwd: parse_cwd(object.get("cwd"), default_cwd)?,
+        env: parse_env(object.get("env"))?,
+        stdin: parse_stdin(object.get("stdin"))?,
+        timeout: parse_timeout(object.get("timeout_ms"))?,
+    })
+}
+
+fn parse_args(value: Option<&Value>) -> std::result::Result<Vec<OsString>, String> {
     let mut args = Vec::new();
     let mut args_bytes: usize = 0;
-    if let Some(value) = object.get("args").filter(|value| !value.is_null()) {
-        let Some(values) = value.as_array() else {
-            return Err("args must be an array".to_string());
+    let Some(value) = value.filter(|value| !value.is_null()) else {
+        return Ok(args);
+    };
+    let Some(values) = value.as_array() else {
+        return Err("args must be an array".to_string());
+    };
+    if values.len() > EXEC_MAX_ARGUMENTS {
+        return Err(format!(
+            "args must contain at most {EXEC_MAX_ARGUMENTS} items"
+        ));
+    }
+    for value in values {
+        let Some(value) = value.as_str() else {
+            return Err("args must contain only strings".to_string());
         };
-        if values.len() > EXEC_MAX_ARGUMENTS {
+        if value.len() > EXEC_MAX_ARGUMENT_BYTES || value.as_bytes().contains(&0) {
+            return Err("argument contains NUL or is too large".to_string());
+        }
+        args_bytes = args_bytes.saturating_add(value.len());
+        if args_bytes > EXEC_MAX_ARGUMENTS_BYTES {
             return Err(format!(
-                "args must contain at most {EXEC_MAX_ARGUMENTS} items"
+                "total argument bytes must be at most {EXEC_MAX_ARGUMENTS_BYTES}"
             ));
         }
-        for value in values {
-            let Some(value) = value.as_str() else {
-                return Err("args must contain only strings".to_string());
-            };
-            if value.len() > EXEC_MAX_ARGUMENT_BYTES || value.as_bytes().contains(&0) {
-                return Err("argument contains NUL or is too large".to_string());
-            }
-            args_bytes = args_bytes.saturating_add(value.len());
-            if args_bytes > EXEC_MAX_ARGUMENTS_BYTES {
-                return Err(format!(
-                    "total argument bytes must be at most {EXEC_MAX_ARGUMENTS_BYTES}"
-                ));
-            }
-            args.push(OsString::from(value));
-        }
+        args.push(OsString::from(value));
     }
+    Ok(args)
+}
 
-    let cwd = match object.get("cwd") {
+fn parse_cwd(value: Option<&Value>, default_cwd: &Path) -> std::result::Result<PathBuf, String> {
+    Ok(match value {
         None | Some(Value::Null) => default_cwd.to_path_buf(),
         Some(value) => {
             let Some(value) = value.as_str() else {
@@ -94,31 +109,37 @@ fn parse_request(
             validate_path_text(value, "cwd", EXEC_MAX_CWD_BYTES, false)?;
             PathBuf::from(value)
         }
-    };
+    })
+}
 
+fn parse_env(value: Option<&Value>) -> std::result::Result<Vec<(OsString, OsString)>, String> {
     let mut env = Vec::new();
-    if let Some(value) = object.get("env").filter(|value| !value.is_null()) {
-        let Some(values) = value.as_object() else {
-            return Err("env must be an object".to_string());
-        };
-        if values.len() > EXEC_MAX_ENV_ENTRIES {
-            return Err(format!(
-                "env must contain at most {EXEC_MAX_ENV_ENTRIES} entries"
-            ));
-        }
-        for (key, value) in values {
-            validate_env_key(key)?;
-            let Some(value) = value.as_str() else {
-                return Err("env values must be strings".to_string());
-            };
-            if value.len() > EXEC_MAX_ENV_VALUE_BYTES || value.as_bytes().contains(&0) {
-                return Err(format!("env value for {key} is too large or contains NUL"));
-            }
-            env.push((OsString::from(key), OsString::from(value)));
-        }
+    let Some(value) = value.filter(|value| !value.is_null()) else {
+        return Ok(env);
+    };
+    let Some(values) = value.as_object() else {
+        return Err("env must be an object".to_string());
+    };
+    if values.len() > EXEC_MAX_ENV_ENTRIES {
+        return Err(format!(
+            "env must contain at most {EXEC_MAX_ENV_ENTRIES} entries"
+        ));
     }
+    for (key, value) in values {
+        validate_env_key(key)?;
+        let Some(value) = value.as_str() else {
+            return Err("env values must be strings".to_string());
+        };
+        if value.len() > EXEC_MAX_ENV_VALUE_BYTES || value.as_bytes().contains(&0) {
+            return Err(format!("env value for {key} is too large or contains NUL"));
+        }
+        env.push((OsString::from(key), OsString::from(value)));
+    }
+    Ok(env)
+}
 
-    let stdin = match object.get("stdin") {
+fn parse_stdin(value: Option<&Value>) -> std::result::Result<Vec<u8>, String> {
+    Ok(match value {
         None | Some(Value::Null) => Vec::new(),
         Some(value) => {
             let Some(value) = value.as_str() else {
@@ -131,9 +152,11 @@ fn parse_request(
             }
             value.as_bytes().to_vec()
         }
-    };
+    })
+}
 
-    let timeout_ms = match object.get("timeout_ms") {
+fn parse_timeout(value: Option<&Value>) -> std::result::Result<Duration, String> {
+    let timeout_ms = match value {
         None | Some(Value::Null) => EXEC_DEFAULT_TIMEOUT_MS,
         Some(value) => value
             .as_u64()
@@ -144,15 +167,7 @@ fn parse_request(
             "timeout_ms must be between 1 and {EXEC_MAX_TIMEOUT_MS}"
         ));
     }
-
-    Ok(ExecRequest {
-        program: program.to_string(),
-        args,
-        cwd,
-        env,
-        stdin,
-        timeout: Duration::from_millis(timeout_ms),
-    })
+    Ok(Duration::from_millis(timeout_ms))
 }
 
 fn validate_path_text(
