@@ -488,7 +488,7 @@ fn handle_runtime_responses_candidate_exhausted(
         &loop_state.excluded_profiles,
         RuntimeRouteKind::Responses,
     )?;
-    if remaining_cold_start_profiles > 0 {
+    if remaining_cold_start_profiles > 0 && loop_state.claim_cold_start_probe_wait() {
         runtime_proxy_log(
             context.shared,
             format!(

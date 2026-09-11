@@ -2,6 +2,8 @@ use super::super::test_support::{
     test_runtime_local_websocket_pair, test_runtime_shared, test_runtime_websocket_flow,
 };
 use super::*;
+use crate::{ProfileEntry, ProfileProvider};
+use std::path::PathBuf;
 
 #[test]
 fn direct_current_profile_fallback_requires_fresh_request_context() {
@@ -69,4 +71,56 @@ fn pending_websocket_reuse_retry_bypasses_expired_budget_once() {
         flow.precommit_budget_exhausted(expired, usize::MAX, false)
             .expect("budget should apply again after the one retry")
     );
+}
+
+#[test]
+fn transport_failure_cannot_bypass_expired_budget() {
+    let _guard = acquire_test_runtime_lock();
+    let shared = test_runtime_shared("loop-transport-failure-budget");
+    let (mut local_socket, _client_socket) = test_runtime_local_websocket_pair();
+    let mut websocket_session = RuntimeWebsocketSessionState::default();
+    let mut flow = test_runtime_websocket_flow(&mut local_socket, &shared, &mut websocket_session);
+    flow.saw_transport_failure = true;
+    let expired = Instant::now() - std::time::Duration::from_secs(60);
+
+    assert!(
+        flow.precommit_budget_exhausted(expired, 0, false)
+            .expect("expired budget should remain authoritative after transport failure")
+    );
+}
+
+#[test]
+fn cold_start_probe_wait_is_one_shot() {
+    let _guard = acquire_test_runtime_lock();
+    let shared = test_runtime_shared("loop-cold-start");
+    shared
+        .runtime
+        .lock()
+        .expect("runtime lock should succeed")
+        .state
+        .profiles
+        .insert(
+            "second".to_string(),
+            ProfileEntry {
+                codex_home: PathBuf::from("/home/test-user/codex-second"),
+                managed: true,
+                email: Some("second@example.com".to_string()),
+                provider: ProfileProvider::Openai,
+            },
+        );
+    let (mut local_socket, _client_socket) = test_runtime_local_websocket_pair();
+    let mut websocket_session = RuntimeWebsocketSessionState::default();
+    let mut flow = test_runtime_websocket_flow(&mut local_socket, &shared, &mut websocket_session);
+
+    assert!(matches!(
+        flow.handle_candidate_exhausted()
+            .expect("first cold-start probe wait should succeed"),
+        RuntimeWebsocketMessageLoopAction::Continue
+    ));
+    assert!(flow.cold_start_probe_waited);
+    assert!(matches!(
+        flow.handle_candidate_exhausted()
+            .expect("second candidate exhaustion should fail closed"),
+        RuntimeWebsocketMessageLoopAction::Finished
+    ));
 }

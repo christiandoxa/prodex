@@ -123,11 +123,11 @@ impl OutputThroughput {
             prune_output_throughput_samples(stream, observed_at);
             output_throughput_stream_rate(stream)
         };
-        if let Some(rate) = rate {
-            if let Some(stream) = self.streams.get_mut(&key) {
-                stream.active = true;
-                stream.last_known_rate = Some(rate);
-            }
+        if let Some(rate) = rate
+            && let Some(stream) = self.streams.get_mut(&key)
+        {
+            stream.active = true;
+            stream.last_known_rate = Some(rate);
         }
         if let Some(rate) = rate {
             self.record_rate(&key, rate);

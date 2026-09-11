@@ -394,7 +394,10 @@ fn runtime_noncompact_next_action(
         &loop_state.excluded_profiles,
         RuntimeRouteKind::Standard,
     )?;
-    if remaining_cold_start_profiles > 0 && !session_present {
+    if remaining_cold_start_profiles > 0
+        && !session_present
+        && loop_state.claim_cold_start_probe_wait()
+    {
         runtime_proxy_log(
             shared,
             format!(

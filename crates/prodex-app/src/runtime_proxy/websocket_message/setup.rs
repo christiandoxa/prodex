@@ -154,6 +154,7 @@ impl<'a> RuntimeWebsocketTextMessageFlow<'a> {
             local_capacity_wait_timed_out: false,
             saw_transport_failure: false,
             saw_overload_failure: false,
+            cold_start_probe_waited: false,
             recovery_sweeps: 0,
             recovery_started_at: None,
             saw_previous_response_not_found: false,

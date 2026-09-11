@@ -196,6 +196,7 @@ impl<'a> RuntimeWebsocketTextMessageFlow<'a> {
         if self.recovery_sweeps == 0 {
             if self.saw_transport_failure
                 && !self.has_continuation_priority()
+                && !exhausted
                 && selection_attempts < self.profile_count()?
             {
                 return Ok(false);
@@ -419,7 +420,8 @@ impl<'a> RuntimeWebsocketTextMessageFlow<'a> {
                 &self.excluded_profiles,
                 RuntimeRouteKind::Websocket,
             )?;
-        if remaining_cold_start_profiles > 0 {
+        if remaining_cold_start_profiles > 0 && !self.cold_start_probe_waited {
+            self.cold_start_probe_waited = true;
             runtime_proxy_log(
                 self.shared,
                 format!(
@@ -529,6 +531,7 @@ impl<'a> RuntimeWebsocketTextMessageFlow<'a> {
         self.last_failure = None;
         self.saw_transport_failure = false;
         self.saw_overload_failure = false;
+        self.cold_start_probe_waited = false;
         self.recovery_sweeps = 0;
         self.recovery_started_at = None;
         self.quota_last_chance_profile = Some(spark_candidate.clone());
