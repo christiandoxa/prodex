@@ -51,6 +51,13 @@ pub(crate) fn retain_followed_logs(
     followed.retain(|path, _| current_paths.contains(path));
 }
 
+pub(crate) fn followed_log_map(paths: &[PathBuf]) -> BTreeMap<PathBuf, FollowedLog> {
+    paths
+        .iter()
+        .map(|path| (path.clone(), FollowedLog::at_end(path)))
+        .collect()
+}
+
 impl Default for FollowedLogPaths {
     fn default() -> Self {
         Self::new(Vec::new())
