@@ -7,7 +7,7 @@ use super::{
     collect_new_runtime_log_stream_items_for_tui_with_throughput, collect_new_transcript_events,
     is_routine_load_event, latest_transcript_event, local_token_usage_event, print_log_stream_item,
     print_token_usage_event, print_transcript_event, print_upstream_payload_event,
-    recent_session_log_paths, retain_followed_logs,
+    recent_session_log_paths, retain_followed_logs, runtime_log_paths_for_follow,
 };
 use crate::app_commands::collect_recent_runtime_log_paths;
 use crate::app_commands::log_tui::{
@@ -20,7 +20,7 @@ use crate::app_commands::log_upstream::{
 use crate::app_commands::log_upstream_payload::UpstreamPayloadEvent;
 use crate::app_commands::log_upstream_payload::upstream_payload_event_from_runtime_line;
 use crate::reports::{InfoTokenUsageEvent, info_token_usage_event_from_line};
-use crate::{LogArgs, LogMode, prodex_runtime_log_paths_in_dir, runtime_proxy_log_dir};
+use crate::{LogArgs, LogMode};
 use anyhow::{Context, Result};
 use crossterm::event::{self, Event, KeyEventKind};
 use prodex_runtime_doctor::read_runtime_log_tail;
@@ -117,15 +117,13 @@ fn stream_token_usage_events(json: bool) -> Result<()> {
 
     let mut live_source = LiveRuntimeLogSource::new();
     print_initial_token_usage_events(json, &mut live_source)?;
-    let mut runtime_paths =
-        FollowedLogPaths::new(prodex_runtime_log_paths_in_dir(&runtime_proxy_log_dir()));
+    let mut runtime_paths = FollowedLogPaths::new(runtime_log_paths_for_follow());
     let mut session_paths = FollowedLogPaths::with_refresh_interval(
         stream_session_log_paths(),
         SESSION_PATH_RECONCILE_INTERVAL,
     );
-    let mut followed_runtime_logs = followed_logs(
-        runtime_paths.refresh(|| prodex_runtime_log_paths_in_dir(&runtime_proxy_log_dir())),
-    );
+    let mut followed_runtime_logs =
+        followed_logs(runtime_paths.refresh(runtime_log_paths_for_follow));
     let mut followed_session_logs = followed_logs(session_paths.refresh(stream_session_log_paths));
     follow_token_usage_events(
         json,
@@ -149,15 +147,13 @@ fn stream_token_usage_events_tui() -> Result<()> {
     let mut header_refresh_at =
         log_tui_header_next_refresh_at(header_detail.as_ref(), Instant::now());
 
-    let mut runtime_paths =
-        FollowedLogPaths::new(prodex_runtime_log_paths_in_dir(&runtime_proxy_log_dir()));
+    let mut runtime_paths = FollowedLogPaths::new(runtime_log_paths_for_follow());
     let mut session_paths = FollowedLogPaths::with_refresh_interval(
         stream_session_log_paths(),
         SESSION_PATH_RECONCILE_INTERVAL,
     );
-    let mut followed_runtime_logs = followed_logs(
-        runtime_paths.refresh(|| prodex_runtime_log_paths_in_dir(&runtime_proxy_log_dir())),
-    );
+    let mut followed_runtime_logs =
+        followed_logs(runtime_paths.refresh(runtime_log_paths_for_follow));
     let mut followed_session_logs = followed_logs(session_paths.refresh(stream_session_log_paths));
 
     loop {
@@ -272,8 +268,7 @@ fn read_token_usage_events_tick_with_live(
     for event in collect_live_log_items(live_source, true, None)? {
         print_log_stream_item(&event, json)?;
     }
-    let current_runtime_paths =
-        runtime_paths.refresh(|| prodex_runtime_log_paths_in_dir(&runtime_proxy_log_dir()));
+    let current_runtime_paths = runtime_paths.refresh(runtime_log_paths_for_follow);
     retain_followed_logs(followed_runtime_logs, current_runtime_paths);
     for path in current_runtime_paths {
         let state = followed_runtime_logs
@@ -384,8 +379,7 @@ fn collect_log_stream_items_with_live(
     for event in collect_live_log_items(live_source, true, Some(throughput))? {
         push_log_stream_item(items, event);
     }
-    let current_runtime_paths =
-        runtime_paths.refresh(|| prodex_runtime_log_paths_in_dir(&runtime_proxy_log_dir()));
+    let current_runtime_paths = runtime_paths.refresh(runtime_log_paths_for_follow);
     retain_followed_logs(followed_runtime_logs, current_runtime_paths);
     for path in current_runtime_paths {
         let state = followed_runtime_logs
