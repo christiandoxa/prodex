@@ -2,7 +2,51 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
-## 0.428.0 - 2026-09-07
+## 0.428.1 - 2026-09-11
+
+### Runtime
+
+- Preserve projected Super child arguments (`c3a590d`)
+- Keep fresh Super config projection cross-platform (`cd2ea99`)
+- Gate Unix companion helpers (`851249f`)
+- Preserve local Super resume semantics (`d023f00`)
+- Bound precommit retry loops (#86) (`9674ded`)
+
+### Misc
+
+- Restore recent authoritative throughput (`6f8a1cd`)
+- Reject inverted blocking ranges (`d6a49ac`)
+- Fence session shadow rollback on main path (`efd5ba9`)
+# Prodex 0.428.1
+
+## New Features
+
+- None.
+
+## Bug Fixes
+
+- Bound fresh runtime-proxy candidate selection after a cold-start probe wait so
+  Responses, standard HTTP, and WebSocket requests fail closed instead of
+  spinning on a no-progress retry path.
+- Keep elapsed pre-commit budgets authoritative when WebSocket transport failure
+  recovery is still below the profile-attempt limit, while preserving the
+  intended one-shot pending-reuse retry.
+- Keep fresh Super launches on Codex's implicit LocalDaemon workspace path by
+  projecting companion settings into the ephemeral overlay, so `/resume`
+  retains local workspace semantics without changing the base config.
+
+## Changelog
+
+- Fix GitHub issue #86 with deterministic bounded-termination and WebSocket
+  elapsed-budget regression coverage.
+
+Full Changelog: [0.428.0...0.428.1](https://github.com/christiandoxa/prodex/compare/0.428.0...0.428.1)
+
+## 0.428.0 - 2026-09-10
+
+### Docs
+
+- Describe session preempt control flow (`44bf39d`)
 
 ### Deps
 
@@ -10,6 +54,7 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 
 ### Misc
 
+- Add current turn preemption (`5d43a29`)
 - Merge pull request #68 from christiandoxa/dependabot/cargo/fuzz/fuzz-cargo-fe1561a707 (`d76fd1e`)
 
 ## 0.427.0 - 2026-09-07
