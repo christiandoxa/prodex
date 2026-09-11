@@ -6,9 +6,10 @@ use super::{
     LogStreamItem, TranscriptEvent, bounded_followed_log_paths, collect_live_log_items,
     collect_new_runtime_log_stream_items,
     collect_new_runtime_log_stream_items_for_tui_with_throughput, collect_new_transcript_events,
-    is_routine_load_event, latest_transcript_event, local_token_usage_event, print_log_stream_item,
-    print_token_usage_event, print_transcript_event, print_upstream_payload_event,
-    recent_session_log_paths, retain_followed_logs, runtime_log_paths_for_follow,
+    followed_log_map, is_routine_load_event, latest_transcript_event, local_token_usage_event,
+    print_log_stream_item, print_token_usage_event, print_transcript_event,
+    print_upstream_payload_event, recent_session_log_paths, retain_followed_logs,
+    runtime_log_paths_for_follow,
 };
 use crate::app_commands::collect_recent_runtime_log_paths;
 use crate::app_commands::log_tui::{
@@ -127,8 +128,8 @@ fn stream_token_usage_events(json: bool) -> Result<()> {
         runtime_paths.refresh(runtime_log_paths_for_follow),
         session_paths.refresh(stream_session_log_paths),
     );
-    let mut followed_runtime_logs = followed_logs(&initial_runtime_paths);
-    let mut followed_session_logs = followed_logs(&initial_session_paths);
+    let mut followed_runtime_logs = followed_log_map(&initial_runtime_paths);
+    let mut followed_session_logs = followed_log_map(&initial_session_paths);
     follow_token_usage_events(
         json,
         &mut followed_runtime_logs,
@@ -160,8 +161,8 @@ fn stream_token_usage_events_tui() -> Result<()> {
         runtime_paths.refresh(runtime_log_paths_for_follow),
         session_paths.refresh(stream_session_log_paths),
     );
-    let mut followed_runtime_logs = followed_logs(&initial_runtime_paths);
-    let mut followed_session_logs = followed_logs(&initial_session_paths);
+    let mut followed_runtime_logs = followed_log_map(&initial_runtime_paths);
+    let mut followed_session_logs = followed_log_map(&initial_session_paths);
 
     loop {
         collect_log_stream_items_with_live(
@@ -212,13 +213,6 @@ fn print_initial_token_usage_events(
         print_log_stream_item(&item, json)?;
     }
     Ok(())
-}
-
-fn followed_logs(paths: &[PathBuf]) -> BTreeMap<PathBuf, FollowedLog> {
-    paths
-        .iter()
-        .map(|path| (path.clone(), FollowedLog::at_end(path)))
-        .collect()
 }
 
 fn stream_session_log_paths() -> Vec<PathBuf> {

@@ -2,7 +2,8 @@ pub(crate) use self::log_command_tui::handle_log;
 #[cfg(test)]
 use self::log_command_tui::{log_snapshot_items, log_stream_tui_text};
 pub(crate) use self::log_follow::{
-    FollowedLog, FollowedLogPaths, collect_new_followed_lines, retain_followed_logs,
+    FollowedLog, FollowedLogPaths, collect_new_followed_lines, followed_log_map,
+    retain_followed_logs,
 };
 pub(crate) use self::log_live::{LiveRuntimeLogSource, collect_live_log_items};
 pub(crate) use self::log_load::{LogLoadAggregate, LogLoadObservation, is_routine_load_event};

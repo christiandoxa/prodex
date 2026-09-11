@@ -1,7 +1,7 @@
 use super::collect_recent_runtime_log_paths;
 use super::log::{
     FollowedLog, FollowedLogPaths, LiveRuntimeLogSource, LogStreamItem, bounded_followed_log_paths,
-    collect_live_log_items, collect_new_runtime_log_stream_items_with_throughput,
+    collect_live_log_items, collect_new_runtime_log_stream_items_with_throughput, followed_log_map,
     retain_followed_logs, runtime_log_paths_for_follow,
 };
 use super::log_format::{current_log_width, render_log_block};
@@ -19,11 +19,11 @@ use prodex_runtime_doctor::read_runtime_log_tail;
 use ratatui::layout::{Constraint, Direction, Layout};
 use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
-use std::collections::{BTreeMap, VecDeque};
+use std::collections::VecDeque;
 #[cfg(test)]
 use std::env;
 use std::io::{self, IsTerminal, Write};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::thread;
 use std::time::{Duration, Instant};
 #[cfg(test)]
@@ -59,7 +59,7 @@ pub(super) fn stream_upstream_payload_events(json: bool) -> Result<()> {
     let mut runtime_paths = FollowedLogPaths::new(runtime_log_paths_for_follow());
     let (initial_runtime_paths, _) =
         bounded_followed_log_paths(runtime_paths.refresh(runtime_log_paths_for_follow), &[]);
-    let mut followed_runtime_logs = followed_logs(&initial_runtime_paths);
+    let mut followed_runtime_logs = followed_log_map(&initial_runtime_paths);
 
     loop {
         let (current_runtime_paths, _) =
@@ -104,7 +104,7 @@ fn stream_upstream_payload_events_tui() -> Result<()> {
     let mut runtime_paths = FollowedLogPaths::new(runtime_log_paths_for_follow());
     let (initial_runtime_paths, _) =
         bounded_followed_log_paths(runtime_paths.refresh(runtime_log_paths_for_follow), &[]);
-    let mut followed_runtime_logs = followed_logs(&initial_runtime_paths);
+    let mut followed_runtime_logs = followed_log_map(&initial_runtime_paths);
 
     loop {
         let (current_runtime_paths, _) =
@@ -153,13 +153,6 @@ fn stream_upstream_payload_events_tui() -> Result<()> {
             return Ok(());
         }
     }
-}
-
-fn followed_logs(paths: &[PathBuf]) -> BTreeMap<PathBuf, FollowedLog> {
-    paths
-        .iter()
-        .map(|path| (path.clone(), FollowedLog::at_end(path)))
-        .collect()
 }
 
 fn push_upstream_payload_event(
