@@ -1,9 +1,11 @@
+#[cfg(unix)]
+use super::session_app_server_companion_eligible;
 use super::{
     AppPaths, PreparedRuntimeLaunch, RuntimeLaunchPlan, RuntimeProxyEndpoint,
     RuntimeToolLaunchStrategy, ensure_presidio_services_for_super_launch,
     ensure_required_presidio_services_for_super_launch, prepare_desktop_overlay_home,
     prepare_runtime_overlay_home, redaction_redact_secret_like_text,
-    session_app_server_companion_eligible, write_provider_runtime_codex_auth,
+    write_provider_runtime_codex_auth,
 };
 use crate::app_commands::runtime_launch::goal_resume::add_runtime_goal_session_tracking;
 use anyhow::{Result, bail};
