@@ -64,9 +64,9 @@ mod tests {
 
         assert_eq!(
             active_rate(&mut throughput, start + Duration::from_secs(1)),
-            Some(100.0)
+            Some(200.0)
         );
-        assert_eq!(format_output_tokens_per_second(Some(100.0)), "100 t/s");
+        assert_eq!(format_output_tokens_per_second(Some(200.0)), "200 t/s");
     }
 
     #[test]
@@ -74,7 +74,14 @@ mod tests {
         let path = Path::new("/tmp/runtime-b.log");
         let start = Instant::now();
         let mut throughput = OutputThroughput::default();
-        throughput.observe_token_usage(path, &usage("main", Some(8), 1), start);
+        throughput.observe_token_usage(
+            path,
+            &InfoTokenUsageEvent {
+                generation_ms: Some(500),
+                ..usage("main", Some(8), 1)
+            },
+            start,
+        );
         assert!(active_rate(&mut throughput, start + Duration::from_millis(1)).is_none());
         assert_eq!(format_output_tokens_per_second(None), "— t/s");
 
@@ -87,7 +94,7 @@ mod tests {
             start + Duration::from_millis(1),
         );
         assert_eq!(
-            throughput.active_rate_for_profile(start + Duration::from_millis(1), None),
+            active_rate(&mut throughput, start + Duration::from_millis(1)),
             Some(2.0)
         );
     }
@@ -129,7 +136,6 @@ mod tests {
             ..InfoTokenUsageEvent::default()
         };
         let mut throughput = OutputThroughput::default();
-        throughput.observe_token_usage(path, &event, now);
         throughput.finish(path, &event);
 
         assert!(active_rate(&mut throughput, now).is_none());
@@ -148,6 +154,7 @@ mod tests {
         let mut throughput = OutputThroughput::default();
         let first = InfoTokenUsageEvent {
             timestamp: "2026-08-28 12:00:00.000 +07:00".to_string(),
+            generation_ms: Some(1_000),
             ..usage("main", Some(12), 100)
         };
         let second = InfoTokenUsageEvent {
@@ -272,7 +279,7 @@ mod tests {
         throughput.observe_token_usage(
             path,
             &InfoTokenUsageEvent {
-                generation_ms: Some(500),
+                generation_ms: Some(1_000),
                 ..usage("backup", Some(4), 5)
             },
             start + Duration::from_secs(2),
@@ -280,7 +287,7 @@ mod tests {
         throughput.observe_token_usage(
             path,
             &InfoTokenUsageEvent {
-                generation_ms: Some(1_250),
+                generation_ms: Some(2_000),
                 ..usage("backup", Some(4), 25)
             },
             start + Duration::from_secs(3),

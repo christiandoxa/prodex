@@ -4,8 +4,7 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 const OUTPUT_THROUGHPUT_WINDOW: Duration = Duration::from_secs(2);
-#[cfg(test)]
-pub(super) const OUTPUT_THROUGHPUT_MIN_SAMPLE: Duration = Duration::from_millis(250);
+const OUTPUT_THROUGHPUT_MIN_SAMPLE: Duration = Duration::from_millis(250);
 const OUTPUT_THROUGHPUT_MAX_STREAMS: usize = 64;
 const OUTPUT_THROUGHPUT_MAX_OBSERVATIONS: usize = 256;
 
@@ -29,7 +28,7 @@ struct OutputThroughputObservation {
 
 #[derive(Debug, Default, Clone)]
 struct OutputThroughputStream {
-    samples: VecDeque<(Instant, u64)>,
+    samples: VecDeque<(Instant, u64, u64)>,
     active: bool,
     last_known_rate: Option<f64>,
     last_event_at: Option<Instant>,
@@ -77,11 +76,22 @@ impl OutputThroughput {
             profile: event.profile.clone(),
             request: event.request,
         };
+        let Some(generation_ms) = event.generation_ms.filter(|duration| *duration > 0) else {
+            return;
+        };
+        if event.output_tokens == 0 {
+            return;
+        }
         let counter_reset = self
             .streams
             .get(&key)
             .and_then(|stream| stream.samples.back())
-            .is_some_and(|(_, previous)| event.output_tokens < *previous);
+            .is_some_and(|(_, previous_tokens, previous_generation_ms)| {
+                event.output_tokens < *previous_tokens || generation_ms < *previous_generation_ms
+            });
+        if counter_reset {
+            self.last_known_rates.remove(&key);
+        }
         if event.output_tokens > 0 {
             let observation = output_throughput_observation(event);
             if !counter_reset
@@ -93,74 +103,33 @@ impl OutputThroughput {
             }
             self.remember_observation(observation, log_path);
         }
-        let rate = valid_output_rate(event);
-        {
+        let rate = {
             let stream = self.stream(&key);
             stream.last_event_at = Some(observed_at);
-            if stream
-                .samples
-                .back()
-                .is_some_and(|(_, previous)| event.output_tokens < *previous)
-            {
+            if counter_reset {
                 stream.samples.clear();
                 stream.active = false;
+                stream.last_known_rate = None;
             }
             if stream
                 .samples
                 .back()
-                .is_none_or(|(_, previous)| event.output_tokens > *previous)
+                .is_none_or(|(_, previous_tokens, _)| event.output_tokens > *previous_tokens)
             {
-                stream.samples.push_back((observed_at, event.output_tokens));
+                stream
+                    .samples
+                    .push_back((observed_at, event.output_tokens, generation_ms));
             }
             prune_output_throughput_samples(stream, observed_at);
-            if let Some(rate) = rate {
+            output_throughput_stream_rate(stream)
+        };
+        if let Some(rate) = rate {
+            if let Some(stream) = self.streams.get_mut(&key) {
                 stream.active = true;
                 stream.last_known_rate = Some(rate);
             }
         }
         if let Some(rate) = rate {
-            self.record_rate(&key, rate);
-        }
-    }
-
-    #[cfg(test)]
-    fn observe_delta(
-        &mut self,
-        log_path: &Path,
-        profile: &str,
-        request: Option<u64>,
-        output_tokens: u64,
-        observed_at: Instant,
-    ) {
-        if output_tokens == 0 {
-            return;
-        }
-        let key = OutputThroughputKey {
-            log_path: log_path.to_path_buf(),
-            profile: profile.to_string(),
-            request,
-        };
-        let rate = {
-            let stream = self.stream(&key);
-            stream.last_event_at = Some(observed_at);
-            let cumulative = stream
-                .samples
-                .back()
-                .map_or(Some(output_tokens), |(_, previous)| {
-                    previous.checked_add(output_tokens)
-                });
-            let Some(cumulative) = cumulative else {
-                return;
-            };
-            stream.samples.push_back((observed_at, cumulative));
-            stream.active = output_tokens > 0;
-            prune_output_throughput_samples(stream, observed_at);
-            output_throughput_stream_rate(stream)
-        };
-        if let Some(rate) = rate.filter(|rate| rate.is_finite() && *rate > 0.0) {
-            if let Some(stream) = self.streams.get_mut(&key) {
-                stream.last_known_rate = Some(rate);
-            }
             self.record_rate(&key, rate);
         }
     }
@@ -183,20 +152,20 @@ impl OutputThroughput {
                     })
                     .copied()
             });
-        let rate = if let Some(stream) = self.streams.get_mut(&key) {
+        let keyed_rate = self.last_known_rates.get(&key).copied();
+        let rate = {
+            let stream = self.stream(&key);
             stream.active = false;
             let rate = duplicate_rate
-                .or_else(|| valid_output_rate(event))
                 .or(stream.last_known_rate)
-                .or_else(|| self.last_known_rates.get(&key).copied());
+                .or(keyed_rate)
+                .or_else(|| valid_output_rate(event));
             if let Some(rate) = rate.filter(|rate| rate.is_finite() && *rate > 0.0) {
                 stream.last_known_rate = Some(rate);
                 Some(rate)
             } else {
                 None
             }
-        } else {
-            None
         };
         if let Some(rate) = rate {
             self.record_rate(&key, rate);
@@ -440,18 +409,18 @@ fn valid_output_rate(event: &InfoTokenUsageEvent) -> Option<f64> {
 }
 
 fn prune_output_throughput_samples(stream: &mut OutputThroughputStream, now: Instant) {
-    while stream.samples.front().is_some_and(|(sampled_at, _)| {
+    while stream.samples.front().is_some_and(|(sampled_at, _, _)| {
         now.saturating_duration_since(*sampled_at) > OUTPUT_THROUGHPUT_WINDOW
     }) {
         stream.samples.pop_front();
     }
 }
 
-#[cfg(test)]
 fn output_throughput_stream_rate(stream: &OutputThroughputStream) -> Option<f64> {
-    let (first_at, first_tokens) = stream.samples.front()?;
-    let (last_at, last_tokens) = stream.samples.back()?;
-    let elapsed = last_at.saturating_duration_since(*first_at);
+    let (_, first_tokens, first_generation_ms) = stream.samples.front()?;
+    let (_, last_tokens, last_generation_ms) = stream.samples.back()?;
+    let elapsed_ms = last_generation_ms.checked_sub(*first_generation_ms)?;
+    let elapsed = Duration::from_millis(elapsed_ms);
     if elapsed < OUTPUT_THROUGHPUT_MIN_SAMPLE || elapsed.is_zero() {
         return None;
     }
@@ -477,16 +446,54 @@ mod tests {
         throughput.display_rate_for_profile(now, None)
     }
 
+    fn observe_sample(
+        throughput: &mut OutputThroughput,
+        path: &Path,
+        profile: &str,
+        request: Option<u64>,
+        output_tokens: u64,
+        generation_ms: u64,
+        observed_at: Instant,
+    ) {
+        throughput.observe_token_usage(
+            path,
+            &InfoTokenUsageEvent {
+                profile: profile.to_string(),
+                request,
+                output_tokens,
+                generation_ms: Some(generation_ms),
+                ..InfoTokenUsageEvent::default()
+            },
+            observed_at,
+        );
+    }
+
     #[test]
     fn unrelated_runtime_logs_do_not_contribute_to_one_header_rate() {
         let first = Path::new("/tmp/runtime-process-a.log");
         let second = Path::new("/tmp/runtime-process-b.log");
         let start = Instant::now();
         let mut throughput = OutputThroughput::default();
-        throughput.observe_delta(first, "main", Some(1), 100, start);
-        throughput.observe_delta(first, "main", Some(1), 100, start + Duration::from_secs(1));
-        throughput.observe_delta(second, "main", Some(2), 50, start);
-        throughput.observe_delta(second, "main", Some(2), 50, start + Duration::from_secs(1));
+        observe_sample(&mut throughput, first, "main", Some(1), 100, 1_000, start);
+        observe_sample(
+            &mut throughput,
+            first,
+            "main",
+            Some(1),
+            200,
+            3_000,
+            start + Duration::from_secs(1),
+        );
+        observe_sample(&mut throughput, second, "main", Some(2), 50, 1_000, start);
+        observe_sample(
+            &mut throughput,
+            second,
+            "main",
+            Some(2),
+            100,
+            2_000,
+            start + Duration::from_secs(1),
+        );
 
         assert_eq!(
             active_rate(&mut throughput, start + Duration::from_secs(1)),
@@ -499,8 +506,16 @@ mod tests {
         let path = Path::new("/tmp/runtime-sticky.log");
         let start = Instant::now();
         let mut throughput = OutputThroughput::default();
-        throughput.observe_delta(path, "main", Some(11), 100, start);
-        throughput.observe_delta(path, "main", Some(11), 100, start + Duration::from_secs(1));
+        observe_sample(&mut throughput, path, "main", Some(11), 100, 1_000, start);
+        observe_sample(
+            &mut throughput,
+            path,
+            "main",
+            Some(11),
+            200,
+            2_000,
+            start + Duration::from_secs(1),
+        );
         assert_eq!(
             active_rate(&mut throughput, start + Duration::from_secs(1)),
             Some(100.0)
@@ -535,12 +550,28 @@ mod tests {
     }
 
     #[test]
-    fn overflow_delta_is_ignored_without_saturating_the_stream() {
+    fn counter_reset_is_ignored_without_saturating_the_stream() {
         let path = Path::new("/tmp/runtime-overflow.log");
         let start = Instant::now();
         let mut throughput = OutputThroughput::default();
-        throughput.observe_delta(path, "main", Some(6), u64::MAX, start);
-        throughput.observe_delta(path, "main", Some(6), 1, start + Duration::from_secs(1));
+        observe_sample(
+            &mut throughput,
+            path,
+            "main",
+            Some(6),
+            u64::MAX,
+            1_000,
+            start,
+        );
+        observe_sample(
+            &mut throughput,
+            path,
+            "main",
+            Some(6),
+            1,
+            2_000,
+            start + Duration::from_secs(1),
+        );
 
         let stream = throughput
             .streams
@@ -644,5 +675,44 @@ mod tests {
             throughput.display_rate_for_profile(Instant::now(), None),
             Some(64.0)
         );
+    }
+
+    #[test]
+    fn recent_authoritative_delta_wins_over_whole_generation_average() {
+        let path = Path::new("/tmp/runtime-recent-authoritative.log");
+        let start = Instant::now();
+        let mut throughput = OutputThroughput::default();
+
+        observe_sample(&mut throughput, path, "main", Some(17), 540, 9_800, start);
+        observe_sample(
+            &mut throughput,
+            path,
+            "main",
+            Some(17),
+            660,
+            10_800,
+            start + Duration::from_secs(1),
+        );
+
+        assert_eq!(
+            throughput.active_rate_for_profile(start + Duration::from_secs(1), Some("main")),
+            Some(120.0)
+        );
+
+        let completed = InfoTokenUsageEvent {
+            profile: "main".to_string(),
+            request: Some(17),
+            output_tokens: 660,
+            generation_ms: Some(12_000),
+            output_tokens_per_second: Some(55.0),
+            ..InfoTokenUsageEvent::default()
+        };
+        throughput.observe_token_usage(path, &completed, start + Duration::from_secs(2));
+        throughput.finish(path, &completed);
+        assert_eq!(
+            throughput.display_for_profile(start + Duration::from_secs(2), Some("main")),
+            Some(super::OutputThroughputDisplay::Last(120.0))
+        );
+        assert_eq!(super::valid_output_rate(&completed), Some(55.0));
     }
 }

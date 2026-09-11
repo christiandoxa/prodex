@@ -55,6 +55,46 @@ fn completed_rate_reaches_tui_header_and_survives_log_flood() {
 }
 
 #[test]
+fn recent_live_rate_stays_in_header_while_final_average_stays_in_token_detail() {
+    let path = Path::new("/home/test-user/runtime-throughput-authoritative.log");
+    let mut throughput = OutputThroughput::default();
+    for line in [
+        "[2026-09-11 10:00:00.000 +00:00] token_usage_progress request=17 route=responses transport=http profile=main source=responses_sse input_tokens=0 output_tokens=540 generation_ms=9800",
+        "[2026-09-11 10:00:01.000 +00:00] token_usage_progress request=17 route=responses transport=http profile=main source=responses_sse input_tokens=0 output_tokens=660 generation_ms=10800",
+    ] {
+        collect_runtime_log_line(path, line, false, Some(&mut throughput), true).unwrap();
+    }
+
+    let items = collect_runtime_log_line(
+        path,
+        "[2026-09-11 10:00:02.000 +00:00] token_usage request=17 route=responses transport=http profile=main source=responses_sse input_tokens=0 output_tokens=660 reasoning_tokens=0 generation_ms=12000 output_tokens_per_second=55.0",
+        false,
+        Some(&mut throughput),
+        true,
+    )
+    .unwrap();
+    let [LogStreamItem::TokenUsage(event)] = items.as_slice() else {
+        panic!("expected final token usage event");
+    };
+
+    assert_eq!(event.output_tokens_per_second, Some(55.0));
+    assert_eq!(
+        throughput.display_for_profile(Instant::now(), Some("main")),
+        Some(OutputThroughputDisplay::Last(120.0))
+    );
+    assert!(
+        render_log_header_with_display(
+            LOG_TUI_TITLE,
+            "",
+            None,
+            Some(OutputThroughputDisplay::Last(120.0)),
+            80,
+        )
+        .contains("last 120 t/s")
+    );
+}
+
+#[test]
 fn log_display_latency_fixture_keeps_p95_below_250ms() {
     const SAMPLES: usize = 128;
     const SLOW_SUBSCRIBER_BUFFER: usize = 64;
