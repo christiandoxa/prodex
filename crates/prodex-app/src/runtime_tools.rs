@@ -14,9 +14,7 @@ mod overlay;
 #[path = "runtime_tools/session_app_server.rs"]
 mod session_app_server;
 #[cfg(unix)]
-use session_app_server::{
-    build_session_app_server_companion, session_app_server_companion_eligible,
-};
+use session_app_server::build_session_app_server_companion;
 #[path = "runtime_tools/provider_auth.rs"]
 mod provider_auth;
 #[cfg(test)]
@@ -44,6 +42,18 @@ pub(crate) use provider_auth::{
 pub(crate) use sub_agents::*;
 pub(crate) use super_dry_run::handle_super_runtime_tools_dry_run;
 pub(crate) use super_trust::trusted_workspace_codex_args;
+
+pub(super) fn session_app_server_companion_eligible(
+    strategy: &RuntimeToolLaunchStrategy,
+    runtime_args: &[OsString],
+) -> bool {
+    strategy.args.super_mode
+        && strategy.desktop_command.is_none()
+        && !prodex_runtime_launch::is_codex_exec_invocation(runtime_args)
+        && !prodex_runtime_launch::codex_resume_requested(runtime_args)
+        && !runtime_args.iter().any(|arg| arg == "--remote")
+}
+
 pub(crate) struct RuntimeToolLaunchStrategy {
     args: RuntimeToolArgs,
     codex_args: Vec<OsString>,

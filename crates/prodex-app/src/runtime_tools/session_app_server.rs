@@ -5,17 +5,6 @@ use std::path::{Path, PathBuf};
 const APP_SERVER_CONTROL_SOCKET_DIR: &str = "app-server-control";
 const APP_SERVER_CONTROL_SOCKET_FILE: &str = "app-server-control.sock";
 
-pub(super) fn session_app_server_companion_eligible(
-    strategy: &RuntimeToolLaunchStrategy,
-    runtime_args: &[std::ffi::OsString],
-) -> bool {
-    strategy.args.super_mode
-        && strategy.desktop_command.is_none()
-        && !prodex_runtime_launch::is_codex_exec_invocation(runtime_args)
-        && !prodex_runtime_launch::codex_resume_requested(runtime_args)
-        && !runtime_args.iter().any(|arg| arg == "--remote")
-}
-
 pub(super) fn session_app_server_socket(overlay_home: &Path) -> PathBuf {
     overlay_home
         .join(APP_SERVER_CONTROL_SOCKET_DIR)
@@ -27,7 +16,7 @@ pub(super) fn build_session_app_server_companion(
     overlay_home: &Path,
     runtime_args: &[std::ffi::OsString],
 ) -> Result<Option<(ChildProcessPlan, PathBuf)>> {
-    if !session_app_server_companion_eligible(strategy, runtime_args) {
+    if !super::session_app_server_companion_eligible(strategy, runtime_args) {
         return Ok(None);
     }
     let socket = session_app_server_socket(overlay_home);
