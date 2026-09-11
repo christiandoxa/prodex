@@ -112,8 +112,8 @@ test("inconsistent registry versions fail closed", async () => {
 test("runtime pin drift fails even when online and audit versions agree", async () => {
   const { inventorySource, observed } = await auditedFixture();
   const staleInventory = inventorySource.replace(
+    'pub(crate) const RTK_RECOMMENDED_VERSION: &str = "0.49.0";',
     'pub(crate) const RTK_RECOMMENDED_VERSION: &str = "0.48.0";',
-    'pub(crate) const RTK_RECOMMENDED_VERSION: &str = "0.47.0";',
   );
   await assert.rejects(
     runFreshnessCheck({

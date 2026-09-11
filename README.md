@@ -212,7 +212,7 @@ prodex caveman --dry-run
 
 The target directory must not already exist. Prodex validates the commit metadata and complete tree digest before activating Caveman.
 
-RTK (latest stable `0.48.0`, externally managed):
+RTK (latest stable `0.49.0`, externally managed):
 
 ```bash
 brew install rtk
@@ -220,9 +220,9 @@ brew install rtk
 rtk_dir="$(mktemp -d)"
 trap 'rm -rf "$rtk_dir"' EXIT
 curl -fsSLo "$rtk_dir/checksums.txt" \
-  https://github.com/rtk-ai/rtk/releases/download/v0.48.0/checksums.txt
+  https://github.com/rtk-ai/rtk/releases/download/v0.49.0/checksums.txt
 curl -fsSLo "$rtk_dir/rtk.tar.gz" \
-  https://github.com/rtk-ai/rtk/releases/download/v0.48.0/rtk-x86_64-unknown-linux-musl.tar.gz
+  https://github.com/rtk-ai/rtk/releases/download/v0.49.0/rtk-x86_64-unknown-linux-musl.tar.gz
 (cd "$rtk_dir" && grep '  rtk-x86_64-unknown-linux-musl.tar.gz$' checksums.txt | sha256sum --check)
 tar -xzf "$rtk_dir/rtk.tar.gz" -C "$rtk_dir"
 install -m 0755 "$rtk_dir/rtk" "$HOME/.local/bin/rtk"
@@ -232,7 +232,7 @@ rtk gain
 prodex capability super-doctor
 ```
 
-Use the matching archive and checksum row from the official v0.48.0 release on
+Use the matching archive and checksum row from the official v0.49.0 release on
 other architectures. Finish any process using the old executable before an
 explicit upgrade; Prodex never replaces RTK during startup.
 
