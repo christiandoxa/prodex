@@ -32,6 +32,31 @@ shell history. `--openai-tunnel-id` is the non-secret CLI alternative to the
 identifier environment variable; there is no `--openai-api-key` option.
 TTY OpenAI setup prompts only for missing values; configured values skip the prompt.
 
+## Standalone MCP execution
+
+`prodex_super_exec` runs one direct command under the same local OS-user
+authority as Expose. It does not require, create, attach to, or depend on a
+Prodex Super run or a separate `prodex s` session. `program` and `args` are
+passed without shell parsing; use `sh -c` or `cmd.exe /C` explicitly for shell
+syntax.
+
+```json
+prodex_super_exec({
+  "program": "python3",
+  "args": ["-c", "print('hello from Python')"],
+  "cwd": "/home/test-user/project",
+  "env": {"MODE": "check"},
+  "stdin": null,
+  "timeout_ms": 30000
+})
+```
+
+`cwd` defaults to the captured expose workspace. Timeout is bounded to
+120 seconds, output is separately capped and secret-redacted, and results
+include status, PID, exit code/status, signal, duration, stdout/stderr, and
+truncation flags. Timeout or expose shutdown terminates and reaps the child
+process tree.
+
 ## Existing-session MCP bridge
 
 Run one plain `prodex s` and one matching `prodex s expose` from the same

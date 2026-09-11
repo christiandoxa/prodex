@@ -204,6 +204,13 @@ authoritative `no_session`; ambiguity, stale identity, addressability, queue,
 source, or verification errors must fail closed. A fresh idle session needs no
 manual bootstrap prompt.
 
+For a standalone command that must not attach to a Super run or plain session,
+call `prodex_super_exec` with direct argv. For example:
+
+```json
+{"program":"python3","args":["-c","print('hello from Python')"],"timeout_ms":30000}
+```
+
 Cloudflare mode prints a public URL ending in `/mcp` and containing a fresh
 ephemeral full-Super capability.
 Anyone with the full URL can control that expose process, so treat it as a

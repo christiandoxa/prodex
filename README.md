@@ -575,6 +575,17 @@ closed and never authorize a fallback. `write_ambiguous` means the queue request
 may have been accepted after a close, timeout, or malformed response; do not
 automatically replay it and do not treat it as exactly-once delivery.
 
+For independent command execution, call `prodex_super_exec`; it is synchronous
+and does not require or create a Super run or plain `prodex s` session. It passes
+argv directly, defaults `cwd` to the captured expose workspace, accepts bounded
+env/stdin/timeout fields, and returns bounded redacted stdout/stderr plus exit
+metadata. Use an explicit shell executable when shell syntax is needed:
+
+```json
+prodex_super_exec({"program":"python3","args":["-c","print('hello from Python')"]})
+prodex_super_exec({"program":"git","args":["status","--short"],"cwd":"/home/test-user/project"})
+```
+
 </details>
 
 ## Sub-agents

@@ -1,4 +1,9 @@
 use super::MCP_MAX_EVENT_PAGE;
+use super::exec::{
+    EXEC_DEFAULT_TIMEOUT_MS, EXEC_MAX_ARGUMENT_BYTES, EXEC_MAX_ARGUMENTS, EXEC_MAX_ARGUMENTS_BYTES,
+    EXEC_MAX_CWD_BYTES, EXEC_MAX_ENV_ENTRIES, EXEC_MAX_ENV_KEY_BYTES, EXEC_MAX_ENV_VALUE_BYTES,
+    EXEC_MAX_OUTPUT_BYTES, EXEC_MAX_PROGRAM_BYTES, EXEC_MAX_STDIN_BYTES, EXEC_MAX_TIMEOUT_MS,
+};
 use crate::expose::run_manager::{EXPOSE_MAX_RUN_ID_BYTES, ExposeRunSummary};
 use prodex_cli::SuperArgs;
 use serde_json::{Value, json};
@@ -75,6 +80,7 @@ pub(super) fn validate_tool_arguments(
         "prodex_session_output_read" => {
             ["cursor", "limit", "wait_ms", "prodex_pid", "thread_id"].as_slice()
         }
+        "prodex_super_exec" => ["program", "args", "cwd", "env", "stdin", "timeout_ms"].as_slice(),
         _ => return Ok(()),
     };
     let Some(object) = arguments.as_object() else {
@@ -234,7 +240,7 @@ fn config_assignment_has_key(assignment: &str, key: &str) -> bool {
         .is_some_and(|(name, _)| name.trim() == key)
 }
 
-pub(super) fn mcp_tool_names() -> [&'static str; 9] {
+pub(super) fn mcp_tool_names() -> [&'static str; 10] {
     [
         "prodex_super_start",
         "prodex_super_status",
@@ -242,6 +248,7 @@ pub(super) fn mcp_tool_names() -> [&'static str; 9] {
         "prodex_super_result",
         "prodex_super_cancel",
         "prodex_super_list",
+        "prodex_super_exec",
         "prodex_session_prompt_write",
         "prodex_session_preempt",
         "prodex_session_output_read",
@@ -315,6 +322,48 @@ pub(super) fn mcp_tools() -> Vec<Value> {
             true,
             false,
             false,
+        ),
+        tool_definition(
+            "prodex_super_exec",
+            "Execute one direct OS command under the expose process's current local OS-user authority. It is synchronous and standalone: it does not require, create, attach to, or depend on a Prodex Super run or plain prodex s session. Use an explicit shell executable such as sh or cmd.exe when shell syntax is needed.",
+            json!({
+                "type": "object",
+                "properties": {
+                    "program": {"type": "string", "minLength": 1, "maxLength": EXEC_MAX_PROGRAM_BYTES},
+                    "args": {"type": ["array", "null"], "maxItems": EXEC_MAX_ARGUMENTS, "description": "Direct argv values; shell parsing is not performed.", "items": {"type": "string", "maxLength": EXEC_MAX_ARGUMENT_BYTES}},
+                    "cwd": {"type": ["string", "null"], "maxLength": EXEC_MAX_CWD_BYTES, "description": "Working directory; null uses the captured expose workspace."},
+                    "env": {"type": ["object", "null"], "maxProperties": EXEC_MAX_ENV_ENTRIES, "additionalProperties": {"type": "string", "maxLength": EXEC_MAX_ENV_VALUE_BYTES}, "propertyNames": {"maxLength": EXEC_MAX_ENV_KEY_BYTES}},
+                    "stdin": {"type": ["string", "null"], "maxLength": EXEC_MAX_STDIN_BYTES},
+                    "timeout_ms": {"type": ["integer", "null"], "minimum": 1, "maximum": EXEC_MAX_TIMEOUT_MS, "default": EXEC_DEFAULT_TIMEOUT_MS}
+                },
+                "required": ["program"],
+                "additionalProperties": false,
+                "x-maxTotalArgumentBytes": EXEC_MAX_ARGUMENTS_BYTES
+            }),
+            json!({
+                "type": "object",
+                "properties": {
+                    "status": {"type": "string", "enum": ["completed", "timed_out", "cancelled"]},
+                    "program": {"type": "string"},
+                    "arg_count": {"type": "integer"},
+                    "cwd": {"type": "string"},
+                    "pid": {"type": ["integer", "null"]},
+                    "exit_code": {"type": ["integer", "null"]},
+                    "exit_status": {"type": "integer"},
+                    "signal": {"type": ["integer", "null"]},
+                    "termination": {"type": ["string", "null"]},
+                    "success": {"type": "boolean"},
+                    "duration_ms": {"type": "integer"},
+                    "stdout": {"type": "string", "maxLength": EXEC_MAX_OUTPUT_BYTES},
+                    "stdout_truncated": {"type": "boolean"},
+                    "stderr": {"type": "string", "maxLength": EXEC_MAX_OUTPUT_BYTES},
+                    "stderr_truncated": {"type": "boolean"}
+                },
+                "required": ["status", "program", "arg_count", "cwd", "pid", "exit_code", "exit_status", "signal", "termination", "success", "duration_ms", "stdout", "stdout_truncated", "stderr", "stderr_truncated"]
+            }),
+            false,
+            true,
+            true,
         ),
         tool_definition(
             "prodex_session_prompt_write",

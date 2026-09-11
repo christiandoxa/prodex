@@ -99,6 +99,7 @@ fn tool_list_is_focused_and_annotations_are_present() {
             "prodex_super_result",
             "prodex_super_cancel",
             "prodex_super_list",
+            "prodex_super_exec",
             "prodex_session_prompt_write",
             "prodex_session_preempt",
             "prodex_session_output_read",
@@ -164,6 +165,14 @@ fn tool_arguments_reject_unknown_schema_keys() {
         .is_ok()
     );
     assert!(validate_tool_arguments("prodex_super_list", &json!({})).is_ok());
+    assert!(validate_tool_arguments("prodex_super_exec", &json!({"program": "echo"})).is_ok());
+    assert!(
+        validate_tool_arguments(
+            "prodex_super_exec",
+            &json!({"program": "echo", "run_id": "spr_invalid"})
+        )
+        .is_err()
+    );
     assert!(validate_tool_arguments("unknown_tool", &json!({"unexpected": true})).is_ok());
 }
 
