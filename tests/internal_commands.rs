@@ -14,6 +14,60 @@ use temp_dir::TestDir;
 
 #[cfg(unix)]
 #[test]
+fn log_stream_survives_low_nofile_limit_with_runtime_and_session_history() {
+    let temp_dir = TestDir::new();
+    let runtime_dir = temp_dir.path.join("runtime");
+    let shared_dir = temp_dir.path.join("shared");
+    let session_dir = shared_dir.join("sessions/2026/09/11");
+    fs::create_dir_all(&runtime_dir).unwrap();
+    fs::create_dir_all(&session_dir).unwrap();
+    for index in 0..32 {
+        fs::write(
+            runtime_dir.join(format!("prodex-runtime-regression-{index:04}.log")),
+            "event\n",
+        )
+        .unwrap();
+        fs::write(
+            session_dir.join(format!("session-{index:04}.jsonl")),
+            "event\n",
+        )
+        .unwrap();
+    }
+
+    let mut child = Command::new("sh")
+        .args([
+            "-c",
+            "ulimit -n 64; exec \"$1\" log stream --json",
+            "prodex-log-fd-regression",
+            env!("CARGO_BIN_EXE_prodex"),
+        ])
+        .env("PRODEX_HOME", temp_dir.path.join("home"))
+        .env("PRODEX_SHARED_CODEX_HOME", &shared_dir)
+        .env("PRODEX_RUNTIME_LOG_DIR", &runtime_dir)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("prodex log should start under low RLIMIT_NOFILE");
+
+    let deadline = Instant::now() + Duration::from_secs(3);
+    while child.try_wait().unwrap().is_none() {
+        if Instant::now() >= deadline {
+            let _ = child.kill();
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(25));
+    }
+    let output = child.wait_with_output().unwrap();
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        !stderr.contains("Too many open files") && !stderr.contains("EMFILE"),
+        "prodex log hit the file descriptor limit: {stderr}"
+    );
+}
+
+#[cfg(unix)]
+#[test]
 fn mcp_jsonl_bridge_reports_child_failure_without_waiting_for_stdin_eof() {
     let mut child = Command::new(env!("CARGO_BIN_EXE_prodex"))
         .args([
