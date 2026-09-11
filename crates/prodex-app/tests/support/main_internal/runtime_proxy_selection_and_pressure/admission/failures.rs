@@ -4,10 +4,12 @@ use super::{
     RuntimeProxyMarkerGuard, RuntimeProxyProfileHarnessBuilder, RuntimeProxyRequest,
     TestEnvVarGuard, closed_loopback_backend_base_url, proxy_runtime_standard_request,
     quota_window_ready, read_runtime_proxy_test_log, register_runtime_proxy_persistence_mode,
-    runtime_usage_snapshot,
+    runtime_profile_route_circuit_key, runtime_usage_snapshot, RuntimeRouteKind,
     tiny_http_response_status_and_body,
 };
+use super::helpers::quota_window_exhausted;
 use chrono::Local;
+use std::time::Instant;
 
 fn two_ready_profiles(backend: &RuntimeProxyBackend) -> RuntimeProxyProfileHarness {
     let ready = runtime_usage_snapshot(
@@ -132,6 +134,52 @@ fn fresh_noncompact_transport_failure_rotates_through_ready_profiles() {
         log.contains("standard_transport_failure profile=main")
             && log.contains("standard_transport_failure profile=second"),
         "every ready profile should receive a bounded precommit attempt: {log}"
+    );
+}
+
+#[test]
+fn fresh_noncompact_cold_start_probe_wait_is_one_shot() {
+    let harness = RuntimeProxyProfileHarnessBuilder::new()
+        .openai_profile("main", "main-account", Some("main@example.com"))
+        .openai_profile("second", "second-account", Some("second@example.com"))
+        .active_profile("main")
+        .current_profile("main")
+        .upstream_base_url("https://example.com/backend-api")
+        .profile_usage_snapshot(
+            "main",
+            runtime_usage_snapshot(
+                quota_window_exhausted(3_600),
+                quota_window_ready(80, 86_400),
+            ),
+        )
+        .build();
+    let shared = harness.shared();
+    shared
+        .runtime
+        .lock()
+        .expect("runtime lock should succeed")
+        .profile_route_circuit_open_until
+        .insert(
+            runtime_profile_route_circuit_key("second", RuntimeRouteKind::Standard),
+            Local::now().timestamp() + 60,
+        );
+    let request = RuntimeProxyRequest {
+        method: "GET".to_string(),
+        path_and_query: "/backend-api/status".to_string(),
+        headers: Vec::new(),
+        body: Vec::new(),
+    };
+    let started_at = Instant::now();
+
+    let response = proxy_runtime_standard_request(86, &request, shared)
+        .expect("cold-start exhaustion should fail locally");
+    let (status, _) = tiny_http_response_status_and_body(response);
+    let log = read_runtime_proxy_test_log(&shared.log_path);
+
+    assert_eq!(status, 503, "{log}");
+    assert!(
+        started_at.elapsed() < Duration::from_secs(2),
+        "cold-start exhaustion should not spin: {log}"
     );
 }
 

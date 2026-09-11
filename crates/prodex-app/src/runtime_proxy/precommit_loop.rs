@@ -23,6 +23,7 @@ pub(super) struct RuntimePrecommitLoopState<F> {
     pub saw_transport_failure: bool,
     pub saw_transport_recovery_candidate: bool,
     pub saw_overload_failure: bool,
+    pub cold_start_probe_waited: bool,
     pub recovery_sweeps: usize,
     pub recovery_started_at: Option<Instant>,
     pub last_failure: Option<(F, bool)>,
@@ -39,6 +40,7 @@ impl<F> RuntimePrecommitLoopState<F> {
             saw_transport_failure: false,
             saw_transport_recovery_candidate: false,
             saw_overload_failure: false,
+            cold_start_probe_waited: false,
             recovery_sweeps: 0,
             recovery_started_at: None,
             last_failure: None,
@@ -59,7 +61,7 @@ impl<F> RuntimePrecommitLoopState<F> {
             pressure_mode,
         )?;
         if self.recovery_sweeps == 0 {
-            if self.selection_attempts < Self::profile_count(shared)? {
+            if self.selection_attempts < Self::profile_count(shared)? && !normal_budget_exhausted {
                 return Ok(false);
             }
             return Ok(normal_budget_exhausted);
@@ -87,6 +89,14 @@ impl<F> RuntimePrecommitLoopState<F> {
 
     pub fn record_attempt(&mut self) {
         self.selection_attempts = self.selection_attempts.saturating_add(1);
+    }
+
+    pub fn claim_cold_start_probe_wait(&mut self) -> bool {
+        if self.cold_start_probe_waited {
+            return false;
+        }
+        self.cold_start_probe_waited = true;
+        true
     }
 
     pub fn record_inflight_saturation(&mut self) {
@@ -134,6 +144,7 @@ impl<F> RuntimePrecommitLoopState<F> {
         self.saw_transport_failure = false;
         self.saw_transport_recovery_candidate = false;
         self.saw_overload_failure = false;
+        self.cold_start_probe_waited = false;
         self.recovery_sweeps = 0;
         self.recovery_started_at = None;
         self.last_failure = None;
@@ -304,5 +315,15 @@ mod tests {
         state.record_attempt();
         assert_eq!(state.selection_attempts, 2);
         assert_eq!(state.selection_started_at, started_at);
+    }
+
+    #[test]
+    fn cold_start_probe_wait_is_one_shot_and_resets_for_model_fallback() {
+        let mut state = RuntimePrecommitLoopState::<()>::new();
+
+        assert!(state.claim_cold_start_probe_wait());
+        assert!(!state.claim_cold_start_probe_wait());
+        state.reset_for_model_fallback();
+        assert!(state.claim_cold_start_probe_wait());
     }
 }
