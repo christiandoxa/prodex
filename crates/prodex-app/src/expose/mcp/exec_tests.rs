@@ -54,13 +54,16 @@ fn python_execution_is_covered_when_python_is_available() {
         Path::new("."),
     );
     assert_eq!(result["success"], true);
-    assert_eq!(result["stdout"], "python-ok\n");
+    assert_eq!(
+        result["stdout"].as_str().unwrap().replace("\r\n", "\n"),
+        "python-ok\n"
+    );
 }
 
 #[test]
 fn nonzero_exit_is_returned_without_losing_output() {
     let (program, args) = shell(if cfg!(windows) {
-        "echo failed & exit /b 7"
+        "echo failed & echo failed 1>&2 & exit /b 7"
     } else {
         "printf failed; printf failed >&2; exit 7"
     });
