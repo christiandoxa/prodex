@@ -264,8 +264,22 @@ fn live_token_usage_is_loggable_only_on_generation_events_with_output_tokens() {
 #[test]
 fn current_codex_generation_deltas_are_output_boundaries_only() {
     for event_type in [
+        "response.output_item.added",
+        "response.content_part.added",
+        "response.reasoning_summary_part.added",
+    ] {
+        assert!(!runtime_response_event_is_generation_start(Some(
+            event_type
+        )));
+    }
+    for event_type in [
+        "response.output_text.delta",
+        "response.refusal.delta",
+        "response.reasoning_summary_text.delta",
         "response.reasoning_text.delta",
+        "response.function_call_arguments.delta",
         "response.mcp_call_arguments.delta",
+        "response.custom_tool_call_input.delta",
     ] {
         assert!(runtime_token_usage_event_is_live(
             Some(event_type),
@@ -453,6 +467,12 @@ fn sse_tap_state_marks_generation_timing_only_after_output_begins() {
     assert!(
         state
             .observe_chunk(br#"data: {"type":"response.output_item.added"}"#)
+            .is_empty()
+    );
+    assert!(state.observe_chunk(b"\r\n\r\n").is_empty());
+    assert!(
+        state
+            .observe_chunk(br#"data: {"type":"response.output_text.delta","delta":"hi"}"#)
             .is_empty()
     );
     assert!(state.observe_chunk(b"\r\n\r\n").is_empty());
