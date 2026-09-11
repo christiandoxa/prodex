@@ -3,7 +3,7 @@ use super::{
     RuntimeToolLaunchStrategy, ensure_presidio_services_for_super_launch,
     ensure_required_presidio_services_for_super_launch, prepare_desktop_overlay_home,
     prepare_runtime_overlay_home, redaction_redact_secret_like_text,
-    write_provider_runtime_codex_auth,
+    session_app_server_companion_eligible, write_provider_runtime_codex_auth,
 };
 use crate::app_commands::runtime_launch::goal_resume::add_runtime_goal_session_tracking;
 use anyhow::{Result, bail};
@@ -109,6 +109,80 @@ pub(crate) fn project_in_app_resume_model_settings(
     Ok(())
 }
 
+fn project_fresh_super_config(
+    strategy: &RuntimeToolLaunchStrategy,
+    overlay_home: &Path,
+    runtime_args: &mut Vec<std::ffi::OsString>,
+) -> Result<()> {
+    let mut projected_args = Vec::with_capacity(runtime_args.len());
+    let mut config_args = Vec::new();
+    let mut bypass_hook_trust = false;
+    let mut index = 0;
+    while index < runtime_args.len() {
+        let argument = runtime_args[index].to_string_lossy();
+        match argument.as_ref() {
+            "-c" | "--config" => {
+                if let Some(value) = runtime_args.get(index + 1) {
+                    config_args.extend([runtime_args[index].clone(), value.clone()]);
+                    index += 2;
+                    continue;
+                }
+            }
+            "--enable" | "--disable" => {
+                if let Some(feature) = runtime_args.get(index + 1) {
+                    config_args.extend([
+                        std::ffi::OsString::from("-c"),
+                        std::ffi::OsString::from(format!(
+                            "features.{}={}",
+                            feature.to_string_lossy(),
+                            argument == "--enable"
+                        )),
+                    ]);
+                    index += 2;
+                    continue;
+                }
+            }
+            "--dangerously-bypass-hook-trust" => {
+                bypass_hook_trust = true;
+                index += 1;
+                continue;
+            }
+            "--dangerously-bypass-approvals-and-sandbox" => {
+                index += 1;
+                continue;
+            }
+            value if value.starts_with("--config=") || value.starts_with("-c") => {
+                config_args.push(runtime_args[index].clone());
+                index += 1;
+                continue;
+            }
+            _ => {}
+        }
+        projected_args.push(runtime_args[index].clone());
+        index += 1;
+    }
+    if bypass_hook_trust {
+        config_args.extend([
+            std::ffi::OsString::from("-c"),
+            std::ffi::OsString::from("bypass_hook_trust=true"),
+        ]);
+    }
+    if crate::codex_cli_config_override_value(runtime_args, "disable_paste_burst").is_none() {
+        config_args.extend([
+            std::ffi::OsString::from("-c"),
+            std::ffi::OsString::from("disable_paste_burst=true"),
+        ]);
+    }
+    crate::runtime_desktop::configure_desktop_codex_home(
+        overlay_home,
+        &config_args,
+        strategy.args.full_access,
+        None,
+    )?;
+    *runtime_args = projected_args;
+    Ok(())
+}
+
 struct PreparedOverlayLaunch {
     cleanup: RuntimeOverlayCleanup,
     overlay_home: PathBuf,
@@ -129,7 +203,7 @@ pub(super) fn build_plan(
         overlay_home,
         tool_plan,
         preference_context,
-        mut runtime_args,
+        runtime_args,
     } = prepare_overlay_launch(strategy, prepared, runtime_proxy)?;
     if let Some(sub_agent) = strategy.sub_agent.as_ref() {
         super::write_sub_agent_overlay(&overlay_home, sub_agent)?;
@@ -145,8 +219,7 @@ pub(super) fn build_plan(
         stage_started,
     );
     #[cfg(unix)]
-    let companion =
-        prepare_session_app_server_companion(strategy, &overlay_home, &mut runtime_args)?;
+    let companion = prepare_session_app_server_companion(strategy, &overlay_home, &runtime_args)?;
     let child = prepare_child_plan(
         strategy,
         prepared,
@@ -230,6 +303,10 @@ fn prepare_overlay_launch(
             ],
         )?;
     }
+    #[cfg(unix)]
+    if session_app_server_companion_eligible(strategy, &runtime_args) {
+        project_fresh_super_config(strategy, &overlay_home, &mut runtime_args)?;
+    }
     crate::runtime_launch::emit_runtime_timing(
         "startup.provider_catalog_prepare_ms",
         stage_started,
@@ -298,16 +375,10 @@ fn prepare_child_plan(
 fn prepare_session_app_server_companion(
     strategy: &RuntimeToolLaunchStrategy,
     overlay_home: &Path,
-    runtime_args: &mut Vec<std::ffi::OsString>,
+    runtime_args: &[std::ffi::OsString],
 ) -> Result<Option<(prodex_runtime_launch::ChildProcessPlan, PathBuf)>> {
     let companion =
         super::build_session_app_server_companion(strategy, overlay_home, runtime_args)?;
-    if let Some((_, socket)) = companion.as_ref() {
-        runtime_args.extend([
-            std::ffi::OsString::from("--remote"),
-            std::ffi::OsString::from(format!("unix://{}", socket.display())),
-        ]);
-    }
     Ok(companion)
 }
 

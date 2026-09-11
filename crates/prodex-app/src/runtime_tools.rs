@@ -14,7 +14,9 @@ mod overlay;
 #[path = "runtime_tools/session_app_server.rs"]
 mod session_app_server;
 #[cfg(unix)]
-use session_app_server::build_session_app_server_companion;
+use session_app_server::{
+    build_session_app_server_companion, session_app_server_companion_eligible,
+};
 #[path = "runtime_tools/provider_auth.rs"]
 mod provider_auth;
 #[cfg(test)]
@@ -282,6 +284,12 @@ impl RuntimeToolLaunchStrategy {
             child.args = desktop.args.clone();
             Ok(child)
         } else {
+            #[cfg(unix)]
+            if session_app_server_companion_eligible(self, runtime_args) {
+                let mut child = codex_child_plan(overlay_home.to_path_buf(), runtime_args.to_vec());
+                child.reset_terminal_keyboard_enhancement = true;
+                return Ok(child);
+            }
             Ok(codex_tui_child_plan(
                 overlay_home.to_path_buf(),
                 runtime_args.to_vec(),
@@ -421,8 +429,9 @@ mod tests {
         );
         assert_eq!(
             socket.file_name().and_then(|name| name.to_str()),
-            Some(".s")
+            Some("app-server-control.sock")
         );
+        assert!(companion.args.iter().any(|arg| arg == "unix://"));
         assert!(!companion.args.iter().any(|arg| {
             arg == "--dangerously-bypass-approvals-and-sandbox"
                 || arg == "--dangerously-bypass-hook-trust"

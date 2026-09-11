@@ -72,7 +72,7 @@ fn super_overlay_applies_fresh_model_preference() {
     std::fs::create_dir_all(&base_home).expect("base home should exist");
     std::fs::write(
         base_home.join("config.toml"),
-        "model_provider = \"openai\"\n",
+        "model_provider = \"openai\"\n[model_providers.openai]\nbase_url = \"https://example.com/v1\"\n",
     )
     .expect("config should be written");
     let paths = AppPaths {
@@ -91,8 +91,17 @@ fn super_overlay_applies_fresh_model_preference() {
         )
         .expect("selected config should be written");
     assert!(sync.finish().is_none());
-    let command = parse_cli_command_from(["prodex", "s", "--no-presidio", "--no-sub-agent"])
-        .expect("Super command should parse");
+    let command = parse_cli_command_from([
+        "prodex",
+        "s",
+        "--no-presidio",
+        "--no-sub-agent",
+        "-c",
+        "model_provider=\"openai\"",
+        "-c",
+        "model_providers.openai.base_url=\"https://example.com/v1\"",
+    ])
+    .expect("Super command should parse");
     let Commands::Super(args) = command else {
         panic!("expected Super command");
     };
@@ -109,12 +118,37 @@ fn super_overlay_applies_fresh_model_preference() {
     };
 
     let plan = super::build_plan(&mut strategy, &prepared, None).unwrap();
+    #[cfg(unix)]
+    {
+        assert!(plan.companion.is_some());
+        assert!(plan.child.args.iter().all(|arg| arg != "--remote"));
+        assert_eq!(
+            plan.companion_unix_socket
+                .as_ref()
+                .and_then(|path| path.file_name())
+                .and_then(|name| name.to_str()),
+            Some("app-server-control.sock")
+        );
+    }
     for key in ["model", "model_provider", "model_reasoning_effort"] {
         assert!(
             crate::codex_cli_config_override_value(&plan.child.args, key).is_none(),
             "{key} must not prevent Codex from restoring the selected thread model"
         );
     }
+    assert!(!plan.child.args.iter().any(|arg| {
+        matches!(
+            arg.to_str(),
+            Some(
+                "-c" | "--config"
+                    | "--enable"
+                    | "--disable"
+                    | "--dangerously-bypass-hook-trust"
+                    | "--dangerously-bypass-approvals-and-sandbox"
+            )
+        ) || arg.to_string_lossy().starts_with("--config=")
+            || (arg.to_string_lossy().starts_with("-c") && arg.len() > 2)
+    }));
     let config: toml::Value = toml::from_str(
         &std::fs::read_to_string(plan.child.codex_home.join("config.toml"))
             .expect("overlay config should be readable"),
@@ -129,11 +163,35 @@ fn super_overlay_applies_fresh_model_preference() {
         Some("openai")
     );
     assert_eq!(
+        config["model_providers"]["openai"]["base_url"].as_str(),
+        Some("https://example.com/v1")
+    );
+    assert_eq!(
         config
             .get("model_reasoning_effort")
             .and_then(toml::Value::as_str),
         Some("max")
     );
+    assert_eq!(
+        config.get("approval_policy").and_then(toml::Value::as_str),
+        Some("never")
+    );
+    assert_eq!(
+        config.get("sandbox_mode").and_then(toml::Value::as_str),
+        Some("danger-full-access")
+    );
+    assert_eq!(
+        config
+            .get("bypass_hook_trust")
+            .and_then(toml::Value::as_bool),
+        Some(true)
+    );
+    let workspace = std::env::current_dir().unwrap();
+    assert_eq!(
+        config["projects"][workspace.to_string_lossy().as_ref()]["trust_level"].as_str(),
+        Some("trusted")
+    );
+    assert_eq!(config["features"]["apps"].as_bool(), Some(false));
 
     let mut mixed_args = vec![
         "-c".into(),
@@ -414,6 +472,7 @@ fn configured_bare_uuid_build_plan_resumes_through_sub_agent_overlay() {
         prodex_runtime_launch::codex_resume_session_id(&plan.child.args),
         Some(session_id)
     );
+    assert!(plan.companion.is_none());
     assert!(plan.child.args.iter().all(|arg| {
         !matches!(
             arg.to_str(),
