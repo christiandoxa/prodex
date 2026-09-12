@@ -658,11 +658,11 @@ shared-state integration around those operations.
   reports unknown Reserve data generically. When an upstream bucket explicitly identifies itself
   as `Luna Reserve`, it is applicable only to Luna requests; Sol and Terra never use it. Reserve
   is a fallback capacity mode, not a model identifier accepted from requests, and an unlabeled
-  `base_model_inference` bucket does not establish entitlement. When all
-  supported Luna capacity is unavailable, a Luna request may make one model-aware pre-commit
-  fallback to catalog-advertised `gpt-5.3-codex-spark` capacity. Requested and effective models
-  remain distinct in runtime state and diagnostics. A 429/503 or transport error never zeros
-  Reserve or Spark capacity without authoritative provider evidence.
+  `base_model_inference` bucket does not establish entitlement. If regular and Reserve Luna
+  capacity are unavailable, the request follows normal rotation and upstream quota handling
+  without substituting another OpenAI model. Requested and effective models remain distinct in
+  runtime state and diagnostics. A 429/503 or transport error never zeros Reserve capacity
+  without authoritative provider evidence.
 - `prodex ping openai` is an all-account application-level diagnostic: it snapshots configured
   eligible OpenAI profiles, sends the text `hello` through the normal OpenAI/Codex runtime path
   with each probe pinned to its profile and cross-profile fallback disabled, and records every

@@ -411,37 +411,6 @@ fn ping_openai_profile_selector_pins_one_profile() {
 }
 
 #[test]
-fn ping_openai_does_not_probe_spark_separately() {
-    let fixture = setup_fixture();
-    let spark_home = add_managed_profile(&fixture, "spark", "spark-account");
-    let args_log = fixture.codex_args_log.display().to_string();
-    let home_log = fixture._temp_dir.path.join("ping-spark-homes.log");
-    let home_log_string = home_log.display().to_string();
-
-    let output = run_prodex_with_env(
-        &fixture,
-        &["ping", "openai"],
-        &[
-            ("TEST_CODEX_ARGS_LOG", args_log.as_str()),
-            ("TEST_CODEX_ARGS_LOG_APPEND", "1"),
-            ("TEST_CODEX_LOG_APPEND", home_log_string.as_str()),
-        ],
-    );
-
-    assert!(output.status.success());
-    assert_profiles_were_probed(
-        &home_log,
-        &[
-            fixture.main_home.clone(),
-            fixture.second_home.clone(),
-            spark_home,
-        ],
-    );
-    let args = fs::read_to_string(&fixture.codex_args_log).expect("failed to read args log");
-    assert!(!args.lines().any(|arg| arg == "gpt-5.3-codex-spark"));
-}
-
-#[test]
 fn ping_openai_ignores_unrelated_profile_session_files_without_aborting_inventory() {
     let fixture = setup_fixture();
     let broken_home = add_managed_profile(&fixture, "broken", "unknown-account");

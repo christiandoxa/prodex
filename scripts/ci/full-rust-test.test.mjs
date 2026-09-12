@@ -60,10 +60,6 @@ test("full Rust runner locks every direct cargo test command", () => {
   const workspaceLine = cargoTestLines.find((line) => line.includes("workspace:parallel-safe:"));
   assert.match(
     workspaceLine,
-    /--skip ping::ping_openai_sends_extra_spark_ping_when_profile_has_spark_limit/,
-  );
-  assert.match(
-    workspaceLine,
     /--skip ping::ping_openai_sends_ping_to_each_ready_openai_profile/,
   );
 });
