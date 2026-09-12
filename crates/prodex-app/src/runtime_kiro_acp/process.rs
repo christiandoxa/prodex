@@ -310,9 +310,6 @@ fn runtime_kiro_acp_prompt_turn_child(
     let mut notifications = Vec::new();
     let mut prompt_sent = false;
     loop {
-        if child.try_wait()?.is_some() {
-            break;
-        }
         let receive_timeout = timeout.unwrap_or(Duration::from_millis(50));
         let line = match lines.recv_timeout(receive_timeout) {
             Ok(Ok(line)) => line,
