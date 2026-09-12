@@ -50,11 +50,15 @@ fn probe_cache_entry(checked_at: i64) -> RuntimeProfileProbeCacheEntry {
     }
 }
 
-fn spark_limit(five_hour_remaining: i64, weekly_remaining: i64, now: i64) -> AdditionalRateLimit {
+fn additional_limit(
+    five_hour_remaining: i64,
+    weekly_remaining: i64,
+    now: i64,
+) -> AdditionalRateLimit {
     AdditionalRateLimit {
         limit_id: None,
-        limit_name: Some("GPT-5.3-Codex-Spark".to_string()),
-        metered_feature: Some("codex_bengalfox".to_string()),
+        limit_name: None,
+        metered_feature: None,
         rate_limit: WindowPair {
             allowed: None,
             limit_reached: None,
@@ -134,18 +138,23 @@ fn unknown_five_hour_usage_does_not_exhaust_known_weekly_quota() {
 }
 
 #[test]
-fn quota_summary_uses_spark_windows_when_main_is_exhausted() {
+fn quota_summary_keeps_main_exhausted_when_unknown_additional_bucket_is_present() {
     let now = Local::now().timestamp();
     let mut usage = usage_response(100, 100, now);
-    usage.additional_rate_limits.push(spark_limit(89, 97, now));
+    usage
+        .additional_rate_limits
+        .push(additional_limit(89, 97, now));
 
     let summary = runtime_quota_summary_for_route(&usage, RuntimeRouteKind::Responses);
     let snapshot = runtime_profile_usage_snapshot_from_usage(&usage);
 
-    assert_eq!(summary.five_hour.status, RuntimeQuotaWindowStatus::Ready);
-    assert_eq!(summary.five_hour.remaining_percent, 89);
-    assert_eq!(summary.weekly.status, RuntimeQuotaWindowStatus::Ready);
-    assert_eq!(summary.weekly.remaining_percent, 97);
+    assert_eq!(
+        summary.five_hour.status,
+        RuntimeQuotaWindowStatus::Exhausted
+    );
+    assert_eq!(summary.five_hour.remaining_percent, 0);
+    assert_eq!(summary.weekly.status, RuntimeQuotaWindowStatus::Exhausted);
+    assert_eq!(summary.weekly.remaining_percent, 0);
     assert_eq!(
         snapshot.five_hour_status,
         RuntimeQuotaWindowStatus::Exhausted
@@ -156,21 +165,24 @@ fn quota_summary_uses_spark_windows_when_main_is_exhausted() {
 }
 
 #[test]
-fn quota_summary_uses_weekly_only_spark_window_when_main_is_exhausted() {
+fn quota_summary_ignores_unknown_additional_bucket_when_main_is_exhausted() {
     let now = Local::now().timestamp();
     let mut usage = usage_response(100, 100, now);
-    let mut spark = spark_limit(89, 97, now);
-    spark.rate_limit.primary_window = None;
-    usage.additional_rate_limits.push(spark);
+    usage
+        .additional_rate_limits
+        .push(additional_limit(89, 97, now));
 
     let summary = runtime_quota_summary_for_route(&usage, RuntimeRouteKind::Responses);
     let snapshot = runtime_profile_usage_snapshot_from_usage(&usage);
 
-    assert_eq!(summary.five_hour.status, RuntimeQuotaWindowStatus::Ready);
-    assert_eq!(summary.five_hour.remaining_percent, 100);
-    assert_eq!(summary.weekly.status, RuntimeQuotaWindowStatus::Ready);
-    assert_eq!(summary.weekly.remaining_percent, 97);
-    assert_eq!(summary.route_band, RuntimeQuotaPressureBand::Healthy);
+    assert_eq!(
+        summary.five_hour.status,
+        RuntimeQuotaWindowStatus::Exhausted
+    );
+    assert_eq!(summary.five_hour.remaining_percent, 0);
+    assert_eq!(summary.weekly.status, RuntimeQuotaWindowStatus::Exhausted);
+    assert_eq!(summary.weekly.remaining_percent, 0);
+    assert_eq!(summary.route_band, RuntimeQuotaPressureBand::Exhausted);
     assert_eq!(
         snapshot.five_hour_status,
         RuntimeQuotaWindowStatus::Exhausted
@@ -180,10 +192,12 @@ fn quota_summary_uses_weekly_only_spark_window_when_main_is_exhausted() {
 }
 
 #[test]
-fn quota_summary_ignores_exhausted_spark_when_main_is_ready() {
+fn quota_summary_ignores_exhausted_unknown_additional_bucket_when_main_is_ready() {
     let now = Local::now().timestamp();
     let mut usage = usage_response(0, 65, now);
-    usage.additional_rate_limits.push(spark_limit(0, 0, now));
+    usage
+        .additional_rate_limits
+        .push(additional_limit(0, 0, now));
 
     let summary = runtime_quota_summary_for_route(&usage, RuntimeRouteKind::Responses);
     let snapshot = runtime_profile_usage_snapshot_from_usage(&usage);
@@ -199,14 +213,68 @@ fn quota_summary_ignores_exhausted_spark_when_main_is_ready() {
 }
 
 #[test]
-fn model_summary_uses_the_bucket_for_luna_and_not_spark_or_regular() {
+fn model_summary_keeps_pro_and_prolite_exhausted_with_retired_additional_bucket() {
+    let now = 1_700_000_000;
+    for plan in ["pro", "prolite"] {
+        let mut usage = usage_response(20, 10, now);
+        usage.plan_type = Some(plan.to_string());
+        let mut retired = additional_limit(80, 90, now);
+        retired.limit_id = Some("spark".to_string());
+        retired.limit_name = Some("GPT-5.3-Codex-Spark".to_string());
+        retired
+            .extra
+            .insert("normalModelSlug".to_string(), "gpt-5.3-codex-spark".into());
+        usage.additional_rate_limits.push(retired);
+
+        for model in ["gpt-5.3-codex-spark", "spark", "gpt-5.3-spark"] {
+            let summary = runtime_quota_summary_for_route_with_model_at(
+                &usage,
+                RuntimeRouteKind::Responses,
+                Some(model),
+                now,
+            );
+            assert_eq!(
+                summary.five_hour.status,
+                RuntimeQuotaWindowStatus::Exhausted,
+                "retired model must not use healthy regular 5h quota for {plan} {model}"
+            );
+            assert_eq!(
+                summary.weekly.status,
+                RuntimeQuotaWindowStatus::Exhausted,
+                "retired model must not use healthy regular weekly quota for {plan} {model}"
+            );
+            assert_eq!(
+                summary.route_band,
+                RuntimeQuotaPressureBand::Exhausted,
+                "retired bucket must not grant {plan} {model} quota"
+            );
+        }
+
+        let future = runtime_quota_summary_for_route_with_model_at(
+            &usage,
+            RuntimeRouteKind::Responses,
+            Some("gpt-future-model"),
+            now,
+        );
+        assert_eq!(future.five_hour.status, RuntimeQuotaWindowStatus::Ready);
+        assert_eq!(future.five_hour.remaining_percent, 80);
+        assert_eq!(future.weekly.status, RuntimeQuotaWindowStatus::Ready);
+        assert_eq!(future.weekly.remaining_percent, 90);
+        assert_eq!(future.route_band, RuntimeQuotaPressureBand::Healthy);
+    }
+}
+
+#[test]
+fn model_summary_uses_luna_reserve_and_not_regular_quota() {
     let now = 1_700_000_000;
     let mut usage = usage_response(100, 100, now);
-    let mut reserve = spark_limit(80, 90, now);
+    let mut reserve = additional_limit(80, 90, now);
     reserve.limit_name = Some("gpt-luna-reserve".to_string());
     reserve.metered_feature = None;
     usage.additional_rate_limits.push(reserve);
-    usage.additional_rate_limits.push(spark_limit(10, 20, now));
+    usage
+        .additional_rate_limits
+        .push(additional_limit(10, 20, now));
 
     let luna = runtime_quota_summary_for_route_with_model_at(
         &usage,
@@ -250,6 +318,37 @@ fn cached_summary_preserves_regular_quota_for_opaque_model() {
 
     assert_eq!(source, Some(RuntimeQuotaSource::PersistedSnapshot));
     assert_eq!(summary.route_band, RuntimeQuotaPressureBand::Healthy);
+}
+
+#[test]
+fn cached_summary_hard_blocks_retired_model_with_healthy_regular_quota() {
+    let snapshot = RuntimeProfileUsageSnapshot {
+        checked_at: 1_700_000_000,
+        plan_type: None,
+        five_hour_status: RuntimeQuotaWindowStatus::Ready,
+        five_hour_remaining_percent: 80,
+        five_hour_reset_at: 1_700_003_600,
+        weekly_status: RuntimeQuotaWindowStatus::Ready,
+        weekly_remaining_percent: 90,
+        weekly_reset_at: 1_700_086_400,
+    };
+
+    let (summary, source) = runtime_quota_summary_from_cached_sources_for_model(
+        None,
+        Some(&snapshot),
+        RuntimeRouteKind::Responses,
+        Some("gpt-5.3-codex-spark"),
+        1_700_000_000,
+        900,
+    );
+
+    assert_eq!(source, Some(RuntimeQuotaSource::PersistedSnapshot));
+    assert_eq!(
+        summary.five_hour.status,
+        RuntimeQuotaWindowStatus::Exhausted
+    );
+    assert_eq!(summary.weekly.status, RuntimeQuotaWindowStatus::Exhausted);
+    assert_eq!(summary.route_band, RuntimeQuotaPressureBand::Exhausted);
 }
 
 #[test]

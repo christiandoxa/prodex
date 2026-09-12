@@ -13,21 +13,12 @@ pub fn required_window_snapshot_for_pair_at(
 }
 
 pub const OPENAI_LUNA_MODEL: &str = "gpt-5.6-luna";
-pub const OPENAI_SPARK_MODEL: &str = "gpt-5.3-codex-spark";
-
-pub fn openai_luna_spark_fallback_model(
-    requested_model: Option<&str>,
-    effective_model: Option<&str>,
-) -> Option<&'static str> {
-    (openai_model_is_luna(requested_model) && !openai_model_is_spark(effective_model))
-        .then_some(OPENAI_SPARK_MODEL)
-}
 
 pub fn openai_model_is_luna(model: Option<&str>) -> bool {
     model.is_some_and(|model| matches!(normalized_identifier(model).as_str(), "luna" | "gpt56luna"))
 }
 
-pub fn openai_model_is_spark(model: Option<&str>) -> bool {
+pub fn openai_model_is_retired_spark(model: Option<&str>) -> bool {
     model.is_some_and(|model| {
         matches!(
             normalized_identifier(model).as_str(),
@@ -40,19 +31,8 @@ pub fn openai_quota_runtime_window_pair_for_model<'a>(
     usage: &'a UsageResponse,
     model: Option<&str>,
 ) -> Option<&'a WindowPair> {
-    if openai_model_is_spark(model) {
-        return usage
-            .additional_rate_limits
-            .iter()
-            .filter(|additional| crate::capacity::additional_rate_limit_is_spark(additional))
-            .find(|additional| super::additional_rate_limit_is_usable(additional))
-            .or_else(|| {
-                usage
-                    .additional_rate_limits
-                    .iter()
-                    .find(|additional| crate::capacity::additional_rate_limit_is_spark(additional))
-            })
-            .map(|additional| &additional.rate_limit);
+    if openai_model_is_retired_spark(model) {
+        return None;
     }
     if openai_model_is_luna(model)
         && usage
@@ -79,15 +59,8 @@ pub fn openai_quota_runtime_window_pair_for_model<'a>(
 }
 
 pub fn openai_quota_has_ready_limit_for_model(usage: &UsageResponse, model: Option<&str>) -> bool {
-    if openai_model_is_spark(model) {
-        return usage
-            .additional_rate_limits
-            .iter()
-            .filter(|additional| crate::capacity::additional_rate_limit_is_spark(additional))
-            .any(|additional| {
-                super::additional_rate_limit_is_usable(additional)
-                    && window_pair_has_ready_limit(&additional.rate_limit)
-            });
+    if openai_model_is_retired_spark(model) {
+        return false;
     }
     if openai_model_is_luna(model)
         && (openai_quota_has_ready_regular_limit(usage)
@@ -117,8 +90,8 @@ pub fn openai_quota_has_ready_regular_limit(usage: &UsageResponse) -> bool {
 }
 
 pub fn additional_rate_limit_is_luna_reserve(additional: &super::AdditionalRateLimit) -> bool {
-    if additional_rate_limit_model_slug(additional)
-        .is_some_and(|model| openai_model_is_spark(Some(model)))
+    if let Some(model) = additional_rate_limit_model_slug(additional)
+        && !openai_model_is_luna(Some(model))
     {
         return false;
     }
@@ -130,6 +103,22 @@ pub fn additional_rate_limit_is_luna_reserve(additional: &super::AdditionalRateL
     .into_iter()
     .flatten()
     .any(is_luna_reserve_identifier)
+}
+
+pub(crate) fn additional_rate_limit_model_slug(
+    additional: &super::AdditionalRateLimit,
+) -> Option<&str> {
+    ["normal_model_slug", "normalModelSlug"]
+        .into_iter()
+        .find_map(|key| {
+            additional
+                .extra
+                .get(key)
+                .or_else(|| additional.rate_limit.extra.get(key))
+                .and_then(serde_json::Value::as_str)
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+        })
 }
 
 pub fn openai_usage_has_unknown_luna_capacity(usage: &UsageResponse) -> bool {
@@ -179,22 +168,6 @@ pub fn openai_usage_supports_model(
             .flatten()
             .all(|window| window.used_percent.is_none_or(|used| used < 100))
         }))
-}
-
-pub(crate) fn additional_rate_limit_model_slug(
-    additional: &super::AdditionalRateLimit,
-) -> Option<&str> {
-    ["normal_model_slug", "normalModelSlug"]
-        .into_iter()
-        .find_map(|key| {
-            additional
-                .extra
-                .get(key)
-                .or_else(|| additional.rate_limit.extra.get(key))
-                .and_then(serde_json::Value::as_str)
-                .map(str::trim)
-                .filter(|value| !value.is_empty())
-        })
 }
 
 fn is_luna_reserve_identifier(value: &str) -> bool {

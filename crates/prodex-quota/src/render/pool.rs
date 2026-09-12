@@ -16,15 +16,9 @@ pub(super) struct QuotaPoolAggregate {
     ready_five_hour_pool_remaining: i64,
     ready_weekly_pool_remaining: i64,
     main_pool_remaining: i64,
-    spark_profiles_with_data: usize,
-    spark_five_hour_profiles_with_data: usize,
-    spark_weekly_profiles_with_data: usize,
-    spark_five_hour_pool_remaining: i64,
-    spark_weekly_pool_remaining: i64,
     earliest_five_hour_reset_at: Option<i64>,
     earliest_weekly_reset_at: Option<i64>,
     earliest_main_reset_at: Option<i64>,
-    earliest_spark_reset_at: Option<i64>,
     last_updated_at: Option<i64>,
 }
 
@@ -113,28 +107,6 @@ fn aggregate_openai_quota(usage: &UsageResponse, aggregate: &mut QuotaPoolAggreg
             &mut aggregate.ready_weekly_pool_remaining,
         );
     }
-    aggregate_openai_spark(usage, aggregate);
-}
-
-fn aggregate_openai_spark(usage: &UsageResponse, aggregate: &mut QuotaPoolAggregate) {
-    let five_hour = spark_window_snapshot(usage, "5h");
-    let weekly = spark_window_snapshot(usage, "weekly");
-    if five_hour.is_none() && weekly.is_none() {
-        return;
-    }
-    aggregate.spark_profiles_with_data += 1;
-    add_pool_window(
-        five_hour,
-        &mut aggregate.spark_five_hour_profiles_with_data,
-        &mut aggregate.spark_five_hour_pool_remaining,
-        &mut aggregate.earliest_spark_reset_at,
-    );
-    add_pool_window(
-        weekly,
-        &mut aggregate.spark_weekly_profiles_with_data,
-        &mut aggregate.spark_weekly_pool_remaining,
-        &mut aggregate.earliest_spark_reset_at,
-    );
 }
 
 #[cfg(not(feature = "mojo"))]
@@ -316,19 +288,6 @@ fn quota_pool_summary_fields_for_aggregate(
             ),
         ]);
     }
-    if aggregate.spark_profiles_with_data > 0 {
-        fields.push((
-            "Spark remaining pool".to_string(),
-            format_dual_pool_remaining(
-                aggregate.spark_five_hour_pool_remaining,
-                aggregate.spark_weekly_pool_remaining,
-                aggregate.spark_profiles_with_data,
-                aggregate.spark_five_hour_profiles_with_data,
-                aggregate.spark_weekly_profiles_with_data,
-                aggregate.earliest_spark_reset_at,
-            ),
-        ));
-    }
     fields
 }
 
@@ -354,47 +313,6 @@ fn format_ready_pool_remaining(
         "{} across {ready_profiles} ready profile(s)",
         windows.join(" | ")
     )
-}
-
-fn format_dual_pool_remaining(
-    five_hour_remaining: i64,
-    weekly_remaining: i64,
-    profiles_with_data: usize,
-    five_hour_profiles: usize,
-    weekly_profiles: usize,
-    earliest_reset_at: Option<i64>,
-) -> String {
-    if profiles_with_data == 0 {
-        return "Unavailable".to_string();
-    }
-
-    let mut value = if five_hour_profiles == profiles_with_data
-        && weekly_profiles == profiles_with_data
-    {
-        format!(
-            "5h {five_hour_remaining}% | weekly {weekly_remaining}% across {profiles_with_data} profile(s)"
-        )
-    } else {
-        let mut windows = Vec::new();
-        if five_hour_profiles > 0 {
-            windows.push(format!(
-                "5h {five_hour_remaining}% across {five_hour_profiles} profile(s)"
-            ));
-        }
-        if weekly_profiles > 0 {
-            windows.push(format!(
-                "weekly {weekly_remaining}% across {weekly_profiles} profile(s)"
-            ));
-        }
-        windows.join(" | ")
-    };
-    if let Some(reset_at) = earliest_reset_at {
-        value.push_str(&format!(
-            "; earliest reset {}",
-            format_precise_reset_time(Some(reset_at))
-        ));
-    }
-    value
 }
 
 pub fn format_info_pool_remaining(

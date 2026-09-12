@@ -65,44 +65,7 @@ pub(super) fn required_window_snapshot_at(
     })
 }
 
-pub fn spark_window_snapshots(
-    usage: &UsageResponse,
-) -> Option<(MainWindowSnapshot, MainWindowSnapshot)> {
-    spark_window_snapshots_at(usage, Local::now().timestamp())
-}
-
-pub fn usage_has_spark_limit(usage: &UsageResponse) -> bool {
-    usage
-        .additional_rate_limits
-        .iter()
-        .any(crate::capacity::additional_rate_limit_is_spark)
-}
-
 pub use crate::capacity::additional_rate_limit_is_usable;
-
-pub fn spark_window_snapshots_at(
-    usage: &UsageResponse,
-    now: i64,
-) -> Option<(MainWindowSnapshot, MainWindowSnapshot)> {
-    let rate_limit = &usage
-        .additional_rate_limits
-        .iter()
-        .find(|additional| crate::capacity::additional_rate_limit_is_spark(additional))?
-        .rate_limit;
-    Some((
-        required_window_snapshot_at(rate_limit, "5h", now)?,
-        required_window_snapshot_at(rate_limit, "weekly", now)?,
-    ))
-}
-
-pub fn spark_window_snapshot(usage: &UsageResponse, label: &str) -> Option<MainWindowSnapshot> {
-    let pair = &usage
-        .additional_rate_limits
-        .iter()
-        .find(|additional| crate::capacity::additional_rate_limit_is_spark(additional))?
-        .rate_limit;
-    required_window_snapshot_at(pair, label, Local::now().timestamp())
-}
 
 pub fn window_pair_has_ready_limit(pair: &WindowPair) -> bool {
     if window_pair_has_blocking_admission(pair) {
@@ -178,19 +141,7 @@ pub fn openai_quota_runtime_window_pair(usage: &UsageResponse) -> Option<&Window
             return usage.rate_limit.as_ref();
         }
 
-        let spark = usage
-            .additional_rate_limits
-            .iter()
-            .find(|additional| {
-                crate::capacity::additional_rate_limit_is_spark(additional)
-                    && additional_rate_limit_is_usable(additional)
-            })
-            .map(|additional| &additional.rate_limit);
-        if spark.is_some_and(window_pair_has_ready_limit) {
-            return spark;
-        }
-
-        usage.rate_limit.as_ref().or(spark)
+        usage.rate_limit.as_ref()
     }
 }
 

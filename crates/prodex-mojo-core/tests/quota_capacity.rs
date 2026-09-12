@@ -1,8 +1,8 @@
 #![cfg(feature = "mojo-quota")]
 
 use prodex_mojo_core::quota::{
-    QUOTA_CAPACITY_LANE_MAIN, QUOTA_CAPACITY_LANE_SPARK, QuotaCapacityInput, QuotaCapacityOutput,
-    quota_capacity_batch,
+    QUOTA_CAPACITY_LANE_MAIN, QUOTA_CAPACITY_LANE_MODEL_SPECIFIC, QuotaCapacityInput,
+    QuotaCapacityOutput, quota_capacity_batch,
 };
 
 fn remaining(used_percent: i64, has_value: bool) -> i64 {
@@ -124,7 +124,7 @@ fn oracle(input: QuotaCapacityInput, route_kind: i64) -> QuotaCapacityOutput {
     let routing_eligible = usable
         && matches!(
             input.lane,
-            QUOTA_CAPACITY_LANE_MAIN | QUOTA_CAPACITY_LANE_SPARK
+            QUOTA_CAPACITY_LANE_MAIN | QUOTA_CAPACITY_LANE_MODEL_SPECIFIC
         );
     let reserve_bias = match pressure_band {
         0 => 0,
