@@ -2,7 +2,7 @@
   "codex": {
     "compatibility": {
       "upstream_repository": "https://github.com/openai/codex",
-      "baseline_source": "openai/codex rust-v0.153.4 release",
+      "baseline_source": "openai/codex rust-v0.154.0 release",
       "guard_command": "node scripts/compat/check-upstream-baseline.mjs",
       "format_version": 2,
       "critical_files": [
@@ -1574,7 +1574,7 @@
           ]
         }
       ],
-      "tested_codex_release": "rust-v0.153.4",
+      "tested_codex_release": "rust-v0.154.0",
       "patch_deltas": [
         {
           "from": "rust-v0.150.0",
@@ -1682,6 +1682,22 @@
           ],
           "prodex_action": "Use the official unmodified Codex release through its supported interfaces; preserve the official queue and thread identity semantics.",
           "compatibility_evidence": "The official tagged release is consumed unmodified; queue behavior remains covered by capability-probed upstream interfaces and the existing session-queue tests."
+        },
+        {
+          "from": "rust-v0.153.4",
+          "to": "rust-v0.154.0",
+          "upstream_commit": "6b9826e3aa83b1a5947db50f4332cb9c65f1b340",
+          "upstream_tag_object": "36eab01061df3cde5f95ec20a526777b430091ba",
+          "upstream_release_date": "2026-09-09T22:35:38Z",
+          "tree_comparison": "exact tagged trees; GitHub compare reports a diverged 249-commit release range from peeled 3d2ee51ca2d5db578f328aa75e20aa22c0197c9a to 6b9826e3aa83b1a5947db50f4332cb9c65f1b340 with merge base 2c79ee6dacb6deccb7e19ac5acffb3e379bbe895",
+          "runtime_changes": [
+            "App-server thread responses add environments, originator, and Daybreak metadata; resume revalidates state after configuration work and rejects threads that are closing.",
+            "Account rate-limit reads add explicit usage capabilities and ordinaryUsageAllowed/normalModelSlug metadata for Luna Reserve fallback; Codex owns capability negotiation and Prodex preserves the fields as quota input.",
+            "The official queue contract remains thread/queue/add with queuedSubmission identity and experimentalApi capability; queue acceptance is still not execution.",
+            "Daemon/PID lifecycle, plugin/MCP refresh, managed worktree, and updater changes remain upstream-owned and are not enabled or reimplemented by Prodex."
+          ],
+          "prodex_action": "Use the official unmodified Codex 0.154.0 release through the existing app-server and quota boundaries. Keep capability detection, exact thread/cwd/status validation, opaque additive fields, fail-closed process identity, and QUEUED-versus-APPLIED reporting unchanged; no production compatibility repair is required.",
+          "compatibility_evidence": "Exact source archives, release metadata, isolated official Linux binary, baseline 0.153.4 comparison, session/thread and queue smokes, upstream baseline guard, runtime manifest guard, app-server broker compatibility tests, and session Prompt Write tests are recorded in migration/codex-rust-v0.154.0-audit.md."
         }
       ],
       "app_server_protocol": {
@@ -1704,16 +1720,21 @@
       }
     },
     "latestRelease": {
-      "tag_name": "rust-v0.153.4",
-      "name": "0.153.4",
-      "published_at": "2026-09-04T23:25:48Z",
-      "html_url": "https://github.com/openai/codex/releases/tag/rust-v0.153.4",
+      "tag_name": "rust-v0.154.0",
+      "name": "0.154.0",
+      "published_at": "2026-09-09T22:35:38Z",
+      "html_url": "https://github.com/openai/codex/releases/tag/rust-v0.154.0",
       "body_head": [
+        "## New Features",
+        "- GPT-6-Astra is now available in the model picker and Amazon Bedrock catalogs. (#42879, #42619)",
+        "- Experimental worktree support lets you create isolated checkouts for new or forked sessions using `--worktree` or `/worktree`, then browse and resume them. (#42652, #43069, #43120, #43286)",
+        "- Answer questions inline while Codex continues working, using suggested choices or custom text without losing your main draft. (#42891, #42894, #42897)",
+        "- Windows sessions can now share a background Codex server, with daemon lifecycle commands and managed updates. (#42405, #42392)",
         "## Bug Fixes",
-        "- Fixed Astra’s visibility in the bundled model picker and made it the bundled default when no model is explicitly configured. (#42874)",
-        "- Updated Astra’s guidance to use asynchronous questions only when the tool is available in the session. (#42878)",
+        "- Existing sessions pick up newly installed plugin tools and refresh skills and hooks after external plugin upgrades or rollbacks. (#42284, #42593, #42990)",
+        "- MCP connections coordinate OAuth token refreshes and surface login challenges when refresh fails, without automatically replaying rejected tool calls. (#42413, #42552)",
         "## Changelog",
-        "Full Changelog: https://github.com/openai/codex/compare/rust-v0.153.2...rust-v0.153.4"
+        "Full Changelog: https://github.com/openai/codex/compare/rust-v0.153.0...rust-v0.154.0"
       ]
     }
   },
