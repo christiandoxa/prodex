@@ -93,15 +93,6 @@ pub(super) fn handle_runtime_proxy_backend_responses_route(
                 )
             }
             "second-account"
-                if matches!(mode, RuntimeProxyBackendMode::HttpOnlyLunaQuotaThenSpark)
-                    && body_json
-                        .get("model")
-                        .and_then(serde_json::Value::as_str)
-                        .is_some_and(|model| model.eq_ignore_ascii_case("gpt-5.6-luna")) =>
-            {
-                usage_limit_sse_response(mode)
-            }
-            "second-account"
                 if matches!(
                     mode,
                     RuntimeProxyBackendMode::HttpOnlyInvalidPreviousResponseId
