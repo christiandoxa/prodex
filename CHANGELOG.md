@@ -2,6 +2,78 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.429.1 - 2026-09-12
+
+### Runtime
+
+- Gate runtime window observations (`94e336b`)
+- Restore safe sidecar cleanup (`9650102`)
+- Repair bounded legacy recovery (`3ec72f4`)
+- Harden legacy registry cleanup (`155a0ca`)
+- Harden legacy registry recovery (`9a0cccc`)
+- Prove non-mac process identity (`0bca967`)
+- Centralize registry admission (`ebbf77b`)
+- Gate registry capability probes (`218eb3c`)
+- Enforce loopback listener trust (`7cc68db`)
+- Keep auto-redeem guard feature-safe (`daacc68`)
+- Remove retired Spark fallback (`e1a950b`)
+- Use catalog model context (`bc9decb`)
+
+### CLI
+
+- Bound profile count (`21276bd`)
+- Retire Spark capacity lane (`7a8ec4c`)
+
+### Claude
+
+- Bound aggregate framing metadata (`e61caf7`)
+- Preserve safe Codex metadata headers (`6c28de0`)
+
+### Misc
+
+- Repair Max-Age and Expires (`db2c78e`)
+- Tighten Codex 0.154 evidence (`a4db8a9`)
+- Keep catalog tests after production items (`54a53fa`)
+- Preserve catalog ordering and health (`9d6e65d`)
+- Reject inverted analyzer ranges (`a7dbfe4`)
+- Enforce session preempt boundary (`c59295a`)
+- Retire Spark catalog entry (`29aaff5`)
+# Prodex 0.429.1
+
+## New Features
+
+- Use provider-catalog context-window metadata for known OpenAI models when
+  preparing runtime launches, while preserving explicit and cached overrides.
+- Recover request model identity when it appears after the bounded Smart
+  Context prefix.
+- Use one bounded provider-aware catalog for main and sub-agent model pickers,
+  preserving canonical ordering and degraded-source visibility.
+- Preempt the active session turn at the verified app-server queue boundary,
+  with fail-closed live regression coverage.
+
+## Bug Fixes
+
+- Retire the removed GPT-5.3 Codex Spark model from provider catalogs, model
+  pickers, quota views, runtime selection, and upstream models metadata.
+- Prevent retired-model requests from reaching upstream or consuming automatic
+  reset credits, including compact, Responses, and WebSocket paths.
+- Keep Luna workflows on regular or explicitly identified Luna Reserve
+  capacity; do not substitute another OpenAI model when those capacities are
+  unavailable.
+- Keep quota, pre-commit, model-context, runtime-proxy tests, CI manifests,
+  and provider documentation aligned with the retired model.
+- Preserve safe Codex continuation metadata through Anthropic translation.
+- Harden broker identity and legacy recovery, runtime sidecar cleanup, cookie
+  expiry handling, Presidio range validation, and MCP framing limits.
+
+## Changelog
+
+- Integrate qualified provider, session-control, runtime, security, and
+  compatibility repairs while preserving bounded model-aware Spark retirement
+  behavior across launch, quota, catalog, and proxy paths.
+
+Full Changelog: [0.429.0...0.429.1](https://github.com/christiandoxa/prodex/compare/0.429.0...0.429.1)
+
 ## 0.429.0 - 2026-09-11
 
 ### Runtime
@@ -13,29 +85,6 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 - Share descriptor budget across sources (`729a044`)
 - Satisfy executor complexity gate (`0835ed3`)
 - Add standalone exec and shorten companion socket (`6c77d95`)
-# Prodex 0.429.0
-
-## New Features
-
-- Add the standalone `prodex_super_exec` expose MCP tool for bounded direct
-  executable work with argv, cwd, environment overrides, stdin, timeout, and
-  redacted bounded output. It does not require a Super run or plain `prodex s`
-  session.
-
-## Bug Fixes
-
-- Fix Unix `prodex s` companion startup on long Linux profile paths by using an
-  explicit short app-server socket path instead of Codex's nested implicit
-  socket path.
-- Add official Linux release-artifact coverage for real Super companion startup
-  so the packaged layout and Unix socket limit are exercised before release.
-
-## Changelog
-
-- Release the standalone execution MCP surface and the Unix companion startup
-  regression fix with offline process-tree, bounds, and artifact coverage.
-
-Full Changelog: [0.428.1...0.429.0](https://github.com/christiandoxa/prodex/compare/0.428.1...0.429.0)
 
 ## 0.428.1 - 2026-09-11
 
