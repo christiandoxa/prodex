@@ -57,6 +57,12 @@ pub(crate) fn configure_desktop_codex_home(
             toml::from_str("approval_policy = \"never\"\nsandbox_mode = \"danger-full-access\"\n")?;
         merge_toml(&mut config, patch);
     }
+    if codex_args
+        .iter()
+        .any(|arg| arg == "--dangerously-bypass-hook-trust")
+    {
+        merge_toml(&mut config, toml::from_str("bypass_hook_trust = true\n")?);
+    }
     if let Some(sqlite_home) = sqlite_home {
         let sqlite_home = sqlite_home
             .to_str()
@@ -305,6 +311,7 @@ mod tests {
             OsString::from("model=\"new\""),
             OsString::from("--config=features.apps=false"),
             OsString::from("-copenai_base_url=\"http://127.0.0.1:2455/v1\""),
+            OsString::from("--dangerously-bypass-hook-trust"),
         ];
 
         let sqlite_home = home.join("shared-sqlite");
@@ -320,11 +327,23 @@ mod tests {
         );
         assert_eq!(config["approval_policy"].as_str(), Some("never"));
         assert_eq!(config["sandbox_mode"].as_str(), Some("danger-full-access"));
+        assert_eq!(config["bypass_hook_trust"].as_bool(), Some(true));
         assert_eq!(
             config["sqlite_home"].as_str(),
             sqlite_home.to_str(),
             "Desktop must read the cross-profile SQLite index"
         );
+        let _ = fs::remove_dir_all(home);
+    }
+
+    #[test]
+    fn desktop_config_keeps_hook_trust_default_without_super_flag() {
+        let home = temp_dir("hook-trust-default");
+        configure_desktop_codex_home(&home, &[], false, None).unwrap();
+
+        let config: toml::Value =
+            toml::from_str(&fs::read_to_string(home.join("config.toml")).unwrap()).unwrap();
+        assert!(config.get("bypass_hook_trust").is_none());
         let _ = fs::remove_dir_all(home);
     }
 

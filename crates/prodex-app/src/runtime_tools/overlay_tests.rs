@@ -121,6 +121,12 @@ fn super_overlay_applies_fresh_model_preference() {
     #[cfg(unix)]
     {
         assert!(plan.companion.is_some());
+        assert!(plan.companion.as_ref().is_some_and(|companion| {
+            companion
+                .args
+                .iter()
+                .any(|arg| arg == "--dangerously-bypass-hook-trust")
+        }));
         assert!(plan.child.args.iter().all(|arg| arg != "--remote"));
         assert_eq!(
             plan.companion_unix_socket
@@ -136,6 +142,12 @@ fn super_overlay_applies_fresh_model_preference() {
             "{key} must not prevent Codex from restoring the selected thread model"
         );
     }
+    assert!(
+        plan.child
+            .args
+            .iter()
+            .any(|arg| arg == "--dangerously-bypass-hook-trust")
+    );
     assert!(!plan.child.args.iter().any(|arg| {
         matches!(
             arg.to_str(),
@@ -143,7 +155,6 @@ fn super_overlay_applies_fresh_model_preference() {
                 "-c" | "--config"
                     | "--enable"
                     | "--disable"
-                    | "--dangerously-bypass-hook-trust"
                     | "--dangerously-bypass-approvals-and-sandbox"
             )
         ) || arg.to_string_lossy().starts_with("--config=")

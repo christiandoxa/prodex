@@ -145,6 +145,7 @@ fn project_fresh_super_config(
             }
             "--dangerously-bypass-hook-trust" => {
                 bypass_hook_trust = true;
+                projected_args.push(runtime_args[index].clone());
                 index += 1;
                 continue;
             }

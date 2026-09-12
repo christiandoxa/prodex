@@ -427,6 +427,10 @@ mod tests {
             .expect("plain Super needs the session app server");
         assert_eq!(
             companion.args.first().and_then(|arg| arg.to_str()),
+            Some("--dangerously-bypass-hook-trust")
+        );
+        assert_eq!(
+            companion.args.get(1).and_then(|arg| arg.to_str()),
             Some("app-server")
         );
         assert!(companion.args.iter().any(|arg| arg == "--listen"));
@@ -443,10 +447,12 @@ mod tests {
         assert!(companion.args.iter().any(|arg| {
             arg.to_string_lossy().starts_with("unix://") && arg.to_string_lossy().ends_with("/.s")
         }));
-        assert!(!companion.args.iter().any(|arg| {
-            arg == "--dangerously-bypass-approvals-and-sandbox"
-                || arg == "--dangerously-bypass-hook-trust"
-        }));
+        assert!(
+            !companion
+                .args
+                .iter()
+                .any(|arg| { arg == "--dangerously-bypass-approvals-and-sandbox" })
+        );
         std::fs::remove_dir_all(root).unwrap();
     }
 
