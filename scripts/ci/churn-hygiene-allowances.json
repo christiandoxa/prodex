@@ -1,4 +1,25 @@
 [  {
+    "id": "audited-prodex-0.429.1-integration-train",
+    "requiredSubjects": [
+      "chore(release): release 0.429.1",
+      "fix(expose): enforce session preempt boundary",
+      "refactor(app): unify provider model catalogs",
+      "fix(runtime-broker): repair bounded legacy recovery",
+      "fix(runtime-store): restore safe sidecar cleanup",
+      "fix(quota): gate runtime window observations",
+      "fix(presidio): reject inverted analyzer ranges",
+      "fix(cookies): repair Max-Age and Expires",
+      "chore(compat): qualify Codex 0.154.0",
+      "fix(ci): repair provider and macos checks"
+    ],
+    "caps": {
+      "maxFiles": 96,
+      "maxBehaviorFiles": 75,
+      "maxLines": 5500,
+      "maxFileLines": 600
+    },
+    "reason": "Reviewed the exact 0.429.1 integration train from origin/main 371468c7: qualified session-preempt boundary, unified provider catalogs, bounded broker/store recovery, quota and Presidio safety, cookie and provider CI repairs, Codex 0.154 compatibility evidence, release metadata, and their regression tests/docs. The measured train is bounded at 96 files, 75 behavior files, 5,500 changed lines, and 600 changed lines in the largest file; exact subjects scope this allowance to the audited release train while all normal size, security, compatibility, correctness, and release gates remain enforced."
+  }, {
     "id": "audited-prodex-0.423.0-reliability-train",
     "requiredSubjects": [
       "feat(reliability): ship 0.423.0 stability train"
