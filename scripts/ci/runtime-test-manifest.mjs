@@ -689,6 +689,14 @@ export const RUNTIME_CI_TEST_CASES = [
     tags: SERIALIZED_TAGS,
   },
   {
+    name: "compact_precommit_blocks_retired_spark_with_hard_affinity_even_when_bypass_allowed",
+    tags: SERIALIZED_TAGS,
+  },
+  {
+    name: "compact_precommit_preserves_valid_model_hard_affinity_quota_bypass",
+    tags: SERIALIZED_TAGS,
+  },
+  {
     name: "fresh_responses_keep_recovering_after_multiple_provider_overload_sweeps",
     tags: SERIALIZED_TAGS,
   },
