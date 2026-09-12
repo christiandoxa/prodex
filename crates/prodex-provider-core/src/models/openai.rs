@@ -1,10 +1,7 @@
 //! Openai provider model catalog.
 
 use super::model;
-use super::{
-    OPENAI_CODEX_SPARK_CONTEXT_WINDOW_TOKENS, OPENAI_CONTEXT_WINDOW_TOKENS,
-    OPENAI_GPT_5_6_CONTEXT_WINDOW_TOKENS,
-};
+use super::{OPENAI_CONTEXT_WINDOW_TOKENS, OPENAI_GPT_5_6_CONTEXT_WINDOW_TOKENS};
 use crate::OPENAI_ENDPOINTS;
 use crate::{ProviderId, ProviderModelSpec};
 
@@ -80,18 +77,6 @@ pub(super) const MODELS: &[ProviderModelSpec] = &[
         None,
         OPENAI_ENDPOINTS,
         ["codex", "sonnet"]
-    ),
-    model!(
-        ProviderId::OpenAi,
-        "openai",
-        "gpt-5.3-codex-spark",
-        "GPT-5.3 Codex Spark",
-        "Spark-tier Codex-optimized coding model routed through OpenAI Responses.",
-        Some(OPENAI_CODEX_SPARK_CONTEXT_WINDOW_TOKENS),
-        None,
-        None,
-        OPENAI_ENDPOINTS,
-        ["spark"]
     ),
     model!(
         ProviderId::OpenAi,

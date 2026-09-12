@@ -329,6 +329,7 @@ fn provider_catalog_entry_rust(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::provider_model_catalog;
     use std::collections::BTreeSet;
 
     #[test]
@@ -433,6 +434,27 @@ mod tests {
                 .as_ref()
                 .is_some_and(|efforts| efforts.contains(&ProviderReasoningEffort::Max))
         );
+    }
+
+    #[test]
+    fn removed_openai_model_is_absent_from_catalog_and_picker() {
+        let choices = resolve_provider_model_choices(ProviderId::OpenAi, &[], None);
+        for model in ["gpt-5.3-codex-spark", "spark"] {
+            assert!(
+                provider_model_catalog(ProviderId::OpenAi)
+                    .iter()
+                    .all(|entry| !entry.id.eq_ignore_ascii_case(model))
+            );
+            assert!(
+                provider_model_catalog_json(ProviderId::OpenAi)
+                    .iter()
+                    .all(|entry| entry["id"] != model)
+            );
+            assert!(provider_catalog_entry(ProviderId::OpenAi, model).is_none());
+            assert!(!choices.iter().any(|choice| {
+                matches!(choice, ProviderModelChoice::Model(candidate) if candidate.eq_ignore_ascii_case(model))
+            }));
+        }
     }
 
     #[test]
