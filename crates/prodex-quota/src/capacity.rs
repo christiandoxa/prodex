@@ -2,24 +2,6 @@ use crate::AdditionalRateLimit;
 #[cfg(feature = "mojo")]
 use crate::{UsageResponse, WindowPair, find_main_window};
 
-pub(crate) fn additional_rate_limit_is_spark(additional: &AdditionalRateLimit) -> bool {
-    if let Some(model) = crate::render::additional_rate_limit_model_slug(additional) {
-        return crate::render::openai_model_is_spark(Some(model));
-    }
-    [
-        additional.limit_name.as_deref(),
-        additional.metered_feature.as_deref(),
-    ]
-    .into_iter()
-    .flatten()
-    .any(|value| {
-        matches!(
-            crate::render::normalized_identifier(value).as_str(),
-            "spark" | "gpt53codexspark" | "gpt53spark"
-        )
-    })
-}
-
 /// Checks explicit backend admission state plus the bucket's own windows.
 pub fn additional_rate_limit_is_usable(additional: &AdditionalRateLimit) -> bool {
     #[cfg(feature = "mojo")]
@@ -72,11 +54,7 @@ pub(crate) fn quota_capacity_candidates_for_usage_at(
         pairs.push(&additional.rate_limit);
         inputs.push(quota_capacity_input_for_pair(
             &additional.rate_limit,
-            if additional_rate_limit_is_spark(additional) {
-                prodex_mojo_core::quota::QUOTA_CAPACITY_LANE_SPARK
-            } else {
-                prodex_mojo_core::quota::QUOTA_CAPACITY_LANE_UNKNOWN_ADDITIONAL
-            },
+            prodex_mojo_core::quota::QUOTA_CAPACITY_LANE_UNKNOWN_ADDITIONAL,
             additional.allowed,
             additional.limit_reached,
             scale_bps,
@@ -97,11 +75,7 @@ pub(crate) fn quota_capacity_candidates_for_usage_at(
 pub(crate) fn classify_additional_rate_limit_is_usable(additional: &AdditionalRateLimit) -> bool {
     let input = quota_capacity_input_for_pair(
         &additional.rate_limit,
-        if additional_rate_limit_is_spark(additional) {
-            prodex_mojo_core::quota::QUOTA_CAPACITY_LANE_SPARK
-        } else {
-            prodex_mojo_core::quota::QUOTA_CAPACITY_LANE_UNKNOWN_ADDITIONAL
-        },
+        prodex_mojo_core::quota::QUOTA_CAPACITY_LANE_UNKNOWN_ADDITIONAL,
         additional.allowed,
         additional.limit_reached,
         10_000,

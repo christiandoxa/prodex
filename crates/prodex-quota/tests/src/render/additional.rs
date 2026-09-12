@@ -133,6 +133,10 @@ fn app_server_rate_limits_payload_keeps_regular_and_reserve_buckets_separate() {
         reserve.extra.get("normalModelSlug"),
         Some(&serde_json::json!("gpt-5.6-luna"))
     );
+    assert_eq!(
+        additional_rate_limit_model_slug(reserve),
+        Some("gpt-5.6-luna")
+    );
     assert!(additional_rate_limit_is_luna_reserve(reserve));
     assert!(openai_quota_has_ready_limit_for_model(
         &usage,

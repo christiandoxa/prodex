@@ -106,7 +106,7 @@ fn selection_score_at_is_deterministic() {
 }
 
 #[test]
-fn model_aware_scheduler_scores_luna_reserve_instead_of_spark() {
+fn model_aware_scheduler_scores_luna_reserve_instead_of_unknown_additional_capacity() {
     let now = chrono::Local::now().timestamp();
     let mut reserve_usage = selection_usage(now, 0);
     let reserve_pair = reserve_usage.rate_limit.clone().unwrap();
@@ -133,20 +133,9 @@ fn model_aware_scheduler_scores_luna_reserve_instead_of_spark() {
             limit_reached: None,
             extra: std::collections::BTreeMap::new(),
         });
-    let mut spark = spark_limit(100, 100, now);
-    spark
-        .rate_limit
-        .primary_window
-        .as_mut()
-        .unwrap()
-        .used_percent = Some(0);
-    spark
-        .rate_limit
-        .secondary_window
-        .as_mut()
-        .unwrap()
-        .used_percent = Some(0);
-    reserve_usage.additional_rate_limits.push(spark);
+    reserve_usage
+        .additional_rate_limits
+        .push(additional_limit(100, 100, now));
 
     let regular_usage = selection_usage(now, 20);
     let candidates = vec![
@@ -191,6 +180,56 @@ fn model_aware_scheduler_scores_luna_reserve_instead_of_spark() {
         model_aware.first().map(|candidate| candidate.name.as_str()),
         Some("regular")
     );
+}
+
+#[test]
+fn runtime_selection_does_not_route_retired_model_from_additional_bucket() {
+    let now = 1_700_000_000;
+    let selection = SelectionView {
+        entries: &[SelectionEntry {
+            name: "main",
+            provider_priority: 0,
+            last_run_selected_at: None,
+        }],
+    };
+
+    for plan in ["pro", "prolite"] {
+        let mut usage = selection_usage(now, 80);
+        usage.plan_type = Some(plan.to_string());
+        let mut retired = additional_limit(80, 90, now);
+        retired.limit_id = Some("spark".to_string());
+        retired.limit_name = Some("GPT-5.3-Codex-Spark".to_string());
+        retired
+            .extra
+            .insert("normalModelSlug".to_string(), "gpt-5.3-codex-spark".into());
+        usage.additional_rate_limits.push(retired);
+        assert!(prodex_quota::openai_quota_has_ready_regular_limit(&usage));
+        let reports = [RunProfileProbeReport {
+            name: "main".to_string(),
+            order_index: 0,
+            auth: AuthSummary {
+                label: "chatgpt".to_string(),
+                quota_compatible: true,
+            },
+            result: Ok(usage),
+        }];
+
+        for model in ["gpt-5.3-codex-spark", "spark", "gpt-5.3-spark"] {
+            assert!(
+                ready_profile_candidates_with_view_for_model(
+                    &reports,
+                    false,
+                    None,
+                    selection,
+                    None,
+                    900,
+                    Some(model),
+                )
+                .is_empty(),
+                "retired bucket must not route {plan} {model}"
+            );
+        }
+    }
 }
 
 #[cfg(feature = "mojo")]

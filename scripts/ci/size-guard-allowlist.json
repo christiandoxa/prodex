@@ -61,7 +61,7 @@
   },
   {
     "file": "crates/prodex-quota/tests/src/render.rs",
-    "maxLines": 863,
+    "maxLines": 861,
     "reason": "Quota renderer coverage keeps provider panels, compact/detail layouts, and error snapshots in one fixture matrix; additional metadata tests live in a sibling module."
   },
   {

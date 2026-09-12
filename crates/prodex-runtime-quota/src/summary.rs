@@ -109,6 +109,9 @@ pub fn runtime_quota_summary_for_route_with_model_at(
     requested_model: Option<&str>,
     now: i64,
 ) -> RuntimeQuotaSummary {
+    if prodex_quota::openai_model_is_retired_spark(requested_model) {
+        return retired_model_quota_summary();
+    }
     let summary =
         runtime_quota_summary_from_proxy(runtime_proxy::runtime_proxy_quota_summary_for_route(
             runtime_quota_window_observation_for_model_at(usage, "5h", requested_model, now),
@@ -201,14 +204,23 @@ pub fn runtime_quota_summary_from_cached_sources_for_model(
     now: i64,
     stale_grace_seconds: i64,
 ) -> (RuntimeQuotaSummary, Option<RuntimeQuotaSource>) {
+    if prodex_quota::openai_model_is_retired_spark(requested_model) {
+        let source = if live_probe_usage.is_some() {
+            Some(RuntimeQuotaSource::LiveProbe)
+        } else if persisted_snapshot.is_some_and(|snapshot| {
+            runtime_usage_snapshot_is_usable(snapshot, now, stale_grace_seconds)
+        }) {
+            Some(RuntimeQuotaSource::PersistedSnapshot)
+        } else {
+            None
+        };
+        return (retired_model_quota_summary(), source);
+    }
     if let Some(usage) = live_probe_usage {
         return (
             runtime_quota_summary_for_route_with_model(usage, route_kind, requested_model),
             Some(RuntimeQuotaSource::LiveProbe),
         );
-    }
-    if prodex_quota::openai_model_is_spark(requested_model) {
-        return (unknown_runtime_quota_summary(), None);
     }
     if let Some(model) = requested_model
         && let Some(snapshot) = persisted_snapshot
@@ -249,6 +261,19 @@ fn unknown_runtime_quota_summary() -> RuntimeQuotaSummary {
             reset_at: i64::MAX,
         },
         route_band: RuntimeQuotaPressureBand::Unknown,
+    }
+}
+
+fn retired_model_quota_summary() -> RuntimeQuotaSummary {
+    let exhausted = RuntimeQuotaWindowSummary {
+        status: RuntimeQuotaWindowStatus::Exhausted,
+        remaining_percent: 0,
+        reset_at: i64::MAX,
+    };
+    RuntimeQuotaSummary {
+        five_hour: exhausted,
+        weekly: exhausted,
+        route_band: RuntimeQuotaPressureBand::Exhausted,
     }
 }
 

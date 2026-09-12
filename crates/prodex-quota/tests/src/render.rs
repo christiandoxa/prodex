@@ -32,7 +32,7 @@ fn main_windows(
     }
 }
 
-fn spark_limit(
+fn additional_limit(
     five_hour_remaining: i64,
     five_hour_reset_at: i64,
     weekly_remaining: i64,
@@ -40,8 +40,8 @@ fn spark_limit(
 ) -> AdditionalRateLimit {
     AdditionalRateLimit {
         limit_id: None,
-        limit_name: Some("GPT-5.3-Codex-Spark".to_string()),
-        metered_feature: Some("codex_bengalfox".to_string()),
+        limit_name: None,
+        metered_feature: None,
         rate_limit: WindowPair {
             allowed: None,
             limit_reached: None,
@@ -117,8 +117,6 @@ fn sorted_names_by(reports: &[QuotaReport], sort: QuotaReportSort) -> Vec<String
 mod additional;
 #[path = "render/model_capacity.rs"]
 mod model_capacity;
-#[path = "render/spark.rs"]
-mod spark;
 #[test]
 fn labels_standard_windows() {
     assert_eq!(window_label(Some(18_000)), "5h");

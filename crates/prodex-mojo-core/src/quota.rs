@@ -4,7 +4,7 @@ pub const QUOTA_CAPACITY_BATCH_MAX_COUNT: usize = 256;
 pub const QUOTA_CAPACITY_FIELD_COUNT: usize = 11;
 
 pub const QUOTA_CAPACITY_LANE_MAIN: i64 = 0;
-pub const QUOTA_CAPACITY_LANE_SPARK: i64 = 1;
+pub const QUOTA_CAPACITY_LANE_MODEL_SPECIFIC: i64 = 1;
 pub const QUOTA_CAPACITY_LANE_UNKNOWN_ADDITIONAL: i64 = 2;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -397,7 +397,7 @@ pub fn quota_capacity_batch(
                     usable[index] == 1
                         && matches!(
                             inputs[index].lane,
-                            QUOTA_CAPACITY_LANE_MAIN | QUOTA_CAPACITY_LANE_SPARK
+                            QUOTA_CAPACITY_LANE_MAIN | QUOTA_CAPACITY_LANE_MODEL_SPECIFIC
                         ),
                 )
         {
