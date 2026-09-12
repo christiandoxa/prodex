@@ -77,7 +77,6 @@ pub(super) enum RuntimeProxyBackendMode {
     HttpOnlyUsageLimitAutoRedeem,
     HttpOnlyUsageLimitMessageLateReadyFifth,
     HttpOnlyUsageLimitUntilThird,
-    HttpOnlyLunaQuotaThenSpark,
     HttpOnlyDelayedQuotaAfterOutputItemAdded,
     HttpOnlyQuotaThenToolOutputFreshFallbackError,
     HttpOnlyPreviousResponseToolContextMissing,
@@ -199,10 +198,6 @@ impl RuntimeProxyBackend {
 
     pub(super) fn start_http_usage_limit_message_late_ready_fifth() -> Self {
         Self::start_with_mode(RuntimeProxyBackendMode::HttpOnlyUsageLimitMessageLateReadyFifth)
-    }
-
-    pub(super) fn start_http_luna_quota_then_spark() -> Self {
-        Self::start_with_mode(RuntimeProxyBackendMode::HttpOnlyLunaQuotaThenSpark)
     }
 
     pub(super) fn start_http_usage_limit_until_third() -> Self {
