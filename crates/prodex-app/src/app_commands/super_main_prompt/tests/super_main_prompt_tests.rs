@@ -95,7 +95,6 @@ fn openai_main_picker_reads_the_active_models_cache() {
             "gpt-5.4",
             "gpt-5.4-mini",
             "gpt-5.3-codex",
-            "gpt-5.3-codex-spark",
             "gpt-5.2",
             "gpt-5.6-sol",
             "gpt-5.6-terra",
@@ -152,7 +151,6 @@ fn openai_main_picker_keeps_canonical_models_when_cache_is_partial() {
             "gpt-5.4",
             "gpt-5.4-mini",
             "gpt-5.3-codex",
-            "gpt-5.3-codex-spark",
             "gpt-5.2",
             "account-model"
         ]
