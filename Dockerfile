@@ -18,6 +18,7 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends \
       ca-certificates=20230311+deb12u1 \
       curl=7.88.1-10+deb12u15 \
+      libpcre2-8-0=10.42-1+deb12u1 \
     && rm -rf /var/lib/apt/lists/*
 
 RUN useradd --create-home --uid 10001 prodex \
