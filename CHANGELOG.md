@@ -2,10 +2,36 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
-## 0.429.1 - 2026-09-12
+## 0.429.2 - 2026-09-13
+
+### CLI
+
+- Propagate hook trust bypass to every launch (`efcaff4`)
+# Prodex 0.429.2
+
+## New Features
+
+- None.
+
+## Bug Fixes
+
+- Propagate Codex's official hook-trust bypass through every Super launch path,
+  including the interactive child, app-server companion, and overlay-config
+  paths, while keeping hooks enabled.
+- Preserve the normal non-Super hook-trust default.
+
+## Changelog
+
+- Close the `Hooks need review` regression without automating or suppressing
+  Codex's trust prompt.
+
+Full Changelog: [0.429.1...0.429.2](https://github.com/christiandoxa/prodex/compare/0.429.1...0.429.2)
+
+## 0.429.1 - 2026-09-13
 
 ### Runtime
 
+- Pin patched libpcre2 runtime package (`0cc96c9`)
 - Gate runtime window observations (`94e336b`)
 - Restore safe sidecar cleanup (`9650102`)
 - Repair bounded legacy recovery (`3ec72f4`)
@@ -31,6 +57,7 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 
 ### Misc
 
+- Drain ACP output after agent exit (`979f82a`)
 - Repair Max-Age and Expires (`db2c78e`)
 - Tighten Codex 0.154 evidence (`a4db8a9`)
 - Keep catalog tests after production items (`54a53fa`)
@@ -38,41 +65,6 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 - Reject inverted analyzer ranges (`a7dbfe4`)
 - Enforce session preempt boundary (`c59295a`)
 - Retire Spark catalog entry (`29aaff5`)
-# Prodex 0.429.1
-
-## New Features
-
-- Use provider-catalog context-window metadata for known OpenAI models when
-  preparing runtime launches, while preserving explicit and cached overrides.
-- Recover request model identity when it appears after the bounded Smart
-  Context prefix.
-- Use one bounded provider-aware catalog for main and sub-agent model pickers,
-  preserving canonical ordering and degraded-source visibility.
-- Preempt the active session turn at the verified app-server queue boundary,
-  with fail-closed live regression coverage.
-
-## Bug Fixes
-
-- Retire the removed GPT-5.3 Codex Spark model from provider catalogs, model
-  pickers, quota views, runtime selection, and upstream models metadata.
-- Prevent retired-model requests from reaching upstream or consuming automatic
-  reset credits, including compact, Responses, and WebSocket paths.
-- Keep Luna workflows on regular or explicitly identified Luna Reserve
-  capacity; do not substitute another OpenAI model when those capacities are
-  unavailable.
-- Keep quota, pre-commit, model-context, runtime-proxy tests, CI manifests,
-  and provider documentation aligned with the retired model.
-- Preserve safe Codex continuation metadata through Anthropic translation.
-- Harden broker identity and legacy recovery, runtime sidecar cleanup, cookie
-  expiry handling, Presidio range validation, and MCP framing limits.
-
-## Changelog
-
-- Integrate qualified provider, session-control, runtime, security, and
-  compatibility repairs while preserving bounded model-aware Spark retirement
-  behavior across launch, quota, catalog, and proxy paths.
-
-Full Changelog: [0.429.0...0.429.1](https://github.com/christiandoxa/prodex/compare/0.429.0...0.429.1)
 
 ## 0.429.0 - 2026-09-11
 

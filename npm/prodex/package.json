@@ -1,6 +1,6 @@
 {
   "name": "@christiandoxa/prodex",
-  "version": "0.429.1",
+  "version": "0.429.2",
   "private": true,
   "description": "Multi-provider Codex wrapper with OpenAI quota-aware routing and Claude Code support",
   "license": "Apache-2.0",
@@ -16,12 +16,12 @@
     "node": ">=18"
   },
   "optionalDependencies": {
-    "@christiandoxa/prodex-linux-x64": "0.429.1",
-    "@christiandoxa/prodex-linux-arm64": "0.429.1",
-    "@christiandoxa/prodex-darwin-x64": "0.429.1",
-    "@christiandoxa/prodex-darwin-arm64": "0.429.1",
-    "@christiandoxa/prodex-win32-x64": "0.429.1",
-    "@christiandoxa/prodex-win32-arm64": "0.429.1"
+    "@christiandoxa/prodex-linux-x64": "0.429.2",
+    "@christiandoxa/prodex-linux-arm64": "0.429.2",
+    "@christiandoxa/prodex-darwin-x64": "0.429.2",
+    "@christiandoxa/prodex-darwin-arm64": "0.429.2",
+    "@christiandoxa/prodex-win32-x64": "0.429.2",
+    "@christiandoxa/prodex-win32-arm64": "0.429.2"
   },
   "publishConfig": {
     "access": "public"
