@@ -6,3 +6,5 @@ mod summary_fields;
 mod finalize_guidance;
 #[path = "doctor/state_collect.rs"]
 mod state_collect;
+#[path = "doctor/broker_security.rs"]
+mod broker_security;
