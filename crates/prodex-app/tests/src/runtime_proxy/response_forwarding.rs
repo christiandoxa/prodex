@@ -1,4 +1,7 @@
 use super::*;
+use std::thread;
+use tiny_http::{Response as TinyResponse, Server as TinyServer};
+use tokio::runtime::Builder as TokioRuntimeBuilder;
 
 struct SharedBufferWriter {
     bytes: Arc<Mutex<Vec<u8>>>,
@@ -46,6 +49,49 @@ impl Write for SharedBufferWriter {
     fn flush(&mut self) -> io::Result<()> {
         Ok(())
     }
+}
+
+#[test]
+fn models_response_without_removed_model_is_forwarded_unchanged() {
+    let server = TinyServer::http("127.0.0.1:0").expect("models test server should bind");
+    let address = server
+        .server_addr()
+        .to_ip()
+        .expect("models test server should expose an address");
+    let body = r#"{"models":[{"id":"gpt-5.3-codex"}]}"#;
+    let expected_body = body.to_string();
+    let server_thread = thread::spawn(move || {
+        let request = server.recv().expect("models request should arrive");
+        request
+            .respond(TinyResponse::from_string(expected_body))
+            .expect("models response should send");
+    });
+
+    let runtime = TokioRuntimeBuilder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("models test runtime should build");
+    let response = runtime
+        .block_on(
+            reqwest::Client::new()
+                .get(format!("http://{address}/models"))
+                .send(),
+        )
+        .expect("models request should succeed");
+    let response = runtime
+        .block_on(forward_runtime_proxy_response(response, Vec::new()))
+        .expect("models response should forward");
+    server_thread.join().expect("models server should finish");
+
+    let mut bytes = Vec::new();
+    response
+        .raw_print(&mut bytes, (1, 0).into(), &[], false, None)
+        .expect("forwarded models response should serialize");
+    let rendered = String::from_utf8(bytes).expect("models response should be UTF-8");
+    assert!(
+        rendered.ends_with(body),
+        "forwarded response changed: {rendered}"
+    );
 }
 
 fn test_runtime_streaming_shared(log_path: PathBuf) -> RuntimeRotationProxyShared {

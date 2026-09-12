@@ -124,12 +124,12 @@ fn active_adaptive_routing_reorders_fallback_without_losing_precommit_fallbacks(
 }
 
 #[test]
-fn fallback_skips_small_actual_model_before_ranking() {
+fn fallback_keeps_catalog_models_in_order_before_ranking() {
     let plan = plan(
         ProviderId::OpenAi,
         ProviderEndpoint::Responses,
-        &large_body("route", 130_000),
-        &[alias(&["gpt-5.3-codex-spark", "gpt-5.4"])],
+        br#"{"model":"route","input":"hi"}"#,
+        &[alias(&["gpt-5.3-codex", "gpt-5.4"])],
         strict_policy(),
         None,
         false,
@@ -137,13 +137,15 @@ fn fallback_skips_small_actual_model_before_ranking() {
     .unwrap();
 
     assert_eq!(plan.concrete_candidates.len(), 2);
-    assert!(!plan.concrete_candidates[0].evaluation.eligible);
-    assert_eq!(
-        plan.concrete_candidates[0].evaluation.decision,
-        ProviderRequestConstraintDecision::ContextWindowExceeded
+    assert!(
+        plan.concrete_candidates
+            .iter()
+            .all(|candidate| candidate.evaluation.eligible)
     );
-    assert!(plan.concrete_candidates[1].evaluation.eligible);
-    assert_eq!(plan.selected_model.as_deref(), Some("gpt-5.4"));
+    assert_eq!(
+        plan.selected_model.as_deref(),
+        Some("combo:gpt-5.3-codex,gpt-5.4")
+    );
 }
 
 #[test]
@@ -153,20 +155,20 @@ fn alias_target_is_resolved_to_actual_catalog_model() {
         ProviderId::OpenAi,
         ProviderEndpoint::Responses,
         body,
-        &[alias(&["spark"])],
+        &[alias(&["codex"])],
         strict_policy(),
         None,
         false,
     )
     .unwrap();
 
-    assert_eq!(plan.concrete_candidates[0].model, "gpt-5.3-codex-spark");
+    assert_eq!(plan.concrete_candidates[0].model, "gpt-5.3-codex");
     assert_eq!(
         serde_json::from_slice::<serde_json::Value>(
             &runtime_gateway_apply_constraint_plan_body(body, &plan).unwrap(),
         )
         .unwrap()["model"],
-        "gpt-5.3-codex-spark"
+        "gpt-5.3-codex"
     );
 }
 
@@ -176,7 +178,7 @@ fn all_incompatible_candidates_produce_no_route() {
         ProviderId::OpenAi,
         ProviderEndpoint::Responses,
         &large_body("route", 410_000),
-        &[alias(&["gpt-5.3-codex-spark", "gpt-5.4"])],
+        &[alias(&["gpt-5.3-codex", "gpt-5.4"])],
         strict_policy(),
         None,
         false,
@@ -199,10 +201,10 @@ fn hard_affinity_owner_is_evaluated_alone_and_never_rotates_to_larger_model() {
     let plan = plan(
         ProviderId::OpenAi,
         ProviderEndpoint::Responses,
-        &large_body("route", 130_000),
-        &[alias(&["gpt-5.3-codex-spark", "gpt-5.4"])],
+        &large_body("route", 410_000),
+        &[alias(&["gpt-5.3-codex", "gpt-5.4"])],
         strict_policy(),
-        Some("gpt-5.3-codex-spark"),
+        Some("gpt-5.3-codex"),
         true,
     )
     .unwrap();
@@ -250,23 +252,23 @@ fn compatible_hard_owner_encodes_one_exact_upstream_attempt() {
         ProviderId::OpenAi,
         ProviderEndpoint::Responses,
         body,
-        &[alias(&["gpt-5.4", "gpt-5.3-codex-spark"])],
+        &[alias(&["gpt-5.4", "gpt-5.3-codex"])],
         strict_policy(),
-        Some("gpt-5.3-codex-spark"),
+        Some("gpt-5.3-codex"),
         true,
     )
     .unwrap();
-    assert_eq!(plan.selected_model.as_deref(), Some("gpt-5.3-codex-spark"));
+    assert_eq!(plan.selected_model.as_deref(), Some("gpt-5.3-codex"));
     let rewritten: serde_json::Value =
         serde_json::from_slice(&runtime_gateway_apply_constraint_plan_body(body, &plan).unwrap())
             .unwrap();
-    assert_eq!(rewritten["model"], "gpt-5.3-codex-spark");
+    assert_eq!(rewritten["model"], "gpt-5.3-codex");
     assert_eq!(
         prodex_provider_core::provider_model_fallback_chain(
             ProviderId::OpenAi,
             rewritten["model"].as_str().unwrap(),
         ),
-        vec!["gpt-5.3-codex-spark".to_string()]
+        vec!["gpt-5.3-codex".to_string()]
     );
 }
 
@@ -276,7 +278,7 @@ fn hard_continuation_without_resolved_owner_never_becomes_fresh_fallback() {
         ProviderId::OpenAi,
         ProviderEndpoint::Responses,
         br#"{"model":"route","previous_response_id":"response-opaque","input":"hi"}"#,
-        &[alias(&["gpt-5.3-codex-spark", "gpt-5.4"])],
+        &[alias(&["gpt-5.3-codex", "gpt-5.4"])],
         strict_policy(),
         None,
         true,
@@ -297,7 +299,7 @@ fn hard_continuation_without_resolved_owner_never_becomes_fresh_fallback() {
 
 #[test]
 fn disabled_policy_preserves_legacy_alias_and_malformed_limit_behavior() {
-    let aliases = [alias(&["gpt-5.3-codex-spark", "gpt-5.4"])];
+    let aliases = [alias(&["gpt-5.3-codex", "gpt-5.4"])];
     let body = br#"{"model":"route","max_output_tokens":"invalid"}"#;
     let legacy =
         crate::runtime_gateway_rewrite_route_alias_with_state(body, &aliases, 1, &BTreeMap::new())
