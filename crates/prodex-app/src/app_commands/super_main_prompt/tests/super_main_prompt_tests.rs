@@ -74,6 +74,7 @@ fn openai_main_picker_reads_the_active_models_cache() {
                 catalog_model("gpt-5.6-terra", "GPT-5.6 Terra", 2, &["high"]),
                 catalog_model("gpt-5.6-sol", "GPT-5.6 Sol", 1, &["max"]),
                 catalog_model("gpt-5.6-luna", "GPT-5.6 Luna", 3, &["medium"]),
+                catalog_model("gpt-5.3-codex-spark", "retired", 4, &["low"]),
             ]
         })
         .to_string(),

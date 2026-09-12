@@ -244,7 +244,7 @@ impl RuntimeToolLaunchStrategy {
             true,
             false,
         );
-        let codex_args = runtime_launch_openai_spark_context_codex_args(overlay_home, &codex_args)?;
+        let codex_args = runtime_launch_openai_model_context_codex_args(overlay_home, &codex_args)?;
         let codex_args = profile_openai_compatible_codex_args(overlay_home, &codex_args)?;
         let codex_args = prepare_local_provider_catalog_codex_args(overlay_home, &codex_args)?;
         let codex_args = prepare_external_provider_catalog_codex_args(overlay_home, &codex_args)?;
@@ -269,7 +269,7 @@ impl RuntimeToolLaunchStrategy {
         } else {
             self.codex_args.clone()
         };
-        let codex_args = runtime_launch_openai_spark_context_codex_args(overlay_home, &codex_args)?;
+        let codex_args = runtime_launch_openai_model_context_codex_args(overlay_home, &codex_args)?;
         profile_openai_compatible_codex_args(overlay_home, &codex_args)
     }
 

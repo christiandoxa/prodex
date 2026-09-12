@@ -99,13 +99,13 @@ fn runtime_launch_dry_run_report_prefers_cli_model_flag() {
     let plan = RuntimeLaunchPlan::new(
         ChildProcessPlan::new(OsString::from("codex"), codex_home.clone()).with_args(vec![
             OsString::from("--model"),
-            OsString::from("gpt-5.3-codex-spark"),
+            OsString::from("gpt-5.3-codex"),
         ]),
     );
 
     let report = runtime_launch_dry_run_report("run", &codex_home, None, &plan).unwrap();
 
-    assert!(report.contains("Model: gpt-5.3-codex-spark"));
+    assert!(report.contains("Model: gpt-5.3-codex"));
 }
 
 #[test]

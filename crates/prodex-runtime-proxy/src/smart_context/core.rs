@@ -33,7 +33,11 @@ pub fn smart_context_model_name_from_body(body: &[u8]) -> Option<String> {
     }
     let scan_len = body.len().min(SMART_CONTEXT_MODEL_SCAN_MAX_BYTES);
     let scan = std::str::from_utf8(&body[..scan_len]).ok()?;
-    smart_context_model_name_from_json_prefix(scan)
+    smart_context_model_name_from_json_prefix(scan).or_else(|| {
+        serde_json::from_slice::<serde_json::Value>(body)
+            .ok()
+            .and_then(|value| smart_context_model_name_from_value(&value))
+    })
 }
 
 pub fn smart_context_normalized_model_name(value: Option<&str>) -> Option<String> {

@@ -12,7 +12,7 @@ use super::{
     repair_resume_session_metadata_prefix_from_codex_args, resolve_codex_delete_session_id,
     restore_resume_session_settings, runtime_exit_status_is_cancelled,
     runtime_launch_cli_gemini_thinking_budget_tokens, runtime_launch_cli_model,
-    runtime_launch_cli_model_context_window_tokens, runtime_launch_openai_spark_context_codex_args,
+    runtime_launch_cli_model_context_window_tokens, runtime_launch_openai_model_context_codex_args,
     runtime_proxy_codex_passthrough_args, runtime_resume_external_provider_from_codex_args,
     runtime_resume_session_settings_from_codex_args, runtime_session_recovery_wait_message,
     super_external_provider_codex_args, wait_for_runtime_recovery_round,
@@ -218,7 +218,7 @@ impl RuntimeLaunchStrategy for RunCommandStrategy {
             self.resume_session_path = Some(path);
         }
         let codex_args =
-            runtime_launch_openai_spark_context_codex_args(&prepared.codex_home, &self.codex_args)?;
+            runtime_launch_openai_model_context_codex_args(&prepared.codex_home, &self.codex_args)?;
         let codex_args = profile_openai_compatible_codex_args(&prepared.codex_home, &codex_args)?;
         let preference_context = crate::resolve_fresh_model_preference_context(
             &prepared.paths,

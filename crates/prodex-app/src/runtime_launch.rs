@@ -56,9 +56,7 @@ pub(crate) use proxy_startup::{
     runtime_gateway_sqlite_migrate_enterprise_state,
 };
 
-const OPENAI_CODEX_DEFAULT_CONTEXT_WINDOW_TOKENS: u64 = 128_000;
-
-pub(super) fn runtime_launch_openai_spark_context_codex_args(
+pub(super) fn runtime_launch_openai_model_context_codex_args(
     codex_home: &Path,
     args: &[OsString],
 ) -> Result<Vec<OsString>> {
@@ -80,11 +78,20 @@ pub(super) fn runtime_launch_openai_spark_context_codex_args(
             profile_v2_name.as_deref(),
         )?,
     };
-    let context_window = explicit_context_window
+    let Some(context_window) = explicit_context_window
         .or(runtime_launch_openai_model_context_from_models_cache(
             codex_home, &model,
         ))
-        .unwrap_or(OPENAI_CODEX_DEFAULT_CONTEXT_WINDOW_TOKENS);
+        .or_else(|| {
+            prodex_provider_core::provider_catalog_entry(
+                prodex_provider_core::ProviderId::OpenAi,
+                &model,
+            )
+            .and_then(|entry| entry.context_window_tokens)
+        })
+    else {
+        return Ok(args.to_vec());
+    };
     let mut overrides = Vec::new();
     if explicit_context_window.is_none() {
         overrides.push(format!("model_context_window={context_window}"));
@@ -287,11 +294,7 @@ fn runtime_launch_openai_model(codex_home: &Path, args: &[OsString]) -> Result<O
 
 fn runtime_launch_openai_model_uses_large_context(model: &str) -> bool {
     let model = model.trim().to_ascii_lowercase();
-    model.starts_with("gpt-5")
-        || matches!(
-            model.as_str(),
-            "gpt-5.3-codex-spark" | "gpt-5.3-spark" | "codex-auto-review"
-        )
+    model.starts_with("gpt-5") || model == "codex-auto-review"
 }
 
 fn runtime_launch_openai_model_context_from_models_cache(
