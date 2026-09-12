@@ -15,11 +15,15 @@ pub(super) fn build_session_app_server_companion(
         return Ok(None);
     }
     let socket = session_app_server_socket(overlay_home);
-    let mut args = vec![
+    let mut args = Vec::with_capacity(runtime_args.len() + 4);
+    if strategy.args.super_mode {
+        args.push(std::ffi::OsString::from("--dangerously-bypass-hook-trust"));
+    }
+    args.extend([
         std::ffi::OsString::from("app-server"),
         std::ffi::OsString::from("--listen"),
         std::ffi::OsString::from(format!("unix://{}", socket.display())),
-    ];
+    ]);
     let mut index = 0;
     while index < runtime_args.len() {
         let argument = runtime_args[index].to_string_lossy();
