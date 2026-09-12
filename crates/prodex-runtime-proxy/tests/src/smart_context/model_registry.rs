@@ -14,18 +14,6 @@ fn model_registry_resolves_known_models_after_normalization() {
 }
 
 #[test]
-fn model_registry_resolves_openai_codex_spark_window() {
-    assert_eq!(
-        smart_context_model_context_window(Some("gpt-5.3-codex-spark")).map(|window| window.tokens),
-        Some(128_000)
-    );
-    assert_eq!(
-        smart_context_model_context_window(Some("GPT-5.3-Spark")).map(|window| window.tokens),
-        Some(128_000)
-    );
-}
-
-#[test]
 fn model_registry_resolves_only_catalogued_gpt_5_6_window() {
     assert_eq!(
         smart_context_model_context_window(Some("gpt-5.6-luna")).map(|window| window.tokens),
@@ -59,7 +47,13 @@ fn model_registry_resolves_known_provider_windows() {
 
 #[test]
 fn model_registry_leaves_unknown_or_invalid_models_unresolved() {
-    assert_eq!(smart_context_model_context_window(Some("local-test")), None);
+    for model in ["gpt-5.3-codex-spark", "spark", "local-test"] {
+        assert_eq!(
+            smart_context_model_context_window(Some(model)),
+            None,
+            "retired or unknown model must not get a context window"
+        );
+    }
     assert_eq!(
         smart_context_model_context_window(Some("bad\u{0007}model")),
         None

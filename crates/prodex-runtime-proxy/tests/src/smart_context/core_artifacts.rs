@@ -89,6 +89,19 @@ fn model_name_helpers_extract_full_or_prefix_json_and_reject_invalid_names() {
 }
 
 #[test]
+fn model_name_helpers_find_model_after_bounded_prefix() {
+    let body = format!(
+        r#"{{"input":"{}","model":"gpt-5.3-codex-spark"}}"#,
+        "x".repeat(8 * 1024)
+    );
+
+    assert_eq!(
+        smart_context_model_name_from_body(body.as_bytes()),
+        Some("gpt-5.3-codex-spark".to_string())
+    );
+}
+
+#[test]
 fn exactness_guard_blocks_context_affinity_but_not_missing_rehydrate() {
     let guard = smart_context_exactness_guard(SmartContextExactnessInput {
         previous_response_id: Some("resp_1".to_string()),

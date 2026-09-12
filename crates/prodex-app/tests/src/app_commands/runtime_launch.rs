@@ -3,8 +3,8 @@ use super::*;
 mod admin_tokens;
 #[path = "runtime_launch/arg0_cleanup.rs"]
 mod arg0_cleanup;
-#[path = "runtime_launch/openai_spark_context.rs"]
-mod openai_spark_context;
+#[path = "runtime_launch/openai_model_context.rs"]
+mod openai_model_context;
 #[path = "runtime_launch/postgres_tls.rs"]
 mod postgres_tls;
 #[path = "runtime_launch/preflight.rs"]

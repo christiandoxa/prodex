@@ -2,7 +2,7 @@ use super::super::{
     ChildProcessPlan, ObservedCommandOutput, codex_child_plan,
     command_output_with_timeout_matching_stdout_line, prepare_codex_launch_args,
     profile_openai_compatible_codex_args, remove_provider_secret_env, remove_upstream_proxy_env,
-    runtime_launch_openai_spark_context_codex_args,
+    runtime_launch_openai_model_context_codex_args,
 };
 use super::{
     PING_OUTPUT_MAX_BYTES, PING_PROMPT, PING_TIMEOUT, PingProbeOptions, PingStatus, PingTarget,
@@ -89,7 +89,7 @@ pub(super) fn ping_command_args(options: &PingProbeOptions) -> Vec<OsString> {
 
 fn ping_child_plan(target: &PingTarget, options: &PingProbeOptions) -> Result<ChildProcessPlan> {
     let (args, _) = prepare_codex_launch_args(&ping_command_args(options), false);
-    let args = runtime_launch_openai_spark_context_codex_args(&target.codex_home, &args)?;
+    let args = runtime_launch_openai_model_context_codex_args(&target.codex_home, &args)?;
     let args = profile_openai_compatible_codex_args(&target.codex_home, &args)?;
     let mut plan = codex_child_plan(target.codex_home.clone(), args);
     remove_provider_secret_env(&mut plan);

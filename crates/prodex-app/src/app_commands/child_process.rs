@@ -23,7 +23,7 @@ use crate::{
     preview_gemini_provider_codex_args, preview_local_provider_catalog_codex_args,
     profile_openai_compatible_codex_args, resolve_runtime_optional_tool_plan,
     runtime_launch_cli_gemini_thinking_budget_tokens,
-    runtime_launch_cli_model_context_window_tokens, runtime_launch_openai_spark_context_codex_args,
+    runtime_launch_cli_model_context_window_tokens, runtime_launch_openai_model_context_codex_args,
     trusted_workspace_codex_args, validate_credential_free_http_url,
 };
 pub(crate) use prodex_runtime_launch::{
@@ -638,7 +638,7 @@ fn dry_run_model_preference_args(
     codex_home: &Path,
     codex_args: Vec<OsString>,
 ) -> Result<Vec<OsString>> {
-    let codex_args = runtime_launch_openai_spark_context_codex_args(codex_home, &codex_args)?;
+    let codex_args = runtime_launch_openai_model_context_codex_args(codex_home, &codex_args)?;
     let codex_args = profile_openai_compatible_codex_args(codex_home, &codex_args)?;
     let preference =
         crate::resolve_fresh_model_preference_context_read_only(paths, codex_home, &codex_args)?;
@@ -649,7 +649,7 @@ fn dry_run_model_preference_args(
         true,
         true,
     );
-    let codex_args = runtime_launch_openai_spark_context_codex_args(codex_home, &codex_args)?;
+    let codex_args = runtime_launch_openai_model_context_codex_args(codex_home, &codex_args)?;
     let codex_args = profile_openai_compatible_codex_args(codex_home, &codex_args)?;
     let codex_args = preview_local_provider_catalog_codex_args(codex_home, &codex_args)?;
     let codex_args = preview_external_provider_catalog_codex_args(codex_home, &codex_args)?;

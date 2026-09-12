@@ -45,10 +45,22 @@ pub(super) fn main_model_choices(
         .map(|choice| main_model_choice_from_provider(provider, choice))
         .collect()
     };
+    if provider == prodex_provider_core::ProviderId::OpenAi {
+        choices.retain(|choice| {
+            !matches!(
+                &choice.choice,
+                prodex_provider_core::ProviderModelChoice::Model(model)
+                    if openai_model_is_retired(model)
+            )
+        });
+    }
 
     if let Some(model) = current_model
         .map(str::trim)
         .filter(|model| !model.is_empty())
+        .filter(|model| {
+            provider != prodex_provider_core::ProviderId::OpenAi || !openai_model_is_retired(model)
+        })
         .filter(|model| !main_model_choice_is_selectable(&choices, model))
     {
         let insert_at = choices
@@ -78,6 +90,13 @@ pub(super) fn main_model_choices(
         );
     }
     choices
+}
+
+fn openai_model_is_retired(model: &str) -> bool {
+    matches!(
+        model.trim().to_ascii_lowercase().as_str(),
+        "spark" | "gpt-5.3-codex-spark" | "gpt-5.3-spark"
+    )
 }
 
 fn main_model_choice_from_provider(
@@ -207,6 +226,13 @@ pub(super) fn openai_main_model_choices() -> Option<Vec<MainModelChoice>> {
     ) {
         merge_bundled_openai_choices(&mut choices);
     }
+    choices.retain(|choice| {
+        !matches!(
+            &choice.choice,
+            prodex_provider_core::ProviderModelChoice::Model(model)
+                if openai_model_is_retired(model)
+        )
+    });
     Some(choices)
 }
 
