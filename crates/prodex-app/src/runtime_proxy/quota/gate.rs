@@ -210,6 +210,13 @@ pub(crate) fn runtime_precommit_quota_gate(
             route_kind,
             requested_model,
         )?;
+    if prodex_quota::openai_model_is_retired_spark(requested_model) {
+        return Ok(RuntimePrecommitQuotaGateDecision::Block {
+            reason: RuntimePrecommitQuotaBlockReason::ExhaustedBeforeSend,
+            summary: initial_quota_summary,
+            source: initial_quota_source,
+        });
+    }
     match prodex_runtime_quota::runtime_precommit_quota_gate_initial_decision(
         initial_quota_summary,
         initial_quota_source,
@@ -265,6 +272,7 @@ pub(crate) fn runtime_precommit_quota_gate(
                     shared,
                     profile_name,
                     route_kind,
+                    requested_model,
                     reprobe_context,
                     !has_continuation_context,
                 )? == RuntimeAutoRedeemResetCreditOutcome::Redeemed

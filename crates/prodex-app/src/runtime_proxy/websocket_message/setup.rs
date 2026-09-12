@@ -55,8 +55,6 @@ impl<'a> RuntimeWebsocketTextMessageFlow<'a> {
         } = input;
         let handshake_request = handshake_request.clone();
         let request_text = request_text.to_string();
-        let requested_model_name =
-            runtime_smart_context_model_name_from_body(request_text.as_bytes());
         let request_requires_previous_response_affinity =
             request_metadata.requires_previous_response_affinity;
         let previous_response_id = request_metadata.previous_response_id.clone();
@@ -123,7 +121,6 @@ impl<'a> RuntimeWebsocketTextMessageFlow<'a> {
             local_socket,
             handshake_request,
             request_text,
-            requested_model_name,
             shared,
             websocket_session,
             request_requires_previous_response_affinity,

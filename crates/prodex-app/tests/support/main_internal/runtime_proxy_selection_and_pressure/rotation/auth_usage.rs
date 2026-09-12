@@ -328,6 +328,7 @@ fn runtime_auto_redeem_disabled_by_default_does_not_consume_credit() {
         &shared,
         "main",
         RuntimeRouteKind::Responses,
+        None,
         "responses_precommit_reprobe",
         true,
     )
@@ -550,6 +551,7 @@ fn runtime_auto_redeem_defers_while_pool_quota_probe_is_pending() {
         &shared,
         "second",
         RuntimeRouteKind::Responses,
+        None,
         "responses_precommit_reprobe",
         true,
     )

@@ -169,7 +169,6 @@ fn handle_runtime_noncompact_response(
             shared,
             profile_name,
             request_session_id,
-            request,
             response,
         );
     }
@@ -233,7 +232,6 @@ fn handle_runtime_noncompact_success_response(
     shared: &RuntimeRotationProxyShared,
     profile_name: &str,
     request_session_id: Option<&str>,
-    request: &RuntimeProxyRequest,
     response: reqwest::Response,
 ) -> Result<Option<RuntimeStandardAttempt>> {
     remember_runtime_session_id(
@@ -242,7 +240,7 @@ fn handle_runtime_noncompact_success_response(
         request_session_id,
         RuntimeRouteKind::Standard,
     )?;
-    let response = match forward_runtime_standard_success_response(shared, request, response) {
+    let response = match forward_runtime_standard_success_response(shared, response) {
         Ok(response) => response,
         Err(err) => {
             return handle_runtime_standard_upstream_error(
