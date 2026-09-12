@@ -74,6 +74,7 @@ pub(crate) fn refresh_runtime_auto_redeem_pool_missing_quota(
     )
 }
 
+#[cfg(any(feature = "mojo-quota", test))]
 fn runtime_auto_redeem_model_is_allowed(requested_model: Option<&str>) -> bool {
     !prodex_quota::openai_model_is_retired_spark(requested_model)
 }
