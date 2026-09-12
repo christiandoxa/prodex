@@ -303,6 +303,10 @@ if [ "\${1:-}" = "--version" ]; then
   printf '%s\\n' 'codex-cli 0.153.4'
   exit 0
 fi
+if [ "\${1:-}" = "--dangerously-bypass-hook-trust" ] && [ "\${2:-}" = "app-server" ]; then
+  printf '%s\\n' '\${1}' > "$SMOKE_CODEX_ARGS"
+  shift
+fi
 if [ "\${1:-}" = "app-server" ] && [ "\${2:-}" = "--help" ]; then
   printf '%s\\n' 'Codex app-server'
   exit 0
