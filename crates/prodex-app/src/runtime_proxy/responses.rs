@@ -4,7 +4,6 @@ mod affinity_state;
 mod attempt;
 mod fallback;
 mod local_selection;
-mod model_fallback;
 mod overloaded;
 mod previous_response;
 mod quota_blocked;
@@ -30,7 +29,6 @@ use self::local_selection::{
     RuntimeResponsesLocalSelectionBlocked, handle_runtime_responses_local_selection_blocked,
     runtime_responses_local_selection_failure_reply,
 };
-use self::model_fallback::try_runtime_responses_luna_spark_fallback;
 use self::overloaded::{RuntimeResponsesOverloaded, handle_runtime_responses_overloaded};
 use self::previous_response::{
     RuntimeResponsesPreviousResponseNotFoundContextInput,
@@ -55,7 +53,6 @@ struct RuntimeResponsesRequestContext<'a> {
     prompt_cache_key: Option<&'a str>,
     request_turn_state: Option<&'a str>,
     request_session_id: Option<&'a str>,
-    requested_model_name: Option<String>,
     request_model_name: Option<String>,
 }
 
@@ -146,7 +143,6 @@ pub(crate) fn proxy_runtime_responses_request(
         prompt_cache_key: prompt_cache_key.as_deref(),
         request_turn_state: request_turn_state.as_deref(),
         request_session_id: request_session_id.as_deref(),
-        requested_model_name: request_model_name.clone(),
         request_model_name,
     };
 
@@ -497,14 +493,6 @@ fn handle_runtime_responses_candidate_exhausted(
             ),
         );
         runtime_proxy_probe_refresh_pause(context.shared, RuntimeRouteKind::Responses);
-        return Ok(RuntimeResponsesLoopControl::Continue);
-    }
-    if try_runtime_responses_luna_spark_fallback(
-        context,
-        affinity_state,
-        loop_state,
-        quota_last_chance_profile,
-    )? {
         return Ok(RuntimeResponsesLoopControl::Continue);
     }
     if let Some(action) = try_runtime_responses_direct_current_profile_fallback(

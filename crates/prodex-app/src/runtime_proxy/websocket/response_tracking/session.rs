@@ -9,7 +9,7 @@ use super::{
     RuntimeWebsocketAttempt, RuntimeWebsocketConnectResult, RuntimeWebsocketSessionState,
     connect_runtime_proxy_upstream_websocket, runtime_auto_redeem_usage_limit_reset_credit,
     runtime_proxy_log, runtime_proxy_log_field, runtime_proxy_structured_log_message,
-    runtime_websocket_precommit_hold_promotion_allowed,
+    runtime_smart_context_model_name_from_body, runtime_websocket_precommit_hold_promotion_allowed,
     runtime_websocket_precommit_transport_retry_allowed,
     try_acquire_runtime_profile_inflight_guard,
 };
@@ -72,6 +72,7 @@ fn connect_runtime_websocket_session_with_auto_redeem(
     turn_state_override: Option<&str>,
     auto_redeem_allowed: bool,
 ) -> Result<RuntimeWebsocketConnectResult> {
+    let requested_model = runtime_smart_context_model_name_from_body(&handshake_request.body);
     let mut auto_redeem_attempted = false;
     loop {
         let result = connect_runtime_proxy_upstream_websocket(
@@ -87,6 +88,7 @@ fn connect_runtime_websocket_session_with_auto_redeem(
                 shared,
                 profile_name,
                 RuntimeRouteKind::Websocket,
+                requested_model.as_deref(),
                 "websocket_connect_quota_blocked",
                 auto_redeem_allowed,
             )? == RuntimeAutoRedeemResetCreditOutcome::Redeemed

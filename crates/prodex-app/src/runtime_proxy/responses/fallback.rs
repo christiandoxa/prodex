@@ -264,10 +264,12 @@ fn handle_runtime_responses_direct_quota(
     profile_name: String,
     response: RuntimeResponsesReply,
 ) -> Result<Option<RuntimeResponsesDirectCurrentFallbackAction>> {
+    let requested_model = runtime_smart_context_model_name_from_body(&fallback.request.body);
     if runtime_auto_redeem_usage_limit_reset_credit(
         fallback.shared,
         &profile_name,
         RuntimeRouteKind::Responses,
+        requested_model.as_deref(),
         "responses_direct_fallback_quota_blocked",
         false,
     )? == RuntimeAutoRedeemResetCreditOutcome::Redeemed

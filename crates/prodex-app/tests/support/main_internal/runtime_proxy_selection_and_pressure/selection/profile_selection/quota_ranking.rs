@@ -262,6 +262,124 @@ fn response_selection_logs_plan_counts_before_pick() {
 }
 
 #[test]
+fn retired_spark_skips_current_selection_fallback_and_precommit_with_healthy_regular_quota() {
+    for plan in ["pro", "prolite"] {
+        let temp_dir = TestDir::isolated();
+        let shared = runtime_shared_for_affinity_selection(&temp_dir, BTreeMap::new());
+        let now = Local::now().timestamp();
+        let mut runtime = shared.runtime.lock().expect("runtime lock should succeed");
+        runtime.state.profiles.remove("second");
+        runtime.profile_probe_cache.insert(
+            "main".to_string(),
+            RuntimeProfileProbeCacheEntry {
+                checked_at: now,
+                auth: AuthSummary {
+                    label: "chatgpt".to_string(),
+                    quota_compatible: true,
+                },
+                result: Ok({
+                    let mut usage = usage_with_main_windows(80, 3_600, 90, 86_400);
+                    usage.plan_type = Some(plan.to_string());
+                    usage
+                }),
+            },
+        );
+        drop(runtime);
+
+        for model in ["spark", "gpt-5.3-codex-spark", "gpt-5.3-spark"] {
+            assert_eq!(
+                select_runtime_response_candidate_for_route_with_request(
+                    &shared,
+                    RuntimeResponseCandidateSelection::fresh(
+                        &BTreeSet::new(),
+                        RuntimeRouteKind::Responses,
+                    ),
+                    None,
+                    Some(model),
+                )
+                .expect("selection should succeed"),
+                None,
+                "retired {plan} {model} must not keep the healthy current profile",
+            );
+            assert_eq!(
+                runtime_proxy_direct_current_fallback_profile(
+                    &shared,
+                    &BTreeSet::new(),
+                    RuntimeRouteKind::Responses,
+                    Some(model),
+                )
+                .expect("direct fallback lookup should succeed"),
+                None,
+                "retired {plan} {model} must not use direct current fallback",
+            );
+            for hard_affinity in [false, true] {
+                match runtime_precommit_quota_gate(RuntimePrecommitQuotaGateRequest {
+                    shared: &shared,
+                    profile_name: "main",
+                    route_kind: RuntimeRouteKind::Responses,
+                    requested_model: Some(model),
+                    has_continuation_context: false,
+                    hard_affinity,
+                    reprobe_context: "retired_spark_test",
+                })
+                .expect("precommit quota gate should succeed")
+                {
+                    RuntimePrecommitQuotaGateDecision::Block {
+                        reason,
+                        summary,
+                        source,
+                    } => {
+                        assert_eq!(reason, RuntimePrecommitQuotaBlockReason::ExhaustedBeforeSend);
+                        assert_eq!(source, Some(RuntimeQuotaSource::LiveProbe));
+                        assert_eq!(summary.five_hour.status, RuntimeQuotaWindowStatus::Exhausted);
+                        assert_eq!(summary.weekly.status, RuntimeQuotaWindowStatus::Exhausted);
+                        assert_eq!(summary.route_band, RuntimeQuotaPressureBand::Exhausted);
+                    }
+                    RuntimePrecommitQuotaGateDecision::Proceed => {
+                        panic!("retired {plan} {model} must be blocked before upstream send")
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn precommit_hard_affinity_preserves_valid_current_model_quota_bypass() {
+    let temp_dir = TestDir::isolated();
+    let shared = runtime_shared_for_affinity_selection(&temp_dir, BTreeMap::new());
+    let now = Local::now().timestamp();
+    let mut runtime = shared.runtime.lock().expect("runtime lock should succeed");
+    runtime.state.profiles.remove("second");
+    runtime.profile_probe_cache.insert(
+        "main".to_string(),
+        RuntimeProfileProbeCacheEntry {
+            checked_at: now,
+            auth: AuthSummary {
+                label: "chatgpt".to_string(),
+                quota_compatible: true,
+            },
+            result: Ok(usage_with_main_windows(0, 300, 95, 86_400)),
+        },
+    );
+    drop(runtime);
+
+    assert!(matches!(
+        runtime_precommit_quota_gate(RuntimePrecommitQuotaGateRequest {
+            shared: &shared,
+            profile_name: "main",
+            route_kind: RuntimeRouteKind::Responses,
+            requested_model: Some("gpt-5.3-codex"),
+            has_continuation_context: false,
+            hard_affinity: true,
+            reprobe_context: "valid_current_model_test",
+        })
+        .expect("precommit quota gate should succeed"),
+        RuntimePrecommitQuotaGateDecision::Proceed
+    ));
+}
+
+#[test]
 fn response_selection_trace_preserves_optimistic_current_circuit_rejection() {
     let temp_dir = TestDir::isolated();
     let shared = runtime_shared_for_affinity_selection(&temp_dir, BTreeMap::new());

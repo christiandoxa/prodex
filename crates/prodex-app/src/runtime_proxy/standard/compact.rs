@@ -29,7 +29,6 @@ mod commit;
 mod fallback;
 mod flow;
 mod logging;
-mod model_fallback;
 mod recovery;
 mod retryable;
 mod transport;
@@ -136,7 +135,6 @@ pub(super) fn proxy_runtime_compact_request(
         request_id,
         request: request.clone(),
         shared,
-        requested_model_name: request_model_name.clone(),
         request_model_name,
         request_previous_response_id,
         request_session_id,
@@ -166,7 +164,6 @@ struct RuntimeCompactSelectionContext<'a> {
     request_id: u64,
     request: RuntimeProxyRequest,
     shared: &'a RuntimeRotationProxyShared,
-    requested_model_name: Option<String>,
     request_model_name: Option<String>,
     request_previous_response_id: Option<String>,
     request_session_id: Option<String>,
@@ -364,9 +361,6 @@ impl RuntimeCompactSelectionContext<'_> {
             return Ok(RuntimeCompactLoopAction::Continue);
         }
         if self.can_wait_for_overload_recovery() && self.wait_for_overload_recovery()? {
-            return Ok(RuntimeCompactLoopAction::Continue);
-        }
-        if self.try_luna_spark_fallback()? {
             return Ok(RuntimeCompactLoopAction::Continue);
         }
         Ok(RuntimeCompactLoopAction::Return(self.finish(

@@ -74,11 +74,16 @@ pub(crate) fn refresh_runtime_auto_redeem_pool_missing_quota(
     )
 }
 
+fn runtime_auto_redeem_model_is_allowed(requested_model: Option<&str>) -> bool {
+    !prodex_quota::openai_model_is_retired_spark(requested_model)
+}
+
 #[cfg(not(feature = "mojo-quota"))]
 pub(crate) fn runtime_auto_redeem_usage_limit_reset_credit(
     _shared: &RuntimeRotationProxyShared,
     _profile_name: &str,
     _route_kind: RuntimeRouteKind,
+    _requested_model: Option<&str>,
     _context: &str,
     _prefer_best_pool_profile: bool,
 ) -> Result<RuntimeAutoRedeemResetCreditOutcome> {
@@ -90,9 +95,13 @@ pub(crate) fn runtime_auto_redeem_usage_limit_reset_credit(
     shared: &RuntimeRotationProxyShared,
     profile_name: &str,
     route_kind: RuntimeRouteKind,
+    requested_model: Option<&str>,
     context: &str,
     prefer_best_pool_profile: bool,
 ) -> Result<RuntimeAutoRedeemResetCreditOutcome> {
+    if !runtime_auto_redeem_model_is_allowed(requested_model) {
+        return Ok(RuntimeAutoRedeemResetCreditOutcome::NothingToRedeem);
+    }
     if !shared.auto_redeem_enabled {
         return Ok(RuntimeAutoRedeemResetCreditOutcome::NothingToRedeem);
     }
@@ -317,5 +326,14 @@ mod tests {
         assert!(message.contains("api_key=<redacted>"));
         assert!(!message.contains("auto-redeem-token"));
         assert!(!message.contains("auto-redeem-key"));
+    }
+
+    #[test]
+    fn retired_models_never_allow_auto_redeem() {
+        for model in ["spark", "gpt-5.3-codex-spark", "gpt-5.3-spark"] {
+            assert!(!runtime_auto_redeem_model_is_allowed(Some(model)));
+        }
+        assert!(runtime_auto_redeem_model_is_allowed(Some("gpt-5.3-codex")));
+        assert!(runtime_auto_redeem_model_is_allowed(None));
     }
 }

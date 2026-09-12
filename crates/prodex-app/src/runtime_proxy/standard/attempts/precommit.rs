@@ -25,13 +25,15 @@ pub(super) fn runtime_standard_precommit_quota_guard(
         return Ok(RuntimeStandardPrecommitGuard::Continue);
     }
 
-    if runtime_auto_redeem_usage_limit_reset_credit(
-        shared,
-        profile_name,
-        RuntimeRouteKind::Standard,
-        "standard_precommit",
-        fresh_request,
-    )? == RuntimeAutoRedeemResetCreditOutcome::Redeemed
+    if !prodex_quota::openai_model_is_retired_spark(requested_model)
+        && runtime_auto_redeem_usage_limit_reset_credit(
+            shared,
+            profile_name,
+            RuntimeRouteKind::Standard,
+            requested_model,
+            "standard_precommit",
+            fresh_request,
+        )? == RuntimeAutoRedeemResetCreditOutcome::Redeemed
     {
         let (redeemed_summary, _) = runtime_profile_quota_summary_for_route_with_model(
             shared,
@@ -79,25 +81,29 @@ pub(super) fn runtime_compact_precommit_quota_guard(
         return Ok(RuntimeStandardPrecommitGuard::Continue);
     }
 
-    if !allow_quota_exhausted_send {
-        if runtime_auto_redeem_usage_limit_reset_credit(
+    let retired_spark = prodex_quota::openai_model_is_retired_spark(requested_model);
+    if !retired_spark
+        && !allow_quota_exhausted_send
+        && runtime_auto_redeem_usage_limit_reset_credit(
             shared,
             profile_name,
             RuntimeRouteKind::Compact,
+            requested_model,
             "compact_precommit",
             fresh_request,
         )? == RuntimeAutoRedeemResetCreditOutcome::Redeemed
-        {
-            let (redeemed_summary, _) = runtime_profile_quota_summary_for_route_with_model(
-                shared,
-                profile_name,
-                RuntimeRouteKind::Compact,
-                requested_model,
-            )?;
-            if redeemed_summary.route_band != RuntimeQuotaPressureBand::Exhausted {
-                return Ok(RuntimeStandardPrecommitGuard::RetryWithoutGuard);
-            }
+    {
+        let (redeemed_summary, _) = runtime_profile_quota_summary_for_route_with_model(
+            shared,
+            profile_name,
+            RuntimeRouteKind::Compact,
+            requested_model,
+        )?;
+        if redeemed_summary.route_band != RuntimeQuotaPressureBand::Exhausted {
+            return Ok(RuntimeStandardPrecommitGuard::RetryWithoutGuard);
         }
+    }
+    if retired_spark || !allow_quota_exhausted_send {
         runtime_proxy_log(
             shared,
             format!(

@@ -53,6 +53,7 @@ pub(super) fn handle_runtime_responses_quota_blocked(
             shared,
             &profile_name,
             RuntimeRouteKind::Responses,
+            request_model_name,
             "responses_quota_blocked",
             false,
         )? == RuntimeAutoRedeemResetCreditOutcome::Redeemed
@@ -68,12 +69,11 @@ pub(super) fn handle_runtime_responses_quota_blocked(
     }
 
     let quota_message = extract_runtime_proxy_quota_message_from_response_reply(&response);
-    mark_runtime_profile_quota_quarantine_for_request_model(
+    mark_runtime_profile_quota_quarantine(
         shared,
         &profile_name,
         RuntimeRouteKind::Responses,
         quota_message.as_deref(),
-        request_model_name,
     )?;
     if !affinity_state.quota_blocked_affinity_is_releasable(
         &profile_name,
@@ -188,15 +188,5 @@ pub(super) fn handle_runtime_responses_quota_attempt(
         excluded_profiles: &mut loop_state.excluded_profiles,
         last_failure: &mut loop_state.last_failure,
     })?;
-    if result.is_some()
-        && try_runtime_responses_luna_spark_fallback(
-            context,
-            affinity_state,
-            loop_state,
-            quota_last_chance_profile,
-        )?
-    {
-        return Ok(None);
-    }
     Ok(result)
 }

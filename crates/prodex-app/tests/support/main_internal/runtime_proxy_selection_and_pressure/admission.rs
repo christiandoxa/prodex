@@ -4,8 +4,6 @@ use super::*;
 mod cli_mount;
 #[path = "admission/compact.rs"]
 mod compact;
-#[path = "admission/compact_model_fallback.rs"]
-mod compact_model_fallback;
 #[path = "admission/responses_overload_recovery.rs"]
 mod responses_overload_recovery;
 #[path = "admission/continuation_store.rs"]
@@ -22,6 +20,8 @@ mod local_capacity;
 mod rotation_matrix;
 #[path = "admission/pre_send.rs"]
 mod pre_send;
+#[path = "admission/retired_spark.rs"]
+mod retired_spark;
 #[path = "admission/pressure_budget.rs"]
 mod pressure_budget;
 #[path = "admission/quota_fallback.rs"]
