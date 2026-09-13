@@ -2,30 +2,20 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.429.3 - 2026-09-13
+
+### Docs
+
+- Remove completed integration ledger (`3cb24f7`)
+- Pin final main audit SHA (`1f1ada0`)
+- Finalize audit evidence (`09e683b`)
+- Record complete integration ledger (`8d28c11`)
+
 ## 0.429.2 - 2026-09-13
 
 ### CLI
 
 - Propagate hook trust bypass to every launch (`efcaff4`)
-# Prodex 0.429.2
-
-## New Features
-
-- None.
-
-## Bug Fixes
-
-- Propagate Codex's official hook-trust bypass through every Super launch path,
-  including the interactive child, app-server companion, and overlay-config
-  paths, while keeping hooks enabled.
-- Preserve the normal non-Super hook-trust default.
-
-## Changelog
-
-- Close the `Hooks need review` regression without automating or suppressing
-  Codex's trust prompt.
-
-Full Changelog: [0.429.1...0.429.2](https://github.com/christiandoxa/prodex/compare/0.429.1...0.429.2)
 
 ## 0.429.1 - 2026-09-13
 
