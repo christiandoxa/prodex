@@ -566,7 +566,7 @@ fn find_compatible_runtime_broker_registry_discovers_other_broker_key() {
     fs::write(
         &script_path,
         format!(
-            "#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then\n  echo 'prodex {}'\n  exit 0\nfi\nsleep 30\n",
+            "#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then\n  echo 'prodex {}'\n  exit 0\nfi\nwhile :; do\n  sleep 30\ndone\n",
             runtime_current_prodex_version()
         ),
     )
