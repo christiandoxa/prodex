@@ -6,10 +6,37 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 
 ### Docs
 
+- Remove obsolete ownership baseline (`1429b14`)
 - Remove completed integration ledger (`3cb24f7`)
 - Pin final main audit SHA (`1f1ada0`)
 - Finalize audit evidence (`09e683b`)
 - Record complete integration ledger (`8d28c11`)
+# Prodex 0.429.3
+
+## New Features
+
+- None.
+
+## Bug Fixes
+
+- Stabilize runtime-broker process-identity regression coverage by keeping the
+  fixture shell process alive instead of allowing its final sleep command to
+  replace the process under CI scheduling.
+- Close a cross-platform probe-refresh test-isolation race by waiting for
+  scheduled probe reservations to drain before the next runtime-selection
+  fixture starts.
+
+## Changelog
+
+- Consolidate duplicated control-plane, gateway, session-store, runtime-launch,
+  CLI, state, and application helpers while removing dead audit APIs, unused
+  npm script surfaces, and no-op validation paths.
+- Remove the completed refactor integration ledger and the obsolete historical
+  Mojo ownership baseline after their evidence was no longer an active release
+  gate.
+- Keep all package, Cargo, fuzz, and platform metadata synchronized at 0.429.3.
+
+Full Changelog: [0.429.2...0.429.3](https://github.com/christiandoxa/prodex/compare/0.429.2...0.429.3)
 
 ## 0.429.2 - 2026-09-13
 
