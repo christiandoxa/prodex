@@ -80,6 +80,7 @@ pub(super) fn runtime_doctor_transport_backoff_profile_name(key: &str) -> &str {
         .unwrap_or(key)
 }
 
+#[cfg(not(feature = "mojo"))]
 fn runtime_doctor_effective_score(
     entry: &RuntimeDoctorHealthScore,
     now: i64,
@@ -90,6 +91,26 @@ fn runtime_doctor_effective_score(
         .saturating_div(decay_seconds.max(1))
         .clamp(0, i64::from(u32::MAX)) as u32;
     entry.score.saturating_sub(decay)
+}
+
+#[cfg(feature = "mojo")]
+fn runtime_doctor_effective_score(
+    entry: &RuntimeDoctorHealthScore,
+    now: i64,
+    decay_seconds: i64,
+) -> u32 {
+    prodex_mojo_core::rich::runtime_doctor_state_plan(
+        prodex_mojo_core::rich::RuntimeDoctorStatePlanInput {
+            operation: prodex_mojo_core::rich::RUNTIME_DOCTOR_STATE_OP_SCORE,
+            now,
+            score: i64::from(entry.score),
+            updated_at: entry.updated_at,
+            decay_seconds: decay_seconds.max(1),
+            ..prodex_mojo_core::rich::RuntimeDoctorStatePlanInput::default()
+        },
+    )
+    .expect("Mojo runtime-doctor score plan returned invalid output")
+    .effective_score as u32
 }
 
 pub(super) fn runtime_doctor_effective_health_score(

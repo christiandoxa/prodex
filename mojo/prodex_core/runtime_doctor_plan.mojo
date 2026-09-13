@@ -934,3 +934,785 @@ def prodex_mojo_rich_runtime_doctor_plan_v1(
     else:
         runtime_doctor_fill_next(input, output)
     return 0
+
+
+# The summary ABI accepts sanitized marker counts only. Rust keeps log parsing,
+# redaction, filesystem access, and process evidence outside this kernel.
+comptime RUNTIME_DOCTOR_SUMMARY_PLAN_ABI_VERSION: Int64 = 1
+comptime RUNTIME_DOCTOR_SUMMARY_MARKER_COUNT: Int64 = 128
+
+comptime SUMMARY_MARKER_RUNTIME_PROXY_OVERLOAD_BACKOFF: Int64 = 0
+comptime SUMMARY_MARKER_RUNTIME_PROXY_LANE_LIMIT: Int64 = 1
+comptime SUMMARY_MARKER_RUNTIME_PROXY_ACTIVE_LIMIT: Int64 = 2
+comptime SUMMARY_MARKER_RUNTIME_PROXY_QUEUE_OVERLOADED: Int64 = 3
+comptime SUMMARY_MARKER_PROFILE_CIRCUIT_OPEN: Int64 = 4
+comptime SUMMARY_MARKER_PROFILE_CIRCUIT_HALF_OPEN: Int64 = 5
+comptime SUMMARY_MARKER_WEBSOCKET_FRAME_TIMEOUT: Int64 = 6
+comptime SUMMARY_MARKER_WEBSOCKET_HOLD_TIMEOUT: Int64 = 7
+comptime SUMMARY_MARKER_WEBSOCKET_DNS_TIMEOUT: Int64 = 8
+comptime SUMMARY_MARKER_WEBSOCKET_DNS_REJECT: Int64 = 9
+comptime SUMMARY_MARKER_WEBSOCKET_DNS_ENQUEUE: Int64 = 10
+comptime SUMMARY_MARKER_WEBSOCKET_DNS_DISPATCH: Int64 = 11
+comptime SUMMARY_MARKER_WEBSOCKET_LOCAL_PRESSURE: Int64 = 12
+comptime SUMMARY_MARKER_WEBSOCKET_CONNECT_REJECT: Int64 = 13
+comptime SUMMARY_MARKER_WEBSOCKET_CONNECT_REJECTED: Int64 = 14
+comptime SUMMARY_MARKER_WEBSOCKET_CONNECT_ENQUEUE: Int64 = 15
+comptime SUMMARY_MARKER_WEBSOCKET_CONNECT_DISPATCH: Int64 = 16
+comptime SUMMARY_MARKER_WEBSOCKET_TUNNEL_FAILURE: Int64 = 17
+comptime SUMMARY_MARKER_PROFILE_INFLIGHT: Int64 = 18
+comptime SUMMARY_MARKER_PROFILE_HEALTH: Int64 = 19
+comptime SUMMARY_MARKER_PROFILE_BAD_PAIRING: Int64 = 20
+comptime SUMMARY_MARKER_PROFILE_AUTH_FAILURE: Int64 = 21
+comptime SUMMARY_MARKER_PROVIDER_AUTH_FAILURE: Int64 = 22
+comptime SUMMARY_MARKER_COMPACT_FALLBACK_BLOCKED: Int64 = 23
+comptime SUMMARY_MARKER_COMPACT_PRESSURE_SHED: Int64 = 24
+comptime SUMMARY_MARKER_CHAIN_DEAD: Int64 = 25
+comptime SUMMARY_MARKER_STALE_CONTINUATION: Int64 = 26
+comptime SUMMARY_MARKER_CHAIN_RETRIED: Int64 = 27
+comptime SUMMARY_MARKER_PREVIOUS_RESPONSE_BLOCKED: Int64 = 28
+comptime SUMMARY_MARKER_PREVIOUS_RESPONSE_FALLBACK: Int64 = 29
+comptime SUMMARY_MARKER_PREVIOUS_RESPONSE_NOT_FOUND: Int64 = 30
+comptime SUMMARY_MARKER_COMPACT_FINAL_FAILURE: Int64 = 31
+comptime SUMMARY_MARKER_COMPAT_WARNING: Int64 = 32
+comptime SUMMARY_MARKER_WEBSOCKET_WATCHDOG: Int64 = 33
+comptime SUMMARY_MARKER_AUTH_RECOVERED: Int64 = 34
+comptime SUMMARY_MARKER_PRECOMMIT_BUDGET: Int64 = 35
+comptime SUMMARY_MARKER_UPSTREAM_USAGE_LIMIT: Int64 = 36
+comptime SUMMARY_MARKER_RESPONSES_PRE_SEND: Int64 = 37
+comptime SUMMARY_MARKER_WEBSOCKET_PRE_SEND: Int64 = 38
+comptime SUMMARY_MARKER_QUOTA_CRITICAL: Int64 = 39
+comptime SUMMARY_MARKER_GEMINI_QUOTA_ROTATE: Int64 = 40
+comptime SUMMARY_MARKER_GEMINI_RATE_RETRY: Int64 = 41
+comptime SUMMARY_MARKER_PROVIDER_MODEL_FALLBACK: Int64 = 42
+comptime SUMMARY_MARKER_GEMINI_STREAM_RETRY: Int64 = 43
+comptime SUMMARY_MARKER_GEMINI_STREAM_FALLBACK: Int64 = 44
+comptime SUMMARY_MARKER_GEMINI_COMPACT_FALLBACK: Int64 = 45
+comptime SUMMARY_MARKER_GEMINI_LIVE_ERROR: Int64 = 46
+comptime SUMMARY_MARKER_GEMINI_LIVE_SIDECAR_ERROR: Int64 = 47
+comptime SUMMARY_MARKER_GEMINI_LIVE_SESSION_ERROR: Int64 = 48
+comptime SUMMARY_MARKER_STREAM_READ: Int64 = 49
+comptime SUMMARY_MARKER_LOCAL_WRITER: Int64 = 50
+comptime SUMMARY_MARKER_CONNECT_TIMEOUT: Int64 = 51
+comptime SUMMARY_MARKER_TLS_ERROR: Int64 = 52
+comptime SUMMARY_MARKER_CONNECT_ERROR: Int64 = 53
+comptime SUMMARY_MARKER_STATE_SAVE_ERROR: Int64 = 54
+comptime SUMMARY_MARKER_STATE_SAVE_BACKPRESSURE: Int64 = 55
+comptime SUMMARY_MARKER_JOURNAL_SAVE_BACKPRESSURE: Int64 = 56
+comptime SUMMARY_MARKER_SYNC_PROBE_SKIP: Int64 = 57
+comptime SUMMARY_MARKER_PROBE_BACKPRESSURE: Int64 = 58
+comptime SUMMARY_MARKER_PROBE_ERROR: Int64 = 59
+comptime SUMMARY_MARKER_PROBE_START: Int64 = 60
+comptime SUMMARY_MARKER_FIRST_UPSTREAM_CHUNK: Int64 = 61
+comptime SUMMARY_MARKER_FIRST_LOCAL_CHUNK: Int64 = 62
+comptime SUMMARY_MARKER_STARTUP_AUDIT: Int64 = 63
+comptime SUMMARY_MARKER_COMPACT_EXIT_CANDIDATE: Int64 = 64
+comptime SUMMARY_MARKER_COMPACT_EXIT_COMMITTED: Int64 = 65
+comptime SUMMARY_MARKER_COMPACT_EXIT_COMMITTED_OWNER: Int64 = 66
+comptime SUMMARY_MARKER_COMPACT_EXIT_FOLLOWUP_OWNER: Int64 = 67
+comptime SUMMARY_MARKER_COMPACT_EXIT_LINEAGE: Int64 = 68
+comptime SUMMARY_MARKER_COMPACT_EXIT_OVERLOAD_RETRY: Int64 = 69
+comptime SUMMARY_MARKER_COMPACT_EXIT_PRECOMMIT: Int64 = 70
+comptime SUMMARY_MARKER_COMPACT_EXIT_PRESSURE: Int64 = 71
+comptime SUMMARY_MARKER_COMPACT_EXIT_QUOTA: Int64 = 72
+comptime SUMMARY_MARKER_COMPACT_EXIT_RETRYABLE: Int64 = 73
+comptime SUMMARY_MARKER_COMPACT_TRANSPORT: Int64 = 74
+comptime SUMMARY_MARKER_COMMITTED: Int64 = 75
+comptime SUMMARY_MARKER_COMMITTED_OWNER: Int64 = 76
+comptime SUMMARY_MARKER_FOLLOWUP_OWNER: Int64 = 77
+comptime SUMMARY_MARKER_LINEAGE: Int64 = 78
+comptime SUMMARY_MARKER_OVERLOAD_RETRY: Int64 = 79
+comptime SUMMARY_MARKER_COMPACT_PRECOMMIT: Int64 = 80
+comptime SUMMARY_MARKER_COMPACT_PRESSURE: Int64 = 81
+comptime SUMMARY_MARKER_COMPACT_QUOTA: Int64 = 82
+comptime SUMMARY_MARKER_COMPACT_RETRYABLE: Int64 = 83
+comptime SUMMARY_MARKER_KEEP_AFFINITY: Int64 = 84
+comptime SUMMARY_MARKER_KEEP_CURRENT: Int64 = 85
+comptime SUMMARY_MARKER_SELECTION_PICK: Int64 = 86
+comptime SUMMARY_MARKER_SELECTION_SKIP_CURRENT: Int64 = 87
+comptime SUMMARY_MARKER_SELECTION_SKIP_AFFINITY: Int64 = 88
+comptime SUMMARY_MARKER_STATE_SAVE_SKIPPED: Int64 = 89
+comptime SUMMARY_MARKER_PROBE_OK: Int64 = 90
+comptime SUMMARY_MARKER_DNS_ERROR: Int64 = 91
+comptime SUMMARY_MARKER_GEMINI_SIDECAR_ACCEPT_ERROR: Int64 = 92
+comptime SUMMARY_MARKER_LOCAL_SELECTION_BLOCKED: Int64 = 93
+comptime SUMMARY_MARKER_UPSTREAM_OVERLOAD_PASSTHROUGH: Int64 = 94
+comptime SUMMARY_MARKER_UPSTREAM_OVERLOADED: Int64 = 95
+comptime SUMMARY_MARKER_UPSTREAM_READ_ERROR: Int64 = 96
+comptime SUMMARY_MARKER_UPSTREAM_SEND_ERROR: Int64 = 97
+comptime SUMMARY_MARKER_UPSTREAM_STREAM_ERROR: Int64 = 98
+comptime SUMMARY_MARKER_PROFILE_TRANSPORT_BACKOFF: Int64 = 99
+comptime SUMMARY_MARKER_PROFILE_TRANSPORT_FAILURE: Int64 = 100
+comptime SUMMARY_MARKER_JOURNAL_SAVE_ERROR: Int64 = 101
+comptime SUMMARY_MARKER_UPSTREAM_CONNECT_HTTP: Int64 = 102
+comptime SUMMARY_MARKER_UPSTREAM_CLOSE_BEFORE_COMPLETED: Int64 = 103
+comptime SUMMARY_MARKER_UPSTREAM_CONNECTION_CLOSED: Int64 = 104
+comptime SUMMARY_MARKER_COMPACT_CANDIDATE: Int64 = 105
+comptime SUMMARY_MARKER_LOCAL_SELECTION_PLAN: Int64 = 106
+comptime SUMMARY_MARKER_PROFILE_AUTH_PROACTIVE_SYNC_FAILED: Int64 = 107
+comptime SUMMARY_MARKER_PROFILE_QUOTA_QUARANTINE: Int64 = 108
+
+comptime SUMMARY_PRESSURE_LOW: Int64 = 0
+comptime SUMMARY_PRESSURE_ELEVATED: Int64 = 1
+comptime SUMMARY_PRESSURE_ACTIVE: Int64 = 2
+comptime SUMMARY_PRESSURE_STALE_RISK: Int64 = 3
+
+comptime SUMMARY_DIAGNOSIS_NONE: Int64 = 0
+comptime SUMMARY_DIAGNOSIS_NO_POINTER: Int64 = 1
+comptime SUMMARY_DIAGNOSIS_NO_LOG: Int64 = 2
+comptime SUMMARY_DIAGNOSIS_EMPTY_LOG: Int64 = 3
+comptime SUMMARY_DIAGNOSIS_PROXY_OVERLOAD_BACKOFF: Int64 = 4
+comptime SUMMARY_DIAGNOSIS_LANE_PRESSURE: Int64 = 5
+comptime SUMMARY_DIAGNOSIS_ACTIVE_PRESSURE: Int64 = 6
+comptime SUMMARY_DIAGNOSIS_QUEUE_OVERLOAD: Int64 = 7
+comptime SUMMARY_DIAGNOSIS_CIRCUIT_OPEN: Int64 = 8
+comptime SUMMARY_DIAGNOSIS_CIRCUIT_HALF_OPEN: Int64 = 9
+comptime SUMMARY_DIAGNOSIS_WEBSOCKET_FRAME_TIMEOUT: Int64 = 10
+comptime SUMMARY_DIAGNOSIS_WEBSOCKET_HOLD_TIMEOUT: Int64 = 11
+comptime SUMMARY_DIAGNOSIS_WEBSOCKET_DNS_TIMEOUT: Int64 = 12
+comptime SUMMARY_DIAGNOSIS_WEBSOCKET_DNS_REJECT: Int64 = 13
+comptime SUMMARY_DIAGNOSIS_WEBSOCKET_DNS_OVERFLOW: Int64 = 14
+comptime SUMMARY_DIAGNOSIS_WEBSOCKET_LOCAL_PRESSURE: Int64 = 15
+comptime SUMMARY_DIAGNOSIS_WEBSOCKET_CONNECT_REJECT: Int64 = 16
+comptime SUMMARY_DIAGNOSIS_WEBSOCKET_CONNECT_ENQUEUE: Int64 = 17
+comptime SUMMARY_DIAGNOSIS_WEBSOCKET_CONNECT_DISPATCH: Int64 = 18
+comptime SUMMARY_DIAGNOSIS_WEBSOCKET_TUNNEL_FAILURE: Int64 = 19
+comptime SUMMARY_DIAGNOSIS_PROFILE_INFLIGHT: Int64 = 20
+comptime SUMMARY_DIAGNOSIS_PROFILE_HEALTH: Int64 = 21
+comptime SUMMARY_DIAGNOSIS_PROFILE_BAD_PAIRING: Int64 = 22
+comptime SUMMARY_DIAGNOSIS_PROFILE_AUTH_FAILURE: Int64 = 23
+comptime SUMMARY_DIAGNOSIS_PROVIDER_AUTH_FAILURE: Int64 = 24
+comptime SUMMARY_DIAGNOSIS_COMPACT_FALLBACK_BLOCKED: Int64 = 25
+comptime SUMMARY_DIAGNOSIS_COMPACT_PRESSURE_SHED: Int64 = 26
+comptime SUMMARY_DIAGNOSIS_CHAIN_DEAD: Int64 = 27
+comptime SUMMARY_DIAGNOSIS_STALE_CONTINUATION: Int64 = 28
+comptime SUMMARY_DIAGNOSIS_CHAIN_RETRIED: Int64 = 29
+comptime SUMMARY_DIAGNOSIS_PREVIOUS_RESPONSE_BLOCKED: Int64 = 30
+comptime SUMMARY_DIAGNOSIS_PREVIOUS_RESPONSE_FALLBACK: Int64 = 31
+comptime SUMMARY_DIAGNOSIS_PREVIOUS_RESPONSE_NOT_FOUND: Int64 = 32
+comptime SUMMARY_DIAGNOSIS_COMPACT_FINAL_FAILURE: Int64 = 33
+comptime SUMMARY_DIAGNOSIS_COMPACT_EXIT_PATHS: Int64 = 34
+comptime SUMMARY_DIAGNOSIS_COMPAT_WARNING: Int64 = 35
+comptime SUMMARY_DIAGNOSIS_DEAD_CONTINUATIONS: Int64 = 36
+comptime SUMMARY_DIAGNOSIS_SUSPECT_CONTINUATIONS: Int64 = 37
+comptime SUMMARY_DIAGNOSIS_WEBSOCKET_WATCHDOG: Int64 = 38
+comptime SUMMARY_DIAGNOSIS_AUTH_RECOVERED: Int64 = 39
+comptime SUMMARY_DIAGNOSIS_PRECOMMIT_BUDGET: Int64 = 40
+comptime SUMMARY_DIAGNOSIS_QUOTA_HARDENING: Int64 = 41
+comptime SUMMARY_DIAGNOSIS_GEMINI_QUOTA_RETRY: Int64 = 42
+comptime SUMMARY_DIAGNOSIS_PROVIDER_MODEL_FALLBACK: Int64 = 43
+comptime SUMMARY_DIAGNOSIS_GEMINI_STREAM_RETRY: Int64 = 44
+comptime SUMMARY_DIAGNOSIS_GEMINI_COMPACT_FALLBACK: Int64 = 45
+comptime SUMMARY_DIAGNOSIS_GEMINI_LIVE_ERROR: Int64 = 46
+comptime SUMMARY_DIAGNOSIS_STREAM_READ: Int64 = 47
+comptime SUMMARY_DIAGNOSIS_LOCAL_WRITER: Int64 = 48
+comptime SUMMARY_DIAGNOSIS_UPSTREAM_CONNECT: Int64 = 49
+comptime SUMMARY_DIAGNOSIS_STATE_SAVE: Int64 = 50
+comptime SUMMARY_DIAGNOSIS_PERSISTENCE: Int64 = 51
+comptime SUMMARY_DIAGNOSIS_SYNC_PROBE: Int64 = 52
+comptime SUMMARY_DIAGNOSIS_PROBE_BACKPRESSURE: Int64 = 53
+comptime SUMMARY_DIAGNOSIS_DEGRADED_ROUTES: Int64 = 54
+comptime SUMMARY_DIAGNOSIS_ORPHAN_DIRS: Int64 = 55
+comptime SUMMARY_DIAGNOSIS_PROBE_ERROR: Int64 = 56
+comptime SUMMARY_DIAGNOSIS_PROBE_ACTIVITY: Int64 = 57
+comptime SUMMARY_DIAGNOSIS_WRITER_STALL: Int64 = 58
+comptime SUMMARY_DIAGNOSIS_BROKER_MISMATCH: Int64 = 59
+comptime SUMMARY_DIAGNOSIS_BINARY_MISMATCH: Int64 = 60
+comptime SUMMARY_DIAGNOSIS_SELECTION: Int64 = 61
+comptime SUMMARY_DIAGNOSIS_NO_RECENT_FAILURE: Int64 = 62
+
+@fieldwise_init
+struct ProdexRuntimeDoctorSummaryPlanInput(Copyable):
+    var marker_counts: InlineArray[Int64, 128]
+    var line_count: Int64
+    var pointer_exists: Int64
+    var log_exists: Int64
+    var stale_persisted_usage_snapshots: Int64
+    var orphan_managed_dirs: Int64
+    var startup_audit_risk: Int64
+    var persisted_dead_continuations: Int64
+    var suspect_continuations: Int64
+    var degraded_routes: Int64
+    var runtime_broker_mismatch: Int64
+    var prodex_binary_mismatch: Int64
+    var persisted_quota_snapshot_risk: Int64
+
+
+@fieldwise_init
+struct ProdexRuntimeDoctorSummaryPlan(Copyable):
+    var abi_version: Int64
+    var selection_pressure: Int64
+    var transport_pressure: Int64
+    var persistence_pressure: Int64
+    var quota_freshness_pressure: Int64
+    var startup_audit_pressure: Int64
+    var diagnosis_kind: Int64
+
+
+def runtime_doctor_summary_count(
+    input: ProdexRuntimeDoctorSummaryPlanInput,
+    index: Int64,
+) -> Int64:
+    return input.marker_counts[Int(index)]
+
+
+def runtime_doctor_summary_any_selection(input: ProdexRuntimeDoctorSummaryPlanInput) -> Bool:
+    return (
+        runtime_doctor_summary_count(input, SUMMARY_MARKER_KEEP_AFFINITY) > 0
+        or runtime_doctor_summary_count(input, SUMMARY_MARKER_KEEP_CURRENT) > 0
+        or runtime_doctor_summary_count(input, SUMMARY_MARKER_SELECTION_PICK) > 0
+        or runtime_doctor_summary_count(input, SUMMARY_MARKER_SELECTION_SKIP_CURRENT) > 0
+        or runtime_doctor_summary_count(input, SUMMARY_MARKER_SELECTION_SKIP_AFFINITY) > 0
+        or runtime_doctor_summary_count(input, SUMMARY_MARKER_SYNC_PROBE_SKIP) > 0
+        or runtime_doctor_summary_count(input, SUMMARY_MARKER_LOCAL_SELECTION_BLOCKED) > 0
+        or runtime_doctor_summary_count(input, SUMMARY_MARKER_PRECOMMIT_BUDGET) > 0
+        or runtime_doctor_summary_count(input, SUMMARY_MARKER_COMPACT_PRECOMMIT) > 0
+        or runtime_doctor_summary_count(input, SUMMARY_MARKER_COMPACT_CANDIDATE) > 0
+        or runtime_doctor_summary_count(input, SUMMARY_MARKER_COMPACT_TRANSPORT) > 0
+        or runtime_doctor_summary_count(input, SUMMARY_MARKER_GEMINI_QUOTA_ROTATE) > 0
+    )
+
+
+def runtime_doctor_summary_any_transport(input: ProdexRuntimeDoctorSummaryPlanInput) -> Bool:
+    return (
+        runtime_doctor_summary_count(input, SUMMARY_MARKER_STREAM_READ) > 0
+        or runtime_doctor_summary_count(input, SUMMARY_MARKER_CONNECT_TIMEOUT) > 0
+        or runtime_doctor_summary_count(input, SUMMARY_MARKER_DNS_ERROR) > 0
+        or runtime_doctor_summary_count(input, SUMMARY_MARKER_TLS_ERROR) > 0
+        or runtime_doctor_summary_count(input, SUMMARY_MARKER_CONNECT_ERROR) > 0
+        or runtime_doctor_summary_count(input, SUMMARY_MARKER_UPSTREAM_CONNECT_HTTP) > 0
+        or runtime_doctor_summary_count(input, SUMMARY_MARKER_UPSTREAM_CLOSE_BEFORE_COMPLETED) > 0
+        or runtime_doctor_summary_count(input, SUMMARY_MARKER_UPSTREAM_CONNECTION_CLOSED) > 0
+        or runtime_doctor_summary_count(input, SUMMARY_MARKER_UPSTREAM_READ_ERROR) > 0
+        or runtime_doctor_summary_count(input, SUMMARY_MARKER_UPSTREAM_SEND_ERROR) > 0
+        or runtime_doctor_summary_count(input, SUMMARY_MARKER_UPSTREAM_STREAM_ERROR) > 0
+        or runtime_doctor_summary_count(input, SUMMARY_MARKER_COMPACT_TRANSPORT) > 0
+        or runtime_doctor_summary_count(input, SUMMARY_MARKER_PROFILE_TRANSPORT_FAILURE) > 0
+        or runtime_doctor_summary_count(input, SUMMARY_MARKER_PROFILE_TRANSPORT_BACKOFF) > 0
+        or runtime_doctor_summary_count(input, SUMMARY_MARKER_PROFILE_CIRCUIT_OPEN) > 0
+        or runtime_doctor_summary_count(input, SUMMARY_MARKER_PROFILE_CIRCUIT_HALF_OPEN) > 0
+        or runtime_doctor_summary_count(input, SUMMARY_MARKER_WEBSOCKET_FRAME_TIMEOUT) > 0
+        or runtime_doctor_summary_count(input, SUMMARY_MARKER_WEBSOCKET_HOLD_TIMEOUT) > 0
+        or runtime_doctor_summary_count(input, SUMMARY_MARKER_WEBSOCKET_DNS_TIMEOUT) > 0
+        or runtime_doctor_summary_count(input, SUMMARY_MARKER_WEBSOCKET_DNS_ENQUEUE) > 0
+        or runtime_doctor_summary_count(input, SUMMARY_MARKER_WEBSOCKET_DNS_DISPATCH) > 0
+        or runtime_doctor_summary_count(input, SUMMARY_MARKER_WEBSOCKET_DNS_REJECT) > 0
+        or runtime_doctor_summary_count(input, SUMMARY_MARKER_WEBSOCKET_LOCAL_PRESSURE) > 0
+        or runtime_doctor_summary_count(input, SUMMARY_MARKER_WEBSOCKET_CONNECT_ENQUEUE) > 0
+        or runtime_doctor_summary_count(input, SUMMARY_MARKER_WEBSOCKET_CONNECT_DISPATCH) > 0
+        or runtime_doctor_summary_count(input, SUMMARY_MARKER_WEBSOCKET_CONNECT_REJECT) > 0
+        or runtime_doctor_summary_count(input, SUMMARY_MARKER_WEBSOCKET_CONNECT_REJECTED) > 0
+        or runtime_doctor_summary_count(input, SUMMARY_MARKER_WEBSOCKET_TUNNEL_FAILURE) > 0
+        or runtime_doctor_summary_count(input, SUMMARY_MARKER_LOCAL_WRITER) > 0
+        or runtime_doctor_summary_count(input, SUMMARY_MARKER_GEMINI_STREAM_RETRY) > 0
+        or runtime_doctor_summary_count(input, SUMMARY_MARKER_GEMINI_STREAM_FALLBACK) > 0
+        or runtime_doctor_summary_count(input, SUMMARY_MARKER_GEMINI_LIVE_ERROR) > 0
+        or runtime_doctor_summary_count(input, SUMMARY_MARKER_GEMINI_LIVE_SIDECAR_ERROR) > 0
+        or runtime_doctor_summary_count(input, SUMMARY_MARKER_GEMINI_LIVE_SESSION_ERROR) > 0
+        or runtime_doctor_summary_count(input, SUMMARY_MARKER_GEMINI_SIDECAR_ACCEPT_ERROR) > 0
+    )
+
+
+def runtime_doctor_summary_any_compact_exit(input: ProdexRuntimeDoctorSummaryPlanInput) -> Bool:
+    return (
+        runtime_doctor_summary_count(input, SUMMARY_MARKER_COMPACT_EXIT_CANDIDATE) > 0
+        or runtime_doctor_summary_count(input, SUMMARY_MARKER_COMPACT_EXIT_COMMITTED) > 0
+        or runtime_doctor_summary_count(input, SUMMARY_MARKER_COMPACT_EXIT_COMMITTED_OWNER) > 0
+        or runtime_doctor_summary_count(input, SUMMARY_MARKER_COMPACT_EXIT_FOLLOWUP_OWNER) > 0
+        or runtime_doctor_summary_count(input, SUMMARY_MARKER_COMPACT_EXIT_LINEAGE) > 0
+        or runtime_doctor_summary_count(input, SUMMARY_MARKER_COMPACT_EXIT_OVERLOAD_RETRY) > 0
+        or runtime_doctor_summary_count(input, SUMMARY_MARKER_COMPACT_EXIT_PRECOMMIT) > 0
+        or runtime_doctor_summary_count(input, SUMMARY_MARKER_COMPACT_EXIT_PRESSURE) > 0
+        or runtime_doctor_summary_count(input, SUMMARY_MARKER_COMPACT_EXIT_QUOTA) > 0
+        or runtime_doctor_summary_count(input, SUMMARY_MARKER_COMPACT_EXIT_RETRYABLE) > 0
+        or runtime_doctor_summary_count(input, SUMMARY_MARKER_COMMITTED) > 0
+        or runtime_doctor_summary_count(input, SUMMARY_MARKER_COMMITTED_OWNER) > 0
+        or runtime_doctor_summary_count(input, SUMMARY_MARKER_FOLLOWUP_OWNER) > 0
+        or runtime_doctor_summary_count(input, SUMMARY_MARKER_LINEAGE) > 0
+        or runtime_doctor_summary_count(input, SUMMARY_MARKER_OVERLOAD_RETRY) > 0
+        or runtime_doctor_summary_count(input, SUMMARY_MARKER_COMPACT_PRESSURE) > 0
+        or runtime_doctor_summary_count(input, SUMMARY_MARKER_COMPACT_QUOTA) > 0
+        or runtime_doctor_summary_count(input, SUMMARY_MARKER_COMPACT_RETRYABLE) > 0
+        or runtime_doctor_summary_count(input, SUMMARY_MARKER_COMPACT_TRANSPORT) > 0
+    )
+
+
+def runtime_doctor_summary_select_diagnosis(
+    input: ProdexRuntimeDoctorSummaryPlanInput,
+) -> Int64:
+    if input.pointer_exists == 0:
+        return SUMMARY_DIAGNOSIS_NO_POINTER
+    if input.log_exists == 0:
+        return SUMMARY_DIAGNOSIS_NO_LOG
+    if input.line_count == 0:
+        return SUMMARY_DIAGNOSIS_EMPTY_LOG
+
+    if runtime_doctor_summary_count(input, SUMMARY_MARKER_RUNTIME_PROXY_OVERLOAD_BACKOFF) > 0:
+        return SUMMARY_DIAGNOSIS_PROXY_OVERLOAD_BACKOFF
+    if runtime_doctor_summary_count(input, SUMMARY_MARKER_RUNTIME_PROXY_LANE_LIMIT) > 0:
+        return SUMMARY_DIAGNOSIS_LANE_PRESSURE
+    if runtime_doctor_summary_count(input, SUMMARY_MARKER_RUNTIME_PROXY_ACTIVE_LIMIT) > 0:
+        return SUMMARY_DIAGNOSIS_ACTIVE_PRESSURE
+    if runtime_doctor_summary_count(input, SUMMARY_MARKER_RUNTIME_PROXY_QUEUE_OVERLOADED) > 0:
+        return SUMMARY_DIAGNOSIS_QUEUE_OVERLOAD
+    if runtime_doctor_summary_count(input, SUMMARY_MARKER_PROFILE_CIRCUIT_OPEN) > 0:
+        return SUMMARY_DIAGNOSIS_CIRCUIT_OPEN
+    if runtime_doctor_summary_count(input, SUMMARY_MARKER_PROFILE_CIRCUIT_HALF_OPEN) > 0:
+        return SUMMARY_DIAGNOSIS_CIRCUIT_HALF_OPEN
+    if runtime_doctor_summary_count(input, SUMMARY_MARKER_WEBSOCKET_FRAME_TIMEOUT) > 0:
+        return SUMMARY_DIAGNOSIS_WEBSOCKET_FRAME_TIMEOUT
+    if runtime_doctor_summary_count(input, SUMMARY_MARKER_WEBSOCKET_HOLD_TIMEOUT) > 0:
+        return SUMMARY_DIAGNOSIS_WEBSOCKET_HOLD_TIMEOUT
+    if runtime_doctor_summary_count(input, SUMMARY_MARKER_WEBSOCKET_DNS_TIMEOUT) > 0:
+        return SUMMARY_DIAGNOSIS_WEBSOCKET_DNS_TIMEOUT
+    if runtime_doctor_summary_count(input, SUMMARY_MARKER_WEBSOCKET_DNS_REJECT) > 0:
+        return SUMMARY_DIAGNOSIS_WEBSOCKET_DNS_REJECT
+    if (
+        runtime_doctor_summary_count(input, SUMMARY_MARKER_WEBSOCKET_DNS_ENQUEUE) > 0
+        or runtime_doctor_summary_count(input, SUMMARY_MARKER_WEBSOCKET_DNS_DISPATCH) > 0
+    ):
+        return SUMMARY_DIAGNOSIS_WEBSOCKET_DNS_OVERFLOW
+
+    if runtime_doctor_summary_count(input, SUMMARY_MARKER_WEBSOCKET_LOCAL_PRESSURE) > 0:
+        return SUMMARY_DIAGNOSIS_WEBSOCKET_LOCAL_PRESSURE
+    if (
+        runtime_doctor_summary_count(input, SUMMARY_MARKER_WEBSOCKET_CONNECT_REJECTED) > 0
+        or runtime_doctor_summary_count(input, SUMMARY_MARKER_WEBSOCKET_CONNECT_REJECT) > 0
+    ):
+        return SUMMARY_DIAGNOSIS_WEBSOCKET_CONNECT_REJECT
+    if runtime_doctor_summary_count(input, SUMMARY_MARKER_WEBSOCKET_CONNECT_ENQUEUE) > 0:
+        return SUMMARY_DIAGNOSIS_WEBSOCKET_CONNECT_ENQUEUE
+    if runtime_doctor_summary_count(input, SUMMARY_MARKER_WEBSOCKET_CONNECT_DISPATCH) > 0:
+        return SUMMARY_DIAGNOSIS_WEBSOCKET_CONNECT_DISPATCH
+    if runtime_doctor_summary_count(input, SUMMARY_MARKER_WEBSOCKET_TUNNEL_FAILURE) > 0:
+        return SUMMARY_DIAGNOSIS_WEBSOCKET_TUNNEL_FAILURE
+
+    if runtime_doctor_summary_count(input, SUMMARY_MARKER_PROFILE_INFLIGHT) > 0:
+        return SUMMARY_DIAGNOSIS_PROFILE_INFLIGHT
+    if runtime_doctor_summary_count(input, SUMMARY_MARKER_PROFILE_HEALTH) > 0:
+        return SUMMARY_DIAGNOSIS_PROFILE_HEALTH
+    if runtime_doctor_summary_count(input, SUMMARY_MARKER_PROFILE_BAD_PAIRING) > 0:
+        return SUMMARY_DIAGNOSIS_PROFILE_BAD_PAIRING
+    if runtime_doctor_summary_count(input, SUMMARY_MARKER_PROFILE_AUTH_FAILURE) > 0:
+        return SUMMARY_DIAGNOSIS_PROFILE_AUTH_FAILURE
+    if runtime_doctor_summary_count(input, SUMMARY_MARKER_PROVIDER_AUTH_FAILURE) > 0:
+        return SUMMARY_DIAGNOSIS_PROVIDER_AUTH_FAILURE
+
+    if runtime_doctor_summary_count(input, SUMMARY_MARKER_COMPACT_FALLBACK_BLOCKED) > 0:
+        return SUMMARY_DIAGNOSIS_COMPACT_FALLBACK_BLOCKED
+    if runtime_doctor_summary_count(input, SUMMARY_MARKER_COMPACT_PRESSURE_SHED) > 0:
+        return SUMMARY_DIAGNOSIS_COMPACT_PRESSURE_SHED
+    if runtime_doctor_summary_count(input, SUMMARY_MARKER_CHAIN_DEAD) > 0:
+        return SUMMARY_DIAGNOSIS_CHAIN_DEAD
+    if runtime_doctor_summary_count(input, SUMMARY_MARKER_STALE_CONTINUATION) > 0:
+        return SUMMARY_DIAGNOSIS_STALE_CONTINUATION
+    if runtime_doctor_summary_count(input, SUMMARY_MARKER_CHAIN_RETRIED) > 0:
+        return SUMMARY_DIAGNOSIS_CHAIN_RETRIED
+    if runtime_doctor_summary_count(input, SUMMARY_MARKER_PREVIOUS_RESPONSE_BLOCKED) > 0:
+        return SUMMARY_DIAGNOSIS_PREVIOUS_RESPONSE_BLOCKED
+    if runtime_doctor_summary_count(input, SUMMARY_MARKER_PREVIOUS_RESPONSE_FALLBACK) > 0:
+        return SUMMARY_DIAGNOSIS_PREVIOUS_RESPONSE_FALLBACK
+    if runtime_doctor_summary_count(input, SUMMARY_MARKER_PREVIOUS_RESPONSE_NOT_FOUND) > 0:
+        return SUMMARY_DIAGNOSIS_PREVIOUS_RESPONSE_NOT_FOUND
+    if runtime_doctor_summary_count(input, SUMMARY_MARKER_COMPACT_FINAL_FAILURE) > 0:
+        return SUMMARY_DIAGNOSIS_COMPACT_FINAL_FAILURE
+    if runtime_doctor_summary_any_compact_exit(input):
+        return SUMMARY_DIAGNOSIS_COMPACT_EXIT_PATHS
+
+    if runtime_doctor_summary_count(input, SUMMARY_MARKER_COMPAT_WARNING) > 0:
+        return SUMMARY_DIAGNOSIS_COMPAT_WARNING
+    if input.persisted_dead_continuations > 0:
+        return SUMMARY_DIAGNOSIS_DEAD_CONTINUATIONS
+    if input.suspect_continuations > 0:
+        return SUMMARY_DIAGNOSIS_SUSPECT_CONTINUATIONS
+    if runtime_doctor_summary_count(input, SUMMARY_MARKER_WEBSOCKET_WATCHDOG) > 0:
+        return SUMMARY_DIAGNOSIS_WEBSOCKET_WATCHDOG
+    if runtime_doctor_summary_count(input, SUMMARY_MARKER_AUTH_RECOVERED) > 0:
+        return SUMMARY_DIAGNOSIS_AUTH_RECOVERED
+    if runtime_doctor_summary_count(input, SUMMARY_MARKER_PRECOMMIT_BUDGET) > 0:
+        return SUMMARY_DIAGNOSIS_PRECOMMIT_BUDGET
+    if (
+        runtime_doctor_summary_count(input, SUMMARY_MARKER_UPSTREAM_USAGE_LIMIT) > 0
+        or runtime_doctor_summary_count(input, SUMMARY_MARKER_RESPONSES_PRE_SEND) > 0
+        or runtime_doctor_summary_count(input, SUMMARY_MARKER_WEBSOCKET_PRE_SEND) > 0
+        or runtime_doctor_summary_count(input, SUMMARY_MARKER_QUOTA_CRITICAL) > 0
+    ):
+        return SUMMARY_DIAGNOSIS_QUOTA_HARDENING
+    if (
+        runtime_doctor_summary_count(input, SUMMARY_MARKER_GEMINI_QUOTA_ROTATE) > 0
+        or runtime_doctor_summary_count(input, SUMMARY_MARKER_GEMINI_RATE_RETRY) > 0
+    ):
+        return SUMMARY_DIAGNOSIS_GEMINI_QUOTA_RETRY
+
+    if runtime_doctor_summary_count(input, SUMMARY_MARKER_PROVIDER_MODEL_FALLBACK) > 0:
+        return SUMMARY_DIAGNOSIS_PROVIDER_MODEL_FALLBACK
+    if (
+        runtime_doctor_summary_count(input, SUMMARY_MARKER_GEMINI_STREAM_RETRY) > 0
+        or runtime_doctor_summary_count(input, SUMMARY_MARKER_GEMINI_STREAM_FALLBACK) > 0
+    ):
+        return SUMMARY_DIAGNOSIS_GEMINI_STREAM_RETRY
+    if runtime_doctor_summary_count(input, SUMMARY_MARKER_GEMINI_COMPACT_FALLBACK) > 0:
+        return SUMMARY_DIAGNOSIS_GEMINI_COMPACT_FALLBACK
+    if (
+        runtime_doctor_summary_count(input, SUMMARY_MARKER_GEMINI_LIVE_ERROR) > 0
+        or runtime_doctor_summary_count(input, SUMMARY_MARKER_GEMINI_LIVE_SIDECAR_ERROR) > 0
+        or runtime_doctor_summary_count(input, SUMMARY_MARKER_GEMINI_LIVE_SESSION_ERROR) > 0
+        or runtime_doctor_summary_count(input, SUMMARY_MARKER_GEMINI_SIDECAR_ACCEPT_ERROR) > 0
+    ):
+        return SUMMARY_DIAGNOSIS_GEMINI_LIVE_ERROR
+
+    if runtime_doctor_summary_count(input, SUMMARY_MARKER_STREAM_READ) > 0:
+        return SUMMARY_DIAGNOSIS_STREAM_READ
+    if runtime_doctor_summary_count(input, SUMMARY_MARKER_LOCAL_WRITER) > 0:
+        return SUMMARY_DIAGNOSIS_LOCAL_WRITER
+    if (
+        runtime_doctor_summary_count(input, SUMMARY_MARKER_CONNECT_TIMEOUT) > 0
+        or runtime_doctor_summary_count(input, SUMMARY_MARKER_DNS_ERROR) > 0
+        or runtime_doctor_summary_count(input, SUMMARY_MARKER_TLS_ERROR) > 0
+        or runtime_doctor_summary_count(input, SUMMARY_MARKER_CONNECT_ERROR) > 0
+    ):
+        return SUMMARY_DIAGNOSIS_UPSTREAM_CONNECT
+    if runtime_doctor_summary_count(input, SUMMARY_MARKER_STATE_SAVE_ERROR) > 0:
+        return SUMMARY_DIAGNOSIS_STATE_SAVE
+    if (
+        runtime_doctor_summary_count(input, SUMMARY_MARKER_STATE_SAVE_BACKPRESSURE) > 0
+        or runtime_doctor_summary_count(input, SUMMARY_MARKER_JOURNAL_SAVE_BACKPRESSURE) > 0
+    ):
+        return SUMMARY_DIAGNOSIS_PERSISTENCE
+    if runtime_doctor_summary_count(input, SUMMARY_MARKER_SYNC_PROBE_SKIP) > 0:
+        return SUMMARY_DIAGNOSIS_SYNC_PROBE
+    if runtime_doctor_summary_count(input, SUMMARY_MARKER_PROBE_BACKPRESSURE) > 0:
+        return SUMMARY_DIAGNOSIS_PROBE_BACKPRESSURE
+
+    if input.degraded_routes > 0:
+        return SUMMARY_DIAGNOSIS_DEGRADED_ROUTES
+    if input.orphan_managed_dirs > 0:
+        return SUMMARY_DIAGNOSIS_ORPHAN_DIRS
+    if runtime_doctor_summary_count(input, SUMMARY_MARKER_PROBE_ERROR) > 0:
+        return SUMMARY_DIAGNOSIS_PROBE_ERROR
+    if runtime_doctor_summary_count(input, SUMMARY_MARKER_PROBE_START) > 0:
+        return SUMMARY_DIAGNOSIS_PROBE_ACTIVITY
+    if (
+        runtime_doctor_summary_count(input, SUMMARY_MARKER_FIRST_UPSTREAM_CHUNK) > 0
+        and runtime_doctor_summary_count(input, SUMMARY_MARKER_FIRST_LOCAL_CHUNK) == 0
+    ):
+        return SUMMARY_DIAGNOSIS_WRITER_STALL
+    if input.runtime_broker_mismatch > 0:
+        return SUMMARY_DIAGNOSIS_BROKER_MISMATCH
+    if input.prodex_binary_mismatch > 0:
+        return SUMMARY_DIAGNOSIS_BINARY_MISMATCH
+    if (
+        runtime_doctor_summary_count(input, SUMMARY_MARKER_SELECTION_PICK) > 0
+        or runtime_doctor_summary_count(input, SUMMARY_MARKER_SELECTION_SKIP_CURRENT) > 0
+    ):
+        return SUMMARY_DIAGNOSIS_SELECTION
+    return SUMMARY_DIAGNOSIS_NO_RECENT_FAILURE
+
+
+def runtime_doctor_summary_validate_input(
+    input: ProdexRuntimeDoctorSummaryPlanInput,
+) -> Bool:
+    # Rust validates the complete fixed marker arena before this call. The
+    # fields used below are only read as zero/non-zero decisions, so no
+    # unbounded traversal is needed on the Mojo side.
+    if input.line_count < 0 or input.line_count > RUNTIME_DOCTOR_PLAN_MAX_COUNT:
+        return False
+    if (
+        input.pointer_exists < 0
+        or input.pointer_exists > 1
+        or input.log_exists < 0
+        or input.log_exists > 1
+        or input.startup_audit_risk < 0
+        or input.startup_audit_risk > 1
+        or input.orphan_managed_dirs < 0
+        or input.orphan_managed_dirs > 1
+        or input.runtime_broker_mismatch < 0
+        or input.runtime_broker_mismatch > 1
+        or input.prodex_binary_mismatch < 0
+        or input.prodex_binary_mismatch > 1
+        or input.persisted_quota_snapshot_risk < 0
+        or input.persisted_quota_snapshot_risk > 1
+    ):
+        return False
+    return (
+        input.stale_persisted_usage_snapshots >= 0
+        and input.stale_persisted_usage_snapshots <= RUNTIME_DOCTOR_PLAN_MAX_COUNT
+        and input.persisted_dead_continuations >= 0
+        and input.persisted_dead_continuations <= RUNTIME_DOCTOR_PLAN_MAX_COUNT
+        and input.suspect_continuations >= 0
+        and input.suspect_continuations <= RUNTIME_DOCTOR_PLAN_MAX_COUNT
+        and input.degraded_routes >= 0
+        and input.degraded_routes <= RUNTIME_DOCTOR_PLAN_MAX_COUNT
+    )
+
+
+def runtime_doctor_summary_reset(
+    output: Pointer[mut=True, ProdexRuntimeDoctorSummaryPlan, _],
+) -> None:
+    output[].abi_version = RUNTIME_DOCTOR_SUMMARY_PLAN_ABI_VERSION
+    output[].selection_pressure = SUMMARY_PRESSURE_LOW
+    output[].transport_pressure = SUMMARY_PRESSURE_LOW
+    output[].persistence_pressure = SUMMARY_PRESSURE_LOW
+    output[].quota_freshness_pressure = SUMMARY_PRESSURE_LOW
+    output[].startup_audit_pressure = SUMMARY_PRESSURE_LOW
+    output[].diagnosis_kind = SUMMARY_DIAGNOSIS_NONE
+
+
+@export("prodex_mojo_rich_runtime_doctor_summary_plan_v1")
+def prodex_mojo_rich_runtime_doctor_summary_plan_v1(
+    abi_version: Int64,
+    input_address: UInt,
+    output_address: UInt,
+) abi("C") -> Int64:
+    if output_address == 0:
+        return 1
+    var output = Pointer[
+        mut=True, ProdexRuntimeDoctorSummaryPlan, MutUntrackedOrigin
+    ](unsafe_from_address=Int(output_address))
+    runtime_doctor_summary_reset(output)
+    if abi_version != RUNTIME_DOCTOR_SUMMARY_PLAN_ABI_VERSION or input_address == 0:
+        return 1
+    var input_pointer = Pointer[
+        mut=False, ProdexRuntimeDoctorSummaryPlanInput, ImmUntrackedOrigin
+    ](unsafe_from_address=Int(input_address))
+    var input = input_pointer[].copy()
+    if not runtime_doctor_summary_validate_input(input):
+        return 1
+
+    var selection = SUMMARY_PRESSURE_LOW
+    if runtime_doctor_summary_any_selection(input):
+        selection = SUMMARY_PRESSURE_ELEVATED
+    var transport = SUMMARY_PRESSURE_LOW
+    if runtime_doctor_summary_any_transport(input):
+        transport = SUMMARY_PRESSURE_ELEVATED
+    var persistence = SUMMARY_PRESSURE_LOW
+    if (
+        runtime_doctor_summary_count(input, SUMMARY_MARKER_STATE_SAVE_ERROR) > 0
+        or runtime_doctor_summary_count(input, SUMMARY_MARKER_STATE_SAVE_BACKPRESSURE) > 0
+        or runtime_doctor_summary_count(input, SUMMARY_MARKER_JOURNAL_SAVE_ERROR) > 0
+        or runtime_doctor_summary_count(input, SUMMARY_MARKER_JOURNAL_SAVE_BACKPRESSURE) > 0
+    ):
+        persistence = SUMMARY_PRESSURE_ELEVATED
+    elif runtime_doctor_summary_count(input, SUMMARY_MARKER_STATE_SAVE_SKIPPED) > 0:
+        persistence = SUMMARY_PRESSURE_ACTIVE
+    var quota = SUMMARY_PRESSURE_LOW
+    if (
+        input.stale_persisted_usage_snapshots > 0
+        or input.persisted_quota_snapshot_risk > 0
+        or runtime_doctor_summary_count(input, SUMMARY_MARKER_PROBE_ERROR) > 0
+        or runtime_doctor_summary_count(input, SUMMARY_MARKER_PROBE_BACKPRESSURE) > 0
+        or runtime_doctor_summary_count(input, SUMMARY_MARKER_SYNC_PROBE_SKIP) > 0
+    ):
+        quota = SUMMARY_PRESSURE_STALE_RISK
+    elif (
+        runtime_doctor_summary_count(input, SUMMARY_MARKER_PROBE_START) > 0
+        or runtime_doctor_summary_count(input, SUMMARY_MARKER_PROBE_OK) > 0
+    ):
+        quota = SUMMARY_PRESSURE_ACTIVE
+    var startup = SUMMARY_PRESSURE_LOW
+    if input.orphan_managed_dirs > 0 or input.startup_audit_risk > 0:
+        startup = SUMMARY_PRESSURE_ELEVATED
+
+    output[].selection_pressure = selection
+    output[].transport_pressure = transport
+    output[].persistence_pressure = persistence
+    output[].quota_freshness_pressure = quota
+    output[].startup_audit_pressure = startup
+    output[].diagnosis_kind = runtime_doctor_summary_select_diagnosis(input)
+    return 0
+
+
+comptime RUNTIME_DOCTOR_STATE_PLAN_ABI_VERSION: Int64 = 1
+comptime STATE_OP_QUOTA: Int64 = 0
+comptime STATE_OP_SCORE: Int64 = 1
+comptime STATE_OP_CIRCUIT: Int64 = 2
+comptime STATE_ROUTE_RESPONSES: Int64 = 0
+comptime STATE_ROUTE_WEBSOCKET: Int64 = 1
+comptime STATE_ROUTE_COMPACT: Int64 = 2
+comptime STATE_ROUTE_STANDARD: Int64 = 3
+comptime STATE_STATUS_READY: Int64 = 0
+comptime STATE_STATUS_THIN: Int64 = 1
+comptime STATE_STATUS_CRITICAL: Int64 = 2
+comptime STATE_STATUS_EXHAUSTED: Int64 = 3
+comptime STATE_STATUS_UNKNOWN: Int64 = 4
+comptime STATE_CIRCUIT_CLOSED: Int64 = 0
+comptime STATE_CIRCUIT_HALF_OPEN: Int64 = 1
+comptime STATE_CIRCUIT_OPEN: Int64 = 2
+comptime STATE_INT64_MAX: Int64 = 9223372036854775807
+
+@fieldwise_init
+struct ProdexRuntimeDoctorStatePlanInput(Copyable):
+    var operation: Int64
+    var route_kind: Int64
+    var now: Int64
+    var checked_at: Int64
+    var five_hour_status: Int64
+    var five_hour_reset_at: Int64
+    var weekly_status: Int64
+    var weekly_reset_at: Int64
+    var stale_grace_seconds: Int64
+    var score: Int64
+    var updated_at: Int64
+    var decay_seconds: Int64
+    var circuit_until: Int64
+
+
+@fieldwise_init
+struct ProdexRuntimeDoctorStatePlan(Copyable):
+    var abi_version: Int64
+    var freshness: Int64
+    var five_hour_status: Int64
+    var weekly_status: Int64
+    var route_band: Int64
+    var effective_score: Int64
+    var circuit_state: Int64
+
+
+def runtime_doctor_state_status_valid(value: Int64) -> Bool:
+    return value >= STATE_STATUS_READY and value <= STATE_STATUS_UNKNOWN
+
+
+def runtime_doctor_state_reset_status(
+    status: Int64,
+    reset_at: Int64,
+    now: Int64,
+) -> Int64:
+    if reset_at != STATE_INT64_MAX and reset_at <= now:
+        return STATE_STATUS_READY
+    return status
+
+
+def runtime_doctor_state_hold_active(
+    status: Int64,
+    reset_at: Int64,
+    now: Int64,
+) -> Bool:
+    return status == STATE_STATUS_EXHAUSTED and reset_at != STATE_INT64_MAX and reset_at > now
+
+
+def runtime_doctor_state_hold_expired(
+    status: Int64,
+    reset_at: Int64,
+    now: Int64,
+) -> Bool:
+    return status == STATE_STATUS_EXHAUSTED and reset_at != STATE_INT64_MAX and reset_at <= now
+
+
+def runtime_doctor_state_freshness(input: ProdexRuntimeDoctorStatePlanInput) -> Int64:
+    if runtime_doctor_state_hold_active(input.five_hour_status, input.five_hour_reset_at, input.now):
+        return STATE_STATUS_READY
+    if runtime_doctor_state_hold_active(input.weekly_status, input.weekly_reset_at, input.now):
+        return STATE_STATUS_READY
+    if runtime_doctor_state_hold_expired(input.five_hour_status, input.five_hour_reset_at, input.now):
+        return STATE_STATUS_THIN
+    if runtime_doctor_state_hold_expired(input.weekly_status, input.weekly_reset_at, input.now):
+        return STATE_STATUS_THIN
+    if input.now < input.checked_at:
+        return STATE_STATUS_READY
+    var age: Int64 = 0
+    if input.checked_at < 0 and input.now > STATE_INT64_MAX + input.checked_at:
+        age = STATE_INT64_MAX
+    else:
+        age = input.now - input.checked_at
+    if age <= input.stale_grace_seconds:
+        return STATE_STATUS_READY
+    return STATE_STATUS_THIN
+
+
+def runtime_doctor_state_route_band(
+    input: ProdexRuntimeDoctorStatePlanInput,
+    five_hour: Int64,
+    weekly: Int64,
+) -> Int64:
+    var band = five_hour
+    if weekly > band:
+        band = weekly
+    var route_status = weekly
+    if input.route_kind == STATE_ROUTE_COMPACT or input.route_kind == STATE_ROUTE_STANDARD:
+        route_status = five_hour
+    if route_status > band:
+        band = route_status
+    return band
+
+
+def runtime_doctor_state_effective_score(input: ProdexRuntimeDoctorStatePlanInput) -> Int64:
+    if input.now <= input.updated_at:
+        return input.score
+    var elapsed: Int64 = 0
+    if input.updated_at < 0 and input.now > STATE_INT64_MAX + input.updated_at:
+        elapsed = STATE_INT64_MAX
+    else:
+        elapsed = input.now - input.updated_at
+    var decay = elapsed / input.decay_seconds
+    if decay >= input.score:
+        return 0
+    return input.score - decay
+
+
+def runtime_doctor_state_validate_input(input: ProdexRuntimeDoctorStatePlanInput) -> Bool:
+    return (
+        input.operation >= STATE_OP_QUOTA
+        and input.operation <= STATE_OP_CIRCUIT
+        and input.route_kind >= STATE_ROUTE_RESPONSES
+        and input.route_kind <= STATE_ROUTE_STANDARD
+        and runtime_doctor_state_status_valid(input.five_hour_status)
+        and runtime_doctor_state_status_valid(input.weekly_status)
+        and input.stale_grace_seconds >= 0
+        and input.score >= 0
+        and input.circuit_until >= -1
+        and (input.operation != STATE_OP_SCORE or input.decay_seconds > 0)
+    )
+
+
+def runtime_doctor_state_reset(
+    output: Pointer[mut=True, ProdexRuntimeDoctorStatePlan, _],
+) -> None:
+    output[].abi_version = RUNTIME_DOCTOR_STATE_PLAN_ABI_VERSION
+    output[].freshness = STATE_STATUS_READY
+    output[].five_hour_status = STATE_STATUS_READY
+    output[].weekly_status = STATE_STATUS_READY
+    output[].route_band = STATE_STATUS_READY
+    output[].effective_score = 0
+    output[].circuit_state = STATE_CIRCUIT_CLOSED
+
+
+@export("prodex_mojo_rich_runtime_doctor_state_plan_v1")
+def prodex_mojo_rich_runtime_doctor_state_plan_v1(
+    abi_version: Int64,
+    input_address: UInt,
+    output_address: UInt,
+) abi("C") -> Int64:
+    if output_address == 0:
+        return 1
+    var output = Pointer[
+        mut=True, ProdexRuntimeDoctorStatePlan, MutUntrackedOrigin
+    ](unsafe_from_address=Int(output_address))
+    runtime_doctor_state_reset(output)
+    if abi_version != RUNTIME_DOCTOR_STATE_PLAN_ABI_VERSION or input_address == 0:
+        return 1
+    var input_pointer = Pointer[
+        mut=False, ProdexRuntimeDoctorStatePlanInput, ImmUntrackedOrigin
+    ](unsafe_from_address=Int(input_address))
+    var input = input_pointer[].copy()
+    if not runtime_doctor_state_validate_input(input):
+        return 1
+    if input.operation == STATE_OP_QUOTA:
+        var five_hour = runtime_doctor_state_reset_status(
+            input.five_hour_status, input.five_hour_reset_at, input.now
+        )
+        var weekly = runtime_doctor_state_reset_status(
+            input.weekly_status, input.weekly_reset_at, input.now
+        )
+        output[].freshness = runtime_doctor_state_freshness(input)
+        output[].five_hour_status = five_hour
+        output[].weekly_status = weekly
+        output[].route_band = runtime_doctor_state_route_band(input, five_hour, weekly)
+    elif input.operation == STATE_OP_SCORE:
+        output[].effective_score = runtime_doctor_state_effective_score(input)
+    else:
+        if input.circuit_until < 0:
+            output[].circuit_state = STATE_CIRCUIT_CLOSED
+        elif input.circuit_until > input.now:
+            output[].circuit_state = STATE_CIRCUIT_OPEN
+        else:
+            output[].circuit_state = STATE_CIRCUIT_HALF_OPEN
+    return 0

@@ -504,6 +504,370 @@ pub fn runtime_doctor_plan_self_test() -> bool {
     })
 }
 
+pub const RUNTIME_DOCTOR_SUMMARY_PLAN_ABI_VERSION: i64 = 1;
+pub const RUNTIME_DOCTOR_SUMMARY_MARKER_COUNT: usize = 128;
+
+pub const RUNTIME_DOCTOR_PRESSURE_LOW: i64 = 0;
+pub const RUNTIME_DOCTOR_PRESSURE_ELEVATED: i64 = 1;
+pub const RUNTIME_DOCTOR_PRESSURE_ACTIVE: i64 = 2;
+pub const RUNTIME_DOCTOR_PRESSURE_STALE_RISK: i64 = 3;
+
+pub const RUNTIME_DOCTOR_DIAGNOSIS_NONE: i64 = 0;
+pub const RUNTIME_DOCTOR_DIAGNOSIS_NO_POINTER: i64 = 1;
+pub const RUNTIME_DOCTOR_DIAGNOSIS_NO_LOG: i64 = 2;
+pub const RUNTIME_DOCTOR_DIAGNOSIS_EMPTY_LOG: i64 = 3;
+pub const RUNTIME_DOCTOR_DIAGNOSIS_PROXY_OVERLOAD_BACKOFF: i64 = 4;
+pub const RUNTIME_DOCTOR_DIAGNOSIS_LANE_PRESSURE: i64 = 5;
+pub const RUNTIME_DOCTOR_DIAGNOSIS_ACTIVE_PRESSURE: i64 = 6;
+pub const RUNTIME_DOCTOR_DIAGNOSIS_QUEUE_OVERLOAD: i64 = 7;
+pub const RUNTIME_DOCTOR_DIAGNOSIS_CIRCUIT_OPEN: i64 = 8;
+pub const RUNTIME_DOCTOR_DIAGNOSIS_CIRCUIT_HALF_OPEN: i64 = 9;
+pub const RUNTIME_DOCTOR_DIAGNOSIS_WEBSOCKET_FRAME_TIMEOUT: i64 = 10;
+pub const RUNTIME_DOCTOR_DIAGNOSIS_WEBSOCKET_HOLD_TIMEOUT: i64 = 11;
+pub const RUNTIME_DOCTOR_DIAGNOSIS_WEBSOCKET_DNS_TIMEOUT: i64 = 12;
+pub const RUNTIME_DOCTOR_DIAGNOSIS_WEBSOCKET_DNS_REJECT: i64 = 13;
+pub const RUNTIME_DOCTOR_DIAGNOSIS_WEBSOCKET_DNS_OVERFLOW: i64 = 14;
+pub const RUNTIME_DOCTOR_DIAGNOSIS_WEBSOCKET_LOCAL_PRESSURE: i64 = 15;
+pub const RUNTIME_DOCTOR_DIAGNOSIS_WEBSOCKET_CONNECT_REJECT: i64 = 16;
+pub const RUNTIME_DOCTOR_DIAGNOSIS_WEBSOCKET_CONNECT_ENQUEUE: i64 = 17;
+pub const RUNTIME_DOCTOR_DIAGNOSIS_WEBSOCKET_CONNECT_DISPATCH: i64 = 18;
+pub const RUNTIME_DOCTOR_DIAGNOSIS_WEBSOCKET_TUNNEL_FAILURE: i64 = 19;
+pub const RUNTIME_DOCTOR_DIAGNOSIS_PROFILE_INFLIGHT: i64 = 20;
+pub const RUNTIME_DOCTOR_DIAGNOSIS_PROFILE_HEALTH: i64 = 21;
+pub const RUNTIME_DOCTOR_DIAGNOSIS_PROFILE_BAD_PAIRING: i64 = 22;
+pub const RUNTIME_DOCTOR_DIAGNOSIS_PROFILE_AUTH_FAILURE: i64 = 23;
+pub const RUNTIME_DOCTOR_DIAGNOSIS_PROVIDER_AUTH_FAILURE: i64 = 24;
+pub const RUNTIME_DOCTOR_DIAGNOSIS_COMPACT_FALLBACK_BLOCKED: i64 = 25;
+pub const RUNTIME_DOCTOR_DIAGNOSIS_COMPACT_PRESSURE_SHED: i64 = 26;
+pub const RUNTIME_DOCTOR_DIAGNOSIS_CHAIN_DEAD: i64 = 27;
+pub const RUNTIME_DOCTOR_DIAGNOSIS_STALE_CONTINUATION: i64 = 28;
+pub const RUNTIME_DOCTOR_DIAGNOSIS_CHAIN_RETRIED: i64 = 29;
+pub const RUNTIME_DOCTOR_DIAGNOSIS_PREVIOUS_RESPONSE_BLOCKED: i64 = 30;
+pub const RUNTIME_DOCTOR_DIAGNOSIS_PREVIOUS_RESPONSE_FALLBACK: i64 = 31;
+pub const RUNTIME_DOCTOR_DIAGNOSIS_PREVIOUS_RESPONSE_NOT_FOUND: i64 = 32;
+pub const RUNTIME_DOCTOR_DIAGNOSIS_COMPACT_FINAL_FAILURE: i64 = 33;
+pub const RUNTIME_DOCTOR_DIAGNOSIS_COMPACT_EXIT_PATHS: i64 = 34;
+pub const RUNTIME_DOCTOR_DIAGNOSIS_COMPAT_WARNING: i64 = 35;
+pub const RUNTIME_DOCTOR_DIAGNOSIS_DEAD_CONTINUATIONS: i64 = 36;
+pub const RUNTIME_DOCTOR_DIAGNOSIS_SUSPECT_CONTINUATIONS: i64 = 37;
+pub const RUNTIME_DOCTOR_DIAGNOSIS_WEBSOCKET_WATCHDOG: i64 = 38;
+pub const RUNTIME_DOCTOR_DIAGNOSIS_AUTH_RECOVERED: i64 = 39;
+pub const RUNTIME_DOCTOR_DIAGNOSIS_PRECOMMIT_BUDGET: i64 = 40;
+pub const RUNTIME_DOCTOR_DIAGNOSIS_QUOTA_HARDENING: i64 = 41;
+pub const RUNTIME_DOCTOR_DIAGNOSIS_GEMINI_QUOTA_RETRY: i64 = 42;
+pub const RUNTIME_DOCTOR_DIAGNOSIS_PROVIDER_MODEL_FALLBACK: i64 = 43;
+pub const RUNTIME_DOCTOR_DIAGNOSIS_GEMINI_STREAM_RETRY: i64 = 44;
+pub const RUNTIME_DOCTOR_DIAGNOSIS_GEMINI_COMPACT_FALLBACK: i64 = 45;
+pub const RUNTIME_DOCTOR_DIAGNOSIS_GEMINI_LIVE_ERROR: i64 = 46;
+pub const RUNTIME_DOCTOR_DIAGNOSIS_STREAM_READ: i64 = 47;
+pub const RUNTIME_DOCTOR_DIAGNOSIS_LOCAL_WRITER: i64 = 48;
+pub const RUNTIME_DOCTOR_DIAGNOSIS_UPSTREAM_CONNECT: i64 = 49;
+pub const RUNTIME_DOCTOR_DIAGNOSIS_STATE_SAVE: i64 = 50;
+pub const RUNTIME_DOCTOR_DIAGNOSIS_PERSISTENCE: i64 = 51;
+pub const RUNTIME_DOCTOR_DIAGNOSIS_SYNC_PROBE: i64 = 52;
+pub const RUNTIME_DOCTOR_DIAGNOSIS_PROBE_BACKPRESSURE: i64 = 53;
+pub const RUNTIME_DOCTOR_DIAGNOSIS_DEGRADED_ROUTES: i64 = 54;
+pub const RUNTIME_DOCTOR_DIAGNOSIS_ORPHAN_DIRS: i64 = 55;
+pub const RUNTIME_DOCTOR_DIAGNOSIS_PROBE_ERROR: i64 = 56;
+pub const RUNTIME_DOCTOR_DIAGNOSIS_PROBE_ACTIVITY: i64 = 57;
+pub const RUNTIME_DOCTOR_DIAGNOSIS_WRITER_STALL: i64 = 58;
+pub const RUNTIME_DOCTOR_DIAGNOSIS_BROKER_MISMATCH: i64 = 59;
+pub const RUNTIME_DOCTOR_DIAGNOSIS_BINARY_MISMATCH: i64 = 60;
+pub const RUNTIME_DOCTOR_DIAGNOSIS_SELECTION: i64 = 61;
+pub const RUNTIME_DOCTOR_DIAGNOSIS_NO_RECENT_FAILURE: i64 = 62;
+
+#[repr(C)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RuntimeDoctorSummaryPlanInput {
+    pub marker_counts: [i64; RUNTIME_DOCTOR_SUMMARY_MARKER_COUNT],
+    pub line_count: i64,
+    pub pointer_exists: i64,
+    pub log_exists: i64,
+    pub stale_persisted_usage_snapshots: i64,
+    pub orphan_managed_dirs: i64,
+    pub startup_audit_risk: i64,
+    pub persisted_dead_continuations: i64,
+    pub suspect_continuations: i64,
+    pub degraded_routes: i64,
+    pub runtime_broker_mismatch: i64,
+    pub prodex_binary_mismatch: i64,
+    pub persisted_quota_snapshot_risk: i64,
+}
+
+impl Default for RuntimeDoctorSummaryPlanInput {
+    fn default() -> Self {
+        Self {
+            marker_counts: [0; RUNTIME_DOCTOR_SUMMARY_MARKER_COUNT],
+            line_count: 0,
+            pointer_exists: 0,
+            log_exists: 0,
+            stale_persisted_usage_snapshots: 0,
+            orphan_managed_dirs: 0,
+            startup_audit_risk: 0,
+            persisted_dead_continuations: 0,
+            suspect_continuations: 0,
+            degraded_routes: 0,
+            runtime_broker_mismatch: 0,
+            prodex_binary_mismatch: 0,
+            persisted_quota_snapshot_risk: 0,
+        }
+    }
+}
+
+#[repr(C)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct RuntimeDoctorSummaryPlan {
+    pub abi_version: i64,
+    pub selection_pressure: i64,
+    pub transport_pressure: i64,
+    pub persistence_pressure: i64,
+    pub quota_freshness_pressure: i64,
+    pub startup_audit_pressure: i64,
+    pub diagnosis_kind: i64,
+}
+
+const _: () = {
+    assert!(std::mem::size_of::<RuntimeDoctorSummaryPlanInput>() == 140 * 8);
+    assert!(std::mem::size_of::<RuntimeDoctorSummaryPlan>() == 7 * 8);
+};
+
+pub const RUNTIME_DOCTOR_STATE_PLAN_ABI_VERSION: i64 = 1;
+pub const RUNTIME_DOCTOR_STATE_OP_QUOTA: i64 = 0;
+pub const RUNTIME_DOCTOR_STATE_OP_SCORE: i64 = 1;
+pub const RUNTIME_DOCTOR_STATE_OP_CIRCUIT: i64 = 2;
+pub const RUNTIME_DOCTOR_STATE_ROUTE_RESPONSES: i64 = 0;
+pub const RUNTIME_DOCTOR_STATE_ROUTE_WEBSOCKET: i64 = 1;
+pub const RUNTIME_DOCTOR_STATE_ROUTE_COMPACT: i64 = 2;
+pub const RUNTIME_DOCTOR_STATE_ROUTE_STANDARD: i64 = 3;
+pub const RUNTIME_DOCTOR_STATE_STATUS_READY: i64 = 0;
+pub const RUNTIME_DOCTOR_STATE_STATUS_THIN: i64 = 1;
+pub const RUNTIME_DOCTOR_STATE_STATUS_CRITICAL: i64 = 2;
+pub const RUNTIME_DOCTOR_STATE_STATUS_EXHAUSTED: i64 = 3;
+pub const RUNTIME_DOCTOR_STATE_STATUS_UNKNOWN: i64 = 4;
+pub const RUNTIME_DOCTOR_STATE_CIRCUIT_CLOSED: i64 = 0;
+pub const RUNTIME_DOCTOR_STATE_CIRCUIT_HALF_OPEN: i64 = 1;
+pub const RUNTIME_DOCTOR_STATE_CIRCUIT_OPEN: i64 = 2;
+
+#[repr(C)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct RuntimeDoctorStatePlanInput {
+    pub operation: i64,
+    pub route_kind: i64,
+    pub now: i64,
+    pub checked_at: i64,
+    pub five_hour_status: i64,
+    pub five_hour_reset_at: i64,
+    pub weekly_status: i64,
+    pub weekly_reset_at: i64,
+    pub stale_grace_seconds: i64,
+    pub score: i64,
+    pub updated_at: i64,
+    pub decay_seconds: i64,
+    pub circuit_until: i64,
+}
+
+#[repr(C)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct RuntimeDoctorStatePlan {
+    pub abi_version: i64,
+    pub freshness: i64,
+    pub five_hour_status: i64,
+    pub weekly_status: i64,
+    pub route_band: i64,
+    pub effective_score: i64,
+    pub circuit_state: i64,
+}
+
+const _: () = {
+    assert!(std::mem::size_of::<RuntimeDoctorStatePlanInput>() == 13 * 8);
+    assert!(std::mem::size_of::<RuntimeDoctorStatePlan>() == 7 * 8);
+};
+
+unsafe extern "C" {
+    fn prodex_mojo_rich_runtime_doctor_summary_plan_v1(
+        abi_version: i64,
+        input: u64,
+        output: u64,
+    ) -> i64;
+    fn prodex_mojo_rich_runtime_doctor_state_plan_v1(
+        abi_version: i64,
+        input: u64,
+        output: u64,
+    ) -> i64;
+}
+
+fn summary_plan_status_error(status: i64) -> MojoError {
+    match status {
+        1 => MojoError::InvalidInput,
+        4 => MojoError::AbiMismatch,
+        _ => MojoError::InvalidOutput,
+    }
+}
+
+fn summary_plan_input_is_valid(input: &RuntimeDoctorSummaryPlanInput) -> bool {
+    input
+        .marker_counts
+        .iter()
+        .all(|value| (0..=RUNTIME_DOCTOR_PLAN_MAX_COUNT).contains(value))
+        && (0..=RUNTIME_DOCTOR_PLAN_MAX_COUNT).contains(&input.line_count)
+        && [
+            input.pointer_exists,
+            input.log_exists,
+            input.orphan_managed_dirs,
+            input.startup_audit_risk,
+            input.runtime_broker_mismatch,
+            input.prodex_binary_mismatch,
+            input.persisted_quota_snapshot_risk,
+        ]
+        .iter()
+        .all(|value| (0..=1).contains(value))
+        && [
+            input.stale_persisted_usage_snapshots,
+            input.persisted_dead_continuations,
+            input.suspect_continuations,
+            input.degraded_routes,
+        ]
+        .iter()
+        .all(|value| (0..=RUNTIME_DOCTOR_PLAN_MAX_COUNT).contains(value))
+}
+
+fn summary_plan_output_is_valid(output: &RuntimeDoctorSummaryPlan) -> bool {
+    output.abi_version == RUNTIME_DOCTOR_SUMMARY_PLAN_ABI_VERSION
+        && (RUNTIME_DOCTOR_PRESSURE_LOW..=RUNTIME_DOCTOR_PRESSURE_STALE_RISK)
+            .contains(&output.selection_pressure)
+        && (RUNTIME_DOCTOR_PRESSURE_LOW..=RUNTIME_DOCTOR_PRESSURE_STALE_RISK)
+            .contains(&output.transport_pressure)
+        && (RUNTIME_DOCTOR_PRESSURE_LOW..=RUNTIME_DOCTOR_PRESSURE_STALE_RISK)
+            .contains(&output.persistence_pressure)
+        && (RUNTIME_DOCTOR_PRESSURE_LOW..=RUNTIME_DOCTOR_PRESSURE_STALE_RISK)
+            .contains(&output.quota_freshness_pressure)
+        && (RUNTIME_DOCTOR_PRESSURE_LOW..=RUNTIME_DOCTOR_PRESSURE_STALE_RISK)
+            .contains(&output.startup_audit_pressure)
+        && (RUNTIME_DOCTOR_DIAGNOSIS_NONE..=RUNTIME_DOCTOR_DIAGNOSIS_NO_RECENT_FAILURE)
+            .contains(&output.diagnosis_kind)
+}
+
+/// Run the bounded sanitized runtime-doctor summary and diagnosis kernel.
+pub fn runtime_doctor_summary_plan(
+    input: RuntimeDoctorSummaryPlanInput,
+) -> Result<RuntimeDoctorSummaryPlan, MojoError> {
+    ensure_rich_abi()?;
+    if !summary_plan_input_is_valid(&input) {
+        return Err(MojoError::InvalidInput);
+    }
+    let mut output = RuntimeDoctorSummaryPlan::default();
+    let status = unsafe {
+        prodex_mojo_rich_runtime_doctor_summary_plan_v1(
+            RUNTIME_DOCTOR_SUMMARY_PLAN_ABI_VERSION,
+            mojo_pointer_address(&input),
+            mojo_mut_pointer_address(&mut output),
+        )
+    };
+    if status != 0 {
+        return Err(summary_plan_status_error(status));
+    }
+    summary_plan_output_is_valid(&output)
+        .then_some(output)
+        .ok_or(MojoError::InvalidOutput)
+}
+
+fn state_plan_input_is_valid(input: &RuntimeDoctorStatePlanInput) -> bool {
+    (RUNTIME_DOCTOR_STATE_OP_QUOTA..=RUNTIME_DOCTOR_STATE_OP_CIRCUIT).contains(&input.operation)
+        && (RUNTIME_DOCTOR_STATE_ROUTE_RESPONSES..=RUNTIME_DOCTOR_STATE_ROUTE_STANDARD)
+            .contains(&input.route_kind)
+        && (RUNTIME_DOCTOR_STATE_STATUS_READY..=RUNTIME_DOCTOR_STATE_STATUS_UNKNOWN)
+            .contains(&input.five_hour_status)
+        && (RUNTIME_DOCTOR_STATE_STATUS_READY..=RUNTIME_DOCTOR_STATE_STATUS_UNKNOWN)
+            .contains(&input.weekly_status)
+        && input.stale_grace_seconds >= 0
+        && input.score >= 0
+        && input.circuit_until >= -1
+        && (input.operation != RUNTIME_DOCTOR_STATE_OP_SCORE || input.decay_seconds > 0)
+}
+
+fn state_plan_output_is_valid(output: &RuntimeDoctorStatePlan) -> bool {
+    output.abi_version == RUNTIME_DOCTOR_STATE_PLAN_ABI_VERSION
+        && (RUNTIME_DOCTOR_STATE_STATUS_READY..=RUNTIME_DOCTOR_STATE_STATUS_UNKNOWN)
+            .contains(&output.freshness)
+        && (RUNTIME_DOCTOR_STATE_STATUS_READY..=RUNTIME_DOCTOR_STATE_STATUS_UNKNOWN)
+            .contains(&output.five_hour_status)
+        && (RUNTIME_DOCTOR_STATE_STATUS_READY..=RUNTIME_DOCTOR_STATE_STATUS_UNKNOWN)
+            .contains(&output.weekly_status)
+        && (RUNTIME_DOCTOR_STATE_STATUS_READY..=RUNTIME_DOCTOR_STATE_STATUS_UNKNOWN)
+            .contains(&output.route_band)
+        && output.effective_score >= 0
+        && (RUNTIME_DOCTOR_STATE_CIRCUIT_CLOSED..=RUNTIME_DOCTOR_STATE_CIRCUIT_OPEN)
+            .contains(&output.circuit_state)
+}
+
+/// Run the bounded runtime-doctor quota, decay, and circuit state kernel.
+pub fn runtime_doctor_state_plan(
+    input: RuntimeDoctorStatePlanInput,
+) -> Result<RuntimeDoctorStatePlan, MojoError> {
+    ensure_rich_abi()?;
+    if !state_plan_input_is_valid(&input) {
+        return Err(MojoError::InvalidInput);
+    }
+    let mut output = RuntimeDoctorStatePlan::default();
+    let status = unsafe {
+        prodex_mojo_rich_runtime_doctor_state_plan_v1(
+            RUNTIME_DOCTOR_STATE_PLAN_ABI_VERSION,
+            mojo_pointer_address(&input),
+            mojo_mut_pointer_address(&mut output),
+        )
+    };
+    if status != 0 {
+        return Err(summary_plan_status_error(status));
+    }
+    state_plan_output_is_valid(&output)
+        .then_some(output)
+        .ok_or(MojoError::InvalidOutput)
+}
+
+pub fn runtime_doctor_summary_plan_self_test() -> bool {
+    let mut input = RuntimeDoctorSummaryPlanInput {
+        pointer_exists: 1,
+        log_exists: 1,
+        line_count: 1,
+        ..RuntimeDoctorSummaryPlanInput::default()
+    };
+    input.marker_counts[1] = 1;
+    input.marker_counts[84] = 1;
+    runtime_doctor_summary_plan(input).is_ok_and(|plan| {
+        plan.selection_pressure == RUNTIME_DOCTOR_PRESSURE_ELEVATED
+            && plan.diagnosis_kind == RUNTIME_DOCTOR_DIAGNOSIS_LANE_PRESSURE
+    })
+}
+
+pub fn runtime_doctor_state_plan_self_test() -> bool {
+    let quota = runtime_doctor_state_plan(RuntimeDoctorStatePlanInput {
+        operation: RUNTIME_DOCTOR_STATE_OP_QUOTA,
+        route_kind: RUNTIME_DOCTOR_STATE_ROUTE_RESPONSES,
+        now: 100,
+        checked_at: 90,
+        five_hour_status: RUNTIME_DOCTOR_STATE_STATUS_READY,
+        five_hour_reset_at: i64::MAX,
+        weekly_status: RUNTIME_DOCTOR_STATE_STATUS_THIN,
+        weekly_reset_at: i64::MAX,
+        stale_grace_seconds: 300,
+        ..RuntimeDoctorStatePlanInput::default()
+    })
+    .is_ok_and(|plan| {
+        plan.freshness == RUNTIME_DOCTOR_STATE_STATUS_READY
+            && plan.route_band == RUNTIME_DOCTOR_STATE_STATUS_THIN
+    });
+    let score = runtime_doctor_state_plan(RuntimeDoctorStatePlanInput {
+        operation: RUNTIME_DOCTOR_STATE_OP_SCORE,
+        now: 110,
+        updated_at: 100,
+        score: 5,
+        decay_seconds: 5,
+        ..RuntimeDoctorStatePlanInput::default()
+    })
+    .is_ok_and(|plan| plan.effective_score == 3);
+    quota && score
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -511,5 +875,11 @@ mod tests {
     #[test]
     fn plan_self_test_passes() {
         assert!(runtime_doctor_plan_self_test());
+    }
+
+    #[test]
+    fn summary_and_state_plan_self_tests_pass() {
+        assert!(runtime_doctor_summary_plan_self_test());
+        assert!(runtime_doctor_state_plan_self_test());
     }
 }

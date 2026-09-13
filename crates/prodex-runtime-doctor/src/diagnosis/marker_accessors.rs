@@ -9,6 +9,7 @@ pub fn runtime_doctor_marker_count(
     summary.marker_counts.get(marker).copied().unwrap_or(0)
 }
 
+#[cfg(not(feature = "mojo"))]
 pub(super) fn runtime_doctor_has_any_markers(
     summary: &RuntimeDoctorSummary,
     markers: &[&'static str],

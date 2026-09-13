@@ -19,11 +19,31 @@ use super::{
     RuntimeDoctorStateSummaryConfig, RuntimeDoctorUsageSnapshot,
 };
 
+#[cfg(not(feature = "mojo"))]
 pub fn runtime_doctor_route_circuit_state(until: Option<i64>, now: i64) -> &'static str {
     match until {
         Some(until) if until > now => "open",
         Some(_) => "half_open",
         None => "closed",
+    }
+}
+
+#[cfg(feature = "mojo")]
+pub fn runtime_doctor_route_circuit_state(until: Option<i64>, now: i64) -> &'static str {
+    match prodex_mojo_core::rich::runtime_doctor_state_plan(
+        prodex_mojo_core::rich::RuntimeDoctorStatePlanInput {
+            operation: prodex_mojo_core::rich::RUNTIME_DOCTOR_STATE_OP_CIRCUIT,
+            now,
+            circuit_until: until.unwrap_or(-1),
+            ..prodex_mojo_core::rich::RuntimeDoctorStatePlanInput::default()
+        },
+    )
+    .expect("Mojo runtime-doctor circuit plan returned invalid output")
+    .circuit_state
+    {
+        prodex_mojo_core::rich::RUNTIME_DOCTOR_STATE_CIRCUIT_OPEN => "open",
+        prodex_mojo_core::rich::RUNTIME_DOCTOR_STATE_CIRCUIT_HALF_OPEN => "half_open",
+        _ => "closed",
     }
 }
 
