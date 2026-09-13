@@ -695,6 +695,40 @@ fn kiro_provider_core_extracts_stream_content_text() {
 }
 
 #[test]
+fn kiro_provider_core_preserves_escaped_stream_content_and_activity_contract() {
+    assert_eq!(
+        kiro_provider_core_stream_content_text(&json!({
+            "content": [{"text": "hello\n"}, {"text": "世界"}]
+        }))
+        .as_deref(),
+        Some("hello\n世界")
+    );
+
+    let item = kiro_provider_core_tool_activity_item(
+        Some("  Run\u{00a0} Shell  "),
+        Some(" IN_PROGRESS "),
+        Some("command"),
+        false,
+        true,
+    );
+    assert_eq!(
+        item,
+        json!({
+            "type": "kiro_internal_activity",
+            "name": "Run Shell",
+            "status": "in_progress",
+            "phase": "updated",
+            "kind": "command",
+            "details_omitted": true,
+        })
+    );
+    assert_eq!(
+        kiro_provider_core_tool_activity_text(&item),
+        "[Kiro activity: Run Shell; status=in_progress; phase=updated; kind=command; details=omitted]\n"
+    );
+}
+
+#[test]
 fn kiro_provider_core_shapes_stream_tool_activity_item() {
     assert_eq!(
         kiro_provider_core_stream_tool_arguments(Some(&json!({"cmd": "pwd"}))),

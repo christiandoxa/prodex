@@ -509,18 +509,66 @@ pub fn runtime_error_signal_message_from_text(
     }
 }
 
+#[cfg(feature = "mojo")]
+pub fn runtime_quota_payload_code(code: &str) -> bool {
+    prodex_mojo_core::MojoError::rich_runtime_error_policy(
+        prodex_mojo_core::rich::RUNTIME_ERROR_MODE_CODE_QUOTA,
+        0,
+        0,
+        code.as_bytes(),
+    )
+    .is_ok_and(|(class, _, _)| class == 1)
+}
+
+#[cfg(not(feature = "mojo"))]
 pub fn runtime_quota_payload_code(code: &str) -> bool {
     runtime_payload_code_matches(code, RuntimeHttpErrorSignal::ExplicitQuota)
 }
 
+#[cfg(feature = "mojo")]
+pub fn runtime_rate_limit_payload_code(code: &str) -> bool {
+    prodex_mojo_core::MojoError::rich_runtime_error_policy(
+        prodex_mojo_core::rich::RUNTIME_ERROR_MODE_CODE_RATE,
+        0,
+        0,
+        code.as_bytes(),
+    )
+    .is_ok_and(|(class, _, _)| class == 2)
+}
+
+#[cfg(not(feature = "mojo"))]
 pub fn runtime_rate_limit_payload_code(code: &str) -> bool {
     runtime_payload_code_matches(code, RuntimeHttpErrorSignal::ExplicitRateLimit)
 }
 
+#[cfg(feature = "mojo")]
+pub fn runtime_overload_payload_code(code: &str) -> bool {
+    prodex_mojo_core::MojoError::rich_runtime_error_policy(
+        prodex_mojo_core::rich::RUNTIME_ERROR_MODE_CODE_OVERLOAD,
+        0,
+        0,
+        code.as_bytes(),
+    )
+    .is_ok_and(|(class, _, _)| class == 4)
+}
+
+#[cfg(not(feature = "mojo"))]
 pub fn runtime_overload_payload_code(code: &str) -> bool {
     runtime_payload_code_matches(code, RuntimeHttpErrorSignal::ExplicitOverload)
 }
 
+#[cfg(feature = "mojo")]
+pub fn runtime_usage_limit_text_message(message: &str) -> bool {
+    prodex_mojo_core::MojoError::rich_runtime_error_policy(
+        prodex_mojo_core::rich::RUNTIME_ERROR_MODE_TEXT_QUOTA,
+        0,
+        0,
+        message.as_bytes(),
+    )
+    .is_ok_and(|(class, _, _)| class == 1)
+}
+
+#[cfg(not(feature = "mojo"))]
 pub fn runtime_usage_limit_text_message(message: &str) -> bool {
     let lower = message.to_ascii_lowercase();
     runtime_text_has_payload_code(message, RuntimeHttpErrorSignal::ExplicitQuota)
@@ -535,6 +583,18 @@ pub fn runtime_usage_limit_text_message(message: &str) -> bool {
                 || lower.contains("more access now"))
 }
 
+#[cfg(feature = "mojo")]
+pub fn runtime_authoritative_usage_limit_text_message(message: &str) -> bool {
+    prodex_mojo_core::MojoError::rich_runtime_error_policy(
+        prodex_mojo_core::rich::RUNTIME_ERROR_MODE_TEXT_AUTHORITATIVE_QUOTA,
+        0,
+        0,
+        message.as_bytes(),
+    )
+    .is_ok_and(|(class, _, _)| class == 1)
+}
+
+#[cfg(not(feature = "mojo"))]
 pub fn runtime_authoritative_usage_limit_text_message(message: &str) -> bool {
     let lower = message.to_ascii_lowercase();
     lower.contains("you've hit your usage limit")
@@ -542,6 +602,18 @@ pub fn runtime_authoritative_usage_limit_text_message(message: &str) -> bool {
         || lower.contains("you hit your usage limit")
 }
 
+#[cfg(feature = "mojo")]
+pub fn runtime_overload_text_message(message: &str) -> bool {
+    prodex_mojo_core::MojoError::rich_runtime_error_policy(
+        prodex_mojo_core::rich::RUNTIME_ERROR_MODE_TEXT_OVERLOAD,
+        0,
+        0,
+        message.as_bytes(),
+    )
+    .is_ok_and(|(class, _, _)| class == 4)
+}
+
+#[cfg(not(feature = "mojo"))]
 pub fn runtime_overload_text_message(message: &str) -> bool {
     let lower = message.to_ascii_lowercase();
     lower.contains("selected model is at capacity")
@@ -705,6 +777,18 @@ fn runtime_text_has_payload_code(text: &str, signal: RuntimeHttpErrorSignal) -> 
         .any(|rule| rule.signal == signal && lower.contains(rule.code))
 }
 
+#[cfg(feature = "mojo")]
+pub fn runtime_workspace_credit_exhausted_text_message(message: &str) -> bool {
+    prodex_mojo_core::MojoError::rich_runtime_error_policy(
+        prodex_mojo_core::rich::RUNTIME_ERROR_MODE_TEXT_WORKSPACE,
+        0,
+        0,
+        message.as_bytes(),
+    )
+    .is_ok_and(|(class, _, _)| class == 1)
+}
+
+#[cfg(not(feature = "mojo"))]
 pub fn runtime_workspace_credit_exhausted_text_message(message: &str) -> bool {
     let lower = message.to_ascii_lowercase();
     lower.contains("workspace_member_credits_depleted")
@@ -714,6 +798,18 @@ pub fn runtime_workspace_credit_exhausted_text_message(message: &str) -> bool {
             && lower.contains("refill"))
 }
 
+#[cfg(feature = "mojo")]
+fn runtime_profile_unavailable_text_message(message: &str) -> bool {
+    prodex_mojo_core::MojoError::rich_runtime_error_policy(
+        prodex_mojo_core::rich::RUNTIME_ERROR_MODE_TEXT_PROFILE,
+        0,
+        0,
+        message.as_bytes(),
+    )
+    .is_ok_and(|(class, _, _)| class == 3)
+}
+
+#[cfg(not(feature = "mojo"))]
 fn runtime_profile_unavailable_text_message(message: &str) -> bool {
     runtime_text_has_payload_code(message, RuntimeHttpErrorSignal::ExplicitProfileUnavailable)
 }
