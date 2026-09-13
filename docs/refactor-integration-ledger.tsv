@@ -1,7 +1,7 @@
 ref_or_group	tip_sha	candidate_commit_or_group	status	evidence	basis
 audit-baseline	2647fb5dfad20c557122e40f6b868278a527d3	integration base	ancestor	2647fb5dfad20c557122e40f6b868278a527d3	origin/main before this integration train
-audit-final	348baf0ed561d454bc2260e562c8e3b822e34ef7	final origin/main	integrated-now	34732292108 success	final fast-forward target and exact-SHA CI
-audit-assertion	348baf0ed561d454bc2260e562c8e3b822e34ef7	60 non-ancestor refactor commits	complete	ledger rows and patch-id evidence	no semantically applicable unique refactor remains unrepresented
+audit-final	09e683b972366ba21fdea92d7de9ce61bae7ff59	final origin/main	integrated-now	34732908881 success	final fast-forward target and exact-SHA CI
+audit-assertion	09e683b972366ba21fdea92d7de9ce61bae7ff59	60 non-ancestor refactor commits	complete	ledger rows and patch-id evidence	no semantically applicable unique refactor remains unrepresented
 refs/heads/refactor/428-integration-20260907;refs/remotes/origin/refactor/428-integration-20260907	afe20dfd9f813eb217f78b63de517c7e8e52e8b7	90ef7087,d554492d,b82b5890,0cecbcc4,542a291a	integrated-now;superseded-by-current-code	492cca5f,94ae91b6,b1c37508,53603b0;26979976	three safe refactors integrated; TOML helper superseded by shared codex-config helper; URL-validation removal rejected because current security validation remains required
 refs/heads/refactor/428-worker-a-cli-20260907	3aa353bc06353054bdbd46f3d4a4844d56081f0a	3aa353bc	patch-equivalent	ad03717b5310880658931bdc2a2266680c4c80e1	git patch-id/cherry
 refs/heads/refactor/428-worker-b-logs-20260907	96acc79a44fc6b4746060fd72a173cb550d0b107	96acc79a	patch-equivalent	e63099af6cc052e77e48beff839356b74f6f6a4e	git patch-id/cherry
