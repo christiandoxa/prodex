@@ -1,4 +1,31 @@
 [  {
+    "id": "audited-prodex-refactor-integration-20260913",
+    "requiredSubjects": [
+      "refactor(application): share control-plane route errors",
+      "refactor(gateway): remove duplicate key mapping",
+      "refactor(expose): remove no-op launch validator",
+      "refactor(core): share root temp-file naming",
+      "refactor(policy): reuse identifier validation",
+      "refactor(session-store): reuse session id extraction",
+      "refactor(cli): merge Super alias rewrites",
+      "refactor(application): reuse validated idempotency path",
+      "refactor(runtime-launch): share CLI model parser",
+      "refactor(app): re-export runtime wrappers",
+      "refactor(state): remove orphaned governance",
+      "refactor(control-plane): remove dead audit API",
+      "refactor(domain): remove dead policy audit API",
+      "refactor(npm): remove unused script surfaces",
+      "docs(refactor): record complete integration ledger",
+      "test(ci): refresh production share after refactors"
+    ],
+    "caps": {
+      "maxFiles": 35,
+      "maxBehaviorFiles": 31,
+      "maxLines": 1200,
+      "maxFileLines": 500
+    },
+    "reason": "Reviewed exact integration train from 0.429.2 main 2647fb5dfad20c557122e40f6b868278a527d3f3: fifteen behavior-preserving refactor commits plus the ledger and measured production-share fixture update. The train is bounded at 31 files, 1,200 changed lines, and 500 changed lines in the largest file; default churn thresholds remain unchanged and all security, release, correctness, compatibility, and boundary guards remain mandatory."
+  },  {
     "id": "audited-prodex-0.429.1-integration-train",
     "requiredSubjects": [
       "chore(release): release 0.429.1",
