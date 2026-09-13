@@ -173,39 +173,56 @@ pub(super) fn wait_for_runtime_background_queues_idle() {
         let continuation_active = runtime_continuation_journal_queue_active();
         let probe_refresh_backlog = runtime_probe_refresh_queue_backlog();
         let probe_refresh_active = runtime_probe_refresh_queue_active();
+        let probe_refresh_scheduled = runtime_probe_refresh_queue()
+            .scheduled
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .len();
         let backlog = state_save_backlog + continuation_backlog + probe_refresh_backlog;
         let active = state_save_active + continuation_active + probe_refresh_active;
-        if backlog == 0 && active == 0 {
+        if backlog == 0 && active == 0 && probe_refresh_scheduled == 0 {
             return;
         }
         let only_lingering_probe_refresh = state_save_backlog == 0
             && state_save_active == 0
             && continuation_backlog == 0
             && continuation_active == 0
-            && (probe_refresh_backlog > 0 || probe_refresh_active > 0);
+            && (probe_refresh_backlog > 0
+                || probe_refresh_active > 0
+                || probe_refresh_scheduled > 0);
         if only_lingering_probe_refresh {
             let lingering_since = lingering_probe_refresh_since.get_or_insert_with(Instant::now);
-            // Tests use isolated state roots, so once every other queue has drained we can
-            // discard stale best-effort probe refresh backlog instead of timing out on work
-            // that belongs to a previous test. Any workers already in flight can finish in the
-            // background without touching the next test's state root.
-            if lingering_since.elapsed() >= probe_refresh_grace {
-                if probe_refresh_backlog > 0 {
-                    let queue = runtime_probe_refresh_queue();
+            // Tests use isolated state roots, so stale queued probe work may be discarded once
+            // every other queue has drained. In-flight workers still share the global probe
+            // revision, though, so wait for their scheduled reservation to clear before the
+            // next test starts.
+            if lingering_since.elapsed() >= probe_refresh_grace && probe_refresh_backlog > 0 {
+                let queue = runtime_probe_refresh_queue();
+                let stale_keys = {
                     let mut pending = queue
                         .pending
                         .lock()
                         .unwrap_or_else(|poisoned| poisoned.into_inner());
+                    let stale_keys = pending.keys().cloned().collect::<Vec<_>>();
                     pending.clear();
+                    stale_keys
+                };
+                if !stale_keys.is_empty() {
+                    let mut scheduled = queue
+                        .scheduled
+                        .lock()
+                        .unwrap_or_else(|poisoned| poisoned.into_inner());
+                    for key in stale_keys {
+                        scheduled.remove(&key);
+                    }
                 }
-                return;
             }
         } else {
             lingering_probe_refresh_since = None;
         }
         if Instant::now() >= deadline {
             panic!(
-                "runtime background queues did not go idle before timeout: backlog={backlog} active={active} state_save_backlog={state_save_backlog} state_save_active={state_save_active} continuation_backlog={continuation_backlog} continuation_active={continuation_active} probe_refresh_backlog={probe_refresh_backlog} probe_refresh_active={probe_refresh_active}"
+                "runtime background queues did not go idle before timeout: backlog={backlog} active={active} state_save_backlog={state_save_backlog} state_save_active={state_save_active} continuation_backlog={continuation_backlog} continuation_active={continuation_active} probe_refresh_backlog={probe_refresh_backlog} probe_refresh_active={probe_refresh_active} probe_refresh_scheduled={probe_refresh_scheduled}"
             );
         }
         thread::sleep(Duration::from_millis(10));
