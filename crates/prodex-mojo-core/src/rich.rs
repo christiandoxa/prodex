@@ -56,7 +56,12 @@ pub use policy::{
     plan_route_policy, validate_policy_alias,
 };
 mod fallback;
-pub use fallback::{model_fallback_chain, model_fallback_plan};
+pub use fallback::{
+    RUNTIME_ERROR_MODE_CODE_OVERLOAD, RUNTIME_ERROR_MODE_CODE_QUOTA, RUNTIME_ERROR_MODE_CODE_RATE,
+    RUNTIME_ERROR_MODE_TEXT_AUTHORITATIVE_QUOTA, RUNTIME_ERROR_MODE_TEXT_OVERLOAD,
+    RUNTIME_ERROR_MODE_TEXT_PROFILE, RUNTIME_ERROR_MODE_TEXT_QUOTA, RUNTIME_ERROR_MODE_TEXT_RATE,
+    RUNTIME_ERROR_MODE_TEXT_WORKSPACE, model_fallback_chain, model_fallback_plan,
+};
 mod gateway_constraint_trace;
 pub use gateway_constraint_trace::{
     GatewayConstraintTraceAffinityOutcome, GatewayConstraintTracePlan,

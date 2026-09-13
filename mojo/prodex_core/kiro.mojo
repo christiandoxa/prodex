@@ -1,7 +1,10 @@
 from std.memory import Pointer
 
 from rich_text import (
+    rich_codepoint,
+    rich_codepoint_width,
     rich_trim_bounds,
+    rich_unicode_space,
     rich_view_matches_literal,
     rich_view_ptr,
     rich_view_valid,
@@ -45,6 +48,9 @@ comptime KIRO_USAGE_UPDATE: Int64 = 25
 comptime KIRO_STREAM_TOOL_ARGUMENTS: Int64 = 26
 comptime KIRO_FINISH_REASON: Int64 = 27
 comptime KIRO_CHAT_TOOL_CALL_ITEM: Int64 = 28
+comptime KIRO_STREAM_CONTENT_TEXT: Int64 = 29
+comptime KIRO_TOOL_ACTIVITY_ITEM: Int64 = 30
+comptime KIRO_TOOL_ACTIVITY_TEXT: Int64 = 31
 
 comptime KIRO_REQUEST_VALIDATION_CHAT: Int64 = 1
 comptime KIRO_REQUEST_VALIDATION_RESPONSES: Int64 = 2
@@ -359,6 +365,611 @@ def kiro_put_prompt_role(
     return kiro_put_literal(writer, StringSlice("User"))
 
 
+def kiro_activity_ascii_lower(value: UInt8) -> UInt8:
+    if value >= 65 and value <= 90:
+        return value + 32
+    return value
+
+
+def kiro_activity_contains(
+    view: ProdexRichStringView, literal: StringSlice
+) -> Bool:
+    var needle = Int64(literal.byte_length())
+    if needle == 0:
+        return True
+    if view.len < UInt(needle):
+        return False
+    var left = rich_view_ptr(view)
+    var right = literal.unsafe_ptr()
+    for start in range(Int64(view.len) - needle + 1):
+        var matched = True
+        for offset in range(needle):
+            if kiro_activity_ascii_lower(left[unsafe_offset=start + offset]) != kiro_activity_ascii_lower(right[unsafe_offset=offset]):
+                matched = False
+                break
+        if matched:
+            return True
+    return False
+
+
+def kiro_activity_field_safe(view: ProdexRichStringView) -> Bool:
+    if view.len == 0 or view.ptr == 0:
+        return False
+    var ptr = rich_view_ptr(view)
+    var has_content = False
+    var index: Int64 = 0
+    while index < Int64(view.len):
+        var width = rich_codepoint_width(ptr[unsafe_offset=index])
+        if not rich_unicode_space(rich_codepoint(ptr, index, width)):
+            has_content = True
+            break
+        index += width
+    if not has_content:
+        return False
+    for forbidden in [StringSlice("authorization"), StringSlice("bearer"), StringSlice("api_key"), StringSlice("apikey"), StringSlice("password"), StringSlice("sk-"), StringSlice("sk_"), StringSlice("secret"), StringSlice("token"), StringSlice("credential")]:
+        if kiro_activity_contains(view, forbidden):
+            return False
+    for index in range(Int64(view.len)):
+        var value = ptr[unsafe_offset=index]
+        if value == 47 or value == 92 or value == 64:
+            return False
+    return True
+
+
+def kiro_put_activity_codepoint(
+    writer: Pointer[mut=True, KiroResponseWriter, _],
+    ptr: Pointer[mut=False, UInt8, _],
+    index: Int64,
+    width: Int64,
+    codepoint: Int64,
+) -> Bool:
+    if codepoint == 34 or codepoint == 92:
+        return kiro_put_byte(writer, 92) and kiro_put_byte(writer, UInt8(codepoint))
+    if codepoint == 8:
+        return kiro_put_literal(writer, StringSlice("\\b"))
+    if codepoint == 9:
+        return kiro_put_literal(writer, StringSlice("\\t"))
+    if codepoint == 10:
+        return kiro_put_literal(writer, StringSlice("\\n"))
+    if codepoint == 12:
+        return kiro_put_literal(writer, StringSlice("\\f"))
+    if codepoint == 13:
+        return kiro_put_literal(writer, StringSlice("\\r"))
+    if codepoint < 32:
+        return kiro_put_literal(writer, StringSlice("\\u00")) and kiro_put_hex_byte(writer, UInt8(codepoint))
+    for offset in range(width):
+        if not kiro_put_byte(writer, ptr[unsafe_offset=index + offset]):
+            return False
+    return True
+
+
+def kiro_put_activity_field(
+    writer: Pointer[mut=True, KiroResponseWriter, _],
+    view: ProdexRichStringView,
+    maximum: Int64,
+) -> Bool:
+    if not kiro_activity_field_safe(view) or not kiro_put_byte(writer, 34):
+        return False
+    var ptr = rich_view_ptr(view)
+    var cursor: Int64 = 0
+    var normalized_length: Int64 = 0
+    var word_started = False
+    var pending_space = False
+    while cursor < Int64(view.len):
+        var width = rich_codepoint_width(ptr[unsafe_offset=cursor])
+        var codepoint = rich_codepoint(ptr, cursor, width)
+        if rich_unicode_space(codepoint):
+            if word_started:
+                pending_space = True
+            cursor += width
+            continue
+        if pending_space:
+            if normalized_length + 1 > maximum:
+                break
+            if not kiro_put_byte(writer, 32):
+                return False
+            normalized_length += 1
+            pending_space = False
+        if normalized_length + width > maximum:
+            break
+        if not kiro_put_activity_codepoint(writer, ptr, cursor, width, codepoint):
+            return False
+        normalized_length += width
+        word_started = True
+        cursor += width
+    return kiro_put_byte(writer, 34)
+
+
+def kiro_activity_status_code(
+    view: ProdexRichStringView, present: Int64
+) -> Int64:
+    if present == 0 or view.len == 0:
+        return 0
+    var bounds = rich_trim_bounds(view)
+    var trimmed = ProdexRichStringView(
+        view.ptr + UInt(bounds[0]), UInt(bounds[1] - bounds[0])
+    )
+    if rich_view_matches_literal["pending"](trimmed, True):
+        return 1
+    if rich_view_matches_literal["in_progress"](trimmed, True):
+        return 2
+    if rich_view_matches_literal["running"](trimmed, True):
+        return 3
+    if rich_view_matches_literal["completed"](trimmed, True):
+        return 4
+    if rich_view_matches_literal["failed"](trimmed, True):
+        return 5
+    if rich_view_matches_literal["error"](trimmed, True):
+        return 6
+    if rich_view_matches_literal["cancelled"](trimmed, True):
+        return 7
+    if rich_view_matches_literal["truncated"](trimmed, True):
+        return 8
+    return 0
+
+
+def kiro_put_activity_status(
+    writer: Pointer[mut=True, KiroResponseWriter, _], status: Int64
+) -> Bool:
+    if status == 1:
+        return kiro_put_literal(writer, StringSlice("pending"))
+    if status == 2:
+        return kiro_put_literal(writer, StringSlice("in_progress"))
+    if status == 3:
+        return kiro_put_literal(writer, StringSlice("running"))
+    if status == 4:
+        return kiro_put_literal(writer, StringSlice("completed"))
+    if status == 5:
+        return kiro_put_literal(writer, StringSlice("failed"))
+    if status == 6:
+        return kiro_put_literal(writer, StringSlice("error"))
+    if status == 7:
+        return kiro_put_literal(writer, StringSlice("cancelled"))
+    if status == 8:
+        return kiro_put_literal(writer, StringSlice("truncated"))
+    return kiro_put_literal(writer, StringSlice("unknown"))
+
+
+def kiro_activity_phase_code(status: Int64, initial: Int64) -> Int64:
+    if status == 4:
+        return 1
+    if status == 5 or status == 6:
+        return 2
+    if status == 7:
+        return 3
+    if status == 8:
+        return 4
+    return 5 if initial == 1 else 6
+
+
+def kiro_put_activity_phase(
+    writer: Pointer[mut=True, KiroResponseWriter, _], phase: Int64
+) -> Bool:
+    if phase == 1:
+        return kiro_put_literal(writer, StringSlice("completed"))
+    if phase == 2:
+        return kiro_put_literal(writer, StringSlice("failed"))
+    if phase == 3:
+        return kiro_put_literal(writer, StringSlice("cancelled"))
+    if phase == 4:
+        return kiro_put_literal(writer, StringSlice("truncated"))
+    if phase == 5:
+        return kiro_put_literal(writer, StringSlice("started"))
+    return kiro_put_literal(writer, StringSlice("updated"))
+
+
+def kiro_write_activity_item(
+    writer: Pointer[mut=True, KiroResponseWriter, _],
+    input: ProdexKiroKernelInput,
+) -> Bool:
+    var title_safe = input.name_present == 1 and kiro_activity_field_safe(input.name)
+    var kind_safe = input.model_present == 1 and kiro_activity_field_safe(input.model)
+    if not kiro_put_literal(writer, StringSlice('{"type":"kiro_internal_activity","name":')):
+        return False
+    if title_safe:
+        if not kiro_put_activity_field(writer, input.name, 160):
+            return False
+    elif kind_safe:
+        if not kiro_put_activity_field(writer, input.model, 48):
+            return False
+    elif not kiro_put_literal(writer, StringSlice('"Kiro internal activity"')):
+        return False
+    var status = kiro_activity_status_code(input.status, input.status_present)
+    if not kiro_put_literal(writer, StringSlice(",\"status\":\"")) or not kiro_put_activity_status(writer, status) or not kiro_put_literal(writer, StringSlice("\",\"phase\":\"")):
+        return False
+    if not kiro_put_activity_phase(writer, kiro_activity_phase_code(status, input.include_role)):
+        return False
+    if not kiro_put_literal(writer, StringSlice("\",\"kind\":")):
+        return False
+    if kind_safe:
+        if not kiro_put_activity_field(writer, input.model, 48):
+            return False
+    elif not kiro_put_literal(writer, StringSlice("null")):
+        return False
+    if not kiro_put_literal(writer, StringSlice(',"details_omitted":')):
+        return False
+    if input.has_tool_calls == 1:
+        if not kiro_put_literal(writer, StringSlice("true")):
+            return False
+    else:
+        if not kiro_put_literal(writer, StringSlice("false")):
+            return False
+    return kiro_put_byte(writer, 125)
+
+
+def kiro_write_activity_text(
+    writer: Pointer[mut=True, KiroResponseWriter, _],
+    input: ProdexKiroKernelInput,
+) -> Bool:
+    if not kiro_put_literal(writer, StringSlice("[Kiro activity: ")):
+        return False
+    if input.name_present == 1:
+        if not kiro_put_view(writer, input.name):
+            return False
+    elif not kiro_put_literal(writer, StringSlice("Kiro internal activity")):
+        return False
+    if not kiro_put_literal(writer, StringSlice("; status=")):
+        return False
+    if input.status_present == 1:
+        if not kiro_put_view(writer, input.status):
+            return False
+    elif not kiro_put_literal(writer, StringSlice("unknown")):
+        return False
+    if not kiro_put_literal(writer, StringSlice("; phase=")):
+        return False
+    if input.role_present == 1:
+        if not kiro_put_view(writer, input.role):
+            return False
+    elif not kiro_put_literal(writer, StringSlice("updated")):
+        return False
+    if input.model_present == 1:
+        if not kiro_put_literal(writer, StringSlice("; kind=")) or not kiro_put_view(writer, input.model):
+            return False
+    if input.has_tool_calls == 1 and not kiro_put_literal(writer, StringSlice("; details=omitted")):
+        return False
+    return kiro_put_literal(writer, StringSlice("]\n"))
+
+
+def kiro_json_byte(view: ProdexRichStringView, index: Int64) -> UInt8:
+    return rich_view_ptr(view)[unsafe_offset=index]
+
+
+def kiro_json_skip_ws(
+    view: ProdexRichStringView, start: Int64, end: Int64
+) -> Int64:
+    var index = start
+    while index < end:
+        var value = kiro_json_byte(view, index)
+        if value != 9 and value != 10 and value != 13 and value != 32:
+            break
+        index += 1
+    return index
+
+
+def kiro_json_hex(value: UInt8) -> Int64:
+    if value >= 48 and value <= 57:
+        return Int64(value - 48)
+    if value >= 65 and value <= 70:
+        return Int64(value - 65) + 10
+    if value >= 97 and value <= 102:
+        return Int64(value - 97) + 10
+    return -1
+
+
+def kiro_json_string_end(
+    view: ProdexRichStringView, start: Int64, end: Int64
+) -> Int64:
+    if start < 0 or start >= end or kiro_json_byte(view, start) != 34:
+        return -1
+    var index = start + 1
+    while index < end:
+        var value = kiro_json_byte(view, index)
+        if value == 34:
+            return index + 1
+        if value == 92:
+            if index + 1 >= end:
+                return -1
+            var escaped = kiro_json_byte(view, index + 1)
+            if escaped == 117:
+                if index + 5 >= end:
+                    return -1
+                for offset in range(2, 6):
+                    if kiro_json_hex(kiro_json_byte(view, index + Int64(offset))) < 0:
+                        return -1
+                index += 6
+            elif escaped == 34 or escaped == 92 or escaped == 47 or escaped == 98 or escaped == 102 or escaped == 110 or escaped == 114 or escaped == 116:
+                index += 2
+            else:
+                return -1
+        elif value < 32:
+            return -1
+        else:
+            var width = rich_codepoint_width(value)
+            if index + width > end:
+                return -1
+            index += width
+    return -1
+
+
+def kiro_json_number_end(
+    view: ProdexRichStringView, start: Int64, end: Int64
+) -> Int64:
+    var index = start
+    if index < end and kiro_json_byte(view, index) == 45:
+        index += 1
+    if index >= end:
+        return -1
+    if kiro_json_byte(view, index) == 48:
+        index += 1
+        if index < end and kiro_json_byte(view, index) >= 48 and kiro_json_byte(view, index) <= 57:
+            return -1
+    elif kiro_json_byte(view, index) >= 49 and kiro_json_byte(view, index) <= 57:
+        index += 1
+        while index < end and kiro_json_byte(view, index) >= 48 and kiro_json_byte(view, index) <= 57:
+            index += 1
+    else:
+        return -1
+    if index < end and kiro_json_byte(view, index) == 46:
+        index += 1
+        if index >= end or kiro_json_byte(view, index) < 48 or kiro_json_byte(view, index) > 57:
+            return -1
+        while index < end and kiro_json_byte(view, index) >= 48 and kiro_json_byte(view, index) <= 57:
+            index += 1
+    if index < end and (kiro_json_byte(view, index) == 69 or kiro_json_byte(view, index) == 101):
+        index += 1
+        if index < end and (kiro_json_byte(view, index) == 43 or kiro_json_byte(view, index) == 45):
+            index += 1
+        if index >= end or kiro_json_byte(view, index) < 48 or kiro_json_byte(view, index) > 57:
+            return -1
+        while index < end and kiro_json_byte(view, index) >= 48 and kiro_json_byte(view, index) <= 57:
+            index += 1
+    return index
+
+
+def kiro_json_literal_end(
+    view: ProdexRichStringView, start: Int64, end: Int64
+) -> Int64:
+    if start + 4 <= end and kiro_json_byte(view, start) == 116 and kiro_json_byte(view, start + 1) == 114 and kiro_json_byte(view, start + 2) == 117 and kiro_json_byte(view, start + 3) == 101:
+        return start + 4
+    if start + 5 <= end and kiro_json_byte(view, start) == 102 and kiro_json_byte(view, start + 1) == 97 and kiro_json_byte(view, start + 2) == 108 and kiro_json_byte(view, start + 3) == 115 and kiro_json_byte(view, start + 4) == 101:
+        return start + 5
+    if start + 4 <= end and kiro_json_byte(view, start) == 110 and kiro_json_byte(view, start + 1) == 117 and kiro_json_byte(view, start + 2) == 108 and kiro_json_byte(view, start + 3) == 108:
+        return start + 4
+    return -1
+
+
+def kiro_json_value_end(
+    view: ProdexRichStringView,
+    start: Int64,
+    end: Int64,
+    depth: Int64,
+) -> Int64:
+    if depth > 128:
+        return -1
+    var index = kiro_json_skip_ws(view, start, end)
+    if index >= end:
+        return -1
+    var opening = kiro_json_byte(view, index)
+    if opening == 34:
+        return kiro_json_string_end(view, index, end)
+    if opening == 91:
+        index += 1
+        index = kiro_json_skip_ws(view, index, end)
+        if index < end and kiro_json_byte(view, index) == 93:
+            return index + 1
+        while index < end:
+            var value_end = kiro_json_value_end(view, index, end, depth + 1)
+            if value_end < 0:
+                return -1
+            index = kiro_json_skip_ws(view, value_end, end)
+            if index < end and kiro_json_byte(view, index) == 44:
+                index = kiro_json_skip_ws(view, index + 1, end)
+                continue
+            if index < end and kiro_json_byte(view, index) == 93:
+                return index + 1
+            return -1
+        return -1
+    if opening == 123:
+        index += 1
+        index = kiro_json_skip_ws(view, index, end)
+        if index < end and kiro_json_byte(view, index) == 125:
+            return index + 1
+        while index < end:
+            var key_end = kiro_json_string_end(view, index, end)
+            if key_end < 0:
+                return -1
+            index = kiro_json_skip_ws(view, key_end, end)
+            if index >= end or kiro_json_byte(view, index) != 58:
+                return -1
+            var value_end = kiro_json_value_end(view, index + 1, end, depth + 1)
+            if value_end < 0:
+                return -1
+            index = kiro_json_skip_ws(view, value_end, end)
+            if index < end and kiro_json_byte(view, index) == 44:
+                index = kiro_json_skip_ws(view, index + 1, end)
+                continue
+            if index < end and kiro_json_byte(view, index) == 125:
+                return index + 1
+            return -1
+        return -1
+    if opening == 116 or opening == 102 or opening == 110:
+        return kiro_json_literal_end(view, index, end)
+    return kiro_json_number_end(view, index, end)
+
+
+def kiro_json_put_codepoint(
+    writer: Pointer[mut=True, KiroResponseWriter, _], codepoint: Int64
+) -> Bool:
+    if codepoint <= 127:
+        return kiro_put_byte(writer, UInt8(codepoint))
+    if codepoint <= 2047:
+        return kiro_put_byte(writer, UInt8(192 + (codepoint >> 6))) and kiro_put_byte(writer, UInt8(128 + (codepoint & 63)))
+    if codepoint <= 65535:
+        return kiro_put_byte(writer, UInt8(224 + (codepoint >> 12))) and kiro_put_byte(writer, UInt8(128 + ((codepoint >> 6) & 63))) and kiro_put_byte(writer, UInt8(128 + (codepoint & 63)))
+    return kiro_put_byte(writer, UInt8(240 + (codepoint >> 18))) and kiro_put_byte(writer, UInt8(128 + ((codepoint >> 12) & 63))) and kiro_put_byte(writer, UInt8(128 + ((codepoint >> 6) & 63))) and kiro_put_byte(writer, UInt8(128 + (codepoint & 63)))
+
+
+def kiro_json_put_string(
+    writer: Pointer[mut=True, KiroResponseWriter, _],
+    view: ProdexRichStringView,
+    start: Int64,
+    end: Int64,
+) -> Int64:
+    var ptr = rich_view_ptr(view)
+    var index = start + 1
+    var written: Int64 = 0
+    while index < end - 1:
+        var value = ptr[unsafe_offset=index]
+        var codepoint: Int64
+        var width: Int64
+        if value == 92:
+            if index + 1 >= end - 1:
+                return -1
+            var escaped = ptr[unsafe_offset=index + 1]
+            if escaped == 117:
+                if index + 5 >= end - 1:
+                    return -1
+                codepoint = 0
+                for offset in range(2, 6):
+                    var digit = kiro_json_hex(ptr[unsafe_offset=index + Int64(offset)])
+                    if digit < 0:
+                        return -1
+                    codepoint = codepoint * 16 + digit
+                index += 6
+                if codepoint >= 55296 and codepoint <= 56319:
+                    if index + 5 >= end - 1 or ptr[unsafe_offset=index] != 92 or ptr[unsafe_offset=index + 1] != 117:
+                        return -1
+                    var low: Int64 = 0
+                    for offset in range(2, 6):
+                        var digit = kiro_json_hex(ptr[unsafe_offset=index + Int64(offset)])
+                        if digit < 0:
+                            return -1
+                        low = low * 16 + digit
+                    if low < 56320 or low > 57343:
+                        return -1
+                    codepoint = 65536 + ((codepoint - 55296) << 10) + low - 56320
+                    index += 6
+                elif codepoint >= 56320 and codepoint <= 57343:
+                    return -1
+            else:
+                if escaped == 34 or escaped == 92 or escaped == 47:
+                    codepoint = Int64(escaped)
+                elif escaped == 98:
+                    codepoint = 8
+                elif escaped == 102:
+                    codepoint = 12
+                elif escaped == 110:
+                    codepoint = 10
+                elif escaped == 114:
+                    codepoint = 13
+                elif escaped == 116:
+                    codepoint = 9
+                else:
+                    return -1
+                index += 2
+        else:
+            width = rich_codepoint_width(value)
+            if index + width > end - 1:
+                return -1
+            codepoint = rich_codepoint(ptr, index, width)
+            index += width
+        if not kiro_json_put_codepoint(writer, codepoint):
+            return -1
+        written += 1
+    return 1 if written > 0 else 0
+
+
+def kiro_json_key_matches(
+    view: ProdexRichStringView,
+    start: Int64,
+    end: Int64,
+    literal: StringSlice,
+) -> Bool:
+    var expected_length = Int64(literal.byte_length())
+    if end - start - 2 != expected_length or kiro_json_byte(view, start) != 34 or kiro_json_byte(view, end - 1) != 34:
+        return False
+    var actual = rich_view_ptr(view)
+    var expected = literal.unsafe_ptr()
+    for index in range(expected_length):
+        if actual[unsafe_offset=start + 1 + index] != expected[unsafe_offset=index]:
+            return False
+    return True
+
+
+def kiro_json_write_content_value(
+    view: ProdexRichStringView,
+    start: Int64,
+    end: Int64,
+    writer: Pointer[mut=True, KiroResponseWriter, _],
+    depth: Int64,
+) -> Int64:
+    if depth > 128:
+        return -1
+    var index = kiro_json_skip_ws(view, start, end)
+    if index >= end:
+        return -1
+    var opening = kiro_json_byte(view, index)
+    if opening == 34:
+        var string_end = kiro_json_string_end(view, index, end)
+        if string_end < 0:
+            return -1
+        return kiro_json_put_string(writer, view, index, string_end)
+    if opening == 91:
+        var found = False
+        index = kiro_json_skip_ws(view, index + 1, end)
+        if index < end and kiro_json_byte(view, index) == 93:
+            return 0
+        while index < end:
+            var value_end = kiro_json_value_end(view, index, end, depth + 1)
+            if value_end < 0:
+                return -1
+            var result = kiro_json_write_content_value(view, index, value_end, writer, depth + 1)
+            if result < 0:
+                return -1
+            if result == 1:
+                found = True
+            index = kiro_json_skip_ws(view, value_end, end)
+            if index < end and kiro_json_byte(view, index) == 93:
+                return 1 if found else 0
+            if index >= end or kiro_json_byte(view, index) != 44:
+                return -1
+            index = kiro_json_skip_ws(view, index + 1, end)
+        return -1
+    if opening == 123:
+        var content_start: Int64 = -1
+        var content_end: Int64 = -1
+        index = kiro_json_skip_ws(view, index + 1, end)
+        if index < end and kiro_json_byte(view, index) == 125:
+            return 0
+        while index < end:
+            var key_start = index
+            var key_end = kiro_json_string_end(view, key_start, end)
+            if key_end < 0:
+                return -1
+            index = kiro_json_skip_ws(view, key_end, end)
+            if index >= end or kiro_json_byte(view, index) != 58:
+                return -1
+            var value_start = kiro_json_skip_ws(view, index + 1, end)
+            var value_end = kiro_json_value_end(view, value_start, end, depth + 1)
+            if value_end < 0:
+                return -1
+            if kiro_json_key_matches(view, key_start, key_end, StringSlice("text")) and kiro_json_byte(view, value_start) == 34:
+                return kiro_json_put_string(writer, view, value_start, value_end)
+            if kiro_json_key_matches(view, key_start, key_end, StringSlice("content")):
+                content_start = value_start
+                content_end = value_end
+            index = kiro_json_skip_ws(view, value_end, end)
+            if index < end and kiro_json_byte(view, index) == 125:
+                if content_start >= 0:
+                    return kiro_json_write_content_value(view, content_start, content_end, writer, depth + 1)
+                return 0
+            if index >= end or kiro_json_byte(view, index) != 44:
+                return -1
+            index = kiro_json_skip_ws(view, index + 1, end)
+        return -1
+    return 0
+
+
 def kiro_put_chat_finish_reason(
     writer: Pointer[mut=True, KiroResponseWriter, _],
     input: ProdexKiroKernelInput,
@@ -393,6 +1004,19 @@ def kiro_write_operation(
     input: ProdexKiroKernelInput,
 ) -> Bool:
     var operation = input.operation
+    if operation == KIRO_STREAM_CONTENT_TEXT:
+        if input.input_present == 0:
+            return False
+        var end = Int64(input.input.len)
+        var start = kiro_json_skip_ws(input.input, 0, end)
+        var value_end = kiro_json_value_end(input.input, start, end, 0)
+        if value_end < 0 or kiro_json_skip_ws(input.input, value_end, end) != end:
+            return False
+        return kiro_json_write_content_value(input.input, start, value_end, writer, 0) >= 0
+    if operation == KIRO_TOOL_ACTIVITY_ITEM:
+        return kiro_write_activity_item(writer, input)
+    if operation == KIRO_TOOL_ACTIVITY_TEXT:
+        return kiro_write_activity_text(writer, input)
     if operation == KIRO_REQUEST_BODY:
         var has_fields = False
         if not kiro_put_byte(writer, 123):

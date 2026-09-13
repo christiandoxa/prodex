@@ -371,3 +371,754 @@ def prodex_mojo_rich_model_fallback_v2(
     result_ptr[].output_written = written
     result_ptr[].required_output = written
     return RICH_STATUS_OK
+
+
+comptime RUNTIME_ERROR_MODE_HTTP: Int64 = 0
+comptime RUNTIME_ERROR_MODE_STREAM: Int64 = 1
+comptime RUNTIME_ERROR_MODE_JSON_QUOTA: Int64 = 2
+comptime RUNTIME_ERROR_MODE_JSON_RATE: Int64 = 3
+comptime RUNTIME_ERROR_MODE_JSON_PROFILE: Int64 = 4
+comptime RUNTIME_ERROR_MODE_JSON_OVERLOAD: Int64 = 5
+comptime RUNTIME_ERROR_MODE_TEXT_QUOTA: Int64 = 6
+comptime RUNTIME_ERROR_MODE_TEXT_AUTHORITATIVE_QUOTA: Int64 = 7
+comptime RUNTIME_ERROR_MODE_TEXT_RATE: Int64 = 8
+comptime RUNTIME_ERROR_MODE_TEXT_PROFILE: Int64 = 9
+comptime RUNTIME_ERROR_MODE_TEXT_OVERLOAD: Int64 = 10
+comptime RUNTIME_ERROR_MODE_TEXT_WORKSPACE: Int64 = 11
+comptime RUNTIME_ERROR_MODE_CODE_QUOTA: Int64 = 12
+comptime RUNTIME_ERROR_MODE_CODE_RATE: Int64 = 13
+comptime RUNTIME_ERROR_MODE_CODE_OVERLOAD: Int64 = 14
+
+comptime RUNTIME_ERROR_CLASS_OTHER: Int64 = 0
+comptime RUNTIME_ERROR_CLASS_QUOTA: Int64 = 1
+comptime RUNTIME_ERROR_CLASS_RATE: Int64 = 2
+comptime RUNTIME_ERROR_CLASS_PROFILE: Int64 = 3
+comptime RUNTIME_ERROR_CLASS_OVERLOAD: Int64 = 4
+comptime RUNTIME_ERROR_CLASS_TRANSIENT: Int64 = 5
+comptime RUNTIME_ERROR_ACTION_PASS: Int64 = 0
+comptime RUNTIME_ERROR_ACTION_ROTATE: Int64 = 1
+comptime RUNTIME_ERROR_ACTION_RETRY: Int64 = 2
+comptime RUNTIME_ERROR_PHASE_PRECOMMIT: Int64 = 0
+comptime RUNTIME_ERROR_PHASE_COMMITTED: Int64 = 1
+comptime RUNTIME_ERROR_MAX_BYTES: Int64 = 65_536
+comptime RUNTIME_ERROR_MAX_DEPTH: Int64 = 32
+
+
+def runtime_error_none() -> ProdexRichFallbackRecord:
+    return ProdexRichFallbackRecord(ProdexRichSlice(0, 0), RUNTIME_ERROR_CLASS_OTHER, 0)
+
+
+def runtime_error_invalid() -> ProdexRichFallbackRecord:
+    return ProdexRichFallbackRecord(ProdexRichSlice(-1, -1), RUNTIME_ERROR_CLASS_OTHER, -1)
+
+
+def runtime_error_match(
+    class_tag: Int64, message_start: Int64, message_end: Int64
+) -> ProdexRichFallbackRecord:
+    return ProdexRichFallbackRecord(
+        ProdexRichSlice(message_start, message_end - message_start), class_tag, 1
+    )
+
+
+def runtime_error_is_match(record: ProdexRichFallbackRecord) -> Bool:
+    return record.input_index == 1 and record.source_kind != RUNTIME_ERROR_CLASS_OTHER
+
+
+def runtime_error_is_invalid(record: ProdexRichFallbackRecord) -> Bool:
+    return record.input_index < 0
+
+
+def runtime_error_ascii_space(value: UInt8) -> Bool:
+    return value == 32 or value == 9 or value == 10 or value == 13
+
+
+def runtime_error_skip_space(
+    ptr: Pointer[mut=False, UInt8, _], start: Int64, end: Int64
+) -> Int64:
+    var index = start
+    while index < end and runtime_error_ascii_space(ptr[unsafe_offset=index]):
+        index += 1
+    return index
+
+
+def runtime_error_trim_end(
+    ptr: Pointer[mut=False, UInt8, _], start: Int64, end: Int64
+) -> Int64:
+    var index = end
+    while index > start and runtime_error_ascii_space(ptr[unsafe_offset=index - 1]):
+        index -= 1
+    return index
+
+
+def runtime_error_range_matches(
+    ptr: Pointer[mut=False, UInt8, _],
+    start: Int64,
+    end: Int64,
+    literal: StringSlice,
+    folded: Bool,
+) -> Bool:
+    if start < 0 or end < start or end - start != Int64(literal.byte_length()):
+        return False
+    for offset in range(end - start):
+        var left = ptr[unsafe_offset=start + offset]
+        var right = literal.unsafe_ptr()[unsafe_offset=offset]
+        if folded and left >= 65 and left <= 90:
+            left += 32
+        if left != right:
+            return False
+    return True
+
+
+def runtime_error_contains(
+    ptr: Pointer[mut=False, UInt8, _],
+    start: Int64,
+    end: Int64,
+    literal: StringSlice,
+) -> Bool:
+    var needle = Int64(literal.byte_length())
+    if needle == 0:
+        return True
+    if start < 0 or end < start or needle > end - start:
+        return False
+    for offset in range(end - start - needle + 1):
+        var matched = True
+        for inner in range(needle):
+            var left = ptr[unsafe_offset=start + offset + inner]
+            var right = literal.unsafe_ptr()[unsafe_offset=inner]
+            if left >= 65 and left <= 90:
+                left += 32
+            if left != right:
+                matched = False
+                break
+        if matched:
+            return True
+    return False
+
+
+def runtime_error_string_end(
+    ptr: Pointer[mut=False, UInt8, _], start: Int64, end: Int64
+) -> Int64:
+    if start >= end or ptr[unsafe_offset=start] != 34:
+        return -1
+    var index = start + 1
+    while index < end:
+        var value = ptr[unsafe_offset=index]
+        if value == 92:
+            if index + 1 >= end:
+                return -1
+            index += 2
+        elif value == 34:
+            return index
+        elif value < 32:
+            return -1
+        else:
+            index += 1
+    return -1
+
+
+def runtime_error_primitive_end(
+    ptr: Pointer[mut=False, UInt8, _], start: Int64, end: Int64
+) -> Int64:
+    if runtime_error_range_matches(ptr, start, min(start + 4, end), StringSlice("true"), False) or runtime_error_range_matches(ptr, start, min(start + 5, end), StringSlice("false"), False) or runtime_error_range_matches(ptr, start, min(start + 4, end), StringSlice("null"), False):
+        if ptr[unsafe_offset=start] == 116:
+            return start + 4
+        if ptr[unsafe_offset=start] == 102:
+            return start + 5
+        return start + 4
+    var index = start
+    if index < end and ptr[unsafe_offset=index] == 45:
+        index += 1
+    var digits = index
+    while index < end and ptr[unsafe_offset=index] >= 48 and ptr[unsafe_offset=index] <= 57:
+        index += 1
+    if index == digits:
+        return -1
+    if index < end and ptr[unsafe_offset=index] == 46:
+        index += 1
+        var fraction = index
+        while index < end and ptr[unsafe_offset=index] >= 48 and ptr[unsafe_offset=index] <= 57:
+            index += 1
+        if index == fraction:
+            return -1
+    if index < end and (ptr[unsafe_offset=index] == 101 or ptr[unsafe_offset=index] == 69):
+        index += 1
+        if index < end and (ptr[unsafe_offset=index] == 43 or ptr[unsafe_offset=index] == 45):
+            index += 1
+        var exponent = index
+        while index < end and ptr[unsafe_offset=index] >= 48 and ptr[unsafe_offset=index] <= 57:
+            index += 1
+        if index == exponent:
+            return -1
+    return index
+
+
+def runtime_error_code_class(
+    ptr: Pointer[mut=False, UInt8, _],
+    start: Int64,
+    end: Int64,
+    mode: Int64,
+) -> Int64:
+    var quota = runtime_error_range_matches(ptr, start, end, StringSlice("insufficient_quota"), True) or runtime_error_range_matches(ptr, start, end, StringSlice("quota_exhausted"), True) or runtime_error_range_matches(ptr, start, end, StringSlice("quota_exceeded"), True) or runtime_error_range_matches(ptr, start, end, StringSlice("resource_exhausted"), True) or runtime_error_range_matches(ptr, start, end, StringSlice("usage_limit_reached"), True) or runtime_error_range_matches(ptr, start, end, StringSlice("usage_not_included"), True) or runtime_error_range_matches(ptr, start, end, StringSlice("workspace_member_credits_depleted"), True)
+    var rate = runtime_error_range_matches(ptr, start, end, StringSlice("rate_limit_exceeded"), True) or runtime_error_range_matches(ptr, start, end, StringSlice("rate_limit_exceeded_error"), True)
+    var profile = runtime_error_range_matches(ptr, start, end, StringSlice("deactivated_workspace"), True)
+    var overload = runtime_error_range_matches(ptr, start, end, StringSlice("server_is_overloaded"), True) or runtime_error_range_matches(ptr, start, end, StringSlice("slow_down"), True)
+    if mode == RUNTIME_ERROR_MODE_CODE_QUOTA:
+        if quota:
+            return RUNTIME_ERROR_CLASS_QUOTA
+        return RUNTIME_ERROR_CLASS_OTHER
+    if mode == RUNTIME_ERROR_MODE_CODE_RATE:
+        if rate:
+            return RUNTIME_ERROR_CLASS_RATE
+        return RUNTIME_ERROR_CLASS_OTHER
+    if mode == RUNTIME_ERROR_MODE_CODE_OVERLOAD:
+        if overload:
+            return RUNTIME_ERROR_CLASS_OVERLOAD
+        return RUNTIME_ERROR_CLASS_OTHER
+    if mode == RUNTIME_ERROR_MODE_JSON_QUOTA:
+        if quota:
+            return RUNTIME_ERROR_CLASS_QUOTA
+        return RUNTIME_ERROR_CLASS_OTHER
+    if mode == RUNTIME_ERROR_MODE_JSON_RATE:
+        if rate:
+            return RUNTIME_ERROR_CLASS_RATE
+        return RUNTIME_ERROR_CLASS_OTHER
+    if mode == RUNTIME_ERROR_MODE_JSON_PROFILE:
+        if profile:
+            return RUNTIME_ERROR_CLASS_PROFILE
+        return RUNTIME_ERROR_CLASS_OTHER
+    if mode == RUNTIME_ERROR_MODE_JSON_OVERLOAD:
+        if overload:
+            return RUNTIME_ERROR_CLASS_OVERLOAD
+        return RUNTIME_ERROR_CLASS_OTHER
+    return RUNTIME_ERROR_CLASS_OTHER
+
+
+def runtime_error_json_direct_record(
+    mode: Int64,
+    status: Int64,
+    quota: Bool,
+    rate: Bool,
+    profile: Bool,
+    overload: Bool,
+    error_quota: Bool,
+    message_start: Int64,
+    message_end: Int64,
+    detail_start: Int64,
+    detail_end: Int64,
+    error_start: Int64,
+    error_end: Int64,
+    ptr: Pointer[mut=False, UInt8, _],
+) -> ProdexRichFallbackRecord:
+    var selected_start = message_start
+    var selected_end = message_end
+    if selected_start < 0:
+        selected_start = detail_start
+        selected_end = detail_end
+    if selected_start < 0:
+        selected_start = error_start
+        selected_end = error_end
+
+    if mode == RUNTIME_ERROR_MODE_HTTP:
+        if status == 402 or status == 403:
+            if profile:
+                return runtime_error_match(RUNTIME_ERROR_CLASS_PROFILE, selected_start, selected_end)
+            if quota or error_quota or selected_start >= 0 and (
+                runtime_error_contains(ptr, selected_start, selected_end, StringSlice("you've hit your usage limit"))
+                or runtime_error_contains(ptr, selected_start, selected_end, StringSlice("you have hit your usage limit"))
+                or runtime_error_contains(ptr, selected_start, selected_end, StringSlice("the usage limit has been reached"))
+                or runtime_error_contains(ptr, selected_start, selected_end, StringSlice("usage limit has been reached"))
+                or runtime_error_contains(ptr, selected_start, selected_end, StringSlice("usage limit")) and (
+                    runtime_error_contains(ptr, selected_start, selected_end, StringSlice("try again at"))
+                    or runtime_error_contains(ptr, selected_start, selected_end, StringSlice("request to your admin"))
+                    or runtime_error_contains(ptr, selected_start, selected_end, StringSlice("more access now"))
+                )
+                or runtime_error_contains(ptr, selected_start, selected_end, StringSlice("workspace_member_credits_depleted"))
+                or runtime_error_contains(ptr, selected_start, selected_end, StringSlice("workspace is out of credits"))
+                or runtime_error_contains(ptr, selected_start, selected_end, StringSlice("out of credits")) and runtime_error_contains(ptr, selected_start, selected_end, StringSlice("workspace owner")) and runtime_error_contains(ptr, selected_start, selected_end, StringSlice("refill"))
+            ):
+                return runtime_error_match(RUNTIME_ERROR_CLASS_QUOTA, selected_start, selected_end)
+        elif status == 429:
+            if rate:
+                return runtime_error_match(RUNTIME_ERROR_CLASS_RATE, selected_start, selected_end)
+            if quota:
+                return runtime_error_match(RUNTIME_ERROR_CLASS_QUOTA, selected_start, selected_end)
+            if selected_start >= 0 and (
+                runtime_error_contains(ptr, selected_start, selected_end, StringSlice("you've hit your usage limit"))
+                or runtime_error_contains(ptr, selected_start, selected_end, StringSlice("you have hit your usage limit"))
+                or runtime_error_contains(ptr, selected_start, selected_end, StringSlice("you hit your usage limit"))
+            ):
+                return runtime_error_match(RUNTIME_ERROR_CLASS_QUOTA, selected_start, selected_end)
+        elif status == 500 or status == 502 or status == 503 or status == 504 or status == 529:
+            if overload:
+                return runtime_error_match(RUNTIME_ERROR_CLASS_OVERLOAD, selected_start, selected_end)
+        return runtime_error_none()
+
+    if mode == RUNTIME_ERROR_MODE_STREAM:
+        if profile:
+            return runtime_error_match(RUNTIME_ERROR_CLASS_PROFILE, selected_start, selected_end)
+        if overload:
+            return runtime_error_match(RUNTIME_ERROR_CLASS_OVERLOAD, selected_start, selected_end)
+        if quota:
+            return runtime_error_match(RUNTIME_ERROR_CLASS_QUOTA, selected_start, selected_end)
+        if rate:
+            return runtime_error_match(RUNTIME_ERROR_CLASS_RATE, selected_start, selected_end)
+        return runtime_error_none()
+
+    if mode == RUNTIME_ERROR_MODE_JSON_QUOTA:
+        if quota or error_quota or selected_start >= 0 and (
+            runtime_error_contains(ptr, selected_start, selected_end, StringSlice("you've hit your usage limit"))
+            or runtime_error_contains(ptr, selected_start, selected_end, StringSlice("you have hit your usage limit"))
+            or runtime_error_contains(ptr, selected_start, selected_end, StringSlice("the usage limit has been reached"))
+            or runtime_error_contains(ptr, selected_start, selected_end, StringSlice("usage limit has been reached"))
+            or runtime_error_contains(ptr, selected_start, selected_end, StringSlice("usage limit")) and (
+                runtime_error_contains(ptr, selected_start, selected_end, StringSlice("try again at"))
+                or runtime_error_contains(ptr, selected_start, selected_end, StringSlice("request to your admin"))
+                or runtime_error_contains(ptr, selected_start, selected_end, StringSlice("more access now"))
+            )
+            or runtime_error_contains(ptr, selected_start, selected_end, StringSlice("workspace_member_credits_depleted"))
+            or runtime_error_contains(ptr, selected_start, selected_end, StringSlice("workspace is out of credits"))
+            or runtime_error_contains(ptr, selected_start, selected_end, StringSlice("out of credits")) and runtime_error_contains(ptr, selected_start, selected_end, StringSlice("workspace owner")) and runtime_error_contains(ptr, selected_start, selected_end, StringSlice("refill"))
+        ):
+            return runtime_error_match(RUNTIME_ERROR_CLASS_QUOTA, selected_start, selected_end)
+    elif mode == RUNTIME_ERROR_MODE_JSON_RATE and rate:
+        return runtime_error_match(RUNTIME_ERROR_CLASS_RATE, selected_start, selected_end)
+    elif mode == RUNTIME_ERROR_MODE_JSON_PROFILE and profile:
+        return runtime_error_match(RUNTIME_ERROR_CLASS_PROFILE, selected_start, selected_end)
+    elif mode == RUNTIME_ERROR_MODE_JSON_OVERLOAD:
+        if overload or selected_start >= 0 and (
+            runtime_error_contains(ptr, selected_start, selected_end, StringSlice("selected model is at capacity"))
+            or runtime_error_contains(ptr, selected_start, selected_end, StringSlice("model is at capacity")) and (
+                runtime_error_contains(ptr, selected_start, selected_end, StringSlice("try a different model"))
+                or runtime_error_contains(ptr, selected_start, selected_end, StringSlice("please try again"))
+            )
+            or runtime_error_contains(ptr, selected_start, selected_end, StringSlice("backend under high demand"))
+            or runtime_error_contains(ptr, selected_start, selected_end, StringSlice("experiencing high demand"))
+            or runtime_error_contains(ptr, selected_start, selected_end, StringSlice("server is overloaded"))
+            or runtime_error_contains(ptr, selected_start, selected_end, StringSlice("currently overloaded"))
+        ):
+            return runtime_error_match(RUNTIME_ERROR_CLASS_OVERLOAD, selected_start, selected_end)
+    return runtime_error_none()
+
+
+def runtime_error_json_scan_value(
+    view: ProdexRichStringView,
+    cursor: Pointer[mut=True, Int64, _],
+    end: Int64,
+    mode: Int64,
+    status: Int64,
+    depth: Int64,
+) -> ProdexRichFallbackRecord:
+    if depth > RUNTIME_ERROR_MAX_DEPTH:
+        return runtime_error_invalid()
+    var ptr = rich_view_ptr(view)
+    var start = runtime_error_skip_space(ptr, cursor[], end)
+    if start >= end:
+        return runtime_error_invalid()
+    var value = ptr[unsafe_offset=start]
+    if value == 123:
+        return runtime_error_json_scan_object(view, cursor, end, mode, status, depth)
+    if value == 91:
+        cursor[] = start + 1
+        var nested = runtime_error_none()
+        while True:
+            var index = runtime_error_skip_space(ptr, cursor[], end)
+            if index >= end:
+                return runtime_error_invalid()
+            if ptr[unsafe_offset=index] == 93:
+                cursor[] = index + 1
+                return nested^
+            cursor[] = index
+            var item = runtime_error_json_scan_value(view, cursor, end, mode, status, depth + 1)
+            if runtime_error_is_invalid(item):
+                return item^
+            if runtime_error_is_match(item) and not runtime_error_is_match(nested):
+                nested = item^
+            index = runtime_error_skip_space(ptr, cursor[], end)
+            if index < end and ptr[unsafe_offset=index] == 44:
+                cursor[] = index + 1
+                continue
+            if index < end and ptr[unsafe_offset=index] == 93:
+                cursor[] = index + 1
+                return nested^
+            return runtime_error_invalid()
+    if value == 34:
+        var string_end = runtime_error_string_end(ptr, start, end)
+        if string_end < 0:
+            return runtime_error_invalid()
+        cursor[] = string_end + 1
+        return runtime_error_none()
+    var primitive_end = runtime_error_primitive_end(ptr, start, end)
+    if primitive_end < 0:
+        return runtime_error_invalid()
+    cursor[] = primitive_end
+    return runtime_error_none()
+
+
+def runtime_error_json_scan_object(
+    view: ProdexRichStringView,
+    cursor: Pointer[mut=True, Int64, _],
+    end: Int64,
+    mode: Int64,
+    status: Int64,
+    depth: Int64,
+) -> ProdexRichFallbackRecord:
+    var ptr = rich_view_ptr(view)
+    var index = runtime_error_skip_space(ptr, cursor[], end)
+    if index >= end or ptr[unsafe_offset=index] != 123:
+        return runtime_error_invalid()
+    index += 1
+    var nested = runtime_error_none()
+    var quota = False
+    var rate = False
+    var profile = False
+    var overload = False
+    var error_quota = False
+    var message_start: Int64 = -1
+    var message_end: Int64 = -1
+    var detail_start: Int64 = -1
+    var detail_end: Int64 = -1
+    var error_start: Int64 = -1
+    var error_end: Int64 = -1
+    while True:
+        index = runtime_error_skip_space(ptr, index, end)
+        if index >= end:
+            return runtime_error_invalid()
+        if ptr[unsafe_offset=index] == 125:
+            index += 1
+            break
+        var key_start = index + 1
+        var key_end = runtime_error_string_end(ptr, index, end)
+        if key_end < 0:
+            return runtime_error_invalid()
+        index = runtime_error_skip_space(ptr, key_end + 1, end)
+        if index >= end or ptr[unsafe_offset=index] != 58:
+            return runtime_error_invalid()
+        index = runtime_error_skip_space(ptr, index + 1, end)
+        if index >= end:
+            return runtime_error_invalid()
+        var value_start = index
+        if ptr[unsafe_offset=index] == 34:
+            var value_end = runtime_error_string_end(ptr, index, end)
+            if value_end < 0:
+                return runtime_error_invalid()
+            var class_tag = runtime_error_code_class(ptr, value_start + 1, value_end, mode)
+            if class_tag == RUNTIME_ERROR_CLASS_QUOTA:
+                quota = True
+            elif class_tag == RUNTIME_ERROR_CLASS_RATE:
+                rate = True
+            elif class_tag == RUNTIME_ERROR_CLASS_PROFILE:
+                profile = True
+            elif class_tag == RUNTIME_ERROR_CLASS_OVERLOAD:
+                overload = True
+            if runtime_error_range_matches(ptr, key_start, key_end, StringSlice("message"), False):
+                message_start = value_start + 1
+                message_end = value_end
+            elif runtime_error_range_matches(ptr, key_start, key_end, StringSlice("detail"), False):
+                detail_start = value_start + 1
+                detail_end = value_end
+            elif runtime_error_range_matches(ptr, key_start, key_end, StringSlice("error"), False):
+                error_start = value_start + 1
+                error_end = value_end
+                if mode == RUNTIME_ERROR_MODE_HTTP and (status == 402 or status == 403):
+                    error_quota = runtime_error_code_class(ptr, value_start + 1, value_end, RUNTIME_ERROR_MODE_CODE_QUOTA) == RUNTIME_ERROR_CLASS_QUOTA
+                elif mode == RUNTIME_ERROR_MODE_JSON_QUOTA:
+                    error_quota = runtime_error_code_class(ptr, value_start + 1, value_end, RUNTIME_ERROR_MODE_CODE_QUOTA) == RUNTIME_ERROR_CLASS_QUOTA
+            index = value_end + 1
+        else:
+            cursor[] = index
+            var child = runtime_error_json_scan_value(view, cursor, end, mode, status, depth + 1)
+            if runtime_error_is_invalid(child):
+                return child^
+            if runtime_error_is_match(child) and not runtime_error_is_match(nested):
+                nested = child^
+            index = cursor[]
+        index = runtime_error_skip_space(ptr, index, end)
+        if index < end and ptr[unsafe_offset=index] == 44:
+            index += 1
+            continue
+        if index < end and ptr[unsafe_offset=index] == 125:
+            index += 1
+            break
+        return runtime_error_invalid()
+    cursor[] = index
+    var direct = runtime_error_json_direct_record(
+        mode,
+        status,
+        quota,
+        rate,
+        profile,
+        overload,
+        error_quota,
+        message_start,
+        message_end,
+        detail_start,
+        detail_end,
+        error_start,
+        error_end,
+        ptr,
+    )
+    if runtime_error_is_match(direct):
+        return direct^
+    return nested^
+
+
+def runtime_error_usage_text(
+    ptr: Pointer[mut=False, UInt8, _], start: Int64, end: Int64
+) -> Bool:
+    return runtime_error_contains(ptr, start, end, StringSlice("you've hit your usage limit")) or runtime_error_contains(ptr, start, end, StringSlice("you have hit your usage limit")) or runtime_error_contains(ptr, start, end, StringSlice("the usage limit has been reached")) or runtime_error_contains(ptr, start, end, StringSlice("usage limit has been reached")) or runtime_error_contains(ptr, start, end, StringSlice("usage limit")) and (
+        runtime_error_contains(ptr, start, end, StringSlice("try again at"))
+        or runtime_error_contains(ptr, start, end, StringSlice("request to your admin"))
+        or runtime_error_contains(ptr, start, end, StringSlice("more access now"))
+    )
+
+
+def runtime_error_workspace_text(
+    ptr: Pointer[mut=False, UInt8, _], start: Int64, end: Int64
+) -> Bool:
+    return runtime_error_contains(ptr, start, end, StringSlice("workspace_member_credits_depleted")) or runtime_error_contains(ptr, start, end, StringSlice("workspace is out of credits")) or runtime_error_contains(ptr, start, end, StringSlice("out of credits")) and runtime_error_contains(ptr, start, end, StringSlice("workspace owner")) and runtime_error_contains(ptr, start, end, StringSlice("refill"))
+
+
+def runtime_error_overload_text(
+    ptr: Pointer[mut=False, UInt8, _], start: Int64, end: Int64
+) -> Bool:
+    return runtime_error_contains(ptr, start, end, StringSlice("selected model is at capacity")) or runtime_error_contains(ptr, start, end, StringSlice("model is at capacity")) and (
+        runtime_error_contains(ptr, start, end, StringSlice("try a different model"))
+        or runtime_error_contains(ptr, start, end, StringSlice("please try again"))
+    ) or runtime_error_contains(ptr, start, end, StringSlice("backend under high demand")) or runtime_error_contains(ptr, start, end, StringSlice("experiencing high demand")) or runtime_error_contains(ptr, start, end, StringSlice("server is overloaded")) or runtime_error_contains(ptr, start, end, StringSlice("currently overloaded"))
+
+
+def runtime_error_text_record(
+    view: ProdexRichStringView, mode: Int64
+) -> ProdexRichFallbackRecord:
+    var ptr = rich_view_ptr(view)
+    var start = runtime_error_skip_space(ptr, 0, Int64(view.len))
+    var end = runtime_error_trim_end(ptr, start, Int64(view.len))
+    if start >= end:
+        return runtime_error_none()
+    if mode == RUNTIME_ERROR_MODE_TEXT_QUOTA:
+        if runtime_error_code_class(ptr, start, end, RUNTIME_ERROR_MODE_CODE_QUOTA) != RUNTIME_ERROR_CLASS_OTHER or runtime_error_usage_text(ptr, start, end) or runtime_error_workspace_text(ptr, start, end):
+            return runtime_error_match(RUNTIME_ERROR_CLASS_QUOTA, start, end)
+    elif mode == RUNTIME_ERROR_MODE_TEXT_AUTHORITATIVE_QUOTA:
+        if runtime_error_contains(ptr, start, end, StringSlice("you've hit your usage limit")) or runtime_error_contains(ptr, start, end, StringSlice("you have hit your usage limit")) or runtime_error_contains(ptr, start, end, StringSlice("you hit your usage limit")):
+            return runtime_error_match(RUNTIME_ERROR_CLASS_QUOTA, start, end)
+    elif mode == RUNTIME_ERROR_MODE_TEXT_RATE:
+        if runtime_error_contains(ptr, start, end, StringSlice("rate_limit_exceeded")) or runtime_error_contains(ptr, start, end, StringSlice("rate_limit_exceeded_error")):
+            return runtime_error_match(RUNTIME_ERROR_CLASS_RATE, start, end)
+    elif mode == RUNTIME_ERROR_MODE_TEXT_PROFILE:
+        if runtime_error_contains(ptr, start, end, StringSlice("deactivated_workspace")):
+            return runtime_error_match(RUNTIME_ERROR_CLASS_PROFILE, start, end)
+    elif mode == RUNTIME_ERROR_MODE_TEXT_OVERLOAD:
+        if runtime_error_overload_text(ptr, start, end):
+            return runtime_error_match(RUNTIME_ERROR_CLASS_OVERLOAD, start, end)
+    elif mode == RUNTIME_ERROR_MODE_TEXT_WORKSPACE:
+        if runtime_error_workspace_text(ptr, start, end):
+            return runtime_error_match(RUNTIME_ERROR_CLASS_QUOTA, start, end)
+    elif mode == RUNTIME_ERROR_MODE_CODE_QUOTA or mode == RUNTIME_ERROR_MODE_CODE_RATE or mode == RUNTIME_ERROR_MODE_CODE_OVERLOAD:
+        var class_tag = runtime_error_code_class(ptr, start, end, mode)
+        if class_tag != RUNTIME_ERROR_CLASS_OTHER:
+            return runtime_error_match(class_tag, start, end)
+    return runtime_error_none()
+
+
+def runtime_error_scan_json(
+    view: ProdexRichStringView, start: Int64, end: Int64, mode: Int64, status: Int64
+) -> ProdexRichFallbackRecord:
+    var cursor_value = start
+    var cursor = Pointer(to=cursor_value)
+    var record = runtime_error_json_scan_value(view, cursor, end, mode, status, 0)
+    if runtime_error_is_invalid(record):
+        return record^
+    var ptr = rich_view_ptr(view)
+    if runtime_error_skip_space(ptr, cursor[], end) != end:
+        return runtime_error_invalid()
+    return record^
+
+
+def runtime_error_scan_sse(
+    view: ProdexRichStringView, mode: Int64, status: Int64
+) -> ProdexRichFallbackRecord:
+    var ptr = rich_view_ptr(view)
+    var line_start: Int64 = 0
+    var length = Int64(view.len)
+    while line_start <= length:
+        var line_end = line_start
+        while line_end < length and ptr[unsafe_offset=line_end] != 10:
+            line_end += 1
+        var trimmed_start = runtime_error_skip_space(ptr, line_start, line_end)
+        var trimmed_end = runtime_error_trim_end(ptr, trimmed_start, line_end)
+        if trimmed_end >= trimmed_start + 5 and runtime_error_range_matches(ptr, trimmed_start, trimmed_start + 5, StringSlice("data:"), False):
+            var payload_start = runtime_error_skip_space(ptr, trimmed_start + 5, trimmed_end)
+            if payload_start < trimmed_end:
+                var record = runtime_error_scan_json(view, payload_start, trimmed_end, mode, status)
+                if runtime_error_is_match(record):
+                    return record^
+        if line_end >= length:
+            break
+        line_start = line_end + 1
+    return runtime_error_none()
+
+
+def runtime_error_is_transient_status(status: Int64) -> Bool:
+    return status == 500 or status == 502 or status == 503 or status == 504 or status == 529
+
+
+def runtime_error_scan_body(
+    view: ProdexRichStringView, mode: Int64, status: Int64
+) -> ProdexRichFallbackRecord:
+    if mode == RUNTIME_ERROR_MODE_TEXT_QUOTA or mode == RUNTIME_ERROR_MODE_TEXT_AUTHORITATIVE_QUOTA or mode == RUNTIME_ERROR_MODE_TEXT_RATE or mode == RUNTIME_ERROR_MODE_TEXT_PROFILE or mode == RUNTIME_ERROR_MODE_TEXT_OVERLOAD or mode == RUNTIME_ERROR_MODE_TEXT_WORKSPACE or mode == RUNTIME_ERROR_MODE_CODE_QUOTA or mode == RUNTIME_ERROR_MODE_CODE_RATE or mode == RUNTIME_ERROR_MODE_CODE_OVERLOAD:
+        return runtime_error_text_record(view, mode)
+
+    var ptr = rich_view_ptr(view)
+    var start = runtime_error_skip_space(ptr, 0, Int64(view.len))
+    var end = runtime_error_trim_end(ptr, start, Int64(view.len))
+    if start < end and (ptr[unsafe_offset=start] == 123 or ptr[unsafe_offset=start] == 91):
+        var json_record = runtime_error_scan_json(view, start, end, mode, status)
+        if runtime_error_is_invalid(json_record):
+            json_record = runtime_error_none()
+        elif runtime_error_is_match(json_record):
+            return json_record^
+        else:
+            if mode == RUNTIME_ERROR_MODE_HTTP and runtime_error_is_transient_status(status):
+                return runtime_error_match(RUNTIME_ERROR_CLASS_TRANSIENT, start, end)
+            return json_record^
+        if mode == RUNTIME_ERROR_MODE_HTTP and start < end and runtime_error_is_transient_status(status):
+            return runtime_error_match(RUNTIME_ERROR_CLASS_TRANSIENT, start, end)
+    if mode == RUNTIME_ERROR_MODE_HTTP or mode == RUNTIME_ERROR_MODE_STREAM:
+        var sse_record = runtime_error_scan_sse(view, mode, status)
+        if runtime_error_is_match(sse_record):
+            return sse_record^
+    if mode != RUNTIME_ERROR_MODE_HTTP:
+        return runtime_error_none()
+    if status == 402 or status == 403:
+        var profile_record = runtime_error_text_record(view, RUNTIME_ERROR_MODE_TEXT_PROFILE)
+        if runtime_error_is_match(profile_record):
+            return profile_record^
+        return runtime_error_text_record(view, RUNTIME_ERROR_MODE_TEXT_QUOTA)
+    if status == 429:
+        return runtime_error_text_record(view, RUNTIME_ERROR_MODE_TEXT_AUTHORITATIVE_QUOTA)
+    if runtime_error_is_transient_status(status):
+        var overload_record = runtime_error_text_record(view, RUNTIME_ERROR_MODE_TEXT_OVERLOAD)
+        if runtime_error_is_match(overload_record):
+            return overload_record^
+        if start < end:
+            return runtime_error_match(RUNTIME_ERROR_CLASS_TRANSIENT, start, end)
+        return runtime_error_match(RUNTIME_ERROR_CLASS_TRANSIENT, -1, -1)
+    return runtime_error_none()
+
+
+def runtime_error_action(class_tag: Int64, phase: Int64) -> Int64:
+    if phase == RUNTIME_ERROR_PHASE_COMMITTED or class_tag == RUNTIME_ERROR_CLASS_OTHER:
+        return RUNTIME_ERROR_ACTION_PASS
+    if class_tag == RUNTIME_ERROR_CLASS_QUOTA or class_tag == RUNTIME_ERROR_CLASS_PROFILE:
+        return RUNTIME_ERROR_ACTION_ROTATE
+    if class_tag == RUNTIME_ERROR_CLASS_RATE or class_tag == RUNTIME_ERROR_CLASS_OVERLOAD or class_tag == RUNTIME_ERROR_CLASS_TRANSIENT:
+        return RUNTIME_ERROR_ACTION_RETRY
+    return RUNTIME_ERROR_ACTION_PASS
+
+
+def runtime_error_write_literal(
+    literal: StringSlice,
+    output: Pointer[mut=True, UInt8, _],
+    output_capacity: Int64,
+    written: Pointer[mut=True, Int64, _],
+) -> ProdexRichSlice:
+    return rich_copy_range(
+        literal.unsafe_ptr(), 0, Int64(literal.byte_length()), output, output_capacity, written, False
+    )
+
+
+def runtime_error_write_message(
+    record: ProdexRichFallbackRecord,
+    status: Int64,
+    body: ProdexRichStringView,
+    output: Pointer[mut=True, UInt8, _],
+    output_capacity: Int64,
+    written: Pointer[mut=True, Int64, _],
+) -> ProdexRichSlice:
+    if record.model.len > 0:
+        var source = rich_view_ptr(body)
+        var copied = rich_copy_range(
+            source,
+            record.model.offset,
+            record.model.offset + record.model.len,
+            output,
+            output_capacity,
+            written,
+            False,
+        )
+        if copied.len >= 0:
+            return copied^
+    if record.source_kind == RUNTIME_ERROR_CLASS_QUOTA:
+        return runtime_error_write_literal(StringSlice("Upstream Codex account quota was exhausted."), output, output_capacity, written)
+    if record.source_kind == RUNTIME_ERROR_CLASS_RATE:
+        return runtime_error_write_literal(StringSlice("Upstream Codex profile is temporarily rate limited."), output, output_capacity, written)
+    if record.source_kind == RUNTIME_ERROR_CLASS_PROFILE:
+        return runtime_error_write_literal(StringSlice("Upstream Codex workspace is deactivated for this profile."), output, output_capacity, written)
+    if record.source_kind == RUNTIME_ERROR_CLASS_OVERLOAD:
+        return runtime_error_write_literal(StringSlice("Upstream Codex backend is currently overloaded."), output, output_capacity, written)
+    if status == 500:
+        return runtime_error_write_literal(StringSlice("Upstream Codex backend is currently experiencing high demand."), output, output_capacity, written)
+    if status == 502:
+        return runtime_error_write_literal(StringSlice("Upstream Codex backend returned transient HTTP 502."), output, output_capacity, written)
+    if status == 503:
+        return runtime_error_write_literal(StringSlice("Upstream Codex backend returned transient HTTP 503."), output, output_capacity, written)
+    if status == 504:
+        return runtime_error_write_literal(StringSlice("Upstream Codex backend returned transient HTTP 504."), output, output_capacity, written)
+    return runtime_error_write_literal(StringSlice("Upstream Codex backend returned transient HTTP 529."), output, output_capacity, written)
+
+
+@export("prodex_mojo_rich_runtime_error_policy_v1")
+def prodex_mojo_rich_runtime_error_policy_v1(
+    abi_version: Int64,
+    operation: Int64,
+    status: Int64,
+    phase: Int64,
+    body_address: UInt,
+    body_len: Int64,
+    output_records_address: UInt,
+    record_capacity: Int64,
+    output_address: UInt,
+    output_capacity: Int64,
+    result_address: UInt,
+) abi("C") -> Int64:
+    if result_address == 0:
+        return RICH_STATUS_INVALID
+    var result_ptr = Pointer[
+        mut=True, ProdexRichFallbackResult, MutUntrackedOrigin
+    ](unsafe_from_address=Int(result_address))
+    result_ptr[].abi_version = PRODEX_RICH_ABI_VERSION
+    result_ptr[].records_written = 0
+    result_ptr[].required_records = 0
+    result_ptr[].output_written = 0
+    result_ptr[].required_output = 0
+    result_ptr[].issue_kind = 0
+    result_ptr[].issue_offset = -1
+    result_ptr[].issue_length = 0
+    if abi_version != PRODEX_RICH_ABI_VERSION or operation < RUNTIME_ERROR_MODE_HTTP or operation > RUNTIME_ERROR_MODE_CODE_OVERLOAD or (phase != RUNTIME_ERROR_PHASE_PRECOMMIT and phase != RUNTIME_ERROR_PHASE_COMMITTED) or status < 0 or body_len < 0 or body_len > RUNTIME_ERROR_MAX_BYTES or record_capacity < 1 or output_capacity < 1 or output_records_address == 0 or output_address == 0 or body_address == 0 and body_len > 0:
+        return RICH_STATUS_INVALID
+    var body = ProdexRichStringView(body_address, UInt(body_len))
+    if not rich_view_valid(body, RUNTIME_ERROR_MAX_BYTES):
+        return RICH_STATUS_UTF8
+    var output_records = Pointer[
+        mut=True, ProdexRichFallbackRecord, MutUntrackedOrigin
+    ](unsafe_from_address=Int(output_records_address))
+    var output = Pointer[mut=True, UInt8, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    var record = runtime_error_scan_body(body, operation, status)
+    if not runtime_error_is_match(record):
+        return RICH_STATUS_OK
+    var written: Int64 = 0
+    var message = runtime_error_write_message(record, status, body, output, output_capacity, Pointer(to=written))
+    if message.len < 0:
+        result_ptr[].required_records = 1
+        result_ptr[].required_output = written + 256
+        return RICH_STATUS_CAPACITY
+    output_records[unsafe_offset=0].model = message^
+    output_records[unsafe_offset=0].source_kind = record.source_kind
+    output_records[unsafe_offset=0].input_index = runtime_error_action(record.source_kind, phase)
+    result_ptr[].records_written = 1
+    result_ptr[].required_records = 1
+    result_ptr[].output_written = written
+    result_ptr[].required_output = written
+    return RICH_STATUS_OK

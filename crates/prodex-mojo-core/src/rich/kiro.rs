@@ -35,6 +35,9 @@ pub enum KiroKernelOperation {
     StreamToolArguments = 26,
     FinishReason = 27,
     ChatToolCallItem = 28,
+    StreamContentText = 29,
+    ToolActivityItem = 30,
+    ToolActivityText = 31,
 }
 
 /// Inputs for one bounded Kiro JSON or text transformation.
@@ -286,6 +289,9 @@ fn operation_code(operation: KiroKernelOperation) -> i64 {
         KiroKernelOperation::StreamToolArguments => 26,
         KiroKernelOperation::FinishReason => 27,
         KiroKernelOperation::ChatToolCallItem => 28,
+        KiroKernelOperation::StreamContentText => 29,
+        KiroKernelOperation::ToolActivityItem => 30,
+        KiroKernelOperation::ToolActivityText => 31,
     }
 }
 

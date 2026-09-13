@@ -20,7 +20,9 @@ pub(super) fn kiro_mojo_value(input: KiroKernelInput<'_>) -> Value {
 
 pub const KIRO_PROVIDER_CORE_MAX_TOOL_ACTIVITY_EVENTS: usize = 128;
 pub const KIRO_PROVIDER_CORE_MAX_TOOL_ACTIVITY_ID_BYTES: usize = 256;
+#[cfg(not(feature = "mojo"))]
 const KIRO_PROVIDER_CORE_ACTIVITY_NAME_MAX_BYTES: usize = 160;
+#[cfg(not(feature = "mojo"))]
 const KIRO_PROVIDER_CORE_ACTIVITY_KIND_MAX_BYTES: usize = 48;
 
 pub fn kiro_provider_core_chat_completion_chunk(
@@ -365,26 +367,38 @@ pub fn kiro_provider_core_tool_call_arguments_delta_chat_value(
 }
 
 pub fn kiro_provider_core_stream_content_text(value: &Value) -> Option<String> {
-    match value {
-        Value::String(text) => (!text.is_empty()).then(|| text.clone()),
-        Value::Array(items) => {
-            let mut text = String::new();
-            for item in items {
-                if let Some(chunk) = kiro_provider_core_stream_content_text(item) {
-                    text.push_str(&chunk);
+    #[cfg(feature = "mojo")]
+    {
+        let serialized = serde_json::to_string(value).expect("Kiro stream content serializes");
+        let mut input = KiroKernelInput::new(KiroKernelOperation::StreamContentText);
+        input.input = Some(&serialized);
+        let text =
+            String::from_utf8(kiro_mojo_body(input)).expect("Mojo Kiro stream content is UTF-8");
+        return (!text.is_empty()).then_some(text);
+    }
+    #[cfg(not(feature = "mojo"))]
+    {
+        match value {
+            Value::String(text) => (!text.is_empty()).then(|| text.clone()),
+            Value::Array(items) => {
+                let mut text = String::new();
+                for item in items {
+                    if let Some(chunk) = kiro_provider_core_stream_content_text(item) {
+                        text.push_str(&chunk);
+                    }
                 }
+                (!text.is_empty()).then_some(text)
             }
-            (!text.is_empty()).then_some(text)
-        }
-        Value::Object(object) => {
-            if let Some(text) = object.get("text").and_then(Value::as_str) {
-                return (!text.is_empty()).then(|| text.to_string());
+            Value::Object(object) => {
+                if let Some(text) = object.get("text").and_then(Value::as_str) {
+                    return (!text.is_empty()).then(|| text.to_string());
+                }
+                object
+                    .get("content")
+                    .and_then(kiro_provider_core_stream_content_text)
             }
-            object
-                .get("content")
-                .and_then(kiro_provider_core_stream_content_text)
+            _ => None,
         }
-        _ => None,
     }
 }
 
@@ -437,35 +451,51 @@ pub fn kiro_provider_core_tool_activity_item(
     initial: bool,
     details_omitted: bool,
 ) -> Value {
-    let safe_kind = kind.and_then(|value| {
-        kiro_provider_core_safe_activity_field(value, KIRO_PROVIDER_CORE_ACTIVITY_KIND_MAX_BYTES)
-    });
-    let name = title
-        .and_then(|value| {
+    #[cfg(feature = "mojo")]
+    {
+        let mut input = KiroKernelInput::new(KiroKernelOperation::ToolActivityItem);
+        input.name = title;
+        input.model = kind;
+        input.status = status;
+        input.include_role = initial;
+        input.has_tool_calls = details_omitted;
+        return kiro_mojo_value(input);
+    }
+    #[cfg(not(feature = "mojo"))]
+    {
+        let safe_kind = kind.and_then(|value| {
             kiro_provider_core_safe_activity_field(
                 value,
-                KIRO_PROVIDER_CORE_ACTIVITY_NAME_MAX_BYTES,
+                KIRO_PROVIDER_CORE_ACTIVITY_KIND_MAX_BYTES,
             )
+        });
+        let name = title
+            .and_then(|value| {
+                kiro_provider_core_safe_activity_field(
+                    value,
+                    KIRO_PROVIDER_CORE_ACTIVITY_NAME_MAX_BYTES,
+                )
+            })
+            .or_else(|| safe_kind.clone())
+            .unwrap_or_else(|| "Kiro internal activity".to_string());
+        let status = kiro_provider_core_activity_status(status);
+        let phase = match status.as_str() {
+            "completed" => "completed",
+            "failed" | "error" => "failed",
+            "cancelled" => "cancelled",
+            "truncated" => "truncated",
+            _ if initial => "started",
+            _ => "updated",
+        };
+        json!({
+            "type": "kiro_internal_activity",
+            "name": name,
+            "status": status,
+            "phase": phase,
+            "kind": safe_kind,
+            "details_omitted": details_omitted,
         })
-        .or_else(|| safe_kind.clone())
-        .unwrap_or_else(|| "Kiro internal activity".to_string());
-    let status = kiro_provider_core_activity_status(status);
-    let phase = match status.as_str() {
-        "completed" => "completed",
-        "failed" | "error" => "failed",
-        "cancelled" => "cancelled",
-        "truncated" => "truncated",
-        _ if initial => "started",
-        _ => "updated",
-    };
-    json!({
-        "type": "kiro_internal_activity",
-        "name": name,
-        "status": status,
-        "phase": phase,
-        "kind": safe_kind,
-        "details_omitted": details_omitted,
-    })
+    }
 }
 
 pub fn kiro_provider_core_truncated_tool_activity_item() -> Value {
@@ -479,33 +509,49 @@ pub fn kiro_provider_core_truncated_tool_activity_item() -> Value {
 }
 
 pub fn kiro_provider_core_tool_activity_text(activity: &Value) -> String {
-    let name = activity
-        .get("name")
-        .and_then(Value::as_str)
-        .unwrap_or("Kiro internal activity");
-    let status = activity
-        .get("status")
-        .and_then(Value::as_str)
-        .unwrap_or("unknown");
-    let phase = activity
-        .get("phase")
-        .and_then(Value::as_str)
-        .unwrap_or("updated");
-    let kind = activity
-        .get("kind")
-        .and_then(Value::as_str)
-        .map(|kind| format!("; kind={kind}"))
-        .unwrap_or_default();
-    let details_omitted = activity
-        .get("details_omitted")
-        .and_then(Value::as_bool)
-        .unwrap_or(false);
-    let details = if details_omitted {
-        "; details=omitted"
-    } else {
-        ""
-    };
-    format!("[Kiro activity: {name}; status={status}; phase={phase}{kind}{details}]\n")
+    #[cfg(feature = "mojo")]
+    {
+        let mut input = KiroKernelInput::new(KiroKernelOperation::ToolActivityText);
+        input.name = activity.get("name").and_then(Value::as_str);
+        input.status = activity.get("status").and_then(Value::as_str);
+        input.role = activity.get("phase").and_then(Value::as_str);
+        input.model = activity.get("kind").and_then(Value::as_str);
+        input.has_tool_calls = activity
+            .get("details_omitted")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        return String::from_utf8(kiro_mojo_body(input)).expect("Mojo Kiro activity text is UTF-8");
+    }
+    #[cfg(not(feature = "mojo"))]
+    {
+        let name = activity
+            .get("name")
+            .and_then(Value::as_str)
+            .unwrap_or("Kiro internal activity");
+        let status = activity
+            .get("status")
+            .and_then(Value::as_str)
+            .unwrap_or("unknown");
+        let phase = activity
+            .get("phase")
+            .and_then(Value::as_str)
+            .unwrap_or("updated");
+        let kind = activity
+            .get("kind")
+            .and_then(Value::as_str)
+            .map(|kind| format!("; kind={kind}"))
+            .unwrap_or_default();
+        let details_omitted = activity
+            .get("details_omitted")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        let details = if details_omitted {
+            "; details=omitted"
+        } else {
+            ""
+        };
+        format!("[Kiro activity: {name}; status={status}; phase={phase}{kind}{details}]\n")
+    }
 }
 
 pub fn kiro_provider_core_acp_usage_update_json(
@@ -559,6 +605,7 @@ pub fn kiro_provider_core_stream_tool_arguments(raw_input: Option<&Value>) -> St
     }
 }
 
+#[cfg(not(feature = "mojo"))]
 fn kiro_provider_core_activity_status(status: Option<&str>) -> String {
     let normalized = status.unwrap_or_default().trim().to_ascii_lowercase();
     match normalized.as_str() {
@@ -568,6 +615,7 @@ fn kiro_provider_core_activity_status(status: Option<&str>) -> String {
     }
 }
 
+#[cfg(not(feature = "mojo"))]
 fn kiro_provider_core_safe_activity_field(value: &str, max_bytes: usize) -> Option<String> {
     let normalized = value.split_whitespace().collect::<Vec<_>>().join(" ");
     if normalized.is_empty() {
