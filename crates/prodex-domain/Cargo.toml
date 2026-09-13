@@ -6,7 +6,12 @@ description = "Pure Prodex domain identifiers and security context types"
 license.workspace = true
 repository.workspace = true
 
+[features]
+default = []
+mojo = ["dep:prodex_mojo_core", "prodex_mojo_core/mojo-runtime"]
+
 [dependencies]
+prodex_mojo_core = { workspace = true, optional = true }
 serde = { workspace = true }
 sha2 = { workspace = true }
 uuid = { workspace = true }
