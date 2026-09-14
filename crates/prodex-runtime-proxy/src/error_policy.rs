@@ -1,10 +1,20 @@
 use std::time::Duration;
+mod json;
 mod rate_limit_header;
+mod retry_after;
+mod signal;
+mod stream;
+#[cfg(not(feature = "mojo"))]
+use json::runtime_json_find;
 pub use rate_limit_header::runtime_http_error_policy_with_headers;
-
-const RUNTIME_JSON_SCAN_LIMIT: usize = 2_048;
-const RUNTIME_RETRY_AFTER_CAP: Duration = Duration::from_secs(300);
-
+pub use retry_after::{runtime_retry_after_from_headers, runtime_retry_after_from_message};
+pub use signal::runtime_error_signal_message_from_value;
+#[cfg(not(feature = "mojo"))]
+use signal::runtime_error_signal_message_from_value_mode;
+pub use stream::{
+    runtime_http_error_action_label, runtime_http_error_class_label, runtime_stream_error_policy,
+    runtime_stream_error_policy_from_value,
+};
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RuntimeHttpErrorPhase {
     PreCommit,
@@ -291,84 +301,6 @@ fn runtime_error_policy_match(
     }
 }
 
-// Rust-only transport-boundary parsing: this consumes raw provider bytes and returns a Rust
-// duration before any deterministic Mojo planning boundary is reached.
-pub fn runtime_retry_after_from_message(message: &str) -> Option<Duration> {
-    let lower = message.to_ascii_lowercase();
-    let start = lower.find("try again in")? + "try again in".len();
-    runtime_retry_after_duration_token(&lower[start..])
-}
-
-pub fn runtime_retry_after_from_headers<'a>(
-    headers: impl IntoIterator<Item = (&'a str, &'a [u8])>,
-) -> Option<Duration> {
-    headers
-        .into_iter()
-        .filter(|(name, _)| name.eq_ignore_ascii_case("retry-after"))
-        .filter_map(|(_, value)| std::str::from_utf8(value).ok())
-        .filter_map(runtime_retry_after_header_value)
-        .max()
-}
-
-fn runtime_retry_after_header_value(value: &str) -> Option<Duration> {
-    let seconds = value.trim().parse::<u64>().ok()?;
-    (seconds > 0).then(|| Duration::from_secs(seconds).min(RUNTIME_RETRY_AFTER_CAP))
-}
-
-fn runtime_retry_after_duration_token(value: &str) -> Option<Duration> {
-    let value = value.trim_start();
-    let number_len = value
-        .bytes()
-        .take_while(|byte| byte.is_ascii_digit() || *byte == b'.')
-        .count();
-    if number_len == 0 {
-        return None;
-    }
-    let number = &value[..number_len];
-    let (whole, fraction) = number.split_once('.').unwrap_or((number, ""));
-    let whole = whole.parse::<u128>().ok()?;
-    if !fraction.bytes().all(|byte| byte.is_ascii_digit()) {
-        return None;
-    }
-    let suffix = value[number_len..].trim_start();
-    let millis = if suffix.starts_with("ms") {
-        whole.checked_add(u128::from(fraction.bytes().any(|byte| byte != b'0')))?
-    } else if suffix.starts_with('s') || suffix.starts_with("second") {
-        whole
-            .checked_mul(1_000)?
-            .checked_add(ceil_fraction_millis(fraction)?)?
-    } else {
-        return None;
-    };
-    if millis == 0 {
-        return None;
-    }
-    Some(
-        Duration::from_millis(u64::try_from(millis).unwrap_or(u64::MAX))
-            .min(RUNTIME_RETRY_AFTER_CAP),
-    )
-}
-
-fn ceil_fraction_millis(fraction: &str) -> Option<u128> {
-    if fraction.is_empty() {
-        return Some(0);
-    }
-    let digits = fraction.as_bytes();
-    let mut millis = 0u128;
-    for digit in digits.iter().copied().take(3) {
-        millis = millis
-            .checked_mul(10)?
-            .checked_add(u128::from(digit - b'0'))?;
-    }
-    for _ in digits.len().min(3)..3 {
-        millis = millis.checked_mul(10)?;
-    }
-    if digits.len() > 3 && digits[3..].iter().any(|digit| *digit != b'0') {
-        millis = millis.checked_add(1)?;
-    }
-    Some(millis)
-}
-
 pub fn runtime_http_error_policy(
     status: u16,
     body: &[u8],
@@ -397,59 +329,6 @@ pub fn runtime_http_error_policy(
                 message,
                 phase,
             );
-        }
-
-        RuntimeHttpErrorPolicy::pass_through()
-    }
-}
-
-/// Classifies an upstream error carried inside a streaming payload.
-///
-/// Unlike HTTP failures, streaming failures have no reliable transport status.
-/// Only payload signals are considered, so a retry cannot be synthesized from
-/// a transport status that the stream never supplied.
-pub fn runtime_stream_error_policy(
-    body: &[u8],
-    phase: RuntimeHttpErrorPhase,
-) -> RuntimeHttpErrorPolicy {
-    #[cfg(feature = "mojo")]
-    {
-        runtime_error_policy_from_mojo(
-            prodex_mojo_core::rich::RUNTIME_ERROR_MODE_STREAM,
-            0,
-            phase,
-            body,
-        )
-    }
-    #[cfg(not(feature = "mojo"))]
-    {
-        if let Ok(value) = serde_json::from_slice::<serde_json::Value>(body) {
-            return runtime_stream_error_policy_from_value(&value, phase);
-        }
-
-        RuntimeHttpErrorPolicy::pass_through()
-    }
-}
-
-pub fn runtime_stream_error_policy_from_value(
-    value: &serde_json::Value,
-    phase: RuntimeHttpErrorPhase,
-) -> RuntimeHttpErrorPolicy {
-    #[cfg(feature = "mojo")]
-    {
-        let body = serde_json::to_vec(value).expect("runtime error payload serializes");
-        runtime_stream_error_policy(&body, phase)
-    }
-    #[cfg(not(feature = "mojo"))]
-    {
-        for &(class, action, rule) in RUNTIME_STREAM_ERROR_RULES {
-            if let Some(message) = runtime_error_signal_message_from_value_mode(
-                value,
-                class,
-                RuntimeSignalMatchMode::ExplicitCode,
-            ) {
-                return runtime_error_policy_match(class, action, rule, message, phase);
-            }
         }
 
         RuntimeHttpErrorPolicy::pass_through()
@@ -505,70 +384,6 @@ fn runtime_error_policy_from_mojo(
         rule: Some(rule),
         message: Some(message),
         retry_after,
-    }
-}
-
-pub fn runtime_http_error_class_label(class: RuntimeHttpErrorClass) -> &'static str {
-    match class {
-        RuntimeHttpErrorClass::Quota => "quota",
-        RuntimeHttpErrorClass::RateLimited => "rate_limited",
-        RuntimeHttpErrorClass::ProfileUnavailable => "profile_unavailable",
-        RuntimeHttpErrorClass::Overload => "overload",
-        RuntimeHttpErrorClass::TransientServer => "transient_5xx",
-        RuntimeHttpErrorClass::Other => "other",
-    }
-}
-
-pub fn runtime_http_error_action_label(action: RuntimeHttpErrorAction) -> &'static str {
-    match action {
-        RuntimeHttpErrorAction::PassThrough => "pass_through",
-        RuntimeHttpErrorAction::RotateProfile => "rotate_profile",
-        RuntimeHttpErrorAction::RetryProfile => "retry_profile",
-    }
-}
-
-pub fn runtime_error_signal_message_from_value(
-    value: &serde_json::Value,
-    signal: RuntimeHttpErrorClass,
-) -> Option<String> {
-    runtime_error_signal_message_from_value_mode(
-        value,
-        signal,
-        RuntimeSignalMatchMode::UsageMessage,
-    )
-}
-
-fn runtime_error_signal_message_from_value_mode(
-    value: &serde_json::Value,
-    signal: RuntimeHttpErrorClass,
-    mode: RuntimeSignalMatchMode,
-) -> Option<String> {
-    match signal {
-        RuntimeHttpErrorClass::Quota => runtime_json_find(value, |candidate| {
-            runtime_error_signal_candidate(candidate, RuntimeHttpErrorSignal::ExplicitQuota, mode)
-        }),
-        RuntimeHttpErrorClass::RateLimited => runtime_json_find(value, |candidate| {
-            runtime_error_signal_candidate(
-                candidate,
-                RuntimeHttpErrorSignal::ExplicitRateLimit,
-                RuntimeSignalMatchMode::ExplicitCode,
-            )
-        }),
-        RuntimeHttpErrorClass::ProfileUnavailable => runtime_json_find(value, |candidate| {
-            runtime_error_signal_candidate(
-                candidate,
-                RuntimeHttpErrorSignal::ExplicitProfileUnavailable,
-                mode,
-            )
-        }),
-        RuntimeHttpErrorClass::Overload => runtime_json_find(value, |candidate| {
-            runtime_error_signal_candidate(
-                candidate,
-                RuntimeHttpErrorSignal::ExplicitOverload,
-                mode,
-            )
-        }),
-        RuntimeHttpErrorClass::TransientServer | RuntimeHttpErrorClass::Other => None,
     }
 }
 
@@ -920,33 +735,6 @@ fn runtime_transient_http_error_message(status: u16, body: &[u8]) -> String {
 #[cfg(not(feature = "mojo"))]
 fn runtime_utf8_text(body: &[u8]) -> Option<&str> {
     std::str::from_utf8(body).ok().map(str::trim)
-}
-
-fn runtime_json_find<T, F>(root: &serde_json::Value, mut candidate: F) -> Option<T>
-where
-    F: FnMut(&serde_json::Value) -> Option<T>,
-{
-    let mut stack = vec![root];
-    let mut visited = 0usize;
-
-    while let Some(value) = stack.pop() {
-        if let Some(result) = candidate(value) {
-            return Some(result);
-        }
-
-        visited += 1;
-        if visited >= RUNTIME_JSON_SCAN_LIMIT {
-            break;
-        }
-
-        match value {
-            serde_json::Value::Array(values) => stack.extend(values.iter().rev()),
-            serde_json::Value::Object(map) => stack.extend(map.values().rev()),
-            _ => {}
-        }
-    }
-
-    None
 }
 
 #[cfg(test)]
