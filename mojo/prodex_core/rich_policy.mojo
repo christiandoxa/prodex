@@ -56,6 +56,78 @@ comptime VIRTUAL_KEY_ADMISSION_RPM: Int64 = 3
 comptime VIRTUAL_KEY_ADMISSION_TPM: Int64 = 4
 comptime VIRTUAL_KEY_ADMISSION_INVALID: Int64 = -1
 comptime VIRTUAL_KEY_ADMISSION_ABI: Int64 = -4
+comptime GOVERNANCE_PREDICATE_MATCH: Int64 = 0
+comptime GOVERNANCE_PREDICATE_OVERLAP: Int64 = 1
+
+
+@fieldwise_init
+struct GovernanceOptionalValuePair(Copyable):
+    var left: Int64
+    var left_present: Int64
+    var right: Int64
+    var right_present: Int64
+
+
+@fieldwise_init
+struct GovernanceOptionalSelectorPair(Copyable):
+    var left: ProdexRichStringView
+    var left_present: Int64
+    var right: ProdexRichStringView
+    var right_present: Int64
+    var wildcard: Int64
+
+
+def governance_selector_is_wildcard(view: ProdexRichStringView) -> Bool:
+    return rich_view_matches_literal["*"](view, False)
+
+
+@export("prodex_mojo_governance_predicates_v1")
+def prodex_mojo_governance_predicates_v1(
+    abi_version: Int64,
+    mode: Int64,
+    values_address: UInt,
+    value_count: Int64,
+    selectors_address: UInt,
+    selector_count: Int64,
+    output_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != PRODEX_RICH_ABI_VERSION:
+        return RICH_STATUS_ABI
+    if output_address == 0 or mode < GOVERNANCE_PREDICATE_MATCH or mode > GOVERNANCE_PREDICATE_OVERLAP or value_count < 0 or value_count > RICH_MAX_RECORDS or selector_count < 0 or selector_count > RICH_MAX_RECORDS:
+        return RICH_STATUS_INVALID
+    if (value_count > 0 and values_address == 0) or (selector_count > 0 and selectors_address == 0):
+        return RICH_STATUS_INVALID
+    var output = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    output[] = 0
+    var values = Pointer[
+        mut=False, GovernanceOptionalValuePair, ImmUntrackedOrigin
+    ](unsafe_from_address=Int(values_address))
+    for index in range(value_count):
+        var pair = values[unsafe_offset=index].copy()
+        if pair.left_present < 0 or pair.left_present > 1 or pair.right_present < 0 or pair.right_present > 1:
+            return RICH_STATUS_INVALID
+        if pair.left_present == 1 and pair.right_present == 1 and pair.left != pair.right:
+            return RICH_STATUS_OK
+    var selectors = Pointer[
+        mut=False, GovernanceOptionalSelectorPair, ImmUntrackedOrigin
+    ](unsafe_from_address=Int(selectors_address))
+    for index in range(selector_count):
+        var pair = selectors[unsafe_offset=index].copy()
+        if pair.left_present < 0 or pair.left_present > 1 or pair.right_present < 0 or pair.right_present > 1 or pair.wildcard < 0 or pair.wildcard > 1:
+            return RICH_STATUS_INVALID
+        if pair.left_present == 1 and not rich_view_valid(pair.left, RICH_MAX_IDENTIFIER_BYTES):
+            return RICH_STATUS_INVALID
+        if pair.right_present == 1 and not rich_view_valid(pair.right, RICH_MAX_IDENTIFIER_BYTES):
+            return RICH_STATUS_INVALID
+        if pair.left_present == 1 and pair.right_present == 1:
+            if rich_views_equal(pair.left, pair.right):
+                continue
+            if pair.wildcard == 0 or not governance_selector_is_wildcard(pair.left) and (mode == GOVERNANCE_PREDICATE_MATCH or not governance_selector_is_wildcard(pair.right)):
+                return RICH_STATUS_OK
+    output[] = 1
+    return RICH_STATUS_OK
 
 
 def policy_issue(
