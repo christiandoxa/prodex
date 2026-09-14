@@ -38,6 +38,8 @@ comptime RUNTIME_ANTHROPIC_SERVER_TOOL_BLOCK: Int64 = 15
 comptime RUNTIME_ANTHROPIC_THINKING_BLOCK: Int64 = 16
 comptime RUNTIME_ANTHROPIC_TEXT_BLOCK: Int64 = 17
 comptime RUNTIME_ANTHROPIC_TOOL_RESULT_TEXT_PLAN: Int64 = 18
+comptime RUNTIME_ANTHROPIC_COMPUTER_ACTION: Int64 = 19
+comptime RUNTIME_ANTHROPIC_COMPUTER_TOOL_INPUT: Int64 = 20
 
 comptime RUNTIME_ANTHROPIC_FLAG_ERROR: Int64 = 1
 comptime RUNTIME_ANTHROPIC_FLAG_MAX_OUTPUT_LENGTH: Int64 = 2
@@ -1132,6 +1134,246 @@ def runtime_anthropic_write_tool_result_text_plan(
     )
 
 
+def runtime_anthropic_coordinate_ranges(
+    view: ProdexRichStringView,
+) -> InlineArray[Int64, 4]:
+    var result = InlineArray[Int64, 4](fill=-1)
+    if view.len < 2 or anthropic_request_byte(view, 0) != 91:
+        return result^
+    var end = Int64(view.len) - 1
+    if anthropic_request_byte(view, end) != 93:
+        return result^
+    var first = anthropic_request_skip_ws(view, 1, end)
+    var first_end = anthropic_request_value_end(view, first, end, 0)
+    if first_end < 0:
+        return result^
+    var comma = anthropic_request_skip_ws(view, first_end, end)
+    if comma >= end or anthropic_request_byte(view, comma) != 44:
+        return result^
+    var second = anthropic_request_skip_ws(view, comma + 1, end)
+    var second_end = anthropic_request_value_end(view, second, end, 0)
+    if second_end < 0:
+        return result^
+    result[0] = first
+    result[1] = first_end
+    result[2] = second
+    result[3] = second_end
+    return result^
+
+
+def runtime_anthropic_put_uppercase_key(
+    writer: Pointer[mut=True, RuntimeAnthropicKernelWriter, _],
+    view: ProdexRichStringView,
+    start: Int64,
+    end: Int64,
+) -> Bool:
+    if not runtime_anthropic_put_byte(writer, 34):
+        return False
+    var ptr = rich_view_ptr(view)
+    for index in range(start, end):
+        var value = ptr[unsafe_offset=index]
+        if value >= 97 and value <= 122:
+            value -= 32
+        if value == 34 or value == 92:
+            if not runtime_anthropic_put_byte(writer, 92):
+                return False
+        if not runtime_anthropic_put_byte(writer, value):
+            return False
+    return runtime_anthropic_put_byte(writer, 34)
+
+
+def runtime_anthropic_write_keypress_keys(
+    writer: Pointer[mut=True, RuntimeAnthropicKernelWriter, _],
+    keys: ProdexRichStringView,
+) -> Bool:
+    if not runtime_anthropic_put_byte(writer, 91):
+        return False
+    var start: Int64 = 0
+    var first = True
+    while start <= Int64(keys.len):
+        var end = start
+        while end < Int64(keys.len) and anthropic_request_byte(keys, end) != 43:
+            end += 1
+        var part = runtime_anthropic_trim_range(keys, start, end)
+        if part[0] < part[1]:
+            if not first and not runtime_anthropic_put_byte(writer, 44):
+                return False
+            first = False
+            if not runtime_anthropic_put_uppercase_key(
+                writer, keys, part[0], part[1]
+            ):
+                return False
+        if end >= Int64(keys.len):
+            break
+        start = end + 1
+    return not first and runtime_anthropic_put_byte(writer, 93)
+
+
+def runtime_anthropic_keypress_has_key(keys: ProdexRichStringView) -> Bool:
+    var start: Int64 = 0
+    while start <= Int64(keys.len):
+        var end = start
+        while end < Int64(keys.len) and anthropic_request_byte(keys, end) != 43:
+            end += 1
+        var part = runtime_anthropic_trim_range(keys, start, end)
+        if part[0] < part[1]:
+            return True
+        if end >= Int64(keys.len):
+            break
+        start = end + 1
+    return False
+
+
+def runtime_anthropic_write_computer_action(
+    writer: Pointer[mut=True, RuntimeAnthropicKernelWriter, _],
+    input: ProdexRuntimeAnthropicKernelInput,
+) -> Bool:
+    if input.block_type_present == 0:
+        return runtime_anthropic_put_literal(writer, StringSlice("null"))
+    if rich_view_matches_literal["screenshot"](input.block_type, False):
+        return runtime_anthropic_put_literal(writer, StringSlice('{"type":"screenshot"}'))
+    if rich_view_matches_literal["wait"](input.block_type, False):
+        return runtime_anthropic_put_literal(writer, StringSlice('{"type":"wait"}'))
+    if rich_view_matches_literal["type"](input.block_type, False):
+        if input.text_present == 0:
+            return runtime_anthropic_put_literal(writer, StringSlice("null"))
+        return (
+            runtime_anthropic_put_literal(writer, StringSlice('{"type":"type","text":'))
+            and runtime_anthropic_put_json_string(writer, input.text)
+            and runtime_anthropic_put_byte(writer, 125)
+        )
+    if rich_view_matches_literal["key"](input.block_type, False):
+        if input.name_present == 0 or not runtime_anthropic_keypress_has_key(input.name):
+            return runtime_anthropic_put_literal(writer, StringSlice("null"))
+        if not runtime_anthropic_put_literal(
+            writer, StringSlice('{"type":"keypress","keys":')
+        ):
+            return False
+        if not runtime_anthropic_write_keypress_keys(writer, input.name):
+            return False
+        return runtime_anthropic_put_byte(writer, 125)
+    var coordinates = runtime_anthropic_coordinate_ranges(input.input)
+    if input.input_present == 0 or coordinates[0] < 0:
+        return runtime_anthropic_put_literal(writer, StringSlice("null"))
+    var kind = StringSlice("")
+    var button = StringSlice("")
+    if rich_view_matches_literal["left_click"](input.block_type, False):
+        kind = StringSlice("click")
+        button = StringSlice("left")
+    elif rich_view_matches_literal["right_click"](input.block_type, False):
+        kind = StringSlice("click")
+        button = StringSlice("right")
+    elif rich_view_matches_literal["middle_click"](input.block_type, False):
+        kind = StringSlice("click")
+        button = StringSlice("middle")
+    elif rich_view_matches_literal["double_click"](input.block_type, False):
+        kind = StringSlice("double_click")
+    elif rich_view_matches_literal["mouse_move"](input.block_type, False):
+        kind = StringSlice("move")
+    else:
+        return runtime_anthropic_put_literal(writer, StringSlice("null"))
+    if not runtime_anthropic_put_literal(writer, StringSlice('{"type":"')) or not runtime_anthropic_put_literal(
+        writer, kind
+    ) or not runtime_anthropic_put_byte(writer, 34):
+        return False
+    if button.byte_length() > 0 and not (
+        runtime_anthropic_put_literal(writer, StringSlice(',"button":"'))
+        and runtime_anthropic_put_literal(writer, button)
+        and runtime_anthropic_put_byte(writer, 34)
+    ):
+        return False
+    return (
+        runtime_anthropic_put_literal(writer, StringSlice(',"x":'))
+        and runtime_anthropic_put_view_range(
+            writer, input.input, coordinates[0], coordinates[1]
+        )
+        and runtime_anthropic_put_literal(writer, StringSlice(',"y":'))
+        and runtime_anthropic_put_view_range(
+            writer, input.input, coordinates[2], coordinates[3]
+        )
+        and runtime_anthropic_put_byte(writer, 125)
+    )
+
+
+def runtime_anthropic_put_lowercase_string(
+    writer: Pointer[mut=True, RuntimeAnthropicKernelWriter, _],
+    view: ProdexRichStringView,
+) -> Bool:
+    if not runtime_anthropic_put_byte(writer, 34):
+        return False
+    var ptr = rich_view_ptr(view)
+    for index in range(Int64(view.len)):
+        var value = ptr[unsafe_offset=index]
+        if value >= 65 and value <= 90:
+            value += 32
+        if value == 34 or value == 92:
+            if not runtime_anthropic_put_byte(writer, 92):
+                return False
+        if not runtime_anthropic_put_byte(writer, value):
+            return False
+    return runtime_anthropic_put_byte(writer, 34)
+
+
+def runtime_anthropic_write_computer_tool_input(
+    writer: Pointer[mut=True, RuntimeAnthropicKernelWriter, _],
+    input: ProdexRuntimeAnthropicKernelInput,
+) -> Bool:
+    if input.block_type_present == 0:
+        return runtime_anthropic_put_literal(writer, StringSlice("null"))
+    if rich_view_matches_literal["screenshot"](input.block_type, False):
+        return runtime_anthropic_put_literal(writer, StringSlice('{"action":"screenshot"}'))
+    if rich_view_matches_literal["wait"](input.block_type, False):
+        return runtime_anthropic_put_literal(writer, StringSlice('{"action":"wait"}'))
+    if rich_view_matches_literal["type"](input.block_type, False):
+        if input.text_present == 0:
+            return runtime_anthropic_put_literal(writer, StringSlice("null"))
+        return (
+            runtime_anthropic_put_literal(writer, StringSlice('{"action":"type","text":'))
+            and runtime_anthropic_put_json_string(writer, input.text)
+            and runtime_anthropic_put_byte(writer, 125)
+        )
+    if rich_view_matches_literal["keypress"](input.block_type, False):
+        if input.output_present == 0:
+            return runtime_anthropic_put_literal(writer, StringSlice("null"))
+        return (
+            runtime_anthropic_put_literal(writer, StringSlice('{"action":"key","key":'))
+            and runtime_anthropic_put_lowercase_string(writer, input.output)
+            and runtime_anthropic_put_byte(writer, 125)
+        )
+    var coordinates = runtime_anthropic_coordinate_ranges(input.input)
+    if input.input_present == 0 or coordinates[0] < 0:
+        return runtime_anthropic_put_literal(writer, StringSlice("null"))
+    var action = StringSlice("")
+    if rich_view_matches_literal["click"](input.block_type, False):
+        if input.name_present == 0 or rich_view_matches_literal["left"](input.name, False):
+            action = StringSlice("left_click")
+        elif rich_view_matches_literal["right"](input.name, False):
+            action = StringSlice("right_click")
+        elif rich_view_matches_literal["middle"](input.name, False):
+            action = StringSlice("middle_click")
+        else:
+            return runtime_anthropic_put_literal(writer, StringSlice("null"))
+    elif rich_view_matches_literal["double_click"](input.block_type, False):
+        action = StringSlice("double_click")
+    elif rich_view_matches_literal["move"](input.block_type, False):
+        action = StringSlice("mouse_move")
+    else:
+        return runtime_anthropic_put_literal(writer, StringSlice("null"))
+    return (
+        runtime_anthropic_put_literal(writer, StringSlice('{"action":"'))
+        and runtime_anthropic_put_literal(writer, action)
+        and runtime_anthropic_put_literal(writer, StringSlice('","coordinate":['))
+        and runtime_anthropic_put_view_range(
+            writer, input.input, coordinates[0], coordinates[1]
+        )
+        and runtime_anthropic_put_byte(writer, 44)
+        and runtime_anthropic_put_view_range(
+            writer, input.input, coordinates[2], coordinates[3]
+        )
+        and runtime_anthropic_put_literal(writer, StringSlice("]}"))
+    )
+
+
 def runtime_anthropic_write_operation(
     writer: Pointer[mut=True, RuntimeAnthropicKernelWriter, _],
     input: ProdexRuntimeAnthropicKernelInput,
@@ -1196,6 +1438,10 @@ def runtime_anthropic_write_operation(
         ) and runtime_anthropic_put_byte(writer, 125)
     if input.operation == RUNTIME_ANTHROPIC_TOOL_RESULT_TEXT_PLAN:
         return runtime_anthropic_write_tool_result_text_plan(writer, input)
+    if input.operation == RUNTIME_ANTHROPIC_COMPUTER_ACTION:
+        return runtime_anthropic_write_computer_action(writer, input)
+    if input.operation == RUNTIME_ANTHROPIC_COMPUTER_TOOL_INPUT:
+        return runtime_anthropic_write_computer_tool_input(writer, input)
     return False
 
 
@@ -1204,7 +1450,7 @@ def runtime_anthropic_input_valid(
 ) -> Bool:
     return (
         input.operation > 0
-        and input.operation <= RUNTIME_ANTHROPIC_TOOL_RESULT_TEXT_PLAN
+        and input.operation <= RUNTIME_ANTHROPIC_COMPUTER_TOOL_INPUT
         and rich_view_valid(input.id, RUNTIME_ANTHROPIC_KERNEL_MAX_BYTES)
         and rich_view_valid(input.name, RUNTIME_ANTHROPIC_KERNEL_MAX_BYTES)
         and rich_view_valid(input.block_type, RUNTIME_ANTHROPIC_KERNEL_MAX_BYTES)
