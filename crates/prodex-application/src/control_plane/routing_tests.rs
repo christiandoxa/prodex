@@ -1,6 +1,10 @@
+#[cfg(not(feature = "mojo"))]
+use super::routing_validation::ControlPlaneRouteValidationDecision;
+use super::routing_validation::{ControlPlaneRouteValidationMode, control_plane_route_validation};
 #[cfg(feature = "mojo")]
-use super::control_plane_route_validation_rust;
-use super::{ControlPlaneRouteValidationMode, control_plane_route_validation};
+use super::routing_validation::{
+    control_plane_request_validation_rust, control_plane_route_validation_rust,
+};
 use prodex_control_plane::ControlPlaneOperation;
 use prodex_gateway_http::GatewayHttpMethod;
 
@@ -46,6 +50,68 @@ fn mojo_control_plane_route_validation_matches_rust_oracle() {
     }
 }
 
+#[cfg(feature = "mojo")]
+#[test]
+fn mojo_control_plane_request_validation_matches_rust_oracle() {
+    use super::routing_validation::{
+        ControlPlaneRequestValidationKind as Kind, control_plane_request_validation,
+    };
+
+    let methods = [
+        GatewayHttpMethod::Get,
+        GatewayHttpMethod::Post,
+        GatewayHttpMethod::Put,
+        GatewayHttpMethod::Patch,
+        GatewayHttpMethod::Delete,
+        GatewayHttpMethod::Options,
+        GatewayHttpMethod::Other,
+    ];
+    let kinds = [
+        Kind::Idempotency,
+        Kind::Page,
+        Kind::Precondition,
+        Kind::Audit,
+    ];
+    for route_operation in ControlPlaneOperation::ALL {
+        for action_operation in ControlPlaneOperation::ALL {
+            for method in methods {
+                for kind in kinds {
+                    let expected = control_plane_request_validation_rust(
+                        route_operation,
+                        action_operation,
+                        method,
+                        kind,
+                        true,
+                        true,
+                    );
+                    let actual = control_plane_request_validation(
+                        route_operation,
+                        action_operation,
+                        method,
+                        kind,
+                        true,
+                        true,
+                    )
+                    .expect("valid request validation input must cross Mojo");
+                    assert_eq!(actual, expected);
+                }
+            }
+        }
+    }
+    assert_eq!(
+        control_plane_request_validation(
+            ControlPlaneOperation::VirtualKeyCreate,
+            ControlPlaneOperation::VirtualKeyCreate,
+            GatewayHttpMethod::Post,
+            Kind::Audit,
+            false,
+            true,
+        )
+        .unwrap(),
+        super::routing_validation::ControlPlaneRequestValidationDecision::AuditNotRequired,
+    );
+}
+
 #[cfg(not(feature = "mojo"))]
 #[test]
 fn feature_off_route_validation_preserves_method_rejection() {
@@ -58,6 +124,6 @@ fn feature_off_route_validation_preserves_method_rejection() {
     .expect("feature-off validation should not need Mojo");
     assert_eq!(
         decision,
-        super::ControlPlaneRouteValidationDecision::MethodNotAllowed
+        ControlPlaneRouteValidationDecision::MethodNotAllowed
     );
 }

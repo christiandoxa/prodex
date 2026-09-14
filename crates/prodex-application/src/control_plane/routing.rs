@@ -5,15 +5,12 @@
 mod routing_tests;
 #[path = "routing_validation.rs"]
 mod routing_validation;
-#[cfg(all(test, feature = "mojo"))]
-use routing_validation::control_plane_route_validation_rust;
-use routing_validation::{
-    ControlPlaneRouteValidationDecision, ControlPlaneRouteValidationMode,
-    control_plane_route_validation,
-};
-
 use super::super::*;
 use super::*;
+use routing_validation::{
+    ControlPlaneRequestValidationDecision, ControlPlaneRequestValidationKind,
+    control_plane_request_validation,
+};
 
 use ControlPlaneOperation as Control;
 use GatewayControlPlaneOperation as Gateway;
@@ -531,16 +528,18 @@ fn validate_control_plane_http_action(
 ) -> Result<(), ApplicationControlPlaneIdempotencyError> {
     let route = plan_application_control_plane_http_route(http)
         .map_err(ApplicationControlPlaneIdempotencyError::HttpRoute)?;
-    let decision = control_plane_route_validation(
+    let decision = control_plane_request_validation(
         route.operation,
         action.operation,
         http.method,
-        ControlPlaneRouteValidationMode::AllowAliasAndMethodCheck,
+        ControlPlaneRequestValidationKind::Idempotency,
+        false,
+        false,
     )
     .map_err(ApplicationControlPlaneIdempotencyError::HttpRoute)?;
     match decision {
-        ControlPlaneRouteValidationDecision::Allow => Ok(()),
-        ControlPlaneRouteValidationDecision::MethodNotAllowed => {
+        ControlPlaneRequestValidationDecision::Allow => Ok(()),
+        ControlPlaneRequestValidationDecision::MethodNotAllowed => {
             Err(ApplicationControlPlaneIdempotencyError::HttpRoute(
                 ApplicationControlPlaneHttpRouteError::Route(
                     GatewayControlPlaneRouteError::MethodNotAllowed {
@@ -550,11 +549,14 @@ fn validate_control_plane_http_action(
                 ),
             ))
         }
-        ControlPlaneRouteValidationDecision::OperationMismatch => {
+        ControlPlaneRequestValidationDecision::OperationMismatch => {
             Err(ApplicationControlPlaneIdempotencyError::OperationMismatch {
                 route_operation: route.operation,
                 action_operation: action.operation,
             })
+        }
+        ControlPlaneRequestValidationDecision::AuditNotRequired => {
+            unreachable!("idempotency validation does not plan audit")
         }
     }
 }
@@ -565,14 +567,16 @@ fn validate_control_plane_http_action_for_page_request(
 ) -> Result<(), ApplicationControlPlanePageRequestError> {
     let route = plan_application_control_plane_http_route(http)
         .map_err(ApplicationControlPlanePageRequestError::HttpRoute)?;
-    let decision = control_plane_route_validation(
+    let decision = control_plane_request_validation(
         route.operation,
         action.operation,
         http.method,
-        ControlPlaneRouteValidationMode::Exact,
+        ControlPlaneRequestValidationKind::Page,
+        false,
+        false,
     )
     .map_err(ApplicationControlPlanePageRequestError::HttpRoute)?;
-    if decision != ControlPlaneRouteValidationDecision::Allow {
+    if decision != ControlPlaneRequestValidationDecision::Allow {
         return Err(ApplicationControlPlanePageRequestError::OperationMismatch {
             route_operation: route.operation,
             action_operation: action.operation,
@@ -587,14 +591,16 @@ fn validate_control_plane_http_action_for_precondition(
 ) -> Result<(), ApplicationControlPlanePreconditionError> {
     let route = plan_application_control_plane_http_route(http)
         .map_err(ApplicationControlPlanePreconditionError::HttpRoute)?;
-    let decision = control_plane_route_validation(
+    let decision = control_plane_request_validation(
         route.operation,
         action.operation,
         http.method,
-        ControlPlaneRouteValidationMode::AllowAlias,
+        ControlPlaneRequestValidationKind::Precondition,
+        false,
+        false,
     )
     .map_err(ApplicationControlPlanePreconditionError::HttpRoute)?;
-    if decision != ControlPlaneRouteValidationDecision::Allow {
+    if decision != ControlPlaneRequestValidationDecision::Allow {
         return Err(
             ApplicationControlPlanePreconditionError::OperationMismatch {
                 route_operation: route.operation,
@@ -611,26 +617,31 @@ pub(crate) fn validate_control_plane_http_action_for_audit(
 ) -> Result<ApplicationControlPlaneHttpRoutePlan, ApplicationControlPlaneAuditError> {
     let route = plan_application_control_plane_http_route(http)
         .map_err(ApplicationControlPlaneAuditError::HttpRoute)?;
-    let decision = control_plane_route_validation(
+    let decision = control_plane_request_validation(
         route.operation,
         action.operation,
         http.method,
-        ControlPlaneRouteValidationMode::AllowAlias,
+        ControlPlaneRequestValidationKind::Audit,
+        route.http.requires_audit,
+        action.operation.requires_immutable_audit(),
     )
     .map_err(ApplicationControlPlaneAuditError::HttpRoute)?;
-    if decision != ControlPlaneRouteValidationDecision::Allow {
-        return Err(ApplicationControlPlaneAuditError::OperationMismatch {
-            route_operation: route.operation,
-            action_operation: action.operation,
-        });
+    match decision {
+        ControlPlaneRequestValidationDecision::Allow => Ok(route),
+        ControlPlaneRequestValidationDecision::AuditNotRequired => {
+            Err(ApplicationControlPlaneAuditError::AuditNotRequired {
+                route_operation: route.http.operation,
+                action_operation: action.operation,
+            })
+        }
+        ControlPlaneRequestValidationDecision::OperationMismatch
+        | ControlPlaneRequestValidationDecision::MethodNotAllowed => {
+            Err(ApplicationControlPlaneAuditError::OperationMismatch {
+                route_operation: route.operation,
+                action_operation: action.operation,
+            })
+        }
     }
-    if !route.http.requires_audit || !action.operation.requires_immutable_audit() {
-        return Err(ApplicationControlPlaneAuditError::AuditNotRequired {
-            route_operation: route.http.operation,
-            action_operation: action.operation,
-        });
-    }
-    Ok(route)
 }
 
 fn control_plane_operation_from_gateway_route(
