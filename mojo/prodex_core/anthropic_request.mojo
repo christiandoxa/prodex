@@ -212,45 +212,85 @@ def anthropic_request_write_body(
     writer: Pointer[mut=True, AnthropicRequestKernelWriter, _],
     input: ProdexAnthropicRequestKernelInput,
 ) -> Bool:
-    if (
-        input.model.len == 0
-        or input.messages.len == 0
-        or input.max_tokens.len == 0
-        or input.stream < 0
-        or input.stream > 1
+    if input.content.len < 2 or input.messages.len == 0:
+        return False
+    var end = Int64(input.content.len)
+    var model = anthropic_request_object_field(
+        input.content, 0, end, StringSlice('"model"')
+    )
+    var max_tokens = anthropic_request_object_field(
+        input.content, 0, end, StringSlice('"max_tokens"')
+    )
+    var stream = anthropic_request_object_field(
+        input.content, 0, end, StringSlice('"stream"')
+    )
+    var temperature = anthropic_request_object_field(
+        input.content, 0, end, StringSlice('"temperature"')
+    )
+    var top_p = anthropic_request_object_field(
+        input.content, 0, end, StringSlice('"top_p"')
+    )
+    var stop = anthropic_request_object_field(
+        input.content, 0, end, StringSlice('"stop"')
+    )
+    if stop[0] >= 0 and not (
+        anthropic_request_byte(input.content, stop[0]) == 34
+        or anthropic_request_byte(input.content, stop[0]) == 91
+    ):
+        return (
+            anthropic_request_put_byte(writer, 2)
+            and anthropic_request_put_literal(
+                writer, StringSlice("Responses `stop` must be a string or array")
+            )
+        )
+    if not (
+        anthropic_request_put_byte(writer, 1)
+        and anthropic_request_put_literal(writer, StringSlice('{"model":'))
+        and anthropic_request_put_range_or_literal(
+            writer, input.content, model, StringSlice('"auto"')
+        )
+        and anthropic_request_put_literal(writer, StringSlice(',"messages":'))
+        and anthropic_request_put_view(writer, input.messages)
+        and anthropic_request_put_literal(writer, StringSlice(',"max_tokens":'))
+        and anthropic_request_put_range_or_literal(
+            writer, input.content, max_tokens, StringSlice("4096")
+        )
+        and anthropic_request_put_literal(writer, StringSlice(',"stream":'))
     ):
         return False
-    if not anthropic_request_put_literal(writer, StringSlice('{"model":')):
-        return False
-    if not anthropic_request_put_view(writer, input.model):
-        return False
-    if not anthropic_request_put_literal(writer, StringSlice(',"messages":')):
-        return False
-    if not anthropic_request_put_view(writer, input.messages):
-        return False
-    if not anthropic_request_put_literal(writer, StringSlice(',"max_tokens":')):
-        return False
-    if not anthropic_request_put_view(writer, input.max_tokens):
-        return False
-    if not anthropic_request_put_literal(writer, StringSlice(',"stream":')):
-        return False
-    if input.stream == 1:
+    if stream[0] >= 0 and anthropic_request_range_matches_literal(
+        input.content, stream[0], stream[1], StringSlice("true")
+    ):
         if not anthropic_request_put_literal(writer, StringSlice("true")):
             return False
     elif not anthropic_request_put_literal(writer, StringSlice("false")):
         return False
     if not anthropic_request_put_optional(writer, StringSlice(',"system":'), input.system):
         return False
-    if not anthropic_request_put_optional(
-        writer, StringSlice(',"temperature":'), input.temperature
+    if temperature[0] >= 0 and not (
+        anthropic_request_put_literal(writer, StringSlice(',"temperature":'))
+        and anthropic_request_put_view_range(
+            writer, input.content, temperature[0], temperature[1]
+        )
     ):
         return False
-    if not anthropic_request_put_optional(writer, StringSlice(',"top_p":'), input.top_p):
-        return False
-    if not anthropic_request_put_optional(
-        writer, StringSlice(',"stop_sequences":'), input.stop_sequences
+    if top_p[0] >= 0 and not (
+        anthropic_request_put_literal(writer, StringSlice(',"top_p":'))
+        and anthropic_request_put_view_range(writer, input.content, top_p[0], top_p[1])
     ):
         return False
+    if stop[0] >= 0:
+        if not anthropic_request_put_literal(writer, StringSlice(',"stop_sequences":')):
+            return False
+        if anthropic_request_byte(input.content, stop[0]) == 34:
+            if not anthropic_request_put_byte(writer, 91) or not anthropic_request_put_view_range(
+                writer, input.content, stop[0], stop[1]
+            ) or not anthropic_request_put_byte(writer, 93):
+                return False
+        elif not anthropic_request_put_view_range(
+            writer, input.content, stop[0], stop[1]
+        ):
+            return False
     if not anthropic_request_put_optional(writer, StringSlice(',"tools":'), input.tools):
         return False
     if not anthropic_request_put_optional(
