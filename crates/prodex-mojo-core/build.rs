@@ -50,6 +50,7 @@ fn emit_source_rerun_directives(sources: &[&str], manifest_dir: &Path) {
             "../../mojo/prodex_core/kiro.mojo",
             "../../mojo/prodex_core/gemini_response.mojo",
             "../../mojo/prodex_core/gemini_sse_state.mojo",
+            "../../mojo/prodex_core/context_command_output_common.mojo",
         ] {
             println!(
                 "cargo:rerun-if-changed={}",
@@ -271,6 +272,7 @@ fn selected_sources() -> Vec<&'static str> {
         sources.push("../../mojo/prodex_core/policy_validation.mojo");
         sources.push("../../mojo/prodex_core/context.mojo");
         sources.push("../../mojo/prodex_core/context_text.mojo");
+        sources.push("../../mojo/prodex_core/context_command_output.mojo");
         sources.push("../../mojo/prodex_core/runtime_health.mojo");
     }
     if env::var_os("CARGO_FEATURE_MOJO_RICH").is_some()

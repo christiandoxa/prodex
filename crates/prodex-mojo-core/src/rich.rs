@@ -126,6 +126,9 @@ pub use smart_context_normalization::{
 #[path = "rich/runtime_doctor_plan.rs"]
 mod runtime_doctor_plan;
 pub use runtime_doctor_plan::*;
+#[path = "rich/context_command_output.rs"]
+mod context_command_output;
+pub use context_command_output::*;
 #[path = "rich/application_obligations.rs"]
 mod application_obligations;
 pub use application_obligations::*;

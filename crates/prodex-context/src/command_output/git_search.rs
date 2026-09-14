@@ -1,9 +1,36 @@
 use super::*;
 
+#[cfg(feature = "mojo")]
 pub(super) fn compact_git_status_output(
     input: &str,
     options: &CommandOutputCompactOptions,
 ) -> String {
+    let Some(body) = prodex_mojo_core::rich::context_command_output(
+        prodex_mojo_core::rich::ContextCommandOutputOperation::GitStatus,
+        input,
+        options.max_path_entries,
+    )
+    .unwrap_or_else(|error| panic!("Mojo git-status formatter failed: {error:?}")) else {
+        return smart_truncate_command_output(input, options);
+    };
+    let lines = body
+        .trim_end_matches('\n')
+        .split('\n')
+        .map(str::to_owned)
+        .collect();
+    finalize_compacted_command_output(CommandOutputKind::GitStatus, input, lines, options)
+}
+
+#[cfg(not(feature = "mojo"))]
+pub(super) fn compact_git_status_output(
+    input: &str,
+    options: &CommandOutputCompactOptions,
+) -> String {
+    compact_git_status_output_rust(input, options)
+}
+
+#[cfg(any(not(feature = "mojo"), test))]
+fn compact_git_status_output_rust(input: &str, options: &CommandOutputCompactOptions) -> String {
     let mut summary = GitStatusSummary::default();
     let lines = command_lines(input);
     let short_format = lines
@@ -577,4 +604,34 @@ fn compact_git_diff_stat_output(
     }
 
     Some(output)
+}
+
+#[cfg(all(test, feature = "mojo"))]
+mod mojo_git_status_tests {
+    use super::*;
+
+    #[test]
+    fn mojo_git_status_formatter_matches_rust_oracle() {
+        let cases = [
+            "",
+            "arbitrary output\n",
+            "## main...origin/main\n M README.md\nM  src/lib.rs\nR  old -> new\n?? notes.txt\n?? notes.txt\nUU conflict.rs\n",
+            "On branch main\nYour branch is up to date with 'origin/main'.\n\nChanges to be committed:\n  modified:   src/lib.rs\n  renamed:    old.rs -> new.rs\n\nChanges not staged for commit:\n  modified:   README.md\n  deleted:    stale.txt\n\nUnmerged paths:\n  both modified: conflict.rs\n\nUntracked files:\n  notes.txt\n\nnothing to commit, working tree clean\n",
+            "HEAD detached at abc1234\nUntracked files:\n  a\n  b\n  c\n  d\n  e\n  f\n  g\n",
+        ];
+        for max_path_entries in [1, 6, 24, 120, usize::MAX] {
+            let options = CommandOutputCompactOptions {
+                max_lines: 200,
+                max_path_entries,
+                ..CommandOutputCompactOptions::default()
+            };
+            for input in cases {
+                assert_eq!(
+                    compact_git_status_output(input, &options),
+                    compact_git_status_output_rust(input, &options),
+                    "max_path_entries={max_path_entries}, input={input:?}",
+                );
+            }
+        }
+    }
 }

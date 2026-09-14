@@ -3,6 +3,7 @@ mod search;
 pub(crate) use search::*;
 
 #[derive(Default)]
+#[cfg(any(not(feature = "mojo"), test))]
 pub(super) struct GitStatusSummary {
     pub(super) branch: Option<String>,
     pub(super) staged: Vec<String>,
@@ -29,6 +30,7 @@ pub(super) fn is_short_git_status_line(line: &str) -> bool {
     valid_status(bytes[0]) && valid_status(bytes[1]) && bytes[2] == b' '
 }
 
+#[cfg(any(not(feature = "mojo"), test))]
 pub(super) fn parse_short_git_status_line(line: &str, summary: &mut GitStatusSummary) {
     if let Some(branch) = line.strip_prefix("## ") {
         summary.branch = Some(branch.trim().to_string());
@@ -61,6 +63,7 @@ pub(super) fn parse_short_git_status_line(line: &str, summary: &mut GitStatusSum
     push_short_status_path(worktree, path, false, summary);
 }
 
+#[cfg(any(not(feature = "mojo"), test))]
 pub(super) fn push_short_status_path(
     status: char,
     path: &str,
@@ -83,6 +86,7 @@ pub(super) fn push_short_status_path(
     }
 }
 
+#[cfg(any(not(feature = "mojo"), test))]
 pub(super) fn parse_long_git_status_lines(lines: &[&str], summary: &mut GitStatusSummary) {
     let mut section = GitStatusSection::Other;
     for line in lines {
@@ -93,6 +97,7 @@ pub(super) fn parse_long_git_status_lines(lines: &[&str], summary: &mut GitStatu
     }
 }
 
+#[cfg(any(not(feature = "mojo"), test))]
 fn parse_long_git_status_line(
     trimmed: &str,
     section: &mut GitStatusSection,
@@ -126,6 +131,7 @@ fn parse_long_git_status_line(
     push_long_status_entry(trimmed, *section, summary);
 }
 
+#[cfg(any(not(feature = "mojo"), test))]
 fn push_long_status_entry(
     trimmed: &str,
     section: GitStatusSection,
@@ -152,6 +158,7 @@ fn push_long_status_entry(
 }
 
 #[derive(Clone, Copy)]
+#[cfg(any(not(feature = "mojo"), test))]
 pub(super) enum GitStatusSection {
     Staged,
     Modified,
@@ -160,6 +167,7 @@ pub(super) enum GitStatusSection {
     Other,
 }
 
+#[cfg(any(not(feature = "mojo"), test))]
 pub(super) fn parse_long_status_path(trimmed: &str) -> String {
     trimmed
         .split_once(':')
@@ -167,6 +175,7 @@ pub(super) fn parse_long_status_path(trimmed: &str) -> String {
         .unwrap_or_else(|| trimmed.to_string())
 }
 
+#[cfg(any(not(feature = "mojo"), test))]
 pub(super) fn push_item_summary(
     output: &mut Vec<String>,
     label: &str,
