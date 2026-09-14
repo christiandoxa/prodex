@@ -131,7 +131,9 @@ pub(super) fn runtime_gateway_builtin_model_cost_plan(
 mod tests {
     use super::*;
 
-    fn rust_oracle(provider: ProviderId) -> (BTreeMap<String, (Option<u64>, Option<u64>)>, bool) {
+    type RustModelCosts = BTreeMap<String, (Option<u64>, Option<u64>)>;
+
+    fn rust_oracle(provider: ProviderId) -> (RustModelCosts, bool) {
         let models = provider_model_catalog(provider);
         let fallback_input = models
             .iter()
