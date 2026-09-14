@@ -11,6 +11,35 @@ pub const RUNTIME_ERROR_MODE_TEXT_RATE: i64 = 8;
 pub const RUNTIME_ERROR_MODE_TEXT_PROFILE: i64 = 9;
 pub const RUNTIME_ERROR_MODE_TEXT_OVERLOAD: i64 = 10;
 pub const RUNTIME_ERROR_MODE_TEXT_WORKSPACE: i64 = 11;
+pub const PREVIOUS_RESPONSE_PLAN_OUTPUT_COUNT: usize = 10;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PreviousResponsePlanInput {
+    pub route: i64,
+    pub previous_response_present: bool,
+    pub has_turn_state_retry: bool,
+    pub request_requires_previous_response_affinity: bool,
+    pub trusted_previous_response_affinity: bool,
+    pub request_turn_state_present: bool,
+    pub previous_response_fresh_fallback_used: bool,
+    pub fresh_fallback_shape: i64,
+    pub retry_index: usize,
+    pub has_session_affinity: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PreviousResponsePlan {
+    pub retry_reason: i64,
+    pub retry_delay_ms: Option<u64>,
+    pub chain_reason: i64,
+    pub request_requires_locked_affinity: bool,
+    pub stale_policy: i64,
+    pub fresh_fail_closed: bool,
+    pub fresh_blocked_without_affinity: bool,
+    pub observability: i64,
+    pub effective_shape: i64,
+    pub websocket_requires_affinity: bool,
+}
 
 unsafe extern "C" {
     fn prodex_mojo_rich_model_fallback_v2(
@@ -51,6 +80,70 @@ unsafe extern "C" {
         output_capacity: i64,
         result: u64,
     ) -> i64;
+    fn prodex_runtime_previous_response_plan_v1(
+        route: i64,
+        previous_response_present: i64,
+        has_turn_state_retry: i64,
+        request_requires_previous_response_affinity: i64,
+        trusted_previous_response_affinity: i64,
+        request_turn_state_present: i64,
+        previous_response_fresh_fallback_used: i64,
+        fresh_fallback_shape: i64,
+        retry_index: i64,
+        has_session_affinity: i64,
+        output: *mut i64,
+    ) -> i64;
+}
+
+pub fn previous_response_plan(
+    input: PreviousResponsePlanInput,
+) -> Result<PreviousResponsePlan, MojoError> {
+    ensure_rich_abi()?;
+    if !(0..=1).contains(&input.route) || !(-1..=3).contains(&input.fresh_fallback_shape) {
+        return Err(MojoError::InvalidInput);
+    }
+    let mut output = [0_i64; PREVIOUS_RESPONSE_PLAN_OUTPUT_COUNT];
+    let status = unsafe {
+        prodex_runtime_previous_response_plan_v1(
+            input.route,
+            i64::from(input.previous_response_present),
+            i64::from(input.has_turn_state_retry),
+            i64::from(input.request_requires_previous_response_affinity),
+            i64::from(input.trusted_previous_response_affinity),
+            i64::from(input.request_turn_state_present),
+            i64::from(input.previous_response_fresh_fallback_used),
+            input.fresh_fallback_shape,
+            i64::try_from(input.retry_index).map_err(|_| MojoError::InvalidInput)?,
+            i64::from(input.has_session_affinity),
+            output.as_mut_ptr(),
+        )
+    };
+    if status != 0
+        || !(0..=2).contains(&output[0])
+        || output[1] < -1
+        || !(0..=2).contains(&output[2])
+        || !matches!(output[3], 0 | 1)
+        || !(0..=2).contains(&output[4])
+        || !matches!(output[5], 0 | 1)
+        || !matches!(output[6], 0 | 1)
+        || !(0..=2).contains(&output[7])
+        || !(-1..=3).contains(&output[8])
+        || !matches!(output[9], 0 | 1)
+    {
+        return Err(MojoError::InvalidOutput);
+    }
+    Ok(PreviousResponsePlan {
+        retry_reason: output[0],
+        retry_delay_ms: (output[1] >= 0).then(|| output[1] as u64),
+        chain_reason: output[2],
+        request_requires_locked_affinity: output[3] == 1,
+        stale_policy: output[4],
+        fresh_fail_closed: output[5] == 1,
+        fresh_blocked_without_affinity: output[6] == 1,
+        observability: output[7],
+        effective_shape: output[8],
+        websocket_requires_affinity: output[9] == 1,
+    })
 }
 
 impl MojoError {

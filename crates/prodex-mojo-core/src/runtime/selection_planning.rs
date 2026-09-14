@@ -50,6 +50,40 @@ pub struct AdaptiveRoutingPlan {
     pub reason: i64,
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct AffinitySelectionInput {
+    pub route_kind: i64,
+    pub strict_candidate_match: bool,
+    pub pinned_candidate_match: bool,
+    pub turn_state_candidate_match: bool,
+    pub session_candidate_match: bool,
+    pub trusted_previous_response_affinity: bool,
+    pub fresh_fallback_shape_present: bool,
+    pub previous_response_present: bool,
+    pub pinned_profile_present: bool,
+    pub request_turn_state_present: bool,
+    pub turn_state_profile_present: bool,
+    pub session_profile_present: bool,
+    pub saw_inflight_saturation: bool,
+    pub saw_upstream_failure: bool,
+    pub previous_response_fresh_fallback_used: bool,
+    pub reuse_terminal_idle_ms: Option<u64>,
+    pub reuse_stale_after_ms: u64,
+    pub compact_session_matches_session: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AffinitySelectionPlan {
+    pub no_rotate_affinity: i64,
+    pub release_quota_affinity: bool,
+    pub continuation_priority: bool,
+    pub direct_current_fallback: bool,
+    pub reuse_nonreplayable: bool,
+    pub reuse_stale: bool,
+    pub wait_owner: i64,
+    pub noncompact_session_priority: bool,
+}
+
 unsafe extern "C" {
     fn prodex_runtime_soft_affinity_policy_v1(
         affinity_kind: i64,
@@ -75,6 +109,79 @@ unsafe extern "C" {
         exploration_rate_bps: i64,
         diagnostic_seed: u64,
     ) -> i64;
+    fn prodex_runtime_affinity_selection_plan_v1(
+        route_kind: i64,
+        strict_candidate_match: i64,
+        pinned_candidate_match: i64,
+        turn_state_candidate_match: i64,
+        session_candidate_match: i64,
+        trusted_previous_response_affinity: i64,
+        fresh_fallback_shape_present: i64,
+        previous_response_present: i64,
+        pinned_profile_present: i64,
+        request_turn_state_present: i64,
+        turn_state_profile_present: i64,
+        session_profile_present: i64,
+        saw_inflight_saturation: i64,
+        saw_upstream_failure: i64,
+        previous_response_fresh_fallback_used: i64,
+        reuse_terminal_idle_present: i64,
+        reuse_terminal_idle_ms: u64,
+        reuse_stale_after_ms: u64,
+        compact_session_matches_session: i64,
+        output: *mut i64,
+    ) -> i64;
+}
+
+pub fn affinity_selection_plan(
+    input: AffinitySelectionInput,
+) -> Result<AffinitySelectionPlan, MojoError> {
+    if !(0..=3).contains(&input.route_kind) {
+        return Err(MojoError::InvalidInput);
+    }
+    let mut output = [0_i64; 8];
+    let status = unsafe {
+        prodex_runtime_affinity_selection_plan_v1(
+            input.route_kind,
+            i64::from(input.strict_candidate_match),
+            i64::from(input.pinned_candidate_match),
+            i64::from(input.turn_state_candidate_match),
+            i64::from(input.session_candidate_match),
+            i64::from(input.trusted_previous_response_affinity),
+            i64::from(input.fresh_fallback_shape_present),
+            i64::from(input.previous_response_present),
+            i64::from(input.pinned_profile_present),
+            i64::from(input.request_turn_state_present),
+            i64::from(input.turn_state_profile_present),
+            i64::from(input.session_profile_present),
+            i64::from(input.saw_inflight_saturation),
+            i64::from(input.saw_upstream_failure),
+            i64::from(input.previous_response_fresh_fallback_used),
+            i64::from(input.reuse_terminal_idle_ms.is_some()),
+            input.reuse_terminal_idle_ms.unwrap_or_default(),
+            input.reuse_stale_after_ms,
+            i64::from(input.compact_session_matches_session),
+            output.as_mut_ptr(),
+        )
+    };
+    if status != 0
+        || !(0..=4).contains(&output[0])
+        || output[1..=5].iter().any(|value| !matches!(value, 0 | 1))
+        || !(0..=4).contains(&output[6])
+        || !matches!(output[7], 0 | 1)
+    {
+        return Err(MojoError::InvalidOutput);
+    }
+    Ok(AffinitySelectionPlan {
+        no_rotate_affinity: output[0],
+        release_quota_affinity: output[1] == 1,
+        continuation_priority: output[2] == 1,
+        direct_current_fallback: output[3] == 1,
+        reuse_nonreplayable: output[4] == 1,
+        reuse_stale: output[5] == 1,
+        wait_owner: output[6],
+        noncompact_session_priority: output[7] == 1,
+    })
 }
 
 pub fn soft_affinity_policy(input: SoftAffinityPolicyInput) -> Result<i64, MojoError> {

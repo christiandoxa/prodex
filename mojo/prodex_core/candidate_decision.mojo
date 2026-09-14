@@ -440,6 +440,139 @@ def prodex_runtime_soft_affinity_policy_v1(
     return runtime_soft_affinity_policy_band_reason(quota_band)
 
 
+def runtime_selection_bool(value: Int64) -> Bool:
+    return value == 1
+
+
+@export("prodex_runtime_affinity_selection_plan_v1")
+def prodex_runtime_affinity_selection_plan_v1(
+    route_kind: Int64,
+    strict_candidate_match: Int64,
+    pinned_candidate_match: Int64,
+    turn_state_candidate_match: Int64,
+    session_candidate_match: Int64,
+    trusted_previous_response_affinity: Int64,
+    fresh_fallback_shape_present: Int64,
+    previous_response_present: Int64,
+    pinned_profile_present: Int64,
+    request_turn_state_present: Int64,
+    turn_state_profile_present: Int64,
+    session_profile_present: Int64,
+    saw_inflight_saturation: Int64,
+    saw_upstream_failure: Int64,
+    previous_response_fresh_fallback_used: Int64,
+    reuse_terminal_idle_present: Int64,
+    reuse_terminal_idle_ms: UInt64,
+    reuse_stale_after_ms: UInt64,
+    compact_session_matches_session: Int64,
+    output: Pointer[mut=True, Int64, _],
+) abi("C") -> Int64:
+    if route_kind < 0 or route_kind > 3:
+        return 1
+    if (
+        strict_candidate_match < 0
+        or strict_candidate_match > 1
+        or pinned_candidate_match < 0
+        or pinned_candidate_match > 1
+        or turn_state_candidate_match < 0
+        or turn_state_candidate_match > 1
+        or session_candidate_match < 0
+        or session_candidate_match > 1
+        or trusted_previous_response_affinity < 0
+        or trusted_previous_response_affinity > 1
+        or fresh_fallback_shape_present < 0
+        or fresh_fallback_shape_present > 1
+        or previous_response_present < 0
+        or previous_response_present > 1
+        or pinned_profile_present < 0
+        or pinned_profile_present > 1
+        or request_turn_state_present < 0
+        or request_turn_state_present > 1
+        or turn_state_profile_present < 0
+        or turn_state_profile_present > 1
+        or session_profile_present < 0
+        or session_profile_present > 1
+        or saw_inflight_saturation < 0
+        or saw_inflight_saturation > 1
+        or saw_upstream_failure < 0
+        or saw_upstream_failure > 1
+        or previous_response_fresh_fallback_used < 0
+        or previous_response_fresh_fallback_used > 1
+        or reuse_terminal_idle_present < 0
+        or reuse_terminal_idle_present > 1
+        or compact_session_matches_session < 0
+        or compact_session_matches_session > 1
+    ):
+        return 1
+
+    var strict_match = runtime_selection_bool(strict_candidate_match)
+    var pinned_match = runtime_selection_bool(pinned_candidate_match)
+    var turn_match = runtime_selection_bool(turn_state_candidate_match)
+    var session_match = runtime_selection_bool(session_candidate_match)
+    var trusted = runtime_selection_bool(trusted_previous_response_affinity)
+    var no_rotate_affinity: Int64 = 0
+    if strict_match:
+        no_rotate_affinity = 1
+    elif turn_match:
+        no_rotate_affinity = 2
+    elif trusted and pinned_match:
+        no_rotate_affinity = 3
+    elif route_kind == 1 and session_match:
+        no_rotate_affinity = 4
+
+    var release_quota_affinity = not (
+        runtime_selection_bool(fresh_fallback_shape_present)
+        or strict_match
+        or turn_match
+        or (route_kind == 1 and session_match)
+    )
+    var continuation_priority = (
+        runtime_selection_bool(previous_response_present)
+        or runtime_selection_bool(pinned_profile_present)
+        or runtime_selection_bool(request_turn_state_present)
+        or runtime_selection_bool(turn_state_profile_present)
+        or runtime_selection_bool(session_profile_present)
+    )
+    var direct_current_fallback = (
+        not continuation_priority
+        and not runtime_selection_bool(saw_inflight_saturation)
+        and not runtime_selection_bool(saw_upstream_failure)
+    )
+    var reuse_nonreplayable = (
+        runtime_selection_bool(previous_response_present)
+        and not runtime_selection_bool(previous_response_fresh_fallback_used)
+        and not runtime_selection_bool(request_turn_state_present)
+    )
+    var reuse_stale = (
+        reuse_nonreplayable
+        and runtime_selection_bool(reuse_terminal_idle_present)
+        and reuse_terminal_idle_ms >= reuse_stale_after_ms
+    )
+    var wait_owner: Int64 = 0
+    if runtime_selection_bool(session_profile_present):
+        wait_owner = 4
+    if runtime_selection_bool(pinned_profile_present) and trusted:
+        wait_owner = 3
+    if runtime_selection_bool(turn_state_profile_present):
+        wait_owner = 2
+    if runtime_selection_bool(strict_candidate_match):
+        wait_owner = 1
+    var noncompact_session_priority = (
+        runtime_selection_bool(session_profile_present)
+        and not runtime_selection_bool(compact_session_matches_session)
+    )
+
+    output[unsafe_offset=0] = no_rotate_affinity
+    output[unsafe_offset=1] = Int64(release_quota_affinity)
+    output[unsafe_offset=2] = Int64(continuation_priority)
+    output[unsafe_offset=3] = Int64(direct_current_fallback)
+    output[unsafe_offset=4] = Int64(reuse_nonreplayable)
+    output[unsafe_offset=5] = Int64(reuse_stale)
+    output[unsafe_offset=6] = wait_owner
+    output[unsafe_offset=7] = Int64(noncompact_session_priority)
+    return 0
+
+
 @export("prodex_runtime_candidate_plan_batch")
 def prodex_runtime_candidate_plan_batch(
     fields: Pointer[mut=False, Int64, _],

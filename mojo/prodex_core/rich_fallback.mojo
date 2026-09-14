@@ -1133,3 +1133,156 @@ def prodex_mojo_rich_runtime_error_policy_v1(
     result_ptr[].output_written = written
     result_ptr[].required_output = written
     return RICH_STATUS_OK
+
+
+comptime PREVIOUS_RESPONSE_ROUTE_RESPONSES: Int64 = 0
+comptime PREVIOUS_RESPONSE_ROUTE_WEBSOCKET: Int64 = 1
+comptime PREVIOUS_RESPONSE_SHAPE_NONE: Int64 = -1
+comptime PREVIOUS_RESPONSE_SHAPE_EMPTY_INPUT: Int64 = 1
+comptime PREVIOUS_RESPONSE_SHAPE_SESSION_REPLAY: Int64 = 2
+comptime PREVIOUS_RESPONSE_RETRY_NONE: Int64 = 0
+comptime PREVIOUS_RESPONSE_RETRY_TURN_STATE: Int64 = 1
+comptime PREVIOUS_RESPONSE_RETRY_LOCKED_AFFINITY: Int64 = 2
+comptime PREVIOUS_RESPONSE_CHAIN_NONE: Int64 = 0
+comptime PREVIOUS_RESPONSE_CHAIN_RESPONSES: Int64 = 1
+comptime PREVIOUS_RESPONSE_CHAIN_WEBSOCKET_LOCKED: Int64 = 2
+comptime PREVIOUS_RESPONSE_STALE_NOT_APPLICABLE: Int64 = 0
+comptime PREVIOUS_RESPONSE_STALE_RETRY_TURN_STATE: Int64 = 1
+comptime PREVIOUS_RESPONSE_STALE_FAIL_CLOSED: Int64 = 2
+comptime PREVIOUS_RESPONSE_OBSERVABILITY_NONE: Int64 = 0
+comptime PREVIOUS_RESPONSE_OBSERVABILITY_BLOCKED: Int64 = 1
+comptime PREVIOUS_RESPONSE_OBSERVABILITY_NONREPLAYABLE: Int64 = 2
+
+
+def previous_response_bool(value: Int64) -> Bool:
+    return value == 1
+
+
+def previous_response_retry_delay_ms(retry_index: Int64) -> Int64:
+    if retry_index == 0:
+        return 75
+    if retry_index == 1:
+        return 200
+    if retry_index == 2:
+        return 500
+    return -1
+
+
+@export("prodex_runtime_previous_response_plan_v1")
+def prodex_runtime_previous_response_plan_v1(
+    route: Int64,
+    previous_response_present: Int64,
+    has_turn_state_retry: Int64,
+    request_requires_previous_response_affinity: Int64,
+    trusted_previous_response_affinity: Int64,
+    request_turn_state_present: Int64,
+    previous_response_fresh_fallback_used: Int64,
+    fresh_fallback_shape: Int64,
+    retry_index: Int64,
+    has_session_affinity: Int64,
+    output: Pointer[mut=True, Int64, _],
+) abi("C") -> Int64:
+    if (
+        route < PREVIOUS_RESPONSE_ROUTE_RESPONSES
+        or route > PREVIOUS_RESPONSE_ROUTE_WEBSOCKET
+        or previous_response_present < 0
+        or previous_response_present > 1
+        or has_turn_state_retry < 0
+        or has_turn_state_retry > 1
+        or request_requires_previous_response_affinity < 0
+        or request_requires_previous_response_affinity > 1
+        or trusted_previous_response_affinity < 0
+        or trusted_previous_response_affinity > 1
+        or request_turn_state_present < 0
+        or request_turn_state_present > 1
+        or previous_response_fresh_fallback_used < 0
+        or previous_response_fresh_fallback_used > 1
+        or fresh_fallback_shape < PREVIOUS_RESPONSE_SHAPE_NONE
+        or fresh_fallback_shape > 3
+        or retry_index < 0
+        or has_session_affinity < 0
+        or has_session_affinity > 1
+    ):
+        return RICH_STATUS_INVALID
+
+    var previous_present = previous_response_bool(previous_response_present)
+    var turn_state_retry = previous_response_bool(has_turn_state_retry)
+    var request_turn_state = previous_response_bool(request_turn_state_present)
+    var request_requires_affinity = previous_response_bool(
+        request_requires_previous_response_affinity
+    )
+    var websocket_requires_affinity = (
+        previous_response_bool(trusted_previous_response_affinity)
+        and previous_present
+        and not request_turn_state
+    )
+    var request_requires_locked_affinity = request_requires_affinity
+    if route == PREVIOUS_RESPONSE_ROUTE_WEBSOCKET:
+        request_requires_locked_affinity = (
+            request_requires_affinity or websocket_requires_affinity
+        )
+
+    var locked_affinity_retry = (
+        route == PREVIOUS_RESPONSE_ROUTE_WEBSOCKET
+        and request_requires_affinity
+        and not turn_state_retry
+    )
+    var retry_reason = PREVIOUS_RESPONSE_RETRY_NONE
+    if turn_state_retry:
+        retry_reason = PREVIOUS_RESPONSE_RETRY_TURN_STATE
+    elif locked_affinity_retry:
+        retry_reason = PREVIOUS_RESPONSE_RETRY_LOCKED_AFFINITY
+
+    var chain_reason = PREVIOUS_RESPONSE_CHAIN_NONE
+    if route == PREVIOUS_RESPONSE_ROUTE_RESPONSES and turn_state_retry:
+        chain_reason = PREVIOUS_RESPONSE_CHAIN_RESPONSES
+    elif route == PREVIOUS_RESPONSE_ROUTE_WEBSOCKET and locked_affinity_retry:
+        chain_reason = PREVIOUS_RESPONSE_CHAIN_WEBSOCKET_LOCKED
+
+    var stale_policy = PREVIOUS_RESPONSE_STALE_NOT_APPLICABLE
+    if previous_present:
+        if turn_state_retry:
+            stale_policy = PREVIOUS_RESPONSE_STALE_RETRY_TURN_STATE
+        else:
+            stale_policy = PREVIOUS_RESPONSE_STALE_FAIL_CLOSED
+
+    var has_previous_context = (
+        previous_present
+        or previous_response_bool(previous_response_fresh_fallback_used)
+    )
+    var fresh_fail_closed = (
+        has_previous_context
+        or request_requires_locked_affinity
+        or fresh_fallback_shape != PREVIOUS_RESPONSE_SHAPE_NONE
+    )
+    var fresh_blocked_without_affinity = (
+        fresh_fail_closed
+        and not turn_state_retry
+        and not request_requires_locked_affinity
+    )
+    var observability = PREVIOUS_RESPONSE_OBSERVABILITY_NONE
+    if fresh_blocked_without_affinity:
+        observability = PREVIOUS_RESPONSE_OBSERVABILITY_BLOCKED
+        if fresh_fallback_shape == 3:
+            observability = PREVIOUS_RESPONSE_OBSERVABILITY_NONREPLAYABLE
+
+    var effective_shape = fresh_fallback_shape
+    if (
+        previous_response_bool(has_session_affinity)
+        and fresh_fallback_shape == PREVIOUS_RESPONSE_SHAPE_EMPTY_INPUT
+    ):
+        effective_shape = PREVIOUS_RESPONSE_SHAPE_SESSION_REPLAY
+
+    output[unsafe_offset=0] = retry_reason
+    output[unsafe_offset=1] = previous_response_retry_delay_ms(retry_index)
+    if retry_reason == PREVIOUS_RESPONSE_RETRY_NONE:
+        output[unsafe_offset=1] = -1
+    output[unsafe_offset=2] = chain_reason
+    output[unsafe_offset=3] = Int64(request_requires_locked_affinity)
+    output[unsafe_offset=4] = stale_policy
+    output[unsafe_offset=5] = Int64(fresh_fail_closed)
+    output[unsafe_offset=6] = Int64(fresh_blocked_without_affinity)
+    output[unsafe_offset=7] = observability
+    output[unsafe_offset=8] = effective_shape
+    output[unsafe_offset=9] = Int64(websocket_requires_affinity)
+    return RICH_STATUS_OK

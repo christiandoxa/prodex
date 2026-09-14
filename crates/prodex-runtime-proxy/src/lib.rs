@@ -481,30 +481,6 @@ pub fn runtime_request_requires_previous_response_affinity(request: &RuntimeProx
         .unwrap_or(false)
 }
 
-pub fn runtime_websocket_previous_response_requires_previous_response_affinity(
-    trusted_previous_response_affinity: bool,
-    previous_response_id: Option<&str>,
-    request_turn_state: Option<&str>,
-) -> bool {
-    trusted_previous_response_affinity
-        && previous_response_id.is_some()
-        && request_turn_state.is_none()
-}
-
-pub fn runtime_websocket_request_requires_locked_previous_response_affinity(
-    request_requires_previous_response_affinity: bool,
-    trusted_previous_response_affinity: bool,
-    previous_response_id: Option<&str>,
-    request_turn_state: Option<&str>,
-) -> bool {
-    request_requires_previous_response_affinity
-        || runtime_websocket_previous_response_requires_previous_response_affinity(
-            trusted_previous_response_affinity,
-            previous_response_id,
-            request_turn_state,
-        )
-}
-
 pub fn runtime_request_turn_state(request: &RuntimeProxyRequest) -> Option<String> {
     runtime_proxy_request_header_value(&request.headers, "x-codex-turn-state").map(str::to_string)
 }
