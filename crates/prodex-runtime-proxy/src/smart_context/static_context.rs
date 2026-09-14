@@ -280,26 +280,61 @@ fn smart_context_stabilize_static_context_items_bounded(
             content_hash: smart_context_hash_text(&canonical_text),
             canonical_text,
         };
+
+        #[cfg(feature = "mojo")]
+        {
+            stable.push(candidate);
+            if stable.len() == SMART_CONTEXT_STATIC_CONTEXT_FINGERPRINT_MAX_ITEMS + 16 {
+                stable = smart_context_reduce_static_context_items_mojo(
+                    stable,
+                    &mut overflow_digest,
+                    SMART_CONTEXT_STATIC_CONTEXT_FINGERPRINT_MAX_ITEMS,
+                );
+                truncated = true;
+            }
+            continue;
+        }
+
+        #[cfg(not(feature = "mojo"))]
         if stable.len() < SMART_CONTEXT_STATIC_CONTEXT_FINGERPRINT_MAX_ITEMS {
             stable.push(candidate);
             continue;
         }
 
-        truncated = true;
-        let largest_index = stable
-            .iter()
-            .enumerate()
-            .max_by(|(_, left), (_, right)| smart_context_static_context_item_order(left, right))
-            .map(|(index, _)| index)
-            .expect("a full bounded fingerprint set is non-empty");
-        if smart_context_static_context_item_order(&candidate, &stable[largest_index]).is_lt() {
-            let overflow = std::mem::replace(&mut stable[largest_index], candidate);
-            smart_context_add_static_context_overflow_digest(&mut overflow_digest, &overflow);
-        } else {
-            smart_context_add_static_context_overflow_digest(&mut overflow_digest, &candidate);
+        #[cfg(not(feature = "mojo"))]
+        {
+            truncated = true;
+            let largest_index = stable
+                .iter()
+                .enumerate()
+                .max_by(|(_, left), (_, right)| {
+                    smart_context_static_context_item_order(left, right)
+                })
+                .map(|(index, _)| index)
+                .expect("a full bounded fingerprint set is non-empty");
+            if smart_context_static_context_item_order(&candidate, &stable[largest_index]).is_lt() {
+                let overflow = std::mem::replace(&mut stable[largest_index], candidate);
+                smart_context_add_static_context_overflow_digest(&mut overflow_digest, &overflow);
+            } else {
+                smart_context_add_static_context_overflow_digest(&mut overflow_digest, &candidate);
+            }
         }
     }
 
+    #[cfg(feature = "mojo")]
+    {
+        let maximum_items = stable
+            .len()
+            .min(SMART_CONTEXT_STATIC_CONTEXT_FINGERPRINT_MAX_ITEMS);
+        truncated |= stable.len() > maximum_items;
+        stable = smart_context_reduce_static_context_items_mojo(
+            stable,
+            &mut overflow_digest,
+            maximum_items,
+        );
+    }
+
+    #[cfg(not(feature = "mojo"))]
     stable.sort_by(smart_context_static_context_item_order);
     (
         stable,
@@ -308,6 +343,37 @@ fn smart_context_stabilize_static_context_items_bounded(
         truncated,
         smart_context_hex_digest(overflow_digest),
     )
+}
+
+#[cfg(feature = "mojo")]
+fn smart_context_reduce_static_context_items_mojo(
+    items: Vec<SmartContextStableStaticContextItem>,
+    overflow_digest: &mut [u8; 32],
+    maximum_items: usize,
+) -> Vec<SmartContextStableStaticContextItem> {
+    let inputs = items
+        .iter()
+        .map(
+            |item| prodex_mojo_core::runtime::SmartContextStaticItemPlanInput {
+                id: &item.id,
+                content_hash: &item.content_hash,
+                canonical_text: &item.canonical_text,
+                byte_len: item.byte_len as u64,
+            },
+        )
+        .collect::<Vec<_>>();
+    let plan = prodex_mojo_core::runtime::smart_context_static_item_plan(&inputs, maximum_items)
+        .expect("Mojo Smart Context static item plan returned invalid output");
+    let mut items = items.into_iter().map(Some).collect::<Vec<_>>();
+    let selected = plan
+        .selected_indices
+        .into_iter()
+        .map(|index| items[index].take().expect("Mojo indices are unique"))
+        .collect::<Vec<_>>();
+    for overflow in items.into_iter().flatten() {
+        smart_context_add_static_context_overflow_digest(overflow_digest, &overflow);
+    }
+    selected
 }
 
 fn smart_context_add_static_context_overflow_digest(

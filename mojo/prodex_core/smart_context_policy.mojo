@@ -1,6 +1,164 @@
 from std.memory import Pointer
+from rich_text import rich_view_matches_literal, rich_view_prefix, rich_view_valid
+from rich_types import ProdexRichStringView, rich_view_ptr
 
 comptime UINT64_MAX: UInt64 = 18446744073709551615
+comptime STATIC_ITEM_MAX_BYTES: Int64 = 262144
+
+@fieldwise_init
+struct SmartContextStaticItem(Copyable):
+    var id: ProdexRichStringView
+    var content_hash: ProdexRichStringView
+    var canonical_text: ProdexRichStringView
+    var byte_len: UInt64
+
+@fieldwise_init
+struct SmartContextStaticOrderKey(Copyable):
+    var group: UInt64
+    var input_index: UInt64
+    var role: UInt64
+
+def view_compare(left: ProdexRichStringView, right: ProdexRichStringView) -> Int64:
+    var left_bytes = rich_view_ptr(left)
+    var right_bytes = rich_view_ptr(right)
+    var common = Int64(left.len)
+    if right.len < left.len:
+        common = Int64(right.len)
+    for index in range(common):
+        if left_bytes[unsafe_offset=index] < right_bytes[unsafe_offset=index]:
+            return -1
+        if left_bytes[unsafe_offset=index] > right_bytes[unsafe_offset=index]:
+            return 1
+    if left.len < right.len:
+        return -1
+    if left.len > right.len:
+        return 1
+    return 0
+
+def static_input_order(view: ProdexRichStringView) -> SmartContextStaticOrderKey:
+    var key = SmartContextStaticOrderKey(100, 0, 0)
+    if not rich_view_prefix["input["](view, False):
+        return key^
+    var source = rich_view_ptr(view)
+    var index = Int64(6)
+    var start = index
+    var value = UInt64(0)
+    while index < Int64(view.len) and source[unsafe_offset=index] >= 48 and source[unsafe_offset=index] <= 57:
+        var digit = UInt64(source[unsafe_offset=index] - 48)
+        if value > 1844674407370955161 or value == 1844674407370955161 and digit > 5:
+            return key^
+        value = value * 10 + digit
+        index += 1
+    if index == start or index + 3 > Int64(view.len) or source[unsafe_offset=index] != 93 or source[unsafe_offset=index + 1] != 46:
+        return key^
+    index += 2
+    var suffix = ProdexRichStringView(ptr=view.ptr + UInt(index), len=view.len - UInt(index))
+    var role = UInt64(0)
+    if rich_view_matches_literal["system"](suffix, False):
+        role = 0
+    elif rich_view_matches_literal["developer"](suffix, False):
+        role = 1
+    else:
+        return key^
+    key.group = 3
+    key.input_index = value
+    key.role = role
+    return key^
+
+def static_item_order_key(item: SmartContextStaticItem) -> SmartContextStaticOrderKey:
+    var key = SmartContextStaticOrderKey(0, 0, 0)
+    if rich_view_matches_literal["instructions"](item.id, False):
+        return key^
+    if rich_view_matches_literal["system"](item.id, False):
+        key.group = 1
+        return key^
+    if rich_view_matches_literal["developer"](item.id, False):
+        key.group = 2
+        return key^
+    return static_input_order(item.id)
+
+def static_item_compare(left: SmartContextStaticItem, right: SmartContextStaticItem) -> Int64:
+    var left_key = static_item_order_key(left)
+    var right_key = static_item_order_key(right)
+    if left_key.group != right_key.group:
+        if left_key.group < right_key.group:
+            return -1
+        return 1
+    if left_key.input_index != right_key.input_index:
+        if left_key.input_index < right_key.input_index:
+            return -1
+        return 1
+    if left_key.role != right_key.role:
+        if left_key.role < right_key.role:
+            return -1
+        return 1
+    if left_key.group == 100:
+        var generic = view_compare(left.id, right.id)
+        if generic != 0:
+            return generic
+    var compared = view_compare(left.id, right.id)
+    if compared != 0:
+        return compared
+    compared = view_compare(left.content_hash, right.content_hash)
+    if compared != 0:
+        return compared
+    if left.byte_len < right.byte_len:
+        return -1
+    if left.byte_len > right.byte_len:
+        return 1
+    return view_compare(left.canonical_text, right.canonical_text)
+
+@export("prodex_smart_context_static_item_plan_v1")
+def prodex_smart_context_static_item_plan_v1(
+    items_address: UInt,
+    selected_indices_address: UInt,
+    retained_address: UInt,
+    selected_count_address: UInt,
+    count: Int64,
+    maximum_items: Int64,
+) abi("C") -> Int64:
+    if count < 0 or maximum_items < 0 or maximum_items > count:
+        return 1
+    if count > 0 and (items_address == 0 or selected_indices_address == 0 or retained_address == 0):
+        return 1
+    if selected_count_address == 0:
+        return 1
+    var items = Pointer[mut=False, SmartContextStaticItem, ImmUntrackedOrigin](unsafe_from_address=Int(items_address))
+    var selected_indices = Pointer[mut=True, Int64, MutUntrackedOrigin](unsafe_from_address=Int(selected_indices_address))
+    var retained = Pointer[mut=True, Int64, MutUntrackedOrigin](unsafe_from_address=Int(retained_address))
+    var selected_count = Pointer[mut=True, Int64, MutUntrackedOrigin](unsafe_from_address=Int(selected_count_address))
+    selected_count[] = 0
+    for index in range(count):
+        var item = items[unsafe_offset=index].copy()
+        if not rich_view_valid(item.id, 512) or not rich_view_valid(item.content_hash, 512) or not rich_view_valid(item.canonical_text, STATIC_ITEM_MAX_BYTES + 512):
+            return 1
+        retained[unsafe_offset=index] = Int64(index < maximum_items)
+        if index < maximum_items:
+            continue
+        var largest = Int64(-1)
+        for candidate in range(index):
+            if retained[unsafe_offset=candidate] == 1 and (largest < 0 or static_item_compare(items[unsafe_offset=candidate].copy(), items[unsafe_offset=largest].copy()) >= 0):
+                largest = candidate
+        if largest >= 0 and static_item_compare(item, items[unsafe_offset=largest].copy()) < 0:
+            retained[unsafe_offset=largest] = 0
+            retained[unsafe_offset=index] = 1
+    for output_index in range(maximum_items):
+        var best = Int64(-1)
+        for index in range(count):
+            if retained[unsafe_offset=index] != 1:
+                continue
+            var already_output = False
+            for previous in range(output_index):
+                if selected_indices[unsafe_offset=previous] == index:
+                    already_output = True
+                    break
+            if not already_output and (best < 0 or static_item_compare(items[unsafe_offset=index].copy(), items[unsafe_offset=best].copy()) < 0):
+                best = index
+        if best < 0:
+            break
+        selected_indices[unsafe_offset=output_index] = best
+        selected_count[] += 1
+    return 0
 
 def saturating_add(left: UInt64, right: UInt64) -> UInt64:
     if left > UINT64_MAX - right:
