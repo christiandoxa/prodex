@@ -192,6 +192,14 @@ pub fn kiro_provider_core_response_has_tool_calls(response: &Value) -> bool {
 }
 
 pub fn kiro_provider_core_model_list_value(model_catalog: &[Value]) -> Value {
+    #[cfg(feature = "mojo")]
+    {
+        let catalog = serde_json::to_string(model_catalog).expect("Kiro model catalog serializes");
+        let mut input = KiroKernelInput::new(KiroKernelOperation::ModelList);
+        input.output = Some(&catalog);
+        kiro_mojo_value(input)
+    }
+    #[cfg(not(feature = "mojo"))]
     json!({
         "object": "list",
         "data": model_catalog,
@@ -210,6 +218,13 @@ pub fn kiro_provider_core_model_value_or_not_found(
     }) {
         return (200, model.clone());
     }
+    #[cfg(feature = "mojo")]
+    {
+        let mut input = KiroKernelInput::new(KiroKernelOperation::ModelNotFound);
+        input.model = Some(model_id);
+        (404, kiro_mojo_value(input))
+    }
+    #[cfg(not(feature = "mojo"))]
     (
         404,
         json!({
@@ -223,6 +238,14 @@ pub fn kiro_provider_core_model_value_or_not_found(
 }
 
 pub fn kiro_provider_core_invalid_request_error_value(message: &str, code: &str) -> Value {
+    #[cfg(feature = "mojo")]
+    {
+        let mut input = KiroKernelInput::new(KiroKernelOperation::InvalidRequestError);
+        input.content = Some(message);
+        input.status = Some(code);
+        kiro_mojo_value(input)
+    }
+    #[cfg(not(feature = "mojo"))]
     json!({
         "error": {
             "message": message,
@@ -233,10 +256,20 @@ pub fn kiro_provider_core_invalid_request_error_value(message: &str, code: &str)
 }
 
 pub fn kiro_provider_core_unsupported_path_error_value(path: &str) -> Value {
-    kiro_provider_core_invalid_request_error_value(
-        &format!("Kiro provider does not support {path} yet"),
-        "unsupported_path",
-    )
+    #[cfg(feature = "mojo")]
+    {
+        let mut input = KiroKernelInput::new(KiroKernelOperation::UnsupportedPathError);
+        input.content = Some(path);
+        input.status = Some("unsupported_path");
+        kiro_mojo_value(input)
+    }
+    #[cfg(not(feature = "mojo"))]
+    {
+        kiro_provider_core_invalid_request_error_value(
+            &format!("Kiro provider does not support {path} yet"),
+            "unsupported_path",
+        )
+    }
 }
 
 pub fn kiro_provider_core_chat_completion_finish_reason(

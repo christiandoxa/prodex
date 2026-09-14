@@ -50,6 +50,10 @@ pub enum KiroKernelOperation {
     AcpSessionInfo = 41,
     AcpMetadata = 42,
     AcpIncompleteDetails = 43,
+    ModelList = 44,
+    ModelNotFound = 45,
+    InvalidRequestError = 46,
+    UnsupportedPathError = 47,
 }
 
 /// Inputs for one bounded Kiro JSON or text transformation.
@@ -316,6 +320,10 @@ fn operation_code(operation: KiroKernelOperation) -> i64 {
         KiroKernelOperation::AcpSessionInfo => 41,
         KiroKernelOperation::AcpMetadata => 42,
         KiroKernelOperation::AcpIncompleteDetails => 43,
+        KiroKernelOperation::ModelList => 44,
+        KiroKernelOperation::ModelNotFound => 45,
+        KiroKernelOperation::InvalidRequestError => 46,
+        KiroKernelOperation::UnsupportedPathError => 47,
     }
 }
 
