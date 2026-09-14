@@ -52,6 +52,7 @@ fn emit_source_rerun_directives(sources: &[&str], manifest_dir: &Path) {
             "../../mojo/prodex_core/gemini_sse_state.mojo",
             "../../mojo/prodex_core/context_command_output_common.mojo",
             "../../mojo/prodex_core/context_command_output_file_list.mojo",
+            "../../mojo/prodex_core/context_command_output_git_log.mojo",
             "../../mojo/prodex_core/context_command_output_search.mojo",
         ] {
             println!(

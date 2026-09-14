@@ -351,6 +351,7 @@ pub(super) struct CommandCriticalBlock {
 }
 
 #[derive(Default)]
+#[cfg(any(not(feature = "mojo"), test))]
 pub(super) struct GitLogCommitSummary {
     pub(super) header: String,
     pub(super) metadata: Vec<String>,
@@ -587,6 +588,7 @@ pub(super) fn looks_like_git_log_stat_output(lines: &[&str]) -> bool {
     stat_lines > 0 || stat_summaries > 0
 }
 
+#[cfg(any(not(feature = "mojo"), test))]
 pub(super) fn parse_git_log_stat_commits(lines: &[&str]) -> Vec<GitLogCommitSummary> {
     let mut commits = Vec::new();
     let mut current = None::<GitLogCommitSummary>;
@@ -612,6 +614,7 @@ pub(super) fn parse_git_log_stat_commits(lines: &[&str]) -> Vec<GitLogCommitSumm
     commits
 }
 
+#[cfg(any(not(feature = "mojo"), test))]
 fn record_git_log_stat_line(commit: &mut GitLogCommitSummary, line: &str, trimmed: &str) {
     if trimmed.is_empty() {
         return;
@@ -627,6 +630,7 @@ fn record_git_log_stat_line(commit: &mut GitLogCommitSummary, line: &str, trimme
     }
 }
 
+#[cfg(any(not(feature = "mojo"), test))]
 fn finish_git_log_stat_commit(
     commits: &mut Vec<GitLogCommitSummary>,
     current: &mut Option<GitLogCommitSummary>,
