@@ -1,6 +1,7 @@
 from std.memory import Pointer
 
 from context_command_output_common import (
+    CONTEXT_COMMAND_OUTPUT_FILE_LIST,
     CONTEXT_COMMAND_OUTPUT_GIT_STATUS,
     CONTEXT_COMMAND_OUTPUT_MAX_BYTES,
     CONTEXT_COMMAND_OUTPUT_STATUS_ABI,
@@ -42,6 +43,7 @@ from context_text import (
     context_search_find_byte,
     context_text_trim_bounds,
 )
+from context_command_output_file_list import context_command_output_file_list
 from rich_text import rich_view_ptr, rich_view_valid
 
 
@@ -72,7 +74,10 @@ def prodex_mojo_context_command_output_size_v1(
     meaningful_lines[] = 0
     meaningful_bytes[] = 0
     var value = input[].copy()
-    if value.operation != CONTEXT_COMMAND_OUTPUT_GIT_STATUS:
+    if (
+        value.operation != CONTEXT_COMMAND_OUTPUT_GIT_STATUS
+        and value.operation != CONTEXT_COMMAND_OUTPUT_FILE_LIST
+    ):
         return CONTEXT_COMMAND_OUTPUT_STATUS_INVALID
     if not rich_view_valid(value.input, CONTEXT_COMMAND_OUTPUT_MAX_BYTES):
         return CONTEXT_COMMAND_OUTPUT_STATUS_UTF8
@@ -497,7 +502,10 @@ def prodex_mojo_context_command_output_v1(
     )
     written[] = 0
     var value = input[].copy()
-    if value.operation != CONTEXT_COMMAND_OUTPUT_GIT_STATUS:
+    if (
+        value.operation != CONTEXT_COMMAND_OUTPUT_GIT_STATUS
+        and value.operation != CONTEXT_COMMAND_OUTPUT_FILE_LIST
+    ):
         return CONTEXT_COMMAND_OUTPUT_STATUS_INVALID
     if not rich_view_valid(value.input, CONTEXT_COMMAND_OUTPUT_MAX_BYTES):
         return CONTEXT_COMMAND_OUTPUT_STATUS_UTF8
@@ -505,14 +513,26 @@ def prodex_mojo_context_command_output_v1(
     var scratch_writer = ContextCommandOutputWriter(
         scratch, scratch_capacity, 0
     )
-    var status = context_command_output_git_status(
-        value,
-        Pointer(to=writer),
-        records,
-        record_capacity,
-        Pointer(to=scratch_writer),
-        hash_slots,
-        hash_capacity,
+    var status = (
+        context_command_output_git_status(
+            value,
+            Pointer(to=writer),
+            records,
+            record_capacity,
+            Pointer(to=scratch_writer),
+            hash_slots,
+            hash_capacity,
+        )
+        if value.operation == CONTEXT_COMMAND_OUTPUT_GIT_STATUS
+        else context_command_output_file_list(
+            value,
+            Pointer(to=writer),
+            records,
+            record_capacity,
+            Pointer(to=scratch_writer),
+            hash_slots,
+            hash_capacity,
+        )
     )
     written[] = writer.written
     return status

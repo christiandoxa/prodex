@@ -11,6 +11,7 @@ from rich_types import ProdexRichStringView
 comptime PRODEX_RICH_ABI_VERSION: Int64 = 6
 comptime CONTEXT_COMMAND_OUTPUT_MAX_BYTES: Int64 = 9_223_372_036_854_775_807
 comptime CONTEXT_COMMAND_OUTPUT_GIT_STATUS: Int64 = 1
+comptime CONTEXT_COMMAND_OUTPUT_FILE_LIST: Int64 = 2
 comptime CONTEXT_COMMAND_OUTPUT_STATUS_OK: Int64 = 0
 comptime CONTEXT_COMMAND_OUTPUT_STATUS_INVALID: Int64 = 1
 comptime CONTEXT_COMMAND_OUTPUT_STATUS_UTF8: Int64 = 2
@@ -31,12 +32,14 @@ comptime CONTEXT_STATUS_OTHER: Int64 = 7
 struct ProdexContextCommandOutputInput(Copyable):
     var operation: Int64
     var max_path_entries: UInt64
+    var max_lines: UInt64
+    var max_line_chars: UInt64
     var input: ProdexRichStringView
 
 
 @fieldwise_init
 struct ProdexContextCommandOutputRecord(Copyable):
-    var hash: UInt64
+    var occurrences: UInt64
     var category: Int64
     var offset: Int64
     var len: Int64
@@ -255,20 +258,20 @@ def context_command_output_record_item(
         if stored == 0:
             records[
                 unsafe_offset=record_count[]
-            ] = ProdexContextCommandOutputRecord(hash, category, start, length)
+            ] = ProdexContextCommandOutputRecord(1, category, start, length)
             hash_slots[unsafe_offset=slot] = record_count[] + 1
             record_count[] += 1
             return True
         var existing = records[unsafe_offset=stored - 1].copy()
         if (
-            existing.hash == hash
-            and existing.category == category
+            existing.category == category
             and existing.len == length
             and context_command_output_slices_equal(
                 scratch[].output, existing.offset, start, length
             )
         ):
             scratch[].written = start
+            records[unsafe_offset=stored - 1].occurrences += 1
             return True
         slot = (slot + 1) % hash_capacity
     return False
