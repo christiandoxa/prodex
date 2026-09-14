@@ -243,7 +243,7 @@ test("canonical report exposes separate statuses and --check enforces only floor
   assert.equal(report.release_floor_status, "PASS");
   assert.equal(report.project_target_percent, 10);
   assert.equal(report.project_target_met, projectTargetMet);
-  assert.equal(report.project_target_status, projectTargetMet ? "PASS" : "NOT_YET_MET");
+  assert.equal(report.project_target_status, projectTargetMet ? "MET" : "NOT_YET_MET");
   assert.equal(report.mojo_non_regression_met, true);
   assert.equal(report.mojo_non_regression_status, "PASS");
   assert.equal(report.mojo_non_regression_baseline_mojo_production_loc, 26_420);
