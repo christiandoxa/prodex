@@ -52,6 +52,33 @@ pub enum ControlPlaneRouteValidationDecision {
     MethodNotAllowed = 2,
 }
 
+#[repr(i64)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ControlPlaneRequestKind {
+    Idempotency = 0,
+    Page = 1,
+    Precondition = 2,
+    Audit = 3,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ControlPlaneRequestValidationInput {
+    pub route_operation: ControlPlaneOperationTag,
+    pub action_operation: ControlPlaneOperationTag,
+    pub method: ControlPlaneHttpMethod,
+    pub kind: ControlPlaneRequestKind,
+    pub route_requires_audit: bool,
+    pub action_requires_audit: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ControlPlaneRequestValidationDecision {
+    Allow,
+    OperationMismatch,
+    MethodNotAllowed,
+    AuditNotRequired,
+}
+
 unsafe extern "C" {
     fn prodex_mojo_control_plane_route_validation_v1(
         abi_version: i64,
@@ -61,6 +88,45 @@ unsafe extern "C" {
         mode: i64,
         decision_address: u64,
     ) -> i64;
+
+    fn prodex_mojo_control_plane_request_validation_v1(
+        abi_version: i64,
+        route_operation: i64,
+        action_operation: i64,
+        method: i64,
+        request_kind: i64,
+        route_requires_audit: i64,
+        action_requires_audit: i64,
+        decision_address: u64,
+    ) -> i64;
+}
+
+pub fn validate_request(
+    input: ControlPlaneRequestValidationInput,
+) -> Result<ControlPlaneRequestValidationDecision, MojoError> {
+    let mut decision = -1_i64;
+    let status = unsafe {
+        prodex_mojo_control_plane_request_validation_v1(
+            ABI_VERSION,
+            input.route_operation.raw(),
+            input.action_operation.raw(),
+            input.method as i64,
+            input.kind as i64,
+            i64::from(input.route_requires_audit),
+            i64::from(input.action_requires_audit),
+            pointer_address(&mut decision),
+        )
+    };
+    if status != 0 {
+        return Err(MojoError::InvalidOutput);
+    }
+    match decision {
+        0 => Ok(ControlPlaneRequestValidationDecision::Allow),
+        1 => Ok(ControlPlaneRequestValidationDecision::OperationMismatch),
+        2 => Ok(ControlPlaneRequestValidationDecision::MethodNotAllowed),
+        3 => Ok(ControlPlaneRequestValidationDecision::AuditNotRequired),
+        _ => Err(MojoError::InvalidOutput),
+    }
 }
 
 pub fn validate(

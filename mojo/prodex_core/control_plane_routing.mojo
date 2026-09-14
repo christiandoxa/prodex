@@ -18,6 +18,12 @@ comptime CONTROL_PLANE_VALIDATION_ALIAS_AND_METHOD: Int64 = 2
 comptime CONTROL_PLANE_DECISION_ALLOW: Int64 = 0
 comptime CONTROL_PLANE_DECISION_MISMATCH: Int64 = 1
 comptime CONTROL_PLANE_DECISION_METHOD_NOT_ALLOWED: Int64 = 2
+comptime CONTROL_PLANE_DECISION_AUDIT_NOT_REQUIRED: Int64 = 3
+
+comptime CONTROL_PLANE_REQUEST_IDEMPOTENCY: Int64 = 0
+comptime CONTROL_PLANE_REQUEST_PAGE: Int64 = 1
+comptime CONTROL_PLANE_REQUEST_PRECONDITION: Int64 = 2
+comptime CONTROL_PLANE_REQUEST_AUDIT: Int64 = 3
 
 
 def control_plane_operations_share_route_family(
@@ -117,6 +123,27 @@ def control_plane_operation_allows_http_method(
     return False
 
 
+def control_plane_route_validation_decision(
+    route_operation: Int64,
+    action_operation: Int64,
+    method: Int64,
+    mode: Int64,
+) -> Int64:
+    if route_operation == action_operation:
+        return CONTROL_PLANE_DECISION_ALLOW
+    if mode != CONTROL_PLANE_VALIDATION_EXACT and control_plane_http_action_alias_allowed(
+        route_operation, action_operation, method
+    ):
+        return CONTROL_PLANE_DECISION_ALLOW
+    if (
+        mode == CONTROL_PLANE_VALIDATION_ALIAS_AND_METHOD
+        and control_plane_operations_share_route_family(route_operation, action_operation)
+        and not control_plane_operation_allows_http_method(action_operation, method)
+    ):
+        return CONTROL_PLANE_DECISION_METHOD_NOT_ALLOWED
+    return CONTROL_PLANE_DECISION_MISMATCH
+
+
 @export("prodex_mojo_control_plane_route_validation_v1")
 def prodex_mojo_control_plane_route_validation_v1(
     abi_version: Int64,
@@ -144,18 +171,56 @@ def prodex_mojo_control_plane_route_validation_v1(
     var decision = Pointer[mut=True, Int64, MutUntrackedOrigin](
         unsafe_from_address=Int(decision_address)
     )
-    if route_operation == action_operation:
-        decision[] = CONTROL_PLANE_DECISION_ALLOW
-    elif mode != CONTROL_PLANE_VALIDATION_EXACT and control_plane_http_action_alias_allowed(
-        route_operation, action_operation, method
+    decision[] = control_plane_route_validation_decision(
+        route_operation, action_operation, method, mode
+    )
+    return 0
+
+
+@export("prodex_mojo_control_plane_request_validation_v1")
+def prodex_mojo_control_plane_request_validation_v1(
+    abi_version: Int64,
+    route_operation: Int64,
+    action_operation: Int64,
+    method: Int64,
+    request_kind: Int64,
+    route_requires_audit: Int64,
+    action_requires_audit: Int64,
+    decision_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != CONTROL_PLANE_ROUTING_ABI_VERSION:
+        return 2
+    if (
+        route_operation < 0
+        or route_operation >= CONTROL_PLANE_OPERATION_COUNT
+        or action_operation < 0
+        or action_operation >= CONTROL_PLANE_OPERATION_COUNT
+        or method < CONTROL_PLANE_METHOD_GET
+        or method > CONTROL_PLANE_METHOD_OTHER
+        or request_kind < CONTROL_PLANE_REQUEST_IDEMPOTENCY
+        or request_kind > CONTROL_PLANE_REQUEST_AUDIT
+        or route_requires_audit < 0
+        or route_requires_audit > 1
+        or action_requires_audit < 0
+        or action_requires_audit > 1
+        or decision_address == 0
     ):
-        decision[] = CONTROL_PLANE_DECISION_ALLOW
-    elif (
-        mode == CONTROL_PLANE_VALIDATION_ALIAS_AND_METHOD
-        and control_plane_operations_share_route_family(route_operation, action_operation)
-        and not control_plane_operation_allows_http_method(action_operation, method)
+        return 1
+    var mode = CONTROL_PLANE_VALIDATION_ALIAS
+    if request_kind == CONTROL_PLANE_REQUEST_IDEMPOTENCY:
+        mode = CONTROL_PLANE_VALIDATION_ALIAS_AND_METHOD
+    elif request_kind == CONTROL_PLANE_REQUEST_PAGE:
+        mode = CONTROL_PLANE_VALIDATION_EXACT
+    var decision = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(decision_address)
+    )
+    decision[] = control_plane_route_validation_decision(
+        route_operation, action_operation, method, mode
+    )
+    if (
+        decision[] == CONTROL_PLANE_DECISION_ALLOW
+        and request_kind == CONTROL_PLANE_REQUEST_AUDIT
+        and (route_requires_audit == 0 or action_requires_audit == 0)
     ):
-        decision[] = CONTROL_PLANE_DECISION_METHOD_NOT_ALLOWED
-    else:
-        decision[] = CONTROL_PLANE_DECISION_MISMATCH
+        decision[] = CONTROL_PLANE_DECISION_AUDIT_NOT_REQUIRED
     return 0
