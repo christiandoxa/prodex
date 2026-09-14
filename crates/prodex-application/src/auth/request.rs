@@ -161,7 +161,5 @@ pub fn plan_application_request_authentication(
 }
 
 fn required_credential_scope_for_route(route: GatewayHttpRouteKind) -> Option<CredentialScope> {
-    route
-        .plane()
-        .and_then(request_context::required_credential_scope_for_plane)
+    request_context::required_credential_scope_for_route(route)
 }

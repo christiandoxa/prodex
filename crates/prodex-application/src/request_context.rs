@@ -24,6 +24,11 @@ use prodex_gateway_http::{
 };
 use prodex_observability::TraceContext;
 
+#[path = "request_context_policy.rs"]
+mod policy;
+#[path = "request_context_debug.rs"]
+mod request_context_debug;
+
 pub const APPLICATION_REQUEST_METADATA_HEADER_LIMIT: usize = 64;
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -50,14 +55,6 @@ impl ApplicationRequestDeadline {
 
     pub fn remaining(self) -> Option<Duration> {
         self.remaining_at(Instant::now())
-    }
-}
-
-impl fmt::Debug for ApplicationRequestDeadline {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_tuple("ApplicationRequestDeadline")
-            .field(&"<redacted>")
-            .finish()
     }
 }
 
@@ -156,20 +153,6 @@ impl ApplicationRequestMetadata {
     }
 }
 
-impl fmt::Debug for ApplicationRequestMetadata {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("ApplicationRequestMetadata")
-            .field("observed_header_count", &self.observed_header_count)
-            .field("headers_truncated", &self.headers_truncated)
-            .field("trace_context_present", &self.trace_context_present)
-            .field("credential_present", &self.credential_present)
-            .field("affinity_present", &self.affinity_present)
-            .field("codex_metadata_present", &self.codex_metadata_present)
-            .field("user_agent_present", &self.user_agent_present)
-            .finish()
-    }
-}
-
 #[derive(Clone, PartialEq, Eq)]
 pub struct ApplicationRequestContext<'a> {
     target: &'a CanonicalRequestTarget,
@@ -221,25 +204,6 @@ impl<'a> ApplicationRequestContext<'a> {
     }
 }
 
-impl fmt::Debug for ApplicationRequestContext<'_> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("ApplicationRequestContext")
-            .field("target", &"<redacted>")
-            .field("request_id", &"<redacted>")
-            .field("deadline", &"<redacted>")
-            .field("route", &self.route)
-            .field("plane", &self.plane)
-            .field("required_credential_scope", &self.required_credential_scope)
-            .field(
-                "trace_context",
-                &self.trace_context.as_ref().map(|_| "<redacted>"),
-            )
-            .field("correlation", &"<redacted>")
-            .field("metadata", &self.metadata)
-            .finish()
-    }
-}
-
 #[derive(Clone, PartialEq, Eq)]
 pub struct ApplicationAuthenticatedRequestContext<'a> {
     request: ApplicationRequestContext<'a>,
@@ -258,16 +222,6 @@ impl<'a> ApplicationAuthenticatedRequestContext<'a> {
 
     pub const fn assurance(&self) -> VerifiedAuthenticationAssurance {
         self.assurance
-    }
-}
-
-impl fmt::Debug for ApplicationAuthenticatedRequestContext<'_> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("ApplicationAuthenticatedRequestContext")
-            .field("request", &self.request)
-            .field("principal", &self.principal.as_ref().map(|_| "<redacted>"))
-            .field("assurance", &self.assurance)
-            .finish()
     }
 }
 
@@ -302,24 +256,6 @@ impl<'a> ApplicationAuthorizedRequestContext<'a> {
 
     pub const fn correlation_context(&self) -> &CorrelationContext {
         &self.correlation
-    }
-}
-
-impl fmt::Debug for ApplicationAuthorizedRequestContext<'_> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("ApplicationAuthorizedRequestContext")
-            .field("request", &self.authenticated.request)
-            .field(
-                "principal",
-                &self.authenticated.principal.as_ref().map(|_| "<redacted>"),
-            )
-            .field("tenant", &self.tenant.map(|_| "<redacted>"))
-            .field(
-                "control_plane_action",
-                &self.control_plane_action.as_ref().map(|_| "<redacted>"),
-            )
-            .field("correlation", &"<redacted>")
-            .finish()
     }
 }
 
@@ -395,6 +331,7 @@ pub fn plan_application_request_context<'a>(
 ) -> Result<ApplicationRequestContext<'a>, ApplicationRequestContextError> {
     let route =
         classify_request_target(target).ok_or(ApplicationRequestContextError::UnknownRoute)?;
+    let policy = policy::plan_request_context_policy(route.kind, route.plane);
     let trace_context =
         trace_context_from_headers(headers).map_err(ApplicationRequestContextError::Trace)?;
     let correlation = match trace_context.as_ref() {
@@ -407,7 +344,7 @@ pub fn plan_application_request_context<'a>(
         deadline,
         route: route.kind,
         plane: route.plane,
-        required_credential_scope: required_credential_scope_for_plane(route.plane),
+        required_credential_scope: policy.required_scope,
         trace_context,
         correlation,
         metadata: ApplicationRequestMetadata::from_headers(headers),
@@ -442,21 +379,35 @@ pub fn plan_application_request_authentication_from_evidence(
 pub fn plan_application_data_plane_authorization(
     authenticated: ApplicationAuthenticatedRequestContext<'_>,
 ) -> Result<ApplicationAuthorizedRequestContext<'_>, ApplicationRequestAuthorizationError> {
-    if authenticated.request.plane != GatewayHttpRoutePlane::DataPlane {
-        return Err(ApplicationRequestAuthorizationError::WrongPlane);
-    }
-    let Some(principal) = authenticated.principal.as_ref() else {
-        return Ok(application_authorized_request_context(
-            authenticated,
-            None,
-            None,
-        ));
+    let decision = policy::plan_request_authorization(
+        policy::RequestAuthorizationKind::DataPlane,
+        authenticated.request.route,
+        authenticated.request.plane,
+        authenticated.principal.is_some(),
+        false,
+    );
+    let boundary = match decision {
+        policy::RequestAuthorizationDecision::WrongPlane => {
+            return Err(ApplicationRequestAuthorizationError::WrongPlane);
+        }
+        policy::RequestAuthorizationDecision::AllowAnonymous => {
+            return Ok(application_authorized_request_context(
+                authenticated,
+                None,
+                None,
+            ));
+        }
+        policy::RequestAuthorizationDecision::DataPlane(boundary) => boundary,
+        policy::RequestAuthorizationDecision::ControlPlaneAction
+        | policy::RequestAuthorizationDecision::AnonymousNotAllowed
+        | policy::RequestAuthorizationDecision::PrincipalMismatch => {
+            unreachable!("validated data-plane authorization decision")
+        }
     };
-    let boundary = if authenticated.request.route == GatewayHttpRouteKind::DataPlaneQuota {
-        BoundaryKind::DataPlaneQuota
-    } else {
-        BoundaryKind::DataPlaneInference
-    };
+    let principal = authenticated
+        .principal
+        .as_ref()
+        .expect("validated data-plane principal presence");
     authorize_boundary_scope(boundary, principal)
         .map_err(ApplicationRequestAuthorizationError::DataPlane)?;
     authorize_boundary_role(boundary, principal)
@@ -475,15 +426,27 @@ pub fn plan_application_control_plane_authorization(
     authenticated: ApplicationAuthenticatedRequestContext<'_>,
     action: ControlPlaneActionRequest,
 ) -> Result<ApplicationAuthorizedRequestContext<'_>, ApplicationRequestAuthorizationError> {
-    if authenticated.request.plane != GatewayHttpRoutePlane::ControlPlane {
-        return Err(ApplicationRequestAuthorizationError::WrongPlane);
-    }
-    let principal = authenticated
-        .principal
-        .as_ref()
-        .ok_or(ApplicationRequestAuthorizationError::AnonymousNotAllowed)?;
-    if principal != &action.principal {
-        return Err(ApplicationRequestAuthorizationError::PrincipalMismatch);
+    match policy::plan_request_authorization(
+        policy::RequestAuthorizationKind::ControlPlane,
+        authenticated.request.route,
+        authenticated.request.plane,
+        authenticated.principal.is_some(),
+        authenticated.principal.as_ref() == Some(&action.principal),
+    ) {
+        policy::RequestAuthorizationDecision::WrongPlane => {
+            return Err(ApplicationRequestAuthorizationError::WrongPlane);
+        }
+        policy::RequestAuthorizationDecision::AnonymousNotAllowed => {
+            return Err(ApplicationRequestAuthorizationError::AnonymousNotAllowed);
+        }
+        policy::RequestAuthorizationDecision::PrincipalMismatch => {
+            return Err(ApplicationRequestAuthorizationError::PrincipalMismatch);
+        }
+        policy::RequestAuthorizationDecision::ControlPlaneAction => {}
+        policy::RequestAuthorizationDecision::AllowAnonymous
+        | policy::RequestAuthorizationDecision::DataPlane(_) => {
+            unreachable!("validated control-plane authorization decision")
+        }
     }
     let plan = match decide_control_plane_action(action) {
         ControlPlaneDecision::Authorized(plan) => plan,
@@ -519,14 +482,12 @@ fn application_authorized_request_context(
     }
 }
 
-pub(crate) const fn required_credential_scope_for_plane(
-    plane: GatewayHttpRoutePlane,
+pub(crate) fn required_credential_scope_for_route(
+    route: GatewayHttpRouteKind,
 ) -> Option<CredentialScope> {
-    match plane {
-        GatewayHttpRoutePlane::DataPlane => Some(CredentialScope::DataPlane),
-        GatewayHttpRoutePlane::ControlPlane => Some(CredentialScope::ControlPlane),
-        GatewayHttpRoutePlane::Health => None,
-    }
+    route
+        .plane()
+        .and_then(|plane| policy::plan_request_context_policy(route, plane).required_scope)
 }
 
 #[cfg(test)]
