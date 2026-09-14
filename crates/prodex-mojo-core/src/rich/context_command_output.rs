@@ -11,6 +11,7 @@ pub enum ContextCommandOutputOperation {
     FileList = 2,
     Search = 3,
     GitLog = 4,
+    GitDiff = 5,
 }
 
 #[repr(C)]
@@ -242,6 +243,25 @@ pub fn context_git_log_output(
     context_command_output_ffi(ContextCommandOutputFfiInput {
         operation: ContextCommandOutputOperation::GitLog as i64,
         max_path_entries: max_path_entries as u64,
+        max_lines: max_lines as u64,
+        max_line_chars: max_line_chars as u64,
+        max_search_matches: 0,
+        input: view(input),
+    })
+}
+
+pub fn context_git_diff_output(
+    input: &str,
+    max_lines: usize,
+    max_line_chars: usize,
+) -> Result<Option<String>, MojoError> {
+    ensure_rich_abi()?;
+    if input.len() > i64::MAX as usize {
+        return Err(MojoError::InvalidInput);
+    }
+    context_command_output_ffi(ContextCommandOutputFfiInput {
+        operation: ContextCommandOutputOperation::GitDiff as i64,
+        max_path_entries: 0,
         max_lines: max_lines as u64,
         max_line_chars: max_line_chars as u64,
         max_search_matches: 0,
