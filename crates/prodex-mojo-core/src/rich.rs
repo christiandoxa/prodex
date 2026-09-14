@@ -28,7 +28,9 @@ pub use app_server_broker::{
 };
 
 mod routing;
-pub use routing::{RouteCandidate, RouteInput, RoutePlan, plan_routes};
+pub use routing::{
+    RouteCandidate, RouteInput, RoutePlan, WebsocketEventKind, plan_routes, websocket_event_kind,
+};
 mod context_plan;
 pub use context_plan::{ContextPlan, ContextPlanAction, ContextPlanItem, plan_context_items};
 mod context;
@@ -510,6 +512,8 @@ unsafe extern "C" {
         affinity_weight: i64,
         result: u64,
     ) -> i64;
+    fn prodex_runtime_websocket_event_kind_v1(abi_version: i64, kind: u64, output: *mut i64)
+    -> i64;
     fn prodex_mojo_rich_policy_alias_v2(
         abi_version: i64,
         input: u64,

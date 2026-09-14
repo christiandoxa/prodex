@@ -7,6 +7,7 @@ from rich_text import (
     rich_required_hash_capacity,
     rich_slice_equal_folded,
     rich_slice_matches_literal,
+    rich_view_matches_literal,
     rich_view_valid,
 )
 from rich_types import (
@@ -142,6 +143,56 @@ def route_better(
     if a.provider_order != b.provider_order:
         return a.provider_order < b.provider_order
     return a.input_index < b.input_index
+
+
+@export("prodex_runtime_websocket_event_kind_v1")
+def prodex_runtime_websocket_event_kind_v1(
+    abi_version: Int64,
+    kind_address: UInt,
+    output: Pointer[mut=True, Int64, _],
+) abi("C") -> Int64:
+    if abi_version != PRODEX_RICH_ABI_VERSION or kind_address == 0:
+        return RICH_STATUS_INVALID
+    var kind_ptr = Pointer[
+        mut=False, ProdexRichStringView, ImmUntrackedOrigin
+    ](unsafe_from_address=Int(kind_address))
+    var kind = kind_ptr[].copy()
+    if not rich_view_valid(kind, RICH_MAX_IDENTIFIER_BYTES):
+        return RICH_STATUS_UTF8
+
+    var precommit_hold = (
+        rich_view_matches_literal["codex.rate_limits"](kind, False)
+        or rich_view_matches_literal["codex.response.metadata"](kind, False)
+        or rich_view_matches_literal["response.metadata"](kind, False)
+        or rich_view_matches_literal["response.created"](kind, False)
+        or rich_view_matches_literal["response.in_progress"](kind, False)
+        or rich_view_matches_literal["response.queued"](kind, False)
+        or rich_view_matches_literal["response.output_item.added"](kind, False)
+        or rich_view_matches_literal["response.content_part.added"](kind, False)
+        or rich_view_matches_literal["response.reasoning_summary_part.added"](
+            kind, False
+        )
+    )
+    var realtime_terminal = (
+        rich_view_matches_literal["session.started"](kind, False)
+        or rich_view_matches_literal["session.updated"](kind, False)
+        or rich_view_matches_literal["conversation.item.added"](kind, False)
+        or rich_view_matches_literal["conversation.item.done"](kind, False)
+        or rich_view_matches_literal["delegation.created"](kind, False)
+        or rich_view_matches_literal["response.cancelled"](kind, False)
+        or rich_view_matches_literal["response.done"](kind, False)
+        or rich_view_matches_literal["turn.done"](kind, False)
+        or rich_view_matches_literal["error"](kind, False)
+    )
+    var responses_terminal = (
+        rich_view_matches_literal["response.completed"](kind, False)
+        or rich_view_matches_literal["response.failed"](kind, False)
+        or rich_view_matches_literal["response.incomplete"](kind, False)
+    )
+    output[unsafe_offset=0] = Int64(precommit_hold)
+    output[unsafe_offset=1] = Int64(realtime_terminal)
+    output[unsafe_offset=2] = Int64(responses_terminal)
+    return RICH_STATUS_OK
 
 
 @export("prodex_mojo_rich_route_plan_v2")
