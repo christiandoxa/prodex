@@ -441,22 +441,26 @@ pub fn evaluate_governance_policy(
         });
     }
 
+    let rule_matches = policy
+        .rules
+        .iter()
+        .map(|rule| (rule.condition.matches(input), rule.effect))
+        .collect::<Vec<_>>();
+    let (effect, matched) = governance_policy_decision_plan(&rule_matches, policy.default_effect);
     let mut obligations = Vec::new();
     let mut reasons = Vec::new();
-    let mut effects = Vec::new();
     for rule in policy
         .rules
         .iter()
-        .filter(|rule| rule.condition.matches(input))
+        .zip(&matched)
+        .filter_map(|(rule, matched)| matched.then_some(rule))
     {
-        effects.push(rule.effect);
         obligations.extend(rule.obligations.iter().cloned());
         reasons.push(rule.reason_code.clone());
     }
-    if effects.is_empty() {
+    if !matched.iter().any(|matched| *matched) {
         reasons.push(PolicyReasonCode::new("policy.default")?);
     }
-    let effect = governance_policy_effect(&effects, policy.default_effect);
     obligations.sort();
     obligations.dedup();
     reasons.sort();
@@ -477,6 +481,55 @@ pub fn evaluate_governance_policy(
         policy_revision: policy.revision,
         valid_until_unix_ms: policy.valid_until_unix_ms,
     })
+}
+
+#[cfg(feature = "mojo")]
+fn governance_policy_decision_plan(
+    rules: &[(bool, PolicyEffect)],
+    default_effect: PolicyEffect,
+) -> (PolicyEffect, Vec<bool>) {
+    let rules = rules
+        .iter()
+        .map(|(matched, effect)| (*matched, *effect as i64))
+        .collect::<Vec<_>>();
+    let (effect, matched) =
+        prodex_mojo_core::policy::governance_policy_decision_plan(&rules, default_effect as i64)
+            .expect("Mojo governance policy decision plan returned invalid output");
+    (policy_effect_from_i64(effect), matched)
+}
+
+#[cfg(not(feature = "mojo"))]
+fn governance_policy_decision_plan(
+    rules: &[(bool, PolicyEffect)],
+    default_effect: PolicyEffect,
+) -> (PolicyEffect, Vec<bool>) {
+    governance_policy_decision_plan_rust(rules, default_effect)
+}
+
+#[cfg(any(test, not(feature = "mojo")))]
+fn governance_policy_decision_plan_rust(
+    rules: &[(bool, PolicyEffect)],
+    default_effect: PolicyEffect,
+) -> (PolicyEffect, Vec<bool>) {
+    let matched = rules
+        .iter()
+        .map(|(matched, _)| *matched)
+        .collect::<Vec<_>>();
+    let effects = rules
+        .iter()
+        .filter_map(|(matched, effect)| matched.then_some(*effect))
+        .collect::<Vec<_>>();
+    (governance_policy_effect(&effects, default_effect), matched)
+}
+
+#[cfg(feature = "mojo")]
+fn policy_effect_from_i64(effect: i64) -> PolicyEffect {
+    match effect {
+        0 => PolicyEffect::Allow,
+        1 => PolicyEffect::RequireApproval,
+        2 => PolicyEffect::Deny,
+        _ => unreachable!("validated Mojo governance policy effect"),
+    }
 }
 
 #[cfg(feature = "mojo")]
@@ -730,6 +783,26 @@ mod governance_predicate_tests {
             assert_eq!(
                 validate_governance_policy_shape(valid_until_unix_ms, &rules),
                 validate_governance_policy_shape_rust(valid_until_unix_ms, &rules)
+            );
+        }
+    }
+
+    #[test]
+    fn mojo_policy_decision_plan_matches_rust_oracle() {
+        for (rules, default_effect) in [
+            (Vec::new(), PolicyEffect::Deny),
+            (
+                vec![
+                    (true, PolicyEffect::Allow),
+                    (false, PolicyEffect::Deny),
+                    (true, PolicyEffect::RequireApproval),
+                ],
+                PolicyEffect::Deny,
+            ),
+        ] {
+            assert_eq!(
+                governance_policy_decision_plan(&rules, default_effect),
+                governance_policy_decision_plan_rust(&rules, default_effect)
             );
         }
     }

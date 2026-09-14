@@ -294,6 +294,42 @@ struct GovernancePolicyRuleShape(Copyable):
     var obligation_count: Int64
 
 
+@fieldwise_init
+struct GovernancePolicyDecisionRule(Copyable):
+    var matched: Int64
+    var effect: Int64
+
+
+@export("prodex_mojo_governance_policy_decision_v1")
+def prodex_mojo_governance_policy_decision_v1(
+    abi_version: Int64,
+    rules_address: UInt,
+    rule_count: Int64,
+    default_effect: Int64,
+    matched_address: UInt,
+    effect_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != PRODEX_RICH_ABI_VERSION:
+        return RICH_STATUS_ABI
+    if rule_count < 0 or rule_count > 256 or default_effect < 0 or default_effect > 2 or effect_address == 0 or (rule_count > 0 and (rules_address == 0 or matched_address == 0)):
+        return RICH_STATUS_INVALID
+    var rules = Pointer[mut=False, GovernancePolicyDecisionRule, ImmUntrackedOrigin](unsafe_from_address=Int(rules_address))
+    var matched = Pointer[mut=True, Int64, MutUntrackedOrigin](unsafe_from_address=Int(matched_address))
+    var effect = Pointer[mut=True, Int64, MutUntrackedOrigin](unsafe_from_address=Int(effect_address))
+    effect[] = default_effect
+    var found = False
+    for index in range(rule_count):
+        var rule = rules[unsafe_offset=index].copy()
+        if rule.matched < 0 or rule.matched > 1 or rule.effect < 0 or rule.effect > 2:
+            return RICH_STATUS_INVALID
+        matched[unsafe_offset=index] = rule.matched
+        if rule.matched == 1:
+            if not found or rule.effect > effect[]:
+                effect[] = rule.effect
+            found = True
+    return RICH_STATUS_OK
+
+
 @export("prodex_mojo_governance_policy_shape_v1")
 def prodex_mojo_governance_policy_shape_v1(
     abi_version: Int64,

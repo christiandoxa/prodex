@@ -1,10 +1,50 @@
 use super::{
     GovernanceMatchSelector, GovernanceMatchValue, GovernanceOptionalSelectorPair,
-    GovernanceOptionalValuePair, GovernancePolicyRuleShape, policy_string_view,
-    prodex_mojo_governance_effect_v1, prodex_mojo_governance_policy_shape_v1,
+    GovernanceOptionalValuePair, GovernancePolicyDecisionRule, GovernancePolicyRuleShape,
+    policy_string_view, prodex_mojo_governance_effect_v1,
+    prodex_mojo_governance_policy_decision_v1, prodex_mojo_governance_policy_shape_v1,
     prodex_mojo_governance_predicates_v1, prodex_mojo_governance_required_attributes_v1,
     prodex_mojo_governance_rule_matches_v1,
 };
+
+pub fn governance_policy_decision_plan(
+    rules: &[(bool, i64)],
+    default_effect: i64,
+) -> Result<(i64, Vec<bool>), crate::MojoError> {
+    let rules = rules
+        .iter()
+        .map(|(matched, effect)| GovernancePolicyDecisionRule {
+            matched: i64::from(*matched),
+            effect: *effect,
+        })
+        .collect::<Vec<_>>();
+    let mut matched = vec![-1_i64; rules.len()];
+    let mut effect = -1_i64;
+    let status = unsafe {
+        prodex_mojo_governance_policy_decision_v1(
+            6,
+            rules.as_ptr() as u64,
+            i64::try_from(rules.len()).map_err(|_| crate::MojoError::InvalidInput)?,
+            default_effect,
+            matched.as_mut_ptr() as u64,
+            (&mut effect as *mut i64) as u64,
+        )
+    };
+    if status != 0
+        || !(0..=2).contains(&effect)
+        || matched.iter().any(|value| !matches!(value, 0 | 1))
+    {
+        return Err(match status {
+            1 | 2 => crate::MojoError::InvalidInput,
+            4 => crate::MojoError::AbiMismatch,
+            _ => crate::MojoError::InvalidOutput,
+        });
+    }
+    Ok((
+        effect,
+        matched.into_iter().map(|value| value == 1).collect(),
+    ))
+}
 
 pub fn governance_policy_shape(
     valid_until_unix_ms: u64,

@@ -11,8 +11,9 @@ pub use gateway_admin::{
     plan_gateway_admin_retention,
 };
 pub use governance::{
-    governance_policy_conditions_overlap, governance_policy_effect, governance_policy_rule_matches,
-    governance_policy_shape, governance_required_attributes_present, governance_selector_matches,
+    governance_policy_conditions_overlap, governance_policy_decision_plan,
+    governance_policy_effect, governance_policy_rule_matches, governance_policy_shape,
+    governance_required_attributes_present, governance_selector_matches,
 };
 
 #[repr(i64)]
@@ -79,6 +80,13 @@ struct GovernancePolicyRuleShape {
     obligation_count: i64,
 }
 
+#[repr(C)]
+#[derive(Debug, Clone, Copy)]
+struct GovernancePolicyDecisionRule {
+    matched: i64,
+    effect: i64,
+}
+
 unsafe extern "C" {
     fn prodex_mojo_governance_finding_classification_v1(
         abi_version: i64,
@@ -137,6 +145,14 @@ unsafe extern "C" {
         rules: u64,
         rule_count: i64,
         output: u64,
+    ) -> i64;
+    fn prodex_mojo_governance_policy_decision_v1(
+        abi_version: i64,
+        rules: u64,
+        rule_count: i64,
+        default_effect: i64,
+        matched: u64,
+        effect: u64,
     ) -> i64;
 }
 
@@ -767,6 +783,8 @@ pub fn self_test() -> bool {
         && governance_policy_shape(0, &[]).is_ok_and(|result| result == 1)
         && governance_policy_shape(1, &[("rule-a", 0, 0), ("rule-a", 0, 0)])
             .is_ok_and(|result| result == 2)
+        && governance_policy_decision_plan(&[(true, 0), (false, 2), (true, 1)], 2)
+            .is_ok_and(|result| result == (1, vec![true, false, true]))
 }
 
 #[cfg(all(test, feature = "mojo-runtime"))]
