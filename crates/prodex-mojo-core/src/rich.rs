@@ -71,6 +71,12 @@ pub use gateway_constraint_trace::{
     GatewayConstraintTraceRejectionStage, GatewayConstraintTraceTerminalOutcome,
     plan_gateway_constraint_trace,
 };
+#[path = "rich/gateway_admin_route.rs"]
+mod gateway_admin_route;
+pub use gateway_admin_route::{
+    GatewayAdminPolicyRoute, GatewayAdminResourceRoute, plan_gateway_admin_policy_route,
+    plan_gateway_admin_resource_route,
+};
 mod billing;
 pub use billing::{
     GatewayBillingSummaryBucket, GatewayBillingSummaryInput, gateway_billing_summary_batch,
@@ -79,9 +85,11 @@ mod catalog;
 pub use catalog::{
     CatalogChoice, CatalogChoicesPlan, CatalogConfigurationInput, CatalogConfigurationPlan,
     CatalogModel, CatalogPlanModel, CatalogPlanRole, CatalogPlannedModel, CatalogReasoningModel,
-    CatalogReasoningPlan, ProviderRegistryModelCostEntry, ProviderRegistryModelCostPlan,
-    merge_catalog_ids, plan_catalog_choices, plan_catalog_configuration, plan_dynamic_catalog,
-    plan_provider_registry_model_costs, resolve_catalog_model, resolve_catalog_reasoning,
+    CatalogReasoningPlan, ProviderRegistryDescriptorValidationInput,
+    ProviderRegistryModelCostEntry, ProviderRegistryModelCostPlan, merge_catalog_ids,
+    plan_catalog_choices, plan_catalog_configuration, plan_dynamic_catalog,
+    plan_provider_registry_model_costs, provider_registry_artifact_is_valid,
+    provider_registry_pricing_is_authoritative, resolve_catalog_model, resolve_catalog_reasoning,
 };
 #[path = "rich/gemini_sse_state.rs"]
 mod gemini_sse_state;

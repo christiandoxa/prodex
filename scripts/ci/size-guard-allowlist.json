@@ -155,11 +155,6 @@
     "reason": "Gateway durable state and cross-proxy PostgreSQL/Redis admission coverage includes explicit local PostgreSQL plaintext setup and remains capped while backend scenarios are split."
   },
   {
-    "file": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_gateway_admin_policies.rs",
-    "maxLines": 1864,
-    "reason": "The signed governed artifact lifecycle, execution approvals, SIEM outbox claims, and payload-free HTTP flow remain capped after retention and HTTP response helpers moved to focused ownership; the shared revoke publication path stays beside activation to preserve one transactional cache boundary."
-  },
-  {
     "file": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_governance_session.rs",
     "maxLines": 876,
     "reason": "The bounded session bank keeps admission, durable command handling, revision pinning, revocation epochs, bank fail-closed refresh, and monotonic classification invariants together."
@@ -183,11 +178,6 @@
     "file": "crates/prodex-storage-sqlite-runtime/tests/governance_repository.rs",
     "maxLines": 1421,
     "reason": "SQLite governance integration coverage proves artifact-signature round trips, lifecycle validation, bounded durable tenant discovery, approval idempotency, session revocation, audit integrity, export, and SIEM behavior after retention, revision-recovery, and outbox-claim tests moved to focused modules."
-  },
-  {
-    "file": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_provider_registry.rs",
-    "maxLines": 1285,
-    "reason": "The runtime provider registry compiles approved descriptors, projected heterogeneous adapters, bounded dynamic signals, non-authoritative zero-price bootstrap handling, and focused conformance tests; tenant snapshot mutation and authoritative pricing validation are split out."
   },
   {
     "file": "crates/prodex-gateway-server/src/tests.rs",

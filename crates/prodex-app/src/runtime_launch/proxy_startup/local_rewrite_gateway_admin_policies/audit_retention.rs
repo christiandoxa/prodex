@@ -586,9 +586,9 @@ fn break_glass_denied() -> tiny_http::ResponseBox {
 
 #[cfg(test)]
 mod tests {
+    use super::super::reporting::gateway_admin_audit_export_limit;
     use super::{
         audit_retention_cutoff, audit_retention_policy_plan, audit_retention_protected_count,
-        gateway_admin_audit_export_limit,
     };
 
     #[test]

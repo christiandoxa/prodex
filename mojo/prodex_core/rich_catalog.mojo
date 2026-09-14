@@ -2,8 +2,10 @@ from std.memory import Pointer
 from rich_text import (
     rich_copy_range,
     rich_trim_bounds,
+    rich_view_matches_literal,
     rich_view_ptr,
     rich_view_valid,
+    rich_views_equal,
 )
 from rich_types import (
     ProdexRichCatalogPlanChoice,
@@ -1726,6 +1728,445 @@ def prodex_mojo_rich_catalog_merge_v1(
 
 
 comptime CATALOG_PROVIDER_REGISTRY_MAX_NAMES: Int64 = 65_536
+comptime PROVIDER_REGISTRY_ARTIFACT_MAX_MODEL_NAME_BYTES: Int64 = 128
+comptime PROVIDER_REGISTRY_DESCRIPTOR_WIDTH: Int64 = 14
+comptime PROVIDER_REGISTRY_MAX_DESCRIPTORS: Int64 = 32
+comptime PROVIDER_REGISTRY_MAX_ENDPOINTS: UInt64 = 11
+comptime PROVIDER_REGISTRY_MAX_REGIONS: UInt64 = 32
+comptime PROVIDER_REGISTRY_MAX_MODEL_COSTS: UInt64 = 1_024
+comptime PROVIDER_REGISTRY_SCORE_SCALE: UInt64 = 10_000
+comptime GATEWAY_ADMIN_ROUTE_CREATE: Int64 = 0
+comptime GATEWAY_ADMIN_ROUTE_LIST: Int64 = 1
+comptime GATEWAY_ADMIN_ROUTE_VALIDATE: Int64 = 2
+comptime GATEWAY_ADMIN_ROUTE_STATUS: Int64 = 3
+comptime GATEWAY_ADMIN_ROUTE_GET: Int64 = 4
+comptime GATEWAY_ADMIN_ROUTE_SUBMIT: Int64 = 5
+comptime GATEWAY_ADMIN_ROUTE_VOTE: Int64 = 6
+comptime GATEWAY_ADMIN_ROUTE_ACTIVATE: Int64 = 7
+comptime GATEWAY_ADMIN_ROUTE_NOT_FOUND: Int64 = 8
+comptime GATEWAY_ADMIN_ROUTE_METHOD_NOT_ALLOWED: Int64 = 9
+comptime GATEWAY_ADMIN_POLICY_NONE: Int64 = 0
+comptime GATEWAY_ADMIN_POLICY_RESOURCE: Int64 = 1
+comptime GATEWAY_ADMIN_POLICY_AUDIT_EXPORT: Int64 = 2
+comptime GATEWAY_ADMIN_POLICY_AUDIT_INTEGRITY: Int64 = 3
+comptime GATEWAY_ADMIN_POLICY_OUTBOX: Int64 = 4
+comptime GATEWAY_ADMIN_POLICY_AUDIT_RETENTION: Int64 = 5
+comptime GATEWAY_ADMIN_POLICY_EXECUTION_APPROVALS: Int64 = 6
+comptime GATEWAY_ADMIN_POLICY_BREAK_GLASS: Int64 = 7
+
+
+def gateway_admin_view_starts_with(
+    value: ProdexRichStringView, prefix: ProdexRichStringView
+) -> Bool:
+    if value.len < prefix.len:
+        return False
+    var value_ptr = rich_view_ptr(value)
+    var prefix_ptr = rich_view_ptr(prefix)
+    for index in range(Int64(prefix.len)):
+        if value_ptr[unsafe_offset=index] != prefix_ptr[unsafe_offset=index]:
+            return False
+    return True
+
+
+def gateway_admin_suffix_matches[literal: StaticString](
+    path: ProdexRichStringView,
+    prefix_length: Int64,
+    children: Bool,
+) -> Bool:
+    var literal_length = Int64(literal.byte_length())
+    if Int64(path.len) < prefix_length + literal_length:
+        return False
+    var path_ptr = rich_view_ptr(path)
+    var literal_ptr = literal.unsafe_ptr()
+    for index in range(literal_length):
+        if path_ptr[unsafe_offset=prefix_length + index] != literal_ptr[unsafe_offset=index]:
+            return False
+    var matched_length = prefix_length + literal_length
+    return (
+        Int64(path.len) == matched_length
+        or children
+        and Int64(path.len) > matched_length
+        and path_ptr[unsafe_offset=matched_length] == 47
+    )
+
+
+@export("prodex_mojo_gateway_admin_policy_route_v1")
+def prodex_mojo_gateway_admin_policy_route_v1(
+    abi_version: Int64,
+    path_address: UInt,
+    admin_prefix_address: UInt,
+    output_address: UInt,
+) abi("C") -> Int64:
+    if (
+        abi_version != PRODEX_RICH_ABI_VERSION
+        or path_address == 0
+        or admin_prefix_address == 0
+        or output_address == 0
+    ):
+        return RICH_STATUS_INVALID
+    var path = Pointer[
+        mut=False, ProdexRichStringView, ImmUntrackedOrigin
+    ](unsafe_from_address=Int(path_address))[].copy()
+    var admin_prefix = Pointer[
+        mut=False, ProdexRichStringView, ImmUntrackedOrigin
+    ](unsafe_from_address=Int(admin_prefix_address))[].copy()
+    if (
+        not rich_view_valid(path, 4_096)
+        or not rich_view_valid(admin_prefix, 4_096)
+        or not gateway_admin_view_starts_with(path, admin_prefix)
+    ):
+        return RICH_STATUS_INVALID
+    var output = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    output[unsafe_offset=0] = GATEWAY_ADMIN_POLICY_NONE
+    output[unsafe_offset=1] = -1
+    var prefix_length = Int64(admin_prefix.len)
+    if gateway_admin_suffix_matches["/audit/exports"](path, prefix_length, False):
+        output[unsafe_offset=0] = GATEWAY_ADMIN_POLICY_AUDIT_EXPORT
+    elif gateway_admin_suffix_matches["/governance/audit/integrity"](
+        path, prefix_length, False
+    ):
+        output[unsafe_offset=0] = GATEWAY_ADMIN_POLICY_AUDIT_INTEGRITY
+    elif gateway_admin_suffix_matches["/governance/outbox"](
+        path, prefix_length, False
+    ) or gateway_admin_suffix_matches["/governance/outbox/claim"](
+        path, prefix_length, False
+    ):
+        output[unsafe_offset=0] = GATEWAY_ADMIN_POLICY_OUTBOX
+    elif gateway_admin_suffix_matches["/audit/retention/holds"](
+        path, prefix_length, True
+    ) or gateway_admin_suffix_matches["/audit/retention/purge"](
+        path, prefix_length, False
+    ):
+        output[unsafe_offset=0] = GATEWAY_ADMIN_POLICY_AUDIT_RETENTION
+    elif gateway_admin_suffix_matches["/execution-approvals"](
+        path, prefix_length, True
+    ):
+        output[unsafe_offset=0] = GATEWAY_ADMIN_POLICY_EXECUTION_APPROVALS
+    elif gateway_admin_suffix_matches["/break-glass-approvals"](
+        path, prefix_length, True
+    ):
+        output[unsafe_offset=0] = GATEWAY_ADMIN_POLICY_BREAK_GLASS
+    elif gateway_admin_suffix_matches["/policies"](path, prefix_length, True):
+        output[unsafe_offset=0] = GATEWAY_ADMIN_POLICY_RESOURCE
+        output[unsafe_offset=1] = 0
+    elif gateway_admin_suffix_matches["/classification-rules"](
+        path, prefix_length, True
+    ):
+        output[unsafe_offset=0] = GATEWAY_ADMIN_POLICY_RESOURCE
+        output[unsafe_offset=1] = 1
+    elif gateway_admin_suffix_matches["/provider-registries"](
+        path, prefix_length, True
+    ):
+        output[unsafe_offset=0] = GATEWAY_ADMIN_POLICY_RESOURCE
+        output[unsafe_offset=1] = 2
+    elif gateway_admin_suffix_matches["/routing-scores"](
+        path, prefix_length, True
+    ):
+        output[unsafe_offset=0] = GATEWAY_ADMIN_POLICY_RESOURCE
+        output[unsafe_offset=1] = 3
+    return RICH_STATUS_OK
+
+
+def gateway_admin_method_kind(method: ProdexRichStringView) -> Int64:
+    if rich_view_matches_literal["get"](method, True):
+        return 0
+    if rich_view_matches_literal["post"](method, True):
+        return 1
+    return 2
+
+
+@export("prodex_mojo_gateway_admin_resource_route_v1")
+def prodex_mojo_gateway_admin_resource_route_v1(
+    abi_version: Int64,
+    method_address: UInt,
+    segments_address: UInt,
+    segment_count: Int64,
+    output_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != PRODEX_RICH_ABI_VERSION:
+        return RICH_STATUS_ABI
+    if (
+        method_address == 0
+        or segment_count < 0
+        or segment_count > 65_536
+        or (segment_count > 0 and segments_address == 0)
+        or output_address == 0
+    ):
+        return RICH_STATUS_INVALID
+    var method = Pointer[
+        mut=False, ProdexRichStringView, ImmUntrackedOrigin
+    ](unsafe_from_address=Int(method_address))[].copy()
+    if not rich_view_valid(method, 16):
+        return RICH_STATUS_UTF8
+    var segments = Pointer[
+        mut=False, ProdexRichStringView, ImmUntrackedOrigin
+    ](unsafe_from_address=Int(segments_address))
+    for index in range(segment_count):
+        if not rich_view_valid(segments[unsafe_offset=index], 4_096):
+            return RICH_STATUS_UTF8
+    var output = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    output[unsafe_offset=0] = GATEWAY_ADMIN_ROUTE_METHOD_NOT_ALLOWED
+    output[unsafe_offset=1] = -1
+    output[unsafe_offset=2] = -1
+    output[unsafe_offset=3] = -1
+    var method_kind = gateway_admin_method_kind(method)
+    if method_kind == 2:
+        return RICH_STATUS_OK
+    if segment_count == 0:
+        output[unsafe_offset=0] = (
+            GATEWAY_ADMIN_ROUTE_CREATE
+            if method_kind == 1
+            else GATEWAY_ADMIN_ROUTE_LIST
+        )
+        return RICH_STATUS_OK
+    if method_kind == 0:
+        if segment_count == 1 and rich_view_matches_literal["status"](
+            segments[unsafe_offset=0], False
+        ):
+            output[unsafe_offset=0] = GATEWAY_ADMIN_ROUTE_STATUS
+        elif segment_count == 1:
+            output[unsafe_offset=0] = GATEWAY_ADMIN_ROUTE_GET
+            output[unsafe_offset=1] = 0
+        else:
+            output[unsafe_offset=0] = GATEWAY_ADMIN_ROUTE_NOT_FOUND
+        return RICH_STATUS_OK
+    if segment_count == 1 and rich_view_matches_literal["validate"](
+        segments[unsafe_offset=0], False
+    ):
+        output[unsafe_offset=0] = GATEWAY_ADMIN_ROUTE_VALIDATE
+    elif segment_count == 2 and rich_view_matches_literal["submit"](
+        segments[unsafe_offset=1], False
+    ):
+        output[unsafe_offset=0] = GATEWAY_ADMIN_ROUTE_SUBMIT
+        output[unsafe_offset=1] = 0
+    elif segment_count == 2 and (
+        rich_view_matches_literal["activate"](segments[unsafe_offset=1], False)
+        or rich_view_matches_literal["rollback"](segments[unsafe_offset=1], False)
+        or rich_view_matches_literal["revoke"](segments[unsafe_offset=1], False)
+    ):
+        output[unsafe_offset=0] = GATEWAY_ADMIN_ROUTE_ACTIVATE
+        output[unsafe_offset=1] = 0
+        output[unsafe_offset=2] = 1
+    elif (
+        segment_count == 4
+        and rich_view_matches_literal["approvals"](
+            segments[unsafe_offset=1], False
+        )
+        and rich_view_matches_literal["votes"](
+            segments[unsafe_offset=3], False
+        )
+    ):
+        output[unsafe_offset=0] = GATEWAY_ADMIN_ROUTE_VOTE
+        output[unsafe_offset=1] = 0
+        output[unsafe_offset=2] = 2
+    else:
+        output[unsafe_offset=0] = GATEWAY_ADMIN_ROUTE_NOT_FOUND
+    return RICH_STATUS_OK
+
+
+def provider_registry_selector_valid(value: ProdexRichStringView) -> Bool:
+    if not rich_view_valid(value, 128) or value.len == 0:
+        return False
+    var ptr = rich_view_ptr(value)
+    for index in range(Int64(value.len)):
+        var byte = ptr[unsafe_offset=index]
+        if not (
+            byte >= 48 and byte <= 57
+            or byte >= 65 and byte <= 90
+            or byte >= 97 and byte <= 122
+            or byte == 46
+            or byte == 95
+            or byte == 45
+            or byte == 58
+            or byte == 47
+            or byte == 42
+        ):
+            return False
+    return True
+
+
+def provider_registry_popcount(value: UInt64) -> UInt64:
+    var remaining = value
+    var count = UInt64(0)
+    while remaining != 0:
+        count += remaining & 1
+        remaining >>= 1
+    return count
+
+
+def provider_registry_descriptor_valid(
+    fields: Pointer[mut=False, UInt64, _],
+    index: Int64,
+    schema_version: UInt64,
+    pricing_revision: UInt64,
+    region_count: Int64,
+) -> Bool:
+    var offset = index * PROVIDER_REGISTRY_DESCRIPTOR_WIDTH
+    var descriptor_regions_offset = fields[unsafe_offset=offset + 6]
+    var descriptor_region_count = fields[unsafe_offset=offset + 7]
+    var endpoint_mask = fields[unsafe_offset=offset + 4]
+    var endpoint_count = fields[unsafe_offset=offset + 5]
+    var model_count = fields[unsafe_offset=offset + 12]
+    var pricing_authoritative = fields[unsafe_offset=offset + 13]
+    if (
+        fields[unsafe_offset=offset] == 0
+        or fields[unsafe_offset=offset + 1] == 0
+        or fields[unsafe_offset=offset + 1] != pricing_revision
+        or fields[unsafe_offset=offset + 2] > 6
+        or fields[unsafe_offset=offset + 3] != 1
+        or endpoint_count == 0
+        or endpoint_count > PROVIDER_REGISTRY_MAX_ENDPOINTS
+        or provider_registry_popcount(endpoint_mask) != endpoint_count
+        or descriptor_region_count == 0
+        or descriptor_region_count > PROVIDER_REGISTRY_MAX_REGIONS
+        or descriptor_regions_offset > UInt64(region_count)
+        or descriptor_region_count > UInt64(region_count) - descriptor_regions_offset
+        or fields[unsafe_offset=offset + 8] > PROVIDER_REGISTRY_SCORE_SCALE
+        or fields[unsafe_offset=offset + 9] > PROVIDER_REGISTRY_SCORE_SCALE
+        or fields[unsafe_offset=offset + 10] > PROVIDER_REGISTRY_SCORE_SCALE
+        or fields[unsafe_offset=offset + 11] > PROVIDER_REGISTRY_SCORE_SCALE
+        or model_count > PROVIDER_REGISTRY_MAX_MODEL_COSTS
+        or pricing_authoritative > 1
+        or (schema_version == 2 and pricing_authoritative != 1)
+        or (model_count > 0 and pricing_authoritative != 1)
+    ):
+        return False
+    return True
+
+
+@export("prodex_mojo_provider_registry_artifact_structure_v1")
+def prodex_mojo_provider_registry_artifact_structure_v1(
+    abi_version: Int64,
+    schema_version: UInt64,
+    revision: UInt64,
+    pricing_revision: UInt64,
+    descriptor_fields_address: UInt,
+    descriptor_count: Int64,
+    regions_address: UInt,
+    region_count: Int64,
+    valid_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != PRODEX_RICH_ABI_VERSION:
+        return RICH_STATUS_ABI
+    if (
+        descriptor_count < 0
+        or descriptor_count > PROVIDER_REGISTRY_MAX_DESCRIPTORS
+        or region_count < 0
+        or region_count > PROVIDER_REGISTRY_MAX_DESCRIPTORS * Int64(PROVIDER_REGISTRY_MAX_REGIONS)
+        or valid_address == 0
+        or (descriptor_count > 0 and descriptor_fields_address == 0)
+        or (region_count > 0 and regions_address == 0)
+    ):
+        return RICH_STATUS_INVALID
+    var valid = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(valid_address)
+    )
+    valid[] = 0
+    if (
+        (schema_version != 1 and schema_version != 2)
+        or revision == 0
+        or pricing_revision == 0
+        or descriptor_count == 0
+    ):
+        return RICH_STATUS_OK
+    var fields = Pointer[mut=False, UInt64, ImmUntrackedOrigin](
+        unsafe_from_address=Int(descriptor_fields_address)
+    )
+    var regions = Pointer[
+        mut=False, ProdexRichStringView, ImmUntrackedOrigin
+    ](unsafe_from_address=Int(regions_address))
+    for descriptor_index in range(descriptor_count):
+        if not provider_registry_descriptor_valid(
+            fields,
+            descriptor_index,
+            schema_version,
+            pricing_revision,
+            region_count,
+        ):
+            return RICH_STATUS_OK
+        var offset = descriptor_index * PROVIDER_REGISTRY_DESCRIPTOR_WIDTH
+        var provider = fields[unsafe_offset=offset + 2]
+        for previous_descriptor in range(descriptor_index):
+            var previous_offset = previous_descriptor * PROVIDER_REGISTRY_DESCRIPTOR_WIDTH
+            if fields[unsafe_offset=previous_offset + 2] == provider:
+                return RICH_STATUS_OK
+        var first_region = Int64(fields[unsafe_offset=offset + 6])
+        var descriptor_region_count = Int64(fields[unsafe_offset=offset + 7])
+        for region_index in range(descriptor_region_count):
+            var absolute_index = first_region + region_index
+            var region = regions[unsafe_offset=absolute_index].copy()
+            if not provider_registry_selector_valid(region):
+                return RICH_STATUS_OK
+            for previous_region in range(region_index):
+                if rich_views_equal(
+                    region,
+                    regions[unsafe_offset=first_region + previous_region],
+                ):
+                    return RICH_STATUS_OK
+    valid[] = 1
+    return RICH_STATUS_OK
+
+
+@export("prodex_mojo_provider_registry_pricing_authority_v1")
+def prodex_mojo_provider_registry_pricing_authority_v1(
+    abi_version: Int64,
+    names_address: UInt,
+    input_present_address: UInt,
+    output_present_address: UInt,
+    name_count: Int64,
+    authoritative_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != PRODEX_RICH_ABI_VERSION:
+        return RICH_STATUS_ABI
+    if (
+        name_count < 0
+        or name_count > CATALOG_PROVIDER_REGISTRY_MAX_NAMES
+        or authoritative_address == 0
+        or (name_count > 0 and (
+            names_address == 0
+            or input_present_address == 0
+            or output_present_address == 0
+        ))
+    ):
+        return RICH_STATUS_INVALID
+
+    var authoritative = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(authoritative_address)
+    )
+    authoritative[] = 0
+    if name_count == 0:
+        return RICH_STATUS_OK
+
+    var names = Pointer[
+        mut=False, ProdexRichStringView, ImmUntrackedOrigin
+    ](unsafe_from_address=Int(names_address))
+    var input_present = Pointer[
+        mut=False, Int64, ImmUntrackedOrigin
+    ](unsafe_from_address=Int(input_present_address))
+    var output_present = Pointer[
+        mut=False, Int64, ImmUntrackedOrigin
+    ](unsafe_from_address=Int(output_present_address))
+    var wildcard = False
+    for index in range(name_count):
+        var name = names[unsafe_offset=index].copy()
+        if (
+            not rich_view_valid(name, PROVIDER_REGISTRY_ARTIFACT_MAX_MODEL_NAME_BYTES)
+            or rich_trim_bounds(name)[1] <= rich_trim_bounds(name)[0]
+            or input_present[unsafe_offset=index] != 1
+            or output_present[unsafe_offset=index] != 1
+        ):
+            return RICH_STATUS_OK
+        if rich_view_matches_literal["*"](name, False):
+            wildcard = True
+        for previous in range(index):
+            if catalog_view_equal_full(name, names[unsafe_offset=previous]):
+                return RICH_STATUS_OK
+    authoritative[] = Int64(wildcard)
+    return RICH_STATUS_OK
 
 
 # ponytail: bounded catalogs use a simple O(n^2) case-folded scan; add a hash index if the 65,536-name ceiling becomes reachable.
