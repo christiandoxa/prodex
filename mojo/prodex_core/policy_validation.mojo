@@ -310,12 +310,101 @@ def gateway_admin_policy_purge_result_impl(
     var status = gateway_admin_policy_status(abi_version)
     if status != GATEWAY_ADMIN_POLICY_STATUS_OK:
         return status
+
+
     if purged > requested or protected_or_ineligible_address == 0:
         return GATEWAY_ADMIN_POLICY_STATUS_INVALID
     var protected_or_ineligible_ptr = Pointer[
         mut=True, UInt64, MutUntrackedOrigin
     ](unsafe_from_address=Int(protected_or_ineligible_address))
     protected_or_ineligible_ptr[] = requested - purged
+    return GATEWAY_ADMIN_POLICY_STATUS_OK
+
+
+comptime PROVIDER_REGISTRY_BOOTSTRAP_OUTPUT_WIDTH: Int64 = 16
+
+
+@export("prodex_mojo_provider_registry_bootstrap_plan_v1")
+def prodex_mojo_provider_registry_bootstrap_plan_v1(
+    abi_version: Int64,
+    pricing_known: Int64,
+    registry_revision: UInt64,
+    registry_revision_present: Int64,
+    provider_present: Int64,
+    regions_present: Int64,
+    descriptor_revision: UInt64,
+    enabled: Int64,
+    revoked: Int64,
+    local_execution: Int64,
+    trust_tier: Int64,
+    maximum_classification: Int64,
+    retention_seconds: UInt64,
+    training_use: Int64,
+    output_address: UInt,
+    output_capacity: Int64,
+) abi("C") -> Int64:
+    if abi_version != GATEWAY_ADMIN_POLICY_ABI_VERSION:
+        return GATEWAY_ADMIN_POLICY_STATUS_ABI
+    if (
+        pricing_known < 0
+        or pricing_known > 1
+        or registry_revision_present < 0
+        or registry_revision_present > 1
+        or provider_present < 0
+        or provider_present > 1
+        or regions_present < 0
+        or regions_present > 1
+        or output_address == 0
+        or output_capacity < PROVIDER_REGISTRY_BOOTSTRAP_OUTPUT_WIDTH
+    ):
+        return GATEWAY_ADMIN_POLICY_STATUS_INVALID
+    if provider_present == 1 and (
+        descriptor_revision == 0
+        or enabled < 0
+        or enabled > 1
+        or revoked < 0
+        or revoked > 1
+        or local_execution < 0
+        or local_execution > 1
+        or trust_tier < 0
+        or trust_tier > 2
+        or maximum_classification < 0
+        or maximum_classification > 3
+        or retention_seconds > UInt64(4_294_967_295)
+        or training_use < 0
+        or training_use > 1
+    ):
+        return GATEWAY_ADMIN_POLICY_STATUS_INVALID
+    var output = Pointer[mut=True, UInt64, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    var effective_trust_tier = trust_tier if provider_present == 1 else 0
+    output[unsafe_offset=0] = 2 if pricing_known == 1 else 1
+    output[unsafe_offset=1] = (
+        registry_revision if registry_revision_present == 1 else 1
+    )
+    output[unsafe_offset=2] = descriptor_revision if provider_present == 1 else 1
+    output[unsafe_offset=3] = UInt64(enabled if provider_present == 1 else 1)
+    output[unsafe_offset=4] = UInt64(revoked if provider_present == 1 else 0)
+    output[unsafe_offset=5] = UInt64(local_execution if provider_present == 1 else 0)
+    output[unsafe_offset=6] = UInt64(effective_trust_tier)
+    output[unsafe_offset=7] = UInt64(
+        maximum_classification if provider_present == 1 else 1
+    )
+    output[unsafe_offset=8] = (
+        retention_seconds if provider_present == 1 else UInt64(4_294_967_295)
+    )
+    output[unsafe_offset=9] = UInt64(training_use if provider_present == 1 else 1)
+    output[unsafe_offset=10] = 5_000
+    output[unsafe_offset=11] = 5_000
+    output[unsafe_offset=12] = (
+        UInt64(8_000)
+        if effective_trust_tier == 0
+        else UInt64(4_000) if effective_trust_tier == 1 else UInt64(1_000)
+    )
+    output[unsafe_offset=13] = 5_000
+    output[unsafe_offset=14] = UInt64(provider_present == 0 or regions_present == 0)
+    output[unsafe_offset=15] = 1
     return GATEWAY_ADMIN_POLICY_STATUS_OK
 
 
