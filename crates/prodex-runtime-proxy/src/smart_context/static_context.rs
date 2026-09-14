@@ -1,5 +1,7 @@
 use super::*;
 use sha2::{Digest as _, Sha256};
+#[cfg(feature = "mojo")]
+use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::fmt::Write as _;
 
@@ -450,6 +452,84 @@ pub fn smart_context_fingerprint_delta(
     previous: impl IntoIterator<Item = SmartContextFingerprint>,
     current: impl IntoIterator<Item = SmartContextFingerprint>,
 ) -> Vec<SmartContextFingerprintChange> {
+    #[cfg(feature = "mojo")]
+    {
+        let previous = previous.into_iter().collect::<Vec<_>>();
+        let current = current.into_iter().collect::<Vec<_>>();
+        smart_context_fingerprint_delta_mojo(previous, current)
+            .expect("Mojo Smart Context fingerprint delta plan returned invalid output")
+    }
+
+    #[cfg(not(feature = "mojo"))]
+    smart_context_fingerprint_delta_rust(previous, current)
+}
+
+#[cfg(feature = "mojo")]
+fn smart_context_fingerprint_delta_mojo(
+    previous: Vec<SmartContextFingerprint>,
+    current: Vec<SmartContextFingerprint>,
+) -> Result<Vec<SmartContextFingerprintChange>, prodex_mojo_core::MojoError> {
+    let keys = previous
+        .iter()
+        .chain(&current)
+        .map(|fingerprint| (fingerprint.kind, fingerprint.id.clone()))
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .enumerate()
+        .map(|(rank, key)| (key, rank as u64))
+        .collect::<BTreeMap<_, _>>();
+    let hashes = previous
+        .iter()
+        .chain(&current)
+        .map(|fingerprint| fingerprint.content_hash.as_str())
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .enumerate()
+        .map(|(rank, hash)| (hash, rank as u64))
+        .collect::<BTreeMap<_, _>>();
+    let encode = |fingerprints: &[SmartContextFingerprint]| {
+        fingerprints
+            .iter()
+            .map(
+                |fingerprint| prodex_mojo_core::runtime::SmartContextFingerprintDeltaInput {
+                    key: keys[&(fingerprint.kind, fingerprint.id.clone())],
+                    content_hash: hashes[fingerprint.content_hash.as_str()],
+                },
+            )
+            .collect::<Vec<_>>()
+    };
+    prodex_mojo_core::runtime::smart_context_fingerprint_delta_plan(
+        &encode(&previous),
+        &encode(&current),
+        keys.len(),
+    )?
+    .into_iter()
+    .map(
+        |item| match (item.action, item.previous_index, item.current_index) {
+            (0, None, Some(after)) => Ok(SmartContextFingerprintChange::Added {
+                fingerprint: current[after].clone(),
+            }),
+            (1, Some(before), None) => Ok(SmartContextFingerprintChange::Removed {
+                fingerprint: previous[before].clone(),
+            }),
+            (2, Some(_), Some(after)) => Ok(SmartContextFingerprintChange::Unchanged {
+                fingerprint: current[after].clone(),
+            }),
+            (3, Some(before), Some(after)) => Ok(SmartContextFingerprintChange::Changed {
+                before: previous[before].clone(),
+                after: current[after].clone(),
+            }),
+            _ => Err(prodex_mojo_core::MojoError::InvalidOutput),
+        },
+    )
+    .collect()
+}
+
+#[cfg(any(not(feature = "mojo"), test))]
+pub(in crate::smart_context) fn smart_context_fingerprint_delta_rust(
+    previous: impl IntoIterator<Item = SmartContextFingerprint>,
+    current: impl IntoIterator<Item = SmartContextFingerprint>,
+) -> Vec<SmartContextFingerprintChange> {
     let previous = smart_context_fingerprint_map(previous);
     let current = smart_context_fingerprint_map(current);
     let mut keys = BTreeSet::new();
@@ -476,4 +556,45 @@ pub fn smart_context_fingerprint_delta(
             (None, None) => None,
         })
         .collect()
+}
+
+#[cfg(all(test, feature = "mojo"))]
+mod mojo_tests {
+    use super::*;
+
+    fn fingerprint(
+        id: &str,
+        kind: SmartContextFingerprintKind,
+        hash: &str,
+    ) -> SmartContextFingerprint {
+        SmartContextFingerprint {
+            id: id.to_string(),
+            kind,
+            content_hash: hash.to_string(),
+            byte_len: hash.len(),
+        }
+    }
+
+    #[test]
+    fn fingerprint_delta_matches_rust_oracle_with_duplicate_keys() {
+        let previous = vec![
+            fingerprint("b", SmartContextFingerprintKind::StaticContext, "old"),
+            fingerprint("a", SmartContextFingerprintKind::Artifact, "same"),
+            fingerprint("b", SmartContextFingerprintKind::StaticContext, "before"),
+            fingerprint("removed", SmartContextFingerprintKind::ToolOutput, "gone"),
+        ];
+        let current = vec![
+            fingerprint(
+                "added",
+                SmartContextFingerprintKind::ConversationTurn,
+                "new",
+            ),
+            fingerprint("b", SmartContextFingerprintKind::StaticContext, "after"),
+            fingerprint("a", SmartContextFingerprintKind::Artifact, "same"),
+        ];
+        assert_eq!(
+            smart_context_fingerprint_delta(previous.clone(), current.clone()),
+            smart_context_fingerprint_delta_rust(previous, current)
+        );
+    }
 }

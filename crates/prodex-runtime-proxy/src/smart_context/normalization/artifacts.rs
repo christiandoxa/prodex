@@ -24,6 +24,7 @@ pub fn smart_context_normalized_command_output_hash_text(text: &str) -> String {
     )
 }
 
+#[cfg(any(not(feature = "mojo"), test))]
 pub(in crate::smart_context) fn smart_context_fingerprint_map(
     fingerprints: impl IntoIterator<Item = SmartContextFingerprint>,
 ) -> BTreeMap<(SmartContextFingerprintKind, String), SmartContextFingerprint> {
