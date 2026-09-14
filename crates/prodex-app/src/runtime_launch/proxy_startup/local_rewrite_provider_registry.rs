@@ -22,6 +22,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
+mod bootstrap_planning;
 mod compilation;
 mod provider_planning;
 mod routing;
@@ -48,6 +49,7 @@ use provider_planning::runtime_gateway_builtin_model_cost_plan;
 use validation::runtime_gateway_validate_provider_registry_structure;
 
 const RUNTIME_GATEWAY_PROVIDER_REGISTRY_SCHEMA_VERSION: u32 = 2;
+#[cfg(any(test, not(feature = "mojo-core")))]
 const RUNTIME_GATEWAY_PROVIDER_REGISTRY_LEGACY_SCHEMA_VERSION: u32 = 1;
 const RUNTIME_GATEWAY_ROUTING_SCORES_SCHEMA_VERSION: u32 = 1;
 #[cfg(not(feature = "mojo-core"))]
@@ -111,7 +113,7 @@ impl RuntimeGatewayProviderModelCostArtifact {
     }
 }
 
-#[derive(Clone, Copy, Debug, Deserialize, Serialize)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
 enum RuntimeGatewayProviderRegistryTrustTier {
     Standard,

@@ -1,3 +1,4 @@
+use super::bootstrap_planning::runtime_gateway_bootstrap_descriptor_plan;
 use super::*;
 
 pub(super) struct RuntimeGatewayAttachedProviderRegistryContext {
@@ -40,78 +41,44 @@ pub(in crate::runtime_launch::proxy_startup) fn runtime_gateway_bootstrap_provid
     credential: Option<&RuntimeProjectedProviderCredential>,
 ) -> Result<RuntimeGatewayGovernedProviderRegistrySnapshot> {
     let context = runtime_gateway_attached_provider_registry_context(provider_options, credential);
-    let provider_settings = settings.provider.as_ref();
     let builtin_cost_plan = runtime_gateway_builtin_model_cost_plan(context.provider);
-    let trust_tier = match provider_settings.map(|settings| settings.trust_tier) {
-        Some(prodex_runtime_policy::RuntimeGovernanceProviderTrustTier::Enterprise) => {
-            RuntimeGatewayProviderRegistryTrustTier::Enterprise
-        }
-        Some(prodex_runtime_policy::RuntimeGovernanceProviderTrustTier::RestrictedApproved) => {
-            RuntimeGatewayProviderRegistryTrustTier::RestrictedApproved
-        }
-        Some(prodex_runtime_policy::RuntimeGovernanceProviderTrustTier::Standard) | None => {
-            RuntimeGatewayProviderRegistryTrustTier::Standard
-        }
-    };
-    let maximum_classification = match provider_settings
-        .map(|settings| settings.maximum_classification)
-        .unwrap_or(prodex_runtime_policy::RuntimeGovernanceDataClassification::Internal)
-    {
-        prodex_runtime_policy::RuntimeGovernanceDataClassification::Public => {
-            DataClassification::Public
-        }
-        prodex_runtime_policy::RuntimeGovernanceDataClassification::Internal => {
-            DataClassification::Internal
-        }
-        prodex_runtime_policy::RuntimeGovernanceDataClassification::Confidential => {
-            DataClassification::Confidential
-        }
-        prodex_runtime_policy::RuntimeGovernanceDataClassification::Restricted => {
-            DataClassification::Restricted
-        }
+    let bootstrap =
+        runtime_gateway_bootstrap_descriptor_plan(settings, builtin_cost_plan.pricing_known);
+    let regions = if bootstrap.use_default_region {
+        vec!["*".to_string()]
+    } else {
+        settings
+            .provider
+            .as_ref()
+            .map_or_else(Vec::new, |settings| settings.regions.clone())
     };
     compile_runtime_gateway_provider_registry_artifact(
         &serde_json::to_vec(&RuntimeGatewayProviderRegistryArtifact {
-            schema_version: if builtin_cost_plan.pricing_known {
-                RUNTIME_GATEWAY_PROVIDER_REGISTRY_SCHEMA_VERSION
-            } else {
-                RUNTIME_GATEWAY_PROVIDER_REGISTRY_LEGACY_SCHEMA_VERSION
-            },
-            revision: settings.provider_registry_revision.unwrap_or(1),
-            pricing_revision: 1,
+            schema_version: bootstrap.schema_version,
+            revision: bootstrap.registry_revision,
+            pricing_revision: bootstrap.pricing_revision,
             descriptors: vec![RuntimeGatewayProviderRegistryDescriptorArtifact {
-                revision: provider_settings
-                    .map(|settings| settings.descriptor_revision)
-                    .unwrap_or(1),
-                pricing_revision: 1,
+                revision: bootstrap.descriptor_revision,
+                pricing_revision: bootstrap.pricing_revision,
                 provider: context.provider,
                 credential_ref: context.credential_ref.clone(),
-                enabled: provider_settings.is_none_or(|settings| settings.enabled),
-                revoked: provider_settings.is_some_and(|settings| settings.revoked),
+                enabled: bootstrap.enabled,
+                revoked: bootstrap.revoked,
                 executable: true,
                 upstream_base_url: None,
                 endpoints: context.endpoints.clone(),
                 capabilities: context.capabilities.clone(),
-                regions: provider_settings
-                    .map(|settings| settings.regions.clone())
-                    .filter(|regions| !regions.is_empty())
-                    .unwrap_or_else(|| vec!["*".to_string()]),
-                local_execution: provider_settings.is_some_and(|settings| settings.local_execution),
-                trust_tier,
-                maximum_classification,
-                retention_seconds: provider_settings
-                    .map(|settings| settings.retention_seconds)
-                    .unwrap_or(u32::MAX),
-                training_use: provider_settings.is_none_or(|settings| settings.training_use),
+                regions,
+                local_execution: bootstrap.local_execution,
+                trust_tier: bootstrap.trust_tier,
+                maximum_classification: bootstrap.maximum_classification,
+                retention_seconds: bootstrap.retention_seconds,
+                training_use: bootstrap.training_use,
                 model_costs: builtin_cost_plan.model_costs,
-                cost: 5_000,
-                latency: 5_000,
-                risk: match trust_tier {
-                    RuntimeGatewayProviderRegistryTrustTier::Standard => 8_000,
-                    RuntimeGatewayProviderRegistryTrustTier::Enterprise => 4_000,
-                    RuntimeGatewayProviderRegistryTrustTier::RestrictedApproved => 1_000,
-                },
-                priority: 5_000,
+                cost: bootstrap.cost,
+                latency: bootstrap.latency,
+                risk: bootstrap.risk,
+                priority: bootstrap.priority,
             }],
         })
         .context("failed to encode bootstrap provider registry")?,

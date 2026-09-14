@@ -4,6 +4,7 @@ pub const POLICY_NUMERIC_RELATION_LE: i64 = 2;
 
 mod gateway_admin;
 mod governance;
+mod provider_registry;
 pub use gateway_admin::{
     GatewayAdminRetentionPlan, audit_event_is_expired, audit_hold_is_active,
     audit_retention_cutoff, audit_time_range_contains, compare_audit_positions,
@@ -14,6 +15,10 @@ pub use governance::{
     governance_policy_conditions_overlap, governance_policy_decision_plan,
     governance_policy_effect, governance_policy_rule_matches, governance_policy_shape,
     governance_required_attributes_present, governance_selector_matches,
+};
+pub use provider_registry::{
+    ProviderRegistryBootstrapPlan, ProviderRegistryBootstrapSettings,
+    ProviderRegistryClassification, ProviderRegistryTrustTier, plan_provider_registry_bootstrap,
 };
 
 #[repr(i64)]
