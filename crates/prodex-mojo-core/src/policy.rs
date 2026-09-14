@@ -366,6 +366,10 @@ pub const ACCOUNTING_USAGE_EXCEEDS: i64 = 2;
 pub const ACCOUNTING_SNAPSHOT_AVAILABLE: i64 = 3;
 pub const ACCOUNTING_RESERVE: i64 = 4;
 pub const ACCOUNTING_COMMIT: i64 = 5;
+pub const ACCOUNTING_RECORD: i64 = 6;
+pub const ACCOUNTING_IS_EXPIRED: i64 = 7;
+pub const ACCOUNTING_RELEASE: i64 = 8;
+pub const ACCOUNTING_RECONCILE: i64 = 9;
 pub const GOVERNANCE_MATCH_EXACT: i64 = 0;
 pub const GOVERNANCE_MATCH_MINIMUM: i64 = 1;
 pub const GOVERNANCE_MATCH_MAXIMUM: i64 = 2;
@@ -589,6 +593,19 @@ pub fn accounting_operation(
             4 => crate::MojoError::AbiMismatch,
             _ => crate::MojoError::InvalidOutput,
         });
+    }
+    let valid_result = match operation {
+        ACCOUNTING_USAGE_ADD | ACCOUNTING_SNAPSHOT_AVAILABLE => matches!(result_code, 0 | 1),
+        ACCOUNTING_USAGE_SATURATING_SUB | ACCOUNTING_USAGE_EXCEEDS | ACCOUNTING_IS_EXPIRED => {
+            result_code == 0
+        }
+        ACCOUNTING_RESERVE | ACCOUNTING_COMMIT => (0..=4).contains(&result_code),
+        ACCOUNTING_RECORD => (0..=3).contains(&result_code),
+        ACCOUNTING_RELEASE | ACCOUNTING_RECONCILE => (0..=2).contains(&result_code),
+        _ => false,
+    };
+    if !valid_result {
+        return Err(crate::MojoError::InvalidOutput);
     }
     Ok(AccountingOperation {
         result_code,

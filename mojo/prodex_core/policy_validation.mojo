@@ -501,6 +501,10 @@ comptime ACCOUNTING_USAGE_EXCEEDS: Int64 = 2
 comptime ACCOUNTING_SNAPSHOT_AVAILABLE: Int64 = 3
 comptime ACCOUNTING_RESERVE: Int64 = 4
 comptime ACCOUNTING_COMMIT: Int64 = 5
+comptime ACCOUNTING_RECORD: Int64 = 6
+comptime ACCOUNTING_IS_EXPIRED: Int64 = 7
+comptime ACCOUNTING_RELEASE: Int64 = 8
+comptime ACCOUNTING_RECONCILE: Int64 = 9
 
 
 def accounting_value(
@@ -540,13 +544,19 @@ def prodex_domain_accounting_arithmetic_v1(
     )
     output[unsafe_offset=0] = 0
     output[unsafe_offset=1] = 0
+    output[unsafe_offset=2] = 0
+    output[unsafe_offset=3] = 0
     result[] = 0
     var required: Int64 = 4
     if operation == ACCOUNTING_SNAPSHOT_AVAILABLE:
         required = 6
-    elif operation == ACCOUNTING_RESERVE or operation == ACCOUNTING_COMMIT:
+    elif operation == ACCOUNTING_RESERVE or operation == ACCOUNTING_COMMIT or operation == ACCOUNTING_RECONCILE:
         required = 8
-    if operation < ACCOUNTING_USAGE_ADD or operation > ACCOUNTING_COMMIT or value_count < required:
+    elif operation == ACCOUNTING_IS_EXPIRED:
+        required = 2
+    elif operation == ACCOUNTING_RELEASE:
+        required = 6
+    if operation < ACCOUNTING_USAGE_ADD or operation > ACCOUNTING_RECONCILE or value_count < required:
         return 1
     if required > 0 and values_address == 0:
         return 1
@@ -602,6 +612,44 @@ def prodex_domain_accounting_arithmetic_v1(
                 output[unsafe_offset=1] = reserved_cost[0]
                 output[unsafe_offset=2] = accounting_value(values_address, 2)
                 output[unsafe_offset=3] = accounting_value(values_address, 3)
+        return 0
+    if operation == ACCOUNTING_RECORD:
+        var created_at = accounting_value(values_address, 0)
+        var ttl = accounting_value(values_address, 1)
+        if ttl == 0:
+            result[] = 1
+        elif accounting_value(values_address, 2) == 0 and accounting_value(values_address, 3) == 0:
+            result[] = 2
+        elif created_at > UINT64_MAX - ttl:
+            result[] = 3
+        else:
+            output[unsafe_offset=0] = created_at + ttl
+        return 0
+    if operation == ACCOUNTING_IS_EXPIRED:
+        output[unsafe_offset=0] = UInt64(accounting_value(values_address, 0) >= accounting_value(values_address, 1))
+        return 0
+    if operation == ACCOUNTING_RELEASE:
+        if accounting_value(values_address, 4) < accounting_value(values_address, 5):
+            result[] = 1
+        elif accounting_value(values_address, 2) > accounting_value(values_address, 0) or accounting_value(values_address, 3) > accounting_value(values_address, 1):
+            result[] = 2
+        else:
+            output[unsafe_offset=0] = accounting_value(values_address, 0) - accounting_value(values_address, 2)
+            output[unsafe_offset=1] = accounting_value(values_address, 1) - accounting_value(values_address, 3)
+        return 0
+    if operation == ACCOUNTING_RECONCILE:
+        if accounting_value(values_address, 4) > accounting_value(values_address, 0) or accounting_value(values_address, 5) > accounting_value(values_address, 1):
+            result[] = 1
+            return 0
+        var reconciled_tokens = accounting_checked_add(accounting_value(values_address, 2), accounting_value(values_address, 6))
+        var reconciled_cost = accounting_checked_add(accounting_value(values_address, 3), accounting_value(values_address, 7))
+        if reconciled_tokens[1] == 1 or reconciled_cost[1] == 1:
+            result[] = 2
+        else:
+            output[unsafe_offset=0] = accounting_value(values_address, 0) - accounting_value(values_address, 4)
+            output[unsafe_offset=1] = accounting_value(values_address, 1) - accounting_value(values_address, 5)
+            output[unsafe_offset=2] = reconciled_tokens[0]
+            output[unsafe_offset=3] = reconciled_cost[0]
         return 0
     if accounting_value(values_address, 6) == 0 and accounting_value(values_address, 7) == 0:
         result[] = 1
