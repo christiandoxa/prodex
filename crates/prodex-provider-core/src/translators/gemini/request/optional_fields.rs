@@ -7,12 +7,7 @@ pub(crate) fn gemini_apply_optional_request_fields(
     source: &serde_json::Map<String, Value>,
     request: &mut serde_json::Map<String, Value>,
 ) {
-    use super::super::request::GeminiRequestFieldScope;
-
-    for field in super::super::request::gemini_request_field_plan(
-        source,
-        GeminiRequestFieldScope::OptionalRequest,
-    ) {
+    for field in super::super::request::gemini_optional_request_field_plan(source) {
         let Some(value) = super::super::request::gemini_request_source_value(source, field) else {
             continue;
         };

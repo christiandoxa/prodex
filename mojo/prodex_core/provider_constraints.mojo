@@ -2549,7 +2549,7 @@ def gemini_bridge_request_write_generation_config(
 
     var format_kind = gemini_bridge_request_text_format_kind(original, original_bounds)
     if not gemini_bridge_request_put_source_pair(
-        original, original_bounds, 6, 7, StringSlice("\"topK\":"), True, writer, first_ptr
+        original, original_bounds, 7, 6, StringSlice("\"topK\":"), True, writer, first_ptr
     ) or not gemini_bridge_request_put_source_pair(
         original, original_bounds, 8, -1, StringSlice("\"seed\":"), True, writer, first_ptr
     ) or not gemini_bridge_request_put_source_pair(

@@ -6,6 +6,7 @@ mod thinking;
 use serde_json::Value;
 
 pub use self::thinking::gemini_provider_core_model_uses_thinking_level;
+#[cfg(not(feature = "mojo"))]
 pub(in crate::translators::gemini) use self::thinking::gemini_thinking_config_from_request;
 #[cfg(not(feature = "mojo"))]
 use self::thinking::gemini_thinking_config_with_budget_from_request;
@@ -29,38 +30,6 @@ pub(crate) fn gemini_config_value(
         .unwrap_or_else(|error| panic!("Mojo Gemini config kernel failed: {error:?}"));
     serde_json::from_slice(&body)
         .unwrap_or_else(|error| panic!("Mojo Gemini config kernel returned invalid JSON: {error}"))
-}
-
-#[cfg(feature = "mojo")]
-fn gemini_apply_mojo_generation_fields(
-    obj: &serde_json::Map<String, Value>,
-    generation_config: &mut serde_json::Map<String, Value>,
-    scope: super::GeminiRequestFieldScope,
-) {
-    for field in super::gemini_request_field_plan(obj, scope) {
-        let Some(value) = super::gemini_request_source_value(obj, field) else {
-            continue;
-        };
-        if value.is_null() {
-            continue;
-        }
-        generation_config.insert(
-            super::gemini_request_target_name(field.target).to_string(),
-            value.clone(),
-        );
-    }
-}
-
-#[cfg(feature = "mojo")]
-pub(in crate::translators::gemini) fn gemini_insert_basic_generation_config(
-    obj: &serde_json::Map<String, Value>,
-    generation_config: &mut serde_json::Map<String, Value>,
-) {
-    gemini_apply_mojo_generation_fields(
-        obj,
-        generation_config,
-        super::GeminiRequestFieldScope::BasicGeneration,
-    );
 }
 
 #[cfg(not(feature = "mojo"))]
@@ -210,18 +179,6 @@ fn gemini_insert_additional_generation_config(
     }
 }
 
-#[cfg(feature = "mojo")]
-pub(in crate::translators::gemini) fn gemini_insert_extended_generation_config(
-    obj: &serde_json::Map<String, Value>,
-    generation_config: &mut serde_json::Map<String, Value>,
-) {
-    gemini_apply_mojo_generation_fields(
-        obj,
-        generation_config,
-        super::GeminiRequestFieldScope::ExtendedGeneration,
-    );
-}
-
 #[cfg(not(feature = "mojo"))]
 pub(in crate::translators::gemini) fn gemini_insert_extended_generation_config(
     obj: &serde_json::Map<String, Value>,
@@ -261,31 +218,6 @@ pub(in crate::translators::gemini) fn gemini_insert_extended_generation_config(
     {
         generation_config.insert("candidateCount".to_string(), value.clone());
     }
-}
-
-#[cfg(feature = "mojo")]
-pub(in crate::translators::gemini) fn gemini_apply_text_format(
-    obj: &serde_json::Map<String, Value>,
-    generation_config: &mut serde_json::Map<String, Value>,
-) {
-    let Some(text) = obj.get("text").and_then(Value::as_object) else {
-        return;
-    };
-    let Some(format) = text.get("format").and_then(Value::as_object) else {
-        return;
-    };
-    let encoded = serde_json::to_string(format).expect("Gemini text format serializes");
-    let Value::Object(fields) = gemini_config_value(
-        prodex_mojo_core::rich::GeminiConfigKernelOperation::TextFormat,
-        Some(&encoded),
-        None,
-        None,
-        None,
-        None,
-    ) else {
-        return;
-    };
-    generation_config.extend(fields);
 }
 
 #[cfg(not(feature = "mojo"))]
