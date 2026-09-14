@@ -212,6 +212,15 @@ fn gemini_provider_core_shapes_stream_tool_calls() {
     assert_eq!(explicit.call_id, "call_1");
     assert_eq!(explicit.name, "shell");
     assert_eq!(
+        gemini_provider_core_stream_tool_call(9, 4, Some(""), Some(""), "{}", None),
+        GeminiProviderCoreStreamToolCall {
+            call_id: String::new(),
+            name: String::new(),
+            arguments: "{}".to_string(),
+            thought_signature: None,
+        }
+    );
+    assert_eq!(
         gemini_provider_core_stream_tool_call_ids(&[
             fallback.clone(),
             GeminiProviderCoreStreamToolCall {
