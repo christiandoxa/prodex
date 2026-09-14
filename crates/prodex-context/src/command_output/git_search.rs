@@ -309,10 +309,38 @@ fn is_git_diff_changed_detail_line(line: &str) -> bool {
         && !line.trim_start_matches(['+', '-']).trim().is_empty()
 }
 
+#[cfg(feature = "mojo")]
 pub(super) fn compact_git_log_stat_output(
     input: &str,
     options: &CommandOutputCompactOptions,
 ) -> String {
+    let Some(body) = prodex_mojo_core::rich::context_git_log_output(
+        input,
+        options.max_lines,
+        options.max_line_chars,
+        options.max_path_entries,
+    )
+    .unwrap_or_else(|error| panic!("Mojo git-log formatter failed: {error:?}")) else {
+        return smart_truncate_command_output(input, options);
+    };
+    let lines = body
+        .trim_end_matches('\n')
+        .split('\n')
+        .map(str::to_owned)
+        .collect();
+    finalize_compacted_command_output(CommandOutputKind::GitLog, input, lines, options)
+}
+
+#[cfg(not(feature = "mojo"))]
+pub(super) fn compact_git_log_stat_output(
+    input: &str,
+    options: &CommandOutputCompactOptions,
+) -> String {
+    compact_git_log_stat_output_rust(input, options)
+}
+
+#[cfg(any(not(feature = "mojo"), test))]
+fn compact_git_log_stat_output_rust(input: &str, options: &CommandOutputCompactOptions) -> String {
     let lines = command_lines(input);
     let commits = parse_git_log_stat_commits(&lines);
     if commits.is_empty() {

@@ -247,3 +247,47 @@ fn public_mojo_search_formatter_matches_rust_oracle() {
         search_oracle(&input, &options)
     );
 }
+
+fn git_log_oracle(input: &str, options: &CommandOutputCompactOptions) -> String {
+    let normalized = normalize_command_output(input);
+    let output = compact_git_log_stat_output_rust(&normalized, options);
+    if options.max_lines <= 12 {
+        output
+    } else {
+        canonicalize_compacted_command_paths(&normalized, &output, CommandOutputKind::GitLog)
+    }
+}
+
+#[test]
+fn public_mojo_git_log_formatter_matches_rust_oracle() {
+    let cases = [
+        "",
+        "ordinary output\n",
+        "commit 0123456789abcdef (HEAD -> main)\nAuthor: Test User <test@example.com>\nDate: Mon Sep 14 12:00:00 2026 +0000\n\n    add feature\n\n src/lib.rs | 2 ++\n 1 file changed, 2 insertions(+)\n",
+        "0123456 subject one\n a.rs | 1 +\n b.rs | 2 +-\n 2 files changed, 2 insertions(+), 1 deletion(-)\n89abcde subject two\n no stats here\nabcdef0 subject three\n image.png | Bin 0 -> 12 bytes\n 1 file changed, 0 insertions(+), 0 deletions(-)\n",
+        "commit abcdef0\nAuthor: A\nAuthor: A\n    café change\n    café change\n src/文件.rs | 3 ++-\n src/文件.rs | 3 ++-\n 1 file changed, 2 insertions(+), 1 deletion(-)\n",
+    ];
+    for (max_lines, max_paths, max_chars) in [
+        (0, 0, 0),
+        (1, 1, 24),
+        (23, 2, 25),
+        (24, 8, 64),
+        (25, 120, 240),
+        (usize::MAX, usize::MAX, usize::MAX),
+    ] {
+        let options = CommandOutputCompactOptions {
+            kind: CommandOutputKind::GitLog,
+            max_lines,
+            max_line_chars: max_chars,
+            max_path_entries: max_paths,
+            ..CommandOutputCompactOptions::default()
+        };
+        for input in cases {
+            assert_eq!(
+                compact_command_output_with_options(input, &options).output,
+                git_log_oracle(input, &options),
+                "max_lines={max_lines}, max_paths={max_paths}, max_chars={max_chars}, input={input:?}",
+            );
+        }
+    }
+}

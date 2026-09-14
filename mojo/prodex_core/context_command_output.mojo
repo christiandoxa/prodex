@@ -2,6 +2,7 @@ from std.memory import Pointer
 
 from context_command_output_common import (
     CONTEXT_COMMAND_OUTPUT_FILE_LIST,
+    CONTEXT_COMMAND_OUTPUT_GIT_LOG,
     CONTEXT_COMMAND_OUTPUT_GIT_STATUS,
     CONTEXT_COMMAND_OUTPUT_MAX_BYTES,
     CONTEXT_COMMAND_OUTPUT_SEARCH,
@@ -45,6 +46,7 @@ from context_text import (
     context_text_trim_bounds,
 )
 from context_command_output_file_list import context_command_output_file_list
+from context_command_output_git_log import context_command_output_git_log
 from rich_text import rich_view_ptr, rich_view_valid
 
 
@@ -79,6 +81,7 @@ def prodex_mojo_context_command_output_size_v1(
         value.operation != CONTEXT_COMMAND_OUTPUT_GIT_STATUS
         and value.operation != CONTEXT_COMMAND_OUTPUT_FILE_LIST
         and value.operation != CONTEXT_COMMAND_OUTPUT_SEARCH
+        and value.operation != CONTEXT_COMMAND_OUTPUT_GIT_LOG
     ):
         return CONTEXT_COMMAND_OUTPUT_STATUS_INVALID
     if not rich_view_valid(value.input, CONTEXT_COMMAND_OUTPUT_MAX_BYTES):
@@ -507,6 +510,7 @@ def prodex_mojo_context_command_output_v1(
     if (
         value.operation != CONTEXT_COMMAND_OUTPUT_GIT_STATUS
         and value.operation != CONTEXT_COMMAND_OUTPUT_FILE_LIST
+        and value.operation != CONTEXT_COMMAND_OUTPUT_GIT_LOG
     ):
         return CONTEXT_COMMAND_OUTPUT_STATUS_INVALID
     if not rich_view_valid(value.input, CONTEXT_COMMAND_OUTPUT_MAX_BYTES):
@@ -534,6 +538,14 @@ def prodex_mojo_context_command_output_v1(
             Pointer(to=scratch_writer),
             hash_slots,
             hash_capacity,
+        )
+        if value.operation == CONTEXT_COMMAND_OUTPUT_FILE_LIST
+        else context_command_output_git_log(
+            value,
+            Pointer(to=writer),
+            records,
+            record_capacity,
+            Pointer(to=scratch_writer),
         )
     )
     written[] = writer.written

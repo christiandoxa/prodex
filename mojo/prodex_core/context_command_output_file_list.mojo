@@ -490,7 +490,11 @@ def context_file_list_write_truncated(
             writer, 10
         )
     var tail_chars = min(UInt64(16), max_chars / 3)
-    var head_chars = max_chars - tail_chars - 24
+    var head_chars = (
+        max_chars - tail_chars - 24
+        if max_chars > tail_chars + 24
+        else UInt64(0)
+    )
     var head_end = start
     for _ in range(Int64(head_chars)):
         head_end += context_text_codepoint_width(ptr[unsafe_offset=head_end])
