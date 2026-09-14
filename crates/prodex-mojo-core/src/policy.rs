@@ -355,6 +355,14 @@ pub const GOVERNANCE_OBLIGATION_MAX_CONTEXT: i64 = 10;
 pub const GOVERNANCE_OBLIGATION_SESSION_IDLE: i64 = 11;
 pub const GOVERNANCE_OBLIGATION_SESSION_ABSOLUTE: i64 = 12;
 pub const GOVERNANCE_OBLIGATION_MIN_AUTHENTICATION: i64 = 13;
+pub const GOVERNANCE_APPROVAL_INVALID: i64 = 0;
+pub const GOVERNANCE_APPROVAL_VOTE_PENDING: i64 = 1;
+pub const GOVERNANCE_APPROVAL_VOTE_APPROVED: i64 = 2;
+pub const GOVERNANCE_APPROVAL_REJECT: i64 = 3;
+pub const GOVERNANCE_APPROVAL_CANCEL: i64 = 4;
+pub const GOVERNANCE_APPROVAL_ACTIVATE: i64 = 5;
+pub const GOVERNANCE_APPROVAL_SUPERSEDE: i64 = 6;
+pub const GOVERNANCE_APPROVAL_ROLLBACK: i64 = 7;
 
 #[repr(C)]
 #[derive(Debug, Clone, Copy)]
@@ -366,6 +374,14 @@ struct GovernanceObligationPredicateInput {
 }
 
 unsafe extern "C" {
+    fn prodex_mojo_governance_approval_transition_v1(
+        abi_version: i64,
+        state: i64,
+        action: i64,
+        vote_count: u64,
+        required_quorum: u64,
+        output: u64,
+    ) -> i64;
     fn prodex_mojo_governance_obligation_predicate_v1(
         abi_version: i64,
         mode: i64,
@@ -384,6 +400,36 @@ unsafe extern "C" {
         last_known_good_invalidated: i64,
         output: u64,
     ) -> i64;
+}
+
+pub fn governance_approval_transition(
+    state: i64,
+    action: i64,
+    vote_count: usize,
+    required_quorum: u8,
+) -> Result<i64, crate::MojoError> {
+    let mut output = -1_i64;
+    let status = unsafe {
+        prodex_mojo_governance_approval_transition_v1(
+            6,
+            state,
+            action,
+            u64::try_from(vote_count).map_err(|_| crate::MojoError::InvalidInput)?,
+            u64::from(required_quorum),
+            (&mut output as *mut i64) as u64,
+        )
+    };
+    if status != 0 {
+        return Err(match status {
+            1 | 2 => crate::MojoError::InvalidInput,
+            4 => crate::MojoError::AbiMismatch,
+            _ => crate::MojoError::InvalidOutput,
+        });
+    }
+    (GOVERNANCE_APPROVAL_INVALID..=GOVERNANCE_APPROVAL_ROLLBACK)
+        .contains(&output)
+        .then_some(output)
+        .ok_or(crate::MojoError::InvalidOutput)
 }
 
 fn governance_obligation_predicate(

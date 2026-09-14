@@ -60,6 +60,43 @@ comptime GOVERNANCE_PREDICATE_MATCH: Int64 = 0
 comptime GOVERNANCE_PREDICATE_OVERLAP: Int64 = 1
 
 
+@export("prodex_mojo_governance_approval_transition_v1")
+def prodex_mojo_governance_approval_transition_v1(
+    abi_version: Int64,
+    state: Int64,
+    action: Int64,
+    vote_count: UInt64,
+    required_quorum: UInt64,
+    output_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != PRODEX_RICH_ABI_VERSION:
+        return RICH_STATUS_ABI
+    if state < 0 or state > 8 or action < 0 or action > 5 or required_quorum == 0 or required_quorum > 16 or output_address == 0:
+        return RICH_STATUS_INVALID
+    var output = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    output[] = 0
+    if action == 0:
+        if state == 1:
+            output[] = 2 if vote_count >= required_quorum - 1 else 1
+    elif action == 1:
+        if state == 1:
+            output[] = 3
+    elif action == 2:
+        if state == 0 or state == 1:
+            output[] = 4
+    elif action == 3:
+        if state == 2:
+            output[] = 5
+    elif action == 4:
+        if state == 6:
+            output[] = 6
+    elif state == 6:
+        output[] = 7
+    return RICH_STATUS_OK
+
+
 @fieldwise_init
 struct GovernanceOptionalValuePair(Copyable):
     var left: Int64
