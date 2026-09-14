@@ -32,6 +32,38 @@ comptime AUDIT_EVENT_EXPIRED: Int64 = 3
 comptime AUDIT_HOLD_ACTIVE: Int64 = 4
 
 
+@export("prodex_mojo_policy_refresh_decision_v1")
+def prodex_mojo_policy_refresh_decision_v1(
+    abi_version: Int64,
+    refresh_after_unix_ms: UInt64,
+    stale_after_unix_ms: UInt64,
+    expires_after_unix_ms: UInt64,
+    now_unix_ms: UInt64,
+    active_invalidated: Int64,
+    last_known_good_present: Int64,
+    last_known_good_invalidated: Int64,
+    output_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != 1:
+        return GATEWAY_ADMIN_POLICY_STATUS_ABI
+    if output_address == 0 or active_invalidated < 0 or active_invalidated > 1 or last_known_good_present < 0 or last_known_good_present > 1 or last_known_good_invalidated < 0 or last_known_good_invalidated > 1 or refresh_after_unix_ms > stale_after_unix_ms or stale_after_unix_ms > expires_after_unix_ms:
+        return GATEWAY_ADMIN_POLICY_STATUS_INVALID
+    var output = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    if active_invalidated == 1:
+        output[] = 4
+    elif now_unix_ms >= expires_after_unix_ms:
+        output[] = 3
+    elif now_unix_ms >= stale_after_unix_ms and last_known_good_present == 1 and last_known_good_invalidated == 0:
+        output[] = 2
+    elif now_unix_ms >= refresh_after_unix_ms:
+        output[] = 1
+    else:
+        output[] = 0
+    return GATEWAY_ADMIN_POLICY_STATUS_OK
+
+
 @export("prodex_mojo_audit_decision_v1")
 def prodex_mojo_audit_decision_v1(
     abi_version: Int64,
