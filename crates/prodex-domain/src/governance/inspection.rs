@@ -109,6 +109,7 @@ impl FindingKind {
     }
 
     #[cfg(any(test, not(feature = "mojo")))]
+    #[cfg_attr(all(test, feature = "mojo"), allow(dead_code))]
     fn minimum_classification_rust(self) -> DataClassification {
         match self {
             Self::EmailAddress

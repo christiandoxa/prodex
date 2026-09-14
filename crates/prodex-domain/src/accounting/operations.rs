@@ -235,7 +235,7 @@ pub fn release_expired_reservation(
             ],
         )
         .expect("Mojo expired reservation release returned invalid output");
-        return match result.result_code {
+        match result.result_code {
             0 => Ok((
                 BudgetSnapshot {
                     reserved: UsageAmount::new(result.values[0], result.values[1]),
@@ -248,7 +248,7 @@ pub fn release_expired_reservation(
                 reserved: record.reserved,
                 available: snapshot.reserved,
             }),
-        };
+        }
     }
 
     #[cfg(not(feature = "mojo"))]

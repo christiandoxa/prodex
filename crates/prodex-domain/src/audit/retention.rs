@@ -159,6 +159,7 @@ impl fmt::Debug for AuditRetentionPlan {
 }
 
 impl AuditRetentionPlan {
+    #[cfg(any(test, not(feature = "mojo")))]
     const MILLIS_PER_DAY: u64 = 86_400_000;
 
     pub fn new(scope: AuditQueryScope, policy: AuditRetentionPolicy, now: AuditTimestamp) -> Self {
@@ -182,6 +183,7 @@ impl AuditRetentionPlan {
     }
 
     #[cfg(any(test, not(feature = "mojo")))]
+    #[cfg_attr(all(test, feature = "mojo"), allow(dead_code))]
     fn cutoff_rust(self) -> AuditTimestamp {
         let retention_ms = u64::from(self.policy.days()) * Self::MILLIS_PER_DAY;
         let cutoff = self
@@ -505,6 +507,7 @@ impl AuditRetentionHold {
     }
 
     #[cfg(any(test, not(feature = "mojo")))]
+    #[cfg_attr(all(test, feature = "mojo"), allow(dead_code))]
     fn is_active_rust(&self, now: AuditTimestamp) -> bool {
         self.expires_at
             .is_none_or(|expires_at| now.unix_ms() <= expires_at.unix_ms())

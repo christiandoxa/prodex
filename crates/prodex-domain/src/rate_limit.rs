@@ -301,6 +301,7 @@ pub fn evaluate_rate_limit(
 }
 
 #[cfg(any(test, not(feature = "mojo")))]
+#[cfg_attr(all(test, feature = "mojo"), allow(dead_code))]
 fn evaluate_rate_limit_rust(
     rule: RateLimitRule,
     snapshot: RateLimitSnapshot,

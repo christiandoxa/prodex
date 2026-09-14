@@ -235,6 +235,7 @@ impl PolicyRuleCondition {
     }
 
     #[cfg(any(test, not(feature = "mojo")))]
+    #[cfg_attr(all(test, feature = "mojo"), allow(dead_code))]
     fn matches_rust(&self, input: &PolicyInput<'_>) -> bool {
         self.channel.is_none_or(|value| value == input.channel)
             && self

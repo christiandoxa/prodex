@@ -154,6 +154,7 @@ pub fn compile_classification_rule_set(
 }
 
 #[cfg(any(test, not(feature = "mojo")))]
+#[cfg_attr(all(test, feature = "mojo"), allow(dead_code))]
 fn compile_classification_rule_set_rust(
     mut rule_set: ClassificationRuleSet,
 ) -> Result<CompiledClassificationRuleSet, ClassificationError> {
@@ -323,6 +324,7 @@ pub fn classify_inspection(
 }
 
 #[cfg(any(test, not(feature = "mojo")))]
+#[cfg_attr(all(test, feature = "mojo"), allow(dead_code))]
 fn classify_inspection_rust(
     rules: &CompiledClassificationRuleSet,
     request: ClassificationRequest<'_>,

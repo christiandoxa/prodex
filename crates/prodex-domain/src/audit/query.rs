@@ -585,6 +585,7 @@ impl AuditTimeRange {
     }
 
     #[cfg(any(test, not(feature = "mojo")))]
+    #[cfg_attr(all(test, feature = "mojo"), allow(dead_code))]
     fn contains_rust(self, timestamp: AuditTimestamp) -> bool {
         self.start
             .is_none_or(|start| timestamp.unix_ms() >= start.unix_ms())
@@ -691,6 +692,7 @@ pub(super) fn compare_audit_events(
 }
 
 #[cfg(any(test, not(feature = "mojo")))]
+#[cfg_attr(all(test, feature = "mojo"), allow(dead_code))]
 fn compare_audit_positions_rust(
     left_timestamp: u64,
     left_id: AuditEventId,

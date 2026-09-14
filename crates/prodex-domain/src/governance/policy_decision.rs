@@ -519,7 +519,10 @@ fn governance_policy_decision_plan_rust(
         .iter()
         .filter_map(|(matched, effect)| matched.then_some(*effect))
         .collect::<Vec<_>>();
-    (governance_policy_effect(&effects, default_effect), matched)
+    (
+        governance_policy_effect_rust(&effects, default_effect),
+        matched,
+    )
 }
 
 #[cfg(feature = "mojo")]
@@ -532,29 +535,9 @@ fn policy_effect_from_i64(effect: i64) -> PolicyEffect {
     }
 }
 
-#[cfg(feature = "mojo")]
-fn governance_policy_effect(
-    effects: &[PolicyEffect],
-    default_effect: PolicyEffect,
-) -> PolicyEffect {
-    match prodex_mojo_core::policy::governance_policy_effect(
-        &effects
-            .iter()
-            .map(|effect| *effect as i64)
-            .collect::<Vec<_>>(),
-        default_effect as i64,
-    )
-    .expect("Mojo governance effect planner returned invalid output")
-    {
-        0 => PolicyEffect::Allow,
-        1 => PolicyEffect::RequireApproval,
-        2 => PolicyEffect::Deny,
-        _ => PolicyEffect::Deny,
-    }
-}
-
-#[cfg(not(feature = "mojo"))]
-fn governance_policy_effect(
+#[cfg(any(test, not(feature = "mojo")))]
+#[cfg_attr(all(test, feature = "mojo"), allow(dead_code))]
+fn governance_policy_effect_rust(
     effects: &[PolicyEffect],
     default_effect: PolicyEffect,
 ) -> PolicyEffect {
@@ -609,6 +592,7 @@ fn policy_required_attributes_present(
 }
 
 #[cfg(any(test, not(feature = "mojo")))]
+#[cfg_attr(all(test, feature = "mojo"), allow(dead_code))]
 fn policy_required_attributes_present_rust(
     policy: &CompiledGovernancePolicy,
     input: &PolicyInput<'_>,
