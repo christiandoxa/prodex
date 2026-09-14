@@ -39,6 +39,7 @@ pub(super) fn compact_log_stream_output(
     }
 }
 
+#[cfg(not(feature = "mojo"))]
 pub(super) fn looks_like_log_stream_output(lines: &[&str]) -> bool {
     let non_empty = lines.iter().filter(|line| !line.trim().is_empty()).count();
     if non_empty < 8 {

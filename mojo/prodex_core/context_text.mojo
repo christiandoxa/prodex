@@ -3939,6 +3939,22 @@ def context_text_skip_ansi_escape(
     return index + 1
 
 
+def context_text_find_line(
+    ptr: Pointer[mut=False, UInt8, _], start: Int64, length: Int64
+) -> InlineArray[Int64, 2]:
+    var end = context_search_find_byte(ptr, start, length, 10)
+    if end < 0:
+        end = length
+        var result = InlineArray[Int64, 2](fill=0)
+        result[0] = end
+        result[1] = end
+        return result^
+    var result = InlineArray[Int64, 2](fill=0)
+    result[0] = end
+    result[1] = end + 1
+    return result^
+
+
 @export("prodex_context_normalize_command_output_v1")
 def prodex_context_normalize_command_output_v1(
     abi_version: Int64,
@@ -3998,6 +4014,366 @@ def prodex_context_normalize_command_output_v1(
     while compacted > 1 and output[unsafe_offset=compacted - 1] == 10 and output[unsafe_offset=compacted - 2] == 10:
         compacted -= 1
     written[] = compacted
+    return 0
+
+
+def context_output_diff_stat_line(
+    ptr: Pointer[mut=False, UInt8, _], start: Int64, end: Int64
+) -> Bool:
+    var separator = context_text_ascii_find[" | "](ptr, start, end)
+    if separator < 0 or separator == start or separator + 3 >= end:
+        return False
+    for index in range(separator + 3, end):
+        var value = ptr[unsafe_offset=index]
+        if value == 43 or value == 45 or value >= 48 and value <= 57:
+            return True
+    return False
+
+
+def context_output_diff_stat_summary(
+    ptr: Pointer[mut=False, UInt8, _], start: Int64, end: Int64
+) -> Bool:
+    return (
+        context_text_ascii_contains[" file changed"](ptr, start, end)
+        or context_text_ascii_contains[" files changed"](ptr, start, end)
+        or context_text_ascii_contains[" insertion"](ptr, start, end)
+        or context_text_ascii_contains[" deletion"](ptr, start, end)
+    )
+
+
+def context_output_short_status_line(
+    ptr: Pointer[mut=False, UInt8, _], start: Int64, end: Int64
+) -> Bool:
+    if end - start < 3 or ptr[unsafe_offset=start + 2] != 32:
+        return False
+    for index in range(start, start + 2):
+        var value = ptr[unsafe_offset=index]
+        if not (
+            value == 32
+            or value == 63
+            or value == 33
+            or value == 65
+            or value == 67
+            or value == 68
+            or value == 77
+            or value == 82
+            or value == 85
+            or value == 84
+        ):
+            return False
+    return True
+
+
+def context_output_log_level_line(
+    ptr: Pointer[mut=False, UInt8, _], start: Int64, end: Int64
+) -> Bool:
+    return (
+        context_text_ascii_starts_at["info"](ptr, start, end)
+        or context_text_ascii_starts_at["debug"](ptr, start, end)
+        or context_text_ascii_starts_at["trace"](ptr, start, end)
+        or context_text_ascii_starts_at["warn"](ptr, start, end)
+        or context_text_ascii_starts_at["warning"](ptr, start, end)
+        or context_text_ascii_starts_at["error"](ptr, start, end)
+        or context_text_ascii_starts_at["fatal"](ptr, start, end)
+        or context_text_ascii_starts_at["[info]"](ptr, start, end)
+        or context_text_ascii_starts_at["[warn]"](ptr, start, end)
+        or context_text_ascii_starts_at["[error]"](ptr, start, end)
+        or context_text_ascii_contains[" info "](ptr, start, end)
+        or context_text_ascii_contains[" warn "](ptr, start, end)
+        or context_text_ascii_contains[" error "](ptr, start, end)
+        or context_text_ascii_contains[" fatal "](ptr, start, end)
+        or context_text_ascii_contains["\"level\":\"info\""](ptr, start, end)
+        or context_text_ascii_contains["\"level\":\"warn\""](ptr, start, end)
+        or context_text_ascii_contains["\"level\":\"error\""](ptr, start, end)
+    )
+
+
+def context_output_numbered_match(
+    ptr: Pointer[mut=False, UInt8, _], start: Int64, end: Int64
+) -> Bool:
+    var cursor = start
+    if cursor >= end or ptr[unsafe_offset=cursor] < 48 or ptr[unsafe_offset=cursor] > 57:
+        return False
+    while cursor < end and ptr[unsafe_offset=cursor] >= 48 and ptr[unsafe_offset=cursor] <= 57:
+        cursor += 1
+    return cursor < end and ptr[unsafe_offset=cursor] == 58
+
+
+def context_output_ls_row(
+    ptr: Pointer[mut=False, UInt8, _], start: Int64, end: Int64
+) -> Bool:
+    if end - start < 10:
+        return False
+    var first = ptr[unsafe_offset=start]
+    if first != 45 and first != 100 and first != 108:
+        return False
+    var spaces: Int64 = 0
+    for index in range(start, end):
+        if ptr[unsafe_offset=index] == 32:
+            spaces += 1
+    return spaces >= 7
+
+
+def context_text_put_byte(
+    output: Pointer[mut=True, UInt8, _], position: Pointer[mut=True, Int64, _], capacity: Int64, value: UInt8
+) -> Bool:
+    if position[] >= capacity:
+        return False
+    output[unsafe_offset=position[]] = value
+    position[] += 1
+    return True
+
+
+def context_text_put_literal(
+    output: Pointer[mut=True, UInt8, _], position: Pointer[mut=True, Int64, _], capacity: Int64, literal: StringSlice
+) -> Bool:
+    var ptr = literal.unsafe_ptr()
+    for index in range(Int64(literal.byte_length())):
+        if not context_text_put_byte(output, position, capacity, ptr[unsafe_offset=index]):
+            return False
+    return True
+
+
+def context_text_put_i64(
+    output: Pointer[mut=True, UInt8, _], position: Pointer[mut=True, Int64, _], capacity: Int64, value: Int64
+) -> Bool:
+    if value == 0:
+        return context_text_put_byte(output, position, capacity, 48)
+    var number = value if value >= 0 else -value
+    if value < 0 and not context_text_put_byte(output, position, capacity, 45):
+        return False
+    var start = position[]
+    while number > 0:
+        if not context_text_put_byte(output, position, capacity, UInt8(number % 10) + 48):
+            return False
+        number //= 10
+    var end = position[] - 1
+    while start < end:
+        var left = output[unsafe_offset=start]
+        output[unsafe_offset=start] = output[unsafe_offset=end]
+        output[unsafe_offset=end] = left
+        start += 1
+        end -= 1
+    return True
+
+
+def context_text_write_truncated_line(
+    ptr: Pointer[mut=False, UInt8, _], start: Int64, end: Int64,
+    output: Pointer[mut=True, UInt8, _], position: Pointer[mut=True, Int64, _], capacity: Int64,
+    max_chars: Int64,
+) -> Bool:
+    var character_count: Int64 = 0
+    var cursor = start
+    while cursor < end:
+        cursor += context_text_codepoint_width(ptr[unsafe_offset=cursor])
+        character_count += 1
+    if character_count <= max_chars:
+        for index in range(start, end):
+            if not context_text_put_byte(output, position, capacity, ptr[unsafe_offset=index]):
+                return False
+        return True
+    var tail_chars = 16 if max_chars // 3 > 16 else max_chars // 3
+    var head_chars = max_chars - tail_chars - 24 if max_chars > tail_chars + 24 else 0
+    cursor = start
+    for _ in range(head_chars):
+        var next = cursor + context_text_codepoint_width(ptr[unsafe_offset=cursor])
+        for index in range(cursor, next):
+            if not context_text_put_byte(output, position, capacity, ptr[unsafe_offset=index]):
+                return False
+        cursor = next
+    if not context_text_put_literal(output, position, capacity, StringSlice(" [... ")) or not context_text_put_i64(
+        output, position, capacity, character_count - head_chars - tail_chars
+    ) or not context_text_put_literal(output, position, capacity, StringSlice(" chars omitted ...] ")):
+        return False
+    var tail_start = end
+    var remaining = tail_chars
+    while tail_start > start and remaining > 0:
+        var previous = tail_start - 1
+        while previous > start and context_text_is_utf8_continuation(ptr[unsafe_offset=previous]):
+            previous -= 1
+        tail_start = previous
+        remaining -= 1
+    for index in range(tail_start, end):
+        if not context_text_put_byte(output, position, capacity, ptr[unsafe_offset=index]):
+            return False
+    return True
+
+
+@export("prodex_context_truncate_command_output_v1")
+def prodex_context_truncate_command_output_v1(
+    abi_version: Int64,
+    input: Pointer[mut=False, ProdexStringView, _],
+    output: Pointer[mut=True, UInt8, _],
+    output_capacity: Int64,
+    max_lines: Int64,
+    head_lines: Int64,
+    tail_lines: Int64,
+    max_line_chars: Int64,
+    written: Pointer[mut=True, Int64, _],
+) abi("C") -> Int64:
+    written[] = 0
+    if abi_version != CONTEXT_TEXT_ABI_VERSION or output_capacity <= 0 or max_lines < 1:
+        return 1
+    var view = input[].copy()
+    if not context_text_is_valid_utf8(view.ptr.unsafe_value(), Int64(view.len)):
+        return 1
+    var ptr = view.ptr.unsafe_value()
+    var length = Int64(view.len)
+    while length > 0 and ptr[unsafe_offset=length - 1] == 10:
+        length -= 1
+    if length == 0:
+        return 0
+    var line_count: Int64 = 1
+    for index in range(length):
+        if ptr[unsafe_offset=index] == 10:
+            line_count += 1
+    var head = head_lines if head_lines < max_lines else max_lines
+    var tail = tail_lines if tail_lines < max_lines - head else max_lines - head
+    if head + tail == 0:
+        head = max_lines
+    var position: Int64 = 0
+    var line_index: Int64 = 0
+    # ponytail: O(n²) line lookup keeps the ABI allocation-free; add an index only if profiling proves it matters.
+    while line_index < line_count:
+        var keep = line_count <= max_lines or line_index < head or line_index >= line_count - tail
+        if keep:
+            if line_index > 0 and position > 0 and output[unsafe_offset=position - 1] != 10:
+                if not context_text_put_byte(output, Pointer(to=position), output_capacity, 10):
+                    return 3
+            var start: Int64 = 0
+            var seen: Int64 = 0
+            while seen < line_index:
+                var next = context_search_find_byte(ptr, start, length, 10)
+                start = next + 1
+                seen += 1
+            var end = context_search_find_byte(ptr, start, length, 10)
+            if end < 0:
+                end = length
+            if not context_text_write_truncated_line(ptr, start, end, output, Pointer(to=position), output_capacity, max_line_chars if max_line_chars > 24 else 24):
+                return 3
+            if not context_text_put_byte(output, Pointer(to=position), output_capacity, 10):
+                return 3
+        line_index += 1
+        if line_count > max_lines and line_index == head:
+            var omitted = line_count - head - tail
+            if not context_text_put_literal(output, Pointer(to=position), output_capacity, StringSlice("[... omitted ")) or not context_text_put_i64(output, Pointer(to=position), output_capacity, omitted) or not context_text_put_literal(output, Pointer(to=position), output_capacity, StringSlice(" lines ...]\n")):
+                return 3
+    written[] = position
+    return 0
+
+
+@export("prodex_context_classify_command_output_kind_v1")
+def prodex_context_classify_command_output_kind_v1(
+    abi_version: Int64,
+    input: Pointer[mut=False, ProdexStringView, _],
+    hint: Int64,
+    output_kind: Pointer[mut=True, Int64, _],
+) abi("C") -> Int64:
+    output_kind[] = 0
+    if abi_version != CONTEXT_TEXT_ABI_VERSION:
+        return 4
+    var view = input[].copy()
+    if not context_text_is_valid_utf8(view.ptr.unsafe_value(), Int64(view.len)):
+        return 1
+    var ptr = view.ptr.unsafe_value()
+    var length = Int64(view.len)
+    var cursor: Int64 = 0
+    var non_empty: Int64 = 0
+    var commit_headers: Int64 = 0
+    var stat_lines: Int64 = 0
+    var stat_summaries: Int64 = 0
+    var short_status: Int64 = 0
+    var search_matches: Int64 = 0
+    var file_candidates: Int64 = 0
+    var heading_path = False
+    var heading_matches: Int64 = 0
+    var diff = False
+    var rust_strong: Int64 = 0
+    var rust_noise: Int64 = 0
+    var rust_locations: Int64 = 0
+    var rust_backtraces: Int64 = 0
+    var rust_exits: Int64 = 0
+    var diagnostic_immediate = False
+    var diagnostic_noise: Int64 = 0
+    var success_signals: Int64 = 0
+    var key_lines: Int64 = 0
+    var success_failure = False
+    var log_levels: Int64 = 0
+    var rust_clippy: Int64 = 0
+    while cursor < length:
+        var line = context_text_find_line(ptr, cursor, length)
+        var bounds = context_text_trim_bounds(ptr, cursor, line[0])
+        var start = bounds[0]
+        var end = bounds[1]
+        if start < end:
+            non_empty += 1
+            if context_text_ascii_starts_at["diff --git "](ptr, start, end) or context_text_ascii_starts_at["@@ "](ptr, start, end):
+                diff = True
+            if context_text_ascii_starts_at["commit "](ptr, start, end):
+                commit_headers += 1
+            if context_output_diff_stat_line(ptr, start, end):
+                stat_lines += 1
+            if context_output_diff_stat_summary(ptr, start, end):
+                stat_summaries += 1
+            if context_output_short_status_line(ptr, start, end):
+                short_status += 1
+            if context_search_path_like(ptr, start, end) and context_text_ascii_find[":"](ptr, start, end) >= 0 or context_text_ascii_find["\\"](ptr, start, end) >= 0 and context_text_ascii_find[":"](ptr, start, end) >= 0:
+                search_matches += 1
+            var numbered_match = context_output_numbered_match(ptr, start, end)
+            if heading_path and numbered_match:
+                heading_matches += 1
+            elif context_search_file_list_candidate(ptr, start, end) and context_text_ascii_find[":"](ptr, start, end) < 0:
+                heading_path = True
+            elif not numbered_match:
+                heading_path = False
+            if context_search_file_list_candidate(ptr, start, end) or context_output_ls_row(ptr, start, end):
+                file_candidates += 1
+            if context_output_log_level_line(ptr, start, end):
+                log_levels += 1
+            var semantics = context_output_line_semantics(ptr, line[0])
+            if semantics.flags & CONTEXT_OUTPUT_RUST_STRONG != 0:
+                rust_strong += 1
+            if semantics.flags & CONTEXT_OUTPUT_RUST_NOISE != 0:
+                rust_noise += 1
+            if semantics.flags & CONTEXT_OUTPUT_CLIPPY != 0:
+                rust_clippy += 1
+            if semantics.flags & CONTEXT_OUTPUT_RUST_LOCATION != 0:
+                rust_locations += 1
+            if semantics.flags & CONTEXT_OUTPUT_RUST_BACKTRACE != 0:
+                rust_backtraces += 1
+            if semantics.flags & CONTEXT_OUTPUT_RUST_EXIT != 0:
+                rust_exits += 1
+            if semantics.flags & CONTEXT_OUTPUT_DIAGNOSTIC_TARGET != 0:
+                diagnostic_immediate = True
+            if semantics.diagnostic_label != CONTEXT_OUTPUT_LABEL_NONE:
+                diagnostic_noise += 1
+            if semantics.noisy_label != CONTEXT_OUTPUT_LABEL_NONE:
+                success_signals += 1
+            if semantics.flags & CONTEXT_OUTPUT_NOISY_KEY != 0:
+                key_lines += 1
+            if semantics.flags & (CONTEXT_OUTPUT_FAILURE | CONTEXT_OUTPUT_WARNING) != 0:
+                success_failure = True
+        cursor = line[1]
+    if commit_headers > 0 and (stat_lines > 0 or stat_summaries > 0):
+        output_kind[] = 5
+    elif diff or (stat_lines > 0 and stat_summaries > 0):
+        output_kind[] = 2
+    elif rust_clippy > 0 or context_text_ascii_find["error[e"](ptr, 0, length) >= 0 or context_text_ascii_find["could not compile"](ptr, 0, length) >= 0 or context_text_ascii_find["stack backtrace:"](ptr, 0, length) >= 0 or context_text_ascii_find["---- "](ptr, 0, length) >= 0 or context_text_ascii_find["test result:"](ptr, 0, length) >= 0 and (context_text_ascii_find["failed"](ptr, 0, length) >= 0 or context_text_ascii_find["ok."](ptr, 0, length) >= 0) or rust_noise >= 4 and context_text_ascii_find["test "](ptr, 0, length) >= 0:
+        output_kind[] = 3
+    elif non_empty >= 8 and not success_failure and (success_signals >= 4 or key_lines > 0 and success_signals >= 2):
+        output_kind[] = 9
+    elif log_levels >= 8 and (log_levels * 2 >= non_empty) or context_text_ascii_find[" info "](ptr, 0, length) >= 0 and context_text_ascii_find[" warn "](ptr, 0, length) >= 0 or context_text_ascii_find["z info "](ptr, 0, length) >= 0 and context_text_ascii_find["z warn "](ptr, 0, length) >= 0:
+        output_kind[] = 8
+    elif diagnostic_immediate or rust_strong > 0 and rust_strong + rust_locations + rust_backtraces + rust_exits + diagnostic_noise >= 2 or rust_backtraces > 0 and rust_locations > 0:
+        output_kind[] = 4
+    elif context_text_ascii_find["On branch "](ptr, 0, length) >= 0 or context_text_ascii_find["## "](ptr, 0, length) >= 0 and short_status >= 1:
+        output_kind[] = 1
+    elif search_matches + heading_matches >= 2 and (search_matches + heading_matches) * 2 >= non_empty or context_text_ascii_find["\\"](ptr, 0, length) >= 0 and (context_text_ascii_find[":10:"](ptr, 0, length) >= 0 or context_text_ascii_find[":20:"](ptr, 0, length) >= 0 or context_text_ascii_find[":fn "](ptr, 0, length) >= 0):
+        output_kind[] = 6
+    elif file_candidates >= 4 and file_candidates * 2 >= non_empty:
+        output_kind[] = 7
+    elif hint >= 1 and hint <= 9:
+        output_kind[] = hint
     return 0
 
 

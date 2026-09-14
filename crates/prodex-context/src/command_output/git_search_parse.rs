@@ -16,6 +16,7 @@ pub(super) struct GitStatusSummary {
     pub(super) clean: bool,
 }
 
+#[cfg(any(not(feature = "mojo"), test))]
 pub(super) fn is_short_git_status_line(line: &str) -> bool {
     if line.len() < 3 {
         return false;
@@ -521,6 +522,7 @@ pub(super) fn git_diff_semantic_context_line(line: &str) -> Option<String> {
     (semantic_start || semantic_contains).then(|| trimmed.to_string())
 }
 
+#[cfg(not(feature = "mojo"))]
 pub(super) fn looks_like_git_diff_output(lines: &[&str]) -> bool {
     if lines.iter().any(|line| line.starts_with("diff --git "))
         || lines
@@ -569,6 +571,7 @@ pub(super) fn looks_like_git_diff_stat_summary(line: &str) -> bool {
         || trimmed.contains(" deletion")
 }
 
+#[cfg(not(feature = "mojo"))]
 pub(super) fn looks_like_git_log_stat_output(lines: &[&str]) -> bool {
     let commit_headers = lines
         .iter()
@@ -642,6 +645,7 @@ fn finish_git_log_stat_commit(
     }
 }
 
+#[cfg(any(not(feature = "mojo"), test))]
 pub(super) fn parse_git_log_commit_header(line: &str) -> Option<String> {
     let trimmed = line.trim();
     if let Some(hash) = trimmed.strip_prefix("commit ") {
@@ -658,6 +662,7 @@ pub(super) fn parse_git_log_commit_header(line: &str) -> Option<String> {
     None
 }
 
+#[cfg(any(not(feature = "mojo"), test))]
 pub(super) fn looks_like_git_hash(input: &str) -> bool {
     (7..=64).contains(&input.len()) && input.chars().all(|ch| ch.is_ascii_hexdigit())
 }
