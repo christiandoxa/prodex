@@ -341,8 +341,38 @@ pub const GOVERNANCE_MATCH_EXACT: i64 = 0;
 pub const GOVERNANCE_MATCH_MINIMUM: i64 = 1;
 pub const GOVERNANCE_MATCH_MAXIMUM: i64 = 2;
 pub const GOVERNANCE_MATCH_CONTAINS: i64 = 3;
+pub const GOVERNANCE_OBLIGATION_OTHER: i64 = 0;
+pub const GOVERNANCE_OBLIGATION_ALLOW_PROVIDER: i64 = 1;
+pub const GOVERNANCE_OBLIGATION_DENY_PROVIDER: i64 = 2;
+pub const GOVERNANCE_OBLIGATION_REQUIRE_REGION: i64 = 3;
+pub const GOVERNANCE_OBLIGATION_PROHIBIT_RETENTION: i64 = 4;
+pub const GOVERNANCE_OBLIGATION_RETENTION_SECONDS: i64 = 5;
+pub const GOVERNANCE_OBLIGATION_DISABLE_TOOLS: i64 = 6;
+pub const GOVERNANCE_OBLIGATION_ALLOW_TOOL: i64 = 7;
+pub const GOVERNANCE_OBLIGATION_MAX_INPUT: i64 = 8;
+pub const GOVERNANCE_OBLIGATION_MAX_OUTPUT: i64 = 9;
+pub const GOVERNANCE_OBLIGATION_MAX_CONTEXT: i64 = 10;
+pub const GOVERNANCE_OBLIGATION_SESSION_IDLE: i64 = 11;
+pub const GOVERNANCE_OBLIGATION_SESSION_ABSOLUTE: i64 = 12;
+pub const GOVERNANCE_OBLIGATION_MIN_AUTHENTICATION: i64 = 13;
+
+#[repr(C)]
+#[derive(Debug, Clone, Copy)]
+struct GovernanceObligationPredicateInput {
+    kind: i64,
+    value: u64,
+    selector: PolicyStringView,
+    selector_present: i64,
+}
 
 unsafe extern "C" {
+    fn prodex_mojo_governance_obligation_predicate_v1(
+        abi_version: i64,
+        mode: i64,
+        left: u64,
+        right: u64,
+        output: u64,
+    ) -> i64;
     fn prodex_mojo_policy_refresh_decision_v1(
         abi_version: i64,
         refresh_after_unix_ms: u64,
@@ -354,6 +384,58 @@ unsafe extern "C" {
         last_known_good_invalidated: i64,
         output: u64,
     ) -> i64;
+}
+
+fn governance_obligation_predicate(
+    mode: i64,
+    left: (i64, u64, Option<&str>),
+    right: Option<(i64, u64, Option<&str>)>,
+) -> Result<bool, crate::MojoError> {
+    let input = |(kind, value, selector)| GovernanceObligationPredicateInput {
+        kind,
+        value,
+        selector: policy_string_view(selector),
+        selector_present: i64::from(selector.is_some()),
+    };
+    let left = input(left);
+    let right = right.map(input);
+    let mut output = -1_i64;
+    let status = unsafe {
+        prodex_mojo_governance_obligation_predicate_v1(
+            6,
+            mode,
+            (&left as *const GovernanceObligationPredicateInput) as u64,
+            right.as_ref().map_or(0, |right| {
+                (right as *const GovernanceObligationPredicateInput) as u64
+            }),
+            (&mut output as *mut i64) as u64,
+        )
+    };
+    if status != 0 {
+        return Err(match status {
+            1 | 2 => crate::MojoError::InvalidInput,
+            4 => crate::MojoError::AbiMismatch,
+            _ => crate::MojoError::InvalidOutput,
+        });
+    }
+    match output {
+        0 => Ok(false),
+        1 => Ok(true),
+        _ => Err(crate::MojoError::InvalidOutput),
+    }
+}
+
+pub fn governance_obligation_bound_is_invalid(
+    input: (i64, u64, Option<&str>),
+) -> Result<bool, crate::MojoError> {
+    governance_obligation_predicate(0, input, None)
+}
+
+pub fn governance_obligations_conflict(
+    left: (i64, u64, Option<&str>),
+    right: (i64, u64, Option<&str>),
+) -> Result<bool, crate::MojoError> {
+    governance_obligation_predicate(1, left, Some(right))
 }
 
 pub fn policy_refresh_decision(
