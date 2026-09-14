@@ -51,6 +51,18 @@ comptime KIRO_CHAT_TOOL_CALL_ITEM: Int64 = 28
 comptime KIRO_STREAM_CONTENT_TEXT: Int64 = 29
 comptime KIRO_TOOL_ACTIVITY_ITEM: Int64 = 30
 comptime KIRO_TOOL_ACTIVITY_TEXT: Int64 = 31
+comptime KIRO_ACP_INITIALIZE_REQUEST: Int64 = 32
+comptime KIRO_ACP_SESSION_NEW_REQUEST: Int64 = 33
+comptime KIRO_ACP_SESSION_PROMPT_REQUEST: Int64 = 34
+comptime KIRO_ACP_MODEL: Int64 = 35
+comptime KIRO_ACP_ASSISTANT_OUTPUT: Int64 = 36
+comptime KIRO_ACP_RESPONSE: Int64 = 37
+comptime KIRO_ACP_CHAT_ASSISTANT: Int64 = 38
+comptime KIRO_ACP_PLAN_ENTRY: Int64 = 39
+comptime KIRO_ACP_ERROR: Int64 = 40
+comptime KIRO_ACP_SESSION_INFO: Int64 = 41
+comptime KIRO_ACP_METADATA: Int64 = 42
+comptime KIRO_ACP_INCOMPLETE_DETAILS: Int64 = 43
 
 comptime KIRO_REQUEST_VALIDATION_CHAT: Int64 = 1
 comptime KIRO_REQUEST_VALIDATION_RESPONSES: Int64 = 2
@@ -970,6 +982,61 @@ def kiro_json_write_content_value(
     return 0
 
 
+def kiro_json_array_length(view: ProdexRichStringView) -> Int64:
+    var end = Int64(view.len)
+    var index = kiro_json_skip_ws(view, 0, end)
+    if index >= end or kiro_json_byte(view, index) != 91:
+        return -1
+    index = kiro_json_skip_ws(view, index + 1, end)
+    if index < end and kiro_json_byte(view, index) == 93:
+        return 0 if kiro_json_skip_ws(view, index + 1, end) == end else -1
+    var count: Int64 = 0
+    while index < end:
+        var value_end = kiro_json_value_end(view, index, end, 0)
+        if value_end < 0:
+            return -1
+        count += 1
+        index = kiro_json_skip_ws(view, value_end, end)
+        if index < end and kiro_json_byte(view, index) == 93:
+            return count if kiro_json_skip_ws(view, index + 1, end) == end else -1
+        if index >= end or kiro_json_byte(view, index) != 44:
+            return -1
+        index = kiro_json_skip_ws(view, index + 1, end)
+    return -1
+
+
+def kiro_put_bounded_activity_array(
+    writer: Pointer[mut=True, KiroResponseWriter, _],
+    view: ProdexRichStringView,
+) -> Bool:
+    var count = kiro_json_array_length(view)
+    if count < 0 or not kiro_put_byte(writer, 91):
+        return False
+    var keep = count
+    if count > 128:
+        keep = 127
+    var end = Int64(view.len)
+    var index = kiro_json_skip_ws(view, 0, end) + 1
+    index = kiro_json_skip_ws(view, index, end)
+    for item_index in range(keep):
+        var value_end = kiro_json_value_end(view, index, end, 0)
+        if value_end < 0:
+            return False
+        if item_index > 0 and not kiro_put_byte(writer, 44):
+            return False
+        if not kiro_put_view_range(writer, view, index, value_end):
+            return False
+        index = kiro_json_skip_ws(view, value_end, end)
+        if index < end and kiro_json_byte(view, index) == 44:
+            index = kiro_json_skip_ws(view, index + 1, end)
+    if count > 128:
+        if keep > 0 and not kiro_put_byte(writer, 44):
+            return False
+        if not kiro_put_literal(writer, StringSlice('{"type":"kiro_internal_activity","name":"Additional Kiro activities omitted","status":"truncated","phase":"truncated","kind":null,"details_omitted":true}')):
+            return False
+    return kiro_put_byte(writer, 93)
+
+
 def kiro_put_chat_finish_reason(
     writer: Pointer[mut=True, KiroResponseWriter, _],
     input: ProdexKiroKernelInput,
@@ -1017,6 +1084,195 @@ def kiro_write_operation(
         return kiro_write_activity_item(writer, input)
     if operation == KIRO_TOOL_ACTIVITY_TEXT:
         return kiro_write_activity_text(writer, input)
+    if operation == KIRO_ACP_INITIALIZE_REQUEST:
+        return (
+            kiro_put_literal(writer, StringSlice('{"jsonrpc":"2.0","id":'))
+            and kiro_put_u64(writer, input.request_id)
+            and kiro_put_literal(writer, StringSlice(',"method":"initialize","params":{"protocolVersion":1,"clientCapabilities":{"fs":{"readTextFile":false,"writeTextFile":false},"terminal":false,"auth":{"terminal":false}},"clientInfo":{"name":'))
+            and kiro_put_json_string(writer, input.name)
+            and kiro_put_literal(writer, StringSlice(',"title":'))
+            and kiro_put_json_string(writer, input.content)
+            and kiro_put_literal(writer, StringSlice(',"version":'))
+            and kiro_put_json_string(writer, input.model)
+            and kiro_put_literal(writer, StringSlice("}}}"))
+        )
+    if operation == KIRO_ACP_SESSION_NEW_REQUEST:
+        return (
+            kiro_put_literal(writer, StringSlice('{"jsonrpc":"2.0","id":'))
+            and kiro_put_u64(writer, input.request_id)
+            and kiro_put_literal(writer, StringSlice(',"method":"session/new","params":{"cwd":'))
+            and kiro_put_json_string(writer, input.content)
+            and kiro_put_literal(writer, StringSlice(',"mcpServers":[]}}'))
+        )
+    if operation == KIRO_ACP_SESSION_PROMPT_REQUEST:
+        return (
+            kiro_put_literal(writer, StringSlice('{"jsonrpc":"2.0","id":'))
+            and kiro_put_u64(writer, input.request_id)
+            and kiro_put_literal(writer, StringSlice(',"method":"session/prompt","params":{"sessionId":'))
+            and kiro_put_json_string(writer, input.response_id)
+            and kiro_put_literal(writer, StringSlice(',"prompt":[{"type":"text","text":'))
+            and kiro_put_json_string(writer, input.content)
+            and kiro_put_literal(writer, StringSlice("}]}}"))
+        )
+    if operation == KIRO_ACP_MODEL:
+        return (
+            kiro_put_literal(writer, StringSlice('{"id":'))
+            and kiro_put_json_string(writer, input.model)
+            and kiro_put_literal(writer, StringSlice(',"name":'))
+            and kiro_put_json_string(writer, input.name)
+            and kiro_put_literal(writer, StringSlice(',"object":"model","owned_by":"kiro-cli"}'))
+        )
+    if operation == KIRO_ACP_ASSISTANT_OUTPUT:
+        return (
+            kiro_put_literal(writer, StringSlice('{"type":"message","role":"assistant","content":[{"type":"output_text","text":'))
+            and kiro_put_json_string(writer, input.content)
+            and kiro_put_literal(writer, StringSlice("}]}"))
+        )
+    if operation == KIRO_ACP_RESPONSE:
+        return (
+            kiro_put_literal(writer, StringSlice('{"id":'))
+            and kiro_put_json_string(writer, input.response_id)
+            and kiro_put_literal(writer, StringSlice(',"object":"response","created_at":'))
+            and kiro_put_u64(writer, input.created_at)
+            and kiro_put_literal(writer, StringSlice(',"model":'))
+            and kiro_put_json_string(writer, input.model)
+            and kiro_put_literal(writer, StringSlice(',"output":'))
+            and kiro_put_view(writer, input.output)
+            and kiro_put_byte(writer, 125)
+        )
+    if operation == KIRO_ACP_CHAT_ASSISTANT:
+        var has_text = input.content_present == 1 and input.content.len > 0
+        var has_reasoning = input.reason_present == 1 and input.reason.len > 0
+        var has_tools = input.tool_calls_present == 1 and input.tool_calls.len > 2
+        if not has_text and not has_reasoning and not has_tools:
+            return True
+        if not kiro_put_literal(writer, StringSlice('{"role":"assistant","content":')):
+            return False
+        if has_text:
+            if not kiro_put_json_string(writer, input.content):
+                return False
+        elif has_tools:
+            if not kiro_put_literal(writer, StringSlice('""')):
+                return False
+        elif not kiro_put_literal(writer, StringSlice("null")):
+            return False
+        if has_reasoning:
+            if not kiro_put_literal(writer, StringSlice(',"reasoning_content":')) or not kiro_put_json_string(writer, input.reason):
+                return False
+        if has_tools:
+            if not kiro_put_literal(writer, StringSlice(',"tool_calls":')) or not kiro_put_view(writer, input.tool_calls):
+                return False
+        return kiro_put_byte(writer, 125)
+    if operation == KIRO_ACP_PLAN_ENTRY:
+        return (
+            kiro_put_literal(writer, StringSlice('{"content":'))
+            and kiro_put_json_string(writer, input.content)
+            and kiro_put_literal(writer, StringSlice(',"priority":'))
+            and kiro_put_json_string(writer, input.reason)
+            and kiro_put_literal(writer, StringSlice(',"status":'))
+            and kiro_put_json_string(writer, input.status)
+            and kiro_put_byte(writer, 125)
+        )
+    if operation == KIRO_ACP_ERROR:
+        return (
+            kiro_put_literal(writer, StringSlice('{"code":'))
+            and kiro_put_json_string(writer, input.call_id)
+            and kiro_put_literal(writer, StringSlice(',"message":'))
+            and kiro_put_json_string(writer, input.content)
+            and kiro_put_byte(writer, 125)
+        )
+    if operation == KIRO_ACP_SESSION_INFO:
+        if not kiro_put_literal(writer, StringSlice('{"title":')):
+            return False
+        if input.name_present == 1:
+            if not kiro_put_json_string(writer, input.name):
+                return False
+        elif not kiro_put_literal(writer, StringSlice("null")):
+            return False
+        if not kiro_put_literal(writer, StringSlice(',"updated_at":')):
+            return False
+        if input.status_present == 1:
+            if not kiro_put_json_string(writer, input.status):
+                return False
+        elif not kiro_put_literal(writer, StringSlice("null")):
+            return False
+        return kiro_put_byte(writer, 125)
+    if operation == KIRO_ACP_METADATA:
+        var has_fields = False
+        if not kiro_put_literal(writer, StringSlice('{"kiro":{')):
+            return False
+        if input.reason_present == 1 and input.reason.len > 0:
+            if not kiro_put_literal(writer, StringSlice('"reasoning_content":')) or not kiro_put_json_string(writer, input.reason):
+                return False
+            has_fields = True
+        if input.input_present == 1:
+            if has_fields and not kiro_put_byte(writer, 44):
+                return False
+            if not kiro_put_literal(writer, StringSlice('"usage_update":')) or not kiro_put_view(writer, input.input):
+                return False
+            has_fields = True
+        if input.output_present == 1:
+            if has_fields and not kiro_put_byte(writer, 44):
+                return False
+            if not kiro_put_literal(writer, StringSlice('"plan":')) or not kiro_put_view(writer, input.output):
+                return False
+            has_fields = True
+        if input.tool_calls_present == 1:
+            if has_fields and not kiro_put_byte(writer, 44):
+                return False
+            if not kiro_put_literal(writer, StringSlice('"available_commands":')) or not kiro_put_view(writer, input.tool_calls):
+                return False
+            has_fields = True
+        if input.model_present == 1:
+            if has_fields and not kiro_put_byte(writer, 44):
+                return False
+            if not kiro_put_literal(writer, StringSlice('"current_mode_id":')) or not kiro_put_json_string(writer, input.model):
+                return False
+            has_fields = True
+        if input.name_present == 1 or input.status_present == 1:
+            if has_fields and not kiro_put_byte(writer, 44):
+                return False
+            if not kiro_put_literal(writer, StringSlice('"session_info":{"title":')):
+                return False
+            if input.name_present == 1:
+                if not kiro_put_json_string(writer, input.name):
+                    return False
+            elif not kiro_put_literal(writer, StringSlice("null")):
+                return False
+            if not kiro_put_literal(writer, StringSlice(',"updated_at":')):
+                return False
+            if input.status_present == 1:
+                if not kiro_put_json_string(writer, input.status):
+                    return False
+            elif not kiro_put_literal(writer, StringSlice("null")):
+                return False
+            if not kiro_put_byte(writer, 125):
+                return False
+            has_fields = True
+        if input.finish_reason_present == 1:
+            if has_fields and not kiro_put_byte(writer, 44):
+                return False
+            if not kiro_put_literal(writer, StringSlice('"stop_reason":')) or not kiro_put_json_string(writer, input.finish_reason):
+                return False
+            has_fields = True
+        if input.extra_present == 1 and input.extra.len > 2:
+            if has_fields and not kiro_put_byte(writer, 44):
+                return False
+            if not kiro_put_literal(writer, StringSlice('"tool_activities":')) or not kiro_put_bounded_activity_array(writer, input.extra):
+                return False
+            has_fields = True
+        if not has_fields:
+            writer[].written = 0
+            return True
+        return kiro_put_literal(writer, StringSlice("}}"))
+    if operation == KIRO_ACP_INCOMPLETE_DETAILS:
+        return (
+            kiro_put_literal(writer, StringSlice('{"reason":'))
+            and kiro_put_json_string(writer, input.reason)
+            and kiro_put_literal(writer, StringSlice(',"message":'))
+            and kiro_put_json_string(writer, input.content)
+            and kiro_put_byte(writer, 125)
+        )
     if operation == KIRO_REQUEST_BODY:
         var has_fields = False
         if not kiro_put_byte(writer, 123):

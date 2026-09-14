@@ -38,6 +38,18 @@ pub enum KiroKernelOperation {
     StreamContentText = 29,
     ToolActivityItem = 30,
     ToolActivityText = 31,
+    AcpInitializeRequest = 32,
+    AcpSessionNewRequest = 33,
+    AcpSessionPromptRequest = 34,
+    AcpModel = 35,
+    AcpAssistantOutput = 36,
+    AcpResponse = 37,
+    AcpChatAssistant = 38,
+    AcpPlanEntry = 39,
+    AcpError = 40,
+    AcpSessionInfo = 41,
+    AcpMetadata = 42,
+    AcpIncompleteDetails = 43,
 }
 
 /// Inputs for one bounded Kiro JSON or text transformation.
@@ -292,6 +304,18 @@ fn operation_code(operation: KiroKernelOperation) -> i64 {
         KiroKernelOperation::StreamContentText => 29,
         KiroKernelOperation::ToolActivityItem => 30,
         KiroKernelOperation::ToolActivityText => 31,
+        KiroKernelOperation::AcpInitializeRequest => 32,
+        KiroKernelOperation::AcpSessionNewRequest => 33,
+        KiroKernelOperation::AcpSessionPromptRequest => 34,
+        KiroKernelOperation::AcpModel => 35,
+        KiroKernelOperation::AcpAssistantOutput => 36,
+        KiroKernelOperation::AcpResponse => 37,
+        KiroKernelOperation::AcpChatAssistant => 38,
+        KiroKernelOperation::AcpPlanEntry => 39,
+        KiroKernelOperation::AcpError => 40,
+        KiroKernelOperation::AcpSessionInfo => 41,
+        KiroKernelOperation::AcpMetadata => 42,
+        KiroKernelOperation::AcpIncompleteDetails => 43,
     }
 }
 
