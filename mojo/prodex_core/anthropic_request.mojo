@@ -37,6 +37,7 @@ comptime ANTHROPIC_STREAM_ARGUMENTS_DELTA: Int64 = 26
 comptime ANTHROPIC_STREAM_THINKING_DELTA: Int64 = 27
 comptime ANTHROPIC_STREAM_COMPLETED: Int64 = 28
 comptime ANTHROPIC_STREAM_ERROR: Int64 = 29
+comptime ANTHROPIC_STREAM_EVENT: Int64 = 30
 
 
 @fieldwise_init
@@ -901,6 +902,333 @@ def anthropic_request_append_message(
     )
 
 
+def anthropic_request_put_range_or_literal(
+    writer: Pointer[mut=True, AnthropicRequestKernelWriter, _],
+    view: ProdexRichStringView,
+    value: InlineArray[Int64, 2],
+    default: StringSlice,
+) -> Bool:
+    if value[0] < 0:
+        return anthropic_request_put_literal(writer, default)
+    return anthropic_request_put_view_range(writer, view, value[0], value[1])
+
+
+def anthropic_request_range_is_string(
+    view: ProdexRichStringView, value: InlineArray[Int64, 2]
+) -> Bool:
+    return (
+        value[0] >= 0
+        and value[1] > value[0] + 1
+        and anthropic_request_byte(view, value[0]) == 34
+        and anthropic_request_byte(view, value[1] - 1) == 34
+    )
+
+
+def anthropic_request_write_stream_queries(
+    writer: Pointer[mut=True, AnthropicRequestKernelWriter, _],
+    view: ProdexRichStringView,
+    block_start: Int64,
+    block_end: Int64,
+) -> Bool:
+    var input = anthropic_request_object_field(
+        view, block_start, block_end, StringSlice('"input"')
+    )
+    var query = anthropic_request_object_field(
+        view, input[0], input[1], StringSlice('"query"')
+    )
+    if anthropic_request_range_is_string(view, query):
+        return (
+            anthropic_request_put_byte(writer, 91)
+            and anthropic_request_put_view_range(writer, view, query[0], query[1])
+            and anthropic_request_put_byte(writer, 93)
+        )
+    var queries = anthropic_request_object_field(
+        view, input[0], input[1], StringSlice('"queries"')
+    )
+    if (
+        queries[0] < 0
+        or queries[1] <= queries[0] + 1
+        or anthropic_request_byte(view, queries[0]) != 91
+        or anthropic_request_byte(view, queries[1] - 1) != 93
+    ):
+        return anthropic_request_put_literal(writer, StringSlice("[]"))
+    if not anthropic_request_put_byte(writer, 91):
+        return False
+    var first = True
+    var index = anthropic_request_skip_ws(view, queries[0] + 1, queries[1] - 1)
+    while index < queries[1] - 1:
+        var item_end = anthropic_request_value_end(view, index, queries[1] - 1, 0)
+        if item_end < 0:
+            return False
+        var item = InlineArray[Int64, 2](fill=-1)
+        item[0] = index
+        item[1] = item_end
+        if anthropic_request_range_is_string(view, item):
+            if not first and not anthropic_request_put_byte(writer, 44):
+                return False
+            first = False
+            if not anthropic_request_put_view_range(writer, view, index, item_end):
+                return False
+        index = anthropic_request_skip_ws(view, item_end, queries[1] - 1)
+        if index < queries[1] - 1 and anthropic_request_byte(view, index) == 44:
+            index = anthropic_request_skip_ws(view, index + 1, queries[1] - 1)
+        else:
+            break
+    return anthropic_request_put_byte(writer, 93)
+
+
+def anthropic_request_write_stream_event_result(
+    writer: Pointer[mut=True, AnthropicRequestKernelWriter, _],
+    input: ProdexAnthropicRequestKernelInput,
+) -> Bool:
+    var view = input.content.copy()
+    var end = Int64(view.len)
+    var event_type = anthropic_request_object_field(
+        view, 0, end, StringSlice('"type"')
+    )
+    if event_type[0] < 0:
+        return anthropic_request_put_byte(writer, 0)
+    if anthropic_request_range_matches_literal(
+        view, event_type[0], event_type[1], StringSlice('"message_start"')
+    ):
+        var message = anthropic_request_object_field(
+            view, 0, end, StringSlice('"message"')
+        )
+        var id = anthropic_request_object_field(
+            view, message[0], message[1], StringSlice('"id"')
+        )
+        var model = anthropic_request_object_field(
+            view, message[0], message[1], StringSlice('"model"')
+        )
+        if not anthropic_request_range_is_string(view, id):
+            id = InlineArray[Int64, 2](fill=-1)
+        if not anthropic_request_range_is_string(view, model):
+            model = InlineArray[Int64, 2](fill=-1)
+        return (
+            anthropic_request_put_byte(writer, 1)
+            and anthropic_request_put_event_prefix(writer, StringSlice("response.created"))
+            and anthropic_request_put_literal(
+                writer, StringSlice('{"type":"response.created","response":{"id":')
+            )
+            and anthropic_request_put_range_or_literal(
+                writer, view, id, StringSlice('"resp_anthropic"')
+            )
+            and anthropic_request_put_literal(
+                writer, StringSlice(',"object":"response","created_at":')
+            )
+            and anthropic_request_put_u64(writer, input.created_at)
+            and anthropic_request_put_literal(writer, StringSlice(',"model":'))
+            and anthropic_request_put_range_or_literal(
+                writer, view, model, StringSlice('"unknown"')
+            )
+            and anthropic_request_put_literal(writer, StringSlice(',"output":[]}}'))
+            and anthropic_request_finish_event(writer)
+        )
+    if anthropic_request_range_matches_literal(
+        view, event_type[0], event_type[1], StringSlice('"content_block_start"')
+    ):
+        var block = anthropic_request_object_field(
+            view, 0, end, StringSlice('"content_block"')
+        )
+        if block[0] < 0:
+            return anthropic_request_put_byte(writer, 2) and anthropic_request_put_literal(
+                writer, StringSlice("Anthropic content_block_start requires content_block")
+            )
+        var block_type = anthropic_request_object_field(
+            view, block[0], block[1], StringSlice('"type"')
+        )
+        if block_type[0] < 0:
+            return anthropic_request_put_byte(writer, 2) and anthropic_request_put_literal(
+                writer, StringSlice("Anthropic content block requires type")
+            )
+        var index = anthropic_request_object_field(
+            view, 0, end, StringSlice('"index"')
+        )
+        if anthropic_request_range_matches_literal(
+            view, block_type[0], block_type[1], StringSlice('"text"')
+        ):
+            return (
+                anthropic_request_put_byte(writer, 1)
+                and anthropic_request_put_event_prefix(
+                    writer, StringSlice("response.output_item.added")
+                )
+                and anthropic_request_put_literal(
+                    writer, StringSlice('{"type":"response.output_item.added","output_index":')
+                )
+                and anthropic_request_put_range_or_literal(writer, view, index, StringSlice("0"))
+                and anthropic_request_put_literal(
+                    writer, StringSlice(',"item":{"type":"message","role":"assistant","content":[]}}')
+                )
+                and anthropic_request_finish_event(writer)
+            )
+        if anthropic_request_range_matches_literal(
+            view, block_type[0], block_type[1], StringSlice('"tool_use"')
+        ):
+            var id = anthropic_request_object_field(
+                view, block[0], block[1], StringSlice('"id"')
+            )
+            var name = anthropic_request_object_field(
+                view, block[0], block[1], StringSlice('"name"')
+            )
+            return (
+                anthropic_request_put_byte(writer, 1)
+                and anthropic_request_put_event_prefix(
+                    writer, StringSlice("response.output_item.added")
+                )
+                and anthropic_request_put_literal(
+                    writer, StringSlice('{"type":"response.output_item.added","output_index":')
+                )
+                and anthropic_request_put_range_or_literal(writer, view, index, StringSlice("0"))
+                and anthropic_request_put_literal(
+                    writer, StringSlice(',"item":{"type":"function_call","call_id":')
+                )
+                and anthropic_request_put_range_or_literal(writer, view, id, StringSlice("null"))
+                and anthropic_request_put_literal(writer, StringSlice(',"name":'))
+                and anthropic_request_put_range_or_literal(writer, view, name, StringSlice("null"))
+                and anthropic_request_put_literal(writer, StringSlice(',"arguments":""}}'))
+                and anthropic_request_finish_event(writer)
+            )
+        if anthropic_request_range_matches_literal(
+            view, block_type[0], block_type[1], StringSlice('"server_tool_use"')
+        ):
+            var name = anthropic_request_object_field(
+                view, block[0], block[1], StringSlice('"name"')
+            )
+            if not anthropic_request_range_matches_literal(
+                view, name[0], name[1], StringSlice('"web_search"')
+            ):
+                return anthropic_request_put_byte(writer, 0)
+            var id = anthropic_request_object_field(
+                view, block[0], block[1], StringSlice('"id"')
+            )
+            if not anthropic_request_range_is_string(view, id):
+                return anthropic_request_put_byte(writer, 2) and anthropic_request_put_literal(
+                    writer, StringSlice("Anthropic server_tool_use block must contain id")
+                )
+            if not (
+                anthropic_request_put_byte(writer, 1)
+                and anthropic_request_put_event_prefix(
+                    writer, StringSlice("response.output_item.added")
+                )
+                and anthropic_request_put_literal(
+                    writer, StringSlice('{"type":"response.output_item.added","output_index":')
+                )
+                and anthropic_request_put_range_or_literal(writer, view, index, StringSlice("0"))
+                and anthropic_request_put_literal(
+                    writer, StringSlice(',"item":{"type":"web_search_call","id":')
+                )
+                and anthropic_request_put_view_range(writer, view, id[0], id[1])
+                and anthropic_request_put_literal(
+                    writer, StringSlice(',"status":"in_progress","action":{"type":"search","queries":')
+                )
+            ):
+                return False
+            if not anthropic_request_write_stream_queries(
+                writer, view, block[0], block[1]
+            ):
+                return False
+            return (
+                anthropic_request_put_literal(writer, StringSlice(',"sources":[]}}}'))
+                and anthropic_request_finish_event(writer)
+            )
+        if anthropic_request_range_matches_literal(
+            view, block_type[0], block_type[1], StringSlice('"thinking"')
+        ):
+            return (
+                anthropic_request_put_byte(writer, 1)
+                and anthropic_request_put_event_prefix(
+                    writer, StringSlice("response.output_item.added")
+                )
+                and anthropic_request_put_literal(
+                    writer, StringSlice('{"type":"response.output_item.added","output_index":')
+                )
+                and anthropic_request_put_range_or_literal(writer, view, index, StringSlice("0"))
+                and anthropic_request_put_literal(
+                    writer, StringSlice(',"item":{"type":"reasoning","summary":[]}}')
+                )
+                and anthropic_request_finish_event(writer)
+            )
+        return anthropic_request_put_byte(writer, 0)
+    if anthropic_request_range_matches_literal(
+        view, event_type[0], event_type[1], StringSlice('"content_block_delta"')
+    ):
+        var delta = anthropic_request_object_field(
+            view, 0, end, StringSlice('"delta"')
+        )
+        var delta_type = anthropic_request_object_field(
+            view, delta[0], delta[1], StringSlice('"type"')
+        )
+        if delta_type[0] < 0:
+            return anthropic_request_put_byte(writer, 2) and anthropic_request_put_literal(
+                writer, StringSlice("Anthropic content_block_delta requires delta.type")
+            )
+        var event = StringSlice("")
+        var prefix = StringSlice("")
+        var field = StringSlice("")
+        if anthropic_request_range_matches_literal(
+            view, delta_type[0], delta_type[1], StringSlice('"text_delta"')
+        ):
+            event = StringSlice("response.output_text.delta")
+            prefix = StringSlice('{"type":"response.output_text.delta","output_index":')
+            field = StringSlice('"text"')
+        elif anthropic_request_range_matches_literal(
+            view, delta_type[0], delta_type[1], StringSlice('"input_json_delta"')
+        ):
+            event = StringSlice("response.function_call_arguments.delta")
+            prefix = StringSlice('{"type":"response.function_call_arguments.delta","output_index":')
+            field = StringSlice('"partial_json"')
+        elif anthropic_request_range_matches_literal(
+            view, delta_type[0], delta_type[1], StringSlice('"thinking_delta"')
+        ):
+            event = StringSlice("response.reasoning_summary_text.delta")
+            prefix = StringSlice('{"type":"response.reasoning_summary_text.delta","output_index":')
+            field = StringSlice('"thinking"')
+        else:
+            return anthropic_request_put_byte(writer, 0)
+        var index = anthropic_request_object_field(
+            view, 0, end, StringSlice('"index"')
+        )
+        var text = anthropic_request_object_field(
+            view, delta[0], delta[1], field
+        )
+        if not anthropic_request_range_is_string(view, text):
+            text = InlineArray[Int64, 2](fill=-1)
+        return (
+            anthropic_request_put_byte(writer, 1)
+            and anthropic_request_put_event_prefix(writer, event)
+            and anthropic_request_put_literal(writer, prefix)
+            and anthropic_request_put_range_or_literal(writer, view, index, StringSlice("0"))
+            and anthropic_request_put_literal(writer, StringSlice(',"delta":'))
+            and anthropic_request_put_range_or_literal(writer, view, text, StringSlice('""'))
+            and anthropic_request_put_byte(writer, 125)
+            and anthropic_request_finish_event(writer)
+        )
+    if anthropic_request_range_matches_literal(
+        view, event_type[0], event_type[1], StringSlice('"message_stop"')
+    ):
+        return (
+            anthropic_request_put_byte(writer, 1)
+            and anthropic_request_put_event_prefix(writer, StringSlice("response.completed"))
+            and anthropic_request_put_literal(writer, StringSlice('{"type":"response.completed"}'))
+            and anthropic_request_finish_event(writer)
+        )
+    if anthropic_request_range_matches_literal(
+        view, event_type[0], event_type[1], StringSlice('"error"')
+    ):
+        var error = anthropic_request_object_field(
+            view, 0, end, StringSlice('"error"')
+        )
+        return (
+            anthropic_request_put_byte(writer, 1)
+            and anthropic_request_put_event_prefix(writer, StringSlice("error"))
+            and anthropic_request_put_literal(writer, StringSlice('{"type":"error","error":'))
+            and anthropic_request_put_range_or_literal(writer, view, error, StringSlice("null"))
+            and anthropic_request_put_byte(writer, 125)
+            and anthropic_request_finish_event(writer)
+        )
+    return anthropic_request_put_byte(writer, 0)
+
+
 def anthropic_request_write_stream(
     writer: Pointer[mut=True, AnthropicRequestKernelWriter, _],
     input: ProdexAnthropicRequestKernelInput,
@@ -1028,7 +1356,7 @@ def anthropic_request_view_valid(view: ProdexRichStringView) -> Bool:
 
 
 def anthropic_request_input_valid(input: ProdexAnthropicRequestKernelInput) -> Bool:
-    if input.operation < ANTHROPIC_REQUEST_BODY or input.operation > ANTHROPIC_STREAM_ERROR:
+    if input.operation < ANTHROPIC_REQUEST_BODY or input.operation > ANTHROPIC_STREAM_EVENT:
         return False
     if input.stream < 0 or input.stream > 1 or input.choice_kind < -1 or input.choice_kind > 3:
         return False
@@ -1094,6 +1422,8 @@ def anthropic_request_write_operation(
         return anthropic_request_write_response_message(writer, input)
     if input.operation == ANTHROPIC_RESPONSE_REASONING:
         return anthropic_request_write_response_reasoning(writer, input)
+    if input.operation == ANTHROPIC_STREAM_EVENT:
+        return anthropic_request_write_stream_event_result(writer, input)
     if input.operation >= ANTHROPIC_STREAM_MESSAGE_START:
         return anthropic_request_write_stream(writer, input)
     return False

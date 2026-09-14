@@ -33,6 +33,7 @@ pub enum AnthropicRequestKernelOperation {
     StreamThinkingDelta = 27,
     StreamCompleted = 28,
     StreamError = 29,
+    StreamEvent = 30,
 }
 
 /// Inputs for one bounded Anthropic wire-shape operation.
