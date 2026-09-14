@@ -1,6 +1,94 @@
 use super::*;
 use crate::{ProviderTransformLoss, anthropic_messages_translator};
 
+#[cfg(feature = "mojo")]
+#[test]
+fn mojo_response_envelope_matches_rust_oracle() {
+    let cases = [
+        json!({}),
+        json!({
+            "id": "msg_\u{1f980}",
+            "model": "claude",
+            "usage": {
+                "input_tokens": 9,
+                "output_tokens": 4,
+                "server_tool_use": {"web_search_requests": 2},
+            },
+            "stop_reason": null,
+        }),
+        json!({
+            "id": null,
+            "model": 1,
+            "usage": {"input_tokens": u64::MAX, "output_tokens": 1},
+            "stop_reason": "end_turn",
+        }),
+    ];
+    for value in cases {
+        let output = vec![json!({"type": "message", "content": [{"text": "x\n\u{1f980}"}]})];
+        assert_eq!(
+            anthropic_response_envelope_mojo(&value, output.clone(), 123).unwrap(),
+            anthropic_response_envelope_rust(&value, output, 123),
+            "{value}"
+        );
+    }
+}
+
+#[cfg(feature = "mojo")]
+#[test]
+fn mojo_request_envelope_matches_rust_oracle() {
+    let cases = [
+        json!({
+            "model": null,
+            "messages": [],
+            "max_tokens": null,
+            "stream": true,
+            "temperature": null,
+            "top_p": 0,
+            "stop": "\u{1f980}\n",
+            "tools": [{"type":"function","function":{"name":"lookup","parameters":{"type":"object"}}}],
+            "tool_choice": {"type":"function","name":"lookup"},
+        }),
+        json!({
+            "messages": [],
+            "stream": "true",
+            "stop": [],
+            "web_search_options": {"search_context_size":"high","allowed_domains":["example.com"]},
+        }),
+        json!({
+            "messages": [],
+            "tools": [{"name":"ignored"}],
+            "tool_choice": "none",
+        }),
+    ];
+    let system = vec!["system \u{1f980}".to_string(), "second".to_string()];
+    let messages = vec![json!({"role":"user","content":[{"type":"text","text":"hi"}]})];
+    for chat in cases {
+        let chat = chat.as_object().unwrap();
+        let mojo =
+            request_builder::build_anthropic_chat_request(&system, messages.clone(), chat).unwrap();
+        let rust = build_anthropic_chat_request_rust(&system, messages.clone(), chat).unwrap();
+        assert_eq!(mojo, rust);
+    }
+
+    let invalid = json!({"messages": [], "stop": null});
+    let chat = invalid.as_object().unwrap();
+    assert_eq!(
+        request_builder::build_anthropic_chat_request(&system, messages.clone(), chat).unwrap_err(),
+        build_anthropic_chat_request_rust(&system, messages, chat).unwrap_err()
+    );
+
+    for invalid in [
+        json!({"messages": [], "parallel_tool_calls": false}),
+        json!({"messages": [], "unknown_field": true}),
+    ] {
+        let chat = invalid.as_object().unwrap();
+        assert_eq!(
+            request_builder::build_anthropic_chat_request(&system, Vec::new(), chat).unwrap_err(),
+            validate_anthropic_chat_fields(chat).unwrap_err()
+        );
+    }
+}
+
 fn request(value: Value) -> ProviderTransformResult {
     anthropic_messages_translator().transform_request(ProviderTransformInput::new(
         ProviderEndpoint::Responses,
@@ -105,6 +193,26 @@ fn chat_request_accepts_benign_ignored_transport_fields() {
         .unwrap(),
     ));
     assert!(matches!(result.loss, ProviderTransformLoss::Lossless));
+}
+
+#[test]
+fn chat_request_normalizes_namespaced_tools_in_the_authoritative_path() {
+    let result = translate_chat_request_to_anthropic(ProviderTransformInput::new(
+        ProviderEndpoint::Responses,
+        serde_json::to_vec(&json!({
+            "messages": [{"role": "user", "content": "hello"}],
+            "tools": [
+                {"name": "functions.lookup", "parameters": {"type": "object"}},
+                {"name": "search", "namespace": "tools", "parameters": {"type": "object"}}
+            ],
+            "tool_choice": {"type": "function", "name": "functions.lookup"}
+        }))
+        .unwrap(),
+    ));
+    let body: Value = serde_json::from_slice(result.body.as_ref().unwrap()).unwrap();
+    assert_eq!(body["tools"][0]["name"], "functions--lookup");
+    assert_eq!(body["tools"][1]["name"], "tools--search");
+    assert_eq!(body["tool_choice"]["name"], "functions--lookup");
 }
 
 #[test]

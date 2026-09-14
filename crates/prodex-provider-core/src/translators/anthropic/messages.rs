@@ -18,6 +18,9 @@ use std::{
 #[cfg(feature = "mojo")]
 #[path = "messages/request_builder.rs"]
 mod request_builder;
+#[cfg(any(not(feature = "mojo"), test))]
+#[path = "messages/request_fallback.rs"]
+mod request_fallback;
 #[path = "messages/response.rs"]
 mod response;
 #[path = "messages/stream.rs"]
@@ -36,7 +39,7 @@ use web_search::{
 };
 
 #[cfg(any(not(feature = "mojo"), test))]
-const DEFAULT_MAX_TOKENS: u64 = 4096;
+use request_fallback::{build_anthropic_chat_request_rust, validate_anthropic_chat_fields};
 
 type AnthropicChatRequest = (Map<String, Value>, BTreeMap<String, Value>);
 
@@ -102,6 +105,7 @@ pub(super) fn translate_chat_request_to_anthropic(
     let Some(chat) = chat.as_object() else {
         return rejected_chat("translated request body must be a JSON object");
     };
+    #[cfg(not(feature = "mojo"))]
     if let Err(reason) = validate_anthropic_chat_fields(chat) {
         return rejected_chat(reason);
     }
@@ -147,80 +151,6 @@ fn build_anthropic_chat_request(
     build_anthropic_chat_request_rust(system, messages, chat)
 }
 
-#[cfg(any(not(feature = "mojo"), test))]
-fn build_anthropic_chat_request_rust(
-    system: &[String],
-    messages: Vec<Value>,
-    chat: &Map<String, Value>,
-) -> Result<AnthropicChatRequest, String> {
-    let mut request = Map::new();
-    request.insert(
-        "model".to_string(),
-        chat.get("model")
-            .cloned()
-            .unwrap_or_else(|| Value::String("auto".to_string())),
-    );
-    request.insert("messages".to_string(), Value::Array(messages));
-    request.insert(
-        "max_tokens".to_string(),
-        chat.get("max_tokens")
-            .cloned()
-            .unwrap_or_else(|| Value::from(DEFAULT_MAX_TOKENS)),
-    );
-    request.insert(
-        "stream".to_string(),
-        Value::Bool(chat.get("stream").and_then(Value::as_bool).unwrap_or(false)),
-    );
-    if !system.is_empty() {
-        request.insert("system".to_string(), Value::String(system.join("\n\n")));
-    }
-    for field in ["temperature", "top_p"] {
-        if let Some(value) = chat.get(field) {
-            request.insert(field.to_string(), value.clone());
-        }
-    }
-    if let Some(stop) = chat.get("stop") {
-        request.insert(
-            "stop_sequences".to_string(),
-            match stop {
-                Value::String(_) => Value::Array(vec![stop.clone()]),
-                Value::Array(_) => stop.clone(),
-                _ => return Err("Responses `stop` must be a string or array".to_string()),
-            },
-        );
-    }
-    let mut degradation_details = BTreeMap::new();
-    let mut tools = match chat.get("tools") {
-        Some(tools) => anthropic_tools(tools)?,
-        None => Vec::new(),
-    };
-    if let Some(options) = chat.get("web_search_options") {
-        let (tool, ignored_context_size) = anthropic_web_search_tool(options)?;
-        tools.push(tool);
-        if let Some(context_size) = ignored_context_size {
-            degradation_details.insert(
-                "web_search_options.search_context_size".to_string(),
-                json!({"from": context_size, "to": "provider_default"}),
-            );
-        }
-    }
-    if !tools.is_empty() {
-        request.insert("tools".to_string(), Value::Array(tools));
-    }
-    if let Some(tool_choice) = chat.get("tool_choice") {
-        match anthropic_tool_choice(tool_choice)? {
-            Some(choice) => {
-                request.insert("tool_choice".to_string(), choice);
-            }
-            None => {
-                request.remove("tools");
-                degradation_details.clear();
-            }
-        }
-    }
-    Ok((request, degradation_details))
-}
-
 #[cfg(feature = "mojo")]
 fn json_fragment(value: &Value) -> Result<String, String> {
     serde_json::to_string(value).map_err(|error| format!("Anthropic JSON fragment failed: {error}"))
@@ -228,27 +158,6 @@ fn json_fragment(value: &Value) -> Result<String, String> {
 
 #[cfg(feature = "mojo")]
 use request_builder::build_anthropic_chat_request;
-
-fn validate_anthropic_chat_fields(chat: &Map<String, Value>) -> Result<(), String> {
-    for field in chat.keys() {
-        match field.as_str() {
-            "model" | "messages" | "max_tokens" | "stream" | "temperature" | "top_p" | "stop"
-            | "tools" | "tool_choice" | "stream_options" | "web_search_options" => {}
-            "parallel_tool_calls" if chat.get(field).and_then(Value::as_bool) == Some(true) => {}
-            "parallel_tool_calls" => {
-                return Err(
-                    "Anthropic Messages only accepts `parallel_tool_calls=true`".to_string()
-                );
-            }
-            _ => {
-                return Err(format!(
-                    "Anthropic Messages does not translate chat field `{field}`"
-                ));
-            }
-        }
-    }
-    Ok(())
-}
 
 pub(super) fn translate_anthropic_response_to_responses(
     input: ProviderTransformInput,
@@ -598,7 +507,10 @@ fn anthropic_tool_call_block(
         .get("name")
         .and_then(Value::as_str)
         .ok_or_else(|| "function call must contain name".to_string())?;
-    let name = anthropic_tool_name(object.get("namespace").and_then(Value::as_str), name);
+    let namespace = object
+        .get("namespace")
+        .and_then(Value::as_str)
+        .filter(|namespace| !namespace.is_empty());
     let arguments = function
         .get("arguments")
         .and_then(Value::as_str)
@@ -615,12 +527,16 @@ fn anthropic_tool_call_block(
             .unwrap_or("call_prodex")
             .to_string(),
     ))?;
-    let name = json_fragment(&Value::String(name))?;
+    let name = json_fragment(&Value::String(name.to_string()))?;
+    let namespace = namespace
+        .map(|namespace| json_fragment(&Value::String(namespace.to_string())))
+        .transpose()?;
     let input_value = json_fragment(&input)?;
     let mut kernel =
         AnthropicRequestKernelInput::new(AnthropicRequestKernelOperation::ToolUseBlock);
     kernel.id = Some(&id);
     kernel.name = Some(&name);
+    kernel.namespace = namespace.as_deref();
     kernel.input = Some(&input_value);
     anthropic_mojo_value(kernel)
 }
@@ -731,6 +647,7 @@ fn anthropic_tool_choice(value: &Value) -> Result<Option<Value>, String> {
     }
 }
 
+#[cfg(any(not(feature = "mojo"), test))]
 fn anthropic_tool_name(namespace: Option<&str>, name: &str) -> String {
     namespace
         .filter(|namespace| !namespace.is_empty())
@@ -830,88 +747,6 @@ fn unix_now_secs() -> u64 {
         .duration_since(UNIX_EPOCH)
         .map(|duration| duration.as_secs())
         .unwrap_or(0)
-}
-
-#[cfg(all(test, feature = "mojo"))]
-mod response_envelope_tests {
-    use super::*;
-
-    #[test]
-    fn mojo_response_envelope_matches_rust_oracle() {
-        let cases = [
-            json!({}),
-            json!({
-                "id": "msg_\u{1f980}",
-                "model": "claude",
-                "usage": {
-                    "input_tokens": 9,
-                    "output_tokens": 4,
-                    "server_tool_use": {"web_search_requests": 2},
-                },
-                "stop_reason": null,
-            }),
-            json!({
-                "id": null,
-                "model": 1,
-                "usage": {"input_tokens": u64::MAX, "output_tokens": 1},
-                "stop_reason": "end_turn",
-            }),
-        ];
-        for value in cases {
-            let output = vec![json!({"type": "message", "content": [{"text": "x\n\u{1f980}"}]})];
-            assert_eq!(
-                anthropic_response_envelope_mojo(&value, output.clone(), 123).unwrap(),
-                anthropic_response_envelope_rust(&value, output, 123),
-                "{value}"
-            );
-        }
-    }
-
-    #[test]
-    fn mojo_request_envelope_matches_rust_oracle() {
-        let cases = [
-            json!({
-                "model": null,
-                "messages": [],
-                "max_tokens": null,
-                "stream": true,
-                "temperature": null,
-                "top_p": 0,
-                "stop": "\u{1f980}\n",
-                "tools": [{"type":"function","function":{"name":"lookup","parameters":{"type":"object"}}}],
-                "tool_choice": {"type":"function","name":"lookup"},
-            }),
-            json!({
-                "messages": [],
-                "stream": "true",
-                "stop": [],
-                "web_search_options": {"search_context_size":"high","allowed_domains":["example.com"]},
-            }),
-            json!({
-                "messages": [],
-                "tools": [{"name":"ignored"}],
-                "tool_choice": "none",
-            }),
-        ];
-        let system = vec!["system \u{1f980}".to_string(), "second".to_string()];
-        let messages = vec![json!({"role":"user","content":[{"type":"text","text":"hi"}]})];
-        for chat in cases {
-            let chat = chat.as_object().unwrap();
-            let mojo =
-                request_builder::build_anthropic_chat_request(&system, messages.clone(), chat)
-                    .unwrap();
-            let rust = build_anthropic_chat_request_rust(&system, messages.clone(), chat).unwrap();
-            assert_eq!(mojo, rust);
-        }
-
-        let invalid = json!({"messages": [], "stop": null});
-        let chat = invalid.as_object().unwrap();
-        assert_eq!(
-            request_builder::build_anthropic_chat_request(&system, messages.clone(), chat)
-                .unwrap_err(),
-            build_anthropic_chat_request_rust(&system, messages, chat).unwrap_err()
-        );
-    }
 }
 
 #[cfg(test)]

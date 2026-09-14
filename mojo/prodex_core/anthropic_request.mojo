@@ -173,7 +173,25 @@ def anthropic_request_put_name(
     name: ProdexRichStringView,
 ) -> Bool:
     if namespace.len == 0:
-        return anthropic_request_put_view(writer, name)
+        if name.len < 2 or anthropic_request_byte(name, 0) != 34 or anthropic_request_byte(
+            name, Int64(name.len) - 1
+        ) != 34:
+            return False
+        var separator: Int64 = -1
+        for index in range(Int64(1), Int64(name.len) - 1):
+            if anthropic_request_byte(name, index) == 46:
+                separator = index
+        if separator <= 1 or separator >= Int64(name.len) - 2:
+            return anthropic_request_put_view(writer, name)
+        return (
+            anthropic_request_put_byte(writer, 34)
+            and anthropic_request_put_view_range(writer, name, 1, separator)
+            and anthropic_request_put_literal(writer, StringSlice("--"))
+            and anthropic_request_put_view_range(
+                writer, name, separator + 1, Int64(name.len) - 1
+            )
+            and anthropic_request_put_byte(writer, 34)
+        )
     if namespace.len < 2 or name.len < 2:
         return False
     if (
@@ -208,12 +226,95 @@ def anthropic_request_finish_event(
     return anthropic_request_put_literal(writer, StringSlice("\n\n"))
 
 
+def anthropic_request_reject_chat_field(
+    writer: Pointer[mut=True, AnthropicRequestKernelWriter, _],
+    view: ProdexRichStringView,
+    key_start: Int64,
+    key_end: Int64,
+) -> Bool:
+    return (
+        anthropic_request_put_byte(writer, 2)
+        and anthropic_request_put_literal(
+            writer, StringSlice("Anthropic Messages does not translate chat field `")
+        )
+        and anthropic_request_put_view_range(writer, view, key_start + 1, key_end - 1)
+        and anthropic_request_put_byte(writer, 96)
+    )
+
+
+def anthropic_request_validate_chat_fields(
+    writer: Pointer[mut=True, AnthropicRequestKernelWriter, _],
+    view: ProdexRichStringView,
+) -> Int64:
+    if view.len < 2 or anthropic_request_byte(view, 0) != 123 or anthropic_request_byte(
+        view, Int64(view.len) - 1
+    ) != 125:
+        return 0
+    var end = Int64(view.len) - 1
+    var index = anthropic_request_skip_ws(view, 1, end)
+    while index < end:
+        var key_start = index
+        var key_end = anthropic_request_string_end(view, key_start, end)
+        if key_end < 0:
+            return 0
+        index = anthropic_request_skip_ws(view, key_end, end)
+        if index >= end or anthropic_request_byte(view, index) != 58:
+            return 0
+        var value_start = anthropic_request_skip_ws(view, index + 1, end)
+        var value_end = anthropic_request_value_end(view, value_start, end, 0)
+        if value_end < 0:
+            return 0
+        var known = (
+            anthropic_request_range_matches_literal(view, key_start, key_end, StringSlice('"model"'))
+            or anthropic_request_range_matches_literal(view, key_start, key_end, StringSlice('"messages"'))
+            or anthropic_request_range_matches_literal(view, key_start, key_end, StringSlice('"max_tokens"'))
+            or anthropic_request_range_matches_literal(view, key_start, key_end, StringSlice('"stream"'))
+            or anthropic_request_range_matches_literal(view, key_start, key_end, StringSlice('"temperature"'))
+            or anthropic_request_range_matches_literal(view, key_start, key_end, StringSlice('"top_p"'))
+            or anthropic_request_range_matches_literal(view, key_start, key_end, StringSlice('"stop"'))
+            or anthropic_request_range_matches_literal(view, key_start, key_end, StringSlice('"tools"'))
+            or anthropic_request_range_matches_literal(view, key_start, key_end, StringSlice('"tool_choice"'))
+            or anthropic_request_range_matches_literal(view, key_start, key_end, StringSlice('"stream_options"'))
+            or anthropic_request_range_matches_literal(view, key_start, key_end, StringSlice('"web_search_options"'))
+        )
+        var parallel = anthropic_request_range_matches_literal(
+            view, key_start, key_end, StringSlice('"parallel_tool_calls"')
+        )
+        if parallel and not anthropic_request_range_matches_literal(
+            view, value_start, value_end, StringSlice("true")
+        ):
+            if not (
+                anthropic_request_put_byte(writer, 2)
+                and anthropic_request_put_literal(
+                    writer,
+                    StringSlice("Anthropic Messages only accepts `parallel_tool_calls=true`"),
+                )
+            ):
+                return 0
+            return 2
+        if not known and not parallel:
+            if not anthropic_request_reject_chat_field(
+                writer, view, key_start, key_end
+            ):
+                return 0
+            return 2
+        index = anthropic_request_skip_ws(view, value_end, end)
+        if index < end and anthropic_request_byte(view, index) == 44:
+            index = anthropic_request_skip_ws(view, index + 1, end)
+        elif index != end:
+            return 0
+    return 1
+
+
 def anthropic_request_write_body(
     writer: Pointer[mut=True, AnthropicRequestKernelWriter, _],
     input: ProdexAnthropicRequestKernelInput,
 ) -> Bool:
     if input.content.len < 2 or input.messages.len == 0:
         return False
+    var validation = anthropic_request_validate_chat_fields(writer, input.content)
+    if validation != 1:
+        return validation == 2
     var end = Int64(input.content.len)
     var model = anthropic_request_object_field(
         input.content, 0, end, StringSlice('"model"')
