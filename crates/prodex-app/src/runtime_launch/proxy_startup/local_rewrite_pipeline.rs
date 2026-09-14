@@ -312,9 +312,11 @@ fn runtime_local_rewrite_canonical_context<'target>(
         application: None,
         guards: RuntimeLocalRewritePipelineGuards::default(),
     };
-    if let Some(response) =
-        runtime_gateway_operational_probe_response(state.request.method(), &state.path, shared)
-    {
+    if let Some(response) = runtime_gateway_operational_probe_response(
+        state.request.method(),
+        state.context.route(),
+        shared,
+    ) {
         return Err(state.respond(response));
     }
     if shared
