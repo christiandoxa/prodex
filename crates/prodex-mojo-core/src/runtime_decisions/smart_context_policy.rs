@@ -41,6 +41,36 @@ pub struct SmartContextFingerprintDeltaPlanItem {
     pub current_index: Option<usize>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SmartContextStaticItemPlanInput<'a> {
+    pub id: &'a str,
+    pub content_hash: &'a str,
+    pub canonical_text: &'a str,
+    pub byte_len: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SmartContextStaticItemPlan {
+    pub selected_indices: Vec<usize>,
+    pub retained: Vec<bool>,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct StringView {
+    ptr: u64,
+    len: u64,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct StaticItem {
+    id: StringView,
+    content_hash: StringView,
+    canonical_text: StringView,
+    byte_len: u64,
+}
+
 unsafe extern "C" {
     fn prodex_smart_context_regression_plan_v1(
         exactness_required: i64,
@@ -85,6 +115,14 @@ unsafe extern "C" {
         previous_count: i64,
         current_count: i64,
         key_count: i64,
+    ) -> i64;
+    fn prodex_smart_context_static_item_plan_v1(
+        items_address: u64,
+        selected_indices_address: u64,
+        retained_address: u64,
+        selected_count_address: u64,
+        count: i64,
+        maximum_items: i64,
     ) -> i64;
 }
 
@@ -239,6 +277,78 @@ fn optional_index(index: i64, count: usize) -> Result<Option<usize>, crate::Mojo
         .map(Some)
         .ok_or(crate::MojoError::InvalidOutput)
 }
+
+pub fn smart_context_static_item_plan(
+    items: &[SmartContextStaticItemPlanInput<'_>],
+    maximum_items: usize,
+) -> Result<SmartContextStaticItemPlan, crate::MojoError> {
+    if maximum_items > items.len() {
+        return Err(crate::MojoError::InvalidInput);
+    }
+    let items = items
+        .iter()
+        .map(|item| StaticItem {
+            id: string_view(item.id),
+            content_hash: string_view(item.content_hash),
+            canonical_text: string_view(item.canonical_text),
+            byte_len: item.byte_len,
+        })
+        .collect::<Vec<_>>();
+    let mut selected_indices = vec![-1_i64; items.len()];
+    let mut retained = vec![0_i64; items.len()];
+    let mut selected_count = 0_i64;
+    let status = unsafe {
+        prodex_smart_context_static_item_plan_v1(
+            items.as_ptr() as usize as u64,
+            selected_indices.as_mut_ptr() as usize as u64,
+            retained.as_mut_ptr() as usize as u64,
+            &mut selected_count as *mut i64 as usize as u64,
+            i64::try_from(items.len()).map_err(|_| crate::MojoError::InvalidInput)?,
+            i64::try_from(maximum_items).map_err(|_| crate::MojoError::InvalidInput)?,
+        )
+    };
+    let selected_count = usize::try_from(selected_count).ok();
+    if status != 0
+        || selected_count.is_none_or(|count| count != maximum_items)
+        || retained.iter().any(|value| !matches!(value, 0 | 1))
+        || retained.iter().filter(|value| **value == 1).count() != maximum_items
+    {
+        return Err(crate::MojoError::InvalidOutput);
+    }
+    let mut seen = vec![false; items.len()];
+    let selected_indices = selected_indices[..selected_count.unwrap()]
+        .iter()
+        .map(|index| {
+            let index = usize::try_from(*index)
+                .ok()
+                .filter(|index| *index < items.len() && retained[*index] == 1)
+                .ok_or(crate::MojoError::InvalidOutput)?;
+            if seen[index] {
+                return Err(crate::MojoError::InvalidOutput);
+            }
+            seen[index] = true;
+            Ok(index)
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(SmartContextStaticItemPlan {
+        selected_indices,
+        retained: retained.into_iter().map(|value| value == 1).collect(),
+    })
+}
+
+fn string_view(value: &str) -> StringView {
+    StringView {
+        ptr: value.as_ptr() as usize as u64,
+        len: value.len() as u64,
+    }
+}
+
+const _: () = {
+    assert!(std::mem::size_of::<StringView>() == 16);
+    assert!(std::mem::align_of::<StringView>() == 8);
+    assert!(std::mem::size_of::<StaticItem>() == 56);
+    assert!(std::mem::align_of::<StaticItem>() == 8);
+};
 
 pub fn smart_context_policy_self_test() -> bool {
     smart_context_regression_plan(SmartContextRegressionPlanInput {
