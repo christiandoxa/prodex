@@ -1,5 +1,12 @@
 use super::*;
 
+#[path = "catalog_provider_registry.rs"]
+mod provider_registry;
+pub use provider_registry::{
+    ProviderRegistryModelCostEntry, ProviderRegistryModelCostPlan,
+    plan_provider_registry_model_costs,
+};
+
 #[path = "catalog_planner.rs"]
 mod catalog_planner;
 pub use catalog_planner::{
