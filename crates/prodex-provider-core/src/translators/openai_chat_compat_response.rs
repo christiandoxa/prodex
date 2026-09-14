@@ -2,6 +2,7 @@
 mod stream;
 
 pub(crate) use self::stream::translate_chat_stream_event_to_responses;
+use super::openai_chat_compat_util::chat_response_body;
 use super::{
     ProviderEndpoint, ProviderId, ProviderTransformInput, ProviderTransformResult,
     ProviderWireFormat, Value, chat_usage_to_responses_usage, json,
@@ -91,27 +92,26 @@ pub(crate) fn translate_chat_response_to_responses(
         }
     }
 
-    let mut response = json!({
-        "id": value.get("id").and_then(Value::as_str).unwrap_or("resp_prodex"),
-        "object": "response",
-        "created_at": value
-            .get("created")
-            .and_then(Value::as_u64)
-            .unwrap_or_else(unix_now_secs),
-        "model": value.get("model").and_then(Value::as_str).unwrap_or("unknown"),
-        "output": output,
-    });
-
-    if let Some(usage) = chat_usage_to_responses_usage(value.get("usage")) {
-        response["usage"] = usage;
-    }
+    let response_id = value
+        .get("id")
+        .and_then(Value::as_str)
+        .unwrap_or("resp_prodex");
+    let created_at = value
+        .get("created")
+        .and_then(Value::as_u64)
+        .unwrap_or_else(unix_now_secs);
+    let model = value
+        .get("model")
+        .and_then(Value::as_str)
+        .unwrap_or("unknown");
+    let usage = chat_usage_to_responses_usage(value.get("usage"));
 
     ProviderTransformResult::lossless(
         provider,
         input.endpoint,
         ProviderWireFormat::OpenAiChatCompletions,
         ProviderWireFormat::OpenAiResponses,
-        serde_json::to_vec(&response).expect("chat compatibility response serializes"),
+        chat_response_body(response_id, created_at, model, &output, usage.as_ref()),
     )
 }
 
@@ -120,4 +120,118 @@ fn unix_now_secs() -> u64 {
         .duration_since(UNIX_EPOCH)
         .map(|duration| duration.as_secs())
         .unwrap_or(0)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        ProviderEndpoint, ProviderId, ProviderTransformInput, ProviderTransformResult,
+        ProviderWireFormat, Value, translate_chat_response_to_responses,
+        translate_chat_stream_event_to_responses,
+    };
+    use crate::ProviderTransformLoss;
+    use serde_json::json;
+
+    fn response(value: Value) -> ProviderTransformResult {
+        translate_chat_response_to_responses(
+            ProviderId::Anthropic,
+            ProviderTransformInput::new(
+                ProviderEndpoint::Responses,
+                serde_json::to_vec(&value).unwrap(),
+            ),
+        )
+    }
+
+    fn stream(event: &str) -> ProviderTransformResult {
+        translate_chat_stream_event_to_responses(
+            ProviderId::Anthropic,
+            ProviderTransformInput::new(ProviderEndpoint::Responses, event.as_bytes()),
+        )
+    }
+
+    fn event_data(result: ProviderTransformResult) -> Value {
+        let body = String::from_utf8(result.body.unwrap()).unwrap();
+        serde_json::from_str(body.lines().nth(1).unwrap().strip_prefix("data: ").unwrap()).unwrap()
+    }
+
+    #[test]
+    fn response_parity_maps_text_tool_arguments_and_usage() {
+        let result = response(json!({
+            "id": "chatcmpl_test",
+            "model": "compat-model",
+            "created": 1700000000u64,
+            "choices": [{
+                "message": {
+                    "role": "assistant",
+                    "content": [{"text": "hello"}, {"content": "world"}, {"text": ""}],
+                    "tool_calls": [{
+                        "id": "call_test",
+                        "function": {
+                            "name": "functions.exec_command",
+                            "arguments": "{\"cmd\":\"ls\"}"
+                        }
+                    }]
+                }
+            }],
+            "usage": {"prompt_tokens": 3, "completion_tokens": 4}
+        }));
+
+        assert!(matches!(result.loss, ProviderTransformLoss::Lossless));
+        let body: Value = serde_json::from_slice(&result.body.unwrap()).unwrap();
+        assert_eq!(body["output"][0]["content"][1]["text"], "world");
+        assert_eq!(body["output"][1]["namespace"], "functions");
+        assert_eq!(body["output"][1]["name"], "exec_command");
+        assert_eq!(body["output"][1]["arguments"], r#"{"cmd":"rtk ls"}"#);
+        assert_eq!(body["usage"]["total_tokens"], 7);
+    }
+
+    #[test]
+    fn response_parity_keeps_defaults_for_sparse_chat_response() {
+        let result = response(json!({"choices": []}));
+        let body: Value = serde_json::from_slice(&result.body.unwrap()).unwrap();
+
+        assert_eq!(body["id"], "resp_prodex");
+        assert_eq!(body["model"], "unknown");
+        assert!(body["created_at"].as_u64().is_some());
+        assert_eq!(body["output"], json!([]));
+        assert!(body.get("usage").is_none());
+    }
+
+    #[test]
+    fn stream_parity_prefers_tool_text_then_finish() {
+        let tool = stream(
+            "data: {\"choices\":[{\"delta\":{\"content\":\"ignored\",\"tool_calls\":[{\"id\":\"call_test\",\"function\":{\"name\":\"functions.exec_command\",\"arguments\":\"{\\\"cmd\\\":\\\"ls\\\"}\"}}]}}]}\n\n",
+        );
+        assert!(matches!(tool.loss, ProviderTransformLoss::Lossless));
+        assert_eq!(
+            event_data(tool),
+            json!({
+                "call_id": "call_test",
+                "delta": r#"{"cmd":"rtk ls"}"#,
+                "type": "response.function_call_arguments.delta"
+            })
+        );
+
+        let text = stream("data: {\"choices\":[{\"delta\":{\"content\":\"hello\"}}]}\n\n");
+        assert_eq!(
+            event_data(text),
+            json!({"type": "response.output_text.delta", "delta": "hello"})
+        );
+
+        let done = stream("data: {\"choices\":[{\"finish_reason\":\"stop\"}]}\n\n");
+        assert_eq!(event_data(done), json!({}));
+    }
+
+    #[test]
+    fn stream_parity_rejects_unrecognized_chat_event() {
+        let result = stream("data: {\"choices\":[{\"delta\":{}}]}\n\n");
+        assert!(matches!(
+            result.loss,
+            ProviderTransformLoss::UnsupportedUpstream { .. }
+        ));
+        assert_eq!(
+            result.from_format,
+            ProviderWireFormat::OpenAiChatCompletions
+        );
+    }
 }

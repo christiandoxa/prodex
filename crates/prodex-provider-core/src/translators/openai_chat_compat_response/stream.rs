@@ -89,126 +89,107 @@ pub(crate) fn translate_chat_stream_event_to_responses(
         }
     };
 
-    if let Some(tool_call) = value
+    let choice = value
         .get("choices")
         .and_then(Value::as_array)
-        .and_then(|choices| choices.first())
-        .and_then(|choice| choice.get("delta"))
+        .and_then(|choices| choices.first());
+    let delta = choice.and_then(|choice| choice.get("delta"));
+    let tool_call = delta
         .and_then(|delta| delta.get("tool_calls"))
         .and_then(Value::as_array)
-        .and_then(|tool_calls| tool_calls.first())
-        && let Some(arguments) = tool_call
-            .get("function")
-            .and_then(|function| function.get("arguments"))
-            .and_then(Value::as_str)
+        .and_then(|tool_calls| tool_calls.first());
+    let arguments = tool_call
+        .and_then(|tool_call| tool_call.get("function"))
+        .and_then(|function| function.get("arguments"))
+        .and_then(Value::as_str);
+    let text = delta
+        .and_then(|delta| delta.get("content"))
+        .and_then(Value::as_str);
+    let finished = choice
+        .and_then(|choice| choice.get("finish_reason"))
+        .is_some_and(|finish_reason| !finish_reason.is_null());
+
+    #[cfg(feature = "mojo")]
     {
-        #[cfg(feature = "mojo")]
-        {
-            let body = stream_event_body(
-                prodex_mojo_core::rich::OpenAiCompatStreamKind::FunctionCallArgumentsDelta,
-                tool_call.get("id").and_then(Value::as_str),
+        let body = match prodex_mojo_core::rich::OpenAiCompatKernelOperation::stream_event_from_chat(
+            tool_call
+                .and_then(|tool_call| tool_call.get("id"))
+                .and_then(Value::as_str),
+            tool_call
+                .and_then(|tool_call| tool_call.get("function"))
+                .and_then(|function| function.get("name"))
+                .and_then(Value::as_str),
+            arguments,
+            text,
+            finished,
+        ) {
+            Ok(body) if body.is_empty() => {
+                return ProviderTransformResult::unsupported(
+                    provider,
+                    input.endpoint,
+                    ProviderWireFormat::OpenAiChatCompletions,
+                    ProviderWireFormat::OpenAiResponses,
+                    "chat completions SSE event does not contain a supported text delta",
+                );
+            }
+            Ok(body) => body,
+            Err(error) => panic!("Mojo OpenAI compatibility stream event failed: {error:?}"),
+        };
+        return ProviderTransformResult::lossless(
+            provider,
+            input.endpoint,
+            ProviderWireFormat::OpenAiChatCompletions,
+            ProviderWireFormat::OpenAiResponses,
+            body,
+        );
+    }
+
+    #[cfg(not(feature = "mojo"))]
+    if let (Some(tool_call), Some(arguments)) = (tool_call, arguments) {
+        let mut payload = json!({
+            "type": "response.function_call_arguments.delta",
+            "delta": super::super::openai_chat_compat_util::rtk_wrapped_tool_arguments(
                 tool_call
                     .get("function")
                     .and_then(|function| function.get("name"))
-                    .and_then(Value::as_str),
-                Some(arguments),
-            );
-            return ProviderTransformResult::lossless(
-                provider,
-                input.endpoint,
-                ProviderWireFormat::OpenAiChatCompletions,
-                ProviderWireFormat::OpenAiResponses,
-                body,
-            );
+                    .and_then(Value::as_str)
+                    .unwrap_or(""),
+                arguments,
+            ),
+        });
+        if let Some(call_id) = tool_call.get("id").and_then(Value::as_str) {
+            payload["call_id"] = Value::String(call_id.to_string());
         }
-
-        #[cfg(not(feature = "mojo"))]
-        {
-            let mut payload = json!({
-                "type": "response.function_call_arguments.delta",
-                "delta": super::super::openai_chat_compat_util::rtk_wrapped_tool_arguments(
-                    tool_call
-                        .get("function")
-                        .and_then(|function| function.get("name"))
-                        .and_then(Value::as_str)
-                        .unwrap_or(""),
-                    arguments,
-                ),
-            });
-            if let Some(call_id) = tool_call.get("id").and_then(Value::as_str) {
-                payload["call_id"] = Value::String(call_id.to_string());
-            }
-            let body = format!(
-                "event: response.function_call_arguments.delta\ndata: {}\n\n",
-                payload
-            );
-            return ProviderTransformResult::lossless(
-                provider,
-                input.endpoint,
-                ProviderWireFormat::OpenAiChatCompletions,
-                ProviderWireFormat::OpenAiResponses,
-                body.into_bytes(),
-            );
-        }
-    }
-
-    if let Some(text) = value
-        .get("choices")
-        .and_then(Value::as_array)
-        .and_then(|choices| choices.first())
-        .and_then(|choice| choice.get("delta"))
-        .and_then(|delta| delta.get("content"))
-        .and_then(Value::as_str)
-    {
-        #[cfg(feature = "mojo")]
-        {
-            let body = stream_event_body(
-                prodex_mojo_core::rich::OpenAiCompatStreamKind::TextDelta,
-                None,
-                None,
-                Some(text),
-            );
-            return ProviderTransformResult::lossless(
-                provider,
-                input.endpoint,
-                ProviderWireFormat::OpenAiChatCompletions,
-                ProviderWireFormat::OpenAiResponses,
-                body,
-            );
-        }
-
-        #[cfg(not(feature = "mojo"))]
-        {
-            let body = format!(
-                "event: response.output_text.delta\ndata: {}\n\n",
-                json!({"type": "response.output_text.delta", "delta": text})
-            );
-            return ProviderTransformResult::lossless(
-                provider,
-                input.endpoint,
-                ProviderWireFormat::OpenAiChatCompletions,
-                ProviderWireFormat::OpenAiResponses,
-                body.into_bytes(),
-            );
-        }
-    }
-
-    if value
-        .get("choices")
-        .and_then(Value::as_array)
-        .and_then(|choices| choices.first())
-        .and_then(|choice| choice.get("finish_reason"))
-        .filter(|finish_reason| !finish_reason.is_null())
-        .is_some()
-    {
-        #[cfg(feature = "mojo")]
-        let body = stream_event_body(
-            prodex_mojo_core::rich::OpenAiCompatStreamKind::Done,
-            None,
-            None,
-            None,
+        let body = format!(
+            "event: response.function_call_arguments.delta\ndata: {}\n\n",
+            payload
         );
-        #[cfg(not(feature = "mojo"))]
+        return ProviderTransformResult::lossless(
+            provider,
+            input.endpoint,
+            ProviderWireFormat::OpenAiChatCompletions,
+            ProviderWireFormat::OpenAiResponses,
+            body.into_bytes(),
+        );
+    }
+
+    #[cfg(not(feature = "mojo"))]
+    if let Some(text) = text {
+        let body = format!(
+            "event: response.output_text.delta\ndata: {}\n\n",
+            json!({"type": "response.output_text.delta", "delta": text})
+        );
+        return ProviderTransformResult::lossless(
+            provider,
+            input.endpoint,
+            ProviderWireFormat::OpenAiChatCompletions,
+            ProviderWireFormat::OpenAiResponses,
+            body.into_bytes(),
+        );
+    }
+
+    #[cfg(not(feature = "mojo"))]
+    if finished {
         let body = b"event: response.completed\ndata: {}\n\n".to_vec();
         return ProviderTransformResult::lossless(
             provider,
@@ -219,11 +200,12 @@ pub(crate) fn translate_chat_stream_event_to_responses(
         );
     }
 
-    ProviderTransformResult::unsupported(
+    #[cfg(not(feature = "mojo"))]
+    return ProviderTransformResult::unsupported(
         provider,
         input.endpoint,
         ProviderWireFormat::OpenAiChatCompletions,
         ProviderWireFormat::OpenAiResponses,
         "chat completions SSE event does not contain a supported text delta",
-    )
+    );
 }

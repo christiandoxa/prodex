@@ -153,6 +153,45 @@ pub(super) fn chat_usage_to_responses_usage(usage: Option<&Value>) -> Option<Val
     }
 }
 
+pub(super) fn chat_response_body(
+    response_id: &str,
+    created_at: u64,
+    model: &str,
+    output: &[Value],
+    usage: Option<&Value>,
+) -> Vec<u8> {
+    #[cfg(feature = "mojo")]
+    {
+        let output = serde_json::to_string(output).expect("chat compatibility output serializes");
+        let usage = usage.map(|usage| {
+            serde_json::to_string(usage).expect("chat compatibility usage serializes")
+        });
+        return prodex_mojo_core::rich::OpenAiCompatKernelOperation::response(
+            response_id,
+            created_at,
+            model,
+            &output,
+            usage.as_deref(),
+        )
+        .unwrap_or_else(|error| panic!("Mojo OpenAI compatibility response failed: {error:?}"));
+    }
+
+    #[cfg(not(feature = "mojo"))]
+    {
+        let mut response = json!({
+            "id": response_id,
+            "object": "response",
+            "created_at": created_at,
+            "model": model,
+            "output": output,
+        });
+        if let Some(usage) = usage {
+            response["usage"] = usage.clone();
+        }
+        serde_json::to_vec(&response).expect("chat compatibility response serializes")
+    }
+}
+
 pub(super) fn stringify_arguments(value: &Value) -> String {
     value
         .as_str()

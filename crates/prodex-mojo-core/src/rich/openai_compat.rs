@@ -18,6 +18,8 @@ pub enum OpenAiCompatKernelOperation {
     SplitToolName = 6,
     RtkArguments = 7,
     StreamEvent = 8,
+    Response = 9,
+    StreamEventFromChat = 10,
 }
 
 /// Message shape requested from the chat-compatibility kernel.
@@ -130,6 +132,7 @@ struct OpenAiCompatKernelFfiInput {
     input_tokens: u64,
     output_tokens: u64,
     total_tokens: u64,
+    created_at: u64,
     total_tokens_present: i64,
     provider_present: i64,
     role_present: i64,
@@ -139,6 +142,13 @@ struct OpenAiCompatKernelFfiInput {
     name_present: i64,
     arguments_present: i64,
     delta_present: i64,
+    response_id_present: i64,
+    model_present: i64,
+    output_present: i64,
+    usage_present: i64,
+    stream_tool_call_present: i64,
+    stream_text_present: i64,
+    stream_finished: i64,
     provider: RichStringView,
     role: RichStringView,
     text: RichStringView,
@@ -147,9 +157,13 @@ struct OpenAiCompatKernelFfiInput {
     name: RichStringView,
     arguments: RichStringView,
     delta: RichStringView,
+    response_id: RichStringView,
+    model: RichStringView,
+    output: RichStringView,
+    usage: RichStringView,
 }
 
-const _: () = assert!(std::mem::size_of::<OpenAiCompatKernelFfiInput>() == 384);
+const _: () = assert!(std::mem::size_of::<OpenAiCompatKernelFfiInput>() == 512);
 
 unsafe extern "C" {
     fn prodex_mojo_openai_compat_kernel_v1(
@@ -170,6 +184,7 @@ struct KernelInput<'a> {
     input_tokens: u64,
     output_tokens: u64,
     total_tokens: u64,
+    created_at: u64,
     total_tokens_present: bool,
     role: Option<&'a str>,
     text: Option<&'a str>,
@@ -178,6 +193,13 @@ struct KernelInput<'a> {
     name: Option<&'a str>,
     arguments: Option<&'a str>,
     delta: Option<&'a str>,
+    response_id: Option<&'a str>,
+    model: Option<&'a str>,
+    output: Option<&'a str>,
+    usage: Option<&'a str>,
+    stream_tool_call_present: bool,
+    stream_text_present: bool,
+    stream_finished: bool,
 }
 
 impl<'a> KernelInput<'a> {
@@ -190,6 +212,7 @@ impl<'a> KernelInput<'a> {
             input_tokens: 0,
             output_tokens: 0,
             total_tokens: 0,
+            created_at: 0,
             total_tokens_present: false,
             role: None,
             text: None,
@@ -198,6 +221,13 @@ impl<'a> KernelInput<'a> {
             name: None,
             arguments: None,
             delta: None,
+            response_id: None,
+            model: None,
+            output: None,
+            usage: None,
+            stream_tool_call_present: false,
+            stream_text_present: false,
+            stream_finished: false,
         }
     }
 }
@@ -228,6 +258,10 @@ fn input_bytes(input: &KernelInput<'_>) -> Result<usize, OpenAiCompatError> {
         input.name,
         input.arguments,
         input.delta,
+        input.response_id,
+        input.model,
+        input.output,
+        input.usage,
     ]
     .into_iter()
     .flatten()
@@ -283,6 +317,7 @@ fn ffi_input(input: &KernelInput<'_>) -> OpenAiCompatKernelFfiInput {
         input_tokens: input.input_tokens,
         output_tokens: input.output_tokens,
         total_tokens: input.total_tokens,
+        created_at: input.created_at,
         total_tokens_present: i64::from(input.total_tokens_present),
         provider_present: i64::from(input.validation.is_some()),
         role_present: i64::from(input.role.is_some()),
@@ -292,6 +327,13 @@ fn ffi_input(input: &KernelInput<'_>) -> OpenAiCompatKernelFfiInput {
         name_present: i64::from(input.name.is_some()),
         arguments_present: i64::from(input.arguments.is_some()),
         delta_present: i64::from(input.delta.is_some()),
+        response_id_present: i64::from(input.response_id.is_some()),
+        model_present: i64::from(input.model.is_some()),
+        output_present: i64::from(input.output.is_some()),
+        usage_present: i64::from(input.usage.is_some()),
+        stream_tool_call_present: i64::from(input.stream_tool_call_present),
+        stream_text_present: i64::from(input.stream_text_present),
+        stream_finished: i64::from(input.stream_finished),
         provider: kernel_view(input.validation.map(|validation| validation.provider)),
         role: kernel_view(input.role),
         text: kernel_view(input.text),
@@ -300,6 +342,10 @@ fn ffi_input(input: &KernelInput<'_>) -> OpenAiCompatKernelFfiInput {
         name: kernel_view(input.name),
         arguments: kernel_view(input.arguments),
         delta: kernel_view(input.delta),
+        response_id: kernel_view(input.response_id),
+        model: kernel_view(input.model),
+        output: kernel_view(input.output),
+        usage: kernel_view(input.usage),
     }
 }
 
@@ -360,6 +406,44 @@ fn run_kernel(input: KernelInput<'_>) -> Result<Vec<u8>, OpenAiCompatError> {
         ));
     }
     Err(error_for_status(status))
+}
+
+impl OpenAiCompatKernelOperation {
+    /// Builds one normalized Responses response from JSON fragments adapted by Rust.
+    pub fn response(
+        response_id: &str,
+        created_at: u64,
+        model: &str,
+        output: &str,
+        usage: Option<&str>,
+    ) -> Result<Vec<u8>, OpenAiCompatError> {
+        let mut kernel = KernelInput::empty(Self::Response);
+        kernel.response_id = Some(response_id);
+        kernel.created_at = created_at;
+        kernel.model = Some(model);
+        kernel.output = Some(output);
+        kernel.usage = usage;
+        run_kernel(kernel)
+    }
+
+    /// Chooses and builds one Responses SSE event from adapted chat facts.
+    pub fn stream_event_from_chat(
+        call_id: Option<&str>,
+        name: Option<&str>,
+        arguments: Option<&str>,
+        text: Option<&str>,
+        finished: bool,
+    ) -> Result<Vec<u8>, OpenAiCompatError> {
+        let mut kernel = KernelInput::empty(Self::StreamEventFromChat);
+        kernel.call_id = call_id;
+        kernel.name = name;
+        kernel.arguments = arguments;
+        kernel.delta = text;
+        kernel.stream_tool_call_present = arguments.is_some();
+        kernel.stream_text_present = text.is_some();
+        kernel.stream_finished = finished;
+        run_kernel(kernel)
+    }
 }
 
 /// Validates the already-decoded Responses request facts in Mojo.
