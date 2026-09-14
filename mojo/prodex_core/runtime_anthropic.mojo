@@ -8,7 +8,7 @@ from anthropic_request import (
     anthropic_request_string_end,
     anthropic_request_value_end,
 )
-from rich_text import rich_view_matches_literal, rich_view_ptr, rich_view_valid
+from rich_text import rich_trim_bounds, rich_view_matches_literal, rich_view_ptr, rich_view_valid
 from rich_types import ProdexRichStringView
 
 
@@ -37,6 +37,7 @@ comptime RUNTIME_ANTHROPIC_MCP_LIST_TOOLS_BLOCK: Int64 = 14
 comptime RUNTIME_ANTHROPIC_SERVER_TOOL_BLOCK: Int64 = 15
 comptime RUNTIME_ANTHROPIC_THINKING_BLOCK: Int64 = 16
 comptime RUNTIME_ANTHROPIC_TEXT_BLOCK: Int64 = 17
+comptime RUNTIME_ANTHROPIC_TOOL_RESULT_TEXT_PLAN: Int64 = 18
 
 comptime RUNTIME_ANTHROPIC_FLAG_ERROR: Int64 = 1
 comptime RUNTIME_ANTHROPIC_FLAG_MAX_OUTPUT_LENGTH: Int64 = 2
@@ -215,7 +216,20 @@ def runtime_anthropic_put_json_string_range(
 ) -> Bool:
     if start < 0 or end < start or end > Int64(view.len):
         return False
-    if not runtime_anthropic_put_byte(writer, 34):
+    return (
+        runtime_anthropic_put_byte(writer, 34)
+        and runtime_anthropic_put_json_range_content(writer, view, start, end)
+        and runtime_anthropic_put_byte(writer, 34)
+    )
+
+
+def runtime_anthropic_put_json_range_content(
+    writer: Pointer[mut=True, RuntimeAnthropicKernelWriter, _],
+    view: ProdexRichStringView,
+    start: Int64,
+    end: Int64,
+) -> Bool:
+    if start < 0 or end < start or end > Int64(view.len):
         return False
     if end > start:
         var ptr = rich_view_ptr(view)
@@ -248,7 +262,7 @@ def runtime_anthropic_put_json_string_range(
                     return False
             elif not runtime_anthropic_put_byte(writer, value):
                 return False
-    return runtime_anthropic_put_byte(writer, 34)
+    return True
 
 
 def runtime_anthropic_json_string_valid(
@@ -970,6 +984,154 @@ def runtime_anthropic_write_mcp_list_tools_block(
     return runtime_anthropic_put_byte(writer, 125)
 
 
+def runtime_anthropic_range_starts_literal(
+    view: ProdexRichStringView,
+    start: Int64,
+    end: Int64,
+    literal: StringSlice,
+) -> Bool:
+    var length = Int64(literal.byte_length())
+    if start < 0 or end - start < length:
+        return False
+    var ptr = rich_view_ptr(view)
+    var other = literal.unsafe_ptr()
+    for index in range(length):
+        if ptr[unsafe_offset=start + index] != other[unsafe_offset=index]:
+            return False
+    return True
+
+
+def runtime_anthropic_trim_range(
+    view: ProdexRichStringView, start: Int64, end: Int64
+) -> InlineArray[Int64, 2]:
+    var result = InlineArray[Int64, 2](fill=start)
+    if start < 0 or end < start or end > Int64(view.len):
+        result[0] = -1
+        result[1] = -1
+        return result^
+    var part = ProdexRichStringView(view.ptr + UInt(start), UInt(end - start))
+    var bounds = rich_trim_bounds(part)
+    result[0] = start + bounds[0]
+    result[1] = start + bounds[1]
+    return result^
+
+
+def runtime_anthropic_tool_result_query(
+    view: ProdexRichStringView,
+) -> InlineArray[Int64, 2]:
+    var missing = InlineArray[Int64, 2](fill=-1)
+    var whole = runtime_anthropic_trim_range(view, 0, Int64(view.len))
+    var prefix = StringSlice("Web search results for query:")
+    if not runtime_anthropic_range_starts_literal(
+        view, whole[0], whole[1], prefix
+    ):
+        return missing^
+    var start = whole[0] + Int64(prefix.byte_length())
+    var line_end = start
+    while line_end < whole[1] and anthropic_request_byte(view, line_end) != 10:
+        line_end += 1
+    var line = runtime_anthropic_trim_range(view, start, line_end)
+    if line[0] >= line[1]:
+        return missing^
+    if anthropic_request_byte(view, line[0]) == 34:
+        var quote = line[0] + 1
+        while quote < line[1] and anthropic_request_byte(view, quote) != 34:
+            quote += 1
+        if quote < line[1]:
+            line = runtime_anthropic_trim_range(view, line[0] + 1, quote)
+            if line[0] < line[1]:
+                return line^
+            return missing^
+    while line[0] < line[1] and anthropic_request_byte(view, line[0]) == 34:
+        line[0] += 1
+    while line[1] > line[0] and anthropic_request_byte(view, line[1] - 1) == 34:
+        line[1] -= 1
+    line = runtime_anthropic_trim_range(view, line[0], line[1])
+    if line[0] >= line[1]:
+        return missing^
+    return line^
+
+
+def runtime_anthropic_put_compact_summary(
+    writer: Pointer[mut=True, RuntimeAnthropicKernelWriter, _],
+    view: ProdexRichStringView,
+    start: Int64,
+) -> Bool:
+    if not runtime_anthropic_put_byte(writer, 34):
+        return False
+    var cursor = start
+    var wrote = False
+    var pending_blank = False
+    while cursor < Int64(view.len):
+        var line_end = cursor
+        while line_end < Int64(view.len) and anthropic_request_byte(view, line_end) != 10:
+            line_end += 1
+        var line = runtime_anthropic_trim_range(view, cursor, line_end)
+        cursor = line_end + 1
+        if line[0] == line[1]:
+            if wrote:
+                pending_blank = True
+            continue
+        if anthropic_request_range_matches_literal(
+            view, line[0], line[1], StringSlice("No links found.")
+        ) or runtime_anthropic_range_starts_literal(
+            view, line[0], line[1], StringSlice("Link:")
+        ):
+            continue
+        if anthropic_request_range_matches_literal(
+            view, line[0], line[1], StringSlice("Sources:")
+        ) or runtime_anthropic_range_starts_literal(
+            view, line[0], line[1], StringSlice("REMINDER:")
+        ) or runtime_anthropic_range_starts_literal(
+            view, line[0], line[1], StringSlice("Kalau mau, saya bisa lanjutkan")
+        ) or runtime_anthropic_range_starts_literal(
+            view, line[0], line[1], StringSlice("If you'd like")
+        ) or runtime_anthropic_range_starts_literal(
+            view, line[0], line[1], StringSlice("If you want,")
+        ):
+            break
+        if wrote and not runtime_anthropic_put_literal(writer, StringSlice("\\n")):
+            return False
+        if pending_blank and not runtime_anthropic_put_literal(writer, StringSlice("\\n")):
+            return False
+        if not runtime_anthropic_put_json_range_content(
+            writer, view, line[0], line[1]
+        ):
+            return False
+        wrote = True
+        pending_blank = False
+    return runtime_anthropic_put_byte(writer, 34)
+
+
+def runtime_anthropic_write_tool_result_text_plan(
+    writer: Pointer[mut=True, RuntimeAnthropicKernelWriter, _],
+    input: ProdexRuntimeAnthropicKernelInput,
+) -> Bool:
+    if input.text_present == 0 or input.index > UInt64(input.text.len):
+        return False
+    var query = InlineArray[Int64, 2](fill=0)
+    if input.flags & 1 == 0:
+        query = runtime_anthropic_tool_result_query(input.text)
+        if query[0] < 0:
+            return runtime_anthropic_put_literal(writer, StringSlice("null"))
+    if not runtime_anthropic_put_literal(writer, StringSlice('{"query":')):
+        return False
+    if input.flags & 1 != 0:
+        if not runtime_anthropic_put_literal(writer, StringSlice('""')):
+            return False
+    elif not runtime_anthropic_put_json_string_range(
+        writer, input.text, query[0], query[1]
+    ):
+        return False
+    return (
+        runtime_anthropic_put_literal(writer, StringSlice(',"summary":'))
+        and runtime_anthropic_put_compact_summary(
+            writer, input.text, Int64(input.index)
+        )
+        and runtime_anthropic_put_byte(writer, 125)
+    )
+
+
 def runtime_anthropic_write_operation(
     writer: Pointer[mut=True, RuntimeAnthropicKernelWriter, _],
     input: ProdexRuntimeAnthropicKernelInput,
@@ -1032,6 +1194,8 @@ def runtime_anthropic_write_operation(
         return runtime_anthropic_put_literal(writer, StringSlice("{\"type\":\"text\",\"text\":")) and runtime_anthropic_put_json_string(
             writer, input.text
         ) and runtime_anthropic_put_byte(writer, 125)
+    if input.operation == RUNTIME_ANTHROPIC_TOOL_RESULT_TEXT_PLAN:
+        return runtime_anthropic_write_tool_result_text_plan(writer, input)
     return False
 
 
@@ -1040,7 +1204,7 @@ def runtime_anthropic_input_valid(
 ) -> Bool:
     return (
         input.operation > 0
-        and input.operation <= RUNTIME_ANTHROPIC_TEXT_BLOCK
+        and input.operation <= RUNTIME_ANTHROPIC_TOOL_RESULT_TEXT_PLAN
         and rich_view_valid(input.id, RUNTIME_ANTHROPIC_KERNEL_MAX_BYTES)
         and rich_view_valid(input.name, RUNTIME_ANTHROPIC_KERNEL_MAX_BYTES)
         and rich_view_valid(input.block_type, RUNTIME_ANTHROPIC_KERNEL_MAX_BYTES)

@@ -365,6 +365,13 @@ pub fn runtime_proxy_extract_balanced_json_array_bounds(
 pub fn runtime_proxy_anthropic_web_search_query_from_tool_result_text(
     text: &str,
 ) -> Option<String> {
+    runtime_proxy_anthropic_tool_result_text_plan(text, 0).map(|(query, _)| query)
+}
+
+#[cfg(any(not(feature = "mojo"), test))]
+fn runtime_proxy_anthropic_web_search_query_from_tool_result_text_rust(
+    text: &str,
+) -> Option<String> {
     let prefix = "Web search results for query:";
     let remainder = text.trim().strip_prefix(prefix)?.trim_start();
     let first_line = remainder.lines().next()?.trim();
@@ -429,6 +436,16 @@ pub fn runtime_proxy_anthropic_web_search_urls_from_tool_result_text(
 }
 
 pub fn runtime_proxy_compact_web_search_tool_result_summary(summary: &str) -> String {
+    #[cfg(feature = "mojo")]
+    return runtime_proxy_anthropic_mojo_tool_result_text_plan(summary, 0, true)
+        .map(|(_, summary)| summary)
+        .unwrap_or_default();
+    #[cfg(not(feature = "mojo"))]
+    runtime_proxy_compact_web_search_tool_result_summary_rust(summary)
+}
+
+#[cfg(any(not(feature = "mojo"), test))]
+fn runtime_proxy_compact_web_search_tool_result_summary_rust(summary: &str) -> String {
     let mut compact_lines = Vec::new();
     let mut saw_content = false;
 
@@ -467,15 +484,9 @@ pub fn runtime_proxy_compact_web_search_tool_result_summary(summary: &str) -> St
 }
 
 pub fn runtime_proxy_normalize_anthropic_tool_result_text(text: &str) -> Option<String> {
-    let query = runtime_proxy_anthropic_web_search_query_from_tool_result_text(text)?;
     let (urls, last_array_end) =
         runtime_proxy_anthropic_web_search_urls_from_tool_result_text(text);
-    let summary_source = if last_array_end > 0 {
-        &text[last_array_end..]
-    } else {
-        text
-    };
-    let summary = runtime_proxy_compact_web_search_tool_result_summary(summary_source);
+    let (query, summary) = runtime_proxy_anthropic_tool_result_text_plan(text, last_array_end)?;
     if urls.is_empty() && summary.is_empty() {
         return None;
     }
@@ -502,6 +513,116 @@ pub fn runtime_proxy_normalize_anthropic_tool_result_text(text: &str) -> Option<
     }
 
     Some(serde_json::Value::Object(output).to_string())
+}
+
+#[cfg(feature = "mojo")]
+fn runtime_proxy_anthropic_tool_result_text_plan(
+    text: &str,
+    summary_start: usize,
+) -> Option<(String, String)> {
+    runtime_proxy_anthropic_mojo_tool_result_text_plan(text, summary_start, false)
+}
+
+#[cfg(feature = "mojo")]
+fn runtime_proxy_anthropic_mojo_tool_result_text_plan(
+    text: &str,
+    summary_start: usize,
+    compact_only: bool,
+) -> Option<(String, String)> {
+    let mut input = prodex_mojo_core::rich::RuntimeAnthropicKernelInput::new(
+        prodex_mojo_core::rich::RuntimeAnthropicKernelOperation::ToolResultTextPlan,
+    );
+    input.text = Some(text);
+    input.index = u64::try_from(summary_start).ok()?;
+    input.flags = i64::from(compact_only);
+    let value = crate::mojo::json(input);
+    let object = value.as_object()?;
+    Some((
+        object.get("query")?.as_str()?.to_string(),
+        object.get("summary")?.as_str()?.to_string(),
+    ))
+}
+
+#[cfg(not(feature = "mojo"))]
+fn runtime_proxy_anthropic_tool_result_text_plan(
+    text: &str,
+    summary_start: usize,
+) -> Option<(String, String)> {
+    runtime_proxy_anthropic_tool_result_text_plan_rust(text, summary_start)
+}
+
+#[cfg(any(not(feature = "mojo"), test))]
+fn runtime_proxy_anthropic_tool_result_text_plan_rust(
+    text: &str,
+    summary_start: usize,
+) -> Option<(String, String)> {
+    let query = runtime_proxy_anthropic_web_search_query_from_tool_result_text_rust(text)?;
+    let summary_source = if summary_start > 0 {
+        text.get(summary_start..)?
+    } else {
+        text
+    };
+    Some((
+        query,
+        runtime_proxy_compact_web_search_tool_result_summary_rust(summary_source),
+    ))
+}
+
+#[cfg(all(test, feature = "mojo"))]
+mod mojo_tool_result_text_tests {
+    use super::*;
+
+    #[test]
+    fn mojo_tool_result_text_plan_matches_rust_oracle() {
+        let cases = [
+            "Web search results for query: \"berita \u{1f980}\"\n\nLinks: []\n\nSummary one\n\nSummary two\nSources:\nignored",
+            "\u{2003}Web search results for query: plain query\r\nNo links found.\nLink: ignored\nanswer\u{2003}\nIf you'd like more",
+            "Web search results for query: \" spaced \" trailing\nREMINDER: stop",
+            "not a web result",
+            "",
+        ];
+        for text in cases {
+            let (_, summary_start) =
+                runtime_proxy_anthropic_web_search_urls_from_tool_result_text(text);
+            assert_eq!(
+                runtime_proxy_anthropic_tool_result_text_plan(text, summary_start),
+                runtime_proxy_anthropic_tool_result_text_plan_rust(text, summary_start),
+                "{text:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn mojo_compact_summary_matches_rust_oracle() {
+        for summary in [
+            "  first  \n\n second \n",
+            "No links found.\ntext\nKalau mau, saya bisa lanjutkan",
+            "Link: ignored\n\u{2003}unicode\u{2003}",
+            "",
+        ] {
+            assert_eq!(
+                runtime_proxy_compact_web_search_tool_result_summary(summary),
+                runtime_proxy_compact_web_search_tool_result_summary_rust(summary),
+                "{summary:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn mojo_tool_result_text_plan_enforces_size_boundary() {
+        const MAX_BYTES: usize = 4 * 1024 * 1024;
+        let exact = "x".repeat(MAX_BYTES);
+        let mut input = prodex_mojo_core::rich::RuntimeAnthropicKernelInput::new(
+            prodex_mojo_core::rich::RuntimeAnthropicKernelOperation::ToolResultTextPlan,
+        );
+        input.text = Some(&exact);
+        input.flags = 1;
+        assert!(prodex_mojo_core::rich::runtime_anthropic_kernel(input).is_ok());
+
+        let oversized = format!("{exact}x");
+        input.text = Some(&oversized);
+        assert!(prodex_mojo_core::rich::runtime_anthropic_kernel(input).is_err());
+    }
 }
 
 #[cfg(feature = "mojo")]
