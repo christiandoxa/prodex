@@ -237,6 +237,7 @@ pub(super) fn push_unique_truncated_line(lines: &mut Vec<String>, line: &str, ma
     push_unique_line(lines, &line);
 }
 
+#[cfg(not(feature = "mojo"))]
 pub(super) fn smart_truncate_command_output(
     input: &str,
     options: &CommandOutputCompactOptions,
@@ -271,6 +272,30 @@ pub(super) fn smart_truncate_command_output(
         output.push(truncate_command_line(line, options.max_line_chars));
     }
     lines_to_text(output)
+}
+
+#[cfg(feature = "mojo")]
+pub(super) fn smart_truncate_command_output(
+    input: &str,
+    options: &CommandOutputCompactOptions,
+) -> String {
+    let lines = command_lines(input);
+    if lines.is_empty() {
+        return String::new();
+    }
+    if let Some(output) =
+        smart_truncate_with_critical_lines(&lines, options, options.max_lines.max(1))
+    {
+        return output;
+    }
+    prodex_mojo_core::context::truncate_command_output(
+        input,
+        options.max_lines.max(1),
+        options.head_lines,
+        options.tail_lines,
+        options.max_line_chars,
+    )
+    .unwrap_or_else(|error| panic!("Mojo command-output truncation failed: {error:?}"))
 }
 
 pub(super) fn smart_truncate_with_critical_lines(
@@ -690,6 +715,7 @@ pub(super) fn truncate_command_line(line: &str, max_chars: usize) -> String {
     )
 }
 
+#[cfg(not(feature = "mojo"))]
 pub(super) fn bounded_head_tail(
     options: &CommandOutputCompactOptions,
     max_lines: usize,

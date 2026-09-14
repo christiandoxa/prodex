@@ -277,6 +277,7 @@ pub(crate) fn parse_heading_search_match_line_rust(
     })
 }
 
+#[cfg(not(feature = "mojo"))]
 pub(crate) fn count_heading_search_matches(lines: &[&str]) -> usize {
     let mut count = 0usize;
     let mut current_path = None::<String>;

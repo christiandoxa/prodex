@@ -1,3 +1,4 @@
+#[cfg(not(feature = "mojo"))]
 use super::log_stream::looks_like_log_stream_output;
 use super::*;
 
@@ -15,11 +16,13 @@ const METADATA_COMMAND_DETECTORS: [MetadataCommandDetector; 7] = [
     infer_metadata_package_command,
 ];
 
+#[cfg(not(feature = "mojo"))]
 fn detect_command_output_kind(input: &str) -> CommandOutputKind {
     let lines = command_lines(input);
     detect_command_output_kind_from_lines(&lines)
 }
 
+#[cfg(not(feature = "mojo"))]
 fn detect_command_output_kind_from_lines(lines: &[&str]) -> CommandOutputKind {
     if let Some(kind) = detect_primary_command_output_kind(lines) {
         return kind;
@@ -36,6 +39,7 @@ fn detect_command_output_kind_from_lines(lines: &[&str]) -> CommandOutputKind {
     CommandOutputKind::Plain
 }
 
+#[cfg(not(feature = "mojo"))]
 fn detect_primary_command_output_kind(lines: &[&str]) -> Option<CommandOutputKind> {
     if looks_like_git_log_stat_output(lines) {
         return Some(CommandOutputKind::GitLog);
@@ -63,6 +67,7 @@ fn detect_primary_command_output_kind(lines: &[&str]) -> Option<CommandOutputKin
     None
 }
 
+#[cfg(not(feature = "mojo"))]
 fn looks_like_git_status_lines(lines: &[&str]) -> bool {
     lines.iter().any(|line| {
         line.starts_with("On branch ")
@@ -78,6 +83,7 @@ fn looks_like_git_status_lines(lines: &[&str]) -> bool {
         >= 2
 }
 
+#[cfg(not(feature = "mojo"))]
 fn detect_search_command_output_kind(lines: &[&str]) -> Option<CommandOutputKind> {
     let non_empty = lines.iter().filter(|line| !line.trim().is_empty()).count();
     let search_matches = lines
@@ -101,6 +107,7 @@ fn detect_search_command_output_kind(lines: &[&str]) -> Option<CommandOutputKind
     None
 }
 
+#[cfg(not(feature = "mojo"))]
 fn looks_like_file_list_output(lines: &[&str]) -> bool {
     let non_empty = lines.iter().filter(|line| !line.trim().is_empty()).count();
     let file_list_lines = lines
@@ -114,13 +121,29 @@ pub(super) fn detect_command_output_kind_with_hint(
     input: &str,
     kind_hint: Option<CommandOutputKind>,
 ) -> CommandOutputKind {
-    let detected = detect_command_output_kind(input);
-    if detected == CommandOutputKind::Plain {
-        kind_hint
-            .filter(|kind| *kind != CommandOutputKind::Auto)
-            .unwrap_or(detected)
-    } else {
-        detected
+    #[cfg(feature = "mojo")]
+    {
+        return command_output_kind_from_mojo_tag(
+            prodex_mojo_core::context::classify_command_output_kind(
+                input,
+                kind_hint.map(|kind| kind as i64),
+            )
+            .unwrap_or_else(|error| {
+                panic!("Mojo command-output kind classification failed: {error:?}")
+            }),
+        )
+        .unwrap_or(CommandOutputKind::Plain);
+    }
+    #[cfg(not(feature = "mojo"))]
+    {
+        let detected = detect_command_output_kind(input);
+        if detected == CommandOutputKind::Plain {
+            kind_hint
+                .filter(|kind| *kind != CommandOutputKind::Auto)
+                .unwrap_or(detected)
+        } else {
+            detected
+        }
     }
 }
 

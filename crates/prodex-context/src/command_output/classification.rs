@@ -245,6 +245,7 @@ pub(crate) fn noisy_success_label(line: &str) -> Option<&'static str> {
 }
 
 #[cfg(feature = "mojo")]
+#[cfg(not(feature = "mojo"))]
 pub(crate) fn looks_like_rust_diagnostic_output(lines: &[&str]) -> bool {
     let (strong, noise, locations, backtraces, exits, clippy) =
         rust_diagnostic_signal_counts(lines);
@@ -261,6 +262,7 @@ pub(crate) fn looks_like_rust_diagnostic_output(lines: &[&str]) -> bool {
 }
 
 #[cfg(feature = "mojo")]
+#[cfg(not(feature = "mojo"))]
 fn rust_diagnostic_signal_counts(lines: &[&str]) -> (usize, usize, usize, usize, usize, usize) {
     let mut strong = 0usize;
     let mut noise = 0usize;
@@ -305,6 +307,7 @@ fn mojo_command_output_analysis(
 }
 
 #[cfg(feature = "mojo")]
+#[cfg(not(feature = "mojo"))]
 pub(crate) fn looks_like_diagnostic_output(lines: &[&str]) -> bool {
     let analysis = mojo_command_output_analysis(lines);
     let [strong, locations, stacks, exits, noise] = analysis.diagnostic;
