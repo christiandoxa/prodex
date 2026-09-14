@@ -257,7 +257,7 @@ test("canonical report exposes separate statuses and --check enforces only floor
   assert.deepEqual(checked, report);
   const human = runShare();
   assert.match(human, /Release floor status: PASS/u);
-  assert.match(human, projectTargetMet ? /Project target status: PASS/u : /Project target status: NOT YET MET/u);
+  assert.match(human, projectTargetMet ? /Project target status: MET/u : /Project target status: NOT YET MET/u);
   assert.match(human, /Historical 0\.421\.0 waiver: EXPIRED/u);
 });
 

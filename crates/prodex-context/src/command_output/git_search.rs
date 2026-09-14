@@ -610,28 +610,84 @@ fn compact_git_diff_stat_output(
 mod mojo_git_status_tests {
     use super::*;
 
+    fn oracle(input: &str, options: &CommandOutputCompactOptions) -> String {
+        let normalized = normalize_command_output(input);
+        let output = compact_git_status_output_rust(&normalized, options);
+        if options.max_lines <= 12 {
+            output
+        } else {
+            canonicalize_compacted_command_paths(&normalized, &output, CommandOutputKind::GitStatus)
+        }
+    }
+
     #[test]
-    fn mojo_git_status_formatter_matches_rust_oracle() {
-        let cases = [
-            "",
-            "arbitrary output\n",
-            "## main...origin/main\n M README.md\nM  src/lib.rs\nR  old -> new\n?? notes.txt\n?? notes.txt\nUU conflict.rs\n",
-            "On branch main\nYour branch is up to date with 'origin/main'.\n\nChanges to be committed:\n  modified:   src/lib.rs\n  renamed:    old.rs -> new.rs\n\nChanges not staged for commit:\n  modified:   README.md\n  deleted:    stale.txt\n\nUnmerged paths:\n  both modified: conflict.rs\n\nUntracked files:\n  notes.txt\n\nnothing to commit, working tree clean\n",
-            "HEAD detached at abc1234\nUntracked files:\n  a\n  b\n  c\n  d\n  e\n  f\n  g\n",
-        ];
-        for max_path_entries in [1, 6, 24, 120, usize::MAX] {
+    fn public_mojo_git_status_formatter_matches_860_case_rust_oracle() {
+        let mut cases = Vec::new();
+        for first in [' ', 'M', 'A', 'D', 'R', 'C', 'U', '?', '!'] {
+            for second in [' ', 'M', 'A', 'D', 'R', 'C', 'U', '?', '!'] {
+                cases.push(format!(
+                    "## main\n{first}{second} src/one.rs\n{first}{second} src/one.rs\n"
+                ));
+            }
+        }
+        cases.extend([
+            "\n\n\n\n".to_string(),
+            "## main\n M café/文件.rs\n??  alpha\u{00a0}\n".to_string(),
+            "## first\n M one\n## second\n M two\n".to_string(),
+            "On branch main\nChanges not staged for commit:\n  deleted : old.rs\nUntracked files:\n a\n a\n b\n".to_string(),
+            format!(
+                "## main\n{}",
+                (0..48)
+                    .map(|index| format!("?? src/file_{index:03}.rs\n"))
+                    .collect::<String>()
+            ),
+        ]);
+        for max_path_entries in [
+            0,
+            1,
+            6,
+            23,
+            24,
+            25,
+            120,
+            i64::MAX as usize - 5,
+            i64::MAX as usize,
+            usize::MAX,
+        ] {
             let options = CommandOutputCompactOptions {
-                max_lines: 200,
+                kind: CommandOutputKind::GitStatus,
+                max_lines: 1_000,
+                max_line_chars: 20_000,
                 max_path_entries,
                 ..CommandOutputCompactOptions::default()
             };
-            for input in cases {
+            for input in &cases {
                 assert_eq!(
-                    compact_git_status_output(input, &options),
-                    compact_git_status_output_rust(input, &options),
+                    compact_command_output_with_options(input, &options).output,
+                    oracle(input, &options),
                     "max_path_entries={max_path_entries}, input={input:?}",
                 );
             }
+        }
+    }
+
+    #[test]
+    fn mojo_git_status_handles_blank_heavy_and_long_inputs() {
+        let options = CommandOutputCompactOptions {
+            kind: CommandOutputKind::GitStatus,
+            max_lines: 1_000,
+            max_line_chars: 20_000,
+            ..CommandOutputCompactOptions::default()
+        };
+        for input in [
+            "\n".repeat(4 * 1024 * 1024 - 1) + "x",
+            format!("## main\n?? {}\n", "界".repeat(1_500_000)),
+            "## main\n?? same\n".repeat(200_000),
+        ] {
+            assert_eq!(
+                compact_command_output_with_options(&input, &options).output,
+                oracle(&input, &options)
+            );
         }
     }
 }
