@@ -24,7 +24,42 @@ pub struct ProviderRegistryModelCostPlan {
     pub pricing_known: bool,
 }
 
+/// Borrowed structural facts for one provider-registry descriptor.
+pub struct ProviderRegistryDescriptorValidationInput<'a> {
+    pub revision: u64,
+    pub pricing_revision: u64,
+    pub provider_code: u8,
+    pub credential_valid: bool,
+    pub endpoint_codes: Vec<u8>,
+    pub regions: &'a [String],
+    pub cost: u16,
+    pub latency: u16,
+    pub risk: u16,
+    pub priority: u16,
+    pub model_cost_count: usize,
+    pub pricing_authoritative: bool,
+}
+
 unsafe extern "C" {
+    fn prodex_mojo_provider_registry_artifact_structure_v1(
+        abi_version: i64,
+        schema_version: u64,
+        revision: u64,
+        pricing_revision: u64,
+        descriptor_fields: u64,
+        descriptor_count: i64,
+        regions: u64,
+        region_count: i64,
+        valid: u64,
+    ) -> i64;
+    fn prodex_mojo_provider_registry_pricing_authority_v1(
+        abi_version: i64,
+        names: u64,
+        input_present: u64,
+        output_present: u64,
+        name_count: i64,
+        authoritative: u64,
+    ) -> i64;
     fn prodex_mojo_rich_catalog_provider_registry_costs_v1(
         abi_version: i64,
         names: u64,
@@ -42,6 +77,107 @@ unsafe extern "C" {
         fallback_output_cost: u64,
         pricing_present: u64,
     ) -> i64;
+}
+
+/// Validate the complete bounded structural contract of a provider-registry artifact.
+pub fn provider_registry_artifact_is_valid(
+    schema_version: u32,
+    revision: u64,
+    pricing_revision: u64,
+    descriptors: &[ProviderRegistryDescriptorValidationInput<'_>],
+) -> Result<bool, MojoError> {
+    ensure_rich_abi()?;
+    const WIDTH: usize = 14;
+    let mut fields = Vec::with_capacity(descriptors.len() * WIDTH);
+    let mut regions = Vec::new();
+    for descriptor in descriptors {
+        let region_offset = regions.len();
+        regions.extend(descriptor.regions.iter().map(|region| view(region)));
+        let endpoint_mask = descriptor
+            .endpoint_codes
+            .iter()
+            .fold(0_u64, |mask, endpoint| {
+                mask | 1_u64.checked_shl(u32::from(*endpoint)).unwrap_or_default()
+            });
+        fields.extend([
+            descriptor.revision,
+            descriptor.pricing_revision,
+            u64::from(descriptor.provider_code),
+            u64::from(descriptor.credential_valid),
+            endpoint_mask,
+            u64::try_from(descriptor.endpoint_codes.len()).unwrap_or(u64::MAX),
+            u64::try_from(region_offset).unwrap_or(u64::MAX),
+            u64::try_from(descriptor.regions.len()).unwrap_or(u64::MAX),
+            u64::from(descriptor.cost),
+            u64::from(descriptor.latency),
+            u64::from(descriptor.risk),
+            u64::from(descriptor.priority),
+            u64::try_from(descriptor.model_cost_count).unwrap_or(u64::MAX),
+            u64::from(descriptor.pricing_authoritative),
+        ]);
+    }
+    let mut valid = -1_i64;
+    let status = unsafe {
+        prodex_mojo_provider_registry_artifact_structure_v1(
+            RICH_ABI_VERSION,
+            u64::from(schema_version),
+            revision,
+            pricing_revision,
+            address(&fields),
+            i64::try_from(descriptors.len()).map_err(|_| MojoError::InvalidInput)?,
+            address(&regions),
+            i64::try_from(regions.len()).map_err(|_| MojoError::InvalidInput)?,
+            mojo_mut_pointer_address(&mut valid),
+        )
+    };
+    if status != 0 {
+        return Err(status_error(status, 6, 0, 0, 0));
+    }
+    match valid {
+        0 => Ok(false),
+        1 => Ok(true),
+        _ => Err(MojoError::InvalidOutput),
+    }
+}
+
+/// Validate whether an artifact supplies complete, unambiguous model pricing.
+pub fn provider_registry_pricing_is_authoritative(
+    names: &[&str],
+    input_present: &[bool],
+    output_present: &[bool],
+) -> Result<bool, MojoError> {
+    ensure_rich_abi()?;
+    if names.len() != input_present.len() || names.len() != output_present.len() {
+        return Err(MojoError::InvalidInput);
+    }
+    let names = names.iter().map(|name| view(name)).collect::<Vec<_>>();
+    let input_present = input_present
+        .iter()
+        .map(|present| i64::from(*present))
+        .collect::<Vec<_>>();
+    let output_present = output_present
+        .iter()
+        .map(|present| i64::from(*present))
+        .collect::<Vec<_>>();
+    let mut authoritative = -1_i64;
+    let status = unsafe {
+        prodex_mojo_provider_registry_pricing_authority_v1(
+            RICH_ABI_VERSION,
+            address(&names),
+            address(&input_present),
+            address(&output_present),
+            i64::try_from(names.len()).map_err(|_| MojoError::InvalidInput)?,
+            mojo_mut_pointer_address(&mut authoritative),
+        )
+    };
+    if status != 0 {
+        return Err(status_error(status, 6, 0, 0, 0));
+    }
+    match authoritative {
+        0 => Ok(false),
+        1 => Ok(true),
+        _ => Err(MojoError::InvalidOutput),
+    }
 }
 
 fn address<T>(values: &[T]) -> u64 {
@@ -187,6 +323,73 @@ mod tests {
                     output_cost_per_million_microusd: 40,
                 },
             ]
+        );
+    }
+
+    #[test]
+    fn provider_registry_pricing_authority_rejects_partial_and_ambiguous_maps() {
+        assert_eq!(
+            provider_registry_pricing_is_authoritative(
+                &["*", "gpt-test"],
+                &[true, true],
+                &[true, true]
+            ),
+            Ok(true)
+        );
+        assert_eq!(
+            provider_registry_pricing_is_authoritative(
+                &["*", "GPT-test", "gpt-TEST"],
+                &[true, true, true],
+                &[true, true, true]
+            ),
+            Ok(false)
+        );
+        assert_eq!(
+            provider_registry_pricing_is_authoritative(&["*"], &[true], &[false]),
+            Ok(false)
+        );
+    }
+
+    #[test]
+    fn provider_registry_artifact_structure_owns_bounded_uniqueness_and_scores() {
+        let regions = vec!["*".to_string(), "ap-southeast-1".to_string()];
+        let descriptor = ProviderRegistryDescriptorValidationInput {
+            revision: 1,
+            pricing_revision: 2,
+            provider_code: 0,
+            credential_valid: true,
+            endpoint_codes: vec![0, 1],
+            regions: &regions,
+            cost: 100,
+            latency: 200,
+            risk: 300,
+            priority: 400,
+            model_cost_count: 1,
+            pricing_authoritative: true,
+        };
+        assert_eq!(
+            provider_registry_artifact_is_valid(2, 1, 2, &[descriptor]),
+            Ok(true)
+        );
+
+        let duplicate_regions = vec!["*".to_string(), "*".to_string()];
+        let invalid = ProviderRegistryDescriptorValidationInput {
+            regions: &duplicate_regions,
+            revision: 1,
+            pricing_revision: 2,
+            provider_code: 0,
+            credential_valid: true,
+            endpoint_codes: vec![0, 1],
+            cost: 100,
+            latency: 200,
+            risk: 300,
+            priority: 400,
+            model_cost_count: 1,
+            pricing_authoritative: true,
+        };
+        assert_eq!(
+            provider_registry_artifact_is_valid(2, 1, 2, &[invalid]),
+            Ok(false)
         );
     }
 }

@@ -3,8 +3,9 @@ use super::*;
 #[path = "catalog_provider_registry.rs"]
 mod provider_registry;
 pub use provider_registry::{
-    ProviderRegistryModelCostEntry, ProviderRegistryModelCostPlan,
-    plan_provider_registry_model_costs,
+    ProviderRegistryDescriptorValidationInput, ProviderRegistryModelCostEntry,
+    ProviderRegistryModelCostPlan, plan_provider_registry_model_costs,
+    provider_registry_artifact_is_valid, provider_registry_pricing_is_authoritative,
 };
 
 #[path = "catalog_planner.rs"]
