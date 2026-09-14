@@ -47,6 +47,15 @@ comptime GEMINI_CUSTOM_TOOL_CALL_ITEM: Int64 = 32
 comptime GEMINI_FINISH_REASON_FAILURE: Int64 = 33
 comptime GEMINI_FINISH_REASON_INCOMPLETE: Int64 = 34
 comptime GEMINI_PROMPT_FEEDBACK_FAILURE: Int64 = 35
+comptime GEMINI_STREAM_FUNCTION_CALL_DELTA: Int64 = 36
+comptime GEMINI_STREAM_TOOL_CALL: Int64 = 37
+comptime GEMINI_STREAM_OUTPUT_TEXT_ITEM_ID: Int64 = 38
+comptime GEMINI_STREAM_MEDIA_ITEM_ID: Int64 = 39
+comptime GEMINI_STREAM_CITATION_ITEM_ID: Int64 = 40
+comptime GEMINI_STREAM_FALLBACK_RESPONSE_ID: Int64 = 41
+comptime GEMINI_STREAM_FALLBACK_TOOL_CALL_ID: Int64 = 42
+comptime GEMINI_STREAM_SHOULD_EMIT_ARGUMENTS_DELTA: Int64 = 43
+comptime GEMINI_STREAM_RESPONSE_ID: Int64 = 44
 
 
 @fieldwise_init
@@ -295,7 +304,7 @@ def gemini_put_event_prefix(
 def gemini_views_valid(input: ProdexGeminiResponseKernelInput) -> Bool:
     return (
         input.operation >= GEMINI_RESPONSE_CREATED
-        and input.operation <= GEMINI_PROMPT_FEEDBACK_FAILURE
+        and input.operation <= GEMINI_STREAM_RESPONSE_ID
         and input.response_id_present >= 0
         and input.response_id_present <= 1
         and input.call_id_present >= 0
@@ -383,6 +392,17 @@ def gemini_view_equals(view: ProdexRichStringView, literal: StringSlice) -> Bool
     var actual = rich_view_ptr(view)
     var expected = literal.unsafe_ptr()
     for index in range(Int64(view.len)):
+        if actual[unsafe_offset=index] != expected[unsafe_offset=index]:
+            return False
+    return True
+
+
+def gemini_view_starts_with(view: ProdexRichStringView, prefix: StringSlice) -> Bool:
+    if view.len < UInt(prefix.byte_length()):
+        return False
+    var actual = rich_view_ptr(view)
+    var expected = prefix.unsafe_ptr()
+    for index in range(Int64(prefix.byte_length())):
         if actual[unsafe_offset=index] != expected[unsafe_offset=index]:
             return False
     return True
@@ -676,6 +696,74 @@ def gemini_put_stream_output_items(
     return gemini_put_byte(writer, 93)
 
 
+def gemini_put_stream_identifier(
+    writer: Pointer[mut=True, GeminiResponseWriter, _],
+    prefix: StringSlice,
+    request_id: UInt64,
+    item_index: UInt64,
+    include_item_index: Bool,
+) -> Bool:
+    if not gemini_put_byte(writer, 34) or not gemini_put_literal(writer, prefix):
+        return False
+    if not gemini_put_u64(writer, request_id):
+        return False
+    if include_item_index:
+        if not gemini_put_byte(writer, 95) or not gemini_put_u64(writer, item_index):
+            return False
+    return gemini_put_byte(writer, 34)
+
+
+def gemini_put_stream_name(
+    writer: Pointer[mut=True, GeminiResponseWriter, _],
+    name: ProdexRichStringView,
+    name_present: Bool,
+) -> Bool:
+    if not name_present:
+        return gemini_put_literal(writer, StringSlice('"tool_call"'))
+    return gemini_put_json_string(writer, name)
+
+
+def gemini_put_stream_function_call_delta(
+    writer: Pointer[mut=True, GeminiResponseWriter, _],
+    input: ProdexGeminiResponseKernelInput,
+) -> Bool:
+    if not gemini_put_byte(writer, 123):
+        return False
+    if input.call_id_present == 1:
+        if not gemini_put_literal(writer, StringSlice('"explicit_call_id":')) or not gemini_put_json_string(writer, input.call_id) or not gemini_put_byte(writer, 44):
+            return False
+    if not gemini_put_literal(writer, StringSlice('"name":')) or not gemini_put_stream_name(writer, input.name, input.reason_present == 1):
+        return False
+    return (
+        gemini_put_literal(writer, StringSlice(',"arguments":'))
+        and gemini_put_json_string(writer, input.arguments)
+        and gemini_put_byte(writer, 125)
+    )
+
+
+def gemini_put_stream_tool_call(
+    writer: Pointer[mut=True, GeminiResponseWriter, _],
+    input: ProdexGeminiResponseKernelInput,
+) -> Bool:
+    if not gemini_put_literal(writer, StringSlice('{"call_id":')):
+        return False
+    if input.call_id_present == 1:
+        if not gemini_put_json_string(writer, input.call_id):
+            return False
+    elif not gemini_put_stream_identifier(
+        writer, StringSlice("call_gemini_"), input.sequence_number, input.summary_index, True
+    ):
+        return False
+    if not gemini_put_literal(writer, StringSlice(',"name":')) or not gemini_put_stream_name(writer, input.name, input.reason_present == 1):
+        return False
+    if not gemini_put_literal(writer, StringSlice(',"arguments":')) or not gemini_put_json_string(writer, input.arguments):
+        return False
+    if input.signature_present == 1:
+        if not gemini_put_literal(writer, StringSlice(',"thought_signature":')) or not gemini_put_json_string(writer, input.signature):
+            return False
+    return gemini_put_byte(writer, 125)
+
+
 def gemini_write_operation(
     writer: Pointer[mut=True, GeminiResponseWriter, _],
     input: ProdexGeminiResponseKernelInput,
@@ -927,6 +1015,28 @@ def gemini_write_operation(
         return gemini_put_reason_result(
             writer, StringSlice("gemini_prompt_blocked"), StringSlice("Gemini blocked the prompt: "), input.reason
         )
+    if operation == GEMINI_STREAM_FUNCTION_CALL_DELTA:
+        return gemini_put_stream_function_call_delta(writer, input)
+    if operation == GEMINI_STREAM_TOOL_CALL:
+        return gemini_put_stream_tool_call(writer, input)
+    if operation == GEMINI_STREAM_OUTPUT_TEXT_ITEM_ID:
+        return gemini_put_stream_identifier(writer, StringSlice("msg_gemini_"), input.sequence_number, 0, False)
+    if operation == GEMINI_STREAM_MEDIA_ITEM_ID:
+        return gemini_put_stream_identifier(writer, StringSlice("msg_gemini_media_"), input.sequence_number, 0, False)
+    if operation == GEMINI_STREAM_CITATION_ITEM_ID:
+        return gemini_put_stream_identifier(writer, StringSlice("msg_gemini_citations_"), input.sequence_number, 0, False)
+    if operation == GEMINI_STREAM_FALLBACK_RESPONSE_ID:
+        return gemini_put_stream_identifier(writer, StringSlice("resp_gemini_"), input.sequence_number, 0, False)
+    if operation == GEMINI_STREAM_FALLBACK_TOOL_CALL_ID:
+        return gemini_put_stream_identifier(writer, StringSlice("call_gemini_"), input.sequence_number, input.summary_index, True)
+    if operation == GEMINI_STREAM_SHOULD_EMIT_ARGUMENTS_DELTA:
+        if gemini_view_equals(input.name, StringSlice("tool_search")) or gemini_view_equals(input.name, StringSlice("apply_patch")):
+            return gemini_put_literal(writer, StringSlice("false"))
+        return gemini_put_literal(writer, StringSlice("true"))
+    if operation == GEMINI_STREAM_RESPONSE_ID:
+        if input.call_id_present == 1 and gemini_view_starts_with(input.response_id, StringSlice("resp_gemini_")):
+            return gemini_put_json_string(writer, input.call_id)
+        return gemini_put_literal(writer, StringSlice("null"))
     return False
 
 
