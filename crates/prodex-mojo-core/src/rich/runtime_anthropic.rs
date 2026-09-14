@@ -26,6 +26,7 @@ pub enum RuntimeAnthropicKernelOperation {
     ServerToolBlock = 15,
     ThinkingBlock = 16,
     TextBlock = 17,
+    ToolResultTextPlan = 18,
 }
 
 pub const RUNTIME_ANTHROPIC_FLAG_ERROR: i64 = 1;
