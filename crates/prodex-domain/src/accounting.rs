@@ -198,7 +198,48 @@ impl fmt::Debug for ReservationRecord {
 }
 
 impl ReservationRecord {
+    #[cfg(feature = "mojo")]
     pub fn from_request(
+        request: ReservationRequest,
+        created_at_unix_ms: u64,
+        ttl_ms: u64,
+    ) -> Result<Self, ReservationRecoveryError> {
+        let result = prodex_mojo_core::policy::accounting_operation(
+            prodex_mojo_core::policy::ACCOUNTING_RECORD,
+            &[
+                created_at_unix_ms,
+                ttl_ms,
+                request.estimate.tokens,
+                request.estimate.cost_micros,
+            ],
+        )
+        .expect("Mojo reservation record planner returned invalid output");
+        match result.result_code {
+            0 => Ok(Self {
+                tenant_id: request.tenant_id,
+                call_id: request.call_id,
+                reservation_id: request.reservation_id,
+                reserved: request.estimate,
+                created_at_unix_ms,
+                expires_at_unix_ms: result.values[0],
+            }),
+            1 => Err(ReservationRecoveryError::ZeroTtl),
+            2 => Err(ReservationRecoveryError::ZeroReserved),
+            _ => Err(ReservationRecoveryError::ExpiryOverflow),
+        }
+    }
+
+    #[cfg(not(feature = "mojo"))]
+    pub fn from_request(
+        request: ReservationRequest,
+        created_at_unix_ms: u64,
+        ttl_ms: u64,
+    ) -> Result<Self, ReservationRecoveryError> {
+        Self::from_request_rust(request, created_at_unix_ms, ttl_ms)
+    }
+
+    #[cfg(any(test, not(feature = "mojo")))]
+    fn from_request_rust(
         request: ReservationRequest,
         created_at_unix_ms: u64,
         ttl_ms: u64,
@@ -222,6 +263,17 @@ impl ReservationRecord {
         })
     }
 
+    #[cfg(feature = "mojo")]
+    pub fn is_expired_at(&self, now_unix_ms: u64) -> bool {
+        let result = prodex_mojo_core::policy::accounting_operation(
+            prodex_mojo_core::policy::ACCOUNTING_IS_EXPIRED,
+            &[now_unix_ms, self.expires_at_unix_ms],
+        )
+        .expect("Mojo reservation expiry predicate returned invalid output");
+        result.values[0] == 1
+    }
+
+    #[cfg(not(feature = "mojo"))]
     pub fn is_expired_at(&self, now_unix_ms: u64) -> bool {
         now_unix_ms >= self.expires_at_unix_ms
     }
