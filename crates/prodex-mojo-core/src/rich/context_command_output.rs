@@ -9,6 +9,7 @@ use super::{
 pub enum ContextCommandOutputOperation {
     GitStatus = 1,
     FileList = 2,
+    Search = 3,
 }
 
 #[repr(C)]
@@ -18,10 +19,11 @@ struct ContextCommandOutputFfiInput {
     max_path_entries: u64,
     max_lines: u64,
     max_line_chars: u64,
+    max_search_matches: u64,
     input: RichStringView,
 }
 
-const _: () = assert!(std::mem::size_of::<ContextCommandOutputFfiInput>() == 48);
+const _: () = assert!(std::mem::size_of::<ContextCommandOutputFfiInput>() == 56);
 
 #[repr(C)]
 #[derive(Debug, Clone, Copy, Default)]
@@ -55,6 +57,24 @@ unsafe extern "C" {
         hash_capacity: i64,
         written: u64,
     ) -> i64;
+
+    fn prodex_mojo_context_search_output_v1(
+        abi_version: i64,
+        input: u64,
+        output: u64,
+        output_capacity: i64,
+        records: u64,
+        record_capacity: i64,
+        scratch: u64,
+        scratch_capacity: i64,
+        hash_slots: u64,
+        hash_capacity: i64,
+        path_output: u64,
+        path_capacity: i64,
+        text_output: u64,
+        text_capacity: i64,
+        written: u64,
+    ) -> i64;
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -70,11 +90,7 @@ fn allocation_from_counts(
     meaningful_lines: usize,
     meaningful_bytes: usize,
 ) -> Result<ContextCommandOutputAllocation, MojoError> {
-    let multiplier = if operation == ContextCommandOutputOperation::FileList as i64 {
-        3
-    } else {
-        2
-    };
+    let multiplier = if matches!(operation, 2 | 3) { 3 } else { 2 };
     let records = meaningful_lines
         .checked_mul(multiplier)
         .and_then(|value| value.checked_add(1))
@@ -145,6 +161,7 @@ pub fn context_command_output(
         max_path_entries: max_path_entries as u64,
         max_lines: 0,
         max_line_chars: 0,
+        max_search_matches: 0,
         input: view(input),
     };
     context_command_output_ffi(ffi_input)
@@ -205,9 +222,77 @@ pub fn context_file_list_output(
         max_path_entries: max_path_entries as u64,
         max_lines: max_lines as u64,
         max_line_chars: max_line_chars as u64,
+        max_search_matches: 0,
         input: view(input),
     };
     context_command_output_ffi(ffi_input)
+}
+
+pub fn context_search_output(
+    input: &str,
+    max_lines: usize,
+    max_line_chars: usize,
+    max_search_matches: usize,
+) -> Result<Option<String>, MojoError> {
+    ensure_rich_abi()?;
+    if input.len() > i64::MAX as usize {
+        return Err(MojoError::InvalidInput);
+    }
+    let ffi_input = ContextCommandOutputFfiInput {
+        operation: ContextCommandOutputOperation::Search as i64,
+        max_path_entries: 0,
+        max_lines: max_lines as u64,
+        max_line_chars: max_line_chars as u64,
+        max_search_matches: max_search_matches as u64,
+        input: view(input),
+    };
+    let allocation = allocation_plan(&ffi_input)?;
+    let temporary_capacity = input
+        .split('\n')
+        .map(str::len)
+        .max()
+        .unwrap_or_default()
+        .max(1);
+    let mut output = zeroed::<u8>(allocation.output)?;
+    let mut records = zeroed::<ContextCommandOutputRecord>(allocation.records)?;
+    let mut scratch = zeroed::<u8>(allocation.scratch)?;
+    let mut hash_slots = zeroed::<i64>(allocation.hash_slots)?;
+    let mut path_output = zeroed::<u8>(temporary_capacity)?;
+    let mut text_output = zeroed::<u8>(temporary_capacity)?;
+    let mut written = 0_i64;
+    let status = unsafe {
+        prodex_mojo_context_search_output_v1(
+            RICH_ABI_VERSION,
+            mojo_pointer_address(&ffi_input),
+            mojo_mut_pointer_address(output.as_mut_ptr()),
+            i64::try_from(output.len()).map_err(|_| MojoError::InvalidInput)?,
+            mojo_mut_pointer_address(records.as_mut_ptr()),
+            i64::try_from(records.len()).map_err(|_| MojoError::InvalidInput)?,
+            mojo_mut_pointer_address(scratch.as_mut_ptr()),
+            i64::try_from(scratch.len()).map_err(|_| MojoError::InvalidInput)?,
+            mojo_mut_pointer_address(hash_slots.as_mut_ptr()),
+            i64::try_from(hash_slots.len()).map_err(|_| MojoError::InvalidInput)?,
+            mojo_mut_pointer_address(path_output.as_mut_ptr()),
+            i64::try_from(path_output.len()).map_err(|_| MojoError::InvalidInput)?,
+            mojo_mut_pointer_address(text_output.as_mut_ptr()),
+            i64::try_from(text_output.len()).map_err(|_| MojoError::InvalidInput)?,
+            mojo_mut_pointer_address(&mut written),
+        )
+    };
+    if status == 5 {
+        return Ok(None);
+    }
+    if status != 0 {
+        return Err(super::status_error(status, 10, 3, 0, 0));
+    }
+    let written = usize::try_from(written).map_err(|_| MojoError::InvalidOutput)?;
+    if written > output.len() {
+        return Err(MojoError::InvalidOutput);
+    }
+    output.truncate(written);
+    String::from_utf8(output)
+        .map(Some)
+        .map_err(|_| MojoError::InvalidOutput)
 }
 
 #[cfg(test)]
@@ -222,6 +307,7 @@ mod tests {
             max_path_entries: 120,
             max_lines: 0,
             max_line_chars: 0,
+            max_search_matches: 0,
             input: view(&input),
         };
         let allocation = allocation_plan(&ffi_input).unwrap();
@@ -242,6 +328,7 @@ mod tests {
             max_path_entries: 120,
             max_lines: 1_000,
             max_line_chars: 240,
+            max_search_matches: 0,
             input: view(&input),
         };
         let allocation = allocation_plan(&ffi_input).unwrap();
@@ -275,6 +362,7 @@ mod tests {
             max_path_entries: 120,
             max_lines: 0,
             max_line_chars: 0,
+            max_search_matches: 0,
             input: RichStringView {
                 ptr: mojo_pointer_address(invalid.as_ptr()),
                 len: 1,
@@ -317,5 +405,53 @@ mod tests {
             )
         };
         assert_eq!(status, 3);
+    }
+
+    #[test]
+    fn raw_search_boundary_rejects_invalid_inputs_and_capacity() {
+        let invalid = [0xff_u8];
+        let mut input = ContextCommandOutputFfiInput {
+            operation: ContextCommandOutputOperation::Search as i64,
+            max_path_entries: 0,
+            max_lines: 1_000,
+            max_line_chars: 240,
+            max_search_matches: 4,
+            input: RichStringView {
+                ptr: mojo_pointer_address(invalid.as_ptr()),
+                len: 1,
+            },
+        };
+        let mut output = [0_u8; 1];
+        let mut records = [ContextCommandOutputRecord::default(); 4];
+        let mut scratch = [0_u8; 64];
+        let mut hash_slots = [0_i64; 16];
+        let mut path = [0_u8; 32];
+        let mut text = [0_u8; 32];
+        let mut written = 0_i64;
+        let mut call = |abi, input_address| unsafe {
+            prodex_mojo_context_search_output_v1(
+                abi,
+                input_address,
+                mojo_mut_pointer_address(output.as_mut_ptr()),
+                1,
+                mojo_mut_pointer_address(records.as_mut_ptr()),
+                records.len() as i64,
+                mojo_mut_pointer_address(scratch.as_mut_ptr()),
+                scratch.len() as i64,
+                mojo_mut_pointer_address(hash_slots.as_mut_ptr()),
+                hash_slots.len() as i64,
+                mojo_mut_pointer_address(path.as_mut_ptr()),
+                path.len() as i64,
+                mojo_mut_pointer_address(text.as_mut_ptr()),
+                text.len() as i64,
+                mojo_mut_pointer_address(&mut written),
+            )
+        };
+        assert_eq!(call(RICH_ABI_VERSION + 1, mojo_pointer_address(&input)), 4);
+        assert_eq!(call(RICH_ABI_VERSION, 0), 1);
+        assert_eq!(call(RICH_ABI_VERSION, mojo_pointer_address(&input)), 2);
+
+        input.input = view("src/lib.rs:1:test\n");
+        assert_eq!(call(RICH_ABI_VERSION, mojo_pointer_address(&input)), 3);
     }
 }

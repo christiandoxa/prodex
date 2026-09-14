@@ -389,7 +389,32 @@ pub(super) fn compact_git_log_stat_output(
     finalize_compacted_command_output(CommandOutputKind::GitLog, input, output, options)
 }
 
+#[cfg(feature = "mojo")]
 pub(super) fn compact_search_output(input: &str, options: &CommandOutputCompactOptions) -> String {
+    let Some(body) = prodex_mojo_core::rich::context_search_output(
+        input,
+        options.max_lines,
+        options.max_line_chars,
+        options.max_search_matches_per_file,
+    )
+    .unwrap_or_else(|error| panic!("Mojo search formatter failed: {error:?}")) else {
+        return smart_truncate_command_output(input, options);
+    };
+    let lines = body
+        .trim_end_matches('\n')
+        .split('\n')
+        .map(str::to_owned)
+        .collect();
+    finalize_compacted_command_output(CommandOutputKind::Search, input, lines, options)
+}
+
+#[cfg(not(feature = "mojo"))]
+pub(super) fn compact_search_output(input: &str, options: &CommandOutputCompactOptions) -> String {
+    compact_search_output_rust(input, options)
+}
+
+#[cfg(any(not(feature = "mojo"), test))]
+fn compact_search_output_rust(input: &str, options: &CommandOutputCompactOptions) -> String {
     let (files, other) = collect_search_output_matches(input);
 
     let total_matches = files.values().map(Vec::len).sum::<usize>();

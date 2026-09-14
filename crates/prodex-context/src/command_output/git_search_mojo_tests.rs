@@ -1,4 +1,3 @@
-
 use super::*;
 
 fn oracle(input: &str, options: &CommandOutputCompactOptions) -> String {
@@ -189,4 +188,62 @@ fn assert_large_file_list_parity(input: String) {
 #[test]
 fn public_mojo_file_list_long_unicode_path_matches_rust_oracle() {
     assert_large_file_list_parity(format!("root/{}.rs\n", "界".repeat(1_500_000)));
+}
+
+fn search_oracle(input: &str, options: &CommandOutputCompactOptions) -> String {
+    let normalized = normalize_command_output(input);
+    let output = compact_search_output_rust(&normalized, options);
+    if options.max_lines <= 12 {
+        output
+    } else {
+        canonicalize_compacted_command_paths(&normalized, &output, CommandOutputKind::Search)
+    }
+}
+
+#[test]
+fn public_mojo_search_formatter_matches_rust_oracle() {
+    let cases = [
+        "",
+        "ordinary output\n",
+        "src/lib.rs:10:fn alpha() {}\nsrc/lib.rs:20:5:let beta = true;\nREADME.md:3:helper\n",
+        "C:\\workspace\\src\\lib.rs:10:fn alpha() {}\nC:\\workspace\\src\\lib.rs:20:fn beta() {}\n",
+        "src/lib.rs\n10:fn alpha() {}\n20:5:fn beta() {}\nREADME.md\n3:helper\n",
+        "{\"type\":\"match\",\"data\":{\"path\":{\"text\":\"src/lib.rs\"},\"lines\":{\"text\":\"fn alpha() {}\\n\"},\"line_number\":10}}\n{\"type\":\"summary\",\"data\":{}}\n",
+        "{\"type\":\"match\",\"data\":{\"path\":{\"text\":\"src\\/\\u006cib.rs\"},\"lines\":{\"text\":\"quote: \\\"x\\\"\\t\\u03b2\"},\"line_number\":7}}\n",
+        "src/lib.rs:1:café 文件\nsrc/lib.rs:1:café 文件\nother output\nother output\n",
+    ];
+    for (max_lines, max_matches, max_chars) in [
+        (1, 0, 0),
+        (12, 1, 24),
+        (13, 2, 25),
+        (1_000, 4, 64),
+        (1_000, usize::MAX, usize::MAX),
+    ] {
+        let options = CommandOutputCompactOptions {
+            kind: CommandOutputKind::Search,
+            max_lines,
+            max_line_chars: max_chars,
+            max_search_matches_per_file: max_matches,
+            ..CommandOutputCompactOptions::default()
+        };
+        for input in cases {
+            assert_eq!(
+                compact_command_output_with_options(input, &options).output,
+                search_oracle(input, &options),
+                "max_lines={max_lines}, max_matches={max_matches}, max_chars={max_chars}, input={input:?}",
+            );
+        }
+    }
+
+    let input = format!("src/{}.rs:1:{}\n", "界".repeat(50_000), "β".repeat(50_000));
+    let options = CommandOutputCompactOptions {
+        kind: CommandOutputKind::Search,
+        max_lines: 1_000,
+        max_line_chars: 240,
+        ..CommandOutputCompactOptions::default()
+    };
+    assert_eq!(
+        compact_command_output_with_options(&input, &options).output,
+        search_oracle(&input, &options)
+    );
 }
