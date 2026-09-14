@@ -20,6 +20,8 @@ comptime OPENAI_COMPAT_RESPONSE_USAGE: Int64 = 5
 comptime OPENAI_COMPAT_SPLIT_TOOL_NAME: Int64 = 6
 comptime OPENAI_COMPAT_RTK_ARGUMENTS: Int64 = 7
 comptime OPENAI_COMPAT_STREAM_EVENT: Int64 = 8
+comptime OPENAI_COMPAT_RESPONSE: Int64 = 9
+comptime OPENAI_COMPAT_STREAM_EVENT_FROM_CHAT: Int64 = 10
 
 comptime OPENAI_COMPAT_SYSTEM_MESSAGE: Int64 = 1
 comptime OPENAI_COMPAT_USER_MESSAGE: Int64 = 2
@@ -57,6 +59,7 @@ struct ProdexOpenAiCompatKernelInput(Copyable):
     var input_tokens: UInt64
     var output_tokens: UInt64
     var total_tokens: UInt64
+    var created_at: UInt64
     var total_tokens_present: Int64
     var provider_present: Int64
     var role_present: Int64
@@ -66,6 +69,13 @@ struct ProdexOpenAiCompatKernelInput(Copyable):
     var name_present: Int64
     var arguments_present: Int64
     var delta_present: Int64
+    var response_id_present: Int64
+    var model_present: Int64
+    var output_present: Int64
+    var usage_present: Int64
+    var stream_tool_call_present: Int64
+    var stream_text_present: Int64
+    var stream_finished: Int64
     var provider: ProdexRichStringView
     var role: ProdexRichStringView
     var text: ProdexRichStringView
@@ -74,6 +84,10 @@ struct ProdexOpenAiCompatKernelInput(Copyable):
     var name: ProdexRichStringView
     var arguments: ProdexRichStringView
     var delta: ProdexRichStringView
+    var response_id: ProdexRichStringView
+    var model: ProdexRichStringView
+    var output: ProdexRichStringView
+    var usage: ProdexRichStringView
 
 
 @fieldwise_init
@@ -743,23 +757,61 @@ def openai_compat_put_rtk_raw(
     )
 
 
+def openai_compat_put_json_string_with_rtk_value(
+    writer: Pointer[mut=True, OpenAiCompatWriter, _],
+    name: ProdexRichStringView,
+    value: ProdexRichStringView,
+) -> Bool:
+    if not openai_compat_name_is_exec_command(name):
+        return openai_compat_put_json_string(writer, value)
+    var bounds = openai_compat_rtk_bounds(value)
+    if bounds[0] != 1 or bounds[1] != 1 or bounds[4] != 1 or not openai_compat_command_needs_rtk(value, bounds[2], bounds[3]):
+        return openai_compat_put_json_string(writer, value)
+    return (
+        openai_compat_put_byte(writer, 34)
+        and openai_compat_put_json_escaped_range(writer, value, 0, bounds[2])
+        and openai_compat_put_literal(writer, StringSlice('rtk '))
+        and openai_compat_put_json_escaped_range(writer, value, bounds[2], bounds[3])
+        and openai_compat_put_json_escaped_range(writer, value, bounds[3], Int64(value.len))
+        and openai_compat_put_byte(writer, 34)
+    )
+
+
 def openai_compat_put_json_string_with_rtk(
     writer: Pointer[mut=True, OpenAiCompatWriter, _],
     input: ProdexOpenAiCompatKernelInput,
 ) -> Bool:
-    if not openai_compat_name_is_exec_command(input.name):
-        return openai_compat_put_json_string(writer, input.delta)
-    var bounds = openai_compat_rtk_bounds(input.delta)
-    if bounds[0] != 1 or bounds[1] != 1 or bounds[4] != 1 or not openai_compat_command_needs_rtk(input.delta, bounds[2], bounds[3]):
-        return openai_compat_put_json_string(writer, input.delta)
-    return (
-        openai_compat_put_byte(writer, 34)
-        and openai_compat_put_json_escaped_range(writer, input.delta, 0, bounds[2])
-        and openai_compat_put_literal(writer, StringSlice('rtk '))
-        and openai_compat_put_json_escaped_range(writer, input.delta, bounds[2], bounds[3])
-        and openai_compat_put_json_escaped_range(writer, input.delta, bounds[3], Int64(input.delta.len))
-        and openai_compat_put_byte(writer, 34)
-    )
+    return openai_compat_put_json_string_with_rtk_value(writer, input.name, input.delta)
+
+
+def openai_compat_write_response(
+    writer: Pointer[mut=True, OpenAiCompatWriter, _],
+    input: ProdexOpenAiCompatKernelInput,
+) -> Bool:
+    if input.response_id_present != 1 or input.model_present != 1 or input.output_present != 1:
+        return False
+    if not openai_compat_put_literal(writer, StringSlice('{"id":')):
+        return False
+    if not openai_compat_put_json_string(writer, input.response_id):
+        return False
+    if not openai_compat_put_literal(writer, StringSlice(',"object":"response","created_at":')):
+        return False
+    if not openai_compat_put_u64(writer, input.created_at):
+        return False
+    if not openai_compat_put_literal(writer, StringSlice(',"model":')):
+        return False
+    if not openai_compat_put_json_string(writer, input.model):
+        return False
+    if not openai_compat_put_literal(writer, StringSlice(',"output":')):
+        return False
+    if not openai_compat_put_view(writer, input.output):
+        return False
+    if input.usage_present == 1:
+        if not openai_compat_put_literal(writer, StringSlice(',"usage":')):
+            return False
+        if not openai_compat_put_view(writer, input.usage):
+            return False
+    return openai_compat_put_byte(writer, 125)
 
 
 def openai_compat_write_stream_event(
@@ -798,7 +850,7 @@ def openai_compat_flag_valid(value: Int64) -> Bool:
 def openai_compat_input_valid(input: ProdexOpenAiCompatKernelInput) -> Bool:
     return (
         input.operation >= OPENAI_COMPAT_VALIDATE_REQUEST
-        and input.operation <= OPENAI_COMPAT_STREAM_EVENT
+        and input.operation <= OPENAI_COMPAT_STREAM_EVENT_FROM_CHAT
         and input.message_kind >= 0
         and input.message_kind <= OPENAI_COMPAT_FUNCTION_CALL_OUTPUT_MESSAGE
         and input.stream_kind >= 0
@@ -829,6 +881,13 @@ def openai_compat_input_valid(input: ProdexOpenAiCompatKernelInput) -> Bool:
         and openai_compat_flag_valid(input.name_present)
         and openai_compat_flag_valid(input.arguments_present)
         and openai_compat_flag_valid(input.delta_present)
+        and openai_compat_flag_valid(input.response_id_present)
+        and openai_compat_flag_valid(input.model_present)
+        and openai_compat_flag_valid(input.output_present)
+        and openai_compat_flag_valid(input.usage_present)
+        and openai_compat_flag_valid(input.stream_tool_call_present)
+        and openai_compat_flag_valid(input.stream_text_present)
+        and openai_compat_flag_valid(input.stream_finished)
         and rich_view_valid(input.provider, OPENAI_COMPAT_KERNEL_MAX_BYTES)
         and rich_view_valid(input.role, OPENAI_COMPAT_KERNEL_MAX_BYTES)
         and rich_view_valid(input.text, OPENAI_COMPAT_KERNEL_MAX_BYTES)
@@ -837,6 +896,10 @@ def openai_compat_input_valid(input: ProdexOpenAiCompatKernelInput) -> Bool:
         and rich_view_valid(input.name, OPENAI_COMPAT_KERNEL_MAX_BYTES)
         and rich_view_valid(input.arguments, OPENAI_COMPAT_KERNEL_MAX_BYTES)
         and rich_view_valid(input.delta, OPENAI_COMPAT_KERNEL_MAX_BYTES)
+        and rich_view_valid(input.response_id, OPENAI_COMPAT_KERNEL_MAX_BYTES)
+        and rich_view_valid(input.model, OPENAI_COMPAT_KERNEL_MAX_BYTES)
+        and rich_view_valid(input.output, OPENAI_COMPAT_KERNEL_MAX_BYTES)
+        and rich_view_valid(input.usage, OPENAI_COMPAT_KERNEL_MAX_BYTES)
     )
 
 
@@ -848,6 +911,27 @@ def openai_compat_writer_status(
     if writer[].written >= writer[].capacity:
         return OPENAI_COMPAT_STATUS_CAPACITY
     return OPENAI_COMPAT_STATUS_INVALID
+
+
+def openai_compat_write_stream_event_from_chat(
+    writer: Pointer[mut=True, OpenAiCompatWriter, _],
+    input: ProdexOpenAiCompatKernelInput,
+) -> Int64:
+    if input.stream_tool_call_present == 1 and input.arguments_present == 1:
+        var event = input.copy()
+        event.stream_kind = OPENAI_COMPAT_FUNCTION_CALL_ARGUMENTS_DELTA_EVENT
+        event.delta = input.arguments.copy()
+        event.delta_present = input.arguments_present
+        return openai_compat_writer_status(writer, openai_compat_write_stream_event(writer, event))
+    if input.stream_text_present == 1:
+        var event = input.copy()
+        event.stream_kind = OPENAI_COMPAT_TEXT_DELTA_EVENT
+        return openai_compat_writer_status(writer, openai_compat_write_stream_event(writer, event))
+    if input.stream_finished == 1:
+        var event = input.copy()
+        event.stream_kind = OPENAI_COMPAT_DONE_EVENT
+        return openai_compat_writer_status(writer, openai_compat_write_stream_event(writer, event))
+    return OPENAI_COMPAT_STATUS_OK
 
 
 def openai_compat_write_operation(
@@ -878,6 +962,10 @@ def openai_compat_write_operation(
         if input.stream_kind == 0:
             return OPENAI_COMPAT_STATUS_INVALID
         return openai_compat_writer_status(writer, openai_compat_write_stream_event(writer, input))
+    if input.operation == OPENAI_COMPAT_RESPONSE:
+        return openai_compat_writer_status(writer, openai_compat_write_response(writer, input))
+    if input.operation == OPENAI_COMPAT_STREAM_EVENT_FROM_CHAT:
+        return openai_compat_write_stream_event_from_chat(writer, input)
     return OPENAI_COMPAT_STATUS_INVALID
 
 
