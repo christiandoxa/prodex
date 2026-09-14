@@ -46,6 +46,26 @@ struct GovernanceOptionalSelectorPair {
     wildcard: i64,
 }
 
+#[repr(C)]
+#[derive(Debug, Clone, Copy)]
+struct GovernanceMatchValue {
+    condition: u64,
+    condition_present: i64,
+    input: u64,
+    input_present: i64,
+    comparison: i64,
+}
+
+#[repr(C)]
+#[derive(Debug, Clone, Copy)]
+struct GovernanceMatchSelector {
+    selector: PolicyStringView,
+    selector_present: i64,
+    values: u64,
+    value_count: i64,
+    wildcard: i64,
+}
+
 unsafe extern "C" {
     fn prodex_runtime_policy_validate_text(
         abi_version: i64,
@@ -56,6 +76,14 @@ unsafe extern "C" {
     fn prodex_mojo_governance_predicates_v1(
         abi_version: i64,
         mode: i64,
+        values: u64,
+        value_count: i64,
+        selectors: u64,
+        selector_count: i64,
+        output: u64,
+    ) -> i64;
+    fn prodex_mojo_governance_rule_matches_v1(
+        abi_version: i64,
         values: u64,
         value_count: i64,
         selectors: u64,
@@ -144,6 +172,68 @@ pub fn governance_policy_conditions_overlap(
     governance_predicates(1, values, &selectors)
 }
 
+pub fn governance_policy_rule_matches(
+    values: &[(Option<u64>, Option<u64>, i64)],
+    selectors: &[(Option<&str>, &[&str], bool)],
+) -> Result<bool, crate::MojoError> {
+    let values = values
+        .iter()
+        .map(|(condition, input, comparison)| GovernanceMatchValue {
+            condition: condition.unwrap_or_default(),
+            condition_present: i64::from(condition.is_some()),
+            input: input.unwrap_or_default(),
+            input_present: i64::from(input.is_some()),
+            comparison: *comparison,
+        })
+        .collect::<Vec<_>>();
+    let selector_values = selectors
+        .iter()
+        .map(|(_, values, _)| {
+            values
+                .iter()
+                .map(|value| policy_string_view(Some(value)))
+                .collect::<Vec<_>>()
+        })
+        .collect::<Vec<_>>();
+    let selectors = selectors
+        .iter()
+        .zip(&selector_values)
+        .map(|((selector, _, wildcard), values)| {
+            Ok(GovernanceMatchSelector {
+                selector: policy_string_view(*selector),
+                selector_present: i64::from(selector.is_some()),
+                values: values.as_ptr() as u64,
+                value_count: i64::try_from(values.len())
+                    .map_err(|_| crate::MojoError::InvalidInput)?,
+                wildcard: i64::from(*wildcard),
+            })
+        })
+        .collect::<Result<Vec<_>, crate::MojoError>>()?;
+    let mut output = -1_i64;
+    let status = unsafe {
+        prodex_mojo_governance_rule_matches_v1(
+            6,
+            values.as_ptr() as u64,
+            i64::try_from(values.len()).map_err(|_| crate::MojoError::InvalidInput)?,
+            selectors.as_ptr() as u64,
+            i64::try_from(selectors.len()).map_err(|_| crate::MojoError::InvalidInput)?,
+            (&mut output as *mut i64) as u64,
+        )
+    };
+    if status != 0 {
+        return Err(match status {
+            1 | 2 => crate::MojoError::InvalidInput,
+            4 => crate::MojoError::AbiMismatch,
+            _ => crate::MojoError::InvalidOutput,
+        });
+    }
+    match output {
+        0 => Ok(false),
+        1 => Ok(true),
+        _ => Err(crate::MojoError::InvalidOutput),
+    }
+}
+
 pub fn validate_text(value: &str, kind: PolicyTextKind) -> Result<bool, crate::MojoError> {
     let value = PolicyStringView {
         ptr: value.as_ptr() as u64,
@@ -178,6 +268,10 @@ pub const ACCOUNTING_USAGE_EXCEEDS: i64 = 2;
 pub const ACCOUNTING_SNAPSHOT_AVAILABLE: i64 = 3;
 pub const ACCOUNTING_RESERVE: i64 = 4;
 pub const ACCOUNTING_COMMIT: i64 = 5;
+pub const GOVERNANCE_MATCH_EXACT: i64 = 0;
+pub const GOVERNANCE_MATCH_MINIMUM: i64 = 1;
+pub const GOVERNANCE_MATCH_MAXIMUM: i64 = 2;
+pub const GOVERNANCE_MATCH_CONTAINS: i64 = 3;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct AccountingOperation {

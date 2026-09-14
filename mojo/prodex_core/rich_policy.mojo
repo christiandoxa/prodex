@@ -77,8 +77,92 @@ struct GovernanceOptionalSelectorPair(Copyable):
     var wildcard: Int64
 
 
+@fieldwise_init
+struct GovernanceMatchValue(Copyable):
+    var condition: UInt64
+    var condition_present: Int64
+    var input: UInt64
+    var input_present: Int64
+    var comparison: Int64
+
+
+@fieldwise_init
+struct GovernanceMatchSelector(Copyable):
+    var selector: ProdexRichStringView
+    var selector_present: Int64
+    var values_address: UInt
+    var value_count: Int64
+    var wildcard: Int64
+
+
 def governance_selector_is_wildcard(view: ProdexRichStringView) -> Bool:
     return rich_view_matches_literal["*"](view, False)
+
+
+@export("prodex_mojo_governance_rule_matches_v1")
+def prodex_mojo_governance_rule_matches_v1(
+    abi_version: Int64,
+    values_address: UInt,
+    value_count: Int64,
+    selectors_address: UInt,
+    selector_count: Int64,
+    output_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != PRODEX_RICH_ABI_VERSION:
+        return RICH_STATUS_ABI
+    if output_address == 0 or value_count < 0 or value_count > RICH_MAX_RECORDS or selector_count < 0 or selector_count > RICH_MAX_RECORDS:
+        return RICH_STATUS_INVALID
+    if (value_count > 0 and values_address == 0) or (selector_count > 0 and selectors_address == 0):
+        return RICH_STATUS_INVALID
+    var output = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    output[] = 0
+    var values = Pointer[mut=False, GovernanceMatchValue, ImmUntrackedOrigin](
+        unsafe_from_address=Int(values_address)
+    )
+    for index in range(value_count):
+        var value = values[unsafe_offset=index].copy()
+        if value.condition_present < 0 or value.condition_present > 1 or value.input_present < 0 or value.input_present > 1 or value.comparison < 0 or value.comparison > 3:
+            return RICH_STATUS_INVALID
+        if value.condition_present == 0:
+            continue
+        if value.input_present == 0:
+            return RICH_STATUS_OK
+        if value.comparison == 0 and value.input != value.condition:
+            return RICH_STATUS_OK
+        if value.comparison == 1 and value.input < value.condition:
+            return RICH_STATUS_OK
+        if value.comparison == 2 and value.input > value.condition:
+            return RICH_STATUS_OK
+        if value.comparison == 3 and (value.input & value.condition) == 0:
+            return RICH_STATUS_OK
+    var selectors = Pointer[
+        mut=False, GovernanceMatchSelector, ImmUntrackedOrigin
+    ](unsafe_from_address=Int(selectors_address))
+    for index in range(selector_count):
+        var selector = selectors[unsafe_offset=index].copy()
+        if selector.selector_present < 0 or selector.selector_present > 1 or selector.wildcard < 0 or selector.wildcard > 1 or selector.value_count < 0 or selector.value_count > RICH_MAX_RECORDS:
+            return RICH_STATUS_INVALID
+        if selector.selector_present == 0:
+            continue
+        if not rich_view_valid(selector.selector, RICH_MAX_IDENTIFIER_BYTES) or selector.value_count == 0 or selector.values_address == 0:
+            return RICH_STATUS_OK
+        var candidates = Pointer[
+            mut=False, ProdexRichStringView, ImmUntrackedOrigin
+        ](unsafe_from_address=Int(selector.values_address))
+        var matched = False
+        for candidate_index in range(selector.value_count):
+            var candidate = candidates[unsafe_offset=candidate_index].copy()
+            if not rich_view_valid(candidate, RICH_MAX_IDENTIFIER_BYTES):
+                return RICH_STATUS_INVALID
+            if rich_views_equal(selector.selector, candidate) or selector.wildcard == 1 and governance_selector_is_wildcard(selector.selector):
+                matched = True
+                break
+        if not matched:
+            return RICH_STATUS_OK
+    output[] = 1
+    return RICH_STATUS_OK
 
 
 @export("prodex_mojo_governance_predicates_v1")
