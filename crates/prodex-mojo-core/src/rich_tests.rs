@@ -6,6 +6,64 @@ fn rich_domain_self_test_covers_structured_results() {
 }
 
 #[test]
+fn rich_virtual_key_admission_preserves_error_precedence_and_rollover() {
+    let mut input = VirtualKeyAdmissionInput {
+        durable_budget: false,
+        usage_minute_epoch: 10,
+        minute_epoch: 10,
+        requests_this_minute: 1,
+        tokens_this_minute: 1,
+        requests_total: 1,
+        spend_microusd: 99,
+        reserved_tokens: 10,
+        estimated_cost_microusd: Some(2),
+        request_budget: Some(1),
+        budget_microusd: Some(100),
+        rpm_limit: Some(1),
+        tpm_limit: Some(10),
+    };
+    assert_eq!(
+        validate_virtual_key_admission(input).unwrap(),
+        VirtualKeyAdmissionDecision::RequestBudgetExceeded
+    );
+
+    input.request_budget = None;
+    assert_eq!(
+        validate_virtual_key_admission(input).unwrap(),
+        VirtualKeyAdmissionDecision::BudgetExceeded
+    );
+    input.budget_microusd = None;
+    assert_eq!(
+        validate_virtual_key_admission(input).unwrap(),
+        VirtualKeyAdmissionDecision::RpmLimitExceeded
+    );
+    input.rpm_limit = None;
+    assert_eq!(
+        validate_virtual_key_admission(input).unwrap(),
+        VirtualKeyAdmissionDecision::TpmLimitExceeded
+    );
+    input.usage_minute_epoch = 9;
+    assert_eq!(
+        validate_virtual_key_admission(input).unwrap(),
+        VirtualKeyAdmissionDecision::Allow
+    );
+
+    input.durable_budget = true;
+    input.usage_minute_epoch = 10;
+    input.minute_epoch = 10;
+    input.requests_total = u64::MAX;
+    input.spend_microusd = u64::MAX;
+    input.tokens_this_minute = 0;
+    input.request_budget = Some(1);
+    input.budget_microusd = Some(1);
+    input.estimated_cost_microusd = Some(1);
+    assert_eq!(
+        validate_virtual_key_admission(input).unwrap(),
+        VirtualKeyAdmissionDecision::Allow
+    );
+}
+
+#[test]
 fn rich_abi_rejects_null_views_and_reports_utf8_offsets() {
     ensure_rich_abi().expect("rich ABI layout should match");
     let mut result = RichContextResult::default();

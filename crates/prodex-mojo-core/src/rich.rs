@@ -53,7 +53,8 @@ pub use runtime_anthropic::{
 mod policy;
 pub use policy::{
     PolicyAliasInput, PolicyAliasPlan, PolicyModel, PolicyRouteModel, PolicyRoutePlan,
-    plan_route_policy, validate_policy_alias,
+    VirtualKeyAdmissionDecision, VirtualKeyAdmissionInput, plan_route_policy,
+    validate_policy_alias, validate_virtual_key_admission,
 };
 mod fallback;
 pub use fallback::{
@@ -681,6 +682,22 @@ pub fn rich_self_test() -> bool {
         ],
     )
     .is_ok_and(|value| value.selected_index == Some(1) && value.ordered_indices == [1]);
+    let virtual_key_admission = validate_virtual_key_admission(VirtualKeyAdmissionInput {
+        durable_budget: false,
+        usage_minute_epoch: 10,
+        minute_epoch: 10,
+        requests_this_minute: 0,
+        tokens_this_minute: 0,
+        requests_total: 0,
+        spend_microusd: 0,
+        reserved_tokens: 22,
+        estimated_cost_microusd: Some(39),
+        request_budget: Some(2),
+        budget_microusd: Some(100),
+        rpm_limit: Some(2),
+        tpm_limit: Some(100),
+    })
+    .is_ok_and(|value| value == VirtualKeyAdmissionDecision::Allow);
     let fallback = model_fallback_chain("copilot", " codex ")
         .is_ok_and(|value| value == ["gpt-5.3-codex", "gpt-5.1-codex", "gpt-4o"]);
     let context_plan = plan_context_items(
@@ -742,6 +759,7 @@ pub fn rich_self_test() -> bool {
         && routes
         && policy
         && policy_route
+        && virtual_key_admission
         && fallback
         && fallback_plan
         && context_plan

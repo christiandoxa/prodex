@@ -115,3 +115,130 @@ pub(super) fn deepseek_transform_request(
         result.with_metadata("continuation", Value::Object(metadata))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::deepseek_transform_request;
+    use crate::translator::{ProviderTransformInput, ProviderTransformLoss};
+    use crate::{ProviderEndpoint, ProviderId};
+    use serde_json::json;
+
+    #[test]
+    fn request_transform_matches_oracle_and_preserves_boundary_metadata() {
+        let mut input = ProviderTransformInput::new(
+            ProviderEndpoint::Responses,
+            serde_json::to_vec(&json!({
+                "model": "deepseek-chat",
+                "input": "call search then stop",
+                "tools": [
+                    {
+                        "type": "function",
+                        "function": {
+                            "name": "search",
+                            "description": "Search docs",
+                            "parameters": {
+                                "type": "object",
+                                "properties": {"query": {"type": "string"}}
+                            }
+                        }
+                    },
+                    {"type": "web_search_preview"}
+                ],
+                "tool_choice": {
+                    "type": "function",
+                    "function": {"name": "search"}
+                },
+                "temperature": 0.2,
+                "top_p": 0.9,
+                "max_output_tokens": 128,
+                "logprobs": true,
+                "top_logprobs": 5,
+                "stop_sequences": ["END"],
+                "user": "user_123",
+                "response_format": {
+                    "type": "json_schema",
+                    "schema": {"type": "object"},
+                },
+                "previous_response_id": "resp_1"
+            }))
+            .expect("request fixture serializes"),
+        );
+        input
+            .headers
+            .insert("session_id".to_string(), "sess_1".to_string());
+        input
+            .headers
+            .insert("x-codex-turn-state".to_string(), "turn_1".to_string());
+
+        let result = deepseek_transform_request(ProviderId::DeepSeek, input);
+        match &result.loss {
+            ProviderTransformLoss::DegradedButSafe { reason, details } => {
+                assert_eq!(
+                    reason,
+                    "DeepSeek degrades JSON schema output to json_object"
+                );
+                assert_eq!(details["from"], "json_schema");
+                assert_eq!(details["to"], "json_object");
+            }
+            loss => panic!("expected degraded request, got {loss:?}"),
+        }
+        assert_eq!(
+            result.metadata["continuation"],
+            json!({
+                "previous_response_id": "resp_1",
+                "session_id": "sess_1",
+                "x-codex-turn-state": "turn_1"
+            })
+        );
+        let body: serde_json::Value =
+            serde_json::from_slice(result.body.as_ref().expect("request body")).unwrap();
+        assert_eq!(
+            body,
+            json!({
+                "model": "deepseek-chat",
+                "stream": false,
+                "messages": [{"role": "user", "content": "call search then stop"}],
+                "tools": [{
+                    "type": "function",
+                    "function": {
+                        "name": "search",
+                        "description": "Search docs",
+                        "parameters": {
+                            "type": "object",
+                            "properties": {"query": {"type": "string"}}
+                        }
+                    }
+                }],
+                "tool_choice": {
+                    "type": "function",
+                    "function": {"name": "search"}
+                },
+                "temperature": 0.2,
+                "top_p": 0.9,
+                "max_tokens": 128,
+                "logprobs": true,
+                "top_logprobs": 5,
+                "stop": ["END"],
+                "user_id": "user_123",
+                "response_format": {"type": "json_object"}
+            })
+        );
+    }
+
+    #[test]
+    fn request_transform_keeps_parallel_tool_call_rejection() {
+        let result = deepseek_transform_request(
+            ProviderId::DeepSeek,
+            ProviderTransformInput::new(
+                ProviderEndpoint::Responses,
+                br#"{"input":"hello","parallel_tool_calls":false}"#.to_vec(),
+            ),
+        );
+
+        assert!(matches!(
+            result.loss,
+            ProviderTransformLoss::Rejected { .. }
+        ));
+        assert!(result.body.is_none());
+    }
+}

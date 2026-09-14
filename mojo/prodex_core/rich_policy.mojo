@@ -49,6 +49,13 @@ comptime ROUTE_RPM: Int64 = 6
 comptime ROUTE_TPM: Int64 = 7
 comptime UINT64_MAX: UInt64 = 18446744073709551615
 comptime UNKNOWN_HEADROOM: UInt64 = 9223372036854775807
+comptime VIRTUAL_KEY_ADMISSION_ALLOW: Int64 = 0
+comptime VIRTUAL_KEY_ADMISSION_REQUEST_BUDGET: Int64 = 1
+comptime VIRTUAL_KEY_ADMISSION_BUDGET: Int64 = 2
+comptime VIRTUAL_KEY_ADMISSION_RPM: Int64 = 3
+comptime VIRTUAL_KEY_ADMISSION_TPM: Int64 = 4
+comptime VIRTUAL_KEY_ADMISSION_INVALID: Int64 = -1
+comptime VIRTUAL_KEY_ADMISSION_ABI: Int64 = -4
 
 
 def policy_issue(
@@ -968,3 +975,53 @@ def prodex_mojo_rich_application_request_metadata_v1(
         if application_metadata_header_matches(name, StringSlice("user-agent")):
             result[].user_agent_present = 1
     return RICH_STATUS_OK
+
+
+@export("prodex_mojo_rich_policy_virtual_key_admission_v1")
+def prodex_mojo_rich_policy_virtual_key_admission_v1(
+    abi_version: Int64,
+    durable_budget: Int64,
+    usage_minute_epoch: UInt64,
+    minute_epoch: UInt64,
+    requests_this_minute: UInt64,
+    tokens_this_minute: UInt64,
+    requests_total: UInt64,
+    spend_microusd: UInt64,
+    reserved_tokens: UInt64,
+    estimated_cost_microusd: UInt64,
+    estimated_cost_present: Int64,
+    request_budget: UInt64,
+    request_budget_present: Int64,
+    budget_microusd: UInt64,
+    budget_present: Int64,
+    rpm_limit: UInt64,
+    rpm_limit_present: Int64,
+    tpm_limit: UInt64,
+    tpm_limit_present: Int64,
+) abi("C") -> Int64:
+    if abi_version != PRODEX_RICH_ABI_VERSION:
+        return VIRTUAL_KEY_ADMISSION_ABI
+    if durable_budget < 0 or durable_budget > 1 or estimated_cost_present < 0 or estimated_cost_present > 1 or request_budget_present < 0 or request_budget_present > 1 or budget_present < 0 or budget_present > 1 or rpm_limit_present < 0 or rpm_limit_present > 1 or tpm_limit_present < 0 or tpm_limit_present > 1:
+        return VIRTUAL_KEY_ADMISSION_INVALID
+
+    var effective_requests_total = requests_total
+    if durable_budget == 1 and request_budget_present == 1:
+        effective_requests_total = 0
+    var effective_spend_microusd = spend_microusd
+    if durable_budget == 1 and budget_present == 1:
+        effective_spend_microusd = 0
+    var effective_requests_this_minute = requests_this_minute
+    var effective_tokens_this_minute = tokens_this_minute
+    if usage_minute_epoch != minute_epoch:
+        effective_requests_this_minute = 0
+        effective_tokens_this_minute = 0
+
+    if request_budget_present == 1 and effective_requests_total >= request_budget:
+        return VIRTUAL_KEY_ADMISSION_REQUEST_BUDGET
+    if budget_present == 1 and estimated_cost_present == 1 and policy_route_saturating_add(effective_spend_microusd, estimated_cost_microusd) > budget_microusd:
+        return VIRTUAL_KEY_ADMISSION_BUDGET
+    if rpm_limit_present == 1 and policy_route_saturating_add(effective_requests_this_minute, 1) > rpm_limit:
+        return VIRTUAL_KEY_ADMISSION_RPM
+    if tpm_limit_present == 1 and policy_route_saturating_add(effective_tokens_this_minute, reserved_tokens) > tpm_limit:
+        return VIRTUAL_KEY_ADMISSION_TPM
+    return VIRTUAL_KEY_ADMISSION_ALLOW
