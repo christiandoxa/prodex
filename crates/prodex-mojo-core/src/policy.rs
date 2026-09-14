@@ -397,6 +397,26 @@ pub const GOVERNANCE_APPROVAL_ACTIVATE: i64 = 5;
 pub const GOVERNANCE_APPROVAL_SUPERSEDE: i64 = 6;
 pub const GOVERNANCE_APPROVAL_ROLLBACK: i64 = 7;
 
+pub struct GovernanceClassificationInput<'a> {
+    pub base_classification: u8,
+    pub coverage: u8,
+    pub unsupported_coverage_floor: u8,
+    pub session_floor: u8,
+    pub route_floor: u8,
+    pub risk_floor: u8,
+    pub trusted_label: Option<u8>,
+    pub untrusted_label: Option<u8>,
+    pub prior_classification: Option<u8>,
+    pub findings: &'a [u8],
+    pub rules: &'a [(u8, u8)],
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct GovernanceClassificationResult {
+    pub classification: u8,
+    pub reason_bits: u8,
+}
+
 #[repr(C)]
 #[derive(Debug, Clone, Copy)]
 struct GovernanceObligationPredicateInput {
@@ -407,6 +427,27 @@ struct GovernanceObligationPredicateInput {
 }
 
 unsafe extern "C" {
+    fn prodex_mojo_governance_classification_v1(
+        abi_version: i64,
+        base_classification: i64,
+        coverage: i64,
+        unsupported_coverage_floor: i64,
+        session_floor: i64,
+        route_floor: i64,
+        risk_floor: i64,
+        trusted_label: i64,
+        trusted_present: i64,
+        untrusted_label: i64,
+        untrusted_present: i64,
+        prior_classification: i64,
+        prior_present: i64,
+        findings: u64,
+        finding_count: i64,
+        rules: u64,
+        rule_count: i64,
+        classification: u64,
+        reason_bits: u64,
+    ) -> i64;
     fn prodex_mojo_governance_approval_transition_v1(
         abi_version: i64,
         state: i64,
@@ -433,6 +474,67 @@ unsafe extern "C" {
         last_known_good_invalidated: i64,
         output: u64,
     ) -> i64;
+}
+
+pub fn governance_classification(
+    input: GovernanceClassificationInput<'_>,
+) -> Result<GovernanceClassificationResult, crate::MojoError> {
+    let option = |value: Option<u8>| value.map_or((0, 0), |value| (i64::from(value), 1));
+    let (trusted, trusted_present) = option(input.trusted_label);
+    let (untrusted, untrusted_present) = option(input.untrusted_label);
+    let (prior, prior_present) = option(input.prior_classification);
+    let findings = input
+        .findings
+        .iter()
+        .map(|value| i64::from(*value))
+        .collect::<Vec<_>>();
+    let rules = input
+        .rules
+        .iter()
+        .flat_map(|(kind, classification)| [i64::from(*kind), i64::from(*classification)])
+        .collect::<Vec<_>>();
+    let mut classification = -1_i64;
+    let mut reason_bits = 0_i64;
+    let status = unsafe {
+        prodex_mojo_governance_classification_v1(
+            6,
+            i64::from(input.base_classification),
+            i64::from(input.coverage),
+            i64::from(input.unsupported_coverage_floor),
+            i64::from(input.session_floor),
+            i64::from(input.route_floor),
+            i64::from(input.risk_floor),
+            trusted,
+            trusted_present,
+            untrusted,
+            untrusted_present,
+            prior,
+            prior_present,
+            findings.as_ptr() as u64,
+            i64::try_from(findings.len()).map_err(|_| crate::MojoError::InvalidInput)?,
+            rules.as_ptr() as u64,
+            i64::try_from(input.rules.len()).map_err(|_| crate::MojoError::InvalidInput)?,
+            (&mut classification as *mut i64) as u64,
+            (&mut reason_bits as *mut i64) as u64,
+        )
+    };
+    if status != 0 {
+        return Err(match status {
+            1 | 2 => crate::MojoError::InvalidInput,
+            4 => crate::MojoError::AbiMismatch,
+            _ => crate::MojoError::InvalidOutput,
+        });
+    }
+    let classification =
+        u8::try_from(classification).map_err(|_| crate::MojoError::InvalidOutput)?;
+    let reason_bits = u8::try_from(reason_bits).map_err(|_| crate::MojoError::InvalidOutput)?;
+    if classification > 3 || reason_bits & !127 != 0 {
+        return Err(crate::MojoError::InvalidOutput);
+    }
+    Ok(GovernanceClassificationResult {
+        classification,
+        reason_bits,
+    })
 }
 
 pub fn governance_approval_transition(
