@@ -215,7 +215,77 @@ impl ClassificationDecision {
     }
 }
 
+#[cfg(feature = "mojo")]
 pub fn classify_inspection(
+    rules: &CompiledClassificationRuleSet,
+    request: ClassificationRequest<'_>,
+) -> Result<ClassificationDecision, ClassificationError> {
+    let findings = request
+        .inspection
+        .findings()
+        .iter()
+        .map(|finding| finding.kind() as u8)
+        .collect::<Vec<_>>();
+    let rule_values = rules
+        .rules
+        .iter()
+        .map(|rule| (rule.finding_kind as u8, rule.classification as u8))
+        .collect::<Vec<_>>();
+    let result = prodex_mojo_core::policy::governance_classification(
+        prodex_mojo_core::policy::GovernanceClassificationInput {
+            base_classification: request.inspection.classification() as u8,
+            coverage: request.inspection.coverage() as u8,
+            unsupported_coverage_floor: rules.unsupported_coverage_floor as u8,
+            session_floor: request.session_floor as u8,
+            route_floor: request.route_floor as u8,
+            risk_floor: request.request_risk_floor as u8,
+            trusted_label: request.trusted_label.map(|value| value as u8),
+            untrusted_label: request.untrusted_label.map(|value| value as u8),
+            prior_classification: request.prior_classification.map(|value| value as u8),
+            findings: &findings,
+            rules: &rule_values,
+        },
+    )
+    .expect("Mojo governance classification returned invalid output");
+    let classification = match result.classification {
+        0 => DataClassification::Public,
+        1 => DataClassification::Internal,
+        2 => DataClassification::Confidential,
+        _ => DataClassification::Restricted,
+    };
+    let mut reasons = Vec::new();
+    for (bit, reason) in [
+        (8, "context.prior_monotonic"),
+        (16, "coverage.partial"),
+        (32, "coverage.unsupported"),
+        (64, "detector.finding"),
+        (1, "inspection.classification"),
+        (2, "label.trusted"),
+        (4, "label.untrusted_raise_only"),
+    ] {
+        if result.reason_bits & bit != 0 {
+            reasons.push(ClassificationReasonCode::new(reason)?);
+        }
+    }
+    Ok(ClassificationDecision {
+        classification,
+        coverage: request.inspection.coverage(),
+        reason_codes: reasons,
+        revision: rules.revision.clone(),
+        checksum: rules.checksum.clone(),
+    })
+}
+
+#[cfg(not(feature = "mojo"))]
+pub fn classify_inspection(
+    rules: &CompiledClassificationRuleSet,
+    request: ClassificationRequest<'_>,
+) -> Result<ClassificationDecision, ClassificationError> {
+    classify_inspection_rust(rules, request)
+}
+
+#[cfg(any(test, not(feature = "mojo")))]
+fn classify_inspection_rust(
     rules: &CompiledClassificationRuleSet,
     request: ClassificationRequest<'_>,
 ) -> Result<ClassificationDecision, ClassificationError> {

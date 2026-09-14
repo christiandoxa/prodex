@@ -97,6 +97,89 @@ def prodex_mojo_governance_approval_transition_v1(
     return RICH_STATUS_OK
 
 
+@export("prodex_mojo_governance_classification_v1")
+def prodex_mojo_governance_classification_v1(
+    abi_version: Int64,
+    base_classification: Int64,
+    coverage: Int64,
+    unsupported_coverage_floor: Int64,
+    session_floor: Int64,
+    route_floor: Int64,
+    risk_floor: Int64,
+    trusted_label: Int64,
+    trusted_present: Int64,
+    untrusted_label: Int64,
+    untrusted_present: Int64,
+    prior_classification: Int64,
+    prior_present: Int64,
+    findings_address: UInt,
+    finding_count: Int64,
+    rules_address: UInt,
+    rule_count: Int64,
+    classification_address: UInt,
+    reason_bits_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != PRODEX_RICH_ABI_VERSION:
+        return RICH_STATUS_ABI
+    if base_classification < 0 or base_classification > 3 or coverage < 0 or coverage > 2 or unsupported_coverage_floor < 0 or unsupported_coverage_floor > 3 or session_floor < 0 or session_floor > 3 or route_floor < 0 or route_floor > 3 or risk_floor < 0 or risk_floor > 3:
+        return RICH_STATUS_INVALID
+    if trusted_present < 0 or trusted_present > 1 or untrusted_present < 0 or untrusted_present > 1 or prior_present < 0 or prior_present > 1:
+        return RICH_STATUS_INVALID
+    if (trusted_present == 1 and (trusted_label < 0 or trusted_label > 3)) or (untrusted_present == 1 and (untrusted_label < 0 or untrusted_label > 3)) or (prior_present == 1 and (prior_classification < 0 or prior_classification > 3)):
+        return RICH_STATUS_INVALID
+    if finding_count < 0 or finding_count > 256 or rule_count < 0 or rule_count > 128 or (finding_count > 0 and findings_address == 0) or (rule_count > 0 and rules_address == 0) or classification_address == 0 or reason_bits_address == 0:
+        return RICH_STATUS_INVALID
+    var classification = base_classification
+    for floor in [session_floor, route_floor, risk_floor]:
+        if floor > classification:
+            classification = floor
+    var reason_bits: Int64 = 1
+    if trusted_present == 1 and trusted_label > classification:
+        classification = trusted_label
+        reason_bits |= 2
+    if untrusted_present == 1 and untrusted_label > classification:
+        classification = untrusted_label
+        reason_bits |= 4
+    if prior_present == 1 and prior_classification > classification:
+        classification = prior_classification
+        reason_bits |= 8
+    if coverage == 1:
+        reason_bits |= 16
+    elif coverage == 2:
+        reason_bits |= 32
+    if coverage != 0 and unsupported_coverage_floor > classification:
+        classification = unsupported_coverage_floor
+    var findings = Pointer[mut=False, Int64, ImmUntrackedOrigin](
+        unsafe_from_address=Int(findings_address)
+    )
+    var rules = Pointer[mut=False, Int64, ImmUntrackedOrigin](
+        unsafe_from_address=Int(rules_address)
+    )
+    # ponytail: bounded 256x128 scan; add a direct table only if these caps grow.
+    for finding_index in range(finding_count):
+        var finding = findings[unsafe_offset=finding_index]
+        if finding < 0 or finding > 11:
+            return RICH_STATUS_INVALID
+        for rule_index in range(rule_count):
+            var rule_kind = rules[unsafe_offset=rule_index * 2]
+            var rule_classification = rules[unsafe_offset=rule_index * 2 + 1]
+            if rule_kind < 0 or rule_kind > 11 or rule_classification < 0 or rule_classification > 3:
+                return RICH_STATUS_INVALID
+            if rule_kind == finding:
+                if rule_classification > classification:
+                    classification = rule_classification
+                break
+    if finding_count > 0:
+        reason_bits |= 64
+    Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(classification_address)
+    )[] = classification
+    Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(reason_bits_address)
+    )[] = reason_bits
+    return RICH_STATUS_OK
+
+
 @fieldwise_init
 struct GovernanceOptionalValuePair(Copyable):
     var left: Int64
