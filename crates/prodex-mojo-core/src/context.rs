@@ -77,6 +77,11 @@ unsafe extern "C" {
         output: *mut i64,
         output_count: i64,
     ) -> i64;
+    fn prodex_context_looks_like_location_path_v1(
+        abi_version: i64,
+        path: *const ProdexStringView,
+        output: *mut i64,
+    ) -> i64;
     fn prodex_context_estimate_tokens(chars: u64, words: u64) -> u64;
     fn prodex_context_signal_diff(
         before: *const i64,
@@ -141,7 +146,10 @@ mod git_search;
 pub use git_search::classify_git_search_line;
 #[path = "context/command_output.rs"]
 mod command_output;
-pub use command_output::{CommandOutputLineClassification, classify_command_output_line};
+pub use command_output::{
+    CommandOutputAnalysis, CommandOutputLineClassification, analyze_command_output,
+    classify_command_output_line, select_critical_lines,
+};
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ContextSignalLine<'a> {
     pub text: &'a str,
@@ -454,6 +462,21 @@ pub fn signal_diff(
     Ok((lost, gained))
 }
 
+pub fn looks_like_location_path(path: &str) -> Result<bool, crate::MojoError> {
+    let path = ProdexStringView {
+        ptr: path.as_ptr(),
+        len: path.len(),
+    };
+    let mut output = 0_i64;
+    let status = unsafe {
+        prodex_context_looks_like_location_path_v1(CONTEXT_TEXT_ABI_VERSION, &path, &mut output)
+    };
+    if status != 0 || !matches!(output, 0 | 1) {
+        return Err(crate::MojoError::InvalidOutput);
+    }
+    Ok(output == 1)
+}
+
 pub fn lost_line_ranges_batch(
     before_rows: &[i64],
     after_available: &mut [i64],
@@ -577,11 +600,25 @@ pub fn self_test() -> bool {
                     | CONTEXT_CI_EXIT_CODE
                     | CONTEXT_CI_FAILURE_TEXT)
         });
+    let command_output_ok = analyze_command_output(&[
+        "Compiling demo v0.1.0",
+        "Finished test profile",
+        "test result: ok. 1 passed; 0 failed",
+        "",
+        "Checking demo v0.1.0",
+        "Running tests",
+        "PASS",
+        "Done in 1.2s",
+    ])
+    .is_ok_and(|analysis| {
+        analysis.non_empty == 7 && analysis.success_signals >= 4 && !analysis.success_failure
+    });
     text_ok
         && metadata_ok
         && gemini_glob_ok
         && search_ok
         && ci_ok
+        && command_output_ok
         && signal_diff(&[3, 0, 4, 1, 0, 2, 8], &[1, 2, 4, 0, 3, 0, 9]).is_ok_and(
             |(lost, gained)| {
                 lost == [2, 0, 0, 1, 0, 2, 0]

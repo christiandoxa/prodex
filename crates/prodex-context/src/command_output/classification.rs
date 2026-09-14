@@ -2,9 +2,7 @@ use super::*;
 
 #[cfg(feature = "mojo")]
 use prodex_mojo_core::context::{
-    CONTEXT_OUTPUT_DIAGNOSTIC_TARGET, CONTEXT_OUTPUT_ESLINT, CONTEXT_OUTPUT_FAILURE,
-    CONTEXT_OUTPUT_JUNIT_FAILURE, CONTEXT_OUTPUT_NOISY_KEY, CONTEXT_OUTPUT_RUST_EXIT,
-    CONTEXT_OUTPUT_RUST_NOISE, CONTEXT_OUTPUT_WARNING,
+    CONTEXT_OUTPUT_FAILURE, CONTEXT_OUTPUT_RUST_NOISE, CONTEXT_OUTPUT_WARNING,
 };
 
 #[cfg(not(feature = "mojo"))]
@@ -299,32 +297,19 @@ fn rust_diagnostic_signal_counts(lines: &[&str]) -> (usize, usize, usize, usize,
 }
 
 #[cfg(feature = "mojo")]
+fn mojo_command_output_analysis(
+    lines: &[&str],
+) -> prodex_mojo_core::context::CommandOutputAnalysis {
+    prodex_mojo_core::context::analyze_command_output(lines)
+        .unwrap_or_else(|error| panic!("Mojo command-output analysis failed: {error:?}"))
+}
+
+#[cfg(feature = "mojo")]
 pub(crate) fn looks_like_diagnostic_output(lines: &[&str]) -> bool {
-    let mut strong = 0;
-    let mut locations = 0;
-    let mut stacks = 0;
-    let mut exits = 0;
-    let mut noise = 0;
-    for line in lines {
-        let result = command_output_line_classification(line);
-        let flags = result.flags;
-        if flags & (CONTEXT_OUTPUT_JUNIT_FAILURE | CONTEXT_OUTPUT_ESLINT) != 0 {
-            return true;
-        }
-        strong += usize::from(
-            flags & CONTEXT_OUTPUT_DIAGNOSTIC_TARGET != 0
-                || is_node_stack_error_line(line)
-                || is_test_failure_signal_line(line)
-                || is_stack_signal_line(line)
-                || line
-                    .trim_start()
-                    .to_ascii_lowercase()
-                    .starts_with("npm err!"),
-        );
-        locations += usize::from(count_file_location_signals(line) > 0);
-        stacks += usize::from(is_stack_signal_line(line));
-        exits += usize::from(flags & CONTEXT_OUTPUT_RUST_EXIT != 0);
-        noise += usize::from(mojo_output_label(result.diagnostic_label).is_some());
+    let analysis = mojo_command_output_analysis(lines);
+    let [strong, locations, stacks, exits, noise] = analysis.diagnostic;
+    if analysis.diagnostic_immediate {
+        return true;
     }
     if strong > 0 {
         return strong + locations + stacks + exits + noise >= 2;
@@ -334,25 +319,11 @@ pub(crate) fn looks_like_diagnostic_output(lines: &[&str]) -> bool {
 
 #[cfg(feature = "mojo")]
 pub(crate) fn looks_like_noisy_success_output(lines: &[&str]) -> bool {
-    let non_empty = lines.iter().filter(|line| !line.trim().is_empty()).count();
-    if non_empty < 8 {
+    let analysis = mojo_command_output_analysis(lines);
+    if analysis.non_empty < 8 || analysis.success_failure {
         return false;
     }
-    let mut success_signals = 0;
-    let mut key_lines = 0;
-    for line in lines {
-        let result = command_output_line_classification(line);
-        let flags = result.flags;
-        if is_error_signal_line(line)
-            || is_test_failure_signal_line(line)
-            || flags & (CONTEXT_OUTPUT_FAILURE | CONTEXT_OUTPUT_WARNING) != 0
-        {
-            return false;
-        }
-        success_signals += usize::from(result.noisy_label > 0);
-        key_lines += usize::from(flags & CONTEXT_OUTPUT_NOISY_KEY != 0);
-    }
-    success_signals >= 4 || key_lines > 0 && success_signals >= 2
+    analysis.success_signals >= 4 || analysis.key_lines > 0 && analysis.success_signals >= 2
 }
 
 #[cfg(not(feature = "mojo"))]

@@ -51,7 +51,7 @@ pub(crate) use compression::{
     estimate_context_tokens, is_compressible_context_file, is_context_backup,
 };
 #[cfg(all(test, feature = "mojo"))]
-pub(crate) use critical_signal::critical_signal_counts_for_line_for_test;
+pub(crate) use critical_signal::oracle::critical_signal_counts_for_line_for_test;
 pub use critical_signal::{
     CriticalSignalCounts, CriticalSignalLineRange, CriticalSignalLineRangeOptions,
     CriticalSignalSelfCheck, count_critical_signals, critical_signal_lost_line_ranges,
