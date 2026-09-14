@@ -100,7 +100,7 @@ chrono = { version = "0.4.44", features = ["clock"] }
 clap = { version = "4.6.1", features = ["derive"] }
 codex_config = { package = "prodex-codex-config", path = "crates/prodex-codex-config", version = "0.429.3" }
 deadpool-postgres = "=0.14.2"
-dirs = "6.0.0"
+dirs = "7.0.0"
 fs2 = "0.4.3"
 filetime = "0.2.26"
 getrandom = "0.4.2"
@@ -165,15 +165,15 @@ prodex_storage_sqlite = { package = "prodex-storage-sqlite", path = "crates/prod
 prodex_storage_sqlite_runtime = { package = "prodex-storage-sqlite-runtime", path = "crates/prodex-storage-sqlite-runtime", version = "0.429.3" }
 prodex_update_notice = { package = "prodex-update-notice", path = "crates/prodex-update-notice", version = "0.429.3" }
 redaction = { package = "prodex-redaction", path = "crates/prodex-redaction", version = "0.429.3" }
-reqwest = { version = "0.13.2", default-features = false }
+reqwest = { version = "0.13.5", default-features = false }
 rpassword = "7.5.4"
 crossterm = "0.29.0"
 rusqlite = { version = "0.40.1", features = ["bundled"] }
 postgres = "0.19.12"
-redis = { version = "1.2.4", default-features = false }
-rustls = { version = "0.23.41", default-features = false, features = ["aws-lc-rs", "std"] }
+redis = { version = "1.7.0", default-features = false }
+rustls = { version = "0.23.44", default-features = false, features = ["aws-lc-rs", "std"] }
 rustls-native-certs = "0.8.4"
-tokio-rustls = "0.26.4"
+tokio-rustls = "0.26.5"
 runtime_anthropic_crate = { package = "prodex-runtime-anthropic", path = "crates/prodex-runtime-anthropic", version = "0.429.3" }
 runtime_log = { package = "prodex-runtime-log", path = "crates/prodex-runtime-log", version = "0.429.3" }
 runtime_metrics = { package = "prodex-runtime-metrics", path = "crates/prodex-runtime-metrics", version = "0.429.3" }
@@ -190,12 +190,12 @@ tiny_http = "0.12.0"
 tokio = { version = "1.52.3", features = ["macros", "rt-multi-thread", "signal", "time"] }
 tokio-postgres = "=0.7.18"
 tokio-postgres-rustls = { version = "0.14.0", features = ["aws-lc-rs"] }
-toml = "1.1.2"
+toml = "1.1.6"
 tungstenite = { version = "0.30.0", default-features = false, features = ["handshake"] }
-uuid = { version = "1.18.1", features = ["serde", "v7"] }
+uuid = { version = "1.26.1", features = ["serde", "v7"] }
 url = "2.5.8"
 zeroize = "1.9.0"
-zstd = "0.13.3"
+zstd = "0.14.0"
 
 [features]
 default = []
