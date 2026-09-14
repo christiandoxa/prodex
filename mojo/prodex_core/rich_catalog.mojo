@@ -1723,3 +1723,146 @@ def prodex_mojo_rich_catalog_merge_v1(
             accepted[unsafe_offset=output_count[]] = additional_index
             output_count[] += 1
     return RICH_STATUS_OK
+
+
+comptime CATALOG_PROVIDER_REGISTRY_MAX_NAMES: Int64 = 65_536
+
+
+# ponytail: bounded catalogs use a simple O(n^2) case-folded scan; add a hash index if the 65,536-name ceiling becomes reachable.
+@export("prodex_mojo_rich_catalog_provider_registry_costs_v1")
+def prodex_mojo_rich_catalog_provider_registry_costs_v1(
+    abi_version: Int64,
+    names_address: UInt,
+    input_costs_address: UInt,
+    input_present_address: UInt,
+    output_costs_address: UInt,
+    output_present_address: UInt,
+    name_count: Int64,
+    accepted_indices_address: UInt,
+    normalized_input_costs_address: UInt,
+    normalized_output_costs_address: UInt,
+    output_capacity: Int64,
+    output_count_address: UInt,
+    fallback_input_cost_address: UInt,
+    fallback_output_cost_address: UInt,
+    pricing_present_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != PRODEX_RICH_ABI_VERSION:
+        return RICH_STATUS_ABI
+    if (
+        name_count < 0
+        or name_count > CATALOG_PROVIDER_REGISTRY_MAX_NAMES
+        or output_capacity < 0
+        or output_capacity < name_count
+        or output_count_address == 0
+        or fallback_input_cost_address == 0
+        or fallback_output_cost_address == 0
+        or pricing_present_address == 0
+    ):
+        return RICH_STATUS_INVALID
+    if name_count > 0 and (
+        names_address == 0
+        or input_costs_address == 0
+        or input_present_address == 0
+        or output_costs_address == 0
+        or output_present_address == 0
+        or accepted_indices_address == 0
+        or normalized_input_costs_address == 0
+        or normalized_output_costs_address == 0
+    ):
+        return RICH_STATUS_INVALID
+
+    var output_count = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_count_address)
+    )
+    var fallback_input_cost = Pointer[mut=True, UInt64, MutUntrackedOrigin](
+        unsafe_from_address=Int(fallback_input_cost_address)
+    )
+    var fallback_output_cost = Pointer[mut=True, UInt64, MutUntrackedOrigin](
+        unsafe_from_address=Int(fallback_output_cost_address)
+    )
+    var pricing_present = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(pricing_present_address)
+    )
+    output_count[] = 0
+    fallback_input_cost[] = 0
+    fallback_output_cost[] = 0
+    pricing_present[] = 0
+
+    if name_count == 0:
+        return RICH_STATUS_OK
+
+    var names = Pointer[
+        mut=False, ProdexRichStringView, ImmUntrackedOrigin
+    ](unsafe_from_address=Int(names_address))
+    var input_costs = Pointer[
+        mut=False, UInt64, ImmUntrackedOrigin
+    ](unsafe_from_address=Int(input_costs_address))
+    var input_present = Pointer[
+        mut=False, Int64, ImmUntrackedOrigin
+    ](unsafe_from_address=Int(input_present_address))
+    var output_costs = Pointer[
+        mut=False, UInt64, ImmUntrackedOrigin
+    ](unsafe_from_address=Int(output_costs_address))
+    var output_present = Pointer[
+        mut=False, Int64, ImmUntrackedOrigin
+    ](unsafe_from_address=Int(output_present_address))
+    var accepted_indices = Pointer[
+        mut=True, Int64, MutUntrackedOrigin
+    ](unsafe_from_address=Int(accepted_indices_address))
+    var normalized_input_costs = Pointer[
+        mut=True, UInt64, MutUntrackedOrigin
+    ](unsafe_from_address=Int(normalized_input_costs_address))
+    var normalized_output_costs = Pointer[
+        mut=True, UInt64, MutUntrackedOrigin
+    ](unsafe_from_address=Int(normalized_output_costs_address))
+
+    for index in range(name_count):
+        if (
+            not rich_view_valid(
+                names[unsafe_offset=index], CATALOG_MAX_IDENTIFIER_BYTES
+            )
+            or names[unsafe_offset=index].len == 0
+            or input_present[unsafe_offset=index] < 0
+            or input_present[unsafe_offset=index] > 1
+            or output_present[unsafe_offset=index] < 0
+            or output_present[unsafe_offset=index] > 1
+        ):
+            return RICH_STATUS_INVALID
+        if input_present[unsafe_offset=index] == 1:
+            pricing_present[] = 1
+            if input_costs[unsafe_offset=index] > fallback_input_cost[]:
+                fallback_input_cost[] = input_costs[unsafe_offset=index]
+        if output_present[unsafe_offset=index] == 1:
+            pricing_present[] = 1
+            if output_costs[unsafe_offset=index] > fallback_output_cost[]:
+                fallback_output_cost[] = output_costs[unsafe_offset=index]
+
+    for index in range(name_count):
+        var duplicate = False
+        for previous in range(output_count[]):
+            var previous_index = accepted_indices[unsafe_offset=previous]
+            if previous_index < 0 or previous_index >= name_count:
+                return RICH_STATUS_INVALID
+            if catalog_view_equal_full(
+                names[unsafe_offset=index], names[unsafe_offset=previous_index]
+            ):
+                duplicate = True
+                break
+        if duplicate:
+            continue
+        if output_count[] >= output_capacity:
+            return RICH_STATUS_CAPACITY
+        accepted_indices[unsafe_offset=output_count[]] = index
+        normalized_input_costs[unsafe_offset=output_count[]] = (
+            input_costs[unsafe_offset=index]
+            if input_present[unsafe_offset=index] == 1
+            else fallback_input_cost[]
+        )
+        normalized_output_costs[unsafe_offset=output_count[]] = (
+            output_costs[unsafe_offset=index]
+            if output_present[unsafe_offset=index] == 1
+            else fallback_output_cost[]
+        )
+        output_count[] += 1
+    return RICH_STATUS_OK

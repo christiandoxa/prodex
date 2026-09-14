@@ -2,6 +2,12 @@ pub const POLICY_NUMERIC_NON_ZERO: i64 = 0;
 pub const POLICY_NUMERIC_RANGE: i64 = 1;
 pub const POLICY_NUMERIC_RELATION_LE: i64 = 2;
 
+mod gateway_admin;
+pub use gateway_admin::{
+    GatewayAdminRetentionPlan, gateway_admin_purge_protected_count, gateway_admin_retention_cutoff,
+    plan_gateway_admin_limit, plan_gateway_admin_retention,
+};
+
 #[repr(i64)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PolicyTextKind {

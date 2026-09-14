@@ -1667,22 +1667,31 @@ fn audit_export_response(
         );
     }
     let limit = if captured.body.is_empty() {
-        100
+        match gateway_admin_audit_export_limit(None) {
+            Ok(limit) => limit,
+            Err(response) => return response,
+        }
     } else {
-        match runtime_gateway_admin_json_body(captured)
-            .ok()
-            .and_then(|body| body.get("limit").and_then(serde_json::Value::as_u64))
-            .and_then(|limit| u16::try_from(limit).ok())
-            .filter(|limit| (1..=1_000).contains(limit))
-        {
-            Some(limit) => limit,
-            None => {
+        let body = match runtime_gateway_admin_json_body(captured) {
+            Ok(body) => body,
+            Err(_) => {
                 return build_runtime_proxy_json_error_response(
                     400,
                     "governance_audit_export_invalid",
                     "audit export limit must be between 1 and 1000",
                 );
             }
+        };
+        let Some(requested_limit) = body.get("limit").and_then(serde_json::Value::as_u64) else {
+            return build_runtime_proxy_json_error_response(
+                400,
+                "governance_audit_export_invalid",
+                "audit export limit must be between 1 and 1000",
+            );
+        };
+        match gateway_admin_audit_export_limit(Some(requested_limit)) {
+            Ok(limit) => limit,
+            Err(response) => return response,
         }
     };
     let repository = match repository(shared) {
@@ -1721,6 +1730,41 @@ fn audit_export_response(
             })).collect::<Vec<_>>()
         }),
     )
+}
+
+fn gateway_admin_audit_export_limit(
+    requested_limit: Option<u64>,
+) -> Result<u16, tiny_http::ResponseBox> {
+    #[cfg(feature = "mojo-core")]
+    {
+        return prodex_mojo_core::policy::plan_gateway_admin_limit(requested_limit).map_err(|_| {
+            build_runtime_proxy_json_error_response(
+                400,
+                "governance_audit_export_invalid",
+                "audit export limit must be between 1 and 1000",
+            )
+        });
+    }
+
+    #[cfg(not(feature = "mojo-core"))]
+    {
+        let limit = requested_limit.unwrap_or(100);
+        if (1..=1_000).contains(&limit) {
+            u16::try_from(limit).map_err(|_| {
+                build_runtime_proxy_json_error_response(
+                    400,
+                    "governance_audit_export_invalid",
+                    "audit export limit must be between 1 and 1000",
+                )
+            })
+        } else {
+            Err(build_runtime_proxy_json_error_response(
+                400,
+                "governance_audit_export_invalid",
+                "audit export limit must be between 1 and 1000",
+            ))
+        }
+    }
 }
 
 fn execution(

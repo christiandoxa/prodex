@@ -248,17 +248,10 @@ fn audit_retention_purge_request(
     event_ids.dedup();
     let retention_days = body
         .get("retention_days")
-        .map(|value| {
-            value
-                .as_u64()
-                .and_then(|value| u16::try_from(value).ok())
-                .ok_or_else(invalid_request)
-        })
+        .map(|value| value.as_u64().ok_or_else(invalid_request))
         .transpose()?;
-    let retention_policy =
-        AuditRetentionPolicy::new(retention_days).map_err(|_| invalid_request())?;
-    let batch_limit = AuditRetentionBatchLimit::new(u16::try_from(event_ids.len()).ok())
-        .map_err(|_| invalid_request())?;
+    let (retention_policy, batch_limit) =
+        audit_retention_policy_plan(retention_days, event_ids.len())?;
     let scope = AuditQueryScope::tenant(TenantContext { tenant_id });
     let keys = event_ids
         .iter()
@@ -466,8 +459,10 @@ fn audit_retention_purge_response(
     }
 
     let now_unix_ms = execution.atomic_write.completed_at_unix_ms;
-    let cutoff_unix_ms = now_unix_ms
-        .saturating_sub(u64::from(purge.retention_policy.days()).saturating_mul(86_400_000));
+    let cutoff_unix_ms = match audit_retention_cutoff(now_unix_ms, purge.retention_policy.days()) {
+        Ok(cutoff) => cutoff,
+        Err(response) => return response,
+    };
     let audit = match control_plane_audit_command(
         context.repository,
         &execution.authorized_action,
@@ -489,19 +484,89 @@ fn audit_retention_purge_response(
             started_at_unix_ms: execution.atomic_write.started_at_unix_ms,
         },
     ) {
-        Ok(purged) => runtime_gateway_admin_json_response(
-            200,
-            serde_json::json!({
-                "object": "governance.audit_retention_purge",
-                "requested": purge.event_ids.len(),
-                "purged": purged.len(),
-                "protected_or_ineligible": purge.event_ids.len().saturating_sub(purged.len()),
-                "audit_event_ids": purged,
-                "retention_days": purge.retention_policy.days(),
-                "approval_id": purge.approval_id.as_str(),
-            }),
-        ),
+        Ok(purged) => {
+            let protected_or_ineligible =
+                match audit_retention_protected_count(purge.event_ids.len(), purged.len()) {
+                    Ok(count) => count,
+                    Err(response) => return response,
+                };
+            runtime_gateway_admin_json_response(
+                200,
+                serde_json::json!({
+                    "object": "governance.audit_retention_purge",
+                    "requested": purge.event_ids.len(),
+                    "purged": purged.len(),
+                    "protected_or_ineligible": protected_or_ineligible,
+                    "audit_event_ids": purged,
+                    "retention_days": purge.retention_policy.days(),
+                    "approval_id": purge.approval_id.as_str(),
+                }),
+            )
+        }
         Err(error) => repository_error(error),
+    }
+}
+
+fn audit_retention_policy_plan(
+    retention_days: Option<u64>,
+    event_count: usize,
+) -> Result<(AuditRetentionPolicy, AuditRetentionBatchLimit), tiny_http::ResponseBox> {
+    #[cfg(feature = "mojo-core")]
+    {
+        let plan =
+            prodex_mojo_core::policy::plan_gateway_admin_retention(retention_days, event_count)
+                .map_err(|_| invalid_request())?;
+        return Ok((
+            AuditRetentionPolicy::new(Some(plan.retention_days)).map_err(|_| invalid_request())?,
+            AuditRetentionBatchLimit::new(Some(plan.batch_limit)).map_err(|_| invalid_request())?,
+        ));
+    }
+
+    #[cfg(not(feature = "mojo-core"))]
+    {
+        let retention_days = retention_days
+            .map(|value| u16::try_from(value).map_err(|_| invalid_request()))
+            .transpose()?;
+        Ok((
+            AuditRetentionPolicy::new(retention_days).map_err(|_| invalid_request())?,
+            AuditRetentionBatchLimit::new(u16::try_from(event_count).ok())
+                .map_err(|_| invalid_request())?,
+        ))
+    }
+}
+
+fn audit_retention_cutoff(
+    now_unix_ms: u64,
+    retention_days: u16,
+) -> Result<u64, tiny_http::ResponseBox> {
+    #[cfg(feature = "mojo-core")]
+    {
+        return prodex_mojo_core::policy::gateway_admin_retention_cutoff(
+            now_unix_ms,
+            retention_days,
+        )
+        .map_err(|_| invalid_request());
+    }
+
+    #[cfg(not(feature = "mojo-core"))]
+    {
+        Ok(now_unix_ms.saturating_sub(u64::from(retention_days).saturating_mul(86_400_000)))
+    }
+}
+
+fn audit_retention_protected_count(
+    requested: usize,
+    purged: usize,
+) -> Result<usize, tiny_http::ResponseBox> {
+    #[cfg(feature = "mojo-core")]
+    {
+        return prodex_mojo_core::policy::gateway_admin_purge_protected_count(requested, purged)
+            .map_err(|_| invalid_request());
+    }
+
+    #[cfg(not(feature = "mojo-core"))]
+    {
+        Ok(requested.saturating_sub(purged))
     }
 }
 
@@ -520,4 +585,43 @@ fn break_glass_denied() -> tiny_http::ResponseBox {
         "break_glass_not_authorized",
         "active break-glass approval is required for audit retention purge",
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        audit_retention_cutoff, audit_retention_policy_plan, audit_retention_protected_count,
+        gateway_admin_audit_export_limit,
+    };
+
+    #[test]
+    fn gateway_admin_retention_kernel_preserves_request_and_response_contract() {
+        let plan = audit_retention_policy_plan(None, 2)
+            .unwrap_or_else(|_| panic!("default retention is valid"));
+        assert_eq!(plan.0.days(), 365);
+        assert_eq!(plan.1.get(), 2);
+        assert_eq!(
+            audit_retention_policy_plan(Some(30), 1)
+                .unwrap_or_else(|_| panic!("minimum retention is valid"))
+                .0
+                .days(),
+            30
+        );
+        assert!(audit_retention_policy_plan(Some(29), 1).is_err());
+        assert!(audit_retention_policy_plan(Some(3_651), 1).is_err());
+
+        assert_eq!(
+            gateway_admin_audit_export_limit(None).map_err(|_| ()),
+            Ok(100)
+        );
+        assert_eq!(
+            gateway_admin_audit_export_limit(Some(1_000)).map_err(|_| ()),
+            Ok(1_000)
+        );
+        assert!(gateway_admin_audit_export_limit(Some(0)).is_err());
+        assert!(gateway_admin_audit_export_limit(Some(1_001)).is_err());
+
+        assert_eq!(audit_retention_cutoff(100_000, 30).map_err(|_| ()), Ok(0));
+        assert_eq!(audit_retention_protected_count(7, 3).map_err(|_| ()), Ok(4));
+    }
 }

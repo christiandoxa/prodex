@@ -13,9 +13,7 @@ use prodex_domain::{
     CapabilitySet, DataClassification, PolicySelector, ProviderTrustTier, SecretRef, TenantContext,
     TenantId,
 };
-use prodex_provider_core::{
-    ProviderEndpoint, ProviderId, ProviderModelCost, provider_adapter, provider_model_catalog,
-};
+use prodex_provider_core::{ProviderEndpoint, ProviderId, ProviderModelCost, provider_adapter};
 use prodex_provider_spi::{
     GovernedProviderDescriptor, GovernedProviderRegistry, GovernedRoute, GovernedRoutingPlan,
     GovernedRoutingSignals, GovernedRoutingWeights, MAX_GOVERNED_PROVIDER_REGIONS,
@@ -25,6 +23,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
+mod provider_planning;
 mod routing;
 mod tenant_snapshot_set;
 mod validation;
@@ -35,6 +34,7 @@ pub(super) use self::routing::{
     runtime_gateway_bootstrap_routing_scores_snapshot, runtime_gateway_model_cost,
     runtime_gateway_projected_provider_options,
 };
+use provider_planning::runtime_gateway_builtin_model_cost_plan;
 use validation::runtime_gateway_model_costs_are_authoritative;
 
 const RUNTIME_GATEWAY_PROVIDER_REGISTRY_SCHEMA_VERSION: u32 = 2;
@@ -439,6 +439,7 @@ pub(super) fn runtime_gateway_bootstrap_provider_registry_snapshot(
 ) -> Result<RuntimeGatewayGovernedProviderRegistrySnapshot> {
     let context = runtime_gateway_attached_provider_registry_context(provider_options, credential);
     let provider_settings = settings.provider.as_ref();
+    let builtin_cost_plan = runtime_gateway_builtin_model_cost_plan(context.provider);
     let trust_tier = match provider_settings.map(|settings| settings.trust_tier) {
         Some(prodex_runtime_policy::RuntimeGovernanceProviderTrustTier::Enterprise) => {
             RuntimeGatewayProviderRegistryTrustTier::Enterprise
@@ -469,7 +470,7 @@ pub(super) fn runtime_gateway_bootstrap_provider_registry_snapshot(
     };
     compile_runtime_gateway_provider_registry_artifact(
         &serde_json::to_vec(&RuntimeGatewayProviderRegistryArtifact {
-            schema_version: if runtime_gateway_provider_catalog_has_pricing(context.provider) {
+            schema_version: if builtin_cost_plan.pricing_known {
                 RUNTIME_GATEWAY_PROVIDER_REGISTRY_SCHEMA_VERSION
             } else {
                 RUNTIME_GATEWAY_PROVIDER_REGISTRY_LEGACY_SCHEMA_VERSION
@@ -500,7 +501,7 @@ pub(super) fn runtime_gateway_bootstrap_provider_registry_snapshot(
                     .map(|settings| settings.retention_seconds)
                     .unwrap_or(u32::MAX),
                 training_use: provider_settings.is_none_or(|settings| settings.training_use),
-                model_costs: runtime_gateway_builtin_model_costs(context.provider),
+                model_costs: builtin_cost_plan.model_costs,
                 cost: 5_000,
                 latency: 5_000,
                 risk: match trust_tier {
@@ -790,65 +791,6 @@ fn runtime_gateway_compile_provider_regions(regions: Vec<String>) -> Result<Vec<
     Ok(compiled)
 }
 
-fn runtime_gateway_provider_catalog_has_pricing(provider: ProviderId) -> bool {
-    provider_model_catalog(provider).iter().any(|model| {
-        model.input_cost_per_million_microusd.is_some()
-            || model.output_cost_per_million_microusd.is_some()
-    })
-}
-
-fn runtime_gateway_builtin_model_costs(
-    provider: ProviderId,
-) -> BTreeMap<String, RuntimeGatewayProviderModelCostArtifact> {
-    let mut model_costs = BTreeMap::new();
-    let fallback = provider_model_catalog(provider)
-        .iter()
-        .map(|model| model.cost())
-        .fold(ProviderModelCost::default(), max_provider_model_cost);
-    let fallback_input = fallback.input_cost_per_million_microusd.unwrap_or_default();
-    let fallback_output = fallback
-        .output_cost_per_million_microusd
-        .unwrap_or_default();
-    for model in provider_model_catalog(provider) {
-        let cost = model.cost();
-        let artifact = RuntimeGatewayProviderModelCostArtifact {
-            input_cost_per_million_microusd: Some(
-                cost.input_cost_per_million_microusd
-                    .unwrap_or(fallback_input),
-            ),
-            output_cost_per_million_microusd: Some(
-                cost.output_cost_per_million_microusd
-                    .unwrap_or(fallback_output),
-            ),
-        };
-        insert_case_insensitive_model_cost(&mut model_costs, model.id, artifact);
-        for alias in model.aliases {
-            insert_case_insensitive_model_cost(&mut model_costs, alias, artifact);
-        }
-    }
-    model_costs.insert(
-        "*".to_string(),
-        RuntimeGatewayProviderModelCostArtifact {
-            input_cost_per_million_microusd: Some(fallback_input),
-            output_cost_per_million_microusd: Some(fallback_output),
-        },
-    );
-    model_costs
-}
-
-fn insert_case_insensitive_model_cost(
-    model_costs: &mut BTreeMap<String, RuntimeGatewayProviderModelCostArtifact>,
-    model: &str,
-    cost: RuntimeGatewayProviderModelCostArtifact,
-) {
-    if !model_costs
-        .keys()
-        .any(|configured| configured.eq_ignore_ascii_case(model))
-    {
-        model_costs.insert(model.to_string(), cost);
-    }
-}
-
 fn artifact_descriptors_duplicate_provider(
     descriptors: &[RuntimeGatewayCompiledProviderDescriptor],
     provider: ProviderId,
@@ -899,7 +841,7 @@ mod tests {
                 maximum_classification: DataClassification::Confidential,
                 retention_seconds: 0,
                 training_use: false,
-                model_costs: runtime_gateway_builtin_model_costs(context.provider),
+                model_costs: runtime_gateway_builtin_model_cost_plan(context.provider).model_costs,
                 cost: 2_000,
                 latency: 3_000,
                 risk: 1_000,
@@ -965,7 +907,8 @@ mod tests {
                 maximum_classification: DataClassification::Confidential,
                 retention_seconds: 0,
                 training_use: false,
-                model_costs: runtime_gateway_builtin_model_costs(ProviderId::Anthropic),
+                model_costs: runtime_gateway_builtin_model_cost_plan(ProviderId::Anthropic)
+                    .model_costs,
                 cost: 5_000,
                 latency: 5_000,
                 risk: 5_000,
@@ -1066,7 +1009,8 @@ mod tests {
                 maximum_classification: DataClassification::Confidential,
                 retention_seconds: 0,
                 training_use: false,
-                model_costs: runtime_gateway_builtin_model_costs(ProviderId::Anthropic),
+                model_costs: runtime_gateway_builtin_model_cost_plan(ProviderId::Anthropic)
+                    .model_costs,
                 cost: 0,
                 latency: 0,
                 risk: 0,
