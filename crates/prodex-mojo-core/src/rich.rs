@@ -141,6 +141,9 @@ pub use application_obligations::*;
 #[path = "rich/application_metadata.rs"]
 mod application_metadata;
 pub use application_metadata::*;
+#[path = "rich/application_scope.rs"]
+mod application_scope;
+pub use application_scope::*;
 
 const RICH_STATUS_INVALID: i64 = 1;
 const RICH_STATUS_UTF8: i64 = 2;
