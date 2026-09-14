@@ -35,6 +35,7 @@ use web_search::{
     anthropic_web_search_call, anthropic_web_search_tool, merge_anthropic_web_search_result,
 };
 
+#[cfg(any(not(feature = "mojo"), test))]
 const DEFAULT_MAX_TOKENS: u64 = 4096;
 
 type AnthropicChatRequest = (Map<String, Value>, BTreeMap<String, Value>);
@@ -139,6 +140,15 @@ pub(super) fn translate_chat_request_to_anthropic(
 
 #[cfg(not(feature = "mojo"))]
 fn build_anthropic_chat_request(
+    system: &[String],
+    messages: Vec<Value>,
+    chat: &Map<String, Value>,
+) -> Result<AnthropicChatRequest, String> {
+    build_anthropic_chat_request_rust(system, messages, chat)
+}
+
+#[cfg(any(not(feature = "mojo"), test))]
+fn build_anthropic_chat_request_rust(
     system: &[String],
     messages: Vec<Value>,
     chat: &Map<String, Value>,
@@ -660,7 +670,7 @@ fn append_message(messages: &mut Vec<Value>, role: &str, blocks: Vec<Value>) -> 
     Ok(())
 }
 
-#[cfg(not(feature = "mojo"))]
+#[cfg(any(not(feature = "mojo"), test))]
 fn anthropic_tools(value: &Value) -> Result<Vec<Value>, String> {
     let Some(tools) = value.as_array() else {
         return Err("Responses `tools` must be an array".to_string());
@@ -695,7 +705,7 @@ fn anthropic_tools(value: &Value) -> Result<Vec<Value>, String> {
         .collect()
 }
 
-#[cfg(not(feature = "mojo"))]
+#[cfg(any(not(feature = "mojo"), test))]
 fn anthropic_tool_choice(value: &Value) -> Result<Option<Value>, String> {
     match value {
         Value::String(choice) => match choice.as_str() {
@@ -855,6 +865,52 @@ mod response_envelope_tests {
                 "{value}"
             );
         }
+    }
+
+    #[test]
+    fn mojo_request_envelope_matches_rust_oracle() {
+        let cases = [
+            json!({
+                "model": null,
+                "messages": [],
+                "max_tokens": null,
+                "stream": true,
+                "temperature": null,
+                "top_p": 0,
+                "stop": "\u{1f980}\n",
+                "tools": [{"type":"function","function":{"name":"lookup","parameters":{"type":"object"}}}],
+                "tool_choice": {"type":"function","name":"lookup"},
+            }),
+            json!({
+                "messages": [],
+                "stream": "true",
+                "stop": [],
+                "web_search_options": {"search_context_size":"high","allowed_domains":["example.com"]},
+            }),
+            json!({
+                "messages": [],
+                "tools": [{"name":"ignored"}],
+                "tool_choice": "none",
+            }),
+        ];
+        let system = vec!["system \u{1f980}".to_string(), "second".to_string()];
+        let messages = vec![json!({"role":"user","content":[{"type":"text","text":"hi"}]})];
+        for chat in cases {
+            let chat = chat.as_object().unwrap();
+            let mojo =
+                request_builder::build_anthropic_chat_request(&system, messages.clone(), chat)
+                    .unwrap();
+            let rust = build_anthropic_chat_request_rust(&system, messages.clone(), chat).unwrap();
+            assert_eq!(mojo, rust);
+        }
+
+        let invalid = json!({"messages": [], "stop": null});
+        let chat = invalid.as_object().unwrap();
+        assert_eq!(
+            request_builder::build_anthropic_chat_request(&system, messages.clone(), chat)
+                .unwrap_err(),
+            build_anthropic_chat_request_rust(&system, messages, chat).unwrap_err()
+        );
     }
 }
 
