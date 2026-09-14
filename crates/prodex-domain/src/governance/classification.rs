@@ -116,7 +116,45 @@ impl CompiledClassificationRuleSet {
     }
 }
 
+#[cfg(feature = "mojo")]
 pub fn compile_classification_rule_set(
+    mut rule_set: ClassificationRuleSet,
+) -> Result<CompiledClassificationRuleSet, ClassificationError> {
+    if rule_set.rules.len() > MAX_CLASSIFICATION_RULES {
+        return Err(ClassificationError::RuleLimitExceeded);
+    }
+    rule_set
+        .rules
+        .sort_by_key(|rule| (rule.finding_kind, rule.classification));
+    let rules = rule_set
+        .rules
+        .iter()
+        .map(|rule| (rule.finding_kind as u8, rule.classification as u8))
+        .collect::<Vec<_>>();
+    match prodex_mojo_core::policy::governance_classification_rules_valid(&rules)
+        .expect("Mojo classification rule validation returned invalid output")
+    {
+        1 => return Err(ClassificationError::DuplicateRule),
+        2 => return Err(ClassificationError::ClassificationTooLow),
+        _ => {}
+    }
+    Ok(CompiledClassificationRuleSet {
+        revision: rule_set.revision,
+        checksum: rule_set.checksum,
+        unsupported_coverage_floor: rule_set.unsupported_coverage_floor,
+        rules: rule_set.rules,
+    })
+}
+
+#[cfg(not(feature = "mojo"))]
+pub fn compile_classification_rule_set(
+    rule_set: ClassificationRuleSet,
+) -> Result<CompiledClassificationRuleSet, ClassificationError> {
+    compile_classification_rule_set_rust(rule_set)
+}
+
+#[cfg(any(test, not(feature = "mojo")))]
+fn compile_classification_rule_set_rust(
     mut rule_set: ClassificationRuleSet,
 ) -> Result<CompiledClassificationRuleSet, ClassificationError> {
     if rule_set.rules.len() > MAX_CLASSIFICATION_RULES {

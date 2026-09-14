@@ -67,6 +67,14 @@ struct GovernanceMatchSelector {
 }
 
 unsafe extern "C" {
+    fn prodex_mojo_governance_finding_classification_v1(
+        abi_version: i64,
+        mode: i64,
+        values: u64,
+        value_count: i64,
+        classification: i64,
+        output: u64,
+    ) -> i64;
     fn prodex_mojo_migration_step_order_v1(
         abi_version: i64,
         steps: u64,
@@ -110,6 +118,68 @@ unsafe extern "C" {
         default_effect: i64,
         output: u64,
     ) -> i64;
+}
+
+fn governance_finding_classification(
+    mode: i64,
+    values: &[i64],
+    value_count: usize,
+    classification: u8,
+) -> Result<i64, crate::MojoError> {
+    let mut output = -1_i64;
+    let status = unsafe {
+        prodex_mojo_governance_finding_classification_v1(
+            6,
+            mode,
+            values.as_ptr() as u64,
+            i64::try_from(value_count).map_err(|_| crate::MojoError::InvalidInput)?,
+            i64::from(classification),
+            (&mut output as *mut i64) as u64,
+        )
+    };
+    if status != 0 {
+        return Err(match status {
+            1 | 2 => crate::MojoError::InvalidInput,
+            4 => crate::MojoError::AbiMismatch,
+            _ => crate::MojoError::InvalidOutput,
+        });
+    }
+    Ok(output)
+}
+
+pub fn governance_finding_minimum_classification(kind: u8) -> Result<u8, crate::MojoError> {
+    let value = governance_finding_classification(0, &[i64::from(kind)], 1, 0)?;
+    let value = u8::try_from(value).map_err(|_| crate::MojoError::InvalidOutput)?;
+    (value <= 3)
+        .then_some(value)
+        .ok_or(crate::MojoError::InvalidOutput)
+}
+
+pub fn governance_findings_exceed_classification(
+    kinds: &[u8],
+    classification: u8,
+) -> Result<bool, crate::MojoError> {
+    let values = kinds
+        .iter()
+        .map(|kind| i64::from(*kind))
+        .collect::<Vec<_>>();
+    match governance_finding_classification(1, &values, values.len(), classification)? {
+        0 => Ok(false),
+        1 => Ok(true),
+        _ => Err(crate::MojoError::InvalidOutput),
+    }
+}
+
+pub fn governance_classification_rules_valid(rules: &[(u8, u8)]) -> Result<i64, crate::MojoError> {
+    let values = rules
+        .iter()
+        .flat_map(|(kind, classification)| [i64::from(*kind), i64::from(*classification)])
+        .collect::<Vec<_>>();
+    let output = governance_finding_classification(2, &values, rules.len(), 0)?;
+    (0..=2)
+        .contains(&output)
+        .then_some(output)
+        .ok_or(crate::MojoError::InvalidOutput)
 }
 
 pub fn migration_step_order(steps: &[i64]) -> Result<i64, crate::MojoError> {
