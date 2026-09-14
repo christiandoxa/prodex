@@ -1170,22 +1170,22 @@ pub fn evaluate_governance_policy(
         });
     }
 
-    let mut effect = PolicyEffect::Allow;
     let mut obligations = Vec::new();
     let mut reasons = Vec::new();
+    let mut effects = Vec::new();
     for rule in policy
         .rules
         .iter()
         .filter(|rule| rule.condition.matches(input))
     {
-        effect = effect.max(rule.effect);
+        effects.push(rule.effect);
         obligations.extend(rule.obligations.iter().cloned());
         reasons.push(rule.reason_code.clone());
     }
-    if reasons.is_empty() {
-        effect = policy.default_effect;
+    if effects.is_empty() {
         reasons.push(PolicyReasonCode::new("policy.default")?);
     }
+    let effect = governance_policy_effect(&effects, policy.default_effect);
     obligations.sort();
     obligations.dedup();
     reasons.sort();
@@ -1206,6 +1206,35 @@ pub fn evaluate_governance_policy(
         policy_revision: policy.revision,
         valid_until_unix_ms: policy.valid_until_unix_ms,
     })
+}
+
+#[cfg(feature = "mojo")]
+fn governance_policy_effect(
+    effects: &[PolicyEffect],
+    default_effect: PolicyEffect,
+) -> PolicyEffect {
+    match prodex_mojo_core::policy::governance_policy_effect(
+        &effects
+            .iter()
+            .map(|effect| *effect as i64)
+            .collect::<Vec<_>>(),
+        default_effect as i64,
+    )
+    .expect("Mojo governance effect planner returned invalid output")
+    {
+        0 => PolicyEffect::Allow,
+        1 => PolicyEffect::RequireApproval,
+        2 => PolicyEffect::Deny,
+        _ => PolicyEffect::Deny,
+    }
+}
+
+#[cfg(not(feature = "mojo"))]
+fn governance_policy_effect(
+    effects: &[PolicyEffect],
+    default_effect: PolicyEffect,
+) -> PolicyEffect {
+    effects.iter().copied().max().unwrap_or(default_effect)
 }
 
 #[cfg(feature = "mojo")]

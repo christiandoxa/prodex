@@ -97,6 +97,13 @@ unsafe extern "C" {
         available_mask: u64,
         output: u64,
     ) -> i64;
+    fn prodex_mojo_governance_effect_v1(
+        abi_version: i64,
+        effects: u64,
+        effect_count: i64,
+        default_effect: i64,
+        output: u64,
+    ) -> i64;
 }
 
 fn policy_string_view(value: Option<&str>) -> PolicyStringView {
@@ -267,6 +274,33 @@ pub fn governance_required_attributes_present(
         1 => Ok(true),
         _ => Err(crate::MojoError::InvalidOutput),
     }
+}
+
+pub fn governance_policy_effect(
+    effects: &[i64],
+    default_effect: i64,
+) -> Result<i64, crate::MojoError> {
+    let mut output = -1_i64;
+    let status = unsafe {
+        prodex_mojo_governance_effect_v1(
+            6,
+            effects.as_ptr() as u64,
+            i64::try_from(effects.len()).map_err(|_| crate::MojoError::InvalidInput)?,
+            default_effect,
+            (&mut output as *mut i64) as u64,
+        )
+    };
+    if status != 0 {
+        return Err(match status {
+            1 | 2 => crate::MojoError::InvalidInput,
+            4 => crate::MojoError::AbiMismatch,
+            _ => crate::MojoError::InvalidOutput,
+        });
+    }
+    (0..=2)
+        .contains(&output)
+        .then_some(output)
+        .ok_or(crate::MojoError::InvalidOutput)
 }
 
 pub fn validate_text(value: &str, kind: PolicyTextKind) -> Result<bool, crate::MojoError> {

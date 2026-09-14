@@ -191,6 +191,38 @@ def prodex_mojo_governance_required_attributes_v1(
     return RICH_STATUS_OK
 
 
+@export("prodex_mojo_governance_effect_v1")
+def prodex_mojo_governance_effect_v1(
+    abi_version: Int64,
+    effects_address: UInt,
+    effect_count: Int64,
+    default_effect: Int64,
+    output_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != PRODEX_RICH_ABI_VERSION:
+        return RICH_STATUS_ABI
+    if output_address == 0 or effect_count < 0 or effect_count > RICH_MAX_RECORDS or default_effect < 0 or default_effect > 2 or (effect_count > 0 and effects_address == 0):
+        return RICH_STATUS_INVALID
+    var output = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    if effect_count == 0:
+        output[] = default_effect
+        return RICH_STATUS_OK
+    var effects = Pointer[mut=False, Int64, ImmUntrackedOrigin](
+        unsafe_from_address=Int(effects_address)
+    )
+    var effect: Int64 = 0
+    for index in range(effect_count):
+        var candidate = effects[unsafe_offset=index]
+        if candidate < 0 or candidate > 2:
+            return RICH_STATUS_INVALID
+        if candidate > effect:
+            effect = candidate
+    output[] = effect
+    return RICH_STATUS_OK
+
+
 @export("prodex_mojo_governance_predicates_v1")
 def prodex_mojo_governance_predicates_v1(
     abi_version: Int64,
