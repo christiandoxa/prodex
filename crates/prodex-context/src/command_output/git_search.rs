@@ -443,10 +443,38 @@ pub(super) fn compact_search_output(input: &str, options: &CommandOutputCompactO
     finalize_compacted_command_output(CommandOutputKind::Search, input, output, options)
 }
 
+#[cfg(feature = "mojo")]
 pub(super) fn compact_file_list_output(
     input: &str,
     options: &CommandOutputCompactOptions,
 ) -> String {
+    let Some(body) = prodex_mojo_core::rich::context_file_list_output(
+        input,
+        options.max_lines,
+        options.max_line_chars,
+        options.max_path_entries,
+    )
+    .unwrap_or_else(|error| panic!("Mojo file-list formatter failed: {error:?}")) else {
+        return smart_truncate_command_output(input, options);
+    };
+    let lines = body
+        .trim_end_matches('\n')
+        .split('\n')
+        .map(str::to_owned)
+        .collect();
+    finalize_compacted_command_output(CommandOutputKind::FileList, input, lines, options)
+}
+
+#[cfg(not(feature = "mojo"))]
+pub(super) fn compact_file_list_output(
+    input: &str,
+    options: &CommandOutputCompactOptions,
+) -> String {
+    compact_file_list_output_rust(input, options)
+}
+
+#[cfg(any(not(feature = "mojo"), test))]
+fn compact_file_list_output_rust(input: &str, options: &CommandOutputCompactOptions) -> String {
     let entries = collect_file_list_entries(input);
 
     if entries.is_empty() {
@@ -607,87 +635,5 @@ fn compact_git_diff_stat_output(
 }
 
 #[cfg(all(test, feature = "mojo"))]
-mod mojo_git_status_tests {
-    use super::*;
-
-    fn oracle(input: &str, options: &CommandOutputCompactOptions) -> String {
-        let normalized = normalize_command_output(input);
-        let output = compact_git_status_output_rust(&normalized, options);
-        if options.max_lines <= 12 {
-            output
-        } else {
-            canonicalize_compacted_command_paths(&normalized, &output, CommandOutputKind::GitStatus)
-        }
-    }
-
-    #[test]
-    fn public_mojo_git_status_formatter_matches_860_case_rust_oracle() {
-        let mut cases = Vec::new();
-        for first in [' ', 'M', 'A', 'D', 'R', 'C', 'U', '?', '!'] {
-            for second in [' ', 'M', 'A', 'D', 'R', 'C', 'U', '?', '!'] {
-                cases.push(format!(
-                    "## main\n{first}{second} src/one.rs\n{first}{second} src/one.rs\n"
-                ));
-            }
-        }
-        cases.extend([
-            "\n\n\n\n".to_string(),
-            "## main\n M café/文件.rs\n??  alpha\u{00a0}\n".to_string(),
-            "## first\n M one\n## second\n M two\n".to_string(),
-            "On branch main\nChanges not staged for commit:\n  deleted : old.rs\nUntracked files:\n a\n a\n b\n".to_string(),
-            format!(
-                "## main\n{}",
-                (0..48)
-                    .map(|index| format!("?? src/file_{index:03}.rs\n"))
-                    .collect::<String>()
-            ),
-        ]);
-        for max_path_entries in [
-            0,
-            1,
-            6,
-            23,
-            24,
-            25,
-            120,
-            i64::MAX as usize - 5,
-            i64::MAX as usize,
-            usize::MAX,
-        ] {
-            let options = CommandOutputCompactOptions {
-                kind: CommandOutputKind::GitStatus,
-                max_lines: 1_000,
-                max_line_chars: 20_000,
-                max_path_entries,
-                ..CommandOutputCompactOptions::default()
-            };
-            for input in &cases {
-                assert_eq!(
-                    compact_command_output_with_options(input, &options).output,
-                    oracle(input, &options),
-                    "max_path_entries={max_path_entries}, input={input:?}",
-                );
-            }
-        }
-    }
-
-    #[test]
-    fn mojo_git_status_handles_blank_heavy_and_long_inputs() {
-        let options = CommandOutputCompactOptions {
-            kind: CommandOutputKind::GitStatus,
-            max_lines: 1_000,
-            max_line_chars: 20_000,
-            ..CommandOutputCompactOptions::default()
-        };
-        for input in [
-            "\n".repeat(4 * 1024 * 1024 - 1) + "x",
-            format!("## main\n?? {}\n", "界".repeat(1_500_000)),
-            "## main\n?? same\n".repeat(200_000),
-        ] {
-            assert_eq!(
-                compact_command_output_with_options(&input, &options).output,
-                oracle(&input, &options)
-            );
-        }
-    }
-}
+#[path = "git_search_mojo_tests.rs"]
+mod mojo_tests;

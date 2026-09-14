@@ -8,6 +8,7 @@ use super::{
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ContextCommandOutputOperation {
     GitStatus = 1,
+    FileList = 2,
 }
 
 #[repr(C)]
@@ -15,15 +16,17 @@ pub enum ContextCommandOutputOperation {
 struct ContextCommandOutputFfiInput {
     operation: i64,
     max_path_entries: u64,
+    max_lines: u64,
+    max_line_chars: u64,
     input: RichStringView,
 }
 
-const _: () = assert!(std::mem::size_of::<ContextCommandOutputFfiInput>() == 32);
+const _: () = assert!(std::mem::size_of::<ContextCommandOutputFfiInput>() == 48);
 
 #[repr(C)]
 #[derive(Debug, Clone, Copy, Default)]
 struct ContextCommandOutputRecord {
-    hash: u64,
+    occurrences: u64,
     category: i64,
     offset: i64,
     len: i64,
@@ -63,15 +66,21 @@ struct ContextCommandOutputAllocation {
 }
 
 fn allocation_from_counts(
+    operation: i64,
     meaningful_lines: usize,
     meaningful_bytes: usize,
 ) -> Result<ContextCommandOutputAllocation, MojoError> {
+    let multiplier = if operation == ContextCommandOutputOperation::FileList as i64 {
+        3
+    } else {
+        2
+    };
     let records = meaningful_lines
-        .checked_mul(2)
+        .checked_mul(multiplier)
         .and_then(|value| value.checked_add(1))
         .ok_or(MojoError::InvalidInput)?;
     let scratch = meaningful_bytes
-        .checked_mul(2)
+        .checked_mul(multiplier)
         .and_then(|value| value.checked_add(1))
         .ok_or(MojoError::InvalidInput)?;
     let output = scratch
@@ -103,6 +112,7 @@ fn allocation_plan(
         return Err(super::status_error(status, 10, 1, 0, 0));
     }
     allocation_from_counts(
+        input.operation,
         usize::try_from(meaningful_lines).map_err(|_| MojoError::InvalidOutput)?,
         usize::try_from(meaningful_bytes).map_err(|_| MojoError::InvalidOutput)?,
     )
@@ -133,8 +143,16 @@ pub fn context_command_output(
     let ffi_input = ContextCommandOutputFfiInput {
         operation: operation as i64,
         max_path_entries: max_path_entries as u64,
+        max_lines: 0,
+        max_line_chars: 0,
         input: view(input),
     };
+    context_command_output_ffi(ffi_input)
+}
+
+fn context_command_output_ffi(
+    ffi_input: ContextCommandOutputFfiInput,
+) -> Result<Option<String>, MojoError> {
     let allocation = allocation_plan(&ffi_input)?;
     let mut output = zeroed::<u8>(allocation.output)?;
     let mut records = zeroed::<ContextCommandOutputRecord>(allocation.records)?;
@@ -172,6 +190,26 @@ pub fn context_command_output(
         .map_err(|_| MojoError::InvalidOutput)
 }
 
+pub fn context_file_list_output(
+    input: &str,
+    max_lines: usize,
+    max_line_chars: usize,
+    max_path_entries: usize,
+) -> Result<Option<String>, MojoError> {
+    ensure_rich_abi()?;
+    if input.len() > i64::MAX as usize {
+        return Err(MojoError::InvalidInput);
+    }
+    let ffi_input = ContextCommandOutputFfiInput {
+        operation: ContextCommandOutputOperation::FileList as i64,
+        max_path_entries: max_path_entries as u64,
+        max_lines: max_lines as u64,
+        max_line_chars: max_line_chars as u64,
+        input: view(input),
+    };
+    context_command_output_ffi(ffi_input)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -182,6 +220,8 @@ mod tests {
         let ffi_input = ContextCommandOutputFfiInput {
             operation: ContextCommandOutputOperation::GitStatus as i64,
             max_path_entries: 120,
+            max_lines: 0,
+            max_line_chars: 0,
             input: view(&input),
         };
         let allocation = allocation_plan(&ffi_input).unwrap();
@@ -195,9 +235,34 @@ mod tests {
     }
 
     #[test]
+    fn file_list_sizing_keeps_blank_heavy_inputs_bounded() {
+        let input = "\n".repeat(4 * 1024 * 1024 - 1) + "x";
+        let ffi_input = ContextCommandOutputFfiInput {
+            operation: ContextCommandOutputOperation::FileList as i64,
+            max_path_entries: 120,
+            max_lines: 1_000,
+            max_line_chars: 240,
+            input: view(&input),
+        };
+        let allocation = allocation_plan(&ffi_input).unwrap();
+        assert_eq!(allocation.records, 4);
+        assert_eq!(allocation.hash_slots, 8);
+        assert!(allocation.output + allocation.scratch < 2048);
+        assert_eq!(
+            context_file_list_output(&input, 1_000, 240, 120).unwrap(),
+            None
+        );
+    }
+
+    #[test]
     fn sizing_arithmetic_rejects_unrepresentable_capacity() {
         assert_eq!(
-            allocation_from_counts(usize::MAX, usize::MAX).unwrap_err(),
+            allocation_from_counts(
+                ContextCommandOutputOperation::FileList as i64,
+                usize::MAX,
+                usize::MAX
+            )
+            .unwrap_err(),
             MojoError::InvalidInput
         );
     }
@@ -208,6 +273,8 @@ mod tests {
         let mut input = ContextCommandOutputFfiInput {
             operation: ContextCommandOutputOperation::GitStatus as i64,
             max_path_entries: 120,
+            max_lines: 0,
+            max_line_chars: 0,
             input: RichStringView {
                 ptr: mojo_pointer_address(invalid.as_ptr()),
                 len: 1,
