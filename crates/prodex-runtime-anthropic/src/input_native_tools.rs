@@ -103,7 +103,8 @@ pub fn runtime_proxy_anthropic_coordinate_pair(
     Some((x, y))
 }
 
-pub fn runtime_proxy_anthropic_computer_keypress_keys(key_combo: &str) -> Option<Vec<String>> {
+#[cfg(any(not(feature = "mojo"), test))]
+fn runtime_proxy_anthropic_computer_keypress_keys(key_combo: &str) -> Option<Vec<String>> {
     let keys = key_combo
         .split('+')
         .map(str::trim)
@@ -114,6 +115,43 @@ pub fn runtime_proxy_anthropic_computer_keypress_keys(key_combo: &str) -> Option
 }
 
 pub fn runtime_proxy_translate_anthropic_computer_action(
+    input: &serde_json::Map<String, serde_json::Value>,
+) -> Option<serde_json::Value> {
+    #[cfg(feature = "mojo")]
+    {
+        let action = input
+            .get("action")
+            .and_then(serde_json::Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty());
+        let text = input
+            .get("text")
+            .and_then(serde_json::Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty());
+        let key = input
+            .get("key")
+            .and_then(serde_json::Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty());
+        let coordinate = runtime_proxy_anthropic_coordinate_pair(input.get("coordinate"))
+            .and_then(|(x, y)| serde_json::to_string(&[x, y]).ok());
+        let mut kernel = prodex_mojo_core::rich::RuntimeAnthropicKernelInput::new(
+            prodex_mojo_core::rich::RuntimeAnthropicKernelOperation::ComputerAction,
+        );
+        kernel.block_type = action;
+        kernel.text = text;
+        kernel.name = key;
+        kernel.input = coordinate.as_deref();
+        let value = crate::mojo::json(kernel);
+        (!value.is_null()).then_some(value)
+    }
+    #[cfg(not(feature = "mojo"))]
+    runtime_proxy_translate_anthropic_computer_action_rust(input)
+}
+
+#[cfg(any(not(feature = "mojo"), test))]
+fn runtime_proxy_translate_anthropic_computer_action_rust(
     input: &serde_json::Map<String, serde_json::Value>,
 ) -> Option<serde_json::Value> {
     let action = input
@@ -218,4 +256,36 @@ pub fn runtime_proxy_translate_anthropic_computer_tool_call(
             max_output_length: None,
         },
     ))
+}
+
+#[cfg(all(test, feature = "mojo"))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn mojo_computer_actions_match_rust_oracle() {
+        let cases = [
+            serde_json::json!({"action":"screenshot"}),
+            serde_json::json!({"action":"left_click","coordinate":[-1,2]}),
+            serde_json::json!({"action":"right_click","coordinate":[i64::MAX,i64::MIN,3]}),
+            serde_json::json!({"action":"middle_click","coordinate":[0,0]}),
+            serde_json::json!({"action":"double_click","coordinate":[3,4]}),
+            serde_json::json!({"action":"mouse_move","coordinate":[5,6]}),
+            serde_json::json!({"action":"type","text":" \u{1f980}\n "}),
+            serde_json::json!({"action":"key","key":" ctrl + Shift + \u{1f980} "}),
+            serde_json::json!({"action":"wait"}),
+            serde_json::json!({"action":"key","key":" + "}),
+            serde_json::json!({"action":"left_click","coordinate":[1]}),
+            serde_json::json!({"action":"unknown"}),
+            serde_json::json!({}),
+        ];
+        for value in cases {
+            let input = value.as_object().unwrap();
+            assert_eq!(
+                runtime_proxy_translate_anthropic_computer_action(input),
+                runtime_proxy_translate_anthropic_computer_action_rust(input),
+                "{value}"
+            );
+        }
+    }
 }
