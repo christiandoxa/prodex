@@ -287,6 +287,54 @@ struct GovernanceObligationPredicateInput(Copyable):
     var selector_present: Int64
 
 
+@fieldwise_init
+struct GovernancePolicyRuleShape(Copyable):
+    var id: ProdexRichStringView
+    var effect: Int64
+    var obligation_count: Int64
+
+
+@export("prodex_mojo_governance_policy_shape_v1")
+def prodex_mojo_governance_policy_shape_v1(
+    abi_version: Int64,
+    valid_until_unix_ms: UInt64,
+    rules_address: UInt,
+    rule_count: Int64,
+    output_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != PRODEX_RICH_ABI_VERSION:
+        return RICH_STATUS_ABI
+    if output_address == 0 or rule_count < 0:
+        return RICH_STATUS_INVALID
+    var output = Pointer[mut=True, Int64, MutUntrackedOrigin](unsafe_from_address=Int(output_address))
+    output[] = 0
+    if rule_count > 256:
+        output[] = 5
+        return RICH_STATUS_OK
+    if valid_until_unix_ms == 0:
+        output[] = 1
+        return RICH_STATUS_OK
+    if rule_count > 0 and rules_address == 0:
+        return RICH_STATUS_INVALID
+    var rules = Pointer[mut=False, GovernancePolicyRuleShape, ImmUntrackedOrigin](unsafe_from_address=Int(rules_address))
+    for index in range(rule_count):
+        var rule = rules[unsafe_offset=index].copy()
+        if not rich_view_valid(rule.id, RICH_MAX_IDENTIFIER_BYTES) or rule.effect < 0 or rule.effect > 2 or rule.obligation_count < 0:
+            return RICH_STATUS_INVALID
+        if index > 0 and rich_views_equal(rules[unsafe_offset=index - 1].id, rule.id):
+            output[] = 2
+            return RICH_STATUS_OK
+    for index in range(rule_count):
+        var rule = rules[unsafe_offset=index].copy()
+        if rule.obligation_count > 64:
+            output[] = 3
+            return RICH_STATUS_OK
+        if rule.effect == 2 and rule.obligation_count != 0:
+            output[] = 4
+            return RICH_STATUS_OK
+    return RICH_STATUS_OK
+
+
 def governance_selector_is_wildcard(view: ProdexRichStringView) -> Bool:
     return rich_view_matches_literal["*"](view, False)
 
