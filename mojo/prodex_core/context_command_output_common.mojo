@@ -9,7 +9,7 @@ from context_text import (
 from rich_types import ProdexRichStringView
 
 comptime PRODEX_RICH_ABI_VERSION: Int64 = 6
-comptime CONTEXT_COMMAND_OUTPUT_MAX_BYTES: Int64 = 4_194_304
+comptime CONTEXT_COMMAND_OUTPUT_MAX_BYTES: Int64 = 9_223_372_036_854_775_807
 comptime CONTEXT_COMMAND_OUTPUT_GIT_STATUS: Int64 = 1
 comptime CONTEXT_COMMAND_OUTPUT_STATUS_OK: Int64 = 0
 comptime CONTEXT_COMMAND_OUTPUT_STATUS_INVALID: Int64 = 1
@@ -30,7 +30,7 @@ comptime CONTEXT_STATUS_OTHER: Int64 = 7
 @fieldwise_init
 struct ProdexContextCommandOutputInput(Copyable):
     var operation: Int64
-    var max_path_entries: Int64
+    var max_path_entries: UInt64
     var input: ProdexRichStringView
 
 
@@ -317,11 +317,12 @@ def context_command_output_add_short_item(
 ) -> Bool:
     var path = context_text_trim_bounds(ptr, path_start, path_end)
     var item_start = scratch[].written
-    if (
+    if status != 63 and (
         not context_command_output_put_byte(scratch, status)
         or not context_command_output_put_byte(scratch, 32)
-        or not context_command_output_put_range(scratch, ptr, path[0], path[1])
     ):
+        return False
+    if not context_command_output_put_range(scratch, ptr, path[0], path[1]):
         return False
     return context_command_output_record_item(
         records,

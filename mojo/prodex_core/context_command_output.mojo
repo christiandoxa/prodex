@@ -45,6 +45,50 @@ from context_text import (
 from rich_text import rich_view_ptr, rich_view_valid
 
 
+@export("prodex_mojo_context_command_output_size_v1")
+def prodex_mojo_context_command_output_size_v1(
+    abi_version: Int64,
+    input_address: UInt,
+    meaningful_lines_address: UInt,
+    meaningful_bytes_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != PRODEX_RICH_ABI_VERSION:
+        return CONTEXT_COMMAND_OUTPUT_STATUS_ABI
+    if (
+        input_address == 0
+        or meaningful_lines_address == 0
+        or meaningful_bytes_address == 0
+    ):
+        return CONTEXT_COMMAND_OUTPUT_STATUS_INVALID
+    var input = Pointer[
+        mut=False, ProdexContextCommandOutputInput, ImmUntrackedOrigin
+    ](unsafe_from_address=Int(input_address))
+    var meaningful_lines = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(meaningful_lines_address)
+    )
+    var meaningful_bytes = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(meaningful_bytes_address)
+    )
+    meaningful_lines[] = 0
+    meaningful_bytes[] = 0
+    var value = input[].copy()
+    if value.operation != CONTEXT_COMMAND_OUTPUT_GIT_STATUS:
+        return CONTEXT_COMMAND_OUTPUT_STATUS_INVALID
+    if not rich_view_valid(value.input, CONTEXT_COMMAND_OUTPUT_MAX_BYTES):
+        return CONTEXT_COMMAND_OUTPUT_STATUS_UTF8
+    var ptr = rich_view_ptr(value.input)
+    var length = Int64(value.input.len)
+    var cursor: Int64 = 0
+    while cursor < length:
+        var line = context_command_output_next_line(ptr, cursor, length)
+        var bounds = context_text_trim_bounds(ptr, cursor, line[0])
+        if bounds[0] < bounds[1]:
+            meaningful_lines[] += 1
+            meaningful_bytes[] += bounds[1] - bounds[0]
+        cursor = line[1]
+    return CONTEXT_COMMAND_OUTPUT_STATUS_OK
+
+
 def context_command_output_add_short_status(
     records: Pointer[mut=True, ProdexContextCommandOutputRecord, _],
     record_capacity: Int64,
@@ -385,11 +429,11 @@ def context_command_output_git_status(
         writer, StringSlice("clean: true\n")
     ):
         return CONTEXT_COMMAND_OUTPUT_STATUS_CAPACITY
-    var path_entries = max(input.max_path_entries, 1)
+    var path_entries = max(input.max_path_entries, UInt64(1))
     var category_limit = path_entries / 6
     if path_entries % 6 != 0:
         category_limit += 1
-    category_limit = max(category_limit, 4)
+    category_limit = min(max(category_limit, UInt64(4)), UInt64(record_count))
     for category in range(CONTEXT_STATUS_STAGED, CONTEXT_STATUS_OTHER + 1):
         if not context_command_output_write_category(
             writer,
@@ -397,7 +441,7 @@ def context_command_output_git_status(
             record_count,
             scratch_writer[].output,
             category,
-            category_limit,
+            Int64(category_limit),
         ):
             return CONTEXT_COMMAND_OUTPUT_STATUS_CAPACITY
     return CONTEXT_COMMAND_OUTPUT_STATUS_OK
@@ -453,10 +497,7 @@ def prodex_mojo_context_command_output_v1(
     )
     written[] = 0
     var value = input[].copy()
-    if (
-        value.operation != CONTEXT_COMMAND_OUTPUT_GIT_STATUS
-        or value.max_path_entries < 0
-    ):
+    if value.operation != CONTEXT_COMMAND_OUTPUT_GIT_STATUS:
         return CONTEXT_COMMAND_OUTPUT_STATUS_INVALID
     if not rich_view_valid(value.input, CONTEXT_COMMAND_OUTPUT_MAX_BYTES):
         return CONTEXT_COMMAND_OUTPUT_STATUS_UTF8

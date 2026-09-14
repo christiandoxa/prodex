@@ -1,9 +1,7 @@
 use super::{
-    MojoError, RICH_ABI_VERSION, RichStringView, ensure_rich_abi, mojo_mut_pointer_address,
-    mojo_pointer_address, view,
+    MojoError, RICH_ABI_VERSION, RichStringView, ensure_rich_abi, hash_capacity,
+    mojo_mut_pointer_address, mojo_pointer_address, view,
 };
-
-const CONTEXT_COMMAND_OUTPUT_MAX_BYTES: usize = 4 * 1024 * 1024;
 
 /// Complete deterministic command-output formatter selected at the Rust host boundary.
 #[repr(i64)]
@@ -16,7 +14,7 @@ pub enum ContextCommandOutputOperation {
 #[derive(Debug, Clone, Copy)]
 struct ContextCommandOutputFfiInput {
     operation: i64,
-    max_path_entries: i64,
+    max_path_entries: u64,
     input: RichStringView,
 }
 
@@ -34,6 +32,13 @@ struct ContextCommandOutputRecord {
 const _: () = assert!(std::mem::size_of::<ContextCommandOutputRecord>() == 32);
 
 unsafe extern "C" {
+    fn prodex_mojo_context_command_output_size_v1(
+        abi_version: i64,
+        input: u64,
+        meaningful_lines: u64,
+        meaningful_bytes: u64,
+    ) -> i64;
+
     fn prodex_mojo_context_command_output_v1(
         abi_version: i64,
         input: u64,
@@ -49,6 +54,69 @@ unsafe extern "C" {
     ) -> i64;
 }
 
+#[derive(Debug, Clone, Copy)]
+struct ContextCommandOutputAllocation {
+    output: usize,
+    records: usize,
+    scratch: usize,
+    hash_slots: usize,
+}
+
+fn allocation_from_counts(
+    meaningful_lines: usize,
+    meaningful_bytes: usize,
+) -> Result<ContextCommandOutputAllocation, MojoError> {
+    let records = meaningful_lines
+        .checked_mul(2)
+        .and_then(|value| value.checked_add(1))
+        .ok_or(MojoError::InvalidInput)?;
+    let scratch = meaningful_bytes
+        .checked_mul(2)
+        .and_then(|value| value.checked_add(1))
+        .ok_or(MojoError::InvalidInput)?;
+    let output = scratch
+        .checked_add(records.checked_mul(2).ok_or(MojoError::InvalidInput)?)
+        .and_then(|value| value.checked_add(1024))
+        .ok_or(MojoError::InvalidInput)?;
+    Ok(ContextCommandOutputAllocation {
+        output,
+        records,
+        scratch,
+        hash_slots: hash_capacity(records)?,
+    })
+}
+
+fn allocation_plan(
+    input: &ContextCommandOutputFfiInput,
+) -> Result<ContextCommandOutputAllocation, MojoError> {
+    let mut meaningful_lines = 0_i64;
+    let mut meaningful_bytes = 0_i64;
+    let status = unsafe {
+        prodex_mojo_context_command_output_size_v1(
+            RICH_ABI_VERSION,
+            mojo_pointer_address(input),
+            mojo_mut_pointer_address(&mut meaningful_lines),
+            mojo_mut_pointer_address(&mut meaningful_bytes),
+        )
+    };
+    if status != 0 {
+        return Err(super::status_error(status, 10, 1, 0, 0));
+    }
+    allocation_from_counts(
+        usize::try_from(meaningful_lines).map_err(|_| MojoError::InvalidOutput)?,
+        usize::try_from(meaningful_bytes).map_err(|_| MojoError::InvalidOutput)?,
+    )
+}
+
+fn zeroed<T: Clone + Default>(len: usize) -> Result<Vec<T>, MojoError> {
+    let mut values = Vec::new();
+    values
+        .try_reserve_exact(len)
+        .map_err(|_| MojoError::InvalidInput)?;
+    values.resize(len, T::default());
+    Ok(values)
+}
+
 /// Formats one normalized command output in Mojo.
 ///
 /// A successful `None` means the selected formatter found no matching structure and the
@@ -59,37 +127,19 @@ pub fn context_command_output(
     max_path_entries: usize,
 ) -> Result<Option<String>, MojoError> {
     ensure_rich_abi()?;
-    if input.len() > CONTEXT_COMMAND_OUTPUT_MAX_BYTES {
+    if input.len() > i64::MAX as usize {
         return Err(MojoError::InvalidInput);
     }
-    // ponytail: fixed 2x writer headroom; add a sizing pass if a future formatter exceeds it.
-    let capacity = input
-        .len()
-        .checked_mul(2)
-        .and_then(|value| value.checked_add(4096))
-        .ok_or(MojoError::InvalidInput)?;
     let ffi_input = ContextCommandOutputFfiInput {
         operation: operation as i64,
-        max_path_entries: i64::try_from(max_path_entries).unwrap_or(i64::MAX),
+        max_path_entries: max_path_entries as u64,
         input: view(input),
     };
-    let line_count = if input.is_empty() {
-        0
-    } else {
-        input.trim_end_matches('\n').split('\n').count()
-    };
-    let record_capacity = line_count
-        .checked_mul(2)
-        .and_then(|value| value.checked_add(1))
-        .ok_or(MojoError::InvalidInput)?;
-    let hash_capacity = record_capacity
-        .checked_mul(2)
-        .and_then(usize::checked_next_power_of_two)
-        .ok_or(MojoError::InvalidInput)?;
-    let mut output = vec![0_u8; capacity];
-    let mut records = vec![ContextCommandOutputRecord::default(); record_capacity];
-    let mut scratch = vec![0_u8; capacity];
-    let mut hash_slots = vec![0_i64; hash_capacity];
+    let allocation = allocation_plan(&ffi_input)?;
+    let mut output = zeroed::<u8>(allocation.output)?;
+    let mut records = zeroed::<ContextCommandOutputRecord>(allocation.records)?;
+    let mut scratch = zeroed::<u8>(allocation.scratch)?;
+    let mut hash_slots = zeroed::<i64>(allocation.hash_slots)?;
     let mut written = 0_i64;
     let status = unsafe {
         prodex_mojo_context_command_output_v1(
@@ -120,4 +170,85 @@ pub fn context_command_output(
     String::from_utf8(output)
         .map(Some)
         .map_err(|_| MojoError::InvalidOutput)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn sizing_keeps_blank_heavy_inputs_bounded() {
+        let input = "\n".repeat(64 * 1024 * 1024 - 1) + "x";
+        let ffi_input = ContextCommandOutputFfiInput {
+            operation: ContextCommandOutputOperation::GitStatus as i64,
+            max_path_entries: 120,
+            input: view(&input),
+        };
+        let allocation = allocation_plan(&ffi_input).unwrap();
+        assert_eq!(allocation.records, 3);
+        assert_eq!(allocation.hash_slots, 8);
+        assert!(allocation.output + allocation.scratch < 2048);
+        assert_eq!(
+            context_command_output(ContextCommandOutputOperation::GitStatus, &input, 120).unwrap(),
+            Some("sum: git status\nother (1): x\n".to_string())
+        );
+    }
+
+    #[test]
+    fn sizing_arithmetic_rejects_unrepresentable_capacity() {
+        assert_eq!(
+            allocation_from_counts(usize::MAX, usize::MAX).unwrap_err(),
+            MojoError::InvalidInput
+        );
+    }
+
+    #[test]
+    fn raw_boundary_rejects_invalid_inputs_and_capacity() {
+        let invalid = [0xff_u8];
+        let mut input = ContextCommandOutputFfiInput {
+            operation: ContextCommandOutputOperation::GitStatus as i64,
+            max_path_entries: 120,
+            input: RichStringView {
+                ptr: mojo_pointer_address(invalid.as_ptr()),
+                len: 1,
+            },
+        };
+        let mut lines = 0_i64;
+        let mut bytes = 0_i64;
+        let mut size = |abi, input_address| unsafe {
+            prodex_mojo_context_command_output_size_v1(
+                abi,
+                input_address,
+                mojo_mut_pointer_address(&mut lines),
+                mojo_mut_pointer_address(&mut bytes),
+            )
+        };
+        assert_eq!(size(RICH_ABI_VERSION + 1, mojo_pointer_address(&input)), 4);
+        assert_eq!(size(RICH_ABI_VERSION, 0), 1);
+        assert_eq!(size(RICH_ABI_VERSION, mojo_pointer_address(&input)), 2);
+
+        input.input = view("## main\n?? one\n");
+        let allocation = allocation_plan(&input).unwrap();
+        let mut output = [0_u8; 1];
+        let mut records = zeroed::<ContextCommandOutputRecord>(allocation.records).unwrap();
+        let mut scratch = zeroed::<u8>(allocation.scratch).unwrap();
+        let mut hash_slots = zeroed::<i64>(allocation.hash_slots).unwrap();
+        let mut written = 0_i64;
+        let status = unsafe {
+            prodex_mojo_context_command_output_v1(
+                RICH_ABI_VERSION,
+                mojo_pointer_address(&input),
+                mojo_mut_pointer_address(output.as_mut_ptr()),
+                1,
+                mojo_mut_pointer_address(records.as_mut_ptr()),
+                records.len() as i64,
+                mojo_mut_pointer_address(scratch.as_mut_ptr()),
+                scratch.len() as i64,
+                mojo_mut_pointer_address(hash_slots.as_mut_ptr()),
+                hash_slots.len() as i64,
+                mojo_mut_pointer_address(&mut written),
+            )
+        };
+        assert_eq!(status, 3);
+    }
 }
