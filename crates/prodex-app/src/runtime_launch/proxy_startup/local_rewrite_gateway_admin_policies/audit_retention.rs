@@ -541,11 +541,8 @@ fn audit_retention_cutoff(
 ) -> Result<u64, tiny_http::ResponseBox> {
     #[cfg(feature = "mojo-core")]
     {
-        return prodex_mojo_core::policy::gateway_admin_retention_cutoff(
-            now_unix_ms,
-            retention_days,
-        )
-        .map_err(|_| invalid_request());
+        prodex_mojo_core::policy::gateway_admin_retention_cutoff(now_unix_ms, retention_days)
+            .map_err(|_| invalid_request())
     }
 
     #[cfg(not(feature = "mojo-core"))]
@@ -560,8 +557,8 @@ fn audit_retention_protected_count(
 ) -> Result<usize, tiny_http::ResponseBox> {
     #[cfg(feature = "mojo-core")]
     {
-        return prodex_mojo_core::policy::gateway_admin_purge_protected_count(requested, purged)
-            .map_err(|_| invalid_request());
+        prodex_mojo_core::policy::gateway_admin_purge_protected_count(requested, purged)
+            .map_err(|_| invalid_request())
     }
 
     #[cfg(not(feature = "mojo-core"))]

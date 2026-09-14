@@ -53,8 +53,7 @@ impl UsageAmount {
                 ],
             )
             .ok()?;
-            return (result.result_code == 0)
-                .then(|| Self::new(result.values[0], result.values[1]));
+            (result.result_code == 0).then(|| Self::new(result.values[0], result.values[1]))
         }
 
         #[cfg(not(feature = "mojo"))]
@@ -77,7 +76,7 @@ impl UsageAmount {
                 ],
             )
             .expect("Mojo accounting subtraction returned invalid output");
-            return Self::new(result.values[0], result.values[1]);
+            Self::new(result.values[0], result.values[1])
         }
 
         #[cfg(not(feature = "mojo"))]
@@ -100,7 +99,7 @@ impl UsageAmount {
                 ],
             )
             .expect("Mojo accounting comparison returned invalid output");
-            return result.result_code == 0 && result.values[0] == 1;
+            result.result_code == 0 && result.values[0] == 1
         }
 
         #[cfg(not(feature = "mojo"))]
@@ -145,7 +144,7 @@ impl BudgetSnapshot {
                 ],
             )
             .expect("Mojo accounting availability returned invalid output");
-            return UsageAmount::new(result.values[0], result.values[1]);
+            UsageAmount::new(result.values[0], result.values[1])
         }
 
         #[cfg(not(feature = "mojo"))]

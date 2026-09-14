@@ -1737,13 +1737,13 @@ fn gateway_admin_audit_export_limit(
 ) -> Result<u16, tiny_http::ResponseBox> {
     #[cfg(feature = "mojo-core")]
     {
-        return prodex_mojo_core::policy::plan_gateway_admin_limit(requested_limit).map_err(|_| {
+        prodex_mojo_core::policy::plan_gateway_admin_limit(requested_limit).map_err(|_| {
             build_runtime_proxy_json_error_response(
                 400,
                 "governance_audit_export_invalid",
                 "audit export limit must be between 1 and 1000",
             )
-        });
+        })
     }
 
     #[cfg(not(feature = "mojo-core"))]
