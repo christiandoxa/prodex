@@ -135,13 +135,13 @@ pub(crate) fn translate_chat_stream_event_to_responses(
             Ok(body) => body,
             Err(error) => panic!("Mojo OpenAI compatibility stream event failed: {error:?}"),
         };
-        return ProviderTransformResult::lossless(
+        ProviderTransformResult::lossless(
             provider,
             input.endpoint,
             ProviderWireFormat::OpenAiChatCompletions,
             ProviderWireFormat::OpenAiResponses,
             body,
-        );
+        )
     }
 
     #[cfg(not(feature = "mojo"))]
