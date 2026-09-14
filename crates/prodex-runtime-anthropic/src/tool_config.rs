@@ -144,7 +144,33 @@ pub fn runtime_proxy_anthropic_unversioned_tool_type(tool_type: &str) -> String 
     }
 }
 
+#[cfg(feature = "mojo")]
 pub fn runtime_proxy_anthropic_builtin_server_tool_name(name: &str) -> Option<&'static str> {
+    let mut input = prodex_mojo_core::rich::RuntimeAnthropicKernelInput::new(
+        prodex_mojo_core::rich::RuntimeAnthropicKernelOperation::ServerToolNameKind,
+    );
+    input.name = Some(name);
+    match crate::mojo::bytes(input).as_slice() {
+        b"1" => Some("web_search"),
+        b"2" => Some("web_fetch"),
+        b"3" => Some("code_execution"),
+        b"4" => Some("bash_code_execution"),
+        b"5" => Some("text_editor_code_execution"),
+        b"6" => Some("tool_search_tool_regex"),
+        b"7" => Some("tool_search_tool_bm25"),
+        _ => None,
+    }
+}
+
+#[cfg(not(feature = "mojo"))]
+pub fn runtime_proxy_anthropic_builtin_server_tool_name(name: &str) -> Option<&'static str> {
+    runtime_proxy_anthropic_builtin_server_tool_name_rust(name)
+}
+
+#[cfg(any(not(feature = "mojo"), test))]
+pub(crate) fn runtime_proxy_anthropic_builtin_server_tool_name_rust(
+    name: &str,
+) -> Option<&'static str> {
     let normalized = name
         .trim()
         .chars()
@@ -594,4 +620,25 @@ pub fn runtime_proxy_anthropic_is_special_input_item_block_type(block_type: &str
     runtime_proxy_anthropic_is_tool_use_block_type(block_type)
         || runtime_proxy_anthropic_is_tool_result_block_type(block_type)
         || block_type == "mcp_approval_response"
+}
+
+#[cfg(all(test, feature = "mojo"))]
+#[test]
+fn mojo_server_tool_names_match_rust_oracle() {
+    for name in [
+        " web.search ",
+        "WEB_FETCH",
+        "bash-code_execution",
+        "text editor/code execution",
+        "tool.search-tool-regex",
+        "tool_search_tool_bm25",
+        "unknown",
+        "🦀web_search",
+    ] {
+        assert_eq!(
+            runtime_proxy_anthropic_builtin_server_tool_name(name),
+            runtime_proxy_anthropic_builtin_server_tool_name_rust(name),
+            "{name:?}"
+        );
+    }
 }

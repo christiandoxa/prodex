@@ -2,6 +2,54 @@ use super::*;
 use std::cell::Cell;
 use std::io::{Cursor, Read};
 
+#[cfg(feature = "mojo")]
+#[test]
+fn mojo_server_tool_usage_and_suffix_accounting() {
+    let messages = vec![
+        serde_json::json!({"role":"assistant","content":[{"type":"server_tool_use","name":"web_fetch"}]}),
+        serde_json::json!({"role":"user","content":"break"}),
+        serde_json::json!({"role":"assistant","content":[{"type":"mcp_tool_use","name":"CODE.Execution"}]}),
+        serde_json::json!({"role":"user","content":[{"type":"tool_result"}]}),
+    ];
+    assert_eq!(
+        runtime_proxy_anthropic_carried_server_tool_usage(&messages),
+        RuntimeAnthropicServerToolUsage {
+            code_execution_requests: 1,
+            ..RuntimeAnthropicServerToolUsage::default()
+        }
+    );
+    assert_eq!(
+        runtime_proxy_anthropic_tool_use_server_tool_usage(
+            &serde_json::json!({"type":"server_tool_use","name":"Web Search"})
+        ),
+        RuntimeAnthropicServerToolUsage {
+            web_search_requests: 1,
+            ..RuntimeAnthropicServerToolUsage::default()
+        }
+    );
+}
+
+#[cfg(feature = "mojo")]
+#[test]
+fn mojo_server_tool_registry_and_chain_detection() {
+    let messages = vec![
+        serde_json::json!({"role":"assistant","content":[
+            {"type":"server_tool_use","name":" Web Search "},
+            {"type":"mcp_tool_use","name":"custom-tool"},
+            {"type":"tool_use","name":"ignored"}
+        ]}),
+        serde_json::json!({"role":"user","content":[{"type":"web_fetch_tool_result"}]}),
+    ];
+    assert!(runtime_proxy_anthropic_message_has_tool_chain_blocks(
+        &messages[1]
+    ));
+    let mut tools = RuntimeAnthropicServerTools::default();
+    runtime_proxy_anthropic_register_server_tools_from_messages(&messages, &mut tools);
+    assert_eq!(tools.aliases["Web Search"].response_name, "web_search");
+    assert_eq!(tools.aliases["custom-tool"].response_name, "custom-tool");
+    assert!(!tools.aliases.contains_key("ignored"));
+}
+
 fn test_messages_request() -> RuntimeAnthropicMessagesRequest {
     let mut server_tools = RuntimeAnthropicServerTools::default();
     server_tools.register("web_search", "web_search");
