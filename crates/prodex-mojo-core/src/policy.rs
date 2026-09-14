@@ -487,6 +487,15 @@ pub struct GovernanceClassificationResult {
     pub reason_bits: u8,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RateLimitPlan {
+    pub capacity_allows: bool,
+    pub reset_unix_ms: u64,
+    pub remaining: u64,
+    pub retry_after_seconds: u64,
+    pub remaining_after_admission: u64,
+}
+
 #[repr(C)]
 #[derive(Debug, Clone, Copy)]
 struct GovernanceObligationPredicateInput {
@@ -497,6 +506,16 @@ struct GovernanceObligationPredicateInput {
 }
 
 unsafe extern "C" {
+    fn prodex_mojo_rate_limit_plan_v1(
+        abi_version: i64,
+        max_requests: u64,
+        window_seconds: u64,
+        used_requests: u64,
+        current_reset_unix_ms: u64,
+        requested_requests: u64,
+        now_unix_ms: u64,
+        output: u64,
+    ) -> i64;
     fn prodex_mojo_governance_classification_v1(
         abi_version: i64,
         base_classification: i64,
@@ -544,6 +563,43 @@ unsafe extern "C" {
         last_known_good_invalidated: i64,
         output: u64,
     ) -> i64;
+}
+
+pub fn rate_limit_plan(
+    max_requests: u64,
+    window_seconds: u64,
+    used_requests: u64,
+    current_reset_unix_ms: u64,
+    requested_requests: u64,
+    now_unix_ms: u64,
+) -> Result<RateLimitPlan, crate::MojoError> {
+    let mut output = [0_u64; 5];
+    let status = unsafe {
+        prodex_mojo_rate_limit_plan_v1(
+            1,
+            max_requests,
+            window_seconds,
+            used_requests,
+            current_reset_unix_ms,
+            requested_requests,
+            now_unix_ms,
+            output.as_mut_ptr() as u64,
+        )
+    };
+    if status != 0 || output[0] > 2 {
+        return Err(match status {
+            1 | 2 => crate::MojoError::InvalidInput,
+            4 => crate::MojoError::AbiMismatch,
+            _ => crate::MojoError::InvalidOutput,
+        });
+    }
+    Ok(RateLimitPlan {
+        capacity_allows: output[0] == 2,
+        reset_unix_ms: output[1],
+        remaining: output[2],
+        retry_after_seconds: output[3],
+        remaining_after_admission: output[4],
+    })
 }
 
 pub fn governance_classification(

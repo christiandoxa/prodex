@@ -106,6 +106,49 @@ def prodex_mojo_migration_step_order_v1(
     return GATEWAY_ADMIN_POLICY_STATUS_OK
 
 
+@export("prodex_mojo_rate_limit_plan_v1")
+def prodex_mojo_rate_limit_plan_v1(
+    abi_version: Int64,
+    max_requests: UInt64,
+    window_seconds: UInt64,
+    used_requests: UInt64,
+    current_reset_unix_ms: UInt64,
+    requested_requests: UInt64,
+    now_unix_ms: UInt64,
+    output_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != 1 or output_address == 0:
+        return GATEWAY_ADMIN_POLICY_STATUS_ABI
+    var output = Pointer[mut=True, UInt64, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    output[0] = 0
+    output[1] = current_reset_unix_ms
+    output[2] = 0
+    output[3] = 0
+    output[4] = 0
+    if max_requests == 0 or window_seconds == 0 or window_seconds > UINT64_MAX // 1_000:
+        return GATEWAY_ADMIN_POLICY_STATUS_OK
+    var reset_unix_ms = current_reset_unix_ms
+    var used = used_requests
+    if now_unix_ms >= current_reset_unix_ms:
+        var window_ms = window_seconds * 1_000
+        reset_unix_ms = UINT64_MAX if now_unix_ms > UINT64_MAX - window_ms else now_unix_ms + window_ms
+        used = 0
+    var remaining = max_requests - used if max_requests > used else 0
+    var retry_millis = reset_unix_ms - now_unix_ms if reset_unix_ms > now_unix_ms else 0
+    var rounded_retry = UINT64_MAX if retry_millis > UINT64_MAX - 999 else retry_millis + 999
+    output[1] = reset_unix_ms
+    output[2] = remaining
+    output[3] = rounded_retry // 1_000
+    if requested_requests == 0 or requested_requests > remaining:
+        output[0] = 1
+    else:
+        output[0] = 2
+        output[4] = remaining - requested_requests
+    return GATEWAY_ADMIN_POLICY_STATUS_OK
+
+
 @export("prodex_mojo_audit_decision_v1")
 def prodex_mojo_audit_decision_v1(
     abi_version: Int64,
