@@ -165,6 +165,32 @@ def prodex_mojo_governance_rule_matches_v1(
     return RICH_STATUS_OK
 
 
+@export("prodex_mojo_governance_required_attributes_v1")
+def prodex_mojo_governance_required_attributes_v1(
+    abi_version: Int64,
+    required_masks_address: UInt,
+    rule_count: Int64,
+    available_mask: UInt64,
+    output_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != PRODEX_RICH_ABI_VERSION:
+        return RICH_STATUS_ABI
+    if output_address == 0 or rule_count < 0 or rule_count > RICH_MAX_RECORDS or (rule_count > 0 and required_masks_address == 0):
+        return RICH_STATUS_INVALID
+    var output = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    output[] = 0
+    var required_masks = Pointer[mut=False, UInt64, ImmUntrackedOrigin](
+        unsafe_from_address=Int(required_masks_address)
+    )
+    for index in range(rule_count):
+        if required_masks[unsafe_offset=index] & ~available_mask != 0:
+            return RICH_STATUS_OK
+    output[] = 1
+    return RICH_STATUS_OK
+
+
 @export("prodex_mojo_governance_predicates_v1")
 def prodex_mojo_governance_predicates_v1(
     abi_version: Int64,

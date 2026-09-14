@@ -90,6 +90,13 @@ unsafe extern "C" {
         selector_count: i64,
         output: u64,
     ) -> i64;
+    fn prodex_mojo_governance_required_attributes_v1(
+        abi_version: i64,
+        required_masks: u64,
+        rule_count: i64,
+        available_mask: u64,
+        output: u64,
+    ) -> i64;
 }
 
 fn policy_string_view(value: Option<&str>) -> PolicyStringView {
@@ -217,6 +224,34 @@ pub fn governance_policy_rule_matches(
             i64::try_from(values.len()).map_err(|_| crate::MojoError::InvalidInput)?,
             selectors.as_ptr() as u64,
             i64::try_from(selectors.len()).map_err(|_| crate::MojoError::InvalidInput)?,
+            (&mut output as *mut i64) as u64,
+        )
+    };
+    if status != 0 {
+        return Err(match status {
+            1 | 2 => crate::MojoError::InvalidInput,
+            4 => crate::MojoError::AbiMismatch,
+            _ => crate::MojoError::InvalidOutput,
+        });
+    }
+    match output {
+        0 => Ok(false),
+        1 => Ok(true),
+        _ => Err(crate::MojoError::InvalidOutput),
+    }
+}
+
+pub fn governance_required_attributes_present(
+    required_masks: &[u64],
+    available_mask: u64,
+) -> Result<bool, crate::MojoError> {
+    let mut output = -1_i64;
+    let status = unsafe {
+        prodex_mojo_governance_required_attributes_v1(
+            6,
+            required_masks.as_ptr() as u64,
+            i64::try_from(required_masks.len()).map_err(|_| crate::MojoError::InvalidInput)?,
+            available_mask,
             (&mut output as *mut i64) as u64,
         )
     };
