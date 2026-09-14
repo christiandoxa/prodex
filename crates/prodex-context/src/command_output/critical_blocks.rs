@@ -1,5 +1,7 @@
 use super::*;
+#[cfg(not(feature = "mojo"))]
 use std::iter::Peekable;
+#[cfg(not(feature = "mojo"))]
 use std::str::Chars;
 
 pub(super) fn is_node_stack_error_line(line: &str) -> bool {
@@ -569,6 +571,13 @@ pub(super) fn finalize_compacted_command_output(
     }
 }
 
+#[cfg(feature = "mojo")]
+pub(crate) fn normalize_command_output(input: &str) -> String {
+    prodex_mojo_core::context::normalize_command_output(input)
+        .unwrap_or_else(|error| panic!("Mojo command-output normalization failed: {error:?}"))
+}
+
+#[cfg(not(feature = "mojo"))]
 pub(crate) fn normalize_command_output(input: &str) -> String {
     let stripped = strip_ansi_codes(input);
     let mut lines = stripped
@@ -581,6 +590,7 @@ pub(crate) fn normalize_command_output(input: &str) -> String {
     lines_to_text(lines)
 }
 
+#[cfg(not(feature = "mojo"))]
 pub(super) fn strip_ansi_codes(input: &str) -> String {
     let mut output = String::with_capacity(input.len());
     let mut chars = input.chars().peekable();
@@ -598,6 +608,7 @@ pub(super) fn strip_ansi_codes(input: &str) -> String {
     output
 }
 
+#[cfg(not(feature = "mojo"))]
 fn skip_ansi_escape(chars: &mut Peekable<Chars<'_>>) {
     match chars.peek().copied() {
         Some('[') => skip_csi_escape(chars),
@@ -609,6 +620,7 @@ fn skip_ansi_escape(chars: &mut Peekable<Chars<'_>>) {
     }
 }
 
+#[cfg(not(feature = "mojo"))]
 fn skip_csi_escape(chars: &mut Peekable<Chars<'_>>) {
     chars.next();
     for code in chars.by_ref() {
@@ -618,6 +630,7 @@ fn skip_csi_escape(chars: &mut Peekable<Chars<'_>>) {
     }
 }
 
+#[cfg(not(feature = "mojo"))]
 fn skip_osc_escape(chars: &mut Peekable<Chars<'_>>) {
     chars.next();
     let mut previous = '\0';

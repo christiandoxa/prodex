@@ -71,6 +71,13 @@ unsafe extern "C" {
         metadata: *const ProdexStringView,
         output_kind: *mut i64,
     ) -> i64;
+    fn prodex_context_normalize_command_output_v1(
+        abi_version: i64,
+        input: *const ProdexStringView,
+        output: *mut u8,
+        output_capacity: i64,
+        written: *mut i64,
+    ) -> i64;
     fn prodex_context_classify_ci_line_v1(
         abi_version: i64,
         line: *const ProdexStringView,
@@ -243,6 +250,39 @@ pub fn classify_command_metadata(metadata: &str) -> Result<Option<i64>, crate::M
         1 | 2 => Err(crate::MojoError::InvalidInput),
         _ => Err(crate::MojoError::InvalidOutput),
     }
+}
+
+pub fn normalize_command_output(input: &str) -> Result<String, crate::MojoError> {
+    if input.len() > CONTEXT_GIT_SEARCH_MAX_BYTES {
+        return Err(crate::MojoError::InvalidInput);
+    }
+    if !text_abi_is_ready() {
+        return Err(crate::MojoError::AbiMismatch);
+    }
+    let view = ProdexStringView {
+        ptr: input.as_ptr(),
+        len: input.len(),
+    };
+    let mut output = vec![0_u8; input.len()];
+    let mut written = 0_i64;
+    let status = unsafe {
+        prodex_context_normalize_command_output_v1(
+            CONTEXT_TEXT_ABI_VERSION,
+            &view,
+            output.as_mut_ptr(),
+            i64::try_from(output.len()).map_err(|_| crate::MojoError::InvalidInput)?,
+            &mut written,
+        )
+    };
+    if status != 0 {
+        return Err(match status {
+            1 => crate::MojoError::InvalidInput,
+            3 => crate::MojoError::Capacity,
+            _ => crate::MojoError::InvalidOutput,
+        });
+    }
+    output.truncate(usize::try_from(written).map_err(|_| crate::MojoError::InvalidOutput)?);
+    String::from_utf8(output).map_err(|_| crate::MojoError::InvalidOutput)
 }
 
 /// Classifies deterministic CI log metadata and returns byte spans into `line`.

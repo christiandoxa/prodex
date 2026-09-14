@@ -3913,6 +3913,94 @@ def prodex_context_classify_command_output_line_v1(
     return 0
 
 
+def context_text_skip_ansi_escape(
+    ptr: Pointer[mut=False, UInt8, _], index: Int64, length: Int64
+) -> Int64:
+    if index >= length:
+        return index
+    var kind = ptr[unsafe_offset=index]
+    if kind == 91 or kind == 93:
+        var cursor = index + 1
+        if kind == 91:
+            while cursor < length:
+                var value = ptr[unsafe_offset=cursor]
+                cursor += 1
+                if value >= 64 and value <= 126:
+                    break
+        else:
+            var previous: UInt8 = 0
+            while cursor < length:
+                var value = ptr[unsafe_offset=cursor]
+                cursor += 1
+                if value == 7 or (previous == 27 and value == 92):
+                    break
+                previous = value
+        return cursor
+    return index + 1
+
+
+@export("prodex_context_normalize_command_output_v1")
+def prodex_context_normalize_command_output_v1(
+    abi_version: Int64,
+    input: Pointer[mut=False, ProdexStringView, _],
+    output: Pointer[mut=True, UInt8, _],
+    output_capacity: Int64,
+    written: Pointer[mut=True, Int64, _],
+) abi("C") -> Int64:
+    written[] = 0
+    if abi_version != CONTEXT_TEXT_ABI_VERSION or output_capacity < 0:
+        return 1
+    var view = input[].copy()
+    if not context_text_is_valid_utf8(view.ptr.unsafe_value(), Int64(view.len)):
+        return 1
+    var ptr = view.ptr.unsafe_value()
+    var length = Int64(view.len)
+    var cursor: Int64 = 0
+    var output_length: Int64 = 0
+    while cursor < length:
+        var value = ptr[unsafe_offset=cursor]
+        if value == 27:
+            cursor = context_text_skip_ansi_escape(ptr, cursor + 1, length)
+        else:
+            if output_length >= output_capacity:
+                return 3
+            if value == 13:
+                if cursor + 1 >= length or ptr[unsafe_offset=cursor + 1] != 10:
+                    output[unsafe_offset=output_length] = 10
+                    output_length += 1
+                cursor += 1
+            else:
+                output[unsafe_offset=output_length] = value
+                output_length += 1
+                cursor += 1
+
+    var read: Int64 = 0
+    var compacted: Int64 = 0
+    while read < output_length:
+        var line_end = read
+        while line_end < output_length and output[unsafe_offset=line_end] != 10:
+            line_end += 1
+        var trim = read
+        var cursor = read
+        while cursor < line_end:
+            var whitespace = context_text_whitespace_width(output, cursor, line_end)
+            if whitespace > 0:
+                cursor += whitespace
+            else:
+                trim = cursor + context_text_codepoint_width(output[unsafe_offset=cursor])
+                cursor = trim
+        for index in range(read, trim):
+            output[unsafe_offset=compacted] = output[unsafe_offset=index]
+            compacted += 1
+        output[unsafe_offset=compacted] = 10
+        compacted += 1
+        read = line_end + 1
+    while compacted > 1 and output[unsafe_offset=compacted - 1] == 10 and output[unsafe_offset=compacted - 2] == 10:
+        compacted -= 1
+    written[] = compacted
+    return 0
+
+
 
 @export("prodex_context_classify_git_search_line_v1")
 def prodex_context_classify_git_search_line_v1(
