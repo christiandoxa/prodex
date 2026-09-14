@@ -55,6 +55,17 @@ pub struct DeepSeekProviderCoreStreamChoiceDelta {
     pub tool_calls: Vec<Value>,
 }
 
+#[cfg(feature = "mojo")]
+fn deepseek_provider_core_stream_projection(
+    operation: DeepSeekKernelOperation,
+    value: &Value,
+) -> Value {
+    let source = serde_json::to_string(value).expect("DeepSeek stream source serializes");
+    let mut input = DeepSeekKernelInput::new(operation);
+    input.input = Some(&source);
+    super::deepseek_mojo_value(input)
+}
+
 pub fn deepseek_provider_core_response_completed_event(
     sequence_number: u64,
     created_at: u64,
@@ -166,27 +177,61 @@ pub fn deepseek_provider_core_validate_stream_tool_call_delta(
 pub fn deepseek_provider_core_stream_tool_call_delta(
     value: &Value,
 ) -> DeepSeekProviderCoreStreamToolCallDelta {
-    let index = value
-        .get("index")
-        .and_then(Value::as_u64)
-        .and_then(|index| usize::try_from(index).ok())
-        .unwrap_or(0);
-    let function = value.get("function");
-    DeepSeekProviderCoreStreamToolCallDelta {
-        index,
-        call_id: value.get("id").and_then(Value::as_str).map(str::to_string),
-        name: function
-            .and_then(|function| function.get("name"))
-            .and_then(Value::as_str)
-            .map(str::to_string),
-        argument_delta: function
-            .and_then(|function| function.get("arguments"))
-            .and_then(Value::as_str)
-            .filter(|arguments| !arguments.is_empty())
-            .map(str::to_string),
-        thought_signature: crate::bridge::provider_core_chat_compatible_tool_call_thought_signature(
+    #[cfg(feature = "mojo")]
+    {
+        let projected = deepseek_provider_core_stream_projection(
+            DeepSeekKernelOperation::StreamToolCallDelta,
             value,
-        ),
+        );
+        return DeepSeekProviderCoreStreamToolCallDelta {
+            index: projected
+                .get("index")
+                .and_then(Value::as_u64)
+                .and_then(|index| usize::try_from(index).ok())
+                .unwrap_or(0),
+            call_id: projected
+                .get("id")
+                .and_then(Value::as_str)
+                .map(str::to_string),
+            name: projected
+                .get("name")
+                .and_then(Value::as_str)
+                .map(str::to_string),
+            argument_delta: projected
+                .get("arguments")
+                .and_then(Value::as_str)
+                .filter(|arguments| !arguments.is_empty())
+                .map(str::to_string),
+            thought_signature: projected
+                .get("thought_signature")
+                .and_then(Value::as_str)
+                .filter(|signature| !signature.trim().is_empty())
+                .map(str::to_string),
+        };
+    }
+    #[cfg(not(feature = "mojo"))]
+    {
+        let index = value
+            .get("index")
+            .and_then(Value::as_u64)
+            .and_then(|index| usize::try_from(index).ok())
+            .unwrap_or(0);
+        let function = value.get("function");
+        DeepSeekProviderCoreStreamToolCallDelta {
+            index,
+            call_id: value.get("id").and_then(Value::as_str).map(str::to_string),
+            name: function
+                .and_then(|function| function.get("name"))
+                .and_then(Value::as_str)
+                .map(str::to_string),
+            argument_delta: function
+                .and_then(|function| function.get("arguments"))
+                .and_then(Value::as_str)
+                .filter(|arguments| !arguments.is_empty())
+                .map(str::to_string),
+            thought_signature:
+                crate::bridge::provider_core_chat_compatible_tool_call_thought_signature(value),
+        }
     }
 }
 
@@ -245,6 +290,29 @@ pub fn deepseek_provider_core_stream_chunk_metadata(
     value: &Value,
     provider_label: &str,
 ) -> DeepSeekProviderCoreStreamChunkMetadata {
+    #[cfg(feature = "mojo")]
+    {
+        let projected = deepseek_provider_core_stream_projection(
+            DeepSeekKernelOperation::StreamChunkMetadata,
+            value,
+        );
+        return DeepSeekProviderCoreStreamChunkMetadata {
+            model: projected
+                .get("model")
+                .and_then(Value::as_str)
+                .map(str::to_string),
+            created_at: projected.get("created").and_then(Value::as_u64),
+            system_fingerprint: projected
+                .get("system_fingerprint")
+                .and_then(Value::as_str)
+                .filter(|value| !value.is_empty())
+                .map(str::to_string),
+            usage: projected.get("usage").and_then(|usage| {
+                crate::bridge::provider_core_chat_compatible_responses_usage(usage, provider_label)
+            }),
+        };
+    }
+    #[cfg(not(feature = "mojo"))]
     DeepSeekProviderCoreStreamChunkMetadata {
         model: value
             .get("model")
@@ -254,7 +322,7 @@ pub fn deepseek_provider_core_stream_chunk_metadata(
         system_fingerprint: value
             .get("system_fingerprint")
             .and_then(Value::as_str)
-            .filter(|system_fingerprint| !system_fingerprint.is_empty())
+            .filter(|value| !value.is_empty())
             .map(str::to_string),
         usage: value.get("usage").and_then(|usage| {
             crate::bridge::provider_core_chat_compatible_responses_usage(usage, provider_label)
@@ -272,10 +340,28 @@ pub fn deepseek_provider_core_stream_first_choice(value: &Value) -> Option<&Valu
 pub fn deepseek_provider_core_stream_choice_metadata(
     choice: &Value,
 ) -> DeepSeekProviderCoreStreamChoiceMetadata {
+    #[cfg(feature = "mojo")]
+    {
+        let projected = deepseek_provider_core_stream_projection(
+            DeepSeekKernelOperation::StreamChoiceMetadata,
+            choice,
+        );
+        return DeepSeekProviderCoreStreamChoiceMetadata {
+            logprobs: projected
+                .get("logprobs")
+                .filter(|value| !value.is_null())
+                .cloned(),
+            finish_reason: projected
+                .get("finish_reason")
+                .and_then(Value::as_str)
+                .map(str::to_string),
+        };
+    }
+    #[cfg(not(feature = "mojo"))]
     DeepSeekProviderCoreStreamChoiceMetadata {
         logprobs: choice
             .get("logprobs")
-            .filter(|logprobs| !logprobs.is_null())
+            .filter(|value| !value.is_null())
             .cloned(),
         finish_reason: choice
             .get("finish_reason")
@@ -287,35 +373,72 @@ pub fn deepseek_provider_core_stream_choice_metadata(
 pub fn deepseek_provider_core_stream_choice_delta(
     choice: &Value,
 ) -> DeepSeekProviderCoreStreamChoiceDelta {
-    let Some(delta) = choice.get("delta") else {
-        return DeepSeekProviderCoreStreamChoiceDelta::default();
-    };
-    DeepSeekProviderCoreStreamChoiceDelta {
-        reasoning_content: delta
-            .get("reasoning_content")
-            .and_then(Value::as_str)
-            .filter(|text| !text.is_empty())
-            .map(str::to_string),
-        refusal: delta
-            .get("refusal")
-            .and_then(Value::as_str)
-            .filter(|text| !text.is_empty())
-            .map(str::to_string),
-        annotations: delta
-            .get("annotations")
-            .and_then(Value::as_array)
-            .map(|annotations| annotations.to_vec())
-            .unwrap_or_default(),
-        content: delta
-            .get("content")
-            .and_then(Value::as_str)
-            .filter(|text| !text.is_empty())
-            .map(str::to_string),
-        tool_calls: delta
-            .get("tool_calls")
-            .and_then(Value::as_array)
-            .map(|tool_calls| tool_calls.to_vec())
-            .unwrap_or_default(),
+    #[cfg(feature = "mojo")]
+    {
+        let projected = deepseek_provider_core_stream_projection(
+            DeepSeekKernelOperation::StreamChoiceDelta,
+            choice,
+        );
+        return DeepSeekProviderCoreStreamChoiceDelta {
+            reasoning_content: projected
+                .get("reasoning_content")
+                .and_then(Value::as_str)
+                .filter(|text| !text.is_empty())
+                .map(str::to_string),
+            refusal: projected
+                .get("refusal")
+                .and_then(Value::as_str)
+                .filter(|text| !text.is_empty())
+                .map(str::to_string),
+            annotations: projected
+                .get("annotations")
+                .and_then(Value::as_array)
+                .map(|items| items.to_vec())
+                .unwrap_or_default(),
+            content: projected
+                .get("content")
+                .and_then(Value::as_str)
+                .filter(|text| !text.is_empty())
+                .map(str::to_string),
+            tool_calls: projected
+                .get("tool_calls")
+                .and_then(Value::as_array)
+                .map(|items| items.to_vec())
+                .unwrap_or_default(),
+        };
+    }
+    #[cfg(not(feature = "mojo"))]
+    {
+        let Some(delta) = choice.get("delta") else {
+            return DeepSeekProviderCoreStreamChoiceDelta::default();
+        };
+        DeepSeekProviderCoreStreamChoiceDelta {
+            reasoning_content: delta
+                .get("reasoning_content")
+                .and_then(Value::as_str)
+                .filter(|text| !text.is_empty())
+                .map(str::to_string),
+            refusal: delta
+                .get("refusal")
+                .and_then(Value::as_str)
+                .filter(|text| !text.is_empty())
+                .map(str::to_string),
+            annotations: delta
+                .get("annotations")
+                .and_then(Value::as_array)
+                .map(|items| items.to_vec())
+                .unwrap_or_default(),
+            content: delta
+                .get("content")
+                .and_then(Value::as_str)
+                .filter(|text| !text.is_empty())
+                .map(str::to_string),
+            tool_calls: delta
+                .get("tool_calls")
+                .and_then(Value::as_array)
+                .map(|items| items.to_vec())
+                .unwrap_or_default(),
+        }
     }
 }
 
@@ -328,38 +451,60 @@ pub fn deepseek_provider_core_stream_response_metadata(
     finish_reason: Option<&str>,
     system_fingerprint: Option<&str>,
 ) -> Option<Value> {
-    let mut metadata = serde_json::Map::new();
-    if let Some(logprobs) = logprobs {
-        metadata.insert("logprobs".to_string(), logprobs);
+    #[cfg(feature = "mojo")]
+    {
+        let logprobs = logprobs
+            .as_ref()
+            .map(|value| serde_json::to_string(value).expect("DeepSeek logprobs serialize"));
+        let annotations = (!annotations.is_empty()).then(|| {
+            serde_json::to_string(annotations).expect("DeepSeek stream annotations serialize")
+        });
+        let mut input = DeepSeekKernelInput::new(DeepSeekKernelOperation::StreamResponseMetadata);
+        input.role = Some(provider_label);
+        input.metadata = logprobs.as_deref();
+        input.reasoning_content = (!reasoning_content.is_empty()).then_some(reasoning_content);
+        input.content = (!refusal.is_empty()).then_some(refusal);
+        input.item = annotations.as_deref();
+        input.name = finish_reason;
+        input.signature = system_fingerprint;
+        let metadata = super::deepseek_mojo_value(input);
+        return (!metadata.is_null()).then_some(metadata);
     }
-    if !reasoning_content.is_empty() {
-        metadata.insert(
-            "reasoning_content".to_string(),
-            Value::String(reasoning_content.to_string()),
-        );
+    #[cfg(not(feature = "mojo"))]
+    {
+        let mut metadata = serde_json::Map::new();
+        if let Some(logprobs) = logprobs {
+            metadata.insert("logprobs".to_string(), logprobs);
+        }
+        if !reasoning_content.is_empty() {
+            metadata.insert(
+                "reasoning_content".to_string(),
+                Value::String(reasoning_content.to_string()),
+            );
+        }
+        if !refusal.is_empty() {
+            metadata.insert("refusal".to_string(), Value::String(refusal.to_string()));
+        }
+        if !annotations.is_empty() {
+            metadata.insert(
+                "annotations".to_string(),
+                Value::Array(annotations.to_vec()),
+            );
+        }
+        if let Some(value) = finish_reason {
+            metadata.insert(
+                "finish_reason".to_string(),
+                Value::String(value.to_string()),
+            );
+        }
+        if let Some(value) = system_fingerprint {
+            metadata.insert(
+                "system_fingerprint".to_string(),
+                Value::String(value.to_string()),
+            );
+        }
+        (!metadata.is_empty()).then(|| serde_json::json!({ provider_label: metadata }))
     }
-    if !refusal.is_empty() {
-        metadata.insert("refusal".to_string(), Value::String(refusal.to_string()));
-    }
-    if !annotations.is_empty() {
-        metadata.insert(
-            "annotations".to_string(),
-            Value::Array(annotations.to_vec()),
-        );
-    }
-    if let Some(finish_reason) = finish_reason {
-        metadata.insert(
-            "finish_reason".to_string(),
-            Value::String(finish_reason.to_string()),
-        );
-    }
-    if let Some(system_fingerprint) = system_fingerprint {
-        metadata.insert(
-            "system_fingerprint".to_string(),
-            Value::String(system_fingerprint.to_string()),
-        );
-    }
-    (!metadata.is_empty()).then(|| serde_json::json!({ provider_label: metadata }))
 }
 
 pub fn deepseek_provider_core_stream_output_text_item(text: &str) -> Value {

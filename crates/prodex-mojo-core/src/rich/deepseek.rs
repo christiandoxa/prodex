@@ -38,6 +38,11 @@ pub enum DeepSeekKernelOperation {
     ReasoningParameters = 29,
     ResponseFormat = 30,
     UserId = 31,
+    StreamToolCallDelta = 32,
+    StreamChunkMetadata = 33,
+    StreamChoiceMetadata = 34,
+    StreamChoiceDelta = 35,
+    StreamResponseMetadata = 36,
 }
 
 /// Inputs for one bounded DeepSeek JSON transformation.
@@ -216,6 +221,11 @@ fn operation_code(operation: DeepSeekKernelOperation) -> i64 {
         DeepSeekKernelOperation::ReasoningParameters => 29,
         DeepSeekKernelOperation::ResponseFormat => 30,
         DeepSeekKernelOperation::UserId => 31,
+        DeepSeekKernelOperation::StreamToolCallDelta => 32,
+        DeepSeekKernelOperation::StreamChunkMetadata => 33,
+        DeepSeekKernelOperation::StreamChoiceMetadata => 34,
+        DeepSeekKernelOperation::StreamChoiceDelta => 35,
+        DeepSeekKernelOperation::StreamResponseMetadata => 36,
     }
 }
 
