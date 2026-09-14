@@ -209,3 +209,57 @@ fn application_pipeline_error_plan_preserves_public_http_statuses() {
         );
     }
 }
+
+#[test]
+fn application_operational_probe_plan_prioritizes_readiness_failures() {
+    let plan = plan_application_operational_probe(ApplicationOperationalProbeInput {
+        route: ApplicationRouteKind::HealthReady,
+        method: ApplicationOperationalProbeMethod::Get,
+        overloaded: true,
+        draining: true,
+        credentials_stale: true,
+        governance_audit_available: false,
+        governance_policy_available: false,
+    })
+    .unwrap();
+    assert_eq!(plan.probe, Some(ApplicationOperationalProbeKind::Ready));
+    assert_eq!(plan.status, ApplicationOperationalProbeStatus::Draining);
+    assert_eq!(plan.metric, ApplicationOperationalProbeMetric::Draining);
+    assert_eq!(plan.http_status, 503);
+    assert!(!plan.ready);
+
+    let live = plan_application_operational_probe(ApplicationOperationalProbeInput {
+        route: ApplicationRouteKind::HealthLive,
+        method: ApplicationOperationalProbeMethod::Head,
+        overloaded: true,
+        draining: false,
+        credentials_stale: false,
+        governance_audit_available: true,
+        governance_policy_available: true,
+    })
+    .unwrap();
+    assert!(live.ready);
+    assert!(live.omit_body);
+    assert_eq!(live.status, ApplicationOperationalProbeStatus::Ok);
+    assert_eq!(live.metric, ApplicationOperationalProbeMetric::Degraded);
+
+    let rejected = plan_application_operational_probe(ApplicationOperationalProbeInput {
+        method: ApplicationOperationalProbeMethod::Other,
+        ..ApplicationOperationalProbeInput {
+            route: ApplicationRouteKind::HealthStartup,
+            method: ApplicationOperationalProbeMethod::Get,
+            overloaded: false,
+            draining: false,
+            credentials_stale: false,
+            governance_audit_available: true,
+            governance_policy_available: true,
+        }
+    })
+    .unwrap();
+    assert!(!rejected.method_allowed);
+    assert_eq!(rejected.http_status, 405);
+    assert_eq!(
+        rejected.status,
+        ApplicationOperationalProbeStatus::MethodNotAllowed
+    );
+}

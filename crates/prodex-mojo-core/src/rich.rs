@@ -153,9 +153,15 @@ pub use application_metadata::*;
 #[path = "rich/application_scope.rs"]
 mod application_scope;
 pub use application_scope::*;
+#[path = "rich/application_data_plane_types.rs"]
+mod application_data_plane_types;
+pub use application_data_plane_types::*;
 #[path = "rich/application_data_plane.rs"]
 mod application_data_plane;
 pub use application_data_plane::*;
+#[path = "rich/application_operational_probe.rs"]
+mod application_operational_probe;
+pub use application_operational_probe::*;
 #[cfg(test)]
 #[path = "rich/application_data_plane_tests.rs"]
 mod application_data_plane_tests;

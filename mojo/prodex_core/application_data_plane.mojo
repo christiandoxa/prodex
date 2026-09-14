@@ -132,8 +132,108 @@ struct ApplicationPipelineErrorPlanResult(Copyable):
     var response_kind: Int64
 
 
+@fieldwise_init
+struct ApplicationOperationalProbePlanResult(Copyable):
+    var abi_version: Int64
+    var method_allowed: Int64
+    var probe_kind: Int64
+    var ready: Int64
+    var status_reason: Int64
+    var metric_result: Int64
+    var http_status: Int64
+    var omit_body: Int64
+
+
 def valid_flag(value: Int64) -> Bool:
     return value == 0 or value == 1
+
+
+@export("prodex_mojo_application_operational_probe_plan_v1")
+def prodex_mojo_application_operational_probe_plan_v1(
+    abi_version: Int64,
+    route: Int64,
+    method: Int64,
+    overloaded: Int64,
+    draining: Int64,
+    credentials_stale: Int64,
+    governance_audit_available: Int64,
+    governance_policy_available: Int64,
+    result_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != APPLICATION_DATA_PLANE_ABI_VERSION:
+        return STATUS_ABI
+    if (
+        route < ROUTE_RESPONSES
+        or route > ROUTE_UNKNOWN
+        or method < 0
+        or method > 2
+        or not valid_flag(overloaded)
+        or not valid_flag(draining)
+        or not valid_flag(credentials_stale)
+        or not valid_flag(governance_audit_available)
+        or not valid_flag(governance_policy_available)
+        or result_address == 0
+    ):
+        return STATUS_INVALID
+    var result = Pointer[
+        mut=True, ApplicationOperationalProbePlanResult, MutUntrackedOrigin
+    ](unsafe_from_address=Int(result_address))
+    result[].abi_version = APPLICATION_DATA_PLANE_ABI_VERSION
+    var handled = Int64(
+        route == ROUTE_HEALTH_LIVE
+        or route == ROUTE_HEALTH_READY
+        or route == ROUTE_HEALTH_STARTUP
+    )
+    result[].method_allowed = Int64(method != 2)
+    result[].probe_kind = route - ROUTE_HEALTH_LIVE
+    result[].ready = 0
+    result[].status_reason = 0
+    result[].metric_result = 0
+    result[].http_status = 200
+    result[].omit_body = Int64(method == 1)
+    if handled == 0:
+        result[].probe_kind = -1
+        result[].method_allowed = 0
+        result[].omit_body = 0
+        return STATUS_OK
+    if result[].method_allowed == 0:
+        result[].status_reason = 6
+        result[].http_status = 405
+        return STATUS_OK
+    result[].ready = Int64(
+        route != ROUTE_HEALTH_READY
+        or (
+            overloaded == 0
+            and draining == 0
+            and credentials_stale == 0
+            and governance_audit_available == 1
+            and governance_policy_available == 1
+        )
+    )
+    if result[].ready == 0:
+        result[].http_status = 503
+    if result[].ready == 1:
+        result[].status_reason = 0
+    elif draining == 1:
+        result[].status_reason = 1
+    elif credentials_stale == 1:
+        result[].status_reason = 2
+    elif governance_audit_available == 0:
+        result[].status_reason = 3
+    elif governance_policy_available == 0:
+        result[].status_reason = 4
+    else:
+        result[].status_reason = 5
+    if draining == 1:
+        result[].metric_result = 1
+    elif (
+        overloaded == 1
+        or credentials_stale == 1
+        or governance_audit_available == 0
+        or governance_policy_available == 0
+    ):
+        result[].metric_result = 2
+    return STATUS_OK
 
 
 @export("prodex_mojo_application_pipeline_error_plan_v1")
