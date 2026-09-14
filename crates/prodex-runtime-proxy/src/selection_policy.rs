@@ -5,6 +5,11 @@ use crate::{
     RuntimeRouteKind, runtime_previous_response_fresh_fallback_policy,
 };
 
+#[cfg(feature = "mojo")]
+mod mojo;
+#[cfg(not(feature = "mojo"))]
+mod rust_oracles;
+
 #[derive(Clone, Copy, Debug)]
 pub struct RuntimeCandidateAffinity<'a> {
     pub route_kind: RuntimeRouteKind,
@@ -53,33 +58,15 @@ pub enum RuntimeNoRotateAffinity {
 pub fn runtime_candidate_no_rotate_affinity(
     affinity: RuntimeCandidateAffinity<'_>,
 ) -> Option<RuntimeNoRotateAffinity> {
-    if affinity
-        .strict_affinity_profile
-        .is_some_and(|profile_name| profile_name == affinity.candidate_name)
+    #[cfg(feature = "mojo")]
     {
-        return Some(RuntimeNoRotateAffinity::Strict);
+        mojo::candidate_no_rotate_affinity(affinity)
     }
-    if affinity
-        .turn_state_profile
-        .is_some_and(|profile_name| profile_name == affinity.candidate_name)
+
+    #[cfg(not(feature = "mojo"))]
     {
-        return Some(RuntimeNoRotateAffinity::TurnState);
+        rust_oracles::candidate_no_rotate_affinity(affinity)
     }
-    if affinity.trusted_previous_response_affinity
-        && affinity
-            .pinned_profile
-            .is_some_and(|profile_name| profile_name == affinity.candidate_name)
-    {
-        return Some(RuntimeNoRotateAffinity::TrustedPreviousResponse);
-    }
-    if affinity.route_kind == RuntimeRouteKind::Compact
-        && affinity
-            .session_profile
-            .is_some_and(|profile_name| profile_name == affinity.candidate_name)
-    {
-        return Some(RuntimeNoRotateAffinity::CompactSession);
-    }
-    None
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -97,36 +84,15 @@ pub struct RuntimeQuotaBlockedAffinityReleaseRequest<'a> {
 pub fn runtime_quota_blocked_affinity_release_policy(
     request: RuntimeQuotaBlockedAffinityReleaseRequest<'_>,
 ) -> RuntimeQuotaBlockedAffinityReleasePolicy {
-    if runtime_previous_response_fresh_fallback_policy(
-        RuntimePreviousResponseFreshFallbackPolicyInput {
-            has_previous_response_context: request.fresh_fallback_shape.is_some(),
-            request_requires_locked_previous_response_affinity: false,
-            fresh_fallback_shape: request.fresh_fallback_shape,
-        },
-    )
-    .is_fail_closed()
+    #[cfg(feature = "mojo")]
     {
-        return RuntimeQuotaBlockedAffinityReleasePolicy::KeepAffinity;
+        mojo::quota_blocked_affinity_release_policy(request)
     }
 
-    if request
-        .affinity
-        .strict_affinity_profile
-        .is_some_and(|profile_name| profile_name == request.affinity.candidate_name)
-        || request
-            .affinity
-            .turn_state_profile
-            .is_some_and(|profile_name| profile_name == request.affinity.candidate_name)
-        || (request.affinity.route_kind == RuntimeRouteKind::Compact
-            && request
-                .affinity
-                .session_profile
-                .is_some_and(|profile_name| profile_name == request.affinity.candidate_name))
+    #[cfg(not(feature = "mojo"))]
     {
-        return RuntimeQuotaBlockedAffinityReleasePolicy::KeepAffinity;
+        rust_oracles::quota_blocked_affinity_release_policy(request)
     }
-
-    RuntimeQuotaBlockedAffinityReleasePolicy::ReleaseAffinity
 }
 
 pub fn runtime_quota_blocked_affinity_is_releasable(
@@ -165,9 +131,23 @@ pub fn runtime_websocket_previous_response_reuse_is_nonreplayable(
     previous_response_fresh_fallback_used: bool,
     turn_state_override: Option<&str>,
 ) -> bool {
-    previous_response_id.is_some()
-        && !previous_response_fresh_fallback_used
-        && turn_state_override.is_none()
+    #[cfg(feature = "mojo")]
+    {
+        mojo::websocket_previous_response_reuse_is_nonreplayable(
+            previous_response_id.is_some(),
+            previous_response_fresh_fallback_used,
+            turn_state_override.is_some(),
+        )
+    }
+
+    #[cfg(not(feature = "mojo"))]
+    {
+        rust_oracles::websocket_previous_response_reuse_is_nonreplayable(
+            previous_response_id,
+            previous_response_fresh_fallback_used,
+            turn_state_override,
+        )
+    }
 }
 
 pub fn runtime_websocket_previous_response_reuse_is_stale_at(
@@ -175,8 +155,23 @@ pub fn runtime_websocket_previous_response_reuse_is_stale_at(
     reuse_terminal_idle: Option<Duration>,
     stale_after: Duration,
 ) -> bool {
-    nonreplayable_previous_response_reuse
-        && reuse_terminal_idle.is_some_and(|elapsed| elapsed >= stale_after)
+    #[cfg(feature = "mojo")]
+    {
+        mojo::websocket_previous_response_reuse_is_stale_at(
+            nonreplayable_previous_response_reuse,
+            reuse_terminal_idle,
+            stale_after,
+        )
+    }
+
+    #[cfg(not(feature = "mojo"))]
+    {
+        rust_oracles::websocket_previous_response_reuse_is_stale_at(
+            nonreplayable_previous_response_reuse,
+            reuse_terminal_idle,
+            stale_after,
+        )
+    }
 }
 
 pub fn runtime_websocket_reuse_watchdog_previous_response_fresh_fallback_allowed(
@@ -240,11 +235,27 @@ pub fn runtime_proxy_has_continuation_priority(
     turn_state_profile: Option<&str>,
     session_profile: Option<&str>,
 ) -> bool {
-    previous_response_id.is_some()
-        || pinned_profile.is_some()
-        || request_turn_state.is_some()
-        || turn_state_profile.is_some()
-        || session_profile.is_some()
+    #[cfg(feature = "mojo")]
+    {
+        mojo::has_continuation_priority(
+            previous_response_id.is_some(),
+            pinned_profile.is_some(),
+            request_turn_state.is_some(),
+            turn_state_profile.is_some(),
+            session_profile.is_some(),
+        )
+    }
+
+    #[cfg(not(feature = "mojo"))]
+    {
+        rust_oracles::has_continuation_priority(
+            previous_response_id,
+            pinned_profile,
+            request_turn_state,
+            turn_state_profile,
+            session_profile,
+        )
+    }
 }
 
 pub fn runtime_wait_affinity_owner<'a>(
@@ -254,24 +265,41 @@ pub fn runtime_wait_affinity_owner<'a>(
     session_profile: Option<&'a str>,
     trusted_previous_response_affinity: bool,
 ) -> Option<&'a str> {
-    strict_affinity_profile
-        .or(turn_state_profile)
-        .or_else(|| {
-            trusted_previous_response_affinity
-                .then_some(pinned_profile)
-                .flatten()
-        })
-        .or(session_profile)
+    #[cfg(feature = "mojo")]
+    {
+        mojo::wait_affinity_owner(
+            strict_affinity_profile,
+            pinned_profile,
+            turn_state_profile,
+            session_profile,
+            trusted_previous_response_affinity,
+        )
+    }
+
+    #[cfg(not(feature = "mojo"))]
+    {
+        rust_oracles::wait_affinity_owner(
+            strict_affinity_profile,
+            pinned_profile,
+            turn_state_profile,
+            session_profile,
+            trusted_previous_response_affinity,
+        )
+    }
 }
 
 pub fn runtime_noncompact_session_priority_profile<'a>(
     session_profile: Option<&'a str>,
     compact_session_profile: Option<&str>,
 ) -> Option<&'a str> {
-    if compact_session_profile.is_some_and(|profile_name| session_profile == Some(profile_name)) {
-        None
-    } else {
-        session_profile
+    #[cfg(feature = "mojo")]
+    {
+        mojo::noncompact_session_priority_profile(session_profile, compact_session_profile)
+    }
+
+    #[cfg(not(feature = "mojo"))]
+    {
+        rust_oracles::noncompact_session_priority_profile(session_profile, compact_session_profile)
     }
 }
 
@@ -284,13 +312,31 @@ pub fn runtime_proxy_allows_direct_current_profile_fallback(
     saw_inflight_saturation: bool,
     saw_upstream_failure: bool,
 ) -> bool {
-    previous_response_id.is_none()
-        && pinned_profile.is_none()
-        && request_turn_state.is_none()
-        && turn_state_profile.is_none()
-        && session_profile.is_none()
-        && !saw_inflight_saturation
-        && !saw_upstream_failure
+    #[cfg(feature = "mojo")]
+    {
+        mojo::allows_direct_current_profile_fallback(
+            previous_response_id.is_some(),
+            pinned_profile.is_some(),
+            request_turn_state.is_some(),
+            turn_state_profile.is_some(),
+            session_profile.is_some(),
+            saw_inflight_saturation,
+            saw_upstream_failure,
+        )
+    }
+
+    #[cfg(not(feature = "mojo"))]
+    {
+        rust_oracles::allows_direct_current_profile_fallback(
+            previous_response_id,
+            pinned_profile,
+            request_turn_state,
+            turn_state_profile,
+            session_profile,
+            saw_inflight_saturation,
+            saw_upstream_failure,
+        )
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

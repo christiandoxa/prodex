@@ -1,10 +1,259 @@
 from std.memory import Pointer
 
 from runtime_math import (
+    INT64_MAX,
+    INT64_MIN,
+    runtime_precommit_budget_plan,
     runtime_quota_scale_pressure,
     runtime_quota_saturating_add,
     runtime_quota_saturating_mul,
 )
+
+
+@export("prodex_runtime_precommit_budget_plan_v1")
+def prodex_runtime_precommit_budget_plan_v1(
+    continuation: Int64,
+    pressure_mode: Int64,
+    standard_attempt_limit: Int64,
+    standard_budget_ms: Int64,
+    continuation_attempt_limit: Int64,
+    continuation_budget_ms: Int64,
+    pressure_attempt_limit: Int64,
+    pressure_budget_ms: Int64,
+    profile_count: Int64,
+    attempts_per_profile: Int64,
+    attempt_limit_out: Pointer[mut=True, Int64, _],
+    budget_ms_out: Pointer[mut=True, Int64, _],
+) abi("C") -> Int64:
+    return runtime_precommit_budget_plan(
+        continuation,
+        pressure_mode,
+        standard_attempt_limit,
+        standard_budget_ms,
+        continuation_attempt_limit,
+        continuation_budget_ms,
+        pressure_attempt_limit,
+        pressure_budget_ms,
+        profile_count,
+        attempts_per_profile,
+        attempt_limit_out,
+        budget_ms_out,
+    )
+
+
+def runtime_i64_saturating_sub(left: Int64, right: Int64) -> Int64:
+    if right < 0 and left > INT64_MAX + right:
+        return INT64_MAX
+    if right > 0 and left < INT64_MIN + right:
+        return INT64_MIN
+    return left - right
+
+
+def runtime_quota_snapshot_window(
+    status: Int64,
+    remaining: Int64,
+    reset_at: Int64,
+    now: Int64,
+    output: Pointer[mut=True, Int64, _],
+    offset: Int64,
+):
+    if reset_at != INT64_MAX and reset_at <= now:
+        output[unsafe_offset=offset] = 0
+        output[unsafe_offset=offset + 1] = 100
+    else:
+        output[unsafe_offset=offset] = status
+        output[unsafe_offset=offset + 1] = remaining
+    output[unsafe_offset=offset + 2] = reset_at
+
+
+@export("prodex_runtime_quota_snapshot_plan_v1")
+def prodex_runtime_quota_snapshot_plan_v1(
+    five_hour_status: Int64,
+    five_hour_remaining: Int64,
+    five_hour_reset_at: Int64,
+    weekly_status: Int64,
+    weekly_remaining: Int64,
+    weekly_reset_at: Int64,
+    route_kind: Int64,
+    checked_at: Int64,
+    now: Int64,
+    stale_grace_seconds: Int64,
+    output: Pointer[mut=True, Int64, _],
+) abi("C") -> Int64:
+    if (
+        five_hour_status < 0
+        or five_hour_status > 4
+        or weekly_status < 0
+        or weekly_status > 4
+        or five_hour_remaining < 0
+        or five_hour_remaining > 100
+        or weekly_remaining < 0
+        or weekly_remaining > 100
+        or route_kind < 0
+        or route_kind > 3
+        or stale_grace_seconds < 0
+    ):
+        return 1
+
+    runtime_quota_snapshot_window(
+        five_hour_status,
+        five_hour_remaining,
+        five_hour_reset_at,
+        now,
+        output,
+        0,
+    )
+    runtime_quota_snapshot_window(
+        weekly_status,
+        weekly_remaining,
+        weekly_reset_at,
+        now,
+        output,
+        3,
+    )
+    if output[unsafe_offset=0] == 4 and output[unsafe_offset=3] != 4:
+        output[unsafe_offset=0] = 0
+        output[unsafe_offset=1] = 100
+        output[unsafe_offset=2] = INT64_MAX
+    elif output[unsafe_offset=3] == 4 and output[unsafe_offset=0] != 4:
+        output[unsafe_offset=3] = 0
+        output[unsafe_offset=4] = 100
+        output[unsafe_offset=5] = INT64_MAX
+    output[unsafe_offset=6] = max(
+        output[unsafe_offset=0], output[unsafe_offset=3]
+    )
+
+    var five_hour_hold_active = (
+        five_hour_status == 3
+        and five_hour_reset_at != INT64_MAX
+        and five_hour_reset_at > now
+    )
+    var weekly_hold_active = (
+        weekly_status == 3
+        and weekly_reset_at != INT64_MAX
+        and weekly_reset_at > now
+    )
+    var hold_active = five_hour_hold_active or weekly_hold_active
+    var five_hour_hold_expired = (
+        five_hour_status == 3
+        and five_hour_reset_at != INT64_MAX
+        and five_hour_reset_at <= now
+    )
+    var weekly_hold_expired = (
+        weekly_status == 3
+        and weekly_reset_at != INT64_MAX
+        and weekly_reset_at <= now
+    )
+    var hold_expired = five_hour_hold_expired or weekly_hold_expired
+    output[unsafe_offset=7] = Int64(hold_active)
+    output[unsafe_offset=8] = Int64(hold_expired)
+    output[unsafe_offset=9] = Int64(
+        hold_active
+        or (
+            not hold_expired
+            and runtime_i64_saturating_sub(now, checked_at)
+            <= stale_grace_seconds
+        )
+    )
+    return 0
+
+
+def runtime_quota_main_route(route_kind: Int64) -> Bool:
+    return route_kind == 0 or route_kind == 2
+
+
+def runtime_quota_gate_block_reason(
+    five_hour_status: Int64, route_kind: Int64
+) -> Int64:
+    if five_hour_status == 3:
+        return 1
+    if runtime_quota_main_route(route_kind) and five_hour_status == 3:
+        return 2
+    return 0
+
+
+@export("prodex_runtime_quota_gate_plan_v1")
+def prodex_runtime_quota_gate_plan_v1(
+    five_hour_status: Int64,
+    five_hour_reset_at: Int64,
+    weekly_status: Int64,
+    weekly_reset_at: Int64,
+    route_kind: Int64,
+    source: Int64,
+    has_continuation_context: Int64,
+    has_alternative_quota_profile: Int64,
+    output: Pointer[mut=True, Int64, _],
+) abi("C") -> Int64:
+    if (
+        five_hour_status < 0
+        or five_hour_status > 4
+        or weekly_status < 0
+        or weekly_status > 4
+        or route_kind < 0
+        or route_kind > 3
+        or source < -1
+        or source > 1
+        or has_continuation_context < 0
+        or has_continuation_context > 1
+        or has_alternative_quota_profile < 0
+        or has_alternative_quota_profile > 1
+    ):
+        return 1
+
+    var main_route = runtime_quota_main_route(route_kind)
+    var requires_probe = (
+        main_route
+        and source != 0
+        and (
+            five_hour_status == 2
+            or weekly_status == 2
+            or five_hour_status == 4
+            or weekly_status == 4
+        )
+    )
+    var requires_live_after_probe = (
+        main_route
+        and source != 0
+        and (five_hour_status == 4 or weekly_status == 4)
+    )
+    var block_reason = runtime_quota_gate_block_reason(
+        five_hour_status, route_kind
+    )
+    var blocking_reset_at = INT64_MIN
+    if five_hour_status == 3 and five_hour_reset_at != INT64_MAX:
+        blocking_reset_at = five_hour_reset_at
+    if weekly_status == 3 and weekly_reset_at != INT64_MAX:
+        blocking_reset_at = max(blocking_reset_at, weekly_reset_at)
+
+    var initial_decision: Int64 = 0
+    var initial_reason: Int64 = 0
+    if has_continuation_context == 1 and source == 1 and block_reason != 0:
+        initial_decision = 2
+        initial_reason = block_reason
+    elif requires_probe:
+        initial_decision = 1
+
+    var final_reason: Int64 = 0
+    if (
+        main_route
+        and has_alternative_quota_profile == 1
+        and weekly_status == 3
+    ):
+        final_reason = 1
+    elif requires_live_after_probe and has_alternative_quota_profile == 1:
+        final_reason = 3
+    elif block_reason != 0:
+        final_reason = block_reason
+
+    output[unsafe_offset=0] = Int64(requires_probe)
+    output[unsafe_offset=1] = Int64(requires_live_after_probe)
+    output[unsafe_offset=2] = block_reason
+    output[unsafe_offset=3] = blocking_reset_at
+    output[unsafe_offset=4] = initial_decision
+    output[unsafe_offset=5] = initial_reason
+    output[unsafe_offset=6] = Int64(final_reason != 0)
+    output[unsafe_offset=7] = final_reason
+    return 0
 
 
 def prodex_runtime_quota_pressure_band_for_status(

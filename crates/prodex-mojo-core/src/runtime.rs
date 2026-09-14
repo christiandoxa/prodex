@@ -6,6 +6,7 @@ mod candidate_plan;
 mod profile_health;
 mod profile_rotation;
 mod prompt_cache_affinity;
+mod quota_decisions;
 mod quota_route_score;
 mod selection_planning;
 pub use auto_redeem::{
@@ -18,16 +19,21 @@ pub use profile_health::{
 };
 pub use profile_rotation::profile_selection_order_batch;
 pub use prompt_cache_affinity::prompt_cache_affinity_batch;
+pub use quota_decisions::{
+    PrecommitBudgetPlan, QuotaGatePlan, QuotaGatePlanInput, QuotaSnapshotPlan,
+    QuotaSnapshotPlanInput, precommit_budget_plan, quota_gate_plan, quota_snapshot_plan,
+};
 pub use quota_route_score::quota_route_score_batch;
 pub use selection_planning::{
     ADAPTIVE_PLAN_REASON_ADAPTIVE_ENABLED, ADAPTIVE_PLAN_REASON_ADAPTIVE_EXPLORATION,
     ADAPTIVE_PLAN_REASON_INSUFFICIENT_SAMPLES, ADAPTIVE_PLAN_REASON_SHADOW_EXPLORATION,
     ADAPTIVE_PLAN_REASON_SHADOW_ONLY, ADAPTIVE_ROUTING_MAX_COUNT, AdaptiveQualityInput,
-    AdaptiveRoutingPlan, SOFT_AFFINITY_POLICY_ALLOWED, SOFT_AFFINITY_POLICY_QUOTA_CRITICAL,
+    AdaptiveRoutingPlan, AffinitySelectionInput, AffinitySelectionPlan,
+    SOFT_AFFINITY_POLICY_ALLOWED, SOFT_AFFINITY_POLICY_QUOTA_CRITICAL,
     SOFT_AFFINITY_POLICY_QUOTA_EXHAUSTED, SOFT_AFFINITY_POLICY_QUOTA_EXHAUSTED_BEFORE_SEND,
     SOFT_AFFINITY_POLICY_QUOTA_HEALTHY, SOFT_AFFINITY_POLICY_QUOTA_THIN,
     SOFT_AFFINITY_POLICY_QUOTA_UNKNOWN, SOFT_AFFINITY_POLICY_QUOTA_WINDOWS_UNAVAILABLE,
-    SoftAffinityPolicyInput, adaptive_routing_plan, soft_affinity_policy,
+    SoftAffinityPolicyInput, adaptive_routing_plan, affinity_selection_plan, soft_affinity_policy,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -365,6 +371,7 @@ unsafe extern "C" {
         count: i64,
     ) -> i64;
 }
+
 pub fn pressure_band_for_route(
     five_hour: Option<(i64, i64)>,
     weekly: Option<(i64, i64)>,

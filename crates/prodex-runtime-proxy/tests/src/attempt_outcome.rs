@@ -78,3 +78,55 @@ fn websocket_locked_affinity_retries_without_turn_state() {
         Some("previous_response_not_found_locked_affinity")
     );
 }
+
+#[cfg(feature = "mojo")]
+#[test]
+fn previous_response_plan_matches_rust_oracle() {
+    let shapes = [
+        None,
+        Some(RuntimePreviousResponseFreshFallbackShape::ToolOutputOnly),
+        Some(RuntimePreviousResponseFreshFallbackShape::EmptyInputOnly),
+        Some(RuntimePreviousResponseFreshFallbackShape::SessionScopedFreshReplay),
+        Some(RuntimePreviousResponseFreshFallbackShape::ContextDependentContinuation),
+    ];
+    for route in [
+        RuntimePreviousResponseNotFoundRoute::Responses,
+        RuntimePreviousResponseNotFoundRoute::Websocket,
+    ] {
+        for previous_response_present in [false, true] {
+            for has_turn_state_retry in [false, true] {
+                for request_requires_previous_response_affinity in [false, true] {
+                    for trusted_previous_response_affinity in [false, true] {
+                        for request_turn_state_present in [false, true] {
+                            for previous_response_fresh_fallback_used in [false, true] {
+                                for fresh_fallback_shape in shapes {
+                                    for retry_index in 0..=4 {
+                                        let input = RuntimePreviousResponseNotFoundDecisionInput {
+                                            route,
+                                            previous_response_id: previous_response_present
+                                                .then_some("resp_1"),
+                                            has_turn_state_retry,
+                                            request_requires_previous_response_affinity,
+                                            trusted_previous_response_affinity,
+                                            request_turn_state: request_turn_state_present
+                                                .then_some("state"),
+                                            previous_response_fresh_fallback_used,
+                                            fresh_fallback_shape,
+                                            retry_index,
+                                        };
+                                        assert_eq!(
+                                            runtime_previous_response_not_found_decision(input),
+                                            runtime_previous_response_not_found_decision_rust(
+                                                input
+                                            ),
+                                        );
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

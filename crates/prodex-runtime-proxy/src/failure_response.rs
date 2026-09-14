@@ -46,22 +46,7 @@ pub fn runtime_proxy_precommit_budget(
     continuation: bool,
     pressure_mode: bool,
 ) -> (usize, Duration) {
-    if continuation {
-        (
-            RUNTIME_PROXY_PRECOMMIT_CONTINUATION_ATTEMPT_LIMIT,
-            Duration::from_millis(RUNTIME_PROXY_PRECOMMIT_CONTINUATION_BUDGET_MS),
-        )
-    } else if pressure_mode {
-        (
-            RUNTIME_PROXY_PRESSURE_PRECOMMIT_ATTEMPT_LIMIT,
-            Duration::from_millis(RUNTIME_PROXY_PRESSURE_PRECOMMIT_BUDGET_MS),
-        )
-    } else {
-        (
-            RUNTIME_PROXY_PRECOMMIT_ATTEMPT_LIMIT,
-            Duration::from_millis(RUNTIME_PROXY_PRECOMMIT_BUDGET_MS),
-        )
-    }
+    runtime_proxy_precommit_budget_for_profile_count(continuation, pressure_mode, 1)
 }
 
 pub fn runtime_proxy_precommit_budget_for_profile_count(
@@ -69,8 +54,58 @@ pub fn runtime_proxy_precommit_budget_for_profile_count(
     pressure_mode: bool,
     profile_count: usize,
 ) -> (usize, Duration) {
+    #[cfg(feature = "mojo")]
+    {
+        let plan = prodex_mojo_core::runtime::precommit_budget_plan(
+            continuation,
+            pressure_mode,
+            RUNTIME_PROXY_PRECOMMIT_ATTEMPT_LIMIT,
+            RUNTIME_PROXY_PRECOMMIT_BUDGET_MS,
+            RUNTIME_PROXY_PRECOMMIT_CONTINUATION_ATTEMPT_LIMIT,
+            RUNTIME_PROXY_PRECOMMIT_CONTINUATION_BUDGET_MS,
+            RUNTIME_PROXY_PRESSURE_PRECOMMIT_ATTEMPT_LIMIT,
+            RUNTIME_PROXY_PRESSURE_PRECOMMIT_BUDGET_MS,
+            profile_count,
+            RUNTIME_PROXY_PRECOMMIT_ATTEMPTS_PER_PROFILE,
+        )
+        .expect("Mojo precommit budget planning returned an invalid result");
+        (plan.attempt_limit, Duration::from_millis(plan.budget_ms))
+    }
+
+    #[cfg(not(feature = "mojo"))]
+    {
+        runtime_proxy_precommit_budget_for_profile_count_rust(
+            continuation,
+            pressure_mode,
+            profile_count,
+        )
+    }
+}
+
+#[cfg(any(not(feature = "mojo"), test))]
+fn runtime_proxy_precommit_budget_for_profile_count_rust(
+    continuation: bool,
+    pressure_mode: bool,
+    profile_count: usize,
+) -> (usize, Duration) {
+    let (base_attempt_limit, base_budget_ms) = if continuation {
+        (
+            RUNTIME_PROXY_PRECOMMIT_CONTINUATION_ATTEMPT_LIMIT,
+            RUNTIME_PROXY_PRECOMMIT_CONTINUATION_BUDGET_MS,
+        )
+    } else if pressure_mode {
+        (
+            RUNTIME_PROXY_PRESSURE_PRECOMMIT_ATTEMPT_LIMIT,
+            RUNTIME_PROXY_PRESSURE_PRECOMMIT_BUDGET_MS,
+        )
+    } else {
+        (
+            RUNTIME_PROXY_PRECOMMIT_ATTEMPT_LIMIT,
+            RUNTIME_PROXY_PRECOMMIT_BUDGET_MS,
+        )
+    };
     let (base_attempt_limit, base_budget) =
-        runtime_proxy_precommit_budget(continuation, pressure_mode);
+        (base_attempt_limit, Duration::from_millis(base_budget_ms));
     let required_profile_attempts = profile_count
         .max(1)
         .saturating_mul(RUNTIME_PROXY_PRECOMMIT_ATTEMPTS_PER_PROFILE);

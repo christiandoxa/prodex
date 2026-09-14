@@ -206,6 +206,29 @@ fn precommit_budget_keeps_base_limit_for_small_pool() {
     assert_eq!(budget, base_budget);
 }
 
+#[cfg(feature = "mojo")]
+#[test]
+fn precommit_budget_matches_rust_oracle() {
+    for continuation in [false, true] {
+        for pressure_mode in [false, true] {
+            for profile_count in 0..=512 {
+                assert_eq!(
+                    runtime_proxy_precommit_budget_for_profile_count(
+                        continuation,
+                        pressure_mode,
+                        profile_count,
+                    ),
+                    runtime_proxy_precommit_budget_for_profile_count_rust(
+                        continuation,
+                        pressure_mode,
+                        profile_count,
+                    ),
+                );
+            }
+        }
+    }
+}
+
 #[test]
 fn precommit_elapsed_budget_remains_bounded_without_candidate_progress() {
     let profile_count = 2;
