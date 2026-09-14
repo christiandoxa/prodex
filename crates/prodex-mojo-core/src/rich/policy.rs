@@ -40,6 +40,32 @@ pub struct PolicyRoutePlan {
     pub ordered_indices: Vec<usize>,
 }
 
+#[derive(Debug, Clone, Copy)]
+pub struct VirtualKeyAdmissionInput {
+    pub durable_budget: bool,
+    pub usage_minute_epoch: u64,
+    pub minute_epoch: u64,
+    pub requests_this_minute: u64,
+    pub tokens_this_minute: u64,
+    pub requests_total: u64,
+    pub spend_microusd: u64,
+    pub reserved_tokens: u64,
+    pub estimated_cost_microusd: Option<u64>,
+    pub request_budget: Option<u64>,
+    pub budget_microusd: Option<u64>,
+    pub rpm_limit: Option<u64>,
+    pub tpm_limit: Option<u64>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum VirtualKeyAdmissionDecision {
+    Allow,
+    RequestBudgetExceeded,
+    BudgetExceeded,
+    RpmLimitExceeded,
+    TpmLimitExceeded,
+}
+
 unsafe extern "C" {
     fn prodex_mojo_rich_policy_route_v1(
         abi_version: i64,
@@ -52,6 +78,66 @@ unsafe extern "C" {
         ordered_capacity: i64,
         result: u64,
     ) -> i64;
+    fn prodex_mojo_rich_policy_virtual_key_admission_v1(
+        abi_version: i64,
+        durable_budget: i64,
+        usage_minute_epoch: u64,
+        minute_epoch: u64,
+        requests_this_minute: u64,
+        tokens_this_minute: u64,
+        requests_total: u64,
+        spend_microusd: u64,
+        reserved_tokens: u64,
+        estimated_cost_microusd: u64,
+        estimated_cost_present: i64,
+        request_budget: u64,
+        request_budget_present: i64,
+        budget_microusd: u64,
+        budget_present: i64,
+        rpm_limit: u64,
+        rpm_limit_present: i64,
+        tpm_limit: u64,
+        tpm_limit_present: i64,
+    ) -> i64;
+}
+
+pub fn validate_virtual_key_admission(
+    input: VirtualKeyAdmissionInput,
+) -> Result<VirtualKeyAdmissionDecision, MojoError> {
+    ensure_rich_abi()?;
+    let result = unsafe {
+        prodex_mojo_rich_policy_virtual_key_admission_v1(
+            RICH_ABI_VERSION,
+            i64::from(input.durable_budget),
+            input.usage_minute_epoch,
+            input.minute_epoch,
+            input.requests_this_minute,
+            input.tokens_this_minute,
+            input.requests_total,
+            input.spend_microusd,
+            input.reserved_tokens,
+            input.estimated_cost_microusd.unwrap_or_default(),
+            i64::from(input.estimated_cost_microusd.is_some()),
+            input.request_budget.unwrap_or_default(),
+            i64::from(input.request_budget.is_some()),
+            input.budget_microusd.unwrap_or_default(),
+            i64::from(input.budget_microusd.is_some()),
+            input.rpm_limit.unwrap_or_default(),
+            i64::from(input.rpm_limit.is_some()),
+            input.tpm_limit.unwrap_or_default(),
+            i64::from(input.tpm_limit.is_some()),
+        )
+    };
+    match result {
+        0 => Ok(VirtualKeyAdmissionDecision::Allow),
+        1 => Ok(VirtualKeyAdmissionDecision::RequestBudgetExceeded),
+        2 => Ok(VirtualKeyAdmissionDecision::BudgetExceeded),
+        3 => Ok(VirtualKeyAdmissionDecision::RpmLimitExceeded),
+        4 => Ok(VirtualKeyAdmissionDecision::TpmLimitExceeded),
+        -4 => Err(MojoError::AbiMismatch),
+        -1 => Err(MojoError::InvalidInput),
+        _ => Err(MojoError::InvalidOutput),
+    }
 }
 
 pub fn validate_policy_alias(input: PolicyAliasInput<'_>) -> Result<PolicyAliasPlan, MojoError> {

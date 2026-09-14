@@ -48,6 +48,8 @@ fn emit_source_rerun_directives(sources: &[&str], manifest_dir: &Path) {
             "../../mojo/prodex_core/rich_types.mojo",
             "../../mojo/prodex_core/rich_text.mojo",
             "../../mojo/prodex_core/kiro.mojo",
+            "../../mojo/prodex_core/gemini_response.mojo",
+            "../../mojo/prodex_core/gemini_sse_state.mojo",
         ] {
             println!(
                 "cargo:rerun-if-changed={}",

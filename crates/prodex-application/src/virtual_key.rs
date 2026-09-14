@@ -1,8 +1,14 @@
 use std::{error::Error, fmt};
 
+#[cfg(not(feature = "mojo"))]
+use prodex_gateway_core::plan_gateway_virtual_key_admission;
 use prodex_gateway_core::{
     GatewayVirtualKeyAdmissionError, GatewayVirtualKeyAdmissionPlan,
-    GatewayVirtualKeyAdmissionRequest, plan_gateway_virtual_key_admission,
+    GatewayVirtualKeyAdmissionRequest,
+};
+#[cfg(feature = "mojo")]
+use prodex_gateway_core::{
+    GatewayVirtualKeyAdmissionKernelInput, plan_gateway_virtual_key_admission_with_kernel,
 };
 
 use crate::distributed_rate_limit::{
@@ -43,11 +49,62 @@ impl fmt::Display for ApplicationVirtualKeyAdmissionError {
 
 impl Error for ApplicationVirtualKeyAdmissionError {}
 
+#[cfg(feature = "mojo")]
+fn gateway_virtual_key_admission_kernel(
+    input: GatewayVirtualKeyAdmissionKernelInput,
+) -> Result<(), GatewayVirtualKeyAdmissionError> {
+    let decision = prodex_mojo_core::rich::validate_virtual_key_admission(
+        prodex_mojo_core::rich::VirtualKeyAdmissionInput {
+            durable_budget: input.durable_budget,
+            usage_minute_epoch: input.usage_minute_epoch,
+            minute_epoch: input.minute_epoch,
+            requests_this_minute: input.requests_this_minute,
+            tokens_this_minute: input.tokens_this_minute,
+            requests_total: input.requests_total,
+            spend_microusd: input.spend_microusd,
+            reserved_tokens: input.reserved_tokens,
+            estimated_cost_microusd: input.estimated_cost_microusd,
+            request_budget: input.request_budget,
+            budget_microusd: input.budget_microusd,
+            rpm_limit: input.rpm_limit,
+            tpm_limit: input.tpm_limit,
+        },
+    )
+    .map_err(|_| GatewayVirtualKeyAdmissionError::PolicyStateUnavailable)?;
+    match decision {
+        prodex_mojo_core::rich::VirtualKeyAdmissionDecision::Allow => Ok(()),
+        prodex_mojo_core::rich::VirtualKeyAdmissionDecision::RequestBudgetExceeded => {
+            Err(GatewayVirtualKeyAdmissionError::RequestBudgetExceeded)
+        }
+        prodex_mojo_core::rich::VirtualKeyAdmissionDecision::BudgetExceeded => {
+            Err(GatewayVirtualKeyAdmissionError::BudgetExceeded)
+        }
+        prodex_mojo_core::rich::VirtualKeyAdmissionDecision::RpmLimitExceeded => {
+            Err(GatewayVirtualKeyAdmissionError::RpmLimitExceeded)
+        }
+        prodex_mojo_core::rich::VirtualKeyAdmissionDecision::TpmLimitExceeded => {
+            Err(GatewayVirtualKeyAdmissionError::TpmLimitExceeded)
+        }
+    }
+}
+
 pub fn plan_application_virtual_key_admission(
     request: GatewayVirtualKeyAdmissionRequest,
 ) -> Result<ApplicationVirtualKeyAdmissionPlan, ApplicationVirtualKeyAdmissionError> {
-    let gateway = plan_gateway_virtual_key_admission(request)
-        .map_err(ApplicationVirtualKeyAdmissionError::Gateway)?;
+    let gateway = {
+        #[cfg(feature = "mojo")]
+        {
+            plan_gateway_virtual_key_admission_with_kernel(
+                request,
+                gateway_virtual_key_admission_kernel,
+            )
+        }
+        #[cfg(not(feature = "mojo"))]
+        {
+            plan_gateway_virtual_key_admission(request)
+        }
+    }
+    .map_err(ApplicationVirtualKeyAdmissionError::Gateway)?;
     let distributed_rate_limit = gateway
         .distributed_rate_limit
         .as_ref()

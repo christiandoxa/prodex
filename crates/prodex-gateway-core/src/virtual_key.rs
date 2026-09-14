@@ -67,6 +67,24 @@ pub struct GatewayVirtualKeyAdmissionRequest {
     pub now_unix_ms: u64,
 }
 
+/// Scalar, non-secret input for virtual-key limit evaluation.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct GatewayVirtualKeyAdmissionKernelInput {
+    pub durable_budget: bool,
+    pub usage_minute_epoch: u64,
+    pub minute_epoch: u64,
+    pub requests_this_minute: u64,
+    pub tokens_this_minute: u64,
+    pub requests_total: u64,
+    pub spend_microusd: u64,
+    pub reserved_tokens: u64,
+    pub estimated_cost_microusd: Option<u64>,
+    pub request_budget: Option<u64>,
+    pub budget_microusd: Option<u64>,
+    pub rpm_limit: Option<u64>,
+    pub tpm_limit: Option<u64>,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct GatewayVirtualKeyAdmission {
     pub key_name: String,
@@ -133,6 +151,17 @@ impl std::error::Error for GatewayVirtualKeyAdmissionError {}
 pub fn plan_gateway_virtual_key_admission(
     request: GatewayVirtualKeyAdmissionRequest,
 ) -> Result<GatewayVirtualKeyAdmissionPlan, GatewayVirtualKeyAdmissionError> {
+    plan_gateway_virtual_key_admission_with_kernel(request, gateway_virtual_key_validate_admission)
+}
+
+/// Plan admission after Rust performs trust-boundary checks and a caller supplies
+/// the bounded scalar limit kernel.
+pub fn plan_gateway_virtual_key_admission_with_kernel(
+    request: GatewayVirtualKeyAdmissionRequest,
+    kernel: fn(
+        GatewayVirtualKeyAdmissionKernelInput,
+    ) -> Result<(), GatewayVirtualKeyAdmissionError>,
+) -> Result<GatewayVirtualKeyAdmissionPlan, GatewayVirtualKeyAdmissionError> {
     if let (Some(reservation), Some(policy_tenant_id)) = (
         request.reservation.as_ref(),
         request
@@ -151,7 +180,7 @@ pub fn plan_gateway_virtual_key_admission(
 
     let GatewayVirtualKeyAdmissionRequest {
         policy,
-        mut usage,
+        usage,
         model,
         input_tokens,
         reserved_tokens,
@@ -163,15 +192,33 @@ pub fn plan_gateway_virtual_key_admission(
         ..
     } = request;
 
-    gateway_virtual_key_validate_admission(
-        &policy,
-        &mut usage,
-        model.as_deref(),
+    // ponytail: dynamic model/grouped-scope matching stays Rust until a bounded
+    // string-table ABI exists.
+    if !policy.allowed_models.is_empty()
+        && model.as_deref().is_some_and(|model| {
+            !policy
+                .allowed_models
+                .iter()
+                .any(|allowed| allowed.trim().eq_ignore_ascii_case(model))
+        })
+    {
+        return Err(GatewayVirtualKeyAdmissionError::ModelNotAllowed);
+    }
+    kernel(GatewayVirtualKeyAdmissionKernelInput {
+        durable_budget,
+        usage_minute_epoch: usage.minute_epoch,
+        minute_epoch,
+        requests_this_minute: usage.requests_this_minute,
+        tokens_this_minute: usage.tokens_this_minute,
+        requests_total: usage.requests_total,
+        spend_microusd: usage.spend_microusd,
         reserved_tokens,
         estimated_cost_microusd,
-        minute_epoch,
-        durable_budget,
-    )?;
+        request_budget: policy.request_budget,
+        budget_microusd: policy.budget_microusd,
+        rpm_limit: policy.rpm_limit,
+        tpm_limit: policy.tpm_limit,
+    })?;
 
     let admission = GatewayVirtualKeyAdmission {
         key_name: policy.name.clone(),
@@ -210,63 +257,48 @@ pub fn plan_gateway_virtual_key_admission(
 }
 
 fn gateway_virtual_key_validate_admission(
-    policy: &GatewayVirtualKeyPolicy,
-    usage: &mut GatewayVirtualKeyUsage,
-    model: Option<&str>,
-    reserved_tokens: u64,
-    estimated_cost_microusd: Option<u64>,
-    minute_epoch: u64,
-    durable_budget: bool,
+    input: GatewayVirtualKeyAdmissionKernelInput,
 ) -> Result<(), GatewayVirtualKeyAdmissionError> {
-    if !policy.allowed_models.is_empty()
-        && model.is_some_and(|model| {
-            !policy
-                .allowed_models
-                .iter()
-                .any(|allowed| allowed.trim().eq_ignore_ascii_case(model))
-        })
-    {
-        return Err(GatewayVirtualKeyAdmissionError::ModelNotAllowed);
-    }
-    if durable_budget {
-        if policy.budget_microusd.is_some() {
-            usage.spend_microusd = 0;
-        }
-        if policy.request_budget.is_some() {
-            usage.requests_total = 0;
-        }
-    }
-    let same_minute = usage.minute_epoch == minute_epoch;
-    let requests_this_minute = if same_minute {
-        usage.requests_this_minute
+    let requests_total = if input.durable_budget && input.request_budget.is_some() {
+        0
+    } else {
+        input.requests_total
+    };
+    let spend_microusd = if input.durable_budget && input.budget_microusd.is_some() {
+        0
+    } else {
+        input.spend_microusd
+    };
+    let requests_this_minute = if input.usage_minute_epoch == input.minute_epoch {
+        input.requests_this_minute
     } else {
         0
     };
-    let tokens_this_minute = if same_minute {
-        usage.tokens_this_minute
+    let tokens_this_minute = if input.usage_minute_epoch == input.minute_epoch {
+        input.tokens_this_minute
     } else {
         0
     };
-    if policy
+    if input
         .request_budget
-        .is_some_and(|limit| usage.requests_total >= limit)
+        .is_some_and(|limit| requests_total >= limit)
     {
         return Err(GatewayVirtualKeyAdmissionError::RequestBudgetExceeded);
     }
-    if let (Some(limit), Some(cost)) = (policy.budget_microusd, estimated_cost_microusd)
-        && usage.spend_microusd.saturating_add(cost) > limit
+    if let (Some(limit), Some(cost)) = (input.budget_microusd, input.estimated_cost_microusd)
+        && spend_microusd.saturating_add(cost) > limit
     {
         return Err(GatewayVirtualKeyAdmissionError::BudgetExceeded);
     }
-    if policy
+    if input
         .rpm_limit
         .is_some_and(|limit| requests_this_minute.saturating_add(1) > limit)
     {
         return Err(GatewayVirtualKeyAdmissionError::RpmLimitExceeded);
     }
-    if policy
+    if input
         .tpm_limit
-        .is_some_and(|limit| tokens_this_minute.saturating_add(reserved_tokens) > limit)
+        .is_some_and(|limit| tokens_this_minute.saturating_add(input.reserved_tokens) > limit)
     {
         return Err(GatewayVirtualKeyAdmissionError::TpmLimitExceeded);
     }

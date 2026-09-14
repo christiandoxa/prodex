@@ -689,6 +689,10 @@ def gemini_write_operation(
         return (
             gemini_put_literal(writer, StringSlice(',"delta":'))
             and gemini_put_json_string(writer, input.delta)
+            and (input.signature_present == 0 or (
+                gemini_put_literal(writer, StringSlice(',"thought_signature":'))
+                and gemini_put_json_string(writer, input.signature)
+            ))
             and gemini_put_byte(writer, 125)
         )
     if operation == GEMINI_FUNCTION_CALL_ARGUMENTS_DELTA_WITHOUT_SEQUENCE:
@@ -702,6 +706,10 @@ def gemini_write_operation(
         return (
             gemini_put_literal(writer, StringSlice(',"delta":'))
             and gemini_put_json_string(writer, input.delta)
+            and (input.signature_present == 0 or (
+                gemini_put_literal(writer, StringSlice(',"thought_signature":'))
+                and gemini_put_json_string(writer, input.signature)
+            ))
             and gemini_put_byte(writer, 125)
         )
     if operation == GEMINI_OUTPUT_TEXT_DELTA:

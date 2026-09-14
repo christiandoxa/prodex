@@ -270,8 +270,30 @@ fn gemini_provider_core_shapes_stream_function_call_arguments_delta() {
         gemini_provider_core_function_call_arguments_delta_event_with_thought_signature(
             gemini_provider_core_function_call_arguments_delta_event(8, "call_1", "{\"x\":1}"),
             Some("sig_delta"),
-        )["thought_signature"],
-        "sig_delta"
+        ),
+        json!({
+            "type": "response.function_call_arguments.delta",
+            "sequence_number": 8,
+            "call_id": "call_1",
+            "delta": "{\"x\":1}",
+            "thought_signature": "sig_delta",
+        })
+    );
+    assert_eq!(
+        gemini_provider_core_function_call_arguments_delta_event_with_thought_signature(
+            json!({
+                "type": "response.function_call_arguments.delta",
+                "call_id": "call_1",
+                "delta": "{\"x\":1}",
+            }),
+            Some("sig_delta"),
+        ),
+        json!({
+            "type": "response.function_call_arguments.delta",
+            "call_id": "call_1",
+            "delta": "{\"x\":1}",
+            "thought_signature": "sig_delta",
+        })
     );
 }
 

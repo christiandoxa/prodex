@@ -4,10 +4,15 @@ use crate::{
     LocalBridgeBearerTokenHash, local_bridge_authorization_bearer_token,
     runtime_gateway_request_model,
 };
+#[cfg(not(feature = "mojo"))]
+use prodex_gateway_core::plan_gateway_virtual_key_admission;
 use prodex_gateway_core::{
     GatewayVirtualKeyAdmissionError, GatewayVirtualKeyAdmissionRequest, GatewayVirtualKeyPolicy,
     GatewayVirtualKeyUsageUpdate, apply_gateway_virtual_key_usage_update,
-    plan_gateway_virtual_key_admission,
+};
+#[cfg(feature = "mojo")]
+use prodex_gateway_core::{
+    GatewayVirtualKeyAdmissionKernelInput, plan_gateway_virtual_key_admission_with_kernel,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -242,7 +247,7 @@ pub fn runtime_gateway_virtual_key_admission(
     let model = runtime_gateway_request_model(body);
     let input_tokens = prodex_provider_core::estimate_request_input_tokens(body);
     let reserved_tokens = runtime_gateway_estimated_tokens(body);
-    plan_gateway_virtual_key_admission(GatewayVirtualKeyAdmissionRequest {
+    let request = GatewayVirtualKeyAdmissionRequest {
         policy: runtime_gateway_virtual_key_policy(key),
         usage: usage.cloned().unwrap_or_default(),
         grouped_usage: Vec::new(),
@@ -254,9 +259,60 @@ pub fn runtime_gateway_virtual_key_admission(
         reservation: None,
         distributed_rate_limit: false,
         now_unix_ms: 0,
-    })
-    .map(|plan| plan.admission)
-    .map_err(Into::into)
+    };
+    let plan = {
+        #[cfg(feature = "mojo")]
+        {
+            plan_gateway_virtual_key_admission_with_kernel(
+                request,
+                runtime_gateway_virtual_key_admission_kernel,
+            )
+        }
+        #[cfg(not(feature = "mojo"))]
+        {
+            plan_gateway_virtual_key_admission(request)
+        }
+    };
+    plan.map(|plan| plan.admission).map_err(Into::into)
+}
+
+#[cfg(feature = "mojo")]
+fn runtime_gateway_virtual_key_admission_kernel(
+    input: GatewayVirtualKeyAdmissionKernelInput,
+) -> Result<(), GatewayVirtualKeyAdmissionError> {
+    let decision = prodex_mojo_core::rich::validate_virtual_key_admission(
+        prodex_mojo_core::rich::VirtualKeyAdmissionInput {
+            durable_budget: input.durable_budget,
+            usage_minute_epoch: input.usage_minute_epoch,
+            minute_epoch: input.minute_epoch,
+            requests_this_minute: input.requests_this_minute,
+            tokens_this_minute: input.tokens_this_minute,
+            requests_total: input.requests_total,
+            spend_microusd: input.spend_microusd,
+            reserved_tokens: input.reserved_tokens,
+            estimated_cost_microusd: input.estimated_cost_microusd,
+            request_budget: input.request_budget,
+            budget_microusd: input.budget_microusd,
+            rpm_limit: input.rpm_limit,
+            tpm_limit: input.tpm_limit,
+        },
+    )
+    .map_err(|_| GatewayVirtualKeyAdmissionError::PolicyStateUnavailable)?;
+    match decision {
+        prodex_mojo_core::rich::VirtualKeyAdmissionDecision::Allow => Ok(()),
+        prodex_mojo_core::rich::VirtualKeyAdmissionDecision::RequestBudgetExceeded => {
+            Err(GatewayVirtualKeyAdmissionError::RequestBudgetExceeded)
+        }
+        prodex_mojo_core::rich::VirtualKeyAdmissionDecision::BudgetExceeded => {
+            Err(GatewayVirtualKeyAdmissionError::BudgetExceeded)
+        }
+        prodex_mojo_core::rich::VirtualKeyAdmissionDecision::RpmLimitExceeded => {
+            Err(GatewayVirtualKeyAdmissionError::RpmLimitExceeded)
+        }
+        prodex_mojo_core::rich::VirtualKeyAdmissionDecision::TpmLimitExceeded => {
+            Err(GatewayVirtualKeyAdmissionError::TpmLimitExceeded)
+        }
+    }
 }
 
 pub fn runtime_gateway_record_virtual_key_usage(
