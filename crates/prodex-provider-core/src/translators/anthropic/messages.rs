@@ -7,7 +7,9 @@ use crate::{
 };
 #[cfg(feature = "mojo")]
 use prodex_mojo_core::rich::{AnthropicRequestKernelInput, AnthropicRequestKernelOperation};
-use serde_json::{Map, Value, json};
+#[cfg(any(not(feature = "mojo"), test))]
+use serde_json::json;
+use serde_json::{Map, Value};
 use std::{
     collections::BTreeMap,
     time::{SystemTime, UNIX_EPOCH},
@@ -27,9 +29,10 @@ mod tool_shapes;
 mod web_search;
 
 pub(super) use stream::translate_anthropic_stream_event_to_responses;
+#[cfg(any(not(feature = "mojo"), test))]
+use web_search::anthropic_tool_usage;
 use web_search::{
-    anthropic_tool_usage, anthropic_web_search_call, anthropic_web_search_tool,
-    merge_anthropic_web_search_result,
+    anthropic_web_search_call, anthropic_web_search_tool, merge_anthropic_web_search_result,
 };
 
 const DEFAULT_MAX_TOKENS: u64 = 4096;
@@ -262,10 +265,90 @@ pub(super) fn translate_anthropic_response_to_responses(
         Err(reason) => return rejected_response(reason),
     };
 
+    #[cfg(feature = "mojo")]
+    let response = match anthropic_response_envelope_mojo(&value, output, unix_now_secs()) {
+        Ok(response) => response,
+        Err(reason) => return rejected_response(reason),
+    };
+    #[cfg(not(feature = "mojo"))]
+    let response = anthropic_response_envelope_rust(&value, output, unix_now_secs());
+
+    ProviderTransformResult::lossless(
+        ProviderId::Anthropic,
+        ProviderEndpoint::Responses,
+        ProviderWireFormat::AnthropicMessages,
+        ProviderWireFormat::OpenAiResponses,
+        serde_json::to_vec(&response).expect("Responses response serializes"),
+    )
+}
+
+#[cfg(feature = "mojo")]
+fn anthropic_response_envelope_mojo(
+    value: &Value,
+    output: Vec<Value>,
+    created_at: u64,
+) -> Result<Value, String> {
+    let id = json_fragment(&Value::String(
+        value
+            .get("id")
+            .and_then(Value::as_str)
+            .unwrap_or("resp_anthropic")
+            .to_string(),
+    ))?;
+    let model = json_fragment(&Value::String(
+        value
+            .get("model")
+            .and_then(Value::as_str)
+            .unwrap_or("unknown")
+            .to_string(),
+    ))?;
+    let output = json_fragment(&Value::Array(output))?;
+    let usage = value.get("usage").and_then(Value::as_object);
+    let stop_reason = value.get("stop_reason").map(json_fragment).transpose()?;
+    let mut flags = i64::from(usage.is_some());
+    let web_search_requests = usage
+        .and_then(|usage| usage.get("server_tool_use"))
+        .and_then(|usage| usage.get("web_search_requests"))
+        .and_then(Value::as_u64);
+    if web_search_requests.is_some() {
+        flags |= 2;
+    }
+    if stop_reason.is_some() {
+        flags |= 4;
+    }
+    let output_tokens = json_fragment(&Value::from(
+        usage
+            .and_then(|usage| usage.get("output_tokens"))
+            .and_then(Value::as_u64)
+            .unwrap_or(0),
+    ))?;
+    let web_search_requests = web_search_requests
+        .map(Value::from)
+        .map(|value| json_fragment(&value))
+        .transpose()?;
+    let mut input =
+        AnthropicRequestKernelInput::new(AnthropicRequestKernelOperation::ResponseEnvelope);
+    input.id = Some(&id);
+    input.model = Some(&model);
+    input.blocks = Some(&output);
+    input.created_at = created_at;
+    input.choice_kind = flags;
+    input.count = usage
+        .and_then(|usage| usage.get("input_tokens"))
+        .and_then(Value::as_u64)
+        .unwrap_or(0);
+    input.max_tokens = Some(&output_tokens);
+    input.arguments = stop_reason.as_deref();
+    input.tool_use_id = web_search_requests.as_deref();
+    anthropic_mojo_value(input)
+}
+
+#[cfg(any(not(feature = "mojo"), test))]
+fn anthropic_response_envelope_rust(value: &Value, output: Vec<Value>, created_at: u64) -> Value {
     let mut response = json!({
         "id": value.get("id").and_then(Value::as_str).unwrap_or("resp_anthropic"),
         "object": "response",
-        "created_at": unix_now_secs(),
+        "created_at": created_at,
         "model": value.get("model").and_then(Value::as_str).unwrap_or("unknown"),
         "output": output,
     });
@@ -278,14 +361,7 @@ pub(super) fn translate_anthropic_response_to_responses(
     if let Some(stop_reason) = value.get("stop_reason") {
         response["metadata"] = json!({"anthropic": {"stop_reason": stop_reason}});
     }
-
-    ProviderTransformResult::lossless(
-        ProviderId::Anthropic,
-        ProviderEndpoint::Responses,
-        ProviderWireFormat::AnthropicMessages,
-        ProviderWireFormat::OpenAiResponses,
-        serde_json::to_vec(&response).expect("Responses response serializes"),
-    )
+    response
 }
 
 #[cfg(not(feature = "mojo"))]
@@ -657,6 +733,7 @@ fn anthropic_tool_name(namespace: Option<&str>, name: &str) -> String {
         .unwrap_or_else(|| name.to_string())
 }
 
+#[cfg(any(not(feature = "mojo"), test))]
 fn anthropic_usage(value: Option<&Value>) -> Option<Value> {
     let value = value?.as_object()?;
     let input = value
@@ -743,6 +820,42 @@ fn unix_now_secs() -> u64 {
         .duration_since(UNIX_EPOCH)
         .map(|duration| duration.as_secs())
         .unwrap_or(0)
+}
+
+#[cfg(all(test, feature = "mojo"))]
+mod response_envelope_tests {
+    use super::*;
+
+    #[test]
+    fn mojo_response_envelope_matches_rust_oracle() {
+        let cases = [
+            json!({}),
+            json!({
+                "id": "msg_\u{1f980}",
+                "model": "claude",
+                "usage": {
+                    "input_tokens": 9,
+                    "output_tokens": 4,
+                    "server_tool_use": {"web_search_requests": 2},
+                },
+                "stop_reason": null,
+            }),
+            json!({
+                "id": null,
+                "model": 1,
+                "usage": {"input_tokens": u64::MAX, "output_tokens": 1},
+                "stop_reason": "end_turn",
+            }),
+        ];
+        for value in cases {
+            let output = vec![json!({"type": "message", "content": [{"text": "x\n\u{1f980}"}]})];
+            assert_eq!(
+                anthropic_response_envelope_mojo(&value, output.clone(), 123).unwrap(),
+                anthropic_response_envelope_rust(&value, output, 123),
+                "{value}"
+            );
+        }
+    }
 }
 
 #[cfg(test)]
