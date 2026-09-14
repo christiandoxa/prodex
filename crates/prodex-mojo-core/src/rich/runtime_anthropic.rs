@@ -29,6 +29,11 @@ pub enum RuntimeAnthropicKernelOperation {
     ToolResultTextPlan = 18,
     ComputerAction = 19,
     ComputerToolInput = 20,
+    ServerToolUsage = 21,
+    CarriedServerToolUsage = 22,
+    ServerToolRegistrations = 23,
+    MessageHasToolChain = 24,
+    ServerToolNameKind = 25,
 }
 
 pub const RUNTIME_ANTHROPIC_FLAG_ERROR: i64 = 1;

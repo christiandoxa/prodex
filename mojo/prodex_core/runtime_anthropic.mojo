@@ -40,6 +40,11 @@ comptime RUNTIME_ANTHROPIC_TEXT_BLOCK: Int64 = 17
 comptime RUNTIME_ANTHROPIC_TOOL_RESULT_TEXT_PLAN: Int64 = 18
 comptime RUNTIME_ANTHROPIC_COMPUTER_ACTION: Int64 = 19
 comptime RUNTIME_ANTHROPIC_COMPUTER_TOOL_INPUT: Int64 = 20
+comptime RUNTIME_ANTHROPIC_SERVER_TOOL_USAGE: Int64 = 21
+comptime RUNTIME_ANTHROPIC_CARRIED_SERVER_TOOL_USAGE: Int64 = 22
+comptime RUNTIME_ANTHROPIC_SERVER_TOOL_REGISTRATIONS: Int64 = 23
+comptime RUNTIME_ANTHROPIC_MESSAGE_HAS_TOOL_CHAIN: Int64 = 24
+comptime RUNTIME_ANTHROPIC_SERVER_TOOL_NAME_KIND: Int64 = 25
 
 comptime RUNTIME_ANTHROPIC_FLAG_ERROR: Int64 = 1
 comptime RUNTIME_ANTHROPIC_FLAG_MAX_OUTPUT_LENGTH: Int64 = 2
@@ -1134,6 +1139,486 @@ def runtime_anthropic_write_tool_result_text_plan(
     )
 
 
+def runtime_anthropic_normalized_name_matches(
+    view: ProdexRichStringView,
+    start: Int64,
+    end: Int64,
+    expected: StringSlice,
+) -> Bool:
+    if start < 0 or end < start or end > Int64(view.len):
+        return False
+    var source = rich_view_ptr(view)
+    var target = expected.unsafe_ptr()
+    var matched: Int64 = 0
+    for index in range(start, end):
+        var value = source[unsafe_offset=index]
+        var alphanumeric = (
+            (value >= 48 and value <= 57)
+            or (value >= 65 and value <= 90)
+            or (value >= 97 and value <= 122)
+        )
+        if not alphanumeric:
+            continue
+        if value >= 65 and value <= 90:
+            value += 32
+        if matched >= Int64(expected.byte_length()) or value != target[unsafe_offset=matched]:
+            return False
+        matched += 1
+    return matched == Int64(expected.byte_length())
+
+
+def runtime_anthropic_normalized_json_name_matches(
+    view: ProdexRichStringView,
+    start: Int64,
+    end: Int64,
+    expected: StringSlice,
+) -> Bool:
+    return runtime_anthropic_json_string_valid(view, start, end) and runtime_anthropic_normalized_name_matches(
+        view, start + 1, end - 1, expected
+    )
+
+
+def runtime_anthropic_server_tool_name_kind_raw(
+    view: ProdexRichStringView,
+    start: Int64,
+    end: Int64,
+) -> Int64:
+    if runtime_anthropic_normalized_name_matches(
+        view, start, end, StringSlice("websearch")
+    ):
+        return 1
+    if runtime_anthropic_normalized_name_matches(
+        view, start, end, StringSlice("webfetch")
+    ):
+        return 2
+    if runtime_anthropic_normalized_name_matches(
+        view, start, end, StringSlice("codeexecution")
+    ):
+        return 3
+    if runtime_anthropic_normalized_name_matches(
+        view, start, end, StringSlice("bashcodeexecution")
+    ):
+        return 4
+    if runtime_anthropic_normalized_name_matches(
+        view, start, end, StringSlice("texteditorcodeexecution")
+    ):
+        return 5
+    if runtime_anthropic_normalized_name_matches(
+        view, start, end, StringSlice("toolsearchtoolregex")
+    ):
+        return 6
+    if runtime_anthropic_normalized_name_matches(
+        view, start, end, StringSlice("toolsearchtoolbm25")
+    ):
+        return 7
+    return 0
+
+
+def runtime_anthropic_server_tool_usage_kind(
+    view: ProdexRichStringView,
+    start: Int64,
+    end: Int64,
+) -> Int64:
+    var block_type = anthropic_request_object_field(
+        view, start, end, StringSlice('"type"')
+    )
+    if block_type[0] < 0 or not (
+        anthropic_request_range_matches_literal(
+            view, block_type[0], block_type[1], StringSlice('"tool_use"')
+        )
+        or anthropic_request_range_matches_literal(
+            view, block_type[0], block_type[1], StringSlice('"server_tool_use"')
+        )
+        or anthropic_request_range_matches_literal(
+            view, block_type[0], block_type[1], StringSlice('"mcp_tool_use"')
+        )
+    ):
+        return 0
+    var name = anthropic_request_object_field(view, start, end, StringSlice('"name"'))
+    return runtime_anthropic_server_tool_name_kind(view, name)
+
+
+def runtime_anthropic_server_tool_name_kind(
+    view: ProdexRichStringView,
+    name: InlineArray[Int64, 2],
+) -> Int64:
+    if not runtime_anthropic_json_string_valid(view, name[0], name[1]):
+        return 0
+    var kind = runtime_anthropic_server_tool_name_kind_raw(
+        view, name[0] + 1, name[1] - 1
+    )
+    if kind >= 3 and kind <= 5:
+        return 3
+    if kind >= 6:
+        return 4
+    return kind
+
+
+def runtime_anthropic_is_tool_result_kind(
+    view: ProdexRichStringView,
+    kind: InlineArray[Int64, 2],
+) -> Bool:
+    return kind[0] >= 0 and (
+        anthropic_request_range_matches_literal(
+            view, kind[0], kind[1], StringSlice('"tool_result"')
+        )
+        or (
+            kind[1] - kind[0] >= 13
+            and anthropic_request_range_matches_literal(
+                view, kind[1] - 13, kind[1], StringSlice('_tool_result"')
+            )
+        )
+    )
+
+
+def runtime_anthropic_write_server_usage_counts(
+    writer: Pointer[mut=True, RuntimeAnthropicKernelWriter, _],
+    web_search: UInt64,
+    web_fetch: UInt64,
+    code_execution: UInt64,
+    tool_search: UInt64,
+) -> Bool:
+    return (
+        runtime_anthropic_put_literal(
+            writer, StringSlice('{"web_search_requests":')
+        )
+        and runtime_anthropic_put_u64(writer, web_search)
+        and runtime_anthropic_put_literal(
+            writer, StringSlice(',"web_fetch_requests":')
+        )
+        and runtime_anthropic_put_u64(writer, web_fetch)
+        and runtime_anthropic_put_literal(
+            writer, StringSlice(',"code_execution_requests":')
+        )
+        and runtime_anthropic_put_u64(writer, code_execution)
+        and runtime_anthropic_put_literal(
+            writer, StringSlice(',"tool_search_requests":')
+        )
+        and runtime_anthropic_put_u64(writer, tool_search)
+        and runtime_anthropic_put_byte(writer, 125)
+    )
+
+
+def runtime_anthropic_write_server_tool_usage(
+    writer: Pointer[mut=True, RuntimeAnthropicKernelWriter, _],
+    view: ProdexRichStringView,
+) -> Bool:
+    if view.len < 2:
+        return False
+    var kind = runtime_anthropic_server_tool_usage_kind(
+        view, 0, Int64(view.len)
+    )
+    return runtime_anthropic_write_server_usage_counts(
+        writer,
+        UInt64(kind == 1),
+        UInt64(kind == 2),
+        UInt64(kind == 3),
+        UInt64(kind == 4),
+    )
+
+
+def runtime_anthropic_write_carried_server_tool_usage(
+    writer: Pointer[mut=True, RuntimeAnthropicKernelWriter, _],
+    messages: ProdexRichStringView,
+) -> Bool:
+    if messages.len < 2 or anthropic_request_byte(messages, 0) != 91 or anthropic_request_byte(
+        messages, Int64(messages.len) - 1
+    ) != 93:
+        return False
+    var web_search: UInt64 = 0
+    var web_fetch: UInt64 = 0
+    var code_execution: UInt64 = 0
+    var tool_search: UInt64 = 0
+    var barrier = False
+    var end = Int64(messages.len) - 1
+    var cursor = anthropic_request_skip_ws(messages, 1, end)
+    while cursor < end:
+        var message_end = anthropic_request_value_end(messages, cursor, end, 0)
+        if message_end < 0:
+            return False
+        var content = anthropic_request_object_field(
+            messages, cursor, message_end, StringSlice('"content"')
+        )
+        var saw_chain = False
+        var saw_unaccounted_tool_use = False
+        var message_web_search: UInt64 = 0
+        var message_web_fetch: UInt64 = 0
+        var message_code_execution: UInt64 = 0
+        var message_tool_search: UInt64 = 0
+        if content[0] >= 0 and anthropic_request_byte(messages, content[0]) == 91:
+            var content_end = content[1] - 1
+            var block = anthropic_request_skip_ws(messages, content[0] + 1, content_end)
+            while block < content_end:
+                var block_end = anthropic_request_value_end(
+                    messages, block, content_end, 0
+                )
+                if block_end < 0:
+                    return False
+                var usage_kind = runtime_anthropic_server_tool_usage_kind(
+                    messages, block, block_end
+                )
+                if usage_kind == 1:
+                    message_web_search += 1
+                    saw_chain = True
+                elif usage_kind == 2:
+                    message_web_fetch += 1
+                    saw_chain = True
+                elif usage_kind == 3:
+                    message_code_execution += 1
+                    saw_chain = True
+                elif usage_kind == 4:
+                    message_tool_search += 1
+                    saw_chain = True
+                var block_type = anthropic_request_object_field(
+                    messages, block, block_end, StringSlice('"type"')
+                )
+                if runtime_anthropic_is_tool_result_kind(messages, block_type):
+                    saw_chain = True
+                elif usage_kind == 0 and block_type[0] >= 0 and (
+                    anthropic_request_range_matches_literal(
+                        messages,
+                        block_type[0],
+                        block_type[1],
+                        StringSlice('"tool_use"'),
+                    )
+                    or anthropic_request_range_matches_literal(
+                        messages,
+                        block_type[0],
+                        block_type[1],
+                        StringSlice('"server_tool_use"'),
+                    )
+                    or anthropic_request_range_matches_literal(
+                        messages,
+                        block_type[0],
+                        block_type[1],
+                        StringSlice('"mcp_tool_use"'),
+                    )
+                ):
+                    saw_unaccounted_tool_use = True
+                block = anthropic_request_skip_ws(messages, block_end, content_end)
+                if block < content_end and anthropic_request_byte(messages, block) == 44:
+                    block = anthropic_request_skip_ws(messages, block + 1, content_end)
+                elif block != content_end:
+                    return False
+        if saw_chain:
+            if barrier:
+                web_search = 0
+                web_fetch = 0
+                code_execution = 0
+                tool_search = 0
+            web_search += message_web_search
+            web_fetch += message_web_fetch
+            code_execution += message_code_execution
+            tool_search += message_tool_search
+            barrier = False
+        elif saw_unaccounted_tool_use:
+            web_search = 0
+            web_fetch = 0
+            code_execution = 0
+            tool_search = 0
+            barrier = False
+        else:
+            barrier = True
+        cursor = anthropic_request_skip_ws(messages, message_end, end)
+        if cursor < end and anthropic_request_byte(messages, cursor) == 44:
+            cursor = anthropic_request_skip_ws(messages, cursor + 1, end)
+        elif cursor != end:
+            return False
+    return runtime_anthropic_write_server_usage_counts(
+        writer, web_search, web_fetch, code_execution, tool_search
+    )
+
+
+def runtime_anthropic_write_canonical_server_tool_name(
+    writer: Pointer[mut=True, RuntimeAnthropicKernelWriter, _],
+    view: ProdexRichStringView,
+    name: InlineArray[Int64, 2],
+) -> Bool:
+    var kind = runtime_anthropic_server_tool_name_kind(view, name)
+    if kind == 1:
+        return runtime_anthropic_put_literal(writer, StringSlice('"web_search"'))
+    if kind == 2:
+        return runtime_anthropic_put_literal(writer, StringSlice('"web_fetch"'))
+    if kind == 3:
+        if runtime_anthropic_normalized_json_name_matches(
+            view, name[0], name[1], StringSlice("bashcodeexecution")
+        ):
+            return runtime_anthropic_put_literal(
+                writer, StringSlice('"bash_code_execution"')
+            )
+        if runtime_anthropic_normalized_json_name_matches(
+            view, name[0], name[1], StringSlice("texteditorcodeexecution")
+        ):
+            return runtime_anthropic_put_literal(
+                writer, StringSlice('"text_editor_code_execution"')
+            )
+        return runtime_anthropic_put_literal(writer, StringSlice('"code_execution"'))
+    if kind == 4:
+        if runtime_anthropic_normalized_json_name_matches(
+            view, name[0], name[1], StringSlice("toolsearchtoolbm25")
+        ):
+            return runtime_anthropic_put_literal(
+                writer, StringSlice('"tool_search_tool_bm25"')
+            )
+        return runtime_anthropic_put_literal(
+            writer, StringSlice('"tool_search_tool_regex"')
+        )
+    return runtime_anthropic_put_view_range(writer, view, name[0], name[1])
+
+
+def runtime_anthropic_put_server_tool_registration(
+    writer: Pointer[mut=True, RuntimeAnthropicKernelWriter, _],
+    view: ProdexRichStringView,
+    block_type: InlineArray[Int64, 2],
+    name: InlineArray[Int64, 2],
+    first: Pointer[mut=True, Bool, _],
+) -> Bool:
+    if not runtime_anthropic_json_string_valid(view, name[0], name[1]):
+        return True
+    if not first[] and not runtime_anthropic_put_byte(writer, 44):
+        return False
+    first[] = False
+    return (
+        runtime_anthropic_put_literal(writer, StringSlice('{"tool_name":'))
+        and runtime_anthropic_put_view_range(writer, view, name[0], name[1])
+        and runtime_anthropic_put_literal(writer, StringSlice(',"response_name":'))
+        and runtime_anthropic_write_canonical_server_tool_name(writer, view, name)
+        and runtime_anthropic_put_literal(writer, StringSlice(',"block_type":'))
+        and runtime_anthropic_put_view_range(
+            writer, view, block_type[0], block_type[1]
+        )
+        and runtime_anthropic_put_byte(writer, 125)
+    )
+
+
+def runtime_anthropic_write_server_tool_registrations(
+    writer: Pointer[mut=True, RuntimeAnthropicKernelWriter, _],
+    messages: ProdexRichStringView,
+) -> Bool:
+    if messages.len < 2 or anthropic_request_byte(messages, 0) != 91 or anthropic_request_byte(
+        messages, Int64(messages.len) - 1
+    ) != 93 or not runtime_anthropic_put_byte(writer, 91):
+        return False
+    var first = True
+    var first_ptr = Pointer(to=first)
+    var end = Int64(messages.len) - 1
+    var cursor = anthropic_request_skip_ws(messages, 1, end)
+    while cursor < end:
+        var message_end = anthropic_request_value_end(messages, cursor, end, 0)
+        if message_end < 0:
+            return False
+        var content = anthropic_request_object_field(
+            messages, cursor, message_end, StringSlice('"content"')
+        )
+        if content[0] >= 0 and anthropic_request_byte(messages, content[0]) == 91:
+            var content_end = content[1] - 1
+            var block = anthropic_request_skip_ws(messages, content[0] + 1, content_end)
+            while block < content_end:
+                var block_end = anthropic_request_value_end(
+                    messages, block, content_end, 0
+                )
+                if block_end < 0:
+                    return False
+                var block_type = anthropic_request_object_field(
+                    messages, block, block_end, StringSlice('"type"')
+                )
+                if (
+                    anthropic_request_range_matches_literal(
+                        messages,
+                        block_type[0],
+                        block_type[1],
+                        StringSlice('"server_tool_use"'),
+                    )
+                    or anthropic_request_range_matches_literal(
+                        messages,
+                        block_type[0],
+                        block_type[1],
+                        StringSlice('"mcp_tool_use"'),
+                    )
+                ):
+                    var name = anthropic_request_object_field(
+                        messages, block, block_end, StringSlice('"name"')
+                    )
+                    if not runtime_anthropic_put_server_tool_registration(
+                        writer, messages, block_type, name, first_ptr
+                    ):
+                        return False
+                block = anthropic_request_skip_ws(messages, block_end, content_end)
+                if block < content_end and anthropic_request_byte(messages, block) == 44:
+                    block = anthropic_request_skip_ws(messages, block + 1, content_end)
+                elif block != content_end:
+                    return False
+        cursor = anthropic_request_skip_ws(messages, message_end, end)
+        if cursor < end and anthropic_request_byte(messages, cursor) == 44:
+            cursor = anthropic_request_skip_ws(messages, cursor + 1, end)
+        elif cursor != end:
+            return False
+    return runtime_anthropic_put_byte(writer, 93)
+
+
+def runtime_anthropic_write_message_has_tool_chain(
+    writer: Pointer[mut=True, RuntimeAnthropicKernelWriter, _],
+    message: ProdexRichStringView,
+) -> Bool:
+    if message.len < 2:
+        return False
+    var content = anthropic_request_object_field(
+        message, 0, Int64(message.len), StringSlice('"content"')
+    )
+    if content[0] < 0 or anthropic_request_byte(message, content[0]) != 91:
+        return runtime_anthropic_put_literal(writer, StringSlice("false"))
+    var end = content[1] - 1
+    var block = anthropic_request_skip_ws(message, content[0] + 1, end)
+    while block < end:
+        var block_end = anthropic_request_value_end(message, block, end, 0)
+        if block_end < 0:
+            return False
+        var block_type = anthropic_request_object_field(
+            message, block, block_end, StringSlice('"type"')
+        )
+        if runtime_anthropic_is_tool_result_kind(message, block_type) or (
+            block_type[0] >= 0
+            and (
+                anthropic_request_range_matches_literal(
+                    message, block_type[0], block_type[1], StringSlice('"tool_use"')
+                )
+                or anthropic_request_range_matches_literal(
+                    message,
+                    block_type[0],
+                    block_type[1],
+                    StringSlice('"server_tool_use"'),
+                )
+                or anthropic_request_range_matches_literal(
+                    message,
+                    block_type[0],
+                    block_type[1],
+                    StringSlice('"mcp_tool_use"'),
+                )
+            )
+        ):
+            return runtime_anthropic_put_literal(writer, StringSlice("true"))
+        block = anthropic_request_skip_ws(message, block_end, end)
+        if block < end and anthropic_request_byte(message, block) == 44:
+            block = anthropic_request_skip_ws(message, block + 1, end)
+        elif block != end:
+            return False
+    return runtime_anthropic_put_literal(writer, StringSlice("false"))
+
+
+def runtime_anthropic_write_server_tool_name_kind(
+    writer: Pointer[mut=True, RuntimeAnthropicKernelWriter, _],
+    name: ProdexRichStringView,
+) -> Bool:
+    return runtime_anthropic_put_u64(
+        writer,
+        UInt64(
+            runtime_anthropic_server_tool_name_kind_raw(
+                name, 0, Int64(name.len)
+            )
+        ),
+    )
+
+
 def runtime_anthropic_coordinate_ranges(
     view: ProdexRichStringView,
 ) -> InlineArray[Int64, 4]:
@@ -1442,6 +1927,26 @@ def runtime_anthropic_write_operation(
         return runtime_anthropic_write_computer_action(writer, input)
     if input.operation == RUNTIME_ANTHROPIC_COMPUTER_TOOL_INPUT:
         return runtime_anthropic_write_computer_tool_input(writer, input)
+    if input.operation == RUNTIME_ANTHROPIC_SERVER_TOOL_USAGE:
+        if input.message_present == 0:
+            return False
+        return runtime_anthropic_write_server_tool_usage(writer, input.message)
+    if input.operation == RUNTIME_ANTHROPIC_CARRIED_SERVER_TOOL_USAGE:
+        if input.message_present == 0:
+            return False
+        return runtime_anthropic_write_carried_server_tool_usage(writer, input.message)
+    if input.operation == RUNTIME_ANTHROPIC_SERVER_TOOL_REGISTRATIONS:
+        if input.message_present == 0:
+            return False
+        return runtime_anthropic_write_server_tool_registrations(writer, input.message)
+    if input.operation == RUNTIME_ANTHROPIC_MESSAGE_HAS_TOOL_CHAIN:
+        if input.message_present == 0:
+            return False
+        return runtime_anthropic_write_message_has_tool_chain(writer, input.message)
+    if input.operation == RUNTIME_ANTHROPIC_SERVER_TOOL_NAME_KIND:
+        if input.name_present == 0:
+            return False
+        return runtime_anthropic_write_server_tool_name_kind(writer, input.name)
     return False
 
 
@@ -1450,7 +1955,7 @@ def runtime_anthropic_input_valid(
 ) -> Bool:
     return (
         input.operation > 0
-        and input.operation <= RUNTIME_ANTHROPIC_COMPUTER_TOOL_INPUT
+        and input.operation <= RUNTIME_ANTHROPIC_SERVER_TOOL_NAME_KIND
         and rich_view_valid(input.id, RUNTIME_ANTHROPIC_KERNEL_MAX_BYTES)
         and rich_view_valid(input.name, RUNTIME_ANTHROPIC_KERNEL_MAX_BYTES)
         and rich_view_valid(input.block_type, RUNTIME_ANTHROPIC_KERNEL_MAX_BYTES)

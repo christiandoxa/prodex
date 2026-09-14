@@ -1,5 +1,16 @@
 use super::*;
 
+#[cfg(any(not(feature = "mojo"), test))]
+#[path = "input_tool_results/usage_fallback.rs"]
+mod usage_fallback;
+
+#[cfg(any(not(feature = "mojo"), test))]
+use usage_fallback::*;
+
+#[cfg(all(test, feature = "mojo"))]
+#[path = "input_tool_results_tests.rs"]
+mod tests;
+
 pub fn runtime_proxy_translate_anthropic_tool_result_payload(
     block: &serde_json::Value,
 ) -> Result<(String, String, Vec<serde_json::Value>)> {
@@ -568,63 +579,6 @@ fn runtime_proxy_anthropic_tool_result_text_plan_rust(
     ))
 }
 
-#[cfg(all(test, feature = "mojo"))]
-mod mojo_tool_result_text_tests {
-    use super::*;
-
-    #[test]
-    fn mojo_tool_result_text_plan_matches_rust_oracle() {
-        let cases = [
-            "Web search results for query: \"berita \u{1f980}\"\n\nLinks: []\n\nSummary one\n\nSummary two\nSources:\nignored",
-            "\u{2003}Web search results for query: plain query\r\nNo links found.\nLink: ignored\nanswer\u{2003}\nIf you'd like more",
-            "Web search results for query: \" spaced \" trailing\nREMINDER: stop",
-            "not a web result",
-            "",
-        ];
-        for text in cases {
-            let (_, summary_start) =
-                runtime_proxy_anthropic_web_search_urls_from_tool_result_text(text);
-            assert_eq!(
-                runtime_proxy_anthropic_tool_result_text_plan(text, summary_start),
-                runtime_proxy_anthropic_tool_result_text_plan_rust(text, summary_start),
-                "{text:?}"
-            );
-        }
-    }
-
-    #[test]
-    fn mojo_compact_summary_matches_rust_oracle() {
-        for summary in [
-            "  first  \n\n second \n",
-            "No links found.\ntext\nKalau mau, saya bisa lanjutkan",
-            "Link: ignored\n\u{2003}unicode\u{2003}",
-            "",
-        ] {
-            assert_eq!(
-                runtime_proxy_compact_web_search_tool_result_summary(summary),
-                runtime_proxy_compact_web_search_tool_result_summary_rust(summary),
-                "{summary:?}"
-            );
-        }
-    }
-
-    #[test]
-    fn mojo_tool_result_text_plan_enforces_size_boundary() {
-        const MAX_BYTES: usize = 4 * 1024 * 1024;
-        let exact = "x".repeat(MAX_BYTES);
-        let mut input = prodex_mojo_core::rich::RuntimeAnthropicKernelInput::new(
-            prodex_mojo_core::rich::RuntimeAnthropicKernelOperation::ToolResultTextPlan,
-        );
-        input.text = Some(&exact);
-        input.flags = 1;
-        assert!(prodex_mojo_core::rich::runtime_anthropic_kernel(input).is_ok());
-
-        let oversized = format!("{exact}x");
-        input.text = Some(&oversized);
-        assert!(prodex_mojo_core::rich::runtime_anthropic_kernel(input).is_err());
-    }
-}
-
 #[cfg(feature = "mojo")]
 pub fn runtime_proxy_translate_anthropic_tool_result(
     block: &serde_json::Value,
@@ -668,127 +622,107 @@ pub fn runtime_proxy_translate_anthropic_tool_result(
     Ok(translated)
 }
 
+#[cfg(feature = "mojo")]
 pub fn runtime_proxy_anthropic_tool_use_server_tool_usage(
     block: &serde_json::Value,
 ) -> RuntimeAnthropicServerToolUsage {
-    let tool_name = match block.get("type").and_then(serde_json::Value::as_str) {
-        Some(block_type) if runtime_proxy_anthropic_is_tool_use_block_type(block_type) => block
-            .get("name")
-            .and_then(serde_json::Value::as_str)
-            .map(str::trim),
-        _ => None,
-    };
-    match tool_name.and_then(runtime_proxy_anthropic_builtin_server_tool_name) {
-        Some("web_search") => RuntimeAnthropicServerToolUsage {
-            web_search_requests: 1,
-            ..RuntimeAnthropicServerToolUsage::default()
-        },
-        Some("web_fetch") => RuntimeAnthropicServerToolUsage {
-            web_fetch_requests: 1,
-            ..RuntimeAnthropicServerToolUsage::default()
-        },
-        Some("code_execution" | "bash_code_execution" | "text_editor_code_execution") => {
-            RuntimeAnthropicServerToolUsage {
-                code_execution_requests: 1,
-                ..RuntimeAnthropicServerToolUsage::default()
-            }
-        }
-        Some("tool_search_tool_regex" | "tool_search_tool_bm25") => {
-            RuntimeAnthropicServerToolUsage {
-                tool_search_requests: 1,
-                ..RuntimeAnthropicServerToolUsage::default()
-            }
-        }
-        _ => RuntimeAnthropicServerToolUsage::default(),
-    }
+    runtime_proxy_anthropic_server_tool_usage_mojo(
+        prodex_mojo_core::rich::RuntimeAnthropicKernelOperation::ServerToolUsage,
+        &serde_json::to_string(block).expect("Anthropic tool-use block serializes"),
+    )
 }
 
+#[cfg(not(feature = "mojo"))]
+pub fn runtime_proxy_anthropic_tool_use_server_tool_usage(
+    block: &serde_json::Value,
+) -> RuntimeAnthropicServerToolUsage {
+    runtime_proxy_anthropic_tool_use_server_tool_usage_rust(block)
+}
+
+#[cfg(feature = "mojo")]
 pub fn runtime_proxy_anthropic_register_server_tools_from_messages(
     messages: &[serde_json::Value],
     server_tools: &mut RuntimeAnthropicServerTools,
 ) {
-    for message in messages {
-        let Some(blocks) = message.get("content").and_then(serde_json::Value::as_array) else {
+    let message = serde_json::to_string(messages).expect("Anthropic messages serialize");
+    let mut input = prodex_mojo_core::rich::RuntimeAnthropicKernelInput::new(
+        prodex_mojo_core::rich::RuntimeAnthropicKernelOperation::ServerToolRegistrations,
+    );
+    input.message = Some(&message);
+    let value = crate::mojo::json(input);
+    for registration in value
+        .as_array()
+        .expect("Anthropic server-tool registrations should be an array")
+    {
+        let Some(tool_name) = registration["tool_name"].as_str() else {
             continue;
         };
-        for block in blocks {
-            let block_type = block
-                .get("type")
-                .and_then(serde_json::Value::as_str)
-                .unwrap_or_default();
-            if !matches!(block_type, "server_tool_use" | "mcp_tool_use") {
-                continue;
-            }
-            let Some(tool_name) = block
-                .get("name")
-                .and_then(serde_json::Value::as_str)
-                .map(str::trim)
-                .filter(|value| !value.is_empty())
-            else {
-                continue;
-            };
-            let response_name =
-                runtime_proxy_anthropic_builtin_server_tool_name(tool_name).unwrap_or(tool_name);
-            server_tools.register_with_block_type(tool_name, response_name, block_type);
-        }
+        let Some(response_name) = registration["response_name"].as_str() else {
+            continue;
+        };
+        let Some(block_type) = registration["block_type"].as_str() else {
+            continue;
+        };
+        server_tools.register_with_block_type(tool_name, response_name, block_type);
     }
 }
 
-pub fn runtime_proxy_anthropic_message_has_tool_chain_blocks(message: &serde_json::Value) -> bool {
-    let Some(content) = message.get("content") else {
-        return false;
-    };
-    let Some(blocks) = content.as_array() else {
-        return false;
-    };
-    blocks.iter().any(|block| {
-        block
-            .get("type")
-            .and_then(serde_json::Value::as_str)
-            .is_some_and(|block_type| {
-                runtime_proxy_anthropic_is_tool_use_block_type(block_type)
-                    || runtime_proxy_anthropic_is_tool_result_block_type(block_type)
-            })
-    })
+#[cfg(not(feature = "mojo"))]
+pub fn runtime_proxy_anthropic_register_server_tools_from_messages(
+    messages: &[serde_json::Value],
+    server_tools: &mut RuntimeAnthropicServerTools,
+) {
+    runtime_proxy_anthropic_register_server_tools_from_messages_rust(messages, server_tools);
 }
 
+#[cfg(feature = "mojo")]
+pub fn runtime_proxy_anthropic_message_has_tool_chain_blocks(message: &serde_json::Value) -> bool {
+    let message = serde_json::to_string(message).expect("Anthropic message serializes");
+    let mut input = prodex_mojo_core::rich::RuntimeAnthropicKernelInput::new(
+        prodex_mojo_core::rich::RuntimeAnthropicKernelOperation::MessageHasToolChain,
+    );
+    input.message = Some(&message);
+    crate::mojo::json(input)
+        .as_bool()
+        .expect("Anthropic tool-chain result should be a boolean")
+}
+
+#[cfg(not(feature = "mojo"))]
+pub fn runtime_proxy_anthropic_message_has_tool_chain_blocks(message: &serde_json::Value) -> bool {
+    runtime_proxy_anthropic_message_has_tool_chain_blocks_rust(message)
+}
+
+#[cfg(feature = "mojo")]
+fn runtime_proxy_anthropic_server_tool_usage_mojo(
+    operation: prodex_mojo_core::rich::RuntimeAnthropicKernelOperation,
+    message: &str,
+) -> RuntimeAnthropicServerToolUsage {
+    let mut input = prodex_mojo_core::rich::RuntimeAnthropicKernelInput::new(operation);
+    input.message = Some(message);
+    let value = crate::mojo::json(input);
+    RuntimeAnthropicServerToolUsage {
+        web_search_requests: value["web_search_requests"].as_u64().unwrap_or_default(),
+        web_fetch_requests: value["web_fetch_requests"].as_u64().unwrap_or_default(),
+        code_execution_requests: value["code_execution_requests"]
+            .as_u64()
+            .unwrap_or_default(),
+        tool_search_requests: value["tool_search_requests"].as_u64().unwrap_or_default(),
+    }
+}
+
+#[cfg(feature = "mojo")]
 pub fn runtime_proxy_anthropic_carried_server_tool_usage(
     messages: &[serde_json::Value],
 ) -> RuntimeAnthropicServerToolUsage {
-    let mut usage = RuntimeAnthropicServerToolUsage::default();
-    let mut collecting_suffix = false;
+    runtime_proxy_anthropic_server_tool_usage_mojo(
+        prodex_mojo_core::rich::RuntimeAnthropicKernelOperation::CarriedServerToolUsage,
+        &serde_json::to_string(messages).expect("Anthropic messages serialize"),
+    )
+}
 
-    for message in messages.iter().rev() {
-        let Some(blocks) = message.get("content").and_then(serde_json::Value::as_array) else {
-            if collecting_suffix {
-                break;
-            }
-            continue;
-        };
-        let mut saw_tool_chain_block = false;
-        for block in blocks {
-            let block_usage = runtime_proxy_anthropic_tool_use_server_tool_usage(block);
-            if block_usage != RuntimeAnthropicServerToolUsage::default() {
-                usage.add_assign(block_usage);
-                saw_tool_chain_block = true;
-                continue;
-            }
-            if block
-                .get("type")
-                .and_then(serde_json::Value::as_str)
-                .is_some_and(runtime_proxy_anthropic_is_tool_result_block_type)
-            {
-                saw_tool_chain_block = true;
-            }
-        }
-        if saw_tool_chain_block {
-            collecting_suffix = true;
-        } else if collecting_suffix
-            || runtime_proxy_anthropic_message_has_tool_chain_blocks(message)
-        {
-            break;
-        }
-    }
-
-    usage
+#[cfg(not(feature = "mojo"))]
+pub fn runtime_proxy_anthropic_carried_server_tool_usage(
+    messages: &[serde_json::Value],
+) -> RuntimeAnthropicServerToolUsage {
+    runtime_proxy_anthropic_carried_server_tool_usage_rust(messages)
 }
