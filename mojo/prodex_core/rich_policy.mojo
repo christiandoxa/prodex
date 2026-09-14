@@ -1538,6 +1538,177 @@ def prodex_mojo_rich_application_authorization_plan_v1(
         decision[] = APPLICATION_AUTHORIZATION_CONTROL_ACTION
     return RICH_STATUS_OK
 
+
+comptime APPLICATION_SCOPE_ABI_VERSION: Int64 = 1
+comptime APPLICATION_SCOPE_DIMENSION_COUNT: Int64 = 5
+comptime APPLICATION_SCOPE_MAX_TEXT_BYTES: Int64 = 9_223_372_036_854_775_807
+comptime APPLICATION_SCOPE_UNRESTRICTED: Int64 = 0
+comptime APPLICATION_SCOPE_TENANT: Int64 = 1
+comptime APPLICATION_SCOPE_DIMENSIONS: Int64 = 2
+comptime APPLICATION_SCOPE_ALL: Int64 = 3
+comptime APPLICATION_SCOPE_RESOURCE_NAME: Int64 = 4
+comptime APPLICATION_SCOPE_PREFIXES: Int64 = 5
+
+
+def application_scope_present(mask: Int64, index: Int64) -> Bool:
+    return mask & (1 << index) != 0
+
+
+def application_scope_dimensions_match(
+    scope_values: Pointer[mut=False, ProdexRichStringView, ImmUntrackedOrigin],
+    scope_present_mask: Int64,
+    values: Pointer[mut=False, ProdexRichStringView, ImmUntrackedOrigin],
+    value_present_mask: Int64,
+    start: Int64,
+    end: Int64,
+) -> Bool:
+    for index in range(start, end):
+        if not application_scope_present(scope_present_mask, index):
+            continue
+        if not application_scope_present(value_present_mask, index) or not rich_views_equal(
+            scope_values[unsafe_offset=index], values[unsafe_offset=index]
+        ):
+            return False
+    return True
+
+
+def application_scope_starts_with(
+    value: ProdexRichStringView, prefix: ProdexRichStringView
+) -> Bool:
+    if prefix.len > value.len:
+        return False
+    var value_ptr = rich_view_ptr(value)
+    var prefix_ptr = rich_view_ptr(prefix)
+    for index in range(Int64(prefix.len)):
+        if value_ptr[unsafe_offset=index] != prefix_ptr[unsafe_offset=index]:
+            return False
+    return True
+
+
+def application_scope_resource_matches(
+    scope_prefixes: Pointer[
+        mut=False, ProdexRichStringView, ImmUntrackedOrigin
+    ],
+    scope_prefix_count: Int64,
+    resource_name: ProdexRichStringView,
+) -> Bool:
+    if scope_prefix_count == 0:
+        return True
+    for index in range(scope_prefix_count):
+        if application_scope_starts_with(
+            resource_name, scope_prefixes[unsafe_offset=index]
+        ):
+            return True
+    return False
+
+
+@export("prodex_mojo_rich_application_governance_scope_v1")
+def prodex_mojo_rich_application_governance_scope_v1(
+    abi_version: Int64,
+    operation: Int64,
+    scope_values_address: UInt,
+    scope_present_mask: Int64,
+    values_address: UInt,
+    value_present_mask: Int64,
+    scope_prefixes_address: UInt,
+    scope_prefix_count: Int64,
+    candidates_address: UInt,
+    candidate_count: Int64,
+    result_address: UInt,
+) abi("C") -> Int64:
+    if (
+        abi_version != APPLICATION_SCOPE_ABI_VERSION
+        or operation < APPLICATION_SCOPE_UNRESTRICTED
+        or operation > APPLICATION_SCOPE_PREFIXES
+        or scope_values_address == 0
+        or values_address == 0
+        or scope_present_mask < 0
+        or scope_present_mask >= 1 << APPLICATION_SCOPE_DIMENSION_COUNT
+        or value_present_mask < 0
+        or value_present_mask >= 1 << APPLICATION_SCOPE_DIMENSION_COUNT
+        or scope_prefix_count < 0
+        or candidate_count < 0
+        or (scope_prefix_count > 0 and scope_prefixes_address == 0)
+        or (candidate_count > 0 and candidates_address == 0)
+        or (operation == APPLICATION_SCOPE_RESOURCE_NAME and candidate_count != 1)
+        or result_address == 0
+    ):
+        return RICH_STATUS_INVALID
+    var scope_values = Pointer[
+        mut=False, ProdexRichStringView, ImmUntrackedOrigin
+    ](unsafe_from_address=Int(scope_values_address))
+    var values = Pointer[
+        mut=False, ProdexRichStringView, ImmUntrackedOrigin
+    ](unsafe_from_address=Int(values_address))
+    var scope_prefixes = Pointer[
+        mut=False, ProdexRichStringView, ImmUntrackedOrigin
+    ](unsafe_from_address=Int(scope_prefixes_address))
+    var candidates = Pointer[
+        mut=False, ProdexRichStringView, ImmUntrackedOrigin
+    ](unsafe_from_address=Int(candidates_address))
+    for index in range(APPLICATION_SCOPE_DIMENSION_COUNT):
+        if application_scope_present(scope_present_mask, index) and not rich_view_valid(
+            scope_values[unsafe_offset=index], APPLICATION_SCOPE_MAX_TEXT_BYTES
+        ):
+            return RICH_STATUS_UTF8
+        if application_scope_present(value_present_mask, index) and not rich_view_valid(
+            values[unsafe_offset=index], APPLICATION_SCOPE_MAX_TEXT_BYTES
+        ):
+            return RICH_STATUS_UTF8
+    for index in range(scope_prefix_count):
+        if not rich_view_valid(
+            scope_prefixes[unsafe_offset=index], APPLICATION_SCOPE_MAX_TEXT_BYTES
+        ):
+            return RICH_STATUS_UTF8
+    for index in range(candidate_count):
+        if not rich_view_valid(
+            candidates[unsafe_offset=index], APPLICATION_SCOPE_MAX_TEXT_BYTES
+        ):
+            return RICH_STATUS_UTF8
+    var allowed = True
+    if operation == APPLICATION_SCOPE_UNRESTRICTED:
+        allowed = scope_present_mask == 0
+    elif operation == APPLICATION_SCOPE_TENANT:
+        allowed = application_scope_dimensions_match(
+            scope_values, scope_present_mask, values, value_present_mask, 0, 1
+        )
+    elif operation == APPLICATION_SCOPE_DIMENSIONS:
+        allowed = application_scope_dimensions_match(
+            scope_values,
+            scope_present_mask,
+            values,
+            value_present_mask,
+            1,
+            APPLICATION_SCOPE_DIMENSION_COUNT,
+        )
+    elif operation == APPLICATION_SCOPE_ALL:
+        allowed = application_scope_dimensions_match(
+            scope_values,
+            scope_present_mask,
+            values,
+            value_present_mask,
+            0,
+            APPLICATION_SCOPE_DIMENSION_COUNT,
+        )
+    elif operation == APPLICATION_SCOPE_RESOURCE_NAME:
+        allowed = application_scope_resource_matches(
+            scope_prefixes, scope_prefix_count, candidates[unsafe_offset=0]
+        )
+    elif scope_prefix_count > 0:
+        allowed = candidate_count > 0
+        for index in range(candidate_count):
+            if not application_scope_resource_matches(
+                scope_prefixes, scope_prefix_count, candidates[unsafe_offset=index]
+            ):
+                allowed = False
+                break
+    var result = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(result_address)
+    )
+    result[] = 1 if allowed else 0
+    return RICH_STATUS_OK
+
+
 @fieldwise_init
 struct ApplicationRequestMetadataResult(Copyable):
     var abi_version: Int64

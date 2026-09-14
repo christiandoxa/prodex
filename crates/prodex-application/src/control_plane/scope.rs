@@ -48,15 +48,27 @@ impl ApplicationControlPlaneGovernanceScope {
     }
 
     pub fn dimensions_are_unrestricted(&self) -> bool {
-        self.tenant_id.is_none()
-            && self.team_id.is_none()
-            && self.project_id.is_none()
-            && self.user_id.is_none()
-            && self.budget_id.is_none()
+        #[cfg(feature = "mojo")]
+        return self.mojo_matches(
+            prodex_mojo_core::rich::ApplicationScopeOperation::DimensionsUnrestricted,
+            [None; 5],
+            &[],
+        );
+
+        #[cfg(not(feature = "mojo"))]
+        self.dimensions_are_unrestricted_rust()
     }
 
     pub fn matches_tenant(&self, tenant_id: Option<&str>) -> bool {
-        scoped_value_matches(self.tenant_id.as_deref(), tenant_id)
+        #[cfg(feature = "mojo")]
+        return self.mojo_matches(
+            prodex_mojo_core::rich::ApplicationScopeOperation::TenantMatches,
+            [tenant_id, None, None, None, None],
+            &[],
+        );
+
+        #[cfg(not(feature = "mojo"))]
+        self.matches_tenant_rust(tenant_id)
     }
 
     pub fn matches_dimensions(
@@ -66,10 +78,15 @@ impl ApplicationControlPlaneGovernanceScope {
         user_id: Option<&str>,
         budget_id: Option<&str>,
     ) -> bool {
-        scoped_value_matches(self.team_id.as_deref(), team_id)
-            && scoped_value_matches(self.project_id.as_deref(), project_id)
-            && scoped_value_matches(self.user_id.as_deref(), user_id)
-            && scoped_value_matches(self.budget_id.as_deref(), budget_id)
+        #[cfg(feature = "mojo")]
+        return self.mojo_matches(
+            prodex_mojo_core::rich::ApplicationScopeOperation::DimensionsMatch,
+            [None, team_id, project_id, user_id, budget_id],
+            &[],
+        );
+
+        #[cfg(not(feature = "mojo"))]
+        self.matches_dimensions_rust(team_id, project_id, user_id, budget_id)
     }
 
     pub fn matches(
@@ -80,24 +97,42 @@ impl ApplicationControlPlaneGovernanceScope {
         user_id: Option<&str>,
         budget_id: Option<&str>,
     ) -> bool {
-        self.matches_tenant(tenant_id)
-            && self.matches_dimensions(team_id, project_id, user_id, budget_id)
+        #[cfg(feature = "mojo")]
+        return self.mojo_matches(
+            prodex_mojo_core::rich::ApplicationScopeOperation::AllMatch,
+            [tenant_id, team_id, project_id, user_id, budget_id],
+            &[],
+        );
+
+        #[cfg(not(feature = "mojo"))]
+        self.matches_rust(tenant_id, team_id, project_id, user_id, budget_id)
     }
 
     pub fn matches_resource_name(&self, name: &str) -> bool {
-        self.allowed_resource_prefixes.is_empty()
-            || self
-                .allowed_resource_prefixes
-                .iter()
-                .any(|prefix| name.starts_with(prefix))
+        #[cfg(feature = "mojo")]
+        return self.mojo_matches(
+            prodex_mojo_core::rich::ApplicationScopeOperation::ResourceNameMatches,
+            [None; 5],
+            &[name],
+        );
+
+        #[cfg(not(feature = "mojo"))]
+        self.matches_resource_name_rust(name)
     }
 
     pub fn allows_resource_prefixes(&self, prefixes: &[String]) -> bool {
-        self.allowed_resource_prefixes.is_empty()
-            || (!prefixes.is_empty()
-                && prefixes
-                    .iter()
-                    .all(|prefix| self.matches_resource_name(prefix)))
+        #[cfg(feature = "mojo")]
+        {
+            let candidates = prefixes.iter().map(String::as_str).collect::<Vec<_>>();
+            self.mojo_matches(
+                prodex_mojo_core::rich::ApplicationScopeOperation::ResourcePrefixesAllowed,
+                [None; 5],
+                &candidates,
+            )
+        }
+
+        #[cfg(not(feature = "mojo"))]
+        self.allows_resource_prefixes_rust(prefixes)
     }
 
     pub(super) fn tenant_id(&self) -> Option<&str> {
@@ -123,12 +158,102 @@ impl ApplicationControlPlaneGovernanceScope {
     pub(super) fn allowed_resource_prefixes(&self) -> &[String] {
         &self.allowed_resource_prefixes
     }
+
+    #[cfg(feature = "mojo")]
+    fn mojo_matches(
+        &self,
+        operation: prodex_mojo_core::rich::ApplicationScopeOperation,
+        values: [Option<&str>; 5],
+        candidates: &[&str],
+    ) -> bool {
+        let scope_prefixes = self
+            .allowed_resource_prefixes
+            .iter()
+            .map(String::as_str)
+            .collect::<Vec<_>>();
+        prodex_mojo_core::rich::application_governance_scope(
+            prodex_mojo_core::rich::ApplicationScopeInput {
+                operation,
+                scope_values: [
+                    self.tenant_id.as_deref(),
+                    self.team_id.as_deref(),
+                    self.project_id.as_deref(),
+                    self.user_id.as_deref(),
+                    self.budget_id.as_deref(),
+                ],
+                values,
+                scope_prefixes: &scope_prefixes,
+                candidates,
+            },
+        )
+        .expect("Mojo application governance-scope planner returned invalid output")
+    }
+
+    #[cfg(any(not(feature = "mojo"), test))]
+    fn dimensions_are_unrestricted_rust(&self) -> bool {
+        self.tenant_id.is_none()
+            && self.team_id.is_none()
+            && self.project_id.is_none()
+            && self.user_id.is_none()
+            && self.budget_id.is_none()
+    }
+
+    #[cfg(any(not(feature = "mojo"), test))]
+    fn matches_tenant_rust(&self, tenant_id: Option<&str>) -> bool {
+        scoped_value_matches(self.tenant_id.as_deref(), tenant_id)
+    }
+
+    #[cfg(any(not(feature = "mojo"), test))]
+    fn matches_dimensions_rust(
+        &self,
+        team_id: Option<&str>,
+        project_id: Option<&str>,
+        user_id: Option<&str>,
+        budget_id: Option<&str>,
+    ) -> bool {
+        scoped_value_matches(self.team_id.as_deref(), team_id)
+            && scoped_value_matches(self.project_id.as_deref(), project_id)
+            && scoped_value_matches(self.user_id.as_deref(), user_id)
+            && scoped_value_matches(self.budget_id.as_deref(), budget_id)
+    }
+
+    #[cfg(any(not(feature = "mojo"), test))]
+    fn matches_rust(
+        &self,
+        tenant_id: Option<&str>,
+        team_id: Option<&str>,
+        project_id: Option<&str>,
+        user_id: Option<&str>,
+        budget_id: Option<&str>,
+    ) -> bool {
+        self.matches_tenant_rust(tenant_id)
+            && self.matches_dimensions_rust(team_id, project_id, user_id, budget_id)
+    }
+
+    #[cfg(any(not(feature = "mojo"), test))]
+    fn matches_resource_name_rust(&self, name: &str) -> bool {
+        self.allowed_resource_prefixes.is_empty()
+            || self
+                .allowed_resource_prefixes
+                .iter()
+                .any(|prefix| name.starts_with(prefix))
+    }
+
+    #[cfg(any(not(feature = "mojo"), test))]
+    fn allows_resource_prefixes_rust(&self, prefixes: &[String]) -> bool {
+        self.allowed_resource_prefixes.is_empty()
+            || (!prefixes.is_empty()
+                && prefixes
+                    .iter()
+                    .all(|prefix| self.matches_resource_name_rust(prefix)))
+    }
 }
 
 fn redacted_option<T>(value: &Option<T>) -> Option<&'static str> {
     value.as_ref().map(|_| "<redacted>")
 }
 
+#[cfg(any(not(feature = "mojo"), test))]
 fn scoped_value_matches(scope: Option<&str>, value: Option<&str>) -> bool {
     scope.map(|scope| value == Some(scope)).unwrap_or(true)
 }
@@ -218,6 +343,60 @@ mod tests {
             "key-prefix-secret",
         ] {
             assert!(!rendered.contains(raw), "{rendered}");
+        }
+    }
+
+    #[cfg(feature = "mojo")]
+    #[test]
+    fn mojo_scope_plans_match_rust_oracle() {
+        let scope = ApplicationControlPlaneGovernanceScope::new(
+            Some("tenant-a".to_string()),
+            Some("team-a".to_string()),
+            None,
+            Some("user-a".to_string()),
+            Some("budget-a".to_string()),
+            vec!["team-a-".to_string(), "shared-".to_string()],
+        );
+        assert_eq!(
+            scope.dimensions_are_unrestricted(),
+            scope.dimensions_are_unrestricted_rust()
+        );
+        for tenant in [Some("tenant-a"), Some("tenant-b"), None] {
+            assert_eq!(
+                scope.matches_tenant(tenant),
+                scope.matches_tenant_rust(tenant)
+            );
+        }
+        let dimensions = [
+            (Some("team-a"), None, Some("user-a"), Some("budget-a")),
+            (Some("team-b"), None, Some("user-a"), Some("budget-a")),
+            (Some("team-a"), None, None, Some("budget-a")),
+        ];
+        for (team, project, user, budget) in dimensions {
+            assert_eq!(
+                scope.matches_dimensions(team, project, user, budget),
+                scope.matches_dimensions_rust(team, project, user, budget),
+            );
+            assert_eq!(
+                scope.matches(Some("tenant-a"), team, project, user, budget),
+                scope.matches_rust(Some("tenant-a"), team, project, user, budget),
+            );
+        }
+        for name in ["team-a-key", "shared-key", "team-b-key", ""] {
+            assert_eq!(
+                scope.matches_resource_name(name),
+                scope.matches_resource_name_rust(name),
+            );
+        }
+        for prefixes in [
+            vec!["team-a-child".to_string()],
+            vec!["team-b-child".to_string()],
+            Vec::new(),
+        ] {
+            assert_eq!(
+                scope.allows_resource_prefixes(&prefixes),
+                scope.allows_resource_prefixes_rust(&prefixes),
+            );
         }
     }
 }
