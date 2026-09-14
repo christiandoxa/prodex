@@ -46,6 +46,7 @@ from context_text import (
     context_search_ascii_find_exact,
     context_search_ascii_starts_exact,
     context_search_find_byte,
+    context_metadata_lower,
     context_text_trim_bounds,
 )
 from context_command_output_file_list import context_command_output_file_list
@@ -490,6 +491,49 @@ def context_command_output_diff_excerpt_structural(
     )
 
 
+def context_command_output_diff_line_matches_term(
+    line: Pointer[mut=False, UInt8, _], start: Int64, end: Int64,
+    term: Pointer[mut=False, UInt8, _], term_start: Int64, term_end: Int64,
+) -> Bool:
+    var term_length = term_end - term_start
+    if term_length == 0 or term_length > end - start:
+        return term_length == 0
+    for offset in range(start, end - term_length + 1):
+        var matched = True
+        for index in range(term_length):
+            if context_metadata_lower(line[unsafe_offset=offset + index]) != context_metadata_lower(term[unsafe_offset=term_start + index]):
+                matched = False
+                break
+        if matched:
+            return True
+    return False
+
+
+def context_command_output_diff_line_matches_intent(
+    input: ProdexContextCommandOutputInput,
+    start: Int64,
+    end: Int64,
+) -> Bool:
+    if input.intent.len == 0:
+        return True
+    var line = rich_view_ptr(input.input)
+    var terms = rich_view_ptr(input.intent)
+    var cursor: Int64 = 0
+    var term_start: Int64 = 0
+    while cursor <= Int64(input.intent.len):
+        if cursor == Int64(input.intent.len) or terms[unsafe_offset=cursor] == 44:
+            var term_end = cursor
+            while term_start < term_end and terms[unsafe_offset=term_start] == 32:
+                term_start += 1
+            while term_end > term_start and terms[unsafe_offset=term_end - 1] == 32:
+                term_end -= 1
+            if context_command_output_diff_line_matches_term(line, start, end, terms, term_start, term_end):
+                return True
+            term_start = cursor + 1
+        cursor += 1
+    return False
+
+
 def context_command_output_git_diff(
     input: ProdexContextCommandOutputInput,
     writer: Pointer[mut=True, ContextCommandOutputWriter, _],
@@ -574,6 +618,9 @@ def context_command_output_git_diff(
         cursor = line[1]
     if not context_command_output_put_literal(writer, StringSlice("sum: git diff files=")) or not context_command_output_put_i64(writer, sections) or not context_command_output_put_literal(writer, StringSlice(", +")) or not context_command_output_put_i64(writer, total_added) or not context_command_output_put_literal(writer, StringSlice(", -")) or not context_command_output_put_i64(writer, total_removed) or not context_command_output_put_literal(writer, StringSlice(", hunks=")) or not context_command_output_put_i64(writer, total_hunks) or not context_command_output_put_byte(writer, 10):
         return CONTEXT_COMMAND_OUTPUT_STATUS_CAPACITY
+    if input.intent.len > 0:
+        if not context_command_output_put_literal(writer, StringSlice("int: git diff focus for ")) or not context_command_output_put_range(writer, rich_view_ptr(input.intent), 0, Int64(input.intent.len)) or not context_command_output_put_byte(writer, 10):
+            return CONTEXT_COMMAND_OUTPUT_STATUS_CAPACITY
     cursor = 0
     while cursor < length:
         var line = context_command_output_next_line(ptr, cursor, length)
@@ -620,7 +667,8 @@ def context_command_output_git_diff(
             while section_cursor < section_end:
                 var section_line = context_command_output_next_line(ptr, section_cursor, section_end)
                 var structural = context_command_output_diff_excerpt_structural(ptr, section_cursor, section_line[0])
-                if structural or detail_written < per_section_budget:
+                var matches_intent = context_command_output_diff_line_matches_intent(input, section_cursor, section_line[0])
+                if structural or matches_intent and detail_written < per_section_budget or input.intent.len == 0 and detail_written < per_section_budget:
                     if not context_command_output_put_range(writer, ptr, section_cursor, section_line[0]) or not context_command_output_put_byte(writer, 10):
                         return CONTEXT_COMMAND_OUTPUT_STATUS_CAPACITY
                     if not structural:

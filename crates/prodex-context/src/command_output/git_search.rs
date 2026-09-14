@@ -1,3 +1,5 @@
+#[cfg(any(not(feature = "mojo"), test))]
+use super::intent::score_intent_text;
 use super::*;
 
 #[cfg(feature = "mojo")]
@@ -104,6 +106,33 @@ pub(super) fn compact_git_diff_output(
     compact_git_diff_output_with_intent(input, options, &[])
 }
 
+#[cfg(all(feature = "mojo", not(test)))]
+pub(super) fn compact_git_diff_output_with_intent(
+    input: &str,
+    options: &CommandOutputCompactOptions,
+    intent_terms: &[String],
+) -> String {
+    if intent_terms.is_empty() {
+        return compact_git_diff_output(input, options);
+    }
+    let Some(body) = prodex_mojo_core::rich::context_git_diff_output_with_intent(
+        input,
+        options.max_lines,
+        options.max_line_chars,
+        intent_terms,
+    )
+    .unwrap_or_else(|error| panic!("Mojo intent git-diff formatter failed: {error:?}")) else {
+        return smart_truncate_command_output(input, options);
+    };
+    let lines = body
+        .trim_end_matches('\n')
+        .split('\n')
+        .map(str::to_owned)
+        .collect();
+    finalize_compacted_command_output(CommandOutputKind::GitDiff, input, lines, options)
+}
+
+#[cfg(any(not(feature = "mojo"), test))]
 pub(super) fn compact_git_diff_output_with_intent(
     input: &str,
     options: &CommandOutputCompactOptions,
@@ -187,6 +216,7 @@ pub(super) fn compact_git_diff_output_with_intent(
     ensure_no_critical_signal_loss_for_intent(input, &output, options)
 }
 
+#[cfg(any(not(feature = "mojo"), test))]
 fn git_diff_summary_output(
     summaries: &[GitDiffSummary],
     total_added: usize,
@@ -227,6 +257,7 @@ fn git_diff_summary_output(
     output
 }
 
+#[cfg(any(not(feature = "mojo"), test))]
 fn append_git_diff_excerpt_output(
     output: &mut Vec<String>,
     sections: &[Vec<&str>],
@@ -266,6 +297,7 @@ fn append_git_diff_excerpt_output(
     }
 }
 
+#[cfg(any(not(feature = "mojo"), test))]
 fn score_git_diff_section_for_intent(
     section: &[&str],
     summary: &GitDiffSummary,
@@ -284,6 +316,7 @@ fn score_git_diff_section_for_intent(
     score
 }
 
+#[cfg(any(not(feature = "mojo"), test))]
 fn select_git_diff_detail_line_indexes(
     section: &[&str],
     budget: usize,
@@ -325,10 +358,12 @@ fn select_git_diff_detail_line_indexes(
     selected
 }
 
+#[cfg(any(not(feature = "mojo"), test))]
 fn git_diff_intent_context_radius() -> usize {
     2
 }
 
+#[cfg(any(not(feature = "mojo"), test))]
 fn is_git_diff_changed_detail_line(line: &str) -> bool {
     (line.starts_with('+') && !line.starts_with("+++")
         || line.starts_with('-') && !line.starts_with("---"))
@@ -640,6 +675,7 @@ pub(super) fn collect_file_list_entries(input: &str) -> Vec<String> {
         .collect()
 }
 
+#[cfg(any(not(feature = "mojo"), test))]
 fn compact_git_diff_stat_output(
     lines: &[&str],
     options: &CommandOutputCompactOptions,

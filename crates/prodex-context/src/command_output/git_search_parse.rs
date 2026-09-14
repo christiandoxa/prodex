@@ -206,6 +206,7 @@ pub(super) fn push_item_summary(
     output.push(format!("{label} ({}): {rendered}", unique.len()));
 }
 
+#[cfg(any(not(feature = "mojo"), test))]
 pub(super) struct GitDiffSummary {
     pub(super) path: String,
     pub(super) added: usize,
@@ -361,6 +362,7 @@ pub(super) struct GitLogCommitSummary {
     pub(super) stat_summaries: Vec<String>,
 }
 
+#[cfg(any(not(feature = "mojo"), test))]
 pub(super) fn split_git_diff_sections<'a>(lines: &'a [&'a str]) -> Vec<Vec<&'a str>> {
     let mut sections = Vec::new();
     let mut current = Vec::new();
@@ -383,6 +385,7 @@ pub(super) fn split_git_diff_sections<'a>(lines: &'a [&'a str]) -> Vec<Vec<&'a s
     sections
 }
 
+#[cfg(any(not(feature = "mojo"), test))]
 pub(super) fn summarize_git_diff_section(section: &[&str]) -> GitDiffSummary {
     let mut summary = GitDiffSummary {
         path: git_diff_section_path(section),
@@ -398,6 +401,7 @@ pub(super) fn summarize_git_diff_section(section: &[&str]) -> GitDiffSummary {
     summary
 }
 
+#[cfg(any(not(feature = "mojo"), test))]
 fn record_git_diff_summary_line(summary: &mut GitDiffSummary, line: &str) {
     if line.starts_with("@@ ") {
         summary.hunks += 1;
@@ -413,12 +417,14 @@ fn record_git_diff_summary_line(summary: &mut GitDiffSummary, line: &str) {
     }
 }
 
+#[cfg(any(not(feature = "mojo"), test))]
 fn record_git_diff_semantic_context(summary: &mut GitDiffSummary, line: &str) {
     if let Some(context) = git_diff_semantic_context_line(line) {
         push_unique_truncated_line(&mut summary.semantic_contexts, &context, 120);
     }
 }
 
+#[cfg(any(not(feature = "mojo"), test))]
 pub(super) fn git_diff_section_path(section: &[&str]) -> String {
     for line in section {
         if let Some((_, rhs)) = line.split_once(" b/") {
@@ -433,6 +439,7 @@ pub(super) fn git_diff_section_path(section: &[&str]) -> String {
     "unknown".to_string()
 }
 
+#[cfg(any(not(feature = "mojo"), test))]
 pub(super) fn is_git_diff_structural_line(line: &str) -> bool {
     line.starts_with("diff --git ")
         || line.starts_with("index ")
@@ -451,6 +458,7 @@ pub(super) fn is_git_diff_structural_line(line: &str) -> bool {
         || line.starts_with("GIT binary patch")
 }
 
+#[cfg(any(not(feature = "mojo"), test))]
 pub(super) fn is_git_diff_excerpt_structural_line(line: &str, intent_focused: bool) -> bool {
     if line.starts_with("@@ ")
         || line.starts_with("Binary files ")
@@ -472,6 +480,7 @@ pub(super) fn is_git_diff_excerpt_structural_line(line: &str, intent_focused: bo
         || line.starts_with("rename to ")
 }
 
+#[cfg(any(not(feature = "mojo"), test))]
 pub(super) fn git_diff_semantic_context_line(line: &str) -> Option<String> {
     if line.starts_with("@@ ")
         && let Some((_, context)) = line.rsplit_once("@@")
@@ -546,6 +555,7 @@ pub(super) fn looks_like_git_diff_output(lines: &[&str]) -> bool {
     stat_lines > 0 && stat_summaries > 0
 }
 
+#[cfg(any(not(feature = "mojo"), test))]
 pub(super) fn looks_like_git_diff_stat_line(line: &str) -> bool {
     let trimmed = line.trim();
     let Some((path, stats)) = trimmed.split_once(" | ") else {
@@ -563,6 +573,7 @@ pub(super) fn looks_like_git_diff_stat_line(line: &str) -> bool {
             .is_some_and(|count| count.chars().all(|ch| ch.is_ascii_digit()))
 }
 
+#[cfg(any(not(feature = "mojo"), test))]
 pub(super) fn looks_like_git_diff_stat_summary(line: &str) -> bool {
     let trimmed = line.trim();
     trimmed.contains(" file changed")

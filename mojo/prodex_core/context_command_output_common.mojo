@@ -39,6 +39,7 @@ struct ProdexContextCommandOutputInput(Copyable):
     var max_line_chars: UInt64
     var max_search_matches: UInt64
     var input: ProdexRichStringView
+    var intent: ProdexRichStringView
 
 
 @fieldwise_init

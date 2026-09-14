@@ -45,9 +45,11 @@ use git_search::{
     compact_git_status_output, compact_search_output,
 };
 pub(crate) use git_search_parse::*;
+#[cfg(any(not(feature = "mojo"), test))]
+use intent::intent_line_matches;
 use intent::{
     compact_command_output_for_intent, ensure_no_critical_signal_loss_for_intent,
-    intent_line_matches, normalize_intent_terms_with_prompt_expansion, score_intent_text,
+    normalize_intent_terms_with_prompt_expansion,
 };
 use kind_detection::{
     command_metadata_subcommand_after, command_metadata_token_command_name,
