@@ -90,6 +90,7 @@ pub fn self_test() -> bool {
     let context_ok = context::self_test();
     let tuning_defaults_ok = runtime_decisions::tuning_defaults_self_test();
     let smart_context_usage_ok = runtime_decisions::smart_context_token_usage_summary_self_test();
+    let smart_context_policy_ok = runtime_decisions::smart_context_policy_self_test();
     let rich_ok = rich::rich_self_test();
     let runtime_doctor_plan_ok = rich::runtime_doctor_plan_self_test();
     let log_semantics_ok = log::self_test();
@@ -107,6 +108,7 @@ pub fn self_test() -> bool {
         context_ok,
         tuning_defaults_ok,
         smart_context_usage_ok,
+        smart_context_policy_ok,
         rich_ok,
         runtime_doctor_plan_ok,
         log_semantics_ok,
