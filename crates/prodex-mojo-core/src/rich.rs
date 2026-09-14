@@ -153,6 +153,12 @@ pub use application_metadata::*;
 #[path = "rich/application_scope.rs"]
 mod application_scope;
 pub use application_scope::*;
+#[path = "rich/application_data_plane.rs"]
+mod application_data_plane;
+pub use application_data_plane::*;
+#[cfg(test)]
+#[path = "rich/application_data_plane_tests.rs"]
+mod application_data_plane_tests;
 
 const RICH_STATUS_INVALID: i64 = 1;
 const RICH_STATUS_UTF8: i64 = 2;
@@ -778,6 +784,15 @@ pub fn rich_self_test() -> bool {
             value == br#"{"type":"message","role":"assistant","content":[{"type":"input_text","text":"hello"}]}"#
         })
     };
+    let application_data_plane =
+        plan_application_route_request(ApplicationRouteKind::Responses, true, true, false)
+            .is_ok_and(|value| {
+                value.endpoint == Some(ApplicationProviderEndpoint::Responses)
+                    && value.capability_mask
+                        == APPLICATION_CAPABILITY_RESPONSES_API
+                            | APPLICATION_CAPABILITY_STREAMING
+                            | APPLICATION_CAPABILITY_TOOLS
+            });
     context
         && routes
         && policy
@@ -790,6 +805,7 @@ pub fn rich_self_test() -> bool {
         && reasoning
         && deepseek
         && kiro
+        && application_data_plane
 }
 
 #[cfg(test)]
