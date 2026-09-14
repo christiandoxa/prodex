@@ -157,6 +157,7 @@ fn governance_obligation_bound_is_invalid(obligation: &GovernanceObligation) -> 
 }
 
 #[cfg(any(test, not(feature = "mojo")))]
+#[cfg_attr(all(test, feature = "mojo"), allow(dead_code))]
 fn governance_obligation_bound_is_invalid_rust(obligation: &GovernanceObligation) -> bool {
     matches!(
         obligation,
@@ -269,6 +270,7 @@ fn governance_obligations_conflict(
 }
 
 #[cfg(any(test, not(feature = "mojo")))]
+#[cfg_attr(all(test, feature = "mojo"), allow(dead_code))]
 fn governance_obligations_conflict_rust(
     left: &GovernanceObligation,
     right: &GovernanceObligation,

@@ -305,6 +305,7 @@ pub fn validate_expand_contract_order(steps: &[MigrationStep]) -> Result<(), Mig
 }
 
 #[cfg(any(test, not(feature = "mojo")))]
+#[cfg_attr(all(test, feature = "mojo"), allow(dead_code))]
 fn validate_expand_contract_order_rust(steps: &[MigrationStep]) -> Result<(), MigrationPlanError> {
     let mut saw_expand = false;
     let mut saw_backfill = false;

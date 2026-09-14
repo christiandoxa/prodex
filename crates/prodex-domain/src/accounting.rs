@@ -239,6 +239,7 @@ impl ReservationRecord {
     }
 
     #[cfg(any(test, not(feature = "mojo")))]
+    #[cfg_attr(all(test, feature = "mojo"), allow(dead_code))]
     fn from_request_rust(
         request: ReservationRequest,
         created_at_unix_ms: u64,

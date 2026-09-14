@@ -486,6 +486,7 @@ pub fn evaluate_policy_refresh(
 }
 
 #[cfg(any(test, not(feature = "mojo")))]
+#[cfg_attr(all(test, feature = "mojo"), allow(dead_code))]
 fn evaluate_policy_refresh_rust(
     status: &PolicyCacheStatus,
     now_unix_ms: u64,
