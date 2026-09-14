@@ -123,7 +123,7 @@ pub(super) fn detect_command_output_kind_with_hint(
 ) -> CommandOutputKind {
     #[cfg(feature = "mojo")]
     {
-        return command_output_kind_from_mojo_tag(
+        command_output_kind_from_mojo_tag(
             prodex_mojo_core::context::classify_command_output_kind(
                 input,
                 kind_hint.map(|kind| kind as i64),
