@@ -180,6 +180,70 @@ def prodex_mojo_governance_classification_v1(
     return RICH_STATUS_OK
 
 
+def governance_finding_minimum_classification(kind: Int64) -> Int64:
+    if kind >= 0 and kind <= 3 or kind == 11:
+        return 2
+    if kind >= 4 and kind <= 10:
+        return 3
+    return -1
+
+
+@export("prodex_mojo_governance_finding_classification_v1")
+def prodex_mojo_governance_finding_classification_v1(
+    abi_version: Int64,
+    mode: Int64,
+    values_address: UInt,
+    value_count: Int64,
+    classification: Int64,
+    output_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != PRODEX_RICH_ABI_VERSION:
+        return RICH_STATUS_ABI
+    if mode < 0 or mode > 2 or value_count < 0 or value_count > 256 or output_address == 0 or (value_count > 0 and values_address == 0):
+        return RICH_STATUS_INVALID
+    var values = Pointer[mut=False, Int64, ImmUntrackedOrigin](
+        unsafe_from_address=Int(values_address)
+    )
+    var output = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    output[] = 0
+    if mode == 0:
+        if value_count != 1:
+            return RICH_STATUS_INVALID
+        var minimum = governance_finding_minimum_classification(values[0])
+        if minimum < 0:
+            return RICH_STATUS_INVALID
+        output[] = minimum
+        return RICH_STATUS_OK
+    if mode == 1:
+        if classification < 0 or classification > 3:
+            return RICH_STATUS_INVALID
+        for index in range(value_count):
+            var minimum = governance_finding_minimum_classification(values[unsafe_offset=index])
+            if minimum < 0:
+                return RICH_STATUS_INVALID
+            if classification < minimum:
+                output[] = 1
+                return RICH_STATUS_OK
+        return RICH_STATUS_OK
+    var prior_kind: Int64 = -1
+    for index in range(value_count):
+        var kind = values[unsafe_offset=index * 2]
+        var rule_classification = values[unsafe_offset=index * 2 + 1]
+        var minimum = governance_finding_minimum_classification(kind)
+        if minimum < 0 or rule_classification < 0 or rule_classification > 3:
+            return RICH_STATUS_INVALID
+        if kind == prior_kind:
+            output[] = 1
+            return RICH_STATUS_OK
+        if rule_classification < minimum:
+            output[] = 2
+            return RICH_STATUS_OK
+        prior_kind = kind
+    return RICH_STATUS_OK
+
+
 @fieldwise_init
 struct GovernanceOptionalValuePair(Copyable):
     var left: Int64
