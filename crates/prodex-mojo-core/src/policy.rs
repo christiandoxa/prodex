@@ -342,6 +342,54 @@ pub const GOVERNANCE_MATCH_MINIMUM: i64 = 1;
 pub const GOVERNANCE_MATCH_MAXIMUM: i64 = 2;
 pub const GOVERNANCE_MATCH_CONTAINS: i64 = 3;
 
+unsafe extern "C" {
+    fn prodex_mojo_policy_refresh_decision_v1(
+        abi_version: i64,
+        refresh_after_unix_ms: u64,
+        stale_after_unix_ms: u64,
+        expires_after_unix_ms: u64,
+        now_unix_ms: u64,
+        active_invalidated: i64,
+        last_known_good_present: i64,
+        last_known_good_invalidated: i64,
+        output: u64,
+    ) -> i64;
+}
+
+pub fn policy_refresh_decision(
+    window: [u64; 3],
+    now_unix_ms: u64,
+    active_invalidated: bool,
+    last_known_good_present: bool,
+    last_known_good_invalidated: bool,
+) -> Result<i64, crate::MojoError> {
+    let mut output = -1_i64;
+    let status = unsafe {
+        prodex_mojo_policy_refresh_decision_v1(
+            1,
+            window[0],
+            window[1],
+            window[2],
+            now_unix_ms,
+            i64::from(active_invalidated),
+            i64::from(last_known_good_present),
+            i64::from(last_known_good_invalidated),
+            (&mut output as *mut i64) as u64,
+        )
+    };
+    if status != 0 {
+        return Err(match status {
+            1 | 2 => crate::MojoError::InvalidInput,
+            4 => crate::MojoError::AbiMismatch,
+            _ => crate::MojoError::InvalidOutput,
+        });
+    }
+    (0..=4)
+        .contains(&output)
+        .then_some(output)
+        .ok_or(crate::MojoError::InvalidOutput)
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct AccountingOperation {
     pub result_code: i64,
