@@ -39,6 +39,9 @@ pub enum GeminiResponseKernelOperation {
     StreamOutputItems = 30,
     ToolSearchCallItem = 31,
     CustomToolCallItem = 32,
+    FinishReasonFailure = 33,
+    FinishReasonIncomplete = 34,
+    PromptFeedbackFailure = 35,
 }
 
 /// Inputs for one bounded Gemini response or stream JSON shape.
@@ -213,6 +216,9 @@ fn gemini_kernel_operation(operation: GeminiResponseKernelOperation) -> i64 {
         GeminiResponseKernelOperation::StreamOutputItems => 30,
         GeminiResponseKernelOperation::ToolSearchCallItem => 31,
         GeminiResponseKernelOperation::CustomToolCallItem => 32,
+        GeminiResponseKernelOperation::FinishReasonFailure => 33,
+        GeminiResponseKernelOperation::FinishReasonIncomplete => 34,
+        GeminiResponseKernelOperation::PromptFeedbackFailure => 35,
     }
 }
 
