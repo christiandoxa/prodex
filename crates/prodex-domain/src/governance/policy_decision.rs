@@ -1208,7 +1208,55 @@ pub fn evaluate_governance_policy(
     })
 }
 
+#[cfg(feature = "mojo")]
 fn policy_required_attributes_present(
+    policy: &CompiledGovernancePolicy,
+    input: &PolicyInput<'_>,
+) -> bool {
+    let available_mask = u64::from(input.principal_attributes.team_id().is_some())
+        | u64::from(input.principal_attributes.project_id().is_some()) << 1
+        | u64::from(input.principal_attributes.user_id().is_some()) << 2
+        | u64::from(input.principal_attributes.group_ids().next().is_some()) << 3
+        | u64::from(input.principal_attributes.department_id().is_some()) << 4
+        | u64::from(input.request_attributes.requested_model().is_some()) << 5
+        | u64::from(input.request_attributes.requested_tools().next().is_some()) << 6
+        | u64::from(!input.request_attributes.requested_modalities().is_empty()) << 7
+        | u64::from(input.request_attributes.valid_break_glass().is_some()) << 8;
+    let required_masks = policy
+        .rules
+        .iter()
+        .map(|rule| {
+            u64::from(rule.condition.team_id.is_some())
+                | u64::from(rule.condition.project_id.is_some()) << 1
+                | u64::from(rule.condition.user_id.is_some()) << 2
+                | u64::from(rule.condition.group_id.is_some()) << 3
+                | u64::from(rule.condition.department_id.is_some()) << 4
+                | u64::from(rule.condition.requested_model.is_some()) << 5
+                | u64::from(rule.condition.requested_tool.is_some()) << 6
+                | u64::from(rule.condition.requested_modality.is_some()) << 7
+                | u64::from(
+                    rule.condition.break_glass_scope.is_some()
+                        || rule.condition.break_glass_required == Some(true),
+                ) << 8
+        })
+        .collect::<Vec<_>>();
+    prodex_mojo_core::policy::governance_required_attributes_present(
+        &required_masks,
+        available_mask,
+    )
+    .expect("Mojo governance required-attribute predicate returned invalid output")
+}
+
+#[cfg(not(feature = "mojo"))]
+fn policy_required_attributes_present(
+    policy: &CompiledGovernancePolicy,
+    input: &PolicyInput<'_>,
+) -> bool {
+    policy_required_attributes_present_rust(policy, input)
+}
+
+#[cfg(any(test, not(feature = "mojo")))]
+fn policy_required_attributes_present_rust(
     policy: &CompiledGovernancePolicy,
     input: &PolicyInput<'_>,
 ) -> bool {
