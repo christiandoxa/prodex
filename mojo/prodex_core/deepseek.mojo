@@ -42,6 +42,11 @@ comptime DEEPSEEK_PRIMITIVE_REQUEST_FIELDS: Int64 = 28
 comptime DEEPSEEK_REASONING_PARAMETERS: Int64 = 29
 comptime DEEPSEEK_RESPONSE_FORMAT: Int64 = 30
 comptime DEEPSEEK_USER_ID: Int64 = 31
+comptime DEEPSEEK_STREAM_TOOL_CALL_DELTA: Int64 = 32
+comptime DEEPSEEK_STREAM_CHUNK_METADATA: Int64 = 33
+comptime DEEPSEEK_STREAM_CHOICE_METADATA: Int64 = 34
+comptime DEEPSEEK_STREAM_CHOICE_DELTA: Int64 = 35
+comptime DEEPSEEK_STREAM_RESPONSE_METADATA: Int64 = 36
 comptime DEEPSEEK_JSON_MAX_DEPTH: Int64 = 256
 
 
@@ -768,6 +773,219 @@ def deepseek_schema_write(
     return deepseek_put_byte(writer, 125)
 
 
+
+def deepseek_put_projection_raw_member(
+    writer: Pointer[mut=True, DeepSeekResponseWriter, _],
+    key: StringSlice,
+    view: ProdexRichStringView,
+    bounds: InlineArray[Int64, 2],
+    first: Pointer[mut=True, Bool, _],
+) -> Bool:
+    if bounds[0] < 0 or bounds[1] < bounds[0]:
+        return True
+    if not first[] and not deepseek_put_byte(writer, 44):
+        return False
+    first[] = False
+    return deepseek_put_literal(writer, key) and deepseek_put_view_range(
+        writer, view, bounds[0], bounds[1]
+    )
+
+
+def deepseek_input_object_bounds(input: ProdexRichStringView) -> InlineArray[Int64, 2]:
+    var result = InlineArray[Int64, 2](fill=-1)
+    if not deepseek_json_fragment_valid(input):
+        return result^
+    var start = deepseek_json_skip_ws(input, 0, Int64(input.len))
+    var end = deepseek_json_value_end(input, start, Int64(input.len), 0)
+    if start >= 0 and end == Int64(input.len) and deepseek_json_byte(input, start) == 123:
+        result[0] = start
+        result[1] = end
+    return result^
+
+
+def deepseek_put_stream_tool_call_delta(
+    writer: Pointer[mut=True, DeepSeekResponseWriter, _],
+    input: ProdexDeepSeekKernelInput,
+) -> Bool:
+    if input.input_present != 1:
+        return False
+    var source = input.input.copy()
+    var root = deepseek_input_object_bounds(source)
+    if root[0] < 0:
+        return False
+    var index = deepseek_json_object_member(source, root[0], root[1], StringSlice("index"))
+    var call_id = deepseek_json_object_member(source, root[0], root[1], StringSlice("id"))
+    var function = deepseek_json_object_member(source, root[0], root[1], StringSlice("function"))
+    var name = InlineArray[Int64, 2](fill=-1)
+    var arguments = InlineArray[Int64, 2](fill=-1)
+    if function[0] >= 0:
+        name = deepseek_json_object_member(source, function[0], function[1], StringSlice("name"))
+        arguments = deepseek_json_object_member(source, function[0], function[1], StringSlice("arguments"))
+    var extra = deepseek_json_object_member(source, root[0], root[1], StringSlice("extra_content"))
+    var google = InlineArray[Int64, 2](fill=-1)
+    var signature = InlineArray[Int64, 2](fill=-1)
+    if extra[0] >= 0:
+        google = deepseek_json_object_member(source, extra[0], extra[1], StringSlice("google"))
+    if google[0] >= 0:
+        signature = deepseek_json_object_member(source, google[0], google[1], StringSlice("thought_signature"))
+    if not deepseek_put_literal(writer, StringSlice('{"index":')):
+        return False
+    if index[0] >= 0:
+        if not deepseek_put_view_range(writer, source, index[0], index[1]):
+            return False
+    elif not deepseek_put_byte(writer, 48):
+        return False
+    var first = False
+    var first_ptr = Pointer(to=first)
+    if not deepseek_put_projection_raw_member(writer, StringSlice('"id":'), source, call_id, first_ptr):
+        return False
+    if not deepseek_put_projection_raw_member(writer, StringSlice('"name":'), source, name, first_ptr):
+        return False
+    if not deepseek_put_projection_raw_member(writer, StringSlice('"arguments":'), source, arguments, first_ptr):
+        return False
+    if not deepseek_put_projection_raw_member(writer, StringSlice('"thought_signature":'), source, signature, first_ptr):
+        return False
+    return deepseek_put_byte(writer, 125)
+
+
+def deepseek_put_stream_chunk_metadata(
+    writer: Pointer[mut=True, DeepSeekResponseWriter, _],
+    input: ProdexDeepSeekKernelInput,
+) -> Bool:
+    if input.input_present != 1:
+        return False
+    var source = input.input.copy()
+    var root = deepseek_input_object_bounds(source)
+    if root[0] < 0:
+        return False
+    if not deepseek_put_byte(writer, 123):
+        return False
+    var first = True
+    for key in [StringSlice("model"), StringSlice("created"), StringSlice("system_fingerprint"), StringSlice("usage")]:
+        var bounds = deepseek_json_object_member(source, root[0], root[1], key)
+        if bounds[0] < 0:
+            continue
+        if not first and not deepseek_put_byte(writer, 44):
+            return False
+        first = False
+        if not deepseek_put_byte(writer, 34) or not deepseek_put_literal(writer, key) or not deepseek_put_literal(writer, StringSlice('":')):
+            return False
+        if not deepseek_put_view_range(writer, source, bounds[0], bounds[1]):
+            return False
+    return deepseek_put_byte(writer, 125)
+
+
+def deepseek_put_stream_choice_metadata(
+    writer: Pointer[mut=True, DeepSeekResponseWriter, _],
+    input: ProdexDeepSeekKernelInput,
+) -> Bool:
+    if input.input_present != 1:
+        return False
+    var source = input.input.copy()
+    var root = deepseek_input_object_bounds(source)
+    if root[0] < 0:
+        return False
+    var logprobs = deepseek_json_object_member(source, root[0], root[1], StringSlice("logprobs"))
+    var finish_reason = deepseek_json_object_member(source, root[0], root[1], StringSlice("finish_reason"))
+    if not deepseek_put_byte(writer, 123):
+        return False
+    var first = True
+    var first_ptr = Pointer(to=first)
+    if not deepseek_put_projection_raw_member(writer, StringSlice('"logprobs":'), source, logprobs, first_ptr):
+        return False
+    if not deepseek_put_projection_raw_member(writer, StringSlice('"finish_reason":'), source, finish_reason, first_ptr):
+        return False
+    return deepseek_put_byte(writer, 125)
+
+
+def deepseek_put_stream_choice_delta(
+    writer: Pointer[mut=True, DeepSeekResponseWriter, _],
+    input: ProdexDeepSeekKernelInput,
+) -> Bool:
+    if input.input_present != 1:
+        return False
+    var source = input.input.copy()
+    var root = deepseek_input_object_bounds(source)
+    if root[0] < 0:
+        return False
+    var delta = deepseek_json_object_member(source, root[0], root[1], StringSlice("delta"))
+    if not deepseek_put_byte(writer, 123):
+        return False
+    if delta[0] < 0 or deepseek_json_byte(source, delta[0]) != 123:
+        return deepseek_put_byte(writer, 125)
+    var first = True
+    for key in [StringSlice("reasoning_content"), StringSlice("refusal"), StringSlice("annotations"), StringSlice("content"), StringSlice("tool_calls")]:
+        var bounds = deepseek_json_object_member(source, delta[0], delta[1], key)
+        if bounds[0] < 0:
+            continue
+        if not first and not deepseek_put_byte(writer, 44):
+            return False
+        first = False
+        if not deepseek_put_byte(writer, 34) or not deepseek_put_literal(writer, key) or not deepseek_put_literal(writer, StringSlice('":')):
+            return False
+        if not deepseek_put_view_range(writer, source, bounds[0], bounds[1]):
+            return False
+    return deepseek_put_byte(writer, 125)
+
+
+def deepseek_put_stream_response_metadata(
+    writer: Pointer[mut=True, DeepSeekResponseWriter, _],
+    input: ProdexDeepSeekKernelInput,
+) -> Bool:
+    if input.role_present != 1 or input.role.len == 0:
+        return False
+    var has_metadata = (
+        input.metadata_present == 1
+        or input.reasoning_content_present == 1
+        or input.content_present == 1
+        or input.item_present == 1
+        or input.name_present == 1
+        or input.signature_present == 1
+    )
+    if not has_metadata:
+        return deepseek_put_literal(writer, StringSlice("null"))
+    if input.metadata_present == 1 and not deepseek_json_fragment_valid(input.metadata):
+        return False
+    if input.item_present == 1 and not deepseek_json_fragment_valid(input.item):
+        return False
+    if not deepseek_put_byte(writer, 123) or not deepseek_put_json_string(writer, input.role) or not deepseek_put_literal(writer, StringSlice(":{")):
+        return False
+    var first = True
+    if input.metadata_present == 1:
+        if not deepseek_put_literal(writer, StringSlice('"logprobs":')) or not deepseek_put_view(writer, input.metadata):
+            return False
+        first = False
+    if input.reasoning_content_present == 1:
+        if not first and not deepseek_put_byte(writer, 44):
+            return False
+        if not deepseek_put_literal(writer, StringSlice('"reasoning_content":')) or not deepseek_put_json_string(writer, input.reasoning_content):
+            return False
+        first = False
+    if input.content_present == 1:
+        if not first and not deepseek_put_byte(writer, 44):
+            return False
+        if not deepseek_put_literal(writer, StringSlice('"refusal":')) or not deepseek_put_json_string(writer, input.content):
+            return False
+        first = False
+    if input.item_present == 1:
+        if not first and not deepseek_put_byte(writer, 44):
+            return False
+        if not deepseek_put_literal(writer, StringSlice('"annotations":')) or not deepseek_put_view(writer, input.item):
+            return False
+        first = False
+    if input.name_present == 1:
+        if not first and not deepseek_put_byte(writer, 44):
+            return False
+        if not deepseek_put_literal(writer, StringSlice('"finish_reason":')) or not deepseek_put_json_string(writer, input.name):
+            return False
+        first = False
+    if input.signature_present == 1:
+        if not first and not deepseek_put_byte(writer, 44):
+            return False
+        if not deepseek_put_literal(writer, StringSlice('"system_fingerprint":')) or not deepseek_put_json_string(writer, input.signature):
+            return False
+    return deepseek_put_literal(writer, StringSlice("}}"))
+
 def deepseek_put_primitive_request_fields(
     writer: Pointer[mut=True, DeepSeekResponseWriter, _],
     input: ProdexDeepSeekKernelInput,
@@ -1187,6 +1405,16 @@ def deepseek_write_operation(
             if not deepseek_put_literal(writer, StringSlice(',"call_id":')) or not deepseek_put_json_string(writer, input.call_id):
                 return False
         return deepseek_put_byte(writer, 125)
+    if operation == DEEPSEEK_STREAM_TOOL_CALL_DELTA:
+        return deepseek_put_stream_tool_call_delta(writer, input)
+    if operation == DEEPSEEK_STREAM_CHUNK_METADATA:
+        return deepseek_put_stream_chunk_metadata(writer, input)
+    if operation == DEEPSEEK_STREAM_CHOICE_METADATA:
+        return deepseek_put_stream_choice_metadata(writer, input)
+    if operation == DEEPSEEK_STREAM_CHOICE_DELTA:
+        return deepseek_put_stream_choice_delta(writer, input)
+    if operation == DEEPSEEK_STREAM_RESPONSE_METADATA:
+        return deepseek_put_stream_response_metadata(writer, input)
     if operation == DEEPSEEK_RESPONSE_METADATA:
         return (
             deepseek_put_literal(writer, StringSlice("{"))
@@ -1205,7 +1433,7 @@ def deepseek_flag_valid(value: Int64) -> Bool:
 def deepseek_input_valid(input: ProdexDeepSeekKernelInput) -> Bool:
     return (
         input.operation >= DEEPSEEK_REQUEST_BODY
-        and input.operation <= DEEPSEEK_USER_ID
+        and input.operation <= DEEPSEEK_STREAM_RESPONSE_METADATA
         and
         deepseek_flag_valid(input.stream)
         and deepseek_flag_valid(input.response_id_present)
