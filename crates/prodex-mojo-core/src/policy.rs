@@ -67,6 +67,12 @@ struct GovernanceMatchSelector {
 }
 
 unsafe extern "C" {
+    fn prodex_mojo_migration_step_order_v1(
+        abi_version: i64,
+        steps: u64,
+        step_count: i64,
+        output: u64,
+    ) -> i64;
     fn prodex_runtime_policy_validate_text(
         abi_version: i64,
         value: u64,
@@ -104,6 +110,29 @@ unsafe extern "C" {
         default_effect: i64,
         output: u64,
     ) -> i64;
+}
+
+pub fn migration_step_order(steps: &[i64]) -> Result<i64, crate::MojoError> {
+    let mut output = -1_i64;
+    let status = unsafe {
+        prodex_mojo_migration_step_order_v1(
+            1,
+            steps.as_ptr() as u64,
+            i64::try_from(steps.len()).map_err(|_| crate::MojoError::InvalidInput)?,
+            (&mut output as *mut i64) as u64,
+        )
+    };
+    if status != 0 {
+        return Err(match status {
+            1 | 2 => crate::MojoError::InvalidInput,
+            4 => crate::MojoError::AbiMismatch,
+            _ => crate::MojoError::InvalidOutput,
+        });
+    }
+    (0..=3)
+        .contains(&output)
+        .then_some(output)
+        .ok_or(crate::MojoError::InvalidOutput)
 }
 
 fn policy_string_view(value: Option<&str>) -> PolicyStringView {

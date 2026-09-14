@@ -64,6 +64,48 @@ def prodex_mojo_policy_refresh_decision_v1(
     return GATEWAY_ADMIN_POLICY_STATUS_OK
 
 
+@export("prodex_mojo_migration_step_order_v1")
+def prodex_mojo_migration_step_order_v1(
+    abi_version: Int64,
+    steps_address: UInt,
+    step_count: Int64,
+    output_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != 1:
+        return GATEWAY_ADMIN_POLICY_STATUS_ABI
+    if step_count < 0 or output_address == 0 or (step_count > 0 and steps_address == 0):
+        return GATEWAY_ADMIN_POLICY_STATUS_INVALID
+    var steps = Pointer[mut=False, Int64, ImmUntrackedOrigin](
+        unsafe_from_address=Int(steps_address)
+    )
+    var output = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    output[] = 0
+    var saw_expand = False
+    var saw_backfill = False
+    for index in range(step_count):
+        var step = steps[unsafe_offset=index]
+        if step == 0:
+            saw_expand = True
+        elif step == 1:
+            if not saw_expand:
+                output[] = 1
+                return GATEWAY_ADMIN_POLICY_STATUS_OK
+            saw_backfill = True
+        elif step == 2:
+            if not saw_backfill:
+                output[] = 2
+                return GATEWAY_ADMIN_POLICY_STATUS_OK
+        elif step == 3:
+            if not saw_expand:
+                output[] = 3
+                return GATEWAY_ADMIN_POLICY_STATUS_OK
+        else:
+            return GATEWAY_ADMIN_POLICY_STATUS_INVALID
+    return GATEWAY_ADMIN_POLICY_STATUS_OK
+
+
 @export("prodex_mojo_audit_decision_v1")
 def prodex_mojo_audit_decision_v1(
     abi_version: Int64,
