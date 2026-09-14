@@ -1,4 +1,4 @@
-use super::{anthropic_mojo_value, anthropic_tool_name, json_fragment};
+use super::{anthropic_mojo_value, json_fragment};
 use prodex_mojo_core::rich::{AnthropicRequestKernelInput, AnthropicRequestKernelOperation};
 use serde_json::{Value, json};
 
@@ -20,17 +20,23 @@ pub(super) fn anthropic_tools(value: &Value) -> Result<Vec<Value>, String> {
                 .get("name")
                 .and_then(Value::as_str)
                 .ok_or_else(|| "Responses function tool must contain name".to_string())?;
-            let name = anthropic_tool_name(function.get("namespace").and_then(Value::as_str), name);
+            let namespace = function
+                .get("namespace")
+                .and_then(Value::as_str)
+                .filter(|namespace| !namespace.is_empty())
+                .map(|namespace| json_fragment(&Value::String(namespace.to_string())))
+                .transpose()?;
             let input_schema = function
                 .get("parameters")
                 .cloned()
                 .unwrap_or_else(|| json!({"type": "object", "properties": {}}));
-            let name = json_fragment(&Value::String(name))?;
+            let name = json_fragment(&Value::String(name.to_string()))?;
             let input_schema = json_fragment(&input_schema)?;
             let description = function.get("description").map(json_fragment).transpose()?;
             let mut input =
                 AnthropicRequestKernelInput::new(AnthropicRequestKernelOperation::ToolDeclaration);
             input.name = Some(&name);
+            input.namespace = namespace.as_deref();
             input.input = Some(&input_schema);
             input.content = description.as_deref();
             anthropic_mojo_value(input)
@@ -56,21 +62,23 @@ pub(super) fn anthropic_tool_choice(value: &Value) -> Result<Option<Value>, Stri
                 })
                 .and_then(Value::as_str)
                 .ok_or_else(|| "function tool_choice must contain name".to_string())?;
-            (
-                3,
-                Some(anthropic_tool_name(
-                    object.get("namespace").and_then(Value::as_str),
-                    name,
-                )),
-            )
+            (3, Some(name.to_string()))
         }
         _ => return Err("unsupported Responses tool_choice shape".to_string()),
     };
     let name = name
         .map(|name| json_fragment(&Value::String(name)))
         .transpose()?;
+    let namespace = value
+        .as_object()
+        .and_then(|object| object.get("namespace"))
+        .and_then(Value::as_str)
+        .filter(|namespace| !namespace.is_empty())
+        .map(|namespace| json_fragment(&Value::String(namespace.to_string())))
+        .transpose()?;
     let mut input = AnthropicRequestKernelInput::new(AnthropicRequestKernelOperation::ToolChoice);
     input.choice_kind = choice_kind;
     input.name = name.as_deref();
+    input.namespace = namespace.as_deref();
     anthropic_mojo_value(input).map(Some)
 }
