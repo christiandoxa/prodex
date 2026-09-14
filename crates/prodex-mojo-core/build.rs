@@ -292,6 +292,7 @@ fn selected_sources() -> Vec<&'static str> {
         sources.push("../../mojo/prodex_core/rich_context_v2.mojo");
         sources.push("../../mojo/prodex_core/rich_route.mojo");
         sources.push("../../mojo/prodex_core/rich_policy.mojo");
+        sources.push("../../mojo/prodex_core/application_data_plane.mojo");
         sources.push("../../mojo/prodex_core/rich_fallback.mojo");
         sources.push("../../mojo/prodex_core/rich_plan.mojo");
         sources.push("../../mojo/prodex_core/rich_catalog.mojo");

@@ -1,5 +1,8 @@
 use super::super::local_rewrite::RUNTIME_LOCAL_REWRITE_PROFILE;
 use super::super::local_rewrite_application_data_plane::RuntimeGatewayApplicationProviderDispatch;
+use super::super::local_rewrite_application_data_plane::{
+    runtime_gateway_route_uses_compact_dispatch, runtime_gateway_route_uses_models_dispatch,
+};
 use super::super::local_rewrite_gemini_compact::runtime_local_compact_response_parts_with_reason;
 use super::super::local_rewrite_upstream::{
     RuntimeLocalRewriteAcceptedBinding, RuntimeLocalRewriteUpstreamResponse,
@@ -10,6 +13,8 @@ use super::super::local_rewrite_upstream::{
 use super::super::provider_bridge::{RuntimeProviderRouteKind, runtime_provider_route_kind};
 #[path = "local_rewrite_pipeline_dispatch/operational_probe.rs"]
 mod operational_probe;
+#[path = "local_rewrite_pipeline_dispatch/planning.rs"]
+mod planning;
 #[path = "local_rewrite_pipeline_dispatch/provider_precommit.rs"]
 mod provider_precommit;
 #[path = "local_rewrite_pipeline_dispatch/quota.rs"]
@@ -18,7 +23,7 @@ use super::{
     RUNTIME_LOCAL_REWRITE_UPSTREAM_REQUEST_FAILED_MESSAGE, RuntimeLocalRewriteDispatchReadyRequest,
     RuntimeLocalRewritePipelineResult, RuntimeLocalRewriteProviderOptions,
     RuntimeLocalRewriteProxyShared, RuntimeLocalRewriteUpstreamResult, RuntimeProxyRequest,
-    build_runtime_proxy_json_error_response, build_runtime_proxy_text_response, path_without_query,
+    build_runtime_proxy_json_error_response, build_runtime_proxy_text_response,
     respond_runtime_local_rewrite_proxy_request, runtime_copilot_model_catalog_from_provider,
     runtime_gateway_application_provider_dispatch,
     runtime_gateway_application_provider_dispatch_attempt,
@@ -34,6 +39,12 @@ use crate::runtime_proxy::{
     runtime_proxy_local_overload_pressure_active,
 };
 pub(super) use operational_probe::runtime_gateway_operational_probe_response;
+use planning::{
+    RuntimeLocalRewriteAttemptResult, RuntimeLocalRewriteBindingDecision,
+    RuntimeLocalRewriteCandidateAttempt, runtime_local_rewrite_attempt_result,
+    runtime_local_rewrite_binding_decision, runtime_local_rewrite_candidate_attempt,
+    runtime_local_rewrite_candidate_count,
+};
 use prodex_provider_core::{ProviderErrorClass, RuntimeProviderBindingIdentity};
 use prodex_provider_spi::{ProviderRetryCause, runtime_provider_binding_identity_from_secret_ref};
 #[cfg(test)]
@@ -53,7 +64,7 @@ pub(super) fn runtime_local_rewrite_dispatch_compact<'target>(
             .state
             .reject(runtime_local_rewrite_request_timeout_response()));
     }
-    if !path_without_query(&request.captured.path_and_query).ends_with("/responses/compact") {
+    if !runtime_gateway_route_uses_compact_dispatch(request.state.context.route()) {
         return Ok(request);
     }
     let provider_dispatch =
@@ -142,6 +153,9 @@ pub(super) fn runtime_local_rewrite_dispatch_builtin_models<'target>(
         return Err(request
             .state
             .reject(runtime_local_rewrite_request_timeout_response()));
+    }
+    if !runtime_gateway_route_uses_models_dispatch(request.state.context.route()) {
+        return Ok(request);
     }
     let Some(response) = runtime_local_rewrite_builtin_models_response(
         request.state.request_id,
@@ -237,16 +251,16 @@ pub(super) fn runtime_local_rewrite_dispatch_provider(
         };
     let hard_continuation =
         runtime_local_rewrite_continuation_is_bound(shared, &request.captured).unwrap_or(true);
-    let candidate_count = if hard_continuation {
-        1
-    } else {
-        request
-            .application_admission
-            .routing()
-            .map_or(1, |routing| 1 + routing.fallbacks.len())
-    };
-    let (selected_response, last_error) =
-        runtime_local_rewrite_try_provider_candidates(&mut request, shared, candidate_count);
+    let fallback_count = request
+        .application_admission
+        .routing()
+        .map_or(0, |routing| routing.fallbacks.len());
+    let (selected_response, last_error) = runtime_local_rewrite_try_provider_candidates(
+        &mut request,
+        shared,
+        hard_continuation,
+        fallback_count,
+    );
     if request.state.deadline_expired() {
         if let Some(guard) = request.state.guards.route_load.as_mut() {
             guard.mark_error();
@@ -305,7 +319,8 @@ enum RuntimeLocalRewriteProviderAttempt {
 fn runtime_local_rewrite_try_provider_candidates(
     request: &mut RuntimeLocalRewriteDispatchReadyRequest<'_>,
     shared: &RuntimeLocalRewriteProxyShared,
-    candidate_count: usize,
+    hard_continuation: bool,
+    fallback_count: usize,
 ) -> (
     Option<(
         RuntimeLocalRewriteUpstreamResult,
@@ -319,18 +334,28 @@ fn runtime_local_rewrite_try_provider_candidates(
             Ok(dispatch) => (Some(dispatch), None),
             Err(error) => (None, Some(anyhow::anyhow!(error))),
         };
+    let candidate_count = runtime_local_rewrite_candidate_count(hard_continuation, fallback_count);
     for attempt_index in 0..candidate_count {
         if request.state.deadline_expired() {
             break;
         }
-        if attempt_index == 0 && primary_dispatch.is_none() {
-            continue;
-        }
+        let attempt = match runtime_local_rewrite_candidate_attempt(
+            hard_continuation,
+            fallback_count,
+            attempt_index,
+            primary_dispatch.is_some(),
+        ) {
+            RuntimeLocalRewriteCandidateAttempt::Stop => break,
+            RuntimeLocalRewriteCandidateAttempt::Skip => continue,
+            attempt @ (RuntimeLocalRewriteCandidateAttempt::Primary
+            | RuntimeLocalRewriteCandidateAttempt::Fallback) => attempt,
+        };
         match runtime_local_rewrite_provider_attempt(
             request,
             shared,
             attempt_index,
             candidate_count,
+            attempt,
             &mut primary_dispatch,
         ) {
             RuntimeLocalRewriteProviderAttempt::Success(result) => {
@@ -355,25 +380,27 @@ fn runtime_local_rewrite_provider_attempt(
     shared: &RuntimeLocalRewriteProxyShared,
     attempt_index: usize,
     candidate_count: usize,
+    attempt: RuntimeLocalRewriteCandidateAttempt,
     primary_dispatch: &mut Option<RuntimeGatewayApplicationProviderDispatch<'_>>,
 ) -> RuntimeLocalRewriteProviderAttempt {
-    let provider_dispatch = if attempt_index == 0 {
-        let Some(dispatch) = primary_dispatch.take() else {
-            return RuntimeLocalRewriteProviderAttempt::Retry(anyhow::anyhow!(
-                "provider dispatch unavailable"
-            ));
-        };
-        dispatch
-    } else {
-        match runtime_gateway_application_provider_dispatch_attempt(
-            &request.application_admission,
-            shared,
-            attempt_index,
-        ) {
-            Ok(dispatch) => dispatch,
-            Err(error) => {
-                return RuntimeLocalRewriteProviderAttempt::Retry(anyhow::anyhow!(error));
+    let provider_dispatch = match attempt {
+        RuntimeLocalRewriteCandidateAttempt::Primary => primary_dispatch
+            .take()
+            .expect("primary dispatch plan requires an available dispatch"),
+        RuntimeLocalRewriteCandidateAttempt::Fallback => {
+            match runtime_gateway_application_provider_dispatch_attempt(
+                &request.application_admission,
+                shared,
+                attempt_index,
+            ) {
+                Ok(dispatch) => dispatch,
+                Err(error) => {
+                    return RuntimeLocalRewriteProviderAttempt::Retry(anyhow::anyhow!(error));
+                }
             }
+        }
+        RuntimeLocalRewriteCandidateAttempt::Stop | RuntimeLocalRewriteCandidateAttempt::Skip => {
+            unreachable!("non-dispatch attempt must not reach provider transport")
         }
     };
     let selected_provider = provider_dispatch.provider();
@@ -445,22 +472,30 @@ fn runtime_local_rewrite_provider_attempt(
         &result,
         fallback_class,
     );
-    match result {
-        Ok(_response)
-            if fallback_class.is_some_and(|class| {
-                runtime_gateway_application_provider_retry_precommit(
-                    ProviderRetryCause::NextProvider,
-                    class,
-                    attempt_index,
-                    candidate_count,
-                )
-            }) =>
-        {
-            RuntimeLocalRewriteProviderAttempt::Retry(anyhow::anyhow!(
-                "provider precommit fallback"
-            ))
-        }
-        Ok(mut response) => {
+    let retry_allowed = fallback_class.is_some_and(|class| {
+        runtime_gateway_application_provider_retry_precommit(
+            ProviderRetryCause::NextProvider,
+            class,
+            attempt_index,
+            candidate_count,
+        )
+    }) || result.is_err()
+        && runtime_gateway_application_provider_retry_precommit(
+            ProviderRetryCause::NextProvider,
+            ProviderErrorClass::Transient,
+            attempt_index,
+            candidate_count,
+        );
+    match runtime_local_rewrite_attempt_result(
+        result.is_ok(),
+        fallback_class.is_some(),
+        retry_allowed,
+    ) {
+        RuntimeLocalRewriteAttemptResult::Retry => RuntimeLocalRewriteProviderAttempt::Retry(
+            anyhow::anyhow!("provider precommit fallback"),
+        ),
+        RuntimeLocalRewriteAttemptResult::Success => {
+            let mut response = result.expect("successful application attempt has a response");
             if let Some(binding_identity) = selected_binding_identity {
                 runtime_local_rewrite_attach_accepted_binding(
                     &mut response,
@@ -471,17 +506,12 @@ fn runtime_local_rewrite_provider_attempt(
             }
             RuntimeLocalRewriteProviderAttempt::Success(Box::new((response, selected_shared)))
         }
-        Err(error)
-            if runtime_gateway_application_provider_retry_precommit(
-                ProviderRetryCause::NextProvider,
-                ProviderErrorClass::Transient,
-                attempt_index,
-                candidate_count,
-            ) =>
-        {
-            RuntimeLocalRewriteProviderAttempt::Retry(error)
+        RuntimeLocalRewriteAttemptResult::Stop => {
+            let Err(error) = result else {
+                unreachable!("stopped application attempt must have an error")
+            };
+            RuntimeLocalRewriteProviderAttempt::Stop(error)
         }
-        Err(error) => RuntimeLocalRewriteProviderAttempt::Stop(error),
     }
 }
 
@@ -506,33 +536,31 @@ fn runtime_local_rewrite_validate_resolved_bound_provider(
     selected_provider: prodex_provider_core::ProviderId,
     selected_identity: Option<&RuntimeProviderBindingIdentity>,
 ) -> Result<(), anyhow::Error> {
-    let Some(identity) = bound_identity else {
-        return Err(anyhow::anyhow!(
-            "bound continuation has no exact provider identity"
-        ));
-    };
-    if identity.provider() != selected_provider {
-        return Err(anyhow::anyhow!(
-            "bound continuation provider is unavailable or unauthorized"
-        ));
-    }
-    if let Some(selected_identity) = selected_identity {
-        if identity != selected_identity {
-            return Err(anyhow::anyhow!(
-                "bound continuation provider identity is unavailable or unauthorized"
-            ));
-        }
-        return Ok(());
-    }
-    if !matches!(
+    let decision = runtime_local_rewrite_binding_decision(
+        true,
+        bound_identity.is_some(),
+        bound_identity.is_some_and(|identity| identity.provider() == selected_provider),
+        selected_identity.is_some(),
+        bound_identity
+            .zip(selected_identity)
+            .is_some_and(|(bound, selected)| bound == selected),
         selected_provider,
-        prodex_provider_core::ProviderId::OpenAi | prodex_provider_core::ProviderId::Copilot
-    ) {
-        return Err(anyhow::anyhow!(
+    );
+    match decision {
+        RuntimeLocalRewriteBindingDecision::Valid => Ok(()),
+        RuntimeLocalRewriteBindingDecision::MissingIdentity => Err(anyhow::anyhow!(
+            "bound continuation has no exact provider identity"
+        )),
+        RuntimeLocalRewriteBindingDecision::ProviderMismatch => Err(anyhow::anyhow!(
+            "bound continuation provider is unavailable or unauthorized"
+        )),
+        RuntimeLocalRewriteBindingDecision::IdentityMismatch => Err(anyhow::anyhow!(
+            "bound continuation provider identity is unavailable or unauthorized"
+        )),
+        RuntimeLocalRewriteBindingDecision::SelectedIdentityRequired => Err(anyhow::anyhow!(
             "bound continuation provider identity is unavailable"
-        ));
+        )),
     }
-    Ok(())
 }
 
 fn runtime_local_rewrite_single_binding_identity(
@@ -658,593 +686,9 @@ fn runtime_local_rewrite_error_log_value(_err: &anyhow::Error) -> String {
 }
 
 #[cfg(test)]
-mod error_log_tests {
-    use super::super::super::local_rewrite::RuntimeLocalRewriteAsyncResponse;
-    use super::super::super::local_rewrite_upstream::{
-        RuntimeLocalRewriteLiveBody, RuntimeLocalRewriteLiveResponse,
-        RuntimeLocalRewriteUpstreamResponse,
-    };
-    use super::super::super::provider_bridge::RuntimeProviderBridgeKind;
-    use super::*;
-    use prodex_provider_core::ProviderErrorClass;
-    use std::io::{Cursor, Read, Write};
-    use std::net::{TcpListener, TcpStream};
-    use std::sync::Arc;
-    use std::thread::JoinHandle;
-    use std::time::Duration;
-
-    fn test_async_runtime() -> Arc<tokio::runtime::Runtime> {
-        Arc::new(
-            tokio::runtime::Builder::new_multi_thread()
-                .worker_threads(2)
-                .enable_all()
-                .build()
-                .expect("SSE test runtime should build"),
-        )
-    }
-
-    fn buffered(status: u16, body: &[u8]) -> RuntimeLocalRewriteUpstreamResult {
-        RuntimeLocalRewriteUpstreamResult {
-            response: RuntimeLocalRewriteUpstreamResponse::Buffered(
-                RuntimeHeapTrimmedBufferedResponseParts {
-                    status,
-                    headers: Vec::new(),
-                    body: body.to_vec().into(),
-                },
-            ),
-            gemini_context: None,
-            copilot_context: None,
-        }
-    }
-
-    #[test]
-    fn upstream_error_log_value_is_content_free() {
-        let error =
-            anyhow::anyhow!("Bearer secret-sentinel for user@example.com in raw provider response");
-
-        assert_eq!(
-            runtime_local_rewrite_error_log_value(&error),
-            "upstream_request_failed"
-        );
-    }
-
-    #[test]
-    fn provider_fallback_requires_explicit_rate_limit_or_retryable_precommit_error() {
-        assert_eq!(
-            runtime_local_rewrite_provider_result_class(429),
-            prodex_observability::ProviderResultClass::ProviderError,
-        );
-        assert_eq!(
-            runtime_local_rewrite_provider_fallback_class(
-                &buffered(429, b"too many requests"),
-                RuntimeProviderBridgeKind::OpenAiResponses,
-            ),
-            None,
-        );
-        assert_eq!(
-            runtime_local_rewrite_provider_fallback_class(
-                &buffered(429, br#"{"error":{"code":"rate_limit_exceeded"}}"#),
-                RuntimeProviderBridgeKind::OpenAiResponses,
-            ),
-            Some(ProviderErrorClass::RateLimit),
-        );
-        assert_eq!(
-            runtime_local_rewrite_provider_fallback_class(
-                &buffered(503, b"temporarily unavailable"),
-                RuntimeProviderBridgeKind::OpenAiResponses,
-            ),
-            Some(ProviderErrorClass::Transient),
-        );
-    }
-
-    fn live_sse(body: impl AsRef<[u8]> + Send + 'static) -> RuntimeLocalRewriteUpstreamResult {
-        let body = body.as_ref().to_vec();
-        live_sse_reader_with_length(Cursor::new(body.clone()), true, Some(body.len())).0
-    }
-
-    fn live_sse_reader_with_length(
-        body: impl Read + Send + 'static,
-        join_server: bool,
-        content_length: Option<usize>,
-    ) -> (RuntimeLocalRewriteUpstreamResult, Option<JoinHandle<()>>) {
-        let server = tiny_http::Server::http("127.0.0.1:0").expect("SSE test server should bind");
-        let address = server
-            .server_addr()
-            .to_ip()
-            .expect("SSE test server should expose an IP address");
-        let sender = std::thread::spawn(move || {
-            let request = server
-                .recv()
-                .expect("SSE test server should receive a request");
-            let _ = request.respond(tiny_http::Response::new(
-                tiny_http::StatusCode(200),
-                vec![
-                    tiny_http::Header::from_bytes("content-type", "text/event-stream")
-                        .expect("SSE content type header"),
-                ],
-                Box::new(body),
-                content_length,
-                None,
-            ));
-        });
-        let async_runtime = test_async_runtime();
-        let response = async_runtime
-            .block_on(
-                reqwest::Client::new()
-                    .get(format!("http://{address}"))
-                    .send(),
-            )
-            .expect("SSE test client should receive a response");
-        let sender = if join_server {
-            sender.join().expect("SSE test server should finish");
-            None
-        } else {
-            Some(sender)
-        };
-        (
-            RuntimeLocalRewriteUpstreamResult {
-                response: RuntimeLocalRewriteUpstreamResponse::Live(
-                    RuntimeLocalRewriteLiveResponse::new(RuntimeLocalRewriteAsyncResponse::new(
-                        response,
-                        async_runtime,
-                        crate::RUNTIME_PROXY_STREAM_IDLE_TIMEOUT_MS,
-                    )),
-                ),
-                gemini_context: None,
-                copilot_context: None,
-            },
-            sender,
-        )
-    }
-
-    fn live_sse_raw(
-        body: Vec<u8>,
-        delayed_clean_end: Option<Duration>,
-    ) -> (RuntimeLocalRewriteUpstreamResult, JoinHandle<()>) {
-        let listener = TcpListener::bind("127.0.0.1:0").expect("SSE test server should bind");
-        let address = listener.local_addr().expect("SSE test address");
-        let sender = std::thread::spawn(move || {
-            let (mut stream, _) = listener.accept().expect("SSE test connection");
-            read_raw_request(&mut stream);
-            if let Some(delay) = delayed_clean_end {
-                stream
-                    .write_all(
-                        b"HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n",
-                    )
-                    .unwrap();
-                write!(stream, "{:x}\r\n", body.len()).unwrap();
-                stream.write_all(&body).unwrap();
-                stream.write_all(b"\r\n").unwrap();
-                stream.flush().unwrap();
-                std::thread::sleep(delay);
-                stream.write_all(b"0\r\n\r\n").unwrap();
-            } else {
-                write!(
-                    stream,
-                    "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
-                    body.len() + 1
-                )
-                .unwrap();
-                stream.write_all(&body).unwrap();
-            }
-            let _ = stream.flush();
-        });
-        let async_runtime = test_async_runtime();
-        let response = async_runtime
-            .block_on(
-                reqwest::Client::new()
-                    .get(format!("http://{address}"))
-                    .send(),
-            )
-            .expect("SSE test client should receive a response");
-        (
-            RuntimeLocalRewriteUpstreamResult {
-                response: RuntimeLocalRewriteUpstreamResponse::Live(
-                    RuntimeLocalRewriteLiveResponse::new(RuntimeLocalRewriteAsyncResponse::new(
-                        response,
-                        async_runtime,
-                        crate::RUNTIME_PROXY_STREAM_IDLE_TIMEOUT_MS,
-                    )),
-                ),
-                gemini_context: None,
-                copilot_context: None,
-            },
-            sender,
-        )
-    }
-
-    fn read_raw_request(stream: &mut TcpStream) {
-        let mut request = Vec::new();
-        let mut buffer = [0_u8; 256];
-        while !request.windows(4).any(|window| window == b"\r\n\r\n") {
-            let read = stream.read(&mut buffer).expect("SSE request should read");
-            if read == 0 {
-                break;
-            }
-            request.extend_from_slice(&buffer[..read]);
-        }
-    }
-
-    fn read_live_body(response: RuntimeLocalRewriteUpstreamResult) -> Vec<u8> {
-        let RuntimeLocalRewriteUpstreamResponse::Live(mut live) = response.response else {
-            panic!("SSE test response should remain live");
-        };
-        let mut body = live.prefix;
-        live.body
-            .take()
-            .expect("SSE test body should remain available")
-            .into_reader()
-            .read_to_end(&mut body)
-            .expect("SSE test response should remain readable");
-        body
-    }
-
-    fn precommit_sse(response: &mut RuntimeLocalRewriteUpstreamResult, timeout_ms: u64) {
-        let async_runtime = test_async_runtime();
-        runtime_local_rewrite_precommit_live_provider_response(
-            response,
-            RuntimeProviderBridgeKind::DeepSeek,
-            true,
-            timeout_ms,
-            crate::RUNTIME_PROXY_STREAM_IDLE_TIMEOUT_MS,
-            &async_runtime,
-            &Arc::new(tokio::sync::Semaphore::new(1)),
-        )
-        .expect("SSE precommit lookahead should succeed");
-    }
-
-    #[test]
-    fn provider_sse_first_retryable_event_is_precommit_classified_for_chat_compatible_candidates() {
-        // This guard intentionally covers only chat-compatible /v1/responses adapters.
-        // Native provider protocols, including Anthropic Messages, stay outside this
-        // precommit fallback contract until they have an explicit equivalent.
-        let async_runtime = test_async_runtime();
-        for (provider, body, expected) in [
-            (
-                RuntimeProviderBridgeKind::DeepSeek,
-                concat!(r#"data: {"error":{"code":"insufficient_quota"}}"#, "\n\n"),
-                ProviderErrorClass::Quota,
-            ),
-            (
-                RuntimeProviderBridgeKind::Anthropic,
-                concat!(r#"data: {"error":{"code":"rate_limit_exceeded"}}"#, "\n\n"),
-                ProviderErrorClass::RateLimit,
-            ),
-            (
-                RuntimeProviderBridgeKind::Gemini,
-                concat!(r#"data: {"error":{"code":"server_is_overloaded"}}"#, "\n\n"),
-                ProviderErrorClass::Transient,
-            ),
-        ] {
-            let mut response = live_sse(body);
-            runtime_local_rewrite_precommit_live_provider_response(
-                &mut response,
-                provider,
-                true,
-                crate::RUNTIME_PROXY_SSE_LOOKAHEAD_TIMEOUT_MS,
-                crate::RUNTIME_PROXY_STREAM_IDLE_TIMEOUT_MS,
-                &async_runtime,
-                &Arc::new(tokio::sync::Semaphore::new(1)),
-            )
-            .expect("SSE precommit lookahead should succeed");
-            assert_eq!(
-                runtime_local_rewrite_provider_fallback_class(&response, provider),
-                Some(expected)
-            );
-            let RuntimeLocalRewriteUpstreamResponse::Live(mut live) = response.response else {
-                panic!("SSE test response should remain live");
-            };
-            let mut tail = Vec::new();
-            let mut reader = live
-                .body
-                .take()
-                .expect("SSE test body should remain available")
-                .into_reader();
-            std::io::Read::read_to_end(&mut reader, &mut tail)
-                .expect("SSE test response should remain readable");
-            let mut reconstructed = live.prefix;
-            reconstructed.extend(tail);
-            assert_eq!(reconstructed, body.as_bytes());
-        }
-
-        let body = concat!(
-            r#"data: {"type":"response.output_text.delta","delta":"overloaded"}"#,
-            "\n\n"
-        );
-        let mut response = live_sse(body);
-        runtime_local_rewrite_precommit_live_provider_response(
-            &mut response,
-            RuntimeProviderBridgeKind::DeepSeek,
-            true,
-            crate::RUNTIME_PROXY_SSE_LOOKAHEAD_TIMEOUT_MS,
-            crate::RUNTIME_PROXY_STREAM_IDLE_TIMEOUT_MS,
-            &async_runtime,
-            &Arc::new(tokio::sync::Semaphore::new(1)),
-        )
-        .expect("ordinary SSE lookahead should succeed");
-        assert_eq!(
-            runtime_local_rewrite_provider_fallback_class(
-                &response,
-                RuntimeProviderBridgeKind::DeepSeek,
-            ),
-            None
-        );
-
-        let mut response = live_sse(body);
-        runtime_local_rewrite_precommit_live_provider_response(
-            &mut response,
-            RuntimeProviderBridgeKind::DeepSeek,
-            false,
-            crate::RUNTIME_PROXY_SSE_LOOKAHEAD_TIMEOUT_MS,
-            crate::RUNTIME_PROXY_STREAM_IDLE_TIMEOUT_MS,
-            &async_runtime,
-            &Arc::new(tokio::sync::Semaphore::new(1)),
-        )
-        .expect("non-Responses SSE should remain untouched");
-        let RuntimeLocalRewriteUpstreamResponse::Live(live) = response.response else {
-            panic!("SSE test response should remain live");
-        };
-        assert!(live.prefix.is_empty());
-    }
-
-    #[test]
-    fn provider_sse_upstream_end_finalizes_partial_tail_for_retry_and_preserves_bytes() {
-        let body = br#"data: {"error":{"code":"insufficient_quota"}}"#;
-        let mut response = live_sse(body);
-
-        precommit_sse(&mut response, crate::RUNTIME_PROXY_SSE_LOOKAHEAD_TIMEOUT_MS);
-        let RuntimeLocalRewriteUpstreamResponse::Live(live) = &response.response else {
-            panic!("SSE test response should remain live");
-        };
-        assert!(live.upstream_eof);
-        assert!(!live.headers.contains_key(reqwest::header::CONNECTION));
-        assert_eq!(
-            runtime_local_rewrite_provider_fallback_class(
-                &response,
-                RuntimeProviderBridgeKind::DeepSeek,
-            ),
-            Some(ProviderErrorClass::Quota)
-        );
-
-        assert_eq!(read_live_body(response), &body[..]);
-    }
-
-    #[test]
-    fn provider_sse_chunked_upstream_end_finalizes_partial_tail_at_true_eof() {
-        let body = br#"data: {"error":{"code":"insufficient_quota"}}"#.to_vec();
-        let expected = body.clone();
-        let (mut response, sender) = live_sse_reader_with_length(Cursor::new(body), false, None);
-
-        precommit_sse(&mut response, crate::RUNTIME_PROXY_SSE_LOOKAHEAD_TIMEOUT_MS);
-
-        let RuntimeLocalRewriteUpstreamResponse::Live(live) = &response.response else {
-            panic!("SSE test response should remain live");
-        };
-        assert!(live.upstream_eof);
-        assert_eq!(
-            runtime_local_rewrite_provider_fallback_class(
-                &response,
-                RuntimeProviderBridgeKind::DeepSeek,
-            ),
-            Some(ProviderErrorClass::Quota)
-        );
-        assert_eq!(read_live_body(response), expected);
-        sender
-            .expect("SSE test server handle should exist")
-            .join()
-            .expect("SSE test server should finish");
-    }
-
-    #[test]
-    fn provider_sse_retry_stops_after_first_committed_event() {
-        let body = concat!(
-            r#"data: {"type":"response.output_text.delta","delta":"committed"}"#,
-            "\n\n",
-            r#"data: {"error":{"code":"insufficient_quota"}}"#,
-            "\n\n",
-        );
-        let mut response = live_sse(body);
-
-        precommit_sse(&mut response, crate::RUNTIME_PROXY_SSE_LOOKAHEAD_TIMEOUT_MS);
-        assert_eq!(
-            runtime_local_rewrite_provider_fallback_class(
-                &response,
-                RuntimeProviderBridgeKind::DeepSeek,
-            ),
-            None
-        );
-        assert_eq!(read_live_body(response), body.as_bytes());
-    }
-
-    #[test]
-    fn provider_sse_budget_does_not_finalize_partial_tail_or_retry() {
-        let mut body = br#"data: {"error":{"code":"insufficient_quota"}}"#.to_vec();
-        body.resize(crate::RUNTIME_PROXY_SSE_LOOKAHEAD_BYTES, b'x');
-        let expected = body.clone();
-        let mut response = live_sse(body);
-
-        precommit_sse(&mut response, crate::RUNTIME_PROXY_SSE_LOOKAHEAD_TIMEOUT_MS);
-        assert_eq!(
-            runtime_local_rewrite_provider_fallback_class(
-                &response,
-                RuntimeProviderBridgeKind::DeepSeek,
-            ),
-            None
-        );
-
-        assert_eq!(read_live_body(response), expected);
-    }
-
-    #[test]
-    fn provider_sse_timeout_does_not_finalize_partial_tail_or_retry() {
-        let body = br#"data: {"error":{"code":"insufficient_quota"}}"#.to_vec();
-        let expected = body.clone();
-        let (mut response, sender) = live_sse_raw(body.clone(), Some(Duration::from_millis(100)));
-
-        precommit_sse(&mut response, 10);
-
-        assert_eq!(
-            runtime_local_rewrite_provider_fallback_class(
-                &response,
-                RuntimeProviderBridgeKind::DeepSeek,
-            ),
-            None
-        );
-        let RuntimeLocalRewriteUpstreamResponse::Live(mut live) = response.response else {
-            panic!("SSE test response should remain live");
-        };
-        let mut reconstructed = live.prefix;
-        live.body
-            .take()
-            .expect("SSE test body should remain available")
-            .into_reader()
-            .read_to_end(&mut reconstructed)
-            .expect("clean upstream EOF should remain a clean EOF");
-        assert_eq!(reconstructed, expected);
-        sender.join().expect("SSE test server should finish");
-    }
-
-    #[test]
-    fn provider_sse_channel_error_does_not_finalize_partial_tail_or_retry() {
-        let body = br#"data: {"error":{"code":"insufficient_quota"}}"#.to_vec();
-        let expected = body.clone();
-        let (mut response, sender) = live_sse_raw(body.clone(), None);
-
-        precommit_sse(&mut response, crate::RUNTIME_PROXY_SSE_LOOKAHEAD_TIMEOUT_MS);
-
-        assert_eq!(
-            runtime_local_rewrite_provider_fallback_class(
-                &response,
-                RuntimeProviderBridgeKind::DeepSeek,
-            ),
-            None
-        );
-        let RuntimeLocalRewriteUpstreamResponse::Live(mut live) = response.response else {
-            panic!("SSE test response should remain live");
-        };
-        let mut reconstructed = live.prefix;
-        let _error = live
-            .body
-            .take()
-            .expect("SSE test body should remain available")
-            .into_reader()
-            .read_to_end(&mut reconstructed)
-            .expect_err("SSE channel error should remain visible");
-        assert_eq!(reconstructed, expected);
-        sender.join().expect("SSE test server should finish");
-    }
-
-    #[test]
-    fn provider_sse_prefetch_saturation_preserves_the_original_live_body() {
-        let async_runtime = test_async_runtime();
-        let mut response = live_sse("data: {}\n\n");
-
-        runtime_local_rewrite_precommit_live_provider_response(
-            &mut response,
-            RuntimeProviderBridgeKind::DeepSeek,
-            true,
-            crate::RUNTIME_PROXY_SSE_LOOKAHEAD_TIMEOUT_MS,
-            crate::RUNTIME_PROXY_STREAM_IDLE_TIMEOUT_MS,
-            &async_runtime,
-            &Arc::new(tokio::sync::Semaphore::new(0)),
-        )
-        .expect("saturated lookahead should pass through");
-
-        let RuntimeLocalRewriteUpstreamResponse::Live(live) = response.response else {
-            panic!("SSE test response should remain live");
-        };
-        assert!(live.prefix.is_empty());
-        assert!(matches!(
-            live.body,
-            Some(RuntimeLocalRewriteLiveBody::AsyncResponse(_))
-        ));
-    }
-}
+#[path = "local_rewrite_pipeline_dispatch/error_log_tests.rs"]
+mod error_log_tests;
 
 #[cfg(test)]
-mod tests {
-    use super::{
-        runtime_local_rewrite_error_log_value,
-        runtime_local_rewrite_validate_resolved_bound_provider,
-    };
-    use prodex_provider_core::{ProviderId, RuntimeProviderBindingIdentity};
-
-    #[test]
-    fn local_rewrite_error_log_value_redacts_secret_like_chain() {
-        let err = anyhow::anyhow!(
-            "upstream failed\nAuthorization: Bearer local-rewrite-token\napi_key=local-rewrite-key"
-        )
-        .context("local rewrite upstream failed");
-        let message = runtime_local_rewrite_error_log_value(&err);
-
-        assert_eq!(message, "upstream_request_failed");
-    }
-
-    #[test]
-    fn governed_continuation_requires_the_exact_projected_binding_identity() {
-        let bound = RuntimeProviderBindingIdentity::from_raw_key(
-            ProviderId::Kiro,
-            "synthetic-key-a",
-            "https://kiro.example.com/v1",
-            Some("governed-route"),
-        )
-        .unwrap();
-        let other_key = RuntimeProviderBindingIdentity::from_raw_key(
-            ProviderId::Kiro,
-            "synthetic-key-b",
-            "https://kiro.example.com/v1",
-            Some("governed-route"),
-        )
-        .unwrap();
-        let other_endpoint = RuntimeProviderBindingIdentity::from_raw_key(
-            ProviderId::Kiro,
-            "synthetic-key-a",
-            "https://other.example.com/v1",
-            Some("governed-route"),
-        )
-        .unwrap();
-
-        assert!(
-            runtime_local_rewrite_validate_resolved_bound_provider(
-                Some(&bound),
-                ProviderId::Kiro,
-                Some(&bound),
-            )
-            .is_ok()
-        );
-        for selected in [&other_key, &other_endpoint] {
-            assert!(
-                runtime_local_rewrite_validate_resolved_bound_provider(
-                    Some(&bound),
-                    ProviderId::Kiro,
-                    Some(selected),
-                )
-                .is_err()
-            );
-        }
-        assert!(
-            runtime_local_rewrite_validate_resolved_bound_provider(
-                Some(&bound),
-                ProviderId::Gemini,
-                Some(&bound),
-            )
-            .is_err()
-        );
-        assert!(
-            runtime_local_rewrite_validate_resolved_bound_provider(
-                None,
-                ProviderId::Kiro,
-                Some(&bound),
-            )
-            .is_err()
-        );
-        assert!(
-            runtime_local_rewrite_validate_resolved_bound_provider(
-                Some(&bound),
-                ProviderId::Kiro,
-                None,
-            )
-            .is_err()
-        );
-    }
-}
+#[path = "local_rewrite_pipeline_dispatch/tests.rs"]
+mod tests;

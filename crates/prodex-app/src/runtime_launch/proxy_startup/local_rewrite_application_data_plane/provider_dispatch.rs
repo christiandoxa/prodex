@@ -123,6 +123,7 @@ pub(in crate::runtime_launch::proxy_startup) fn runtime_gateway_application_prov
     attempt_index: usize,
 ) -> Result<RuntimeGatewayApplicationProviderDispatch<'a>, RuntimeGatewayApplicationDataPlaneError>
 {
+    runtime_gateway_application_dispatch_governance(admission, shared)?;
     match &admission.0 {
         RuntimeGatewayApplicationAdmissionKind::TenantBound { plan, routing, .. } => {
             runtime_gateway_application_tenant_provider_dispatch_attempt(
@@ -134,15 +135,6 @@ pub(in crate::runtime_launch::proxy_startup) fn runtime_gateway_application_prov
             )
         }
         RuntimeGatewayApplicationAdmissionKind::CompatibilityAnonymous { invocation, .. } => {
-            if !shared
-                .runtime_shared
-                .runtime_config
-                .governance
-                .mode
-                .allows_anonymous_compatibility()
-            {
-                return Err(RuntimeGatewayApplicationDataPlaneError::MissingPrincipal);
-            }
             Ok(RuntimeGatewayApplicationProviderDispatch {
                 kind: RuntimeGatewayApplicationProviderDispatchKind::CompatibilityAnonymous(
                     invocation,
@@ -170,22 +162,6 @@ fn runtime_gateway_application_tenant_provider_dispatch_attempt<'a>(
         shared,
         attempt_index,
     )?;
-    if shared
-        .runtime_shared
-        .runtime_config
-        .governance
-        .mode
-        .is_enforcing()
-        && (!shared
-            .runtime_shared
-            .runtime_config
-            .governance
-            .mandatory_audit
-            || plan.governance.policy.effect != PolicyEffect::Allow
-            || routing.is_none())
-    {
-        return Err(RuntimeGatewayApplicationDataPlaneError::GovernanceUnavailable);
-    }
     Ok(RuntimeGatewayApplicationProviderDispatch {
         kind: RuntimeGatewayApplicationProviderDispatchKind::Application(
             &plan.admission.provider_invocation,
@@ -195,6 +171,69 @@ fn runtime_gateway_application_tenant_provider_dispatch_attempt<'a>(
         pricing,
         provider_override,
     })
+}
+
+#[cfg(feature = "mojo-core")]
+fn runtime_gateway_application_dispatch_governance(
+    admission: &RuntimeGatewayApplicationAdmission,
+    shared: &RuntimeLocalRewriteProxyShared,
+) -> Result<(), RuntimeGatewayApplicationDataPlaneError> {
+    use prodex_mojo_core::rich::ApplicationGovernanceDispatchDecision as MojoDecision;
+    let (tenant_bound, policy_allows, routing_present) = match &admission.0 {
+        RuntimeGatewayApplicationAdmissionKind::TenantBound { plan, routing, .. } => (
+            true,
+            plan.governance.policy.effect == PolicyEffect::Allow,
+            routing.is_some(),
+        ),
+        RuntimeGatewayApplicationAdmissionKind::CompatibilityAnonymous { .. } => {
+            (false, false, false)
+        }
+    };
+    let governance = &shared.runtime_shared.runtime_config.governance;
+    let decision = prodex_mojo_core::rich::plan_application_governance_dispatch(
+        prodex_mojo_core::rich::ApplicationGovernanceDispatchInput {
+            tenant_bound,
+            anonymous_compatibility_allowed: governance.mode.allows_anonymous_compatibility(),
+            enforcing: governance.mode.is_enforcing(),
+            mandatory_audit: governance.mandatory_audit,
+            policy_allows,
+            routing_present,
+        },
+    )
+    .expect("Mojo application dispatch governance returned invalid output");
+    match decision {
+        MojoDecision::Allowed => Ok(()),
+        MojoDecision::IdentityRequired => {
+            Err(RuntimeGatewayApplicationDataPlaneError::MissingPrincipal)
+        }
+        MojoDecision::Unavailable => {
+            Err(RuntimeGatewayApplicationDataPlaneError::GovernanceUnavailable)
+        }
+    }
+}
+
+#[cfg(not(feature = "mojo-core"))]
+fn runtime_gateway_application_dispatch_governance(
+    admission: &RuntimeGatewayApplicationAdmission,
+    shared: &RuntimeLocalRewriteProxyShared,
+) -> Result<(), RuntimeGatewayApplicationDataPlaneError> {
+    let governance = &shared.runtime_shared.runtime_config.governance;
+    match &admission.0 {
+        RuntimeGatewayApplicationAdmissionKind::CompatibilityAnonymous { .. }
+            if !governance.mode.allows_anonymous_compatibility() =>
+        {
+            Err(RuntimeGatewayApplicationDataPlaneError::MissingPrincipal)
+        }
+        RuntimeGatewayApplicationAdmissionKind::TenantBound { plan, routing, .. }
+            if governance.mode.is_enforcing()
+                && (!governance.mandatory_audit
+                    || plan.governance.policy.effect != PolicyEffect::Allow
+                    || routing.is_none()) =>
+        {
+            Err(RuntimeGatewayApplicationDataPlaneError::GovernanceUnavailable)
+        }
+        _ => Ok(()),
+    }
 }
 
 type RuntimeGatewayApplicationRouteExecution = (
