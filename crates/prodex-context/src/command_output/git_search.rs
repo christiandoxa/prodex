@@ -75,6 +75,28 @@ fn compact_git_status_output_rust(input: &str, options: &CommandOutputCompactOpt
     finalize_compacted_command_output(CommandOutputKind::GitStatus, input, output, options)
 }
 
+#[cfg(feature = "mojo")]
+pub(super) fn compact_git_diff_output(
+    input: &str,
+    options: &CommandOutputCompactOptions,
+) -> String {
+    let Some(body) = prodex_mojo_core::rich::context_git_diff_output(
+        input,
+        options.max_lines,
+        options.max_line_chars,
+    )
+    .unwrap_or_else(|error| panic!("Mojo git-diff formatter failed: {error:?}")) else {
+        return smart_truncate_command_output(input, options);
+    };
+    let lines = body
+        .trim_end_matches('\n')
+        .split('\n')
+        .map(str::to_owned)
+        .collect();
+    finalize_compacted_command_output(CommandOutputKind::GitDiff, input, lines, options)
+}
+
+#[cfg(not(feature = "mojo"))]
 pub(super) fn compact_git_diff_output(
     input: &str,
     options: &CommandOutputCompactOptions,
@@ -87,6 +109,10 @@ pub(super) fn compact_git_diff_output_with_intent(
     options: &CommandOutputCompactOptions,
     intent_terms: &[String],
 ) -> String {
+    #[cfg(feature = "mojo")]
+    if intent_terms.is_empty() {
+        return compact_git_diff_output(input, options);
+    }
     let lines = command_lines(input);
     let sections = split_git_diff_sections(&lines);
     if sections.is_empty() {

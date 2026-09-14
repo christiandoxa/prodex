@@ -2,6 +2,7 @@ from std.memory import Pointer
 
 from context_command_output_common import (
     CONTEXT_COMMAND_OUTPUT_FILE_LIST,
+    CONTEXT_COMMAND_OUTPUT_GIT_DIFF,
     CONTEXT_COMMAND_OUTPUT_GIT_LOG,
     CONTEXT_COMMAND_OUTPUT_GIT_STATUS,
     CONTEXT_COMMAND_OUTPUT_MAX_BYTES,
@@ -41,6 +42,8 @@ from context_command_output_common import (
     context_command_output_short_status_line,
 )
 from context_text import (
+    context_search_ascii_contains_exact,
+    context_search_ascii_find_exact,
     context_search_ascii_starts_exact,
     context_search_find_byte,
     context_text_trim_bounds,
@@ -82,6 +85,7 @@ def prodex_mojo_context_command_output_size_v1(
         and value.operation != CONTEXT_COMMAND_OUTPUT_FILE_LIST
         and value.operation != CONTEXT_COMMAND_OUTPUT_SEARCH
         and value.operation != CONTEXT_COMMAND_OUTPUT_GIT_LOG
+        and value.operation != CONTEXT_COMMAND_OUTPUT_GIT_DIFF
     ):
         return CONTEXT_COMMAND_OUTPUT_STATUS_INVALID
     if not rich_view_valid(value.input, CONTEXT_COMMAND_OUTPUT_MAX_BYTES):
@@ -378,6 +382,259 @@ def context_command_output_write_category(
     return context_command_output_put_byte(writer, 10)
 
 
+def context_command_output_diff_stat_line(
+    ptr: Pointer[mut=False, UInt8, _], start: Int64, end: Int64
+) -> Bool:
+    var separator = context_search_ascii_find_exact[" | "](ptr, start, end)
+    if separator < 0 or separator == start or separator + 3 >= end:
+        return False
+    for index in range(separator + 3, end):
+        var value = ptr[unsafe_offset=index]
+        if value == 43 or value == 45 or value >= 48 and value <= 57:
+            return True
+    return False
+
+
+def context_command_output_diff_stat_summary(
+    ptr: Pointer[mut=False, UInt8, _], start: Int64, end: Int64
+) -> Bool:
+    return (
+        context_search_ascii_contains_exact[" file changed"](ptr, start, end)
+        or context_search_ascii_contains_exact[" files changed"](ptr, start, end)
+        or context_search_ascii_contains_exact[" insertion"](ptr, start, end)
+        or context_search_ascii_contains_exact[" deletion"](ptr, start, end)
+    )
+
+
+def context_command_output_diff_header(
+    ptr: Pointer[mut=False, UInt8, _], start: Int64, end: Int64
+) -> Bool:
+    return context_search_ascii_starts_exact["diff --git "](ptr, start, end)
+
+
+def context_command_output_diff_path(
+    ptr: Pointer[mut=False, UInt8, _], start: Int64, end: Int64,
+    writer: Pointer[mut=True, ContextCommandOutputWriter, _],
+) -> Bool:
+    var marker = context_search_ascii_find_exact[" b/"](ptr, start, end)
+    if marker >= 0:
+        return context_command_output_put_range(writer, ptr, marker + 3, end)
+    marker = context_search_ascii_find_exact["+++ b/"](ptr, start, end)
+    if marker >= 0:
+        return context_command_output_put_range(writer, ptr, marker + 6, end)
+    return context_command_output_put_literal(writer, StringSlice("unknown"))
+
+
+def context_command_output_diff_write_section_summary(
+    ptr: Pointer[mut=False, UInt8, _], start: Int64, end: Int64,
+    writer: Pointer[mut=True, ContextCommandOutputWriter, _],
+) -> Bool:
+    var added: Int64 = 0
+    var removed: Int64 = 0
+    var hunks: Int64 = 0
+    var binary = False
+    var context_start: Int64 = -1
+    var context_end: Int64 = -1
+    var cursor = start
+    while cursor < end:
+        var line = context_command_output_next_line(ptr, cursor, end)
+        if context_search_ascii_starts_exact["@@ "](ptr, cursor, line[0]):
+            hunks += 1
+            var first_marker = context_search_ascii_find_exact["@@"](ptr, cursor, line[0])
+            var second_marker = context_search_ascii_find_exact["@@"](ptr, first_marker + 2, line[0]) if first_marker >= 0 else -1
+            if second_marker >= 0:
+                var context = context_text_trim_bounds(ptr, second_marker + 2, line[0])
+                if context[0] < context[1] and context_start < 0:
+                    context_start = context[0]
+                    context_end = context[1]
+        elif context_search_ascii_starts_exact["+"](ptr, cursor, line[0]) and not context_search_ascii_starts_exact["+++ "](ptr, cursor, line[0]):
+            added += 1
+        elif context_search_ascii_starts_exact["-"](ptr, cursor, line[0]) and not context_search_ascii_starts_exact["--- "](ptr, cursor, line[0]):
+            removed += 1
+        elif context_search_ascii_starts_exact["Binary files "](ptr, cursor, line[0]) or context_search_ascii_starts_exact["GIT binary patch"](ptr, cursor, line[0]):
+            binary = True
+        cursor = line[1]
+    var header = context_command_output_next_line(ptr, start, end)
+    if not context_command_output_diff_path(ptr, start, header[0], writer):
+        return False
+    if not context_command_output_put_literal(writer, StringSlice(": +")) or not context_command_output_put_i64(writer, added) or not context_command_output_put_literal(writer, StringSlice(", -")) or not context_command_output_put_i64(writer, removed) or not context_command_output_put_literal(writer, StringSlice(", ")) or not context_command_output_put_i64(writer, hunks) or not context_command_output_put_literal(writer, StringSlice(" hunks")):
+        return False
+    if binary and not context_command_output_put_literal(writer, StringSlice(", binary")):
+        return False
+    if context_start >= 0 and (
+        not context_command_output_put_literal(writer, StringSlice(", ctx="))
+        or not context_command_output_put_range(writer, ptr, context_start, context_end)
+    ):
+        return False
+    return context_command_output_put_byte(writer, 10)
+
+
+def context_command_output_diff_excerpt_structural(
+    ptr: Pointer[mut=False, UInt8, _], start: Int64, end: Int64
+) -> Bool:
+    return (
+        context_search_ascii_starts_exact["diff --git "](ptr, start, end)
+        or context_search_ascii_starts_exact["@@ "](ptr, start, end)
+        or context_search_ascii_starts_exact["--- "](ptr, start, end)
+        or context_search_ascii_starts_exact["+++ "](ptr, start, end)
+        or context_search_ascii_starts_exact["new file mode "](ptr, start, end)
+        or context_search_ascii_starts_exact["deleted file mode "](ptr, start, end)
+        or context_search_ascii_starts_exact["old mode "](ptr, start, end)
+        or context_search_ascii_starts_exact["new mode "](ptr, start, end)
+        or context_search_ascii_starts_exact["rename from "](ptr, start, end)
+        or context_search_ascii_starts_exact["rename to "](ptr, start, end)
+        or context_search_ascii_starts_exact["similarity index "](ptr, start, end)
+        or context_search_ascii_starts_exact["dissimilarity index "](ptr, start, end)
+        or context_search_ascii_starts_exact["Binary files "](ptr, start, end)
+        or context_search_ascii_starts_exact["GIT binary patch"](ptr, start, end)
+    )
+
+
+def context_command_output_git_diff(
+    input: ProdexContextCommandOutputInput,
+    writer: Pointer[mut=True, ContextCommandOutputWriter, _],
+    records: Pointer[mut=True, ProdexContextCommandOutputRecord, _],
+    record_capacity: Int64,
+    scratch: Pointer[mut=True, ContextCommandOutputWriter, _],
+) -> Int64:
+    _ = records
+    _ = record_capacity
+    _ = scratch
+    var ptr = rich_view_ptr(input.input)
+    var length = Int64(input.input.len)
+    var sections: Int64 = 0
+    var total_added: Int64 = 0
+    var total_removed: Int64 = 0
+    var total_hunks: Int64 = 0
+    var stat_lines: Int64 = 0
+    var stat_summary = False
+    var cursor: Int64 = 0
+    while cursor < length:
+        var line = context_command_output_next_line(ptr, cursor, length)
+        if context_command_output_diff_header(ptr, cursor, line[0]):
+            sections += 1
+        if context_command_output_diff_stat_line(ptr, cursor, line[0]):
+            stat_lines += 1
+        if context_command_output_diff_stat_summary(ptr, cursor, line[0]):
+            stat_summary = True
+        cursor = line[1]
+    if sections == 0:
+        if stat_lines == 0 or not stat_summary:
+            return CONTEXT_COMMAND_OUTPUT_STATUS_NO_MATCH
+        if not context_command_output_put_literal(writer, StringSlice("sum: git diff stat_only entries=")) or not context_command_output_put_i64(writer, stat_lines) or not context_command_output_put_byte(writer, 10):
+            return CONTEXT_COMMAND_OUTPUT_STATUS_CAPACITY
+        cursor = 0
+        while cursor < length:
+            var line = context_command_output_next_line(ptr, cursor, length)
+            if context_command_output_diff_stat_summary(ptr, cursor, line[0]):
+                var bounds = context_text_trim_bounds(ptr, cursor, line[0])
+                if not context_command_output_put_literal(writer, StringSlice("stat totals: ")) or not context_command_output_put_range(writer, ptr, bounds[0], bounds[1]) or not context_command_output_put_byte(writer, 10):
+                    return CONTEXT_COMMAND_OUTPUT_STATUS_CAPACITY
+            cursor = line[1]
+        if not context_command_output_put_literal(writer, StringSlice("stat files:\n")):
+            return CONTEXT_COMMAND_OUTPUT_STATUS_CAPACITY
+        cursor = 0
+        while cursor < length:
+            var line = context_command_output_next_line(ptr, cursor, length)
+            if context_command_output_diff_stat_line(ptr, cursor, line[0]) and not context_command_output_diff_stat_summary(ptr, cursor, line[0]):
+                if not context_command_output_put_literal(writer, StringSlice("  ")) or not context_command_output_put_range(writer, ptr, cursor, line[0]) or not context_command_output_put_byte(writer, 10):
+                    return CONTEXT_COMMAND_OUTPUT_STATUS_CAPACITY
+            cursor = line[1]
+        return CONTEXT_COMMAND_OUTPUT_STATUS_OK
+
+    # ponytail: repeated section scans keep the bounded ABI record-free; index sections if diffs dominate profiles.
+    cursor = 0
+    while cursor < length:
+        var line = context_command_output_next_line(ptr, cursor, length)
+        if context_command_output_diff_header(ptr, cursor, line[0]):
+            var section_end = length
+            var probe = line[1]
+            while probe < length:
+                var next = context_command_output_next_line(ptr, probe, length)
+                if context_command_output_diff_header(ptr, probe, next[0]):
+                    section_end = probe
+                    break
+                probe = next[1]
+            var section_added: Int64 = 0
+            var section_removed: Int64 = 0
+            var section_hunks: Int64 = 0
+            var section_cursor = cursor
+            while section_cursor < section_end:
+                var section_line = context_command_output_next_line(ptr, section_cursor, section_end)
+                if context_search_ascii_starts_exact["@@ "](ptr, section_cursor, section_line[0]):
+                    section_hunks += 1
+                elif context_search_ascii_starts_exact["+"](ptr, section_cursor, section_line[0]) and not context_search_ascii_starts_exact["+++ "](ptr, section_cursor, section_line[0]):
+                    section_added += 1
+                elif context_search_ascii_starts_exact["-"](ptr, section_cursor, section_line[0]) and not context_search_ascii_starts_exact["--- "](ptr, section_cursor, section_line[0]):
+                    section_removed += 1
+                section_cursor = section_line[1]
+            total_added += section_added
+            total_removed += section_removed
+            total_hunks += section_hunks
+        cursor = line[1]
+    if not context_command_output_put_literal(writer, StringSlice("sum: git diff files=")) or not context_command_output_put_i64(writer, sections) or not context_command_output_put_literal(writer, StringSlice(", +")) or not context_command_output_put_i64(writer, total_added) or not context_command_output_put_literal(writer, StringSlice(", -")) or not context_command_output_put_i64(writer, total_removed) or not context_command_output_put_literal(writer, StringSlice(", hunks=")) or not context_command_output_put_i64(writer, total_hunks) or not context_command_output_put_byte(writer, 10):
+        return CONTEXT_COMMAND_OUTPUT_STATUS_CAPACITY
+    cursor = 0
+    while cursor < length:
+        var line = context_command_output_next_line(ptr, cursor, length)
+        if context_command_output_diff_header(ptr, cursor, line[0]):
+            var section_end = length
+            var probe = line[1]
+            while probe < length:
+                var next = context_command_output_next_line(ptr, probe, length)
+                if context_command_output_diff_header(ptr, probe, next[0]):
+                    section_end = probe
+                    break
+                probe = next[1]
+            if not context_command_output_diff_write_section_summary(ptr, cursor, section_end, writer):
+                return CONTEXT_COMMAND_OUTPUT_STATUS_CAPACITY
+        cursor = line[1]
+    if not context_command_output_put_literal(writer, StringSlice("\ndiff excerpts:\n")):
+        return CONTEXT_COMMAND_OUTPUT_STATUS_CAPACITY
+    var structural_lines: Int64 = 0
+    cursor = 0
+    while cursor < length:
+        var line = context_command_output_next_line(ptr, cursor, length)
+        if context_command_output_diff_excerpt_structural(ptr, cursor, line[0]):
+            structural_lines += 1
+        cursor = line[1]
+    var max_lines = Int64(input.max_lines)
+    var fixed_lines = 1 + sections + 2 + structural_lines + sections
+    var detail_budget = max_lines - 1 - fixed_lines if max_lines > fixed_lines + 1 else 0
+    var per_section_budget = detail_budget / sections if sections > 0 else 0
+    cursor = 0
+    while cursor < length:
+        var line = context_command_output_next_line(ptr, cursor, length)
+        if context_command_output_diff_header(ptr, cursor, line[0]):
+            var section_end = length
+            var probe = line[1]
+            while probe < length:
+                var next = context_command_output_next_line(ptr, probe, length)
+                if context_command_output_diff_header(ptr, probe, next[0]):
+                    section_end = probe
+                    break
+                probe = next[1]
+            var detail_written: Int64 = 0
+            var omitted: Int64 = 0
+            var section_cursor = cursor
+            while section_cursor < section_end:
+                var section_line = context_command_output_next_line(ptr, section_cursor, section_end)
+                var structural = context_command_output_diff_excerpt_structural(ptr, section_cursor, section_line[0])
+                if structural or detail_written < per_section_budget:
+                    if not context_command_output_put_range(writer, ptr, section_cursor, section_line[0]) or not context_command_output_put_byte(writer, 10):
+                        return CONTEXT_COMMAND_OUTPUT_STATUS_CAPACITY
+                    if not structural:
+                        detail_written += 1
+                else:
+                    omitted += 1
+                section_cursor = section_line[1]
+            if omitted > 0:
+                if not context_command_output_put_literal(writer, StringSlice("[... omitted ")) or not context_command_output_put_i64(writer, omitted) or not context_command_output_put_literal(writer, StringSlice(" diff lines ...]\n")):
+                    return CONTEXT_COMMAND_OUTPUT_STATUS_CAPACITY
+        cursor = line[1]
+    return CONTEXT_COMMAND_OUTPUT_STATUS_OK
+
+
 def context_command_output_git_status(
     input: ProdexContextCommandOutputInput,
     writer: Pointer[mut=True, ContextCommandOutputWriter, _],
@@ -511,6 +768,7 @@ def prodex_mojo_context_command_output_v1(
         value.operation != CONTEXT_COMMAND_OUTPUT_GIT_STATUS
         and value.operation != CONTEXT_COMMAND_OUTPUT_FILE_LIST
         and value.operation != CONTEXT_COMMAND_OUTPUT_GIT_LOG
+        and value.operation != CONTEXT_COMMAND_OUTPUT_GIT_DIFF
     ):
         return CONTEXT_COMMAND_OUTPUT_STATUS_INVALID
     if not rich_view_valid(value.input, CONTEXT_COMMAND_OUTPUT_MAX_BYTES):
@@ -541,6 +799,14 @@ def prodex_mojo_context_command_output_v1(
         )
         if value.operation == CONTEXT_COMMAND_OUTPUT_FILE_LIST
         else context_command_output_git_log(
+            value,
+            Pointer(to=writer),
+            records,
+            record_capacity,
+            Pointer(to=scratch_writer),
+        )
+        if value.operation == CONTEXT_COMMAND_OUTPUT_GIT_LOG
+        else context_command_output_git_diff(
             value,
             Pointer(to=writer),
             records,
