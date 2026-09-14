@@ -4,8 +4,10 @@ pub const POLICY_NUMERIC_RELATION_LE: i64 = 2;
 
 mod gateway_admin;
 pub use gateway_admin::{
-    GatewayAdminRetentionPlan, gateway_admin_purge_protected_count, gateway_admin_retention_cutoff,
-    plan_gateway_admin_limit, plan_gateway_admin_retention,
+    GatewayAdminRetentionPlan, audit_event_is_expired, audit_hold_is_active,
+    audit_retention_cutoff, audit_time_range_contains, compare_audit_positions,
+    gateway_admin_purge_protected_count, gateway_admin_retention_cutoff, plan_gateway_admin_limit,
+    plan_gateway_admin_retention,
 };
 
 #[repr(i64)]

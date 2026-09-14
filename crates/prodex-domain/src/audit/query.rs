@@ -569,7 +569,23 @@ impl AuditTimeRange {
         Ok(Self { start, end })
     }
 
+    #[cfg(feature = "mojo")]
     pub fn contains(self, timestamp: AuditTimestamp) -> bool {
+        prodex_mojo_core::policy::audit_time_range_contains(
+            self.start.map(AuditTimestamp::unix_ms),
+            self.end.map(AuditTimestamp::unix_ms),
+            timestamp.unix_ms(),
+        )
+        .expect("Mojo audit time-range predicate returned invalid output")
+    }
+
+    #[cfg(not(feature = "mojo"))]
+    pub fn contains(self, timestamp: AuditTimestamp) -> bool {
+        self.contains_rust(timestamp)
+    }
+
+    #[cfg(any(test, not(feature = "mojo")))]
+    fn contains_rust(self, timestamp: AuditTimestamp) -> bool {
         self.start
             .is_none_or(|start| timestamp.unix_ms() >= start.unix_ms())
             && self
@@ -659,27 +675,100 @@ impl fmt::Display for AuditPageLimitError {
 }
 
 impl Error for AuditPageLimitError {}
+#[cfg(feature = "mojo")]
 pub(super) fn compare_audit_events(
     left: &AuditEvent,
     right: &AuditEvent,
     sort_order: AuditSortOrder,
 ) -> Ordering {
-    let time_order = left.occurred_at_unix_ms.cmp(&right.occurred_at_unix_ms);
+    compare_audit_positions(
+        left.occurred_at_unix_ms,
+        left.id,
+        right.occurred_at_unix_ms,
+        right.id,
+        sort_order,
+    )
+}
+
+#[cfg(any(test, not(feature = "mojo")))]
+fn compare_audit_positions_rust(
+    left_timestamp: u64,
+    left_id: AuditEventId,
+    right_timestamp: u64,
+    right_id: AuditEventId,
+    sort_order: AuditSortOrder,
+) -> Ordering {
+    let time_order = left_timestamp.cmp(&right_timestamp);
     let time_order = match sort_order {
         AuditSortOrder::OccurredAtAsc => time_order,
         AuditSortOrder::OccurredAtDesc => time_order.reverse(),
     };
-    time_order.then_with(|| left.id.cmp(&right.id))
+    time_order.then_with(|| left_id.cmp(&right_id))
 }
 
+#[cfg(not(feature = "mojo"))]
+pub(super) fn compare_audit_events(
+    left: &AuditEvent,
+    right: &AuditEvent,
+    sort_order: AuditSortOrder,
+) -> Ordering {
+    compare_audit_positions_rust(
+        left.occurred_at_unix_ms,
+        left.id,
+        right.occurred_at_unix_ms,
+        right.id,
+        sort_order,
+    )
+}
+
+#[cfg(feature = "mojo")]
+fn compare_audit_positions(
+    left_timestamp: u64,
+    left_id: AuditEventId,
+    right_timestamp: u64,
+    right_id: AuditEventId,
+    sort_order: AuditSortOrder,
+) -> Ordering {
+    prodex_mojo_core::policy::compare_audit_positions(
+        left_timestamp,
+        audit_id_parts(left_id),
+        right_timestamp,
+        audit_id_parts(right_id),
+        sort_order == AuditSortOrder::OccurredAtDesc,
+    )
+    .expect("Mojo audit ordering returned invalid output")
+}
+
+#[cfg(feature = "mojo")]
+fn audit_id_parts(id: AuditEventId) -> [u64; 2] {
+    let (high, low) = id.as_uuid().as_u64_pair();
+    [high, low]
+}
+
+#[cfg(feature = "mojo")]
 pub(super) fn compare_audit_event_to_cursor_position(
     event: &AuditEvent,
     cursor: AuditQueryCursor,
 ) -> Ordering {
-    let time_order = event.occurred_at_unix_ms.cmp(&cursor.occurred_at.unix_ms());
-    let time_order = match cursor.sort_order {
-        AuditSortOrder::OccurredAtAsc => time_order,
-        AuditSortOrder::OccurredAtDesc => time_order.reverse(),
-    };
-    time_order.then_with(|| event.id.cmp(&cursor.event_id))
+    compare_audit_positions(
+        event.occurred_at_unix_ms,
+        event.id,
+        cursor.occurred_at.unix_ms(),
+        cursor.event_id,
+        cursor.sort_order,
+    )
+}
+
+#[cfg(not(feature = "mojo"))]
+pub(super) fn compare_audit_event_to_cursor_position(
+    event: &AuditEvent,
+    cursor: AuditQueryCursor,
+) -> Ordering {
+    compare_audit_positions_rust(
+        event.occurred_at_unix_ms,
+        event.id,
+        cursor.occurred_at.unix_ms(),
+        cursor.event_id,
+        cursor.sort_order,
+    )
 }
