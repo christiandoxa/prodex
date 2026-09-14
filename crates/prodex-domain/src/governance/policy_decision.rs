@@ -433,7 +433,198 @@ pub struct PolicyRuleCondition {
 }
 
 impl PolicyRuleCondition {
+    #[cfg(feature = "mojo")]
     fn matches(&self, input: &PolicyInput<'_>) -> bool {
+        use prodex_mojo_core::policy::{
+            GOVERNANCE_MATCH_CONTAINS, GOVERNANCE_MATCH_EXACT, GOVERNANCE_MATCH_MAXIMUM,
+            GOVERNANCE_MATCH_MINIMUM,
+        };
+
+        let values = [
+            (
+                self.channel.map(|value| value as u64),
+                Some(input.channel as u64),
+                GOVERNANCE_MATCH_EXACT,
+            ),
+            (
+                self.principal_kind.map(|value| value as u64),
+                Some(input.principal.kind as u64),
+                GOVERNANCE_MATCH_EXACT,
+            ),
+            (
+                self.minimum_role.map(|value| value as u64),
+                Some(input.principal.role as u64),
+                GOVERNANCE_MATCH_MINIMUM,
+            ),
+            (
+                self.credential_scope.map(|value| value as u64),
+                Some(input.credential_scope as u64),
+                GOVERNANCE_MATCH_EXACT,
+            ),
+            (
+                self.action.map(|value| value as u64),
+                Some(input.action as u64),
+                GOVERNANCE_MATCH_EXACT,
+            ),
+            (
+                self.minimum_classification.map(|value| value as u64),
+                Some(input.data.classification as u64),
+                GOVERNANCE_MATCH_MINIMUM,
+            ),
+            (
+                self.inspection_coverage.map(|value| value as u64),
+                Some(input.data.inspection_coverage as u64),
+                GOVERNANCE_MATCH_EXACT,
+            ),
+            (
+                self.minimum_request_risk.map(|value| value as u64),
+                Some(input.request_risk as u64),
+                GOVERNANCE_MATCH_MINIMUM,
+            ),
+            (
+                self.network_zone.map(|value| value as u64),
+                Some(input.environment.network_zone as u64),
+                GOVERNANCE_MATCH_EXACT,
+            ),
+            (
+                self.maximum_session_age_seconds,
+                Some(input.session.age_seconds),
+                GOVERNANCE_MATCH_MAXIMUM,
+            ),
+            (
+                self.maximum_session_idle_seconds,
+                Some(input.session.idle_seconds),
+                GOVERNANCE_MATCH_MAXIMUM,
+            ),
+            (
+                self.session_revoked.map(u64::from),
+                Some(u64::from(input.session.revoked)),
+                GOVERNANCE_MATCH_EXACT,
+            ),
+            (
+                self.session_mfa_satisfied.map(u64::from),
+                Some(u64::from(input.session.mfa_satisfied)),
+                GOVERNANCE_MATCH_EXACT,
+            ),
+            (
+                self.minimum_session_retained_classification
+                    .map(|value| value as u64),
+                Some(input.session.retained_classification as u64),
+                GOVERNANCE_MATCH_MINIMUM,
+            ),
+            (
+                self.minimum_authentication_strength.map(u64::from),
+                Some(u64::from(input.environment.authentication_strength)),
+                GOVERNANCE_MATCH_MINIMUM,
+            ),
+            (
+                self.environment_mfa_satisfied.map(u64::from),
+                Some(u64::from(input.environment.mfa_satisfied)),
+                GOVERNANCE_MATCH_EXACT,
+            ),
+            (
+                self.requested_capability.map(model_capability_bit),
+                Some(model_capability_mask(input.requested_capabilities)),
+                GOVERNANCE_MATCH_CONTAINS,
+            ),
+            (
+                self.requested_modality.map(data_modality_bit),
+                Some(data_modality_mask(
+                    input.request_attributes.requested_modalities(),
+                )),
+                GOVERNANCE_MATCH_CONTAINS,
+            ),
+            (
+                self.break_glass_required.map(u64::from),
+                Some(u64::from(
+                    input.request_attributes.valid_break_glass().is_some(),
+                )),
+                GOVERNANCE_MATCH_EXACT,
+            ),
+            (
+                self.quota_has_headroom.map(u64::from),
+                Some(u64::from(input.quota.has_headroom)),
+                GOVERNANCE_MATCH_EXACT,
+            ),
+            (
+                self.quota_reservation_required.map(u64::from),
+                Some(u64::from(input.quota.reservation_required)),
+                GOVERNANCE_MATCH_EXACT,
+            ),
+        ];
+        let team_id = input.principal_attributes.team_id();
+        let project_id = input.principal_attributes.project_id();
+        let user_id = input.principal_attributes.user_id();
+        let group_ids = input.principal_attributes.group_ids().collect::<Vec<_>>();
+        let department_id = input.principal_attributes.department_id();
+        let route = [input.route.as_str()];
+        let requested_model = input.request_attributes.requested_model();
+        let requested_tools = input
+            .request_attributes
+            .requested_tools()
+            .collect::<Vec<_>>();
+        let break_glass_scope = input
+            .request_attributes
+            .valid_break_glass()
+            .map(|grant| grant.scope.as_str());
+        let selectors = [
+            (
+                self.team_id.as_ref().map(PolicySelector::as_str),
+                team_id.as_slice(),
+                true,
+            ),
+            (
+                self.project_id.as_ref().map(PolicySelector::as_str),
+                project_id.as_slice(),
+                true,
+            ),
+            (
+                self.user_id.as_ref().map(PolicySelector::as_str),
+                user_id.as_slice(),
+                true,
+            ),
+            (
+                self.group_id.as_ref().map(PolicySelector::as_str),
+                group_ids.as_slice(),
+                true,
+            ),
+            (
+                self.department_id.as_ref().map(PolicySelector::as_str),
+                department_id.as_slice(),
+                true,
+            ),
+            (
+                self.route.as_ref().map(CanonicalRoute::as_str),
+                route.as_slice(),
+                false,
+            ),
+            (
+                self.requested_model.as_ref().map(PolicySelector::as_str),
+                requested_model.as_slice(),
+                true,
+            ),
+            (
+                self.requested_tool.as_ref().map(PolicySelector::as_str),
+                requested_tools.as_slice(),
+                true,
+            ),
+            (
+                self.break_glass_scope.as_ref().map(PolicySelector::as_str),
+                break_glass_scope.as_slice(),
+                true,
+            ),
+        ];
+        prodex_mojo_core::policy::governance_policy_rule_matches(&values, &selectors)
+            .expect("Mojo governance condition matcher returned invalid output")
+    }
+
+    #[cfg(not(feature = "mojo"))]
+    fn matches(&self, input: &PolicyInput<'_>) -> bool {
+        self.matches_rust(input)
+    }
+
+    #[cfg(any(test, not(feature = "mojo")))]
+    fn matches_rust(&self, input: &PolicyInput<'_>) -> bool {
         self.channel.is_none_or(|value| value == input.channel)
             && self
                 .principal_kind
@@ -546,6 +737,31 @@ impl PolicyRuleCondition {
                 .quota_reservation_required
                 .is_none_or(|value| value == input.quota.reservation_required)
     }
+}
+
+#[cfg(feature = "mojo")]
+fn model_capability_bit(value: ModelCapability) -> u64 {
+    1_u64 << value as usize
+}
+
+#[cfg(feature = "mojo")]
+fn model_capability_mask(values: &CapabilitySet) -> u64 {
+    values
+        .as_slice()
+        .iter()
+        .fold(0, |mask, value| mask | model_capability_bit(*value))
+}
+
+#[cfg(feature = "mojo")]
+fn data_modality_bit(value: DataModality) -> u64 {
+    1_u64 << value as usize
+}
+
+#[cfg(feature = "mojo")]
+fn data_modality_mask(values: &[DataModality]) -> u64 {
+    values
+        .iter()
+        .fold(0, |mask, value| mask | data_modality_bit(*value))
 }
 
 #[cfg(feature = "mojo")]
