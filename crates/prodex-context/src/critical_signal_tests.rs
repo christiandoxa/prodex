@@ -3,6 +3,27 @@
 use super::*;
 
 #[test]
+fn mojo_location_path_matches_rust_oracle() {
+    for path in [
+        "src/main.rs",
+        r"C:\\src\\main.rs",
+        "lib.rs",
+        "archive.tar.gz",
+        "<--: src/火.rs :-->",
+        "账户🙂.json",
+        "https://example.com/file.rs",
+        "README",
+        "",
+    ] {
+        assert_eq!(
+            looks_like_location_path(path),
+            rust_looks_like_location_path(path),
+            "{path:?}"
+        );
+    }
+}
+
+#[test]
 fn mojo_text_rows_match_rust_oracle_for_utf8_duplicates_and_generated_inputs() {
     let long = format!("error: {}🔥", "x".repeat(64 * 1024));
     let fixed = [

@@ -392,6 +392,39 @@ fn select_numbered_critical_lines<'a>(
     critical: &'a [(usize, &'a str)],
     budget: usize,
 ) -> Vec<(usize, &'a str)> {
+    #[cfg(feature = "mojo")]
+    {
+        let lines = critical.iter().map(|(_, line)| *line).collect::<Vec<_>>();
+        let normalized_keys = lines
+            .iter()
+            .map(|line| critical_line_selection_key(line))
+            .collect::<Vec<_>>();
+        let key_refs = normalized_keys
+            .iter()
+            .map(String::as_str)
+            .collect::<Vec<_>>();
+        let counts = prodex_mojo_core::rich::signal_counts_batch(&lines)
+            .expect("Mojo critical-line classification returned invalid output");
+        let mut selected =
+            prodex_mojo_core::context::select_critical_lines(&lines, &key_refs, &counts, budget)
+                .expect("Mojo critical-line selection returned invalid output")
+                .into_iter()
+                .map(|index| critical[index])
+                .collect::<Vec<_>>();
+        selected.sort_by_key(|(index, _)| *index);
+        selected
+    }
+    #[cfg(not(feature = "mojo"))]
+    {
+        select_numbered_critical_lines_rust(critical, budget)
+    }
+}
+
+#[cfg(any(not(feature = "mojo"), test))]
+fn select_numbered_critical_lines_rust<'a>(
+    critical: &'a [(usize, &'a str)],
+    budget: usize,
+) -> Vec<(usize, &'a str)> {
     let mut candidates = critical.to_vec();
     candidates.sort_by_key(|(index, line)| (critical_preserve_priority(line), *index));
     let selected_budget = budget.saturating_sub(1).max(1);
@@ -417,6 +450,27 @@ fn select_numbered_critical_lines<'a>(
     selected
 }
 
+#[cfg(all(test, feature = "mojo"))]
+#[test]
+fn mojo_critical_line_selection_matches_rust_oracle() {
+    let lines = [
+        (0, "warning: repeated 账户"),
+        (1, "error: root cause"),
+        (2, "src/火.rs:12:4"),
+        (3, "  ERROR:\u{2003}root\tcause  "),
+        (4, "stack backtrace:"),
+        (5, "pcs: prior compaction"),
+        (6, "warning TS1234: secondary"),
+    ];
+    for budget in 1..=lines.len() {
+        assert_eq!(
+            select_numbered_critical_lines(&lines, budget),
+            select_numbered_critical_lines_rust(&lines, budget),
+            "budget {budget}"
+        );
+    }
+}
+
 pub(super) fn critical_line_selection_key(line: &str) -> String {
     line.split_whitespace()
         .collect::<Vec<_>>()
@@ -424,6 +478,7 @@ pub(super) fn critical_line_selection_key(line: &str) -> String {
         .to_ascii_lowercase()
 }
 
+#[cfg(any(not(feature = "mojo"), test))]
 pub(super) fn critical_preserve_priority(line: &str) -> u8 {
     if is_generated_compaction_header_line(line) {
         return 5;
@@ -447,6 +502,7 @@ pub(super) fn critical_preserve_priority(line: &str) -> u8 {
     3
 }
 
+#[cfg(any(not(feature = "mojo"), test))]
 pub(super) fn is_failure_first_critical_line(line: &str) -> bool {
     !is_warning_only_signal_line(line)
         && (is_error_signal_line(line)
@@ -476,6 +532,7 @@ pub(crate) fn is_generated_compaction_header_line(line: &str) -> bool {
         || lower.starts_with("critical blocks:")
 }
 
+#[cfg(any(not(feature = "mojo"), test))]
 pub(super) fn is_warning_only_signal_line(line: &str) -> bool {
     let lower = line.trim_start().to_ascii_lowercase();
     (lower.starts_with("warning")

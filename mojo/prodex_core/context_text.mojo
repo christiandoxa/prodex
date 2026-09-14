@@ -18,6 +18,7 @@ comptime CONTEXT_GIT_SEARCH_JSON_LINE: Int64 = 4
 comptime CONTEXT_GIT_SEARCH_HEADING_PATH: Int64 = 8
 comptime CONTEXT_GIT_SEARCH_HEADING_MATCH: Int64 = 16
 comptime CONTEXT_GIT_SEARCH_CAPACITY: Int64 = -2
+comptime CONTEXT_OUTPUT_ANALYSIS_WIDTH: Int64 = 10
 
 
 @fieldwise_init
@@ -3914,6 +3915,194 @@ def prodex_context_classify_command_output_line_v1(
     return 0
 
 
+@export("prodex_context_analyze_command_output_v1")
+def prodex_context_analyze_command_output_v1(
+    abi_version: Int64,
+    lines: Pointer[mut=False, ProdexStringView, _],
+    line_count: Int64,
+    output: Pointer[mut=True, Int64, _],
+    output_count: Int64,
+) abi("C") -> Int64:
+    if output_count != CONTEXT_OUTPUT_ANALYSIS_WIDTH:
+        return 1
+    for index in range(CONTEXT_OUTPUT_ANALYSIS_WIDTH):
+        output[unsafe_offset=index] = 0
+    if abi_version != CONTEXT_TEXT_ABI_VERSION:
+        return 4
+    if line_count < 0 or line_count > CONTEXT_SIGNAL_MAX_LINES:
+        return 1
+
+    for index in range(line_count):
+        var view = lines[unsafe_offset=index].copy()
+        if view.len > UInt(CONTEXT_OUTPUT_MAX_BYTES):
+            return 1
+        if not context_text_view_is_valid(view):
+            return 2
+        var bounds = context_text_trim_bounds(
+            view.ptr.unsafe_value(), 0, Int64(view.len)
+        )
+        if bounds[0] < bounds[1]:
+            output[unsafe_offset=6] += 1
+        var semantics = context_output_line_semantics(
+            view.ptr.unsafe_value(), Int64(view.len)
+        )
+        var flags = semantics.flags
+        if flags & (CONTEXT_OUTPUT_JUNIT_FAILURE | CONTEXT_OUTPUT_ESLINT) != 0:
+            output[unsafe_offset=0] = 1
+        if (
+            flags & CONTEXT_OUTPUT_DIAGNOSTIC_TARGET != 0
+            or flags & CONTEXT_OUTPUT_RUST_BACKTRACE != 0
+            or flags & CONTEXT_OUTPUT_FAILURE != 0
+        ):
+            output[unsafe_offset=1] += 1
+        if context_output_has_file_location(
+            view.ptr.unsafe_value(), bounds[0], bounds[1]
+        ):
+            output[unsafe_offset=2] += 1
+        if flags & CONTEXT_OUTPUT_RUST_BACKTRACE != 0:
+            output[unsafe_offset=3] += 1
+        if flags & CONTEXT_OUTPUT_RUST_EXIT != 0:
+            output[unsafe_offset=4] += 1
+        if semantics.diagnostic_label != CONTEXT_OUTPUT_LABEL_NONE:
+            output[unsafe_offset=5] += 1
+        if semantics.noisy_label != CONTEXT_OUTPUT_LABEL_NONE:
+            output[unsafe_offset=7] += 1
+        if flags & CONTEXT_OUTPUT_NOISY_KEY != 0:
+            output[unsafe_offset=8] += 1
+        if flags & (CONTEXT_OUTPUT_FAILURE | CONTEXT_OUTPUT_WARNING) != 0:
+            output[unsafe_offset=9] = 1
+    return 0
+
+
+def context_critical_generated_header(
+    ptr: Pointer[mut=False, UInt8, _], start: Int64, end: Int64
+) -> Bool:
+    return (
+        context_output_starts["pcs:"](ptr, start, end)
+        or context_output_starts["# prodex context saver:"](ptr, start, end)
+        or context_output_starts["sum:"](ptr, start, end)
+        or context_output_starts["rust/cargo summary:"](ptr, start, end)
+        or context_output_starts["diagnostic summary:"](ptr, start, end)
+        or context_output_starts["success output summary:"](ptr, start, end)
+        or context_output_starts["command output summary:"](ptr, start, end)
+        or context_output_starts["baseline compaction:"](ptr, start, end)
+        or context_output_starts["base:"](ptr, start, end)
+        or context_output_starts["intent matches:"](ptr, start, end)
+        or context_output_starts["int:"](ptr, start, end)
+        or context_output_starts["diagnostics ("](ptr, start, end)
+        or context_output_starts["locations ("](ptr, start, end)
+        or context_output_starts["failed tests ("](ptr, start, end)
+        or context_output_starts["exit statuses ("](ptr, start, end)
+        or context_output_starts["key lines ("](ptr, start, end)
+        or context_output_starts["critical blocks:"](ptr, start, end)
+    )
+
+
+def context_critical_warning_only(
+    ptr: Pointer[mut=False, UInt8, _], start: Int64, end: Int64
+) -> Bool:
+    var warning = (
+        context_output_starts["warning"](ptr, start, end)
+        or context_output_contains[" warning "](ptr, start, end)
+        or context_output_contains["warning ts"](ptr, start, end)
+        or context_output_contains[": warning ts"](ptr, start, end)
+        or context_output_contains[" - warning ts"](ptr, start, end)
+    )
+    return (
+        warning
+        and not context_output_contains["error"](ptr, start, end)
+        and not context_output_contains["failed"](ptr, start, end)
+        and not context_output_contains["panicked"](ptr, start, end)
+    )
+
+
+def context_critical_priority(
+    view: ProdexStringView,
+    counts: Pointer[mut=False, Int64, _],
+    index: Int64,
+) -> Int64:
+    ref ptr = view.ptr.unsafe_value()
+    var bounds = context_text_trim_bounds(ptr, 0, Int64(view.len))
+    if context_critical_generated_header(ptr, bounds[0], bounds[1]):
+        return 5
+    if context_critical_warning_only(ptr, bounds[0], bounds[1]):
+        return 4
+    var offset = index * CONTEXT_SIGNAL_COUNTER_COUNT
+    if (
+        counts[unsafe_offset=offset] > 0
+        or counts[unsafe_offset=offset + 3] > 0
+        or counts[unsafe_offset=offset + 4] > 0
+        or context_output_is_diagnostic_failure_summary(ptr, bounds[0], bounds[1])
+    ):
+        return 0
+    if counts[unsafe_offset=offset + 1] > 0 or counts[unsafe_offset=offset + 5] > 0:
+        return 1
+    if counts[unsafe_offset=offset + 6] > 0:
+        return 2
+    return 3
+
+
+@export("prodex_context_select_critical_lines_v1")
+def prodex_context_select_critical_lines_v1(
+    abi_version: Int64,
+    lines: Pointer[mut=False, ProdexStringView, _],
+    normalized_keys: Pointer[mut=False, ProdexStringView, _],
+    counts: Pointer[mut=False, Int64, _],
+    line_count: Int64,
+    budget: Int64,
+    output: Pointer[mut=True, Int64, _],
+    output_count: Pointer[mut=True, Int64, _],
+) abi("C") -> Int64:
+    output_count[] = 0
+    if abi_version != CONTEXT_TEXT_ABI_VERSION:
+        return 4
+    if line_count < 0 or line_count > CONTEXT_SIGNAL_MAX_LINES or budget < 1:
+        return 1
+    var selected_budget = budget - 1
+    if selected_budget < 1:
+        selected_budget = 1
+    var failure_present = False
+    for index in range(line_count):
+        var view = lines[unsafe_offset=index].copy()
+        if view.len > UInt(CONTEXT_OUTPUT_MAX_BYTES) or not context_text_view_is_valid(view):
+            return 2
+        var key = normalized_keys[unsafe_offset=index].copy()
+        if key.len > UInt(CONTEXT_OUTPUT_MAX_BYTES) or not context_text_view_is_valid(key):
+            return 2
+        for counter in range(CONTEXT_SIGNAL_COUNTER_COUNT):
+            if counts[unsafe_offset=index * CONTEXT_SIGNAL_COUNTER_COUNT + counter] < 0:
+                return 1
+        var priority = context_critical_priority(view, counts, index)
+        if priority == 0:
+            failure_present = True
+
+    for priority in range(6):
+        for index in range(line_count):
+            var view = lines[unsafe_offset=index].copy()
+            if context_critical_priority(view, counts, index) != Int64(priority):
+                continue
+            ref ptr = view.ptr.unsafe_value()
+            var bounds = context_text_trim_bounds(ptr, 0, Int64(view.len))
+            if failure_present and context_critical_warning_only(ptr, bounds[0], bounds[1]):
+                continue
+            var duplicate = False
+            for selected in range(output_count[]):
+                var selected_index = output[unsafe_offset=selected]
+                if context_text_views_equal(
+                    normalized_keys[unsafe_offset=index],
+                    normalized_keys[unsafe_offset=selected_index],
+                ):
+                    duplicate = True
+                    break
+            if duplicate:
+                continue
+            output[unsafe_offset=output_count[]] = index
+            output_count[] += 1
+            if output_count[] >= selected_budget:
+                return 0
+    return 0
+
+
 @export("prodex_context_classify_git_search_line_v1")
 def prodex_context_classify_git_search_line_v1(
     abi_version: Int64,
@@ -4061,6 +4250,44 @@ def prodex_context_classify_dot_reporter_success_line_v1(
         if ptr[unsafe_offset=index] != 46:
             return 0
     output[] = 1
+    return 0
+
+
+@export("prodex_context_looks_like_location_path_v1")
+def prodex_context_looks_like_location_path_v1(
+    abi_version: Int64,
+    path: Pointer[mut=False, ProdexStringView, _],
+    output: Pointer[mut=True, Int64, _],
+) abi("C") -> Int64:
+    output[] = 0
+    if abi_version != CONTEXT_TEXT_ABI_VERSION:
+        return 4
+    var view = path[].copy()
+    if view.len > UInt(CONTEXT_OUTPUT_MAX_BYTES):
+        return 1
+    if not context_text_view_is_valid(view):
+        return 2
+    var bounds = Tuple[Int64, Int64](0, Int64(view.len))
+    while bounds[0] < bounds[1] and (
+        view.ptr.unsafe_value()[unsafe_offset=bounds[0]] == 60
+        or view.ptr.unsafe_value()[unsafe_offset=bounds[0]] == 62
+        or view.ptr.unsafe_value()[unsafe_offset=bounds[0]] == 45
+        or view.ptr.unsafe_value()[unsafe_offset=bounds[0]] == 58
+        or view.ptr.unsafe_value()[unsafe_offset=bounds[0]] == 32
+    ):
+        bounds[0] += 1
+    while bounds[1] > bounds[0] and (
+        view.ptr.unsafe_value()[unsafe_offset=bounds[1] - 1] == 60
+        or view.ptr.unsafe_value()[unsafe_offset=bounds[1] - 1] == 62
+        or view.ptr.unsafe_value()[unsafe_offset=bounds[1] - 1] == 45
+        or view.ptr.unsafe_value()[unsafe_offset=bounds[1] - 1] == 58
+        or view.ptr.unsafe_value()[unsafe_offset=bounds[1] - 1] == 32
+    ):
+        bounds[1] -= 1
+    if context_output_looks_like_location_path(
+        view.ptr.unsafe_value(), bounds[0], bounds[1]
+    ):
+        output[] = 1
     return 0
 
 
