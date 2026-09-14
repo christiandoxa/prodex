@@ -132,7 +132,7 @@ pub(super) fn detect_command_output_kind_with_hint(
                 panic!("Mojo command-output kind classification failed: {error:?}")
             }),
         )
-        .unwrap_or(CommandOutputKind::Plain);
+        .unwrap_or(CommandOutputKind::Plain)
     }
     #[cfg(not(feature = "mojo"))]
     {
