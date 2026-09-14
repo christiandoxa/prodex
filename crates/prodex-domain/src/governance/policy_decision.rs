@@ -943,7 +943,21 @@ fn validate_governance_obligation_conflicts(
     Ok(())
 }
 
+#[cfg(feature = "mojo")]
 fn governance_obligation_bound_is_invalid(obligation: &GovernanceObligation) -> bool {
+    prodex_mojo_core::policy::governance_obligation_bound_is_invalid(governance_obligation_input(
+        obligation,
+    ))
+    .expect("Mojo governance obligation bound predicate returned invalid output")
+}
+
+#[cfg(not(feature = "mojo"))]
+fn governance_obligation_bound_is_invalid(obligation: &GovernanceObligation) -> bool {
+    governance_obligation_bound_is_invalid_rust(obligation)
+}
+
+#[cfg(any(test, not(feature = "mojo")))]
+fn governance_obligation_bound_is_invalid_rust(obligation: &GovernanceObligation) -> bool {
     matches!(
         obligation,
         GovernanceObligation::MaxInputTokens(0)
@@ -955,7 +969,107 @@ fn governance_obligation_bound_is_invalid(obligation: &GovernanceObligation) -> 
     )
 }
 
+#[cfg(feature = "mojo")]
 fn governance_obligations_conflict(
+    left: &GovernanceObligation,
+    right: &GovernanceObligation,
+) -> bool {
+    prodex_mojo_core::policy::governance_obligations_conflict(
+        governance_obligation_input(left),
+        governance_obligation_input(right),
+    )
+    .expect("Mojo governance obligation conflict predicate returned invalid output")
+}
+
+#[cfg(feature = "mojo")]
+fn governance_obligation_input(obligation: &GovernanceObligation) -> (i64, u64, Option<&str>) {
+    use prodex_mojo_core::policy::{
+        GOVERNANCE_OBLIGATION_ALLOW_PROVIDER, GOVERNANCE_OBLIGATION_ALLOW_TOOL,
+        GOVERNANCE_OBLIGATION_DENY_PROVIDER, GOVERNANCE_OBLIGATION_DISABLE_TOOLS,
+        GOVERNANCE_OBLIGATION_MAX_CONTEXT, GOVERNANCE_OBLIGATION_MAX_INPUT,
+        GOVERNANCE_OBLIGATION_MAX_OUTPUT, GOVERNANCE_OBLIGATION_MIN_AUTHENTICATION,
+        GOVERNANCE_OBLIGATION_OTHER, GOVERNANCE_OBLIGATION_PROHIBIT_RETENTION,
+        GOVERNANCE_OBLIGATION_REQUIRE_REGION, GOVERNANCE_OBLIGATION_RETENTION_SECONDS,
+        GOVERNANCE_OBLIGATION_SESSION_ABSOLUTE, GOVERNANCE_OBLIGATION_SESSION_IDLE,
+    };
+
+    match obligation {
+        GovernanceObligation::AllowProvider(selector) => (
+            GOVERNANCE_OBLIGATION_ALLOW_PROVIDER,
+            0,
+            Some(selector.as_str()),
+        ),
+        GovernanceObligation::DenyProvider(selector) => (
+            GOVERNANCE_OBLIGATION_DENY_PROVIDER,
+            0,
+            Some(selector.as_str()),
+        ),
+        GovernanceObligation::RequireRegion(selector) => (
+            GOVERNANCE_OBLIGATION_REQUIRE_REGION,
+            0,
+            Some(selector.as_str()),
+        ),
+        GovernanceObligation::ProhibitRetention => {
+            (GOVERNANCE_OBLIGATION_PROHIBIT_RETENTION, 0, None)
+        }
+        GovernanceObligation::RetentionSeconds(value) => (
+            GOVERNANCE_OBLIGATION_RETENTION_SECONDS,
+            u64::from(*value),
+            None,
+        ),
+        GovernanceObligation::DisableTools => (GOVERNANCE_OBLIGATION_DISABLE_TOOLS, 0, None),
+        GovernanceObligation::AllowTool(selector) => {
+            (GOVERNANCE_OBLIGATION_ALLOW_TOOL, 0, Some(selector.as_str()))
+        }
+        GovernanceObligation::MaxInputTokens(value) => {
+            (GOVERNANCE_OBLIGATION_MAX_INPUT, u64::from(*value), None)
+        }
+        GovernanceObligation::MaxOutputTokens(value) => {
+            (GOVERNANCE_OBLIGATION_MAX_OUTPUT, u64::from(*value), None)
+        }
+        GovernanceObligation::MaxContextTokens(value) => {
+            (GOVERNANCE_OBLIGATION_MAX_CONTEXT, u64::from(*value), None)
+        }
+        GovernanceObligation::SessionIdleTimeoutSeconds(value) => {
+            (GOVERNANCE_OBLIGATION_SESSION_IDLE, u64::from(*value), None)
+        }
+        GovernanceObligation::SessionAbsoluteTimeoutSeconds(value) => (
+            GOVERNANCE_OBLIGATION_SESSION_ABSOLUTE,
+            u64::from(*value),
+            None,
+        ),
+        GovernanceObligation::MinimumAuthenticationStrength(value) => (
+            GOVERNANCE_OBLIGATION_MIN_AUTHENTICATION,
+            u64::from(*value),
+            None,
+        ),
+        GovernanceObligation::MaskFinding(_)
+        | GovernanceObligation::MinimumProviderTrust(_)
+        | GovernanceObligation::RequireLocalExecution
+        | GovernanceObligation::ProhibitTrainingUse
+        | GovernanceObligation::AllowModel(_)
+        | GovernanceObligation::AllowModality(_)
+        | GovernanceObligation::RequireResponseInspection
+        | GovernanceObligation::RequireReauthentication
+        | GovernanceObligation::RequireMfa
+        | GovernanceObligation::AuditDetail(_)
+        | GovernanceObligation::RequireHumanApproval
+        | GovernanceObligation::DenyFallbackOutsideEligibility => {
+            (GOVERNANCE_OBLIGATION_OTHER, 0, None)
+        }
+    }
+}
+
+#[cfg(not(feature = "mojo"))]
+fn governance_obligations_conflict(
+    left: &GovernanceObligation,
+    right: &GovernanceObligation,
+) -> bool {
+    governance_obligations_conflict_rust(left, right)
+}
+
+#[cfg(any(test, not(feature = "mojo")))]
+fn governance_obligations_conflict_rust(
     left: &GovernanceObligation,
     right: &GovernanceObligation,
 ) -> bool {

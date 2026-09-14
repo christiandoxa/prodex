@@ -95,8 +95,69 @@ struct GovernanceMatchSelector(Copyable):
     var wildcard: Int64
 
 
+@fieldwise_init
+struct GovernanceObligationPredicateInput(Copyable):
+    var kind: Int64
+    var value: UInt64
+    var selector: ProdexRichStringView
+    var selector_present: Int64
+
+
 def governance_selector_is_wildcard(view: ProdexRichStringView) -> Bool:
     return rich_view_matches_literal["*"](view, False)
+
+
+@export("prodex_mojo_governance_obligation_predicate_v1")
+def prodex_mojo_governance_obligation_predicate_v1(
+    abi_version: Int64,
+    mode: Int64,
+    left_address: UInt,
+    right_address: UInt,
+    output_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != PRODEX_RICH_ABI_VERSION:
+        return RICH_STATUS_ABI
+    if mode < 0 or mode > 1 or left_address == 0 or output_address == 0 or (mode == 1 and right_address == 0):
+        return RICH_STATUS_INVALID
+    var left = Pointer[
+        mut=False, GovernanceObligationPredicateInput, ImmUntrackedOrigin
+    ](unsafe_from_address=Int(left_address))[].copy()
+    if left.kind < 0 or left.kind > 13 or left.selector_present < 0 or left.selector_present > 1 or (left.selector_present == 1 and not rich_view_valid(left.selector, RICH_MAX_IDENTIFIER_BYTES)):
+        return RICH_STATUS_INVALID
+    if (left.kind == 1 or left.kind == 2 or left.kind == 3 or left.kind == 7) and left.selector_present == 0:
+        return RICH_STATUS_INVALID
+    var output = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    if mode == 0:
+        output[] = Int64(
+            left.value == 0
+            and (left.kind == 8 or left.kind == 9 or left.kind == 10 or left.kind == 11 or left.kind == 12 or left.kind == 13)
+        )
+        return RICH_STATUS_OK
+    var right = Pointer[
+        mut=False, GovernanceObligationPredicateInput, ImmUntrackedOrigin
+    ](unsafe_from_address=Int(right_address))[].copy()
+    if right.kind < 0 or right.kind > 13 or right.selector_present < 0 or right.selector_present > 1 or (right.selector_present == 1 and not rich_view_valid(right.selector, RICH_MAX_IDENTIFIER_BYTES)):
+        return RICH_STATUS_INVALID
+    if (right.kind == 1 or right.kind == 2 or right.kind == 3 or right.kind == 7) and right.selector_present == 0:
+        return RICH_STATUS_INVALID
+    output[] = 0
+    if (left.kind == 1 and right.kind == 2) or (left.kind == 2 and right.kind == 1):
+        var allowed = left.selector.copy() if left.kind == 1 else right.selector.copy()
+        var denied = left.selector.copy() if left.kind == 2 else right.selector.copy()
+        output[] = Int64(governance_selector_is_wildcard(denied) or rich_views_equal(allowed, denied))
+    elif left.kind == 3 and right.kind == 3:
+        output[] = Int64(not governance_selector_is_wildcard(left.selector) and not governance_selector_is_wildcard(right.selector) and not rich_views_equal(left.selector, right.selector))
+    elif (left.kind == 4 and right.kind == 5) or (left.kind == 5 and right.kind == 4):
+        output[] = Int64((left.value if left.kind == 5 else right.value) != 0)
+    elif (left.kind == 6 and right.kind == 7) or (left.kind == 7 and right.kind == 6):
+        output[] = 1
+    elif (left.kind == 8 or left.kind == 9) and right.kind == 10:
+        output[] = Int64(left.value > right.value)
+    elif left.kind == 10 and (right.kind == 8 or right.kind == 9):
+        output[] = Int64(right.value > left.value)
+    return RICH_STATUS_OK
 
 
 @export("prodex_mojo_governance_rule_matches_v1")
