@@ -75,11 +75,6 @@
     "reason": "Gemini bridge request, response, streaming, candidate-count, malformed-tool, Live update, multimodal, usage, and error conformance regressions remain colocated by protocol boundary."
   },
   {
-    "file": "crates/prodex-provider-core/src/translators/kiro/tests.rs",
-    "maxLines": 889,
-    "reason": "Kiro translator regressions keep ordered non-executable ACP activity, bounded metadata, malformed events, and terminal-state compatibility beside the protocol translator."
-  },
-  {
     "file": "crates/prodex-provider-core/tests/provider_conformance_v1.rs",
     "maxLines": 995,
     "reason": "Cross-provider conformance v1 fixtures verify capability, transform status, stream termination, usage, error, and tool-call contracts across every supported provider."

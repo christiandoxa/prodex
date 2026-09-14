@@ -336,6 +336,9 @@ fn kiro_degraded_details(
 }
 
 #[cfg(test)]
+#[path = "kiro/acp_tests.rs"]
+mod acp_tests;
+#[cfg(test)]
 #[path = "kiro/request_tests.rs"]
 mod request_tests;
 #[cfg(test)]
