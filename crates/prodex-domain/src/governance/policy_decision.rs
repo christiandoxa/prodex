@@ -548,8 +548,20 @@ impl PolicyRuleCondition {
     }
 }
 
+#[cfg(feature = "mojo")]
 fn selector_matches(selector: &PolicySelector, value: &str) -> bool {
+    prodex_mojo_core::policy::governance_selector_matches(selector.as_str(), value)
+        .expect("Mojo governance selector predicate returned invalid output")
+}
+
+#[cfg(any(test, not(feature = "mojo")))]
+fn selector_matches_rust(selector: &PolicySelector, value: &str) -> bool {
     selector.as_str() == "*" || selector.as_str() == value
+}
+
+#[cfg(not(feature = "mojo"))]
+fn selector_matches(selector: &PolicySelector, value: &str) -> bool {
+    selector_matches_rust(selector, value)
 }
 
 impl fmt::Debug for PolicyRuleCondition {
@@ -755,7 +767,99 @@ fn governance_obligations_conflict(
     }
 }
 
+#[cfg(feature = "mojo")]
 fn policy_rule_conditions_overlap(left: &PolicyRuleCondition, right: &PolicyRuleCondition) -> bool {
+    let values = [
+        (
+            left.channel.map(|value| value as i64),
+            right.channel.map(|value| value as i64),
+        ),
+        (
+            left.principal_kind.map(|value| value as i64),
+            right.principal_kind.map(|value| value as i64),
+        ),
+        (
+            left.credential_scope.map(|value| value as i64),
+            right.credential_scope.map(|value| value as i64),
+        ),
+        (
+            left.action.map(|value| value as i64),
+            right.action.map(|value| value as i64),
+        ),
+        (
+            left.inspection_coverage.map(|value| value as i64),
+            right.inspection_coverage.map(|value| value as i64),
+        ),
+        (
+            left.network_zone.map(|value| value as i64),
+            right.network_zone.map(|value| value as i64),
+        ),
+        (
+            left.session_revoked.map(i64::from),
+            right.session_revoked.map(i64::from),
+        ),
+        (
+            left.session_mfa_satisfied.map(i64::from),
+            right.session_mfa_satisfied.map(i64::from),
+        ),
+        (
+            left.environment_mfa_satisfied.map(i64::from),
+            right.environment_mfa_satisfied.map(i64::from),
+        ),
+        (
+            left.requested_modality.map(|value| value as i64),
+            right.requested_modality.map(|value| value as i64),
+        ),
+        (
+            left.break_glass_required.map(i64::from),
+            right.break_glass_required.map(i64::from),
+        ),
+        (
+            left.quota_has_headroom.map(i64::from),
+            right.quota_has_headroom.map(i64::from),
+        ),
+        (
+            left.quota_reservation_required.map(i64::from),
+            right.quota_reservation_required.map(i64::from),
+        ),
+    ];
+    let exact_selectors = [(
+        left.route.as_ref().map(CanonicalRoute::as_str),
+        right.route.as_ref().map(CanonicalRoute::as_str),
+    )];
+    let wildcard_selectors = [
+        policy_selector_pair(&left.team_id, &right.team_id),
+        policy_selector_pair(&left.project_id, &right.project_id),
+        policy_selector_pair(&left.user_id, &right.user_id),
+        policy_selector_pair(&left.department_id, &right.department_id),
+        policy_selector_pair(&left.requested_model, &right.requested_model),
+        policy_selector_pair(&left.requested_tool, &right.requested_tool),
+        policy_selector_pair(&left.break_glass_scope, &right.break_glass_scope),
+    ];
+    prodex_mojo_core::policy::governance_policy_conditions_overlap(
+        &values,
+        &exact_selectors,
+        &wildcard_selectors,
+    )
+    .expect("Mojo governance overlap predicate returned invalid output")
+}
+
+#[cfg(feature = "mojo")]
+fn policy_selector_pair<'a>(
+    left: &'a Option<PolicySelector>,
+    right: &'a Option<PolicySelector>,
+) -> (Option<&'a str>, Option<&'a str>) {
+    (
+        left.as_ref().map(PolicySelector::as_str),
+        right.as_ref().map(PolicySelector::as_str),
+    )
+}
+
+#[cfg(any(test, not(feature = "mojo")))]
+fn policy_rule_conditions_overlap_rust(
+    left: &PolicyRuleCondition,
+    right: &PolicyRuleCondition,
+) -> bool {
     optional_policy_attributes_overlap(&left.channel, &right.channel)
         && optional_policy_attributes_overlap(&left.principal_kind, &right.principal_kind)
         && policy_selectors_overlap(&left.team_id, &right.team_id)
@@ -791,6 +895,12 @@ fn policy_rule_conditions_overlap(left: &PolicyRuleCondition, right: &PolicyRule
         )
 }
 
+#[cfg(not(feature = "mojo"))]
+fn policy_rule_conditions_overlap(left: &PolicyRuleCondition, right: &PolicyRuleCondition) -> bool {
+    policy_rule_conditions_overlap_rust(left, right)
+}
+
+#[cfg(any(test, not(feature = "mojo")))]
 fn policy_selectors_overlap(left: &Option<PolicySelector>, right: &Option<PolicySelector>) -> bool {
     !matches!(
         (left, right),
@@ -799,6 +909,7 @@ fn policy_selectors_overlap(left: &Option<PolicySelector>, right: &Option<Policy
     )
 }
 
+#[cfg(any(test, not(feature = "mojo")))]
 fn optional_policy_attributes_overlap<T: PartialEq>(left: &Option<T>, right: &Option<T>) -> bool {
     !matches!((left, right), (Some(left), Some(right)) if left != right)
 }
@@ -927,3 +1038,67 @@ impl fmt::Display for GovernancePolicyError {
 }
 
 impl Error for GovernancePolicyError {}
+
+#[cfg(all(test, feature = "mojo"))]
+mod governance_predicate_tests {
+    use super::*;
+
+    #[test]
+    fn mojo_selector_predicates_match_rust_oracle() {
+        for (selector, value) in [("*", "model-a"), ("model-a", "model-a"), ("model-a", "*")] {
+            let selector = PolicySelector::new(selector).expect("valid test selector");
+            assert_eq!(
+                selector_matches(&selector, value),
+                selector_matches_rust(&selector, value)
+            );
+        }
+    }
+
+    #[test]
+    fn mojo_condition_overlap_matches_rust_oracle() {
+        let wildcard = PolicySelector::new("*").expect("valid wildcard");
+        let exact = PolicySelector::new("team-a").expect("valid selector");
+        let cases = [
+            (
+                PolicyRuleCondition::default(),
+                PolicyRuleCondition::default(),
+            ),
+            (
+                PolicyRuleCondition {
+                    channel: Some(Channel::Api),
+                    ..PolicyRuleCondition::default()
+                },
+                PolicyRuleCondition {
+                    channel: Some(Channel::Cli),
+                    ..PolicyRuleCondition::default()
+                },
+            ),
+            (
+                PolicyRuleCondition {
+                    team_id: Some(wildcard),
+                    ..PolicyRuleCondition::default()
+                },
+                PolicyRuleCondition {
+                    team_id: Some(exact),
+                    ..PolicyRuleCondition::default()
+                },
+            ),
+            (
+                PolicyRuleCondition {
+                    route: Some(CanonicalRoute::new("route-a").expect("valid route")),
+                    ..PolicyRuleCondition::default()
+                },
+                PolicyRuleCondition {
+                    route: Some(CanonicalRoute::new("route-b").expect("valid route")),
+                    ..PolicyRuleCondition::default()
+                },
+            ),
+        ];
+        for (left, right) in cases {
+            assert_eq!(
+                policy_rule_conditions_overlap(&left, &right),
+                policy_rule_conditions_overlap_rust(&left, &right)
+            );
+        }
+    }
+}
