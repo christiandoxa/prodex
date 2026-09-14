@@ -573,6 +573,70 @@ def prodex_runtime_affinity_selection_plan_v1(
     return 0
 
 
+@export("prodex_runtime_websocket_response_plan_v1")
+def prodex_runtime_websocket_response_plan_v1(
+    reuse_existing_session: Int64,
+    request_previous_response_present: Int64,
+    request_session_present: Int64,
+    request_turn_state_present: Int64,
+    turn_state_override_present: Int64,
+    promote_committed_profile: Int64,
+    bound_profile_present: Int64,
+    turn_state_profile_present: Int64,
+    compact_followup_profile_present: Int64,
+    bound_session_profile_present: Int64,
+    direct_fallback_reason: Int64,
+    output: Pointer[mut=True, Int64, _],
+) abi("C") -> Int64:
+    if (
+        reuse_existing_session < 0
+        or reuse_existing_session > 1
+        or request_previous_response_present < 0
+        or request_previous_response_present > 1
+        or request_session_present < 0
+        or request_session_present > 1
+        or request_turn_state_present < 0
+        or request_turn_state_present > 1
+        or turn_state_override_present < 0
+        or turn_state_override_present > 1
+        or promote_committed_profile < 0
+        or promote_committed_profile > 1
+        or bound_profile_present < 0
+        or bound_profile_present > 1
+        or turn_state_profile_present < 0
+        or turn_state_profile_present > 1
+        or compact_followup_profile_present < 0
+        or compact_followup_profile_present > 1
+        or bound_session_profile_present < 0
+        or bound_session_profile_present > 1
+        or direct_fallback_reason < 0
+        or direct_fallback_reason > 1
+    ):
+        return 1
+
+    var fresh_request = (
+        reuse_existing_session == 0
+        and request_previous_response_present == 0
+        and request_turn_state_present == 0
+        and turn_state_override_present == 0
+        and promote_committed_profile == 1
+    )
+    output[unsafe_offset=0] = Int64(
+        fresh_request and request_session_present == 0
+    )
+    output[unsafe_offset=1] = Int64(fresh_request)
+    output[unsafe_offset=2] = Int64(
+        request_previous_response_present == 0
+        and bound_profile_present == 0
+        and request_turn_state_present == 0
+        and turn_state_profile_present == 0
+        and compact_followup_profile_present == 0
+        and bound_session_profile_present == 0
+    )
+    output[unsafe_offset=3] = Int64(direct_fallback_reason == 0)
+    return 0
+
+
 @export("prodex_runtime_candidate_plan_batch")
 def prodex_runtime_candidate_plan_batch(
     fields: Pointer[mut=False, Int64, _],

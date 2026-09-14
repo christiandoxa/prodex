@@ -84,6 +84,29 @@ pub struct AffinitySelectionPlan {
     pub noncompact_session_priority: bool,
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct WebsocketResponsePlanInput {
+    pub reuse_existing_session: bool,
+    pub request_previous_response_present: bool,
+    pub request_session_present: bool,
+    pub request_turn_state_present: bool,
+    pub turn_state_override_present: bool,
+    pub promote_committed_profile: bool,
+    pub bound_profile_present: bool,
+    pub turn_state_profile_present: bool,
+    pub compact_followup_profile_present: bool,
+    pub bound_session_profile_present: bool,
+    pub direct_fallback_reason: i64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct WebsocketResponsePlan {
+    pub hold_promotion_allowed: bool,
+    pub transport_retry_allowed: bool,
+    pub committed_profile_promotion_allowed: bool,
+    pub reset_retry_index_on_local_block: bool,
+}
+
 unsafe extern "C" {
     fn prodex_runtime_soft_affinity_policy_v1(
         affinity_kind: i64,
@@ -131,6 +154,54 @@ unsafe extern "C" {
         compact_session_matches_session: i64,
         output: *mut i64,
     ) -> i64;
+    fn prodex_runtime_websocket_response_plan_v1(
+        reuse_existing_session: i64,
+        request_previous_response_present: i64,
+        request_session_present: i64,
+        request_turn_state_present: i64,
+        turn_state_override_present: i64,
+        promote_committed_profile: i64,
+        bound_profile_present: i64,
+        turn_state_profile_present: i64,
+        compact_followup_profile_present: i64,
+        bound_session_profile_present: i64,
+        direct_fallback_reason: i64,
+        output: *mut i64,
+    ) -> i64;
+}
+
+pub fn websocket_response_plan(
+    input: WebsocketResponsePlanInput,
+) -> Result<WebsocketResponsePlan, MojoError> {
+    if !(0..=1).contains(&input.direct_fallback_reason) {
+        return Err(MojoError::InvalidInput);
+    }
+    let mut output = [0_i64; 4];
+    let status = unsafe {
+        prodex_runtime_websocket_response_plan_v1(
+            i64::from(input.reuse_existing_session),
+            i64::from(input.request_previous_response_present),
+            i64::from(input.request_session_present),
+            i64::from(input.request_turn_state_present),
+            i64::from(input.turn_state_override_present),
+            i64::from(input.promote_committed_profile),
+            i64::from(input.bound_profile_present),
+            i64::from(input.turn_state_profile_present),
+            i64::from(input.compact_followup_profile_present),
+            i64::from(input.bound_session_profile_present),
+            input.direct_fallback_reason,
+            output.as_mut_ptr(),
+        )
+    };
+    if status != 0 || output.iter().any(|value| !matches!(value, 0 | 1)) {
+        return Err(MojoError::InvalidOutput);
+    }
+    Ok(WebsocketResponsePlan {
+        hold_promotion_allowed: output[0] == 1,
+        transport_retry_allowed: output[1] == 1,
+        committed_profile_promotion_allowed: output[2] == 1,
+        reset_retry_index_on_local_block: output[3] == 1,
+    })
 }
 
 pub fn affinity_selection_plan(
