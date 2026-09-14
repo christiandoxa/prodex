@@ -23,9 +23,10 @@ struct ContextCommandOutputFfiInput {
     max_line_chars: u64,
     max_search_matches: u64,
     input: RichStringView,
+    intent: RichStringView,
 }
 
-const _: () = assert!(std::mem::size_of::<ContextCommandOutputFfiInput>() == 56);
+const _: () = assert!(std::mem::size_of::<ContextCommandOutputFfiInput>() == 72);
 
 #[repr(C)]
 #[derive(Debug, Clone, Copy, Default)]
@@ -165,6 +166,7 @@ pub fn context_command_output(
         max_line_chars: 0,
         max_search_matches: 0,
         input: view(input),
+        intent: view(""),
     };
     context_command_output_ffi(ffi_input)
 }
@@ -226,6 +228,7 @@ pub fn context_file_list_output(
         max_line_chars: max_line_chars as u64,
         max_search_matches: 0,
         input: view(input),
+        intent: view(""),
     };
     context_command_output_ffi(ffi_input)
 }
@@ -247,6 +250,7 @@ pub fn context_git_log_output(
         max_line_chars: max_line_chars as u64,
         max_search_matches: 0,
         input: view(input),
+        intent: view(""),
     })
 }
 
@@ -266,6 +270,29 @@ pub fn context_git_diff_output(
         max_line_chars: max_line_chars as u64,
         max_search_matches: 0,
         input: view(input),
+        intent: view(""),
+    })
+}
+
+pub fn context_git_diff_output_with_intent(
+    input: &str,
+    max_lines: usize,
+    max_line_chars: usize,
+    intent_terms: &[String],
+) -> Result<Option<String>, MojoError> {
+    ensure_rich_abi()?;
+    if input.len() > i64::MAX as usize {
+        return Err(MojoError::InvalidInput);
+    }
+    let intent = intent_terms.join(", ");
+    context_command_output_ffi(ContextCommandOutputFfiInput {
+        operation: ContextCommandOutputOperation::GitDiff as i64,
+        max_path_entries: 0,
+        max_lines: max_lines as u64,
+        max_line_chars: max_line_chars as u64,
+        max_search_matches: 0,
+        input: view(input),
+        intent: view(&intent),
     })
 }
 
@@ -286,6 +313,7 @@ pub fn context_search_output(
         max_line_chars: max_line_chars as u64,
         max_search_matches: max_search_matches as u64,
         input: view(input),
+        intent: view(""),
     };
     let allocation = allocation_plan(&ffi_input)?;
     let temporary_capacity = input
@@ -350,6 +378,7 @@ mod tests {
             max_line_chars: 0,
             max_search_matches: 0,
             input: view(&input),
+            intent: view(""),
         };
         let allocation = allocation_plan(&ffi_input).unwrap();
         assert_eq!(allocation.records, 3);
@@ -371,6 +400,7 @@ mod tests {
             max_line_chars: 240,
             max_search_matches: 0,
             input: view(&input),
+            intent: view(""),
         };
         let allocation = allocation_plan(&ffi_input).unwrap();
         assert_eq!(allocation.records, 4);
@@ -408,6 +438,7 @@ mod tests {
                 ptr: mojo_pointer_address(invalid.as_ptr()),
                 len: 1,
             },
+            intent: view(""),
         };
         let mut lines = 0_i64;
         let mut bytes = 0_i64;
@@ -461,6 +492,7 @@ mod tests {
                 ptr: mojo_pointer_address(invalid.as_ptr()),
                 len: 1,
             },
+            intent: view(""),
         };
         let mut output = [0_u8; 1];
         let mut records = [ContextCommandOutputRecord::default(); 4];

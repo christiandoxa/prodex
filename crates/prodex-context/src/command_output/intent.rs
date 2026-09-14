@@ -413,6 +413,7 @@ fn collect_intent_matching_lines(
     matches
 }
 
+#[cfg(any(not(feature = "mojo"), test))]
 pub(super) fn intent_line_matches(line: &str, intent_terms: &[String]) -> bool {
     score_intent_text(line, intent_terms) > 0
 }
