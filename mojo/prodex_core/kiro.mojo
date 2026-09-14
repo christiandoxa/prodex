@@ -63,6 +63,10 @@ comptime KIRO_ACP_ERROR: Int64 = 40
 comptime KIRO_ACP_SESSION_INFO: Int64 = 41
 comptime KIRO_ACP_METADATA: Int64 = 42
 comptime KIRO_ACP_INCOMPLETE_DETAILS: Int64 = 43
+comptime KIRO_MODEL_LIST: Int64 = 44
+comptime KIRO_MODEL_NOT_FOUND: Int64 = 45
+comptime KIRO_INVALID_REQUEST_ERROR: Int64 = 46
+comptime KIRO_UNSUPPORTED_PATH_ERROR: Int64 = 47
 
 comptime KIRO_REQUEST_VALIDATION_CHAT: Int64 = 1
 comptime KIRO_REQUEST_VALIDATION_RESPONSES: Int64 = 2
@@ -1272,6 +1276,33 @@ def kiro_write_operation(
             and kiro_put_literal(writer, StringSlice(',"message":'))
             and kiro_put_json_string(writer, input.content)
             and kiro_put_byte(writer, 125)
+        )
+    if operation == KIRO_MODEL_LIST:
+        return (
+            kiro_put_literal(writer, StringSlice('{"object":"list","data":'))
+            and kiro_put_view(writer, input.output)
+            and kiro_put_byte(writer, 125)
+        )
+    if operation == KIRO_MODEL_NOT_FOUND:
+        if not kiro_put_literal(writer, StringSlice('{"error":{"message":')) or not kiro_put_json_string_with_prefix(writer, StringSlice("model '"), input.model):
+            return False
+        writer[].written -= 1
+        return kiro_put_literal(writer, StringSlice('\' is not available for kiro","type":"invalid_request_error","code":"model_not_found"}}'))
+    if operation == KIRO_INVALID_REQUEST_ERROR or operation == KIRO_UNSUPPORTED_PATH_ERROR:
+        if not kiro_put_literal(writer, StringSlice('{"error":{"message":')):
+            return False
+        if operation == KIRO_UNSUPPORTED_PATH_ERROR:
+            if not kiro_put_json_string_with_prefix(writer, StringSlice("Kiro provider does not support "), input.content):
+                return False
+            writer[].written -= 1
+            if not kiro_put_literal(writer, StringSlice(' yet"')):
+                return False
+        elif not kiro_put_json_string(writer, input.content):
+            return False
+        return (
+            kiro_put_literal(writer, StringSlice(',"type":"invalid_request_error","code":'))
+            and kiro_put_json_string(writer, input.status)
+            and kiro_put_literal(writer, StringSlice("}}"))
         )
     if operation == KIRO_REQUEST_BODY:
         var has_fields = False

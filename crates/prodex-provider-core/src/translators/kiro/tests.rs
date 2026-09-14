@@ -143,6 +143,12 @@ fn kiro_provider_core_shapes_model_endpoint_values() {
         body["error"]["message"],
         "model 'missing' is not available for kiro"
     );
+    let (status, body) = kiro_provider_core_model_value_or_not_found(&catalog, "界'\\\"");
+    assert_eq!(status, 404);
+    assert_eq!(
+        body["error"]["message"],
+        "model '界'\\\"' is not available for kiro"
+    );
 }
 
 #[test]
@@ -164,6 +170,16 @@ fn kiro_provider_core_shapes_error_values() {
                 "message": "Kiro provider does not support /v1/files yet",
                 "type": "invalid_request_error",
                 "code": "unsupported_path",
+            }
+        })
+    );
+    assert_eq!(
+        kiro_provider_core_invalid_request_error_value("échec\n界", "bad_\"code"),
+        json!({
+            "error": {
+                "message": "échec\n界",
+                "type": "invalid_request_error",
+                "code": "bad_\"code",
             }
         })
     );
