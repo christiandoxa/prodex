@@ -166,14 +166,14 @@ pub(super) fn chat_response_body(
         let usage = usage.map(|usage| {
             serde_json::to_string(usage).expect("chat compatibility usage serializes")
         });
-        return prodex_mojo_core::rich::OpenAiCompatKernelOperation::response(
+        prodex_mojo_core::rich::OpenAiCompatKernelOperation::response(
             response_id,
             created_at,
             model,
             &output,
             usage.as_deref(),
         )
-        .unwrap_or_else(|error| panic!("Mojo OpenAI compatibility response failed: {error:?}"));
+        .unwrap_or_else(|error| panic!("Mojo OpenAI compatibility response failed: {error:?}"))
     }
 
     #[cfg(not(feature = "mojo"))]

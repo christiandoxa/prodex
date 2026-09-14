@@ -374,7 +374,7 @@ pub fn kiro_provider_core_stream_content_text(value: &Value) -> Option<String> {
         input.input = Some(&serialized);
         let text =
             String::from_utf8(kiro_mojo_body(input)).expect("Mojo Kiro stream content is UTF-8");
-        return (!text.is_empty()).then_some(text);
+        (!text.is_empty()).then_some(text)
     }
     #[cfg(not(feature = "mojo"))]
     {
@@ -459,7 +459,7 @@ pub fn kiro_provider_core_tool_activity_item(
         input.status = status;
         input.include_role = initial;
         input.has_tool_calls = details_omitted;
-        return kiro_mojo_value(input);
+        kiro_mojo_value(input)
     }
     #[cfg(not(feature = "mojo"))]
     {
@@ -520,7 +520,7 @@ pub fn kiro_provider_core_tool_activity_text(activity: &Value) -> String {
             .get("details_omitted")
             .and_then(Value::as_bool)
             .unwrap_or(false);
-        return String::from_utf8(kiro_mojo_body(input)).expect("Mojo Kiro activity text is UTF-8");
+        String::from_utf8(kiro_mojo_body(input)).expect("Mojo Kiro activity text is UTF-8")
     }
     #[cfg(not(feature = "mojo"))]
     {

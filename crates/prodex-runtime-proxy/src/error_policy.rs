@@ -37,6 +37,7 @@ pub struct RuntimeHttpErrorPolicy {
     pub retry_after: Option<Duration>,
 }
 
+#[cfg_attr(feature = "mojo", allow(dead_code))]
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum RuntimeHttpErrorSignal {
     ExplicitQuota,
@@ -53,6 +54,7 @@ enum RuntimeSignalMatchMode {
 }
 
 #[derive(Clone, Copy)]
+#[cfg(not(feature = "mojo"))]
 struct RuntimeHttpErrorRule {
     name: &'static str,
     statuses: &'static [u16],
@@ -61,8 +63,10 @@ struct RuntimeHttpErrorRule {
     precommit_action: RuntimeHttpErrorAction,
 }
 
+#[cfg(not(feature = "mojo"))]
 const RUNTIME_TRANSIENT_HTTP_STATUSES: &[u16] = &[500, 502, 503, 504, 529];
 
+#[cfg(not(feature = "mojo"))]
 const RUNTIME_HTTP_ERROR_RULES: &[RuntimeHttpErrorRule] = &[
     RuntimeHttpErrorRule {
         name: "profile_unavailable",
@@ -101,6 +105,7 @@ const RUNTIME_HTTP_ERROR_RULES: &[RuntimeHttpErrorRule] = &[
     },
 ];
 
+#[cfg(not(feature = "mojo"))]
 const RUNTIME_STREAM_ERROR_RULES: &[(RuntimeHttpErrorClass, RuntimeHttpErrorAction, &str)] = &[
     (
         RuntimeHttpErrorClass::ProfileUnavailable,
@@ -181,6 +186,7 @@ const RUNTIME_PAYLOAD_CODE_RULES: &[RuntimePayloadCodeRule] = &[
     },
 ];
 
+#[cfg(not(feature = "mojo"))]
 impl RuntimeHttpErrorRule {
     fn matches(self, status: u16, body: &[u8]) -> Option<String> {
         if !self.statuses.contains(&status) {
@@ -368,21 +374,33 @@ pub fn runtime_http_error_policy(
     body: &[u8],
     phase: RuntimeHttpErrorPhase,
 ) -> RuntimeHttpErrorPolicy {
-    for rule in RUNTIME_HTTP_ERROR_RULES {
-        let Some(message) = rule.matches(status, body) else {
-            continue;
-        };
-
-        return runtime_error_policy_match(
-            rule.class,
-            rule.precommit_action,
-            rule.name,
-            message,
+    #[cfg(feature = "mojo")]
+    {
+        runtime_error_policy_from_mojo(
+            prodex_mojo_core::rich::RUNTIME_ERROR_MODE_HTTP,
+            status,
             phase,
-        );
+            body,
+        )
     }
+    #[cfg(not(feature = "mojo"))]
+    {
+        for rule in RUNTIME_HTTP_ERROR_RULES {
+            let Some(message) = rule.matches(status, body) else {
+                continue;
+            };
 
-    RuntimeHttpErrorPolicy::pass_through()
+            return runtime_error_policy_match(
+                rule.class,
+                rule.precommit_action,
+                rule.name,
+                message,
+                phase,
+            );
+        }
+
+        RuntimeHttpErrorPolicy::pass_through()
+    }
 }
 
 /// Classifies an upstream error carried inside a streaming payload.
@@ -394,28 +412,100 @@ pub fn runtime_stream_error_policy(
     body: &[u8],
     phase: RuntimeHttpErrorPhase,
 ) -> RuntimeHttpErrorPolicy {
-    if let Ok(value) = serde_json::from_slice::<serde_json::Value>(body) {
-        return runtime_stream_error_policy_from_value(&value, phase);
+    #[cfg(feature = "mojo")]
+    {
+        runtime_error_policy_from_mojo(
+            prodex_mojo_core::rich::RUNTIME_ERROR_MODE_STREAM,
+            0,
+            phase,
+            body,
+        )
     }
+    #[cfg(not(feature = "mojo"))]
+    {
+        if let Ok(value) = serde_json::from_slice::<serde_json::Value>(body) {
+            return runtime_stream_error_policy_from_value(&value, phase);
+        }
 
-    RuntimeHttpErrorPolicy::pass_through()
+        RuntimeHttpErrorPolicy::pass_through()
+    }
 }
 
 pub fn runtime_stream_error_policy_from_value(
     value: &serde_json::Value,
     phase: RuntimeHttpErrorPhase,
 ) -> RuntimeHttpErrorPolicy {
-    for &(class, action, rule) in RUNTIME_STREAM_ERROR_RULES {
-        if let Some(message) = runtime_error_signal_message_from_value_mode(
-            value,
-            class,
-            RuntimeSignalMatchMode::ExplicitCode,
-        ) {
-            return runtime_error_policy_match(class, action, rule, message, phase);
-        }
+    #[cfg(feature = "mojo")]
+    {
+        let body = serde_json::to_vec(value).expect("runtime error payload serializes");
+        runtime_stream_error_policy(&body, phase)
     }
+    #[cfg(not(feature = "mojo"))]
+    {
+        for &(class, action, rule) in RUNTIME_STREAM_ERROR_RULES {
+            if let Some(message) = runtime_error_signal_message_from_value_mode(
+                value,
+                class,
+                RuntimeSignalMatchMode::ExplicitCode,
+            ) {
+                return runtime_error_policy_match(class, action, rule, message, phase);
+            }
+        }
 
-    RuntimeHttpErrorPolicy::pass_through()
+        RuntimeHttpErrorPolicy::pass_through()
+    }
+}
+
+#[cfg(feature = "mojo")]
+fn runtime_error_policy_from_mojo(
+    operation: i64,
+    status: u16,
+    phase: RuntimeHttpErrorPhase,
+    body: &[u8],
+) -> RuntimeHttpErrorPolicy {
+    let phase = match phase {
+        RuntimeHttpErrorPhase::PreCommit => 0,
+        RuntimeHttpErrorPhase::Committed => 1,
+    };
+    let (class, action, message) =
+        prodex_mojo_core::MojoError::rich_runtime_error_policy(operation, status, phase, body)
+            .expect("Mojo runtime error policy returned an invalid result");
+    let class = match class {
+        0 => RuntimeHttpErrorClass::Other,
+        1 => RuntimeHttpErrorClass::Quota,
+        2 => RuntimeHttpErrorClass::RateLimited,
+        3 => RuntimeHttpErrorClass::ProfileUnavailable,
+        4 => RuntimeHttpErrorClass::Overload,
+        5 => RuntimeHttpErrorClass::TransientServer,
+        _ => return RuntimeHttpErrorPolicy::pass_through(),
+    };
+    if class == RuntimeHttpErrorClass::Other {
+        return RuntimeHttpErrorPolicy::pass_through();
+    }
+    let action = match action {
+        0 => RuntimeHttpErrorAction::PassThrough,
+        1 => RuntimeHttpErrorAction::RotateProfile,
+        2 => RuntimeHttpErrorAction::RetryProfile,
+        _ => return RuntimeHttpErrorPolicy::pass_through(),
+    };
+    let rule = match class {
+        RuntimeHttpErrorClass::Quota => "explicit_quota",
+        RuntimeHttpErrorClass::RateLimited => "rate_limited",
+        RuntimeHttpErrorClass::ProfileUnavailable => "profile_unavailable",
+        RuntimeHttpErrorClass::Overload => "explicit_overload",
+        RuntimeHttpErrorClass::TransientServer => "transient_5xx",
+        RuntimeHttpErrorClass::Other => return RuntimeHttpErrorPolicy::pass_through(),
+    };
+    let retry_after = (class == RuntimeHttpErrorClass::RateLimited)
+        .then(|| runtime_retry_after_from_message(&message))
+        .flatten();
+    RuntimeHttpErrorPolicy {
+        class,
+        action,
+        rule: Some(rule),
+        message: Some(message),
+        retry_after,
+    }
 }
 
 pub fn runtime_http_error_class_label(class: RuntimeHttpErrorClass) -> &'static str {
@@ -625,6 +715,7 @@ pub fn runtime_overload_text_message(message: &str) -> bool {
         || lower.contains("currently overloaded")
 }
 
+#[cfg(not(feature = "mojo"))]
 fn runtime_error_signal_message_from_body(
     body: &[u8],
     signal: RuntimeHttpErrorSignal,
@@ -666,6 +757,7 @@ fn runtime_error_signal_message_from_body(
     })
 }
 
+#[cfg(not(feature = "mojo"))]
 fn runtime_error_signal_message_from_sse_body(
     body: &[u8],
     signal: RuntimeHttpErrorSignal,
@@ -814,6 +906,7 @@ fn runtime_profile_unavailable_text_message(message: &str) -> bool {
     runtime_text_has_payload_code(message, RuntimeHttpErrorSignal::ExplicitProfileUnavailable)
 }
 
+#[cfg(not(feature = "mojo"))]
 fn runtime_transient_http_error_message(status: u16, body: &[u8]) -> String {
     runtime_utf8_text(body)
         .filter(|text| !text.is_empty())
@@ -824,6 +917,7 @@ fn runtime_transient_http_error_message(status: u16, body: &[u8]) -> String {
         })
 }
 
+#[cfg(not(feature = "mojo"))]
 fn runtime_utf8_text(body: &[u8]) -> Option<&str> {
     std::str::from_utf8(body).ok().map(str::trim)
 }

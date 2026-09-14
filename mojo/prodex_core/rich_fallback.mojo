@@ -590,6 +590,15 @@ def runtime_error_code_class(
         if overload:
             return RUNTIME_ERROR_CLASS_OVERLOAD
         return RUNTIME_ERROR_CLASS_OTHER
+    if mode == RUNTIME_ERROR_MODE_HTTP or mode == RUNTIME_ERROR_MODE_STREAM:
+        if quota:
+            return RUNTIME_ERROR_CLASS_QUOTA
+        if rate:
+            return RUNTIME_ERROR_CLASS_RATE
+        if profile:
+            return RUNTIME_ERROR_CLASS_PROFILE
+        if overload:
+            return RUNTIME_ERROR_CLASS_OVERLOAD
     return RUNTIME_ERROR_CLASS_OTHER
 
 
@@ -801,15 +810,17 @@ def runtime_error_json_scan_object(
             var value_end = runtime_error_string_end(ptr, index, end)
             if value_end < 0:
                 return runtime_error_invalid()
-            var class_tag = runtime_error_code_class(ptr, value_start + 1, value_end, mode)
-            if class_tag == RUNTIME_ERROR_CLASS_QUOTA:
-                quota = True
-            elif class_tag == RUNTIME_ERROR_CLASS_RATE:
-                rate = True
-            elif class_tag == RUNTIME_ERROR_CLASS_PROFILE:
-                profile = True
-            elif class_tag == RUNTIME_ERROR_CLASS_OVERLOAD:
-                overload = True
+            var code_field = runtime_error_range_matches(ptr, key_start, key_end, StringSlice("code"), False) or runtime_error_range_matches(ptr, key_start, key_end, StringSlice("type"), False) or runtime_error_range_matches(ptr, key_start, key_end, StringSlice("status"), False) or runtime_error_range_matches(ptr, key_start, key_end, StringSlice("reason"), False)
+            if code_field:
+                var class_tag = runtime_error_code_class(ptr, value_start + 1, value_end, mode)
+                if class_tag == RUNTIME_ERROR_CLASS_QUOTA:
+                    quota = True
+                elif class_tag == RUNTIME_ERROR_CLASS_RATE:
+                    rate = True
+                elif class_tag == RUNTIME_ERROR_CLASS_PROFILE:
+                    profile = True
+                elif class_tag == RUNTIME_ERROR_CLASS_OVERLOAD:
+                    overload = True
             if runtime_error_range_matches(ptr, key_start, key_end, StringSlice("message"), False):
                 message_start = value_start + 1
                 message_end = value_end

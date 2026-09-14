@@ -183,7 +183,7 @@ pub fn deepseek_provider_core_stream_tool_call_delta(
             DeepSeekKernelOperation::StreamToolCallDelta,
             value,
         );
-        return DeepSeekProviderCoreStreamToolCallDelta {
+        DeepSeekProviderCoreStreamToolCallDelta {
             index: projected
                 .get("index")
                 .and_then(Value::as_u64)
@@ -207,7 +207,7 @@ pub fn deepseek_provider_core_stream_tool_call_delta(
                 .and_then(Value::as_str)
                 .filter(|signature| !signature.trim().is_empty())
                 .map(str::to_string),
-        };
+        }
     }
     #[cfg(not(feature = "mojo"))]
     {
@@ -296,7 +296,7 @@ pub fn deepseek_provider_core_stream_chunk_metadata(
             DeepSeekKernelOperation::StreamChunkMetadata,
             value,
         );
-        return DeepSeekProviderCoreStreamChunkMetadata {
+        DeepSeekProviderCoreStreamChunkMetadata {
             model: projected
                 .get("model")
                 .and_then(Value::as_str)
@@ -310,7 +310,7 @@ pub fn deepseek_provider_core_stream_chunk_metadata(
             usage: projected.get("usage").and_then(|usage| {
                 crate::bridge::provider_core_chat_compatible_responses_usage(usage, provider_label)
             }),
-        };
+        }
     }
     #[cfg(not(feature = "mojo"))]
     DeepSeekProviderCoreStreamChunkMetadata {
@@ -346,7 +346,7 @@ pub fn deepseek_provider_core_stream_choice_metadata(
             DeepSeekKernelOperation::StreamChoiceMetadata,
             choice,
         );
-        return DeepSeekProviderCoreStreamChoiceMetadata {
+        DeepSeekProviderCoreStreamChoiceMetadata {
             logprobs: projected
                 .get("logprobs")
                 .filter(|value| !value.is_null())
@@ -355,7 +355,7 @@ pub fn deepseek_provider_core_stream_choice_metadata(
                 .get("finish_reason")
                 .and_then(Value::as_str)
                 .map(str::to_string),
-        };
+        }
     }
     #[cfg(not(feature = "mojo"))]
     DeepSeekProviderCoreStreamChoiceMetadata {
@@ -379,7 +379,7 @@ pub fn deepseek_provider_core_stream_choice_delta(
             DeepSeekKernelOperation::StreamChoiceDelta,
             choice,
         );
-        return DeepSeekProviderCoreStreamChoiceDelta {
+        DeepSeekProviderCoreStreamChoiceDelta {
             reasoning_content: projected
                 .get("reasoning_content")
                 .and_then(Value::as_str)
@@ -405,7 +405,7 @@ pub fn deepseek_provider_core_stream_choice_delta(
                 .and_then(Value::as_array)
                 .map(|items| items.to_vec())
                 .unwrap_or_default(),
-        };
+        }
     }
     #[cfg(not(feature = "mojo"))]
     {
@@ -468,7 +468,7 @@ pub fn deepseek_provider_core_stream_response_metadata(
         input.name = finish_reason;
         input.signature = system_fingerprint;
         let metadata = super::deepseek_mojo_value(input);
-        return (!metadata.is_null()).then_some(metadata);
+        (!metadata.is_null()).then_some(metadata)
     }
     #[cfg(not(feature = "mojo"))]
     {
