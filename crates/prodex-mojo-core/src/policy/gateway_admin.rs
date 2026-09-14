@@ -1,7 +1,13 @@
 use crate::MojoError;
+use std::cmp::Ordering;
 
 pub const GATEWAY_ADMIN_POLICY_ABI_VERSION: i64 = 1;
 const MAX_RETENTION_LIMIT: u64 = 1_000;
+const AUDIT_TIME_RANGE_CONTAINS: i64 = 0;
+const AUDIT_COMPARE_POSITIONS: i64 = 1;
+const AUDIT_RETENTION_CUTOFF: i64 = 2;
+const AUDIT_EVENT_EXPIRED: i64 = 3;
+const AUDIT_HOLD_ACTIVE: i64 = 4;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct GatewayAdminRetentionPlan {
@@ -10,6 +16,13 @@ pub struct GatewayAdminRetentionPlan {
 }
 
 unsafe extern "C" {
+    fn prodex_mojo_audit_decision_v1(
+        abi_version: i64,
+        operation: i64,
+        values: u64,
+        value_count: i64,
+        output: u64,
+    ) -> i64;
     fn prodex_mojo_gateway_admin_retention_plan_v1(
         abi_version: i64,
         retention_days: u64,
@@ -36,6 +49,103 @@ unsafe extern "C" {
         purged: u64,
         protected_or_ineligible: u64,
     ) -> i64;
+}
+
+fn audit_decision(operation: i64, values: &[u64]) -> Result<u64, MojoError> {
+    let mut output = 0;
+    let status = unsafe {
+        prodex_mojo_audit_decision_v1(
+            GATEWAY_ADMIN_POLICY_ABI_VERSION,
+            operation,
+            values.as_ptr() as u64,
+            i64::try_from(values.len()).map_err(|_| MojoError::InvalidInput)?,
+            pointer_address(&mut output),
+        )
+    };
+    if status != 0 {
+        return Err(status_error(status));
+    }
+    Ok(output)
+}
+
+pub fn audit_time_range_contains(
+    start: Option<u64>,
+    end: Option<u64>,
+    timestamp: u64,
+) -> Result<bool, MojoError> {
+    let (start, start_present) = option_input(start);
+    let (end, end_present) = option_input(end);
+    match audit_decision(
+        AUDIT_TIME_RANGE_CONTAINS,
+        &[
+            u64::from(start_present == 1),
+            start,
+            u64::from(end_present == 1),
+            end,
+            timestamp,
+        ],
+    )? {
+        0 => Ok(false),
+        1 => Ok(true),
+        _ => Err(MojoError::InvalidOutput),
+    }
+}
+
+pub fn compare_audit_positions(
+    left_timestamp: u64,
+    left_id: [u64; 2],
+    right_timestamp: u64,
+    right_id: [u64; 2],
+    descending: bool,
+) -> Result<Ordering, MojoError> {
+    match audit_decision(
+        AUDIT_COMPARE_POSITIONS,
+        &[
+            left_timestamp,
+            left_id[0],
+            left_id[1],
+            right_timestamp,
+            right_id[0],
+            right_id[1],
+            u64::from(descending),
+        ],
+    )? {
+        0 => Ok(Ordering::Less),
+        1 => Ok(Ordering::Equal),
+        2 => Ok(Ordering::Greater),
+        _ => Err(MojoError::InvalidOutput),
+    }
+}
+
+pub fn audit_retention_cutoff(
+    now_unix_ms: u64,
+    retention_days: u16,
+    minimum_unix_ms: u64,
+) -> Result<u64, MojoError> {
+    audit_decision(
+        AUDIT_RETENTION_CUTOFF,
+        &[now_unix_ms, u64::from(retention_days), minimum_unix_ms],
+    )
+}
+
+pub fn audit_event_is_expired(event_unix_ms: u64, cutoff_unix_ms: u64) -> Result<bool, MojoError> {
+    match audit_decision(AUDIT_EVENT_EXPIRED, &[event_unix_ms, cutoff_unix_ms])? {
+        0 => Ok(false),
+        1 => Ok(true),
+        _ => Err(MojoError::InvalidOutput),
+    }
+}
+
+pub fn audit_hold_is_active(expires_at: Option<u64>, now_unix_ms: u64) -> Result<bool, MojoError> {
+    let (expires_at, present) = option_input(expires_at);
+    match audit_decision(
+        AUDIT_HOLD_ACTIVE,
+        &[u64::from(present == 1), expires_at, now_unix_ms],
+    )? {
+        0 => Ok(false),
+        1 => Ok(true),
+        _ => Err(MojoError::InvalidOutput),
+    }
 }
 
 fn status_error(status: i64) -> MojoError {
@@ -178,5 +288,20 @@ mod tests {
         assert_eq!(gateway_admin_retention_cutoff(100_000, 30), Ok(0));
         assert_eq!(gateway_admin_purge_protected_count(7, 3), Ok(4));
         assert!(gateway_admin_purge_protected_count(3, 4).is_err());
+
+        assert_eq!(audit_time_range_contains(Some(10), Some(20), 10), Ok(true));
+        assert_eq!(audit_time_range_contains(Some(10), Some(20), 21), Ok(false));
+        assert_eq!(
+            compare_audit_positions(20, [0, 1], 10, [0, 2], true),
+            Ok(Ordering::Less)
+        );
+        assert_eq!(
+            compare_audit_positions(10, [0, 2], 10, [0, 1], true),
+            Ok(Ordering::Greater)
+        );
+        assert_eq!(audit_retention_cutoff(1_000, 30, 1_000), Ok(1_000));
+        assert_eq!(audit_event_is_expired(999, 1_000), Ok(true));
+        assert_eq!(audit_hold_is_active(None, 20), Ok(true));
+        assert_eq!(audit_hold_is_active(Some(20), 21), Ok(false));
     }
 }
