@@ -236,20 +236,10 @@ fn anthropic_web_search_sources(block: &Value) -> Vec<Value> {
         .collect()
 }
 
-#[cfg(not(feature = "mojo"))]
+#[cfg(any(not(feature = "mojo"), test))]
 pub(super) fn anthropic_tool_usage(value: Option<&Value>) -> Option<Value> {
     let requests = value?
         .pointer("/server_tool_use/web_search_requests")?
         .as_u64()?;
     Some(json!({"web_search": {"num_requests": requests}}))
-}
-
-#[cfg(feature = "mojo")]
-pub(super) fn anthropic_tool_usage(value: Option<&Value>) -> Option<Value> {
-    let requests = value?
-        .pointer("/server_tool_use/web_search_requests")?
-        .as_u64()?;
-    let mut input = AnthropicRequestKernelInput::new(AnthropicRequestKernelOperation::ToolUsage);
-    input.count = requests;
-    anthropic_mojo_value(input).ok()
 }

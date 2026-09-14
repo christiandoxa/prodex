@@ -38,6 +38,8 @@ comptime ANTHROPIC_STREAM_THINKING_DELTA: Int64 = 27
 comptime ANTHROPIC_STREAM_COMPLETED: Int64 = 28
 comptime ANTHROPIC_STREAM_ERROR: Int64 = 29
 comptime ANTHROPIC_STREAM_EVENT: Int64 = 30
+comptime ANTHROPIC_RESPONSE_ENVELOPE: Int64 = 31
+comptime ANTHROPIC_UINT64_MAX: UInt64 = 18_446_744_073_709_551_615
 
 
 @fieldwise_init
@@ -1229,6 +1231,71 @@ def anthropic_request_write_stream_event_result(
     return anthropic_request_put_byte(writer, 0)
 
 
+def anthropic_request_json_u64(view: ProdexRichStringView) -> UInt64:
+    var value: UInt64 = 0
+    for index in range(Int64(view.len)):
+        var digit = anthropic_request_byte(view, index)
+        if digit < 48 or digit > 57:
+            return 0
+        value = value * 10 + UInt64(digit - 48)
+    return value
+
+
+def anthropic_request_write_response_envelope(
+    writer: Pointer[mut=True, AnthropicRequestKernelWriter, _],
+    input: ProdexAnthropicRequestKernelInput,
+) -> Bool:
+    if input.id.len == 0 or input.model.len == 0 or input.blocks.len == 0:
+        return False
+    if not (
+        anthropic_request_put_literal(writer, StringSlice('{"id":'))
+        and anthropic_request_put_view(writer, input.id)
+        and anthropic_request_put_literal(
+            writer, StringSlice(',"object":"response","created_at":')
+        )
+        and anthropic_request_put_u64(writer, input.created_at)
+        and anthropic_request_put_literal(writer, StringSlice(',"model":'))
+        and anthropic_request_put_view(writer, input.model)
+        and anthropic_request_put_literal(writer, StringSlice(',"output":'))
+        and anthropic_request_put_view(writer, input.blocks)
+    ):
+        return False
+    if input.choice_kind & 1:
+        var output_tokens = anthropic_request_json_u64(input.max_tokens)
+        var total = ANTHROPIC_UINT64_MAX
+        if output_tokens <= ANTHROPIC_UINT64_MAX - input.count:
+            total = input.count + output_tokens
+        if not (
+            anthropic_request_put_literal(writer, StringSlice(',"usage":{"input_tokens":'))
+            and anthropic_request_put_u64(writer, input.count)
+            and anthropic_request_put_literal(writer, StringSlice(',"output_tokens":'))
+            and anthropic_request_put_u64(writer, output_tokens)
+            and anthropic_request_put_literal(writer, StringSlice(',"total_tokens":'))
+            and anthropic_request_put_u64(writer, total)
+            and anthropic_request_put_byte(writer, 125)
+        ):
+            return False
+    if input.choice_kind & 2:
+        if not (
+            anthropic_request_put_literal(
+                writer, StringSlice(',"tool_usage":{"web_search":{"num_requests":')
+            )
+            and anthropic_request_put_view(writer, input.tool_use_id)
+            and anthropic_request_put_literal(writer, StringSlice("}}"))
+        ):
+            return False
+    if input.choice_kind & 4:
+        if not (
+            anthropic_request_put_literal(
+                writer, StringSlice(',"metadata":{"anthropic":{"stop_reason":')
+            )
+            and anthropic_request_put_view(writer, input.arguments)
+            and anthropic_request_put_literal(writer, StringSlice("}}"))
+        ):
+            return False
+    return anthropic_request_put_byte(writer, 125)
+
+
 def anthropic_request_write_stream(
     writer: Pointer[mut=True, AnthropicRequestKernelWriter, _],
     input: ProdexAnthropicRequestKernelInput,
@@ -1356,9 +1423,9 @@ def anthropic_request_view_valid(view: ProdexRichStringView) -> Bool:
 
 
 def anthropic_request_input_valid(input: ProdexAnthropicRequestKernelInput) -> Bool:
-    if input.operation < ANTHROPIC_REQUEST_BODY or input.operation > ANTHROPIC_STREAM_EVENT:
+    if input.operation < ANTHROPIC_REQUEST_BODY or input.operation > ANTHROPIC_RESPONSE_ENVELOPE:
         return False
-    if input.stream < 0 or input.stream > 1 or input.choice_kind < -1 or input.choice_kind > 3:
+    if input.stream < 0 or input.stream > 1 or input.choice_kind < -1 or input.choice_kind > 7:
         return False
     return (
         anthropic_request_view_valid(input.index)
@@ -1424,6 +1491,8 @@ def anthropic_request_write_operation(
         return anthropic_request_write_response_reasoning(writer, input)
     if input.operation == ANTHROPIC_STREAM_EVENT:
         return anthropic_request_write_stream_event_result(writer, input)
+    if input.operation == ANTHROPIC_RESPONSE_ENVELOPE:
+        return anthropic_request_write_response_envelope(writer, input)
     if input.operation >= ANTHROPIC_STREAM_MESSAGE_START:
         return anthropic_request_write_stream(writer, input)
     return False
