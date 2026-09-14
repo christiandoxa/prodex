@@ -211,18 +211,39 @@ test("historical waiver remains expired, scoped to 0.421.0, and cannot lower the
   }
 });
 
+test("historical 0.429.3 report retains its exact production inventory", () => {
+  const report = JSON.parse(runShare("--release-sha", "1f1ada0d7933cbcd2158c5be9f97eaad3f147342", "--json"));
+  assert.equal(report.current_prodex_version, "0.429.3");
+  assert.equal(report.final.broad_mojo_production_loc, 26_420);
+  assert.equal(report.final.broad_rust_production_loc, 348_775);
+  assert.equal(report.final.broad_total_production_loc, 375_195);
+  assert.equal(report.final.broad_mojo_percent, 7.041671664068018);
+  assert.equal(report.final.source_inventory_sha256, "dff8e1ca90554e56e09969475fb5a90938faf83553f6c5ea3b2a9c2f8bec76f1");
+  assert.equal(report.project_target_met, false);
+  assert.equal(report.project_target_status, "NOT_YET_MET");
+});
+
 test("canonical report exposes separate statuses and --check enforces only floor plus non-regression", async () => {
   const report = JSON.parse(runShare("--json"));
   assert.equal(report.current_prodex_version, await readCargoVersion());
-  assert.equal(report.final.broad_mojo_production_loc, 26_420);
-  assert.equal(report.final.broad_total_production_loc, 375_195);
-  assert.equal(report.final.broad_mojo_percent, 7.041671664068018);
+  const inventory = productionInventoryAtRevision("WORKTREE");
+  assert.equal(report.final.broad_mojo_production_loc, inventory.mojo_production_loc);
+  assert.equal(report.final.broad_rust_production_loc, inventory.rust_production_loc);
+  assert.equal(report.final.broad_total_production_loc, inventory.total_production_loc);
+  assert.equal(report.final.broad_mojo_percent, inventory.mojo_percent);
+  assert.equal(report.final.source_inventory_sha256, inventory.source_inventory_sha256);
+  assert.equal(
+    report.final.broad_total_production_loc,
+    report.final.broad_mojo_production_loc + report.final.broad_rust_production_loc,
+  );
+  assert.ok(report.final.broad_mojo_production_loc >= 26_420);
+  const projectTargetMet = inventory.mojo_production_loc * 100 >= inventory.total_production_loc * 10;
   assert.equal(report.release_floor_percent, 7);
   assert.equal(report.release_floor_met, true);
   assert.equal(report.release_floor_status, "PASS");
   assert.equal(report.project_target_percent, 10);
-  assert.equal(report.project_target_met, false);
-  assert.equal(report.project_target_status, "NOT_YET_MET");
+  assert.equal(report.project_target_met, projectTargetMet);
+  assert.equal(report.project_target_status, projectTargetMet ? "PASS" : "NOT_YET_MET");
   assert.equal(report.mojo_non_regression_met, true);
   assert.equal(report.mojo_non_regression_status, "PASS");
   assert.equal(report.mojo_non_regression_baseline_mojo_production_loc, 26_420);
@@ -236,7 +257,7 @@ test("canonical report exposes separate statuses and --check enforces only floor
   assert.deepEqual(checked, report);
   const human = runShare();
   assert.match(human, /Release floor status: PASS/u);
-  assert.match(human, /Project target status: NOT YET MET/u);
+  assert.match(human, projectTargetMet ? /Project target status: PASS/u : /Project target status: NOT YET MET/u);
   assert.match(human, /Historical 0\.421\.0 waiver: EXPIRED/u);
 });
 
