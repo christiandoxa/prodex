@@ -22,6 +22,7 @@ pub(super) use self::continuation::gemini_continuation_metadata;
 pub(crate) use self::generation_config::gemini_generation_config_from_request;
 pub use self::generation_config::gemini_provider_core_model_uses_thinking_level;
 pub(crate) use self::generation_config::gemini_validate_candidate_count;
+#[cfg(not(feature = "mojo"))]
 pub(super) use self::generation_config::{
     gemini_apply_text_format, gemini_insert_basic_generation_config,
     gemini_insert_extended_generation_config, gemini_thinking_config_from_request,
@@ -39,27 +40,13 @@ pub(crate) use self::tools::{
 };
 
 #[cfg(feature = "mojo")]
-#[derive(Clone, Copy)]
-pub(super) enum GeminiRequestFieldScope {
-    BasicGeneration,
-    ExtendedGeneration,
-    OptionalRequest,
-}
-
-#[cfg(feature = "mojo")]
-pub(super) fn gemini_request_field_plan(
+pub(super) fn gemini_optional_request_field_plan(
     source: &Map<String, Value>,
-    scope: GeminiRequestFieldScope,
 ) -> Vec<prodex_mojo_core::provider_constraints::GeminiRequestField> {
-    let (basic_fields, extended_fields, optional_fields) = match scope {
-        GeminiRequestFieldScope::BasicGeneration => (gemini_basic_field_mask(source), 0, 0),
-        GeminiRequestFieldScope::ExtendedGeneration => (0, gemini_extended_field_mask(source), 0),
-        GeminiRequestFieldScope::OptionalRequest => (0, 0, gemini_optional_field_mask(source)),
-    };
     prodex_mojo_core::provider_constraints::gemini_request_field_plan(
-        basic_fields,
-        extended_fields,
-        optional_fields,
+        0,
+        0,
+        gemini_optional_field_mask(source),
     )
     .expect("Gemini request field plan returned invalid output")
 }
@@ -140,60 +127,6 @@ const GEMINI_REQUEST_SOURCE_KEYS: [&str; 34] = [
     "cachedContent",
     "labels",
 ];
-
-#[cfg(feature = "mojo")]
-fn gemini_basic_field_mask(source: &Map<String, Value>) -> u64 {
-    let mut mask = 0;
-    for (bit, key) in [(0, "temperature"), (1, "top_p"), (2, "max_tokens")] {
-        if source.get(key).is_some_and(|value| !value.is_null()) {
-            mask |= 1 << bit;
-        }
-    }
-    for (bit, key) in [(3, "stop"), (4, "stop_sequences"), (5, "stopSequences")] {
-        if source.contains_key(key) {
-            mask |= 1 << bit;
-        }
-    }
-    mask
-}
-
-#[cfg(feature = "mojo")]
-fn gemini_extended_field_mask(source: &Map<String, Value>) -> u64 {
-    let mut mask = 0;
-    for (bit, key) in [
-        (0, "top_k"),
-        (1, "topK"),
-        (2, "seed"),
-        (3, "presence_penalty"),
-        (4, "presencePenalty"),
-        (5, "frequency_penalty"),
-        (6, "frequencyPenalty"),
-        (7, "response_mime_type"),
-        (8, "responseMimeType"),
-        (9, "response_schema"),
-        (10, "responseSchema"),
-        (11, "response_json_schema"),
-        (12, "responseJsonSchema"),
-        (13, "response_modalities"),
-        (14, "responseModalities"),
-        (15, "media_resolution"),
-        (16, "mediaResolution"),
-        (17, "audio_timestamp"),
-        (18, "audioTimestamp"),
-        (19, "speech_config"),
-        (20, "speechConfig"),
-    ] {
-        if source.get(key).is_some_and(|value| !value.is_null()) {
-            mask |= 1 << bit;
-        }
-    }
-    for (bit, key) in [(21, "candidateCount"), (22, "candidate_count")] {
-        if source.contains_key(key) {
-            mask |= 1 << bit;
-        }
-    }
-    mask
-}
 
 #[cfg(feature = "mojo")]
 fn gemini_optional_field_mask(source: &Map<String, Value>) -> u64 {

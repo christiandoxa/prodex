@@ -5,12 +5,15 @@ use crate::{ProviderEndpoint, ProviderId, ProviderWireFormat};
 use serde_json::{Value, json};
 
 use super::request::{
-    gemini_apply_optional_request_fields, gemini_apply_response_format, gemini_apply_text_format,
+    gemini_apply_optional_request_fields, gemini_apply_response_format,
     gemini_builtin_tools_from_request, gemini_continuation_metadata,
-    gemini_insert_basic_generation_config, gemini_insert_extended_generation_config,
-    gemini_is_supported_builtin_tool, gemini_thinking_config_from_request,
-    gemini_tool_config_from_request, gemini_tool_from_openai_tool, gemini_validate_candidate_count,
-    gemini_validate_openai_tools,
+    gemini_is_supported_builtin_tool, gemini_tool_config_from_request,
+    gemini_tool_from_openai_tool, gemini_validate_candidate_count, gemini_validate_openai_tools,
+};
+#[cfg(not(feature = "mojo"))]
+use super::request::{
+    gemini_apply_text_format, gemini_insert_basic_generation_config,
+    gemini_insert_extended_generation_config, gemini_thinking_config_from_request,
 };
 use super::request_contents::{
     gemini_contains_local_media_path, gemini_contents_from_request,
@@ -105,13 +108,7 @@ pub(super) fn gemini_transform_request(input: ProviderTransformInput) -> Provide
         .and_then(Value::as_str)
         .unwrap_or("gemini-2.5-pro")
         .to_string();
-    let mut generation_config = serde_json::Map::new();
-    gemini_insert_basic_generation_config(obj, &mut generation_config);
-    gemini_insert_extended_generation_config(obj, &mut generation_config);
-    gemini_apply_text_format(obj, &mut generation_config);
-    if let Some(thinking_config) = gemini_thinking_config_from_request(obj, &model) {
-        generation_config.insert("thinkingConfig".to_string(), thinking_config);
-    }
+    let mut generation_config = gemini_translator_generation_config(&value, obj, &model);
     if let Some(response_format) = obj.get("response_format")
         && let Err(reason) = gemini_apply_response_format(response_format, &mut generation_config)
     {
@@ -156,6 +153,34 @@ pub(super) fn gemini_transform_request(input: ProviderTransformInput) -> Provide
     } else {
         result
     }
+}
+
+#[cfg(feature = "mojo")]
+fn gemini_translator_generation_config(
+    value: &Value,
+    _obj: &serde_json::Map<String, Value>,
+    model: &str,
+) -> serde_json::Map<String, Value> {
+    crate::gemini_provider_core_generation_config_from_request(value, value, model, None)
+        .as_object()
+        .cloned()
+        .expect("Mojo Gemini generation config is an object")
+}
+
+#[cfg(not(feature = "mojo"))]
+fn gemini_translator_generation_config(
+    _value: &Value,
+    obj: &serde_json::Map<String, Value>,
+    model: &str,
+) -> serde_json::Map<String, Value> {
+    let mut generation_config = serde_json::Map::new();
+    gemini_insert_basic_generation_config(obj, &mut generation_config);
+    gemini_insert_extended_generation_config(obj, &mut generation_config);
+    gemini_apply_text_format(obj, &mut generation_config);
+    if let Some(thinking_config) = gemini_thinking_config_from_request(obj, model) {
+        generation_config.insert("thinkingConfig".to_string(), thinking_config);
+    }
+    generation_config
 }
 
 fn gemini_apply_tools(

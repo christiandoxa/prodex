@@ -4,6 +4,7 @@ use serde_json::Value;
 #[cfg(not(feature = "mojo"))]
 use serde_json::json;
 
+#[cfg(not(feature = "mojo"))]
 pub(in crate::translators::gemini) fn gemini_thinking_config_from_request(
     obj: &serde_json::Map<String, Value>,
     model: &str,
@@ -18,26 +19,6 @@ pub(super) fn gemini_thinking_config_with_budget_from_request(
     thinking_budget_tokens: Option<u64>,
 ) -> Option<Value> {
     gemini_thinking_config(obj, model, thinking_budget_tokens)
-}
-
-#[cfg(feature = "mojo")]
-fn gemini_thinking_config(
-    obj: &serde_json::Map<String, Value>,
-    model: &str,
-    thinking_budget_tokens: Option<u64>,
-) -> Option<Value> {
-    let effort = obj
-        .get("reasoning")
-        .and_then(|reasoning| reasoning.get("effort"))
-        .and_then(Value::as_str);
-    Some(super::gemini_config_value(
-        prodex_mojo_core::rich::GeminiConfigKernelOperation::ThinkingConfig,
-        Some(model),
-        effort,
-        None,
-        None,
-        thinking_budget_tokens,
-    ))
 }
 
 #[cfg(not(feature = "mojo"))]
