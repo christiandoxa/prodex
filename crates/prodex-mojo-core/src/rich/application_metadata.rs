@@ -2,6 +2,36 @@ use super::*;
 
 pub const APPLICATION_METADATA_ABI_VERSION: i64 = 1;
 pub const APPLICATION_METADATA_MAX_HEADERS: usize = 64;
+pub const APPLICATION_REQUEST_CONTEXT_ABI_VERSION: i64 = 1;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ApplicationCredentialScopePlan {
+    DataPlane,
+    ControlPlane,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ApplicationRequestContextPlan {
+    pub credential_scope: Option<ApplicationCredentialScopePlan>,
+}
+
+#[repr(i64)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ApplicationAuthorizationKind {
+    DataPlane = 0,
+    ControlPlane = 1,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ApplicationAuthorizationDecision {
+    AllowAnonymous,
+    DataPlaneInference,
+    DataPlaneQuota,
+    ControlPlaneAction,
+    WrongPlane,
+    AnonymousNotAllowed,
+    PrincipalMismatch,
+}
 
 /// Presence-only metadata derived from bounded header-name views.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -28,9 +58,34 @@ struct ApplicationRequestMetadataResult {
     user_agent_present: i64,
 }
 
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default)]
+struct ApplicationRequestContextPlanResult {
+    abi_version: i64,
+    credential_scope: i64,
+}
+
 const _: () = assert!(std::mem::size_of::<ApplicationRequestMetadataResult>() == 64);
+const _: () = assert!(std::mem::size_of::<ApplicationRequestContextPlanResult>() == 16);
 
 unsafe extern "C" {
+    fn prodex_mojo_rich_application_request_context_plan_v1(
+        abi_version: i64,
+        route_kind: i64,
+        route_plane: i64,
+        result: u64,
+    ) -> i64;
+
+    fn prodex_mojo_rich_application_authorization_plan_v1(
+        abi_version: i64,
+        authorization_kind: i64,
+        route_kind: i64,
+        route_plane: i64,
+        principal_present: i64,
+        principal_matches_action: i64,
+        decision: u64,
+    ) -> i64;
+
     fn prodex_mojo_rich_application_request_metadata_v1(
         abi_version: i64,
         header_names: u64,
@@ -38,6 +93,70 @@ unsafe extern "C" {
         total_header_count: i64,
         result: u64,
     ) -> i64;
+}
+
+pub fn plan_application_authorization(
+    authorization_kind: ApplicationAuthorizationKind,
+    route_kind: i64,
+    route_plane: i64,
+    principal_present: bool,
+    principal_matches_action: bool,
+) -> Result<ApplicationAuthorizationDecision, MojoError> {
+    ensure_rich_abi()?;
+    let mut decision = -1_i64;
+    let status = unsafe {
+        prodex_mojo_rich_application_authorization_plan_v1(
+            APPLICATION_REQUEST_CONTEXT_ABI_VERSION,
+            authorization_kind as i64,
+            route_kind,
+            route_plane,
+            i64::from(principal_present),
+            i64::from(principal_matches_action),
+            mojo_mut_pointer_address(&mut decision),
+        )
+    };
+    if status != 0 {
+        return Err(status_error(status, 10, 0, 0, 0));
+    }
+    match decision {
+        0 => Ok(ApplicationAuthorizationDecision::AllowAnonymous),
+        1 => Ok(ApplicationAuthorizationDecision::DataPlaneInference),
+        2 => Ok(ApplicationAuthorizationDecision::DataPlaneQuota),
+        3 => Ok(ApplicationAuthorizationDecision::ControlPlaneAction),
+        4 => Ok(ApplicationAuthorizationDecision::WrongPlane),
+        5 => Ok(ApplicationAuthorizationDecision::AnonymousNotAllowed),
+        6 => Ok(ApplicationAuthorizationDecision::PrincipalMismatch),
+        _ => Err(MojoError::InvalidOutput),
+    }
+}
+
+pub fn plan_application_request_context(
+    route_kind: i64,
+    route_plane: i64,
+) -> Result<ApplicationRequestContextPlan, MojoError> {
+    ensure_rich_abi()?;
+    let mut result = ApplicationRequestContextPlanResult::default();
+    let status = unsafe {
+        prodex_mojo_rich_application_request_context_plan_v1(
+            APPLICATION_REQUEST_CONTEXT_ABI_VERSION,
+            route_kind,
+            route_plane,
+            mojo_mut_pointer_address(&mut result),
+        )
+    };
+    if status != 0 {
+        return Err(status_error(status, 10, 0, 0, 0));
+    }
+    if result.abi_version != APPLICATION_REQUEST_CONTEXT_ABI_VERSION {
+        return Err(MojoError::InvalidOutput);
+    }
+    let credential_scope = match result.credential_scope {
+        -1 => None,
+        0 => Some(ApplicationCredentialScopePlan::DataPlane),
+        1 => Some(ApplicationCredentialScopePlan::ControlPlane),
+        _ => return Err(MojoError::InvalidOutput),
+    };
+    Ok(ApplicationRequestContextPlan { credential_scope })
 }
 
 /// Normalize header-name DTOs without crossing header values or credentials.

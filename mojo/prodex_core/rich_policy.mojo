@@ -1435,6 +1435,109 @@ comptime APPLICATION_METADATA_ABI_VERSION: Int64 = 1
 comptime APPLICATION_METADATA_MAX_HEADERS: Int64 = 64
 comptime APPLICATION_METADATA_MAX_TEXT_BYTES: Int64 = 4_096
 
+comptime APPLICATION_REQUEST_CONTEXT_ABI_VERSION: Int64 = 1
+
+@fieldwise_init
+struct ApplicationRequestContextPlanResult(Copyable):
+    var abi_version: Int64
+    var credential_scope: Int64
+
+
+comptime APPLICATION_AUTHORIZATION_DATA: Int64 = 0
+comptime APPLICATION_AUTHORIZATION_CONTROL: Int64 = 1
+comptime APPLICATION_AUTHORIZATION_ALLOW_ANONYMOUS: Int64 = 0
+comptime APPLICATION_AUTHORIZATION_DATA_INFERENCE: Int64 = 1
+comptime APPLICATION_AUTHORIZATION_DATA_QUOTA: Int64 = 2
+comptime APPLICATION_AUTHORIZATION_CONTROL_ACTION: Int64 = 3
+comptime APPLICATION_AUTHORIZATION_WRONG_PLANE: Int64 = 4
+comptime APPLICATION_AUTHORIZATION_ANONYMOUS_NOT_ALLOWED: Int64 = 5
+comptime APPLICATION_AUTHORIZATION_PRINCIPAL_MISMATCH: Int64 = 6
+
+
+def application_request_route_plane(route_kind: Int64) -> Int64:
+    if route_kind < 0 or route_kind > 22:
+        return -1
+    if route_kind == 19:
+        return 1
+    if route_kind >= 20:
+        return 2
+    return 0
+
+
+@export("prodex_mojo_rich_application_request_context_plan_v1")
+def prodex_mojo_rich_application_request_context_plan_v1(
+    abi_version: Int64,
+    route_kind: Int64,
+    route_plane: Int64,
+    result_address: UInt,
+) abi("C") -> Int64:
+    if result_address == 0:
+        return RICH_STATUS_INVALID
+    var result = Pointer[
+        mut=True, ApplicationRequestContextPlanResult, MutUntrackedOrigin
+    ](unsafe_from_address=Int(result_address))
+    result[].abi_version = APPLICATION_REQUEST_CONTEXT_ABI_VERSION
+    result[].credential_scope = -1
+    if abi_version != APPLICATION_REQUEST_CONTEXT_ABI_VERSION:
+        return RICH_STATUS_INVALID
+    if route_plane < 0 or route_plane > 2:
+        return RICH_STATUS_INVALID
+    if route_plane != application_request_route_plane(route_kind):
+        return RICH_STATUS_INVALID
+    if route_plane == 0:
+        result[].credential_scope = 0
+    elif route_plane == 1:
+        result[].credential_scope = 1
+    return RICH_STATUS_OK
+
+
+@export("prodex_mojo_rich_application_authorization_plan_v1")
+def prodex_mojo_rich_application_authorization_plan_v1(
+    abi_version: Int64,
+    authorization_kind: Int64,
+    route_kind: Int64,
+    route_plane: Int64,
+    principal_present: Int64,
+    principal_matches_action: Int64,
+    decision_address: UInt,
+) abi("C") -> Int64:
+    if (
+        abi_version != APPLICATION_REQUEST_CONTEXT_ABI_VERSION
+        or authorization_kind < APPLICATION_AUTHORIZATION_DATA
+        or authorization_kind > APPLICATION_AUTHORIZATION_CONTROL
+        or route_plane < 0
+        or route_plane > 2
+        or principal_present < 0
+        or principal_present > 1
+        or principal_matches_action < 0
+        or principal_matches_action > 1
+        or decision_address == 0
+    ):
+        return RICH_STATUS_INVALID
+    var decision = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(decision_address)
+    )
+    if route_plane != application_request_route_plane(route_kind):
+        return RICH_STATUS_INVALID
+    if authorization_kind == APPLICATION_AUTHORIZATION_DATA:
+        if route_plane != 0:
+            decision[] = APPLICATION_AUTHORIZATION_WRONG_PLANE
+        elif principal_present == 0:
+            decision[] = APPLICATION_AUTHORIZATION_ALLOW_ANONYMOUS
+        elif route_kind == 3:
+            decision[] = APPLICATION_AUTHORIZATION_DATA_QUOTA
+        else:
+            decision[] = APPLICATION_AUTHORIZATION_DATA_INFERENCE
+    elif route_plane != 1:
+        decision[] = APPLICATION_AUTHORIZATION_WRONG_PLANE
+    elif principal_present == 0:
+        decision[] = APPLICATION_AUTHORIZATION_ANONYMOUS_NOT_ALLOWED
+    elif principal_matches_action == 0:
+        decision[] = APPLICATION_AUTHORIZATION_PRINCIPAL_MISMATCH
+    else:
+        decision[] = APPLICATION_AUTHORIZATION_CONTROL_ACTION
+    return RICH_STATUS_OK
+
 @fieldwise_init
 struct ApplicationRequestMetadataResult(Copyable):
     var abi_version: Int64
