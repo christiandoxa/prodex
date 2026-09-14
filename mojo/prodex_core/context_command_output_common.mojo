@@ -12,6 +12,7 @@ comptime PRODEX_RICH_ABI_VERSION: Int64 = 6
 comptime CONTEXT_COMMAND_OUTPUT_MAX_BYTES: Int64 = 9_223_372_036_854_775_807
 comptime CONTEXT_COMMAND_OUTPUT_GIT_STATUS: Int64 = 1
 comptime CONTEXT_COMMAND_OUTPUT_FILE_LIST: Int64 = 2
+comptime CONTEXT_COMMAND_OUTPUT_SEARCH: Int64 = 3
 comptime CONTEXT_COMMAND_OUTPUT_STATUS_OK: Int64 = 0
 comptime CONTEXT_COMMAND_OUTPUT_STATUS_INVALID: Int64 = 1
 comptime CONTEXT_COMMAND_OUTPUT_STATUS_UTF8: Int64 = 2
@@ -34,6 +35,7 @@ struct ProdexContextCommandOutputInput(Copyable):
     var max_path_entries: UInt64
     var max_lines: UInt64
     var max_line_chars: UInt64
+    var max_search_matches: UInt64
     var input: ProdexRichStringView
 
 
@@ -236,7 +238,7 @@ def context_command_output_slices_equal(
     return True
 
 
-def context_command_output_record_item(
+def context_command_output_record_item_index(
     records: Pointer[mut=True, ProdexContextCommandOutputRecord, _],
     record_capacity: Int64,
     record_count: Pointer[mut=True, Int64, _],
@@ -245,10 +247,10 @@ def context_command_output_record_item(
     scratch: Pointer[mut=True, ContextCommandOutputWriter, _],
     category: Int64,
     start: Int64,
-) -> Bool:
+) -> Int64:
     var length = scratch[].written - start
     if length < 0 or record_count[] >= record_capacity:
-        return False
+        return -1
     var hash = context_command_output_hash_bytes(
         scratch[].output, start, scratch[].written, category
     )
@@ -261,7 +263,7 @@ def context_command_output_record_item(
             ] = ProdexContextCommandOutputRecord(1, category, start, length)
             hash_slots[unsafe_offset=slot] = record_count[] + 1
             record_count[] += 1
-            return True
+            return record_count[] - 1
         var existing = records[unsafe_offset=stored - 1].copy()
         if (
             existing.category == category
@@ -272,9 +274,31 @@ def context_command_output_record_item(
         ):
             scratch[].written = start
             records[unsafe_offset=stored - 1].occurrences += 1
-            return True
+            return stored - 1
         slot = (slot + 1) % hash_capacity
-    return False
+    return -1
+
+
+def context_command_output_record_item(
+    records: Pointer[mut=True, ProdexContextCommandOutputRecord, _],
+    record_capacity: Int64,
+    record_count: Pointer[mut=True, Int64, _],
+    hash_slots: Pointer[mut=True, Int64, _],
+    hash_capacity: Int64,
+    scratch: Pointer[mut=True, ContextCommandOutputWriter, _],
+    category: Int64,
+    start: Int64,
+) -> Bool:
+    return context_command_output_record_item_index(
+        records,
+        record_capacity,
+        record_count,
+        hash_slots,
+        hash_capacity,
+        scratch,
+        category,
+        start,
+    ) >= 0
 
 
 def context_command_output_add_raw_item(

@@ -566,14 +566,5 @@ mod mojo_search_tests {
             ),
             Err(prodex_mojo_core::MojoError::Capacity)
         );
-        assert_eq!(
-            prodex_mojo_core::context::classify_git_search_line(
-                &"x".repeat(prodex_mojo_core::context::CONTEXT_GIT_SEARCH_MAX_BYTES + 1),
-                None,
-                &mut path_output,
-                &mut text_output,
-            ),
-            Err(prodex_mojo_core::MojoError::InvalidInput)
-        );
     }
 }

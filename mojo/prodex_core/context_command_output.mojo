@@ -4,6 +4,7 @@ from context_command_output_common import (
     CONTEXT_COMMAND_OUTPUT_FILE_LIST,
     CONTEXT_COMMAND_OUTPUT_GIT_STATUS,
     CONTEXT_COMMAND_OUTPUT_MAX_BYTES,
+    CONTEXT_COMMAND_OUTPUT_SEARCH,
     CONTEXT_COMMAND_OUTPUT_STATUS_ABI,
     CONTEXT_COMMAND_OUTPUT_STATUS_CAPACITY,
     CONTEXT_COMMAND_OUTPUT_STATUS_INVALID,
@@ -77,6 +78,7 @@ def prodex_mojo_context_command_output_size_v1(
     if (
         value.operation != CONTEXT_COMMAND_OUTPUT_GIT_STATUS
         and value.operation != CONTEXT_COMMAND_OUTPUT_FILE_LIST
+        and value.operation != CONTEXT_COMMAND_OUTPUT_SEARCH
     ):
         return CONTEXT_COMMAND_OUTPUT_STATUS_INVALID
     if not rich_view_valid(value.input, CONTEXT_COMMAND_OUTPUT_MAX_BYTES):
