@@ -41,10 +41,13 @@ pub(crate) fn gemini_prompt_feedback_failure(value: &Value) -> Option<(String, S
         .get("blockReason")
         .and_then(Value::as_str)
         .filter(|reason| !reason.trim().is_empty())?;
-    Some((
-        "gemini_prompt_blocked".to_string(),
-        format!("Gemini blocked the prompt: {reason}"),
-    ))
+    #[cfg(feature = "mojo")]
+    return gemini_status_pair(
+        prodex_mojo_core::rich::GeminiResponseKernelOperation::PromptFeedbackFailure,
+        reason,
+    );
+    #[cfg(not(feature = "mojo"))]
+    gemini_prompt_feedback_failure_oracle(reason)
 }
 
 pub(crate) fn gemini_finish_reason(value: &Value) -> Option<String> {
@@ -59,6 +62,17 @@ pub(crate) fn gemini_finish_reason(value: &Value) -> Option<String> {
 }
 
 pub(crate) fn gemini_finish_reason_failure(reason: &str) -> Option<(String, String)> {
+    #[cfg(feature = "mojo")]
+    return gemini_status_pair(
+        prodex_mojo_core::rich::GeminiResponseKernelOperation::FinishReasonFailure,
+        reason,
+    );
+    #[cfg(not(feature = "mojo"))]
+    gemini_finish_reason_failure_oracle(reason)
+}
+
+#[cfg(any(not(feature = "mojo"), test))]
+fn gemini_finish_reason_failure_oracle(reason: &str) -> Option<(String, String)> {
     let code = match reason {
         "MALFORMED_FUNCTION_CALL" => "gemini_malformed_function_call",
         "UNEXPECTED_TOOL_CALL" => "gemini_unexpected_tool_call",
@@ -81,11 +95,90 @@ pub(crate) fn gemini_finish_reason_failure(reason: &str) -> Option<(String, Stri
 }
 
 pub(crate) fn gemini_finish_reason_incomplete(reason: &str) -> Option<(String, String)> {
+    #[cfg(feature = "mojo")]
+    return gemini_status_pair(
+        prodex_mojo_core::rich::GeminiResponseKernelOperation::FinishReasonIncomplete,
+        reason,
+    );
+    #[cfg(not(feature = "mojo"))]
+    gemini_finish_reason_incomplete_oracle(reason)
+}
+
+#[cfg(any(not(feature = "mojo"), test))]
+fn gemini_finish_reason_incomplete_oracle(reason: &str) -> Option<(String, String)> {
     match reason {
         "MAX_TOKENS" => Some((
             "max_output_tokens".to_string(),
             "Gemini stopped because it reached the maximum output token limit.".to_string(),
         )),
         _ => None,
+    }
+}
+
+#[cfg(any(not(feature = "mojo"), test))]
+fn gemini_prompt_feedback_failure_oracle(reason: &str) -> Option<(String, String)> {
+    Some((
+        "gemini_prompt_blocked".to_string(),
+        format!("Gemini blocked the prompt: {reason}"),
+    ))
+}
+
+#[cfg(feature = "mojo")]
+fn gemini_status_pair(
+    operation: prodex_mojo_core::rich::GeminiResponseKernelOperation,
+    reason: &str,
+) -> Option<(String, String)> {
+    let mut input = prodex_mojo_core::rich::GeminiResponseKernelInput::new(operation);
+    input.reason = Some(reason);
+    let value = super::super::stream::gemini_mojo_value(input);
+    let pair = value.as_array()?;
+    Some((
+        pair.first()?.as_str()?.to_string(),
+        pair.get(1)?.as_str()?.to_string(),
+    ))
+}
+
+#[cfg(all(test, feature = "mojo"))]
+mod mojo_parity_tests {
+    use super::*;
+
+    #[test]
+    fn finish_reason_mapping_matches_rust_oracle() {
+        for reason in [
+            "MAX_TOKENS",
+            "MALFORMED_FUNCTION_CALL",
+            "UNEXPECTED_TOOL_CALL",
+            "OTHER",
+            "NO_IMAGE",
+            "SAFETY",
+            "RECITATION",
+            "LANGUAGE",
+            "BLOCKLIST",
+            "PROHIBITED_CONTENT",
+            "SPII",
+            "IMAGE_SAFETY",
+            "IMAGE_PROHIBITED_CONTENT",
+            "STOP",
+            "安全🙂",
+            "",
+        ] {
+            assert_eq!(
+                gemini_finish_reason_failure(reason),
+                gemini_finish_reason_failure_oracle(reason)
+            );
+            assert_eq!(
+                gemini_finish_reason_incomplete(reason),
+                gemini_finish_reason_incomplete_oracle(reason)
+            );
+        }
+        for reason in ["blocked", "安全🙂", ""] {
+            assert_eq!(
+                gemini_status_pair(
+                    prodex_mojo_core::rich::GeminiResponseKernelOperation::PromptFeedbackFailure,
+                    reason,
+                ),
+                gemini_prompt_feedback_failure_oracle(reason),
+            );
+        }
     }
 }
