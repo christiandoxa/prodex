@@ -33,6 +33,7 @@ mod auto_redeem;
 mod cache;
 mod gate;
 mod quarantine;
+mod reserve;
 mod selection;
 mod summary;
 
@@ -40,6 +41,7 @@ pub(crate) use auto_redeem::*;
 pub(crate) use cache::*;
 pub(crate) use gate::*;
 pub(crate) use quarantine::*;
+pub(crate) use reserve::*;
 pub(crate) use selection::*;
 pub(crate) use summary::*;
 

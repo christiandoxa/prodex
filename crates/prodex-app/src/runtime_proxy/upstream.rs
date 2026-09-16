@@ -200,13 +200,22 @@ fn build_runtime_proxy_upstream_request(
     if let Some(turn_state) = turn_state_override {
         upstream_request = upstream_request.header("x-codex-turn-state", turn_state);
     }
-    let upstream_body = prepare_runtime_smart_context_http_body_for_profile(
+    let mut upstream_body = prepare_runtime_smart_context_http_body_for_profile(
         request_id,
         request,
         shared,
         route_kind,
         Some(profile_name),
     )?;
+    if let Some(reserve_body) = rewrite_runtime_luna_reserve_model_if_authorized(
+        shared,
+        profile_name,
+        auth.account_id.as_deref(),
+        upstream_body.as_ref(),
+        true,
+    )? {
+        upstream_body = std::borrow::Cow::Owned(reserve_body);
+    }
     log_runtime_upstream_payload_snapshot(
         shared,
         request_id,

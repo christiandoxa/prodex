@@ -87,6 +87,14 @@ fn luna_reserve_requires_its_explicit_bucket_and_never_regularizes_sol() {
     reserve.limit_id = Some("base_model_inference".to_string());
     reserve.limit_name = Some("gpt-luna-reserve".to_string());
     reserve.metered_feature = Some("base_model_inference".to_string());
+    reserve.extra.insert(
+        "normalModelSlug".to_string(),
+        serde_json::json!("gpt-5.6-luna"),
+    );
+    usage.rate_limit.as_mut().unwrap().extra.insert(
+        "rateLimitUpsell".to_string(),
+        serde_json::json!({ "banner_type": "luna_reserve" }),
+    );
     usage.additional_rate_limits.push(reserve);
 
     assert!(additional_rate_limit_is_luna_reserve(
@@ -178,6 +186,14 @@ fn luna_reserve_is_model_specific_and_kept_separate_from_regular_quota() {
     let mut reserve = additional_limit(70, 1_700_003_600, 80, 1_700_086_400);
     reserve.limit_name = Some("Luna Reserve".to_string());
     reserve.metered_feature = None;
+    reserve.extra.insert(
+        "normalModelSlug".to_string(),
+        serde_json::json!("gpt-5.6-luna"),
+    );
+    usage.rate_limit.as_mut().unwrap().extra.insert(
+        "rateLimitUpsell".to_string(),
+        serde_json::json!({ "banner_type": "luna_reserve" }),
+    );
     usage.additional_rate_limits.push(reserve);
 
     assert!(additional_rate_limit_is_luna_reserve(
@@ -205,6 +221,14 @@ fn regular_luna_quota_beats_luna_reserve_when_both_are_ready() {
     let mut reserve = additional_limit(90, 1_700_003_600, 90, 1_700_086_400);
     reserve.limit_name = Some("Luna Reserve".to_string());
     reserve.metered_feature = None;
+    reserve.extra.insert(
+        "normalModelSlug".to_string(),
+        serde_json::json!("gpt-5.6-luna"),
+    );
+    usage.rate_limit.as_mut().unwrap().extra.insert(
+        "rateLimitUpsell".to_string(),
+        serde_json::json!({ "banner_type": "luna_reserve" }),
+    );
     usage.additional_rate_limits.push(reserve);
 
     assert_eq!(

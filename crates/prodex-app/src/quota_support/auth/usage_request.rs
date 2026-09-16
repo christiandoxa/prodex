@@ -13,7 +13,8 @@ pub(super) fn send_usage_request(
 ) -> Result<(reqwest::StatusCode, Vec<u8>)> {
     let send = || {
         let mut request = codex_openai_auth_headers_for_home(client.get(usage_url), codex_home)?
-            .header("Authorization", format!("Bearer {}", auth.access_token));
+            .header("Authorization", format!("Bearer {}", auth.access_token))
+            .header("x-openai-codex-luna-reserve", "1");
 
         if let Some(account_id) = auth.account_id.as_deref() {
             request = request.header("ChatGPT-Account-Id", account_id);

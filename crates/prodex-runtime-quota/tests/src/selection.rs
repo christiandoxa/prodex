@@ -110,6 +110,10 @@ fn model_aware_scheduler_scores_luna_reserve_instead_of_unknown_additional_capac
     let now = chrono::Local::now().timestamp();
     let mut reserve_usage = selection_usage(now, 0);
     let reserve_pair = reserve_usage.rate_limit.clone().unwrap();
+    reserve_usage.rate_limit.as_mut().unwrap().extra.insert(
+        "rateLimitUpsell".to_string(),
+        serde_json::json!({ "banner_type": "luna_reserve" }),
+    );
     reserve_usage
         .additional_rate_limits
         .push(AdditionalRateLimit {
@@ -131,7 +135,10 @@ fn model_aware_scheduler_scores_luna_reserve_instead_of_unknown_additional_capac
             },
             allowed: None,
             limit_reached: None,
-            extra: std::collections::BTreeMap::new(),
+            extra: std::collections::BTreeMap::from([(
+                "normalModelSlug".to_string(),
+                serde_json::json!("gpt-5.6-luna"),
+            )]),
         });
     reserve_usage
         .additional_rate_limits

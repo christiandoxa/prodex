@@ -49,6 +49,7 @@ pub(in crate::runtime_proxy) fn run_runtime_realtime_websocket_duplex_session(
                     websocket_session,
                     profile_name: &profile_name,
                     reuse_existing_session: true,
+                    reserve_rewrite_allowed: false,
                     precommit_transport_retry_allowed: false,
                     upstream_socket: &mut upstream_socket,
                 })?

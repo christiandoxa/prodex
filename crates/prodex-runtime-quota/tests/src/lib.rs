@@ -292,6 +292,14 @@ fn model_summary_uses_luna_reserve_and_not_regular_quota() {
     let mut reserve = additional_limit(80, 90, now);
     reserve.limit_name = Some("gpt-luna-reserve".to_string());
     reserve.metered_feature = None;
+    reserve.extra.insert(
+        "normalModelSlug".to_string(),
+        serde_json::json!("gpt-5.6-luna"),
+    );
+    usage.rate_limit.as_mut().unwrap().extra.insert(
+        "rateLimitUpsell".to_string(),
+        serde_json::json!({ "banner_type": "luna_reserve" }),
+    );
     usage.additional_rate_limits.push(reserve);
     usage
         .additional_rate_limits

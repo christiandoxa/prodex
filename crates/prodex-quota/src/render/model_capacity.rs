@@ -13,6 +13,7 @@ pub fn required_window_snapshot_for_pair_at(
 }
 
 pub const OPENAI_LUNA_MODEL: &str = "gpt-5.6-luna";
+pub const OPENAI_LUNA_RESERVE_MODEL: &str = "gpt-reserve";
 
 pub fn openai_model_is_luna(model: Option<&str>) -> bool {
     model.is_some_and(|model| matches!(normalized_identifier(model).as_str(), "luna" | "gpt56luna"))
@@ -44,6 +45,7 @@ pub fn openai_quota_runtime_window_pair_for_model<'a>(
     }
     if openai_model_is_luna(model)
         && !openai_quota_has_ready_regular_limit(usage)
+        && openai_usage_advertises_luna_reserve(usage)
         && let Some(reserve) = usage
             .additional_rate_limits
             .iter()
@@ -75,11 +77,12 @@ pub fn openai_quota_has_ready_limit_for_model(usage: &UsageResponse, model: Opti
 }
 
 pub fn openai_quota_has_ready_luna_reserve(usage: &UsageResponse) -> bool {
-    usage.additional_rate_limits.iter().any(|additional| {
-        additional_rate_limit_is_luna_reserve(additional)
-            && super::additional_rate_limit_is_usable(additional)
-            && window_pair_has_ready_limit(&additional.rate_limit)
-    })
+    openai_usage_advertises_luna_reserve(usage)
+        && usage.additional_rate_limits.iter().any(|additional| {
+            additional_rate_limit_is_luna_reserve(additional)
+                && super::additional_rate_limit_is_usable(additional)
+                && window_pair_has_ready_limit(&additional.rate_limit)
+        })
 }
 
 pub fn openai_quota_has_ready_regular_limit(usage: &UsageResponse) -> bool {
@@ -90,9 +93,7 @@ pub fn openai_quota_has_ready_regular_limit(usage: &UsageResponse) -> bool {
 }
 
 pub fn additional_rate_limit_is_luna_reserve(additional: &super::AdditionalRateLimit) -> bool {
-    if let Some(model) = additional_rate_limit_model_slug(additional)
-        && !openai_model_is_luna(Some(model))
-    {
+    if additional_rate_limit_model_slug(additional) != Some(OPENAI_LUNA_MODEL) {
         return false;
     }
     [
@@ -102,7 +103,68 @@ pub fn additional_rate_limit_is_luna_reserve(additional: &super::AdditionalRateL
     ]
     .into_iter()
     .flatten()
-    .any(is_luna_reserve_identifier)
+    .any(|value| {
+        value.eq_ignore_ascii_case(OPENAI_LUNA_RESERVE_MODEL) || is_luna_reserve_identifier(value)
+    })
+}
+
+pub fn openai_effective_model_for_usage(
+    usage: &UsageResponse,
+    requested_model: Option<&str>,
+    authenticated_account_id: Option<&str>,
+    fetched_for_authenticated_account: bool,
+) -> Option<&'static str> {
+    if requested_model != Some(OPENAI_LUNA_MODEL)
+        || usage.rate_limit.as_ref()?.allowed != Some(false)
+        || !openai_usage_account_matches(
+            usage,
+            authenticated_account_id,
+            fetched_for_authenticated_account,
+        )
+        || !openai_quota_has_ready_luna_reserve(usage)
+    {
+        return None;
+    }
+    Some(OPENAI_LUNA_RESERVE_MODEL)
+}
+
+fn openai_usage_advertises_luna_reserve(usage: &UsageResponse) -> bool {
+    usage
+        .rate_limit
+        .as_ref()
+        .and_then(|pair| {
+            pair.extra
+                .get("rateLimitUpsell")
+                .or_else(|| pair.extra.get("rate_limit_upsell"))
+        })
+        .and_then(serde_json::Value::as_object)
+        .and_then(|upsell| {
+            upsell
+                .get("banner_type")
+                .or_else(|| upsell.get("bannerType"))
+        })
+        .and_then(serde_json::Value::as_str)
+        .is_some_and(|banner| banner.eq_ignore_ascii_case("luna_reserve"))
+}
+
+fn openai_usage_account_matches(
+    usage: &UsageResponse,
+    authenticated_account_id: Option<&str>,
+    fetched_for_authenticated_account: bool,
+) -> bool {
+    let authenticated_account_id = authenticated_account_id.filter(|id| !id.is_empty());
+    let response_account_id = usage.rate_limit.as_ref().and_then(|pair| {
+        ["accountId", "account_id"].into_iter().find_map(|key| {
+            pair.extra
+                .get(key)
+                .and_then(serde_json::Value::as_str)
+                .filter(|id| !id.is_empty())
+        })
+    });
+    match response_account_id {
+        Some(response_account_id) => authenticated_account_id == Some(response_account_id),
+        None => fetched_for_authenticated_account && authenticated_account_id.is_some(),
+    }
 }
 
 pub(crate) fn additional_rate_limit_model_slug(
