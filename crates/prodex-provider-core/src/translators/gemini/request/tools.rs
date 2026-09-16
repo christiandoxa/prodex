@@ -220,37 +220,16 @@ pub(crate) fn gemini_function_declaration_from_openai_tool(tool: &Value) -> Opti
 
 #[cfg(feature = "mojo")]
 pub(crate) fn gemini_tool_config_from_request(value: &Value) -> Option<Value> {
-    let tool_choice = value.get("tool_choice")?;
-    let (mode, name) = if tool_choice.as_str() == Some("auto") {
-        return None;
-    } else if tool_choice.as_str() == Some("none") {
-        ("NONE", None)
-    } else if tool_choice.as_str() == Some("required") {
-        ("ANY", None)
-    } else {
-        let name = tool_choice
-            .get("function")
-            .and_then(|function| function.get("name"))
-            .and_then(Value::as_str)
-            .or_else(|| tool_choice.get("name").and_then(Value::as_str))?;
-        ("ANY", Some(name))
-    };
-    let mode = serde_json::to_vec(mode).expect("Gemini tool mode serializes");
-    let name = name.map(|name| serde_json::to_vec(name).expect("Gemini tool name serializes"));
-    Some(
-        crate::translators::gemini::request_contents::gemini_request_content_mojo_value(
-            prodex_mojo_core::provider_constraints::GeminiRequestContentOperation::ToolConfig,
-            Some(&mode),
-            name.as_deref(),
-            None,
-            None,
-            0,
-        ),
-    )
+    crate::gemini_provider_core_tool_config_from_request(value)
 }
 
 #[cfg(not(feature = "mojo"))]
 pub(crate) fn gemini_tool_config_from_request(value: &Value) -> Option<Value> {
+    gemini_tool_config_from_request_oracle(value)
+}
+
+#[cfg(any(not(feature = "mojo"), test))]
+fn gemini_tool_config_from_request_oracle(value: &Value) -> Option<Value> {
     let tool_choice = value.get("tool_choice")?;
     if tool_choice.as_str() == Some("auto") {
         return None;
@@ -280,4 +259,29 @@ pub(crate) fn gemini_tool_config_from_request(value: &Value) -> Option<Value> {
             "allowedFunctionNames": [name],
         }
     }))
+}
+
+#[cfg(all(test, feature = "mojo"))]
+mod mojo_tool_config_tests {
+    use super::{gemini_tool_config_from_request, gemini_tool_config_from_request_oracle};
+    use serde_json::json;
+
+    #[test]
+    fn tool_choice_mapping_matches_rust_oracle() {
+        for request in [
+            json!({}),
+            json!({"tool_choice": null}),
+            json!({"tool_choice": "auto"}),
+            json!({"tool_choice": "none"}),
+            json!({"tool_choice": "required"}),
+            json!({"tool_choice": {"name": "検索🙂"}}),
+            json!({"tool_choice": {"function": {"name": "検索🙂"}}}),
+            json!({"tool_choice": {"function": {"name": ""}}}),
+        ] {
+            assert_eq!(
+                gemini_tool_config_from_request(&request),
+                gemini_tool_config_from_request_oracle(&request),
+            );
+        }
+    }
 }

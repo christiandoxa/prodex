@@ -38,31 +38,7 @@ pub fn gemini_provider_core_sanitize_function_schema(
 pub fn gemini_provider_core_tool_config_from_request(
     value: &serde_json::Value,
 ) -> Option<serde_json::Value> {
-    let tool_choice = value.get("tool_choice")?;
-    let (mode, name) = if tool_choice.as_str() == Some("auto") {
-        return None;
-    } else if tool_choice.as_str() == Some("none") {
-        ("NONE", None)
-    } else if tool_choice.as_str() == Some("required") {
-        ("ANY", None)
-    } else {
-        let name = tool_choice
-            .get("function")
-            .and_then(|function| function.get("name"))
-            .and_then(serde_json::Value::as_str)
-            .or_else(|| tool_choice.get("name").and_then(serde_json::Value::as_str))?;
-        ("ANY", Some(name))
-    };
-    let mode = serde_json::to_vec(mode).expect("Gemini tool mode serializes");
-    let name = name.map(|name| serde_json::to_vec(name).expect("Gemini tool name serializes"));
-    Some(super::request_contents::gemini_request_content_value(
-        prodex_mojo_core::provider_constraints::GeminiRequestContentOperation::ToolConfig,
-        Some(&mode),
-        name.as_deref(),
-        None,
-        None,
-        0,
-    ))
+    super::request_contents::gemini_bridge_request_tool_config(value)
 }
 
 #[cfg(not(feature = "mojo"))]
