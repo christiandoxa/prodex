@@ -78,7 +78,9 @@ fn additional_rate_limit_preserves_admission_and_future_fields() {
 #[test]
 fn app_server_rate_limits_payload_keeps_regular_and_reserve_buckets_separate() {
     let usage: UsageResponse = serde_json::from_value(serde_json::json!({
+        "accountId": "acct-luna",
         "ordinaryUsageAllowed": false,
+        "rateLimitUpsell": { "banner_type": "luna_reserve" },
         "rateLimitsByLimitId": {
             "codex": {
                 "limitId": "codex",
@@ -96,7 +98,7 @@ fn app_server_rate_limits_payload_keeps_regular_and_reserve_buckets_separate() {
             },
             "base_model_inference": {
                 "limitId": "base_model_inference",
-                "limitName": "gpt-luna-reserve",
+                "limitName": "gpt-reserve",
                 "normalModelSlug": "gpt-5.6-luna",
                 "primary": {
                     "usedPercent": 0,
@@ -128,7 +130,7 @@ fn app_server_rate_limits_payload_keeps_regular_and_reserve_buckets_separate() {
         .iter()
         .find(|additional| additional.limit_id.as_deref() == Some("base_model_inference"))
         .expect("reserve bucket");
-    assert_eq!(reserve.limit_name.as_deref(), Some("gpt-luna-reserve"));
+    assert_eq!(reserve.limit_name.as_deref(), Some("gpt-reserve"));
     assert_eq!(
         reserve.extra.get("normalModelSlug"),
         Some(&serde_json::json!("gpt-5.6-luna"))
@@ -142,6 +144,51 @@ fn app_server_rate_limits_payload_keeps_regular_and_reserve_buckets_separate() {
         &usage,
         Some("gpt-5.6-luna")
     ));
+    assert_eq!(
+        openai_effective_model_for_usage(&usage, Some("gpt-5.6-luna"), Some("acct-luna"), true,),
+        Some("gpt-reserve")
+    );
+    let mut without_banner = usage.clone();
+    without_banner
+        .rate_limit
+        .as_mut()
+        .unwrap()
+        .extra
+        .remove("rateLimitUpsell");
+    assert_eq!(
+        openai_effective_model_for_usage(
+            &without_banner,
+            Some("gpt-5.6-luna"),
+            Some("acct-luna"),
+            true,
+        ),
+        None
+    );
+    let mut ordinary_allowed = usage.clone();
+    ordinary_allowed.rate_limit.as_mut().unwrap().allowed = Some(true);
+    assert_eq!(
+        openai_effective_model_for_usage(
+            &ordinary_allowed,
+            Some("gpt-5.6-luna"),
+            Some("acct-luna"),
+            true,
+        ),
+        None
+    );
+    let mut exhausted = usage.clone();
+    exhausted.additional_rate_limits[0].limit_reached = Some(true);
+    assert_eq!(
+        openai_effective_model_for_usage(&exhausted, Some("gpt-5.6-luna"), Some("acct-luna"), true,),
+        None
+    );
+    assert_eq!(
+        openai_effective_model_for_usage(&usage, Some("gpt-5.6-sol"), Some("acct-luna"), true,),
+        None
+    );
+    assert_eq!(
+        openai_effective_model_for_usage(&usage, Some("gpt-5.6-luna"), Some("acct-other"), true,),
+        None
+    );
     assert!(!openai_quota_has_ready_limit_for_model(
         &usage,
         Some("gpt-luna-reserve")

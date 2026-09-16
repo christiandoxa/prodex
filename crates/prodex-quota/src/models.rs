@@ -267,6 +267,16 @@ impl<'de> Deserialize<'de> for UsageResponse {
             })
             .map(|(_, pair)| pair.clone());
         let mut rate_limit = indexed_main.or(raw.rate_limit).or(raw.rate_limits);
+        let reserve_upsell = raw
+            .extra
+            .get("rateLimitUpsell")
+            .or_else(|| raw.extra.get("rate_limit_upsell"))
+            .cloned();
+        let response_account_id = raw
+            .extra
+            .get("accountId")
+            .or_else(|| raw.extra.get("account_id"))
+            .cloned();
         let backend_blocked = raw
             .rate_limit_reached_type
             .as_ref()
@@ -287,6 +297,12 @@ impl<'de> Deserialize<'de> for UsageResponse {
             }
             if backend_blocked {
                 pair.allowed = Some(false);
+            }
+            if let Some(value) = reserve_upsell {
+                pair.extra.insert("rateLimitUpsell".to_string(), value);
+            }
+            if let Some(value) = response_account_id {
+                pair.extra.insert("accountId".to_string(), value);
             }
         }
         let plan_type = raw.plan_type.or_else(|| {

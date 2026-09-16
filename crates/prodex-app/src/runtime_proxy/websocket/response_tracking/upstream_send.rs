@@ -5,8 +5,9 @@ use super::{
     RuntimeProxyRequest, RuntimeRotationProxyShared, RuntimeRouteKind, RuntimeUpstreamWebSocket,
     RuntimeWebsocketAttempt, RuntimeWebsocketSessionState,
     apply_runtime_presidio_redaction_to_websocket_text, note_runtime_profile_transport_failure,
-    prepare_runtime_smart_context_websocket_text, runtime_proxy_log, runtime_proxy_log_field,
-    runtime_proxy_structured_log_message, runtime_websocket_error_log_value,
+    prepare_runtime_smart_context_websocket_text, rewrite_runtime_luna_reserve_model_if_authorized,
+    runtime_proxy_log, runtime_proxy_log_field, runtime_proxy_structured_log_message,
+    runtime_websocket_error_log_value,
 };
 use crate::runtime_proxy::log_runtime_upstream_payload_snapshot;
 
@@ -18,6 +19,7 @@ pub(super) struct RuntimeWebsocketUpstreamSendRequest<'a, 'socket> {
     pub(super) websocket_session: &'a mut RuntimeWebsocketSessionState,
     pub(super) profile_name: &'a str,
     pub(super) reuse_existing_session: bool,
+    pub(super) reserve_rewrite_allowed: bool,
     pub(super) precommit_transport_retry_allowed: bool,
     pub(super) upstream_socket: &'socket mut RuntimeUpstreamWebSocket,
 }
@@ -33,6 +35,7 @@ pub(super) fn send_runtime_websocket_upstream_request(
         websocket_session,
         profile_name,
         reuse_existing_session,
+        reserve_rewrite_allowed,
         precommit_transport_retry_allowed,
         upstream_socket,
     } = request;
@@ -44,13 +47,22 @@ pub(super) fn send_runtime_websocket_upstream_request(
         false,
         None,
     )?;
-    let upstream_request_text = prepare_runtime_smart_context_websocket_text(
+    let mut upstream_request_text = prepare_runtime_smart_context_websocket_text(
         request_id,
         inspected.text.as_ref(),
         handshake_request,
         shared,
         profile_name,
     )?;
+    if let Some(reserve_body) = rewrite_runtime_luna_reserve_model_if_authorized(
+        shared,
+        profile_name,
+        None,
+        upstream_request_text.as_bytes(),
+        reserve_rewrite_allowed,
+    )? {
+        upstream_request_text = std::borrow::Cow::Owned(String::from_utf8(reserve_body)?);
+    }
     log_runtime_upstream_payload_snapshot(
         shared,
         request_id,

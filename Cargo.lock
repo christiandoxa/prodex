@@ -3370,6 +3370,7 @@ dependencies = [
  "prodex-runtime-state",
  "prodex-shared-types",
  "prodex-state",
+ "serde_json",
 ]
 
 [[package]]

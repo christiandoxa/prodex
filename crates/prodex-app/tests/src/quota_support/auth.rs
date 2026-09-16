@@ -193,6 +193,7 @@ fn usage_request_retries_one_transient_disconnect() {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let address = listener.local_addr().unwrap();
     let server = thread::spawn(move || {
+        let mut requests = Vec::new();
         for attempt in 0..2 {
             let (mut stream, _) = listener.accept().unwrap();
             let mut request = Vec::new();
@@ -204,6 +205,7 @@ fn usage_request_retries_one_transient_disconnect() {
                 }
                 request.extend_from_slice(&buffer[..read]);
             }
+            requests.push(String::from_utf8(request).unwrap());
             if attempt == 0 {
                 let _ = stream.shutdown(Shutdown::Both);
                 continue;
@@ -217,6 +219,7 @@ fn usage_request_retries_one_transient_disconnect() {
             .unwrap();
             stream.write_all(body).unwrap();
         }
+        requests
     });
     let client = Client::builder()
         .no_proxy()
@@ -241,7 +244,12 @@ fn usage_request_retries_one_transient_disconnect() {
     .unwrap();
 
     assert_eq!(body, br#"{"ok":true}"#);
-    server.join().unwrap();
+    let requests = server.join().unwrap();
+    assert!(requests.iter().all(|request| {
+        request
+            .lines()
+            .any(|line| line.eq_ignore_ascii_case("x-openai-codex-luna-reserve: 1"))
+    }));
 }
 
 #[test]

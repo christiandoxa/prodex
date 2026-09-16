@@ -27,5 +27,8 @@ prodex_shared_types = { workspace = true }
 prodex_state = { workspace = true }
 runtime_proxy_crate = { workspace = true }
 
+[dev-dependencies]
+serde_json = { workspace = true }
+
 [lints]
 workspace = true
