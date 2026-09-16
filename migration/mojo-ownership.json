@@ -26,6 +26,9 @@
     "critical_signal_line_classification": {
       "expanded_in": "0.420.0"
     },
+    "critical_signal_range_planning": {
+      "mojo_source": "mojo/prodex_core/context_critical_signal.mojo"
+    },
     "log_event_classification": {
       "production_reachability_test": "crates/prodex-app/src/app_commands/log_event_source.rs",
       "expanded_in": "0.427.0"
@@ -729,7 +732,7 @@
       "baseline_state": "authoritative",
       "final_state": "authoritative",
       "mojo_entry": "prodex_context_lost_line_ranges_batch",
-      "mojo_source": "mojo/prodex_core/context_critical_signal.mojo",
+      "mojo_source": "mojo/prodex_core/context.mojo",
       "consumer": "crates/prodex-context/src/critical_signal.rs",
       "consumer_marker": "prodex_mojo_core::context::lost_line_ranges_batch",
       "production_reachability_test": "crates/prodex-context/tests/src/lib/mojo_rich.rs",
