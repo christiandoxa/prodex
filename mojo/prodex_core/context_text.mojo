@@ -4959,3 +4959,275 @@ def prodex_context_classify_noisy_success_line_v1(
     if bounds[1] > bounds[0]:
         output[] = context_success_label(view.ptr.unsafe_value(), bounds[0], bounds[1])
     return 0
+
+# Watcher/log delta classification stays allocation-free in Mojo. Rust owns only
+# the ordered map/set assembly used to present the bounded summary.
+comptime CONTEXT_WATCHER_MARKER_NONE: Int64 = 0
+comptime CONTEXT_WATCHER_MARKER_GH_RUN: Int64 = 1
+comptime CONTEXT_WATCHER_MARKER_WATCH: Int64 = 2
+comptime CONTEXT_WATCHER_MARKER_LOG_TAIL: Int64 = 3
+comptime CONTEXT_WATCHER_STATE_NONE: Int64 = 0
+comptime CONTEXT_WATCHER_STATE_FAILURE: Int64 = 1
+comptime CONTEXT_WATCHER_STATE_CANCELLED: Int64 = 2
+comptime CONTEXT_WATCHER_STATE_SKIPPED: Int64 = 3
+comptime CONTEXT_WATCHER_STATE_SUCCESS: Int64 = 4
+comptime CONTEXT_WATCHER_STATE_QUEUED: Int64 = 5
+comptime CONTEXT_WATCHER_STATE_RUNNING: Int64 = 6
+
+
+def context_watcher_generated_header(
+    ptr: Pointer[mut=False, UInt8, _], start: Int64, end: Int64
+) -> Bool:
+    return (
+        context_text_ascii_starts_at["pcs:"](ptr, start, end)
+        or context_text_ascii_starts_at["# prodex context saver:"](ptr, start, end)
+        or context_text_ascii_starts_at["sum:"](ptr, start, end)
+        or context_text_ascii_starts_at["rust/cargo summary:"](ptr, start, end)
+        or context_text_ascii_starts_at["diagnostic summary:"](ptr, start, end)
+        or context_text_ascii_starts_at["success output summary:"](ptr, start, end)
+        or context_text_ascii_starts_at["command output summary:"](ptr, start, end)
+        or context_text_ascii_starts_at["baseline compaction:"](ptr, start, end)
+        or context_text_ascii_starts_at["base:"](ptr, start, end)
+        or context_text_ascii_starts_at["intent matches:"](ptr, start, end)
+        or context_text_ascii_starts_at["int:"](ptr, start, end)
+        or context_text_ascii_starts_at["diagnostics ("](ptr, start, end)
+        or context_text_ascii_starts_at["locations ("](ptr, start, end)
+        or context_text_ascii_starts_at["failed tests ("](ptr, start, end)
+        or context_text_ascii_starts_at["exit statuses ("](ptr, start, end)
+        or context_text_ascii_starts_at["key lines ("](ptr, start, end)
+        or context_text_ascii_starts_at["critical blocks:"](ptr, start, end)
+    )
+
+
+def context_watcher_marker(
+    ptr: Pointer[mut=False, UInt8, _], start: Int64, end: Int64
+) -> Int64:
+    if (
+        context_text_ascii_contains["refreshing run status"](ptr, start, end)
+        or context_text_ascii_contains["gh run watch"](ptr, start, end)
+        or context_text_ascii_contains["view this run in github"](ptr, start, end)
+    ):
+        return CONTEXT_WATCHER_MARKER_GH_RUN
+    if (
+        context_text_ascii_contains["press ctrl+c to quit"](ptr, start, end)
+        or context_text_ascii_contains["watch usage"](ptr, start, end)
+        or context_text_ascii_contains["watch mode"](ptr, start, end)
+        or context_text_ascii_contains["watching for file changes"](ptr, start, end)
+        or context_text_ascii_contains["waiting for file changes"](ptr, start, end)
+        or context_text_ascii_contains["rerun when files change"](ptr, start, end)
+    ):
+        return CONTEXT_WATCHER_MARKER_WATCH
+    if (
+        context_text_ascii_starts_at["==> "](ptr, start, end)
+        and context_text_ascii_find[" <=="](ptr, start, end) == end - 4
+        or context_text_ascii_contains["tailing "](ptr, start, end)
+        or context_text_ascii_contains["following logs"](ptr, start, end)
+    ):
+        return CONTEXT_WATCHER_MARKER_LOG_TAIL
+    return CONTEXT_WATCHER_MARKER_NONE
+
+
+def context_watcher_failure(
+    ptr: Pointer[mut=False, UInt8, _], start: Int64, end: Int64
+) -> Bool:
+    var semantics = context_output_line_semantics(ptr, end)
+    if semantics.flags & CONTEXT_OUTPUT_FAILURE != 0:
+        return True
+    return (
+        context_text_ascii_contains[" conclusion: failure"](ptr, start, end)
+        or context_text_ascii_contains[" status: failure"](ptr, start, end)
+        or context_text_ascii_contains["failure after "](ptr, start, end)
+        or context_text_ascii_contains["failed with exit code"](ptr, start, end)
+        or context_text_ascii_contains["completed with exit code"](ptr, start, end)
+        or context_text_ascii_contains["exited with code"](ptr, start, end)
+        or end - start >= 2
+        and ptr[unsafe_offset=start] == 88
+        and ptr[unsafe_offset=start + 1] == 32
+        or end - start >= 2
+        and context_metadata_lower(ptr[unsafe_offset=start]) == 120
+        and context_text_ascii_contains[" failed"](ptr, start, end)
+    )
+
+
+def context_watcher_state(
+    ptr: Pointer[mut=False, UInt8, _], start: Int64, end: Int64
+) -> Int64:
+    if start >= end or context_watcher_generated_header(ptr, start, end):
+        return CONTEXT_WATCHER_STATE_NONE
+    if context_watcher_failure(ptr, start, end):
+        return CONTEXT_WATCHER_STATE_FAILURE
+    if (
+        context_text_ascii_contains["cancelled"](ptr, start, end)
+        or context_text_ascii_contains["canceled"](ptr, start, end)
+    ):
+        return CONTEXT_WATCHER_STATE_CANCELLED
+    if (
+        context_text_ascii_contains["skipped"](ptr, start, end)
+        or context_text_ascii_contains["neutral"](ptr, start, end)
+    ):
+        return CONTEXT_WATCHER_STATE_SKIPPED
+    var starts_check = (
+        end - start >= 3
+        and ptr[unsafe_offset=start] == 0xE2
+        and ptr[unsafe_offset=start + 1] == 0x9C
+        and ptr[unsafe_offset=start + 2] == 0x93
+    )
+    if (
+        starts_check
+        or context_text_ascii_contains[" succeeded"](ptr, start, end)
+        or context_text_ascii_contains[" success"](ptr, start, end)
+        or context_text_ascii_contains[" successful"](ptr, start, end)
+        or context_text_ascii_contains[" passed"](ptr, start, end)
+        or end - start >= 3
+        and context_text_ascii_starts_at[" ok"](ptr, end - 3, end)
+    ):
+        return CONTEXT_WATCHER_STATE_SUCCESS
+    if (
+        context_text_ascii_contains["queued"](ptr, start, end)
+        or context_text_ascii_contains["pending"](ptr, start, end)
+        or context_text_ascii_contains["waiting"](ptr, start, end)
+        or end - start >= 2
+        and ptr[unsafe_offset=start] == 45
+        and ptr[unsafe_offset=start + 1] == 32
+    ):
+        return CONTEXT_WATCHER_STATE_QUEUED
+    if (
+        context_text_ascii_contains["in_progress"](ptr, start, end)
+        or context_text_ascii_contains["in progress"](ptr, start, end)
+        or context_text_ascii_contains[" running"](ptr, start, end)
+        or context_text_ascii_starts_at["running "](ptr, start, end)
+        or end - start >= 2
+        and ptr[unsafe_offset=start] == 42
+        and ptr[unsafe_offset=start + 1] == 32
+    ):
+        return CONTEXT_WATCHER_STATE_RUNNING
+    return CONTEXT_WATCHER_STATE_NONE
+
+
+def context_watcher_key(
+    ptr: Pointer[mut=False, UInt8, _],
+    start: Int64,
+    end: Int64,
+    output: Pointer[mut=True, UInt8, _],
+    capacity: Int64,
+) -> Int64:
+    if end - start < 6 or context_watcher_generated_header(ptr, start, end):
+        return -1
+    var letters: Int64 = 0
+    for index in range(start, end):
+        var value = context_metadata_lower(ptr[unsafe_offset=index])
+        if value >= 97 and value <= 122:
+            letters += 1
+    if letters < 3:
+        return -1
+    var written: Int64 = 0
+    var previous_space = False
+    var previous_hash = False
+    for index in range(start, end):
+        var value = context_metadata_lower(ptr[unsafe_offset=index])
+        if value >= 48 and value <= 57:
+            if not previous_hash:
+                if written >= capacity:
+                    return -2
+                output[unsafe_offset=written] = 35
+                written += 1
+            previous_hash = True
+            previous_space = False
+        else:
+            previous_hash = False
+            if (
+                value >= 97
+                and value <= 122
+                or value == 95
+                or value == 45
+                or value == 47
+                or value == 46
+                or value == 58
+            ):
+                if written >= capacity:
+                    return -2
+                output[unsafe_offset=written] = value
+                written += 1
+                previous_space = False
+            elif not previous_space and written > 0:
+                if written >= capacity:
+                    return -2
+                output[unsafe_offset=written] = 32
+                written += 1
+                previous_space = True
+    while written > 0 and output[unsafe_offset=written - 1] == 32:
+        written -= 1
+    if written < 6:
+        return -1
+    return written
+
+
+@export("prodex_context_watcher_line_semantics_v1")
+def prodex_context_watcher_line_semantics_v1(
+    abi_version: Int64,
+    line: Pointer[mut=False, ProdexStringView, _],
+    key_output: Pointer[mut=True, UInt8, _],
+    key_capacity: Int64,
+    output: Pointer[mut=True, Int64, _],
+    output_count: Int64,
+) abi("C") -> Int64:
+    if abi_version != CONTEXT_TEXT_ABI_VERSION:
+        return 4
+    if key_capacity < 0 or output_count != 4:
+        return 1
+    var view = line[].copy()
+    if not context_text_view_is_valid(view):
+        return 2
+    var ptr = view.ptr.unsafe_value()
+    var bounds = context_text_trim_bounds(ptr, 0, Int64(view.len))
+    var start = bounds[0]
+    var end = bounds[1]
+    output[unsafe_offset=0] = context_watcher_marker(ptr, start, end)
+    output[unsafe_offset=1] = context_watcher_state(ptr, start, end)
+    output[unsafe_offset=2] = 1 if context_watcher_failure(ptr, start, end) else 0
+    output[unsafe_offset=3] = context_watcher_key(ptr, start, end, key_output, key_capacity)
+    return 0
+
+
+@export("prodex_context_watcher_should_compact_v1")
+def prodex_context_watcher_should_compact_v1(
+    abi_version: Int64,
+    kind: Int64,
+    line_count: Int64,
+    max_lines: Int64,
+    marker_count: Int64,
+    duplicate_keys: Int64,
+    state_lines: Int64,
+    failure_lines: Int64,
+    output: Pointer[mut=True, Int64, _],
+) abi("C") -> Int64:
+    if abi_version != CONTEXT_TEXT_ABI_VERSION:
+        return 4
+    if (
+        kind < 0
+        or kind > 10
+        or line_count < 0
+        or max_lines < 0
+        or marker_count < 0
+        or duplicate_keys < 0
+        or state_lines < 0
+        or failure_lines < 0
+    ):
+        return 1
+    # Git status/diff/log/search/file-list cannot use watcher compaction.
+    if kind == 1 or kind == 2 or kind == 5 or kind == 6 or kind == 7:
+        output[] = 0
+        return 0
+    var budget_floor = max_lines if max_lines > 24 else 24
+    var over_budget = line_count > budget_floor
+    if marker_count > 0:
+        output[] = 1 if (
+            over_budget or state_lines >= 6 or duplicate_keys >= 6 or failure_lines > 0
+        ) else 0
+        return 0
+    # Noisy-success mode deliberately does not steal generic success compaction.
+    if kind == 9:
+        output[] = 0
+        return 0
+    output[] = 1 if over_budget and state_lines >= 16 and duplicate_keys >= 8 else 0
+    return 0
