@@ -159,13 +159,32 @@ impl fmt::Debug for AuditRetentionPlan {
 }
 
 impl AuditRetentionPlan {
+    #[cfg(any(test, not(feature = "mojo")))]
     const MILLIS_PER_DAY: u64 = 86_400_000;
 
     pub fn new(scope: AuditQueryScope, policy: AuditRetentionPolicy, now: AuditTimestamp) -> Self {
         Self { scope, policy, now }
     }
 
+    #[cfg(feature = "mojo")]
     pub fn cutoff(self) -> AuditTimestamp {
+        let cutoff = prodex_mojo_core::policy::audit_retention_cutoff(
+            self.now.unix_ms(),
+            self.policy.days(),
+            AuditEvent::MIN_UNIX_MS,
+        )
+        .expect("Mojo audit retention cutoff returned invalid output");
+        AuditTimestamp { unix_ms: cutoff }
+    }
+
+    #[cfg(not(feature = "mojo"))]
+    pub fn cutoff(self) -> AuditTimestamp {
+        self.cutoff_rust()
+    }
+
+    #[cfg(any(test, not(feature = "mojo")))]
+    #[cfg_attr(all(test, feature = "mojo"), allow(dead_code))]
+    fn cutoff_rust(self) -> AuditTimestamp {
         let retention_ms = u64::from(self.policy.days()) * Self::MILLIS_PER_DAY;
         let cutoff = self
             .now
@@ -181,6 +200,14 @@ impl AuditRetentionPlan {
             .map_err(AuditRetentionPlanError::Scope)?;
         let occurred_at = AuditTimestamp::new(event.occurred_at_unix_ms)
             .map_err(AuditRetentionPlanError::Timestamp)?;
+        #[cfg(feature = "mojo")]
+        return Ok(prodex_mojo_core::policy::audit_event_is_expired(
+            occurred_at.unix_ms(),
+            self.cutoff().unix_ms(),
+        )
+        .expect("Mojo audit retention predicate returned invalid output"));
+
+        #[cfg(not(feature = "mojo"))]
         Ok(occurred_at.unix_ms() < self.cutoff().unix_ms())
     }
 
@@ -465,7 +492,23 @@ impl AuditRetentionHold {
         }
     }
 
+    #[cfg(feature = "mojo")]
     pub fn is_active(&self, now: AuditTimestamp) -> bool {
+        prodex_mojo_core::policy::audit_hold_is_active(
+            self.expires_at.map(AuditTimestamp::unix_ms),
+            now.unix_ms(),
+        )
+        .expect("Mojo audit retention hold predicate returned invalid output")
+    }
+
+    #[cfg(not(feature = "mojo"))]
+    pub fn is_active(&self, now: AuditTimestamp) -> bool {
+        self.is_active_rust(now)
+    }
+
+    #[cfg(any(test, not(feature = "mojo")))]
+    #[cfg_attr(all(test, feature = "mojo"), allow(dead_code))]
+    fn is_active_rust(&self, now: AuditTimestamp) -> bool {
         self.expires_at
             .is_none_or(|expires_at| now.unix_ms() <= expires_at.unix_ms())
     }

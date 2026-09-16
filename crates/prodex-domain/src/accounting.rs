@@ -41,6 +41,22 @@ impl UsageAmount {
     }
 
     pub fn checked_add(self, other: Self) -> Option<Self> {
+        #[cfg(feature = "mojo")]
+        {
+            let result = prodex_mojo_core::policy::accounting_operation(
+                prodex_mojo_core::policy::ACCOUNTING_USAGE_ADD,
+                &[
+                    self.tokens,
+                    self.cost_micros,
+                    other.tokens,
+                    other.cost_micros,
+                ],
+            )
+            .ok()?;
+            (result.result_code == 0).then(|| Self::new(result.values[0], result.values[1]))
+        }
+
+        #[cfg(not(feature = "mojo"))]
         Some(Self {
             tokens: self.tokens.checked_add(other.tokens)?,
             cost_micros: self.cost_micros.checked_add(other.cost_micros)?,
@@ -48,6 +64,22 @@ impl UsageAmount {
     }
 
     pub fn saturating_sub(self, other: Self) -> Self {
+        #[cfg(feature = "mojo")]
+        {
+            let result = prodex_mojo_core::policy::accounting_operation(
+                prodex_mojo_core::policy::ACCOUNTING_USAGE_SATURATING_SUB,
+                &[
+                    self.tokens,
+                    self.cost_micros,
+                    other.tokens,
+                    other.cost_micros,
+                ],
+            )
+            .expect("Mojo accounting subtraction returned invalid output");
+            Self::new(result.values[0], result.values[1])
+        }
+
+        #[cfg(not(feature = "mojo"))]
         Self {
             tokens: self.tokens.saturating_sub(other.tokens),
             cost_micros: self.cost_micros.saturating_sub(other.cost_micros),
@@ -55,7 +87,25 @@ impl UsageAmount {
     }
 
     pub fn exceeds(self, limit: Self) -> bool {
-        self.tokens > limit.tokens || self.cost_micros > limit.cost_micros
+        #[cfg(feature = "mojo")]
+        {
+            let result = prodex_mojo_core::policy::accounting_operation(
+                prodex_mojo_core::policy::ACCOUNTING_USAGE_EXCEEDS,
+                &[
+                    self.tokens,
+                    self.cost_micros,
+                    limit.tokens,
+                    limit.cost_micros,
+                ],
+            )
+            .expect("Mojo accounting comparison returned invalid output");
+            result.result_code == 0 && result.values[0] == 1
+        }
+
+        #[cfg(not(feature = "mojo"))]
+        {
+            self.tokens > limit.tokens || self.cost_micros > limit.cost_micros
+        }
     }
 }
 
@@ -80,6 +130,24 @@ impl BudgetSnapshot {
     }
 
     pub fn available(self, limit: BudgetLimit) -> UsageAmount {
+        #[cfg(feature = "mojo")]
+        {
+            let result = prodex_mojo_core::policy::accounting_operation(
+                prodex_mojo_core::policy::ACCOUNTING_SNAPSHOT_AVAILABLE,
+                &[
+                    self.reserved.tokens,
+                    self.reserved.cost_micros,
+                    self.committed.tokens,
+                    self.committed.cost_micros,
+                    limit.max.tokens,
+                    limit.max.cost_micros,
+                ],
+            )
+            .expect("Mojo accounting availability returned invalid output");
+            UsageAmount::new(result.values[0], result.values[1])
+        }
+
+        #[cfg(not(feature = "mojo"))]
         match self.total_held() {
             Some(held) => limit.max.saturating_sub(held),
             None => UsageAmount::ZERO,
@@ -130,7 +198,49 @@ impl fmt::Debug for ReservationRecord {
 }
 
 impl ReservationRecord {
+    #[cfg(feature = "mojo")]
     pub fn from_request(
+        request: ReservationRequest,
+        created_at_unix_ms: u64,
+        ttl_ms: u64,
+    ) -> Result<Self, ReservationRecoveryError> {
+        let result = prodex_mojo_core::policy::accounting_operation(
+            prodex_mojo_core::policy::ACCOUNTING_RECORD,
+            &[
+                created_at_unix_ms,
+                ttl_ms,
+                request.estimate.tokens,
+                request.estimate.cost_micros,
+            ],
+        )
+        .expect("Mojo reservation record planner returned invalid output");
+        match result.result_code {
+            0 => Ok(Self {
+                tenant_id: request.tenant_id,
+                call_id: request.call_id,
+                reservation_id: request.reservation_id,
+                reserved: request.estimate,
+                created_at_unix_ms,
+                expires_at_unix_ms: result.values[0],
+            }),
+            1 => Err(ReservationRecoveryError::ZeroTtl),
+            2 => Err(ReservationRecoveryError::ZeroReserved),
+            _ => Err(ReservationRecoveryError::ExpiryOverflow),
+        }
+    }
+
+    #[cfg(not(feature = "mojo"))]
+    pub fn from_request(
+        request: ReservationRequest,
+        created_at_unix_ms: u64,
+        ttl_ms: u64,
+    ) -> Result<Self, ReservationRecoveryError> {
+        Self::from_request_rust(request, created_at_unix_ms, ttl_ms)
+    }
+
+    #[cfg(any(test, not(feature = "mojo")))]
+    #[cfg_attr(all(test, feature = "mojo"), allow(dead_code))]
+    fn from_request_rust(
         request: ReservationRequest,
         created_at_unix_ms: u64,
         ttl_ms: u64,
@@ -154,6 +264,17 @@ impl ReservationRecord {
         })
     }
 
+    #[cfg(feature = "mojo")]
+    pub fn is_expired_at(&self, now_unix_ms: u64) -> bool {
+        let result = prodex_mojo_core::policy::accounting_operation(
+            prodex_mojo_core::policy::ACCOUNTING_IS_EXPIRED,
+            &[now_unix_ms, self.expires_at_unix_ms],
+        )
+        .expect("Mojo reservation expiry predicate returned invalid output");
+        result.values[0] == 1
+    }
+
+    #[cfg(not(feature = "mojo"))]
     pub fn is_expired_at(&self, now_unix_ms: u64) -> bool {
         now_unix_ms >= self.expires_at_unix_ms
     }

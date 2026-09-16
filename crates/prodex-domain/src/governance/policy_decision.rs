@@ -5,15 +5,18 @@ use std::fmt;
 
 use serde::Serialize;
 
-use crate::{
-    CapabilitySet, CredentialScope, ModelCapability, PolicyRevisionId, Principal, PrincipalKind,
-    Role, TenantContext,
-};
+use crate::{CapabilitySet, CredentialScope, PolicyRevisionId, Principal, TenantContext};
 
 use super::{DataClassification, FindingKind, InspectionCoverage};
 
 mod compiled_policy;
+mod condition;
 mod principal_attributes;
+pub use compiled_policy::{
+    CompiledGovernancePolicy, GovernancePolicyArtifact, GovernancePolicyRule,
+    compile_governance_policy,
+};
+pub use condition::PolicyRuleCondition;
 pub use principal_attributes::{MAX_POLICY_PRINCIPAL_GROUPS, PrincipalPolicyAttributes};
 
 pub const MAX_GOVERNANCE_POLICY_RULES: usize = 256;
@@ -398,411 +401,6 @@ fn policy_obligation_safe_debug(obligation: &GovernanceObligation) -> &'static s
     }
 }
 
-#[derive(Clone, Default, PartialEq, Eq)]
-pub struct PolicyRuleCondition {
-    pub channel: Option<Channel>,
-    pub principal_kind: Option<PrincipalKind>,
-    pub team_id: Option<PolicySelector>,
-    pub project_id: Option<PolicySelector>,
-    pub user_id: Option<PolicySelector>,
-    pub group_id: Option<PolicySelector>,
-    pub department_id: Option<PolicySelector>,
-    pub minimum_role: Option<Role>,
-    pub credential_scope: Option<CredentialScope>,
-    pub action: Option<GovernedAction>,
-    pub route: Option<CanonicalRoute>,
-    pub minimum_classification: Option<DataClassification>,
-    pub inspection_coverage: Option<InspectionCoverage>,
-    pub minimum_request_risk: Option<RequestRisk>,
-    pub network_zone: Option<NetworkZone>,
-    pub maximum_session_age_seconds: Option<u64>,
-    pub maximum_session_idle_seconds: Option<u64>,
-    pub session_revoked: Option<bool>,
-    pub session_mfa_satisfied: Option<bool>,
-    pub minimum_session_retained_classification: Option<DataClassification>,
-    pub minimum_authentication_strength: Option<u8>,
-    pub environment_mfa_satisfied: Option<bool>,
-    pub requested_capability: Option<ModelCapability>,
-    pub requested_model: Option<PolicySelector>,
-    pub requested_tool: Option<PolicySelector>,
-    pub requested_modality: Option<DataModality>,
-    pub break_glass_required: Option<bool>,
-    pub break_glass_scope: Option<PolicySelector>,
-    pub quota_has_headroom: Option<bool>,
-    pub quota_reservation_required: Option<bool>,
-}
-
-impl PolicyRuleCondition {
-    fn matches(&self, input: &PolicyInput<'_>) -> bool {
-        self.channel.is_none_or(|value| value == input.channel)
-            && self
-                .principal_kind
-                .is_none_or(|value| value == input.principal.kind)
-            && self.team_id.as_ref().is_none_or(|selector| {
-                input
-                    .principal_attributes
-                    .team_id()
-                    .is_some_and(|value| selector_matches(selector, value))
-            })
-            && self.project_id.as_ref().is_none_or(|selector| {
-                input
-                    .principal_attributes
-                    .project_id()
-                    .is_some_and(|value| selector_matches(selector, value))
-            })
-            && self.user_id.as_ref().is_none_or(|selector| {
-                input
-                    .principal_attributes
-                    .user_id()
-                    .is_some_and(|value| selector_matches(selector, value))
-            })
-            && self.group_id.as_ref().is_none_or(|selector| {
-                input
-                    .principal_attributes
-                    .group_ids()
-                    .any(|value| selector_matches(selector, value))
-            })
-            && self.department_id.as_ref().is_none_or(|selector| {
-                input
-                    .principal_attributes
-                    .department_id()
-                    .is_some_and(|value| selector_matches(selector, value))
-            })
-            && self
-                .minimum_role
-                .is_none_or(|value| input.principal.role >= value)
-            && self
-                .credential_scope
-                .is_none_or(|value| value == input.credential_scope)
-            && self.action.is_none_or(|value| value == input.action)
-            && self.route.as_ref().is_none_or(|value| value == input.route)
-            && self
-                .minimum_classification
-                .is_none_or(|value| input.data.classification >= value)
-            && self
-                .inspection_coverage
-                .is_none_or(|value| value == input.data.inspection_coverage)
-            && self
-                .minimum_request_risk
-                .is_none_or(|value| input.request_risk >= value)
-            && self
-                .network_zone
-                .is_none_or(|value| value == input.environment.network_zone)
-            && self
-                .maximum_session_age_seconds
-                .is_none_or(|value| input.session.age_seconds <= value)
-            && self
-                .maximum_session_idle_seconds
-                .is_none_or(|value| input.session.idle_seconds <= value)
-            && self
-                .session_revoked
-                .is_none_or(|value| value == input.session.revoked)
-            && self
-                .session_mfa_satisfied
-                .is_none_or(|value| value == input.session.mfa_satisfied)
-            && self
-                .minimum_session_retained_classification
-                .is_none_or(|value| input.session.retained_classification >= value)
-            && self
-                .minimum_authentication_strength
-                .is_none_or(|value| input.environment.authentication_strength >= value)
-            && self
-                .environment_mfa_satisfied
-                .is_none_or(|value| value == input.environment.mfa_satisfied)
-            && self
-                .requested_capability
-                .is_none_or(|value| input.requested_capabilities.contains(value))
-            && self.requested_model.as_ref().is_none_or(|selector| {
-                input
-                    .request_attributes
-                    .requested_model()
-                    .is_some_and(|value| selector_matches(selector, value))
-            })
-            && self.requested_tool.as_ref().is_none_or(|selector| {
-                input
-                    .request_attributes
-                    .requested_tools()
-                    .any(|value| selector_matches(selector, value))
-            })
-            && self.requested_modality.is_none_or(|modality| {
-                input
-                    .request_attributes
-                    .requested_modalities()
-                    .contains(&modality)
-            })
-            && self.break_glass_required.is_none_or(|required| {
-                input.request_attributes.valid_break_glass().is_some() == required
-            })
-            && self.break_glass_scope.as_ref().is_none_or(|selector| {
-                input
-                    .request_attributes
-                    .valid_break_glass()
-                    .is_some_and(|grant| selector_matches(selector, grant.scope.as_str()))
-            })
-            && self
-                .quota_has_headroom
-                .is_none_or(|value| value == input.quota.has_headroom)
-            && self
-                .quota_reservation_required
-                .is_none_or(|value| value == input.quota.reservation_required)
-    }
-}
-
-fn selector_matches(selector: &PolicySelector, value: &str) -> bool {
-    selector.as_str() == "*" || selector.as_str() == value
-}
-
-impl fmt::Debug for PolicyRuleCondition {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("PolicyRuleCondition")
-            .field("channel", &self.channel)
-            .field("principal_kind", &self.principal_kind)
-            .field("team_id", &self.team_id.as_ref().map(|_| "<redacted>"))
-            .field(
-                "project_id",
-                &self.project_id.as_ref().map(|_| "<redacted>"),
-            )
-            .field("user_id", &self.user_id.as_ref().map(|_| "<redacted>"))
-            .field("group_id", &self.group_id.as_ref().map(|_| "<redacted>"))
-            .field(
-                "department_id",
-                &self.department_id.as_ref().map(|_| "<redacted>"),
-            )
-            .field("minimum_role", &self.minimum_role)
-            .field("credential_scope", &self.credential_scope)
-            .field("action", &self.action)
-            .field("route", &self.route.as_ref().map(|_| "<redacted>"))
-            .field("minimum_classification", &self.minimum_classification)
-            .field("inspection_coverage", &self.inspection_coverage)
-            .field("minimum_request_risk", &self.minimum_request_risk)
-            .field("network_zone", &self.network_zone)
-            .field(
-                "maximum_session_age_seconds",
-                &self.maximum_session_age_seconds,
-            )
-            .field(
-                "maximum_session_idle_seconds",
-                &self.maximum_session_idle_seconds,
-            )
-            .field("session_revoked", &self.session_revoked)
-            .field("session_mfa_satisfied", &self.session_mfa_satisfied)
-            .field(
-                "minimum_session_retained_classification",
-                &self.minimum_session_retained_classification,
-            )
-            .field(
-                "minimum_authentication_strength",
-                &self.minimum_authentication_strength,
-            )
-            .field("environment_mfa_satisfied", &self.environment_mfa_satisfied)
-            .field("requested_capability", &self.requested_capability)
-            .field(
-                "requested_model",
-                &self.requested_model.as_ref().map(|_| "<redacted>"),
-            )
-            .field(
-                "requested_tool",
-                &self.requested_tool.as_ref().map(|_| "<redacted>"),
-            )
-            .field("requested_modality", &self.requested_modality)
-            .field("break_glass_required", &self.break_glass_required)
-            .field(
-                "break_glass_scope",
-                &self.break_glass_scope.as_ref().map(|_| "<redacted>"),
-            )
-            .field("quota_has_headroom", &self.quota_has_headroom)
-            .field(
-                "quota_reservation_required",
-                &self.quota_reservation_required,
-            )
-            .finish()
-    }
-}
-
-#[derive(Clone, PartialEq, Eq)]
-pub struct GovernancePolicyRule {
-    pub id: GovernancePolicyRuleId,
-    pub condition: PolicyRuleCondition,
-    pub effect: PolicyEffect,
-    pub obligations: Vec<GovernanceObligation>,
-    pub reason_code: PolicyReasonCode,
-}
-
-#[derive(Clone, PartialEq, Eq)]
-pub struct GovernancePolicyArtifact {
-    pub revision: PolicyRevisionId,
-    pub valid_until_unix_ms: u64,
-    pub default_effect: PolicyEffect,
-    pub rules: Vec<GovernancePolicyRule>,
-}
-
-#[derive(Clone, PartialEq, Eq)]
-pub struct CompiledGovernancePolicy {
-    revision: PolicyRevisionId,
-    valid_until_unix_ms: u64,
-    default_effect: PolicyEffect,
-    rules: Vec<GovernancePolicyRule>,
-}
-
-pub fn compile_governance_policy(
-    mut artifact: GovernancePolicyArtifact,
-) -> Result<CompiledGovernancePolicy, GovernancePolicyError> {
-    if artifact.rules.len() > MAX_GOVERNANCE_POLICY_RULES {
-        return Err(GovernancePolicyError::RuleLimitExceeded);
-    }
-    if artifact.valid_until_unix_ms == 0 {
-        return Err(GovernancePolicyError::InvalidExpiry);
-    }
-    artifact.rules.sort_by(|left, right| left.id.cmp(&right.id));
-    if artifact
-        .rules
-        .windows(2)
-        .any(|rules| rules[0].id == rules[1].id)
-    {
-        return Err(GovernancePolicyError::DuplicateRule);
-    }
-    for rule in &mut artifact.rules {
-        if rule.obligations.len() > MAX_POLICY_OBLIGATIONS {
-            return Err(GovernancePolicyError::ObligationLimitExceeded);
-        }
-        if rule.effect == PolicyEffect::Deny && !rule.obligations.is_empty() {
-            return Err(GovernancePolicyError::DenyRuleHasObligations);
-        }
-        rule.obligations.sort();
-        rule.obligations.dedup();
-    }
-    validate_governance_obligation_conflicts(&artifact.rules)?;
-    Ok(CompiledGovernancePolicy {
-        revision: artifact.revision,
-        valid_until_unix_ms: artifact.valid_until_unix_ms,
-        default_effect: artifact.default_effect,
-        rules: artifact.rules,
-    })
-}
-
-fn validate_governance_obligation_conflicts(
-    rules: &[GovernancePolicyRule],
-) -> Result<(), GovernancePolicyError> {
-    for (index, rule) in rules.iter().enumerate() {
-        if rule
-            .obligations
-            .iter()
-            .any(governance_obligation_bound_is_invalid)
-        {
-            return Err(GovernancePolicyError::ConflictingObligations);
-        }
-        for (left_index, left) in rule.obligations.iter().enumerate() {
-            if rule.obligations[left_index + 1..]
-                .iter()
-                .any(|right| governance_obligations_conflict(left, right))
-            {
-                return Err(GovernancePolicyError::ConflictingObligations);
-            }
-        }
-        for prior in &rules[..index] {
-            if policy_rule_conditions_overlap(&rule.condition, &prior.condition)
-                && rule.obligations.iter().any(|left| {
-                    prior
-                        .obligations
-                        .iter()
-                        .any(|right| governance_obligations_conflict(left, right))
-                })
-            {
-                return Err(GovernancePolicyError::ConflictingObligations);
-            }
-        }
-    }
-    Ok(())
-}
-
-fn governance_obligation_bound_is_invalid(obligation: &GovernanceObligation) -> bool {
-    matches!(
-        obligation,
-        GovernanceObligation::MaxInputTokens(0)
-            | GovernanceObligation::MaxOutputTokens(0)
-            | GovernanceObligation::MaxContextTokens(0)
-            | GovernanceObligation::SessionIdleTimeoutSeconds(0)
-            | GovernanceObligation::SessionAbsoluteTimeoutSeconds(0)
-            | GovernanceObligation::MinimumAuthenticationStrength(0)
-    )
-}
-
-fn governance_obligations_conflict(
-    left: &GovernanceObligation,
-    right: &GovernanceObligation,
-) -> bool {
-    use GovernanceObligation::{
-        AllowProvider, AllowTool, DenyProvider, DisableTools, MaxContextTokens, MaxInputTokens,
-        MaxOutputTokens, ProhibitRetention, RequireRegion, RetentionSeconds,
-    };
-
-    match (left, right) {
-        (AllowProvider(allowed), DenyProvider(denied))
-        | (DenyProvider(denied), AllowProvider(allowed)) => {
-            denied.as_str() == "*" || allowed == denied
-        }
-        (RequireRegion(left), RequireRegion(right)) => {
-            left.as_str() != "*" && right.as_str() != "*" && left != right
-        }
-        (ProhibitRetention, RetentionSeconds(seconds))
-        | (RetentionSeconds(seconds), ProhibitRetention) => *seconds != 0,
-        (DisableTools, AllowTool(_)) | (AllowTool(_), DisableTools) => true,
-        (MaxInputTokens(limit), MaxContextTokens(context))
-        | (MaxContextTokens(context), MaxInputTokens(limit))
-        | (MaxOutputTokens(limit), MaxContextTokens(context))
-        | (MaxContextTokens(context), MaxOutputTokens(limit)) => limit > context,
-        _ => false,
-    }
-}
-
-fn policy_rule_conditions_overlap(left: &PolicyRuleCondition, right: &PolicyRuleCondition) -> bool {
-    optional_policy_attributes_overlap(&left.channel, &right.channel)
-        && optional_policy_attributes_overlap(&left.principal_kind, &right.principal_kind)
-        && policy_selectors_overlap(&left.team_id, &right.team_id)
-        && policy_selectors_overlap(&left.project_id, &right.project_id)
-        && policy_selectors_overlap(&left.user_id, &right.user_id)
-        && policy_selectors_overlap(&left.department_id, &right.department_id)
-        && optional_policy_attributes_overlap(&left.credential_scope, &right.credential_scope)
-        && optional_policy_attributes_overlap(&left.action, &right.action)
-        && optional_policy_attributes_overlap(&left.route, &right.route)
-        && optional_policy_attributes_overlap(&left.inspection_coverage, &right.inspection_coverage)
-        && optional_policy_attributes_overlap(&left.network_zone, &right.network_zone)
-        && optional_policy_attributes_overlap(&left.session_revoked, &right.session_revoked)
-        && optional_policy_attributes_overlap(
-            &left.session_mfa_satisfied,
-            &right.session_mfa_satisfied,
-        )
-        && optional_policy_attributes_overlap(
-            &left.environment_mfa_satisfied,
-            &right.environment_mfa_satisfied,
-        )
-        && policy_selectors_overlap(&left.requested_model, &right.requested_model)
-        && policy_selectors_overlap(&left.requested_tool, &right.requested_tool)
-        && optional_policy_attributes_overlap(&left.requested_modality, &right.requested_modality)
-        && optional_policy_attributes_overlap(
-            &left.break_glass_required,
-            &right.break_glass_required,
-        )
-        && policy_selectors_overlap(&left.break_glass_scope, &right.break_glass_scope)
-        && optional_policy_attributes_overlap(&left.quota_has_headroom, &right.quota_has_headroom)
-        && optional_policy_attributes_overlap(
-            &left.quota_reservation_required,
-            &right.quota_reservation_required,
-        )
-}
-
-fn policy_selectors_overlap(left: &Option<PolicySelector>, right: &Option<PolicySelector>) -> bool {
-    !matches!(
-        (left, right),
-        (Some(left), Some(right))
-            if left.as_str() != "*" && right.as_str() != "*" && left != right
-    )
-}
-
-fn optional_policy_attributes_overlap<T: PartialEq>(left: &Option<T>, right: &Option<T>) -> bool {
-    !matches!((left, right), (Some(left), Some(right)) if left != right)
-}
-
 #[derive(Clone, PartialEq, Eq)]
 pub struct PolicyDecision {
     pub effect: PolicyEffect,
@@ -843,20 +441,24 @@ pub fn evaluate_governance_policy(
         });
     }
 
-    let mut effect = PolicyEffect::Allow;
+    let rule_matches = policy
+        .rules
+        .iter()
+        .map(|rule| (rule.condition.matches(input), rule.effect))
+        .collect::<Vec<_>>();
+    let (effect, matched) = governance_policy_decision_plan(&rule_matches, policy.default_effect);
     let mut obligations = Vec::new();
     let mut reasons = Vec::new();
     for rule in policy
         .rules
         .iter()
-        .filter(|rule| rule.condition.matches(input))
+        .zip(&matched)
+        .filter_map(|(rule, matched)| matched.then_some(rule))
     {
-        effect = effect.max(rule.effect);
         obligations.extend(rule.obligations.iter().cloned());
         reasons.push(rule.reason_code.clone());
     }
-    if reasons.is_empty() {
-        effect = policy.default_effect;
+    if !matched.iter().any(|matched| *matched) {
         reasons.push(PolicyReasonCode::new("policy.default")?);
     }
     obligations.sort();
@@ -881,7 +483,117 @@ pub fn evaluate_governance_policy(
     })
 }
 
+#[cfg(feature = "mojo")]
+fn governance_policy_decision_plan(
+    rules: &[(bool, PolicyEffect)],
+    default_effect: PolicyEffect,
+) -> (PolicyEffect, Vec<bool>) {
+    let rules = rules
+        .iter()
+        .map(|(matched, effect)| (*matched, *effect as i64))
+        .collect::<Vec<_>>();
+    let (effect, matched) =
+        prodex_mojo_core::policy::governance_policy_decision_plan(&rules, default_effect as i64)
+            .expect("Mojo governance policy decision plan returned invalid output");
+    (policy_effect_from_i64(effect), matched)
+}
+
+#[cfg(not(feature = "mojo"))]
+fn governance_policy_decision_plan(
+    rules: &[(bool, PolicyEffect)],
+    default_effect: PolicyEffect,
+) -> (PolicyEffect, Vec<bool>) {
+    governance_policy_decision_plan_rust(rules, default_effect)
+}
+
+#[cfg(any(test, not(feature = "mojo")))]
+fn governance_policy_decision_plan_rust(
+    rules: &[(bool, PolicyEffect)],
+    default_effect: PolicyEffect,
+) -> (PolicyEffect, Vec<bool>) {
+    let matched = rules
+        .iter()
+        .map(|(matched, _)| *matched)
+        .collect::<Vec<_>>();
+    let effects = rules
+        .iter()
+        .filter_map(|(matched, effect)| matched.then_some(*effect))
+        .collect::<Vec<_>>();
+    (
+        governance_policy_effect_rust(&effects, default_effect),
+        matched,
+    )
+}
+
+#[cfg(feature = "mojo")]
+fn policy_effect_from_i64(effect: i64) -> PolicyEffect {
+    match effect {
+        0 => PolicyEffect::Allow,
+        1 => PolicyEffect::RequireApproval,
+        2 => PolicyEffect::Deny,
+        _ => unreachable!("validated Mojo governance policy effect"),
+    }
+}
+
+#[cfg(any(test, not(feature = "mojo")))]
+#[cfg_attr(all(test, feature = "mojo"), allow(dead_code))]
+fn governance_policy_effect_rust(
+    effects: &[PolicyEffect],
+    default_effect: PolicyEffect,
+) -> PolicyEffect {
+    effects.iter().copied().max().unwrap_or(default_effect)
+}
+
+#[cfg(feature = "mojo")]
 fn policy_required_attributes_present(
+    policy: &CompiledGovernancePolicy,
+    input: &PolicyInput<'_>,
+) -> bool {
+    let available_mask = u64::from(input.principal_attributes.team_id().is_some())
+        | u64::from(input.principal_attributes.project_id().is_some()) << 1
+        | u64::from(input.principal_attributes.user_id().is_some()) << 2
+        | u64::from(input.principal_attributes.group_ids().next().is_some()) << 3
+        | u64::from(input.principal_attributes.department_id().is_some()) << 4
+        | u64::from(input.request_attributes.requested_model().is_some()) << 5
+        | u64::from(input.request_attributes.requested_tools().next().is_some()) << 6
+        | u64::from(!input.request_attributes.requested_modalities().is_empty()) << 7
+        | u64::from(input.request_attributes.valid_break_glass().is_some()) << 8;
+    let required_masks = policy
+        .rules
+        .iter()
+        .map(|rule| {
+            u64::from(rule.condition.team_id.is_some())
+                | u64::from(rule.condition.project_id.is_some()) << 1
+                | u64::from(rule.condition.user_id.is_some()) << 2
+                | u64::from(rule.condition.group_id.is_some()) << 3
+                | u64::from(rule.condition.department_id.is_some()) << 4
+                | u64::from(rule.condition.requested_model.is_some()) << 5
+                | u64::from(rule.condition.requested_tool.is_some()) << 6
+                | u64::from(rule.condition.requested_modality.is_some()) << 7
+                | u64::from(
+                    rule.condition.break_glass_scope.is_some()
+                        || rule.condition.break_glass_required == Some(true),
+                ) << 8
+        })
+        .collect::<Vec<_>>();
+    prodex_mojo_core::policy::governance_required_attributes_present(
+        &required_masks,
+        available_mask,
+    )
+    .expect("Mojo governance required-attribute predicate returned invalid output")
+}
+
+#[cfg(not(feature = "mojo"))]
+fn policy_required_attributes_present(
+    policy: &CompiledGovernancePolicy,
+    input: &PolicyInput<'_>,
+) -> bool {
+    policy_required_attributes_present_rust(policy, input)
+}
+
+#[cfg(any(test, not(feature = "mojo")))]
+#[cfg_attr(all(test, feature = "mojo"), allow(dead_code))]
+fn policy_required_attributes_present_rust(
     policy: &CompiledGovernancePolicy,
     input: &PolicyInput<'_>,
 ) -> bool {
@@ -927,3 +639,155 @@ impl fmt::Display for GovernancePolicyError {
 }
 
 impl Error for GovernancePolicyError {}
+
+#[cfg(all(test, feature = "mojo"))]
+mod governance_predicate_tests {
+    use super::*;
+    use super::{
+        compiled_policy::{
+            policy_rule_conditions_overlap, policy_rule_conditions_overlap_rust,
+            validate_governance_policy_shape, validate_governance_policy_shape_rust,
+        },
+        condition::{selector_matches, selector_matches_rust},
+    };
+
+    #[test]
+    fn mojo_selector_predicates_match_rust_oracle() {
+        for (selector, value) in [("*", "model-a"), ("model-a", "model-a"), ("model-a", "*")] {
+            let selector = PolicySelector::new(selector).expect("valid test selector");
+            assert_eq!(
+                selector_matches(&selector, value),
+                selector_matches_rust(&selector, value)
+            );
+        }
+    }
+
+    #[test]
+    fn mojo_condition_overlap_matches_rust_oracle() {
+        let wildcard = PolicySelector::new("*").expect("valid wildcard");
+        let exact = PolicySelector::new("team-a").expect("valid selector");
+        let cases = [
+            (
+                PolicyRuleCondition::default(),
+                PolicyRuleCondition::default(),
+            ),
+            (
+                PolicyRuleCondition {
+                    channel: Some(Channel::Api),
+                    ..PolicyRuleCondition::default()
+                },
+                PolicyRuleCondition {
+                    channel: Some(Channel::Cli),
+                    ..PolicyRuleCondition::default()
+                },
+            ),
+            (
+                PolicyRuleCondition {
+                    team_id: Some(wildcard),
+                    ..PolicyRuleCondition::default()
+                },
+                PolicyRuleCondition {
+                    team_id: Some(exact),
+                    ..PolicyRuleCondition::default()
+                },
+            ),
+            (
+                PolicyRuleCondition {
+                    route: Some(CanonicalRoute::new("route-a").expect("valid route")),
+                    ..PolicyRuleCondition::default()
+                },
+                PolicyRuleCondition {
+                    route: Some(CanonicalRoute::new("route-b").expect("valid route")),
+                    ..PolicyRuleCondition::default()
+                },
+            ),
+        ];
+        for (left, right) in cases {
+            assert_eq!(
+                policy_rule_conditions_overlap(&left, &right),
+                policy_rule_conditions_overlap_rust(&left, &right)
+            );
+        }
+    }
+
+    #[test]
+    fn mojo_policy_shape_matches_rust_oracle() {
+        let rule = |id: &str, effect, obligations| GovernancePolicyRule {
+            id: GovernancePolicyRuleId::new(id).expect("valid rule id"),
+            condition: PolicyRuleCondition::default(),
+            effect,
+            obligations,
+            reason_code: PolicyReasonCode::new("policy.test").expect("valid reason"),
+        };
+        let mut cases = vec![
+            (1, vec![rule("a", PolicyEffect::Allow, Vec::new())]),
+            (0, Vec::new()),
+            (
+                1,
+                vec![
+                    rule("a", PolicyEffect::Allow, Vec::new()),
+                    rule("a", PolicyEffect::Allow, Vec::new()),
+                ],
+            ),
+            (
+                1,
+                vec![rule(
+                    "a",
+                    PolicyEffect::Deny,
+                    vec![GovernanceObligation::RequireMfa],
+                )],
+            ),
+            (
+                1,
+                vec![
+                    rule(
+                        "a",
+                        PolicyEffect::Deny,
+                        vec![GovernanceObligation::RequireMfa],
+                    ),
+                    rule("a", PolicyEffect::Allow, Vec::new()),
+                ],
+            ),
+            (
+                1,
+                vec![rule(
+                    "a",
+                    PolicyEffect::Allow,
+                    vec![GovernanceObligation::RequireMfa; MAX_POLICY_OBLIGATIONS + 1],
+                )],
+            ),
+        ];
+        cases.push((
+            1,
+            (0..=MAX_GOVERNANCE_POLICY_RULES)
+                .map(|index| rule(&format!("rule-{index}"), PolicyEffect::Allow, Vec::new()))
+                .collect(),
+        ));
+        for (valid_until_unix_ms, rules) in cases {
+            assert_eq!(
+                validate_governance_policy_shape(valid_until_unix_ms, &rules),
+                validate_governance_policy_shape_rust(valid_until_unix_ms, &rules)
+            );
+        }
+    }
+
+    #[test]
+    fn mojo_policy_decision_plan_matches_rust_oracle() {
+        for (rules, default_effect) in [
+            (Vec::new(), PolicyEffect::Deny),
+            (
+                vec![
+                    (true, PolicyEffect::Allow),
+                    (false, PolicyEffect::Deny),
+                    (true, PolicyEffect::RequireApproval),
+                ],
+                PolicyEffect::Deny,
+            ),
+        ] {
+            assert_eq!(
+                governance_policy_decision_plan(&rules, default_effect),
+                governance_policy_decision_plan_rust(&rules, default_effect)
+            );
+        }
+    }
+}
