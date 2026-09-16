@@ -137,6 +137,8 @@ pub mod context;
 pub mod control_plane_routing;
 #[cfg(feature = "mojo-rich")]
 pub mod log;
+#[cfg(feature = "mojo-observability")]
+pub mod observability;
 #[cfg(feature = "mojo-runtime")]
 pub mod policy;
 #[cfg(feature = "mojo-provider-constraints")]

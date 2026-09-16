@@ -17,12 +17,14 @@ mojo-runtime = []
 mojo-routing = []
 mojo-provider-constraints = []
 mojo-rich = []
+mojo-observability = []
 mojo-core = [
     "mojo-quota",
     "mojo-runtime",
     "mojo-routing",
     "mojo-provider-constraints",
     "mojo-rich",
+    "mojo-observability",
 ]
 
 [lints]

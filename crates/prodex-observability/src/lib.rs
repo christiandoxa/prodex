@@ -13,6 +13,8 @@ mod accounting;
 mod api;
 mod audit;
 mod configuration;
+#[cfg(feature = "mojo")]
+mod mojo;
 mod operations;
 mod provider;
 mod runtime;

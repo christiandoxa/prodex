@@ -151,35 +151,82 @@ pub fn plan_trace_propagation_metric(
     carrier: TracePropagationCarrier,
     result: TracePropagationResult,
 ) -> Result<TracePropagationMetricPlan, TelemetryAttributeError> {
-    let carrier_label =
-        TelemetryAttribute::metric_label("trace_carrier", trace_propagation_carrier_label(carrier));
+    let carrier_label = TelemetryAttribute::metric_label(
+        {
+            #[cfg(feature = "mojo")]
+            {
+                crate::mojo::label_key(145)
+            }
+            #[cfg(not(feature = "mojo"))]
+            {
+                "trace_carrier"
+            }
+        },
+        trace_propagation_carrier_label(carrier),
+    );
     let result_label = TelemetryAttribute::metric_label(
-        "trace_propagation_result",
+        {
+            #[cfg(feature = "mojo")]
+            {
+                crate::mojo::label_key(146)
+            }
+            #[cfg(not(feature = "mojo"))]
+            {
+                "trace_propagation_result"
+            }
+        },
         trace_propagation_result_label(result),
     );
     carrier_label.as_metric_label()?;
     result_label.as_metric_label()?;
     Ok(TracePropagationMetricPlan {
-        metric_name: "prodex_trace_propagation_events_total",
+        metric_name: {
+            #[cfg(feature = "mojo")]
+            {
+                crate::mojo::metric_name(75, 0)
+            }
+            #[cfg(not(feature = "mojo"))]
+            {
+                "prodex_trace_propagation_events_total"
+            }
+        },
         increment: 1,
         carrier_label,
         result_label,
     })
 }
 
-fn trace_propagation_carrier_label(carrier: TracePropagationCarrier) -> &'static str {
-    match carrier {
-        TracePropagationCarrier::Traceparent => "traceparent",
-        TracePropagationCarrier::Tracestate => "tracestate",
-        TracePropagationCarrier::Baggage => "baggage",
+fn trace_propagation_carrier_label(carrier: TracePropagationCarrier) -> String {
+    #[cfg(feature = "mojo")]
+    {
+        prodex_mojo_core::observability::label(135, carrier as i64)
+            .expect("Mojo observability label planner returned invalid output")
+    }
+    #[cfg(not(feature = "mojo"))]
+    {
+        (match carrier {
+            TracePropagationCarrier::Traceparent => "traceparent",
+            TracePropagationCarrier::Tracestate => "tracestate",
+            TracePropagationCarrier::Baggage => "baggage",
+        })
+        .to_string()
     }
 }
 
-fn trace_propagation_result_label(result: TracePropagationResult) -> &'static str {
-    match result {
-        TracePropagationResult::Propagated => "propagated",
-        TracePropagationResult::Rejected => "rejected",
-        TracePropagationResult::Missing => "missing",
+fn trace_propagation_result_label(result: TracePropagationResult) -> String {
+    #[cfg(feature = "mojo")]
+    {
+        prodex_mojo_core::observability::label(136, result as i64)
+            .expect("Mojo observability label planner returned invalid output")
+    }
+    #[cfg(not(feature = "mojo"))]
+    {
+        (match result {
+            TracePropagationResult::Propagated => "propagated",
+            TracePropagationResult::Rejected => "rejected",
+            TracePropagationResult::Missing => "missing",
+        })
+        .to_string()
     }
 }
 
