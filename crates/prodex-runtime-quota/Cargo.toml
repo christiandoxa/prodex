@@ -6,6 +6,9 @@ description = "Runtime quota adapter helpers for prodex"
 license.workspace = true
 repository.workspace = true
 
+[package.metadata.cargo-machete]
+ignored = ["serde_json"]
+
 [lib]
 name = "prodex_runtime_quota"
 path = "src/lib.rs"
