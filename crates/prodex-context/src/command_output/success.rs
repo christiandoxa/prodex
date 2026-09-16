@@ -281,7 +281,76 @@ fn command_success_output_success_like(
             .is_some_and(command_name_is_success_output_candidate)
 }
 
+fn command_success_flags(command: &str) -> i64 {
+    #[cfg(feature = "mojo")]
+    {
+        prodex_mojo_core::context::command_success_flags(command)
+            .unwrap_or_else(|error| panic!("Mojo success-command classification failed: {error:?}"))
+    }
+    #[cfg(not(feature = "mojo"))]
+    {
+        let mut flags = 0_i64;
+        if command_name_is_success_output_candidate_rust(command) {
+            flags |= prodex_mojo_core_compat::CONTEXT_COMMAND_SUCCESS_CANDIDATE;
+        }
+        if command_name_is_short_success_output_candidate_rust(command) {
+            flags |= prodex_mojo_core_compat::CONTEXT_COMMAND_SHORT_SUCCESS_CANDIDATE;
+        }
+        if command_name_is_path_relevant_success_output_rust(command) {
+            flags |= prodex_mojo_core_compat::CONTEXT_COMMAND_PATH_RELEVANT_SUCCESS;
+        }
+        flags
+    }
+}
+
+#[cfg(not(feature = "mojo"))]
+mod prodex_mojo_core_compat {
+    pub const CONTEXT_COMMAND_SUCCESS_CANDIDATE: i64 = 1;
+    pub const CONTEXT_COMMAND_SHORT_SUCCESS_CANDIDATE: i64 = 2;
+    pub const CONTEXT_COMMAND_PATH_RELEVANT_SUCCESS: i64 = 4;
+}
+
 fn command_name_is_success_output_candidate(command: &str) -> bool {
+    command_success_flags(command) & {
+        #[cfg(feature = "mojo")]
+        {
+            prodex_mojo_core::context::CONTEXT_COMMAND_SUCCESS_CANDIDATE
+        }
+        #[cfg(not(feature = "mojo"))]
+        {
+            prodex_mojo_core_compat::CONTEXT_COMMAND_SUCCESS_CANDIDATE
+        }
+    } != 0
+}
+
+fn command_name_is_short_success_output_candidate(command: &str) -> bool {
+    command_success_flags(command) & {
+        #[cfg(feature = "mojo")]
+        {
+            prodex_mojo_core::context::CONTEXT_COMMAND_SHORT_SUCCESS_CANDIDATE
+        }
+        #[cfg(not(feature = "mojo"))]
+        {
+            prodex_mojo_core_compat::CONTEXT_COMMAND_SHORT_SUCCESS_CANDIDATE
+        }
+    } != 0
+}
+
+fn command_name_is_path_relevant_success_output(command: &str) -> bool {
+    command_success_flags(command) & {
+        #[cfg(feature = "mojo")]
+        {
+            prodex_mojo_core::context::CONTEXT_COMMAND_PATH_RELEVANT_SUCCESS
+        }
+        #[cfg(not(feature = "mojo"))]
+        {
+            prodex_mojo_core_compat::CONTEXT_COMMAND_PATH_RELEVANT_SUCCESS
+        }
+    } != 0
+}
+
+#[cfg(any(not(feature = "mojo"), test))]
+fn command_name_is_success_output_candidate_rust(command: &str) -> bool {
     let tokens = command_metadata_tokens(command);
     for index in 0..tokens.len() {
         let command = command_metadata_token_command_name(&tokens[index]);
@@ -358,7 +427,8 @@ fn command_name_is_success_output_candidate(command: &str) -> bool {
     false
 }
 
-fn command_name_is_short_success_output_candidate(command: &str) -> bool {
+#[cfg(any(not(feature = "mojo"), test))]
+fn command_name_is_short_success_output_candidate_rust(command: &str) -> bool {
     if command.contains("&&") || command.contains(';') || command.contains('|') {
         return false;
     }
@@ -422,7 +492,8 @@ fn command_success_output_path_summary_useful(
             }))
 }
 
-fn command_name_is_path_relevant_success_output(command: &str) -> bool {
+#[cfg(any(not(feature = "mojo"), test))]
+fn command_name_is_path_relevant_success_output_rust(command: &str) -> bool {
     let tokens = command_metadata_tokens(command);
     for index in 0..tokens.len() {
         let command = command_metadata_token_command_name(&tokens[index]);
@@ -532,5 +603,50 @@ fn push_success_output_touched_files(
             "  [... {} more touched files ...]",
             paths.len() - limit
         ));
+    }
+}
+
+#[cfg(all(test, feature = "mojo"))]
+mod mojo_success_command_parity_tests {
+    use super::*;
+
+    #[test]
+    fn mojo_success_command_flags_match_rust_oracle() {
+        let cases = [
+            "cargo test --workspace",
+            "cargo clippy -p prodex-context",
+            "cargo fmt --all",
+            "go test ./...",
+            "go list ./...",
+            "docker build .",
+            "docker compose up",
+            "npm test",
+            "pnpm run test:unit",
+            "uv run pytest -q",
+            "./node_modules/.bin/tsc --noEmit",
+            "find crates -name '*.rs'",
+            "rg TODO crates",
+            "grep -R needle .",
+            "printf hello",
+            "cargo clippy && cargo test",
+            "vite | tee output.log",
+        ];
+        for command in cases {
+            assert_eq!(
+                command_name_is_success_output_candidate(command),
+                command_name_is_success_output_candidate_rust(command),
+                "success candidate mismatch for {command:?}",
+            );
+            assert_eq!(
+                command_name_is_short_success_output_candidate(command),
+                command_name_is_short_success_output_candidate_rust(command),
+                "short-success candidate mismatch for {command:?}",
+            );
+            assert_eq!(
+                command_name_is_path_relevant_success_output(command),
+                command_name_is_path_relevant_success_output_rust(command),
+                "path-relevant candidate mismatch for {command:?}",
+            );
+        }
     }
 }

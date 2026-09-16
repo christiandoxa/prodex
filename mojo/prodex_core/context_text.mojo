@@ -4437,6 +4437,213 @@ def prodex_context_classify_git_search_line_v1(
     return 0
 
 
+
+comptime CONTEXT_SUCCESS_CANDIDATE: Int64 = 1
+comptime CONTEXT_SHORT_SUCCESS_CANDIDATE: Int64 = 2
+comptime CONTEXT_PATH_RELEVANT_SUCCESS: Int64 = 4
+
+
+def context_metadata_command_is_success_candidate(
+    ptr: Pointer[mut=False, UInt8, _],
+    length: Int64,
+    start: Int64,
+    end: Int64,
+    next_cursor: Int64,
+) -> Bool:
+    if (
+        context_metadata_token_equals["cargo"](ptr, start, end)
+        or context_metadata_token_equals["npm"](ptr, start, end)
+        or context_metadata_token_equals["pnpm"](ptr, start, end)
+        or context_metadata_token_equals["yarn"](ptr, start, end)
+        or context_metadata_token_equals["bun"](ptr, start, end)
+        or context_metadata_token_equals["corepack"](ptr, start, end)
+        or context_metadata_token_equals["make"](ptr, start, end)
+        or context_metadata_token_equals["cmake"](ptr, start, end)
+        or context_metadata_token_equals["ninja"](ptr, start, end)
+        or context_metadata_token_equals["ls"](ptr, start, end)
+        or context_metadata_token_equals["find"](ptr, start, end)
+        or context_metadata_token_equals["tree"](ptr, start, end)
+        or context_metadata_token_equals["du"](ptr, start, end)
+        or context_metadata_token_equals["tar"](ptr, start, end)
+        or context_metadata_token_equals["unzip"](ptr, start, end)
+        or context_metadata_token_equals["pip"](ptr, start, end)
+        or context_metadata_token_equals["pip3"](ptr, start, end)
+        or context_metadata_token_equals["uv"](ptr, start, end)
+        or context_metadata_token_equals["pipenv"](ptr, start, end)
+        or context_metadata_token_equals["poetry"](ptr, start, end)
+        or context_metadata_token_equals["ruff"](ptr, start, end)
+        or context_metadata_token_equals["mypy"](ptr, start, end)
+        or context_metadata_token_equals["biome"](ptr, start, end)
+        or context_metadata_token_equals["oxlint"](ptr, start, end)
+        or context_metadata_token_equals["pytest"](ptr, start, end)
+        or context_metadata_token_equals["py.test"](ptr, start, end)
+        or context_metadata_token_equals["swift"](ptr, start, end)
+        or context_metadata_token_equals["zig"](ptr, start, end)
+        or context_metadata_token_equals["tsc"](ptr, start, end)
+        or context_metadata_token_equals["vitest"](ptr, start, end)
+        or context_metadata_token_equals["jest"](ptr, start, end)
+        or context_metadata_token_equals["eslint"](ptr, start, end)
+        or context_metadata_token_equals["prettier"](ptr, start, end)
+        or context_metadata_token_equals["vite"](ptr, start, end)
+        or context_metadata_token_equals["next"](ptr, start, end)
+        or context_metadata_token_equals["playwright"](ptr, start, end)
+        or context_metadata_token_equals["cypress"](ptr, start, end)
+        or context_metadata_token_equals["nyc"](ptr, start, end)
+        or context_metadata_token_equals["c8"](ptr, start, end)
+        or context_metadata_token_equals["mvn"](ptr, start, end)
+        or context_metadata_token_equals["mvnw"](ptr, start, end)
+        or context_metadata_token_equals["gradle"](ptr, start, end)
+        or context_metadata_token_equals["gradlew"](ptr, start, end)
+        or context_metadata_token_equals["bazel"](ptr, start, end)
+        or context_metadata_token_equals["bazelisk"](ptr, start, end)
+        or context_metadata_token_equals["nx"](ptr, start, end)
+        or context_metadata_token_equals["turbo"](ptr, start, end)
+        or context_metadata_token_equals["docker-compose"](ptr, start, end)
+        or context_metadata_token_ends_with["-tsc"](ptr, start, end)
+        or context_metadata_token_ends_with["_tsc"](ptr, start, end)
+    ):
+        return True
+    var subcommand = context_metadata_subcommand_after(ptr, length, next_cursor)
+    if context_metadata_token_equals["go"](ptr, start, end) and subcommand[0] >= 0:
+        return (
+            context_metadata_token_equals["test"](ptr, subcommand[0], subcommand[1])
+            or context_metadata_token_equals["build"](ptr, subcommand[0], subcommand[1])
+            or context_metadata_token_equals["vet"](ptr, subcommand[0], subcommand[1])
+            or context_metadata_token_equals["list"](ptr, subcommand[0], subcommand[1])
+        )
+    if context_metadata_token_equals["docker"](ptr, start, end) and subcommand[0] >= 0:
+        return (
+            context_metadata_token_equals["build"](ptr, subcommand[0], subcommand[1])
+            or context_metadata_token_equals["buildx"](ptr, subcommand[0], subcommand[1])
+            or context_metadata_token_equals["pull"](ptr, subcommand[0], subcommand[1])
+            or context_metadata_token_equals["compose"](ptr, subcommand[0], subcommand[1])
+        )
+    return False
+
+
+def context_metadata_command_is_short_success_candidate(
+    ptr: Pointer[mut=False, UInt8, _],
+    length: Int64,
+    start: Int64,
+    end: Int64,
+    next_cursor: Int64,
+) -> Bool:
+    if (
+        context_metadata_token_equals["tsc"](ptr, start, end)
+        or context_metadata_token_equals["vitest"](ptr, start, end)
+        or context_metadata_token_equals["jest"](ptr, start, end)
+        or context_metadata_token_equals["vite"](ptr, start, end)
+        or context_metadata_token_equals["next"](ptr, start, end)
+        or context_metadata_token_equals["playwright"](ptr, start, end)
+        or context_metadata_token_equals["cypress"](ptr, start, end)
+        or context_metadata_token_equals["biome"](ptr, start, end)
+        or context_metadata_token_equals["oxlint"](ptr, start, end)
+        or context_metadata_token_equals["pnpm"](ptr, start, end)
+        or context_metadata_token_ends_with["-tsc"](ptr, start, end)
+        or context_metadata_token_ends_with["_tsc"](ptr, start, end)
+        or context_metadata_token_equals["bun"](ptr, start, end)
+        or context_metadata_token_equals["swift"](ptr, start, end)
+        or context_metadata_token_equals["zig"](ptr, start, end)
+    ):
+        return True
+    var subcommand = context_metadata_subcommand_after(ptr, length, next_cursor)
+    if context_metadata_token_equals["cargo"](ptr, start, end) and subcommand[0] >= 0:
+        return (
+            context_metadata_token_equals["clippy"](ptr, subcommand[0], subcommand[1])
+            or context_metadata_token_equals["doc"](ptr, subcommand[0], subcommand[1])
+            or context_metadata_token_equals["fmt"](ptr, subcommand[0], subcommand[1])
+            or context_metadata_token_equals["fix"](ptr, subcommand[0], subcommand[1])
+            or context_metadata_token_equals["nextest"](ptr, subcommand[0], subcommand[1])
+        )
+    if context_metadata_token_equals["uv"](ptr, start, end) and subcommand[0] >= 0 and context_metadata_token_equals["run"](ptr, subcommand[0], subcommand[1]):
+        var scan = subcommand[1]
+        while scan < length:
+            var span = context_metadata_next_token(ptr, length, scan)
+            if span[0] < 0:
+                break
+            if (
+                context_metadata_token_equals["pytest"](ptr, span[0], span[1])
+                or context_metadata_token_equals["py.test"](ptr, span[0], span[1])
+            ):
+                return True
+            scan = span[2]
+    return False
+
+
+def context_metadata_command_is_path_relevant_success(
+    ptr: Pointer[mut=False, UInt8, _],
+    length: Int64,
+    start: Int64,
+    end: Int64,
+    next_cursor: Int64,
+) -> Bool:
+    if (
+        context_metadata_token_equals["ls"](ptr, start, end)
+        or context_metadata_token_equals["find"](ptr, start, end)
+        or context_metadata_token_equals["tree"](ptr, start, end)
+        or context_metadata_token_equals["du"](ptr, start, end)
+        or context_metadata_token_equals["rg"](ptr, start, end)
+        or context_metadata_token_equals["grep"](ptr, start, end)
+    ):
+        return True
+    var subcommand = context_metadata_subcommand_after(ptr, length, next_cursor)
+    return (
+        context_metadata_token_equals["go"](ptr, start, end)
+        and subcommand[0] >= 0
+        and context_metadata_token_equals["list"](ptr, subcommand[0], subcommand[1])
+    )
+
+
+def context_metadata_has_compound_short_success_syntax(
+    ptr: Pointer[mut=False, UInt8, _], length: Int64
+) -> Bool:
+    for index in range(length):
+        var value = ptr[unsafe_offset=index]
+        if value == 59 or value == 124:
+            return True
+        if value == 38 and index + 1 < length and ptr[unsafe_offset=index + 1] == 38:
+            return True
+    return False
+
+
+def context_metadata_success_flags(view: ProdexStringView) -> Int64:
+    var ptr = view.ptr.unsafe_value()
+    var length = Int64(view.len)
+    var cursor: Int64 = 0
+    var flags: Int64 = 0
+    var compound = context_metadata_has_compound_short_success_syntax(ptr, length)
+    while cursor < length:
+        var span = context_metadata_next_token(ptr, length, cursor)
+        if span[0] < 0:
+            break
+        if context_metadata_command_is_success_candidate(ptr, length, span[0], span[1], span[2]):
+            flags |= CONTEXT_SUCCESS_CANDIDATE
+        if not compound and context_metadata_command_is_short_success_candidate(ptr, length, span[0], span[1], span[2]):
+            flags |= CONTEXT_SHORT_SUCCESS_CANDIDATE
+        if context_metadata_command_is_path_relevant_success(ptr, length, span[0], span[1], span[2]):
+            flags |= CONTEXT_PATH_RELEVANT_SUCCESS
+        cursor = span[2]
+    return flags
+
+
+@export("prodex_context_command_success_flags_v1")
+def prodex_context_command_success_flags_v1(
+    abi_version: Int64,
+    metadata: Pointer[mut=False, ProdexStringView, _],
+    output_flags: Pointer[mut=True, Int64, _],
+) abi("C") -> Int64:
+    if abi_version != CONTEXT_TEXT_ABI_VERSION:
+        return 4
+    output_flags[] = 0
+    var view = metadata[].copy()
+    if not context_text_view_is_valid(view):
+        return 2
+    if view.len == 0:
+        return 0
+    output_flags[] = context_metadata_success_flags(view)
+    return 0
+
+
 @export("prodex_context_classify_command_metadata_v1")
 def prodex_context_classify_command_metadata_v1(
     abi_version: Int64,
