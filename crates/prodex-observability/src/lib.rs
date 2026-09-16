@@ -16,6 +16,7 @@ mod configuration;
 #[cfg(feature = "mojo")]
 mod mojo;
 mod operations;
+mod planning_support;
 mod provider;
 mod runtime;
 mod security;

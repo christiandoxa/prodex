@@ -51,31 +51,12 @@ pub struct ConnectionPoolSaturationMetricPlan {
 pub fn plan_dropped_telemetry_metric(
     reason: TelemetryDropReason,
 ) -> Result<DroppedTelemetryMetricPlan, TelemetryAttributeError> {
-    let reason_label = TelemetryAttribute::metric_label(
-        {
-            #[cfg(feature = "mojo")]
-            {
-                crate::mojo::label_key(142)
-            }
-            #[cfg(not(feature = "mojo"))]
-            {
-                "telemetry_drop_reason"
-            }
-        },
+    let reason_label = crate::planning_support::validated_metric_label(
+        crate::planning_support::label_key(142, "telemetry_drop_reason"),
         telemetry_drop_reason_label(reason),
-    );
-    reason_label.as_metric_label()?;
+    )?;
     Ok(DroppedTelemetryMetricPlan {
-        metric_name: {
-            #[cfg(feature = "mojo")]
-            {
-                crate::mojo::metric_name(55, 0)
-            }
-            #[cfg(not(feature = "mojo"))]
-            {
-                "prodex_telemetry_dropped_total"
-            }
-        },
+        metric_name: crate::planning_support::metric_name(55, 0, "prodex_telemetry_dropped_total"),
         increment: 1,
         reason_label,
     })
@@ -86,31 +67,12 @@ pub fn plan_queue_depth_metric(
     depth: u64,
     capacity: u64,
 ) -> Result<QueueDepthMetricPlan, TelemetryAttributeError> {
-    let queue_label = TelemetryAttribute::metric_label(
-        {
-            #[cfg(feature = "mojo")]
-            {
-                crate::mojo::label_key(115)
-            }
-            #[cfg(not(feature = "mojo"))]
-            {
-                "queue_kind"
-            }
-        },
+    let queue_label = crate::planning_support::validated_metric_label(
+        crate::planning_support::label_key(115, "queue_kind"),
         queue_depth_kind_label(kind),
-    );
-    queue_label.as_metric_label()?;
+    )?;
     Ok(QueueDepthMetricPlan {
-        metric_name: {
-            #[cfg(feature = "mojo")]
-            {
-                crate::mojo::metric_name(56, 0)
-            }
-            #[cfg(not(feature = "mojo"))]
-            {
-                "prodex_queue_depth"
-            }
-        },
+        metric_name: crate::planning_support::metric_name(56, 0, "prodex_queue_depth"),
         depth,
         capacity,
         queue_label,
@@ -122,31 +84,12 @@ pub fn plan_connection_pool_saturation_metric(
     in_use: u64,
     capacity: u64,
 ) -> Result<ConnectionPoolSaturationMetricPlan, TelemetryAttributeError> {
-    let pool_label = TelemetryAttribute::metric_label(
-        {
-            #[cfg(feature = "mojo")]
-            {
-                crate::mojo::label_key(100)
-            }
-            #[cfg(not(feature = "mojo"))]
-            {
-                "pool_kind"
-            }
-        },
+    let pool_label = crate::planning_support::validated_metric_label(
+        crate::planning_support::label_key(100, "pool_kind"),
         connection_pool_kind_label(kind),
-    );
-    pool_label.as_metric_label()?;
+    )?;
     Ok(ConnectionPoolSaturationMetricPlan {
-        metric_name: {
-            #[cfg(feature = "mojo")]
-            {
-                crate::mojo::metric_name(54, 0)
-            }
-            #[cfg(not(feature = "mojo"))]
-            {
-                "prodex_connection_pool_in_use"
-            }
-        },
+        metric_name: crate::planning_support::metric_name(54, 0, "prodex_connection_pool_in_use"),
         in_use,
         capacity,
         pool_label,
