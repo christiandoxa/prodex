@@ -185,24 +185,24 @@ Caveman is externally installed and validated; Smart Context is built into the C
 <details>
 <summary>Install and verify the Super tools</summary>
 
-Caveman (Prodex-vetted `2.6.0` checkout):
+Caveman (Prodex-vetted `2.7.0` checkout):
 
 ```bash
 export PRODEX_OPTIMIZERS_HOME="${PRODEX_OPTIMIZERS_HOME:-${XDG_DATA_HOME:-$HOME/.local/share}/prodex-optimizers}"
 install -d "$PRODEX_OPTIMIZERS_HOME/caveman"
 git clone --no-checkout https://github.com/JuliusBrussee/caveman \
-  "$PRODEX_OPTIMIZERS_HOME/caveman/2.6.0"
-git -C "$PRODEX_OPTIMIZERS_HOME/caveman/2.6.0" config core.autocrlf false
-git -C "$PRODEX_OPTIMIZERS_HOME/caveman/2.6.0" checkout --detach \
-  b82c0ad42c2bedc1f2cd78e414dadfaffbaaeec3
-cat >"$PRODEX_OPTIMIZERS_HOME/caveman/2.6.0/prodex-tool.json" <<'JSON'
+  "$PRODEX_OPTIMIZERS_HOME/caveman/2.7.0"
+git -C "$PRODEX_OPTIMIZERS_HOME/caveman/2.7.0" config core.autocrlf false
+git -C "$PRODEX_OPTIMIZERS_HOME/caveman/2.7.0" checkout --detach \
+  8b0c1d3699b8d83e87fe4605b378da20c41555e0
+cat >"$PRODEX_OPTIMIZERS_HOME/caveman/2.7.0/prodex-tool.json" <<'JSON'
 {
   "schema_version": 1,
   "id": "caveman",
-  "version": "2.6.0",
+  "version": "2.7.0",
   "source": "https://github.com/JuliusBrussee/caveman",
-  "commit": "b82c0ad42c2bedc1f2cd78e414dadfaffbaaeec3",
-  "tree_sha256": "ddac7f7a89ae5a8d80d1b606620589e8ade7897d536663537bc82b8f6322d4a6"
+  "commit": "8b0c1d3699b8d83e87fe4605b378da20c41555e0",
+  "tree_sha256": "26d587fc179e79f76f4e2b42edec0266a7af40cf08bf15eb4609de310fabd8fb"
 }
 JSON
 
@@ -236,14 +236,14 @@ Use the matching archive and checksum row from the official v0.49.0 release on
 other architectures. Finish any process using the old executable before an
 explicit upgrade; Prodex never replaces RTK during startup.
 
-Codebase Memory MCP (latest stable `0.10.8`):
+Codebase Memory MCP (latest stable `0.11.0`):
 
 ```bash
 cbm_install_dir="$(mktemp -d)"
 trap 'rm -rf "$cbm_install_dir"' EXIT
 curl -fsSLo "$cbm_install_dir/install.sh" \
-  https://raw.githubusercontent.com/DeusData/codebase-memory-mcp/v0.10.8/install.sh
-CBM_DOWNLOAD_URL=https://github.com/DeusData/codebase-memory-mcp/releases/download/v0.10.8 \
+  https://raw.githubusercontent.com/DeusData/codebase-memory-mcp/v0.11.0/install.sh
+CBM_DOWNLOAD_URL=https://github.com/DeusData/codebase-memory-mcp/releases/download/v0.11.0 \
   bash "$cbm_install_dir/install.sh" --skip-config
 codebase-memory-mcp daemon status || true
 prodex capability super-doctor
@@ -257,13 +257,13 @@ heavy indexing work are skipped unless updated. Prodex leaves `CBM_CACHE_DIR` un
 sub-agent sessions join the account-wide canonical daemon; an explicit user override is inherited
 unchanged and must stay consistent across every CBM client.
 
-Playwright MCP (latest stable, pinned `@playwright/mcp@0.0.80`):
+Playwright MCP (latest stable, pinned `@playwright/mcp@0.0.81`):
 
 ```bash
 node --version
 npx --version
-npx -y @playwright/mcp@0.0.80 install-browser chrome
-npx -y @playwright/mcp@0.0.80 --version
+npx -y @playwright/mcp@0.0.81 install-browser chrome
+npx -y @playwright/mcp@0.0.81 --version
 prodex capability super-doctor
 prodex playwright --dry-run
 ```
@@ -272,24 +272,24 @@ The browser install command above installs the Chrome channel used by Prodex's d
 
 Prodex preserves inherited `[mcp_servers.playwright]` entries. Add a custom entry to the base profile's `config.toml` to change flags, use a persistent/headed browser, or set `enabled = false`; the temporary Super overlay will not replace it.
 
-Ponytail (Prodex-vetted `4.9.0` checkout):
+Ponytail (Prodex-vetted `4.10.0` checkout):
 
 ```bash
 export PRODEX_OPTIMIZERS_HOME="${PRODEX_OPTIMIZERS_HOME:-${XDG_DATA_HOME:-$HOME/.local/share}/prodex-optimizers}"
 install -d "$PRODEX_OPTIMIZERS_HOME/ponytail"
 git clone --no-checkout https://github.com/DietrichGebert/ponytail \
-  "$PRODEX_OPTIMIZERS_HOME/ponytail/4.9.0"
-git -C "$PRODEX_OPTIMIZERS_HOME/ponytail/4.9.0" config core.autocrlf false
-git -C "$PRODEX_OPTIMIZERS_HOME/ponytail/4.9.0" checkout --detach \
-  0a4dd63ad4541f4f655c4108a295916f3c1d8fda
-cat >"$PRODEX_OPTIMIZERS_HOME/ponytail/4.9.0/prodex-tool.json" <<'JSON'
+  "$PRODEX_OPTIMIZERS_HOME/ponytail/4.10.0"
+git -C "$PRODEX_OPTIMIZERS_HOME/ponytail/4.10.0" config core.autocrlf false
+git -C "$PRODEX_OPTIMIZERS_HOME/ponytail/4.10.0" checkout --detach \
+  1d95ff7d39de12d87014ea40d4e22201bddc501b
+cat >"$PRODEX_OPTIMIZERS_HOME/ponytail/4.10.0/prodex-tool.json" <<'JSON'
 {
   "schema_version": 1,
   "id": "ponytail",
-  "version": "4.9.0",
+  "version": "4.10.0",
   "source": "https://github.com/DietrichGebert/ponytail",
-  "commit": "0a4dd63ad4541f4f655c4108a295916f3c1d8fda",
-  "tree_sha256": "88c6dfa10bc0a63385a8f3f01bc4a3e51963c8fd76a0ebc0426bd889f0705970"
+  "commit": "1d95ff7d39de12d87014ea40d4e22201bddc501b",
+  "tree_sha256": "5443a5ee4a7248adcb59e1e102dd5bbd14af3083a9c3b4f271dd86790ac88c9c"
 }
 JSON
 

@@ -31,17 +31,17 @@ pub use super_optimizers::{
 };
 
 pub const PRODEX_OPTIMIZERS_HOME_ENV: &str = "PRODEX_OPTIMIZERS_HOME";
-pub const CAVEMAN_VETTED_VERSION: &str = "2.6.0";
-pub const CAVEMAN_VETTED_COMMIT: &str = "b82c0ad42c2bedc1f2cd78e414dadfaffbaaeec3";
+pub const CAVEMAN_VETTED_VERSION: &str = "2.7.0";
+pub const CAVEMAN_VETTED_COMMIT: &str = "8b0c1d3699b8d83e87fe4605b378da20c41555e0";
 pub const CAVEMAN_VETTED_TREE_SHA256: &str =
-    "ddac7f7a89ae5a8d80d1b606620589e8ade7897d536663537bc82b8f6322d4a6";
-pub const PONYTAIL_VETTED_VERSION: &str = "4.9.0";
-pub const PONYTAIL_VETTED_COMMIT: &str = "0a4dd63ad4541f4f655c4108a295916f3c1d8fda";
+    "26d587fc179e79f76f4e2b42edec0266a7af40cf08bf15eb4609de310fabd8fb";
+pub const PONYTAIL_VETTED_VERSION: &str = "4.10.0";
+pub const PONYTAIL_VETTED_COMMIT: &str = "1d95ff7d39de12d87014ea40d4e22201bddc501b";
 pub const PONYTAIL_VETTED_TREE_SHA256: &str =
-    "88c6dfa10bc0a63385a8f3f01bc4a3e51963c8fd76a0ebc0426bd889f0705970";
-pub(crate) const PLAYWRIGHT_MCP_PACKAGE: &str = "@playwright/mcp@0.0.80";
+    "5443a5ee4a7248adcb59e1e102dd5bbd14af3083a9c3b4f271dd86790ac88c9c";
+pub(crate) const PLAYWRIGHT_MCP_PACKAGE: &str = "@playwright/mcp@0.0.81";
 pub(crate) const RTK_RECOMMENDED_VERSION: &str = "0.49.0";
-pub(crate) const CODEBASE_MEMORY_RECOMMENDED_VERSION: &str = "0.10.8";
+pub(crate) const CODEBASE_MEMORY_RECOMMENDED_VERSION: &str = "0.11.0";
 pub(crate) const PRESIDIO_RECOMMENDED_VERSION: &str = "2.2.364";
 
 pub fn optional_tool_recommended_version(id: OptionalToolId) -> &'static str {
