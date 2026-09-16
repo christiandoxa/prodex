@@ -1,49 +1,20 @@
 use super::*;
-use prodex_domain::{TelemetryAttribute, TelemetryAttributeError};
+use prodex_domain::TelemetryAttributeError;
 
 pub fn plan_security_decision_metric(
     decision: SecurityDecisionKind,
     result: SecurityDecisionResult,
 ) -> Result<SecurityDecisionMetricPlan, TelemetryAttributeError> {
-    let decision_label = TelemetryAttribute::metric_label(
-        {
-            #[cfg(feature = "mojo")]
-            {
-                crate::mojo::label_key(132)
-            }
-            #[cfg(not(feature = "mojo"))]
-            {
-                "security_decision"
-            }
-        },
+    let decision_label = crate::planning_support::validated_metric_label(
+        crate::planning_support::label_key(132, "security_decision"),
         security_decision_kind_label(decision),
-    );
-    let result_label = TelemetryAttribute::metric_label(
-        {
-            #[cfg(feature = "mojo")]
-            {
-                crate::mojo::label_key(133)
-            }
-            #[cfg(not(feature = "mojo"))]
-            {
-                "security_result"
-            }
-        },
+    )?;
+    let result_label = crate::planning_support::validated_metric_label(
+        crate::planning_support::label_key(133, "security_result"),
         security_decision_result_label(result),
-    );
-    decision_label.as_metric_label()?;
-    result_label.as_metric_label()?;
+    )?;
     Ok(SecurityDecisionMetricPlan {
-        metric_name: {
-            #[cfg(feature = "mojo")]
-            {
-                crate::mojo::metric_name(68, 0)
-            }
-            #[cfg(not(feature = "mojo"))]
-            {
-                "prodex_security_decisions_total"
-            }
-        },
+        metric_name: crate::planning_support::metric_name(68, 0, "prodex_security_decisions_total"),
         increment: 1,
         decision_label,
         result_label,
@@ -58,101 +29,37 @@ pub fn plan_inspection_metric(
     outcome: InspectionOutcome,
     duration_micros: u64,
 ) -> Result<InspectionMetricPlan, TelemetryAttributeError> {
-    let stage_label = TelemetryAttribute::metric_label(
-        {
-            #[cfg(feature = "mojo")]
-            {
-                crate::mojo::label_key(83)
-            }
-            #[cfg(not(feature = "mojo"))]
-            {
-                "inspection_stage"
-            }
-        },
+    let stage_label = crate::planning_support::validated_metric_label(
+        crate::planning_support::label_key(83, "inspection_stage"),
         inspection_stage_label(stage),
-    );
-    let coverage_label = TelemetryAttribute::metric_label(
-        {
-            #[cfg(feature = "mojo")]
-            {
-                crate::mojo::label_key(79)
-            }
-            #[cfg(not(feature = "mojo"))]
-            {
-                "inspection_coverage"
-            }
-        },
+    )?;
+    let coverage_label = crate::planning_support::validated_metric_label(
+        crate::planning_support::label_key(79, "inspection_coverage"),
         inspection_coverage_label(coverage),
-    );
-    let finding_category_label = TelemetryAttribute::metric_label(
-        {
-            #[cfg(feature = "mojo")]
-            {
-                crate::mojo::label_key(80)
-            }
-            #[cfg(not(feature = "mojo"))]
-            {
-                "inspection_finding_category"
-            }
-        },
+    )?;
+    let finding_category_label = crate::planning_support::validated_metric_label(
+        crate::planning_support::label_key(80, "inspection_finding_category"),
         inspection_finding_category_label(finding_category),
-    );
-    let masking_action_label = TelemetryAttribute::metric_label(
-        {
-            #[cfg(feature = "mojo")]
-            {
-                crate::mojo::label_key(81)
-            }
-            #[cfg(not(feature = "mojo"))]
-            {
-                "inspection_masking_action"
-            }
-        },
+    )?;
+    let masking_action_label = crate::planning_support::validated_metric_label(
+        crate::planning_support::label_key(81, "inspection_masking_action"),
         inspection_masking_action_label(masking_action),
-    );
-    let outcome_label = TelemetryAttribute::metric_label(
-        {
-            #[cfg(feature = "mojo")]
-            {
-                crate::mojo::label_key(82)
-            }
-            #[cfg(not(feature = "mojo"))]
-            {
-                "inspection_outcome"
-            }
-        },
+    )?;
+    let outcome_label = crate::planning_support::validated_metric_label(
+        crate::planning_support::label_key(82, "inspection_outcome"),
         inspection_outcome_label(outcome),
-    );
-    for label in [
-        &stage_label,
-        &coverage_label,
-        &finding_category_label,
-        &masking_action_label,
-        &outcome_label,
-    ] {
-        label.as_metric_label()?;
-    }
+    )?;
     Ok(InspectionMetricPlan {
-        event_metric_name: {
-            #[cfg(feature = "mojo")]
-            {
-                crate::mojo::metric_name(63, 0)
-            }
-            #[cfg(not(feature = "mojo"))]
-            {
-                "prodex_inspection_events_total"
-            }
-        },
-        duration_metric_name: {
-            #[cfg(feature = "mojo")]
-            {
-                crate::mojo::metric_name(63, 1)
-            }
-            #[cfg(not(feature = "mojo"))]
-            {
-                "prodex_inspection_duration_microseconds"
-            }
-        },
+        event_metric_name: crate::planning_support::metric_name(
+            63,
+            0,
+            "prodex_inspection_events_total",
+        ),
+        duration_metric_name: crate::planning_support::metric_name(
+            63,
+            1,
+            "prodex_inspection_duration_microseconds",
+        ),
         increment: 1,
         duration_micros: duration_micros.min(120_000_000),
         stage_label,
@@ -167,45 +74,20 @@ pub fn plan_authn_token_validation_metric(
     stage: AuthnTokenValidationStage,
     result: AuthnTokenValidationResult,
 ) -> Result<AuthnTokenValidationMetricPlan, TelemetryAttributeError> {
-    let stage_label = TelemetryAttribute::metric_label(
-        {
-            #[cfg(feature = "mojo")]
-            {
-                crate::mojo::label_key(44)
-            }
-            #[cfg(not(feature = "mojo"))]
-            {
-                "authn_validation_stage"
-            }
-        },
+    let stage_label = crate::planning_support::validated_metric_label(
+        crate::planning_support::label_key(44, "authn_validation_stage"),
         authn_token_validation_stage_label(stage),
-    );
-    let result_label = TelemetryAttribute::metric_label(
-        {
-            #[cfg(feature = "mojo")]
-            {
-                crate::mojo::label_key(43)
-            }
-            #[cfg(not(feature = "mojo"))]
-            {
-                "authn_validation_result"
-            }
-        },
+    )?;
+    let result_label = crate::planning_support::validated_metric_label(
+        crate::planning_support::label_key(43, "authn_validation_result"),
         authn_token_validation_result_label(result),
-    );
-    stage_label.as_metric_label()?;
-    result_label.as_metric_label()?;
+    )?;
     Ok(AuthnTokenValidationMetricPlan {
-        metric_name: {
-            #[cfg(feature = "mojo")]
-            {
-                crate::mojo::metric_name(57, 0)
-            }
-            #[cfg(not(feature = "mojo"))]
-            {
-                "prodex_authn_token_validation_events_total"
-            }
-        },
+        metric_name: crate::planning_support::metric_name(
+            57,
+            0,
+            "prodex_authn_token_validation_events_total",
+        ),
         increment: 1,
         stage_label,
         result_label,
@@ -216,45 +98,16 @@ pub fn plan_authz_decision_metric(
     boundary: AuthzBoundaryKind,
     result: AuthzDecisionResult,
 ) -> Result<AuthzDecisionMetricPlan, TelemetryAttributeError> {
-    let boundary_label = TelemetryAttribute::metric_label(
-        {
-            #[cfg(feature = "mojo")]
-            {
-                crate::mojo::label_key(45)
-            }
-            #[cfg(not(feature = "mojo"))]
-            {
-                "authz_boundary"
-            }
-        },
+    let boundary_label = crate::planning_support::validated_metric_label(
+        crate::planning_support::label_key(45, "authz_boundary"),
         authz_boundary_kind_label(boundary),
-    );
-    let result_label = TelemetryAttribute::metric_label(
-        {
-            #[cfg(feature = "mojo")]
-            {
-                crate::mojo::label_key(46)
-            }
-            #[cfg(not(feature = "mojo"))]
-            {
-                "authz_result"
-            }
-        },
+    )?;
+    let result_label = crate::planning_support::validated_metric_label(
+        crate::planning_support::label_key(46, "authz_result"),
         authz_decision_result_label(result),
-    );
-    boundary_label.as_metric_label()?;
-    result_label.as_metric_label()?;
+    )?;
     Ok(AuthzDecisionMetricPlan {
-        metric_name: {
-            #[cfg(feature = "mojo")]
-            {
-                crate::mojo::metric_name(58, 0)
-            }
-            #[cfg(not(feature = "mojo"))]
-            {
-                "prodex_authz_decisions_total"
-            }
-        },
+        metric_name: crate::planning_support::metric_name(58, 0, "prodex_authz_decisions_total"),
         increment: 1,
         boundary_label,
         result_label,
@@ -265,45 +118,20 @@ pub fn plan_credential_scope_mismatch_metric(
     direction: CredentialScopeMismatchDirection,
     result: CredentialScopeMismatchResult,
 ) -> Result<CredentialScopeMismatchMetricPlan, TelemetryAttributeError> {
-    let direction_label = TelemetryAttribute::metric_label(
-        {
-            #[cfg(feature = "mojo")]
-            {
-                crate::mojo::label_key(64)
-            }
-            #[cfg(not(feature = "mojo"))]
-            {
-                "credential_scope_direction"
-            }
-        },
+    let direction_label = crate::planning_support::validated_metric_label(
+        crate::planning_support::label_key(64, "credential_scope_direction"),
         credential_scope_mismatch_direction_label(direction),
-    );
-    let result_label = TelemetryAttribute::metric_label(
-        {
-            #[cfg(feature = "mojo")]
-            {
-                crate::mojo::label_key(65)
-            }
-            #[cfg(not(feature = "mojo"))]
-            {
-                "credential_scope_result"
-            }
-        },
+    )?;
+    let result_label = crate::planning_support::validated_metric_label(
+        crate::planning_support::label_key(65, "credential_scope_result"),
         credential_scope_mismatch_result_label(result),
-    );
-    direction_label.as_metric_label()?;
-    result_label.as_metric_label()?;
+    )?;
     Ok(CredentialScopeMismatchMetricPlan {
-        metric_name: {
-            #[cfg(feature = "mojo")]
-            {
-                crate::mojo::metric_name(61, 0)
-            }
-            #[cfg(not(feature = "mojo"))]
-            {
-                "prodex_credential_scope_mismatch_events_total"
-            }
-        },
+        metric_name: crate::planning_support::metric_name(
+            61,
+            0,
+            "prodex_credential_scope_mismatch_events_total",
+        ),
         increment: 1,
         direction_label,
         result_label,
@@ -314,45 +142,20 @@ pub fn plan_tenant_isolation_metric(
     surface: TenantIsolationSurface,
     result: TenantIsolationResult,
 ) -> Result<TenantIsolationMetricPlan, TelemetryAttributeError> {
-    let surface_label = TelemetryAttribute::metric_label(
-        {
-            #[cfg(feature = "mojo")]
-            {
-                crate::mojo::label_key(144)
-            }
-            #[cfg(not(feature = "mojo"))]
-            {
-                "tenant_isolation_surface"
-            }
-        },
+    let surface_label = crate::planning_support::validated_metric_label(
+        crate::planning_support::label_key(144, "tenant_isolation_surface"),
         tenant_isolation_surface_label(surface),
-    );
-    let result_label = TelemetryAttribute::metric_label(
-        {
-            #[cfg(feature = "mojo")]
-            {
-                crate::mojo::label_key(143)
-            }
-            #[cfg(not(feature = "mojo"))]
-            {
-                "tenant_isolation_result"
-            }
-        },
+    )?;
+    let result_label = crate::planning_support::validated_metric_label(
+        crate::planning_support::label_key(143, "tenant_isolation_result"),
         tenant_isolation_result_label(result),
-    );
-    surface_label.as_metric_label()?;
-    result_label.as_metric_label()?;
+    )?;
     Ok(TenantIsolationMetricPlan {
-        metric_name: {
-            #[cfg(feature = "mojo")]
-            {
-                crate::mojo::metric_name(70, 0)
-            }
-            #[cfg(not(feature = "mojo"))]
-            {
-                "prodex_tenant_isolation_events_total"
-            }
-        },
+        metric_name: crate::planning_support::metric_name(
+            70,
+            0,
+            "prodex_tenant_isolation_events_total",
+        ),
         increment: 1,
         surface_label,
         result_label,
@@ -363,45 +166,20 @@ pub fn plan_postgres_tenant_context_metric(
     operation: PostgresTenantContextOperation,
     result: PostgresTenantContextResult,
 ) -> Result<PostgresTenantContextMetricPlan, TelemetryAttributeError> {
-    let operation_label = TelemetryAttribute::metric_label(
-        {
-            #[cfg(feature = "mojo")]
-            {
-                crate::mojo::label_key(101)
-            }
-            #[cfg(not(feature = "mojo"))]
-            {
-                "postgres_tenant_context_operation"
-            }
-        },
+    let operation_label = crate::planning_support::validated_metric_label(
+        crate::planning_support::label_key(101, "postgres_tenant_context_operation"),
         postgres_tenant_context_operation_label(operation),
-    );
-    let result_label = TelemetryAttribute::metric_label(
-        {
-            #[cfg(feature = "mojo")]
-            {
-                crate::mojo::label_key(102)
-            }
-            #[cfg(not(feature = "mojo"))]
-            {
-                "postgres_tenant_context_result"
-            }
-        },
+    )?;
+    let result_label = crate::planning_support::validated_metric_label(
+        crate::planning_support::label_key(102, "postgres_tenant_context_result"),
         postgres_tenant_context_result_label(result),
-    );
-    operation_label.as_metric_label()?;
-    result_label.as_metric_label()?;
+    )?;
     Ok(PostgresTenantContextMetricPlan {
-        metric_name: {
-            #[cfg(feature = "mojo")]
-            {
-                crate::mojo::metric_name(65, 0)
-            }
-            #[cfg(not(feature = "mojo"))]
-            {
-                "prodex_postgres_tenant_context_events_total"
-            }
-        },
+        metric_name: crate::planning_support::metric_name(
+            65,
+            0,
+            "prodex_postgres_tenant_context_events_total",
+        ),
         increment: 1,
         operation_label,
         result_label,
@@ -412,45 +190,20 @@ pub fn plan_identity_context_metric(
     surface: IdentityContextSurface,
     result: IdentityContextResult,
 ) -> Result<IdentityContextMetricPlan, TelemetryAttributeError> {
-    let surface_label = TelemetryAttribute::metric_label(
-        {
-            #[cfg(feature = "mojo")]
-            {
-                crate::mojo::label_key(78)
-            }
-            #[cfg(not(feature = "mojo"))]
-            {
-                "identity_context_surface"
-            }
-        },
+    let surface_label = crate::planning_support::validated_metric_label(
+        crate::planning_support::label_key(78, "identity_context_surface"),
         identity_context_surface_label(surface),
-    );
-    let result_label = TelemetryAttribute::metric_label(
-        {
-            #[cfg(feature = "mojo")]
-            {
-                crate::mojo::label_key(77)
-            }
-            #[cfg(not(feature = "mojo"))]
-            {
-                "identity_context_result"
-            }
-        },
+    )?;
+    let result_label = crate::planning_support::validated_metric_label(
+        crate::planning_support::label_key(77, "identity_context_result"),
         identity_context_result_label(result),
-    );
-    surface_label.as_metric_label()?;
-    result_label.as_metric_label()?;
+    )?;
     Ok(IdentityContextMetricPlan {
-        metric_name: {
-            #[cfg(feature = "mojo")]
-            {
-                crate::mojo::metric_name(62, 0)
-            }
-            #[cfg(not(feature = "mojo"))]
-            {
-                "prodex_identity_context_events_total"
-            }
-        },
+        metric_name: crate::planning_support::metric_name(
+            62,
+            0,
+            "prodex_identity_context_events_total",
+        ),
         increment: 1,
         surface_label,
         result_label,
@@ -461,45 +214,20 @@ pub fn plan_break_glass_lifecycle_metric(
     operation: BreakGlassLifecycleOperation,
     result: BreakGlassLifecycleResult,
 ) -> Result<BreakGlassLifecycleMetricPlan, TelemetryAttributeError> {
-    let operation_label = TelemetryAttribute::metric_label(
-        {
-            #[cfg(feature = "mojo")]
-            {
-                crate::mojo::label_key(51)
-            }
-            #[cfg(not(feature = "mojo"))]
-            {
-                "break_glass_operation"
-            }
-        },
+    let operation_label = crate::planning_support::validated_metric_label(
+        crate::planning_support::label_key(51, "break_glass_operation"),
         break_glass_lifecycle_operation_label(operation),
-    );
-    let result_label = TelemetryAttribute::metric_label(
-        {
-            #[cfg(feature = "mojo")]
-            {
-                crate::mojo::label_key(52)
-            }
-            #[cfg(not(feature = "mojo"))]
-            {
-                "break_glass_result"
-            }
-        },
+    )?;
+    let result_label = crate::planning_support::validated_metric_label(
+        crate::planning_support::label_key(52, "break_glass_result"),
         break_glass_lifecycle_result_label(result),
-    );
-    operation_label.as_metric_label()?;
-    result_label.as_metric_label()?;
+    )?;
     Ok(BreakGlassLifecycleMetricPlan {
-        metric_name: {
-            #[cfg(feature = "mojo")]
-            {
-                crate::mojo::metric_name(59, 0)
-            }
-            #[cfg(not(feature = "mojo"))]
-            {
-                "prodex_break_glass_lifecycle_events_total"
-            }
-        },
+        metric_name: crate::planning_support::metric_name(
+            59,
+            0,
+            "prodex_break_glass_lifecycle_events_total",
+        ),
         increment: 1,
         operation_label,
         result_label,
@@ -510,45 +238,20 @@ pub fn plan_user_lifecycle_metric(
     operation: UserLifecycleOperation,
     result: UserLifecycleResult,
 ) -> Result<UserLifecycleMetricPlan, TelemetryAttributeError> {
-    let operation_label = TelemetryAttribute::metric_label(
-        {
-            #[cfg(feature = "mojo")]
-            {
-                crate::mojo::label_key(147)
-            }
-            #[cfg(not(feature = "mojo"))]
-            {
-                "user_lifecycle_operation"
-            }
-        },
+    let operation_label = crate::planning_support::validated_metric_label(
+        crate::planning_support::label_key(147, "user_lifecycle_operation"),
         user_lifecycle_operation_label(operation),
-    );
-    let result_label = TelemetryAttribute::metric_label(
-        {
-            #[cfg(feature = "mojo")]
-            {
-                crate::mojo::label_key(148)
-            }
-            #[cfg(not(feature = "mojo"))]
-            {
-                "user_lifecycle_result"
-            }
-        },
+    )?;
+    let result_label = crate::planning_support::validated_metric_label(
+        crate::planning_support::label_key(148, "user_lifecycle_result"),
         user_lifecycle_result_label(result),
-    );
-    operation_label.as_metric_label()?;
-    result_label.as_metric_label()?;
+    )?;
     Ok(UserLifecycleMetricPlan {
-        metric_name: {
-            #[cfg(feature = "mojo")]
-            {
-                crate::mojo::metric_name(72, 0)
-            }
-            #[cfg(not(feature = "mojo"))]
-            {
-                "prodex_user_lifecycle_events_total"
-            }
-        },
+        metric_name: crate::planning_support::metric_name(
+            72,
+            0,
+            "prodex_user_lifecycle_events_total",
+        ),
         increment: 1,
         operation_label,
         result_label,
@@ -559,45 +262,20 @@ pub fn plan_service_identity_lifecycle_metric(
     operation: ServiceIdentityLifecycleOperation,
     result: ServiceIdentityLifecycleResult,
 ) -> Result<ServiceIdentityLifecycleMetricPlan, TelemetryAttributeError> {
-    let operation_label = TelemetryAttribute::metric_label(
-        {
-            #[cfg(feature = "mojo")]
-            {
-                crate::mojo::label_key(134)
-            }
-            #[cfg(not(feature = "mojo"))]
-            {
-                "service_identity_operation"
-            }
-        },
+    let operation_label = crate::planning_support::validated_metric_label(
+        crate::planning_support::label_key(134, "service_identity_operation"),
         service_identity_lifecycle_operation_label(operation),
-    );
-    let result_label = TelemetryAttribute::metric_label(
-        {
-            #[cfg(feature = "mojo")]
-            {
-                crate::mojo::label_key(135)
-            }
-            #[cfg(not(feature = "mojo"))]
-            {
-                "service_identity_result"
-            }
-        },
+    )?;
+    let result_label = crate::planning_support::validated_metric_label(
+        crate::planning_support::label_key(135, "service_identity_result"),
         service_identity_lifecycle_result_label(result),
-    );
-    operation_label.as_metric_label()?;
-    result_label.as_metric_label()?;
+    )?;
     Ok(ServiceIdentityLifecycleMetricPlan {
-        metric_name: {
-            #[cfg(feature = "mojo")]
-            {
-                crate::mojo::metric_name(69, 0)
-            }
-            #[cfg(not(feature = "mojo"))]
-            {
-                "prodex_service_identity_lifecycle_events_total"
-            }
-        },
+        metric_name: crate::planning_support::metric_name(
+            69,
+            0,
+            "prodex_service_identity_lifecycle_events_total",
+        ),
         increment: 1,
         operation_label,
         result_label,
@@ -608,45 +286,20 @@ pub fn plan_role_binding_lifecycle_metric(
     operation: RoleBindingLifecycleOperation,
     result: RoleBindingLifecycleResult,
 ) -> Result<RoleBindingLifecycleMetricPlan, TelemetryAttributeError> {
-    let operation_label = TelemetryAttribute::metric_label(
-        {
-            #[cfg(feature = "mojo")]
-            {
-                crate::mojo::label_key(123)
-            }
-            #[cfg(not(feature = "mojo"))]
-            {
-                "role_binding_operation"
-            }
-        },
+    let operation_label = crate::planning_support::validated_metric_label(
+        crate::planning_support::label_key(123, "role_binding_operation"),
         role_binding_lifecycle_operation_label(operation),
-    );
-    let result_label = TelemetryAttribute::metric_label(
-        {
-            #[cfg(feature = "mojo")]
-            {
-                crate::mojo::label_key(124)
-            }
-            #[cfg(not(feature = "mojo"))]
-            {
-                "role_binding_result"
-            }
-        },
+    )?;
+    let result_label = crate::planning_support::validated_metric_label(
+        crate::planning_support::label_key(124, "role_binding_result"),
         role_binding_lifecycle_result_label(result),
-    );
-    operation_label.as_metric_label()?;
-    result_label.as_metric_label()?;
+    )?;
     Ok(RoleBindingLifecycleMetricPlan {
-        metric_name: {
-            #[cfg(feature = "mojo")]
-            {
-                crate::mojo::metric_name(67, 0)
-            }
-            #[cfg(not(feature = "mojo"))]
-            {
-                "prodex_role_binding_lifecycle_events_total"
-            }
-        },
+        metric_name: crate::planning_support::metric_name(
+            67,
+            0,
+            "prodex_role_binding_lifecycle_events_total",
+        ),
         increment: 1,
         operation_label,
         result_label,
@@ -657,45 +310,20 @@ pub fn plan_provider_credential_lifecycle_metric(
     operation: ProviderCredentialLifecycleOperation,
     result: ProviderCredentialLifecycleResult,
 ) -> Result<ProviderCredentialLifecycleMetricPlan, TelemetryAttributeError> {
-    let operation_label = TelemetryAttribute::metric_label(
-        {
-            #[cfg(feature = "mojo")]
-            {
-                crate::mojo::label_key(108)
-            }
-            #[cfg(not(feature = "mojo"))]
-            {
-                "provider_credential_operation"
-            }
-        },
+    let operation_label = crate::planning_support::validated_metric_label(
+        crate::planning_support::label_key(108, "provider_credential_operation"),
         provider_credential_lifecycle_operation_label(operation),
-    );
-    let result_label = TelemetryAttribute::metric_label(
-        {
-            #[cfg(feature = "mojo")]
-            {
-                crate::mojo::label_key(109)
-            }
-            #[cfg(not(feature = "mojo"))]
-            {
-                "provider_credential_result"
-            }
-        },
+    )?;
+    let result_label = crate::planning_support::validated_metric_label(
+        crate::planning_support::label_key(109, "provider_credential_result"),
         provider_credential_lifecycle_result_label(result),
-    );
-    operation_label.as_metric_label()?;
-    result_label.as_metric_label()?;
+    )?;
     Ok(ProviderCredentialLifecycleMetricPlan {
-        metric_name: {
-            #[cfg(feature = "mojo")]
-            {
-                crate::mojo::metric_name(66, 0)
-            }
-            #[cfg(not(feature = "mojo"))]
-            {
-                "prodex_provider_credential_lifecycle_events_total"
-            }
-        },
+        metric_name: crate::planning_support::metric_name(
+            66,
+            0,
+            "prodex_provider_credential_lifecycle_events_total",
+        ),
         increment: 1,
         operation_label,
         result_label,
@@ -706,45 +334,20 @@ pub fn plan_virtual_key_lifecycle_metric(
     operation: VirtualKeyLifecycleOperation,
     result: VirtualKeyLifecycleResult,
 ) -> Result<VirtualKeyLifecycleMetricPlan, TelemetryAttributeError> {
-    let operation_label = TelemetryAttribute::metric_label(
-        {
-            #[cfg(feature = "mojo")]
-            {
-                crate::mojo::label_key(62)
-            }
-            #[cfg(not(feature = "mojo"))]
-            {
-                "credential_lifecycle_operation"
-            }
-        },
+    let operation_label = crate::planning_support::validated_metric_label(
+        crate::planning_support::label_key(62, "credential_lifecycle_operation"),
         virtual_key_lifecycle_operation_label(operation),
-    );
-    let result_label = TelemetryAttribute::metric_label(
-        {
-            #[cfg(feature = "mojo")]
-            {
-                crate::mojo::label_key(63)
-            }
-            #[cfg(not(feature = "mojo"))]
-            {
-                "credential_lifecycle_result"
-            }
-        },
+    )?;
+    let result_label = crate::planning_support::validated_metric_label(
+        crate::planning_support::label_key(63, "credential_lifecycle_result"),
         virtual_key_lifecycle_result_label(result),
-    );
-    operation_label.as_metric_label()?;
-    result_label.as_metric_label()?;
+    )?;
     Ok(VirtualKeyLifecycleMetricPlan {
-        metric_name: {
-            #[cfg(feature = "mojo")]
-            {
-                crate::mojo::metric_name(73, 0)
-            }
-            #[cfg(not(feature = "mojo"))]
-            {
-                "prodex_virtual_key_lifecycle_events_total"
-            }
-        },
+        metric_name: crate::planning_support::metric_name(
+            73,
+            0,
+            "prodex_virtual_key_lifecycle_events_total",
+        ),
         increment: 1,
         operation_label,
         result_label,
@@ -755,45 +358,20 @@ pub fn plan_budget_policy_lifecycle_metric(
     operation: BudgetPolicyLifecycleOperation,
     result: BudgetPolicyLifecycleResult,
 ) -> Result<BudgetPolicyLifecycleMetricPlan, TelemetryAttributeError> {
-    let operation_label = TelemetryAttribute::metric_label(
-        {
-            #[cfg(feature = "mojo")]
-            {
-                crate::mojo::label_key(53)
-            }
-            #[cfg(not(feature = "mojo"))]
-            {
-                "budget_policy_operation"
-            }
-        },
+    let operation_label = crate::planning_support::validated_metric_label(
+        crate::planning_support::label_key(53, "budget_policy_operation"),
         budget_policy_lifecycle_operation_label(operation),
-    );
-    let result_label = TelemetryAttribute::metric_label(
-        {
-            #[cfg(feature = "mojo")]
-            {
-                crate::mojo::label_key(54)
-            }
-            #[cfg(not(feature = "mojo"))]
-            {
-                "budget_policy_result"
-            }
-        },
+    )?;
+    let result_label = crate::planning_support::validated_metric_label(
+        crate::planning_support::label_key(54, "budget_policy_result"),
         budget_policy_lifecycle_result_label(result),
-    );
-    operation_label.as_metric_label()?;
-    result_label.as_metric_label()?;
+    )?;
     Ok(BudgetPolicyLifecycleMetricPlan {
-        metric_name: {
-            #[cfg(feature = "mojo")]
-            {
-                crate::mojo::metric_name(60, 0)
-            }
-            #[cfg(not(feature = "mojo"))]
-            {
-                "prodex_budget_policy_lifecycle_events_total"
-            }
-        },
+        metric_name: crate::planning_support::metric_name(
+            60,
+            0,
+            "prodex_budget_policy_lifecycle_events_total",
+        ),
         increment: 1,
         operation_label,
         result_label,
@@ -804,45 +382,20 @@ pub fn plan_policy_lifecycle_metric(
     operation: PolicyLifecycleOperation,
     result: PolicyLifecycleResult,
 ) -> Result<PolicyLifecycleMetricPlan, TelemetryAttributeError> {
-    let operation_label = TelemetryAttribute::metric_label(
-        {
-            #[cfg(feature = "mojo")]
-            {
-                crate::mojo::label_key(95)
-            }
-            #[cfg(not(feature = "mojo"))]
-            {
-                "policy_lifecycle_operation"
-            }
-        },
+    let operation_label = crate::planning_support::validated_metric_label(
+        crate::planning_support::label_key(95, "policy_lifecycle_operation"),
         policy_lifecycle_operation_label(operation),
-    );
-    let result_label = TelemetryAttribute::metric_label(
-        {
-            #[cfg(feature = "mojo")]
-            {
-                crate::mojo::label_key(96)
-            }
-            #[cfg(not(feature = "mojo"))]
-            {
-                "policy_lifecycle_result"
-            }
-        },
+    )?;
+    let result_label = crate::planning_support::validated_metric_label(
+        crate::planning_support::label_key(96, "policy_lifecycle_result"),
         policy_lifecycle_result_label(result),
-    );
-    operation_label.as_metric_label()?;
-    result_label.as_metric_label()?;
+    )?;
     Ok(PolicyLifecycleMetricPlan {
-        metric_name: {
-            #[cfg(feature = "mojo")]
-            {
-                crate::mojo::metric_name(64, 0)
-            }
-            #[cfg(not(feature = "mojo"))]
-            {
-                "prodex_policy_lifecycle_events_total"
-            }
-        },
+        metric_name: crate::planning_support::metric_name(
+            64,
+            0,
+            "prodex_policy_lifecycle_events_total",
+        ),
         increment: 1,
         operation_label,
         result_label,
@@ -853,45 +406,20 @@ pub fn plan_tenant_lifecycle_metric(
     operation: TenantLifecycleOperation,
     result: TenantLifecycleResult,
 ) -> Result<TenantLifecycleMetricPlan, TelemetryAttributeError> {
-    let operation_label = TelemetryAttribute::metric_label(
-        {
-            #[cfg(feature = "mojo")]
-            {
-                crate::mojo::label_key(0)
-            }
-            #[cfg(not(feature = "mojo"))]
-            {
-                "account_lifecycle_operation"
-            }
-        },
+    let operation_label = crate::planning_support::validated_metric_label(
+        crate::planning_support::label_key(0, "account_lifecycle_operation"),
         tenant_lifecycle_operation_label(operation),
-    );
-    let result_label = TelemetryAttribute::metric_label(
-        {
-            #[cfg(feature = "mojo")]
-            {
-                crate::mojo::label_key(1)
-            }
-            #[cfg(not(feature = "mojo"))]
-            {
-                "account_lifecycle_result"
-            }
-        },
+    )?;
+    let result_label = crate::planning_support::validated_metric_label(
+        crate::planning_support::label_key(1, "account_lifecycle_result"),
         tenant_lifecycle_result_label(result),
-    );
-    operation_label.as_metric_label()?;
-    result_label.as_metric_label()?;
+    )?;
     Ok(TenantLifecycleMetricPlan {
-        metric_name: {
-            #[cfg(feature = "mojo")]
-            {
-                crate::mojo::metric_name(71, 0)
-            }
-            #[cfg(not(feature = "mojo"))]
-            {
-                "prodex_tenant_lifecycle_events_total"
-            }
-        },
+        metric_name: crate::planning_support::metric_name(
+            71,
+            0,
+            "prodex_tenant_lifecycle_events_total",
+        ),
         increment: 1,
         operation_label,
         result_label,

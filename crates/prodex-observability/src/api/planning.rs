@@ -1,60 +1,30 @@
 use super::*;
-use prodex_domain::{TelemetryAttribute, TelemetryAttributeError};
+use prodex_domain::TelemetryAttributeError;
 
 pub fn plan_api_red_metric(
     route: ApiRouteKind,
     status_class: ApiStatusClass,
     duration_ms: u64,
 ) -> Result<ApiRedMetricPlan, TelemetryAttributeError> {
-    let route_label = TelemetryAttribute::metric_label(
-        {
-            #[cfg(feature = "mojo")]
-            {
-                crate::mojo::label_key(24)
-            }
-            #[cfg(not(feature = "mojo"))]
-            {
-                "api_route"
-            }
-        },
+    let route_label = crate::planning_support::validated_metric_label(
+        crate::planning_support::label_key(24, "api_route"),
         api_route_kind_label(route),
-    );
-    let status_label = TelemetryAttribute::metric_label(
-        {
-            #[cfg(feature = "mojo")]
-            {
-                crate::mojo::label_key(139)
-            }
-            #[cfg(not(feature = "mojo"))]
-            {
-                "status_class"
-            }
-        },
+    )?;
+    let status_label = crate::planning_support::validated_metric_label(
+        crate::planning_support::label_key(139, "status_class"),
         api_status_class_label(status_class),
-    );
-    route_label.as_metric_label()?;
-    status_label.as_metric_label()?;
+    )?;
     Ok(ApiRedMetricPlan {
-        request_count_metric_name: {
-            #[cfg(feature = "mojo")]
-            {
-                crate::mojo::metric_name(17, 0)
-            }
-            #[cfg(not(feature = "mojo"))]
-            {
-                "prodex_api_requests_total"
-            }
-        },
-        duration_metric_name: {
-            #[cfg(feature = "mojo")]
-            {
-                crate::mojo::metric_name(17, 1)
-            }
-            #[cfg(not(feature = "mojo"))]
-            {
-                "prodex_api_request_duration_ms"
-            }
-        },
+        request_count_metric_name: crate::planning_support::metric_name(
+            17,
+            0,
+            "prodex_api_requests_total",
+        ),
+        duration_metric_name: crate::planning_support::metric_name(
+            17,
+            1,
+            "prodex_api_request_duration_ms",
+        ),
         increment: 1,
         duration_ms,
         route_label,
@@ -66,45 +36,20 @@ pub fn plan_api_admission_metric(
     route: ApiRouteKind,
     result: ApiAdmissionResult,
 ) -> Result<ApiAdmissionMetricPlan, TelemetryAttributeError> {
-    let route_label = TelemetryAttribute::metric_label(
-        {
-            #[cfg(feature = "mojo")]
-            {
-                crate::mojo::label_key(5)
-            }
-            #[cfg(not(feature = "mojo"))]
-            {
-                "api_admission_route"
-            }
-        },
+    let route_label = crate::planning_support::validated_metric_label(
+        crate::planning_support::label_key(5, "api_admission_route"),
         api_route_kind_label(route),
-    );
-    let result_label = TelemetryAttribute::metric_label(
-        {
-            #[cfg(feature = "mojo")]
-            {
-                crate::mojo::label_key(4)
-            }
-            #[cfg(not(feature = "mojo"))]
-            {
-                "api_admission_result"
-            }
-        },
+    )?;
+    let result_label = crate::planning_support::validated_metric_label(
+        crate::planning_support::label_key(4, "api_admission_result"),
         api_admission_result_label(result),
-    );
-    route_label.as_metric_label()?;
-    result_label.as_metric_label()?;
+    )?;
     Ok(ApiAdmissionMetricPlan {
-        metric_name: {
-            #[cfg(feature = "mojo")]
-            {
-                crate::mojo::metric_name(7, 0)
-            }
-            #[cfg(not(feature = "mojo"))]
-            {
-                "prodex_api_admission_decisions_total"
-            }
-        },
+        metric_name: crate::planning_support::metric_name(
+            7,
+            0,
+            "prodex_api_admission_decisions_total",
+        ),
         increment: 1,
         route_label,
         result_label,
@@ -115,45 +60,20 @@ pub fn plan_api_schema_validation_metric(
     surface: ApiSchemaSurface,
     result: ApiSchemaValidationResult,
 ) -> Result<ApiSchemaValidationMetricPlan, TelemetryAttributeError> {
-    let surface_label = TelemetryAttribute::metric_label(
-        {
-            #[cfg(feature = "mojo")]
-            {
-                crate::mojo::label_key(26)
-            }
-            #[cfg(not(feature = "mojo"))]
-            {
-                "api_schema_surface"
-            }
-        },
+    let surface_label = crate::planning_support::validated_metric_label(
+        crate::planning_support::label_key(26, "api_schema_surface"),
         api_schema_surface_label(surface),
-    );
-    let result_label = TelemetryAttribute::metric_label(
-        {
-            #[cfg(feature = "mojo")]
-            {
-                crate::mojo::label_key(25)
-            }
-            #[cfg(not(feature = "mojo"))]
-            {
-                "api_schema_result"
-            }
-        },
+    )?;
+    let result_label = crate::planning_support::validated_metric_label(
+        crate::planning_support::label_key(25, "api_schema_result"),
         api_schema_validation_result_label(result),
-    );
-    surface_label.as_metric_label()?;
-    result_label.as_metric_label()?;
+    )?;
     Ok(ApiSchemaValidationMetricPlan {
-        metric_name: {
-            #[cfg(feature = "mojo")]
-            {
-                crate::mojo::metric_name(18, 0)
-            }
-            #[cfg(not(feature = "mojo"))]
-            {
-                "prodex_api_schema_validation_total"
-            }
-        },
+        metric_name: crate::planning_support::metric_name(
+            18,
+            0,
+            "prodex_api_schema_validation_total",
+        ),
         increment: 1,
         surface_label,
         result_label,
@@ -164,45 +84,20 @@ pub fn plan_api_deprecation_metric(
     surface: ApiDeprecationSurface,
     signal: ApiDeprecationSignal,
 ) -> Result<ApiDeprecationMetricPlan, TelemetryAttributeError> {
-    let surface_label = TelemetryAttribute::metric_label(
-        {
-            #[cfg(feature = "mojo")]
-            {
-                crate::mojo::label_key(13)
-            }
-            #[cfg(not(feature = "mojo"))]
-            {
-                "api_deprecation_surface"
-            }
-        },
+    let surface_label = crate::planning_support::validated_metric_label(
+        crate::planning_support::label_key(13, "api_deprecation_surface"),
         api_deprecation_surface_label(surface),
-    );
-    let signal_label = TelemetryAttribute::metric_label(
-        {
-            #[cfg(feature = "mojo")]
-            {
-                crate::mojo::label_key(12)
-            }
-            #[cfg(not(feature = "mojo"))]
-            {
-                "api_deprecation_signal"
-            }
-        },
+    )?;
+    let signal_label = crate::planning_support::validated_metric_label(
+        crate::planning_support::label_key(12, "api_deprecation_signal"),
         api_deprecation_signal_label(signal),
-    );
-    surface_label.as_metric_label()?;
-    signal_label.as_metric_label()?;
+    )?;
     Ok(ApiDeprecationMetricPlan {
-        metric_name: {
-            #[cfg(feature = "mojo")]
-            {
-                crate::mojo::metric_name(11, 0)
-            }
-            #[cfg(not(feature = "mojo"))]
-            {
-                "prodex_api_deprecation_events_total"
-            }
-        },
+        metric_name: crate::planning_support::metric_name(
+            11,
+            0,
+            "prodex_api_deprecation_events_total",
+        ),
         increment: 1,
         surface_label,
         signal_label,
@@ -213,45 +108,20 @@ pub fn plan_api_pagination_metric(
     surface: ApiPaginationSurface,
     result: ApiPaginationResult,
 ) -> Result<ApiPaginationMetricPlan, TelemetryAttributeError> {
-    let surface_label = TelemetryAttribute::metric_label(
-        {
-            #[cfg(feature = "mojo")]
-            {
-                crate::mojo::label_key(21)
-            }
-            #[cfg(not(feature = "mojo"))]
-            {
-                "api_pagination_surface"
-            }
-        },
+    let surface_label = crate::planning_support::validated_metric_label(
+        crate::planning_support::label_key(21, "api_pagination_surface"),
         api_pagination_surface_label(surface),
-    );
-    let result_label = TelemetryAttribute::metric_label(
-        {
-            #[cfg(feature = "mojo")]
-            {
-                crate::mojo::label_key(20)
-            }
-            #[cfg(not(feature = "mojo"))]
-            {
-                "api_pagination_result"
-            }
-        },
+    )?;
+    let result_label = crate::planning_support::validated_metric_label(
+        crate::planning_support::label_key(20, "api_pagination_result"),
         api_pagination_result_label(result),
-    );
-    surface_label.as_metric_label()?;
-    result_label.as_metric_label()?;
+    )?;
     Ok(ApiPaginationMetricPlan {
-        metric_name: {
-            #[cfg(feature = "mojo")]
-            {
-                crate::mojo::metric_name(15, 0)
-            }
-            #[cfg(not(feature = "mojo"))]
-            {
-                "prodex_api_pagination_events_total"
-            }
-        },
+        metric_name: crate::planning_support::metric_name(
+            15,
+            0,
+            "prodex_api_pagination_events_total",
+        ),
         increment: 1,
         surface_label,
         result_label,
@@ -262,45 +132,20 @@ pub fn plan_api_precondition_metric(
     surface: ApiPreconditionSurface,
     result: ApiPreconditionResult,
 ) -> Result<ApiPreconditionMetricPlan, TelemetryAttributeError> {
-    let surface_label = TelemetryAttribute::metric_label(
-        {
-            #[cfg(feature = "mojo")]
-            {
-                crate::mojo::label_key(23)
-            }
-            #[cfg(not(feature = "mojo"))]
-            {
-                "api_precondition_surface"
-            }
-        },
+    let surface_label = crate::planning_support::validated_metric_label(
+        crate::planning_support::label_key(23, "api_precondition_surface"),
         api_precondition_surface_label(surface),
-    );
-    let result_label = TelemetryAttribute::metric_label(
-        {
-            #[cfg(feature = "mojo")]
-            {
-                crate::mojo::label_key(22)
-            }
-            #[cfg(not(feature = "mojo"))]
-            {
-                "api_precondition_result"
-            }
-        },
+    )?;
+    let result_label = crate::planning_support::validated_metric_label(
+        crate::planning_support::label_key(22, "api_precondition_result"),
         api_precondition_result_label(result),
-    );
-    surface_label.as_metric_label()?;
-    result_label.as_metric_label()?;
+    )?;
     Ok(ApiPreconditionMetricPlan {
-        metric_name: {
-            #[cfg(feature = "mojo")]
-            {
-                crate::mojo::metric_name(16, 0)
-            }
-            #[cfg(not(feature = "mojo"))]
-            {
-                "prodex_api_precondition_events_total"
-            }
-        },
+        metric_name: crate::planning_support::metric_name(
+            16,
+            0,
+            "prodex_api_precondition_events_total",
+        ),
         increment: 1,
         surface_label,
         result_label,
@@ -311,45 +156,20 @@ pub fn plan_api_idempotency_metric(
     surface: ApiIdempotencySurface,
     result: ApiIdempotencyResult,
 ) -> Result<ApiIdempotencyMetricPlan, TelemetryAttributeError> {
-    let surface_label = TelemetryAttribute::metric_label(
-        {
-            #[cfg(feature = "mojo")]
-            {
-                crate::mojo::label_key(17)
-            }
-            #[cfg(not(feature = "mojo"))]
-            {
-                "api_idempotency_surface"
-            }
-        },
+    let surface_label = crate::planning_support::validated_metric_label(
+        crate::planning_support::label_key(17, "api_idempotency_surface"),
         api_idempotency_surface_label(surface),
-    );
-    let result_label = TelemetryAttribute::metric_label(
-        {
-            #[cfg(feature = "mojo")]
-            {
-                crate::mojo::label_key(16)
-            }
-            #[cfg(not(feature = "mojo"))]
-            {
-                "api_idempotency_result"
-            }
-        },
+    )?;
+    let result_label = crate::planning_support::validated_metric_label(
+        crate::planning_support::label_key(16, "api_idempotency_result"),
         api_idempotency_result_label(result),
-    );
-    surface_label.as_metric_label()?;
-    result_label.as_metric_label()?;
+    )?;
     Ok(ApiIdempotencyMetricPlan {
-        metric_name: {
-            #[cfg(feature = "mojo")]
-            {
-                crate::mojo::metric_name(13, 0)
-            }
-            #[cfg(not(feature = "mojo"))]
-            {
-                "prodex_api_idempotency_events_total"
-            }
-        },
+        metric_name: crate::planning_support::metric_name(
+            13,
+            0,
+            "prodex_api_idempotency_events_total",
+        ),
         increment: 1,
         surface_label,
         result_label,
@@ -361,59 +181,24 @@ pub fn plan_idempotency_record_metric(
     operation: IdempotencyRecordOperation,
     result: IdempotencyRecordResult,
 ) -> Result<IdempotencyRecordMetricPlan, TelemetryAttributeError> {
-    let backend_label = TelemetryAttribute::metric_label(
-        {
-            #[cfg(feature = "mojo")]
-            {
-                crate::mojo::label_key(74)
-            }
-            #[cfg(not(feature = "mojo"))]
-            {
-                "idempotency_record_backend"
-            }
-        },
+    let backend_label = crate::planning_support::validated_metric_label(
+        crate::planning_support::label_key(74, "idempotency_record_backend"),
         idempotency_record_backend_label(backend),
-    );
-    let operation_label = TelemetryAttribute::metric_label(
-        {
-            #[cfg(feature = "mojo")]
-            {
-                crate::mojo::label_key(75)
-            }
-            #[cfg(not(feature = "mojo"))]
-            {
-                "idempotency_record_operation"
-            }
-        },
+    )?;
+    let operation_label = crate::planning_support::validated_metric_label(
+        crate::planning_support::label_key(75, "idempotency_record_operation"),
         idempotency_record_operation_label(operation),
-    );
-    let result_label = TelemetryAttribute::metric_label(
-        {
-            #[cfg(feature = "mojo")]
-            {
-                crate::mojo::label_key(76)
-            }
-            #[cfg(not(feature = "mojo"))]
-            {
-                "idempotency_record_result"
-            }
-        },
+    )?;
+    let result_label = crate::planning_support::validated_metric_label(
+        crate::planning_support::label_key(76, "idempotency_record_result"),
         idempotency_record_result_label(result),
-    );
-    backend_label.as_metric_label()?;
-    operation_label.as_metric_label()?;
-    result_label.as_metric_label()?;
+    )?;
     Ok(IdempotencyRecordMetricPlan {
-        metric_name: {
-            #[cfg(feature = "mojo")]
-            {
-                crate::mojo::metric_name(23, 0)
-            }
-            #[cfg(not(feature = "mojo"))]
-            {
-                "prodex_idempotency_record_events_total"
-            }
-        },
+        metric_name: crate::planning_support::metric_name(
+            23,
+            0,
+            "prodex_idempotency_record_events_total",
+        ),
         increment: 1,
         backend_label,
         operation_label,
@@ -425,45 +210,20 @@ pub fn plan_api_compatibility_metric(
     surface: ApiCompatibilitySurface,
     result: ApiCompatibilityResult,
 ) -> Result<ApiCompatibilityMetricPlan, TelemetryAttributeError> {
-    let surface_label = TelemetryAttribute::metric_label(
-        {
-            #[cfg(feature = "mojo")]
-            {
-                crate::mojo::label_key(11)
-            }
-            #[cfg(not(feature = "mojo"))]
-            {
-                "api_compatibility_surface"
-            }
-        },
+    let surface_label = crate::planning_support::validated_metric_label(
+        crate::planning_support::label_key(11, "api_compatibility_surface"),
         api_compatibility_surface_label(surface),
-    );
-    let result_label = TelemetryAttribute::metric_label(
-        {
-            #[cfg(feature = "mojo")]
-            {
-                crate::mojo::label_key(10)
-            }
-            #[cfg(not(feature = "mojo"))]
-            {
-                "api_compatibility_result"
-            }
-        },
+    )?;
+    let result_label = crate::planning_support::validated_metric_label(
+        crate::planning_support::label_key(10, "api_compatibility_result"),
         api_compatibility_result_label(result),
-    );
-    surface_label.as_metric_label()?;
-    result_label.as_metric_label()?;
+    )?;
     Ok(ApiCompatibilityMetricPlan {
-        metric_name: {
-            #[cfg(feature = "mojo")]
-            {
-                crate::mojo::metric_name(10, 0)
-            }
-            #[cfg(not(feature = "mojo"))]
-            {
-                "prodex_api_compatibility_events_total"
-            }
-        },
+        metric_name: crate::planning_support::metric_name(
+            10,
+            0,
+            "prodex_api_compatibility_events_total",
+        ),
         increment: 1,
         surface_label,
         result_label,
@@ -474,45 +234,20 @@ pub fn plan_api_mutation_audit_metric(
     surface: ApiMutationAuditSurface,
     result: ApiMutationAuditResult,
 ) -> Result<ApiMutationAuditMetricPlan, TelemetryAttributeError> {
-    let surface_label = TelemetryAttribute::metric_label(
-        {
-            #[cfg(feature = "mojo")]
-            {
-                crate::mojo::label_key(19)
-            }
-            #[cfg(not(feature = "mojo"))]
-            {
-                "api_mutation_audit_surface"
-            }
-        },
+    let surface_label = crate::planning_support::validated_metric_label(
+        crate::planning_support::label_key(19, "api_mutation_audit_surface"),
         api_mutation_audit_surface_label(surface),
-    );
-    let result_label = TelemetryAttribute::metric_label(
-        {
-            #[cfg(feature = "mojo")]
-            {
-                crate::mojo::label_key(18)
-            }
-            #[cfg(not(feature = "mojo"))]
-            {
-                "api_mutation_audit_result"
-            }
-        },
+    )?;
+    let result_label = crate::planning_support::validated_metric_label(
+        crate::planning_support::label_key(18, "api_mutation_audit_result"),
         api_mutation_audit_result_label(result),
-    );
-    surface_label.as_metric_label()?;
-    result_label.as_metric_label()?;
+    )?;
     Ok(ApiMutationAuditMetricPlan {
-        metric_name: {
-            #[cfg(feature = "mojo")]
-            {
-                crate::mojo::metric_name(14, 0)
-            }
-            #[cfg(not(feature = "mojo"))]
-            {
-                "prodex_api_mutation_audit_events_total"
-            }
-        },
+        metric_name: crate::planning_support::metric_name(
+            14,
+            0,
+            "prodex_api_mutation_audit_events_total",
+        ),
         increment: 1,
         surface_label,
         result_label,
@@ -523,45 +258,20 @@ pub fn plan_api_version_metric(
     surface: ApiVersionSurface,
     result: ApiVersionResult,
 ) -> Result<ApiVersionMetricPlan, TelemetryAttributeError> {
-    let surface_label = TelemetryAttribute::metric_label(
-        {
-            #[cfg(feature = "mojo")]
-            {
-                crate::mojo::label_key(34)
-            }
-            #[cfg(not(feature = "mojo"))]
-            {
-                "api_version_surface"
-            }
-        },
+    let surface_label = crate::planning_support::validated_metric_label(
+        crate::planning_support::label_key(34, "api_version_surface"),
         api_version_surface_label(surface),
-    );
-    let result_label = TelemetryAttribute::metric_label(
-        {
-            #[cfg(feature = "mojo")]
-            {
-                crate::mojo::label_key(33)
-            }
-            #[cfg(not(feature = "mojo"))]
-            {
-                "api_version_result"
-            }
-        },
+    )?;
+    let result_label = crate::planning_support::validated_metric_label(
+        crate::planning_support::label_key(33, "api_version_result"),
         api_version_result_label(result),
-    );
-    surface_label.as_metric_label()?;
-    result_label.as_metric_label()?;
+    )?;
     Ok(ApiVersionMetricPlan {
-        metric_name: {
-            #[cfg(feature = "mojo")]
-            {
-                crate::mojo::metric_name(22, 0)
-            }
-            #[cfg(not(feature = "mojo"))]
-            {
-                "prodex_api_version_negotiation_events_total"
-            }
-        },
+        metric_name: crate::planning_support::metric_name(
+            22,
+            0,
+            "prodex_api_version_negotiation_events_total",
+        ),
         increment: 1,
         surface_label,
         result_label,
@@ -572,45 +282,20 @@ pub fn plan_api_spec_publication_metric(
     surface: ApiSpecSurface,
     result: ApiSpecPublicationResult,
 ) -> Result<ApiSpecPublicationMetricPlan, TelemetryAttributeError> {
-    let surface_label = TelemetryAttribute::metric_label(
-        {
-            #[cfg(feature = "mojo")]
-            {
-                crate::mojo::label_key(28)
-            }
-            #[cfg(not(feature = "mojo"))]
-            {
-                "api_spec_surface"
-            }
-        },
+    let surface_label = crate::planning_support::validated_metric_label(
+        crate::planning_support::label_key(28, "api_spec_surface"),
         api_spec_surface_label(surface),
-    );
-    let result_label = TelemetryAttribute::metric_label(
-        {
-            #[cfg(feature = "mojo")]
-            {
-                crate::mojo::label_key(27)
-            }
-            #[cfg(not(feature = "mojo"))]
-            {
-                "api_spec_publication_result"
-            }
-        },
+    )?;
+    let result_label = crate::planning_support::validated_metric_label(
+        crate::planning_support::label_key(27, "api_spec_publication_result"),
         api_spec_publication_result_label(result),
-    );
-    surface_label.as_metric_label()?;
-    result_label.as_metric_label()?;
+    )?;
     Ok(ApiSpecPublicationMetricPlan {
-        metric_name: {
-            #[cfg(feature = "mojo")]
-            {
-                crate::mojo::metric_name(19, 0)
-            }
-            #[cfg(not(feature = "mojo"))]
-            {
-                "prodex_api_spec_publication_events_total"
-            }
-        },
+        metric_name: crate::planning_support::metric_name(
+            19,
+            0,
+            "prodex_api_spec_publication_events_total",
+        ),
         increment: 1,
         surface_label,
         result_label,
@@ -621,45 +306,20 @@ pub fn plan_api_error_envelope_metric(
     surface: ApiErrorEnvelopeSurface,
     result: ApiErrorEnvelopeResult,
 ) -> Result<ApiErrorEnvelopeMetricPlan, TelemetryAttributeError> {
-    let surface_label = TelemetryAttribute::metric_label(
-        {
-            #[cfg(feature = "mojo")]
-            {
-                crate::mojo::label_key(15)
-            }
-            #[cfg(not(feature = "mojo"))]
-            {
-                "api_error_envelope_surface"
-            }
-        },
+    let surface_label = crate::planning_support::validated_metric_label(
+        crate::planning_support::label_key(15, "api_error_envelope_surface"),
         api_error_envelope_surface_label(surface),
-    );
-    let result_label = TelemetryAttribute::metric_label(
-        {
-            #[cfg(feature = "mojo")]
-            {
-                crate::mojo::label_key(14)
-            }
-            #[cfg(not(feature = "mojo"))]
-            {
-                "api_error_envelope_result"
-            }
-        },
+    )?;
+    let result_label = crate::planning_support::validated_metric_label(
+        crate::planning_support::label_key(14, "api_error_envelope_result"),
         api_error_envelope_result_label(result),
-    );
-    surface_label.as_metric_label()?;
-    result_label.as_metric_label()?;
+    )?;
     Ok(ApiErrorEnvelopeMetricPlan {
-        metric_name: {
-            #[cfg(feature = "mojo")]
-            {
-                crate::mojo::metric_name(12, 0)
-            }
-            #[cfg(not(feature = "mojo"))]
-            {
-                "prodex_api_error_envelope_events_total"
-            }
-        },
+        metric_name: crate::planning_support::metric_name(
+            12,
+            0,
+            "prodex_api_error_envelope_events_total",
+        ),
         increment: 1,
         surface_label,
         result_label,
@@ -670,45 +330,20 @@ pub fn plan_api_body_limit_metric(
     surface: ApiBodyLimitSurface,
     result: ApiBodyLimitResult,
 ) -> Result<ApiBodyLimitMetricPlan, TelemetryAttributeError> {
-    let surface_label = TelemetryAttribute::metric_label(
-        {
-            #[cfg(feature = "mojo")]
-            {
-                crate::mojo::label_key(7)
-            }
-            #[cfg(not(feature = "mojo"))]
-            {
-                "api_body_limit_surface"
-            }
-        },
+    let surface_label = crate::planning_support::validated_metric_label(
+        crate::planning_support::label_key(7, "api_body_limit_surface"),
         api_body_limit_surface_label(surface),
-    );
-    let result_label = TelemetryAttribute::metric_label(
-        {
-            #[cfg(feature = "mojo")]
-            {
-                crate::mojo::label_key(6)
-            }
-            #[cfg(not(feature = "mojo"))]
-            {
-                "api_body_limit_result"
-            }
-        },
+    )?;
+    let result_label = crate::planning_support::validated_metric_label(
+        crate::planning_support::label_key(6, "api_body_limit_result"),
         api_body_limit_result_label(result),
-    );
-    surface_label.as_metric_label()?;
-    result_label.as_metric_label()?;
+    )?;
     Ok(ApiBodyLimitMetricPlan {
-        metric_name: {
-            #[cfg(feature = "mojo")]
-            {
-                crate::mojo::metric_name(8, 0)
-            }
-            #[cfg(not(feature = "mojo"))]
-            {
-                "prodex_api_body_limit_events_total"
-            }
-        },
+        metric_name: crate::planning_support::metric_name(
+            8,
+            0,
+            "prodex_api_body_limit_events_total",
+        ),
         increment: 1,
         surface_label,
         result_label,
@@ -719,45 +354,20 @@ pub fn plan_api_timeout_budget_metric(
     surface: ApiTimeoutBudgetSurface,
     result: ApiTimeoutBudgetResult,
 ) -> Result<ApiTimeoutBudgetMetricPlan, TelemetryAttributeError> {
-    let surface_label = TelemetryAttribute::metric_label(
-        {
-            #[cfg(feature = "mojo")]
-            {
-                crate::mojo::label_key(32)
-            }
-            #[cfg(not(feature = "mojo"))]
-            {
-                "api_timeout_budget_surface"
-            }
-        },
+    let surface_label = crate::planning_support::validated_metric_label(
+        crate::planning_support::label_key(32, "api_timeout_budget_surface"),
         api_timeout_budget_surface_label(surface),
-    );
-    let result_label = TelemetryAttribute::metric_label(
-        {
-            #[cfg(feature = "mojo")]
-            {
-                crate::mojo::label_key(31)
-            }
-            #[cfg(not(feature = "mojo"))]
-            {
-                "api_timeout_budget_result"
-            }
-        },
+    )?;
+    let result_label = crate::planning_support::validated_metric_label(
+        crate::planning_support::label_key(31, "api_timeout_budget_result"),
         api_timeout_budget_result_label(result),
-    );
-    surface_label.as_metric_label()?;
-    result_label.as_metric_label()?;
+    )?;
     Ok(ApiTimeoutBudgetMetricPlan {
-        metric_name: {
-            #[cfg(feature = "mojo")]
-            {
-                crate::mojo::metric_name(21, 0)
-            }
-            #[cfg(not(feature = "mojo"))]
-            {
-                "prodex_api_timeout_budget_events_total"
-            }
-        },
+        metric_name: crate::planning_support::metric_name(
+            21,
+            0,
+            "prodex_api_timeout_budget_events_total",
+        ),
         increment: 1,
         surface_label,
         result_label,
@@ -768,45 +378,20 @@ pub fn plan_api_cancellation_metric(
     surface: ApiCancellationSurface,
     source: ApiCancellationSource,
 ) -> Result<ApiCancellationMetricPlan, TelemetryAttributeError> {
-    let surface_label = TelemetryAttribute::metric_label(
-        {
-            #[cfg(feature = "mojo")]
-            {
-                crate::mojo::label_key(9)
-            }
-            #[cfg(not(feature = "mojo"))]
-            {
-                "api_cancellation_surface"
-            }
-        },
+    let surface_label = crate::planning_support::validated_metric_label(
+        crate::planning_support::label_key(9, "api_cancellation_surface"),
         api_cancellation_surface_label(surface),
-    );
-    let source_label = TelemetryAttribute::metric_label(
-        {
-            #[cfg(feature = "mojo")]
-            {
-                crate::mojo::label_key(8)
-            }
-            #[cfg(not(feature = "mojo"))]
-            {
-                "api_cancellation_source"
-            }
-        },
+    )?;
+    let source_label = crate::planning_support::validated_metric_label(
+        crate::planning_support::label_key(8, "api_cancellation_source"),
         api_cancellation_source_label(source),
-    );
-    surface_label.as_metric_label()?;
-    source_label.as_metric_label()?;
+    )?;
     Ok(ApiCancellationMetricPlan {
-        metric_name: {
-            #[cfg(feature = "mojo")]
-            {
-                crate::mojo::metric_name(9, 0)
-            }
-            #[cfg(not(feature = "mojo"))]
-            {
-                "prodex_api_cancellation_events_total"
-            }
-        },
+        metric_name: crate::planning_support::metric_name(
+            9,
+            0,
+            "prodex_api_cancellation_events_total",
+        ),
         increment: 1,
         surface_label,
         source_label,
@@ -817,45 +402,20 @@ pub fn plan_api_stream_backpressure_metric(
     surface: ApiStreamBackpressureSurface,
     state: ApiStreamBackpressureState,
 ) -> Result<ApiStreamBackpressureMetricPlan, TelemetryAttributeError> {
-    let surface_label = TelemetryAttribute::metric_label(
-        {
-            #[cfg(feature = "mojo")]
-            {
-                crate::mojo::label_key(30)
-            }
-            #[cfg(not(feature = "mojo"))]
-            {
-                "api_stream_backpressure_surface"
-            }
-        },
+    let surface_label = crate::planning_support::validated_metric_label(
+        crate::planning_support::label_key(30, "api_stream_backpressure_surface"),
         api_stream_backpressure_surface_label(surface),
-    );
-    let state_label = TelemetryAttribute::metric_label(
-        {
-            #[cfg(feature = "mojo")]
-            {
-                crate::mojo::label_key(29)
-            }
-            #[cfg(not(feature = "mojo"))]
-            {
-                "api_stream_backpressure_state"
-            }
-        },
+    )?;
+    let state_label = crate::planning_support::validated_metric_label(
+        crate::planning_support::label_key(29, "api_stream_backpressure_state"),
         api_stream_backpressure_state_label(state),
-    );
-    surface_label.as_metric_label()?;
-    state_label.as_metric_label()?;
+    )?;
     Ok(ApiStreamBackpressureMetricPlan {
-        metric_name: {
-            #[cfg(feature = "mojo")]
-            {
-                crate::mojo::metric_name(20, 0)
-            }
-            #[cfg(not(feature = "mojo"))]
-            {
-                "prodex_api_stream_backpressure_events_total"
-            }
-        },
+        metric_name: crate::planning_support::metric_name(
+            20,
+            0,
+            "prodex_api_stream_backpressure_events_total",
+        ),
         increment: 1,
         surface_label,
         state_label,

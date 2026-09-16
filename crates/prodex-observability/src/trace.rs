@@ -151,45 +151,20 @@ pub fn plan_trace_propagation_metric(
     carrier: TracePropagationCarrier,
     result: TracePropagationResult,
 ) -> Result<TracePropagationMetricPlan, TelemetryAttributeError> {
-    let carrier_label = TelemetryAttribute::metric_label(
-        {
-            #[cfg(feature = "mojo")]
-            {
-                crate::mojo::label_key(145)
-            }
-            #[cfg(not(feature = "mojo"))]
-            {
-                "trace_carrier"
-            }
-        },
+    let carrier_label = crate::planning_support::validated_metric_label(
+        crate::planning_support::label_key(145, "trace_carrier"),
         trace_propagation_carrier_label(carrier),
-    );
-    let result_label = TelemetryAttribute::metric_label(
-        {
-            #[cfg(feature = "mojo")]
-            {
-                crate::mojo::label_key(146)
-            }
-            #[cfg(not(feature = "mojo"))]
-            {
-                "trace_propagation_result"
-            }
-        },
+    )?;
+    let result_label = crate::planning_support::validated_metric_label(
+        crate::planning_support::label_key(146, "trace_propagation_result"),
         trace_propagation_result_label(result),
-    );
-    carrier_label.as_metric_label()?;
-    result_label.as_metric_label()?;
+    )?;
     Ok(TracePropagationMetricPlan {
-        metric_name: {
-            #[cfg(feature = "mojo")]
-            {
-                crate::mojo::metric_name(75, 0)
-            }
-            #[cfg(not(feature = "mojo"))]
-            {
-                "prodex_trace_propagation_events_total"
-            }
-        },
+        metric_name: crate::planning_support::metric_name(
+            75,
+            0,
+            "prodex_trace_propagation_events_total",
+        ),
         increment: 1,
         carrier_label,
         result_label,
