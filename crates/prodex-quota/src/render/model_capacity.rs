@@ -129,6 +129,14 @@ pub fn openai_effective_model_for_usage(
 }
 
 fn openai_usage_advertises_luna_reserve(usage: &UsageResponse) -> bool {
+    if usage
+        .additional_rate_limits
+        .iter()
+        .any(additional_rate_limit_is_luna_reserve)
+    {
+        return true;
+    }
+
     usage
         .rate_limit
         .as_ref()

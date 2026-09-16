@@ -162,7 +162,8 @@ fn app_server_rate_limits_payload_keeps_regular_and_reserve_buckets_separate() {
             Some("acct-luna"),
             true,
         ),
-        None
+        Some("gpt-reserve"),
+        "the explicit mapped gpt-reserve bucket is authoritative even when the upsell banner is omitted"
     );
     let mut ordinary_allowed = usage.clone();
     ordinary_allowed.rate_limit.as_mut().unwrap().allowed = Some(true);

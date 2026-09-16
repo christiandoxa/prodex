@@ -656,9 +656,10 @@ shared-state integration around those operations.
   explicit `allowed`, `limit_reached`, `ordinaryUsageAllowed`, `normalModelSlug`, and unknown
   future fields. The pinned Codex `rust-v0.154.0` contract exposes backend admission and model
   mapping metadata. Reserve-aware usage reads advertise
-  `x-openai-codex-luna-reserve: 1`. Prodex requires `ordinaryUsageAllowed=false`, an explicit
-  `rateLimitUpsell.banner_type=luna_reserve`, `normalModelSlug=gpt-5.6-luna`, and a usable mapped
-  `gpt-reserve` bucket before routing on that bucket. Account identity must match when the usage
+  `x-openai-codex-luna-reserve: 1`. Prodex requires `ordinaryUsageAllowed=false`,
+  `normalModelSlug=gpt-5.6-luna`, and a usable explicitly mapped `gpt-reserve` bucket before
+  routing on that bucket. `rateLimitUpsell.banner_type=luna_reserve` is accepted as a compatibility
+  signal when present, but the backend may omit that presentation hint. Account identity must match when the usage
   response supplies it; otherwise the authenticated profile-scoped usage fetch is the authority.
   Sol and Terra never use Reserve. Prodex accepts only `gpt-5.6-luna` from the client and changes
   the final upstream model to hidden `gpt-reserve` after profile selection. The original requested

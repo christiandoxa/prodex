@@ -63,7 +63,6 @@ fn runtime_luna_reserve_request_uses_hidden_upstream_model_without_reset_claim()
     write_auth_json(&codex_home.join("auth.json"), "main-account");
     let reserve_usage: UsageResponse = serde_json::from_value(serde_json::json!({
         "ordinaryUsageAllowed": false,
-        "rateLimitUpsell": { "banner_type": "luna_reserve" },
         "rateLimitResetCredits": { "availableCount": 2 },
         "rateLimitsByLimitId": {
             "codex": {
