@@ -1,5 +1,3 @@
-use super::*;
-
 pub(in crate::runtime_launch::proxy_startup) enum RuntimeGovernanceRepository<'a> {
     Sqlite(GovernanceSqliteRepository),
     Postgres {
@@ -477,3 +475,14 @@ pub(in crate::runtime_launch::proxy_startup) fn storage_unavailable() -> tiny_ht
         "policy governance storage is temporarily unavailable",
     )
 }
+use super::{
+    ApplicationGovernanceRepository, ApprovalAction, ApprovalId, ApprovalKind, ApprovalRecord,
+    ApprovalVoteIdempotency, ApprovalVoteMutationOutcome, ApprovalVoteRequest, AuditEventId,
+    AuditOutboxWriteCommand, AuditRetentionHold, GovernanceActivationRequest,
+    GovernanceActivationResult, GovernanceArtifactKind, GovernanceArtifactValidationInput,
+    GovernanceAuditExportRecord, GovernanceAuditIntegrityHealth, GovernanceMutationIdempotency,
+    GovernanceOutboxHealth, GovernanceRepositoryError, GovernanceRevisionSummary,
+    GovernanceRevisionWriteCommand, GovernanceSqliteRepository, GovernanceStatus,
+    GovernanceWriteOutcome, RuntimeGatewayStateStore, RuntimeLocalRewriteProxyShared,
+    build_runtime_proxy_json_error_response, repository_error,
+};

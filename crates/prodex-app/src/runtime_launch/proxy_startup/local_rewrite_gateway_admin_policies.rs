@@ -60,7 +60,6 @@ use prodex_storage::{
     GovernanceRevisionWriteCommand, GovernanceStatus, GovernanceWriteOutcome, TenantStorageKey,
 };
 use prodex_storage_sqlite_runtime::GovernanceSqliteRepository;
-use sha2::{Digest, Sha256};
 use std::str::FromStr;
 
 use super::local_rewrite::RuntimeLocalRewriteProxyShared;
