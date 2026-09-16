@@ -87,6 +87,25 @@ unsafe extern "C" {
         path: *const ProdexStringView,
         output: *mut i64,
     ) -> i64;
+    fn prodex_context_watcher_line_semantics_v1(
+        abi_version: i64,
+        line: *const ProdexStringView,
+        key_output: *mut u8,
+        key_capacity: i64,
+        output: *mut i64,
+        output_count: i64,
+    ) -> i64;
+    fn prodex_context_watcher_should_compact_v1(
+        abi_version: i64,
+        kind: i64,
+        line_count: i64,
+        max_lines: i64,
+        marker_count: i64,
+        duplicate_keys: i64,
+        state_lines: i64,
+        failure_lines: i64,
+        output: *mut i64,
+    ) -> i64;
     fn prodex_context_estimate_tokens(chars: u64, words: u64) -> u64;
     fn prodex_context_signal_diff(
         before: *const i64,
@@ -226,6 +245,104 @@ fn text_abi_is_ready() -> bool {
 pub const CONTEXT_COMMAND_SUCCESS_CANDIDATE: i64 = 1;
 pub const CONTEXT_COMMAND_SHORT_SUCCESS_CANDIDATE: i64 = 2;
 pub const CONTEXT_COMMAND_PATH_RELEVANT_SUCCESS: i64 = 4;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ContextWatcherLineSemantics {
+    pub marker: i64,
+    pub state: i64,
+    pub failure: bool,
+    pub key: Option<String>,
+}
+
+pub fn watcher_line_semantics(line: &str) -> Result<ContextWatcherLineSemantics, crate::MojoError> {
+    if !text_abi_is_ready() {
+        return Err(crate::MojoError::AbiMismatch);
+    }
+    let key_capacity = line.len().saturating_add(1);
+    let mut key = vec![0_u8; key_capacity.max(1)];
+    let view = ProdexStringView {
+        ptr: line.as_ptr(),
+        len: line.len(),
+    };
+    let mut output = [0_i64; 4];
+    let status = unsafe {
+        prodex_context_watcher_line_semantics_v1(
+            CONTEXT_TEXT_ABI_VERSION,
+            &view,
+            key.as_mut_ptr(),
+            i64::try_from(key.len()).map_err(|_| crate::MojoError::InvalidInput)?,
+            output.as_mut_ptr(),
+            output.len() as i64,
+        )
+    };
+    if status != 0 {
+        return Err(match status {
+            1 | 2 => crate::MojoError::InvalidInput,
+            4 => crate::MojoError::AbiMismatch,
+            _ => crate::MojoError::InvalidOutput,
+        });
+    }
+    if !(0..=3).contains(&output[0])
+        || !(0..=6).contains(&output[1])
+        || !(0..=1).contains(&output[2])
+    {
+        return Err(crate::MojoError::InvalidOutput);
+    }
+    let key = match output[3] {
+        -1 => None,
+        written if written >= 0 => {
+            let written = usize::try_from(written).map_err(|_| crate::MojoError::InvalidOutput)?;
+            if written > key.len() {
+                return Err(crate::MojoError::InvalidOutput);
+            }
+            key.truncate(written);
+            Some(String::from_utf8(key).map_err(|_| crate::MojoError::InvalidOutput)?)
+        }
+        _ => return Err(crate::MojoError::Capacity),
+    };
+    Ok(ContextWatcherLineSemantics {
+        marker: output[0],
+        state: output[1],
+        failure: output[2] == 1,
+        key,
+    })
+}
+
+pub fn watcher_should_compact(
+    kind: i64,
+    line_count: usize,
+    max_lines: usize,
+    marker_count: usize,
+    duplicate_keys: usize,
+    state_lines: usize,
+    failure_lines: usize,
+) -> Result<bool, crate::MojoError> {
+    if !text_abi_is_ready() {
+        return Err(crate::MojoError::AbiMismatch);
+    }
+    let as_i64 = |value: usize| i64::try_from(value).map_err(|_| crate::MojoError::InvalidInput);
+    let mut output = 0_i64;
+    let status = unsafe {
+        prodex_context_watcher_should_compact_v1(
+            CONTEXT_TEXT_ABI_VERSION,
+            kind,
+            as_i64(line_count)?,
+            as_i64(max_lines)?,
+            as_i64(marker_count)?,
+            as_i64(duplicate_keys)?,
+            as_i64(state_lines)?,
+            as_i64(failure_lines)?,
+            &mut output,
+        )
+    };
+    match (status, output) {
+        (0, 0) => Ok(false),
+        (0, 1) => Ok(true),
+        (1, _) => Err(crate::MojoError::InvalidInput),
+        (4, _) => Err(crate::MojoError::AbiMismatch),
+        _ => Err(crate::MojoError::InvalidOutput),
+    }
+}
 
 pub fn command_success_flags(metadata: &str) -> Result<i64, crate::MojoError> {
     let _ = i64::try_from(metadata.len()).map_err(|_| crate::MojoError::InvalidInput)?;
