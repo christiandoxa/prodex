@@ -216,8 +216,8 @@
   },
   {
     "file": "crates/prodex-app/src/runtime_tools/sub_agents.rs",
-    "maxLines": 1419,
-    "reason": "Typed sub-agent resolution, cross-process slot leases, strict tool inheritance, recursion protection, output validation, and overlay lifecycle form one audited launch-policy boundary; process supervision, provider catalog choices, and rendering live in focused sibling modules."
+    "maxLines": 1429,
+    "reason": "Typed sub-agent resolution, cross-process slot leases, strict tool inheritance, recursion protection, output validation, and overlay lifecycle form one audited launch-policy boundary; the narrow increase adds bounded recovery when parallel Cargo jobs briefly replace the test executable, while process supervision, provider catalog choices, and rendering remain in focused sibling modules."
   },
   {
     "file": "crates/prodex-app/tests/src/runtime_proxy/smart_context/prepare.rs",
