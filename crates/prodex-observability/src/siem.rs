@@ -36,7 +36,16 @@ pub fn plan_siem_outbox_health_metric(
         SiemOutboxHealthStatus::Healthy
     };
     let status_label = TelemetryAttribute::metric_label(
-        "siem_outbox_status",
+        {
+            #[cfg(feature = "mojo")]
+            {
+                crate::mojo::label_key(138)
+            }
+            #[cfg(not(feature = "mojo"))]
+            {
+                "siem_outbox_status"
+            }
+        },
         match status {
             SiemOutboxHealthStatus::Healthy => "healthy",
             SiemOutboxHealthStatus::Lagging => "lagging",
@@ -46,9 +55,36 @@ pub fn plan_siem_outbox_health_metric(
     status_label.as_metric_label()?;
 
     Ok(SiemOutboxHealthMetricPlan {
-        pending_metric_name: "prodex_governance_siem_outbox_pending",
-        dead_letter_metric_name: "prodex_governance_siem_outbox_dead_lettered",
-        lag_metric_name: "prodex_governance_siem_outbox_oldest_pending_lag_milliseconds",
+        pending_metric_name: {
+            #[cfg(feature = "mojo")]
+            {
+                crate::mojo::metric_name(74, 0)
+            }
+            #[cfg(not(feature = "mojo"))]
+            {
+                "prodex_governance_siem_outbox_pending"
+            }
+        },
+        dead_letter_metric_name: {
+            #[cfg(feature = "mojo")]
+            {
+                crate::mojo::metric_name(74, 1)
+            }
+            #[cfg(not(feature = "mojo"))]
+            {
+                "prodex_governance_siem_outbox_dead_lettered"
+            }
+        },
+        lag_metric_name: {
+            #[cfg(feature = "mojo")]
+            {
+                crate::mojo::metric_name(74, 2)
+            }
+            #[cfg(not(feature = "mojo"))]
+            {
+                "prodex_governance_siem_outbox_oldest_pending_lag_milliseconds"
+            }
+        },
         pending,
         dead_lettered,
         lag_milliseconds,

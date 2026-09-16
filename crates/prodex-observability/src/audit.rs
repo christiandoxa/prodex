@@ -100,13 +100,45 @@ pub fn plan_audit_metric(
     operation: AuditOperation,
     result: AuditResult,
 ) -> Result<AuditMetricPlan, TelemetryAttributeError> {
-    let operation_label =
-        TelemetryAttribute::metric_label("audit_operation", audit_operation_label(operation));
-    let result_label = TelemetryAttribute::metric_label("audit_result", audit_result_label(result));
+    let operation_label = TelemetryAttribute::metric_label(
+        {
+            #[cfg(feature = "mojo")]
+            {
+                crate::mojo::label_key(37)
+            }
+            #[cfg(not(feature = "mojo"))]
+            {
+                "audit_operation"
+            }
+        },
+        audit_operation_label(operation),
+    );
+    let result_label = TelemetryAttribute::metric_label(
+        {
+            #[cfg(feature = "mojo")]
+            {
+                crate::mojo::label_key(40)
+            }
+            #[cfg(not(feature = "mojo"))]
+            {
+                "audit_result"
+            }
+        },
+        audit_result_label(result),
+    );
     operation_label.as_metric_label()?;
     result_label.as_metric_label()?;
     Ok(AuditMetricPlan {
-        metric_name: "prodex_audit_events_total",
+        metric_name: {
+            #[cfg(feature = "mojo")]
+            {
+                crate::mojo::metric_name(25, 0)
+            }
+            #[cfg(not(feature = "mojo"))]
+            {
+                "prodex_audit_events_total"
+            }
+        },
         increment: 1,
         operation_label,
         result_label,
@@ -118,17 +150,44 @@ pub fn plan_audit_query_lifecycle_metric(
     result: AuditQueryLifecycleResult,
 ) -> Result<AuditQueryLifecycleMetricPlan, TelemetryAttributeError> {
     let operation_label = TelemetryAttribute::metric_label(
-        "audit_query_operation",
+        {
+            #[cfg(feature = "mojo")]
+            {
+                crate::mojo::label_key(38)
+            }
+            #[cfg(not(feature = "mojo"))]
+            {
+                "audit_query_operation"
+            }
+        },
         audit_query_lifecycle_operation_label(operation),
     );
     let result_label = TelemetryAttribute::metric_label(
-        "audit_query_result",
+        {
+            #[cfg(feature = "mojo")]
+            {
+                crate::mojo::label_key(39)
+            }
+            #[cfg(not(feature = "mojo"))]
+            {
+                "audit_query_result"
+            }
+        },
         audit_query_lifecycle_result_label(result),
     );
     operation_label.as_metric_label()?;
     result_label.as_metric_label()?;
     Ok(AuditQueryLifecycleMetricPlan {
-        metric_name: "prodex_audit_query_lifecycle_events_total",
+        metric_name: {
+            #[cfg(feature = "mojo")]
+            {
+                crate::mojo::metric_name(26, 0)
+            }
+            #[cfg(not(feature = "mojo"))]
+            {
+                "prodex_audit_query_lifecycle_events_total"
+            }
+        },
         increment: 1,
         operation_label,
         result_label,
@@ -140,15 +199,44 @@ pub fn plan_audit_chain_metric(
     result: AuditChainResult,
 ) -> Result<AuditChainMetricPlan, TelemetryAttributeError> {
     let operation_label = TelemetryAttribute::metric_label(
-        "audit_chain_operation",
+        {
+            #[cfg(feature = "mojo")]
+            {
+                crate::mojo::label_key(35)
+            }
+            #[cfg(not(feature = "mojo"))]
+            {
+                "audit_chain_operation"
+            }
+        },
         audit_chain_operation_label(operation),
     );
-    let result_label =
-        TelemetryAttribute::metric_label("audit_chain_result", audit_chain_result_label(result));
+    let result_label = TelemetryAttribute::metric_label(
+        {
+            #[cfg(feature = "mojo")]
+            {
+                crate::mojo::label_key(36)
+            }
+            #[cfg(not(feature = "mojo"))]
+            {
+                "audit_chain_result"
+            }
+        },
+        audit_chain_result_label(result),
+    );
     operation_label.as_metric_label()?;
     result_label.as_metric_label()?;
     Ok(AuditChainMetricPlan {
-        metric_name: "prodex_audit_chain_events_total",
+        metric_name: {
+            #[cfg(feature = "mojo")]
+            {
+                crate::mojo::metric_name(24, 0)
+            }
+            #[cfg(not(feature = "mojo"))]
+            {
+                "prodex_audit_chain_events_total"
+            }
+        },
         increment: 1,
         operation_label,
         result_label,
@@ -160,91 +248,190 @@ pub fn plan_audit_retention_purge_metric(
     result: AuditRetentionPurgeResult,
 ) -> Result<AuditRetentionPurgeMetricPlan, TelemetryAttributeError> {
     let operation_label = TelemetryAttribute::metric_label(
-        "audit_retention_operation",
+        {
+            #[cfg(feature = "mojo")]
+            {
+                crate::mojo::label_key(41)
+            }
+            #[cfg(not(feature = "mojo"))]
+            {
+                "audit_retention_operation"
+            }
+        },
         audit_retention_purge_operation_label(operation),
     );
     let result_label = TelemetryAttribute::metric_label(
-        "audit_retention_result",
+        {
+            #[cfg(feature = "mojo")]
+            {
+                crate::mojo::label_key(42)
+            }
+            #[cfg(not(feature = "mojo"))]
+            {
+                "audit_retention_result"
+            }
+        },
         audit_retention_purge_result_label(result),
     );
     operation_label.as_metric_label()?;
     result_label.as_metric_label()?;
     Ok(AuditRetentionPurgeMetricPlan {
-        metric_name: "prodex_audit_retention_purge_events_total",
+        metric_name: {
+            #[cfg(feature = "mojo")]
+            {
+                crate::mojo::metric_name(27, 0)
+            }
+            #[cfg(not(feature = "mojo"))]
+            {
+                "prodex_audit_retention_purge_events_total"
+            }
+        },
         increment: 1,
         operation_label,
         result_label,
     })
 }
 
-fn audit_operation_label(operation: AuditOperation) -> &'static str {
-    match operation {
-        AuditOperation::Emit => "emit",
-        AuditOperation::Persist => "persist",
-        AuditOperation::Export => "export",
+fn audit_operation_label(operation: AuditOperation) -> String {
+    #[cfg(feature = "mojo")]
+    {
+        prodex_mojo_core::observability::label(48, operation as i64)
+            .expect("Mojo observability label planner returned invalid output")
+    }
+    #[cfg(not(feature = "mojo"))]
+    {
+        (match operation {
+            AuditOperation::Emit => "emit",
+            AuditOperation::Persist => "persist",
+            AuditOperation::Export => "export",
+        })
+        .to_string()
     }
 }
 
-fn audit_result_label(result: AuditResult) -> &'static str {
-    match result {
-        AuditResult::Success => "success",
-        AuditResult::Failure => "failure",
-        AuditResult::Dropped => "dropped",
+fn audit_result_label(result: AuditResult) -> String {
+    #[cfg(feature = "mojo")]
+    {
+        prodex_mojo_core::observability::label(51, result as i64)
+            .expect("Mojo observability label planner returned invalid output")
+    }
+    #[cfg(not(feature = "mojo"))]
+    {
+        (match result {
+            AuditResult::Success => "success",
+            AuditResult::Failure => "failure",
+            AuditResult::Dropped => "dropped",
+        })
+        .to_string()
     }
 }
 
-fn audit_query_lifecycle_operation_label(operation: AuditQueryLifecycleOperation) -> &'static str {
-    match operation {
-        AuditQueryLifecycleOperation::PlanQuery => "plan_query",
-        AuditQueryLifecycleOperation::PageQuery => "page_query",
-        AuditQueryLifecycleOperation::PlanExport => "plan_export",
-        AuditQueryLifecycleOperation::SerializeExport => "serialize_export",
+fn audit_query_lifecycle_operation_label(operation: AuditQueryLifecycleOperation) -> String {
+    #[cfg(feature = "mojo")]
+    {
+        prodex_mojo_core::observability::label(49, operation as i64)
+            .expect("Mojo observability label planner returned invalid output")
+    }
+    #[cfg(not(feature = "mojo"))]
+    {
+        (match operation {
+            AuditQueryLifecycleOperation::PlanQuery => "plan_query",
+            AuditQueryLifecycleOperation::PageQuery => "page_query",
+            AuditQueryLifecycleOperation::PlanExport => "plan_export",
+            AuditQueryLifecycleOperation::SerializeExport => "serialize_export",
+        })
+        .to_string()
     }
 }
 
-fn audit_query_lifecycle_result_label(result: AuditQueryLifecycleResult) -> &'static str {
-    match result {
-        AuditQueryLifecycleResult::Planned => "planned",
-        AuditQueryLifecycleResult::PageReturned => "page_returned",
-        AuditQueryLifecycleResult::Empty => "empty",
-        AuditQueryLifecycleResult::Denied => "denied",
-        AuditQueryLifecycleResult::Failed => "failed",
+fn audit_query_lifecycle_result_label(result: AuditQueryLifecycleResult) -> String {
+    #[cfg(feature = "mojo")]
+    {
+        prodex_mojo_core::observability::label(50, result as i64)
+            .expect("Mojo observability label planner returned invalid output")
+    }
+    #[cfg(not(feature = "mojo"))]
+    {
+        (match result {
+            AuditQueryLifecycleResult::Planned => "planned",
+            AuditQueryLifecycleResult::PageReturned => "page_returned",
+            AuditQueryLifecycleResult::Empty => "empty",
+            AuditQueryLifecycleResult::Denied => "denied",
+            AuditQueryLifecycleResult::Failed => "failed",
+        })
+        .to_string()
     }
 }
 
-fn audit_chain_operation_label(operation: AuditChainOperation) -> &'static str {
-    match operation {
-        AuditChainOperation::Append => "append",
-        AuditChainOperation::VerifyLink => "verify_link",
-        AuditChainOperation::VerifyRange => "verify_range",
-        AuditChainOperation::ExportProof => "export_proof",
+fn audit_chain_operation_label(operation: AuditChainOperation) -> String {
+    #[cfg(feature = "mojo")]
+    {
+        prodex_mojo_core::observability::label(46, operation as i64)
+            .expect("Mojo observability label planner returned invalid output")
+    }
+    #[cfg(not(feature = "mojo"))]
+    {
+        (match operation {
+            AuditChainOperation::Append => "append",
+            AuditChainOperation::VerifyLink => "verify_link",
+            AuditChainOperation::VerifyRange => "verify_range",
+            AuditChainOperation::ExportProof => "export_proof",
+        })
+        .to_string()
     }
 }
 
-fn audit_chain_result_label(result: AuditChainResult) -> &'static str {
-    match result {
-        AuditChainResult::Success => "success",
-        AuditChainResult::Conflict => "conflict",
-        AuditChainResult::DigestInvalid => "digest_invalid",
-        AuditChainResult::GapDetected => "gap_detected",
-        AuditChainResult::Failed => "failed",
+fn audit_chain_result_label(result: AuditChainResult) -> String {
+    #[cfg(feature = "mojo")]
+    {
+        prodex_mojo_core::observability::label(47, result as i64)
+            .expect("Mojo observability label planner returned invalid output")
+    }
+    #[cfg(not(feature = "mojo"))]
+    {
+        (match result {
+            AuditChainResult::Success => "success",
+            AuditChainResult::Conflict => "conflict",
+            AuditChainResult::DigestInvalid => "digest_invalid",
+            AuditChainResult::GapDetected => "gap_detected",
+            AuditChainResult::Failed => "failed",
+        })
+        .to_string()
     }
 }
 
-fn audit_retention_purge_operation_label(operation: AuditRetentionPurgeOperation) -> &'static str {
-    match operation {
-        AuditRetentionPurgeOperation::SelectCandidates => "select_candidates",
-        AuditRetentionPurgeOperation::ApplyLegalHold => "apply_legal_hold",
-        AuditRetentionPurgeOperation::DeleteBatch => "delete_batch",
-        AuditRetentionPurgeOperation::VerifyChain => "verify_chain",
+fn audit_retention_purge_operation_label(operation: AuditRetentionPurgeOperation) -> String {
+    #[cfg(feature = "mojo")]
+    {
+        prodex_mojo_core::observability::label(52, operation as i64)
+            .expect("Mojo observability label planner returned invalid output")
+    }
+    #[cfg(not(feature = "mojo"))]
+    {
+        (match operation {
+            AuditRetentionPurgeOperation::SelectCandidates => "select_candidates",
+            AuditRetentionPurgeOperation::ApplyLegalHold => "apply_legal_hold",
+            AuditRetentionPurgeOperation::DeleteBatch => "delete_batch",
+            AuditRetentionPurgeOperation::VerifyChain => "verify_chain",
+        })
+        .to_string()
     }
 }
 
-fn audit_retention_purge_result_label(result: AuditRetentionPurgeResult) -> &'static str {
-    match result {
-        AuditRetentionPurgeResult::Success => "success",
-        AuditRetentionPurgeResult::Protected => "protected",
-        AuditRetentionPurgeResult::Empty => "empty",
-        AuditRetentionPurgeResult::Failed => "failed",
+fn audit_retention_purge_result_label(result: AuditRetentionPurgeResult) -> String {
+    #[cfg(feature = "mojo")]
+    {
+        prodex_mojo_core::observability::label(53, result as i64)
+            .expect("Mojo observability label planner returned invalid output")
+    }
+    #[cfg(not(feature = "mojo"))]
+    {
+        (match result {
+            AuditRetentionPurgeResult::Success => "success",
+            AuditRetentionPurgeResult::Protected => "protected",
+            AuditRetentionPurgeResult::Empty => "empty",
+            AuditRetentionPurgeResult::Failed => "failed",
+        })
+        .to_string()
     }
 }

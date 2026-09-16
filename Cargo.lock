@@ -3108,6 +3108,7 @@ name = "prodex-observability"
 version = "0.429.4"
 dependencies = [
  "prodex-domain",
+ "prodex-mojo-core",
 ]
 
 [[package]]
