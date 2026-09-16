@@ -112,10 +112,15 @@ pub fn openai_effective_model_for_usage(
     usage: &UsageResponse,
     requested_model: Option<&str>,
     authenticated_account_id: Option<&str>,
+    fetched_for_authenticated_account: bool,
 ) -> Option<&'static str> {
     if requested_model != Some(OPENAI_LUNA_MODEL)
         || usage.rate_limit.as_ref()?.allowed != Some(false)
-        || !openai_usage_account_matches(usage, authenticated_account_id)
+        || !openai_usage_account_matches(
+            usage,
+            authenticated_account_id,
+            fetched_for_authenticated_account,
+        )
         || !openai_quota_has_ready_luna_reserve(usage)
     {
         return None;
@@ -145,6 +150,7 @@ fn openai_usage_advertises_luna_reserve(usage: &UsageResponse) -> bool {
 fn openai_usage_account_matches(
     usage: &UsageResponse,
     authenticated_account_id: Option<&str>,
+    fetched_for_authenticated_account: bool,
 ) -> bool {
     let authenticated_account_id = authenticated_account_id.filter(|id| !id.is_empty());
     let response_account_id = usage.rate_limit.as_ref().and_then(|pair| {
@@ -155,8 +161,10 @@ fn openai_usage_account_matches(
                 .filter(|id| !id.is_empty())
         })
     });
-    response_account_id
-        .is_some_and(|response_account_id| authenticated_account_id == Some(response_account_id))
+    match response_account_id {
+        Some(response_account_id) => authenticated_account_id == Some(response_account_id),
+        None => fetched_for_authenticated_account && authenticated_account_id.is_some(),
+    }
 }
 
 pub(crate) fn additional_rate_limit_model_slug(

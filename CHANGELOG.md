@@ -52,8 +52,8 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 - Route eligible `gpt-5.6-luna` requests through the hidden `gpt-reserve`
   upstream model only after profile selection, while keeping the requested
   model unchanged for affinity, selection, logs, and public metadata.
-- Route each eligible WebSocket turn before send, including reused sessions and
-  continuations, without replaying committed output or tool effects.
+- Keep reused WebSocket sessions and continuations on their existing route so
+  Reserve recovery cannot replay committed output or tool effects.
 - Keep Luna Reserve activation independent from reset-credit redemption.
 
 ## Safety
