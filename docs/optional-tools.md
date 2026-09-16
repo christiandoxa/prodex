@@ -53,15 +53,15 @@ external release below:
 
 | Field | Required value |
 | --- | --- |
-| Version | `2.6.0` |
+| Version | `2.7.0` |
 | Source | `https://github.com/JuliusBrussee/caveman` |
-| Commit | `b82c0ad42c2bedc1f2cd78e414dadfaffbaaeec3` |
-| Prodex tree SHA-256 | `ddac7f7a89ae5a8d80d1b606620589e8ade7897d536663537bc82b8f6322d4a6` |
+| Commit | `8b0c1d3699b8d83e87fe4605b378da20c41555e0` |
+| Prodex tree SHA-256 | `26d587fc179e79f76f4e2b42edec0266a7af40cf08bf15eb4609de310fabd8fb` |
 
 Install the exact checked-out tree at:
 
 ```text
-<managed-root>/caveman/2.6.0/
+<managed-root>/caveman/2.7.0/
 ```
 
 The directory must contain the upstream `AGENTS.md`,
@@ -72,10 +72,10 @@ manifest as `prodex-tool.json`:
 {
   "schema_version": 1,
   "id": "caveman",
-  "version": "2.6.0",
+  "version": "2.7.0",
   "source": "https://github.com/JuliusBrussee/caveman",
-  "commit": "b82c0ad42c2bedc1f2cd78e414dadfaffbaaeec3",
-  "tree_sha256": "ddac7f7a89ae5a8d80d1b606620589e8ade7897d536663537bc82b8f6322d4a6"
+  "commit": "8b0c1d3699b8d83e87fe4605b378da20c41555e0",
+  "tree_sha256": "26d587fc179e79f76f4e2b42edec0266a7af40cf08bf15eb4609de310fabd8fb"
 }
 ```
 
@@ -91,17 +91,17 @@ versioned path shown above.
 ## Ponytail
 
 Ponytail uses the same manifest and tree-validation contract at
-`<managed-root>/ponytail/4.9.0/`. Its vetted metadata is:
+`<managed-root>/ponytail/4.10.0/`. Its vetted metadata is:
 
 - source: `https://github.com/DietrichGebert/ponytail`
-- commit: `0a4dd63ad4541f4f655c4108a295916f3c1d8fda`
-- tree SHA-256: `88c6dfa10bc0a63385a8f3f01bc4a3e51963c8fd76a0ebc0426bd889f0705970`
+- commit: `1d95ff7d39de12d87014ea40d4e22201bddc501b`
+- tree SHA-256: `5443a5ee4a7248adcb59e1e102dd5bbd14af3083a9c3b4f271dd86790ac88c9c`
 
 RTK `0.49.0` is the latest stable release validated for this Prodex release; it remains
 externally managed and version-compatible rather than latest-only. Codebase Memory MCP
-`0.10.8` is the latest stable release validated for this Prodex release. Both resolve from
+`0.11.0` is the latest stable release validated for this Prodex release. Both resolve from
 managed roots first and then `PATH`.
-The README installs the current stable Codebase Memory MCP `0.10.8`; Prodex
+The README installs the current stable Codebase Memory MCP `0.11.0`; Prodex
 continues to accept `0.9.1-rc.1` or newer (or a development build) and
 expose its native `daemon status` contract. The explicit health check verifies
 this contract; normal optional launch resolution does not synchronously spawn
@@ -115,7 +115,7 @@ Kiro launches retain that shared server but add `check_index_coverage` to the
 server's `disabledTools` list because Kiro/Bedrock rejects its top-level JSON
 Schema composition; all other Codebase Memory tools remain available.
 Playwright MCP requires validated Node.js 18+, `npx`, and the pinned
-`@playwright/mcp@0.0.80` package to pass an offline probe; install the package
+`@playwright/mcp@0.0.81` package to pass an offline probe; install the package
 and browser before launching Super, then use `prodex capability super-doctor`
 to verify it explicitly.
 Presidio remains an explicit service selection and is checked by its existing
