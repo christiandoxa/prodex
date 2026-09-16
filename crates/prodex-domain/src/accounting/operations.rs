@@ -1,48 +1,5 @@
 use super::*;
 
-#[cfg(feature = "mojo")]
-pub fn reserve_budget(
-    snapshot: BudgetSnapshot,
-    limit: BudgetLimit,
-    request: ReservationRequest,
-) -> Result<BudgetSnapshot, BudgetRejection> {
-    let result = prodex_mojo_core::policy::accounting_operation(
-        prodex_mojo_core::policy::ACCOUNTING_RESERVE,
-        &[
-            snapshot.reserved.tokens,
-            snapshot.reserved.cost_micros,
-            snapshot.committed.tokens,
-            snapshot.committed.cost_micros,
-            limit.max.tokens,
-            limit.max.cost_micros,
-            request.estimate.tokens,
-            request.estimate.cost_micros,
-        ],
-    )
-    .expect("Mojo budget reservation returned invalid output");
-    if result.result_code == 0 {
-        return Ok(BudgetSnapshot {
-            reserved: UsageAmount::new(result.values[0], result.values[1]),
-            committed: UsageAmount::new(result.values[2], result.values[3]),
-        });
-    }
-    Err(BudgetRejection {
-        reason: match result.result_code {
-            2 => BudgetRejectionReason::ZeroEstimate,
-            3 => BudgetRejectionReason::TokenLimitExceeded,
-            4 => BudgetRejectionReason::CostLimitExceeded,
-            _ => BudgetRejectionReason::ArithmeticOverflow,
-        },
-        available: if result.result_code == 1 {
-            UsageAmount::ZERO
-        } else {
-            snapshot.available(limit)
-        },
-        requested: request.estimate,
-    })
-}
-
-#[cfg(not(feature = "mojo"))]
 pub fn reserve_budget(
     snapshot: BudgetSnapshot,
     limit: BudgetLimit,
@@ -135,47 +92,6 @@ pub fn commit_reservation_checked(
     commit_reservation(snapshot, commit)
 }
 
-#[cfg(feature = "mojo")]
-pub fn commit_reservation(
-    snapshot: BudgetSnapshot,
-    commit: ReservationCommit,
-) -> Result<BudgetSnapshot, ReservationCommitError> {
-    let result = prodex_mojo_core::policy::accounting_operation(
-        prodex_mojo_core::policy::ACCOUNTING_COMMIT,
-        &[
-            snapshot.reserved.tokens,
-            snapshot.reserved.cost_micros,
-            snapshot.committed.tokens,
-            snapshot.committed.cost_micros,
-            commit.reserved.tokens,
-            commit.reserved.cost_micros,
-            commit.actual.tokens,
-            commit.actual.cost_micros,
-        ],
-    )
-    .expect("Mojo reservation commit returned invalid output");
-    match result.result_code {
-        0 => Ok(BudgetSnapshot {
-            reserved: UsageAmount::new(result.values[0], result.values[1]),
-            committed: UsageAmount::new(result.values[2], result.values[3]),
-        }),
-        1 => Err(ReservationCommitError::ZeroActual),
-        2 => Err(ReservationCommitError::ActualExceedsReserved {
-            reserved: commit.reserved,
-            actual: commit.actual,
-        }),
-        3 => Err(ReservationCommitError::ReservedBalanceUnderflow {
-            reserved: commit.reserved,
-            available: snapshot.reserved,
-        }),
-        _ => Err(ReservationCommitError::CommittedUsageOverflow {
-            committed: snapshot.committed,
-            actual: commit.actual,
-        }),
-    }
-}
-
-#[cfg(not(feature = "mojo"))]
 pub fn commit_reservation(
     snapshot: BudgetSnapshot,
     commit: ReservationCommit,
@@ -221,55 +137,22 @@ pub fn release_expired_reservation(
             actual: tenant_id,
         });
     }
-    #[cfg(feature = "mojo")]
-    {
-        let result = prodex_mojo_core::policy::accounting_operation(
-            prodex_mojo_core::policy::ACCOUNTING_RELEASE,
-            &[
-                snapshot.reserved.tokens,
-                snapshot.reserved.cost_micros,
-                record.reserved.tokens,
-                record.reserved.cost_micros,
-                now_unix_ms,
-                record.expires_at_unix_ms,
-            ],
-        )
-        .expect("Mojo expired reservation release returned invalid output");
-        match result.result_code {
-            0 => Ok((
-                BudgetSnapshot {
-                    reserved: UsageAmount::new(result.values[0], result.values[1]),
-                    committed: snapshot.committed,
-                },
-                record.release_event(),
-            )),
-            1 => Err(ReservationRecoveryError::NotExpired),
-            _ => Err(ReservationRecoveryError::ReservedBalanceUnderflow {
-                reserved: record.reserved,
-                available: snapshot.reserved,
-            }),
-        }
+    if !record.is_expired_at(now_unix_ms) {
+        return Err(ReservationRecoveryError::NotExpired);
     }
-
-    #[cfg(not(feature = "mojo"))]
-    {
-        if !record.is_expired_at(now_unix_ms) {
-            return Err(ReservationRecoveryError::NotExpired);
-        }
-        if record.reserved.exceeds(snapshot.reserved) {
-            return Err(ReservationRecoveryError::ReservedBalanceUnderflow {
-                reserved: record.reserved,
-                available: snapshot.reserved,
-            });
-        }
-        Ok((
-            BudgetSnapshot {
-                reserved: snapshot.reserved.saturating_sub(record.reserved),
-                committed: snapshot.committed,
-            },
-            record.release_event(),
-        ))
+    if record.reserved.exceeds(snapshot.reserved) {
+        return Err(ReservationRecoveryError::ReservedBalanceUnderflow {
+            reserved: record.reserved,
+            available: snapshot.reserved,
+        });
     }
+    Ok((
+        BudgetSnapshot {
+            reserved: snapshot.reserved.saturating_sub(record.reserved),
+            committed: snapshot.committed,
+        },
+        record.release_event(),
+    ))
 }
 
 pub fn reconcile_reserved_usage(
@@ -278,61 +161,18 @@ pub fn reconcile_reserved_usage(
     actual: UsageAmount,
     reason: ReservationReconciliationReason,
 ) -> Result<(BudgetSnapshot, ReservationReconciliation), ReservationReconciliationError> {
-    #[cfg(feature = "mojo")]
-    let snapshot = {
-        let result = prodex_mojo_core::policy::accounting_operation(
-            prodex_mojo_core::policy::ACCOUNTING_RECONCILE,
-            &[
-                snapshot.reserved.tokens,
-                snapshot.reserved.cost_micros,
-                snapshot.committed.tokens,
-                snapshot.committed.cost_micros,
-                record.reserved.tokens,
-                record.reserved.cost_micros,
-                actual.tokens,
-                actual.cost_micros,
-            ],
-        )
-        .expect("Mojo reservation reconciliation returned invalid output");
-        match result.result_code {
-            0 => BudgetSnapshot {
-                reserved: UsageAmount::new(result.values[0], result.values[1]),
-                committed: UsageAmount::new(result.values[2], result.values[3]),
-            },
-            1 => {
-                return Err(ReservationReconciliationError::ReservedBalanceUnderflow {
-                    reserved: record.reserved,
-                    available: snapshot.reserved,
-                });
-            }
-            _ => {
-                return Err(ReservationReconciliationError::CommittedUsageOverflow {
-                    committed: snapshot.committed,
-                    actual,
-                });
-            }
-        }
-    };
-
-    #[cfg(not(feature = "mojo"))]
-    let snapshot = {
-        if record.reserved.exceeds(snapshot.reserved) {
-            return Err(ReservationReconciliationError::ReservedBalanceUnderflow {
-                reserved: record.reserved,
-                available: snapshot.reserved,
-            });
-        }
-        let committed = snapshot.committed.checked_add(actual).ok_or(
-            ReservationReconciliationError::CommittedUsageOverflow {
-                committed: snapshot.committed,
-                actual,
-            },
-        )?;
-        BudgetSnapshot {
-            reserved: snapshot.reserved.saturating_sub(record.reserved),
-            committed,
-        }
-    };
+    if record.reserved.exceeds(snapshot.reserved) {
+        return Err(ReservationReconciliationError::ReservedBalanceUnderflow {
+            reserved: record.reserved,
+            available: snapshot.reserved,
+        });
+    }
+    let committed = snapshot.committed.checked_add(actual).ok_or(
+        ReservationReconciliationError::CommittedUsageOverflow {
+            committed: snapshot.committed,
+            actual,
+        },
+    )?;
 
     let commit = ReservationCommit {
         tenant_id: record.tenant_id,
@@ -357,7 +197,10 @@ pub fn reconcile_reserved_usage(
         amount: released,
     });
     Ok((
-        snapshot,
+        BudgetSnapshot {
+            reserved: snapshot.reserved.saturating_sub(record.reserved),
+            committed,
+        },
         ReservationReconciliation {
             reason,
             commit,
