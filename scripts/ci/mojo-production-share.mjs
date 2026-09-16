@@ -6,7 +6,7 @@ import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
-import { cargoTomlPath, parseCargoVersion, repoRoot } from "../npm/common.mjs";
+import { parseCargoVersion, repoRoot } from "../npm/common.mjs";
 
 const manifestPath = path.join(repoRoot, "migration", "mojo-production-share.json");
 const COUNTING_RULES_VERSION = 1;
@@ -624,7 +624,7 @@ export function calculateProductionShare(manifest, baselineRevision = manifest.b
   );
   const requiredAtReleaseFloor = requiredMojoLoc(final.rust_production_loc, manifest.release_floor_percent);
   const requiredAtProjectTarget = requiredMojoLoc(final.rust_production_loc, manifest.project_target_percent);
-  const currentProdexVersion = parseCargoVersion(fs.readFileSync(cargoTomlPath, "utf8"));
+  const currentProdexVersion = parseCargoVersion(sourceText(releaseRevision, "Cargo.toml"));
   const waiver = manifest.temporary_release_waiver;
   const releaseFloorMet = productionShareMeetsReleaseFloor({
     final,

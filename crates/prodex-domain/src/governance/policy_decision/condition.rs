@@ -1,6 +1,6 @@
 use std::fmt;
 
-#[cfg(feature = "mojo")]
+#[cfg(any())]
 use crate::CapabilitySet;
 use crate::{CredentialScope, ModelCapability, PrincipalKind, Role};
 
@@ -44,7 +44,7 @@ pub struct PolicyRuleCondition {
 }
 
 impl PolicyRuleCondition {
-    #[cfg(feature = "mojo")]
+    #[cfg(any())]
     pub(super) fn matches(&self, input: &PolicyInput<'_>) -> bool {
         use prodex_mojo_core::policy::{
             GOVERNANCE_MATCH_CONTAINS, GOVERNANCE_MATCH_EXACT, GOVERNANCE_MATCH_MAXIMUM,
@@ -229,13 +229,10 @@ impl PolicyRuleCondition {
             .expect("Mojo governance condition matcher returned invalid output")
     }
 
-    #[cfg(not(feature = "mojo"))]
     pub(super) fn matches(&self, input: &PolicyInput<'_>) -> bool {
         self.matches_rust(input)
     }
 
-    #[cfg(any(test, not(feature = "mojo")))]
-    #[cfg_attr(all(test, feature = "mojo"), allow(dead_code))]
     fn matches_rust(&self, input: &PolicyInput<'_>) -> bool {
         self.channel.is_none_or(|value| value == input.channel)
             && self
@@ -351,12 +348,12 @@ impl PolicyRuleCondition {
     }
 }
 
-#[cfg(feature = "mojo")]
+#[cfg(any())]
 fn model_capability_bit(value: ModelCapability) -> u64 {
     1_u64 << value as usize
 }
 
-#[cfg(feature = "mojo")]
+#[cfg(any())]
 fn model_capability_mask(values: &CapabilitySet) -> u64 {
     values
         .as_slice()
@@ -364,30 +361,28 @@ fn model_capability_mask(values: &CapabilitySet) -> u64 {
         .fold(0, |mask, value| mask | model_capability_bit(*value))
 }
 
-#[cfg(feature = "mojo")]
+#[cfg(any())]
 fn data_modality_bit(value: DataModality) -> u64 {
     1_u64 << value as usize
 }
 
-#[cfg(feature = "mojo")]
+#[cfg(any())]
 fn data_modality_mask(values: &[DataModality]) -> u64 {
     values
         .iter()
         .fold(0, |mask, value| mask | data_modality_bit(*value))
 }
 
-#[cfg(all(test, feature = "mojo"))]
+#[cfg(any())]
 pub(super) fn selector_matches(selector: &PolicySelector, value: &str) -> bool {
     prodex_mojo_core::policy::governance_selector_matches(selector.as_str(), value)
         .expect("Mojo governance selector predicate returned invalid output")
 }
 
-#[cfg(any(test, not(feature = "mojo")))]
 pub(super) fn selector_matches_rust(selector: &PolicySelector, value: &str) -> bool {
     selector.as_str() == "*" || selector.as_str() == value
 }
 
-#[cfg(not(feature = "mojo"))]
 pub(super) fn selector_matches(selector: &PolicySelector, value: &str) -> bool {
     selector_matches_rust(selector, value)
 }

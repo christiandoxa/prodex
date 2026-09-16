@@ -282,7 +282,7 @@ pub fn plan_migration_plan_error_response(
     }
 }
 
-#[cfg(feature = "mojo")]
+#[cfg(any())]
 pub fn validate_expand_contract_order(steps: &[MigrationStep]) -> Result<(), MigrationPlanError> {
     let steps = steps
         .iter()
@@ -299,13 +299,10 @@ pub fn validate_expand_contract_order(steps: &[MigrationStep]) -> Result<(), Mig
     }
 }
 
-#[cfg(not(feature = "mojo"))]
 pub fn validate_expand_contract_order(steps: &[MigrationStep]) -> Result<(), MigrationPlanError> {
     validate_expand_contract_order_rust(steps)
 }
 
-#[cfg(any(test, not(feature = "mojo")))]
-#[cfg_attr(all(test, feature = "mojo"), allow(dead_code))]
 fn validate_expand_contract_order_rust(steps: &[MigrationStep]) -> Result<(), MigrationPlanError> {
     let mut saw_expand = false;
     let mut saw_backfill = false;

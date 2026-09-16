@@ -41,7 +41,7 @@ impl UsageAmount {
     }
 
     pub fn checked_add(self, other: Self) -> Option<Self> {
-        #[cfg(feature = "mojo")]
+        #[cfg(any())]
         {
             let result = prodex_mojo_core::policy::accounting_operation(
                 prodex_mojo_core::policy::ACCOUNTING_USAGE_ADD,
@@ -56,7 +56,6 @@ impl UsageAmount {
             (result.result_code == 0).then(|| Self::new(result.values[0], result.values[1]))
         }
 
-        #[cfg(not(feature = "mojo"))]
         Some(Self {
             tokens: self.tokens.checked_add(other.tokens)?,
             cost_micros: self.cost_micros.checked_add(other.cost_micros)?,
@@ -64,7 +63,7 @@ impl UsageAmount {
     }
 
     pub fn saturating_sub(self, other: Self) -> Self {
-        #[cfg(feature = "mojo")]
+        #[cfg(any())]
         {
             let result = prodex_mojo_core::policy::accounting_operation(
                 prodex_mojo_core::policy::ACCOUNTING_USAGE_SATURATING_SUB,
@@ -79,7 +78,6 @@ impl UsageAmount {
             Self::new(result.values[0], result.values[1])
         }
 
-        #[cfg(not(feature = "mojo"))]
         Self {
             tokens: self.tokens.saturating_sub(other.tokens),
             cost_micros: self.cost_micros.saturating_sub(other.cost_micros),
@@ -87,7 +85,7 @@ impl UsageAmount {
     }
 
     pub fn exceeds(self, limit: Self) -> bool {
-        #[cfg(feature = "mojo")]
+        #[cfg(any())]
         {
             let result = prodex_mojo_core::policy::accounting_operation(
                 prodex_mojo_core::policy::ACCOUNTING_USAGE_EXCEEDS,
@@ -102,10 +100,7 @@ impl UsageAmount {
             result.result_code == 0 && result.values[0] == 1
         }
 
-        #[cfg(not(feature = "mojo"))]
-        {
-            self.tokens > limit.tokens || self.cost_micros > limit.cost_micros
-        }
+        self.tokens > limit.tokens || self.cost_micros > limit.cost_micros
     }
 }
 
@@ -130,7 +125,7 @@ impl BudgetSnapshot {
     }
 
     pub fn available(self, limit: BudgetLimit) -> UsageAmount {
-        #[cfg(feature = "mojo")]
+        #[cfg(any())]
         {
             let result = prodex_mojo_core::policy::accounting_operation(
                 prodex_mojo_core::policy::ACCOUNTING_SNAPSHOT_AVAILABLE,
@@ -147,7 +142,6 @@ impl BudgetSnapshot {
             UsageAmount::new(result.values[0], result.values[1])
         }
 
-        #[cfg(not(feature = "mojo"))]
         match self.total_held() {
             Some(held) => limit.max.saturating_sub(held),
             None => UsageAmount::ZERO,
@@ -198,7 +192,7 @@ impl fmt::Debug for ReservationRecord {
 }
 
 impl ReservationRecord {
-    #[cfg(feature = "mojo")]
+    #[cfg(any())]
     pub fn from_request(
         request: ReservationRequest,
         created_at_unix_ms: u64,
@@ -229,7 +223,6 @@ impl ReservationRecord {
         }
     }
 
-    #[cfg(not(feature = "mojo"))]
     pub fn from_request(
         request: ReservationRequest,
         created_at_unix_ms: u64,
@@ -238,8 +231,6 @@ impl ReservationRecord {
         Self::from_request_rust(request, created_at_unix_ms, ttl_ms)
     }
 
-    #[cfg(any(test, not(feature = "mojo")))]
-    #[cfg_attr(all(test, feature = "mojo"), allow(dead_code))]
     fn from_request_rust(
         request: ReservationRequest,
         created_at_unix_ms: u64,
@@ -264,7 +255,7 @@ impl ReservationRecord {
         })
     }
 
-    #[cfg(feature = "mojo")]
+    #[cfg(any())]
     pub fn is_expired_at(&self, now_unix_ms: u64) -> bool {
         let result = prodex_mojo_core::policy::accounting_operation(
             prodex_mojo_core::policy::ACCOUNTING_IS_EXPIRED,
@@ -274,7 +265,6 @@ impl ReservationRecord {
         result.values[0] == 1
     }
 
-    #[cfg(not(feature = "mojo"))]
     pub fn is_expired_at(&self, now_unix_ms: u64) -> bool {
         now_unix_ms >= self.expires_at_unix_ms
     }

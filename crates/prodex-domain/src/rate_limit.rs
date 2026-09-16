@@ -262,7 +262,7 @@ pub enum RateLimitAtomicUpdateError {
     ExpiredWindow,
 }
 
-#[cfg(feature = "mojo")]
+#[cfg(any())]
 pub fn evaluate_rate_limit(
     rule: RateLimitRule,
     snapshot: RateLimitSnapshot,
@@ -291,7 +291,6 @@ pub fn evaluate_rate_limit(
     }
 }
 
-#[cfg(not(feature = "mojo"))]
 pub fn evaluate_rate_limit(
     rule: RateLimitRule,
     snapshot: RateLimitSnapshot,
@@ -300,8 +299,6 @@ pub fn evaluate_rate_limit(
     evaluate_rate_limit_rust(rule, snapshot, request)
 }
 
-#[cfg(any(test, not(feature = "mojo")))]
-#[cfg_attr(all(test, feature = "mojo"), allow(dead_code))]
 fn evaluate_rate_limit_rust(
     rule: RateLimitRule,
     snapshot: RateLimitSnapshot,

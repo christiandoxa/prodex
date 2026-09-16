@@ -569,7 +569,7 @@ impl AuditTimeRange {
         Ok(Self { start, end })
     }
 
-    #[cfg(feature = "mojo")]
+    #[cfg(any())]
     pub fn contains(self, timestamp: AuditTimestamp) -> bool {
         prodex_mojo_core::policy::audit_time_range_contains(
             self.start.map(AuditTimestamp::unix_ms),
@@ -579,13 +579,10 @@ impl AuditTimeRange {
         .expect("Mojo audit time-range predicate returned invalid output")
     }
 
-    #[cfg(not(feature = "mojo"))]
     pub fn contains(self, timestamp: AuditTimestamp) -> bool {
         self.contains_rust(timestamp)
     }
 
-    #[cfg(any(test, not(feature = "mojo")))]
-    #[cfg_attr(all(test, feature = "mojo"), allow(dead_code))]
     fn contains_rust(self, timestamp: AuditTimestamp) -> bool {
         self.start
             .is_none_or(|start| timestamp.unix_ms() >= start.unix_ms())
@@ -676,7 +673,7 @@ impl fmt::Display for AuditPageLimitError {
 }
 
 impl Error for AuditPageLimitError {}
-#[cfg(feature = "mojo")]
+#[cfg(any())]
 pub(super) fn compare_audit_events(
     left: &AuditEvent,
     right: &AuditEvent,
@@ -691,8 +688,6 @@ pub(super) fn compare_audit_events(
     )
 }
 
-#[cfg(any(test, not(feature = "mojo")))]
-#[cfg_attr(all(test, feature = "mojo"), allow(dead_code))]
 fn compare_audit_positions_rust(
     left_timestamp: u64,
     left_id: AuditEventId,
@@ -708,7 +703,6 @@ fn compare_audit_positions_rust(
     time_order.then_with(|| left_id.cmp(&right_id))
 }
 
-#[cfg(not(feature = "mojo"))]
 pub(super) fn compare_audit_events(
     left: &AuditEvent,
     right: &AuditEvent,
@@ -723,7 +717,7 @@ pub(super) fn compare_audit_events(
     )
 }
 
-#[cfg(feature = "mojo")]
+#[cfg(any())]
 fn compare_audit_positions(
     left_timestamp: u64,
     left_id: AuditEventId,
@@ -741,13 +735,13 @@ fn compare_audit_positions(
     .expect("Mojo audit ordering returned invalid output")
 }
 
-#[cfg(feature = "mojo")]
+#[cfg(any())]
 fn audit_id_parts(id: AuditEventId) -> [u64; 2] {
     let (high, low) = id.as_uuid().as_u64_pair();
     [high, low]
 }
 
-#[cfg(feature = "mojo")]
+#[cfg(any())]
 pub(super) fn compare_audit_event_to_cursor_position(
     event: &AuditEvent,
     cursor: AuditQueryCursor,
@@ -761,7 +755,6 @@ pub(super) fn compare_audit_event_to_cursor_position(
     )
 }
 
-#[cfg(not(feature = "mojo"))]
 pub(super) fn compare_audit_event_to_cursor_position(
     event: &AuditEvent,
     cursor: AuditQueryCursor,

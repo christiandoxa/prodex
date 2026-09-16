@@ -378,7 +378,7 @@ pub fn transition_approval(
     })
 }
 
-#[cfg(feature = "mojo")]
+#[cfg(any())]
 fn apply_approval_action(
     request: &ApprovalTransitionRequest<'_>,
     record: &mut ApprovalRecord,
@@ -445,7 +445,7 @@ fn apply_approval_action(
     }
 }
 
-#[cfg(feature = "mojo")]
+#[cfg(any())]
 const fn approval_state_tag(state: ApprovalState) -> i64 {
     match state {
         ApprovalState::Draft => 0,
@@ -460,7 +460,7 @@ const fn approval_state_tag(state: ApprovalState) -> i64 {
     }
 }
 
-#[cfg(feature = "mojo")]
+#[cfg(any())]
 const fn approval_action_tag(action: ApprovalAction) -> i64 {
     match action {
         ApprovalAction::Approve => 0,
@@ -472,7 +472,6 @@ const fn approval_action_tag(action: ApprovalAction) -> i64 {
     }
 }
 
-#[cfg(not(feature = "mojo"))]
 fn apply_approval_action(
     request: &ApprovalTransitionRequest<'_>,
     record: &mut ApprovalRecord,
@@ -487,7 +486,6 @@ fn apply_approval_action(
     }
 }
 
-#[cfg(not(feature = "mojo"))]
 fn apply_approval_vote(
     request: &ApprovalTransitionRequest<'_>,
     record: &mut ApprovalRecord,
@@ -506,7 +504,6 @@ fn apply_approval_vote(
     Ok("approval.approved")
 }
 
-#[cfg(not(feature = "mojo"))]
 fn apply_approval_rejection(
     request: &ApprovalTransitionRequest<'_>,
     record: &mut ApprovalRecord,
@@ -524,7 +521,6 @@ fn apply_approval_rejection(
     Ok("approval.rejected")
 }
 
-#[cfg(not(feature = "mojo"))]
 fn apply_approval_cancellation(
     request: &ApprovalTransitionRequest<'_>,
     record: &mut ApprovalRecord,
@@ -545,7 +541,6 @@ fn apply_approval_cancellation(
     Ok("approval.cancelled")
 }
 
-#[cfg(not(feature = "mojo"))]
 fn apply_approval_activation(
     request: &ApprovalTransitionRequest<'_>,
     record: &mut ApprovalRecord,
@@ -558,7 +553,6 @@ fn apply_approval_activation(
     Ok("approval.activated")
 }
 
-#[cfg(not(feature = "mojo"))]
 fn apply_approval_state_change(
     record: &mut ApprovalRecord,
     state: ApprovalState,

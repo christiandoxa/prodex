@@ -116,7 +116,7 @@ impl CompiledClassificationRuleSet {
     }
 }
 
-#[cfg(feature = "mojo")]
+#[cfg(any())]
 pub fn compile_classification_rule_set(
     mut rule_set: ClassificationRuleSet,
 ) -> Result<CompiledClassificationRuleSet, ClassificationError> {
@@ -146,15 +146,12 @@ pub fn compile_classification_rule_set(
     })
 }
 
-#[cfg(not(feature = "mojo"))]
 pub fn compile_classification_rule_set(
     rule_set: ClassificationRuleSet,
 ) -> Result<CompiledClassificationRuleSet, ClassificationError> {
     compile_classification_rule_set_rust(rule_set)
 }
 
-#[cfg(any(test, not(feature = "mojo")))]
-#[cfg_attr(all(test, feature = "mojo"), allow(dead_code))]
 fn compile_classification_rule_set_rust(
     mut rule_set: ClassificationRuleSet,
 ) -> Result<CompiledClassificationRuleSet, ClassificationError> {
@@ -254,7 +251,7 @@ impl ClassificationDecision {
     }
 }
 
-#[cfg(feature = "mojo")]
+#[cfg(any())]
 pub fn classify_inspection(
     rules: &CompiledClassificationRuleSet,
     request: ClassificationRequest<'_>,
@@ -315,7 +312,6 @@ pub fn classify_inspection(
     })
 }
 
-#[cfg(not(feature = "mojo"))]
 pub fn classify_inspection(
     rules: &CompiledClassificationRuleSet,
     request: ClassificationRequest<'_>,
@@ -323,8 +319,6 @@ pub fn classify_inspection(
     classify_inspection_rust(rules, request)
 }
 
-#[cfg(any(test, not(feature = "mojo")))]
-#[cfg_attr(all(test, feature = "mojo"), allow(dead_code))]
 fn classify_inspection_rust(
     rules: &CompiledClassificationRuleSet,
     request: ClassificationRequest<'_>,

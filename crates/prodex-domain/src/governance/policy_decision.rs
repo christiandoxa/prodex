@@ -483,7 +483,7 @@ pub fn evaluate_governance_policy(
     })
 }
 
-#[cfg(feature = "mojo")]
+#[cfg(any())]
 fn governance_policy_decision_plan(
     rules: &[(bool, PolicyEffect)],
     default_effect: PolicyEffect,
@@ -498,7 +498,6 @@ fn governance_policy_decision_plan(
     (policy_effect_from_i64(effect), matched)
 }
 
-#[cfg(not(feature = "mojo"))]
 fn governance_policy_decision_plan(
     rules: &[(bool, PolicyEffect)],
     default_effect: PolicyEffect,
@@ -506,7 +505,6 @@ fn governance_policy_decision_plan(
     governance_policy_decision_plan_rust(rules, default_effect)
 }
 
-#[cfg(any(test, not(feature = "mojo")))]
 fn governance_policy_decision_plan_rust(
     rules: &[(bool, PolicyEffect)],
     default_effect: PolicyEffect,
@@ -525,7 +523,7 @@ fn governance_policy_decision_plan_rust(
     )
 }
 
-#[cfg(feature = "mojo")]
+#[cfg(any())]
 fn policy_effect_from_i64(effect: i64) -> PolicyEffect {
     match effect {
         0 => PolicyEffect::Allow,
@@ -535,8 +533,6 @@ fn policy_effect_from_i64(effect: i64) -> PolicyEffect {
     }
 }
 
-#[cfg(any(test, not(feature = "mojo")))]
-#[cfg_attr(all(test, feature = "mojo"), allow(dead_code))]
 fn governance_policy_effect_rust(
     effects: &[PolicyEffect],
     default_effect: PolicyEffect,
@@ -544,7 +540,7 @@ fn governance_policy_effect_rust(
     effects.iter().copied().max().unwrap_or(default_effect)
 }
 
-#[cfg(feature = "mojo")]
+#[cfg(any())]
 fn policy_required_attributes_present(
     policy: &CompiledGovernancePolicy,
     input: &PolicyInput<'_>,
@@ -583,7 +579,6 @@ fn policy_required_attributes_present(
     .expect("Mojo governance required-attribute predicate returned invalid output")
 }
 
-#[cfg(not(feature = "mojo"))]
 fn policy_required_attributes_present(
     policy: &CompiledGovernancePolicy,
     input: &PolicyInput<'_>,
@@ -591,8 +586,6 @@ fn policy_required_attributes_present(
     policy_required_attributes_present_rust(policy, input)
 }
 
-#[cfg(any(test, not(feature = "mojo")))]
-#[cfg_attr(all(test, feature = "mojo"), allow(dead_code))]
 fn policy_required_attributes_present_rust(
     policy: &CompiledGovernancePolicy,
     input: &PolicyInput<'_>,
@@ -640,7 +633,7 @@ impl fmt::Display for GovernancePolicyError {
 
 impl Error for GovernancePolicyError {}
 
-#[cfg(all(test, feature = "mojo"))]
+#[cfg(any())]
 mod governance_predicate_tests {
     use super::*;
     use super::{

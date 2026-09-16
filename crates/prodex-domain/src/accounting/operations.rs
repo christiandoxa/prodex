@@ -1,6 +1,6 @@
 use super::*;
 
-#[cfg(feature = "mojo")]
+#[cfg(any())]
 pub fn reserve_budget(
     snapshot: BudgetSnapshot,
     limit: BudgetLimit,
@@ -42,7 +42,6 @@ pub fn reserve_budget(
     })
 }
 
-#[cfg(not(feature = "mojo"))]
 pub fn reserve_budget(
     snapshot: BudgetSnapshot,
     limit: BudgetLimit,
@@ -135,7 +134,7 @@ pub fn commit_reservation_checked(
     commit_reservation(snapshot, commit)
 }
 
-#[cfg(feature = "mojo")]
+#[cfg(any())]
 pub fn commit_reservation(
     snapshot: BudgetSnapshot,
     commit: ReservationCommit,
@@ -175,7 +174,6 @@ pub fn commit_reservation(
     }
 }
 
-#[cfg(not(feature = "mojo"))]
 pub fn commit_reservation(
     snapshot: BudgetSnapshot,
     commit: ReservationCommit,
@@ -221,7 +219,7 @@ pub fn release_expired_reservation(
             actual: tenant_id,
         });
     }
-    #[cfg(feature = "mojo")]
+    #[cfg(any())]
     {
         let result = prodex_mojo_core::policy::accounting_operation(
             prodex_mojo_core::policy::ACCOUNTING_RELEASE,
@@ -251,7 +249,6 @@ pub fn release_expired_reservation(
         }
     }
 
-    #[cfg(not(feature = "mojo"))]
     {
         if !record.is_expired_at(now_unix_ms) {
             return Err(ReservationRecoveryError::NotExpired);
@@ -278,7 +275,7 @@ pub fn reconcile_reserved_usage(
     actual: UsageAmount,
     reason: ReservationReconciliationReason,
 ) -> Result<(BudgetSnapshot, ReservationReconciliation), ReservationReconciliationError> {
-    #[cfg(feature = "mojo")]
+    #[cfg(any())]
     let snapshot = {
         let result = prodex_mojo_core::policy::accounting_operation(
             prodex_mojo_core::policy::ACCOUNTING_RECONCILE,
@@ -314,7 +311,6 @@ pub fn reconcile_reserved_usage(
         }
     };
 
-    #[cfg(not(feature = "mojo"))]
     let snapshot = {
         if record.reserved.exceeds(snapshot.reserved) {
             return Err(ReservationReconciliationError::ReservedBalanceUnderflow {

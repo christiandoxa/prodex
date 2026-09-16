@@ -212,7 +212,7 @@ test("historical waiver remains expired, scoped to 0.421.0, and cannot lower the
 });
 
 test("historical 0.429.3 report retains its exact production inventory", () => {
-  const report = JSON.parse(runShare("--release-sha", "1f1ada0d7933cbcd2158c5be9f97eaad3f147342", "--json"));
+  const report = JSON.parse(runShare("--release-sha", "149e99d358e57ce9b9d5cf7b49376aad3aa0d08f", "--json"));
   assert.equal(report.current_prodex_version, "0.429.3");
   assert.equal(report.final.broad_mojo_production_loc, 26_420);
   assert.equal(report.final.broad_rust_production_loc, 348_775);
