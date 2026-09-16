@@ -116,7 +116,46 @@ impl CompiledClassificationRuleSet {
     }
 }
 
+#[cfg(feature = "mojo")]
 pub fn compile_classification_rule_set(
+    mut rule_set: ClassificationRuleSet,
+) -> Result<CompiledClassificationRuleSet, ClassificationError> {
+    if rule_set.rules.len() > MAX_CLASSIFICATION_RULES {
+        return Err(ClassificationError::RuleLimitExceeded);
+    }
+    rule_set
+        .rules
+        .sort_by_key(|rule| (rule.finding_kind, rule.classification));
+    let rules = rule_set
+        .rules
+        .iter()
+        .map(|rule| (rule.finding_kind as u8, rule.classification as u8))
+        .collect::<Vec<_>>();
+    match prodex_mojo_core::policy::governance_classification_rules_valid(&rules)
+        .expect("Mojo classification rule validation returned invalid output")
+    {
+        1 => return Err(ClassificationError::DuplicateRule),
+        2 => return Err(ClassificationError::ClassificationTooLow),
+        _ => {}
+    }
+    Ok(CompiledClassificationRuleSet {
+        revision: rule_set.revision,
+        checksum: rule_set.checksum,
+        unsupported_coverage_floor: rule_set.unsupported_coverage_floor,
+        rules: rule_set.rules,
+    })
+}
+
+#[cfg(not(feature = "mojo"))]
+pub fn compile_classification_rule_set(
+    rule_set: ClassificationRuleSet,
+) -> Result<CompiledClassificationRuleSet, ClassificationError> {
+    compile_classification_rule_set_rust(rule_set)
+}
+
+#[cfg(any(test, not(feature = "mojo")))]
+#[cfg_attr(all(test, feature = "mojo"), allow(dead_code))]
+fn compile_classification_rule_set_rust(
     mut rule_set: ClassificationRuleSet,
 ) -> Result<CompiledClassificationRuleSet, ClassificationError> {
     if rule_set.rules.len() > MAX_CLASSIFICATION_RULES {
@@ -215,7 +254,78 @@ impl ClassificationDecision {
     }
 }
 
+#[cfg(feature = "mojo")]
 pub fn classify_inspection(
+    rules: &CompiledClassificationRuleSet,
+    request: ClassificationRequest<'_>,
+) -> Result<ClassificationDecision, ClassificationError> {
+    let findings = request
+        .inspection
+        .findings()
+        .iter()
+        .map(|finding| finding.kind() as u8)
+        .collect::<Vec<_>>();
+    let rule_values = rules
+        .rules
+        .iter()
+        .map(|rule| (rule.finding_kind as u8, rule.classification as u8))
+        .collect::<Vec<_>>();
+    let result = prodex_mojo_core::policy::governance_classification(
+        prodex_mojo_core::policy::GovernanceClassificationInput {
+            base_classification: request.inspection.classification() as u8,
+            coverage: request.inspection.coverage() as u8,
+            unsupported_coverage_floor: rules.unsupported_coverage_floor as u8,
+            session_floor: request.session_floor as u8,
+            route_floor: request.route_floor as u8,
+            risk_floor: request.request_risk_floor as u8,
+            trusted_label: request.trusted_label.map(|value| value as u8),
+            untrusted_label: request.untrusted_label.map(|value| value as u8),
+            prior_classification: request.prior_classification.map(|value| value as u8),
+            findings: &findings,
+            rules: &rule_values,
+        },
+    )
+    .expect("Mojo governance classification returned invalid output");
+    let classification = match result.classification {
+        0 => DataClassification::Public,
+        1 => DataClassification::Internal,
+        2 => DataClassification::Confidential,
+        _ => DataClassification::Restricted,
+    };
+    let mut reasons = Vec::new();
+    for (bit, reason) in [
+        (8, "context.prior_monotonic"),
+        (16, "coverage.partial"),
+        (32, "coverage.unsupported"),
+        (64, "detector.finding"),
+        (1, "inspection.classification"),
+        (2, "label.trusted"),
+        (4, "label.untrusted_raise_only"),
+    ] {
+        if result.reason_bits & bit != 0 {
+            reasons.push(ClassificationReasonCode::new(reason)?);
+        }
+    }
+    Ok(ClassificationDecision {
+        classification,
+        coverage: request.inspection.coverage(),
+        reason_codes: reasons,
+        revision: rules.revision.clone(),
+        checksum: rules.checksum.clone(),
+    })
+}
+
+#[cfg(not(feature = "mojo"))]
+pub fn classify_inspection(
+    rules: &CompiledClassificationRuleSet,
+    request: ClassificationRequest<'_>,
+) -> Result<ClassificationDecision, ClassificationError> {
+    classify_inspection_rust(rules, request)
+}
+
+#[cfg(any(test, not(feature = "mojo")))]
+#[cfg_attr(all(test, feature = "mojo"), allow(dead_code))]
+fn classify_inspection_rust(
     rules: &CompiledClassificationRuleSet,
     request: ClassificationRequest<'_>,
 ) -> Result<ClassificationDecision, ClassificationError> {
