@@ -655,15 +655,19 @@ shared-state integration around those operations.
 - OpenAI `additional_rate_limits` are preserved as independent backend buckets, including their
   explicit `allowed`, `limit_reached`, `ordinaryUsageAllowed`, `normalModelSlug`, and unknown
   future fields. The pinned Codex `rust-v0.154.0` contract exposes backend admission and model
-  mapping metadata, but Prodex still requires an explicit source-backed Luna Reserve identifier
-  before routing on that bucket. When an upstream bucket explicitly identifies itself as `Luna
-  Reserve`, it is applicable only to Luna requests; Sol and Terra never use it. Reserve is a
-  fallback capacity mode, not a model identifier accepted from requests, and an unlabeled
-  `base_model_inference` bucket does not establish entitlement. If regular and Reserve Luna
-  capacity are unavailable, the request follows normal rotation and upstream quota handling
-  without substituting another OpenAI model. Requested and effective models remain distinct in
-  runtime state and diagnostics. A 429/503 or transport error never zeros Reserve capacity
-  without authoritative provider evidence.
+  mapping metadata. Reserve-aware usage reads advertise
+  `x-openai-codex-luna-reserve: 1`. Prodex requires `ordinaryUsageAllowed=false`, an explicit
+  `rateLimitUpsell.banner_type=luna_reserve`, `normalModelSlug=gpt-5.6-luna`, and a usable mapped
+  `gpt-reserve` bucket before routing on that bucket. Account identity must match when the usage
+  response supplies it; otherwise the authenticated profile-scoped usage fetch is the authority.
+  Sol and Terra never use Reserve. Prodex accepts only `gpt-5.6-luna` from the client and changes
+  the final upstream model to hidden `gpt-reserve` after profile selection. The original requested
+  model remains unchanged for selection, affinity, and public metadata. WebSocket rewriting is
+  limited to fresh pre-commit sends; reused sessions and continuations never switch or replay.
+  Reserve does not consume reset credits. If regular and Reserve Luna capacity are unavailable,
+  the request follows normal rotation and upstream quota handling without substituting another
+  public OpenAI model. A 429/503 or transport error never zeros Reserve capacity without
+  authoritative provider evidence.
 - `prodex ping openai` is an all-account application-level diagnostic: it snapshots configured
   eligible OpenAI profiles, sends the text `hello` through the normal OpenAI/Codex runtime path
   with each probe pinned to its profile and cross-profile fallback disabled, and records every
