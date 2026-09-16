@@ -1345,14 +1345,24 @@ mod tests {
         let root = temp_test_root("sub-agent-cross-process");
         let spec = slot_spec(&root, 4);
         let test_name = "runtime_tools::sub_agents::tests::slot_holder_process";
+        let executable = env::current_exe().unwrap();
         let mut children = (0..5)
             .map(|_| {
-                std::process::Command::new(env::current_exe().unwrap())
-                    .args(["--exact", test_name, "--nocapture"])
-                    .env("PRODEX_TEST_SUB_AGENT_SLOT_ROOT", &root)
-                    .env("PRODEX_TEST_SUB_AGENT_SLOT_LIMIT", "4")
-                    .spawn()
-                    .unwrap()
+                for _ in 0..20 {
+                    match std::process::Command::new(&executable)
+                        .args(["--exact", test_name, "--nocapture"])
+                        .env("PRODEX_TEST_SUB_AGENT_SLOT_ROOT", &root)
+                        .env("PRODEX_TEST_SUB_AGENT_SLOT_LIMIT", "4")
+                        .spawn()
+                    {
+                        Ok(child) => return child,
+                        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                            std::thread::sleep(std::time::Duration::from_millis(10));
+                        }
+                        Err(error) => panic!("failed to spawn slot holder: {error}"),
+                    }
+                }
+                panic!("test executable remained unavailable while spawning slot holder")
             })
             .collect::<Vec<_>>();
         let result_dir = root.join("results");
