@@ -10,7 +10,7 @@ export const ALLOW_ATTRIBUTE_CAPS = Object.freeze({
   "unused_imports": 3,
   "clippy::large_enum_variant": 10,
   "clippy::result_large_err": 3,
-  "clippy::too_many_arguments": 38,
+  "clippy::too_many_arguments": 41,
   "clippy::type_complexity": 1,
 });
 
@@ -51,7 +51,7 @@ export const ALLOW_ATTRIBUTE_LOCATION_KEYS = Object.freeze([
   "clippy::too_many_arguments|crates/prodex-provider-core/src/translators/kiro/stream.rs|pub fn kiro_provider_core_acp_responses_tool_call_item(",
   "clippy::too_many_arguments|crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_application_data_plane.rs|fn runtime_gateway_mandatory_governance_audit(",
   "clippy::too_many_arguments|crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_application_data_plane.rs|fn runtime_gateway_obligation_execution(",
-  "clippy::too_many_arguments|crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_gateway_admin_policies.rs|fn activation_response(",
+  "clippy::too_many_arguments|crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_gateway_admin_policies/activation.rs|pub(super) fn activation_response(",
   "clippy::too_many_arguments|crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_gateway_admin_policies/break_glass.rs|pub(super) fn vote_response(",
   // ponytail: keep security/audit inputs explicit; add a request context if this endpoint family grows again.
   "clippy::too_many_arguments|crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_gateway_admin_policies/audit_retention.rs|pub(super) fn audit_retention_response(",
@@ -73,6 +73,11 @@ export const ALLOW_ATTRIBUTE_LOCATION_KEYS = Object.freeze([
   "clippy::too_many_arguments|crates/prodex-storage-sqlite-runtime/tests/governance_repository.rs|fn activation_request(",
   "clippy::too_many_arguments|crates/prodex-storage-sqlite-runtime/tests/governance_repository.rs|fn prepare_approval_for_existing(",
   "clippy::too_many_arguments|crates/prodex-storage-sqlite-runtime/tests/governance_repository.rs|fn prepare_approved_revision(",
+  // ponytail: keep the Mojo ABI adapter explicit; use an input struct only if another caller appears.
+  "clippy::too_many_arguments|crates/prodex-mojo-core/src/runtime/quota_decisions.rs|pub fn precommit_budget_plan(",
+  // ponytail: keep production and test-oracle signatures identical for parity checks.
+  "clippy::too_many_arguments|crates/prodex-runtime-proxy/src/selection_policy/mojo.rs|pub(super) fn allows_direct_current_profile_fallback(",
+  "clippy::too_many_arguments|crates/prodex-runtime-proxy/src/selection_policy/rust_oracles.rs|pub(super) fn allows_direct_current_profile_fallback(",
   // ponytail: immutable live-reload inputs stay explicit; add a watcher context when another consumer appears.
   "clippy::too_many_arguments|src/enterprise_serve.rs|fn deliver_live_config_publications(",
   "clippy::too_many_arguments|src/enterprise_serve.rs|fn spawn_live_config_publication_watcher(",
