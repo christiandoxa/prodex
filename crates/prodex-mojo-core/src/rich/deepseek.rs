@@ -45,6 +45,22 @@ pub enum DeepSeekKernelOperation {
     StreamResponseMetadata = 36,
 }
 
+#[repr(i64)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DeepSeekRequestPolicyOperation {
+    RequestFields = 1,
+    BetaFields = 2,
+    ReasoningShape = 3,
+    SimpleRequest = 4,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DeepSeekRequestPolicyPlan {
+    pub tag: i64,
+    pub detail_start: Option<usize>,
+    pub detail_end: Option<usize>,
+}
+
 /// Inputs for one bounded DeepSeek JSON transformation.
 #[derive(Debug, Clone, Copy)]
 pub struct DeepSeekKernelInput<'a> {
@@ -180,6 +196,15 @@ unsafe extern "C" {
         output_capacity: i64,
         written: u64,
     ) -> i64;
+    fn prodex_mojo_deepseek_request_policy_v1(
+        abi_version: i64,
+        operation: i64,
+        input: u64,
+        input_length: i64,
+        flag: i64,
+        scalar: i64,
+        output: u64,
+    ) -> i64;
 }
 
 const DEEPSEEK_KERNEL_MAX_BYTES: usize = 4 * 1024 * 1024;
@@ -260,6 +285,54 @@ fn input_bytes(input: &DeepSeekKernelInput<'_>) -> Result<usize, MojoError> {
         total
             .checked_add(value.len())
             .ok_or(MojoError::InvalidInput)
+    })
+}
+
+pub fn deepseek_request_policy(
+    operation: DeepSeekRequestPolicyOperation,
+    input: &str,
+    flag: bool,
+    scalar: i64,
+) -> Result<DeepSeekRequestPolicyPlan, MojoError> {
+    ensure_rich_abi()?;
+    if input.len() > DEEPSEEK_KERNEL_MAX_BYTES || scalar < 0 {
+        return Err(MojoError::InvalidInput);
+    }
+    let mut output = [0_i64; 3];
+    let status = unsafe {
+        prodex_mojo_deepseek_request_policy_v1(
+            RICH_ABI_VERSION,
+            operation as i64,
+            input.as_ptr() as u64,
+            i64::try_from(input.len()).map_err(|_| MojoError::InvalidInput)?,
+            i64::from(flag),
+            scalar,
+            mojo_mut_pointer_address(output.as_mut_ptr()),
+        )
+    };
+    if status != 0 {
+        return Err(match status {
+            4 => MojoError::AbiMismatch,
+            1 | 2 => MojoError::InvalidInput,
+            _ => MojoError::InvalidOutput,
+        });
+    }
+    let (detail_start, detail_end) = match (output[1], output[2]) {
+        (-1, -1) => (None, None),
+        (start, end) if start >= 0 && end >= start => {
+            let start = usize::try_from(start).map_err(|_| MojoError::InvalidOutput)?;
+            let end = usize::try_from(end).map_err(|_| MojoError::InvalidOutput)?;
+            if end > input.len() {
+                return Err(MojoError::InvalidOutput);
+            }
+            (Some(start), Some(end))
+        }
+        _ => return Err(MojoError::InvalidOutput),
+    };
+    Ok(DeepSeekRequestPolicyPlan {
+        tag: output[0],
+        detail_start,
+        detail_end,
     })
 }
 

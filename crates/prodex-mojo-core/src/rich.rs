@@ -110,7 +110,10 @@ pub use gemini_config::{
 };
 #[path = "rich/deepseek.rs"]
 mod deepseek;
-pub use deepseek::{DeepSeekKernelInput, DeepSeekKernelOperation, deepseek_kernel};
+pub use deepseek::{
+    DeepSeekKernelInput, DeepSeekKernelOperation, DeepSeekRequestPolicyOperation,
+    DeepSeekRequestPolicyPlan, deepseek_kernel, deepseek_request_policy,
+};
 #[path = "rich/openai_compat.rs"]
 mod openai_compat;
 pub use openai_compat::{

@@ -40,7 +40,7 @@ from rich_types import (
 from gemini_response import gemini_response_kernel_v1
 from gemini_config import gemini_config_kernel_v1
 # DeepSeek shares the rich ABI while keeping its provider wire semantics isolated.
-from deepseek import deepseek_kernel_v1
+from deepseek import deepseek_kernel_v1, deepseek_request_policy_v1
 from anthropic_request import anthropic_request_kernel_v1
 # Runtime Anthropic keeps response/block shaping separate from request shaping.
 from runtime_anthropic import runtime_anthropic_kernel_v1
@@ -422,6 +422,21 @@ def prodex_mojo_deepseek_kernel_v1(
 ) abi("C") -> Int64:
     return deepseek_kernel_v1(
         abi_version, input_address, output_address, output_capacity, written_address
+    )
+
+
+@export("prodex_mojo_deepseek_request_policy_v1")
+def prodex_mojo_deepseek_request_policy_export_v1(
+    abi_version: Int64,
+    operation: Int64,
+    input_address: UInt,
+    input_length: Int64,
+    flag: Int64,
+    scalar: Int64,
+    output_address: UInt,
+) abi("C") -> Int64:
+    return deepseek_request_policy_v1(
+        abi_version, operation, input_address, input_length, flag, scalar, output_address
     )
 
 
