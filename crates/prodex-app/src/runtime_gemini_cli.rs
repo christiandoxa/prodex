@@ -80,6 +80,7 @@ impl RuntimeLaunchStrategy for SuperNativeCliLaunchStrategy {
             }),
             upstream_no_proxy: self.args.no_proxy,
             include_code_review: false,
+            requested_model: None,
             smart_context_enabled: self.agent == SuperCliAgent::Copilot,
             presidio_redaction_enabled: self.presidio_enabled
                 && self.agent == SuperCliAgent::Copilot,

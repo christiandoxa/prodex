@@ -87,3 +87,59 @@ fn websocket_continuation_cannot_rewrite_or_double_rewrite() {
         .is_none()
     );
 }
+
+fn http_request(body: &[u8]) -> RuntimeProxyRequest {
+    RuntimeProxyRequest {
+        method: "POST".to_string(),
+        path_and_query: "/backend-api/prodex/responses".to_string(),
+        headers: Vec::new(),
+        body: body.to_vec(),
+    }
+}
+
+#[test]
+fn http_reserve_rewrite_is_limited_to_fresh_responses_requests() {
+    let fresh = http_request(br#"{"model":"gpt-5.6-luna"}"#);
+    assert!(runtime_luna_reserve_http_rewrite_allowed(
+        &fresh,
+        RuntimeRouteKind::Responses,
+        None,
+    ));
+    assert!(!runtime_luna_reserve_http_rewrite_allowed(
+        &fresh,
+        RuntimeRouteKind::Compact,
+        None,
+    ));
+    assert!(!runtime_luna_reserve_http_rewrite_allowed(
+        &fresh,
+        RuntimeRouteKind::Responses,
+        Some("continuation-state"),
+    ));
+
+    let mut previous_response =
+        http_request(br#"{"model":"gpt-5.6-luna","previous_response_id":"resp_123"}"#);
+    assert!(!runtime_luna_reserve_http_rewrite_allowed(
+        &previous_response,
+        RuntimeRouteKind::Responses,
+        None,
+    ));
+
+    previous_response
+        .headers
+        .push(("session_id".to_string(), "session_123".to_string()));
+    assert!(!runtime_luna_reserve_http_rewrite_allowed(
+        &previous_response,
+        RuntimeRouteKind::Responses,
+        None,
+    ));
+
+    previous_response.headers.clear();
+    previous_response
+        .headers
+        .push(("x-codex-turn-state".to_string(), "turn-state".to_string()));
+    assert!(!runtime_luna_reserve_http_rewrite_allowed(
+        &previous_response,
+        RuntimeRouteKind::Responses,
+        None,
+    ));
+}

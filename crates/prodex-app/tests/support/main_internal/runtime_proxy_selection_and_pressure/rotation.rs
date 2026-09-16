@@ -2,6 +2,8 @@ use super::*;
 
 #[path = "rotation/auth_usage.rs"]
 mod auth_usage;
+#[path = "rotation/luna_reserve.rs"]
+mod luna_reserve;
 #[path = "rotation/profile_removal.rs"]
 mod profile_removal;
 #[path = "rotation/paths_usage.rs"]

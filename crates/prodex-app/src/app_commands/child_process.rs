@@ -411,6 +411,8 @@ pub(crate) fn handle_runtime_tools_dry_run(args: RuntimeToolArgs) -> Result<()> 
         base_url: args.base_url.as_deref(),
         upstream_no_proxy: args.no_proxy,
         include_code_review,
+        requested_model: crate::runtime_launch_cli_model(&codex_args)
+            .or_else(|| codex_cli_config_override_value(&codex_args, "model")),
         smart_context_enabled: args.smart_context,
         presidio_redaction_enabled: presidio_enabled,
         model_context_window_tokens,

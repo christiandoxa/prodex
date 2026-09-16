@@ -212,7 +212,7 @@ fn build_runtime_proxy_upstream_request(
         profile_name,
         auth.account_id.as_deref(),
         upstream_body.as_ref(),
-        true,
+        runtime_luna_reserve_http_rewrite_allowed(request, route_kind, turn_state_override),
     )? {
         upstream_body = std::borrow::Cow::Owned(reserve_body);
     }

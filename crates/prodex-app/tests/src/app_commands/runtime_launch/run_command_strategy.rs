@@ -35,6 +35,34 @@ fn assert_repaired_session_meta_line(line: &str, session_id: &str) {
 }
 
 #[test]
+fn run_strategy_passes_explicit_model_to_runtime_preflight() {
+    let strategy = RunCommandStrategy::new(RunArgs {
+        profile: None,
+        auto_rotate: false,
+        no_auto_rotate: false,
+        auto_redeem: false,
+        skip_quota_check: false,
+        full_access: false,
+        base_url: None,
+        no_proxy: false,
+        dry_run: false,
+        codex_features: CodexRuntimeFeatureArgs::default(),
+        codex_args: vec![
+            OsString::from("exec"),
+            OsString::from("--model"),
+            OsString::from("gpt-5.6-luna"),
+            OsString::from("hello"),
+        ],
+    })
+    .expect("run strategy should accept an explicit model");
+
+    assert_eq!(
+        strategy.runtime_request().requested_model.as_deref(),
+        Some("gpt-5.6-luna")
+    );
+}
+
+#[test]
 fn run_strategy_auto_routes_gemini_resume_sessions_to_provider_bridge() {
     let root = temp_dir("auto-route-gemini-resume");
     let _env = TestEnvVarGuard::set("PRODEX_HOME", root.to_str().unwrap());

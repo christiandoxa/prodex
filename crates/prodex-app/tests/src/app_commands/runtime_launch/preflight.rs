@@ -63,6 +63,7 @@ fn no_ready_runtime_profiles_returns_error_for_blocked_report() {
             base_url: None,
             upstream_no_proxy: false,
             include_code_review: false,
+            requested_model: None,
             smart_context_enabled: false,
             presidio_redaction_enabled: false,
             model_context_window_tokens: None,
@@ -110,6 +111,7 @@ fn no_ready_runtime_profiles_continues_when_probe_failed() {
             base_url: None,
             upstream_no_proxy: false,
             include_code_review: false,
+            requested_model: None,
             smart_context_enabled: false,
             presidio_redaction_enabled: false,
             model_context_window_tokens: None,
@@ -248,6 +250,7 @@ fn prepare_runtime_launch_rechecks_persisted_exhausted_quota_snapshot() {
         base_url: Some(&base_url),
         upstream_no_proxy: true,
         include_code_review: false,
+        requested_model: None,
         smart_context_enabled: false,
         presidio_redaction_enabled: false,
         model_context_window_tokens: None,
@@ -262,6 +265,101 @@ fn prepare_runtime_launch_rechecks_persisted_exhausted_quota_snapshot() {
     handle.join().expect("quota test server should finish");
 
     assert_eq!(prepared.codex_home, main_home);
+}
+
+#[test]
+fn runtime_launch_preflight_accepts_luna_reserve_without_upsell_banner() {
+    let root = temp_dir("launch-preflight-luna-reserve-no-banner");
+    let _env = TestEnvVarGuard::set("PRODEX_HOME", root.to_str().unwrap());
+    let main_home = root.join("main-home");
+    fs::create_dir_all(&main_home).unwrap();
+    write_runtime_launch_auth(
+        main_home.join("auth.json"),
+        serde_json::json!({
+            "tokens": {
+                "access_token": "main-token",
+                "account_id": "main-account"
+            }
+        })
+        .to_string(),
+    )
+    .unwrap();
+    let mut state = AppState {
+        active_profile: Some("main".to_string()),
+        profiles: BTreeMap::from([(
+            "main".to_string(),
+            ProfileEntry {
+                codex_home: main_home.clone(),
+                managed: false,
+                email: None,
+                provider: ProfileProvider::Openai,
+            },
+        )]),
+        ..AppState::default()
+    };
+    let paths = AppPaths::discover().unwrap();
+    let server = TinyServer::http("127.0.0.1:0").expect("quota test server should bind");
+    let addr = server.server_addr().to_ip().unwrap();
+    let handle = thread::spawn(move || {
+        let request = server
+            .recv_timeout(Duration::from_secs(5))
+            .expect("quota request should be readable")
+            .expect("Luna Reserve preflight should request live usage");
+        assert_eq!(request.url(), "/backend-api/wham/usage");
+        request
+            .respond(
+                TinyResponse::from_string(
+                    serde_json::json!({
+                        "accountId": "main-account",
+                        "ordinaryUsageAllowed": false,
+                        "rateLimitResetCredits": { "availableCount": 2 },
+                        "rateLimitsByLimitId": {
+                            "codex": {
+                                "limitId": "codex",
+                                "primary": { "usedPercent": 100, "windowDurationMins": 300 },
+                                "secondary": { "usedPercent": 100, "windowDurationMins": 10080 }
+                            },
+                            "base_model_inference": {
+                                "limitId": "base_model_inference",
+                                "limitName": "gpt-reserve",
+                                "normalModelSlug": "gpt-5.6-luna",
+                                "primary": { "usedPercent": 0, "windowDurationMins": 300 },
+                                "secondary": { "usedPercent": 0, "windowDurationMins": 10080 }
+                            }
+                        }
+                    })
+                    .to_string(),
+                )
+                .with_header(TinyHeader::from_bytes("Content-Type", "application/json").unwrap()),
+            )
+            .expect("quota response should send");
+    });
+    let base_url = format!("http://{addr}/backend-api");
+    let request = RuntimeLaunchRequest {
+        profile: None,
+        allow_auto_rotate: false,
+        auto_redeem: false,
+        skip_quota_check: false,
+        base_url: Some(&base_url),
+        upstream_no_proxy: true,
+        include_code_review: false,
+        requested_model: Some("gpt-5.6-luna".to_string()),
+        smart_context_enabled: false,
+        presidio_redaction_enabled: false,
+        model_context_window_tokens: None,
+        gemini_thinking_budget_tokens: None,
+        force_runtime_proxy: false,
+        model_provider_override: None,
+        profile_v2_name: None,
+        external_provider: None,
+        external_provider_api_key: None,
+    };
+
+    let selection = select_runtime_launch_profile(&paths, &mut state, &request)
+        .expect("an authenticated mapped Reserve bucket should satisfy Luna preflight");
+    handle.join().expect("quota test server should finish");
+
+    assert_eq!(selection.selected_profile_name, "main");
 }
 
 #[test]
@@ -338,6 +436,7 @@ fn prepare_runtime_launch_auto_selects_ready_snapshot_before_current_network_pre
         base_url: Some("http://127.0.0.1:9"),
         upstream_no_proxy: true,
         include_code_review: false,
+        requested_model: None,
         smart_context_enabled: false,
         presidio_redaction_enabled: false,
         model_context_window_tokens: None,

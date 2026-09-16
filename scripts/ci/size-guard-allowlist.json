@@ -36,7 +36,7 @@
   },
   {
     "file": "crates/prodex-app/tests/src/app_commands/runtime_launch.rs",
-    "maxLines": 2066,
+    "maxLines": 2047,
     "reason": "Runtime launch command tests remain capped after admin-token, secure credential, and post-exit session maintenance coverage moved into focused sibling modules."
   },
   {

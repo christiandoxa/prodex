@@ -1,6 +1,22 @@
 use super::{RuntimeRotationProxyShared, UsageResponse, runtime_profile_usage_cache_is_fresh};
 use anyhow::{Context, Result};
 use chrono::Local;
+use runtime_proxy_crate::{
+    RuntimeProxyRequest, RuntimeRouteKind, runtime_request_previous_response_id,
+    runtime_request_session_id, runtime_request_turn_state,
+};
+
+pub(crate) fn runtime_luna_reserve_http_rewrite_allowed(
+    request: &RuntimeProxyRequest,
+    route_kind: RuntimeRouteKind,
+    turn_state_override: Option<&str>,
+) -> bool {
+    matches!(route_kind, RuntimeRouteKind::Responses)
+        && turn_state_override.is_none()
+        && runtime_request_previous_response_id(request).is_none()
+        && runtime_request_session_id(request).is_none()
+        && runtime_request_turn_state(request).is_none()
+}
 
 pub(crate) fn rewrite_runtime_luna_reserve_model_if_authorized(
     shared: &RuntimeRotationProxyShared,
