@@ -177,6 +177,12 @@ serde_json = { workspace = true }
     "forbidden runtime dependency accepted",
   );
 
+  const invalidMojoBridge = `${valid}\nprodex_mojo_core = { workspace = true, optional = true }\n`;
+  assertSelfTest(
+    validateDomainManifest(invalidMojoBridge, "invalid-mojo/Cargo.toml").some((error) => error.includes("prodex_mojo_core")),
+    "Mojo bridge dependency accepted in pure domain",
+  );
+
   const invalidTarget = `${valid}\n[target.'cfg(unix)'.dependencies]\ntokio = "1"\n`;
   assertSelfTest(
     validateDomainManifest(invalidTarget, "invalid-target/Cargo.toml").some((error) => error.includes("target-specific")),
