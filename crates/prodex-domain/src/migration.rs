@@ -282,7 +282,28 @@ pub fn plan_migration_plan_error_response(
     }
 }
 
+#[cfg(any())]
 pub fn validate_expand_contract_order(steps: &[MigrationStep]) -> Result<(), MigrationPlanError> {
+    let steps = steps
+        .iter()
+        .map(|step| step.kind as i64)
+        .collect::<Vec<_>>();
+    match prodex_mojo_core::policy::migration_step_order(&steps)
+        .expect("Mojo migration step planner returned invalid output")
+    {
+        0 => Ok(()),
+        1 => Err(MigrationPlanError::BackfillBeforeExpand),
+        2 => Err(MigrationPlanError::VerifyBeforeBackfill),
+        3 => Err(MigrationPlanError::ContractBeforeExpand),
+        _ => Err(MigrationPlanError::ContractBeforeExpand),
+    }
+}
+
+pub fn validate_expand_contract_order(steps: &[MigrationStep]) -> Result<(), MigrationPlanError> {
+    validate_expand_contract_order_rust(steps)
+}
+
+fn validate_expand_contract_order_rust(steps: &[MigrationStep]) -> Result<(), MigrationPlanError> {
     let mut saw_expand = false;
     let mut saw_backfill = false;
     for step in steps {

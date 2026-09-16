@@ -262,7 +262,44 @@ pub enum RateLimitAtomicUpdateError {
     ExpiredWindow,
 }
 
+#[cfg(any())]
 pub fn evaluate_rate_limit(
+    rule: RateLimitRule,
+    snapshot: RateLimitSnapshot,
+    request: RateLimitRequest,
+) -> RateLimitDecision {
+    let plan = prodex_mojo_core::policy::rate_limit_plan(
+        rule.max_requests,
+        rule.window_seconds,
+        snapshot.used_requests,
+        snapshot.window_reset_unix_ms,
+        request.requested_requests,
+        request.now_unix_ms,
+    )
+    .expect("Mojo rate limit planner returned invalid output");
+    if plan.capacity_allows && request.tenant_id == snapshot.tenant_id {
+        RateLimitDecision::Allow(RateLimitAllowance {
+            remaining_after_admission: plan.remaining_after_admission,
+            reset_unix_ms: plan.reset_unix_ms,
+        })
+    } else {
+        RateLimitDecision::Reject(RateLimitRejection {
+            retry_after_seconds: plan.retry_after_seconds,
+            reset_unix_ms: plan.reset_unix_ms,
+            remaining: plan.remaining,
+        })
+    }
+}
+
+pub fn evaluate_rate_limit(
+    rule: RateLimitRule,
+    snapshot: RateLimitSnapshot,
+    request: RateLimitRequest,
+) -> RateLimitDecision {
+    evaluate_rate_limit_rust(rule, snapshot, request)
+}
+
+fn evaluate_rate_limit_rust(
     rule: RateLimitRule,
     snapshot: RateLimitSnapshot,
     request: RateLimitRequest,

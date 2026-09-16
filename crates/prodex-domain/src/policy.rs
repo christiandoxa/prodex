@@ -446,7 +446,45 @@ pub enum PolicyRefreshDecision {
     Invalidated,
 }
 
+#[cfg(any())]
 pub fn evaluate_policy_refresh(
+    status: &PolicyCacheStatus,
+    now_unix_ms: u64,
+) -> PolicyRefreshDecision {
+    let active_invalidated = status.invalidated_revision_id.is_some()
+        && status.invalidated_revision_id == status.active_revision_id;
+    let last_known_good_invalidated = status.last_known_good_revision_id.is_some()
+        && status.last_known_good_revision_id == status.invalidated_revision_id;
+    match prodex_mojo_core::policy::policy_refresh_decision(
+        [
+            status.refresh_window.refresh_after_unix_ms,
+            status.refresh_window.stale_after_unix_ms,
+            status.refresh_window.expires_after_unix_ms,
+        ],
+        now_unix_ms,
+        active_invalidated,
+        status.last_known_good_revision_id.is_some(),
+        last_known_good_invalidated,
+    )
+    .expect("Mojo policy refresh decision returned invalid output")
+    {
+        0 => PolicyRefreshDecision::UseActive,
+        1 => PolicyRefreshDecision::RefreshAsync,
+        2 => PolicyRefreshDecision::UseLastKnownGoodAndRefresh,
+        3 => PolicyRefreshDecision::Expired,
+        4 => PolicyRefreshDecision::Invalidated,
+        _ => PolicyRefreshDecision::Expired,
+    }
+}
+
+pub fn evaluate_policy_refresh(
+    status: &PolicyCacheStatus,
+    now_unix_ms: u64,
+) -> PolicyRefreshDecision {
+    evaluate_policy_refresh_rust(status, now_unix_ms)
+}
+
+fn evaluate_policy_refresh_rust(
     status: &PolicyCacheStatus,
     now_unix_ms: u64,
 ) -> PolicyRefreshDecision {
