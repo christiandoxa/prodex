@@ -2,6 +2,73 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.429.4 - 2026-09-16
+
+### Runtime
+
+- Gate compatibility helper (`463b5cc`)
+- Route Luna Reserve requests (`dfaa176`)
+- Route runtime error policy through Mojo (`1fd5eb1`)
+- Migrate Kiro and proxy error kernels (`d5dcbb2`)
+- Migrate runtime doctor summary planning (`05f6166`)
+
+### CLI
+
+- Revert "feat(mojo): migrate profile health scoring" (`b7ef44c`)
+- Migrate profile health scoring (`d033915`)
+
+### Docs
+
+- Document Luna Reserve routing (`a908be3`)
+
+### Deps
+
+- Synchronize Dependabot cargo updates (`2227a42`)
+
+### Misc
+
+- Sync critical signal ownership (`c347a97`)
+- Plan registry bootstrap in Mojo (`ab75ab4`)
+- Move command output normalization to Mojo (`7376d2c`)
+- Move admin registry policy into Mojo (`1e7dcd9`)
+- Move endpoint shapes to Mojo (`d75b030`)
+- Move ACP shaping to Mojo (`e9846fb`)
+- Preserve git status Mojo parity (`82f5f04`)
+- Migrate DeepSeek stream shaping (`d0d51a8`)
+- Migrate gateway admin and provider registry plans (`8d38034`)
+- Finish OpenAI response shaping (`fa84ef0`)
+- Migrate health and gateway policy kernels (`f42f56d`)
+- Route domain accounting arithmetic (`c266c60`)
+# Prodex 0.429.4
+
+## New Features
+
+- None.
+
+## Bug Fixes
+
+- Advertise Luna Reserve capability on OpenAI usage reads and preserve the
+  backend's authoritative Reserve banner, model mapping, and account identity.
+- Route eligible `gpt-5.6-luna` requests through the hidden `gpt-reserve`
+  upstream model only after profile selection, while keeping the requested
+  model unchanged for affinity, selection, logs, and public metadata.
+- Keep reused WebSocket sessions and continuations on their existing route so
+  Reserve recovery cannot replay committed output or tool effects.
+- Keep Luna Reserve activation independent from reset-credit redemption.
+
+## Safety
+
+- Fail closed when Reserve metadata is missing, regular usage remains allowed,
+  the Reserve bucket is denied or exhausted, or backend and authenticated
+  account identities conflict.
+
+## Changelog
+
+- Synchronize release metadata and generated changelog for the Luna Reserve
+  routing fix.
+
+Full Changelog: [0.429.3...0.429.4](https://github.com/christiandoxa/prodex/compare/0.429.3...0.429.4)
+
 ## 0.429.3 - 2026-09-13
 
 ### Docs
@@ -11,32 +78,6 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 - Pin final main audit SHA (`1f1ada0`)
 - Finalize audit evidence (`09e683b`)
 - Record complete integration ledger (`8d28c11`)
-# Prodex 0.429.3
-
-## New Features
-
-- None.
-
-## Bug Fixes
-
-- Stabilize runtime-broker process-identity regression coverage by keeping the
-  fixture shell process alive instead of allowing its final sleep command to
-  replace the process under CI scheduling.
-- Close a cross-platform probe-refresh test-isolation race by waiting for
-  scheduled probe reservations to drain before the next runtime-selection
-  fixture starts.
-
-## Changelog
-
-- Consolidate duplicated control-plane, gateway, session-store, runtime-launch,
-  CLI, state, and application helpers while removing dead audit APIs, unused
-  npm script surfaces, and no-op validation paths.
-- Remove the completed refactor integration ledger and the obsolete historical
-  Mojo ownership baseline after their evidence was no longer an active release
-  gate.
-- Keep all package, Cargo, fuzz, and platform metadata synchronized at 0.429.3.
-
-Full Changelog: [0.429.2...0.429.3](https://github.com/christiandoxa/prodex/compare/0.429.2...0.429.3)
 
 ## 0.429.2 - 2026-09-13
 
@@ -88,48 +129,11 @@ Full Changelog: [0.429.2...0.429.3](https://github.com/christiandoxa/prodex/comp
 ### Runtime
 
 - Bound precommit and log resources (`61b9825`)
-
-### Misc
-
-- Share descriptor budget across sources (`729a044`)
-- Satisfy executor complexity gate (`0835ed3`)
-- Add standalone exec and shorten companion socket (`6c77d95`)
-
-## 0.428.1 - 2026-09-11
-
-### Runtime
-
 - Preserve projected Super child arguments (`c3a590d`)
 - Keep fresh Super config projection cross-platform (`cd2ea99`)
 - Gate Unix companion helpers (`851249f`)
 - Preserve local Super resume semantics (`d023f00`)
 - Bound precommit retry loops (#86) (`9674ded`)
-
-### Misc
-
-- Restore recent authoritative throughput (`6f8a1cd`)
-- Reject inverted blocking ranges (`d6a49ac`)
-- Fence session shadow rollback on main path (`efd5ba9`)
-
-## 0.428.0 - 2026-09-10
-
-### Docs
-
-- Describe session preempt control flow (`44bf39d`)
-
-### Deps
-
-- Bump toml (`6112ed0`)
-
-### Misc
-
-- Add current turn preemption (`5d43a29`)
-- Merge pull request #68 from christiandoxa/dependabot/cargo/fuzz/fuzz-cargo-fe1561a707 (`d76fd1e`)
-
-## 0.427.0 - 2026-09-07
-
-### Runtime
-
 - Skip diagnostic traces in selection benches (`25f3c6e`)
 - Box recovery log target (`9351628`)
 - Bound overload recovery sweeps (`3cba60f`)
@@ -141,63 +145,6 @@ Full Changelog: [0.429.2...0.429.3](https://github.com/christiandoxa/prodex/comp
 - Separate rate-limit recovery from overload (`765dc56`)
 - Require official external Codex (`0ddccaf`)
 - Bundle patched Codex TUI runtime (`fd7d890`)
-
-### CLI
-
-- Require explicit Luna reserve evidence (`e69dfa0`)
-- Isolate model-specific capacity (`a87e7cb`)
-
-### Claude
-
-- Avoid copying ambiguous Claude state (`811cad0`)
-- Isolate OAuth and send hello (`14a4191`)
-
-### Docs
-
-- Describe official Codex baseline (`3e5b904`)
-- Explain gaps and idle throughput (`cfaf689`)
-- Record verified release metadata (`f16dd6a`)
-
-### Deps
-
-- Bump the cargo group with 5 updates (`0e31f2a`)
-
-### Misc
-
-- Restore Windows tunnel timeout (`afbe0a4`)
-- Use stable Windows rollout identity (`3a422a6`)
-- Simplify bounded output reader (`db01ee4`)
-- Remove needless returns (`27b59b1`)
-- Reduce session prompt write complexity (`1ec3c8a`)
-- Merge remote-tracking branch 'origin/main' into resume/0.427.0-20260907 (`7675fed`)
-- Merge pull request #67 from christiandoxa/dependabot/cargo/cargo-3cd5a82d43 (`78fe101`)
-- Retry definitely rejected prompts (`8f0e18b`)
-- Tail complete rollout records safely (`f822e54`)
-- Follow upstream schema module split (`c55c229`)
-- Align final release source inventories (`1448a60`)
-- Validate extracted log reachability (`48b5e95`)
-- Verify official app-server session bridge (`caa21dd`)
-- Harden session bridge follow-up (`02766c0`)
-- Harden session bridge (`2e99c33`)
-- Satisfy Codex resolver lint (`6451f54`)
-- Complete event telemetry (`bfd8d57`)
-- Measure first model response (`e031bc4`)
-- Report model identity honestly (`15c8990`)
-- Merge pull request #65 from christiandoxa/integration/0.426.1-final (`caeee51`)
-- Tighten active session queue routing (`afdaeb6`)
-- Surface busy session writes in the TUI queue (`f909625`)
-- Preserve bounded preference timeout (`5ecb2b0`)
-- Bound preference lock retries (`81255bd`)
-- Stabilize release qualification fixtures (`8788fb2`)
-- Refresh Codex lock and inventory baselines (`3853bd8`)
-- Build patched Codex with locked dependencies (`3b96eac`)
-- Normalize dynamic model catalogs (`a9984b6`)
-- Route Prompt Write through existing sessions (`c6cc410`)
-
-## 0.426.0 - 2026-09-04
-
-### Runtime
-
 - Stabilize broker working directory (`7340f6b`)
 - Simplify compact retry classification (`1e4cde9`)
 - Preserve provider recovery and model fallback (`2bf4acb`)
@@ -333,6 +280,8 @@ Full Changelog: [0.429.2...0.429.3](https://github.com/christiandoxa/prodex/comp
 
 ### CLI
 
+- Require explicit Luna reserve evidence (`e69dfa0`)
+- Isolate model-specific capacity (`a87e7cb`)
 - Preserve Luna reserve capacity (`028c1e2`)
 - Add expose tunnel providers (`7859b34`)
 - Gate Mojo-only selection oracle imports (`8d28d1f`)
@@ -411,6 +360,8 @@ Full Changelog: [0.429.2...0.429.3](https://github.com/christiandoxa/prodex/comp
 
 ### Claude
 
+- Avoid copying ambiguous Claude state (`811cad0`)
+- Isolate OAuth and send hello (`14a4191`)
 - Reject unsafe external credential files (`190e699`)
 - Import existing OAuth credentials (`5f66a68`)
 - Supervise OpenAI Secure MCP tunnel client (`118927d`)
@@ -430,6 +381,10 @@ Full Changelog: [0.429.2...0.429.3](https://github.com/christiandoxa/prodex/comp
 
 ### Docs
 
+- Describe session preempt control flow (`44bf39d`)
+- Describe official Codex baseline (`3e5b904`)
+- Explain gaps and idle throughput (`cfaf689`)
+- Record verified release metadata (`f16dd6a`)
 - Document 0.426.0 session bridge (`0a5e4d3`)
 - Reflect public Cloudflare browser access (`bbd7ea0`)
 - Add canonical root guide (`8334efe`)
@@ -482,6 +437,8 @@ Full Changelog: [0.429.2...0.429.3](https://github.com/christiandoxa/prodex/comp
 
 ### Deps
 
+- Bump toml (`6112ed0`)
+- Bump the cargo group with 5 updates (`0e31f2a`)
 - Bump argon2 in /fuzz in the fuzz-cargo group (`6674044`)
 - Bump the cargo group with 4 updates (`b8afd47`)
 - Include dependabot uuid update (`94a0364`)
@@ -518,6 +475,43 @@ Full Changelog: [0.429.2...0.429.3](https://github.com/christiandoxa/prodex/comp
 
 ### Misc
 
+- Share descriptor budget across sources (`729a044`)
+- Satisfy executor complexity gate (`0835ed3`)
+- Add standalone exec and shorten companion socket (`6c77d95`)
+- Restore recent authoritative throughput (`6f8a1cd`)
+- Reject inverted blocking ranges (`d6a49ac`)
+- Fence session shadow rollback on main path (`efd5ba9`)
+- Add current turn preemption (`5d43a29`)
+- Merge pull request #68 from christiandoxa/dependabot/cargo/fuzz/fuzz-cargo-fe1561a707 (`d76fd1e`)
+- Restore Windows tunnel timeout (`afbe0a4`)
+- Use stable Windows rollout identity (`3a422a6`)
+- Simplify bounded output reader (`db01ee4`)
+- Remove needless returns (`27b59b1`)
+- Reduce session prompt write complexity (`1ec3c8a`)
+- Merge remote-tracking branch 'origin/main' into resume/0.427.0-20260907 (`7675fed`)
+- Merge pull request #67 from christiandoxa/dependabot/cargo/cargo-3cd5a82d43 (`78fe101`)
+- Retry definitely rejected prompts (`8f0e18b`)
+- Tail complete rollout records safely (`f822e54`)
+- Follow upstream schema module split (`c55c229`)
+- Align final release source inventories (`1448a60`)
+- Validate extracted log reachability (`48b5e95`)
+- Verify official app-server session bridge (`caa21dd`)
+- Harden session bridge follow-up (`02766c0`)
+- Harden session bridge (`2e99c33`)
+- Satisfy Codex resolver lint (`6451f54`)
+- Complete event telemetry (`bfd8d57`)
+- Measure first model response (`e031bc4`)
+- Report model identity honestly (`15c8990`)
+- Merge pull request #65 from christiandoxa/integration/0.426.1-final (`caeee51`)
+- Tighten active session queue routing (`afdaeb6`)
+- Surface busy session writes in the TUI queue (`f909625`)
+- Preserve bounded preference timeout (`5ecb2b0`)
+- Bound preference lock retries (`81255bd`)
+- Stabilize release qualification fixtures (`8788fb2`)
+- Refresh Codex lock and inventory baselines (`3853bd8`)
+- Build patched Codex with locked dependencies (`3b96eac`)
+- Normalize dynamic model catalogs (`a9984b6`)
+- Route Prompt Write through existing sessions (`c6cc410`)
 - Reduce tunnel readiness complexity (`d54cd62`)
 - Classify late tunnel child exits (`3a0134c`)
 - Accommodate Windows tunnel startup latency (`0fd173b`)
