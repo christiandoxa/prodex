@@ -3,6 +3,8 @@ use super::*;
 mod admin_tokens;
 #[path = "runtime_launch/arg0_cleanup.rs"]
 mod arg0_cleanup;
+#[path = "runtime_launch/force_proxy.rs"]
+mod force_proxy;
 #[path = "runtime_launch/openai_model_context.rs"]
 mod openai_model_context;
 #[path = "runtime_launch/postgres_tls.rs"]
@@ -1500,6 +1502,7 @@ fn prepare_runtime_launch_skips_proxy_for_non_openai_model_provider() {
         base_url: None,
         upstream_no_proxy: false,
         include_code_review: false,
+        requested_model: None,
         smart_context_enabled: false,
         presidio_redaction_enabled: false,
         model_context_window_tokens: None,
@@ -1549,6 +1552,7 @@ fn prepare_runtime_launch_rejects_claude_for_non_openai_model_provider() {
         base_url: None,
         upstream_no_proxy: false,
         include_code_review: false,
+        requested_model: None,
         smart_context_enabled: false,
         presidio_redaction_enabled: false,
         model_context_window_tokens: None,
@@ -1619,6 +1623,7 @@ fn prepare_runtime_launch_dry_run_uses_proxy_preview_without_recording_selection
         base_url: None,
         upstream_no_proxy: false,
         include_code_review: false,
+        requested_model: None,
         smart_context_enabled: false,
         presidio_redaction_enabled: false,
         model_context_window_tokens: None,
@@ -1662,6 +1667,7 @@ fn prepare_runtime_launch_allows_profileless_local_home_when_no_profiles_exist()
         base_url: None,
         upstream_no_proxy: false,
         include_code_review: false,
+        requested_model: None,
         smart_context_enabled: false,
         presidio_redaction_enabled: false,
         model_context_window_tokens: None,
@@ -1703,6 +1709,7 @@ fn prepare_runtime_launch_profile_v2_config_enables_profileless_local_rewrite_pr
         base_url: None,
         upstream_no_proxy: false,
         include_code_review: false,
+        requested_model: None,
         smart_context_enabled: true,
         presidio_redaction_enabled: false,
         model_context_window_tokens: Some(65_536),
@@ -1744,6 +1751,7 @@ fn prepare_runtime_launch_enables_local_rewrite_proxy_for_prodex_local_smart_con
         base_url: Some("http://127.0.0.1:8131/v1"),
         upstream_no_proxy: false,
         include_code_review: false,
+        requested_model: None,
         smart_context_enabled: true,
         presidio_redaction_enabled: false,
         model_context_window_tokens: Some(65_536),
@@ -1805,6 +1813,7 @@ fn prepare_runtime_launch_profileless_local_flag_preserves_existing_profiles() {
         base_url: None,
         upstream_no_proxy: false,
         include_code_review: false,
+        requested_model: None,
         smart_context_enabled: false,
         presidio_redaction_enabled: false,
         model_context_window_tokens: None,
@@ -1856,6 +1865,7 @@ fn prepare_runtime_launch_uses_profile_v2_model_provider_overlay() {
         base_url: None,
         upstream_no_proxy: false,
         include_code_review: false,
+        requested_model: None,
         smart_context_enabled: false,
         presidio_redaction_enabled: false,
         model_context_window_tokens: None,
@@ -1900,6 +1910,7 @@ fn prepare_runtime_launch_explicit_profile_keeps_profile_home_with_local_overrid
         base_url: None,
         upstream_no_proxy: false,
         include_code_review: false,
+        requested_model: None,
         smart_context_enabled: false,
         presidio_redaction_enabled: false,
         model_context_window_tokens: None,
@@ -1950,6 +1961,7 @@ fn prepare_runtime_launch_dry_run_skips_proxy_for_non_openai_model_provider() {
         base_url: None,
         upstream_no_proxy: false,
         include_code_review: false,
+        requested_model: None,
         smart_context_enabled: false,
         presidio_redaction_enabled: false,
         model_context_window_tokens: None,
@@ -1982,6 +1994,7 @@ fn prepare_runtime_launch_dry_run_previews_local_rewrite_proxy_for_prodex_local_
         base_url: Some("http://127.0.0.1:8131/v1"),
         upstream_no_proxy: false,
         include_code_review: false,
+        requested_model: None,
         smart_context_enabled: true,
         presidio_redaction_enabled: false,
         model_context_window_tokens: Some(65_536),
@@ -2012,38 +2025,6 @@ fn prepare_runtime_launch_dry_run_previews_local_rewrite_proxy_for_prodex_local_
         "dry-run local proxy preview must not persist synthetic profile selection"
     );
 }
-#[test]
-fn prepare_runtime_launch_rejects_force_proxy_for_profileless_local_home() {
-    let root = temp_dir("profileless-local-force-proxy");
-    let _env = TestEnvVarGuard::set("PRODEX_HOME", root.to_str().unwrap());
-    let shared_root = root.join("shared-codex");
-    let _shared = TestEnvVarGuard::set("PRODEX_SHARED_CODEX_HOME", shared_root.to_str().unwrap());
-    let err = match prepare_runtime_launch(RuntimeLaunchRequest {
-        profile: None,
-        allow_auto_rotate: true,
-        auto_redeem: false,
-        skip_quota_check: true,
-        base_url: None,
-        upstream_no_proxy: false,
-        include_code_review: false,
-        smart_context_enabled: false,
-        presidio_redaction_enabled: false,
-        model_context_window_tokens: None,
-        gemini_thinking_budget_tokens: None,
-        force_runtime_proxy: true,
-        model_provider_override: Some(SUPER_LOCAL_PROVIDER_ID),
-        profile_v2_name: None,
-        external_provider: None,
-        external_provider_api_key: None,
-    }) {
-        Ok(_) => panic!("expected forced proxy launch to reject profileless local provider"),
-        Err(err) => err,
-    };
-    let message = format!("{err:#}");
-    assert!(message.contains(SUPER_LOCAL_PROVIDER_ID));
-    assert!(message.contains("prodex claude"));
-}
-
 fn write_state(root: &Path, state: AppState) {
     fs::create_dir_all(root).unwrap();
     let paths = AppPaths::discover().unwrap();

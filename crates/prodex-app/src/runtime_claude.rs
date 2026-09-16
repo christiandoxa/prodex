@@ -38,6 +38,7 @@ impl RuntimeLaunchStrategy for ClaudeLaunchStrategy {
             base_url: self.args.base_url.as_deref(),
             upstream_no_proxy: self.args.no_proxy,
             include_code_review: false,
+            requested_model: None,
             smart_context_enabled: false,
             presidio_redaction_enabled: false,
             model_context_window_tokens: None,

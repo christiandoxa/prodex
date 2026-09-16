@@ -156,6 +156,8 @@ impl RuntimeLaunchStrategy for RuntimeToolLaunchStrategy {
             base_url: self.args.base_url.as_deref(),
             upstream_no_proxy: self.args.no_proxy,
             include_code_review: self.include_code_review,
+            requested_model: crate::runtime_launch_cli_model(&self.codex_args)
+                .or_else(|| codex_cli_config_override_value(&self.codex_args, "model")),
             smart_context_enabled: self.args.smart_context,
             presidio_redaction_enabled: self.presidio_enabled,
             model_context_window_tokens: self.model_context_window_tokens,

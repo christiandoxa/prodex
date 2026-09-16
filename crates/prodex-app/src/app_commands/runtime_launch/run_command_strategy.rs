@@ -193,6 +193,8 @@ impl RuntimeLaunchStrategy for RunCommandStrategy {
                 .or(self.auto_external_provider_base_url.as_deref()),
             upstream_no_proxy: self.args.no_proxy,
             include_code_review: self.include_code_review,
+            requested_model: runtime_launch_cli_model(&self.codex_args)
+                .or_else(|| codex_cli_config_override_value(&self.codex_args, "model")),
             smart_context_enabled: self.auto_external_provider.is_some(),
             presidio_redaction_enabled: false,
             model_context_window_tokens: self.model_context_window_tokens,

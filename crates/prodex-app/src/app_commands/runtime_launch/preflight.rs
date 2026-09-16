@@ -88,7 +88,7 @@ fn run_auto_runtime_launch_preflight(
         request.base_url,
         request.upstream_no_proxy,
     )?;
-    if run_profile_probe_is_ready(&current_report, request.include_code_review) {
+    if runtime_launch_usage_is_ready_for_request(&current_report, request) {
         return Ok(());
     }
 
@@ -101,12 +101,13 @@ fn run_auto_runtime_launch_preflight(
         request.base_url,
         request.upstream_no_proxy,
     );
-    let ready_candidates = ready_profile_candidates(
+    let ready_candidates = ready_profile_candidates_for_model(
         &reports,
         request.include_code_review,
         Some(&selection.initial_profile_name),
         state,
         Some(&persisted_usage_snapshots),
+        request.requested_model.as_deref(),
     );
     let selected_report = reports
         .iter()
@@ -224,7 +225,7 @@ fn run_selected_runtime_launch_preflight(
         request.upstream_no_proxy,
     ) {
         Ok(usage) => {
-            let blocked = collect_blocked_limits(&usage, request.include_code_review);
+            let blocked = runtime_launch_blocked_limits_for_request(&usage, request);
             if !blocked.is_empty() {
                 handle_blocked_selected_runtime_profile(
                     paths, state, request, selection, &blocked,
@@ -247,6 +248,34 @@ fn run_selected_runtime_launch_preflight(
     }
 
     Ok(())
+}
+
+fn runtime_launch_usage_is_ready_for_request(
+    report: &RunProfileProbeReport,
+    request: &RuntimeLaunchRequest<'_>,
+) -> bool {
+    report.result.as_ref().is_ok_and(|usage| {
+        prodex_quota::openai_usage_supports_model(
+            usage,
+            request.include_code_review,
+            request.requested_model.as_deref(),
+        )
+    })
+}
+
+fn runtime_launch_blocked_limits_for_request(
+    usage: &UsageResponse,
+    request: &RuntimeLaunchRequest<'_>,
+) -> Vec<BlockedLimit> {
+    if prodex_quota::openai_usage_supports_model(
+        usage,
+        request.include_code_review,
+        request.requested_model.as_deref(),
+    ) {
+        Vec::new()
+    } else {
+        collect_blocked_limits(usage, request.include_code_review)
+    }
 }
 
 pub(super) fn runtime_launch_preflight_error_message(err: &anyhow::Error) -> String {
@@ -275,7 +304,7 @@ fn try_runtime_launch_snapshot_preflight(
     };
 
     let current_usage = runtime_launch_usage_from_snapshot(current_snapshot);
-    let current_blocked = collect_blocked_limits(&current_usage, request.include_code_review);
+    let current_blocked = runtime_launch_blocked_limits_for_request(&current_usage, request);
     if current_blocked.is_empty() {
         return Ok(true);
     }
@@ -290,18 +319,15 @@ fn try_runtime_launch_auto_snapshot_preflight(
     selection: &mut RuntimeLaunchSelection,
     snapshots: &BTreeMap<String, RuntimeProfileUsageSnapshot>,
 ) -> Result<bool> {
-    let snapshot_reports = runtime_launch_snapshot_reports(
-        state,
-        &selection.initial_profile_name,
-        snapshots,
-        request.include_code_review,
-    );
-    let ready_candidates = ready_profile_candidates(
+    let snapshot_reports =
+        runtime_launch_snapshot_reports(state, &selection.initial_profile_name, snapshots, request);
+    let ready_candidates = ready_profile_candidates_for_model(
         &snapshot_reports,
         request.include_code_review,
         Some(&selection.initial_profile_name),
         state,
         Some(snapshots),
+        request.requested_model.as_deref(),
     );
     let Some(best_candidate) = ready_candidates.first() else {
         return Ok(false);
@@ -344,7 +370,7 @@ fn runtime_launch_snapshot_reports(
     state: &AppState,
     current_profile: &str,
     snapshots: &BTreeMap<String, RuntimeProfileUsageSnapshot>,
-    include_code_review: bool,
+    request: &RuntimeLaunchRequest<'_>,
 ) -> Vec<RunProfileProbeReport> {
     profile_rotation_order(state, current_profile)
         .into_iter()
@@ -353,7 +379,7 @@ fn runtime_launch_snapshot_reports(
             let profile = state.profiles.get(&name)?;
             let snapshot = runtime_launch_usable_usage_snapshot(snapshots.get(&name))?;
             let usage = runtime_launch_usage_from_snapshot(snapshot);
-            let blocked = collect_blocked_limits(&usage, include_code_review);
+            let blocked = runtime_launch_blocked_limits_for_request(&usage, request);
             let result = if blocked.is_empty() {
                 Ok(usage)
             } else {
@@ -443,12 +469,13 @@ fn handle_blocked_selected_runtime_profile(
     selection: &mut RuntimeLaunchSelection,
     blocked: &[BlockedLimit],
 ) -> Result<()> {
-    let alternatives = find_ready_profiles(
+    let alternatives = find_ready_profiles_for_model(
         state,
         &selection.initial_profile_name,
         request.base_url,
         request.include_code_review,
         request.upstream_no_proxy,
+        request.requested_model.as_deref(),
     );
     let plan = prodex_runtime_launch::blocked_selected_runtime_profile_plan(
         &selection.initial_profile_name,

@@ -17,13 +17,14 @@ use crate::{MainWindowSnapshot, UsageResponse};
 #[cfg(test)]
 pub(crate) use prodex_runtime_quota::ready_profile_sort_key;
 #[cfg(test)]
+pub(crate) use prodex_runtime_quota::run_profile_probe_is_ready;
+#[cfg(test)]
 pub(crate) use prodex_runtime_quota::schedule_ready_profile_candidates_with_view;
 pub(crate) use prodex_runtime_quota::{
-    ProfileSelectionRead, ProfileSelectionView, RuntimeProfileSelectionCatalog,
-    RuntimeRouteSelectionCatalog, RuntimeRouteSelectionCatalogView, RuntimeRouteSelectionEntry,
-    RuntimeSelectionProfileEntry, active_profile_selection_order_with_view,
-    merge_run_preflight_reports_with_current_first, profile_rotation_order_with_view,
-    run_profile_probe_is_ready,
+    ProfileSelectionView, RuntimeProfileSelectionCatalog, RuntimeRouteSelectionCatalog,
+    RuntimeRouteSelectionCatalogView, RuntimeRouteSelectionEntry, RuntimeSelectionProfileEntry,
+    active_profile_selection_order_with_view, merge_run_preflight_reports_with_current_first,
+    profile_rotation_order_with_view,
 };
 
 pub(crate) fn app_state_profile_selection_view(
@@ -123,6 +124,7 @@ fn selection_probe_error(err: &anyhow::Error) -> String {
     redaction_redact_secret_like_text(&err.to_string())
 }
 
+#[cfg(test)]
 pub(crate) fn ready_profile_candidates(
     reports: &[RunProfileProbeReport],
     include_code_review: bool,
@@ -130,29 +132,32 @@ pub(crate) fn ready_profile_candidates(
     state: &AppState,
     persisted_usage_snapshots: Option<&BTreeMap<String, RuntimeProfileUsageSnapshot>>,
 ) -> Vec<ReadyProfileCandidate> {
-    ready_profile_candidates_with_view(
+    ready_profile_candidates_for_model(
+        reports,
+        include_code_review,
+        preferred_profile,
+        state,
+        persisted_usage_snapshots,
+        None,
+    )
+}
+
+pub(crate) fn ready_profile_candidates_for_model(
+    reports: &[RunProfileProbeReport],
+    include_code_review: bool,
+    preferred_profile: Option<&str>,
+    state: &AppState,
+    persisted_usage_snapshots: Option<&BTreeMap<String, RuntimeProfileUsageSnapshot>>,
+    requested_model: Option<&str>,
+) -> Vec<ReadyProfileCandidate> {
+    prodex_runtime_quota::ready_profile_candidates_with_view_for_model(
         reports,
         include_code_review,
         preferred_profile,
         app_state_profile_selection_view(state),
         persisted_usage_snapshots,
-    )
-}
-
-pub(crate) fn ready_profile_candidates_with_view<S: ProfileSelectionRead>(
-    reports: &[RunProfileProbeReport],
-    include_code_review: bool,
-    preferred_profile: Option<&str>,
-    selection: S,
-    persisted_usage_snapshots: Option<&BTreeMap<String, RuntimeProfileUsageSnapshot>>,
-) -> Vec<ReadyProfileCandidate> {
-    prodex_runtime_quota::ready_profile_candidates_with_view(
-        reports,
-        include_code_review,
-        preferred_profile,
-        selection,
-        persisted_usage_snapshots,
         RUNTIME_PROFILE_USAGE_CACHE_STALE_GRACE_SECONDS,
+        requested_model,
     )
 }
 
@@ -234,23 +239,6 @@ where
         }
         output
     })
-}
-
-pub(crate) fn find_ready_profiles(
-    state: &AppState,
-    current_profile: &str,
-    base_url: Option<&str>,
-    include_code_review: bool,
-    upstream_no_proxy: bool,
-) -> Vec<String> {
-    find_ready_profiles_for_model(
-        state,
-        current_profile,
-        base_url,
-        include_code_review,
-        upstream_no_proxy,
-        None,
-    )
 }
 
 pub(crate) fn find_ready_profiles_for_model(
