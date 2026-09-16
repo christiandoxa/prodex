@@ -446,7 +446,7 @@ pub enum PolicyRefreshDecision {
     Invalidated,
 }
 
-#[cfg(feature = "mojo")]
+#[cfg(any())]
 pub fn evaluate_policy_refresh(
     status: &PolicyCacheStatus,
     now_unix_ms: u64,
@@ -477,7 +477,6 @@ pub fn evaluate_policy_refresh(
     }
 }
 
-#[cfg(not(feature = "mojo"))]
 pub fn evaluate_policy_refresh(
     status: &PolicyCacheStatus,
     now_unix_ms: u64,
@@ -485,8 +484,6 @@ pub fn evaluate_policy_refresh(
     evaluate_policy_refresh_rust(status, now_unix_ms)
 }
 
-#[cfg(any(test, not(feature = "mojo")))]
-#[cfg_attr(all(test, feature = "mojo"), allow(dead_code))]
 fn evaluate_policy_refresh_rust(
     status: &PolicyCacheStatus,
     now_unix_ms: u64,

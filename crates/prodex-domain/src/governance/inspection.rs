@@ -93,7 +93,7 @@ impl FindingKind {
         Self::TenantSensitive,
     ];
 
-    #[cfg(feature = "mojo")]
+    #[cfg(any())]
     pub fn minimum_classification(self) -> DataClassification {
         match prodex_mojo_core::policy::governance_finding_minimum_classification(self as u8)
             .expect("Mojo finding classification returned invalid output")
@@ -103,13 +103,10 @@ impl FindingKind {
         }
     }
 
-    #[cfg(not(feature = "mojo"))]
     pub fn minimum_classification(self) -> DataClassification {
         self.minimum_classification_rust()
     }
 
-    #[cfg(any(test, not(feature = "mojo")))]
-    #[cfg_attr(all(test, feature = "mojo"), allow(dead_code))]
     fn minimum_classification_rust(self) -> DataClassification {
         match self {
             Self::EmailAddress
@@ -366,7 +363,7 @@ impl InspectionResult {
         {
             return Err(InspectionModelError::LimitExceeded);
         }
-        #[cfg(feature = "mojo")]
+        #[cfg(any())]
         let classification_too_low =
             prodex_mojo_core::policy::governance_findings_exceed_classification(
                 &findings
@@ -376,7 +373,6 @@ impl InspectionResult {
                 classification as u8,
             )
             .expect("Mojo finding classification validation returned invalid output");
-        #[cfg(not(feature = "mojo"))]
         let classification_too_low = findings
             .iter()
             .any(|finding| classification < finding.kind.minimum_classification());

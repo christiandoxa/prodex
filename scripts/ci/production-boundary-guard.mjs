@@ -77,6 +77,7 @@ const FILES = Object.freeze({
 });
 
 const SOURCE_PARTS = Object.freeze({
+  application: ["crates/prodex-application/src/request_context_debug.rs"],
   dataPlaneAdapter: [
     "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_application_data_plane/provider_dispatch.rs",
   ],

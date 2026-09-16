@@ -2,12 +2,11 @@ use std::fmt;
 
 use crate::{GovernancePolicyRuleId, PolicyReasonCode, PolicyRevisionId};
 
-#[cfg(feature = "mojo")]
+#[cfg(any())]
 use super::CanonicalRoute;
 use super::{
     GovernanceObligation, GovernancePolicyError, PolicyEffect, PolicyRuleCondition, PolicySelector,
 };
-#[cfg(any(test, not(feature = "mojo")))]
 use super::{MAX_GOVERNANCE_POLICY_RULES, MAX_POLICY_OBLIGATIONS};
 
 #[derive(Clone, PartialEq, Eq)]
@@ -53,7 +52,7 @@ pub fn compile_governance_policy(
     })
 }
 
-#[cfg(feature = "mojo")]
+#[cfg(any())]
 pub(super) fn validate_governance_policy_shape(
     valid_until_unix_ms: u64,
     rules: &[GovernancePolicyRule],
@@ -75,7 +74,6 @@ pub(super) fn validate_governance_policy_shape(
     }
 }
 
-#[cfg(not(feature = "mojo"))]
 pub(super) fn validate_governance_policy_shape(
     valid_until_unix_ms: u64,
     rules: &[GovernancePolicyRule],
@@ -83,7 +81,6 @@ pub(super) fn validate_governance_policy_shape(
     validate_governance_policy_shape_rust(valid_until_unix_ms, rules)
 }
 
-#[cfg(any(test, not(feature = "mojo")))]
 pub(super) fn validate_governance_policy_shape_rust(
     valid_until_unix_ms: u64,
     rules: &[GovernancePolicyRule],
@@ -143,7 +140,7 @@ fn validate_governance_obligation_conflicts(
     Ok(())
 }
 
-#[cfg(feature = "mojo")]
+#[cfg(any())]
 fn governance_obligation_bound_is_invalid(obligation: &GovernanceObligation) -> bool {
     prodex_mojo_core::policy::governance_obligation_bound_is_invalid(governance_obligation_input(
         obligation,
@@ -151,13 +148,10 @@ fn governance_obligation_bound_is_invalid(obligation: &GovernanceObligation) -> 
     .expect("Mojo governance obligation bound predicate returned invalid output")
 }
 
-#[cfg(not(feature = "mojo"))]
 fn governance_obligation_bound_is_invalid(obligation: &GovernanceObligation) -> bool {
     governance_obligation_bound_is_invalid_rust(obligation)
 }
 
-#[cfg(any(test, not(feature = "mojo")))]
-#[cfg_attr(all(test, feature = "mojo"), allow(dead_code))]
 fn governance_obligation_bound_is_invalid_rust(obligation: &GovernanceObligation) -> bool {
     matches!(
         obligation,
@@ -170,7 +164,7 @@ fn governance_obligation_bound_is_invalid_rust(obligation: &GovernanceObligation
     )
 }
 
-#[cfg(feature = "mojo")]
+#[cfg(any())]
 fn governance_obligations_conflict(
     left: &GovernanceObligation,
     right: &GovernanceObligation,
@@ -182,7 +176,7 @@ fn governance_obligations_conflict(
     .expect("Mojo governance obligation conflict predicate returned invalid output")
 }
 
-#[cfg(feature = "mojo")]
+#[cfg(any())]
 fn governance_obligation_input(obligation: &GovernanceObligation) -> (i64, u64, Option<&str>) {
     use prodex_mojo_core::policy::{
         GOVERNANCE_OBLIGATION_ALLOW_PROVIDER, GOVERNANCE_OBLIGATION_ALLOW_TOOL,
@@ -261,7 +255,6 @@ fn governance_obligation_input(obligation: &GovernanceObligation) -> (i64, u64, 
     }
 }
 
-#[cfg(not(feature = "mojo"))]
 fn governance_obligations_conflict(
     left: &GovernanceObligation,
     right: &GovernanceObligation,
@@ -269,8 +262,6 @@ fn governance_obligations_conflict(
     governance_obligations_conflict_rust(left, right)
 }
 
-#[cfg(any(test, not(feature = "mojo")))]
-#[cfg_attr(all(test, feature = "mojo"), allow(dead_code))]
 fn governance_obligations_conflict_rust(
     left: &GovernanceObligation,
     right: &GovernanceObligation,
@@ -299,7 +290,7 @@ fn governance_obligations_conflict_rust(
     }
 }
 
-#[cfg(feature = "mojo")]
+#[cfg(any())]
 pub(super) fn policy_rule_conditions_overlap(
     left: &PolicyRuleCondition,
     right: &PolicyRuleCondition,
@@ -379,7 +370,7 @@ pub(super) fn policy_rule_conditions_overlap(
     .expect("Mojo governance overlap predicate returned invalid output")
 }
 
-#[cfg(feature = "mojo")]
+#[cfg(any())]
 fn policy_selector_pair<'a>(
     left: &'a Option<PolicySelector>,
     right: &'a Option<PolicySelector>,
@@ -390,7 +381,6 @@ fn policy_selector_pair<'a>(
     )
 }
 
-#[cfg(any(test, not(feature = "mojo")))]
 pub(super) fn policy_rule_conditions_overlap_rust(
     left: &PolicyRuleCondition,
     right: &PolicyRuleCondition,
@@ -430,7 +420,6 @@ pub(super) fn policy_rule_conditions_overlap_rust(
         )
 }
 
-#[cfg(not(feature = "mojo"))]
 pub(super) fn policy_rule_conditions_overlap(
     left: &PolicyRuleCondition,
     right: &PolicyRuleCondition,
@@ -438,7 +427,6 @@ pub(super) fn policy_rule_conditions_overlap(
     policy_rule_conditions_overlap_rust(left, right)
 }
 
-#[cfg(any(test, not(feature = "mojo")))]
 fn policy_selectors_overlap(left: &Option<PolicySelector>, right: &Option<PolicySelector>) -> bool {
     !matches!(
         (left, right),
@@ -447,7 +435,6 @@ fn policy_selectors_overlap(left: &Option<PolicySelector>, right: &Option<Policy
     )
 }
 
-#[cfg(any(test, not(feature = "mojo")))]
 fn optional_policy_attributes_overlap<T: PartialEq>(left: &Option<T>, right: &Option<T>) -> bool {
     !matches!((left, right), (Some(left), Some(right)) if left != right)
 }
