@@ -1,5 +1,3 @@
-use super::*;
-
 #[derive(Debug, PartialEq, Eq)]
 pub(super) struct RuntimeGatewayBootstrapDescriptorPlan {
     pub(super) schema_version: u32,
@@ -200,3 +198,4 @@ mod tests {
         );
     }
 }
+use super::{DataClassification, RuntimeGatewayProviderRegistryTrustTier};
