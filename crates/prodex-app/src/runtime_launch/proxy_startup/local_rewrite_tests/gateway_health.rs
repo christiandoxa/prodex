@@ -303,6 +303,8 @@ fn gateway_readyz_fails_during_local_overload_while_livez_and_startupz_stay_up()
     let _worker_guard = crate::TestEnvVarGuard::set("PRODEX_RUNTIME_PROXY_WORKER_COUNT", "5");
     let _limit_guard =
         crate::TestEnvVarGuard::set("PRODEX_RUNTIME_PROXY_ACTIVE_REQUEST_LIMIT", "4");
+    let _idle_guard =
+        crate::TestEnvVarGuard::set("PRODEX_RUNTIME_PROXY_STREAM_IDLE_TIMEOUT_MS", "120000");
     let root = temp_root("gateway-health-overload");
     let paths = app_paths_for_root(root);
     let server = TinyServer::http("127.0.0.1:0").expect("held upstream should bind");
