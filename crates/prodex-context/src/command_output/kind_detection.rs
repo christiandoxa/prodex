@@ -364,6 +364,7 @@ fn infer_metadata_package_command(
     }
 }
 
+#[cfg(any(not(feature = "mojo"), test))]
 pub(super) fn command_metadata_subcommand_after(
     tokens: &[String],
     command_index: usize,
@@ -455,6 +456,7 @@ fn command_metadata_package_install_after(tokens: &[String], command_index: usiz
     None
 }
 
+#[cfg(any(not(feature = "mojo"), test))]
 fn command_metadata_token_is_option_or_shell_glue(token: &str) -> bool {
     token.is_empty()
         || token.starts_with('-')
@@ -497,6 +499,7 @@ fn command_metadata_token_is_option_or_shell_glue(token: &str) -> bool {
         )
 }
 
+#[cfg(any(not(feature = "mojo"), test))]
 fn command_metadata_token_option_takes_value(token: &str) -> bool {
     matches!(
         token,
@@ -517,11 +520,13 @@ fn command_metadata_token_option_takes_value(token: &str) -> bool {
     )
 }
 
+#[cfg(any(not(feature = "mojo"), test))]
 pub(super) fn command_metadata_token_command_name(token: &str) -> &str {
     let basename = token.rsplit('/').next().unwrap_or(token);
     basename.strip_suffix(".exe").unwrap_or(basename)
 }
 
+#[cfg(any(not(feature = "mojo"), test))]
 pub(super) fn command_metadata_tokens(metadata: &str) -> Vec<String> {
     let mut tokens = Vec::new();
     let mut token = String::new();

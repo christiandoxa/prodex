@@ -71,6 +71,11 @@ unsafe extern "C" {
         metadata: *const ProdexStringView,
         output_kind: *mut i64,
     ) -> i64;
+    fn prodex_context_command_success_flags_v1(
+        abi_version: i64,
+        metadata: *const ProdexStringView,
+        output_flags: *mut i64,
+    ) -> i64;
     fn prodex_context_classify_ci_line_v1(
         abi_version: i64,
         line: *const ProdexStringView,
@@ -216,6 +221,31 @@ pub fn text_abi_layout_matches() -> bool {
 
 fn text_abi_is_ready() -> bool {
     *CONTEXT_TEXT_ABI_READY.get_or_init(|| text_abi_version().is_ok() && text_abi_layout_matches())
+}
+
+pub const CONTEXT_COMMAND_SUCCESS_CANDIDATE: i64 = 1;
+pub const CONTEXT_COMMAND_SHORT_SUCCESS_CANDIDATE: i64 = 2;
+pub const CONTEXT_COMMAND_PATH_RELEVANT_SUCCESS: i64 = 4;
+
+pub fn command_success_flags(metadata: &str) -> Result<i64, crate::MojoError> {
+    let _ = i64::try_from(metadata.len()).map_err(|_| crate::MojoError::InvalidInput)?;
+    if !text_abi_is_ready() {
+        return Err(crate::MojoError::AbiMismatch);
+    }
+    let view = ProdexStringView {
+        ptr: metadata.as_ptr(),
+        len: metadata.len(),
+    };
+    let mut flags = 0_i64;
+    let status = unsafe {
+        prodex_context_command_success_flags_v1(CONTEXT_TEXT_ABI_VERSION, &view, &mut flags)
+    };
+    match status {
+        0 if flags >= 0 && flags & !7 == 0 => Ok(flags),
+        1 | 2 => Err(crate::MojoError::InvalidInput),
+        4 => Err(crate::MojoError::AbiMismatch),
+        _ => Err(crate::MojoError::InvalidOutput),
+    }
 }
 
 pub fn classify_command_metadata(metadata: &str) -> Result<Option<i64>, crate::MojoError> {

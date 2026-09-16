@@ -51,9 +51,10 @@ use intent::{
     compact_command_output_for_intent, ensure_no_critical_signal_loss_for_intent,
     normalize_intent_terms_with_prompt_expansion,
 };
+use kind_detection::detect_command_output_kind_with_hint;
+#[cfg(any(not(feature = "mojo"), test))]
 use kind_detection::{
-    command_metadata_subcommand_after, command_metadata_token_command_name,
-    command_metadata_tokens, detect_command_output_kind_with_hint,
+    command_metadata_subcommand_after, command_metadata_token_command_name, command_metadata_tokens,
 };
 use log_stream::compact_log_stream_output;
 use noisy_output::compact_noisy_success_output;
