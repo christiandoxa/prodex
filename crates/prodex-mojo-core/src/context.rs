@@ -106,6 +106,16 @@ unsafe extern "C" {
         failure_lines: i64,
         output: *mut i64,
     ) -> i64;
+    fn prodex_context_structured_json_compact_v1(
+        abi_version: i64,
+        input_address: u64,
+        input_length: i64,
+        line_count: i64,
+        max_line_bytes: i64,
+        output_address: u64,
+        output_capacity: i64,
+        written_address: u64,
+    ) -> i64;
     fn prodex_context_estimate_tokens(chars: u64, words: u64) -> u64;
     fn prodex_context_signal_diff(
         before: *const i64,
@@ -306,6 +316,57 @@ pub fn watcher_line_semantics(line: &str) -> Result<ContextWatcherLineSemantics,
         failure: output[2] == 1,
         key,
     })
+}
+
+pub fn compact_structured_json(
+    input: &str,
+    line_count: usize,
+    max_line_bytes: usize,
+) -> Result<Option<String>, crate::MojoError> {
+    if !text_abi_is_ready() {
+        return Err(crate::MojoError::AbiMismatch);
+    }
+    if input.len() > 4 * 1024 * 1024 {
+        return Err(crate::MojoError::InvalidInput);
+    }
+    let capacity = input
+        .len()
+        .min(64 * 1024)
+        .saturating_add(16 * 1024)
+        .max(4096);
+    let mut output = vec![0_u8; capacity];
+    let mut written = 0_i64;
+    let status = unsafe {
+        prodex_context_structured_json_compact_v1(
+            CONTEXT_TEXT_ABI_VERSION,
+            input.as_ptr() as usize as u64,
+            i64::try_from(input.len()).map_err(|_| crate::MojoError::InvalidInput)?,
+            i64::try_from(line_count).map_err(|_| crate::MojoError::InvalidInput)?,
+            i64::try_from(max_line_bytes).unwrap_or(i64::MAX),
+            output.as_mut_ptr() as usize as u64,
+            i64::try_from(output.len()).map_err(|_| crate::MojoError::InvalidInput)?,
+            (&mut written as *mut i64) as usize as u64,
+        )
+    };
+    if status != 0 {
+        return Err(match status {
+            1 | 2 => crate::MojoError::InvalidInput,
+            3 => crate::MojoError::Capacity,
+            4 => crate::MojoError::AbiMismatch,
+            _ => crate::MojoError::InvalidOutput,
+        });
+    }
+    let written = usize::try_from(written).map_err(|_| crate::MojoError::InvalidOutput)?;
+    if written == 0 {
+        return Ok(None);
+    }
+    if written > output.len() {
+        return Err(crate::MojoError::InvalidOutput);
+    }
+    output.truncate(written);
+    String::from_utf8(output)
+        .map(Some)
+        .map_err(|_| crate::MojoError::InvalidOutput)
 }
 
 pub fn watcher_should_compact(
