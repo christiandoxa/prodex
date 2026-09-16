@@ -378,6 +378,100 @@ pub fn transition_approval(
     })
 }
 
+#[cfg(any())]
+fn apply_approval_action(
+    request: &ApprovalTransitionRequest<'_>,
+    record: &mut ApprovalRecord,
+) -> Result<&'static str, ApprovalError> {
+    use prodex_mojo_core::policy::{
+        GOVERNANCE_APPROVAL_ACTIVATE, GOVERNANCE_APPROVAL_CANCEL, GOVERNANCE_APPROVAL_REJECT,
+        GOVERNANCE_APPROVAL_ROLLBACK, GOVERNANCE_APPROVAL_SUPERSEDE,
+        GOVERNANCE_APPROVAL_VOTE_APPROVED, GOVERNANCE_APPROVAL_VOTE_PENDING,
+    };
+
+    let transition = prodex_mojo_core::policy::governance_approval_transition(
+        approval_state_tag(record.state),
+        approval_action_tag(request.action),
+        record.votes.len(),
+        record.effective_required_quorum(),
+    )
+    .expect("Mojo governance approval transition returned invalid output");
+    match transition {
+        GOVERNANCE_APPROVAL_VOTE_PENDING | GOVERNANCE_APPROVAL_VOTE_APPROVED => {
+            record.votes.push(ApprovalVote {
+                checker: request.actor.id,
+                approved_at_unix_ms: request.now_unix_ms,
+            });
+            record.votes.sort_by_key(|vote| vote.checker);
+            if transition == GOVERNANCE_APPROVAL_VOTE_APPROVED {
+                record.state = ApprovalState::Approved;
+            }
+            Ok("approval.approved")
+        }
+        GOVERNANCE_APPROVAL_REJECT => {
+            record.state = ApprovalState::Rejected;
+            record.termination_reason = Some(
+                request
+                    .reason
+                    .cloned()
+                    .unwrap_or(ApprovalReasonCode::new("approval.rejected")?),
+            );
+            Ok("approval.rejected")
+        }
+        GOVERNANCE_APPROVAL_CANCEL => {
+            record.state = ApprovalState::Cancelled;
+            record.termination_reason = Some(
+                request
+                    .reason
+                    .cloned()
+                    .unwrap_or(ApprovalReasonCode::new("approval.cancelled")?),
+            );
+            Ok("approval.cancelled")
+        }
+        GOVERNANCE_APPROVAL_ACTIVATE => {
+            record.state = ApprovalState::Active;
+            record.activated_at_unix_ms = Some(request.now_unix_ms);
+            Ok("approval.activated")
+        }
+        GOVERNANCE_APPROVAL_SUPERSEDE => {
+            record.state = ApprovalState::Superseded;
+            Ok("approval.superseded")
+        }
+        GOVERNANCE_APPROVAL_ROLLBACK => {
+            record.state = ApprovalState::RolledBack;
+            Ok("approval.rolled_back")
+        }
+        _ => Err(ApprovalError::InvalidTransition),
+    }
+}
+
+#[cfg(any())]
+const fn approval_state_tag(state: ApprovalState) -> i64 {
+    match state {
+        ApprovalState::Draft => 0,
+        ApprovalState::PendingApproval => 1,
+        ApprovalState::Approved => 2,
+        ApprovalState::Rejected => 3,
+        ApprovalState::Expired => 4,
+        ApprovalState::Cancelled => 5,
+        ApprovalState::Active => 6,
+        ApprovalState::Superseded => 7,
+        ApprovalState::RolledBack => 8,
+    }
+}
+
+#[cfg(any())]
+const fn approval_action_tag(action: ApprovalAction) -> i64 {
+    match action {
+        ApprovalAction::Approve => 0,
+        ApprovalAction::Reject => 1,
+        ApprovalAction::Cancel => 2,
+        ApprovalAction::Activate => 3,
+        ApprovalAction::Supersede => 4,
+        ApprovalAction::RollBack => 5,
+    }
+}
+
 fn apply_approval_action(
     request: &ApprovalTransitionRequest<'_>,
     record: &mut ApprovalRecord,
