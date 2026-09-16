@@ -171,7 +171,7 @@ crossterm = "0.29.0"
 rusqlite = { version = "0.40.1", features = ["bundled"] }
 postgres = "0.19.12"
 redis = { version = "1.7.0", default-features = false }
-rustls = { version = "0.23.44", default-features = false, features = ["aws-lc-rs", "std"] }
+rustls = { version = "0.23.45", default-features = false, features = ["aws-lc-rs", "std"] }
 rustls-native-certs = "0.8.4"
 tokio-rustls = "0.26.5"
 runtime_anthropic_crate = { package = "prodex-runtime-anthropic", path = "crates/prodex-runtime-anthropic", version = "0.429.4" }
