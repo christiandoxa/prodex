@@ -13,7 +13,13 @@ const DOMAIN_OBSERVABILITY = "crates/prodex-domain/src/observability.rs";
 const DOMAIN_HEALTH = "crates/prodex-domain/src/health.rs";
 const DOMAIN_SECRETS = "crates/prodex-domain/src/secrets.rs";
 const DOMAIN_LIB = "crates/prodex-domain/src/lib.rs";
-const ALLOWED_DEPENDENCIES = new Set(["serde", "sha2", "uuid", "zeroize"]);
+const ALLOWED_DEPENDENCIES = new Set([
+  "prodex_mojo_core",
+  "serde",
+  "sha2",
+  "uuid",
+  "zeroize",
+]);
 const ALLOWED_DEV_DEPENDENCIES = new Set(["serde_json"]);
 const FORBIDDEN_DEPENDENCIES = new Set([
   "anyhow",
@@ -161,6 +167,7 @@ function runSelfTest() {
 name = "prodex-domain"
 
 [dependencies]
+prodex_mojo_core = { workspace = true, optional = true }
 serde = { workspace = true }
 sha2 = { workspace = true }
 uuid = { workspace = true }
