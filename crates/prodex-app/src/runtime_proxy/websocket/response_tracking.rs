@@ -104,10 +104,8 @@ pub(crate) fn attempt_runtime_websocket_request_with_hard_affinity(
             websocket_session,
             profile_name,
             reuse_existing_session,
-            reserve_rewrite_allowed: !reuse_existing_session
-                && request_previous_response_id.is_none()
-                && request_session_id.is_none()
-                && request_turn_state.is_none(),
+            // Each response.create is a pre-commit turn boundary, including on a reused socket.
+            reserve_rewrite_allowed: true,
             precommit_transport_retry_allowed,
             upstream_socket: &mut upstream_socket,
         })?

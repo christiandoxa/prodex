@@ -44,7 +44,6 @@ pub(crate) fn rewrite_runtime_luna_reserve_model_if_authorized(
         &usage,
         authenticated_account_id.or(cached_account_id.as_deref()),
         body,
-        true,
     )
 }
 
@@ -52,7 +51,6 @@ fn rewrite_runtime_luna_reserve_model_for_usage(
     usage: &UsageResponse,
     authenticated_account_id: Option<&str>,
     body: &[u8],
-    fetched_for_authenticated_account: bool,
 ) -> Result<Option<Vec<u8>>> {
     let mut value: serde_json::Value = match serde_json::from_slice(body) {
         Ok(value) => value,
@@ -63,7 +61,6 @@ fn rewrite_runtime_luna_reserve_model_for_usage(
         usage,
         requested_model,
         authenticated_account_id,
-        fetched_for_authenticated_account,
     ) != Some(prodex_quota::OPENAI_LUNA_RESERVE_MODEL)
     {
         return Ok(None);

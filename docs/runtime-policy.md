@@ -658,12 +658,13 @@ shared-state integration around those operations.
   mapping metadata. Reserve-aware usage reads advertise
   `x-openai-codex-luna-reserve: 1`. Prodex requires `ordinaryUsageAllowed=false`, an explicit
   `rateLimitUpsell.banner_type=luna_reserve`, `normalModelSlug=gpt-5.6-luna`, and a usable mapped
-  `gpt-reserve` bucket before routing on that bucket. Account identity must match when the usage
-  response supplies it; otherwise the authenticated profile-scoped usage fetch is the authority.
+  `gpt-reserve` bucket before routing on that bucket. The usage response account identity must
+  exactly match the authenticated profile; missing or mismatched identity cannot authorize Reserve.
   Sol and Terra never use Reserve. Prodex accepts only `gpt-5.6-luna` from the client and changes
   the final upstream model to hidden `gpt-reserve` after profile selection. The original requested
-  model remains unchanged for selection, affinity, and public metadata. WebSocket rewriting is
-  limited to fresh pre-commit sends; reused sessions and continuations never switch or replay.
+  model remains unchanged for selection, affinity, and public metadata. Every WebSocket
+  `response.create` is a pre-commit turn boundary, so reused sessions and continuations may select
+  Reserve before that turn is sent; committed output and tool effects are never replayed.
   Reserve does not consume reset credits. If regular and Reserve Luna capacity are unavailable,
   the request follows normal rotation and upstream quota handling without substituting another
   public OpenAI model. A 429/503 or transport error never zeros Reserve capacity without

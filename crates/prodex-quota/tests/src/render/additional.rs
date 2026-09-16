@@ -145,7 +145,7 @@ fn app_server_rate_limits_payload_keeps_regular_and_reserve_buckets_separate() {
         Some("gpt-5.6-luna")
     ));
     assert_eq!(
-        openai_effective_model_for_usage(&usage, Some("gpt-5.6-luna"), Some("acct-luna"), true,),
+        openai_effective_model_for_usage(&usage, Some("gpt-5.6-luna"), Some("acct-luna")),
         Some("gpt-reserve")
     );
     let mut without_banner = usage.clone();
@@ -156,12 +156,7 @@ fn app_server_rate_limits_payload_keeps_regular_and_reserve_buckets_separate() {
         .extra
         .remove("rateLimitUpsell");
     assert_eq!(
-        openai_effective_model_for_usage(
-            &without_banner,
-            Some("gpt-5.6-luna"),
-            Some("acct-luna"),
-            true,
-        ),
+        openai_effective_model_for_usage(&without_banner, Some("gpt-5.6-luna"), Some("acct-luna"),),
         None
     );
     let mut ordinary_allowed = usage.clone();
@@ -171,22 +166,32 @@ fn app_server_rate_limits_payload_keeps_regular_and_reserve_buckets_separate() {
             &ordinary_allowed,
             Some("gpt-5.6-luna"),
             Some("acct-luna"),
-            true,
         ),
         None
     );
     let mut exhausted = usage.clone();
     exhausted.additional_rate_limits[0].limit_reached = Some(true);
     assert_eq!(
-        openai_effective_model_for_usage(&exhausted, Some("gpt-5.6-luna"), Some("acct-luna"), true,),
+        openai_effective_model_for_usage(&exhausted, Some("gpt-5.6-luna"), Some("acct-luna")),
         None
     );
     assert_eq!(
-        openai_effective_model_for_usage(&usage, Some("gpt-5.6-sol"), Some("acct-luna"), true,),
+        openai_effective_model_for_usage(&usage, Some("gpt-5.6-sol"), Some("acct-luna")),
         None
     );
     assert_eq!(
-        openai_effective_model_for_usage(&usage, Some("gpt-5.6-luna"), Some("acct-other"), true,),
+        openai_effective_model_for_usage(&usage, Some("gpt-5.6-luna"), Some("acct-other")),
+        None
+    );
+    let mut missing_account = usage.clone();
+    missing_account
+        .rate_limit
+        .as_mut()
+        .unwrap()
+        .extra
+        .remove("accountId");
+    assert_eq!(
+        openai_effective_model_for_usage(&missing_account, Some("gpt-5.6-luna"), Some("acct-luna"),),
         None
     );
     assert!(!openai_quota_has_ready_limit_for_model(
