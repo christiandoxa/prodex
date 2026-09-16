@@ -466,6 +466,17 @@
         "operations": [
           "runtime_profile_health_sorting"
         ]
+      },
+      {
+        "path": "mojo/prodex_core/context_critical_signal.mojo",
+        "language": "mojo",
+        "classification": "DETERMINISTIC_DOMAIN",
+        "production_reachable": true,
+        "role": "semantic",
+        "operations": [
+          "critical_signal_text_grouping",
+          "critical_signal_range_planning"
+        ]
       }
     ]
   },
@@ -718,7 +729,7 @@
       "baseline_state": "authoritative",
       "final_state": "authoritative",
       "mojo_entry": "prodex_context_lost_line_ranges_batch",
-      "mojo_source": "mojo/prodex_core/context.mojo",
+      "mojo_source": "mojo/prodex_core/context_critical_signal.mojo",
       "consumer": "crates/prodex-context/src/critical_signal.rs",
       "consumer_marker": "prodex_mojo_core::context::lost_line_ranges_batch",
       "production_reachability_test": "crates/prodex-context/tests/src/lib/mojo_rich.rs",
