@@ -81,6 +81,17 @@ pub(super) fn gemini_bridge_request_candidate_count(value: &Value) -> Result<(),
 }
 
 #[cfg(feature = "mojo")]
+pub(super) fn gemini_bridge_request_tool_config(value: &Value) -> Option<Value> {
+    let input = serde_json::to_vec(value).expect("Gemini tool choice serializes");
+    let value = gemini_bridge_request_value(GeminiBridgeRequestKernelInput {
+        operation: GeminiBridgeRequestOperation::ToolConfig,
+        primary: Some(&input),
+        ..GeminiBridgeRequestKernelInput::new(GeminiBridgeRequestOperation::ToolConfig)
+    });
+    (!value.is_null()).then_some(value)
+}
+
+#[cfg(feature = "mojo")]
 pub(super) fn gemini_bridge_request_generation_config(
     original: &Value,
     chat: &Value,

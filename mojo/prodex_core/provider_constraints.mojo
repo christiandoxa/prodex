@@ -1958,6 +1958,7 @@ comptime GEMINI_BRIDGE_REQUEST_NATIVE_PROJECT: Int64 = 4
 comptime GEMINI_BRIDGE_REQUEST_WITHOUT_TOOL: Int64 = 5
 comptime GEMINI_BRIDGE_REQUEST_SIMPLE: Int64 = 6
 comptime GEMINI_BRIDGE_REQUEST_VALIDATE_CANDIDATE_COUNT: Int64 = 7
+comptime GEMINI_BRIDGE_REQUEST_TOOL_CONFIG: Int64 = 8
 
 @fieldwise_init
 struct GeminiBridgeRequestInput(Copyable):
@@ -1986,7 +1987,7 @@ def gemini_bridge_request_input_flag_valid(value: Int64) -> Bool:
 
 
 def gemini_bridge_request_input_valid(input: GeminiBridgeRequestInput) -> Bool:
-    if input.operation < GEMINI_BRIDGE_REQUEST_GENERATE_CONTENT_REQUEST or input.operation > GEMINI_BRIDGE_REQUEST_VALIDATE_CANDIDATE_COUNT:
+    if input.operation < GEMINI_BRIDGE_REQUEST_GENERATE_CONTENT_REQUEST or input.operation > GEMINI_BRIDGE_REQUEST_TOOL_CONFIG:
         return False
     if not gemini_bridge_request_input_flag_valid(input.primary_present) or not gemini_bridge_request_input_flag_valid(input.secondary_present) or not gemini_bridge_request_input_flag_valid(input.tertiary_present) or not gemini_bridge_request_input_flag_valid(input.quaternary_present) or not gemini_bridge_request_input_flag_valid(input.quinary_present) or not gemini_bridge_request_input_flag_valid(input.senary_present) or not gemini_bridge_request_input_flag_valid(input.septenary_present) or not gemini_bridge_request_input_flag_valid(input.octonary_present):
         return False
@@ -2017,6 +2018,8 @@ def gemini_bridge_request_input_valid(input: GeminiBridgeRequestInput) -> Bool:
     if input.operation == GEMINI_BRIDGE_REQUEST_SIMPLE and input.primary_present == 0:
         return False
     if input.operation == GEMINI_BRIDGE_REQUEST_VALIDATE_CANDIDATE_COUNT and input.primary_present == 0:
+        return False
+    if input.operation == GEMINI_BRIDGE_REQUEST_TOOL_CONFIG and input.primary_present == 0:
         return False
     return True
 
@@ -3014,6 +3017,57 @@ def gemini_bridge_request_write_candidate_validation(
     return gemini_request_content_put_literal(writer, StringSlice("null"))
 
 
+def gemini_bridge_request_write_tool_config(
+    input: GeminiBridgeRequestInput,
+    writer: Pointer[mut=True, GeminiRequestContentWriter, _],
+) -> Bool:
+    if not gemini_request_content_fragment_valid(input.primary):
+        return False
+    var bounds = gemini_bridge_request_value_bounds(input.primary)
+    if not gemini_bridge_request_is_object(input.primary, bounds[0], bounds[1]):
+        return gemini_request_content_put_literal(writer, StringSlice("null"))
+    var choice = gemini_bridge_request_object_member(
+        input.primary, bounds[0], bounds[1], StringSlice("tool_choice")
+    )
+    if choice[0] < 0:
+        return gemini_request_content_put_literal(writer, StringSlice("null"))
+    if gemini_request_content_string_equals(
+        input.primary, choice[0], choice[1], StringSlice("auto"), False
+    ):
+        return gemini_request_content_put_literal(writer, StringSlice("null"))
+    if gemini_request_content_string_equals(
+        input.primary, choice[0], choice[1], StringSlice("none"), False
+    ):
+        return gemini_request_content_put_literal(
+            writer, StringSlice('{"functionCallingConfig":{"mode":"NONE"}}')
+        )
+    if gemini_request_content_string_equals(
+        input.primary, choice[0], choice[1], StringSlice("required"), False
+    ):
+        return gemini_request_content_put_literal(
+            writer, StringSlice('{"functionCallingConfig":{"mode":"ANY"}}')
+        )
+    if not gemini_bridge_request_is_object(input.primary, choice[0], choice[1]):
+        return gemini_request_content_put_literal(writer, StringSlice("null"))
+    var function = gemini_bridge_request_object_member(
+        input.primary, choice[0], choice[1], StringSlice("function")
+    )
+    var name = gemini_bridge_request_object_member(
+        input.primary, choice[0], choice[1], StringSlice("name")
+    )
+    if gemini_bridge_request_is_object(input.primary, function[0], function[1]):
+        name = gemini_bridge_request_object_member(
+            input.primary, function[0], function[1], StringSlice("name")
+        )
+    if name[0] < 0 or gemini_request_content_byte(input.primary, name[0]) != 34:
+        return gemini_request_content_put_literal(writer, StringSlice("null"))
+    return (
+        gemini_request_content_put_literal(writer, StringSlice('{"functionCallingConfig":{"mode":"ANY","allowedFunctionNames":['))
+        and gemini_request_content_put_range(writer, input.primary, name[0], name[1])
+        and gemini_request_content_put_literal(writer, StringSlice("]}}"))
+    )
+
+
 def gemini_bridge_request_string_starts_with(
     view: GeminiRequestContentStringView, literal: StringSlice
 ) -> Bool:
@@ -3410,6 +3464,8 @@ def prodex_gemini_bridge_request_kernel_v1(
             ok = gemini_request_content_put_literal(writer_ptr, StringSlice("false"))
     elif input.operation == GEMINI_BRIDGE_REQUEST_VALIDATE_CANDIDATE_COUNT:
         ok = gemini_bridge_request_write_candidate_validation(input, writer_ptr)
+    elif input.operation == GEMINI_BRIDGE_REQUEST_TOOL_CONFIG:
+        ok = gemini_bridge_request_write_tool_config(input, writer_ptr)
     if not ok:
         written[] = writer.written
         if writer.written >= output_capacity:
