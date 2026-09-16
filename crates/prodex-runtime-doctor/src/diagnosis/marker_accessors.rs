@@ -82,6 +82,7 @@ pub(super) fn runtime_doctor_marker_scope(
     }
 }
 
+#[cfg(any(not(feature = "mojo"), test))]
 pub(super) fn runtime_doctor_admission_pressure_load(
     summary: &RuntimeDoctorSummary,
     marker: &str,
