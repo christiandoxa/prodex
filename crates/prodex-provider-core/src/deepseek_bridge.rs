@@ -14,6 +14,8 @@ mod json;
 mod messages;
 mod request_messages;
 mod request_params;
+#[cfg(feature = "mojo")]
+mod request_policy;
 mod request_probe;
 mod request_tools;
 
