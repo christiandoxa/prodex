@@ -1,4 +1,5 @@
 use std::time::Duration;
+#[cfg(any(not(feature = "mojo"), test))]
 mod json;
 mod rate_limit_header;
 mod retry_after;
@@ -9,7 +10,7 @@ use json::runtime_json_find;
 pub use rate_limit_header::runtime_http_error_policy_with_headers;
 pub use retry_after::{runtime_retry_after_from_headers, runtime_retry_after_from_message};
 pub use signal::runtime_error_signal_message_from_value;
-#[cfg(not(feature = "mojo"))]
+#[cfg(any(not(feature = "mojo"), test))]
 use signal::runtime_error_signal_message_from_value_mode;
 pub use stream::{
     runtime_http_error_action_label, runtime_http_error_class_label, runtime_stream_error_policy,
@@ -47,7 +48,8 @@ pub struct RuntimeHttpErrorPolicy {
     pub retry_after: Option<Duration>,
 }
 
-#[cfg_attr(feature = "mojo", allow(dead_code))]
+#[cfg(any(not(feature = "mojo"), test))]
+#[cfg_attr(all(test, feature = "mojo"), allow(dead_code))]
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum RuntimeHttpErrorSignal {
     ExplicitQuota,
@@ -57,6 +59,7 @@ enum RuntimeHttpErrorSignal {
     TransientStatus,
 }
 
+#[cfg(any(not(feature = "mojo"), test))]
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum RuntimeSignalMatchMode {
     ExplicitCode,
@@ -139,12 +142,14 @@ const RUNTIME_STREAM_ERROR_RULES: &[(RuntimeHttpErrorClass, RuntimeHttpErrorActi
     ),
 ];
 
+#[cfg(any(not(feature = "mojo"), test))]
 #[derive(Clone, Copy)]
 struct RuntimePayloadCodeRule {
     code: &'static str,
     signal: RuntimeHttpErrorSignal,
 }
 
+#[cfg(any(not(feature = "mojo"), test))]
 const RUNTIME_PAYLOAD_CODE_RULES: &[RuntimePayloadCodeRule] = &[
     RuntimePayloadCodeRule {
         code: "insufficient_quota",
@@ -387,7 +392,44 @@ fn runtime_error_policy_from_mojo(
     }
 }
 
+#[cfg(feature = "mojo")]
 pub fn runtime_error_signal_message_from_text(
+    text: &str,
+    signal: RuntimeHttpErrorClass,
+) -> Option<String> {
+    let trimmed = text.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    let (mode, expected_class) = match signal {
+        RuntimeHttpErrorClass::Quota => (prodex_mojo_core::rich::RUNTIME_ERROR_MODE_TEXT_QUOTA, 1),
+        RuntimeHttpErrorClass::RateLimited => {
+            (prodex_mojo_core::rich::RUNTIME_ERROR_MODE_TEXT_RATE, 2)
+        }
+        RuntimeHttpErrorClass::ProfileUnavailable => {
+            (prodex_mojo_core::rich::RUNTIME_ERROR_MODE_TEXT_PROFILE, 3)
+        }
+        RuntimeHttpErrorClass::Overload => {
+            (prodex_mojo_core::rich::RUNTIME_ERROR_MODE_TEXT_OVERLOAD, 4)
+        }
+        RuntimeHttpErrorClass::TransientServer | RuntimeHttpErrorClass::Other => return None,
+    };
+    prodex_mojo_core::MojoError::rich_runtime_error_policy(mode, 0, 0, trimmed.as_bytes())
+        .ok()
+        .filter(|(class, _, _)| *class == expected_class)
+        .map(|_| trimmed.to_string())
+}
+
+#[cfg(not(feature = "mojo"))]
+pub fn runtime_error_signal_message_from_text(
+    text: &str,
+    signal: RuntimeHttpErrorClass,
+) -> Option<String> {
+    runtime_error_signal_message_from_text_rust(text, signal)
+}
+
+#[cfg(any(not(feature = "mojo"), test))]
+fn runtime_error_signal_message_from_text_rust(
     text: &str,
     signal: RuntimeHttpErrorClass,
 ) -> Option<String> {
@@ -398,17 +440,17 @@ pub fn runtime_error_signal_message_from_text(
 
     match signal {
         RuntimeHttpErrorClass::Quota => {
-            runtime_usage_limit_text_message(trimmed).then(|| trimmed.to_string())
+            runtime_usage_limit_text_message_rust(trimmed).then(|| trimmed.to_string())
         }
         RuntimeHttpErrorClass::RateLimited => {
             runtime_text_has_payload_code(trimmed, RuntimeHttpErrorSignal::ExplicitRateLimit)
                 .then(|| trimmed.to_string())
         }
         RuntimeHttpErrorClass::ProfileUnavailable => {
-            runtime_profile_unavailable_text_message(trimmed).then(|| trimmed.to_string())
+            runtime_profile_unavailable_text_message_rust(trimmed).then(|| trimmed.to_string())
         }
         RuntimeHttpErrorClass::Overload => {
-            runtime_overload_text_message(trimmed).then(|| trimmed.to_string())
+            runtime_overload_text_message_rust(trimmed).then(|| trimmed.to_string())
         }
         RuntimeHttpErrorClass::TransientServer | RuntimeHttpErrorClass::Other => None,
     }
@@ -475,6 +517,11 @@ pub fn runtime_usage_limit_text_message(message: &str) -> bool {
 
 #[cfg(not(feature = "mojo"))]
 pub fn runtime_usage_limit_text_message(message: &str) -> bool {
+    runtime_usage_limit_text_message_rust(message)
+}
+
+#[cfg(any(not(feature = "mojo"), test))]
+fn runtime_usage_limit_text_message_rust(message: &str) -> bool {
     let lower = message.to_ascii_lowercase();
     runtime_text_has_payload_code(message, RuntimeHttpErrorSignal::ExplicitQuota)
         || runtime_workspace_credit_exhausted_text_message(message)
@@ -520,6 +567,11 @@ pub fn runtime_overload_text_message(message: &str) -> bool {
 
 #[cfg(not(feature = "mojo"))]
 pub fn runtime_overload_text_message(message: &str) -> bool {
+    runtime_overload_text_message_rust(message)
+}
+
+#[cfg(any(not(feature = "mojo"), test))]
+fn runtime_overload_text_message_rust(message: &str) -> bool {
     let lower = message.to_ascii_lowercase();
     lower.contains("selected model is at capacity")
         || (lower.contains("model is at capacity")
@@ -595,6 +647,7 @@ fn runtime_error_signal_message_from_sse_body(
     None
 }
 
+#[cfg(any(not(feature = "mojo"), test))]
 fn runtime_error_signal_candidate(
     value: &serde_json::Value,
     signal: RuntimeHttpErrorSignal,
@@ -671,12 +724,14 @@ fn runtime_error_signal_candidate(
     }
 }
 
+#[cfg(any(not(feature = "mojo"), test))]
 fn runtime_payload_code_matches(code: &str, signal: RuntimeHttpErrorSignal) -> bool {
     RUNTIME_PAYLOAD_CODE_RULES
         .iter()
         .any(|rule| rule.signal == signal && rule.code.eq_ignore_ascii_case(code.trim()))
 }
 
+#[cfg(any(not(feature = "mojo"), test))]
 fn runtime_text_has_payload_code(text: &str, signal: RuntimeHttpErrorSignal) -> bool {
     let lower = text.to_ascii_lowercase();
     RUNTIME_PAYLOAD_CODE_RULES
@@ -705,19 +760,8 @@ pub fn runtime_workspace_credit_exhausted_text_message(message: &str) -> bool {
             && lower.contains("refill"))
 }
 
-#[cfg(feature = "mojo")]
-fn runtime_profile_unavailable_text_message(message: &str) -> bool {
-    prodex_mojo_core::MojoError::rich_runtime_error_policy(
-        prodex_mojo_core::rich::RUNTIME_ERROR_MODE_TEXT_PROFILE,
-        0,
-        0,
-        message.as_bytes(),
-    )
-    .is_ok_and(|(class, _, _)| class == 3)
-}
-
-#[cfg(not(feature = "mojo"))]
-fn runtime_profile_unavailable_text_message(message: &str) -> bool {
+#[cfg(any(not(feature = "mojo"), test))]
+fn runtime_profile_unavailable_text_message_rust(message: &str) -> bool {
     runtime_text_has_payload_code(message, RuntimeHttpErrorSignal::ExplicitProfileUnavailable)
 }
 
