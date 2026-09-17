@@ -178,6 +178,9 @@ static CONTEXT_TEXT_ABI_READY: std::sync::OnceLock<bool> = std::sync::OnceLock::
 #[path = "context/git_search.rs"]
 mod git_search;
 pub use git_search::classify_git_search_line;
+#[path = "context/blob_noise.rs"]
+mod blob_noise;
+pub use blob_noise::*;
 #[path = "context/command_output.rs"]
 mod command_output;
 #[path = "context/command_output_ops.rs"]

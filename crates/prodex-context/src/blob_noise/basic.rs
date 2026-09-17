@@ -14,6 +14,7 @@ pub(super) fn is_lockfile_or_vendor_path(path: &Path) -> bool {
         || normalized.contains("/target/")
 }
 
+#[cfg(any(not(feature = "mojo"), test))]
 pub(super) fn looks_like_base64_blob(line: &str) -> bool {
     let base64_chars = line
         .chars()
@@ -25,6 +26,7 @@ pub(super) fn looks_like_base64_blob(line: &str) -> bool {
         && line.chars().any(|ch| ch.is_ascii_lowercase())
 }
 
+#[cfg(any(not(feature = "mojo"), test))]
 pub(super) fn looks_like_minified_js_json(line: &str) -> bool {
     let punctuation = line
         .chars()
