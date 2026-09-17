@@ -6,7 +6,6 @@ const IMAGE_BUDGET: &str = "features.compaction_image_budget=true";
 fn passthrough_args(args: &[&str]) -> Vec<OsString> {
     match parse_cli_command_from(args.iter().copied()).expect("managed launch should parse") {
         Commands::Run(args) => args.codex_args,
-        Commands::Caveman(args) => args.codex_args,
         Commands::Super(args) => args.codex_args,
         command => panic!("unexpected command: {command:?}"),
     }
@@ -31,14 +30,6 @@ fn codex_01491_thread_source_is_exact_passthrough_for_managed_launches() {
         vec![
             "prodex",
             "run",
-            "exec",
-            "--thread-source",
-            THREAD_SOURCE,
-            "review this repository",
-        ],
-        vec![
-            "prodex",
-            "caveman",
             "exec",
             "--thread-source",
             THREAD_SOURCE,
@@ -110,7 +101,6 @@ fn codex_01491_image_budget_override_reaches_each_codex_launch_once() {
     for invocation in [
         vec!["prodex", "-c", IMAGE_BUDGET, "exec", "review"],
         vec!["prodex", "run", "-c", IMAGE_BUDGET, "exec", "review"],
-        vec!["prodex", "caveman", "-c", IMAGE_BUDGET, "exec", "review"],
     ] {
         assert_eq!(
             passthrough_args(&invocation),
@@ -215,7 +205,6 @@ fn codex_01501_unspecified_image_budget_leaves_the_upstream_default_owned_by_cod
     for invocation in [
         ["prodex", "exec", "review"].as_slice(),
         ["prodex", "run", "exec", "review"].as_slice(),
-        ["prodex", "caveman", "exec", "review"].as_slice(),
         [
             "prodex",
             "s",

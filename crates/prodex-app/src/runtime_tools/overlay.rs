@@ -2,12 +2,11 @@ use super::session_app_server_companion_eligible;
 use super::{
     AppPaths, PreparedRuntimeLaunch, RuntimeLaunchPlan, RuntimeProxyEndpoint,
     RuntimeToolLaunchStrategy, ensure_presidio_services_for_super_launch,
-    ensure_required_presidio_services_for_super_launch, prepare_desktop_overlay_home,
-    prepare_runtime_overlay_home, redaction_redact_secret_like_text,
+    ensure_required_presidio_services_for_super_launch, redaction_redact_secret_like_text,
     write_provider_runtime_codex_auth,
 };
 use crate::app_commands::runtime_launch::goal_resume::add_runtime_goal_session_tracking;
-use anyhow::{Result, bail};
+use anyhow::{Context, Result, bail};
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
@@ -50,12 +49,107 @@ pub(crate) fn resolve_runtime_optional_tool_plan(
         .find(|health| required.contains(health.id))
     {
         bail!(
-            "required optional tool {} is unavailable: {}; run `prodex capability super-doctor`",
+            "required optional tool {} is unavailable: {}; run `prodex doctor --install`",
             unavailable.id,
             redaction_redact_secret_like_text(&unavailable.detail)
         );
     }
     Ok(plan)
+}
+
+fn configure_overlay_codex_home(
+    codex_home: &Path,
+    codex_args: &[std::ffi::OsString],
+    full_access: bool,
+) -> Result<()> {
+    let config_path = codex_home.join("config.toml");
+    if std::fs::symlink_metadata(&config_path)
+        .is_ok_and(|metadata| metadata.file_type().is_symlink())
+    {
+        bail!(
+            "refusing to write symlinked overlay config {}",
+            config_path.display()
+        );
+    }
+    let raw = match std::fs::read_to_string(&config_path) {
+        Ok(raw) => raw,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => String::new(),
+        Err(error) => {
+            return Err(error).with_context(|| format!("failed to read {}", config_path.display()));
+        }
+    };
+    let mut config = if raw.trim().is_empty() {
+        toml::Value::Table(toml::map::Map::new())
+    } else {
+        toml::from_str(&raw)
+            .with_context(|| format!("failed to parse {}", config_path.display()))?
+    };
+    for assignment in overlay_config_assignments(codex_args)? {
+        let patch: toml::Value = toml::from_str(&format!("{assignment}\n"))
+            .map_err(|_| anyhow::anyhow!("invalid Codex overlay config override"))?;
+        merge_overlay_toml(&mut config, patch);
+    }
+    if full_access {
+        merge_overlay_toml(
+            &mut config,
+            toml::from_str("approval_policy = \"never\"\nsandbox_mode = \"danger-full-access\"\n")?,
+        );
+    }
+    if codex_args
+        .iter()
+        .any(|arg| arg == "--dangerously-bypass-hook-trust")
+    {
+        merge_overlay_toml(&mut config, toml::from_str("bypass_hook_trust = true\n")?);
+    }
+    let rendered = toml::to_string_pretty(&config).context("failed to render overlay config")?;
+    std::fs::write(&config_path, rendered)
+        .with_context(|| format!("failed to write {}", config_path.display()))
+}
+
+fn overlay_config_assignments(args: &[std::ffi::OsString]) -> Result<Vec<&str>> {
+    let mut assignments = Vec::new();
+    let mut index = 0;
+    while index < args.len() {
+        let Some(arg) = args[index].to_str() else {
+            index += 1;
+            continue;
+        };
+        if matches!(arg, "-c" | "--config") {
+            let value = args
+                .get(index + 1)
+                .context("Codex overlay config flag is missing its value")?
+                .to_str()
+                .context("Codex overlay config override must be UTF-8")?;
+            assignments.push(value);
+            index += 2;
+            continue;
+        }
+        if let Some(value) = arg.strip_prefix("--config=") {
+            assignments.push(value);
+        } else if let Some(value) = arg.strip_prefix("-c")
+            && !value.is_empty()
+        {
+            assignments.push(value);
+        }
+        index += 1;
+    }
+    Ok(assignments)
+}
+
+fn merge_overlay_toml(target: &mut toml::Value, patch: toml::Value) {
+    match (target, patch) {
+        (toml::Value::Table(target), toml::Value::Table(patch)) => {
+            for (key, value) in patch {
+                match target.get_mut(&key) {
+                    Some(current) => merge_overlay_toml(current, value),
+                    None => {
+                        target.insert(key, value);
+                    }
+                }
+            }
+        }
+        (target, patch) => *target = patch,
+    }
 }
 
 pub(crate) fn project_in_app_resume_model_settings(
@@ -105,7 +199,7 @@ pub(crate) fn project_in_app_resume_model_settings(
             ]
         })
         .collect::<Vec<_>>();
-    crate::runtime_desktop::configure_desktop_codex_home(codex_home, &config_args, false, None)?;
+    configure_overlay_codex_home(codex_home, &config_args, false)?;
     *codex_args = projected_args;
     Ok(())
 }
@@ -175,12 +269,7 @@ fn project_fresh_super_config(
             std::ffi::OsString::from("disable_paste_burst=true"),
         ]);
     }
-    crate::runtime_desktop::configure_desktop_codex_home(
-        overlay_home,
-        &config_args,
-        strategy.args.full_access,
-        None,
-    )?;
+    configure_overlay_codex_home(overlay_home, &config_args, strategy.args.full_access)?;
     *runtime_args = projected_args;
     Ok(())
 }
@@ -277,9 +366,7 @@ fn prepare_overlay_launch(
         strategy.prepare_runtime_codex_args(&overlay_home, runtime_proxy, &preference_context)?;
     strategy.recovery_model =
         crate::codex_effective_config_value(&overlay_home, &runtime_args, "model")?;
-    if strategy.desktop_command.is_none()
-        && let Some(monitor) = strategy.goal_usage_limit_monitor.as_ref()
-    {
+    if let Some(monitor) = strategy.goal_usage_limit_monitor.as_ref() {
         add_runtime_goal_session_tracking(
             &overlay_home,
             strategy.profile_v2_name.as_deref(),
@@ -287,8 +374,7 @@ fn prepare_overlay_launch(
             &monitor.marker_path,
         )?;
     }
-    if strategy.desktop_command.is_none()
-        && !prodex_runtime_launch::is_codex_exec_invocation(&runtime_args)
+    if !prodex_runtime_launch::is_codex_exec_invocation(&runtime_args)
         && !prodex_runtime_launch::codex_resume_requested(&runtime_args)
     {
         crate::project_in_app_resume_model_settings(
@@ -329,7 +415,7 @@ fn prepare_child_plan(
     runtime_proxy: Option<&RuntimeProxyEndpoint>,
     preference_context: &crate::ModelPreferenceContext,
 ) -> Result<prodex_runtime_launch::ChildProcessPlan> {
-    let mut child = strategy.build_child_plan(prepared, overlay_home, runtime_args)?;
+    let mut child = strategy.build_child_plan(overlay_home, runtime_args)?;
     strategy.finalize_child_plan(&mut child, overlay_home, runtime_proxy);
     if prepared.managed
         && !child
@@ -343,17 +429,12 @@ fn prepare_child_plan(
         ));
     }
     if !strategy.args.dry_run
-        && strategy.desktop_command.is_none()
         && !prodex_cli::is_codex_command_server_subcommand(&strategy.codex_args)
     {
         crate::runtime_thread_index::repair_dirty_thread_index(&prepared.paths, &child);
     }
     if !strategy.args.dry_run
         && !prodex_cli::is_codex_command_server_subcommand(&strategy.codex_args)
-        // Desktop's unmanaged overlay deliberately shares the state database through a
-        // symlink; app-server startup may localize that path. Managed Desktop keeps the
-        // historical prelaunch repair with its explicit shared SQLite home.
-        && (strategy.desktop_command.is_none() || prepared.managed)
     {
         strategy.model_preference_sync = match crate::ModelPreferenceSync::start_with_scope(
             &prepared.paths,
@@ -434,17 +515,7 @@ fn prepare_overlay_home(
     strategy: &RuntimeToolLaunchStrategy,
     prepared: &PreparedRuntimeLaunch,
 ) -> Result<PathBuf> {
-    let overlay_home = if strategy.desktop_command.is_some() {
-        prepare_desktop_overlay_home(
-            &prepared.paths,
-            &prepared.codex_home,
-            strategy.configure_prodex_overlay,
-        )?
-    } else if strategy.configure_prodex_overlay {
-        prepare_prodex_overlay_home(&prepared.paths, &prepared.codex_home)?
-    } else {
-        prepare_runtime_overlay_home(&prepared.paths, &prepared.codex_home)?
-    };
+    let overlay_home = prepare_prodex_overlay_home(&prepared.paths, &prepared.codex_home)?;
     let cleanup = RuntimeOverlayCleanup::new(overlay_home.clone());
     if strategy.provider_runtime_uses_local_proxy_auth() {
         write_provider_runtime_codex_auth(&overlay_home)?;
@@ -462,7 +533,3 @@ pub(crate) fn prepare_prodex_overlay_home(
         base_codex_home,
     )
 }
-
-#[cfg(test)]
-#[path = "overlay_tests.rs"]
-mod tests;

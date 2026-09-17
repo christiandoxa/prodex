@@ -3,8 +3,6 @@ mod tests {
     use crate::runtime_state_shared::RuntimeSmartContextArtifactStore;
     use std::fs;
     use std::path::{Path, PathBuf};
-    use std::sync::{Arc, Barrier};
-    use std::thread;
     use std::time::{SystemTime, UNIX_EPOCH};
 
     #[test]
@@ -84,50 +82,6 @@ mod tests {
         assert!(!store.artifacts.contains_key(legacy_id));
         remove_smart_context_artifact_temp_files(&path);
     }
-
-    #[test]
-    fn runtime_smart_context_artifact_concurrent_saves_keep_all_artifacts() {
-        let path = Arc::new(smart_context_artifact_temp_path("concurrent-merge-save"));
-        remove_smart_context_artifact_temp_files(path.as_ref());
-        let thread_count = 8;
-        let barrier = Arc::new(Barrier::new(thread_count));
-
-        let handles = (0..thread_count)
-            .map(|index| {
-                let path = Arc::clone(&path);
-                let barrier = Arc::clone(&barrier);
-                thread::spawn(move || {
-                    let text = format!("artifact-{index}");
-                    let mut store = RuntimeSmartContextArtifactStore::default();
-                    let artifact = store.insert_text(&text).expect("artifact inserted");
-                    barrier.wait();
-                    store.save_to_path(path.as_ref()).expect("store saved");
-                    (artifact.id, text)
-                })
-            })
-            .collect::<Vec<_>>();
-
-        let expected = handles
-            .into_iter()
-            .map(|handle| handle.join().expect("save thread joined"))
-            .collect::<Vec<_>>();
-
-        let loaded = RuntimeSmartContextArtifactStore::load_from_path(path.as_ref());
-        assert_eq!(loaded.artifact_count(), thread_count);
-        let mut orders = loaded
-            .artifacts
-            .values()
-            .map(|artifact| artifact.order)
-            .collect::<Vec<_>>();
-        orders.sort_unstable();
-        assert_eq!(orders, (1..=thread_count as u64).collect::<Vec<_>>());
-        for (id, text) in expected {
-            assert_eq!(loaded.get_text(&id).as_deref(), Some(text.as_str()));
-        }
-
-        remove_smart_context_artifact_temp_files(path.as_ref());
-    }
-
     fn smart_context_artifact_temp_path(name: &str) -> PathBuf {
         let nanos = SystemTime::now()
             .duration_since(UNIX_EPOCH)

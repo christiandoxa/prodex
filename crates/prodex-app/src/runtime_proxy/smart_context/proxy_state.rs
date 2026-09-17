@@ -335,6 +335,7 @@ fn runtime_smart_context_remove_scope_store(path: &Path) -> std::io::Result<()> 
     Ok(())
 }
 
+#[cfg(test)]
 pub(super) fn runtime_smart_context_proxy_state_snapshot(
     shared: &RuntimeRotationProxyShared,
 ) -> Option<(u64, RuntimeSmartContextProxyState)> {

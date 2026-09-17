@@ -298,8 +298,10 @@ mod tests {
         let Commands::Super(args) = command else {
             panic!("expected Super command");
         };
-        let mut strategy =
-            RuntimeToolLaunchStrategy::new(args.into_runtime_tool_args_with_presidio(false));
+        let mut strategy = RuntimeToolLaunchStrategy::new_with_sub_agent(
+            args.into_runtime_tool_args_with_presidio(false),
+            None,
+        );
         strategy
             .apply_goal_resume_relaunch(GoalResumeRelaunchPlan {
                 session_id: "019c9e3d-45a0-7ad0-a6ee-b194ac2d44f9".to_string(),
@@ -359,8 +361,10 @@ mod tests {
         let Commands::Super(args) = command else {
             panic!("expected Super command");
         };
-        let mut strategy =
-            RuntimeToolLaunchStrategy::new(args.into_runtime_tool_args_with_presidio(false));
+        let mut strategy = RuntimeToolLaunchStrategy::new_with_sub_agent(
+            args.into_runtime_tool_args_with_presidio(false),
+            None,
+        );
         strategy
             .apply_goal_resume_relaunch(GoalResumeRelaunchPlan {
                 session_id: "019c9e3d-45a0-7ad0-a6ee-b194ac2d44f9".to_string(),
@@ -404,8 +408,10 @@ mod tests {
         let Commands::Super(args) = command else {
             panic!("expected Super command");
         };
-        let mut strategy =
-            RuntimeToolLaunchStrategy::new(args.into_runtime_tool_args_with_presidio(false));
+        let mut strategy = RuntimeToolLaunchStrategy::new_with_sub_agent(
+            args.into_runtime_tool_args_with_presidio(false),
+            None,
+        );
         strategy.pending_goal_resume_plan = Some(GoalResumeRelaunchPlan {
             session_id: "019c9e3d-45a0-7ad0-a6ee-b194ac2d44f9".to_string(),
             failed_profile_name: "profile-a".to_string(),
@@ -437,8 +443,10 @@ mod tests {
         let Commands::Super(args) = command else {
             panic!("expected Super command");
         };
-        let mut strategy =
-            RuntimeToolLaunchStrategy::new(args.into_runtime_tool_args_with_presidio(false));
+        let mut strategy = RuntimeToolLaunchStrategy::new_with_sub_agent(
+            args.into_runtime_tool_args_with_presidio(false),
+            None,
+        );
         strategy.pending_goal_resume_plan = Some(GoalResumeRelaunchPlan {
             session_id: "019c9e3d-45a0-7ad0-a6ee-b194ac2d44f9".to_string(),
             failed_profile_name: "profile-a".to_string(),

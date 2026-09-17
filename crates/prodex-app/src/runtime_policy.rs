@@ -18,8 +18,8 @@ pub use postgres_publication::*;
 use prodex_runtime_policy::RuntimePolicyCacheInvalidationPlan;
 pub use prodex_runtime_policy::clear_runtime_policy_cache;
 pub(super) use prodex_runtime_policy::{
-    RuntimeLogFormat, RuntimePolicySummary, ensure_runtime_policy_valid, runtime_policy_proxy,
-    runtime_policy_runtime, runtime_policy_summary,
+    RuntimeLogFormat, RuntimePolicySummary, ensure_runtime_policy_valid, runtime_policy_runtime,
+    runtime_policy_summary,
 };
 
 const CONFIG_PUBLICATION_TRANSPORT_SCHEMA_VERSION: u32 = 1;

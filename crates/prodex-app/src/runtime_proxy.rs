@@ -68,8 +68,7 @@ use self::smart_context::*;
 pub(crate) use self::smart_context::{
     RuntimeSmartContextEngine, observe_runtime_smart_context_token_usage_for_bucket,
     prepare_runtime_smart_context_http_body, prepare_runtime_smart_context_http_body_for_profile,
-    register_runtime_smart_context_proxy_state, render_runtime_smart_context_replay_markdown,
-    run_runtime_smart_context_replay_json, runtime_smart_context_offline_self_test,
+    register_runtime_smart_context_proxy_state,
 };
 pub(crate) use self::standard::*;
 pub(super) use self::transport_failure::*;

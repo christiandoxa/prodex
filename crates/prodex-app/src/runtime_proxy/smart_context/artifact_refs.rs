@@ -41,15 +41,6 @@ pub(super) fn runtime_smart_context_collect_rehydratable_artifact_refs(
     refs
 }
 
-pub(super) fn runtime_smart_context_collect_artifact_refs(
-    value: &serde_json::Value,
-) -> Vec<RuntimeSmartContextArtifactReference> {
-    let aliases = runtime_smart_context_collect_artifact_aliases(value);
-    let mut refs = BTreeSet::<RuntimeSmartContextArtifactReference>::new();
-    runtime_smart_context_collect_artifact_refs_from_value(value, &aliases, &mut refs);
-    refs.into_iter().collect()
-}
-
 fn runtime_smart_context_collect_rehydratable_artifact_refs_from_value(
     value: &serde_json::Value,
     aliases: &BTreeMap<String, String>,

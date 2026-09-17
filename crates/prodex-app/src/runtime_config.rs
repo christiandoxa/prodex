@@ -48,6 +48,7 @@ impl RuntimeConfig {
         self.governance.inspection != prodex_config::GovernanceRolloutMode::Off
     }
 
+    #[cfg(test)]
     pub(crate) fn offline_default(paths: &prodex_core::AppPaths) -> Result<Self, ConfigErrors> {
         Self::from_environment(paths, RuntimeConfigEnvironment::default())
     }

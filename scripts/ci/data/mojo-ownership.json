@@ -403,7 +403,6 @@
       },
       "mojo/prodex_core/log_semantics.mojo": {
         "operations": [
-          "log_event_classification",
           "runtime_log_level_classification"
         ]
       },
@@ -1544,6 +1543,12 @@
         "release_gate": "#[cfg(feature = \"mojo\")]"
       },
       "cleanup_evidence": "The active selection catalog now collects normalized profile health observations and delegates bounded sort-key arithmetic to one Mojo batch; Rust retains state lookup and ordering reconstruction."
+    }
+  ],
+  "deleted_authoritative_operations": [
+    {
+      "name": "log_event_classification",
+      "reason": "Deleted the non-core runtime log command/event-classification feature and its production consumer."
     }
   ]
 }

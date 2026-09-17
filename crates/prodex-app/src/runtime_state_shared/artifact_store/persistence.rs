@@ -9,16 +9,11 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::io::{self, Read as _};
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex, OnceLock, Weak};
 use zeroize::Zeroizing;
 
 const RUNTIME_SMART_CONTEXT_ARTIFACT_STORE_MAX_FILE_BYTES: u64 = 64 * 1024 * 1024;
 const RUNTIME_SMART_CONTEXT_ARTIFACT_KEY_BYTES: usize = 32;
 const RUNTIME_SMART_CONTEXT_ARTIFACT_ENCRYPTED_MAGIC: &[u8] = b"PSCA1\0";
-
-static RUNTIME_SMART_CONTEXT_ARTIFACT_PROCESS_LOCKS: OnceLock<
-    Mutex<BTreeMap<PathBuf, Weak<Mutex<()>>>>,
-> = OnceLock::new();
 
 impl RuntimeSmartContextArtifactStore {
     pub(crate) fn for_scope(scope: runtime_proxy_crate::ContextScopeId) -> Self {
@@ -26,11 +21,6 @@ impl RuntimeSmartContextArtifactStore {
             scope_id: Some(scope),
             ..Self::default()
         }
-    }
-
-    #[cfg(test)]
-    pub(crate) fn bind_scope(&mut self, scope: runtime_proxy_crate::ContextScopeId) {
-        self.scope_id = Some(scope);
     }
 
     #[cfg(test)]
@@ -87,99 +77,6 @@ impl RuntimeSmartContextArtifactStore {
         Ok(store)
     }
 
-    #[cfg(test)]
-    pub(crate) fn save_to_path(&self, path: &Path) -> anyhow::Result<()> {
-        self.save_merged_to_path(path).map(|_| ())
-    }
-
-    pub(crate) fn save_merged_to_path(&self, path: &Path) -> anyhow::Result<Self> {
-        if runtime_smart_context_artifact_key_path(path).is_some() {
-            runtime_smart_context_prepare_scoped_directories(path)?;
-        } else if let Some(parent) = path
-            .parent()
-            .filter(|parent| !parent.as_os_str().is_empty())
-        {
-            fs::create_dir_all(parent)?;
-        }
-        let process_lock = runtime_smart_context_artifact_process_lock(path);
-        let _process_guard = process_lock
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
-        let _lock = crate::runtime_store::acquire_json_file_lock(path)?;
-        let mut merged = Self::load_validated_from_path(path, self.scope_id.as_ref())?;
-        merged.merge_from(self);
-        merged.write_to_path_unlocked(path)?;
-        Ok(merged)
-    }
-
-    fn merge_from(&mut self, incoming: &Self) {
-        self.next_artifact_order = self.next_artifact_order.max(
-            self.artifacts
-                .values()
-                .map(|artifact| artifact.order)
-                .max()
-                .unwrap_or(0),
-        );
-        for (id, incoming_artifact) in incoming
-            .artifacts
-            .iter()
-            .filter(|(_, artifact)| !artifact.pending_order)
-        {
-            self.artifacts
-                .entry(id.clone())
-                .and_modify(|current| {
-                    if incoming_artifact.order >= current.order {
-                        *current = incoming_artifact.clone();
-                    }
-                })
-                .or_insert_with(|| incoming_artifact.clone());
-        }
-        let mut pending = incoming
-            .artifacts
-            .values()
-            .filter(|artifact| artifact.pending_order)
-            .cloned()
-            .collect::<Vec<_>>();
-        pending.sort_by(|left, right| {
-            left.order
-                .cmp(&right.order)
-                .then_with(|| left.id.cmp(&right.id))
-        });
-        for mut artifact in pending {
-            self.next_artifact_order = self.next_artifact_order.saturating_add(1);
-            artifact.order = self.next_artifact_order;
-            artifact.pending_order = false;
-            self.artifacts.insert(artifact.id.clone(), artifact);
-        }
-        self.legacy_artifact_ids
-            .extend(incoming.legacy_artifact_ids.clone());
-        self.legacy_artifact_ids
-            .retain(|_, id| self.artifacts.contains_key(id));
-        self.schema_version = 3;
-        self.scope_id = incoming.scope_id.clone().or(self.scope_id.clone());
-        if !incoming.static_context_fingerprints.is_empty()
-            || incoming.static_context_prompt_cache_hash.is_some()
-        {
-            self.static_context_fingerprints = incoming.static_context_fingerprints.clone();
-            self.static_context_prompt_cache_hash =
-                incoming.static_context_prompt_cache_hash.clone();
-        }
-        self.recompute_total_bytes();
-        self.enforce_limits();
-        self.refresh_prewarmed_projections();
-    }
-
-    fn write_to_path_unlocked(&self, path: &Path) -> anyhow::Result<()> {
-        let raw = Zeroizing::new(serde_json::to_vec(self)?);
-        let encoded = runtime_smart_context_encrypt_artifact_store(
-            path,
-            self.scope_id.as_ref(),
-            raw.as_slice(),
-        )?;
-        crate::runtime_store::write_private_file_atomic(path, &encoded)?;
-        Ok(())
-    }
-
     fn recompute_total_bytes(&mut self) {
         self.total_bytes = self
             .artifacts
@@ -200,13 +97,6 @@ impl RuntimeSmartContextArtifactStore {
         valid &= self.static_context_fingerprints.len() == fingerprint_count;
         self.legacy_artifact_ids
             .retain(|legacy, id| legacy.starts_with("sc:") && self.artifacts.contains_key(id));
-        self.next_artifact_order = self.next_artifact_order.max(
-            self.artifacts
-                .values()
-                .map(|artifact| artifact.order)
-                .max()
-                .unwrap_or(0),
-        );
         valid
     }
 
@@ -352,29 +242,6 @@ fn runtime_smart_context_read_artifact_store(
     Ok(Some(raw))
 }
 
-fn runtime_smart_context_encrypt_artifact_store(
-    path: &Path,
-    scope: Option<&runtime_proxy_crate::ContextScopeId>,
-    plaintext: &[u8],
-) -> anyhow::Result<Zeroizing<Vec<u8>>> {
-    let Some(key_path) = runtime_smart_context_artifact_key_path(path) else {
-        return Ok(Zeroizing::new(plaintext.to_vec()));
-    };
-    let scope = scope.context("scoped Smart Context artifact store is missing its scope ID")?;
-    let key = runtime_smart_context_artifact_key(&key_path, true)?;
-    let ciphertext = secret_store::encrypt_private_payload(
-        key.as_slice(),
-        scope.as_str().as_bytes(),
-        plaintext,
-    )?;
-    let mut encoded = Zeroizing::new(Vec::with_capacity(
-        RUNTIME_SMART_CONTEXT_ARTIFACT_ENCRYPTED_MAGIC.len() + ciphertext.len(),
-    ));
-    encoded.extend_from_slice(RUNTIME_SMART_CONTEXT_ARTIFACT_ENCRYPTED_MAGIC);
-    encoded.extend_from_slice(&ciphertext);
-    Ok(encoded)
-}
-
 fn runtime_smart_context_decrypt_artifact_store(
     path: &Path,
     scope: Option<&runtime_proxy_crate::ContextScopeId>,
@@ -403,37 +270,6 @@ fn runtime_smart_context_artifact_key_path(path: &Path) -> Option<PathBuf> {
         .then(|| smart_context_dir.join("artifact-store.key"))
 }
 
-fn runtime_smart_context_prepare_scoped_directories(path: &Path) -> std::io::Result<()> {
-    let scope_dir = path.parent().ok_or_else(|| {
-        std::io::Error::new(
-            std::io::ErrorKind::InvalidInput,
-            "missing artifact scope directory",
-        )
-    })?;
-    let scopes_dir = scope_dir.parent().ok_or_else(|| {
-        std::io::Error::new(
-            std::io::ErrorKind::InvalidInput,
-            "missing artifact scopes directory",
-        )
-    })?;
-    let smart_context_dir = scopes_dir.parent().ok_or_else(|| {
-        std::io::Error::new(
-            std::io::ErrorKind::InvalidInput,
-            "missing Smart Context directory",
-        )
-    })?;
-    let root = smart_context_dir.parent().ok_or_else(|| {
-        std::io::Error::new(
-            std::io::ErrorKind::InvalidInput,
-            "missing Prodex state directory",
-        )
-    })?;
-    for directory in [root, smart_context_dir, scopes_dir, scope_dir] {
-        secret_store::ensure_private_directory(directory)?;
-    }
-    Ok(())
-}
-
 fn runtime_smart_context_artifact_key(
     path: &Path,
     create: bool,
@@ -459,19 +295,4 @@ fn runtime_smart_context_artifact_key(
         .map_err(|_| anyhow::anyhow!("failed to generate Smart Context artifact key"))?;
     secret_store::write_private_file_atomic(path, &key)?;
     Ok(key)
-}
-
-fn runtime_smart_context_artifact_process_lock(path: &Path) -> Arc<Mutex<()>> {
-    let locks =
-        RUNTIME_SMART_CONTEXT_ARTIFACT_PROCESS_LOCKS.get_or_init(|| Mutex::new(BTreeMap::new()));
-    let mut locks = locks
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
-    locks.retain(|_, lock| lock.strong_count() > 0);
-    if let Some(lock) = locks.get(path).and_then(Weak::upgrade) {
-        return lock;
-    }
-    let lock = Arc::new(Mutex::new(()));
-    locks.insert(path.to_path_buf(), Arc::downgrade(&lock));
-    lock
 }

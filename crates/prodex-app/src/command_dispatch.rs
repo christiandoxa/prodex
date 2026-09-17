@@ -33,7 +33,6 @@ pub(crate) fn command_should_show_update_notice(command: &Commands) -> bool {
             command,
             Commands::RuntimeBroker(_)
                 | Commands::Update(_)
-                | Commands::Capability(_)
                 | Commands::GeminiCompatRefresh(_)
                 | Commands::McpJsonlBridge(_)
                 | Commands::SubAgentExec(_)
@@ -58,39 +57,15 @@ pub(crate) fn execute_command(command: Commands) -> Result<()> {
         Commands::Profile(command) => execute_profile_command(command),
         Commands::UseProfile(args) => handle_set_active_profile(args),
         Commands::Current => handle_current_profile(),
-        Commands::Info(args) => handle_info(args),
         Commands::Status(args) => handle_status(args),
-        Commands::Log(args) => handle_log(args),
         Commands::Session(command) => handle_session(command),
         Commands::Doctor(args) => handle_doctor(args),
-        Commands::Setup(args) => handle_setup(args),
-        Commands::Capability(command) => handle_capability(command),
-        Commands::Audit(args) => handle_audit(args),
-        Commands::Context(command) => execute_context_command(command),
-        Commands::Cleanup(args) => handle_cleanup(args),
-        Commands::Presidio(command) => handle_presidio(command),
         Commands::Login(args) => handle_codex_login(args),
         Commands::Logout(args) => handle_codex_logout(args),
         Commands::Update(args) => handle_prodex_update(args),
         Commands::Quota(args) => handle_quota(args),
-        Commands::Redeem(args) => handle_redeem(args),
-        Commands::Ping(command) => handle_ping(command),
-        Commands::Gui(args) => handle_gui(args),
         Commands::Run(args) => app_commands::runtime_launch::handle_run(args),
-        Commands::Caveman(mut args) => {
-            args.require_tool(prodex_optional_tools::OptionalToolId::Caveman);
-            execute_tool_launch(args)
-        }
-        Commands::Rtk(args) => {
-            execute_optional_tool_alias(args, prodex_optional_tools::OptionalToolId::Rtk)
-        }
-        Commands::Playwright(args) => {
-            execute_optional_tool_alias(args, prodex_optional_tools::OptionalToolId::PlaywrightMcp)
-        }
-        Commands::Ponytail(args) => {
-            execute_optional_tool_alias(args, prodex_optional_tools::OptionalToolId::Ponytail)
-        }
-        Commands::Super(args) => execute_super(args),
+        Commands::Super(args) => execute_super(*args),
         Commands::Gateway(args) => handle_gateway(args),
         Commands::Claude(args) => handle_claude(args),
         Commands::RuntimeBroker(args) => handle_runtime_broker(args),
@@ -105,10 +80,7 @@ fn command_runs_profile_lifecycle_recovery(command: &Commands) -> bool {
         && !matches!(
             command,
             Commands::Profile(ProfileCommands::Remove(_))
-                | Commands::Cleanup(_)
                 | Commands::Doctor(_)
-                | Commands::Capability(_)
-                | Commands::Ping(_)
                 | Commands::McpJsonlBridge(_)
                 | Commands::SubAgentExec(_)
         )
@@ -136,44 +108,11 @@ fn execute_profile_command(command: ProfileCommands) -> Result<()> {
     }
 }
 
-fn execute_context_command(command: ContextCommands) -> Result<()> {
-    match command {
-        ContextCommands::Audit(args) => handle_context_audit(args),
-        ContextCommands::Export(args) => handle_context_export(args),
-        ContextCommands::Compress(args) => handle_context_compress(args),
-        ContextCommands::ReplayReport(args) => handle_context_replay_report(args),
-        ContextCommands::CompactOutput(args) => handle_context_compact_output(args),
-    }
-}
-
-fn execute_optional_tool_alias(
-    mut args: RuntimeToolArgs,
-    tool: prodex_optional_tools::OptionalToolId,
-) -> Result<()> {
-    args.select_tool(prodex_optional_tools::OptionalToolId::Caveman);
-    args.select_tool(tool);
-    execute_tool_launch(args)
-}
-
-fn execute_tool_launch(args: RuntimeToolArgs) -> Result<()> {
-    if args.dry_run || prodex_dry_run_requested(&args.codex_args) {
-        return handle_runtime_tools_dry_run(args);
-    }
-    handle_runtime_tools(args)
-}
-
 fn execute_super(mut args: SuperArgs) -> Result<()> {
     args.extract_provider_overrides_from_codex_args()
         .map_err(anyhow::Error::msg)?;
     crate::runtime_gemini_cli::validate_super_native_cli_capability_args(&args)?;
     args.validate_urls().map_err(anyhow::Error::msg)?;
-    if args.codex_args.first().is_some_and(|arg| arg == "gui") {
-        args.codex_args.remove(0);
-        if !args.codex_args.is_empty() {
-            bail!("`prodex s gui` does not accept Codex CLI arguments")
-        }
-        return handle_super_gui(args);
-    }
     if args.dry_run || prodex_dry_run_requested(&args.codex_args) {
         let use_presidio = match args.presidio_preference() {
             Some(use_presidio) => use_presidio,
@@ -307,22 +246,5 @@ mod tests {
         let command = parse_cli_command_from(["prodex", "gateway", "providers"]).unwrap();
 
         assert!(!command_runs_profile_lifecycle_recovery(&command));
-    }
-
-    #[test]
-    fn ping_skips_profile_recovery_and_housekeeping() {
-        let command = parse_cli_command_from(["prodex", "ping", "openai"]).unwrap();
-
-        assert!(!command_runs_profile_lifecycle_recovery(&command));
-        assert!(!crate::housekeeping::command_runs_auto_runtime_housekeeping(&command));
-    }
-
-    #[test]
-    fn capability_commands_skip_startup_notifications() {
-        let command = parse_cli_command_from(["prodex", "s", "--no-presidio", "doctor"])
-            .expect("Super doctor should parse");
-
-        assert!(!command_should_show_update_notice(&command));
-        assert!(!crate::housekeeping::command_runs_auto_runtime_housekeeping(&command));
     }
 }

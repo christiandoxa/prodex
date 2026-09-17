@@ -118,7 +118,7 @@ fn super_resume_restores_the_session_model_and_reasoning_effort() {
         panic!("expected Super command");
     };
 
-    let runtime_args = resolved_super_runtime_tool_args(args, false);
+    let runtime_args = resolved_super_runtime_tool_args(*args, false);
 
     assert_eq!(
         codex_cli_config_override_value(&runtime_args.codex_args, "model").as_deref(),
@@ -163,7 +163,7 @@ fn super_resume_dry_run_restores_session_provider_model_and_reasoning_effort() {
     args.extract_provider_overrides_from_codex_args().unwrap();
 
     resolve_super_dry_run_main_agent(&mut args).unwrap();
-    let runtime_args = resolved_super_runtime_tool_args(args, false);
+    let runtime_args = resolved_super_runtime_tool_args(*args, false);
 
     assert_eq!(
         runtime_args.external_provider,

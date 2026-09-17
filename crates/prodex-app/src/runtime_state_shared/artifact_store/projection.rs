@@ -182,13 +182,6 @@ impl RuntimeSmartContextArtifactStore {
         RuntimeSmartContextArtifactRepoMap { complete, entries }
     }
 
-    pub(in crate::runtime_state_shared::artifact_store) fn invalidate_prewarmed_projections(
-        &mut self,
-    ) {
-        self.repo_map_prewarm = None;
-        self.symbol_map_prewarm = None;
-    }
-
     pub(in crate::runtime_state_shared::artifact_store) fn refresh_prewarmed_projections(
         &mut self,
     ) {

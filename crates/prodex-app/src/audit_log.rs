@@ -5,10 +5,6 @@ use std::path::{Path, PathBuf};
 
 use crate::RuntimeRotationProxyShared;
 
-pub(super) use prodex_audit_log::{
-    AuditLogQuery, AuditLogReadResult, render_audit_events_human_with_scope,
-};
-
 pub(super) fn audit_log_path() -> PathBuf {
     prodex_audit_log::audit_log_path(&super::runtime_proxy_log_dir())
 }
@@ -77,12 +73,6 @@ pub(super) fn format_audit_logs_summary() -> String {
 
 pub(super) fn audit_logs_json_value() -> Value {
     prodex_audit_log::audit_logs_json_value(&super::runtime_proxy_log_dir())
-}
-
-pub(super) fn read_recent_audit_events_with_scope(
-    query: &AuditLogQuery,
-) -> Result<AuditLogReadResult> {
-    prodex_audit_log::read_recent_audit_events_with_scope(&audit_log_path(), query)
 }
 
 #[cfg(test)]

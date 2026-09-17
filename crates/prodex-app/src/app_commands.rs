@@ -1,30 +1,16 @@
 use super::*;
-mod audit;
 mod broker;
-mod capability;
 mod child_process;
-mod cleanup;
-mod context;
 mod doctor;
 mod gateway;
-mod gui;
 mod info;
-mod info_handler;
-mod log;
-mod log_format;
-mod log_throughput;
-mod log_throughput_state;
 mod log_tui;
-mod log_upstream;
-mod log_upstream_payload;
 mod mcp_jsonl_bridge;
 #[cfg(test)]
 mod native_cli_tests;
-mod ping;
 mod presidio;
 mod prodex_update;
 mod quota;
-mod redeem;
 pub(crate) mod runtime_launch;
 mod selection;
 mod session;
@@ -34,34 +20,26 @@ mod status;
 #[path = "app_commands/sub_agent_catalog_tests.rs"]
 mod sub_agent_catalog_tests;
 mod super_config;
-mod super_doctor;
 mod super_main_prompt;
 mod super_prompt;
 
-pub(crate) use self::audit::*;
 pub(crate) use self::broker::*;
-pub(crate) use self::capability::*;
 pub(crate) use self::child_process::*;
-pub(crate) use self::cleanup::*;
-pub(crate) use self::context::*;
 pub(crate) use self::doctor::*;
 pub(crate) use self::gateway::*;
-pub(crate) use self::gui::*;
 pub(crate) use self::info::*;
-pub(crate) use self::info_handler::*;
-pub(crate) use self::log::*;
 pub(crate) use self::mcp_jsonl_bridge::*;
-pub(crate) use self::ping::*;
-pub(crate) use self::presidio::*;
+pub(crate) use self::presidio::{
+    ensure_presidio_services_for_super_launch, ensure_required_presidio_services_for_super_launch,
+    stored_presidio_preference,
+};
 pub(crate) use self::prodex_update::*;
 pub(crate) use self::quota::*;
-pub(crate) use self::redeem::*;
 pub(crate) use self::selection::*;
 pub(crate) use self::session::*;
 pub(crate) use self::shared::*;
 pub(crate) use self::status::*;
 pub(crate) use self::super_config::ResolvedMainAgentConfig;
-pub(super) use self::super_prompt::prompt_super_presidio_opt_in;
 
 pub(super) fn handle_super(mut args: SuperArgs) -> Result<()> {
     args.validate_urls().map_err(anyhow::Error::msg)?;
@@ -235,7 +213,7 @@ mod sub_agent_prompt_tests {
         };
         args.extract_super_overrides_from_codex_args()
             .expect("Super tail should extract");
-        args
+        *args
     }
 
     #[test]

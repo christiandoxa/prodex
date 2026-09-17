@@ -23,17 +23,6 @@ fn launch_commands_accept_dry_run_as_prodex_flag() {
         vec![OsString::from("exec"), OsString::from("hello")]
     );
 
-    let caveman = parse_cli_command_from(["prodex", "caveman", "--dry-run", "exec", "hello"])
-        .expect("caveman dry-run should parse");
-    let Commands::Caveman(caveman_args) = caveman else {
-        panic!("expected caveman command");
-    };
-    assert!(caveman_args.dry_run);
-    assert_eq!(
-        caveman_args.codex_args,
-        vec![OsString::from("exec"), OsString::from("hello")]
-    );
-
     let super_command = parse_cli_command_from(["prodex", "super", "--dry-run", "exec", "hello"])
         .expect("super dry-run should parse");
     let Commands::Super(super_args) = super_command else {

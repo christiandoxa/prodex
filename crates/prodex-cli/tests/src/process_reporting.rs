@@ -14,36 +14,13 @@ fn command_runtime_and_process_labels_follow_canonical_parsing() {
         assert!(command.launches_runtime(), "{args:?}");
     }
 
-    let command =
-        parse_cli_command_from(["prodex", "super", "doctor"]).expect("super doctor should parse");
-    assert!(!command.launches_runtime());
-    assert_eq!(command.process_label(), "capability");
-
-    let command = parse_cli_command_from(["prodex", "info"]).expect("info should parse");
-    assert!(!command.launches_runtime());
-    assert_eq!(command.process_label(), "info");
+    let doctor = parse_cli_command_from(["prodex", "doctor"]).expect("doctor should parse");
+    assert!(!doctor.launches_runtime());
+    assert_eq!(doctor.process_label(), "doctor");
 }
 
 #[test]
-fn super_positioned_aliases_survive_no_presidio() {
-    let command = parse_cli_command_from([
-        "prodex",
-        "s",
-        "--no-presidio",
-        "doctor",
-        "--json",
-        "--strict",
-    ])
-    .expect("positioned Super doctor should parse");
-    assert!(matches!(
-        command,
-        Commands::Capability(CapabilityCommands::SuperDoctor(SuperDoctorArgs {
-            json: true,
-            strict: true,
-            presidio: false,
-        }))
-    ));
-
+fn positioned_super_provider_aliases_survive_no_presidio() {
     let Commands::Super(mut args) = parse_cli_command_from([
         "prodex",
         "s",

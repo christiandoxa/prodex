@@ -1,8 +1,7 @@
 #[cfg(test)]
 mod tests {
     use crate::runtime_state_shared::{
-        RUNTIME_SMART_CONTEXT_CHUNK_WINDOW_LINES, RUNTIME_SMART_CONTEXT_MAX_ARTIFACTS,
-        RUNTIME_SMART_CONTEXT_MAX_CHUNK_FINGERPRINTS,
+        RUNTIME_SMART_CONTEXT_CHUNK_WINDOW_LINES, RUNTIME_SMART_CONTEXT_MAX_CHUNK_FINGERPRINTS,
         RUNTIME_SMART_CONTEXT_MAX_LINE_INDEX_EXCERPT_BYTES,
         RUNTIME_SMART_CONTEXT_MAX_SEMANTIC_LINE_INDEX_RANGES, RuntimeSmartContextArtifactLineIndex,
         RuntimeSmartContextArtifactRepoMapEntryKind, RuntimeSmartContextArtifactStore,
@@ -11,149 +10,6 @@ mod tests {
     use std::fs;
     use std::path::{Path, PathBuf};
     use std::time::{SystemTime, UNIX_EPOCH};
-
-    #[test]
-    fn runtime_smart_context_scoped_artifacts_are_encrypted_and_scope_bound() {
-        let root = smart_context_artifact_temp_path("encrypted-scope").with_extension("");
-        let scope = runtime_proxy_crate::ContextScopeId::new(
-            "tenant",
-            "profile",
-            "provider",
-            "/workspace",
-            None,
-        );
-        let path = root
-            .join("smart-context")
-            .join("scopes")
-            .join(scope.path_component())
-            .join("artifacts.json");
-        let mut store = RuntimeSmartContextArtifactStore::default();
-        store.bind_scope(scope.clone());
-        let artifact = store.insert_text("sensitive scoped context").unwrap();
-        store.save_to_path(&path).unwrap();
-
-        let raw = fs::read(&path).unwrap();
-        assert!(raw.starts_with(b"PSCA1\0"));
-        assert!(
-            !raw.windows(b"sensitive scoped context".len())
-                .any(|window| { window == b"sensitive scoped context" })
-        );
-        let loaded =
-            RuntimeSmartContextArtifactStore::load_scoped_from_path(&path, &scope).unwrap();
-        assert_eq!(
-            loaded.get_text(&artifact.id).as_deref(),
-            Some("sensitive scoped context")
-        );
-        let wrong_scope = runtime_proxy_crate::ContextScopeId::new(
-            "tenant",
-            "other-profile",
-            "provider",
-            "/workspace",
-            None,
-        );
-        assert!(
-            RuntimeSmartContextArtifactStore::load_scoped_from_path(&path, &wrong_scope).is_err()
-        );
-
-        let _ = fs::remove_dir_all(root);
-    }
-
-    #[test]
-    fn runtime_smart_context_artifact_save_merges_existing_file() {
-        let path = smart_context_artifact_temp_path("merge-save");
-        remove_smart_context_artifact_temp_files(&path);
-
-        let mut first = RuntimeSmartContextArtifactStore::default();
-        let alpha = first.insert_text("alpha").expect("alpha artifact");
-        first.save_to_path(&path).expect("first store saved");
-
-        let mut second = RuntimeSmartContextArtifactStore::default();
-        let beta = second.insert_text("beta").expect("beta artifact");
-        second.save_to_path(&path).expect("second store saved");
-
-        let loaded = RuntimeSmartContextArtifactStore::load_from_path(&path);
-        assert_eq!(loaded.artifact_count(), 2);
-        assert_eq!(loaded.get_text(&alpha.id).as_deref(), Some("alpha"));
-        assert_eq!(loaded.get_text(&beta.id).as_deref(), Some("beta"));
-
-        remove_smart_context_artifact_temp_files(&path);
-    }
-
-    #[test]
-    fn runtime_smart_context_artifact_save_assigns_global_persisted_order() {
-        let path = smart_context_artifact_temp_path("global-order");
-        remove_smart_context_artifact_temp_files(&path);
-
-        let mut first = RuntimeSmartContextArtifactStore::default();
-        let alpha = first.insert_text("alpha").unwrap();
-        first.save_to_path(&path).unwrap();
-
-        let mut second = RuntimeSmartContextArtifactStore::default();
-        let beta = second.insert_text("beta").unwrap();
-        second.save_to_path(&path).unwrap();
-
-        let loaded = RuntimeSmartContextArtifactStore::load_from_path(&path);
-        assert!(loaded.artifacts[&alpha.id].order < loaded.artifacts[&beta.id].order);
-        assert_eq!(loaded.next_artifact_order, loaded.artifacts[&beta.id].order);
-
-        remove_smart_context_artifact_temp_files(&path);
-    }
-
-    #[test]
-    fn runtime_smart_context_artifact_merge_evicts_globally_oldest() {
-        let path = smart_context_artifact_temp_path("global-order-eviction");
-        remove_smart_context_artifact_temp_files(&path);
-
-        let mut first = RuntimeSmartContextArtifactStore::default();
-        let oldest = first.insert_text("oldest").unwrap();
-        first.save_to_path(&path).unwrap();
-
-        let mut incoming = RuntimeSmartContextArtifactStore::default();
-        let newest = (0..RUNTIME_SMART_CONTEXT_MAX_ARTIFACTS)
-            .filter_map(|index| incoming.insert_text(&format!("new-{index}")))
-            .last()
-            .unwrap();
-        incoming.save_to_path(&path).unwrap();
-
-        let loaded = RuntimeSmartContextArtifactStore::load_from_path(&path);
-        assert_eq!(loaded.artifact_count(), RUNTIME_SMART_CONTEXT_MAX_ARTIFACTS);
-        assert!(!loaded.artifacts.contains_key(&oldest.id));
-        assert!(loaded.artifacts.contains_key(&newest.id));
-
-        remove_smart_context_artifact_temp_files(&path);
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn runtime_smart_context_artifact_save_rejects_symlink_without_reading_target() {
-        let path = smart_context_artifact_temp_path("symlink-save");
-        remove_smart_context_artifact_temp_files(&path);
-        let target = path.with_file_name("outside-artifacts.json");
-        fs::write(&target, r#"{"artifacts":{},"total_bytes":0}"#).unwrap();
-        std::os::unix::fs::symlink(&target, &path).unwrap();
-
-        let mut store = RuntimeSmartContextArtifactStore::default();
-        let artifact = store.insert_text("safe artifact").unwrap();
-        assert!(store.save_to_path(&path).is_err());
-
-        assert_eq!(
-            fs::read_to_string(&target).unwrap(),
-            r#"{"artifacts":{},"total_bytes":0}"#
-        );
-        assert!(
-            fs::symlink_metadata(&path)
-                .unwrap()
-                .file_type()
-                .is_symlink()
-        );
-        let loaded = RuntimeSmartContextArtifactStore::load_from_path(&path);
-        assert_eq!(loaded.artifact_count(), 0);
-        assert!(loaded.get_text(&artifact.id).is_none());
-
-        remove_smart_context_artifact_temp_files(&path);
-        let _ = fs::remove_file(target);
-    }
-
     #[test]
     fn runtime_smart_context_artifact_load_ignores_oversized_store_file() {
         let path = smart_context_artifact_temp_path("oversized-load");
@@ -168,32 +24,6 @@ mod tests {
         assert_eq!(loaded.artifact_count(), 0);
         remove_smart_context_artifact_temp_files(&path);
     }
-
-    #[test]
-    fn runtime_smart_context_artifact_save_persists_static_fingerprints() {
-        let path = smart_context_artifact_temp_path("static-fingerprints");
-        remove_smart_context_artifact_temp_files(&path);
-
-        let mut store = RuntimeSmartContextArtifactStore::default();
-        store.set_static_context_fingerprints(
-            Some("scpc:1234".to_string()),
-            vec![runtime_proxy_crate::SmartContextFingerprint {
-                id: "instructions".to_string(),
-                kind: runtime_proxy_crate::SmartContextFingerprintKind::StaticContext,
-                content_hash: runtime_proxy_crate::smart_context_hash_text("static instructions"),
-                byte_len: 42,
-            }],
-        );
-        store.save_to_path(&path).expect("store saved");
-
-        let loaded = RuntimeSmartContextArtifactStore::load_from_path(&path);
-        assert_eq!(loaded.static_context_prompt_cache_hash(), Some("scpc:1234"));
-        assert_eq!(loaded.static_context_fingerprints().len(), 1);
-        assert_eq!(loaded.static_context_fingerprints()[0].id, "instructions");
-
-        remove_smart_context_artifact_temp_files(&path);
-    }
-
     #[test]
     fn runtime_smart_context_artifact_ref_for_exact_text_requires_exact_hash_match() {
         let mut store = RuntimeSmartContextArtifactStore::default();
@@ -511,47 +341,6 @@ fn target_test() {
                 .all(|entry| entry.kind == RuntimeSmartContextArtifactRepoMapEntryKind::Path)
         );
     }
-
-    #[test]
-    fn runtime_smart_context_artifact_save_prewarms_repo_and_symbol_maps() {
-        let path = smart_context_artifact_temp_path("projection-prewarm");
-        remove_smart_context_artifact_temp_files(&path);
-
-        let text = "\
-error[E0425]: missing value
- --> src/lib.rs:7:3
-pub mod runtime {
-}
-fn launch_super() {
-}";
-        let mut store = RuntimeSmartContextArtifactStore::default();
-        store.insert_text(text).expect("artifact inserted");
-        store.save_to_path(&path).expect("store saved");
-
-        let raw = std::fs::read_to_string(&path).expect("store json should exist");
-        assert!(raw.contains("repo_map_prewarm"));
-        assert!(raw.contains("symbol_map_prewarm"));
-
-        let loaded = RuntimeSmartContextArtifactStore::load_from_path(&path);
-        let repo_map = loaded.repo_map_projection(64);
-        let symbol_map = loaded.symbol_map_projection(64);
-        assert!(repo_map.entries.iter().any(|entry| {
-            entry.kind == RuntimeSmartContextArtifactRepoMapEntryKind::Path
-                && entry.path.as_deref() == Some("src/lib.rs")
-                && entry.range_start > 0
-        }));
-        assert!(symbol_map.entries.iter().any(|entry| {
-            entry.kind == RuntimeSmartContextArtifactRepoMapEntryKind::Module
-                && entry.symbol.as_deref() == Some("runtime")
-        }));
-        assert!(symbol_map.entries.iter().any(|entry| {
-            entry.kind == RuntimeSmartContextArtifactRepoMapEntryKind::Error
-                && entry.code.as_deref() == Some("E0425")
-        }));
-
-        remove_smart_context_artifact_temp_files(&path);
-    }
-
     #[test]
     fn runtime_smart_context_artifact_insert_stores_chunk_fingerprints() {
         let text = "\

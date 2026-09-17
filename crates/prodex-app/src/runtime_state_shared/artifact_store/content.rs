@@ -1,10 +1,9 @@
-use super::super::{
-    RUNTIME_SMART_CONTEXT_MAX_ARTIFACT_BYTES, RuntimeSmartContextArtifact,
-    runtime_smart_context_artifact_chunk_index, runtime_smart_context_artifact_line_index,
-    runtime_smart_context_artifact_line_index_needs_refresh,
-};
 #[cfg(test)]
-use super::super::{RuntimeSmartContextArtifactChunkIndex, RuntimeSmartContextArtifactLineIndex};
+use super::super::{
+    RuntimeSmartContextArtifact, RuntimeSmartContextArtifactChunkIndex,
+    RuntimeSmartContextArtifactLineIndex, runtime_smart_context_artifact_chunk_index,
+    runtime_smart_context_artifact_line_index,
+};
 use super::RuntimeSmartContextArtifactStore;
 #[cfg(test)]
 use super::RuntimeSmartContextStaticFingerprintMetadata;
@@ -12,6 +11,81 @@ use super::RuntimeSmartContextStaticFingerprintMetadata;
 use super::types::RuntimeSmartContextStaticFingerprintMetadata;
 
 impl RuntimeSmartContextArtifactStore {
+    #[cfg(test)]
+    pub(crate) fn insert_text(
+        &mut self,
+        text: &str,
+    ) -> Option<runtime_proxy_crate::SmartContextArtifactRef> {
+        let content_hash = runtime_proxy_crate::smart_context_hash_text(text);
+        let id = content_hash.clone();
+        if let Some(existing) = self.artifacts.get_mut(&id) {
+            if existing.line_index.is_none() {
+                existing.line_index = Some(runtime_smart_context_artifact_line_index(text));
+            }
+            if existing.chunk_index.is_none() {
+                let line_index = existing
+                    .line_index
+                    .clone()
+                    .unwrap_or_else(|| runtime_smart_context_artifact_line_index(text));
+                existing.chunk_index = Some(runtime_smart_context_artifact_chunk_index(
+                    text,
+                    &line_index,
+                ));
+            }
+            return Some(runtime_proxy_crate::SmartContextArtifactRef {
+                id: existing.id.clone(),
+                byte_len: existing.byte_len,
+                content_hash: existing.content_hash.clone(),
+            });
+        }
+        let order = self
+            .artifacts
+            .values()
+            .map(|artifact| artifact.order)
+            .max()
+            .unwrap_or(0)
+            .saturating_add(1);
+        let line_index = runtime_smart_context_artifact_line_index(text);
+        let chunk_index = runtime_smart_context_artifact_chunk_index(text, &line_index);
+        let byte_len = text.len();
+        self.artifacts.insert(
+            id.clone(),
+            RuntimeSmartContextArtifact {
+                id: id.clone(),
+                byte_len,
+                content_hash: content_hash.clone(),
+                text: text.to_string(),
+                order,
+                line_index: Some(line_index),
+                chunk_index: Some(chunk_index),
+            },
+        );
+        self.total_bytes = self.total_bytes.saturating_add(byte_len);
+        self.enforce_limits();
+        Some(runtime_proxy_crate::SmartContextArtifactRef {
+            id,
+            byte_len,
+            content_hash,
+        })
+    }
+
+    #[cfg(test)]
+    pub(crate) fn artifact_ref_for_exact_text(
+        &self,
+        text: &str,
+    ) -> Option<runtime_proxy_crate::SmartContextArtifactRef> {
+        let content_hash = runtime_proxy_crate::smart_context_hash_text(text);
+        let artifact = self.artifacts.get(&content_hash)?;
+        (artifact.content_hash == content_hash
+            && artifact.byte_len == text.len()
+            && artifact.text == text)
+            .then(|| runtime_proxy_crate::SmartContextArtifactRef {
+                id: artifact.id.clone(),
+                byte_len: artifact.byte_len,
+                content_hash: artifact.content_hash.clone(),
+            })
+    }
+
     #[cfg(test)]
     pub(crate) fn artifact_count(&self) -> usize {
         self.artifacts.len()
@@ -56,103 +130,6 @@ impl RuntimeSmartContextArtifactStore {
         self.static_context_prompt_cache_hash.as_deref()
     }
 
-    pub(crate) fn insert_text(
-        &mut self,
-        text: &str,
-    ) -> Option<runtime_proxy_crate::SmartContextArtifactRef> {
-        if text.len() > RUNTIME_SMART_CONTEXT_MAX_ARTIFACT_BYTES {
-            return None;
-        }
-        let order = self.next_artifact_order.saturating_add(1);
-        self.next_artifact_order = order;
-        let content_hash = runtime_proxy_crate::smart_context_hash_text(text);
-        let id = content_hash.clone();
-        if self.artifacts.contains_key(&id) {
-            return self.refresh_existing_artifact_text(&id, text, &content_hash, order);
-        }
-
-        self.insert_new_artifact(id, content_hash, text, order)
-    }
-
-    fn refresh_existing_artifact_text(
-        &mut self,
-        id: &str,
-        text: &str,
-        content_hash: &str,
-        order: u64,
-    ) -> Option<runtime_proxy_crate::SmartContextArtifactRef> {
-        let (artifact_ref, projection_dirty) = {
-            let existing = self.artifacts.get_mut(id)?;
-            if !Self::artifact_matches_text(existing, text, content_hash) {
-                return None;
-            }
-            let mut projection_dirty = existing.order != order;
-            existing.order = order;
-            existing.pending_order = true;
-            let refresh_line_index = runtime_smart_context_artifact_line_index_needs_refresh(
-                existing.line_index.as_ref(),
-            );
-            if refresh_line_index || existing.chunk_index.is_none() {
-                let line_index = if refresh_line_index {
-                    runtime_smart_context_artifact_line_index(text)
-                } else if let Some(line_index) = existing.line_index.clone() {
-                    line_index
-                } else {
-                    projection_dirty = true;
-                    runtime_smart_context_artifact_line_index(text)
-                };
-                if refresh_line_index || existing.line_index.is_none() {
-                    existing.line_index = Some(line_index.clone());
-                    projection_dirty = true;
-                }
-                if refresh_line_index || existing.chunk_index.is_none() {
-                    existing.chunk_index = Some(runtime_smart_context_artifact_chunk_index(
-                        text,
-                        &line_index,
-                    ));
-                }
-            }
-            (Self::artifact_ref(existing), projection_dirty)
-        };
-        if projection_dirty {
-            self.invalidate_prewarmed_projections();
-        }
-        Some(artifact_ref)
-    }
-
-    fn insert_new_artifact(
-        &mut self,
-        id: String,
-        content_hash: String,
-        text: &str,
-        order: u64,
-    ) -> Option<runtime_proxy_crate::SmartContextArtifactRef> {
-        let byte_len = text.len();
-        let line_index = runtime_smart_context_artifact_line_index(text);
-        let chunk_index = runtime_smart_context_artifact_chunk_index(text, &line_index);
-        self.artifacts.insert(
-            id.clone(),
-            RuntimeSmartContextArtifact {
-                id: id.clone(),
-                byte_len,
-                content_hash: content_hash.clone(),
-                text: text.to_string(),
-                order,
-                pending_order: true,
-                line_index: Some(line_index),
-                chunk_index: Some(chunk_index),
-            },
-        );
-        self.total_bytes = self.total_bytes.saturating_add(byte_len);
-        self.invalidate_prewarmed_projections();
-        self.enforce_limits();
-        Some(runtime_proxy_crate::SmartContextArtifactRef {
-            id,
-            byte_len,
-            content_hash,
-        })
-    }
-
     pub(crate) fn get_text(&self, id: &str) -> Option<String> {
         self.artifacts
             .get(self.resolve_artifact_id(id))
@@ -173,17 +150,6 @@ impl RuntimeSmartContextArtifactStore {
             .and_then(|artifact| artifact.chunk_index.as_ref())
     }
 
-    #[cfg(test)]
-    pub(crate) fn artifact_ref_for_exact_text(
-        &self,
-        text: &str,
-    ) -> Option<runtime_proxy_crate::SmartContextArtifactRef> {
-        let content_hash = runtime_proxy_crate::smart_context_hash_text(text);
-        let artifact = self.artifacts.get(&content_hash)?;
-        Self::artifact_matches_text(artifact, text, &content_hash)
-            .then(|| Self::artifact_ref(artifact))
-    }
-
     pub(crate) fn contains(&self, id: &str) -> bool {
         self.artifacts.contains_key(self.resolve_artifact_id(id))
     }
@@ -193,25 +159,5 @@ impl RuntimeSmartContextArtifactStore {
             .get(id)
             .map(String::as_str)
             .unwrap_or(id)
-    }
-
-    pub(in crate::runtime_state_shared::artifact_store) fn artifact_matches_text(
-        artifact: &RuntimeSmartContextArtifact,
-        text: &str,
-        content_hash: &str,
-    ) -> bool {
-        artifact.content_hash == content_hash
-            && artifact.byte_len == text.len()
-            && artifact.text == text
-    }
-
-    pub(in crate::runtime_state_shared::artifact_store) fn artifact_ref(
-        artifact: &RuntimeSmartContextArtifact,
-    ) -> runtime_proxy_crate::SmartContextArtifactRef {
-        runtime_proxy_crate::SmartContextArtifactRef {
-            id: artifact.id.clone(),
-            byte_len: artifact.byte_len,
-            content_hash: artifact.content_hash.clone(),
-        }
     }
 }
