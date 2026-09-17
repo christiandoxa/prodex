@@ -101,7 +101,6 @@ pub fn deepseek_provider_core_validate_reasoning_shape(
 
 #[cfg(not(feature = "mojo"))]
 mod rust_compat {
-    use super::*;
 
     pub(super) fn apply_reasoning_rust(
         value: &serde_json::Value,

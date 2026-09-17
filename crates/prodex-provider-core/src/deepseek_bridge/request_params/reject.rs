@@ -121,7 +121,6 @@ pub fn deepseek_provider_core_reject_beta_completion_fields(
 
 #[cfg(not(feature = "mojo"))]
 mod rust_compat {
-    use super::*;
 
     pub(super) fn reject_unsupported_request_fields_rust(
         value: &serde_json::Value,

@@ -802,3 +802,170 @@ def prodex_domain_accounting_arithmetic_v1(
     output[unsafe_offset=2] = committed_tokens[0]
     output[unsafe_offset=3] = committed_cost[0]
     return 0
+
+
+comptime POLICY_GATEWAY_SHAPE_ABI_VERSION: Int64 = 1
+comptime POLICY_GATEWAY_SHAPE_GOVERNANCE: Int64 = 0
+comptime POLICY_GATEWAY_SHAPE_ENFORCING: Int64 = 1
+comptime POLICY_GATEWAY_SHAPE_BANK_DEPLOYMENT: Int64 = 2
+comptime POLICY_GATEWAY_SHAPE_BANK_GATEWAY: Int64 = 3
+comptime POLICY_GATEWAY_SHAPE_BANK_WORKLOAD: Int64 = 4
+comptime POLICY_GATEWAY_SHAPE_SSO: Int64 = 5
+comptime POLICY_GATEWAY_SHAPE_WORKLOAD: Int64 = 6
+
+
+def policy_shape_flag(values: Pointer[mut=False, Int64, _], index: Int64) -> Bool:
+    return values[unsafe_offset=index] == 1
+
+
+def policy_shape_flags_valid(values: Pointer[mut=False, Int64, _], count: Int64) -> Bool:
+    for index in range(count):
+        if values[unsafe_offset=index] < 0 or values[unsafe_offset=index] > 1:
+            return False
+    return True
+
+
+def policy_gateway_shape_error(mode: Int64, values: Pointer[mut=False, Int64, _], count: Int64) -> Int64:
+    if mode == POLICY_GATEWAY_SHAPE_GOVERNANCE:
+        if count != 9:
+            return -1
+        var enforcing = policy_shape_flag(values, 0)
+        if enforcing and not (
+            policy_shape_flag(values, 1)
+            and policy_shape_flag(values, 2)
+            and policy_shape_flag(values, 3)
+            and policy_shape_flag(values, 4)
+        ):
+            return 1
+        if enforcing and not policy_shape_flag(values, 5):
+            return 2
+        if policy_shape_flag(values, 6) and policy_shape_flag(values, 7):
+            return 3
+        if policy_shape_flag(values, 6) and policy_shape_flag(values, 8):
+            return 4
+        return 0
+    if mode == POLICY_GATEWAY_SHAPE_ENFORCING:
+        if count != 22:
+            return -1
+        if not (
+            policy_shape_flag(values, 0)
+            and policy_shape_flag(values, 1)
+            and policy_shape_flag(values, 2)
+            and policy_shape_flag(values, 3)
+            and policy_shape_flag(values, 4)
+            and policy_shape_flag(values, 5)
+        ):
+            return 1
+        if not policy_shape_flag(values, 6):
+            return 2
+        if not (
+            policy_shape_flag(values, 7)
+            and policy_shape_flag(values, 8)
+            and policy_shape_flag(values, 9)
+            and policy_shape_flag(values, 10)
+        ):
+            return 3
+        if policy_shape_flag(values, 11) and not (
+            policy_shape_flag(values, 12)
+            and not policy_shape_flag(values, 13)
+            and policy_shape_flag(values, 14)
+        ):
+            return 4
+        if not (
+            policy_shape_flag(values, 15)
+            and policy_shape_flag(values, 16)
+            and policy_shape_flag(values, 17)
+            and policy_shape_flag(values, 18)
+        ):
+            return 5
+        if not (
+            policy_shape_flag(values, 19)
+            and policy_shape_flag(values, 20)
+            and policy_shape_flag(values, 21)
+        ):
+            return 6
+        return 0
+    if mode == POLICY_GATEWAY_SHAPE_BANK_DEPLOYMENT:
+        if count != 10:
+            return -1
+        for index in range(10):
+            if not policy_shape_flag(values, Int64(index)):
+                return Int64(index) + 1
+        return 0
+    if mode == POLICY_GATEWAY_SHAPE_BANK_GATEWAY:
+        if count != 14:
+            return -1
+        for index in range(14):
+            if not policy_shape_flag(values, Int64(index)):
+                return 1
+        return 0
+    if mode == POLICY_GATEWAY_SHAPE_BANK_WORKLOAD:
+        if count != 6:
+            return -1
+        for index in range(6):
+            if not policy_shape_flag(values, Int64(index)):
+                return 1
+        return 0
+    if mode == POLICY_GATEWAY_SHAPE_SSO:
+        if count != 7:
+            return -1
+        var oidc_enabled = policy_shape_flag(values, 0)
+        if policy_shape_flag(values, 1) and not oidc_enabled:
+            return 1
+        if not policy_shape_flag(values, 2):
+            return 2
+        if not policy_shape_flag(values, 3):
+            return 3
+        if not policy_shape_flag(values, 4):
+            return 4
+        var browser_configured = policy_shape_flag(values, 5)
+        var browser_enabled = policy_shape_flag(values, 6)
+        if browser_configured and not browser_enabled:
+            return 5
+        if browser_enabled and not oidc_enabled:
+            return 6
+        return 0
+    if mode == POLICY_GATEWAY_SHAPE_WORKLOAD:
+        if count != 8:
+            return -1
+        if not policy_shape_flag(values, 0):
+            return 0
+        if not policy_shape_flag(values, 1):
+            return 1
+        if not policy_shape_flag(values, 2):
+            return 2
+        if not policy_shape_flag(values, 3):
+            return 3
+        if not policy_shape_flag(values, 4):
+            return 4
+        if not policy_shape_flag(values, 5):
+            return 5
+        if not policy_shape_flag(values, 6):
+            return 6
+        if not policy_shape_flag(values, 7):
+            return 7
+        return 0
+    return -1
+
+
+@export("prodex_runtime_policy_gateway_shape_v1")
+def prodex_runtime_policy_gateway_shape_v1(
+    abi_version: Int64,
+    mode: Int64,
+    values_address: UInt,
+    value_count: Int64,
+    output_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != POLICY_GATEWAY_SHAPE_ABI_VERSION:
+        return 4
+    if value_count < 0 or value_count > 64 or output_address == 0 or (value_count > 0 and values_address == 0):
+        return 1
+    var values = Pointer[mut=False, Int64, ImmUntrackedOrigin](unsafe_from_address=Int(values_address))
+    if not policy_shape_flags_valid(values, value_count):
+        return 1
+    var output = Pointer[mut=True, Int64, MutUntrackedOrigin](unsafe_from_address=Int(output_address))
+    var error = policy_gateway_shape_error(mode, values, value_count)
+    if error < 0:
+        return 1
+    output[] = error
+    return 0
