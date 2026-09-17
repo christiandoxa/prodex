@@ -67,6 +67,7 @@ comptime KIRO_MODEL_LIST: Int64 = 44
 comptime KIRO_MODEL_NOT_FOUND: Int64 = 45
 comptime KIRO_INVALID_REQUEST_ERROR: Int64 = 46
 comptime KIRO_UNSUPPORTED_PATH_ERROR: Int64 = 47
+comptime KIRO_REQUEST_VALIDATION_ERROR: Int64 = 48
 
 comptime KIRO_REQUEST_VALIDATION_CHAT: Int64 = 1
 comptime KIRO_REQUEST_VALIDATION_RESPONSES: Int64 = 2
@@ -1070,11 +1071,81 @@ def kiro_put_anthropic_stop_reason(
     return kiro_put_literal(writer, StringSlice('"end_turn"'))
 
 
+
+def kiro_write_request_validation_error(
+    writer: Pointer[mut=True, KiroResponseWriter, _],
+    input: ProdexKiroKernelInput,
+) -> Bool:
+    var reason = Int64(input.request_id)
+    var detail = Int64(input.used)
+    var invalid = input.include_role != 0
+    if reason == 1:
+        return kiro_put_literal(writer, StringSlice("unsupported_response_format\nKiro provider only supports chat response_format type 'text' right now"))
+    if reason == 2:
+        return kiro_put_literal(writer, StringSlice("unsupported_choice_count\nKiro provider only supports chat completion parameter n=1 right now"))
+    if reason == 3:
+        return kiro_put_literal(writer, StringSlice("unsupported_stop\nKiro provider does not support chat stop sequences right now"))
+    if reason == 4:
+        return kiro_put_literal(writer, StringSlice("unsupported_temperature\nKiro provider does not support non-default chat temperature right now"))
+    if reason == 5:
+        return kiro_put_literal(writer, StringSlice("unsupported_top_p\nKiro provider does not support non-default chat top_p right now"))
+    if reason == 6:
+        return kiro_put_literal(writer, StringSlice("unsupported_presence_penalty\nKiro provider does not support non-default chat presence_penalty right now"))
+    if reason == 7:
+        return kiro_put_literal(writer, StringSlice("unsupported_frequency_penalty\nKiro provider does not support non-default chat frequency_penalty right now"))
+    if reason == 8:
+        return kiro_put_literal(writer, StringSlice("unsupported_seed\nKiro provider does not support chat seed right now"))
+    if reason == 9:
+        return kiro_put_literal(writer, StringSlice("unsupported_parallel_tool_calls\nKiro provider does not support chat parallel_tool_calls right now"))
+    if reason == 10:
+        var field = StringSlice("max_output_tokens")
+        if detail == 1:
+            field = StringSlice("max_tokens")
+        elif detail == 2:
+            field = StringSlice("max_completion_tokens")
+        elif detail < 0 or detail > 2:
+            return kiro_put_literal(writer, StringSlice("invalid_request\nKiro request capability validation returned an invalid token limit field"))
+        if not kiro_put_literal(writer, StringSlice("unsupported_token_limit\nKiro ")):
+            return False
+        if not kiro_put_literal(writer, field):
+            return False
+        if invalid:
+            return kiro_put_literal(writer, StringSlice(" must be a positive integer"))
+        return kiro_put_literal(writer, StringSlice(" ACP does not expose the ")) and kiro_put_literal(writer, field) and kiro_put_literal(writer, StringSlice(" control"))
+    if reason == 11:
+        var field = StringSlice("temperature")
+        if detail == 1:
+            field = StringSlice("top_p")
+        elif detail == 2:
+            field = StringSlice("seed")
+        return kiro_put_literal(writer, StringSlice("unsupported_generation_control\nKiro ACP does not expose the ")) and kiro_put_literal(writer, field) and kiro_put_literal(writer, StringSlice(" control"))
+    if reason == 12:
+        return kiro_put_literal(writer, StringSlice("unsupported_stop\nKiro ACP does not expose stop-sequence controls"))
+    if reason == 13:
+        if invalid:
+            return kiro_put_literal(writer, StringSlice("invalid_logprobs\nKiro logprobs must be a boolean"))
+        return kiro_put_literal(writer, StringSlice("unsupported_logprobs\nKiro ACP does not expose log probabilities"))
+    if reason == 14:
+        return kiro_put_literal(writer, StringSlice("unsupported_logprobs\nKiro ACP does not expose top_logprobs"))
+    if reason == 15:
+        return kiro_put_literal(writer, StringSlice("unsupported_response_format\nKiro ACP supports only text response format"))
+    if reason == 16:
+        return kiro_put_literal(writer, StringSlice("unsupported_tool_choice\nKiro ACP owns tool selection and cannot honor tool_choice"))
+    if reason == 17:
+        return kiro_put_literal(writer, StringSlice("unsupported_tools\nKiro ACP owns its tool inventory and cannot execute external tools"))
+    if reason == 18:
+        return kiro_put_literal(writer, StringSlice("unsupported_web_search_options\nKiro ACP owns web search and cannot honor web_search_options"))
+    if reason == 19:
+        return kiro_put_literal(writer, StringSlice("unsupported_reasoning_effort\nKiro ACP does not support reasoning effort `")) and kiro_put_view(writer, input.reason) and kiro_put_byte(writer, 96)
+    return kiro_put_literal(writer, StringSlice("invalid_request\nKiro request capability validation returned an unknown reason"))
+
 def kiro_write_operation(
     writer: Pointer[mut=True, KiroResponseWriter, _],
     input: ProdexKiroKernelInput,
 ) -> Bool:
     var operation = input.operation
+    if operation == KIRO_REQUEST_VALIDATION_ERROR:
+        return kiro_write_request_validation_error(writer, input)
     if operation == KIRO_STREAM_CONTENT_TEXT:
         if input.input_present == 0:
             return False
