@@ -5,10 +5,16 @@ pub fn plan_security_decision_metric(
     decision: SecurityDecisionKind,
     result: SecurityDecisionResult,
 ) -> Result<SecurityDecisionMetricPlan, TelemetryAttributeError> {
+    #[cfg(feature = "mojo")]
+    let decision_label = crate::planning_support::planned_metric_label(68, 0, (decision) as i64)?;
+    #[cfg(not(feature = "mojo"))]
     let decision_label = crate::planning_support::validated_metric_label(
         crate::planning_support::label_key(132, "security_decision"),
         security_decision_kind_label(decision),
     )?;
+    #[cfg(feature = "mojo")]
+    let result_label = crate::planning_support::planned_metric_label(68, 1, (result) as i64)?;
+    #[cfg(not(feature = "mojo"))]
     let result_label = crate::planning_support::validated_metric_label(
         crate::planning_support::label_key(133, "security_result"),
         security_decision_result_label(result),
@@ -29,22 +35,39 @@ pub fn plan_inspection_metric(
     outcome: InspectionOutcome,
     duration_micros: u64,
 ) -> Result<InspectionMetricPlan, TelemetryAttributeError> {
+    #[cfg(feature = "mojo")]
+    let stage_label = crate::planning_support::planned_metric_label(63, 0, (stage) as i64)?;
+    #[cfg(not(feature = "mojo"))]
     let stage_label = crate::planning_support::validated_metric_label(
         crate::planning_support::label_key(83, "inspection_stage"),
         inspection_stage_label(stage),
     )?;
+    #[cfg(feature = "mojo")]
+    let coverage_label = crate::planning_support::planned_metric_label(63, 1, (coverage) as i64)?;
+    #[cfg(not(feature = "mojo"))]
     let coverage_label = crate::planning_support::validated_metric_label(
         crate::planning_support::label_key(79, "inspection_coverage"),
         inspection_coverage_label(coverage),
     )?;
+    #[cfg(feature = "mojo")]
+    let finding_category_label =
+        crate::planning_support::planned_metric_label(63, 2, (finding_category) as i64)?;
+    #[cfg(not(feature = "mojo"))]
     let finding_category_label = crate::planning_support::validated_metric_label(
         crate::planning_support::label_key(80, "inspection_finding_category"),
         inspection_finding_category_label(finding_category),
     )?;
+    #[cfg(feature = "mojo")]
+    let masking_action_label =
+        crate::planning_support::planned_metric_label(63, 3, (masking_action) as i64)?;
+    #[cfg(not(feature = "mojo"))]
     let masking_action_label = crate::planning_support::validated_metric_label(
         crate::planning_support::label_key(81, "inspection_masking_action"),
         inspection_masking_action_label(masking_action),
     )?;
+    #[cfg(feature = "mojo")]
+    let outcome_label = crate::planning_support::planned_metric_label(63, 4, (outcome) as i64)?;
+    #[cfg(not(feature = "mojo"))]
     let outcome_label = crate::planning_support::validated_metric_label(
         crate::planning_support::label_key(82, "inspection_outcome"),
         inspection_outcome_label(outcome),
@@ -74,10 +97,16 @@ pub fn plan_authn_token_validation_metric(
     stage: AuthnTokenValidationStage,
     result: AuthnTokenValidationResult,
 ) -> Result<AuthnTokenValidationMetricPlan, TelemetryAttributeError> {
+    #[cfg(feature = "mojo")]
+    let stage_label = crate::planning_support::planned_metric_label(57, 0, (stage) as i64)?;
+    #[cfg(not(feature = "mojo"))]
     let stage_label = crate::planning_support::validated_metric_label(
         crate::planning_support::label_key(44, "authn_validation_stage"),
         authn_token_validation_stage_label(stage),
     )?;
+    #[cfg(feature = "mojo")]
+    let result_label = crate::planning_support::planned_metric_label(57, 1, (result) as i64)?;
+    #[cfg(not(feature = "mojo"))]
     let result_label = crate::planning_support::validated_metric_label(
         crate::planning_support::label_key(43, "authn_validation_result"),
         authn_token_validation_result_label(result),
@@ -98,10 +127,16 @@ pub fn plan_authz_decision_metric(
     boundary: AuthzBoundaryKind,
     result: AuthzDecisionResult,
 ) -> Result<AuthzDecisionMetricPlan, TelemetryAttributeError> {
+    #[cfg(feature = "mojo")]
+    let boundary_label = crate::planning_support::planned_metric_label(58, 0, (boundary) as i64)?;
+    #[cfg(not(feature = "mojo"))]
     let boundary_label = crate::planning_support::validated_metric_label(
         crate::planning_support::label_key(45, "authz_boundary"),
         authz_boundary_kind_label(boundary),
     )?;
+    #[cfg(feature = "mojo")]
+    let result_label = crate::planning_support::planned_metric_label(58, 1, (result) as i64)?;
+    #[cfg(not(feature = "mojo"))]
     let result_label = crate::planning_support::validated_metric_label(
         crate::planning_support::label_key(46, "authz_result"),
         authz_decision_result_label(result),
@@ -118,10 +153,16 @@ pub fn plan_credential_scope_mismatch_metric(
     direction: CredentialScopeMismatchDirection,
     result: CredentialScopeMismatchResult,
 ) -> Result<CredentialScopeMismatchMetricPlan, TelemetryAttributeError> {
+    #[cfg(feature = "mojo")]
+    let direction_label = crate::planning_support::planned_metric_label(61, 0, (direction) as i64)?;
+    #[cfg(not(feature = "mojo"))]
     let direction_label = crate::planning_support::validated_metric_label(
         crate::planning_support::label_key(64, "credential_scope_direction"),
         credential_scope_mismatch_direction_label(direction),
     )?;
+    #[cfg(feature = "mojo")]
+    let result_label = crate::planning_support::planned_metric_label(61, 1, (result) as i64)?;
+    #[cfg(not(feature = "mojo"))]
     let result_label = crate::planning_support::validated_metric_label(
         crate::planning_support::label_key(65, "credential_scope_result"),
         credential_scope_mismatch_result_label(result),
@@ -142,10 +183,16 @@ pub fn plan_tenant_isolation_metric(
     surface: TenantIsolationSurface,
     result: TenantIsolationResult,
 ) -> Result<TenantIsolationMetricPlan, TelemetryAttributeError> {
+    #[cfg(feature = "mojo")]
+    let surface_label = crate::planning_support::planned_metric_label(70, 0, (surface) as i64)?;
+    #[cfg(not(feature = "mojo"))]
     let surface_label = crate::planning_support::validated_metric_label(
         crate::planning_support::label_key(144, "tenant_isolation_surface"),
         tenant_isolation_surface_label(surface),
     )?;
+    #[cfg(feature = "mojo")]
+    let result_label = crate::planning_support::planned_metric_label(70, 1, (result) as i64)?;
+    #[cfg(not(feature = "mojo"))]
     let result_label = crate::planning_support::validated_metric_label(
         crate::planning_support::label_key(143, "tenant_isolation_result"),
         tenant_isolation_result_label(result),
@@ -166,10 +213,16 @@ pub fn plan_postgres_tenant_context_metric(
     operation: PostgresTenantContextOperation,
     result: PostgresTenantContextResult,
 ) -> Result<PostgresTenantContextMetricPlan, TelemetryAttributeError> {
+    #[cfg(feature = "mojo")]
+    let operation_label = crate::planning_support::planned_metric_label(65, 0, (operation) as i64)?;
+    #[cfg(not(feature = "mojo"))]
     let operation_label = crate::planning_support::validated_metric_label(
         crate::planning_support::label_key(101, "postgres_tenant_context_operation"),
         postgres_tenant_context_operation_label(operation),
     )?;
+    #[cfg(feature = "mojo")]
+    let result_label = crate::planning_support::planned_metric_label(65, 1, (result) as i64)?;
+    #[cfg(not(feature = "mojo"))]
     let result_label = crate::planning_support::validated_metric_label(
         crate::planning_support::label_key(102, "postgres_tenant_context_result"),
         postgres_tenant_context_result_label(result),
@@ -190,10 +243,16 @@ pub fn plan_identity_context_metric(
     surface: IdentityContextSurface,
     result: IdentityContextResult,
 ) -> Result<IdentityContextMetricPlan, TelemetryAttributeError> {
+    #[cfg(feature = "mojo")]
+    let surface_label = crate::planning_support::planned_metric_label(62, 0, (surface) as i64)?;
+    #[cfg(not(feature = "mojo"))]
     let surface_label = crate::planning_support::validated_metric_label(
         crate::planning_support::label_key(78, "identity_context_surface"),
         identity_context_surface_label(surface),
     )?;
+    #[cfg(feature = "mojo")]
+    let result_label = crate::planning_support::planned_metric_label(62, 1, (result) as i64)?;
+    #[cfg(not(feature = "mojo"))]
     let result_label = crate::planning_support::validated_metric_label(
         crate::planning_support::label_key(77, "identity_context_result"),
         identity_context_result_label(result),
@@ -214,10 +273,16 @@ pub fn plan_break_glass_lifecycle_metric(
     operation: BreakGlassLifecycleOperation,
     result: BreakGlassLifecycleResult,
 ) -> Result<BreakGlassLifecycleMetricPlan, TelemetryAttributeError> {
+    #[cfg(feature = "mojo")]
+    let operation_label = crate::planning_support::planned_metric_label(59, 0, (operation) as i64)?;
+    #[cfg(not(feature = "mojo"))]
     let operation_label = crate::planning_support::validated_metric_label(
         crate::planning_support::label_key(51, "break_glass_operation"),
         break_glass_lifecycle_operation_label(operation),
     )?;
+    #[cfg(feature = "mojo")]
+    let result_label = crate::planning_support::planned_metric_label(59, 1, (result) as i64)?;
+    #[cfg(not(feature = "mojo"))]
     let result_label = crate::planning_support::validated_metric_label(
         crate::planning_support::label_key(52, "break_glass_result"),
         break_glass_lifecycle_result_label(result),
@@ -238,10 +303,16 @@ pub fn plan_user_lifecycle_metric(
     operation: UserLifecycleOperation,
     result: UserLifecycleResult,
 ) -> Result<UserLifecycleMetricPlan, TelemetryAttributeError> {
+    #[cfg(feature = "mojo")]
+    let operation_label = crate::planning_support::planned_metric_label(72, 0, (operation) as i64)?;
+    #[cfg(not(feature = "mojo"))]
     let operation_label = crate::planning_support::validated_metric_label(
         crate::planning_support::label_key(147, "user_lifecycle_operation"),
         user_lifecycle_operation_label(operation),
     )?;
+    #[cfg(feature = "mojo")]
+    let result_label = crate::planning_support::planned_metric_label(72, 1, (result) as i64)?;
+    #[cfg(not(feature = "mojo"))]
     let result_label = crate::planning_support::validated_metric_label(
         crate::planning_support::label_key(148, "user_lifecycle_result"),
         user_lifecycle_result_label(result),
@@ -262,10 +333,16 @@ pub fn plan_service_identity_lifecycle_metric(
     operation: ServiceIdentityLifecycleOperation,
     result: ServiceIdentityLifecycleResult,
 ) -> Result<ServiceIdentityLifecycleMetricPlan, TelemetryAttributeError> {
+    #[cfg(feature = "mojo")]
+    let operation_label = crate::planning_support::planned_metric_label(69, 0, (operation) as i64)?;
+    #[cfg(not(feature = "mojo"))]
     let operation_label = crate::planning_support::validated_metric_label(
         crate::planning_support::label_key(134, "service_identity_operation"),
         service_identity_lifecycle_operation_label(operation),
     )?;
+    #[cfg(feature = "mojo")]
+    let result_label = crate::planning_support::planned_metric_label(69, 1, (result) as i64)?;
+    #[cfg(not(feature = "mojo"))]
     let result_label = crate::planning_support::validated_metric_label(
         crate::planning_support::label_key(135, "service_identity_result"),
         service_identity_lifecycle_result_label(result),
@@ -286,10 +363,16 @@ pub fn plan_role_binding_lifecycle_metric(
     operation: RoleBindingLifecycleOperation,
     result: RoleBindingLifecycleResult,
 ) -> Result<RoleBindingLifecycleMetricPlan, TelemetryAttributeError> {
+    #[cfg(feature = "mojo")]
+    let operation_label = crate::planning_support::planned_metric_label(67, 0, (operation) as i64)?;
+    #[cfg(not(feature = "mojo"))]
     let operation_label = crate::planning_support::validated_metric_label(
         crate::planning_support::label_key(123, "role_binding_operation"),
         role_binding_lifecycle_operation_label(operation),
     )?;
+    #[cfg(feature = "mojo")]
+    let result_label = crate::planning_support::planned_metric_label(67, 1, (result) as i64)?;
+    #[cfg(not(feature = "mojo"))]
     let result_label = crate::planning_support::validated_metric_label(
         crate::planning_support::label_key(124, "role_binding_result"),
         role_binding_lifecycle_result_label(result),
@@ -310,10 +393,16 @@ pub fn plan_provider_credential_lifecycle_metric(
     operation: ProviderCredentialLifecycleOperation,
     result: ProviderCredentialLifecycleResult,
 ) -> Result<ProviderCredentialLifecycleMetricPlan, TelemetryAttributeError> {
+    #[cfg(feature = "mojo")]
+    let operation_label = crate::planning_support::planned_metric_label(66, 0, (operation) as i64)?;
+    #[cfg(not(feature = "mojo"))]
     let operation_label = crate::planning_support::validated_metric_label(
         crate::planning_support::label_key(108, "provider_credential_operation"),
         provider_credential_lifecycle_operation_label(operation),
     )?;
+    #[cfg(feature = "mojo")]
+    let result_label = crate::planning_support::planned_metric_label(66, 1, (result) as i64)?;
+    #[cfg(not(feature = "mojo"))]
     let result_label = crate::planning_support::validated_metric_label(
         crate::planning_support::label_key(109, "provider_credential_result"),
         provider_credential_lifecycle_result_label(result),
@@ -334,10 +423,16 @@ pub fn plan_virtual_key_lifecycle_metric(
     operation: VirtualKeyLifecycleOperation,
     result: VirtualKeyLifecycleResult,
 ) -> Result<VirtualKeyLifecycleMetricPlan, TelemetryAttributeError> {
+    #[cfg(feature = "mojo")]
+    let operation_label = crate::planning_support::planned_metric_label(73, 0, (operation) as i64)?;
+    #[cfg(not(feature = "mojo"))]
     let operation_label = crate::planning_support::validated_metric_label(
         crate::planning_support::label_key(62, "credential_lifecycle_operation"),
         virtual_key_lifecycle_operation_label(operation),
     )?;
+    #[cfg(feature = "mojo")]
+    let result_label = crate::planning_support::planned_metric_label(73, 1, (result) as i64)?;
+    #[cfg(not(feature = "mojo"))]
     let result_label = crate::planning_support::validated_metric_label(
         crate::planning_support::label_key(63, "credential_lifecycle_result"),
         virtual_key_lifecycle_result_label(result),
@@ -358,10 +453,16 @@ pub fn plan_budget_policy_lifecycle_metric(
     operation: BudgetPolicyLifecycleOperation,
     result: BudgetPolicyLifecycleResult,
 ) -> Result<BudgetPolicyLifecycleMetricPlan, TelemetryAttributeError> {
+    #[cfg(feature = "mojo")]
+    let operation_label = crate::planning_support::planned_metric_label(60, 0, (operation) as i64)?;
+    #[cfg(not(feature = "mojo"))]
     let operation_label = crate::planning_support::validated_metric_label(
         crate::planning_support::label_key(53, "budget_policy_operation"),
         budget_policy_lifecycle_operation_label(operation),
     )?;
+    #[cfg(feature = "mojo")]
+    let result_label = crate::planning_support::planned_metric_label(60, 1, (result) as i64)?;
+    #[cfg(not(feature = "mojo"))]
     let result_label = crate::planning_support::validated_metric_label(
         crate::planning_support::label_key(54, "budget_policy_result"),
         budget_policy_lifecycle_result_label(result),
@@ -382,10 +483,16 @@ pub fn plan_policy_lifecycle_metric(
     operation: PolicyLifecycleOperation,
     result: PolicyLifecycleResult,
 ) -> Result<PolicyLifecycleMetricPlan, TelemetryAttributeError> {
+    #[cfg(feature = "mojo")]
+    let operation_label = crate::planning_support::planned_metric_label(64, 0, (operation) as i64)?;
+    #[cfg(not(feature = "mojo"))]
     let operation_label = crate::planning_support::validated_metric_label(
         crate::planning_support::label_key(95, "policy_lifecycle_operation"),
         policy_lifecycle_operation_label(operation),
     )?;
+    #[cfg(feature = "mojo")]
+    let result_label = crate::planning_support::planned_metric_label(64, 1, (result) as i64)?;
+    #[cfg(not(feature = "mojo"))]
     let result_label = crate::planning_support::validated_metric_label(
         crate::planning_support::label_key(96, "policy_lifecycle_result"),
         policy_lifecycle_result_label(result),
@@ -406,10 +513,16 @@ pub fn plan_tenant_lifecycle_metric(
     operation: TenantLifecycleOperation,
     result: TenantLifecycleResult,
 ) -> Result<TenantLifecycleMetricPlan, TelemetryAttributeError> {
+    #[cfg(feature = "mojo")]
+    let operation_label = crate::planning_support::planned_metric_label(71, 0, (operation) as i64)?;
+    #[cfg(not(feature = "mojo"))]
     let operation_label = crate::planning_support::validated_metric_label(
         crate::planning_support::label_key(0, "account_lifecycle_operation"),
         tenant_lifecycle_operation_label(operation),
     )?;
+    #[cfg(feature = "mojo")]
+    let result_label = crate::planning_support::planned_metric_label(71, 1, (result) as i64)?;
+    #[cfg(not(feature = "mojo"))]
     let result_label = crate::planning_support::validated_metric_label(
         crate::planning_support::label_key(1, "account_lifecycle_result"),
         tenant_lifecycle_result_label(result),
@@ -426,6 +539,7 @@ pub fn plan_tenant_lifecycle_metric(
     })
 }
 
+#[cfg(not(feature = "mojo"))]
 fn security_decision_kind_label(decision: SecurityDecisionKind) -> String {
     #[cfg(feature = "mojo")]
     {
@@ -444,6 +558,7 @@ fn security_decision_kind_label(decision: SecurityDecisionKind) -> String {
     }
 }
 
+#[cfg(not(feature = "mojo"))]
 fn inspection_stage_label(stage: InspectionStage) -> String {
     #[cfg(feature = "mojo")]
     {
@@ -463,6 +578,7 @@ fn inspection_stage_label(stage: InspectionStage) -> String {
     }
 }
 
+#[cfg(not(feature = "mojo"))]
 fn inspection_coverage_label(coverage: InspectionCoverageClass) -> String {
     #[cfg(feature = "mojo")]
     {
@@ -480,6 +596,7 @@ fn inspection_coverage_label(coverage: InspectionCoverageClass) -> String {
     }
 }
 
+#[cfg(not(feature = "mojo"))]
 fn inspection_finding_category_label(category: InspectionFindingCategory) -> String {
     #[cfg(feature = "mojo")]
     {
@@ -499,6 +616,7 @@ fn inspection_finding_category_label(category: InspectionFindingCategory) -> Str
     }
 }
 
+#[cfg(not(feature = "mojo"))]
 fn inspection_masking_action_label(action: InspectionMaskingAction) -> String {
     #[cfg(feature = "mojo")]
     {
@@ -516,6 +634,7 @@ fn inspection_masking_action_label(action: InspectionMaskingAction) -> String {
     }
 }
 
+#[cfg(not(feature = "mojo"))]
 fn inspection_outcome_label(outcome: InspectionOutcome) -> String {
     #[cfg(feature = "mojo")]
     {
@@ -534,6 +653,7 @@ fn inspection_outcome_label(outcome: InspectionOutcome) -> String {
     }
 }
 
+#[cfg(not(feature = "mojo"))]
 fn security_decision_result_label(result: SecurityDecisionResult) -> String {
     #[cfg(feature = "mojo")]
     {
@@ -551,6 +671,7 @@ fn security_decision_result_label(result: SecurityDecisionResult) -> String {
     }
 }
 
+#[cfg(not(feature = "mojo"))]
 fn authn_token_validation_stage_label(stage: AuthnTokenValidationStage) -> String {
     #[cfg(feature = "mojo")]
     {
@@ -571,6 +692,7 @@ fn authn_token_validation_stage_label(stage: AuthnTokenValidationStage) -> Strin
     }
 }
 
+#[cfg(not(feature = "mojo"))]
 fn authn_token_validation_result_label(result: AuthnTokenValidationResult) -> String {
     #[cfg(feature = "mojo")]
     {
@@ -593,6 +715,7 @@ fn authn_token_validation_result_label(result: AuthnTokenValidationResult) -> St
     }
 }
 
+#[cfg(not(feature = "mojo"))]
 fn authz_boundary_kind_label(boundary: AuthzBoundaryKind) -> String {
     #[cfg(feature = "mojo")]
     {
@@ -613,6 +736,7 @@ fn authz_boundary_kind_label(boundary: AuthzBoundaryKind) -> String {
     }
 }
 
+#[cfg(not(feature = "mojo"))]
 fn authz_decision_result_label(result: AuthzDecisionResult) -> String {
     #[cfg(feature = "mojo")]
     {
@@ -633,6 +757,7 @@ fn authz_decision_result_label(result: AuthzDecisionResult) -> String {
     }
 }
 
+#[cfg(not(feature = "mojo"))]
 fn credential_scope_mismatch_direction_label(
     direction: CredentialScopeMismatchDirection,
 ) -> String {
@@ -660,6 +785,7 @@ fn credential_scope_mismatch_direction_label(
     }
 }
 
+#[cfg(not(feature = "mojo"))]
 fn credential_scope_mismatch_result_label(result: CredentialScopeMismatchResult) -> String {
     #[cfg(feature = "mojo")]
     {
@@ -677,6 +803,7 @@ fn credential_scope_mismatch_result_label(result: CredentialScopeMismatchResult)
     }
 }
 
+#[cfg(not(feature = "mojo"))]
 fn tenant_isolation_surface_label(surface: TenantIsolationSurface) -> String {
     #[cfg(feature = "mojo")]
     {
@@ -696,6 +823,7 @@ fn tenant_isolation_surface_label(surface: TenantIsolationSurface) -> String {
     }
 }
 
+#[cfg(not(feature = "mojo"))]
 fn tenant_isolation_result_label(result: TenantIsolationResult) -> String {
     #[cfg(feature = "mojo")]
     {
@@ -715,6 +843,7 @@ fn tenant_isolation_result_label(result: TenantIsolationResult) -> String {
     }
 }
 
+#[cfg(not(feature = "mojo"))]
 fn postgres_tenant_context_operation_label(operation: PostgresTenantContextOperation) -> String {
     #[cfg(feature = "mojo")]
     {
@@ -733,6 +862,7 @@ fn postgres_tenant_context_operation_label(operation: PostgresTenantContextOpera
     }
 }
 
+#[cfg(not(feature = "mojo"))]
 fn postgres_tenant_context_result_label(result: PostgresTenantContextResult) -> String {
     #[cfg(feature = "mojo")]
     {
@@ -752,6 +882,7 @@ fn postgres_tenant_context_result_label(result: PostgresTenantContextResult) -> 
     }
 }
 
+#[cfg(not(feature = "mojo"))]
 fn identity_context_surface_label(surface: IdentityContextSurface) -> String {
     #[cfg(feature = "mojo")]
     {
@@ -771,6 +902,7 @@ fn identity_context_surface_label(surface: IdentityContextSurface) -> String {
     }
 }
 
+#[cfg(not(feature = "mojo"))]
 fn identity_context_result_label(result: IdentityContextResult) -> String {
     #[cfg(feature = "mojo")]
     {
@@ -791,6 +923,7 @@ fn identity_context_result_label(result: IdentityContextResult) -> String {
     }
 }
 
+#[cfg(not(feature = "mojo"))]
 fn break_glass_lifecycle_operation_label(operation: BreakGlassLifecycleOperation) -> String {
     #[cfg(feature = "mojo")]
     {
@@ -810,6 +943,7 @@ fn break_glass_lifecycle_operation_label(operation: BreakGlassLifecycleOperation
     }
 }
 
+#[cfg(not(feature = "mojo"))]
 fn break_glass_lifecycle_result_label(result: BreakGlassLifecycleResult) -> String {
     #[cfg(feature = "mojo")]
     {
@@ -829,6 +963,7 @@ fn break_glass_lifecycle_result_label(result: BreakGlassLifecycleResult) -> Stri
     }
 }
 
+#[cfg(not(feature = "mojo"))]
 fn user_lifecycle_operation_label(operation: UserLifecycleOperation) -> String {
     #[cfg(feature = "mojo")]
     {
@@ -847,6 +982,7 @@ fn user_lifecycle_operation_label(operation: UserLifecycleOperation) -> String {
     }
 }
 
+#[cfg(not(feature = "mojo"))]
 fn user_lifecycle_result_label(result: UserLifecycleResult) -> String {
     #[cfg(feature = "mojo")]
     {
@@ -865,6 +1001,7 @@ fn user_lifecycle_result_label(result: UserLifecycleResult) -> String {
     }
 }
 
+#[cfg(not(feature = "mojo"))]
 fn service_identity_lifecycle_operation_label(
     operation: ServiceIdentityLifecycleOperation,
 ) -> String {
@@ -884,6 +1021,7 @@ fn service_identity_lifecycle_operation_label(
     }
 }
 
+#[cfg(not(feature = "mojo"))]
 fn service_identity_lifecycle_result_label(result: ServiceIdentityLifecycleResult) -> String {
     #[cfg(feature = "mojo")]
     {
@@ -902,6 +1040,7 @@ fn service_identity_lifecycle_result_label(result: ServiceIdentityLifecycleResul
     }
 }
 
+#[cfg(not(feature = "mojo"))]
 fn role_binding_lifecycle_operation_label(operation: RoleBindingLifecycleOperation) -> String {
     #[cfg(feature = "mojo")]
     {
@@ -918,6 +1057,7 @@ fn role_binding_lifecycle_operation_label(operation: RoleBindingLifecycleOperati
     }
 }
 
+#[cfg(not(feature = "mojo"))]
 fn role_binding_lifecycle_result_label(result: RoleBindingLifecycleResult) -> String {
     #[cfg(feature = "mojo")]
     {
@@ -936,6 +1076,7 @@ fn role_binding_lifecycle_result_label(result: RoleBindingLifecycleResult) -> St
     }
 }
 
+#[cfg(not(feature = "mojo"))]
 fn provider_credential_lifecycle_operation_label(
     operation: ProviderCredentialLifecycleOperation,
 ) -> String {
@@ -955,6 +1096,7 @@ fn provider_credential_lifecycle_operation_label(
     }
 }
 
+#[cfg(not(feature = "mojo"))]
 fn provider_credential_lifecycle_result_label(result: ProviderCredentialLifecycleResult) -> String {
     #[cfg(feature = "mojo")]
     {
@@ -973,6 +1115,7 @@ fn provider_credential_lifecycle_result_label(result: ProviderCredentialLifecycl
     }
 }
 
+#[cfg(not(feature = "mojo"))]
 fn virtual_key_lifecycle_operation_label(operation: VirtualKeyLifecycleOperation) -> String {
     #[cfg(feature = "mojo")]
     {
@@ -990,6 +1133,7 @@ fn virtual_key_lifecycle_operation_label(operation: VirtualKeyLifecycleOperation
     }
 }
 
+#[cfg(not(feature = "mojo"))]
 fn virtual_key_lifecycle_result_label(result: VirtualKeyLifecycleResult) -> String {
     #[cfg(feature = "mojo")]
     {
@@ -1008,6 +1152,7 @@ fn virtual_key_lifecycle_result_label(result: VirtualKeyLifecycleResult) -> Stri
     }
 }
 
+#[cfg(not(feature = "mojo"))]
 fn budget_policy_lifecycle_operation_label(operation: BudgetPolicyLifecycleOperation) -> String {
     #[cfg(feature = "mojo")]
     {
@@ -1025,6 +1170,7 @@ fn budget_policy_lifecycle_operation_label(operation: BudgetPolicyLifecycleOpera
     }
 }
 
+#[cfg(not(feature = "mojo"))]
 fn budget_policy_lifecycle_result_label(result: BudgetPolicyLifecycleResult) -> String {
     #[cfg(feature = "mojo")]
     {
@@ -1043,6 +1189,7 @@ fn budget_policy_lifecycle_result_label(result: BudgetPolicyLifecycleResult) -> 
     }
 }
 
+#[cfg(not(feature = "mojo"))]
 fn policy_lifecycle_operation_label(operation: PolicyLifecycleOperation) -> String {
     #[cfg(feature = "mojo")]
     {
@@ -1061,6 +1208,7 @@ fn policy_lifecycle_operation_label(operation: PolicyLifecycleOperation) -> Stri
     }
 }
 
+#[cfg(not(feature = "mojo"))]
 fn policy_lifecycle_result_label(result: PolicyLifecycleResult) -> String {
     #[cfg(feature = "mojo")]
     {
@@ -1080,6 +1228,7 @@ fn policy_lifecycle_result_label(result: PolicyLifecycleResult) -> String {
     }
 }
 
+#[cfg(not(feature = "mojo"))]
 fn tenant_lifecycle_operation_label(operation: TenantLifecycleOperation) -> String {
     #[cfg(feature = "mojo")]
     {
@@ -1096,6 +1245,7 @@ fn tenant_lifecycle_operation_label(operation: TenantLifecycleOperation) -> Stri
     }
 }
 
+#[cfg(not(feature = "mojo"))]
 fn tenant_lifecycle_result_label(result: TenantLifecycleResult) -> String {
     #[cfg(feature = "mojo")]
     {

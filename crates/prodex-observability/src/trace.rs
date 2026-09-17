@@ -151,10 +151,16 @@ pub fn plan_trace_propagation_metric(
     carrier: TracePropagationCarrier,
     result: TracePropagationResult,
 ) -> Result<TracePropagationMetricPlan, TelemetryAttributeError> {
+    #[cfg(feature = "mojo")]
+    let carrier_label = crate::planning_support::planned_metric_label(75, 0, (carrier) as i64)?;
+    #[cfg(not(feature = "mojo"))]
     let carrier_label = crate::planning_support::validated_metric_label(
         crate::planning_support::label_key(145, "trace_carrier"),
         trace_propagation_carrier_label(carrier),
     )?;
+    #[cfg(feature = "mojo")]
+    let result_label = crate::planning_support::planned_metric_label(75, 1, (result) as i64)?;
+    #[cfg(not(feature = "mojo"))]
     let result_label = crate::planning_support::validated_metric_label(
         crate::planning_support::label_key(146, "trace_propagation_result"),
         trace_propagation_result_label(result),
@@ -171,6 +177,7 @@ pub fn plan_trace_propagation_metric(
     })
 }
 
+#[cfg(not(feature = "mojo"))]
 fn trace_propagation_carrier_label(carrier: TracePropagationCarrier) -> String {
     #[cfg(feature = "mojo")]
     {
@@ -188,6 +195,7 @@ fn trace_propagation_carrier_label(carrier: TracePropagationCarrier) -> String {
     }
 }
 
+#[cfg(not(feature = "mojo"))]
 fn trace_propagation_result_label(result: TracePropagationResult) -> String {
     #[cfg(feature = "mojo")]
     {
