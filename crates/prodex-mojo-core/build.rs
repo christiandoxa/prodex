@@ -280,6 +280,7 @@ fn selected_sources() -> Vec<&'static str> {
         sources.push("../../mojo/prodex_core/context_text.mojo");
         sources.push("../../mojo/prodex_core/structured_json.mojo");
         sources.push("../../mojo/prodex_core/context_critical_signal.mojo");
+        sources.push("../../mojo/prodex_core/context_blob_noise.mojo");
         sources.push("../../mojo/prodex_core/context_command_output.mojo");
         sources.push("../../mojo/prodex_core/context_command_output_search.mojo");
         sources.push("../../mojo/prodex_core/runtime_health.mojo");
