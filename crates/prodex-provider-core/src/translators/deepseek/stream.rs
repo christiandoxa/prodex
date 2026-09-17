@@ -3,6 +3,7 @@
 use super::{deepseek_passthrough_endpoint, deepseek_stream_event_from_chat_value};
 use crate::translator::{ProviderTransformInput, ProviderTransformResult};
 use crate::{ProviderEndpoint, ProviderId, ProviderWireFormat};
+use serde::Deserialize;
 use serde_json::Value;
 
 #[path = "stream/response_values.rs"]
@@ -20,12 +21,52 @@ pub struct DeepSeekProviderCoreStreamChatToolCall {
     pub thought_signature: Option<String>,
 }
 
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
+fn deserialize_usize_or_default<'de, D>(deserializer: D) -> Result<usize, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let value = Value::deserialize(deserializer)?;
+    Ok(value
+        .as_u64()
+        .and_then(|value| usize::try_from(value).ok())
+        .unwrap_or_default())
+}
+
+fn deserialize_optional_string<'de, D>(deserializer: D) -> Result<Option<String>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let value = Value::deserialize(deserializer)?;
+    Ok(value.as_str().map(str::to_string))
+}
+
+fn deserialize_value_vec<'de, D>(deserializer: D) -> Result<Vec<Value>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let value = Value::deserialize(deserializer)?;
+    Ok(value.as_array().cloned().unwrap_or_default())
+}
+
+#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq)]
 pub struct DeepSeekProviderCoreStreamToolCallDelta {
+    #[serde(default, deserialize_with = "deserialize_usize_or_default")]
     pub index: usize,
+    #[serde(
+        default,
+        rename = "id",
+        deserialize_with = "deserialize_optional_string"
+    )]
     pub call_id: Option<String>,
+    #[serde(default, deserialize_with = "deserialize_optional_string")]
     pub name: Option<String>,
+    #[serde(
+        default,
+        rename = "arguments",
+        deserialize_with = "deserialize_optional_string"
+    )]
     pub argument_delta: Option<String>,
+    #[serde(default, deserialize_with = "deserialize_optional_string")]
     pub thought_signature: Option<String>,
 }
 
@@ -37,18 +78,25 @@ pub struct DeepSeekProviderCoreStreamChunkMetadata {
     pub usage: Option<Value>,
 }
 
-#[derive(Clone, Debug, Default, PartialEq)]
+#[derive(Clone, Debug, Default, Deserialize, PartialEq)]
 pub struct DeepSeekProviderCoreStreamChoiceMetadata {
+    #[serde(default)]
     pub logprobs: Option<Value>,
+    #[serde(default, deserialize_with = "deserialize_optional_string")]
     pub finish_reason: Option<String>,
 }
 
-#[derive(Clone, Debug, Default, PartialEq)]
+#[derive(Clone, Debug, Default, Deserialize, PartialEq)]
 pub struct DeepSeekProviderCoreStreamChoiceDelta {
+    #[serde(default, deserialize_with = "deserialize_optional_string")]
     pub reasoning_content: Option<String>,
+    #[serde(default, deserialize_with = "deserialize_optional_string")]
     pub refusal: Option<String>,
+    #[serde(default, deserialize_with = "deserialize_value_vec")]
     pub annotations: Vec<Value>,
+    #[serde(default, deserialize_with = "deserialize_optional_string")]
     pub content: Option<String>,
+    #[serde(default, deserialize_with = "deserialize_value_vec")]
     pub tool_calls: Vec<Value>,
 }
 
