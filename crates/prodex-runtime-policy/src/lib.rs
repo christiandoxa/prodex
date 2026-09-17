@@ -2,10 +2,6 @@ mod cache;
 mod load;
 mod paths;
 mod types;
-mod validate;
-mod validate_helpers;
-mod validate_request_constraints;
-mod validate_secrets;
 
 pub use self::cache::{
     RuntimePolicyCacheInvalidationPlan, clear_runtime_policy_cache,
@@ -18,44 +14,20 @@ pub use self::load::{
 pub use self::paths::{resolve_runtime_policy_path, runtime_policy_path};
 pub use self::types::{
     PRODEX_POLICY_FILE_NAME, PRODEX_POLICY_VERSION, PRODEX_RUNTIME_PROXY_PRESET_ENV,
-    RuntimeGovernanceDataClassification, RuntimeGovernanceMode, RuntimeGovernancePolicyAction,
-    RuntimeGovernancePolicyAuditDetailLevel, RuntimeGovernancePolicyChannel,
-    RuntimeGovernancePolicyDataModality, RuntimeGovernancePolicyEffect,
-    RuntimeGovernancePolicyFailureMode, RuntimeGovernancePolicyNetworkZone,
-    RuntimeGovernancePolicyObligation, RuntimeGovernancePolicyRequestRisk,
-    RuntimeGovernancePolicyRule, RuntimeGovernancePolicyRuleCondition,
-    RuntimeGovernanceProviderTrustTier, RuntimeGovernanceRolloutMode,
-    RuntimeGovernanceUnknownClassificationBehavior, RuntimeLogFormat,
-    RuntimePolicyAdaptiveRoutingSettings, RuntimePolicyConfig, RuntimePolicyFile,
-    RuntimePolicyGatewayAdminToken, RuntimePolicyGatewayGuardrailsSettings,
-    RuntimePolicyGatewayObservabilitySettings, RuntimePolicyGatewayRequestConstraintSettings,
-    RuntimePolicyGatewayRouteAlias, RuntimePolicyGatewayRouteModelMetrics,
-    RuntimePolicyGatewaySettings, RuntimePolicyGatewayVirtualKey,
-    RuntimePolicyGatewayWorkloadIdentitySettings, RuntimePolicyGovernanceArtifactVerifier,
-    RuntimePolicyGovernanceProviderSettings, RuntimePolicyGovernanceSessionSettings,
-    RuntimePolicyGovernanceSettings, RuntimePolicyInspectionPattern, RuntimePolicyProxyPreset,
+    RuntimeLogFormat, RuntimePolicyConfig, RuntimePolicyFile, RuntimePolicyProxyPreset,
     RuntimePolicyProxyPresetSelection, RuntimePolicyProxySettings, RuntimePolicyRuntimeFile,
     RuntimePolicyRuntimeSettings, RuntimePolicySecretsFile, RuntimePolicySecretsSettings,
-    RuntimePolicyServiceMode, RuntimePolicySummary,
+    RuntimePolicySummary,
 };
 
-pub const MAX_GATEWAY_GUARDRAIL_KEYWORDS: usize = 128;
-pub const MAX_GATEWAY_GUARDRAIL_KEYWORD_BYTES: usize = 4 * 1024;
-pub use self::validate::{
-    MAX_GOVERNANCE_AUTHORITY_TENANTS, RuntimePolicyValidationErrors, RuntimePolicyValidationIssue,
-    RuntimePolicyValidationSection, validate_runtime_governance_settings,
-    validate_runtime_policy_file, validate_runtime_proxy_policy,
-};
-
-use anyhow::{Result, bail};
+use anyhow::Result;
 use prodex_core::AppPaths;
 
 pub fn ensure_runtime_policy_valid() -> Result<()> {
-    if !runtime_policy_enabled_for_current_process() {
-        return Ok(());
+    if runtime_policy_enabled_for_current_process() {
+        let paths = AppPaths::discover()?;
+        let _ = load_runtime_policy_cached(&paths.root)?;
     }
-    let paths = AppPaths::discover()?;
-    let _ = load_runtime_policy_cached(&paths.root)?;
     Ok(())
 }
 
@@ -70,28 +42,6 @@ pub fn runtime_policy_summary() -> Result<Option<RuntimePolicySummary>> {
             version: config.version,
         }),
     )
-}
-
-pub fn runtime_policy_service_mode() -> Result<RuntimePolicyServiceMode> {
-    if !runtime_policy_enabled_for_current_process() {
-        return Ok(RuntimePolicyServiceMode::default());
-    }
-    let paths = AppPaths::discover()?;
-    Ok(load_runtime_policy_cached(&paths.root)?
-        .map(|config| config.service_mode)
-        .unwrap_or_default())
-}
-
-pub fn ensure_runtime_policy_service_mode(expected: RuntimePolicyServiceMode) -> Result<()> {
-    let actual = runtime_policy_service_mode()?;
-    if actual != expected {
-        bail!(
-            "runtime policy service_mode={} cannot start {} service",
-            actual.as_str(),
-            expected.as_str()
-        );
-    }
-    Ok(())
 }
 
 pub fn runtime_policy_runtime() -> Option<RuntimePolicyRuntimeSettings> {
@@ -117,23 +67,11 @@ fn runtime_policy_proxy_from_root(
     root: &std::path::Path,
     env_preset: Option<RuntimePolicyProxyPreset>,
 ) -> Option<RuntimePolicyProxySettings> {
-    let loaded = load_runtime_policy_cached(root).ok().flatten();
-    if let Some(config) = loaded {
+    if let Some(config) = load_runtime_policy_cached(root).ok().flatten() {
         return Some(config.runtime_proxy.with_effective_preset(env_preset));
     }
     env_preset
         .map(|preset| RuntimePolicyProxySettings::default().with_effective_preset(Some(preset)))
-}
-
-pub fn runtime_policy_gateway() -> Option<RuntimePolicyGatewaySettings> {
-    if !runtime_policy_enabled_for_current_process() {
-        return None;
-    }
-    let paths = prodex_core::AppPaths::discover().ok()?;
-    load_runtime_policy_cached(&paths.root)
-        .ok()
-        .flatten()
-        .map(|config| config.gateway)
 }
 
 pub fn runtime_proxy_preset_from_env() -> Option<RuntimePolicyProxyPreset> {
@@ -162,10 +100,3 @@ fn runtime_policy_enabled_for_current_process() -> bool {
 fn runtime_policy_enabled_for_current_process() -> bool {
     true
 }
-
-#[cfg(test)]
-#[path = "../tests/src/reload.rs"]
-mod reload_tests;
-#[cfg(test)]
-#[path = "../tests/src/lib.rs"]
-mod tests;

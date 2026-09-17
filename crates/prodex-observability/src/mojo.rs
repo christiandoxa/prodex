@@ -1,14 +1,10 @@
-#[cfg(feature = "mojo")]
 use std::sync::OnceLock;
 
-#[cfg(feature = "mojo")]
 const METRIC_NAME_SLOTS: usize = 228;
 
-#[cfg(feature = "mojo")]
 static METRIC_NAMES: [OnceLock<String>; METRIC_NAME_SLOTS] =
     [const { OnceLock::new() }; METRIC_NAME_SLOTS];
 
-#[cfg(feature = "mojo")]
 pub(crate) fn metric_name(plan: usize, slot: usize) -> &'static str {
     let index = plan
         .checked_mul(3)
@@ -23,14 +19,11 @@ pub(crate) fn metric_name(plan: usize, slot: usize) -> &'static str {
         .as_str()
 }
 
-#[cfg(feature = "mojo")]
 const LABEL_KEY_SLOTS: usize = 149;
 
-#[cfg(feature = "mojo")]
 static LABEL_KEYS: [OnceLock<String>; LABEL_KEY_SLOTS] =
     [const { OnceLock::new() }; LABEL_KEY_SLOTS];
 
-#[cfg(feature = "mojo")]
 pub(crate) fn label_key(key: usize) -> &'static str {
     LABEL_KEYS
         .get(key)

@@ -2828,14 +2828,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "prodex-authn"
-version = "0.429.4"
-dependencies = [
- "prodex-domain",
- "url",
-]
-
-[[package]]
 name = "prodex-bench-support"
 version = "0.429.4"
 
@@ -3002,8 +2994,6 @@ dependencies = [
 name = "prodex-provider-spi"
 version = "0.429.4"
 dependencies = [
- "prodex-domain",
- "prodex-mojo-core",
  "prodex-provider-core",
 ]
 
@@ -3148,16 +3138,11 @@ name = "prodex-runtime-policy"
 version = "0.429.4"
 dependencies = [
  "anyhow",
- "base64 0.23.1",
- "prodex-authn",
  "prodex-core",
- "prodex-domain",
  "prodex-mojo-core",
- "prodex-provider-core",
  "prodex-secret-store",
  "serde",
  "toml",
- "url",
 ]
 
 [[package]]

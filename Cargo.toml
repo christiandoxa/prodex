@@ -12,7 +12,6 @@ rust-version = "1.98.0"
 members = [
     ".",
     "crates/prodex-app",
-    "crates/prodex-authn",
     "crates/prodex-optional-tools",
     "crates/prodex-cli",
     "crates/prodex-config",
@@ -97,7 +96,6 @@ portable-pty = "0.9.0"
 ratatui = { version = "0.30.2", default-features = false, features = ["crossterm"] }
 unicode-width = "0.2.2"
 prodex_audit_log = { package = "prodex-audit-log", path = "crates/prodex-audit-log", version = "0.429.4" }
-prodex_authn = { package = "prodex-authn", path = "crates/prodex-authn", version = "0.429.4" }
 prodex_app = { package = "prodex-app", path = "crates/prodex-app", version = "0.429.4" }
 prodex_bench_support = { package = "prodex-bench-support", path = "crates/prodex-bench-support", version = "0.429.4" }
 prodex_optional_tools = { package = "prodex-optional-tools", path = "crates/prodex-optional-tools", version = "0.429.4" }
