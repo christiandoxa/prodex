@@ -109,35 +109,10 @@ struct ProdexRichRouteResult(Copyable):
     var issue_length: Int64
 
 
-@fieldwise_init
-struct ProdexRichPolicyInput(Copyable):
-    var alias_view: ProdexRichStringView
-    var models: UInt
-    var model_count: Int64
-    var strategy: ProdexRichStringView
-    var metrics: UInt
-    var metric_count: Int64
 
 
-@fieldwise_init
-struct ProdexRichPolicyModel(Copyable):
-    var model: ProdexRichSlice
-    var model_index: Int64
-    var metric_match: Int64
 
 
-@fieldwise_init
-struct ProdexRichPolicyResult(Copyable):
-    var abi_version: Int64
-    var models_written: Int64
-    var required_models: Int64
-    var output_written: Int64
-    var required_output: Int64
-    var issue_kind: Int64
-    var issue_field: Int64
-    var issue_index: Int64
-    var issue_offset: Int64
-    var issue_length: Int64
 
 
 @fieldwise_init
@@ -193,36 +168,8 @@ struct ProdexRichCatalogPlanResult(Copyable):
     var issue_length: Int64
 
 
-@fieldwise_init
-struct ProdexRichPolicyRouteInput(Copyable):
-    var model: ProdexRichStringView
-    var input_cost: UInt64
-    var input_cost_present: Int64
-    var output_cost: UInt64
-    var output_cost_present: Int64
-    var policy_latency: UInt64
-    var policy_latency_present: Int64
-    var state_latency: UInt64
-    var state_latency_present: Int64
-    var in_flight: UInt64
-    var rpm_limit: UInt64
-    var rpm_limit_present: Int64
-    var rpm_used: UInt64
-    var tpm_limit: UInt64
-    var tpm_limit_present: Int64
-    var tpm_used: UInt64
 
 
-@fieldwise_init
-struct ProdexRichPolicyRouteResult(Copyable):
-    var abi_version: Int64
-    var selected_index: Int64
-    var ordered_written: Int64
-    var required_ordered: Int64
-    var issue_kind: Int64
-    var issue_index: Int64
-    var issue_offset: Int64
-    var issue_length: Int64
 
 
 @fieldwise_init
@@ -273,45 +220,10 @@ struct ProdexRichPlanResult(Copyable):
     var issue_length: Int64
 
 
-@fieldwise_init
-struct ProdexGatewayBillingSummaryInput(Copyable):
-    var bucket_ids: InlineArray[Int64, 9]
-    var response_status: Int64
-    var response_status_present: Int64
-    var input_tokens: UInt64
-    var output_tokens: UInt64
-    var response_bytes: UInt64
-    var estimated_cost_microusd: UInt64
-    var final_cost_microusd: UInt64
-    var created_at_epoch: UInt64
-    var reconciled_at_epoch: UInt64
-    var reconciled_at_present: Int64
 
 
-@fieldwise_init
-struct ProdexGatewayBillingSummaryBucket(Copyable):
-    var requests: UInt64
-    var successful_requests: UInt64
-    var failed_requests: UInt64
-    var unreconciled_requests: UInt64
-    var input_tokens: UInt64
-    var output_tokens: UInt64
-    var response_bytes: UInt64
-    var estimated_cost_microusd: UInt64
-    var final_cost_microusd: UInt64
-    var first_created_at_epoch: UInt64
-    var first_created_at_present: Int64
-    var last_created_at_epoch: UInt64
-    var last_reconciled_at_epoch: UInt64
-    var last_reconciled_at_present: Int64
 
 
-@fieldwise_init
-struct ProdexGatewayBillingSummaryResult(Copyable):
-    var abi_version: Int64
-    var buckets_written: Int64
-    var required_buckets: Int64
-    var issue_kind: Int64
 
 
 @fieldwise_init

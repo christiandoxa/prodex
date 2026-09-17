@@ -29,7 +29,6 @@ fn super_args_from(codex_args: &[&str]) -> SuperArgs {
         tools: Vec::new(),
         required_tools: Vec::new(),
         url: None,
-        cli: None,
         local_context_window: None,
         local_auto_compact_token_limit: None,
         codex_features: CodexRuntimeFeatureArgs::default(),
@@ -217,41 +216,5 @@ fn super_url_validation_rejects_secrets_without_echoing_them() {
             "{error}"
         );
         assert!(!error.contains("secret-sentinel"), "{error}");
-    }
-}
-
-#[test]
-fn runtime_arg_debug_redacts_url_and_passthrough_values() {
-    let sentinel = "runtime-args-debug-secret-sentinel";
-    let run = RunArgs {
-        profile: None,
-        auto_rotate: false,
-        no_auto_rotate: false,
-        auto_redeem: false,
-        skip_quota_check: false,
-        full_access: false,
-        base_url: Some(format!("https://user:{sentinel}@example.test")),
-        no_proxy: false,
-        dry_run: false,
-        codex_features: CodexRuntimeFeatureArgs::default(),
-        codex_args: vec![OsString::from(sentinel)],
-    };
-    let claude = ClaudeArgs {
-        profile: None,
-        auto_rotate: false,
-        no_auto_rotate: false,
-        auto_redeem: false,
-        skip_quota_check: false,
-        base_url: Some(format!("https://user:{sentinel}@example.test")),
-        no_proxy: false,
-        claude_args: vec![OsString::from(sentinel)],
-    };
-
-    for rendered in [
-        format!("{:?}", crate::Commands::Run(run)),
-        format!("{:?}", crate::Commands::Claude(claude)),
-    ] {
-        assert!(rendered.contains("base_url_configured: true"), "{rendered}");
-        assert!(!rendered.contains(sentinel), "{rendered}");
     }
 }

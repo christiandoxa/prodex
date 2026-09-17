@@ -59,7 +59,6 @@ mod runtime_broker;
 mod runtime_broker_shared;
 mod runtime_capabilities;
 mod runtime_catalog_config;
-mod runtime_claude;
 mod runtime_claude_auth;
 mod runtime_config;
 mod runtime_core_shared;
@@ -67,11 +66,8 @@ mod runtime_deepseek_config;
 mod runtime_doctor;
 mod runtime_external_provider_config;
 mod runtime_gemini_auth;
-mod runtime_gemini_cli;
-mod runtime_gemini_cli_compat;
 mod runtime_gemini_config;
 mod runtime_kiro_acp;
-mod runtime_kiro_connect_proxy;
 mod runtime_launch;
 mod runtime_launch_shared;
 mod runtime_local_provider_config;
@@ -126,7 +122,6 @@ use runtime_background::*;
 use runtime_broker::*;
 use runtime_broker_shared::*;
 use runtime_capabilities::*;
-use runtime_claude::*;
 use runtime_claude_auth::*;
 use runtime_config::*;
 use runtime_core_shared::*;
@@ -134,9 +129,7 @@ use runtime_deepseek_config::*;
 use runtime_doctor::*;
 use runtime_external_provider_config::*;
 use runtime_gemini_auth::*;
-use runtime_gemini_cli_compat::*;
 use runtime_gemini_config::*;
-use runtime_kiro_connect_proxy::*;
 use runtime_launch::*;
 use runtime_launch_shared::*;
 use runtime_local_provider_config::*;
@@ -394,9 +387,6 @@ fn run() -> Result<()> {
 
 fn run_command(command: Commands) -> Result<()> {
     let super_dry_run = command_dispatch::command_is_super_dry_run(&command);
-    if !super_dry_run && let Commands::Super(args) = &command {
-        runtime_gemini_cli::validate_super_native_cli_preflight(args)?;
-    }
     let minimal_startup = command_uses_minimal_startup(&command);
     if !super_dry_run && !minimal_startup {
         create_codex_home_if_missing(&AppPaths::discover()?.root)?;

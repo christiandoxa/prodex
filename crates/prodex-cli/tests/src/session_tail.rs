@@ -86,39 +86,6 @@ fn s_session_tail_super_launch_flags_are_prodex_flags() {
 }
 
 #[test]
-fn s_session_tail_super_local_provider_flags_are_prodex_flags() {
-    let command = parse_cli_command_from([
-        "prodex",
-        "s",
-        "00000000-0000-7000-8000-000000000042",
-        "--url",
-        "http://127.0.0.1:8131/v1",
-        "--local-model",
-        "local-model",
-        "--local-context-window",
-        "32000",
-        "--local-auto-compact-token-limit",
-        "24000",
-        "--cli",
-        "gemini",
-    ])
-    .expect("s session command should parse");
-    let Commands::Super(mut args) = command else {
-        panic!("expected super command");
-    };
-    args.extract_provider_overrides_from_codex_args().unwrap();
-    assert_eq!(args.url.as_deref(), Some("http://127.0.0.1:8131/v1"));
-    assert_eq!(args.local_model.as_deref(), Some("local-model"));
-    assert_eq!(args.local_context_window, Some(32000));
-    assert_eq!(args.local_auto_compact_token_limit, Some(24000));
-    assert_eq!(args.cli, Some(SuperCliAgent::Gemini));
-    assert_eq!(
-        args.codex_args,
-        os_args(&["00000000-0000-7000-8000-000000000042"])
-    );
-}
-
-#[test]
 fn s_session_tail_codex_feature_flags_are_extracted_after_target() {
     let command = parse_cli_command_from([
         "prodex",
@@ -224,31 +191,6 @@ fn s_provider_alias_accepts_harness_after_alias_position() {
 }
 
 #[test]
-fn s_session_tail_invalid_typed_values_fail_before_codex_launch() {
-    let command = parse_cli_command_from([
-        "prodex",
-        "s",
-        "00000000-0000-7000-8000-000000000042",
-        "--provider",
-        "unknown",
-        "--local-context-window",
-        "many",
-        "--cli=unknown",
-    ])
-    .expect("s session command should parse");
-    let Commands::Super(mut args) = command else {
-        panic!("expected super command");
-    };
-    let error = args
-        .extract_provider_overrides_from_codex_args()
-        .expect_err("invalid typed Super values must not leak to Codex");
-    assert!(
-        error.contains("unknown provider") || error.contains("invalid"),
-        "{error}"
-    );
-}
-
-#[test]
 fn s_session_tail_rejects_credential_bearing_urls_without_echoing_them() {
     for argument in [
         "--url=https://user:tail-url-secret-sentinel@example.test/v1",
@@ -275,109 +217,6 @@ fn s_session_tail_rejects_credential_bearing_urls_without_echoing_them() {
         );
         assert!(!error.contains("secret-sentinel"), "{error}");
     }
-}
-
-#[test]
-fn s_session_tail_equals_forms_cover_value_options_and_aliases() {
-    let command = parse_cli_command_from([
-        "prodex",
-        "s",
-        "00000000-0000-7000-8000-000000000042",
-        "--provider=anthropic",
-        "--harness=native",
-        "--api-key=test-key",
-        "--model=model-a",
-        "--local-model=model-b",
-        "--profile=tail",
-        "--base-url=https://example.test/backend-api",
-        "--url=http://127.0.0.1:8131/v1",
-        "--context-window=32000",
-        "--local-context-window=33000",
-        "--auto-compact-token-limit=24000",
-        "--local-auto-compact-token-limit=25000",
-        "--cli=agy",
-    ])
-    .unwrap();
-    let Commands::Super(mut args) = command else {
-        panic!("expected super command");
-    };
-
-    args.extract_provider_overrides_from_codex_args().unwrap();
-
-    assert_eq!(args.provider, Some(SuperExternalProvider::Anthropic));
-    assert_eq!(
-        args.harness,
-        Some(prodex_provider_core::HarnessMode::Native)
-    );
-    assert_eq!(args.api_key.as_deref(), Some("test-key"));
-    assert_eq!(args.local_model.as_deref(), Some("model-b"));
-    assert_eq!(args.profile.as_deref(), Some("tail"));
-    assert_eq!(
-        args.base_url.as_deref(),
-        Some("https://example.test/backend-api")
-    );
-    assert_eq!(args.url.as_deref(), Some("http://127.0.0.1:8131/v1"));
-    assert_eq!(args.local_context_window, Some(33_000));
-    assert_eq!(args.local_auto_compact_token_limit, Some(25_000));
-    assert_eq!(args.cli, Some(SuperCliAgent::Agy));
-    assert_eq!(
-        args.codex_args,
-        os_args(&["00000000-0000-7000-8000-000000000042"])
-    );
-}
-
-#[test]
-fn s_session_tail_extracts_native_copilot_cli() {
-    let command = parse_cli_command_from([
-        "prodex",
-        "s",
-        "00000000-0000-7000-8000-000000000042",
-        "--provider=copilot",
-        "--cli=copilot",
-    ])
-    .unwrap();
-    let Commands::Super(mut args) = command else {
-        panic!("expected super command");
-    };
-
-    args.extract_provider_overrides_from_codex_args().unwrap();
-
-    assert_eq!(args.provider, Some(SuperExternalProvider::Copilot));
-    assert_eq!(args.cli, Some(SuperCliAgent::Copilot));
-    assert_eq!(
-        args.codex_args,
-        os_args(&["00000000-0000-7000-8000-000000000042"])
-    );
-}
-
-#[test]
-fn s_session_tail_missing_and_invalid_values_fail_closed() {
-    let command = parse_cli_command_from([
-        "prodex",
-        "s",
-        "00000000-0000-7000-8000-000000000042",
-        "--unknown-before",
-        "value",
-        "--provider",
-        "unknown",
-        "--context-window=many",
-        "--auto-compact-token-limit",
-        "many",
-        "--cli=unknown",
-        "--api-key",
-    ])
-    .unwrap();
-    let Commands::Super(mut args) = command else {
-        panic!("expected super command");
-    };
-
-    let error = args
-        .extract_provider_overrides_from_codex_args()
-        .expect_err("missing or invalid typed values must fail closed");
-    assert!(
-        error.contains("unknown provider") || error.contains("invalid"),
-        "{error}"
-    );
 }
 
 #[test]

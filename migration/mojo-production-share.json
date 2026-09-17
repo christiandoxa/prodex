@@ -10,7 +10,20 @@
     "baseline_sha": "731d7a776527ac65c72384cc68459200715d8793",
     "baseline_source_inventory_sha256": "48cddc617b019666bd72efa5c2fb91c2e1b40400ded1dfeee73877240662c27e",
     "baseline_mojo_production_loc": 26420,
-    "approved_reductions": []
+    "approved_reductions": [
+      {
+        "path": "mojo/prodex_core/control_plane_routing.mojo",
+        "reason": "The enterprise control-plane routing feature was deleted; the core gateway retains only provider data-plane routing."
+      },
+      {
+        "path": "mojo/prodex_core/gateway_constraint_trace.mojo",
+        "reason": "Enterprise gateway constraint tracing was deleted with the retired governance/admin routing stack."
+      },
+      {
+        "path": "mojo/prodex_core/rich_policy.mojo",
+        "reason": "Enterprise route-alias, billing, and virtual-key policy planning was deleted with the retired multi-tenant gateway control plane."
+      }
+    ]
   },
   "production_build_feature": "mojo-core",
   "temporary_release_waiver": {

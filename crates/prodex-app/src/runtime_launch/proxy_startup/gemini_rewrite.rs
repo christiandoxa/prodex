@@ -27,39 +27,15 @@ use std::path::PathBuf;
 
 #[path = "gemini_request.rs"]
 mod gemini_request;
-#[path = "gemini_request_extensions.rs"]
-mod gemini_request_extensions;
-#[path = "gemini_request_io.rs"]
-mod gemini_request_io;
-#[path = "gemini_request_policy.rs"]
-mod gemini_request_policy;
-#[path = "gemini_request_session.rs"]
-mod gemini_request_session;
-#[path = "gemini_request_tool_output.rs"]
-mod gemini_request_tool_output;
 
-#[cfg(test)]
-pub(super) use gemini_request::{
-    runtime_gemini_blocked_tool_call_message, runtime_gemini_generate_request_body,
-};
-pub(super) use gemini_request::{
-    runtime_gemini_blocked_tool_call_message_with_config,
-    runtime_gemini_generate_request_body_with_config,
-};
+pub(super) use gemini_request::runtime_gemini_generate_request_body_with_config;
 
-#[cfg(test)]
-pub(in super::super) fn runtime_gemini_responses_value_from_generate_value(
-    value: &serde_json::Value,
-    _request_id: u64,
-) -> serde_json::Value {
-    gemini_provider_core_runtime_responses_value_with_fallback_ids(
-        value,
-        prodex_provider_core::provider_core_chat_compatible_created_at(),
-        prodex_provider_core::PRODEX_GEMINI_DEFAULT_MODEL,
-        runtime_gemini_blocked_tool_call_message,
-        || format!("resp_gemini_{}", RequestId::new()),
-        |_index| format!("call_gemini_{}", CallId::new()),
-    )
+pub(in crate::runtime_launch::proxy_startup) fn runtime_gemini_blocked_tool_call_message_with_config(
+    _name: &str,
+    _args: &serde_json::Value,
+    _config: &crate::RuntimeGeminiConfig,
+) -> Option<String> {
+    None
 }
 
 #[derive(Clone)]

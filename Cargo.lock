@@ -2774,10 +2774,8 @@ dependencies = [
  "prodex-runtime-anthropic",
  "prodex-runtime-broker",
  "prodex-runtime-broker-log",
- "prodex-runtime-claude",
  "prodex-runtime-cookies",
  "prodex-runtime-doctor",
- "prodex-runtime-gemini-cli-compat",
  "prodex-runtime-launch",
  "prodex-runtime-log",
  "prodex-runtime-metrics",
@@ -3050,21 +3048,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "prodex-runtime-claude"
-version = "0.429.4"
-dependencies = [
- "anyhow",
- "dirs",
- "fs2",
- "prodex-codex-config",
- "prodex-core",
- "prodex-runtime-anthropic",
- "prodex-runtime-launch",
- "prodex-shared-codex-fs",
- "serde_json",
-]
-
-[[package]]
 name = "prodex-runtime-cookies"
 version = "0.429.4"
 dependencies = [
@@ -3086,17 +3069,6 @@ dependencies = [
  "prodex-terminal-ui",
  "serde",
  "serde_json",
-]
-
-[[package]]
-name = "prodex-runtime-gemini-cli-compat"
-version = "0.429.4"
-dependencies = [
- "anyhow",
- "dirs",
- "prodex-core",
- "serde_json",
- "toml",
 ]
 
 [[package]]

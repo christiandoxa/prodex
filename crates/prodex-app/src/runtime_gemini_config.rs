@@ -12,7 +12,7 @@ use prodex_provider_core::{
     ProviderId, provider_model_catalog,
 };
 use serde_json::json;
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 use std::ffi::OsString;
 #[cfg(test)]
 use std::fs;
@@ -25,240 +25,17 @@ Focus on the user's software task. Inspect the codebase before changing behavior
 
 Use tools deliberately. For shell work, prefer fast focused commands. For file edits, keep changes minimal and explain non-obvious logic in short comments only when useful."#;
 
-#[derive(Clone, Debug, Default)]
-pub(crate) struct RuntimeGeminiModelResolution {
-    catalog_models: Vec<RuntimeGeminiDynamicModel>,
-    fallback_chains: BTreeMap<String, Vec<String>>,
-}
-
-#[derive(Clone, Debug)]
-struct RuntimeGeminiDynamicModel {
-    slug: String,
-    display_name: String,
-    description: String,
-}
+#[derive(Clone, Copy, Debug, Default)]
+pub(crate) struct RuntimeGeminiModelResolution;
 
 impl RuntimeGeminiModelResolution {
     pub(crate) fn from_current_settings() -> Result<Self> {
-        let cwd = std::env::current_dir().ok();
-        Self::from_settings_sources(crate::gemini_settings_sources(cwd.as_deref()))
-    }
-
-    fn from_settings_sources(sources: Vec<crate::GeminiSettingsSource>) -> Result<Self> {
-        let mut resolution = Self::default();
-        for source in sources {
-            let Some(model_configs) = source
-                .value
-                .get("modelConfigs")
-                .or_else(|| source.value.get("model_configs"))
-            else {
-                continue;
-            };
-            resolution.apply_model_configs(model_configs)?;
-        }
-        Ok(resolution)
+        Ok(Self)
     }
 
     pub(crate) fn fallback_chain(&self, model: &str) -> Option<Vec<String>> {
-        let key = model.trim().to_ascii_lowercase();
-        self.fallback_chains
-            .get(&key)
-            .filter(|chain| !chain.is_empty())
-            .cloned()
-    }
-
-    fn catalog_models(&self) -> impl Iterator<Item = &RuntimeGeminiDynamicModel> {
-        self.catalog_models.iter()
-    }
-
-    fn apply_model_configs(&mut self, model_configs: &serde_json::Value) -> Result<()> {
-        self.apply_model_definitions(model_configs)?;
-        self.apply_model_aliases(model_configs, "aliases")?;
-        self.apply_model_aliases(model_configs, "customAliases")?;
-        self.apply_model_aliases(model_configs, "custom_aliases")?;
-        self.apply_model_id_resolutions(model_configs)?;
-        self.apply_model_chains(model_configs)
-    }
-
-    fn apply_model_definitions(&mut self, model_configs: &serde_json::Value) -> Result<()> {
-        let Some(definitions) = model_configs
-            .get("modelDefinitions")
-            .or_else(|| model_configs.get("model_definitions"))
-            .and_then(serde_json::Value::as_object)
-        else {
-            return Ok(());
-        };
-        for (slug, definition) in definitions {
-            if !definition
-                .get("isVisible")
-                .or_else(|| definition.get("is_visible"))
-                .and_then(serde_json::Value::as_bool)
-                .unwrap_or(false)
-            {
-                continue;
-            }
-            let display_name = definition
-                .get("displayName")
-                .or_else(|| definition.get("display_name"))
-                .and_then(serde_json::Value::as_str)
-                .unwrap_or(slug);
-            self.remember_catalog_model(slug, display_name, "Gemini CLI modelConfig model.")?;
-        }
-        Ok(())
-    }
-
-    fn apply_model_aliases(&mut self, model_configs: &serde_json::Value, key: &str) -> Result<()> {
-        let Some(aliases) = model_configs
-            .get(key)
-            .and_then(serde_json::Value::as_object)
-        else {
-            return Ok(());
-        };
-        for (alias, config) in aliases {
-            let Some(model) = config
-                .get("modelConfig")
-                .or_else(|| config.get("model_config"))
-                .and_then(|config| config.get("model"))
-                .and_then(serde_json::Value::as_str)
-                .map(str::trim)
-                .filter(|model| !model.is_empty())
-            else {
-                continue;
-            };
-            self.remember_catalog_model(alias, alias, "Gemini CLI modelConfig alias.")?;
-            self.remember_catalog_model(model, model, "Gemini CLI modelConfig target.")?;
-            self.remember_chain(alias, [model])?;
-        }
-        Ok(())
-    }
-
-    fn apply_model_id_resolutions(&mut self, model_configs: &serde_json::Value) -> Result<()> {
-        let Some(resolutions) = model_configs
-            .get("modelIdResolutions")
-            .or_else(|| model_configs.get("model_id_resolutions"))
-            .and_then(serde_json::Value::as_object)
-        else {
-            return Ok(());
-        };
-        for (model, resolution) in resolutions {
-            let mut chain = Vec::new();
-            for target in gemini_model_resolution_targets(resolution) {
-                if chain.len() >= PROVIDER_MODEL_CATALOG_HARD_LIMIT {
-                    bail!(
-                        "Gemini fallback chain exceeds the hard limit of {} entries",
-                        PROVIDER_MODEL_CATALOG_HARD_LIMIT
-                    );
-                }
-                chain.push(target.to_string());
-                self.remember_catalog_model(target, target, "Gemini CLI resolved model.")?;
-            }
-            if !chain.is_empty() {
-                self.remember_catalog_model(model, model, "Gemini CLI modelIdResolution alias.")?;
-                self.remember_chain(model, chain.iter().map(String::as_str))?;
-            }
-        }
-        Ok(())
-    }
-
-    fn apply_model_chains(&mut self, model_configs: &serde_json::Value) -> Result<()> {
-        let Some(chains) = model_configs
-            .get("modelChains")
-            .or_else(|| model_configs.get("model_chains"))
-            .and_then(serde_json::Value::as_object)
-        else {
-            return Ok(());
-        };
-        for (name, chain) in chains {
-            let mut models = Vec::new();
-            for model in chain
-                .as_array()
-                .into_iter()
-                .flatten()
-                .filter_map(|entry| entry.get("model").and_then(serde_json::Value::as_str))
-                .map(str::trim)
-                .filter(|model| !model.is_empty())
-            {
-                if models.len() >= PROVIDER_MODEL_CATALOG_HARD_LIMIT {
-                    bail!(
-                        "Gemini fallback chain exceeds the hard limit of {} entries",
-                        PROVIDER_MODEL_CATALOG_HARD_LIMIT
-                    );
-                }
-                models.push(model);
-            }
-            for model in &models {
-                self.remember_catalog_model(model, model, "Gemini CLI modelChain model.")?;
-            }
-            if !models.is_empty() {
-                self.remember_catalog_model(name, name, "Gemini CLI modelChain alias.")?;
-            }
-            self.remember_chain(name, models)?;
-        }
-        Ok(())
-    }
-
-    fn remember_catalog_model(
-        &mut self,
-        slug: &str,
-        display_name: &str,
-        description: &str,
-    ) -> Result<()> {
-        let slug = slug.trim();
-        if slug.is_empty()
-            || self
-                .catalog_models
-                .iter()
-                .any(|model| model.slug.eq_ignore_ascii_case(slug))
-        {
-            return Ok(());
-        }
-        if self.catalog_models.len() >= PROVIDER_MODEL_CATALOG_HARD_LIMIT {
-            bail!(
-                "Gemini model catalog exceeds the hard limit of {} entries",
-                PROVIDER_MODEL_CATALOG_HARD_LIMIT
-            );
-        }
-        self.catalog_models.push(RuntimeGeminiDynamicModel {
-            slug: slug.to_string(),
-            display_name: display_name.trim().to_string(),
-            description: description.to_string(),
-        });
-        Ok(())
-    }
-
-    fn remember_chain<'a>(
-        &mut self,
-        model: &str,
-        chain: impl IntoIterator<Item = &'a str>,
-    ) -> Result<()> {
-        let mut seen = BTreeSet::new();
-        let mut bounded = Vec::new();
-        for item in chain {
-            let item = item.trim();
-            if item.is_empty() || !seen.insert(item.to_ascii_lowercase()) {
-                continue;
-            }
-            if bounded.len() >= PROVIDER_MODEL_CATALOG_HARD_LIMIT {
-                bail!(
-                    "Gemini fallback chain exceeds the hard limit of {} entries",
-                    PROVIDER_MODEL_CATALOG_HARD_LIMIT
-                );
-            }
-            bounded.push(item.to_string());
-        }
-        if !bounded.is_empty() {
-            let key = model.trim().to_ascii_lowercase();
-            if !self.fallback_chains.contains_key(&key)
-                && self.fallback_chains.len() >= PROVIDER_MODEL_CATALOG_HARD_LIMIT
-            {
-                bail!(
-                    "Gemini fallback map exceeds the hard limit of {} entries",
-                    PROVIDER_MODEL_CATALOG_HARD_LIMIT
-                );
-            }
-            self.fallback_chains.insert(key, bounded);
-        }
-        Ok(())
+        let chain = prodex_provider_core::provider_model_fallback_chain(ProviderId::Gemini, model);
+        (!chain.is_empty()).then_some(chain)
     }
 }
 
@@ -276,28 +53,6 @@ pub(crate) fn preview_gemini_provider_codex_args(
     gemini_provider_codex_args(codex_home, user_args, false)
 }
 
-fn gemini_model_resolution_targets(resolution: &serde_json::Value) -> Vec<&str> {
-    let mut targets = resolution
-        .get("default")
-        .and_then(serde_json::Value::as_str)
-        .map(str::trim)
-        .filter(|target| !target.is_empty())
-        .into_iter()
-        .collect::<Vec<_>>();
-    targets.extend(
-        resolution
-            .get("contexts")
-            .and_then(serde_json::Value::as_array)
-            .into_iter()
-            .flatten()
-            .filter_map(|context| context.get("target"))
-            .filter_map(serde_json::Value::as_str)
-            .map(str::trim)
-            .filter(|target| !target.is_empty()),
-    );
-    targets
-}
-
 fn gemini_provider_codex_args(
     codex_home: &Path,
     user_args: &[OsString],
@@ -305,9 +60,6 @@ fn gemini_provider_codex_args(
 ) -> Result<Vec<OsString>> {
     if !gemini_provider_enabled(codex_home, user_args)? {
         return Ok(user_args.to_vec());
-    }
-    if write_catalog {
-        crate::prepare_gemini_cli_compat(codex_home)?;
     }
     if codex_cli_config_override_value(user_args, "model_catalog_json").is_some() {
         return Ok(user_args.to_vec());
@@ -407,29 +159,18 @@ fn write_gemini_model_catalog(
 
 fn gemini_catalog_models(
     launch_model: &str,
-    model_resolution: &RuntimeGeminiModelResolution,
+    _model_resolution: &RuntimeGeminiModelResolution,
     context_window: u64,
     auto_compact_token_limit: u64,
 ) -> Result<Vec<serde_json::Value>> {
-    let mut models = Vec::with_capacity(
-        provider_model_catalog(ProviderId::Gemini).len()
-            + model_resolution.catalog_models.len()
-            + 1,
-    );
+    let mut models = Vec::with_capacity(provider_model_catalog(ProviderId::Gemini).len() + 1);
     let mut seen = BTreeSet::new();
 
-    for slug in std::iter::once(launch_model)
-        .chain(
-            model_resolution
-                .catalog_models()
-                .map(|model| model.slug.as_str()),
-        )
-        .chain(
-            provider_model_catalog(ProviderId::Gemini)
-                .iter()
-                .map(|spec| spec.id),
-        )
-    {
+    for slug in std::iter::once(launch_model).chain(
+        provider_model_catalog(ProviderId::Gemini)
+            .iter()
+            .map(|spec| spec.id),
+    ) {
         let slug = slug.trim();
         if slug.is_empty() || !seen.insert(slug.to_ascii_lowercase()) {
             continue;
@@ -441,7 +182,7 @@ fn gemini_catalog_models(
             );
         }
         let priority = models.len() + 1;
-        let (display_name, description) = gemini_catalog_model_metadata(slug, model_resolution);
+        let (display_name, description) = gemini_catalog_model_metadata(slug);
         models.push(gemini_catalog_model(
             slug,
             &display_name,
@@ -455,16 +196,7 @@ fn gemini_catalog_models(
     Ok(models)
 }
 
-fn gemini_catalog_model_metadata(
-    model: &str,
-    model_resolution: &RuntimeGeminiModelResolution,
-) -> (String, String) {
-    if let Some(model) = model_resolution
-        .catalog_models()
-        .find(|spec| model.eq_ignore_ascii_case(&spec.slug))
-    {
-        return (model.display_name.clone(), model.description.clone());
-    }
+fn gemini_catalog_model_metadata(model: &str) -> (String, String) {
     provider_model_catalog(ProviderId::Gemini)
         .iter()
         .find(|spec| model.eq_ignore_ascii_case(spec.id))

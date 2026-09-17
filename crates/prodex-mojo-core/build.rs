@@ -293,8 +293,6 @@ fn selected_sources() -> Vec<&'static str> {
         sources.push("../../mojo/prodex_core/rich_abi.mojo");
         sources.push("../../mojo/prodex_core/rich_context_v2.mojo");
         sources.push("../../mojo/prodex_core/rich_route.mojo");
-        sources.push("../../mojo/prodex_core/rich_policy.mojo");
-        sources.push("../../mojo/prodex_core/application_data_plane.mojo");
         sources.push("../../mojo/prodex_core/rich_fallback.mojo");
         sources.push("../../mojo/prodex_core/rich_plan.mojo");
         sources.push("../../mojo/prodex_core/rich_catalog.mojo");
@@ -305,7 +303,6 @@ fn selected_sources() -> Vec<&'static str> {
     if env::var_os("CARGO_FEATURE_MOJO_ROUTING").is_some()
         || env::var_os("CARGO_FEATURE_MOJO_CORE").is_some()
     {
-        sources.push("../../mojo/prodex_core/control_plane_routing.mojo");
         sources.push("../../mojo/prodex_core/routing_score.mojo");
     }
     if env::var_os("CARGO_FEATURE_MOJO_OBSERVABILITY").is_some()

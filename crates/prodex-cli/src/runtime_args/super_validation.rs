@@ -1,4 +1,4 @@
-use super::{SuperArgs, SuperCliAgent};
+use super::SuperArgs;
 use prodex_provider_core::ProviderId;
 
 pub(super) fn validate_super_mode_compatibility(args: &SuperArgs) -> Result<(), String> {
@@ -49,22 +49,10 @@ fn validate_harness_options(args: &SuperArgs) -> Result<(), String> {
     if args.harness.is_some() && args.provider.is_none() && args.url.is_none() {
         return Err("--harness requires --provider or --url".to_string());
     }
-    if args.harness.is_some() && args.cli.is_some_and(|agent| agent != SuperCliAgent::Codex) {
-        return Err("--harness is only supported with the Codex CLI bridge".to_string());
-    }
     Ok(())
 }
 
 fn validate_frontend_options(args: &SuperArgs) -> Result<(), String> {
-    if args.presidio && matches!(args.cli, Some(SuperCliAgent::Kiro | SuperCliAgent::Agy)) {
-        return Err("--presidio is unsupported for native Kiro or Antigravity".to_string());
-    }
-    if args.sub_agent && args.cli.is_some_and(|agent| agent != SuperCliAgent::Codex) {
-        return Err(
-            "--sub-agent is supported only on the Codex Super bridge, not native CLI launches"
-                .to_string(),
-        );
-    }
     if args.sub_agent
         && args
             .codex_args

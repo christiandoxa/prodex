@@ -33,7 +33,6 @@ pub(crate) fn command_should_show_update_notice(command: &Commands) -> bool {
             command,
             Commands::RuntimeBroker(_)
                 | Commands::Update(_)
-                | Commands::GeminiCompatRefresh(_)
                 | Commands::McpJsonlBridge(_)
                 | Commands::SubAgentExec(_)
         )
@@ -67,9 +66,7 @@ pub(crate) fn execute_command(command: Commands) -> Result<()> {
         Commands::Run(args) => app_commands::runtime_launch::handle_run(args),
         Commands::Super(args) => execute_super(*args),
         Commands::Gateway(args) => handle_gateway(args),
-        Commands::Claude(args) => handle_claude(args),
         Commands::RuntimeBroker(args) => handle_runtime_broker(args),
-        Commands::GeminiCompatRefresh(args) => handle_gemini_compat_refresh(args),
         Commands::McpJsonlBridge(args) => handle_mcp_jsonl_bridge(args),
         Commands::SubAgentExec(args) => handle_sub_agent_exec(args),
     }
@@ -110,7 +107,6 @@ fn execute_profile_command(command: ProfileCommands) -> Result<()> {
 fn execute_super(mut args: SuperArgs) -> Result<()> {
     args.extract_provider_overrides_from_codex_args()
         .map_err(anyhow::Error::msg)?;
-    crate::runtime_gemini_cli::validate_super_native_cli_capability_args(&args)?;
     args.validate_urls().map_err(anyhow::Error::msg)?;
     if args.dry_run || prodex_dry_run_requested(&args.codex_args) {
         let use_presidio = match args.presidio_preference() {
@@ -120,12 +116,6 @@ fn execute_super(mut args: SuperArgs) -> Result<()> {
         let mut sub_agent = resolve_super_sub_agent(&args, false)?;
         if let Some(sub_agent) = sub_agent.as_mut() {
             sub_agent.presidio_enabled = use_presidio;
-        }
-        if matches!(args.cli, Some(agent) if agent != SuperCliAgent::Codex) {
-            return crate::runtime_gemini_cli::handle_super_native_cli_dry_run(
-                args,
-                sub_agent.as_ref(),
-            );
         }
         return handle_super_runtime_tools_dry_run(args, use_presidio, sub_agent.as_ref());
     }
@@ -164,72 +154,6 @@ mod tests {
         assert!(command_is_super_dry_run(&codex));
         assert!(!command_should_show_update_notice(&codex));
         assert!(!crate::housekeeping::command_runs_auto_runtime_housekeeping(&codex));
-    }
-
-    #[test]
-    #[cfg(unix)]
-    fn command_dispatch_does_not_repeat_native_preflight() {
-        use std::fs;
-        use std::os::unix::fs::PermissionsExt;
-        use std::time::{SystemTime, UNIX_EPOCH};
-
-        let root = std::env::temp_dir().join(format!(
-            "prodex-native-preflight-count-{}-{}",
-            std::process::id(),
-            SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_nanos(),
-        ));
-        fs::create_dir_all(&root).unwrap();
-        let agy = root.join("agy");
-        let marker = root.join("preflight-count");
-        fs::write(
-            &agy,
-            "#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then printf x >> \"$PRODEX_AGY_PREFLIGHT_MARKER\"; fi\nexit 0\n",
-        )
-        .unwrap();
-        fs::set_permissions(&agy, fs::Permissions::from_mode(0o755)).unwrap();
-
-        let _lock = crate::test_support::TestEnvVarGuard::lock();
-        let _home = crate::test_support::TestEnvVarGuard::set(
-            "PRODEX_HOME",
-            root.to_str().expect("test root should be UTF-8"),
-        );
-        let _agy = crate::test_support::TestEnvVarGuard::set(
-            "PRODEX_AGY_BIN",
-            agy.to_str().expect("test binary should be UTF-8"),
-        );
-        let _marker = crate::test_support::TestEnvVarGuard::set(
-            "PRODEX_AGY_PREFLIGHT_MARKER",
-            marker.to_str().expect("test marker should be UTF-8"),
-        );
-        let crate::Commands::Super(args) = parse_cli_command_from([
-            "prodex",
-            "super",
-            "--cli",
-            "agy",
-            "--provider",
-            "gemini",
-            "gui",
-            "extra",
-        ])
-        .expect("native Super command should parse") else {
-            panic!("expected Super command");
-        };
-
-        crate::runtime_gemini_cli::validate_super_native_cli_preflight(&args)
-            .expect("native preflight should succeed");
-        let error = execute_command(crate::Commands::Super(args))
-            .expect_err("extra GUI argument should fail before launch");
-        assert!(
-            error
-                .to_string()
-                .contains("does not accept Codex CLI arguments")
-        );
-        assert_eq!(fs::read_to_string(&marker).unwrap().len(), 1);
-
-        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

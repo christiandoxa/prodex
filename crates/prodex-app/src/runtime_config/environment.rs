@@ -2,7 +2,6 @@ use super::ConfigError;
 use std::collections::BTreeMap;
 use std::env;
 use std::ffi::OsString;
-use std::path::PathBuf;
 
 const RUNTIME_CONFIG_ENV_KEYS: &[&str] = &[
     prodex_runtime_policy::PRODEX_RUNTIME_PROXY_PRESET_ENV,
@@ -122,16 +121,6 @@ impl RuntimeConfigEnvironment {
 
     pub(super) fn get(&self, key: &'static str) -> Option<&OsString> {
         self.values.get(key).and_then(Option::as_ref)
-    }
-
-    pub(super) fn path(&self, key: &'static str) -> Option<PathBuf> {
-        self.get(key).map(PathBuf::from)
-    }
-
-    pub(super) fn nonempty_path(&self, key: &'static str) -> Option<PathBuf> {
-        self.get(key)
-            .filter(|path| !path.is_empty())
-            .map(PathBuf::from)
     }
 }
 
@@ -315,23 +304,6 @@ impl RuntimeConfigParser {
                     "1" | "true" | "yes" | "on"
                 )
             })
-    }
-
-    pub(super) fn compatibility_optional_bool(&mut self, key: &'static str) -> Option<bool> {
-        let value = self.environment.get(key)?;
-        let Some(value) = value.to_str() else {
-            self.compatibility_defaults.push(key);
-            return None;
-        };
-        let parsed = match value.trim().to_ascii_lowercase().as_str() {
-            "1" | "true" | "yes" | "on" => Some(true),
-            "0" | "false" | "no" | "off" => Some(false),
-            _ => None,
-        };
-        if parsed.is_none() {
-            self.compatibility_defaults.push(key);
-        }
-        parsed
     }
 
     pub(super) fn compatibility_text(&mut self, key: &'static str) -> Option<String> {
