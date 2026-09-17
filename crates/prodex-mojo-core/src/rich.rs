@@ -49,8 +49,8 @@ pub use anthropic_request::{
 mod runtime_anthropic;
 pub use runtime_anthropic::{
     RUNTIME_ANTHROPIC_FLAG_CACHED_TOKENS, RUNTIME_ANTHROPIC_FLAG_ERROR,
-    RUNTIME_ANTHROPIC_FLAG_MAX_OUTPUT_LENGTH, RuntimeAnthropicKernelInput,
-    RuntimeAnthropicKernelOperation, runtime_anthropic_kernel,
+    RUNTIME_ANTHROPIC_FLAG_MAX_OUTPUT_LENGTH, RUNTIME_ANTHROPIC_FLAG_SUPPORTS_XHIGH,
+    RuntimeAnthropicKernelInput, RuntimeAnthropicKernelOperation, runtime_anthropic_kernel,
 };
 mod policy;
 pub use policy::{
