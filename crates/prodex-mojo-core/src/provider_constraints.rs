@@ -1,4 +1,5 @@
 pub const PROVIDER_CONSTRAINT_ABI_VERSION: i64 = 2;
+pub const PROVIDER_CONSTRAINT_COMBO_ABI_VERSION: i64 = 1;
 pub const PROVIDER_CONSTRAINT_INPUT_I64_FIELD_COUNT: usize = 17;
 pub const PROVIDER_CONSTRAINT_INPUT_U64_FIELD_COUNT: usize = 7;
 pub const PROVIDER_CONSTRAINT_OUTPUT_I64_FIELD_COUNT: usize = 12;
@@ -209,7 +210,8 @@ pub use gemini_sse_tool_call_index::{
     GeminiToolCallIndexBinding, GeminiToolCallIndexRecord, gemini_tool_call_index,
 };
 pub use planning::{
-    Preclassification, PreclassificationInput, RequirementResolution, RequirementResolutionInput,
+    ComboOutputAdjustment, ComboOutputAdjustmentInput, Preclassification, PreclassificationInput,
+    RequirementResolution, RequirementResolutionInput, normalize_combo_output_adjustment,
     preclassify, resolve_requirement_input,
 };
 
