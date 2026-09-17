@@ -89,6 +89,7 @@ pub(super) fn detect_lockfile_or_vendor_noise_supplement(
     None
 }
 
+#[cfg(feature = "mojo")]
 pub(super) fn context_lockfile_or_vendor_path_finding(
     path: Option<&Path>,
     input_bytes: usize,

@@ -18,6 +18,7 @@ mod supplement;
 use self::basic::{is_lockfile_or_vendor_path, repeated_path_flood};
 #[cfg(any(not(feature = "mojo"), test))]
 use self::basic::{looks_like_base64_blob, looks_like_minified_js_json};
+#[cfg(feature = "mojo")]
 use self::lock_vendor::context_lockfile_or_vendor_path_finding;
 pub(crate) use self::paths::{
     context_noise_normalize_path_token_supplement,

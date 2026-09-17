@@ -89,14 +89,3 @@ cargo test -q -p prodex-provider-core
 
 Pure predicates and payload shaping belong in `prodex-provider-core`; auth,
 state, transport, and retry timing belong in `prodex-app`.
-
-## App-server broker
-
-`prodex app-server-broker --experimental-stdio-live` launches `codex app-server`,
-validates lifecycle frames bidirectionally with one shared lifecycle state, and
-preserves stdio passthrough. Default app-server traffic remains passthrough;
-model HTTP traffic uses the normal silent runtime-proxy preparation.
-
-The broker validates protocol drift but is not a second provider router. It
-does not own provider selection or weaken `previous_response_id`, turn-state,
-or `session_id` affinity.

@@ -290,8 +290,8 @@ fn ensure_supported_main_effort(
     }
 }
 
-#[cfg(any(not(feature = "mojo-core"), test))]
-pub(super) fn ensure_supported_effort(
+#[cfg(not(feature = "mojo-core"))]
+fn ensure_supported_effort(
     provider: prodex_provider_core::ProviderId,
     model: Option<&str>,
     effort: &str,

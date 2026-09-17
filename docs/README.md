@@ -19,8 +19,6 @@ not retained here; Git history is the record for obsolete material.
 | [Provider conformance](provider-conformance.md) | Adapter contract |
 | [Harness modes](harness-modes.md) | Model-facing request policy |
 | [Super sub-agents](sub-agents.md) | Staged CLI contract, session boundaries, and local-process design |
-| [Expose deep dive](../EXPOSE.md) | Canonical local, Cloudflare, and OpenAI Secure MCP Tunnel guide |
-| [ChatGPT MCP expose](expose.md) | Short Expose reference and compatibility link |
 
 ## Security, Operations, and Release
 
@@ -32,7 +30,6 @@ not retained here; Git history is the record for obsolete material.
 | [Supply chain](supply-chain.md) | Pins, provenance, and release gates |
 | [Deployment](deployment.md) | Supported deployment patterns |
 | [Backup and restore](backup-restore.md) | Recovery contract |
-| [Local control plane](local-control-plane.md) | Local administration boundary |
 
 ## Enterprise Governance
 

@@ -7,7 +7,6 @@ fn command_runtime_and_process_labels_follow_canonical_parsing() {
         &["prodex", "fix this bug"][..],
         &["prodex", "run"][..],
         &["prodex", "s"][..],
-        &["prodex", "super", "expose"][..],
         &["prodex", "__runtime-broker"][..],
     ] {
         let command = parse_cli_command_from(args.iter().copied())
@@ -43,13 +42,6 @@ fn super_positioned_aliases_survive_no_presidio() {
             strict: true,
             presidio: false,
         }))
-    ));
-
-    let command = parse_cli_command_from(["prodex", "s", "--no-presidio", "expose", "--tunnel"])
-        .expect("positioned Super expose should parse");
-    assert!(matches!(
-        command,
-        Commands::Expose(ExposeArgs { tunnel: true, .. })
     ));
 
     let Commands::Super(mut args) = parse_cli_command_from([

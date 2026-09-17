@@ -309,38 +309,6 @@ impl fmt::Debug for GuiArgs {
     }
 }
 
-#[derive(Args)]
-pub struct DashboardArgs {
-    /// Interface to bind. Defaults to localhost only.
-    #[arg(long, default_value = "127.0.0.1", value_name = "HOST")]
-    pub host: String,
-    /// Port to bind. Use 0 to ask the OS for a free port.
-    #[arg(long, default_value_t = 8765, value_name = "PORT")]
-    pub port: u16,
-    /// Override the ChatGPT backend base URL used for quota requests.
-    #[arg(long, value_name = "URL")]
-    pub base_url: Option<String>,
-    /// Open the dashboard in the system browser after binding.
-    #[arg(long, hide = true)]
-    pub open: bool,
-    /// Retry with an OS-assigned port when the requested port is busy.
-    #[arg(long, hide = true)]
-    pub fallback_port: bool,
-}
-
-impl fmt::Debug for DashboardArgs {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter
-            .debug_struct("DashboardArgs")
-            .field("host", &self.host)
-            .field("port", &self.port)
-            .field("base_url_configured", &self.base_url.is_some())
-            .field("open", &self.open)
-            .field("fallback_port", &self.fallback_port)
-            .finish()
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -366,18 +334,10 @@ mod tests {
             base_url: base_url.clone(),
             no_proxy: false,
         };
-        let dashboard = DashboardArgs {
-            host: "127.0.0.1".to_string(),
-            port: 8765,
-            base_url,
-            open: false,
-            fallback_port: false,
-        };
 
         for rendered in [
             format!("{quota:?}"),
             format!("{redeem:?}"),
-            format!("{dashboard:?}"),
             format!(
                 "{:?}",
                 CodexPassthroughArgs {
