@@ -5,10 +5,11 @@ mod input;
 
 pub fn deepseek_provider_core_simple_request(
     body: &[u8],
-    mut has_stored_previous_response_id: impl FnMut(&str) -> bool,
+    has_stored_previous_response_id: impl FnMut(&str) -> bool,
 ) -> bool {
     #[cfg(feature = "mojo")]
     {
+        let mut has_stored_previous_response_id = has_stored_previous_response_id;
         let Ok(value) = serde_json::from_slice::<serde_json::Value>(body) else {
             return false;
         };
@@ -30,7 +31,6 @@ pub fn deepseek_provider_core_simple_request(
 
 #[cfg(not(feature = "mojo"))]
 mod rust_compat {
-    use super::*;
 
     pub(super) fn simple_request_rust(
         body: &[u8],

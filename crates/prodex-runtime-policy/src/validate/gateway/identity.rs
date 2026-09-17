@@ -220,6 +220,83 @@ fn validate_gateway_sso_identifiers(
     Ok(())
 }
 
+#[cfg(feature = "mojo")]
+fn validate_gateway_sso_shape(sso: &RuntimePolicyGatewaySsoSettings, path: &Path) -> Result<bool> {
+    let oidc_enabled = sso.oidc_issuer.is_some()
+        || sso.oidc_audience.is_some()
+        || sso.oidc_jwks_url.is_some()
+        || !sso.oidc_jwks_origin_allowlist.is_empty()
+        || sso.authentication_strength.is_some()
+        || sso.reauthentication_max_age_seconds.is_some();
+    let required_scope_valid = sso
+        .required_scope
+        .as_deref()
+        .is_none_or(|scope| matches!(scope, "control_plane" | "data_plane"));
+    let authentication_strength_valid = sso
+        .authentication_strength
+        .as_deref()
+        .is_none_or(|strength| matches!(strength, "mfa" | "phishing_resistant"));
+    let reauthentication_valid = if let Some(value) = sso.reauthentication_max_age_seconds {
+        failed_numeric_rules(&[NumericRule::Range {
+            value,
+            minimum: 1,
+            maximum: 86_400,
+        }])?
+        .is_empty()
+    } else {
+        true
+    };
+    let browser_configured = sso.browser_flow.is_some()
+        || sso.pkce_method.is_some()
+        || sso.oidc_authorization_url.is_some()
+        || sso.oidc_token_url.is_some()
+        || sso.oidc_client_id.is_some()
+        || sso.oidc_client_secret_ref.is_some()
+        || sso.oidc_redirect_uri.is_some();
+    let error = prodex_mojo_core::policy::gateway_shape_error(
+        prodex_mojo_core::policy::POLICY_GATEWAY_SHAPE_SSO,
+        &[
+            oidc_enabled,
+            sso.remote_human == Some(true),
+            required_scope_valid,
+            authentication_strength_valid,
+            reauthentication_valid,
+            browser_configured,
+            sso.browser_flow == Some(true),
+        ],
+    )
+    .map_err(|_| anyhow::anyhow!("gateway SSO shape validation returned invalid output"))?;
+    match error {
+        0 => Ok(oidc_enabled),
+        1 => bail!(
+            "gateway.sso.remote_human in {} requires exact OIDC issuer and audience",
+            path.display()
+        ),
+        2 => bail!(
+            "gateway.sso.required_scope in {} must be control_plane or data_plane",
+            path.display()
+        ),
+        3 => bail!(
+            "gateway.sso.authentication_strength in {} must be mfa or phishing_resistant",
+            path.display()
+        ),
+        4 => bail!(
+            "gateway.sso.reauthentication_max_age_seconds in {} must be between 1 and 86400",
+            path.display()
+        ),
+        5 => bail!(
+            "gateway.sso browser settings in {} require browser_flow=true",
+            path.display()
+        ),
+        6 => bail!(
+            "gateway.sso.browser_flow in {} requires exact OIDC issuer and audience",
+            path.display()
+        ),
+        _ => bail!("gateway SSO shape validation failed in {}", path.display()),
+    }
+}
+
+#[cfg(not(feature = "mojo"))]
 fn validate_gateway_sso_shape(sso: &RuntimePolicyGatewaySsoSettings, path: &Path) -> Result<bool> {
     let oidc_enabled = sso.oidc_issuer.is_some()
         || sso.oidc_audience.is_some()

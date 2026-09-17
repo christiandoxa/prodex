@@ -115,6 +115,62 @@ pub fn validate_runtime_governance_settings(
     let numeric_failures = governance_numeric::governance_numeric_failures(governance)?;
     validate_governance_policy_rules(governance, &numeric_failures.policy_rules, path)?;
     governance_numeric::validate_governance_session(numeric_failures.session, path)?;
+    validate_governance_rollout_shape(governance, path)?;
+    Ok(())
+}
+
+#[cfg(feature = "mojo")]
+fn validate_governance_rollout_shape(
+    governance: &crate::types::RuntimePolicyGovernanceSettings,
+    path: &Path,
+) -> Result<()> {
+    let enforcing = governance_is_enforcing(governance);
+    let error = prodex_mojo_core::policy::gateway_shape_error(
+        prodex_mojo_core::policy::POLICY_GATEWAY_SHAPE_GOVERNANCE,
+        &[
+            enforcing,
+            governance.inspection == RuntimeGovernanceRolloutMode::Enforce,
+            governance.classification == RuntimeGovernanceRolloutMode::Enforce,
+            governance.policy == RuntimeGovernanceRolloutMode::Enforce,
+            governance.routing == RuntimeGovernanceRolloutMode::Enforce,
+            governance.mandatory_audit,
+            governance.mode == RuntimeGovernanceMode::BankEnforce,
+            governance.anonymous_data_plane,
+            governance.raw_secret_sources,
+        ],
+    )
+    .map_err(|_| anyhow::anyhow!("governance shape validation returned invalid output"))?;
+    match error {
+        0 => {}
+        1 => bail!(
+            "enforcing governance mode requires inspection, classification, policy, and routing enforcement in {}",
+            path.display()
+        ),
+        2 => bail!(
+            "enforcing governance mode requires mandatory audit in {}",
+            path.display()
+        ),
+        3 => bail!(
+            "bank governance mode forbids anonymous data-plane access in {}",
+            path.display()
+        ),
+        4 => bail!(
+            "bank governance mode requires secret references in {}",
+            path.display()
+        ),
+        _ => bail!("governance shape validation failed in {}", path.display()),
+    }
+    if enforcing {
+        validate_enforcing_governance_settings(governance, path)?;
+    }
+    Ok(())
+}
+
+#[cfg(not(feature = "mojo"))]
+fn validate_governance_rollout_shape(
+    governance: &crate::types::RuntimePolicyGovernanceSettings,
+    path: &Path,
+) -> Result<()> {
     if governance_is_enforcing(governance)
         && [
             governance.inspection,
@@ -152,6 +208,7 @@ fn governance_is_enforcing(governance: &crate::types::RuntimePolicyGovernanceSet
     )
 }
 
+#[cfg(not(feature = "mojo"))]
 fn validate_bank_governance_settings(
     governance: &crate::types::RuntimePolicyGovernanceSettings,
     path: &Path,
@@ -171,6 +228,94 @@ fn validate_bank_governance_settings(
     Ok(())
 }
 
+#[cfg(feature = "mojo")]
+fn validate_enforcing_governance_settings(
+    governance: &crate::types::RuntimePolicyGovernanceSettings,
+    path: &Path,
+) -> Result<()> {
+    let provider = governance.provider.as_ref();
+    let flags = [
+        governance.policy_revision.is_some(),
+        governance
+            .policy_valid_until_unix_ms
+            .is_some_and(|value| value != 0),
+        governance
+            .classification_revision
+            .as_deref()
+            .is_some_and(governance_token_is_valid),
+        governance
+            .classification_checksum
+            .as_deref()
+            .is_some_and(governance_token_is_valid),
+        governance
+            .provider_registry_revision
+            .is_some_and(|value| value != 0),
+        governance
+            .routing_score_revision
+            .is_some_and(|value| value != 0),
+        provider.is_some(),
+        provider.is_some_and(|provider| provider.descriptor_revision != 0),
+        provider.is_some_and(|provider| !provider.regions.is_empty()),
+        provider.is_some_and(|provider| provider.regions.len() <= 16),
+        provider.is_some_and(|provider| {
+            provider
+                .regions
+                .iter()
+                .all(|region| governance_token_is_valid(region))
+        }),
+        governance.mode == RuntimeGovernanceMode::BankEnforce,
+        provider.is_some_and(|provider| {
+            provider.trust_tier >= crate::types::RuntimeGovernanceProviderTrustTier::Enterprise
+        }),
+        provider.is_some_and(|provider| provider.training_use),
+        provider.is_some_and(|provider| provider.retention_seconds == 0),
+        governance.classification_unknown == RuntimeGovernanceUnknownClassificationBehavior::Deny,
+        governance.policy_failure_mode == RuntimeGovernancePolicyFailureMode::Closed,
+        governance.active_policy_revision.is_some(),
+        governance.active_policy_revision == governance.policy_revision,
+        governance.session.absolute_timeout_seconds.is_some(),
+        governance.session.idle_timeout_seconds.is_some(),
+        governance.session.max_concurrent.is_some(),
+    ];
+    let error = prodex_mojo_core::policy::gateway_shape_error(
+        prodex_mojo_core::policy::POLICY_GATEWAY_SHAPE_ENFORCING,
+        &flags,
+    )
+    .map_err(|_| anyhow::anyhow!("governance enforcing validation returned invalid output"))?;
+    match error {
+        0 => Ok(()),
+        1 => bail!(
+            "enforcing governance mode requires valid immutable snapshot revisions in {}",
+            path.display()
+        ),
+        2 => bail!(
+            "enforcing governance mode requires an approved provider registry entry in {}",
+            path.display()
+        ),
+        3 => bail!(
+            "governance provider registry entry is invalid in {}",
+            path.display()
+        ),
+        4 => bail!(
+            "bank governance mode requires an approved no-retention provider in {}",
+            path.display()
+        ),
+        5 => bail!(
+            "enforcing governance mode requires deny-on-unknown classification, fail-closed policy, and matching active policy revision in {}",
+            path.display()
+        ),
+        6 => bail!(
+            "enforcing governance mode requires explicit bounded session controls in {}",
+            path.display()
+        ),
+        _ => bail!(
+            "governance enforcing validation failed in {}",
+            path.display()
+        ),
+    }
+}
+
+#[cfg(not(feature = "mojo"))]
 fn validate_enforcing_governance_settings(
     governance: &crate::types::RuntimePolicyGovernanceSettings,
     path: &Path,
@@ -444,6 +589,79 @@ fn validate_governance_policy_obligation(
     Ok(())
 }
 
+#[cfg(feature = "mojo")]
+fn validate_bank_deployment(policy: &RuntimePolicyFile, path: &Path) -> Result<()> {
+    let governance = &policy.governance;
+    let flags = [
+        governance.classification_default == RuntimeGovernanceDataClassification::Restricted,
+        policy.secrets.production,
+        policy
+            .gateway
+            .listen_addr
+            .as_deref()
+            .is_some_and(bank_bind_address_is_private),
+        policy.gateway.expected_host.is_some(),
+        policy.gateway.restricted_egress == Some(true),
+        policy
+            .gateway
+            .replica_count
+            .is_some_and(|replicas| replicas >= 2)
+            && policy.gateway.require_multi_replica_accounting_checks == Some(true),
+        policy.gateway.state.backend.as_deref() == Some("postgres")
+            && policy.gateway.state.postgres_url_ref.is_some()
+            && policy.gateway.state.redis_url_ref.is_some(),
+        true,
+        true,
+        true,
+    ];
+    let error = prodex_mojo_core::policy::gateway_shape_error(
+        prodex_mojo_core::policy::POLICY_GATEWAY_SHAPE_BANK_DEPLOYMENT,
+        &flags,
+    )
+    .map_err(|_| anyhow::anyhow!("bank deployment validation returned invalid output"))?;
+    match error {
+        0 => {}
+        1 => bail!(
+            "bank governance mode requires restricted default classification in {}",
+            path.display()
+        ),
+        2 => bail!(
+            "bank governance mode requires production projected secret references in {}",
+            path.display()
+        ),
+        3 => bail!(
+            "bank governance mode requires a private gateway listen address in {}",
+            path.display()
+        ),
+        4 => bail!(
+            "bank governance mode requires an exact gateway expected host in {}",
+            path.display()
+        ),
+        5 => bail!(
+            "bank governance mode requires restricted egress in {}",
+            path.display()
+        ),
+        6 => bail!(
+            "bank governance mode requires a highly available gateway with multi-replica accounting checks in {}",
+            path.display()
+        ),
+        7 => bail!(
+            "bank governance mode requires shared PostgreSQL state and Redis coordination SecretRefs in {}",
+            path.display()
+        ),
+        _ => bail!("bank deployment validation failed in {}", path.display()),
+    }
+    validate_bank_workload_identity(policy, path)?;
+    match policy.service_mode {
+        RuntimePolicyServiceMode::Gateway => validate_bank_gateway_mode(policy, path)?,
+        RuntimePolicyServiceMode::ControlPlane => {
+            validate_bank_control_plane_admin_tokens(policy, path)?;
+        }
+    }
+    Ok(())
+}
+
+#[cfg(not(feature = "mojo"))]
 fn validate_bank_deployment(policy: &RuntimePolicyFile, path: &Path) -> Result<()> {
     let governance = &policy.governance;
     if governance.classification_default != RuntimeGovernanceDataClassification::Restricted {
@@ -511,6 +729,52 @@ fn validate_bank_deployment(policy: &RuntimePolicyFile, path: &Path) -> Result<(
     Ok(())
 }
 
+#[cfg(feature = "mojo")]
+fn validate_bank_gateway_mode(policy: &RuntimePolicyFile, path: &Path) -> Result<()> {
+    let sso = &policy.gateway.sso;
+    let observability = &policy.gateway.observability;
+    let flags = [
+        sso.remote_human == Some(true),
+        sso.oidc_issuer.is_some(),
+        sso.oidc_audience.is_some(),
+        sso.required_scope.as_deref() == Some("control_plane"),
+        sso.require_tenant == Some(true),
+        sso.authentication_strength.as_deref() == Some("phishing_resistant"),
+        sso.reauthentication_max_age_seconds
+            .is_some_and(|seconds| seconds <= 900),
+        observability.sinks.iter().any(|sink| sink == "siem"),
+        observability.siem_endpoint.is_some(),
+        observability.siem_bearer_token_ref.is_some(),
+        observability.siem_mtls_identity_ref.is_some(),
+        observability.siem_signing_key_ref.is_some(),
+        observability.siem_max_batch_events.is_some()
+            && observability.siem_max_batch_bytes.is_some()
+            && observability.siem_max_attempts.is_some(),
+        observability.siem_retry_base_ms.is_some()
+            && observability.siem_retry_max_ms.is_some()
+            && observability.siem_max_lag_ms.is_some(),
+    ];
+    let error = prodex_mojo_core::policy::gateway_shape_error(
+        prodex_mojo_core::policy::POLICY_GATEWAY_SHAPE_BANK_GATEWAY,
+        &flags,
+    )
+    .map_err(|_| anyhow::anyhow!("bank gateway validation returned invalid output"))?;
+    if error != 0 {
+        if flags[..7].iter().any(|flag| !*flag) {
+            bail!(
+                "bank governance gateway mode requires exact remote human OIDC issuer, audience, control_plane scope, tenant requirement, phishing_resistant authentication, and reauthentication within 900 seconds in {}",
+                path.display()
+            );
+        }
+        bail!(
+            "bank governance gateway mode requires a bounded SecretRef/mTLS/signing SIEM audit worker in {}",
+            path.display()
+        );
+    }
+    Ok(())
+}
+
+#[cfg(not(feature = "mojo"))]
 fn validate_bank_gateway_mode(policy: &RuntimePolicyFile, path: &Path) -> Result<()> {
     let sso = &policy.gateway.sso;
     if sso.remote_human != Some(true)
@@ -549,6 +813,51 @@ fn validate_bank_gateway_mode(policy: &RuntimePolicyFile, path: &Path) -> Result
     Ok(())
 }
 
+#[cfg(feature = "mojo")]
+fn validate_bank_workload_identity(policy: &RuntimePolicyFile, path: &Path) -> Result<()> {
+    let workload = &policy.gateway.workload_identity;
+    let required_scope = match policy.service_mode {
+        RuntimePolicyServiceMode::Gateway => "data_plane",
+        RuntimePolicyServiceMode::ControlPlane => "control_plane",
+    };
+    let oidc_shape_valid = match policy.service_mode {
+        RuntimePolicyServiceMode::Gateway => {
+            workload.issuer.is_some() && workload.audience.is_some()
+        }
+        RuntimePolicyServiceMode::ControlPlane => {
+            workload.issuer.is_none()
+                && workload.audience.is_none()
+                && workload.jwks_url.is_none()
+                && workload.jwks_origin_allowlist.is_empty()
+                && workload.subject_claim.is_none()
+                && workload.tenant_claim.is_none()
+                && workload.scope_claim.is_none()
+        }
+    };
+    let flags = [
+        workload.enabled == Some(true),
+        oidc_shape_valid,
+        workload.required_scope.as_deref() == Some(required_scope),
+        workload.mtls_required == Some(true),
+        workload.mtls_ca_ref.is_some(),
+        workload.tls_identity_ref.is_some(),
+    ];
+    let error = prodex_mojo_core::policy::gateway_shape_error(
+        prodex_mojo_core::policy::POLICY_GATEWAY_SHAPE_BANK_WORKLOAD,
+        &flags,
+    )
+    .map_err(|_| anyhow::anyhow!("bank workload validation returned invalid output"))?;
+    if error != 0 {
+        bail!(
+            "bank governance {} mode requires an exact {required_scope} workload identity bound to mTLS SecretRefs in {}",
+            policy.service_mode.as_str(),
+            path.display()
+        );
+    }
+    Ok(())
+}
+
+#[cfg(not(feature = "mojo"))]
 fn validate_bank_workload_identity(policy: &RuntimePolicyFile, path: &Path) -> Result<()> {
     let workload = &policy.gateway.workload_identity;
     let required_scope = match policy.service_mode {

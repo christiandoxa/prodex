@@ -101,6 +101,13 @@ unsafe extern "C" {
         classification: i64,
         output: u64,
     ) -> i64;
+    fn prodex_runtime_policy_gateway_shape_v1(
+        abi_version: i64,
+        mode: i64,
+        values: u64,
+        value_count: i64,
+        output: u64,
+    ) -> i64;
     fn prodex_mojo_migration_step_order_v1(
         abi_version: i64,
         steps: u64,
@@ -218,6 +225,45 @@ pub fn governance_classification_rules_valid(rules: &[(u8, u8)]) -> Result<i64, 
         .collect::<Vec<_>>();
     let output = governance_finding_classification(2, &values, rules.len(), 0)?;
     (0..=2)
+        .contains(&output)
+        .then_some(output)
+        .ok_or(crate::MojoError::InvalidOutput)
+}
+
+pub const POLICY_GATEWAY_SHAPE_GOVERNANCE: i64 = 0;
+pub const POLICY_GATEWAY_SHAPE_ENFORCING: i64 = 1;
+pub const POLICY_GATEWAY_SHAPE_BANK_DEPLOYMENT: i64 = 2;
+pub const POLICY_GATEWAY_SHAPE_BANK_GATEWAY: i64 = 3;
+pub const POLICY_GATEWAY_SHAPE_BANK_WORKLOAD: i64 = 4;
+pub const POLICY_GATEWAY_SHAPE_SSO: i64 = 5;
+pub const POLICY_GATEWAY_SHAPE_WORKLOAD: i64 = 6;
+
+pub fn gateway_shape_error(mode: i64, flags: &[bool]) -> Result<i64, crate::MojoError> {
+    if flags.len() > 64 {
+        return Err(crate::MojoError::InvalidInput);
+    }
+    let values = flags
+        .iter()
+        .map(|value| i64::from(*value))
+        .collect::<Vec<_>>();
+    let mut output = -1_i64;
+    let status = unsafe {
+        prodex_runtime_policy_gateway_shape_v1(
+            1,
+            mode,
+            values.as_ptr() as u64,
+            i64::try_from(values.len()).map_err(|_| crate::MojoError::InvalidInput)?,
+            (&mut output as *mut i64) as u64,
+        )
+    };
+    if status != 0 {
+        return Err(match status {
+            1 | 2 => crate::MojoError::InvalidInput,
+            4 => crate::MojoError::AbiMismatch,
+            _ => crate::MojoError::InvalidOutput,
+        });
+    }
+    (0..=64)
         .contains(&output)
         .then_some(output)
         .ok_or(crate::MojoError::InvalidOutput)
