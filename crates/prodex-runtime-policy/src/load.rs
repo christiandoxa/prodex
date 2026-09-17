@@ -1,4 +1,4 @@
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, bail};
 use std::fs;
 use std::path::Path;
 
@@ -8,11 +8,9 @@ use crate::cache::{
 };
 use crate::paths::{resolve_runtime_policy_path, runtime_policy_path};
 use crate::types::{
-    RuntimePolicyConfig, RuntimePolicyFile, RuntimePolicyRuntimeSettings,
+    PRODEX_POLICY_VERSION, RuntimePolicyConfig, RuntimePolicyFile, RuntimePolicyRuntimeSettings,
     RuntimePolicySecretsSettings,
 };
-use crate::validate::validate_runtime_policy_file;
-use crate::validate_secrets::parse_secret_backend_kind;
 
 pub fn load_runtime_policy_cached(root: &Path) -> Result<Option<RuntimePolicyConfig>> {
     if let Some(cached) = cached_policy_for(root) {
@@ -43,12 +41,18 @@ pub fn load_runtime_policy_from_root(root: &Path) -> Result<Option<RuntimePolicy
     if !path.exists() {
         return Ok(None);
     }
-
     let content =
         fs::read_to_string(&path).with_context(|| format!("failed to read {}", path.display()))?;
     let parsed: RuntimePolicyFile =
         toml::from_str(&content).with_context(|| format!("failed to parse {}", path.display()))?;
-    validate_runtime_policy_file(&parsed, &path)?;
+    if parsed.version != PRODEX_POLICY_VERSION {
+        bail!(
+            "unsupported policy version {} in {}; expected {}",
+            parsed.version,
+            path.display(),
+            PRODEX_POLICY_VERSION
+        );
+    }
 
     let runtime = RuntimePolicyRuntimeSettings {
         log_format: parsed.runtime.log_format,
@@ -59,32 +63,44 @@ pub fn load_runtime_policy_from_root(root: &Path) -> Result<Option<RuntimePolicy
             .map(|value| resolve_runtime_policy_path(root, value))
             .transpose()?,
     };
-    let secrets = RuntimePolicySecretsSettings {
-        backend: parsed
-            .secrets
-            .backend
-            .as_deref()
-            .map(parse_secret_backend_kind)
-            .transpose()?,
-        keyring_service: parsed.secrets.keyring_service,
-        production: parsed.secrets.production,
-        projected_root: parsed
-            .secrets
-            .projected_root
-            .as_deref()
-            .map(|value| resolve_runtime_policy_path(root, value))
-            .transpose()?,
-        projected_provider: parsed.secrets.projected_provider,
-    };
+    let backend = parsed
+        .secrets
+        .backend
+        .as_deref()
+        .map(str::parse::<secret_store::SecretBackendKind>)
+        .transpose()
+        .map_err(anyhow::Error::new)?;
+    let keyring_service = parsed.secrets.keyring_service;
+    if keyring_service
+        .as_deref()
+        .is_some_and(|value| value.is_empty() || value.chars().any(char::is_whitespace))
+    {
+        bail!(
+            "secrets.keyring_service in {} must be non-empty without whitespace",
+            path.display()
+        );
+    }
+    if keyring_service.is_some() && backend != Some(secret_store::SecretBackendKind::Keyring) {
+        bail!(
+            "secrets.keyring_service in {} requires secrets.backend=keyring",
+            path.display()
+        );
+    }
+    if backend == Some(secret_store::SecretBackendKind::Keyring) && keyring_service.is_none() {
+        bail!(
+            "secrets.keyring_service in {} is required when secrets.backend=keyring",
+            path.display()
+        );
+    }
 
     Ok(Some(RuntimePolicyConfig {
         path,
         version: parsed.version,
-        service_mode: parsed.service_mode,
         runtime,
         runtime_proxy: parsed.runtime_proxy,
-        gateway: parsed.gateway,
-        secrets,
-        governance: parsed.governance,
+        secrets: RuntimePolicySecretsSettings {
+            backend,
+            keyring_service,
+        },
     }))
 }
