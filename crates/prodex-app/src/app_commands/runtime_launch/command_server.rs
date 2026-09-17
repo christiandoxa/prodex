@@ -1,11 +1,9 @@
 use super::{
-    AppPaths, AppState, AppStateIoExt, ChildProcessPlan, CodexRuntimeFeatureArgs,
-    PreparedRuntimeLaunch, Result, RunArgs, RunCommandStrategy, RuntimeLaunchPreparationBuilder,
-    RuntimeLaunchRequest, RuntimeLaunchSelection, RuntimeLaunchStrategy, RuntimeProxyEndpoint,
-    exit_with_status, is_codex_command_server_subcommand, prodex_dry_run_requested, run_child_plan,
-    validate_runtime_launch_upstream_base_url,
+    AppPaths, AppState, AppStateIoExt, PreparedRuntimeLaunch, Result, RunArgs, RunCommandStrategy,
+    RuntimeLaunchPreparationBuilder, RuntimeLaunchRequest, RuntimeLaunchSelection,
+    RuntimeLaunchStrategy, exit_with_status, is_codex_command_server_subcommand,
+    prodex_dry_run_requested, run_child_plan, validate_runtime_launch_upstream_base_url,
 };
-use std::ffi::OsString;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum RunLaunchRoute {
@@ -41,27 +39,6 @@ pub(super) fn execute_codex_command_server_managed_runtime(
     prodex_runtime_launch::cleanup_runtime_launch_plan(&plan);
     after_result?;
     exit_with_status(status)
-}
-
-pub(in crate::app_commands) fn codex_app_server_broker_launch(
-    profile: Option<&str>,
-) -> Result<(ChildProcessPlan, Option<RuntimeProxyEndpoint>)> {
-    let mut strategy = RunCommandStrategy::new(RunArgs {
-        profile: profile.map(str::to_string),
-        auto_rotate: false,
-        no_auto_rotate: false,
-        auto_redeem: false,
-        skip_quota_check: true,
-        full_access: false,
-        base_url: None,
-        no_proxy: false,
-        dry_run: false,
-        codex_features: CodexRuntimeFeatureArgs::default(),
-        codex_args: vec![OsString::from("app-server")],
-    })?;
-    let prepared = prepare_codex_command_server_runtime_launch(strategy.runtime_request())?;
-    let plan = strategy.build_plan(&prepared, prepared.runtime_proxy.as_ref())?;
-    Ok((plan.child, prepared.runtime_proxy))
 }
 
 pub(super) fn prepare_codex_command_server_runtime_launch(

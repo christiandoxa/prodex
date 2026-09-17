@@ -40,18 +40,12 @@ use tungstenite::{
 };
 
 mod app_commands;
-mod app_server_broker;
-#[cfg(unix)]
-mod app_server_control;
 mod app_state;
 mod audit_log;
 mod cli_args;
 mod codex_binary;
 mod command_dispatch;
 mod core_constants;
-mod dashboard;
-mod dashboard_html;
-mod expose;
 mod gateway_application;
 mod gateway_backend;
 mod housekeeping;
@@ -125,8 +119,6 @@ pub(crate) use cli_args::*;
 pub(crate) use codex_binary::{codex_bin, validate_selected_codex_binary};
 pub(crate) use codex_config::*;
 pub(crate) use core_constants::*;
-use dashboard::*;
-use expose::*;
 use housekeeping::*;
 pub(crate) use presidio_runtime::*;
 pub(crate) use prodex_core::AppPaths;

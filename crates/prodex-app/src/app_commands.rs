@@ -1,16 +1,11 @@
 use super::*;
-mod app_server_broker;
 mod audit;
 mod broker;
 mod capability;
 mod child_process;
 mod cleanup;
 mod context;
-mod dashboard;
 mod doctor;
-mod expose_config;
-#[cfg(test)]
-mod expose_config_tests;
 mod gateway;
 mod gui;
 mod info;
@@ -43,16 +38,13 @@ mod super_doctor;
 mod super_main_prompt;
 mod super_prompt;
 
-pub(crate) use self::app_server_broker::*;
 pub(crate) use self::audit::*;
 pub(crate) use self::broker::*;
 pub(crate) use self::capability::*;
 pub(crate) use self::child_process::*;
 pub(crate) use self::cleanup::*;
 pub(crate) use self::context::*;
-pub(crate) use self::dashboard::*;
 pub(crate) use self::doctor::*;
-pub(crate) use self::expose_config::resolve_super_expose_configuration;
 pub(crate) use self::gateway::*;
 pub(crate) use self::gui::*;
 pub(crate) use self::info::*;

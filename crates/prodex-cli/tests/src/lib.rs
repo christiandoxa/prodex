@@ -3,8 +3,6 @@ use std::ffi::OsString;
 mod app_server;
 mod cleanup;
 mod codex_01491;
-mod dashboard;
-mod expose;
 mod external_provider;
 mod harness;
 mod ping;

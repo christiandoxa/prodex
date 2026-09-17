@@ -63,6 +63,7 @@ fn set_runtime_proxy_log_format(format: RuntimeLogFormat) {
     );
 }
 
+#[cfg(test)]
 pub(super) fn create_runtime_proxy_log_path() -> Result<PathBuf> {
     create_runtime_proxy_log_path_in_dir(&runtime_proxy_log_dir())
 }
@@ -143,12 +144,13 @@ pub(crate) fn runtime_proxy_latest_log_path_from_pointer_text(
     }
 }
 
+#[cfg(test)]
 pub(super) fn initialize_runtime_proxy_log_path() -> Result<PathBuf> {
     let format = runtime_proxy_log_format();
     set_runtime_proxy_log_format(format);
     let log_path = create_runtime_proxy_log_path()?;
     if runtime_proxy_log_recording_enabled() {
-        write_runtime_proxy_latest_log_pointer(&log_path)
+        write_runtime_proxy_latest_log_pointer_in_dir(&log_path, &runtime_proxy_log_dir())
             .context("failed to update latest runtime log pointer")?;
     }
     initialize_runtime_proxy_log_contents(&log_path)?;
@@ -189,10 +191,6 @@ fn initialize_runtime_proxy_log_contents(log_path: &Path) -> Result<()> {
     logger
         .flush_path(log_path)
         .context("failed to initialize runtime log")
-}
-
-fn write_runtime_proxy_latest_log_pointer(log_path: &Path) -> io::Result<()> {
-    write_runtime_proxy_latest_log_pointer_in_dir(log_path, &runtime_proxy_log_dir())
 }
 
 fn write_runtime_proxy_latest_log_pointer_in_dir(

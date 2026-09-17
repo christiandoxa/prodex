@@ -42,17 +42,6 @@ pub struct Cli {
     pub command: Commands,
 }
 
-#[derive(Parser, Debug)]
-#[command(
-    name = "prodex expose",
-    bin_name = "prodex expose",
-    after_help = CLI_EXPOSE_AFTER_HELP
-)]
-struct SuperExposeCli {
-    #[command(flatten)]
-    args: runtime_args::SuperExposeArgs,
-}
-
 #[derive(Subcommand, Debug)]
 pub enum Commands {
     #[command(
@@ -150,10 +139,6 @@ pub enum Commands {
     #[command(about = "Launch Codex Desktop through Prodex on this platform.")]
     Gui(GuiArgs),
     #[command(
-        about = "Serve a local browser dashboard for profiles, active account, and quota usage."
-    )]
-    Dashboard(DashboardArgs),
-    #[command(
         trailing_var_arg = true,
         about = "Run codex through prodex with quota preflight and eligible pre-commit rotation.",
         after_help = CLI_RUN_AFTER_HELP
@@ -191,13 +176,6 @@ pub enum Commands {
     )]
     Super(SuperArgs),
     #[command(
-        about = "Expose a protected browser terminal, or `prodex s expose` as a ChatGPT MCP endpoint.",
-        after_help = CLI_EXPOSE_AFTER_HELP
-    )]
-    Expose(ExposeArgs),
-    #[command(about = "Inspect the experimental JSON-RPC app-server broker contract.")]
-    AppServerBroker(AppServerBrokerArgs),
-    #[command(
         about = "Run a standalone OpenAI-compatible gateway backed by Prodex provider routing."
     )]
     Gateway(GatewayArgs),
@@ -228,7 +206,6 @@ impl Commands {
                 | Self::Playwright(_)
                 | Self::Ponytail(_)
                 | Self::Super(_)
-                | Self::Expose(_)
                 | Self::Gateway(GatewayArgs { command: None, .. })
                 | Self::Claude(_)
                 | Self::RuntimeBroker(_)
@@ -258,15 +235,12 @@ impl Commands {
             Self::Redeem(_) => "redeem",
             Self::Ping(_) => "ping",
             Self::Gui(_) => "gui",
-            Self::Dashboard(_) => "dashboard",
             Self::Run(_) => "run",
             Self::Caveman(_) => "caveman",
             Self::Rtk(_) => "rtk",
             Self::Playwright(_) => "playwright",
             Self::Ponytail(_) => "ponytail",
             Self::Super(_) => "super",
-            Self::Expose(_) => "expose",
-            Self::AppServerBroker(_) => "app-server-broker",
             Self::Gateway(_) => "gateway",
             Self::Claude(_) => "claude",
             Self::RuntimeBroker(_) => "__runtime-broker",
@@ -283,9 +257,6 @@ where
     T: Into<OsString>,
 {
     let raw_args = args.into_iter().map(Into::into).collect::<Vec<_>>();
-    if let Some(command) = parse_super_expose_alias(&raw_args)? {
-        return Ok(command);
-    }
     let raw_args = rewrite_super_compat_args(&raw_args);
     let parse_args = if should_default_cli_invocation_to_run(&raw_args) {
         rewrite_cli_args_as_run(&raw_args)
@@ -313,107 +284,6 @@ where
     Ok(command)
 }
 
-fn parse_super_expose_alias(
-    args: &[OsString],
-) -> std::result::Result<Option<Commands>, clap::Error> {
-    if !matches!(
-        args.get(1).and_then(|arg| arg.to_str()),
-        Some("s" | "super")
-    ) {
-        return Ok(None);
-    }
-
-    let Some(expose_index) = super_expose_index(args) else {
-        return Ok(None);
-    };
-
-    let mut rewritten = Vec::with_capacity(args.len().saturating_sub(2));
-    rewritten.push(
-        args.first()
-            .cloned()
-            .unwrap_or_else(|| OsString::from("prodex")),
-    );
-    rewritten.extend(args.iter().skip(2).take(expose_index - 2).cloned());
-    rewritten.extend(args.iter().skip(expose_index + 1).cloned());
-    let parsed = SuperExposeCli::try_parse_from(rewritten)?;
-    let mut super_args = parsed.args.super_args;
-    super_args
-        .extract_super_overrides_from_codex_args()
-        .map_err(|error| clap::Error::raw(clap::error::ErrorKind::InvalidValue, error))?;
-    let mut expose = parsed.args.expose;
-    expose.invocation = ExposeInvocation::SuperAlias;
-    expose.super_args = Some(super_args);
-    Ok(Some(Commands::Expose(expose)))
-}
-
-fn super_expose_index(args: &[OsString]) -> Option<usize> {
-    let mut index = 2;
-    while index < args.len() {
-        let value = args[index].to_str()?;
-        if value == "--" {
-            return None;
-        }
-        if value == "expose" {
-            return Some(index);
-        }
-        if super_option_takes_value(value) {
-            index += 2;
-        } else if value.starts_with('-') {
-            index += 1;
-        } else {
-            return None;
-        }
-    }
-    None
-}
-
-fn super_option_takes_value(value: &str) -> bool {
-    matches!(
-        value.split_once('=').map_or(value, |(name, _)| name),
-        "-c" | "--config"
-            | "-p"
-            | "--command"
-            | "--name"
-            | "--cols"
-            | "--rows"
-            | "--max-clients"
-            | "--tunnel-provider"
-            | "--cloudflare-config"
-            | "--cloudflare-tunnel"
-            | "--cloudflare-hostname"
-            | "--cloudflare-origin-port"
-            | "--cloudflare-token-file"
-            | "--openai-tunnel-id"
-            | "--profile"
-            | "--base-url"
-            | "--provider"
-            | "--harness"
-            | "--api-key"
-            | "--sub-agent-provider"
-            | "--sub-agent-model"
-            | "--sub-agent-model-reasoning-effort"
-            | "--sub-agent-url"
-            | "--sub-agent-max-concurrency"
-            | "--model"
-            | "--local-model"
-            | "--url"
-            | "--context-window"
-            | "--local-context-window"
-            | "--auto-compact-token-limit"
-            | "--local-auto-compact-token-limit"
-            | "--cli"
-            | "--tool"
-            | "--require-tool"
-            | "--web-search"
-            | "--rollout-budget-tokens"
-            | "--rollout-budget-reminders"
-            | "--rollout-budget-sampling-weight"
-            | "--rollout-budget-prefill-weight"
-            | "--current-time-reminder-interval"
-            | "--current-time-clock-source"
-    )
-}
-
 fn rewrite_positioned_super_alias(
     args: &[OsString],
     command: Commands,
@@ -434,7 +304,6 @@ fn rewrite_positioned_super_alias(
             &super_args.codex_args,
             &["capability", "super-doctor"],
         ),
-        "expose" => rewrite_positioned_super_command(args, &super_args.codex_args, &["expose"]),
         "gemini" if super_args.provider.is_none() && super_args.url.is_none() => {
             super_args.provider = Some(SuperExternalProvider::Gemini);
             super_args.codex_args.remove(0);

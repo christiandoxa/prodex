@@ -128,6 +128,7 @@ pub(super) fn compact_watcher_delta_output(
 mod rust_compat {
     use super::*;
 
+    #[cfg(all(test, feature = "mojo"))]
     pub(super) fn watcher_delta_kind_allowed(kind: CommandOutputKind) -> bool {
         !matches!(
             kind,
@@ -201,6 +202,7 @@ mod rust_compat {
         (key.len() >= 6).then_some(key)
     }
 
+    #[cfg(all(test, feature = "mojo"))]
     pub(super) fn count_duplicate_watcher_delta_keys(lines: &[&str]) -> usize {
         let mut counts = BTreeMap::<String, usize>::new();
         for line in lines {
@@ -291,6 +293,7 @@ mod rust_compat {
             || trimmed.starts_with('x') && lower.contains(" failed")
     }
 
+    #[cfg(all(test, feature = "mojo"))]
     fn watcher_delta_entity_key(line: &str) -> String {
         let line = line
             .trim_start()
@@ -321,6 +324,7 @@ mod rust_compat {
     }
 }
 
+#[cfg(feature = "mojo")]
 fn watcher_kind_code(kind: CommandOutputKind) -> i64 {
     match kind {
         CommandOutputKind::Auto => 0,

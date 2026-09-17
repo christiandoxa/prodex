@@ -66,7 +66,6 @@ pub(crate) fn execute_command(command: Commands) -> Result<()> {
         Commands::Setup(args) => handle_setup(args),
         Commands::Capability(command) => handle_capability(command),
         Commands::Audit(args) => handle_audit(args),
-        Commands::AppServerBroker(args) => handle_app_server_broker(args),
         Commands::Context(command) => execute_context_command(command),
         Commands::Cleanup(args) => handle_cleanup(args),
         Commands::Presidio(command) => handle_presidio(command),
@@ -77,7 +76,6 @@ pub(crate) fn execute_command(command: Commands) -> Result<()> {
         Commands::Redeem(args) => handle_redeem(args),
         Commands::Ping(command) => handle_ping(command),
         Commands::Gui(args) => handle_gui(args),
-        Commands::Dashboard(args) => handle_dashboard(args),
         Commands::Run(args) => app_commands::runtime_launch::handle_run(args),
         Commands::Caveman(mut args) => {
             args.require_tool(prodex_optional_tools::OptionalToolId::Caveman);
@@ -93,7 +91,6 @@ pub(crate) fn execute_command(command: Commands) -> Result<()> {
             execute_optional_tool_alias(args, prodex_optional_tools::OptionalToolId::Ponytail)
         }
         Commands::Super(args) => execute_super(args),
-        Commands::Expose(args) => handle_expose(args),
         Commands::Gateway(args) => handle_gateway(args),
         Commands::Claude(args) => handle_claude(args),
         Commands::RuntimeBroker(args) => handle_runtime_broker(args),

@@ -18,8 +18,6 @@ Use multiple Codex accounts and supported provider backends from one command lin
 - [Optional tools](#optional-tools)
 - [Quick start](#quick-start)
 - [Daily command: `prodex s`](#daily-command-prodex-s)
-- [ChatGPT MCP expose](#chatgpt-mcp-expose)
-- [EXPOSE.md](EXPOSE.md)
 - [Commands](#commands)
 - [Modes](#modes)
 - [Sub-agents](docs/sub-agents.md)
@@ -440,7 +438,6 @@ prodex s
 prodex s exec "review this repo"
 prodex s doctor --strict
 prodex s doctor --presidio --strict
-prodex s expose
 ```
 
 <details>
@@ -454,17 +451,6 @@ prodex super --presidio
 ```
 
 Interactive Super launches render a terminal Presidio opt-in screen. Pass `--presidio` or `--no-presidio` for non-interactive launches. Ordinary interactive `prodex s` still selects the main agent and provider, then reuses the remembered provider-scoped model and effort without reopening those pickers. Super is the explicit YOLO entrypoint: it launches Codex with approval and sandbox bypass, bypasses hook-trust confirmation, and trusts the current workspace for that invocation without changing persisted Codex configuration. Use `prodex run` for the normal approval and workspace-trust flow.
-
-`prodex s expose` and `prodex s expose --no-tunnel` keep the browser terminal
-and MCP route local. `prodex s expose --tunnel` or
-`--tunnel-provider cloudflare-quick` (alias `cloudflare`) selects the Cloudflare
-Quick Tunnel and publishes the browser terminal plus MCP route.
-`--tunnel-provider cloudflare-existing` uses an existing Cloudflare config or
-token file. `--tunnel-provider openai` uses the OpenAI Secure MCP Tunnel for MCP
-only; the browser remains local and no public browser URL exists. Local MCP and
-tunnel-client `/readyz` readiness do not prove ChatGPT connector creation or
-remote discovery; the connector remains unverified until real remote traffic
-is observed.
 
 On Codex/provider-bridge paths, Smart Context preserves continuation metadata and critical signals while applying deterministic, validated context rewriting. Native opaque CLIs are outside that rewrite boundary. See [docs/smart-context.md](docs/smart-context.md) for its safety model and rollout controls.
 
@@ -488,105 +474,6 @@ guessing. It reports credential validation, first completed model-message
 latency, and terminal completion latency separately. This is an
 application-level provider diagnostic, not ICMP, DNS,
 TCP, TLS, or `/models` connectivity testing.
-
-## ChatGPT MCP expose
-
-Run this from the workspace you want the local connection to start in:
-
-```bash
-prodex s expose
-```
-
-In a real TTY, `prodex s expose` opens a Ratatui picker with **Local only**
-selected first. The choices are Local only, Cloudflare Quick Tunnel, Existing
-Cloudflare Tunnel, and OpenAI Secure MCP Tunnel. Use the keyboard to choose and
-confirm; Esc or `q` cancels before any external child starts. Without a TTY,
-the picker is never opened and the bare command remains loopback-only.
-
-Explicit automation modes are:
-
-```bash
-prodex s expose --no-tunnel                      # local browser + local MCP
-prodex s expose --tunnel                         # Cloudflare Quick public browser + MCP
-prodex s expose --tunnel-provider cloudflare-quick    # same explicit Quick Tunnel mode
-prodex s expose --tunnel-provider cloudflare-existing # existing Cloudflare config/token file
-prodex s expose --tunnel-provider openai         # OpenAI remote MCP; browser local
-```
-
-`cloudflare` remains an alias for `cloudflare-quick`, and `--no-tunnel` remains
-the local-only compatibility alias.
-
-WARNING: Cloudflare mode publishes a full-access Super capability. Anyone who
-obtains the complete URL can control the expose process as the current OS user;
-the URL is not OAuth or multi-user authentication. Existing Cloudflare mode
-requires a pre-created user-managed tunnel whose configured hostname routes to
-the selected loopback origin; Prodex does not request or display its secrets.
-OpenAI Secure MCP Tunnel is MCP-only and never publishes a generic
-browser-terminal URL. The OpenAI Platform tunnel must have the intended
-ChatGPT workspace association, and the runtime principal needs Tunnels
-**Read** + **Use**. A newly created tunnel may need its documented propagation
-window before connector setup succeeds.
-
-See [EXPOSE.md](EXPOSE.md) for the verified CLI reference, readiness layers,
-Cloudflare QUIC/HTTP/2 and DNS/DoH troubleshooting, OpenAI Secure MCP Tunnel
-configuration, lifecycle, security model, and focused tests.
-
-<details>
-<summary><strong>Expose configuration and ChatGPT connection</strong></summary>
-
-In an interactive terminal, Prodex asks for the main agent/provider/model,
-model-aware effort, optional sub-agent configuration, and expose mode before
-starting. Existing Cloudflare setup uses a public hostname and loopback origin
-port already configured by the user; Quick Tunnel remains ephemeral. Non-TTY
-launches use explicit, remembered, and normal default values without waiting for
-stdin.
-
-After readiness, Prodex prints the relevant local/public URLs and provider
-status. The interactive Ready panel wraps complete long URLs—including
-capability paths—across rows and scrolls its body on short terminals; it never
-silently clips or ellipsizes them. Add a model/effort override when needed:
-
-```bash
-prodex s expose --model gpt-5.6-luna -c 'model_reasoning_effort="max"'
-```
-
-The public URL is intended for ChatGPT Developer Mode's public MCP server URL
-connection. Treat the complete URL as a credential and stop the process to
-revoke it.
-
-When a plain `prodex s` is already running in the same workspace, the default
-MCP tool list also includes `prodex_session_prompt_write` and
-`prodex_session_output_read`. The first delivers one session input using only
-`{ "message": "..." }` in the common case; the second returns bounded, cursor-based
-user-visible user, assistant, tool, MCP/agent, and session/turn-status events.
-Both bind to the same process-bound Codex writer and
-thread, so this is a no-copy/paste bridge to the existing session and never
-starts another solver. The transport is Codex's supported app-server
-control plane; it does not write the PTY or SQLite queue payloads. An accepted
-write may return an optional `output_cursor` anchor for the exact pre-write
-rollout source; fresh sessions without a source return `null`. Output pages
-use bounded generic gap markers for safely skipped malformed, invalid-UTF-8,
-or oversized records, and mark bounded text with `[text_truncated]`.
-For development requests, use this bridge when exactly one compatible session exists,
-then keep using its returned PID, thread, and cursor. Start one
-`prodex_super_start` fallback only after authoritative `no_session`; ambiguity,
-stale identity, addressability, queue, source, or verification errors fail
-closed and never authorize a fallback. `write_ambiguous` means the queue request
-may have been accepted after a close, timeout, or malformed response; do not
-automatically replay it and do not treat it as exactly-once delivery.
-
-For independent command execution, call `prodex_super_exec`; it is synchronous
-and does not require or create a Super run or plain `prodex s` session. It passes
-argv directly, defaults `cwd` to the captured expose workspace, accepts bounded
-env/stdin/timeout fields, and returns bounded redacted stdout/stderr plus exit
-metadata. Use an explicit shell executable when shell syntax is needed:
-
-```json
-prodex_super_exec({"program":"python3","args":["-c","print('hello from Python')"]})
-prodex_super_exec({"program":"git","args":["status","--short"],"cwd":"/home/test-user/project"})
-```
-
-</details>
 
 ## Sub-agents
 
@@ -662,7 +549,6 @@ launcher, concurrency, resume-affinity, and isolation contracts.
 ```bash
 prodex
 prodex s
-prodex s expose
 prodex exec "review this repo"
 prodex quota --all
 prodex profile list
@@ -716,7 +602,6 @@ prodex quota --all --provider agy --once
 prodex redeem main
 prodex gui
 prodex s gui
-prodex dashboard --open
 prodex status
 ```
 
@@ -734,8 +619,6 @@ For OpenAI/Codex profiles, quota views also show earned rate-limit reset credits
 - **Linux:** install the `codex-desktop` command from [codex-desktop-linux](https://github.com/ilysenko/codex-desktop-linux). Prodex launches it with `--new-instance`.
 
 Prodex does not download, build, or redistribute either desktop app. Keep the launching terminal open while the GUI runs; that process owns the temporary profile overlay and local proxy.
-
-The browser control plane remains available separately through `prodex dashboard`. Use `prodex dashboard --open` to open it, `prodex dashboard --port 0` for an OS-selected free port, or `--base-url` for quota checks against a custom Codex-compatible backend. The responsive dashboard shows profile/account settings, provider presets, model metadata, quota, a bounded redacted runtime-log tail, theme selection, and runtime/gateway commands. It generates safe provider setup commands instead of storing provider secrets. Prodex enforces a loopback bind; use an SSH tunnel when remote access is required.
 
 </details>
 
@@ -845,10 +728,6 @@ Codex `multiAgentMode` is an app-server/thread setting, not a normal TUI `config
 `prodex mcp-server`, `prodex app-server`, and `prodex exec-server` preserve Codex command-server stdio and protocol arguments. Prodex performs runtime preparation silently: it selects the profile `CODEX_HOME` and routes model HTTP traffic through the same runtime proxy when rotation, pressure controls, or governance require it, without writing launch notices into the protocol stream. The JSON-RPC-aware app-server broker remains an explicit opt-in for validating the stdio frames themselves.
 
 Codex 0.149 commands remain Codex-owned passthrough: `prodex queue --thread THREAD --message TEXT` reaches `codex queue`, and `prodex agents` opens Codex's shared task dashboard. In-session `/cd`, `/pwd`, and `/cwd` are likewise handled by Codex; Prodex consumes turn-time working-directory metadata instead of freezing the launch directory.
-
-`prodex app-server-broker --json` exposes the live-validated broker contract. It recognizes JSON-RPC lifecycle methods such as `initialize`, `thread/start`, `thread/resume`, `thread/fork`, `turn/start`, and `turn/interrupt`, while still accepting compatibility aliases such as `notifications/initialized` and `turn/cancel`. The parser matches upstream wire behavior where `jsonrpc: "2.0"` may be omitted and advertises ordered continuation decisions as `fresh`, `continue-session`, `continue-thread`, and `continue-turn`.
-
-The broker classifies newline-delimited JSON-RPC frames as `batch`, `request`, `notification`, `response`, or `invalid`; bounds stdio reads and rejects lines over 1 MiB before JSON parsing; validates envelope shape, IDs, params, method names, response/error payloads, and lifecycle order; derives session/thread/turn/item metadata plus ordered affinity keys; and exposes invalid-reason counters. Non-empty JSON-RPC batches are bounded to 4,096 members, validated member by member for lifecycle and request/response correlation, and forwarded as the exact original line; empty, oversized, nested, or invalid-member batches fail closed before passthrough. Secret-looking JSON-RPC string fields are redacted from diagnostics and logs. `--experimental-stdio` runs a diagnostic preview, `--experimental-stdio-passthrough-preview` mirrors input with diagnostics on stderr, `--experimental-stdio-validate` fails on invalid input, and `--experimental-stdio-validate-passthrough` forwards only valid frames. `--experimental-stdio-live [--profile NAME]` launches the selected profile's real `codex app-server`, validates both client-to-server and server-to-client streams against one shared lifecycle session, forwards only validated frames, and terminates the child on protocol or transport failure. Default Codex app-server passthrough remains unchanged; the broker does not invent provider routing. Each broker session appends one counts-only local `prodex audit` summary. Schema/replay drift fixtures live under `crates/prodex-app/tests/fixtures/compat_replay/`.
 
 Codex plugin catalog commands are managed passthrough by default:
 

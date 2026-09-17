@@ -48,44 +48,6 @@ Common command edit points:
 
 ## ChatGPT Expose Composition
 
-The ChatGPT convenience path is an additive composition around the existing
-browser expose subsystem:
-
-```text
-ChatGPT
-  -> Cloudflare Quick Tunnel, user-managed Cloudflare hostname, or OpenAI Secure MCP Tunnel
-  -> loopback HTTP listener
-  -> exact capability + public Host policy
-  -> Streamable HTTP JSON MCP adapter
-  -> process-local run manager
-  -> normal `prodex s exec -` child
-  -> shared Super/runtime/profile routing
-```
-
-`prodex s expose` captures one canonical initial workspace and configures Super
-before generating a capability. Quick Tunnel mode binds `127.0.0.1:0` and starts
-one directly invoked, user-config-isolated `cloudflared tunnel --protocol auto
---url ...` child. Existing Tunnel mode binds the user-selected loopback port,
-uses the exact validated hostname, and does not start or stop cloudflared. The
-public default admits only `/pdx/v1/<capability>/mcp`; `prodex expose --tunnel`
-and `prodex s expose --tunnel` retain the explicit browser-terminal behavior.
-`prodex s expose --tunnel-provider openai` supervises the official tunnel client
-for MCP connectivity only: its browser terminal stays local and no public
-browser URL is generated.
-
-The MCP layer owns ingress validation, protocol schemas, bounded run lifecycle,
-and redacted status/events/results. It does not own model selection, provider
-routing, quota, auto-rotation, Codex continuation, optional tools, or account
-selection. A run task is delivered over stdin, not argv, and the child uses the
-same Super argument/runtime path as local execution.
-
-An expose process is the isolation unit for active state: capability digest,
-workspace, server identity, tunnel, run manager, event/output rings, and child
-process groups are not shared. Multiple processes may still share the existing
-merge-safe `PRODEX_HOME` profile/quota/health and durable-preference state. The
-MCP endpoint is intentionally not a filesystem sandbox beyond the underlying
-Super permission model; documentation must reflect that full-access caveat.
-
 ## Runtime Proxy Hot Path
 
 Runtime launch and proxy flow:
