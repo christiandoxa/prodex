@@ -95,9 +95,7 @@ pub enum Commands {
         after_help = CLI_SUPER_AFTER_HELP
     )]
     Super(Box<SuperArgs>),
-    #[command(
-        about = "Run a standalone OpenAI-compatible gateway backed by Prodex provider routing."
-    )]
+    #[command(about = "Run a lean OpenAI-compatible provider gateway.")]
     Gateway(GatewayArgs),
     #[command(
         trailing_var_arg = true,
@@ -121,7 +119,7 @@ impl Commands {
             self,
             Self::Run(_)
                 | Self::Super(_)
-                | Self::Gateway(GatewayArgs { command: None, .. })
+                | Self::Gateway(_)
                 | Self::Claude(_)
                 | Self::RuntimeBroker(_)
         )

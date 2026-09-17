@@ -7,69 +7,15 @@ use prodex_domain::{
     ContentLocation, DetectorId, FindingKind, InspectionCoverage, InspectionFinding,
     MAX_INSPECTION_FINDINGS, TenantId,
 };
-use prodex_runtime_policy::RuntimePolicyInspectionPattern;
-use std::collections::{BTreeMap, BTreeSet};
 
 const LOCAL_DETECTOR_ID: &str = "local-bounded-v1";
-const MAX_TENANT_PATTERN_MATCH_BYTES: usize = 4 * 1024;
-const MAX_TENANT_PATTERNS: usize = 64;
-const MAX_TENANT_PATTERNS_PER_TENANT: usize = 16;
-const MAX_TENANT_PATTERN_BYTES: usize = 256;
-const MAX_TENANT_PATTERN_ID_BYTES: usize = 64;
-const MAX_TENANT_PATTERN_WILDCARDS: usize = 8;
 
 #[derive(Clone, Default)]
-pub(crate) struct RuntimeTenantDetectorPatterns {
-    by_tenant: BTreeMap<TenantId, Vec<RuntimeTenantDetectorPattern>>,
-}
-
-#[derive(Clone)]
-struct RuntimeTenantDetectorPattern {
-    segments: Vec<String>,
-}
+pub(crate) struct RuntimeTenantDetectorPatterns;
 
 impl RuntimeTenantDetectorPatterns {
-    pub(crate) fn compile(entries: &[RuntimePolicyInspectionPattern]) -> Result<Self> {
-        if entries.len() > MAX_TENANT_PATTERNS {
-            anyhow::bail!("tenant detector pattern count exceeded safe limit");
-        }
-        let mut by_tenant = BTreeMap::<TenantId, Vec<RuntimeTenantDetectorPattern>>::new();
-        let mut identities = BTreeSet::new();
-        for entry in entries {
-            let wildcard_count = entry.pattern.bytes().filter(|byte| *byte == b'*').count();
-            if entry.id.is_empty()
-                || entry.id.len() > MAX_TENANT_PATTERN_ID_BYTES
-                || entry.pattern.is_empty()
-                || entry.pattern.len() > MAX_TENANT_PATTERN_BYTES
-                || wildcard_count > MAX_TENANT_PATTERN_WILDCARDS
-                || entry.pattern.chars().any(char::is_control)
-                || entry.pattern.starts_with('*')
-                || entry.pattern.ends_with('*')
-                || entry.pattern.split('*').any(str::is_empty)
-                || !identities.insert((entry.tenant_id, entry.id.as_str()))
-            {
-                anyhow::bail!("tenant detector pattern is invalid");
-            }
-            let tenant_patterns = by_tenant.entry(entry.tenant_id).or_default();
-            if tenant_patterns.len() >= MAX_TENANT_PATTERNS_PER_TENANT {
-                anyhow::bail!("tenant detector pattern count exceeded per-tenant safe limit");
-            }
-            tenant_patterns.push(RuntimeTenantDetectorPattern {
-                segments: entry.pattern.split('*').map(str::to_owned).collect(),
-            });
-        }
-        Ok(Self { by_tenant })
-    }
-
-    fn for_tenant(&self, tenant_id: Option<TenantId>) -> &[RuntimeTenantDetectorPattern] {
-        tenant_id
-            .and_then(|tenant_id| self.by_tenant.get(&tenant_id))
-            .map(Vec::as_slice)
-            .unwrap_or_default()
-    }
-
-    pub(crate) fn has_for_tenant(&self, tenant_id: Option<TenantId>) -> bool {
-        !self.for_tenant(tenant_id).is_empty()
+    pub(crate) fn has_for_tenant(&self, _tenant_id: Option<TenantId>) -> bool {
+        false
     }
 }
 
@@ -100,15 +46,16 @@ struct LocalMatch {
     kind: FindingKind,
 }
 
+#[cfg(test)]
 pub(crate) fn runtime_local_inspect_and_mask(body: Vec<u8>) -> Result<RuntimeLocalInspection> {
-    runtime_local_inspect_and_mask_for_tenant(body, &RuntimeTenantDetectorPatterns::default(), None)
+    runtime_local_inspect_and_mask_for_tenant(body, &RuntimeTenantDetectorPatterns, None)
         .map_err(|failure| failure.error)
 }
 
 pub(crate) fn runtime_local_inspect_and_mask_for_tenant(
     body: Vec<u8>,
-    patterns: &RuntimeTenantDetectorPatterns,
-    tenant_id: Option<TenantId>,
+    _patterns: &RuntimeTenantDetectorPatterns,
+    _tenant_id: Option<TenantId>,
 ) -> std::result::Result<RuntimeLocalInspection, RuntimeLocalInspectionFailure> {
     let text = match String::from_utf8(body) {
         Ok(text) => text,
@@ -120,7 +67,7 @@ pub(crate) fn runtime_local_inspect_and_mask_for_tenant(
             });
         }
     };
-    match runtime_local_inspect_and_mask_text(&text, patterns, tenant_id) {
+    match runtime_local_inspect_and_mask_text(&text) {
         Ok(result) => Ok(RuntimeLocalInspection {
             body: result.body.unwrap_or_else(|| text.into_bytes()),
             coverage: result.coverage,
@@ -134,17 +81,13 @@ pub(crate) fn runtime_local_inspect_and_mask_for_tenant(
     }
 }
 
-fn runtime_local_inspect_and_mask_text(
-    text: &str,
-    patterns: &RuntimeTenantDetectorPatterns,
-    tenant_id: Option<TenantId>,
-) -> Result<RuntimeLocalInspectionResult> {
+fn runtime_local_inspect_and_mask_text(text: &str) -> Result<RuntimeLocalInspectionResult> {
     if let Ok(mut json) = serde_json::from_str::<serde_json::Value>(text) {
         let content = collect_json_content(&json)?;
         let mut findings = Vec::new();
         let mut masked_values = Vec::with_capacity(content.values.len());
         for value in &content.values {
-            let (masked, value_findings) = inspect_and_mask_value(value, patterns, tenant_id)?;
+            let (masked, value_findings) = inspect_and_mask_value(value)?;
             findings.extend(value_findings);
             if findings.len() > MAX_INSPECTION_FINDINGS {
                 anyhow::bail!("local inspection finding count exceeded safe limit");
@@ -179,7 +122,7 @@ fn runtime_local_inspect_and_mask_text(
     if value.text.len() > MAX_PRESIDIO_JSON_TEXT_BYTES {
         anyhow::bail!("request content exceeds inspection limits");
     }
-    let (text, findings) = inspect_and_mask_value(&value, patterns, tenant_id)?;
+    let (text, findings) = inspect_and_mask_value(&value)?;
     let changed = !findings.is_empty();
     Ok(RuntimeLocalInspectionResult {
         body: changed.then(|| text.into_bytes()),
@@ -189,16 +132,8 @@ fn runtime_local_inspect_and_mask_text(
     })
 }
 
-fn inspect_and_mask_value(
-    value: &PresidioJsonString,
-    patterns: &RuntimeTenantDetectorPatterns,
-    tenant_id: Option<TenantId>,
-) -> Result<(String, Vec<InspectionFinding>)> {
-    let matches = local_matches(
-        &value.text,
-        value.sensitive_kind,
-        patterns.for_tenant(tenant_id),
-    )?;
+fn inspect_and_mask_value(value: &PresidioJsonString) -> Result<(String, Vec<InspectionFinding>)> {
+    let matches = local_matches(&value.text, value.sensitive_kind)?;
     let detector_id = DetectorId::new(LOCAL_DETECTOR_ID)?;
     let findings = matches
         .iter()
@@ -224,11 +159,7 @@ fn inspect_and_mask_value(
     Ok((masked, findings))
 }
 
-fn local_matches(
-    text: &str,
-    sensitive_kind: Option<FindingKind>,
-    tenant_patterns: &[RuntimeTenantDetectorPattern],
-) -> Result<Vec<LocalMatch>> {
+fn local_matches(text: &str, sensitive_kind: Option<FindingKind>) -> Result<Vec<LocalMatch>> {
     if let Some(kind) = sensitive_kind.filter(|_| !text.is_empty()) {
         return Ok(vec![LocalMatch {
             start: 0,
@@ -244,7 +175,6 @@ fn local_matches(
     detect_prefixed_api_keys(text, &mut matches);
     detect_emails(text, &mut matches);
     detect_financial_identifiers(text, &mut matches);
-    detect_tenant_patterns(text, tenant_patterns, &mut matches)?;
     matches.sort_by_key(|finding| (finding.start, usize::MAX - finding.end, finding.kind));
 
     let mut bounded = Vec::new();
@@ -281,61 +211,6 @@ fn detect_private_keys(text: &str, matches: &mut Vec<LocalMatch>) {
         });
         offset = end;
     }
-}
-
-fn detect_tenant_patterns(
-    text: &str,
-    patterns: &[RuntimeTenantDetectorPattern],
-    matches: &mut Vec<LocalMatch>,
-) -> Result<()> {
-    for pattern in patterns {
-        detect_tenant_pattern_matches(text, pattern, matches)?;
-    }
-    Ok(())
-}
-
-fn detect_tenant_pattern_matches(
-    text: &str,
-    pattern: &RuntimeTenantDetectorPattern,
-    matches: &mut Vec<LocalMatch>,
-) -> Result<()> {
-    let mut search_from = 0;
-    while search_from < text.len() {
-        let Some(relative_start) = text[search_from..].find(&pattern.segments[0]) else {
-            break;
-        };
-        let start = search_from + relative_start;
-        let Some(end) = tenant_pattern_match_end(text, pattern, start) else {
-            search_from = start + text[start..].chars().next().map_or(1, char::len_utf8);
-            continue;
-        };
-        matches.push(LocalMatch {
-            start,
-            end,
-            kind: FindingKind::TenantSensitive,
-        });
-        if matches.len() > MAX_INSPECTION_FINDINGS {
-            anyhow::bail!("local inspection finding count exceeded safe limit");
-        }
-        search_from = end;
-    }
-    Ok(())
-}
-
-fn tenant_pattern_match_end(
-    text: &str,
-    pattern: &RuntimeTenantDetectorPattern,
-    start: usize,
-) -> Option<usize> {
-    let mut end = start + pattern.segments[0].len();
-    for segment in &pattern.segments[1..] {
-        let relative_end = text[end..].find(segment)?;
-        end += relative_end + segment.len();
-        if end - start > MAX_TENANT_PATTERN_MATCH_BYTES {
-            return None;
-        }
-    }
-    Some(end)
 }
 
 fn detect_labeled_credentials(text: &str, matches: &mut Vec<LocalMatch>) {

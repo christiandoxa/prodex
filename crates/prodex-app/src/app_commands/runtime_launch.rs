@@ -1,12 +1,6 @@
 use super::*;
 use crate::runtime_launch::emit_runtime_timing as emit_timing;
 mod command_server;
-pub(crate) mod gateway_config;
-#[path = "runtime_launch/gateway_shutdown.rs"]
-mod gateway_shutdown;
-#[path = "runtime_launch/gateway_startup.rs"]
-pub(crate) mod gateway_startup;
-mod gateway_status;
 pub(crate) mod goal_resume;
 mod preflight;
 mod provider_names;
@@ -22,18 +16,6 @@ use command_server::prepare_codex_command_server_runtime_launch;
 use command_server::{
     RunLaunchRoute, execute_codex_command_server_managed_runtime, run_launch_route,
 };
-#[cfg(test)]
-use gateway_config::{
-    gateway_admin_tokens_config, gateway_call_id_header_config, gateway_guardrail_config,
-    gateway_guardrail_webhook_config, gateway_observability_config, gateway_openai_api_keys,
-    gateway_route_alias_model_metrics, gateway_route_aliases_config, gateway_sso_config,
-    gateway_state_store_config, gateway_upstream_base_url, gateway_virtual_keys_config,
-    resolve_gateway_auth_config, resolve_gateway_guardrail_config,
-};
-#[cfg(test)]
-use gateway_config::{resolve_gateway_launch_config, resolve_gateway_launch_config_with_secrets};
-use gateway_startup::start_gateway_backend;
-use gateway_status::print_gateway_status;
 use goal_resume::*;
 pub(super) use resume_provider::runtime_resume_provider_from_codex_args;
 use resume_provider::*;
@@ -174,15 +156,6 @@ pub(crate) fn remove_first_codex_config_override_pair(args: &mut Vec<OsString>, 
     }
     false
 }
-pub(super) fn handle_gateway(args: GatewayArgs) -> Result<()> {
-    let backend = start_gateway_backend(args)?;
-    print_gateway_status(
-        backend.listen_addr(),
-        backend.provider_name(),
-        backend.auth_required(),
-    )?;
-    gateway_shutdown::wait_for_signal_and_drain(&backend)
-}
 struct RuntimeLaunchPreparationBuilder<'a> {
     request: RuntimeLaunchRequest<'a>,
     resolved_harness: prodex_provider_core::ResolvedHarnessMode,
@@ -210,11 +183,15 @@ impl<'a> RuntimeLaunchPreparationBuilder<'a> {
         })
     }
     fn build(self) -> Result<PreparedRuntimeLaunch> {
-        self.build_with_terminal_output(true)
+        self.build_with_proxy_listen(true, None)
     }
-    fn build_with_terminal_output(
+    fn build_with_terminal_output(self, terminal_output: bool) -> Result<PreparedRuntimeLaunch> {
+        self.build_with_proxy_listen(terminal_output, None)
+    }
+    fn build_with_proxy_listen(
         mut self,
         terminal_output: bool,
+        preferred_listen_addr: Option<&str>,
     ) -> Result<PreparedRuntimeLaunch> {
         self.record_selection()?;
         if terminal_output {
@@ -253,12 +230,13 @@ impl<'a> RuntimeLaunchPreparationBuilder<'a> {
         }
 
         let proxy_started = Instant::now();
-        let runtime_proxy = RuntimeProxyStartupFactory::build(
+        let runtime_proxy = RuntimeProxyStartupFactory::build_with_listen(
             &self.paths,
             &self.state,
             &self.selection,
             &self.request,
             self.resolved_harness,
+            preferred_listen_addr,
         )?;
         emit_timing("startup.runtime_proxy_prepare_ms", proxy_started);
 
@@ -369,12 +347,13 @@ fn ensure_managed_runtime_launch_home_under_root(
 struct RuntimeProxyStartupFactory;
 
 impl RuntimeProxyStartupFactory {
-    fn build(
+    fn build_with_listen(
         paths: &AppPaths,
         state: &AppState,
         selection: &RuntimeLaunchSelection,
         request: &RuntimeLaunchRequest<'_>,
         resolved_harness: prodex_provider_core::ResolvedHarnessMode,
+        preferred_listen_addr: Option<&str>,
     ) -> Result<Option<RuntimeProxyEndpoint>> {
         if request
             .external_provider
@@ -409,6 +388,7 @@ impl RuntimeProxyStartupFactory {
                 request,
                 local_upstream_base_url,
                 resolved_harness,
+                preferred_listen_addr,
             )?));
         }
 
@@ -427,6 +407,7 @@ impl RuntimeProxyStartupFactory {
                 request,
                 runtime_upstream_base_url,
                 !request.allow_auto_rotate,
+                preferred_listen_addr,
             )?));
         }
         if (request.force_runtime_proxy || response_governance_enabled)
@@ -439,6 +420,7 @@ impl RuntimeProxyStartupFactory {
                 request,
                 runtime_upstream_base_url,
                 true,
+                preferred_listen_addr,
             )?));
         }
         if request.force_runtime_proxy
@@ -537,6 +519,15 @@ pub(crate) fn prepare_runtime_launch_with_harness(
     resolved_harness: prodex_provider_core::ResolvedHarnessMode,
 ) -> Result<PreparedRuntimeLaunch> {
     RuntimeLaunchPreparationBuilder::from_request(request, resolved_harness)?.build()
+}
+
+pub(crate) fn prepare_gateway_runtime(
+    request: RuntimeLaunchRequest<'_>,
+    resolved_harness: prodex_provider_core::ResolvedHarnessMode,
+    preferred_listen_addr: Option<&str>,
+) -> Result<PreparedRuntimeLaunch> {
+    RuntimeLaunchPreparationBuilder::from_request(request, resolved_harness)?
+        .build_with_proxy_listen(false, preferred_listen_addr)
 }
 
 pub(super) fn prepare_runtime_launch_dry_run(
@@ -645,6 +636,7 @@ fn start_runtime_proxy_endpoint(
     request: &RuntimeLaunchRequest<'_>,
     runtime_upstream_base_url: String,
     fixed: bool,
+    preferred_listen_addr: Option<&str>,
 ) -> Result<RuntimeProxyEndpoint> {
     let model_context_window_tokens =
         runtime_launch_effective_model_context_window_tokens(request, &selection.codex_home)?;
@@ -661,7 +653,7 @@ fn start_runtime_proxy_endpoint(
         smart_context_enabled: request.smart_context_enabled,
         presidio_redaction_enabled: request.presidio_redaction_enabled,
         model_context_window_tokens,
-        preferred_listen_addr: None,
+        preferred_listen_addr,
     })?;
     let live_log_source = publish_runtime_live_log_source(
         paths,
@@ -702,6 +694,7 @@ fn start_local_rewrite_proxy_endpoint(
     request: &RuntimeLaunchRequest<'_>,
     upstream_base_url: String,
     resolved_harness: prodex_provider_core::ResolvedHarnessMode,
+    preferred_listen_addr: Option<&str>,
 ) -> Result<RuntimeProxyEndpoint> {
     let model_context_window_tokens =
         runtime_launch_effective_model_context_window_tokens(request, &selection.codex_home)?;
@@ -716,17 +709,7 @@ fn start_local_rewrite_proxy_endpoint(
             smart_context_enabled: request.smart_context_enabled,
             presidio_redaction_enabled: request.presidio_redaction_enabled,
             model_context_window_tokens,
-            preferred_listen_addr: None,
-            gateway_auth_token_hash: None,
-            gateway_admin_tokens: Vec::new(),
-            gateway_sso: RuntimeGatewaySsoConfig::default(),
-            gateway_state_store: RuntimeGatewayStateStore::file(paths),
-            gateway_virtual_keys: Vec::new(),
-            gateway_route_aliases: Vec::new(),
-            gateway_guardrails: runtime_proxy_crate::RuntimeGatewayGuardrailConfig::default(),
-            gateway_guardrail_webhook: RuntimeGatewayGuardrailWebhookConfig::default(),
-            gateway_call_id_header: None,
-            gateway_observability: RuntimeGatewayObservabilityConfig::default(),
+            preferred_listen_addr,
         },
         resolved_harness,
     )?;

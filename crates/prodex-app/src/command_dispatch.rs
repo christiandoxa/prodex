@@ -84,7 +84,6 @@ fn command_runs_profile_lifecycle_recovery(command: &Commands) -> bool {
                 | Commands::McpJsonlBridge(_)
                 | Commands::SubAgentExec(_)
         )
-        && !matches!(command, Commands::Gateway(args) if args.command.is_some())
 }
 
 fn profile_command_requests_insecure(command: &Commands) -> bool {

@@ -208,13 +208,6 @@ pub(crate) fn runtime_gemini_oauth_profiles_for_provider(
     bail!(crate::GEMINI_OAUTH_DISABLED_GUIDANCE)
 }
 
-pub(crate) fn runtime_kiro_gateway_profile_auth(
-    state: &AppState,
-) -> Result<RuntimeKiroProfileAuth> {
-    let profile_name = resolve_kiro_runtime_launch_profile_name(state, None)?;
-    runtime_kiro_profile_auth(state, &profile_name)
-}
-
 pub(crate) fn runtime_kiro_profile_for_provider(
     state: &AppState,
     selection: &RuntimeLaunchSelection,

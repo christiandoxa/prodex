@@ -33,7 +33,6 @@ use anyhow::Result;
 use prodex_provider_core::{
     ProviderEndpoint, ProviderErrorClass, ProviderId, RuntimeProviderBindingIdentity,
 };
-use prodex_provider_spi::runtime_provider_binding_identity_from_secret_ref;
 use prodex_state::ResponseProfileBinding;
 use runtime_proxy_crate::{runtime_proxy_log_field, runtime_proxy_structured_log_message};
 use serde_json::{Value, json};
@@ -707,7 +706,6 @@ pub(super) fn send_runtime_local_rewrite_upstream_request(
     let provider = dispatch.provider();
     let endpoint = dispatch.endpoint();
     let stream_mode = dispatch.stream_mode();
-    let inspection = dispatch.inspection();
     runtime_proxy_log(
         &shared.runtime_shared,
         runtime_proxy_structured_log_message(
@@ -715,15 +713,6 @@ pub(super) fn send_runtime_local_rewrite_upstream_request(
             [
                 runtime_proxy_log_field("request", request_id.to_string()),
                 runtime_proxy_log_field("provider", provider.label()),
-                runtime_proxy_log_field(
-                    "classification",
-                    inspection.result.classification().as_str(),
-                ),
-                runtime_proxy_log_field("coverage", inspection.result.coverage().as_str()),
-                runtime_proxy_log_field(
-                    "finding_count",
-                    inspection.result.findings().len().to_string(),
-                ),
             ],
         ),
     );
@@ -748,9 +737,6 @@ pub(super) fn send_runtime_local_rewrite_upstream_request(
         }
     };
     match (provider, shared.provider.as_ref()) {
-        (_, RuntimeLocalRewriteProviderOptions::ProjectedCredential { .. }) => {
-            unreachable!("projected provider wrapper must be split before dispatch")
-        }
         (ProviderId::Anthropic, RuntimeLocalRewriteProviderOptions::Anthropic { auth }) => {
             send_runtime_anthropic_upstream_request(
                 request_id, request, shared, body, auth, endpoint,
@@ -837,23 +823,13 @@ fn send_runtime_openai_upstream_request(
     };
     let (attempts, hard_binding) =
         runtime_local_rewrite_openai_attempts(shared, api_keys, binding.bound.as_ref())?;
-    if !hard_binding && attempts.is_empty() && shared.provider_credential.is_none() {
+    if !hard_binding && attempts.is_empty() {
         return runtime_local_rewrite_send_openai_unkeyed(
             request_id,
             request,
             shared,
             &upstream_url,
             body,
-        );
-    }
-    if shared.provider_credential.is_some() {
-        return runtime_local_rewrite_send_openai_projected(
-            request_id,
-            request,
-            shared,
-            &upstream_url,
-            body,
-            &binding,
         );
     }
     runtime_local_rewrite_send_openai_key_attempts(
@@ -896,9 +872,6 @@ fn runtime_local_rewrite_openai_attempts<'a>(
         }
         return Ok((attempts, true));
     }
-    if shared.provider_credential.is_some() {
-        return Ok((Vec::new(), true));
-    }
     let attempt_limit = shared
         .runtime_shared
         .runtime_config
@@ -930,71 +903,6 @@ fn runtime_local_rewrite_send_openai_unkeyed(
         RuntimeLocalRewritePreparedAuth::OpenAiResponses { api_key: None },
     )?;
     runtime_local_rewrite_openai_response(response, None, shared, None)
-}
-
-fn runtime_local_rewrite_send_openai_projected(
-    request_id: u64,
-    request: &RuntimeProxyRequest,
-    shared: &RuntimeLocalRewriteProxyShared,
-    upstream_url: &str,
-    body: Vec<u8>,
-    binding: &RuntimeLocalRewriteBindingContext,
-) -> Result<RuntimeLocalRewriteUpstreamResult> {
-    let binding_identity = shared
-        .provider_credential
-        .as_ref()
-        .and_then(|credential| {
-            runtime_provider_binding_identity_from_secret_ref(
-                ProviderId::OpenAi,
-                credential.reference(),
-                &shared.upstream_base_url,
-                Some(RUNTIME_LOCAL_REWRITE_PROFILE),
-            )
-        })
-        .or_else(|| {
-            RuntimeProviderBindingIdentity::from_profile(
-                ProviderId::OpenAi,
-                RUNTIME_LOCAL_REWRITE_PROFILE,
-                &shared.upstream_base_url,
-            )
-        })
-        .ok_or_else(|| anyhow::anyhow!("OpenAI projected binding is unavailable"))?;
-    runtime_local_rewrite_validate_openai_projected_binding(binding, &binding_identity)?;
-    let response = send_runtime_local_rewrite_prepared_request(
-        request_id,
-        request,
-        shared,
-        upstream_url,
-        body,
-        RuntimeLocalRewritePreparedAuth::OpenAiProjected,
-    )?;
-    runtime_local_rewrite_openai_response(response, Some(binding_identity), shared, Some(binding))
-}
-
-fn runtime_local_rewrite_validate_openai_projected_binding(
-    binding: &RuntimeLocalRewriteBindingContext,
-    identity: &RuntimeProviderBindingIdentity,
-) -> Result<()> {
-    if binding
-        .bound
-        .as_ref()
-        .is_some_and(|binding| binding.profile_name != RUNTIME_LOCAL_REWRITE_PROFILE)
-    {
-        return Err(anyhow::anyhow!(
-            "OpenAI continuation binding is unavailable or unauthorized"
-        ));
-    }
-    if binding
-        .bound
-        .as_ref()
-        .and_then(|binding| binding.binding_identity.as_ref())
-        .is_some_and(|bound| bound != identity)
-    {
-        return Err(anyhow::anyhow!(
-            "OpenAI continuation binding is conflicting"
-        ));
-    }
-    Ok(())
 }
 
 fn runtime_local_rewrite_send_openai_key_attempts(
@@ -1158,7 +1066,7 @@ pub(super) fn runtime_local_rewrite_binding_context(
 }
 
 pub(super) fn runtime_local_rewrite_raw_binding_identity(
-    shared: &RuntimeLocalRewriteProxyShared,
+    _shared: &RuntimeLocalRewriteProxyShared,
     provider: ProviderId,
     credential: Option<&str>,
     endpoint: &str,
@@ -1169,27 +1077,10 @@ pub(super) fn runtime_local_rewrite_raw_binding_identity(
             RuntimeProviderBindingIdentity::from_raw_key(provider, credential, endpoint, profile)
         })
         .or_else(|| {
-            shared.provider_credential.as_ref().and_then(|credential| {
-                runtime_provider_binding_identity_from_secret_ref(
-                    provider,
-                    credential.reference(),
-                    endpoint,
-                    profile,
-                )
-            })
-        })
-        .or_else(|| {
             profile.and_then(|profile| {
                 RuntimeProviderBindingIdentity::from_profile(provider, profile, endpoint)
             })
         })
-}
-
-pub(super) fn runtime_local_rewrite_continuation_is_bound(
-    shared: &RuntimeLocalRewriteProxyShared,
-    request: &RuntimeProxyRequest,
-) -> Result<bool> {
-    Ok(runtime_local_rewrite_request_bound_binding(shared, request)?.is_some())
 }
 
 pub(super) fn runtime_local_rewrite_request_bound_binding(

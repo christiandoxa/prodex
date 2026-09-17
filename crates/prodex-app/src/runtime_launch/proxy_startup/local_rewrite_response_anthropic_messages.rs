@@ -12,7 +12,6 @@ use super::super::local_rewrite_rate_limits::{
     runtime_provider_codex_rate_limit_headers,
 };
 use super::super::local_rewrite_request::RuntimeLocalRewriteRequest;
-use super::super::local_rewrite_response_spend::emit_runtime_gateway_response_spend_event_for_body;
 use super::super::provider_bridge::{
     RuntimeProviderBridgeKind, runtime_provider_log_response_conformance,
 };
@@ -100,7 +99,7 @@ pub(super) fn respond_runtime_anthropic_messages_rewrite(
         return;
     }
 
-    let response_started_at = Instant::now();
+    let _response_started_at = Instant::now();
     let translated = (|| -> anyhow::Result<_> {
         let body = read_blocking_response_body_with_limit(
             response,
@@ -148,14 +147,6 @@ pub(super) fn respond_runtime_anthropic_messages_rewrite(
             runtime_copilot_remember_bindings_from_responses_body(
                 binding_recorder.as_ref(),
                 &parts.body,
-            );
-            emit_runtime_gateway_response_spend_event_for_body(
-                request_id,
-                captured,
-                shared,
-                parts.status,
-                response_started_at.elapsed().as_millis(),
-                parts.body.as_slice(),
             );
             runtime_local_rewrite_governed_response_with_call_id(
                 parts,

@@ -10,7 +10,6 @@ mod local_rewrite_gemini_auth;
 #[path = "local_rewrite_gemini_oauth_pool.rs"]
 mod local_rewrite_gemini_oauth_pool;
 use local_rewrite_gemini_oauth_pool::RuntimeGeminiSelectedAuth;
-pub(super) use local_rewrite_gemini_oauth_pool::runtime_gemini_live_auth_attempts;
 pub(super) use local_rewrite_gemini_oauth_pool::{
     RuntimeGeminiOAuthPool, RuntimeGeminiRequestContext, runtime_gemini_oauth_pool_from_provider,
 };

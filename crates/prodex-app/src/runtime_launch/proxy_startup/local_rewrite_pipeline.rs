@@ -2,96 +2,20 @@
 mod dispatch;
 #[path = "local_rewrite_pipeline/errors.rs"]
 mod errors;
-#[path = "local_rewrite_pipeline_governance.rs"]
-mod governance;
 #[path = "local_rewrite_pipeline_websocket.rs"]
 mod websocket;
 
 use dispatch::{
-    runtime_gateway_operational_probe_response, runtime_local_rewrite_dispatch_builtin_models,
-    runtime_local_rewrite_dispatch_compact, runtime_local_rewrite_dispatch_provider,
+    runtime_local_rewrite_dispatch_builtin_models, runtime_local_rewrite_dispatch_compact,
+    runtime_local_rewrite_dispatch_provider,
 };
-pub(super) use errors::{
-    runtime_local_rewrite_application_context_rejection,
-    runtime_local_rewrite_request_timeout_response,
-};
-use governance::{
-    runtime_local_rewrite_apply_constraints, runtime_local_rewrite_dispatch_control_plane,
-    runtime_local_rewrite_enforce_guardrails, runtime_local_rewrite_prepare_constraints,
-    runtime_local_rewrite_reserve_virtual_key,
-};
+pub(super) use errors::runtime_local_rewrite_request_timeout_response;
 use websocket::runtime_local_rewrite_dispatch_websocket;
 
-use super::local_rewrite::{
-    RUNTIME_GATEWAY_CONVERSATION_NAMESPACE_HEADER, RuntimeLocalRewriteProxyShared,
-};
-use super::local_rewrite_application_boundary::{
-    RuntimeGatewayAdminPreauthorization, RuntimeGatewayApplicationBoundaryError,
-    runtime_gateway_admin_preauthorization, runtime_gateway_application_data_plane_authorization,
-    runtime_gateway_application_request_context, runtime_gateway_data_plane_credential,
-    runtime_gateway_virtual_key_principal,
-};
-use super::local_rewrite_application_data_plane::{
-    RuntimeGatewayApplicationAdmission, runtime_gateway_application_http_policy,
-    runtime_gateway_application_local_admission, runtime_gateway_application_provider_dispatch,
-    runtime_gateway_application_provider_dispatch_attempt,
-    runtime_gateway_application_provider_retry_precommit,
-};
-use super::local_rewrite_constraints::{
-    RuntimeGatewayPendingConstraintPlan, runtime_gateway_prepare_constraint_plan,
-};
-use super::local_rewrite_copilot::runtime_copilot_model_catalog_from_provider;
-use super::local_rewrite_gateway_admin_audit::runtime_gateway_audit_admin_auth_event;
-use super::local_rewrite_gateway_admin_auth::runtime_gateway_admin_auth;
-use super::local_rewrite_gateway_admin_dispatch::runtime_gateway_respond_route_explain;
-use super::local_rewrite_gateway_admin_response::runtime_gateway_http_plan_error_response;
-use super::local_rewrite_gateway_admin_router::{
-    runtime_gateway_admin_authorization_rejection_response, runtime_gateway_admin_response,
-    runtime_gateway_http_request_meta, runtime_gateway_request_path_is_admin,
-    runtime_gateway_request_path_is_current_session_revoke,
-    runtime_gateway_request_path_is_route_explain,
-    runtime_gateway_request_path_requires_admin_auth,
-};
-use super::local_rewrite_gateway_admin_sessions::runtime_gateway_self_service_session_response;
-use super::local_rewrite_gateway_admission::RuntimeGatewayRealtimeAccountingPlan;
-use super::local_rewrite_gateway_browser::runtime_gateway_browser_auth_response;
-use super::local_rewrite_gateway_data_plane_audit::{
-    runtime_gateway_audit_data_plane_auth_failed,
-    runtime_gateway_audit_data_plane_guardrail_blocked,
-    runtime_gateway_audit_data_plane_guardrail_webhook_blocked,
-    runtime_gateway_audit_data_plane_presidio_redaction_failed,
-    runtime_gateway_audit_data_plane_request_body_too_large,
-    runtime_gateway_audit_data_plane_request_capture_failed,
-    runtime_gateway_audit_data_plane_virtual_key_rejected,
-};
-use super::local_rewrite_gateway_guardrail_webhook::runtime_gateway_guardrail_webhook_block;
-use super::local_rewrite_gateway_keys::{
-    runtime_gateway_request_header_virtual_key, runtime_gateway_virtual_key_admission,
-    runtime_gateway_virtual_key_entries_is_empty,
-};
-use super::local_rewrite_gateway_request_auth::runtime_local_rewrite_request_is_authorized;
-use super::local_rewrite_gateway_route_load::RuntimeGatewayRouteLoadGuard;
-use super::local_rewrite_gateway_usage::RuntimeGatewayUsageRequestGuard;
-use super::local_rewrite_gateway_workload_identity::runtime_gateway_workload_credential;
-use super::local_rewrite_gemini_compact::runtime_gemini_compact_response;
-use super::local_rewrite_kiro::{
-    runtime_kiro_compact_response_parts, runtime_kiro_model_catalog_from_provider,
-    runtime_kiro_models_buffered_response,
-};
-use super::local_rewrite_options::RuntimeLocalRewriteProviderOptions;
+use super::local_rewrite::RuntimeLocalRewriteProxyShared;
+use super::local_rewrite_application_data_plane::RuntimeGatewayApplicationAdmission;
 use super::local_rewrite_request::RuntimeLocalRewriteRequest;
 use super::local_rewrite_request::runtime_api_route_kind;
-use super::local_rewrite_response::{
-    respond_runtime_local_rewrite_proxy_request, runtime_local_rewrite_response_with_call_id,
-};
-use super::local_rewrite_upstream::{
-    RuntimeLocalRewriteUpstreamResponse, RuntimeLocalRewriteUpstreamResult,
-    send_runtime_local_rewrite_upstream_request,
-};
-use super::provider_bridge::{
-    RuntimeProviderBridgeKind, runtime_provider_error_class,
-    runtime_provider_models_buffered_response, runtime_provider_request_ledger_message,
-};
 use crate::runtime_proxy::{
     RuntimeProxyAdmissionRejection, acquire_runtime_proxy_active_request_slot_with_wait,
     build_runtime_proxy_json_error_response, build_runtime_proxy_text_response,
@@ -100,9 +24,6 @@ use crate::runtime_proxy::{
 };
 use crate::runtime_proxy_shared::RuntimeProxyActiveRequestGuard;
 use crate::{runtime_proxy_log, runtime_proxy_next_request_id};
-use prodex_application::{ApplicationInspectionPlan, ApplicationRequestDeadline};
-use prodex_domain::{RequestId, ReservationReconciliationReason};
-use prodex_observability::ApiAdmissionResult;
 use runtime_proxy_crate::{
     RuntimeProxyRequest, path_without_query, runtime_proxy_log_field,
     runtime_proxy_structured_log_message,
@@ -112,63 +33,27 @@ use std::time::{Duration, Instant};
 const RUNTIME_LOCAL_REWRITE_UPSTREAM_REQUEST_FAILED_MESSAGE: &str = "upstream request failed";
 
 #[derive(Default)]
-struct RuntimeLocalRewritePipelineGuards {
-    active: Option<RuntimeProxyActiveRequestGuard>,
-    usage: Option<RuntimeGatewayUsageRequestGuard>,
-    route_load: Option<RuntimeGatewayRouteLoadGuard>,
+pub(super) struct RuntimeLocalRewritePipelineGuards {
+    pub(super) active: Option<RuntimeProxyActiveRequestGuard>,
 }
 
-struct RuntimeLocalRewriteRequestState<'target> {
-    request: RuntimeLocalRewriteRequest,
-    context: prodex_application::ApplicationRequestContext<'target>,
-    path: String,
-    request_id: u64,
-    admin: Option<RuntimeGatewayAdminPreauthorization<'target>>,
-    application: Option<prodex_application::ApplicationAuthorizedRequestContext<'target>>,
-    guards: RuntimeLocalRewritePipelineGuards,
+pub(super) struct RuntimeLocalRewriteRequestState {
+    pub(super) request: RuntimeLocalRewriteRequest,
+    pub(super) path: String,
+    pub(super) request_id: u64,
+    deadline: Instant,
+    pub(super) guards: RuntimeLocalRewritePipelineGuards,
 }
 
-struct RuntimeLocalRewriteCanonicalRequest<'target>(RuntimeLocalRewriteRequestState<'target>);
-struct RuntimeLocalRewriteAuthenticatedRequest<'target>(RuntimeLocalRewriteRequestState<'target>);
-struct RuntimeLocalRewriteAdmittedRequest<'target>(RuntimeLocalRewriteRequestState<'target>);
-
-struct RuntimeLocalRewriteCapturedRequest<'target> {
-    state: RuntimeLocalRewriteRequestState<'target>,
-    captured: RuntimeProxyRequest,
+pub(super) struct RuntimeLocalRewriteCapturedRequest {
+    pub(super) state: RuntimeLocalRewriteRequestState,
+    pub(super) captured: RuntimeProxyRequest,
 }
 
-struct RuntimeLocalRewritePreparedRequest<'target, 'shared> {
-    state: RuntimeLocalRewriteRequestState<'target>,
-    captured: RuntimeProxyRequest,
-    constraints: Option<RuntimeGatewayPendingConstraintPlan<'shared>>,
-    inspection: ApplicationInspectionPlan,
-}
-
-impl RuntimeLocalRewritePreparedRequest<'_, '_> {
-    fn reject(self, response: tiny_http::ResponseBox) -> RuntimeLocalRewritePipelineExit {
-        self.state.reject(response).finish();
-        RuntimeLocalRewritePipelineExit::Handled
-    }
-
-    fn respond(self, response: tiny_http::ResponseBox) -> RuntimeLocalRewritePipelineExit {
-        self.state.respond(response).finish();
-        RuntimeLocalRewritePipelineExit::Handled
-    }
-}
-
-struct RuntimeLocalRewriteGovernedRequest<'target, 'shared>(
-    RuntimeLocalRewritePreparedRequest<'target, 'shared>,
-);
-struct RuntimeLocalRewriteReservedRequest<'target, 'shared> {
-    request: RuntimeLocalRewritePreparedRequest<'target, 'shared>,
-    application_admission: RuntimeGatewayApplicationAdmission,
-    realtime_accounting: Option<RuntimeGatewayRealtimeAccountingPlan>,
-}
-struct RuntimeLocalRewriteDispatchReadyRequest<'target> {
-    state: RuntimeLocalRewriteRequestState<'target>,
-    captured: RuntimeProxyRequest,
-    application_admission: RuntimeGatewayApplicationAdmission,
-    realtime_accounting: Option<RuntimeGatewayRealtimeAccountingPlan>,
+pub(super) struct RuntimeLocalRewriteDispatchReadyRequest {
+    pub(super) state: RuntimeLocalRewriteRequestState,
+    pub(super) captured: RuntimeProxyRequest,
+    pub(super) admission: RuntimeGatewayApplicationAdmission,
 }
 
 struct RuntimeLocalRewritePipelineReply {
@@ -180,24 +65,16 @@ struct RuntimeLocalRewritePipelineReply {
 enum RuntimeLocalRewritePipelineExit {
     Rejected(Box<RuntimeLocalRewritePipelineReply>),
     Responded(Box<RuntimeLocalRewritePipelineReply>),
-    Handled,
 }
 
 type RuntimeLocalRewritePipelineResult<T> = Result<T, RuntimeLocalRewritePipelineExit>;
 
-impl RuntimeLocalRewriteRequestState<'_> {
-    fn deadline_expired(&self) -> bool {
-        self.context.deadline().is_expired_at(Instant::now())
+impl RuntimeLocalRewriteRequestState {
+    pub(super) fn deadline_expired(&self) -> bool {
+        Instant::now() >= self.deadline
     }
 
-    fn reply(
-        mut self,
-        response: tiny_http::ResponseBox,
-        reason: ReservationReconciliationReason,
-    ) -> RuntimeLocalRewritePipelineReply {
-        if let Some(usage) = self.guards.usage.as_mut() {
-            usage.mark_terminal(response.status_code().0, reason);
-        }
+    fn reply(self, response: tiny_http::ResponseBox) -> RuntimeLocalRewritePipelineReply {
         RuntimeLocalRewritePipelineReply {
             request: self.request,
             response,
@@ -206,23 +83,18 @@ impl RuntimeLocalRewriteRequestState<'_> {
     }
 
     fn reject(self, response: tiny_http::ResponseBox) -> RuntimeLocalRewritePipelineExit {
-        RuntimeLocalRewritePipelineExit::Rejected(Box::new(
-            self.reply(response, ReservationReconciliationReason::Cancelled),
-        ))
+        RuntimeLocalRewritePipelineExit::Rejected(Box::new(self.reply(response)))
     }
 
     fn respond(self, response: tiny_http::ResponseBox) -> RuntimeLocalRewritePipelineExit {
-        RuntimeLocalRewritePipelineExit::Responded(Box::new(
-            self.reply(response, ReservationReconciliationReason::Completed),
-        ))
+        RuntimeLocalRewritePipelineExit::Responded(Box::new(self.reply(response)))
     }
 }
 
 impl RuntimeLocalRewritePipelineExit {
-    fn finish(self) {
+    pub(super) fn finish(self) {
         let reply = match self {
             Self::Rejected(reply) | Self::Responded(reply) => reply,
-            Self::Handled => return,
         };
         let RuntimeLocalRewritePipelineReply {
             request,
@@ -235,423 +107,70 @@ impl RuntimeLocalRewritePipelineExit {
 
 pub(super) fn run_runtime_local_rewrite_pipeline(
     request: RuntimeLocalRewriteRequest,
-    target: prodex_gateway_http::CanonicalRequestTarget,
+    target: String,
     shared: &RuntimeLocalRewriteProxyShared,
 ) {
-    let shared = shared.with_pinned_governance();
-    if let Err(exit) = try_run_runtime_local_rewrite_pipeline(request, &target, &shared) {
+    if let Err(exit) = try_run_runtime_local_rewrite_pipeline(request, &target, shared) {
         exit.finish();
     }
 }
 
 fn try_run_runtime_local_rewrite_pipeline(
     request: RuntimeLocalRewriteRequest,
-    target: &prodex_gateway_http::CanonicalRequestTarget,
+    target: &str,
     shared: &RuntimeLocalRewriteProxyShared,
 ) -> RuntimeLocalRewritePipelineResult<()> {
-    let canonical = runtime_local_rewrite_canonical_context(request, target, shared)?;
-    let authenticated = runtime_local_rewrite_authenticate(canonical, shared)?;
-    let admitted = runtime_local_rewrite_bounded_admission(authenticated, shared)?;
-    let captured = runtime_local_rewrite_capture_body(admitted, shared)?;
-    let captured = dispatch::quota::runtime_local_rewrite_dispatch_quota(captured, shared)?;
-    let prepared = runtime_local_rewrite_prepare_constraints(captured, shared)?;
-    let prepared = runtime_local_rewrite_dispatch_control_plane(prepared, shared)?;
-    let governed = runtime_local_rewrite_enforce_guardrails(prepared, shared)?;
-    let reserved = runtime_local_rewrite_reserve_virtual_key(governed, shared)?;
-    let ready = runtime_local_rewrite_apply_constraints(reserved, shared)?;
+    let state = runtime_local_rewrite_request_state(request, target, shared);
+    let state = runtime_local_rewrite_bounded_admission(state, shared)?;
+    let captured = runtime_local_rewrite_capture_body(state, shared)?;
+    let admission =
+        match RuntimeGatewayApplicationAdmission::from_request(&captured.captured, shared) {
+            Ok(admission) => admission,
+            Err(_) => {
+                return Err(captured
+                    .state
+                    .reject(build_runtime_proxy_json_error_response(
+                        404,
+                        "unsupported_provider_route",
+                        "provider route is not supported",
+                    )));
+            }
+        };
+    let ready = RuntimeLocalRewriteDispatchReadyRequest {
+        state: captured.state,
+        captured: captured.captured,
+        admission,
+    };
     let ready = runtime_local_rewrite_dispatch_websocket(ready, shared)?;
     let ready = runtime_local_rewrite_dispatch_compact(ready, shared)?;
     let ready = runtime_local_rewrite_dispatch_builtin_models(ready, shared)?;
     runtime_local_rewrite_dispatch_provider(ready, shared)
 }
 
-fn runtime_local_rewrite_canonical_context<'target>(
+fn runtime_local_rewrite_request_state(
     request: RuntimeLocalRewriteRequest,
-    target: &'target prodex_gateway_http::CanonicalRequestTarget,
-    shared: &RuntimeLocalRewriteProxyShared,
-) -> RuntimeLocalRewritePipelineResult<RuntimeLocalRewriteCanonicalRequest<'target>> {
-    let path = target.path_and_query().to_string();
-    let request_id = if runtime_gateway_request_path_is_route_explain(&path, shared) {
-        0
-    } else {
-        runtime_proxy_next_request_id(&shared.runtime_shared)
-    };
-    let typed_request_id = RequestId::new();
-    let started_at = Instant::now();
-    let request_timeout =
-        Duration::from_millis(runtime_gateway_application_http_policy(shared).request_timeout_ms);
-    let deadline = ApplicationRequestDeadline::at(
-        started_at
-            .checked_add(request_timeout)
-            .unwrap_or(started_at),
-    );
-    let header_request = request.header_request();
-    let context = match runtime_gateway_application_request_context(
-        target,
-        typed_request_id,
-        deadline,
-        &header_request.headers,
-    ) {
-        Ok(context) => context,
-        Err(error) => {
-            return Err(RuntimeLocalRewritePipelineExit::Rejected(Box::new(
-                RuntimeLocalRewritePipelineReply {
-                    request,
-                    response: runtime_local_rewrite_application_context_rejection(error),
-                    _guards: RuntimeLocalRewritePipelineGuards::default(),
-                },
-            )));
-        }
-    };
-    let state = RuntimeLocalRewriteRequestState {
+    target: &str,
+    _shared: &RuntimeLocalRewriteProxyShared,
+) -> RuntimeLocalRewriteRequestState {
+    let request_id = runtime_proxy_next_request_id(&_shared.runtime_shared);
+    let timeout = Duration::from_millis(120_000);
+    RuntimeLocalRewriteRequestState {
         request,
-        context,
-        path,
+        path: target.to_string(),
         request_id,
-        admin: None,
-        application: None,
+        deadline: Instant::now()
+            .checked_add(timeout)
+            .unwrap_or_else(Instant::now),
         guards: RuntimeLocalRewritePipelineGuards::default(),
-    };
-    if let Some(response) = runtime_gateway_operational_probe_response(
-        state.request.method(),
-        state.context.route(),
-        shared,
-    ) {
-        return Err(state.respond(response));
     }
-    if shared
-        .gateway_draining
-        .load(std::sync::atomic::Ordering::SeqCst)
-    {
-        crate::runtime_operational_metrics::record_runtime_api_admission_metric(
-            runtime_api_route_kind(&state.path, state.request.is_websocket_upgrade()),
-            ApiAdmissionResult::Draining,
-        );
-        return Err(state.reject(build_runtime_proxy_json_error_response(
-            503,
-            "service_unavailable",
-            "gateway is draining",
-        )));
-    }
-    if shared.gateway_credentials.refresh_is_stale() {
-        return Err(state.reject(build_runtime_proxy_json_error_response(
-            503,
-            "credential_refresh_stale",
-            "gateway credentials are stale",
-        )));
-    }
-    if state.context.plane() == prodex_gateway_http::GatewayHttpRoutePlane::DataPlane
-        && !super::local_rewrite_governance_audit::runtime_governance_audit_is_available(shared)
-    {
-        return Err(state.reject(build_runtime_proxy_json_error_response(
-            503,
-            "governance_audit_unavailable",
-            "gateway governance audit is temporarily unavailable",
-        )));
-    }
-    Ok(RuntimeLocalRewriteCanonicalRequest(state))
 }
 
-fn runtime_local_rewrite_authenticate<'target>(
-    canonical: RuntimeLocalRewriteCanonicalRequest<'target>,
+fn runtime_local_rewrite_bounded_admission(
+    mut state: RuntimeLocalRewriteRequestState,
     shared: &RuntimeLocalRewriteProxyShared,
-) -> RuntimeLocalRewritePipelineResult<RuntimeLocalRewriteAuthenticatedRequest<'target>> {
-    let mut state = canonical.0;
+) -> RuntimeLocalRewritePipelineResult<RuntimeLocalRewriteRequestState> {
     if state.deadline_expired() {
         return Err(state.reject(runtime_local_rewrite_request_timeout_response()));
-    }
-    if let Some(response) = runtime_gateway_browser_auth_response(&mut state.request, shared) {
-        return Err(state.respond(response));
-    }
-    if runtime_gateway_request_path_is_current_session_revoke(&state.path, shared)
-        && runtime_gateway_admin_auth(&state.request.header_request(), shared).is_none()
-    {
-        let virtual_key = match runtime_gateway_request_header_virtual_key(
-            state.request_id,
-            &state.request,
-            shared,
-        ) {
-            Ok(virtual_key) => virtual_key,
-            Err(rejection) => {
-                return Err(state.reject(build_runtime_proxy_json_error_response(
-                    rejection.status(),
-                    rejection.code(),
-                    "gateway virtual key policy rejected this request",
-                )));
-            }
-        };
-        let Some(virtual_key) = virtual_key else {
-            return Err(state.reject(build_runtime_proxy_json_error_response(
-                401,
-                "missing_or_invalid_token",
-                "current-session revocation requires a gateway virtual key",
-            )));
-        };
-        let principal = runtime_gateway_virtual_key_principal(&virtual_key);
-        let response = runtime_gateway_self_service_session_response(
-            &state.request.header_request(),
-            shared,
-            &principal,
-        );
-        return Err(state.respond(response));
-    }
-    state.admin = match runtime_local_rewrite_preauthorize_admin(&state, shared) {
-        Ok(admin) => admin,
-        Err(response) => return Err(state.reject(response)),
-    };
-    if runtime_gateway_request_path_is_route_explain(&state.path, shared) {
-        runtime_gateway_respond_route_explain(
-            state.request,
-            &state.path,
-            shared,
-            state.context,
-            state.admin,
-        );
-        return Err(RuntimeLocalRewritePipelineExit::Handled);
-    }
-    state.application = match runtime_local_rewrite_authorize_data_plane(&state, shared) {
-        Ok(application) => application,
-        Err(response) => return Err(state.reject(response)),
-    };
-    Ok(RuntimeLocalRewriteAuthenticatedRequest(state))
-}
-
-fn runtime_local_rewrite_preauthorize_admin<'target>(
-    state: &RuntimeLocalRewriteRequestState<'target>,
-    shared: &RuntimeLocalRewriteProxyShared,
-) -> Result<Option<RuntimeGatewayAdminPreauthorization<'target>>, tiny_http::ResponseBox> {
-    if !runtime_gateway_request_path_requires_admin_auth(&state.path, shared) {
-        return Ok(None);
-    }
-    let header_request = state.request.header_request();
-    let http = runtime_gateway_http_request_meta(
-        &header_request,
-        path_without_query(state.context.target().path_and_query()),
-    );
-    if let Err(error) = prodex_gateway_http::plan_gateway_http_request(
-        runtime_gateway_application_http_policy(shared),
-        http.clone(),
-    ) {
-        return Err(runtime_gateway_http_plan_error_response(&error));
-    }
-    let Some(authentication) = runtime_gateway_admin_auth(&header_request, shared) else {
-        return Err(runtime_local_rewrite_admin_auth_rejection(state, shared));
-    };
-    let admin_auth = &authentication.auth;
-    let application =
-        match runtime_gateway_admin_preauthorization(&state.context, &http, &authentication) {
-            Ok(application) => application,
-            Err(RuntimeGatewayApplicationBoundaryError::Authorization(_)) => {
-                return Err(runtime_gateway_admin_authorization_rejection_response(
-                    state.request_id,
-                    state.request.method(),
-                    path_without_query(&state.path),
-                    shared,
-                    admin_auth,
-                ));
-            }
-            Err(RuntimeGatewayApplicationBoundaryError::Authentication(_))
-            | Err(RuntimeGatewayApplicationBoundaryError::Route) => {
-                return Err(build_runtime_proxy_json_error_response(
-                    401,
-                    "invalid_admin_token",
-                    "missing or invalid gateway admin bearer token",
-                ));
-            }
-        };
-    Ok(Some(RuntimeGatewayAdminPreauthorization {
-        auth: authentication.auth,
-        application,
-    }))
-}
-
-fn runtime_local_rewrite_admin_auth_rejection(
-    state: &RuntimeLocalRewriteRequestState<'_>,
-    shared: &RuntimeLocalRewriteProxyShared,
-) -> tiny_http::ResponseBox {
-    runtime_proxy_log(
-        &shared.runtime_shared,
-        runtime_proxy_structured_log_message(
-            "gateway_admin_auth_rejected",
-            [
-                runtime_proxy_log_field("request", state.request_id.to_string()),
-                runtime_proxy_log_field("path", path_without_query(&state.path)),
-                runtime_proxy_log_field("stage", "headers"),
-            ],
-        ),
-    );
-    let configured = !shared.gateway_admin_tokens.is_empty()
-        || shared.gateway_sso.proxy_token_hash.is_some()
-        || shared.gateway_sso.oidc.is_some();
-    let (status, code, message, reason) = if configured {
-        (
-            401,
-            "invalid_admin_token",
-            "missing or invalid gateway admin bearer token",
-            "admin_authentication_required",
-        )
-    } else {
-        (
-            403,
-            "admin_auth_not_configured",
-            "configure a gateway admin bearer token to use gateway admin endpoints",
-            "admin_auth_not_configured",
-        )
-    };
-    runtime_gateway_audit_admin_auth_event(
-        shared,
-        "auth_failed",
-        "failure",
-        serde_json::json!({
-            "reason": reason,
-            "method": state.request.method(),
-            "path": path_without_query(&state.path),
-        }),
-    );
-    build_runtime_proxy_json_error_response(status, code, message)
-}
-
-fn runtime_local_rewrite_authorize_data_plane<'target>(
-    state: &RuntimeLocalRewriteRequestState<'target>,
-    shared: &RuntimeLocalRewriteProxyShared,
-) -> Result<
-    Option<prodex_application::ApplicationAuthorizedRequestContext<'target>>,
-    tiny_http::ResponseBox,
-> {
-    if state.context.plane() != prodex_gateway_http::GatewayHttpRoutePlane::DataPlane {
-        return Ok(None);
-    }
-    let virtual_keys_empty = runtime_gateway_virtual_key_entries_is_empty(shared);
-    let legacy_authorized = shared
-        .gateway_auth_token_hash
-        .as_ref()
-        .is_some_and(|hash| runtime_local_rewrite_request_is_authorized(&state.request, hash));
-    let workload_credential = runtime_gateway_workload_credential(&state.request, shared)
-        .map_err(|_| runtime_local_rewrite_data_auth_rejection(state, shared))?;
-    let admin_configured = !shared.gateway_admin_tokens.is_empty()
-        || shared.gateway_sso.proxy_token_hash.is_some()
-        || shared.gateway_sso.oidc.is_some()
-        || shared.gateway_sso.workload_identity.is_some();
-    let virtual_key = if workload_credential.is_some() {
-        None
-    } else {
-        runtime_local_rewrite_verified_virtual_key(state, shared, virtual_keys_empty)?
-    };
-    let mut credential = runtime_gateway_data_plane_credential(
-        virtual_key.as_ref(),
-        legacy_authorized,
-        shared.gateway_auth_token_hash.is_some() || admin_configured,
-        shared.runtime_shared.runtime_config.governance.mode,
-    );
-    if let Some(workload_credential) = workload_credential {
-        credential.evidence = Some(workload_credential);
-        credential.anonymous_allowed = false;
-    }
-    credential.anonymous_allowed &= shared
-        .runtime_shared
-        .runtime_config
-        .governance
-        .anonymous_data_plane;
-    let authorized =
-        runtime_gateway_application_data_plane_authorization(&state.context, credential)
-            .map_err(|_| runtime_local_rewrite_data_auth_rejection(state, shared))?;
-    if state.context.route() == prodex_gateway_http::GatewayHttpRouteKind::DataPlaneQuota
-        && authorized.tenant_context().is_none()
-    {
-        return Err(runtime_local_rewrite_data_auth_rejection(state, shared));
-    }
-    Ok(Some(authorized))
-}
-
-fn runtime_local_rewrite_verified_virtual_key(
-    state: &RuntimeLocalRewriteRequestState<'_>,
-    shared: &RuntimeLocalRewriteProxyShared,
-    virtual_keys_empty: bool,
-) -> Result<Option<runtime_proxy_crate::RuntimeGatewayVirtualKey>, tiny_http::ResponseBox> {
-    if virtual_keys_empty || runtime_gateway_request_path_is_admin(&state.path, shared) {
-        return Ok(None);
-    }
-    runtime_gateway_request_header_virtual_key(state.request_id, &state.request, shared).map_err(
-        |rejection| {
-            runtime_gateway_audit_data_plane_virtual_key_rejected(
-                shared,
-                &state.path,
-                rejection.code(),
-            );
-            runtime_proxy_log(
-                &shared.runtime_shared,
-                runtime_proxy_structured_log_message(
-                    "gateway_virtual_key_rejected",
-                    [
-                        runtime_proxy_log_field("request", state.request_id.to_string()),
-                        runtime_proxy_log_field("transport", "http"),
-                        runtime_proxy_log_field("reason", rejection.code()),
-                        runtime_proxy_log_field("path", path_without_query(&state.path)),
-                        runtime_proxy_log_field("stage", "headers"),
-                    ],
-                ),
-            );
-            build_runtime_proxy_json_error_response(
-                rejection.status(),
-                rejection.code(),
-                "gateway virtual key policy rejected this request",
-            )
-        },
-    )
-}
-
-fn runtime_local_rewrite_data_auth_rejection(
-    state: &RuntimeLocalRewriteRequestState<'_>,
-    shared: &RuntimeLocalRewriteProxyShared,
-) -> tiny_http::ResponseBox {
-    runtime_gateway_audit_data_plane_auth_failed(shared, &state.path);
-    runtime_proxy_log(
-        &shared.runtime_shared,
-        runtime_proxy_structured_log_message(
-            "gateway_auth_rejected",
-            [
-                runtime_proxy_log_field("request", state.request_id.to_string()),
-                runtime_proxy_log_field("transport", "http"),
-                runtime_proxy_log_field("path", path_without_query(&state.path)),
-            ],
-        ),
-    );
-    build_runtime_proxy_text_response(401, "missing or invalid gateway bearer token")
-}
-
-fn runtime_local_rewrite_bounded_admission<'target>(
-    authenticated: RuntimeLocalRewriteAuthenticatedRequest<'target>,
-    shared: &RuntimeLocalRewriteProxyShared,
-) -> RuntimeLocalRewritePipelineResult<RuntimeLocalRewriteAdmittedRequest<'target>> {
-    let mut state = authenticated.0;
-    if state.deadline_expired() {
-        return Err(state.reject(runtime_local_rewrite_request_timeout_response()));
-    }
-    if state.context.plane() == prodex_gateway_http::GatewayHttpRoutePlane::DataPlane {
-        let Some(application) = state.application.as_ref() else {
-            return Err(state.reject(build_runtime_proxy_json_error_response(
-                503,
-                "gateway_admission_unavailable",
-                "gateway admission is temporarily unavailable",
-            )));
-        };
-        let execution = match runtime_gateway_application_local_admission(application, shared) {
-            Ok(execution) => execution,
-            Err(_) => {
-                return Err(state.reject(build_runtime_proxy_json_error_response(
-                    503,
-                    "gateway_admission_unavailable",
-                    "gateway admission is temporarily unavailable",
-                )));
-            }
-        };
-        if execution.max_concurrent_streams as usize != shared.runtime_shared.active_request_limit {
-            return Err(state.reject(build_runtime_proxy_json_error_response(
-                503,
-                "gateway_admission_unavailable",
-                "gateway admission is temporarily unavailable",
-            )));
-        }
     }
     let websocket = state.request.is_websocket_upgrade();
     let metric_route = runtime_api_route_kind(&state.path, websocket);
@@ -665,7 +184,7 @@ fn runtime_local_rewrite_bounded_admission<'target>(
         Err(RuntimeProxyAdmissionRejection::GlobalLimit) => {
             crate::runtime_operational_metrics::record_runtime_api_admission_metric(
                 metric_route,
-                ApiAdmissionResult::GlobalLimitReached,
+                prodex_observability::ApiAdmissionResult::GlobalLimitReached,
             );
             mark_runtime_proxy_local_overload(&shared.runtime_shared, "active_request_limit");
             let response = runtime_proxy_overloaded_response(
@@ -679,7 +198,7 @@ fn runtime_local_rewrite_bounded_admission<'target>(
         Err(RuntimeProxyAdmissionRejection::LaneLimit(lane)) => {
             crate::runtime_operational_metrics::record_runtime_api_admission_metric(
                 metric_route,
-                ApiAdmissionResult::RouteLimitReached,
+                prodex_observability::ApiAdmissionResult::RouteLimitReached,
             );
             let reason = format!("lane_limit:{}", runtime_route_kind_label(lane));
             let response = runtime_proxy_overloaded_response(
@@ -693,16 +212,15 @@ fn runtime_local_rewrite_bounded_admission<'target>(
     };
     crate::runtime_operational_metrics::record_runtime_api_admission_metric(
         metric_route,
-        ApiAdmissionResult::Accepted,
+        prodex_observability::ApiAdmissionResult::Accepted,
     );
-    Ok(RuntimeLocalRewriteAdmittedRequest(state))
+    Ok(state)
 }
 
-fn runtime_local_rewrite_capture_body<'target>(
-    admitted: RuntimeLocalRewriteAdmittedRequest<'target>,
+fn runtime_local_rewrite_capture_body(
+    mut state: RuntimeLocalRewriteRequestState,
     shared: &RuntimeLocalRewriteProxyShared,
-) -> RuntimeLocalRewritePipelineResult<RuntimeLocalRewriteCapturedRequest<'target>> {
-    let mut state = admitted.0;
+) -> RuntimeLocalRewritePipelineResult<RuntimeLocalRewriteCapturedRequest> {
     if state.deadline_expired() {
         return Err(state.reject(runtime_local_rewrite_request_timeout_response()));
     }
@@ -720,26 +238,16 @@ fn runtime_local_rewrite_capture_body<'target>(
             }
         }
     };
-    if state.deadline_expired() {
-        return Err(state.reject(runtime_local_rewrite_request_timeout_response()));
-    }
-    captured.path_and_query = state.context.target().path_and_query().to_string();
+    captured.path_and_query = state.path.clone();
     Ok(RuntimeLocalRewriteCapturedRequest { state, captured })
 }
 
 fn runtime_local_rewrite_capture_rejection(
-    state: &RuntimeLocalRewriteRequestState<'_>,
+    state: &RuntimeLocalRewriteRequestState,
     shared: &RuntimeLocalRewriteProxyShared,
     err: &anyhow::Error,
 ) -> tiny_http::ResponseBox {
     let body_too_large = runtime_proxy_error_is_body_too_large(err);
-    let reason = if body_too_large {
-        runtime_gateway_audit_data_plane_request_body_too_large(shared, &state.path);
-        "request_body_too_large"
-    } else {
-        runtime_gateway_audit_data_plane_request_capture_failed(shared, &state.path);
-        "request_capture_failed"
-    };
     runtime_proxy_log(
         &shared.runtime_shared,
         runtime_proxy_structured_log_message(
@@ -751,7 +259,6 @@ fn runtime_local_rewrite_capture_rejection(
             [
                 runtime_proxy_log_field("request", state.request_id.to_string()),
                 runtime_proxy_log_field("transport", "http"),
-                runtime_proxy_log_field("reason", reason),
                 runtime_proxy_log_field("path", path_without_query(&state.path)),
             ],
         ),

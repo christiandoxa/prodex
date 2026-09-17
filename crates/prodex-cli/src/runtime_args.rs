@@ -1,5 +1,5 @@
 use crate::CodexRuntimeFeatureArgs;
-use clap::{Args, Subcommand};
+use clap::Args;
 use prodex_provider_core::{ProviderId, ProviderRuntimeMetadata, provider_runtime_metadata};
 use std::ffi::OsString;
 use std::fmt;
@@ -16,6 +16,49 @@ mod super_validation;
 pub use launch_args::{ClaudeArgs, RunArgs, RuntimeToolArgs, SuperArgs, SuperCliAgent};
 use launch_args::{parse_harness_mode, parse_runtime_base_url};
 pub use optional_tools::runtime_tool_args_with_tool;
+
+#[derive(Args)]
+pub struct GatewayArgs {
+    /// Address to bind the OpenAI-compatible gateway to. Defaults to loopback with an ephemeral port.
+    #[arg(long, value_name = "ADDR")]
+    pub listen: Option<String>,
+    /// External provider preset. Omit for an OpenAI-compatible upstream.
+    #[arg(long, value_name = "PROVIDER", value_parser = parse_super_external_provider)]
+    pub provider: Option<SuperExternalProvider>,
+    /// Model-facing harness policy.
+    #[arg(long, value_name = "native|minimal|evaluated", value_parser = parse_harness_mode)]
+    pub harness: Option<prodex_provider_core::HarnessMode>,
+    /// Upstream base URL.
+    #[arg(long = "base-url", visible_alias = "url", value_name = "URL")]
+    pub base_url: Option<String>,
+    /// Provider API key. Prefer provider-specific environment variables.
+    #[arg(long = "api-key", value_name = "KEY")]
+    pub api_key: Option<String>,
+    /// Enable Smart Context Autopilot.
+    #[arg(long = "smart-context", default_value_t = false)]
+    pub smart_context: bool,
+    /// Enable Presidio request-body redaction.
+    #[arg(long, conflicts_with = "no_presidio")]
+    pub presidio: bool,
+    /// Disable policy-enabled Presidio redaction.
+    #[arg(long, conflicts_with = "presidio")]
+    pub no_presidio: bool,
+}
+
+impl fmt::Debug for GatewayArgs {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("GatewayArgs")
+            .field("listen", &self.listen)
+            .field("provider", &self.provider)
+            .field("harness", &self.harness)
+            .field("base_url_configured", &self.base_url.is_some())
+            .field("api_key", &self.api_key.as_ref().map(|_| "<redacted>"))
+            .field("smart_context", &self.smart_context)
+            .field("presidio", &self.presidio)
+            .field("no_presidio", &self.no_presidio)
+            .finish()
+    }
+}
 
 #[derive(Args, Debug)]
 pub struct GeminiCompatRefreshArgs {
@@ -46,87 +89,6 @@ pub struct SubAgentExecArgs {
     /// File containing the exact delegated task.
     #[arg(long, value_name = "PATH")]
     pub task_file: PathBuf,
-}
-
-#[derive(Args)]
-pub struct GatewayArgs {
-    #[command(subcommand)]
-    pub command: Option<GatewayCommands>,
-    /// Address to bind the OpenAI-compatible gateway to.
-    #[arg(long, value_name = "ADDR")]
-    pub listen: Option<String>,
-    /// External provider preset for the gateway. Omit for an OpenAI-compatible upstream.
-    #[arg(long, value_name = "PROVIDER", value_parser = parse_super_external_provider)]
-    pub provider: Option<SuperExternalProvider>,
-    /// Model-facing harness policy. Defaults to policy.toml or native.
-    #[arg(
-        long,
-        value_name = "native|minimal|evaluated",
-        value_parser = parse_harness_mode
-    )]
-    pub harness: Option<prodex_provider_core::HarnessMode>,
-    /// Upstream base URL. Defaults to the selected provider default, policy.toml, or OPENAI_BASE_URL.
-    #[arg(long = "base-url", visible_alias = "url", value_name = "URL")]
-    pub base_url: Option<String>,
-    /// Provider API key. Prefer provider-specific env vars for shells/history.
-    #[arg(long = "api-key", value_name = "KEY")]
-    pub api_key: Option<String>,
-    /// Require this bearer token from gateway clients. Env fallback: PRODEX_GATEWAY_TOKEN.
-    #[arg(long = "auth-token", value_name = "TOKEN")]
-    pub auth_token: Option<String>,
-    /// Enable Smart Context Autopilot for gateway /v1/responses and /v1/chat/completions requests.
-    #[arg(long = "smart-context", default_value_t = false)]
-    pub smart_context: bool,
-    /// Enable Presidio request-body redaction for gateway requests.
-    #[arg(long, conflicts_with = "no_presidio")]
-    pub presidio: bool,
-    /// Disable policy-enabled Presidio redaction for this gateway process.
-    #[arg(long, conflicts_with = "presidio")]
-    pub no_presidio: bool,
-}
-
-impl fmt::Debug for GatewayArgs {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("GatewayArgs")
-            .field("command", &self.command)
-            .field("listen", &self.listen)
-            .field("provider", &self.provider)
-            .field("harness", &self.harness)
-            .field("base_url_configured", &self.base_url.is_some())
-            .field("api_key", &self.api_key.as_ref().map(|_| "<redacted>"))
-            .field(
-                "auth_token",
-                &self.auth_token.as_ref().map(|_| "<redacted>"),
-            )
-            .field("smart_context", &self.smart_context)
-            .field("presidio", &self.presidio)
-            .field("no_presidio", &self.no_presidio)
-            .finish()
-    }
-}
-
-#[derive(Subcommand, Debug)]
-pub enum GatewayCommands {
-    #[command(about = "Print provider adapter contracts.")]
-    Providers(GatewayProvidersArgs),
-    #[command(about = "Print provider endpoint capabilities.")]
-    Capabilities(GatewayProviderFilterArgs),
-    #[command(about = "Print provider model catalog.")]
-    Models(GatewayProviderFilterArgs),
-}
-
-#[derive(Args, Debug)]
-pub struct GatewayProvidersArgs {
-    #[arg(long)]
-    pub json: bool,
-}
-
-#[derive(Args, Debug)]
-pub struct GatewayProviderFilterArgs {
-    #[arg(long, value_name = "PROVIDER")]
-    pub provider: String,
-    #[arg(long)]
-    pub json: bool,
 }
 
 fn codex_args_with_feature_overrides(

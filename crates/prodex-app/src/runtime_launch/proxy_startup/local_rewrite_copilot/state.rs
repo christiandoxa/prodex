@@ -15,7 +15,6 @@ pub(crate) enum RuntimeCopilotProviderAuth {
     Profiles {
         profiles: Vec<RuntimeCopilotProfileAuth>,
     },
-    Projected,
 }
 
 #[derive(Clone)]
@@ -67,7 +66,6 @@ pub(super) struct RuntimeCopilotSelectedAuth {
     pub(super) api_key: String,
     pub(super) api_url: Option<String>,
     pub(super) hard_affinity: bool,
-    pub(super) projected: bool,
 }
 
 #[derive(Clone)]
@@ -111,7 +109,6 @@ pub(in crate::runtime_launch::proxy_startup) fn runtime_copilot_oauth_pool_from_
             runtime_copilot_api_key_profiles(api_keys)
         }
         RuntimeCopilotProviderAuth::Profiles { profiles } => profiles.clone(),
-        RuntimeCopilotProviderAuth::Projected => return None,
     };
     Some(RuntimeCopilotOAuthPool {
         state: Arc::new(Mutex::new(RuntimeCopilotOAuthPoolState {

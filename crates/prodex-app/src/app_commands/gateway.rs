@@ -1,493 +1,64 @@
-use super::{
-    GatewayArgs, GatewayCommands, GatewayProviderFilterArgs, GatewayProvidersArgs, Result,
-};
-use crate::profile_commands::{KIRO_MODEL_CATALOG_FILE, parse_kiro_model_catalog_text};
-use crate::read_provider_model_catalog_text;
-use crate::{AppPaths, AppState, AppStateIoExt, ProfileProvider};
-use anyhow::{Context, anyhow};
-use prodex_provider_core::{
-    ProviderAdapterContractSpec, ProviderId, provider_adapter, provider_adapter_contract_matrix,
-    provider_contract_catalog, provider_model_catalog_json, resolve_harness_mode,
-};
-use terminal_ui::print_stdout_line;
+use super::*;
+use anyhow::bail;
 
 pub(crate) fn handle_gateway(args: GatewayArgs) -> Result<()> {
-    if args.harness.is_some() && args.command.is_some() {
-        anyhow::bail!("--harness is only supported when launching the gateway");
-    }
-    match &args.command {
-        Some(GatewayCommands::Providers(command)) => handle_gateway_providers(command),
-        Some(GatewayCommands::Capabilities(command)) => handle_gateway_capabilities(command),
-        Some(GatewayCommands::Models(command)) => handle_gateway_models(command),
-        None => super::runtime_launch::handle_gateway(args),
-    }
-}
-
-fn handle_gateway_providers(args: &GatewayProvidersArgs) -> Result<()> {
-    let providers = provider_adapter_contract_matrix();
-    if args.json {
-        let catalog = provider_contract_catalog(resolve_harness_mode(None, None).effective);
-        print_stdout_line(
-            &serde_json::to_string_pretty(&catalog)
-                .context("failed to serialize provider contracts")?,
-        )?;
-        return Ok(());
-    }
-    for provider in providers {
-        print_stdout_line(&format!(
-            "{}: {}; models={}; endpoints={}",
-            provider.provider,
-            provider.transform_status,
-            provider.model_count,
-            provider.supported_endpoints.join(",")
-        ))?;
-    }
+    let provider = args.provider.map(SuperExternalProvider::as_str);
+    let presidio = args.presidio && !args.no_presidio;
+    let request = RuntimeLaunchRequest {
+        profile: None,
+        allow_auto_rotate: false,
+        auto_redeem: false,
+        skip_quota_check: true,
+        base_url: args.base_url.as_deref(),
+        upstream_no_proxy: false,
+        include_code_review: false,
+        requested_model: None,
+        smart_context_enabled: args.smart_context,
+        presidio_redaction_enabled: presidio,
+        model_context_window_tokens: None,
+        gemini_thinking_budget_tokens: None,
+        force_runtime_proxy: true,
+        model_provider_override: None,
+        profile_v2_name: None,
+        external_provider: provider,
+        external_provider_api_key: args.api_key.as_deref(),
+    };
+    let resolved_harness = prodex_provider_core::resolve_harness_mode(args.harness, None);
+    let prepared =
+        runtime_launch::prepare_gateway_runtime(request, resolved_harness, args.listen.as_deref())?;
+    let Some(endpoint) = prepared.runtime_proxy.as_ref() else {
+        bail!("gateway provider does not expose an OpenAI-compatible proxy");
+    };
+    println!(
+        "Prodex gateway listening on http://{}{}",
+        endpoint.listen_addr, endpoint.openai_mount_path
+    );
+    wait_for_gateway_signal()?;
+    drop(prepared);
     Ok(())
 }
 
-fn handle_gateway_capabilities(args: &GatewayProviderFilterArgs) -> Result<()> {
-    let provider = parse_gateway_provider(&args.provider)?;
-    let spec = gateway_capabilities_spec(provider)?;
-    if args.json {
-        print_stdout_line(
-            &serde_json::to_string_pretty(&spec)
-                .context("failed to serialize provider capabilities")?,
-        )?;
-        return Ok(());
-    }
-    print_stdout_line(&format!(
-        "{}: {}; streaming={}; fallback={}",
-        spec.provider, spec.transform_status, spec.supports_streaming, spec.supports_model_fallback
-    ))?;
-    for endpoint in spec.endpoint_status {
-        print_stdout_line(&format!(
-            "  {}: {}; streaming={}; tested={}",
-            endpoint.endpoint, endpoint.status, endpoint.streaming, endpoint.tested
-        ))?;
-    }
-    Ok(())
+fn wait_for_gateway_signal() -> Result<()> {
+    tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .context("failed to initialize gateway signal runtime")?
+        .block_on(wait_for_signal())
 }
 
-fn gateway_capabilities_spec(provider: ProviderId) -> Result<ProviderAdapterContractSpec> {
-    let mut spec = prodex_provider_core::provider_adapter_contract_spec(provider);
-    if provider == ProviderId::Kiro {
-        spec.model_count = gateway_kiro_model_catalog_json()?.len();
+#[cfg(unix)]
+async fn wait_for_signal() -> Result<()> {
+    let mut terminate = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+        .context("failed to register gateway SIGTERM handler")?;
+    tokio::select! {
+        result = tokio::signal::ctrl_c() => result.context("failed to wait for gateway SIGINT"),
+        _ = terminate.recv() => Ok(()),
     }
-    Ok(spec)
 }
 
-fn handle_gateway_models(args: &GatewayProviderFilterArgs) -> Result<()> {
-    let provider = parse_gateway_provider(&args.provider)?;
-    if provider == ProviderId::Kiro {
-        return handle_gateway_kiro_models(args);
-    }
-    let models = provider_model_catalog_json(provider);
-    if args.json {
-        print_stdout_line(
-            &serde_json::to_string_pretty(&models)
-                .context("failed to serialize provider model catalog")?,
-        )?;
-        return Ok(());
-    }
-    let adapter = provider_adapter(provider);
-    for model in adapter.model_catalog() {
-        print_stdout_line(&format!(
-            "{}: {} ({})",
-            model.id,
-            model.display_name,
-            model
-                .endpoints
-                .iter()
-                .map(|endpoint| endpoint.label())
-                .collect::<Vec<_>>()
-                .join(",")
-        ))?;
-    }
-    Ok(())
-}
-
-fn handle_gateway_kiro_models(args: &GatewayProviderFilterArgs) -> Result<()> {
-    let models = gateway_kiro_model_catalog_json()?;
-    if args.json {
-        print_stdout_line(
-            &serde_json::to_string_pretty(&models)
-                .context("failed to serialize Kiro model catalog")?,
-        )?;
-        return Ok(());
-    }
-    for model in &models {
-        let id = model
-            .get("id")
-            .and_then(serde_json::Value::as_str)
-            .unwrap_or("");
-        let name = model
-            .get("name")
-            .and_then(serde_json::Value::as_str)
-            .unwrap_or(id);
-        print_stdout_line(&format!("{id}: {name} (Kiro model catalog)"))?;
-    }
-    Ok(())
-}
-
-fn gateway_kiro_model_catalog_json() -> Result<Vec<serde_json::Value>> {
-    let paths = AppPaths::discover()?;
-    gateway_kiro_model_catalog_json_from_paths(&paths)
-}
-
-fn gateway_kiro_model_catalog_json_from_paths(paths: &AppPaths) -> Result<Vec<serde_json::Value>> {
-    let state = AppState::load(paths)?;
-    let mut models = Vec::new();
-    for profile in state.profiles.values() {
-        if !matches!(profile.provider, ProfileProvider::Kiro { .. }) {
-            continue;
-        }
-        if !profile.codex_home.exists() {
-            continue;
-        }
-        let path = profile.codex_home.join(KIRO_MODEL_CATALOG_FILE);
-        let Ok(Some(text)) = read_provider_model_catalog_text(&path) else {
-            continue;
-        };
-        let Ok(catalog) = parse_kiro_model_catalog_text(&text) else {
-            continue;
-        };
-        let previous = std::mem::take(&mut models);
-        models = prodex_provider_core::merge_provider_model_catalog_json(
-            ProviderId::Kiro,
-            previous.iter().chain(&catalog),
-        )
-        .map_err(anyhow::Error::new)?;
-    }
-    if models.is_empty() {
-        models = provider_model_catalog_json(ProviderId::Kiro);
-    }
-    Ok(models)
-}
-
-fn parse_gateway_provider(value: &str) -> Result<ProviderId> {
-    ProviderId::parse(value).ok_or_else(|| {
-        anyhow!(
-            "unknown provider '{}'; expected openai, anthropic, copilot, deepseek, gemini, kiro, or local",
-            value
-        )
-    })
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::create_codex_home_if_missing;
-    use std::collections::BTreeMap;
-    use std::env;
-    use std::fs;
-    use std::time::{SystemTime, UNIX_EPOCH};
-
-    #[test]
-    fn harness_is_rejected_for_offline_gateway_catalog_commands() {
-        let crate::Commands::Gateway(args) = crate::parse_cli_command_from([
-            "prodex",
-            "gateway",
-            "--harness",
-            "minimal",
-            "providers",
-        ])
-        .unwrap() else {
-            panic!("expected gateway command");
-        };
-
-        let error = handle_gateway(args).unwrap_err().to_string();
-
-        assert!(error.contains("only supported when launching"), "{error}");
-    }
-
-    fn temp_dir(name: &str) -> std::path::PathBuf {
-        let stamp = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .expect("clock should be valid")
-            .as_nanos();
-        let dir = env::temp_dir().join(format!(
-            "prodex-gateway-kiro-{name}-{}-{stamp}",
-            std::process::id()
-        ));
-        fs::create_dir_all(&dir).expect("temp dir should exist");
-        dir
-    }
-
-    fn test_paths(root: &std::path::Path) -> AppPaths {
-        AppPaths {
-            root: root.to_path_buf(),
-            state_file: root.join("state.json"),
-            managed_profiles_root: root.join("profiles"),
-            shared_codex_root: root.join("codex"),
-            legacy_shared_codex_root: root.join("shared"),
-        }
-    }
-
-    #[test]
-    fn parse_gateway_provider_accepts_kiro() {
-        assert_eq!(
-            parse_gateway_provider("kiro").expect("kiro should parse"),
-            ProviderId::Kiro
-        );
-    }
-
-    #[test]
-    fn gateway_kiro_model_catalog_json_merges_imported_profile_snapshots() {
-        let root = temp_dir("catalog");
-        let paths = test_paths(&root);
-        let first_home = paths.managed_profiles_root.join("kiro-a");
-        let second_home = paths.managed_profiles_root.join("kiro-b");
-        create_codex_home_if_missing(&first_home).expect("first home should exist");
-        create_codex_home_if_missing(&second_home).expect("second home should exist");
-        fs::write(
-            first_home.join(KIRO_MODEL_CATALOG_FILE),
-            serde_json::json!({
-                "models": [
-                    { "id": "catalog-model-a", "name": "Catalog Model A", "owned_by": "kiro-cli" }
-                ]
-            })
-            .to_string(),
-        )
-        .expect("first catalog should be written");
-        fs::write(
-            second_home.join(KIRO_MODEL_CATALOG_FILE),
-            serde_json::json!({
-                "models": [
-                    { "id": "catalog-model-a", "name": "Catalog Model A", "owned_by": "kiro-cli" },
-                    { "id": "catalog-model-b", "name": "Catalog Model B", "owned_by": "kiro-cli" }
-                ]
-            })
-            .to_string(),
-        )
-        .expect("second catalog should be written");
-        AppState {
-            active_profile: Some("kiro-a".to_string()),
-            profiles: BTreeMap::from([
-                (
-                    "kiro-a".to_string(),
-                    crate::ProfileEntry {
-                        codex_home: first_home.clone(),
-                        managed: true,
-                        email: Some("a@example.com".to_string()),
-                        provider: ProfileProvider::Kiro {
-                            auth_key: "key-a".to_string(),
-                            auth_kind: Some("builder-id".to_string()),
-                            profile_arn: None,
-                            profile_name: None,
-                            start_url: None,
-                            region: None,
-                        },
-                    },
-                ),
-                (
-                    "kiro-b".to_string(),
-                    crate::ProfileEntry {
-                        codex_home: second_home,
-                        managed: true,
-                        email: Some("b@example.com".to_string()),
-                        provider: ProfileProvider::Kiro {
-                            auth_key: "key-b".to_string(),
-                            auth_kind: Some("builder-id".to_string()),
-                            profile_arn: None,
-                            profile_name: None,
-                            start_url: None,
-                            region: None,
-                        },
-                    },
-                ),
-            ]),
-            ..AppState::default()
-        }
-        .save(&paths)
-        .expect("state should save");
-
-        let models =
-            gateway_kiro_model_catalog_json_from_paths(&paths).expect("catalog should load");
-        assert_eq!(models.len(), 4);
-        assert_eq!(models[0]["id"], "gpt-5.6-luna");
-        assert_eq!(models[1]["id"], "auto");
-        assert_eq!(models[2]["id"], "catalog-model-a");
-        assert_eq!(models[3]["id"], "catalog-model-b");
-
-        fs::write(
-            first_home.join(KIRO_MODEL_CATALOG_FILE),
-            serde_json::json!({
-                "models": (0..=prodex_provider_core::PROVIDER_MODEL_CATALOG_HARD_LIMIT)
-                    .map(|index| serde_json::json!({"id": format!("model-{index}")}))
-                    .collect::<Vec<_>>()
-            })
-            .to_string(),
-        )
-        .expect("oversized catalog should be written");
-        let models = gateway_kiro_model_catalog_json_from_paths(&paths)
-            .expect("healthy profile catalog should remain available");
-        assert!(models.iter().any(|model| model["id"] == "catalog-model-a"));
-        assert!(models.iter().any(|model| model["id"] == "catalog-model-b"));
-        let _ = fs::remove_dir_all(root);
-    }
-
-    #[test]
-    fn gateway_kiro_catalog_skips_stale_and_malformed_profiles() {
-        let root = temp_dir("stale-profile");
-        let paths = test_paths(&root);
-        let malformed_home = paths.managed_profiles_root.join("kiro-malformed");
-        let healthy_home = paths.managed_profiles_root.join("kiro-healthy");
-        fs::create_dir_all(&malformed_home).expect("malformed home should exist");
-        fs::create_dir_all(&healthy_home).expect("healthy home should exist");
-        fs::write(malformed_home.join(KIRO_MODEL_CATALOG_FILE), "not-json")
-            .expect("malformed catalog should be written");
-        fs::write(
-            healthy_home.join(KIRO_MODEL_CATALOG_FILE),
-            serde_json::json!({
-                "availableModels": [{"modelId": "healthy-model"}]
-            })
-            .to_string(),
-        )
-        .expect("healthy catalog should be written");
-        let profile = |codex_home| crate::ProfileEntry {
-            codex_home,
-            managed: true,
-            email: Some("example@example.test".to_string()),
-            provider: ProfileProvider::Kiro {
-                auth_key: "test-key".to_string(),
-                auth_kind: Some("builder-id".to_string()),
-                profile_arn: None,
-                profile_name: None,
-                start_url: None,
-                region: None,
-            },
-        };
-        AppState {
-            active_profile: Some("kiro-stale".to_string()),
-            profiles: BTreeMap::from([
-                (
-                    "kiro-stale".to_string(),
-                    profile(paths.managed_profiles_root.join("missing")),
-                ),
-                ("kiro-malformed".to_string(), profile(malformed_home)),
-                ("kiro-healthy".to_string(), profile(healthy_home)),
-            ]),
-            ..Default::default()
-        }
-        .save(&paths)
-        .expect("state should save");
-
-        let models = gateway_kiro_model_catalog_json_from_paths(&paths)
-            .expect("healthy catalog should remain available");
-        assert!(models.iter().any(|model| model["id"] == "healthy-model"));
-        assert!(!models.iter().any(|model| model["id"] == "missing"));
-        let _ = fs::remove_dir_all(root);
-    }
-
-    #[test]
-    fn gateway_kiro_capabilities_json_reports_runtime_surface() {
-        let root = temp_dir("capabilities");
-        let paths = test_paths(&root);
-        let kiro_home = paths.managed_profiles_root.join("kiro-cap");
-        create_codex_home_if_missing(&kiro_home).expect("kiro home should exist");
-        fs::write(
-            kiro_home.join(KIRO_MODEL_CATALOG_FILE),
-            serde_json::json!({
-                "models": [
-                    { "id": "catalog-model-a", "name": "Catalog Model A", "owned_by": "kiro-cli" }
-                ]
-            })
-            .to_string(),
-        )
-        .expect("catalog should be written");
-        AppState {
-            active_profile: Some("kiro-cap".to_string()),
-            profiles: BTreeMap::from([(
-                "kiro-cap".to_string(),
-                crate::ProfileEntry {
-                    codex_home: kiro_home,
-                    managed: true,
-                    email: Some("example@example.test".to_string()),
-                    provider: ProfileProvider::Kiro {
-                        auth_key: "key-cap".to_string(),
-                        auth_kind: Some("builder-id".to_string()),
-                        profile_arn: None,
-                        profile_name: None,
-                        start_url: None,
-                        region: None,
-                    },
-                },
-            )]),
-            ..Default::default()
-        }
-        .save(&paths)
-        .expect("state should save");
-
-        let mut spec = prodex_provider_core::provider_adapter_contract_spec(ProviderId::Kiro);
-        spec.model_count = gateway_kiro_model_catalog_json_from_paths(&paths)
-            .expect("catalog should load")
-            .len();
-        let spec = serde_json::to_value(spec).expect("spec should serialize");
-        assert_eq!(spec["provider"], "kiro");
-        assert_eq!(spec["supports_streaming"], true);
-        assert_eq!(spec["transform_status"], "translated");
-        assert_eq!(spec["model_count"], 3);
-        assert_eq!(spec["endpoint_status"][2]["endpoint"], "chat-completions");
-        assert_eq!(spec["endpoint_status"][2]["streaming"], true);
-        assert_eq!(spec["endpoint_status"][2]["tested"], true);
-        assert!(
-            spec["endpoint_status"][2]["unsupported_params"]
-                .as_array()
-                .expect("unsupported_params should be an array")
-                .iter()
-                .any(|value| value == "temperature")
-        );
-        assert!(
-            spec["endpoint_status"][2]["unsupported_params"]
-                .as_array()
-                .expect("unsupported_params should be an array")
-                .iter()
-                .any(|value| value == "parallel_tool_calls")
-        );
-        assert!(
-            spec["endpoint_status"][2]["unsupported_params"]
-                .as_array()
-                .expect("unsupported_params should be an array")
-                .iter()
-                .any(|value| value == "user")
-        );
-        assert!(
-            spec["endpoint_status"][2]["unsupported_params"]
-                .as_array()
-                .expect("unsupported_params should be an array")
-                .iter()
-                .any(|value| value == "max_output_tokens/max_tokens/max_completion_tokens")
-        );
-        assert_eq!(spec["endpoint_status"][1]["endpoint"], "responses/compact");
-        assert_eq!(spec["endpoint_status"][1]["status"], "emulated");
-        assert_eq!(spec["endpoint_status"][1]["tested"], true);
-        assert!(
-            spec["supported_endpoints"]
-                .as_array()
-                .expect("supported_endpoints should be an array")
-                .iter()
-                .any(|value| value == "responses")
-        );
-        assert!(
-            spec["supported_endpoints"]
-                .as_array()
-                .expect("supported_endpoints should be an array")
-                .iter()
-                .any(|value| value == "chat-completions")
-        );
-    }
-
-    #[test]
-    fn gateway_copilot_capabilities_report_compact_surface() {
-        let spec = prodex_provider_core::provider_adapter_contract_spec(ProviderId::Copilot);
-        assert!(spec.supported_endpoints.contains(&"responses/compact"));
-        let compact = spec
-            .endpoint_status
-            .iter()
-            .find(|endpoint| endpoint.endpoint == "responses/compact")
-            .expect("copilot compact endpoint should be reported");
-        assert_eq!(compact.status, "passthrough");
-        assert!(!compact.streaming);
-        assert!(compact.tested);
-    }
+#[cfg(not(unix))]
+async fn wait_for_signal() -> Result<()> {
+    tokio::signal::ctrl_c()
+        .await
+        .context("failed to wait for gateway shutdown signal")
 }

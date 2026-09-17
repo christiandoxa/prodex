@@ -364,15 +364,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "backon"
-version = "1.6.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cffb0e931875b666fc4fcb20fee52e9bbd1ef836fd9e9e04ec21555f9f85f7ef"
-dependencies = [
- "fastrand",
-]
-
-[[package]]
 name = "base64"
 version = "0.22.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -711,11 +702,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cfc320937d09e6de266b31b9afb480f197d7a861be86be7cb2ea7e5d1bfffc5e"
 dependencies = [
  "bytes",
- "futures-core",
  "memchr",
- "pin-project-lite",
- "tokio",
- "tokio-util",
 ]
 
 [[package]]
@@ -740,12 +727,6 @@ checksum = "4ca0197aee26d1ae37445ee532fefce43251d24cc7c166799f4d46817f1d3973"
 dependencies = [
  "crossbeam-utils",
 ]
-
-[[package]]
-name = "const-oid"
-version = "0.9.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c2459377285ad874054d797f3ccebf984978aa39129f6eafde5cdc8315b612f8"
 
 [[package]]
 name = "const-oid"
@@ -985,62 +966,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4583a4551df46e2792f82ceeac45e850d2e2d5debba0b91f102385cda5b11f06"
 
 [[package]]
-name = "deadpool"
-version = "0.13.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3e98a7e119cd347f4201e1159b19831029e203e2d8b790547708e8157b4acf1e"
-dependencies = [
- "deadpool-runtime",
- "tokio",
-]
-
-[[package]]
-name = "deadpool-postgres"
-version = "0.14.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "65a536565624b97fc19f758cd01b15d12908d3344425066efc8162236fbd3749"
-dependencies = [
- "async-trait",
- "deadpool",
- "getrandom 0.4.3",
- "tokio",
- "tokio-postgres",
- "tracing",
-]
-
-[[package]]
-name = "deadpool-runtime"
-version = "0.3.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2657f61fb1dd8bf37a8d51093cc7cee4e77125b22f7753f49b289f831bec2bae"
-dependencies = [
- "tokio",
-]
-
-[[package]]
-name = "der"
-version = "0.7.10"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e7c1832837b905bbfb5101e07cc24c8deddf52f93225eee6ead5f4d63d53ddcb"
-dependencies = [
- "const-oid 0.9.6",
- "der_derive",
- "flagset",
- "zeroize",
-]
-
-[[package]]
-name = "der_derive"
-version = "0.7.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8034092389675178f570469e6c3b0465d3d30b4505c294a6550db47f3c17ad18"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 2.0.119",
-]
-
-[[package]]
 name = "deranged"
 version = "0.5.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1086,7 +1011,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f1dd6dbb5841937940781866fa1281a1ff7bd3bf827091440879f9994983d5c2"
 dependencies = [
  "block-buffer 0.12.1",
- "const-oid 0.10.2",
+ "const-oid",
  "crypto-common 0.2.2",
  "ctutils",
 ]
@@ -1284,12 +1209,6 @@ name = "find-msvc-tools"
 version = "0.1.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "26b73573e6edcd2af0cdf47bd6cb58f0b3839491263c314eaad1ccf24430e1de"
-
-[[package]]
-name = "flagset"
-version = "0.4.7"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b7ac824320a75a52197e8f2d787f6a38b6718bb6897a35142d749af3c0e8f4fe"
 
 [[package]]
 name = "foldhash"
@@ -1614,7 +1533,6 @@ dependencies = [
  "http",
  "http-body",
  "httparse",
- "httpdate",
  "itoa",
  "pin-project-lite",
  "smallvec",
@@ -2753,8 +2671,6 @@ dependencies = [
  "bytes",
  "fallible-iterator 0.2.0",
  "postgres-protocol",
- "serde_core",
- "serde_json",
  "uuid",
 ]
 
@@ -2802,18 +2718,11 @@ dependencies = [
  "criterion",
  "libc",
  "prodex-app",
- "prodex-application",
  "prodex-config",
- "prodex-control-plane",
  "prodex-domain",
- "prodex-gateway-http",
- "prodex-gateway-server",
  "prodex-provider-core",
  "prodex-provider-spi",
  "prodex-secret-store",
- "prodex-storage",
- "prodex-storage-postgres-runtime",
- "prodex-storage-sqlite",
  "reqwest",
  "rusqlite",
  "serde",
@@ -2842,21 +2751,14 @@ dependencies = [
  "os_info",
  "portable-pty",
  "postgres",
- "prodex-application",
  "prodex-audit-log",
- "prodex-authn",
- "prodex-authz",
  "prodex-bench-support",
  "prodex-cli",
  "prodex-codex-config",
  "prodex-config",
  "prodex-context",
- "prodex-control-plane",
  "prodex-core",
  "prodex-domain",
- "prodex-gateway-core",
- "prodex-gateway-http",
- "prodex-gateway-server",
  "prodex-housekeeping",
  "prodex-mcp-stdio",
  "prodex-mojo-core",
@@ -2890,13 +2792,6 @@ dependencies = [
  "prodex-shared-codex-fs",
  "prodex-shared-types",
  "prodex-state",
- "prodex-storage",
- "prodex-storage-postgres",
- "prodex-storage-postgres-runtime",
- "prodex-storage-redis",
- "prodex-storage-redis-runtime",
- "prodex-storage-sqlite",
- "prodex-storage-sqlite-runtime",
  "prodex-terminal-ui",
  "prodex-update-notice",
  "ratatui",
@@ -2920,27 +2815,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "prodex-application"
-version = "0.429.4"
-dependencies = [
- "prodex-authn",
- "prodex-authz",
- "prodex-config",
- "prodex-control-plane",
- "prodex-domain",
- "prodex-gateway-core",
- "prodex-gateway-http",
- "prodex-mojo-core",
- "prodex-observability",
- "prodex-provider-core",
- "prodex-provider-spi",
- "prodex-storage",
- "prodex-storage-postgres",
- "prodex-storage-redis",
- "prodex-storage-sqlite",
-]
-
-[[package]]
 name = "prodex-audit-log"
 version = "0.429.4"
 dependencies = [
@@ -2959,13 +2833,6 @@ version = "0.429.4"
 dependencies = [
  "prodex-domain",
  "url",
-]
-
-[[package]]
-name = "prodex-authz"
-version = "0.429.4"
-dependencies = [
- "prodex-domain",
 ]
 
 [[package]]
@@ -3013,14 +2880,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "prodex-control-plane"
-version = "0.429.4"
-dependencies = [
- "prodex-config",
- "prodex-domain",
-]
-
-[[package]]
 name = "prodex-core"
 version = "0.429.4"
 dependencies = [
@@ -3039,46 +2898,6 @@ dependencies = [
  "sha2 0.11.0",
  "uuid",
  "zeroize",
-]
-
-[[package]]
-name = "prodex-gateway-core"
-version = "0.429.4"
-dependencies = [
- "prodex-authz",
- "prodex-domain",
- "prodex-observability",
- "prodex-provider-core",
- "prodex-provider-spi",
- "prodex-storage",
- "serde",
- "sha2 0.11.0",
-]
-
-[[package]]
-name = "prodex-gateway-http"
-version = "0.429.4"
-dependencies = [
- "prodex-domain",
- "prodex-gateway-core",
- "prodex-observability",
-]
-
-[[package]]
-name = "prodex-gateway-server"
-version = "0.429.4"
-dependencies = [
- "anyhow",
- "arc-swap",
- "bytes",
- "http-body-util",
- "hyper",
- "hyper-util",
- "prodex-gateway-http",
- "rustls",
- "sha2 0.11.0",
- "tokio",
- "tokio-rustls",
 ]
 
 [[package]]
@@ -3346,7 +3165,6 @@ name = "prodex-runtime-proxy"
 version = "0.429.4"
 dependencies = [
  "base64 0.23.1",
- "prodex-gateway-core",
  "prodex-mojo-core",
  "prodex-provider-core",
  "prodex-redaction",
@@ -3462,80 +3280,6 @@ dependencies = [
  "prodex-provider-core",
  "serde",
  "serde_json",
-]
-
-[[package]]
-name = "prodex-storage"
-version = "0.429.4"
-dependencies = [
- "prodex-domain",
-]
-
-[[package]]
-name = "prodex-storage-postgres"
-version = "0.429.4"
-dependencies = [
- "postgres",
- "prodex-domain",
- "prodex-storage",
-]
-
-[[package]]
-name = "prodex-storage-postgres-runtime"
-version = "0.429.4"
-dependencies = [
- "deadpool-postgres",
- "postgres",
- "prodex-domain",
- "prodex-storage",
- "prodex-storage-postgres",
- "rustls",
- "rustls-native-certs",
- "serde_json",
- "sha2 0.11.0",
- "tokio",
- "tokio-postgres",
- "tokio-postgres-rustls",
- "uuid",
-]
-
-[[package]]
-name = "prodex-storage-redis"
-version = "0.429.4"
-dependencies = [
- "prodex-domain",
- "prodex-storage",
-]
-
-[[package]]
-name = "prodex-storage-redis-runtime"
-version = "0.429.4"
-dependencies = [
- "prodex-domain",
- "prodex-storage-redis",
- "redis",
- "tokio",
-]
-
-[[package]]
-name = "prodex-storage-sqlite"
-version = "0.429.4"
-dependencies = [
- "prodex-domain",
- "prodex-storage",
- "rusqlite",
-]
-
-[[package]]
-name = "prodex-storage-sqlite-runtime"
-version = "0.429.4"
-dependencies = [
- "prodex-domain",
- "prodex-storage",
- "prodex-storage-sqlite",
- "rusqlite",
- "serde_json",
- "sha2 0.11.0",
 ]
 
 [[package]]
@@ -3764,25 +3508,12 @@ version = "1.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2acbc41a996f7652b2ddd9dfd98cc4ff602cfd742ae35382f07f608405ab50ed"
 dependencies = [
- "arc-swap",
  "arcstr",
- "async-lock",
- "backon",
- "bytes",
- "cfg-if",
  "combine",
- "futures-channel",
- "futures-util",
  "itoa",
  "percent-encoding",
- "pin-project-lite",
- "rustls",
- "rustls-native-certs",
  "ryu",
  "socket2",
- "tokio",
- "tokio-rustls",
- "tokio-util",
  "url",
  "xxhash-rust",
 ]
@@ -3997,7 +3728,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0d41d731c7d2f962d1ccc364cec258de3c0e93b38c2fb3ba97ac74513048d634"
 dependencies = [
  "aws-lc-rs",
- "log",
  "once_cell",
  "rustls-pki-types",
  "rustls-webpki",
@@ -4388,16 +4118,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "spki"
-version = "0.7.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d91ed6c858b01f942cd56b37a94b3e0a1798290327d1236e4d9cf4eaca44d29d"
-dependencies = [
- "base64ct",
- "der",
-]
-
-[[package]]
 name = "sqlite-wasm-rs"
 version = "0.5.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4689,27 +4409,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1f3ccbac311fea05f86f61904b462b55fb3df8837a366dfc601a0161d0532f20"
 
 [[package]]
-name = "tls_codec"
-version = "0.4.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0de2e01245e2bb89d6f05801c564fa27624dbd7b1846859876c7dad82e90bf6b"
-dependencies = [
- "tls_codec_derive",
- "zeroize",
-]
-
-[[package]]
-name = "tls_codec_derive"
-version = "0.4.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2d2e76690929402faae40aebdda620a2c0e25dd6d3b9afe48867dfd95991f4bd"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 2.0.119",
-]
-
-[[package]]
 name = "tokio"
 version = "1.53.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4760,20 +4459,6 @@ dependencies = [
  "tokio",
  "tokio-util",
  "whoami",
-]
-
-[[package]]
-name = "tokio-postgres-rustls"
-version = "0.14.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4c2ad44aa0ae96db89c4742212ed41645b2f597311ff6e1945542a4d9fadc2fb"
-dependencies = [
- "rustls",
- "sha2 0.11.0",
- "tokio",
- "tokio-postgres",
- "tokio-rustls",
- "x509-cert",
 ]
 
 [[package]]
@@ -5497,18 +5182,6 @@ name = "writeable"
 version = "0.6.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1ffae5123b2d3fc086436f8834ae3ab053a283cfac8fe0a0b8eaae044768a4c4"
-
-[[package]]
-name = "x509-cert"
-version = "0.2.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1301e935010a701ae5f8655edc0ad17c44bad3ac5ce8c39185f75453b720ae94"
-dependencies = [
- "const-oid 0.9.6",
- "der",
- "spki",
- "tls_codec",
-]
 
 [[package]]
 name = "xxhash-rust"

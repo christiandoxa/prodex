@@ -1,6 +1,7 @@
 //! Shared local/remote Presidio inspection and redaction engine.
 
 use super::analyzer::{detect_presidio_language, merge_presidio_analyzer_results};
+use super::findings::ApplicationInspectionSource;
 use super::findings::{
     PresidioAnalyzerResult, runtime_presidio_findings, runtime_presidio_inspection_source,
 };
@@ -12,7 +13,6 @@ use super::registry::RuntimePresidioRedactionState;
 use crate::presidio_runtime::PresidioLanguageMode;
 use crate::{RuntimePresidioRedactionConfig, read_async_response_body_with_limit};
 use anyhow::{Context, Result, anyhow};
-use prodex_application::ApplicationInspectionSource;
 use prodex_domain::{InspectionCoverage, MAX_INSPECTION_FINDINGS};
 use std::sync::Arc;
 

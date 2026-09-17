@@ -12,7 +12,6 @@ use super::super::local_rewrite_rate_limits::{
     runtime_deepseek_codex_rate_limit_headers, runtime_provider_codex_rate_limit_headers,
 };
 use super::super::local_rewrite_request::RuntimeLocalRewriteRequest;
-use super::super::local_rewrite_response_spend::emit_runtime_gateway_response_spend_event_for_body;
 use super::super::provider_bridge::{
     RuntimeProviderBridgeKind, runtime_provider_log_stream_conformance,
     runtime_provider_stream_event_conformance_result,
@@ -131,7 +130,7 @@ pub(super) fn respond_runtime_chat_compatible_rewrite(
         return;
     }
 
-    let response_started_at = Instant::now();
+    let _response_started_at = Instant::now();
     let response = runtime_deepseek_chat_buffered_response_parts(
         provider_kind,
         status,
@@ -148,14 +147,6 @@ pub(super) fn respond_runtime_chat_compatible_rewrite(
             &parts.body,
         );
         append_binary_rate_limit_headers(&mut parts.headers, rate_limit_headers);
-        emit_runtime_gateway_response_spend_event_for_body(
-            request_id,
-            captured,
-            shared,
-            parts.status,
-            response_started_at.elapsed().as_millis(),
-            parts.body.as_slice(),
-        );
         runtime_local_rewrite_governed_response_with_call_id(
             parts,
             request_id,

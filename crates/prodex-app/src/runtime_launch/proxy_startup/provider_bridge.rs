@@ -23,17 +23,9 @@ pub(super) use self::provider_bridge_error_policy::{
 pub(super) use self::provider_bridge_routing::runtime_provider_native_passthrough;
 pub(super) use self::provider_bridge_routing::{
     RuntimeProviderRouteKind, runtime_provider_canonical_model,
-    runtime_provider_gateway_cost_for_request, runtime_provider_gateway_pricing_model,
     runtime_provider_model_fallback_chain, runtime_provider_models_buffered_response,
     runtime_provider_request_body_with_model, runtime_provider_request_ledger_message,
     runtime_provider_route_kind,
-};
-pub(super) use super::provider_bridge_spend::{
-    RuntimeProviderGatewaySpendEvent, runtime_provider_gateway_response_spend_event,
-    runtime_provider_gateway_response_spend_event_from_tokens,
-    runtime_provider_gateway_spend_apply_admission_ids,
-    runtime_provider_gateway_spend_apply_ledger_scope, runtime_provider_gateway_spend_event,
-    runtime_provider_gateway_terminal_spend_event,
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

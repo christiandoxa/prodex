@@ -116,9 +116,6 @@ pub(super) fn runtime_local_rewrite_remember_accepted_model(
     request: &RuntimeProxyRequest,
     model: &str,
 ) {
-    if !shared.gateway_request_constraints.enabled {
-        return;
-    }
     if let Some(scope) = runtime_local_rewrite_model_scope(provider_kind, request, &request.body)
         && let Ok(mut memory) = shared.model_memory.lock()
     {

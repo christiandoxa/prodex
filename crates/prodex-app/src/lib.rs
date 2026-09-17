@@ -44,8 +44,6 @@ mod cli_args;
 mod codex_binary;
 mod command_dispatch;
 mod core_constants;
-mod gateway_application;
-mod gateway_backend;
 mod housekeeping;
 mod presidio_runtime;
 mod profile_commands;
@@ -72,7 +70,6 @@ mod runtime_gemini_auth;
 mod runtime_gemini_cli;
 mod runtime_gemini_cli_compat;
 mod runtime_gemini_config;
-mod runtime_governance;
 mod runtime_kiro_acp;
 mod runtime_kiro_connect_proxy;
 mod runtime_launch;
@@ -144,72 +141,17 @@ use runtime_launch::*;
 use runtime_launch_shared::*;
 use runtime_local_provider_config::*;
 use runtime_model_preferences::*;
+pub(crate) use runtime_operational_metrics::*;
 use runtime_persistence::*;
 use runtime_policy::*;
-pub use runtime_policy::{
-    ConfigPublicationPostgresCompactionPlan, ConfigPublicationPostgresDeliveryPlan,
-    ConfigPublicationPostgresPublishPlan, ConfigPublicationPostgresTransport,
-    ConfigPublicationTransportCompactionPlan, ConfigPublicationTransportDeliveryPlan,
-    ConfigPublicationTransportPublishPlan, RuntimePolicyPublicationDeliveryPlan,
-    clear_runtime_policy_cache, compact_config_publication_transport,
-    compact_postgres_config_publication_transport,
-    deliver_config_publication_event_to_gateway_runtime,
-    deliver_pending_config_publication_events_to_gateway_runtime,
-    deliver_pending_config_publication_events_with_activation,
-    deliver_pending_postgres_config_publication_events_to_gateway_runtime,
-    deliver_pending_postgres_config_publication_events_with_activation,
-    publish_config_publication_event_to_gateway_transport,
-    publish_config_publication_event_to_postgres_transport,
-    runtime_config_publication_postgres_transport,
-};
-pub(crate) use runtime_thread_index::*;
-use runtime_tools::*;
-pub fn migrate_gateway_compatibility_state_sqlite(path: &Path) -> anyhow::Result<()> {
-    runtime_launch::runtime_gateway_sqlite_migrate_compatibility_state(path)
-}
-
-pub fn migrate_gateway_compatibility_state_postgres(
-    url: &str,
-    tls: &prodex_storage_postgres_runtime::PostgresTlsConfig,
-) -> anyhow::Result<()> {
-    runtime_launch::runtime_gateway_postgres_migrate_compatibility_state(url, tls)
-}
-pub fn migrate_gateway_enterprise_state_sqlite(path: &Path) -> anyhow::Result<usize> {
-    runtime_launch::runtime_gateway_sqlite_migrate_enterprise_state(path)
-}
-
-pub fn migrate_gateway_enterprise_state_postgres(
-    url: &str,
-    tls: &prodex_storage_postgres_runtime::PostgresTlsConfig,
-) -> anyhow::Result<usize> {
-    runtime_launch::runtime_gateway_postgres_migrate_enterprise_state(url, tls)
-}
-pub use gateway_application::{
-    GatewayApplication, start_policy_gateway_application,
-    start_policy_gateway_application_for_mode, start_policy_gateway_application_for_mode_at,
-};
-pub use gateway_backend::{
-    GatewayBackend, start_policy_gateway_backend, start_policy_gateway_backend_for_mode,
-};
-pub use prodex_runtime_policy::{RuntimePolicyServiceMode, runtime_policy_gateway};
-
-pub fn runtime_policy_root() -> anyhow::Result<std::path::PathBuf> {
-    Ok(AppPaths::discover()?.root)
-}
-
-pub fn runtime_policy_gateway_tls_config()
--> anyhow::Result<Option<prodex_gateway_server::GatewayServerTlsConfig>> {
-    let gateway = prodex_runtime_policy::runtime_policy_gateway().unwrap_or_default();
-    let secrets = prodex_runtime_policy::runtime_policy_secrets().unwrap_or_default();
-    app_commands::runtime_launch::gateway_config::gateway_tls_config(&gateway, &secrets)
-}
-pub(crate) use runtime_operational_metrics::*;
 use runtime_proxy::*;
 use runtime_proxy_shared::*;
 pub(crate) use runtime_save_shared::*;
 pub(crate) use runtime_secret_backend::*;
 pub(crate) use runtime_state_shared::*;
 use runtime_store::*;
+pub(crate) use runtime_thread_index::*;
+use runtime_tools::*;
 use shared_codex_fs::*;
 pub(crate) use shared_types::*;
 use terminal_ui::*;
@@ -471,7 +413,6 @@ fn run_command(command: Commands) -> Result<()> {
 
 fn command_uses_minimal_startup(command: &Commands) -> bool {
     matches!(command, Commands::McpJsonlBridge(_))
-        || matches!(command, Commands::Gateway(args) if args.command.is_some())
         || matches!(
             command,
             Commands::Doctor(args)

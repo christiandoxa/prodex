@@ -3,15 +3,12 @@ use super::super::provider_models::{
 };
 use super::{RuntimeProviderBridgeKind, runtime_provider_label};
 use crate::RuntimeHeapTrimmedBufferedResponseParts;
-use prodex_gateway_http::{GatewayHttpRouteKind, classify_route};
 use prodex_provider_core::{
-    ProviderCapabilityStatus, ProviderEndpoint, ProviderModelCost, provider_adapter,
-    provider_model_cost, provider_model_fallback_chain,
+    ProviderCapabilityStatus, ProviderEndpoint, provider_adapter, provider_model_fallback_chain,
 };
 use runtime_proxy_crate::{
     path_without_query, runtime_proxy_log_field, runtime_proxy_structured_log_message,
 };
-use std::collections::BTreeMap;
 
 pub(in crate::runtime_launch::proxy_startup) fn runtime_provider_native_passthrough(
     kind: RuntimeProviderBridgeKind,
@@ -124,93 +121,6 @@ pub(in crate::runtime_launch::proxy_startup) fn runtime_provider_canonical_model
     prodex_provider_core::provider_canonical_model(kind.provider_id(), model)
 }
 
-pub(in crate::runtime_launch::proxy_startup) fn runtime_provider_gateway_cost_for_request(
-    kind: RuntimeProviderBridgeKind,
-    aliases: &[runtime_proxy_crate::RuntimeGatewayRouteAlias],
-    model_state: &BTreeMap<String, runtime_proxy_crate::RuntimeGatewayRouteModelState>,
-    request_id: u64,
-    body: &[u8],
-    model: &str,
-    governed_cost: Option<ProviderModelCost>,
-) -> ProviderModelCost {
-    if let Some(cost) = governed_cost {
-        return cost;
-    }
-    let model = model.trim();
-    let direct_metric_model = model
-        .strip_prefix("combo:")
-        .and_then(|combo| {
-            combo
-                .split(',')
-                .map(str::trim)
-                .find(|part| !part.is_empty())
-        })
-        .unwrap_or(model);
-    if let Some(metrics) = aliases
-        .iter()
-        .find_map(|alias| alias.model_metrics.get(direct_metric_model))
-    {
-        return ProviderModelCost {
-            input_cost_per_million_microusd: metrics.input_cost_per_million_microusd,
-            output_cost_per_million_microusd: metrics.output_cost_per_million_microusd,
-        };
-    }
-    if let Some(rewrite) = runtime_proxy_crate::runtime_gateway_rewrite_route_alias_with_state(
-        body,
-        aliases,
-        request_id,
-        model_state,
-    ) && let Some(alias) = aliases
-        .iter()
-        .find(|alias| alias.alias.eq_ignore_ascii_case(model))
-    {
-        if let Some(metrics) = alias.model_metrics.get(&rewrite.model) {
-            return ProviderModelCost {
-                input_cost_per_million_microusd: metrics.input_cost_per_million_microusd,
-                output_cost_per_million_microusd: metrics.output_cost_per_million_microusd,
-            };
-        }
-        if matches!(
-            rewrite.strategy,
-            runtime_proxy_crate::RuntimeGatewayRouteStrategy::Fallback
-        ) && let Some(first_model) = alias.models.first()
-            && let Some(metrics) = alias.model_metrics.get(first_model)
-        {
-            return ProviderModelCost {
-                input_cost_per_million_microusd: metrics.input_cost_per_million_microusd,
-                output_cost_per_million_microusd: metrics.output_cost_per_million_microusd,
-            };
-        }
-    }
-    provider_model_cost(kind.provider_id(), model)
-}
-
-pub(in crate::runtime_launch::proxy_startup) fn runtime_provider_gateway_pricing_model(
-    aliases: &[runtime_proxy_crate::RuntimeGatewayRouteAlias],
-    model_state: &BTreeMap<String, runtime_proxy_crate::RuntimeGatewayRouteModelState>,
-    request_id: u64,
-    body: &[u8],
-    model: &str,
-) -> String {
-    let model = model.trim();
-    if let Some(combo) = model.strip_prefix("combo:")
-        && let Some(first) = combo
-            .split(',')
-            .map(str::trim)
-            .find(|part| !part.is_empty())
-    {
-        return first.to_string();
-    }
-    runtime_proxy_crate::runtime_gateway_rewrite_route_alias_with_state(
-        body,
-        aliases,
-        request_id,
-        model_state,
-    )
-    .map(|rewrite| rewrite.model)
-    .unwrap_or_else(|| model.to_string())
-}
-
 pub(in crate::runtime_launch::proxy_startup) fn runtime_provider_request_ledger_message(
     request_id: u64,
     kind: RuntimeProviderBridgeKind,
@@ -273,23 +183,25 @@ fn runtime_provider_route_endpoint(
 }
 
 pub(in crate::runtime_launch::proxy_startup) fn runtime_provider_route_kind(
-    path: &str,
+    path_and_query: &str,
 ) -> Option<RuntimeProviderRouteKind<'_>> {
-    let path = path_without_query(path);
-    match classify_route(path) {
-        GatewayHttpRouteKind::DataPlaneResponses => Some(RuntimeProviderRouteKind::Responses),
-        GatewayHttpRouteKind::DataPlaneCompact => Some(RuntimeProviderRouteKind::ResponsesCompact),
-        GatewayHttpRouteKind::DataPlaneChatCompletions => {
+    let path = path_without_query(path_and_query);
+    match path {
+        "/v1/responses" | "/responses" => Some(RuntimeProviderRouteKind::Responses),
+        "/v1/responses/compact" | "/responses/compact" => {
+            Some(RuntimeProviderRouteKind::ResponsesCompact)
+        }
+        "/v1/chat/completions" | "/chat/completions" => {
             Some(RuntimeProviderRouteKind::ChatCompletions)
         }
-        GatewayHttpRouteKind::DataPlaneMessages => Some(RuntimeProviderRouteKind::Messages),
-        GatewayHttpRouteKind::DataPlaneEmbeddings => Some(RuntimeProviderRouteKind::Embeddings),
-        GatewayHttpRouteKind::DataPlaneModels => Some(RuntimeProviderRouteKind::ModelsList),
-        GatewayHttpRouteKind::DataPlaneModel => ["/v1/models/", "/models/"]
+        "/v1/messages" | "/messages" => Some(RuntimeProviderRouteKind::Messages),
+        "/v1/embeddings" | "/embeddings" => Some(RuntimeProviderRouteKind::Embeddings),
+        "/v1/models" | "/models" => Some(RuntimeProviderRouteKind::ModelsList),
+        _ => ["/v1/models/", "/models/"]
             .into_iter()
             .find_map(|prefix| path.strip_prefix(prefix))
+            .filter(|id| !id.is_empty())
             .map(RuntimeProviderRouteKind::ModelsSingle),
-        _ => None,
     }
 }
 

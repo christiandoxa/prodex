@@ -1,11 +1,6 @@
-mod gateway_helpers;
 mod gemini;
 use super as runtime_config;
 use crate::{core_constants, runtime_proxy};
-use gateway_helpers::{
-    ParsedWebsocketTuning, RuntimeGatewayConfigInput, nonzero, runtime_gateway_launch_environment,
-};
-use prodex_cli::GatewayArgs;
 use prodex_core::AppPaths;
 use prodex_runtime_policy::RuntimeLogFormat;
 use prodex_runtime_state::RuntimeProxyLaneLimits;
@@ -13,49 +8,27 @@ use std::env;
 use std::path::PathBuf;
 use std::sync::atomic::Ordering;
 use std::thread;
-use std::time::Duration;
+
+struct ParsedWebsocketTuning {
+    connect_timeout_ms: u64,
+    happy_eyeballs_delay_ms: u64,
+    precommit_progress_timeout_ms: u64,
+    connect_worker_count: usize,
+    connect_queue_capacity: usize,
+    connect_overflow_capacity: usize,
+    dns_worker_count: usize,
+    dns_queue_capacity: usize,
+    dns_overflow_capacity: usize,
+}
+
+fn nonzero(value: usize) -> Option<usize> {
+    (value > 0).then_some(value)
+}
 
 impl runtime_config::RuntimeConfig {
-    pub(crate) fn from_gateway_env_policy_and_cli(
-        paths: &AppPaths,
-        service_mode: prodex_runtime_policy::RuntimePolicyServiceMode,
-        args: &GatewayArgs,
-    ) -> Result<Self, runtime_config::ConfigErrors> {
-        let data_plane = service_mode == prodex_runtime_policy::RuntimePolicyServiceMode::Gateway;
-        let environment =
-            runtime_config::RuntimeConfigEnvironment::read_gateway_process(data_plane);
-        Self::from_environment_with_gateway(
-            paths,
-            environment,
-            Some(RuntimeGatewayConfigInput::new(service_mode, args)),
-        )
-    }
-
     pub(super) fn from_environment(
         paths: &AppPaths,
         environment: runtime_config::RuntimeConfigEnvironment,
-    ) -> Result<Self, runtime_config::ConfigErrors> {
-        Self::from_environment_with_gateway(paths, environment, None)
-    }
-
-    #[cfg(test)]
-    pub(super) fn from_gateway_environment(
-        paths: &AppPaths,
-        environment: runtime_config::RuntimeConfigEnvironment,
-        service_mode: prodex_runtime_policy::RuntimePolicyServiceMode,
-        args: &GatewayArgs,
-    ) -> Result<Self, runtime_config::ConfigErrors> {
-        Self::from_environment_with_gateway(
-            paths,
-            environment,
-            Some(RuntimeGatewayConfigInput::new(service_mode, args)),
-        )
-    }
-
-    fn from_environment_with_gateway(
-        paths: &AppPaths,
-        environment: runtime_config::RuntimeConfigEnvironment,
-        gateway_input: Option<RuntimeGatewayConfigInput<'_>>,
     ) -> Result<Self, runtime_config::ConfigErrors> {
         let mut parser = runtime_config::RuntimeConfigParser::new(environment);
         let loaded_policy = match prodex_runtime_policy::load_runtime_policy_cached(&paths.root) {
@@ -84,45 +57,7 @@ impl runtime_config::RuntimeConfig {
             parsed
         });
         proxy_policy = proxy_policy.with_effective_preset(preset);
-        let mut config = Self::parse(&mut parser, runtime_policy.as_ref(), &proxy_policy);
-        config.gateway.adaptive_routing = runtime_gateway_adaptive_routing_config(
-            loaded_policy
-                .as_ref()
-                .map(|policy| &policy.gateway.adaptive_routing),
-        );
-        config.governance_policy = loaded_policy
-            .as_ref()
-            .map(|policy| policy.governance.clone())
-            .unwrap_or_default();
-        match crate::runtime_proxy::presidio::local::RuntimeTenantDetectorPatterns::compile(
-            &config.governance_policy.inspection_patterns,
-        ) {
-            Ok(patterns) => config.tenant_detector_patterns = patterns,
-            Err(_) => parser.errors.push(runtime_config::ConfigError {
-                key: "runtime.policy.governance.inspection_patterns",
-                message: "contains an invalid bounded tenant detector pattern".to_string(),
-            }),
-        }
-        config.governance = loaded_policy
-            .as_ref()
-            .map(|policy| crate::runtime_governance::runtime_governance_config(&policy.governance))
-            .unwrap_or_else(prodex_config::GovernanceConfig::personal_compatible);
-        if crate::runtime_governance::compile_runtime_governance_settings(&config.governance_policy)
-            .is_err()
-        {
-            parser.errors.push(runtime_config::ConfigError {
-                key: "runtime.policy.governance",
-                message: "contains an invalid immutable governance snapshot".to_string(),
-            });
-        }
-        if let Some(input) = gateway_input {
-            config.gateway.launch = runtime_gateway_launch_environment(
-                &mut parser,
-                loaded_policy.as_ref(),
-                input,
-                &config.gemini,
-            );
-        }
+        let config = Self::parse(&mut parser, runtime_policy.as_ref(), &proxy_policy);
         if parser.errors.is_empty() {
             let config = runtime_config::RuntimeConfig {
                 compatibility_defaults: parser.compatibility_defaults,
@@ -518,13 +453,6 @@ impl runtime_config::RuntimeConfig {
             .filter_map(|key| parser.environment.get(key))
             .map(|value| value.to_string_lossy().into_owned())
             .collect();
-        let gateway = runtime_config::RuntimeGatewayConfig {
-            replica_count: parser.positive_u16("PRODEX_GATEWAY_REPLICA_COUNT", 1),
-            require_multi_replica_accounting_checks: parser
-                .strict_bool("PRODEX_REQUIRE_MULTI_REPLICA_ACCOUNTING_CHECKS", false),
-            adaptive_routing: Default::default(),
-            launch: runtime_config::RuntimeGatewayLaunchEnvironment::default(),
-        };
         let gemini = gemini::parse_gemini(parser);
         Self {
             tuning,
@@ -627,57 +555,11 @@ impl runtime_config::RuntimeConfig {
                 http_proxy,
                 no_proxy,
             },
-            oidc: runtime_config::RuntimeOidcTimingConfig {
-                prefetch_timeout: Duration::from_millis(parser.bounded_u64(
-                    "PRODEX_GATEWAY_OIDC_PREFETCH_TIMEOUT_MS",
-                    runtime_config::DEFAULT_RUNTIME_GATEWAY_OIDC_PREFETCH_TIMEOUT_MS,
-                    false,
-                    runtime_config::MAX_RUNTIME_GATEWAY_OIDC_PREFETCH_TIMEOUT_MS,
-                )),
-                http_cache_ttl: Duration::from_secs(parser.bounded_u64(
-                    "PRODEX_GATEWAY_OIDC_HTTP_CACHE_TTL_SECONDS",
-                    runtime_config::DEFAULT_RUNTIME_GATEWAY_OIDC_HTTP_CACHE_TTL_SECONDS,
-                    true,
-                    runtime_config::MAX_RUNTIME_GATEWAY_OIDC_HTTP_CACHE_TTL_SECONDS,
-                )),
-                refresh_failure_backoff: Duration::from_millis(parser.bounded_u64(
-                    "PRODEX_GATEWAY_OIDC_REFRESH_FAILURE_BACKOFF_MS",
-                    runtime_config::DEFAULT_RUNTIME_GATEWAY_OIDC_REFRESH_FAILURE_BACKOFF_MS,
-                    false,
-                    runtime_config::MAX_RUNTIME_GATEWAY_OIDC_REFRESH_FAILURE_BACKOFF_MS,
-                )),
-                last_known_good_window: Duration::from_secs(parser.bounded_u64(
-                    "PRODEX_GATEWAY_OIDC_LAST_KNOWN_GOOD_SECONDS",
-                    runtime_config::DEFAULT_RUNTIME_GATEWAY_OIDC_LAST_KNOWN_GOOD_SECONDS,
-                    true,
-                    runtime_config::MAX_RUNTIME_GATEWAY_OIDC_LAST_KNOWN_GOOD_SECONDS,
-                )),
-            },
-            gateway,
             governance: prodex_config::GovernanceConfig::personal_compatible(),
-            governance_policy: prodex_runtime_policy::RuntimePolicyGovernanceSettings::default(),
             tenant_detector_patterns:
-                crate::runtime_proxy::presidio::local::RuntimeTenantDetectorPatterns::default(),
+                crate::runtime_proxy::presidio::local::RuntimeTenantDetectorPatterns,
             gemini,
             compatibility_defaults: Vec::new(),
         }
-    }
-}
-
-fn runtime_gateway_adaptive_routing_config(
-    settings: Option<&prodex_runtime_policy::RuntimePolicyAdaptiveRoutingSettings>,
-) -> runtime_proxy_crate::RuntimeGatewayAdaptiveRoutingConfig {
-    let Some(settings) = settings else {
-        return Default::default();
-    };
-    runtime_proxy_crate::RuntimeGatewayAdaptiveRoutingConfig {
-        enabled: settings.enabled.unwrap_or(false),
-        shadow_mode: settings.shadow_mode.unwrap_or(true),
-        window_size: settings.window_size.unwrap_or(128),
-        min_samples: settings.min_samples.unwrap_or(8),
-        exploration_rate_bps: settings
-            .exploration_rate
-            .map(|rate| (rate * 10_000.0).round() as u16)
-            .unwrap_or_default(),
     }
 }

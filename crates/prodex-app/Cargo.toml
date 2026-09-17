@@ -29,7 +29,6 @@ mojo-routing = ["prodex_provider_spi/mojo"]
 mojo-core = [
     "mojo-quota",
     "mojo-routing",
-    "prodex_application/mojo",
     "prodex_observability/mojo",
     "prodex_provider_core/mojo",
     "runtime_anthropic_crate/mojo",
@@ -57,22 +56,15 @@ libc = { workspace = true }
 portable-pty = { workspace = true }
 os_info = { workspace = true }
 prodex_audit_log = { workspace = true }
-prodex_application = { workspace = true }
-prodex_authn = { workspace = true }
-prodex_authz = { workspace = true }
 prodex_bench_support = { workspace = true, optional = true }
 codex_config = { workspace = true }
 prodex_optional_tools = { workspace = true }
 prodex_cli = { workspace = true }
 prodex_config = { workspace = true }
-prodex_control_plane = { workspace = true }
 prodex_context = { workspace = true }
 prodex_domain = { workspace = true }
 prodex_mojo_core = { workspace = true, optional = true }
 prodex_core = { workspace = true }
-prodex_gateway_core = { workspace = true }
-prodex_gateway_http = { workspace = true }
-prodex_gateway_server = { workspace = true }
 prodex_housekeeping = { workspace = true }
 prodex_mcp_stdio = { workspace = true }
 prodex_observability = { workspace = true }
@@ -84,13 +76,6 @@ prodex_provider_spi = { workspace = true }
 prodex_quota = { workspace = true }
 prodex_runtime_quota = { workspace = true }
 prodex_runtime_state = { workspace = true }
-prodex_storage = { workspace = true }
-prodex_storage_postgres = { workspace = true }
-prodex_storage_postgres_runtime = { workspace = true }
-prodex_storage_redis = { workspace = true }
-prodex_storage_redis_runtime = { workspace = true }
-prodex_storage_sqlite = { workspace = true }
-prodex_storage_sqlite_runtime = { workspace = true }
 postgres = { workspace = true, features = ["with-uuid-1"] }
 redaction = { workspace = true }
 redis = { workspace = true }
@@ -126,7 +111,7 @@ uuid = { workspace = true }
 url = { workspace = true }
 zeroize = { workspace = true }
 tiny_http = { workspace = true }
-tokio = { workspace = true, features = ["io-std", "io-util", "net", "process", "sync"] }
+tokio = { workspace = true, features = ["io-std", "io-util", "net", "process", "signal", "sync"] }
 toml = { workspace = true }
 tungstenite = { workspace = true, features = ["rustls-tls-native-roots", "url"] }
 jsonwebtoken = { version = "11.0.0", features = ["aws_lc_rs"] }

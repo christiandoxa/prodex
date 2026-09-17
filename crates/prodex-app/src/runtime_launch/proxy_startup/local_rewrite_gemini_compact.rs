@@ -5,7 +5,6 @@ use super::local_rewrite::{
 };
 use super::local_rewrite_gemini::send_runtime_gemini_upstream_request;
 use super::local_rewrite_response::runtime_local_rewrite_response_with_call_id;
-use super::local_rewrite_response_spend::emit_runtime_gateway_response_spend_event_for_body;
 use super::*;
 use crate::{
     RUNTIME_PROXY_BUFFERED_RESPONSE_MAX_BYTES, RuntimeHeapTrimmedBufferedResponseParts,
@@ -92,7 +91,7 @@ pub(super) fn runtime_gemini_compact_response(
             )
         });
 
-    let (parts, provider_completed) = match upstream {
+    let (parts, _provider_completed) = match upstream {
         Ok(result) => {
             let RuntimeLocalRewriteUpstreamResult {
                 response,
@@ -189,16 +188,6 @@ pub(super) fn runtime_gemini_compact_response(
             )
         }
     };
-    if provider_completed {
-        emit_runtime_gateway_response_spend_event_for_body(
-            request_id,
-            captured,
-            shared,
-            parts.status,
-            0,
-            parts.body.as_slice(),
-        );
-    }
     runtime_local_rewrite_response_with_call_id(parts, request_id, shared)
 }
 

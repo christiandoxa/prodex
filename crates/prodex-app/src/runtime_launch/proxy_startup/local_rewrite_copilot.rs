@@ -371,7 +371,7 @@ fn send_runtime_copilot_model_request(
             auth_label: context.selected.profile_name.as_str(),
             model: context.model,
             auth_factory: || RuntimeLocalRewritePreparedAuth::Copilot {
-                api_key: (!context.selected.projected).then_some(context.selected.api_key.as_str()),
+                api_key: Some(context.selected.api_key.as_str()),
             },
         },
     )

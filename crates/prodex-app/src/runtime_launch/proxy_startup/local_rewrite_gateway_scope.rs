@@ -1,1 +1,0 @@
-pub(super) use prodex_application::ApplicationControlPlaneGovernanceScope as RuntimeGatewayGovernanceScope;
