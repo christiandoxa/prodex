@@ -54,9 +54,6 @@ mod rust_compat {
     pub fn plan_dropped_telemetry_metric(
         reason: TelemetryDropReason,
     ) -> Result<DroppedTelemetryMetricPlan, TelemetryAttributeError> {
-        #[cfg(feature = "mojo")]
-        let reason_label = crate::planning_support::planned_metric_label(55, 0, (reason) as i64)?;
-        #[cfg(not(feature = "mojo"))]
         let reason_label = crate::planning_support::validated_metric_label(
             crate::planning_support::label_key(142, "telemetry_drop_reason"),
             telemetry_drop_reason_label(reason),
@@ -77,9 +74,6 @@ mod rust_compat {
         depth: u64,
         capacity: u64,
     ) -> Result<QueueDepthMetricPlan, TelemetryAttributeError> {
-        #[cfg(feature = "mojo")]
-        let queue_label = crate::planning_support::planned_metric_label(56, 0, (kind) as i64)?;
-        #[cfg(not(feature = "mojo"))]
         let queue_label = crate::planning_support::validated_metric_label(
             crate::planning_support::label_key(115, "queue_kind"),
             queue_depth_kind_label(kind),
@@ -97,9 +91,6 @@ mod rust_compat {
         in_use: u64,
         capacity: u64,
     ) -> Result<ConnectionPoolSaturationMetricPlan, TelemetryAttributeError> {
-        #[cfg(feature = "mojo")]
-        let pool_label = crate::planning_support::planned_metric_label(54, 0, (kind) as i64)?;
-        #[cfg(not(feature = "mojo"))]
         let pool_label = crate::planning_support::validated_metric_label(
             crate::planning_support::label_key(100, "pool_kind"),
             connection_pool_kind_label(kind),
@@ -118,12 +109,6 @@ mod rust_compat {
 
     #[cfg(not(feature = "mojo"))]
     fn telemetry_drop_reason_label(reason: TelemetryDropReason) -> String {
-        #[cfg(feature = "mojo")]
-        {
-            prodex_mojo_core::observability::label(104, reason as i64)
-                .expect("Mojo observability label planner returned invalid output")
-        }
-        #[cfg(not(feature = "mojo"))]
         {
             (match reason {
                 TelemetryDropReason::QueueFull => "queue_full",
@@ -137,12 +122,6 @@ mod rust_compat {
 
     #[cfg(not(feature = "mojo"))]
     fn queue_depth_kind_label(kind: QueueDepthKind) -> String {
-        #[cfg(feature = "mojo")]
-        {
-            prodex_mojo_core::observability::label(103, kind as i64)
-                .expect("Mojo observability label planner returned invalid output")
-        }
-        #[cfg(not(feature = "mojo"))]
         {
             (match kind {
                 QueueDepthKind::Responses => "responses",
@@ -157,12 +136,6 @@ mod rust_compat {
 
     #[cfg(not(feature = "mojo"))]
     fn connection_pool_kind_label(kind: ConnectionPoolKind) -> String {
-        #[cfg(feature = "mojo")]
-        {
-            prodex_mojo_core::observability::label(102, kind as i64)
-                .expect("Mojo observability label planner returned invalid output")
-        }
-        #[cfg(not(feature = "mojo"))]
         {
             (match kind {
                 ConnectionPoolKind::Postgres => "postgres",

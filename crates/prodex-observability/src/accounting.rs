@@ -169,17 +169,10 @@ mod rust_compat {
         operation: ReservationRecoveryOperation,
         result: ReservationRecoveryResult,
     ) -> Result<ReservationRecoveryMetricPlan, TelemetryAttributeError> {
-        #[cfg(feature = "mojo")]
-        let operation_label =
-            crate::planning_support::planned_metric_label(6, 0, (operation) as i64)?;
-        #[cfg(not(feature = "mojo"))]
         let operation_label = crate::planning_support::validated_metric_label(
             crate::planning_support::label_key(121, "reservation_recovery_operation"),
             reservation_recovery_operation_label(operation),
         )?;
-        #[cfg(feature = "mojo")]
-        let result_label = crate::planning_support::planned_metric_label(6, 1, (result) as i64)?;
-        #[cfg(not(feature = "mojo"))]
         let result_label = crate::planning_support::validated_metric_label(
             crate::planning_support::label_key(122, "reservation_recovery_result"),
             reservation_recovery_result_label(result),
@@ -200,17 +193,10 @@ mod rust_compat {
         operation: AccountingOperation,
         result: AccountingResult,
     ) -> Result<AccountingMetricPlan, TelemetryAttributeError> {
-        #[cfg(feature = "mojo")]
-        let operation_label =
-            crate::planning_support::planned_metric_label(0, 0, (operation) as i64)?;
-        #[cfg(not(feature = "mojo"))]
         let operation_label = crate::planning_support::validated_metric_label(
             crate::planning_support::label_key(2, "accounting_operation"),
             accounting_operation_label(operation),
         )?;
-        #[cfg(feature = "mojo")]
-        let result_label = crate::planning_support::planned_metric_label(0, 1, (result) as i64)?;
-        #[cfg(not(feature = "mojo"))]
         let result_label = crate::planning_support::validated_metric_label(
             crate::planning_support::label_key(3, "accounting_result"),
             accounting_result_label(result),
@@ -231,17 +217,10 @@ mod rust_compat {
         operation: BillingLedgerOperation,
         result: BillingLedgerResult,
     ) -> Result<BillingLedgerMetricPlan, TelemetryAttributeError> {
-        #[cfg(feature = "mojo")]
-        let operation_label =
-            crate::planning_support::planned_metric_label(1, 0, (operation) as i64)?;
-        #[cfg(not(feature = "mojo"))]
         let operation_label = crate::planning_support::validated_metric_label(
             crate::planning_support::label_key(49, "billing_ledger_operation"),
             billing_ledger_operation_label(operation),
         )?;
-        #[cfg(feature = "mojo")]
-        let result_label = crate::planning_support::planned_metric_label(1, 1, (result) as i64)?;
-        #[cfg(not(feature = "mojo"))]
         let result_label = crate::planning_support::validated_metric_label(
             crate::planning_support::label_key(50, "billing_ledger_result"),
             billing_ledger_result_label(result),
@@ -261,9 +240,6 @@ mod rust_compat {
     pub fn plan_budget_rejection_metric(
         reason: BudgetRejectionReason,
     ) -> Result<BudgetRejectionMetricPlan, TelemetryAttributeError> {
-        #[cfg(feature = "mojo")]
-        let reason_label = crate::planning_support::planned_metric_label(2, 0, (reason) as i64)?;
-        #[cfg(not(feature = "mojo"))]
         let reason_label = crate::planning_support::validated_metric_label(
             crate::planning_support::label_key(55, "budget_rejection_reason"),
             budget_rejection_reason_label(reason),
@@ -283,17 +259,10 @@ mod rust_compat {
         scope: RateLimitScope,
         decision: RateLimitDecision,
     ) -> Result<RateLimitDecisionMetricPlan, TelemetryAttributeError> {
-        #[cfg(feature = "mojo")]
-        let scope_label = crate::planning_support::planned_metric_label(4, 0, (scope) as i64)?;
-        #[cfg(not(feature = "mojo"))]
         let scope_label = crate::planning_support::validated_metric_label(
             crate::planning_support::label_key(118, "rate_limit_scope"),
             rate_limit_scope_label(scope),
         )?;
-        #[cfg(feature = "mojo")]
-        let decision_label =
-            crate::planning_support::planned_metric_label(4, 1, (decision) as i64)?;
-        #[cfg(not(feature = "mojo"))]
         let decision_label = crate::planning_support::validated_metric_label(
             crate::planning_support::label_key(117, "rate_limit_decision"),
             rate_limit_decision_label(decision),
@@ -314,17 +283,10 @@ mod rust_compat {
         operation: RedisCoordinationOperation,
         result: RedisCoordinationResult,
     ) -> Result<RedisCoordinationMetricPlan, TelemetryAttributeError> {
-        #[cfg(feature = "mojo")]
-        let operation_label =
-            crate::planning_support::planned_metric_label(5, 0, (operation) as i64)?;
-        #[cfg(not(feature = "mojo"))]
         let operation_label = crate::planning_support::validated_metric_label(
             crate::planning_support::label_key(119, "redis_coordination_operation"),
             redis_coordination_operation_label(operation),
         )?;
-        #[cfg(feature = "mojo")]
-        let result_label = crate::planning_support::planned_metric_label(5, 1, (result) as i64)?;
-        #[cfg(not(feature = "mojo"))]
         let result_label = crate::planning_support::validated_metric_label(
             crate::planning_support::label_key(120, "redis_coordination_result"),
             redis_coordination_result_label(result),
@@ -344,9 +306,6 @@ mod rust_compat {
     pub fn plan_quota_correctness_metric(
         event: QuotaCorrectnessEvent,
     ) -> Result<QuotaCorrectnessMetricPlan, TelemetryAttributeError> {
-        #[cfg(feature = "mojo")]
-        let event_label = crate::planning_support::planned_metric_label(3, 0, (event) as i64)?;
-        #[cfg(not(feature = "mojo"))]
         let event_label = crate::planning_support::validated_metric_label(
             crate::planning_support::label_key(116, "quota_correctness_event"),
             quota_correctness_event_label(event),
@@ -364,12 +323,6 @@ mod rust_compat {
 
     #[cfg(not(feature = "mojo"))]
     fn reservation_recovery_operation_label(operation: ReservationRecoveryOperation) -> String {
-        #[cfg(feature = "mojo")]
-        {
-            prodex_mojo_core::observability::label(10, operation as i64)
-                .expect("Mojo observability label planner returned invalid output")
-        }
-        #[cfg(not(feature = "mojo"))]
         {
             (match operation {
                 ReservationRecoveryOperation::ScanExpired => "scan_expired",
@@ -383,12 +336,6 @@ mod rust_compat {
 
     #[cfg(not(feature = "mojo"))]
     fn reservation_recovery_result_label(result: ReservationRecoveryResult) -> String {
-        #[cfg(feature = "mojo")]
-        {
-            prodex_mojo_core::observability::label(11, result as i64)
-                .expect("Mojo observability label planner returned invalid output")
-        }
-        #[cfg(not(feature = "mojo"))]
         {
             (match result {
                 ReservationRecoveryResult::Recovered => "recovered",
@@ -402,12 +349,6 @@ mod rust_compat {
 
     #[cfg(not(feature = "mojo"))]
     fn accounting_operation_label(operation: AccountingOperation) -> String {
-        #[cfg(feature = "mojo")]
-        {
-            prodex_mojo_core::observability::label(0, operation as i64)
-                .expect("Mojo observability label planner returned invalid output")
-        }
-        #[cfg(not(feature = "mojo"))]
         {
             (match operation {
                 AccountingOperation::Reservation => "reservation",
@@ -423,12 +364,6 @@ mod rust_compat {
 
     #[cfg(not(feature = "mojo"))]
     fn accounting_result_label(result: AccountingResult) -> String {
-        #[cfg(feature = "mojo")]
-        {
-            prodex_mojo_core::observability::label(1, result as i64)
-                .expect("Mojo observability label planner returned invalid output")
-        }
-        #[cfg(not(feature = "mojo"))]
         {
             (match result {
                 AccountingResult::Accepted => "accepted",
@@ -445,12 +380,6 @@ mod rust_compat {
 
     #[cfg(not(feature = "mojo"))]
     fn billing_ledger_operation_label(operation: BillingLedgerOperation) -> String {
-        #[cfg(feature = "mojo")]
-        {
-            prodex_mojo_core::observability::label(2, operation as i64)
-                .expect("Mojo observability label planner returned invalid output")
-        }
-        #[cfg(not(feature = "mojo"))]
         {
             (match operation {
                 BillingLedgerOperation::ReserveAppend => "reserve_append",
@@ -465,12 +394,6 @@ mod rust_compat {
 
     #[cfg(not(feature = "mojo"))]
     fn billing_ledger_result_label(result: BillingLedgerResult) -> String {
-        #[cfg(feature = "mojo")]
-        {
-            prodex_mojo_core::observability::label(3, result as i64)
-                .expect("Mojo observability label planner returned invalid output")
-        }
-        #[cfg(not(feature = "mojo"))]
         {
             (match result {
                 BillingLedgerResult::Written => "written",
@@ -484,12 +407,6 @@ mod rust_compat {
 
     #[cfg(not(feature = "mojo"))]
     fn budget_rejection_reason_label(reason: BudgetRejectionReason) -> String {
-        #[cfg(feature = "mojo")]
-        {
-            prodex_mojo_core::observability::label(4, reason as i64)
-                .expect("Mojo observability label planner returned invalid output")
-        }
-        #[cfg(not(feature = "mojo"))]
         {
             (match reason {
                 BudgetRejectionReason::TenantBudgetExceeded => "tenant_budget_exceeded",
@@ -504,12 +421,6 @@ mod rust_compat {
 
     #[cfg(not(feature = "mojo"))]
     fn rate_limit_scope_label(scope: RateLimitScope) -> String {
-        #[cfg(feature = "mojo")]
-        {
-            prodex_mojo_core::observability::label(7, scope as i64)
-                .expect("Mojo observability label planner returned invalid output")
-        }
-        #[cfg(not(feature = "mojo"))]
         {
             (match scope {
                 RateLimitScope::Tenant => "tenant",
@@ -523,12 +434,6 @@ mod rust_compat {
 
     #[cfg(not(feature = "mojo"))]
     fn rate_limit_decision_label(decision: RateLimitDecision) -> String {
-        #[cfg(feature = "mojo")]
-        {
-            prodex_mojo_core::observability::label(6, decision as i64)
-                .expect("Mojo observability label planner returned invalid output")
-        }
-        #[cfg(not(feature = "mojo"))]
         {
             (match decision {
                 RateLimitDecision::Allowed => "allowed",
@@ -542,12 +447,6 @@ mod rust_compat {
 
     #[cfg(not(feature = "mojo"))]
     fn redis_coordination_operation_label(operation: RedisCoordinationOperation) -> String {
-        #[cfg(feature = "mojo")]
-        {
-            prodex_mojo_core::observability::label(8, operation as i64)
-                .expect("Mojo observability label planner returned invalid output")
-        }
-        #[cfg(not(feature = "mojo"))]
         {
             (match operation {
                 RedisCoordinationOperation::RateLimitCheck => "rate_limit_check",
@@ -563,12 +462,6 @@ mod rust_compat {
 
     #[cfg(not(feature = "mojo"))]
     fn redis_coordination_result_label(result: RedisCoordinationResult) -> String {
-        #[cfg(feature = "mojo")]
-        {
-            prodex_mojo_core::observability::label(9, result as i64)
-                .expect("Mojo observability label planner returned invalid output")
-        }
-        #[cfg(not(feature = "mojo"))]
         {
             (match result {
                 RedisCoordinationResult::Success => "success",
@@ -584,12 +477,6 @@ mod rust_compat {
 
     #[cfg(not(feature = "mojo"))]
     fn quota_correctness_event_label(event: QuotaCorrectnessEvent) -> String {
-        #[cfg(feature = "mojo")]
-        {
-            prodex_mojo_core::observability::label(5, event as i64)
-                .expect("Mojo observability label planner returned invalid output")
-        }
-        #[cfg(not(feature = "mojo"))]
         {
             (match event {
                 QuotaCorrectnessEvent::ReservationOvershoot => "reservation_overshoot",
