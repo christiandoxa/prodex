@@ -45,6 +45,8 @@ comptime RUNTIME_ANTHROPIC_CARRIED_SERVER_TOOL_USAGE: Int64 = 22
 comptime RUNTIME_ANTHROPIC_SERVER_TOOL_REGISTRATIONS: Int64 = 23
 comptime RUNTIME_ANTHROPIC_MESSAGE_HAS_TOOL_CHAIN: Int64 = 24
 comptime RUNTIME_ANTHROPIC_SERVER_TOOL_NAME_KIND: Int64 = 25
+comptime RUNTIME_ANTHROPIC_CLIENT_TOOL_DESCRIPTION: Int64 = 26
+comptime RUNTIME_ANTHROPIC_CLIENT_TOOL_SCHEMA: Int64 = 27
 
 comptime RUNTIME_ANTHROPIC_FLAG_ERROR: Int64 = 1
 comptime RUNTIME_ANTHROPIC_FLAG_MAX_OUTPUT_LENGTH: Int64 = 2
@@ -1859,6 +1861,220 @@ def runtime_anthropic_write_computer_tool_input(
     )
 
 
+def runtime_anthropic_tool_json_root(
+    input: ProdexRuntimeAnthropicKernelInput,
+) -> InlineArray[Int64, 2]:
+    var result = InlineArray[Int64, 2](fill=-1)
+    if input.input_present == 0 or input.input.len == 0:
+        return result^
+    var start = anthropic_request_skip_ws(input.input, 0, Int64(input.input.len))
+    var end = anthropic_request_value_end(input.input, start, Int64(input.input.len), 0)
+    if (
+        start >= 0
+        and end > start
+        and anthropic_request_skip_ws(input.input, end, Int64(input.input.len)) == Int64(input.input.len)
+        and anthropic_request_byte(input.input, start) == 123
+    ):
+        result[0] = start
+        result[1] = end
+    return result^
+
+
+def runtime_anthropic_tool_json_field(
+    input: ProdexRuntimeAnthropicKernelInput,
+    key: StringSlice,
+) -> InlineArray[Int64, 2]:
+    var root = runtime_anthropic_tool_json_root(input)
+    if root[0] < 0:
+        return InlineArray[Int64, 2](fill=-1)^
+    return anthropic_request_object_field(input.input, root[0], root[1], key)
+
+
+def runtime_anthropic_tool_json_true(
+    input: ProdexRuntimeAnthropicKernelInput,
+    key: StringSlice,
+) -> Bool:
+    var field = runtime_anthropic_tool_json_field(input, key)
+    return (
+        field[0] >= 0
+        and anthropic_request_range_matches_literal(
+            input.input, field[0], field[1], StringSlice("true")
+        )
+    )
+
+
+def runtime_anthropic_write_client_tool_description(
+    writer: Pointer[mut=True, RuntimeAnthropicKernelWriter, _],
+    input: ProdexRuntimeAnthropicKernelInput,
+) -> Bool:
+    if input.name_present == 0:
+        return False
+    if rich_view_matches_literal["bash"](input.name, False):
+        return runtime_anthropic_put_literal(
+            writer, StringSlice("Run shell commands on the local machine.")
+        )
+    if rich_view_matches_literal["memory"](input.name, False):
+        return runtime_anthropic_put_literal(
+            writer,
+            StringSlice(
+                "Store and retrieve information across conversations using persistent memory files."
+            ),
+        )
+    if rich_view_matches_literal["str_replace_based_edit_tool"](input.name, False):
+        if not runtime_anthropic_put_literal(
+            writer, StringSlice("Edit local text files with string replacement operations.")
+        ):
+            return False
+        if input.index >= 20250728:
+            var max_characters = runtime_anthropic_tool_json_field(
+                input, StringSlice("\"max_characters\"")
+            )
+            if max_characters[0] >= 0:
+                return (
+                    runtime_anthropic_put_literal(
+                        writer, StringSlice(" View results may be truncated to ")
+                    )
+                    and runtime_anthropic_put_view_range(
+                        writer, input.input, max_characters[0], max_characters[1]
+                    )
+                    and runtime_anthropic_put_literal(writer, StringSlice(" characters."))
+                )
+        return True
+    if rich_view_matches_literal["computer"](input.name, False):
+        if not runtime_anthropic_put_literal(
+            writer, StringSlice("Interact with the graphical computer display.")
+        ):
+            return False
+        var width = runtime_anthropic_tool_json_field(
+            input, StringSlice("\"display_width_px\"")
+        )
+        var height = runtime_anthropic_tool_json_field(
+            input, StringSlice("\"display_height_px\"")
+        )
+        if width[0] >= 0 and height[0] >= 0:
+            if not (
+                runtime_anthropic_put_literal(writer, StringSlice(" Display resolution: "))
+                and runtime_anthropic_put_view_range(
+                    writer, input.input, width[0], width[1]
+                )
+                and runtime_anthropic_put_byte(writer, 120)
+                and runtime_anthropic_put_view_range(
+                    writer, input.input, height[0], height[1]
+                )
+                and runtime_anthropic_put_literal(writer, StringSlice(" pixels."))
+            ):
+                return False
+        var display_number = runtime_anthropic_tool_json_field(
+            input, StringSlice("\"display_number\"")
+        )
+        if display_number[0] >= 0:
+            if not (
+                runtime_anthropic_put_literal(writer, StringSlice(" Display number: "))
+                and runtime_anthropic_put_view_range(
+                    writer, input.input, display_number[0], display_number[1]
+                )
+                and runtime_anthropic_put_byte(writer, 46)
+            ):
+                return False
+        if input.index >= 20251124 and runtime_anthropic_tool_json_true(
+            input, StringSlice("\"enable_zoom\"")
+        ):
+            return runtime_anthropic_put_literal(writer, StringSlice(" Zoom action enabled."))
+        return True
+    return False
+
+
+def runtime_anthropic_write_text_editor_schema(
+    writer: Pointer[mut=True, RuntimeAnthropicKernelWriter, _], version: UInt64
+) -> Bool:
+    if not runtime_anthropic_put_literal(
+        writer,
+        StringSlice(
+            "{\"type\":\"object\",\"properties\":{\"command\":{\"type\":\"string\",\"enum\":[\"view\",\"create\",\"str_replace\",\"insert\""
+        ),
+    ):
+        return False
+    if version < 20250429 and not runtime_anthropic_put_literal(
+        writer, StringSlice(",\"undo_edit\"")
+    ):
+        return False
+    return runtime_anthropic_put_literal(
+        writer,
+        StringSlice(
+            "],\"description\":\"Text editor action to perform.\"},\"path\":{\"type\":\"string\",\"description\":\"Path of the file to inspect or edit.\"},\"file_text\":{\"type\":\"string\",\"description\":\"File contents used when creating a new file.\"},\"old_str\":{\"type\":\"string\",\"description\":\"Existing text to replace.\"},\"new_str\":{\"type\":\"string\",\"description\":\"Replacement text.\"},\"insert_line\":{\"type\":\"integer\",\"description\":\"Line number where new text should be inserted.\"},\"insert_text\":{\"type\":\"string\",\"description\":\"Text to insert at the requested line.\"},\"view_range\":{\"type\":\"array\",\"items\":{\"type\":\"integer\"},\"minItems\":2,\"maxItems\":2,\"description\":\"Optional inclusive start and end line numbers for view.\"}},\"additionalProperties\":true}"
+        ),
+    )
+
+
+def runtime_anthropic_write_memory_schema(
+    writer: Pointer[mut=True, RuntimeAnthropicKernelWriter, _]
+) -> Bool:
+    return runtime_anthropic_put_literal(
+        writer,
+        StringSlice(
+            "{\"type\":\"object\",\"properties\":{\"command\":{\"type\":\"string\",\"enum\":[\"view\",\"create\",\"str_replace\",\"insert\",\"delete\",\"rename\"],\"description\":\"Memory operation to perform.\"},\"path\":{\"type\":\"string\",\"description\":\"Path within /memories to inspect or modify.\"},\"view_range\":{\"type\":\"array\",\"items\":{\"type\":\"integer\"},\"minItems\":2,\"maxItems\":2,\"description\":\"Optional inclusive start and end line numbers for view.\"},\"file_text\":{\"type\":\"string\",\"description\":\"File contents used when creating a new memory file.\"},\"old_str\":{\"type\":\"string\",\"description\":\"Existing text to replace in a memory file.\"},\"new_str\":{\"type\":\"string\",\"description\":\"Replacement text for a memory file edit.\"},\"insert_line\":{\"type\":\"integer\",\"description\":\"Line number where new text should be inserted.\"},\"insert_text\":{\"type\":\"string\",\"description\":\"Text to insert at the requested line.\"},\"old_path\":{\"type\":\"string\",\"description\":\"Existing memory path to rename or move.\"},\"new_path\":{\"type\":\"string\",\"description\":\"Destination memory path for a rename or move.\"}},\"additionalProperties\":true}"
+        ),
+    )
+
+
+def runtime_anthropic_write_bash_schema(
+    writer: Pointer[mut=True, RuntimeAnthropicKernelWriter, _]
+) -> Bool:
+    return runtime_anthropic_put_literal(
+        writer,
+        StringSlice(
+            "{\"type\":\"object\",\"properties\":{\"command\":{\"type\":\"string\",\"description\":\"Shell command to execute.\"},\"restart\":{\"type\":\"boolean\",\"description\":\"Restart the shell session before executing the command.\"},\"timeout_ms\":{\"type\":\"integer\",\"minimum\":1,\"description\":\"Maximum time to wait for the command to finish.\"},\"max_output_length\":{\"type\":\"integer\",\"minimum\":1,\"description\":\"Maximum number of output characters to return.\"}},\"additionalProperties\":true}"
+        ),
+    )
+
+
+def runtime_anthropic_write_computer_schema(
+    writer: Pointer[mut=True, RuntimeAnthropicKernelWriter, _],
+    input: ProdexRuntimeAnthropicKernelInput,
+) -> Bool:
+    if not runtime_anthropic_put_literal(
+        writer,
+        StringSlice(
+            "{\"type\":\"object\",\"properties\":{\"action\":{\"type\":\"string\",\"enum\":[\"screenshot\",\"left_click\",\"type\",\"key\",\"mouse_move\""
+        ),
+    ):
+        return False
+    if input.index >= 20250124 and not runtime_anthropic_put_literal(
+        writer,
+        StringSlice(
+            ",\"scroll\",\"left_click_drag\",\"right_click\",\"middle_click\",\"double_click\",\"triple_click\",\"left_mouse_down\",\"left_mouse_up\",\"hold_key\",\"wait\""
+        ),
+    ):
+        return False
+    if input.index >= 20251124 and runtime_anthropic_tool_json_true(
+        input, StringSlice("\"enable_zoom\"")
+    ) and not runtime_anthropic_put_literal(writer, StringSlice(",\"zoom\"")):
+        return False
+    return runtime_anthropic_put_literal(
+        writer,
+        StringSlice(
+            "],\"description\":\"Computer action to perform.\"},\"coordinate\":{\"type\":\"array\",\"items\":{\"type\":\"integer\"},\"minItems\":2,\"maxItems\":2,\"description\":\"Screen coordinate pair in pixels.\"},\"text\":{\"type\":\"string\",\"description\":\"Text to type into the active application.\"},\"key\":{\"type\":\"string\",\"description\":\"Single key or key chord to press.\"},\"keys\":{\"type\":\"array\",\"items\":{\"type\":\"string\"},\"description\":\"Keys to hold while performing another action.\"},\"scroll_direction\":{\"type\":\"string\",\"enum\":[\"up\",\"down\",\"left\",\"right\"],\"description\":\"Scroll direction.\"},\"scroll_amount\":{\"type\":\"integer\",\"description\":\"Distance to scroll.\"},\"duration_ms\":{\"type\":\"integer\",\"minimum\":0,\"description\":\"Optional wait duration in milliseconds.\"},\"region\":{\"type\":\"array\",\"items\":{\"type\":\"integer\"},\"minItems\":4,\"maxItems\":4,\"description\":\"Optional screen region [x1, y1, x2, y2] for zoom actions.\"}},\"additionalProperties\":true}"
+        ),
+    )
+
+
+def runtime_anthropic_write_client_tool_schema(
+    writer: Pointer[mut=True, RuntimeAnthropicKernelWriter, _],
+    input: ProdexRuntimeAnthropicKernelInput,
+) -> Bool:
+    if input.name_present == 0:
+        return False
+    if rich_view_matches_literal["bash"](input.name, False):
+        return runtime_anthropic_write_bash_schema(writer)
+    if rich_view_matches_literal["memory"](input.name, False):
+        return runtime_anthropic_write_memory_schema(writer)
+    if rich_view_matches_literal["str_replace_based_edit_tool"](input.name, False):
+        return runtime_anthropic_write_text_editor_schema(writer, input.index)
+    if rich_view_matches_literal["computer"](input.name, False):
+        return runtime_anthropic_write_computer_schema(writer, input)
+    return False
+
+
 def runtime_anthropic_write_operation(
     writer: Pointer[mut=True, RuntimeAnthropicKernelWriter, _],
     input: ProdexRuntimeAnthropicKernelInput,
@@ -1947,6 +2163,10 @@ def runtime_anthropic_write_operation(
         if input.name_present == 0:
             return False
         return runtime_anthropic_write_server_tool_name_kind(writer, input.name)
+    if input.operation == RUNTIME_ANTHROPIC_CLIENT_TOOL_DESCRIPTION:
+        return runtime_anthropic_write_client_tool_description(writer, input)
+    if input.operation == RUNTIME_ANTHROPIC_CLIENT_TOOL_SCHEMA:
+        return runtime_anthropic_write_client_tool_schema(writer, input)
     return False
 
 
@@ -1955,7 +2175,7 @@ def runtime_anthropic_input_valid(
 ) -> Bool:
     return (
         input.operation > 0
-        and input.operation <= RUNTIME_ANTHROPIC_SERVER_TOOL_NAME_KIND
+        and input.operation <= RUNTIME_ANTHROPIC_CLIENT_TOOL_SCHEMA
         and rich_view_valid(input.id, RUNTIME_ANTHROPIC_KERNEL_MAX_BYTES)
         and rich_view_valid(input.name, RUNTIME_ANTHROPIC_KERNEL_MAX_BYTES)
         and rich_view_valid(input.block_type, RUNTIME_ANTHROPIC_KERNEL_MAX_BYTES)
