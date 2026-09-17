@@ -143,6 +143,8 @@ pub mod observability;
 pub mod policy;
 #[cfg(feature = "mojo-provider-constraints")]
 pub mod provider_constraints;
+#[cfg(feature = "mojo-provider-constraints")]
+pub mod provider_registry;
 #[cfg(feature = "mojo-quota")]
 pub mod quota;
 #[cfg(feature = "mojo-rich")]
