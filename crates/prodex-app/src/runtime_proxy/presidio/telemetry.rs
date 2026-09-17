@@ -1,10 +1,10 @@
 //! Bounded, content-free Presidio inspection telemetry.
 
+use super::findings::ApplicationInspectionPlan;
 use crate::runtime_core_shared::{runtime_proxy_log_field, runtime_proxy_structured_log_message};
 use crate::runtime_proxy_log;
 use crate::runtime_state_shared::RuntimeRotationProxyShared;
 use anyhow::{Result, anyhow};
-use prodex_application::ApplicationInspectionPlan;
 use prodex_domain::{FindingKind, InspectionCoverage, InspectionFinding};
 use prodex_observability::{
     InspectionCoverageClass, InspectionFindingCategory, InspectionMaskingAction,

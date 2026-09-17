@@ -13,23 +13,14 @@ pub(super) use prodex_runtime_tuning::{
 };
 
 const RUNTIME_PROXY_DEFAULT_MAX_REQUEST_BODY_BYTES: u64 = 64 * 1024 * 1024;
-const DEFAULT_RUNTIME_GATEWAY_OIDC_PREFETCH_TIMEOUT_MS: u64 = 2_000;
-const DEFAULT_RUNTIME_GATEWAY_OIDC_HTTP_CACHE_TTL_SECONDS: u64 = 300;
-const DEFAULT_RUNTIME_GATEWAY_OIDC_REFRESH_FAILURE_BACKOFF_MS: u64 = 30_000;
-const DEFAULT_RUNTIME_GATEWAY_OIDC_LAST_KNOWN_GOOD_SECONDS: u64 = 86_400;
-const MAX_RUNTIME_GATEWAY_OIDC_PREFETCH_TIMEOUT_MS: u64 = 10_000;
-const MAX_RUNTIME_GATEWAY_OIDC_HTTP_CACHE_TTL_SECONDS: u64 = 86_400;
-const MAX_RUNTIME_GATEWAY_OIDC_REFRESH_FAILURE_BACKOFF_MS: u64 = 3_600_000;
-const MAX_RUNTIME_GATEWAY_OIDC_LAST_KNOWN_GOOD_SECONDS: u64 = 604_800;
 
 mod config;
 mod environment;
 mod types;
 use environment::{RuntimeConfigEnvironment, RuntimeConfigParser};
 pub(crate) use types::{
-    ConfigError, ConfigErrors, RuntimeConfig, RuntimeGatewayConfig, RuntimeGatewayDeepSeekConfig,
-    RuntimeGatewayLaunchEnvironment, RuntimeGeminiConfig, RuntimeGeminiExtensionSelection,
-    RuntimeOidcTimingConfig, RuntimeWebsocketEnvironment,
+    ConfigError, ConfigErrors, RuntimeConfig, RuntimeGeminiConfig, RuntimeGeminiExtensionSelection,
+    RuntimeWebsocketEnvironment,
 };
 
 pub(crate) fn collect_runtime_tuning_snapshot(config: &RuntimeConfig) -> RuntimeTuningSnapshot {

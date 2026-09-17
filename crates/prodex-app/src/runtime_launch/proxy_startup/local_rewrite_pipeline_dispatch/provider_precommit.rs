@@ -1,10 +1,13 @@
+use super::super::super::local_rewrite::{
+    RuntimeLocalRewriteProxyShared, RuntimeLocalRewriteUpstreamResponse,
+    RuntimeLocalRewriteUpstreamResult,
+};
 use super::super::super::local_rewrite_upstream::{
     RuntimeLocalRewriteLiveResponse, RuntimeLocalRewritePrefetchChunk,
     RuntimeLocalRewriteSsePrefetch,
 };
-use super::super::{
-    RuntimeLocalRewriteProxyShared, RuntimeLocalRewriteUpstreamResponse,
-    RuntimeLocalRewriteUpstreamResult, RuntimeProviderBridgeKind, runtime_provider_error_class,
+use super::super::super::provider_bridge::{
+    RuntimeProviderBridgeKind, runtime_provider_error_class,
 };
 use crate::runtime_proxy::{
     bump_runtime_profile_health_score, commit_runtime_proxy_profile_selection_with_policy,

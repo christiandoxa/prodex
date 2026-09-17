@@ -2,27 +2,16 @@ use self::dispatch::respond_runtime_local_rewrite_live_response;
 use super::local_rewrite::{
     RuntimeLocalRewriteAsyncResponse, RuntimeLocalRewriteProxyShared,
     RuntimeLocalRewriteUpstreamResponse, RuntimeLocalRewriteUpstreamResult,
-    runtime_gateway_guardrail_webhook_block,
 };
 use super::local_rewrite_copilot::RuntimeCopilotResponsesSseBindingReader;
 use super::local_rewrite_request::RuntimeLocalRewriteRequest;
-use super::local_rewrite_response_guardrails::{
-    RuntimeGatewayGuardrailStreamPlan, runtime_gateway_guardrail_stream_body,
-};
-use super::local_rewrite_response_spend::{
-    RuntimeGatewaySpendTermination,
-    emit_runtime_gateway_policy_interrupted_response_spend_event_for_body,
-    emit_runtime_gateway_response_spend_event_for_body, runtime_gateway_spend_stream_body,
-};
 use super::local_rewrite_upstream::runtime_local_rewrite_remember_accepted_binding;
 use crate::{
     RUNTIME_PROXY_BUFFERED_RESPONSE_MAX_BYTES, RuntimeHeapTrimmedBufferedResponseParts,
-    RuntimeProxyRequest, RuntimeStreamingResponse, build_runtime_proxy_json_error_response,
-    build_runtime_proxy_response_from_parts, build_runtime_proxy_text_response,
-    read_blocking_response_body_with_limit, runtime_proxy_log,
+    RuntimeProxyRequest, RuntimeStreamingResponse, build_runtime_proxy_response_from_parts,
+    build_runtime_proxy_text_response, read_blocking_response_body_with_limit, runtime_proxy_log,
 };
 use anyhow::Result;
-use prodex_domain::CallId;
 use runtime_proxy_crate::{runtime_proxy_log_field, runtime_proxy_structured_log_message};
 use std::io;
 use std::time::Duration;
@@ -40,13 +29,8 @@ mod local_rewrite_response_gemini;
 #[path = "local_rewrite_response_passthrough.rs"]
 mod local_rewrite_response_passthrough;
 
-#[derive(Clone, Default)]
-pub(super) struct RuntimeGatewayResponseGovernance {
-    pub(super) obligations: Option<prodex_application::ApplicationResponseObligationPlan>,
-    pub(super) audit_context:
-        Option<super::local_rewrite_governance_audit::RuntimeGovernanceAuditContext>,
-    pub(super) spend_termination: RuntimeGatewaySpendTermination,
-}
+#[derive(Clone, Copy, Default)]
+pub(super) struct RuntimeGatewayResponseGovernance;
 
 fn runtime_local_rewrite_invalid_response(
     request_id: u64,
@@ -119,364 +103,31 @@ pub(super) fn runtime_local_rewrite_buffered_response_from_response(
     })
 }
 
-fn runtime_gateway_audit_response_blocked(
-    shared: &RuntimeLocalRewriteProxyShared,
-    context: Option<&super::local_rewrite_governance_audit::RuntimeGovernanceAuditContext>,
-    request_id: u64,
-    action: &str,
-    reason: &str,
-) -> Result<(), prodex_storage::GovernanceRepositoryError> {
-    if super::local_rewrite_governance_audit::runtime_governance_audit_is_durable(shared)
-        && let Some(context) = context
-    {
-        return super::local_rewrite_governance_audit::persist_runtime_material_governance_audit(
-            shared,
-            context,
-            request_id,
-            "response_precommit_block",
-            prodex_domain::AuditOutcome::Denied,
-            reason,
-        );
-    }
-    crate::audit_log::append_runtime_audit_event_best_effort(
-        &shared.runtime_shared,
-        "gateway_data_plane",
-        action,
-        "failure",
-        serde_json::json!({
-            "state_backend": shared.gateway_state_store.label(),
-            "details": {"reason": reason},
-        }),
-    );
-    Ok(())
-}
-
-fn runtime_gateway_audit_unavailable_response() -> tiny_http::ResponseBox {
-    build_runtime_proxy_json_error_response(
-        503,
-        "governance_audit_unavailable",
-        "gateway governance audit is temporarily unavailable",
-    )
-}
-
-fn runtime_gateway_response_policy_blocked(
-    shared: &RuntimeLocalRewriteProxyShared,
-    audit_context: Option<&super::local_rewrite_governance_audit::RuntimeGovernanceAuditContext>,
-    request_id: u64,
-    action: &str,
-    reason: &str,
-    code: &str,
-    message: &str,
-) -> tiny_http::ResponseBox {
-    if runtime_gateway_audit_response_blocked(shared, audit_context, request_id, action, reason)
-        .is_err()
-    {
-        return runtime_gateway_audit_unavailable_response();
-    }
-    build_runtime_proxy_json_error_response(403, code, message)
-}
-
-fn runtime_gateway_apply_buffered_inspection(
-    parts: &mut RuntimeHeapTrimmedBufferedResponseParts,
-    request_id: u64,
-    shared: &RuntimeLocalRewriteProxyShared,
-    obligations: Option<&prodex_application::ApplicationResponseObligationPlan>,
-    audit_context: Option<&super::local_rewrite_governance_audit::RuntimeGovernanceAuditContext>,
-) -> Option<tiny_http::ResponseBox> {
-    if !(200..300).contains(&parts.status)
-        || !obligations.is_some_and(|plan| plan.inspection_required)
-    {
-        return None;
-    }
-    match crate::runtime_proxy::presidio::local::runtime_local_inspect_and_mask(
-        parts.body.as_slice().to_vec(),
-    ) {
-        Ok(inspected) => {
-            if obligations.is_some_and(|plan| {
-                plan.enforce
-                    && plan.require_full_inspection
-                    && inspected.coverage != prodex_domain::InspectionCoverage::Full
-            }) {
-                return Some(runtime_gateway_response_policy_blocked(
-                    shared,
-                    audit_context,
-                    request_id,
-                    "response_inspection_failed",
-                    "response_inspection_incomplete",
-                    "response_inspection_incomplete",
-                    "gateway response policy denied this response",
-                ));
-            }
-            runtime_proxy_log(
-                &shared.runtime_shared,
-                runtime_proxy_structured_log_message(
-                    "gateway_response_inspection",
-                    [
-                        runtime_proxy_log_field("request", request_id.to_string()),
-                        runtime_proxy_log_field("transport", "http"),
-                        runtime_proxy_log_field("coverage", inspected.coverage.as_str()),
-                        runtime_proxy_log_field(
-                            "finding_count",
-                            inspected.findings.len().to_string(),
-                        ),
-                        runtime_proxy_log_field("changed", inspected.changed.to_string()),
-                    ],
-                ),
-            );
-            parts.body = inspected.body.into();
-        }
-        Err(_) if obligations.is_some_and(|plan| plan.enforce) => {
-            return Some(runtime_gateway_response_policy_blocked(
-                shared,
-                audit_context,
-                request_id,
-                "response_inspection_failed",
-                "response_inspection_unsupported",
-                "response_inspection_unsupported",
-                "gateway response policy denied this response",
-            ));
-        }
-        Err(_) => runtime_proxy_log(
-            &shared.runtime_shared,
-            runtime_proxy_structured_log_message(
-                "gateway_response_inspection",
-                [
-                    runtime_proxy_log_field("request", request_id.to_string()),
-                    runtime_proxy_log_field("transport", "http"),
-                    runtime_proxy_log_field("coverage", "unsupported"),
-                    runtime_proxy_log_field("finding_count", "0"),
-                    runtime_proxy_log_field("changed", "false"),
-                ],
-            ),
-        ),
-    }
-    None
-}
-
-fn runtime_gateway_apply_buffered_output_limit(
-    parts: &RuntimeHeapTrimmedBufferedResponseParts,
-    request_id: u64,
-    shared: &RuntimeLocalRewriteProxyShared,
-    obligations: Option<&prodex_application::ApplicationResponseObligationPlan>,
-    audit_context: Option<&super::local_rewrite_governance_audit::RuntimeGovernanceAuditContext>,
-) -> Option<tiny_http::ResponseBox> {
-    if !(200..300).contains(&parts.status) {
-        return None;
-    }
-    let plan = obligations?;
-    let limit = plan.maximum_output_tokens?;
-    let output_tokens = u32::try_from(parts.body.len().saturating_add(3) / 4).unwrap_or(u32::MAX);
-    if !plan.enforce || output_tokens <= limit {
-        return None;
-    }
-    Some(runtime_gateway_response_policy_blocked(
-        shared,
-        audit_context,
-        request_id,
-        "response_obligation_blocked",
-        "output_token_limit_exceeded",
-        "output_token_limit_exceeded",
-        "gateway response policy denied this response",
-    ))
-}
-
-fn runtime_gateway_apply_buffered_guardrails(
-    parts: &RuntimeHeapTrimmedBufferedResponseParts,
-    request_id: u64,
-    shared: &RuntimeLocalRewriteProxyShared,
-    audit_context: Option<&super::local_rewrite_governance_audit::RuntimeGovernanceAuditContext>,
-) -> Option<tiny_http::ResponseBox> {
-    if !(200..300).contains(&parts.status) {
-        return None;
-    }
-    if let Some(block) = runtime_proxy_crate::runtime_gateway_response_guardrail_block(
-        &parts.body,
-        &shared.gateway_guardrails,
-    ) {
-        if runtime_gateway_audit_response_blocked(
-            shared,
-            audit_context,
-            request_id,
-            "response_guardrail_blocked",
-            block.kind.as_str(),
-        )
-        .is_err()
-        {
-            return Some(runtime_gateway_audit_unavailable_response());
-        }
-        crate::runtime_proxy_log(
-            &shared.runtime_shared,
-            runtime_proxy_structured_log_message(
-                "gateway_guardrail_response_blocked",
-                [
-                    runtime_proxy_log_field("request", request_id.to_string()),
-                    runtime_proxy_log_field("transport", "http"),
-                    runtime_proxy_log_field("reason", block.kind.as_str()),
-                    runtime_proxy_log_field("matched_value_redacted", "true"),
-                ],
-            ),
-        );
-        return Some(build_runtime_proxy_json_error_response(
-            403,
-            "policy_violation",
-            "gateway guardrail blocked this response",
-        ));
-    }
-    let block = runtime_gateway_guardrail_webhook_block("post", request_id, &parts.body, shared)?;
-    if runtime_gateway_audit_response_blocked(
-        shared,
-        audit_context,
-        request_id,
-        "response_guardrail_webhook_blocked",
-        block.reason.as_str(),
-    )
-    .is_err()
-    {
-        return Some(runtime_gateway_audit_unavailable_response());
-    }
-    crate::runtime_proxy_log(
-        &shared.runtime_shared,
-        runtime_proxy_structured_log_message(
-            "gateway_guardrail_webhook_blocked",
-            [
-                runtime_proxy_log_field("request", request_id.to_string()),
-                runtime_proxy_log_field("transport", "http"),
-                runtime_proxy_log_field("phase", "post"),
-                runtime_proxy_log_field("reason", block.reason.as_str()),
-                runtime_proxy_log_field("matched_value_redacted", "true"),
-            ],
-        ),
-    );
-    Some(build_runtime_proxy_json_error_response(
-        403,
-        "policy_violation",
-        "gateway guardrail webhook blocked this response",
-    ))
-}
-
 pub(super) fn runtime_local_rewrite_response_with_call_id(
     parts: RuntimeHeapTrimmedBufferedResponseParts,
-    request_id: u64,
-    shared: &RuntimeLocalRewriteProxyShared,
+    _request_id: u64,
+    _shared: &RuntimeLocalRewriteProxyShared,
 ) -> tiny_http::ResponseBox {
-    runtime_local_rewrite_governed_response_with_call_id(
-        parts,
-        request_id,
-        shared,
-        RuntimeGatewayResponseGovernance::default(),
-    )
+    build_runtime_proxy_response_from_parts(parts)
 }
 
 pub(super) fn runtime_local_rewrite_governed_response_with_call_id(
-    mut parts: RuntimeHeapTrimmedBufferedResponseParts,
+    parts: RuntimeHeapTrimmedBufferedResponseParts,
     request_id: u64,
     shared: &RuntimeLocalRewriteProxyShared,
-    governance: RuntimeGatewayResponseGovernance,
+    _governance: RuntimeGatewayResponseGovernance,
 ) -> tiny_http::ResponseBox {
-    let obligations = governance.obligations.as_ref();
-    let audit_context = governance.audit_context.as_ref();
-    if let Some(response) = runtime_gateway_apply_buffered_inspection(
-        &mut parts,
-        request_id,
-        shared,
-        obligations,
-        audit_context,
-    ) {
-        return response;
-    }
-    if let Some(response) = runtime_gateway_apply_buffered_output_limit(
-        &parts,
-        request_id,
-        shared,
-        obligations,
-        audit_context,
-    ) {
-        return response;
-    }
-    if let Some(response) =
-        runtime_gateway_apply_buffered_guardrails(&parts, request_id, shared, audit_context)
-    {
-        return response;
-    }
-    if let Some(header_name) = shared.gateway_call_id_header.as_deref() {
-        parts.headers.push((
-            header_name.to_string(),
-            runtime_local_rewrite_call_id(request_id, shared).into_bytes(),
-        ));
-    }
-    build_runtime_proxy_response_from_parts(parts)
+    runtime_local_rewrite_response_with_call_id(parts, request_id, shared)
 }
 
 pub(super) fn respond_runtime_local_rewrite_stream(
     request: RuntimeLocalRewriteRequest,
-    mut streaming: RuntimeStreamingResponse,
-    captured: &RuntimeProxyRequest,
-    shared: &RuntimeLocalRewriteProxyShared,
-    governance: RuntimeGatewayResponseGovernance,
+    streaming: RuntimeStreamingResponse,
+    _captured: &RuntimeProxyRequest,
+    _shared: &RuntimeLocalRewriteProxyShared,
+    _governance: RuntimeGatewayResponseGovernance,
 ) {
-    let body = std::mem::replace(&mut streaming.body, Box::new(std::io::empty()));
-    let termination = governance.spend_termination.clone();
-    match runtime_gateway_guardrail_stream_body(
-        body,
-        streaming.request_id,
-        streaming.status,
-        shared,
-        governance.obligations,
-        governance.audit_context,
-        termination.clone(),
-    ) {
-        Ok(RuntimeGatewayGuardrailStreamPlan::Allowed(body)) => {
-            streaming.body = runtime_gateway_spend_stream_body(
-                body,
-                streaming.request_id,
-                streaming.status,
-                captured,
-                shared,
-                termination,
-            );
-            let _ = request.stream(streaming, None);
-        }
-        Ok(RuntimeGatewayGuardrailStreamPlan::Blocked {
-            reason,
-            consumed_body,
-        }) => {
-            emit_runtime_gateway_policy_interrupted_response_spend_event_for_body(
-                streaming.request_id,
-                captured,
-                shared,
-                streaming.status,
-                &consumed_body,
-            );
-            let _ = request.respond(build_runtime_proxy_json_error_response(
-                403,
-                reason,
-                "gateway guardrail blocked this response",
-            ));
-        }
-        Ok(RuntimeGatewayGuardrailStreamPlan::AuditUnavailable(consumed_body)) => {
-            emit_runtime_gateway_policy_interrupted_response_spend_event_for_body(
-                streaming.request_id,
-                captured,
-                shared,
-                streaming.status,
-                &consumed_body,
-            );
-            let _ = request.respond(runtime_gateway_audit_unavailable_response());
-        }
-        Err(error) => {
-            let request_id = streaming.request_id;
-            emit_runtime_gateway_policy_interrupted_response_spend_event_for_body(
-                request_id,
-                captured,
-                shared,
-                streaming.status,
-                &[],
-            );
-            let _ = request.respond(runtime_local_rewrite_invalid_response(
-                request_id, shared, &error,
-            ));
-        }
-    }
+    let _ = request.stream(streaming, None);
 }
 
 pub(super) fn respond_runtime_local_rewrite_proxy_request(
@@ -509,11 +160,9 @@ pub(super) fn respond_runtime_local_rewrite_proxy_request(
                     Some(recorder),
                 ));
             }
-            let mut headers = streaming_response.headers;
-            runtime_local_rewrite_append_call_id_header(&mut headers, request_id, shared);
             let streaming = RuntimeStreamingResponse {
                 status: streaming_response.status,
-                headers,
+                headers: streaming_response.headers,
                 body: streaming_response.body,
                 request_id,
                 profile_name: streaming_response.profile_name,
@@ -524,14 +173,6 @@ pub(super) fn respond_runtime_local_rewrite_proxy_request(
             respond_runtime_local_rewrite_stream(request, streaming, captured, shared, governance);
         }
         RuntimeLocalRewriteUpstreamResponse::Buffered(parts) => {
-            emit_runtime_gateway_response_spend_event_for_body(
-                request_id,
-                captured,
-                shared,
-                parts.status,
-                0,
-                parts.body.as_slice(),
-            );
             let _ = request.respond(runtime_local_rewrite_governed_response_with_call_id(
                 parts, request_id, shared, governance,
             ));
@@ -551,30 +192,11 @@ pub(super) fn respond_runtime_local_rewrite_proxy_request(
     }
 }
 
-fn runtime_local_rewrite_call_id(
-    request_id: u64,
-    shared: &RuntimeLocalRewriteProxyShared,
-) -> String {
-    shared
-        .gateway_usage
-        .call_ids
-        .lock()
-        .ok()
-        .and_then(|call_ids| call_ids.get(&request_id).cloned())
-        .unwrap_or_else(|| format!("prodex-{}", CallId::new()))
-}
-
 pub(super) fn runtime_local_rewrite_append_call_id_header(
-    headers: &mut Vec<(String, String)>,
-    request_id: u64,
-    shared: &RuntimeLocalRewriteProxyShared,
+    _headers: &mut Vec<(String, String)>,
+    _request_id: u64,
+    _shared: &RuntimeLocalRewriteProxyShared,
 ) {
-    if let Some(header_name) = shared.gateway_call_id_header.as_deref() {
-        headers.push((
-            header_name.to_string(),
-            runtime_local_rewrite_call_id(request_id, shared),
-        ));
-    }
 }
 
 pub(super) fn runtime_local_rewrite_buffered_response_parts(
@@ -592,48 +214,4 @@ pub(super) fn runtime_local_rewrite_buffered_response_parts(
         headers,
         body: body.into(),
     })
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use std::sync::Arc;
-    use std::thread;
-    use tiny_http::{Response as TinyResponse, Server as TinyServer};
-
-    #[test]
-    fn local_provider_buffered_response_rejects_oversized_body() {
-        let server = TinyServer::http("127.0.0.1:0").expect("test server should bind");
-        let addr = server.server_addr().to_ip().unwrap();
-        let handle = thread::spawn(move || {
-            let request = server.recv().expect("request should arrive");
-            let _ = request.respond(TinyResponse::from_data(vec![
-                b'a';
-                RUNTIME_PROXY_BUFFERED_RESPONSE_MAX_BYTES
-                    + 1
-            ]));
-        });
-        let runtime = Arc::new(
-            tokio::runtime::Builder::new_current_thread()
-                .enable_all()
-                .build()
-                .expect("test runtime should build"),
-        );
-        let response = runtime
-            .block_on(reqwest::Client::new().get(format!("http://{addr}/")).send())
-            .expect("response should arrive");
-        let response = RuntimeLocalRewriteAsyncResponse::new(
-            response,
-            Arc::clone(&runtime),
-            crate::RUNTIME_PROXY_STREAM_IDLE_TIMEOUT_MS,
-        );
-
-        let error = match runtime_local_rewrite_buffered_response_from_response(response) {
-            Ok(_) => panic!("oversized local provider response should fail"),
-            Err(error) => error,
-        };
-        handle.join().expect("test server should finish");
-
-        assert!(error.to_string().contains("safe size limit"));
-    }
 }

@@ -53,14 +53,10 @@ pub(in super::super) fn send_runtime_deepseek_upstream_request(
 ) -> Result<RuntimeLocalRewriteUpstreamResult> {
     let binding = runtime_local_rewrite_binding_context(shared, request)?;
     let binding_endpoint = runtime_deepseek_binding_endpoint(shared, endpoint);
-    let mut api_key_attempts = if shared.provider_credential.is_some() {
-        vec![("projected".to_string(), None)]
-    } else {
-        runtime_local_rewrite_api_key_attempts(shared, api_keys)
-            .into_iter()
-            .map(|(label, api_key)| (label, Some(api_key)))
-            .collect()
-    };
+    let mut api_key_attempts = runtime_local_rewrite_api_key_attempts(shared, api_keys)
+        .into_iter()
+        .map(|(label, api_key)| (label, Some(api_key)))
+        .collect::<Vec<_>>();
     api_key_attempts.retain(|(_, api_key)| {
         runtime_deepseek_binding_identity(shared, *api_key, &binding_endpoint)
             .as_ref()

@@ -1,23 +1,18 @@
 use super::anthropic_rewrite::{RuntimeAnthropicAuth, RuntimeAnthropicProviderAuth};
 use super::gemini_rewrite::RuntimeGeminiAuth;
 use super::local_rewrite::{RuntimeLocalRewriteAsyncResponse, RuntimeLocalRewriteProxyShared};
-use super::local_rewrite_gateway_config::RuntimeGatewaySsoConfig;
 use super::local_rewrite_transport_copilot::{
     runtime_copilot_initiator_header, runtime_copilot_request_has_vision_input,
 };
 use super::provider_bridge::{
-    RuntimeProviderBridgeKind, runtime_provider_gateway_cost_for_request,
-    runtime_provider_gateway_pricing_model, runtime_provider_gateway_spend_event,
-    runtime_provider_label, runtime_provider_model_from_body,
+    RuntimeProviderBridgeKind, runtime_provider_label, runtime_provider_model_from_body,
     runtime_provider_request_ledger_message,
 };
 use crate::{RuntimeProxyRequest, runtime_proxy_log};
 use anyhow::{Context, Result};
-use prodex_domain::RequestId;
 use prodex_provider_core::{ProviderWireFormat, provider_adapter};
 use runtime_proxy_crate::{
-    local_bridge_authorization_bearer_token, path_without_query, runtime_proxy_log_field,
-    runtime_proxy_structured_log_message,
+    path_without_query, runtime_proxy_log_field, runtime_proxy_structured_log_message,
 };
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
@@ -25,21 +20,9 @@ use std::time::Instant;
 
 const ANTHROPIC_API_VERSION: &str = "2023-06-01";
 
-mod observability;
-#[path = "local_rewrite_transport/projected_credential.rs"]
-mod projected_credential;
 #[path = "local_rewrite_transport/urls.rs"]
 mod urls;
 
-pub(super) use observability::{
-    emit_runtime_gateway_spend_event, emit_runtime_gateway_terminal_spend_event,
-};
-pub(super) use projected_credential::{
-    runtime_gateway_with_outbound_secret, runtime_local_rewrite_with_projected_provider_secret,
-};
-use projected_credential::{
-    runtime_local_rewrite_apply_projected_bearer, runtime_local_rewrite_apply_projected_header,
-};
 pub(super) use urls::{
     runtime_anthropic_messages_upstream_url, runtime_deepseek_anthropic_messages_upstream_url,
     runtime_deepseek_upstream_url, runtime_gemini_openai_compatible_upstream_url,
@@ -58,7 +41,6 @@ pub(super) enum RuntimeLocalRewritePreparedAuth<'a> {
     OpenAiResponses {
         api_key: Option<&'a str>,
     },
-    OpenAiProjected,
     DeepSeek {
         api_key: Option<&'a str>,
         native_messages: bool,
@@ -84,9 +66,6 @@ impl RuntimeLocalRewritePreparedAuth<'_> {
             }
             RuntimeLocalRewritePreparedAuth::Copilot { .. } => RuntimeProviderBridgeKind::Copilot,
             RuntimeLocalRewritePreparedAuth::OpenAiResponses { .. } => {
-                RuntimeProviderBridgeKind::OpenAiResponses
-            }
-            RuntimeLocalRewritePreparedAuth::OpenAiProjected => {
                 RuntimeProviderBridgeKind::OpenAiResponses
             }
             RuntimeLocalRewritePreparedAuth::DeepSeek { .. } => RuntimeProviderBridgeKind::DeepSeek,
@@ -115,7 +94,6 @@ pub(super) fn send_runtime_local_rewrite_prepared_request(
             request.method
         )
     })?;
-    let request_body_for_spend = body.clone();
     let mut upstream_request = shared
         .runtime_shared
         .async_client
@@ -186,45 +164,6 @@ pub(super) fn send_runtime_local_rewrite_prepared_request(
             body_bytes,
         ),
     );
-    let route_load = shared
-        .gateway_route_load
-        .lock()
-        .map(|load| load.clone())
-        .unwrap_or_default();
-    let pricing_model = runtime_provider_gateway_pricing_model(
-        &shared.gateway_route_aliases,
-        &route_load,
-        request_id,
-        &request_body_for_spend,
-        model.as_deref().unwrap_or("unknown"),
-    );
-    let governed_cost = shared
-        .governed_pricing
-        .as_ref()
-        .and_then(|pricing| pricing.cost_for_model(provider_kind.provider_id(), &pricing_model));
-    let cost = runtime_provider_gateway_cost_for_request(
-        provider_kind,
-        &shared.gateway_route_aliases,
-        &route_load,
-        request_id,
-        &request_body_for_spend,
-        model.as_deref().unwrap_or("unknown"),
-        governed_cost,
-    );
-    emit_runtime_gateway_spend_event(
-        shared,
-        runtime_provider_gateway_spend_event(
-            request_id,
-            provider_kind,
-            &request.path_and_query,
-            model.as_deref(),
-            response.status().as_u16(),
-            started_at.elapsed().as_millis(),
-            body_bytes,
-            &request_body_for_spend,
-            cost,
-        ),
-    );
     Ok(response)
 }
 
@@ -258,9 +197,6 @@ fn runtime_local_rewrite_apply_prepared_auth(
         RuntimeLocalRewritePreparedAuth::OpenAiResponses { api_key } => Ok(
             runtime_local_rewrite_apply_openai_auth(upstream_request, request, shared, api_key),
         ),
-        RuntimeLocalRewritePreparedAuth::OpenAiProjected => {
-            runtime_local_rewrite_apply_openai_projected_auth(upstream_request, request, shared)
-        }
         RuntimeLocalRewritePreparedAuth::DeepSeek {
             api_key,
             native_messages,
@@ -308,20 +244,8 @@ fn runtime_local_rewrite_apply_anthropic_auth(
     if native_messages {
         upstream_request = upstream_request.header("anthropic-version", ANTHROPIC_API_VERSION);
     }
-    upstream_request = match auth {
-        RuntimeAnthropicAuth::Projected if native_messages => {
-            runtime_local_rewrite_apply_projected_header(shared, upstream_request, "x-api-key")?
-        }
-        RuntimeAnthropicAuth::Projected => {
-            runtime_local_rewrite_apply_projected_bearer(shared, upstream_request)?
-        }
-        _ => runtime_local_rewrite_apply_direct_anthropic_auth(
-            upstream_request,
-            auth,
-            native_messages,
-        )
-        .expect("non-projected Anthropic auth builds request"),
-    };
+    upstream_request =
+        runtime_local_rewrite_apply_direct_anthropic_auth(upstream_request, auth, native_messages);
     if let Some(user_agent) = runtime_local_rewrite_header_if_allowed(request, shared, "user-agent")
     {
         upstream_request = upstream_request.header(reqwest::header::USER_AGENT, user_agent);
@@ -332,7 +256,7 @@ fn runtime_local_rewrite_apply_anthropic_auth(
 fn runtime_local_rewrite_apply_copilot_auth(
     upstream_request: reqwest::RequestBuilder,
     request: &RuntimeProxyRequest,
-    shared: &RuntimeLocalRewriteProxyShared,
+    _shared: &RuntimeLocalRewriteProxyShared,
     body: &[u8],
     api_key: Option<&str>,
 ) -> Result<reqwest::RequestBuilder> {
@@ -340,16 +264,14 @@ fn runtime_local_rewrite_apply_copilot_auth(
         .header("copilot-integration-id", "copilot-developer-cli")
         .header("openai-intent", "conversation-panel")
         .header("x-github-api-version", "2025-04-01")
-        .header("x-request-id", format!("prodex-{}", RequestId::new()))
+        .header("x-request-id", format!("prodex-{}", uuid::Uuid::now_v7()))
         .header("X-Initiator", runtime_copilot_initiator_header(request))
         .header(
             reqwest::header::USER_AGENT,
             "copilot/1.0.65 (client/github/cli)",
         );
-    upstream_request = match api_key {
-        Some(api_key) => upstream_request.bearer_auth(api_key),
-        None => runtime_local_rewrite_apply_projected_bearer(shared, upstream_request)?,
-    };
+    let api_key = api_key.context("Copilot API credential is unavailable")?;
+    upstream_request = upstream_request.bearer_auth(api_key);
     if runtime_copilot_request_has_vision_input(body) {
         upstream_request = upstream_request.header("copilot-vision-request", "true");
     }
@@ -362,11 +284,7 @@ fn runtime_local_rewrite_apply_openai_auth(
     shared: &RuntimeLocalRewriteProxyShared,
     api_key: Option<&str>,
 ) -> reqwest::RequestBuilder {
-    let replacing_openai_auth = api_key.is_some()
-        || request.headers.iter().any(|(name, value)| {
-            name.eq_ignore_ascii_case("authorization")
-                && runtime_local_rewrite_authorization_is_gateway_credential(shared, value)
-        });
+    let replacing_openai_auth = api_key.is_some();
     let mut upstream_request = runtime_local_rewrite_copy_openai_headers(
         request,
         shared,
@@ -377,16 +295,6 @@ fn runtime_local_rewrite_apply_openai_auth(
         upstream_request = upstream_request.bearer_auth(api_key);
     }
     upstream_request
-}
-
-fn runtime_local_rewrite_apply_openai_projected_auth(
-    upstream_request: reqwest::RequestBuilder,
-    request: &RuntimeProxyRequest,
-    shared: &RuntimeLocalRewriteProxyShared,
-) -> Result<reqwest::RequestBuilder> {
-    let upstream_request =
-        runtime_local_rewrite_copy_openai_headers(request, shared, upstream_request, true);
-    runtime_local_rewrite_apply_projected_bearer(shared, upstream_request)
 }
 
 fn runtime_local_rewrite_apply_deepseek_auth(
@@ -400,17 +308,9 @@ fn runtime_local_rewrite_apply_deepseek_auth(
     if native_messages {
         upstream_request = upstream_request.header("anthropic-version", ANTHROPIC_API_VERSION);
     }
-    upstream_request = match (api_key, native_messages) {
-        (Some(api_key), native_messages) => runtime_local_rewrite_apply_direct_api_key_auth(
-            upstream_request,
-            api_key,
-            native_messages,
-        ),
-        (None, true) => {
-            runtime_local_rewrite_apply_projected_header(shared, upstream_request, "x-api-key")?
-        }
-        (None, false) => runtime_local_rewrite_apply_projected_bearer(shared, upstream_request)?,
-    };
+    let api_key = api_key.context("DeepSeek API credential is unavailable")?;
+    upstream_request =
+        runtime_local_rewrite_apply_direct_api_key_auth(upstream_request, api_key, native_messages);
     if let Some(user_agent) = runtime_local_rewrite_header_if_allowed(request, shared, "user-agent")
     {
         upstream_request = upstream_request.header(reqwest::header::USER_AGENT, user_agent);
@@ -432,13 +332,6 @@ fn runtime_local_rewrite_apply_gemini_auth(
         RuntimeGeminiAuth::OAuth { access_token, .. } => {
             upstream_request = upstream_request.bearer_auth(access_token);
         }
-        RuntimeGeminiAuth::Projected => {
-            upstream_request = runtime_local_rewrite_apply_projected_header(
-                shared,
-                upstream_request,
-                "x-goog-api-key",
-            )?;
-        }
     }
     if let Some(user_agent) = runtime_local_rewrite_header_if_allowed(request, shared, "user-agent")
     {
@@ -454,10 +347,8 @@ fn runtime_local_rewrite_apply_gemini_openai_auth(
     api_key: Option<&str>,
 ) -> Result<reqwest::RequestBuilder> {
     let mut upstream_request = runtime_local_rewrite_provider_headers(upstream_request);
-    upstream_request = match api_key {
-        Some(api_key) => upstream_request.bearer_auth(api_key),
-        None => runtime_local_rewrite_apply_projected_bearer(shared, upstream_request)?,
-    };
+    let api_key = api_key.context("Gemini API credential is unavailable")?;
+    upstream_request = upstream_request.bearer_auth(api_key);
     if let Some(user_agent) = runtime_local_rewrite_header_if_allowed(request, shared, "user-agent")
     {
         upstream_request = upstream_request.header(reqwest::header::USER_AGENT, user_agent);
@@ -469,17 +360,14 @@ fn runtime_local_rewrite_apply_direct_anthropic_auth(
     request: reqwest::RequestBuilder,
     auth: &RuntimeAnthropicAuth,
     native_messages: bool,
-) -> Option<reqwest::RequestBuilder> {
+) -> reqwest::RequestBuilder {
     match auth {
-        RuntimeAnthropicAuth::ApiKey { api_key } => Some(
-            runtime_local_rewrite_apply_direct_api_key_auth(request, api_key, native_messages),
-        ),
-        RuntimeAnthropicAuth::OAuth { access_token } => Some(
-            request
-                .bearer_auth(access_token)
-                .header("anthropic-beta", "oauth-2025-04-20"),
-        ),
-        RuntimeAnthropicAuth::Projected => None,
+        RuntimeAnthropicAuth::ApiKey { api_key } => {
+            runtime_local_rewrite_apply_direct_api_key_auth(request, api_key, native_messages)
+        }
+        RuntimeAnthropicAuth::OAuth { access_token } => request
+            .bearer_auth(access_token)
+            .header("anthropic-beta", "oauth-2025-04-20"),
     }
 }
 
@@ -511,7 +399,6 @@ mod anthropic_native_transport_tests {
             &auth,
             true,
         )
-        .unwrap()
         .build()
         .unwrap();
 
@@ -539,7 +426,6 @@ mod anthropic_native_transport_tests {
             &auth,
             true,
         )
-        .unwrap()
         .build()
         .unwrap();
 
@@ -558,7 +444,7 @@ mod anthropic_native_transport_tests {
 
 fn runtime_local_rewrite_copy_openai_headers(
     request: &RuntimeProxyRequest,
-    shared: &RuntimeLocalRewriteProxyShared,
+    _shared: &RuntimeLocalRewriteProxyShared,
     mut upstream_request: reqwest::RequestBuilder,
     replacing_openai_auth: bool,
 ) -> reqwest::RequestBuilder {
@@ -572,7 +458,7 @@ fn runtime_local_rewrite_copy_openai_headers(
         if runtime_proxy_crate::runtime_header_name_matches_connection_token(
             name,
             &connection_headers,
-        ) || should_skip_runtime_local_rewrite_request_header(name, &shared.gateway_sso)
+        ) || should_skip_runtime_local_rewrite_request_header(name)
         {
             continue;
         }
@@ -657,12 +543,6 @@ pub(super) fn runtime_local_rewrite_anthropic_auth_attempts(
                 })
                 .collect()
         }
-        RuntimeAnthropicProviderAuth::Projected => {
-            vec![RuntimeLocalRewriteSelectedAnthropicAuth {
-                label: "projected".to_string(),
-                auth: RuntimeAnthropicAuth::Projected,
-            }]
-        }
     }
 }
 
@@ -679,88 +559,15 @@ fn runtime_local_rewrite_header<'a>(
 
 fn runtime_local_rewrite_header_if_allowed<'a>(
     request: &'a RuntimeProxyRequest,
-    shared: &RuntimeLocalRewriteProxyShared,
+    _shared: &RuntimeLocalRewriteProxyShared,
     expected_name: &str,
 ) -> Option<&'a str> {
-    (!shared.gateway_sso.is_configured_header(expected_name))
-        .then(|| runtime_local_rewrite_header(request, expected_name))
-        .flatten()
+    runtime_local_rewrite_header(request, expected_name)
 }
 
-fn should_skip_runtime_local_rewrite_request_header(
-    name: &str,
-    gateway_sso: &RuntimeGatewaySsoConfig,
-) -> bool {
+fn should_skip_runtime_local_rewrite_request_header(name: &str) -> bool {
     runtime_proxy_crate::is_runtime_transport_local_request_header(name)
         || runtime_proxy_crate::is_prodex_internal_request_header(name)
-        || gateway_sso.is_configured_header(name)
-}
-
-#[cfg(test)]
-mod sso_header_tests {
-    use super::*;
-
-    #[test]
-    fn configured_sso_headers_are_not_forwardable_but_codex_metadata_is() {
-        let gateway_sso = RuntimeGatewaySsoConfig {
-            token_header: "x-auth-token".to_string(),
-            user_header: "x-auth-user".to_string(),
-            role_header: "x-auth-role".to_string(),
-            tenant_header: "x-auth-tenant".to_string(),
-            key_prefixes_header: "x-auth-prefixes".to_string(),
-            ..RuntimeGatewaySsoConfig::default()
-        };
-
-        for name in [
-            "X-AUTH-TOKEN",
-            "x-auth-user",
-            "x-auth-role",
-            "x-auth-tenant",
-            "x-auth-prefixes",
-        ] {
-            assert!(should_skip_runtime_local_rewrite_request_header(
-                name,
-                &gateway_sso
-            ));
-        }
-        for name in [
-            "session_id",
-            "x-openai-subagent",
-            "x-codex-turn-state",
-            "x-codex-turn-metadata",
-            "x-codex-beta-features",
-        ] {
-            assert!(!should_skip_runtime_local_rewrite_request_header(
-                name,
-                &gateway_sso
-            ));
-        }
-    }
-}
-
-fn runtime_local_rewrite_authorization_is_gateway_credential(
-    shared: &RuntimeLocalRewriteProxyShared,
-    authorization: &str,
-) -> bool {
-    if shared
-        .gateway_auth_token_hash
-        .as_ref()
-        .is_some_and(|hash| hash.verify_authorization_header(authorization))
-    {
-        return true;
-    }
-    let Some(token) = local_bridge_authorization_bearer_token(authorization) else {
-        return false;
-    };
-    shared
-        .gateway_virtual_keys
-        .lock()
-        .map(|entries| {
-            entries
-                .iter()
-                .any(|entry| !entry.disabled && entry.key.token_hash.verify_bearer_token(token))
-        })
-        .unwrap_or(false)
 }
 
 #[cfg(test)]

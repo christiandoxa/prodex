@@ -10,19 +10,12 @@ mod registry;
 mod telemetry;
 mod websocket;
 
-pub(crate) use http::{
-    apply_runtime_presidio_redaction_to_request,
-    apply_runtime_presidio_redaction_to_request_with_rules,
-};
+pub(crate) use http::apply_runtime_presidio_redaction_to_request;
 pub(crate) use registry::{
     register_runtime_presidio_redaction_proxy_state,
     unregister_runtime_presidio_redaction_proxy_state,
 };
-pub(crate) use telemetry::runtime_emit_inspection_denied_metric;
-pub(crate) use websocket::{
-    RuntimePresidioWebSocketInspection, apply_runtime_presidio_redaction_to_websocket_text,
-    apply_runtime_presidio_redaction_to_websocket_text_with_rules,
-};
+pub(crate) use websocket::apply_runtime_presidio_redaction_to_websocket_text;
 
 #[cfg(test)]
 mod tests;

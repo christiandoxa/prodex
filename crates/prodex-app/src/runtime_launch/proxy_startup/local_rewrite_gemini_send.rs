@@ -5,10 +5,9 @@ use super::super::gemini_rewrite::{
     runtime_gemini_project_id, runtime_gemini_request_upstream_url,
 };
 use super::super::local_rewrite::{
-    RUNTIME_LOCAL_REWRITE_PROFILE, RuntimeLocalRewriteAsyncResponse,
-    RuntimeLocalRewriteLiveResponse, RuntimeLocalRewriteProxyShared,
-    RuntimeLocalRewriteUpstreamResponse, RuntimeLocalRewriteUpstreamResult,
-    runtime_local_rewrite_model_selection,
+    RuntimeLocalRewriteAsyncResponse, RuntimeLocalRewriteLiveResponse,
+    RuntimeLocalRewriteProxyShared, RuntimeLocalRewriteUpstreamResponse,
+    RuntimeLocalRewriteUpstreamResult, runtime_local_rewrite_model_selection,
 };
 use super::super::local_rewrite_application_data_plane::runtime_gateway_application_provider_retry_precommit;
 use super::super::local_rewrite_response::runtime_local_rewrite_buffered_response_from_response;
@@ -132,15 +131,6 @@ fn runtime_gemini_responses_route_result(
         RuntimeGeminiProviderAuth::ApiKeys { api_keys } => Some(
             super::local_rewrite_gemini_openai::send_runtime_gemini_openai_compatible_request(
                 request_id, request, shared, body, api_keys,
-            ),
-        ),
-        RuntimeGeminiProviderAuth::Projected => Some(
-            super::local_rewrite_gemini_openai::send_runtime_gemini_openai_compatible_request(
-                request_id,
-                request,
-                shared,
-                body,
-                &[],
             ),
         ),
         RuntimeGeminiProviderAuth::OAuthProfiles { .. } => None,
@@ -273,7 +263,6 @@ fn runtime_gemini_binding_identity(
             Some(access_token.as_str()),
             Some(selected.profile_name.as_str()),
         ),
-        RuntimeGeminiAuth::Projected => (None, Some(RUNTIME_LOCAL_REWRITE_PROFILE)),
     };
     runtime_local_rewrite_raw_binding_identity(
         shared,
@@ -554,10 +543,7 @@ fn runtime_gemini_upstream_url_for_endpoint(
     endpoint: ProviderEndpoint,
 ) -> String {
     if endpoint == ProviderEndpoint::ChatCompletions
-        && matches!(
-            auth,
-            RuntimeGeminiAuth::ApiKey { .. } | RuntimeGeminiAuth::Projected
-        )
+        && matches!(auth, RuntimeGeminiAuth::ApiKey { .. })
     {
         runtime_gemini_openai_compatible_upstream_url(base_url)
     } else {
@@ -582,9 +568,6 @@ fn runtime_gemini_prepared_auth_for_endpoint<'a>(
                 RuntimeLocalRewritePreparedAuth::GeminiOpenAi {
                     api_key: Some(api_key.as_str()),
                 }
-            }
-            RuntimeGeminiAuth::Projected => {
-                RuntimeLocalRewritePreparedAuth::GeminiOpenAi { api_key: None }
             }
             RuntimeGeminiAuth::OAuth { .. } => RuntimeLocalRewritePreparedAuth::Gemini { auth },
         }

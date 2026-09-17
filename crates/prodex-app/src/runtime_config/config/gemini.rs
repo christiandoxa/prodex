@@ -70,10 +70,6 @@ pub(super) fn parse_gemini(parser: &mut RuntimeConfigParser) -> RuntimeGeminiCon
         .compatibility_optional_bool("PRODEX_GEMINI_LOAD_MEMORY")
         .or_else(|| parser.compatibility_optional_bool("PRODEX_GEMINI_MEMORY"))
         .unwrap_or(true);
-    let live_url = parser
-        .compatibility_text("PRODEX_GEMINI_LIVE_URL")
-        .filter(|value| !value.trim().is_empty());
-    let live_model = parser.compatibility_text("PRODEX_GEMINI_LIVE_MODEL");
     let sticky_fresh_oauth = parser
         .compatibility_text("PRODEX_GEMINI_STICKY_FRESH_OAUTH")
         .is_none_or(|value| {
@@ -102,8 +98,6 @@ pub(super) fn parse_gemini(parser: &mut RuntimeConfigParser) -> RuntimeGeminiCon
         memory_files_disabled,
         memory_files_default,
         extension_memory_paths,
-        live_url,
-        live_model,
         sticky_fresh_oauth,
     }
 }

@@ -1,16 +1,28 @@
 //! Presidio finding normalization and domain inspection conversion.
 
 use anyhow::{Context, Result};
-use prodex_application::{
-    ApplicationInspectionPlan, ApplicationInspectionRequest, ApplicationInspectionSource,
-    plan_application_request_inspection,
-};
 use prodex_domain::{
     ContentLocation, DataClassification, DetectorId, DetectorRevisionId, FindingKind,
-    InspectionCoverage, InspectionFinding, InspectionLimits, InspectionReasonCode, InspectionTag,
+    InspectionCoverage, InspectionFinding, InspectionLimits, InspectionReasonCode,
+    InspectionResult, InspectionTag,
 };
 
 use super::json_body::PresidioJsonString;
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(super) struct ApplicationInspectionSource {
+    pub(super) coverage: InspectionCoverage,
+    pub(super) findings: Vec<InspectionFinding>,
+    pub(super) masked_findings: Vec<FindingKind>,
+    pub(super) tags: Vec<InspectionTag>,
+    pub(super) reason_codes: Vec<InspectionReasonCode>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct ApplicationInspectionPlan {
+    pub(super) result: InspectionResult,
+    pub(super) masked_findings: Vec<FindingKind>,
+}
 
 #[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
 pub(super) struct PresidioAnalyzerResult {
@@ -92,15 +104,52 @@ pub(super) fn runtime_presidio_inspection_plan(
     default_classification: DataClassification,
     detector_revision: &DetectorRevisionId,
 ) -> Result<ApplicationInspectionPlan> {
-    plan_application_request_inspection(ApplicationInspectionRequest {
-        sources,
-        default_classification,
-        trusted_label: None,
-        prior_classification: None,
-        detector_revision: detector_revision.clone(),
-        limits: InspectionLimits::default(),
+    let limits = InspectionLimits::default();
+    if sources.len() > limits.max_detectors {
+        anyhow::bail!("too many inspection sources");
+    }
+    let mut coverage: Option<InspectionCoverage> = None;
+    let mut classification = default_classification;
+    let mut findings = Vec::new();
+    let mut masked_findings = Vec::new();
+    let mut tags = Vec::new();
+    let mut reason_codes = Vec::new();
+    for source in sources {
+        if source.masked_findings.len() > FindingKind::ALL.len() {
+            anyhow::bail!("too many masked finding kinds");
+        }
+        coverage = Some(match coverage {
+            Some(current) => current.combine(source.coverage),
+            None => source.coverage,
+        });
+        for kind in source.masked_findings {
+            if source.findings.iter().any(|finding| finding.kind() == kind) {
+                masked_findings.push(kind);
+            }
+        }
+        for finding in source.findings {
+            classification = classification.raised_to(finding.kind().minimum_classification());
+            findings.push(finding);
+        }
+        tags.extend(source.tags);
+        reason_codes.extend(source.reason_codes);
+    }
+    masked_findings.sort();
+    masked_findings.dedup();
+    let result = InspectionResult::new(
+        coverage.unwrap_or(InspectionCoverage::Unsupported),
+        classification,
+        findings,
+        tags,
+        reason_codes,
+        detector_revision.clone(),
+        limits,
+    )
+    .context("failed to build inspection result")?;
+    Ok(ApplicationInspectionPlan {
+        result,
+        masked_findings,
     })
-    .context("failed to build inspection plan")
 }
 
 pub(super) fn runtime_presidio_findings(

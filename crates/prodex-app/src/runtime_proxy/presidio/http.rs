@@ -6,8 +6,8 @@ use super::engine::{
     runtime_presidio_redact_body,
 };
 use super::findings::{
-    runtime_local_inspection_source, runtime_presidio_inspection_plan,
-    runtime_presidio_unavailable_source,
+    ApplicationInspectionPlan, ApplicationInspectionSource, runtime_local_inspection_source,
+    runtime_presidio_inspection_plan, runtime_presidio_unavailable_source,
 };
 use super::local::{RuntimeTenantDetectorPatterns, runtime_local_inspect_and_mask_for_tenant};
 use super::registry::{RuntimePresidioRedactionState, runtime_presidio_redaction_for_log_path};
@@ -20,7 +20,6 @@ use super::telemetry::{
 use crate::runtime_state_shared::RuntimeRotationProxyShared;
 use crate::shared_types::RuntimeProxyRequest;
 use anyhow::{Context, Result, anyhow};
-use prodex_application::{ApplicationInspectionPlan, ApplicationInspectionSource};
 use prodex_domain::{DetectorRevisionId, InspectionCoverage, TenantId};
 use prodex_observability::{InspectionMaskingAction, InspectionOutcome, InspectionStage};
 use std::time::Instant;

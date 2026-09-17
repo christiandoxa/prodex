@@ -24,7 +24,7 @@ pub(super) use self::providers_profiles::{
     resolve_gemini_runtime_launch_profile_name, resolve_kiro_runtime_launch_profile_name,
     runtime_anthropic_oauth_profiles_for_provider, runtime_copilot_profiles_for_provider,
     runtime_external_provider_oauth_profile_count, runtime_gemini_oauth_profiles_for_provider,
-    runtime_kiro_gateway_profile_auth, runtime_kiro_profile_for_provider,
+    runtime_kiro_profile_for_provider,
 };
 use crate::{
     AppState, ChildProcessPlan, ProfileProvider, RuntimeAnthropicProviderAuth,

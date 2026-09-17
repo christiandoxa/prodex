@@ -70,32 +70,12 @@ fn runtime_copilot_auth_attempts_with_identity(
                     api_key: api_key.to_string(),
                     api_url: None,
                     hard_affinity: api_keys.len() <= 1,
-                    projected: false,
                 })
                 .collect::<Vec<_>>();
             if attempts.is_empty() {
                 bail!("Copilot API-key pool is empty");
             }
             Ok(attempts)
-        }
-        RuntimeCopilotProviderAuth::Projected => {
-            if runtime_local_rewrite_bound_binding(
-                &shared.runtime_shared.runtime,
-                runtime_copilot_previous_response_id(body).as_deref(),
-                turn_state,
-                session_id,
-            )?
-            .is_some()
-            {
-                bail!("Copilot projected continuation binding is unavailable");
-            }
-            Ok(vec![RuntimeCopilotSelectedAuth {
-                profile_name: "projected".to_string(),
-                api_key: String::new(),
-                api_url: None,
-                hard_affinity: true,
-                projected: true,
-            }])
         }
         RuntimeCopilotProviderAuth::Profiles { profiles } => {
             let pool = shared
@@ -179,7 +159,6 @@ impl RuntimeCopilotOAuthPool {
                 api_key: profile.api_key.clone(),
                 api_url: (!profile.api_url.trim().is_empty()).then(|| profile.api_url.clone()),
                 hard_affinity: true,
-                projected: false,
             }]);
         }
         if profiles.is_empty() {
@@ -196,7 +175,6 @@ impl RuntimeCopilotOAuthPool {
                     api_key: profile.api_key,
                     api_url: (!is_raw_api_key).then_some(profile.api_url),
                     hard_affinity: profiles.len() == 1 && is_raw_api_key,
-                    projected: false,
                 }
             })
             .collect())

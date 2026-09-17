@@ -14,93 +14,24 @@ mod gemini_sse;
 mod gemini_thought_signatures;
 mod local_rewrite;
 mod local_rewrite_anthropic;
-mod local_rewrite_application_boundary;
 mod local_rewrite_application_data_plane;
-mod local_rewrite_application_runtime;
-mod local_rewrite_classification_rules;
 mod local_rewrite_constraints;
 mod local_rewrite_copilot;
 mod local_rewrite_copilot_bindings;
 mod local_rewrite_deepseek;
-mod local_rewrite_gateway_admin_audit;
-mod local_rewrite_gateway_admin_auth;
-mod local_rewrite_gateway_admin_dispatch;
-mod local_rewrite_gateway_admin_execution;
-mod local_rewrite_gateway_admin_fields;
-mod local_rewrite_gateway_admin_identity;
-mod local_rewrite_gateway_admin_keys;
-mod local_rewrite_gateway_admin_ledger;
-mod local_rewrite_gateway_admin_payloads;
-mod local_rewrite_gateway_admin_policies;
-mod local_rewrite_gateway_admin_policy_resource;
-mod local_rewrite_gateway_admin_response;
-mod local_rewrite_gateway_admin_route_explain;
-mod local_rewrite_gateway_admin_router;
-mod local_rewrite_gateway_admin_scim;
-mod local_rewrite_gateway_admin_sessions;
-mod local_rewrite_gateway_admin_store_mutation;
-mod local_rewrite_gateway_admission;
-mod local_rewrite_gateway_backend_connection;
-mod local_rewrite_gateway_billing_csv;
-mod local_rewrite_gateway_billing_summary;
-mod local_rewrite_gateway_browser;
-mod local_rewrite_gateway_config;
-mod local_rewrite_gateway_credentials;
-mod local_rewrite_gateway_dashboard;
-mod local_rewrite_gateway_data_plane_audit;
-mod local_rewrite_gateway_distributed_rate_limit;
-mod local_rewrite_gateway_file_ledger;
-mod local_rewrite_gateway_guardrail_webhook;
-mod local_rewrite_gateway_key_payloads;
-mod local_rewrite_gateway_key_store_backend;
-mod local_rewrite_gateway_keys;
-mod local_rewrite_gateway_ledger;
-mod local_rewrite_gateway_ledger_types;
-mod local_rewrite_gateway_metrics;
-mod local_rewrite_gateway_openapi;
-mod local_rewrite_gateway_reconciliation_audit;
-mod local_rewrite_gateway_reconciliation_runtime;
-mod local_rewrite_gateway_reconciliation_worker;
-mod local_rewrite_gateway_redis_ledger;
-mod local_rewrite_gateway_request_auth;
-mod local_rewrite_gateway_reservation;
-mod local_rewrite_gateway_reservation_recovery;
-mod local_rewrite_gateway_route_load;
-mod local_rewrite_gateway_scim;
-mod local_rewrite_gateway_scope;
-#[cfg(test)]
-mod local_rewrite_gateway_side_effect_snapshot;
-#[cfg(test)]
-use local_rewrite_gateway_side_effect_snapshot::gateway_snapshot_handle;
-mod local_rewrite_gateway_sql_ledger;
-mod local_rewrite_gateway_sqlite_utils;
-mod local_rewrite_gateway_store_file;
-mod local_rewrite_gateway_store_scim;
-mod local_rewrite_gateway_store_types;
-mod local_rewrite_gateway_usage;
-mod local_rewrite_gateway_usage_backend;
-mod local_rewrite_gateway_util;
-mod local_rewrite_gateway_workload_identity;
 mod local_rewrite_gemini;
 mod local_rewrite_gemini_bindings;
 mod local_rewrite_gemini_compact;
-mod local_rewrite_gemini_live;
 mod local_rewrite_gemini_models;
 mod local_rewrite_gemini_quota;
 mod local_rewrite_gemini_thought_signatures;
-mod local_rewrite_governance_artifact_authenticity;
-mod local_rewrite_governance_audit;
-mod local_rewrite_governance_session;
 mod local_rewrite_kiro;
 mod local_rewrite_model_memory;
 mod local_rewrite_options;
 mod local_rewrite_pipeline;
-mod local_rewrite_provider_registry;
 mod local_rewrite_rate_limits;
 mod local_rewrite_request;
 mod local_rewrite_response;
-mod local_rewrite_response_guardrails;
-mod local_rewrite_response_spend;
 mod local_rewrite_search_fallback;
 #[cfg(test)]
 mod local_rewrite_tests;
@@ -110,7 +41,6 @@ mod local_rewrite_upstream;
 #[cfg(test)]
 mod openai_responses_contract_tests;
 mod provider_bridge;
-mod provider_bridge_spend;
 mod provider_models;
 mod provider_sse_events;
 mod provider_sse_reader;
@@ -123,27 +53,10 @@ pub(crate) use anthropic_rewrite::{
 pub(crate) use deepseek_rewrite::RuntimeDeepSeekWebSearchMode;
 pub(crate) use gemini_rewrite::{RuntimeGeminiOAuthProfileAuth, RuntimeGeminiProviderAuth};
 pub(crate) use local_rewrite::{
-    RUNTIME_LOCAL_REWRITE_PROXY_MOUNT_PATH, RuntimeGatewayAdminRole, RuntimeGatewayAdminToken,
-    RuntimeGatewayBrowserConfig, RuntimeGatewayGuardrailWebhookConfig,
-    RuntimeGatewayObservabilityConfig, RuntimeGatewayOidcConfig, RuntimeGatewaySecret,
-    RuntimeGatewaySsoConfig, RuntimeGatewayStateStore, RuntimeGatewayWorkloadIdentityConfig,
-    RuntimeLocalRewriteProviderOptions, RuntimeLocalRewriteProxyStartOptions,
-    RuntimeProjectedProviderCredential, start_runtime_gateway_rewrite_proxy_with_runtime_config,
-    start_runtime_local_rewrite_proxy_with_harness,
-};
-pub(crate) use local_rewrite_application_runtime::{
-    RuntimeGatewayApplication, start_runtime_gateway_application_with_runtime_config,
+    RUNTIME_LOCAL_REWRITE_PROXY_MOUNT_PATH, RuntimeLocalRewriteProviderOptions,
+    RuntimeLocalRewriteProxyStartOptions, start_runtime_local_rewrite_proxy_with_harness,
 };
 pub(crate) use local_rewrite_copilot::{RuntimeCopilotProfileAuth, RuntimeCopilotProviderAuth};
-pub(crate) use local_rewrite_gateway_backend_connection::{
-    runtime_gateway_postgres_migrate_compatibility_state,
-    runtime_gateway_postgres_migrate_enterprise_state,
-    runtime_gateway_sqlite_migrate_compatibility_state,
-    runtime_gateway_sqlite_migrate_enterprise_state,
-};
-pub(crate) use local_rewrite_gateway_credentials::{
-    RuntimeGatewayCredentialRefreshCandidate, RuntimeGatewayCredentialRefreshPlan,
-};
 pub(crate) use local_rewrite_kiro::RuntimeKiroProfileAuth;
 use recovery::runtime_startup_recovery_or_default;
 use workers::spawn_runtime_rotation_proxy_workers;
@@ -224,13 +137,6 @@ pub(crate) fn start_runtime_rotation_proxy_with_options(
     } = options;
     validate_credential_free_http_url(&upstream_base_url, "runtime upstream base URL")?;
     let runtime_config = Arc::new(RuntimeConfig::from_env_policy_and_cli(paths)?);
-    if !runtime_config
-        .governance
-        .mode
-        .allows_anonymous_compatibility()
-    {
-        bail!("enterprise governance modes require the authenticated unified gateway data plane");
-    }
     let log_path = initialize_runtime_proxy_log_path_from_config(&runtime_config)?;
     for key in runtime_config.compatibility_defaults() {
         runtime_proxy_log_to_path(

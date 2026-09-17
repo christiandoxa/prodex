@@ -15,9 +15,7 @@ mod sse_tap;
 mod streaming_writer;
 
 pub(crate) use sse_tap::{RuntimeSseTapReader, RuntimeSseTapReaderInit};
-pub(crate) use streaming_writer::{
-    write_runtime_gateway_streaming_response, write_runtime_streaming_response,
-};
+pub(crate) use streaming_writer::write_runtime_streaming_response;
 
 pub(super) fn handle_runtime_responses_precommit_transport_error(
     shared: &RuntimeRotationProxyShared,

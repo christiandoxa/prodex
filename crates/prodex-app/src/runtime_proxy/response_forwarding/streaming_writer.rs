@@ -1,6 +1,4 @@
 use super::*;
-use bytes::Bytes;
-use prodex_gateway_server::GatewayResponseBodySender;
 use redaction::redaction_redact_secret_like_text;
 use runtime_proxy_crate::runtime_stream_response_should_flush_each_chunk;
 
@@ -9,18 +7,6 @@ pub(crate) fn write_runtime_streaming_response(
     response: RuntimeStreamingResponse,
 ) -> io::Result<()> {
     write_runtime_streaming_response_to_sink(RuntimeHttp1StreamSink { writer }, response)
-}
-
-pub(crate) fn write_runtime_gateway_streaming_response(
-    sender: GatewayResponseBodySender,
-    response: RuntimeStreamingResponse,
-) -> io::Result<()> {
-    write_runtime_streaming_response_to_sink(
-        RuntimeGatewayStreamSink {
-            sender: Some(sender),
-        },
-        response,
-    )
 }
 
 trait RuntimeStreamingSink {
@@ -67,36 +53,6 @@ impl RuntimeStreamingSink for RuntimeHttp1StreamSink {
     }
 
     fn send_error(&mut self, _error: &io::Error) {}
-}
-
-struct RuntimeGatewayStreamSink {
-    sender: Option<GatewayResponseBodySender>,
-}
-
-impl RuntimeStreamingSink for RuntimeGatewayStreamSink {
-    fn write_head(&mut self, _status: u16, _headers: &[(String, String)]) -> io::Result<()> {
-        Ok(())
-    }
-
-    fn write_chunk(&mut self, chunk: &[u8], _flush: bool) -> io::Result<()> {
-        self.sender
-            .as_ref()
-            .ok_or_else(|| io::Error::new(io::ErrorKind::BrokenPipe, "gateway response closed"))?
-            .blocking_send(Bytes::copy_from_slice(chunk))
-    }
-
-    fn finish(&mut self) -> io::Result<()> {
-        self.sender
-            .take()
-            .ok_or_else(|| io::Error::new(io::ErrorKind::BrokenPipe, "gateway response closed"))?
-            .finish()
-    }
-
-    fn send_error(&mut self, error: &io::Error) {
-        if let Some(sender) = self.sender.take() {
-            let _ = sender.blocking_send_error(io::Error::new(error.kind(), error.to_string()));
-        }
-    }
 }
 
 fn write_runtime_streaming_response_to_sink(

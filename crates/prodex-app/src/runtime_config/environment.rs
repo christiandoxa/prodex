@@ -1,5 +1,5 @@
 use super::ConfigError;
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 use std::env;
 use std::ffi::OsString;
 use std::path::PathBuf;
@@ -100,44 +100,14 @@ const RUNTIME_CONFIG_ENV_KEYS: &[&str] = &[
     "no_proxy",
 ];
 
-const RUNTIME_GATEWAY_CONFIG_ENV_KEYS: &[&str] = &[
-    "OPENAI_BASE_URL",
-    "PRODEX_DEEPSEEK_STRICT_TOOLS",
-    "PRODEX_DEEPSEEK_BETA_BASE_URL",
-    "PRODEX_DEEPSEEK_WEB_SEARCH_MODE",
-];
-
-const RUNTIME_GATEWAY_SECRET_ENV_KEYS: &[&str] = &[
-    "PRODEX_GATEWAY_TOKEN",
-    "PRODEX_GATEWAY_POSTGRES_URL",
-    "PRODEX_GATEWAY_REDIS_URL",
-    "OPENAI_API_KEYS",
-    "OPENAI_API_KEY",
-    "ANTHROPIC_API_KEYS",
-    "ANTHROPIC_API_KEY",
-    "GITHUB_COPILOT_API_KEYS",
-    "GITHUB_COPILOT_API_KEY",
-    "DEEPSEEK_API_KEYS",
-    "DEEPSEEK_API_KEY",
-    "GEMINI_API_KEYS",
-    "GOOGLE_API_KEYS",
-    "GEMINI_API_KEY",
-    "GOOGLE_API_KEY",
-];
-
 #[derive(Default)]
 pub(super) struct RuntimeConfigEnvironment {
     values: BTreeMap<&'static str, Option<OsString>>,
-    present_gateway_secret_env: BTreeSet<&'static str>,
 }
 
 impl RuntimeConfigEnvironment {
     pub(super) fn read_process() -> Self {
         Self::read_with(|key| env::var_os(key))
-    }
-
-    pub(super) fn read_gateway_process(data_plane: bool) -> Self {
-        Self::read_with_gateway(|key| env::var_os(key), data_plane)
     }
 
     pub(super) fn read_with(mut read: impl FnMut(&str) -> Option<OsString>) -> Self {
@@ -147,38 +117,11 @@ impl RuntimeConfigEnvironment {
                 .copied()
                 .map(|key| (key, read(key)))
                 .collect(),
-            present_gateway_secret_env: BTreeSet::new(),
         }
-    }
-
-    pub(super) fn read_with_gateway(
-        mut read: impl FnMut(&str) -> Option<OsString>,
-        data_plane: bool,
-    ) -> Self {
-        let mut environment = Self::read_with(&mut read);
-        if !data_plane {
-            return environment;
-        }
-        environment.values.extend(
-            RUNTIME_GATEWAY_CONFIG_ENV_KEYS
-                .iter()
-                .copied()
-                .map(|key| (key, read(key))),
-        );
-        environment.present_gateway_secret_env = RUNTIME_GATEWAY_SECRET_ENV_KEYS
-            .iter()
-            .copied()
-            .filter(|key| read(key).is_some())
-            .collect();
-        environment
     }
 
     pub(super) fn get(&self, key: &'static str) -> Option<&OsString> {
         self.values.get(key).and_then(Option::as_ref)
-    }
-
-    pub(super) fn present_gateway_secret_env(&self) -> BTreeSet<&'static str> {
-        self.present_gateway_secret_env.clone()
     }
 
     pub(super) fn path(&self, key: &'static str) -> Option<PathBuf> {
@@ -261,29 +204,6 @@ impl RuntimeConfigParser {
         }
     }
 
-    pub(super) fn positive_u16(&mut self, key: &'static str, default: u16) -> u16 {
-        let Some(value) = self.strict_text(key) else {
-            return default;
-        };
-        match value.parse::<u16>() {
-            Ok(value) if value > 0 => value,
-            Ok(_) => {
-                self.errors.push(ConfigError {
-                    key,
-                    message: "must be at least 1".to_string(),
-                });
-                default
-            }
-            Err(_) => {
-                self.errors.push(ConfigError {
-                    key,
-                    message: "must be a positive integer".to_string(),
-                });
-                default
-            }
-        }
-    }
-
     pub(super) fn strict_bool(&mut self, key: &'static str, default: bool) -> bool {
         let Some(value) = self.strict_text(key) else {
             return default;
@@ -295,42 +215,6 @@ impl RuntimeConfigParser {
                 self.errors.push(ConfigError {
                     key,
                     message: "must be one of true,false,1,0,yes,no,on,off".to_string(),
-                });
-                default
-            }
-        }
-    }
-
-    pub(super) fn bounded_u64(
-        &mut self,
-        key: &'static str,
-        default: u64,
-        allow_zero: bool,
-        maximum: u64,
-    ) -> u64 {
-        let Some(value) = self.strict_text(key) else {
-            return default;
-        };
-        match value.parse::<u64>() {
-            Ok(value) if !allow_zero && value == 0 => {
-                self.errors.push(ConfigError {
-                    key,
-                    message: "must be greater than zero".to_string(),
-                });
-                default
-            }
-            Ok(value) if value > maximum => {
-                self.errors.push(ConfigError {
-                    key,
-                    message: "must not exceed maximum".to_string(),
-                });
-                default
-            }
-            Ok(value) => value,
-            Err(_) => {
-                self.errors.push(ConfigError {
-                    key,
-                    message: "must be an unsigned integer".to_string(),
                 });
                 default
             }

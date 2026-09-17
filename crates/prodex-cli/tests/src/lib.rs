@@ -177,8 +177,6 @@ fn secret_bearing_runtime_args_debug_is_redacted_through_commands() {
             BASE_URL,
             "--api-key",
             API_KEY,
-            "--auth-token",
-            AUTH_TOKEN,
         ])
         .expect("gateway command should parse")
     );

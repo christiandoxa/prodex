@@ -239,8 +239,6 @@ fn gateway_provider_args_parse_as_top_level_command() {
         "gemini",
         "--api-key",
         "test-key",
-        "--auth-token",
-        "gateway-token",
         "--smart-context",
         "--presidio",
     ])
@@ -251,42 +249,8 @@ fn gateway_provider_args_parse_as_top_level_command() {
     assert_eq!(args.listen.as_deref(), Some("127.0.0.1:4100"));
     assert_eq!(args.provider, Some(SuperExternalProvider::Gemini));
     assert_eq!(args.api_key.as_deref(), Some("test-key"));
-    assert_eq!(args.auth_token.as_deref(), Some("gateway-token"));
     assert!(args.smart_context);
     assert!(args.presidio);
-}
-
-#[test]
-fn gateway_provider_catalog_commands_parse() {
-    let command = parse_cli_command_from(["prodex", "gateway", "providers", "--json"])
-        .expect("gateway providers should parse");
-    let Commands::Gateway(args) = command else {
-        panic!("expected gateway command");
-    };
-    assert!(matches!(
-        args.command,
-        Some(GatewayCommands::Providers(GatewayProvidersArgs {
-            json: true
-        }))
-    ));
-
-    let command = parse_cli_command_from([
-        "prodex",
-        "gateway",
-        "models",
-        "--provider",
-        "gemini",
-        "--json",
-    ])
-    .expect("gateway models should parse");
-    let Commands::Gateway(args) = command else {
-        panic!("expected gateway command");
-    };
-    assert!(matches!(
-        args.command,
-        Some(GatewayCommands::Models(GatewayProviderFilterArgs { provider, json: true }))
-            if provider == "gemini"
-    ));
 }
 
 #[test]

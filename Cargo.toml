@@ -12,18 +12,12 @@ rust-version = "1.98.0"
 members = [
     ".",
     "crates/prodex-app",
-    "crates/prodex-application",
     "crates/prodex-authn",
-    "crates/prodex-authz",
     "crates/prodex-optional-tools",
     "crates/prodex-cli",
     "crates/prodex-config",
-    "crates/prodex-control-plane",
     "crates/prodex-audit-log",
     "crates/prodex-bench-support",
-    "crates/prodex-gateway-core",
-    "crates/prodex-gateway-http",
-    "crates/prodex-gateway-server",
     "crates/prodex-codex-config",
     "crates/prodex-context",
     "crates/prodex-core",
@@ -59,13 +53,6 @@ members = [
     "crates/prodex-shared-codex-fs",
     "crates/prodex-shared-types",
     "crates/prodex-state",
-    "crates/prodex-storage",
-    "crates/prodex-storage-postgres",
-    "crates/prodex-storage-postgres-runtime",
-    "crates/prodex-storage-redis",
-    "crates/prodex-storage-redis-runtime",
-    "crates/prodex-storage-sqlite",
-    "crates/prodex-storage-sqlite-runtime",
     "crates/prodex-runtime-proxy",
     "crates/prodex-terminal-ui",
     "crates/prodex-update-notice",
@@ -82,11 +69,6 @@ rust-version = "1.98.0"
 [profile.release]
 lto = "thin"
 strip = "symbols"
-
-[[bin]]
-name = "prodex-control-plane"
-path = "src/bin/prodex-control-plane.rs"
-doc = false
 
 [workspace.dependencies]
 aes-gcm-siv = "0.12.0"
@@ -116,20 +98,14 @@ ratatui = { version = "0.30.2", default-features = false, features = ["crossterm
 unicode-width = "0.2.2"
 prodex_audit_log = { package = "prodex-audit-log", path = "crates/prodex-audit-log", version = "0.429.4" }
 prodex_authn = { package = "prodex-authn", path = "crates/prodex-authn", version = "0.429.4" }
-prodex_authz = { package = "prodex-authz", path = "crates/prodex-authz", version = "0.429.4" }
 prodex_app = { package = "prodex-app", path = "crates/prodex-app", version = "0.429.4" }
-prodex_application = { package = "prodex-application", path = "crates/prodex-application", version = "0.429.4" }
 prodex_bench_support = { package = "prodex-bench-support", path = "crates/prodex-bench-support", version = "0.429.4" }
 prodex_optional_tools = { package = "prodex-optional-tools", path = "crates/prodex-optional-tools", version = "0.429.4" }
 prodex_cli = { package = "prodex-cli", path = "crates/prodex-cli", version = "0.429.4" }
 prodex_config = { package = "prodex-config", path = "crates/prodex-config", version = "0.429.4" }
-prodex_control_plane = { package = "prodex-control-plane", path = "crates/prodex-control-plane", version = "0.429.4" }
 prodex_context = { package = "prodex-context", path = "crates/prodex-context", version = "0.429.4" }
 prodex_core = { package = "prodex-core", path = "crates/prodex-core", version = "0.429.4" }
 prodex_domain = { package = "prodex-domain", path = "crates/prodex-domain", version = "0.429.4" }
-prodex_gateway_core = { package = "prodex-gateway-core", path = "crates/prodex-gateway-core", version = "0.429.4" }
-prodex_gateway_http = { package = "prodex-gateway-http", path = "crates/prodex-gateway-http", version = "0.429.4" }
-prodex_gateway_server = { package = "prodex-gateway-server", path = "crates/prodex-gateway-server", version = "0.429.4" }
 prodex_housekeeping = { package = "prodex-housekeeping", path = "crates/prodex-housekeeping", version = "0.429.4" }
 prodex_mcp_stdio = { package = "prodex-mcp-stdio", path = "crates/prodex-mcp-stdio", version = "0.429.4" }
 prodex_mojo_core = { package = "prodex-mojo-core", path = "crates/prodex-mojo-core", version = "0.429.4" }
@@ -156,13 +132,6 @@ prodex_session_store = { package = "prodex-session-store", path = "crates/prodex
 prodex_shared_codex_fs = { package = "prodex-shared-codex-fs", path = "crates/prodex-shared-codex-fs", version = "0.429.4" }
 prodex_shared_types = { package = "prodex-shared-types", path = "crates/prodex-shared-types", version = "0.429.4" }
 prodex_state = { package = "prodex-state", path = "crates/prodex-state", version = "0.429.4" }
-prodex_storage = { package = "prodex-storage", path = "crates/prodex-storage", version = "0.429.4" }
-prodex_storage_postgres = { package = "prodex-storage-postgres", path = "crates/prodex-storage-postgres", version = "0.429.4" }
-prodex_storage_postgres_runtime = { package = "prodex-storage-postgres-runtime", path = "crates/prodex-storage-postgres-runtime", version = "0.429.4" }
-prodex_storage_redis = { package = "prodex-storage-redis", path = "crates/prodex-storage-redis", version = "0.429.4" }
-prodex_storage_redis_runtime = { package = "prodex-storage-redis-runtime", path = "crates/prodex-storage-redis-runtime", version = "0.429.4" }
-prodex_storage_sqlite = { package = "prodex-storage-sqlite", path = "crates/prodex-storage-sqlite", version = "0.429.4" }
-prodex_storage_sqlite_runtime = { package = "prodex-storage-sqlite-runtime", path = "crates/prodex-storage-sqlite-runtime", version = "0.429.4" }
 prodex_update_notice = { package = "prodex-update-notice", path = "crates/prodex-update-notice", version = "0.429.4" }
 redaction = { package = "prodex-redaction", path = "crates/prodex-redaction", version = "0.429.4" }
 reqwest = { version = "0.13.5", default-features = false }
@@ -214,15 +183,8 @@ anyhow = { workspace = true }
 arc-swap = { workspace = true }
 clap = { workspace = true }
 prodex_app = { workspace = true }
-prodex_application = { workspace = true }
 prodex_config = { workspace = true }
-prodex_control_plane = { workspace = true }
 prodex_domain = { workspace = true }
-prodex_gateway_http = { workspace = true }
-prodex_gateway_server = { workspace = true }
-prodex_storage = { workspace = true }
-prodex_storage_postgres_runtime = { workspace = true }
-prodex_storage_sqlite = { workspace = true }
 rusqlite = { workspace = true }
 reqwest = { workspace = true, features = ["blocking", "json", "rustls"] }
 serde = { workspace = true }

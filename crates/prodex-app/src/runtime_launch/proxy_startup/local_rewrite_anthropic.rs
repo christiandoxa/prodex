@@ -4,8 +4,8 @@ use super::chat_compatible_rewrite::{
 };
 use super::deepseek_rewrite::{RuntimeDeepSeekConversationStore, RuntimeDeepSeekPendingRequest};
 use super::local_rewrite::{
-    RUNTIME_LOCAL_REWRITE_PROFILE, RuntimeLocalRewriteProxyShared,
-    RuntimeLocalRewriteUpstreamResponse, RuntimeLocalRewriteUpstreamResult,
+    RuntimeLocalRewriteProxyShared, RuntimeLocalRewriteUpstreamResponse,
+    RuntimeLocalRewriteUpstreamResult,
 };
 use super::local_rewrite_application_data_plane::runtime_gateway_application_provider_retry_precommit;
 use super::local_rewrite_model_memory::runtime_local_rewrite_model_selection;
@@ -253,7 +253,6 @@ fn runtime_anthropic_binding_identity(
         RuntimeAnthropicAuth::OAuth { access_token } => {
             (Some(access_token.as_str()), Some(selected.label.as_str()))
         }
-        RuntimeAnthropicAuth::Projected => (None, Some(RUNTIME_LOCAL_REWRITE_PROFILE)),
     };
     runtime_local_rewrite_raw_binding_identity(
         shared,

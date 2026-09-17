@@ -22,7 +22,6 @@ mojo = [
 
 [dependencies]
 base64 = { workspace = true }
-prodex_gateway_core = { workspace = true }
 prodex_mojo_core = { workspace = true, optional = true }
 prodex_provider_core = { workspace = true }
 prodex_runtime_tuning = { workspace = true }

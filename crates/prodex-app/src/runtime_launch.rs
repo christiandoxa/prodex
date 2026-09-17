@@ -35,27 +35,10 @@ pub(super) use proxy_startup::start_runtime_rotation_proxy_with_listen_addr;
 pub(super) use proxy_startup::{
     RUNTIME_LOCAL_REWRITE_PROXY_MOUNT_PATH, RuntimeAnthropicOAuthProfileAuth,
     RuntimeAnthropicProviderAuth, RuntimeCopilotProfileAuth, RuntimeCopilotProviderAuth,
-    RuntimeDeepSeekWebSearchMode, RuntimeGatewayAdminRole, RuntimeGatewayAdminToken,
-    RuntimeGatewayApplication, RuntimeGatewayBrowserConfig, RuntimeGatewayGuardrailWebhookConfig,
-    RuntimeGatewayObservabilityConfig, RuntimeGatewayOidcConfig, RuntimeGatewaySecret,
-    RuntimeGatewaySsoConfig, RuntimeGatewayStateStore, RuntimeGatewayWorkloadIdentityConfig,
-    RuntimeGeminiOAuthProfileAuth, RuntimeGeminiProviderAuth, RuntimeKiroProfileAuth,
-    RuntimeLocalRewriteProviderOptions, RuntimeLocalRewriteProxyStartOptions,
-    RuntimeProjectedProviderCredential, start_runtime_gateway_application_with_runtime_config,
-    start_runtime_gateway_rewrite_proxy_with_runtime_config,
-    start_runtime_local_rewrite_proxy_with_harness,
-};
-pub(super) use proxy_startup::{
-    RuntimeGatewayCredentialRefreshCandidate, RuntimeGatewayCredentialRefreshPlan,
-};
-pub(super) use proxy_startup::{
-    RuntimeRotationProxyStartOptions, start_runtime_rotation_proxy_with_options,
-};
-pub(crate) use proxy_startup::{
-    runtime_gateway_postgres_migrate_compatibility_state,
-    runtime_gateway_postgres_migrate_enterprise_state,
-    runtime_gateway_sqlite_migrate_compatibility_state,
-    runtime_gateway_sqlite_migrate_enterprise_state,
+    RuntimeDeepSeekWebSearchMode, RuntimeGeminiOAuthProfileAuth, RuntimeGeminiProviderAuth,
+    RuntimeKiroProfileAuth, RuntimeLocalRewriteProviderOptions,
+    RuntimeLocalRewriteProxyStartOptions, RuntimeRotationProxyStartOptions,
+    start_runtime_local_rewrite_proxy_with_harness, start_runtime_rotation_proxy_with_options,
 };
 
 pub(super) fn runtime_launch_openai_model_context_codex_args(

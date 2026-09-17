@@ -4,7 +4,6 @@ use super::super::local_rewrite_copilot::{
     runtime_copilot_remember_bindings_from_responses_body,
 };
 use super::super::local_rewrite_request::RuntimeLocalRewriteRequest;
-use super::super::local_rewrite_response_spend::emit_runtime_gateway_response_spend_event_for_body;
 use super::RuntimeGatewayResponseGovernance;
 use super::respond_runtime_local_rewrite_stream;
 use super::runtime_local_rewrite_append_call_id_header;
@@ -63,20 +62,12 @@ pub(super) fn respond_runtime_copilot_rewrite(
         return;
     }
 
-    let response_started_at = Instant::now();
+    let _response_started_at = Instant::now();
     let response = runtime_local_rewrite_buffered_response_parts(status, headers, response)
         .map(|parts| {
             runtime_copilot_remember_bindings_from_responses_body(
                 binding_recorder.as_ref(),
                 &parts.body,
-            );
-            emit_runtime_gateway_response_spend_event_for_body(
-                request_id,
-                captured,
-                shared,
-                parts.status,
-                response_started_at.elapsed().as_millis(),
-                parts.body.as_slice(),
             );
             runtime_local_rewrite_governed_response_with_call_id(
                 parts,
