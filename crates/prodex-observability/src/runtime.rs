@@ -51,6 +51,9 @@ pub struct ConnectionPoolSaturationMetricPlan {
 pub fn plan_dropped_telemetry_metric(
     reason: TelemetryDropReason,
 ) -> Result<DroppedTelemetryMetricPlan, TelemetryAttributeError> {
+    #[cfg(feature = "mojo")]
+    let reason_label = crate::planning_support::planned_metric_label(55, 0, (reason) as i64)?;
+    #[cfg(not(feature = "mojo"))]
     let reason_label = crate::planning_support::validated_metric_label(
         crate::planning_support::label_key(142, "telemetry_drop_reason"),
         telemetry_drop_reason_label(reason),
@@ -67,6 +70,9 @@ pub fn plan_queue_depth_metric(
     depth: u64,
     capacity: u64,
 ) -> Result<QueueDepthMetricPlan, TelemetryAttributeError> {
+    #[cfg(feature = "mojo")]
+    let queue_label = crate::planning_support::planned_metric_label(56, 0, (kind) as i64)?;
+    #[cfg(not(feature = "mojo"))]
     let queue_label = crate::planning_support::validated_metric_label(
         crate::planning_support::label_key(115, "queue_kind"),
         queue_depth_kind_label(kind),
@@ -84,6 +90,9 @@ pub fn plan_connection_pool_saturation_metric(
     in_use: u64,
     capacity: u64,
 ) -> Result<ConnectionPoolSaturationMetricPlan, TelemetryAttributeError> {
+    #[cfg(feature = "mojo")]
+    let pool_label = crate::planning_support::planned_metric_label(54, 0, (kind) as i64)?;
+    #[cfg(not(feature = "mojo"))]
     let pool_label = crate::planning_support::validated_metric_label(
         crate::planning_support::label_key(100, "pool_kind"),
         connection_pool_kind_label(kind),
@@ -96,6 +105,7 @@ pub fn plan_connection_pool_saturation_metric(
     })
 }
 
+#[cfg(not(feature = "mojo"))]
 fn telemetry_drop_reason_label(reason: TelemetryDropReason) -> String {
     #[cfg(feature = "mojo")]
     {
@@ -114,6 +124,7 @@ fn telemetry_drop_reason_label(reason: TelemetryDropReason) -> String {
     }
 }
 
+#[cfg(not(feature = "mojo"))]
 fn queue_depth_kind_label(kind: QueueDepthKind) -> String {
     #[cfg(feature = "mojo")]
     {
@@ -133,6 +144,7 @@ fn queue_depth_kind_label(kind: QueueDepthKind) -> String {
     }
 }
 
+#[cfg(not(feature = "mojo"))]
 fn connection_pool_kind_label(kind: ConnectionPoolKind) -> String {
     #[cfg(feature = "mojo")]
     {

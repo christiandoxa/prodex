@@ -34,3 +34,19 @@ pub(crate) fn validated_metric_label(
     label.as_metric_label()?;
     Ok(label)
 }
+
+#[cfg(feature = "mojo")]
+pub(crate) fn planned_metric_label(
+    plan: usize,
+    slot: usize,
+    value: i64,
+) -> Result<TelemetryAttribute, TelemetryAttributeError> {
+    let spec = prodex_mojo_core::observability::plan_label_spec(plan as i64, slot as i64)
+        .expect("Mojo observability plan-label metadata returned invalid output");
+    let key = crate::mojo::label_key(
+        usize::try_from(spec.key).expect("Mojo observability label-key index is non-negative"),
+    );
+    let value = prodex_mojo_core::observability::label(spec.kind, value)
+        .expect("Mojo observability plan-label value returned invalid output");
+    validated_metric_label(key, value)
+}

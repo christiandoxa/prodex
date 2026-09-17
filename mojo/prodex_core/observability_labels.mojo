@@ -2212,3 +2212,479 @@ def prodex_mojo_observability_label_key_v1(
     else:
         return OBSERVABILITY_STATUS_INVALID
     return observability_copy_label(name, output, output_capacity, output_length)
+
+@export("prodex_mojo_observability_plan_label_spec_v1")
+def prodex_mojo_observability_plan_label_spec_v1(
+    abi_version: Int64,
+    plan: Int64,
+    slot: Int64,
+    key_address: UInt,
+    kind_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != OBSERVABILITY_LABEL_ABI_VERSION:
+        return OBSERVABILITY_STATUS_ABI
+    if plan < 0 or slot < 0 or key_address == 0 or kind_address == 0:
+        return OBSERVABILITY_STATUS_INVALID
+    var key = Pointer[mut=True, Int64, MutUntrackedOrigin](unsafe_from_address=Int(key_address))
+    var kind = Pointer[mut=True, Int64, MutUntrackedOrigin](unsafe_from_address=Int(kind_address))
+    key[] = -1
+    kind[] = -1
+    if plan == 0 and slot == 0:
+        key[] = 2
+        kind[] = 0
+    elif plan == 0 and slot == 1:
+        key[] = 3
+        kind[] = 1
+    elif plan == 1 and slot == 0:
+        key[] = 49
+        kind[] = 2
+    elif plan == 1 and slot == 1:
+        key[] = 50
+        kind[] = 3
+    elif plan == 2 and slot == 0:
+        key[] = 55
+        kind[] = 4
+    elif plan == 3 and slot == 0:
+        key[] = 116
+        kind[] = 5
+    elif plan == 4 and slot == 0:
+        key[] = 118
+        kind[] = 7
+    elif plan == 4 and slot == 1:
+        key[] = 117
+        kind[] = 6
+    elif plan == 5 and slot == 0:
+        key[] = 119
+        kind[] = 8
+    elif plan == 5 and slot == 1:
+        key[] = 120
+        kind[] = 9
+    elif plan == 6 and slot == 0:
+        key[] = 121
+        kind[] = 10
+    elif plan == 6 and slot == 1:
+        key[] = 122
+        kind[] = 11
+    elif plan == 7 and slot == 0:
+        key[] = 5
+        kind[] = 31
+    elif plan == 7 and slot == 1:
+        key[] = 4
+        kind[] = 12
+    elif plan == 8 and slot == 0:
+        key[] = 7
+        kind[] = 14
+    elif plan == 8 and slot == 1:
+        key[] = 6
+        kind[] = 13
+    elif plan == 9 and slot == 0:
+        key[] = 9
+        kind[] = 16
+    elif plan == 9 and slot == 1:
+        key[] = 8
+        kind[] = 15
+    elif plan == 10 and slot == 0:
+        key[] = 11
+        kind[] = 18
+    elif plan == 10 and slot == 1:
+        key[] = 10
+        kind[] = 17
+    elif plan == 11 and slot == 0:
+        key[] = 13
+        kind[] = 20
+    elif plan == 11 and slot == 1:
+        key[] = 12
+        kind[] = 19
+    elif plan == 12 and slot == 0:
+        key[] = 15
+        kind[] = 22
+    elif plan == 12 and slot == 1:
+        key[] = 14
+        kind[] = 21
+    elif plan == 13 and slot == 0:
+        key[] = 17
+        kind[] = 24
+    elif plan == 13 and slot == 1:
+        key[] = 16
+        kind[] = 23
+    elif plan == 14 and slot == 0:
+        key[] = 19
+        kind[] = 26
+    elif plan == 14 and slot == 1:
+        key[] = 18
+        kind[] = 25
+    elif plan == 15 and slot == 0:
+        key[] = 21
+        kind[] = 28
+    elif plan == 15 and slot == 1:
+        key[] = 20
+        kind[] = 27
+    elif plan == 16 and slot == 0:
+        key[] = 23
+        kind[] = 30
+    elif plan == 16 and slot == 1:
+        key[] = 22
+        kind[] = 29
+    elif plan == 17 and slot == 0:
+        key[] = 24
+        kind[] = 31
+    elif plan == 17 and slot == 1:
+        key[] = 139
+        kind[] = 36
+    elif plan == 18 and slot == 0:
+        key[] = 26
+        kind[] = 32
+    elif plan == 18 and slot == 1:
+        key[] = 25
+        kind[] = 33
+    elif plan == 19 and slot == 0:
+        key[] = 28
+        kind[] = 35
+    elif plan == 19 and slot == 1:
+        key[] = 27
+        kind[] = 34
+    elif plan == 20 and slot == 0:
+        key[] = 30
+        kind[] = 38
+    elif plan == 20 and slot == 1:
+        key[] = 29
+        kind[] = 37
+    elif plan == 21 and slot == 0:
+        key[] = 32
+        kind[] = 40
+    elif plan == 21 and slot == 1:
+        key[] = 31
+        kind[] = 39
+    elif plan == 22 and slot == 0:
+        key[] = 34
+        kind[] = 42
+    elif plan == 22 and slot == 1:
+        key[] = 33
+        kind[] = 41
+    elif plan == 23 and slot == 0:
+        key[] = 74
+        kind[] = 43
+    elif plan == 23 and slot == 1:
+        key[] = 75
+        kind[] = 44
+    elif plan == 23 and slot == 2:
+        key[] = 76
+        kind[] = 45
+    elif plan == 24 and slot == 0:
+        key[] = 35
+        kind[] = 46
+    elif plan == 24 and slot == 1:
+        key[] = 36
+        kind[] = 47
+    elif plan == 25 and slot == 0:
+        key[] = 37
+        kind[] = 48
+    elif plan == 25 and slot == 1:
+        key[] = 40
+        kind[] = 51
+    elif plan == 26 and slot == 0:
+        key[] = 38
+        kind[] = 49
+    elif plan == 26 and slot == 1:
+        key[] = 39
+        kind[] = 50
+    elif plan == 27 and slot == 0:
+        key[] = 41
+        kind[] = 52
+    elif plan == 27 and slot == 1:
+        key[] = 42
+        kind[] = 53
+    elif plan == 28 and slot == 0:
+        key[] = 57
+        kind[] = 55
+    elif plan == 28 and slot == 1:
+        key[] = 56
+        kind[] = 54
+    elif plan == 29 and slot == 0:
+        key[] = 59
+        kind[] = 57
+    elif plan == 29 and slot == 1:
+        key[] = 58
+        kind[] = 56
+    elif plan == 30 and slot == 0:
+        key[] = 61
+        kind[] = 138
+    elif plan == 30 and slot == 1:
+        key[] = 60
+        kind[] = 139
+    elif plan == 31 and slot == 0:
+        key[] = 68
+        kind[] = 58
+    elif plan == 31 and slot == 1:
+        key[] = 69
+        kind[] = 59
+    elif plan == 32 and slot == 0:
+        key[] = 84
+        kind[] = 60
+    elif plan == 33 and slot == 0:
+        key[] = 85
+        kind[] = 61
+    elif plan == 34 and slot == 0:
+        key[] = 90
+        kind[] = 62
+    elif plan == 34 and slot == 1:
+        key[] = 91
+        kind[] = 63
+    elif plan == 35 and slot == 0:
+        key[] = 97
+        kind[] = 65
+    elif plan == 36 and slot == 0:
+        key[] = 98
+        kind[] = 66
+    elif plan == 36 and slot == 1:
+        key[] = 99
+        kind[] = 67
+    elif plan == 37 and slot == 0:
+        key[] = 47
+        kind[] = 68
+    elif plan == 37 and slot == 1:
+        key[] = 48
+        kind[] = 69
+    elif plan == 38 and slot == 0:
+        key[] = 66
+        kind[] = 70
+    elif plan == 38 and slot == 1:
+        key[] = 67
+        kind[] = 71
+    elif plan == 39 and slot == 0:
+        key[] = 71
+        kind[] = 73
+    elif plan == 39 and slot == 1:
+        key[] = 70
+        kind[] = 72
+    elif plan == 40 and slot == 0:
+        key[] = 72
+        kind[] = 74
+    elif plan == 40 and slot == 1:
+        key[] = 73
+        kind[] = 75
+    elif plan == 41 and slot == 0:
+        key[] = 87
+        kind[] = 77
+    elif plan == 41 and slot == 1:
+        key[] = 86
+        kind[] = 76
+    elif plan == 42 and slot == 0:
+        key[] = 88
+        kind[] = 78
+    elif plan == 42 and slot == 1:
+        key[] = 89
+        kind[] = 79
+    elif plan == 43 and slot == 0:
+        key[] = 92
+        kind[] = 80
+    elif plan == 43 and slot == 1:
+        key[] = 93
+        kind[] = 81
+    elif plan == 44 and slot == 0:
+        key[] = 127
+        kind[] = 82
+    elif plan == 44 and slot == 1:
+        key[] = 128
+        kind[] = 83
+    elif plan == 44 and slot == 2:
+        key[] = 129
+        kind[] = 84
+    elif plan == 45 and slot == 0:
+        key[] = 131
+        kind[] = 86
+    elif plan == 45 and slot == 1:
+        key[] = 130
+        kind[] = 85
+    elif plan == 46 and slot == 0:
+        key[] = 136
+        kind[] = 87
+    elif plan == 46 and slot == 1:
+        key[] = 137
+        kind[] = 88
+    elif plan == 47 and slot == 0:
+        key[] = 103
+        kind[] = 94
+    elif plan == 47 and slot == 1:
+        key[] = 104
+        kind[] = 89
+    elif plan == 47 and slot == 2:
+        key[] = 105
+        kind[] = 90
+    elif plan == 48 and slot == 0:
+        key[] = 103
+        kind[] = 94
+    elif plan == 48 and slot == 1:
+        key[] = 106
+        kind[] = 137
+    elif plan == 48 and slot == 2:
+        key[] = 107
+        kind[] = 91
+    elif plan == 49 and slot == 0:
+        key[] = 103
+        kind[] = 94
+    elif plan == 49 and slot == 1:
+        key[] = 111
+        kind[] = 93
+    elif plan == 49 and slot == 2:
+        key[] = 110
+        kind[] = 92
+    elif plan == 50 and slot == 0:
+        key[] = 103
+        kind[] = 94
+    elif plan == 50 and slot == 1:
+        key[] = 112
+        kind[] = 95
+    elif plan == 51 and slot == 0:
+        key[] = 103
+        kind[] = 94
+    elif plan == 51 and slot == 1:
+        key[] = 114
+        kind[] = 96
+    elif plan == 51 and slot == 2:
+        key[] = 113
+        kind[] = 97
+    elif plan == 52 and slot == 0:
+        key[] = 125
+        kind[] = 99
+    elif plan == 52 and slot == 1:
+        key[] = 126
+        kind[] = 98
+    elif plan == 53 and slot == 0:
+        key[] = 141
+        kind[] = 101
+    elif plan == 53 and slot == 1:
+        key[] = 140
+        kind[] = 100
+    elif plan == 54 and slot == 0:
+        key[] = 100
+        kind[] = 102
+    elif plan == 55 and slot == 0:
+        key[] = 142
+        kind[] = 104
+    elif plan == 56 and slot == 0:
+        key[] = 115
+        kind[] = 103
+    elif plan == 57 and slot == 0:
+        key[] = 44
+        kind[] = 106
+    elif plan == 57 and slot == 1:
+        key[] = 43
+        kind[] = 105
+    elif plan == 58 and slot == 0:
+        key[] = 45
+        kind[] = 107
+    elif plan == 58 and slot == 1:
+        key[] = 46
+        kind[] = 108
+    elif plan == 59 and slot == 0:
+        key[] = 51
+        kind[] = 109
+    elif plan == 59 and slot == 1:
+        key[] = 52
+        kind[] = 110
+    elif plan == 60 and slot == 0:
+        key[] = 53
+        kind[] = 146
+    elif plan == 60 and slot == 1:
+        key[] = 54
+        kind[] = 111
+    elif plan == 61 and slot == 0:
+        key[] = 64
+        kind[] = 140
+    elif plan == 61 and slot == 1:
+        key[] = 65
+        kind[] = 112
+    elif plan == 62 and slot == 0:
+        key[] = 78
+        kind[] = 114
+    elif plan == 62 and slot == 1:
+        key[] = 77
+        kind[] = 113
+    elif plan == 63 and slot == 0:
+        key[] = 83
+        kind[] = 119
+    elif plan == 63 and slot == 1:
+        key[] = 79
+        kind[] = 115
+    elif plan == 63 and slot == 2:
+        key[] = 80
+        kind[] = 116
+    elif plan == 63 and slot == 3:
+        key[] = 81
+        kind[] = 117
+    elif plan == 63 and slot == 4:
+        key[] = 82
+        kind[] = 118
+    elif plan == 64 and slot == 0:
+        key[] = 95
+        kind[] = 120
+    elif plan == 64 and slot == 1:
+        key[] = 96
+        kind[] = 121
+    elif plan == 65 and slot == 0:
+        key[] = 101
+        kind[] = 141
+    elif plan == 65 and slot == 1:
+        key[] = 102
+        kind[] = 122
+    elif plan == 66 and slot == 0:
+        key[] = 108
+        kind[] = 144
+    elif plan == 66 and slot == 1:
+        key[] = 109
+        kind[] = 145
+    elif plan == 67 and slot == 0:
+        key[] = 123
+        kind[] = 143
+    elif plan == 67 and slot == 1:
+        key[] = 124
+        kind[] = 123
+    elif plan == 68 and slot == 0:
+        key[] = 132
+        kind[] = 124
+    elif plan == 68 and slot == 1:
+        key[] = 133
+        kind[] = 125
+    elif plan == 69 and slot == 0:
+        key[] = 134
+        kind[] = 142
+    elif plan == 69 and slot == 1:
+        key[] = 135
+        kind[] = 126
+    elif plan == 70 and slot == 0:
+        key[] = 144
+        kind[] = 128
+    elif plan == 70 and slot == 1:
+        key[] = 143
+        kind[] = 127
+    elif plan == 71 and slot == 0:
+        key[] = 0
+        kind[] = 129
+    elif plan == 71 and slot == 1:
+        key[] = 1
+        kind[] = 130
+    elif plan == 72 and slot == 0:
+        key[] = 147
+        kind[] = 131
+    elif plan == 72 and slot == 1:
+        key[] = 148
+        kind[] = 132
+    elif plan == 73 and slot == 0:
+        key[] = 62
+        kind[] = 133
+    elif plan == 73 and slot == 1:
+        key[] = 63
+        kind[] = 134
+    elif plan == 75 and slot == 0:
+        key[] = 145
+        kind[] = 135
+    elif plan == 75 and slot == 1:
+        key[] = 146
+        kind[] = 136
+    elif plan == 76 and slot == 0:
+        key[] = 94
+        kind[] = 64
+    else:
+        return OBSERVABILITY_STATUS_INVALID
+    return OBSERVABILITY_STATUS_OK

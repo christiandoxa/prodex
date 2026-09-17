@@ -100,10 +100,16 @@ pub fn plan_audit_metric(
     operation: AuditOperation,
     result: AuditResult,
 ) -> Result<AuditMetricPlan, TelemetryAttributeError> {
+    #[cfg(feature = "mojo")]
+    let operation_label = crate::planning_support::planned_metric_label(25, 0, (operation) as i64)?;
+    #[cfg(not(feature = "mojo"))]
     let operation_label = crate::planning_support::validated_metric_label(
         crate::planning_support::label_key(37, "audit_operation"),
         audit_operation_label(operation),
     )?;
+    #[cfg(feature = "mojo")]
+    let result_label = crate::planning_support::planned_metric_label(25, 1, (result) as i64)?;
+    #[cfg(not(feature = "mojo"))]
     let result_label = crate::planning_support::validated_metric_label(
         crate::planning_support::label_key(40, "audit_result"),
         audit_result_label(result),
@@ -120,10 +126,16 @@ pub fn plan_audit_query_lifecycle_metric(
     operation: AuditQueryLifecycleOperation,
     result: AuditQueryLifecycleResult,
 ) -> Result<AuditQueryLifecycleMetricPlan, TelemetryAttributeError> {
+    #[cfg(feature = "mojo")]
+    let operation_label = crate::planning_support::planned_metric_label(26, 0, (operation) as i64)?;
+    #[cfg(not(feature = "mojo"))]
     let operation_label = crate::planning_support::validated_metric_label(
         crate::planning_support::label_key(38, "audit_query_operation"),
         audit_query_lifecycle_operation_label(operation),
     )?;
+    #[cfg(feature = "mojo")]
+    let result_label = crate::planning_support::planned_metric_label(26, 1, (result) as i64)?;
+    #[cfg(not(feature = "mojo"))]
     let result_label = crate::planning_support::validated_metric_label(
         crate::planning_support::label_key(39, "audit_query_result"),
         audit_query_lifecycle_result_label(result),
@@ -144,10 +156,16 @@ pub fn plan_audit_chain_metric(
     operation: AuditChainOperation,
     result: AuditChainResult,
 ) -> Result<AuditChainMetricPlan, TelemetryAttributeError> {
+    #[cfg(feature = "mojo")]
+    let operation_label = crate::planning_support::planned_metric_label(24, 0, (operation) as i64)?;
+    #[cfg(not(feature = "mojo"))]
     let operation_label = crate::planning_support::validated_metric_label(
         crate::planning_support::label_key(35, "audit_chain_operation"),
         audit_chain_operation_label(operation),
     )?;
+    #[cfg(feature = "mojo")]
+    let result_label = crate::planning_support::planned_metric_label(24, 1, (result) as i64)?;
+    #[cfg(not(feature = "mojo"))]
     let result_label = crate::planning_support::validated_metric_label(
         crate::planning_support::label_key(36, "audit_chain_result"),
         audit_chain_result_label(result),
@@ -164,10 +182,16 @@ pub fn plan_audit_retention_purge_metric(
     operation: AuditRetentionPurgeOperation,
     result: AuditRetentionPurgeResult,
 ) -> Result<AuditRetentionPurgeMetricPlan, TelemetryAttributeError> {
+    #[cfg(feature = "mojo")]
+    let operation_label = crate::planning_support::planned_metric_label(27, 0, (operation) as i64)?;
+    #[cfg(not(feature = "mojo"))]
     let operation_label = crate::planning_support::validated_metric_label(
         crate::planning_support::label_key(41, "audit_retention_operation"),
         audit_retention_purge_operation_label(operation),
     )?;
+    #[cfg(feature = "mojo")]
+    let result_label = crate::planning_support::planned_metric_label(27, 1, (result) as i64)?;
+    #[cfg(not(feature = "mojo"))]
     let result_label = crate::planning_support::validated_metric_label(
         crate::planning_support::label_key(42, "audit_retention_result"),
         audit_retention_purge_result_label(result),
@@ -184,6 +208,7 @@ pub fn plan_audit_retention_purge_metric(
     })
 }
 
+#[cfg(not(feature = "mojo"))]
 fn audit_operation_label(operation: AuditOperation) -> String {
     #[cfg(feature = "mojo")]
     {
@@ -201,6 +226,7 @@ fn audit_operation_label(operation: AuditOperation) -> String {
     }
 }
 
+#[cfg(not(feature = "mojo"))]
 fn audit_result_label(result: AuditResult) -> String {
     #[cfg(feature = "mojo")]
     {
@@ -218,6 +244,7 @@ fn audit_result_label(result: AuditResult) -> String {
     }
 }
 
+#[cfg(not(feature = "mojo"))]
 fn audit_query_lifecycle_operation_label(operation: AuditQueryLifecycleOperation) -> String {
     #[cfg(feature = "mojo")]
     {
@@ -236,6 +263,7 @@ fn audit_query_lifecycle_operation_label(operation: AuditQueryLifecycleOperation
     }
 }
 
+#[cfg(not(feature = "mojo"))]
 fn audit_query_lifecycle_result_label(result: AuditQueryLifecycleResult) -> String {
     #[cfg(feature = "mojo")]
     {
@@ -255,6 +283,7 @@ fn audit_query_lifecycle_result_label(result: AuditQueryLifecycleResult) -> Stri
     }
 }
 
+#[cfg(not(feature = "mojo"))]
 fn audit_chain_operation_label(operation: AuditChainOperation) -> String {
     #[cfg(feature = "mojo")]
     {
@@ -273,6 +302,7 @@ fn audit_chain_operation_label(operation: AuditChainOperation) -> String {
     }
 }
 
+#[cfg(not(feature = "mojo"))]
 fn audit_chain_result_label(result: AuditChainResult) -> String {
     #[cfg(feature = "mojo")]
     {
@@ -292,6 +322,7 @@ fn audit_chain_result_label(result: AuditChainResult) -> String {
     }
 }
 
+#[cfg(not(feature = "mojo"))]
 fn audit_retention_purge_operation_label(operation: AuditRetentionPurgeOperation) -> String {
     #[cfg(feature = "mojo")]
     {
@@ -310,6 +341,7 @@ fn audit_retention_purge_operation_label(operation: AuditRetentionPurgeOperation
     }
 }
 
+#[cfg(not(feature = "mojo"))]
 fn audit_retention_purge_result_label(result: AuditRetentionPurgeResult) -> String {
     #[cfg(feature = "mojo")]
     {

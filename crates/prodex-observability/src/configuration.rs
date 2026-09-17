@@ -1,7 +1,9 @@
+#[cfg(not(feature = "mojo"))]
+use prodex_domain::{JwksRefreshDecision, PolicyRefreshDecision};
+
 use prodex_domain::{
-    JwksCacheSnapshot, JwksRefreshDecision, PolicyCacheStatus, PolicyRefreshDecision,
-    PolicySnapshot, TelemetryAttribute, TelemetryAttributeError, evaluate_jwks_refresh,
-    evaluate_policy_refresh,
+    JwksCacheSnapshot, PolicyCacheStatus, PolicySnapshot, TelemetryAttribute,
+    TelemetryAttributeError, evaluate_jwks_refresh, evaluate_policy_refresh,
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -195,10 +197,16 @@ pub fn plan_enterprise_id_metric(
     kind: EnterpriseIdKind,
     result: EnterpriseIdResult,
 ) -> Result<EnterpriseIdMetricPlan, TelemetryAttributeError> {
+    #[cfg(feature = "mojo")]
+    let kind_label = crate::planning_support::planned_metric_label(31, 0, (kind) as i64)?;
+    #[cfg(not(feature = "mojo"))]
     let kind_label = crate::planning_support::validated_metric_label(
         crate::planning_support::label_key(68, "enterprise_id_kind"),
         enterprise_id_kind_label(kind),
     )?;
+    #[cfg(feature = "mojo")]
+    let result_label = crate::planning_support::planned_metric_label(31, 1, (result) as i64)?;
+    #[cfg(not(feature = "mojo"))]
     let result_label = crate::planning_support::validated_metric_label(
         crate::planning_support::label_key(69, "enterprise_id_result"),
         enterprise_id_result_label(result),
@@ -220,6 +228,9 @@ pub fn plan_jwks_cache_age_metric(
     now_unix_ms: u64,
 ) -> Result<JwksCacheAgeMetricPlan, TelemetryAttributeError> {
     let decision = evaluate_jwks_refresh(snapshot, now_unix_ms);
+    #[cfg(feature = "mojo")]
+    let state_label = crate::planning_support::planned_metric_label(32, 0, (decision) as i64)?;
+    #[cfg(not(feature = "mojo"))]
     let state_label = crate::planning_support::validated_metric_label(
         crate::planning_support::label_key(84, "jwks_cache_state"),
         jwks_refresh_decision_label(decision),
@@ -237,6 +248,9 @@ pub fn plan_policy_snapshot_age_metric<T>(
     now_unix_ms: u64,
 ) -> Result<PolicySnapshotAgeMetricPlan, TelemetryAttributeError> {
     let decision = evaluate_policy_refresh(status, now_unix_ms);
+    #[cfg(feature = "mojo")]
+    let state_label = crate::planning_support::planned_metric_label(76, 0, (decision) as i64)?;
+    #[cfg(not(feature = "mojo"))]
     let state_label = crate::planning_support::validated_metric_label(
         crate::planning_support::label_key(94, "policy_cache_state"),
         policy_refresh_decision_label(decision),
@@ -251,6 +265,9 @@ pub fn plan_policy_snapshot_age_metric<T>(
 pub fn plan_jwks_refresh_outcome_metric(
     outcome: JwksRefreshOutcome,
 ) -> Result<JwksRefreshOutcomeMetricPlan, TelemetryAttributeError> {
+    #[cfg(feature = "mojo")]
+    let result_label = crate::planning_support::planned_metric_label(33, 0, (outcome) as i64)?;
+    #[cfg(not(feature = "mojo"))]
     let result_label = crate::planning_support::validated_metric_label(
         crate::planning_support::label_key(85, "jwks_refresh_result"),
         jwks_refresh_outcome_label(outcome),
@@ -266,10 +283,16 @@ pub fn plan_oidc_refresh_metric(
     operation: OidcRefreshOperation,
     result: OidcRefreshResult,
 ) -> Result<OidcRefreshMetricPlan, TelemetryAttributeError> {
+    #[cfg(feature = "mojo")]
+    let operation_label = crate::planning_support::planned_metric_label(34, 0, (operation) as i64)?;
+    #[cfg(not(feature = "mojo"))]
     let operation_label = crate::planning_support::validated_metric_label(
         crate::planning_support::label_key(90, "oidc_refresh_operation"),
         oidc_refresh_operation_label(operation),
     )?;
+    #[cfg(feature = "mojo")]
+    let result_label = crate::planning_support::planned_metric_label(34, 1, (result) as i64)?;
+    #[cfg(not(feature = "mojo"))]
     let result_label = crate::planning_support::validated_metric_label(
         crate::planning_support::label_key(91, "oidc_refresh_result"),
         oidc_refresh_result_label(result),
@@ -289,6 +312,9 @@ pub fn plan_oidc_refresh_metric(
 pub fn plan_policy_refresh_outcome_metric(
     outcome: PolicyRefreshOutcome,
 ) -> Result<PolicyRefreshOutcomeMetricPlan, TelemetryAttributeError> {
+    #[cfg(feature = "mojo")]
+    let result_label = crate::planning_support::planned_metric_label(35, 0, (outcome) as i64)?;
+    #[cfg(not(feature = "mojo"))]
     let result_label = crate::planning_support::validated_metric_label(
         crate::planning_support::label_key(97, "policy_refresh_result"),
         policy_refresh_outcome_label(outcome),
@@ -304,10 +330,16 @@ pub fn plan_policy_rollback_metric(
     operation: PolicyRollbackOperation,
     result: PolicyRollbackResult,
 ) -> Result<PolicyRollbackMetricPlan, TelemetryAttributeError> {
+    #[cfg(feature = "mojo")]
+    let operation_label = crate::planning_support::planned_metric_label(36, 0, (operation) as i64)?;
+    #[cfg(not(feature = "mojo"))]
     let operation_label = crate::planning_support::validated_metric_label(
         crate::planning_support::label_key(98, "policy_rollback_operation"),
         policy_rollback_operation_label(operation),
     )?;
+    #[cfg(feature = "mojo")]
+    let result_label = crate::planning_support::planned_metric_label(36, 1, (result) as i64)?;
+    #[cfg(not(feature = "mojo"))]
     let result_label = crate::planning_support::validated_metric_label(
         crate::planning_support::label_key(99, "policy_rollback_result"),
         policy_rollback_result_label(result),
@@ -328,10 +360,16 @@ pub fn plan_config_activation_metric(
     source: ConfigActivationSource,
     result: ConfigActivationResult,
 ) -> Result<ConfigActivationMetricPlan, TelemetryAttributeError> {
+    #[cfg(feature = "mojo")]
+    let source_label = crate::planning_support::planned_metric_label(28, 0, (source) as i64)?;
+    #[cfg(not(feature = "mojo"))]
     let source_label = crate::planning_support::validated_metric_label(
         crate::planning_support::label_key(57, "config_activation_source"),
         config_activation_source_label(source),
     )?;
+    #[cfg(feature = "mojo")]
+    let result_label = crate::planning_support::planned_metric_label(28, 1, (result) as i64)?;
+    #[cfg(not(feature = "mojo"))]
     let result_label = crate::planning_support::validated_metric_label(
         crate::planning_support::label_key(56, "config_activation_result"),
         config_activation_result_label(result),
@@ -352,10 +390,16 @@ pub fn plan_config_publication_delivery_metric(
     target: ConfigPublicationDeliveryTarget,
     result: ConfigPublicationDeliveryResult,
 ) -> Result<ConfigPublicationDeliveryMetricPlan, TelemetryAttributeError> {
+    #[cfg(feature = "mojo")]
+    let target_label = crate::planning_support::planned_metric_label(30, 0, (target) as i64)?;
+    #[cfg(not(feature = "mojo"))]
     let target_label = crate::planning_support::validated_metric_label(
         crate::planning_support::label_key(61, "config_publication_target"),
         config_publication_delivery_target_label(target),
     )?;
+    #[cfg(feature = "mojo")]
+    let result_label = crate::planning_support::planned_metric_label(30, 1, (result) as i64)?;
+    #[cfg(not(feature = "mojo"))]
     let result_label = crate::planning_support::validated_metric_label(
         crate::planning_support::label_key(60, "config_publication_result"),
         config_publication_delivery_result_label(result),
@@ -376,10 +420,16 @@ pub fn plan_config_cache_invalidation_metric(
     target: ConfigCacheInvalidationTarget,
     result: ConfigCacheInvalidationResult,
 ) -> Result<ConfigCacheInvalidationMetricPlan, TelemetryAttributeError> {
+    #[cfg(feature = "mojo")]
+    let target_label = crate::planning_support::planned_metric_label(29, 0, (target) as i64)?;
+    #[cfg(not(feature = "mojo"))]
     let target_label = crate::planning_support::validated_metric_label(
         crate::planning_support::label_key(59, "config_invalidation_target"),
         config_cache_invalidation_target_label(target),
     )?;
+    #[cfg(feature = "mojo")]
+    let result_label = crate::planning_support::planned_metric_label(29, 1, (result) as i64)?;
+    #[cfg(not(feature = "mojo"))]
     let result_label = crate::planning_support::validated_metric_label(
         crate::planning_support::label_key(58, "config_invalidation_result"),
         config_cache_invalidation_result_label(result),
@@ -396,6 +446,7 @@ pub fn plan_config_cache_invalidation_metric(
     })
 }
 
+#[cfg(not(feature = "mojo"))]
 fn jwks_refresh_decision_label(decision: JwksRefreshDecision) -> String {
     #[cfg(feature = "mojo")]
     {
@@ -415,6 +466,7 @@ fn jwks_refresh_decision_label(decision: JwksRefreshDecision) -> String {
     }
 }
 
+#[cfg(not(feature = "mojo"))]
 fn policy_refresh_decision_label(decision: PolicyRefreshDecision) -> String {
     #[cfg(feature = "mojo")]
     {
@@ -434,6 +486,7 @@ fn policy_refresh_decision_label(decision: PolicyRefreshDecision) -> String {
     }
 }
 
+#[cfg(not(feature = "mojo"))]
 fn jwks_refresh_outcome_label(outcome: JwksRefreshOutcome) -> String {
     #[cfg(feature = "mojo")]
     {
@@ -450,6 +503,7 @@ fn jwks_refresh_outcome_label(outcome: JwksRefreshOutcome) -> String {
     }
 }
 
+#[cfg(not(feature = "mojo"))]
 fn oidc_refresh_operation_label(operation: OidcRefreshOperation) -> String {
     #[cfg(feature = "mojo")]
     {
@@ -468,6 +522,7 @@ fn oidc_refresh_operation_label(operation: OidcRefreshOperation) -> String {
     }
 }
 
+#[cfg(not(feature = "mojo"))]
 fn oidc_refresh_result_label(result: OidcRefreshResult) -> String {
     #[cfg(feature = "mojo")]
     {
@@ -487,6 +542,7 @@ fn oidc_refresh_result_label(result: OidcRefreshResult) -> String {
     }
 }
 
+#[cfg(not(feature = "mojo"))]
 fn enterprise_id_kind_label(kind: EnterpriseIdKind) -> String {
     #[cfg(feature = "mojo")]
     {
@@ -509,6 +565,7 @@ fn enterprise_id_kind_label(kind: EnterpriseIdKind) -> String {
     }
 }
 
+#[cfg(not(feature = "mojo"))]
 fn enterprise_id_result_label(result: EnterpriseIdResult) -> String {
     #[cfg(feature = "mojo")]
     {
@@ -526,6 +583,7 @@ fn enterprise_id_result_label(result: EnterpriseIdResult) -> String {
     }
 }
 
+#[cfg(not(feature = "mojo"))]
 fn policy_refresh_outcome_label(outcome: PolicyRefreshOutcome) -> String {
     #[cfg(feature = "mojo")]
     {
@@ -543,6 +601,7 @@ fn policy_refresh_outcome_label(outcome: PolicyRefreshOutcome) -> String {
     }
 }
 
+#[cfg(not(feature = "mojo"))]
 fn policy_rollback_operation_label(operation: PolicyRollbackOperation) -> String {
     #[cfg(feature = "mojo")]
     {
@@ -561,6 +620,7 @@ fn policy_rollback_operation_label(operation: PolicyRollbackOperation) -> String
     }
 }
 
+#[cfg(not(feature = "mojo"))]
 fn policy_rollback_result_label(result: PolicyRollbackResult) -> String {
     #[cfg(feature = "mojo")]
     {
@@ -579,6 +639,7 @@ fn policy_rollback_result_label(result: PolicyRollbackResult) -> String {
     }
 }
 
+#[cfg(not(feature = "mojo"))]
 fn config_activation_source_label(source: ConfigActivationSource) -> String {
     #[cfg(feature = "mojo")]
     {
@@ -597,6 +658,7 @@ fn config_activation_source_label(source: ConfigActivationSource) -> String {
     }
 }
 
+#[cfg(not(feature = "mojo"))]
 fn config_activation_result_label(result: ConfigActivationResult) -> String {
     #[cfg(feature = "mojo")]
     {
@@ -615,6 +677,7 @@ fn config_activation_result_label(result: ConfigActivationResult) -> String {
     }
 }
 
+#[cfg(not(feature = "mojo"))]
 fn config_publication_delivery_target_label(target: ConfigPublicationDeliveryTarget) -> String {
     #[cfg(feature = "mojo")]
     {
@@ -632,6 +695,7 @@ fn config_publication_delivery_target_label(target: ConfigPublicationDeliveryTar
     }
 }
 
+#[cfg(not(feature = "mojo"))]
 fn config_publication_delivery_result_label(result: ConfigPublicationDeliveryResult) -> String {
     #[cfg(feature = "mojo")]
     {
@@ -650,6 +714,7 @@ fn config_publication_delivery_result_label(result: ConfigPublicationDeliveryRes
     }
 }
 
+#[cfg(not(feature = "mojo"))]
 fn config_cache_invalidation_target_label(target: ConfigCacheInvalidationTarget) -> String {
     #[cfg(feature = "mojo")]
     {
@@ -667,6 +732,7 @@ fn config_cache_invalidation_target_label(target: ConfigCacheInvalidationTarget)
     }
 }
 
+#[cfg(not(feature = "mojo"))]
 fn config_cache_invalidation_result_label(result: ConfigCacheInvalidationResult) -> String {
     #[cfg(feature = "mojo")]
     {

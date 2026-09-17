@@ -259,10 +259,16 @@ pub fn plan_shutdown_lifecycle_metric(
     event: ShutdownLifecycleEvent,
     result: ShutdownLifecycleResult,
 ) -> Result<ShutdownLifecycleMetricPlan, TelemetryAttributeError> {
+    #[cfg(feature = "mojo")]
+    let event_label = crate::planning_support::planned_metric_label(46, 0, (event) as i64)?;
+    #[cfg(not(feature = "mojo"))]
     let event_label = crate::planning_support::validated_metric_label(
         crate::planning_support::label_key(136, "shutdown_event"),
         shutdown_lifecycle_event_label(event),
     )?;
+    #[cfg(feature = "mojo")]
+    let result_label = crate::planning_support::planned_metric_label(46, 1, (result) as i64)?;
+    #[cfg(not(feature = "mojo"))]
     let result_label = crate::planning_support::validated_metric_label(
         crate::planning_support::label_key(137, "shutdown_result"),
         shutdown_lifecycle_result_label(result),
@@ -279,10 +285,16 @@ pub fn plan_health_probe_metric(
     probe: HealthProbeKind,
     result: HealthProbeResult,
 ) -> Result<HealthProbeMetricPlan, TelemetryAttributeError> {
+    #[cfg(feature = "mojo")]
+    let probe_label = crate::planning_support::planned_metric_label(40, 0, (probe) as i64)?;
+    #[cfg(not(feature = "mojo"))]
     let probe_label = crate::planning_support::validated_metric_label(
         crate::planning_support::label_key(72, "health_probe"),
         health_probe_kind_label(probe),
     )?;
+    #[cfg(feature = "mojo")]
+    let result_label = crate::planning_support::planned_metric_label(40, 1, (result) as i64)?;
+    #[cfg(not(feature = "mojo"))]
     let result_label = crate::planning_support::validated_metric_label(
         crate::planning_support::label_key(73, "health_result"),
         health_probe_result_label(result),
@@ -304,14 +316,23 @@ pub fn plan_secret_provider_metric(
     operation: SecretProviderOperation,
     result: SecretProviderResult,
 ) -> Result<SecretProviderMetricPlan, TelemetryAttributeError> {
+    #[cfg(feature = "mojo")]
+    let backend_label = crate::planning_support::planned_metric_label(44, 0, (backend) as i64)?;
+    #[cfg(not(feature = "mojo"))]
     let backend_label = crate::planning_support::validated_metric_label(
         crate::planning_support::label_key(127, "secret_backend"),
         secret_provider_backend_label(backend),
     )?;
+    #[cfg(feature = "mojo")]
+    let operation_label = crate::planning_support::planned_metric_label(44, 1, (operation) as i64)?;
+    #[cfg(not(feature = "mojo"))]
     let operation_label = crate::planning_support::validated_metric_label(
         crate::planning_support::label_key(128, "secret_operation"),
         secret_provider_operation_label(operation),
     )?;
+    #[cfg(feature = "mojo")]
+    let result_label = crate::planning_support::planned_metric_label(44, 2, (result) as i64)?;
+    #[cfg(not(feature = "mojo"))]
     let result_label = crate::planning_support::validated_metric_label(
         crate::planning_support::label_key(129, "secret_result"),
         secret_provider_result_label(result),
@@ -333,10 +354,16 @@ pub fn plan_secret_rotation_metric(
     scope: SecretRotationScope,
     result: SecretRotationResult,
 ) -> Result<SecretRotationMetricPlan, TelemetryAttributeError> {
+    #[cfg(feature = "mojo")]
+    let scope_label = crate::planning_support::planned_metric_label(45, 0, (scope) as i64)?;
+    #[cfg(not(feature = "mojo"))]
     let scope_label = crate::planning_support::validated_metric_label(
         crate::planning_support::label_key(131, "secret_scope"),
         secret_rotation_scope_label(scope),
     )?;
+    #[cfg(feature = "mojo")]
+    let result_label = crate::planning_support::planned_metric_label(45, 1, (result) as i64)?;
+    #[cfg(not(feature = "mojo"))]
     let result_label = crate::planning_support::validated_metric_label(
         crate::planning_support::label_key(130, "secret_rotation_result"),
         secret_rotation_result_label(result),
@@ -357,10 +384,16 @@ pub fn plan_backup_restore_metric(
     operation: BackupRestoreOperation,
     result: BackupRestoreResult,
 ) -> Result<BackupRestoreMetricPlan, TelemetryAttributeError> {
+    #[cfg(feature = "mojo")]
+    let operation_label = crate::planning_support::planned_metric_label(37, 0, (operation) as i64)?;
+    #[cfg(not(feature = "mojo"))]
     let operation_label = crate::planning_support::validated_metric_label(
         crate::planning_support::label_key(47, "backup_restore_operation"),
         backup_restore_operation_label(operation),
     )?;
+    #[cfg(feature = "mojo")]
+    let result_label = crate::planning_support::planned_metric_label(37, 1, (result) as i64)?;
+    #[cfg(not(feature = "mojo"))]
     let result_label = crate::planning_support::validated_metric_label(
         crate::planning_support::label_key(48, "backup_restore_result"),
         backup_restore_result_label(result),
@@ -381,10 +414,16 @@ pub fn plan_deployment_rollout_metric(
     operation: DeploymentRolloutOperation,
     result: DeploymentRolloutResult,
 ) -> Result<DeploymentRolloutMetricPlan, TelemetryAttributeError> {
+    #[cfg(feature = "mojo")]
+    let operation_label = crate::planning_support::planned_metric_label(38, 0, (operation) as i64)?;
+    #[cfg(not(feature = "mojo"))]
     let operation_label = crate::planning_support::validated_metric_label(
         crate::planning_support::label_key(66, "deployment_rollout_operation"),
         deployment_rollout_operation_label(operation),
     )?;
+    #[cfg(feature = "mojo")]
+    let result_label = crate::planning_support::planned_metric_label(38, 1, (result) as i64)?;
+    #[cfg(not(feature = "mojo"))]
     let result_label = crate::planning_support::validated_metric_label(
         crate::planning_support::label_key(67, "deployment_rollout_result"),
         deployment_rollout_result_label(result),
@@ -406,10 +445,16 @@ pub fn plan_load_soak_metric(
     result: LoadSoakResult,
     duration_ms: u64,
 ) -> Result<LoadSoakMetricPlan, TelemetryAttributeError> {
+    #[cfg(feature = "mojo")]
+    let scenario_label = crate::planning_support::planned_metric_label(41, 0, (scenario) as i64)?;
+    #[cfg(not(feature = "mojo"))]
     let scenario_label = crate::planning_support::validated_metric_label(
         crate::planning_support::label_key(87, "load_soak_scenario"),
         load_soak_scenario_label(scenario),
     )?;
+    #[cfg(feature = "mojo")]
+    let result_label = crate::planning_support::planned_metric_label(41, 1, (result) as i64)?;
+    #[cfg(not(feature = "mojo"))]
     let result_label = crate::planning_support::validated_metric_label(
         crate::planning_support::label_key(86, "load_soak_result"),
         load_soak_result_label(result),
@@ -436,10 +481,16 @@ pub fn plan_fault_injection_metric(
     target: FaultInjectionTarget,
     result: FaultInjectionResult,
 ) -> Result<FaultInjectionMetricPlan, TelemetryAttributeError> {
+    #[cfg(feature = "mojo")]
+    let target_label = crate::planning_support::planned_metric_label(39, 0, (target) as i64)?;
+    #[cfg(not(feature = "mojo"))]
     let target_label = crate::planning_support::validated_metric_label(
         crate::planning_support::label_key(71, "fault_injection_target"),
         fault_injection_target_label(target),
     )?;
+    #[cfg(feature = "mojo")]
+    let result_label = crate::planning_support::planned_metric_label(39, 1, (result) as i64)?;
+    #[cfg(not(feature = "mojo"))]
     let result_label = crate::planning_support::validated_metric_label(
         crate::planning_support::label_key(70, "fault_injection_result"),
         fault_injection_result_label(result),
@@ -460,10 +511,16 @@ pub fn plan_migration_lifecycle_metric(
     operation: MigrationLifecycleOperation,
     result: MigrationLifecycleResult,
 ) -> Result<MigrationLifecycleMetricPlan, TelemetryAttributeError> {
+    #[cfg(feature = "mojo")]
+    let operation_label = crate::planning_support::planned_metric_label(42, 0, (operation) as i64)?;
+    #[cfg(not(feature = "mojo"))]
     let operation_label = crate::planning_support::validated_metric_label(
         crate::planning_support::label_key(88, "migration_operation"),
         migration_lifecycle_operation_label(operation),
     )?;
+    #[cfg(feature = "mojo")]
+    let result_label = crate::planning_support::planned_metric_label(42, 1, (result) as i64)?;
+    #[cfg(not(feature = "mojo"))]
     let result_label = crate::planning_support::validated_metric_label(
         crate::planning_support::label_key(89, "migration_result"),
         migration_lifecycle_result_label(result),
@@ -484,10 +541,16 @@ pub fn plan_persistence_metric(
     operation: PersistenceOperation,
     result: PersistenceResult,
 ) -> Result<PersistenceMetricPlan, TelemetryAttributeError> {
+    #[cfg(feature = "mojo")]
+    let operation_label = crate::planning_support::planned_metric_label(43, 0, (operation) as i64)?;
+    #[cfg(not(feature = "mojo"))]
     let operation_label = crate::planning_support::validated_metric_label(
         crate::planning_support::label_key(92, "persistence_operation"),
         persistence_operation_label(operation),
     )?;
+    #[cfg(feature = "mojo")]
+    let result_label = crate::planning_support::planned_metric_label(43, 1, (result) as i64)?;
+    #[cfg(not(feature = "mojo"))]
     let result_label = crate::planning_support::validated_metric_label(
         crate::planning_support::label_key(93, "persistence_result"),
         persistence_result_label(result),
@@ -504,6 +567,7 @@ pub fn plan_persistence_metric(
     })
 }
 
+#[cfg(not(feature = "mojo"))]
 fn shutdown_lifecycle_event_label(event: ShutdownLifecycleEvent) -> String {
     #[cfg(feature = "mojo")]
     {
@@ -524,6 +588,7 @@ fn shutdown_lifecycle_event_label(event: ShutdownLifecycleEvent) -> String {
     }
 }
 
+#[cfg(not(feature = "mojo"))]
 fn shutdown_lifecycle_result_label(result: ShutdownLifecycleResult) -> String {
     #[cfg(feature = "mojo")]
     {
@@ -542,6 +607,7 @@ fn shutdown_lifecycle_result_label(result: ShutdownLifecycleResult) -> String {
     }
 }
 
+#[cfg(not(feature = "mojo"))]
 fn health_probe_kind_label(probe: HealthProbeKind) -> String {
     #[cfg(feature = "mojo")]
     {
@@ -559,6 +625,7 @@ fn health_probe_kind_label(probe: HealthProbeKind) -> String {
     }
 }
 
+#[cfg(not(feature = "mojo"))]
 fn health_probe_result_label(result: HealthProbeResult) -> String {
     #[cfg(feature = "mojo")]
     {
@@ -577,6 +644,7 @@ fn health_probe_result_label(result: HealthProbeResult) -> String {
     }
 }
 
+#[cfg(not(feature = "mojo"))]
 fn secret_provider_backend_label(backend: SecretProviderBackend) -> String {
     #[cfg(feature = "mojo")]
     {
@@ -594,6 +662,7 @@ fn secret_provider_backend_label(backend: SecretProviderBackend) -> String {
     }
 }
 
+#[cfg(not(feature = "mojo"))]
 fn secret_provider_operation_label(operation: SecretProviderOperation) -> String {
     #[cfg(feature = "mojo")]
     {
@@ -612,6 +681,7 @@ fn secret_provider_operation_label(operation: SecretProviderOperation) -> String
     }
 }
 
+#[cfg(not(feature = "mojo"))]
 fn secret_provider_result_label(result: SecretProviderResult) -> String {
     #[cfg(feature = "mojo")]
     {
@@ -630,6 +700,7 @@ fn secret_provider_result_label(result: SecretProviderResult) -> String {
     }
 }
 
+#[cfg(not(feature = "mojo"))]
 fn secret_rotation_scope_label(scope: SecretRotationScope) -> String {
     #[cfg(feature = "mojo")]
     {
@@ -649,6 +720,7 @@ fn secret_rotation_scope_label(scope: SecretRotationScope) -> String {
     }
 }
 
+#[cfg(not(feature = "mojo"))]
 fn secret_rotation_result_label(result: SecretRotationResult) -> String {
     #[cfg(feature = "mojo")]
     {
@@ -667,6 +739,7 @@ fn secret_rotation_result_label(result: SecretRotationResult) -> String {
     }
 }
 
+#[cfg(not(feature = "mojo"))]
 fn backup_restore_operation_label(operation: BackupRestoreOperation) -> String {
     #[cfg(feature = "mojo")]
     {
@@ -685,6 +758,7 @@ fn backup_restore_operation_label(operation: BackupRestoreOperation) -> String {
     }
 }
 
+#[cfg(not(feature = "mojo"))]
 fn backup_restore_result_label(result: BackupRestoreResult) -> String {
     #[cfg(feature = "mojo")]
     {
@@ -703,6 +777,7 @@ fn backup_restore_result_label(result: BackupRestoreResult) -> String {
     }
 }
 
+#[cfg(not(feature = "mojo"))]
 fn deployment_rollout_operation_label(operation: DeploymentRolloutOperation) -> String {
     #[cfg(feature = "mojo")]
     {
@@ -721,6 +796,7 @@ fn deployment_rollout_operation_label(operation: DeploymentRolloutOperation) -> 
     }
 }
 
+#[cfg(not(feature = "mojo"))]
 fn deployment_rollout_result_label(result: DeploymentRolloutResult) -> String {
     #[cfg(feature = "mojo")]
     {
@@ -739,6 +815,7 @@ fn deployment_rollout_result_label(result: DeploymentRolloutResult) -> String {
     }
 }
 
+#[cfg(not(feature = "mojo"))]
 fn load_soak_scenario_label(scenario: LoadSoakScenarioKind) -> String {
     #[cfg(feature = "mojo")]
     {
@@ -757,6 +834,7 @@ fn load_soak_scenario_label(scenario: LoadSoakScenarioKind) -> String {
     }
 }
 
+#[cfg(not(feature = "mojo"))]
 fn load_soak_result_label(result: LoadSoakResult) -> String {
     #[cfg(feature = "mojo")]
     {
@@ -775,6 +853,7 @@ fn load_soak_result_label(result: LoadSoakResult) -> String {
     }
 }
 
+#[cfg(not(feature = "mojo"))]
 fn fault_injection_target_label(target: FaultInjectionTarget) -> String {
     #[cfg(feature = "mojo")]
     {
@@ -793,6 +872,7 @@ fn fault_injection_target_label(target: FaultInjectionTarget) -> String {
     }
 }
 
+#[cfg(not(feature = "mojo"))]
 fn fault_injection_result_label(result: FaultInjectionResult) -> String {
     #[cfg(feature = "mojo")]
     {
@@ -811,6 +891,7 @@ fn fault_injection_result_label(result: FaultInjectionResult) -> String {
     }
 }
 
+#[cfg(not(feature = "mojo"))]
 fn migration_lifecycle_operation_label(operation: MigrationLifecycleOperation) -> String {
     #[cfg(feature = "mojo")]
     {
@@ -829,6 +910,7 @@ fn migration_lifecycle_operation_label(operation: MigrationLifecycleOperation) -
     }
 }
 
+#[cfg(not(feature = "mojo"))]
 fn migration_lifecycle_result_label(result: MigrationLifecycleResult) -> String {
     #[cfg(feature = "mojo")]
     {
@@ -848,6 +930,7 @@ fn migration_lifecycle_result_label(result: MigrationLifecycleResult) -> String 
     }
 }
 
+#[cfg(not(feature = "mojo"))]
 fn persistence_operation_label(operation: PersistenceOperation) -> String {
     #[cfg(feature = "mojo")]
     {
@@ -867,6 +950,7 @@ fn persistence_operation_label(operation: PersistenceOperation) -> String {
     }
 }
 
+#[cfg(not(feature = "mojo"))]
 fn persistence_result_label(result: PersistenceResult) -> String {
     #[cfg(feature = "mojo")]
     {
