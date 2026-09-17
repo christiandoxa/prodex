@@ -232,7 +232,37 @@ pub fn runtime_proxy_anthropic_client_tool_name(name: &str) -> Option<&'static s
     }
 }
 
+#[cfg(feature = "mojo")]
 pub fn runtime_proxy_anthropic_builtin_client_tool_description(
+    tool: &serde_json::Value,
+    tool_type: Option<&str>,
+    name: &str,
+) -> Option<String> {
+    let tool_version = runtime_proxy_anthropic_tool_version(tool_type).unwrap_or_default();
+    let canonical_name = runtime_proxy_anthropic_client_tool_name(name).or_else(|| {
+        tool_type.and_then(runtime_proxy_anthropic_builtin_client_tool_name_from_type)
+    })?;
+    let serialized = serde_json::to_string(tool).ok()?;
+    let mut input = prodex_mojo_core::rich::RuntimeAnthropicKernelInput::new(
+        prodex_mojo_core::rich::RuntimeAnthropicKernelOperation::ClientToolDescription,
+    );
+    input.index = u64::from(tool_version);
+    input.name = Some(canonical_name);
+    input.input = Some(&serialized);
+    String::from_utf8(crate::mojo::bytes(input)).ok()
+}
+
+#[cfg(not(feature = "mojo"))]
+pub fn runtime_proxy_anthropic_builtin_client_tool_description(
+    tool: &serde_json::Value,
+    tool_type: Option<&str>,
+    name: &str,
+) -> Option<String> {
+    runtime_proxy_anthropic_builtin_client_tool_description_rust(tool, tool_type, name)
+}
+
+#[cfg(any(not(feature = "mojo"), test))]
+pub(crate) fn runtime_proxy_anthropic_builtin_client_tool_description_rust(
     tool: &serde_json::Value,
     tool_type: Option<&str>,
     name: &str,
@@ -352,7 +382,37 @@ pub fn runtime_proxy_anthropic_tool_description(
     }
 }
 
+#[cfg(feature = "mojo")]
 pub fn runtime_proxy_anthropic_builtin_client_tool_schema(
+    tool: &serde_json::Value,
+    tool_type: Option<&str>,
+    name: &str,
+) -> Option<serde_json::Value> {
+    let tool_version = runtime_proxy_anthropic_tool_version(tool_type).unwrap_or_default();
+    let canonical_name = runtime_proxy_anthropic_client_tool_name(name).or_else(|| {
+        tool_type.and_then(runtime_proxy_anthropic_builtin_client_tool_name_from_type)
+    })?;
+    let serialized = serde_json::to_string(tool).ok()?;
+    let mut input = prodex_mojo_core::rich::RuntimeAnthropicKernelInput::new(
+        prodex_mojo_core::rich::RuntimeAnthropicKernelOperation::ClientToolSchema,
+    );
+    input.index = u64::from(tool_version);
+    input.name = Some(canonical_name);
+    input.input = Some(&serialized);
+    serde_json::from_slice(&crate::mojo::bytes(input)).ok()
+}
+
+#[cfg(not(feature = "mojo"))]
+pub fn runtime_proxy_anthropic_builtin_client_tool_schema(
+    tool: &serde_json::Value,
+    tool_type: Option<&str>,
+    name: &str,
+) -> Option<serde_json::Value> {
+    runtime_proxy_anthropic_builtin_client_tool_schema_rust(tool, tool_type, name)
+}
+
+#[cfg(any(not(feature = "mojo"), test))]
+pub(crate) fn runtime_proxy_anthropic_builtin_client_tool_schema_rust(
     tool: &serde_json::Value,
     tool_type: Option<&str>,
     name: &str,
@@ -639,6 +699,78 @@ fn mojo_server_tool_names_match_rust_oracle() {
             runtime_proxy_anthropic_builtin_server_tool_name(name),
             runtime_proxy_anthropic_builtin_server_tool_name_rust(name),
             "{name:?}"
+        );
+    }
+}
+
+#[cfg(all(test, feature = "mojo"))]
+#[test]
+fn mojo_client_tool_descriptions_match_rust_oracle() {
+    let cases = [
+        ("bash", None, serde_json::json!({})),
+        ("memory", Some("memory_20250818"), serde_json::json!({})),
+        (
+            "str_replace_based_edit_tool",
+            Some("text_editor_20250728"),
+            serde_json::json!({"max_characters": 12345}),
+        ),
+        (
+            "computer",
+            Some("computer_20251124"),
+            serde_json::json!({
+                "display_width_px": 1920,
+                "display_height_px": 1080,
+                "display_number": 2,
+                "enable_zoom": true
+            }),
+        ),
+        (
+            "computer",
+            Some("computer_20250124"),
+            serde_json::json!({"display_width_px": "bad", "enable_zoom": false}),
+        ),
+    ];
+    for (name, tool_type, tool) in cases {
+        assert_eq!(
+            runtime_proxy_anthropic_builtin_client_tool_description(&tool, tool_type, name),
+            runtime_proxy_anthropic_builtin_client_tool_description_rust(&tool, tool_type, name),
+            "name={name} type={tool_type:?} tool={tool}"
+        );
+    }
+}
+
+#[cfg(all(test, feature = "mojo"))]
+#[test]
+fn mojo_client_tool_schemas_match_rust_oracle() {
+    let cases = [
+        ("bash", None, serde_json::json!({})),
+        ("memory", Some("memory_20250818"), serde_json::json!({})),
+        (
+            "str_replace_based_edit_tool",
+            Some("text_editor_20250123"),
+            serde_json::json!({}),
+        ),
+        (
+            "str_replace_based_edit_tool",
+            Some("text_editor_20250728"),
+            serde_json::json!({"max_characters": 5000}),
+        ),
+        (
+            "computer",
+            Some("computer_20250123"),
+            serde_json::json!({"enable_zoom": true}),
+        ),
+        (
+            "computer",
+            Some("computer_20251124"),
+            serde_json::json!({"enable_zoom": true}),
+        ),
+    ];
+    for (name, tool_type, tool) in cases {
+        assert_eq!(
+            runtime_proxy_anthropic_builtin_client_tool_schema(&tool, tool_type, name),
+            runtime_proxy_anthropic_builtin_client_tool_schema_rust(&tool, tool_type, name),
+            "name={name} type={tool_type:?} tool={tool}"
         );
     }
 }
