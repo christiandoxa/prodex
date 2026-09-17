@@ -1,5 +1,32 @@
 use super::Feature;
 
+const COMBO_INPUT_I64_FIELD_COUNT: usize = 5;
+const COMBO_INPUT_U64_FIELD_COUNT: usize = 5;
+const COMBO_OUTPUT_I64_FIELD_COUNT: usize = 2;
+const COMBO_OUTPUT_U64_FIELD_COUNT: usize = 3;
+const COMBO_MAX_CANDIDATES: usize = 256;
+
+/// Candidate inputs for cross-model output-limit normalization.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ComboOutputAdjustmentInput {
+    pub eligible: bool,
+    pub output_limit_field: Option<super::OutputLimitField>,
+    pub adjustment_requested_tokens: Option<u64>,
+    pub adjustment_applied_tokens: Option<u64>,
+    pub explicit_output_tokens: Option<u64>,
+    pub estimated_input_tokens: u64,
+    pub reasoning_reserve_tokens: Option<u64>,
+}
+
+/// Normalized output-limit decision for one candidate.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ComboOutputAdjustment {
+    pub field: super::OutputLimitField,
+    pub requested_tokens: u64,
+    pub applied_tokens: u64,
+    pub total_required_tokens: u64,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct RequirementResolutionInput {
     pub explicit_output_present: bool,
@@ -72,6 +99,18 @@ unsafe extern "C" {
         missing_feature_present: *mut i64,
         missing_feature: *mut i64,
         reasoning_effort_unsupported: *mut i64,
+    ) -> i64;
+    fn prodex_provider_constraints_normalize_combo_v1(
+        abi_version: i64,
+        input_i64: *const i64,
+        input_i64_count: i64,
+        input_u64: *const u64,
+        input_u64_count: i64,
+        output_i64: *mut i64,
+        output_i64_count: i64,
+        output_u64: *mut u64,
+        output_u64_count: i64,
+        candidate_count: i64,
     ) -> i64;
 }
 
@@ -183,4 +222,126 @@ pub fn preclassify(input: PreclassificationInput) -> Result<Preclassification, c
         missing_feature,
         reasoning_effort_unsupported: reasoning_effort_unsupported == 1,
     })
+}
+
+/// Normalize one shared output limit across eligible fallback candidates.
+pub fn normalize_combo_output_adjustment(
+    inputs: &[ComboOutputAdjustmentInput],
+) -> Result<Vec<Option<ComboOutputAdjustment>>, crate::MojoError> {
+    if inputs.len() > COMBO_MAX_CANDIDATES {
+        return Err(crate::MojoError::InvalidInput);
+    }
+    if inputs.iter().any(|input| {
+        input.adjustment_requested_tokens.is_some() != input.adjustment_applied_tokens.is_some()
+    }) {
+        return Err(crate::MojoError::InvalidInput);
+    }
+    let input_i64_len = inputs
+        .len()
+        .checked_mul(COMBO_INPUT_I64_FIELD_COUNT)
+        .ok_or(crate::MojoError::InvalidInput)?;
+    let input_u64_len = inputs
+        .len()
+        .checked_mul(COMBO_INPUT_U64_FIELD_COUNT)
+        .ok_or(crate::MojoError::InvalidInput)?;
+    let output_i64_len = inputs
+        .len()
+        .checked_mul(COMBO_OUTPUT_I64_FIELD_COUNT)
+        .ok_or(crate::MojoError::InvalidInput)?;
+    let output_u64_len = inputs
+        .len()
+        .checked_mul(COMBO_OUTPUT_U64_FIELD_COUNT)
+        .ok_or(crate::MojoError::InvalidInput)?;
+    let mut input_i64 = vec![0_i64; input_i64_len];
+    let mut input_u64 = vec![0_u64; input_u64_len];
+    for (index, input) in inputs.iter().enumerate() {
+        let i64_base = index * COMBO_INPUT_I64_FIELD_COUNT;
+        input_i64[i64_base] = i64::from(input.eligible);
+        input_i64[i64_base + 1] = input.output_limit_field.map_or(-1, |field| field as i64);
+        input_i64[i64_base + 2] = i64::from(input.adjustment_applied_tokens.is_some());
+        input_i64[i64_base + 3] = i64::from(input.explicit_output_tokens.is_some());
+        input_i64[i64_base + 4] = i64::from(input.reasoning_reserve_tokens.is_some());
+
+        let u64_base = index * COMBO_INPUT_U64_FIELD_COUNT;
+        input_u64[u64_base] = input.adjustment_requested_tokens.unwrap_or_default();
+        input_u64[u64_base + 1] = input.adjustment_applied_tokens.unwrap_or_default();
+        input_u64[u64_base + 2] = input.explicit_output_tokens.unwrap_or_default();
+        input_u64[u64_base + 3] = input.estimated_input_tokens;
+        input_u64[u64_base + 4] = input.reasoning_reserve_tokens.unwrap_or_default();
+    }
+    let mut output_i64 = vec![0_i64; output_i64_len];
+    let mut output_u64 = vec![0_u64; output_u64_len];
+    let candidate_count =
+        i64::try_from(inputs.len()).map_err(|_| crate::MojoError::InvalidInput)?;
+    let status = unsafe {
+        prodex_provider_constraints_normalize_combo_v1(
+            super::PROVIDER_CONSTRAINT_COMBO_ABI_VERSION,
+            input_i64.as_ptr(),
+            i64::try_from(input_i64.len()).map_err(|_| crate::MojoError::InvalidInput)?,
+            input_u64.as_ptr(),
+            i64::try_from(input_u64.len()).map_err(|_| crate::MojoError::InvalidInput)?,
+            output_i64.as_mut_ptr(),
+            i64::try_from(output_i64.len()).map_err(|_| crate::MojoError::InvalidInput)?,
+            output_u64.as_mut_ptr(),
+            i64::try_from(output_u64.len()).map_err(|_| crate::MojoError::InvalidInput)?,
+            candidate_count,
+        )
+    };
+    match status {
+        0 => {}
+        1 => return Err(crate::MojoError::AbiMismatch),
+        2 => return Err(crate::MojoError::InvalidInput),
+        _ => return Err(crate::MojoError::InvalidOutput),
+    }
+
+    inputs
+        .iter()
+        .enumerate()
+        .map(|(index, input)| {
+            let i64_base = index * COMBO_OUTPUT_I64_FIELD_COUNT;
+            let u64_base = index * COMBO_OUTPUT_U64_FIELD_COUNT;
+            let changed = match output_i64[i64_base] {
+                0 => false,
+                1 => true,
+                _ => return Err(crate::MojoError::InvalidOutput),
+            };
+            let field = output_i64[i64_base + 1];
+            let requested_tokens = output_u64[u64_base];
+            let applied_tokens = output_u64[u64_base + 1];
+            let total_required_tokens = output_u64[u64_base + 2];
+            if !changed {
+                if field != -1
+                    || requested_tokens != 0
+                    || applied_tokens != 0
+                    || total_required_tokens != 0
+                {
+                    return Err(crate::MojoError::InvalidOutput);
+                }
+                return Ok(None);
+            }
+            if !input.eligible || input.output_limit_field.is_none() {
+                return Err(crate::MojoError::InvalidOutput);
+            }
+            let field = super::OutputLimitField::try_from(field)?;
+            let expected_requested = input
+                .adjustment_requested_tokens
+                .or(input.explicit_output_tokens)
+                .unwrap_or(applied_tokens);
+            if requested_tokens != expected_requested
+                || total_required_tokens
+                    != input
+                        .estimated_input_tokens
+                        .saturating_add(applied_tokens)
+                        .saturating_add(input.reasoning_reserve_tokens.unwrap_or_default())
+            {
+                return Err(crate::MojoError::InvalidOutput);
+            }
+            Ok(Some(ComboOutputAdjustment {
+                field,
+                requested_tokens,
+                applied_tokens,
+                total_required_tokens,
+            }))
+        })
+        .collect()
 }

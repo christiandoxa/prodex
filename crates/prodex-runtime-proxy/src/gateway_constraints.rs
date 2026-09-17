@@ -352,53 +352,6 @@ fn first_concrete_model(model: &str) -> Option<&str> {
         .or_else(|| (!model.is_empty()).then_some(model))
 }
 
-fn normalize_combo_output_adjustment(candidates: &mut [RuntimeGatewayConstraintCandidate]) {
-    let Some(applied_tokens) = candidates
-        .iter()
-        .filter(|candidate| candidate.evaluation.eligible)
-        .filter_map(|candidate| candidate.evaluation.adjustment.as_ref())
-        .map(|adjustment| adjustment.applied_tokens)
-        .min()
-    else {
-        return;
-    };
-    for candidate in candidates
-        .iter_mut()
-        .filter(|candidate| candidate.evaluation.eligible)
-    {
-        let Some(field) = candidate.evaluation.requirements.output_limit_field else {
-            continue;
-        };
-        let requested_tokens = candidate
-            .evaluation
-            .adjustment
-            .as_ref()
-            .map(|adjustment| adjustment.requested_tokens)
-            .or(candidate.evaluation.requirements.explicit_output_tokens)
-            .unwrap_or(applied_tokens);
-        candidate.evaluation.adjustment = Some(ProviderOutputAdjustment {
-            field,
-            requested_tokens,
-            applied_tokens,
-            reason: ProviderRequestConstraintDecision::OutputLimitClamped,
-        });
-        candidate.evaluation.decision = ProviderRequestConstraintDecision::OutputLimitClamped;
-        candidate.evaluation.requirements.explicit_output_tokens = Some(applied_tokens);
-        candidate.evaluation.requirements.total_required_tokens = candidate
-            .evaluation
-            .requirements
-            .estimated_input_tokens
-            .saturating_add(applied_tokens)
-            .saturating_add(
-                candidate
-                    .evaluation
-                    .requirements
-                    .reasoning_reserve_tokens
-                    .unwrap_or_default(),
-            );
-    }
-}
-
 #[cfg(feature = "mojo")]
 fn concrete_models<'a>(
     provider: ProviderId,

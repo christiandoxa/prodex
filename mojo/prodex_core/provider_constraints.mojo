@@ -27,6 +27,29 @@ comptime WARNING_CATALOG_UNAVAILABLE: UInt64 = 1 << 3
 
 comptime UINT64_MAX: UInt64 = 18446744073709551615
 
+comptime COMBO_ABI_VERSION: Int64 = 1
+comptime COMBO_MAX_CANDIDATES: Int64 = 256
+comptime COMBO_INPUT_I64_FIELDS: Int64 = 5
+comptime COMBO_INPUT_U64_FIELDS: Int64 = 5
+comptime COMBO_OUTPUT_I64_FIELDS: Int64 = 2
+comptime COMBO_OUTPUT_U64_FIELDS: Int64 = 3
+comptime COMBO_INPUT_I64_ELIGIBLE: Int64 = 0
+comptime COMBO_INPUT_I64_OUTPUT_FIELD: Int64 = 1
+comptime COMBO_INPUT_I64_ADJUSTMENT_PRESENT: Int64 = 2
+comptime COMBO_INPUT_I64_EXPLICIT_PRESENT: Int64 = 3
+comptime COMBO_INPUT_I64_REASONING_PRESENT: Int64 = 4
+comptime COMBO_INPUT_U64_ADJUSTMENT_REQUESTED: Int64 = 0
+comptime COMBO_INPUT_U64_ADJUSTMENT_APPLIED: Int64 = 1
+comptime COMBO_INPUT_U64_EXPLICIT: Int64 = 2
+comptime COMBO_INPUT_U64_ESTIMATED_INPUT: Int64 = 3
+comptime COMBO_INPUT_U64_REASONING_RESERVE: Int64 = 4
+comptime COMBO_OUTPUT_I64_CHANGED: Int64 = 0
+comptime COMBO_OUTPUT_I64_FIELD: Int64 = 1
+comptime COMBO_OUTPUT_U64_REQUESTED: Int64 = 0
+comptime COMBO_OUTPUT_U64_APPLIED: Int64 = 1
+comptime COMBO_OUTPUT_U64_TOTAL: Int64 = 2
+
+
 comptime PROVIDER_REASONING_EFFORT_NONE: Int64 = 0
 comptime PROVIDER_REASONING_EFFORT_MINIMAL: Int64 = 1
 comptime PROVIDER_REASONING_EFFORT_UNKNOWN: Int64 = 8
@@ -440,6 +463,151 @@ def prodex_gemini_request_field_plan_v1(
         return GEMINI_REQUEST_PLAN_STATUS_CAPACITY
     return 0
 
+
+@export("prodex_provider_constraints_normalize_combo_v1")
+def prodex_provider_constraints_normalize_combo_v1(
+    abi_version: Int64,
+    input_i64_address: UInt,
+    input_i64_count: Int64,
+    input_u64_address: UInt,
+    input_u64_count: Int64,
+    output_i64_address: UInt,
+    output_i64_count: Int64,
+    output_u64_address: UInt,
+    output_u64_count: Int64,
+    candidate_count: Int64,
+) abi("C") -> Int64:
+    if abi_version != COMBO_ABI_VERSION:
+        return ABI_STATUS_MISMATCH
+    if candidate_count < 0 or candidate_count > COMBO_MAX_CANDIDATES:
+        return ABI_STATUS_INVALID_INPUT
+    if (
+        input_i64_count != candidate_count * COMBO_INPUT_I64_FIELDS
+        or input_u64_count != candidate_count * COMBO_INPUT_U64_FIELDS
+        or output_i64_count != candidate_count * COMBO_OUTPUT_I64_FIELDS
+        or output_u64_count != candidate_count * COMBO_OUTPUT_U64_FIELDS
+    ):
+        return ABI_STATUS_MISMATCH
+    if candidate_count > 0 and (
+        input_i64_address == 0
+        or input_u64_address == 0
+        or output_i64_address == 0
+        or output_u64_address == 0
+    ):
+        return ABI_STATUS_INVALID_INPUT
+
+    var input_i64 = Pointer[mut=False, Int64, ImmUntrackedOrigin](
+        unsafe_from_address=Int(input_i64_address)
+    )
+    var input_u64 = Pointer[mut=False, UInt64, ImmUntrackedOrigin](
+        unsafe_from_address=Int(input_u64_address)
+    )
+    var output_i64 = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_i64_address)
+    )
+    var output_u64 = Pointer[mut=True, UInt64, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_u64_address)
+    )
+    var has_applied = False
+    var minimum_applied: UInt64 = UINT64_MAX
+    for index in range(candidate_count):
+        var input_i64_base = index * COMBO_INPUT_I64_FIELDS
+        var input_u64_base = index * COMBO_INPUT_U64_FIELDS
+        var eligible = input_i64[unsafe_offset=input_i64_base + COMBO_INPUT_I64_ELIGIBLE]
+        var output_field = input_i64[unsafe_offset=input_i64_base + COMBO_INPUT_I64_OUTPUT_FIELD]
+        var adjustment_present = input_i64[
+            unsafe_offset=input_i64_base + COMBO_INPUT_I64_ADJUSTMENT_PRESENT
+        ]
+        var explicit_present = input_i64[
+            unsafe_offset=input_i64_base + COMBO_INPUT_I64_EXPLICIT_PRESENT
+        ]
+        var reasoning_present = input_i64[
+            unsafe_offset=input_i64_base + COMBO_INPUT_I64_REASONING_PRESENT
+        ]
+        if (
+            eligible < 0
+            or eligible > 1
+            or output_field < -1
+            or output_field > 2
+            or adjustment_present < 0
+            or adjustment_present > 1
+            or explicit_present < 0
+            or explicit_present > 1
+            or reasoning_present < 0
+            or reasoning_present > 1
+        ):
+            return ABI_STATUS_INVALID_INPUT
+        if adjustment_present == 0 and (
+            input_u64[
+                unsafe_offset=input_u64_base + COMBO_INPUT_U64_ADJUSTMENT_REQUESTED
+            ] != 0
+            or input_u64[
+                unsafe_offset=input_u64_base + COMBO_INPUT_U64_ADJUSTMENT_APPLIED
+            ] != 0
+        ):
+            return ABI_STATUS_INVALID_INPUT
+        if explicit_present == 0 and input_u64[
+            unsafe_offset=input_u64_base + COMBO_INPUT_U64_EXPLICIT
+        ] != 0:
+            return ABI_STATUS_INVALID_INPUT
+        if reasoning_present == 0 and input_u64[
+            unsafe_offset=input_u64_base + COMBO_INPUT_U64_REASONING_RESERVE
+        ] != 0:
+            return ABI_STATUS_INVALID_INPUT
+        if eligible == 1 and adjustment_present == 1:
+            var applied = input_u64[
+                unsafe_offset=input_u64_base + COMBO_INPUT_U64_ADJUSTMENT_APPLIED
+            ]
+            if not has_applied or applied < minimum_applied:
+                minimum_applied = applied
+                has_applied = True
+
+    for index in range(candidate_count):
+        var input_i64_base = index * COMBO_INPUT_I64_FIELDS
+        var input_u64_base = index * COMBO_INPUT_U64_FIELDS
+        var output_i64_base = index * COMBO_OUTPUT_I64_FIELDS
+        var output_u64_base = index * COMBO_OUTPUT_U64_FIELDS
+        output_i64[unsafe_offset=output_i64_base + COMBO_OUTPUT_I64_CHANGED] = 0
+        output_i64[unsafe_offset=output_i64_base + COMBO_OUTPUT_I64_FIELD] = -1
+        output_u64[unsafe_offset=output_u64_base + COMBO_OUTPUT_U64_REQUESTED] = 0
+        output_u64[unsafe_offset=output_u64_base + COMBO_OUTPUT_U64_APPLIED] = 0
+        output_u64[unsafe_offset=output_u64_base + COMBO_OUTPUT_U64_TOTAL] = 0
+        if not has_applied:
+            continue
+        var eligible = input_i64[unsafe_offset=input_i64_base + COMBO_INPUT_I64_ELIGIBLE]
+        var output_field = input_i64[unsafe_offset=input_i64_base + COMBO_INPUT_I64_OUTPUT_FIELD]
+        if eligible == 0 or output_field < 0:
+            continue
+        var adjustment_present = input_i64[
+            unsafe_offset=input_i64_base + COMBO_INPUT_I64_ADJUSTMENT_PRESENT
+        ]
+        var explicit_present = input_i64[
+            unsafe_offset=input_i64_base + COMBO_INPUT_I64_EXPLICIT_PRESENT
+        ]
+        var requested = minimum_applied
+        if adjustment_present == 1:
+            requested = input_u64[
+                unsafe_offset=input_u64_base + COMBO_INPUT_U64_ADJUSTMENT_REQUESTED
+            ]
+        elif explicit_present == 1:
+            requested = input_u64[
+                unsafe_offset=input_u64_base + COMBO_INPUT_U64_EXPLICIT
+            ]
+        var total = provider_constraint_saturating_add(
+            input_u64[unsafe_offset=input_u64_base + COMBO_INPUT_U64_ESTIMATED_INPUT],
+            minimum_applied,
+        )
+        if input_i64[unsafe_offset=input_i64_base + COMBO_INPUT_I64_REASONING_PRESENT] == 1:
+            total = provider_constraint_saturating_add(
+                total,
+                input_u64[unsafe_offset=input_u64_base + COMBO_INPUT_U64_REASONING_RESERVE],
+            )
+        output_i64[unsafe_offset=output_i64_base + COMBO_OUTPUT_I64_CHANGED] = 1
+        output_i64[unsafe_offset=output_i64_base + COMBO_OUTPUT_I64_FIELD] = output_field
+        output_u64[unsafe_offset=output_u64_base + COMBO_OUTPUT_U64_REQUESTED] = requested
+        output_u64[unsafe_offset=output_u64_base + COMBO_OUTPUT_U64_APPLIED] = minimum_applied
+        output_u64[unsafe_offset=output_u64_base + COMBO_OUTPUT_U64_TOTAL] = total
+    return 0
 
 comptime ABI_VERSION: Int64 = 2
 comptime ABI_STATUS_MISMATCH: Int64 = 1
