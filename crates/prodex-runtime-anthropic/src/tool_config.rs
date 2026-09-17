@@ -23,7 +23,37 @@ pub fn runtime_proxy_anthropic_wants_thinking(value: &serde_json::Value) -> bool
         .is_some_and(|thinking| matches!(thinking, "enabled" | "adaptive"))
 }
 
+#[cfg(feature = "mojo")]
 pub fn runtime_proxy_translate_anthropic_reasoning_effort(
+    effort: &str,
+    target_model: &str,
+) -> Option<&'static str> {
+    let mut input = prodex_mojo_core::rich::RuntimeAnthropicKernelInput::new(
+        prodex_mojo_core::rich::RuntimeAnthropicKernelOperation::TranslateReasoningEffort,
+    );
+    input.name = Some(effort);
+    if runtime_proxy_responses_model_supports_xhigh(target_model) {
+        input.flags |= prodex_mojo_core::rich::RUNTIME_ANTHROPIC_FLAG_SUPPORTS_XHIGH;
+    }
+    match crate::mojo::bytes(input).as_slice() {
+        b"low" => Some("low"),
+        b"medium" => Some("medium"),
+        b"high" => Some("high"),
+        b"xhigh" => Some("xhigh"),
+        _ => None,
+    }
+}
+
+#[cfg(not(feature = "mojo"))]
+pub fn runtime_proxy_translate_anthropic_reasoning_effort(
+    effort: &str,
+    target_model: &str,
+) -> Option<&'static str> {
+    runtime_proxy_translate_anthropic_reasoning_effort_rust(effort, target_model)
+}
+
+#[cfg(any(not(feature = "mojo"), test))]
+pub(crate) fn runtime_proxy_translate_anthropic_reasoning_effort_rust(
     effort: &str,
     target_model: &str,
 ) -> Option<&'static str> {
@@ -132,7 +162,23 @@ IMPORTANT: Check the `/memories` directory with the `memory` tool before startin
 Use the `view` command to recover prior progress and relevant context.
 Keep important state in memory as you work because your context window may be interrupted.";
 
+#[cfg(feature = "mojo")]
 pub fn runtime_proxy_anthropic_unversioned_tool_type(tool_type: &str) -> String {
+    let mut input = prodex_mojo_core::rich::RuntimeAnthropicKernelInput::new(
+        prodex_mojo_core::rich::RuntimeAnthropicKernelOperation::UnversionedToolType,
+    );
+    input.name = Some(tool_type);
+    String::from_utf8(crate::mojo::bytes(input))
+        .expect("Mojo Anthropic unversioned tool type is UTF-8")
+}
+
+#[cfg(not(feature = "mojo"))]
+pub fn runtime_proxy_anthropic_unversioned_tool_type(tool_type: &str) -> String {
+    runtime_proxy_anthropic_unversioned_tool_type_rust(tool_type)
+}
+
+#[cfg(any(not(feature = "mojo"), test))]
+pub(crate) fn runtime_proxy_anthropic_unversioned_tool_type_rust(tool_type: &str) -> String {
     let normalized = tool_type.trim().to_ascii_lowercase();
     let Some((base, suffix)) = normalized.rsplit_once('_') else {
         return normalized;
@@ -189,10 +235,44 @@ pub(crate) fn runtime_proxy_anthropic_builtin_server_tool_name_rust(
     }
 }
 
+#[cfg(feature = "mojo")]
+fn runtime_proxy_anthropic_client_tool_kind(kind: u8) -> Option<&'static str> {
+    match kind {
+        1 => Some("bash"),
+        2 => Some("computer"),
+        3 => Some("memory"),
+        4 => Some("str_replace_based_edit_tool"),
+        _ => None,
+    }
+}
+
+#[cfg(feature = "mojo")]
 pub fn runtime_proxy_anthropic_builtin_client_tool_name_from_type(
     tool_type: &str,
 ) -> Option<&'static str> {
-    match runtime_proxy_anthropic_unversioned_tool_type(tool_type).as_str() {
+    let mut input = prodex_mojo_core::rich::RuntimeAnthropicKernelInput::new(
+        prodex_mojo_core::rich::RuntimeAnthropicKernelOperation::ClientToolNameFromType,
+    );
+    input.name = Some(tool_type);
+    let kind = crate::mojo::bytes(input)
+        .first()
+        .copied()?
+        .checked_sub(b'0')?;
+    runtime_proxy_anthropic_client_tool_kind(kind)
+}
+
+#[cfg(not(feature = "mojo"))]
+pub fn runtime_proxy_anthropic_builtin_client_tool_name_from_type(
+    tool_type: &str,
+) -> Option<&'static str> {
+    runtime_proxy_anthropic_builtin_client_tool_name_from_type_rust(tool_type)
+}
+
+#[cfg(any(not(feature = "mojo"), test))]
+pub(crate) fn runtime_proxy_anthropic_builtin_client_tool_name_from_type_rust(
+    tool_type: &str,
+) -> Option<&'static str> {
+    match runtime_proxy_anthropic_unversioned_tool_type_rust(tool_type).as_str() {
         "bash" => Some("bash"),
         "computer" => Some("computer"),
         "memory" => Some("memory"),
@@ -201,7 +281,26 @@ pub fn runtime_proxy_anthropic_builtin_client_tool_name_from_type(
     }
 }
 
+#[cfg(feature = "mojo")]
 pub fn runtime_proxy_anthropic_tool_version(tool_type: Option<&str>) -> Option<u32> {
+    let tool_type = tool_type?;
+    let mut input = prodex_mojo_core::rich::RuntimeAnthropicKernelInput::new(
+        prodex_mojo_core::rich::RuntimeAnthropicKernelOperation::ToolVersion,
+    );
+    input.name = Some(tool_type);
+    String::from_utf8(crate::mojo::bytes(input))
+        .ok()?
+        .parse()
+        .ok()
+}
+
+#[cfg(not(feature = "mojo"))]
+pub fn runtime_proxy_anthropic_tool_version(tool_type: Option<&str>) -> Option<u32> {
+    runtime_proxy_anthropic_tool_version_rust(tool_type)
+}
+
+#[cfg(any(not(feature = "mojo"), test))]
+pub(crate) fn runtime_proxy_anthropic_tool_version_rust(tool_type: Option<&str>) -> Option<u32> {
     let tool_type = tool_type?;
     let (_, suffix) = tool_type.trim().rsplit_once('_')?;
     if suffix.len() != 8 || !suffix.chars().all(|ch| ch.is_ascii_digit()) {
@@ -210,8 +309,41 @@ pub fn runtime_proxy_anthropic_tool_version(tool_type: Option<&str>) -> Option<u
     suffix.parse::<u32>().ok()
 }
 
+#[cfg(feature = "mojo")]
+fn runtime_proxy_anthropic_server_tool_kind(kind: u8) -> Option<&'static str> {
+    match kind {
+        1 => Some("web_search"),
+        2 => Some("web_fetch"),
+        3 => Some("code_execution"),
+        4 => Some("tool_search_tool_regex"),
+        5 => Some("tool_search_tool_bm25"),
+        _ => None,
+    }
+}
+
+#[cfg(feature = "mojo")]
 pub fn runtime_proxy_anthropic_server_tool_name_from_type(tool_type: &str) -> Option<&'static str> {
-    match runtime_proxy_anthropic_unversioned_tool_type(tool_type).as_str() {
+    let mut input = prodex_mojo_core::rich::RuntimeAnthropicKernelInput::new(
+        prodex_mojo_core::rich::RuntimeAnthropicKernelOperation::ServerToolNameFromType,
+    );
+    input.name = Some(tool_type);
+    let kind = crate::mojo::bytes(input)
+        .first()
+        .copied()?
+        .checked_sub(b'0')?;
+    runtime_proxy_anthropic_server_tool_kind(kind)
+}
+
+#[cfg(not(feature = "mojo"))]
+pub fn runtime_proxy_anthropic_server_tool_name_from_type(tool_type: &str) -> Option<&'static str> {
+    runtime_proxy_anthropic_server_tool_name_from_type_rust(tool_type)
+}
+
+#[cfg(any(not(feature = "mojo"), test))]
+pub(crate) fn runtime_proxy_anthropic_server_tool_name_from_type_rust(
+    tool_type: &str,
+) -> Option<&'static str> {
+    match runtime_proxy_anthropic_unversioned_tool_type_rust(tool_type).as_str() {
         "web_search" => Some("web_search"),
         "web_fetch" => Some("web_fetch"),
         "code_execution" => Some("code_execution"),
@@ -221,14 +353,33 @@ pub fn runtime_proxy_anthropic_server_tool_name_from_type(tool_type: &str) -> Op
     }
 }
 
+#[cfg(feature = "mojo")]
 pub fn runtime_proxy_anthropic_client_tool_name(name: &str) -> Option<&'static str> {
+    let mut input = prodex_mojo_core::rich::RuntimeAnthropicKernelInput::new(
+        prodex_mojo_core::rich::RuntimeAnthropicKernelOperation::ClientToolName,
+    );
+    input.name = Some(name);
+    let kind = crate::mojo::bytes(input)
+        .first()
+        .copied()?
+        .checked_sub(b'0')?;
+    runtime_proxy_anthropic_client_tool_kind(kind)
+}
+
+#[cfg(not(feature = "mojo"))]
+pub fn runtime_proxy_anthropic_client_tool_name(name: &str) -> Option<&'static str> {
+    runtime_proxy_anthropic_client_tool_name_rust(name)
+}
+
+#[cfg(any(not(feature = "mojo"), test))]
+pub(crate) fn runtime_proxy_anthropic_client_tool_name_rust(name: &str) -> Option<&'static str> {
     let normalized = name.trim().to_ascii_lowercase();
     match normalized.as_str() {
         "bash" => Some("bash"),
         "computer" => Some("computer"),
         "memory" => Some("memory"),
         "str_replace_based_edit_tool" => Some("str_replace_based_edit_tool"),
-        _ => runtime_proxy_anthropic_builtin_client_tool_name_from_type(name),
+        _ => runtime_proxy_anthropic_builtin_client_tool_name_from_type_rust(name),
     }
 }
 
@@ -668,11 +819,41 @@ pub fn runtime_proxy_anthropic_native_computer_enabled_for_request(
         && !runtime_proxy_anthropic_has_ambiguous_native_tool_choice(value, "computer")
 }
 
+#[cfg(feature = "mojo")]
 pub fn runtime_proxy_anthropic_is_tool_use_block_type(block_type: &str) -> bool {
+    let mut input = prodex_mojo_core::rich::RuntimeAnthropicKernelInput::new(
+        prodex_mojo_core::rich::RuntimeAnthropicKernelOperation::IsToolUseBlockType,
+    );
+    input.block_type = Some(block_type);
+    crate::mojo::bytes(input).as_slice() == b"1"
+}
+
+#[cfg(not(feature = "mojo"))]
+pub fn runtime_proxy_anthropic_is_tool_use_block_type(block_type: &str) -> bool {
+    runtime_proxy_anthropic_is_tool_use_block_type_rust(block_type)
+}
+
+#[cfg(any(not(feature = "mojo"), test))]
+pub(crate) fn runtime_proxy_anthropic_is_tool_use_block_type_rust(block_type: &str) -> bool {
     matches!(block_type, "tool_use" | "server_tool_use" | "mcp_tool_use")
 }
 
+#[cfg(feature = "mojo")]
 pub fn runtime_proxy_anthropic_is_tool_result_block_type(block_type: &str) -> bool {
+    let mut input = prodex_mojo_core::rich::RuntimeAnthropicKernelInput::new(
+        prodex_mojo_core::rich::RuntimeAnthropicKernelOperation::IsToolResultBlockType,
+    );
+    input.block_type = Some(block_type);
+    crate::mojo::bytes(input).as_slice() == b"1"
+}
+
+#[cfg(not(feature = "mojo"))]
+pub fn runtime_proxy_anthropic_is_tool_result_block_type(block_type: &str) -> bool {
+    runtime_proxy_anthropic_is_tool_result_block_type_rust(block_type)
+}
+
+#[cfg(any(not(feature = "mojo"), test))]
+pub(crate) fn runtime_proxy_anthropic_is_tool_result_block_type_rust(block_type: &str) -> bool {
     block_type == "tool_result" || block_type.ends_with("_tool_result")
 }
 
@@ -680,6 +861,86 @@ pub fn runtime_proxy_anthropic_is_special_input_item_block_type(block_type: &str
     runtime_proxy_anthropic_is_tool_use_block_type(block_type)
         || runtime_proxy_anthropic_is_tool_result_block_type(block_type)
         || block_type == "mcp_approval_response"
+}
+
+#[cfg(all(test, feature = "mojo"))]
+#[test]
+fn mojo_tool_config_string_policy_matches_rust_oracle() {
+    for tool_type in [
+        "bash",
+        " BASH_20250124 ",
+        "computer_20251124",
+        "memory_20250818",
+        "text_editor_20250728",
+        "web_search_20250305",
+        "web_fetch_20250910",
+        "code_execution_20250825",
+        "tool_search_tool_regex_20251119",
+        "tool_search_tool_bm25_20251119",
+        "bad_2025",
+        "weird_abcdefgh",
+        "🦀_20250124",
+    ] {
+        assert_eq!(
+            runtime_proxy_anthropic_unversioned_tool_type(tool_type),
+            runtime_proxy_anthropic_unversioned_tool_type_rust(tool_type),
+            "unversioned {tool_type:?}"
+        );
+        assert_eq!(
+            runtime_proxy_anthropic_builtin_client_tool_name_from_type(tool_type),
+            runtime_proxy_anthropic_builtin_client_tool_name_from_type_rust(tool_type),
+            "client-from-type {tool_type:?}"
+        );
+        assert_eq!(
+            runtime_proxy_anthropic_tool_version(Some(tool_type)),
+            runtime_proxy_anthropic_tool_version_rust(Some(tool_type)),
+            "version {tool_type:?}"
+        );
+        assert_eq!(
+            runtime_proxy_anthropic_server_tool_name_from_type(tool_type),
+            runtime_proxy_anthropic_server_tool_name_from_type_rust(tool_type),
+            "server-from-type {tool_type:?}"
+        );
+        assert_eq!(
+            runtime_proxy_anthropic_client_tool_name(tool_type),
+            runtime_proxy_anthropic_client_tool_name_rust(tool_type),
+            "client-name {tool_type:?}"
+        );
+    }
+
+    assert_eq!(runtime_proxy_anthropic_tool_version(None), None);
+    for block_type in [
+        "tool_use",
+        "server_tool_use",
+        "mcp_tool_use",
+        "tool_result",
+        "web_search_tool_result",
+        "mcp_tool_result",
+        " TOOL_USE ",
+        "tool_result_extra",
+        "",
+    ] {
+        assert_eq!(
+            runtime_proxy_anthropic_is_tool_use_block_type(block_type),
+            runtime_proxy_anthropic_is_tool_use_block_type_rust(block_type),
+            "tool-use {block_type:?}"
+        );
+        assert_eq!(
+            runtime_proxy_anthropic_is_tool_result_block_type(block_type),
+            runtime_proxy_anthropic_is_tool_result_block_type_rust(block_type),
+            "tool-result {block_type:?}"
+        );
+    }
+
+    for model in ["gpt-5.6-sol", "gpt-5.6-luna", "gpt-5.4", "unknown"] {
+        for effort in ["low", " MEDIUM ", "High", "max", "xhigh", "unknown"] {
+            assert_eq!(
+                runtime_proxy_translate_anthropic_reasoning_effort(effort, model),
+                runtime_proxy_translate_anthropic_reasoning_effort_rust(effort, model),
+                "effort={effort:?} model={model:?}"
+            );
+        }
+    }
 }
 
 #[cfg(all(test, feature = "mojo"))]

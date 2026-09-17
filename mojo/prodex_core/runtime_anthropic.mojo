@@ -47,10 +47,19 @@ comptime RUNTIME_ANTHROPIC_MESSAGE_HAS_TOOL_CHAIN: Int64 = 24
 comptime RUNTIME_ANTHROPIC_SERVER_TOOL_NAME_KIND: Int64 = 25
 comptime RUNTIME_ANTHROPIC_CLIENT_TOOL_DESCRIPTION: Int64 = 26
 comptime RUNTIME_ANTHROPIC_CLIENT_TOOL_SCHEMA: Int64 = 27
+comptime RUNTIME_ANTHROPIC_UNVERSIONED_TOOL_TYPE: Int64 = 28
+comptime RUNTIME_ANTHROPIC_CLIENT_TOOL_NAME_FROM_TYPE: Int64 = 29
+comptime RUNTIME_ANTHROPIC_TOOL_VERSION: Int64 = 30
+comptime RUNTIME_ANTHROPIC_SERVER_TOOL_NAME_FROM_TYPE: Int64 = 31
+comptime RUNTIME_ANTHROPIC_CLIENT_TOOL_NAME: Int64 = 32
+comptime RUNTIME_ANTHROPIC_IS_TOOL_USE_BLOCK_TYPE: Int64 = 33
+comptime RUNTIME_ANTHROPIC_IS_TOOL_RESULT_BLOCK_TYPE: Int64 = 34
+comptime RUNTIME_ANTHROPIC_TRANSLATE_REASONING_EFFORT: Int64 = 35
 
 comptime RUNTIME_ANTHROPIC_FLAG_ERROR: Int64 = 1
 comptime RUNTIME_ANTHROPIC_FLAG_MAX_OUTPUT_LENGTH: Int64 = 2
 comptime RUNTIME_ANTHROPIC_FLAG_CACHED_TOKENS: Int64 = 4
+comptime RUNTIME_ANTHROPIC_FLAG_SUPPORTS_XHIGH: Int64 = 8
 
 
 @fieldwise_init
@@ -2075,6 +2084,176 @@ def runtime_anthropic_write_client_tool_schema(
     return False
 
 
+
+def runtime_anthropic_ascii_lower_range(
+    writer: Pointer[mut=True, RuntimeAnthropicKernelWriter, _],
+    view: ProdexRichStringView,
+    start: Int64,
+    end: Int64,
+) -> Bool:
+    if start < 0 or end < start or end > Int64(view.len):
+        return False
+    var ptr = rich_view_ptr(view)
+    for index in range(start, end):
+        var value = ptr[unsafe_offset=index]
+        if value >= 65 and value <= 90:
+            value += 32
+        if not runtime_anthropic_put_byte(writer, value):
+            return False
+    return True
+
+
+def runtime_anthropic_trimmed_view(view: ProdexRichStringView) -> ProdexRichStringView:
+    var bounds = rich_trim_bounds(view)
+    return ProdexRichStringView(
+        view.ptr + UInt(bounds[0]), UInt(bounds[1] - bounds[0])
+    )
+
+
+def runtime_anthropic_versioned_type_base_range(
+    view: ProdexRichStringView,
+) -> InlineArray[Int64, 3]:
+    var result = InlineArray[Int64, 3](fill=-1)
+    var bounds = rich_trim_bounds(view)
+    var start = bounds[0]
+    var end = bounds[1]
+    result[0] = start
+    result[1] = end
+    if end - start < 9:
+        return result^
+    var ptr = rich_view_ptr(view)
+    var underscore: Int64 = -1
+    for index in range(start, end):
+        if ptr[unsafe_offset=index] == 95:
+            underscore = index
+    if underscore < start or end - underscore - 1 != 8:
+        return result^
+    for index in range(underscore + 1, end):
+        var value = ptr[unsafe_offset=index]
+        if value < 48 or value > 57:
+            return result^
+    result[1] = underscore
+    result[2] = underscore + 1
+    return result^
+
+
+def runtime_anthropic_type_kind(view: ProdexRichStringView) -> Int64:
+    var base = runtime_anthropic_versioned_type_base_range(view)
+    if base[0] < 0:
+        return 0
+    var normalized = ProdexRichStringView(
+        view.ptr + UInt(base[0]), UInt(base[1] - base[0])
+    )
+    if rich_view_matches_literal["bash"](normalized, True):
+        return 1
+    if rich_view_matches_literal["computer"](normalized, True):
+        return 2
+    if rich_view_matches_literal["memory"](normalized, True):
+        return 3
+    if rich_view_matches_literal["text_editor"](normalized, True):
+        return 4
+    if rich_view_matches_literal["web_search"](normalized, True):
+        return 5
+    if rich_view_matches_literal["web_fetch"](normalized, True):
+        return 6
+    if rich_view_matches_literal["code_execution"](normalized, True):
+        return 7
+    if rich_view_matches_literal["tool_search_tool_regex"](normalized, True):
+        return 8
+    if rich_view_matches_literal["tool_search_tool_bm25"](normalized, True):
+        return 9
+    return 0
+
+
+def runtime_anthropic_write_unversioned_tool_type(
+    writer: Pointer[mut=True, RuntimeAnthropicKernelWriter, _],
+    view: ProdexRichStringView,
+) -> Bool:
+    var base = runtime_anthropic_versioned_type_base_range(view)
+    return base[0] >= 0 and runtime_anthropic_ascii_lower_range(
+        writer, view, base[0], base[1]
+    )
+
+
+def runtime_anthropic_write_tool_version(
+    writer: Pointer[mut=True, RuntimeAnthropicKernelWriter, _],
+    view: ProdexRichStringView,
+) -> Bool:
+    var base = runtime_anthropic_versioned_type_base_range(view)
+    if base[2] < 0:
+        return True
+    var bounds = rich_trim_bounds(view)
+    return runtime_anthropic_put_view_range(writer, view, base[2], bounds[1])
+
+
+def runtime_anthropic_write_client_tool_kind(
+    writer: Pointer[mut=True, RuntimeAnthropicKernelWriter, _],
+    view: ProdexRichStringView,
+) -> Bool:
+    var kind = runtime_anthropic_type_kind(view)
+    if kind >= 1 and kind <= 4:
+        return runtime_anthropic_put_u64(writer, UInt64(kind))
+    return runtime_anthropic_put_byte(writer, 48)
+
+
+def runtime_anthropic_write_server_tool_type_kind(
+    writer: Pointer[mut=True, RuntimeAnthropicKernelWriter, _],
+    view: ProdexRichStringView,
+) -> Bool:
+    var kind = runtime_anthropic_type_kind(view)
+    if kind >= 5:
+        return runtime_anthropic_put_u64(writer, UInt64(kind - 4))
+    return runtime_anthropic_put_byte(writer, 48)
+
+
+def runtime_anthropic_write_client_tool_name_kind(
+    writer: Pointer[mut=True, RuntimeAnthropicKernelWriter, _],
+    view: ProdexRichStringView,
+) -> Bool:
+    var trimmed = runtime_anthropic_trimmed_view(view)
+    if rich_view_matches_literal["bash"](trimmed, True):
+        return runtime_anthropic_put_byte(writer, 49)
+    if rich_view_matches_literal["computer"](trimmed, True):
+        return runtime_anthropic_put_byte(writer, 50)
+    if rich_view_matches_literal["memory"](trimmed, True):
+        return runtime_anthropic_put_byte(writer, 51)
+    if rich_view_matches_literal["str_replace_based_edit_tool"](trimmed, True):
+        return runtime_anthropic_put_byte(writer, 52)
+    return runtime_anthropic_write_client_tool_kind(writer, view)
+
+
+def runtime_anthropic_view_ends_literal(
+    view: ProdexRichStringView, literal: StringSlice
+) -> Bool:
+    if Int64(view.len) < Int64(literal.byte_length()):
+        return False
+    var ptr = rich_view_ptr(view)
+    var expected = literal.unsafe_ptr()
+    var start = Int64(view.len) - Int64(literal.byte_length())
+    for index in range(Int64(literal.byte_length())):
+        if ptr[unsafe_offset=start + index] != expected[unsafe_offset=index]:
+            return False
+    return True
+
+
+def runtime_anthropic_write_reasoning_effort(
+    writer: Pointer[mut=True, RuntimeAnthropicKernelWriter, _],
+    effort: ProdexRichStringView,
+    supports_xhigh: Bool,
+) -> Bool:
+    var trimmed = runtime_anthropic_trimmed_view(effort)
+    if rich_view_matches_literal["low"](trimmed, True):
+        return runtime_anthropic_put_literal(writer, StringSlice("low"))
+    if rich_view_matches_literal["medium"](trimmed, True):
+        return runtime_anthropic_put_literal(writer, StringSlice("medium"))
+    if rich_view_matches_literal["high"](trimmed, True):
+        return runtime_anthropic_put_literal(writer, StringSlice("high"))
+    if rich_view_matches_literal["max"](trimmed, True):
+        if supports_xhigh:
+            return runtime_anthropic_put_literal(writer, StringSlice("xhigh"))
+        return runtime_anthropic_put_literal(writer, StringSlice("high"))
+    return True
+
 def runtime_anthropic_write_operation(
     writer: Pointer[mut=True, RuntimeAnthropicKernelWriter, _],
     input: ProdexRuntimeAnthropicKernelInput,
@@ -2167,6 +2346,28 @@ def runtime_anthropic_write_operation(
         return runtime_anthropic_write_client_tool_description(writer, input)
     if input.operation == RUNTIME_ANTHROPIC_CLIENT_TOOL_SCHEMA:
         return runtime_anthropic_write_client_tool_schema(writer, input)
+    if input.operation == RUNTIME_ANTHROPIC_UNVERSIONED_TOOL_TYPE:
+        return input.name_present != 0 and runtime_anthropic_write_unversioned_tool_type(writer, input.name)
+    if input.operation == RUNTIME_ANTHROPIC_CLIENT_TOOL_NAME_FROM_TYPE:
+        return input.name_present != 0 and runtime_anthropic_write_client_tool_kind(writer, input.name)
+    if input.operation == RUNTIME_ANTHROPIC_TOOL_VERSION:
+        return input.name_present != 0 and runtime_anthropic_write_tool_version(writer, input.name)
+    if input.operation == RUNTIME_ANTHROPIC_SERVER_TOOL_NAME_FROM_TYPE:
+        return input.name_present != 0 and runtime_anthropic_write_server_tool_type_kind(writer, input.name)
+    if input.operation == RUNTIME_ANTHROPIC_CLIENT_TOOL_NAME:
+        return input.name_present != 0 and runtime_anthropic_write_client_tool_name_kind(writer, input.name)
+    if input.operation == RUNTIME_ANTHROPIC_IS_TOOL_USE_BLOCK_TYPE:
+        if input.block_type_present == 0:
+            return False
+        var matched = rich_view_matches_literal["tool_use"](input.block_type, False) or rich_view_matches_literal["server_tool_use"](input.block_type, False) or rich_view_matches_literal["mcp_tool_use"](input.block_type, False)
+        return runtime_anthropic_put_byte(writer, UInt8(49 if matched else 48))
+    if input.operation == RUNTIME_ANTHROPIC_IS_TOOL_RESULT_BLOCK_TYPE:
+        if input.block_type_present == 0:
+            return False
+        var matched = rich_view_matches_literal["tool_result"](input.block_type, False) or runtime_anthropic_view_ends_literal(input.block_type, StringSlice("_tool_result"))
+        return runtime_anthropic_put_byte(writer, UInt8(49 if matched else 48))
+    if input.operation == RUNTIME_ANTHROPIC_TRANSLATE_REASONING_EFFORT:
+        return input.name_present != 0 and runtime_anthropic_write_reasoning_effort(writer, input.name, (input.flags & RUNTIME_ANTHROPIC_FLAG_SUPPORTS_XHIGH) != 0)
     return False
 
 
@@ -2175,7 +2376,7 @@ def runtime_anthropic_input_valid(
 ) -> Bool:
     return (
         input.operation > 0
-        and input.operation <= RUNTIME_ANTHROPIC_CLIENT_TOOL_SCHEMA
+        and input.operation <= RUNTIME_ANTHROPIC_TRANSLATE_REASONING_EFFORT
         and rich_view_valid(input.id, RUNTIME_ANTHROPIC_KERNEL_MAX_BYTES)
         and rich_view_valid(input.name, RUNTIME_ANTHROPIC_KERNEL_MAX_BYTES)
         and rich_view_valid(input.block_type, RUNTIME_ANTHROPIC_KERNEL_MAX_BYTES)

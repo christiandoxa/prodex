@@ -36,11 +36,20 @@ pub enum RuntimeAnthropicKernelOperation {
     ServerToolNameKind = 25,
     ClientToolDescription = 26,
     ClientToolSchema = 27,
+    UnversionedToolType = 28,
+    ClientToolNameFromType = 29,
+    ToolVersion = 30,
+    ServerToolNameFromType = 31,
+    ClientToolName = 32,
+    IsToolUseBlockType = 33,
+    IsToolResultBlockType = 34,
+    TranslateReasoningEffort = 35,
 }
 
 pub const RUNTIME_ANTHROPIC_FLAG_ERROR: i64 = 1;
 pub const RUNTIME_ANTHROPIC_FLAG_MAX_OUTPUT_LENGTH: i64 = 2;
 pub const RUNTIME_ANTHROPIC_FLAG_CACHED_TOKENS: i64 = 4;
+pub const RUNTIME_ANTHROPIC_FLAG_SUPPORTS_XHIGH: i64 = 8;
 
 /// Inputs for one bounded Anthropic runtime wire-shape operation.
 #[derive(Debug, Clone, Copy)]
