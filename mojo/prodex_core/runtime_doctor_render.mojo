@@ -20,6 +20,7 @@ comptime RENDER_PROBE_REFRESH: Int64 = 10
 comptime RENDER_TRANSPORT: Int64 = 11
 comptime RENDER_QUOTA: Int64 = 12
 comptime RENDER_PRECOMMIT: Int64 = 13
+comptime RENDER_DIAGNOSIS: Int64 = 14
 
 comptime DETAIL_CONTEXT_DEPENDENT: Int64 = 1
 comptime DETAIL_COMPACT_PRESSURE: Int64 = 2
@@ -212,10 +213,155 @@ def runtime_doctor_render_probe_refresh(
     return runtime_doctor_render_put_literal(writer, StringSlice("Let the background quota-refresh queue drain")) and runtime_doctor_render_put_prefixed_if_present(writer, input, 0, StringSlice(" for profile ")) and runtime_doctor_render_put_literal(writer, StringSlice(" before expecting cold-start profiles to become selectable again.")) and runtime_doctor_render_put_prefixed_if_present(writer, input, 1, StringSlice(" Latest probe backlog: ")) and (not runtime_doctor_render_input_present(input, 1) or runtime_doctor_render_put_literal(writer, StringSlice(".")))
 
 
+def runtime_doctor_render_diagnosis(
+    writer: Pointer[mut=True, RuntimeDoctorRenderWriter, _],
+    input: ProdexRuntimeDoctorRenderInput,
+) -> Bool:
+    var kind = input.detail
+    if kind == 1:
+        return runtime_doctor_render_put_literal(writer, StringSlice("No runtime log pointer has been created yet."))
+    if kind == 2:
+        return runtime_doctor_render_put_literal(writer, StringSlice("Latest runtime log path does not exist."))
+    if kind == 3:
+        return runtime_doctor_render_put_literal(writer, StringSlice("Latest runtime log is empty."))
+    if kind == 4:
+        return runtime_doctor_render_put_literal(writer, StringSlice("Recent local proxy overload backoff was triggered."))
+    if kind == 5:
+        return runtime_doctor_render_put_literal(writer, StringSlice("Recent per-lane admission limit was triggered on ")) and runtime_doctor_render_put_value_or_literal(writer, input, 0, StringSlice("-")) and runtime_doctor_render_put_literal(writer, StringSlice(". Next step: ")) and runtime_doctor_render_put_value_or_literal(writer, input, 1, StringSlice("inspect lane pressure"))
+    if kind == 6:
+        return runtime_doctor_render_put_literal(writer, StringSlice("Recent global active-request admission limit was triggered. Next step: ")) and runtime_doctor_render_put_value_or_literal(writer, input, 0, StringSlice("inspect active pressure"))
+    if kind == 7:
+        return runtime_doctor_render_put_literal(writer, StringSlice("Recent proxy saturation detected before commit."))
+    if kind == 8:
+        return runtime_doctor_render_put_literal(writer, StringSlice("Recent route-level circuit breaker opened; fresh selection is temporarily steering away from a degraded profile."))
+    if kind == 9:
+        return runtime_doctor_render_put_literal(writer, StringSlice("Recent route-level circuit breaker entered half-open probing; fresh selection is cautiously testing a degraded profile before fully restoring it."))
+    if kind == 10:
+        return runtime_doctor_render_put_literal(writer, StringSlice("Recent websocket reuse/connect path failed to produce a first upstream frame before the pre-commit deadline."))
+    if kind == 11:
+        return runtime_doctor_render_put_literal(writer, StringSlice("Recent websocket pre-commit hold timed out before an upstream terminal frame arrived."))
+    if kind == 12:
+        return runtime_doctor_render_put_literal(writer, StringSlice("Recent websocket DNS resolution timed out before upstream connect completed."))
+    if kind == 13:
+        return runtime_doctor_render_put_literal(writer, StringSlice("Recent websocket DNS resolution work was rejected after the overflow queue saturated."))
+    if kind == 14:
+        return runtime_doctor_render_put_literal(writer, StringSlice("Recent websocket DNS resolution overflow queueing was observed."))
+    if kind == 15:
+        return runtime_doctor_render_put_literal(writer, StringSlice("Recent websocket connect failed due local pressure before upstream commit."))
+    if kind == 16:
+        return runtime_doctor_render_put_literal(writer, StringSlice("Recent websocket connect work was rejected after the overflow queue saturated. Next step: ")) and runtime_doctor_render_put_value_or_literal(writer, input, 0, StringSlice("inspect websocket connect overflow"))
+    if kind == 17:
+        return runtime_doctor_render_put_literal(writer, StringSlice("Recent websocket connect overflow queueing was observed. Next step: ")) and runtime_doctor_render_put_value_or_literal(writer, input, 0, StringSlice("inspect websocket connect overflow"))
+    if kind == 18:
+        return runtime_doctor_render_put_literal(writer, StringSlice("Recent websocket connect overflow dispatch was observed. Next step: ")) and runtime_doctor_render_put_value_or_literal(writer, input, 0, StringSlice("inspect websocket connect overflow"))
+    if kind == 19:
+        return runtime_doctor_render_put_literal(writer, StringSlice("Recent websocket upstream proxy tunnel failed before the upstream websocket handshake completed. Next step: inspect HTTPS_PROXY/NO_PROXY and the proxy's CONNECT support."))
+    if kind == 20:
+        if not (runtime_doctor_render_put_literal(writer, StringSlice("Recent per-profile in-flight saturation blocked ")) and runtime_doctor_render_put_value_or_literal(writer, input, 0, StringSlice("an eligible profile"))):
+            return False
+        if runtime_doctor_render_input_present(input, 1) and not (runtime_doctor_render_put_literal(writer, StringSlice(" at hard limit ")) and runtime_doctor_render_put_view(writer, runtime_doctor_render_input_value(input, 1))):
+            return False
+        return runtime_doctor_render_put_literal(writer, StringSlice(". Next step: ")) and runtime_doctor_render_put_value_or_literal(writer, input, 2, StringSlice("wait for in-flight work to drain"))
+    if kind == 21:
+        return runtime_doctor_render_put_literal(writer, StringSlice("Recent route-specific health penalty is steering fresh selection away from ")) and runtime_doctor_render_put_value_or_literal(writer, input, 0, StringSlice("unknown route")) and runtime_doctor_render_put_literal(writer, StringSlice(" (score ")) and runtime_doctor_render_put_value_or_literal(writer, input, 1, StringSlice("-")) and runtime_doctor_render_put_literal(writer, StringSlice(", reason ")) and runtime_doctor_render_put_value_or_literal(writer, input, 2, StringSlice("unknown_reason")) and runtime_doctor_render_put_literal(writer, StringSlice("). Next step: ")) and runtime_doctor_render_put_value_or_literal(writer, input, 3, StringSlice("inspect route health"))
+    if kind == 22:
+        return runtime_doctor_render_put_literal(writer, StringSlice("Recent route-specific bad pairing memory is steering fresh selection away from a flaky account."))
+    if kind == 23:
+        return runtime_doctor_render_put_literal(writer, StringSlice("Recent profile auth recovery failed after an upstream unauthorized response. Next step: ")) and runtime_doctor_render_put_value_or_literal(writer, input, 0, StringSlice("refresh profile credentials"))
+    if kind == 24:
+        return runtime_doctor_render_put_literal(writer, StringSlice("Recent ")) and runtime_doctor_render_put_value_or_literal(writer, input, 0, StringSlice("unknown")) and runtime_doctor_render_put_literal(writer, StringSlice(" provider auth failure was observed for profile ")) and runtime_doctor_render_put_value_or_literal(writer, input, 1, StringSlice("unknown")) and runtime_doctor_render_put_literal(writer, StringSlice("; refresh that provider login or API key before retrying."))
+    if kind == 25:
+        return runtime_doctor_render_put_literal(writer, StringSlice("Recent compact lineage guard failed closed so a follow-up stayed owner-first until upstream continuity was proven dead."))
+    if kind == 26:
+        return runtime_doctor_render_put_literal(writer, StringSlice("Recent pressure mode is shedding fresh compact requests to preserve continuation-heavy traffic."))
+    if kind == 27:
+        return runtime_doctor_render_put_literal(writer, StringSlice("Recent previous_response_id chain was confirmed dead upstream after owner retries. Latest chain event: ")) and runtime_doctor_render_put_value_or_literal(writer, input, 0, StringSlice("inspect chain_dead_upstream_confirmed markers")) and runtime_doctor_render_put_literal(writer, StringSlice("."))
+    if kind == 28:
+        return runtime_doctor_render_put_literal(writer, StringSlice("Recent stale continuation was surfaced to Codex via fail-closed handling. Latest reason: ")) and runtime_doctor_render_put_value_or_literal(writer, input, 0, StringSlice("inspect stale_continuation markers")) and runtime_doctor_render_put_literal(writer, StringSlice("."))
+    if kind == 29:
+        return runtime_doctor_render_put_literal(writer, StringSlice("Recent continuation chain was retried on the owning profile before commit. Latest chain event: ")) and runtime_doctor_render_put_value_or_literal(writer, input, 0, StringSlice("inspect chain_retried_owner markers")) and runtime_doctor_render_put_literal(writer, StringSlice("."))
+    if kind == 30:
+        if runtime_doctor_render_input_present(input, 2):
+            return runtime_doctor_render_put_literal(writer, StringSlice("Recent context-dependent previous_response_id continuation failed closed before commit. Fresh replay is disabled to preserve continuity. Latest reason: ")) and runtime_doctor_render_put_value_or_literal(writer, input, 1, StringSlice("-")) and runtime_doctor_render_put_literal(writer, StringSlice(". Next step: ")) and runtime_doctor_render_put_value_or_literal(writer, input, 3, StringSlice("inspect continuation state"))
+        return runtime_doctor_render_put_literal(writer, StringSlice("Recent ")) and runtime_doctor_render_put_value_or_literal(writer, input, 0, StringSlice("previous_response_id continuation")) and runtime_doctor_render_put_literal(writer, StringSlice(" failed closed before commit. Fresh replay is disabled for stale continuation handling. Latest reason: ")) and runtime_doctor_render_put_value_or_literal(writer, input, 1, StringSlice("-")) and runtime_doctor_render_put_literal(writer, StringSlice(". Next step: ")) and runtime_doctor_render_put_value_or_literal(writer, input, 3, StringSlice("inspect continuation state"))
+    if kind == 31:
+        return runtime_doctor_render_put_literal(writer, StringSlice("Legacy previous_response recovery marker was observed for ")) and runtime_doctor_render_put_value_or_literal(writer, input, 0, StringSlice("previous_response_id continuation")) and runtime_doctor_render_put_literal(writer, StringSlice(", but current runtime should fail closed instead of treating this as recoverable. Latest reason: ")) and runtime_doctor_render_put_value_or_literal(writer, input, 1, StringSlice("-")) and runtime_doctor_render_put_literal(writer, StringSlice(". Restart active prodex/codex sessions if this came from a live broker."))
+    if kind == 32:
+        return runtime_doctor_render_put_literal(writer, StringSlice("Recent previous_response_id continuity failures were observed: ")) and runtime_doctor_render_put_value_or_literal(writer, input, 0, StringSlice("none")) and runtime_doctor_render_put_literal(writer, StringSlice("."))
+    if kind == 33:
+        return runtime_doctor_render_put_literal(writer, StringSlice("Recent compact final failure exited via ")) and runtime_doctor_render_put_value_or_literal(writer, input, 0, StringSlice("-")) and runtime_doctor_render_put_literal(writer, StringSlice(" with reason ")) and runtime_doctor_render_put_value_or_literal(writer, input, 1, StringSlice("-")) and runtime_doctor_render_put_literal(writer, StringSlice(". Next step: ")) and runtime_doctor_render_put_value_or_literal(writer, input, 2, StringSlice("inspect compact failure"))
+    if kind == 34:
+        if runtime_doctor_render_input_present(input, 0):
+            return runtime_doctor_render_put_literal(writer, StringSlice("Recent compact exit paths were logged: ")) and runtime_doctor_render_put_view(writer, runtime_doctor_render_input_value(input, 0)) and runtime_doctor_render_put_literal(writer, StringSlice("."))
+        return runtime_doctor_render_put_literal(writer, StringSlice("No recent overload or stream-failure markers were detected in the sampled runtime tail."))
+    if kind == 35:
+        return runtime_doctor_render_put_literal(writer, StringSlice("Recent compatibility warnings were observed for ")) and runtime_doctor_render_put_value_or_literal(writer, input, 0, StringSlice("unknown client")) and runtime_doctor_render_put_literal(writer, StringSlice(": ")) and runtime_doctor_render_put_value_or_literal(writer, input, 1, StringSlice("inspect compat_warning markers")) and runtime_doctor_render_put_literal(writer, StringSlice("."))
+    if kind == 36:
+        return runtime_doctor_render_put_literal(writer, StringSlice("Some persisted continuations are currently dead and will be pruned: ")) and runtime_doctor_render_put_value_or_literal(writer, input, 0, StringSlice("0")) and runtime_doctor_render_put_literal(writer, StringSlice("."))
+    if kind == 37:
+        return runtime_doctor_render_put_literal(writer, StringSlice("Some persisted continuations are currently suspect: ")) and runtime_doctor_render_put_value_or_literal(writer, input, 0, StringSlice("")) and runtime_doctor_render_put_literal(writer, StringSlice("."))
+    if kind == 38:
+        return runtime_doctor_render_put_literal(writer, StringSlice("Recent websocket session reuse degraded before a terminal event; fresh reuse may be steering away from that profile."))
+    if kind == 39:
+        return runtime_doctor_render_put_literal(writer, StringSlice("Recent profile auth recovered after an upstream unauthorized response. Next step: ")) and runtime_doctor_render_put_value_or_literal(writer, input, 0, StringSlice("inspect profile auth recovery"))
+    if kind == 40:
+        return runtime_doctor_render_put_literal(writer, StringSlice("Recent candidate selection exhausted before commit."))
+    if kind == 41:
+        return runtime_doctor_render_put_literal(writer, StringSlice("Recent quota hardening skipped near-exhausted sends or passed through upstream usage-limit responses."))
+    if kind == 42:
+        return runtime_doctor_render_put_literal(writer, StringSlice("Recent Gemini quota or rate-limit recovery was observed for profile ")) and runtime_doctor_render_put_value_or_literal(writer, input, 0, StringSlice("unknown")) and runtime_doctor_render_put_literal(writer, StringSlice(" before commit; OAuth profile rotation/retry kept the Codex-facing request recoverable."))
+    if kind == 43:
+        return runtime_doctor_render_put_literal(writer, StringSlice("Recent ")) and runtime_doctor_render_put_value_or_literal(writer, input, 0, StringSlice("unknown")) and runtime_doctor_render_put_literal(writer, StringSlice(" model fallback was used before commit (")) and runtime_doctor_render_put_value_or_literal(writer, input, 1, StringSlice("-")) and runtime_doctor_render_put_literal(writer, StringSlice(" -> ")) and runtime_doctor_render_put_value_or_literal(writer, input, 2, StringSlice("-")) and runtime_doctor_render_put_literal(writer, StringSlice(")."))
+    if kind == 44:
+        return runtime_doctor_render_put_literal(writer, StringSlice("Recent Gemini stream produced an invalid pre-commit prefix (")) and runtime_doctor_render_put_value_or_literal(writer, input, 0, StringSlice("invalid_stream")) and runtime_doctor_render_put_literal(writer, StringSlice("); Prodex retried or fell back before exposing it to Codex."))
+    if kind == 45:
+        return runtime_doctor_render_put_literal(writer, StringSlice("Recent Gemini semantic compact failed before commit, so Prodex preserved continuity with the bounded local fallback. Latest reason: ")) and runtime_doctor_render_put_value_or_literal(writer, input, 0, StringSlice("-")) and runtime_doctor_render_put_literal(writer, StringSlice("."))
+    if kind == 46:
+        return runtime_doctor_render_put_literal(writer, StringSlice("Recent Gemini Live bridge errors were observed; inspect local_rewrite_gemini_live_* markers for the failing profile/request."))
+    if kind == 47:
+        return runtime_doctor_render_put_literal(writer, StringSlice("Recent upstream stream read failure detected after commit."))
+    if kind == 48:
+        return runtime_doctor_render_put_literal(writer, StringSlice("Recent local writer failure detected while forwarding an upstream stream."))
+    if kind == 49:
+        return runtime_doctor_render_put_literal(writer, StringSlice("Recent upstream connect failures detected."))
+    if kind == 50:
+        return runtime_doctor_render_put_literal(writer, StringSlice("Recent runtime state save failures detected."))
+    if kind == 51:
+        return runtime_doctor_render_put_literal(writer, StringSlice("Recent background persistence queue backpressure was detected. Next step: ")) and runtime_doctor_render_put_value_or_literal(writer, input, 0, StringSlice("inspect persistence pressure"))
+    if kind == 52:
+        return runtime_doctor_render_put_literal(writer, StringSlice("Recent fresh selection skipped inline quota probing on route ")) and runtime_doctor_render_put_value_or_literal(writer, input, 0, StringSlice("-")) and runtime_doctor_render_put_literal(writer, StringSlice(" under pressure mode. Next step: ")) and runtime_doctor_render_put_value_or_literal(writer, input, 1, StringSlice("inspect sync probe pressure"))
+    if kind == 53:
+        if not (runtime_doctor_render_put_literal(writer, StringSlice("Recent background quota refresh queue backpressure was detected for profile ")) and runtime_doctor_render_put_value_or_literal(writer, input, 0, StringSlice("-"))):
+            return False
+        if runtime_doctor_render_input_present(input, 1) and not (runtime_doctor_render_put_literal(writer, StringSlice(" with backlog ")) and runtime_doctor_render_put_view(writer, runtime_doctor_render_input_value(input, 1))):
+            return False
+        return runtime_doctor_render_put_literal(writer, StringSlice(". Next step: ")) and runtime_doctor_render_put_value_or_literal(writer, input, 2, StringSlice("let background probes drain"))
+    if kind == 54:
+        return runtime_doctor_render_put_literal(writer, StringSlice("Persisted degraded runtime routes are still active: ")) and runtime_doctor_render_put_value_or_literal(writer, input, 0, StringSlice(""))
+    if kind == 55:
+        return runtime_doctor_render_put_literal(writer, StringSlice("Orphan managed profile directories were detected: ")) and runtime_doctor_render_put_value_or_literal(writer, input, 0, StringSlice(""))
+    if kind == 56:
+        return runtime_doctor_render_put_literal(writer, StringSlice("Recent background quota refresh failures detected; fresh selection may rely on stale quota snapshots."))
+    if kind == 57:
+        return runtime_doctor_render_put_literal(writer, StringSlice("Background quota refresh activity was detected; inspect the last marker for the most recent profile refresh."))
+    if kind == 58:
+        return runtime_doctor_render_put_literal(writer, StringSlice("Likely writer stall: upstream produced data but the local writer did not emit a first chunk in the sampled tail."))
+    if kind == 59:
+        return runtime_doctor_render_put_literal(writer, StringSlice("A running runtime broker uses a different prodex binary than this command; restart active prodex/codex sessions so the patched runtime is loaded."))
+    if kind == 60:
+        return runtime_doctor_render_put_literal(writer, StringSlice("Multiple prodex binaries on PATH differ by version or hash; align installs so new sessions use the patched runtime."))
+    if kind == 61:
+        return runtime_doctor_render_put_literal(writer, StringSlice("Recent selection decisions were logged; inspect the last marker for why a profile was picked or skipped."))
+    if kind == 0 or kind == 62:
+        return runtime_doctor_render_put_literal(writer, StringSlice("No recent overload or stream-failure markers were detected in the sampled runtime tail."))
+    return False
+
 def runtime_doctor_render_value(
     writer: Pointer[mut=True, RuntimeDoctorRenderWriter, _],
     input: ProdexRuntimeDoctorRenderInput,
 ) -> Bool:
+    if input.operation == RENDER_DIAGNOSIS:
+        return runtime_doctor_render_diagnosis(writer, input)
     if input.operation == RENDER_PREVIOUS_RESPONSE:
         return runtime_doctor_render_previous(writer, input)
     if input.operation == RENDER_COMPACT_FINAL_FAILURE:
@@ -341,9 +487,9 @@ def prodex_mojo_runtime_doctor_render_v1(
         return 1
     var input_pointer = Pointer[mut=False, ProdexRuntimeDoctorRenderInput, ImmUntrackedOrigin](unsafe_from_address=Int(input_address))
     var input = input_pointer[].copy()
-    if input.operation < RENDER_PREVIOUS_RESPONSE or input.operation > RENDER_PRECOMMIT or input.detail < 0 or input.detail > 23 or input.values_address == 0:
+    if input.operation < RENDER_PREVIOUS_RESPONSE or input.operation > RENDER_DIAGNOSIS or input.detail < 0 or input.detail > 62 or input.values_address == 0:
         return 1
-    for index in range(8):
+    for index in range(16):
         if not rich_view_valid(runtime_doctor_render_input_value(input, index), RUNTIME_DOCTOR_RENDER_MAX_VALUE_BYTES):
             return 2
     var output = Pointer[mut=True, UInt8, MutUntrackedOrigin](unsafe_from_address=Int(output_address))

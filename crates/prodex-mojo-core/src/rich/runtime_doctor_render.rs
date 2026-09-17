@@ -33,8 +33,8 @@ unsafe extern "C" {
 
 pub fn runtime_doctor_render(input: RuntimeDoctorRenderInput<'_>) -> Result<String, MojoError> {
     ensure_rich_abi()?;
-    if !(0..=13).contains(&input.operation)
-        || !(0..=23).contains(&input.detail)
+    if !(0..=14).contains(&input.operation)
+        || !(0..=62).contains(&input.detail)
         || input.values.len() > RUNTIME_DOCTOR_RENDER_VALUE_COUNT
         || input
             .values
