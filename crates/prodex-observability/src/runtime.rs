@@ -48,117 +48,172 @@ pub struct ConnectionPoolSaturationMetricPlan {
     pub pool_label: TelemetryAttribute,
 }
 
-pub fn plan_dropped_telemetry_metric(
-    reason: TelemetryDropReason,
-) -> Result<DroppedTelemetryMetricPlan, TelemetryAttributeError> {
-    #[cfg(feature = "mojo")]
-    let reason_label = crate::planning_support::planned_metric_label(55, 0, (reason) as i64)?;
-    #[cfg(not(feature = "mojo"))]
-    let reason_label = crate::planning_support::validated_metric_label(
-        crate::planning_support::label_key(142, "telemetry_drop_reason"),
-        telemetry_drop_reason_label(reason),
-    )?;
-    Ok(DroppedTelemetryMetricPlan {
-        metric_name: crate::planning_support::metric_name(55, 0, "prodex_telemetry_dropped_total"),
-        increment: 1,
-        reason_label,
-    })
-}
+#[cfg(not(feature = "mojo"))]
+mod rust_compat {
+    use super::*;
+    pub fn plan_dropped_telemetry_metric(
+        reason: TelemetryDropReason,
+    ) -> Result<DroppedTelemetryMetricPlan, TelemetryAttributeError> {
+        #[cfg(feature = "mojo")]
+        let reason_label = crate::planning_support::planned_metric_label(55, 0, (reason) as i64)?;
+        #[cfg(not(feature = "mojo"))]
+        let reason_label = crate::planning_support::validated_metric_label(
+            crate::planning_support::label_key(142, "telemetry_drop_reason"),
+            telemetry_drop_reason_label(reason),
+        )?;
+        Ok(DroppedTelemetryMetricPlan {
+            metric_name: crate::planning_support::metric_name(
+                55,
+                0,
+                "prodex_telemetry_dropped_total",
+            ),
+            increment: 1,
+            reason_label,
+        })
+    }
 
-pub fn plan_queue_depth_metric(
-    kind: QueueDepthKind,
-    depth: u64,
-    capacity: u64,
-) -> Result<QueueDepthMetricPlan, TelemetryAttributeError> {
-    #[cfg(feature = "mojo")]
-    let queue_label = crate::planning_support::planned_metric_label(56, 0, (kind) as i64)?;
-    #[cfg(not(feature = "mojo"))]
-    let queue_label = crate::planning_support::validated_metric_label(
-        crate::planning_support::label_key(115, "queue_kind"),
-        queue_depth_kind_label(kind),
-    )?;
-    Ok(QueueDepthMetricPlan {
-        metric_name: crate::planning_support::metric_name(56, 0, "prodex_queue_depth"),
-        depth,
-        capacity,
-        queue_label,
-    })
-}
+    pub fn plan_queue_depth_metric(
+        kind: QueueDepthKind,
+        depth: u64,
+        capacity: u64,
+    ) -> Result<QueueDepthMetricPlan, TelemetryAttributeError> {
+        #[cfg(feature = "mojo")]
+        let queue_label = crate::planning_support::planned_metric_label(56, 0, (kind) as i64)?;
+        #[cfg(not(feature = "mojo"))]
+        let queue_label = crate::planning_support::validated_metric_label(
+            crate::planning_support::label_key(115, "queue_kind"),
+            queue_depth_kind_label(kind),
+        )?;
+        Ok(QueueDepthMetricPlan {
+            metric_name: crate::planning_support::metric_name(56, 0, "prodex_queue_depth"),
+            depth,
+            capacity,
+            queue_label,
+        })
+    }
 
-pub fn plan_connection_pool_saturation_metric(
-    kind: ConnectionPoolKind,
-    in_use: u64,
-    capacity: u64,
-) -> Result<ConnectionPoolSaturationMetricPlan, TelemetryAttributeError> {
-    #[cfg(feature = "mojo")]
-    let pool_label = crate::planning_support::planned_metric_label(54, 0, (kind) as i64)?;
+    pub fn plan_connection_pool_saturation_metric(
+        kind: ConnectionPoolKind,
+        in_use: u64,
+        capacity: u64,
+    ) -> Result<ConnectionPoolSaturationMetricPlan, TelemetryAttributeError> {
+        #[cfg(feature = "mojo")]
+        let pool_label = crate::planning_support::planned_metric_label(54, 0, (kind) as i64)?;
+        #[cfg(not(feature = "mojo"))]
+        let pool_label = crate::planning_support::validated_metric_label(
+            crate::planning_support::label_key(100, "pool_kind"),
+            connection_pool_kind_label(kind),
+        )?;
+        Ok(ConnectionPoolSaturationMetricPlan {
+            metric_name: crate::planning_support::metric_name(
+                54,
+                0,
+                "prodex_connection_pool_in_use",
+            ),
+            in_use,
+            capacity,
+            pool_label,
+        })
+    }
+
     #[cfg(not(feature = "mojo"))]
-    let pool_label = crate::planning_support::validated_metric_label(
-        crate::planning_support::label_key(100, "pool_kind"),
-        connection_pool_kind_label(kind),
-    )?;
-    Ok(ConnectionPoolSaturationMetricPlan {
-        metric_name: crate::planning_support::metric_name(54, 0, "prodex_connection_pool_in_use"),
-        in_use,
-        capacity,
-        pool_label,
-    })
+    fn telemetry_drop_reason_label(reason: TelemetryDropReason) -> String {
+        #[cfg(feature = "mojo")]
+        {
+            prodex_mojo_core::observability::label(104, reason as i64)
+                .expect("Mojo observability label planner returned invalid output")
+        }
+        #[cfg(not(feature = "mojo"))]
+        {
+            (match reason {
+                TelemetryDropReason::QueueFull => "queue_full",
+                TelemetryDropReason::ExporterUnavailable => "exporter_unavailable",
+                TelemetryDropReason::Shutdown => "shutdown",
+                TelemetryDropReason::InvalidPayload => "invalid_payload",
+            })
+            .to_string()
+        }
+    }
+
+    #[cfg(not(feature = "mojo"))]
+    fn queue_depth_kind_label(kind: QueueDepthKind) -> String {
+        #[cfg(feature = "mojo")]
+        {
+            prodex_mojo_core::observability::label(103, kind as i64)
+                .expect("Mojo observability label planner returned invalid output")
+        }
+        #[cfg(not(feature = "mojo"))]
+        {
+            (match kind {
+                QueueDepthKind::Responses => "responses",
+                QueueDepthKind::Compact => "compact",
+                QueueDepthKind::Websocket => "websocket",
+                QueueDepthKind::Telemetry => "telemetry",
+                QueueDepthKind::Persistence => "persistence",
+            })
+            .to_string()
+        }
+    }
+
+    #[cfg(not(feature = "mojo"))]
+    fn connection_pool_kind_label(kind: ConnectionPoolKind) -> String {
+        #[cfg(feature = "mojo")]
+        {
+            prodex_mojo_core::observability::label(102, kind as i64)
+                .expect("Mojo observability label planner returned invalid output")
+        }
+        #[cfg(not(feature = "mojo"))]
+        {
+            (match kind {
+                ConnectionPoolKind::Postgres => "postgres",
+                ConnectionPoolKind::Redis => "redis",
+                ConnectionPoolKind::ProviderHttp => "provider_http",
+                ConnectionPoolKind::OidcHttp => "oidc_http",
+            })
+            .to_string()
+        }
+    }
 }
 
 #[cfg(not(feature = "mojo"))]
-fn telemetry_drop_reason_label(reason: TelemetryDropReason) -> String {
-    #[cfg(feature = "mojo")]
-    {
-        prodex_mojo_core::observability::label(104, reason as i64)
-            .expect("Mojo observability label planner returned invalid output")
-    }
-    #[cfg(not(feature = "mojo"))]
-    {
-        (match reason {
-            TelemetryDropReason::QueueFull => "queue_full",
-            TelemetryDropReason::ExporterUnavailable => "exporter_unavailable",
-            TelemetryDropReason::Shutdown => "shutdown",
-            TelemetryDropReason::InvalidPayload => "invalid_payload",
-        })
-        .to_string()
-    }
-}
+pub use rust_compat::*;
 
-#[cfg(not(feature = "mojo"))]
-fn queue_depth_kind_label(kind: QueueDepthKind) -> String {
-    #[cfg(feature = "mojo")]
-    {
-        prodex_mojo_core::observability::label(103, kind as i64)
-            .expect("Mojo observability label planner returned invalid output")
-    }
-    #[cfg(not(feature = "mojo"))]
-    {
-        (match kind {
-            QueueDepthKind::Responses => "responses",
-            QueueDepthKind::Compact => "compact",
-            QueueDepthKind::Websocket => "websocket",
-            QueueDepthKind::Telemetry => "telemetry",
-            QueueDepthKind::Persistence => "persistence",
+#[cfg(feature = "mojo")]
+mod mojo_impl {
+    use super::*;
+    pub fn plan_dropped_telemetry_metric(
+        reason: TelemetryDropReason,
+    ) -> Result<DroppedTelemetryMetricPlan, TelemetryAttributeError> {
+        Ok(DroppedTelemetryMetricPlan {
+            metric_name: crate::planning_support::metric_name(55, 0, ""),
+            increment: 1,
+            reason_label: crate::planning_support::planned_metric_label(55, 0, reason as i64)?,
         })
-        .to_string()
+    }
+    pub fn plan_queue_depth_metric(
+        kind: QueueDepthKind,
+        depth: u64,
+        capacity: u64,
+    ) -> Result<QueueDepthMetricPlan, TelemetryAttributeError> {
+        Ok(QueueDepthMetricPlan {
+            metric_name: crate::planning_support::metric_name(56, 0, ""),
+            depth,
+            capacity,
+            queue_label: crate::planning_support::planned_metric_label(56, 0, kind as i64)?,
+        })
+    }
+    pub fn plan_connection_pool_saturation_metric(
+        kind: ConnectionPoolKind,
+        in_use: u64,
+        capacity: u64,
+    ) -> Result<ConnectionPoolSaturationMetricPlan, TelemetryAttributeError> {
+        Ok(ConnectionPoolSaturationMetricPlan {
+            metric_name: crate::planning_support::metric_name(54, 0, ""),
+            in_use,
+            capacity,
+            pool_label: crate::planning_support::planned_metric_label(54, 0, kind as i64)?,
+        })
     }
 }
-
-#[cfg(not(feature = "mojo"))]
-fn connection_pool_kind_label(kind: ConnectionPoolKind) -> String {
-    #[cfg(feature = "mojo")]
-    {
-        prodex_mojo_core::observability::label(102, kind as i64)
-            .expect("Mojo observability label planner returned invalid output")
-    }
-    #[cfg(not(feature = "mojo"))]
-    {
-        (match kind {
-            ConnectionPoolKind::Postgres => "postgres",
-            ConnectionPoolKind::Redis => "redis",
-            ConnectionPoolKind::ProviderHttp => "provider_http",
-            ConnectionPoolKind::OidcHttp => "oidc_http",
-        })
-        .to_string()
-    }
-}
+#[cfg(feature = "mojo")]
+pub use mojo_impl::*;
