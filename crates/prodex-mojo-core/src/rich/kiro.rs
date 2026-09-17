@@ -54,6 +54,7 @@ pub enum KiroKernelOperation {
     ModelNotFound = 45,
     InvalidRequestError = 46,
     UnsupportedPathError = 47,
+    RequestValidationError = 48,
 }
 
 /// Inputs for one bounded Kiro JSON or text transformation.
@@ -324,6 +325,7 @@ fn operation_code(operation: KiroKernelOperation) -> i64 {
         KiroKernelOperation::ModelNotFound => 45,
         KiroKernelOperation::InvalidRequestError => 46,
         KiroKernelOperation::UnsupportedPathError => 47,
+        KiroKernelOperation::RequestValidationError => 48,
     }
 }
 

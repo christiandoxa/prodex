@@ -214,6 +214,36 @@ fn response_flags(
     flags
 }
 
+#[cfg(feature = "mojo")]
+pub(super) fn error(
+    plan: KiroRequestValidationPlan,
+    object: &Map<String, Value>,
+) -> Result<(), KiroProviderCoreRequestError> {
+    if plan.reason == KiroRequestValidationPlan::REASON_NONE {
+        return Ok(());
+    }
+    let effort = object
+        .get("reasoning")
+        .and_then(|reasoning| reasoning.get("effort"))
+        .or_else(|| object.get("reasoning_effort"))
+        .and_then(Value::as_str)
+        .unwrap_or("unknown");
+    let mut input = prodex_mojo_core::rich::KiroKernelInput::new(
+        prodex_mojo_core::rich::KiroKernelOperation::RequestValidationError,
+    );
+    input.request_id = u64::try_from(plan.reason).unwrap_or_default();
+    input.used = u64::try_from(plan.detail).unwrap_or(u64::MAX);
+    input.include_role = plan.detail_is_invalid;
+    input.reason = Some(effort);
+    let rendered = String::from_utf8(super::kiro_mojo_body(input))
+        .expect("Mojo Kiro validation error is UTF-8");
+    let (code, message) = rendered
+        .split_once('\n')
+        .expect("Mojo Kiro validation error contains code and message");
+    Err(KiroProviderCoreRequestError::new(message, code))
+}
+
+#[cfg(not(feature = "mojo"))]
 pub(super) fn error(
     plan: KiroRequestValidationPlan,
     object: &Map<String, Value>,
