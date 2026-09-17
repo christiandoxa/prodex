@@ -7,17 +7,10 @@ mod rust_compat {
         decision: SecurityDecisionKind,
         result: SecurityDecisionResult,
     ) -> Result<SecurityDecisionMetricPlan, TelemetryAttributeError> {
-        #[cfg(feature = "mojo")]
-        let decision_label =
-            crate::planning_support::planned_metric_label(68, 0, (decision) as i64)?;
-        #[cfg(not(feature = "mojo"))]
         let decision_label = crate::planning_support::validated_metric_label(
             crate::planning_support::label_key(132, "security_decision"),
             security_decision_kind_label(decision),
         )?;
-        #[cfg(feature = "mojo")]
-        let result_label = crate::planning_support::planned_metric_label(68, 1, (result) as i64)?;
-        #[cfg(not(feature = "mojo"))]
         let result_label = crate::planning_support::validated_metric_label(
             crate::planning_support::label_key(133, "security_result"),
             security_decision_result_label(result),
@@ -42,40 +35,22 @@ mod rust_compat {
         outcome: InspectionOutcome,
         duration_micros: u64,
     ) -> Result<InspectionMetricPlan, TelemetryAttributeError> {
-        #[cfg(feature = "mojo")]
-        let stage_label = crate::planning_support::planned_metric_label(63, 0, (stage) as i64)?;
-        #[cfg(not(feature = "mojo"))]
         let stage_label = crate::planning_support::validated_metric_label(
             crate::planning_support::label_key(83, "inspection_stage"),
             inspection_stage_label(stage),
         )?;
-        #[cfg(feature = "mojo")]
-        let coverage_label =
-            crate::planning_support::planned_metric_label(63, 1, (coverage) as i64)?;
-        #[cfg(not(feature = "mojo"))]
         let coverage_label = crate::planning_support::validated_metric_label(
             crate::planning_support::label_key(79, "inspection_coverage"),
             inspection_coverage_label(coverage),
         )?;
-        #[cfg(feature = "mojo")]
-        let finding_category_label =
-            crate::planning_support::planned_metric_label(63, 2, (finding_category) as i64)?;
-        #[cfg(not(feature = "mojo"))]
         let finding_category_label = crate::planning_support::validated_metric_label(
             crate::planning_support::label_key(80, "inspection_finding_category"),
             inspection_finding_category_label(finding_category),
         )?;
-        #[cfg(feature = "mojo")]
-        let masking_action_label =
-            crate::planning_support::planned_metric_label(63, 3, (masking_action) as i64)?;
-        #[cfg(not(feature = "mojo"))]
         let masking_action_label = crate::planning_support::validated_metric_label(
             crate::planning_support::label_key(81, "inspection_masking_action"),
             inspection_masking_action_label(masking_action),
         )?;
-        #[cfg(feature = "mojo")]
-        let outcome_label = crate::planning_support::planned_metric_label(63, 4, (outcome) as i64)?;
-        #[cfg(not(feature = "mojo"))]
         let outcome_label = crate::planning_support::validated_metric_label(
             crate::planning_support::label_key(82, "inspection_outcome"),
             inspection_outcome_label(outcome),
@@ -105,16 +80,10 @@ mod rust_compat {
         stage: AuthnTokenValidationStage,
         result: AuthnTokenValidationResult,
     ) -> Result<AuthnTokenValidationMetricPlan, TelemetryAttributeError> {
-        #[cfg(feature = "mojo")]
-        let stage_label = crate::planning_support::planned_metric_label(57, 0, (stage) as i64)?;
-        #[cfg(not(feature = "mojo"))]
         let stage_label = crate::planning_support::validated_metric_label(
             crate::planning_support::label_key(44, "authn_validation_stage"),
             authn_token_validation_stage_label(stage),
         )?;
-        #[cfg(feature = "mojo")]
-        let result_label = crate::planning_support::planned_metric_label(57, 1, (result) as i64)?;
-        #[cfg(not(feature = "mojo"))]
         let result_label = crate::planning_support::validated_metric_label(
             crate::planning_support::label_key(43, "authn_validation_result"),
             authn_token_validation_result_label(result),
@@ -135,17 +104,10 @@ mod rust_compat {
         boundary: AuthzBoundaryKind,
         result: AuthzDecisionResult,
     ) -> Result<AuthzDecisionMetricPlan, TelemetryAttributeError> {
-        #[cfg(feature = "mojo")]
-        let boundary_label =
-            crate::planning_support::planned_metric_label(58, 0, (boundary) as i64)?;
-        #[cfg(not(feature = "mojo"))]
         let boundary_label = crate::planning_support::validated_metric_label(
             crate::planning_support::label_key(45, "authz_boundary"),
             authz_boundary_kind_label(boundary),
         )?;
-        #[cfg(feature = "mojo")]
-        let result_label = crate::planning_support::planned_metric_label(58, 1, (result) as i64)?;
-        #[cfg(not(feature = "mojo"))]
         let result_label = crate::planning_support::validated_metric_label(
             crate::planning_support::label_key(46, "authz_result"),
             authz_decision_result_label(result),
@@ -166,17 +128,10 @@ mod rust_compat {
         direction: CredentialScopeMismatchDirection,
         result: CredentialScopeMismatchResult,
     ) -> Result<CredentialScopeMismatchMetricPlan, TelemetryAttributeError> {
-        #[cfg(feature = "mojo")]
-        let direction_label =
-            crate::planning_support::planned_metric_label(61, 0, (direction) as i64)?;
-        #[cfg(not(feature = "mojo"))]
         let direction_label = crate::planning_support::validated_metric_label(
             crate::planning_support::label_key(64, "credential_scope_direction"),
             credential_scope_mismatch_direction_label(direction),
         )?;
-        #[cfg(feature = "mojo")]
-        let result_label = crate::planning_support::planned_metric_label(61, 1, (result) as i64)?;
-        #[cfg(not(feature = "mojo"))]
         let result_label = crate::planning_support::validated_metric_label(
             crate::planning_support::label_key(65, "credential_scope_result"),
             credential_scope_mismatch_result_label(result),
@@ -197,16 +152,10 @@ mod rust_compat {
         surface: TenantIsolationSurface,
         result: TenantIsolationResult,
     ) -> Result<TenantIsolationMetricPlan, TelemetryAttributeError> {
-        #[cfg(feature = "mojo")]
-        let surface_label = crate::planning_support::planned_metric_label(70, 0, (surface) as i64)?;
-        #[cfg(not(feature = "mojo"))]
         let surface_label = crate::planning_support::validated_metric_label(
             crate::planning_support::label_key(144, "tenant_isolation_surface"),
             tenant_isolation_surface_label(surface),
         )?;
-        #[cfg(feature = "mojo")]
-        let result_label = crate::planning_support::planned_metric_label(70, 1, (result) as i64)?;
-        #[cfg(not(feature = "mojo"))]
         let result_label = crate::planning_support::validated_metric_label(
             crate::planning_support::label_key(143, "tenant_isolation_result"),
             tenant_isolation_result_label(result),
@@ -227,17 +176,10 @@ mod rust_compat {
         operation: PostgresTenantContextOperation,
         result: PostgresTenantContextResult,
     ) -> Result<PostgresTenantContextMetricPlan, TelemetryAttributeError> {
-        #[cfg(feature = "mojo")]
-        let operation_label =
-            crate::planning_support::planned_metric_label(65, 0, (operation) as i64)?;
-        #[cfg(not(feature = "mojo"))]
         let operation_label = crate::planning_support::validated_metric_label(
             crate::planning_support::label_key(101, "postgres_tenant_context_operation"),
             postgres_tenant_context_operation_label(operation),
         )?;
-        #[cfg(feature = "mojo")]
-        let result_label = crate::planning_support::planned_metric_label(65, 1, (result) as i64)?;
-        #[cfg(not(feature = "mojo"))]
         let result_label = crate::planning_support::validated_metric_label(
             crate::planning_support::label_key(102, "postgres_tenant_context_result"),
             postgres_tenant_context_result_label(result),
@@ -258,16 +200,10 @@ mod rust_compat {
         surface: IdentityContextSurface,
         result: IdentityContextResult,
     ) -> Result<IdentityContextMetricPlan, TelemetryAttributeError> {
-        #[cfg(feature = "mojo")]
-        let surface_label = crate::planning_support::planned_metric_label(62, 0, (surface) as i64)?;
-        #[cfg(not(feature = "mojo"))]
         let surface_label = crate::planning_support::validated_metric_label(
             crate::planning_support::label_key(78, "identity_context_surface"),
             identity_context_surface_label(surface),
         )?;
-        #[cfg(feature = "mojo")]
-        let result_label = crate::planning_support::planned_metric_label(62, 1, (result) as i64)?;
-        #[cfg(not(feature = "mojo"))]
         let result_label = crate::planning_support::validated_metric_label(
             crate::planning_support::label_key(77, "identity_context_result"),
             identity_context_result_label(result),
@@ -288,17 +224,10 @@ mod rust_compat {
         operation: BreakGlassLifecycleOperation,
         result: BreakGlassLifecycleResult,
     ) -> Result<BreakGlassLifecycleMetricPlan, TelemetryAttributeError> {
-        #[cfg(feature = "mojo")]
-        let operation_label =
-            crate::planning_support::planned_metric_label(59, 0, (operation) as i64)?;
-        #[cfg(not(feature = "mojo"))]
         let operation_label = crate::planning_support::validated_metric_label(
             crate::planning_support::label_key(51, "break_glass_operation"),
             break_glass_lifecycle_operation_label(operation),
         )?;
-        #[cfg(feature = "mojo")]
-        let result_label = crate::planning_support::planned_metric_label(59, 1, (result) as i64)?;
-        #[cfg(not(feature = "mojo"))]
         let result_label = crate::planning_support::validated_metric_label(
             crate::planning_support::label_key(52, "break_glass_result"),
             break_glass_lifecycle_result_label(result),
@@ -319,17 +248,10 @@ mod rust_compat {
         operation: UserLifecycleOperation,
         result: UserLifecycleResult,
     ) -> Result<UserLifecycleMetricPlan, TelemetryAttributeError> {
-        #[cfg(feature = "mojo")]
-        let operation_label =
-            crate::planning_support::planned_metric_label(72, 0, (operation) as i64)?;
-        #[cfg(not(feature = "mojo"))]
         let operation_label = crate::planning_support::validated_metric_label(
             crate::planning_support::label_key(147, "user_lifecycle_operation"),
             user_lifecycle_operation_label(operation),
         )?;
-        #[cfg(feature = "mojo")]
-        let result_label = crate::planning_support::planned_metric_label(72, 1, (result) as i64)?;
-        #[cfg(not(feature = "mojo"))]
         let result_label = crate::planning_support::validated_metric_label(
             crate::planning_support::label_key(148, "user_lifecycle_result"),
             user_lifecycle_result_label(result),
@@ -350,17 +272,10 @@ mod rust_compat {
         operation: ServiceIdentityLifecycleOperation,
         result: ServiceIdentityLifecycleResult,
     ) -> Result<ServiceIdentityLifecycleMetricPlan, TelemetryAttributeError> {
-        #[cfg(feature = "mojo")]
-        let operation_label =
-            crate::planning_support::planned_metric_label(69, 0, (operation) as i64)?;
-        #[cfg(not(feature = "mojo"))]
         let operation_label = crate::planning_support::validated_metric_label(
             crate::planning_support::label_key(134, "service_identity_operation"),
             service_identity_lifecycle_operation_label(operation),
         )?;
-        #[cfg(feature = "mojo")]
-        let result_label = crate::planning_support::planned_metric_label(69, 1, (result) as i64)?;
-        #[cfg(not(feature = "mojo"))]
         let result_label = crate::planning_support::validated_metric_label(
             crate::planning_support::label_key(135, "service_identity_result"),
             service_identity_lifecycle_result_label(result),
@@ -381,17 +296,10 @@ mod rust_compat {
         operation: RoleBindingLifecycleOperation,
         result: RoleBindingLifecycleResult,
     ) -> Result<RoleBindingLifecycleMetricPlan, TelemetryAttributeError> {
-        #[cfg(feature = "mojo")]
-        let operation_label =
-            crate::planning_support::planned_metric_label(67, 0, (operation) as i64)?;
-        #[cfg(not(feature = "mojo"))]
         let operation_label = crate::planning_support::validated_metric_label(
             crate::planning_support::label_key(123, "role_binding_operation"),
             role_binding_lifecycle_operation_label(operation),
         )?;
-        #[cfg(feature = "mojo")]
-        let result_label = crate::planning_support::planned_metric_label(67, 1, (result) as i64)?;
-        #[cfg(not(feature = "mojo"))]
         let result_label = crate::planning_support::validated_metric_label(
             crate::planning_support::label_key(124, "role_binding_result"),
             role_binding_lifecycle_result_label(result),
@@ -412,17 +320,10 @@ mod rust_compat {
         operation: ProviderCredentialLifecycleOperation,
         result: ProviderCredentialLifecycleResult,
     ) -> Result<ProviderCredentialLifecycleMetricPlan, TelemetryAttributeError> {
-        #[cfg(feature = "mojo")]
-        let operation_label =
-            crate::planning_support::planned_metric_label(66, 0, (operation) as i64)?;
-        #[cfg(not(feature = "mojo"))]
         let operation_label = crate::planning_support::validated_metric_label(
             crate::planning_support::label_key(108, "provider_credential_operation"),
             provider_credential_lifecycle_operation_label(operation),
         )?;
-        #[cfg(feature = "mojo")]
-        let result_label = crate::planning_support::planned_metric_label(66, 1, (result) as i64)?;
-        #[cfg(not(feature = "mojo"))]
         let result_label = crate::planning_support::validated_metric_label(
             crate::planning_support::label_key(109, "provider_credential_result"),
             provider_credential_lifecycle_result_label(result),
@@ -443,17 +344,10 @@ mod rust_compat {
         operation: VirtualKeyLifecycleOperation,
         result: VirtualKeyLifecycleResult,
     ) -> Result<VirtualKeyLifecycleMetricPlan, TelemetryAttributeError> {
-        #[cfg(feature = "mojo")]
-        let operation_label =
-            crate::planning_support::planned_metric_label(73, 0, (operation) as i64)?;
-        #[cfg(not(feature = "mojo"))]
         let operation_label = crate::planning_support::validated_metric_label(
             crate::planning_support::label_key(62, "credential_lifecycle_operation"),
             virtual_key_lifecycle_operation_label(operation),
         )?;
-        #[cfg(feature = "mojo")]
-        let result_label = crate::planning_support::planned_metric_label(73, 1, (result) as i64)?;
-        #[cfg(not(feature = "mojo"))]
         let result_label = crate::planning_support::validated_metric_label(
             crate::planning_support::label_key(63, "credential_lifecycle_result"),
             virtual_key_lifecycle_result_label(result),
@@ -474,17 +368,10 @@ mod rust_compat {
         operation: BudgetPolicyLifecycleOperation,
         result: BudgetPolicyLifecycleResult,
     ) -> Result<BudgetPolicyLifecycleMetricPlan, TelemetryAttributeError> {
-        #[cfg(feature = "mojo")]
-        let operation_label =
-            crate::planning_support::planned_metric_label(60, 0, (operation) as i64)?;
-        #[cfg(not(feature = "mojo"))]
         let operation_label = crate::planning_support::validated_metric_label(
             crate::planning_support::label_key(53, "budget_policy_operation"),
             budget_policy_lifecycle_operation_label(operation),
         )?;
-        #[cfg(feature = "mojo")]
-        let result_label = crate::planning_support::planned_metric_label(60, 1, (result) as i64)?;
-        #[cfg(not(feature = "mojo"))]
         let result_label = crate::planning_support::validated_metric_label(
             crate::planning_support::label_key(54, "budget_policy_result"),
             budget_policy_lifecycle_result_label(result),
@@ -505,17 +392,10 @@ mod rust_compat {
         operation: PolicyLifecycleOperation,
         result: PolicyLifecycleResult,
     ) -> Result<PolicyLifecycleMetricPlan, TelemetryAttributeError> {
-        #[cfg(feature = "mojo")]
-        let operation_label =
-            crate::planning_support::planned_metric_label(64, 0, (operation) as i64)?;
-        #[cfg(not(feature = "mojo"))]
         let operation_label = crate::planning_support::validated_metric_label(
             crate::planning_support::label_key(95, "policy_lifecycle_operation"),
             policy_lifecycle_operation_label(operation),
         )?;
-        #[cfg(feature = "mojo")]
-        let result_label = crate::planning_support::planned_metric_label(64, 1, (result) as i64)?;
-        #[cfg(not(feature = "mojo"))]
         let result_label = crate::planning_support::validated_metric_label(
             crate::planning_support::label_key(96, "policy_lifecycle_result"),
             policy_lifecycle_result_label(result),
@@ -536,17 +416,10 @@ mod rust_compat {
         operation: TenantLifecycleOperation,
         result: TenantLifecycleResult,
     ) -> Result<TenantLifecycleMetricPlan, TelemetryAttributeError> {
-        #[cfg(feature = "mojo")]
-        let operation_label =
-            crate::planning_support::planned_metric_label(71, 0, (operation) as i64)?;
-        #[cfg(not(feature = "mojo"))]
         let operation_label = crate::planning_support::validated_metric_label(
             crate::planning_support::label_key(0, "account_lifecycle_operation"),
             tenant_lifecycle_operation_label(operation),
         )?;
-        #[cfg(feature = "mojo")]
-        let result_label = crate::planning_support::planned_metric_label(71, 1, (result) as i64)?;
-        #[cfg(not(feature = "mojo"))]
         let result_label = crate::planning_support::validated_metric_label(
             crate::planning_support::label_key(1, "account_lifecycle_result"),
             tenant_lifecycle_result_label(result),
@@ -565,12 +438,6 @@ mod rust_compat {
 
     #[cfg(not(feature = "mojo"))]
     fn security_decision_kind_label(decision: SecurityDecisionKind) -> String {
-        #[cfg(feature = "mojo")]
-        {
-            prodex_mojo_core::observability::label(124, decision as i64)
-                .expect("Mojo observability label planner returned invalid output")
-        }
-        #[cfg(not(feature = "mojo"))]
         {
             (match decision {
                 SecurityDecisionKind::Authentication => "authentication",
@@ -584,12 +451,6 @@ mod rust_compat {
 
     #[cfg(not(feature = "mojo"))]
     fn inspection_stage_label(stage: InspectionStage) -> String {
-        #[cfg(feature = "mojo")]
-        {
-            prodex_mojo_core::observability::label(119, stage as i64)
-                .expect("Mojo observability label planner returned invalid output")
-        }
-        #[cfg(not(feature = "mojo"))]
         {
             (match stage {
                 InspectionStage::Local => "local",
@@ -604,12 +465,6 @@ mod rust_compat {
 
     #[cfg(not(feature = "mojo"))]
     fn inspection_coverage_label(coverage: InspectionCoverageClass) -> String {
-        #[cfg(feature = "mojo")]
-        {
-            prodex_mojo_core::observability::label(115, coverage as i64)
-                .expect("Mojo observability label planner returned invalid output")
-        }
-        #[cfg(not(feature = "mojo"))]
         {
             (match coverage {
                 InspectionCoverageClass::Full => "full",
@@ -622,12 +477,6 @@ mod rust_compat {
 
     #[cfg(not(feature = "mojo"))]
     fn inspection_finding_category_label(category: InspectionFindingCategory) -> String {
-        #[cfg(feature = "mojo")]
-        {
-            prodex_mojo_core::observability::label(116, category as i64)
-                .expect("Mojo observability label planner returned invalid output")
-        }
-        #[cfg(not(feature = "mojo"))]
         {
             (match category {
                 InspectionFindingCategory::None => "none",
@@ -642,12 +491,6 @@ mod rust_compat {
 
     #[cfg(not(feature = "mojo"))]
     fn inspection_masking_action_label(action: InspectionMaskingAction) -> String {
-        #[cfg(feature = "mojo")]
-        {
-            prodex_mojo_core::observability::label(117, action as i64)
-                .expect("Mojo observability label planner returned invalid output")
-        }
-        #[cfg(not(feature = "mojo"))]
         {
             (match action {
                 InspectionMaskingAction::None => "none",
@@ -660,12 +503,6 @@ mod rust_compat {
 
     #[cfg(not(feature = "mojo"))]
     fn inspection_outcome_label(outcome: InspectionOutcome) -> String {
-        #[cfg(feature = "mojo")]
-        {
-            prodex_mojo_core::observability::label(118, outcome as i64)
-                .expect("Mojo observability label planner returned invalid output")
-        }
-        #[cfg(not(feature = "mojo"))]
         {
             (match outcome {
                 InspectionOutcome::Allowed => "allowed",
@@ -679,12 +516,6 @@ mod rust_compat {
 
     #[cfg(not(feature = "mojo"))]
     fn security_decision_result_label(result: SecurityDecisionResult) -> String {
-        #[cfg(feature = "mojo")]
-        {
-            prodex_mojo_core::observability::label(125, result as i64)
-                .expect("Mojo observability label planner returned invalid output")
-        }
-        #[cfg(not(feature = "mojo"))]
         {
             (match result {
                 SecurityDecisionResult::Allowed => "allowed",
@@ -697,12 +528,6 @@ mod rust_compat {
 
     #[cfg(not(feature = "mojo"))]
     fn authn_token_validation_stage_label(stage: AuthnTokenValidationStage) -> String {
-        #[cfg(feature = "mojo")]
-        {
-            prodex_mojo_core::observability::label(106, stage as i64)
-                .expect("Mojo observability label planner returned invalid output")
-        }
-        #[cfg(not(feature = "mojo"))]
         {
             (match stage {
                 AuthnTokenValidationStage::Decode => "decode",
@@ -718,12 +543,6 @@ mod rust_compat {
 
     #[cfg(not(feature = "mojo"))]
     fn authn_token_validation_result_label(result: AuthnTokenValidationResult) -> String {
-        #[cfg(feature = "mojo")]
-        {
-            prodex_mojo_core::observability::label(105, result as i64)
-                .expect("Mojo observability label planner returned invalid output")
-        }
-        #[cfg(not(feature = "mojo"))]
         {
             (match result {
                 AuthnTokenValidationResult::Accepted => "accepted",
@@ -741,12 +560,6 @@ mod rust_compat {
 
     #[cfg(not(feature = "mojo"))]
     fn authz_boundary_kind_label(boundary: AuthzBoundaryKind) -> String {
-        #[cfg(feature = "mojo")]
-        {
-            prodex_mojo_core::observability::label(107, boundary as i64)
-                .expect("Mojo observability label planner returned invalid output")
-        }
-        #[cfg(not(feature = "mojo"))]
         {
             (match boundary {
                 AuthzBoundaryKind::DataPlaneInference => "data_plane_inference",
@@ -762,12 +575,6 @@ mod rust_compat {
 
     #[cfg(not(feature = "mojo"))]
     fn authz_decision_result_label(result: AuthzDecisionResult) -> String {
-        #[cfg(feature = "mojo")]
-        {
-            prodex_mojo_core::observability::label(108, result as i64)
-                .expect("Mojo observability label planner returned invalid output")
-        }
-        #[cfg(not(feature = "mojo"))]
         {
             (match result {
                 AuthzDecisionResult::Allowed => "allowed",
@@ -785,12 +592,6 @@ mod rust_compat {
     fn credential_scope_mismatch_direction_label(
         direction: CredentialScopeMismatchDirection,
     ) -> String {
-        #[cfg(feature = "mojo")]
-        {
-            prodex_mojo_core::observability::label(140, direction as i64)
-                .expect("Mojo observability label planner returned invalid output")
-        }
-        #[cfg(not(feature = "mojo"))]
         {
             (match direction {
                 CredentialScopeMismatchDirection::DataPlaneToControlPlane => {
@@ -813,12 +614,6 @@ mod rust_compat {
 
     #[cfg(not(feature = "mojo"))]
     fn credential_scope_mismatch_result_label(result: CredentialScopeMismatchResult) -> String {
-        #[cfg(feature = "mojo")]
-        {
-            prodex_mojo_core::observability::label(112, result as i64)
-                .expect("Mojo observability label planner returned invalid output")
-        }
-        #[cfg(not(feature = "mojo"))]
         {
             (match result {
                 CredentialScopeMismatchResult::Rejected => "rejected",
@@ -831,12 +626,6 @@ mod rust_compat {
 
     #[cfg(not(feature = "mojo"))]
     fn tenant_isolation_surface_label(surface: TenantIsolationSurface) -> String {
-        #[cfg(feature = "mojo")]
-        {
-            prodex_mojo_core::observability::label(128, surface as i64)
-                .expect("Mojo observability label planner returned invalid output")
-        }
-        #[cfg(not(feature = "mojo"))]
         {
             (match surface {
                 TenantIsolationSurface::Authentication => "authentication",
@@ -851,12 +640,6 @@ mod rust_compat {
 
     #[cfg(not(feature = "mojo"))]
     fn tenant_isolation_result_label(result: TenantIsolationResult) -> String {
-        #[cfg(feature = "mojo")]
-        {
-            prodex_mojo_core::observability::label(127, result as i64)
-                .expect("Mojo observability label planner returned invalid output")
-        }
-        #[cfg(not(feature = "mojo"))]
         {
             (match result {
                 TenantIsolationResult::Enforced => "enforced",
@@ -873,12 +656,6 @@ mod rust_compat {
     fn postgres_tenant_context_operation_label(
         operation: PostgresTenantContextOperation,
     ) -> String {
-        #[cfg(feature = "mojo")]
-        {
-            prodex_mojo_core::observability::label(141, operation as i64)
-                .expect("Mojo observability label planner returned invalid output")
-        }
-        #[cfg(not(feature = "mojo"))]
         {
             (match operation {
                 PostgresTenantContextOperation::SetContext => "set_context",
@@ -892,12 +669,6 @@ mod rust_compat {
 
     #[cfg(not(feature = "mojo"))]
     fn postgres_tenant_context_result_label(result: PostgresTenantContextResult) -> String {
-        #[cfg(feature = "mojo")]
-        {
-            prodex_mojo_core::observability::label(122, result as i64)
-                .expect("Mojo observability label planner returned invalid output")
-        }
-        #[cfg(not(feature = "mojo"))]
         {
             (match result {
                 PostgresTenantContextResult::Applied => "applied",
@@ -912,12 +683,6 @@ mod rust_compat {
 
     #[cfg(not(feature = "mojo"))]
     fn identity_context_surface_label(surface: IdentityContextSurface) -> String {
-        #[cfg(feature = "mojo")]
-        {
-            prodex_mojo_core::observability::label(114, surface as i64)
-                .expect("Mojo observability label planner returned invalid output")
-        }
-        #[cfg(not(feature = "mojo"))]
         {
             (match surface {
                 IdentityContextSurface::Authentication => "authentication",
@@ -932,12 +697,6 @@ mod rust_compat {
 
     #[cfg(not(feature = "mojo"))]
     fn identity_context_result_label(result: IdentityContextResult) -> String {
-        #[cfg(feature = "mojo")]
-        {
-            prodex_mojo_core::observability::label(113, result as i64)
-                .expect("Mojo observability label planner returned invalid output")
-        }
-        #[cfg(not(feature = "mojo"))]
         {
             (match result {
                 IdentityContextResult::Consistent => "consistent",
@@ -953,12 +712,6 @@ mod rust_compat {
 
     #[cfg(not(feature = "mojo"))]
     fn break_glass_lifecycle_operation_label(operation: BreakGlassLifecycleOperation) -> String {
-        #[cfg(feature = "mojo")]
-        {
-            prodex_mojo_core::observability::label(109, operation as i64)
-                .expect("Mojo observability label planner returned invalid output")
-        }
-        #[cfg(not(feature = "mojo"))]
         {
             (match operation {
                 BreakGlassLifecycleOperation::Request => "request",
@@ -973,12 +726,6 @@ mod rust_compat {
 
     #[cfg(not(feature = "mojo"))]
     fn break_glass_lifecycle_result_label(result: BreakGlassLifecycleResult) -> String {
-        #[cfg(feature = "mojo")]
-        {
-            prodex_mojo_core::observability::label(110, result as i64)
-                .expect("Mojo observability label planner returned invalid output")
-        }
-        #[cfg(not(feature = "mojo"))]
         {
             (match result {
                 BreakGlassLifecycleResult::Authorized => "authorized",
@@ -993,12 +740,6 @@ mod rust_compat {
 
     #[cfg(not(feature = "mojo"))]
     fn user_lifecycle_operation_label(operation: UserLifecycleOperation) -> String {
-        #[cfg(feature = "mojo")]
-        {
-            prodex_mojo_core::observability::label(131, operation as i64)
-                .expect("Mojo observability label planner returned invalid output")
-        }
-        #[cfg(not(feature = "mojo"))]
         {
             (match operation {
                 UserLifecycleOperation::Invite => "invite",
@@ -1012,12 +753,6 @@ mod rust_compat {
 
     #[cfg(not(feature = "mojo"))]
     fn user_lifecycle_result_label(result: UserLifecycleResult) -> String {
-        #[cfg(feature = "mojo")]
-        {
-            prodex_mojo_core::observability::label(132, result as i64)
-                .expect("Mojo observability label planner returned invalid output")
-        }
-        #[cfg(not(feature = "mojo"))]
         {
             (match result {
                 UserLifecycleResult::Authorized => "authorized",
@@ -1033,12 +768,6 @@ mod rust_compat {
     fn service_identity_lifecycle_operation_label(
         operation: ServiceIdentityLifecycleOperation,
     ) -> String {
-        #[cfg(feature = "mojo")]
-        {
-            prodex_mojo_core::observability::label(142, operation as i64)
-                .expect("Mojo observability label planner returned invalid output")
-        }
-        #[cfg(not(feature = "mojo"))]
         {
             (match operation {
                 ServiceIdentityLifecycleOperation::Create => "create",
@@ -1051,12 +780,6 @@ mod rust_compat {
 
     #[cfg(not(feature = "mojo"))]
     fn service_identity_lifecycle_result_label(result: ServiceIdentityLifecycleResult) -> String {
-        #[cfg(feature = "mojo")]
-        {
-            prodex_mojo_core::observability::label(126, result as i64)
-                .expect("Mojo observability label planner returned invalid output")
-        }
-        #[cfg(not(feature = "mojo"))]
         {
             (match result {
                 ServiceIdentityLifecycleResult::Authorized => "authorized",
@@ -1070,12 +793,6 @@ mod rust_compat {
 
     #[cfg(not(feature = "mojo"))]
     fn role_binding_lifecycle_operation_label(operation: RoleBindingLifecycleOperation) -> String {
-        #[cfg(feature = "mojo")]
-        {
-            prodex_mojo_core::observability::label(143, operation as i64)
-                .expect("Mojo observability label planner returned invalid output")
-        }
-        #[cfg(not(feature = "mojo"))]
         {
             (match operation {
                 RoleBindingLifecycleOperation::Grant => "grant",
@@ -1087,12 +804,6 @@ mod rust_compat {
 
     #[cfg(not(feature = "mojo"))]
     fn role_binding_lifecycle_result_label(result: RoleBindingLifecycleResult) -> String {
-        #[cfg(feature = "mojo")]
-        {
-            prodex_mojo_core::observability::label(123, result as i64)
-                .expect("Mojo observability label planner returned invalid output")
-        }
-        #[cfg(not(feature = "mojo"))]
         {
             (match result {
                 RoleBindingLifecycleResult::Authorized => "authorized",
@@ -1108,12 +819,6 @@ mod rust_compat {
     fn provider_credential_lifecycle_operation_label(
         operation: ProviderCredentialLifecycleOperation,
     ) -> String {
-        #[cfg(feature = "mojo")]
-        {
-            prodex_mojo_core::observability::label(144, operation as i64)
-                .expect("Mojo observability label planner returned invalid output")
-        }
-        #[cfg(not(feature = "mojo"))]
         {
             (match operation {
                 ProviderCredentialLifecycleOperation::Rotate => "rotate",
@@ -1128,12 +833,6 @@ mod rust_compat {
     fn provider_credential_lifecycle_result_label(
         result: ProviderCredentialLifecycleResult,
     ) -> String {
-        #[cfg(feature = "mojo")]
-        {
-            prodex_mojo_core::observability::label(145, result as i64)
-                .expect("Mojo observability label planner returned invalid output")
-        }
-        #[cfg(not(feature = "mojo"))]
         {
             (match result {
                 ProviderCredentialLifecycleResult::Authorized => "authorized",
@@ -1147,12 +846,6 @@ mod rust_compat {
 
     #[cfg(not(feature = "mojo"))]
     fn virtual_key_lifecycle_operation_label(operation: VirtualKeyLifecycleOperation) -> String {
-        #[cfg(feature = "mojo")]
-        {
-            prodex_mojo_core::observability::label(133, operation as i64)
-                .expect("Mojo observability label planner returned invalid output")
-        }
-        #[cfg(not(feature = "mojo"))]
         {
             (match operation {
                 VirtualKeyLifecycleOperation::Create => "create",
@@ -1165,12 +858,6 @@ mod rust_compat {
 
     #[cfg(not(feature = "mojo"))]
     fn virtual_key_lifecycle_result_label(result: VirtualKeyLifecycleResult) -> String {
-        #[cfg(feature = "mojo")]
-        {
-            prodex_mojo_core::observability::label(134, result as i64)
-                .expect("Mojo observability label planner returned invalid output")
-        }
-        #[cfg(not(feature = "mojo"))]
         {
             (match result {
                 VirtualKeyLifecycleResult::Authorized => "authorized",
@@ -1186,12 +873,6 @@ mod rust_compat {
     fn budget_policy_lifecycle_operation_label(
         operation: BudgetPolicyLifecycleOperation,
     ) -> String {
-        #[cfg(feature = "mojo")]
-        {
-            prodex_mojo_core::observability::label(146, operation as i64)
-                .expect("Mojo observability label planner returned invalid output")
-        }
-        #[cfg(not(feature = "mojo"))]
         {
             (match operation {
                 BudgetPolicyLifecycleOperation::Update => "update",
@@ -1204,12 +885,6 @@ mod rust_compat {
 
     #[cfg(not(feature = "mojo"))]
     fn budget_policy_lifecycle_result_label(result: BudgetPolicyLifecycleResult) -> String {
-        #[cfg(feature = "mojo")]
-        {
-            prodex_mojo_core::observability::label(111, result as i64)
-                .expect("Mojo observability label planner returned invalid output")
-        }
-        #[cfg(not(feature = "mojo"))]
         {
             (match result {
                 BudgetPolicyLifecycleResult::Authorized => "authorized",
@@ -1223,12 +898,6 @@ mod rust_compat {
 
     #[cfg(not(feature = "mojo"))]
     fn policy_lifecycle_operation_label(operation: PolicyLifecycleOperation) -> String {
-        #[cfg(feature = "mojo")]
-        {
-            prodex_mojo_core::observability::label(120, operation as i64)
-                .expect("Mojo observability label planner returned invalid output")
-        }
-        #[cfg(not(feature = "mojo"))]
         {
             (match operation {
                 PolicyLifecycleOperation::Create => "create",
@@ -1242,12 +911,6 @@ mod rust_compat {
 
     #[cfg(not(feature = "mojo"))]
     fn policy_lifecycle_result_label(result: PolicyLifecycleResult) -> String {
-        #[cfg(feature = "mojo")]
-        {
-            prodex_mojo_core::observability::label(121, result as i64)
-                .expect("Mojo observability label planner returned invalid output")
-        }
-        #[cfg(not(feature = "mojo"))]
         {
             (match result {
                 PolicyLifecycleResult::Authorized => "authorized",
@@ -1262,12 +925,6 @@ mod rust_compat {
 
     #[cfg(not(feature = "mojo"))]
     fn tenant_lifecycle_operation_label(operation: TenantLifecycleOperation) -> String {
-        #[cfg(feature = "mojo")]
-        {
-            prodex_mojo_core::observability::label(129, operation as i64)
-                .expect("Mojo observability label planner returned invalid output")
-        }
-        #[cfg(not(feature = "mojo"))]
         {
             (match operation {
                 TenantLifecycleOperation::Create => "create",
@@ -1279,12 +936,6 @@ mod rust_compat {
 
     #[cfg(not(feature = "mojo"))]
     fn tenant_lifecycle_result_label(result: TenantLifecycleResult) -> String {
-        #[cfg(feature = "mojo")]
-        {
-            prodex_mojo_core::observability::label(130, result as i64)
-                .expect("Mojo observability label planner returned invalid output")
-        }
-        #[cfg(not(feature = "mojo"))]
         {
             (match result {
                 TenantLifecycleResult::Authorized => "authorized",

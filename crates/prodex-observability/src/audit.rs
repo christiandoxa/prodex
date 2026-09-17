@@ -103,17 +103,10 @@ mod rust_compat {
         operation: AuditOperation,
         result: AuditResult,
     ) -> Result<AuditMetricPlan, TelemetryAttributeError> {
-        #[cfg(feature = "mojo")]
-        let operation_label =
-            crate::planning_support::planned_metric_label(25, 0, (operation) as i64)?;
-        #[cfg(not(feature = "mojo"))]
         let operation_label = crate::planning_support::validated_metric_label(
             crate::planning_support::label_key(37, "audit_operation"),
             audit_operation_label(operation),
         )?;
-        #[cfg(feature = "mojo")]
-        let result_label = crate::planning_support::planned_metric_label(25, 1, (result) as i64)?;
-        #[cfg(not(feature = "mojo"))]
         let result_label = crate::planning_support::validated_metric_label(
             crate::planning_support::label_key(40, "audit_result"),
             audit_result_label(result),
@@ -130,17 +123,10 @@ mod rust_compat {
         operation: AuditQueryLifecycleOperation,
         result: AuditQueryLifecycleResult,
     ) -> Result<AuditQueryLifecycleMetricPlan, TelemetryAttributeError> {
-        #[cfg(feature = "mojo")]
-        let operation_label =
-            crate::planning_support::planned_metric_label(26, 0, (operation) as i64)?;
-        #[cfg(not(feature = "mojo"))]
         let operation_label = crate::planning_support::validated_metric_label(
             crate::planning_support::label_key(38, "audit_query_operation"),
             audit_query_lifecycle_operation_label(operation),
         )?;
-        #[cfg(feature = "mojo")]
-        let result_label = crate::planning_support::planned_metric_label(26, 1, (result) as i64)?;
-        #[cfg(not(feature = "mojo"))]
         let result_label = crate::planning_support::validated_metric_label(
             crate::planning_support::label_key(39, "audit_query_result"),
             audit_query_lifecycle_result_label(result),
@@ -161,17 +147,10 @@ mod rust_compat {
         operation: AuditChainOperation,
         result: AuditChainResult,
     ) -> Result<AuditChainMetricPlan, TelemetryAttributeError> {
-        #[cfg(feature = "mojo")]
-        let operation_label =
-            crate::planning_support::planned_metric_label(24, 0, (operation) as i64)?;
-        #[cfg(not(feature = "mojo"))]
         let operation_label = crate::planning_support::validated_metric_label(
             crate::planning_support::label_key(35, "audit_chain_operation"),
             audit_chain_operation_label(operation),
         )?;
-        #[cfg(feature = "mojo")]
-        let result_label = crate::planning_support::planned_metric_label(24, 1, (result) as i64)?;
-        #[cfg(not(feature = "mojo"))]
         let result_label = crate::planning_support::validated_metric_label(
             crate::planning_support::label_key(36, "audit_chain_result"),
             audit_chain_result_label(result),
@@ -192,17 +171,10 @@ mod rust_compat {
         operation: AuditRetentionPurgeOperation,
         result: AuditRetentionPurgeResult,
     ) -> Result<AuditRetentionPurgeMetricPlan, TelemetryAttributeError> {
-        #[cfg(feature = "mojo")]
-        let operation_label =
-            crate::planning_support::planned_metric_label(27, 0, (operation) as i64)?;
-        #[cfg(not(feature = "mojo"))]
         let operation_label = crate::planning_support::validated_metric_label(
             crate::planning_support::label_key(41, "audit_retention_operation"),
             audit_retention_purge_operation_label(operation),
         )?;
-        #[cfg(feature = "mojo")]
-        let result_label = crate::planning_support::planned_metric_label(27, 1, (result) as i64)?;
-        #[cfg(not(feature = "mojo"))]
         let result_label = crate::planning_support::validated_metric_label(
             crate::planning_support::label_key(42, "audit_retention_result"),
             audit_retention_purge_result_label(result),
@@ -221,12 +193,6 @@ mod rust_compat {
 
     #[cfg(not(feature = "mojo"))]
     fn audit_operation_label(operation: AuditOperation) -> String {
-        #[cfg(feature = "mojo")]
-        {
-            prodex_mojo_core::observability::label(48, operation as i64)
-                .expect("Mojo observability label planner returned invalid output")
-        }
-        #[cfg(not(feature = "mojo"))]
         {
             (match operation {
                 AuditOperation::Emit => "emit",
@@ -239,12 +205,6 @@ mod rust_compat {
 
     #[cfg(not(feature = "mojo"))]
     fn audit_result_label(result: AuditResult) -> String {
-        #[cfg(feature = "mojo")]
-        {
-            prodex_mojo_core::observability::label(51, result as i64)
-                .expect("Mojo observability label planner returned invalid output")
-        }
-        #[cfg(not(feature = "mojo"))]
         {
             (match result {
                 AuditResult::Success => "success",
@@ -257,12 +217,6 @@ mod rust_compat {
 
     #[cfg(not(feature = "mojo"))]
     fn audit_query_lifecycle_operation_label(operation: AuditQueryLifecycleOperation) -> String {
-        #[cfg(feature = "mojo")]
-        {
-            prodex_mojo_core::observability::label(49, operation as i64)
-                .expect("Mojo observability label planner returned invalid output")
-        }
-        #[cfg(not(feature = "mojo"))]
         {
             (match operation {
                 AuditQueryLifecycleOperation::PlanQuery => "plan_query",
@@ -276,12 +230,6 @@ mod rust_compat {
 
     #[cfg(not(feature = "mojo"))]
     fn audit_query_lifecycle_result_label(result: AuditQueryLifecycleResult) -> String {
-        #[cfg(feature = "mojo")]
-        {
-            prodex_mojo_core::observability::label(50, result as i64)
-                .expect("Mojo observability label planner returned invalid output")
-        }
-        #[cfg(not(feature = "mojo"))]
         {
             (match result {
                 AuditQueryLifecycleResult::Planned => "planned",
@@ -296,12 +244,6 @@ mod rust_compat {
 
     #[cfg(not(feature = "mojo"))]
     fn audit_chain_operation_label(operation: AuditChainOperation) -> String {
-        #[cfg(feature = "mojo")]
-        {
-            prodex_mojo_core::observability::label(46, operation as i64)
-                .expect("Mojo observability label planner returned invalid output")
-        }
-        #[cfg(not(feature = "mojo"))]
         {
             (match operation {
                 AuditChainOperation::Append => "append",
@@ -315,12 +257,6 @@ mod rust_compat {
 
     #[cfg(not(feature = "mojo"))]
     fn audit_chain_result_label(result: AuditChainResult) -> String {
-        #[cfg(feature = "mojo")]
-        {
-            prodex_mojo_core::observability::label(47, result as i64)
-                .expect("Mojo observability label planner returned invalid output")
-        }
-        #[cfg(not(feature = "mojo"))]
         {
             (match result {
                 AuditChainResult::Success => "success",
@@ -335,12 +271,6 @@ mod rust_compat {
 
     #[cfg(not(feature = "mojo"))]
     fn audit_retention_purge_operation_label(operation: AuditRetentionPurgeOperation) -> String {
-        #[cfg(feature = "mojo")]
-        {
-            prodex_mojo_core::observability::label(52, operation as i64)
-                .expect("Mojo observability label planner returned invalid output")
-        }
-        #[cfg(not(feature = "mojo"))]
         {
             (match operation {
                 AuditRetentionPurgeOperation::SelectCandidates => "select_candidates",
@@ -354,12 +284,6 @@ mod rust_compat {
 
     #[cfg(not(feature = "mojo"))]
     fn audit_retention_purge_result_label(result: AuditRetentionPurgeResult) -> String {
-        #[cfg(feature = "mojo")]
-        {
-            prodex_mojo_core::observability::label(53, result as i64)
-                .expect("Mojo observability label planner returned invalid output")
-        }
-        #[cfg(not(feature = "mojo"))]
         {
             (match result {
                 AuditRetentionPurgeResult::Success => "success",
