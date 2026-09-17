@@ -46,8 +46,6 @@ pub(crate) struct RuntimeSmartContextArtifactStore {
     pub(in crate::runtime_state_shared) schema_version: u32,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(in crate::runtime_state_shared) scope_id: Option<runtime_proxy_crate::ContextScopeId>,
-    #[serde(default)]
-    pub(in crate::runtime_state_shared) next_artifact_order: u64,
     pub(in crate::runtime_state_shared) artifacts: BTreeMap<String, RuntimeSmartContextArtifact>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub(in crate::runtime_state_shared) legacy_artifact_ids: BTreeMap<String, String>,
@@ -70,7 +68,6 @@ impl Default for RuntimeSmartContextArtifactStore {
         Self {
             schema_version: 3,
             scope_id: None,
-            next_artifact_order: 0,
             artifacts: BTreeMap::new(),
             legacy_artifact_ids: BTreeMap::new(),
             total_bytes: 0,

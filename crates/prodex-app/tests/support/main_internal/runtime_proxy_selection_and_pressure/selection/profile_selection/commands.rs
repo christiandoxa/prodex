@@ -59,37 +59,6 @@ fn bare_prodex_defaults_to_run_command() {
 }
 
 #[test]
-fn cleanup_command_does_not_default_to_run() {
-    let command = parse_cli_command_from(["prodex", "cleanup"]).expect("cleanup command");
-    assert!(matches!(command, Commands::Cleanup(_)));
-}
-
-#[test]
-fn log_command_defaults_to_stream_and_supports_explicit_modes() {
-    let command = parse_cli_command_from(["prodex", "log"]).expect("log command");
-    let Commands::Log(args) = command else {
-        panic!("expected log command");
-    };
-    assert_eq!(args.mode, LogMode::Stream);
-    assert!(!args.json);
-
-    let command =
-        parse_cli_command_from(["prodex", "log", "stream", "--json"]).expect("log stream command");
-    let Commands::Log(args) = command else {
-        panic!("expected log command");
-    };
-    assert_eq!(args.mode, LogMode::Stream);
-    assert!(args.json);
-
-    let command = parse_cli_command_from(["prodex", "log", "upstream"])
-        .expect("log upstream command");
-    let Commands::Log(args) = command else {
-        panic!("expected log command");
-    };
-    assert_eq!(args.mode, LogMode::Upstream);
-}
-
-#[test]
 fn logout_command_accepts_positional_profile_name() {
     let command = parse_cli_command_from(["prodex", "logout", "second"]).expect("logout command");
     let Commands::Logout(args) = command else {
@@ -125,45 +94,6 @@ fn bare_prodex_accepts_run_options_before_codex_args() {
         args.codex_args,
         vec![OsString::from("exec"), OsString::from("review this repo")]
     );
-}
-
-#[test]
-fn caveman_command_accepts_passthrough_args() {
-    let command = parse_cli_command_from([
-        "prodex",
-        "caveman",
-        "--profile",
-        "main",
-        "exec",
-        "review this repo",
-    ])
-    .expect("caveman command should parse");
-    let Commands::Caveman(args) = command else {
-        panic!("expected caveman command");
-    };
-    assert_eq!(args.profile.as_deref(), Some("main"));
-    assert_eq!(
-        args.codex_args,
-        vec![OsString::from("exec"), OsString::from("review this repo")]
-    );
-}
-
-#[test]
-fn optimizer_shortcuts_parse_as_dedicated_commands() {
-    let rtk = parse_cli_command_from(["prodex", "rtk", "--profile", "main", "exec", "review"])
-        .expect("rtk shortcut should parse");
-    let Commands::Rtk(args) = rtk else {
-        panic!("expected rtk shortcut");
-    };
-    assert_eq!(args.profile.as_deref(), Some("main"));
-    assert_eq!(
-        args.codex_args,
-        vec![OsString::from("exec"), OsString::from("review")]
-    );
-
-    let ponytail = parse_cli_command_from(["prodex", "ponytail", "exec", "review"])
-        .expect("ponytail shortcut should parse");
-    assert!(matches!(ponytail, Commands::Ponytail(_)));
 }
 
 #[test]
@@ -218,24 +148,6 @@ fn super_command_accepts_s_alias() {
         args.codex_args,
         vec![OsString::from("exec"), OsString::from("review this repo")]
     );
-}
-
-#[test]
-fn super_doctor_alias_routes_to_capability_super_doctor() {
-    let command = parse_cli_command_from(["prodex", "s", "doctor", "--json", "--strict"])
-        .expect("super doctor alias should parse");
-    let Commands::Capability(CapabilityCommands::SuperDoctor(args)) = command else {
-        panic!("expected capability super-doctor command");
-    };
-    assert!(args.json);
-    assert!(args.strict);
-
-    let command = parse_cli_command_from(["prodex", "super", "doctor", "--presidio"])
-        .expect("super doctor command should parse");
-    let Commands::Capability(CapabilityCommands::SuperDoctor(args)) = command else {
-        panic!("expected capability super-doctor command");
-    };
-    assert!(args.presidio);
 }
 
 #[test]
@@ -329,29 +241,6 @@ fn quota_command_accepts_once_flag() {
 }
 
 #[test]
-fn audit_command_accepts_filters_and_json() {
-    let command = parse_cli_command_from([
-        "prodex",
-        "audit",
-        "--tail",
-        "50",
-        "--component",
-        "profile",
-        "--action",
-        "use",
-        "--json",
-    ])
-    .expect("audit command");
-    let Commands::Audit(args) = command else {
-        panic!("expected audit command");
-    };
-    assert_eq!(args.tail, 50);
-    assert_eq!(args.component.as_deref(), Some("profile"));
-    assert_eq!(args.action.as_deref(), Some("use"));
-    assert!(args.json);
-}
-
-#[test]
 fn bare_prodex_with_codex_args_defaults_to_run_command() {
     let command = parse_cli_command_from(["prodex", "exec", "review this repo"])
         .expect("bare prodex codex args should parse");
@@ -399,36 +288,14 @@ fn profile_remove_command_accepts_profile_name() {
 
 #[test]
 fn launch_commands_accept_no_proxy_flag() {
-    let run = parse_cli_command_from(["prodex", "run", "--no-proxy", "exec", "hello"])
-        .expect("run no-proxy should parse");
-    let Commands::Run(args) = run else {
-        panic!("expected run command");
-    };
-    assert!(args.no_proxy);
+    let Commands::Run(run) = parse_cli_command_from(["prodex", "run", "--no-proxy"])
+        .expect("run should parse") else { panic!("expected run") };
+    assert!(run.no_proxy);
 
-    let caveman = parse_cli_command_from(["prodex", "caveman", "--no-proxy", "exec", "hello"])
-        .expect("caveman no-proxy should parse");
-    let Commands::Caveman(args) = caveman else {
-        panic!("expected caveman command");
-    };
-    assert!(args.no_proxy);
-
-    let super_command = parse_cli_command_from(["prodex", "super", "--no-proxy", "exec", "hello"])
-        .expect("super no-proxy should parse");
-    let Commands::Super(args) = super_command else {
-        panic!("expected super command");
-    };
-    assert!(args.no_proxy);
-    assert!(args.into_runtime_tool_args().no_proxy);
-
-    let claude = parse_cli_command_from(["prodex", "claude", "--no-proxy", "--", "-p", "hello"])
-        .expect("claude no-proxy should parse");
-    let Commands::Claude(args) = claude else {
-        panic!("expected claude command");
-    };
-    assert!(args.no_proxy);
+    let Commands::Super(super_args) = parse_cli_command_from(["prodex", "super", "--no-proxy"])
+        .expect("super should parse") else { panic!("expected super") };
+    assert!(super_args.no_proxy);
 }
-
 #[test]
 fn super_command_url_expands_to_local_openai_provider_config() {
     let command = parse_cli_command_from([

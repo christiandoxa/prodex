@@ -42,7 +42,7 @@ fn auto_runtime_housekeeping_removes_runtime_garbage_without_touching_user_state
         runtime_usage_snapshots_last_good_file_path(&paths),
         runtime_backoffs_file_path(&paths),
         runtime_backoffs_last_good_file_path(&paths),
-        update_check_cache_file_path(&paths),
+        paths.root.join("update-check.json"),
     ];
     for path in &transient_root_files {
         fs::write(path, "{}").expect("transient root file should write");

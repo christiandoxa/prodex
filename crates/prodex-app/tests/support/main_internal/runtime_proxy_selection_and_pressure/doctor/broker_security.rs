@@ -188,11 +188,6 @@ fn runtime_broker_capability_operations_reject_missing_identity_before_http() {
             .is_none()
     );
     assert!(
-        probe_runtime_broker_log_snapshot(&client, &paths, "identity-missing", &registry, 0)
-            .expect("log probe should fail closed")
-            .is_none()
-    );
-    assert!(
         activate_runtime_broker_profile(
             &client,
             &paths,

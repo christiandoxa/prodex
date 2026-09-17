@@ -1,62 +1,9 @@
 use super::*;
 
-mod duplicates;
-
-use self::duplicates::cleanup_duplicate_profiles;
 use fs2::FileExt;
 use prodex_core::{runtime_broker_artifact_key, runtime_broker_lease_pid};
 
 pub(crate) use prodex_housekeeping::{ProdexCleanupCounts, ProdexCleanupSummary};
-
-#[derive(Debug, Clone, Copy)]
-pub(crate) struct ProdexCleanupOptions {
-    pub(crate) orphan_managed_profile_retention_seconds: i64,
-}
-
-impl Default for ProdexCleanupOptions {
-    fn default() -> Self {
-        Self {
-            orphan_managed_profile_retention_seconds:
-                ORPHAN_MANAGED_PROFILE_AUDIT_RETENTION_SECONDS,
-        }
-    }
-}
-
-fn cleanup_prodex_transient_root_files_with_counts(paths: &AppPaths) -> ProdexCleanupCounts {
-    let mut counts = ProdexCleanupCounts::default();
-    for (path, backup_path) in [
-        (
-            runtime_scores_file_path(paths),
-            runtime_scores_last_good_file_path(paths),
-        ),
-        (
-            runtime_usage_snapshots_file_path(paths),
-            runtime_usage_snapshots_last_good_file_path(paths),
-        ),
-        (
-            runtime_backoffs_file_path(paths),
-            runtime_backoffs_last_good_file_path(paths),
-        ),
-    ] {
-        match remove_versioned_json_file_with_backup_under(&paths.root, &path, &backup_path) {
-            Ok(report) => {
-                counts.removed += report.removed;
-                counts.delete_failures += report.failures.len();
-            }
-            Err(_) => counts.delete_failures += 1,
-        }
-    }
-
-    let update_check = prodex_housekeeping::cleanup_existing_files_under(
-        &paths.root,
-        [update_check_cache_file_path(paths)],
-    )
-    .counts();
-    counts.removed += update_check.removed;
-    counts.scan_failures += update_check.scan_failures;
-    counts.delete_failures += update_check.delete_failures;
-    counts
-}
 
 fn cleanup_prodex_stale_root_temp_files_at_with_counts(
     paths: &AppPaths,
@@ -88,21 +35,6 @@ pub(crate) fn collect_orphan_managed_profile_dirs(
     state: &AppState,
 ) -> Vec<String> {
     collect_orphan_managed_profile_dirs_at(paths, state, SystemTime::now())
-}
-
-fn cleanup_orphan_managed_profile_dirs_with_retention_at_with_counts(
-    paths: &AppPaths,
-    state: &AppState,
-    now: SystemTime,
-    retention_seconds: i64,
-) -> ProdexCleanupCounts {
-    prodex_housekeeping::cleanup_orphan_managed_profile_dirs_at_with_counts(
-        paths,
-        state,
-        now,
-        retention_seconds,
-        |path| remove_dir_if_exists(path).is_ok(),
-    )
 }
 
 pub(crate) fn prodex_runtime_log_paths_in_dir(dir: &Path) -> Vec<PathBuf> {
@@ -145,14 +77,7 @@ fn add_cleanup_counts(summary: &mut ProdexCleanupSummary, counts: ProdexCleanupC
 
 pub(crate) fn command_runs_auto_runtime_housekeeping(command: &Commands) -> bool {
     !crate::command_dispatch::command_is_super_dry_run(command)
-        && !matches!(
-            command,
-            Commands::Cleanup(_)
-                | Commands::RuntimeBroker(_)
-                | Commands::Update(_)
-                | Commands::Capability(_)
-                | Commands::Ping(_)
-        )
+        && !matches!(command, |Commands::RuntimeBroker(_)| Commands::Update(_))
 }
 
 pub(crate) fn schedule_prodex_auto_runtime_housekeeping(command: &Commands) {
@@ -529,97 +454,4 @@ fn cleanup_runtime_broker_stale_leases_in_dir(lease_dir: &Path) -> ProdexCleanup
     }
     cleanup_runtime_broker_empty_lease_dir(lease_dir, &mut counts);
     counts
-}
-
-#[cfg(test)]
-pub(crate) fn perform_prodex_cleanup_at(
-    paths: &AppPaths,
-    state: &AppState,
-    runtime_log_dir: &Path,
-    runtime_log_pointer_path: &Path,
-    now: SystemTime,
-) -> Result<ProdexCleanupSummary> {
-    perform_prodex_cleanup_with_options_at(
-        paths,
-        state,
-        runtime_log_dir,
-        runtime_log_pointer_path,
-        now,
-        ProdexCleanupOptions::default(),
-    )
-}
-
-pub(crate) fn perform_prodex_cleanup_with_options_at(
-    paths: &AppPaths,
-    state: &AppState,
-    runtime_log_dir: &Path,
-    runtime_log_pointer_path: &Path,
-    now: SystemTime,
-    options: ProdexCleanupOptions,
-) -> Result<ProdexCleanupSummary> {
-    let runtime_logs = cleanup_runtime_proxy_logs_in_dir_with_counts(runtime_log_dir, now);
-    let stale_pointer = cleanup_runtime_proxy_latest_pointer_with_counts(runtime_log_pointer_path);
-    let stale_login_dirs = cleanup_stale_login_dirs_at_with_counts(paths, now);
-    let orphan_managed_profile_dirs =
-        cleanup_orphan_managed_profile_dirs_with_retention_at_with_counts(
-            paths,
-            state,
-            now,
-            options.orphan_managed_profile_retention_seconds,
-        );
-    let transient_root_files = cleanup_prodex_transient_root_files_with_counts(paths);
-    let stale_root_temp_files = cleanup_prodex_stale_root_temp_files_at_with_counts(paths, now);
-    let broker_leases = cleanup_runtime_broker_stale_leases_for_all(paths);
-    let broker_registries = cleanup_runtime_broker_stale_registries(paths)?;
-    let mut summary = ProdexCleanupSummary {
-        duplicate_profiles_removed: 0,
-        duplicate_managed_profile_homes_removed: 0,
-        runtime_logs_removed: runtime_logs.removed,
-        stale_runtime_log_pointer_removed: stale_pointer.removed,
-        stale_login_dirs_removed: stale_login_dirs.removed,
-        orphan_managed_profile_dirs_removed: orphan_managed_profile_dirs.removed,
-        transient_root_files_removed: transient_root_files.removed,
-        stale_root_temp_files_removed: stale_root_temp_files.removed,
-        dead_runtime_broker_leases_removed: broker_leases.removed,
-        dead_runtime_broker_registries_removed: broker_registries.removed,
-        ..ProdexCleanupSummary::default()
-    };
-    for counts in [
-        runtime_logs,
-        stale_pointer,
-        stale_login_dirs,
-        orphan_managed_profile_dirs,
-        transient_root_files,
-        stale_root_temp_files,
-        broker_leases,
-        broker_registries,
-    ] {
-        add_cleanup_counts(&mut summary, counts);
-    }
-    Ok(summary)
-}
-
-#[cfg(test)]
-pub(crate) fn perform_prodex_cleanup(
-    paths: &AppPaths,
-    state: &mut AppState,
-) -> Result<ProdexCleanupSummary> {
-    perform_prodex_cleanup_with_options(paths, state, ProdexCleanupOptions::default())
-}
-
-pub(crate) fn perform_prodex_cleanup_with_options(
-    paths: &AppPaths,
-    state: &mut AppState,
-    options: ProdexCleanupOptions,
-) -> Result<ProdexCleanupSummary> {
-    let duplicate_summary = cleanup_duplicate_profiles(paths, state)?;
-    let artifact_summary = perform_prodex_cleanup_with_options_at(
-        paths,
-        state,
-        &runtime_proxy_log_dir(),
-        &runtime_proxy_latest_log_pointer_path(),
-        SystemTime::now(),
-        options,
-    )?;
-    Ok(duplicate_summary.merge(artifact_summary))
 }

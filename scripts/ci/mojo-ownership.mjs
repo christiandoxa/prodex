@@ -194,6 +194,20 @@ function baselineOperations(manifest) {
     .filter((operation) => operation.baseline_state === "authoritative");
 }
 
+function deletedAuthoritativeOperations(manifest) {
+  const deleted = new Map();
+  for (const entry of manifest.deleted_authoritative_operations ?? []) {
+    assert(entry && typeof entry === "object" && !Array.isArray(entry),
+      "deleted authoritative operation entries must be objects");
+    assert.equal(typeof entry.name, "string", "deleted authoritative operation needs a name");
+    assert.equal(typeof entry.reason, "string", `${entry.name} deletion needs a reason`);
+    assert(entry.reason.trim() !== "", `${entry.name} deletion reason must not be empty`);
+    assert(!deleted.has(entry.name), `duplicate deleted authoritative operation ${entry.name}`);
+    deleted.set(entry.name, entry);
+  }
+  return deleted;
+}
+
 function operationsAtRevision(manifest, revision) {
   const operations = manifest.authoritative_operations ?? [];
   if (revision === manifest.baseline_sha) return operations;
@@ -351,6 +365,7 @@ export function rustConsumerSources(manifest, revision, relativePath) {
 
 function validateOperations(manifest, revision) {
   const operations = operationsAtRevision(manifest, revision);
+  const deleted = revision === manifest.baseline_sha ? new Map() : deletedAuthoritativeOperations(manifest);
   assert(operations.length >= 6, "at least six Mojo operations are required");
   assert(new Set(operations.map((operation) => operation.domain.split("/")[0])).size >= 4,
     "Mojo operations must span at least four deterministic domains");
@@ -358,6 +373,31 @@ function validateOperations(manifest, revision) {
   for (const operation of operations) {
     assert(!names.has(operation.name), `duplicate authoritative operation ${operation.name}`);
     names.add(operation.name);
+    if (deleted.has(operation.name)) {
+      assert.equal(operation.baseline_state, "authoritative",
+        `${operation.name} deletion is only valid for a baseline-authoritative operation`);
+      const sharedSource = operations.some((candidate) =>
+        candidate.name !== operation.name &&
+        !deleted.has(candidate.name) &&
+        candidate.mojo_source === operation.mojo_source);
+      if (sharedSource) {
+        assert(sourceExists(manifest, revision, operation.mojo_source),
+          `${operation.name} shared Mojo source was removed with a surviving operation`);
+        const mojo = sourceText(manifest, revision, operation.mojo_source);
+        assert(!mojo.includes(`@export("${operation.mojo_entry}")`),
+          `${operation.name} is declared deleted but its Mojo export remains`);
+      } else {
+        assert(!sourceExists(manifest, revision, operation.mojo_source),
+          `${operation.name} is declared deleted but its Mojo source remains in the release`);
+      }
+      if (sourceExists(manifest, revision, operation.consumer)) {
+        const consumers = rustConsumerSources(manifest, revision, operation.consumer);
+        const marker = operation.consumer_marker ?? operation.mojo_entry;
+        assert(!consumers.some(({ contents }) => contents.includes(marker)),
+          `${operation.name} is declared deleted but its production consumer remains`);
+      }
+      continue;
+    }
     assert.equal(operation.final_state, "authoritative", `${operation.name} is not final-authoritative`);
     assert.equal(typeof operation.mojo_entry, "string", `${operation.name} needs a Mojo entry`);
     assert.equal(typeof operation.mojo_source, "string", `${operation.name} needs a Mojo source`);
@@ -402,6 +442,11 @@ function validateOperationContinuity(manifest, snapshot) {
     "frozen baseline needs authoritative operation names");
   const operations = new Map((manifest.authoritative_operations ?? [])
     .map((operation) => [operation.name, operation]));
+  const deleted = deletedAuthoritativeOperations(manifest);
+  for (const name of deleted.keys()) {
+    assert(expectedNames.includes(name),
+      `deleted authoritative operation ${name} is not part of the frozen baseline`);
+  }
   for (const name of expectedNames) {
     const operation = operations.get(name);
     assert(operation, `baseline authoritative operation ${name} is missing from the release manifest`);

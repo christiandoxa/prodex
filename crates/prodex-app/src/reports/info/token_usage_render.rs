@@ -77,10 +77,6 @@ pub fn info_token_usage_event_from_line(line: &str) -> Option<InfoTokenUsageEven
     info_token_usage_event_from_line_with_event(line, "token_usage")
 }
 
-pub fn info_token_usage_progress_event_from_line(line: &str) -> Option<InfoTokenUsageEvent> {
-    info_token_usage_event_from_line_with_event(line, "token_usage_progress")
-}
-
 fn info_token_usage_event_from_line_with_event(
     line: &str,
     event_name: &str,

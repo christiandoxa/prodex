@@ -1,5 +1,3 @@
-pub(crate) use prodex_update_notice::*;
-
 use anyhow::{Context, Result};
 use prodex_cli::Commands;
 use ratatui::layout::{Constraint, Direction, Layout};

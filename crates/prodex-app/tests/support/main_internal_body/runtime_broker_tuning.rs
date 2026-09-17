@@ -133,26 +133,6 @@ pressure_long_lived_queue_wait_budget_ms = 44
     assert_eq!(snapshot.websocket_dns_overflow_capacity, 9);
     assert_eq!(snapshot.profile_inflight_soft_limit, 9);
     assert_eq!(snapshot.profile_inflight_hard_limit, 10);
-    assert_eq!(
-        format_runtime_tuning_workers(&snapshot),
-        "workers proxy=12, long-lived=5, async=3, probe-refresh=4; active=40, queue=88; lanes responses=31, compact=5, websocket=7, standard=6; ws-connect workers=6, queue=12, overflow=0; ws-dns workers=2, queue=8, overflow=9"
-    );
-    assert_eq!(
-        format_runtime_tuning_budgets(&snapshot),
-        format!(
-            "precommit={}x/{}ms, pressure-precommit={}x/{}ms, continuation={}x/{}ms; admission=111ms, pressure-admission=22ms, long-lived=333ms, pressure-long-lived=44ms",
-            RUNTIME_PROXY_PRECOMMIT_ATTEMPT_LIMIT,
-            RUNTIME_PROXY_PRECOMMIT_BUDGET_MS,
-            RUNTIME_PROXY_PRESSURE_PRECOMMIT_ATTEMPT_LIMIT,
-            RUNTIME_PROXY_PRESSURE_PRECOMMIT_BUDGET_MS,
-            RUNTIME_PROXY_PRECOMMIT_CONTINUATION_ATTEMPT_LIMIT,
-            RUNTIME_PROXY_PRECOMMIT_CONTINUATION_BUDGET_MS
-        )
-    );
-    assert_eq!(
-        format_runtime_tuning_transport(&snapshot),
-        "http-connect=1234ms, stream-idle=555ms, sse-lookahead=66ms; ws-connect=777ms, ws-progress=999ms, ws-happy=88ms, ws-stale-reuse=1001ms; inflight soft/hard=9/10"
-    );
 }
 
 #[test]

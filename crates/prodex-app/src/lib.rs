@@ -4,8 +4,6 @@ use anyhow::{Context, Result, bail};
 #[cfg(test)]
 use base64::Engine;
 use chrono::Local;
-#[cfg(test)]
-use chrono::TimeZone;
 use redaction::redaction_redact_secret_like_text;
 use reqwest::blocking::Client;
 use std::collections::hash_map::DefaultHasher;
@@ -68,7 +66,6 @@ mod runtime_claude_auth;
 mod runtime_config;
 mod runtime_core_shared;
 mod runtime_deepseek_config;
-mod runtime_desktop;
 mod runtime_doctor;
 mod runtime_external_provider_config;
 mod runtime_gemini_auth;
@@ -466,12 +463,6 @@ fn run_command(command: Commands) -> Result<()> {
         }
     }
     validate_command_runtime_policy(&command)?;
-    if matches!(&command, Commands::Setup(args) if args.dry_run) {
-        let Commands::Setup(args) = command else {
-            unreachable!("setup dry-run command should match");
-        };
-        return handle_setup(args);
-    }
     if !super_dry_run && !minimal_startup {
         schedule_prodex_auto_runtime_housekeeping(&command);
     }
@@ -479,11 +470,8 @@ fn run_command(command: Commands) -> Result<()> {
 }
 
 fn command_uses_minimal_startup(command: &Commands) -> bool {
-    matches!(
-        command,
-        Commands::McpJsonlBridge(_) | Commands::Capability(_) | Commands::Ping(_)
-    ) || matches!(command, Commands::Gateway(args) if args.command.is_some())
-        || matches!(command, Commands::Setup(args) if args.dry_run)
+    matches!(command, Commands::McpJsonlBridge(_))
+        || matches!(command, Commands::Gateway(args) if args.command.is_some())
         || matches!(
             command,
             Commands::Doctor(args)

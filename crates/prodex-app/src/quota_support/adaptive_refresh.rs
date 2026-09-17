@@ -1,4 +1,3 @@
-use super::DEFAULT_WATCH_INTERVAL_SECONDS;
 use super::{ProviderQuotaSnapshot, QuotaReport};
 use crate::{
     AppPaths, AppState, AppStateIoExt, ProfileEntry, RuntimeProfileUsageSnapshot,
@@ -12,41 +11,18 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::time::Duration;
 
-pub(crate) const ALL_QUOTA_WATCH_IMMINENT_INTERVAL_SECONDS: u64 = DEFAULT_WATCH_INTERVAL_SECONDS;
 pub(crate) const ALL_QUOTA_WATCH_FAST_INTERVAL_SECONDS: u64 = 10;
-pub(crate) const ALL_QUOTA_WATCH_DETAIL_STABLE_INTERVAL_SECONDS: u64 = 45;
-pub(crate) const ALL_QUOTA_WATCH_STABLE_INTERVAL_SECONDS: u64 = 90;
-pub(crate) const ALL_QUOTA_WATCH_PROFILE_SCALE_SECONDS: u64 = 2;
-pub(crate) const ALL_QUOTA_WATCH_IMMINENT_RESET_SECONDS: i64 = 2 * 60;
-pub(crate) const ALL_QUOTA_WATCH_NEAR_RESET_SECONDS: i64 = 15 * 60;
 const QUOTA_WATCH_RUNTIME_USAGE_CACHE_FILE: &str = "quota-watch-runtime-usage-cache.json";
-
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-pub(crate) enum QuotaRefreshSignal {
-    Stable,
-    Watch,
-    Imminent,
-}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct QuotaWatchRuntimeUsageCache {
     updated_at: i64,
-    next_refresh_at: i64,
     alive_until: i64,
     snapshots: BTreeMap<String, RuntimeProfileUsageSnapshot>,
 }
 
 pub(crate) struct LiveQuotaWatchRuntimeUsageCache {
     pub(crate) snapshots: BTreeMap<String, RuntimeProfileUsageSnapshot>,
-    next_refresh_at: i64,
-}
-
-impl LiveQuotaWatchRuntimeUsageCache {
-    pub(crate) fn refresh_interval_at(&self, now: i64) -> Duration {
-        Duration::from_secs(
-            u64::try_from(self.next_refresh_at.saturating_sub(now).max(1)).unwrap_or(1),
-        )
-    }
 }
 
 pub(crate) fn save_quota_watch_runtime_usage_cache(
@@ -67,7 +43,6 @@ pub(crate) fn save_quota_watch_runtime_usage_cache(
         .max(1);
     let cache = QuotaWatchRuntimeUsageCache {
         updated_at: now,
-        next_refresh_at: now.saturating_add(refresh_seconds),
         alive_until: now
             .saturating_add(refresh_seconds)
             .saturating_add(ALL_QUOTA_WATCH_FAST_INTERVAL_SECONDS as i64),
@@ -150,10 +125,7 @@ pub(crate) fn load_live_quota_watch_runtime_usage_cache(
         .into_iter()
         .filter(|(name, _)| profiles.contains_key(name))
         .collect::<BTreeMap<_, _>>();
-    Some(LiveQuotaWatchRuntimeUsageCache {
-        snapshots,
-        next_refresh_at: cache.next_refresh_at,
-    })
+    Some(LiveQuotaWatchRuntimeUsageCache { snapshots })
 }
 
 fn quota_watch_runtime_usage_cache_path(paths: &AppPaths) -> PathBuf {
@@ -179,71 +151,6 @@ fn provider_quota_runtime_usage_snapshot(
     let mut snapshot = prodex_runtime_quota::runtime_profile_usage_snapshot_from_usage(usage);
     snapshot.checked_at = checked_at;
     Some(snapshot)
-}
-
-pub(crate) fn quota_watch_detail_refresh_interval_for_cached_openai(
-    reset_windows: &[i64],
-    watch: bool,
-    profile_count: usize,
-    now: i64,
-) -> Duration {
-    let signal = if watch {
-        QuotaRefreshSignal::Watch
-    } else {
-        reset_windows
-            .iter()
-            .copied()
-            .map(|reset_at| quota_reset_refresh_signal(reset_at, now))
-            .max()
-            .unwrap_or(QuotaRefreshSignal::Stable)
-    };
-
-    quota_watch_refresh_interval_for_signal(signal, true, profile_count, now)
-}
-
-pub(crate) fn quota_watch_refresh_interval_for_signal(
-    signal: QuotaRefreshSignal,
-    detail: bool,
-    profile_count: usize,
-    now: i64,
-) -> Duration {
-    let base = match signal {
-        QuotaRefreshSignal::Imminent => ALL_QUOTA_WATCH_IMMINENT_INTERVAL_SECONDS,
-        QuotaRefreshSignal::Watch => ALL_QUOTA_WATCH_FAST_INTERVAL_SECONDS,
-        QuotaRefreshSignal::Stable => {
-            if detail {
-                ALL_QUOTA_WATCH_DETAIL_STABLE_INTERVAL_SECONDS
-            } else {
-                ALL_QUOTA_WATCH_STABLE_INTERVAL_SECONDS
-            }
-        }
-    };
-    let scaled = base.max(
-        u64::try_from(profile_count)
-            .unwrap_or(u64::MAX)
-            .saturating_mul(ALL_QUOTA_WATCH_PROFILE_SCALE_SECONDS),
-    );
-    Duration::from_secs(quota_watch_jittered_interval_seconds(scaled, now))
-}
-
-pub(crate) fn quota_reset_refresh_signal(reset_at: i64, now: i64) -> QuotaRefreshSignal {
-    if reset_at <= now + ALL_QUOTA_WATCH_IMMINENT_RESET_SECONDS {
-        QuotaRefreshSignal::Imminent
-    } else if reset_at <= now + ALL_QUOTA_WATCH_NEAR_RESET_SECONDS {
-        QuotaRefreshSignal::Watch
-    } else {
-        QuotaRefreshSignal::Stable
-    }
-}
-
-fn quota_watch_jittered_interval_seconds(seconds: u64, now: i64) -> u64 {
-    if seconds <= ALL_QUOTA_WATCH_IMMINENT_INTERVAL_SECONDS {
-        return seconds;
-    }
-    let jitter_span = (seconds / 10).max(1);
-    let bucket = now.unsigned_abs() % (jitter_span.saturating_mul(2).saturating_add(1));
-    let delta = i64::try_from(bucket).unwrap_or(0) - i64::try_from(jitter_span).unwrap_or(0);
-    seconds.saturating_add_signed(delta).max(1)
 }
 
 #[cfg(test)]
@@ -326,7 +233,6 @@ mod tests {
         snapshots.insert("other".to_string(), snapshot());
         let cache = QuotaWatchRuntimeUsageCache {
             updated_at: 0,
-            next_refresh_at: 10,
             alive_until: 20,
             snapshots,
         };
@@ -336,7 +242,6 @@ mod tests {
         let profiles = BTreeMap::from([("main".to_string(), profile(&paths))]);
         let live = load_live_quota_watch_runtime_usage_cache(&paths, &profiles, 5).unwrap();
 
-        assert_eq!(live.refresh_interval_at(5), Duration::from_secs(5));
         assert!(live.snapshots.contains_key("main"));
         assert!(!live.snapshots.contains_key("other"));
         assert!(load_live_quota_watch_runtime_usage_cache(&paths, &profiles, 21).is_none());

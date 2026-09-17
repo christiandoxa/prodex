@@ -10,7 +10,7 @@ fn super_command(args: &[&str]) -> SuperArgs {
     else {
         panic!("expected Super command");
     };
-    args
+    *args
 }
 
 fn extract(args: &[&str]) -> SuperArgs {

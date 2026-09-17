@@ -247,7 +247,7 @@
     #[test]
     fn all_quota_watch_refresh_interval_stays_fast_near_reset() {
         let now = Local::now().timestamp();
-        let reset_at = now + ALL_QUOTA_WATCH_IMMINENT_RESET_SECONDS - 1;
+        let reset_at = now + 1;
         let snapshot = AllQuotaWatchSnapshot::Reports {
             updated: "near-reset".to_string(),
             profile_count: 1,

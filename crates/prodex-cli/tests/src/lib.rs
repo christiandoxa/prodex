@@ -1,11 +1,9 @@
 use super::*;
 use std::ffi::OsString;
 mod app_server;
-mod cleanup;
 mod codex_01491;
 mod external_provider;
 mod harness;
-mod ping;
 mod process_reporting;
 mod quota;
 mod redeem;
@@ -90,50 +88,6 @@ fn profile_lifecycle_commands_parse_insecure_flag() {
 }
 
 #[test]
-fn presidio_commands_parse_as_top_level_commands() {
-    let command = parse_cli_command_from(["prodex", "presidio", "doctor", "--json"])
-        .expect("presidio doctor should parse");
-    assert!(matches!(
-        command,
-        Commands::Presidio(PresidioCommands::Doctor(PresidioDoctorArgs {
-            json: true,
-            ..
-        }))
-    ));
-    let command = parse_cli_command_from([
-        "prodex",
-        "presidio",
-        "redact",
-        "--text",
-        "my phone is 212-555-1234",
-        "--json",
-    ])
-    .expect("presidio redact should parse");
-    assert!(matches!(
-        command,
-        Commands::Presidio(PresidioCommands::Redact(PresidioRedactArgs {
-            json: true,
-            language_mode: None,
-            ..
-        }))
-    ));
-
-    let command = parse_cli_command_from([
-        "prodex",
-        "presidio",
-        "redact",
-        "--text",
-        "hello",
-        "--language-mode",
-        "fixed",
-    ])
-    .expect("explicit fixed language mode should parse");
-    let Commands::Presidio(PresidioCommands::Redact(args)) = command else {
-        panic!("expected presidio redact command");
-    };
-    assert_eq!(args.language_mode, Some(PresidioLanguageMode::Fixed));
-}
-#[test]
 fn doctor_install_parse_as_top_level_command() {
     let command = parse_cli_command_from(["prodex", "doctor", "--install"])
         .expect("doctor install should parse");
@@ -212,10 +166,7 @@ fn secret_bearing_runtime_args_debug_is_redacted_through_commands() {
     let Commands::Super(super_args) = super_command else {
         panic!("expected super command");
     };
-    let runtime_tools_debug = format!(
-        "{:?}",
-        Commands::Caveman(super_args.into_runtime_tool_args())
-    );
+    let runtime_tools_debug = format!("{:?}", super_args.into_runtime_tool_args());
 
     let gateway_debug = format!(
         "{:?}",
@@ -238,53 +189,6 @@ fn secret_bearing_runtime_args_debug_is_redacted_through_commands() {
             assert!(!rendered.contains(secret), "{rendered}");
         }
     }
-}
-#[test]
-fn setup_parse_as_top_level_command() {
-    let command =
-        parse_cli_command_from(["prodex", "setup", "--dry-run", "--verify-tools", "--json"])
-            .expect("setup should parse");
-    let Commands::Setup(args) = command else {
-        panic!("expected setup command");
-    };
-    assert!(args.dry_run);
-    assert!(args.verify_tools);
-    assert!(args.json);
-    assert!(!should_default_cli_invocation_to_run(&os_args(&[
-        "prodex", "setup",
-    ])));
-    assert!(parse_cli_command_from(["prodex", "setup", "--verify-assets"]).is_err());
-}
-
-#[test]
-fn setup_help_lists_optional_tool_catalog() {
-    let help = parse_cli_command_from(["prodex", "setup", "--help"])
-        .expect_err("setup help should be returned as a CLI error")
-        .to_string();
-
-    for tool in [
-        "Caveman",
-        "RTK",
-        "Codebase Memory MCP",
-        "Playwright MCP",
-        "Ponytail",
-    ] {
-        assert!(help.contains(tool), "setup help omitted {tool}: {help}");
-    }
-}
-
-#[test]
-fn capability_list_parse_as_top_level_command() {
-    let command = parse_cli_command_from(["prodex", "capability", "list", "--json"])
-        .expect("capability list should parse");
-    let Commands::Capability(CapabilityCommands::List(args)) = command else {
-        panic!("expected capability list command");
-    };
-    assert!(args.json);
-    assert!(!should_default_cli_invocation_to_run(&os_args(&[
-        "prodex",
-        "capability",
-    ])));
 }
 #[test]
 fn super_url_sets_runtime_base_url_for_local_rewrite_proxy() {
@@ -402,74 +306,6 @@ fn super_gemini_provider_expands_to_local_responses_adapter_config() {
     assert!(rendered.contains(&"features.apps=false".to_string()));
     assert!(rendered.contains(&"features.image_generation=true".to_string()));
     assert!(!rendered.iter().any(|arg| arg.contains("gemini-test-key")));
-}
-#[test]
-fn caveman_command_keeps_smart_context_autopilot_disabled() {
-    let command = parse_cli_command_from(["prodex", "caveman", "exec", "hello"])
-        .expect("caveman command should parse");
-    let Commands::Caveman(args) = command else {
-        panic!("expected caveman command");
-    };
-    assert!(!args.smart_context);
-    assert!(args.tools.is_empty());
-}
-#[test]
-fn optimizer_shortcuts_parse_as_top_level_commands_not_run_passthrough() {
-    for (command_name, expected) in [
-        ("rtk", prodex_optional_tools::OptionalToolId::Rtk),
-        (
-            "playwright",
-            prodex_optional_tools::OptionalToolId::PlaywrightMcp,
-        ),
-        ("ponytail", prodex_optional_tools::OptionalToolId::Ponytail),
-    ] {
-        assert!(!should_default_cli_invocation_to_run(&os_args(&[
-            "prodex",
-            command_name,
-        ])));
-        let command = parse_cli_command_from(["prodex", command_name, "exec", "hello"])
-            .expect("optimizer shortcut should parse");
-        let args = match command {
-            Commands::Rtk(args) | Commands::Playwright(args) | Commands::Ponytail(args) => args,
-            other => panic!("expected optimizer shortcut command, got {other:?}"),
-        };
-        assert_eq!(args.codex_args, os_args(&["exec", "hello"]));
-        let args = runtime_tool_args_with_tool(args, expected);
-        assert!(args.selected_tool_set().contains(expected));
-        assert_eq!(args.codex_args, os_args(&["exec", "hello"]));
-    }
-}
-
-#[test]
-fn legacy_optimizer_aliases_preserve_access_choice_and_passthrough() {
-    for command_name in ["rtk", "playwright", "ponytail"] {
-        let command = parse_cli_command_from([
-            "prodex",
-            command_name,
-            "exec",
-            "presidio",
-            "--literal-passthrough",
-        ])
-        .expect("legacy optimizer alias should parse");
-        let args = match command {
-            Commands::Rtk(args) | Commands::Playwright(args) | Commands::Ponytail(args) => args,
-            other => panic!("expected optimizer shortcut command, got {other:?}"),
-        };
-
-        assert!(!args.full_access);
-        assert_eq!(
-            args.codex_args,
-            os_args(&["exec", "presidio", "--literal-passthrough"])
-        );
-    }
-
-    let Commands::Rtk(args) =
-        parse_cli_command_from(["prodex", "rtk", "--full-access", "exec", "review"])
-            .expect("explicit full access should parse")
-    else {
-        panic!("expected rtk shortcut");
-    };
-    assert!(args.full_access);
 }
 #[test]
 fn codex_remote_control_defaults_to_managed_run_passthrough() {
@@ -651,28 +487,6 @@ fn codex_command_server_detection_is_first_arg_only() {
     ])));
     assert!(!is_codex_command_server_subcommand(&[]));
 }
-#[test]
-fn context_export_parses_id_and_optional_path() {
-    let command = parse_cli_command_from([
-        "prodex",
-        "context",
-        "export",
-        "019c9e3d",
-        "./context_session.md",
-        "--force",
-    ])
-    .expect("context export should parse");
-    let Commands::Context(ContextCommands::Export(args)) = command else {
-        panic!("expected context export command");
-    };
-    assert_eq!(args.id, "019c9e3d");
-    assert_eq!(
-        args.path.as_deref(),
-        Some(std::path::Path::new("./context_session.md"))
-    );
-    assert!(args.force);
-}
-
 #[test]
 fn session_list_parses_line_modes_and_filters() {
     let command = parse_cli_command_from([

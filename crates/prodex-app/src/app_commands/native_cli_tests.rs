@@ -12,7 +12,7 @@ fn super_args(values: &[&str]) -> SuperArgs {
     };
     args.extract_super_overrides_from_codex_args()
         .expect("Super overrides should parse");
-    args
+    *args
 }
 
 #[test]

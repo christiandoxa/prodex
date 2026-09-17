@@ -1,6 +1,6 @@
 use anyhow::{Context, Result, bail};
 use chrono::Local;
-use prodex_cli::{Commands, ContextCommands};
+use prodex_cli::Commands;
 use prodex_core::AppPaths;
 use reqwest::blocking::Client;
 use semver::Version;
@@ -90,12 +90,7 @@ pub fn show_update_notice_if_available(command: &Commands) -> Result<()> {
 
 pub fn should_emit_update_notice(command: &Commands) -> bool {
     match command {
-        Commands::Info(_) => false,
-        Commands::Log(_) => false,
         Commands::Doctor(args) => !args.json && args.bundle.is_none(),
-        Commands::Audit(args) => !args.json,
-        Commands::Context(ContextCommands::Audit(args)) => !args.json,
-        Commands::Context(ContextCommands::Compress(args)) => !args.json,
         Commands::Update(_) => false,
         Commands::Quota(args) => !args.raw,
         _ => true,

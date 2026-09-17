@@ -28,8 +28,6 @@ use runtime_test_websocket::*;
 mod runtime_proxy_continuation_helpers;
 use runtime_proxy_continuation_helpers::*;
 
-#[path = "main_internal_body/context_commands.rs"]
-mod context_commands;
 #[path = "main_internal_body/quota_selection.rs"]
 mod quota_selection;
 #[path = "main_internal_body/info_and_broker.rs"]

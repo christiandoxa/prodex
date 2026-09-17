@@ -12,8 +12,6 @@ pub(crate) struct RuntimeSmartContextArtifact {
     pub(crate) text: String,
     #[serde(alias = "sequence")]
     pub(crate) order: u64,
-    #[serde(skip)]
-    pub(crate) pending_order: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) line_index: Option<RuntimeSmartContextArtifactLineIndex>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

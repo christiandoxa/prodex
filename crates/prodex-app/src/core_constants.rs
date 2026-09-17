@@ -8,7 +8,6 @@ use crate::{
     RuntimeStateSaveQueue,
 };
 
-pub(crate) const DEFAULT_CODEX_DIR: &str = ".codex";
 pub(crate) const DEFAULT_CHATGPT_BASE_URL: &str = "https://chatgpt.com/backend-api";
 pub(crate) const RUNTIME_PROXY_OPENAI_MOUNT_PATH: &str = "/backend-api/prodex";
 pub(crate) const LEGACY_RUNTIME_PROXY_OPENAI_MOUNT_PATH_PREFIX: &str = "/backend-api/prodex/v";

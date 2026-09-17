@@ -20,8 +20,7 @@ pub(crate) use self::copilot::{
 use self::import_export::write_secret_text_file;
 pub(crate) use self::import_export::{
     acquire_profile_lifecycle_lock, count_profile_import_auth_journals, handle_export_profiles,
-    handle_import_current_profile, handle_import_profiles,
-    load_profile_state_with_profile_recovery_locked, recover_pending_profile_lifecycle,
+    handle_import_current_profile, handle_import_profiles, recover_pending_profile_lifecycle,
     repair_profile_import_auth_journals,
 };
 #[cfg(test)]
@@ -36,7 +35,7 @@ pub(crate) use self::logout::handle_codex_logout;
 pub(crate) use self::manage::{
     handle_add_profile, handle_current_profile, handle_list_profiles, handle_set_active_profile,
 };
-pub(crate) use self::remove::{finalize_recovered_profile_removals, handle_remove_profile};
+pub(crate) use self::remove::handle_remove_profile;
 #[cfg(test)]
 use prodex_profile_export::{
     PROFILE_EXPORT_CIPHER, PROFILE_EXPORT_VERSION_V2, ProfileExportKdfParameters,

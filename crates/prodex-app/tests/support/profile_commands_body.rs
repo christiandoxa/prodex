@@ -240,8 +240,8 @@ fn profile_remove_recovers_after_continuation_sidecar_failure() {
         "PRODEX_RUNTIME_LOG_DIR",
         &runtime_log_dir.display().to_string(),
     );
-    crate::command_dispatch::execute_command(crate::Commands::Cleanup(CleanupArgs::default()))
-        .expect("cleanup should finalize committed remove recovery");
+    crate::command_dispatch::execute_command(crate::Commands::Profile(ProfileCommands::List))
+        .expect("profile list should finalize committed remove recovery");
 
     assert!(!profile_home.exists());
     assert!(

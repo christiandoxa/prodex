@@ -2,10 +2,6 @@ use super::*;
 use crate::app_commands::runtime_launch::{
     GoalResumeRelaunchPlan, GoalUsageLimitMonitor, prepare_goal_usage_limit_monitor,
 };
-use crate::runtime_desktop::{
-    DesktopGuiCommand, configure_desktop_codex_home, desktop_gui_command,
-    prepare_desktop_overlay_home, prepare_runtime_overlay_home,
-};
 #[path = "runtime_tools/child_env.rs"]
 mod child_env;
 #[path = "runtime_tools/overlay.rs"]
@@ -48,7 +44,6 @@ pub(super) fn session_app_server_companion_eligible(
     runtime_args: &[OsString],
 ) -> bool {
     strategy.args.super_mode
-        && strategy.desktop_command.is_none()
         && !prodex_runtime_launch::is_codex_exec_invocation(runtime_args)
         && !prodex_runtime_launch::codex_resume_requested(runtime_args)
         && !runtime_args.iter().any(|arg| arg == "--remote")
@@ -64,8 +59,6 @@ pub(crate) struct RuntimeToolLaunchStrategy {
     profile_v2_name: Option<String>,
     model_context_window_tokens: Option<u64>,
     gemini_thinking_budget_tokens: Option<u64>,
-    desktop_command: Option<DesktopGuiCommand>,
-    configure_prodex_overlay: bool,
     sub_agent: Option<ResolvedSuperSubAgent>,
     model_preference_sync: Option<ModelPreferenceSync>,
     resume_session_path: Option<PathBuf>,
@@ -81,10 +74,6 @@ pub(crate) struct RuntimeToolLaunchStrategy {
 }
 
 impl RuntimeToolLaunchStrategy {
-    pub(crate) fn new(args: RuntimeToolArgs) -> Self {
-        Self::new_with_sub_agent(args, None)
-    }
-
     pub(crate) fn new_with_sub_agent(
         args: RuntimeToolArgs,
         sub_agent: Option<ResolvedSuperSubAgent>,
@@ -114,8 +103,6 @@ impl RuntimeToolLaunchStrategy {
             profile_v2_name,
             model_context_window_tokens,
             gemini_thinking_budget_tokens,
-            desktop_command: None,
-            configure_prodex_overlay: true,
             sub_agent,
             model_preference_sync: None,
             resume_session_path: None,
@@ -129,16 +116,6 @@ impl RuntimeToolLaunchStrategy {
             recovery_generation: 0,
             allow_failed_profile_recovery: false,
         }
-    }
-
-    pub(crate) fn new_desktop(
-        args: RuntimeToolArgs,
-        configure_prodex_overlay: bool,
-    ) -> Result<Self> {
-        let mut strategy = Self::new(args);
-        strategy.desktop_command = Some(desktop_gui_command()?);
-        strategy.configure_prodex_overlay = configure_prodex_overlay;
-        Ok(strategy)
     }
 }
 
@@ -162,7 +139,7 @@ impl RuntimeLaunchStrategy for RuntimeToolLaunchStrategy {
             presidio_redaction_enabled: self.presidio_enabled,
             model_context_window_tokens: self.model_context_window_tokens,
             gemini_thinking_budget_tokens: self.gemini_thinking_budget_tokens,
-            force_runtime_proxy: self.desktop_command.is_some(),
+            force_runtime_proxy: false,
             model_provider_override: self.model_provider_override.as_deref(),
             profile_v2_name: self.profile_v2_name.as_deref(),
             external_provider: self
@@ -178,7 +155,7 @@ impl RuntimeLaunchStrategy for RuntimeToolLaunchStrategy {
         prepared: &PreparedRuntimeLaunch,
         runtime_proxy: Option<&RuntimeProxyEndpoint>,
     ) -> Result<RuntimeLaunchPlan> {
-        if self.goal_usage_limit_monitor.is_none() && self.desktop_command.is_none() {
+        if self.goal_usage_limit_monitor.is_none() {
             self.goal_usage_limit_monitor = prepare_goal_usage_limit_monitor(
                 &self.codex_args,
                 self.args.dry_run || self.args.no_auto_rotate,
@@ -213,18 +190,14 @@ impl RuntimeLaunchStrategy for RuntimeToolLaunchStrategy {
         {
             print_launch_status("model preference synchronization was incomplete");
         }
-        let mut repair_child = plan.child.clone();
-        if self.desktop_command.is_some() {
-            repair_child.binary = crate::codex_bin();
-        }
         if let Some(session_file) = self.resume_session_path.as_deref() {
             crate::app_commands::runtime_launch::maintain_shared_codex_session_after_child_exit(
-                &repair_child,
+                &plan.child,
                 session_file,
             );
         } else {
             crate::app_commands::runtime_launch::maintain_shared_codex_sessions_after_child_exit(
-                &repair_child,
+                &plan.child,
             );
         }
         Ok(())
@@ -277,35 +250,18 @@ impl RuntimeToolLaunchStrategy {
 
     fn build_child_plan(
         &self,
-        prepared: &PreparedRuntimeLaunch,
         overlay_home: &std::path::Path,
         runtime_args: &[OsString],
     ) -> Result<ChildProcessPlan> {
-        if let Some(desktop) = self.desktop_command.as_ref() {
-            let sqlite_home = prepared
-                .managed
-                .then_some(prepared.paths.shared_codex_root.as_path());
-            configure_desktop_codex_home(
-                overlay_home,
-                runtime_args,
-                self.args.full_access,
-                sqlite_home,
-            )?;
-            let mut child = codex_child_plan(overlay_home.to_path_buf(), Vec::new());
-            child.binary = desktop.binary.clone();
-            child.args = desktop.args.clone();
-            Ok(child)
-        } else {
-            if session_app_server_companion_eligible(self, runtime_args) {
-                let mut child = codex_child_plan(overlay_home.to_path_buf(), runtime_args.to_vec());
-                child.reset_terminal_keyboard_enhancement = true;
-                return Ok(child);
-            }
-            Ok(codex_tui_child_plan(
-                overlay_home.to_path_buf(),
-                runtime_args.to_vec(),
-            ))
+        if session_app_server_companion_eligible(self, runtime_args) {
+            let mut child = codex_child_plan(overlay_home.to_path_buf(), runtime_args.to_vec());
+            child.reset_terminal_keyboard_enhancement = true;
+            return Ok(child);
         }
+        Ok(codex_tui_child_plan(
+            overlay_home.to_path_buf(),
+            runtime_args.to_vec(),
+        ))
     }
 
     fn finalize_child_plan(
@@ -342,13 +298,6 @@ impl RuntimeToolLaunchStrategy {
     }
 }
 
-pub(super) fn handle_runtime_tools(args: RuntimeToolArgs) -> Result<()> {
-    if let Some(base_url) = args.base_url.as_deref() {
-        validate_credential_free_http_url(base_url, "runtime upstream base URL")?;
-    }
-    execute_runtime_launch(RuntimeToolLaunchStrategy::new(args))
-}
-
 pub(crate) fn handle_super_runtime_tools(
     args: RuntimeToolArgs,
     sub_agent: Option<ResolvedSuperSubAgent>,
@@ -360,23 +309,6 @@ pub(crate) fn handle_super_runtime_tools(
         args, sub_agent,
     ))
 }
-
-pub(super) fn handle_desktop_gui(
-    args: RuntimeToolArgs,
-    configure_prodex_overlay: bool,
-) -> Result<()> {
-    if let Some(base_url) = args.base_url.as_deref() {
-        validate_credential_free_http_url(base_url, "runtime upstream base URL")?;
-    }
-    execute_runtime_launch(RuntimeToolLaunchStrategy::new_desktop(
-        args,
-        configure_prodex_overlay,
-    )?)
-}
-
-#[cfg(test)]
-#[path = "../tests/src/runtime_tools_desktop.rs"]
-mod desktop_tests;
 
 #[cfg(test)]
 mod tests {
@@ -420,7 +352,10 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn plain_super_launch_has_one_persisted_app_server_companion() {
-        let strategy = RuntimeToolLaunchStrategy::new(super_as_caveman_args(&["prodex", "s"]));
+        let strategy = RuntimeToolLaunchStrategy::new_with_sub_agent(
+            super_as_caveman_args(&["prodex", "s"]),
+            None,
+        );
         let root = crate::test_temp_root()
             .join(format!("prodex-session-server-plan-{}", std::process::id()));
         std::fs::create_dir_all(&root).unwrap();
@@ -460,9 +395,10 @@ mod tests {
 
     #[test]
     fn super_default_enables_optimizer_stack_with_yolo_access() {
-        let strategy = RuntimeToolLaunchStrategy::new(super_as_caveman_args(&[
-            "prodex", "super", "exec", "hi",
-        ]));
+        let strategy = RuntimeToolLaunchStrategy::new_with_sub_agent(
+            super_as_caveman_args(&["prodex", "super", "exec", "hi"]),
+            None,
+        );
 
         assert!(strategy.rtk_enabled);
         assert!(strategy.presidio_enabled);
@@ -482,24 +418,6 @@ mod tests {
                 OsString::from("hi")
             ]
         );
-    }
-
-    #[test]
-    fn desktop_strategy_forces_runtime_proxy() {
-        let command =
-            parse_cli_command_from(["prodex", "caveman"]).expect("caveman command should parse");
-        let Commands::Caveman(args) = command else {
-            panic!("expected caveman command");
-        };
-        let mut strategy = RuntimeToolLaunchStrategy::new(args);
-        assert!(!strategy.runtime_request().force_runtime_proxy);
-
-        strategy.desktop_command = Some(DesktopGuiCommand {
-            binary: OsString::from("desktop"),
-            args: Vec::new(),
-        });
-
-        assert!(strategy.runtime_request().force_runtime_proxy);
     }
 
     #[test]
@@ -528,8 +446,10 @@ mod tests {
 
     #[test]
     fn super_alias_enables_optimizer_stack() {
-        let strategy =
-            RuntimeToolLaunchStrategy::new(super_as_caveman_args(&["prodex", "s", "exec", "hi"]));
+        let strategy = RuntimeToolLaunchStrategy::new_with_sub_agent(
+            super_as_caveman_args(&["prodex", "s", "exec", "hi"]),
+            None,
+        );
 
         assert!(strategy.rtk_enabled);
         assert!(strategy.presidio_enabled);
@@ -543,8 +463,10 @@ mod tests {
 
     #[test]
     fn super_alias_keeps_optional_stack_for_default_openai_provider() {
-        let strategy =
-            RuntimeToolLaunchStrategy::new(super_as_caveman_args(&["prodex", "s", "exec", "hi"]));
+        let strategy = RuntimeToolLaunchStrategy::new_with_sub_agent(
+            super_as_caveman_args(&["prodex", "s", "exec", "hi"]),
+            None,
+        );
 
         assert_super_optional_stack(&strategy);
         assert!(!strategy.args.skip_quota_check);
@@ -554,16 +476,19 @@ mod tests {
 
     #[test]
     fn super_alias_keeps_optional_stack_for_deepseek_provider() {
-        let strategy = RuntimeToolLaunchStrategy::new(super_as_caveman_args(&[
-            "prodex",
-            "s",
-            "--provider",
-            "deepseek",
-            "--api-key",
-            "deepseek-key",
-            "exec",
-            "hi",
-        ]));
+        let strategy = RuntimeToolLaunchStrategy::new_with_sub_agent(
+            super_as_caveman_args(&[
+                "prodex",
+                "s",
+                "--provider",
+                "deepseek",
+                "--api-key",
+                "deepseek-key",
+                "exec",
+                "hi",
+            ]),
+            None,
+        );
 
         assert_super_optional_stack(&strategy);
         assert!(strategy.args.skip_quota_check);
@@ -584,16 +509,19 @@ mod tests {
 
     #[test]
     fn super_alias_keeps_optional_stack_for_gemini_provider() {
-        let strategy = RuntimeToolLaunchStrategy::new(super_as_caveman_args(&[
-            "prodex",
-            "s",
-            "--provider",
-            "gemini",
-            "--api-key",
-            "gemini-key",
-            "exec",
-            "hi",
-        ]));
+        let strategy = RuntimeToolLaunchStrategy::new_with_sub_agent(
+            super_as_caveman_args(&[
+                "prodex",
+                "s",
+                "--provider",
+                "gemini",
+                "--api-key",
+                "gemini-key",
+                "exec",
+                "hi",
+            ]),
+            None,
+        );
 
         assert_super_optional_stack(&strategy);
         assert!(strategy.args.skip_quota_check);
@@ -614,16 +542,19 @@ mod tests {
 
     #[test]
     fn super_alias_keeps_optional_stack_for_copilot_provider() {
-        let strategy = RuntimeToolLaunchStrategy::new(super_as_caveman_args(&[
-            "prodex",
-            "s",
-            "--provider",
-            "copilot",
-            "--api-key",
-            "copilot-key",
-            "exec",
-            "hi",
-        ]));
+        let strategy = RuntimeToolLaunchStrategy::new_with_sub_agent(
+            super_as_caveman_args(&[
+                "prodex",
+                "s",
+                "--provider",
+                "copilot",
+                "--api-key",
+                "copilot-key",
+                "exec",
+                "hi",
+            ]),
+            None,
+        );
 
         assert_super_optional_stack(&strategy);
         assert!(strategy.args.skip_quota_check);
@@ -650,15 +581,18 @@ mod tests {
 
     #[test]
     fn super_provider_normalizes_bare_session_id_after_provider_config() {
-        let strategy = RuntimeToolLaunchStrategy::new(super_as_caveman_args(&[
-            "prodex",
-            "s",
-            "--provider",
-            "gemini",
-            "--api-key",
-            "gemini-key",
-            "019c9e3d-45a0-7ad0-a6ee-b194ac2d44f9",
-        ]));
+        let strategy = RuntimeToolLaunchStrategy::new_with_sub_agent(
+            super_as_caveman_args(&[
+                "prodex",
+                "s",
+                "--provider",
+                "gemini",
+                "--api-key",
+                "gemini-key",
+                "019c9e3d-45a0-7ad0-a6ee-b194ac2d44f9",
+            ]),
+            None,
+        );
 
         let rendered = strategy
             .codex_args
@@ -709,14 +643,17 @@ mod tests {
 
     #[test]
     fn super_alias_keeps_optional_stack_for_local_provider() {
-        let strategy = RuntimeToolLaunchStrategy::new(super_as_caveman_args(&[
-            "prodex",
-            "s",
-            "--url",
-            "http://127.0.0.1:11434",
-            "exec",
-            "hi",
-        ]));
+        let strategy = RuntimeToolLaunchStrategy::new_with_sub_agent(
+            super_as_caveman_args(&[
+                "prodex",
+                "s",
+                "--url",
+                "http://127.0.0.1:11434",
+                "exec",
+                "hi",
+            ]),
+            None,
+        );
 
         assert_super_optional_stack(&strategy);
         assert!(strategy.args.skip_quota_check);
@@ -724,93 +661,6 @@ mod tests {
         assert_eq!(
             strategy.model_provider_override.as_deref(),
             Some("prodex-local")
-        );
-    }
-
-    #[test]
-    fn legacy_leading_tool_prefixes_translate_to_typed_selection() {
-        let command = parse_cli_command_from([
-            "prodex",
-            "caveman",
-            "rtk",
-            "playwright",
-            "ponytail",
-            "exec",
-            "hi",
-        ])
-        .unwrap();
-        let Commands::Caveman(args) = command else {
-            panic!("expected caveman command");
-        };
-        let tools = args.selected_tool_set();
-        assert!(tools.contains(prodex_optional_tools::OptionalToolId::Rtk));
-        assert!(tools.contains(prodex_optional_tools::OptionalToolId::PlaywrightMcp));
-        assert!(tools.contains(prodex_optional_tools::OptionalToolId::Ponytail));
-        assert_eq!(
-            args.codex_args,
-            [OsString::from("exec"), OsString::from("hi")]
-        );
-    }
-
-    #[test]
-    fn non_prefix_presidio_is_preserved_for_codex() {
-        let command =
-            parse_cli_command_from(["prodex", "caveman", "exec", "presidio", "hi"]).unwrap();
-        let Commands::Caveman(args) = command else {
-            panic!("expected caveman command");
-        };
-        assert!(!args.presidio);
-        assert_eq!(
-            args.codex_args,
-            [
-                OsString::from("exec"),
-                OsString::from("presidio"),
-                OsString::from("hi")
-            ]
-        );
-    }
-
-    #[test]
-    fn rtk_alias_launch_keeps_approval_bypass_explicit() {
-        let command = parse_cli_command_from(["prodex", "rtk", "exec", "review"])
-            .expect("rtk shortcut should parse");
-        let Commands::Rtk(args) = command else {
-            panic!("expected rtk shortcut");
-        };
-        let strategy = RuntimeToolLaunchStrategy::new(runtime_tool_args_with_tool(
-            args,
-            prodex_optional_tools::OptionalToolId::Rtk,
-        ));
-
-        assert!(strategy.rtk_enabled);
-        assert!(!strategy.args.full_access);
-        assert!(!strategy.codex_args.contains(&OsString::from(
-            "--dangerously-bypass-approvals-and-sandbox"
-        )));
-        assert!(
-            !strategy
-                .codex_args
-                .contains(&OsString::from("--dangerously-bypass-hook-trust"))
-        );
-    }
-
-    #[test]
-    fn legacy_leading_presidio_translates_without_string_surgery() {
-        let command = parse_cli_command_from([
-            "prodex", "caveman", "rtk", "ponytail", "presidio", "exec", "hi",
-        ])
-        .unwrap();
-        let Commands::Caveman(args) = command else {
-            panic!("expected caveman command");
-        };
-        assert!(args.presidio);
-        assert!(
-            args.selected_tool_set()
-                .contains(prodex_optional_tools::OptionalToolId::Presidio)
-        );
-        assert_eq!(
-            args.codex_args,
-            [OsString::from("exec"), OsString::from("hi")]
         );
     }
 

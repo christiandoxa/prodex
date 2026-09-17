@@ -1,4 +1,4 @@
-use clap::{Args, Subcommand, ValueEnum};
+use clap::{Args, Subcommand};
 use std::path::PathBuf;
 
 use super::RUNTIME_PROXY_DOCTOR_TAIL_BYTES;
@@ -79,13 +79,6 @@ pub struct SessionResumeArgs {
     pub id: String,
 }
 
-#[derive(Args, Debug, Default)]
-pub struct InfoArgs {
-    /// Include token usage totals parsed from recent runtime logs.
-    #[arg(long)]
-    pub tokens: bool,
-}
-
 #[derive(Args, Debug)]
 pub struct StatusArgs {
     /// Render one snapshot instead of the live dashboard.
@@ -103,28 +96,6 @@ impl Default for StatusArgs {
             interval: 1,
         }
     }
-}
-
-#[derive(Clone, Copy, Debug, Default, ValueEnum, PartialEq, Eq)]
-pub enum LogMode {
-    /// Follow session/runtime logs and print live text, tool calls, and token usage events.
-    #[default]
-    Stream,
-    /// Show the most recent transcript text and token usage event and exit.
-    Last,
-    /// Follow redacted, bounded upstream payload snapshots sent toward the backend.
-    Upstream,
-}
-
-#[derive(Args, Debug, Default)]
-pub struct LogArgs {
-    /// Output mode. Omit for live transcript/tool/token logs, use `stream` for the explicit
-    /// equivalent, `last` for the latest event, or `upstream` for processed backend payloads.
-    #[arg(value_enum, default_value_t)]
-    pub mode: LogMode,
-    /// Emit machine-readable JSON. Stream mode emits text/tool/token events; upstream mode emits payload events.
-    #[arg(long)]
-    pub json: bool,
 }
 
 #[derive(Args, Debug)]
@@ -165,174 +136,4 @@ pub struct DoctorArgs {
     /// Required for --bundle; secret values are never emitted.
     #[arg(long, requires = "bundle")]
     pub redacted: bool,
-}
-
-#[derive(Args, Debug)]
-pub struct SetupArgs {
-    /// Preview planned setup/repair actions without writing files.
-    #[arg(long)]
-    pub dry_run: bool,
-    /// Verify the externally installed optional-tool catalog: Caveman, RTK, Codebase Memory MCP, Playwright MCP, and Ponytail.
-    #[arg(long = "verify-tools")]
-    pub verify_tools: bool,
-    /// Emit machine-readable JSON output.
-    #[arg(long)]
-    pub json: bool,
-}
-
-#[derive(Subcommand, Debug)]
-pub enum CapabilityCommands {
-    /// List Prodex capabilities and local availability.
-    List(CapabilityListArgs),
-    /// Diagnose the local optimizer stack used by `prodex s` / `prodex super`.
-    #[command(name = "super-doctor", visible_alias = "s-doctor")]
-    SuperDoctor(SuperDoctorArgs),
-}
-
-#[derive(Args, Debug)]
-pub struct CapabilityListArgs {
-    /// Emit machine-readable JSON.
-    #[arg(long)]
-    pub json: bool,
-}
-
-#[derive(Args, Debug)]
-pub struct SuperDoctorArgs {
-    /// Emit machine-readable JSON.
-    #[arg(long)]
-    pub json: bool,
-    /// Exit non-zero when any Super optimizer check is not ready.
-    #[arg(long)]
-    pub strict: bool,
-    /// Include local Presidio Analyzer/Anonymizer health checks.
-    #[arg(long)]
-    pub presidio: bool,
-}
-
-#[derive(Args, Debug)]
-pub struct AuditArgs {
-    /// Show only the most recent matching events.
-    #[arg(long, default_value_t = 50, value_name = "COUNT")]
-    pub tail: usize,
-    /// Emit machine-readable JSON output.
-    #[arg(long)]
-    pub json: bool,
-    /// Filter by component, for example `profile` or `runtime`.
-    #[arg(long, value_name = "NAME")]
-    pub component: Option<String>,
-    /// Filter by action, for example `use` or `broker_start`.
-    #[arg(long, value_name = "NAME")]
-    pub action: Option<String>,
-    /// Filter by outcome, for example `success` or `failure`.
-    #[arg(long, value_name = "NAME")]
-    pub outcome: Option<String>,
-}
-
-#[derive(Subcommand, Debug)]
-pub enum ContextCommands {
-    /// Read-only size and approximate token audit for shared Codex context roots.
-    Audit(ContextAuditArgs),
-    /// Export a shared Codex session transcript/context to Markdown.
-    Export(ContextExportArgs),
-    /// Deterministically compact prose context files and write .original.md backups.
-    Compress(ContextCompressArgs),
-    /// Execute a Smart Context inputs-only replay corpus.
-    #[command(name = "replay-report")]
-    ReplayReport(ContextReplayReportArgs),
-    /// Compact copied command output from stdin or a file for low-token context sharing.
-    #[command(name = "compact-output")]
-    CompactOutput(ContextCompactOutputArgs),
-}
-
-#[derive(Args, Debug)]
-pub struct ContextAuditArgs {
-    /// Shared Codex root to inspect. Defaults to the resolved shared CODEX_HOME.
-    #[arg(long, value_name = "PATH")]
-    pub root: Option<PathBuf>,
-    /// Show this many largest files in the human table. Use 0 for all.
-    #[arg(long, default_value_t = 20, value_name = "COUNT")]
-    pub limit: usize,
-    /// Emit machine-readable JSON output.
-    #[arg(long)]
-    pub json: bool,
-}
-
-#[derive(Args, Debug)]
-pub struct ContextExportArgs {
-    /// Unique full or partial shared Codex session id.
-    #[arg(value_name = "ID")]
-    pub id: String,
-    /// Output Markdown path. Defaults to `./context_<resolved-session-id>.md`.
-    #[arg(value_name = "PATH")]
-    pub path: Option<PathBuf>,
-    /// Replace an existing output file.
-    #[arg(long)]
-    pub force: bool,
-}
-
-#[derive(Args, Debug)]
-pub struct ContextCompressArgs {
-    /// Markdown/text file or directory to compact.
-    #[arg(value_name = "PATH")]
-    pub path: PathBuf,
-    /// Show savings without writing the file or backup.
-    #[arg(long)]
-    pub dry_run: bool,
-    /// Emit machine-readable JSON output.
-    #[arg(long)]
-    pub json: bool,
-}
-
-#[derive(Args, Debug)]
-pub struct ContextReplayReportArgs {
-    /// Smart Context inputs-only replay JSON corpus.
-    #[arg(value_name = "PATH")]
-    pub path: PathBuf,
-    /// Emit the generated machine-readable report instead of Markdown.
-    #[arg(long)]
-    pub json: bool,
-    /// Exit non-zero when deterministic replay invariants fail.
-    #[arg(long)]
-    pub strict: bool,
-}
-
-#[derive(Clone, Copy, Debug, ValueEnum)]
-pub enum ContextCompactOutputKind {
-    Auto,
-    GitStatus,
-    GitDiff,
-    Search,
-    FileList,
-    Plain,
-}
-
-#[derive(Args, Debug)]
-pub struct ContextCompactOutputArgs {
-    /// Text file to compact. Omit to read command output from stdin.
-    #[arg(value_name = "PATH")]
-    pub path: Option<PathBuf>,
-    /// Output kind to use. `auto` detects common git/search/file-list output.
-    #[arg(long, value_enum, default_value = "auto")]
-    pub kind: ContextCompactOutputKind,
-    /// Maximum lines in the compacted output.
-    #[arg(long, default_value_t = 160, value_name = "COUNT")]
-    pub max_lines: usize,
-    /// Lines to keep from the beginning for plain truncation.
-    #[arg(long, default_value_t = 80, value_name = "COUNT")]
-    pub head_lines: usize,
-    /// Lines to keep from the end for plain truncation.
-    #[arg(long, default_value_t = 40, value_name = "COUNT")]
-    pub tail_lines: usize,
-    /// Maximum characters per retained line.
-    #[arg(long, default_value_t = 240, value_name = "CHARS")]
-    pub max_line_chars: usize,
-    /// Maximum search matches to keep per file.
-    #[arg(long, default_value_t = 4, value_name = "COUNT")]
-    pub max_search_matches_per_file: usize,
-    /// Maximum paths to keep in file-list summaries.
-    #[arg(long, default_value_t = 120, value_name = "COUNT")]
-    pub max_path_entries: usize,
-    /// Emit machine-readable JSON output including the compacted text.
-    #[arg(long)]
-    pub json: bool,
 }

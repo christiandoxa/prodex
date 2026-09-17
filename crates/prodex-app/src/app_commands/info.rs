@@ -3,116 +3,11 @@ use super::*;
 #[cfg(test)]
 pub(crate) use crate::reports::collect_info_runtime_load_summary_from_text;
 pub(crate) use crate::reports::{
-    InfoTokenUsageSummary, classify_prodex_process_row,
-    collect_info_runtime_load_summary_from_texts, collect_info_token_usage_summary_from_texts,
-    format_info_pool_remaining, format_info_process_summary, format_info_quota_data_summary,
-    format_info_runway, format_info_token_usage_summary, format_runtime_tuning_budgets,
-    format_runtime_tuning_transport, format_runtime_tuning_workers, parse_ps_process_rows,
-    select_active_runtime_log_paths_with_prefix, select_recent_runtime_log_paths,
+    classify_prodex_process_row, collect_info_runtime_load_summary_from_texts,
+    format_info_pool_remaining, format_info_runway, format_info_token_usage_summary,
+    parse_ps_process_rows, select_active_runtime_log_paths_with_prefix,
+    select_recent_runtime_log_paths,
 };
-
-pub(crate) fn collect_info_quota_aggregate(
-    paths: &AppPaths,
-    state: &AppState,
-    now: i64,
-) -> InfoQuotaAggregate {
-    let codex_runtime_profiles = state
-        .profiles
-        .iter()
-        .filter(|(_, profile)| profile.provider.supports_codex_runtime())
-        .map(|(name, _)| name.clone())
-        .collect::<Vec<_>>();
-
-    if codex_runtime_profiles.is_empty() {
-        return InfoQuotaAggregate {
-            quota_compatible_profiles: 0,
-            live_profiles: 0,
-            snapshot_profiles: 0,
-            unavailable_profiles: 0,
-            five_hour_profiles_with_data: 0,
-            weekly_profiles_with_data: 0,
-            five_hour_pool_remaining: 0,
-            weekly_pool_remaining: 0,
-            earliest_five_hour_reset_at: None,
-            earliest_weekly_reset_at: None,
-        };
-    }
-
-    let persisted_usage_snapshots =
-        load_runtime_usage_snapshots(paths, &state.profiles).unwrap_or_default();
-    let reports = collect_run_profile_reports(state, codex_runtime_profiles, None, false);
-    build_info_quota_aggregate(&reports, &persisted_usage_snapshots, now)
-}
-
-pub(crate) fn format_info_provider_summary(profiles: &BTreeMap<String, ProfileEntry>) -> String {
-    if profiles.is_empty() {
-        return "none".to_string();
-    }
-
-    let mut counts = BTreeMap::<&'static str, usize>::new();
-    for profile in profiles.values() {
-        *counts.entry(profile.provider.label()).or_default() += 1;
-    }
-
-    counts
-        .into_iter()
-        .map(|(provider, count)| format!("{provider}={count}"))
-        .collect::<Vec<_>>()
-        .join(", ")
-}
-
-pub(crate) fn format_info_provider_capabilities_summary(
-    profiles: &BTreeMap<String, ProfileEntry>,
-) -> String {
-    if profiles.is_empty() {
-        return "none".to_string();
-    }
-
-    let mut native = 0;
-    let mut adapter = 0;
-    let mut external_cli = 0;
-    let mut unsupported = 0;
-    let mut openai_format = 0;
-    let mut quota_shapes = BTreeMap::<&'static str, usize>::new();
-
-    for profile in profiles.values() {
-        let capabilities = profile.provider.capabilities();
-        if capabilities.uses_openai_client_format {
-            openai_format += 1;
-        }
-        match capabilities.runtime_route_policy {
-            prodex_state::RuntimeRoutePolicy::NativeCodex => native += 1,
-            prodex_state::RuntimeRoutePolicy::ResponsesAdapter => adapter += 1,
-            prodex_state::RuntimeRoutePolicy::ExternalCli => external_cli += 1,
-            prodex_state::RuntimeRoutePolicy::Unsupported => unsupported += 1,
-        }
-        *quota_shapes
-            .entry(capabilities.quota_shape.label())
-            .or_default() += 1;
-    }
-
-    let quota_shapes = quota_shapes
-        .into_iter()
-        .map(|(shape, count)| format!("{shape}={count}"))
-        .collect::<Vec<_>>()
-        .join(", ");
-    format!(
-        "routes native={native}, adapter={adapter}, external-cli={external_cli}, unsupported={unsupported}; openai-format={openai_format}; quota {quota_shapes}"
-    )
-}
-
-pub(crate) fn build_info_quota_aggregate(
-    reports: &[RunProfileProbeReport],
-    persisted_usage_snapshots: &BTreeMap<String, RuntimeProfileUsageSnapshot>,
-    now: i64,
-) -> InfoQuotaAggregate {
-    crate::reports::build_info_quota_aggregate(
-        reports,
-        persisted_usage_snapshots,
-        now,
-        RUNTIME_PROFILE_USAGE_CACHE_STALE_GRACE_SECONDS,
-    )
-}
 
 pub(crate) fn collect_prodex_processes() -> Vec<ProdexProcessInfo> {
     try_collect_prodex_processes().unwrap_or_default()
@@ -230,15 +125,6 @@ pub(crate) fn collect_recent_runtime_log_paths(limit: usize) -> Vec<PathBuf> {
     )
 }
 
-pub(crate) fn collect_info_token_usage_summary(log_paths: &[PathBuf]) -> InfoTokenUsageSummary {
-    let tails = log_paths.iter().filter_map(|path| {
-        read_runtime_log_tail(path, INFO_RUNTIME_LOG_TAIL_BYTES)
-            .ok()
-            .map(|tail| String::from_utf8_lossy(&tail).into_owned())
-    });
-    collect_info_token_usage_summary_from_texts(log_paths.len(), tails)
-}
-
 pub(crate) fn estimate_info_runway(
     observations: &[InfoRuntimeQuotaObservation],
     window: InfoQuotaWindow,
@@ -275,12 +161,6 @@ pub(crate) fn format_runtime_policy_summary(summary: Option<&RuntimePolicySummar
 
 pub(crate) fn format_runtime_proxy_contract_summary() -> String {
     crate::reports::format_runtime_proxy_contract_summary()
-}
-
-pub(crate) fn format_runtime_proxy_preset() -> String {
-    runtime_policy_proxy()
-        .and_then(|policy| policy.preset().map(|preset| preset.as_str().to_string()))
-        .unwrap_or_else(|| "default".to_string())
 }
 
 pub(crate) fn format_runtime_logs_summary() -> String {
