@@ -286,3 +286,72 @@ fn validation_errors_do_not_expose_registration_values() {
     let rendered = format!("{error:?} {error}");
     assert!(!rendered.contains(SECRET_LIKE));
 }
+
+#[cfg(feature = "mojo")]
+#[test]
+fn mojo_registry_metadata_matches_rust_oracle() {
+    let actual = super::mojo::builtin_registrations();
+    assert_eq!(actual.len(), BUILTIN_REGISTRATIONS.len());
+    for (actual, oracle) in actual.iter().zip(BUILTIN_REGISTRATIONS) {
+        assert_eq!(actual.provider, oracle.provider);
+        assert_eq!(actual.aliases, oracle.aliases);
+        assert_eq!(actual.adapter.provider(), oracle.adapter.provider());
+        assert_eq!(actual.translator.provider(), oracle.translator.provider());
+        assert_eq!(actual.client_request_format, oracle.client_request_format);
+        assert_eq!(
+            actual.upstream_request_format,
+            oracle.upstream_request_format
+        );
+        assert_eq!(actual.response_format, oracle.response_format);
+        assert_eq!(actual.supports_streaming, oracle.supports_streaming);
+        assert_eq!(
+            actual.supports_model_fallback,
+            oracle.supports_model_fallback
+        );
+        assert_eq!(actual.supported_endpoints, oracle.supported_endpoints);
+        assert_eq!(actual.capabilities, oracle.capabilities);
+        assert_eq!(actual.passthrough_endpoints, oracle.passthrough_endpoints);
+        assert_eq!(
+            actual
+                .model_catalog
+                .iter()
+                .map(|model| model.id)
+                .collect::<Vec<_>>(),
+            oracle
+                .model_catalog
+                .iter()
+                .map(|model| model.id)
+                .collect::<Vec<_>>()
+        );
+        assert_eq!(
+            actual.runtime_metadata.map(|metadata| metadata.provider),
+            oracle.runtime_metadata.map(|metadata| metadata.provider)
+        );
+    }
+    for (alias, expected) in [
+        ("openai", Some(ProviderId::OpenAi)),
+        (" OPENAI-compatible ", Some(ProviderId::OpenAi)),
+        ("claude", Some(ProviderId::Anthropic)),
+        ("github_copilot", Some(ProviderId::Copilot)),
+        ("google", Some(ProviderId::Gemini)),
+        ("local-openai", Some(ProviderId::Local)),
+        ("unknown", None),
+    ] {
+        assert_eq!(super::mojo::resolve_alias(alias), expected, "{alias:?}");
+    }
+    for (value, expected) in [
+        ("prodex-anthropic", Some(ProviderId::Anthropic)),
+        ("prodex-copilot", Some(ProviderId::Copilot)),
+        ("prodex-deepseek", Some(ProviderId::DeepSeek)),
+        ("prodex-gemini", Some(ProviderId::Gemini)),
+        ("prodex-kiro", Some(ProviderId::Kiro)),
+        ("prodex-local", Some(ProviderId::Local)),
+        ("prodex-openai", None),
+    ] {
+        assert_eq!(
+            super::mojo::resolve_model_provider_id(value),
+            expected,
+            "{value:?}"
+        );
+    }
+}

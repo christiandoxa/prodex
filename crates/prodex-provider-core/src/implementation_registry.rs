@@ -1,6 +1,8 @@
 //! Immutable built-in provider implementation registry.
 
-use std::{error::Error, fmt, sync::LazyLock};
+use std::sync::LazyLock;
+#[cfg(any(not(feature = "mojo"), test))]
+use std::{error::Error, fmt};
 
 use crate::models::{
     ANTHROPIC_MODELS, COPILOT_MODELS, DEEPSEEK_MODELS, GEMINI_MODELS, KIRO_MODELS, LOCAL_MODELS,
@@ -15,11 +17,19 @@ use crate::translators::{
     PassthroughTranslator,
 };
 use crate::{
-    ALL_PROVIDER_ENDPOINTS, COPILOT_TEXT_ENDPOINTS, CORE_TEXT_ENDPOINTS, GEMINI_ENDPOINTS,
-    KIRO_ENDPOINTS, OPENAI_ENDPOINTS, ProviderCapabilityStatus, ProviderEndpoint, ProviderId,
+    ALL_PROVIDER_ENDPOINTS, ProviderCapabilityStatus, ProviderEndpoint, ProviderId,
     ProviderModelSpec, ProviderRuntimeMetadata, ProviderTranslator, ProviderWireFormat,
     StaticProviderAdapter,
 };
+
+#[cfg(any(not(feature = "mojo"), test))]
+use crate::{
+    COPILOT_TEXT_ENDPOINTS, CORE_TEXT_ENDPOINTS, GEMINI_ENDPOINTS, KIRO_ENDPOINTS, OPENAI_ENDPOINTS,
+};
+
+#[cfg(feature = "mojo")]
+#[path = "implementation_registry/mojo.rs"]
+mod mojo;
 
 pub const PROVIDER_IMPLEMENTATION_ORDER: &[ProviderId] = &[
     ProviderId::OpenAi,
@@ -31,6 +41,7 @@ pub const PROVIDER_IMPLEMENTATION_ORDER: &[ProviderId] = &[
     ProviderId::Local,
 ];
 
+#[cfg(any(not(feature = "mojo"), test))]
 const OPENAI_CAPABILITIES: &[(ProviderEndpoint, ProviderCapabilityStatus)] = &[
     (
         ProviderEndpoint::Responses,
@@ -53,6 +64,7 @@ const OPENAI_CAPABILITIES: &[(ProviderEndpoint, ProviderCapabilityStatus)] = &[
     (ProviderEndpoint::Audio, ProviderCapabilityStatus::Native),
     (ProviderEndpoint::Batches, ProviderCapabilityStatus::Native),
 ];
+#[cfg(any(not(feature = "mojo"), test))]
 const CHAT_TRANSLATED_CAPABILITIES: &[(ProviderEndpoint, ProviderCapabilityStatus)] = &[
     (
         ProviderEndpoint::Responses,
@@ -72,6 +84,7 @@ const CHAT_TRANSLATED_CAPABILITIES: &[(ProviderEndpoint, ProviderCapabilityStatu
     ),
     (ProviderEndpoint::Models, ProviderCapabilityStatus::Emulated),
 ];
+#[cfg(any(not(feature = "mojo"), test))]
 const COPILOT_CAPABILITIES: &[(ProviderEndpoint, ProviderCapabilityStatus)] = &[
     (
         ProviderEndpoint::Responses,
@@ -91,6 +104,7 @@ const COPILOT_CAPABILITIES: &[(ProviderEndpoint, ProviderCapabilityStatus)] = &[
     ),
     (ProviderEndpoint::Models, ProviderCapabilityStatus::Emulated),
 ];
+#[cfg(any(not(feature = "mojo"), test))]
 const GEMINI_CAPABILITIES: &[(ProviderEndpoint, ProviderCapabilityStatus)] = &[
     (
         ProviderEndpoint::Responses,
@@ -114,6 +128,7 @@ const GEMINI_CAPABILITIES: &[(ProviderEndpoint, ProviderCapabilityStatus)] = &[
         ProviderCapabilityStatus::Passthrough,
     ),
 ];
+#[cfg(any(not(feature = "mojo"), test))]
 const KIRO_CAPABILITIES: &[(ProviderEndpoint, ProviderCapabilityStatus)] = &[
     (
         ProviderEndpoint::Responses,
@@ -133,6 +148,7 @@ const KIRO_CAPABILITIES: &[(ProviderEndpoint, ProviderCapabilityStatus)] = &[
     ),
     (ProviderEndpoint::Models, ProviderCapabilityStatus::Emulated),
 ];
+#[cfg(any(not(feature = "mojo"), test))]
 const LOCAL_CAPABILITIES: &[(ProviderEndpoint, ProviderCapabilityStatus)] = &[
     (
         ProviderEndpoint::Responses,
@@ -176,6 +192,7 @@ const LOCAL_CAPABILITIES: &[(ProviderEndpoint, ProviderCapabilityStatus)] = &[
     ),
     (ProviderEndpoint::A2a, ProviderCapabilityStatus::Passthrough),
 ];
+#[cfg(any(not(feature = "mojo"), test))]
 const OPENAI_PASSTHROUGH_ENDPOINTS: &[ProviderEndpoint] = &[
     ProviderEndpoint::Responses,
     ProviderEndpoint::ChatCompletions,
@@ -185,6 +202,7 @@ const OPENAI_PASSTHROUGH_ENDPOINTS: &[ProviderEndpoint] = &[
     ProviderEndpoint::Audio,
     ProviderEndpoint::Batches,
 ];
+#[cfg(any(not(feature = "mojo"), test))]
 const LOCAL_PASSTHROUGH_ENDPOINTS: &[ProviderEndpoint] = &[
     ProviderEndpoint::Responses,
     ProviderEndpoint::ChatCompletions,
@@ -197,16 +215,19 @@ const LOCAL_PASSTHROUGH_ENDPOINTS: &[ProviderEndpoint] = &[
     ProviderEndpoint::Rerank,
     ProviderEndpoint::A2a,
 ];
+#[cfg(any(not(feature = "mojo"), test))]
 const CHAT_PASSTHROUGH_ENDPOINTS: &[ProviderEndpoint] = &[
     ProviderEndpoint::ChatCompletions,
     ProviderEndpoint::Messages,
 ];
+#[cfg(any(not(feature = "mojo"), test))]
 const COPILOT_PASSTHROUGH_ENDPOINTS: &[ProviderEndpoint] = &[
     ProviderEndpoint::Responses,
     ProviderEndpoint::ResponsesCompact,
     ProviderEndpoint::ChatCompletions,
     ProviderEndpoint::Messages,
 ];
+#[cfg(any(not(feature = "mojo"), test))]
 const GEMINI_PASSTHROUGH_ENDPOINTS: &[ProviderEndpoint] = &[
     ProviderEndpoint::ChatCompletions,
     ProviderEndpoint::Messages,
@@ -239,6 +260,7 @@ struct ProviderImplementationRegistration {
     runtime_metadata: Option<&'static ProviderRuntimeMetadata>,
 }
 
+#[cfg(any(not(feature = "mojo"), test))]
 const BUILTIN_REGISTRATIONS: &[ProviderImplementationRegistration] = &[
     ProviderImplementationRegistration {
         provider: ProviderId::OpenAi,
@@ -455,6 +477,7 @@ pub struct ProviderImplementationRegistry {
 }
 
 impl ProviderImplementationRegistry {
+    #[cfg(any(not(feature = "mojo"), test))]
     fn from_registrations(
         registrations: &[ProviderImplementationRegistration],
     ) -> Result<Self, ProviderImplementationRegistryError> {
@@ -483,27 +506,43 @@ impl ProviderImplementationRegistry {
     }
 
     pub fn resolve_alias(&self, value: &str) -> Option<ProviderId> {
-        let value = value.trim();
-        self.descriptors.iter().find_map(|descriptor| {
-            (descriptor.canonical_label().eq_ignore_ascii_case(value)
-                || descriptor
-                    .accepted_aliases()
-                    .iter()
-                    .any(|alias| alias.eq_ignore_ascii_case(value)))
-            .then_some(descriptor.provider())
-        })
+        #[cfg(feature = "mojo")]
+        {
+            mojo::resolve_alias(value)
+        }
+        #[cfg(not(feature = "mojo"))]
+        {
+            let value = value.trim();
+            self.descriptors.iter().find_map(|descriptor| {
+                (descriptor.canonical_label().eq_ignore_ascii_case(value)
+                    || descriptor
+                        .accepted_aliases()
+                        .iter()
+                        .any(|alias| alias.eq_ignore_ascii_case(value)))
+                .then_some(descriptor.provider())
+            })
+        }
     }
 
     pub fn resolve_model_provider_id(&self, value: &str) -> Option<ProviderId> {
-        let value = value.trim();
-        self.resolve_alias(value).or_else(|| {
-            self.descriptors.iter().find_map(|descriptor| {
-                descriptor
-                    .runtime_metadata()
-                    .is_some_and(|metadata| metadata.model_provider_id.eq_ignore_ascii_case(value))
-                    .then_some(descriptor.provider())
+        #[cfg(feature = "mojo")]
+        {
+            mojo::resolve_model_provider_id(value)
+        }
+        #[cfg(not(feature = "mojo"))]
+        {
+            let value = value.trim();
+            self.resolve_alias(value).or_else(|| {
+                self.descriptors.iter().find_map(|descriptor| {
+                    descriptor
+                        .runtime_metadata()
+                        .is_some_and(|metadata| {
+                            metadata.model_provider_id.eq_ignore_ascii_case(value)
+                        })
+                        .then_some(descriptor.provider())
+                })
             })
-        })
+        }
     }
 
     pub fn iter(&self) -> impl ExactSizeIterator<Item = &ProviderImplementationDescriptor> {
@@ -517,8 +556,29 @@ impl ProviderImplementationRegistry {
 
 pub fn provider_implementation_registry() -> &'static ProviderImplementationRegistry {
     static REGISTRY: LazyLock<ProviderImplementationRegistry> = LazyLock::new(|| {
-        ProviderImplementationRegistry::from_registrations(BUILTIN_REGISTRATIONS)
-            .expect("built-in provider implementation registry must be valid")
+        #[cfg(feature = "mojo")]
+        let registrations = mojo::builtin_registrations();
+        #[cfg(not(feature = "mojo"))]
+        let registrations = BUILTIN_REGISTRATIONS;
+        #[cfg(feature = "mojo")]
+        {
+            let descriptors = registrations
+                .iter()
+                .copied()
+                .map(|registration| ProviderImplementationDescriptor {
+                    adapter: registration.adapter,
+                    translator: registration.translator,
+                    registration,
+                })
+                .collect::<Vec<_>>()
+                .into_boxed_slice();
+            ProviderImplementationRegistry { descriptors }
+        }
+        #[cfg(not(feature = "mojo"))]
+        {
+            ProviderImplementationRegistry::from_registrations(registrations)
+                .expect("built-in provider implementation registry must be valid")
+        }
     });
     &REGISTRY
 }
@@ -526,10 +586,19 @@ pub fn provider_implementation_registry() -> &'static ProviderImplementationRegi
 pub(crate) const fn builtin_provider_runtime_metadata(
     provider: ProviderId,
 ) -> Option<&'static ProviderRuntimeMetadata> {
-    BUILTIN_REGISTRATIONS[provider as usize].runtime_metadata
+    match provider {
+        ProviderId::OpenAi => None,
+        ProviderId::Anthropic => Some(&ANTHROPIC_RUNTIME_METADATA),
+        ProviderId::Copilot => Some(&COPILOT_RUNTIME_METADATA),
+        ProviderId::DeepSeek => Some(&DEEPSEEK_RUNTIME_METADATA),
+        ProviderId::Gemini => Some(&GEMINI_RUNTIME_METADATA),
+        ProviderId::Kiro => Some(&KIRO_RUNTIME_METADATA),
+        ProviderId::Local => Some(&LOCAL_RUNTIME_METADATA),
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[cfg(any(not(feature = "mojo"), test))]
 enum ProviderImplementationRegistryError {
     DuplicateProviderId { first: usize, duplicate: usize },
     DuplicateNormalizedAlias { first: usize, duplicate: usize },
@@ -547,6 +616,7 @@ enum ProviderImplementationRegistryError {
     NonDeterministicRegistrationOrder { index: usize },
 }
 
+#[cfg(any(not(feature = "mojo"), test))]
 impl fmt::Display for ProviderImplementationRegistryError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
@@ -556,8 +626,10 @@ impl fmt::Display for ProviderImplementationRegistryError {
     }
 }
 
+#[cfg(any(not(feature = "mojo"), test))]
 impl Error for ProviderImplementationRegistryError {}
 
+#[cfg(any(not(feature = "mojo"), test))]
 fn validate_names(
     registrations: &[ProviderImplementationRegistration],
 ) -> Result<(), ProviderImplementationRegistryError> {
@@ -565,6 +637,7 @@ fn validate_names(
     validate_aliases(registrations)
 }
 
+#[cfg(any(not(feature = "mojo"), test))]
 fn validate_duplicate_provider_ids(
     registrations: &[ProviderImplementationRegistration],
 ) -> Result<(), ProviderImplementationRegistryError> {
@@ -581,6 +654,7 @@ fn validate_duplicate_provider_ids(
     Ok(())
 }
 
+#[cfg(any(not(feature = "mojo"), test))]
 fn validate_aliases(
     registrations: &[ProviderImplementationRegistration],
 ) -> Result<(), ProviderImplementationRegistryError> {
@@ -615,6 +689,7 @@ fn validate_aliases(
     Ok(())
 }
 
+#[cfg(any(not(feature = "mojo"), test))]
 fn validate_registration(
     index: usize,
     registration: ProviderImplementationRegistration,
@@ -670,6 +745,7 @@ fn validate_registration(
     Ok(())
 }
 
+#[cfg(any(not(feature = "mojo"), test))]
 fn capabilities_are_coherent(registration: ProviderImplementationRegistration) -> bool {
     if registration.capabilities.len() != registration.supported_endpoints.len() {
         return false;
@@ -713,6 +789,7 @@ fn capabilities_are_coherent(registration: ProviderImplementationRegistration) -
         })
 }
 
+#[cfg(any(not(feature = "mojo"), test))]
 fn validate_order(
     registrations: &[ProviderImplementationRegistration],
 ) -> Result<(), ProviderImplementationRegistryError> {
@@ -729,6 +806,7 @@ fn validate_order(
     Ok(())
 }
 
+#[cfg(any(not(feature = "mojo"), test))]
 fn normalized(value: &str) -> String {
     value.trim().to_ascii_lowercase()
 }
