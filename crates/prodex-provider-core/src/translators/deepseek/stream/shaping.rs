@@ -2,20 +2,23 @@ use super::{
     DeepSeekProviderCoreStreamChoiceDelta, DeepSeekProviderCoreStreamChoiceMetadata,
     DeepSeekProviderCoreStreamChunkMetadata, DeepSeekProviderCoreStreamToolCallDelta,
 };
+#[cfg(feature = "mojo")]
+use serde::de::DeserializeOwned;
 use serde_json::Value;
 
 #[cfg(feature = "mojo")]
 use prodex_mojo_core::rich::{DeepSeekKernelInput, DeepSeekKernelOperation};
 
 #[cfg(feature = "mojo")]
-fn deepseek_provider_core_stream_projection(
+fn deepseek_provider_core_stream_projection<T: DeserializeOwned>(
     operation: DeepSeekKernelOperation,
     value: &Value,
-) -> Value {
+) -> T {
     let source = serde_json::to_string(value).expect("DeepSeek stream source serializes");
     let mut input = DeepSeekKernelInput::new(operation);
     input.input = Some(&source);
-    super::super::deepseek_mojo_value(input)
+    serde_json::from_value(super::super::deepseek_mojo_value(input))
+        .expect("DeepSeek stream projection matches the typed contract")
 }
 pub fn deepseek_provider_core_response_completed_event(
     sequence_number: u64,
@@ -130,35 +133,22 @@ pub fn deepseek_provider_core_stream_tool_call_delta(
 ) -> DeepSeekProviderCoreStreamToolCallDelta {
     #[cfg(feature = "mojo")]
     {
-        let projected = deepseek_provider_core_stream_projection(
-            DeepSeekKernelOperation::StreamToolCallDelta,
-            value,
-        );
-        DeepSeekProviderCoreStreamToolCallDelta {
-            index: projected
-                .get("index")
-                .and_then(Value::as_u64)
-                .and_then(|index| usize::try_from(index).ok())
-                .unwrap_or(0),
-            call_id: projected
-                .get("id")
-                .and_then(Value::as_str)
-                .map(str::to_string),
-            name: projected
-                .get("name")
-                .and_then(Value::as_str)
-                .map(str::to_string),
-            argument_delta: projected
-                .get("arguments")
-                .and_then(Value::as_str)
-                .filter(|arguments| !arguments.is_empty())
-                .map(str::to_string),
-            thought_signature: projected
-                .get("thought_signature")
-                .and_then(Value::as_str)
-                .filter(|signature| !signature.trim().is_empty())
-                .map(str::to_string),
+        let mut projected: DeepSeekProviderCoreStreamToolCallDelta =
+            deepseek_provider_core_stream_projection(
+                DeepSeekKernelOperation::StreamToolCallDelta,
+                value,
+            );
+        if projected.argument_delta.as_deref() == Some("") {
+            projected.argument_delta = None;
         }
+        if projected
+            .thought_signature
+            .as_deref()
+            .is_some_and(|value| value.trim().is_empty())
+        {
+            projected.thought_signature = None;
+        }
+        projected
     }
     #[cfg(not(feature = "mojo"))]
     {
@@ -243,7 +233,7 @@ pub fn deepseek_provider_core_stream_chunk_metadata(
 ) -> DeepSeekProviderCoreStreamChunkMetadata {
     #[cfg(feature = "mojo")]
     {
-        let projected = deepseek_provider_core_stream_projection(
+        let projected: Value = deepseek_provider_core_stream_projection(
             DeepSeekKernelOperation::StreamChunkMetadata,
             value,
         );
@@ -293,20 +283,15 @@ pub fn deepseek_provider_core_stream_choice_metadata(
 ) -> DeepSeekProviderCoreStreamChoiceMetadata {
     #[cfg(feature = "mojo")]
     {
-        let projected = deepseek_provider_core_stream_projection(
-            DeepSeekKernelOperation::StreamChoiceMetadata,
-            choice,
-        );
-        DeepSeekProviderCoreStreamChoiceMetadata {
-            logprobs: projected
-                .get("logprobs")
-                .filter(|value| !value.is_null())
-                .cloned(),
-            finish_reason: projected
-                .get("finish_reason")
-                .and_then(Value::as_str)
-                .map(str::to_string),
+        let mut projected: DeepSeekProviderCoreStreamChoiceMetadata =
+            deepseek_provider_core_stream_projection(
+                DeepSeekKernelOperation::StreamChoiceMetadata,
+                choice,
+            );
+        if projected.logprobs.as_ref().is_some_and(Value::is_null) {
+            projected.logprobs = None;
         }
+        projected
     }
     #[cfg(not(feature = "mojo"))]
     DeepSeekProviderCoreStreamChoiceMetadata {
@@ -326,37 +311,21 @@ pub fn deepseek_provider_core_stream_choice_delta(
 ) -> DeepSeekProviderCoreStreamChoiceDelta {
     #[cfg(feature = "mojo")]
     {
-        let projected = deepseek_provider_core_stream_projection(
-            DeepSeekKernelOperation::StreamChoiceDelta,
-            choice,
-        );
-        DeepSeekProviderCoreStreamChoiceDelta {
-            reasoning_content: projected
-                .get("reasoning_content")
-                .and_then(Value::as_str)
-                .filter(|text| !text.is_empty())
-                .map(str::to_string),
-            refusal: projected
-                .get("refusal")
-                .and_then(Value::as_str)
-                .filter(|text| !text.is_empty())
-                .map(str::to_string),
-            annotations: projected
-                .get("annotations")
-                .and_then(Value::as_array)
-                .map(|items| items.to_vec())
-                .unwrap_or_default(),
-            content: projected
-                .get("content")
-                .and_then(Value::as_str)
-                .filter(|text| !text.is_empty())
-                .map(str::to_string),
-            tool_calls: projected
-                .get("tool_calls")
-                .and_then(Value::as_array)
-                .map(|items| items.to_vec())
-                .unwrap_or_default(),
+        let mut projected: DeepSeekProviderCoreStreamChoiceDelta =
+            deepseek_provider_core_stream_projection(
+                DeepSeekKernelOperation::StreamChoiceDelta,
+                choice,
+            );
+        for text in [
+            &mut projected.reasoning_content,
+            &mut projected.refusal,
+            &mut projected.content,
+        ] {
+            if text.as_deref() == Some("") {
+                *text = None;
+            }
         }
+        projected
     }
     #[cfg(not(feature = "mojo"))]
     {
