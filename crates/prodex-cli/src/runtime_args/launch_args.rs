@@ -64,50 +64,6 @@ impl fmt::Debug for RunArgs {
 }
 
 #[derive(Args)]
-pub struct ClaudeArgs {
-    /// Starting profile for the run. If omitted, prodex uses the active profile.
-    #[arg(short, long, value_name = "NAME")]
-    pub profile: Option<String>,
-    /// Allow eligible pre-commit rotation. This is the default behavior.
-    #[arg(long, conflicts_with = "no_auto_rotate")]
-    pub auto_rotate: bool,
-    /// Keep the selected profile fixed and fail instead of rotating.
-    #[arg(long)]
-    pub no_auto_rotate: bool,
-    /// Allow Prodex to redeem one earned reset credit automatically when all configured OpenAI/Codex profiles are weekly-exhausted.
-    #[arg(long)]
-    pub auto_redeem: bool,
-    /// Skip the preflight quota gate before launching Claude Code.
-    #[arg(long)]
-    pub skip_quota_check: bool,
-    /// Override the upstream ChatGPT base URL used for quota preflight and the runtime proxy.
-    #[arg(long, value_name = "URL")]
-    pub base_url: Option<String>,
-    /// Disable system and environment proxy settings for upstream OpenAI/quota HTTP requests.
-    #[arg(long)]
-    pub no_proxy: bool,
-    /// Arguments passed through to `claude` unchanged.
-    #[arg(value_name = "CLAUDE_ARG", allow_hyphen_values = true)]
-    pub claude_args: Vec<OsString>,
-}
-
-impl fmt::Debug for ClaudeArgs {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter
-            .debug_struct("ClaudeArgs")
-            .field("profile_configured", &self.profile.is_some())
-            .field("auto_rotate", &self.auto_rotate)
-            .field("no_auto_rotate", &self.no_auto_rotate)
-            .field("auto_redeem", &self.auto_redeem)
-            .field("skip_quota_check", &self.skip_quota_check)
-            .field("base_url_configured", &self.base_url.is_some())
-            .field("no_proxy", &self.no_proxy)
-            .field("claude_args_count", &self.claude_args.len())
-            .finish()
-    }
-}
-
-#[derive(Args)]
 pub struct RuntimeToolArgs {
     /// Starting profile for the run. If omitted, prodex uses the active profile.
     #[arg(short, long, value_name = "NAME")]
@@ -272,9 +228,6 @@ pub struct SuperArgs {
         requires = "provider_or_url"
     )]
     pub harness: Option<prodex_provider_core::HarnessMode>,
-    /// Agent CLI to launch. Gemini and Copilot use their matching provider; Kiro uses an imported profile through a local transport tunnel.
-    #[arg(long, value_name = "CLI", value_enum)]
-    pub cli: Option<SuperCliAgent>,
     /// API key for --provider. Prefer the provider-specific environment variable for shells/history.
     #[arg(long = "api-key", value_name = "KEY", requires = "provider")]
     pub api_key: Option<String>,
@@ -337,7 +290,6 @@ impl fmt::Debug for SuperArgs {
             .field("url_configured", &self.url.is_some())
             .field("provider", &self.provider)
             .field("harness", &self.harness)
-            .field("cli", &self.cli)
             .field("api_key", &self.api_key.as_ref().map(|_| "<redacted>"))
             .field("local_model", &self.local_model)
             .field("local_context_window", &self.local_context_window)
@@ -349,15 +301,6 @@ impl fmt::Debug for SuperArgs {
             .field("codex_args_count", &self.codex_args.len())
             .finish()
     }
-}
-
-#[derive(clap::ValueEnum, Debug, Clone, Copy, PartialEq, Eq)]
-pub enum SuperCliAgent {
-    Codex,
-    Gemini,
-    Copilot,
-    Kiro,
-    Agy,
 }
 
 pub(super) fn parse_harness_mode(

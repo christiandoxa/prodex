@@ -36,9 +36,7 @@ members = [
     "crates/prodex-runtime-broker",
     "crates/prodex-runtime-broker-log",
     "crates/prodex-runtime-doctor",
-    "crates/prodex-runtime-claude",
     "crates/prodex-runtime-cookies",
-    "crates/prodex-runtime-gemini-cli-compat",
     "crates/prodex-runtime-launch",
     "crates/prodex-runtime-log",
     "crates/prodex-runtime-policy",
@@ -116,10 +114,8 @@ prodex_provider_spi = { package = "prodex-provider-spi", path = "crates/prodex-p
 prodex_quota = { package = "prodex-quota", path = "crates/prodex-quota", version = "0.429.4" }
 prodex_runtime_broker = { package = "prodex-runtime-broker", path = "crates/prodex-runtime-broker", version = "0.429.4" }
 prodex_runtime_broker_log = { package = "prodex-runtime-broker-log", path = "crates/prodex-runtime-broker-log", version = "0.429.4" }
-prodex_runtime_claude = { package = "prodex-runtime-claude", path = "crates/prodex-runtime-claude", version = "0.429.4" }
 prodex_runtime_cookies = { package = "prodex-runtime-cookies", path = "crates/prodex-runtime-cookies", version = "0.429.4" }
 prodex_runtime_doctor = { package = "prodex-runtime-doctor", path = "crates/prodex-runtime-doctor", version = "0.429.4" }
-prodex_runtime_gemini_cli_compat = { package = "prodex-runtime-gemini-cli-compat", path = "crates/prodex-runtime-gemini-cli-compat", version = "0.429.4" }
 prodex_runtime_launch = { package = "prodex-runtime-launch", path = "crates/prodex-runtime-launch", version = "0.429.4" }
 prodex_runtime_policy = { package = "prodex-runtime-policy", path = "crates/prodex-runtime-policy", version = "0.429.4" }
 prodex_runtime_quota = { package = "prodex-runtime-quota", path = "crates/prodex-runtime-quota", version = "0.429.4" }

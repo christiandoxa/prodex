@@ -1,6 +1,5 @@
 use prodex_runtime_policy::RuntimeLogFormat;
 use prodex_runtime_tuning::RuntimeTuningSnapshot;
-use std::collections::BTreeSet;
 use std::fmt;
 use std::path::PathBuf;
 
@@ -38,41 +37,7 @@ pub(crate) struct RuntimeConfig {
 
 #[derive(Clone)]
 pub(crate) struct RuntimeGeminiConfig {
-    pub(crate) home_dir: Option<PathBuf>,
-    pub(crate) config_dir: Option<PathBuf>,
-    pub(crate) system_settings_path: Option<PathBuf>,
-    pub(crate) system_defaults_path: Option<PathBuf>,
-    pub(crate) extension_dirs: Vec<PathBuf>,
-    pub(crate) extension_selection: RuntimeGeminiExtensionSelection,
-    pub(crate) export_checkpoint_path: Option<PathBuf>,
-    pub(crate) import_paths: Vec<PathBuf>,
-    pub(crate) tool_output_mask_threshold: usize,
-    pub(crate) tool_output_dir: Option<PathBuf>,
-    pub(crate) memory_files_disabled: bool,
-    pub(crate) memory_files_default: bool,
-    pub(crate) extension_memory_paths: Vec<PathBuf>,
     pub(crate) sticky_fresh_oauth: bool,
-}
-
-impl RuntimeGeminiConfig {
-    pub(crate) const DEFAULT_TOOL_OUTPUT_MASK_THRESHOLD: usize = 50_000;
-
-    pub(crate) fn extension_enabled_override(&self, name: &str) -> Option<bool> {
-        match &self.extension_selection {
-            RuntimeGeminiExtensionSelection::All => None,
-            RuntimeGeminiExtensionSelection::None => Some(false),
-            RuntimeGeminiExtensionSelection::Names(names) => {
-                Some(names.contains(&name.to_ascii_lowercase()))
-            }
-        }
-    }
-}
-
-#[derive(Clone)]
-pub(crate) enum RuntimeGeminiExtensionSelection {
-    All,
-    None,
-    Names(BTreeSet<String>),
 }
 
 impl fmt::Debug for RuntimeConfig {
@@ -90,7 +55,6 @@ impl fmt::Debug for RuntimeConfig {
             .field("log_format", &self.log_format)
             .field("response_chain_trace", &self.response_chain_trace)
             .field("governance_mode", &self.governance.mode.as_str())
-            .field("gemini_home_configured", &self.gemini.home_dir.is_some())
             .field(
                 "websocket_proxy_configured",
                 &self.websocket_environment.has_proxy(),

@@ -355,29 +355,6 @@ impl RuntimeProxyStartupFactory {
         resolved_harness: prodex_provider_core::ResolvedHarnessMode,
         preferred_listen_addr: Option<&str>,
     ) -> Result<Option<RuntimeProxyEndpoint>> {
-        if request
-            .external_provider
-            .is_some_and(|provider| provider.eq_ignore_ascii_case("gemini-native"))
-        {
-            return Ok(None);
-        }
-        if runtime_launch_uses_kiro_connect_proxy(request) {
-            let proxy = start_runtime_kiro_connect_proxy(paths, request.upstream_no_proxy)?;
-            return Ok(Some(RuntimeProxyEndpoint {
-                listen_addr: proxy.listen_addr(),
-                openai_mount_path: String::new(),
-                local_model_provider_id: None,
-                force_http_responses: false,
-                realtime_ws_base_url: None,
-                realtime_ws_model: None,
-                lease_dir: paths.root.join("runtime-kiro-connect-proxy-leases"),
-                broker_session_affinity_control: None,
-                _lease: None,
-                _direct_proxy: None,
-                _kiro_connect_proxy: Some(proxy),
-            }));
-        }
-
         if let Some(local_upstream_base_url) =
             local_rewrite_proxy_upstream_base_url(selection, request)?
         {
@@ -454,29 +431,6 @@ impl RuntimeProxyStartupFactory {
         selection: &RuntimeLaunchSelection,
         request: &RuntimeLaunchRequest<'_>,
     ) -> Result<Option<RuntimeProxyEndpoint>> {
-        if request
-            .external_provider
-            .is_some_and(|provider| provider.eq_ignore_ascii_case("gemini-native"))
-        {
-            return Ok(None);
-        }
-        if runtime_launch_uses_kiro_connect_proxy(request) {
-            let proxy = RuntimeKiroConnectProxy::dry_run();
-            return Ok(Some(RuntimeProxyEndpoint {
-                listen_addr: proxy.listen_addr(),
-                openai_mount_path: String::new(),
-                local_model_provider_id: None,
-                force_http_responses: false,
-                realtime_ws_base_url: None,
-                realtime_ws_model: None,
-                lease_dir: paths.root.join("runtime-kiro-connect-proxy-dry-run-leases"),
-                broker_session_affinity_control: None,
-                _lease: None,
-                _direct_proxy: None,
-                _kiro_connect_proxy: Some(proxy),
-            }));
-        }
-
         if local_rewrite_proxy_upstream_base_url(selection, request)?.is_some() {
             return Ok(Some(runtime_local_rewrite_proxy_dry_run_endpoint(
                 paths, selection, request,
@@ -579,7 +533,6 @@ fn runtime_proxy_dry_run_endpoint(paths: &AppPaths) -> Result<RuntimeProxyEndpoi
         broker_session_affinity_control: None,
         _lease: None,
         _direct_proxy: None,
-        _kiro_connect_proxy: None,
     })
 }
 
@@ -625,7 +578,6 @@ fn runtime_local_rewrite_proxy_dry_run_endpoint(
         broker_session_affinity_control: None,
         _lease: None,
         _direct_proxy: None,
-        _kiro_connect_proxy: None,
     })
 }
 
@@ -683,7 +635,6 @@ fn start_runtime_proxy_endpoint(
         broker_session_affinity_control: None,
         _lease: None,
         _direct_proxy: Some(proxy),
-        _kiro_connect_proxy: None,
     })
 }
 
@@ -738,7 +689,6 @@ fn start_local_rewrite_proxy_endpoint(
         broker_session_affinity_control: None,
         _lease: None,
         _direct_proxy: Some(proxy),
-        _kiro_connect_proxy: None,
     })
 }
 

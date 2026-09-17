@@ -19,8 +19,7 @@ mod environment;
 mod types;
 use environment::{RuntimeConfigEnvironment, RuntimeConfigParser};
 pub(crate) use types::{
-    ConfigError, ConfigErrors, RuntimeConfig, RuntimeGeminiConfig, RuntimeGeminiExtensionSelection,
-    RuntimeWebsocketEnvironment,
+    ConfigError, ConfigErrors, RuntimeConfig, RuntimeGeminiConfig, RuntimeWebsocketEnvironment,
 };
 
 pub(crate) fn collect_runtime_tuning_snapshot(config: &RuntimeConfig) -> RuntimeTuningSnapshot {

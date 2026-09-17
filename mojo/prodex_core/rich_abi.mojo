@@ -17,20 +17,12 @@ from rich_types import (
     ProdexRichCatalogPlanChoice,
     ProdexRichCatalogPlanModel,
     ProdexRichCatalogPlanResult,
-    ProdexGatewayBillingSummaryBucket,
-    ProdexGatewayBillingSummaryInput,
-    ProdexGatewayBillingSummaryResult,
     ProdexRichFallbackRecord,
     ProdexRichFallbackResult,
     ProdexRichIssue,
     ProdexRichPlanAction,
     ProdexRichPlanItem,
     ProdexRichPlanResult,
-    ProdexRichPolicyInput,
-    ProdexRichPolicyModel,
-    ProdexRichPolicyResult,
-    ProdexRichPolicyRouteInput,
-    ProdexRichPolicyRouteResult,
     ProdexRichRouteInput,
     ProdexRichRouteRecord,
     ProdexRichRouteResult,
@@ -53,47 +45,8 @@ from smart_context_normalization import (
     prodex_mojo_smart_context_memory_capsule_budget_v1,
     prodex_mojo_smart_context_capsule_plan_v1,
 )
-from gateway_constraint_trace import prodex_mojo_gateway_constraint_trace_impl
-
 
 comptime PRODEX_RICH_ABI_VERSION: Int64 = 6
-
-
-@export("prodex_mojo_gateway_constraint_trace_v1")
-def prodex_mojo_gateway_constraint_trace_v1(
-    abi_version: Int64,
-    eligible_address: UInt,
-    decisions_address: UInt,
-    endpoint_unsupported_decision: Int64,
-    candidate_count: Int64,
-    selected_index: Int64,
-    hard_affinity: Int64,
-    ordered_indices_address: UInt,
-    ordered_capacity: Int64,
-    rejection_stages_address: UInt,
-    rejection_capacity: Int64,
-    endpoint_supported_address: UInt,
-    request_constraints_outcome_address: UInt,
-    affinity_outcome_address: UInt,
-    terminal_outcome_address: UInt,
-) abi("C") -> Int64:
-    return prodex_mojo_gateway_constraint_trace_impl(
-        abi_version,
-        eligible_address,
-        decisions_address,
-        endpoint_unsupported_decision,
-        candidate_count,
-        selected_index,
-        hard_affinity,
-        ordered_indices_address,
-        ordered_capacity,
-        rejection_stages_address,
-        rejection_capacity,
-        endpoint_supported_address,
-        request_constraints_outcome_address,
-        affinity_outcome_address,
-        terminal_outcome_address,
-    )
 
 
 @export("prodex_mojo_rich_abi_version")
@@ -105,7 +58,7 @@ def prodex_mojo_rich_abi_version() abi("C") -> Int64:
 def prodex_mojo_rich_abi_layout(
     output: Pointer[mut=True, UInt64, _], output_count: Int64
 ) abi("C") -> Int64:
-    if output_count != 46:
+    if output_count != 30:
         return 1
     output[unsafe_offset=0] = UInt64(size_of[ProdexRichStringView]())
     output[unsafe_offset=1] = UInt64(align_of[ProdexRichStringView]())
@@ -123,36 +76,20 @@ def prodex_mojo_rich_abi_layout(
     output[unsafe_offset=13] = UInt64(align_of[ProdexRichRouteRecord]())
     output[unsafe_offset=14] = UInt64(size_of[ProdexRichRouteResult]())
     output[unsafe_offset=15] = UInt64(align_of[ProdexRichRouteResult]())
-    output[unsafe_offset=16] = UInt64(size_of[ProdexRichPolicyInput]())
-    output[unsafe_offset=17] = UInt64(align_of[ProdexRichPolicyInput]())
-    output[unsafe_offset=18] = UInt64(size_of[ProdexRichPolicyModel]())
-    output[unsafe_offset=19] = UInt64(align_of[ProdexRichPolicyModel]())
-    output[unsafe_offset=20] = UInt64(size_of[ProdexRichPolicyResult]())
-    output[unsafe_offset=21] = UInt64(align_of[ProdexRichPolicyResult]())
-    output[unsafe_offset=22] = UInt64(size_of[ProdexRichPlanItem]())
-    output[unsafe_offset=23] = UInt64(align_of[ProdexRichPlanItem]())
-    output[unsafe_offset=24] = UInt64(size_of[ProdexRichPlanAction]())
-    output[unsafe_offset=25] = UInt64(align_of[ProdexRichPlanAction]())
-    output[unsafe_offset=26] = UInt64(size_of[ProdexRichPlanResult]())
-    output[unsafe_offset=27] = UInt64(align_of[ProdexRichPlanResult]())
-    output[unsafe_offset=28] = UInt64(size_of[ProdexRichCatalogReasoningResult]())
-    output[unsafe_offset=29] = UInt64(align_of[ProdexRichCatalogReasoningResult]())
-    output[unsafe_offset=30] = UInt64(size_of[ProdexRichPolicyRouteInput]())
-    output[unsafe_offset=31] = UInt64(align_of[ProdexRichPolicyRouteInput]())
-    output[unsafe_offset=32] = UInt64(size_of[ProdexRichPolicyRouteResult]())
-    output[unsafe_offset=33] = UInt64(align_of[ProdexRichPolicyRouteResult]())
-    output[unsafe_offset=34] = UInt64(size_of[ProdexRichCatalogPlanModel]())
-    output[unsafe_offset=35] = UInt64(align_of[ProdexRichCatalogPlanModel]())
-    output[unsafe_offset=36] = UInt64(size_of[ProdexRichCatalogPlanChoice]())
-    output[unsafe_offset=37] = UInt64(align_of[ProdexRichCatalogPlanChoice]())
-    output[unsafe_offset=38] = UInt64(size_of[ProdexRichCatalogPlanResult]())
-    output[unsafe_offset=39] = UInt64(align_of[ProdexRichCatalogPlanResult]())
-    output[unsafe_offset=40] = UInt64(size_of[ProdexGatewayBillingSummaryInput]())
-    output[unsafe_offset=41] = UInt64(align_of[ProdexGatewayBillingSummaryInput]())
-    output[unsafe_offset=42] = UInt64(size_of[ProdexGatewayBillingSummaryBucket]())
-    output[unsafe_offset=43] = UInt64(align_of[ProdexGatewayBillingSummaryBucket]())
-    output[unsafe_offset=44] = UInt64(size_of[ProdexGatewayBillingSummaryResult]())
-    output[unsafe_offset=45] = UInt64(align_of[ProdexGatewayBillingSummaryResult]())
+    output[unsafe_offset=16] = UInt64(size_of[ProdexRichPlanItem]())
+    output[unsafe_offset=17] = UInt64(align_of[ProdexRichPlanItem]())
+    output[unsafe_offset=18] = UInt64(size_of[ProdexRichPlanAction]())
+    output[unsafe_offset=19] = UInt64(align_of[ProdexRichPlanAction]())
+    output[unsafe_offset=20] = UInt64(size_of[ProdexRichPlanResult]())
+    output[unsafe_offset=21] = UInt64(align_of[ProdexRichPlanResult]())
+    output[unsafe_offset=22] = UInt64(size_of[ProdexRichCatalogReasoningResult]())
+    output[unsafe_offset=23] = UInt64(align_of[ProdexRichCatalogReasoningResult]())
+    output[unsafe_offset=24] = UInt64(size_of[ProdexRichCatalogPlanModel]())
+    output[unsafe_offset=25] = UInt64(align_of[ProdexRichCatalogPlanModel]())
+    output[unsafe_offset=26] = UInt64(size_of[ProdexRichCatalogPlanChoice]())
+    output[unsafe_offset=27] = UInt64(align_of[ProdexRichCatalogPlanChoice]())
+    output[unsafe_offset=28] = UInt64(size_of[ProdexRichCatalogPlanResult]())
+    output[unsafe_offset=29] = UInt64(align_of[ProdexRichCatalogPlanResult]())
     return 0
 
 

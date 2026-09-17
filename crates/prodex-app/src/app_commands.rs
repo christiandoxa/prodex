@@ -55,17 +55,6 @@ pub(super) fn handle_super(mut args: SuperArgs) -> Result<()> {
         super_prompt::prompt_super_main_agent_configuration,
         super_prompt::prompt_super_sub_agent_configuration,
     )?;
-    if matches!(
-        args.cli,
-        Some(
-            SuperCliAgent::Gemini
-                | SuperCliAgent::Copilot
-                | SuperCliAgent::Kiro
-                | SuperCliAgent::Agy
-        )
-    ) {
-        return crate::runtime_gemini_cli::handle_super_native_cli(args, use_presidio, sub_agent);
-    }
     let args = runtime_launch::resolved_super_runtime_tool_args(args, use_presidio);
     handle_super_runtime_tools(args, sub_agent)
 }
@@ -166,12 +155,6 @@ fn resolve_super_presidio_choice(
     interactive: bool,
     prompt: impl FnOnce() -> Result<bool>,
 ) -> Result<bool> {
-    if matches!(
-        args.cli,
-        Some(SuperCliAgent::Gemini | SuperCliAgent::Kiro | SuperCliAgent::Agy)
-    ) {
-        return Ok(false);
-    }
     match args.presidio_preference() {
         Some(use_presidio) => Ok(use_presidio),
         None if interactive => prompt(),
@@ -589,28 +572,6 @@ mod sub_agent_prompt_tests {
                 session_id: SESSION_ID.to_string()
             }
         );
-    }
-
-    #[test]
-    fn native_gemini_skips_unavailable_presidio_prompt() {
-        let _marker = crate::test_support::TestEnvVarGuard::unset(SUB_AGENT_RECURSION_MARKER);
-        let mut args = super_args(&["--cli", "gemini", "--provider", "gemini"]);
-        let (presidio, main_agent, sub_agent) = resolve_super_launch_decisions_with_prompts(
-            &mut args,
-            true,
-            || panic!("native Gemini must not prompt for unavailable Presidio"),
-            |_| Ok(None),
-            |_, _| panic!("explicit native Gemini must skip the picker"),
-            |_| Ok(None),
-        )
-        .expect("native Gemini should resolve without Presidio");
-
-        assert!(!presidio);
-        assert_eq!(main_agent.provider, ProviderId::Gemini);
-        assert!(sub_agent.is_none());
-        assert!(args.provider.is_some());
-        assert!(args.url.is_none());
-        crate::runtime_gemini_cli::validate_super_native_cli_preflight(&args).unwrap();
     }
 
     #[test]

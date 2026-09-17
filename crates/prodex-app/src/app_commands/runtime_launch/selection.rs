@@ -38,21 +38,6 @@ impl RuntimeLaunchSelection {
         });
         let kiro_external_provider =
             external_provider.is_some_and(|provider| provider.eq_ignore_ascii_case("kiro"));
-        let antigravity_external_provider =
-            external_provider.is_some_and(|provider| provider.eq_ignore_ascii_case("antigravity"));
-        let native_gemini_external_provider = external_provider
-            .is_some_and(|provider| provider.eq_ignore_ascii_case("gemini-native"));
-        if requested.is_none() && (antigravity_external_provider || native_gemini_external_provider)
-        {
-            return Ok(Self {
-                initial_profile_name: "local".to_string(),
-                selected_profile_name: "local".to_string(),
-                codex_home: paths.shared_codex_root.clone(),
-                explicit_profile_requested: false,
-                non_openai_model_provider: None,
-                profileless_local_home: true,
-            });
-        }
         if requested.is_none()
             && (state.profiles.is_empty()
                 || runtime_launch_should_use_profileless_gemini(

@@ -23,7 +23,7 @@ impl ResolvedMainAgentConfig {
 
 use crate::{codex_cli_config_override_value, provider_display_name};
 use anyhow::{Result, bail};
-use prodex_cli::{SuperArgs, SuperCliAgent, SuperExternalProvider};
+use prodex_cli::{SuperArgs, SuperExternalProvider};
 use std::ffi::OsString;
 
 pub(super) fn resolve_main_agent_config(
@@ -103,8 +103,6 @@ pub(super) fn apply_resolved_main_agent(
             prodex_cli::parse_super_local_url(url).map_err(anyhow::Error::msg)?;
             args.url = Some(url.to_string());
         }
-        prodex_provider_core::ProviderId::Kiro
-            if args.cli == Some(SuperCliAgent::Kiro) && args.provider.is_none() => {}
         provider => {
             args.provider = SuperExternalProvider::from_provider_id(provider);
         }
@@ -126,15 +124,7 @@ pub(super) fn resolve_super_main_agent_with_prompt(
         .url
         .as_ref()
         .map(|_| prodex_provider_core::ProviderId::Local)
-        .or(args.provider.map(SuperExternalProvider::provider_id))
-        .or(match args.cli {
-            Some(SuperCliAgent::Gemini | SuperCliAgent::Agy) => {
-                Some(prodex_provider_core::ProviderId::Gemini)
-            }
-            Some(SuperCliAgent::Copilot) => Some(prodex_provider_core::ProviderId::Copilot),
-            Some(SuperCliAgent::Kiro) => Some(prodex_provider_core::ProviderId::Kiro),
-            Some(SuperCliAgent::Codex) | None => None,
-        });
+        .or(args.provider.map(SuperExternalProvider::provider_id));
     let explicit_codex_provider = codex_cli_config_override_value(
         &args.codex_args,
         "model_provider",

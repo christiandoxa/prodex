@@ -43,28 +43,6 @@ fn harness_parses_only_for_local_super_bridges_and_gateway() {
 }
 
 #[test]
-fn harness_is_rejected_for_native_external_agent_clis() {
-    let Commands::Super(args) = parse_cli_command_from([
-        "prodex",
-        "s",
-        "--provider",
-        "gemini",
-        "--cli",
-        "gemini",
-        "--harness",
-        "minimal",
-    ])
-    .unwrap() else {
-        panic!("expected super command");
-    };
-    assert!(
-        args.validate_urls()
-            .unwrap_err()
-            .contains("Codex CLI bridge")
-    );
-}
-
-#[test]
 fn harness_help_lists_all_modes() {
     let error = parse_cli_command_from(["prodex", "s", "--help"]).unwrap_err();
     let help = error.to_string();

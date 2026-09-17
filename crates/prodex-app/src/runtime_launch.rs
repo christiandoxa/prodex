@@ -9,10 +9,7 @@ mod profile;
 mod proxy_args;
 mod proxy_startup;
 
-pub(super) use execution::{
-    RuntimeLaunchStrategy, emit_runtime_timing, execute_runtime_launch,
-    runtime_launch_uses_kiro_connect_proxy,
-};
+pub(super) use execution::{RuntimeLaunchStrategy, emit_runtime_timing, execute_runtime_launch};
 use plan::cleanup_runtime_launch_plan;
 pub(super) use plan::{ChildProcessPlan, RuntimeLaunchPlan};
 #[cfg(test)]

@@ -91,23 +91,6 @@ Notes:
   A lone session id is forwarded as `codex resume <session-id>`.
   Codex runtime feature overrides are passed through with `-c`: `--web-search disabled|cached|indexed|live`, `--rollout-budget-tokens`, `--current-time-reminder`, and `--respect-system-proxy` / `--no-respect-system-proxy`.
   If the selected profile's `config.toml` sets `model_provider` to a non-OpenAI backend, prodex launches Codex directly without quota preflight or the local auto-rotate proxy.";
-pub const CLI_CLAUDE_AFTER_HELP: &str = "\
-Examples:
-  prodex claude --print \"summarize this repo\"
-  prodex claude caveman
-  prodex claude caveman -- -p \"summarize this repo briefly\"
-  prodex claude --profile main --print \"review the latest changes\"
-  prodex claude --skip-quota-check -- --help
-
-Notes:
-  Prodex injects a local Anthropic-compatible proxy via `ANTHROPIC_BASE_URL`.
-  Prefix Claude args with `caveman` to load the Caveman plugin for that session only.
-  Use `PRODEX_CLAUDE_BIN` to point prodex at a specific Claude Code binary.
-  `prodex claude` requires the default OpenAI/Codex provider; profiles that set `model_provider` to a non-OpenAI backend are not supported on this path.
-  Claude defaults to the current Codex model from `config.toml` when available.
-  Use `PRODEX_CLAUDE_MODEL` to override the upstream Responses model mapping.
-  Use `PRODEX_CLAUDE_REASONING_EFFORT` to force the upstream Responses reasoning effort.
-  Use `PRODEX_CLAUDE_NATIVE_CLIENT_TOOLS=shell,computer` to opt into native client-tool translation on supported models.";
 pub const CLI_SUPER_AFTER_HELP: &str = "\
 Examples:
   prodex super

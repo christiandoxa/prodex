@@ -13,7 +13,7 @@ mod optional_tools;
 mod super_tail_extract;
 #[path = "runtime_args/super_validation.rs"]
 mod super_validation;
-pub use launch_args::{ClaudeArgs, RunArgs, RuntimeToolArgs, SuperArgs, SuperCliAgent};
+pub use launch_args::{RunArgs, RuntimeToolArgs, SuperArgs};
 use launch_args::{parse_harness_mode, parse_runtime_base_url};
 pub use optional_tools::runtime_tool_args_with_tool;
 
@@ -58,13 +58,6 @@ impl fmt::Debug for GatewayArgs {
             .field("no_presidio", &self.no_presidio)
             .finish()
     }
-}
-
-#[derive(Args, Debug)]
-pub struct GeminiCompatRefreshArgs {
-    /// CODEX_HOME to refresh Gemini CLI compatibility surfaces into.
-    #[arg(long, value_name = "PATH")]
-    pub codex_home: PathBuf,
 }
 
 #[derive(Args, Debug)]

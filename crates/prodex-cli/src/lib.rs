@@ -97,16 +97,8 @@ pub enum Commands {
     Super(Box<SuperArgs>),
     #[command(about = "Run a lean OpenAI-compatible provider gateway.")]
     Gateway(GatewayArgs),
-    #[command(
-        trailing_var_arg = true,
-        about = "Run Claude Code through prodex via an Anthropic-compatible runtime proxy.",
-        after_help = CLI_CLAUDE_AFTER_HELP
-    )]
-    Claude(ClaudeArgs),
     #[command(name = "__runtime-broker", hide = true)]
     RuntimeBroker(RuntimeBrokerArgs),
-    #[command(name = "__gemini-compat-refresh", hide = true)]
-    GeminiCompatRefresh(GeminiCompatRefreshArgs),
     #[command(name = "__mcp-jsonl-bridge", hide = true)]
     McpJsonlBridge(McpJsonlBridgeArgs),
     #[command(name = "__sub-agent-exec", hide = true)]
@@ -117,11 +109,7 @@ impl Commands {
     pub fn launches_runtime(&self) -> bool {
         matches!(
             self,
-            Self::Run(_)
-                | Self::Super(_)
-                | Self::Gateway(_)
-                | Self::Claude(_)
-                | Self::RuntimeBroker(_)
+            Self::Run(_) | Self::Super(_) | Self::Gateway(_) | Self::RuntimeBroker(_)
         )
     }
 
@@ -140,9 +128,7 @@ impl Commands {
             Self::Run(_) => "run",
             Self::Super(_) => "super",
             Self::Gateway(_) => "gateway",
-            Self::Claude(_) => "claude",
             Self::RuntimeBroker(_) => "__runtime-broker",
-            Self::GeminiCompatRefresh(_) => "__gemini-compat-refresh",
             Self::McpJsonlBridge(_) => "__mcp-jsonl-bridge",
             Self::SubAgentExec(_) => "__sub-agent-exec",
         }
@@ -295,7 +281,6 @@ pub fn should_default_cli_invocation_to_run(args: &[OsString]) -> bool {
             | "claude"
             | "help"
             | "__runtime-broker"
-            | "__gemini-compat-refresh"
             | "__mcp-jsonl-bridge"
             | "__sub-agent-exec"
     )

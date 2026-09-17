@@ -52,12 +52,6 @@ pub use runtime_anthropic::{
     RUNTIME_ANTHROPIC_FLAG_MAX_OUTPUT_LENGTH, RUNTIME_ANTHROPIC_FLAG_SUPPORTS_XHIGH,
     RuntimeAnthropicKernelInput, RuntimeAnthropicKernelOperation, runtime_anthropic_kernel,
 };
-mod policy;
-pub use policy::{
-    PolicyAliasInput, PolicyAliasPlan, PolicyModel, PolicyRouteModel, PolicyRoutePlan,
-    VirtualKeyAdmissionDecision, VirtualKeyAdmissionInput, plan_route_policy,
-    validate_policy_alias, validate_virtual_key_admission,
-};
 mod fallback;
 pub use fallback::{
     PreviousResponsePlan, PreviousResponsePlanInput, RUNTIME_ERROR_MODE_CODE_OVERLOAD,
@@ -69,31 +63,12 @@ pub use fallback::{
     RUNTIME_ERROR_MODE_TEXT_WORKSPACE, model_fallback_chain, model_fallback_plan,
     previous_response_plan,
 };
-mod gateway_constraint_trace;
-pub use gateway_constraint_trace::{
-    GatewayConstraintTraceAffinityOutcome, GatewayConstraintTracePlan,
-    GatewayConstraintTraceRejectionStage, GatewayConstraintTraceTerminalOutcome,
-    plan_gateway_constraint_trace,
-};
-#[path = "rich/gateway_admin_route.rs"]
-mod gateway_admin_route;
-pub use gateway_admin_route::{
-    GatewayAdminPolicyRoute, GatewayAdminResourceRoute, plan_gateway_admin_policy_route,
-    plan_gateway_admin_resource_route,
-};
-mod billing;
-pub use billing::{
-    GatewayBillingSummaryBucket, GatewayBillingSummaryInput, gateway_billing_summary_batch,
-};
 mod catalog;
 pub use catalog::{
     CatalogChoice, CatalogChoicesPlan, CatalogConfigurationInput, CatalogConfigurationPlan,
     CatalogModel, CatalogPlanModel, CatalogPlanRole, CatalogPlannedModel, CatalogReasoningModel,
-    CatalogReasoningPlan, ProviderRegistryDescriptorValidationInput,
-    ProviderRegistryModelCostEntry, ProviderRegistryModelCostPlan, merge_catalog_ids,
-    plan_catalog_choices, plan_catalog_configuration, plan_dynamic_catalog,
-    plan_provider_registry_model_costs, provider_registry_artifact_is_valid,
-    provider_registry_pricing_is_authoritative, resolve_catalog_model, resolve_catalog_reasoning,
+    CatalogReasoningPlan, merge_catalog_ids, plan_catalog_choices, plan_catalog_configuration,
+    plan_dynamic_catalog, resolve_catalog_model, resolve_catalog_reasoning,
 };
 #[path = "rich/gemini_sse_state.rs"]
 mod gemini_sse_state;
@@ -151,27 +126,6 @@ pub use runtime_doctor_render::*;
 #[path = "rich/context_command_output.rs"]
 mod context_command_output;
 pub use context_command_output::*;
-#[path = "rich/application_obligations.rs"]
-mod application_obligations;
-pub use application_obligations::*;
-#[path = "rich/application_metadata.rs"]
-mod application_metadata;
-pub use application_metadata::*;
-#[path = "rich/application_scope.rs"]
-mod application_scope;
-pub use application_scope::*;
-#[path = "rich/application_data_plane_types.rs"]
-mod application_data_plane_types;
-pub use application_data_plane_types::*;
-#[path = "rich/application_data_plane.rs"]
-mod application_data_plane;
-pub use application_data_plane::*;
-#[path = "rich/application_operational_probe.rs"]
-mod application_operational_probe;
-pub use application_operational_probe::*;
-#[cfg(test)]
-#[path = "rich/application_data_plane_tests.rs"]
-mod application_data_plane_tests;
 
 const RICH_STATUS_INVALID: i64 = 1;
 const RICH_STATUS_UTF8: i64 = 2;
@@ -274,40 +228,6 @@ struct RichRouteResult {
 
 #[repr(C)]
 #[derive(Debug, Clone, Copy, Default)]
-struct RichPolicyInput {
-    alias_view: RichStringView,
-    models: u64,
-    model_count: i64,
-    strategy: RichStringView,
-    metrics: u64,
-    metric_count: i64,
-}
-
-#[repr(C)]
-#[derive(Debug, Clone, Copy, Default)]
-struct RichPolicyModel {
-    model: RichSlice,
-    model_index: i64,
-    metric_match: i64,
-}
-
-#[repr(C)]
-#[derive(Debug, Clone, Copy, Default)]
-struct RichPolicyResult {
-    abi_version: i64,
-    models_written: i64,
-    required_models: i64,
-    output_written: i64,
-    required_output: i64,
-    issue_kind: i64,
-    issue_field: i64,
-    issue_index: i64,
-    issue_offset: i64,
-    issue_length: i64,
-}
-
-#[repr(C)]
-#[derive(Debug, Clone, Copy, Default)]
 struct RichCatalogReasoningResult {
     abi_version: i64,
     model_index: i64,
@@ -357,40 +277,6 @@ struct RichCatalogPlanResult {
     selected_model: RichSlice,
     selected_effort: RichSlice,
     default_effort: RichSlice,
-    issue_kind: i64,
-    issue_index: i64,
-    issue_offset: i64,
-    issue_length: i64,
-}
-
-#[repr(C)]
-#[derive(Debug, Clone, Copy, Default)]
-struct RichPolicyRouteInput {
-    model: RichStringView,
-    input_cost: u64,
-    input_cost_present: i64,
-    output_cost: u64,
-    output_cost_present: i64,
-    policy_latency: u64,
-    policy_latency_present: i64,
-    state_latency: u64,
-    state_latency_present: i64,
-    in_flight: u64,
-    rpm_limit: u64,
-    rpm_limit_present: i64,
-    rpm_used: u64,
-    tpm_limit: u64,
-    tpm_limit_present: i64,
-    tpm_used: u64,
-}
-
-#[repr(C)]
-#[derive(Debug, Clone, Copy, Default)]
-struct RichPolicyRouteResult {
-    abi_version: i64,
-    selected_index: i64,
-    ordered_written: i64,
-    required_ordered: i64,
     issue_kind: i64,
     issue_index: i64,
     issue_offset: i64,
@@ -460,20 +346,10 @@ const _: () = {
     assert!(std::mem::size_of::<RichRouteInput>() == 128);
     assert!(std::mem::size_of::<RichRouteRecord>() == 160);
     assert!(std::mem::size_of::<RichRouteResult>() == 80);
-    assert!(std::mem::size_of::<RichPolicyInput>() == 64);
-    assert!(std::mem::offset_of!(RichPolicyInput, models) == 16);
-    assert!(std::mem::offset_of!(RichPolicyInput, model_count) == 24);
-    assert!(std::mem::offset_of!(RichPolicyInput, strategy) == 32);
-    assert!(std::mem::offset_of!(RichPolicyInput, metrics) == 48);
-    assert!(std::mem::offset_of!(RichPolicyInput, metric_count) == 56);
-    assert!(std::mem::size_of::<RichPolicyModel>() == 32);
-    assert!(std::mem::size_of::<RichPolicyResult>() == 80);
     assert!(std::mem::size_of::<RichCatalogReasoningResult>() == 96);
     assert!(std::mem::size_of::<RichCatalogPlanModel>() == 96);
     assert!(std::mem::size_of::<RichCatalogPlanChoice>() == 32);
     assert!(std::mem::size_of::<RichCatalogPlanResult>() == 136);
-    assert!(std::mem::size_of::<RichPolicyRouteInput>() == 136);
-    assert!(std::mem::size_of::<RichPolicyRouteResult>() == 64);
     assert!(std::mem::size_of::<RichPlanItem>() == 32);
     assert!(std::mem::size_of::<RichPlanAction>() == 48);
     assert!(std::mem::size_of::<RichPlanResult>() == 72);
@@ -519,15 +395,6 @@ unsafe extern "C" {
     ) -> i64;
     fn prodex_runtime_websocket_event_kind_v1(abi_version: i64, kind: u64, output: *mut i64)
     -> i64;
-    fn prodex_mojo_rich_policy_alias_v2(
-        abi_version: i64,
-        input: u64,
-        output_models: u64,
-        model_capacity: i64,
-        output: u64,
-        output_capacity: i64,
-        result: u64,
-    ) -> i64;
     fn prodex_mojo_rich_context_plan_v2(
         abi_version: i64,
         items: u64,
@@ -574,7 +441,7 @@ fn hash_capacity(count: usize) -> Result<usize, MojoError> {
 
 fn rich_abi_ready() -> bool {
     *RICH_ABI_READY.get_or_init(|| {
-        let mut layout = [0_u64; 46];
+        let mut layout = [0_u64; 30];
         let status =
             unsafe { prodex_mojo_rich_abi_layout(layout.as_mut_ptr(), layout.len() as i64) };
         let rust = [
@@ -594,12 +461,6 @@ fn rich_abi_ready() -> bool {
             std::mem::align_of::<RichRouteRecord>() as u64,
             std::mem::size_of::<RichRouteResult>() as u64,
             std::mem::align_of::<RichRouteResult>() as u64,
-            std::mem::size_of::<RichPolicyInput>() as u64,
-            std::mem::align_of::<RichPolicyInput>() as u64,
-            std::mem::size_of::<RichPolicyModel>() as u64,
-            std::mem::align_of::<RichPolicyModel>() as u64,
-            std::mem::size_of::<RichPolicyResult>() as u64,
-            std::mem::align_of::<RichPolicyResult>() as u64,
             std::mem::size_of::<RichPlanItem>() as u64,
             std::mem::align_of::<RichPlanItem>() as u64,
             std::mem::size_of::<RichPlanAction>() as u64,
@@ -608,22 +469,12 @@ fn rich_abi_ready() -> bool {
             std::mem::align_of::<RichPlanResult>() as u64,
             std::mem::size_of::<RichCatalogReasoningResult>() as u64,
             std::mem::align_of::<RichCatalogReasoningResult>() as u64,
-            std::mem::size_of::<RichPolicyRouteInput>() as u64,
-            std::mem::align_of::<RichPolicyRouteInput>() as u64,
-            std::mem::size_of::<RichPolicyRouteResult>() as u64,
-            std::mem::align_of::<RichPolicyRouteResult>() as u64,
             std::mem::size_of::<RichCatalogPlanModel>() as u64,
             std::mem::align_of::<RichCatalogPlanModel>() as u64,
             std::mem::size_of::<RichCatalogPlanChoice>() as u64,
             std::mem::align_of::<RichCatalogPlanChoice>() as u64,
             std::mem::size_of::<RichCatalogPlanResult>() as u64,
             std::mem::align_of::<RichCatalogPlanResult>() as u64,
-            std::mem::size_of::<billing::GatewayBillingSummaryInput>() as u64,
-            std::mem::align_of::<billing::GatewayBillingSummaryInput>() as u64,
-            std::mem::size_of::<billing::GatewayBillingSummaryBucket>() as u64,
-            std::mem::align_of::<billing::GatewayBillingSummaryBucket>() as u64,
-            std::mem::size_of::<billing::GatewayBillingSummaryResult>() as u64,
-            std::mem::align_of::<billing::GatewayBillingSummaryResult>() as u64,
         ];
         status == 0
             && unsafe { prodex_mojo_rich_abi_version() } == RICH_ABI_VERSION
@@ -687,61 +538,6 @@ pub fn rich_self_test() -> bool {
         [10_000, 0, 0, 0, 0, 0, 0],
     )
     .is_ok_and(|value| value.selected_index == Some(0) && value.candidates[0].provider == "openai");
-    let policy = validate_policy_alias(PolicyAliasInput {
-        alias: "prodex",
-        models: &["gpt-5"],
-        strategy: Some("ordered-fallback"),
-        metrics: &["gpt-5"],
-    })
-    .is_ok_and(|value| value.models[0].metric_match == Some(0));
-    let policy_route = plan_route_policy(
-        "lowest-cost",
-        1,
-        4,
-        &[
-            PolicyRouteModel {
-                model: "slow",
-                input_cost: Some(20),
-                output_cost: None,
-                policy_latency: Some(2),
-                state_latency: None,
-                in_flight: 0,
-                rpm_limit: None,
-                rpm_used: 0,
-                tpm_limit: None,
-                tpm_used: 0,
-            },
-            PolicyRouteModel {
-                model: "cheap",
-                input_cost: Some(10),
-                output_cost: None,
-                policy_latency: Some(3),
-                state_latency: None,
-                in_flight: 0,
-                rpm_limit: None,
-                rpm_used: 0,
-                tpm_limit: None,
-                tpm_used: 0,
-            },
-        ],
-    )
-    .is_ok_and(|value| value.selected_index == Some(1) && value.ordered_indices == [1]);
-    let virtual_key_admission = validate_virtual_key_admission(VirtualKeyAdmissionInput {
-        durable_budget: false,
-        usage_minute_epoch: 10,
-        minute_epoch: 10,
-        requests_this_minute: 0,
-        tokens_this_minute: 0,
-        requests_total: 0,
-        spend_microusd: 0,
-        reserved_tokens: 22,
-        estimated_cost_microusd: Some(39),
-        request_budget: Some(2),
-        budget_microusd: Some(100),
-        rpm_limit: Some(2),
-        tpm_limit: Some(100),
-    })
-    .is_ok_and(|value| value == VirtualKeyAdmissionDecision::Allow);
     let fallback = model_fallback_chain("copilot", " codex ")
         .is_ok_and(|value| value == ["gpt-5.3-codex", "gpt-5.1-codex", "gpt-4o"]);
     let context_plan = plan_context_items(
@@ -799,20 +595,8 @@ pub fn rich_self_test() -> bool {
             value == br#"{"type":"message","role":"assistant","content":[{"type":"input_text","text":"hello"}]}"#
         })
     };
-    let application_data_plane =
-        plan_application_route_request(ApplicationRouteKind::Responses, true, true, false)
-            .is_ok_and(|value| {
-                value.endpoint == Some(ApplicationProviderEndpoint::Responses)
-                    && value.capability_mask
-                        == APPLICATION_CAPABILITY_RESPONSES_API
-                            | APPLICATION_CAPABILITY_STREAMING
-                            | APPLICATION_CAPABILITY_TOOLS
-            });
     context
         && routes
-        && policy
-        && policy_route
-        && virtual_key_admission
         && fallback
         && fallback_plan
         && context_plan
@@ -820,7 +604,6 @@ pub fn rich_self_test() -> bool {
         && reasoning
         && deepseek
         && kiro
-        && application_data_plane
 }
 
 #[cfg(test)]

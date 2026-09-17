@@ -1,8 +1,7 @@
 use std::ffi::OsString;
 
 use super::{
-    SuperArgs, SuperCliAgent, parse_runtime_base_url, parse_super_external_provider,
-    parse_super_local_url,
+    SuperArgs, parse_runtime_base_url, parse_super_external_provider, parse_super_local_url,
 };
 use crate::{
     CodexCurrentTimeClockSource, CodexWebSearchMode, SubAgentMaxConcurrency,
@@ -38,7 +37,6 @@ enum SuperOverride {
     Url(String),
     LocalContextWindow(usize),
     LocalAutoCompactTokenLimit(usize),
-    Cli(SuperCliAgent),
     Tool(OptionalToolId),
     RequiredTool(OptionalToolId),
     FullAccess,
@@ -113,6 +111,9 @@ fn scan_override(args: &[OsString], index: usize) -> Result<ScanOutcome, String>
     let Some(argument) = args[index].to_str() else {
         return Ok(ScanOutcome::Unknown);
     };
+    if argument == "--cli" || argument.starts_with("--cli=") {
+        return Err("--cli was removed; use --provider gemini|copilot|kiro instead".to_string());
+    }
     if let Some(outcome) = scan_identity_override(args, index) {
         return outcome;
     }
@@ -272,17 +273,6 @@ fn scan_runtime_override(args: &[OsString], index: usize) -> Option<Result<ScanO
             str::parse::<usize>,
             SuperOverride::LocalAutoCompactTokenLimit,
             "--auto-compact-token-limit",
-        ));
-    }
-    if let Some(scanned) = scan_value(args, index, &["--cli"]) {
-        return Some(parse_required(
-            scanned,
-            |value| {
-                parse_super_cli_agent(value)
-                    .ok_or_else(|| "expected codex, gemini, copilot, kiro, or agy".to_string())
-            },
-            SuperOverride::Cli,
-            "--cli",
         ));
     }
     if let Some(scanned) = scan_value(args, index, &["--tool"]) {
@@ -469,7 +459,6 @@ fn apply_override(args: &mut SuperArgs, value: SuperOverride) {
         SuperOverride::LocalAutoCompactTokenLimit(value) => {
             args.local_auto_compact_token_limit = Some(value);
         }
-        SuperOverride::Cli(value) => args.cli = Some(value),
         SuperOverride::Tool(value) => {
             if !args.tools.contains(&value) {
                 args.tools.push(value);
@@ -547,7 +536,6 @@ fn is_known_super_flag(value: &str) -> bool {
             | "--local-context-window"
             | "--auto-compact-token-limit"
             | "--local-auto-compact-token-limit"
-            | "--cli"
             | "--tool"
             | "--require-tool"
             | "--web-search"
@@ -587,17 +575,6 @@ fn parse_rollout_budget_reminders(value: &str) -> Result<Vec<u64>, String> {
         .map(str::parse::<u64>)
         .collect::<Result<Vec<_>, _>>()
         .map_err(|_| "expected comma-separated unsigned integers".to_string())
-}
-
-fn parse_super_cli_agent(value: &str) -> Option<SuperCliAgent> {
-    match value {
-        "codex" => Some(SuperCliAgent::Codex),
-        "gemini" => Some(SuperCliAgent::Gemini),
-        "copilot" => Some(SuperCliAgent::Copilot),
-        "kiro" => Some(SuperCliAgent::Kiro),
-        "agy" => Some(SuperCliAgent::Agy),
-        _ => None,
-    }
 }
 
 #[cfg(test)]

@@ -8,7 +8,7 @@ use anyhow::{Result, bail};
 use crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
 use prodex_cli::{
     DEFAULT_SUB_AGENT_MAX_CONCURRENCY, HARD_MAX_SUB_AGENT_CONCURRENCY, SubAgentConfig,
-    SubAgentMaxConcurrency, SubAgentPreference, SuperArgs, SuperCliAgent,
+    SubAgentMaxConcurrency, SubAgentPreference, SuperArgs,
 };
 use ratatui::layout::{Constraint, Direction, Layout};
 use ratatui::style::Modifier;
@@ -104,23 +104,6 @@ pub(super) fn resolve_super_sub_agent_with_prompt(
     ) {
         if explicitly_enabled {
             bail!("--sub-agent cannot be re-enabled while {SUB_AGENT_RECURSION_MARKER} is set");
-        }
-        return Ok(None);
-    }
-
-    if matches!(
-        args.cli,
-        Some(
-            SuperCliAgent::Gemini
-                | SuperCliAgent::Copilot
-                | SuperCliAgent::Kiro
-                | SuperCliAgent::Agy
-        )
-    ) {
-        if matches!(&preference, SubAgentPreference::Enabled(_)) {
-            bail!(
-                "--sub-agent is supported only on the Codex Super bridge, not native CLI launches"
-            );
         }
         return Ok(None);
     }
