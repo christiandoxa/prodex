@@ -41,7 +41,7 @@ pub(super) fn resolve_main_model_and_effort(
         .or_else(|| codex_cli_config_override_value(&args.codex_args, "model"));
     let explicit_effort =
         codex_cli_config_override_value(&args.codex_args, "model_reasoning_effort");
-    let remembered_selection = remembered_main_selection(args, provider);
+    let remembered_selection = current_main_selection(args, provider);
     let remembered_model = explicit_model
         .is_none()
         .then(|| {
@@ -110,7 +110,7 @@ fn resolve_main_model_and_effort_mojo(
         .or_else(|| codex_cli_config_override_value(&args.codex_args, "model"));
     let explicit_effort =
         codex_cli_config_override_value(&args.codex_args, "model_reasoning_effort");
-    let remembered_selection = remembered_main_selection(args, provider);
+    let remembered_selection = current_main_selection(args, provider);
     let choices = main_model_choices(provider, None);
     let owned_models = choices
         .iter()
@@ -301,7 +301,7 @@ fn ensure_supported_effort(
         .map_err(|error| anyhow::anyhow!(error.to_string()))
 }
 
-fn remembered_main_selection(
+fn current_main_selection(
     args: &SuperArgs,
     provider: prodex_provider_core::ProviderId,
 ) -> Option<(String, Option<String>)> {
@@ -331,15 +331,6 @@ fn remembered_main_selection(
             .splice(0..0, ["-c".into(), "model_provider=\"openai\"".into()]);
     }
     let runtime_args = preference_args.into_runtime_tool_args_with_presidio(false);
-    let context = crate::resolve_fresh_model_preference_context_read_only(
-        &paths,
-        &codex_home,
-        &runtime_args.codex_args,
-    )
-    .ok()?;
-    if let Some(selection) = context.remembered {
-        return Some((selection.model, selection.reasoning_effort));
-    }
     let model = crate::codex_effective_config_value(&codex_home, &runtime_args.codex_args, "model")
         .ok()
         .flatten()?;
