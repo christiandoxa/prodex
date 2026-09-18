@@ -26,7 +26,8 @@ pub struct SmartContextRolloutDecision {
 }
 
 impl SmartContextRolloutDecision {
-    pub fn applies_rewrite(&self) -> bool {
+    #[cfg(test)]
+    pub(crate) fn applies_rewrite(&self) -> bool {
         self.mode == SmartContextRolloutMode::Apply
     }
 

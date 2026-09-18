@@ -336,41 +336,6 @@ fn runtime_previous_response_not_found_fallback_policy_rust(
     }
 }
 
-pub fn runtime_websocket_previous_response_requires_previous_response_affinity(
-    trusted_previous_response_affinity: bool,
-    previous_response_id: Option<&str>,
-    request_turn_state: Option<&str>,
-) -> bool {
-    #[cfg(feature = "mojo")]
-    {
-        prodex_mojo_core::rich::previous_response_plan(
-            prodex_mojo_core::rich::PreviousResponsePlanInput {
-                route: 1,
-                previous_response_present: previous_response_id.is_some(),
-                has_turn_state_retry: false,
-                request_requires_previous_response_affinity: false,
-                trusted_previous_response_affinity,
-                request_turn_state_present: request_turn_state.is_some(),
-                previous_response_fresh_fallback_used: false,
-                fresh_fallback_shape: -1,
-                retry_index: 0,
-                has_session_affinity: false,
-            },
-        )
-        .expect("Mojo websocket affinity planning returned an invalid result")
-        .websocket_requires_affinity
-    }
-
-    #[cfg(not(feature = "mojo"))]
-    {
-        runtime_websocket_previous_response_requires_previous_response_affinity_rust(
-            trusted_previous_response_affinity,
-            previous_response_id,
-            request_turn_state,
-        )
-    }
-}
-
 #[cfg(any(not(feature = "mojo"), test))]
 fn runtime_websocket_previous_response_requires_previous_response_affinity_rust(
     trusted_previous_response_affinity: bool,

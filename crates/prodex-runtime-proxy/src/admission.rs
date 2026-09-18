@@ -1,3 +1,4 @@
+#[cfg(test)]
 use std::sync::{
     Condvar, Mutex,
     atomic::{AtomicU64, AtomicUsize, Ordering},
@@ -31,6 +32,7 @@ pub struct RuntimeProfileInFlightReleaseSnapshot {
     pub underflow: bool,
 }
 
+#[cfg(test)]
 fn runtime_proxy_guarded_counter_release(counter: &AtomicUsize) -> (usize, bool) {
     loop {
         let current = counter.load(Ordering::SeqCst);
@@ -47,7 +49,8 @@ fn runtime_proxy_guarded_counter_release(counter: &AtomicUsize) -> (usize, bool)
     }
 }
 
-pub fn release_runtime_proxy_active_request_guard(
+#[cfg(test)]
+pub(crate) fn release_runtime_proxy_active_request_guard(
     active_request_count: &AtomicUsize,
     lane_active_count: &AtomicUsize,
     lane_releases_total: &AtomicU64,

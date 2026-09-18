@@ -3,6 +3,7 @@ use std::collections::VecDeque;
 use std::io::{self, Read};
 use std::net::SocketAddr;
 
+#[cfg(test)]
 const HTTPS_PROXY_KEYS: [&str; 6] = [
     "HTTPS_PROXY",
     "https_proxy",
@@ -11,6 +12,7 @@ const HTTPS_PROXY_KEYS: [&str; 6] = [
     "PROXY",
     "proxy",
 ];
+#[cfg(test)]
 const HTTP_PROXY_KEYS: [&str; 6] = [
     "HTTP_PROXY",
     "http_proxy",
@@ -71,7 +73,8 @@ pub fn runtime_websocket_target_from_parts(
     }
 }
 
-pub fn runtime_websocket_proxy_env_keys(scheme: &str) -> &'static [&'static str] {
+#[cfg(test)]
+pub(crate) fn runtime_websocket_proxy_env_keys(scheme: &str) -> &'static [&'static str] {
     if matches!(scheme, "wss" | "https") {
         HTTPS_PROXY_KEYS.as_slice()
     } else {

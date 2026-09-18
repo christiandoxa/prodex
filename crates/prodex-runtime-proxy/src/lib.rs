@@ -29,7 +29,6 @@ mod error_policy;
 mod failure_response;
 mod health;
 mod lineage;
-mod local_bridge;
 mod log_event;
 mod payload_detection;
 mod previous_response_log;
@@ -57,7 +56,6 @@ pub use self::error_policy::*;
 pub use self::failure_response::*;
 pub use self::health::*;
 pub use self::lineage::*;
-pub use self::local_bridge::*;
 pub use self::log_event::*;
 pub use self::payload_detection::*;
 pub use self::previous_response_log::*;
@@ -235,32 +233,6 @@ pub fn runtime_proxy_admission_wait_budget(path: &str, pressure_mode: bool) -> s
         RUNTIME_PROXY_PRESSURE_ADMISSION_WAIT_BUDGET_MS
     } else {
         RUNTIME_PROXY_ADMISSION_WAIT_BUDGET_MS
-    };
-    std::time::Duration::from_millis(runtime_proxy_interactive_wait_budget_ms(
-        path,
-        base_budget_ms,
-    ))
-}
-
-pub fn runtime_proxy_request_inflight_wait_budget(
-    request: &RuntimeProxyRequest,
-    pressure_mode: bool,
-) -> std::time::Duration {
-    if runtime_proxy_request_prefers_inflight_wait(request) {
-        runtime_proxy_admission_wait_budget(&request.path_and_query, pressure_mode)
-    } else {
-        std::time::Duration::ZERO
-    }
-}
-
-pub fn runtime_proxy_long_lived_queue_wait_budget(
-    path: &str,
-    pressure_mode: bool,
-) -> std::time::Duration {
-    let base_budget_ms = if pressure_mode {
-        RUNTIME_PROXY_PRESSURE_LONG_LIVED_QUEUE_WAIT_BUDGET_MS
-    } else {
-        RUNTIME_PROXY_LONG_LIVED_QUEUE_WAIT_BUDGET_MS
     };
     std::time::Duration::from_millis(runtime_proxy_interactive_wait_budget_ms(
         path,

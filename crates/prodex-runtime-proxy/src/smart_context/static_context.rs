@@ -9,23 +9,6 @@ pub const SMART_CONTEXT_STATIC_CONTEXT_FINGERPRINT_MAX_ITEMS: usize = 128;
 pub const SMART_CONTEXT_STATIC_CONTEXT_FINGERPRINT_MAX_ITEM_BYTES: usize = 256 * 1024;
 const SMART_CONTEXT_STATIC_CONTEXT_FINGERPRINT_MAX_ID_BYTES: usize = 256;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct SmartContextArtifactLineRangeRef {
-    pub artifact_id: String,
-    pub artifact_content_hash: String,
-    pub artifact_byte_len: usize,
-    pub start_line: usize,
-    pub end_line: usize,
-    pub excerpt_hash: String,
-    pub excerpt_byte_len: usize,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct SmartContextArtifactLineRange {
-    pub reference: SmartContextArtifactLineRangeRef,
-    pub excerpt: String,
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum SmartContextFingerprintKind {
     StaticContext,
@@ -35,8 +18,9 @@ pub enum SmartContextFingerprintKind {
     MemoryCapsule,
 }
 
+#[cfg(test)]
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct SmartContextFingerprintInput {
+pub(crate) struct SmartContextFingerprintInput {
     pub id: String,
     pub kind: SmartContextFingerprintKind,
     pub text: String,
@@ -97,7 +81,10 @@ pub enum SmartContextFingerprintChange {
     },
 }
 
-pub fn smart_context_fingerprint(input: SmartContextFingerprintInput) -> SmartContextFingerprint {
+#[cfg(test)]
+pub(crate) fn smart_context_fingerprint(
+    input: SmartContextFingerprintInput,
+) -> SmartContextFingerprint {
     SmartContextFingerprint {
         id: input.id,
         kind: input.kind,

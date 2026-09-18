@@ -515,10 +515,6 @@ impl RuntimeAffinitySelectionKind {
             Self::Session => "session",
         }
     }
-
-    pub fn excluded_is_terminal(self) -> bool {
-        matches!(self, Self::Strict)
-    }
 }
 
 #[derive(Clone, Copy, Debug)]

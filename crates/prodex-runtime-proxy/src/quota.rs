@@ -246,7 +246,8 @@ pub fn runtime_proxy_quota_summary_blocking_reset_at(
         .max()
 }
 
-pub fn runtime_proxy_usage_snapshot_from_observations_at(
+#[cfg(test)]
+pub(crate) fn runtime_proxy_usage_snapshot_from_observations_at(
     five_hour: Option<RuntimeProxyQuotaWindowObservation>,
     weekly: Option<RuntimeProxyQuotaWindowObservation>,
     checked_at: i64,
@@ -370,25 +371,6 @@ pub fn runtime_proxy_usage_snapshot_is_usable(
     {
         rust_oracles::usage_snapshot_is_usable(snapshot, now, stale_grace_seconds)
     }
-}
-
-pub fn runtime_proxy_quota_pressure_sort_key_for_route(
-    five_hour: Option<RuntimeProxyQuotaWindowObservation>,
-    weekly: Option<RuntimeProxyQuotaWindowObservation>,
-    route_kind: RuntimeRouteKind,
-) -> RuntimeProxyQuotaPressureSortKey {
-    let score = runtime_proxy_quota_score_for_route(five_hour, weekly, route_kind);
-    (
-        score.pressure_band,
-        score.total_pressure,
-        score.weekly_pressure,
-        score.five_hour_pressure,
-        Reverse(score.reserve_floor),
-        Reverse(score.weekly_remaining),
-        Reverse(score.five_hour_remaining),
-        score.weekly_reset_at,
-        score.five_hour_reset_at,
-    )
 }
 
 pub fn runtime_proxy_quota_pressure_sort_key_for_route_from_summary(

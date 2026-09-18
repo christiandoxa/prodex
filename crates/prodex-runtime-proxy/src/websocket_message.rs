@@ -213,7 +213,10 @@ pub fn runtime_translate_precommit_previous_response_websocket_text_frame(payloa
     runtime_proxy_websocket_error_payload_text(409, "stale_continuation", message)
 }
 
-pub fn inspect_runtime_websocket_text_frame(payload: &str) -> RuntimeInspectedWebsocketTextFrame {
+#[cfg(test)]
+pub(crate) fn inspect_runtime_websocket_text_frame(
+    payload: &str,
+) -> RuntimeInspectedWebsocketTextFrame {
     inspect_runtime_websocket_text_frame_with_phase(payload, RuntimeHttpErrorPhase::PreCommit)
 }
 
@@ -298,12 +301,6 @@ fn runtime_websocket_wrapped_error_status(value: &serde_json::Value) -> Option<u
         .and_then(|status| u16::try_from(status).ok())
 }
 
-pub fn runtime_response_event_type(payload: &str) -> Option<String> {
-    serde_json::from_str::<serde_json::Value>(payload)
-        .ok()
-        .and_then(|value| runtime_response_event_type_from_value(&value))
-}
-
 pub fn runtime_proxy_precommit_hold_event_kind(kind: &str) -> bool {
     #[cfg(feature = "mojo")]
     {
@@ -371,7 +368,8 @@ fn runtime_websocket_event_kind_mojo(kind: &str) -> prodex_mojo_core::rich::Webs
         .expect("Mojo websocket event classification returned an invalid result")
 }
 
-pub fn is_runtime_terminal_event(payload: &str) -> bool {
+#[cfg(test)]
+pub(crate) fn is_runtime_terminal_event(payload: &str) -> bool {
     let Ok(value) = serde_json::from_str::<serde_json::Value>(payload) else {
         return false;
     };

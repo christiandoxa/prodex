@@ -17,13 +17,6 @@ impl RuntimeResponseForwardingBodyKind {
     pub fn is_sse(self) -> bool {
         matches!(self, Self::Sse)
     }
-
-    pub fn as_log_label(self) -> &'static str {
-        match self {
-            Self::Unary => "unary",
-            Self::Sse => "sse",
-        }
-    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

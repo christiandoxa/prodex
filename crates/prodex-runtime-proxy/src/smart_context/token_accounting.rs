@@ -48,7 +48,8 @@ pub const SMART_CONTEXT_MEMORY_CAPSULE_MINIMAL_TOKEN_BUDGET: usize = 256;
 pub const SMART_CONTEXT_MEMORY_CAPSULE_CONDENSED_TOKEN_BUDGET: usize = 1_024;
 pub const SMART_CONTEXT_MEMORY_CAPSULE_LARGE_TOKEN_BUDGET: usize = 4_096;
 
-pub fn smart_context_select_memory_capsules_for_policy(
+#[cfg(test)]
+pub(crate) fn smart_context_select_memory_capsules_for_policy(
     capsules: impl IntoIterator<Item = SmartContextMemoryCapsule>,
     accounting: &SmartContextObservedTokenAccounting,
     policy: &SmartContextAdaptiveBudgetPolicy,
@@ -392,7 +393,8 @@ struct SmartContextTokenAccountingDecision {
     accounting_risks: Vec<SmartContextTokenAccountingRisk>,
 }
 
-pub fn smart_context_observed_token_accounting(
+#[cfg(test)]
+pub(crate) fn smart_context_observed_token_accounting(
     input: SmartContextObservedTokenAccountingInput,
 ) -> SmartContextObservedTokenAccounting {
     smart_context_observed_token_accounting_with_calibration(

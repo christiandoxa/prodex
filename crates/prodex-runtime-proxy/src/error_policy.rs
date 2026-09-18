@@ -260,10 +260,6 @@ impl RuntimeHttpErrorRule {
 }
 
 impl RuntimeHttpErrorAction {
-    pub fn rotates_profile(self) -> bool {
-        matches!(self, Self::RotateProfile)
-    }
-
     pub fn retries_profile(self) -> bool {
         matches!(self, Self::RotateProfile | Self::RetryProfile)
     }
