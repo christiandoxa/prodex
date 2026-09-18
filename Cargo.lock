@@ -2751,7 +2751,6 @@ dependencies = [
  "os_info",
  "portable-pty",
  "postgres",
- "prodex-audit-log",
  "prodex-bench-support",
  "prodex-cli",
  "prodex-codex-config",
@@ -2778,7 +2777,6 @@ dependencies = [
  "prodex-runtime-doctor",
  "prodex-runtime-launch",
  "prodex-runtime-log",
- "prodex-runtime-metrics",
  "prodex-runtime-policy",
  "prodex-runtime-proxy",
  "prodex-runtime-quota",
@@ -2810,19 +2808,6 @@ dependencies = [
  "windows-sys 0.61.2",
  "zeroize",
  "zstd",
-]
-
-[[package]]
-name = "prodex-audit-log"
-version = "0.429.4"
-dependencies = [
- "anyhow",
- "chrono",
- "libc",
- "prodex-redaction",
- "serde",
- "serde_json",
- "sha2 0.11.0",
 ]
 
 [[package]]
@@ -3066,7 +3051,6 @@ dependencies = [
  "prodex-quota",
  "prodex-runtime-proxy",
  "prodex-runtime-state",
- "prodex-terminal-ui",
  "serde",
  "serde_json",
 ]
@@ -3096,13 +3080,6 @@ dependencies = [
  "prodex-runtime-proxy",
  "serde_json",
  "zstd",
-]
-
-[[package]]
-name = "prodex-runtime-metrics"
-version = "0.429.4"
-dependencies = [
- "prodex-runtime-broker",
 ]
 
 [[package]]

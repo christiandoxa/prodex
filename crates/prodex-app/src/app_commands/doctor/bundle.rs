@@ -1,11 +1,11 @@
 use super::{
-    audit_logs_json_value, codex_bin, collect_install_check_rows,
-    collect_live_runtime_broker_observations, collect_profile_summaries,
-    collect_runtime_doctor_summary_with_tail_bytes, doctor_quota_reports_json_value,
-    first_line_of_error, format_binary_resolution, format_runtime_policy_summary, kiro_bin,
-    runtime_current_prodex_version, runtime_doctor_json_value,
-    runtime_doctor_json_value_with_policy_suggestions, runtime_logs_json_value,
-    runtime_policy_json_value, runtime_proxy_latest_log_pointer_path, secret_backend_json_value,
+    codex_bin, collect_install_check_rows, collect_live_runtime_broker_observations,
+    collect_profile_summaries, collect_runtime_doctor_summary_with_tail_bytes,
+    doctor_quota_reports_json_value, first_line_of_error, format_binary_resolution,
+    format_runtime_policy_summary, kiro_bin, runtime_current_prodex_version,
+    runtime_doctor_json_value, runtime_doctor_json_value_with_policy_suggestions,
+    runtime_logs_json_value, runtime_policy_json_value, runtime_proxy_latest_log_pointer_path,
+    secret_backend_json_value,
 };
 use crate::{AppPaths, AppState, DoctorArgs, RuntimeConfig};
 use anyhow::{Context, Result};
@@ -32,7 +32,6 @@ pub(super) struct DoctorRedactedBundleContext<'a> {
     pub(super) state: &'a AppState,
     pub(super) codex_home: &'a Path,
     pub(super) policy_summary: Option<&'a RuntimePolicySummary>,
-    pub(super) runtime_metrics_targets: &'a [String],
     pub(super) import_auth_journal_count: usize,
     pub(super) repaired_import_auth_journals: Option<usize>,
     pub(super) runtime_config: Option<&'a RuntimeConfig>,
@@ -82,11 +81,8 @@ pub(super) fn doctor_redacted_bundle_json_value(
             "runtime_configuration_error": context.runtime_config_error,
             "runtime_logs": runtime_logs_json_value(),
             "runtime_latest_log_pointer": runtime_proxy_latest_log_pointer_path().display().to_string(),
-            "audit_logs": audit_logs_json_value(),
             "secret_backend": secret_backend_json_value(),
-            "runtime_metrics_targets": context.runtime_metrics_targets,
             "live_brokers": collect_live_runtime_broker_observations(context.paths),
-            "live_broker_metrics_targets": context.runtime_metrics_targets,
             "import_auth_journals": import_auth_journals_json_value(
                 context.import_auth_journal_count,
                 context.repaired_import_auth_journals,

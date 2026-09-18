@@ -64,10 +64,6 @@ pub(crate) fn runtime_broker_metrics_url(registry: &RuntimeBrokerRegistry) -> St
     prodex_runtime_broker::runtime_broker_metrics_url(registry)
 }
 
-pub(crate) fn runtime_broker_metrics_prometheus_url(registry: &RuntimeBrokerRegistry) -> String {
-    prodex_runtime_broker::runtime_broker_metrics_prometheus_url(registry)
-}
-
 pub(crate) fn runtime_broker_activate_url(registry: &RuntimeBrokerRegistry) -> String {
     prodex_runtime_broker::runtime_broker_activate_url(registry)
 }
@@ -174,24 +170,6 @@ pub(crate) fn collect_live_runtime_broker_observations(
         });
     }
     observations
-}
-
-pub(crate) fn collect_runtime_broker_metrics_targets(paths: &AppPaths) -> Vec<String> {
-    let mut targets = Vec::new();
-    for broker_key in runtime_broker_registry_keys(paths) {
-        let Ok(Some(registry)) = load_runtime_broker_registry(paths, &broker_key) else {
-            continue;
-        };
-        if runtime_broker_registry_admission(&registry).is_err() {
-            continue;
-        }
-        targets.push(runtime_broker_metrics_prometheus_url(&registry));
-    }
-    targets
-}
-
-pub(crate) fn format_runtime_broker_metrics_targets(targets: &[String]) -> String {
-    prodex_runtime_broker::format_runtime_broker_metrics_targets(targets)
 }
 
 pub(crate) fn activate_runtime_broker_profile(

@@ -39,7 +39,7 @@ pub struct RuntimeDoctorBindingStateSummary {
     pub merged_continuations: RuntimeDoctorBindingSourceSummary,
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, Serialize)]
 pub struct RuntimeDoctorSummary {
     pub log_path: Option<PathBuf>,
     pub pointer_exists: bool,
@@ -127,15 +127,6 @@ pub struct RuntimeDoctorMarkerContextSummary {
     pub routes: BTreeMap<String, usize>,
     pub lanes: BTreeMap<String, usize>,
     pub profiles: BTreeMap<String, usize>,
-}
-
-#[derive(Debug, Clone, Default, Serialize, PartialEq, Eq)]
-pub struct RuntimeDoctorIncidentExplanation {
-    pub id: String,
-    pub cause: String,
-    pub evidence: Vec<String>,
-    pub markers: Vec<String>,
-    pub next_action: String,
 }
 
 #[derive(Debug, Clone, Default, Serialize)]

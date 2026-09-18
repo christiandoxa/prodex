@@ -79,10 +79,6 @@ impl RuntimeBrokerRegistry {
         self.admin_url(RuntimeBrokerAdminRoute::Metrics)
     }
 
-    pub fn metrics_prometheus_url(&self) -> String {
-        self.admin_url(RuntimeBrokerAdminRoute::MetricsPrometheus)
-    }
-
     pub fn activate_url(&self) -> String {
         self.admin_url(RuntimeBrokerAdminRoute::Activate)
     }
@@ -165,7 +161,6 @@ impl RuntimeBrokerHealth {
 pub enum RuntimeBrokerAdminRoute {
     Health,
     Metrics,
-    MetricsPrometheus,
     Activate,
     ReleaseSessionAffinity,
     LogSnapshot,
@@ -177,7 +172,6 @@ impl RuntimeBrokerAdminRoute {
         match self {
             Self::Health => RUNTIME_BROKER_HEALTH_PATH,
             Self::Metrics => RUNTIME_BROKER_METRICS_PATH,
-            Self::MetricsPrometheus => RUNTIME_BROKER_METRICS_PROMETHEUS_PATH,
             Self::Activate => RUNTIME_BROKER_ACTIVATE_PATH,
             Self::ReleaseSessionAffinity => RUNTIME_BROKER_RELEASE_SESSION_AFFINITY_PATH,
             Self::LogSnapshot => RUNTIME_BROKER_LOG_SNAPSHOT_PATH,
@@ -189,7 +183,6 @@ impl RuntimeBrokerAdminRoute {
         match path {
             RUNTIME_BROKER_HEALTH_PATH => Some(Self::Health),
             RUNTIME_BROKER_METRICS_PATH => Some(Self::Metrics),
-            RUNTIME_BROKER_METRICS_PROMETHEUS_PATH => Some(Self::MetricsPrometheus),
             RUNTIME_BROKER_ACTIVATE_PATH => Some(Self::Activate),
             RUNTIME_BROKER_RELEASE_SESSION_AFFINITY_PATH => Some(Self::ReleaseSessionAffinity),
             RUNTIME_BROKER_LOG_SNAPSHOT_PATH => Some(Self::LogSnapshot),
@@ -209,10 +202,6 @@ pub fn runtime_broker_health_url(registry: &RuntimeBrokerRegistry) -> String {
 
 pub fn runtime_broker_metrics_url(registry: &RuntimeBrokerRegistry) -> String {
     registry.metrics_url()
-}
-
-pub fn runtime_broker_metrics_prometheus_url(registry: &RuntimeBrokerRegistry) -> String {
-    registry.metrics_prometheus_url()
 }
 
 pub fn runtime_broker_activate_url(registry: &RuntimeBrokerRegistry) -> String {

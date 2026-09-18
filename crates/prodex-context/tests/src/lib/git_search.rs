@@ -31,35 +31,6 @@ R  old.txt -> new.txt
 }
 
 #[test]
-fn git_status_output_shortens_repeated_absolute_cwd_prefix() {
-    let cwd = test_cwd_prefix();
-    let input = format!(
-        "\
-## main...origin/main
- M {cwd}/src/lib.rs
-?? {cwd}/tests/new.rs
-"
-    );
-
-    let report = compact_command_output_with_options(
-        &input,
-        &CommandOutputCompactOptions {
-            kind: CommandOutputKind::Auto,
-            ..CommandOutputCompactOptions::default()
-        },
-    );
-
-    assert_eq!(report.detected_kind, CommandOutputKind::GitStatus);
-    assert!(
-        report
-            .output
-            .contains(&format!("path aliases: $REPO={cwd}"))
-    );
-    assert!(report.output.contains("modified (1): M $REPO/src/lib.rs"));
-    assert!(report.output.contains("untracked (1): $REPO/tests/new.rs"));
-}
-
-#[test]
 fn git_diff_output_keeps_summary_and_hunk_markers() {
     let input = "\
 diff --git a/src/lib.rs b/src/lib.rs
@@ -126,36 +97,6 @@ README.md:3:prodex context helper
             .output
             .contains("[... 1 more matches in this file ...]")
     );
-}
-
-#[test]
-fn search_output_shortens_repeated_absolute_cwd_prefix() {
-    let cwd = test_cwd_prefix();
-    let input = format!(
-        "\
-{cwd}/src/lib.rs:10:fn alpha() {{}}
-{cwd}/src/lib.rs:20:fn beta() {{}}
-{cwd}/README.md:3:prodex context helper
-"
-    );
-
-    let report = compact_command_output_with_options(
-        &input,
-        &CommandOutputCompactOptions {
-            kind: CommandOutputKind::Auto,
-            max_search_matches_per_file: 2,
-            ..CommandOutputCompactOptions::default()
-        },
-    );
-
-    assert_eq!(report.detected_kind, CommandOutputKind::Search);
-    assert!(
-        report
-            .output
-            .contains(&format!("path aliases: $REPO={cwd}"))
-    );
-    assert!(report.output.contains("$REPO/src/lib.rs (2 matches):"));
-    assert!(report.output.contains("$REPO/README.md (1 matches):"));
 }
 
 #[test]

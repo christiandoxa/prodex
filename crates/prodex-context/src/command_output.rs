@@ -1,69 +1,43 @@
-use crate::blob_noise::{
-    context_noise_normalize_path_token_supplement,
-    context_noise_strip_path_location_suffix_supplement,
-};
+use crate::blob_noise::context_noise_strip_path_location_suffix_supplement;
 use crate::critical_signal::{
-    CriticalSignalCounts, count_critical_signals, count_file_location_signals,
-    critical_signal_self_check, is_diff_hunk_line, is_error_signal_line,
-    is_rust_diagnostic_signal_line, is_stack_signal_line, is_test_failure_signal_line,
-    looks_like_location_path,
+    count_critical_signals, count_file_location_signals, critical_signal_self_check,
+    is_diff_hunk_line, is_error_signal_line, is_rust_diagnostic_signal_line, is_stack_signal_line,
+    is_test_failure_signal_line, looks_like_location_path,
 };
 use crate::estimate_context_tokens;
 use serde::Serialize;
 use std::cmp::Reverse;
 use std::collections::BTreeMap;
 
-mod ci_failure;
-mod classification;
 mod critical_blocks;
-mod diagnostics;
 mod git_search;
 mod git_search_parse;
 mod intent;
 mod kind_detection;
-mod log_stream;
-mod noisy_output;
-mod noisy_success;
-mod path_aliases;
-mod rust_diagnostics;
 mod structured_json;
-mod success;
-mod watcher_delta;
 
 pub use intent::extract_intent_terms_from_prompt;
 pub use kind_detection::infer_command_output_kind_from_metadata;
-pub(crate) use log_stream::is_log_level_signal_line;
-pub use success::compact_successful_command_output_with_options;
 
-use ci_failure::compact_ci_failure_log_output;
-use classification::*;
 pub(crate) use critical_blocks::*;
-use diagnostics::compact_diagnostic_output;
 use git_search::{
     collect_file_list_entries, collect_search_output_matches, compact_file_list_output,
     compact_git_diff_output, compact_git_diff_output_with_intent, compact_git_log_stat_output,
     compact_git_status_output, compact_search_output,
 };
 pub(crate) use git_search_parse::*;
-#[cfg(any(not(feature = "mojo"), test))]
+#[cfg(not(feature = "mojo"))]
 use intent::intent_line_matches;
 use intent::{
     compact_command_output_for_intent, ensure_no_critical_signal_loss_for_intent,
     normalize_intent_terms_with_prompt_expansion,
 };
 use kind_detection::detect_command_output_kind_with_hint;
-#[cfg(any(not(feature = "mojo"), test))]
+#[cfg(not(feature = "mojo"))]
 use kind_detection::{
     command_metadata_subcommand_after, command_metadata_token_command_name, command_metadata_tokens,
 };
-use log_stream::compact_log_stream_output;
-use noisy_output::compact_noisy_success_output;
-pub(crate) use noisy_success::*;
-use path_aliases::canonicalize_compacted_command_paths;
-use rust_diagnostics::compact_rust_diagnostic_output;
 use structured_json::compact_structured_json_output;
-use success::{count_success_output_path_extensions, count_success_output_path_roots};
-use watcher_delta::compact_watcher_delta_output;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -166,40 +140,6 @@ pub struct CommandOutputCompactReport {
     pub output: String,
 }
 
-#[derive(Debug, Clone, Serialize)]
-pub struct CommandSuccessOutputCompactOptions {
-    pub command: Option<String>,
-    pub exit_code: Option<i32>,
-    pub min_lines_to_compact: usize,
-    pub max_touched_files: usize,
-    pub max_key_lines: usize,
-    pub max_line_chars: usize,
-}
-
-impl Default for CommandSuccessOutputCompactOptions {
-    fn default() -> Self {
-        Self {
-            command: None,
-            exit_code: None,
-            min_lines_to_compact: 40,
-            max_touched_files: 24,
-            max_key_lines: 12,
-            max_line_chars: 200,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Serialize)]
-pub struct CommandSuccessOutputCompactReport {
-    pub compacted: bool,
-    pub failure_suspected: bool,
-    pub original_lines: usize,
-    pub compacted_lines: usize,
-    pub touched_files: usize,
-    pub critical_signals: CriticalSignalCounts,
-    pub output: String,
-}
-
 impl CommandOutputKind {
     pub(crate) fn label(self) -> &'static str {
         match self {
@@ -247,34 +187,23 @@ pub fn compact_command_output_with_options_and_kind_hint(
         CommandOutputKind::Auto => detect_command_output_kind_with_hint(&normalized, kind_hint),
         explicit => explicit,
     };
-    let specialized_output = compact_ci_failure_log_output(&normalized, options)
-        .or_else(|| compact_watcher_delta_output(&normalized, detected_kind, options));
-    let structured_json_output = (specialized_output.is_none()
-        && command_output_kind_allows_structured_json_compaction(detected_kind))
-    .then(|| compact_structured_json_output(&normalized, options))
-    .flatten();
-    let output = specialized_output
-        .or(structured_json_output)
-        .unwrap_or_else(|| match detected_kind {
-            CommandOutputKind::Auto => smart_truncate_command_output(&normalized, options),
-            CommandOutputKind::GitStatus => compact_git_status_output(&normalized, options),
-            CommandOutputKind::GitDiff => compact_git_diff_output(&normalized, options),
-            CommandOutputKind::RustDiagnostics => {
-                compact_rust_diagnostic_output(&normalized, options)
-            }
-            CommandOutputKind::Diagnostics => compact_diagnostic_output(&normalized, options),
-            CommandOutputKind::GitLog => compact_git_log_stat_output(&normalized, options),
-            CommandOutputKind::Search => compact_search_output(&normalized, options),
-            CommandOutputKind::FileList => compact_file_list_output(&normalized, options),
-            CommandOutputKind::LogStream => compact_log_stream_output(&normalized, options),
-            CommandOutputKind::NoisySuccess => compact_noisy_success_output(&normalized, options),
-            CommandOutputKind::Plain => smart_truncate_command_output(&normalized, options),
-        });
-    let output = if options.max_lines <= 12 {
-        output
-    } else {
-        canonicalize_compacted_command_paths(&normalized, &output, detected_kind)
-    };
+    let structured_json_output =
+        command_output_kind_allows_structured_json_compaction(detected_kind)
+            .then(|| compact_structured_json_output(&normalized, options))
+            .flatten();
+    let output = structured_json_output.unwrap_or_else(|| match detected_kind {
+        CommandOutputKind::GitStatus => compact_git_status_output(&normalized, options),
+        CommandOutputKind::GitDiff => compact_git_diff_output(&normalized, options),
+        CommandOutputKind::GitLog => compact_git_log_stat_output(&normalized, options),
+        CommandOutputKind::Search => compact_search_output(&normalized, options),
+        CommandOutputKind::FileList => compact_file_list_output(&normalized, options),
+        CommandOutputKind::Auto
+        | CommandOutputKind::RustDiagnostics
+        | CommandOutputKind::Diagnostics
+        | CommandOutputKind::LogStream
+        | CommandOutputKind::NoisySuccess
+        | CommandOutputKind::Plain => smart_truncate_command_output(&normalized, options),
+    });
 
     let original_lines = count_text_lines(&normalized);
     let compacted_lines = count_text_lines(&output);
@@ -337,12 +266,6 @@ pub fn compact_command_output_with_intent_options(
         &intent_terms,
     );
     let output = ensure_no_critical_signal_loss_for_intent(&normalized, &output, &options.base);
-    let output = if options.base.max_lines <= 12 {
-        output
-    } else {
-        canonicalize_compacted_command_paths(&normalized, &output, report.detected_kind)
-    };
-
     report.compacted_lines = count_text_lines(&output);
     report.estimated_tokens_after =
         estimate_context_tokens(output.chars().count(), output.split_whitespace().count());

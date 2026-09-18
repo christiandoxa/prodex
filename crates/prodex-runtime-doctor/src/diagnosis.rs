@@ -2,7 +2,6 @@ use super::*;
 
 mod broker;
 mod final_summary;
-mod incident_explainer;
 mod marker_accessors;
 mod next_steps;
 mod route_health;
@@ -11,7 +10,6 @@ pub use final_summary::{
     runtime_doctor_append_pointer_note, runtime_doctor_finalize_log_summary,
     runtime_doctor_finalize_summary, runtime_doctor_top_facet,
 };
-pub use incident_explainer::runtime_doctor_incident_explainer;
 pub use marker_accessors::{runtime_doctor_count_breakdown, runtime_doctor_marker_count};
 pub use next_steps::{
     runtime_doctor_active_pressure_next_step, runtime_doctor_compact_final_failure_next_step,

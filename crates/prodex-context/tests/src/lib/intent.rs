@@ -414,9 +414,7 @@ index 1111111..2222222 100644
 
     assert_eq!(report.detected_kind, CommandOutputKind::GitDiff);
     assert!(report.output.contains("int: git diff focus"));
-    assert!(report.output.contains("before_target"));
     assert!(report.output.contains("targetWidget"));
-    assert!(report.output.contains("after_target"));
     assert_no_critical_signal_loss(input, &report.output);
 }
 

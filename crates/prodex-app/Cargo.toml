@@ -55,7 +55,6 @@ http-body-util = { workspace = true }
 libc = { workspace = true }
 portable-pty = { workspace = true }
 os_info = { workspace = true }
-prodex_audit_log = { workspace = true }
 prodex_bench_support = { workspace = true, optional = true }
 codex_config = { workspace = true }
 prodex_optional_tools = { workspace = true }
@@ -90,7 +89,6 @@ prodex_runtime_broker_log = { workspace = true }
 prodex_runtime_cookies = { workspace = true }
 prodex_runtime_launch = { workspace = true }
 runtime_log = { workspace = true }
-runtime_metrics = { workspace = true }
 prodex_runtime_policy = { workspace = true }
 runtime_proxy_crate = { workspace = true }
 prodex_runtime_store = { workspace = true }
