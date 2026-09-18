@@ -56,7 +56,6 @@ pub(crate) fn handle_run(args: RunArgs) -> Result<()> {
                 codex_args: strategy.codex_args.clone(),
             },
             None,
-            None,
         );
     }
     match route {
@@ -158,16 +157,12 @@ pub(crate) fn remove_first_codex_config_override_pair(args: &mut Vec<OsString>, 
 }
 struct RuntimeLaunchPreparationBuilder<'a> {
     request: RuntimeLaunchRequest<'a>,
-    resolved_harness: prodex_provider_core::ResolvedHarnessMode,
     paths: AppPaths,
     state: AppState,
     selection: RuntimeLaunchSelection,
 }
 impl<'a> RuntimeLaunchPreparationBuilder<'a> {
-    fn from_request(
-        request: RuntimeLaunchRequest<'a>,
-        resolved_harness: prodex_provider_core::ResolvedHarnessMode,
-    ) -> Result<Self> {
+    fn from_request(request: RuntimeLaunchRequest<'a>) -> Result<Self> {
         let profile_started = Instant::now();
         let paths = AppPaths::discover()?;
         let mut state = AppState::load_and_repair(&paths)?;
@@ -176,7 +171,6 @@ impl<'a> RuntimeLaunchPreparationBuilder<'a> {
 
         Ok(Self {
             request,
-            resolved_harness,
             paths,
             state,
             selection,
@@ -235,7 +229,6 @@ impl<'a> RuntimeLaunchPreparationBuilder<'a> {
             &self.state,
             &self.selection,
             &self.request,
-            self.resolved_harness,
             preferred_listen_addr,
         )?;
         emit_timing("startup.runtime_proxy_prepare_ms", proxy_started);
@@ -352,7 +345,6 @@ impl RuntimeProxyStartupFactory {
         state: &AppState,
         selection: &RuntimeLaunchSelection,
         request: &RuntimeLaunchRequest<'_>,
-        resolved_harness: prodex_provider_core::ResolvedHarnessMode,
         preferred_listen_addr: Option<&str>,
     ) -> Result<Option<RuntimeProxyEndpoint>> {
         if let Some(local_upstream_base_url) =
@@ -364,7 +356,6 @@ impl RuntimeProxyStartupFactory {
                 selection,
                 request,
                 local_upstream_base_url,
-                resolved_harness,
                 preferred_listen_addr,
             )?));
         }
@@ -458,29 +449,17 @@ impl RuntimeProxyStartupFactory {
     }
 }
 
-#[cfg(test)]
-pub(super) fn prepare_runtime_launch(
+pub(crate) fn prepare_runtime_launch(
     request: RuntimeLaunchRequest<'_>,
 ) -> Result<PreparedRuntimeLaunch> {
-    prepare_runtime_launch_with_harness(
-        request,
-        prodex_provider_core::resolve_harness_mode(None, None),
-    )
-}
-
-pub(crate) fn prepare_runtime_launch_with_harness(
-    request: RuntimeLaunchRequest<'_>,
-    resolved_harness: prodex_provider_core::ResolvedHarnessMode,
-) -> Result<PreparedRuntimeLaunch> {
-    RuntimeLaunchPreparationBuilder::from_request(request, resolved_harness)?.build()
+    RuntimeLaunchPreparationBuilder::from_request(request)?.build()
 }
 
 pub(crate) fn prepare_gateway_runtime(
     request: RuntimeLaunchRequest<'_>,
-    resolved_harness: prodex_provider_core::ResolvedHarnessMode,
     preferred_listen_addr: Option<&str>,
 ) -> Result<PreparedRuntimeLaunch> {
-    RuntimeLaunchPreparationBuilder::from_request(request, resolved_harness)?
+    RuntimeLaunchPreparationBuilder::from_request(request)?
         .build_with_proxy_listen(false, preferred_listen_addr)
 }
 
@@ -644,26 +623,22 @@ fn start_local_rewrite_proxy_endpoint(
     selection: &RuntimeLaunchSelection,
     request: &RuntimeLaunchRequest<'_>,
     upstream_base_url: String,
-    resolved_harness: prodex_provider_core::ResolvedHarnessMode,
     preferred_listen_addr: Option<&str>,
 ) -> Result<RuntimeProxyEndpoint> {
     let model_context_window_tokens =
         runtime_launch_effective_model_context_window_tokens(request, &selection.codex_home)?;
     let live_upstream_base_url = upstream_base_url.clone();
-    let mut proxy = start_runtime_local_rewrite_proxy_with_harness(
-        RuntimeLocalRewriteProxyStartOptions {
-            paths,
-            state,
-            upstream_base_url,
-            provider: runtime_local_rewrite_provider_options(state, selection, request)?,
-            upstream_no_proxy: request.upstream_no_proxy,
-            smart_context_enabled: request.smart_context_enabled,
-            presidio_redaction_enabled: request.presidio_redaction_enabled,
-            model_context_window_tokens,
-            preferred_listen_addr,
-        },
-        resolved_harness,
-    )?;
+    let mut proxy = start_runtime_local_rewrite_proxy(RuntimeLocalRewriteProxyStartOptions {
+        paths,
+        state,
+        upstream_base_url,
+        provider: runtime_local_rewrite_provider_options(state, selection, request)?,
+        upstream_no_proxy: request.upstream_no_proxy,
+        smart_context_enabled: request.smart_context_enabled,
+        presidio_redaction_enabled: request.presidio_redaction_enabled,
+        model_context_window_tokens,
+        preferred_listen_addr,
+    })?;
     let live_log_source = publish_runtime_live_log_source(
         paths,
         &proxy,

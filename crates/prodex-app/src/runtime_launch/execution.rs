@@ -9,9 +9,6 @@ use std::time::Instant;
 
 pub(crate) trait RuntimeLaunchStrategy {
     fn runtime_request(&self) -> RuntimeLaunchRequest<'_>;
-    fn harness_mode(&self) -> Option<prodex_provider_core::HarnessMode> {
-        None
-    }
     fn build_plan(
         &mut self,
         prepared: &PreparedRuntimeLaunch,
@@ -81,12 +78,7 @@ where
 {
     let request = strategy.runtime_request();
     emit_runtime_launch_progress(&request);
-    let resolved_harness =
-        prodex_provider_core::resolve_harness_mode(strategy.harness_mode(), None);
-    let prepared = crate::app_commands::runtime_launch::prepare_runtime_launch_with_harness(
-        request,
-        resolved_harness,
-    )?;
+    let prepared = crate::app_commands::runtime_launch::prepare_runtime_launch(request)?;
     if let (Some(runtime_proxy), Some(session_id)) = (
         prepared.runtime_proxy.as_ref(),
         strategy.session_affinity_release(),

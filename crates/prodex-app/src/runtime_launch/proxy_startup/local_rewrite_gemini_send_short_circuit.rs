@@ -53,8 +53,6 @@ pub(super) fn runtime_gemini_exact_output_short_circuit(
         binding_recorder,
         RuntimeGeminiSseReaderConfig {
             observer: None,
-            harness_mode: shared.resolved_harness.effective,
-            harness_model: Some(translated.model.clone()),
             gemini: shared.runtime_shared.runtime_config.gemini.clone(),
         },
     );

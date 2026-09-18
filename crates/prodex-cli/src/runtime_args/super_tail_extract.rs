@@ -17,7 +17,6 @@ struct ScannedValue<'a> {
 
 enum SuperOverride {
     Provider(super::SuperExternalProvider),
-    Harness(prodex_provider_core::HarnessMode),
     ApiKey(String),
     LocalModel(String),
     Profile(String),
@@ -139,18 +138,6 @@ fn scan_identity_override(args: &[OsString], index: usize) -> Option<Result<Scan
             parse_super_external_provider,
             SuperOverride::Provider,
             "--provider",
-        ));
-    }
-    if let Some(scanned) = scan_value(args, index, &["--harness"]) {
-        return Some(parse_required(
-            scanned,
-            |value| {
-                value
-                    .parse()
-                    .map_err(|err: prodex_provider_core::ParseHarnessModeError| err.to_string())
-            },
-            SuperOverride::Harness,
-            "--harness",
         ));
     }
     if let Some(scanned) = scan_value(args, index, &["--api-key"]) {
@@ -419,7 +406,6 @@ fn apply(consumed_count: usize, value: SuperOverride) -> ScanOutcome {
 fn apply_override(args: &mut SuperArgs, value: SuperOverride) {
     match value {
         SuperOverride::Provider(value) => args.provider = Some(value),
-        SuperOverride::Harness(value) => args.harness = Some(value),
         SuperOverride::ApiKey(value) => args.api_key = Some(value),
         SuperOverride::LocalModel(value) => args.local_model = Some(value),
         SuperOverride::Profile(value) if args.profile.is_none() => args.profile = Some(value),
@@ -509,7 +495,6 @@ fn is_known_super_flag(value: &str) -> bool {
     matches!(
         name,
         "--provider"
-            | "--harness"
             | "--api-key"
             | "--sub-agent-provider"
             | "--sub-agent-model"

@@ -371,7 +371,6 @@ fn runtime_gemini_attempt_selected_auth(
                     .responses_route
                     .then(|| RuntimeGeminiRequestContext {
                         profile_name: selected.profile_name.clone(),
-                        model: translated.model.clone(),
                         conversation_messages: translated.messages,
                         binding_recorder,
                     });

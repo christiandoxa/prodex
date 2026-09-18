@@ -10,7 +10,6 @@ use std::sync::Arc;
 pub(in super::super) struct RuntimeLocalRewriteProcessServices {
     pub(in super::super) runtime_shared: RuntimeRotationProxyShared,
     pub(in super::super) mount_path: String,
-    pub(in super::super) resolved_harness: prodex_provider_core::ResolvedHarnessMode,
     pub(in super::super) deepseek_conversations: RuntimeDeepSeekConversationStore,
     pub(in super::super) gemini_conversations: RuntimeDeepSeekConversationStore,
     pub(in super::super) gemini_oauth_pool: Option<RuntimeGeminiOAuthPool>,

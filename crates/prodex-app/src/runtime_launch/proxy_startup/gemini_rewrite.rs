@@ -4,8 +4,7 @@ use super::deepseek_rewrite::{
 #[cfg(test)]
 use super::gemini_thought_signatures::runtime_gemini_harden_tool_call_thought_signatures;
 use super::provider_bridge::{
-    RuntimeHarnessProviderPolicyLog, RuntimeProviderBridgeKind,
-    runtime_harness_log_provider_policy, runtime_provider_log_response_conformance,
+    RuntimeProviderBridgeKind, runtime_provider_log_response_conformance,
     runtime_provider_response_conformance_result,
 };
 use crate::{
@@ -102,8 +101,6 @@ pub(super) struct RuntimeGeminiTranslatedRequest {
 pub(super) struct RuntimeGeminiBufferedResponseContext<'a> {
     pub(super) conversations: &'a RuntimeDeepSeekConversationStore,
     pub(super) runtime_shared: &'a crate::RuntimeRotationProxyShared,
-    pub(super) harness_mode: prodex_provider_core::EffectiveHarnessMode,
-    pub(super) harness_model: Option<&'a str>,
 }
 
 pub(super) fn runtime_gemini_generate_buffered_response_parts(
@@ -116,8 +113,6 @@ pub(super) fn runtime_gemini_generate_buffered_response_parts(
     let RuntimeGeminiBufferedResponseContext {
         conversations,
         runtime_shared,
-        harness_mode,
-        harness_model,
     } = context;
     let body = read_blocking_response_body_with_limit(
         response,
@@ -170,27 +165,6 @@ pub(super) fn runtime_gemini_generate_buffered_response_parts(
         );
     }
     let body = serde_json::to_vec(&response).context("failed to serialize Responses JSON")?;
-    let postprocessed = prodex_provider_core::postprocess_harness_provider_response(
-        harness_mode,
-        prodex_provider_core::ProviderId::Gemini,
-        harness_model,
-        prodex_provider_core::ProviderEndpoint::Responses,
-        &body,
-    )
-    .context("failed to postprocess Gemini Responses JSON")?;
-    runtime_harness_log_provider_policy(
-        runtime_shared,
-        request_id,
-        RuntimeHarnessProviderPolicyLog {
-            provider: prodex_provider_core::ProviderId::Gemini,
-            endpoint: prodex_provider_core::ProviderEndpoint::Responses,
-            model: harness_model.unwrap_or_default(),
-            phase: "response",
-            policy: postprocessed.policy,
-            applied: postprocessed.applied,
-        },
-    );
-    let body = postprocessed.body.into_owned();
     Ok(RuntimeHeapTrimmedBufferedResponseParts {
         status,
         headers: vec![(

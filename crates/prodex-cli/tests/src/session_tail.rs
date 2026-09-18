@@ -143,54 +143,6 @@ fn s_session_tail_codex_feature_flags_are_extracted_after_target() {
 }
 
 #[test]
-fn s_session_tail_harness_is_extracted_and_never_forwarded_to_codex() {
-    let command = parse_cli_command_from([
-        "prodex",
-        "s",
-        "00000000-0000-7000-8000-000000000042",
-        "--provider",
-        "deepseek",
-        "--harness=minimal",
-    ])
-    .unwrap();
-    let Commands::Super(mut args) = command else {
-        panic!("expected super command");
-    };
-
-    args.extract_provider_overrides_from_codex_args().unwrap();
-    args.validate_urls().unwrap();
-
-    assert_eq!(args.provider, Some(SuperExternalProvider::DeepSeek));
-    assert_eq!(
-        args.harness,
-        Some(prodex_provider_core::HarnessMode::Minimal)
-    );
-    assert_eq!(
-        args.codex_args,
-        os_args(&["00000000-0000-7000-8000-000000000042"])
-    );
-}
-
-#[test]
-fn s_provider_alias_accepts_harness_after_alias_position() {
-    let command =
-        parse_cli_command_from(["prodex", "s", "deepseek", "--harness", "minimal"]).unwrap();
-    let Commands::Super(mut args) = command else {
-        panic!("expected super command");
-    };
-
-    args.extract_provider_overrides_from_codex_args().unwrap();
-    args.validate_urls().unwrap();
-
-    assert_eq!(args.provider, Some(SuperExternalProvider::DeepSeek));
-    assert_eq!(
-        args.harness,
-        Some(prodex_provider_core::HarnessMode::Minimal)
-    );
-    assert!(args.codex_args.is_empty());
-}
-
-#[test]
 fn s_session_tail_rejects_credential_bearing_urls_without_echoing_them() {
     for argument in [
         "--url=https://user:tail-url-secret-sentinel@example.test/v1",

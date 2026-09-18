@@ -1,7 +1,6 @@
 use super::{
     RuntimeLaunchDryRunChild, join_thread_with_timeout, profile_openai_compatible_dry_run_child,
     runtime_launch_dry_run_tui_text, runtime_launch_dry_run_value_color,
-    runtime_launch_harness_dry_run_line,
 };
 #[cfg(unix)]
 use super::{
@@ -46,21 +45,6 @@ fn runtime_launch_dry_run_tui_text_keeps_report_content() {
     assert!(rendered.contains("Command: codex"));
     assert!(rendered.contains("Runtime proxy: enabled"));
     assert!(rendered.contains("Presidio redaction: disabled"));
-}
-
-#[test]
-fn harness_dry_run_line_reports_immutable_resolution() {
-    let resolved = prodex_provider_core::resolve_harness_mode(
-        Some(prodex_provider_core::HarnessMode::Minimal),
-        None,
-    );
-
-    let line = runtime_launch_harness_dry_run_line(&resolved);
-
-    assert!(line.contains("requested=minimal"), "{line}");
-    assert!(line.contains("resolved=minimal"), "{line}");
-    assert!(line.contains("source=cli"), "{line}");
-    assert!(line.contains("reason=explicit CLI selection"), "{line}");
 }
 
 #[test]

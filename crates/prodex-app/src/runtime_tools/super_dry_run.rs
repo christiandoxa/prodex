@@ -42,7 +42,6 @@ pub(crate) fn handle_super_runtime_tools_dry_run(
     let model_context_window_tokens = runtime_launch_cli_model_context_window_tokens(&codex_args);
     let gemini_thinking_budget_tokens =
         runtime_launch_cli_gemini_thinking_budget_tokens(&codex_args);
-    let resolved_harness = prodex_provider_core::resolve_harness_mode(args.harness, None);
     let request = RuntimeLaunchRequest {
         profile: args.profile.as_deref(),
         allow_auto_rotate: !args.no_auto_rotate,
@@ -99,7 +98,6 @@ pub(crate) fn handle_super_runtime_tools_dry_run(
         "optional-tools",
         request,
         RuntimeLaunchDryRunChild::Caveman { codex_args },
-        Some(resolved_harness),
         Some(&extra_report),
     )
 }

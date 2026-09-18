@@ -87,8 +87,6 @@ fn evaluated_gemini_sse_restores_native_shell_alias_in_every_tool_call_event() {
         None,
         RuntimeGeminiSseReaderConfig {
             observer: None,
-            harness_mode: prodex_provider_core::EffectiveHarnessMode::Evaluated,
-            harness_model: Some("gemini-3.1-pro-preview".to_string()),
             gemini: config.gemini,
         },
     );

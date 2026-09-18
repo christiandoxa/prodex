@@ -68,7 +68,10 @@ pub fn render_quota_reports_window_with_sort(
     } else {
         "PROFILE · AUTH · ACCOUNT · PLAN · STATUS · REMAINING"
     };
-    let mut lines = vec![section_header_with_width("Quota Overview", total_width), header.to_string()];
+    let mut lines = vec![
+        section_header_with_width("Quota Overview", total_width),
+        header.to_string(),
+    ];
     for (label, value) in quota_pool_summary_fields(reports) {
         lines.extend(wrap_text(&format!("{label}: {value}"), total_width.max(1)));
     }

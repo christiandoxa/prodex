@@ -23,9 +23,7 @@ pub(crate) fn handle_gateway(args: GatewayArgs) -> Result<()> {
         external_provider: provider,
         external_provider_api_key: args.api_key.as_deref(),
     };
-    let resolved_harness = prodex_provider_core::resolve_harness_mode(args.harness, None);
-    let prepared =
-        runtime_launch::prepare_gateway_runtime(request, resolved_harness, args.listen.as_deref())?;
+    let prepared = runtime_launch::prepare_gateway_runtime(request, args.listen.as_deref())?;
     let Some(endpoint) = prepared.runtime_proxy.as_ref() else {
         bail!("gateway provider does not expose an OpenAI-compatible proxy");
     };

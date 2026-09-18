@@ -5,7 +5,6 @@ pub(super) fn validate_super_mode_compatibility(args: &SuperArgs) -> Result<(), 
     validate_sub_agent_flags(args)?;
     validate_mode_conflicts(args)?;
     validate_provider_options(args)?;
-    validate_harness_options(args)?;
     validate_frontend_options(args)
 }
 
@@ -41,13 +40,6 @@ fn validate_provider_options(args: &SuperArgs) -> Result<(), String> {
         && args.url.is_none()
     {
         return Err("context-window options require --provider or --url".to_string());
-    }
-    Ok(())
-}
-
-fn validate_harness_options(args: &SuperArgs) -> Result<(), String> {
-    if args.harness.is_some() && args.provider.is_none() && args.url.is_none() {
-        return Err("--harness requires --provider or --url".to_string());
     }
     Ok(())
 }

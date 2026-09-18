@@ -20,8 +20,6 @@ pub(super) struct RuntimeGeminiGenerateSseReader<R: Read> {
 
 pub(super) struct RuntimeGeminiSseReaderConfig {
     pub(super) observer: Option<RuntimeProviderSseObserver>,
-    pub(super) harness_mode: prodex_provider_core::EffectiveHarnessMode,
-    pub(super) harness_model: Option<String>,
     pub(super) gemini: crate::RuntimeGeminiConfig,
 }
 
@@ -43,8 +41,6 @@ impl<R: Read> RuntimeGeminiGenerateSseReader<R> {
             binding_recorder,
             RuntimeGeminiSseReaderConfig {
                 observer: None,
-                harness_mode: prodex_provider_core::EffectiveHarnessMode::Native,
-                harness_model: None,
                 gemini: config.gemini,
             },
         )
@@ -58,12 +54,7 @@ impl<R: Read> RuntimeGeminiGenerateSseReader<R> {
         binding_recorder: Option<RuntimeGeminiBindingRecorder>,
         config: RuntimeGeminiSseReaderConfig,
     ) -> Self {
-        let RuntimeGeminiSseReaderConfig {
-            observer,
-            harness_mode,
-            harness_model,
-            gemini,
-        } = config;
+        let RuntimeGeminiSseReaderConfig { observer, gemini } = config;
         Self {
             inner: RuntimeProviderSseJsonReader::new_with_observer(
                 reader,
@@ -72,8 +63,6 @@ impl<R: Read> RuntimeGeminiGenerateSseReader<R> {
                     conversation_messages,
                     conversations,
                     binding_recorder,
-                    harness_mode,
-                    harness_model,
                     gemini,
                 ),
                 observer,
@@ -93,18 +82,15 @@ impl RuntimeProviderSseJsonState for RuntimeGeminiSseState {
 
     fn observe_value(&mut self, value: &serde_json::Value) -> Vec<String> {
         let value = gemini_provider_core_normalized_response_value(value);
-        let events = self.observe_generate_chunk(&value);
-        self.postprocess_harness_events(events)
+        self.observe_generate_chunk(&value)
     }
 
     fn complete_event(&mut self) -> Option<String> {
         RuntimeGeminiSseState::complete_event(self)
-            .map(|event| self.postprocess_harness_event(event))
     }
 
     fn failed_event(&mut self, code: &str, message: &str) -> Option<String> {
         RuntimeGeminiSseState::failed_event(self, code, message)
-            .map(|event| self.postprocess_harness_event(event))
     }
 }
 
