@@ -379,7 +379,6 @@ pub(crate) fn print_runtime_launch_dry_run(
     flow: &str,
     request: RuntimeLaunchRequest<'_>,
     child: RuntimeLaunchDryRunChild,
-    resolved_harness: Option<prodex_provider_core::ResolvedHarnessMode>,
     extra_report: Option<&str>,
 ) -> Result<()> {
     let upstream_no_proxy = request.upstream_no_proxy;
@@ -390,11 +389,6 @@ pub(crate) fn print_runtime_launch_dry_run(
         "(active/default)"
     };
     let prepared = super::runtime_launch::prepare_runtime_launch_dry_run(request)?;
-    let local_provider_bridge = prepared
-        .runtime_proxy
-        .as_ref()
-        .and_then(|proxy| proxy.local_model_provider_id.as_deref())
-        .is_some();
     let child =
         profile_openai_compatible_dry_run_child(&prepared.paths, &prepared.codex_home, child)?;
     let child_args = match &child {
@@ -422,9 +416,6 @@ pub(crate) fn print_runtime_launch_dry_run(
         output.push_str(extra_report);
         output.push('\n');
     }
-    if local_provider_bridge && let Some(harness) = resolved_harness {
-        output.push_str(&runtime_launch_harness_dry_run_line(&harness));
-    }
     output.push_str(&format!(
         "Presidio redaction: {}",
         if presidio_redaction_enabled {
@@ -436,18 +427,6 @@ pub(crate) fn print_runtime_launch_dry_run(
     output.push('\n');
     print_runtime_launch_dry_run_report(flow, &output)?;
     Ok(())
-}
-
-fn runtime_launch_harness_dry_run_line(
-    harness: &prodex_provider_core::ResolvedHarnessMode,
-) -> String {
-    format!(
-        "Harness: requested={} resolved={} source={} reason={}\n",
-        harness.requested,
-        harness.effective,
-        harness.source.id(),
-        harness.reason
-    )
 }
 
 pub(crate) fn print_runtime_launch_dry_run_report(flow: &str, output: &str) -> Result<()> {

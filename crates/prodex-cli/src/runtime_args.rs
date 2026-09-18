@@ -13,8 +13,8 @@ mod optional_tools;
 mod super_tail_extract;
 #[path = "runtime_args/super_validation.rs"]
 mod super_validation;
+use launch_args::parse_runtime_base_url;
 pub use launch_args::{RunArgs, RuntimeToolArgs, SuperArgs};
-use launch_args::{parse_harness_mode, parse_runtime_base_url};
 pub use optional_tools::runtime_tool_args_with_tool;
 
 #[derive(Args)]
@@ -25,9 +25,6 @@ pub struct GatewayArgs {
     /// External provider preset. Omit for an OpenAI-compatible upstream.
     #[arg(long, value_name = "PROVIDER", value_parser = parse_super_external_provider)]
     pub provider: Option<SuperExternalProvider>,
-    /// Model-facing harness policy.
-    #[arg(long, value_name = "native|minimal|evaluated", value_parser = parse_harness_mode)]
-    pub harness: Option<prodex_provider_core::HarnessMode>,
     /// Upstream base URL.
     #[arg(long = "base-url", visible_alias = "url", value_name = "URL")]
     pub base_url: Option<String>,
@@ -50,7 +47,6 @@ impl fmt::Debug for GatewayArgs {
         f.debug_struct("GatewayArgs")
             .field("listen", &self.listen)
             .field("provider", &self.provider)
-            .field("harness", &self.harness)
             .field("base_url_configured", &self.base_url.is_some())
             .field("api_key", &self.api_key.as_ref().map(|_| "<redacted>"))
             .field("smart_context", &self.smart_context)

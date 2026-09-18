@@ -122,7 +122,6 @@ impl SuperArgs {
             presidio,
             external_provider: self.provider,
             external_provider_api_key: self.api_key,
-            harness: self.harness,
             codex_features: CodexRuntimeFeatureArgs::default(),
             codex_args,
         }
@@ -147,7 +146,6 @@ impl fmt::Debug for RuntimeToolArgs {
             .field("required_tools", &self.required_tools)
             .field("presidio", &self.presidio)
             .field("external_provider", &self.external_provider)
-            .field("harness", &self.harness)
             .field(
                 "external_provider_api_key",
                 &self

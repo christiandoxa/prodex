@@ -3,7 +3,6 @@ use std::ffi::OsString;
 mod app_server;
 mod codex_01491;
 mod external_provider;
-mod harness;
 mod process_reporting;
 mod quota;
 mod redeem;
@@ -52,7 +51,6 @@ fn assert_same_runtime_tool_args(left: RuntimeToolArgs, right: RuntimeToolArgs) 
     assert_eq!(left.required_tools, right.required_tools);
     assert_eq!(left.presidio, right.presidio);
     assert_eq!(left.external_provider, right.external_provider);
-    assert_eq!(left.harness, right.harness);
     assert_eq!(
         left.external_provider_api_key,
         right.external_provider_api_key

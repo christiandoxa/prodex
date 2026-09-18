@@ -54,7 +54,7 @@ pub(crate) use deepseek_rewrite::RuntimeDeepSeekWebSearchMode;
 pub(crate) use gemini_rewrite::{RuntimeGeminiOAuthProfileAuth, RuntimeGeminiProviderAuth};
 pub(crate) use local_rewrite::{
     RUNTIME_LOCAL_REWRITE_PROXY_MOUNT_PATH, RuntimeLocalRewriteProviderOptions,
-    RuntimeLocalRewriteProxyStartOptions, start_runtime_local_rewrite_proxy_with_harness,
+    RuntimeLocalRewriteProxyStartOptions, start_runtime_local_rewrite_proxy,
 };
 pub(crate) use local_rewrite_copilot::{RuntimeCopilotProfileAuth, RuntimeCopilotProviderAuth};
 pub(crate) use local_rewrite_kiro::RuntimeKiroProfileAuth;

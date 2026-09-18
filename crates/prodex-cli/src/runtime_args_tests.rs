@@ -5,7 +5,6 @@ fn super_args_from(codex_args: &[&str]) -> SuperArgs {
     SuperArgs {
         codex_args: os,
         provider: None,
-        harness: None,
         api_key: None,
         local_model: None,
         profile: None,

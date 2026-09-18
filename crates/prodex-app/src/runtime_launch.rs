@@ -35,7 +35,7 @@ pub(super) use proxy_startup::{
     RuntimeDeepSeekWebSearchMode, RuntimeGeminiOAuthProfileAuth, RuntimeGeminiProviderAuth,
     RuntimeKiroProfileAuth, RuntimeLocalRewriteProviderOptions,
     RuntimeLocalRewriteProxyStartOptions, RuntimeRotationProxyStartOptions,
-    start_runtime_local_rewrite_proxy_with_harness, start_runtime_rotation_proxy_with_options,
+    start_runtime_local_rewrite_proxy, start_runtime_rotation_proxy_with_options,
 };
 
 pub(super) fn runtime_launch_openai_model_context_codex_args(

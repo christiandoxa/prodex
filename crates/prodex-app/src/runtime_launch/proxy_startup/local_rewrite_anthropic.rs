@@ -27,17 +27,14 @@ use super::local_rewrite_upstream::{
     runtime_local_rewrite_raw_binding_identity,
 };
 use super::provider_bridge::{
-    RuntimeHarnessProviderPolicyLog, RuntimeProviderBridgeKind, RuntimeProviderErrorClass,
-    runtime_harness_log_provider_policy, runtime_provider_error_class, runtime_provider_label,
-    runtime_provider_log_request_conformance, runtime_provider_model_fallback_chain,
-    runtime_provider_request_body_with_model, runtime_provider_request_conformance_result,
+    RuntimeProviderBridgeKind, RuntimeProviderErrorClass, runtime_provider_error_class,
+    runtime_provider_label, runtime_provider_log_request_conformance,
+    runtime_provider_model_fallback_chain, runtime_provider_request_body_with_model,
+    runtime_provider_request_conformance_result,
 };
 use crate::{RuntimeHeapTrimmedBufferedResponseParts, RuntimeProxyRequest, runtime_proxy_log};
 use anyhow::Result;
-use prodex_provider_core::{
-    ProviderEndpoint, ProviderId, ProviderTransformInput, harness_provider_policy,
-    provider_core_lossless_body, translate_openai_chat_request_to_anthropic_messages,
-};
+use prodex_provider_core::{ProviderEndpoint, ProviderId, provider_core_lossless_body};
 use prodex_provider_spi::ProviderRetryCause;
 use runtime_proxy_crate::{runtime_proxy_log_field, runtime_proxy_structured_log_message};
 use serde_json::json;
@@ -405,12 +402,7 @@ fn prepare_anthropic_attempt<'a>(
     messages_upstream_url: &'a str,
 ) -> Result<Option<AnthropicPreparedAttempt<'a>>> {
     let model_body = runtime_provider_request_body_with_model(body, model);
-    let harness_policy = harness_provider_policy(
-        context.shared.resolved_harness.effective,
-        ProviderId::Anthropic,
-        Some(model),
-    );
-    let native_messages = harness_policy.is_some_and(|policy| policy.native_anthropic_messages);
+    let native_messages = false;
     let translated = runtime_provider_chat_compatible_request_body(
         &model_body,
         conversations,
@@ -419,18 +411,11 @@ fn prepare_anthropic_attempt<'a>(
         false,
         RuntimeDeepSeekRewriteOptions::default(),
     )?;
-    let provider_core_result = if native_messages {
-        let mut input =
-            ProviderTransformInput::new(ProviderEndpoint::Responses, translated.body.clone());
-        input.model = Some(model.to_string());
-        Some(translate_openai_chat_request_to_anthropic_messages(input))
-    } else {
-        runtime_provider_request_conformance_result(
-            RuntimeProviderBridgeKind::Anthropic,
-            context.request,
-            &model_body,
-        )
-    };
+    let provider_core_result = runtime_provider_request_conformance_result(
+        RuntimeProviderBridgeKind::Anthropic,
+        context.request,
+        &model_body,
+    );
     if let Some(result) = provider_core_result.as_ref() {
         runtime_provider_log_request_conformance(
             &context.shared.runtime_shared,
@@ -439,24 +424,8 @@ fn prepare_anthropic_attempt<'a>(
             result,
         );
     }
-    runtime_harness_log_provider_policy(
-        &context.shared.runtime_shared,
-        context.request_id,
-        RuntimeHarnessProviderPolicyLog {
-            provider: ProviderId::Anthropic,
-            endpoint: ProviderEndpoint::Responses,
-            model,
-            phase: "request-translation",
-            policy: harness_policy,
-            applied: native_messages
-                && provider_core_lossless_body(provider_core_result.as_ref()).is_some(),
-        },
-    );
-    let Some(upstream_body) = provider_core_lossless_body(provider_core_result.as_ref())
-        .or_else(|| (!native_messages).then(|| translated.body.clone()))
-    else {
-        return Ok(None);
-    };
+    let upstream_body = provider_core_lossless_body(provider_core_result.as_ref())
+        .unwrap_or_else(|| translated.body.clone());
     Ok(Some(AnthropicPreparedAttempt {
         upstream_url: if native_messages {
             messages_upstream_url

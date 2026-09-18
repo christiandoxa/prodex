@@ -113,8 +113,6 @@ pub struct RuntimeToolArgs {
     /// External provider API key supplied by a higher-level launch shortcut.
     #[arg(skip)]
     pub external_provider_api_key: Option<String>,
-    #[arg(skip)]
-    pub harness: Option<prodex_provider_core::HarnessMode>,
     #[command(flatten)]
     pub codex_features: CodexRuntimeFeatureArgs,
     /// Arguments passed through to `codex`. A lone session id is normalized to `codex resume <session-id>`.
@@ -220,14 +218,6 @@ pub struct SuperArgs {
     /// External provider preset to use through Codex/Super.
     #[arg(long, value_name = "PROVIDER", value_parser = parse_super_external_provider)]
     pub provider: Option<SuperExternalProvider>,
-    /// Model-facing harness policy for local --provider or --url bridges. Defaults to native.
-    #[arg(
-        long,
-        value_name = "native|minimal|evaluated",
-        value_parser = parse_harness_mode,
-        requires = "provider_or_url"
-    )]
-    pub harness: Option<prodex_provider_core::HarnessMode>,
     /// API key for --provider. Prefer the provider-specific environment variable for shells/history.
     #[arg(long = "api-key", value_name = "KEY", requires = "provider")]
     pub api_key: Option<String>,
@@ -289,7 +279,6 @@ impl fmt::Debug for SuperArgs {
             .field("required_tools", &self.required_tools)
             .field("url_configured", &self.url.is_some())
             .field("provider", &self.provider)
-            .field("harness", &self.harness)
             .field("api_key", &self.api_key.as_ref().map(|_| "<redacted>"))
             .field("local_model", &self.local_model)
             .field("local_context_window", &self.local_context_window)
@@ -301,12 +290,6 @@ impl fmt::Debug for SuperArgs {
             .field("codex_args_count", &self.codex_args.len())
             .finish()
     }
-}
-
-pub(super) fn parse_harness_mode(
-    value: &str,
-) -> Result<prodex_provider_core::HarnessMode, prodex_provider_core::ParseHarnessModeError> {
-    value.parse()
 }
 
 pub(super) fn parse_runtime_base_url(url: &str) -> std::result::Result<String, String> {

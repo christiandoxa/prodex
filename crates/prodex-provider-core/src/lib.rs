@@ -8,8 +8,6 @@ mod deepseek_bridge;
 mod errors;
 mod fallback;
 mod gemini_bridge;
-mod harness;
-mod harness_provider_policy;
 mod implementation_registry;
 mod models;
 mod reasoning_effort;
@@ -180,18 +178,6 @@ pub use gemini_bridge::{
     gemini_provider_core_unverified_success_claim, gemini_provider_core_validate_candidate_count,
     gemini_provider_core_validate_request_tools, gemini_provider_core_visible_text_from_part,
     gemini_provider_core_web_search_call_from_grounding,
-};
-pub use harness::{
-    EffectiveHarnessMode, HarnessMode, HarnessRequestShapeError, HarnessResolutionSource,
-    HarnessShapedRequest, MINIMAL_HARNESS_INSTRUCTIONS, ParseHarnessModeError, ResolvedHarnessMode,
-    resolve_harness_mode, shape_harness_request,
-};
-pub use harness_provider_policy::{
-    HarnessBodyTransform, HarnessProviderPolicySpec, HarnessProviderTransformError,
-    HarnessResponsePolicy, HarnessToolAlias, harness_canonical_tool_name,
-    harness_provider_native_tool_name, harness_provider_policy,
-    postprocess_harness_provider_response, postprocess_harness_provider_stream_event,
-    shape_harness_provider_request,
 };
 pub use implementation_registry::{
     PROVIDER_IMPLEMENTATION_ORDER, ProviderImplementationDescriptor,

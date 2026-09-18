@@ -8,7 +8,6 @@ pub(super) use prodex_provider_core::ProviderErrorClass as RuntimeProviderErrorC
 use prodex_provider_core::ProviderId;
 
 pub(super) use self::provider_bridge_conformance::{
-    RuntimeHarnessProviderPolicyLog, runtime_harness_log_provider_policy,
     runtime_provider_log_request_conformance, runtime_provider_log_response_conformance,
     runtime_provider_log_stream_conformance, runtime_provider_request_conformance_result,
     runtime_provider_response_conformance_result, runtime_provider_stream_event_conformance_result,

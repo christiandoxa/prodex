@@ -20,11 +20,7 @@ use super::local_rewrite_transport::{
     RuntimeLocalRewritePreparedAuth, runtime_local_rewrite_api_key_attempts,
     runtime_local_rewrite_upstream_url, send_runtime_local_rewrite_prepared_request,
 };
-use super::provider_bridge::{
-    RuntimeHarnessProviderPolicyLog, RuntimeProviderBridgeKind,
-    runtime_harness_log_provider_policy, runtime_provider_error_class,
-    runtime_provider_model_from_body,
-};
+use super::provider_bridge::{RuntimeProviderBridgeKind, runtime_provider_error_class};
 use crate::{
     RuntimeHeapTrimmedBufferedResponseParts, RuntimeProxyRequest, RuntimeRouteKind,
     prepare_runtime_smart_context_http_body, runtime_proxy_log,
@@ -35,7 +31,7 @@ use prodex_provider_core::{
 };
 use prodex_state::ResponseProfileBinding;
 use runtime_proxy_crate::{runtime_proxy_log_field, runtime_proxy_structured_log_message};
-use serde_json::{Value, json};
+use serde_json::Value;
 use std::collections::VecDeque;
 use std::io::{self, Cursor, Read};
 use std::sync::Arc;
@@ -724,18 +720,6 @@ pub(super) fn send_runtime_local_rewrite_upstream_request(
         route_kind,
     )?
     .into_owned();
-    let body = match runtime_harness_shape_request(
-        request_id, request, shared, provider, endpoint, body,
-    ) {
-        Ok(body) => body,
-        Err(parts) => {
-            return Ok(RuntimeLocalRewriteUpstreamResult {
-                response: RuntimeLocalRewriteUpstreamResponse::Buffered(parts),
-                gemini_context: None,
-                copilot_context: None,
-            });
-        }
-    };
     match (provider, shared.provider.as_ref()) {
         (ProviderId::Anthropic, RuntimeLocalRewriteProviderOptions::Anthropic { auth }) => {
             send_runtime_anthropic_upstream_request(
@@ -1235,160 +1219,6 @@ pub(super) fn runtime_local_rewrite_binding_recorder(
             None,
         );
     })
-}
-
-fn runtime_harness_shape_request(
-    request_id: u64,
-    request: &RuntimeProxyRequest,
-    shared: &RuntimeLocalRewriteProxyShared,
-    provider: ProviderId,
-    endpoint: ProviderEndpoint,
-    body: Vec<u8>,
-) -> std::result::Result<Vec<u8>, RuntimeHeapTrimmedBufferedResponseParts> {
-    if endpoint != ProviderEndpoint::Responses {
-        runtime_harness_log_request_shape(
-            request_id,
-            shared,
-            provider,
-            endpoint,
-            false,
-            "unchanged",
-        );
-        return Ok(body);
-    }
-    let shaped = match prodex_provider_core::shape_harness_request(
-        shared.resolved_harness.effective,
-        endpoint,
-        &body,
-        &request.headers,
-    ) {
-        Ok(shaped) => shaped,
-        Err(error) => {
-            runtime_harness_log_request_rejection(
-                request_id,
-                shared,
-                provider,
-                endpoint,
-                error.code(),
-            );
-            return Err(runtime_local_rewrite_json_parts(
-                400,
-                json!({
-                    "error": {
-                        "message": "request is incompatible with the selected minimal harness",
-                        "type": "invalid_request_error",
-                        "code": "invalid_request",
-                    }
-                }),
-            ));
-        }
-    };
-    let instruction_applied = shaped.applied;
-    let body = shaped.body.into_owned();
-    let model = runtime_provider_model_from_body(&body).or_else(|| {
-        (provider == ProviderId::Gemini)
-            .then(|| prodex_provider_core::PRODEX_GEMINI_DEFAULT_MODEL.to_string())
-    });
-    match prodex_provider_core::shape_harness_provider_request(
-        shared.resolved_harness.effective,
-        provider,
-        model.as_deref(),
-        endpoint,
-        &body,
-    ) {
-        Ok(shaped) => {
-            runtime_harness_log_provider_policy(
-                &shared.runtime_shared,
-                request_id,
-                RuntimeHarnessProviderPolicyLog {
-                    provider,
-                    endpoint,
-                    model: model.as_deref().unwrap_or_default(),
-                    phase: "request",
-                    policy: shaped.policy,
-                    applied: shaped.applied,
-                },
-            );
-            runtime_harness_log_request_shape(
-                request_id,
-                shared,
-                provider,
-                endpoint,
-                instruction_applied || shaped.applied,
-                "accepted",
-            );
-            Ok(shaped.body.into_owned())
-        }
-        Err(error) => {
-            runtime_harness_log_request_rejection(
-                request_id,
-                shared,
-                provider,
-                endpoint,
-                error.code(),
-            );
-            Err(runtime_local_rewrite_json_parts(
-                400,
-                json!({
-                    "error": {
-                        "message": "request is incompatible with the selected evaluated harness",
-                        "type": "invalid_request_error",
-                        "code": "invalid_request",
-                    }
-                }),
-            ))
-        }
-    }
-}
-
-fn runtime_harness_log_request_rejection(
-    request_id: u64,
-    shared: &RuntimeLocalRewriteProxyShared,
-    provider: ProviderId,
-    endpoint: ProviderEndpoint,
-    reason: &'static str,
-) {
-    runtime_proxy_log(
-        &shared.runtime_shared,
-        runtime_proxy_structured_log_message(
-            "harness_request_shape",
-            [
-                runtime_proxy_log_field("request", request_id.to_string()),
-                runtime_proxy_log_field("provider", provider.label()),
-                runtime_proxy_log_field("route", endpoint.label()),
-                runtime_proxy_log_field("requested", shared.resolved_harness.requested.to_string()),
-                runtime_proxy_log_field("resolved", shared.resolved_harness.effective.to_string()),
-                runtime_proxy_log_field("applied", "false"),
-                runtime_proxy_log_field("outcome", "rejected"),
-                runtime_proxy_log_field("reason", reason),
-            ],
-        ),
-    );
-}
-
-fn runtime_harness_log_request_shape(
-    request_id: u64,
-    shared: &RuntimeLocalRewriteProxyShared,
-    provider: ProviderId,
-    endpoint: ProviderEndpoint,
-    applied: bool,
-    outcome: &'static str,
-) {
-    runtime_proxy_log(
-        &shared.runtime_shared,
-        runtime_proxy_structured_log_message(
-            "harness_request_shape",
-            [
-                runtime_proxy_log_field("request", request_id.to_string()),
-                runtime_proxy_log_field("provider", provider.label()),
-                runtime_proxy_log_field("route", endpoint.label()),
-                runtime_proxy_log_field("requested", shared.resolved_harness.requested.to_string()),
-                runtime_proxy_log_field("resolved", shared.resolved_harness.effective.to_string()),
-                runtime_proxy_log_field("applied", applied.to_string()),
-                runtime_proxy_log_field("outcome", outcome),
-            ],
-        ),
-    );
 }
 
 pub(super) fn runtime_local_rewrite_json_parts(

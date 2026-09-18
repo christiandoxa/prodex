@@ -528,8 +528,7 @@ fn quota_reports_respect_line_budget_while_preserving_sort_order() {
         ),
     ];
 
-    let window =
-        render_quota_reports_window_with_layout(&reports, false, Some(15), 90, 0, false);
+    let window = render_quota_reports_window_with_layout(&reports, false, Some(15), 90, 0, false);
 
     assert!(window.output.lines().count() <= 15);
     assert_eq!(window.total_profiles, 4);

@@ -15,7 +15,7 @@ pub(super) use self::context::{
 use self::listener_worker::spawn_runtime_local_rewrite_listener_worker;
 #[cfg(test)]
 pub(crate) use super::local_rewrite_constraints::start_runtime_local_rewrite_proxy;
-pub(crate) use super::local_rewrite_constraints::start_runtime_local_rewrite_proxy_with_harness;
+pub(crate) use super::local_rewrite_constraints::start_runtime_local_rewrite_proxy;
 use super::local_rewrite_copilot::runtime_copilot_oauth_pool_from_provider;
 use super::local_rewrite_gemini::runtime_gemini_oauth_pool_from_provider;
 pub(super) use super::local_rewrite_model_memory::{
@@ -55,9 +55,7 @@ use crate::{RuntimeRotationProxy, runtime_proxy_request_sequence_seed};
 use anyhow::{Context, Result};
 use prodex_provider_core::provider_adapter;
 use prodex_runtime_state::{RuntimeProxyLaneAdmission, RuntimeProxyLaneLimits};
-use runtime_proxy_crate::{
-    RuntimeProxyRequest, runtime_proxy_log_field, runtime_proxy_structured_log_message,
-};
+use runtime_proxy_crate::RuntimeProxyRequest;
 use std::collections::BTreeMap;
 use std::io::{self, Read};
 use std::path::PathBuf;
@@ -187,7 +185,6 @@ pub(super) fn start_runtime_local_rewrite_proxy_with_file_access(
     options: RuntimeLocalRewriteProxyStartOptions<'_>,
     runtime_config: Arc<RuntimeConfig>,
     allow_local_file_access: bool,
-    resolved_harness: prodex_provider_core::ResolvedHarnessMode,
 ) -> Result<RuntimeRotationProxy> {
     validate_credential_free_http_url(&options.upstream_base_url, "runtime upstream base URL")?;
     let (server, listen_addr) = runtime_local_rewrite_server(options.preferred_listen_addr)?;
@@ -195,7 +192,6 @@ pub(super) fn start_runtime_local_rewrite_proxy_with_file_access(
         options,
         runtime_config,
         allow_local_file_access,
-        resolved_harness,
         ("loopback", Some(listen_addr)),
     )?;
     let RuntimeLocalRewritePrepared {
@@ -269,7 +265,6 @@ pub(super) fn prepare_runtime_local_rewrite_application(
     options: RuntimeLocalRewriteProxyStartOptions<'_>,
     runtime_config: Arc<RuntimeConfig>,
     allow_local_file_access: bool,
-    resolved_harness: prodex_provider_core::ResolvedHarnessMode,
     transport: (&str, Option<std::net::SocketAddr>),
 ) -> Result<RuntimeLocalRewritePrepared> {
     let (transport, listen_addr) = transport;
@@ -363,19 +358,6 @@ pub(super) fn prepare_runtime_local_rewrite_application(
         },
     )?;
     let bridge_kind = provider.bridge_kind();
-    runtime_proxy_log_to_path(
-        &log_path,
-        &runtime_proxy_structured_log_message(
-            "harness_resolution",
-            [
-                runtime_proxy_log_field("provider", runtime_provider_label(bridge_kind)),
-                runtime_proxy_log_field("requested", resolved_harness.requested.to_string()),
-                runtime_proxy_log_field("resolved", resolved_harness.effective.to_string()),
-                runtime_proxy_log_field("source", resolved_harness.source.id()),
-                runtime_proxy_log_field("reason", resolved_harness.reason_code()),
-            ],
-        ),
-    );
     let contract = provider_adapter(bridge_kind.provider_id());
     runtime_proxy_log_to_path(
         &log_path,
@@ -402,7 +384,6 @@ pub(super) fn prepare_runtime_local_rewrite_application(
     let process = Arc::new(RuntimeLocalRewriteProcessServices {
         runtime_shared: runtime_shared.clone(),
         mount_path: RUNTIME_LOCAL_REWRITE_PROXY_MOUNT_PATH.to_string(),
-        resolved_harness,
         deepseek_conversations: RuntimeDeepSeekConversationStore::default(),
         gemini_conversations: RuntimeDeepSeekConversationStore::default(),
         gemini_oauth_pool,

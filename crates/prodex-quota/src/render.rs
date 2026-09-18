@@ -5,8 +5,6 @@ use terminal_ui::{
 };
 
 #[cfg(test)]
-use terminal_ui::text_width;
-#[cfg(test)]
 use super::ExternalQuotaDetail;
 use super::{
     AdditionalRateLimit, BlockedLimit, CopilotQuotaInfo, ExternalQuotaInfo, GeminiQuotaBucket,
@@ -14,6 +12,8 @@ use super::{
     RenderedQuotaReportWindow, RuntimeQuotaPressureBand, RuntimeQuotaSummary,
     RuntimeQuotaWindowStatus, RuntimeQuotaWindowSummary, UsageResponse, UsageWindow, WindowPair,
 };
+#[cfg(test)]
+use terminal_ui::text_width;
 
 mod copilot;
 mod gemini;

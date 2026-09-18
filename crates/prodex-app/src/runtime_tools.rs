@@ -120,10 +120,6 @@ impl RuntimeToolLaunchStrategy {
 }
 
 impl RuntimeLaunchStrategy for RuntimeToolLaunchStrategy {
-    fn harness_mode(&self) -> Option<prodex_provider_core::HarnessMode> {
-        self.args.harness
-    }
-
     fn runtime_request(&self) -> RuntimeLaunchRequest<'_> {
         RuntimeLaunchRequest {
             profile: self.args.profile.as_deref(),

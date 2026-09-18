@@ -58,7 +58,6 @@ pub(super) fn prepare_codex_command_server_runtime_launch(
     validate_runtime_launch_upstream_base_url(&selection, &request)?;
     RuntimeLaunchPreparationBuilder {
         request,
-        resolved_harness: prodex_provider_core::resolve_harness_mode(None, None),
         paths,
         state,
         selection,
