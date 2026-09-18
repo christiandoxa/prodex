@@ -33,7 +33,6 @@ fn runtime_responses_local_capacity_timeout_reply() -> RuntimeResponsesReply {
 
 pub(super) struct RuntimeResponsesLocalSelectionBlocked<'a> {
     pub(super) request_id: u64,
-    pub(super) request: &'a RuntimeProxyRequest,
     pub(super) shared: &'a RuntimeRotationProxyShared,
     pub(super) selection_started_at: Instant,
     pub(super) profile_name: String,
@@ -53,7 +52,6 @@ pub(super) fn handle_runtime_responses_local_selection_blocked(
 ) -> Result<Option<RuntimeResponsesReply>> {
     let RuntimeResponsesLocalSelectionBlocked {
         request_id,
-        request,
         shared,
         selection_started_at,
         profile_name,
@@ -78,7 +76,6 @@ pub(super) fn handle_runtime_responses_local_selection_blocked(
             match runtime_proxy_maybe_wait_for_interactive_inflight_relief(
                 RuntimeInflightReliefWait {
                     request_id,
-                    request,
                     shared,
                     excluded_profiles,
                     route_kind: RuntimeRouteKind::Responses,

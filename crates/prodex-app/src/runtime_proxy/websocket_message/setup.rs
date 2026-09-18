@@ -302,7 +302,6 @@ impl<'a> RuntimeWebsocketTextMessageFlow<'a> {
             return match runtime_proxy_maybe_wait_for_interactive_inflight_relief(
                 RuntimeInflightReliefWait {
                     request_id: self.request_id,
-                    request: &self.handshake_request,
                     shared: self.shared,
                     excluded_profiles: &self.excluded_profiles,
                     route_kind: RuntimeRouteKind::Websocket,

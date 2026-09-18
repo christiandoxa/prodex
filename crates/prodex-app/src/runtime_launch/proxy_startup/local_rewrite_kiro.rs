@@ -8,7 +8,7 @@ use self::process::{
     runtime_kiro_configure_process_group, runtime_kiro_streaming_command,
     runtime_kiro_terminate_child,
 };
-use self::response::{runtime_kiro_anthropic_message_parts_from_response, runtime_kiro_json_parts};
+use self::response::runtime_kiro_json_parts;
 use self::stream::runtime_kiro_finish_stream;
 #[cfg(test)]
 use self::stream_driver::runtime_kiro_next_stream_line;
@@ -44,10 +44,6 @@ use super::provider_sse_events::{
     runtime_provider_sse_output_text_item_done_event,
 };
 use crate::profile_commands::prepare_kiro_cli_data_dir;
-use crate::runtime_anthropic::{
-    RuntimeAnthropicMessagesRequest, build_runtime_anthropic_error_parts,
-    translate_runtime_anthropic_messages_request, translate_runtime_responses_reply_to_anthropic,
-};
 #[cfg(test)]
 pub(super) use crate::runtime_kiro_acp::RuntimeKiroAcpEnvelope;
 use crate::runtime_kiro_acp::{
@@ -56,7 +52,6 @@ use crate::runtime_kiro_acp::{
     runtime_kiro_acp_line_receiver, runtime_kiro_acp_prompt_turn_with_command_and_options,
     runtime_kiro_acp_responses_value_from_prompt_turn, runtime_kiro_acp_session_new_request,
 };
-use crate::runtime_proxy_shared::{RuntimeResponsesReply, RuntimeStreamingResponse};
 use crate::{RuntimeHeapTrimmedBufferedResponseParts, RuntimeProxyRequest};
 use anyhow::{Context, Result};
 #[cfg(test)]
@@ -173,19 +168,10 @@ pub(super) fn send_runtime_kiro_upstream_request(
     }
     let path = path_without_query(&request.path_and_query);
     let chat_completions_route = endpoint == ProviderEndpoint::ChatCompletions;
-    let messages_route = endpoint == ProviderEndpoint::Messages;
-    if !(endpoint == ProviderEndpoint::Responses || chat_completions_route || messages_route) {
+    if !(endpoint == ProviderEndpoint::Responses || chat_completions_route) {
         return Ok(runtime_kiro_unsupported_route_result(path));
     }
     let conversations = shared.deepseek_conversations_for_request(request);
-    let anthropic_request = match runtime_kiro_anthropic_request(request, messages_route) {
-        Ok(translated) => translated,
-        Err(response) => return Ok(*response),
-    };
-    let body = anthropic_request
-        .as_ref()
-        .map(|translated| translated.translated_request.body.clone())
-        .unwrap_or(body);
     let body = match runtime_kiro_request_body(endpoint, body) {
         Ok(body) => body,
         Err(response) => return Ok(*response),
@@ -217,9 +203,9 @@ pub(super) fn send_runtime_kiro_upstream_request(
         binding_identity,
     };
     if stream_mode == Streaming {
-        return runtime_kiro_streaming_upstream_result(context, anthropic_request);
+        return runtime_kiro_streaming_upstream_result(context);
     }
-    runtime_kiro_buffered_upstream_result(context, anthropic_request)
+    runtime_kiro_buffered_upstream_result(context)
 }
 
 fn runtime_kiro_unsupported_route_result(path: &str) -> RuntimeLocalRewriteUpstreamResult {
@@ -231,33 +217,6 @@ fn runtime_kiro_unsupported_route_result(path: &str) -> RuntimeLocalRewriteUpstr
         gemini_context: None,
         copilot_context: None,
     }
-}
-
-fn runtime_kiro_anthropic_request(
-    request: &RuntimeProxyRequest,
-    messages_route: bool,
-) -> std::result::Result<
-    Option<RuntimeAnthropicMessagesRequest>,
-    Box<RuntimeLocalRewriteUpstreamResult>,
-> {
-    if !messages_route {
-        return Ok(None);
-    }
-    translate_runtime_anthropic_messages_request(request)
-        .map(Some)
-        .map_err(|err| {
-            Box::new(RuntimeLocalRewriteUpstreamResult {
-                response: RuntimeLocalRewriteUpstreamResponse::Buffered(
-                    build_runtime_anthropic_error_parts(
-                        400,
-                        "invalid_request_error",
-                        &err.to_string(),
-                    ),
-                ),
-                gemini_context: None,
-                copilot_context: None,
-            })
-        })
 }
 
 fn runtime_kiro_request_body(
@@ -306,9 +265,7 @@ struct RuntimeKiroRequestContext<'a> {
 
 fn runtime_kiro_streaming_upstream_result(
     context: RuntimeKiroRequestContext<'_>,
-    anthropic_request: Option<RuntimeAnthropicMessagesRequest>,
 ) -> Result<RuntimeLocalRewriteUpstreamResult> {
-    let request_id = context.request_id;
     let profile_name = context.auth.profile_name.clone();
     let shared = context.shared;
     let binding = context.binding.clone();
@@ -328,15 +285,6 @@ fn runtime_kiro_streaming_upstream_result(
             )),
             accepted_binding: Some(binding.accepted_binding(binding_identity)),
         });
-    let response = match anthropic_request.as_ref() {
-        Some(anthropic_request) => runtime_kiro_anthropic_streaming_local_response(
-            response,
-            anthropic_request,
-            request_id,
-            &shared.runtime_shared,
-        )?,
-        None => response,
-    };
     Ok(RuntimeLocalRewriteUpstreamResult {
         response,
         gemini_context: None,
@@ -346,7 +294,6 @@ fn runtime_kiro_streaming_upstream_result(
 
 fn runtime_kiro_buffered_upstream_result(
     context: RuntimeKiroRequestContext<'_>,
-    anthropic_request: Option<RuntimeAnthropicMessagesRequest>,
 ) -> Result<RuntimeLocalRewriteUpstreamResult> {
     let RuntimeKiroRequestContext {
         request_id,
@@ -422,13 +369,6 @@ fn runtime_kiro_buffered_upstream_result(
                 body: body.into(),
             },
         );
-        let response = if let Some(anthropic_request) = anthropic_request.as_ref() {
-            RuntimeLocalRewriteUpstreamResponse::Buffered(
-                runtime_kiro_anthropic_message_parts_from_response(&response, anthropic_request),
-            )
-        } else {
-            response
-        };
         if response_succeeded {
             runtime_local_rewrite_remember_accepted_binding(
                 shared,
@@ -536,55 +476,6 @@ fn schedule_runtime_kiro_blocking_work(
     work: impl FnOnce() + Send + 'static,
 ) {
     drop(async_runtime.spawn_blocking(work));
-}
-
-fn runtime_kiro_anthropic_streaming_local_response(
-    response: RuntimeLocalRewriteUpstreamResponse,
-    anthropic_request: &RuntimeAnthropicMessagesRequest,
-    request_id: u64,
-    runtime_shared: &crate::RuntimeRotationProxyShared,
-) -> Result<RuntimeLocalRewriteUpstreamResponse> {
-    let RuntimeLocalRewriteUpstreamResponse::Streaming(streaming) = response else {
-        return Ok(RuntimeLocalRewriteUpstreamResponse::Buffered(
-            build_runtime_anthropic_error_parts(
-                500,
-                "api_error",
-                "Kiro Anthropic messages streaming translation expected a streaming response",
-            ),
-        ));
-    };
-    let accepted_binding_recorder = streaming.accepted_binding_recorder;
-    let accepted_binding = streaming.accepted_binding;
-    let translated = translate_runtime_responses_reply_to_anthropic(
-        RuntimeResponsesReply::Streaming(RuntimeStreamingResponse {
-            status: streaming.status,
-            headers: streaming.headers,
-            body: streaming.body,
-            request_id,
-            profile_name: streaming.profile_name,
-            log_path: runtime_shared.log_path.clone(),
-            shared: runtime_shared.clone(),
-            _inflight_guard: None,
-        }),
-        anthropic_request,
-        request_id,
-        runtime_shared,
-    )?;
-    Ok(match translated {
-        RuntimeResponsesReply::Buffered(parts) => {
-            RuntimeLocalRewriteUpstreamResponse::Buffered(parts)
-        }
-        RuntimeResponsesReply::Streaming(streaming) => {
-            RuntimeLocalRewriteUpstreamResponse::Streaming(RuntimeLocalRewriteStreamingResponse {
-                status: streaming.status,
-                headers: streaming.headers,
-                body: streaming.body,
-                profile_name: streaming.profile_name,
-                accepted_binding_recorder,
-                accepted_binding,
-            })
-        }
-    })
 }
 
 fn runtime_kiro_streaming_reader(

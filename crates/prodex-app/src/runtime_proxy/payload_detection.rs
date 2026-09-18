@@ -5,10 +5,7 @@ use super::{
 };
 use crate::{RuntimeRotationProxyShared, runtime_proxy_log};
 use prodex_runtime_state::RuntimeRouteKind;
-use redaction::{
-    redaction_redact_json, redaction_redact_secret_like_text, redaction_redacted_body_snippet,
-    redaction_redacted_headers_debug,
-};
+use redaction::{redaction_redact_json, redaction_redact_secret_like_text};
 use runtime_proxy_crate::{
     RuntimeTokenUsage, runtime_proxy_log_field, runtime_proxy_structured_log_message,
 };
@@ -36,18 +33,10 @@ pub(crate) fn extract_runtime_proxy_quota_message_from_response_reply(
     }
 }
 
-pub(crate) fn runtime_proxy_redacted_body_snippet(body: &[u8], max_chars: usize) -> String {
-    redaction_redacted_body_snippet(body, max_chars)
-}
-
 pub(crate) fn runtime_proxy_body_indicates_token_invalidated(body: &[u8]) -> bool {
     String::from_utf8_lossy(body)
         .to_ascii_lowercase()
         .contains("token invalidated")
-}
-
-pub(crate) fn runtime_proxy_redacted_headers_debug(headers: &[(String, String)]) -> String {
-    redaction_redacted_headers_debug(headers)
 }
 
 fn runtime_prompt_cache_key_log_label(prompt_cache_key: Option<&str>) -> &'static str {

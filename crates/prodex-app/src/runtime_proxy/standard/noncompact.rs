@@ -227,7 +227,6 @@ fn runtime_noncompact_budget_action(
 
 fn wait_after_runtime_noncompact_inflight_saturation(
     request_id: u64,
-    request: &RuntimeProxyRequest,
     shared: &RuntimeRotationProxyShared,
     loop_state: &mut RuntimePrecommitLoopState<tiny_http::ResponseBox>,
     session_profile: &Option<String>,
@@ -236,7 +235,6 @@ fn wait_after_runtime_noncompact_inflight_saturation(
     if matches!(
         runtime_proxy_maybe_wait_for_interactive_inflight_relief(RuntimeInflightReliefWait {
             request_id,
-            request,
             shared,
             excluded_profiles: &loop_state.excluded_profiles,
             route_kind: RuntimeRouteKind::Standard,
@@ -296,7 +294,6 @@ fn run_runtime_noncompact_standard_loop(
         };
         if runtime_noncompact_candidate_saturated(
             request_id,
-            request,
             shared,
             &candidate_name,
             &mut *loop_state,
@@ -319,7 +316,6 @@ fn run_runtime_noncompact_standard_loop(
         ) {
             wait_after_runtime_noncompact_inflight_saturation(
                 request_id,
-                request,
                 shared,
                 &mut *loop_state,
                 session_profile,
@@ -430,7 +426,6 @@ fn runtime_noncompact_next_action(
 
 fn runtime_noncompact_candidate_saturated(
     request_id: u64,
-    request: &RuntimeProxyRequest,
     shared: &RuntimeRotationProxyShared,
     candidate_name: &str,
     loop_state: &mut RuntimePrecommitLoopState<tiny_http::ResponseBox>,
@@ -469,7 +464,6 @@ fn runtime_noncompact_candidate_saturated(
     loop_state.record_inflight_saturation();
     match runtime_proxy_maybe_wait_for_interactive_inflight_relief(RuntimeInflightReliefWait {
         request_id,
-        request,
         shared,
         excluded_profiles: &loop_state.excluded_profiles,
         route_kind: RuntimeRouteKind::Standard,

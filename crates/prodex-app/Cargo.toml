@@ -31,7 +31,6 @@ mojo-core = [
     "mojo-routing",
     "prodex_observability/mojo",
     "prodex_provider_core/mojo",
-    "runtime_anthropic_crate/mojo",
     "prodex_runtime_store/mojo",
     "prodex_runtime_tuning/mojo",
     "dep:prodex_mojo_core",
@@ -82,7 +81,6 @@ reqwest = { workspace = true, features = ["blocking", "form", "json", "rustls", 
 ratatui = { workspace = true }
 rpassword = { workspace = true }
 rusqlite = { workspace = true }
-runtime_anthropic_crate = { workspace = true }
 prodex_runtime_doctor = { workspace = true }
 prodex_runtime_broker = { workspace = true }
 prodex_runtime_broker_log = { workspace = true }

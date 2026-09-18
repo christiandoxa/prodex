@@ -2770,7 +2770,6 @@ dependencies = [
  "prodex-provider-spi",
  "prodex-quota",
  "prodex-redaction",
- "prodex-runtime-anthropic",
  "prodex-runtime-broker",
  "prodex-runtime-broker-log",
  "prodex-runtime-cookies",
@@ -2843,15 +2842,8 @@ dependencies = [
 name = "prodex-context"
 version = "0.429.4"
 dependencies = [
- "anyhow",
- "criterion",
- "libc",
  "prodex-mojo-core",
- "prodex-redaction",
- "prodex-terminal-ui",
  "serde",
- "serde_json",
- "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -3004,18 +2996,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "prodex-runtime-anthropic"
-version = "0.429.4"
-dependencies = [
- "anyhow",
- "base64 0.23.1",
- "prodex-mojo-core",
- "serde_json",
- "uuid",
- "zeroize",
-]
-
-[[package]]
 name = "prodex-runtime-broker"
 version = "0.429.4"
 dependencies = [
@@ -3102,7 +3082,6 @@ dependencies = [
  "prodex-mojo-core",
  "prodex-provider-core",
  "prodex-redaction",
- "prodex-runtime-anthropic",
  "prodex-runtime-state",
  "prodex-runtime-tuning",
  "serde",

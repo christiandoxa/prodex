@@ -31,7 +31,6 @@ members = [
     "crates/prodex-provider-spi",
     "crates/prodex-quota",
     "crates/prodex-redaction",
-    "crates/prodex-runtime-anthropic",
     "crates/prodex-runtime-broker",
     "crates/prodex-runtime-broker-log",
     "crates/prodex-runtime-doctor",
@@ -134,7 +133,6 @@ redis = { version = "1.7.0", default-features = false }
 rustls = { version = "0.23.45", default-features = false, features = ["aws-lc-rs", "std"] }
 rustls-native-certs = "0.8.4"
 tokio-rustls = "0.26.5"
-runtime_anthropic_crate = { package = "prodex-runtime-anthropic", path = "crates/prodex-runtime-anthropic", version = "0.429.4" }
 runtime_log = { package = "prodex-runtime-log", path = "crates/prodex-runtime-log", version = "0.429.4" }
 runtime_proxy_crate = { package = "prodex-runtime-proxy", path = "crates/prodex-runtime-proxy", version = "0.429.4" }
 secret_store = { package = "prodex-secret-store", path = "crates/prodex-secret-store", version = "0.429.4" }

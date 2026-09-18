@@ -267,17 +267,6 @@ pub(crate) fn build_runtime_proxy_response_from_parts(
     .boxed()
 }
 
-pub(crate) fn runtime_buffered_response_content_type(
-    parts: &RuntimeHeapTrimmedBufferedResponseParts,
-) -> Option<&str> {
-    runtime_proxy_crate::runtime_response_content_type_from_binary_headers(
-        parts
-            .headers
-            .iter()
-            .map(|(name, value)| (name.as_str(), value.as_slice())),
-    )
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

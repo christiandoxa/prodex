@@ -363,24 +363,6 @@ fn strips_previous_response_id_from_websocket_text_for_fresh_retry() {
 }
 
 #[test]
-fn detects_internal_interactive_origin_case_insensitively() {
-    let request = RuntimeProxyRequest {
-        method: "POST".to_string(),
-        path_and_query: "/v1/messages".to_string(),
-        headers: vec![(
-            "x-prodex-internal-request-origin".to_string(),
-            " Anthropic_Messages ".to_string(),
-        )],
-        body: Vec::new(),
-    };
-
-    assert!(runtime_proxy_request_prefers_interactive_inflight_wait(
-        &request
-    ));
-    assert!(runtime_proxy_request_prefers_inflight_wait(&request));
-}
-
-#[test]
 fn structured_log_round_trips_quoted_values() {
     let message = runtime_proxy_structured_log_message(
         "event\nname",

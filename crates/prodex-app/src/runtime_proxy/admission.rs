@@ -43,12 +43,6 @@ pub(crate) fn runtime_proxy_overloaded_response(
             503,
             "Runtime auto-rotate proxy is temporarily saturated. Retry the request.",
         )
-    } else if is_runtime_anthropic_messages_path(path) {
-        build_runtime_proxy_response_from_parts(build_runtime_anthropic_error_parts(
-            503,
-            runtime_anthropic_error_type_for_status(503),
-            "Runtime auto-rotate proxy is temporarily saturated. Retry the request.",
-        ))
     } else if is_runtime_responses_path(path) || is_runtime_compact_path(path) {
         build_runtime_proxy_json_error_response(
             503,
