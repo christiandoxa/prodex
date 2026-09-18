@@ -1,5 +1,47 @@
 use super::*;
 
+pub(crate) fn handle_info(args: InfoArgs) -> Result<()> {
+    let paths = AppPaths::discover()?;
+    let state = AppState::load(&paths)?;
+    let policy = runtime_policy_summary().ok().flatten();
+    let process_count = collect_process_rows().len();
+
+    if args.json {
+        let value = serde_json::json!({
+            "version": env!("CARGO_PKG_VERSION"),
+            "active_profile": state.active_profile,
+            "profile_count": state.profiles.len(),
+            "runtime_policy": runtime_policy_json_value(policy.as_ref()),
+            "runtime_logs": runtime_logs_json_value(),
+            "secret_backend": secret_backend_json_value(),
+            "process_count": process_count,
+        });
+        println!("{}", serde_json::to_string_pretty(&value)?);
+        return Ok(());
+    }
+
+    let fields = vec![
+        ("Version".to_string(), env!("CARGO_PKG_VERSION").to_string()),
+        (
+            "Active profile".to_string(),
+            state.active_profile.unwrap_or_else(|| "-".to_string()),
+        ),
+        ("Profiles".to_string(), state.profiles.len().to_string()),
+        (
+            "Runtime policy".to_string(),
+            format_runtime_policy_summary(policy.as_ref()),
+        ),
+        ("Runtime logs".to_string(), format_runtime_logs_summary()),
+        (
+            "Secret backend".to_string(),
+            format_secret_backend_summary(),
+        ),
+        ("Prodex processes".to_string(), process_count.to_string()),
+    ];
+    terminal_ui::print_panel("Info", &fields)?;
+    Ok(())
+}
+
 pub(crate) fn collect_process_rows() -> Vec<ProcessRow> {
     try_collect_process_rows().unwrap_or_default()
 }

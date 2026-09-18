@@ -578,3 +578,20 @@ fn log_parses_as_top_level_command_with_modes() {
     assert_eq!(upstream.mode, LogMode::Upstream);
     assert!(upstream.json);
 }
+
+#[test]
+fn info_parses_as_read_only_summary_command() {
+    let Commands::Info(default) =
+        parse_cli_command_from(["prodex", "info"]).expect("info should parse")
+    else {
+        panic!("expected info command");
+    };
+    assert!(!default.json);
+
+    let Commands::Info(json) =
+        parse_cli_command_from(["prodex", "info", "--json"]).expect("info json should parse")
+    else {
+        panic!("expected info command");
+    };
+    assert!(json.json);
+}

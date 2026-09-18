@@ -79,6 +79,13 @@ pub struct SessionResumeArgs {
     pub id: String,
 }
 
+#[derive(Args, Debug, Default)]
+pub struct InfoArgs {
+    /// Emit machine-readable JSON.
+    #[arg(long)]
+    pub json: bool,
+}
+
 #[derive(Args, Debug)]
 pub struct StatusArgs {
     /// Render one snapshot instead of the live dashboard.
