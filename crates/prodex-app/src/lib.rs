@@ -395,7 +395,7 @@ fn run_command(command: Commands) -> Result<()> {
 }
 
 fn command_uses_minimal_startup(command: &Commands) -> bool {
-    matches!(command, Commands::McpJsonlBridge(_))
+    matches!(command, Commands::McpJsonlBridge(_) | Commands::Ping(_))
         || matches!(
             command,
             Commands::Doctor(args)

@@ -33,6 +33,7 @@ pub(crate) fn command_should_show_update_notice(command: &Commands) -> bool {
             command,
             Commands::RuntimeBroker(_)
                 | Commands::Info(_)
+                | Commands::Ping(_)
                 | Commands::Log(_)
                 | Commands::Update(_)
                 | Commands::McpJsonlBridge(_)
@@ -67,6 +68,7 @@ pub(crate) fn execute_command(command: Commands) -> Result<()> {
         Commands::Logout(args) => handle_codex_logout(args),
         Commands::Update(args) => handle_prodex_update(args),
         Commands::Quota(args) => handle_quota(args),
+        Commands::Ping(command) => handle_ping(command),
         Commands::Run(args) => app_commands::runtime_launch::handle_run(args),
         Commands::Super(args) => execute_super(*args),
         Commands::Gateway(args) => handle_gateway(args),
@@ -84,6 +86,7 @@ fn command_runs_profile_lifecycle_recovery(command: &Commands) -> bool {
                 | Commands::Info(_)
                 | Commands::Log(_)
                 | Commands::Doctor(_)
+                | Commands::Ping(_)
                 | Commands::McpJsonlBridge(_)
                 | Commands::SubAgentExec(_)
         )

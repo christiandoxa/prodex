@@ -8,6 +8,7 @@ mod log;
 mod mcp_jsonl_bridge;
 #[cfg(test)]
 mod native_cli_tests;
+mod ping;
 mod presidio;
 mod prodex_update;
 mod quota;
@@ -30,6 +31,7 @@ pub(crate) use self::gateway::*;
 pub(crate) use self::info::*;
 pub(crate) use self::log::*;
 pub(crate) use self::mcp_jsonl_bridge::*;
+pub(crate) use self::ping::*;
 pub(crate) use self::presidio::{
     ensure_presidio_services_for_super_launch, ensure_required_presidio_services_for_super_launch,
     stored_presidio_preference,
