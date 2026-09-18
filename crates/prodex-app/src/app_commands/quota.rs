@@ -4,8 +4,7 @@ use crate::{
     AppPaths, AppState, AppStateIoExt, QuotaArgs, QuotaAuthFilter, QuotaProviderFilter,
     collect_quota_reports, collect_quota_reports_with_filters, fetch_profile_quota,
     fetch_profile_quota_json, print_stdout_line, print_stdout_text, quota_watch_enabled,
-    render_all_quota_reports_once_tui, render_profile_quota_once_tui, render_quota_reports,
-    resolve_profile_name, save_openai_quota_runtime_usage_snapshot,
+    render_quota_reports, resolve_profile_name, save_openai_quota_runtime_usage_snapshot,
     save_openai_quota_runtime_usage_snapshots, watch_all_quotas, watch_quota,
 };
 
@@ -79,18 +78,7 @@ fn handle_all_quota(
             provider_filter,
         )
     };
-    if let Some(mut terminal) = crate::try_inline_stdout_terminal(
-        reports
-            .len()
-            .saturating_mul(if args.detail { 4 } else { 3 })
-            .saturating_add(8)
-            .clamp(8, 32) as u16,
-    ) {
-        terminal.draw(|frame| render_all_quota_reports_once_tui(frame, &reports, args.detail))?;
-        let _ = terminal.show_cursor();
-    } else {
-        print_stdout_text(&render_quota_reports(&reports, args.detail))?;
-    }
+    print_stdout_text(&render_quota_reports(&reports, args.detail))?;
     save_openai_quota_runtime_usage_snapshots(paths, &state.profiles, &reports);
     Ok(())
 }
@@ -122,20 +110,13 @@ fn handle_profile_quota(paths: &AppPaths, state: &AppState, args: &QuotaArgs) ->
     }
 
     let quota = fetch_profile_quota(&profile.provider, &codex_home, args.base_url.as_deref())?;
-    if let Some(mut terminal) = crate::try_inline_stdout_terminal(12) {
-        terminal.draw(|frame| {
-            render_profile_quota_once_tui(frame, &profile_name, quota.clone(), args.detail)
-        })?;
-        let _ = terminal.show_cursor();
-    } else {
-        print_stdout_text(
-            &crate::quota_support::render_profile_quota_snapshot_with_detail(
-                &profile_name,
-                &quota,
-                args.detail,
-            ),
-        )?;
-    }
+    print_stdout_text(
+        &crate::quota_support::render_profile_quota_snapshot_with_detail(
+            &profile_name,
+            &quota,
+            args.detail,
+        ),
+    )?;
     save_openai_quota_runtime_usage_snapshot(paths, &state.profiles, &profile_name, &quota);
     Ok(())
 }

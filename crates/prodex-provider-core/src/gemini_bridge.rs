@@ -6,14 +6,12 @@ mod bindings;
 mod compact;
 mod errors;
 mod hardening;
-mod history;
 mod leaks;
 mod media;
 mod precommit;
 mod request;
 mod response;
 mod response_state;
-mod tool_io;
 mod tooling;
 mod util;
 pub use self::bindings::{
@@ -42,13 +40,6 @@ pub use self::errors::{
 pub use self::hardening::{
     gemini_provider_core_harden_contents, gemini_provider_core_harden_tool_call_thought_signatures,
     gemini_provider_core_thought_signature,
-};
-pub use self::history::{
-    gemini_provider_core_chat_message_text, gemini_provider_core_contextual_user_instruction_text,
-    gemini_provider_core_import_contents_from_value,
-    gemini_provider_core_is_contextual_user_fragment,
-    gemini_provider_core_session_checkpoint_value,
-    gemini_provider_core_system_instruction_from_chat, gemini_provider_core_truncate_to_bytes,
 };
 pub use self::leaks::{
     gemini_provider_core_internal_instruction_corpus,
@@ -110,16 +101,6 @@ pub use self::response_state::{
     GeminiProviderCoreResponsePartInput, GeminiProviderCoreResponsePartPlan,
     GeminiProviderCoreResponsePartPlanError, gemini_provider_core_response_part_plan,
 };
-pub use self::tool_io::{
-    gemini_provider_core_function_call_part,
-    gemini_provider_core_function_call_part_from_tool_call,
-    gemini_provider_core_function_response_content_part,
-    gemini_provider_core_function_response_from_tool_message,
-    gemini_provider_core_function_response_part,
-    gemini_provider_core_mask_tool_response_for_history,
-    gemini_provider_core_structured_command_tool_response,
-    gemini_provider_core_tool_output_preview, gemini_provider_core_tool_response_output_string,
-};
 pub use self::tooling::{
     gemini_provider_core_apply_gemini3_tool_declaration_overrides,
     gemini_provider_core_blocked_tool_call_item,
@@ -137,6 +118,3 @@ pub use self::util::{
     gemini_provider_core_collect_string_values, gemini_provider_core_parse_command_specific_tool,
     gemini_provider_core_skip_context_path_name, gemini_provider_core_stream_error,
 };
-
-#[cfg(test)]
-mod tests;

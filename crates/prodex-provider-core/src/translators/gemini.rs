@@ -14,9 +14,6 @@ pub(crate) use self::request::gemini_validate_openai_tools;
 #[cfg(not(feature = "mojo"))]
 pub(crate) use self::request::sanitize_function_schema as gemini_sanitize_function_schema;
 pub(crate) use self::request_contents::gemini_contents_from_request;
-pub(crate) use self::request_contents::{
-    gemini_contextual_user_instruction_text, gemini_is_contextual_user_fragment,
-};
 pub(crate) use self::response::gemini_normalized_response_value;
 pub(crate) use self::response::{
     gemini_chat_assistant_messages_from_generate_value,
