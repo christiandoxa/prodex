@@ -239,27 +239,3 @@ fn runtime_broker_artifact_key_parses_registry_and_lease_names() {
         None
     );
 }
-
-#[test]
-fn session_path_date_extracts_valid_date_components() {
-    assert_eq!(
-        session_path_date(Path::new("/tmp/sessions/2026/02/28/session.jsonl")),
-        Some(PathDate {
-            year: 2026,
-            month: 2,
-            day: 28,
-        })
-    );
-    assert_eq!(
-        session_path_date(Path::new("/tmp/sessions/2026/02/29/session.jsonl")),
-        None
-    );
-    assert_eq!(
-        session_path_date(Path::new("/tmp/sessions/2024/02/29/session.jsonl")),
-        Some(PathDate {
-            year: 2024,
-            month: 2,
-            day: 29,
-        })
-    );
-}

@@ -21,6 +21,13 @@ comptime RENDER_TRANSPORT: Int64 = 11
 comptime RENDER_QUOTA: Int64 = 12
 comptime RENDER_PRECOMMIT: Int64 = 13
 comptime RENDER_DIAGNOSIS: Int64 = 14
+comptime RENDER_POLICY_SUGGESTION_ID: Int64 = 15
+comptime RENDER_POLICY_SUGGESTION_TITLE: Int64 = 16
+comptime RENDER_POLICY_SUGGESTION_MARKERS: Int64 = 17
+comptime RENDER_POLICY_SETTING_KEY: Int64 = 18
+comptime RENDER_POLICY_SETTING_RATIONALE: Int64 = 19
+comptime RENDER_POLICY_SUGGESTION_REASON: Int64 = 20
+comptime RENDER_POLICY_MARKER_NAME: Int64 = 21
 
 comptime DETAIL_CONTEXT_DEPENDENT: Int64 = 1
 comptime DETAIL_COMPACT_PRESSURE: Int64 = 2
@@ -356,12 +363,196 @@ def runtime_doctor_render_diagnosis(
         return runtime_doctor_render_put_literal(writer, StringSlice("No recent overload or stream-failure markers were detected in the sampled runtime tail."))
     return False
 
+
+
+def runtime_doctor_render_policy_suggestion_id(
+    writer: Pointer[mut=True, RuntimeDoctorRenderWriter, _], detail: Int64
+) -> Bool:
+    if detail == 1:
+        return runtime_doctor_render_put_literal(writer, StringSlice("lane_pressure"))
+    if detail == 2:
+        return runtime_doctor_render_put_literal(writer, StringSlice("active_request_pressure"))
+    if detail == 3:
+        return runtime_doctor_render_put_literal(writer, StringSlice("profile_inflight_saturation"))
+    if detail == 4:
+        return runtime_doctor_render_put_literal(writer, StringSlice("websocket_connect_overflow"))
+    if detail == 5:
+        return runtime_doctor_render_put_literal(writer, StringSlice("websocket_dns_overflow"))
+    if detail == 6:
+        return runtime_doctor_render_put_literal(writer, StringSlice("persistence_backpressure"))
+    if detail == 7:
+        return runtime_doctor_render_put_literal(writer, StringSlice("route_scoped_profile_health"))
+    return False
+
+
+def runtime_doctor_render_policy_suggestion_title(
+    writer: Pointer[mut=True, RuntimeDoctorRenderWriter, _], detail: Int64
+) -> Bool:
+    if detail == 1:
+        return runtime_doctor_render_put_literal(writer, StringSlice("Lane pressure"))
+    if detail == 2:
+        return runtime_doctor_render_put_literal(writer, StringSlice("Active request pressure"))
+    if detail == 3:
+        return runtime_doctor_render_put_literal(writer, StringSlice("Profile in-flight saturation"))
+    if detail == 4:
+        return runtime_doctor_render_put_literal(writer, StringSlice("Websocket connect overflow"))
+    if detail == 5:
+        return runtime_doctor_render_put_literal(writer, StringSlice("Websocket DNS overflow"))
+    if detail == 6:
+        return runtime_doctor_render_put_literal(writer, StringSlice("Persistence backpressure"))
+    if detail == 7:
+        return runtime_doctor_render_put_literal(writer, StringSlice("Route-scoped profile health"))
+    return False
+
+
+def runtime_doctor_render_policy_suggestion_markers(
+    writer: Pointer[mut=True, RuntimeDoctorRenderWriter, _], detail: Int64
+) -> Bool:
+    if detail == 1:
+        return runtime_doctor_render_put_literal(writer, StringSlice("runtime_proxy_lane_limit_reached"))
+    if detail == 2:
+        return runtime_doctor_render_put_literal(writer, StringSlice("runtime_proxy_active_limit_reached"))
+    if detail == 3:
+        return runtime_doctor_render_put_literal(writer, StringSlice("profile_inflight_saturated"))
+    if detail == 4:
+        return runtime_doctor_render_put_literal(writer, StringSlice("websocket_connect_overflow_rejected\nwebsocket_connect_overflow_reject\nwebsocket_connect_overflow_enqueue\nwebsocket_connect_overflow_dispatch"))
+    if detail == 5:
+        return runtime_doctor_render_put_literal(writer, StringSlice("websocket_dns_overflow_reject\nwebsocket_dns_overflow_enqueue\nwebsocket_dns_overflow_dispatch"))
+    if detail == 6:
+        return runtime_doctor_render_put_literal(writer, StringSlice("state_save_queue_backpressure\ncontinuation_journal_queue_backpressure"))
+    if detail == 7:
+        return runtime_doctor_render_put_literal(writer, StringSlice("profile_health"))
+    return False
+
+
+def runtime_doctor_render_policy_setting_key(
+    writer: Pointer[mut=True, RuntimeDoctorRenderWriter, _], detail: Int64
+) -> Bool:
+    if detail == 1:
+        return runtime_doctor_render_put_literal(writer, StringSlice("responses_active_limit"))
+    if detail == 2:
+        return runtime_doctor_render_put_literal(writer, StringSlice("compact_active_limit"))
+    if detail == 3:
+        return runtime_doctor_render_put_literal(writer, StringSlice("websocket_active_limit"))
+    if detail == 4:
+        return runtime_doctor_render_put_literal(writer, StringSlice("standard_active_limit"))
+    if detail == 5:
+        return runtime_doctor_render_put_literal(writer, StringSlice("active_request_limit"))
+    if detail == 6:
+        return runtime_doctor_render_put_literal(writer, StringSlice("profile_inflight_soft_limit"))
+    if detail == 7:
+        return runtime_doctor_render_put_literal(writer, StringSlice("profile_inflight_hard_limit"))
+    if detail == 8:
+        return runtime_doctor_render_put_literal(writer, StringSlice("websocket_connect_worker_count"))
+    if detail == 9:
+        return runtime_doctor_render_put_literal(writer, StringSlice("websocket_connect_queue_capacity"))
+    if detail == 10:
+        return runtime_doctor_render_put_literal(writer, StringSlice("websocket_connect_overflow_capacity"))
+    if detail == 11:
+        return runtime_doctor_render_put_literal(writer, StringSlice("websocket_dns_worker_count"))
+    if detail == 12:
+        return runtime_doctor_render_put_literal(writer, StringSlice("websocket_dns_queue_capacity"))
+    if detail == 13:
+        return runtime_doctor_render_put_literal(writer, StringSlice("websocket_dns_overflow_capacity"))
+    if detail == 14:
+        return runtime_doctor_render_put_literal(writer, StringSlice("pressure_admission_wait_budget_ms"))
+    return False
+
+
+def runtime_doctor_render_policy_marker_name(
+    writer: Pointer[mut=True, RuntimeDoctorRenderWriter, _], detail: Int64
+) -> Bool:
+    if detail == 1:
+        return runtime_doctor_render_put_literal(writer, StringSlice("websocket_connect_overflow_rejected"))
+    if detail == 2:
+        return runtime_doctor_render_put_literal(writer, StringSlice("websocket_connect_overflow_reject"))
+    if detail == 3:
+        return runtime_doctor_render_put_literal(writer, StringSlice("websocket_connect_overflow_enqueue"))
+    if detail == 4:
+        return runtime_doctor_render_put_literal(writer, StringSlice("websocket_connect_overflow_dispatch"))
+    if detail == 102:
+        return runtime_doctor_render_put_literal(writer, StringSlice("websocket_dns_overflow_reject"))
+    if detail == 103:
+        return runtime_doctor_render_put_literal(writer, StringSlice("websocket_dns_overflow_enqueue"))
+    if detail == 104:
+        return runtime_doctor_render_put_literal(writer, StringSlice("websocket_dns_overflow_dispatch"))
+    return runtime_doctor_render_put_literal(writer, StringSlice("-"))
+
+
+def runtime_doctor_render_policy_setting_rationale(
+    writer: Pointer[mut=True, RuntimeDoctorRenderWriter, _],
+    input: ProdexRuntimeDoctorRenderInput,
+) -> Bool:
+    var suggestion = input.detail // 100
+    var key = input.detail % 100
+    if suggestion == 1 and key == 5:
+        return runtime_doctor_render_put_literal(writer, StringSlice("keep the global admission cap above the suggested lane cap"))
+    if suggestion == 1:
+        return runtime_doctor_render_put_literal(writer, StringSlice("raise the ")) and runtime_doctor_render_put_value_or_literal(writer, input, 0, StringSlice("responses")) and runtime_doctor_render_put_literal(writer, StringSlice(" lane cap after repeated lane-limit markers"))
+    if suggestion == 2:
+        return runtime_doctor_render_put_literal(writer, StringSlice("allow more pre-commit requests through local admission"))
+    if suggestion == 3 and key == 6:
+        return runtime_doctor_render_put_literal(writer, StringSlice("delay soft load penalty until a profile has more concurrent work"))
+    if suggestion == 3:
+        return runtime_doctor_render_put_literal(writer, StringSlice("raise the fresh-selection hard cap for a busy profile"))
+    if suggestion == 4 or suggestion == 5:
+        if key == 8 or key == 11:
+            return runtime_doctor_render_put_literal(writer, StringSlice("increase bounded executor parallelism"))
+        if key == 9 or key == 12:
+            return runtime_doctor_render_put_literal(writer, StringSlice("increase bounded executor queue capacity"))
+        return runtime_doctor_render_put_literal(writer, StringSlice("increase burst overflow buffering after the bounded queue fills"))
+    if suggestion == 6 and key == 2:
+        return runtime_doctor_render_put_literal(writer, StringSlice("reduce fresh compact churn that creates continuation state writes"))
+    if suggestion == 6 and key == 4:
+        return runtime_doctor_render_put_literal(writer, StringSlice("reduce side-lane churn while persistence is behind"))
+    if suggestion == 6:
+        return runtime_doctor_render_put_literal(writer, StringSlice("let pressure-mode admission wait briefly for queues to drain"))
+    if suggestion == 7 and key == 6:
+        return runtime_doctor_render_put_literal(writer, StringSlice("spread fresh work away from accounts accumulating route-specific health penalties"))
+    if suggestion == 7:
+        return runtime_doctor_render_put_literal(writer, StringSlice("cap fresh work per profile more tightly while route health recovers"))
+    return False
+
+
+def runtime_doctor_render_policy_suggestion_reason(
+    writer: Pointer[mut=True, RuntimeDoctorRenderWriter, _],
+    input: ProdexRuntimeDoctorRenderInput,
+) -> Bool:
+    var detail = input.detail
+    if detail == 1:
+        return runtime_doctor_render_put_value_or_literal(writer, input, 0, StringSlice("0")) and runtime_doctor_render_put_literal(writer, StringSlice(" lane-limit marker(s) on lane=")) and runtime_doctor_render_put_value_or_literal(writer, input, 1, StringSlice("responses")) and runtime_doctor_render_put_literal(writer, StringSlice("; apply only if host/network headroom exists"))
+    if detail == 2:
+        return runtime_doctor_render_put_value_or_literal(writer, input, 0, StringSlice("0")) and runtime_doctor_render_put_literal(writer, StringSlice(" global active-limit marker(s); raise only if local CPU/network is not saturated"))
+    if detail == 3:
+        return runtime_doctor_render_put_value_or_literal(writer, input, 0, StringSlice("0")) and runtime_doctor_render_put_literal(writer, StringSlice(" per-profile in-flight saturation marker(s), latest profile=")) and runtime_doctor_render_put_value_or_literal(writer, input, 2, StringSlice("unknown")) and runtime_doctor_render_put_literal(writer, StringSlice("; raise only if account fan-out is intentional"))
+    if detail == 4 or detail == 5:
+        return runtime_doctor_render_put_value_or_literal(writer, input, 0, StringSlice("0")) and runtime_doctor_render_put_literal(writer, StringSlice(" websocket executor overflow marker(s), latest=")) and runtime_doctor_render_put_value_or_literal(writer, input, 3, StringSlice("-")) and runtime_doctor_render_put_literal(writer, StringSlice("; raise only for bursty session starts"))
+    if detail == 6:
+        return runtime_doctor_render_put_literal(writer, StringSlice("state-save backpressure=")) and runtime_doctor_render_put_value_or_literal(writer, input, 4, StringSlice("0")) and runtime_doctor_render_put_literal(writer, StringSlice(", continuation-journal backpressure=")) and runtime_doctor_render_put_value_or_literal(writer, input, 5, StringSlice("0")) and runtime_doctor_render_put_literal(writer, StringSlice("; throttle churn while queues drain"))
+    if detail == 7:
+        return runtime_doctor_render_put_value_or_literal(writer, input, 0, StringSlice("0")) and runtime_doctor_render_put_literal(writer, StringSlice(" route-scoped health marker(s), latest=")) and runtime_doctor_render_put_value_or_literal(writer, input, 6, StringSlice("unknown")) and runtime_doctor_render_put_literal(writer, StringSlice("/")) and runtime_doctor_render_put_value_or_literal(writer, input, 7, StringSlice("unknown")) and runtime_doctor_render_put_literal(writer, StringSlice(" reason=")) and runtime_doctor_render_put_value_or_literal(writer, input, 8, StringSlice("unknown")) and runtime_doctor_render_put_literal(writer, StringSlice("; lower per-profile fresh pressure if this repeats"))
+    return False
+
 def runtime_doctor_render_value(
     writer: Pointer[mut=True, RuntimeDoctorRenderWriter, _],
     input: ProdexRuntimeDoctorRenderInput,
 ) -> Bool:
     if input.operation == RENDER_DIAGNOSIS:
         return runtime_doctor_render_diagnosis(writer, input)
+    if input.operation == RENDER_POLICY_SUGGESTION_ID:
+        return runtime_doctor_render_policy_suggestion_id(writer, input.detail)
+    if input.operation == RENDER_POLICY_SUGGESTION_TITLE:
+        return runtime_doctor_render_policy_suggestion_title(writer, input.detail)
+    if input.operation == RENDER_POLICY_SUGGESTION_MARKERS:
+        return runtime_doctor_render_policy_suggestion_markers(writer, input.detail)
+    if input.operation == RENDER_POLICY_SETTING_KEY:
+        return runtime_doctor_render_policy_setting_key(writer, input.detail)
+    if input.operation == RENDER_POLICY_SETTING_RATIONALE:
+        return runtime_doctor_render_policy_setting_rationale(writer, input)
+    if input.operation == RENDER_POLICY_SUGGESTION_REASON:
+        return runtime_doctor_render_policy_suggestion_reason(writer, input)
+    if input.operation == RENDER_POLICY_MARKER_NAME:
+        return runtime_doctor_render_policy_marker_name(writer, input.detail)
     if input.operation == RENDER_PREVIOUS_RESPONSE:
         return runtime_doctor_render_previous(writer, input)
     if input.operation == RENDER_COMPACT_FINAL_FAILURE:
@@ -487,7 +678,7 @@ def prodex_mojo_runtime_doctor_render_v1(
         return 1
     var input_pointer = Pointer[mut=False, ProdexRuntimeDoctorRenderInput, ImmUntrackedOrigin](unsafe_from_address=Int(input_address))
     var input = input_pointer[].copy()
-    if input.operation < RENDER_PREVIOUS_RESPONSE or input.operation > RENDER_DIAGNOSIS or input.detail < 0 or input.detail > 62 or input.values_address == 0:
+    if input.operation < RENDER_PREVIOUS_RESPONSE or input.operation > RENDER_POLICY_MARKER_NAME or input.detail < 0 or input.detail > 799 or input.values_address == 0:
         return 1
     for index in range(16):
         if not rich_view_valid(runtime_doctor_render_input_value(input, index), RUNTIME_DOCTOR_RENDER_MAX_VALUE_BYTES):

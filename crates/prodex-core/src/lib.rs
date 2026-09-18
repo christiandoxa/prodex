@@ -414,69 +414,6 @@ pub fn chat_history_file_path_is_owned(path: &Path) -> bool {
         })
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-pub struct PathDate {
-    pub year: i32,
-    pub month: u32,
-    pub day: u32,
-}
-
-impl PathDate {
-    pub fn new(year: i32, month: u32, day: u32) -> Option<Self> {
-        let max_day = days_in_month(year, month)?;
-        (day >= 1 && day <= max_day).then_some(Self { year, month, day })
-    }
-}
-
-pub fn session_path_date(path: &Path) -> Option<PathDate> {
-    let parts = path
-        .components()
-        .filter_map(|component| component.as_os_str().to_str())
-        .collect::<Vec<_>>();
-    for window in parts.windows(3) {
-        let year = window[0];
-        let month = window[1];
-        let day = window[2];
-        if year.len() != 4
-            || month.len() != 2
-            || day.len() != 2
-            || !year.chars().all(|ch| ch.is_ascii_digit())
-            || !month.chars().all(|ch| ch.is_ascii_digit())
-            || !day.chars().all(|ch| ch.is_ascii_digit())
-        {
-            continue;
-        }
-
-        let Ok(year) = year.parse::<i32>() else {
-            continue;
-        };
-        let Ok(month) = month.parse::<u32>() else {
-            continue;
-        };
-        let Ok(day) = day.parse::<u32>() else {
-            continue;
-        };
-        if let Some(date) = PathDate::new(year, month, day) {
-            return Some(date);
-        }
-    }
-    None
-}
-
-fn days_in_month(year: i32, month: u32) -> Option<u32> {
-    Some(match month {
-        1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
-        4 | 6 | 9 | 11 => 30,
-        2 if is_leap_year(year) => 29,
-        2 => 28,
-        _ => return None,
-    })
-}
-
-fn is_leap_year(year: i32) -> bool {
-    (year % 4 == 0 && year % 100 != 0) || year % 400 == 0
-}
-
 pub fn format_binary_resolution(binary: &OsString) -> String {
     let configured = binary.to_string_lossy();
     match resolve_binary_path(binary) {

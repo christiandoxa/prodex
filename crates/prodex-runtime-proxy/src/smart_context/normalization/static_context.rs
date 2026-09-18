@@ -1,5 +1,73 @@
 use super::*;
 
+#[cfg(not(feature = "mojo"))]
+pub(in crate::smart_context) fn smart_context_static_context_item_order(
+    left: &SmartContextStableStaticContextItem,
+    right: &SmartContextStableStaticContextItem,
+) -> std::cmp::Ordering {
+    smart_context_static_context_item_order_key(&left.id)
+        .cmp(&smart_context_static_context_item_order_key(&right.id))
+        .then_with(|| left.id.cmp(&right.id))
+        .then_with(|| left.content_hash.cmp(&right.content_hash))
+        .then_with(|| left.byte_len.cmp(&right.byte_len))
+        .then_with(|| left.canonical_text.cmp(&right.canonical_text))
+}
+
+#[cfg(not(feature = "mojo"))]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+struct SmartContextStaticContextItemOrderKey {
+    group: u8,
+    input_index: usize,
+    role_rank: u8,
+    generic_id: String,
+}
+
+#[cfg(not(feature = "mojo"))]
+fn smart_context_static_context_item_order_key(id: &str) -> SmartContextStaticContextItemOrderKey {
+    match id {
+        "instructions" => smart_context_static_context_order_key(0, 0, 0, ""),
+        "system" => smart_context_static_context_order_key(1, 0, 0, ""),
+        "developer" => smart_context_static_context_order_key(2, 0, 0, ""),
+        _ => smart_context_input_static_context_order_key(id)
+            .unwrap_or_else(|| smart_context_static_context_order_key(100, 0, 0, id)),
+    }
+}
+
+#[cfg(not(feature = "mojo"))]
+fn smart_context_input_static_context_order_key(
+    id: &str,
+) -> Option<SmartContextStaticContextItemOrderKey> {
+    let rest = id.strip_prefix("input[")?;
+    let (index, rest) = rest.split_once("].")?;
+    let input_index = index.parse::<usize>().ok()?;
+    let role_rank = match rest {
+        "system" => 0,
+        "developer" => 1,
+        _ => return None,
+    };
+    Some(smart_context_static_context_order_key(
+        3,
+        input_index,
+        role_rank,
+        "",
+    ))
+}
+
+#[cfg(not(feature = "mojo"))]
+fn smart_context_static_context_order_key(
+    group: u8,
+    input_index: usize,
+    role_rank: u8,
+    generic_id: &str,
+) -> SmartContextStaticContextItemOrderKey {
+    SmartContextStaticContextItemOrderKey {
+        group,
+        input_index,
+        role_rank,
+        generic_id: generic_id.to_string(),
+    }
+}
+
 pub(in crate::smart_context) fn smart_context_static_context_prompt_cache_payload(
     items: &[SmartContextStableStaticContextItem],
 ) -> String {

@@ -62,12 +62,6 @@ fn binding(profile_name: &str, bound_at: i64) -> ResponseProfileBinding {
     }
 }
 
-fn external_profile(name: &str) -> (String, ProfileEntry) {
-    let (name, mut profile) = profile(name);
-    profile.managed = false;
-    (name, profile)
-}
-
 #[test]
 fn provider_capabilities_define_route_policy_and_quota_shape() {
     let openai = ProfileProvider::Openai.capabilities();
@@ -188,77 +182,6 @@ fn timestamp_ties_merge_commutatively() {
     assert_eq!(
         merge_profile_bindings(&left_bindings, &right_bindings, &profiles),
         merge_profile_bindings(&right_bindings, &left_bindings, &profiles)
-    );
-}
-
-#[test]
-fn canonical_duplicate_profile_prefers_active_recent_external_then_name() {
-    let state = AppState {
-        active_profile: Some("active".to_string()),
-        profiles: BTreeMap::from([
-            profile("active"),
-            profile("recent"),
-            external_profile("external"),
-            profile("alpha"),
-            profile("beta"),
-        ]),
-        last_run_selected_at: BTreeMap::from([
-            ("active".to_string(), 1),
-            ("recent".to_string(), 20),
-            ("external".to_string(), 20),
-            ("alpha".to_string(), 5),
-            ("beta".to_string(), 5),
-        ]),
-        ..AppState::default()
-    };
-
-    assert_eq!(
-        select_canonical_duplicate_profile(
-            &state,
-            &[
-                "recent".to_string(),
-                "external".to_string(),
-                "active".to_string()
-            ],
-        ),
-        Some("active".to_string())
-    );
-    assert_eq!(
-        select_canonical_duplicate_profile(&state, &["recent".to_string(), "external".to_string()],),
-        Some("external".to_string())
-    );
-    assert_eq!(
-        select_canonical_duplicate_profile(&state, &["beta".to_string(), "alpha".to_string()]),
-        Some("alpha".to_string())
-    );
-}
-
-#[test]
-fn remove_duplicate_profile_from_state_merges_selection_and_remaps_bindings() {
-    let mut state = AppState {
-        active_profile: Some("duplicate".to_string()),
-        profiles: BTreeMap::from([profile("canonical"), profile("duplicate")]),
-        last_run_selected_at: BTreeMap::from([
-            ("canonical".to_string(), 10),
-            ("duplicate".to_string(), 20),
-        ]),
-        response_profile_bindings: BTreeMap::from([("r".to_string(), binding("duplicate", 1))]),
-        session_profile_bindings: BTreeMap::from([("s".to_string(), binding("duplicate", 2))]),
-    };
-
-    let removed = remove_duplicate_profile_from_state(&mut state, "duplicate", "canonical");
-
-    assert!(removed.is_some());
-    assert_eq!(state.active_profile.as_deref(), Some("canonical"));
-    assert!(!state.profiles.contains_key("duplicate"));
-    assert_eq!(state.last_run_selected_at.get("canonical"), Some(&20));
-    assert_eq!(
-        state.response_profile_bindings["r"].profile_name,
-        "canonical"
-    );
-    assert_eq!(
-        state.session_profile_bindings["s"].profile_name,
-        "canonical"
     );
 }
 
