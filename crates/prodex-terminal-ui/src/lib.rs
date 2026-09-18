@@ -3,17 +3,11 @@ mod print;
 mod runtime_launch;
 mod session;
 mod terminal;
-mod terminal_session;
 mod text;
 
 pub use panel::{
-    FieldRowsBuilder, PanelBuilder, draw_status_panel_terminal, format_field_lines_with_layout,
-    panel_label_width, print_panel, print_stderr_panel, print_text_panel, render_panel,
-    render_text_panel, section_header, section_header_with_width, tui_accent_style,
-    tui_border_style, tui_connected_footer_block, tui_connected_footer_border_set,
-    tui_connected_header_block, tui_connected_header_border_set, tui_connected_separator_line,
-    tui_detail_style, tui_error_style, tui_hint_style, tui_metric_style, tui_muted_style,
-    tui_primary_style, tui_secondary_style, tui_success_style, tui_title_style, tui_tool_style,
+    format_field_lines_with_layout, panel_label_width, print_panel, print_stderr_panel,
+    render_panel, render_text_panel, section_header, section_header_with_width,
 };
 pub use print::{
     print_blank_line, print_stderr_line, print_stderr_prompt, print_stdout_line, print_stdout_text,
@@ -28,12 +22,8 @@ pub use runtime_launch::{
 pub use session::{
     SessionReportDisplay, render_session_reports, render_session_reports_with_width,
 };
-pub use terminal::{
-    current_cli_width, terminal_dimensions_from_tty, terminal_height_lines,
-    terminal_size_override_usize, terminal_width_chars,
-};
-pub use terminal_session::AlternateScreenTerminal;
-pub use text::{chunk_token, fit_cell, pad_cell, text_width, wrap_text};
+pub use terminal::{current_cli_width, terminal_height_lines};
+pub use text::{fit_cell, text_width, wrap_text};
 
 pub const CLI_WIDTH: usize = 110;
 pub const CLI_MIN_WIDTH: usize = 60;

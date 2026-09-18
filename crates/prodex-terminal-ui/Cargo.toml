@@ -11,10 +11,8 @@ name = "terminal_ui"
 path = "src/lib.rs"
 
 [dependencies]
-anyhow = { workspace = true }
 crossterm = { workspace = true }
 libc = { workspace = true }
-ratatui = { workspace = true }
 unicode-width = { workspace = true }
 
 [lints]

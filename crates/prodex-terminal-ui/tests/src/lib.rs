@@ -53,58 +53,6 @@ fn text_panel_renderer_adds_panel_header() {
 }
 
 #[test]
-fn tui_panel_styles_use_theme_safe_ansi_colors() {
-    use ratatui::style::Color;
-
-    assert_eq!(tui_title_style().fg, Some(Color::Cyan));
-    assert_eq!(tui_secondary_style().fg, Some(Color::Gray));
-    assert_eq!(tui_muted_style().fg, Some(Color::Gray));
-    assert_eq!(tui_detail_style().fg, Some(Color::Gray));
-    assert_eq!(tui_primary_style().fg, None);
-    assert_eq!(tui_border_style().fg, Some(Color::Cyan));
-    assert_eq!(tui_hint_style().fg, Some(Color::Cyan));
-    assert_eq!(tui_success_style().fg, Some(Color::Green));
-    assert_eq!(tui_metric_style().fg, Some(Color::Green));
-    assert_eq!(tui_accent_style().fg, Some(Color::LightCyan));
-    assert_eq!(tui_tool_style().fg, Some(Color::LightMagenta));
-    assert_eq!(tui_error_style().fg, Some(Color::Red));
-}
-
-#[test]
-fn connected_tui_border_helpers_use_junctions() {
-    let header = tui_connected_header_border_set();
-    assert_eq!(header.bottom_left, "├");
-    assert_eq!(header.bottom_right, "┤");
-
-    let footer = tui_connected_footer_border_set();
-    assert_eq!(footer.top_left, "├");
-    assert_eq!(footer.top_right, "┤");
-
-    assert_eq!(tui_connected_separator_line(0), "");
-    assert_eq!(tui_connected_separator_line(1), "─");
-    assert_eq!(tui_connected_separator_line(2), "├┤");
-    assert_eq!(tui_connected_separator_line(5), "├───┤");
-}
-
-#[test]
-fn status_panel_draws_on_test_backend() {
-    use ratatui::Terminal;
-    use ratatui::backend::TestBackend;
-
-    let backend = TestBackend::new(48, 3);
-    let mut terminal = Terminal::new(backend).expect("terminal");
-
-    draw_status_panel_terminal(
-        &mut terminal,
-        "Prodex Launch",
-        "preflight",
-        "Status",
-        "starting child process...",
-    )
-    .expect("draw status panel");
-}
-
-#[test]
 fn session_report_renderer_keeps_existing_columns_and_profile_line() {
     let rendered = render_session_reports_with_width(
         &[SessionReportDisplay {
