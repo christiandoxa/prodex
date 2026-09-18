@@ -49,10 +49,6 @@ pub fn runtime_log_message_is_routine_load(message: &str) -> bool {
     )
 }
 
-pub fn decode_zstd_bounded(payload: &[u8], max_bytes: usize) -> io::Result<Vec<u8>> {
-    zstd::bulk::decompress(payload, max_bytes)
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RuntimeLogFormat {
     Text,
@@ -287,18 +283,6 @@ impl RuntimeAsyncLogger {
     }
 
     #[doc(hidden)]
-    pub fn pending_count_for_path(&self, log_path: &Path) -> usize {
-        self.inner
-            .state
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .pending_by_path
-            .get(log_path)
-            .copied()
-            .unwrap_or(0)
-    }
-
-    #[doc(hidden)]
     pub fn capacity(&self) -> usize {
         self.inner.capacity
     }
@@ -402,14 +386,6 @@ impl RuntimeAsyncLoggerState {
     }
 }
 
-fn runtime_async_logger_pause_writes() -> bool {
-    runtime_async_logger_test_state()
-        .0
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner())
-        .pause_writes
-}
-
 fn runtime_async_logger_wait_for_write_permit() {
     let (mutex, condvar) = runtime_async_logger_test_state();
     let mut state = mutex
@@ -486,11 +462,6 @@ impl Drop for RuntimeAsyncLogger {
     fn drop(&mut self) {
         self.inner.work_available.notify_one();
     }
-}
-
-#[doc(hidden)]
-pub fn runtime_async_logger_writes_are_paused_for_test() -> bool {
-    runtime_async_logger_pause_writes()
 }
 
 #[cfg(test)]

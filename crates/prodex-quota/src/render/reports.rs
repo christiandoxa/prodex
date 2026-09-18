@@ -14,14 +14,6 @@ pub fn render_quota_reports(reports: &[QuotaReport], detail: bool) -> String {
     render_quota_reports_with_layout(reports, detail, None, current_cli_width())
 }
 
-pub fn render_quota_reports_with_line_limit(
-    reports: &[QuotaReport],
-    detail: bool,
-    max_lines: Option<usize>,
-) -> String {
-    render_quota_reports_with_layout(reports, detail, max_lines, current_cli_width())
-}
-
 pub fn render_quota_reports_with_layout(
     reports: &[QuotaReport],
     detail: bool,
@@ -278,10 +270,6 @@ fn format_additional_reset_pair(rate_limit: &WindowPair) -> String {
     })
     .collect::<Vec<_>>()
     .join(" | ")
-}
-
-pub fn sort_quota_reports_for_display(reports: &[QuotaReport]) -> Vec<&QuotaReport> {
-    sort_quota_reports_for_display_with_sort(reports, QuotaReportSort::Remaining)
 }
 
 pub fn sort_quota_reports_for_display_with_sort(

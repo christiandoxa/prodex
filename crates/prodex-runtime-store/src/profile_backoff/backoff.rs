@@ -139,13 +139,6 @@ pub fn runtime_profile_route_circuit_update_key(key: &str) -> String {
     format!("{ROUTE_CIRCUIT_UPDATE_PREFIX}{key}")
 }
 
-pub fn runtime_profile_backoff_update_key_valid(
-    key: &str,
-    profiles: &BTreeMap<String, ProfileEntry>,
-) -> bool {
-    runtime_profile_backoff_update_key_matches_profiles(key, profiles)
-}
-
 pub fn runtime_profile_transport_backoff_until_from_map(
     transport_backoff_until: &BTreeMap<String, i64>,
     profile_name: &str,

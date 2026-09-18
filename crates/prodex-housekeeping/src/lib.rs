@@ -40,7 +40,8 @@ pub struct ProdexCleanupSummary {
 }
 
 impl ProdexCleanupSummary {
-    pub fn total_removed(self) -> usize {
+    #[cfg(test)]
+    fn total_removed(self) -> usize {
         self.duplicate_profiles_removed
             + self.duplicate_managed_profile_homes_removed
             + self.runtime_logs_removed
@@ -119,16 +120,6 @@ pub fn remove_file_if_exists(path: &Path) -> bool {
     }
 }
 
-pub fn cleanup_existing_files<I>(paths: I) -> usize
-where
-    I: IntoIterator<Item = PathBuf>,
-{
-    paths
-        .into_iter()
-        .filter(|path| remove_file_if_exists(path))
-        .count()
-}
-
 pub fn cleanup_existing_files_under<I>(root: &Path, paths: I) -> ProdexCleanupReport
 where
     I: IntoIterator<Item = PathBuf>,
@@ -176,16 +167,6 @@ pub fn path_is_contained_without_symlink_parents(root: &Path, path: &Path) -> bo
         }
     }
     false
-}
-
-pub fn cleanup_prodex_stale_root_temp_files_at(
-    paths: &AppPaths,
-    now: SystemTime,
-    retention_seconds: i64,
-    pid_alive: impl Fn(u32) -> bool,
-) -> usize {
-    cleanup_prodex_stale_root_temp_files_at_with_counts(paths, now, retention_seconds, pid_alive)
-        .removed
 }
 
 pub fn cleanup_prodex_stale_root_temp_files_at_with_counts(
@@ -330,23 +311,6 @@ pub fn collect_orphan_managed_profile_dirs_at_with_counts(
     }
     names.sort();
     (names, scan_failures)
-}
-
-pub fn cleanup_orphan_managed_profile_dirs_at(
-    paths: &AppPaths,
-    state: &AppState,
-    now: SystemTime,
-    retention_seconds: i64,
-    remove_dir: impl Fn(&Path) -> bool,
-) -> usize {
-    cleanup_orphan_managed_profile_dirs_at_with_counts(
-        paths,
-        state,
-        now,
-        retention_seconds,
-        remove_dir,
-    )
-    .removed
 }
 
 pub fn cleanup_orphan_managed_profile_dirs_at_with_counts(

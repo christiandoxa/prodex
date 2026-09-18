@@ -46,13 +46,6 @@ fn gemini_numeric_batch(buckets: &[GeminiQuotaBucket]) -> Vec<GeminiBucketNumeri
     buckets.iter().map(gemini_bucket_numeric_rust).collect()
 }
 
-fn gemini_bucket_numeric(bucket: &GeminiQuotaBucket) -> GeminiBucketNumeric {
-    gemini_numeric_batch(std::slice::from_ref(bucket))
-        .into_iter()
-        .next()
-        .unwrap_or_else(|| panic!("Mojo Gemini quota numeric batch returned no bucket"))
-}
-
 #[cfg(not(feature = "mojo"))]
 fn gemini_bucket_numeric_rust(bucket: &GeminiQuotaBucket) -> GeminiBucketNumeric {
     let (remaining, total) = match bucket.remaining_amount.as_deref() {
@@ -142,12 +135,6 @@ pub fn format_gemini_quota_status(info: &GeminiQuotaInfo) -> String {
     } else {
         "Blocked".to_string()
     }
-}
-
-pub fn format_gemini_bucket_summary(bucket: &GeminiQuotaBucket) -> String {
-    let label = gemini_bucket_label(bucket);
-    let numeric = gemini_bucket_numeric(bucket);
-    format_gemini_bucket_summary_with_numeric(&label, numeric)
 }
 
 pub(super) fn format_gemini_bucket_summaries(info: &GeminiQuotaInfo) -> Vec<String> {

@@ -114,15 +114,12 @@ impl RuntimeBrokerContinuityFailureReasonCache {
         self.entries.remove(log_path);
     }
 
+    #[cfg(test)]
     fn clear(&mut self) {
-        self.entries.clear();
-        self.next_touch = 0;
-        self.full_rebuilds = 0;
-        self.incremental_updates = 0;
-        self.hits = 0;
-        self.misses = 0;
+        *self = Self::default();
     }
 
+    #[cfg(test)]
     fn stats(&self) -> RuntimeBrokerContinuityFailureReasonCacheStats {
         RuntimeBrokerContinuityFailureReasonCacheStats {
             full_rebuilds: self.full_rebuilds,
@@ -134,6 +131,7 @@ impl RuntimeBrokerContinuityFailureReasonCache {
     }
 }
 
+#[cfg(test)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct RuntimeBrokerContinuityFailureReasonCacheStats {
     pub full_rebuilds: u64,
@@ -220,14 +218,6 @@ fn append_runtime_broker_log_chunk(line: &mut Vec<u8>, chunk: &[u8]) -> bool {
     false
 }
 
-pub fn runtime_broker_continuity_failure_reason_metrics_from_log_file(
-    log_path: &Path,
-) -> Option<RuntimeBrokerContinuityFailureReasonMetrics> {
-    let end = fs::metadata(log_path).ok()?.len();
-    runtime_broker_continuity_failure_reason_metrics_from_log_range(log_path, 0, end)
-        .map(|(metrics, _)| metrics)
-}
-
 pub fn runtime_broker_cached_continuity_failure_reason_metrics(
     log_path: &Path,
 ) -> RuntimeBrokerContinuityFailureReasonMetrics {
@@ -294,16 +284,16 @@ pub fn runtime_broker_cached_continuity_failure_reason_metrics(
     metrics
 }
 
-#[doc(hidden)]
-pub fn clear_runtime_broker_continuity_failure_reason_cache_for_test() {
+#[cfg(test)]
+fn clear_runtime_broker_continuity_failure_reason_cache_for_test() {
     runtime_broker_continuity_failure_reason_cache()
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner())
         .clear();
 }
 
-#[doc(hidden)]
-pub fn runtime_broker_continuity_failure_reason_cache_stats_for_test()
+#[cfg(test)]
+fn runtime_broker_continuity_failure_reason_cache_stats_for_test()
 -> RuntimeBrokerContinuityFailureReasonCacheStats {
     runtime_broker_continuity_failure_reason_cache()
         .lock()
