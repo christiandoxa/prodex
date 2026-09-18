@@ -5,16 +5,9 @@ use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::fmt::Write as _;
 
-const SMART_CONTEXT_STATIC_CONTEXT_SECTION_MIN_BYTES: usize = 512;
 pub const SMART_CONTEXT_STATIC_CONTEXT_FINGERPRINT_MAX_ITEMS: usize = 128;
 pub const SMART_CONTEXT_STATIC_CONTEXT_FINGERPRINT_MAX_ITEM_BYTES: usize = 256 * 1024;
 const SMART_CONTEXT_STATIC_CONTEXT_FINGERPRINT_MAX_ID_BYTES: usize = 256;
-const SMART_CONTEXT_STATIC_CONTEXT_DELTA_MARKER_PREFIX: &str = "psc static ";
-const SMART_CONTEXT_STATIC_CONTEXT_DELTA_MARKER_PREFIX_LEGACY: &str =
-    "prodex static context unchanged ";
-const SMART_CONTEXT_STATIC_CONTEXT_DUP_MARKER_PREFIX: &str = "psc static dup ";
-const SMART_CONTEXT_STATIC_CONTEXT_CHUNK_DUP_MARKER_PREFIX: &str = "psc static chunk dup ";
-const SMART_CONTEXT_STATIC_CONTEXT_SECTION_DUP_MARKER_PREFIX: &str = "psc static section dup ";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SmartContextArtifactLineRangeRef {
@@ -31,53 +24,6 @@ pub struct SmartContextArtifactLineRangeRef {
 pub struct SmartContextArtifactLineRange {
     pub reference: SmartContextArtifactLineRangeRef,
     pub excerpt: String,
-}
-
-pub fn smart_context_artifact_line_range(
-    artifact: &SmartContextArtifactRef,
-    artifact_text: &str,
-    start_line: usize,
-    end_line: usize,
-) -> Option<SmartContextArtifactLineRange> {
-    if artifact.content_hash != smart_context_hash_text(artifact_text) {
-        return None;
-    }
-
-    let excerpt = smart_context_extract_line_range(artifact_text, start_line, end_line)?;
-    let reference = SmartContextArtifactLineRangeRef {
-        artifact_id: artifact.id.clone(),
-        artifact_content_hash: artifact.content_hash.clone(),
-        artifact_byte_len: artifact.byte_len,
-        start_line,
-        end_line,
-        excerpt_hash: smart_context_hash_text(&excerpt),
-        excerpt_byte_len: excerpt.len(),
-    };
-
-    Some(SmartContextArtifactLineRange { reference, excerpt })
-}
-
-pub fn smart_context_extract_line_range(
-    text: &str,
-    start_line: usize,
-    end_line: usize,
-) -> Option<String> {
-    if start_line == 0 || end_line < start_line {
-        return None;
-    }
-
-    let mut selected = Vec::new();
-    for (index, line) in text.lines().enumerate() {
-        let line_number = index + 1;
-        if line_number > end_line {
-            break;
-        }
-        if line_number >= start_line {
-            selected.push(line);
-        }
-    }
-
-    (!selected.is_empty()).then(|| selected.join("\n"))
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -135,14 +81,6 @@ pub struct SmartContextStaticContextItemFingerprint {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct SmartContextStaticHeadingSection {
-    pub heading: String,
-    pub start: usize,
-    pub end: usize,
-    pub ordinal: usize,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SmartContextFingerprintChange {
     Added {
         fingerprint: SmartContextFingerprint,
@@ -168,12 +106,6 @@ pub fn smart_context_fingerprint(input: SmartContextFingerprintInput) -> SmartCo
     }
 }
 
-pub fn smart_context_fingerprints(
-    inputs: impl IntoIterator<Item = SmartContextFingerprintInput>,
-) -> Vec<SmartContextFingerprint> {
-    inputs.into_iter().map(smart_context_fingerprint).collect()
-}
-
 pub fn smart_context_stabilize_static_context_text(text: &str) -> String {
     let text = text.replace("\r\n", "\n").replace('\r', "\n");
     let lines = text
@@ -192,31 +124,6 @@ pub fn smart_context_stabilize_static_context_text(text: &str) -> String {
         .unwrap_or(start);
 
     lines[start..=end].join("\n")
-}
-
-pub fn smart_context_stabilize_static_context_items(
-    items: impl IntoIterator<Item = SmartContextStaticContextItem>,
-) -> Vec<SmartContextStableStaticContextItem> {
-    let mut items = items
-        .into_iter()
-        .filter_map(|item| {
-            let id = smart_context_stabilize_static_context_id(&item.id);
-            let canonical_text = smart_context_stabilize_static_context_text(&item.text);
-            if id.is_empty() && canonical_text.is_empty() {
-                return None;
-            }
-            let content_hash = smart_context_hash_text(&canonical_text);
-            Some(SmartContextStableStaticContextItem {
-                id,
-                byte_len: canonical_text.len(),
-                canonical_text,
-                content_hash,
-            })
-        })
-        .collect::<Vec<_>>();
-
-    items.sort_by(smart_context_static_context_item_order);
-    items
 }
 
 pub fn smart_context_static_context_prompt_cache_fingerprint(
@@ -432,86 +339,6 @@ fn smart_context_hex_digest(digest: [u8; 32]) -> String {
         write!(output, "{byte:02x}").expect("writing to String cannot fail");
     }
     output
-}
-
-pub fn smart_context_static_heading_section_body<'a>(
-    text: &'a str,
-    section: &SmartContextStaticHeadingSection,
-) -> Option<&'a str> {
-    if section.start >= section.end
-        || section.end > text.len()
-        || !text.is_char_boundary(section.start)
-        || !text.is_char_boundary(section.end)
-    {
-        return None;
-    }
-    text.get(section.start..section.end)
-}
-
-pub fn smart_context_static_context_heading_sections(
-    text: &str,
-) -> Vec<SmartContextStaticHeadingSection> {
-    let mut headings = Vec::<(String, usize)>::new();
-    let mut offset = 0usize;
-    for line in text.split_inclusive('\n') {
-        let line_without_newline = line.trim_end_matches('\n').trim_end_matches('\r');
-        if let Some(heading) = smart_context_static_context_heading(line_without_newline) {
-            headings.push((heading, offset));
-        }
-        offset = offset.saturating_add(line.len());
-    }
-    if !text.ends_with('\n')
-        && let Some(last_line) = text.rsplit('\n').next()
-        && let Some(heading) = smart_context_static_context_heading(last_line)
-    {
-        let start = text.len().saturating_sub(last_line.len());
-        if !headings
-            .iter()
-            .any(|(_, existing_start)| *existing_start == start)
-        {
-            headings.push((heading, start));
-        }
-    }
-    let mut sections = Vec::new();
-    for (index, (heading, start)) in headings.iter().enumerate() {
-        let end = headings
-            .get(index + 1)
-            .map(|(_, next_start)| *next_start)
-            .unwrap_or(text.len());
-        if end.saturating_sub(*start) < SMART_CONTEXT_STATIC_CONTEXT_SECTION_MIN_BYTES {
-            continue;
-        }
-        let Some(body) = text.get(*start..end).map(str::trim) else {
-            continue;
-        };
-        if body.starts_with(SMART_CONTEXT_STATIC_CONTEXT_DELTA_MARKER_PREFIX)
-            || body.starts_with(SMART_CONTEXT_STATIC_CONTEXT_DELTA_MARKER_PREFIX_LEGACY)
-            || body.starts_with(SMART_CONTEXT_STATIC_CONTEXT_DUP_MARKER_PREFIX)
-            || body.starts_with(SMART_CONTEXT_STATIC_CONTEXT_CHUNK_DUP_MARKER_PREFIX)
-            || body.starts_with(SMART_CONTEXT_STATIC_CONTEXT_SECTION_DUP_MARKER_PREFIX)
-        {
-            continue;
-        }
-        sections.push(SmartContextStaticHeadingSection {
-            heading: heading.clone(),
-            start: *start,
-            end,
-            ordinal: index,
-        });
-    }
-    sections
-}
-
-fn smart_context_static_context_heading(line: &str) -> Option<String> {
-    let trimmed = line.trim();
-    if !trimmed.starts_with('#') {
-        return None;
-    }
-    let level = trimmed.chars().take_while(|ch| *ch == '#').count();
-    if level == 0 || level > 6 || !trimmed.chars().nth(level).is_some_and(char::is_whitespace) {
-        return None;
-    }
-    Some(trimmed.to_string())
 }
 
 pub fn smart_context_fingerprint_delta(

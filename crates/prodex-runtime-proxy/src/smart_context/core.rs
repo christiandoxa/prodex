@@ -1,26 +1,7 @@
 use super::*;
-use std::borrow::Cow;
 
-pub(super) const SMART_CONTEXT_SHORT_ARTIFACT_REF_PREFIX: &str = "psc:";
 pub(super) const SMART_CONTEXT_MODEL_SCAN_MAX_BYTES: usize = 4 * 1024;
 pub(super) const SMART_CONTEXT_MODEL_NAME_MAX_BYTES: usize = 128;
-
-pub fn smart_context_structural_minify_json_body(body: &[u8]) -> Cow<'_, [u8]> {
-    let Ok(value) = serde_json::from_slice::<serde_json::Value>(body) else {
-        return Cow::Borrowed(body);
-    };
-    smart_context_structural_minify_json_value_body(body, &value)
-}
-
-pub fn smart_context_structural_minify_json_value_body<'a>(
-    original_body: &'a [u8],
-    value: &serde_json::Value,
-) -> Cow<'a, [u8]> {
-    match serde_json::to_vec(value) {
-        Ok(body) if body != original_body => Cow::Owned(body),
-        _ => Cow::Borrowed(original_body),
-    }
-}
 
 pub fn smart_context_model_name_from_body(body: &[u8]) -> Option<String> {
     if body.is_empty() {
@@ -216,26 +197,4 @@ pub struct SmartContextArtifactRef {
     pub id: String,
     pub byte_len: usize,
     pub content_hash: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct SmartContextToolOutput {
-    pub call_id: String,
-    pub text: String,
-    pub artifact: Option<SmartContextArtifactRef>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum SmartContextCondensedToolOutput {
-    Inline {
-        call_id: String,
-        text: String,
-        content_hash: String,
-    },
-    ArtifactBacked {
-        call_id: String,
-        artifact: SmartContextArtifactRef,
-        content_hash: String,
-        summary: String,
-    },
 }

@@ -281,25 +281,28 @@ fn adaptive_budget_policy_expands_preview_only_after_recent_safe_savings() {
 
 #[test]
 fn recent_rewrite_safety_requires_savings_without_fallbacks() {
-    assert!(!smart_context_recent_rewrite_safety_allows_larger_preview(
-        &SmartContextRecentRewriteSafety {
+    assert_eq!(
+        smart_context_recent_rewrite_safety_budget_decision(&SmartContextRecentRewriteSafety {
             safe_rewrites: 2,
             fallback_rewrites: 0,
             saved_tokens: SMART_CONTEXT_RECENT_SAFE_REWRITE_MIN_SAVED_TOKENS * 2 - 1,
-        }
-    ));
-    assert!(!smart_context_recent_rewrite_safety_allows_larger_preview(
-        &SmartContextRecentRewriteSafety {
+        }),
+        SmartContextRewriteBudgetDecision::Tighten
+    );
+    assert_eq!(
+        smart_context_recent_rewrite_safety_budget_decision(&SmartContextRecentRewriteSafety {
             safe_rewrites: 1,
             fallback_rewrites: 1,
             saved_tokens: SMART_CONTEXT_RECENT_SAFE_REWRITE_MIN_SAVED_TOKENS * 2,
-        }
-    ));
-    assert!(smart_context_recent_rewrite_safety_allows_larger_preview(
-        &SmartContextRecentRewriteSafety {
+        }),
+        SmartContextRewriteBudgetDecision::Tighten
+    );
+    assert_eq!(
+        smart_context_recent_rewrite_safety_budget_decision(&SmartContextRecentRewriteSafety {
             safe_rewrites: 1,
             fallback_rewrites: 0,
             saved_tokens: SMART_CONTEXT_RECENT_SAFE_REWRITE_MIN_SAVED_TOKENS,
-        }
-    ));
+        }),
+        SmartContextRewriteBudgetDecision::Relax
+    );
 }
