@@ -54,15 +54,7 @@ fn translator(provider: ProviderId) -> &'static dyn ProviderTranslator {
 }
 
 fn model_catalog(provider: ProviderId) -> &'static [ProviderModelSpec] {
-    match provider {
-        ProviderId::OpenAi => OPENAI_MODELS,
-        ProviderId::Anthropic => ANTHROPIC_MODELS,
-        ProviderId::Copilot => COPILOT_MODELS,
-        ProviderId::DeepSeek => DEEPSEEK_MODELS,
-        ProviderId::Gemini => GEMINI_MODELS,
-        ProviderId::Kiro => KIRO_MODELS,
-        ProviderId::Local => LOCAL_MODELS,
-    }
+    builtin_model_catalog(provider)
 }
 
 fn runtime_metadata(provider: ProviderId) -> Option<&'static ProviderRuntimeMetadata> {

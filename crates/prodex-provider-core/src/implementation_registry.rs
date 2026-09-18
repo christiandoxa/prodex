@@ -1,13 +1,6 @@
 //! Immutable built-in provider implementation registry.
 
-use std::sync::LazyLock;
-#[cfg(not(feature = "mojo"))]
-use std::{error::Error, fmt};
-
-use crate::models::{
-    ANTHROPIC_MODELS, COPILOT_MODELS, DEEPSEEK_MODELS, GEMINI_MODELS, KIRO_MODELS, LOCAL_MODELS,
-    OPENAI_MODELS,
-};
+use crate::models::builtin_model_catalog;
 use crate::runtime_metadata::{
     ANTHROPIC_RUNTIME_METADATA, COPILOT_RUNTIME_METADATA, DEEPSEEK_RUNTIME_METADATA,
     GEMINI_RUNTIME_METADATA, KIRO_RUNTIME_METADATA, LOCAL_RUNTIME_METADATA,
@@ -21,13 +14,8 @@ use crate::{
     ProviderModelSpec, ProviderRuntimeMetadata, ProviderTranslator, ProviderWireFormat,
     StaticProviderAdapter,
 };
+use std::sync::LazyLock;
 
-#[cfg(not(feature = "mojo"))]
-use crate::{
-    COPILOT_TEXT_ENDPOINTS, CORE_TEXT_ENDPOINTS, GEMINI_ENDPOINTS, KIRO_ENDPOINTS, OPENAI_ENDPOINTS,
-};
-
-#[cfg(feature = "mojo")]
 #[path = "implementation_registry/mojo.rs"]
 mod mojo;
 
@@ -39,199 +27,6 @@ pub const PROVIDER_IMPLEMENTATION_ORDER: &[ProviderId] = &[
     ProviderId::Gemini,
     ProviderId::Kiro,
     ProviderId::Local,
-];
-
-#[cfg(not(feature = "mojo"))]
-const OPENAI_CAPABILITIES: &[(ProviderEndpoint, ProviderCapabilityStatus)] = &[
-    (
-        ProviderEndpoint::Responses,
-        ProviderCapabilityStatus::Native,
-    ),
-    (
-        ProviderEndpoint::ResponsesCompact,
-        ProviderCapabilityStatus::Emulated,
-    ),
-    (
-        ProviderEndpoint::ChatCompletions,
-        ProviderCapabilityStatus::Native,
-    ),
-    (ProviderEndpoint::Models, ProviderCapabilityStatus::Native),
-    (
-        ProviderEndpoint::Embeddings,
-        ProviderCapabilityStatus::Native,
-    ),
-    (ProviderEndpoint::Images, ProviderCapabilityStatus::Native),
-    (ProviderEndpoint::Audio, ProviderCapabilityStatus::Native),
-    (ProviderEndpoint::Batches, ProviderCapabilityStatus::Native),
-];
-#[cfg(not(feature = "mojo"))]
-const CHAT_TRANSLATED_CAPABILITIES: &[(ProviderEndpoint, ProviderCapabilityStatus)] = &[
-    (
-        ProviderEndpoint::Responses,
-        ProviderCapabilityStatus::Translated,
-    ),
-    (
-        ProviderEndpoint::ResponsesCompact,
-        ProviderCapabilityStatus::Emulated,
-    ),
-    (
-        ProviderEndpoint::ChatCompletions,
-        ProviderCapabilityStatus::Passthrough,
-    ),
-    (
-        ProviderEndpoint::Messages,
-        ProviderCapabilityStatus::Passthrough,
-    ),
-    (ProviderEndpoint::Models, ProviderCapabilityStatus::Emulated),
-];
-#[cfg(not(feature = "mojo"))]
-const COPILOT_CAPABILITIES: &[(ProviderEndpoint, ProviderCapabilityStatus)] = &[
-    (
-        ProviderEndpoint::Responses,
-        ProviderCapabilityStatus::Native,
-    ),
-    (
-        ProviderEndpoint::ResponsesCompact,
-        ProviderCapabilityStatus::Passthrough,
-    ),
-    (
-        ProviderEndpoint::ChatCompletions,
-        ProviderCapabilityStatus::Passthrough,
-    ),
-    (
-        ProviderEndpoint::Messages,
-        ProviderCapabilityStatus::Passthrough,
-    ),
-    (ProviderEndpoint::Models, ProviderCapabilityStatus::Emulated),
-];
-#[cfg(not(feature = "mojo"))]
-const GEMINI_CAPABILITIES: &[(ProviderEndpoint, ProviderCapabilityStatus)] = &[
-    (
-        ProviderEndpoint::Responses,
-        ProviderCapabilityStatus::Translated,
-    ),
-    (
-        ProviderEndpoint::ResponsesCompact,
-        ProviderCapabilityStatus::Emulated,
-    ),
-    (
-        ProviderEndpoint::ChatCompletions,
-        ProviderCapabilityStatus::Passthrough,
-    ),
-    (
-        ProviderEndpoint::Messages,
-        ProviderCapabilityStatus::Passthrough,
-    ),
-    (ProviderEndpoint::Models, ProviderCapabilityStatus::Emulated),
-    (
-        ProviderEndpoint::Embeddings,
-        ProviderCapabilityStatus::Passthrough,
-    ),
-];
-#[cfg(not(feature = "mojo"))]
-const KIRO_CAPABILITIES: &[(ProviderEndpoint, ProviderCapabilityStatus)] = &[
-    (
-        ProviderEndpoint::Responses,
-        ProviderCapabilityStatus::Translated,
-    ),
-    (
-        ProviderEndpoint::ResponsesCompact,
-        ProviderCapabilityStatus::Emulated,
-    ),
-    (
-        ProviderEndpoint::ChatCompletions,
-        ProviderCapabilityStatus::Translated,
-    ),
-    (
-        ProviderEndpoint::Messages,
-        ProviderCapabilityStatus::Translated,
-    ),
-    (ProviderEndpoint::Models, ProviderCapabilityStatus::Emulated),
-];
-#[cfg(not(feature = "mojo"))]
-const LOCAL_CAPABILITIES: &[(ProviderEndpoint, ProviderCapabilityStatus)] = &[
-    (
-        ProviderEndpoint::Responses,
-        ProviderCapabilityStatus::Passthrough,
-    ),
-    (
-        ProviderEndpoint::ResponsesCompact,
-        ProviderCapabilityStatus::Emulated,
-    ),
-    (
-        ProviderEndpoint::ChatCompletions,
-        ProviderCapabilityStatus::Passthrough,
-    ),
-    (
-        ProviderEndpoint::Messages,
-        ProviderCapabilityStatus::Passthrough,
-    ),
-    (
-        ProviderEndpoint::Models,
-        ProviderCapabilityStatus::Passthrough,
-    ),
-    (
-        ProviderEndpoint::Embeddings,
-        ProviderCapabilityStatus::Passthrough,
-    ),
-    (
-        ProviderEndpoint::Images,
-        ProviderCapabilityStatus::Passthrough,
-    ),
-    (
-        ProviderEndpoint::Audio,
-        ProviderCapabilityStatus::Passthrough,
-    ),
-    (
-        ProviderEndpoint::Batches,
-        ProviderCapabilityStatus::Passthrough,
-    ),
-    (
-        ProviderEndpoint::Rerank,
-        ProviderCapabilityStatus::Passthrough,
-    ),
-    (ProviderEndpoint::A2a, ProviderCapabilityStatus::Passthrough),
-];
-#[cfg(not(feature = "mojo"))]
-const OPENAI_PASSTHROUGH_ENDPOINTS: &[ProviderEndpoint] = &[
-    ProviderEndpoint::Responses,
-    ProviderEndpoint::ChatCompletions,
-    ProviderEndpoint::Models,
-    ProviderEndpoint::Embeddings,
-    ProviderEndpoint::Images,
-    ProviderEndpoint::Audio,
-    ProviderEndpoint::Batches,
-];
-#[cfg(not(feature = "mojo"))]
-const LOCAL_PASSTHROUGH_ENDPOINTS: &[ProviderEndpoint] = &[
-    ProviderEndpoint::Responses,
-    ProviderEndpoint::ChatCompletions,
-    ProviderEndpoint::Messages,
-    ProviderEndpoint::Models,
-    ProviderEndpoint::Embeddings,
-    ProviderEndpoint::Images,
-    ProviderEndpoint::Audio,
-    ProviderEndpoint::Batches,
-    ProviderEndpoint::Rerank,
-    ProviderEndpoint::A2a,
-];
-#[cfg(not(feature = "mojo"))]
-const CHAT_PASSTHROUGH_ENDPOINTS: &[ProviderEndpoint] = &[
-    ProviderEndpoint::ChatCompletions,
-    ProviderEndpoint::Messages,
-];
-#[cfg(not(feature = "mojo"))]
-const COPILOT_PASSTHROUGH_ENDPOINTS: &[ProviderEndpoint] = &[
-    ProviderEndpoint::Responses,
-    ProviderEndpoint::ResponsesCompact,
-    ProviderEndpoint::ChatCompletions,
-    ProviderEndpoint::Messages,
-];
-#[cfg(not(feature = "mojo"))]
-const GEMINI_PASSTHROUGH_ENDPOINTS: &[ProviderEndpoint] = &[
-    ProviderEndpoint::ChatCompletions,
-    ProviderEndpoint::Messages,
-    ProviderEndpoint::Embeddings,
 ];
 
 static OPENAI_TRANSLATOR: PassthroughTranslator = PassthroughTranslator::new(ProviderId::OpenAi);
@@ -259,122 +54,6 @@ struct ProviderImplementationRegistration {
     model_catalog: &'static [ProviderModelSpec],
     runtime_metadata: Option<&'static ProviderRuntimeMetadata>,
 }
-
-#[cfg(not(feature = "mojo"))]
-const BUILTIN_REGISTRATIONS: &[ProviderImplementationRegistration] = &[
-    ProviderImplementationRegistration {
-        provider: ProviderId::OpenAi,
-        aliases: &["openai-responses", "openai_compatible", "openai-compatible"],
-        adapter: StaticProviderAdapter::new(ProviderId::OpenAi),
-        translator: &OPENAI_TRANSLATOR,
-        client_request_format: ProviderWireFormat::OpenAiResponses,
-        upstream_request_format: ProviderWireFormat::OpenAiResponses,
-        response_format: ProviderWireFormat::OpenAiResponses,
-        supports_streaming: true,
-        supports_model_fallback: false,
-        supported_endpoints: OPENAI_ENDPOINTS,
-        capabilities: OPENAI_CAPABILITIES,
-        passthrough_endpoints: OPENAI_PASSTHROUGH_ENDPOINTS,
-        model_catalog: OPENAI_MODELS,
-        runtime_metadata: None,
-    },
-    ProviderImplementationRegistration {
-        provider: ProviderId::Anthropic,
-        aliases: &["claude"],
-        adapter: StaticProviderAdapter::new(ProviderId::Anthropic),
-        translator: &ANTHROPIC_TRANSLATOR,
-        client_request_format: ProviderWireFormat::OpenAiResponses,
-        upstream_request_format: ProviderWireFormat::OpenAiChatCompletions,
-        response_format: ProviderWireFormat::OpenAiResponses,
-        supports_streaming: true,
-        supports_model_fallback: true,
-        supported_endpoints: CORE_TEXT_ENDPOINTS,
-        capabilities: CHAT_TRANSLATED_CAPABILITIES,
-        passthrough_endpoints: CHAT_PASSTHROUGH_ENDPOINTS,
-        model_catalog: ANTHROPIC_MODELS,
-        runtime_metadata: Some(&ANTHROPIC_RUNTIME_METADATA),
-    },
-    ProviderImplementationRegistration {
-        provider: ProviderId::Copilot,
-        aliases: &["github-copilot", "github_copilot"],
-        adapter: StaticProviderAdapter::new(ProviderId::Copilot),
-        translator: &COPILOT_TRANSLATOR,
-        client_request_format: ProviderWireFormat::OpenAiResponses,
-        upstream_request_format: ProviderWireFormat::OpenAiResponses,
-        response_format: ProviderWireFormat::OpenAiResponses,
-        supports_streaming: true,
-        supports_model_fallback: true,
-        supported_endpoints: COPILOT_TEXT_ENDPOINTS,
-        capabilities: COPILOT_CAPABILITIES,
-        passthrough_endpoints: COPILOT_PASSTHROUGH_ENDPOINTS,
-        model_catalog: COPILOT_MODELS,
-        runtime_metadata: Some(&COPILOT_RUNTIME_METADATA),
-    },
-    ProviderImplementationRegistration {
-        provider: ProviderId::DeepSeek,
-        aliases: &[],
-        adapter: StaticProviderAdapter::new(ProviderId::DeepSeek),
-        translator: &DEEPSEEK_TRANSLATOR,
-        client_request_format: ProviderWireFormat::OpenAiResponses,
-        upstream_request_format: ProviderWireFormat::OpenAiChatCompletions,
-        response_format: ProviderWireFormat::OpenAiResponses,
-        supports_streaming: true,
-        supports_model_fallback: true,
-        supported_endpoints: CORE_TEXT_ENDPOINTS,
-        capabilities: CHAT_TRANSLATED_CAPABILITIES,
-        passthrough_endpoints: CHAT_PASSTHROUGH_ENDPOINTS,
-        model_catalog: DEEPSEEK_MODELS,
-        runtime_metadata: Some(&DEEPSEEK_RUNTIME_METADATA),
-    },
-    ProviderImplementationRegistration {
-        provider: ProviderId::Gemini,
-        aliases: &["google"],
-        adapter: StaticProviderAdapter::new(ProviderId::Gemini),
-        translator: &GEMINI_TRANSLATOR,
-        client_request_format: ProviderWireFormat::OpenAiResponses,
-        upstream_request_format: ProviderWireFormat::GeminiGenerateContent,
-        response_format: ProviderWireFormat::OpenAiResponses,
-        supports_streaming: true,
-        supports_model_fallback: true,
-        supported_endpoints: GEMINI_ENDPOINTS,
-        capabilities: GEMINI_CAPABILITIES,
-        passthrough_endpoints: GEMINI_PASSTHROUGH_ENDPOINTS,
-        model_catalog: GEMINI_MODELS,
-        runtime_metadata: Some(&GEMINI_RUNTIME_METADATA),
-    },
-    ProviderImplementationRegistration {
-        provider: ProviderId::Kiro,
-        aliases: &[],
-        adapter: StaticProviderAdapter::new(ProviderId::Kiro),
-        translator: &KIRO_TRANSLATOR,
-        client_request_format: ProviderWireFormat::OpenAiResponses,
-        upstream_request_format: ProviderWireFormat::Passthrough,
-        response_format: ProviderWireFormat::OpenAiResponses,
-        supports_streaming: true,
-        supports_model_fallback: false,
-        supported_endpoints: KIRO_ENDPOINTS,
-        capabilities: KIRO_CAPABILITIES,
-        passthrough_endpoints: &[],
-        model_catalog: KIRO_MODELS,
-        runtime_metadata: Some(&KIRO_RUNTIME_METADATA),
-    },
-    ProviderImplementationRegistration {
-        provider: ProviderId::Local,
-        aliases: &["local-openai", "local_openai"],
-        adapter: StaticProviderAdapter::new(ProviderId::Local),
-        translator: &LOCAL_TRANSLATOR,
-        client_request_format: ProviderWireFormat::OpenAiResponses,
-        upstream_request_format: ProviderWireFormat::OpenAiResponses,
-        response_format: ProviderWireFormat::OpenAiResponses,
-        supports_streaming: true,
-        supports_model_fallback: false,
-        supported_endpoints: ALL_PROVIDER_ENDPOINTS,
-        capabilities: LOCAL_CAPABILITIES,
-        passthrough_endpoints: LOCAL_PASSTHROUGH_ENDPOINTS,
-        model_catalog: LOCAL_MODELS,
-        runtime_metadata: Some(&LOCAL_RUNTIME_METADATA),
-    },
-];
 
 pub struct ProviderImplementationDescriptor {
     registration: ProviderImplementationRegistration,
@@ -477,28 +156,6 @@ pub struct ProviderImplementationRegistry {
 }
 
 impl ProviderImplementationRegistry {
-    #[cfg(not(feature = "mojo"))]
-    fn from_registrations(
-        registrations: &[ProviderImplementationRegistration],
-    ) -> Result<Self, ProviderImplementationRegistryError> {
-        validate_names(registrations)?;
-        let mut descriptors = Vec::with_capacity(registrations.len());
-        for (index, registration) in registrations.iter().copied().enumerate() {
-            let adapter = registration.adapter;
-            let translator = registration.translator;
-            validate_registration(index, registration, adapter, translator)?;
-            descriptors.push(ProviderImplementationDescriptor {
-                registration,
-                adapter,
-                translator,
-            });
-        }
-        validate_order(registrations)?;
-        Ok(Self {
-            descriptors: descriptors.into_boxed_slice(),
-        })
-    }
-
     pub fn get(&self, provider: ProviderId) -> Option<&ProviderImplementationDescriptor> {
         self.descriptors
             .iter()
@@ -506,43 +163,11 @@ impl ProviderImplementationRegistry {
     }
 
     pub fn resolve_alias(&self, value: &str) -> Option<ProviderId> {
-        #[cfg(feature = "mojo")]
-        {
-            mojo::resolve_alias(value)
-        }
-        #[cfg(not(feature = "mojo"))]
-        {
-            let value = value.trim();
-            self.descriptors.iter().find_map(|descriptor| {
-                (descriptor.canonical_label().eq_ignore_ascii_case(value)
-                    || descriptor
-                        .accepted_aliases()
-                        .iter()
-                        .any(|alias| alias.eq_ignore_ascii_case(value)))
-                .then_some(descriptor.provider())
-            })
-        }
+        mojo::resolve_alias(value)
     }
 
     pub fn resolve_model_provider_id(&self, value: &str) -> Option<ProviderId> {
-        #[cfg(feature = "mojo")]
-        {
-            mojo::resolve_model_provider_id(value)
-        }
-        #[cfg(not(feature = "mojo"))]
-        {
-            let value = value.trim();
-            self.resolve_alias(value).or_else(|| {
-                self.descriptors.iter().find_map(|descriptor| {
-                    descriptor
-                        .runtime_metadata()
-                        .is_some_and(|metadata| {
-                            metadata.model_provider_id.eq_ignore_ascii_case(value)
-                        })
-                        .then_some(descriptor.provider())
-                })
-            })
-        }
+        mojo::resolve_model_provider_id(value)
     }
 
     pub fn iter(&self) -> impl ExactSizeIterator<Item = &ProviderImplementationDescriptor> {
@@ -556,29 +181,17 @@ impl ProviderImplementationRegistry {
 
 pub fn provider_implementation_registry() -> &'static ProviderImplementationRegistry {
     static REGISTRY: LazyLock<ProviderImplementationRegistry> = LazyLock::new(|| {
-        #[cfg(feature = "mojo")]
-        let registrations = mojo::builtin_registrations();
-        #[cfg(not(feature = "mojo"))]
-        let registrations = BUILTIN_REGISTRATIONS;
-        #[cfg(feature = "mojo")]
-        {
-            let descriptors = registrations
-                .iter()
-                .copied()
-                .map(|registration| ProviderImplementationDescriptor {
-                    adapter: registration.adapter,
-                    translator: registration.translator,
-                    registration,
-                })
-                .collect::<Vec<_>>()
-                .into_boxed_slice();
-            ProviderImplementationRegistry { descriptors }
-        }
-        #[cfg(not(feature = "mojo"))]
-        {
-            ProviderImplementationRegistry::from_registrations(registrations)
-                .expect("built-in provider implementation registry must be valid")
-        }
+        let descriptors = mojo::builtin_registrations()
+            .iter()
+            .copied()
+            .map(|registration| ProviderImplementationDescriptor {
+                adapter: registration.adapter,
+                translator: registration.translator,
+                registration,
+            })
+            .collect::<Vec<_>>()
+            .into_boxed_slice();
+        ProviderImplementationRegistry { descriptors }
     });
     &REGISTRY
 }
@@ -595,218 +208,4 @@ pub(crate) const fn builtin_provider_runtime_metadata(
         ProviderId::Kiro => Some(&KIRO_RUNTIME_METADATA),
         ProviderId::Local => Some(&LOCAL_RUNTIME_METADATA),
     }
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-#[cfg(not(feature = "mojo"))]
-enum ProviderImplementationRegistryError {
-    DuplicateProviderId { first: usize, duplicate: usize },
-    DuplicateNormalizedAlias { first: usize, duplicate: usize },
-    AliasCanonicalLabelCollision { alias: usize, label: usize },
-    AdapterProviderMismatch { index: usize },
-    TranslatorProviderMismatch { index: usize },
-    InconsistentWireFormatMetadata { index: usize },
-    MissingEndpointMetadata { index: usize },
-    InconsistentCapabilityMetadata { index: usize },
-    MissingModelCatalog { index: usize },
-    InconsistentModelCatalog { index: usize },
-    MissingRuntimeMetadata { index: usize },
-    UnexpectedRuntimeMetadata { index: usize },
-    RuntimeMetadataProviderMismatch { index: usize },
-    NonDeterministicRegistrationOrder { index: usize },
-}
-
-#[cfg(not(feature = "mojo"))]
-impl fmt::Display for ProviderImplementationRegistryError {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            formatter,
-            "invalid provider implementation registry: {self:?}"
-        )
-    }
-}
-
-#[cfg(not(feature = "mojo"))]
-impl Error for ProviderImplementationRegistryError {}
-
-#[cfg(not(feature = "mojo"))]
-fn validate_names(
-    registrations: &[ProviderImplementationRegistration],
-) -> Result<(), ProviderImplementationRegistryError> {
-    validate_duplicate_provider_ids(registrations)?;
-    validate_aliases(registrations)
-}
-
-#[cfg(not(feature = "mojo"))]
-fn validate_duplicate_provider_ids(
-    registrations: &[ProviderImplementationRegistration],
-) -> Result<(), ProviderImplementationRegistryError> {
-    for (index, registration) in registrations.iter().enumerate() {
-        for (previous, candidate) in registrations[..index].iter().enumerate() {
-            if candidate.provider == registration.provider {
-                return Err(ProviderImplementationRegistryError::DuplicateProviderId {
-                    first: previous,
-                    duplicate: index,
-                });
-            }
-        }
-    }
-    Ok(())
-}
-
-#[cfg(not(feature = "mojo"))]
-fn validate_aliases(
-    registrations: &[ProviderImplementationRegistration],
-) -> Result<(), ProviderImplementationRegistryError> {
-    let mut seen_aliases = Vec::new();
-    for (index, registration) in registrations.iter().enumerate() {
-        for alias in registration.aliases {
-            let normalized_alias = normalized(alias);
-            if let Some((first, _)) = seen_aliases
-                .iter()
-                .find(|(_, candidate)| *candidate == normalized_alias)
-            {
-                return Err(
-                    ProviderImplementationRegistryError::DuplicateNormalizedAlias {
-                        first: *first,
-                        duplicate: index,
-                    },
-                );
-            }
-            for (label_index, candidate) in registrations.iter().enumerate() {
-                if normalized(candidate.provider.label()) == normalized_alias {
-                    return Err(
-                        ProviderImplementationRegistryError::AliasCanonicalLabelCollision {
-                            alias: index,
-                            label: label_index,
-                        },
-                    );
-                }
-            }
-            seen_aliases.push((index, normalized_alias));
-        }
-    }
-    Ok(())
-}
-
-#[cfg(not(feature = "mojo"))]
-fn validate_registration(
-    index: usize,
-    registration: ProviderImplementationRegistration,
-    adapter: StaticProviderAdapter,
-    translator: &'static dyn ProviderTranslator,
-) -> Result<(), ProviderImplementationRegistryError> {
-    if adapter.provider() != registration.provider {
-        return Err(ProviderImplementationRegistryError::AdapterProviderMismatch { index });
-    }
-    if translator.provider() != registration.provider {
-        return Err(ProviderImplementationRegistryError::TranslatorProviderMismatch { index });
-    }
-    if translator.client_wire_format() != registration.client_request_format
-        || translator.upstream_wire_format() != registration.upstream_request_format
-        || registration.response_format != registration.client_request_format
-    {
-        return Err(ProviderImplementationRegistryError::InconsistentWireFormatMetadata { index });
-    }
-    if registration.supported_endpoints.is_empty() {
-        return Err(ProviderImplementationRegistryError::MissingEndpointMetadata { index });
-    }
-    if !capabilities_are_coherent(registration) {
-        return Err(ProviderImplementationRegistryError::InconsistentCapabilityMetadata { index });
-    }
-    if registration.model_catalog.is_empty() {
-        return Err(ProviderImplementationRegistryError::MissingModelCatalog { index });
-    }
-    if registration.model_catalog.iter().any(|model| {
-        model.provider != registration.provider
-            || model.endpoints.is_empty()
-            || model
-                .endpoints
-                .iter()
-                .any(|endpoint| !registration.supported_endpoints.contains(endpoint))
-    }) {
-        return Err(ProviderImplementationRegistryError::InconsistentModelCatalog { index });
-    }
-    match (registration.provider, registration.runtime_metadata) {
-        (ProviderId::OpenAi, Some(_)) => {
-            return Err(ProviderImplementationRegistryError::UnexpectedRuntimeMetadata { index });
-        }
-        (ProviderId::OpenAi, None) => {}
-        (_, None) => {
-            return Err(ProviderImplementationRegistryError::MissingRuntimeMetadata { index });
-        }
-        (_, Some(metadata)) if metadata.provider != registration.provider => {
-            return Err(
-                ProviderImplementationRegistryError::RuntimeMetadataProviderMismatch { index },
-            );
-        }
-        (_, Some(_)) => {}
-    }
-    Ok(())
-}
-
-#[cfg(not(feature = "mojo"))]
-fn capabilities_are_coherent(registration: ProviderImplementationRegistration) -> bool {
-    if registration.capabilities.len() != registration.supported_endpoints.len() {
-        return false;
-    }
-    for (index, endpoint) in registration.supported_endpoints.iter().enumerate() {
-        if registration.supported_endpoints[..index].contains(endpoint) {
-            return false;
-        }
-        let statuses: Vec<_> = registration
-            .capabilities
-            .iter()
-            .filter_map(|(candidate, status)| (*candidate == *endpoint).then_some(*status))
-            .collect();
-        if statuses.len() != 1
-            || matches!(
-                statuses[0],
-                ProviderCapabilityStatus::Unsupported | ProviderCapabilityStatus::Untested
-            )
-        {
-            return false;
-        }
-    }
-    let capabilities_valid = registration.capabilities.iter().all(|(endpoint, status)| {
-        registration.supported_endpoints.contains(endpoint)
-            && ALL_PROVIDER_ENDPOINTS.contains(endpoint)
-            && (*status != ProviderCapabilityStatus::Passthrough
-                || registration.passthrough_endpoints.contains(endpoint))
-    });
-    capabilities_valid
-        && registration.passthrough_endpoints.iter().all(|endpoint| {
-            registration.supported_endpoints.contains(endpoint)
-                && matches!(
-                    registration
-                        .capabilities
-                        .iter()
-                        .find_map(|(candidate, status)| {
-                            (*candidate == *endpoint).then_some(*status)
-                        }),
-                    Some(ProviderCapabilityStatus::Native | ProviderCapabilityStatus::Passthrough)
-                )
-        })
-}
-
-#[cfg(not(feature = "mojo"))]
-fn validate_order(
-    registrations: &[ProviderImplementationRegistration],
-) -> Result<(), ProviderImplementationRegistryError> {
-    let count = registrations.len().max(PROVIDER_IMPLEMENTATION_ORDER.len());
-    for index in 0..count {
-        if registrations.get(index).map(|entry| entry.provider)
-            != PROVIDER_IMPLEMENTATION_ORDER.get(index).copied()
-        {
-            return Err(
-                ProviderImplementationRegistryError::NonDeterministicRegistrationOrder { index },
-            );
-        }
-    }
-    Ok(())
-}
-
-#[cfg(not(feature = "mojo"))]
-fn normalized(value: &str) -> String {
-    value.trim().to_ascii_lowercase()
 }

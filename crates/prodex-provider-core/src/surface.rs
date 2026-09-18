@@ -11,9 +11,6 @@ mod models;
 
 pub use self::adapter_contract::{ProviderBodyTransform, ProviderTransformPhase};
 pub use self::endpoints::{ALL_PROVIDER_ENDPOINTS, provider_supported_endpoints};
-pub(crate) use self::endpoints::{
-    COPILOT_TEXT_ENDPOINTS, CORE_TEXT_ENDPOINTS, GEMINI_ENDPOINTS, KIRO_ENDPOINTS, OPENAI_ENDPOINTS,
-};
 pub use self::models::{ProviderModelCost, ProviderModelSpec};
 
 pub const PRODEX_ANTHROPIC_DEFAULT_MODEL: &str = "claude-sonnet-4-6";
