@@ -1,7 +1,6 @@
 use std::ffi::{OsStr, OsString};
 
 const REDACTED: &str = "<redacted>";
-const REDACTION_FAILED_GATEWAY_BODY: &[u8] = b"{}";
 const AUTHORIZATION_SCHEMES: &[&str] = &["Bearer", "Basic", "Token"];
 const API_KEY_PREFIXES: &[&str] = &[
     "sk-proj-", "sk-ant-", "sk-live-", "sk_test_", "sk_live_", "sk-", "sk_",
@@ -32,35 +31,6 @@ pub fn redaction_redacted_body_snippet(body: &[u8], max_chars: usize) -> String 
         Err(_) => redaction_redact_secret_like_text(&String::from_utf8_lossy(body)),
     };
     redaction_text_snippet(&redacted, max_chars)
-}
-
-pub fn redaction_redact_gateway_body(body: &[u8]) -> Option<Vec<u8>> {
-    match serde_json::from_slice::<serde_json::Value>(body) {
-        Ok(mut value) => {
-            let changed = redaction_redact_gateway_json_value(&mut value);
-            changed.then(|| redaction_gateway_json_bytes(serde_json::to_vec(&value)))
-        }
-        Err(_) => {
-            let text = String::from_utf8_lossy(body);
-            let redacted = redaction_redact_gateway_text(&text);
-            (redacted.as_bytes() != body).then(|| redacted.into_bytes())
-        }
-    }
-}
-
-pub fn redaction_redacted_headers_debug(headers: &[(String, String)]) -> String {
-    let redacted_headers = headers
-        .iter()
-        .map(|(name, value)| {
-            let value = if redaction_key_looks_sensitive(name) {
-                redaction_redact_sensitive_header_value(name, value)
-            } else {
-                redaction_redact_secret_like_text(value)
-            };
-            (name.clone(), value)
-        })
-        .collect::<Vec<_>>();
-    format!("{redacted_headers:?}")
 }
 
 pub fn redaction_redacted_cli_args(args: &[OsString]) -> Vec<String> {
@@ -179,72 +149,10 @@ pub fn redaction_redact_json(value: &mut serde_json::Value) {
     redaction_redact_json_value(value);
 }
 
-fn redaction_redact_sensitive_header_value(name: &str, value: &str) -> String {
-    if name.eq_ignore_ascii_case("authorization")
-        || name.eq_ignore_ascii_case("proxy-authorization")
-    {
-        let trimmed = value.trim_start();
-        for scheme in AUTHORIZATION_SCHEMES {
-            if trimmed.len() > scheme.len()
-                && redaction_starts_with_ignore_ascii_case(trimmed.as_bytes(), 0, scheme.as_bytes())
-                && trimmed.as_bytes()[scheme.len()].is_ascii_whitespace()
-            {
-                return format!("{scheme} {REDACTED}");
-            }
-        }
-    }
-    REDACTED.to_string()
-}
-
 pub fn redaction_redact_secret_like_text(value: &str) -> String {
     let value = redaction_redact_sensitive_key_value_text(value);
     let value = redaction_redact_authorization_like_values(&value);
     redaction_redact_prefixed_api_key_tokens(&value)
-}
-
-fn redaction_gateway_json_bytes(result: serde_json::Result<Vec<u8>>) -> Vec<u8> {
-    result.unwrap_or_else(|_| REDACTION_FAILED_GATEWAY_BODY.to_vec())
-}
-
-fn redaction_redact_gateway_json_value(value: &mut serde_json::Value) -> bool {
-    match value {
-        serde_json::Value::Object(map) => redaction_redact_gateway_object(map),
-        serde_json::Value::Array(values) => redaction_redact_gateway_array(values),
-        serde_json::Value::String(value) => redaction_redact_gateway_string(value),
-        _ => false,
-    }
-}
-
-fn redaction_redact_gateway_object(map: &mut serde_json::Map<String, serde_json::Value>) -> bool {
-    let mut changed = false;
-    for (key, value) in map.iter_mut() {
-        if redaction_key_looks_sensitive(key) {
-            if value != &serde_json::Value::String(REDACTED.to_string()) {
-                *value = serde_json::Value::String(REDACTED.to_string());
-                changed = true;
-            }
-        } else {
-            changed |= redaction_redact_gateway_json_value(value);
-        }
-    }
-    changed
-}
-
-fn redaction_redact_gateway_array(values: &mut [serde_json::Value]) -> bool {
-    let mut changed = false;
-    for value in values {
-        changed |= redaction_redact_gateway_json_value(value);
-    }
-    changed
-}
-
-fn redaction_redact_gateway_string(value: &mut String) -> bool {
-    let redacted = redaction_redact_gateway_text(value);
-    if redacted == *value {
-        return false;
-    }
-    *value = redacted;
-    true
 }
 
 fn redaction_redact_gateway_text(value: &str) -> String {

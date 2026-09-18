@@ -113,12 +113,6 @@ pub fn auth_summary_from_stored_auth(stored_auth: &StoredAuth) -> AuthSummary {
     .into_summary()
 }
 
-pub fn usage_auth_from_auth_text(content: &str) -> Result<UsageAuth> {
-    let stored_auth: StoredAuth =
-        serde_json::from_str(content).context("failed to parse stored auth JSON")?;
-    usage_auth_from_stored_auth(&stored_auth)
-}
-
 pub fn usage_auth_from_stored_auth(stored_auth: &StoredAuth) -> Result<UsageAuth> {
     let has_api_key = stored_auth
         .openai_api_key

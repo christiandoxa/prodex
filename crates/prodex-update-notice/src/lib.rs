@@ -166,17 +166,6 @@ pub fn prodex_version_status(paths: &AppPaths) -> Result<ProdexVersionStatus> {
     })
 }
 
-pub fn format_info_prodex_version(paths: &AppPaths) -> Result<String> {
-    let current_version = current_prodex_version();
-    Ok(match prodex_version_status(paths)? {
-        ProdexVersionStatus::UpToDate => format!("{current_version} (up to date)"),
-        ProdexVersionStatus::UpdateAvailable(latest_version) => {
-            format!("{current_version} (update available: {latest_version})")
-        }
-        ProdexVersionStatus::Unknown => format!("{current_version} (update check unavailable)"),
-    })
-}
-
 pub fn format_info_codex_version(
     paths: &AppPaths,
     current_version: Option<&str>,

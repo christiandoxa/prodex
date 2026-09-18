@@ -1,14 +1,5 @@
 use super::*;
 
-pub fn main_window_snapshots(
-    usage: &UsageResponse,
-) -> Option<(MainWindowSnapshot, MainWindowSnapshot)> {
-    Some((
-        required_main_window_snapshot(usage, "5h")?,
-        required_main_window_snapshot(usage, "weekly")?,
-    ))
-}
-
 pub fn required_main_window_snapshot(
     usage: &UsageResponse,
     label: &str,

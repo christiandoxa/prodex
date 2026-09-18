@@ -159,16 +159,6 @@ fn ensure_opened_regular_file(file: &fs::File) -> std::io::Result<()> {
     ))
 }
 
-#[cfg(windows)]
-/// Returns a stable identity hash for an opened file handle.
-pub fn opened_file_identity(file: &fs::File) -> std::io::Result<u64> {
-    use std::hash::{Hash, Hasher};
-
-    let mut hasher = std::collections::hash_map::DefaultHasher::new();
-    same_file::Handle::from_file(file.try_clone()?)?.hash(&mut hasher);
-    Ok(hasher.finish())
-}
-
 pub fn opened_file_matches_path(
     before: &fs::Metadata,
     path: &Path,
@@ -341,7 +331,8 @@ pub fn runtime_proxy_log_file_name_is_owned(name: &str, prefix: &str) -> bool {
     name.starts_with(prefix) && name.ends_with(".log")
 }
 
-pub fn select_runtime_log_paths_to_remove(
+#[cfg(test)]
+fn select_runtime_log_paths_to_remove(
     mut paths: Vec<(PathBuf, i64)>,
     oldest_allowed_epoch_seconds: i64,
     retention_count: usize,
@@ -404,14 +395,6 @@ pub fn runtime_broker_lease_pid(file_name: &str) -> Option<u32> {
         .split('-')
         .next()
         .and_then(|value| value.parse::<u32>().ok())
-}
-
-pub fn chat_history_file_path_is_owned(path: &Path) -> bool {
-    path.extension()
-        .and_then(|extension| extension.to_str())
-        .is_some_and(|extension| {
-            extension.eq_ignore_ascii_case("jsonl") || extension.eq_ignore_ascii_case("json")
-        })
 }
 
 pub fn format_binary_resolution(binary: &OsString) -> String {

@@ -254,7 +254,8 @@ pub fn codex_configured_model_provider(codex_home: &Path) -> CodexConfigResult<O
     codex_config_value(codex_home, "model_provider")
 }
 
-pub fn codex_configured_model_provider_with_profile_v2(
+#[cfg(test)]
+fn codex_configured_model_provider_with_profile_v2(
     codex_home: &Path,
     profile_v2_name: Option<&str>,
 ) -> CodexConfigResult<Option<String>> {
@@ -399,7 +400,8 @@ fn codex_model_provider_setting_from_config(
     )
 }
 
-pub fn codex_non_openai_model_provider_for_args(
+#[cfg(test)]
+fn codex_non_openai_model_provider_for_args(
     codex_home: &Path,
     args: &[OsString],
 ) -> CodexConfigResult<Option<CodexModelProviderSetting>> {

@@ -27,10 +27,11 @@ fn auth_summary_detects_bedrock_api_key() {
 
 #[test]
 fn usage_auth_rejects_bedrock_api_key_with_provider_hint() {
-    let err = usage_auth_from_auth_text(
-        r#"{"auth_mode":"bedrock_api_key","bedrock_api_key":{"api_key":"bedrock-test","region":"us-east-1"}}"#,
+    let stored: StoredAuth = serde_json::from_str(
+        r#"{"auth_mode":"bedrock_api_key","bedrock_api_key":{"api_key":"<redacted>","region":"us-east-1"}}"#,
     )
-    .unwrap_err();
+    .unwrap();
+    let err = usage_auth_from_stored_auth(&stored).unwrap_err();
     assert!(err.to_string().contains("Amazon Bedrock API key auth"));
 }
 
@@ -38,7 +39,7 @@ fn usage_auth_rejects_bedrock_api_key_with_provider_hint() {
 fn usage_auth_prefers_jwt_account_id() {
     let jwt =
         test_jwt(r#"{"https://api.openai.com/auth":{"chatgpt_account_id":"acct_jwt"},"exp":200}"#);
-    let auth = usage_auth_from_auth_text(&format!(
+    let stored: StoredAuth = serde_json::from_str(&format!(
         r#"{{
                 "tokens": {{
                     "access_token": "{jwt}",
@@ -49,6 +50,7 @@ fn usage_auth_prefers_jwt_account_id() {
             }}"#
     ))
     .unwrap();
+    let auth = usage_auth_from_stored_auth(&stored).unwrap();
 
     assert_eq!(auth.account_id.as_deref(), Some("acct_jwt"));
     assert_eq!(auth.expires_at, Some(200));
@@ -57,7 +59,7 @@ fn usage_auth_prefers_jwt_account_id() {
 
 #[test]
 fn usage_auth_accepts_v2_personal_access_token_with_stored_account_id() {
-    let auth = usage_auth_from_auth_text(
+    let stored: StoredAuth = serde_json::from_str(
         r#"{
                 "auth_mode": "personalAccessToken",
                 "tokens": {
@@ -68,6 +70,7 @@ fn usage_auth_accepts_v2_personal_access_token_with_stored_account_id() {
             }"#,
     )
     .unwrap();
+    let auth = usage_auth_from_stored_auth(&stored).unwrap();
 
     assert_eq!(auth.access_token, "at-v2-opaque-token");
     assert_eq!(auth.account_id.as_deref(), Some("acct_stored"));

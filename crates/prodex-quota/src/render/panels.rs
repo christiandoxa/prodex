@@ -210,10 +210,6 @@ pub fn render_profile_external_quota_with_width(
     render_panel_with_width(&format!("Quota {profile_name}"), &fields, total_width)
 }
 
-pub fn render_quota_error_panel(title: &str, message: &str) -> String {
-    render_quota_error_panel_with_width(title, message, current_cli_width())
-}
-
 pub fn render_quota_error_panel_with_width(
     title: &str,
     message: &str,
