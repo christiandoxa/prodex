@@ -10,9 +10,6 @@ mod core_artifacts;
 #[path = "smart_context/candidates.rs"]
 mod candidates;
 
-#[path = "smart_context/path_aliases.rs"]
-mod path_aliases;
-
 #[path = "smart_context/memory_budget.rs"]
 mod memory_budget;
 
@@ -25,9 +22,6 @@ mod rehydration;
 #[path = "smart_context/rollout.rs"]
 mod rollout;
 
-#[path = "smart_context/replay.rs"]
-mod replay;
-
 #[path = "smart_context/token_accounting.rs"]
 mod token_accounting;
 
@@ -39,9 +33,6 @@ mod adaptive_rewrite;
 
 #[path = "smart_context/safety.rs"]
 mod safety;
-
-#[path = "smart_context/tool_outputs.rs"]
-mod tool_outputs;
 
 #[cfg(feature = "mojo")]
 #[test]
