@@ -4,7 +4,6 @@ mod adaptive_refresh;
 mod auth;
 mod codex_openai_auth;
 mod external_provider;
-mod render;
 mod virtual_provider;
 mod watch;
 
@@ -15,35 +14,25 @@ use self::external_provider::{
     custom_model_provider_quota_info, fetch_agy_quota_info, fetch_anthropic_quota_info,
     fetch_kiro_quota_info,
 };
-pub(super) use self::render::*;
 use self::virtual_provider::collect_virtual_quota_reports;
 pub(super) use self::watch::*;
 pub(crate) use prodex_core::format_binary_resolution;
 pub(crate) use prodex_quota::{
-    AuthSummary, ExternalQuotaDetail, ExternalQuotaInfo, GeminiQuotaInfo, QuotaAuthFilter,
-    UsageAuth,
+    AuthSummary, ExternalQuotaDetail, ExternalQuotaInfo, ProviderQuotaSnapshot, QuotaAuthFilter,
+    QuotaReport, QuotaReportSort, UsageAuth, collect_blocked_limits, first_line_of_error,
+    format_blocked_limits, format_copilot_main_quota, format_copilot_quota_status,
+    format_copilot_reset_summary, format_gemini_main_quota, format_gemini_quota_status,
+    format_gemini_reset_summary, format_main_windows, render_profile_quota_snapshot_with_detail,
+    render_quota_reports, render_quota_reports_window_with_sort,
+};
+#[cfg(test)]
+pub(crate) use prodex_quota::{
+    format_main_reset_summary, format_precise_reset_time, format_window_status,
+    format_window_status_compact, render_quota_reports_window_with_layout,
+    render_quota_reports_with_layout, sorted_quota_report_indexes, window_label,
 };
 use prodex_runtime_doctor::read_runtime_log_tail;
 use redaction::redaction_redact_secret_like_text;
-
-#[derive(Debug, Clone)]
-pub(crate) enum ProviderQuotaSnapshot {
-    OpenAi(UsageResponse),
-    Copilot(CopilotUserInfo),
-    Gemini(GeminiQuotaInfo),
-    External(ExternalQuotaInfo),
-}
-
-#[derive(Debug, Clone)]
-pub(crate) struct QuotaReport {
-    pub(crate) name: String,
-    pub(crate) active: bool,
-    pub(crate) auth: AuthSummary,
-    pub(crate) workspace_id: Option<String>,
-    pub(crate) workspace_name: Option<String>,
-    pub(crate) result: std::result::Result<ProviderQuotaSnapshot, String>,
-    pub(crate) fetched_at: i64,
-}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum QuotaProviderFilter {
@@ -383,9 +372,19 @@ pub(crate) fn fetch_profile_quota(
             account.as_deref(),
             auth_method.as_deref(),
         )?)),
-        ProfileProvider::Copilot { host, login, .. } => Ok(ProviderQuotaSnapshot::Copilot(
-            fetch_copilot_user_info_for_account(host, login)?,
-        )),
+        ProfileProvider::Copilot { host, login, .. } => {
+            let info = fetch_copilot_user_info_for_account(host, login)?;
+            Ok(ProviderQuotaSnapshot::Copilot(
+                prodex_quota::CopilotQuotaInfo {
+                    login: info.login,
+                    access_type_sku: info.access_type_sku,
+                    copilot_plan: info.copilot_plan,
+                    limited_user_quotas: info.limited_user_quotas,
+                    monthly_quotas: info.monthly_quotas,
+                    limited_user_reset_date: info.limited_user_reset_date,
+                },
+            ))
+        }
         ProfileProvider::Kiro { .. } => Ok(ProviderQuotaSnapshot::External(fetch_kiro_quota_info(
             codex_home,
         )?)),

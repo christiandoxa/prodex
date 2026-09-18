@@ -14,7 +14,7 @@ mod manage;
 mod remove;
 
 pub(crate) use self::copilot::{
-    CopilotUserInfo, fetch_copilot_user_info_for_account, fetch_copilot_user_info_json_for_account,
+    fetch_copilot_user_info_for_account, fetch_copilot_user_info_json_for_account,
     handle_import_copilot_profile, resolve_copilot_runtime_api_auth,
 };
 use self::import_export::write_secret_text_file;
