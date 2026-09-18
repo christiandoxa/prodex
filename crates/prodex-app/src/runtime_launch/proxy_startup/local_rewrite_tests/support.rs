@@ -1,7 +1,4 @@
-use crate::runtime_launch::proxy_startup::local_rewrite::{
-    RuntimeGatewayAdminRole, RuntimeGatewayAdminToken,
-};
-use crate::{AppPaths, RuntimeRotationProxy};
+use crate::AppPaths;
 use jsonwebtoken::{Algorithm, EncodingKey, Header, encode};
 use reqwest::{IntoUrl, blocking::RequestBuilder};
 use std::collections::VecDeque;
@@ -15,66 +12,6 @@ use std::sync::{Arc, mpsc};
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tiny_http::{Header as TinyHeader, Response as TinyResponse, Server as TinyServer};
-
-pub(super) trait IdempotentClient {
-    fn idempotent_post(&self, url: impl IntoUrl) -> RequestBuilder;
-    fn idempotent_patch(&self, url: impl IntoUrl) -> RequestBuilder;
-    fn idempotent_delete(&self, url: impl IntoUrl) -> RequestBuilder;
-}
-
-impl IdempotentClient for reqwest::blocking::Client {
-    fn idempotent_post(&self, url: impl IntoUrl) -> RequestBuilder {
-        idempotent(self.post(url))
-    }
-
-    fn idempotent_patch(&self, url: impl IntoUrl) -> RequestBuilder {
-        idempotent(self.patch(url))
-    }
-
-    fn idempotent_delete(&self, url: impl IntoUrl) -> RequestBuilder {
-        idempotent(self.delete(url))
-    }
-}
-
-fn idempotent(request: RequestBuilder) -> RequestBuilder {
-    request.header(
-        "Idempotency-Key",
-        format!("test-{}", prodex_domain::RequestId::new()),
-    )
-}
-
-pub(super) fn wait_for_oidc_cache(proxy: &RuntimeRotationProxy, minimum_entries: usize) {
-    let deadline = std::time::Instant::now() + Duration::from_secs(2);
-    loop {
-        let entries = proxy
-            .gateway_side_effect_snapshot
-            .as_ref()
-            .map(|snapshot| snapshot().oidc_cache_entries)
-            .unwrap_or_default();
-        if entries >= minimum_entries {
-            return;
-        }
-        assert!(
-            std::time::Instant::now() < deadline,
-            "OIDC background cache did not reach {minimum_entries} entries"
-        );
-        std::thread::sleep(Duration::from_millis(5));
-    }
-}
-
-pub(super) fn runtime_gateway_test_admin_token(token: &str) -> RuntimeGatewayAdminToken {
-    RuntimeGatewayAdminToken {
-        name: "test-admin".to_string(),
-        token_hash: runtime_proxy_crate::LocalBridgeBearerTokenHash::from_token(token),
-        role: RuntimeGatewayAdminRole::Admin,
-        tenant_id: None,
-        team_id: None,
-        project_id: None,
-        user_id: None,
-        budget_id: None,
-        allowed_key_prefixes: Vec::new(),
-    }
-}
 
 pub(super) struct TestUpstream {
     pub(super) addr: SocketAddr,

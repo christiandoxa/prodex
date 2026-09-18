@@ -1,9 +1,11 @@
 use super::json_utils::{runtime_json_find, runtime_proxy_utf8_text};
 use crate::{
     RuntimeHttpErrorClass, RuntimeHttpErrorPhase, RuntimeHttpErrorPolicy,
-    runtime_error_signal_message_from_text, runtime_error_signal_message_from_value,
-    runtime_http_error_policy, runtime_overload_text_message, runtime_stream_error_policy,
-    runtime_usage_limit_text_message, runtime_workspace_credit_exhausted_text_message,
+    runtime_http_error_policy, runtime_stream_error_policy,
+};
+#[cfg(test)]
+use crate::{
+    runtime_error_signal_message_from_value, runtime_workspace_credit_exhausted_text_message,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -54,7 +56,8 @@ pub fn runtime_websocket_error_policy(
     }
 }
 
-pub fn runtime_websocket_workspace_credit_exhausted(
+#[cfg(test)]
+pub(crate) fn runtime_websocket_workspace_credit_exhausted(
     payload: &RuntimeWebsocketErrorPayload,
 ) -> bool {
     match payload {
@@ -78,7 +81,8 @@ pub fn extract_runtime_proxy_previous_response_message(body: &[u8]) -> Option<St
         .and_then(extract_runtime_proxy_previous_response_message_from_text)
 }
 
-pub fn extract_runtime_proxy_overload_message(status: u16, body: &[u8]) -> Option<String> {
+#[cfg(test)]
+pub(crate) fn extract_runtime_proxy_overload_message(status: u16, body: &[u8]) -> Option<String> {
     let policy = runtime_http_error_policy(status, body, RuntimeHttpErrorPhase::PreCommit);
     matches!(
         policy.class,
@@ -88,34 +92,18 @@ pub fn extract_runtime_proxy_overload_message(status: u16, body: &[u8]) -> Optio
     .flatten()
 }
 
-pub fn extract_runtime_proxy_overload_message_from_value(
+#[cfg(test)]
+pub(crate) fn extract_runtime_proxy_overload_message_from_value(
     value: &serde_json::Value,
 ) -> Option<String> {
     runtime_error_signal_message_from_value(value, RuntimeHttpErrorClass::Overload)
 }
 
-pub fn extract_runtime_proxy_overload_message_from_text(text: &str) -> Option<String> {
-    runtime_error_signal_message_from_text(text, RuntimeHttpErrorClass::Overload)
-}
-
-pub fn extract_runtime_proxy_quota_message_from_value(value: &serde_json::Value) -> Option<String> {
+#[cfg(test)]
+pub(crate) fn extract_runtime_proxy_quota_message_from_value(
+    value: &serde_json::Value,
+) -> Option<String> {
     runtime_error_signal_message_from_value(value, RuntimeHttpErrorClass::Quota)
-}
-
-pub fn extract_runtime_proxy_quota_message_candidate(value: &serde_json::Value) -> Option<String> {
-    runtime_error_signal_message_from_value(value, RuntimeHttpErrorClass::Quota)
-}
-
-pub fn extract_runtime_proxy_quota_message_from_text(text: &str) -> Option<String> {
-    runtime_error_signal_message_from_text(text, RuntimeHttpErrorClass::Quota)
-}
-
-pub fn runtime_proxy_usage_limit_message(message: &str) -> bool {
-    runtime_usage_limit_text_message(message)
-}
-
-pub fn runtime_proxy_overload_message(message: &str) -> bool {
-    runtime_overload_text_message(message)
 }
 
 pub fn runtime_proxy_body_snippet(body: &[u8], max_chars: usize) -> String {

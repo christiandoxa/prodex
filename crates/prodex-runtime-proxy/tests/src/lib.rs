@@ -1,7 +1,5 @@
 use super::*;
 
-#[path = "local_bridge.rs"]
-mod local_bridge;
 #[path = "payload_detection_invalid_previous_response.rs"]
 mod payload_detection_invalid_previous_response;
 

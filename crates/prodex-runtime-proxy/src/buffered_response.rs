@@ -1,5 +1,6 @@
 use std::ops::Deref;
 
+#[cfg(test)]
 use crate::runtime_response_content_type_from_binary_headers;
 
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
@@ -87,7 +88,8 @@ pub fn build_runtime_proxy_json_error_parts(
     }
 }
 
-pub fn runtime_buffered_response_content_type(
+#[cfg(test)]
+pub(crate) fn runtime_buffered_response_content_type(
     parts: &RuntimeBufferedResponseParts,
 ) -> Option<&str> {
     runtime_response_content_type_from_binary_headers(

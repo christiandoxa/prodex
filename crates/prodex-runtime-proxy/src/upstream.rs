@@ -166,7 +166,8 @@ pub fn runtime_header_name_matches_connection_token(name: &str, tokens: &[String
     tokens.iter().any(|token| token.eq_ignore_ascii_case(name))
 }
 
-pub fn runtime_proxy_effective_user_agent(headers: &[(String, String)]) -> Option<&str> {
+#[cfg(test)]
+pub(crate) fn runtime_proxy_effective_user_agent(headers: &[(String, String)]) -> Option<&str> {
     headers.iter().find_map(|(name, value)| {
         name.eq_ignore_ascii_case("user-agent")
             .then_some(value.as_str())

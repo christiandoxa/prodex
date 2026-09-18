@@ -13,19 +13,15 @@ pub struct RuntimeResponseTurnStateLineageBinding<'a> {
     pub bound_at: i64,
 }
 
+#[cfg(test)]
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct RuntimeResponseTurnStateLineageDrainPlan {
+pub(crate) struct RuntimeResponseTurnStateLineageDrainPlan {
     pub keys: Vec<String>,
     pub removed_turn_states: BTreeSet<String>,
 }
 
-#[derive(Debug, Clone, Copy)]
-pub struct RuntimeProfileBindingOrderEntry<'a> {
-    pub key: &'a str,
-    pub bound_at: i64,
-}
-
-pub fn runtime_response_turn_state_lineage_drain_plan<'a>(
+#[cfg(test)]
+pub(crate) fn runtime_response_turn_state_lineage_drain_plan<'a>(
     bindings: impl IntoIterator<Item = RuntimeResponseTurnStateLineageBinding<'a>>,
     previous_response_id: &str,
     bound_profile: Option<&str>,
@@ -95,27 +91,6 @@ pub fn runtime_live_response_turn_states_for_profile<'a>(
         .filter_map(|entry| runtime_response_turn_state_lineage_parts(entry.key))
         .filter(|(_, turn_state)| filter.contains(*turn_state))
         .map(|(_, turn_state)| turn_state.to_string())
-        .collect()
-}
-
-pub fn runtime_profile_binding_prune_keys<'a>(
-    bindings: impl IntoIterator<Item = RuntimeProfileBindingOrderEntry<'a>>,
-    max_entries: usize,
-) -> Vec<String> {
-    let mut oldest = bindings
-        .into_iter()
-        .map(|entry| (entry.key.to_string(), entry.bound_at))
-        .collect::<Vec<_>>();
-    if oldest.len() <= max_entries {
-        return Vec::new();
-    }
-
-    let excess = oldest.len() - max_entries;
-    oldest.sort_by_key(|(_, bound_at)| *bound_at);
-    oldest
-        .into_iter()
-        .take(excess)
-        .map(|(key, _)| key)
         .collect()
 }
 
