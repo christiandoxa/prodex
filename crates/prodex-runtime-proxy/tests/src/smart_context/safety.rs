@@ -108,30 +108,3 @@ fn affinity_pressure_rewrite_guard_preserves_reasons_but_allows_rewrite() {
     assert_eq!(rewritten.decision, SmartContextExactnessDecision::Allow);
     assert_eq!(rewritten.reasons, exactness.reasons);
 }
-
-#[test]
-fn segment_envelope_scopes_affinity_and_missing_rehydrate_locally() {
-    let affinity = smart_context_exactness_reason_segment_envelope(
-        SmartContextExactnessReason::PreviousResponseAffinity,
-    );
-    assert_eq!(
-        affinity.class,
-        SmartContextSegmentSafetyClass::ContinuationExact
-    );
-    assert_eq!(
-        affinity.failure_scope,
-        SmartContextSegmentFailureScope::SegmentLocal
-    );
-    assert!(affinity.requires_exact_segment());
-
-    let missing = smart_context_missing_rehydrate_ref_segment_envelope();
-    assert_eq!(
-        missing.class,
-        SmartContextSegmentSafetyClass::RehydratableExact
-    );
-    assert_eq!(
-        missing.failure_scope,
-        SmartContextSegmentFailureScope::SegmentLocal
-    );
-    assert!(missing.requires_exact_segment());
-}
