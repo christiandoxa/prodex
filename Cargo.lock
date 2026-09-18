@@ -3197,10 +3197,8 @@ dependencies = [
 name = "prodex-terminal-ui"
 version = "0.429.4"
 dependencies = [
- "anyhow",
  "crossterm",
  "libc",
- "ratatui",
  "unicode-width",
 ]
 
