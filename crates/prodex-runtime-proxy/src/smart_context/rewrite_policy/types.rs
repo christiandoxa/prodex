@@ -1,4 +1,12 @@
-use crate::smart_context::{SmartContextTokenCalibrationBucketKey, SmartContextTokenCountSource};
+use crate::smart_context::SmartContextTokenCountSource;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SmartContextTokenBudgetTier {
+    Exact,
+    Large,
+    Condensed,
+    Minimal,
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SmartContextBudgetMode {
@@ -41,33 +49,6 @@ pub const SMART_CONTEXT_REWRITE_BUDGET_TIGHTEN_DENOMINATOR: u64 = 10;
 pub const SMART_CONTEXT_REWRITE_BUDGET_TIGHTEN_MIN_INLINE_BYTES: usize = 256;
 pub const SMART_CONTEXT_REWRITE_BUDGET_TIGHTEN_MIN_REHYDRATE_TOKENS: u64 = 1;
 
-#[derive(Debug, Clone, Default, PartialEq, Eq, PartialOrd, Ord)]
-pub struct SmartContextRewritePolicyBucketKey {
-    pub provider: Option<String>,
-    pub route: Option<String>,
-    pub model: Option<String>,
-    pub profile: Option<String>,
-    pub context_window_band: Option<String>,
-    pub session_length_band: Option<String>,
-    pub task_class: Option<String>,
-    pub transform_category: Option<String>,
-}
-
-impl From<SmartContextTokenCalibrationBucketKey> for SmartContextRewritePolicyBucketKey {
-    fn from(value: SmartContextTokenCalibrationBucketKey) -> Self {
-        Self {
-            provider: None,
-            route: value.route,
-            model: value.model,
-            profile: value.profile,
-            context_window_band: None,
-            session_length_band: None,
-            task_class: None,
-            transform_category: None,
-        }
-    }
-}
-
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum SmartContextRewriteBudgetDecision {
     #[default]
@@ -102,10 +83,4 @@ pub struct SmartContextRewriteTelemetrySample {
 pub struct SmartContextRewriteTelemetryBudgetInput {
     pub recent_rewrite_safety: SmartContextRecentRewriteSafety,
     pub telemetry_samples: Vec<SmartContextRewriteTelemetrySample>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct SmartContextBucketedRewriteTelemetrySample {
-    pub bucket_key: Option<SmartContextRewritePolicyBucketKey>,
-    pub sample: SmartContextRewriteTelemetrySample,
 }

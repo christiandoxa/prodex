@@ -1,6 +1,7 @@
 use super::*;
 use sha2::{Digest as _, Sha256};
 use std::cmp::Ordering;
+#[cfg(any(not(feature = "mojo"), test))]
 use std::collections::BTreeMap;
 use std::fmt::Write as _;
 
@@ -32,66 +33,6 @@ pub(in crate::smart_context) fn smart_context_fingerprint_map(
         .into_iter()
         .map(|fingerprint| ((fingerprint.kind, fingerprint.id.clone()), fingerprint))
         .collect()
-}
-
-pub(in crate::smart_context) fn smart_context_available_artifacts_by_hash_and_len(
-    artifacts: impl IntoIterator<Item = SmartContextArtifactRef>,
-) -> BTreeMap<(String, usize), SmartContextArtifactRef> {
-    let mut artifacts = artifacts
-        .into_iter()
-        .filter(|artifact| non_empty(&artifact.id) && non_empty(&artifact.content_hash))
-        .collect::<Vec<_>>();
-    artifacts.sort_by(|left, right| {
-        left.content_hash
-            .cmp(&right.content_hash)
-            .then_with(|| left.byte_len.cmp(&right.byte_len))
-            .then_with(|| left.id.cmp(&right.id))
-    });
-
-    let mut available = BTreeMap::new();
-    for artifact in artifacts {
-        available
-            .entry((artifact.content_hash.clone(), artifact.byte_len))
-            .or_insert(artifact);
-    }
-
-    available
-}
-
-pub(in crate::smart_context) fn smart_context_summary_prefix(
-    text: &str,
-    byte_limit: usize,
-) -> String {
-    let mut summary = String::new();
-    for value in text.chars() {
-        let next_len = summary.len() + value.len_utf8();
-        if next_len > byte_limit {
-            break;
-        }
-        summary.push(value);
-    }
-    summary
-}
-
-pub(in crate::smart_context) fn smart_context_artifact_marker_line(
-    kind: &str,
-    artifact: &SmartContextArtifactRef,
-) -> String {
-    let reference = smart_context_short_artifact_ref(&artifact.id);
-    let kind = match kind {
-        "artifact" => "art",
-        other => other,
-    };
-    format!(
-        "psc {kind} {reference} b={} lines=#Lx-Ly",
-        artifact.byte_len
-    )
-}
-
-pub(in crate::smart_context) fn smart_context_short_artifact_label(id: &str) -> &str {
-    id.strip_prefix("sc2:")
-        .or_else(|| id.strip_prefix("sc:"))
-        .unwrap_or(id)
 }
 
 pub(in crate::smart_context) fn smart_context_capsule_order(

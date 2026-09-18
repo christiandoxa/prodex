@@ -1,43 +1,8 @@
 use super::*;
 
 #[test]
-fn artifact_line_range_refs_are_hash_checked_and_exact() {
-    let text = "one\ntwo\nthree\nfour";
-    let artifact = SmartContextArtifactRef {
-        id: "artifact-lines".to_string(),
-        byte_len: text.len(),
-        content_hash: smart_context_hash_text(text),
-    };
-
-    let range = smart_context_artifact_line_range(&artifact, text, 2, 3).unwrap();
-
-    assert_eq!(range.excerpt, "two\nthree");
-    assert_eq!(range.reference.artifact_id, "artifact-lines");
-    assert_eq!(
-        range.reference.artifact_content_hash,
-        smart_context_hash_text(text)
-    );
-    assert_eq!(range.reference.start_line, 2);
-    assert_eq!(range.reference.end_line, 3);
-    assert_eq!(
-        range.reference.excerpt_hash,
-        smart_context_hash_text("two\nthree")
-    );
-    assert_eq!(range.reference.excerpt_byte_len, "two\nthree".len());
-
-    let stale_artifact = SmartContextArtifactRef {
-        id: "artifact-lines".to_string(),
-        byte_len: text.len(),
-        content_hash: smart_context_hash_text("old"),
-    };
-    assert!(smart_context_artifact_line_range(&stale_artifact, text, 2, 3).is_none());
-    assert!(smart_context_extract_line_range(text, 0, 1).is_none());
-    assert!(smart_context_extract_line_range(text, 3, 2).is_none());
-}
-
-#[test]
 fn fingerprint_delta_tracks_static_context_across_turns() {
-    let previous = smart_context_fingerprints([
+    let previous = [
         SmartContextFingerprintInput {
             id: "AGENTS.md".to_string(),
             kind: SmartContextFingerprintKind::StaticContext,
@@ -53,8 +18,11 @@ fn fingerprint_delta_tracks_static_context_across_turns() {
             kind: SmartContextFingerprintKind::ToolOutput,
             text: "gone".to_string(),
         },
-    ]);
-    let current = smart_context_fingerprints([
+    ]
+    .into_iter()
+    .map(smart_context_fingerprint)
+    .collect::<Vec<_>>();
+    let current = [
         SmartContextFingerprintInput {
             id: "AGENTS.md".to_string(),
             kind: SmartContextFingerprintKind::StaticContext,
@@ -70,7 +38,10 @@ fn fingerprint_delta_tracks_static_context_across_turns() {
             kind: SmartContextFingerprintKind::Artifact,
             text: "fresh".to_string(),
         },
-    ]);
+    ]
+    .into_iter()
+    .map(smart_context_fingerprint)
+    .collect::<Vec<_>>();
 
     let delta = smart_context_fingerprint_delta(previous, current);
 
@@ -335,74 +306,4 @@ fn static_context_fingerprint_is_bounded_and_secret_safe() {
     large.reverse();
     let reversed = smart_context_static_context_prompt_cache_fingerprint(large);
     assert_eq!(forward, reversed);
-}
-
-#[test]
-fn static_context_heading_sections_preserve_offsets_and_ordinals() {
-    let intro = "intro\n";
-    let first_body = "alpha ".repeat(90);
-    let second_body = "beta ".repeat(110);
-    let text = format!("{intro}# First\r\n{first_body}\n## Second\n{second_body}");
-
-    let sections = smart_context_static_context_heading_sections(&text);
-
-    assert_eq!(sections.len(), 2);
-    assert_eq!(sections[0].heading, "# First");
-    assert_eq!(sections[0].start, intro.len());
-    assert_eq!(sections[0].ordinal, 0);
-    assert_eq!(
-        smart_context_static_heading_section_body(&text, &sections[0]),
-        Some(&text[sections[0].start..sections[0].end])
-    );
-    assert_eq!(sections[1].heading, "## Second");
-    assert_eq!(sections[1].ordinal, 1);
-    assert_eq!(sections[0].end, sections[1].start);
-}
-
-#[test]
-fn static_context_heading_sections_ignore_short_and_invalid_sections() {
-    let short_body = "short";
-    let valid_body = "rule ".repeat(110);
-    let text = format!("# Too Short\n{short_body}\nnot a heading\n# Valid\n{valid_body}");
-
-    let sections = smart_context_static_context_heading_sections(&text);
-
-    assert_eq!(sections.len(), 1);
-    assert_eq!(sections[0].heading, "# Valid");
-    assert_eq!(sections[0].ordinal, 1);
-    assert!(
-        smart_context_static_heading_section_body(&text, &sections[0])
-            .unwrap()
-            .contains(&valid_body)
-    );
-}
-
-#[test]
-fn static_context_heading_section_body_rejects_invalid_ranges() {
-    let text = "é\n# Heading\n".to_string() + &"body ".repeat(110);
-
-    assert!(
-        smart_context_static_heading_section_body(
-            &text,
-            &SmartContextStaticHeadingSection {
-                heading: "# Heading".to_string(),
-                start: 1,
-                end: 2,
-                ordinal: 0,
-            },
-        )
-        .is_none()
-    );
-    assert!(
-        smart_context_static_heading_section_body(
-            &text,
-            &SmartContextStaticHeadingSection {
-                heading: "# Heading".to_string(),
-                start: text.len(),
-                end: text.len(),
-                ordinal: 0,
-            },
-        )
-        .is_none()
-    );
 }

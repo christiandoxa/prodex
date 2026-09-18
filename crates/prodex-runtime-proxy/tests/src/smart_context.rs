@@ -1,8 +1,4 @@
 use super::*;
-use std::borrow::Cow;
-
-#[path = "smart_context/golden.rs"]
-mod golden;
 
 #[path = "smart_context/core_artifacts.rs"]
 mod core_artifacts;

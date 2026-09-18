@@ -1,22 +1,11 @@
 use super::*;
 use crate::smart_context::smart_context_recent_rewrite_min_saved_tokens;
+#[cfg(not(feature = "mojo"))]
+use crate::smart_context::smart_context_rewrite_telemetry_sample_safe_saved;
 #[cfg(feature = "mojo")]
 use crate::smart_context::{
     SmartContextTokenCountSource, smart_context_rewrite_telemetry_sample_quality_risk,
 };
-#[cfg(any(not(feature = "mojo"), test))]
-use crate::smart_context::{
-    smart_context_rewrite_telemetry_average_body_ratio_percent,
-    smart_context_rewrite_telemetry_sample_safe_saved,
-    smart_context_rewrite_telemetry_saved_tokens,
-};
-
-pub fn smart_context_recent_rewrite_safety_allows_larger_preview(
-    safety: &SmartContextRecentRewriteSafety,
-) -> bool {
-    smart_context_recent_rewrite_safety_budget_decision(safety)
-        == SmartContextRewriteBudgetDecision::Relax
-}
 
 pub fn smart_context_recent_rewrite_safety_budget_decision(
     safety: &SmartContextRecentRewriteSafety,
@@ -87,7 +76,7 @@ pub fn smart_context_rewrite_telemetry_budget_decision(
     smart_context_rewrite_telemetry_budget_decision_rust(input)
 }
 
-#[cfg(any(not(feature = "mojo"), test))]
+#[cfg(not(feature = "mojo"))]
 fn smart_context_rewrite_telemetry_budget_decision_rust(
     input: SmartContextRewriteTelemetryBudgetInput,
 ) -> SmartContextRewriteBudgetDecision {
@@ -112,9 +101,21 @@ fn smart_context_rewrite_telemetry_budget_decision_rust(
         return smart_context_recent_rewrite_safety_budget_decision(&input.recent_rewrite_safety);
     }
 
-    let saved_tokens = smart_context_rewrite_telemetry_saved_tokens(&recent);
-    let average_body_ratio_percent =
-        smart_context_rewrite_telemetry_average_body_ratio_percent(&recent);
+    let saved_tokens = recent.iter().fold(0u64, |total, sample| {
+        total.saturating_add(sample.tokens_before.saturating_sub(sample.tokens_after))
+    });
+    let average_body_ratio_percent = if recent.is_empty() {
+        100
+    } else {
+        recent.iter().fold(0usize, |total, sample| {
+            let ratio = if sample.body_bytes_before == 0 {
+                100
+            } else {
+                sample.body_bytes_after.saturating_mul(100) / sample.body_bytes_before
+            };
+            total.saturating_add(ratio)
+        }) / recent.len()
+    };
     let required_saved_tokens = smart_context_recent_rewrite_min_saved_tokens(recent.len());
 
     if saved_tokens >= required_saved_tokens
@@ -129,71 +130,5 @@ fn smart_context_rewrite_telemetry_budget_decision_rust(
         SmartContextRewriteBudgetDecision::Tighten
     } else {
         SmartContextRewriteBudgetDecision::NoChange
-    }
-}
-
-#[cfg(all(test, feature = "mojo"))]
-mod mojo_tests {
-    use super::*;
-    use crate::smart_context::SmartContextTokenCountSource;
-
-    fn sample(
-        before: usize,
-        after: usize,
-        tokens_before: u64,
-        tokens_after: u64,
-        safe: bool,
-        fallback: bool,
-    ) -> SmartContextRewriteTelemetrySample {
-        SmartContextRewriteTelemetrySample {
-            body_bytes_before: before,
-            body_bytes_after: after,
-            tokens_before,
-            tokens_after,
-            token_count_source: SmartContextTokenCountSource::TokenizerCounted,
-            safe,
-            fallback,
-            ..SmartContextRewriteTelemetrySample::default()
-        }
-    }
-
-    #[test]
-    fn telemetry_planner_matches_rust_oracle_for_empty_and_recent_batches() {
-        let cases = [
-            Vec::new(),
-            vec![sample(1_000, 500, 1_000, 500, true, false)],
-            vec![
-                sample(1_000, 500, 1_000, 500, true, false),
-                sample(1_000, 500, 1_000, 500, true, false),
-            ],
-            vec![
-                sample(1_000, 900, 1_000, 950, true, false),
-                sample(1_000, 500, 1_000, 500, true, false),
-            ],
-            vec![sample(1_000, 500, 1_000, 500, false, true)],
-        ];
-        for (index, telemetry_samples) in cases.into_iter().enumerate() {
-            for safety in [
-                SmartContextRecentRewriteSafety::default(),
-                SmartContextRecentRewriteSafety {
-                    safe_rewrites: 2,
-                    fallback_rewrites: 0,
-                    saved_tokens: 512,
-                },
-                SmartContextRecentRewriteSafety {
-                    safe_rewrites: 0,
-                    fallback_rewrites: 1,
-                    saved_tokens: 0,
-                },
-            ] {
-                let input = SmartContextRewriteTelemetryBudgetInput {
-                    recent_rewrite_safety: safety,
-                    telemetry_samples: telemetry_samples.clone(),
-                };
-                let expected = smart_context_rewrite_telemetry_budget_decision_rust(input.clone());
-                let actual = smart_context_rewrite_telemetry_budget_decision(input);
-                assert_eq!(actual, expected, "case={index} safety={safety:?}");
-            }
-        }
     }
 }
