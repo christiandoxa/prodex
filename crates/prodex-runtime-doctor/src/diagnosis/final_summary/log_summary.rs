@@ -200,7 +200,7 @@ pub fn runtime_doctor_finalize_log_summary(summary: &mut RuntimeDoctorSummary) {
     if quota_floor_before_send_count > 0 {
         *summary
             .marker_counts
-            .entry("quota_critical_floor_before_send")
+            .entry("quota_critical_floor_before_send".to_string())
             .or_insert(0) += quota_floor_before_send_count;
     }
     summary.compat_warning_count = runtime_doctor_marker_count(summary, "compat_warning");

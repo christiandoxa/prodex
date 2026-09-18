@@ -37,16 +37,17 @@ fn runtime_doctor_count_context_value(
 }
 
 fn runtime_doctor_record_marker_context(
-    context: &mut BTreeMap<&'static str, RuntimeDoctorMarkerContextSummary>,
-    marker: &'static str,
+    context: &mut BTreeMap<String, RuntimeDoctorMarkerContextSummary>,
+    marker: &str,
     fields: &BTreeMap<String, String>,
 ) {
-    let entry = context
-        .entry(marker)
-        .or_insert_with(|| RuntimeDoctorMarkerContextSummary {
-            marker: marker.to_string(),
-            ..RuntimeDoctorMarkerContextSummary::default()
-        });
+    let entry =
+        context
+            .entry(marker.to_string())
+            .or_insert_with(|| RuntimeDoctorMarkerContextSummary {
+                marker: marker.to_string(),
+                ..RuntimeDoctorMarkerContextSummary::default()
+            });
     entry.total += 1;
     runtime_doctor_count_context_value(&mut entry.routes, fields, "route");
     runtime_doctor_count_context_value(&mut entry.lanes, fields, "lane");
@@ -54,7 +55,7 @@ fn runtime_doctor_record_marker_context(
 }
 
 fn runtime_doctor_marker_context_summary(
-    context: BTreeMap<&'static str, RuntimeDoctorMarkerContextSummary>,
+    context: BTreeMap<String, RuntimeDoctorMarkerContextSummary>,
 ) -> Vec<RuntimeDoctorMarkerContextSummary> {
     let mut summary = context
         .into_values()
@@ -73,7 +74,7 @@ fn runtime_doctor_marker_context_summary(
 
 fn runtime_doctor_record_marker_reason(
     summary: &mut RuntimeDoctorSummary,
-    marker: &'static str,
+    marker: &str,
     fields: &BTreeMap<String, String>,
 ) {
     let Some(reason) = fields.get("reason").cloned() else {
@@ -105,7 +106,7 @@ fn runtime_doctor_record_marker_reason(
 
 fn runtime_doctor_record_continuation_fields(
     summary: &mut RuntimeDoctorSummary,
-    marker: &'static str,
+    marker: &str,
     fields: &BTreeMap<String, String>,
 ) {
     if marker == "previous_response_not_found" {
@@ -151,13 +152,13 @@ fn runtime_doctor_record_marker_facets(
 fn runtime_doctor_record_parsed_marker(
     summary: &mut RuntimeDoctorSummary,
     request_timelines: &mut BTreeMap<String, RuntimeDoctorRequestTimelineBuilder>,
-    marker_context: &mut BTreeMap<&'static str, RuntimeDoctorMarkerContextSummary>,
+    marker_context: &mut BTreeMap<String, RuntimeDoctorMarkerContextSummary>,
     line: (usize, Option<&str>, &str),
-    marker: &'static str,
+    marker: &str,
     fields: BTreeMap<String, String>,
 ) {
     let (line_index, line_timestamp, line) = line;
-    *summary.marker_counts.entry(marker).or_insert(0) += 1;
+    *summary.marker_counts.entry(marker.to_string()).or_insert(0) += 1;
     summary.last_marker_line = Some(runtime_doctor_truncate_line(line, 160));
     if matches!(
         marker,
@@ -170,7 +171,9 @@ fn runtime_doctor_record_parsed_marker(
     runtime_doctor_record_marker_context(marker_context, marker, &fields);
     runtime_doctor_record_marker_facets(summary, &fields);
     if !fields.is_empty() {
-        summary.marker_last_fields.insert(marker, fields.clone());
+        summary
+            .marker_last_fields
+            .insert(marker.to_string(), fields.clone());
     }
     runtime_doctor_record_selection_summary(summary, marker, &fields);
     runtime_doctor_record_route_profile_event(summary, line_timestamp, marker, &fields);
@@ -209,8 +212,7 @@ pub fn summarize_runtime_log_tail(tail: &[u8]) -> RuntimeDoctorSummary {
     let mut summary = RuntimeDoctorSummary::default();
     let mut request_timelines: BTreeMap<String, RuntimeDoctorRequestTimelineBuilder> =
         BTreeMap::new();
-    let mut marker_context: BTreeMap<&'static str, RuntimeDoctorMarkerContextSummary> =
-        BTreeMap::new();
+    let mut marker_context: BTreeMap<String, RuntimeDoctorMarkerContextSummary> = BTreeMap::new();
     for (line_index, line) in text.lines().enumerate() {
         let parsed_line = RuntimeDoctorParsedLogLine::new(line);
         summary.line_count += 1;
@@ -228,7 +230,7 @@ pub fn summarize_runtime_log_tail(tail: &[u8]) -> RuntimeDoctorSummary {
                 &mut request_timelines,
                 &mut marker_context,
                 (line_index, line_timestamp.as_deref(), line),
-                marker,
+                &marker,
                 fields,
             );
         }

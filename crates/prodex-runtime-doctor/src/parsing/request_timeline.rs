@@ -147,7 +147,7 @@ pub(super) fn runtime_doctor_record_request_timeline_event(
     request_timelines: &mut BTreeMap<String, RuntimeDoctorRequestTimelineBuilder>,
     line_index: usize,
     timestamp: Option<&str>,
-    marker: &'static str,
+    marker: &str,
     fields: &BTreeMap<String, String>,
 ) {
     let Some(phase) = runtime_doctor_request_timeline_phase(marker) else {

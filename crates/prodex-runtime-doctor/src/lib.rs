@@ -13,12 +13,17 @@ pub mod tuning;
 pub mod types;
 
 pub use log_fields::runtime_proxy_log_fields;
+pub use markers::RUNTIME_DOCTOR_FACETS;
+#[cfg(any(not(feature = "mojo"), test))]
 pub use markers::{
     RUNTIME_DOCTOR_ACTIVE_PERSISTENCE_MARKERS, RUNTIME_DOCTOR_ACTIVE_QUOTA_REFRESH_MARKERS,
-    RUNTIME_DOCTOR_COUNT_FIELD_ROWS, RUNTIME_DOCTOR_FACETS, RUNTIME_DOCTOR_MARKERS,
-    RUNTIME_DOCTOR_PERSISTENCE_PRESSURE_MARKERS, RUNTIME_DOCTOR_SELECTION_PRESSURE_MARKERS,
-    RUNTIME_DOCTOR_TRANSPORT_PRESSURE_MARKERS, RuntimeDoctorLogFacet, RuntimeDoctorMarker,
-    RuntimeDoctorMarkerDescriptor, runtime_doctor_marker_descriptor,
+    RUNTIME_DOCTOR_MARKERS, RUNTIME_DOCTOR_PERSISTENCE_PRESSURE_MARKERS,
+    RUNTIME_DOCTOR_SELECTION_PRESSURE_MARKERS, RUNTIME_DOCTOR_TRANSPORT_PRESSURE_MARKERS,
+    RuntimeDoctorMarker,
+};
+#[cfg(test)]
+pub use markers::{
+    RuntimeDoctorLogFacet, RuntimeDoctorMarkerDescriptor, runtime_doctor_marker_descriptor,
 };
 pub use parsing::{read_runtime_log_tail, summarize_runtime_log_tail};
 pub use render::{

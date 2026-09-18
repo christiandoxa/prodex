@@ -1,7 +1,7 @@
 use std::borrow::Cow;
 use std::collections::BTreeMap;
 
-use crate::{RUNTIME_DOCTOR_MARKERS, RuntimeDoctorMarker};
+use crate::markers::runtime_doctor_marker_is_known;
 use runtime_proxy_crate::{runtime_proxy_redact_log_field_value, runtime_proxy_redact_log_text};
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -90,35 +90,31 @@ impl<'a> RuntimeDoctorParsedLogLine<'a> {
         fields
     }
 
-    pub(crate) fn marker_name(&self) -> Option<&'static str> {
+    pub(crate) fn marker_name(&self) -> Option<String> {
         if let Some(event) = self
             .json()
             .and_then(|value| value.get("event"))
             .and_then(serde_json::Value::as_str)
-            && let Some(marker) = runtime_doctor_known_marker(event)
+            && runtime_doctor_marker_is_known(event)
         {
-            return Some(marker);
+            return Some(event.to_string());
         }
 
         let message = self.message();
         if let Some(event) = runtime_doctor_parse_log_message(&message).event
-            && let Some(marker) = runtime_doctor_known_marker(&event)
+            && runtime_doctor_marker_is_known(&event)
         {
-            return Some(marker);
+            return Some(event);
         }
-        RUNTIME_DOCTOR_MARKERS
-            .iter()
-            .copied()
-            .find(|marker| message.contains(marker))
+        message
+            .split(|character: char| !(character.is_ascii_alphanumeric() || character == '_'))
+            .find(|token| !token.is_empty() && runtime_doctor_marker_is_known(token))
+            .map(str::to_string)
     }
 }
 
 pub(super) fn runtime_doctor_parse_message_fields(message: &str) -> BTreeMap<String, String> {
     runtime_doctor_parse_log_message(message).fields_map()
-}
-
-fn runtime_doctor_known_marker(event: &str) -> Option<&'static str> {
-    RuntimeDoctorMarker::from_name(event).map(RuntimeDoctorMarker::as_str)
 }
 
 fn runtime_doctor_json_fields_map(

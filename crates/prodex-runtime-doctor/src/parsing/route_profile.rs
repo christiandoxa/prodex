@@ -47,7 +47,7 @@ fn runtime_doctor_route_profile_action(marker: &str) -> Option<&'static str> {
 pub(super) fn runtime_doctor_record_route_profile_event(
     summary: &mut RuntimeDoctorSummary,
     timestamp: Option<&str>,
-    marker: &'static str,
+    marker: &str,
     fields: &BTreeMap<String, String>,
 ) {
     let Some(action) = runtime_doctor_route_profile_action(marker) else {

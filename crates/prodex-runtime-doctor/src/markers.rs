@@ -1,3 +1,4 @@
+#[cfg(any(not(feature = "mojo"), test))]
 macro_rules! runtime_doctor_marker_registry {
     ($macro:ident) => {
         $macro! {
@@ -172,6 +173,7 @@ macro_rules! runtime_doctor_marker_registry {
     };
 }
 
+#[cfg(any(not(feature = "mojo"), test))]
 macro_rules! define_runtime_doctor_marker_enum {
     ($($variant:ident => $name:literal,)+) => {
         #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -206,265 +208,189 @@ macro_rules! define_runtime_doctor_marker_enum {
     };
 }
 
+#[cfg(any(not(feature = "mojo"), test))]
 runtime_doctor_marker_registry!(define_runtime_doctor_marker_enum);
 
-macro_rules! runtime_doctor_facet_registry {
-    ($macro:ident) => {
-        $macro! {
-            Lane => "lane",
-            Route => "route",
-            Profile => "profile",
-            Reason => "reason",
-            Transport => "transport",
-            Provider => "provider",
-            Family => "family",
-            Client => "client",
-            ToolSurface => "tool_surface",
-            Continuation => "continuation",
-            Origin => "origin",
-            Warning => "warning",
-            QuotaSource => "quota_source",
-            QuotaBand => "quota_band",
-            FiveHourStatus => "five_hour_status",
-            WeeklyStatus => "weekly_status",
-            Affinity => "affinity",
-            Context => "context",
-            Event => "event",
-            Stage => "stage",
-            State => "state",
-            Source => "source",
-            RequestShape => "request_shape",
-            Exit => "exit",
-            Mode => "mode",
-            Tier => "tier",
-            Decision => "decision",
-            Reasons => "reasons",
-            TokenUsageSource => "token_usage_source",
-            SelfCheck => "self_check",
-            BudgetMode => "budget_mode",
-            PolicyReasons => "policy_reasons",
-        }
-    };
+pub const RUNTIME_DOCTOR_FACETS: &[&str] = &[
+    "lane",
+    "route",
+    "profile",
+    "reason",
+    "transport",
+    "provider",
+    "family",
+    "client",
+    "tool_surface",
+    "continuation",
+    "origin",
+    "warning",
+    "quota_source",
+    "quota_band",
+    "five_hour_status",
+    "weekly_status",
+    "affinity",
+    "context",
+    "event",
+    "stage",
+    "state",
+    "source",
+    "request_shape",
+    "exit",
+    "mode",
+    "tier",
+    "decision",
+    "reasons",
+    "token_usage_source",
+    "self_check",
+    "budget_mode",
+    "policy_reasons",
+];
+
+#[cfg(test)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum RuntimeDoctorLogFacet {
+    Lane,
+    Route,
+    Profile,
+    Reason,
+    Transport,
+    Provider,
+    Family,
+    Client,
+    ToolSurface,
+    Continuation,
+    Origin,
+    Warning,
+    QuotaSource,
+    QuotaBand,
+    FiveHourStatus,
+    WeeklyStatus,
+    Affinity,
+    Context,
+    Event,
+    Stage,
+    State,
+    Source,
+    RequestShape,
+    Exit,
+    Mode,
+    Tier,
+    Decision,
+    Reasons,
+    TokenUsageSource,
+    SelfCheck,
+    BudgetMode,
+    PolicyReasons,
 }
 
-macro_rules! define_runtime_doctor_facet_enum {
-    ($($variant:ident => $name:literal,)+) => {
-        #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-        pub enum RuntimeDoctorLogFacet {
-            $($variant,)+
+#[cfg(test)]
+impl RuntimeDoctorLogFacet {
+    pub const ALL: &'static [Self] = &[
+        Self::Lane,
+        Self::Route,
+        Self::Profile,
+        Self::Reason,
+        Self::Transport,
+        Self::Provider,
+        Self::Family,
+        Self::Client,
+        Self::ToolSurface,
+        Self::Continuation,
+        Self::Origin,
+        Self::Warning,
+        Self::QuotaSource,
+        Self::QuotaBand,
+        Self::FiveHourStatus,
+        Self::WeeklyStatus,
+        Self::Affinity,
+        Self::Context,
+        Self::Event,
+        Self::Stage,
+        Self::State,
+        Self::Source,
+        Self::RequestShape,
+        Self::Exit,
+        Self::Mode,
+        Self::Tier,
+        Self::Decision,
+        Self::Reasons,
+        Self::TokenUsageSource,
+        Self::SelfCheck,
+        Self::BudgetMode,
+        Self::PolicyReasons,
+    ];
+
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Lane => "lane",
+            Self::Route => "route",
+            Self::Profile => "profile",
+            Self::Reason => "reason",
+            Self::Transport => "transport",
+            Self::Provider => "provider",
+            Self::Family => "family",
+            Self::Client => "client",
+            Self::ToolSurface => "tool_surface",
+            Self::Continuation => "continuation",
+            Self::Origin => "origin",
+            Self::Warning => "warning",
+            Self::QuotaSource => "quota_source",
+            Self::QuotaBand => "quota_band",
+            Self::FiveHourStatus => "five_hour_status",
+            Self::WeeklyStatus => "weekly_status",
+            Self::Affinity => "affinity",
+            Self::Context => "context",
+            Self::Event => "event",
+            Self::Stage => "stage",
+            Self::State => "state",
+            Self::Source => "source",
+            Self::RequestShape => "request_shape",
+            Self::Exit => "exit",
+            Self::Mode => "mode",
+            Self::Tier => "tier",
+            Self::Decision => "decision",
+            Self::Reasons => "reasons",
+            Self::TokenUsageSource => "token_usage_source",
+            Self::SelfCheck => "self_check",
+            Self::BudgetMode => "budget_mode",
+            Self::PolicyReasons => "policy_reasons",
         }
+    }
 
-        impl RuntimeDoctorLogFacet {
-            pub const ALL: &'static [Self] = &[$(Self::$variant,)+];
-
-            pub const fn as_str(self) -> &'static str {
-                match self {
-                    $(Self::$variant => $name,)+
-                }
-            }
-
-            pub fn from_name(value: &str) -> Option<Self> {
-                match value {
-                    $($name => Some(Self::$variant),)+
-                    _ => None,
-                }
-            }
-        }
-
-        impl AsRef<str> for RuntimeDoctorLogFacet {
-            fn as_ref(&self) -> &str {
-                self.as_str()
-            }
-        }
-
-        pub const RUNTIME_DOCTOR_FACETS: &[&str] = &[$($name,)+];
-    };
+    pub fn from_name(value: &str) -> Option<Self> {
+        Self::ALL
+            .iter()
+            .copied()
+            .find(|facet| facet.as_str() == value)
+    }
 }
 
-runtime_doctor_facet_registry!(define_runtime_doctor_facet_enum);
-
+#[cfg(test)]
 pub struct RuntimeDoctorMarkerDescriptor {
     pub marker: RuntimeDoctorMarker,
     pub name: &'static str,
 }
 
-impl RuntimeDoctorMarkerDescriptor {
-    pub const fn new(marker: RuntimeDoctorMarker) -> Self {
-        Self {
-            marker,
-            name: marker.as_str(),
-        }
-    }
-}
-
+#[cfg(test)]
 pub fn runtime_doctor_marker_descriptor(value: &str) -> Option<RuntimeDoctorMarkerDescriptor> {
-    RuntimeDoctorMarker::from_name(value).map(RuntimeDoctorMarkerDescriptor::new)
+    RuntimeDoctorMarker::from_name(value).map(|marker| RuntimeDoctorMarkerDescriptor {
+        marker,
+        name: marker.as_str(),
+    })
 }
 
-pub const RUNTIME_DOCTOR_COUNT_FIELD_ROWS: &[(&str, &str)] = &[
-    ("Queue overload", "runtime_proxy_queue_overloaded"),
-    ("Active limit", "runtime_proxy_active_limit_reached"),
-    ("Lane limit", "runtime_proxy_lane_limit_reached"),
-    ("In-flight saturated", "profile_inflight_saturated"),
-    ("Overload backoff", "runtime_proxy_overload_backoff"),
-    (
-        "Admission wait exhausted",
-        "runtime_proxy_admission_wait_exhausted",
-    ),
-    ("Queue wait exhausted", "runtime_proxy_queue_wait_exhausted"),
-    ("Pre-commit budget", "precommit_budget_exhausted"),
-    ("Responses pre-send skips", "responses_pre_send_skip"),
-    ("Websocket pre-send skips", "websocket_pre_send_skip"),
-    (
-        "Quota critical floor pre-send",
-        "quota_critical_floor_before_send",
-    ),
-    (
-        "Upstream usage-limit passthrough",
-        "upstream_usage_limit_passthrough",
-    ),
-    ("Provider requests", "local_rewrite_request_detail"),
-    (
-        "Provider model fallback",
-        "local_rewrite_provider_model_fallback",
-    ),
-    (
-        "Provider auth failures",
-        "local_rewrite_provider_auth_failure",
-    ),
-    ("Gemini quota rotates", "local_rewrite_gemini_quota_rotate"),
-    (
-        "Gemini rate retries",
-        "local_rewrite_gemini_rate_limit_retry",
-    ),
-    (
-        "Gemini invalid stream retry",
-        "local_rewrite_gemini_invalid_stream_retry",
-    ),
-    (
-        "Gemini invalid stream fallback",
-        "local_rewrite_gemini_invalid_stream_model_fallback",
-    ),
-    (
-        "Gemini tool fallback",
-        "local_rewrite_gemini_builtin_tool_fallback",
-    ),
-    (
-        "Gemini semantic compact",
-        "local_rewrite_gemini_compact_semantic",
-    ),
-    (
-        "Gemini compact fallback",
-        "local_rewrite_gemini_compact_fallback",
-    ),
-    (
-        "Gemini quota refresh fail",
-        "local_rewrite_gemini_quota_status_unavailable",
-    ),
-    (
-        "Gemini Live connected",
-        "local_rewrite_gemini_live_connected",
-    ),
-    ("Gemini Live errors", "local_rewrite_gemini_live_error"),
-    (
-        "Gemini Live sidecar errors",
-        "local_rewrite_gemini_live_sidecar_error",
-    ),
-    ("Retry backoff", "profile_retry_backoff"),
-    ("Transport backoff", "profile_transport_backoff"),
-    ("Route circuits", "profile_circuit_open"),
-    ("Health penalties", "profile_health"),
-    ("Latency penalties", "profile_latency"),
-    ("Bad pairing", "profile_bad_pairing"),
-    ("Chain owner retries", "chain_retried_owner"),
-    ("Chain dead upstream", "chain_dead_upstream_confirmed"),
-    ("Stale continuations", "stale_continuation"),
-    ("Prev not found", "previous_response_not_found"),
-    ("Prev negative cache", "previous_response_negative_cache"),
-    ("Legacy prev recovery", "previous_response_fresh_fallback"),
-    (
-        "Prev fail-closed",
-        "previous_response_fresh_fallback_blocked",
-    ),
-    ("Compact guard", "compact_fresh_fallback_blocked"),
-    ("Compact shed", "compact_pressure_shed"),
-    ("Compact committed", "compact_committed"),
-    ("Compact budget", "compact_precommit_budget_exhausted"),
-    ("Compact exhausted", "compact_candidate_exhausted"),
-    ("Compact retry", "compact_retryable_failure"),
-    ("Compact transport", "compact_transport_failure"),
-    ("Compact owner retry", "compact_overload_conservative_retry"),
-    ("Compact quota misc", "compact_quota_unclassified"),
-    ("Compact final", "compact_final_failure"),
-    ("Selection plans", "selection_plan"),
-    ("Selection picks", "selection_pick"),
-    ("Selection skips", "selection_skip_current"),
-    ("Sync-probe skips", "selection_skip_sync_probe"),
-    ("WS reuse watchdog", "websocket_reuse_watchdog"),
-    (
-        "WS first-frame timeouts",
-        "websocket_precommit_frame_timeout",
-    ),
-    (
-        "WS precommit hold timeouts",
-        "websocket_precommit_hold_timeout",
-    ),
-    ("WS DNS timeouts", "websocket_dns_resolve_timeout"),
-    ("WS DNS overflow enqueue", "websocket_dns_overflow_enqueue"),
-    (
-        "WS DNS overflow dispatch",
-        "websocket_dns_overflow_dispatch",
-    ),
-    ("WS DNS overflow reject", "websocket_dns_overflow_reject"),
-    (
-        "WS connect local pressure",
-        "websocket_connect_local_pressure",
-    ),
-    (
-        "WS connect overflow enqueue",
-        "websocket_connect_overflow_enqueue",
-    ),
-    (
-        "WS connect overflow dispatch",
-        "websocket_connect_overflow_dispatch",
-    ),
-    (
-        "WS connect overflow reject",
-        "websocket_connect_overflow_reject",
-    ),
-    (
-        "WS connect overflow rejected",
-        "websocket_connect_overflow_rejected",
-    ),
-    ("WS proxy tunnel ok", "websocket_proxy_tunnel_ok"),
-    ("WS proxy tunnel failure", "websocket_proxy_tunnel_failure"),
-    ("Auth recovered", "profile_auth_recovered"),
-    ("Auth recovery failed", "profile_auth_recovery_failed"),
-    ("Stream read errors", "stream_read_error"),
-    ("Writer errors", "local_writer_error"),
-    ("State save errors", "state_save_error"),
-    ("State save pressure", "state_save_queue_backpressure"),
-    ("Cont journal err", "continuation_journal_save_error"),
-    (
-        "Cont journal pressure",
-        "continuation_journal_queue_backpressure",
-    ),
-    ("State save ok", "state_save_ok"),
-    ("Cont journal ok", "continuation_journal_save_ok"),
-    ("State save skipped", "state_save_skipped"),
-    ("Startup audit", "runtime_proxy_startup_audit"),
-    ("Admission recovered", "runtime_proxy_admission_recovered"),
-    ("Queue recovered", "runtime_proxy_queue_recovered"),
-    ("Probe refresh", "profile_probe_refresh_start"),
-    ("Probe refresh errors", "profile_probe_refresh_error"),
-    (
-        "Probe refresh pressure",
-        "profile_probe_refresh_backpressure",
-    ),
-    ("Compat samples", "compat_request_surface"),
-    ("Smart context", "smart_context_autopilot"),
-];
+#[cfg(feature = "mojo")]
+pub(crate) fn runtime_doctor_marker_is_known(value: &str) -> bool {
+    prodex_mojo_core::rich::runtime_doctor_marker_known(value)
+        .expect("Mojo runtime-doctor marker classifier returned invalid output")
+}
 
+#[cfg(not(feature = "mojo"))]
+pub(crate) fn runtime_doctor_marker_is_known(value: &str) -> bool {
+    RuntimeDoctorMarker::from_name(value).is_some()
+}
+
+#[cfg(any(not(feature = "mojo"), test))]
 pub const RUNTIME_DOCTOR_SELECTION_PRESSURE_MARKERS: &[&str] = &[
     "selection_keep_affinity",
     "selection_keep_current",
@@ -480,6 +406,7 @@ pub const RUNTIME_DOCTOR_SELECTION_PRESSURE_MARKERS: &[&str] = &[
     "local_rewrite_gemini_quota_rotate",
 ];
 
+#[cfg(any(not(feature = "mojo"), test))]
 pub const RUNTIME_DOCTOR_TRANSPORT_PRESSURE_MARKERS: &[&str] = &[
     "stream_read_error",
     "upstream_connect_timeout",
@@ -518,6 +445,7 @@ pub const RUNTIME_DOCTOR_TRANSPORT_PRESSURE_MARKERS: &[&str] = &[
     "local_rewrite_gemini_live_sidecar_session_error",
 ];
 
+#[cfg(any(not(feature = "mojo"), test))]
 pub const RUNTIME_DOCTOR_PERSISTENCE_PRESSURE_MARKERS: &[&str] = &[
     "state_save_error",
     "state_save_queue_backpressure",
@@ -525,7 +453,9 @@ pub const RUNTIME_DOCTOR_PERSISTENCE_PRESSURE_MARKERS: &[&str] = &[
     "continuation_journal_queue_backpressure",
 ];
 
+#[cfg(any(not(feature = "mojo"), test))]
 pub const RUNTIME_DOCTOR_ACTIVE_PERSISTENCE_MARKERS: &[&str] = &["state_save_skipped"];
 
+#[cfg(any(not(feature = "mojo"), test))]
 pub const RUNTIME_DOCTOR_ACTIVE_QUOTA_REFRESH_MARKERS: &[&str] =
     &["profile_probe_refresh_start", "profile_probe_refresh_ok"];

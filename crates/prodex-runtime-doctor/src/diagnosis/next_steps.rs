@@ -244,7 +244,9 @@ mod mojo_parity_tests {
                 ("quota_blocked", 13),
                 ("compact_precommit_budget_exhausted", 14),
             ]
-            .into(),
+            .into_iter()
+            .map(|(key, value)| (key.to_string(), value))
+            .collect(),
             marker_last_fields: [
                 (
                     "runtime_proxy_lane_limit_reached",
@@ -338,7 +340,9 @@ mod mojo_parity_tests {
                     [("route".to_string(), "compact".to_string())].into(),
                 ),
             ]
-            .into(),
+            .into_iter()
+            .map(|(key, value)| (key.to_string(), value))
+            .collect(),
             facet_counts: [("reason".to_string(), [("transport".to_string(), 4)].into())].into(),
             state_save_queue_backlog: Some(5),
             continuation_journal_save_backlog: Some(6),
@@ -355,7 +359,7 @@ mod mojo_parity_tests {
             ("candidate_exhausted", "inflight_saturation"),
         ] {
             summary.marker_last_fields.insert(
-                "compact_final_failure",
+                "compact_final_failure".to_string(),
                 [
                     ("exit".to_string(), exit.to_string()),
                     ("reason".to_string(), reason.to_string()),
@@ -370,14 +374,14 @@ mod mojo_parity_tests {
         }
 
         summary.marker_last_fields.insert(
-            "state_save_queue_backpressure",
+            "state_save_queue_backpressure".to_string(),
             [("reason".to_string(), "-".to_string())].into(),
         );
         assert_matches(&summary);
 
         let long_lane = "界".repeat(2_800_000);
         summary.marker_last_fields.insert(
-            "runtime_proxy_lane_limit_reached",
+            "runtime_proxy_lane_limit_reached".to_string(),
             [("lane".to_string(), long_lane)].into(),
         );
         assert_eq!(
@@ -387,7 +391,7 @@ mod mojo_parity_tests {
 
         let long_profile = "配置".repeat(1_500_000);
         summary.marker_last_fields.insert(
-            "profile_auth_recovery_failed",
+            "profile_auth_recovery_failed".to_string(),
             [
                 ("profile".to_string(), long_profile),
                 ("route".to_string(), "responses".to_string()),

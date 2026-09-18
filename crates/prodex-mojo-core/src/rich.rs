@@ -104,6 +104,9 @@ pub use runtime_doctor_constants::*;
 #[path = "rich/runtime_doctor_plan.rs"]
 mod runtime_doctor_plan;
 pub use runtime_doctor_plan::*;
+#[path = "rich/runtime_doctor_marker.rs"]
+mod runtime_doctor_marker;
+pub use runtime_doctor_marker::*;
 #[path = "rich/runtime_doctor_render.rs"]
 mod runtime_doctor_render;
 pub use runtime_doctor_render::*;
