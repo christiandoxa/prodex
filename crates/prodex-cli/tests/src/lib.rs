@@ -561,3 +561,22 @@ fn session_resume_parses_partial_id() {
     };
     assert_eq!(args.id, "1234abcd");
 }
+
+#[test]
+fn log_parses_as_top_level_command_with_modes() {
+    let Commands::Log(default) =
+        parse_cli_command_from(["prodex", "log"]).expect("log should parse")
+    else {
+        panic!("expected log command");
+    };
+    assert_eq!(default.mode, LogMode::Stream);
+    assert!(!default.json);
+
+    let Commands::Log(upstream) = parse_cli_command_from(["prodex", "log", "upstream", "--json"])
+        .expect("upstream log should parse")
+    else {
+        panic!("expected log command");
+    };
+    assert_eq!(upstream.mode, LogMode::Upstream);
+    assert!(upstream.json);
+}

@@ -4,6 +4,7 @@ mod child_process;
 mod doctor;
 mod gateway;
 mod info;
+mod log;
 mod log_tui;
 mod mcp_jsonl_bridge;
 #[cfg(test)]
@@ -28,6 +29,7 @@ pub(crate) use self::child_process::*;
 pub(crate) use self::doctor::*;
 pub(crate) use self::gateway::*;
 pub(crate) use self::info::*;
+pub(crate) use self::log::*;
 pub(crate) use self::mcp_jsonl_bridge::*;
 pub(crate) use self::presidio::{
     ensure_presidio_services_for_super_launch, ensure_required_presidio_services_for_super_launch,
