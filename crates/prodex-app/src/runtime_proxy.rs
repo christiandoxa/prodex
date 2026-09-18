@@ -92,9 +92,8 @@ pub(crate) use runtime_proxy_crate::{
     runtime_previous_response_not_found_observability_outcome,
 };
 pub(super) use runtime_proxy_crate::{
-    RuntimePreviousResponseNotFoundRoute, is_runtime_anthropic_messages_path,
-    is_runtime_compact_path, is_runtime_responses_path, path_without_query,
-    runtime_noncompact_session_priority_profile,
+    RuntimePreviousResponseNotFoundRoute, is_runtime_compact_path, is_runtime_responses_path,
+    path_without_query, runtime_noncompact_session_priority_profile,
     runtime_proxy_allows_direct_current_profile_fallback, runtime_proxy_has_continuation_priority,
     runtime_proxy_normalize_openai_path, runtime_proxy_precommit_budget,
     runtime_proxy_precommit_budget_for_profile_count,

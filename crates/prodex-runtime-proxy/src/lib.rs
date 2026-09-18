@@ -80,10 +80,8 @@ pub use self::websocket_tcp_connect_executor::*;
 
 pub const RUNTIME_PROXY_OPENAI_UPSTREAM_PATH: &str = "/backend-api/codex";
 pub const RUNTIME_PROXY_OPENAI_MOUNT_PATH: &str = "/backend-api/prodex";
-pub const RUNTIME_PROXY_ANTHROPIC_MESSAGES_PATH: &str = "/v1/messages";
 pub const LEGACY_RUNTIME_PROXY_OPENAI_MOUNT_PATH_PREFIX: &str = "/backend-api/prodex/v";
 pub const PRODEX_INTERNAL_REQUEST_ORIGIN_HEADER: &str = "X-Prodex-Internal-Request-Origin";
-pub const PRODEX_INTERNAL_REQUEST_ORIGIN_ANTHROPIC_MESSAGES: &str = "anthropic_messages";
 pub const RUNTIME_PROXY_ADMISSION_WAIT_BUDGET_MS: u64 = if cfg!(test) { 80 } else { 750 };
 pub const RUNTIME_PROXY_LONG_LIVED_QUEUE_WAIT_BUDGET_MS: u64 = if cfg!(test) { 80 } else { 750 };
 pub const RUNTIME_PROXY_PRESSURE_ADMISSION_WAIT_BUDGET_MS: u64 = if cfg!(test) { 25 } else { 200 };
@@ -179,10 +177,6 @@ pub fn is_runtime_responses_path(path_and_query: &str) -> bool {
     path_without_query(normalized_path_and_query.as_ref()).ends_with("/codex/responses")
 }
 
-pub fn is_runtime_anthropic_messages_path(path_and_query: &str) -> bool {
-    path_without_query(path_and_query).ends_with(RUNTIME_PROXY_ANTHROPIC_MESSAGES_PATH)
-}
-
 pub fn is_runtime_chat_completions_path(path_and_query: &str) -> bool {
     let normalized_path_and_query = runtime_proxy_normalize_openai_path(path_and_query);
     path_without_query(normalized_path_and_query.as_ref()).ends_with("/chat/completions")
@@ -198,10 +192,7 @@ pub fn runtime_proxy_request_lane(path: &str, websocket: bool) -> RuntimeRouteKi
         RuntimeRouteKind::Websocket
     } else if is_runtime_compact_path(path) {
         RuntimeRouteKind::Compact
-    } else if is_runtime_responses_path(path)
-        || is_runtime_chat_completions_path(path)
-        || is_runtime_anthropic_messages_path(path)
-    {
+    } else if is_runtime_responses_path(path) || is_runtime_chat_completions_path(path) {
         RuntimeRouteKind::Responses
     } else {
         RuntimeRouteKind::Standard
@@ -209,10 +200,7 @@ pub fn runtime_proxy_request_lane(path: &str, websocket: bool) -> RuntimeRouteKi
 }
 
 pub fn runtime_proxy_request_is_long_lived(path: &str, websocket: bool) -> bool {
-    websocket
-        || is_runtime_responses_path(path)
-        || is_runtime_chat_completions_path(path)
-        || is_runtime_anthropic_messages_path(path)
+    websocket || is_runtime_responses_path(path) || is_runtime_chat_completions_path(path)
 }
 
 pub fn runtime_proxy_request_header_value<'a>(
@@ -234,27 +222,14 @@ pub fn runtime_proxy_request_origin(headers: &[(String, String)]) -> Option<&str
     runtime_proxy_request_header_value(headers, PRODEX_INTERNAL_REQUEST_ORIGIN_HEADER)
 }
 
-pub fn runtime_proxy_request_prefers_interactive_inflight_wait(
-    request: &RuntimeProxyRequest,
-) -> bool {
-    runtime_proxy_request_origin(&request.headers).is_some_and(|origin| {
-        origin.eq_ignore_ascii_case(PRODEX_INTERNAL_REQUEST_ORIGIN_ANTHROPIC_MESSAGES)
-    })
-}
-
 pub fn runtime_proxy_request_prefers_inflight_wait(request: &RuntimeProxyRequest) -> bool {
     request.method.eq_ignore_ascii_case("GET")
         || is_runtime_responses_path(&request.path_and_query)
         || is_runtime_chat_completions_path(&request.path_and_query)
-        || runtime_proxy_request_prefers_interactive_inflight_wait(request)
 }
 
-pub fn runtime_proxy_interactive_wait_budget_ms(path: &str, base_budget_ms: u64) -> u64 {
-    if is_runtime_anthropic_messages_path(path) {
-        base_budget_ms.saturating_mul(RUNTIME_PROXY_INTERACTIVE_WAIT_MULTIPLIER)
-    } else {
-        base_budget_ms
-    }
+pub fn runtime_proxy_interactive_wait_budget_ms(_path: &str, base_budget_ms: u64) -> u64 {
+    base_budget_ms
 }
 
 pub fn runtime_proxy_admission_wait_budget(path: &str, pressure_mode: bool) -> std::time::Duration {
@@ -273,9 +248,7 @@ pub fn runtime_proxy_request_inflight_wait_budget(
     request: &RuntimeProxyRequest,
     pressure_mode: bool,
 ) -> std::time::Duration {
-    if runtime_proxy_request_prefers_interactive_inflight_wait(request) {
-        runtime_proxy_admission_wait_budget(RUNTIME_PROXY_ANTHROPIC_MESSAGES_PATH, pressure_mode)
-    } else if runtime_proxy_request_prefers_inflight_wait(request) {
+    if runtime_proxy_request_prefers_inflight_wait(request) {
         runtime_proxy_admission_wait_budget(&request.path_and_query, pressure_mode)
     } else {
         std::time::Duration::ZERO

@@ -4,9 +4,6 @@ use std::io::Read;
 
 const RUNTIME_PROXY_REQUEST_CAPTURE_FAILED_MESSAGE: &str = "proxied request could not be captured";
 const RUNTIME_PROXY_REQUEST_REWRITE_FAILED_MESSAGE: &str = "proxied request could not be prepared";
-const RUNTIME_PROXY_ANTHROPIC_REQUEST_TRANSLATION_FAILED_MESSAGE: &str =
-    "Anthropic request could not be translated";
-const RUNTIME_PROXY_ANTHROPIC_REQUEST_FAILED_MESSAGE: &str = "Anthropic request failed";
 
 #[derive(Debug)]
 pub(crate) struct RuntimeProxyBodyTooLarge {
@@ -100,10 +97,6 @@ pub(crate) fn handle_runtime_rotation_proxy_request(
     shared: &RuntimeRotationProxyShared,
 ) {
     if let Some(response) = handle_runtime_proxy_admin_request(&mut request, shared) {
-        let _ = request.respond(response);
-        return;
-    }
-    if let Some(response) = handle_runtime_proxy_anthropic_compat_request(&request) {
         let _ = request.respond(response);
         return;
     }
@@ -315,81 +308,12 @@ fn dispatch_runtime_http_captured(
 ) {
     let compat_surface = runtime_detect_request_compatibility_surface(&captured, "request", "http");
     runtime_proxy_log_request_compatibility(shared, request_id, &compat_surface);
-    if is_runtime_anthropic_messages_path(&captured.path_and_query)
-        && shared.runtime_config.debug_anthropic_compat
-    {
-        runtime_proxy_log(
-            shared,
-            runtime_proxy_structured_log_message(
-                "anthropic_compat",
-                [
-                    runtime_proxy_log_field("request", request_id.to_string()),
-                    runtime_proxy_log_field("transport", "http"),
-                    runtime_proxy_log_field(
-                        "headers",
-                        runtime_proxy_redacted_headers_debug(&captured.headers),
-                    ),
-                    runtime_proxy_log_field(
-                        "body_snippet",
-                        runtime_proxy_redacted_body_snippet(&captured.body, 1024),
-                    ),
-                ],
-            ),
-        );
-    }
-
-    if is_runtime_anthropic_messages_path(&captured.path_and_query) {
-        dispatch_runtime_http_anthropic_request(request_id, request, &captured, shared);
-        return;
-    }
-
     if is_runtime_responses_path(&captured.path_and_query) {
         dispatch_runtime_http_responses_request(request_id, request, &captured, shared);
         return;
     }
 
     dispatch_runtime_http_standard_request(request_id, request, &captured, shared);
-}
-
-fn dispatch_runtime_http_anthropic_request(
-    request_id: u64,
-    request: tiny_http::Request,
-    captured: &RuntimeProxyRequest,
-    shared: &RuntimeRotationProxyShared,
-) {
-    let response = match proxy_runtime_anthropic_messages_request(request_id, captured, shared) {
-        Ok(response) => response,
-        Err(err) => {
-            if is_runtime_proxy_transport_failure(&err) {
-                runtime_proxy_log_dispatch_error(
-                    shared,
-                    request_id,
-                    "anthropic_transport_failure",
-                    format!("{err:#}"),
-                );
-                let _ = request.respond(build_runtime_proxy_response_from_parts(
-                    build_runtime_anthropic_error_parts(
-                        503,
-                        "service_unavailable",
-                        runtime_proxy_local_selection_failure_message(),
-                    ),
-                ));
-                return;
-            }
-            runtime_proxy_log_dispatch_error(
-                shared,
-                request_id,
-                "anthropic_error",
-                format!("{err:#}"),
-            );
-            RuntimeResponsesReply::Buffered(build_runtime_anthropic_error_parts(
-                502,
-                "api_error",
-                RUNTIME_PROXY_ANTHROPIC_REQUEST_FAILED_MESSAGE,
-            ))
-        }
-    };
-    respond_runtime_responses_reply(request, response);
 }
 
 fn dispatch_runtime_http_responses_request(
@@ -556,124 +480,6 @@ pub(crate) fn runtime_proxy_request_headers(request: &tiny_http::Request) -> Vec
             )
         })
         .collect()
-}
-
-pub(crate) fn proxy_runtime_anthropic_messages_request(
-    request_id: u64,
-    request: &RuntimeProxyRequest,
-    shared: &RuntimeRotationProxyShared,
-) -> Result<RuntimeResponsesReply> {
-    let translated_request = match translate_runtime_anthropic_messages_request(request) {
-        Ok(translated_request) => translated_request,
-        Err(_err) => {
-            return Ok(RuntimeResponsesReply::Buffered(
-                build_runtime_anthropic_error_parts(
-                    400,
-                    "invalid_request_error",
-                    RUNTIME_PROXY_ANTHROPIC_REQUEST_TRANSLATION_FAILED_MESSAGE,
-                ),
-            ));
-        }
-    };
-    if shared.runtime_config.debug_anthropic_compat {
-        runtime_proxy_log(
-            shared,
-            runtime_proxy_structured_log_message(
-                "anthropic_translated",
-                [
-                    runtime_proxy_log_field("request", request_id.to_string()),
-                    runtime_proxy_log_field("transport", "http"),
-                    runtime_proxy_log_field(
-                        "path",
-                        translated_request
-                            .translated_request
-                            .path_and_query
-                            .as_str(),
-                    ),
-                    runtime_proxy_log_field(
-                        "headers",
-                        runtime_proxy_redacted_headers_debug(
-                            &translated_request.translated_request.headers,
-                        ),
-                    ),
-                    runtime_proxy_log_field(
-                        "body_snippet",
-                        runtime_proxy_redacted_body_snippet(
-                            &translated_request.translated_request.body,
-                            2048,
-                        ),
-                    ),
-                ],
-            ),
-        );
-    }
-    let response = proxy_runtime_responses_request(
-        request_id,
-        &translated_request.translated_request,
-        shared,
-    )?;
-    let translate_started_at = Instant::now();
-    let translated_response = translate_runtime_responses_reply_to_anthropic(
-        response,
-        &translated_request,
-        request_id,
-        shared,
-    )?;
-    match &translated_response {
-        RuntimeResponsesReply::Buffered(parts) => runtime_proxy_log(
-            shared,
-            runtime_proxy_structured_log_message(
-                "anthropic_translate_complete",
-                [
-                    runtime_proxy_log_field("request", request_id.to_string()),
-                    runtime_proxy_log_field("transport", "http"),
-                    runtime_proxy_log_field("stream", translated_request.stream.to_string()),
-                    runtime_proxy_log_field(
-                        "needs_buffered_translation",
-                        translated_request
-                            .server_tools
-                            .needs_buffered_translation()
-                            .to_string(),
-                    ),
-                    runtime_proxy_log_field("status", parts.status.to_string()),
-                    runtime_proxy_log_field(
-                        "content_type",
-                        runtime_buffered_response_content_type(parts).unwrap_or("-"),
-                    ),
-                    runtime_proxy_log_field("body_bytes", parts.body.len().to_string()),
-                    runtime_proxy_log_field(
-                        "elapsed_ms",
-                        translate_started_at.elapsed().as_millis().to_string(),
-                    ),
-                ],
-            ),
-        ),
-        RuntimeResponsesReply::Streaming(response) => runtime_proxy_log(
-            shared,
-            runtime_proxy_structured_log_message(
-                "anthropic_translate_complete",
-                [
-                    runtime_proxy_log_field("request", request_id.to_string()),
-                    runtime_proxy_log_field("transport", "http"),
-                    runtime_proxy_log_field("stream", translated_request.stream.to_string()),
-                    runtime_proxy_log_field(
-                        "needs_buffered_translation",
-                        translated_request
-                            .server_tools
-                            .needs_buffered_translation()
-                            .to_string(),
-                    ),
-                    runtime_proxy_log_field("status", response.status.to_string()),
-                    runtime_proxy_log_field("body_streaming", "true"),
-                    runtime_proxy_log_field(
-                        "elapsed_ms",
-                        translate_started_at.elapsed().as_millis().to_string(),
-                    ),
-                ],
-            ),
-        ),
-    }
-    Ok(translated_response)
 }
 
 #[cfg(test)]

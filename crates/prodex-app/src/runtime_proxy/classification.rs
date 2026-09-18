@@ -1,8 +1,8 @@
 use std::time::Duration;
 
-use crate::{RUNTIME_PROXY_INTERACTIVE_WAIT_MULTIPLIER, RuntimeConfig};
+use crate::RuntimeConfig;
 
-use super::{RuntimeRouteKind, is_runtime_anthropic_messages_path};
+use super::RuntimeRouteKind;
 
 #[cfg(test)]
 pub(crate) use runtime_proxy_crate::{
@@ -22,12 +22,8 @@ pub(crate) fn runtime_proxy_request_lane(path: &str, websocket: bool) -> Runtime
     }
 }
 
-pub(crate) fn runtime_proxy_interactive_wait_budget_ms(path: &str, base_budget_ms: u64) -> u64 {
-    if is_runtime_anthropic_messages_path(path) {
-        base_budget_ms.saturating_mul(RUNTIME_PROXY_INTERACTIVE_WAIT_MULTIPLIER)
-    } else {
-        base_budget_ms
-    }
+pub(crate) fn runtime_proxy_interactive_wait_budget_ms(_path: &str, base_budget_ms: u64) -> u64 {
+    base_budget_ms
 }
 
 pub(crate) fn runtime_proxy_admission_wait_budget_with_config(

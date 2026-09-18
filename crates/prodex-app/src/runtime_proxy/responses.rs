@@ -306,7 +306,6 @@ fn runtime_responses_candidate_saturated(
     loop_state.record_inflight_saturation();
     match runtime_proxy_maybe_wait_for_interactive_inflight_relief(RuntimeInflightReliefWait {
         request_id: context.request_id,
-        request: &context.request,
         shared: context.shared,
         excluded_profiles: &loop_state.excluded_profiles,
         route_kind: RuntimeRouteKind::Responses,
@@ -440,7 +439,6 @@ fn handle_runtime_responses_candidate_exhausted(
     }
     match runtime_proxy_maybe_wait_for_interactive_inflight_relief(RuntimeInflightReliefWait {
         request_id: context.request_id,
-        request: &context.request,
         shared: context.shared,
         excluded_profiles: &loop_state.excluded_profiles,
         route_kind: RuntimeRouteKind::Responses,
@@ -692,7 +690,6 @@ fn handle_runtime_responses_local_selection_attempt(
 ) -> Result<Option<RuntimeResponsesReply>> {
     handle_runtime_responses_local_selection_blocked(RuntimeResponsesLocalSelectionBlocked {
         request_id: context.request_id,
-        request: &context.request,
         shared: context.shared,
         selection_started_at: loop_state.selection_started_at,
         profile_name,

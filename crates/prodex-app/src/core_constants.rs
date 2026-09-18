@@ -71,7 +71,6 @@ pub(crate) const RUNTIME_PROXY_PRESSURE_ADMISSION_WAIT_BUDGET_MS: u64 =
     if cfg!(test) { 25 } else { 200 };
 pub(crate) const RUNTIME_PROXY_PRESSURE_LONG_LIVED_QUEUE_WAIT_BUDGET_MS: u64 =
     if cfg!(test) { 25 } else { 200 };
-pub(crate) const RUNTIME_PROXY_INTERACTIVE_WAIT_MULTIPLIER: u64 = 2;
 pub(crate) const RUNTIME_PROXY_COMPACT_OWNER_RETRY_DELAY_MS: u64 = if cfg!(test) { 5 } else { 150 };
 pub(crate) const RUNTIME_PROXY_SYNC_PROBE_PRESSURE_PAUSE_MS: u64 = 5;
 pub(crate) const RUNTIME_PROFILE_INFLIGHT_SOFT_LIMIT: usize = if cfg!(test) { 1 } else { 4 };
@@ -137,8 +136,6 @@ pub(crate) const RUNTIME_PROXY_COMPACT_BUFFERED_RESPONSE_MAX_BYTES: usize = 32 *
 pub(crate) const RUNTIME_PROXY_HEAP_TRIM_MIN_RELEASE_BYTES: usize =
     if cfg!(test) { 1024 } else { 1024 * 1024 };
 pub(crate) const RUNTIME_PROXY_HEAP_TRIM_MIN_INTERVAL_MS: u64 = if cfg!(test) { 0 } else { 2_000 };
-pub(crate) const RUNTIME_PROXY_ANTHROPIC_WEB_SEARCH_FOLLOWUP_LIMIT: usize =
-    if cfg!(test) { 2 } else { 4 };
 pub(crate) const RUNTIME_PROXY_LOG_FILE_PREFIX: &str = "prodex-runtime";
 pub(crate) const RUNTIME_PROXY_LATEST_LOG_POINTER: &str = "prodex-runtime-latest.path";
 pub(crate) const CODEX_REFRESH_TOKEN_URL_OVERRIDE_ENV: &str = "CODEX_REFRESH_TOKEN_URL_OVERRIDE";

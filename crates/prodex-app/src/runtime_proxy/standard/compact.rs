@@ -488,7 +488,6 @@ impl RuntimeCompactSelectionContext<'_> {
     ) -> Result<RuntimeInflightReliefWaitResult> {
         runtime_proxy_maybe_wait_for_interactive_inflight_relief(RuntimeInflightReliefWait {
             request_id: self.request_id,
-            request: &self.request,
             shared: self.shared,
             excluded_profiles: &self.excluded_profiles,
             route_kind: RuntimeRouteKind::Compact,

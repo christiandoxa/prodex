@@ -2,7 +2,7 @@
 name = "prodex-context"
 version.workspace = true
 edition.workspace = true
-description = "Context audit and compression helpers for prodex"
+description = "Mojo-backed critical-signal safety helpers for prodex"
 license.workspace = true
 repository.workspace = true
 
@@ -12,37 +12,11 @@ path = "src/lib.rs"
 
 [features]
 default = ["mojo"]
-mojo = [
-    "dep:prodex_mojo_core",
-    "prodex_mojo_core/mojo-runtime",
-    "prodex_mojo_core/mojo-rich",
-]
+mojo = []
 
 [dependencies]
-anyhow = { workspace = true }
-redaction = { workspace = true }
 serde = { workspace = true }
-serde_json = { workspace = true }
-terminal_ui = { workspace = true }
-prodex_mojo_core = { workspace = true, optional = true }
-
-[target.'cfg(unix)'.dependencies]
-libc = { workspace = true }
-
-[target.'cfg(windows)'.dependencies]
-windows-sys = { version = "=0.61.2", features = [
-    "Wdk_Storage_FileSystem",
-    "Win32_Foundation",
-    "Win32_Storage_FileSystem",
-    "Win32_System_IO",
-] }
-
-[dev-dependencies]
-criterion = "0.8.2"
-
-[[bench]]
-name = "context_text_boundary"
-harness = false
+prodex_mojo_core = { workspace = true, features = ["mojo-runtime", "mojo-rich"] }
 
 [lints]
 workspace = true

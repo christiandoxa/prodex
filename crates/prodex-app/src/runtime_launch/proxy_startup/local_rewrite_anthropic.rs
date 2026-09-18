@@ -39,7 +39,6 @@ use prodex_provider_core::{
     provider_core_lossless_body, translate_openai_chat_request_to_anthropic_messages,
 };
 use prodex_provider_spi::ProviderRetryCause;
-use runtime_anthropic_crate::runtime_anthropic_first_event_retry_allowed;
 use runtime_proxy_crate::{runtime_proxy_log_field, runtime_proxy_structured_log_message};
 use serde_json::json;
 
@@ -148,6 +147,15 @@ enum AnthropicRetryTransition {
     ModelFallback,
     CredentialRotation,
     TerminalBuffered,
+}
+
+const RUNTIME_ANTHROPIC_FIRST_EVENT_RETRY_LIMIT: u8 = 1;
+
+fn runtime_anthropic_first_event_retry_allowed(
+    attempted_retries: u8,
+    first_event_committed: bool,
+) -> bool {
+    !first_event_committed && attempted_retries < RUNTIME_ANTHROPIC_FIRST_EVENT_RETRY_LIMIT
 }
 
 pub(super) fn send_runtime_anthropic_upstream_request(

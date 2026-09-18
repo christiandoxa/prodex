@@ -172,7 +172,6 @@ pub(crate) fn runtime_any_waited_candidate_relieved(
 
 pub(crate) struct RuntimeInflightReliefWait<'a> {
     pub(crate) request_id: u64,
-    pub(crate) request: &'a RuntimeProxyRequest,
     pub(crate) shared: &'a RuntimeRotationProxyShared,
     pub(crate) excluded_profiles: &'a BTreeSet<String>,
     pub(crate) route_kind: RuntimeRouteKind,
@@ -202,7 +201,6 @@ pub(crate) fn runtime_proxy_maybe_wait_for_interactive_inflight_relief(
 ) -> Result<RuntimeInflightReliefWaitResult> {
     let RuntimeInflightReliefWait {
         request_id,
-        request,
         shared,
         excluded_profiles,
         route_kind,
@@ -257,17 +255,11 @@ pub(crate) fn runtime_proxy_maybe_wait_for_interactive_inflight_relief(
                     "waiter_priority",
                     if continuation {
                         "continuation"
-                    } else if runtime_proxy_crate::runtime_proxy_request_prefers_interactive_inflight_wait(request)
-                    {
-                        "interactive"
                     } else {
                         "normal"
                     },
                 ),
-                runtime_proxy_log_field(
-                    "deadline_ms",
-                    total_wait_budget.as_millis().to_string(),
-                ),
+                runtime_proxy_log_field("deadline_ms", total_wait_budget.as_millis().to_string()),
             ],
         ),
     );
