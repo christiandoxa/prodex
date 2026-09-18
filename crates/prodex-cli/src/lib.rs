@@ -57,6 +57,15 @@ pub enum Commands {
     )]
     Status(StatusArgs),
     #[command(
+        about = "Follow redacted Prodex runtime logs.",
+        after_help = "Examples:
+  prodex log
+  prodex log last
+  prodex log upstream
+  prodex log --json"
+    )]
+    Log(LogArgs),
+    #[command(
         subcommand,
         about = "Inspect shared Codex session metadata.",
         after_help = CLI_SESSION_AFTER_HELP
@@ -119,6 +128,7 @@ impl Commands {
             Self::UseProfile(_) => "use",
             Self::Current => "current",
             Self::Status(_) => "status",
+            Self::Log(_) => "log",
             Self::Session(_) => "session",
             Self::Doctor(_) => "doctor",
             Self::Login(_) => "login",
@@ -268,6 +278,7 @@ pub fn should_default_cli_invocation_to_run(args: &[OsString]) -> bool {
             | "use"
             | "current"
             | "status"
+            | "log"
             | "session"
             | "doctor"
             | "login"

@@ -1,4 +1,4 @@
-use clap::{Args, Subcommand};
+use clap::{Args, Subcommand, ValueEnum};
 use std::path::PathBuf;
 
 use super::RUNTIME_PROXY_DOCTOR_TAIL_BYTES;
@@ -96,6 +96,27 @@ impl Default for StatusArgs {
             interval: 1,
         }
     }
+}
+
+#[derive(Clone, Copy, Debug, Default, ValueEnum, PartialEq, Eq)]
+pub enum LogMode {
+    /// Follow redacted runtime logs.
+    #[default]
+    Stream,
+    /// Print the latest matching runtime-log line and exit.
+    Last,
+    /// Follow only upstream request/response log events.
+    Upstream,
+}
+
+#[derive(Args, Debug, Default)]
+pub struct LogArgs {
+    /// Log view. Omit for the live stream.
+    #[arg(value_enum, default_value_t)]
+    pub mode: LogMode,
+    /// Emit one JSON object per line.
+    #[arg(long)]
+    pub json: bool,
 }
 
 #[derive(Args, Debug)]

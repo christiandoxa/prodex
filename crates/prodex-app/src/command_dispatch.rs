@@ -32,6 +32,7 @@ pub(crate) fn command_should_show_update_notice(command: &Commands) -> bool {
         && !matches!(
             command,
             Commands::RuntimeBroker(_)
+                | Commands::Log(_)
                 | Commands::Update(_)
                 | Commands::McpJsonlBridge(_)
                 | Commands::SubAgentExec(_)
@@ -57,6 +58,7 @@ pub(crate) fn execute_command(command: Commands) -> Result<()> {
         Commands::UseProfile(args) => handle_set_active_profile(args),
         Commands::Current => handle_current_profile(),
         Commands::Status(args) => handle_status(args),
+        Commands::Log(args) => handle_log(args),
         Commands::Session(command) => handle_session(command),
         Commands::Doctor(args) => handle_doctor(args),
         Commands::Login(args) => handle_codex_login(args),
@@ -77,6 +79,7 @@ fn command_runs_profile_lifecycle_recovery(command: &Commands) -> bool {
         && !matches!(
             command,
             Commands::Profile(ProfileCommands::Remove(_))
+                | Commands::Log(_)
                 | Commands::Doctor(_)
                 | Commands::McpJsonlBridge(_)
                 | Commands::SubAgentExec(_)
@@ -154,6 +157,14 @@ mod tests {
         assert!(command_is_super_dry_run(&codex));
         assert!(!command_should_show_update_notice(&codex));
         assert!(!crate::housekeeping::command_runs_auto_runtime_housekeeping(&codex));
+    }
+
+    #[test]
+    fn log_is_read_only_startup_surface() {
+        let command = parse_cli_command_from(["prodex", "log", "last"]).unwrap();
+        assert!(!command_runs_profile_lifecycle_recovery(&command));
+        assert!(!command_should_show_update_notice(&command));
+        assert!(!crate::housekeeping::command_runs_auto_runtime_housekeeping(&command));
     }
 
     #[test]

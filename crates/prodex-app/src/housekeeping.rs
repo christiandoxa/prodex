@@ -77,7 +77,10 @@ fn add_cleanup_counts(summary: &mut ProdexCleanupSummary, counts: ProdexCleanupC
 
 pub(crate) fn command_runs_auto_runtime_housekeeping(command: &Commands) -> bool {
     !crate::command_dispatch::command_is_super_dry_run(command)
-        && !matches!(command, |Commands::RuntimeBroker(_)| Commands::Update(_))
+        && !matches!(
+            command,
+            Commands::RuntimeBroker(_) | Commands::Log(_) | Commands::Update(_)
+        )
 }
 
 pub(crate) fn schedule_prodex_auto_runtime_housekeeping(command: &Commands) {
