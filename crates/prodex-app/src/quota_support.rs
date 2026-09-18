@@ -39,7 +39,6 @@ pub(crate) struct QuotaReport {
     pub(crate) name: String,
     pub(crate) active: bool,
     pub(crate) auth: AuthSummary,
-    pub(crate) provider: ProfileProvider,
     pub(crate) workspace_id: Option<String>,
     pub(crate) workspace_name: Option<String>,
     pub(crate) result: std::result::Result<ProviderQuotaSnapshot, String>,
@@ -78,34 +77,6 @@ impl QuotaProviderFilter {
         }
     }
 
-    pub(crate) fn next(self) -> Self {
-        match self {
-            Self::All => Self::OpenAi,
-            Self::OpenAi => Self::Gemini,
-            Self::Gemini => Self::Anthropic,
-            Self::Anthropic => Self::Copilot,
-            Self::Copilot => Self::Kiro,
-            Self::Kiro => Self::DeepSeek,
-            Self::DeepSeek => Self::Local,
-            Self::Local => Self::Agy,
-            Self::Agy => Self::All,
-        }
-    }
-
-    pub(crate) fn label(self) -> &'static str {
-        match self {
-            Self::All => "all",
-            Self::OpenAi => "openai",
-            Self::Gemini => "gemini",
-            Self::Anthropic => "anthropic",
-            Self::Copilot => "copilot",
-            Self::Kiro => "kiro",
-            Self::DeepSeek => "deepseek",
-            Self::Local => "local",
-            Self::Agy => "agy",
-        }
-    }
-
     pub(crate) fn matches(self, provider: &ProfileProvider) -> bool {
         match self {
             Self::All => true,
@@ -141,28 +112,6 @@ impl QuotaProviderFilter {
             | Self::Copilot
             | Self::Kiro
             | Self::Agy => false,
-        }
-    }
-
-    pub(crate) fn matches_report(self, report: &QuotaReport) -> bool {
-        if self.matches(&report.provider) {
-            return true;
-        }
-        if let Ok(ProviderQuotaSnapshot::External(info)) = &report.result {
-            match self {
-                Self::DeepSeek => return info.provider.eq_ignore_ascii_case("DeepSeek"),
-                Self::Local => {
-                    return info
-                        .provider
-                        .eq_ignore_ascii_case("Local OpenAI-compatible");
-                }
-                _ => {}
-            }
-        }
-        match self {
-            Self::DeepSeek => report.auth.label.eq_ignore_ascii_case("deepseek-key"),
-            Self::Local => report.auth.label.eq_ignore_ascii_case("local"),
-            _ => false,
         }
     }
 }
@@ -262,7 +211,6 @@ pub(crate) fn collect_quota_reports_with_filters(
             name: job.name,
             active: job.active,
             auth: job.auth,
-            provider: job.provider,
             workspace_id,
             workspace_name,
             result,
@@ -278,9 +226,6 @@ pub(crate) fn collect_quota_reports_with_filters(
 
 const QUOTA_RUNTIME_LOG_TAIL_BYTES: usize = 1024 * 1024;
 const QUOTA_RUNTIME_PROFILE_EVENTS: &[&str] = &["token_usage", "profile_commit"];
-const QUOTA_RUNTIME_AUTH_BACKOFF_EVENTS: &[&str] =
-    &["profile_auth_backoff", "profile_auth_backoff_cleared"];
-
 fn quota_current_profile_name(state: &AppState) -> Option<String> {
     quota_current_runtime_profile_name(state).or_else(|| quota_state_current_profile_name(state))
 }
@@ -309,86 +254,6 @@ fn quota_current_runtime_profile_name(state: &AppState) -> Option<String> {
         state,
         prodex_runtime_log_paths_in_dir(&runtime_proxy_log_dir()),
     )
-}
-
-pub(crate) fn quota_runtime_auth_backoff_profiles() -> std::collections::BTreeSet<String> {
-    if let Some(path) = runtime_proxy_latest_log_path_from_pointer()
-        && path.exists()
-    {
-        return quota_runtime_auth_backoff_profiles_from_paths([path]);
-    }
-    quota_runtime_auth_backoff_profiles_from_paths(prodex_runtime_log_paths_in_dir(
-        &runtime_proxy_log_dir(),
-    ))
-}
-
-fn quota_runtime_auth_backoff_profiles_from_paths<I>(paths: I) -> std::collections::BTreeSet<String>
-where
-    I: IntoIterator<Item = PathBuf>,
-{
-    let mut paths: Vec<PathBuf> = paths.into_iter().collect();
-    paths.sort_by(|left, right| {
-        let left_modified = left
-            .metadata()
-            .and_then(|metadata| metadata.modified())
-            .ok();
-        let right_modified = right
-            .metadata()
-            .and_then(|metadata| metadata.modified())
-            .ok();
-        left_modified
-            .cmp(&right_modified)
-            .then_with(|| left.cmp(right))
-    });
-
-    let mut backoff = std::collections::BTreeSet::new();
-    for path in paths {
-        let Ok(tail) = read_runtime_log_tail(&path, QUOTA_RUNTIME_LOG_TAIL_BYTES) else {
-            continue;
-        };
-        let tail = String::from_utf8_lossy(&tail);
-        for line in tail.lines() {
-            match quota_runtime_auth_backoff_from_line(line) {
-                Some((profile_name, true)) => {
-                    backoff.insert(profile_name);
-                }
-                Some((profile_name, false)) => {
-                    backoff.remove(&profile_name);
-                }
-                None => {}
-            }
-        }
-    }
-    backoff
-}
-
-fn quota_runtime_auth_backoff_from_line(line: &str) -> Option<(String, bool)> {
-    if let Ok(value) = serde_json::from_str::<serde_json::Value>(line) {
-        let event = value.get("event").and_then(serde_json::Value::as_str)?;
-        if !QUOTA_RUNTIME_AUTH_BACKOFF_EVENTS.contains(&event) {
-            return None;
-        }
-        let profile = value
-            .get("fields")
-            .and_then(serde_json::Value::as_object)
-            .and_then(|fields| fields.get("profile"))
-            .and_then(serde_json::Value::as_str)?
-            .to_string();
-        return Some((profile, event == "profile_auth_backoff"));
-    }
-
-    let message = line
-        .strip_prefix('[')
-        .and_then(|rest| rest.split_once("] ").map(|(_, message)| message))
-        .unwrap_or(line);
-    let event = runtime_proxy_crate::runtime_proxy_log_event(message)?;
-    if !QUOTA_RUNTIME_AUTH_BACKOFF_EVENTS.contains(&event) {
-        return None;
-    }
-    runtime_proxy_crate::runtime_proxy_log_fields(message)
-        .get("profile")
-        .cloned()
-        .map(|profile| (profile, event == "profile_auth_backoff"))
 }
 
 fn quota_current_runtime_profile_name_from_paths<I>(state: &AppState, paths: I) -> Option<String>

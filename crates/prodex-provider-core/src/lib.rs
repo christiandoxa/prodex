@@ -1,5 +1,4 @@
 #![forbid(unsafe_code)]
-
 mod adapter;
 mod binding_identity;
 mod bridge;
@@ -23,7 +22,6 @@ mod tests;
 mod translator;
 mod translators;
 mod usage;
-
 pub use adapter::{StaticProviderAdapter, provider_adapter};
 pub use binding_identity::RuntimeProviderBindingIdentity;
 pub use bridge::{
@@ -134,22 +132,17 @@ pub use gemini_bridge::{
     gemini_provider_core_buffered_responses_value,
     gemini_provider_core_buffered_responses_value_with_fallback_ids,
     gemini_provider_core_chat_assistant_messages,
-    gemini_provider_core_chat_assistant_tool_call_item, gemini_provider_core_chat_message_text,
-    gemini_provider_core_citation_text, gemini_provider_core_collect_input_texts,
-    gemini_provider_core_collect_media_parts, gemini_provider_core_collect_path_values,
-    gemini_provider_core_collect_string_values, gemini_provider_core_compact_response_body,
-    gemini_provider_core_content, gemini_provider_core_contextual_user_instruction_text,
+    gemini_provider_core_chat_assistant_tool_call_item, gemini_provider_core_citation_text,
+    gemini_provider_core_collect_input_texts, gemini_provider_core_collect_media_parts,
+    gemini_provider_core_collect_path_values, gemini_provider_core_collect_string_values,
+    gemini_provider_core_compact_response_body, gemini_provider_core_content,
     gemini_provider_core_conversation_requests_command_output_only,
     gemini_provider_core_custom_tool_input_from_arguments, gemini_provider_core_data_url_parts,
     gemini_provider_core_exact_output_generate_chunk, gemini_provider_core_exact_output_sse_stream,
     gemini_provider_core_finish_reason, gemini_provider_core_finish_reason_failure,
     gemini_provider_core_finish_reason_incomplete,
     gemini_provider_core_finish_reason_retryable_invalid,
-    gemini_provider_core_forced_command_output, gemini_provider_core_function_call_part,
-    gemini_provider_core_function_call_part_from_tool_call,
-    gemini_provider_core_function_response_content_part,
-    gemini_provider_core_function_response_from_tool_message,
-    gemini_provider_core_function_response_part, gemini_provider_core_function_tools_from_chat,
+    gemini_provider_core_forced_command_output, gemini_provider_core_function_tools_from_chat,
     gemini_provider_core_function_tools_from_chat_checked,
     gemini_provider_core_gemini3_tool_description,
     gemini_provider_core_generate_content_body_value,
@@ -158,13 +151,10 @@ pub use gemini_bridge::{
     gemini_provider_core_generation_config_from_request, gemini_provider_core_google_quota_message,
     gemini_provider_core_harden_contents, gemini_provider_core_harden_tool_call_thought_signatures,
     gemini_provider_core_image_generation_call_item_from_part,
-    gemini_provider_core_image_url_value, gemini_provider_core_import_contents_from_value,
-    gemini_provider_core_internal_instruction_corpus,
+    gemini_provider_core_image_url_value, gemini_provider_core_internal_instruction_corpus,
     gemini_provider_core_internal_instruction_leak_text,
-    gemini_provider_core_invalid_stream_retry_delay_ms,
-    gemini_provider_core_is_contextual_user_fragment, gemini_provider_core_local_compact_summary,
+    gemini_provider_core_invalid_stream_retry_delay_ms, gemini_provider_core_local_compact_summary,
     gemini_provider_core_local_context_text_part,
-    gemini_provider_core_mask_tool_response_for_history,
     gemini_provider_core_media_content_item_from_part,
     gemini_provider_core_media_part_from_content_object, gemini_provider_core_media_part_from_data,
     gemini_provider_core_media_part_from_uri_or_data_url, gemini_provider_core_mime_type_for_uri,
@@ -192,22 +182,19 @@ pub use gemini_bridge::{
     gemini_provider_core_semantic_compact_continuation_summary,
     gemini_provider_core_semantic_compact_instructions,
     gemini_provider_core_semantic_compact_request_body,
-    gemini_provider_core_semantic_compact_summary, gemini_provider_core_session_checkpoint_value,
+    gemini_provider_core_semantic_compact_summary,
     gemini_provider_core_should_inline_rate_limit_retry,
     gemini_provider_core_should_rotate_after_quota_response, gemini_provider_core_simple_request,
     gemini_provider_core_simple_response, gemini_provider_core_skip_context_path_name,
-    gemini_provider_core_stream_error, gemini_provider_core_structured_command_tool_response,
-    gemini_provider_core_system_instruction_from_chat,
-    gemini_provider_core_text_echoes_internal_instruction,
+    gemini_provider_core_stream_error, gemini_provider_core_text_echoes_internal_instruction,
     gemini_provider_core_text_from_special_part, gemini_provider_core_text_part,
     gemini_provider_core_thought_signature, gemini_provider_core_tool_aliases,
     gemini_provider_core_tool_call_command_text,
     gemini_provider_core_tool_call_ids_from_responses_value,
     gemini_provider_core_tool_config_from_request, gemini_provider_core_tool_intent_without_call,
     gemini_provider_core_tool_is_mutating, gemini_provider_core_tool_output_call_ids_from_request,
-    gemini_provider_core_tool_output_preview, gemini_provider_core_tool_response_output_string,
     gemini_provider_core_tools_from_requests, gemini_provider_core_tools_from_requests_checked,
-    gemini_provider_core_truncate_to_bytes, gemini_provider_core_unsupported_tool_fallback_body,
+    gemini_provider_core_unsupported_tool_fallback_body,
     gemini_provider_core_unverified_success_claim, gemini_provider_core_validate_candidate_count,
     gemini_provider_core_validate_request_tools, gemini_provider_core_visible_text_from_part,
     gemini_provider_core_web_search_call_from_grounding,

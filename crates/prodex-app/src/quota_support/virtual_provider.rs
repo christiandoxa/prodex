@@ -7,7 +7,6 @@ use super::{
 use crate::{RUNTIME_PROXY_BUFFERED_RESPONSE_MAX_BYTES, read_blocking_response_body_with_limit};
 use anyhow::{Context, Result, bail};
 use chrono::Local;
-use prodex_state::ProfileProvider;
 use std::env;
 
 pub(super) fn collect_virtual_quota_reports(
@@ -70,7 +69,7 @@ fn collect_local_quota_report(base_url: Option<&str>) -> QuotaReport {
 
 fn collect_agy_quota_reports() -> Vec<QuotaReport> {
     match fetch_agy_quota_info(None) {
-        Ok(info) => vec![virtual_quota_report_with_provider(
+        Ok(info) => vec![virtual_quota_report(
             &info
                 .account
                 .as_deref()
@@ -78,13 +77,11 @@ fn collect_agy_quota_reports() -> Vec<QuotaReport> {
                 .unwrap_or_else(|| "agy".to_string()),
             "agy",
             Ok(ProviderQuotaSnapshot::External(info)),
-            ProfileProvider::Agy { account: None },
         )],
-        Err(err) => vec![virtual_quota_report_with_provider(
+        Err(err) => vec![virtual_quota_report(
             "agy",
             "agy",
             Err(quota_error_message(&err)),
-            ProfileProvider::Agy { account: None },
         )],
     }
 }
@@ -94,15 +91,6 @@ fn virtual_quota_report(
     auth_label: &str,
     result: std::result::Result<ProviderQuotaSnapshot, String>,
 ) -> QuotaReport {
-    virtual_quota_report_with_provider(name, auth_label, result, ProfileProvider::Openai)
-}
-
-fn virtual_quota_report_with_provider(
-    name: &str,
-    auth_label: &str,
-    result: std::result::Result<ProviderQuotaSnapshot, String>,
-    provider: ProfileProvider,
-) -> QuotaReport {
     QuotaReport {
         name: name.to_string(),
         active: false,
@@ -110,7 +98,6 @@ fn virtual_quota_report_with_provider(
             label: auth_label.to_string(),
             quota_compatible: false,
         },
-        provider,
         workspace_id: None,
         workspace_name: None,
         result,

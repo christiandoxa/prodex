@@ -55,12 +55,10 @@ pub(crate) use deepseek::{
 pub(crate) use gemini::gemini_builtin_tools_from_request;
 pub(crate) use gemini::gemini_citation_text;
 pub(crate) use gemini::gemini_contents_from_request;
-pub(crate) use gemini::gemini_contextual_user_instruction_text;
 pub(crate) use gemini::gemini_custom_apply_patch_input;
 pub(crate) use gemini::gemini_function_declaration_from_openai_tool;
 #[cfg(not(feature = "mojo"))]
 pub(crate) use gemini::gemini_generation_config_from_request;
-pub(crate) use gemini::gemini_is_contextual_user_fragment;
 pub(crate) use gemini::gemini_normalized_response_value;
 pub(crate) use gemini::gemini_preserve_tool_call_signatures;
 #[cfg(not(feature = "mojo"))]

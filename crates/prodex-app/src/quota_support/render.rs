@@ -112,19 +112,6 @@ pub(crate) fn render_quota_reports_window_with_sort(
     )
 }
 
-pub(crate) fn sorted_quota_report_indexes_by_sort(
-    reports: &[QuotaReport],
-    sort: QuotaReportSort,
-) -> Vec<usize> {
-    prodex_quota::sorted_quota_report_indexes_by(&render_quota_report_inputs(reports), sort)
-}
-
-pub(crate) fn quota_pool_summary_fields_for_reports(
-    reports: &[QuotaReport],
-) -> Vec<(String, String)> {
-    prodex_quota::quota_pool_summary_fields(&render_quota_report_inputs(reports))
-}
-
 #[cfg(test)]
 pub(crate) fn sort_quota_reports_for_display(reports: &[QuotaReport]) -> Vec<&QuotaReport> {
     let render_reports = render_quota_report_inputs(reports);
@@ -136,10 +123,6 @@ pub(crate) fn sort_quota_reports_for_display(reports: &[QuotaReport]) -> Vec<&Qu
 
 pub(crate) fn format_main_windows(usage: &UsageResponse) -> String {
     prodex_quota::format_main_windows(usage)
-}
-
-pub(crate) fn format_main_windows_compact(usage: &UsageResponse) -> String {
-    prodex_quota::format_main_windows_compact(usage)
 }
 
 #[cfg(test)]
@@ -166,14 +149,6 @@ pub(crate) fn collect_blocked_limits(
 
 pub(crate) fn format_blocked_limits(blocked: &[BlockedLimit]) -> String {
     prodex_quota::format_blocked_limits(blocked)
-}
-
-pub(crate) fn format_openai_quota_status(usage: &UsageResponse) -> String {
-    prodex_quota::format_openai_quota_status(usage)
-}
-
-pub(crate) fn format_quota_error_status(error: &str) -> String {
-    prodex_quota::format_quota_error_status(error)
 }
 
 #[cfg(test)]
@@ -224,8 +199,4 @@ pub(crate) fn render_profile_quota_snapshot_with_detail(
 
 pub(crate) fn first_line_of_error(input: &str) -> String {
     prodex_quota::first_line_of_error(input)
-}
-
-pub(super) fn render_quota_watch_error_panel(title: &str, message: &str) -> String {
-    prodex_quota::render_quota_error_panel(title, message)
 }

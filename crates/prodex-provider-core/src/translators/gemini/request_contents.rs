@@ -34,6 +34,3 @@ pub(crate) fn gemini_request_content_mojo_value(
 pub(crate) use self::items::gemini_contains_local_media_path;
 pub(crate) use self::items::gemini_contents_from_request;
 pub(super) use self::system_instruction::gemini_system_instruction_from_request;
-pub(crate) use self::text::{
-    gemini_contextual_user_instruction_text, gemini_is_contextual_user_fragment,
-};
