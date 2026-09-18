@@ -5,7 +5,6 @@ mod doctor;
 mod gateway;
 mod info;
 mod log;
-mod log_tui;
 mod mcp_jsonl_bridge;
 #[cfg(test)]
 mod native_cli_tests;

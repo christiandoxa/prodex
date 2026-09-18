@@ -1,10 +1,11 @@
 use chrono::{Local, TimeZone};
-use std::cmp::Ordering;
 use terminal_ui::{
-    CLI_LABEL_WIDTH, CLI_TABLE_GAP, current_cli_width, format_field_lines_with_layout, pad_cell,
-    panel_label_width, section_header_with_width, text_width, wrap_text,
+    current_cli_width, format_field_lines_with_layout, panel_label_width,
+    section_header_with_width, wrap_text,
 };
 
+#[cfg(test)]
+use terminal_ui::text_width;
 #[cfg(test)]
 use super::ExternalQuotaDetail;
 use super::{

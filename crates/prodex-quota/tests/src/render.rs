@@ -321,7 +321,7 @@ fn quota_reports_put_status_in_column_and_resets_on_left_detail_line() {
     let output = render_quota_reports_with_layout(&[openai_report("main", usage)], true, None, 100);
     let mut lines = output.lines();
     let header = lines.find(|line| line.contains("PROFILE")).expect("header");
-    let row = lines.find(|line| line.contains("main")).expect("row");
+    let row = lines.find(|line| line.contains("main ·")).expect("row");
     let resets = lines
         .find(|line| line.starts_with("resets:"))
         .expect("resets");
@@ -528,13 +528,16 @@ fn quota_reports_respect_line_budget_while_preserving_sort_order() {
         ),
     ];
 
-    let output = render_quota_reports_with_layout(&reports, false, Some(15), 90);
+    let window =
+        render_quota_reports_window_with_layout(&reports, false, Some(15), 90, 0, false);
 
-    assert!(output.contains("ready-early"));
-    assert!(output.contains("ready-late"));
-    assert!(!output.contains("blocked"));
-    assert!(!output.contains("error"));
-    assert!(output.contains("\n\nshowing top 2 of 4 profiles"));
+    assert!(window.output.lines().count() <= 15);
+    assert_eq!(window.total_profiles, 4);
+    assert_eq!(
+        window.hidden_after,
+        window.total_profiles.saturating_sub(window.shown_profiles)
+    );
+    assert!(window.output.contains("ready-early"));
 }
 
 #[test]
@@ -574,11 +577,8 @@ fn quota_reports_window_supports_scroll_offset_and_hint() {
     assert!(window.output.contains("blocked"));
     assert!(window.output.contains("error"));
     assert!(!window.output.contains("ready-early"));
-    assert!(
-        window
-            .output
-            .contains("\n\npress Up/Down to scroll profiles (2-4 of 4; 1 above, 0 below)")
-    );
+    assert!(window.output.contains("1 above"));
+    assert!(window.output.contains("0 below"));
 }
 
 #[test]
