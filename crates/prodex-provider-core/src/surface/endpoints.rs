@@ -2,50 +2,6 @@
 
 use super::{ProviderEndpoint, ProviderId};
 
-pub(crate) const CORE_TEXT_ENDPOINTS: &[ProviderEndpoint] = &[
-    ProviderEndpoint::Responses,
-    ProviderEndpoint::ResponsesCompact,
-    ProviderEndpoint::ChatCompletions,
-    ProviderEndpoint::Messages,
-    ProviderEndpoint::Models,
-];
-
-pub(crate) const COPILOT_TEXT_ENDPOINTS: &[ProviderEndpoint] = &[
-    ProviderEndpoint::Responses,
-    ProviderEndpoint::ResponsesCompact,
-    ProviderEndpoint::ChatCompletions,
-    ProviderEndpoint::Messages,
-    ProviderEndpoint::Models,
-];
-
-pub(crate) const KIRO_ENDPOINTS: &[ProviderEndpoint] = &[
-    ProviderEndpoint::Responses,
-    ProviderEndpoint::ResponsesCompact,
-    ProviderEndpoint::ChatCompletions,
-    ProviderEndpoint::Messages,
-    ProviderEndpoint::Models,
-];
-
-pub(crate) const OPENAI_ENDPOINTS: &[ProviderEndpoint] = &[
-    ProviderEndpoint::Responses,
-    ProviderEndpoint::ResponsesCompact,
-    ProviderEndpoint::ChatCompletions,
-    ProviderEndpoint::Models,
-    ProviderEndpoint::Embeddings,
-    ProviderEndpoint::Images,
-    ProviderEndpoint::Audio,
-    ProviderEndpoint::Batches,
-];
-
-pub(crate) const GEMINI_ENDPOINTS: &[ProviderEndpoint] = &[
-    ProviderEndpoint::Responses,
-    ProviderEndpoint::ResponsesCompact,
-    ProviderEndpoint::ChatCompletions,
-    ProviderEndpoint::Messages,
-    ProviderEndpoint::Models,
-    ProviderEndpoint::Embeddings,
-];
-
 pub const ALL_PROVIDER_ENDPOINTS: &[ProviderEndpoint] = &[
     ProviderEndpoint::Responses,
     ProviderEndpoint::ResponsesCompact,

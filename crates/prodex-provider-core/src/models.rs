@@ -1,55 +1,59 @@
 use super::{ProviderId, ProviderModelCost, ProviderModelSpec};
+use std::sync::LazyLock;
 
-mod anthropic;
-mod copilot;
-mod deepseek;
-mod gemini;
-mod kiro;
-mod local;
-mod openai;
+const PROVIDERS: [ProviderId; 7] = [
+    ProviderId::OpenAi,
+    ProviderId::Anthropic,
+    ProviderId::Copilot,
+    ProviderId::DeepSeek,
+    ProviderId::Gemini,
+    ProviderId::Kiro,
+    ProviderId::Local,
+];
 
-pub(crate) const ANTHROPIC_MODELS: &[ProviderModelSpec] = anthropic::MODELS;
-pub(crate) const COPILOT_MODELS: &[ProviderModelSpec] = copilot::MODELS;
-pub(crate) const DEEPSEEK_MODELS: &[ProviderModelSpec] = deepseek::MODELS;
-pub(crate) const GEMINI_MODELS: &[ProviderModelSpec] = gemini::MODELS;
-pub(crate) const KIRO_MODELS: &[ProviderModelSpec] = kiro::MODELS;
-pub(crate) const LOCAL_MODELS: &[ProviderModelSpec] = local::MODELS;
-pub(crate) const OPENAI_MODELS: &[ProviderModelSpec] = openai::MODELS;
-
-const OPENAI_CONTEXT_WINDOW_TOKENS: u64 = 400_000;
-const OPENAI_GPT_5_6_CONTEXT_WINDOW_TOKENS: u64 = 872_000;
-const ANTHROPIC_CONTEXT_WINDOW_TOKENS: u64 = 200_000;
-const COPILOT_OPENAI_CONTEXT_WINDOW_TOKENS: u64 = 400_000;
-const COPILOT_EXTENDED_CONTEXT_WINDOW_TOKENS: u64 = 1_000_000;
-const COPILOT_ANTHROPIC_CONTEXT_WINDOW_TOKENS: u64 = 200_000;
-const COPILOT_GEMINI_CONTEXT_WINDOW_TOKENS: u64 = 1_048_576;
-const DEEPSEEK_CONTEXT_WINDOW_TOKENS: u64 = 128_000;
-const GEMINI_CONTEXT_WINDOW_TOKENS: u64 = 1_048_576;
-const KIRO_CONTEXT_WINDOW_TOKENS: u64 = 1_000_000;
-
-macro_rules! model {
-    ($provider:expr, $owned_by:expr, $id:expr, $display:expr, $description:expr, $ctx:expr, $in_cost:expr, $out_cost:expr, $endpoints:expr, [$($alias:expr),* $(,)?]) => {
-        ProviderModelSpec {
-            id: $id,
-            display_name: $display,
-            description: $description,
-            provider: $provider,
-            owned_by: $owned_by,
-            context_window_tokens: $ctx,
-            input_cost_per_million_microusd: $in_cost,
-            output_cost_per_million_microusd: $out_cost,
-            endpoints: $endpoints,
-            aliases: &[$($alias),*],
-        }
-    };
+fn provider_index(provider: ProviderId) -> usize {
+    PROVIDERS
+        .iter()
+        .position(|candidate| *candidate == provider)
+        .expect("built-in provider id")
 }
-pub(super) use model;
+
+fn build_catalog(provider: ProviderId) -> Box<[ProviderModelSpec]> {
+    crate::catalog::provider_catalog_entries_for(provider)
+        .into_iter()
+        .map(|entry| {
+            let aliases = entry
+                .aliases
+                .iter()
+                .map(|alias| alias.as_str())
+                .collect::<Vec<_>>()
+                .into_boxed_slice();
+            ProviderModelSpec {
+                id: entry.id.as_str(),
+                display_name: entry.display_name.as_str(),
+                description: entry.description.as_str(),
+                provider: entry.provider,
+                owned_by: entry.owned_by.as_str(),
+                context_window_tokens: entry.context_window_tokens,
+                input_cost_per_million_microusd: entry.input_cost_per_million_microusd,
+                output_cost_per_million_microusd: entry.output_cost_per_million_microusd,
+                endpoints: entry.supported_endpoints.as_slice(),
+                aliases: Box::leak(aliases),
+            }
+        })
+        .collect::<Vec<_>>()
+        .into_boxed_slice()
+}
+
+static MODEL_CATALOGS: LazyLock<[Box<[ProviderModelSpec]>; 7]> =
+    LazyLock::new(|| std::array::from_fn(|index| build_catalog(PROVIDERS[index])));
+
+pub(crate) fn builtin_model_catalog(provider: ProviderId) -> &'static [ProviderModelSpec] {
+    MODEL_CATALOGS[provider_index(provider)].as_ref()
+}
 
 pub fn provider_model_catalog(provider: ProviderId) -> &'static [ProviderModelSpec] {
-    crate::provider_implementation_registry()
-        .get(provider)
-        .expect("built-in provider implementation must be registered")
-        .model_catalog()
+    builtin_model_catalog(provider)
 }
 
 #[cfg(feature = "mojo")]
@@ -58,11 +62,16 @@ pub fn provider_model_spec(
     model: &str,
 ) -> Option<&'static ProviderModelSpec> {
     let models = provider_model_catalog(provider);
+    let aliases = models
+        .iter()
+        .map(|spec| spec.aliases.to_vec())
+        .collect::<Vec<_>>();
     let catalog = models
         .iter()
-        .map(|spec| prodex_mojo_core::rich::CatalogModel {
+        .zip(&aliases)
+        .map(|(spec, aliases)| prodex_mojo_core::rich::CatalogModel {
             id: spec.id,
-            aliases: spec.aliases,
+            aliases,
         })
         .collect::<Vec<_>>();
     prodex_mojo_core::rich::resolve_catalog_model(&catalog, model)

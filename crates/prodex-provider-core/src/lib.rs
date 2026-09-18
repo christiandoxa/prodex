@@ -187,9 +187,6 @@ pub use models::{provider_model_catalog, provider_model_cost, provider_model_spe
 pub use reasoning_effort::ProviderReasoningEffort;
 pub use runtime_metadata::*;
 pub use surface::*;
-pub(crate) use surface::{
-    COPILOT_TEXT_ENDPOINTS, CORE_TEXT_ENDPOINTS, GEMINI_ENDPOINTS, KIRO_ENDPOINTS, OPENAI_ENDPOINTS,
-};
 pub use translator::{
     ProviderParamSupport, ProviderTransformInput, ProviderTransformLoss, ProviderTransformResult,
     ProviderTranslator, ProviderUnsupportedReason, TransformOutcome, TransformStatus,
