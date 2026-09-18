@@ -94,16 +94,16 @@ pub(super) fn runtime_continuation_header(
     }
 }
 
-pub(super) fn codex_0135_compaction_turn_metadata() -> String {
+pub(super) fn codex_0155_compaction_turn_metadata() -> String {
     concat!(
         r#"{"request_kind":"compaction","#,
         r#""session_id":"sess-rich-metadata","#,
         r#""thread_id":"thread-rich-metadata","#,
         r#""turn_id":"turn-rich-metadata","#,
         r#""window_id":"thread-rich-metadata:2","#,
-        r#""compaction":{"trigger":"token_limit","#,
-        r#""reason":"context_window_full","#,
-        r#""implementation":"responses_compact","#,
+        r#""compaction":{"trigger":"auto","#,
+        r#""reason":"context_limit","#,
+        r#""implementation":"responses_compaction_v2","#,
         r#""phase":"pre_turn","#,
         r#""strategy":"memento"}}"#
     )

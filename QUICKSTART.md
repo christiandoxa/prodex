@@ -234,9 +234,6 @@ cd ../feature-a && prodex s expose --name feature-a
 cd ../feature-b && prodex s expose --name feature-b
 ```
 
-See [Expose](EXPOSE.md) for route isolation, tool lifecycle,
-workspace binding, and security limits.
-
 ## 7. Select another provider
 
 Examples:

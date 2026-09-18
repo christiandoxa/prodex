@@ -329,7 +329,7 @@ fn runtime_proxy_websocket_preserves_rich_turn_metadata_handshake_header() {
     let (_connect_timeout_guard, _progress_timeout_guard) =
         ci_runtime_proxy_websocket_timeout_guards();
 
-    let turn_metadata = codex_0135_compaction_turn_metadata();
+    let turn_metadata = codex_0155_compaction_turn_metadata();
     let fixture = start_runtime_continuation_fixture(
         RuntimeProxyBackend::start_websocket(),
         "second",
@@ -376,7 +376,7 @@ fn runtime_proxy_websocket_preserves_rich_turn_metadata_handshake_header() {
             .get("x-codex-turn-metadata")
             .map(String::as_str),
         Some(turn_metadata.as_str()),
-        "websocket handshake should preserve Codex 0.135 turn metadata unchanged"
+        "websocket handshake should preserve Codex 0.155 turn metadata unchanged"
     );
 }
 
