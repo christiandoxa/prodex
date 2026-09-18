@@ -2,18 +2,15 @@
   "codex": {
     "compatibility": {
       "upstream_repository": "https://github.com/openai/codex",
-      "baseline_source": "openai/codex rust-v0.154.0 release",
+      "baseline_source": "openai/codex rust-v0.155.0 release",
       "guard_command": "node scripts/compat/check-upstream-baseline.mjs",
       "format_version": 2,
       "critical_files": [
         {
           "path": "codex-rs/core/src/client.rs",
-          "reason": "Owns Responses route constants, compact route calls, request metadata/header construction, and websocket client metadata used by Prodex affinity.",
+          "reason": "Owns Responses request metadata/header construction, websocket client metadata, and auth-owner cache invalidation used by Prodex affinity.",
           "required_contains": [
             "ResponsesEndpoint::Responses",
-            "/responses",
-            "RESPONSES_COMPACT_ENDPOINT",
-            "/responses/compact",
             "build_responses_headers",
             "build_responses_compatibility_headers",
             "build_ws_client_metadata",
@@ -48,50 +45,41 @@
             "responses_websockets=2026-02-06",
             "x-client-request-id",
             "stream_responses_websocket",
-            "compact_conversation_history",
-            "compact_input",
             "client_metadata",
             "X_CODEX_WS_STREAM_REQUEST_START_MS_CLIENT_METADATA_KEY",
             "x-codex-ws-stream-request-start-ms",
             "prepare_response_items_for_request",
-            "responses_request_properties_match"
-          ]
-        },
-        {
-          "path": "codex-rs/core/src/compact_remote.rs",
-          "reason": "Owns remote compaction lifecycle, analytics, fallback, and delegation to the unary /responses/compact request path.",
-          "required_contains": [
-            "run_remote_compact_task",
-            "run_inline_remote_auto_compact_task",
-            "run_remote_compact_attempt",
-            "CompactionImplementation::ResponsesCompact",
-            "ContextCompactionItem",
-            "CompactionTurnMetadata",
-            "turn_state"
-          ]
-        },
-        {
-          "path": "codex-rs/core/src/compact_remote_request.rs",
-          "reason": "Owns remote compaction request construction, compaction-specific Responses metadata, and the unary /responses/compact client call.",
-          "required_contains": [
-            "run_remote_compact_attempt",
-            "compact_conversation_history",
-            "CompactConversationRequestSettings",
-            "CompactionTurnMetadata",
-            "CodexResponsesRequestKind::Compaction",
-            "turn_state",
-            "responses_metadata"
+            "responses_request_properties_match",
+            "auth_owner_generation",
+            "take_cached_websocket_session",
+            "build_responses_request"
           ]
         },
         {
           "path": "codex-rs/core/src/compact_remote_v2.rs",
-          "reason": "Owns Codex's opt-in retained-image accounting and boundary truncation; Prodex tracks this contract but does not reimplement it.",
+          "reason": "Owns Codex 0.155 remote compaction over the normal Responses stream, compaction reasoning effort, retry lifecycle, retained-image accounting, and history installation.",
           "required_contains": [
+            "run_remote_compact_task",
+            "run_inline_remote_auto_compact_task",
+            "run_remote_compaction_request_v2",
+            "RequestEffortUsage::Compaction",
+            "CompactionImplementation::ResponsesCompactionV2",
             "Feature::CompactionImageBudget",
             "RetainedImageBudget::Enabled",
             "truncate_retained_messages",
             "images::truncate_message_to_token_budget",
             "remaining = 0"
+          ]
+        },
+        {
+          "path": "codex-rs/core/src/compact_remote_v2_attempt.rs",
+          "reason": "Owns Codex 0.155 compaction request construction by appending a CompactionTrigger to normal Responses input and attaching compaction-specific metadata.",
+          "required_contains": [
+            "ResponseItem::CompactionTrigger {}",
+            "CompactionTurnMetadata",
+            "CodexResponsesRequestKind::Compaction",
+            "responses_metadata",
+            "run_remote_compaction_request_v2"
           ]
         },
         {
@@ -161,6 +149,18 @@
           ]
         },
         {
+          "path": "codex-rs/models-manager/src/cache.rs",
+          "reason": "Owns model catalog cache freshness plus client-version, provider/auth identity, and ETag revalidation for Codex 0.155.",
+          "required_contains": [
+            "ModelsCacheEntry",
+            "identity: Option<String>",
+            "refresh_ttl",
+            "entry.identity",
+            "client_version",
+            "etag"
+          ]
+        },
+        {
           "path": "codex-rs/model-provider/src/auth.rs",
           "reason": "Owns provider-scoped authentication. Custom providers must not inherit ambient OpenAI credentials, while explicit provider auth and OpenAI providers retain authentication.",
           "required_contains": [
@@ -170,6 +170,23 @@
             "custom_provider_does_not_inherit_ambient_auth_headers",
             "custom_provider_uses_explicit_bearer_instead_of_ambient_auth",
             "openai_provider_preserves_ambient_auth_headers"
+          ]
+        },
+        {
+          "path": "codex-rs/model-provider/src/models_identity.rs",
+          "reason": "Owns the provider-routing and effective-auth digest that scopes Codex 0.155 model catalog caches without coupling stable account identity to rotating access tokens.",
+          "required_contains": [
+            "models-cache-v1",
+            "provider.name",
+            "provider.base_url",
+            "provider.query_params",
+            "requires_openai_auth",
+            "get_account_id",
+            "get_chatgpt_user_id",
+            "get_account_email",
+            "account_plan_type",
+            "resolve_provider_auth",
+            "has_stable_account"
           ]
         },
         {
@@ -315,34 +332,16 @@
           ]
         },
         {
-          "path": "codex-rs/protocol/src/response_usage.rs",
-          "reason": "Codex 0.153 preserves raw per-response usage metadata separately from token counts; Prodex keeps this upstream-owned data opaque while deriving t/s only from its own measured stream boundary.",
+          "path": "codex-rs/codex-api/src/endpoint/responses.rs",
+          "reason": "Owns the provider-relative /responses path, HTTP session headers, and turn-state capture shared by ordinary and compaction-v2 Responses streams.",
           "required_contains": [
-            "ResponseUsageMetadata",
-            "pub amount: Option<String>",
-            "pub metadata: Option<Value>"
-          ]
-        },
-        {
-          "path": "codex-rs/app-server-protocol/schema/json/v2/RawResponseCompletedNotification.json",
-          "reason": "App-server raw response completion notifications preserve upstream response usage metadata without changing Prodex token accounting ownership.",
-          "required_contains": [
-            "RawResponseCompletedNotification",
-            "ResponseUsageMetadata",
-            "metadata"
-          ]
-        },
-        {
-          "path": "codex-rs/codex-api/src/endpoint/compact.rs",
-          "reason": "Owns unary /responses/compact transport and response x-codex-turn-state capture.",
-          "required_contains": [
-            "CompactClient",
-            "responses/compact",
-            "compact_input",
-            "X_CODEX_TURN_STATE_HEADER",
-            "x-codex-turn-state",
+            "pub enum ResponsesEndpoint",
+            "Self::Responses => \"/responses\"",
+            "ResponsesOptions",
             "turn_state",
-            "headers"
+            "stream_request",
+            "self.endpoint.path()",
+            "spawn_response_stream"
           ]
         },
         {
@@ -371,6 +370,24 @@
             "treatment_from_headers",
             "SafetyBufferingTreatment",
             "safety_buffering(treatment)"
+          ]
+        },
+        {
+          "path": "codex-rs/protocol/src/response_usage.rs",
+          "reason": "Codex 0.153 preserves raw per-response usage metadata separately from token counts; Prodex keeps this upstream-owned data opaque while deriving t/s only from its own measured stream boundary.",
+          "required_contains": [
+            "ResponseUsageMetadata",
+            "pub amount: Option<String>",
+            "pub metadata: Option<Value>"
+          ]
+        },
+        {
+          "path": "codex-rs/app-server-protocol/schema/json/v2/RawResponseCompletedNotification.json",
+          "reason": "App-server raw response completion notifications preserve upstream response usage metadata without changing Prodex token accounting ownership.",
+          "required_contains": [
+            "RawResponseCompletedNotification",
+            "ResponseUsageMetadata",
+            "metadata"
           ]
         },
         {
@@ -566,18 +583,16 @@
         },
         {
           "path": "codex-rs/app-server/README.md",
-          "reason": "Owns public app-server JSON-RPC lifecycle docs and generated-schema command surface.",
+          "reason": "Documents additive 0.155 app-server surfaces that Prodex must tolerate without assuming support, including verification cancellation and durable thread attachments.",
           "required_contains": [
-            "codex app-server generate-json-schema",
-            "--experimental",
-            "thread/start",
-            "thread/resume",
-            "thread/fork",
-            "turn/start",
-            "thread/started",
-            "turn/started",
-            "turn/completed",
-            "JSON-RPC"
+            "userVerification/cancel",
+            "experimentalApi",
+            "thread/attachment/add",
+            "thread/attachment/list",
+            "thread/attachment/remove",
+            "thread/attachment/updated",
+            "thread/archive",
+            "thread/delete"
           ]
         },
         {
@@ -742,7 +757,6 @@
       ],
       "expected_routes": [
         "/responses",
-        "/responses/compact",
         "alpha/search",
         "/memories/trace_summarize",
         "websocket_url_for_path(self.endpoint.path())",
@@ -764,13 +778,15 @@
       ],
       "semantic_checks": [
         {
-          "id": "client.responses-route",
+          "id": "responses.http-route",
           "kind": "route",
-          "file": "codex-rs/core/src/client.rs",
-          "reason": "Responses unary traffic must keep the upstream route constant and path together.",
+          "file": "codex-rs/codex-api/src/endpoint/responses.rs",
+          "reason": "The canonical Responses path is now owned by codex-api and is shared by normal and compaction-v2 streaming.",
           "file_contains_all": [
-            "ResponsesEndpoint::Responses",
-            "/responses"
+            "pub enum ResponsesEndpoint",
+            "Self::Responses => \"/responses\"",
+            "stream_request",
+            "self.endpoint.path()"
           ],
           "expected_routes_all": [
             "/responses"
@@ -809,35 +825,34 @@
           ]
         },
         {
-          "id": "client.responses-compact-route",
+          "id": "compact.remote-responses-v2",
           "kind": "route",
-          "file": "codex-rs/core/src/client.rs",
-          "reason": "Remote compaction must keep using the upstream Responses compact route.",
+          "file": "codex-rs/core/src/compact_remote_v2.rs",
+          "reason": "Codex 0.155 remote compaction uses the normal Responses stream and preserves the request reasoning effort for compaction.",
           "file_contains_all": [
-            "RESPONSES_COMPACT_ENDPOINT",
-            "/responses/compact",
-            "compact_conversation_history",
-            "compact_input",
-            "CodexResponsesMetadata"
+            "run_remote_compact_task",
+            "run_inline_remote_auto_compact_task",
+            "run_remote_compaction_request_v2",
+            "RequestEffortUsage::Compaction",
+            "CompactionImplementation::ResponsesCompactionV2"
           ],
           "expected_routes_all": [
-            "/responses/compact"
+            "/responses"
           ]
         },
         {
-          "id": "client.responses-compact-metadata-header",
-          "kind": "header_group",
-          "reason": "Remote compact unary traffic must forward the Codex turn metadata header added for compaction attribution.",
-          "file": "codex-rs/core/src/client.rs",
+          "id": "compact.trigger-request",
+          "kind": "metadata_group",
+          "file": "codex-rs/core/src/compact_remote_v2_attempt.rs",
+          "reason": "Codex 0.155 compaction appends a CompactionTrigger and derives compaction-specific Responses metadata before normal /responses streaming.",
           "file_contains_all": [
-            "compact_conversation_history",
-            "build_responses_headers",
-            "build_responses_compatibility_headers",
-            "CodexResponsesMetadata",
-            "compact_input"
+            "ResponseItem::CompactionTrigger {}",
+            "CodexResponsesRequestKind::Compaction",
+            "responses_metadata",
+            "run_remote_compaction_request_v2"
           ],
           "expected_routes_all": [
-            "/responses/compact"
+            "/responses"
           ],
           "expected_headers_all": [
             "x-codex-turn-metadata"
@@ -959,39 +974,6 @@
           ]
         },
         {
-          "id": "compact.remote-responses-compact",
-          "kind": "route",
-          "file": "codex-rs/core/src/compact_remote_request.rs",
-          "reason": "Remote compaction must construct compaction-specific Responses metadata before calling the unary compact client.",
-          "file_contains_all": [
-            "run_remote_compact_attempt",
-            "compact_conversation_history",
-            "CompactConversationRequestSettings",
-            "CodexResponsesRequestKind::Compaction"
-          ],
-          "expected_routes_all": [
-            "/responses/compact"
-          ]
-        },
-        {
-          "id": "compact.remote-turn-metadata-header",
-          "kind": "header_group",
-          "reason": "Remote compaction must derive and pass compaction-specific turn metadata into the compact request.",
-          "file": "codex-rs/core/src/compact_remote_request.rs",
-          "file_contains_all": [
-            "CompactionTurnMetadata",
-            "compact_conversation_history",
-            "CodexResponsesRequestKind::Compaction",
-            "responses_metadata"
-          ],
-          "expected_routes_all": [
-            "/responses/compact"
-          ],
-          "expected_headers_all": [
-            "x-codex-turn-metadata"
-          ]
-        },
-        {
           "id": "compact.image-budget-owned-by-codex",
           "kind": "feature_gate",
           "file": "codex-rs/core/src/compact_remote_v2.rs",
@@ -1005,22 +987,21 @@
           ]
         },
         {
-          "id": "compact.response-turn-state",
-          "kind": "header_group",
-          "file": "codex-rs/codex-api/src/endpoint/compact.rs",
-          "reason": "Compact unary responses can establish x-codex-turn-state, which Prodex must bind for follow-up affinity.",
+          "id": "models.cache-provider-auth-identity",
+          "kind": "cache_identity",
+          "file": "codex-rs/model-provider/src/models_identity.rs",
+          "reason": "Model catalogs are isolated by provider routing and effective account/auth identity so profile switching cannot reuse another identity cache.",
           "file_contains_all": [
-            "compact_input",
-            "X_CODEX_TURN_STATE_HEADER",
-            "x-codex-turn-state",
-            "turn_state",
-            "headers"
-          ],
-          "expected_routes_all": [
-            "/responses/compact"
-          ],
-          "expected_headers_all": [
-            "x-codex-turn-state"
+            "models-cache-v1",
+            "provider.name",
+            "provider.base_url",
+            "provider.query_params",
+            "get_account_id",
+            "get_chatgpt_user_id",
+            "get_account_email",
+            "account_plan_type",
+            "resolve_provider_auth",
+            "has_stable_account"
           ]
         },
         {
@@ -1463,13 +1444,17 @@
           ]
         },
         {
-          "id": "app-server.schema-generation",
-          "kind": "schema_generation",
+          "id": "app-server.additive-extensions",
+          "kind": "jsonrpc_docs",
           "file": "codex-rs/app-server/README.md",
-          "reason": "Generated schema support must stay exposed so Prodex can move from token checks to schema-aware compatibility.",
+          "reason": "Prodex treats the new 0.155 verification-cancel and durable-thread-attachment surfaces as additive optional app-server APIs.",
           "file_contains_all": [
-            "codex app-server generate-json-schema",
-            "--experimental"
+            "userVerification/cancel",
+            "experimentalApi",
+            "thread/attachment/add",
+            "thread/attachment/list",
+            "thread/attachment/remove",
+            "thread/attachment/updated"
           ]
         },
         {
@@ -1572,9 +1557,23 @@
             "ThreadPath",
             "RequestSerializationAccess"
           ]
+        },
+        {
+          "id": "models.cache-entry-identity",
+          "kind": "cache_identity",
+          "file": "codex-rs/models-manager/src/cache.rs",
+          "reason": "Cached model catalogs carry identity, client version, and ETag so 0.155 can reject stale or cross-identity snapshots.",
+          "file_contains_all": [
+            "ModelsCacheEntry",
+            "identity: Option<String>",
+            "refresh_ttl",
+            "entry.identity",
+            "client_version",
+            "etag"
+          ]
         }
       ],
-      "tested_codex_release": "rust-v0.154.0",
+      "tested_codex_release": "rust-v0.155.0",
       "patch_deltas": [
         {
           "from": "rust-v0.150.0",
@@ -1698,6 +1697,22 @@
           ],
           "prodex_action": "Use the official unmodified Codex 0.154.0 release through the existing app-server and quota boundaries. Keep capability detection, exact thread/cwd/status validation, opaque additive fields, fail-closed process identity, and QUEUED-versus-APPLIED reporting unchanged; no production compatibility repair is required.",
           "compatibility_evidence": "Exact source archives, release metadata, isolated official Linux binary, baseline 0.153.4 comparison, session/thread and queue smokes, upstream baseline guard, runtime manifest guard, app-server broker compatibility tests, and session Prompt Write tests are recorded in migration/codex-rust-v0.154.0-audit.md."
+        },
+        {
+          "from": "rust-v0.154.0",
+          "to": "rust-v0.155.0",
+          "upstream_commit": "f0a1b8f0849d90960bc406b848f32e5a129b0457",
+          "upstream_tag_object": "799f378ee7f85c775dee82d9bc45cc2df8df18fb",
+          "upstream_release_date": "2026-09-17T23:14:43Z",
+          "tree_comparison": "exact tagged source archives; 1330 changed files, 110802 additions, 24895 deletions, 2 binary entries",
+          "runtime_changes": [
+            "Remote compaction v2 now sends a CompactionTrigger through the normal /responses stream; the old compact_remote.rs, compact_remote_request.rs, and codex-api compact endpoint are removed.",
+            "Compaction requests preserve the effective reasoning effort through RequestEffortUsage::Compaction.",
+            "Model catalog caches are scoped by provider routing plus effective auth/account identity, and WebSocket cache ownership is invalidated when the auth owner changes.",
+            "App-server adds daemon recovery/update, user-verification cancellation, memory/status, and durable thread attachment surfaces; these remain upstream-owned optional APIs."
+          ],
+          "prodex_action": "Preserve normal Responses metadata and compaction-trigger payloads opaquely, keep hard session/continuation affinity and pre-commit rotation rules, retain legacy /responses/compact compatibility for older clients, and do not duplicate Codex model-cache identity, daemon, voice, or verification semantics.",
+          "compatibility_evidence": "Exact 0.154.0 and 0.155.0 source archives, upstream release metadata, the existing Prodex normal-/responses compaction-v2 affinity regression, offline baseline guard, and focused runtime proxy replay/compatibility checks are recorded in migration/codex-rust-v0.155.0-audit.md."
         }
       ],
       "app_server_protocol": {
@@ -1720,19 +1735,20 @@
       }
     },
     "latestRelease": {
-      "tag_name": "rust-v0.154.0",
-      "name": "0.154.0",
-      "published_at": "2026-09-09T22:35:38Z",
-      "html_url": "https://github.com/openai/codex/releases/tag/rust-v0.154.0",
+      "tag_name": "rust-v0.155.0",
+      "name": "0.155.0",
+      "published_at": "2026-09-17T23:14:43Z",
+      "html_url": "https://github.com/openai/codex/releases/tag/rust-v0.155.0",
       "body_head": [
         "## New Features",
-        "- GPT-6-Astra is now available in the model picker and Amazon Bedrock catalogs. (#42879, #42619)",
-        "- Experimental worktree support lets you create isolated checkouts for new or forked sessions using `--worktree` or `/worktree`, then browse and resume them. (#42652, #43069, #43120, #43286)",
-        "- Answer questions inline while Codex continues working, using suggested choices or custom text without losing your main draft. (#42891, #42894, #42897)",
-        "- Windows sessions can now share a background Codex server, with daemon lifecycle commands and managed updates. (#42405, #42392)",
-        "- Vim editing gains `R` replace mode with undo and dot-repeat, plus more reliable Escape handling in legacy terminals. (#42194, #42584)",
-        "- Copying responses preserves formatting in rich-text apps, and `/copy` can copy status output or individual session fields. (#42847, #43055)",
-        "## Bug Fixes"
+        "",
+        "- Added experimental `/voice` conversations with live transcripts and microphone controls on supported builds, enabled through `/experimental`. (#43581, #43651, #44331)",
+        "- The TUI now shows live reasoning summaries in the status row and completion timestamps after successful turns. (#43558, #43921)",
+        "- Added task hiding, archiving, and deletion in the agents overview, plus worktree ownership details and confirmed deletion of clean managed worktrees. (#43942, #44424, #44433)",
+        "- Added Touch ID verification for MCP requests in local TUI sessions on supported Macs. (#43624, #43712, #43715)",
+        "- Added configurable daemon update schedules and `codex app-server daemon update`; saved threads and active goals can recover after daemon restarts. (#43542, #43562, #44314)",
+        "- Amazon Bedrock can now obtain AWS credentials from configured commands, with caching, expiration-based refresh, and authentication recovery. (#44028)",
+        ""
       ]
     }
   },

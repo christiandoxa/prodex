@@ -783,7 +783,7 @@ fn runtime_proxy_http_compaction_v2_stream_uses_session_bound_profile() {
 
     let proxy = start_runtime_rotation_proxy(&paths, &state, "main", backend.base_url(), false)
         .expect("runtime proxy should start");
-    let turn_metadata = codex_0135_compaction_turn_metadata();
+    let turn_metadata = codex_0155_compaction_turn_metadata();
     let response = Client::builder()
         .build()
         .expect("client")
@@ -856,7 +856,7 @@ fn runtime_proxy_http_compaction_v2_stream_uses_session_bound_profile() {
             .get("x-codex-turn-metadata")
             .map(String::as_str),
         Some(turn_metadata.as_str()),
-        "compaction v2 stream should preserve Codex 0.135 turn metadata unchanged"
+        "compaction v2 stream should preserve Codex 0.155 turn metadata unchanged"
     );
 
     let responses_bodies = backend.responses_bodies();
@@ -970,7 +970,7 @@ fn runtime_proxy_http_compact_previous_response_not_found_surfaces_stale_continu
 
     let proxy = start_runtime_rotation_proxy(&paths, &state, "second", backend.base_url(), false)
         .expect("runtime proxy should start");
-    let turn_metadata = codex_0135_compaction_turn_metadata();
+    let turn_metadata = codex_0155_compaction_turn_metadata();
     let response = Client::builder()
         .build()
         .expect("client")
@@ -1021,6 +1021,6 @@ fn runtime_proxy_http_compact_previous_response_not_found_surfaces_stale_continu
             .get("x-codex-turn-metadata")
             .map(String::as_str),
         Some(turn_metadata.as_str()),
-        "compact unary path should preserve Codex 0.135 turn metadata unchanged"
+        "compact unary path should preserve Codex 0.155 turn metadata unchanged"
     );
 }
