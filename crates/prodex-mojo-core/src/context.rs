@@ -66,57 +66,6 @@ unsafe extern "C" {
         key_indices: *mut i64,
         result: *mut ContextTextRowsResult,
     ) -> i64;
-    fn prodex_context_classify_command_metadata_v1(
-        abi_version: i64,
-        metadata: *const ProdexStringView,
-        output_kind: *mut i64,
-    ) -> i64;
-    fn prodex_context_command_success_flags_v1(
-        abi_version: i64,
-        metadata: *const ProdexStringView,
-        output_flags: *mut i64,
-    ) -> i64;
-    fn prodex_context_classify_ci_line_v1(
-        abi_version: i64,
-        line: *const ProdexStringView,
-        output: *mut i64,
-        output_count: i64,
-    ) -> i64;
-    fn prodex_context_looks_like_location_path_v1(
-        abi_version: i64,
-        path: *const ProdexStringView,
-        output: *mut i64,
-    ) -> i64;
-    fn prodex_context_watcher_line_semantics_v1(
-        abi_version: i64,
-        line: *const ProdexStringView,
-        key_output: *mut u8,
-        key_capacity: i64,
-        output: *mut i64,
-        output_count: i64,
-    ) -> i64;
-    fn prodex_context_watcher_should_compact_v1(
-        abi_version: i64,
-        kind: i64,
-        line_count: i64,
-        max_lines: i64,
-        marker_count: i64,
-        duplicate_keys: i64,
-        state_lines: i64,
-        failure_lines: i64,
-        output: *mut i64,
-    ) -> i64;
-    fn prodex_context_structured_json_compact_v1(
-        abi_version: i64,
-        input_address: u64,
-        input_length: i64,
-        line_count: i64,
-        max_line_bytes: i64,
-        output_address: u64,
-        output_capacity: i64,
-        written_address: u64,
-    ) -> i64;
-    fn prodex_context_estimate_tokens(chars: u64, words: u64) -> u64;
     fn prodex_context_signal_diff(
         before: *const i64,
         after: *const i64,
@@ -150,14 +99,6 @@ pub const CONTEXT_GIT_SEARCH_JSON_MATCH: i64 = 2;
 pub const CONTEXT_GIT_SEARCH_JSON_LINE: i64 = 4;
 pub const CONTEXT_GIT_SEARCH_HEADING_PATH: i64 = 8;
 pub const CONTEXT_GIT_SEARCH_HEADING_MATCH: i64 = 16;
-const CONTEXT_GIT_SEARCH_RESULT_WIDTH: usize = 4;
-const CONTEXT_CI_RESULT_WIDTH: usize = 7;
-const CONTEXT_CI_MARKER: i64 = 1;
-const CONTEXT_CI_ANNOTATION: i64 = 2;
-const CONTEXT_CI_JOB: i64 = 4;
-const CONTEXT_CI_STEP: i64 = 8;
-const CONTEXT_CI_EXIT_CODE: i64 = 16;
-const CONTEXT_CI_FAILURE_TEXT: i64 = 32;
 pub const CONTEXT_OUTPUT_RUST_STRONG: i64 = 1;
 pub const CONTEXT_OUTPUT_RUST_LOCATION: i64 = 2;
 pub const CONTEXT_OUTPUT_RUST_BACKTRACE: i64 = 4;
@@ -175,20 +116,8 @@ pub const CONTEXT_OUTPUT_ESLINT: i64 = 8192;
 pub const CONTEXT_OUTPUT_EXCEPTION: i64 = 16_384;
 pub const CONTEXT_OUTPUT_JUNIT_FAILURE: i64 = 32_768;
 static CONTEXT_TEXT_ABI_READY: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-#[path = "context/git_search.rs"]
-mod git_search;
-pub use git_search::classify_git_search_line;
-#[path = "context/blob_noise.rs"]
-mod blob_noise;
-pub use blob_noise::*;
-#[path = "context/command_output.rs"]
-mod command_output;
 #[path = "context/command_output_ops.rs"]
 mod command_output_ops;
-pub use command_output::{
-    CommandOutputAnalysis, CommandOutputLineClassification, analyze_command_output,
-    classify_command_output_line, select_critical_lines,
-};
 pub use command_output_ops::{
     classify_command_output_kind, normalize_command_output, truncate_command_output,
 };
@@ -267,258 +196,7 @@ pub struct ContextWatcherLineSemantics {
     pub key: Option<String>,
 }
 
-pub fn watcher_line_semantics(line: &str) -> Result<ContextWatcherLineSemantics, crate::MojoError> {
-    if !text_abi_is_ready() {
-        return Err(crate::MojoError::AbiMismatch);
-    }
-    let key_capacity = line.len().saturating_add(1);
-    let mut key = vec![0_u8; key_capacity.max(1)];
-    let view = ProdexStringView {
-        ptr: line.as_ptr(),
-        len: line.len(),
-    };
-    let mut output = [0_i64; 4];
-    let status = unsafe {
-        prodex_context_watcher_line_semantics_v1(
-            CONTEXT_TEXT_ABI_VERSION,
-            &view,
-            key.as_mut_ptr(),
-            i64::try_from(key.len()).map_err(|_| crate::MojoError::InvalidInput)?,
-            output.as_mut_ptr(),
-            output.len() as i64,
-        )
-    };
-    if status != 0 {
-        return Err(match status {
-            1 | 2 => crate::MojoError::InvalidInput,
-            4 => crate::MojoError::AbiMismatch,
-            _ => crate::MojoError::InvalidOutput,
-        });
-    }
-    if !(0..=3).contains(&output[0])
-        || !(0..=6).contains(&output[1])
-        || !(0..=1).contains(&output[2])
-    {
-        return Err(crate::MojoError::InvalidOutput);
-    }
-    let key = match output[3] {
-        -1 => None,
-        written if written >= 0 => {
-            let written = usize::try_from(written).map_err(|_| crate::MojoError::InvalidOutput)?;
-            if written > key.len() {
-                return Err(crate::MojoError::InvalidOutput);
-            }
-            key.truncate(written);
-            Some(String::from_utf8(key).map_err(|_| crate::MojoError::InvalidOutput)?)
-        }
-        _ => return Err(crate::MojoError::Capacity),
-    };
-    Ok(ContextWatcherLineSemantics {
-        marker: output[0],
-        state: output[1],
-        failure: output[2] == 1,
-        key,
-    })
-}
-
-pub fn compact_structured_json(
-    input: &str,
-    line_count: usize,
-    max_line_bytes: usize,
-) -> Result<Option<String>, crate::MojoError> {
-    if !text_abi_is_ready() {
-        return Err(crate::MojoError::AbiMismatch);
-    }
-    if input.len() > 4 * 1024 * 1024 {
-        return Err(crate::MojoError::InvalidInput);
-    }
-    let capacity = input
-        .len()
-        .min(64 * 1024)
-        .saturating_add(16 * 1024)
-        .max(4096);
-    let mut output = vec![0_u8; capacity];
-    let mut written = 0_i64;
-    let status = unsafe {
-        prodex_context_structured_json_compact_v1(
-            CONTEXT_TEXT_ABI_VERSION,
-            input.as_ptr() as usize as u64,
-            i64::try_from(input.len()).map_err(|_| crate::MojoError::InvalidInput)?,
-            i64::try_from(line_count).map_err(|_| crate::MojoError::InvalidInput)?,
-            i64::try_from(max_line_bytes).unwrap_or(i64::MAX),
-            output.as_mut_ptr() as usize as u64,
-            i64::try_from(output.len()).map_err(|_| crate::MojoError::InvalidInput)?,
-            (&mut written as *mut i64) as usize as u64,
-        )
-    };
-    if status != 0 {
-        return Err(match status {
-            1 | 2 => crate::MojoError::InvalidInput,
-            3 => crate::MojoError::Capacity,
-            4 => crate::MojoError::AbiMismatch,
-            _ => crate::MojoError::InvalidOutput,
-        });
-    }
-    let written = usize::try_from(written).map_err(|_| crate::MojoError::InvalidOutput)?;
-    if written == 0 {
-        return Ok(None);
-    }
-    if written > output.len() {
-        return Err(crate::MojoError::InvalidOutput);
-    }
-    output.truncate(written);
-    String::from_utf8(output)
-        .map(Some)
-        .map_err(|_| crate::MojoError::InvalidOutput)
-}
-
-pub fn watcher_should_compact(
-    kind: i64,
-    line_count: usize,
-    max_lines: usize,
-    marker_count: usize,
-    duplicate_keys: usize,
-    state_lines: usize,
-    failure_lines: usize,
-) -> Result<bool, crate::MojoError> {
-    if !text_abi_is_ready() {
-        return Err(crate::MojoError::AbiMismatch);
-    }
-    let as_i64 = |value: usize| i64::try_from(value).map_err(|_| crate::MojoError::InvalidInput);
-    let mut output = 0_i64;
-    let status = unsafe {
-        prodex_context_watcher_should_compact_v1(
-            CONTEXT_TEXT_ABI_VERSION,
-            kind,
-            as_i64(line_count)?,
-            as_i64(max_lines)?,
-            as_i64(marker_count)?,
-            as_i64(duplicate_keys)?,
-            as_i64(state_lines)?,
-            as_i64(failure_lines)?,
-            &mut output,
-        )
-    };
-    match (status, output) {
-        (0, 0) => Ok(false),
-        (0, 1) => Ok(true),
-        (1, _) => Err(crate::MojoError::InvalidInput),
-        (4, _) => Err(crate::MojoError::AbiMismatch),
-        _ => Err(crate::MojoError::InvalidOutput),
-    }
-}
-
-pub fn command_success_flags(metadata: &str) -> Result<i64, crate::MojoError> {
-    let _ = i64::try_from(metadata.len()).map_err(|_| crate::MojoError::InvalidInput)?;
-    if !text_abi_is_ready() {
-        return Err(crate::MojoError::AbiMismatch);
-    }
-    let view = ProdexStringView {
-        ptr: metadata.as_ptr(),
-        len: metadata.len(),
-    };
-    let mut flags = 0_i64;
-    let status = unsafe {
-        prodex_context_command_success_flags_v1(CONTEXT_TEXT_ABI_VERSION, &view, &mut flags)
-    };
-    match status {
-        0 if flags >= 0 && flags & !7 == 0 => Ok(flags),
-        1 | 2 => Err(crate::MojoError::InvalidInput),
-        4 => Err(crate::MojoError::AbiMismatch),
-        _ => Err(crate::MojoError::InvalidOutput),
-    }
-}
-
-pub fn classify_command_metadata(metadata: &str) -> Result<Option<i64>, crate::MojoError> {
-    if metadata.len() > CONTEXT_METADATA_MAX_BYTES {
-        return Ok(None);
-    }
-    if !text_abi_is_ready() {
-        return Err(crate::MojoError::AbiMismatch);
-    }
-    let view = ProdexStringView {
-        ptr: metadata.as_ptr(),
-        len: metadata.len(),
-    };
-    let mut output_kind = -1_i64;
-    let status = unsafe {
-        prodex_context_classify_command_metadata_v1(
-            CONTEXT_TEXT_ABI_VERSION,
-            &view,
-            &mut output_kind,
-        )
-    };
-    match status {
-        0 => match output_kind {
-            -1 => Ok(None),
-            1..=9 => Ok(Some(output_kind)),
-            _ => Err(crate::MojoError::InvalidOutput),
-        },
-        3 => Ok(None),
-        4 => Err(crate::MojoError::AbiMismatch),
-        1 | 2 => Err(crate::MojoError::InvalidInput),
-        _ => Err(crate::MojoError::InvalidOutput),
-    }
-}
-
 /// Classifies deterministic CI log metadata and returns byte spans into `line`.
-pub fn classify_ci_line(line: &str) -> Result<[i64; CONTEXT_CI_RESULT_WIDTH], crate::MojoError> {
-    if !text_abi_is_ready() {
-        return Err(crate::MojoError::AbiMismatch);
-    }
-    let view = ProdexStringView {
-        ptr: line.as_ptr(),
-        len: line.len(),
-    };
-    let mut output = [-1_i64; CONTEXT_CI_RESULT_WIDTH];
-    let status = unsafe {
-        prodex_context_classify_ci_line_v1(
-            CONTEXT_TEXT_ABI_VERSION,
-            &view,
-            output.as_mut_ptr(),
-            CONTEXT_CI_RESULT_WIDTH as i64,
-        )
-    };
-    if status != 0 {
-        return Err(match status {
-            1 | 2 => crate::MojoError::InvalidInput,
-            4 => crate::MojoError::AbiMismatch,
-            _ => crate::MojoError::InvalidOutput,
-        });
-    }
-    if output[0] < 0
-        || output[0]
-            & !(CONTEXT_CI_MARKER
-                | CONTEXT_CI_ANNOTATION
-                | CONTEXT_CI_JOB
-                | CONTEXT_CI_STEP
-                | CONTEXT_CI_EXIT_CODE
-                | CONTEXT_CI_FAILURE_TEXT)
-            != 0
-    {
-        return Err(crate::MojoError::InvalidOutput);
-    }
-    for pair in output[1..].as_chunks::<2>().0 {
-        let (start, end) = (pair[0], pair[1]);
-        if start == -1 && end == -1 {
-            continue;
-        }
-        let valid = start >= 0
-            && end >= start
-            && usize::try_from(end)
-                .ok()
-                .is_some_and(|end| end <= line.len())
-            && usize::try_from(start)
-                .ok()
-                .zip(usize::try_from(end).ok())
-                .is_some_and(|(start, end)| line.get(start..end).is_some());
-        if !valid {
-            return Err(crate::MojoError::InvalidOutput);
-        }
-    }
-    Ok(output)
-}
-
 pub fn prepare_signal_rows(
     before: &[ContextSignalLine<'_>],
     after: &[ContextSignalLine<'_>],
@@ -647,13 +325,6 @@ fn validate_signal_rows(
     Ok(())
 }
 
-pub fn estimate_tokens(chars: usize, words: usize) -> Result<usize, crate::MojoError> {
-    let chars = u64::try_from(chars).map_err(|_| crate::MojoError::InvalidInput)?;
-    let words = u64::try_from(words).map_err(|_| crate::MojoError::InvalidInput)?;
-    let tokens = unsafe { prodex_context_estimate_tokens(chars, words) };
-    usize::try_from(tokens).map_err(|_| crate::MojoError::InvalidOutput)
-}
-
 pub fn signal_diff(
     before: &[usize; 7],
     after: &[usize; 7],
@@ -676,21 +347,6 @@ pub fn signal_diff(
     let lost = counters_from_i64(lost)?;
     let gained = counters_from_i64(gained)?;
     Ok((lost, gained))
-}
-
-pub fn looks_like_location_path(path: &str) -> Result<bool, crate::MojoError> {
-    let path = ProdexStringView {
-        ptr: path.as_ptr(),
-        len: path.len(),
-    };
-    let mut output = 0_i64;
-    let status = unsafe {
-        prodex_context_looks_like_location_path_v1(CONTEXT_TEXT_ABI_VERSION, &path, &mut output)
-    };
-    if status != 0 || !matches!(output, 0 | 1) {
-        return Err(crate::MojoError::InvalidOutput);
-    }
-    Ok(output == 1)
 }
 
 pub fn lost_line_ranges_batch(
@@ -787,59 +443,11 @@ pub fn self_test() -> bool {
                     .map(|row| row[0])
                     .eq([0, 0, -1])
         });
-    let metadata_ok = classify_command_metadata("cargo test --workspace") == Ok(Some(3))
-        && classify_command_metadata("rg needle src") == Ok(Some(6))
-        && classify_command_metadata("unknown-command") == Ok(None)
-        && classify_command_metadata(&"cargo ".repeat(CONTEXT_METADATA_MAX_BYTES / 6 + 1))
-            == Ok(None);
-    let gemini_glob_ok = gemini_glob_matches("**/*.rs", "src/lib.rs") == Ok(true)
-        && gemini_glob_matches("src/*.rs", "src/lib.rs") == Ok(true)
-        && gemini_glob_matches("src/*.rs", "src/nested/lib.rs") == Ok(false);
-    let mut search_path = [0_u8; 64];
-    let mut search_text = [0_u8; 64];
-    let search_ok = classify_git_search_line(
-        "src/lib.rs:7:needle",
-        None,
-        &mut search_path,
-        &mut search_text,
-    )
-    .is_ok_and(|result| result[0] == CONTEXT_GIT_SEARCH_DIRECT_MATCH && result[1] == 7);
-    let ci_ok =
-        classify_ci_line("##[error]Process completed with exit code 7").is_ok_and(|result| {
-            result[0]
-                & (CONTEXT_CI_MARKER
-                    | CONTEXT_CI_ANNOTATION
-                    | CONTEXT_CI_EXIT_CODE
-                    | CONTEXT_CI_FAILURE_TEXT)
-                == (CONTEXT_CI_MARKER
-                    | CONTEXT_CI_ANNOTATION
-                    | CONTEXT_CI_EXIT_CODE
-                    | CONTEXT_CI_FAILURE_TEXT)
-        });
-    let command_output_ok = analyze_command_output(&[
-        "Compiling demo v0.1.0",
-        "Finished test profile",
-        "test result: ok. 1 passed; 0 failed",
-        "",
-        "Checking demo v0.1.0",
-        "Running tests",
-        "PASS",
-        "Done in 1.2s",
-    ])
-    .is_ok_and(|analysis| {
-        analysis.non_empty == 7 && analysis.success_signals >= 4 && !analysis.success_failure
-    });
     text_ok
-        && metadata_ok
-        && gemini_glob_ok
-        && search_ok
-        && ci_ok
-        && command_output_ok
         && signal_diff(&[3, 0, 4, 1, 0, 2, 8], &[1, 2, 4, 0, 3, 0, 9]).is_ok_and(
             |(lost, gained)| {
                 lost == [2, 0, 0, 1, 0, 2, 0]
                     && gained == [0, 2, 0, 0, 3, 0, 1]
-                    && estimate_tokens(5, 2) == Ok(3)
                     && lost_line_ranges_batch(
                         &[0, 1, 0, 0, 0, 0, 0, 0],
                         &mut after_available,
@@ -889,7 +497,3 @@ fn next_random(state: &mut u64) -> u64 {
 #[cfg(all(test, feature = "mojo-runtime"))]
 #[path = "context/tests.rs"]
 mod text_abi_tests;
-
-#[path = "context/gemini_glob.rs"]
-mod gemini_glob;
-pub use gemini_glob::gemini_glob_matches;

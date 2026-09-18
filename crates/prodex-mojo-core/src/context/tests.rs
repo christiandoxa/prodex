@@ -1,7 +1,7 @@
 use super::{
     CONTEXT_TEXT_ABI_VERSION, ContextSignalLine, ContextTextRowsResult, ProdexStringView,
-    gemini_glob_matches, prepare_signal_rows, prodex_context_prepare_signal_rows_v1,
-    text_abi_layout_matches, text_abi_version,
+    prepare_signal_rows, prodex_context_prepare_signal_rows_v1, text_abi_layout_matches,
+    text_abi_version,
 };
 
 #[test]
@@ -68,31 +68,6 @@ fn text_pipeline_is_reentrant_across_concurrent_calls() {
         .collect::<Vec<_>>();
     for thread in threads {
         thread.join().unwrap();
-    }
-}
-
-#[test]
-fn gemini_glob_matches_request_context_patterns() {
-    for (pattern, path, expected) in [
-        ("**/*.rs", "src/lib.rs", true),
-        ("**/*.rs", "lib.rs", true),
-        ("src/*.RS", "src/lib.rs", true),
-        ("src/?ib.rs", "src/lib.rs", true),
-        ("src/*.rs", "src/nested/lib.rs", false),
-        ("a/**/b", "a/b", true),
-        ("a/**/b", "a/x/y/b", true),
-        ("a/**/b", "a/x/y/c", false),
-        ("a/**/b", "a/b/c", false),
-        ("a/**", "a", true),
-        ("a/**", "a/x/y", true),
-        ("a/*/b", "a//b", true),
-        ("a/*/b", "a/x/y/b", false),
-        ("ab*cd", "abXYZcd", true),
-        ("*a*b", "xxaYYb", true),
-        ("a/", "a/", true),
-        ("a/", "a", false),
-    ] {
-        assert_eq!(gemini_glob_matches(pattern, path), Ok(expected));
     }
 }
 
