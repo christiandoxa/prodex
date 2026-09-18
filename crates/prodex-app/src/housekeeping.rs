@@ -79,7 +79,11 @@ pub(crate) fn command_runs_auto_runtime_housekeeping(command: &Commands) -> bool
     !crate::command_dispatch::command_is_super_dry_run(command)
         && !matches!(
             command,
-            Commands::RuntimeBroker(_) | Commands::Info(_) | Commands::Log(_) | Commands::Update(_)
+            Commands::RuntimeBroker(_)
+                | Commands::Info(_)
+                | Commands::Log(_)
+                | Commands::Update(_)
+                | Commands::Ping(_)
         )
 }
 

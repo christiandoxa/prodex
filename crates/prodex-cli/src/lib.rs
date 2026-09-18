@@ -4,6 +4,7 @@ use std::ffi::OsString;
 const CODEX_COMMAND_SERVER_SUBCOMMANDS: [&str; 3] = ["mcp-server", "app-server", "exec-server"];
 
 mod help;
+mod ping;
 mod presidio;
 mod profile;
 mod runtime_args;
@@ -14,6 +15,7 @@ pub(crate) mod super_provider_limits;
 
 pub use help::RUNTIME_PROXY_DOCTOR_TAIL_BYTES;
 use help::*;
+pub use ping::*;
 pub use presidio::*;
 pub use profile::*;
 pub use runtime_args::*;
@@ -96,6 +98,11 @@ pub enum Commands {
     )]
     Quota(QuotaArgs),
     #[command(
+        subcommand,
+        about = "Send lightweight prompt checks through ready profiles."
+    )]
+    Ping(PingCommands),
+    #[command(
         trailing_var_arg = true,
         about = "Run codex through prodex with quota preflight and eligible pre-commit rotation.",
         after_help = CLI_RUN_AFTER_HELP
@@ -140,6 +147,7 @@ impl Commands {
             Self::Logout(_) => "logout",
             Self::Update(_) => "update",
             Self::Quota(_) => "quota",
+            Self::Ping(_) => "ping",
             Self::Run(_) => "run",
             Self::Super(_) => "super",
             Self::Gateway(_) => "gateway",
@@ -291,6 +299,7 @@ pub fn should_default_cli_invocation_to_run(args: &[OsString]) -> bool {
             | "logout"
             | "update"
             | "quota"
+            | "ping"
             | "run"
             | "super"
             | "s"

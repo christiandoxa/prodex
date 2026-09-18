@@ -3,6 +3,7 @@ use std::ffi::OsString;
 mod app_server;
 mod codex_01491;
 mod external_provider;
+mod ping;
 mod process_reporting;
 mod quota;
 mod redeem;

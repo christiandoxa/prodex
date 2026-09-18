@@ -550,6 +550,7 @@ launcher, concurrency, resume-affinity, and isolation contracts.
 prodex
 prodex s
 prodex exec "review this repo"
+prodex ping openai
 prodex quota --all
 prodex profile list
 prodex session list
@@ -973,9 +974,12 @@ prodex claude --profile second -- -p --output-format json "show the latest diff"
 
 ## Harness modes
 
-A harness mode is model-facing request policy for a local provider bridge. Prodex supports
-`native`, `minimal`, and the explicit evaluation-backed `evaluated` mode. Omitting `--harness`
-selects `native`, so existing launches remain unchanged.
+A harness mode is model-facing request policy for a local provider bridge. Native remains the default.
+
+<details>
+<summary>Harness modes, examples, and evaluated-policy boundaries</summary>
+
+Prodex supports `native`, `minimal`, and the explicit evaluation-backed `evaluated` mode. Omitting `--harness` selects `native`, so existing launches remain unchanged.
 
 ```bash
 prodex s --provider anthropic --harness native
@@ -1009,6 +1013,8 @@ skills, hooks, reconnect behavior, and TUI.
 
 See [docs/harness-modes.md](./docs/harness-modes.md) for exact scope, diagnostics, evaluation
 catalog behavior, and non-goals.
+
+</details>
 
 ## Profiles
 
