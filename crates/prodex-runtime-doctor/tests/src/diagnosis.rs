@@ -34,7 +34,10 @@ fn runtime_doctor_failure_diagnosis_overrides_routine_selection_markers() {
             pointer_exists: true,
             log_exists: true,
             line_count: 2,
-            marker_counts: [("selection_pick", 1), (marker, 1)].into(),
+            marker_counts: [("selection_pick", 1), (marker, 1)]
+                .into_iter()
+                .map(|(key, value)| (key.to_string(), value))
+                .collect(),
             ..RuntimeDoctorSummary::default()
         };
 

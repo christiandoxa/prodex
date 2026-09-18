@@ -24,7 +24,7 @@ fn runtime_doctor_selection_bucket(marker: &str) -> Option<&'static str> {
 
 pub(super) fn runtime_doctor_record_selection_summary(
     summary: &mut RuntimeDoctorSummary,
-    marker: &'static str,
+    marker: &str,
     fields: &BTreeMap<String, String>,
 ) {
     let Some(bucket) = runtime_doctor_selection_bucket(marker) else {

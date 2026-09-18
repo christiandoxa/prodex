@@ -12,7 +12,7 @@ path = "src/lib.rs"
 
 [features]
 default = []
-mojo = ["dep:prodex_mojo_core", "prodex_mojo_core/mojo-rich"]
+mojo = ["dep:prodex_mojo_core", "prodex_mojo_core/mojo-rich", "runtime_proxy_crate/mojo"]
 
 [dependencies]
 anyhow = { workspace = true }
