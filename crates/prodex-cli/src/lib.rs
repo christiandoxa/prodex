@@ -53,6 +53,10 @@ pub enum Commands {
     #[command(about = "Show the active profile and its CODEX_HOME details.")]
     Current,
     #[command(
+        about = "Summarize Prodex version, profiles, runtime policy, logs, and secret backend."
+    )]
+    Info(InfoArgs),
+    #[command(
         about = "Monitor profiles, quota resets, token efficiency, and Prodex resource usage."
     )]
     Status(StatusArgs),
@@ -127,6 +131,7 @@ impl Commands {
             Self::Profile(_) => "profile",
             Self::UseProfile(_) => "use",
             Self::Current => "current",
+            Self::Info(_) => "info",
             Self::Status(_) => "status",
             Self::Log(_) => "log",
             Self::Session(_) => "session",
@@ -277,6 +282,7 @@ pub fn should_default_cli_invocation_to_run(args: &[OsString]) -> bool {
             | "profile"
             | "use"
             | "current"
+            | "info"
             | "status"
             | "log"
             | "session"
