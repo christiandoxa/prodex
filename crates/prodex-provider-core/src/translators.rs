@@ -8,7 +8,7 @@ mod passthrough;
 mod tool_args;
 
 use crate::ProviderId;
-use crate::translator::{ProviderConformanceCase, ProviderTransformResult, ProviderTranslator};
+use crate::translator::{ProviderTransformResult, ProviderTranslator};
 use crate::{ProviderEndpoint, ProviderWireFormat};
 
 pub use anthropic::{
@@ -201,16 +201,4 @@ pub fn provider_translator(provider: ProviderId) -> &'static dyn ProviderTransla
 
 pub fn anthropic_messages_translator() -> &'static dyn ProviderTranslator {
     &ANTHROPIC_MESSAGES_TRANSLATOR
-}
-
-pub fn provider_conformance_cases() -> &'static [ProviderConformanceCase] {
-    static CASES: std::sync::OnceLock<Vec<ProviderConformanceCase>> = std::sync::OnceLock::new();
-    CASES
-        .get_or_init(|| {
-            serde_json::from_str(include_str!(
-                "../tests/fixtures/provider_conformance_cases.json"
-            ))
-            .expect("provider conformance fixtures should parse")
-        })
-        .as_slice()
 }

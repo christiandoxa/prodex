@@ -1,10 +1,9 @@
-use crate::{ALL_PROVIDER_ENDPOINTS, ProviderEndpoint};
+use crate::ProviderEndpoint;
 use serde::{Deserialize, Serialize};
 use std::{borrow::Cow, fmt, str::FromStr};
 
 pub const MINIMAL_HARNESS_INSTRUCTIONS: &str = "[Prodex harness: minimal/v1]\nAct as a focused coding agent. Inspect the relevant code before editing, use\navailable tools to make concrete progress, keep changes minimal, and run the\nsmallest relevant verification before finishing.";
 const MINIMAL_HARNESS_MARKER: &str = "[Prodex harness: minimal/v1]";
-const RESPONSES_ROUTE: &[ProviderEndpoint] = &[ProviderEndpoint::Responses];
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -150,63 +149,6 @@ pub fn resolve_harness_mode(
         source,
         reason: reason.to_string(),
     }
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
-pub struct HarnessModeSpec {
-    pub mode: HarnessMode,
-    pub id: &'static str,
-    pub display_label: &'static str,
-    pub description: &'static str,
-    pub selectable: bool,
-    pub default_effective_mode: EffectiveHarnessMode,
-    pub supported_canonical_request_routes: &'static [ProviderEndpoint],
-    pub request_shaping: bool,
-    pub response_shaping: bool,
-    pub stream_shaping: bool,
-}
-
-pub const HARNESS_MODE_CATALOG: &[HarnessModeSpec] = &[
-    HarnessModeSpec {
-        mode: HarnessMode::Native,
-        id: "native",
-        display_label: "Native",
-        description: "Preserves existing bridge behavior without harness shaping.",
-        selectable: true,
-        default_effective_mode: EffectiveHarnessMode::Native,
-        supported_canonical_request_routes: ALL_PROVIDER_ENDPOINTS,
-        request_shaping: false,
-        response_shaping: false,
-        stream_shaping: false,
-    },
-    HarnessModeSpec {
-        mode: HarnessMode::Minimal,
-        id: "minimal",
-        display_label: "Minimal",
-        description: "Prepends the minimal/v1 instruction block to canonical Responses requests.",
-        selectable: true,
-        default_effective_mode: EffectiveHarnessMode::Minimal,
-        supported_canonical_request_routes: RESPONSES_ROUTE,
-        request_shaping: true,
-        response_shaping: false,
-        stream_shaping: false,
-    },
-    HarnessModeSpec {
-        mode: HarnessMode::Evaluated,
-        id: "evaluated",
-        display_label: "Evaluated",
-        description: "Applies only provider/model policies backed by the versioned evaluation catalog.",
-        selectable: true,
-        default_effective_mode: EffectiveHarnessMode::Evaluated,
-        supported_canonical_request_routes: RESPONSES_ROUTE,
-        request_shaping: true,
-        response_shaping: true,
-        stream_shaping: true,
-    },
-];
-
-pub const fn harness_mode_catalog() -> &'static [HarnessModeSpec] {
-    HARNESS_MODE_CATALOG
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -446,30 +388,5 @@ mod tests {
         assert!(matches!(shaped.body, Cow::Borrowed(_)));
         assert_eq!(shaped.body.as_ref(), body);
         assert!(!shaped.applied);
-    }
-
-    #[test]
-    fn catalog_exposes_v1_and_opt_in_evaluated_modes() {
-        assert_eq!(
-            harness_mode_catalog()
-                .iter()
-                .map(|spec| spec.id)
-                .collect::<Vec<_>>(),
-            ["native", "minimal", "evaluated"]
-        );
-        assert!(harness_mode_catalog().iter().all(|spec| spec.selectable));
-        assert!(
-            harness_mode_catalog()
-                .iter()
-                .filter(|spec| spec.mode != HarnessMode::Evaluated)
-                .all(|spec| !spec.response_shaping && !spec.stream_shaping)
-        );
-        let evaluated = harness_mode_catalog()
-            .iter()
-            .find(|spec| spec.mode == HarnessMode::Evaluated)
-            .unwrap();
-        assert!(evaluated.request_shaping);
-        assert!(evaluated.response_shaping);
-        assert!(evaluated.stream_shaping);
     }
 }

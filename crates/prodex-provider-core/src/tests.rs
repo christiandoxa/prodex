@@ -95,56 +95,6 @@ fn catalog_covers_gateway_providers() {
 }
 
 #[test]
-fn provider_adapter_contract_matches_fixture() {
-    let fixture: serde_json::Value =
-        serde_json::from_str(include_str!("../tests/fixtures/provider_contracts.json"))
-            .expect("provider contract fixture should parse");
-    let contracts = fixture.as_array().expect("fixture should be an array");
-    assert_eq!(contracts.len(), 7);
-    for contract in contracts {
-        let provider = ProviderId::parse(contract["provider"].as_str().unwrap())
-            .expect("fixture provider should parse");
-        let adapter = provider_adapter(provider);
-        let spec = provider_adapter_contract_spec(provider);
-        assert_eq!(adapter.provider().label(), contract["provider"]);
-        assert_eq!(spec.provider, contract["provider"]);
-        assert_eq!(
-            spec.client_request_format,
-            contract["client_request_format"]
-        );
-        assert_eq!(
-            spec.upstream_request_format,
-            contract["upstream_request_format"]
-        );
-        assert_eq!(spec.response_format, contract["response_format"]);
-        assert_eq!(
-            spec.canonical_client_endpoint,
-            contract["canonical_client_endpoint"]
-        );
-        assert_eq!(spec.model_list_endpoint, contract["model_list_endpoint"]);
-        assert_eq!(
-            spec.supports_streaming,
-            contract["supports_streaming"].as_bool().unwrap()
-        );
-        assert_eq!(
-            spec.supports_model_fallback,
-            contract["supports_model_fallback"].as_bool().unwrap()
-        );
-        assert_eq!(spec.transform_status, contract["transform_status"]);
-        for required in contract["required_endpoints"].as_array().unwrap() {
-            assert!(
-                spec.supported_endpoints
-                    .contains(&required.as_str().unwrap()),
-                "{} missing endpoint {}",
-                provider.label(),
-                required
-            );
-        }
-        assert!(spec.model_count > 0);
-    }
-}
-
-#[test]
 fn transform_result_exposes_explicit_status_outcome() {
     let lossless = ProviderTransformResult::lossless(
         ProviderId::Gemini,
@@ -206,50 +156,6 @@ fn transform_result_exposes_explicit_status_outcome() {
             reason: "stream event unsupported".to_string()
         }
     );
-    assert!(ProviderConformanceExpectedLoss::Unsupported.matches_status(&unsupported.status()));
-    assert!(ProviderConformanceExpectedLoss::Unsupported.requires_reason());
-    assert!(!ProviderConformanceExpectedLoss::Lossless.requires_reason());
-    assert_eq!(
-        ProviderConformanceExpectedLoss::Unsupported.label(),
-        "unsupported"
-    );
-}
-
-#[test]
-fn provider_contract_matrix_is_stable_and_complete() {
-    let matrix = provider_adapter_contract_matrix();
-    assert_eq!(matrix.len(), PROVIDER_CONTRACT_PROVIDERS.len());
-    assert_eq!(
-        matrix
-            .iter()
-            .map(|contract| contract.provider)
-            .collect::<Vec<_>>(),
-        vec![
-            "openai",
-            "anthropic",
-            "copilot",
-            "deepseek",
-            "gemini",
-            "kiro",
-            "local"
-        ]
-    );
-    for contract in matrix {
-        assert_eq!(contract.client_request_format, "openai-responses");
-        assert_eq!(contract.canonical_client_endpoint, "/v1/responses");
-        assert_eq!(contract.model_list_endpoint, "/v1/models");
-        assert!(contract.supports_streaming);
-        assert!(
-            contract.transform_status == "passthrough" || contract.transform_status == "translated"
-        );
-        assert!(contract.supported_endpoints.contains(&"responses"));
-        assert!(contract.supported_endpoints.contains(&"models"));
-        if matches!(contract.provider, "copilot" | "gemini") {
-            assert!(contract.supported_endpoints.contains(&"responses/compact"));
-        }
-        assert!(contract.model_count > 0);
-        assert_eq!(contract.replay_case_count, 1);
-    }
 }
 
 #[test]

@@ -37,7 +37,7 @@ const GEMINI_TOOL_ALIASES: &[HarnessToolAlias] = &[HarnessToolAlias {
     provider_native: "run_shell_command",
 }];
 
-pub const HARNESS_PROVIDER_POLICY_CATALOG: &[HarnessProviderPolicySpec] = &[
+const HARNESS_PROVIDER_POLICY_CATALOG: &[HarnessProviderPolicySpec] = &[
     HarnessProviderPolicySpec {
         evaluation_id: "gemini-native-tool-alias-roundtrip-v1",
         evaluation_version: 1,
@@ -63,10 +63,6 @@ pub const HARNESS_PROVIDER_POLICY_CATALOG: &[HarnessProviderPolicySpec] = &[
         continuity_tested: true,
     },
 ];
-
-pub const fn harness_provider_policy_catalog() -> &'static [HarnessProviderPolicySpec] {
-    HARNESS_PROVIDER_POLICY_CATALOG
-}
 
 pub fn harness_provider_policy(
     mode: EffectiveHarnessMode,
@@ -476,44 +472,6 @@ mod tests {
             ProviderEndpoint::Responses,
             body,
         )
-    }
-
-    #[test]
-    fn catalog_is_versioned_provider_scoped_and_explicit() {
-        assert_eq!(harness_provider_policy_catalog().len(), 2);
-        let policy = harness_provider_policy_catalog()
-            .iter()
-            .find(|policy| policy.provider == ProviderId::Gemini)
-            .unwrap();
-        assert_eq!(
-            policy.evaluation_id,
-            "gemini-native-tool-alias-roundtrip-v1"
-        );
-        assert_eq!(policy.evaluation_version, 1);
-        assert_eq!(policy.provider, ProviderId::Gemini);
-        assert_eq!(policy.model, "*");
-        assert!(!policy.minimal_instructions);
-        assert!(!policy.native_anthropic_messages);
-        assert_eq!(
-            policy.response_policy,
-            HarnessResponsePolicy::RestoreToolAliases
-        );
-        assert!(policy.continuity_tested);
-        assert_eq!(policy.tool_aliases, GEMINI_TOOL_ALIASES);
-
-        let anthropic = harness_provider_policy_catalog()
-            .iter()
-            .find(|policy| policy.provider == ProviderId::Anthropic)
-            .unwrap();
-        assert_eq!(
-            anthropic.evaluation_id,
-            "anthropic-native-messages-roundtrip-v1"
-        );
-        assert_eq!(anthropic.model, "*");
-        assert!(anthropic.native_anthropic_messages);
-        assert!(anthropic.tool_aliases.is_empty());
-        assert_eq!(anthropic.response_policy, HarnessResponsePolicy::Disabled);
-        assert!(anthropic.continuity_tested);
     }
 
     #[test]
