@@ -22,6 +22,14 @@
       {
         "path": "mojo/prodex_core/rich_policy.mojo",
         "reason": "Enterprise route-alias, billing, and virtual-key policy planning was deleted with the retired multi-tenant gateway control plane."
+      },
+      {
+        "path": "mojo/prodex_core/app_server_broker.mojo",
+        "reason": "The app-server broker feature was retired from Prodex; no production Rust consumer remains for its Mojo ABI."
+      },
+      {
+        "path": "mojo/prodex_core/runtime_anthropic.mojo",
+        "reason": "The orphan runtime-Anthropic shaping kernel had no production Rust consumer; active Anthropic request/response translation remains owned by the reachable Anthropic request and message kernels."
       }
     ]
   },
