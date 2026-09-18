@@ -14,9 +14,7 @@ pub const RICH_ABI_VERSION: i64 = 6;
 const _: () = assert!(std::mem::size_of::<usize>() == std::mem::size_of::<u64>());
 
 mod routing;
-pub use routing::{
-    RouteCandidate, RouteInput, RoutePlan, WebsocketEventKind, plan_routes, websocket_event_kind,
-};
+pub use routing::{WebsocketEventKind, websocket_event_kind};
 mod context_plan;
 pub use context_plan::{ContextPlan, ContextPlanAction, ContextPlanItem, plan_context_items};
 mod context;
@@ -354,28 +352,6 @@ unsafe extern "C" {
         hash_capacity: i64,
         result: u64,
     ) -> i64;
-    fn prodex_mojo_rich_route_plan_v2(
-        abi_version: i64,
-        inputs: u64,
-        input_count: i64,
-        required_capabilities: u64,
-        output_records: u64,
-        record_capacity: i64,
-        ordered_indices: u64,
-        ordered_capacity: i64,
-        output: u64,
-        output_capacity: i64,
-        hash_slots: u64,
-        hash_capacity: i64,
-        health_weight: i64,
-        load_weight: i64,
-        cost_weight: i64,
-        latency_weight: i64,
-        risk_weight: i64,
-        priority_weight: i64,
-        affinity_weight: i64,
-        result: u64,
-    ) -> i64;
     fn prodex_runtime_websocket_event_kind_v1(abi_version: i64, kind: u64, output: *mut i64)
     -> i64;
     fn prodex_mojo_rich_context_plan_v2(
@@ -502,25 +478,6 @@ pub fn rich_self_test() -> bool {
     let context = analyze_context(" error: 火\r\nnoise\nerror: 火\n").is_ok_and(|value| {
         value.counts[0] == 2 && value.groups.len() == 1 && value.groups[0].duplicate_count == 1
     });
-    let routes = plan_routes(
-        &[RouteInput {
-            provider: " OpenAI ",
-            model: "gpt-5",
-            capabilities: "responses_api,tools",
-            hard_eligible: true,
-            health: 10_000,
-            load: 0,
-            quota_headroom: Some(10_000),
-            cost: 0,
-            latency: 0,
-            risk: 0,
-            priority: 10_000,
-            affinity: false,
-        }],
-        "responses_api",
-        [10_000, 0, 0, 0, 0, 0, 0],
-    )
-    .is_ok_and(|value| value.selected_index == Some(0) && value.candidates[0].provider == "openai");
     let fallback = model_fallback_chain("copilot", " codex ")
         .is_ok_and(|value| value == ["gpt-5.3-codex", "gpt-5.1-codex", "gpt-4o"]);
     let context_plan = plan_context_items(
@@ -578,15 +535,7 @@ pub fn rich_self_test() -> bool {
             value == br#"{"type":"message","role":"assistant","content":[{"type":"input_text","text":"hello"}]}"#
         })
     };
-    context
-        && routes
-        && fallback
-        && fallback_plan
-        && context_plan
-        && catalog
-        && reasoning
-        && deepseek
-        && kiro
+    context && fallback && fallback_plan && context_plan && catalog && reasoning && deepseek && kiro
 }
 
 #[cfg(test)]

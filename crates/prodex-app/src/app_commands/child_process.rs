@@ -522,30 +522,21 @@ fn profile_openai_compatible_dry_run_child(
 ) -> Result<RuntimeLaunchDryRunChild> {
     match child {
         RuntimeLaunchDryRunChild::Codex { codex_args } => Ok(RuntimeLaunchDryRunChild::Codex {
-            codex_args: dry_run_model_preference_args(paths, codex_home, codex_args)?,
+            codex_args: dry_run_provider_args(paths, codex_home, codex_args)?,
         }),
         RuntimeLaunchDryRunChild::Caveman { codex_args } => Ok(RuntimeLaunchDryRunChild::Caveman {
-            codex_args: dry_run_model_preference_args(paths, codex_home, codex_args)?,
+            codex_args: dry_run_provider_args(paths, codex_home, codex_args)?,
         }),
     }
 }
 
-fn dry_run_model_preference_args(
-    paths: &crate::AppPaths,
+fn dry_run_provider_args(
+    _paths: &crate::AppPaths,
     codex_home: &Path,
     codex_args: Vec<OsString>,
 ) -> Result<Vec<OsString>> {
     let codex_args = runtime_launch_openai_model_context_codex_args(codex_home, &codex_args)?;
     let codex_args = profile_openai_compatible_codex_args(codex_home, &codex_args)?;
-    let preference =
-        crate::resolve_fresh_model_preference_context_read_only(paths, codex_home, &codex_args)?;
-    let codex_args = crate::apply_fresh_model_preference_selection(
-        codex_home,
-        codex_args,
-        &preference,
-        true,
-        true,
-    );
     let codex_args = runtime_launch_openai_model_context_codex_args(codex_home, &codex_args)?;
     let codex_args = profile_openai_compatible_codex_args(codex_home, &codex_args)?;
     let codex_args = preview_local_provider_catalog_codex_args(codex_home, &codex_args)?;

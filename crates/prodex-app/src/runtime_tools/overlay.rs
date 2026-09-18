@@ -278,7 +278,6 @@ struct PreparedOverlayLaunch {
     cleanup: RuntimeOverlayCleanup,
     overlay_home: PathBuf,
     tool_plan: prodex_optional_tools::ToolActivationPlan,
-    preference_context: crate::ModelPreferenceContext,
     runtime_args: Vec<std::ffi::OsString>,
 }
 
@@ -293,7 +292,6 @@ pub(super) fn build_plan(
         cleanup,
         overlay_home,
         tool_plan,
-        preference_context,
         runtime_args,
     } = prepare_overlay_launch(strategy, prepared, runtime_proxy)?;
     if let Some(sub_agent) = strategy.sub_agent.as_ref() {
@@ -317,7 +315,6 @@ pub(super) fn build_plan(
         &overlay_home,
         &runtime_args,
         runtime_proxy,
-        &preference_context,
     )?;
     let plan = RuntimeLaunchPlan::new(child).with_cleanup_path(cleanup.keep());
     #[cfg(unix)]
@@ -354,16 +351,7 @@ fn prepare_overlay_launch(
     crate::runtime_launch::emit_runtime_timing("startup.overlay_prepare_ms", stage_started);
     let cleanup = RuntimeOverlayCleanup::new(overlay_home.clone());
     let stage_started = Instant::now();
-    let scope_args = strategy.base_runtime_codex_args(&overlay_home)?;
-    let preference_context =
-        crate::resolve_fresh_model_preference_context(&prepared.paths, &overlay_home, &scope_args)?;
-    crate::runtime_launch::emit_runtime_timing(
-        "startup.model_preference_context_ms",
-        stage_started,
-    );
-    let stage_started = Instant::now();
-    let mut runtime_args =
-        strategy.prepare_runtime_codex_args(&overlay_home, runtime_proxy, &preference_context)?;
+    let mut runtime_args = strategy.prepare_runtime_codex_args(&overlay_home, runtime_proxy)?;
     strategy.recovery_model =
         crate::codex_effective_config_value(&overlay_home, &runtime_args, "model")?;
     if let Some(monitor) = strategy.goal_usage_limit_monitor.as_ref() {
@@ -382,11 +370,20 @@ fn prepare_overlay_launch(
             &mut runtime_args,
             strategy.profile_v2_name.as_deref(),
             [
-                ("model", preference_context.explicit_model.is_none()),
+                (
+                    "model",
+                    crate::runtime_launch_cli_model(&strategy.codex_args).is_none()
+                        && crate::codex_cli_config_override_value(&strategy.codex_args, "model")
+                            .is_none(),
+                ),
                 ("model_provider", strategy.model_provider_override.is_none()),
                 (
                     "model_reasoning_effort",
-                    preference_context.explicit_effort.is_none(),
+                    crate::codex_cli_config_override_value(
+                        &strategy.codex_args,
+                        "model_reasoning_effort",
+                    )
+                    .is_none(),
                 ),
             ],
         )?;
@@ -402,7 +399,6 @@ fn prepare_overlay_launch(
         cleanup,
         overlay_home,
         tool_plan,
-        preference_context,
         runtime_args,
     })
 }
@@ -413,7 +409,6 @@ fn prepare_child_plan(
     overlay_home: &Path,
     runtime_args: &[std::ffi::OsString],
     runtime_proxy: Option<&RuntimeProxyEndpoint>,
-    preference_context: &crate::ModelPreferenceContext,
 ) -> Result<prodex_runtime_launch::ChildProcessPlan> {
     let mut child = strategy.build_child_plan(overlay_home, runtime_args)?;
     strategy.finalize_child_plan(&mut child, overlay_home, runtime_proxy);
@@ -432,23 +427,6 @@ fn prepare_child_plan(
         && !prodex_cli::is_codex_command_server_subcommand(&strategy.codex_args)
     {
         crate::runtime_thread_index::repair_dirty_thread_index(&prepared.paths, &child);
-    }
-    if !strategy.args.dry_run
-        && !prodex_cli::is_codex_command_server_subcommand(&strategy.codex_args)
-    {
-        strategy.model_preference_sync = match crate::ModelPreferenceSync::start_with_scope(
-            &prepared.paths,
-            &child,
-            preference_context.logical_scope.clone(),
-        ) {
-            Ok(sync) => Some(sync),
-            Err(_error) => {
-                crate::print_launch_status(
-                    "model preference synchronization unavailable; continuing",
-                );
-                None
-            }
-        };
     }
     Ok(child)
 }

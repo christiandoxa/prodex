@@ -60,7 +60,6 @@ pub(crate) struct RuntimeToolLaunchStrategy {
     model_context_window_tokens: Option<u64>,
     gemini_thinking_budget_tokens: Option<u64>,
     sub_agent: Option<ResolvedSuperSubAgent>,
-    model_preference_sync: Option<ModelPreferenceSync>,
     resume_session_path: Option<PathBuf>,
     auto_goal_resume_attempted_profiles: BTreeSet<String>,
     goal_usage_limit_monitor: Option<GoalUsageLimitMonitor>,
@@ -104,7 +103,6 @@ impl RuntimeToolLaunchStrategy {
             model_context_window_tokens,
             gemini_thinking_budget_tokens,
             sub_agent,
-            model_preference_sync: None,
             resume_session_path: None,
             auto_goal_resume_attempted_profiles: BTreeSet::new(),
             goal_usage_limit_monitor: None,
@@ -181,11 +179,6 @@ impl RuntimeLaunchStrategy for RuntimeToolLaunchStrategy {
         _status: &std::process::ExitStatus,
         plan: &RuntimeLaunchPlan,
     ) -> Result<()> {
-        if let Some(sync) = self.model_preference_sync.as_mut()
-            && let Some(_error) = sync.finish()
-        {
-            print_launch_status("model preference synchronization was incomplete");
-        }
         if let Some(session_file) = self.resume_session_path.as_deref() {
             crate::app_commands::runtime_launch::maintain_shared_codex_session_after_child_exit(
                 &plan.child,
@@ -205,29 +198,14 @@ impl RuntimeToolLaunchStrategy {
         &self,
         overlay_home: &std::path::Path,
         runtime_proxy: Option<&RuntimeProxyEndpoint>,
-        preference_context: &crate::ModelPreferenceContext,
     ) -> Result<Vec<OsString>> {
         let codex_args = self.base_runtime_codex_args(overlay_home)?;
-        let codex_args = crate::apply_fresh_model_preference_selection(
-            overlay_home,
-            codex_args,
-            preference_context,
-            true,
-            false,
-        );
         let codex_args = runtime_launch_openai_model_context_codex_args(overlay_home, &codex_args)?;
         let codex_args = profile_openai_compatible_codex_args(overlay_home, &codex_args)?;
         let codex_args = prepare_local_provider_catalog_codex_args(overlay_home, &codex_args)?;
         let codex_args = prepare_external_provider_catalog_codex_args(overlay_home, &codex_args)?;
         let codex_args = prepare_deepseek_provider_codex_args(overlay_home, &codex_args)?;
         let codex_args = prepare_gemini_provider_codex_args(overlay_home, &codex_args)?;
-        let codex_args = crate::apply_fresh_model_preference_selection(
-            overlay_home,
-            codex_args,
-            preference_context,
-            false,
-            true,
-        );
         Ok(runtime_proxy_codex_passthrough_args(
             runtime_proxy,
             &codex_args,

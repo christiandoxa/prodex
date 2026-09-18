@@ -38,46 +38,7 @@ pub fn self_test() -> bool {
         && quota::window_status(5, true) == 2
         && quota::pressure_band(1, 2) == 2
         && quota::window_pair_has_ready_limit(Some(20), Some(30));
-    let routing = routing::routing_plan_batch(
-        &[routing::RoutingPlanInput {
-            hard_eligible: true,
-            capability_mask: 1,
-            provider_order: 0,
-            score: routing::ScoreInput {
-                health: 10_000,
-                load: 0,
-                quota_headroom: 10_000,
-                quota_present: true,
-                cost: 0,
-                latency: 0,
-                risk: 0,
-                priority: 10_000,
-                affinity: true,
-            },
-        }],
-        1,
-        routing::ScoreWeights {
-            health: 10_000,
-            load: 0,
-            cost: 0,
-            latency: 0,
-            risk: 0,
-            priority: 0,
-            affinity: 0,
-        },
-    );
-    let capability = routing::capability_match_batch(&[true, true], &[1, 0], 1);
-    let routing_ok = routing.is_ok_and(|plan| {
-        plan.eligible == [true]
-            && plan.reason_tags == [routing::ROUTING_REASON_ELIGIBLE]
-            && plan.ordered_indices == [0]
-            && plan.scores[0].score == 10_000
-    });
-    let capability_ok = capability.is_ok_and(|result| {
-        result.first_compatible == Some(0)
-            && result.first_incompatible == Some(1)
-            && result.compatible == [true, false]
-    });
+    let routing_ok = routing::self_test();
     let profile_schedule_ok = runtime::profile_schedule_self_test();
     let quota_score_ok = runtime::quota_score_self_test();
     let candidate_plan_ok = runtime::candidate_plan_self_test();
@@ -95,7 +56,6 @@ pub fn self_test() -> bool {
     let log_semantics_ok = log::self_test();
     let checks = [
         routing_ok,
-        capability_ok,
         profile_schedule_ok,
         quota_score_ok,
         candidate_plan_ok,

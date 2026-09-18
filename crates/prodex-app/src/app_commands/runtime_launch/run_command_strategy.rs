@@ -44,7 +44,6 @@ pub(super) struct RunCommandStrategy {
     pub(super) transient_recovery_rounds: usize,
     pub(super) recovery_generation: usize,
     pub(super) allow_failed_profile_recovery: bool,
-    pub(super) model_preference_sync: Option<crate::ModelPreferenceSync>,
     pub(super) resume_session_path: Option<PathBuf>,
 }
 
@@ -139,7 +138,6 @@ impl RunCommandStrategy {
             transient_recovery_rounds: 0,
             recovery_generation: 0,
             allow_failed_profile_recovery: false,
-            model_preference_sync: None,
             resume_session_path,
         })
     }
@@ -148,7 +146,6 @@ impl RunCommandStrategy {
         &self,
         prepared: &PreparedRuntimeLaunch,
         codex_args: &mut Vec<OsString>,
-        preference_context: &crate::ModelPreferenceContext,
     ) -> Result<()> {
         if self.command_server
             || prodex_runtime_launch::is_codex_exec_invocation(codex_args)
@@ -165,14 +162,23 @@ impl RunCommandStrategy {
             codex_args,
             self.profile_v2_name.as_deref(),
             [
-                ("model", preference_context.explicit_model.is_none()),
+                (
+                    "model",
+                    crate::runtime_launch_cli_model(&self.codex_args).is_none()
+                        && crate::codex_cli_config_override_value(&self.codex_args, "model")
+                            .is_none(),
+                ),
                 (
                     "model_provider",
                     !prepared.managed && self.model_provider_override.is_none(),
                 ),
                 (
                     "model_reasoning_effort",
-                    preference_context.explicit_effort.is_none(),
+                    crate::codex_cli_config_override_value(
+                        &self.codex_args,
+                        "model_reasoning_effort",
+                    )
+                    .is_none(),
                 ),
             ],
         )
@@ -222,31 +228,13 @@ impl RuntimeLaunchStrategy for RunCommandStrategy {
         let codex_args =
             runtime_launch_openai_model_context_codex_args(&prepared.codex_home, &self.codex_args)?;
         let codex_args = profile_openai_compatible_codex_args(&prepared.codex_home, &codex_args)?;
-        let preference_context = crate::resolve_fresh_model_preference_context(
-            &prepared.paths,
-            &prepared.codex_home,
-            &codex_args,
-        )?;
-        let codex_args = crate::apply_fresh_model_preference_selection(
-            &prepared.codex_home,
-            codex_args,
-            &preference_context,
-            true,
-            false,
-        );
         let codex_args = prepare_provider_capability_codex_args(&prepared.codex_home, &codex_args)?;
-        let mut codex_args = crate::apply_fresh_model_preference_selection(
-            &prepared.codex_home,
-            codex_args,
-            &preference_context,
-            false,
-            true,
-        );
+        let mut codex_args = codex_args;
         self.recovery_model =
             crate::codex_effective_config_value(&prepared.codex_home, &codex_args, "model")?;
         self.runtime_recovery_log_target =
             runtime_proxy.and_then(RuntimeProxyEndpoint::recovery_log_target);
-        self.project_in_app_resume_settings(prepared, &mut codex_args, &preference_context)?;
+        self.project_in_app_resume_settings(prepared, &mut codex_args)?;
         if let Some(monitor) = self.goal_usage_limit_monitor.as_ref() {
             add_runtime_goal_session_tracking(
                 &prepared.codex_home,
@@ -278,21 +266,6 @@ impl RuntimeLaunchStrategy for RunCommandStrategy {
         }
         if !self.dry_run && !self.command_server {
             crate::runtime_thread_index::repair_dirty_thread_index(&prepared.paths, &child);
-        }
-        if !self.dry_run && !self.command_server {
-            self.model_preference_sync = match crate::ModelPreferenceSync::start_with_scope(
-                &prepared.paths,
-                &child,
-                preference_context.logical_scope.clone(),
-            ) {
-                Ok(sync) => Some(sync),
-                Err(_error) => {
-                    crate::print_launch_status(
-                        "model preference synchronization unavailable; continuing",
-                    );
-                    None
-                }
-            };
         }
         Ok(RuntimeLaunchPlan::new(child))
     }
@@ -406,11 +379,6 @@ impl RuntimeLaunchStrategy for RunCommandStrategy {
         status: &std::process::ExitStatus,
         plan: &RuntimeLaunchPlan,
     ) -> Result<()> {
-        if let Some(sync) = self.model_preference_sync.as_mut()
-            && let Some(_error) = sync.finish()
-        {
-            crate::print_launch_status("model preference synchronization was incomplete");
-        }
         if let Some(session_file) = self.resume_session_path.as_deref() {
             super::maintain_shared_codex_session_after_child_exit(&plan.child, session_file);
         } else {
