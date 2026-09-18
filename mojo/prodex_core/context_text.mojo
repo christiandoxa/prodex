@@ -4690,29 +4690,6 @@ def prodex_context_gemini_glob_matches_v1(
     return 0
 
 
-@export("prodex_context_classify_ci_line_v1")
-def prodex_context_classify_ci_line_v1(
-    abi_version: Int64,
-    line: Pointer[mut=False, ProdexStringView, _],
-    output: Pointer[mut=True, Int64, _],
-    output_count: Int64,
-) abi("C") -> Int64:
-    if output_count != CONTEXT_CI_RESULT_WIDTH:
-        return 1
-    for index in range(CONTEXT_CI_RESULT_WIDTH):
-        output[unsafe_offset=index] = -1
-    output[unsafe_offset=0] = 0
-    if abi_version != CONTEXT_TEXT_ABI_VERSION:
-        return 4
-    var view = line[].copy()
-    if not context_text_view_is_valid(view):
-        return 2
-    if view.len == 0:
-        return 0
-    context_ci_line_semantics(view.ptr.unsafe_value(), Int64(view.len), output)
-    return 0
-
-
 @export("prodex_context_classify_dot_reporter_success_line_v1")
 def prodex_context_classify_dot_reporter_success_line_v1(
     abi_version: Int64,

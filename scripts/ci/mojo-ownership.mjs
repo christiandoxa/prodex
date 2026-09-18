@@ -374,18 +374,53 @@ function validateOperations(manifest, revision) {
     assert(!names.has(operation.name), `duplicate authoritative operation ${operation.name}`);
     names.add(operation.name);
     if (deleted.has(operation.name)) {
-      assert.equal(operation.baseline_state, "authoritative",
-        `${operation.name} deletion is only valid for a baseline-authoritative operation`);
+      assert(
+        operation.baseline_state === "authoritative" || isReleaseOperation(manifest, operation),
+        `${operation.name} deletion must be baseline-authoritative or a declared release operation`,
+      );
       const sharedSource = operations.some((candidate) =>
         candidate.name !== operation.name &&
         !deleted.has(candidate.name) &&
         candidate.mojo_source === operation.mojo_source);
-      if (sharedSource) {
+      const retainedFor = deleted.get(operation.name)?.source_retained_for;
+      if (sharedSource || retainedFor) {
         assert(sourceExists(manifest, revision, operation.mojo_source),
           `${operation.name} shared Mojo source was removed with a surviving operation`);
         const mojo = sourceText(manifest, revision, operation.mojo_source);
         assert(!mojo.includes(`@export("${operation.mojo_entry}")`),
           `${operation.name} is declared deleted but its Mojo export remains`);
+        if (retainedFor) {
+          assert.equal(typeof retainedFor, "string",
+            `${operation.name} retained source operation must be a string`);
+          const retainedDeclared = (manifest.supporting_operations ?? []).includes(retainedFor) ||
+            operations.some((candidate) => candidate.name === retainedFor && !deleted.has(candidate.name));
+          assert(retainedDeclared,
+            `${operation.name} retained source operation ${retainedFor} is not declared ownership`);
+          const releaseEntry = entriesFor(manifest, "release", "mojo")
+            .find((entry) => entry.path === operation.mojo_source);
+          assert(releaseEntry, `${operation.name} retained Mojo source is absent from release inventory`);
+          const releaseOperations = releaseEntry.operations ??
+            (releaseEntry.operation ? [releaseEntry.operation] : []);
+          assert(releaseOperations.includes(retainedFor),
+            `${operation.name} retained Mojo source does not claim ${retainedFor}`);
+          assert(!releaseOperations.includes(operation.name),
+            `${operation.name} retained Mojo source still claims the deleted operation`);
+          assert(mojoProductionReachable(manifest, revision, operation.mojo_source),
+            `${operation.name} retained Mojo source is not production reachable`);
+          const deletion = deleted.get(operation.name);
+          if (deletion?.source_retained_export) {
+            assert(mojo.includes(`@export("${deletion.source_retained_export}")`),
+              `${operation.name} retained Mojo export ${deletion.source_retained_export} is missing`);
+          }
+          if (deletion?.source_retained_consumer) {
+            assert(sourceExists(manifest, revision, deletion.source_retained_consumer),
+              `${operation.name} retained Mojo consumer is missing`);
+            const retainedConsumer = sourceText(manifest, revision, deletion.source_retained_consumer);
+            const retainedMarker = deletion.source_retained_marker ?? deletion.source_retained_export;
+            assert(typeof retainedMarker === "string" && retainedConsumer.includes(retainedMarker),
+              `${operation.name} retained Mojo consumer marker is missing`);
+          }
+        }
       } else {
         assert(!sourceExists(manifest, revision, operation.mojo_source),
           `${operation.name} is declared deleted but its Mojo source remains in the release`);
@@ -444,8 +479,10 @@ function validateOperationContinuity(manifest, snapshot) {
     .map((operation) => [operation.name, operation]));
   const deleted = deletedAuthoritativeOperations(manifest);
   for (const name of deleted.keys()) {
-    assert(expectedNames.includes(name),
-      `deleted authoritative operation ${name} is not part of the frozen baseline`);
+    const operation = operations.get(name);
+    assert(operation, `deleted authoritative operation ${name} is missing from the manifest`);
+    assert(expectedNames.includes(name) || isReleaseOperation(manifest, operation),
+      `deleted authoritative operation ${name} is neither frozen-baseline nor release-declared`);
   }
   for (const name of expectedNames) {
     const operation = operations.get(name);
@@ -543,6 +580,7 @@ function validateCleanupReduction(manifest, reduction, baselineRevision, release
     `${label} cleanup_loc does not match its baseline source range`,
   );
   if (releaseRevision === baselineRevision) return;
+  if (proof.kind === "deleted" && !sourceExists(manifest, releaseRevision, reduction.file)) return;
   const release = sourceText(manifest, releaseRevision, reduction.file);
   switch (proof.kind) {
     case "deleted":
@@ -567,6 +605,21 @@ function validateCleanupReduction(manifest, reduction, baselineRevision, release
       assert(gateOffset >= 0, `${label} feature-gated cleanup release gate/symbol is absent`);
       assert(release.slice(gateOffset, symbolOffset).split(/\r?\n/).length <= 3,
         `${label} feature-gated cleanup release symbol is not guarded by its release gate`);
+      break;
+    }
+    case "collapsed-adapter": {
+      assert.equal(reduction.final_state, "adapter-only",
+        `${label} collapsed-adapter cleanup must remain adapter-only`);
+      assert.equal(typeof proof.release_symbol, "string",
+        `${label} collapsed-adapter cleanup needs release_symbol`);
+      assert.equal(typeof proof.release_marker, "string",
+        `${label} collapsed-adapter cleanup needs release_marker`);
+      const symbolOffset = release.indexOf(proof.release_symbol);
+      assert(symbolOffset >= 0, `${label} collapsed-adapter release symbol is absent`);
+      const markerOffset = release.indexOf(proof.release_marker, symbolOffset);
+      assert(markerOffset >= 0, `${label} collapsed-adapter delegation marker is absent`);
+      assert(release.slice(symbolOffset, markerOffset).split(/\r?\n/).length <= 8,
+        `${label} collapsed-adapter delegation marker is not local to its release symbol`);
       break;
     }
     default:
@@ -651,15 +704,22 @@ function validateInventory(manifest, baselineRevision, releaseRevision) {
     if (!isEligible(baseline)) continue;
     const release = releaseByPath.get(baseline.path);
     if (!release) {
+      if (baseline.language === "mojo") {
+        const baselineSourceOperations = baseline.operations ??
+          (baseline.operation ? [baseline.operation] : []);
+        const deleted = deletedAuthoritativeOperations(manifest);
+        assert(baselineSourceOperations.length > 0 &&
+          baselineSourceOperations.every((operation) => deleted.has(operation)),
+        `baseline Mojo source ${baseline.path} was removed while a declared operation still survives`);
+        continue;
+      }
       const reduction = requireReduction(
         reductions,
         baseline.path,
         `baseline production source ${baseline.path} was removed from the release manifest without a Rust reduction record`,
       );
-      if (baseline.language === "rust") {
-        assert(["deleted", "adapter-only", "test-oracle-only"].includes(reduction.final_state),
-          `${baseline.path} removal is not a declared Rust semantic reduction`);
-      }
+      assert(["deleted", "adapter-only", "test-oracle-only"].includes(reduction.final_state),
+        `${baseline.path} removal is not a declared Rust semantic reduction`);
       continue;
     }
     const releaseLoc = semanticLocAtRevision(manifest, releaseRevision, release);

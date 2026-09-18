@@ -1,6 +1,7 @@
 use super::*;
 use crate::{AdditionalRateLimit, AuthSummary, RateLimitResetCreditsSummary};
 use std::collections::BTreeMap;
+use terminal_ui::text_width;
 
 fn main_windows(
     five_hour_remaining: i64,

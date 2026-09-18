@@ -12,9 +12,6 @@ use super::{
     RenderedQuotaReportWindow, RuntimeQuotaPressureBand, RuntimeQuotaSummary,
     RuntimeQuotaWindowStatus, RuntimeQuotaWindowSummary, UsageResponse, UsageWindow, WindowPair,
 };
-#[cfg(test)]
-use terminal_ui::text_width;
-
 mod copilot;
 mod gemini;
 mod model_capacity;

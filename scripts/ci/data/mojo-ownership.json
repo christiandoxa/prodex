@@ -27,11 +27,20 @@
       "expanded_in": "0.420.0"
     },
     "critical_signal_range_planning": {
+      "production_reachability_test": "crates/prodex-context/src/critical_signal.rs",
       "mojo_source": "mojo/prodex_core/context_critical_signal.mojo"
     },
     "log_event_classification": {
       "production_reachability_test": "crates/prodex-app/src/app_commands/log_event_source.rs",
       "expanded_in": "0.427.0"
+    },
+    "critical_signal_text_grouping": {
+      "production_reachability_test": "crates/prodex-context/src/critical_signal.rs"
+    },
+    "runtime_log_level_classification": {
+      "consumer": "crates/prodex-app/src/app_commands/doctor.rs",
+      "consumer_marker": "prodex_mojo_core::log::self_test",
+      "production_reachability_test": "crates/prodex-app/src/app_commands/doctor.rs"
     }
   },
   "classification_legend": {
@@ -420,9 +429,19 @@
         ]
       },
       "mojo/prodex_core/context_text.mojo": {
+        "semantic_ranges": [
+          {
+            "start": 40,
+            "end": 288
+          },
+          {
+            "start": 329,
+            "end": 484
+          }
+        ],
         "operations": [
           "critical_signal_text_grouping",
-          "runtime_ci_failure_classification"
+          "command_output_text_kernel"
         ]
       },
       "crates/prodex-runtime-quota/src/selection/scoring.rs": {
@@ -435,6 +454,19 @@
             "start": 570,
             "end": 574
           }
+        ]
+      },
+      "mojo/prodex_core/rich_route.mojo": {
+        "operations": [
+          "runtime_websocket_event_classification"
+        ]
+      },
+      "mojo/prodex_core/provider_constraints.mojo": {
+        "operations": [
+          "gemini_request_field_planning",
+          "gemini_tool_call_indexing",
+          "gemini_request_content_kernel",
+          "gemini_bridge_request_kernel"
         ]
       }
     },
@@ -480,13 +512,26 @@
           "critical_signal_range_planning"
         ]
       }
+    ],
+    "removed": [
+      "crates/prodex-runtime-proxy/src/gateway_policy.rs",
+      "crates/prodex-provider-core/src/constraints.rs",
+      "crates/prodex-provider-spi/src/governed_routing.rs",
+      "crates/prodex-runtime-policy/src/validate/gateway/routing.rs",
+      "mojo/prodex_core/rich_policy.mojo"
     ]
   },
   "supporting_operations": [
     "quota_aggregation_kernel",
     "runtime_policy_numeric_kernel",
     "runtime_profile_schedule_kernel",
-    "runtime_tuning_defaults_kernel"
+    "runtime_tuning_defaults_kernel",
+    "runtime_websocket_event_classification",
+    "gemini_request_field_planning",
+    "gemini_tool_call_indexing",
+    "gemini_request_content_kernel",
+    "gemini_bridge_request_kernel",
+    "command_output_text_kernel"
   ],
   "authoritative_operations": [
     {
@@ -1056,9 +1101,9 @@
       "previous_responsibility": "complete deterministic gateway route strategy selection",
       "baseline_semantic_loc": 417,
       "migrated_semantic_loc": 166,
-      "final_state": "adapter-only",
+      "final_state": "deleted",
       "rust_before": "crates/prodex-runtime-proxy/src/gateway_policy.rs::runtime_gateway_route_selected_model",
-      "rust_after": "adapter-only",
+      "rust_after": "deleted with the retired enterprise/generic routing surface",
       "mojo_owner": "mojo/prodex_core/rich_policy.mojo::prodex_mojo_rich_policy_route_v1",
       "mojo_source": "mojo/prodex_core/rich_policy.mojo",
       "mojo_entry": "prodex_mojo_rich_policy_route_v1",
@@ -1158,9 +1203,9 @@
       "previous_responsibility": "critical-signal line classification and normalized range input construction",
       "baseline_semantic_loc": 367,
       "migrated_semantic_loc": 130,
-      "final_state": "test-oracle-only",
+      "final_state": "deleted",
       "rust_before": "crates/prodex-context/src/critical_signal.rs::critical_signal_normalized_rows_rust",
-      "rust_after": "test-oracle-only",
+      "rust_after": "deleted; production critical-signal classification and range planning delegate directly to Mojo",
       "mojo_owner": "mojo/prodex_core/rich_context_v2.mojo::prodex_mojo_rich_context_signal_counts_batch_v1",
       "mojo_source": "mojo/prodex_core/rich_context_v2.mojo",
       "mojo_entry": "prodex_mojo_rich_context_signal_counts_batch_v1",
@@ -1225,7 +1270,8 @@
       "symbol": "critical_signal_normalized_rows_rust",
       "operation": "critical_signal_range_planning",
       "previous_responsibility": "signal-row identity and post-loss range input construction",
-      "final_state": "test-oracle-only"
+      "final_state": "deleted",
+      "rust_after": "deleted; production critical-signal classification and range planning delegate directly to Mojo"
     },
     {
       "file": "crates/prodex-provider-core/src/constraints.rs",
@@ -1234,9 +1280,9 @@
       "previous_responsibility": "provider request default, reasoning reserve, endpoint, capability, and reasoning-effort preclassification",
       "baseline_semantic_loc": 423,
       "migrated_semantic_loc": 61,
-      "final_state": "adapter-only",
+      "final_state": "deleted",
       "rust_before": "crates/prodex-provider-core/src/constraints.rs::resolve_provider_request_requirements",
-      "rust_after": "adapter-only; Mojo owns bounded requirement resolution and preclassification",
+      "rust_after": "deleted with the retired enterprise/generic routing surface",
       "mojo_owner": "mojo/prodex_core/provider_constraints.mojo::prodex_provider_constraints_resolve_v1",
       "mojo_source": "mojo/prodex_core/provider_constraints.mojo",
       "mojo_entry": "prodex_provider_constraints_resolve_v1",
@@ -1366,24 +1412,24 @@
       "parity_test": "crates/prodex-runtime-policy/tests/src/runtime_proxy.rs",
       "cleanup_loc": 78,
       "cleanup_source": {
-        "kind": "feature-gated",
+        "kind": "collapsed-adapter",
         "baseline_range": {
           "start": 672,
           "end": 751
         },
         "release_symbol": "fn settings(self) -> RuntimePolicyProxySettings",
-        "release_gate": "#[cfg(feature = \"mojo\")]"
+        "release_marker": "self.resolve()"
       },
-      "cleanup_evidence": "The Mojo-enabled runtime policy path resolves all preset defaults through the bounded runtime-tuning ABI; the feature-off Rust table remains an oracle."
+      "cleanup_evidence": "The former Rust preset default table collapsed to settings() -> resolve(); resolve() delegates preset values to prodex_mojo_core::runtime::runtime_tuning_proxy_preset_defaults."
     },
     {
       "file": "crates/prodex-context/src/command_output/log_stream.rs",
       "symbol": "fn log_stream_level_label(line: &str) -> Option<&'static str>",
       "operation": "runtime_log_level_classification",
       "previous_responsibility": "log-level token, key-value, and JSON classification",
-      "final_state": "adapter-only",
+      "final_state": "deleted",
       "rust_before": "crates/prodex-context/src/command_output/log_stream.rs::log_stream_level_label",
-      "rust_after": "feature-gated Rust oracle plus bounded Mojo adapter",
+      "rust_after": "deleted; the Mojo classifier remains exercised by the runtime doctor self-test",
       "mojo_owner": "mojo/prodex_core/log_semantics.mojo::prodex_mojo_log_level_classify_v1",
       "mojo_source": "mojo/prodex_core/log_semantics.mojo",
       "mojo_entry": "prodex_mojo_log_level_classify_v1",
@@ -1391,24 +1437,22 @@
       "parity_test": "crates/prodex-context/src/command_output/log_stream.rs",
       "cleanup_loc": 53,
       "cleanup_source": {
-        "kind": "feature-gated",
+        "kind": "deleted",
         "baseline_range": {
           "start": 197,
           "end": 253
-        },
-        "release_symbol": "fn log_stream_level_label_rust(line: &str) -> Option<&'static str>",
-        "release_gate": "#[cfg(any(not(feature = \"mojo\"), test))]"
+        }
       },
-      "cleanup_evidence": "The Mojo production path bounds the untrusted line, classifies supported log-level forms, and maps the validated tag; the Rust classifier remains only for feature-off and parity builds."
+      "cleanup_evidence": "The former Rust log classifier source was removed; the Mojo classifier remains production-linked through doctor self-test."
     },
     {
       "file": "crates/prodex-context/src/command_output/ci_failure.rs",
       "symbol": "is_ci_log_marker_line",
       "operation": "runtime_ci_failure_classification",
       "previous_responsibility": "CI log marker, annotation, failure-text, job, step, and exit-code classification",
-      "final_state": "adapter-only",
+      "final_state": "deleted",
       "rust_before": "crates/prodex-context/src/command_output/ci_failure.rs::is_ci_log_marker_line",
-      "rust_after": "feature-gated Rust oracle plus bounded Mojo metadata adapter",
+      "rust_after": "deleted with the retired CI presentation surface",
       "mojo_owner": "mojo/prodex_core/context_text.mojo::prodex_context_classify_ci_line_v1",
       "mojo_source": "mojo/prodex_core/context_text.mojo",
       "mojo_entry": "prodex_context_classify_ci_line_v1",
@@ -1416,24 +1460,22 @@
       "parity_test": "crates/prodex-context/src/command_output/ci_failure.rs",
       "cleanup_loc": 33,
       "cleanup_source": {
-        "kind": "feature-gated",
+        "kind": "deleted",
         "baseline_range": {
           "start": 113,
           "end": 147
-        },
-        "release_symbol": "fn is_ci_log_marker_line_rust(line: &str) -> bool",
-        "release_gate": "#[cfg(any(not(feature = \"mojo\"), test))]"
+        }
       },
-      "cleanup_evidence": "The Mojo production path classifies bounded CI metadata through one fixed-width call; Rust retains normalization, failure-index selection, truncation, and the feature-off/test oracle."
+      "cleanup_evidence": "The former Rust CI-classifier source was removed with the retired command-output presentation surface."
     },
     {
       "file": "crates/prodex-context/src/command_output/ci_failure.rs",
       "symbol": "ci_job_name_from_line",
       "operation": "runtime_ci_failure_classification",
       "previous_responsibility": "CI job and step name extraction from diagnostic lines",
-      "final_state": "adapter-only",
+      "final_state": "deleted",
       "rust_before": "crates/prodex-context/src/command_output/ci_failure.rs::ci_job_name_from_line and ci_step_name_from_line",
-      "rust_after": "feature-gated Rust oracle plus bounded Mojo span mapping",
+      "rust_after": "deleted with the retired CI presentation surface",
       "mojo_owner": "mojo/prodex_core/context_text.mojo::prodex_context_classify_ci_line_v1",
       "mojo_source": "mojo/prodex_core/context_text.mojo",
       "mojo_entry": "prodex_context_classify_ci_line_v1",
@@ -1441,24 +1483,22 @@
       "parity_test": "crates/prodex-context/src/command_output/ci_failure.rs",
       "cleanup_loc": 30,
       "cleanup_source": {
-        "kind": "feature-gated",
+        "kind": "deleted",
         "baseline_range": {
           "start": 167,
           "end": 197
-        },
-        "release_symbol": "fn ci_job_name_from_line_rust(line: &str) -> Option<String>",
-        "release_gate": "#[cfg(any(not(feature = \"mojo\"), test))]"
+        }
       },
-      "cleanup_evidence": "Mojo returns bounded job and step spans while Rust retains the surrounding line-window search and truncation policy."
+      "cleanup_evidence": "The former Rust CI-classifier source was removed with the retired command-output presentation surface."
     },
     {
       "file": "crates/prodex-context/src/command_output/ci_failure.rs",
       "symbol": "ci_exit_code_from_line",
       "operation": "runtime_ci_failure_classification",
       "previous_responsibility": "CI exit-code token extraction",
-      "final_state": "adapter-only",
+      "final_state": "deleted",
       "rust_before": "crates/prodex-context/src/command_output/ci_failure.rs::ci_exit_code_from_line",
-      "rust_after": "feature-gated Rust oracle plus bounded Mojo span mapping",
+      "rust_after": "deleted with the retired CI presentation surface",
       "mojo_owner": "mojo/prodex_core/context_text.mojo::prodex_context_classify_ci_line_v1",
       "mojo_source": "mojo/prodex_core/context_text.mojo",
       "mojo_entry": "prodex_context_classify_ci_line_v1",
@@ -1466,15 +1506,13 @@
       "parity_test": "crates/prodex-context/src/command_output/ci_failure.rs",
       "cleanup_loc": 31,
       "cleanup_source": {
-        "kind": "feature-gated",
+        "kind": "deleted",
         "baseline_range": {
           "start": 199,
           "end": 230
-        },
-        "release_symbol": "fn ci_exit_code_from_line_rust(line: &str) -> Option<String>",
-        "release_gate": "#[cfg(any(not(feature = \"mojo\"), test))]"
+        }
       },
-      "cleanup_evidence": "Mojo extracts the bounded exit-code span; Rust retains only the feature-off/test integer-token oracle."
+      "cleanup_evidence": "The former Rust CI-classifier source was removed with the retired command-output presentation surface."
     },
     {
       "file": "crates/prodex-runtime-proxy/src/smart_context/token_accounting.rs",
@@ -1543,12 +1581,78 @@
         "release_gate": "#[cfg(feature = \"mojo\")]"
       },
       "cleanup_evidence": "The active selection catalog now collects normalized profile health observations and delegates bounded sort-key arithmetic to one Mojo batch; Rust retains state lookup and ordering reconstruction."
+    },
+    {
+      "file": "crates/prodex-provider-spi/src/governed_routing.rs",
+      "symbol": "plan_governed_provider_route",
+      "operation": "governed_provider_route_plan",
+      "previous_responsibility": "enterprise governed provider candidate normalization, policy filtering, scoring, and route ordering",
+      "baseline_semantic_loc": 527,
+      "migrated_semantic_loc": 527,
+      "final_state": "deleted",
+      "rust_before": "crates/prodex-provider-spi/src/governed_routing.rs::plan_governed_provider_route",
+      "rust_after": "deleted with the retired enterprise governance/control-plane surface",
+      "mojo_owner": "deleted with the retired governed-provider route operation",
+      "mojo_source": "mojo/prodex_core/rich_route.mojo",
+      "mojo_entry": "prodex_mojo_rich_route_plan_v2",
+      "production_consumer": "deleted crates/prodex-provider-spi governed-routing consumer",
+      "parity_test": "historical crates/prodex-provider-spi/tests/governed_routing.rs",
+      "performance": "operation removed from the production surface"
+    },
+    {
+      "file": "crates/prodex-runtime-policy/src/validate/gateway/routing.rs",
+      "symbol": "validate_gateway_route_alias",
+      "operation": "gateway_route_alias_policy",
+      "previous_responsibility": "enterprise gateway route-alias validation and adaptive routing numeric policy checks",
+      "baseline_semantic_loc": 256,
+      "migrated_semantic_loc": 256,
+      "final_state": "deleted",
+      "rust_before": "crates/prodex-runtime-policy/src/validate/gateway/routing.rs::validate_gateway_route_alias",
+      "rust_after": "deleted with the retired enterprise gateway policy/control-plane surface",
+      "mojo_owner": "deleted with the retired gateway route-alias operation",
+      "mojo_source": "mojo/prodex_core/rich_policy.mojo",
+      "mojo_entry": "prodex_mojo_rich_policy_alias_v2",
+      "production_consumer": "deleted runtime-policy gateway validation consumer",
+      "parity_test": "historical runtime-policy gateway routing tests",
+      "performance": "operation removed from the production surface"
     }
   ],
   "deleted_authoritative_operations": [
     {
       "name": "log_event_classification",
       "reason": "Deleted the non-core runtime log command/event-classification feature and its production consumer."
+    },
+    {
+      "name": "governed_provider_route_plan",
+      "reason": "Deleted the retired enterprise governed-routing plane and its production consumer; the shared Mojo source now retains only websocket event classification.",
+      "source_retained_for": "runtime_websocket_event_classification",
+      "source_retained_export": "prodex_runtime_websocket_event_kind_v1",
+      "source_retained_consumer": "crates/prodex-mojo-core/src/rich/routing.rs",
+      "source_retained_marker": "prodex_runtime_websocket_event_kind_v1"
+    },
+    {
+      "name": "gateway_route_alias_policy",
+      "reason": "Deleted with the retired enterprise gateway policy/control-plane validation surface."
+    },
+    {
+      "name": "runtime_gateway_route_selection",
+      "reason": "Deleted with the retired enterprise gateway policy/control-plane routing surface."
+    },
+    {
+      "name": "provider_constraint_kernel",
+      "reason": "Deleted the retired generic provider-constraint resolver; the shared Mojo source remains authoritative for active Gemini request kernels.",
+      "source_retained_for": "gemini_request_field_planning",
+      "source_retained_export": "prodex_gemini_request_field_plan_v1",
+      "source_retained_consumer": "crates/prodex-mojo-core/src/provider_constraints/gemini_request.rs",
+      "source_retained_marker": "prodex_gemini_request_field_plan_v1"
+    },
+    {
+      "name": "runtime_ci_failure_classification",
+      "reason": "Deleted the retired CI-failure presentation classifier; the shared context-text source remains active for command-output normalization.",
+      "source_retained_for": "command_output_text_kernel",
+      "source_retained_export": "prodex_context_normalize_command_output_v1",
+      "source_retained_consumer": "crates/prodex-mojo-core/src/context/command_output_ops.rs",
+      "source_retained_marker": "prodex_context_normalize_command_output_v1"
     }
   ]
 }
