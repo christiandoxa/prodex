@@ -4,8 +4,6 @@ mod binding_identity;
 mod bridge;
 mod catalog;
 mod chat_tools_bridge;
-mod constraints;
-mod contract;
 mod deepseek_bridge;
 mod errors;
 mod fallback;
@@ -14,7 +12,7 @@ mod harness;
 mod harness_provider_policy;
 mod implementation_registry;
 mod models;
-mod replay_cases;
+mod reasoning_effort;
 mod runtime_metadata;
 mod surface;
 #[cfg(test)]
@@ -48,22 +46,6 @@ pub use chat_tools_bridge::{
     provider_core_chat_tools_from_responses_request,
     provider_core_chat_web_search_options_from_responses_request,
     provider_core_flatten_namespace_tool_name,
-};
-pub use constraints::{
-    PROVIDER_REQUEST_SAFE_WINDOW_TOKENS_DEFAULT, ProviderOutputAdjustment,
-    ProviderOutputLimitField, ProviderOversizedOutputPolicy, ProviderReasoningEffort,
-    ProviderRequestConstraintDecision, ProviderRequestConstraintEvaluation,
-    ProviderRequestConstraintPolicy, ProviderRequestFeature, ProviderRequestLimitError,
-    ProviderRequestLimitErrorKind, ProviderRequestRequirements, ProviderUnknownContextPolicy,
-    evaluate_provider_request_constraints,
-    evaluate_provider_request_constraints_with_catalog_entry, provider_request_requirements,
-    provider_request_requirements_from_value, provider_requested_output_tokens,
-    provider_requested_output_tokens_compat,
-};
-pub use contract::{
-    PROVIDER_CONTRACT_PROVIDERS, ProviderAdapterContractSpec, ProviderContractCatalogSpec,
-    ProviderEndpointContractSpec, provider_adapter_contract_matrix, provider_adapter_contract_spec,
-    provider_capabilities_markdown, provider_contract_catalog,
 };
 pub use deepseek_bridge::{
     deepseek_provider_core_apply_reasoning_from_responses_request,
@@ -200,35 +182,31 @@ pub use gemini_bridge::{
     gemini_provider_core_web_search_call_from_grounding,
 };
 pub use harness::{
-    EffectiveHarnessMode, HARNESS_MODE_CATALOG, HarnessMode, HarnessModeSpec,
-    HarnessRequestShapeError, HarnessResolutionSource, HarnessShapedRequest,
-    MINIMAL_HARNESS_INSTRUCTIONS, ParseHarnessModeError, ResolvedHarnessMode, harness_mode_catalog,
+    EffectiveHarnessMode, HarnessMode, HarnessRequestShapeError, HarnessResolutionSource,
+    HarnessShapedRequest, MINIMAL_HARNESS_INSTRUCTIONS, ParseHarnessModeError, ResolvedHarnessMode,
     resolve_harness_mode, shape_harness_request,
 };
 pub use harness_provider_policy::{
-    HARNESS_PROVIDER_POLICY_CATALOG, HarnessBodyTransform, HarnessProviderPolicySpec,
-    HarnessProviderTransformError, HarnessResponsePolicy, HarnessToolAlias,
-    harness_canonical_tool_name, harness_provider_native_tool_name, harness_provider_policy,
-    harness_provider_policy_catalog, postprocess_harness_provider_response,
-    postprocess_harness_provider_stream_event, shape_harness_provider_request,
+    HarnessBodyTransform, HarnessProviderPolicySpec, HarnessProviderTransformError,
+    HarnessResponsePolicy, HarnessToolAlias, harness_canonical_tool_name,
+    harness_provider_native_tool_name, harness_provider_policy,
+    postprocess_harness_provider_response, postprocess_harness_provider_stream_event,
+    shape_harness_provider_request,
 };
 pub use implementation_registry::{
     PROVIDER_IMPLEMENTATION_ORDER, ProviderImplementationDescriptor,
     ProviderImplementationRegistry, provider_implementation_registry,
 };
 pub use models::{provider_model_catalog, provider_model_cost, provider_model_spec};
-use replay_cases::provider_replay_case_count;
-pub use replay_cases::{ProviderReplayCase, provider_replay_cases};
+pub use reasoning_effort::ProviderReasoningEffort;
 pub use runtime_metadata::*;
 pub use surface::*;
 pub(crate) use surface::{
     COPILOT_TEXT_ENDPOINTS, CORE_TEXT_ENDPOINTS, GEMINI_ENDPOINTS, KIRO_ENDPOINTS, OPENAI_ENDPOINTS,
 };
 pub use translator::{
-    ProviderConformanceCase, ProviderConformanceExpectedErrorClass,
-    ProviderConformanceExpectedLoss, ProviderConformanceOperation, ProviderParamSupport,
-    ProviderTransformInput, ProviderTransformLoss, ProviderTransformResult, ProviderTranslator,
-    ProviderUnsupportedReason, TransformOutcome, TransformStatus,
+    ProviderParamSupport, ProviderTransformInput, ProviderTransformLoss, ProviderTransformResult,
+    ProviderTranslator, ProviderUnsupportedReason, TransformOutcome, TransformStatus,
 };
 pub use translators::{
     DEEPSEEK_PROVIDER_CORE_FIRST_EVENT_RETRY_LIMIT, DeepSeekProviderCoreStreamChatToolCall,
@@ -329,8 +307,8 @@ pub use translators::{
     kiro_provider_core_tool_choice_from_legacy_chat_function_call,
     kiro_provider_core_tool_from_legacy_chat_function,
     kiro_provider_core_truncated_tool_activity_item,
-    kiro_provider_core_unsupported_path_error_value, provider_conformance_cases,
-    provider_translator, translate_openai_chat_request_to_anthropic_messages,
+    kiro_provider_core_unsupported_path_error_value, provider_translator,
+    translate_openai_chat_request_to_anthropic_messages,
 };
 pub use usage::{
     ProviderTokenUsage, calculate_cost_microusd, estimate_request_input_tokens,

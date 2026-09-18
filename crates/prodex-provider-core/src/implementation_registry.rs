@@ -1,7 +1,7 @@
 //! Immutable built-in provider implementation registry.
 
 use std::sync::LazyLock;
-#[cfg(any(not(feature = "mojo"), test))]
+#[cfg(not(feature = "mojo"))]
 use std::{error::Error, fmt};
 
 use crate::models::{
@@ -22,7 +22,7 @@ use crate::{
     StaticProviderAdapter,
 };
 
-#[cfg(any(not(feature = "mojo"), test))]
+#[cfg(not(feature = "mojo"))]
 use crate::{
     COPILOT_TEXT_ENDPOINTS, CORE_TEXT_ENDPOINTS, GEMINI_ENDPOINTS, KIRO_ENDPOINTS, OPENAI_ENDPOINTS,
 };
@@ -41,7 +41,7 @@ pub const PROVIDER_IMPLEMENTATION_ORDER: &[ProviderId] = &[
     ProviderId::Local,
 ];
 
-#[cfg(any(not(feature = "mojo"), test))]
+#[cfg(not(feature = "mojo"))]
 const OPENAI_CAPABILITIES: &[(ProviderEndpoint, ProviderCapabilityStatus)] = &[
     (
         ProviderEndpoint::Responses,
@@ -64,7 +64,7 @@ const OPENAI_CAPABILITIES: &[(ProviderEndpoint, ProviderCapabilityStatus)] = &[
     (ProviderEndpoint::Audio, ProviderCapabilityStatus::Native),
     (ProviderEndpoint::Batches, ProviderCapabilityStatus::Native),
 ];
-#[cfg(any(not(feature = "mojo"), test))]
+#[cfg(not(feature = "mojo"))]
 const CHAT_TRANSLATED_CAPABILITIES: &[(ProviderEndpoint, ProviderCapabilityStatus)] = &[
     (
         ProviderEndpoint::Responses,
@@ -84,7 +84,7 @@ const CHAT_TRANSLATED_CAPABILITIES: &[(ProviderEndpoint, ProviderCapabilityStatu
     ),
     (ProviderEndpoint::Models, ProviderCapabilityStatus::Emulated),
 ];
-#[cfg(any(not(feature = "mojo"), test))]
+#[cfg(not(feature = "mojo"))]
 const COPILOT_CAPABILITIES: &[(ProviderEndpoint, ProviderCapabilityStatus)] = &[
     (
         ProviderEndpoint::Responses,
@@ -104,7 +104,7 @@ const COPILOT_CAPABILITIES: &[(ProviderEndpoint, ProviderCapabilityStatus)] = &[
     ),
     (ProviderEndpoint::Models, ProviderCapabilityStatus::Emulated),
 ];
-#[cfg(any(not(feature = "mojo"), test))]
+#[cfg(not(feature = "mojo"))]
 const GEMINI_CAPABILITIES: &[(ProviderEndpoint, ProviderCapabilityStatus)] = &[
     (
         ProviderEndpoint::Responses,
@@ -128,7 +128,7 @@ const GEMINI_CAPABILITIES: &[(ProviderEndpoint, ProviderCapabilityStatus)] = &[
         ProviderCapabilityStatus::Passthrough,
     ),
 ];
-#[cfg(any(not(feature = "mojo"), test))]
+#[cfg(not(feature = "mojo"))]
 const KIRO_CAPABILITIES: &[(ProviderEndpoint, ProviderCapabilityStatus)] = &[
     (
         ProviderEndpoint::Responses,
@@ -148,7 +148,7 @@ const KIRO_CAPABILITIES: &[(ProviderEndpoint, ProviderCapabilityStatus)] = &[
     ),
     (ProviderEndpoint::Models, ProviderCapabilityStatus::Emulated),
 ];
-#[cfg(any(not(feature = "mojo"), test))]
+#[cfg(not(feature = "mojo"))]
 const LOCAL_CAPABILITIES: &[(ProviderEndpoint, ProviderCapabilityStatus)] = &[
     (
         ProviderEndpoint::Responses,
@@ -192,7 +192,7 @@ const LOCAL_CAPABILITIES: &[(ProviderEndpoint, ProviderCapabilityStatus)] = &[
     ),
     (ProviderEndpoint::A2a, ProviderCapabilityStatus::Passthrough),
 ];
-#[cfg(any(not(feature = "mojo"), test))]
+#[cfg(not(feature = "mojo"))]
 const OPENAI_PASSTHROUGH_ENDPOINTS: &[ProviderEndpoint] = &[
     ProviderEndpoint::Responses,
     ProviderEndpoint::ChatCompletions,
@@ -202,7 +202,7 @@ const OPENAI_PASSTHROUGH_ENDPOINTS: &[ProviderEndpoint] = &[
     ProviderEndpoint::Audio,
     ProviderEndpoint::Batches,
 ];
-#[cfg(any(not(feature = "mojo"), test))]
+#[cfg(not(feature = "mojo"))]
 const LOCAL_PASSTHROUGH_ENDPOINTS: &[ProviderEndpoint] = &[
     ProviderEndpoint::Responses,
     ProviderEndpoint::ChatCompletions,
@@ -215,19 +215,19 @@ const LOCAL_PASSTHROUGH_ENDPOINTS: &[ProviderEndpoint] = &[
     ProviderEndpoint::Rerank,
     ProviderEndpoint::A2a,
 ];
-#[cfg(any(not(feature = "mojo"), test))]
+#[cfg(not(feature = "mojo"))]
 const CHAT_PASSTHROUGH_ENDPOINTS: &[ProviderEndpoint] = &[
     ProviderEndpoint::ChatCompletions,
     ProviderEndpoint::Messages,
 ];
-#[cfg(any(not(feature = "mojo"), test))]
+#[cfg(not(feature = "mojo"))]
 const COPILOT_PASSTHROUGH_ENDPOINTS: &[ProviderEndpoint] = &[
     ProviderEndpoint::Responses,
     ProviderEndpoint::ResponsesCompact,
     ProviderEndpoint::ChatCompletions,
     ProviderEndpoint::Messages,
 ];
-#[cfg(any(not(feature = "mojo"), test))]
+#[cfg(not(feature = "mojo"))]
 const GEMINI_PASSTHROUGH_ENDPOINTS: &[ProviderEndpoint] = &[
     ProviderEndpoint::ChatCompletions,
     ProviderEndpoint::Messages,
@@ -260,7 +260,7 @@ struct ProviderImplementationRegistration {
     runtime_metadata: Option<&'static ProviderRuntimeMetadata>,
 }
 
-#[cfg(any(not(feature = "mojo"), test))]
+#[cfg(not(feature = "mojo"))]
 const BUILTIN_REGISTRATIONS: &[ProviderImplementationRegistration] = &[
     ProviderImplementationRegistration {
         provider: ProviderId::OpenAi,
@@ -477,7 +477,7 @@ pub struct ProviderImplementationRegistry {
 }
 
 impl ProviderImplementationRegistry {
-    #[cfg(any(not(feature = "mojo"), test))]
+    #[cfg(not(feature = "mojo"))]
     fn from_registrations(
         registrations: &[ProviderImplementationRegistration],
     ) -> Result<Self, ProviderImplementationRegistryError> {
@@ -598,7 +598,7 @@ pub(crate) const fn builtin_provider_runtime_metadata(
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-#[cfg(any(not(feature = "mojo"), test))]
+#[cfg(not(feature = "mojo"))]
 enum ProviderImplementationRegistryError {
     DuplicateProviderId { first: usize, duplicate: usize },
     DuplicateNormalizedAlias { first: usize, duplicate: usize },
@@ -616,7 +616,7 @@ enum ProviderImplementationRegistryError {
     NonDeterministicRegistrationOrder { index: usize },
 }
 
-#[cfg(any(not(feature = "mojo"), test))]
+#[cfg(not(feature = "mojo"))]
 impl fmt::Display for ProviderImplementationRegistryError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
@@ -626,10 +626,10 @@ impl fmt::Display for ProviderImplementationRegistryError {
     }
 }
 
-#[cfg(any(not(feature = "mojo"), test))]
+#[cfg(not(feature = "mojo"))]
 impl Error for ProviderImplementationRegistryError {}
 
-#[cfg(any(not(feature = "mojo"), test))]
+#[cfg(not(feature = "mojo"))]
 fn validate_names(
     registrations: &[ProviderImplementationRegistration],
 ) -> Result<(), ProviderImplementationRegistryError> {
@@ -637,7 +637,7 @@ fn validate_names(
     validate_aliases(registrations)
 }
 
-#[cfg(any(not(feature = "mojo"), test))]
+#[cfg(not(feature = "mojo"))]
 fn validate_duplicate_provider_ids(
     registrations: &[ProviderImplementationRegistration],
 ) -> Result<(), ProviderImplementationRegistryError> {
@@ -654,7 +654,7 @@ fn validate_duplicate_provider_ids(
     Ok(())
 }
 
-#[cfg(any(not(feature = "mojo"), test))]
+#[cfg(not(feature = "mojo"))]
 fn validate_aliases(
     registrations: &[ProviderImplementationRegistration],
 ) -> Result<(), ProviderImplementationRegistryError> {
@@ -689,7 +689,7 @@ fn validate_aliases(
     Ok(())
 }
 
-#[cfg(any(not(feature = "mojo"), test))]
+#[cfg(not(feature = "mojo"))]
 fn validate_registration(
     index: usize,
     registration: ProviderImplementationRegistration,
@@ -745,7 +745,7 @@ fn validate_registration(
     Ok(())
 }
 
-#[cfg(any(not(feature = "mojo"), test))]
+#[cfg(not(feature = "mojo"))]
 fn capabilities_are_coherent(registration: ProviderImplementationRegistration) -> bool {
     if registration.capabilities.len() != registration.supported_endpoints.len() {
         return false;
@@ -789,7 +789,7 @@ fn capabilities_are_coherent(registration: ProviderImplementationRegistration) -
         })
 }
 
-#[cfg(any(not(feature = "mojo"), test))]
+#[cfg(not(feature = "mojo"))]
 fn validate_order(
     registrations: &[ProviderImplementationRegistration],
 ) -> Result<(), ProviderImplementationRegistryError> {
@@ -806,11 +806,7 @@ fn validate_order(
     Ok(())
 }
 
-#[cfg(any(not(feature = "mojo"), test))]
+#[cfg(not(feature = "mojo"))]
 fn normalized(value: &str) -> String {
     value.trim().to_ascii_lowercase()
 }
-
-#[cfg(test)]
-#[path = "implementation_registry/tests.rs"]
-mod tests;

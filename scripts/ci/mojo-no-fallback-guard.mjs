@@ -23,8 +23,6 @@ const PROMOTED_FILES = [
   "crates/prodex-mojo-core/src/log.rs",
   "crates/prodex-mojo-core/src/rich/routing.rs",
   "crates/prodex-context/src/critical_signal.rs",
-  "crates/prodex-provider-core/src/constraints.rs",
-  "crates/prodex-provider-core/src/constraints/mojo.rs",
   "crates/prodex-quota/src/render/gemini.rs",
   "crates/prodex-runtime-proxy/src/mojo.rs",
   "crates/prodex-runtime-proxy/src/quota.rs",

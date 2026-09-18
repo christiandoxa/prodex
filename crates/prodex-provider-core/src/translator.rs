@@ -4,17 +4,11 @@ use crate::{
     extract_usage_tokens,
 };
 
-#[path = "translator/conformance.rs"]
-mod conformance;
 #[path = "translator/params.rs"]
 mod params;
 #[path = "translator/transform.rs"]
 mod transform;
 
-pub use self::conformance::{
-    ProviderConformanceCase, ProviderConformanceExpectedErrorClass,
-    ProviderConformanceExpectedLoss, ProviderConformanceOperation,
-};
 pub use self::params::{ProviderParamSupport, ProviderUnsupportedReason};
 pub use self::transform::{
     ProviderTransformInput, ProviderTransformLoss, ProviderTransformResult, TransformOutcome,
