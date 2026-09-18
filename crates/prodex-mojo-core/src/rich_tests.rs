@@ -6,64 +6,6 @@ fn rich_domain_self_test_covers_structured_results() {
 }
 
 #[test]
-fn rich_virtual_key_admission_preserves_error_precedence_and_rollover() {
-    let mut input = VirtualKeyAdmissionInput {
-        durable_budget: false,
-        usage_minute_epoch: 10,
-        minute_epoch: 10,
-        requests_this_minute: 1,
-        tokens_this_minute: 1,
-        requests_total: 1,
-        spend_microusd: 99,
-        reserved_tokens: 10,
-        estimated_cost_microusd: Some(2),
-        request_budget: Some(1),
-        budget_microusd: Some(100),
-        rpm_limit: Some(1),
-        tpm_limit: Some(10),
-    };
-    assert_eq!(
-        validate_virtual_key_admission(input).unwrap(),
-        VirtualKeyAdmissionDecision::RequestBudgetExceeded
-    );
-
-    input.request_budget = None;
-    assert_eq!(
-        validate_virtual_key_admission(input).unwrap(),
-        VirtualKeyAdmissionDecision::BudgetExceeded
-    );
-    input.budget_microusd = None;
-    assert_eq!(
-        validate_virtual_key_admission(input).unwrap(),
-        VirtualKeyAdmissionDecision::RpmLimitExceeded
-    );
-    input.rpm_limit = None;
-    assert_eq!(
-        validate_virtual_key_admission(input).unwrap(),
-        VirtualKeyAdmissionDecision::TpmLimitExceeded
-    );
-    input.usage_minute_epoch = 9;
-    assert_eq!(
-        validate_virtual_key_admission(input).unwrap(),
-        VirtualKeyAdmissionDecision::Allow
-    );
-
-    input.durable_budget = true;
-    input.usage_minute_epoch = 10;
-    input.minute_epoch = 10;
-    input.requests_total = u64::MAX;
-    input.spend_microusd = u64::MAX;
-    input.tokens_this_minute = 0;
-    input.request_budget = Some(1);
-    input.budget_microusd = Some(1);
-    input.estimated_cost_microusd = Some(1);
-    assert_eq!(
-        validate_virtual_key_admission(input).unwrap(),
-        VirtualKeyAdmissionDecision::Allow
-    );
-}
-
-#[test]
 fn rich_abi_rejects_null_views_and_reports_utf8_offsets() {
     ensure_rich_abi().expect("rich ABI layout should match");
     let mut result = RichContextResult::default();
@@ -668,60 +610,6 @@ fn rich_catalog_planner_rejects_oversized_inputs_without_panicking() {
         default_effort: None,
     }];
     assert_eq!(plan_dynamic_catalog(&model), Err(MojoError::InvalidInput));
-}
-
-#[test]
-fn rich_policy_route_plan_preserves_stable_strategy_semantics() {
-    let models = [
-        PolicyRouteModel {
-            model: "a",
-            input_cost: Some(20),
-            output_cost: Some(30),
-            policy_latency: Some(300),
-            state_latency: Some(80),
-            in_flight: 3,
-            rpm_limit: Some(100),
-            rpm_used: 90,
-            tpm_limit: Some(10_000),
-            tpm_used: 9_900,
-        },
-        PolicyRouteModel {
-            model: "b",
-            input_cost: Some(10),
-            output_cost: Some(15),
-            policy_latency: Some(500),
-            state_latency: None,
-            in_flight: 1,
-            rpm_limit: Some(20),
-            rpm_used: 0,
-            tpm_limit: Some(100_000),
-            tpm_used: 0,
-        },
-    ];
-    assert_eq!(
-        plan_route_policy("fallback", 1, 10, &models)
-            .unwrap()
-            .ordered_indices,
-        [0, 1]
-    );
-    assert_eq!(
-        plan_route_policy("lowest-cost", 1, 10, &models)
-            .unwrap()
-            .selected_index,
-        Some(1)
-    );
-    assert_eq!(
-        plan_route_policy("lowest-latency", 1, 10, &models)
-            .unwrap()
-            .selected_index,
-        Some(0)
-    );
-    assert_eq!(
-        plan_route_policy("round-robin", 2, 10, &models)
-            .unwrap()
-            .selected_index,
-        Some(1)
-    );
 }
 
 #[test]

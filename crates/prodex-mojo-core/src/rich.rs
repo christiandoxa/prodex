@@ -13,20 +13,6 @@ pub const RICH_ABI_VERSION: i64 = 6;
 
 const _: () = assert!(std::mem::size_of::<usize>() == std::mem::size_of::<u64>());
 
-mod app_server_broker;
-pub use app_server_broker::{
-    AffinityPlan as AppServerBrokerAffinityPlan, MethodPlan as AppServerBrokerMethodPlan,
-    ValidationInput as AppServerBrokerValidationInput, WireInput as AppServerBrokerWireInput,
-    WirePlan as AppServerBrokerWirePlan, classify_wire as app_server_broker_classify_wire,
-    lifecycle_sequence_reason as app_server_broker_lifecycle_sequence_reason,
-    lifecycle_validation_reason as app_server_broker_lifecycle_validation_reason,
-    normalize_method as app_server_broker_normalize_method,
-    plan_affinity as app_server_broker_plan_affinity,
-    request_sequence_reason as app_server_broker_request_sequence_reason,
-    response_schema as app_server_broker_response_schema,
-    response_sequence_reason as app_server_broker_response_sequence_reason,
-};
-
 mod routing;
 pub use routing::{
     RouteCandidate, RouteInput, RoutePlan, WebsocketEventKind, plan_routes, websocket_event_kind,
@@ -123,9 +109,6 @@ pub use runtime_doctor_plan::*;
 #[path = "rich/runtime_doctor_render.rs"]
 mod runtime_doctor_render;
 pub use runtime_doctor_render::*;
-#[path = "rich/context_command_output.rs"]
-mod context_command_output;
-pub use context_command_output::*;
 
 const RICH_STATUS_INVALID: i64 = 1;
 const RICH_STATUS_UTF8: i64 = 2;
