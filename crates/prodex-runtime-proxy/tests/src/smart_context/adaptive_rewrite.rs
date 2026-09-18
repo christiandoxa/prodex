@@ -64,23 +64,6 @@ fn smart_context_test_bucketed_rewrite_telemetry_sample(
     }
 }
 
-fn smart_context_test_transform_rewrite_telemetry_sample(
-    category: SmartContextTransformCategory,
-    sample: SmartContextRewriteTelemetrySample,
-) -> SmartContextTransformRewriteTelemetrySample {
-    SmartContextTransformRewriteTelemetrySample { category, sample }
-}
-
-fn smart_context_test_transform_score(
-    scores: &[SmartContextTransformRewriteSafetyScore],
-    category: SmartContextTransformCategory,
-) -> &SmartContextTransformRewriteSafetyScore {
-    scores
-        .iter()
-        .find(|score| score.category == category)
-        .unwrap_or_else(|| panic!("missing transform score: {category:?}"))
-}
-
 fn smart_context_test_rewrite_telemetry_sample(
     body_bytes_before: usize,
     body_bytes_after: usize,

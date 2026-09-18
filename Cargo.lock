@@ -3116,13 +3116,11 @@ dependencies = [
 name = "prodex-runtime-store"
 version = "0.429.4"
 dependencies = [
- "prodex-core",
  "prodex-mojo-core",
  "prodex-runtime-state",
  "prodex-state",
  "serde",
  "serde_json",
- "sha2 0.11.0",
 ]
 
 [[package]]

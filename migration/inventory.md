@@ -91,8 +91,8 @@ production Mojo components as well. The
 generic accounting and rate-limit helpers remain Rust-only because
 their actual production owners are durable storage and Redis/runtime admission. Mojo does not
 own policy, credentials, affinity, tenant ownership, transport, route construction, durable
-mutation, secrets, or user-facing errors. The dormant Smart Context candidate scorer/selector remains an
-audit-only candidate until a non-test production caller exists.
+mutation, secrets, or user-facing errors. The dormant Smart Context candidate scorer/selector was removed after a production-reachability
+audit found no non-test caller; it should not return without a real production seam.
 
 ## Rich domain promotion on 2026-08-26
 

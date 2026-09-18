@@ -50,8 +50,9 @@
 1. Measure complete boundaries for provider, rehydration, quota, tuning, optimistic, and context
    text components including Rust normalization and reconstruction; keep the checked context
    benchmark sizes at 0, 1, 16, 64, 256, and 1,024 lines.
-2. Revisit the dormant Smart Context candidate scorer/selector only if a non-test production
-   caller is restored; do not add an unused Mojo wrapper.
+2. The dormant Smart Context candidate scorer/selector was removed after production-reachability
+   audit confirmed it had no non-test caller; do not restore it or add a Mojo wrapper without a
+   real production seam.
 3. Revisit remaining normalized policy numeric rules only after security and error contracts are
    explicit.
 4. Reevaluate macOS/ARM64/Windows release rows only after final-link and clean-runtime evidence.

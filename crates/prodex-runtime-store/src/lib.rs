@@ -1,8 +1,7 @@
 //! Runtime store merge, compaction, and small persisted cache helpers.
 //!
 //! Runtime state save orchestration stays in the binary crate. This crate keeps
-//! reusable merge/retention primitives and the smart-context artifact JSON cache
-//! boundary.
+//! reusable merge/retention primitives and shared Smart Context artifact DTOs.
 
 use prodex_runtime_state::{
     RuntimeContinuationBindingLifecycle, RuntimeContinuationBindingStatus,
@@ -50,8 +49,6 @@ pub const RUNTIME_PROFILE_CIRCUIT_HALF_OPEN_PROBE_MAX_SECONDS: i64 =
 pub const RUNTIME_PROFILE_CIRCUIT_REOPEN_DECAY_SECONDS: i64 = if cfg!(test) { 12 } else { 1_800 };
 pub const RUNTIME_PROFILE_CIRCUIT_REOPEN_MAX_STAGE: u32 = 4;
 pub const RUNTIME_SMART_CONTEXT_ARTIFACT_STORE_VERSION: u32 = 2;
-pub const RUNTIME_SMART_CONTEXT_STALE_CONTEXT_MIN_BYTES: usize = 1_024;
-pub const RUNTIME_SMART_CONTEXT_STALE_CONTEXT_MIN_TOKENS: usize = 256;
 
 #[cfg(test)]
 #[path = "../tests/src/lib.rs"]

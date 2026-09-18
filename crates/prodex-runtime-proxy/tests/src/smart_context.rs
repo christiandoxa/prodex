@@ -7,17 +7,11 @@ mod golden;
 #[path = "smart_context/core_artifacts.rs"]
 mod core_artifacts;
 
-#[path = "smart_context/candidates.rs"]
-mod candidates;
-
 #[path = "smart_context/memory_budget.rs"]
 mod memory_budget;
 
 #[path = "smart_context/model_registry.rs"]
 mod model_registry;
-
-#[path = "smart_context/rehydration.rs"]
-mod rehydration;
 
 #[path = "smart_context/rollout.rs"]
 mod rollout;

@@ -16,12 +16,12 @@ mojo = ["dep:prodex_mojo_core", "prodex_mojo_core/mojo-runtime"]
 
 [dependencies]
 prodex_mojo_core = { workspace = true, optional = true }
-prodex_core = { workspace = true }
 prodex_runtime_state = { workspace = true }
 prodex_state = { workspace = true }
 serde = { workspace = true }
+
+[dev-dependencies]
 serde_json = { workspace = true }
-sha2 = { workspace = true }
 
 [lints]
 workspace = true
