@@ -1,8 +1,5 @@
 use super::local_rewrite::{
-    RuntimeGatewayAdminRole, RuntimeGatewayAdminToken, RuntimeGatewayGuardrailWebhookConfig,
-    RuntimeGatewayObservabilityConfig, RuntimeGatewayOidcConfig, RuntimeGatewaySecret,
-    RuntimeGatewaySsoConfig, RuntimeGatewayStateStore, RuntimeLocalRewriteProviderOptions,
-    RuntimeLocalRewriteProxyStartOptions, start_runtime_gateway_rewrite_proxy,
+    RuntimeLocalRewriteProviderOptions, RuntimeLocalRewriteProxyStartOptions,
     start_runtime_local_rewrite_proxy,
 };
 use super::local_rewrite_copilot::RuntimeCopilotProviderAuth;
@@ -12,36 +9,12 @@ use std::fs;
 use std::path::Path;
 use std::time::Duration;
 mod deepseek;
-mod gateway_admin_auth;
-mod gateway_admin_crud;
-mod gateway_admin_governance_headers;
-mod gateway_admin_ledger_query;
-mod gateway_admin_policy_lifecycle;
-mod gateway_admin_scope;
-mod gateway_admin_tenant_scope;
-mod gateway_admin_toctou;
-mod gateway_application_boundary;
-mod gateway_break_glass;
-mod gateway_grouped_budget;
-mod gateway_health;
-mod gateway_release_secret_canary;
-mod gateway_state;
-mod gateway_usage;
-mod governance_failure;
 mod model_memory;
 #[cfg(unix)]
 mod projected_provider;
 mod provider_routes;
-mod request_constraints;
 mod support;
 use support::*;
-
-fn runtime_gateway_test_secret(value: &str) -> RuntimeGatewaySecret {
-    RuntimeGatewaySecret::development_compatibility(prodex_domain::SecretMaterial::new(
-        value.as_bytes().to_vec(),
-        None::<String>,
-    ))
-}
 
 fn write_fake_kiro_agent(root: &Path, name: &str, body: &str) -> std::path::PathBuf {
     crate::test_support::write_test_python_executable(root, name, body)
@@ -229,16 +202,6 @@ fn kiro_responses_route_returns_translated_buffered_response() {
         presidio_redaction_enabled: false,
         model_context_window_tokens: None,
         preferred_listen_addr: Some("127.0.0.1:0"),
-        gateway_auth_token_hash: None,
-        gateway_admin_tokens: Vec::new(),
-        gateway_sso: RuntimeGatewaySsoConfig::default(),
-        gateway_state_store: RuntimeGatewayStateStore::file(&paths),
-        gateway_virtual_keys: Vec::new(),
-        gateway_route_aliases: Vec::new(),
-        gateway_guardrails: runtime_proxy_crate::RuntimeGatewayGuardrailConfig::default(),
-        gateway_guardrail_webhook: RuntimeGatewayGuardrailWebhookConfig::default(),
-        gateway_call_id_header: None,
-        gateway_observability: RuntimeGatewayObservabilityConfig::default(),
     })
     .expect("kiro local rewrite proxy should start");
 
@@ -309,16 +272,6 @@ fn kiro_responses_route_reuses_previous_response_history() {
         presidio_redaction_enabled: false,
         model_context_window_tokens: None,
         preferred_listen_addr: Some("127.0.0.1:0"),
-        gateway_auth_token_hash: None,
-        gateway_admin_tokens: Vec::new(),
-        gateway_sso: RuntimeGatewaySsoConfig::default(),
-        gateway_state_store: RuntimeGatewayStateStore::file(&paths),
-        gateway_virtual_keys: Vec::new(),
-        gateway_route_aliases: Vec::new(),
-        gateway_guardrails: runtime_proxy_crate::RuntimeGatewayGuardrailConfig::default(),
-        gateway_guardrail_webhook: RuntimeGatewayGuardrailWebhookConfig::default(),
-        gateway_call_id_header: None,
-        gateway_observability: RuntimeGatewayObservabilityConfig::default(),
     })
     .expect("kiro local rewrite proxy should start");
 
@@ -403,16 +356,6 @@ fn kiro_responses_route_keeps_internal_tool_activity_non_executable() {
         presidio_redaction_enabled: false,
         model_context_window_tokens: None,
         preferred_listen_addr: Some("127.0.0.1:0"),
-        gateway_auth_token_hash: None,
-        gateway_admin_tokens: Vec::new(),
-        gateway_sso: RuntimeGatewaySsoConfig::default(),
-        gateway_state_store: RuntimeGatewayStateStore::file(&paths),
-        gateway_virtual_keys: Vec::new(),
-        gateway_route_aliases: Vec::new(),
-        gateway_guardrails: runtime_proxy_crate::RuntimeGatewayGuardrailConfig::default(),
-        gateway_guardrail_webhook: RuntimeGatewayGuardrailWebhookConfig::default(),
-        gateway_call_id_header: None,
-        gateway_observability: RuntimeGatewayObservabilityConfig::default(),
     })
     .expect("kiro local rewrite proxy should start");
 
@@ -488,16 +431,6 @@ fn kiro_responses_route_supports_buffered_sse_streaming() {
         presidio_redaction_enabled: false,
         model_context_window_tokens: None,
         preferred_listen_addr: Some("127.0.0.1:0"),
-        gateway_auth_token_hash: None,
-        gateway_admin_tokens: Vec::new(),
-        gateway_sso: RuntimeGatewaySsoConfig::default(),
-        gateway_state_store: RuntimeGatewayStateStore::file(&paths),
-        gateway_virtual_keys: Vec::new(),
-        gateway_route_aliases: Vec::new(),
-        gateway_guardrails: runtime_proxy_crate::RuntimeGatewayGuardrailConfig::default(),
-        gateway_guardrail_webhook: RuntimeGatewayGuardrailWebhookConfig::default(),
-        gateway_call_id_header: None,
-        gateway_observability: RuntimeGatewayObservabilityConfig::default(),
     })
     .expect("kiro local rewrite proxy should start");
 
@@ -586,16 +519,6 @@ fn kiro_remote_compact_uses_kiro_semantic_summary_when_available() {
         presidio_redaction_enabled: false,
         model_context_window_tokens: None,
         preferred_listen_addr: Some("127.0.0.1:0"),
-        gateway_auth_token_hash: None,
-        gateway_admin_tokens: Vec::new(),
-        gateway_sso: RuntimeGatewaySsoConfig::default(),
-        gateway_state_store: RuntimeGatewayStateStore::file(&paths),
-        gateway_virtual_keys: Vec::new(),
-        gateway_route_aliases: Vec::new(),
-        gateway_guardrails: runtime_proxy_crate::RuntimeGatewayGuardrailConfig::default(),
-        gateway_guardrail_webhook: RuntimeGatewayGuardrailWebhookConfig::default(),
-        gateway_call_id_header: None,
-        gateway_observability: RuntimeGatewayObservabilityConfig::default(),
     })
     .expect("kiro local rewrite proxy should start");
 
@@ -677,16 +600,6 @@ fn kiro_models_route_uses_kiro_canonical_catalog_when_snapshot_is_empty() {
         presidio_redaction_enabled: false,
         model_context_window_tokens: None,
         preferred_listen_addr: Some("127.0.0.1:0"),
-        gateway_auth_token_hash: None,
-        gateway_admin_tokens: Vec::new(),
-        gateway_sso: RuntimeGatewaySsoConfig::default(),
-        gateway_state_store: RuntimeGatewayStateStore::file(&paths),
-        gateway_virtual_keys: Vec::new(),
-        gateway_route_aliases: Vec::new(),
-        gateway_guardrails: runtime_proxy_crate::RuntimeGatewayGuardrailConfig::default(),
-        gateway_guardrail_webhook: RuntimeGatewayGuardrailWebhookConfig::default(),
-        gateway_call_id_header: None,
-        gateway_observability: RuntimeGatewayObservabilityConfig::default(),
     })
     .expect("kiro local rewrite proxy should start");
 
@@ -766,16 +679,6 @@ fn kiro_chat_completions_route_reuses_responses_translation_surface() {
         presidio_redaction_enabled: false,
         model_context_window_tokens: None,
         preferred_listen_addr: Some("127.0.0.1:0"),
-        gateway_auth_token_hash: None,
-        gateway_admin_tokens: Vec::new(),
-        gateway_sso: RuntimeGatewaySsoConfig::default(),
-        gateway_state_store: RuntimeGatewayStateStore::file(&paths),
-        gateway_virtual_keys: Vec::new(),
-        gateway_route_aliases: Vec::new(),
-        gateway_guardrails: runtime_proxy_crate::RuntimeGatewayGuardrailConfig::default(),
-        gateway_guardrail_webhook: RuntimeGatewayGuardrailWebhookConfig::default(),
-        gateway_call_id_header: None,
-        gateway_observability: RuntimeGatewayObservabilityConfig::default(),
     })
     .expect("kiro local rewrite proxy should start");
 
@@ -843,16 +746,6 @@ fn kiro_messages_route_reuses_anthropic_translation_surface() {
         presidio_redaction_enabled: false,
         model_context_window_tokens: None,
         preferred_listen_addr: Some("127.0.0.1:0"),
-        gateway_auth_token_hash: None,
-        gateway_admin_tokens: Vec::new(),
-        gateway_sso: RuntimeGatewaySsoConfig::default(),
-        gateway_state_store: RuntimeGatewayStateStore::file(&paths),
-        gateway_virtual_keys: Vec::new(),
-        gateway_route_aliases: Vec::new(),
-        gateway_guardrails: runtime_proxy_crate::RuntimeGatewayGuardrailConfig::default(),
-        gateway_guardrail_webhook: RuntimeGatewayGuardrailWebhookConfig::default(),
-        gateway_call_id_header: None,
-        gateway_observability: RuntimeGatewayObservabilityConfig::default(),
     })
     .expect("kiro local rewrite proxy should start");
 
@@ -925,16 +818,6 @@ fn kiro_messages_route_renders_internal_activity_as_text() {
         presidio_redaction_enabled: false,
         model_context_window_tokens: None,
         preferred_listen_addr: Some("127.0.0.1:0"),
-        gateway_auth_token_hash: None,
-        gateway_admin_tokens: Vec::new(),
-        gateway_sso: RuntimeGatewaySsoConfig::default(),
-        gateway_state_store: RuntimeGatewayStateStore::file(&paths),
-        gateway_virtual_keys: Vec::new(),
-        gateway_route_aliases: Vec::new(),
-        gateway_guardrails: runtime_proxy_crate::RuntimeGatewayGuardrailConfig::default(),
-        gateway_guardrail_webhook: RuntimeGatewayGuardrailWebhookConfig::default(),
-        gateway_call_id_header: None,
-        gateway_observability: RuntimeGatewayObservabilityConfig::default(),
     })
     .expect("kiro local rewrite proxy should start");
 
@@ -1014,16 +897,6 @@ fn kiro_messages_route_replays_anthropic_tool_result_followup() {
         presidio_redaction_enabled: false,
         model_context_window_tokens: None,
         preferred_listen_addr: Some("127.0.0.1:0"),
-        gateway_auth_token_hash: None,
-        gateway_admin_tokens: Vec::new(),
-        gateway_sso: RuntimeGatewaySsoConfig::default(),
-        gateway_state_store: RuntimeGatewayStateStore::file(&paths),
-        gateway_virtual_keys: Vec::new(),
-        gateway_route_aliases: Vec::new(),
-        gateway_guardrails: runtime_proxy_crate::RuntimeGatewayGuardrailConfig::default(),
-        gateway_guardrail_webhook: RuntimeGatewayGuardrailWebhookConfig::default(),
-        gateway_call_id_header: None,
-        gateway_observability: RuntimeGatewayObservabilityConfig::default(),
     })
     .expect("kiro local rewrite proxy should start");
 
@@ -1131,16 +1004,6 @@ fn kiro_messages_route_streams_anthropic_sse() {
         presidio_redaction_enabled: false,
         model_context_window_tokens: None,
         preferred_listen_addr: Some("127.0.0.1:0"),
-        gateway_auth_token_hash: None,
-        gateway_admin_tokens: Vec::new(),
-        gateway_sso: RuntimeGatewaySsoConfig::default(),
-        gateway_state_store: RuntimeGatewayStateStore::file(&paths),
-        gateway_virtual_keys: Vec::new(),
-        gateway_route_aliases: Vec::new(),
-        gateway_guardrails: runtime_proxy_crate::RuntimeGatewayGuardrailConfig::default(),
-        gateway_guardrail_webhook: RuntimeGatewayGuardrailWebhookConfig::default(),
-        gateway_call_id_header: None,
-        gateway_observability: RuntimeGatewayObservabilityConfig::default(),
     })
     .expect("kiro local rewrite proxy should start");
 
@@ -1211,16 +1074,6 @@ fn kiro_chat_completions_route_rejects_legacy_function_call_control() {
         presidio_redaction_enabled: false,
         model_context_window_tokens: None,
         preferred_listen_addr: Some("127.0.0.1:0"),
-        gateway_auth_token_hash: None,
-        gateway_admin_tokens: Vec::new(),
-        gateway_sso: RuntimeGatewaySsoConfig::default(),
-        gateway_state_store: RuntimeGatewayStateStore::file(&paths),
-        gateway_virtual_keys: Vec::new(),
-        gateway_route_aliases: Vec::new(),
-        gateway_guardrails: runtime_proxy_crate::RuntimeGatewayGuardrailConfig::default(),
-        gateway_guardrail_webhook: RuntimeGatewayGuardrailWebhookConfig::default(),
-        gateway_call_id_header: None,
-        gateway_observability: RuntimeGatewayObservabilityConfig::default(),
     })
     .expect("kiro local rewrite proxy should start");
 
@@ -1298,16 +1151,6 @@ fn kiro_chat_completions_route_rejects_unsupported_response_format() {
         presidio_redaction_enabled: false,
         model_context_window_tokens: None,
         preferred_listen_addr: Some("127.0.0.1:0"),
-        gateway_auth_token_hash: None,
-        gateway_admin_tokens: Vec::new(),
-        gateway_sso: RuntimeGatewaySsoConfig::default(),
-        gateway_state_store: RuntimeGatewayStateStore::file(&paths),
-        gateway_virtual_keys: Vec::new(),
-        gateway_route_aliases: Vec::new(),
-        gateway_guardrails: runtime_proxy_crate::RuntimeGatewayGuardrailConfig::default(),
-        gateway_guardrail_webhook: RuntimeGatewayGuardrailWebhookConfig::default(),
-        gateway_call_id_header: None,
-        gateway_observability: RuntimeGatewayObservabilityConfig::default(),
     })
     .expect("kiro local rewrite proxy should start");
 
@@ -1385,16 +1228,6 @@ fn kiro_chat_completions_route_rejects_multiple_choices() {
         presidio_redaction_enabled: false,
         model_context_window_tokens: None,
         preferred_listen_addr: Some("127.0.0.1:0"),
-        gateway_auth_token_hash: None,
-        gateway_admin_tokens: Vec::new(),
-        gateway_sso: RuntimeGatewaySsoConfig::default(),
-        gateway_state_store: RuntimeGatewayStateStore::file(&paths),
-        gateway_virtual_keys: Vec::new(),
-        gateway_route_aliases: Vec::new(),
-        gateway_guardrails: runtime_proxy_crate::RuntimeGatewayGuardrailConfig::default(),
-        gateway_guardrail_webhook: RuntimeGatewayGuardrailWebhookConfig::default(),
-        gateway_call_id_header: None,
-        gateway_observability: RuntimeGatewayObservabilityConfig::default(),
     })
     .expect("kiro local rewrite proxy should start");
 
@@ -1461,16 +1294,6 @@ fn kiro_chat_completions_route_rejects_stop_sequences() {
         presidio_redaction_enabled: false,
         model_context_window_tokens: None,
         preferred_listen_addr: Some("127.0.0.1:0"),
-        gateway_auth_token_hash: None,
-        gateway_admin_tokens: Vec::new(),
-        gateway_sso: RuntimeGatewaySsoConfig::default(),
-        gateway_state_store: RuntimeGatewayStateStore::file(&paths),
-        gateway_virtual_keys: Vec::new(),
-        gateway_route_aliases: Vec::new(),
-        gateway_guardrails: runtime_proxy_crate::RuntimeGatewayGuardrailConfig::default(),
-        gateway_guardrail_webhook: RuntimeGatewayGuardrailWebhookConfig::default(),
-        gateway_call_id_header: None,
-        gateway_observability: RuntimeGatewayObservabilityConfig::default(),
     })
     .expect("kiro local rewrite proxy should start");
 
@@ -1537,16 +1360,6 @@ fn kiro_chat_completions_route_rejects_temperature() {
         presidio_redaction_enabled: false,
         model_context_window_tokens: None,
         preferred_listen_addr: Some("127.0.0.1:0"),
-        gateway_auth_token_hash: None,
-        gateway_admin_tokens: Vec::new(),
-        gateway_sso: RuntimeGatewaySsoConfig::default(),
-        gateway_state_store: RuntimeGatewayStateStore::file(&paths),
-        gateway_virtual_keys: Vec::new(),
-        gateway_route_aliases: Vec::new(),
-        gateway_guardrails: runtime_proxy_crate::RuntimeGatewayGuardrailConfig::default(),
-        gateway_guardrail_webhook: RuntimeGatewayGuardrailWebhookConfig::default(),
-        gateway_call_id_header: None,
-        gateway_observability: RuntimeGatewayObservabilityConfig::default(),
     })
     .expect("kiro local rewrite proxy should start");
 
@@ -1613,16 +1426,6 @@ fn kiro_chat_completions_route_rejects_top_p() {
         presidio_redaction_enabled: false,
         model_context_window_tokens: None,
         preferred_listen_addr: Some("127.0.0.1:0"),
-        gateway_auth_token_hash: None,
-        gateway_admin_tokens: Vec::new(),
-        gateway_sso: RuntimeGatewaySsoConfig::default(),
-        gateway_state_store: RuntimeGatewayStateStore::file(&paths),
-        gateway_virtual_keys: Vec::new(),
-        gateway_route_aliases: Vec::new(),
-        gateway_guardrails: runtime_proxy_crate::RuntimeGatewayGuardrailConfig::default(),
-        gateway_guardrail_webhook: RuntimeGatewayGuardrailWebhookConfig::default(),
-        gateway_call_id_header: None,
-        gateway_observability: RuntimeGatewayObservabilityConfig::default(),
     })
     .expect("kiro local rewrite proxy should start");
 
@@ -1689,16 +1492,6 @@ fn kiro_chat_completions_route_rejects_presence_penalty() {
         presidio_redaction_enabled: false,
         model_context_window_tokens: None,
         preferred_listen_addr: Some("127.0.0.1:0"),
-        gateway_auth_token_hash: None,
-        gateway_admin_tokens: Vec::new(),
-        gateway_sso: RuntimeGatewaySsoConfig::default(),
-        gateway_state_store: RuntimeGatewayStateStore::file(&paths),
-        gateway_virtual_keys: Vec::new(),
-        gateway_route_aliases: Vec::new(),
-        gateway_guardrails: runtime_proxy_crate::RuntimeGatewayGuardrailConfig::default(),
-        gateway_guardrail_webhook: RuntimeGatewayGuardrailWebhookConfig::default(),
-        gateway_call_id_header: None,
-        gateway_observability: RuntimeGatewayObservabilityConfig::default(),
     })
     .expect("kiro local rewrite proxy should start");
 
@@ -1765,16 +1558,6 @@ fn kiro_chat_completions_route_rejects_frequency_penalty() {
         presidio_redaction_enabled: false,
         model_context_window_tokens: None,
         preferred_listen_addr: Some("127.0.0.1:0"),
-        gateway_auth_token_hash: None,
-        gateway_admin_tokens: Vec::new(),
-        gateway_sso: RuntimeGatewaySsoConfig::default(),
-        gateway_state_store: RuntimeGatewayStateStore::file(&paths),
-        gateway_virtual_keys: Vec::new(),
-        gateway_route_aliases: Vec::new(),
-        gateway_guardrails: runtime_proxy_crate::RuntimeGatewayGuardrailConfig::default(),
-        gateway_guardrail_webhook: RuntimeGatewayGuardrailWebhookConfig::default(),
-        gateway_call_id_header: None,
-        gateway_observability: RuntimeGatewayObservabilityConfig::default(),
     })
     .expect("kiro local rewrite proxy should start");
 
@@ -1841,16 +1624,6 @@ fn kiro_chat_completions_route_rejects_seed() {
         presidio_redaction_enabled: false,
         model_context_window_tokens: None,
         preferred_listen_addr: Some("127.0.0.1:0"),
-        gateway_auth_token_hash: None,
-        gateway_admin_tokens: Vec::new(),
-        gateway_sso: RuntimeGatewaySsoConfig::default(),
-        gateway_state_store: RuntimeGatewayStateStore::file(&paths),
-        gateway_virtual_keys: Vec::new(),
-        gateway_route_aliases: Vec::new(),
-        gateway_guardrails: runtime_proxy_crate::RuntimeGatewayGuardrailConfig::default(),
-        gateway_guardrail_webhook: RuntimeGatewayGuardrailWebhookConfig::default(),
-        gateway_call_id_header: None,
-        gateway_observability: RuntimeGatewayObservabilityConfig::default(),
     })
     .expect("kiro local rewrite proxy should start");
 
@@ -1917,16 +1690,6 @@ fn kiro_chat_completions_route_tolerates_parallel_tool_calls_true() {
         presidio_redaction_enabled: false,
         model_context_window_tokens: None,
         preferred_listen_addr: Some("127.0.0.1:0"),
-        gateway_auth_token_hash: None,
-        gateway_admin_tokens: Vec::new(),
-        gateway_sso: RuntimeGatewaySsoConfig::default(),
-        gateway_state_store: RuntimeGatewayStateStore::file(&paths),
-        gateway_virtual_keys: Vec::new(),
-        gateway_route_aliases: Vec::new(),
-        gateway_guardrails: runtime_proxy_crate::RuntimeGatewayGuardrailConfig::default(),
-        gateway_guardrail_webhook: RuntimeGatewayGuardrailWebhookConfig::default(),
-        gateway_call_id_header: None,
-        gateway_observability: RuntimeGatewayObservabilityConfig::default(),
     })
     .expect("kiro local rewrite proxy should start");
 
@@ -1992,16 +1755,6 @@ fn kiro_chat_completions_route_ignores_user_metadata() {
         presidio_redaction_enabled: false,
         model_context_window_tokens: None,
         preferred_listen_addr: Some("127.0.0.1:0"),
-        gateway_auth_token_hash: None,
-        gateway_admin_tokens: Vec::new(),
-        gateway_sso: RuntimeGatewaySsoConfig::default(),
-        gateway_state_store: RuntimeGatewayStateStore::file(&paths),
-        gateway_virtual_keys: Vec::new(),
-        gateway_route_aliases: Vec::new(),
-        gateway_guardrails: runtime_proxy_crate::RuntimeGatewayGuardrailConfig::default(),
-        gateway_guardrail_webhook: RuntimeGatewayGuardrailWebhookConfig::default(),
-        gateway_call_id_header: None,
-        gateway_observability: RuntimeGatewayObservabilityConfig::default(),
     })
     .expect("kiro local rewrite proxy should start");
 
@@ -2067,16 +1820,6 @@ fn kiro_chat_completions_route_rejects_token_limit_controls() {
         presidio_redaction_enabled: false,
         model_context_window_tokens: None,
         preferred_listen_addr: Some("127.0.0.1:0"),
-        gateway_auth_token_hash: None,
-        gateway_admin_tokens: Vec::new(),
-        gateway_sso: RuntimeGatewaySsoConfig::default(),
-        gateway_state_store: RuntimeGatewayStateStore::file(&paths),
-        gateway_virtual_keys: Vec::new(),
-        gateway_route_aliases: Vec::new(),
-        gateway_guardrails: runtime_proxy_crate::RuntimeGatewayGuardrailConfig::default(),
-        gateway_guardrail_webhook: RuntimeGatewayGuardrailWebhookConfig::default(),
-        gateway_call_id_header: None,
-        gateway_observability: RuntimeGatewayObservabilityConfig::default(),
     })
     .expect("kiro local rewrite proxy should start");
 
@@ -2142,16 +1885,6 @@ fn kiro_chat_completions_route_rejects_invalid_token_limit_controls() {
         presidio_redaction_enabled: false,
         model_context_window_tokens: None,
         preferred_listen_addr: Some("127.0.0.1:0"),
-        gateway_auth_token_hash: None,
-        gateway_admin_tokens: Vec::new(),
-        gateway_sso: RuntimeGatewaySsoConfig::default(),
-        gateway_state_store: RuntimeGatewayStateStore::file(&paths),
-        gateway_virtual_keys: Vec::new(),
-        gateway_route_aliases: Vec::new(),
-        gateway_guardrails: runtime_proxy_crate::RuntimeGatewayGuardrailConfig::default(),
-        gateway_guardrail_webhook: RuntimeGatewayGuardrailWebhookConfig::default(),
-        gateway_call_id_header: None,
-        gateway_observability: RuntimeGatewayObservabilityConfig::default(),
     })
     .expect("kiro local rewrite proxy should start");
 
@@ -2218,16 +1951,6 @@ fn kiro_chat_completions_stream_translates_to_chat_chunks() {
         presidio_redaction_enabled: false,
         model_context_window_tokens: None,
         preferred_listen_addr: Some("127.0.0.1:0"),
-        gateway_auth_token_hash: None,
-        gateway_admin_tokens: Vec::new(),
-        gateway_sso: RuntimeGatewaySsoConfig::default(),
-        gateway_state_store: RuntimeGatewayStateStore::file(&paths),
-        gateway_virtual_keys: Vec::new(),
-        gateway_route_aliases: Vec::new(),
-        gateway_guardrails: runtime_proxy_crate::RuntimeGatewayGuardrailConfig::default(),
-        gateway_guardrail_webhook: RuntimeGatewayGuardrailWebhookConfig::default(),
-        gateway_call_id_header: None,
-        gateway_observability: RuntimeGatewayObservabilityConfig::default(),
     })
     .expect("kiro local rewrite proxy should start");
 
@@ -2300,16 +2023,6 @@ fn kiro_chat_completions_stream_emits_non_executable_tool_activity() {
         presidio_redaction_enabled: false,
         model_context_window_tokens: None,
         preferred_listen_addr: Some("127.0.0.1:0"),
-        gateway_auth_token_hash: None,
-        gateway_admin_tokens: Vec::new(),
-        gateway_sso: RuntimeGatewaySsoConfig::default(),
-        gateway_state_store: RuntimeGatewayStateStore::file(&paths),
-        gateway_virtual_keys: Vec::new(),
-        gateway_route_aliases: Vec::new(),
-        gateway_guardrails: runtime_proxy_crate::RuntimeGatewayGuardrailConfig::default(),
-        gateway_guardrail_webhook: RuntimeGatewayGuardrailWebhookConfig::default(),
-        gateway_call_id_header: None,
-        gateway_observability: RuntimeGatewayObservabilityConfig::default(),
     })
     .expect("kiro local rewrite proxy should start");
 
@@ -2384,16 +2097,6 @@ fn kiro_streaming_emits_bounded_non_executable_activity_progress() {
         presidio_redaction_enabled: false,
         model_context_window_tokens: None,
         preferred_listen_addr: Some("127.0.0.1:0"),
-        gateway_auth_token_hash: None,
-        gateway_admin_tokens: Vec::new(),
-        gateway_sso: RuntimeGatewaySsoConfig::default(),
-        gateway_state_store: RuntimeGatewayStateStore::file(&paths),
-        gateway_virtual_keys: Vec::new(),
-        gateway_route_aliases: Vec::new(),
-        gateway_guardrails: runtime_proxy_crate::RuntimeGatewayGuardrailConfig::default(),
-        gateway_guardrail_webhook: RuntimeGatewayGuardrailWebhookConfig::default(),
-        gateway_call_id_header: None,
-        gateway_observability: RuntimeGatewayObservabilityConfig::default(),
     })
     .expect("kiro local rewrite proxy should start");
 
@@ -2446,16 +2149,6 @@ fn copilot_transport_uses_copilot_api_headers_for_chat_completions() {
         presidio_redaction_enabled: false,
         model_context_window_tokens: None,
         preferred_listen_addr: Some("127.0.0.1:0"),
-        gateway_auth_token_hash: None,
-        gateway_admin_tokens: Vec::new(),
-        gateway_sso: RuntimeGatewaySsoConfig::default(),
-        gateway_state_store: RuntimeGatewayStateStore::file(&paths),
-        gateway_virtual_keys: Vec::new(),
-        gateway_route_aliases: Vec::new(),
-        gateway_guardrails: runtime_proxy_crate::RuntimeGatewayGuardrailConfig::default(),
-        gateway_guardrail_webhook: RuntimeGatewayGuardrailWebhookConfig::default(),
-        gateway_call_id_header: None,
-        gateway_observability: RuntimeGatewayObservabilityConfig::default(),
     })
     .expect("copilot local rewrite proxy should start");
 
@@ -2542,16 +2235,6 @@ fn openai_compatible_transport_preserves_trace_context_for_chat_completions() {
         presidio_redaction_enabled: false,
         model_context_window_tokens: None,
         preferred_listen_addr: Some("127.0.0.1:0"),
-        gateway_auth_token_hash: None,
-        gateway_admin_tokens: Vec::new(),
-        gateway_sso: RuntimeGatewaySsoConfig::default(),
-        gateway_state_store: RuntimeGatewayStateStore::file(&paths),
-        gateway_virtual_keys: Vec::new(),
-        gateway_route_aliases: Vec::new(),
-        gateway_guardrails: runtime_proxy_crate::RuntimeGatewayGuardrailConfig::default(),
-        gateway_guardrail_webhook: RuntimeGatewayGuardrailWebhookConfig::default(),
-        gateway_call_id_header: None,
-        gateway_observability: RuntimeGatewayObservabilityConfig::default(),
     })
     .expect("OpenAI-compatible local rewrite proxy should start");
 
@@ -2617,16 +2300,6 @@ fn copilot_chat_completions_strip_encrypted_reasoning_content() {
         presidio_redaction_enabled: false,
         model_context_window_tokens: None,
         preferred_listen_addr: Some("127.0.0.1:0"),
-        gateway_auth_token_hash: None,
-        gateway_admin_tokens: Vec::new(),
-        gateway_sso: RuntimeGatewaySsoConfig::default(),
-        gateway_state_store: RuntimeGatewayStateStore::file(&paths),
-        gateway_virtual_keys: Vec::new(),
-        gateway_route_aliases: Vec::new(),
-        gateway_guardrails: runtime_proxy_crate::RuntimeGatewayGuardrailConfig::default(),
-        gateway_guardrail_webhook: RuntimeGatewayGuardrailWebhookConfig::default(),
-        gateway_call_id_header: None,
-        gateway_observability: RuntimeGatewayObservabilityConfig::default(),
     })
     .expect("copilot local rewrite proxy should start");
 
@@ -2694,16 +2367,6 @@ fn copilot_responses_route_preserves_responses_endpoint() {
         presidio_redaction_enabled: false,
         model_context_window_tokens: None,
         preferred_listen_addr: Some("127.0.0.1:0"),
-        gateway_auth_token_hash: None,
-        gateway_admin_tokens: Vec::new(),
-        gateway_sso: RuntimeGatewaySsoConfig::default(),
-        gateway_state_store: RuntimeGatewayStateStore::file(&paths),
-        gateway_virtual_keys: Vec::new(),
-        gateway_route_aliases: Vec::new(),
-        gateway_guardrails: runtime_proxy_crate::RuntimeGatewayGuardrailConfig::default(),
-        gateway_guardrail_webhook: RuntimeGatewayGuardrailWebhookConfig::default(),
-        gateway_call_id_header: None,
-        gateway_observability: RuntimeGatewayObservabilityConfig::default(),
     })
     .expect("copilot local rewrite proxy should start");
 
@@ -2786,16 +2449,6 @@ fn copilot_responses_route_preserves_codex_tool_surface() {
         presidio_redaction_enabled: false,
         model_context_window_tokens: None,
         preferred_listen_addr: Some("127.0.0.1:0"),
-        gateway_auth_token_hash: None,
-        gateway_admin_tokens: Vec::new(),
-        gateway_sso: RuntimeGatewaySsoConfig::default(),
-        gateway_state_store: RuntimeGatewayStateStore::file(&paths),
-        gateway_virtual_keys: Vec::new(),
-        gateway_route_aliases: Vec::new(),
-        gateway_guardrails: runtime_proxy_crate::RuntimeGatewayGuardrailConfig::default(),
-        gateway_guardrail_webhook: RuntimeGatewayGuardrailWebhookConfig::default(),
-        gateway_call_id_header: None,
-        gateway_observability: RuntimeGatewayObservabilityConfig::default(),
     })
     .expect("copilot local rewrite proxy should start");
 
@@ -2914,16 +2567,6 @@ fn copilot_responses_compact_route_forwards_upstream() {
         presidio_redaction_enabled: false,
         model_context_window_tokens: None,
         preferred_listen_addr: Some("127.0.0.1:0"),
-        gateway_auth_token_hash: None,
-        gateway_admin_tokens: Vec::new(),
-        gateway_sso: RuntimeGatewaySsoConfig::default(),
-        gateway_state_store: RuntimeGatewayStateStore::file(&paths),
-        gateway_virtual_keys: Vec::new(),
-        gateway_route_aliases: Vec::new(),
-        gateway_guardrails: runtime_proxy_crate::RuntimeGatewayGuardrailConfig::default(),
-        gateway_guardrail_webhook: RuntimeGatewayGuardrailWebhookConfig::default(),
-        gateway_call_id_header: None,
-        gateway_observability: RuntimeGatewayObservabilityConfig::default(),
     })
     .expect("copilot local rewrite proxy should start");
 
@@ -2955,630 +2598,4 @@ fn copilot_responses_compact_route_forwards_upstream() {
     .unwrap();
     assert_eq!(body["model"], "gpt-5.3-codex");
     assert_eq!(body["input"][0]["content"][0]["text"], "compact this");
-}
-
-#[test]
-fn gateway_admin_viewer_token_can_read_but_not_mutate_keys() {
-    let root = temp_root("gateway-admin-rbac");
-    let paths = app_paths_for_root(root);
-    let upstream = TestUpstream::start_n(0);
-    let admin_token = "admin-token";
-    let viewer_token = "viewer-token";
-    let proxy = start_runtime_local_rewrite_proxy(RuntimeLocalRewriteProxyStartOptions {
-        paths: &paths,
-        state: &AppState::default(),
-        upstream_base_url: format!("http://{}/v1", upstream.addr),
-        provider: RuntimeLocalRewriteProviderOptions::OpenAiResponses {
-            api_keys: vec!["upstream-key".to_string()],
-        },
-        upstream_no_proxy: false,
-        smart_context_enabled: false,
-        presidio_redaction_enabled: false,
-        model_context_window_tokens: None,
-        preferred_listen_addr: Some("127.0.0.1:0"),
-        gateway_auth_token_hash: None,
-        gateway_admin_tokens: vec![
-            RuntimeGatewayAdminToken {
-                name: "admin".to_string(),
-                token_hash: runtime_proxy_crate::LocalBridgeBearerTokenHash::from_token(
-                    admin_token,
-                ),
-                role: RuntimeGatewayAdminRole::Admin,
-                allowed_key_prefixes: Vec::new(),
-                tenant_id: None,
-                team_id: None,
-                project_id: None,
-                user_id: None,
-                budget_id: None,
-            },
-            RuntimeGatewayAdminToken {
-                name: "viewer".to_string(),
-                token_hash: runtime_proxy_crate::LocalBridgeBearerTokenHash::from_token(
-                    viewer_token,
-                ),
-                role: RuntimeGatewayAdminRole::Viewer,
-                allowed_key_prefixes: Vec::new(),
-                tenant_id: None,
-                team_id: None,
-                project_id: None,
-                user_id: None,
-                budget_id: None,
-            },
-        ],
-        gateway_sso: RuntimeGatewaySsoConfig::default(),
-        gateway_state_store: RuntimeGatewayStateStore::file(&paths),
-        gateway_virtual_keys: Vec::new(),
-        gateway_route_aliases: Vec::new(),
-        gateway_guardrails: runtime_proxy_crate::RuntimeGatewayGuardrailConfig::default(),
-        gateway_guardrail_webhook: RuntimeGatewayGuardrailWebhookConfig::default(),
-        gateway_call_id_header: Some("x-prodex-call-id".to_string()),
-        gateway_observability: RuntimeGatewayObservabilityConfig::default(),
-    })
-    .expect("gateway proxy should start");
-    let client = reqwest::blocking::Client::new();
-    let keys_url = format!("http://{}/v1/prodex/gateway/keys", proxy.listen_addr);
-    let key_url = format!("{keys_url}/team-rbac");
-
-    let admin_data_plane = client
-        .post(format!("http://{}/v1/responses", proxy.listen_addr))
-        .bearer_auth(admin_token)
-        .json(&serde_json::json!({"model": "gpt-5.4", "input": "admin token"}))
-        .send()
-        .expect("admin token data-plane request should be sent");
-    assert_eq!(admin_data_plane.status().as_u16(), 401);
-
-    let viewed = client
-        .get(&keys_url)
-        .bearer_auth(viewer_token)
-        .send()
-        .expect("viewer list keys request should be sent");
-    assert_eq!(viewed.status().as_u16(), 200);
-    let viewer_create = client
-        .idempotent_post(&keys_url)
-        .bearer_auth(viewer_token)
-        .json(&serde_json::json!({"name": "team-rbac"}))
-        .send()
-        .expect("viewer create key request should be sent");
-    assert_eq!(viewer_create.status().as_u16(), 403);
-    assert_eq!(
-        viewer_create.json::<serde_json::Value>().unwrap()["error"]["code"],
-        "gateway_admin_role_forbidden"
-    );
-
-    let created = client
-        .idempotent_post(&keys_url)
-        .bearer_auth(admin_token)
-        .json(&serde_json::json!({"name": "team-rbac"}))
-        .send()
-        .expect("admin create key request should be sent");
-    assert_eq!(created.status().as_u16(), 201);
-
-    let viewer_patch = client
-        .idempotent_patch(&key_url)
-        .bearer_auth(viewer_token)
-        .json(&serde_json::json!({"disabled": true}))
-        .send()
-        .expect("viewer patch key request should be sent");
-    assert_eq!(viewer_patch.status().as_u16(), 403);
-
-    let viewer_delete = client
-        .idempotent_delete(&key_url)
-        .bearer_auth(viewer_token)
-        .send()
-        .expect("viewer delete key request should be sent");
-    assert_eq!(viewer_delete.status().as_u16(), 403);
-
-    let metrics = client
-        .get(format!(
-            "http://{}/v1/prodex/gateway/metrics",
-            proxy.listen_addr
-        ))
-        .bearer_auth(viewer_token)
-        .send()
-        .expect("viewer metrics request should be sent");
-    assert_eq!(metrics.status().as_u16(), 200);
-}
-
-#[test]
-fn gateway_guardrail_pii_redaction_rewrites_request_before_upstream() {
-    let root = temp_root("gateway-pii-redaction");
-    let paths = app_paths_for_root(root);
-    let upstream = TestUpstream::start_n(1);
-    let gateway_token = "gateway-token";
-    let proxy = start_runtime_local_rewrite_proxy(RuntimeLocalRewriteProxyStartOptions {
-        paths: &paths,
-        state: &AppState::default(),
-        upstream_base_url: format!("http://{}/v1", upstream.addr),
-        provider: RuntimeLocalRewriteProviderOptions::OpenAiResponses {
-            api_keys: vec!["upstream-key".to_string()],
-        },
-        upstream_no_proxy: false,
-        smart_context_enabled: false,
-        presidio_redaction_enabled: false,
-        model_context_window_tokens: None,
-        preferred_listen_addr: Some("127.0.0.1:0"),
-        gateway_auth_token_hash: Some(runtime_proxy_crate::LocalBridgeBearerTokenHash::from_token(
-            gateway_token,
-        )),
-        gateway_admin_tokens: Vec::new(),
-        gateway_sso: RuntimeGatewaySsoConfig::default(),
-        gateway_state_store: RuntimeGatewayStateStore::file(&paths),
-        gateway_virtual_keys: Vec::new(),
-        gateway_route_aliases: Vec::new(),
-        gateway_guardrails: runtime_proxy_crate::RuntimeGatewayGuardrailConfig {
-            pii_redaction: true,
-            ..runtime_proxy_crate::RuntimeGatewayGuardrailConfig::default()
-        },
-        gateway_guardrail_webhook: RuntimeGatewayGuardrailWebhookConfig::default(),
-        gateway_call_id_header: Some("x-prodex-call-id".to_string()),
-        gateway_observability: RuntimeGatewayObservabilityConfig::default(),
-    })
-    .expect("gateway proxy should start");
-    let response = reqwest::blocking::Client::new()
-        .post(format!("http://{}/v1/responses", proxy.listen_addr))
-        .bearer_auth(gateway_token)
-        .json(&serde_json::json!({
-            "model": "gpt-5.4",
-            "input": "email alice@example.com card 4111-1111-1111-1111"
-        }))
-        .send()
-        .expect("gateway request should be sent");
-    assert_eq!(response.status().as_u16(), 200);
-    let upstream_body = upstream
-        .body_rx
-        .recv_timeout(Duration::from_secs(2))
-        .expect("upstream should receive redacted request");
-    let upstream_body = String::from_utf8(upstream_body).expect("upstream body should be utf8");
-    assert!(upstream_body.contains("<redacted>"));
-    assert!(!upstream_body.contains("alice@example.com"));
-    assert!(!upstream_body.contains("4111-1111-1111-1111"));
-}
-
-#[test]
-fn gateway_request_guardrail_blocked_keywords_are_audited_without_token_leakage() {
-    let root = temp_root("gateway-request-guardrail-audit");
-    let audit_dir = root.join("audit");
-    std::fs::create_dir_all(&audit_dir).expect("audit dir should be created");
-    let _audit_env = crate::TestEnvVarGuard::set(
-        "PRODEX_AUDIT_LOG_DIR",
-        audit_dir.to_str().expect("audit dir should be utf8"),
-    );
-    let paths = app_paths_for_root(root);
-    let upstream = TestUpstream::start_n(0);
-    let gateway_token = "guardrail-token";
-    let proxy = start_runtime_local_rewrite_proxy(RuntimeLocalRewriteProxyStartOptions {
-        paths: &paths,
-        state: &AppState::default(),
-        upstream_base_url: format!("http://{}/v1", upstream.addr),
-        provider: RuntimeLocalRewriteProviderOptions::OpenAiResponses {
-            api_keys: vec!["upstream-key".to_string()],
-        },
-        upstream_no_proxy: false,
-        smart_context_enabled: false,
-        presidio_redaction_enabled: false,
-        model_context_window_tokens: None,
-        preferred_listen_addr: Some("127.0.0.1:0"),
-        gateway_auth_token_hash: Some(runtime_proxy_crate::LocalBridgeBearerTokenHash::from_token(
-            gateway_token,
-        )),
-        gateway_admin_tokens: Vec::new(),
-        gateway_sso: RuntimeGatewaySsoConfig::default(),
-        gateway_state_store: RuntimeGatewayStateStore::file(&paths),
-        gateway_virtual_keys: Vec::new(),
-        gateway_route_aliases: Vec::new(),
-        gateway_guardrails: runtime_proxy_crate::RuntimeGatewayGuardrailConfig {
-            blocked_keywords: vec!["do-not-send".to_string()],
-            blocked_output_keywords: Vec::new(),
-            allowed_models: Vec::new(),
-            prompt_injection_detection: false,
-            pii_redaction: false,
-        },
-        gateway_guardrail_webhook: RuntimeGatewayGuardrailWebhookConfig::default(),
-        gateway_call_id_header: Some("x-prodex-call-id".to_string()),
-        gateway_observability: RuntimeGatewayObservabilityConfig::default(),
-    })
-    .expect("gateway proxy should start");
-
-    let client = reqwest::blocking::Client::new();
-    let denied = client
-        .post(format!("http://{}/v1/responses", proxy.listen_addr))
-        .bearer_auth(gateway_token)
-        .json(&serde_json::json!({"model":"gpt-5","input":"please do-not-send this"}))
-        .send()
-        .expect("guardrail-denied request should be sent");
-    assert_eq!(denied.status().as_u16(), 403);
-    let denied: serde_json::Value = denied.json().expect("denied response should be json");
-    assert_eq!(denied["error"]["code"], "blocked_keyword");
-
-    let audit_log = wait_for_text_file(&audit_dir.join("prodex-audit.log"));
-    assert!(audit_log.contains(r#""component":"gateway_data_plane""#));
-    assert!(audit_log.contains(r#""action":"guardrail_blocked""#));
-    assert!(audit_log.contains(r#""reason":"blocked_keyword""#));
-    assert!(audit_log.contains(r#""path":"/v1/responses""#));
-    assert!(!audit_log.contains(gateway_token));
-    assert!(!audit_log.contains("do-not-send"));
-
-    let runtime_log = crate::read_runtime_proxy_test_log(&proxy.log_path);
-    assert!(runtime_log.contains("gateway_guardrail_blocked"));
-    assert!(runtime_log.contains("matched_value_redacted"));
-    assert!(!runtime_log.contains(gateway_token));
-    assert!(!runtime_log.contains("do-not-send"));
-}
-
-#[test]
-fn gateway_response_guardrail_blocked_output_is_audited_without_token_or_value_leakage() {
-    let root = temp_root("gateway-response-guardrail-audit");
-    let audit_dir = root.join("audit");
-    std::fs::create_dir_all(&audit_dir).expect("audit dir should be created");
-    let _audit_env = crate::TestEnvVarGuard::set(
-        "PRODEX_AUDIT_LOG_DIR",
-        audit_dir.to_str().expect("audit dir should be utf8"),
-    );
-    let paths = app_paths_for_root(root);
-    let upstream = TestUpstream::start_with_response_body(
-        r#"{"id":"resp_test","output":[{"content":"do-not-emit-sensitive-marker"}],"usage":{"input_tokens":7,"output_tokens":11,"total_tokens":18}}"#,
-    );
-    let gateway_token = "response-guardrail-token";
-    let proxy = start_runtime_local_rewrite_proxy(RuntimeLocalRewriteProxyStartOptions {
-        paths: &paths,
-        state: &AppState::default(),
-        upstream_base_url: format!("http://{}/v1", upstream.addr),
-        provider: RuntimeLocalRewriteProviderOptions::OpenAiResponses {
-            api_keys: vec!["upstream-key".to_string()],
-        },
-        upstream_no_proxy: false,
-        smart_context_enabled: false,
-        presidio_redaction_enabled: false,
-        model_context_window_tokens: None,
-        preferred_listen_addr: Some("127.0.0.1:0"),
-        gateway_auth_token_hash: Some(runtime_proxy_crate::LocalBridgeBearerTokenHash::from_token(
-            gateway_token,
-        )),
-        gateway_admin_tokens: Vec::new(),
-        gateway_sso: RuntimeGatewaySsoConfig::default(),
-        gateway_state_store: RuntimeGatewayStateStore::file(&paths),
-        gateway_virtual_keys: Vec::new(),
-        gateway_route_aliases: Vec::new(),
-        gateway_guardrails: runtime_proxy_crate::RuntimeGatewayGuardrailConfig {
-            blocked_keywords: Vec::new(),
-            blocked_output_keywords: vec!["do-not-emit-sensitive-marker".to_string()],
-            allowed_models: Vec::new(),
-            prompt_injection_detection: false,
-            pii_redaction: false,
-        },
-        gateway_guardrail_webhook: RuntimeGatewayGuardrailWebhookConfig::default(),
-        gateway_call_id_header: Some("x-prodex-call-id".to_string()),
-        gateway_observability: RuntimeGatewayObservabilityConfig::default(),
-    })
-    .expect("gateway proxy should start");
-
-    let denied = reqwest::blocking::Client::new()
-        .post(format!("http://{}/v1/responses", proxy.listen_addr))
-        .bearer_auth(gateway_token)
-        .json(&serde_json::json!({"model":"gpt-5","input":"hello"}))
-        .send()
-        .expect("response-guardrail request should be sent");
-    assert_eq!(denied.status().as_u16(), 403);
-    let denied: serde_json::Value = denied.json().expect("denied response should be json");
-    assert_eq!(denied["error"]["code"], "policy_violation");
-
-    let audit_log = wait_for_text_file(&audit_dir.join("prodex-audit.log"));
-    assert!(audit_log.contains(r#""component":"gateway_data_plane""#));
-    assert!(audit_log.contains(r#""action":"response_guardrail_blocked""#));
-    assert!(audit_log.contains(r#""reason":"blocked_output_keyword""#));
-    assert!(!audit_log.contains(gateway_token));
-    assert!(!audit_log.contains("do-not-emit-sensitive-marker"));
-
-    let runtime_log = crate::read_runtime_proxy_test_log(&proxy.log_path);
-    assert!(runtime_log.contains("gateway_guardrail_response_blocked"));
-    assert!(runtime_log.contains("matched_value_redacted"));
-    assert!(!runtime_log.contains(gateway_token));
-    assert!(!runtime_log.contains("do-not-emit-sensitive-marker"));
-}
-
-#[test]
-fn gateway_streaming_response_guardrail_blocked_output_is_audited_without_value_leakage() {
-    let root = temp_root("gateway-stream-response-guardrail-audit");
-    let audit_dir = root.join("audit");
-    std::fs::create_dir_all(&audit_dir).expect("audit dir should be created");
-    let _audit_env = crate::TestEnvVarGuard::set(
-        "PRODEX_AUDIT_LOG_DIR",
-        audit_dir.to_str().expect("audit dir should be utf8"),
-    );
-    let paths = app_paths_for_root(root);
-    let upstream = TestUpstream::start_with_response(
-        "text/event-stream; charset=utf-8",
-        concat!(
-            "data: {\"type\":\"response.output_text.delta\",\"delta\":\"safe chunk\"}\n\n",
-            "data: {\"type\":\"response.output_text.delta\",\"delta\":\"do-not-stream-sensitive-marker\"}\n\n",
-            "data: [DONE]\n\n",
-        ),
-    );
-    let gateway_token = "stream-guardrail-token";
-    let proxy = start_runtime_local_rewrite_proxy(RuntimeLocalRewriteProxyStartOptions {
-        paths: &paths,
-        state: &AppState::default(),
-        upstream_base_url: format!("http://{}/v1", upstream.addr),
-        provider: RuntimeLocalRewriteProviderOptions::OpenAiResponses {
-            api_keys: vec!["upstream-key".to_string()],
-        },
-        upstream_no_proxy: false,
-        smart_context_enabled: false,
-        presidio_redaction_enabled: false,
-        model_context_window_tokens: None,
-        preferred_listen_addr: Some("127.0.0.1:0"),
-        gateway_auth_token_hash: Some(runtime_proxy_crate::LocalBridgeBearerTokenHash::from_token(
-            gateway_token,
-        )),
-        gateway_admin_tokens: Vec::new(),
-        gateway_virtual_keys: Vec::new(),
-        gateway_route_aliases: Vec::new(),
-        gateway_guardrails: runtime_proxy_crate::RuntimeGatewayGuardrailConfig {
-            blocked_keywords: Vec::new(),
-            blocked_output_keywords: vec!["do-not-stream-sensitive-marker".to_string()],
-            allowed_models: Vec::new(),
-            prompt_injection_detection: false,
-            pii_redaction: false,
-        },
-        gateway_guardrail_webhook: RuntimeGatewayGuardrailWebhookConfig::default(),
-        gateway_observability: RuntimeGatewayObservabilityConfig::default(),
-        gateway_state_store: RuntimeGatewayStateStore::file(&paths),
-        gateway_sso: RuntimeGatewaySsoConfig::default(),
-        gateway_call_id_header: Some("x-prodex-call-id".to_string()),
-    })
-    .expect("proxy should start");
-
-    let client = reqwest::blocking::Client::new();
-    let response = client
-        .post(format!("http://{}/v1/responses", proxy.listen_addr))
-        .bearer_auth(gateway_token)
-        .json(&serde_json::json!({
-            "model": "gpt-5",
-            "input": "hello",
-            "stream": true,
-        }))
-        .send()
-        .expect("streaming request should be sent");
-    assert_eq!(response.status().as_u16(), 403);
-    let body = response.text().expect("stream body should be readable");
-    assert!(body.contains(r#""code":"blocked_output_keyword""#));
-    assert!(!body.contains("do-not-stream-sensitive-marker"));
-
-    let audit_log = wait_for_text_file(&audit_dir.join("prodex-audit.log"));
-    assert!(audit_log.contains(r#""component":"gateway_data_plane""#));
-    assert!(audit_log.contains(r#""action":"response_guardrail_blocked""#));
-    assert!(audit_log.contains(r#""reason":"blocked_output_keyword""#));
-    assert!(audit_log.contains(r#""commit_state":"precommit""#));
-    assert!(!audit_log.contains(gateway_token));
-    assert!(!audit_log.contains("do-not-stream-sensitive-marker"));
-
-    let runtime_log = crate::read_runtime_proxy_test_log(&proxy.log_path);
-    assert!(runtime_log.contains("gateway_guardrail_stream_blocked"));
-    assert!(runtime_log.contains("matched_value_redacted"));
-    assert!(!runtime_log.contains(gateway_token));
-    assert!(!runtime_log.contains("do-not-stream-sensitive-marker"));
-}
-
-#[test]
-fn gateway_pre_guardrail_webhook_denial_is_audited_without_secret_leakage() {
-    let root = temp_root("gateway-pre-webhook-guardrail-audit");
-    let audit_dir = root.join("audit");
-    std::fs::create_dir_all(&audit_dir).expect("audit dir should be created");
-    let _audit_env = crate::TestEnvVarGuard::set(
-        "PRODEX_AUDIT_LOG_DIR",
-        audit_dir.to_str().expect("audit dir should be utf8"),
-    );
-    let paths = app_paths_for_root(root);
-    let upstream = TestUpstream::start_n(0);
-    let webhook = TestGuardrailWebhook::start_deny("tenant_policy_denied");
-    let gateway_token = "pre-webhook-gateway-token";
-    let webhook_token = "webhook-secret-token";
-    let proxy = start_runtime_local_rewrite_proxy(RuntimeLocalRewriteProxyStartOptions {
-        paths: &paths,
-        state: &AppState::default(),
-        upstream_base_url: format!("http://{}/v1", upstream.addr),
-        provider: RuntimeLocalRewriteProviderOptions::OpenAiResponses {
-            api_keys: vec!["upstream-key".to_string()],
-        },
-        upstream_no_proxy: false,
-        smart_context_enabled: false,
-        presidio_redaction_enabled: false,
-        model_context_window_tokens: None,
-        preferred_listen_addr: Some("127.0.0.1:0"),
-        gateway_auth_token_hash: Some(runtime_proxy_crate::LocalBridgeBearerTokenHash::from_token(
-            gateway_token,
-        )),
-        gateway_admin_tokens: Vec::new(),
-        gateway_virtual_keys: Vec::new(),
-        gateway_route_aliases: Vec::new(),
-        gateway_guardrails: runtime_proxy_crate::RuntimeGatewayGuardrailConfig::default(),
-        gateway_guardrail_webhook: RuntimeGatewayGuardrailWebhookConfig {
-            url: Some(format!("http://{}", webhook.addr)),
-            phases: vec!["pre".to_string()],
-            bearer_token: Some(runtime_gateway_test_secret(webhook_token)),
-            fail_closed: true,
-        },
-        gateway_observability: RuntimeGatewayObservabilityConfig::default(),
-        gateway_state_store: RuntimeGatewayStateStore::file(&paths),
-        gateway_sso: RuntimeGatewaySsoConfig::default(),
-        gateway_call_id_header: Some("x-prodex-call-id".to_string()),
-    })
-    .expect("gateway proxy should start");
-
-    let denied = reqwest::blocking::Client::new()
-        .post(format!("http://{}/v1/responses", proxy.listen_addr))
-        .bearer_auth(gateway_token)
-        .json(&serde_json::json!({"model":"gpt-5","input":"hello"}))
-        .send()
-        .expect("webhook-denied request should be sent");
-    assert_eq!(denied.status().as_u16(), 403);
-    let denied: serde_json::Value = denied.json().expect("denied response should be json");
-    assert_eq!(denied["error"]["code"], "policy_violation");
-
-    let audit_log = wait_for_text_file(&audit_dir.join("prodex-audit.log"));
-    assert!(audit_log.contains(r#""component":"gateway_data_plane""#));
-    assert!(audit_log.contains(r#""action":"guardrail_webhook_blocked""#));
-    assert!(audit_log.contains(r#""phase":"pre""#));
-    assert!(audit_log.contains(r#""reason":"webhook_denied""#));
-    assert!(!audit_log.contains("tenant_policy_denied"));
-    assert!(audit_log.contains(r#""path":"/v1/responses""#));
-    assert!(!audit_log.contains(gateway_token));
-    assert!(!audit_log.contains(webhook_token));
-    assert!(!audit_log.contains("do-not-log-webhook-message"));
-
-    let runtime_log = crate::read_runtime_proxy_test_log(&proxy.log_path);
-    assert!(runtime_log.contains("gateway_guardrail_webhook_blocked"));
-    assert!(runtime_log.contains("matched_value_redacted"));
-    assert!(!runtime_log.contains(gateway_token));
-    assert!(!runtime_log.contains(webhook_token));
-    assert!(!runtime_log.contains("do-not-log-webhook-message"));
-}
-
-#[test]
-fn gateway_post_guardrail_webhook_denial_is_audited_without_secret_leakage() {
-    let root = temp_root("gateway-post-webhook-guardrail-audit");
-    let audit_dir = root.join("audit");
-    std::fs::create_dir_all(&audit_dir).expect("audit dir should be created");
-    let _audit_env = crate::TestEnvVarGuard::set(
-        "PRODEX_AUDIT_LOG_DIR",
-        audit_dir.to_str().expect("audit dir should be utf8"),
-    );
-    let paths = app_paths_for_root(root);
-    let upstream = TestUpstream::start_n(1);
-    let webhook = TestGuardrailWebhook::start_deny("output_policy_denied");
-    let gateway_token = "post-webhook-gateway-token";
-    let webhook_token = "post-webhook-secret-token";
-    let proxy = start_runtime_local_rewrite_proxy(RuntimeLocalRewriteProxyStartOptions {
-        paths: &paths,
-        state: &AppState::default(),
-        upstream_base_url: format!("http://{}/v1", upstream.addr),
-        provider: RuntimeLocalRewriteProviderOptions::OpenAiResponses {
-            api_keys: vec!["upstream-key".to_string()],
-        },
-        upstream_no_proxy: false,
-        smart_context_enabled: false,
-        presidio_redaction_enabled: false,
-        model_context_window_tokens: None,
-        preferred_listen_addr: Some("127.0.0.1:0"),
-        gateway_auth_token_hash: Some(runtime_proxy_crate::LocalBridgeBearerTokenHash::from_token(
-            gateway_token,
-        )),
-        gateway_admin_tokens: Vec::new(),
-        gateway_virtual_keys: Vec::new(),
-        gateway_route_aliases: Vec::new(),
-        gateway_guardrails: runtime_proxy_crate::RuntimeGatewayGuardrailConfig::default(),
-        gateway_guardrail_webhook: RuntimeGatewayGuardrailWebhookConfig {
-            url: Some(format!("http://{}", webhook.addr)),
-            phases: vec!["post".to_string()],
-            bearer_token: Some(runtime_gateway_test_secret(webhook_token)),
-            fail_closed: true,
-        },
-        gateway_observability: RuntimeGatewayObservabilityConfig::default(),
-        gateway_state_store: RuntimeGatewayStateStore::file(&paths),
-        gateway_sso: RuntimeGatewaySsoConfig::default(),
-        gateway_call_id_header: Some("x-prodex-call-id".to_string()),
-    })
-    .expect("gateway proxy should start");
-
-    let denied = reqwest::blocking::Client::new()
-        .post(format!("http://{}/v1/responses", proxy.listen_addr))
-        .bearer_auth(gateway_token)
-        .json(&serde_json::json!({"model":"gpt-5","input":"hello"}))
-        .send()
-        .expect("webhook-denied request should be sent");
-    assert_eq!(denied.status().as_u16(), 403);
-    let denied: serde_json::Value = denied.json().expect("denied response should be json");
-    assert_eq!(denied["error"]["code"], "policy_violation");
-
-    let audit_log = wait_for_text_file(&audit_dir.join("prodex-audit.log"));
-    assert!(audit_log.contains(r#""component":"gateway_data_plane""#));
-    assert!(audit_log.contains(r#""action":"response_guardrail_webhook_blocked""#));
-    assert!(audit_log.contains(r#""phase":"post""#));
-    assert!(audit_log.contains(r#""reason":"webhook_denied""#));
-    assert!(!audit_log.contains("output_policy_denied"));
-    assert!(!audit_log.contains(gateway_token));
-    assert!(!audit_log.contains(webhook_token));
-    assert!(!audit_log.contains("do-not-log-webhook-message"));
-
-    let runtime_log = crate::read_runtime_proxy_test_log(&proxy.log_path);
-    assert!(runtime_log.contains("gateway_guardrail_webhook_blocked"));
-    assert!(runtime_log.contains("matched_value_redacted"));
-    assert!(!runtime_log.contains(gateway_token));
-    assert!(!runtime_log.contains(webhook_token));
-    assert!(!runtime_log.contains("do-not-log-webhook-message"));
-}
-
-#[test]
-fn gateway_pre_guardrail_webhook_failure_redacts_url_and_is_audited() {
-    let root = temp_root("gateway-pre-webhook-failure-audit");
-    let audit_dir = root.join("audit");
-    std::fs::create_dir_all(&audit_dir).expect("audit dir should be created");
-    let _audit_env = crate::TestEnvVarGuard::set(
-        "PRODEX_AUDIT_LOG_DIR",
-        audit_dir.to_str().expect("audit dir should be utf8"),
-    );
-    let paths = app_paths_for_root(root);
-    let upstream = TestUpstream::start_n(0);
-    let gateway_token = "pre-webhook-failure-gateway-token";
-    let webhook_url_secret = "webhook-url-query-secret";
-    let proxy = start_runtime_local_rewrite_proxy(RuntimeLocalRewriteProxyStartOptions {
-        paths: &paths,
-        state: &AppState::default(),
-        upstream_base_url: format!("http://{}/v1", upstream.addr),
-        provider: RuntimeLocalRewriteProviderOptions::OpenAiResponses {
-            api_keys: vec!["upstream-key".to_string()],
-        },
-        upstream_no_proxy: false,
-        smart_context_enabled: false,
-        presidio_redaction_enabled: false,
-        model_context_window_tokens: None,
-        preferred_listen_addr: Some("127.0.0.1:0"),
-        gateway_auth_token_hash: Some(runtime_proxy_crate::LocalBridgeBearerTokenHash::from_token(
-            gateway_token,
-        )),
-        gateway_admin_tokens: Vec::new(),
-        gateway_virtual_keys: Vec::new(),
-        gateway_route_aliases: Vec::new(),
-        gateway_guardrails: runtime_proxy_crate::RuntimeGatewayGuardrailConfig::default(),
-        gateway_guardrail_webhook: RuntimeGatewayGuardrailWebhookConfig {
-            url: Some(format!(
-                "http://127.0.0.1:9/deny?token={webhook_url_secret}"
-            )),
-            phases: vec!["pre".to_string()],
-            bearer_token: Some(runtime_gateway_test_secret("failure-webhook-bearer-secret")),
-            fail_closed: true,
-        },
-        gateway_observability: RuntimeGatewayObservabilityConfig::default(),
-        gateway_state_store: RuntimeGatewayStateStore::file(&paths),
-        gateway_sso: RuntimeGatewaySsoConfig::default(),
-        gateway_call_id_header: Some("x-prodex-call-id".to_string()),
-    })
-    .expect("gateway proxy should start");
-
-    let denied = reqwest::blocking::Client::new()
-        .post(format!("http://{}/v1/responses", proxy.listen_addr))
-        .bearer_auth(gateway_token)
-        .json(&serde_json::json!({"model":"gpt-5","input":"hello"}))
-        .send()
-        .expect("webhook-failure request should be sent");
-    assert_eq!(denied.status().as_u16(), 403);
-    let denied: serde_json::Value = denied.json().expect("denied response should be json");
-    assert_eq!(denied["error"]["code"], "policy_violation");
-
-    let audit_log = wait_for_text_file(&audit_dir.join("prodex-audit.log"));
-    assert!(audit_log.contains(r#""action":"guardrail_webhook_blocked""#));
-    assert!(audit_log.contains(r#""phase":"pre""#));
-    assert!(audit_log.contains(r#""reason":"webhook_error""#));
-    assert!(!audit_log.contains(gateway_token));
-    assert!(!audit_log.contains(webhook_url_secret));
-    assert!(!audit_log.contains("failure-webhook-bearer-secret"));
-
-    let runtime_log = crate::read_runtime_proxy_test_log(&proxy.log_path);
-    assert!(runtime_log.contains("gateway_guardrail_webhook_failed"));
-    assert!(runtime_log.contains("endpoint=redacted"));
-    assert!(runtime_log.contains("error_kind="));
-    assert!(!runtime_log.contains(gateway_token));
-    assert!(!runtime_log.contains(webhook_url_secret));
-    assert!(!runtime_log.contains("failure-webhook-bearer-secret"));
-    assert!(!runtime_log.contains("127.0.0.1:9/deny"));
 }

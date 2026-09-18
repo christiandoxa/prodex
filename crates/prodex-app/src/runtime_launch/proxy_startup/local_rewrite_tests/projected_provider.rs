@@ -29,16 +29,6 @@ fn rotation_is_observed_without_environment_reload() {
         presidio_redaction_enabled: false,
         model_context_window_tokens: None,
         preferred_listen_addr: Some("127.0.0.1:0"),
-        gateway_auth_token_hash: None,
-        gateway_admin_tokens: Vec::new(),
-        gateway_sso: RuntimeGatewaySsoConfig::default(),
-        gateway_state_store: RuntimeGatewayStateStore::file(&paths),
-        gateway_virtual_keys: Vec::new(),
-        gateway_route_aliases: Vec::new(),
-        gateway_guardrails: runtime_proxy_crate::RuntimeGatewayGuardrailConfig::default(),
-        gateway_guardrail_webhook: RuntimeGatewayGuardrailWebhookConfig::default(),
-        gateway_call_id_header: None,
-        gateway_observability: RuntimeGatewayObservabilityConfig::default(),
     })
     .expect("gateway proxy should start");
     let client = reqwest::blocking::Client::new();
