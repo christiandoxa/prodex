@@ -5,21 +5,11 @@ use crate::{
     resolve_super_launch_target, resolve_super_sub_agent_config, sub_agent_recursion_policy,
 };
 use anyhow::{Result, bail};
-use crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
 use prodex_cli::{
     DEFAULT_SUB_AGENT_MAX_CONCURRENCY, HARD_MAX_SUB_AGENT_CONCURRENCY, SubAgentConfig,
     SubAgentMaxConcurrency, SubAgentPreference, SuperArgs,
 };
-use ratatui::layout::{Constraint, Direction, Layout};
-use ratatui::style::Modifier;
-use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
-use std::io::{self, IsTerminal};
-use terminal_ui::{
-    fit_cell, tui_border_style, tui_connected_footer_block, tui_connected_header_block,
-    tui_detail_style, tui_hint_style, tui_primary_style, tui_secondary_style, tui_success_style,
-    tui_title_style,
-};
+use std::io::{self, IsTerminal, Write};
 
 const SUPER_PROMPT_MAX_TEXT_CHARS: usize = 256;
 
@@ -326,131 +316,40 @@ pub(super) fn prompt_super_choice(
     if choices.is_empty() {
         bail!("Super prompt has no choices");
     }
-    let mut tui = terminal_ui::AlternateScreenTerminal::stderr("Super sub-agent prompt TUI")?;
-    let mut selected = selected.min(choices.len().saturating_sub(1));
+    let selected = selected.min(choices.len() - 1);
     loop {
-        tui.terminal.draw(|frame| {
-            let chunks = Layout::default()
-                .direction(Direction::Vertical)
-                .constraints([
-                    Constraint::Length(3),
-                    Constraint::Min(1),
-                    Constraint::Length(3),
-                ])
-                .split(frame.area());
-            let header = Paragraph::new(Line::from(vec![
-                Span::styled("Prodex Super", tui_title_style()),
-                Span::raw("  "),
-                Span::styled(title, tui_detail_style()),
-            ]))
-            .block(tui_connected_header_block(tui_border_style()));
-            frame.render_widget(header, chunks[0]);
-            let visible = visible_choice_range(selected, choices.len(), chunks[1].height);
-            let start = visible.start;
-            let lines = choices[visible.start..visible.end]
-                .iter()
-                .enumerate()
-                .map(|(offset, choice)| (start + offset, choice))
-                .map(|(index, choice)| {
-                    let choice = bounded_tui_text(choice, frame.area().width.saturating_sub(4));
-                    if index == selected {
-                        Line::from(vec![
-                            Span::styled("› ", tui_success_style()),
-                            Span::styled(choice, tui_primary_style().add_modifier(Modifier::BOLD)),
-                        ])
-                    } else {
-                        Line::from(vec![
-                            Span::raw("  "),
-                            Span::styled(choice, tui_secondary_style()),
-                        ])
-                    }
-                })
-                .collect::<Vec<_>>();
-            let body = Paragraph::new(lines)
-                .block(
-                    Block::default()
-                        .borders(Borders::LEFT | Borders::RIGHT)
-                        .border_style(tui_border_style()),
-                )
-                .wrap(Wrap { trim: true });
-            frame.render_widget(body, chunks[1]);
-            let mut footer_spans = vec![
-                Span::styled("↑/↓", tui_hint_style()),
-                Span::raw(" choose  "),
-                Span::styled("enter", tui_success_style()),
-                Span::raw(" select  "),
-                Span::styled("esc", tui_hint_style()),
-                Span::raw(if escape_selects_last {
-                    " skip"
-                } else {
-                    " cancel"
-                }),
-            ];
-            if visible.start > 0 {
-                footer_spans.push(Span::styled("  ↑ more", tui_hint_style()));
-            }
-            if visible.end < choices.len() {
-                footer_spans.push(Span::styled("  ↓ more", tui_hint_style()));
-            }
-            let footer = Paragraph::new(Line::from(footer_spans))
-                .block(tui_connected_footer_block(tui_border_style()));
-            frame.render_widget(footer, chunks[2]);
-        })?;
-
-        if let Event::Key(key) = event::read()?
-            && key.kind == KeyEventKind::Press
-            && let Some(choice) = update_super_choice_selection(
-                key,
-                &mut selected,
-                choices.len(),
-                escape_selects_last,
-            )?
-        {
-            return Ok(choice);
+        let mut stderr = io::stderr().lock();
+        writeln!(stderr, "{title}:")?;
+        for (index, choice) in choices.iter().enumerate() {
+            let marker = if index == selected { "*" } else { " " };
+            writeln!(stderr, "  {marker} {}. {choice}", index + 1)?;
         }
-    }
-}
+        write!(stderr, "Select [{}]: ", selected + 1)?;
+        stderr.flush()?;
+        drop(stderr);
 
-fn update_super_choice_selection(
-    key: crossterm::event::KeyEvent,
-    selected: &mut usize,
-    len: usize,
-    escape_selects_last: bool,
-) -> Result<Option<usize>> {
-    match key.code {
-        KeyCode::Up | KeyCode::Char('k') => *selected = selected.checked_sub(1).unwrap_or(len - 1),
-        KeyCode::Down | KeyCode::Char('j') => *selected = (*selected + 1) % len,
-        KeyCode::PageUp => *selected = selected.saturating_sub(10),
-        KeyCode::PageDown => *selected = selected.saturating_add(10).min(len - 1),
-        KeyCode::Home => *selected = 0,
-        KeyCode::End => *selected = len - 1,
-        KeyCode::Enter => return Ok(Some(*selected)),
-        KeyCode::Esc if escape_selects_last => return Ok(Some(len - 1)),
-        KeyCode::Esc => bail!("Prodex Super prompt cancelled"),
-        KeyCode::Char('c') | KeyCode::Char('z')
-            if key.modifiers.contains(KeyModifiers::CONTROL) =>
-        {
-            bail!("Prodex Super prompt cancelled")
+        let mut input = String::new();
+        io::stdin().read_line(&mut input)?;
+        let value = input.trim();
+        if value.is_empty() {
+            return Ok(selected);
         }
-        _ => {}
+        if matches!(
+            value.to_ascii_lowercase().as_str(),
+            "q" | "quit" | "cancel" | "esc"
+        ) {
+            if escape_selects_last {
+                return Ok(choices.len() - 1);
+            }
+            bail!("Prodex Super prompt cancelled");
+        }
+        if let Ok(choice) = value.parse::<usize>()
+            && (1..=choices.len()).contains(&choice)
+        {
+            return Ok(choice - 1);
+        }
+        writeln!(io::stderr(), "Enter a number from 1 to {}.", choices.len())?;
     }
-    Ok(None)
-}
-
-pub(super) fn visible_choice_range(
-    selected: usize,
-    len: usize,
-    height: u16,
-) -> std::ops::Range<usize> {
-    let visible = usize::from(height).max(1).min(len);
-    let start = selected
-        .saturating_sub(visible / 2)
-        .min(len.saturating_sub(visible));
-    start..start + visible
-}
-
-pub(super) fn bounded_tui_text(value: &str, width: u16) -> String {
-    fit_cell(value, usize::from(width).max(1))
 }
 
 pub(super) fn prompt_super_text(title: &str, initial: &str) -> Result<String> {
@@ -468,164 +367,52 @@ fn prompt_super_text_input<T>(
     escape_returns_none: bool,
     parse: impl Fn(&str) -> std::result::Result<T, String>,
 ) -> Result<Option<T>> {
-    let mut tui = terminal_ui::AlternateScreenTerminal::stderr("Super sub-agent text prompt TUI")?;
-    let mut value = initial
-        .chars()
-        .take(SUPER_PROMPT_MAX_TEXT_CHARS)
-        .collect::<String>();
-    let mut validation_error = None::<String>;
     loop {
-        tui.terminal.draw(|frame| {
-            let chunks = Layout::default()
-                .direction(Direction::Vertical)
-                .constraints([
-                    Constraint::Length(3),
-                    Constraint::Min(1),
-                    Constraint::Length(3),
-                ])
-                .split(frame.area());
-            let header = Paragraph::new(Line::from(vec![
-                Span::styled("Prodex Super", tui_title_style()),
-                Span::raw("  "),
-                Span::styled(title, tui_detail_style()),
-            ]))
-            .block(tui_connected_header_block(tui_border_style()));
-            frame.render_widget(header, chunks[0]);
-            let value_display = bounded_tui_text(&value, frame.area().width.saturating_sub(4));
-            let mut lines = vec![Line::from(vec![
-                Span::styled(value_display, tui_primary_style()),
-                Span::styled("▌", tui_success_style()),
-            ])];
-            if let Some(error) = validation_error.as_deref() {
-                lines.push(Line::from(Span::styled(
-                    bounded_tui_text(error, frame.area().width.saturating_sub(4)),
-                    tui_hint_style(),
-                )));
-            }
-            let body = Paragraph::new(lines)
-                .block(
-                    Block::default()
-                        .borders(Borders::LEFT | Borders::RIGHT)
-                        .border_style(tui_border_style()),
-                )
-                .wrap(Wrap { trim: true });
-            frame.render_widget(body, chunks[1]);
-            let footer = Paragraph::new(Line::from(vec![
-                Span::styled("enter", tui_success_style()),
-                Span::raw(" accept  "),
-                Span::styled("esc", tui_hint_style()),
-                Span::raw(if escape_returns_none {
-                    " back"
-                } else {
-                    " cancel"
-                }),
-            ]))
-            .block(tui_connected_footer_block(tui_border_style()));
-            frame.render_widget(footer, chunks[2]);
-        })?;
-        if let Event::Key(key) = event::read()?
-            && key.kind == KeyEventKind::Press
+        let mut stderr = io::stderr().lock();
+        if initial.is_empty() {
+            write!(stderr, "{title}: ")?;
+        } else {
+            write!(stderr, "{title} [{initial}]: ")?;
+        }
+        stderr.flush()?;
+        drop(stderr);
+
+        let mut input = String::new();
+        io::stdin().read_line(&mut input)?;
+        let value = input.trim();
+        if escape_returns_none
+            && matches!(
+                value.to_ascii_lowercase().as_str(),
+                "q" | "quit" | "back" | "cancel"
+            )
         {
-            match key.code {
-                KeyCode::Enter => match parse(&value) {
-                    Ok(parsed) => return Ok(Some(parsed)),
-                    Err(error) => validation_error = Some(error),
-                },
-                KeyCode::Backspace => {
-                    value.pop();
-                    validation_error = None;
-                }
-                KeyCode::Char(character)
-                    if !key.modifiers.contains(KeyModifiers::CONTROL)
-                        && value.chars().count() < SUPER_PROMPT_MAX_TEXT_CHARS =>
-                {
-                    value.push(character);
-                    validation_error = None;
-                }
-                KeyCode::Esc if escape_returns_none => return Ok(None),
-                KeyCode::Esc => bail!("Prodex Super prompt cancelled"),
-                KeyCode::Char('c') | KeyCode::Char('z')
-                    if key.modifiers.contains(KeyModifiers::CONTROL) =>
-                {
-                    bail!("Prodex Super prompt cancelled")
-                }
-                _ => {}
-            }
+            return Ok(None);
+        }
+        let value = if value.is_empty() { initial } else { value };
+        if value.chars().count() > SUPER_PROMPT_MAX_TEXT_CHARS {
+            writeln!(io::stderr(), "value is too long")?;
+            continue;
+        }
+        match parse(value) {
+            Ok(parsed) => return Ok(Some(parsed)),
+            Err(error) => writeln!(io::stderr(), "{error}")?,
         }
     }
 }
+
 pub(crate) fn prompt_super_presidio_opt_in() -> Result<bool> {
     if !io::stdin().is_terminal() || !io::stderr().is_terminal() {
         return Ok(false);
     }
-
-    let mut tui = terminal_ui::AlternateScreenTerminal::stderr("Presidio prompt TUI")?;
-    loop {
-        tui.terminal.draw(|frame| {
-            let chunks = Layout::default()
-                .direction(Direction::Vertical)
-                .constraints([
-                    Constraint::Length(3),
-                    Constraint::Min(1),
-                    Constraint::Length(3),
-                ])
-                .split(frame.area());
-            let header = Paragraph::new(Line::from(vec![
-                Span::styled("Prodex Super", tui_title_style()),
-                Span::raw("  "),
-                Span::styled("Presidio opt-in", tui_detail_style()),
-            ]))
-            .block(tui_connected_header_block(tui_border_style()));
-            frame.render_widget(header, chunks[0]);
-
-            let body = Paragraph::new(vec![
-                Line::from(Span::styled(
-                    "Use Presidio for data safety?",
-                    tui_primary_style().add_modifier(Modifier::BOLD),
-                )),
-                Line::raw(""),
-                Line::from(Span::styled(
-                    "Detected sensitive data is redacted from request bodies before upstream delivery.",
-                    tui_secondary_style(),
-                )),
-            ])
-            .block(
-                Block::default()
-                    .borders(Borders::LEFT | Borders::RIGHT)
-                    .border_style(tui_border_style()),
-            )
-            .wrap(Wrap { trim: false });
-            frame.render_widget(body, chunks[1]);
-
-            let footer = Paragraph::new(Line::from(vec![
-                Span::styled("y", tui_success_style()),
-                Span::raw(" enable  "),
-                Span::styled("n", tui_hint_style()),
-                Span::raw(" skip  "),
-                Span::styled("enter", tui_hint_style()),
-                Span::raw(" skip  "),
-                Span::styled("esc", tui_hint_style()),
-                Span::raw(" skip"),
-            ]))
-            .block(tui_connected_footer_block(tui_border_style()));
-            frame.render_widget(footer, chunks[2]);
-        })?;
-
-        if let Event::Key(key) = event::read()?
-            && key.kind == KeyEventKind::Press
-        {
-            match key.code {
-                KeyCode::Char('y') | KeyCode::Char('Y') => return Ok(true),
-                KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Enter | KeyCode::Esc => {
-                    return Ok(false);
-                }
-                KeyCode::Char('c') | KeyCode::Char('z')
-                    if key.modifiers.contains(KeyModifiers::CONTROL) =>
-                {
-                    bail!("Presidio prompt cancelled");
-                }
-                _ => {}
-            }
-        }
-    }
+    write!(
+        io::stderr(),
+        "Use Presidio for data safety? Sensitive data is redacted before upstream delivery. [y/N]: "
+    )?;
+    io::stderr().flush()?;
+    let mut input = String::new();
+    io::stdin().read_line(&mut input)?;
+    Ok(matches!(
+        input.trim().to_ascii_lowercase().as_str(),
+        "y" | "yes"
+    ))
 }
