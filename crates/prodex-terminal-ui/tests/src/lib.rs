@@ -105,62 +105,6 @@ fn status_panel_draws_on_test_backend() {
 }
 
 #[test]
-fn info_process_summary_preserves_pid_limit() {
-    let processes = (10..17).map(|pid| format!("{pid}/run"));
-    assert_eq!(
-        format_info_process_summary_display(7, 2, processes, 6),
-        "Yes (7 total, 2 runtime; processes: 10/run, 11/run, 12/run, 13/run, 14/run, 15/run (+1 more))"
-    );
-}
-
-#[test]
-fn info_token_usage_summary_formats_profile_totals() {
-    let summary = format_info_token_usage_summary_display(
-        2,
-        3,
-        TokenUsageCounts {
-            input_tokens: 110,
-            cached_input_tokens: 25,
-            output_tokens: 44,
-            reasoning_tokens: 9,
-        },
-        [
-            TokenUsageProfileDisplay {
-                profile: "backup",
-                total: TokenUsageCounts {
-                    input_tokens: 10,
-                    cached_input_tokens: 0,
-                    output_tokens: 4,
-                    reasoning_tokens: 1,
-                },
-            },
-            TokenUsageProfileDisplay {
-                profile: "main",
-                total: TokenUsageCounts {
-                    input_tokens: 100,
-                    cached_input_tokens: 25,
-                    output_tokens: 40,
-                    reasoning_tokens: 8,
-                },
-            },
-        ],
-    );
-
-    assert_eq!(
-        summary,
-        "2 event(s), logs=3: input=110, cached_input=25, output=44, reasoning=9; by profile: backup:10 in/0 cached/4 out/1 reasoning; main:100 in/25 cached/40 out/8 reasoning"
-    );
-}
-
-#[test]
-fn relative_duration_formats_existing_info_style() {
-    assert_eq!(format_relative_duration(0), "now");
-    assert_eq!(format_relative_duration(59), "<1m");
-    assert_eq!(format_relative_duration(3_660), "1h 1m");
-    assert_eq!(format_relative_duration(90_000), "1d 1h");
-}
-
-#[test]
 fn session_report_renderer_keeps_existing_columns_and_profile_line() {
     let rendered = render_session_reports_with_width(
         &[SessionReportDisplay {

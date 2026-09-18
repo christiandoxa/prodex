@@ -1,51 +1,19 @@
 use super::*;
 
-#[cfg(test)]
-pub(crate) use crate::reports::collect_info_runtime_load_summary_from_text;
-pub(crate) use crate::reports::{
-    classify_prodex_process_row, collect_info_runtime_load_summary_from_texts,
-    format_info_pool_remaining, format_info_runway, format_info_token_usage_summary,
-    parse_ps_process_rows, select_active_runtime_log_paths_with_prefix,
-    select_recent_runtime_log_paths,
-};
-
-pub(crate) fn collect_prodex_processes() -> Vec<ProdexProcessInfo> {
-    try_collect_prodex_processes().unwrap_or_default()
-}
-
-pub(crate) fn try_collect_prodex_processes() -> Result<Vec<ProdexProcessInfo>> {
-    let current_pid = std::process::id();
-    let current_basename = std::env::current_exe().ok().and_then(|path| {
-        path.file_name()
-            .and_then(|name| name.to_str())
-            .map(ToOwned::to_owned)
-    });
-
-    let mut processes = try_collect_process_rows()?
-        .into_iter()
-        .filter_map(|row| {
-            classify_prodex_process_row(row, current_pid, current_basename.as_deref())
-        })
-        .collect::<Vec<_>>();
-    processes.sort_by_key(|process| process.pid);
-    Ok(processes)
-}
-
 pub(crate) fn collect_process_rows() -> Vec<ProcessRow> {
     try_collect_process_rows().unwrap_or_default()
 }
 
-pub(crate) fn try_collect_process_rows() -> Result<Vec<ProcessRow>> {
+fn try_collect_process_rows() -> Result<Vec<ProcessRow>> {
     match collect_process_rows_from_proc() {
         Some(rows) if !rows.is_empty() => Ok(rows),
         _ => collect_process_rows_from_ps(),
     }
 }
 
-pub(crate) fn collect_process_rows_from_proc() -> Option<Vec<ProcessRow>> {
+fn collect_process_rows_from_proc() -> Option<Vec<ProcessRow>> {
     let mut rows = Vec::new();
-    let entries = fs::read_dir("/proc").ok()?;
-    for entry in entries.flatten() {
+    for entry in fs::read_dir("/proc").ok()?.flatten() {
         let Ok(pid) = entry.file_name().to_string_lossy().parse::<u32>() else {
             continue;
         };
@@ -61,19 +29,15 @@ pub(crate) fn collect_process_rows_from_proc() -> Option<Vec<ProcessRow>> {
         };
         let args = args_bytes
             .split(|byte| *byte == 0)
-            .filter_map(|chunk| {
-                if chunk.is_empty() {
-                    return None;
-                }
-                String::from_utf8(chunk.to_vec()).ok()
-            })
+            .filter(|chunk| !chunk.is_empty())
+            .filter_map(|chunk| String::from_utf8(chunk.to_vec()).ok())
             .collect::<Vec<_>>();
         rows.push(ProcessRow { pid, command, args });
     }
     Some(rows)
 }
 
-pub(crate) fn collect_process_rows_from_ps() -> Result<Vec<ProcessRow>> {
+fn collect_process_rows_from_ps() -> Result<Vec<ProcessRow>> {
     let mut command = Command::new("ps");
     command.args(["-Ao", "pid=,comm=,args="]);
     let output = crate::command_probe_output(&mut command, "process listing")
@@ -82,37 +46,11 @@ pub(crate) fn collect_process_rows_from_ps() -> Result<Vec<ProcessRow>> {
         bail!("ps returned exit status {}", output.status);
     }
     let text = String::from_utf8(output.stdout).context("ps output was not valid UTF-8")?;
-    Ok(parse_ps_process_rows(&text))
-}
-
-pub(crate) fn collect_active_runtime_log_paths(processes: &[ProdexProcessInfo]) -> Vec<PathBuf> {
-    select_active_runtime_log_paths_with_prefix(
-        processes,
-        prodex_runtime_log_paths_in_dir(&runtime_proxy_log_dir()),
-        RUNTIME_PROXY_LOG_FILE_PREFIX,
-    )
-}
-
-pub(crate) fn collect_info_runtime_load_summary(
-    log_paths: &[PathBuf],
-    now: i64,
-) -> InfoRuntimeLoadSummary {
-    let tails = log_paths.iter().filter_map(|path| {
-        read_runtime_log_tail(path, INFO_RUNTIME_LOG_TAIL_BYTES)
-            .ok()
-            .map(|tail| String::from_utf8_lossy(&tail).into_owned())
-    });
-    collect_info_runtime_load_summary_from_texts(
-        log_paths.len(),
-        tails,
-        now,
-        INFO_RECENT_LOAD_WINDOW_SECONDS,
-        INFO_FORECAST_LOOKBACK_SECONDS,
-    )
+    Ok(crate::reports::parse_ps_process_rows(&text))
 }
 
 pub(crate) fn collect_recent_runtime_log_paths(limit: usize) -> Vec<PathBuf> {
-    select_recent_runtime_log_paths(
+    crate::reports::select_recent_runtime_log_paths(
         prodex_runtime_log_paths_in_dir(&runtime_proxy_log_dir())
             .into_iter()
             .map(|path| {
@@ -122,32 +60,6 @@ pub(crate) fn collect_recent_runtime_log_paths(limit: usize) -> Vec<PathBuf> {
                 (path, modified)
             }),
         limit,
-    )
-}
-
-pub(crate) fn estimate_info_runway(
-    observations: &[InfoRuntimeQuotaObservation],
-    window: InfoQuotaWindow,
-    current_remaining: i64,
-    now: i64,
-) -> Option<InfoRunwayEstimate> {
-    crate::reports::estimate_info_runway(
-        observations,
-        window,
-        current_remaining,
-        now,
-        INFO_FORECAST_MIN_SPAN_SECONDS,
-    )
-}
-
-pub(crate) fn format_info_load_summary(
-    summary: &InfoRuntimeLoadSummary,
-    runtime_process_count: usize,
-) -> String {
-    crate::reports::format_info_load_summary(
-        summary,
-        runtime_process_count,
-        INFO_RECENT_LOAD_WINDOW_SECONDS,
     )
 }
 
