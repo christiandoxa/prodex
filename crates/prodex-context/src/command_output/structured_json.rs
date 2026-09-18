@@ -64,7 +64,7 @@ fn ensure_mojo_structured_json_critical_signals(
     lines_to_text(output)
 }
 
-#[cfg(any(not(feature = "mojo"), test))]
+#[cfg(not(feature = "mojo"))]
 #[cfg_attr(all(test, feature = "mojo"), allow(dead_code))]
 mod rust_compat {
     use super::*;
@@ -411,32 +411,5 @@ mod rust_compat {
             .entry(key.to_string())
             .and_modify(|count| *count = count.saturating_add(1))
             .or_insert(1);
-    }
-}
-
-#[cfg(all(test, feature = "mojo"))]
-#[test]
-fn mojo_structured_json_compactor_preserves_rust_eligibility_and_signals() {
-    let fixtures = [
-        r#"[{"id":"a","path":"src/lib.rs","error":{"code":"E42","message":"failed"}},{"id":"b","status":"ok"}]"#,
-        "{\"id\":\"a\",\"status\":\"ok\"}\n{\"id\":\"b\",\"error\":\"E_IO\"}\n",
-        "plain text\nnot json\n",
-    ];
-    let options = CommandOutputCompactOptions {
-        max_lines: 40,
-        max_line_chars: 240,
-        ..CommandOutputCompactOptions::default()
-    };
-    for input in fixtures {
-        let mojo = compact_structured_json_output(input, &options);
-        let rust = rust_compat::compact_structured_json_output_rust(input, &options);
-        assert_eq!(
-            mojo.is_some(),
-            rust.is_some(),
-            "eligibility mismatch for {input:?}"
-        );
-        if let Some(output) = mojo {
-            assert!(critical_signal_self_check(input, &output).passed());
-        }
     }
 }

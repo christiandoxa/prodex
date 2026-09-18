@@ -10,43 +10,6 @@ fn assert_no_critical_signal_loss(before: &str, after: &str) {
     );
 }
 
-fn assert_token_regression_budget(
-    before: &str,
-    report: &CommandOutputCompactReport,
-    min_saved_percent: usize,
-) {
-    assert_no_critical_signal_loss(before, &report.output);
-    assert!(
-        report.estimated_tokens_after < report.estimated_tokens_before,
-        "compaction did not save tokens: before={}, after={}\n{}",
-        report.estimated_tokens_before,
-        report.estimated_tokens_after,
-        report.output
-    );
-    let saved = report
-        .estimated_tokens_before
-        .saturating_sub(report.estimated_tokens_after);
-    assert!(
-        saved.saturating_mul(100)
-            >= report
-                .estimated_tokens_before
-                .saturating_mul(min_saved_percent),
-        "saved {saved}/{} tokens, expected at least {min_saved_percent}%\n{}",
-        report.estimated_tokens_before,
-        report.output
-    );
-}
-
-fn test_cwd_prefix() -> String {
-    std::env::current_dir()
-        .expect("test cwd")
-        .display()
-        .to_string()
-        .replace('\\', "/")
-        .trim_end_matches('/')
-        .to_string()
-}
-
 fn temp_context_root(name: &str) -> std::path::PathBuf {
     let unique = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -73,24 +36,8 @@ mod git_search;
 #[path = "lib/intent.rs"]
 mod intent;
 
-#[path = "lib/diagnostics.rs"]
-mod diagnostics;
-
-#[path = "lib/diagnostic_extra.rs"]
-mod diagnostic_extra;
-
-#[cfg(feature = "mojo")]
-#[path = "lib/mojo_rich.rs"]
-mod mojo_rich;
-
 #[path = "lib/git_noisy.rs"]
 mod git_noisy;
-
-#[path = "lib/success_summary.rs"]
-mod success_summary;
-
-#[path = "lib/success_summary_tools.rs"]
-mod success_summary_tools;
 
 #[path = "lib/search_log.rs"]
 mod search_log;

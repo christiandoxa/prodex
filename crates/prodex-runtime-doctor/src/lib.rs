@@ -50,9 +50,8 @@ pub use suggestions::{
 pub use tuning::{RuntimeDoctorTuningLaneLimits, RuntimeDoctorTuningSnapshot};
 pub use types::{
     RuntimeDoctorBindingProfileSummary, RuntimeDoctorBindingSourceSummary,
-    RuntimeDoctorBindingStateSummary, RuntimeDoctorIncidentExplanation,
-    RuntimeDoctorMarkerContextSummary, RuntimeDoctorProfileSummary,
-    RuntimeDoctorRequestTimelineEvent, RuntimeDoctorRouteHealthSummary,
-    RuntimeDoctorRouteProfileEvent, RuntimeDoctorRouteSummary, RuntimeDoctorSelectionSummary,
-    RuntimeDoctorSummary,
+    RuntimeDoctorBindingStateSummary, RuntimeDoctorMarkerContextSummary,
+    RuntimeDoctorProfileSummary, RuntimeDoctorRequestTimelineEvent,
+    RuntimeDoctorRouteHealthSummary, RuntimeDoctorRouteProfileEvent, RuntimeDoctorRouteSummary,
+    RuntimeDoctorSelectionSummary, RuntimeDoctorSummary,
 };

@@ -2,7 +2,7 @@ use std::path::Path;
 
 use super::{ContextBlobNoiseFinding, ContextBlobNoiseKind};
 
-#[cfg(any(not(feature = "mojo"), test))]
+#[cfg(not(feature = "mojo"))]
 pub(super) fn detect_lockfile_or_vendor_noise_supplement(
     path: Option<&Path>,
     input: &str,
@@ -141,7 +141,7 @@ fn context_lockfile_or_vendor_path_detail_supplement(path: &Path) -> Option<Stri
     .map(|_| format!("vendor_path={normalized}"))
 }
 
-#[cfg(any(not(feature = "mojo"), test))]
+#[cfg(not(feature = "mojo"))]
 fn context_line_has_vendor_path_supplement(line: &str) -> bool {
     let lower = line.replace('\\', "/").to_ascii_lowercase();
     [

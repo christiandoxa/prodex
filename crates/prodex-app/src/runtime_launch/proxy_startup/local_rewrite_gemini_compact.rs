@@ -312,7 +312,6 @@ fn mark_runtime_compact_parts(
     mode: &'static str,
     reason: Option<&'static str>,
 ) {
-    crate::semantic_compact_metrics::record_semantic_compact(provider, mode, reason);
     parts.headers.retain(|(name, _)| {
         !name.eq_ignore_ascii_case("x-prodex-compact-mode")
             && !name.eq_ignore_ascii_case("x-prodex-compact-provider")

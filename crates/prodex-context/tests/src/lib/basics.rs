@@ -25,39 +25,6 @@ fn plain_command_output_strips_ansi_and_keeps_head_tail() {
 }
 
 #[test]
-fn plain_command_output_uses_path_alias_for_repeated_absolute_cwd_prefix() {
-    let cwd = test_cwd_prefix();
-    let input = format!(
-        "\
-loaded {cwd}/src/main.rs
-cached {cwd}/crates/prodex-context/src/lib.rs
-"
-    );
-
-    let report = compact_command_output_with_options(
-        &input,
-        &CommandOutputCompactOptions {
-            kind: CommandOutputKind::Plain,
-            max_lines: 20,
-            ..CommandOutputCompactOptions::default()
-        },
-    );
-
-    assert_eq!(report.detected_kind, CommandOutputKind::Plain);
-    assert!(
-        report
-            .output
-            .contains(&format!("path aliases: $REPO={cwd}"))
-    );
-    assert!(report.output.contains("loaded $REPO/src/main.rs"));
-    assert!(
-        report
-            .output
-            .contains("cached $REPO/crates/prodex-context/src/lib.rs")
-    );
-}
-
-#[test]
 fn compact_command_output_structured_json_array_summarizes_shape_and_errors() {
     let mut input = String::from("[\n");
     for index in 0..80 {
@@ -229,7 +196,6 @@ fn command_metadata_hint_compacts_quiet_cargo_output_as_rust_diagnostics() {
     );
 
     assert_eq!(report.detected_kind, CommandOutputKind::RustDiagnostics);
-    assert!(report.output.contains("sum: rust"));
     assert!(report.output.contains("Finished `dev` profile"));
     assert_no_critical_signal_loss(input, &report.output);
 }

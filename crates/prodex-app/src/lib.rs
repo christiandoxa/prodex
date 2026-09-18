@@ -39,7 +39,6 @@ use tungstenite::{
 
 mod app_commands;
 mod app_state;
-mod audit_log;
 mod cli_args;
 mod codex_binary;
 mod command_dispatch;
@@ -85,7 +84,6 @@ mod runtime_store;
 mod runtime_thread_index;
 mod runtime_tools;
 mod secret_store_support;
-mod semantic_compact_metrics;
 mod shared_codex_fs;
 mod shared_types;
 #[cfg(test)]
@@ -104,7 +102,6 @@ pub mod allocation_bench_support {
 
 use app_commands::*;
 pub(crate) use app_state::*;
-use audit_log::*;
 pub(crate) use cli_args::*;
 pub(crate) use codex_binary::{codex_bin, validate_selected_codex_binary};
 pub(crate) use codex_config::*;

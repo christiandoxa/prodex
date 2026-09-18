@@ -3,7 +3,7 @@ mod search;
 pub(crate) use search::*;
 
 #[derive(Default)]
-#[cfg(any(not(feature = "mojo"), test))]
+#[cfg(not(feature = "mojo"))]
 pub(super) struct GitStatusSummary {
     pub(super) branch: Option<String>,
     pub(super) staged: Vec<String>,
@@ -16,7 +16,7 @@ pub(super) struct GitStatusSummary {
     pub(super) clean: bool,
 }
 
-#[cfg(any(not(feature = "mojo"), test))]
+#[cfg(not(feature = "mojo"))]
 pub(super) fn is_short_git_status_line(line: &str) -> bool {
     if line.len() < 3 {
         return false;
@@ -31,7 +31,7 @@ pub(super) fn is_short_git_status_line(line: &str) -> bool {
     valid_status(bytes[0]) && valid_status(bytes[1]) && bytes[2] == b' '
 }
 
-#[cfg(any(not(feature = "mojo"), test))]
+#[cfg(not(feature = "mojo"))]
 pub(super) fn parse_short_git_status_line(line: &str, summary: &mut GitStatusSummary) {
     if let Some(branch) = line.strip_prefix("## ") {
         summary.branch = Some(branch.trim().to_string());
@@ -64,7 +64,7 @@ pub(super) fn parse_short_git_status_line(line: &str, summary: &mut GitStatusSum
     push_short_status_path(worktree, path, false, summary);
 }
 
-#[cfg(any(not(feature = "mojo"), test))]
+#[cfg(not(feature = "mojo"))]
 pub(super) fn push_short_status_path(
     status: char,
     path: &str,
@@ -87,7 +87,7 @@ pub(super) fn push_short_status_path(
     }
 }
 
-#[cfg(any(not(feature = "mojo"), test))]
+#[cfg(not(feature = "mojo"))]
 pub(super) fn parse_long_git_status_lines(lines: &[&str], summary: &mut GitStatusSummary) {
     let mut section = GitStatusSection::Other;
     for line in lines {
@@ -98,7 +98,7 @@ pub(super) fn parse_long_git_status_lines(lines: &[&str], summary: &mut GitStatu
     }
 }
 
-#[cfg(any(not(feature = "mojo"), test))]
+#[cfg(not(feature = "mojo"))]
 fn parse_long_git_status_line(
     trimmed: &str,
     section: &mut GitStatusSection,
@@ -132,7 +132,7 @@ fn parse_long_git_status_line(
     push_long_status_entry(trimmed, *section, summary);
 }
 
-#[cfg(any(not(feature = "mojo"), test))]
+#[cfg(not(feature = "mojo"))]
 fn push_long_status_entry(
     trimmed: &str,
     section: GitStatusSection,
@@ -159,7 +159,7 @@ fn push_long_status_entry(
 }
 
 #[derive(Clone, Copy)]
-#[cfg(any(not(feature = "mojo"), test))]
+#[cfg(not(feature = "mojo"))]
 pub(super) enum GitStatusSection {
     Staged,
     Modified,
@@ -168,7 +168,7 @@ pub(super) enum GitStatusSection {
     Other,
 }
 
-#[cfg(any(not(feature = "mojo"), test))]
+#[cfg(not(feature = "mojo"))]
 pub(super) fn parse_long_status_path(trimmed: &str) -> String {
     trimmed
         .split_once(':')
@@ -176,7 +176,7 @@ pub(super) fn parse_long_status_path(trimmed: &str) -> String {
         .unwrap_or_else(|| trimmed.to_string())
 }
 
-#[cfg(any(not(feature = "mojo"), test))]
+#[cfg(not(feature = "mojo"))]
 pub(super) fn push_item_summary(
     output: &mut Vec<String>,
     label: &str,
@@ -206,7 +206,7 @@ pub(super) fn push_item_summary(
     output.push(format!("{label} ({}): {rendered}", unique.len()));
 }
 
-#[cfg(any(not(feature = "mojo"), test))]
+#[cfg(not(feature = "mojo"))]
 pub(super) struct GitDiffSummary {
     pub(super) path: String,
     pub(super) added: usize,
@@ -217,143 +217,7 @@ pub(super) struct GitDiffSummary {
 }
 
 #[derive(Default)]
-pub(super) struct RustDiagnosticSummary {
-    pub(super) errors: usize,
-    pub(super) warnings: usize,
-    pub(super) panics: usize,
-    pub(super) root_causes: Vec<String>,
-    pub(super) diagnostic_headers: Vec<String>,
-    pub(super) locations: Vec<String>,
-    pub(super) failed_tests: Vec<String>,
-    pub(super) exit_statuses: Vec<String>,
-}
-
-impl RustDiagnosticSummary {
-    pub(super) fn is_empty(&self) -> bool {
-        self.errors == 0
-            && self.warnings == 0
-            && self.panics == 0
-            && self.root_causes.is_empty()
-            && self.diagnostic_headers.is_empty()
-            && self.locations.is_empty()
-            && self.failed_tests.is_empty()
-            && self.exit_statuses.is_empty()
-    }
-
-    pub(super) fn record_diagnostic(&mut self, severity: RustDiagnosticSeverity, line: &str) {
-        match severity {
-            RustDiagnosticSeverity::Error => self.errors += 1,
-            RustDiagnosticSeverity::Warning => self.warnings += 1,
-        }
-        push_unique_line(&mut self.diagnostic_headers, line.trim());
-        if matches!(severity, RustDiagnosticSeverity::Error) {
-            push_unique_truncated_line(&mut self.root_causes, line, 240);
-        }
-    }
-
-    pub(super) fn record_failed_test(&mut self, test_name: &str) {
-        push_unique_line(&mut self.failed_tests, test_name.trim());
-        push_unique_line(&mut self.root_causes, test_name.trim());
-    }
-
-    pub(super) fn record_location(&mut self, line: &str) {
-        push_unique_line(&mut self.locations, line.trim());
-    }
-
-    pub(super) fn record_exit_status(&mut self, line: &str) {
-        push_unique_line(&mut self.exit_statuses, line.trim());
-        push_unique_truncated_line(&mut self.root_causes, line, 240);
-    }
-
-    pub(super) fn record_block_signals(&mut self, block: &RustCriticalBlock) {
-        for line in &block.lines {
-            if is_rust_location_line(line) {
-                self.record_location(line);
-            }
-            if is_rust_panic_line(line) {
-                self.panics += 1;
-                push_unique_truncated_line(&mut self.root_causes, line, 240);
-            }
-            if is_rust_exit_status_line(line) {
-                self.record_exit_status(line);
-            }
-            if let Some(test_name) = rust_failure_separator_name(line) {
-                self.record_failed_test(test_name);
-            }
-        }
-    }
-}
-
-#[derive(Clone, Copy)]
-pub(crate) enum RustDiagnosticSeverity {
-    Error,
-    Warning,
-}
-
-pub(super) struct RustCriticalBlock {
-    pub(super) label: String,
-    pub(super) lines: Vec<String>,
-}
-
-#[derive(Default)]
-pub(super) struct CommandDiagnosticSummary {
-    pub(super) errors: usize,
-    pub(super) stack_markers: usize,
-    pub(super) root_causes: Vec<String>,
-    pub(super) diagnostic_headers: Vec<String>,
-    pub(super) locations: Vec<String>,
-    pub(super) failed_tests: Vec<String>,
-    pub(super) exit_statuses: Vec<String>,
-}
-
-impl CommandDiagnosticSummary {
-    pub(super) fn is_empty(&self) -> bool {
-        self.errors == 0
-            && self.stack_markers == 0
-            && self.root_causes.is_empty()
-            && self.diagnostic_headers.is_empty()
-            && self.locations.is_empty()
-            && self.failed_tests.is_empty()
-            && self.exit_statuses.is_empty()
-    }
-
-    pub(super) fn record_line(&mut self, line: &str) {
-        if is_error_signal_line(line) || is_typescript_diagnostic_line(line) {
-            self.errors += 1;
-            push_unique_truncated_line(&mut self.diagnostic_headers, line, 240);
-            push_unique_truncated_line(&mut self.root_causes, line, 240);
-        }
-        if let Some(test_name) = generic_failed_test_name(line) {
-            push_unique_line(&mut self.failed_tests, test_name);
-            push_unique_line(&mut self.root_causes, test_name);
-        }
-        if count_file_location_signals(line) > 0 {
-            push_unique_truncated_line(&mut self.locations, line, 240);
-        }
-        if is_rust_exit_status_line(line) {
-            push_unique_truncated_line(&mut self.exit_statuses, line, 240);
-            push_unique_truncated_line(&mut self.root_causes, line, 240);
-        }
-        if is_stack_signal_line(line) {
-            self.stack_markers += 1;
-            push_unique_truncated_line(&mut self.diagnostic_headers, line, 240);
-        }
-    }
-
-    pub(super) fn record_block_signals(&mut self, block: &CommandCriticalBlock) {
-        for line in &block.lines {
-            self.record_line(line);
-        }
-    }
-}
-
-pub(super) struct CommandCriticalBlock {
-    pub(super) label: String,
-    pub(super) lines: Vec<String>,
-}
-
-#[derive(Default)]
-#[cfg(any(not(feature = "mojo"), test))]
+#[cfg(not(feature = "mojo"))]
 pub(super) struct GitLogCommitSummary {
     pub(super) header: String,
     pub(super) metadata: Vec<String>,
@@ -362,7 +226,7 @@ pub(super) struct GitLogCommitSummary {
     pub(super) stat_summaries: Vec<String>,
 }
 
-#[cfg(any(not(feature = "mojo"), test))]
+#[cfg(not(feature = "mojo"))]
 pub(super) fn split_git_diff_sections<'a>(lines: &'a [&'a str]) -> Vec<Vec<&'a str>> {
     let mut sections = Vec::new();
     let mut current = Vec::new();
@@ -385,7 +249,7 @@ pub(super) fn split_git_diff_sections<'a>(lines: &'a [&'a str]) -> Vec<Vec<&'a s
     sections
 }
 
-#[cfg(any(not(feature = "mojo"), test))]
+#[cfg(not(feature = "mojo"))]
 pub(super) fn summarize_git_diff_section(section: &[&str]) -> GitDiffSummary {
     let mut summary = GitDiffSummary {
         path: git_diff_section_path(section),
@@ -401,7 +265,7 @@ pub(super) fn summarize_git_diff_section(section: &[&str]) -> GitDiffSummary {
     summary
 }
 
-#[cfg(any(not(feature = "mojo"), test))]
+#[cfg(not(feature = "mojo"))]
 fn record_git_diff_summary_line(summary: &mut GitDiffSummary, line: &str) {
     if line.starts_with("@@ ") {
         summary.hunks += 1;
@@ -417,14 +281,14 @@ fn record_git_diff_summary_line(summary: &mut GitDiffSummary, line: &str) {
     }
 }
 
-#[cfg(any(not(feature = "mojo"), test))]
+#[cfg(not(feature = "mojo"))]
 fn record_git_diff_semantic_context(summary: &mut GitDiffSummary, line: &str) {
     if let Some(context) = git_diff_semantic_context_line(line) {
         push_unique_truncated_line(&mut summary.semantic_contexts, &context, 120);
     }
 }
 
-#[cfg(any(not(feature = "mojo"), test))]
+#[cfg(not(feature = "mojo"))]
 pub(super) fn git_diff_section_path(section: &[&str]) -> String {
     for line in section {
         if let Some((_, rhs)) = line.split_once(" b/") {
@@ -439,7 +303,7 @@ pub(super) fn git_diff_section_path(section: &[&str]) -> String {
     "unknown".to_string()
 }
 
-#[cfg(any(not(feature = "mojo"), test))]
+#[cfg(not(feature = "mojo"))]
 pub(super) fn is_git_diff_structural_line(line: &str) -> bool {
     line.starts_with("diff --git ")
         || line.starts_with("index ")
@@ -458,7 +322,7 @@ pub(super) fn is_git_diff_structural_line(line: &str) -> bool {
         || line.starts_with("GIT binary patch")
 }
 
-#[cfg(any(not(feature = "mojo"), test))]
+#[cfg(not(feature = "mojo"))]
 pub(super) fn is_git_diff_excerpt_structural_line(line: &str, intent_focused: bool) -> bool {
     if line.starts_with("@@ ")
         || line.starts_with("Binary files ")
@@ -480,7 +344,7 @@ pub(super) fn is_git_diff_excerpt_structural_line(line: &str, intent_focused: bo
         || line.starts_with("rename to ")
 }
 
-#[cfg(any(not(feature = "mojo"), test))]
+#[cfg(not(feature = "mojo"))]
 pub(super) fn git_diff_semantic_context_line(line: &str) -> Option<String> {
     if line.starts_with("@@ ")
         && let Some((_, context)) = line.rsplit_once("@@")
@@ -555,7 +419,7 @@ pub(super) fn looks_like_git_diff_output(lines: &[&str]) -> bool {
     stat_lines > 0 && stat_summaries > 0
 }
 
-#[cfg(any(not(feature = "mojo"), test))]
+#[cfg(not(feature = "mojo"))]
 pub(super) fn looks_like_git_diff_stat_line(line: &str) -> bool {
     let trimmed = line.trim();
     let Some((path, stats)) = trimmed.split_once(" | ") else {
@@ -573,7 +437,7 @@ pub(super) fn looks_like_git_diff_stat_line(line: &str) -> bool {
             .is_some_and(|count| count.chars().all(|ch| ch.is_ascii_digit()))
 }
 
-#[cfg(any(not(feature = "mojo"), test))]
+#[cfg(not(feature = "mojo"))]
 pub(super) fn looks_like_git_diff_stat_summary(line: &str) -> bool {
     let trimmed = line.trim();
     trimmed.contains(" file changed")
@@ -602,7 +466,7 @@ pub(super) fn looks_like_git_log_stat_output(lines: &[&str]) -> bool {
     stat_lines > 0 || stat_summaries > 0
 }
 
-#[cfg(any(not(feature = "mojo"), test))]
+#[cfg(not(feature = "mojo"))]
 pub(super) fn parse_git_log_stat_commits(lines: &[&str]) -> Vec<GitLogCommitSummary> {
     let mut commits = Vec::new();
     let mut current = None::<GitLogCommitSummary>;
@@ -628,7 +492,7 @@ pub(super) fn parse_git_log_stat_commits(lines: &[&str]) -> Vec<GitLogCommitSumm
     commits
 }
 
-#[cfg(any(not(feature = "mojo"), test))]
+#[cfg(not(feature = "mojo"))]
 fn record_git_log_stat_line(commit: &mut GitLogCommitSummary, line: &str, trimmed: &str) {
     if trimmed.is_empty() {
         return;
@@ -644,7 +508,7 @@ fn record_git_log_stat_line(commit: &mut GitLogCommitSummary, line: &str, trimme
     }
 }
 
-#[cfg(any(not(feature = "mojo"), test))]
+#[cfg(not(feature = "mojo"))]
 fn finish_git_log_stat_commit(
     commits: &mut Vec<GitLogCommitSummary>,
     current: &mut Option<GitLogCommitSummary>,
@@ -656,7 +520,7 @@ fn finish_git_log_stat_commit(
     }
 }
 
-#[cfg(any(not(feature = "mojo"), test))]
+#[cfg(not(feature = "mojo"))]
 pub(super) fn parse_git_log_commit_header(line: &str) -> Option<String> {
     let trimmed = line.trim();
     if let Some(hash) = trimmed.strip_prefix("commit ") {
@@ -673,7 +537,7 @@ pub(super) fn parse_git_log_commit_header(line: &str) -> Option<String> {
     None
 }
 
-#[cfg(any(not(feature = "mojo"), test))]
+#[cfg(not(feature = "mojo"))]
 pub(super) fn looks_like_git_hash(input: &str) -> bool {
     (7..=64).contains(&input.len()) && input.chars().all(|ch| ch.is_ascii_hexdigit())
 }

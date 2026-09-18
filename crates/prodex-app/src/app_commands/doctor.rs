@@ -153,7 +153,6 @@ struct DoctorContext<'a> {
     codex_home: &'a std::path::Path,
     policy_summary: Option<&'a RuntimePolicySummary>,
     policy_summary_error: Option<&'a str>,
-    runtime_metrics_targets: &'a [String],
     import_auth_journal_count: usize,
     repaired_import_auth_journals: Option<usize>,
     runtime_config: Option<&'a RuntimeConfig>,
@@ -202,7 +201,6 @@ pub(crate) fn handle_doctor(args: DoctorArgs) -> Result<()> {
         .err()
         .map(|error| redaction_redact_secret_like_text(&format!("{error:#}")));
     let policy_summary = policy_summary.ok().flatten();
-    let runtime_metrics_targets = collect_runtime_broker_metrics_targets(&paths);
 
     let context = DoctorContext {
         args: &args,
@@ -211,7 +209,6 @@ pub(crate) fn handle_doctor(args: DoctorArgs) -> Result<()> {
         codex_home: &codex_home,
         policy_summary: policy_summary.as_ref(),
         policy_summary_error: policy_summary_error.as_deref(),
-        runtime_metrics_targets: &runtime_metrics_targets,
         import_auth_journal_count,
         repaired_import_auth_journals,
         runtime_config: runtime_config.as_ref(),
@@ -270,7 +267,6 @@ fn handle_doctor_bundle(context: &DoctorContext<'_>) -> Result<bool> {
         state: context.state,
         codex_home: context.codex_home,
         policy_summary: context.policy_summary,
-        runtime_metrics_targets: context.runtime_metrics_targets,
         import_auth_journal_count: context.import_auth_journal_count,
         repaired_import_auth_journals: context.repaired_import_auth_journals,
         runtime_config: context.runtime_config,
@@ -328,7 +324,6 @@ fn append_doctor_runtime_json_fields(
     object.insert("secret_backend".to_string(), secret_backend_json_value());
     object.insert("mojo_core".to_string(), mojo_core_json_value());
     object.insert("runtime_logs".to_string(), runtime_logs_json_value());
-    object.insert("audit_logs".to_string(), audit_logs_json_value());
     object.insert(
         "disabled_auth_profiles".to_string(),
         serde_json::Value::Array(
@@ -350,11 +345,6 @@ fn append_doctor_runtime_json_fields(
     object.insert(
         "live_brokers".to_string(),
         serde_json::to_value(collect_live_runtime_broker_observations(context.paths))
-            .unwrap_or_else(|_| serde_json::Value::Array(Vec::new())),
-    );
-    object.insert(
-        "live_broker_metrics_targets".to_string(),
-        serde_json::to_value(context.runtime_metrics_targets)
             .unwrap_or_else(|_| serde_json::Value::Array(Vec::new())),
     );
     object.insert(
@@ -482,7 +472,6 @@ fn render_human_doctor(context: DoctorContext<'_>) -> Result<()> {
         codex_home,
         policy_summary,
         policy_summary_error,
-        runtime_metrics_targets,
         import_auth_journal_count,
         repaired_import_auth_journals,
         runtime_config,
@@ -547,11 +536,6 @@ fn render_human_doctor(context: DoctorContext<'_>) -> Result<()> {
             format_secret_backend_summary(),
         ),
         ("Runtime logs".to_string(), format_runtime_logs_summary()),
-        ("Audit logs".to_string(), format_audit_logs_summary()),
-        (
-            "Runtime metrics".to_string(),
-            format_runtime_broker_metrics_targets(runtime_metrics_targets),
-        ),
         (
             "Import auth journals".to_string(),
             format_import_auth_journal_status(

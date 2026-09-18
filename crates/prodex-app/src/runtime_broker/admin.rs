@@ -61,25 +61,6 @@ pub(crate) fn build_runtime_proxy_json_response(
     response.boxed()
 }
 
-pub(crate) fn build_runtime_proxy_string_response(
-    status: u16,
-    body: String,
-    content_type: &str,
-) -> tiny_http::ResponseBox {
-    let mut response = TinyResponse::from_string(body).with_status_code(status);
-    if let Ok(header) = TinyHeader::from_bytes("Content-Type", content_type) {
-        response = response.with_header(header);
-    }
-    response.boxed()
-}
-
-pub(crate) fn build_runtime_proxy_prometheus_response(
-    status: u16,
-    body: String,
-) -> tiny_http::ResponseBox {
-    build_runtime_proxy_string_response(status, body, "text/plain; version=0.0.4; charset=utf-8")
-}
-
 fn runtime_broker_log_event_response(
     request: &mut tiny_http::Request,
     shared: &RuntimeRotationProxyShared,
@@ -167,26 +148,6 @@ fn runtime_broker_metrics_json_response(
     };
     let body = serde_json::to_string(&metrics).ok()?;
     Some(build_runtime_proxy_json_response(200, body))
-}
-
-fn runtime_broker_metrics_prometheus_response(
-    shared: &RuntimeRotationProxyShared,
-    metadata: &RuntimeBrokerMetadata,
-) -> Option<tiny_http::ResponseBox> {
-    let metrics = match runtime_broker_metrics_snapshot(shared, metadata) {
-        Ok(metrics) => metrics,
-        Err(err) => {
-            return Some(build_runtime_proxy_json_error_response(
-                500,
-                "internal_error",
-                &err.to_string(),
-            ));
-        }
-    };
-    let mut body =
-        runtime_metrics::render_runtime_broker_prometheus_from_metrics(metadata, &metrics);
-    body.push_str(&crate::semantic_compact_metrics::render_semantic_compact_metrics());
-    Some(build_runtime_proxy_prometheus_response(200, body))
 }
 
 fn runtime_broker_health_response(
@@ -344,7 +305,6 @@ fn apply_runtime_broker_activation(
 fn runtime_broker_activation_response(
     request: &mut tiny_http::Request,
     shared: &RuntimeRotationProxyShared,
-    metadata: RuntimeBrokerMetadata,
 ) -> Option<tiny_http::ResponseBox> {
     let current_profile = match runtime_broker_activation_profile(request) {
         Ok(current_profile) => current_profile,
@@ -361,17 +321,6 @@ fn runtime_broker_activation_response(
     runtime_proxy_log(
         shared,
         format!("runtime_broker_activate current_profile={current_profile}"),
-    );
-    crate::audit_log::append_runtime_audit_event_best_effort(
-        shared,
-        "runtime_broker",
-        "activate_profile",
-        "success",
-        serde_json::json!({
-            "broker_key": metadata.broker_key,
-            "listen_addr": metadata.listen_addr,
-            "current_profile": current_profile,
-        }),
     );
     Some(build_runtime_proxy_json_response(
         200,
@@ -404,7 +353,6 @@ fn runtime_broker_session_affinity_release_id(
 fn runtime_broker_session_affinity_release_response(
     request: &mut tiny_http::Request,
     shared: &RuntimeRotationProxyShared,
-    metadata: RuntimeBrokerMetadata,
 ) -> Option<tiny_http::ResponseBox> {
     let session_id = match runtime_broker_session_affinity_release_id(request) {
         Ok(session_id) => session_id,
@@ -417,16 +365,6 @@ fn runtime_broker_session_affinity_release_response(
             &err.to_string(),
         ));
     }
-    crate::audit_log::append_runtime_audit_event_best_effort(
-        shared,
-        "runtime_broker",
-        "release_session_affinity",
-        "success",
-        serde_json::json!({
-            "broker_key": metadata.broker_key,
-            "listen_addr": metadata.listen_addr,
-        }),
-    );
     Some(build_runtime_proxy_json_response(
         200,
         serde_json::to_string(
@@ -462,14 +400,11 @@ pub(crate) fn handle_runtime_proxy_admin_request(
         prodex_runtime_broker::RuntimeBrokerAdminRoute::Metrics => {
             runtime_broker_metrics_json_response(shared, &metadata)
         }
-        prodex_runtime_broker::RuntimeBrokerAdminRoute::MetricsPrometheus => {
-            runtime_broker_metrics_prometheus_response(shared, &metadata)
-        }
         prodex_runtime_broker::RuntimeBrokerAdminRoute::Activate => {
-            runtime_broker_activation_response(request, shared, metadata)
+            runtime_broker_activation_response(request, shared)
         }
         prodex_runtime_broker::RuntimeBrokerAdminRoute::ReleaseSessionAffinity => {
-            runtime_broker_session_affinity_release_response(request, shared, metadata)
+            runtime_broker_session_affinity_release_response(request, shared)
         }
         prodex_runtime_broker::RuntimeBrokerAdminRoute::LogSnapshot => {
             runtime_broker_log_snapshot_response(request, shared)

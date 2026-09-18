@@ -413,7 +413,7 @@ fn collect_intent_matching_lines(
     matches
 }
 
-#[cfg(any(not(feature = "mojo"), test))]
+#[cfg(not(feature = "mojo"))]
 pub(super) fn intent_line_matches(line: &str, intent_terms: &[String]) -> bool {
     score_intent_text(line, intent_terms) > 0
 }
@@ -459,4 +459,20 @@ pub(super) fn ensure_no_critical_signal_loss_for_intent(
     } else {
         candidate.to_string()
     }
+}
+
+fn count_success_output_path_roots(paths: &[String]) -> BTreeMap<String, usize> {
+    let mut roots = BTreeMap::new();
+    for path in paths {
+        *roots.entry(top_level_path_segment(path)).or_insert(0) += 1;
+    }
+    roots
+}
+
+fn count_success_output_path_extensions(paths: &[String]) -> BTreeMap<String, usize> {
+    let mut extensions = BTreeMap::new();
+    for path in paths {
+        *extensions.entry(path_extension_label(path)).or_insert(0) += 1;
+    }
+    extensions
 }

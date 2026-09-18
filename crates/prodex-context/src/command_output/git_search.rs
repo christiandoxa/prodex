@@ -1,4 +1,4 @@
-#[cfg(any(not(feature = "mojo"), test))]
+#[cfg(not(feature = "mojo"))]
 use super::intent::score_intent_text;
 use super::*;
 
@@ -31,7 +31,7 @@ pub(super) fn compact_git_status_output(
     compact_git_status_output_rust(input, options)
 }
 
-#[cfg(any(not(feature = "mojo"), test))]
+#[cfg(not(feature = "mojo"))]
 fn compact_git_status_output_rust(input: &str, options: &CommandOutputCompactOptions) -> String {
     let mut summary = GitStatusSummary::default();
     let lines = command_lines(input);
@@ -106,7 +106,7 @@ pub(super) fn compact_git_diff_output(
     compact_git_diff_output_with_intent(input, options, &[])
 }
 
-#[cfg(all(feature = "mojo", not(test)))]
+#[cfg(feature = "mojo")]
 pub(super) fn compact_git_diff_output_with_intent(
     input: &str,
     options: &CommandOutputCompactOptions,
@@ -132,7 +132,7 @@ pub(super) fn compact_git_diff_output_with_intent(
     finalize_compacted_command_output(CommandOutputKind::GitDiff, input, lines, options)
 }
 
-#[cfg(any(not(feature = "mojo"), test))]
+#[cfg(not(feature = "mojo"))]
 pub(super) fn compact_git_diff_output_with_intent(
     input: &str,
     options: &CommandOutputCompactOptions,
@@ -216,7 +216,7 @@ pub(super) fn compact_git_diff_output_with_intent(
     ensure_no_critical_signal_loss_for_intent(input, &output, options)
 }
 
-#[cfg(any(not(feature = "mojo"), test))]
+#[cfg(not(feature = "mojo"))]
 fn git_diff_summary_output(
     summaries: &[GitDiffSummary],
     total_added: usize,
@@ -257,7 +257,7 @@ fn git_diff_summary_output(
     output
 }
 
-#[cfg(any(not(feature = "mojo"), test))]
+#[cfg(not(feature = "mojo"))]
 fn append_git_diff_excerpt_output(
     output: &mut Vec<String>,
     sections: &[Vec<&str>],
@@ -297,7 +297,7 @@ fn append_git_diff_excerpt_output(
     }
 }
 
-#[cfg(any(not(feature = "mojo"), test))]
+#[cfg(not(feature = "mojo"))]
 fn score_git_diff_section_for_intent(
     section: &[&str],
     summary: &GitDiffSummary,
@@ -316,7 +316,7 @@ fn score_git_diff_section_for_intent(
     score
 }
 
-#[cfg(any(not(feature = "mojo"), test))]
+#[cfg(not(feature = "mojo"))]
 fn select_git_diff_detail_line_indexes(
     section: &[&str],
     budget: usize,
@@ -358,12 +358,12 @@ fn select_git_diff_detail_line_indexes(
     selected
 }
 
-#[cfg(any(not(feature = "mojo"), test))]
+#[cfg(not(feature = "mojo"))]
 fn git_diff_intent_context_radius() -> usize {
     2
 }
 
-#[cfg(any(not(feature = "mojo"), test))]
+#[cfg(not(feature = "mojo"))]
 fn is_git_diff_changed_detail_line(line: &str) -> bool {
     (line.starts_with('+') && !line.starts_with("+++")
         || line.starts_with('-') && !line.starts_with("---"))
@@ -400,7 +400,7 @@ pub(super) fn compact_git_log_stat_output(
     compact_git_log_stat_output_rust(input, options)
 }
 
-#[cfg(any(not(feature = "mojo"), test))]
+#[cfg(not(feature = "mojo"))]
 fn compact_git_log_stat_output_rust(input: &str, options: &CommandOutputCompactOptions) -> String {
     let lines = command_lines(input);
     let commits = parse_git_log_stat_commits(&lines);
@@ -502,7 +502,7 @@ pub(super) fn compact_search_output(input: &str, options: &CommandOutputCompactO
     compact_search_output_rust(input, options)
 }
 
-#[cfg(any(not(feature = "mojo"), test))]
+#[cfg(not(feature = "mojo"))]
 fn compact_search_output_rust(input: &str, options: &CommandOutputCompactOptions) -> String {
     let (files, other) = collect_search_output_matches(input);
 
@@ -587,7 +587,7 @@ pub(super) fn compact_file_list_output(
     compact_file_list_output_rust(input, options)
 }
 
-#[cfg(any(not(feature = "mojo"), test))]
+#[cfg(not(feature = "mojo"))]
 fn compact_file_list_output_rust(input: &str, options: &CommandOutputCompactOptions) -> String {
     let entries = collect_file_list_entries(input);
 
@@ -675,7 +675,7 @@ pub(super) fn collect_file_list_entries(input: &str) -> Vec<String> {
         .collect()
 }
 
-#[cfg(any(not(feature = "mojo"), test))]
+#[cfg(not(feature = "mojo"))]
 fn compact_git_diff_stat_output(
     lines: &[&str],
     options: &CommandOutputCompactOptions,
@@ -748,7 +748,3 @@ fn compact_git_diff_stat_output(
 
     Some(output)
 }
-
-#[cfg(all(test, feature = "mojo"))]
-#[path = "git_search_mojo_tests.rs"]
-mod mojo_tests;

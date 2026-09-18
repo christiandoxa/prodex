@@ -3,28 +3,25 @@ use std::path::Path;
 
 use crate::{command_lines, count_text_lines, normalize_command_output};
 
-#[cfg(any(not(feature = "mojo"), test))]
+#[cfg(not(feature = "mojo"))]
 mod base64;
 mod basic;
-#[cfg(any(not(feature = "mojo"), test))]
+#[cfg(not(feature = "mojo"))]
 mod binary;
 mod lock_vendor;
-#[cfg(any(not(feature = "mojo"), test))]
+#[cfg(not(feature = "mojo"))]
 mod minified;
 mod paths;
-#[cfg(any(not(feature = "mojo"), test))]
+#[cfg(not(feature = "mojo"))]
 mod supplement;
 
 use self::basic::{is_lockfile_or_vendor_path, repeated_path_flood};
-#[cfg(any(not(feature = "mojo"), test))]
+#[cfg(not(feature = "mojo"))]
 use self::basic::{looks_like_base64_blob, looks_like_minified_js_json};
 #[cfg(feature = "mojo")]
 use self::lock_vendor::context_lockfile_or_vendor_path_finding;
-pub(crate) use self::paths::{
-    context_noise_normalize_path_token_supplement,
-    context_noise_strip_path_location_suffix_supplement,
-};
-#[cfg(any(not(feature = "mojo"), test))]
+pub(crate) use self::paths::context_noise_strip_path_location_suffix_supplement;
+#[cfg(not(feature = "mojo"))]
 use self::supplement::add_context_blob_noise_supplemental_findings;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize)]
@@ -214,7 +211,7 @@ fn detect_context_blob_noise_inner(path: Option<&Path>, input: &str) -> ContextB
     detect_context_blob_noise_inner_rust(path, input)
 }
 
-#[cfg(any(not(feature = "mojo"), test))]
+#[cfg(not(feature = "mojo"))]
 fn detect_context_blob_noise_inner_rust(
     path: Option<&Path>,
     input: &str,
@@ -289,46 +286,5 @@ pub(super) fn push_context_blob_noise_finding(
         .any(|existing| existing.kind == finding.kind)
     {
         findings.push(finding);
-    }
-}
-
-#[cfg(all(test, feature = "mojo"))]
-mod mojo_parity_tests {
-    use super::*;
-
-    #[test]
-    fn blob_noise_mojo_matches_rust_oracle_for_representative_inputs() {
-        let base = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-        let json_entries = (0..48)
-            .map(|index| format!("\"k{index}\":{{\"v\":\"{index}\",\"d\":[\"a\",\"b\"]}}"))
-            .collect::<Vec<_>>()
-            .join(",");
-        let cases = vec![
-            "plain diagnostic\nerror[E0308]: mismatch\n".to_string(),
-            format!("head\n{}\ntail\n", base.repeat(10)),
-            format!("{{{json_entries}}}"),
-            (0..36)
-                .map(|index| format!("!function(a){{return a+{index}}}({index});"))
-                .collect::<String>(),
-            format!("plain\n{}payload\n", "\u{1}".repeat(6)),
-            (0..5)
-                .map(|index| {
-                    format!("[[package]]\nname = \"d{index}\"\nchecksum = \"abc{index}\"\n")
-                })
-                .collect::<String>(),
-        ];
-        for input in cases {
-            assert_eq!(
-                detect_context_blob_noise_inner(None, &input),
-                detect_context_blob_noise_inner_rust(None, &input),
-                "input prefix {:?}",
-                input.chars().take(80).collect::<String>()
-            );
-        }
-        let vendor = Path::new("node_modules/example/index.js");
-        assert_eq!(
-            detect_context_blob_noise_inner(Some(vendor), "module.exports = 1;\n"),
-            detect_context_blob_noise_inner_rust(Some(vendor), "module.exports = 1;\n")
-        );
     }
 }

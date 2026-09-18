@@ -15,7 +15,6 @@ members = [
     "crates/prodex-optional-tools",
     "crates/prodex-cli",
     "crates/prodex-config",
-    "crates/prodex-audit-log",
     "crates/prodex-bench-support",
     "crates/prodex-codex-config",
     "crates/prodex-context",
@@ -40,7 +39,6 @@ members = [
     "crates/prodex-runtime-launch",
     "crates/prodex-runtime-log",
     "crates/prodex-runtime-policy",
-    "crates/prodex-runtime-metrics",
     "crates/prodex-runtime-quota",
     "crates/prodex-runtime-state",
     "crates/prodex-runtime-store",
@@ -93,7 +91,6 @@ pbkdf2 = "0.13.0"
 portable-pty = "0.9.0"
 ratatui = { version = "0.30.2", default-features = false, features = ["crossterm"] }
 unicode-width = "0.2.2"
-prodex_audit_log = { package = "prodex-audit-log", path = "crates/prodex-audit-log", version = "0.429.4" }
 prodex_app = { package = "prodex-app", path = "crates/prodex-app", version = "0.429.4" }
 prodex_bench_support = { package = "prodex-bench-support", path = "crates/prodex-bench-support", version = "0.429.4" }
 prodex_optional_tools = { package = "prodex-optional-tools", path = "crates/prodex-optional-tools", version = "0.429.4" }
@@ -139,7 +136,6 @@ rustls-native-certs = "0.8.4"
 tokio-rustls = "0.26.5"
 runtime_anthropic_crate = { package = "prodex-runtime-anthropic", path = "crates/prodex-runtime-anthropic", version = "0.429.4" }
 runtime_log = { package = "prodex-runtime-log", path = "crates/prodex-runtime-log", version = "0.429.4" }
-runtime_metrics = { package = "prodex-runtime-metrics", path = "crates/prodex-runtime-metrics", version = "0.429.4" }
 runtime_proxy_crate = { package = "prodex-runtime-proxy", path = "crates/prodex-runtime-proxy", version = "0.429.4" }
 secret_store = { package = "prodex-secret-store", path = "crates/prodex-secret-store", version = "0.429.4" }
 serde = { version = "1.0.228", features = ["derive"] }
