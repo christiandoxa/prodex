@@ -141,11 +141,6 @@ pub(crate) const RUNTIME_PROXY_LATEST_LOG_POINTER: &str = "prodex-runtime-latest
 pub(crate) const CODEX_REFRESH_TOKEN_URL_OVERRIDE_ENV: &str = "CODEX_REFRESH_TOKEN_URL_OVERRIDE";
 pub(crate) const PRODEX_SECRET_BACKEND_ENV: &str = "PRODEX_SECRET_BACKEND";
 pub(crate) const PRODEX_SECRET_KEYRING_SERVICE_ENV: &str = "PRODEX_SECRET_KEYRING_SERVICE";
-pub(crate) const INFO_RUNTIME_LOG_TAIL_BYTES: usize =
-    if cfg!(test) { 64 * 1024 } else { 512 * 1024 };
-pub(crate) const INFO_FORECAST_LOOKBACK_SECONDS: i64 = if cfg!(test) { 3_600 } else { 3 * 60 * 60 };
-pub(crate) const INFO_FORECAST_MIN_SPAN_SECONDS: i64 = if cfg!(test) { 60 } else { 5 * 60 };
-pub(crate) const INFO_RECENT_LOAD_WINDOW_SECONDS: i64 = if cfg!(test) { 600 } else { 30 * 60 };
 pub(crate) const LAST_GOOD_FILE_SUFFIX: &str = ".last-good";
 pub(crate) const RUNTIME_PREVIOUS_RESPONSE_NEGATIVE_CACHE_SECONDS: i64 =
     if cfg!(test) { 5 } else { 180 };
