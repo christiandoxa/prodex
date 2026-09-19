@@ -133,7 +133,7 @@ pub fn kiro_provider_core_chat_completions_request_body(
                 "invalid_request_body",
             )
         })?;
-        return kiro_provider_core_responses_request_body(&body, false);
+        kiro_provider_core_responses_request_body(&body, false)
     }
 
     #[cfg(not(feature = "mojo"))]

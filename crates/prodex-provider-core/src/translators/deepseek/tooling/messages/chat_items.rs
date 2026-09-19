@@ -2,6 +2,7 @@
 
 use serde_json::{Value, json};
 
+#[cfg(any(not(feature = "mojo"), test))]
 pub(super) fn deepseek_message_content_text(value: Option<&Value>) -> Option<String> {
     let parts = value?.as_array()?;
     let text = parts
@@ -12,6 +13,7 @@ pub(super) fn deepseek_message_content_text(value: Option<&Value>) -> Option<Str
     Some(text)
 }
 
+#[cfg(any(not(feature = "mojo"), test))]
 fn deepseek_message_content_part_text(value: &Value) -> Option<String> {
     match value {
         Value::String(text) => Some(text.clone()),
@@ -25,6 +27,7 @@ fn deepseek_message_content_part_text(value: &Value) -> Option<String> {
     }
 }
 
+#[cfg(any(not(feature = "mojo"), test))]
 pub(super) fn deepseek_message_tool_calls(item: &Value) -> Option<Vec<Value>> {
     let tool_calls = item.get("tool_calls")?.as_array()?;
     let translated = tool_calls
@@ -34,6 +37,7 @@ pub(super) fn deepseek_message_tool_calls(item: &Value) -> Option<Vec<Value>> {
     (!translated.is_empty()).then_some(translated)
 }
 
+#[cfg(any(not(feature = "mojo"), test))]
 fn deepseek_message_tool_call(value: &Value) -> Option<Value> {
     let object = value.as_object()?;
     let function = object.get("function").and_then(Value::as_object)?;

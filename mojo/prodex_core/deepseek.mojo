@@ -2494,14 +2494,8 @@ def deepseek_raw_put_tool_output_message_from_item(
     ):
         return False
     if deepseek_raw_present(output):
-        if deepseek_json_byte(view, output[0]) == 34:
-            if not deepseek_put_view_range(writer, view, output[0], output[1]):
-                return False
-        else:
-            if not deepseek_put_json_string_range(
-                writer, view, output[0], output[1]
-            ):
-                return False
+        if not deepseek_raw_put_content_text_string(writer, view, output):
+            return False
     elif not deepseek_put_literal(writer, StringSlice('""')):
         return False
     return deepseek_put_byte(writer, 125)
@@ -2553,6 +2547,10 @@ def deepseek_raw_put_generic_input_message(
                 )
             ):
                 return False
+    var calls = deepseek_raw_member(view, item, StringSlice("tool_calls"))
+    if deepseek_raw_present(calls):
+        if not deepseek_raw_put_generic_tool_calls(writer, view, calls):
+            return False
     return deepseek_put_byte(writer, 125)
 
 def deepseek_raw_mcp_has_result(
@@ -2598,6 +2596,12 @@ def deepseek_raw_put_input_items(
         var is_mcp = deepseek_raw_present(kind) and deepseek_json_raw_equals(
             view, kind[0], kind[1], StringSlice("mcp_call")
         )
+        var is_custom = deepseek_raw_present(kind) and deepseek_json_raw_equals(
+            view, kind[0], kind[1], StringSlice("custom_tool_call")
+        )
+        var is_local_shell = deepseek_raw_present(kind) and deepseek_json_raw_equals(
+            view, kind[0], kind[1], StringSlice("local_shell_call")
+        )
         var is_output = False
         if deepseek_raw_present(kind):
             is_output = (
@@ -2642,6 +2646,22 @@ def deepseek_raw_put_input_items(
                     )
                 ):
                     return False
+        elif is_custom:
+            if (
+                not deepseek_raw_put_array_separator(writer, first_ptr)
+                or not deepseek_raw_put_custom_tool_call_message_from_item(
+                    writer, view, item
+                )
+            ):
+                return False
+        elif is_local_shell:
+            if (
+                not deepseek_raw_put_array_separator(writer, first_ptr)
+                or not deepseek_raw_put_local_shell_call_message_from_item(
+                    writer, view, item
+                )
+            ):
+                return False
         elif is_output:
             if (
                 not deepseek_raw_put_array_separator(writer, first_ptr)
@@ -2840,3 +2860,286 @@ def deepseek_put_request_metadata(
         if not deepseek_put_byte(writer, 125):
             return False
     return deepseek_put_byte(writer, 125)
+
+def deepseek_raw_put_content_text_string(
+    writer: Pointer[mut=True, DeepSeekResponseWriter, _],
+    view: ProdexRichStringView,
+    bounds: InlineArray[Int64, 2],
+) -> Bool:
+    if not deepseek_raw_present(bounds):
+        return deepseek_put_literal(writer, StringSlice('""'))
+    if deepseek_json_byte(view, bounds[0]) == 34:
+        return deepseek_put_view_range(writer, view, bounds[0], bounds[1])
+    if deepseek_json_byte(view, bounds[0]) != 91:
+        return deepseek_put_json_string_range(writer, view, bounds[0], bounds[1])
+    if not deepseek_put_byte(writer, 34):
+        return False
+    var first = True
+    var cursor = deepseek_json_skip_ws(view, bounds[0] + 1, bounds[1] - 1)
+    while cursor < bounds[1] - 1:
+        var item_end = deepseek_json_value_end(view, cursor, bounds[1] - 1, 0)
+        if item_end < 0:
+            return False
+        var text = InlineArray[Int64, 2](fill=-1)
+        if deepseek_json_byte(view, cursor) == 34:
+            text[0] = cursor
+            text[1] = item_end
+        elif deepseek_json_byte(view, cursor) == 123:
+            text = deepseek_json_object_member(
+                view, cursor, item_end, StringSlice("text")
+            )
+            if not deepseek_raw_present(text):
+                text = deepseek_json_object_member(
+                    view, cursor, item_end, StringSlice("input_text")
+                )
+            if not deepseek_raw_present(text):
+                text = deepseek_json_object_member(
+                    view, cursor, item_end, StringSlice("output_text")
+                )
+        if deepseek_raw_present(text) and deepseek_json_byte(view, text[0]) == 34:
+            if not first and not deepseek_put_literal(writer, StringSlice("\n")):
+                return False
+            first = False
+            if not deepseek_put_view_range(writer, view, text[0] + 1, text[1] - 1):
+                return False
+        cursor = deepseek_json_skip_ws(view, item_end, bounds[1] - 1)
+        if cursor < bounds[1] - 1 and deepseek_json_byte(view, cursor) == 44:
+            cursor = deepseek_json_skip_ws(view, cursor + 1, bounds[1] - 1)
+            continue
+        if cursor != bounds[1] - 1:
+            return False
+        break
+    return deepseek_put_byte(writer, 34)
+
+def deepseek_raw_put_custom_tool_call_message_from_item(
+    writer: Pointer[mut=True, DeepSeekResponseWriter, _],
+    view: ProdexRichStringView,
+    item: InlineArray[Int64, 2],
+) -> Bool:
+    var call_id = deepseek_raw_first_member3(
+        view,
+        item,
+        StringSlice("call_id"),
+        StringSlice("tool_call_id"),
+        StringSlice("id"),
+    )
+    var name = deepseek_raw_member(view, item, StringSlice("name"))
+    if not deepseek_raw_present(name):
+        name = deepseek_raw_member(view, item, StringSlice("tool_name"))
+    if not deepseek_raw_string_nonempty(view, name):
+        return deepseek_put_literal(writer, StringSlice('{"role":"assistant","content":""}'))
+    var input = deepseek_raw_member(view, item, StringSlice("input"))
+    var signature = deepseek_raw_thought_signature(view, item)
+    if (
+        not deepseek_put_literal(writer, StringSlice('{"role":"assistant","content":"","tool_calls":[{"id":'))
+        or not deepseek_raw_put_default_or_string(
+            writer, view, call_id, StringSlice('"call_1"')
+        )
+        or not deepseek_put_literal(
+            writer, StringSlice(',"type":"function","function":{"name":')
+        )
+        or not deepseek_put_view_range(writer, view, name[0], name[1])
+        or not deepseek_put_literal(writer, StringSlice(',"arguments":"{\\"input\\":'))
+    ):
+        return False
+
+    # Arguments must itself be a JSON string containing {"input": <string>}.
+    var temp_start = writer[].written
+    if deepseek_raw_present(input) and deepseek_json_byte(view, input[0]) == 34:
+        if not deepseek_put_view_range(writer, view, input[0], input[1]):
+            return False
+    elif deepseek_raw_present(input) and deepseek_json_byte(view, input[0]) == 91:
+        # Reuse Responses content flattening, then escape the resulting quoted string
+        # into the arguments string.
+        var temp = DeepSeekResponseWriter(
+            writer[].output + writer[].written,
+            writer[].capacity - writer[].written,
+            0,
+        )
+        var temp_ptr = Pointer(to=temp)
+        if not deepseek_raw_put_content_text_string(temp_ptr, view, input):
+            return False
+        var nested = ProdexRichStringView(
+            UInt(writer[].output + writer[].written),
+            UInt(temp.written),
+        )
+        writer[].written = temp_start
+        if not deepseek_put_json_string(writer, nested):
+            return False
+    elif deepseek_raw_present(input):
+        if (
+            not deepseek_put_literal(writer, StringSlice('"'))
+            or not deepseek_put_view_range(writer, view, input[0], input[1])
+            or not deepseek_put_literal(writer, StringSlice('"'))
+        ):
+            return False
+    elif not deepseek_put_literal(writer, StringSlice('""')):
+        return False
+    if not deepseek_put_literal(writer, StringSlice('}"')):
+        return False
+    if not deepseek_put_byte(writer, 125):
+        return False
+    if deepseek_raw_present(signature):
+        if (
+            not deepseek_put_literal(
+                writer, StringSlice(',"gemini_thought_signature":')
+            )
+            or not deepseek_put_view_range(writer, view, signature[0], signature[1])
+        ):
+            return False
+    return deepseek_put_literal(writer, StringSlice("}]}"))
+
+def deepseek_raw_shell_command(
+    writer: Pointer[mut=True, DeepSeekResponseWriter, _],
+    view: ProdexRichStringView,
+    item: InlineArray[Int64, 2],
+) -> Bool:
+    var action = deepseek_raw_member(view, item, StringSlice("action"))
+    var command = InlineArray[Int64, 2](fill=-1)
+    if deepseek_raw_present(action) and deepseek_json_byte(view, action[0]) == 123:
+        command = deepseek_raw_member(view, action, StringSlice("command"))
+    if deepseek_raw_present(command) and deepseek_json_byte(view, command[0]) == 91:
+        if not deepseek_put_byte(writer, 34):
+            return False
+        var first = True
+        var cursor = deepseek_json_skip_ws(view, command[0] + 1, command[1] - 1)
+        while cursor < command[1] - 1:
+            var part_end = deepseek_json_value_end(view, cursor, command[1] - 1, 0)
+            if part_end < 0:
+                return False
+            if deepseek_json_byte(view, cursor) == 34:
+                if not first and not deepseek_put_byte(writer, 32):
+                    return False
+                first = False
+                if not deepseek_put_view_range(writer, view, cursor + 1, part_end - 1):
+                    return False
+            cursor = deepseek_json_skip_ws(view, part_end, command[1] - 1)
+            if cursor < command[1] - 1 and deepseek_json_byte(view, cursor) == 44:
+                cursor = deepseek_json_skip_ws(view, cursor + 1, command[1] - 1)
+                continue
+            break
+        return deepseek_put_byte(writer, 34)
+    command = deepseek_raw_member(view, item, StringSlice("command"))
+    if deepseek_raw_string_nonempty(view, command):
+        return deepseek_put_view_range(writer, view, command[0], command[1])
+    return False
+
+def deepseek_raw_shell_optional(
+    writer: Pointer[mut=True, DeepSeekResponseWriter, _],
+    view: ProdexRichStringView,
+    item: InlineArray[Int64, 2],
+    key: StringSlice,
+) -> Bool:
+    var value = deepseek_raw_member(view, item, key)
+    if not deepseek_raw_present(value):
+        var action = deepseek_raw_member(view, item, StringSlice("action"))
+        if deepseek_raw_present(action) and deepseek_json_byte(view, action[0]) == 123:
+            value = deepseek_raw_member(view, action, key)
+    if not deepseek_raw_present(value):
+        return True
+    return (
+        deepseek_put_literal(writer, StringSlice(","))
+        and deepseek_put_json_string_range(writer, key, 0, Int64(key.byte_length()))
+        and deepseek_put_byte(writer, 58)
+        and deepseek_put_view_range(writer, view, value[0], value[1])
+    )
+
+def deepseek_raw_put_local_shell_call_message_from_item(
+    writer: Pointer[mut=True, DeepSeekResponseWriter, _],
+    view: ProdexRichStringView,
+    item: InlineArray[Int64, 2],
+) -> Bool:
+    var call_id = deepseek_raw_first_member3(
+        view,
+        item,
+        StringSlice("call_id"),
+        StringSlice("tool_call_id"),
+        StringSlice("id"),
+    )
+    if (
+        not deepseek_put_literal(writer, StringSlice('{"role":"assistant","content":"","tool_calls":[{"id":'))
+        or not deepseek_raw_put_default_or_string(
+            writer, view, call_id, StringSlice('"call_1"')
+        )
+        or not deepseek_put_literal(
+            writer, StringSlice(',"type":"function","function":{"name":"shell_command","arguments":"{\\"command\\":')
+        )
+    ):
+        return False
+
+    # Emit command as a JSON string embedded in the arguments string.
+    var command_start = writer[].written
+    var temp = DeepSeekResponseWriter(
+        writer[].output + writer[].written,
+        writer[].capacity - writer[].written,
+        0,
+    )
+    var temp_ptr = Pointer(to=temp)
+    if not deepseek_raw_shell_command(temp_ptr, view, item):
+        return deepseek_put_literal(writer, StringSlice('"}"}]}'))
+    var command_view = ProdexRichStringView(
+        UInt(writer[].output + command_start), UInt(temp.written)
+    )
+    writer[].written = command_start
+    if not deepseek_put_json_string(writer, command_view):
+        return False
+    if not deepseek_put_literal(writer, StringSlice('}"')):
+        return False
+    return deepseek_put_literal(writer, StringSlice("}]}"))
+
+def deepseek_raw_put_generic_tool_calls(
+    writer: Pointer[mut=True, DeepSeekResponseWriter, _],
+    view: ProdexRichStringView,
+    calls: InlineArray[Int64, 2],
+) -> Bool:
+    if not deepseek_raw_present(calls) or deepseek_json_byte(view, calls[0]) != 91:
+        return True
+    if not deepseek_put_literal(writer, StringSlice(',"tool_calls":[')):
+        return False
+    var first = True
+    var cursor = deepseek_json_skip_ws(view, calls[0] + 1, calls[1] - 1)
+    while cursor < calls[1] - 1:
+        var call_end = deepseek_json_value_end(view, cursor, calls[1] - 1, 0)
+        if call_end < 0:
+            return False
+        if deepseek_json_byte(view, cursor) == 123:
+            var function = deepseek_json_object_member(
+                view, cursor, call_end, StringSlice("function")
+            )
+            if deepseek_raw_present(function) and deepseek_json_byte(view, function[0]) == 123:
+                var name = deepseek_json_object_member(
+                    view, function[0], function[1], StringSlice("name")
+                )
+                if deepseek_raw_string_nonempty(view, name):
+                    if not first and not deepseek_put_byte(writer, 44):
+                        return False
+                    first = False
+                    var call_id = deepseek_json_object_member(
+                        view, cursor, call_end, StringSlice("id")
+                    )
+                    var arguments = deepseek_json_object_member(
+                        view, function[0], function[1], StringSlice("arguments")
+                    )
+                    if not deepseek_put_byte(writer, 123):
+                        return False
+                    if deepseek_raw_present(call_id):
+                        if (
+                            not deepseek_put_literal(writer, StringSlice('"id":'))
+                            or not deepseek_put_view_range(writer, view, call_id[0], call_id[1])
+                            or not deepseek_put_byte(writer, 44)
+                        ):
+                            return False
+                    if (
+                        not deepseek_put_literal(writer, StringSlice('"type":"function","function":{"name":'))
+                        or not deepseek_put_view_range(writer, view, name[0], name[1])
+                        or not deepseek_put_literal(writer, StringSlice(',"arguments":'))
+                        or not deepseek_raw_put_argument_string(writer, view, arguments)
+                        or not deepseek_put_literal(writer, StringSlice("}}"))
+                    ):
+                        return False
+        cursor = deepseek_json_skip_ws(view, call_end, calls[1] - 1)
+        if cursor < calls[1] - 1 and deepseek_json_byte(view, cursor) == 44:
+            cursor = deepseek_json_skip_ws(view, cursor + 1, calls[1] - 1)
+            continue
+        break
+    return deepseek_put_byte(writer, 93)

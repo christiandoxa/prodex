@@ -3,6 +3,7 @@
 use super::deepseek_tool_call_message;
 use serde_json::Value;
 
+#[cfg(any(not(feature = "mojo"), test))]
 pub(super) fn deepseek_input_local_shell_call_message(item: &Value) -> Option<Value> {
     let call_id = item
         .get("call_id")
@@ -42,6 +43,7 @@ pub(super) fn deepseek_input_local_shell_call_message(item: &Value) -> Option<Va
     ))
 }
 
+#[cfg(any(not(feature = "mojo"), test))]
 fn deepseek_copy_shell_argument(
     item: &Value,
     arguments: &mut serde_json::Map<String, Value>,
