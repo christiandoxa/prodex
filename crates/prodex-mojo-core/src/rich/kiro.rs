@@ -299,6 +299,15 @@ unsafe extern "C" {
         written_address: u64,
         issue_address: u64,
     ) -> i64;
+    fn prodex_mojo_kiro_chat_response_rewrite_v1(
+        abi_version: i64,
+        input_address: u64,
+        input_length: i64,
+        request_id: u64,
+        output_address: u64,
+        output_capacity: i64,
+        written_address: u64,
+    ) -> i64;
 }
 
 const KIRO_KERNEL_MAX_BYTES: usize = 4 * 1024 * 1024;
@@ -533,6 +542,46 @@ pub fn kiro_rewrite_chat_request_json(input: &str) -> Result<KiroChatRewrite, Mo
         body: output,
         issue,
     })
+}
+
+/// Rewrite one canonical Kiro Responses JSON value into Chat Completions JSON.
+pub fn kiro_rewrite_chat_response_json(input: &str, request_id: u64) -> Result<Vec<u8>, MojoError> {
+    ensure_rich_abi()?;
+    if input.len() > KIRO_KERNEL_MAX_BYTES {
+        return Err(MojoError::InvalidInput);
+    }
+    let capacity = input
+        .len()
+        .checked_mul(8)
+        .and_then(|value| value.checked_add(4096))
+        .ok_or(MojoError::InvalidInput)?;
+    let mut output = vec![0_u8; capacity];
+    let mut written = 0_i64;
+    let status = unsafe {
+        prodex_mojo_kiro_chat_response_rewrite_v1(
+            RICH_ABI_VERSION,
+            input.as_ptr() as u64,
+            i64::try_from(input.len()).map_err(|_| MojoError::InvalidInput)?,
+            request_id,
+            mojo_mut_pointer_address(output.as_mut_ptr()),
+            i64::try_from(output.len()).map_err(|_| MojoError::InvalidInput)?,
+            mojo_mut_pointer_address(&mut written),
+        )
+    };
+    if status != 0 {
+        return Err(match status {
+            1 | 2 => MojoError::InvalidInput,
+            3 => MojoError::Capacity,
+            4 => MojoError::AbiMismatch,
+            _ => MojoError::InvalidOutput,
+        });
+    }
+    let written = usize::try_from(written).map_err(|_| MojoError::InvalidOutput)?;
+    if written > output.len() {
+        return Err(MojoError::InvalidOutput);
+    }
+    output.truncate(written);
+    Ok(output)
 }
 
 /// Apply the authoritative Kiro request capability policy in Mojo.
