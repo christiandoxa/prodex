@@ -212,6 +212,7 @@ fn super_url_local_provider_uses_openai_responses_wire_api() {
     assert!(
         rendered.contains(&"model_providers.prodex-local.supports_websockets=false".to_string())
     );
+    assert!(rendered.contains(&"model_reasoning_summary=\"none\"".to_string()));
 }
 #[test]
 fn super_model_without_provider_selects_codex_model() {
@@ -257,6 +258,7 @@ fn super_deepseek_provider_expands_to_local_responses_adapter_config() {
         rendered.contains(&"model_providers.prodex-deepseek.wire_api=\"responses\"".to_string())
     );
     assert!(rendered.contains(&"web_search=\"live\"".to_string()));
+    assert!(rendered.contains(&"model_reasoning_summary=\"none\"".to_string()));
     assert!(rendered.contains(&"features.apps=false".to_string()));
     assert!(!rendered.iter().any(|arg| arg.contains("ds-test-key")));
 }

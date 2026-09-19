@@ -4,7 +4,7 @@ import path from "node:path";
 import { repoRoot } from "../npm/common.mjs";
 
 const DEFAULT_BASELINE_PATH = path.join(repoRoot, "scripts/compat/upstream-baseline.json");
-const EXPECTED_CODEX_RELEASE = "rust-v0.155.0";
+const EXPECTED_CODEX_RELEASE = "rust-v0.155.1";
 
 const REQUIRED_CRITICAL_FILES = [
   "codex-rs/core/src/client.rs",
