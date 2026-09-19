@@ -201,6 +201,7 @@ fn compile_mojo_source(
     let status = Command::new(mojo)
         .arg("build")
         .arg(source)
+        .args(["-D", "HEAP_BUFFER_BYTES=4096"])
         .args(["--target-triple", target, "--target-cpu", target_cpu])
         .args(["--emit", "object", "--optimization-level=3", "-o"])
         .arg(object)
