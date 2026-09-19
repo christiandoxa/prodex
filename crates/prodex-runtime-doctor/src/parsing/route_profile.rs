@@ -6,7 +6,36 @@ use super::request_timeline::runtime_doctor_request_timeline_detail;
 
 const RUNTIME_DOCTOR_ROUTE_PROFILE_MAX_EVENTS: usize = 20;
 
+#[cfg(feature = "mojo")]
 fn runtime_doctor_route_profile_action(marker: &str) -> Option<&'static str> {
+    let semantics = prodex_mojo_core::rich::runtime_doctor_marker_semantics(marker)
+        .expect("Mojo runtime-doctor marker semantics returned invalid output");
+    match semantics.route_action {
+        prodex_mojo_core::rich::RUNTIME_DOCTOR_MARKER_ROUTE_SELECTED => Some("selected"),
+        prodex_mojo_core::rich::RUNTIME_DOCTOR_MARKER_ROUTE_SELECTION_SKIP => {
+            Some("selection_skip")
+        }
+        prodex_mojo_core::rich::RUNTIME_DOCTOR_MARKER_ROUTE_BLOCKED => Some("blocked"),
+        prodex_mojo_core::rich::RUNTIME_DOCTOR_MARKER_ROUTE_HEALTH => Some("health"),
+        prodex_mojo_core::rich::RUNTIME_DOCTOR_MARKER_ROUTE_TRANSPORT_HEALTH => {
+            Some("transport_health")
+        }
+        prodex_mojo_core::rich::RUNTIME_DOCTOR_MARKER_ROUTE_TRANSPORT_FAILURE => {
+            Some("transport_failure")
+        }
+        prodex_mojo_core::rich::RUNTIME_DOCTOR_MARKER_ROUTE_QUOTA => Some("quota"),
+        prodex_mojo_core::rich::RUNTIME_DOCTOR_MARKER_ROUTE_NONE => None,
+        _ => unreachable!("validated Mojo route-profile action"),
+    }
+}
+
+#[cfg(not(feature = "mojo"))]
+fn runtime_doctor_route_profile_action(marker: &str) -> Option<&'static str> {
+    runtime_doctor_route_profile_action_rust(marker)
+}
+
+#[cfg(any(not(feature = "mojo"), test))]
+fn runtime_doctor_route_profile_action_rust(marker: &str) -> Option<&'static str> {
     match marker {
         "selection_keep_affinity" | "selection_keep_current" | "selection_pick" => Some("selected"),
         "selection_skip_current" | "selection_skip_affinity" | "selection_skip_sync_probe" => {
@@ -76,5 +105,24 @@ pub(super) fn runtime_doctor_record_route_profile_event(
         });
     if summary.route_profile_events.len() > RUNTIME_DOCTOR_ROUTE_PROFILE_MAX_EVENTS {
         summary.route_profile_events.remove(0);
+    }
+}
+
+#[cfg(all(test, feature = "mojo"))]
+mod mojo_semantics_parity_tests {
+    use super::*;
+    use crate::markers::RuntimeDoctorMarker;
+
+    #[test]
+    fn route_profile_action_matches_rust_oracle_for_every_marker() {
+        for marker in RuntimeDoctorMarker::ALL {
+            let marker = marker.as_str();
+            assert_eq!(
+                runtime_doctor_route_profile_action(marker),
+                runtime_doctor_route_profile_action_rust(marker),
+                "{marker}"
+            );
+        }
+        assert_eq!(runtime_doctor_route_profile_action("unknown_marker"), None);
     }
 }
