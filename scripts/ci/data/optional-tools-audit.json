@@ -15,7 +15,11 @@
       "prodex_tree_sha256": "26d587fc179e79f76f4e2b42edec0266a7af40cf08bf15eb4609de310fabd8fb",
       "license": "MIT",
       "runtime": "Node.js >=18; externally managed immutable checkout",
-      "platforms": ["linux", "macos", "windows"],
+      "platforms": [
+        "linux",
+        "macos",
+        "windows"
+      ],
       "decision": "ADOPT_PACKAGE",
       "notes": "v2.7.0 is the latest stable release; the exact commit, Git tree, source archive, and complete Prodex tree digest are pinned."
     },
@@ -36,7 +40,11 @@
       },
       "license": "Apache-2.0",
       "runtime": "Externally managed executable; recommended, not latest-only",
-      "platforms": ["linux", "macos", "windows"],
+      "platforms": [
+        "linux",
+        "macos",
+        "windows"
+      ],
       "decision": "ADOPT_PACKAGE",
       "notes": "v0.49.0 is the latest stable release; the exact release commit, Git tree, and checksum manifest digest are pinned."
     },
@@ -57,28 +65,36 @@
       },
       "license": "MIT",
       "runtime": "Portable release binary; shared daemon with lightweight stdio frontends",
-      "platforms": ["linux", "macos", "windows"],
+      "platforms": [
+        "linux",
+        "macos",
+        "windows"
+      ],
       "decision": "ADOPT_PACKAGE",
       "notes": "Daemon-capable 0.9.1-rc.1 minimum remains for backward compatibility."
     },
     {
       "id": "playwright-mcp",
       "repository": "https://github.com/microsoft/playwright-mcp",
-      "latest_stable": "0.0.81",
-      "release": "v0.0.81",
-      "commit": "e73d72e01f162054a3d0a6b0fe8d4affffb095ee",
-      "git_tree": "9ee2309cb48733a20324a83bb7c91028c1fbb085",
+      "latest_stable": "0.0.82",
+      "release": "v0.0.82",
+      "commit": "f1257a5a67aff872f947fae274759f7d54853862",
+      "git_tree": "099d3156de5e672b3c54ed9e4afd416c352e48db",
       "npm": {
         "package": "@playwright/mcp",
-        "version": "0.0.81",
-        "integrity": "sha512-c4eVex1nS53IzLHlwAm0J9ZISDTvA7RndFX8oVcQOrmvIrKSkByazpq79lZHWJuWTB7Gpk0sLBQoRepyIgmneA==",
+        "version": "0.0.82",
+        "integrity": "sha512-OCqftfb8H4dnqm/njbTBRk3seUvUPttOlJUxCtEzXGETYOlRH5Qt3bbXIjmZIuWAxD9RF+yg1ASrPeXvm0y5cA==",
         "node": ">=18"
       },
       "license": "Apache-2.0",
       "runtime": "Pinned npm package through npx; isolated browser profile",
-      "platforms": ["linux", "macos", "windows"],
+      "platforms": [
+        "linux",
+        "macos",
+        "windows"
+      ],
       "decision": "ADOPT_PACKAGE",
-      "notes": "Stable v0.0.81 is verified from the official release tag and npm package; retain the pinned package and Node.js >=18 runtime contract."
+      "notes": "Stable v0.0.82 is verified from the official release tag and npm package; retain the pinned package and Node.js >=18 runtime contract."
     },
     {
       "id": "ponytail",
@@ -90,7 +106,11 @@
       "prodex_tree_sha256": "5443a5ee4a7248adcb59e1e102dd5bbd14af3083a9c3b4f271dd86790ac88c9c",
       "license": "MIT",
       "runtime": "Node.js plugin; externally managed immutable checkout",
-      "platforms": ["linux", "macos", "windows"],
+      "platforms": [
+        "linux",
+        "macos",
+        "windows"
+      ],
       "decision": "ADOPT_PACKAGE",
       "notes": "Latest stable release revalidated for Codex hooks, sub-agent scoping, and Windows behavior."
     },
@@ -107,7 +127,11 @@
       },
       "license": "MIT",
       "runtime": "Opt-in Analyzer/Anonymizer containers; fail-closed redaction",
-      "platforms": ["linux", "macos", "windows"],
+      "platforms": [
+        "linux",
+        "macos",
+        "windows"
+      ],
       "decision": "ADOPT_PACKAGE",
       "security_review": {
         "advisory": "GHSA-g6cj-pr64-35w5 / CVE-2026-69247",
