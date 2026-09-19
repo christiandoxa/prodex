@@ -117,6 +117,8 @@ pub enum Commands {
     Super(Box<SuperArgs>),
     #[command(about = "Run a lean OpenAI-compatible provider gateway.")]
     Gateway(GatewayArgs),
+    #[command(name = "__super-expose", hide = true)]
+    SuperExpose(Box<SuperExposeArgs>),
     #[command(name = "__runtime-broker", hide = true)]
     RuntimeBroker(RuntimeBrokerArgs),
     #[command(name = "__mcp-jsonl-bridge", hide = true)]
@@ -129,7 +131,11 @@ impl Commands {
     pub fn launches_runtime(&self) -> bool {
         matches!(
             self,
-            Self::Run(_) | Self::Super(_) | Self::Gateway(_) | Self::RuntimeBroker(_)
+            Self::Run(_)
+                | Self::Super(_)
+                | Self::Gateway(_)
+                | Self::SuperExpose(_)
+                | Self::RuntimeBroker(_)
         )
     }
 
@@ -151,6 +157,7 @@ impl Commands {
             Self::Run(_) => "run",
             Self::Super(_) => "super",
             Self::Gateway(_) => "gateway",
+            Self::SuperExpose(_) => "super-expose",
             Self::RuntimeBroker(_) => "__runtime-broker",
             Self::McpJsonlBridge(_) => "__mcp-jsonl-bridge",
             Self::SubAgentExec(_) => "__sub-agent-exec",
@@ -164,6 +171,7 @@ where
     T: Into<OsString>,
 {
     let raw_args = args.into_iter().map(Into::into).collect::<Vec<_>>();
+    let raw_args = rewrite_super_expose_alias(&raw_args);
     let raw_args = rewrite_super_compat_args(&raw_args);
     let parse_args = if should_default_cli_invocation_to_run(&raw_args) {
         rewrite_cli_args_as_run(&raw_args)
@@ -182,6 +190,21 @@ where
         args.detail = true;
     }
     Ok(command)
+}
+
+fn rewrite_super_expose_alias(args: &[OsString]) -> Vec<OsString> {
+    if !matches!(
+        args.get(1).and_then(|arg| arg.to_str()),
+        Some("super" | "s")
+    ) || args.get(2).and_then(|arg| arg.to_str()) != Some("expose")
+    {
+        return args.to_vec();
+    }
+    let mut rewritten = Vec::with_capacity(args.len().saturating_sub(1));
+    rewritten.push(args[0].clone());
+    rewritten.push(OsString::from("__super-expose"));
+    rewritten.extend(args.iter().skip(3).cloned());
+    rewritten
 }
 
 fn rewrite_positioned_super_alias(
@@ -306,6 +329,7 @@ pub fn should_default_cli_invocation_to_run(args: &[OsString]) -> bool {
             | "gateway"
             | "claude"
             | "help"
+            | "__super-expose"
             | "__runtime-broker"
             | "__mcp-jsonl-bridge"
             | "__sub-agent-exec"

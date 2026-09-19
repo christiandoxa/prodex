@@ -84,6 +84,7 @@ mod runtime_tools;
 mod secret_store_support;
 mod shared_codex_fs;
 mod shared_types;
+mod super_expose;
 #[cfg(test)]
 mod test_support;
 mod update_notice;
