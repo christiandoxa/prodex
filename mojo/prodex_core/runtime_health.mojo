@@ -324,3 +324,235 @@ def prodex_runtime_health_scalar_v1(
         return 0
 
     return 1
+
+comptime RUNTIME_HEALTH_SCALAR_BAD_PAIRING_NEXT: Int64 = 8
+comptime RUNTIME_HEALTH_SCALAR_BUMP_DECISION: Int64 = 9
+comptime RUNTIME_HEALTH_SCALAR_RECOVERY_DECISION: Int64 = 10
+comptime RUNTIME_HEALTH_SCALAR_INFLIGHT_WEIGHT: Int64 = 11
+comptime RUNTIME_HEALTH_SCALAR_INFLIGHT_HARD_LIMIT: Int64 = 12
+comptime RUNTIME_HEALTH_SCALAR_INFLIGHT_SOFT_LIMIT: Int64 = 13
+comptime RUNTIME_HEALTH_SCALAR_LATENCY_PENALTY: Int64 = 14
+comptime RUNTIME_HEALTH_SCALAR_LATENCY_NEXT_SCORE: Int64 = 15
+comptime RUNTIME_HEALTH_SCALAR_LATENCY_FAILURE_SCORE: Int64 = 16
+
+@export("prodex_runtime_health_policy_v1")
+def prodex_runtime_health_policy_v1(
+    abi_version: Int64,
+    operation: Int64,
+    fields_address: UInt,
+    field_count: Int64,
+    output_address: UInt,
+    output_count: Int64,
+) abi("C") -> Int64:
+    if abi_version != RUNTIME_HEALTH_SCALAR_ABI_VERSION:
+        return 4
+    if field_count < 0 or field_count > 12 or output_count < 1 or output_count > 5:
+        return 1
+    if fields_address == 0 or output_address == 0:
+        return 1
+    var fields = Pointer[mut=False, Int64, ImmUntrackedOrigin](
+        unsafe_from_address=Int(fields_address)
+    )
+    var output = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    for index in range(output_count):
+        output[unsafe_offset=index] = 0
+
+    if operation == RUNTIME_HEALTH_SCALAR_BAD_PAIRING_NEXT:
+        if field_count != 3:
+            return 1
+        var current = fields[unsafe_offset=0]
+        var delta = fields[unsafe_offset=1]
+        var maximum = fields[unsafe_offset=2]
+        if current < 0 or delta < 0 or maximum < 0:
+            return 2
+        var next = current
+        if delta > INT64_MAX - current:
+            next = INT64_MAX
+        else:
+            next = current + delta
+        output[unsafe_offset=0] = min(next, maximum)
+        return 0
+
+    if operation == RUNTIME_HEALTH_SCALAR_BUMP_DECISION:
+        if field_count != 9 or output_count < 5:
+            return 1
+        var current = fields[unsafe_offset=0]
+        var delta = fields[unsafe_offset=1]
+        var maximum = fields[unsafe_offset=2]
+        var threshold = fields[unsafe_offset=3]
+        var already_open = fields[unsafe_offset=4]
+        var current_stage = fields[unsafe_offset=5]
+        var max_stage = fields[unsafe_offset=6]
+        var base_seconds = fields[unsafe_offset=7]
+        var max_seconds = fields[unsafe_offset=8]
+        if (
+            current < 0
+            or delta < 0
+            or maximum < 0
+            or threshold < 0
+            or already_open < 0
+            or already_open > 1
+            or current_stage < 0
+            or max_stage < 0
+            or base_seconds < 0
+            or max_seconds < 0
+        ):
+            return 2
+        var next = current
+        if delta > INT64_MAX - current:
+            next = INT64_MAX
+        else:
+            next = current + delta
+        next = min(next, maximum)
+        output[unsafe_offset=0] = next
+        if next < threshold:
+            return 0
+        var stage: Int64 = 0
+        if already_open == 1:
+            stage = min(current_stage + 1, max_stage)
+        output[unsafe_offset=1] = 1
+        output[unsafe_offset=2] = stage
+        var exponent = max(next - threshold, 0)
+        if exponent > 3:
+            exponent = 3
+        exponent += min(stage, max_stage)
+        var multiplier = runtime_health_saturating_shift_multiplier(exponent)
+        var seconds = max_seconds
+        if multiplier != INT64_MAX and (base_seconds == 0 or multiplier <= INT64_MAX / base_seconds):
+            seconds = min(base_seconds * multiplier, max_seconds)
+        output[unsafe_offset=3] = 1
+        output[unsafe_offset=4] = seconds
+        return 0
+
+    if operation == RUNTIME_HEALTH_SCALAR_RECOVERY_DECISION:
+        if field_count != 5 or output_count < 4:
+            return 1
+        var current_present = fields[unsafe_offset=0]
+        var current_score = fields[unsafe_offset=1]
+        var current_streak = fields[unsafe_offset=2]
+        var max_streak = fields[unsafe_offset=3]
+        var recovery_base = fields[unsafe_offset=4]
+        if (
+            current_present < 0
+            or current_present > 1
+            or current_score < 0
+            or current_streak < 0
+            or max_streak < 0
+            or recovery_base < 0
+        ):
+            return 2
+        if current_present == 0:
+            return 0
+        var next_streak = min(current_streak + 1, max_streak)
+        var extra = max(next_streak - 1, 0)
+        if extra > 1:
+            extra = 1
+        var recovery = recovery_base + extra
+        var next_score = max(current_score - recovery, 0)
+        if next_score == 0:
+            return 0
+        output[unsafe_offset=0] = 1
+        output[unsafe_offset=1] = next_score
+        output[unsafe_offset=2] = 1
+        output[unsafe_offset=3] = next_streak
+        return 0
+
+    if operation == RUNTIME_HEALTH_SCALAR_INFLIGHT_WEIGHT:
+        if field_count != 1:
+            return 1
+        output[unsafe_offset=0] = 2 if fields[unsafe_offset=0] == 1 else 1
+        return 0
+
+    if operation == RUNTIME_HEALTH_SCALAR_INFLIGHT_HARD_LIMIT:
+        if field_count != 2:
+            return 1
+        if fields[unsafe_offset=0] < 0 or fields[unsafe_offset=1] < 1:
+            return 2
+        output[unsafe_offset=0] = max(fields[unsafe_offset=0], fields[unsafe_offset=1])
+        return 0
+
+    if operation == RUNTIME_HEALTH_SCALAR_INFLIGHT_SOFT_LIMIT:
+        if field_count != 3:
+            return 1
+        var route_kind = fields[unsafe_offset=0]
+        var pressure_mode = fields[unsafe_offset=1]
+        var base = fields[unsafe_offset=2]
+        if route_kind < 0 or route_kind > 3 or pressure_mode < 0 or pressure_mode > 1 or base < 0:
+            return 2
+        base = max(base, 1)
+        if pressure_mode == 0:
+            output[unsafe_offset=0] = base
+            return 0
+        var reduction: Int64 = 2
+        if route_kind == 0 or route_kind == 2:
+            reduction = 1
+        output[unsafe_offset=0] = max(base - reduction, 1)
+        return 0
+
+    if operation == RUNTIME_HEALTH_SCALAR_LATENCY_PENALTY:
+        if field_count != 4:
+            return 1
+        var elapsed = fields[unsafe_offset=0]
+        var route_kind = fields[unsafe_offset=1]
+        var stage_kind = fields[unsafe_offset=2]
+        var maximum = fields[unsafe_offset=3]
+        if elapsed < 0 or route_kind < 0 or route_kind > 3 or stage_kind < 0 or stage_kind > 2 or maximum < 0:
+            return 2
+        var good: Int64 = 100
+        var warn: Int64 = 250
+        var poor: Int64 = 600
+        var severe: Int64 = 1200
+        if (route_kind == 0 and stage_kind == 1) or (route_kind == 2 and stage_kind == 2):
+            good = 120
+            warn = 300
+            poor = 700
+            severe = 1500
+        elif route_kind == 1 or route_kind == 3:
+            good = 80
+            warn = 180
+            poor = 400
+            severe = 900
+        if elapsed <= good:
+            output[unsafe_offset=0] = 0
+        elif elapsed <= warn:
+            output[unsafe_offset=0] = 2
+        elif elapsed <= poor:
+            output[unsafe_offset=0] = 4
+        elif elapsed <= severe:
+            output[unsafe_offset=0] = 7
+        else:
+            output[unsafe_offset=0] = maximum
+        return 0
+
+    if operation == RUNTIME_HEALTH_SCALAR_LATENCY_NEXT_SCORE:
+        if field_count != 2:
+            return 1
+        var current = fields[unsafe_offset=0]
+        var observed = fields[unsafe_offset=1]
+        if current < 0 or observed < 0:
+            return 2
+        if observed == 0:
+            output[unsafe_offset=0] = max(current - 2, 0)
+        else:
+            output[unsafe_offset=0] = ((current * 2) + observed + 2) / 3
+        return 0
+
+    if operation == RUNTIME_HEALTH_SCALAR_LATENCY_FAILURE_SCORE:
+        if field_count != 3:
+            return 1
+        var current = fields[unsafe_offset=0]
+        var penalty = fields[unsafe_offset=1]
+        var maximum = fields[unsafe_offset=2]
+        if current < 0 or penalty < 0 or maximum < 0:
+            return 2
+        var next = current
+        if penalty > INT64_MAX - current:
+            next = INT64_MAX
+        else:
+            next = current + penalty
+        output[unsafe_offset=0] = min(next, maximum)
+        return 0
+
+    return 1

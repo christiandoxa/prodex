@@ -3,10 +3,12 @@ use std::hash::{Hash, Hasher};
 
 use crate::{RuntimeRouteKind, runtime_route_kind_label};
 
+#[cfg(any(not(feature = "mojo"), test))]
+use super::runtime_profile_circuit_open_seconds;
 use super::{
     RUNTIME_PROFILE_CIRCUIT_OPEN_THRESHOLD, RUNTIME_PROFILE_CIRCUIT_REOPEN_MAX_STAGE,
     RUNTIME_PROFILE_HEALTH_MAX_SCORE, RUNTIME_PROFILE_HEALTH_SUCCESS_RECOVERY_SCORE,
-    RUNTIME_PROFILE_SUCCESS_STREAK_MAX, runtime_profile_circuit_open_seconds,
+    RUNTIME_PROFILE_SUCCESS_STREAK_MAX,
 };
 
 pub fn runtime_profile_selection_jitter(
@@ -22,6 +24,21 @@ pub fn runtime_profile_selection_jitter(
 }
 
 pub fn runtime_profile_bad_pairing_next_score(current_score: u32, delta: u32) -> u32 {
+    #[cfg(feature = "mojo")]
+    {
+        return prodex_mojo_core::runtime::profile_bad_pairing_next_score(
+            current_score,
+            delta,
+            RUNTIME_PROFILE_HEALTH_MAX_SCORE,
+        )
+        .unwrap_or_else(|error| panic!("Mojo bad-pairing score failed: {error:?}"));
+    }
+    #[cfg(not(feature = "mojo"))]
+    runtime_profile_bad_pairing_next_score_rust(current_score, delta)
+}
+
+#[cfg(any(not(feature = "mojo"), test))]
+fn runtime_profile_bad_pairing_next_score_rust(current_score: u32, delta: u32) -> u32 {
     current_score
         .saturating_add(delta)
         .min(RUNTIME_PROFILE_HEALTH_MAX_SCORE)
@@ -35,6 +52,42 @@ pub struct RuntimeProfileHealthBumpDecision {
 }
 
 pub fn runtime_profile_health_bump_decision(
+    current_score: u32,
+    delta: u32,
+    circuit_already_open: bool,
+    current_circuit_reopen_stage: u32,
+) -> RuntimeProfileHealthBumpDecision {
+    #[cfg(feature = "mojo")]
+    {
+        let plan = prodex_mojo_core::runtime::profile_health_bump_plan(
+            current_score,
+            delta,
+            RUNTIME_PROFILE_HEALTH_MAX_SCORE,
+            RUNTIME_PROFILE_CIRCUIT_OPEN_THRESHOLD,
+            circuit_already_open,
+            current_circuit_reopen_stage,
+            RUNTIME_PROFILE_CIRCUIT_REOPEN_MAX_STAGE,
+            super::RUNTIME_PROFILE_CIRCUIT_OPEN_SECONDS,
+            super::RUNTIME_PROFILE_CIRCUIT_OPEN_MAX_SECONDS,
+        )
+        .unwrap_or_else(|error| panic!("Mojo profile health bump failed: {error:?}"));
+        return RuntimeProfileHealthBumpDecision {
+            next_score: plan.next_score,
+            circuit_reopen_stage: plan.circuit_reopen_stage,
+            circuit_open_seconds: plan.circuit_open_seconds,
+        };
+    }
+    #[cfg(not(feature = "mojo"))]
+    runtime_profile_health_bump_decision_rust(
+        current_score,
+        delta,
+        circuit_already_open,
+        current_circuit_reopen_stage,
+    )
+}
+
+#[cfg(any(not(feature = "mojo"), test))]
+fn runtime_profile_health_bump_decision_rust(
     current_score: u32,
     delta: u32,
     circuit_already_open: bool,
@@ -80,6 +133,29 @@ pub fn runtime_profile_health_recovery_decision(
     current_score: Option<u32>,
     current_success_streak: u32,
 ) -> RuntimeProfileHealthRecoveryDecision {
+    #[cfg(feature = "mojo")]
+    {
+        let plan = prodex_mojo_core::runtime::profile_health_recovery_plan(
+            current_score,
+            current_success_streak,
+            RUNTIME_PROFILE_SUCCESS_STREAK_MAX,
+            RUNTIME_PROFILE_HEALTH_SUCCESS_RECOVERY_SCORE,
+        )
+        .unwrap_or_else(|error| panic!("Mojo profile health recovery failed: {error:?}"));
+        return RuntimeProfileHealthRecoveryDecision {
+            next_score: plan.next_score,
+            next_success_streak: plan.next_success_streak,
+        };
+    }
+    #[cfg(not(feature = "mojo"))]
+    runtime_profile_health_recovery_decision_rust(current_score, current_success_streak)
+}
+
+#[cfg(any(not(feature = "mojo"), test))]
+fn runtime_profile_health_recovery_decision_rust(
+    current_score: Option<u32>,
+    current_success_streak: u32,
+) -> RuntimeProfileHealthRecoveryDecision {
     let Some(current_score) = current_score else {
         return RuntimeProfileHealthRecoveryDecision {
             next_score: None,
@@ -103,6 +179,39 @@ pub fn runtime_profile_health_recovery_decision(
         RuntimeProfileHealthRecoveryDecision {
             next_score: Some(next_score),
             next_success_streak: Some(next_success_streak),
+        }
+    }
+}
+
+#[cfg(all(test, feature = "mojo"))]
+mod mojo_parity_tests {
+    use super::*;
+
+    #[test]
+    fn health_decisions_match_rust_oracles() {
+        for current in [0_u32, 1, 3, 4, 10, u32::MAX] {
+            for delta in [0_u32, 1, 2, 100, u32::MAX] {
+                assert_eq!(
+                    runtime_profile_bad_pairing_next_score(current, delta),
+                    runtime_profile_bad_pairing_next_score_rust(current, delta),
+                );
+                for open in [false, true] {
+                    for stage in [0_u32, 1, RUNTIME_PROFILE_CIRCUIT_REOPEN_MAX_STAGE, u32::MAX] {
+                        assert_eq!(
+                            runtime_profile_health_bump_decision(current, delta, open, stage),
+                            runtime_profile_health_bump_decision_rust(current, delta, open, stage),
+                        );
+                    }
+                }
+            }
+            for streak in [0_u32, 1, 2, RUNTIME_PROFILE_SUCCESS_STREAK_MAX, u32::MAX] {
+                for score in [None, Some(current)] {
+                    assert_eq!(
+                        runtime_profile_health_recovery_decision(score, streak),
+                        runtime_profile_health_recovery_decision_rust(score, streak),
+                    );
+                }
+            }
         }
     }
 }
