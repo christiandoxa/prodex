@@ -54,6 +54,164 @@ impl RuntimePreviousResponseFreshFallbackPolicy {
     }
 }
 
+#[cfg(any(not(feature = "mojo"), test))]
+mod rust_oracle {
+    use super::*;
+
+    pub(super) fn runtime_previous_response_fresh_fallback_policy_rust(
+        input: RuntimePreviousResponseFreshFallbackPolicyInput,
+    ) -> RuntimePreviousResponseFreshFallbackPolicy {
+        if !input.has_previous_response_context
+            && !input.request_requires_locked_previous_response_affinity
+            && input.fresh_fallback_shape.is_none()
+        {
+            return RuntimePreviousResponseFreshFallbackPolicy::NotApplicable;
+        }
+
+        RuntimePreviousResponseFreshFallbackPolicy::FailClosed {
+            request_shape: runtime_previous_response_fallback_policy_shape(
+                input.fresh_fallback_shape,
+            ),
+        }
+    }
+
+    #[cfg(not(feature = "mojo"))]
+    pub(super) fn runtime_previous_response_fresh_fallback_shape_with_session_rust(
+        shape: Option<RuntimePreviousResponseFreshFallbackShape>,
+        has_session_affinity: bool,
+    ) -> Option<RuntimePreviousResponseFreshFallbackShape> {
+        if !has_session_affinity {
+            return shape;
+        }
+
+        match shape {
+            Some(RuntimePreviousResponseFreshFallbackShape::EmptyInputOnly) => {
+                Some(RuntimePreviousResponseFreshFallbackShape::SessionScopedFreshReplay)
+            }
+            other => other,
+        }
+    }
+
+    pub(super) fn runtime_previous_response_not_found_fallback_policy_rust(
+        request: RuntimePreviousResponseNotFoundFallbackRequest<'_>,
+    ) -> RuntimePreviousResponseNotFoundFallbackPolicy {
+        let stale_continuation = match (request.previous_response_id, request.has_turn_state_retry)
+        {
+            (Some(_), false) => RuntimePreviousResponseStaleContinuationPolicy::FailClosed,
+            (Some(_), true) => RuntimePreviousResponseStaleContinuationPolicy::RetryWithTurnState,
+            (None, _) => RuntimePreviousResponseStaleContinuationPolicy::NotApplicable,
+        };
+        let fresh_fallback = runtime_previous_response_fresh_fallback_policy_rust(
+            RuntimePreviousResponseFreshFallbackPolicyInput {
+                has_previous_response_context: request.previous_response_id.is_some()
+                    || request.previous_response_fresh_fallback_used,
+                request_requires_locked_previous_response_affinity: request
+                    .request_requires_locked_previous_response_affinity,
+                fresh_fallback_shape: request.fresh_fallback_shape,
+            },
+        );
+
+        RuntimePreviousResponseNotFoundFallbackPolicy {
+            stale_continuation,
+            fresh_fallback,
+        }
+    }
+
+    pub(super) fn runtime_websocket_previous_response_requires_previous_response_affinity_rust(
+        trusted_previous_response_affinity: bool,
+        previous_response_id: Option<&str>,
+        request_turn_state: Option<&str>,
+    ) -> bool {
+        trusted_previous_response_affinity
+            && previous_response_id.is_some()
+            && request_turn_state.is_none()
+    }
+
+    pub(super) fn runtime_websocket_request_requires_locked_previous_response_affinity_rust(
+        request_requires_previous_response_affinity: bool,
+        trusted_previous_response_affinity: bool,
+        previous_response_id: Option<&str>,
+        request_turn_state: Option<&str>,
+    ) -> bool {
+        request_requires_previous_response_affinity
+            || runtime_websocket_previous_response_requires_previous_response_affinity_rust(
+                trusted_previous_response_affinity,
+                previous_response_id,
+                request_turn_state,
+            )
+    }
+
+    pub(super) fn runtime_previous_response_not_found_decision_rust(
+        input: RuntimePreviousResponseNotFoundDecisionInput<'_>,
+    ) -> RuntimePreviousResponseNotFoundDecision {
+        let request_requires_locked_previous_response_affinity = match input.route {
+            RuntimePreviousResponseNotFoundRoute::Responses => {
+                input.request_requires_previous_response_affinity
+            }
+            RuntimePreviousResponseNotFoundRoute::Websocket => {
+                runtime_websocket_request_requires_locked_previous_response_affinity_rust(
+                    input.request_requires_previous_response_affinity,
+                    input.trusted_previous_response_affinity,
+                    input.previous_response_id,
+                    input.request_turn_state,
+                )
+            }
+        };
+        let locked_previous_response_retry =
+            matches!(input.route, RuntimePreviousResponseNotFoundRoute::Websocket)
+                && input.request_requires_previous_response_affinity
+                && !input.has_turn_state_retry;
+        let retry_delay = (input.has_turn_state_retry || locked_previous_response_retry)
+            .then(|| runtime_previous_response_retry_delay(input.retry_index))
+            .flatten();
+        let retry_reason = if input.has_turn_state_retry {
+            Some("non_blocking_retry")
+        } else if locked_previous_response_retry {
+            Some("locked_affinity_no_turn_state")
+        } else {
+            None
+        };
+        let chain_retry_reason = match input.route {
+            RuntimePreviousResponseNotFoundRoute::Responses if input.has_turn_state_retry => {
+                Some("previous_response_not_found")
+            }
+            RuntimePreviousResponseNotFoundRoute::Websocket if locked_previous_response_retry => {
+                Some("previous_response_not_found_locked_affinity")
+            }
+            _ => None,
+        };
+        let fallback_policy = runtime_previous_response_not_found_fallback_policy_rust(
+            RuntimePreviousResponseNotFoundFallbackRequest {
+                previous_response_id: input.previous_response_id,
+                has_turn_state_retry: input.has_turn_state_retry,
+                request_requires_locked_previous_response_affinity,
+                previous_response_fresh_fallback_used: input.previous_response_fresh_fallback_used,
+                fresh_fallback_shape: input.fresh_fallback_shape,
+            },
+        );
+
+        RuntimePreviousResponseNotFoundDecision {
+            retry_delay,
+            retry_reason,
+            chain_retry_reason,
+            request_requires_locked_previous_response_affinity,
+            stale_continuation: fallback_policy
+                .stale_continuation
+                .requires_stale_continuation(),
+            fresh_fallback_allowed: fallback_policy.fresh_fallback.allows_fresh_fallback(),
+            fresh_fallback_blocked_without_affinity: fallback_policy
+                .fresh_fallback
+                .blocks_without_affinity(
+                    input.has_turn_state_retry,
+                    request_requires_locked_previous_response_affinity,
+                ),
+        }
+    }
+}
+
+#[cfg(all(test, feature = "mojo"))]
+use rust_oracle::runtime_previous_response_not_found_decision_rust;
+
 pub fn runtime_previous_response_fresh_fallback_policy(
     input: RuntimePreviousResponseFreshFallbackPolicyInput,
 ) -> RuntimePreviousResponseFreshFallbackPolicy {
@@ -89,23 +247,7 @@ pub fn runtime_previous_response_fresh_fallback_policy(
     }
 
     #[cfg(not(feature = "mojo"))]
-    runtime_previous_response_fresh_fallback_policy_rust(input)
-}
-
-#[cfg(any(not(feature = "mojo"), test))]
-fn runtime_previous_response_fresh_fallback_policy_rust(
-    input: RuntimePreviousResponseFreshFallbackPolicyInput,
-) -> RuntimePreviousResponseFreshFallbackPolicy {
-    if !input.has_previous_response_context
-        && !input.request_requires_locked_previous_response_affinity
-        && input.fresh_fallback_shape.is_none()
-    {
-        return RuntimePreviousResponseFreshFallbackPolicy::NotApplicable;
-    }
-
-    RuntimePreviousResponseFreshFallbackPolicy::FailClosed {
-        request_shape: runtime_previous_response_fallback_policy_shape(input.fresh_fallback_shape),
-    }
+    rust_oracle::runtime_previous_response_fresh_fallback_policy_rust(input)
 }
 
 fn runtime_previous_response_fallback_policy_shape(
@@ -209,24 +351,10 @@ pub fn runtime_previous_response_fresh_fallback_shape_with_session(
     }
 
     #[cfg(not(feature = "mojo"))]
-    runtime_previous_response_fresh_fallback_shape_with_session_rust(shape, has_session_affinity)
-}
-
-#[cfg(not(feature = "mojo"))]
-fn runtime_previous_response_fresh_fallback_shape_with_session_rust(
-    shape: Option<RuntimePreviousResponseFreshFallbackShape>,
-    has_session_affinity: bool,
-) -> Option<RuntimePreviousResponseFreshFallbackShape> {
-    if !has_session_affinity {
-        return shape;
-    }
-
-    match shape {
-        Some(RuntimePreviousResponseFreshFallbackShape::EmptyInputOnly) => {
-            Some(RuntimePreviousResponseFreshFallbackShape::SessionScopedFreshReplay)
-        }
-        other => other,
-    }
+    rust_oracle::runtime_previous_response_fresh_fallback_shape_with_session_rust(
+        shape,
+        has_session_affinity,
+    )
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -296,7 +424,7 @@ pub fn runtime_previous_response_not_found_fallback_policy(
     }
 
     #[cfg(not(feature = "mojo"))]
-    runtime_previous_response_not_found_fallback_policy_rust(request)
+    rust_oracle::runtime_previous_response_not_found_fallback_policy_rust(request)
 }
 
 #[cfg(feature = "mojo")]
@@ -309,42 +437,6 @@ fn runtime_previous_response_stale_policy_from_tag(
         2 => RuntimePreviousResponseStaleContinuationPolicy::FailClosed,
         _ => unreachable!("validated Mojo previous-response stale policy"),
     }
-}
-
-#[cfg(any(not(feature = "mojo"), test))]
-fn runtime_previous_response_not_found_fallback_policy_rust(
-    request: RuntimePreviousResponseNotFoundFallbackRequest<'_>,
-) -> RuntimePreviousResponseNotFoundFallbackPolicy {
-    let stale_continuation = match (request.previous_response_id, request.has_turn_state_retry) {
-        (Some(_), false) => RuntimePreviousResponseStaleContinuationPolicy::FailClosed,
-        (Some(_), true) => RuntimePreviousResponseStaleContinuationPolicy::RetryWithTurnState,
-        (None, _) => RuntimePreviousResponseStaleContinuationPolicy::NotApplicable,
-    };
-    let fresh_fallback = runtime_previous_response_fresh_fallback_policy_rust(
-        RuntimePreviousResponseFreshFallbackPolicyInput {
-            has_previous_response_context: request.previous_response_id.is_some()
-                || request.previous_response_fresh_fallback_used,
-            request_requires_locked_previous_response_affinity: request
-                .request_requires_locked_previous_response_affinity,
-            fresh_fallback_shape: request.fresh_fallback_shape,
-        },
-    );
-
-    RuntimePreviousResponseNotFoundFallbackPolicy {
-        stale_continuation,
-        fresh_fallback,
-    }
-}
-
-#[cfg(any(not(feature = "mojo"), test))]
-fn runtime_websocket_previous_response_requires_previous_response_affinity_rust(
-    trusted_previous_response_affinity: bool,
-    previous_response_id: Option<&str>,
-    request_turn_state: Option<&str>,
-) -> bool {
-    trusted_previous_response_affinity
-        && previous_response_id.is_some()
-        && request_turn_state.is_none()
 }
 
 pub fn runtime_websocket_request_requires_locked_previous_response_affinity(
@@ -375,28 +467,13 @@ pub fn runtime_websocket_request_requires_locked_previous_response_affinity(
 
     #[cfg(not(feature = "mojo"))]
     {
-        runtime_websocket_request_requires_locked_previous_response_affinity_rust(
+        rust_oracle::runtime_websocket_request_requires_locked_previous_response_affinity_rust(
             request_requires_previous_response_affinity,
             trusted_previous_response_affinity,
             previous_response_id,
             request_turn_state,
         )
     }
-}
-
-#[cfg(any(not(feature = "mojo"), test))]
-fn runtime_websocket_request_requires_locked_previous_response_affinity_rust(
-    request_requires_previous_response_affinity: bool,
-    trusted_previous_response_affinity: bool,
-    previous_response_id: Option<&str>,
-    request_turn_state: Option<&str>,
-) -> bool {
-    request_requires_previous_response_affinity
-        || runtime_websocket_previous_response_requires_previous_response_affinity_rust(
-            trusted_previous_response_affinity,
-            previous_response_id,
-            request_turn_state,
-        )
 }
 
 pub fn runtime_previous_response_retry_delay(retry_index: usize) -> Option<Duration> {
@@ -505,75 +582,7 @@ pub fn runtime_previous_response_not_found_decision(
     }
 
     #[cfg(not(feature = "mojo"))]
-    runtime_previous_response_not_found_decision_rust(input)
-}
-
-#[cfg(any(not(feature = "mojo"), test))]
-fn runtime_previous_response_not_found_decision_rust(
-    input: RuntimePreviousResponseNotFoundDecisionInput<'_>,
-) -> RuntimePreviousResponseNotFoundDecision {
-    let request_requires_locked_previous_response_affinity = match input.route {
-        RuntimePreviousResponseNotFoundRoute::Responses => {
-            input.request_requires_previous_response_affinity
-        }
-        RuntimePreviousResponseNotFoundRoute::Websocket => {
-            runtime_websocket_request_requires_locked_previous_response_affinity_rust(
-                input.request_requires_previous_response_affinity,
-                input.trusted_previous_response_affinity,
-                input.previous_response_id,
-                input.request_turn_state,
-            )
-        }
-    };
-    let locked_previous_response_retry =
-        matches!(input.route, RuntimePreviousResponseNotFoundRoute::Websocket)
-            && input.request_requires_previous_response_affinity
-            && !input.has_turn_state_retry;
-    let retry_delay = (input.has_turn_state_retry || locked_previous_response_retry)
-        .then(|| runtime_previous_response_retry_delay(input.retry_index))
-        .flatten();
-    let retry_reason = if input.has_turn_state_retry {
-        Some("non_blocking_retry")
-    } else if locked_previous_response_retry {
-        Some("locked_affinity_no_turn_state")
-    } else {
-        None
-    };
-    let chain_retry_reason = match input.route {
-        RuntimePreviousResponseNotFoundRoute::Responses if input.has_turn_state_retry => {
-            Some("previous_response_not_found")
-        }
-        RuntimePreviousResponseNotFoundRoute::Websocket if locked_previous_response_retry => {
-            Some("previous_response_not_found_locked_affinity")
-        }
-        _ => None,
-    };
-    let fallback_policy = runtime_previous_response_not_found_fallback_policy_rust(
-        RuntimePreviousResponseNotFoundFallbackRequest {
-            previous_response_id: input.previous_response_id,
-            has_turn_state_retry: input.has_turn_state_retry,
-            request_requires_locked_previous_response_affinity,
-            previous_response_fresh_fallback_used: input.previous_response_fresh_fallback_used,
-            fresh_fallback_shape: input.fresh_fallback_shape,
-        },
-    );
-
-    RuntimePreviousResponseNotFoundDecision {
-        retry_delay,
-        retry_reason,
-        chain_retry_reason,
-        request_requires_locked_previous_response_affinity,
-        stale_continuation: fallback_policy
-            .stale_continuation
-            .requires_stale_continuation(),
-        fresh_fallback_allowed: fallback_policy.fresh_fallback.allows_fresh_fallback(),
-        fresh_fallback_blocked_without_affinity: fallback_policy
-            .fresh_fallback
-            .blocks_without_affinity(
-                input.has_turn_state_retry,
-                request_requires_locked_previous_response_affinity,
-            ),
-    }
+    rust_oracle::runtime_previous_response_not_found_decision_rust(input)
 }
 
 pub fn runtime_previous_response_not_found_observability_outcome(
