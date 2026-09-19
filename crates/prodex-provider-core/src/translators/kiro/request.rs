@@ -74,8 +74,13 @@ pub fn kiro_provider_core_chat_completions_request_body(
     };
     #[cfg(feature = "mojo")]
     {
-        let plan = prodex_mojo_core::rich::kiro_validate_request(validation::chat_input(object))
-            .unwrap_or_else(|error| panic!("Mojo Kiro request validation failed: {error:?}"));
+        let raw = std::str::from_utf8(body).expect("valid JSON is valid UTF-8");
+        let plan = prodex_mojo_core::rich::kiro_validate_request_json(
+            prodex_mojo_core::rich::KiroRequestValidationMode::ChatCompletions,
+            raw,
+            false,
+        )
+        .unwrap_or_else(|error| panic!("Mojo Kiro raw request validation failed: {error:?}"));
         validation::error(plan, object)?;
         validation::remove_chat_defaults(object);
     }
@@ -283,11 +288,13 @@ pub(super) fn kiro_provider_core_responses_request_body(
     kiro_validate_response_input(object)?;
     #[cfg(feature = "mojo")]
     {
-        let plan = prodex_mojo_core::rich::kiro_validate_request(validation::response_input(
-            object,
+        let raw = std::str::from_utf8(body).expect("valid JSON is valid UTF-8");
+        let plan = prodex_mojo_core::rich::kiro_validate_request_json(
+            prodex_mojo_core::rich::KiroRequestValidationMode::Responses,
+            raw,
             allow_token_limit,
-        ))
-        .unwrap_or_else(|error| panic!("Mojo Kiro request validation failed: {error:?}"));
+        )
+        .unwrap_or_else(|error| panic!("Mojo Kiro raw request validation failed: {error:?}"));
         if matches!(
             plan.reason,
             prodex_mojo_core::rich::KiroRequestValidationPlan::REASON_NONE

@@ -82,7 +82,7 @@ pub use openai_compat::{
 mod kiro;
 pub use kiro::{
     KiroKernelInput, KiroKernelOperation, KiroRequestValidationInput, KiroRequestValidationMode,
-    KiroRequestValidationPlan, kiro_kernel, kiro_validate_request,
+    KiroRequestValidationPlan, kiro_kernel, kiro_validate_request, kiro_validate_request_json,
 };
 #[path = "rich/smart_context_normalization.rs"]
 mod smart_context_normalization;
