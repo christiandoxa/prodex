@@ -14,11 +14,15 @@ pub use auto_redeem::{
     auto_redeem_plan_self_test,
 };
 pub use profile_health::{
-    ProfileBackoffSoftening, ProfileHealthScoreInput, RUNTIME_PROFILE_HEALTH_SCORE_FIELD_COUNT,
+    ProfileBackoffSoftening, ProfileHealthBumpPlan, ProfileHealthRecoveryPlan,
+    ProfileHealthScoreInput, RUNTIME_PROFILE_HEALTH_SCORE_FIELD_COUNT,
     RUNTIME_PROFILE_HEALTH_SCORE_MAX_COUNT, profile_backoff_sort_key,
-    profile_circuit_half_open_seconds, profile_circuit_open_seconds, profile_health_coupling_score,
-    profile_health_effective_score, profile_health_performance_score,
-    profile_health_sort_key_batch, profile_soften_backoff_until,
+    profile_bad_pairing_next_score, profile_circuit_half_open_seconds,
+    profile_circuit_open_seconds, profile_health_bump_plan, profile_health_coupling_score,
+    profile_health_effective_score, profile_health_performance_score, profile_health_recovery_plan,
+    profile_health_sort_key_batch, profile_inflight_effective_hard_limit,
+    profile_inflight_soft_limit, profile_inflight_weight, profile_latency_failure_score,
+    profile_latency_next_score, profile_latency_penalty, profile_soften_backoff_until,
 };
 pub use profile_rotation::profile_selection_order_batch;
 pub use prompt_cache_affinity::prompt_cache_affinity_batch;
