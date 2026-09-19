@@ -46,10 +46,67 @@ pub(super) fn deepseek_tool_choice_from_request(value: &Value) -> Option<Value> 
     }))
 }
 
+#[cfg(feature = "mojo")]
+fn deepseek_common_request_body_from_responses_mojo(
+    obj: &serde_json::Map<String, Value>,
+    value: &Value,
+) -> Result<DeepSeekRequestBody, String> {
+    let mut validated = serde_json::Map::new();
+    deepseek_insert_primitive_request_fields(value, &mut validated)?;
+    let _ = deepseek_top_logprobs_from_request(value)?;
+    let _ = deepseek_stop_from_request(value)?;
+    let user_id = deepseek_user_id_from_request(value)?;
+
+    let mut degraded = None;
+    let response_format_mode = if let Some(response_format) = obj.get("response_format") {
+        match response_format
+            .get("type")
+            .and_then(Value::as_str)
+            .unwrap_or("text")
+        {
+            "text" => 0_u64,
+            "json_object" => 1_u64,
+            "json_schema" | "json" | "structured_output" => {
+                degraded = Some({
+                    let mut map = BTreeMap::new();
+                    map.insert("from".to_string(), Value::String("json_schema".to_string()));
+                    map.insert("to".to_string(), Value::String("json_object".to_string()));
+                    map
+                });
+                1_u64
+            }
+            other => {
+                return Err(format!(
+                    "DeepSeek response_format type \x60{other}\x60 is not supported"
+                ));
+            }
+        }
+    } else {
+        0_u64
+    };
+    let instructions = value
+        .get("instructions")
+        .and_then(Value::as_str)
+        .filter(|text| !text.trim().is_empty());
+    let canonical = serde_json::to_string(value)
+        .map_err(|error| format!("DeepSeek request serialization failed: {error}"))?;
+    let mut input = DeepSeekKernelInput::new(DeepSeekKernelOperation::RawCommonRequest);
+    input.input = Some(&canonical);
+    input.content = user_id.as_deref();
+    input.reasoning_content = instructions;
+    input.sequence_number = response_format_mode;
+    let body = super::deepseek_mojo_body(input);
+    Ok((body, degraded))
+}
+
 pub(super) fn deepseek_request_body_from_responses(
     obj: &serde_json::Map<String, Value>,
     value: &Value,
 ) -> Result<DeepSeekRequestBody, String> {
+    #[cfg(feature = "mojo")]
+    if !matches!(value.get("input"), Some(Value::Array(_))) {
+        return deepseek_common_request_body_from_responses_mojo(obj, value);
+    }
     let mut request = serde_json::Map::new();
     request.insert(
         "model".to_string(),
