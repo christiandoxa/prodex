@@ -47,6 +47,53 @@ pub(super) fn deepseek_tool_choice_from_request(value: &Value) -> Option<Value> 
 }
 
 #[cfg(feature = "mojo")]
+fn deepseek_mojo_request_shape_supported(value: &Value) -> bool {
+    if value.get("messages").and_then(Value::as_array).is_some() {
+        return true;
+    }
+    let Some(input) = value.get("input") else {
+        return true;
+    };
+    let Value::Array(items) = input else {
+        return true;
+    };
+    items.iter().all(deepseek_mojo_input_item_supported)
+}
+
+#[cfg(feature = "mojo")]
+fn deepseek_mojo_input_item_supported(item: &Value) -> bool {
+    let Some(object) = item.as_object() else {
+        return false;
+    };
+    let item_type = object.get("type").and_then(Value::as_str);
+    if matches!(item_type, Some("custom_tool_call" | "local_shell_call")) {
+        return false;
+    }
+    if object.get("tool_calls").is_some() {
+        return false;
+    }
+    if matches!(
+        item_type,
+        Some(
+            "function_call_output"
+                | "custom_tool_call_output"
+                | "mcp_tool_result"
+                | "mcp_call_output"
+        )
+    ) {
+        let output = object
+            .get("output")
+            .or_else(|| object.get("content"))
+            .or_else(|| object.get("result"))
+            .or_else(|| object.get("error"));
+        if output.is_some_and(Value::is_array) {
+            return false;
+        }
+    }
+    true
+}
+
+#[cfg(feature = "mojo")]
 fn deepseek_common_request_body_from_responses_mojo(
     obj: &serde_json::Map<String, Value>,
     value: &Value,
@@ -104,7 +151,7 @@ pub(super) fn deepseek_request_body_from_responses(
     value: &Value,
 ) -> Result<DeepSeekRequestBody, String> {
     #[cfg(feature = "mojo")]
-    if !matches!(value.get("input"), Some(Value::Array(_))) {
+    if deepseek_mojo_request_shape_supported(value) {
         return deepseek_common_request_body_from_responses_mojo(obj, value);
     }
     let mut request = serde_json::Map::new();
