@@ -300,6 +300,7 @@ fn selected_sources() -> Vec<&'static str> {
         sources.push("../../mojo/prodex_core/runtime_doctor_plan.mojo");
         sources.push("../../mojo/prodex_core/runtime_doctor_marker.mojo");
         sources.push("../../mojo/prodex_core/runtime_doctor_render.mojo");
+        sources.push("../../mojo/prodex_core/ping_protocol.mojo");
     }
     if env::var_os("CARGO_FEATURE_MOJO_ROUTING").is_some()
         || env::var_os("CARGO_FEATURE_MOJO_CORE").is_some()

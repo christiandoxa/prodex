@@ -88,3 +88,7 @@ owned by the Redis/runtime adapters. Do not add a Mojo wrapper without a real pr
 33. Raised Smart Context rehydration to a Mojo context-item set lookup and structured action plan.
 34. Promoted the rich consumers and self-tests in strict real-Mojo CI and release archive symbol
     checks; native heap objects remain outside release artifacts.
+35. Migrated the OpenAI application ping JSONL protocol validator and typed failure-taxonomy
+    precedence into one bounded Mojo call. Rust retains profile discovery, child-process lifecycle,
+    timeout/cleanup, redaction, and user-facing rendering; Mojo is authoritative for release-build
+    turn-state validation and failure classification.
