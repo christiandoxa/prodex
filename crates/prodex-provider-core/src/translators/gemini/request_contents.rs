@@ -63,6 +63,7 @@ pub(crate) fn gemini_text_contents_from_request_mojo(
     Some((system_instruction, contents))
 }
 
+#[cfg(not(feature = "mojo"))]
 pub(crate) use self::items::gemini_contains_local_media_path;
 pub(crate) use self::items::gemini_contents_from_request;
 pub(super) use self::system_instruction::gemini_system_instruction_from_request;

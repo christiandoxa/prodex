@@ -29,7 +29,7 @@ pub fn deepseek_provider_core_validate_tools_shape(
             gemini_compat,
         );
         let detail = || detail(&source, plan).unwrap_or_default();
-        return match plan.tag {
+        match plan.tag {
             0 => Ok(()),
             1 => Err(format!("{provider_label} tools must be an array")),
             2 => Err(format!("{provider_label} tools entries must be objects")),
@@ -104,7 +104,7 @@ pub fn deepseek_provider_core_validate_tools_shape(
             _ => Err(format!(
                 "{provider_label} tools shape validation returned an unknown result"
             )),
-        };
+        }
     }
 
     #[cfg(not(feature = "mojo"))]

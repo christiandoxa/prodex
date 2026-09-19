@@ -1790,6 +1790,8 @@ comptime GEMINI_BRIDGE_REQUEST_SIMPLE: Int64 = 6
 comptime GEMINI_BRIDGE_REQUEST_VALIDATE_CANDIDATE_COUNT: Int64 = 7
 comptime GEMINI_BRIDGE_REQUEST_TOOL_CONFIG: Int64 = 8
 comptime GEMINI_BRIDGE_REQUEST_TEXT_CONTENTS: Int64 = 9
+comptime GEMINI_BRIDGE_REQUEST_RAW_TRANSLATOR: Int64 = 10
+comptime GEMINI_BRIDGE_REQUEST_VALIDATE_TRANSLATOR: Int64 = 11
 
 @fieldwise_init
 struct GeminiBridgeRequestInput(Copyable):
@@ -1818,7 +1820,7 @@ def gemini_bridge_request_input_flag_valid(value: Int64) -> Bool:
 
 
 def gemini_bridge_request_input_valid(input: GeminiBridgeRequestInput) -> Bool:
-    if input.operation < GEMINI_BRIDGE_REQUEST_GENERATE_CONTENT_REQUEST or input.operation > GEMINI_BRIDGE_REQUEST_TEXT_CONTENTS:
+    if input.operation < GEMINI_BRIDGE_REQUEST_GENERATE_CONTENT_REQUEST or input.operation > GEMINI_BRIDGE_REQUEST_VALIDATE_TRANSLATOR:
         return False
     if not gemini_bridge_request_input_flag_valid(input.primary_present) or not gemini_bridge_request_input_flag_valid(input.secondary_present) or not gemini_bridge_request_input_flag_valid(input.tertiary_present) or not gemini_bridge_request_input_flag_valid(input.quaternary_present) or not gemini_bridge_request_input_flag_valid(input.quinary_present) or not gemini_bridge_request_input_flag_valid(input.senary_present) or not gemini_bridge_request_input_flag_valid(input.septenary_present) or not gemini_bridge_request_input_flag_valid(input.octonary_present):
         return False
@@ -1853,6 +1855,14 @@ def gemini_bridge_request_input_valid(input: GeminiBridgeRequestInput) -> Bool:
     if input.operation == GEMINI_BRIDGE_REQUEST_TOOL_CONFIG and input.primary_present == 0:
         return False
     if input.operation == GEMINI_BRIDGE_REQUEST_TEXT_CONTENTS and input.primary_present == 0:
+        return False
+    if input.operation == GEMINI_BRIDGE_REQUEST_RAW_TRANSLATOR and (
+        input.primary_present == 0
+        or input.tertiary_present == 0
+        or input.senary_present == 0
+    ):
+        return False
+    if input.operation == GEMINI_BRIDGE_REQUEST_VALIDATE_TRANSLATOR and input.primary_present == 0:
         return False
     return True
 
@@ -3826,6 +3836,1184 @@ def gemini_bridge_request_write_text_contents(
         return False
     return gemini_request_content_put_byte(writer, 125)
 
+
+comptime GEMINI_TRANSLATOR_VALIDATION_OK: Int64 = 0
+comptime GEMINI_TRANSLATOR_VALIDATION_LOCAL_MEDIA: Int64 = 1
+comptime GEMINI_TRANSLATOR_VALIDATION_CANDIDATE_CONFLICT: Int64 = 2
+comptime GEMINI_TRANSLATOR_VALIDATION_CANDIDATE_SNAKE: Int64 = 3
+comptime GEMINI_TRANSLATOR_VALIDATION_CANDIDATE_CAMEL: Int64 = 4
+comptime GEMINI_TRANSLATOR_VALIDATION_TOOLS_ARRAY: Int64 = 5
+comptime GEMINI_TRANSLATOR_VALIDATION_TOOL_OBJECT: Int64 = 6
+comptime GEMINI_TRANSLATOR_VALIDATION_FUNCTION_OBJECT: Int64 = 7
+comptime GEMINI_TRANSLATOR_VALIDATION_FUNCTION_NAME_WRAPPED: Int64 = 8
+comptime GEMINI_TRANSLATOR_VALIDATION_FUNCTION_NAME_FLAT: Int64 = 9
+comptime GEMINI_TRANSLATOR_VALIDATION_PARAMETERS_REQUIRED_WRAPPED: Int64 = 10
+comptime GEMINI_TRANSLATOR_VALIDATION_PARAMETERS_REQUIRED_FLAT: Int64 = 11
+comptime GEMINI_TRANSLATOR_VALIDATION_PARAMETERS_OBJECT_WRAPPED: Int64 = 12
+comptime GEMINI_TRANSLATOR_VALIDATION_PARAMETERS_OBJECT_FLAT: Int64 = 13
+comptime GEMINI_TRANSLATOR_VALIDATION_DESCRIPTION_STRING_WRAPPED: Int64 = 14
+comptime GEMINI_TRANSLATOR_VALIDATION_DESCRIPTION_STRING_FLAT: Int64 = 15
+comptime GEMINI_TRANSLATOR_VALIDATION_RUST_TOOL_BRIDGE: Int64 = 16
+comptime GEMINI_TRANSLATOR_VALIDATION_RESPONSE_FORMAT: Int64 = 17
+
+def gemini_bridge_request_put_nonnegative_i64(
+    writer: Pointer[mut=True, GeminiRequestContentWriter, _],
+    value: Int64,
+) -> Bool:
+    if value < 0:
+        return (
+            gemini_request_content_put_byte(writer, 45)
+            and gemini_request_content_put_byte(writer, 49)
+        )
+    if value == 0:
+        return gemini_request_content_put_byte(writer, 48)
+    var divisor: Int64 = 1
+    while value / divisor >= 10:
+        divisor *= 10
+    var remaining = value
+    while divisor > 0:
+        if not gemini_request_content_put_byte(
+            writer, UInt8(remaining / divisor) + 48
+        ):
+            return False
+        remaining %= divisor
+        divisor /= 10
+    return True
+
+def gemini_bridge_validation_put_plan(
+    writer: Pointer[mut=True, GeminiRequestContentWriter, _],
+    source: GeminiRequestContentStringView,
+    tag: Int64,
+    index: Int64 = -1,
+    detail_start: Int64 = -1,
+    detail_end: Int64 = -1,
+) -> Bool:
+    if not gemini_request_content_put_literal(writer, StringSlice('{"tag":')):
+        return False
+    if not gemini_bridge_request_put_nonnegative_i64(writer, tag):
+        return False
+    if not gemini_request_content_put_literal(writer, StringSlice(',"index":')):
+        return False
+    if not gemini_bridge_request_put_nonnegative_i64(writer, index):
+        return False
+    if not gemini_request_content_put_literal(writer, StringSlice(',"detail":')):
+        return False
+    if detail_start >= 0 and detail_end > detail_start:
+        if not gemini_request_content_put_range(
+            writer, source, detail_start, detail_end
+        ):
+            return False
+    elif not gemini_request_content_put_literal(writer, StringSlice("null")):
+        return False
+    return gemini_request_content_put_byte(writer, 125)
+
+def gemini_bridge_validation_media_type(
+    source: GeminiRequestContentStringView,
+    bounds: InlineArray[Int64, 2],
+) -> Bool:
+    if bounds[0] < 0 or gemini_request_content_byte(source, bounds[0]) != 34:
+        return False
+    return (
+        gemini_request_content_string_equals(
+            source, bounds[0], bounds[1], StringSlice("input_image"), False
+        )
+        or gemini_request_content_string_equals(
+            source, bounds[0], bounds[1], StringSlice("image_url"), False
+        )
+        or gemini_request_content_string_equals(
+            source, bounds[0], bounds[1], StringSlice("input_file"), False
+        )
+        or gemini_request_content_string_equals(
+            source, bounds[0], bounds[1], StringSlice("file"), False
+        )
+        or gemini_request_content_string_equals(
+            source, bounds[0], bounds[1], StringSlice("media"), False
+        )
+        or gemini_request_content_string_equals(
+            source, bounds[0], bounds[1], StringSlice("input_audio"), False
+        )
+        or gemini_request_content_string_equals(
+            source, bounds[0], bounds[1], StringSlice("input_video"), False
+        )
+    )
+
+def gemini_bridge_validation_has_local_media(
+    source: GeminiRequestContentStringView,
+    start: Int64,
+    end: Int64,
+    depth: Int64,
+) -> Bool:
+    if depth > GEMINI_REQUEST_CONTENT_MAX_DEPTH or start < 0 or end <= start:
+        return False
+    var opening = gemini_request_content_byte(source, start)
+    if opening == 91:
+        var index = gemini_request_content_skip_ws(source, start + 1, end - 1)
+        while index < end - 1:
+            var value_end = gemini_request_content_value_end(
+                source, index, end - 1, depth + 1
+            )
+            if value_end < 0:
+                return False
+            if gemini_bridge_validation_has_local_media(
+                source, index, value_end, depth + 1
+            ):
+                return True
+            index = gemini_request_content_skip_ws(source, value_end, end - 1)
+            if index < end - 1 and gemini_request_content_byte(source, index) == 44:
+                index = gemini_request_content_skip_ws(source, index + 1, end - 1)
+                continue
+            break
+        return False
+    if opening != 123:
+        return False
+
+    var kind = gemini_bridge_request_object_member(
+        source, start, end, StringSlice("type")
+    )
+    if gemini_bridge_validation_media_type(source, kind):
+        if (
+            gemini_bridge_request_object_member(
+                source, start, end, StringSlice("path")
+            )[0] >= 0
+            or gemini_bridge_request_object_member(
+                source, start, end, StringSlice("file_path")
+            )[0] >= 0
+            or gemini_bridge_request_object_member(
+                source, start, end, StringSlice("filePath")
+            )[0] >= 0
+        ):
+            return True
+
+    var index = gemini_request_content_skip_ws(source, start + 1, end - 1)
+    while index < end - 1:
+        var key_end = gemini_request_content_string_end(source, index, end - 1)
+        if key_end < 0:
+            return False
+        index = gemini_request_content_skip_ws(source, key_end, end - 1)
+        if index >= end - 1 or gemini_request_content_byte(source, index) != 58:
+            return False
+        var value_start = gemini_request_content_skip_ws(source, index + 1, end - 1)
+        var value_end = gemini_request_content_value_end(
+            source, value_start, end - 1, depth + 1
+        )
+        if value_end < 0:
+            return False
+        if gemini_bridge_validation_has_local_media(
+            source, value_start, value_end, depth + 1
+        ):
+            return True
+        index = gemini_request_content_skip_ws(source, value_end, end - 1)
+        if index < end - 1 and gemini_request_content_byte(source, index) == 44:
+            index = gemini_request_content_skip_ws(source, index + 1, end - 1)
+            continue
+        break
+    return False
+
+def gemini_bridge_validation_function_tool(
+    source: GeminiRequestContentStringView,
+    start: Int64,
+    end: Int64,
+    index: Int64,
+    writer: Pointer[mut=True, GeminiRequestContentWriter, _],
+) -> Int64:
+    var function = gemini_bridge_request_object_member(
+        source, start, end, StringSlice("function")
+    )
+    var wrapped = function[0] >= 0
+    var target_start = start
+    var target_end = end
+    if wrapped:
+        if not gemini_bridge_request_is_object(
+            source, function[0], function[1]
+        ):
+            if gemini_bridge_validation_put_plan(
+                writer,
+                source,
+                GEMINI_TRANSLATOR_VALIDATION_FUNCTION_OBJECT,
+                index,
+            ):
+                return 1
+            return -1
+        target_start = function[0]
+        target_end = function[1]
+
+    var name = gemini_bridge_request_object_member(
+        source, target_start, target_end, StringSlice("name")
+    )
+    if (
+        name[0] < 0
+        or gemini_request_content_byte(source, name[0]) != 34
+        or not gemini_request_content_string_has_non_space(
+            source, name[0], name[1]
+        )
+    ):
+        var tag = GEMINI_TRANSLATOR_VALIDATION_FUNCTION_NAME_FLAT
+        if wrapped:
+            tag = GEMINI_TRANSLATOR_VALIDATION_FUNCTION_NAME_WRAPPED
+        if gemini_bridge_validation_put_plan(
+            writer, source, tag, index
+        ):
+            return 1
+        return -1
+
+    var parameters = gemini_bridge_request_object_member(
+        source, target_start, target_end, StringSlice("parameters")
+    )
+    if parameters[0] < 0:
+        var tag = GEMINI_TRANSLATOR_VALIDATION_PARAMETERS_REQUIRED_FLAT
+        if wrapped:
+            tag = GEMINI_TRANSLATOR_VALIDATION_PARAMETERS_REQUIRED_WRAPPED
+        if gemini_bridge_validation_put_plan(
+            writer, source, tag, index
+        ):
+            return 1
+        return -1
+    if not gemini_bridge_request_is_object(
+        source, parameters[0], parameters[1]
+    ):
+        var tag = GEMINI_TRANSLATOR_VALIDATION_PARAMETERS_OBJECT_FLAT
+        if wrapped:
+            tag = GEMINI_TRANSLATOR_VALIDATION_PARAMETERS_OBJECT_WRAPPED
+        if gemini_bridge_validation_put_plan(
+            writer, source, tag, index
+        ):
+            return 1
+        return -1
+
+    var description = gemini_bridge_request_object_member(
+        source, target_start, target_end, StringSlice("description")
+    )
+    if (
+        description[0] >= 0
+        and not gemini_bridge_request_is_null(
+            source, description[0], description[1]
+        )
+        and gemini_request_content_byte(source, description[0]) != 34
+    ):
+        var tag = GEMINI_TRANSLATOR_VALIDATION_DESCRIPTION_STRING_FLAT
+        if wrapped:
+            tag = GEMINI_TRANSLATOR_VALIDATION_DESCRIPTION_STRING_WRAPPED
+        if gemini_bridge_validation_put_plan(
+            writer, source, tag, index
+        ):
+            return 1
+        return -1
+    return 0
+
+def gemini_bridge_request_validate_translator(
+    input: GeminiBridgeRequestInput,
+    writer: Pointer[mut=True, GeminiRequestContentWriter, _],
+) -> Bool:
+    if not gemini_request_content_fragment_valid(input.primary):
+        return False
+    var root = gemini_bridge_request_value_bounds(input.primary)
+    if not gemini_bridge_request_is_object(
+        input.primary, root[0], root[1]
+    ):
+        return gemini_bridge_validation_put_plan(
+            writer, input.primary, GEMINI_TRANSLATOR_VALIDATION_OK
+        )
+
+    if gemini_bridge_validation_has_local_media(
+        input.primary, root[0], root[1], 0
+    ):
+        return gemini_bridge_validation_put_plan(
+            writer, input.primary, GEMINI_TRANSLATOR_VALIDATION_LOCAL_MEDIA
+        )
+
+    var snake = gemini_bridge_request_object_member(
+        input.primary, root[0], root[1], StringSlice("candidate_count")
+    )
+    var camel = gemini_bridge_request_object_member(
+        input.primary, root[0], root[1], StringSlice("candidateCount")
+    )
+    var snake_active = (
+        snake[0] >= 0
+        and not gemini_bridge_request_is_null(
+            input.primary, snake[0], snake[1]
+        )
+    )
+    var camel_active = (
+        camel[0] >= 0
+        and not gemini_bridge_request_is_null(
+            input.primary, camel[0], camel[1]
+        )
+    )
+    if (
+        snake_active
+        and camel_active
+        and not gemini_bridge_request_raw_values_equal(
+            input.primary, snake, camel
+        )
+    ):
+        return gemini_bridge_validation_put_plan(
+            writer,
+            input.primary,
+            GEMINI_TRANSLATOR_VALIDATION_CANDIDATE_CONFLICT,
+        )
+    if (
+        snake_active
+        and not gemini_bridge_request_literal_equals(
+            input.primary, snake[0], snake[1], StringSlice("1")
+        )
+    ):
+        return gemini_bridge_validation_put_plan(
+            writer,
+            input.primary,
+            GEMINI_TRANSLATOR_VALIDATION_CANDIDATE_SNAKE,
+        )
+    if (
+        camel_active
+        and not gemini_bridge_request_literal_equals(
+            input.primary, camel[0], camel[1], StringSlice("1")
+        )
+    ):
+        return gemini_bridge_validation_put_plan(
+            writer,
+            input.primary,
+            GEMINI_TRANSLATOR_VALIDATION_CANDIDATE_CAMEL,
+        )
+
+    var response_format = gemini_bridge_request_object_member(
+        input.primary, root[0], root[1], StringSlice("response_format")
+    )
+    if gemini_bridge_request_is_object(
+        input.primary, response_format[0], response_format[1]
+    ):
+        var format_type = gemini_bridge_request_object_member(
+            input.primary,
+            response_format[0],
+            response_format[1],
+            StringSlice("type"),
+        )
+        if (
+            format_type[0] >= 0
+            and gemini_request_content_byte(input.primary, format_type[0]) == 34
+            and not gemini_request_content_string_equals(
+                input.primary,
+                format_type[0],
+                format_type[1],
+                StringSlice("text"),
+                False,
+            )
+            and not gemini_request_content_string_equals(
+                input.primary,
+                format_type[0],
+                format_type[1],
+                StringSlice("json_object"),
+                False,
+            )
+            and not gemini_request_content_string_equals(
+                input.primary,
+                format_type[0],
+                format_type[1],
+                StringSlice("json_schema"),
+                False,
+            )
+        ):
+            return gemini_bridge_validation_put_plan(
+                writer,
+                input.primary,
+                GEMINI_TRANSLATOR_VALIDATION_RESPONSE_FORMAT,
+                -1,
+                format_type[0],
+                format_type[1],
+            )
+
+    var tools = gemini_bridge_request_object_member(
+        input.primary, root[0], root[1], StringSlice("tools")
+    )
+    if tools[0] < 0:
+        return gemini_bridge_validation_put_plan(
+            writer, input.primary, GEMINI_TRANSLATOR_VALIDATION_OK
+        )
+    if not gemini_bridge_request_is_array(
+        input.primary, tools[0], tools[1]
+    ):
+        return gemini_bridge_validation_put_plan(
+            writer,
+            input.primary,
+            GEMINI_TRANSLATOR_VALIDATION_TOOLS_ARRAY,
+        )
+
+    var item_index: Int64 = 0
+    var cursor = gemini_request_content_skip_ws(
+        input.primary, tools[0] + 1, tools[1] - 1
+    )
+    while cursor < tools[1] - 1:
+        var item_end = gemini_request_content_value_end(
+            input.primary, cursor, tools[1] - 1, 0
+        )
+        if item_end < 0:
+            return False
+        if not gemini_bridge_request_is_object(
+            input.primary, cursor, item_end
+        ):
+            return gemini_bridge_validation_put_plan(
+                writer,
+                input.primary,
+                GEMINI_TRANSLATOR_VALIDATION_TOOL_OBJECT,
+                item_index,
+            )
+
+        var function = gemini_bridge_request_object_member(
+            input.primary, cursor, item_end, StringSlice("function")
+        )
+        var tool_type = gemini_bridge_request_object_member(
+            input.primary, cursor, item_end, StringSlice("type")
+        )
+        var is_function = function[0] >= 0 or (
+            tool_type[0] >= 0
+            and gemini_request_content_string_equals(
+                input.primary,
+                tool_type[0],
+                tool_type[1],
+                StringSlice("function"),
+                False,
+            )
+        )
+        if is_function:
+            if function[0] < 0:
+                return gemini_bridge_validation_put_plan(
+                    writer,
+                    input.primary,
+                    GEMINI_TRANSLATOR_VALIDATION_FUNCTION_OBJECT,
+                    item_index,
+                )
+            var result = gemini_bridge_validation_function_tool(
+                input.primary, cursor, item_end, item_index, writer
+            )
+            if result != 0:
+                return result > 0
+        elif not gemini_bridge_request_builtin_tool(
+            input.primary, cursor, item_end
+        ):
+            return gemini_bridge_validation_put_plan(
+                writer,
+                input.primary,
+                GEMINI_TRANSLATOR_VALIDATION_RUST_TOOL_BRIDGE,
+                item_index,
+            )
+
+        item_index += 1
+        cursor = gemini_request_content_skip_ws(
+            input.primary, item_end, tools[1] - 1
+        )
+        if (
+            cursor < tools[1] - 1
+            and gemini_request_content_byte(input.primary, cursor) == 44
+        ):
+            cursor = gemini_request_content_skip_ws(
+                input.primary, cursor + 1, tools[1] - 1
+            )
+            continue
+        if cursor != tools[1] - 1:
+            return False
+        break
+
+    return gemini_bridge_validation_put_plan(
+        writer, input.primary, GEMINI_TRANSLATOR_VALIDATION_OK
+    )
+
+def gemini_translator_response_format_kind(
+    source: GeminiRequestContentStringView,
+    root: InlineArray[Int64, 2],
+) -> Int64:
+    var response_format = gemini_bridge_request_object_member(
+        source, root[0], root[1], StringSlice("response_format")
+    )
+    if not gemini_bridge_request_is_object(
+        source, response_format[0], response_format[1]
+    ):
+        return 0
+    var kind = gemini_bridge_request_object_member(
+        source, response_format[0], response_format[1], StringSlice("type")
+    )
+    if (
+        kind[0] < 0
+        or gemini_request_content_byte(source, kind[0]) != 34
+        or gemini_request_content_string_equals(
+            source, kind[0], kind[1], StringSlice("text"), False
+        )
+    ):
+        return 0
+    if gemini_request_content_string_equals(
+        source, kind[0], kind[1], StringSlice("json_object"), False
+    ):
+        return 1
+    if gemini_request_content_string_equals(
+        source, kind[0], kind[1], StringSlice("json_schema"), False
+    ):
+        return 2
+    return 0
+
+def gemini_translator_write_response_format(
+    source: GeminiRequestContentStringView,
+    root: InlineArray[Int64, 2],
+    kind: Int64,
+    writer: Pointer[mut=True, GeminiRequestContentWriter, _],
+    first: Pointer[mut=True, Bool, _],
+) -> Bool:
+    if kind == 0:
+        return True
+    if not gemini_bridge_request_put_literal_field(
+        writer, first, StringSlice('"responseMimeType":"application/json"')
+    ):
+        return False
+    if kind != 2:
+        return True
+    var response_format = gemini_bridge_request_object_member(
+        source, root[0], root[1], StringSlice("response_format")
+    )
+    var schema = gemini_bridge_request_object_member(
+        source, response_format[0], response_format[1], StringSlice("schema")
+    )
+    if schema[0] < 0:
+        return True
+    if not gemini_bridge_request_put_field_prefix(
+        writer, first, StringSlice('"responseJsonSchema":')
+    ):
+        return False
+    return gemini_request_content_write_sanitized_schema(
+        source, schema[0], schema[1], writer, 0
+    )
+
+def gemini_translator_write_generation_config(
+    source: GeminiRequestContentStringView,
+    model: GeminiRequestContentStringView,
+    writer: Pointer[mut=True, GeminiRequestContentWriter, _],
+) -> Bool:
+    var root = gemini_bridge_request_value_bounds(source)
+    if not gemini_bridge_request_is_object(source, root[0], root[1]):
+        return False
+    var first = True
+    var first_ptr = Pointer(to=first)
+    if not gemini_request_content_put_byte(writer, 123):
+        return False
+
+    if (
+        not gemini_bridge_request_put_source_pair(
+            source, root, 0, -1, StringSlice('"temperature":'), False, writer, first_ptr
+        )
+        or not gemini_bridge_request_put_source_pair(
+            source, root, 1, -1, StringSlice('"topP":'), False, writer, first_ptr
+        )
+        or not gemini_bridge_request_put_source_pair(
+            source, root, 2, -1, StringSlice('"maxOutputTokens":'), False, writer, first_ptr
+        )
+        or not gemini_bridge_request_put_source_pair(
+            source, root, 7, 6, StringSlice('"topK":'), True, writer, first_ptr
+        )
+        or not gemini_bridge_request_put_source_pair(
+            source, root, 8, -1, StringSlice('"seed":'), True, writer, first_ptr
+        )
+        or not gemini_bridge_request_put_source_pair(
+            source, root, 10, 9, StringSlice('"presencePenalty":'), True, writer, first_ptr
+        )
+        or not gemini_bridge_request_put_source_pair(
+            source, root, 12, 11, StringSlice('"frequencyPenalty":'), True, writer, first_ptr
+        )
+        or not gemini_bridge_request_put_source_pair(
+            source, root, 14, 13, StringSlice('"responseMimeType":'), True, writer, first_ptr
+        )
+        or not gemini_bridge_request_put_source_pair(
+            source, root, 16, 15, StringSlice('"responseSchema":'), True, writer, first_ptr
+        )
+        or not gemini_bridge_request_put_source_pair(
+            source, root, 18, 17, StringSlice('"responseJsonSchema":'), True, writer, first_ptr
+        )
+        or not gemini_bridge_request_put_source_pair(
+            source, root, 20, 19, StringSlice('"responseModalities":'), True, writer, first_ptr
+        )
+        or not gemini_bridge_request_put_source_pair(
+            source, root, 22, 21, StringSlice('"mediaResolution":'), True, writer, first_ptr
+        )
+        or not gemini_bridge_request_put_source_pair(
+            source, root, 24, 23, StringSlice('"audioTimestamp":'), True, writer, first_ptr
+        )
+        or not gemini_bridge_request_put_source_pair(
+            source, root, 26, 25, StringSlice('"speechConfig":'), True, writer, first_ptr
+        )
+        or not gemini_bridge_request_put_source_pair(
+            source, root, 27, 28, StringSlice('"candidateCount":'), True, writer, first_ptr
+        )
+    ):
+        return False
+
+    var stop = gemini_bridge_request_object_member(
+        source, root[0], root[1], StringSlice("stop")
+    )
+    if stop[0] < 0:
+        stop = gemini_bridge_request_object_member(
+            source, root[0], root[1], StringSlice("stop_sequences")
+        )
+    if stop[0] < 0:
+        stop = gemini_bridge_request_object_member(
+            source, root[0], root[1], StringSlice("stopSequences")
+        )
+    if (
+        stop[0] >= 0
+        and not gemini_bridge_request_is_null(source, stop[0], stop[1])
+        and not gemini_bridge_request_put_raw_field(
+            writer,
+            first_ptr,
+            StringSlice('"stopSequences":'),
+            gemini_bridge_request_value_view(source, stop),
+        )
+    ):
+        return False
+
+    var text_format = gemini_bridge_request_text_format_kind(source, root)
+    var response_format = gemini_translator_response_format_kind(source, root)
+    if response_format == 2:
+        if not gemini_translator_write_response_format(
+            source, root, response_format, writer, first_ptr
+        ):
+            return False
+    else:
+        if not gemini_bridge_request_write_text_format(
+            source, root, text_format, writer, first_ptr
+        ):
+            return False
+        if response_format == 1 and text_format == 0:
+            if not gemini_translator_write_response_format(
+                source, root, response_format, writer, first_ptr
+            ):
+                return False
+
+    if not gemini_bridge_request_write_thinking_config(
+        source,
+        root,
+        model,
+        GeminiRequestContentStringView(0, 0),
+        0,
+        writer,
+        first_ptr,
+    ):
+        return False
+
+    return gemini_request_content_put_byte(writer, 125)
+
+
+
+
+def gemini_translator_type_is(
+    source: GeminiRequestContentStringView,
+    start: Int64,
+    end: Int64,
+    literal: StringSlice,
+) -> Bool:
+    var kind = gemini_bridge_request_object_member(
+        source, start, end, StringSlice("type")
+    )
+    return (
+        kind[0] >= 0
+        and gemini_request_content_byte(source, kind[0]) == 34
+        and gemini_request_content_string_equals(
+            source, kind[0], kind[1], literal, False
+        )
+    )
+
+def gemini_translator_type_starts_with(
+    source: GeminiRequestContentStringView,
+    start: Int64,
+    end: Int64,
+    prefix: StringSlice,
+) -> Bool:
+    var kind = gemini_bridge_request_object_member(
+        source, start, end, StringSlice("type")
+    )
+    if kind[0] < 0:
+        return False
+    return gemini_bridge_request_string_starts_with(
+        gemini_bridge_request_value_view(source, kind), prefix
+    )
+
+def gemini_translator_is_computer_tool(
+    source: GeminiRequestContentStringView,
+    start: Int64,
+    end: Int64,
+) -> Bool:
+    return (
+        gemini_translator_type_is(
+            source, start, end, StringSlice("computer")
+        )
+        or gemini_translator_type_is(
+            source, start, end, StringSlice("computer_use")
+        )
+        or gemini_translator_type_is(
+            source, start, end, StringSlice("computerUse")
+        )
+        or gemini_translator_type_is(
+            source, start, end, StringSlice("computer_use_preview")
+        )
+        or gemini_translator_type_starts_with(
+            source, start, end, StringSlice("computer_")
+        )
+        or gemini_bridge_request_object_member(
+            source, start, end, StringSlice("computerUse")
+        )[0] >= 0
+    )
+
+def gemini_translator_is_code_tool(
+    source: GeminiRequestContentStringView,
+    start: Int64,
+    end: Int64,
+) -> Bool:
+    return (
+        gemini_translator_type_is(
+            source, start, end, StringSlice("code_interpreter")
+        )
+        or gemini_translator_type_is(
+            source, start, end, StringSlice("code_execution")
+        )
+        or gemini_translator_type_is(
+            source, start, end, StringSlice("codeExecution")
+        )
+        or gemini_bridge_request_object_member(
+            source, start, end, StringSlice("codeExecution")
+        )[0] >= 0
+    )
+
+def gemini_translator_is_web_tool(
+    source: GeminiRequestContentStringView,
+    start: Int64,
+    end: Int64,
+) -> Bool:
+    return (
+        gemini_translator_type_is(
+            source, start, end, StringSlice("web_search")
+        )
+        or gemini_translator_type_is(
+            source, start, end, StringSlice("web_search_preview")
+        )
+        or gemini_translator_type_starts_with(
+            source, start, end, StringSlice("web_search_preview_")
+        )
+    )
+
+def gemini_translator_is_url_tool(
+    source: GeminiRequestContentStringView,
+    start: Int64,
+    end: Int64,
+) -> Bool:
+    return (
+        gemini_translator_type_is(
+            source, start, end, StringSlice("web_fetch")
+        )
+        or gemini_translator_type_is(
+            source, start, end, StringSlice("url_context")
+        )
+        or gemini_translator_type_is(
+            source, start, end, StringSlice("urlContext")
+        )
+        or gemini_translator_type_is(
+            source, start, end, StringSlice("web_fetch_preview")
+        )
+        or gemini_translator_type_starts_with(
+            source, start, end, StringSlice("web_fetch_preview_")
+        )
+        or gemini_bridge_request_object_member(
+            source, start, end, StringSlice("urlContext")
+        )[0] >= 0
+    )
+
+def gemini_translator_is_function_tool(
+    source: GeminiRequestContentStringView,
+    start: Int64,
+    end: Int64,
+) -> Bool:
+    return gemini_bridge_request_object_member(
+        source, start, end, StringSlice("function")
+    )[0] >= 0
+
+def gemini_translator_write_computer_tool(
+    source: GeminiRequestContentStringView,
+    start: Int64,
+    end: Int64,
+    writer: Pointer[mut=True, GeminiRequestContentWriter, _],
+) -> Bool:
+    var config_start = start
+    var config_end = end
+    var config = gemini_bridge_request_object_member(
+        source, start, end, StringSlice("computerUse")
+    )
+    if not gemini_bridge_request_is_object(
+        source, config[0], config[1]
+    ):
+        config = gemini_bridge_request_object_member(
+            source, start, end, StringSlice("computer_use")
+        )
+    if gemini_bridge_request_is_object(source, config[0], config[1]):
+        config_start = config[0]
+        config_end = config[1]
+
+    var environment = gemini_bridge_request_object_member(
+        source, config_start, config_end, StringSlice("environment")
+    )
+    if (
+        environment[0] < 0
+        or gemini_request_content_byte(source, environment[0]) != 34
+        or not gemini_request_content_string_has_non_space(
+            source, environment[0], environment[1]
+        )
+    ):
+        environment = InlineArray[Int64, 2](fill=-1)
+
+    var excluded = gemini_bridge_request_object_member(
+        source,
+        config_start,
+        config_end,
+        StringSlice("excludedPredefinedFunctions"),
+    )
+    if excluded[0] < 0:
+        excluded = gemini_bridge_request_object_member(
+            source,
+            config_start,
+            config_end,
+            StringSlice("excluded_predefined_functions"),
+        )
+
+    if not gemini_request_content_put_literal(
+        writer, StringSlice('{"computerUse":{"environment":')
+    ):
+        return False
+    if environment[0] >= 0:
+        if not gemini_request_content_put_range(
+            writer, source, environment[0], environment[1]
+        ):
+            return False
+    elif not gemini_request_content_put_literal(
+        writer, StringSlice('"ENVIRONMENT_BROWSER"')
+    ):
+        return False
+    if (
+        excluded[0] >= 0
+        and not gemini_bridge_request_is_null(
+            source, excluded[0], excluded[1]
+        )
+    ):
+        if (
+            not gemini_request_content_put_literal(
+                writer, StringSlice(',"excludedPredefinedFunctions":')
+            )
+            or not gemini_request_content_put_range(
+                writer, source, excluded[0], excluded[1]
+            )
+        ):
+            return False
+    return gemini_request_content_put_literal(writer, StringSlice("}}"))
+
+def gemini_translator_write_function_declaration(
+    source: GeminiRequestContentStringView,
+    start: Int64,
+    end: Int64,
+    writer: Pointer[mut=True, GeminiRequestContentWriter, _],
+) -> Bool:
+    var function = gemini_bridge_request_object_member(
+        source, start, end, StringSlice("function")
+    )
+    if not gemini_bridge_request_is_object(
+        source, function[0], function[1]
+    ):
+        return False
+    var name = gemini_bridge_request_object_member(
+        source, function[0], function[1], StringSlice("name")
+    )
+    var description = gemini_bridge_request_object_member(
+        source, function[0], function[1], StringSlice("description")
+    )
+    var parameters = gemini_bridge_request_object_member(
+        source, function[0], function[1], StringSlice("parameters")
+    )
+    if (
+        not gemini_request_content_put_literal(writer, StringSlice('{"name":'))
+        or not gemini_request_content_put_range(
+            writer, source, name[0], name[1]
+        )
+        or not gemini_request_content_put_literal(
+            writer, StringSlice(',"description":')
+        )
+    ):
+        return False
+    if description[0] >= 0:
+        if not gemini_request_content_put_range(
+            writer, source, description[0], description[1]
+        ):
+            return False
+    elif not gemini_request_content_put_literal(writer, StringSlice('""')):
+        return False
+    if not gemini_request_content_put_literal(
+        writer, StringSlice(',"parameters":')
+    ):
+        return False
+    if not gemini_request_content_write_sanitized_schema(
+        source, parameters[0], parameters[1], writer, 0
+    ):
+        return False
+    return gemini_request_content_put_byte(writer, 125)
+
+def gemini_translator_write_tools_field(
+    source: GeminiRequestContentStringView,
+    root: InlineArray[Int64, 2],
+    writer: Pointer[mut=True, GeminiRequestContentWriter, _],
+    first_field: Pointer[mut=True, Bool, _],
+) -> Bool:
+    var tools = gemini_bridge_request_object_member(
+        source, root[0], root[1], StringSlice("tools")
+    )
+    if tools[0] < 0:
+        return True
+    if not gemini_bridge_request_is_array(source, tools[0], tools[1]):
+        return False
+
+    var computer_start: Int64 = -1
+    var computer_end: Int64 = -1
+    var has_code = False
+    var has_web = False
+    var has_url = False
+    var has_function = False
+    var cursor = gemini_request_content_skip_ws(
+        source, tools[0] + 1, tools[1] - 1
+    )
+    while cursor < tools[1] - 1:
+        var item_end = gemini_request_content_value_end(
+            source, cursor, tools[1] - 1, 0
+        )
+        if item_end < 0:
+            return False
+        if gemini_translator_is_computer_tool(
+            source, cursor, item_end
+        ) and computer_start < 0:
+            computer_start = cursor
+            computer_end = item_end
+        if gemini_translator_is_code_tool(source, cursor, item_end):
+            has_code = True
+        if gemini_translator_is_web_tool(source, cursor, item_end):
+            has_web = True
+        if gemini_translator_is_url_tool(source, cursor, item_end):
+            has_url = True
+        if gemini_translator_is_function_tool(
+            source, cursor, item_end
+        ):
+            has_function = True
+        cursor = gemini_request_content_skip_ws(
+            source, item_end, tools[1] - 1
+        )
+        if (
+            cursor < tools[1] - 1
+            and gemini_request_content_byte(source, cursor) == 44
+        ):
+            cursor = gemini_request_content_skip_ws(
+                source, cursor + 1, tools[1] - 1
+            )
+            continue
+        if cursor != tools[1] - 1:
+            return False
+        break
+
+    if (
+        computer_start < 0
+        and not has_code
+        and not has_web
+        and not has_url
+        and not has_function
+    ):
+        return True
+
+    if not gemini_bridge_request_put_field_prefix(
+        writer, first_field, StringSlice('"tools":')
+    ):
+        return False
+    if not gemini_request_content_put_byte(writer, 91):
+        return False
+
+    var first_tool = True
+    if computer_start >= 0:
+        if not gemini_translator_write_computer_tool(
+            source, computer_start, computer_end, writer
+        ):
+            return False
+        first_tool = False
+
+    if has_code:
+        if (
+            not first_tool
+            and not gemini_request_content_put_byte(writer, 44)
+        ):
+            return False
+        if not gemini_request_content_put_literal(
+            writer, StringSlice('{"codeExecution":{}}')
+        ):
+            return False
+        first_tool = False
+
+    if has_web:
+        if (
+            not first_tool
+            and not gemini_request_content_put_byte(writer, 44)
+        ):
+            return False
+        if not gemini_request_content_put_literal(
+            writer, StringSlice('{"googleSearch":{}}')
+        ):
+            return False
+        first_tool = False
+
+    if has_url:
+        if (
+            not first_tool
+            and not gemini_request_content_put_byte(writer, 44)
+        ):
+            return False
+        if not gemini_request_content_put_literal(
+            writer, StringSlice('{"urlContext":{}}')
+        ):
+            return False
+        first_tool = False
+
+    if has_function:
+        if (
+            not first_tool
+            and not gemini_request_content_put_byte(writer, 44)
+        ):
+            return False
+        if not gemini_request_content_put_literal(
+            writer, StringSlice('{"functionDeclarations":[')
+        ):
+            return False
+        var first_function = True
+        cursor = gemini_request_content_skip_ws(
+            source, tools[0] + 1, tools[1] - 1
+        )
+        while cursor < tools[1] - 1:
+            var item_end = gemini_request_content_value_end(
+                source, cursor, tools[1] - 1, 0
+            )
+            if item_end < 0:
+                return False
+            if gemini_translator_is_function_tool(
+                source, cursor, item_end
+            ):
+                if (
+                    not first_function
+                    and not gemini_request_content_put_byte(writer, 44)
+                ):
+                    return False
+                if not gemini_translator_write_function_declaration(
+                    source, cursor, item_end, writer
+                ):
+                    return False
+                first_function = False
+            cursor = gemini_request_content_skip_ws(
+                source, item_end, tools[1] - 1
+            )
+            if (
+                cursor < tools[1] - 1
+                and gemini_request_content_byte(source, cursor) == 44
+            ):
+                cursor = gemini_request_content_skip_ws(
+                    source, cursor + 1, tools[1] - 1
+                )
+                continue
+            if cursor != tools[1] - 1:
+                return False
+            break
+        if not gemini_request_content_put_literal(
+            writer, StringSlice("]}")
+        ):
+            return False
+
+    return gemini_request_content_put_byte(writer, 93)
+
+def gemini_bridge_request_write_raw_translator(
+    input: GeminiBridgeRequestInput,
+    writer: Pointer[mut=True, GeminiRequestContentWriter, _],
+) -> Bool:
+    if (
+        not gemini_request_content_fragment_valid(input.primary)
+        or not gemini_request_content_fragment_valid(input.tertiary)
+        or not gemini_request_content_fragment_valid(input.senary)
+        or gemini_request_content_byte(input.senary, 0) != 34
+    ):
+        return False
+    if input.secondary_present == 1 and not gemini_request_content_fragment_valid(input.secondary):
+        return False
+    if input.quaternary_present == 1 and not gemini_request_content_fragment_valid(input.quaternary):
+        return False
+    if input.quinary_present == 1 and not gemini_request_content_fragment_valid(input.quinary):
+        return False
+
+    var root = gemini_bridge_request_value_bounds(input.primary)
+    if not gemini_bridge_request_is_object(input.primary, root[0], root[1]):
+        return False
+
+    if (
+        not gemini_request_content_put_literal(writer, StringSlice('{"model":'))
+        or not gemini_request_content_put_range(
+            writer, input.senary, 0, Int64(input.senary.len)
+        )
+        or not gemini_request_content_put_literal(writer, StringSlice(',"request":{'))
+    ):
+        return False
+
+    var first = True
+    var first_ptr = Pointer(to=first)
+    if input.secondary_present == 1 and not gemini_bridge_request_put_raw_field(
+        writer,
+        first_ptr,
+        StringSlice('"systemInstruction":'),
+        input.secondary,
+    ):
+        return False
+    if not gemini_bridge_request_put_raw_field(
+        writer,
+        first_ptr,
+        StringSlice('"contents":'),
+        input.tertiary,
+    ):
+        return False
+
+    if not gemini_bridge_request_put_field_prefix(
+        writer, first_ptr, StringSlice('"generationConfig":')
+    ):
+        return False
+    if not gemini_translator_write_generation_config(
+        input.primary, input.senary, writer
+    ):
+        return False
+
+    if input.quaternary_present == 1:
+        if not gemini_bridge_request_put_raw_field(
+            writer,
+            first_ptr,
+            StringSlice('"tools":'),
+            input.quaternary,
+        ):
+            return False
+    elif not gemini_translator_write_tools_field(
+        input.primary, root, writer, first_ptr
+    ):
+        return False
+    if input.quinary_present == 1 and not gemini_bridge_request_put_raw_field(
+        writer,
+        first_ptr,
+        StringSlice('"toolConfig":'),
+        input.quinary,
+    ):
+        return False
+
+    if not gemini_bridge_request_write_optional_original_fields(
+        input.primary, root, writer, first_ptr
+    ):
+        return False
+
+    return (
+        gemini_request_content_put_byte(writer, 125)
+        and gemini_request_content_put_byte(writer, 125)
+    )
+
+
 @export("prodex_gemini_bridge_request_kernel_v1")
 def prodex_gemini_bridge_request_kernel_v1(
     abi_version: Int64,
@@ -3875,6 +5063,10 @@ def prodex_gemini_bridge_request_kernel_v1(
         ok = gemini_bridge_request_write_tool_config(input, writer_ptr)
     elif input.operation == GEMINI_BRIDGE_REQUEST_TEXT_CONTENTS:
         ok = gemini_bridge_request_write_text_contents(input, writer_ptr)
+    elif input.operation == GEMINI_BRIDGE_REQUEST_VALIDATE_TRANSLATOR:
+        ok = gemini_bridge_request_validate_translator(input, writer_ptr)
+    elif input.operation == GEMINI_BRIDGE_REQUEST_RAW_TRANSLATOR:
+        ok = gemini_bridge_request_write_raw_translator(input, writer_ptr)
     if not ok:
         written[] = writer.written
         if writer.written >= output_capacity:

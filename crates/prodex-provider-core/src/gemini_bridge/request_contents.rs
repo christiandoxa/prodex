@@ -50,6 +50,68 @@ pub(super) fn gemini_bridge_request_value(input: GeminiBridgeRequestKernelInput<
 }
 
 #[cfg(feature = "mojo")]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct GeminiTranslatorValidationPlan {
+    pub tag: i64,
+    pub index: Option<usize>,
+    pub detail: Option<String>,
+}
+
+#[cfg(feature = "mojo")]
+pub(crate) fn gemini_bridge_validate_translator(body: &[u8]) -> GeminiTranslatorValidationPlan {
+    let value = gemini_bridge_request_value(GeminiBridgeRequestKernelInput {
+        operation: GeminiBridgeRequestOperation::ValidateTranslatorRequest,
+        primary: Some(body),
+        ..GeminiBridgeRequestKernelInput::new(
+            GeminiBridgeRequestOperation::ValidateTranslatorRequest,
+        )
+    });
+    let tag = value
+        .get("tag")
+        .and_then(Value::as_i64)
+        .expect("Mojo Gemini translator validation tag is an integer");
+    let index = value
+        .get("index")
+        .and_then(Value::as_i64)
+        .and_then(|value| usize::try_from(value).ok());
+    let detail = value
+        .get("detail")
+        .and_then(Value::as_str)
+        .map(str::to_string);
+    GeminiTranslatorValidationPlan { tag, index, detail }
+}
+
+#[cfg(feature = "mojo")]
+pub(crate) fn gemini_bridge_raw_translator_request(
+    original: &Value,
+    system_instruction: Option<&Value>,
+    contents: &[Value],
+    tools: Option<&Value>,
+    tool_config: Option<&Value>,
+    model: &str,
+) -> Vec<u8> {
+    let original = serde_json::to_vec(original).expect("Gemini translator request serializes");
+    let system_instruction = system_instruction
+        .map(|value| serde_json::to_vec(value).expect("Gemini system instruction serializes"));
+    let contents = serde_json::to_vec(contents).expect("Gemini contents serialize");
+    let tools = tools.map(|value| serde_json::to_vec(value).expect("Gemini tools serialize"));
+    let tool_config =
+        tool_config.map(|value| serde_json::to_vec(value).expect("Gemini tool config serializes"));
+    let model = serde_json::to_vec(model).expect("Gemini model serializes");
+    gemini_bridge_request_bytes(GeminiBridgeRequestKernelInput {
+        operation: GeminiBridgeRequestOperation::RawTranslatorRequest,
+        primary: Some(&original),
+        secondary: system_instruction.as_deref(),
+        tertiary: Some(&contents),
+        quaternary: tools.as_deref(),
+        quinary: tool_config.as_deref(),
+        senary: Some(&model),
+        ..GeminiBridgeRequestKernelInput::new(GeminiBridgeRequestOperation::RawTranslatorRequest)
+    })
+    .unwrap_or_else(|error| panic!("Mojo Gemini raw translator request failed: {error:?}"))
+}
+
+#[cfg(feature = "mojo")]
 pub(super) fn gemini_bridge_request_simple(body: &[u8]) -> bool {
     let Ok(body) = gemini_bridge_request_bytes(GeminiBridgeRequestKernelInput {
         operation: GeminiBridgeRequestOperation::SimpleRequest,
