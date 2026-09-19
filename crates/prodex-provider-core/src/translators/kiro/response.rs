@@ -12,105 +12,68 @@ pub fn kiro_provider_core_chat_completion_value_from_response(
     response: &Value,
     request_id: u64,
 ) -> Value {
-    #[cfg(not(feature = "mojo"))]
-    let id = response
-        .get("id")
-        .and_then(Value::as_str)
-        .map(|id| format!("chatcmpl_{id}"))
-        .unwrap_or_else(|| format!("chatcmpl_kiro_{request_id}"));
-    let created = response
-        .get("created_at")
-        .and_then(Value::as_u64)
-        .unwrap_or(0);
-    #[cfg(not(feature = "mojo"))]
-    let model = response
-        .get("model")
-        .and_then(Value::as_str)
-        .unwrap_or("kiro-cli");
-    let output = response
-        .get("output")
-        .and_then(Value::as_array)
-        .map(Vec::as_slice)
-        .unwrap_or_default();
-    let assistant_text = output
-        .iter()
-        .find(|item| item.get("type").and_then(Value::as_str) == Some("message"))
-        .and_then(|item| item.get("content"))
-        .and_then(Value::as_array)
-        .and_then(|content| content.first())
-        .and_then(|item| item.get("text"))
-        .and_then(Value::as_str)
-        .unwrap_or_default();
-    let function_calls = output
-        .iter()
-        .filter(|item| item.get("type").and_then(Value::as_str) == Some("function_call"))
-        .collect::<Vec<_>>();
-    let has_tool_calls = !function_calls.is_empty();
-    let reasoning_content = response
-        .get("metadata")
-        .and_then(|metadata| metadata.get("kiro"))
-        .and_then(|kiro| kiro.get("reasoning_content"))
-        .and_then(Value::as_str)
-        .filter(|reasoning| !reasoning.is_empty());
-    let status = response.get("status").and_then(Value::as_str);
-    let refusal = if status == Some("failed") {
-        response.get("error").map(|error| {
-            error
-                .get("message")
-                .cloned()
-                .unwrap_or_else(|| Value::String("Kiro request failed".to_string()))
-        })
-    } else {
-        None
-    };
-
     #[cfg(feature = "mojo")]
     {
-        let tool_calls = function_calls
-            .iter()
-            .map(|item| {
-                let mut input = KiroKernelInput::new(KiroKernelOperation::ChatToolCallItem);
-                input.call_id = item.get("call_id").and_then(Value::as_str);
-                input.name = item.get("name").and_then(Value::as_str);
-                input.arguments = item.get("arguments").and_then(Value::as_str);
-                kiro_mojo_value(input)
-            })
-            .collect::<Vec<_>>();
-        let tool_calls = has_tool_calls
-            .then(|| serde_json::to_string(&tool_calls).expect("Kiro chat tool calls serialize"));
-        let content = serde_json::to_string(&if assistant_text.is_empty() && has_tool_calls {
-            Value::Null
-        } else {
-            Value::String(assistant_text.to_string())
-        })
-        .expect("Kiro chat response content serializes");
-        let response_id = response.get("id").and_then(Value::as_str);
-        let requested_model = response.get("requested_model").and_then(Value::as_str);
-        let metadata = response.get("metadata").map(|value| {
-            serde_json::to_string(value).expect("Kiro chat response metadata serializes")
+        let canonical =
+            serde_json::to_string(response).expect("Kiro response canonical JSON serializes");
+        let body = prodex_mojo_core::rich::kiro_rewrite_chat_response_json(&canonical, request_id)
+            .unwrap_or_else(|error| panic!("Mojo Kiro raw response rewrite failed: {error:?}"));
+        return serde_json::from_slice(&body).unwrap_or_else(|error| {
+            panic!("Mojo Kiro raw response rewrite returned invalid JSON: {error}")
         });
-        let error = refusal.as_ref().and_then(Value::as_str);
-        let mut input = KiroKernelInput::new(KiroKernelOperation::ChatCompletionResponse);
-        input.request_id = request_id;
-        input.created_at = created;
-        input.response_id = response_id;
-        input.model = response.get("model").and_then(Value::as_str);
-        input.content = Some(&content);
-        input.has_tool_calls = has_tool_calls;
-        input.tool_calls = tool_calls.as_deref();
-        input.reason = reasoning_content;
-        input.requested_model = requested_model;
-        input.metadata = metadata.as_deref();
-        input.status = status;
-        input.error = error;
-        input.incomplete_reason = response
-            .pointer("/incomplete_details/reason")
-            .and_then(Value::as_str);
-        kiro_mojo_value(input)
     }
 
     #[cfg(not(feature = "mojo"))]
     {
+        let id = response
+            .get("id")
+            .and_then(Value::as_str)
+            .map(|id| format!("chatcmpl_{id}"))
+            .unwrap_or_else(|| format!("chatcmpl_kiro_{request_id}"));
+        let created = response
+            .get("created_at")
+            .and_then(Value::as_u64)
+            .unwrap_or(0);
+        let model = response
+            .get("model")
+            .and_then(Value::as_str)
+            .unwrap_or("kiro-cli");
+        let output = response
+            .get("output")
+            .and_then(Value::as_array)
+            .map(Vec::as_slice)
+            .unwrap_or_default();
+        let assistant_text = output
+            .iter()
+            .find(|item| item.get("type").and_then(Value::as_str) == Some("message"))
+            .and_then(|item| item.get("content"))
+            .and_then(Value::as_array)
+            .and_then(|content| content.first())
+            .and_then(|item| item.get("text"))
+            .and_then(Value::as_str)
+            .unwrap_or_default();
+        let function_calls = output
+            .iter()
+            .filter(|item| item.get("type").and_then(Value::as_str) == Some("function_call"))
+            .collect::<Vec<_>>();
+        let has_tool_calls = !function_calls.is_empty();
+        let reasoning_content = response
+            .get("metadata")
+            .and_then(|metadata| metadata.get("kiro"))
+            .and_then(|kiro| kiro.get("reasoning_content"))
+            .and_then(Value::as_str)
+            .filter(|reasoning| !reasoning.is_empty());
+        let status = response.get("status").and_then(Value::as_str);
+        let refusal = if status == Some("failed") {
+            response.get("error").map(|error| {
+                error
+                    .get("message")
+                    .cloned()
+                    .unwrap_or_else(|| Value::String("Kiro request failed".to_string()))
+            })
+        } else {
+            None
+        };
         let tool_calls = function_calls
             .iter()
             .map(|item| {

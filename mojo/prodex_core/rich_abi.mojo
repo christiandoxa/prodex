@@ -30,6 +30,7 @@ from openai_compat import openai_compat_kernel_v1
 # Kiro shares the rich ABI while keeping ACP transport and session behavior in Rust.
 from kiro import (
     kiro_chat_request_rewrite_v1,
+    kiro_chat_response_rewrite_v1,
     kiro_kernel_v1,
     kiro_request_validation_json_v1,
     kiro_request_validation_v1,
@@ -457,4 +458,25 @@ def prodex_mojo_kiro_chat_request_rewrite_v1(
         output_capacity,
         written_address,
         issue_address,
+    )
+
+
+@export("prodex_mojo_kiro_chat_response_rewrite_v1")
+def prodex_mojo_kiro_chat_response_rewrite_v1(
+    abi_version: Int64,
+    input_address: UInt,
+    input_length: Int64,
+    request_id: UInt64,
+    output_address: UInt,
+    output_capacity: Int64,
+    written_address: UInt,
+) abi("C") -> Int64:
+    return kiro_chat_response_rewrite_v1(
+        abi_version,
+        input_address,
+        input_length,
+        request_id,
+        output_address,
+        output_capacity,
+        written_address,
     )
