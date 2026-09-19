@@ -111,6 +111,23 @@ pub(crate) fn gemini_runtime_responses_value_from_generate_value_with_fallback_i
 }
 
 pub(super) fn gemini_responses_value_from_generate_value(value: &Value) -> Value {
+    #[cfg(feature = "mojo")]
+    {
+        let canonical =
+            serde_json::to_string(value).expect("Gemini raw text response input serializes");
+        let mut input = prodex_mojo_core::rich::GeminiResponseKernelInput::new(
+            prodex_mojo_core::rich::GeminiResponseKernelOperation::RawTextResponse,
+        );
+        input.response = Some(&canonical);
+        input.response_id = Some("gemini_resp_prodex");
+        input.model = Some("gemini-2.5-pro");
+        input.include_empty_usage = true;
+        input.include_empty_metadata = true;
+        let mapped = super::stream::gemini_mojo_value(input);
+        if !mapped.is_null() {
+            return mapped;
+        }
+    }
     let response_id = value
         .get("responseId")
         .and_then(Value::as_str)

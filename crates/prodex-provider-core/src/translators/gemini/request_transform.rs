@@ -15,6 +15,8 @@ use super::request::{
     gemini_apply_text_format, gemini_insert_basic_generation_config,
     gemini_insert_extended_generation_config, gemini_thinking_config_from_request,
 };
+#[cfg(feature = "mojo")]
+use super::request_contents::gemini_text_contents_from_request_mojo;
 use super::request_contents::{
     gemini_contains_local_media_path, gemini_contents_from_request,
     gemini_system_instruction_from_request,
@@ -96,13 +98,25 @@ pub(super) fn gemini_transform_request(input: ProviderTransformInput) -> Provide
         );
     }
     let mut request = serde_json::Map::new();
-    if let Some(system_instruction) = gemini_system_instruction_from_request(&value) {
+    #[cfg(feature = "mojo")]
+    let mojo_text_contents = gemini_text_contents_from_request_mojo(&value);
+    #[cfg(feature = "mojo")]
+    let (system_instruction, contents) = match mojo_text_contents {
+        Some(mapped) => mapped,
+        None => (
+            gemini_system_instruction_from_request(&value),
+            gemini_contents_from_request(&value),
+        ),
+    };
+    #[cfg(not(feature = "mojo"))]
+    let (system_instruction, contents) = (
+        gemini_system_instruction_from_request(&value),
+        gemini_contents_from_request(&value),
+    );
+    if let Some(system_instruction) = system_instruction {
         request.insert("systemInstruction".to_string(), system_instruction);
     }
-    request.insert(
-        "contents".to_string(),
-        Value::Array(gemini_contents_from_request(&value)),
-    );
+    request.insert("contents".to_string(), Value::Array(contents));
     let model = obj
         .get("model")
         .and_then(Value::as_str)
