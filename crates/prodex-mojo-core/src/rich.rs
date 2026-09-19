@@ -103,6 +103,9 @@ pub use runtime_doctor_marker::*;
 #[path = "rich/runtime_doctor_render.rs"]
 mod runtime_doctor_render;
 pub use runtime_doctor_render::*;
+#[path = "rich/super_expose.rs"]
+mod super_expose;
+pub use super_expose::*;
 #[path = "rich/ping_protocol.rs"]
 mod ping_protocol;
 pub use ping_protocol::*;

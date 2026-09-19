@@ -598,3 +598,48 @@ fn info_parses_as_read_only_summary_command() {
     };
     assert!(json.json);
 }
+
+#[test]
+fn super_expose_alias_parses_local_endpoint() {
+    let command = parse_cli_command_from([
+        "prodex",
+        "s",
+        "expose",
+        "--listen",
+        "127.0.0.1:0",
+        "--no-tunnel",
+        "--no-presidio",
+        "--tool",
+        "rtk",
+    ])
+    .expect("super expose should parse");
+    let Commands::SuperExpose(args) = command else {
+        panic!("expected hidden super expose command");
+    };
+    assert_eq!(args.listen, "127.0.0.1:0");
+    assert!(args.no_tunnel);
+    assert!(!args.tunnel);
+    assert!(args.super_args.no_presidio);
+    assert!(
+        args.super_args
+            .tools
+            .contains(&prodex_optional_tools::OptionalToolId::Rtk)
+    );
+}
+
+#[test]
+fn super_profile_named_expose_is_not_rewritten_as_expose_command() {
+    let command = parse_cli_command_from([
+        "prodex",
+        "s",
+        "--profile",
+        "expose",
+        "--no-presidio",
+        "--dry-run",
+    ])
+    .expect("profile named expose should stay a Super launch");
+    let Commands::Super(args) = command else {
+        panic!("expected Super command");
+    };
+    assert_eq!(args.profile.as_deref(), Some("expose"));
+}

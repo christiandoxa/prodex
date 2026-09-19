@@ -36,6 +36,7 @@ pub(crate) fn command_should_show_update_notice(command: &Commands) -> bool {
                 | Commands::Ping(_)
                 | Commands::Log(_)
                 | Commands::Update(_)
+                | Commands::SuperExpose(_)
                 | Commands::McpJsonlBridge(_)
                 | Commands::SubAgentExec(_)
         )
@@ -46,6 +47,11 @@ pub(crate) fn command_is_super_dry_run(command: &Commands) -> bool {
         command,
         Commands::Super(args)
             if args.dry_run || prodex_dry_run_requested(&args.codex_args)
+    ) || matches!(
+        command,
+        Commands::SuperExpose(args)
+            if args.super_args.dry_run
+                || prodex_dry_run_requested(&args.super_args.codex_args)
     )
 }
 
@@ -72,6 +78,7 @@ pub(crate) fn execute_command(command: Commands) -> Result<()> {
         Commands::Run(args) => app_commands::runtime_launch::handle_run(args),
         Commands::Super(args) => execute_super(*args),
         Commands::Gateway(args) => handle_gateway(args),
+        Commands::SuperExpose(args) => super_expose::handle_super_expose(*args),
         Commands::RuntimeBroker(args) => handle_runtime_broker(args),
         Commands::McpJsonlBridge(args) => handle_mcp_jsonl_bridge(args),
         Commands::SubAgentExec(args) => handle_sub_agent_exec(args),
