@@ -60,46 +60,98 @@ pub(super) fn kiro_mojo_body(input: KiroKernelInput<'_>) -> Vec<u8> {
 pub fn kiro_provider_core_chat_completions_request_body(
     body: &[u8],
 ) -> Result<Vec<u8>, KiroProviderCoreRequestError> {
-    let mut value: Value = serde_json::from_slice(body).map_err(|_| {
+    let value: Value = serde_json::from_slice(body).map_err(|_| {
         KiroProviderCoreRequestError::new(
             "Kiro chat completions request body must be valid JSON",
             "invalid_json",
         )
     })?;
-    let Some(object) = value.as_object_mut() else {
+    let Some(object) = value.as_object() else {
         return Err(KiroProviderCoreRequestError::new(
             "Kiro chat completions request body must be a JSON object",
             "invalid_request_body",
         ));
     };
+
     #[cfg(feature = "mojo")]
     {
-        let raw = std::str::from_utf8(body).expect("valid JSON is valid UTF-8");
-        let plan = prodex_mojo_core::rich::kiro_validate_request_json(
-            prodex_mojo_core::rich::KiroRequestValidationMode::ChatCompletions,
-            raw,
+        use prodex_mojo_core::rich::{
+            KiroChatRewriteIssue, KiroRequestValidationMode, kiro_rewrite_chat_request_json,
+            kiro_validate_request_json,
+        };
+
+        let canonical = serde_json::to_string(&value).map_err(|_| {
+            KiroProviderCoreRequestError::new(
+                "failed to serialize Kiro chat completions request",
+                "invalid_request_body",
+            )
+        })?;
+        let plan = kiro_validate_request_json(
+            KiroRequestValidationMode::ChatCompletions,
+            &canonical,
             false,
         )
         .unwrap_or_else(|error| panic!("Mojo Kiro raw request validation failed: {error:?}"));
         validation::error(plan, object)?;
-        validation::remove_chat_defaults(object);
+
+        let had_input = object.contains_key("input");
+        let rewritten = kiro_rewrite_chat_request_json(&canonical)
+            .unwrap_or_else(|error| panic!("Mojo Kiro raw chat rewrite failed: {error:?}"));
+        match rewritten.issue {
+            KiroChatRewriteIssue::None => {}
+            KiroChatRewriteIssue::MissingMessages => {
+                return Err(KiroProviderCoreRequestError::new(
+                    "Kiro chat completions request is missing messages",
+                    "missing_messages",
+                ));
+            }
+            KiroChatRewriteIssue::InvalidMessages => {
+                return Err(KiroProviderCoreRequestError::new(
+                    "Kiro chat completions messages must be an array",
+                    "invalid_messages",
+                ));
+            }
+        }
+        let mut rewritten: Value = serde_json::from_slice(&rewritten.body).map_err(|_| {
+            KiroProviderCoreRequestError::new(
+                "failed to serialize rewritten Kiro chat completions body",
+                "invalid_request_body",
+            )
+        })?;
+        let object = rewritten.as_object_mut().ok_or_else(|| {
+            KiroProviderCoreRequestError::new(
+                "failed to serialize rewritten Kiro chat completions body",
+                "invalid_request_body",
+            )
+        })?;
+        if !had_input {
+            kiro_rewrite_legacy_chat_tools(object);
+        }
+        let body = serde_json::to_vec(&rewritten).map_err(|_| {
+            KiroProviderCoreRequestError::new(
+                "failed to serialize rewritten Kiro chat completions body",
+                "invalid_request_body",
+            )
+        })?;
+        return kiro_provider_core_responses_request_body(&body, false);
     }
+
     #[cfg(not(feature = "mojo"))]
     {
+        let mut value = value;
+        let object = value.as_object_mut().expect("validated request object");
         kiro_validate_chat_completion_format_and_sampling(object)?;
         kiro_validate_chat_completion_penalties(object)?;
+        object.remove("n");
+        object.remove("user");
+        kiro_provider_core_reject_token_limit_controls(object)?;
+        if object.contains_key("input") {
+            return kiro_validate_serialized_chat_body(&value);
+        }
+        kiro_rewrite_chat_messages(object)?;
+        kiro_validate_serialized_chat_body(&value)
     }
-    object.remove("n");
-    object.remove("user");
-    #[cfg(not(feature = "mojo"))]
-    kiro_provider_core_reject_token_limit_controls(object)?;
-    if object.contains_key("input") {
-        return kiro_validate_serialized_chat_body(&value);
-    }
-    kiro_rewrite_chat_messages(object)?;
-    kiro_validate_serialized_chat_body(&value)
 }
-
 #[cfg(not(feature = "mojo"))]
 fn kiro_validate_chat_completion_format_and_sampling(
     object: &mut serde_json::Map<String, Value>,
@@ -214,6 +266,7 @@ fn kiro_remove_default_number_chat_control(
     )
 }
 
+#[cfg(not(feature = "mojo"))]
 fn kiro_rewrite_chat_messages(
     object: &mut serde_json::Map<String, Value>,
 ) -> Result<(), KiroProviderCoreRequestError> {
@@ -235,6 +288,11 @@ fn kiro_rewrite_chat_messages(
         .flat_map(kiro_provider_core_responses_items_from_chat_message)
         .collect::<Vec<_>>();
     object.insert("input".to_string(), Value::Array(items));
+    kiro_rewrite_legacy_chat_tools(object);
+    Ok(())
+}
+
+fn kiro_rewrite_legacy_chat_tools(object: &mut serde_json::Map<String, Value>) {
     if !object.contains_key("tools")
         && let Some(functions) = object.remove("functions")
         && let Some(functions) = functions.as_array()
@@ -256,9 +314,9 @@ fn kiro_rewrite_chat_messages(
     {
         object.insert("tool_choice".to_string(), tool_choice);
     }
-    Ok(())
 }
 
+#[cfg(not(feature = "mojo"))]
 fn kiro_validate_serialized_chat_body(
     value: &Value,
 ) -> Result<Vec<u8>, KiroProviderCoreRequestError> {
