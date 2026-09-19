@@ -2,7 +2,7 @@
   "codex": {
     "compatibility": {
       "upstream_repository": "https://github.com/openai/codex",
-      "baseline_source": "openai/codex rust-v0.155.0 release",
+      "baseline_source": "openai/codex rust-v0.155.1 release",
       "guard_command": "node scripts/compat/check-upstream-baseline.mjs",
       "format_version": 2,
       "critical_files": [
@@ -1573,7 +1573,7 @@
           ]
         }
       ],
-      "tested_codex_release": "rust-v0.155.0",
+      "tested_codex_release": "rust-v0.155.1",
       "patch_deltas": [
         {
           "from": "rust-v0.150.0",
@@ -1713,6 +1713,20 @@
           ],
           "prodex_action": "Preserve normal Responses metadata and compaction-trigger payloads opaquely, keep hard session/continuation affinity and pre-commit rotation rules, retain legacy /responses/compact compatibility for older clients, and do not duplicate Codex model-cache identity, daemon, voice, or verification semantics.",
           "compatibility_evidence": "Exact 0.154.0 and 0.155.0 source archives, upstream release metadata, the existing Prodex normal-/responses compaction-v2 affinity regression, offline baseline guard, and focused runtime proxy replay/compatibility checks are recorded in migration/codex-rust-v0.155.0-audit.md."
+        },
+        {
+          "from": "rust-v0.155.0",
+          "to": "rust-v0.155.1",
+          "upstream_commit": "be2951ea34f0d295ed0becf97079f92fa5f6950e",
+          "upstream_tag_object": "4e21628f9ec9ee656650cd2b62ef92225725b5ac",
+          "upstream_release_date": "2026-09-18T20:03:04Z",
+          "tree_comparison": "exact tagged source archives; 3 changed files, 23 additions, 6 deletions, no binary entries",
+          "runtime_changes": [
+            "New local TUI app-server sessions now default model_reasoning_summary to none instead of detailed.",
+            "Explicit model_reasoning_summary settings remain respected; Responses transport, compaction, metadata/header ownership, model-cache identity, provider auth, MCP normalization, and app-server protocol schemas are unchanged."
+          ],
+          "prodex_action": "Keep Prodex provider bridges explicit with model_reasoning_summary=none, preserve ordinary Codex passthrough semantics, and make no runtime proxy or compatibility rewrite for 0.155.1.",
+          "compatibility_evidence": "Exact 0.155.0 and 0.155.1 source archives, official release metadata and Linux binary digests, isolated app-server initialize smoke, provider-bridge reasoning-summary regression, and offline baseline guard are recorded in migration/codex-rust-v0.155.1-audit.md."
         }
       ],
       "app_server_protocol": {
@@ -1735,20 +1749,18 @@
       }
     },
     "latestRelease": {
-      "tag_name": "rust-v0.155.0",
-      "name": "0.155.0",
-      "published_at": "2026-09-17T23:14:43Z",
-      "html_url": "https://github.com/openai/codex/releases/tag/rust-v0.155.0",
+      "tag_name": "rust-v0.155.1",
+      "name": "0.155.1",
+      "published_at": "2026-09-18T20:03:04Z",
+      "html_url": "https://github.com/openai/codex/releases/tag/rust-v0.155.1",
       "body_head": [
-        "## New Features",
+        "## Bug Fixes",
         "",
-        "- Added experimental `/voice` conversations with live transcripts and microphone controls on supported builds, enabled through `/experimental`. (#43581, #43651, #44331)",
-        "- The TUI now shows live reasoning summaries in the status row and completion timestamps after successful turns. (#43558, #43921)",
-        "- Added task hiding, archiving, and deletion in the agents overview, plus worktree ownership details and confirmed deletion of clean managed worktrees. (#43942, #44424, #44433)",
-        "- Added Touch ID verification for MCP requests in local TUI sessions on supported Macs. (#43624, #43712, #43715)",
-        "- Added configurable daemon update schedules and `codex app-server daemon update`; saved threads and active goals can recover after daemon restarts. (#43542, #43562, #44314)",
-        "- Amazon Bedrock can now obtain AWS credentials from configured commands, with caching, expiration-based refresh, and authentication recovery. (#44028)",
-        ""
+        "- New local TUI sessions now leave reasoning summaries disabled by default, fixing request rejection by providers that do not support them. Explicit reasoning-summary settings remain respected. (#46467)",
+        "",
+        "## Changelog",
+        "",
+        "Full Changelog: https://github.com/openai/codex/compare/rust-v0.155.0...rust-v0.155.1"
       ]
     }
   },
