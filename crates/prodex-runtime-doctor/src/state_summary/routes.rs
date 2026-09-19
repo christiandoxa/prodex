@@ -121,6 +121,7 @@ pub(super) fn runtime_doctor_effective_health_score(
     runtime_doctor_effective_score(entry, now, config.health_decay_seconds)
 }
 
+#[cfg(any(not(feature = "mojo"), test))]
 pub(super) fn runtime_doctor_effective_health_score_from_map(
     scores: &BTreeMap<String, RuntimeDoctorHealthScore>,
     key: &str,
@@ -133,6 +134,7 @@ pub(super) fn runtime_doctor_effective_health_score_from_map(
         .unwrap_or(0)
 }
 
+#[cfg(any(not(feature = "mojo"), test))]
 pub(super) fn runtime_doctor_effective_score_from_map(
     scores: &BTreeMap<String, RuntimeDoctorHealthScore>,
     key: &str,

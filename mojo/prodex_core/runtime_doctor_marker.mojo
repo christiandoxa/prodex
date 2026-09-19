@@ -1,6 +1,6 @@
 from std.memory import Pointer
 
-from rich_text import rich_view_matches_literal, rich_view_valid
+from rich_text import rich_view_matches_literal, rich_view_ptr, rich_view_valid
 from rich_types import ProdexRichStringView
 
 comptime RUNTIME_DOCTOR_MARKER_ABI_VERSION: Int64 = 1
@@ -577,4 +577,131 @@ def prodex_mojo_runtime_doctor_marker_semantics_v1(
     output[unsafe_offset=0] = runtime_doctor_marker_timeline_phase(marker)
     output[unsafe_offset=1] = runtime_doctor_marker_selection_bucket(marker)
     output[unsafe_offset=2] = runtime_doctor_marker_route_action(marker)
+    return 0
+
+comptime RUNTIME_DOCTOR_MESSAGE_PARSE_MAX_BYTES: Int64 = 4_194_304
+
+def runtime_doctor_message_is_space(value: UInt8) -> Bool:
+    return value == 9 or value == 10 or value == 11 or value == 12 or value == 13 or value == 32
+
+def runtime_doctor_message_skip_space(
+    view: ProdexRichStringView, index: Int64
+) -> Int64:
+    var next = index
+    var ptr = rich_view_ptr(view)
+    while next < Int64(view.len):
+        if not runtime_doctor_message_is_space(ptr[unsafe_offset=next]):
+            break
+        next += 1
+    return next
+
+def runtime_doctor_message_skip_key_or_token(
+    view: ProdexRichStringView, index: Int64
+) -> Int64:
+    var next = index
+    var ptr = rich_view_ptr(view)
+    while next < Int64(view.len):
+        var value = ptr[unsafe_offset=next]
+        if runtime_doctor_message_is_space(value) or value == 61:
+            break
+        next += 1
+    return next
+
+def runtime_doctor_message_skip_token(
+    view: ProdexRichStringView, index: Int64
+) -> Int64:
+    var next = index
+    var ptr = rich_view_ptr(view)
+    while next < Int64(view.len):
+        if runtime_doctor_message_is_space(ptr[unsafe_offset=next]):
+            break
+        next += 1
+    return next
+
+def runtime_doctor_message_skip_value(
+    view: ProdexRichStringView, index: Int64
+) -> Int64:
+    var next = index
+    var length = Int64(view.len)
+    if next >= length:
+        return next
+    var ptr = rich_view_ptr(view)
+    if ptr[unsafe_offset=next] == 34:
+        next += 1
+        var escaped = False
+        while next < length:
+            var value = ptr[unsafe_offset=next]
+            if escaped:
+                escaped = False
+                next += 1
+                continue
+            if value == 92:
+                escaped = True
+                next += 1
+                continue
+            if value == 34:
+                next += 1
+                break
+            next += 1
+        return next
+    while next < length:
+        if runtime_doctor_message_is_space(ptr[unsafe_offset=next]):
+            break
+        next += 1
+    return next
+
+@export("prodex_mojo_runtime_doctor_parse_message_v1")
+def prodex_mojo_runtime_doctor_parse_message_v1(
+    abi_version: Int64,
+    input_address: UInt,
+    input_length: Int64,
+    output_address: UInt,
+    output_capacity: Int64,
+) abi("C") -> Int64:
+    if abi_version != RUNTIME_DOCTOR_MARKER_ABI_VERSION:
+        return 4
+    if (
+        input_length < 0
+        or input_length > RUNTIME_DOCTOR_MESSAGE_PARSE_MAX_BYTES
+        or output_capacity < 3
+        or output_address == 0
+        or (input_length > 0 and input_address == 0)
+    ):
+        return 1
+    var view = ProdexRichStringView(input_address, UInt(input_length))
+    if not rich_view_valid(view, RUNTIME_DOCTOR_MESSAGE_PARSE_MAX_BYTES):
+        return 2
+    var output = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    output[unsafe_offset=0] = -1
+    output[unsafe_offset=1] = -1
+    output[unsafe_offset=2] = 0
+    var index: Int64 = 0
+    var field_count: Int64 = 0
+    var ptr = rich_view_ptr(view)
+    while index < input_length:
+        index = runtime_doctor_message_skip_space(view, index)
+        if index >= input_length:
+            break
+        var token_start = index
+        index = runtime_doctor_message_skip_key_or_token(view, index)
+        if index < input_length and ptr[unsafe_offset=index] == 61:
+            var value_start = index + 1
+            var value_end = runtime_doctor_message_skip_value(view, value_start)
+            var base = 3 + field_count * 4
+            if base + 4 > output_capacity:
+                return 3
+            output[unsafe_offset=base] = token_start
+            output[unsafe_offset=base + 1] = index
+            output[unsafe_offset=base + 2] = value_start
+            output[unsafe_offset=base + 3] = value_end
+            field_count += 1
+            output[unsafe_offset=2] = field_count
+            index = value_end
+            continue
+        if token_start < index and output[unsafe_offset=0] < 0:
+            output[unsafe_offset=0] = token_start
+            output[unsafe_offset=1] = index
+        index = runtime_doctor_message_skip_token(view, index)
     return 0

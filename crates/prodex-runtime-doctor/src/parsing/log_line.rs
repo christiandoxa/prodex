@@ -137,7 +137,38 @@ fn runtime_doctor_json_fields_map(
         .collect()
 }
 
+#[cfg(feature = "mojo")]
 fn runtime_doctor_parse_log_message(message: &str) -> RuntimeDoctorParsedLogMessage {
+    let plan = prodex_mojo_core::rich::runtime_doctor_parse_message_offsets(message)
+        .expect("Mojo runtime-doctor message parser returned invalid output");
+    RuntimeDoctorParsedLogMessage {
+        event: plan
+            .event
+            .map(|(start, end)| message[start..end].to_string()),
+        fields: plan
+            .fields
+            .into_iter()
+            .filter_map(|field| {
+                let key = &message[field.key_start..field.key_end];
+                let raw_value = &message[field.value_start..field.value_end];
+                (!key.is_empty() && !raw_value.is_empty()).then(|| {
+                    (
+                        key.to_string(),
+                        runtime_doctor_parse_log_field_value(raw_value),
+                    )
+                })
+            })
+            .collect(),
+    }
+}
+
+#[cfg(not(feature = "mojo"))]
+fn runtime_doctor_parse_log_message(message: &str) -> RuntimeDoctorParsedLogMessage {
+    runtime_doctor_parse_log_message_rust(message)
+}
+
+#[cfg(any(not(feature = "mojo"), test))]
+fn runtime_doctor_parse_log_message_rust(message: &str) -> RuntimeDoctorParsedLogMessage {
     let mut parsed = RuntimeDoctorParsedLogMessage::default();
     let bytes = message.as_bytes();
     let mut index = 0;
@@ -167,6 +198,7 @@ fn runtime_doctor_parse_log_message(message: &str) -> RuntimeDoctorParsedLogMess
     parsed
 }
 
+#[cfg(any(not(feature = "mojo"), test))]
 fn runtime_doctor_parse_log_field(
     message: &str,
     key_start: usize,
@@ -185,6 +217,7 @@ fn runtime_doctor_parse_log_field(
     (next_index, field)
 }
 
+#[cfg(any(not(feature = "mojo"), test))]
 fn runtime_doctor_skip_log_whitespace(message: &str, mut index: usize) -> usize {
     let bytes = message.as_bytes();
     while index < bytes.len() && bytes[index].is_ascii_whitespace() {
@@ -193,6 +226,7 @@ fn runtime_doctor_skip_log_whitespace(message: &str, mut index: usize) -> usize 
     index
 }
 
+#[cfg(any(not(feature = "mojo"), test))]
 fn runtime_doctor_skip_log_key_or_token(message: &str, mut index: usize) -> usize {
     let bytes = message.as_bytes();
     while index < bytes.len() && !bytes[index].is_ascii_whitespace() && bytes[index] != b'=' {
@@ -201,6 +235,7 @@ fn runtime_doctor_skip_log_key_or_token(message: &str, mut index: usize) -> usiz
     index
 }
 
+#[cfg(any(not(feature = "mojo"), test))]
 fn runtime_doctor_skip_log_token(message: &str, mut index: usize) -> usize {
     let bytes = message.as_bytes();
     while index < bytes.len() && !bytes[index].is_ascii_whitespace() {
@@ -209,6 +244,7 @@ fn runtime_doctor_skip_log_token(message: &str, mut index: usize) -> usize {
     index
 }
 
+#[cfg(any(not(feature = "mojo"), test))]
 fn runtime_doctor_skip_log_field_value(message: &str, mut index: usize) -> usize {
     let bytes = message.as_bytes();
     if index >= bytes.len() {
@@ -290,4 +326,30 @@ pub(super) fn runtime_doctor_truncate_line(line: &str, limit: usize) -> String {
         .take(limit.saturating_sub(1))
         .collect::<String>()
         + "…"
+}
+
+#[cfg(all(test, feature = "mojo"))]
+mod mojo_message_parser_parity_tests {
+    use super::*;
+
+    #[test]
+    fn message_parser_matches_rust_oracle() {
+        for message in [
+            "",
+            "selection_pick",
+            "selection_pick profile=alpha route=responses reason=healthy",
+            r#"selection_pick profile="alpha beta" route=responses"#,
+            r#"event key="escaped \"quote\"" n=42 bool=true"#,
+            "前置 selection_pick profile=東京",
+            "key=value selection_pick later=field",
+            "selection_pick empty= trailing",
+            "selection_pick malformed=\"unterminated",
+        ] {
+            assert_eq!(
+                runtime_doctor_parse_log_message(message),
+                runtime_doctor_parse_log_message_rust(message),
+                "{message:?}"
+            );
+        }
+    }
 }
