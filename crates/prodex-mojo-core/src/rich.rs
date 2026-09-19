@@ -103,6 +103,9 @@ pub use runtime_doctor_marker::*;
 #[path = "rich/runtime_doctor_render.rs"]
 mod runtime_doctor_render;
 pub use runtime_doctor_render::*;
+#[path = "rich/ping_protocol.rs"]
+mod ping_protocol;
+pub use ping_protocol::*;
 
 const RICH_STATUS_INVALID: i64 = 1;
 const RICH_STATUS_UTF8: i64 = 2;

@@ -309,6 +309,87 @@ fn ping_result_from_output(
     }
 }
 
+#[cfg(feature = "mojo-core")]
+fn ping_status_from_mojo(value: i64) -> PingStatus {
+    use prodex_mojo_core::rich::*;
+    match value {
+        PING_STATUS_OK => PingStatus::Pass,
+        PING_STATUS_PROTOCOL_FAILED => PingStatus::ProtocolFailed,
+        PING_STATUS_UNEXPECTED_RESPONSE => PingStatus::UnexpectedResponse,
+        PING_STATUS_TURN_FAILED => PingStatus::TurnFailed,
+        PING_STATUS_AUTH_FAILED => PingStatus::AuthFailed,
+        PING_STATUS_DNS_FAILED => PingStatus::DnsFailed,
+        PING_STATUS_TLS_FAILED => PingStatus::TlsFailed,
+        PING_STATUS_TIMEOUT => PingStatus::Timeout,
+        PING_STATUS_RATE_LIMITED => PingStatus::RateLimited,
+        PING_STATUS_QUOTA_EXHAUSTED => PingStatus::QuotaExhausted,
+        PING_STATUS_UPSTREAM_OVERLOADED => PingStatus::UpstreamOverloaded,
+        PING_STATUS_MODEL_UNAVAILABLE => PingStatus::ModelUnavailable,
+        PING_STATUS_PROCESS_FAILED => PingStatus::ProcessFailed,
+        PING_STATUS_SPAWN_FAILED => PingStatus::SpawnFailed,
+        PING_STATUS_CANCELLED => PingStatus::Cancelled,
+        _ => PingStatus::ProtocolFailed,
+    }
+}
+
+fn ping_status_detail(status: PingStatus) -> &'static str {
+    match status {
+        PingStatus::Pass => "valid model response received",
+        PingStatus::AuthFailed => "OpenAI authentication failed",
+        PingStatus::DnsFailed => "OpenAI hostname resolution failed",
+        PingStatus::TlsFailed => "OpenAI TLS connection failed",
+        PingStatus::Timeout => "OpenAI diagnostic timed out",
+        PingStatus::RateLimited => "OpenAI temporarily rate limited the profile",
+        PingStatus::QuotaExhausted => "OpenAI reported quota exhaustion",
+        PingStatus::UpstreamOverloaded => "OpenAI upstream is temporarily unavailable",
+        PingStatus::ModelUnavailable => "selected OpenAI model is unavailable",
+        PingStatus::ProtocolFailed => "Codex did not complete a structured turn",
+        PingStatus::TurnFailed => "Codex turn failed",
+        PingStatus::ProcessFailed => "Codex diagnostic process failed",
+        PingStatus::SpawnFailed => "OpenAI application ping could not start",
+        PingStatus::Cancelled => "OpenAI ping was cancelled",
+        PingStatus::UnexpectedResponse => "completed turn did not return a model response",
+    }
+}
+
+#[cfg(feature = "mojo-core")]
+fn validate_ping_output(output: &Output) -> std::result::Result<(), PingValidationFailure> {
+    let text = String::from_utf8_lossy(&output.stdout);
+    let status = ping_status_from_mojo(
+        prodex_mojo_core::rich::ping_validate_jsonl(&text)
+            .expect("Mojo ping protocol validator returned invalid output"),
+    );
+    if status == PingStatus::Pass {
+        return Ok(());
+    }
+    let detail = ping_structured_failure_detail(&text)
+        .unwrap_or_else(|| ping_status_detail(status).to_string());
+    Err(PingValidationFailure { status, detail })
+}
+
+#[cfg(not(feature = "mojo-core"))]
+fn validate_ping_output(output: &Output) -> std::result::Result<(), PingValidationFailure> {
+    validate_ping_output_rust(output)
+}
+
+fn ping_structured_failure_detail(text: &str) -> Option<String> {
+    text.lines().find_map(|line| {
+        let event: Value = serde_json::from_str(line).ok()?;
+        let event_type = event.get("type").and_then(Value::as_str)?;
+        matches!(event_type, "turn.failed" | "error").then(|| {
+            ping_process::bounded_ping_detail(&ping_event_failure_text(
+                &event,
+                if event_type == "turn.failed" {
+                    "turn failed"
+                } else {
+                    "Codex error"
+                },
+            ))
+        })
+    })
+}
+
+#[cfg(any(not(feature = "mojo-core"), test))]
 #[derive(Default)]
 struct PingValidationState {
     thread_started: bool,
@@ -318,6 +399,7 @@ struct PingValidationState {
     final_message: Option<String>,
 }
 
+#[cfg(any(not(feature = "mojo-core"), test))]
 impl PingValidationState {
     fn finish(self) -> std::result::Result<(), PingValidationFailure> {
         if !self.thread_started || !self.turn_started || !self.turn_completed {
@@ -341,19 +423,21 @@ impl PingValidationState {
     }
 }
 
-fn validate_ping_output(output: &Output) -> std::result::Result<(), PingValidationFailure> {
+#[cfg(any(not(feature = "mojo-core"), test))]
+fn validate_ping_output_rust(output: &Output) -> std::result::Result<(), PingValidationFailure> {
     let mut state = PingValidationState::default();
     for line in String::from_utf8_lossy(&output.stdout).lines() {
         let event: Value = serde_json::from_str(line).map_err(|_| PingValidationFailure {
             status: PingStatus::ProtocolFailed,
             detail: "Codex JSONL output was malformed".to_string(),
         })?;
-        validate_ping_event(&event, &mut state)?;
+        validate_ping_event_rust(&event, &mut state)?;
     }
     state.finish()
 }
 
-fn validate_ping_event(
+#[cfg(any(not(feature = "mojo-core"), test))]
+fn validate_ping_event_rust(
     event: &Value,
     state: &mut PingValidationState,
 ) -> std::result::Result<(), PingValidationFailure> {
@@ -392,9 +476,9 @@ fn validate_ping_event(
             }
             state.turn_completed = true;
         }
-        Some("turn.failed") => return ping_turn_failure(event),
-        Some("error") => return ping_event_failure(event),
-        Some(event_type) if is_ping_item_event(event_type) => {
+        Some("turn.failed") => return ping_turn_failure_rust(event),
+        Some("error") => return ping_event_failure_rust(event),
+        Some(event_type) if is_ping_item_event_rust(event_type) => {
             if !state.thread_started || !state.turn_started || state.turn_completed {
                 return Err(PingValidationFailure {
                     status: PingStatus::ProtocolFailed,
@@ -402,7 +486,7 @@ fn validate_ping_event(
                         .to_string(),
                 });
             }
-            return validate_ping_item(event_type, event, state);
+            return validate_ping_item_rust(event_type, event, state);
         }
         Some(_) | None => {
             return Err(PingValidationFailure {
@@ -414,16 +498,18 @@ fn validate_ping_event(
     Ok(())
 }
 
-fn is_ping_item_event(event_type: &str) -> bool {
+#[cfg(any(not(feature = "mojo-core"), test))]
+fn is_ping_item_event_rust(event_type: &str) -> bool {
     matches!(
         event_type,
         "item.started" | "item.updated" | "item.completed"
     )
 }
 
-fn ping_turn_failure(event: &Value) -> std::result::Result<(), PingValidationFailure> {
+#[cfg(any(not(feature = "mojo-core"), test))]
+fn ping_turn_failure_rust(event: &Value) -> std::result::Result<(), PingValidationFailure> {
     let message = ping_event_failure_text(event, "turn failed");
-    let status = classify_failure_text(&message).0;
+    let status = classify_failure_text_rust(&message).0;
     Err(PingValidationFailure {
         status: if status == PingStatus::ProcessFailed {
             PingStatus::TurnFailed
@@ -434,10 +520,11 @@ fn ping_turn_failure(event: &Value) -> std::result::Result<(), PingValidationFai
     })
 }
 
-fn ping_event_failure(event: &Value) -> std::result::Result<(), PingValidationFailure> {
+#[cfg(any(not(feature = "mojo-core"), test))]
+fn ping_event_failure_rust(event: &Value) -> std::result::Result<(), PingValidationFailure> {
     let message = ping_event_failure_text(event, "Codex error");
     Err(PingValidationFailure {
-        status: classify_failure_text(&message).0,
+        status: classify_failure_text_rust(&message).0,
         detail: ping_process::bounded_ping_detail(&message),
     })
 }
@@ -469,7 +556,8 @@ fn ping_event_failure_text(event: &Value, fallback: &str) -> String {
     }
 }
 
-fn validate_ping_item(
+#[cfg(any(not(feature = "mojo-core"), test))]
+fn validate_ping_item_rust(
     event_type: &str,
     event: &Value,
     state: &mut PingValidationState,
@@ -506,60 +594,78 @@ fn classify_failure(output: &Output) -> (PingStatus, String) {
     (status, detail.to_string())
 }
 
+#[cfg(feature = "mojo-core")]
+fn classify_failure_text(text: &str) -> (PingStatus, &'static str) {
+    let status = ping_status_from_mojo(
+        prodex_mojo_core::rich::ping_classify_failure(text)
+            .expect("Mojo ping failure classifier returned invalid output"),
+    );
+    (status, ping_status_detail(status))
+}
+
+#[cfg(not(feature = "mojo-core"))]
+fn classify_failure_text(text: &str) -> (PingStatus, &'static str) {
+    classify_failure_text_rust(text)
+}
+
+#[cfg(any(not(feature = "mojo-core"), test))]
 type PingFailureMatcher = fn(&str) -> bool;
+#[cfg(any(not(feature = "mojo-core"), test))]
 type PingFailureRule = (PingFailureMatcher, PingStatus, &'static str);
 
+#[cfg(any(not(feature = "mojo-core"), test))]
 const PING_FAILURE_RULES: &[PingFailureRule] = &[
     (
-        is_overload_failure,
+        is_overload_failure_rust,
         PingStatus::UpstreamOverloaded,
         "OpenAI upstream is temporarily unavailable",
     ),
     (
-        is_quota_failure,
+        is_quota_failure_rust,
         PingStatus::QuotaExhausted,
         "OpenAI reported quota exhaustion",
     ),
     (
-        is_auth_failure,
+        is_auth_failure_rust,
         PingStatus::AuthFailed,
         "OpenAI authentication failed",
     ),
     (
-        is_rate_limit_failure,
+        is_rate_limit_failure_rust,
         PingStatus::RateLimited,
         "OpenAI temporarily rate limited the profile",
     ),
     (
-        is_dns_failure,
+        is_dns_failure_rust,
         PingStatus::DnsFailed,
         "OpenAI hostname resolution failed",
     ),
     (
-        is_tls_failure,
+        is_tls_failure_rust,
         PingStatus::TlsFailed,
         "OpenAI TLS connection failed",
     ),
     (
-        is_model_failure,
+        is_model_failure_rust,
         PingStatus::ModelUnavailable,
         "selected OpenAI model is unavailable",
     ),
     (
-        is_cancelled_failure,
+        is_cancelled_failure_rust,
         PingStatus::Cancelled,
         "OpenAI ping was cancelled",
     ),
     (
-        is_timeout_failure,
+        is_timeout_failure_rust,
         PingStatus::Timeout,
         "OpenAI diagnostic timed out",
     ),
 ];
 
-fn classify_failure_text(text: &str) -> (PingStatus, &'static str) {
+#[cfg(any(not(feature = "mojo-core"), test))]
+fn classify_failure_text_rust(text: &str) -> (PingStatus, &'static str) {
     let lower = text.to_ascii_lowercase();
-    if contains_any(
+    if contains_any_rust(
         &lower,
         &[
             "failed to start",
@@ -573,7 +679,7 @@ fn classify_failure_text(text: &str) -> (PingStatus, &'static str) {
             "OpenAI application ping could not start",
         );
     }
-    if contains_any(
+    if contains_any_rust(
         &lower,
         &[
             "structured turn",
@@ -593,12 +699,14 @@ fn classify_failure_text(text: &str) -> (PingStatus, &'static str) {
         .unwrap_or((PingStatus::ProcessFailed, "Codex diagnostic process failed"))
 }
 
-fn contains_any(text: &str, needles: &[&str]) -> bool {
+#[cfg(any(not(feature = "mojo-core"), test))]
+fn contains_any_rust(text: &str, needles: &[&str]) -> bool {
     needles.iter().any(|needle| text.contains(needle))
 }
 
-fn is_quota_failure(text: &str) -> bool {
-    contains_any(
+#[cfg(any(not(feature = "mojo-core"), test))]
+fn is_quota_failure_rust(text: &str) -> bool {
+    contains_any_rust(
         text,
         &[
             "insufficient_quota",
@@ -609,7 +717,7 @@ fn is_quota_failure(text: &str) -> bool {
             "insufficient quota",
         ],
     ) && (!text.contains("429")
-        || contains_any(
+        || contains_any_rust(
             text,
             &[
                 "insufficient_quota",
@@ -619,45 +727,53 @@ fn is_quota_failure(text: &str) -> bool {
         ))
 }
 
-fn is_auth_failure(text: &str) -> bool {
-    contains_any(
+#[cfg(any(not(feature = "mojo-core"), test))]
+fn is_auth_failure_rust(text: &str) -> bool {
+    contains_any_rust(
         text,
         &["401", "unauthorized", "invalid api key", "authentication"],
     )
 }
 
-fn is_rate_limit_failure(text: &str) -> bool {
-    contains_any(text, &["429", "rate_limit", "rate limit"])
+#[cfg(any(not(feature = "mojo-core"), test))]
+fn is_rate_limit_failure_rust(text: &str) -> bool {
+    contains_any_rust(text, &["429", "rate_limit", "rate limit"])
 }
 
-fn is_overload_failure(text: &str) -> bool {
-    contains_any(
+#[cfg(any(not(feature = "mojo-core"), test))]
+fn is_overload_failure_rust(text: &str) -> bool {
+    contains_any_rust(
         text,
         &["503", "502", "504", "overloaded", "temporarily unavailable"],
     )
 }
 
-fn is_dns_failure(text: &str) -> bool {
-    contains_any(
+#[cfg(any(not(feature = "mojo-core"), test))]
+fn is_dns_failure_rust(text: &str) -> bool {
+    contains_any_rust(
         text,
         &["dns", "resolve", "name or service not known", "getaddrinfo"],
     )
 }
 
-fn is_tls_failure(text: &str) -> bool {
-    contains_any(text, &["tls", "certificate", "handshake"])
+#[cfg(any(not(feature = "mojo-core"), test))]
+fn is_tls_failure_rust(text: &str) -> bool {
+    contains_any_rust(text, &["tls", "certificate", "handshake"])
 }
 
-fn is_model_failure(text: &str) -> bool {
-    contains_any(text, &["unsupported model", "model_not_found"])
+#[cfg(any(not(feature = "mojo-core"), test))]
+fn is_model_failure_rust(text: &str) -> bool {
+    contains_any_rust(text, &["unsupported model", "model_not_found"])
 }
 
-fn is_cancelled_failure(text: &str) -> bool {
+#[cfg(any(not(feature = "mojo-core"), test))]
+fn is_cancelled_failure_rust(text: &str) -> bool {
     text.contains("cancel")
 }
 
-fn is_timeout_failure(text: &str) -> bool {
-    contains_any(text, &["timeout", "timed out"])
+#[cfg(any(not(feature = "mojo-core"), test))]
+fn is_timeout_failure_rust(text: &str) -> bool {
+    contains_any_rust(text, &["timeout", "timed out"])
 }
 
 #[cfg(test)]
