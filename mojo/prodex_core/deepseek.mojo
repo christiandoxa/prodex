@@ -57,6 +57,7 @@ comptime DEEPSEEK_STREAM_CHOICE_METADATA: Int64 = 34
 comptime DEEPSEEK_STREAM_CHOICE_DELTA: Int64 = 35
 comptime DEEPSEEK_STREAM_RESPONSE_METADATA: Int64 = 36
 comptime DEEPSEEK_RAW_COMMON_REQUEST: Int64 = 37
+comptime DEEPSEEK_REQUEST_METADATA: Int64 = 38
 comptime DEEPSEEK_JSON_MAX_DEPTH: Int64 = 256
 
 
@@ -1557,6 +1558,8 @@ def deepseek_write_operation(
     var operation = input.operation
     if operation == DEEPSEEK_RAW_COMMON_REQUEST:
         return deepseek_raw_common_request(writer, input)
+    if operation == DEEPSEEK_REQUEST_METADATA:
+        return deepseek_put_request_metadata(writer, input)
     if operation == DEEPSEEK_STRICT_FUNCTION_SCHEMA:
         if not deepseek_json_fragment_valid(input.input):
             return False
@@ -1821,7 +1824,7 @@ def deepseek_flag_valid(value: Int64) -> Bool:
 def deepseek_input_valid(input: ProdexDeepSeekKernelInput) -> Bool:
     return (
         input.operation >= DEEPSEEK_REQUEST_BODY
-        and input.operation <= DEEPSEEK_RAW_COMMON_REQUEST
+        and input.operation <= DEEPSEEK_REQUEST_METADATA
         and
         deepseek_flag_valid(input.stream)
         and deepseek_flag_valid(input.response_id_present)
@@ -2696,4 +2699,144 @@ def deepseek_raw_put_mcp_output_message_from_item(
             return False
     elif not deepseek_put_literal(writer, StringSlice('""')):
         return False
+    return deepseek_put_byte(writer, 125)
+
+def deepseek_raw_object_has_fields(view: ProdexRichStringView) -> Bool:
+    if not deepseek_json_fragment_valid(view):
+        return False
+    var root = deepseek_raw_root(view)
+    return (
+        root[0] >= 0
+        and deepseek_json_skip_ws(view, root[0] + 1, root[1] - 1)
+        < root[1] - 1
+    )
+
+def deepseek_put_object_interior(
+    writer: Pointer[mut=True, DeepSeekResponseWriter, _],
+    view: ProdexRichStringView,
+) -> Bool:
+    if not deepseek_json_fragment_valid(view):
+        return False
+    var root = deepseek_raw_root(view)
+    if root[0] < 0:
+        return False
+    var start = deepseek_json_skip_ws(view, root[0] + 1, root[1] - 1)
+    if start >= root[1] - 1:
+        return True
+    return deepseek_put_view_range(writer, view, start, root[1] - 1)
+
+def deepseek_metadata_separator(
+    writer: Pointer[mut=True, DeepSeekResponseWriter, _],
+    has_fields: Pointer[mut=True, Bool, _],
+) -> Bool:
+    if has_fields[]:
+        return deepseek_put_byte(writer, 44)
+    has_fields[] = True
+    return True
+
+def deepseek_put_request_metadata(
+    writer: Pointer[mut=True, DeepSeekResponseWriter, _],
+    input: ProdexDeepSeekKernelInput,
+) -> Bool:
+    # input.extra: base metadata object without provider subobject
+    # input.metadata: existing provider-specific metadata object
+    # input.item: client_metadata JSON object
+    # input.content: normalized prompt_cache_key
+    # input.reasoning_content: prompt_cache_retention
+    # input.response: degraded response-format source label
+    # input.error_message: degraded response-format reason
+    # input.tool_choice: original tool_choice JSON
+    # input.arguments: omitted tool-choice reason
+    # input.name: provider metadata key
+    if not deepseek_put_byte(writer, 123):
+        return False
+    var has_fields = False
+    var has_fields_ptr = Pointer(to=has_fields)
+
+    if input.extra_present == 1 and deepseek_raw_object_has_fields(input.extra):
+        if not deepseek_put_object_interior(writer, input.extra):
+            return False
+        has_fields = True
+
+    if input.item_present == 1:
+        if (
+            not deepseek_metadata_separator(writer, has_fields_ptr)
+            or not deepseek_put_literal(writer, StringSlice('"client_metadata":'))
+            or not deepseek_put_view(writer, input.item)
+        ):
+            return False
+    if input.content_present == 1 and input.content.len > 0:
+        if (
+            not deepseek_metadata_separator(writer, has_fields_ptr)
+            or not deepseek_put_literal(writer, StringSlice('"prompt_cache_key":'))
+            or not deepseek_put_json_string(writer, input.content)
+        ):
+            return False
+    if input.reasoning_content_present == 1:
+        if (
+            not deepseek_metadata_separator(writer, has_fields_ptr)
+            or not deepseek_put_literal(
+                writer, StringSlice('"prompt_cache_retention":')
+            )
+            or not deepseek_put_json_string(writer, input.reasoning_content)
+        ):
+            return False
+
+    var provider_has_fields = (
+        input.metadata_present == 1
+        and deepseek_raw_object_has_fields(input.metadata)
+    )
+    var has_degraded = (
+        input.response_present == 1 and input.error_message_present == 1
+    )
+    var has_omitted = (
+        input.stream == 1
+        and input.tool_choice_present == 1
+        and input.arguments_present == 1
+    )
+    if provider_has_fields or has_degraded or has_omitted:
+        if (
+            input.name_present != 1
+            or not deepseek_metadata_separator(writer, has_fields_ptr)
+            or not deepseek_put_json_string(writer, input.name)
+            or not deepseek_put_literal(writer, StringSlice(":{"))
+        ):
+            return False
+        var provider_written = False
+        if provider_has_fields:
+            if not deepseek_put_object_interior(writer, input.metadata):
+                return False
+            provider_written = True
+        if has_degraded:
+            if provider_written and not deepseek_put_byte(writer, 44):
+                return False
+            if (
+                not deepseek_put_literal(
+                    writer,
+                    StringSlice('"degraded_response_format":{"from":'),
+                )
+                or not deepseek_put_json_string(writer, input.response)
+                or not deepseek_put_literal(
+                    writer, StringSlice(',"to":"json_object","reason":')
+                )
+                or not deepseek_put_json_string(writer, input.error_message)
+                or not deepseek_put_byte(writer, 125)
+            ):
+                return False
+            provider_written = True
+        if has_omitted:
+            if provider_written and not deepseek_put_byte(writer, 44):
+                return False
+            if (
+                not deepseek_put_literal(
+                    writer, StringSlice('"omitted_tool_choice":{"from":')
+                )
+                or not deepseek_put_view(writer, input.tool_choice)
+                or not deepseek_put_literal(writer, StringSlice(',"reason":'))
+                or not deepseek_put_json_string(writer, input.arguments)
+                or not deepseek_put_byte(writer, 125)
+            ):
+                return False
+        if not deepseek_put_byte(writer, 125):
+            return False
     return deepseek_put_byte(writer, 125)

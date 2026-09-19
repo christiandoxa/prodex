@@ -44,6 +44,7 @@ pub enum DeepSeekKernelOperation {
     StreamChoiceDelta = 35,
     StreamResponseMetadata = 36,
     RawCommonRequest = 37,
+    RequestMetadata = 38,
 }
 
 #[repr(i64)]
@@ -253,6 +254,7 @@ fn operation_code(operation: DeepSeekKernelOperation) -> i64 {
         DeepSeekKernelOperation::StreamChoiceDelta => 35,
         DeepSeekKernelOperation::StreamResponseMetadata => 36,
         DeepSeekKernelOperation::RawCommonRequest => 37,
+        DeepSeekKernelOperation::RequestMetadata => 38,
     }
 }
 
