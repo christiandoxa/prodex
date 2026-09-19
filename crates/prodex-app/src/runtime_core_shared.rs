@@ -69,7 +69,21 @@ pub(super) fn create_runtime_proxy_log_path() -> Result<PathBuf> {
 }
 
 fn create_runtime_proxy_log_path_in_dir(dir: &Path) -> Result<PathBuf> {
-    let record_to_disk = cfg!(test) || runtime_log::runtime_log_recording_enabled();
+    create_runtime_proxy_log_path_in_dir_with_recording(
+        dir,
+        cfg!(test) || runtime_log::runtime_log_recording_enabled(),
+    )
+}
+
+pub(crate) fn create_recorded_runtime_log_path() -> Result<PathBuf> {
+    let dir = runtime_proxy_log_dir();
+    create_runtime_proxy_log_path_in_dir_with_recording(&dir, true)
+}
+
+fn create_runtime_proxy_log_path_in_dir_with_recording(
+    dir: &Path,
+    record_to_disk: bool,
+) -> Result<PathBuf> {
     if record_to_disk {
         fs::create_dir_all(dir)
             .with_context(|| format!("failed to create runtime log directory {}", dir.display()))?;
@@ -376,7 +390,7 @@ pub(crate) use runtime_proxy_crate::{
 #[cfg(test)]
 use runtime_proxy_crate::{runtime_proxy_log_event, runtime_proxy_log_fields};
 
-fn runtime_proxy_format_log_line(message: &str, format: RuntimeLogFormat) -> String {
+pub(crate) fn runtime_proxy_format_log_line(message: &str, format: RuntimeLogFormat) -> String {
     let timestamp = Local::now().format("%Y-%m-%d %H:%M:%S%.3f %:z");
     let format = match format {
         RuntimeLogFormat::Text => runtime_log::RuntimeLogFormat::Text,
@@ -390,7 +404,9 @@ fn runtime_proxy_format_log_line(message: &str, format: RuntimeLogFormat) -> Str
     )
 }
 
-fn runtime_proxy_format_dropped_log_marker(marker: runtime_log::RuntimeDroppedLogMarker) -> String {
+pub(crate) fn runtime_proxy_format_dropped_log_marker(
+    marker: runtime_log::RuntimeDroppedLogMarker,
+) -> String {
     let mut message = format!(
         "{RUNTIME_PROXY_DROPPED_LOG_EVENT} dropped_count={} reason=queue_full queue_capacity={}",
         marker.dropped_count, marker.queue_capacity

@@ -86,3 +86,38 @@ def prodex_mojo_super_expose_route_v1(
     output[unsafe_offset=0] = super_expose_method(method)
     output[unsafe_offset=1] = super_expose_tool(tool)
     return 0
+
+comptime SUPER_EXPOSE_MODE_FULL: Int64 = 0
+comptime SUPER_EXPOSE_MODE_EXEC: Int64 = 1
+
+@export("prodex_mojo_super_expose_tool_allowed_v1")
+def prodex_mojo_super_expose_tool_allowed_v1(
+    abi_version: Int64,
+    mode: Int64,
+    tool_address: UInt,
+    tool_length: Int64,
+    output_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != SUPER_EXPOSE_ABI_VERSION:
+        return 4
+    if (
+        mode < SUPER_EXPOSE_MODE_FULL
+        or mode > SUPER_EXPOSE_MODE_EXEC
+        or tool_length < 0
+        or tool_length > SUPER_EXPOSE_MAX_NAME_BYTES
+        or output_address == 0
+        or (tool_length > 0 and tool_address == 0)
+    ):
+        return 1
+    var tool = ProdexRichStringView(tool_address, UInt(tool_length))
+    if not rich_view_valid(tool, SUPER_EXPOSE_MAX_NAME_BYTES):
+        return 2
+    var output = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    var tool_kind = super_expose_tool(tool)
+    if mode == SUPER_EXPOSE_MODE_EXEC:
+        output[] = 1 if tool_kind == SUPER_EXPOSE_TOOL_EXEC else 0
+    else:
+        output[] = 1 if tool_kind != SUPER_EXPOSE_TOOL_UNKNOWN else 0
+    return 0

@@ -104,7 +104,9 @@ workspace, one ephemeral capability digest, one MCP server identity, one
 selected public endpoint (and a Quick Tunnel child only when Prodex-managed),
 one resolved Super configuration, one bounded run manager,
 and one set of child process groups. It does not persist the capability, run
-table, task text, event history, or active model/effort configuration.
+table, task text, captured command output, or active model/effort configuration.
+Expose lifecycle and action metadata is retained only through the normal bounded,
+redacted runtime-log policy so prodex log can account for what the endpoint did.
 
 Multiple expose processes may share the authoritative `PRODEX_HOME` profile,
 quota, health, cooldown, auto-rotation, and durable model-preference state

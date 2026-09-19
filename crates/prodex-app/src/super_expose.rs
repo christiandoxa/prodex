@@ -11,6 +11,8 @@ use tiny_http::{Method, Server};
 
 #[path = "super_expose/exec.rs"]
 mod exec;
+#[path = "super_expose/logging.rs"]
+mod logging;
 #[path = "super_expose/protocol.rs"]
 mod protocol;
 #[path = "super_expose/run.rs"]
@@ -42,7 +44,12 @@ pub(crate) fn handle_super_expose(mut expose: SuperExposeArgs) -> Result<()> {
         bail!("Super expose only binds loopback addresses in 0.430");
     }
     if expose.super_args.dry_run {
-        println!("Prodex Super expose: local MCP on {}", expose.listen);
+        let label = if expose.mode.exec_only() {
+            "Prodex Super expose exec"
+        } else {
+            "Prodex Super expose"
+        };
+        println!("{label}: local MCP on {}", expose.listen);
         return Ok(());
     }
 
@@ -50,6 +57,14 @@ pub(crate) fn handle_super_expose(mut expose: SuperExposeArgs) -> Result<()> {
         .context("failed to resolve expose workspace")?
         .canonicalize()
         .context("failed to canonicalize expose workspace")?;
+    let audit = logging::ExposeAuditLog::new()?;
+    audit.event(
+        "super_expose_starting",
+        [
+            crate::runtime_proxy_log_field("mode", expose.mode.as_str()),
+            crate::runtime_proxy_log_field("bind", "loopback"),
+        ],
+    );
     let token = capability_token()?;
     let server = Server::http(expose.listen.as_str())
         .map_err(|error| anyhow::anyhow!("failed to bind Super expose: {error}"))?;
@@ -66,17 +81,42 @@ pub(crate) fn handle_super_expose(mut expose: SuperExposeArgs) -> Result<()> {
         .or_else(|| workspace.file_name().and_then(|name| name.to_str()))
         .unwrap_or("workspace");
 
-    println!("Prodex Super expose ({display_name}): {endpoint}");
+    let label = if expose.mode.exec_only() {
+        "Prodex Super expose exec"
+    } else {
+        "Prodex Super expose"
+    };
+    println!("{label} ({display_name}): {endpoint}");
     eprintln!("Capability URL: keep it secret; Ctrl-C stops the endpoint.");
+    audit.event(
+        "super_expose_started",
+        [
+            crate::runtime_proxy_log_field("mode", expose.mode.as_str()),
+            crate::runtime_proxy_log_field("bind", "loopback"),
+            crate::runtime_proxy_log_field("port", address.port().to_string()),
+        ],
+    );
+    audit.flush()?;
 
-    let manager = run::RunManager::new(workspace.clone(), expose.super_args);
+    let manager = run::RunManager::new(workspace.clone(), expose.super_args, audit.clone());
     for mut request in server.incoming_requests() {
         let expected_path = format!("/mcp/{token}");
         if request.url().split('?').next() != Some(expected_path.as_str()) {
+            audit.event(
+                "super_expose_http_rejected",
+                [crate::runtime_proxy_log_field("reason", "not_found")],
+            );
             let _ = request.respond(protocol::json_response(404, json!({"error":"not_found"})));
             continue;
         }
         if request.method() != &Method::Post {
+            audit.event(
+                "super_expose_http_rejected",
+                [crate::runtime_proxy_log_field(
+                    "reason",
+                    "method_not_allowed",
+                )],
+            );
             let _ = request.respond(protocol::json_response(
                 405,
                 json!({"error":"method_not_allowed"}),
@@ -90,13 +130,26 @@ pub(crate) fn handle_super_expose(mut expose: SuperExposeArgs) -> Result<()> {
             .take(BODY_MAX_BYTES.saturating_add(1))
             .read_to_end(&mut body);
         if read.is_err() || body.len() as u64 > BODY_MAX_BYTES {
+            audit.event(
+                "super_expose_http_rejected",
+                [
+                    crate::runtime_proxy_log_field("reason", "invalid_body"),
+                    crate::runtime_proxy_log_field("body_bytes", body.len().to_string()),
+                ],
+            );
             let _ = request.respond(protocol::json_response(
                 400,
                 json!({"jsonrpc":"2.0","id":null,"error":{"code":-32600,"message":"request body is invalid or too large"}}),
             ));
             continue;
         }
-        let _ = request.respond(protocol::dispatch(&body, &manager, &workspace));
+        let _ = request.respond(protocol::dispatch(
+            &body,
+            &manager,
+            &workspace,
+            expose.mode,
+            &audit,
+        ));
     }
     Ok(())
 }

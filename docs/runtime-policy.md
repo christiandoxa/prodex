@@ -19,7 +19,7 @@ order without including configured values. Rust callers that need structured
 diagnostics can downcast the error to `RuntimePolicyValidationErrors`.
 
 Relative `runtime.log_dir` values are resolved under the Prodex root. `PRODEX_RUNTIME_LOG_DIR` is used as provided.
-Live `prodex log stream` and `prodex log upstream` data is published through the authenticated runtime broker and retained only in a bounded in-memory window by default. Raw runtime-log recording is opt-in with `PRODEX_RUNTIME_LOG_RECORD=1`; recorded files remain byte-, count-, total-size-, and age-bounded.
+Live `prodex log stream` and `prodex log upstream` data is published through the authenticated runtime broker and retained only in a bounded in-memory window by default. Raw runtime-log recording is opt-in with `PRODEX_RUNTIME_LOG_RECORD=1`; recorded files remain byte-, count-, total-size-, and age-bounded. `prodex s expose` is the narrow exception: it always records bounded redacted expose activity metadata into the same runtime-log directory so `prodex log` can account for endpoint actions even when raw proxy recording is disabled. Expose audit lines never store the capability URL/token, task or request payload text, environment values, stdin, or captured stdout/stderr.
 Use `prodex info` for effective tuning values and `prodex doctor --runtime --json` for the resolved runtime log directory, format, and current `log_path` when recording is enabled.
 
 ```bash

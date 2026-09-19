@@ -619,12 +619,33 @@ fn super_expose_alias_parses_local_endpoint() {
     assert_eq!(args.listen, "127.0.0.1:0");
     assert!(args.no_tunnel);
     assert!(!args.tunnel);
+    assert_eq!(args.mode, SuperExposeMode::Full);
     assert!(args.super_args.no_presidio);
     assert!(
         args.super_args
             .tools
             .contains(&prodex_optional_tools::OptionalToolId::Rtk)
     );
+}
+
+#[test]
+fn super_expose_exec_selects_exec_only_surface() {
+    let command = parse_cli_command_from([
+        "prodex",
+        "s",
+        "expose",
+        "exec",
+        "--listen",
+        "127.0.0.1:0",
+        "--no-presidio",
+    ])
+    .expect("super expose exec should parse");
+    let Commands::SuperExpose(args) = command else {
+        panic!("expected hidden super expose command");
+    };
+    assert_eq!(args.mode, SuperExposeMode::Exec);
+    assert!(args.mode.exec_only());
+    assert_eq!(args.listen, "127.0.0.1:0");
 }
 
 #[test]

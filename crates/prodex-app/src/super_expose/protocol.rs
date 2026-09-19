@@ -1,5 +1,7 @@
 use super::exec::execute_direct;
+use super::logging::ExposeAuditLog;
 use super::run::RunManager;
+use prodex_cli::SuperExposeMode;
 use serde_json::{Value, json};
 use std::path::Path;
 use tiny_http::{Header, Response, StatusCode};
@@ -25,6 +27,33 @@ enum ExposeTool {
     Cancel,
     List,
     Exec,
+}
+
+impl ExposeMethod {
+    const fn as_str(self) -> &'static str {
+        match self {
+            Self::Unknown => "unknown",
+            Self::Initialize => "initialize",
+            Self::Ping => "ping",
+            Self::ToolsList => "tools_list",
+            Self::ToolsCall => "tools_call",
+            Self::Notification => "notification",
+        }
+    }
+}
+
+impl ExposeTool {
+    const fn as_str(self) -> &'static str {
+        match self {
+            Self::Unknown => "unknown",
+            Self::Start => "start",
+            Self::Status => "status",
+            Self::Result => "result",
+            Self::Cancel => "cancel",
+            Self::List => "list",
+            Self::Exec => "exec",
+        }
+    }
 }
 
 #[cfg(feature = "mojo-core")]
@@ -75,16 +104,56 @@ fn expose_route(method: &str, tool: Option<&str>) -> (ExposeMethod, ExposeTool) 
     (method, tool)
 }
 
+#[cfg(feature = "mojo-core")]
+fn tool_allowed(mode: SuperExposeMode, tool_name: &str) -> bool {
+    prodex_mojo_core::rich::super_expose_tool_allowed(mode.exec_only(), tool_name)
+        .expect("Mojo Super expose tool policy returned invalid output")
+}
+
+#[cfg(not(feature = "mojo-core"))]
+fn tool_allowed(mode: SuperExposeMode, tool_name: &str) -> bool {
+    if mode.exec_only() {
+        return tool_name == "prodex_super_exec";
+    }
+    matches!(
+        tool_name,
+        "prodex_super_start"
+            | "prodex_super_status"
+            | "prodex_super_result"
+            | "prodex_super_cancel"
+            | "prodex_super_list"
+            | "prodex_super_exec"
+    )
+}
+
 pub(super) fn dispatch(
     body: &[u8],
     manager: &RunManager,
     workspace: &Path,
+    mode: SuperExposeMode,
+    audit: &ExposeAuditLog,
 ) -> Response<std::io::Cursor<Vec<u8>>> {
     let value: Value = match serde_json::from_slice(body) {
         Ok(value) => value,
-        Err(_) => return error(None, -32700, "parse error"),
+        Err(_) => {
+            audit.event(
+                "super_expose_rpc_rejected",
+                [
+                    crate::runtime_proxy_log_field("mode", mode.as_str()),
+                    crate::runtime_proxy_log_field("reason", "parse_error"),
+                ],
+            );
+            return error(None, -32700, "parse error");
+        }
     };
     let Some(object) = value.as_object() else {
+        audit.event(
+            "super_expose_rpc_rejected",
+            [
+                crate::runtime_proxy_log_field("mode", mode.as_str()),
+                crate::runtime_proxy_log_field("reason", "invalid_request"),
+            ],
+        );
         return error(None, -32600, "invalid request");
     };
     let id = object
@@ -103,29 +172,84 @@ pub(super) fn dispatch(
         .and_then(|params| params.get("name"))
         .and_then(Value::as_str);
     let (method_kind, tool_kind) = expose_route(method, tool_name);
+    audit.event(
+        "super_expose_rpc",
+        [
+            crate::runtime_proxy_log_field("mode", mode.as_str()),
+            crate::runtime_proxy_log_field("method", method_kind.as_str()),
+            crate::runtime_proxy_log_field("tool", tool_kind.as_str()),
+            crate::runtime_proxy_log_field("body_bytes", body.len().to_string()),
+        ],
+    );
     let result = match method_kind {
         ExposeMethod::Initialize => Ok(json!({
             "protocolVersion": MCP_PROTOCOL_VERSION,
             "capabilities": {"tools": {"listChanged": false}},
             "serverInfo": {"name": "prodex-super", "version": env!("CARGO_PKG_VERSION")},
-            "instructions": "Full-access Prodex Super endpoint. Use prodex_super_start for autonomous tasks or prodex_super_exec for explicit OS commands."
+            "instructions": if mode.exec_only() {
+                "Exec-only Prodex Super endpoint. Only prodex_super_exec is exposed."
+            } else {
+                "Full-access Prodex Super endpoint. Use prodex_super_start for autonomous tasks or prodex_super_exec for explicit OS commands."
+            }
         })),
         ExposeMethod::Ping => Ok(json!({})),
-        ExposeMethod::ToolsList => Ok(json!({"tools": tools()})),
-        ExposeMethod::ToolsCall => tool_call(&params, tool_kind, manager, workspace),
-        ExposeMethod::Notification => return json_response(202, Value::Null),
-        ExposeMethod::Unknown => return error(id, -32601, "method not found"),
+        ExposeMethod::ToolsList => Ok(json!({"tools": tools(mode)})),
+        ExposeMethod::ToolsCall => tool_call(&params, tool_kind, manager, workspace, mode, audit),
+        ExposeMethod::Notification => {
+            audit.event(
+                "super_expose_rpc_completed",
+                [
+                    crate::runtime_proxy_log_field("mode", mode.as_str()),
+                    crate::runtime_proxy_log_field("method", method_kind.as_str()),
+                    crate::runtime_proxy_log_field("tool", tool_kind.as_str()),
+                    crate::runtime_proxy_log_field("success", "true"),
+                ],
+            );
+            return json_response(202, Value::Null);
+        }
+        ExposeMethod::Unknown => {
+            audit.event(
+                "super_expose_rpc_rejected",
+                [
+                    crate::runtime_proxy_log_field("mode", mode.as_str()),
+                    crate::runtime_proxy_log_field("reason", "method_not_found"),
+                ],
+            );
+            return error(id, -32601, "method not found");
+        }
     };
     match result {
-        Ok(result) => rpc_result(id, result),
-        Err(message) => rpc_result(
-            id,
-            json!({
-                "content":[{"type":"text","text":message}],
-                "structuredContent":{"error":message},
-                "isError":true
-            }),
-        ),
+        Ok(result) => {
+            audit.event(
+                "super_expose_rpc_completed",
+                [
+                    crate::runtime_proxy_log_field("mode", mode.as_str()),
+                    crate::runtime_proxy_log_field("method", method_kind.as_str()),
+                    crate::runtime_proxy_log_field("tool", tool_kind.as_str()),
+                    crate::runtime_proxy_log_field("success", "true"),
+                ],
+            );
+            rpc_result(id, result)
+        }
+        Err(message) => {
+            audit.event(
+                "super_expose_rpc_completed",
+                [
+                    crate::runtime_proxy_log_field("mode", mode.as_str()),
+                    crate::runtime_proxy_log_field("method", method_kind.as_str()),
+                    crate::runtime_proxy_log_field("tool", tool_kind.as_str()),
+                    crate::runtime_proxy_log_field("success", "false"),
+                ],
+            );
+            rpc_result(
+                id,
+                json!({
+                    "content":[{"type":"text","text":message}],
+                    "structuredContent":{"error":message},
+                    "isError":true
+                }),
+            )
+        }
     }
 }
 
@@ -134,12 +258,17 @@ fn tool_call(
     tool_kind: ExposeTool,
     manager: &RunManager,
     workspace: &Path,
+    mode: SuperExposeMode,
+    audit: &ExposeAuditLog,
 ) -> std::result::Result<Value, String> {
     let object = params
         .as_object()
         .ok_or_else(|| "tool parameters are required".to_string())?;
-    if object.get("name").and_then(Value::as_str).is_none() {
+    let Some(tool_name) = object.get("name").and_then(Value::as_str) else {
         return Err("tool name is required".to_string());
+    };
+    if !tool_allowed(mode, tool_name) {
+        return Err("tool is not exposed by this endpoint".to_string());
     }
     let empty = json!({});
     let arguments = object.get("arguments").unwrap_or(&empty);
@@ -158,7 +287,7 @@ fn tool_call(
             .cancel(&required_run_id(arguments)?)
             .ok_or_else(|| "run not found".to_string())?,
         ExposeTool::List => json!({"runs":manager.list()}),
-        ExposeTool::Exec => execute_direct(arguments, workspace)?,
+        ExposeTool::Exec => execute_direct(arguments, workspace, audit)?,
         ExposeTool::Unknown => return Err("tool not found".to_string()),
     };
     Ok(json!({
@@ -168,7 +297,7 @@ fn tool_call(
     }))
 }
 
-pub(super) fn tools() -> Vec<Value> {
+pub(super) fn tools(mode: SuperExposeMode) -> Vec<Value> {
     vec![
         tool_definition(
             "prodex_super_start",
@@ -211,6 +340,13 @@ pub(super) fn tools() -> Vec<Value> {
             }}),
         ),
     ]
+    .into_iter()
+    .filter(|tool| {
+        tool.get("name")
+            .and_then(Value::as_str)
+            .is_some_and(|name| tool_allowed(mode, name))
+    })
+    .collect()
 }
 
 fn tool_definition(name: &str, description: &str, schema: Value) -> Value {
@@ -273,12 +409,23 @@ mod tests {
 
     #[test]
     fn tool_list_keeps_start_and_direct_exec() {
-        let names = tools()
+        let names = tools(SuperExposeMode::Full)
             .into_iter()
             .filter_map(|tool| tool["name"].as_str().map(str::to_string))
             .collect::<Vec<_>>();
         assert!(names.contains(&"prodex_super_start".to_string()));
         assert!(names.contains(&"prodex_super_exec".to_string()));
         assert!(names.contains(&"prodex_super_result".to_string()));
+    }
+
+    #[test]
+    fn exec_mode_exposes_only_direct_exec() {
+        let names = tools(SuperExposeMode::Exec)
+            .into_iter()
+            .filter_map(|tool| tool["name"].as_str().map(str::to_string))
+            .collect::<Vec<_>>();
+        assert_eq!(names, vec!["prodex_super_exec".to_string()]);
+        assert!(tool_allowed(SuperExposeMode::Exec, "prodex_super_exec"));
+        assert!(!tool_allowed(SuperExposeMode::Exec, "prodex_super_start"));
     }
 }
