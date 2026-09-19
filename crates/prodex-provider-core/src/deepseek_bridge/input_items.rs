@@ -3,6 +3,7 @@
 use std::collections::BTreeSet;
 
 mod history;
+#[cfg(not(feature = "mojo"))]
 mod push;
 mod validation;
 
@@ -12,6 +13,7 @@ pub use self::history::{
     deepseek_provider_core_history_has_tool_call, deepseek_provider_core_message_signatures,
     deepseek_provider_core_tool_call_ids, deepseek_provider_core_tool_output_call_ids,
 };
+#[cfg(not(feature = "mojo"))]
 use self::push::{
     deepseek_provider_core_chat_message, deepseek_provider_core_chat_tool_message,
     deepseek_provider_core_input_tool_call_id, deepseek_provider_core_input_tool_output_call_id,
@@ -106,69 +108,146 @@ pub fn deepseek_provider_core_push_message_from_responses_item(
     replayed_tool_output_call_ids: &BTreeSet<String>,
     replayed_message_signatures: &BTreeSet<(String, String)>,
 ) {
-    let Some(object) = item.as_object() else {
-        return;
-    };
-    match object.get("type").and_then(serde_json::Value::as_str) {
-        Some("message") | None
-            if object.contains_key("role")
-                && object.contains_key("content")
-                && !object.contains_key("call_id")
-                && !object.contains_key("tool_call_id") =>
+    #[cfg(feature = "mojo")]
+    {
+        let Some(object) = item.as_object() else {
+            return;
+        };
+        let item_type = object.get("type").and_then(serde_json::Value::as_str);
+        let call_id = object
+            .get("call_id")
+            .or_else(|| object.get("tool_call_id"))
+            .or_else(|| object.get("id"))
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("call_0");
+        let is_mcp = item_type == Some("mcp_call");
+        let is_call = matches!(
+            item_type,
+            Some("function_call" | "custom_tool_call" | "local_shell_call" | "mcp_call")
+        );
+        let is_output = matches!(
+            item_type,
+            Some(
+                "function_call_output"
+                    | "custom_tool_call_output"
+                    | "mcp_tool_result"
+                    | "mcp_call_output"
+            )
+        );
+        if !is_call && !is_output {
+            let role = deepseek_provider_core_chat_role(
+                object
+                    .get("role")
+                    .and_then(serde_json::Value::as_str)
+                    .unwrap_or("user"),
+            );
+            let text = deepseek_provider_core_responses_content_text(object.get("content"));
+            if text.trim().is_empty()
+                || replayed_message_signatures.contains(&(role.to_string(), text))
+            {
+                return;
+            }
+        }
+
+        let emit_call = !is_call || !replayed_tool_call_ids.contains(call_id);
+        let emit_output = is_mcp
+            && ["output", "content", "result", "error"]
+                .iter()
+                .any(|key| object.contains_key(*key))
+            && !replayed_tool_output_call_ids.contains(call_id);
+        if (is_call && !emit_call && !emit_output)
+            || (is_output && replayed_tool_output_call_ids.contains(call_id))
         {
-            deepseek_provider_core_push_message_item(object, messages, replayed_message_signatures);
+            return;
         }
-        Some("function_call") => {
-            deepseek_provider_core_push_tool_call_item(
-                object,
-                messages,
-                replayed_tool_call_ids,
-                deepseek_provider_core_push_chat_tool_call_message,
-            );
+
+        let source = serde_json::to_string(item).expect("DeepSeek input item serializes");
+        let mut input = prodex_mojo_core::rich::DeepSeekKernelInput::new(
+            prodex_mojo_core::rich::DeepSeekKernelOperation::RawBridgeInputItem,
+        );
+        input.item = Some(&source);
+        input.stream = if is_output { true } else { emit_call };
+        input.sequence_number = u64::from(emit_output);
+        let body = prodex_mojo_core::rich::deepseek_kernel(input)
+            .unwrap_or_else(|error| panic!("Mojo DeepSeek input-item shaping failed: {error:?}"));
+        let mapped: Vec<serde_json::Value> =
+            serde_json::from_slice(&body).unwrap_or_else(|error| {
+                panic!("Mojo DeepSeek input-item shaping returned invalid JSON: {error}")
+            });
+        messages.extend(mapped);
+        return;
+    }
+
+    #[cfg(not(feature = "mojo"))]
+    {
+        let Some(object) = item.as_object() else {
+            return;
+        };
+        match object.get("type").and_then(serde_json::Value::as_str) {
+            Some("message") | None
+                if object.contains_key("role")
+                    && object.contains_key("content")
+                    && !object.contains_key("call_id")
+                    && !object.contains_key("tool_call_id") =>
+            {
+                deepseek_provider_core_push_message_item(
+                    object,
+                    messages,
+                    replayed_message_signatures,
+                );
+            }
+            Some("function_call") => {
+                deepseek_provider_core_push_tool_call_item(
+                    object,
+                    messages,
+                    replayed_tool_call_ids,
+                    deepseek_provider_core_push_chat_tool_call_message,
+                );
+            }
+            Some("custom_tool_call") => {
+                deepseek_provider_core_push_tool_call_item(
+                    object,
+                    messages,
+                    replayed_tool_call_ids,
+                    deepseek_provider_core_push_chat_custom_tool_call_message,
+                );
+            }
+            Some("local_shell_call") => {
+                deepseek_provider_core_push_tool_call_item(
+                    object,
+                    messages,
+                    replayed_tool_call_ids,
+                    deepseek_provider_core_push_chat_local_shell_call_message,
+                );
+            }
+            Some("function_call_output") | Some("custom_tool_call_output") => {
+                deepseek_provider_core_push_tool_output_item(
+                    object,
+                    messages,
+                    replayed_tool_output_call_ids,
+                );
+            }
+            Some("mcp_call") => {
+                deepseek_provider_core_push_mcp_call_item(
+                    object,
+                    messages,
+                    replayed_tool_call_ids,
+                    replayed_tool_output_call_ids,
+                );
+            }
+            Some("mcp_tool_result") | Some("mcp_call_output") => {
+                deepseek_provider_core_push_tool_output_item(
+                    object,
+                    messages,
+                    replayed_tool_output_call_ids,
+                );
+            }
+            Some(_) | None => {}
         }
-        Some("custom_tool_call") => {
-            deepseek_provider_core_push_tool_call_item(
-                object,
-                messages,
-                replayed_tool_call_ids,
-                deepseek_provider_core_push_chat_custom_tool_call_message,
-            );
-        }
-        Some("local_shell_call") => {
-            deepseek_provider_core_push_tool_call_item(
-                object,
-                messages,
-                replayed_tool_call_ids,
-                deepseek_provider_core_push_chat_local_shell_call_message,
-            );
-        }
-        Some("function_call_output") | Some("custom_tool_call_output") => {
-            deepseek_provider_core_push_tool_output_item(
-                object,
-                messages,
-                replayed_tool_output_call_ids,
-            );
-        }
-        Some("mcp_call") => {
-            deepseek_provider_core_push_mcp_call_item(
-                object,
-                messages,
-                replayed_tool_call_ids,
-                replayed_tool_output_call_ids,
-            );
-        }
-        Some("mcp_tool_result") | Some("mcp_call_output") => {
-            deepseek_provider_core_push_tool_output_item(
-                object,
-                messages,
-                replayed_tool_output_call_ids,
-            );
-        }
-        Some(_) => {}
-        None => {}
     }
 }
 
+#[cfg(not(feature = "mojo"))]
 fn deepseek_provider_core_push_message_item(
     object: &serde_json::Map<String, serde_json::Value>,
     messages: &mut Vec<serde_json::Value>,
@@ -188,6 +267,7 @@ fn deepseek_provider_core_push_message_item(
     }
 }
 
+#[cfg(not(feature = "mojo"))]
 fn deepseek_provider_core_push_tool_call_item(
     object: &serde_json::Map<String, serde_json::Value>,
     messages: &mut Vec<serde_json::Value>,
@@ -201,6 +281,7 @@ fn deepseek_provider_core_push_tool_call_item(
     push(object, call_id, messages);
 }
 
+#[cfg(not(feature = "mojo"))]
 fn deepseek_provider_core_push_tool_output_item(
     object: &serde_json::Map<String, serde_json::Value>,
     messages: &mut Vec<serde_json::Value>,
@@ -216,6 +297,7 @@ fn deepseek_provider_core_push_tool_output_item(
     ));
 }
 
+#[cfg(not(feature = "mojo"))]
 fn deepseek_provider_core_push_mcp_call_item(
     object: &serde_json::Map<String, serde_json::Value>,
     messages: &mut Vec<serde_json::Value>,
