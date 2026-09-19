@@ -15,7 +15,7 @@ mod optional_tools;
 mod super_tail_extract;
 #[path = "runtime_args/super_validation.rs"]
 mod super_validation;
-pub use expose::SuperExposeArgs;
+pub use expose::{SuperExposeArgs, SuperExposeMode};
 use launch_args::parse_runtime_base_url;
 pub use launch_args::{RunArgs, RuntimeToolArgs, SuperArgs};
 pub use optional_tools::runtime_tool_args_with_tool;

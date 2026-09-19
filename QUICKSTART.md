@@ -211,6 +211,20 @@ call `prodex_super_exec` with direct argv. For example:
 {"program":"python3","args":["-c","print('hello from Python')"],"timeout_ms":30000}
 ```
 
+
+When you want an MCP capability that can do only direct exec, start the
+exec-only surface with:
+
+    prodex s expose exec
+
+In this mode tools/list advertises only prodex_super_exec, and guessed calls to
+the run/session tools are rejected. Both full and exec-only expose modes write
+bounded redacted activity metadata to the normal Prodex runtime-log set, so
+prodex log, prodex log last, and prodex log --json can show expose lifecycle,
+RPC/tool calls, run state transitions, and exec completion. Capability URLs,
+task/input text, environment values, stdin, and captured stdout/stderr are not
+copied into those audit lines.
+
 Cloudflare mode prints a public URL ending in `/mcp` and containing a fresh
 ephemeral full-Super capability.
 Anyone with the full URL can control that expose process, so treat it as a

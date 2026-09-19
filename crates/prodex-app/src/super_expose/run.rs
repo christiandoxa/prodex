@@ -1,4 +1,4 @@
-use super::{bounded_redacted_text, now_millis};
+use super::{bounded_redacted_text, logging::ExposeAuditLog, now_millis};
 use crate::{configure_child_process_group, terminate_child_process_tree};
 use anyhow::{Context, Result};
 use base64::Engine as _;
@@ -54,6 +54,7 @@ pub(super) struct RunManager {
 struct RunManagerInner {
     workspace: PathBuf,
     base_args: SuperArgs,
+    audit: ExposeAuditLog,
     runs: Mutex<BTreeMap<String, RunRecord>>,
 }
 
@@ -70,11 +71,12 @@ struct RunRecord {
 }
 
 impl RunManager {
-    pub(super) fn new(workspace: PathBuf, base_args: SuperArgs) -> Self {
+    pub(super) fn new(workspace: PathBuf, base_args: SuperArgs, audit: ExposeAuditLog) -> Self {
         Self {
             inner: Arc::new(RunManagerInner {
                 workspace,
                 base_args,
+                audit,
                 runs: Mutex::new(BTreeMap::new()),
             }),
         }
@@ -102,6 +104,10 @@ impl RunManager {
                 .lock()
                 .map_err(|_| "run manager unavailable".to_string())?;
             if runs.values().filter(|run| !run.state.terminal()).count() >= MAX_ACTIVE_RUNS {
+                self.inner.audit.event(
+                    "super_expose_run_rejected",
+                    [crate::runtime_proxy_log_field("reason", "active_limit")],
+                );
                 return Err(format!(
                     "active run limit reached ({MAX_ACTIVE_RUNS}); wait for a run to finish"
                 ));
@@ -122,6 +128,10 @@ impl RunManager {
             );
         }
 
+        self.inner.audit.event(
+            "super_expose_run_created",
+            [crate::runtime_proxy_log_field("run_id", run_id.clone())],
+        );
         let manager = self.clone();
         let thread_run_id = run_id.clone();
         thread::spawn(move || manager.execute(thread_run_id, task, args, cancel, child));
@@ -161,6 +171,10 @@ impl RunManager {
                 return Some(summary_json(run_id, record));
             }
             record.cancel.store(true, Ordering::SeqCst);
+            self.inner.audit.event(
+                "super_expose_run_cancel_requested",
+                [crate::runtime_proxy_log_field("run_id", run_id.to_string())],
+            );
             record.child.clone()
         };
         if let Ok(mut child) = child.lock()
@@ -181,6 +195,13 @@ impl RunManager {
         let executable = match std::env::current_exe() {
             Ok(executable) => executable,
             Err(error) => {
+                self.inner.audit.event(
+                    "super_expose_run_start_failed",
+                    [
+                        crate::runtime_proxy_log_field("run_id", run_id.clone()),
+                        crate::runtime_proxy_log_field("stage", "current_exe"),
+                    ],
+                );
                 self.finish_start_failed(&run_id, &format!("current executable: {error}"));
                 return;
             }
@@ -200,6 +221,13 @@ impl RunManager {
         let mut child = match command.spawn() {
             Ok(child) => child,
             Err(error) => {
+                self.inner.audit.event(
+                    "super_expose_run_start_failed",
+                    [
+                        crate::runtime_proxy_log_field("run_id", run_id.clone()),
+                        crate::runtime_proxy_log_field("stage", "spawn"),
+                    ],
+                );
                 self.finish_start_failed(&run_id, &format!("spawn: {error}"));
                 return;
             }
@@ -216,6 +244,10 @@ impl RunManager {
             *slot = Some(child);
         }
         self.mark_running(&run_id);
+        self.inner.audit.event(
+            "super_expose_run_started",
+            [crate::runtime_proxy_log_field("run_id", run_id.clone())],
+        );
 
         let stdout_reader = stdout.map(|reader| spawn_reader(self.clone(), run_id.clone(), reader));
         let stderr_reader = stderr.map(|reader| spawn_reader(self.clone(), run_id.clone(), reader));
@@ -268,6 +300,24 @@ impl RunManager {
         } else {
             record.state = RunState::StartFailed;
         }
+        self.inner.audit.event(
+            "super_expose_run_completed",
+            [
+                crate::runtime_proxy_log_field("run_id", run_id.clone()),
+                crate::runtime_proxy_log_field("state", record.state.as_str()),
+                crate::runtime_proxy_log_field(
+                    "exit_code",
+                    record
+                        .exit_status
+                        .map_or_else(|| "none".to_string(), |code| code.to_string()),
+                ),
+                crate::runtime_proxy_log_field("output_bytes", record.output.len().to_string()),
+                crate::runtime_proxy_log_field(
+                    "output_truncated",
+                    record.output_truncated.to_string(),
+                ),
+            ],
+        );
     }
 
     fn mark_running(&self, run_id: &str) {
