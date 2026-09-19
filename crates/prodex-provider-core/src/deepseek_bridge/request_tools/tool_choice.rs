@@ -53,7 +53,7 @@ pub fn deepseek_provider_core_validate_tool_choice_shape(
             DeepSeekRequestPolicyOperation::ToolChoice,
             thinking_enabled,
         );
-        return match plan.tag {
+        match plan.tag {
             0 => Ok(()),
             1 => Err(format!(
                 "{provider_label} tool_choice string `{}` is not supported",
@@ -72,7 +72,7 @@ pub fn deepseek_provider_core_validate_tool_choice_shape(
             _ => Err(format!(
                 "{provider_label} tool_choice validation returned an unknown result"
             )),
-        };
+        }
     }
     #[cfg(not(feature = "mojo"))]
     {

@@ -56,34 +56,6 @@ pub(in crate::translators::gemini) fn gemini_insert_basic_generation_config(
     }
 }
 
-#[cfg(feature = "mojo")]
-pub(crate) fn gemini_validate_candidate_count(value: &Value) -> Result<(), String> {
-    let Some(object) = value.as_object() else {
-        return Ok(());
-    };
-    let encoded = serde_json::to_string(object).expect("Gemini request serializes");
-    let result = gemini_config_value(
-        prodex_mojo_core::rich::GeminiConfigKernelOperation::ValidateCandidateCount,
-        Some(&encoded),
-        None,
-        None,
-        None,
-        None,
-    );
-    if result.get("conflict").and_then(Value::as_bool) == Some(true) {
-        return Err(
-            "invalid_candidate_count: Gemini request fields `candidate_count` and `candidateCount` conflict"
-                .to_string(),
-        );
-    }
-    if let Some(field) = result.get("invalidField").and_then(Value::as_str) {
-        return Err(format!(
-            "invalid_candidate_count: Gemini request field `{field}` must be omitted, null, or 1"
-        ));
-    }
-    Ok(())
-}
-
 #[cfg(not(feature = "mojo"))]
 pub(crate) fn gemini_validate_candidate_count(value: &Value) -> Result<(), String> {
     let Some(object) = value.as_object() else {

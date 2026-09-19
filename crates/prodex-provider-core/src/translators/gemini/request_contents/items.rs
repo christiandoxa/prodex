@@ -26,6 +26,7 @@ fn gemini_content_value(role: &str, parts: Vec<Value>) -> Value {
     }
 }
 
+#[cfg(not(feature = "mojo"))]
 pub(crate) fn gemini_contains_local_media_path(value: &Value) -> bool {
     match value {
         Value::Array(items) => items.iter().any(gemini_contains_local_media_path),

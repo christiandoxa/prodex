@@ -4,23 +4,54 @@ use crate::translator::{ProviderTransformInput, ProviderTransformResult};
 use crate::{ProviderEndpoint, ProviderId, ProviderWireFormat};
 use serde_json::{Value, json};
 
+#[cfg(not(feature = "mojo"))]
 use super::request::{
     gemini_apply_optional_request_fields, gemini_apply_response_format,
-    gemini_builtin_tools_from_request, gemini_continuation_metadata,
-    gemini_is_supported_builtin_tool, gemini_tool_config_from_request,
-    gemini_tool_from_openai_tool, gemini_validate_candidate_count, gemini_validate_openai_tools,
+    gemini_validate_candidate_count,
 };
 #[cfg(not(feature = "mojo"))]
 use super::request::{
     gemini_apply_text_format, gemini_insert_basic_generation_config,
     gemini_insert_extended_generation_config, gemini_thinking_config_from_request,
 };
+use super::request::{
+    gemini_builtin_tools_from_request, gemini_continuation_metadata,
+    gemini_is_supported_builtin_tool, gemini_tool_config_from_request,
+    gemini_tool_from_openai_tool, gemini_validate_openai_tools,
+};
+#[cfg(not(feature = "mojo"))]
+use super::request_contents::gemini_contains_local_media_path;
 #[cfg(feature = "mojo")]
 use super::request_contents::gemini_text_contents_from_request_mojo;
 use super::request_contents::{
-    gemini_contains_local_media_path, gemini_contents_from_request,
-    gemini_system_instruction_from_request,
+    gemini_contents_from_request, gemini_system_instruction_from_request,
 };
+
+#[cfg(feature = "mojo")]
+fn gemini_translator_validation_error(
+    plan: &crate::gemini_bridge::GeminiTranslatorValidationPlan,
+) -> Option<String> {
+    let index = plan.index.unwrap_or(0);
+    Some(match plan.tag {
+        0 | 1 | 16 => return None,
+        2 => "invalid_candidate_count: Gemini request fields `candidate_count` and `candidateCount` conflict".to_string(),
+        3 => "invalid_candidate_count: Gemini request field `candidate_count` must be omitted, null, or 1".to_string(),
+        4 => "invalid_candidate_count: Gemini request field `candidateCount` must be omitted, null, or 1".to_string(),
+        5 => "invalid_tool_declaration: Gemini request field `tools` must be an array".to_string(),
+        6 => format!("invalid_tool_declaration: Gemini request field `tools[{index}]` must be an object"),
+        7 => format!("invalid_tool_declaration: Gemini request field `tools[{index}].function` must be an object"),
+        8 => format!("invalid_tool_declaration: Gemini request field `tools[{index}].function.name` must be a non-empty string"),
+        9 => format!("invalid_tool_declaration: Gemini request field `tools[{index}].name` must be a non-empty string"),
+        10 => format!("invalid_tool_declaration: Gemini request field `tools[{index}].function.parameters` is required"),
+        11 => format!("invalid_tool_declaration: Gemini request field `tools[{index}].parameters` is required"),
+        12 => format!("invalid_tool_declaration: Gemini request field `tools[{index}].function.parameters` must be an object"),
+        13 => format!("invalid_tool_declaration: Gemini request field `tools[{index}].parameters` must be an object"),
+        14 => format!("invalid_tool_declaration: Gemini request field `tools[{index}].function.description` must be a string"),
+        15 => format!("invalid_tool_declaration: Gemini request field `tools[{index}].description` must be a string"),
+        17 => format!("Gemini response_format type `{}` is not supported", plan.detail.as_deref().unwrap_or_default()),
+        _ => "Gemini translator validation returned an unknown result".to_string(),
+    })
+}
 
 pub(super) fn gemini_transform_request(input: ProviderTransformInput) -> ProviderTransformResult {
     if super::gemini_passthrough_endpoint(input.endpoint) {
@@ -68,36 +99,74 @@ pub(super) fn gemini_transform_request(input: ProviderTransformInput) -> Provide
             "Gemini request body must be a JSON object",
         );
     };
-    if gemini_contains_local_media_path(&value) {
-        return ProviderTransformResult::unsupported(
-            ProviderId::Gemini,
-            input.endpoint,
-            ProviderWireFormat::OpenAiResponses,
-            ProviderWireFormat::GeminiGenerateContent,
-            "Gemini translator does not support local media path inputs",
-        );
-    }
-    if let Err(reason) = gemini_validate_candidate_count(&value) {
-        return ProviderTransformResult::rejected(
-            ProviderId::Gemini,
-            input.endpoint,
-            ProviderWireFormat::OpenAiResponses,
-            ProviderWireFormat::GeminiGenerateContent,
-            reason,
-        );
-    }
-    if let Some(tools) = obj.get("tools")
-        && let Err(reason) = gemini_validate_openai_tools(tools)
+    #[cfg(feature = "mojo")]
+    let mojo_validation_plan = crate::gemini_bridge::gemini_bridge_validate_translator(&input.body);
+    #[cfg(feature = "mojo")]
     {
-        return ProviderTransformResult::rejected(
-            ProviderId::Gemini,
-            input.endpoint,
-            ProviderWireFormat::OpenAiResponses,
-            ProviderWireFormat::GeminiGenerateContent,
-            reason,
-        );
+        let plan = &mojo_validation_plan;
+        if plan.tag == 1 {
+            return ProviderTransformResult::unsupported(
+                ProviderId::Gemini,
+                input.endpoint,
+                ProviderWireFormat::OpenAiResponses,
+                ProviderWireFormat::GeminiGenerateContent,
+                "Gemini translator does not support local media path inputs",
+            );
+        }
+        if let Some(reason) = gemini_translator_validation_error(plan) {
+            return ProviderTransformResult::rejected(
+                ProviderId::Gemini,
+                input.endpoint,
+                ProviderWireFormat::OpenAiResponses,
+                ProviderWireFormat::GeminiGenerateContent,
+                reason,
+            );
+        }
+        if plan.tag == 16
+            && let Some(tools) = obj.get("tools")
+            && let Err(reason) = gemini_validate_openai_tools(tools)
+        {
+            return ProviderTransformResult::rejected(
+                ProviderId::Gemini,
+                input.endpoint,
+                ProviderWireFormat::OpenAiResponses,
+                ProviderWireFormat::GeminiGenerateContent,
+                reason,
+            );
+        }
     }
-    let mut request = serde_json::Map::new();
+    #[cfg(not(feature = "mojo"))]
+    {
+        if gemini_contains_local_media_path(&value) {
+            return ProviderTransformResult::unsupported(
+                ProviderId::Gemini,
+                input.endpoint,
+                ProviderWireFormat::OpenAiResponses,
+                ProviderWireFormat::GeminiGenerateContent,
+                "Gemini translator does not support local media path inputs",
+            );
+        }
+        if let Err(reason) = gemini_validate_candidate_count(&value) {
+            return ProviderTransformResult::rejected(
+                ProviderId::Gemini,
+                input.endpoint,
+                ProviderWireFormat::OpenAiResponses,
+                ProviderWireFormat::GeminiGenerateContent,
+                reason,
+            );
+        }
+        if let Some(tools) = obj.get("tools")
+            && let Err(reason) = gemini_validate_openai_tools(tools)
+        {
+            return ProviderTransformResult::rejected(
+                ProviderId::Gemini,
+                input.endpoint,
+                ProviderWireFormat::OpenAiResponses,
+                ProviderWireFormat::GeminiGenerateContent,
+                reason,
+            );
+        }
+    }
     #[cfg(feature = "mojo")]
     let mojo_text_contents = gemini_text_contents_from_request_mojo(&value);
     #[cfg(feature = "mojo")]
@@ -113,48 +182,82 @@ pub(super) fn gemini_transform_request(input: ProviderTransformInput) -> Provide
         gemini_system_instruction_from_request(&value),
         gemini_contents_from_request(&value),
     );
-    if let Some(system_instruction) = system_instruction {
-        request.insert("systemInstruction".to_string(), system_instruction);
-    }
-    request.insert("contents".to_string(), Value::Array(contents));
     let model = obj
         .get("model")
         .and_then(Value::as_str)
         .unwrap_or("gemini-2.5-pro")
         .to_string();
-    let mut generation_config = gemini_translator_generation_config(&value, obj, &model);
-    if let Some(response_format) = obj.get("response_format")
-        && let Err(reason) = gemini_apply_response_format(response_format, &mut generation_config)
-    {
-        return ProviderTransformResult::rejected(
-            ProviderId::Gemini,
-            input.endpoint,
-            ProviderWireFormat::OpenAiResponses,
-            ProviderWireFormat::GeminiGenerateContent,
-            reason,
-        );
-    }
-    if !generation_config.is_empty() {
-        request.insert(
-            "generationConfig".to_string(),
-            Value::Object(generation_config),
-        );
-    }
-    if let Err(reason) = gemini_apply_tools(obj, &mut request) {
-        return ProviderTransformResult::rejected(
-            ProviderId::Gemini,
-            input.endpoint,
-            ProviderWireFormat::OpenAiResponses,
-            ProviderWireFormat::GeminiGenerateContent,
-            reason,
-        );
-    }
-    if let Some(tool_config) = gemini_tool_config_from_request(&value) {
-        request.insert("toolConfig".to_string(), tool_config);
-    }
-    gemini_apply_optional_request_fields(obj, &mut request);
-    let body = serde_json::to_vec(&json!({"model": model, "request": Value::Object(request)}))
-        .expect("gemini request serializes");
+
+    #[cfg(feature = "mojo")]
+    let body = {
+        let tools = if mojo_validation_plan.tag == 16 {
+            let mut tool_request = serde_json::Map::new();
+            if let Err(reason) = gemini_apply_tools(obj, &mut tool_request) {
+                return ProviderTransformResult::rejected(
+                    ProviderId::Gemini,
+                    input.endpoint,
+                    ProviderWireFormat::OpenAiResponses,
+                    ProviderWireFormat::GeminiGenerateContent,
+                    reason,
+                );
+            }
+            tool_request.remove("tools")
+        } else {
+            None
+        };
+        let tool_config = gemini_tool_config_from_request(&value);
+        crate::gemini_bridge::gemini_bridge_raw_translator_request(
+            &value,
+            system_instruction.as_ref(),
+            &contents,
+            tools.as_ref(),
+            tool_config.as_ref(),
+            &model,
+        )
+    };
+
+    #[cfg(not(feature = "mojo"))]
+    let body = {
+        let mut request = serde_json::Map::new();
+        if let Some(system_instruction) = system_instruction {
+            request.insert("systemInstruction".to_string(), system_instruction);
+        }
+        request.insert("contents".to_string(), Value::Array(contents));
+        let mut generation_config = gemini_translator_generation_config(&value, obj, &model);
+        if let Some(response_format) = obj.get("response_format")
+            && let Err(reason) =
+                gemini_apply_response_format(response_format, &mut generation_config)
+        {
+            return ProviderTransformResult::rejected(
+                ProviderId::Gemini,
+                input.endpoint,
+                ProviderWireFormat::OpenAiResponses,
+                ProviderWireFormat::GeminiGenerateContent,
+                reason,
+            );
+        }
+        if !generation_config.is_empty() {
+            request.insert(
+                "generationConfig".to_string(),
+                Value::Object(generation_config),
+            );
+        }
+        if let Err(reason) = gemini_apply_tools(obj, &mut request) {
+            return ProviderTransformResult::rejected(
+                ProviderId::Gemini,
+                input.endpoint,
+                ProviderWireFormat::OpenAiResponses,
+                ProviderWireFormat::GeminiGenerateContent,
+                reason,
+            );
+        }
+        if let Some(tool_config) = gemini_tool_config_from_request(&value) {
+            request.insert("toolConfig".to_string(), tool_config);
+        }
+        gemini_apply_optional_request_fields(obj, &mut request);
+        serde_json::to_vec(&json!({"model": model, "request": Value::Object(request)}))
+            .expect("gemini request serializes")
+    };
     let result = ProviderTransformResult::lossless(
         ProviderId::Gemini,
         input.endpoint,
@@ -167,18 +270,6 @@ pub(super) fn gemini_transform_request(input: ProviderTransformInput) -> Provide
     } else {
         result
     }
-}
-
-#[cfg(feature = "mojo")]
-fn gemini_translator_generation_config(
-    value: &Value,
-    _obj: &serde_json::Map<String, Value>,
-    model: &str,
-) -> serde_json::Map<String, Value> {
-    crate::gemini_provider_core_generation_config_from_request(value, value, model, None)
-        .as_object()
-        .cloned()
-        .expect("Mojo Gemini generation config is an object")
 }
 
 #[cfg(not(feature = "mojo"))]

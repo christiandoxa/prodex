@@ -21,7 +21,7 @@ pub fn deepseek_provider_core_validate_web_search_options(
             DeepSeekRequestPolicyOperation::WebSearchOptions,
             false,
         );
-        return match plan.tag {
+        match plan.tag {
             0 => Ok(()),
             2 => Err(format!(
                 "{provider_label} web_search search_context_size must be low, medium, or high"
@@ -47,7 +47,7 @@ pub fn deepseek_provider_core_validate_web_search_options(
             _ => Err(format!(
                 "{provider_label} web_search validation returned an unknown result"
             )),
-        };
+        }
     }
     #[cfg(not(feature = "mojo"))]
     {
@@ -114,7 +114,7 @@ pub fn deepseek_provider_core_validate_web_search_tool_context_size(
             DeepSeekRequestPolicyOperation::WebSearchContext,
             false,
         );
-        return match plan.tag {
+        match plan.tag {
             0 => Ok(()),
             1 => Err(format!(
                 "{provider_label} web_search context_size must be low, medium, or high"
@@ -122,7 +122,7 @@ pub fn deepseek_provider_core_validate_web_search_tool_context_size(
             _ => Err(format!(
                 "{provider_label} web_search context validation returned an unknown result"
             )),
-        };
+        }
     }
     #[cfg(not(feature = "mojo"))]
     {

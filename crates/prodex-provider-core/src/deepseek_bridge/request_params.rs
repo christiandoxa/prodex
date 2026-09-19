@@ -57,11 +57,11 @@ pub fn deepseek_provider_core_stop_from_responses_request(
         if let Some(error) = error {
             return Err(format!("{provider_label} {error}"));
         }
-        return Ok(value
+        Ok(value
             .get("stop")
             .or_else(|| value.get("stop_sequences"))
             .or_else(|| value.get("stopSequences"))
-            .cloned());
+            .cloned())
     }
     #[cfg(not(feature = "mojo"))]
     {
@@ -196,7 +196,7 @@ pub fn deepseek_provider_core_top_logprobs_from_responses_request(
         if let Some(error) = error {
             return Err(format!("{provider_label} {error}"));
         }
-        return Ok(value.get("top_logprobs").cloned());
+        Ok(value.get("top_logprobs").cloned())
     }
     #[cfg(not(feature = "mojo"))]
     {

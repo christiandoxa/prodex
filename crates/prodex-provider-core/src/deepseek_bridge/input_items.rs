@@ -175,7 +175,6 @@ pub fn deepseek_provider_core_push_message_from_responses_item(
                 panic!("Mojo DeepSeek input-item shaping returned invalid JSON: {error}")
             });
         messages.extend(mapped);
-        return;
     }
 
     #[cfg(not(feature = "mojo"))]

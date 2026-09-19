@@ -61,6 +61,11 @@ pub use self::precommit::{
     GeminiProviderCorePrecommitDecision, GeminiProviderCorePrecommitProbe,
     gemini_provider_core_precommit_decision_for_data_lines,
 };
+#[cfg(feature = "mojo")]
+pub(crate) use self::request::{
+    GeminiTranslatorValidationPlan, gemini_bridge_raw_translator_request,
+    gemini_bridge_validate_translator,
+};
 pub use self::request::{
     gemini_provider_core_exact_output_generate_chunk, gemini_provider_core_exact_output_sse_stream,
     gemini_provider_core_function_tools_from_chat,
