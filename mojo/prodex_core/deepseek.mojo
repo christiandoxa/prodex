@@ -1019,6 +1019,7 @@ comptime DEEPSEEK_POLICY_STOP: Int64 = 7
 comptime DEEPSEEK_POLICY_TOOL_CHOICE: Int64 = 8
 comptime DEEPSEEK_POLICY_WEB_SEARCH_OPTIONS: Int64 = 9
 comptime DEEPSEEK_POLICY_WEB_SEARCH_CONTEXT: Int64 = 10
+comptime DEEPSEEK_POLICY_TOOLS_SHAPE: Int64 = 11
 
 
 def deepseek_policy_set(
@@ -1891,6 +1892,431 @@ def deepseek_web_search_context_plan(
     return True
 
 
+def deepseek_policy_string_starts_with(
+    view: ProdexRichStringView,
+    bounds: InlineArray[Int64, 2],
+    prefix: StringSlice,
+) -> Bool:
+    if not deepseek_json_bounds_is_kind(view, bounds, 34):
+        return False
+    var length = bounds[1] - bounds[0] - 2
+    var prefix_length = Int64(prefix.byte_length())
+    if length < prefix_length:
+        return False
+    var ptr = rich_view_ptr(view)
+    var expected = prefix.unsafe_ptr()
+    for offset in range(prefix_length):
+        if ptr[unsafe_offset=bounds[0] + 1 + offset] != expected[unsafe_offset=offset]:
+            return False
+    return True
+
+
+def deepseek_policy_tool_name(
+    view: ProdexRichStringView,
+    start: Int64,
+    end: Int64,
+) -> InlineArray[Int64, 2]:
+    var name = deepseek_json_object_member(view, start, end, StringSlice("name"))
+    if deepseek_json_string_nonempty(view, name):
+        return name^
+    var function = deepseek_json_object_member(
+        view, start, end, StringSlice("function")
+    )
+    if deepseek_json_bounds_is_kind(view, function, 123):
+        name = deepseek_json_object_member(
+            view, function[0], function[1], StringSlice("name")
+        )
+        if deepseek_json_string_nonempty(view, name):
+            return name^
+    return InlineArray[Int64, 2](fill=-1)^
+
+
+def deepseek_policy_optional_member_bad(
+    view: ProdexRichStringView,
+    start: Int64,
+    end: Int64,
+    key: StringSlice,
+    kind: UInt8,
+) -> Bool:
+    var value = deepseek_json_object_member(view, start, end, key)
+    return value[0] >= 0 and not deepseek_json_bounds_is_kind(view, value, kind)
+
+
+def deepseek_policy_core_tool_type_supported(
+    view: ProdexRichStringView,
+    kind: InlineArray[Int64, 2],
+) -> Bool:
+    return (
+        deepseek_json_raw_equals(view, kind[0], kind[1], StringSlice("function"))
+        or deepseek_json_raw_equals(view, kind[0], kind[1], StringSlice("custom"))
+        or deepseek_json_raw_equals(view, kind[0], kind[1], StringSlice("namespace"))
+        or deepseek_json_raw_equals(view, kind[0], kind[1], StringSlice("tool_search"))
+        or deepseek_json_raw_equals(view, kind[0], kind[1], StringSlice("mcp"))
+        or deepseek_json_raw_equals(view, kind[0], kind[1], StringSlice("mcp_toolset"))
+        or deepseek_json_raw_equals(view, kind[0], kind[1], StringSlice("web_search"))
+        or deepseek_json_raw_equals(view, kind[0], kind[1], StringSlice("web_search_preview"))
+        or deepseek_policy_string_starts_with(view, kind, StringSlice("mcp"))
+        or deepseek_policy_string_starts_with(view, kind, StringSlice("web_search_preview_"))
+    )
+
+
+def deepseek_policy_gemini_tool_type_supported(
+    view: ProdexRichStringView,
+    kind: InlineArray[Int64, 2],
+) -> Bool:
+    return (
+        deepseek_json_raw_equals(view, kind[0], kind[1], StringSlice("web_fetch"))
+        or deepseek_json_raw_equals(view, kind[0], kind[1], StringSlice("url_context"))
+        or deepseek_json_raw_equals(view, kind[0], kind[1], StringSlice("urlContext"))
+        or deepseek_json_raw_equals(view, kind[0], kind[1], StringSlice("web_fetch_preview"))
+        or deepseek_json_raw_equals(view, kind[0], kind[1], StringSlice("code_interpreter"))
+        or deepseek_json_raw_equals(view, kind[0], kind[1], StringSlice("code_execution"))
+        or deepseek_json_raw_equals(view, kind[0], kind[1], StringSlice("codeExecution"))
+        or deepseek_json_raw_equals(view, kind[0], kind[1], StringSlice("computer"))
+        or deepseek_json_raw_equals(view, kind[0], kind[1], StringSlice("computer_use"))
+        or deepseek_json_raw_equals(view, kind[0], kind[1], StringSlice("computerUse"))
+        or deepseek_json_raw_equals(view, kind[0], kind[1], StringSlice("computer_use_preview"))
+        or deepseek_policy_string_starts_with(view, kind, StringSlice("web_fetch_preview_"))
+        or deepseek_policy_string_starts_with(view, kind, StringSlice("computer_"))
+    )
+
+
+def deepseek_policy_tool_type_supported(
+    view: ProdexRichStringView,
+    kind: InlineArray[Int64, 2],
+    gemini_compat: Bool,
+) -> Bool:
+    if not deepseek_json_bounds_is_kind(view, kind, 34):
+        return False
+    if deepseek_policy_core_tool_type_supported(view, kind):
+        return True
+    return gemini_compat and deepseek_policy_gemini_tool_type_supported(view, kind)
+
+
+
+def deepseek_policy_array_has_nonempty_string(
+    view: ProdexRichStringView,
+    bounds: InlineArray[Int64, 2],
+) -> Bool:
+    if not deepseek_json_bounds_is_kind(view, bounds, 91):
+        return False
+    var index = deepseek_json_skip_ws(view, bounds[0] + 1, bounds[1] - 1)
+    while index < bounds[1] - 1:
+        var value_end = deepseek_json_value_end(view, index, bounds[1] - 1, 0)
+        if value_end < 0:
+            return False
+        var item = InlineArray[Int64, 2](fill=-1)
+        item[0] = index
+        item[1] = value_end
+        if deepseek_json_string_nonempty(view, item):
+            return True
+        index = deepseek_json_skip_ws(view, value_end, bounds[1] - 1)
+        if index < bounds[1] - 1 and deepseek_json_byte(view, index) == 44:
+            index = deepseek_json_skip_ws(view, index + 1, bounds[1] - 1)
+            continue
+        break
+    return False
+
+
+def deepseek_policy_configs_have_enabled(
+    view: ProdexRichStringView,
+    tool_start: Int64,
+    tool_end: Int64,
+    configs: InlineArray[Int64, 2],
+) -> Bool:
+    if not deepseek_json_bounds_is_kind(view, configs, 123):
+        return False
+    var default_enabled = True
+    var default_config = deepseek_json_object_member(
+        view, tool_start, tool_end, StringSlice("default_config")
+    )
+    if deepseek_json_bounds_is_kind(view, default_config, 123):
+        var enabled = deepseek_json_object_member(
+            view, default_config[0], default_config[1], StringSlice("enabled")
+        )
+        if deepseek_json_is_false(view, enabled):
+            default_enabled = False
+        elif deepseek_json_is_true(view, enabled):
+            default_enabled = True
+    var index = deepseek_json_skip_ws(view, configs[0] + 1, configs[1] - 1)
+    while index < configs[1] - 1:
+        var key_end = deepseek_json_string_end(view, index, configs[1] - 1)
+        if key_end < 0:
+            return False
+        index = deepseek_json_skip_ws(view, key_end, configs[1] - 1)
+        if index >= configs[1] - 1 or deepseek_json_byte(view, index) != 58:
+            return False
+        var value_start = deepseek_json_skip_ws(view, index + 1, configs[1] - 1)
+        var value_end = deepseek_json_value_end(view, value_start, configs[1] - 1, 0)
+        if value_end < 0:
+            return False
+        var enabled_value = InlineArray[Int64, 2](fill=-1)
+        if deepseek_json_byte(view, value_start) == 123:
+            enabled_value = deepseek_json_object_member(
+                view, value_start, value_end, StringSlice("enabled")
+            )
+        var enabled = default_enabled
+        if deepseek_json_is_true(view, enabled_value):
+            enabled = True
+        elif deepseek_json_is_false(view, enabled_value):
+            enabled = False
+        if enabled:
+            return True
+        index = deepseek_json_skip_ws(view, value_end, configs[1] - 1)
+        if index < configs[1] - 1 and deepseek_json_byte(view, index) == 44:
+            index = deepseek_json_skip_ws(view, index + 1, configs[1] - 1)
+            continue
+        if index == configs[1] - 1:
+            break
+        return False
+    return False
+
+
+def deepseek_policy_namespace_tool(
+    view: ProdexRichStringView,
+    start: Int64,
+    end: Int64,
+    output: Pointer[mut=True, Int64, _],
+) -> Bool:
+    var namespace = deepseek_policy_tool_name(view, start, end)
+    if namespace[0] < 0:
+        deepseek_policy_set(output, 12)
+        return True
+    var tools = deepseek_json_object_member(view, start, end, StringSlice("tools"))
+    if not deepseek_json_bounds_is_kind(view, tools, 91):
+        deepseek_policy_set(output, 13, namespace[0], namespace[1])
+        return True
+    var index = deepseek_json_skip_ws(view, tools[0] + 1, tools[1] - 1)
+    if index >= tools[1] - 1:
+        deepseek_policy_set(output, 14, namespace[0], namespace[1])
+        return True
+    while index < tools[1] - 1:
+        var item_end = deepseek_json_value_end(view, index, tools[1] - 1, 0)
+        if item_end < 0:
+            return False
+        if deepseek_json_byte(view, index) != 123:
+            deepseek_policy_set(output, 15, namespace[0], namespace[1])
+            return True
+        if deepseek_policy_optional_member_bad(
+            view, index, item_end, StringSlice("description"), 34
+        ):
+            deepseek_policy_set(output, 16, namespace[0], namespace[1])
+            return True
+        var strict_value = deepseek_json_object_member(
+            view, index, item_end, StringSlice("strict")
+        )
+        if strict_value[0] >= 0 and not deepseek_json_is_bool(view, strict_value):
+            deepseek_policy_set(output, 17, namespace[0], namespace[1])
+            return True
+        var kind = deepseek_json_object_member(
+            view, index, item_end, StringSlice("type")
+        )
+        if not deepseek_json_raw_equals(
+            view, kind[0], kind[1], StringSlice("function")
+        ):
+            deepseek_policy_set(output, 18, namespace[0], namespace[1])
+            return True
+        var name = deepseek_json_object_member(
+            view, index, item_end, StringSlice("name")
+        )
+        if not deepseek_json_string_nonempty(view, name):
+            deepseek_policy_set(output, 19, namespace[0], namespace[1])
+            return True
+        index = deepseek_json_skip_ws(view, item_end, tools[1] - 1)
+        if index < tools[1] - 1 and deepseek_json_byte(view, index) == 44:
+            index = deepseek_json_skip_ws(view, index + 1, tools[1] - 1)
+            continue
+        if index == tools[1] - 1:
+            break
+        return False
+    return True
+
+
+def deepseek_tools_shape_plan(
+    view: ProdexRichStringView,
+    gemini_compat: Bool,
+    output: Pointer[mut=True, Int64, _],
+) -> Bool:
+    var root = deepseek_input_object_bounds(view)
+    if root[0] < 0:
+        return False
+    var tools = deepseek_json_object_member(
+        view, root[0], root[1], StringSlice("tools")
+    )
+    if tools[0] < 0:
+        return True
+    if not deepseek_json_bounds_is_kind(view, tools, 91):
+        deepseek_policy_set(output, 1)
+        return True
+    var index = deepseek_json_skip_ws(view, tools[0] + 1, tools[1] - 1)
+    while index < tools[1] - 1:
+        var tool_end = deepseek_json_value_end(view, index, tools[1] - 1, 0)
+        if tool_end < 0:
+            return False
+        if deepseek_json_byte(view, index) != 123:
+            deepseek_policy_set(output, 2)
+            return True
+        var kind = deepseek_json_object_member(
+            view, index, tool_end, StringSlice("type")
+        )
+        if kind[0] < 0:
+            index = deepseek_json_skip_ws(view, tool_end, tools[1] - 1)
+            if index < tools[1] - 1 and deepseek_json_byte(view, index) == 44:
+                index = deepseek_json_skip_ws(view, index + 1, tools[1] - 1)
+                continue
+            if index == tools[1] - 1:
+                break
+            return False
+        if not deepseek_policy_tool_type_supported(view, kind, gemini_compat):
+            deepseek_policy_set(output, 3, kind[0], kind[1])
+            return True
+        if deepseek_policy_optional_member_bad(
+            view, index, tool_end, StringSlice("description"), 34
+        ):
+            deepseek_policy_set(output, 4)
+            return True
+        var function = deepseek_json_object_member(
+            view, index, tool_end, StringSlice("function")
+        )
+        if deepseek_json_bounds_is_kind(view, function, 123):
+            if deepseek_policy_optional_member_bad(
+                view, function[0], function[1], StringSlice("description"), 34
+            ):
+                deepseek_policy_set(output, 5)
+                return True
+            var function_strict = deepseek_json_object_member(
+                view, function[0], function[1], StringSlice("strict")
+            )
+            if function_strict[0] >= 0 and not deepseek_json_is_bool(
+                view, function_strict
+            ):
+                deepseek_policy_set(output, 6)
+                return True
+        var strict_value = deepseek_json_object_member(
+            view, index, tool_end, StringSlice("strict")
+        )
+        if strict_value[0] >= 0 and not deepseek_json_is_bool(view, strict_value):
+            deepseek_policy_set(output, 7)
+            return True
+        var is_function = deepseek_json_raw_equals(
+            view, kind[0], kind[1], StringSlice("function")
+        )
+        var is_custom = deepseek_json_raw_equals(
+            view, kind[0], kind[1], StringSlice("custom")
+        )
+        if (is_function or is_custom) and deepseek_policy_tool_name(
+            view, index, tool_end
+        )[0] < 0:
+            deepseek_policy_set(output, 8, kind[0], kind[1])
+            return True
+        if is_custom and deepseek_json_is_true(view, strict_value):
+            deepseek_policy_set(output, 9)
+            return True
+        if is_custom:
+            var format = deepseek_json_object_member(
+                view, index, tool_end, StringSlice("format")
+            )
+            if format[0] >= 0:
+                if not deepseek_json_bounds_is_kind(view, format, 123):
+                    deepseek_policy_set(output, 10)
+                    return True
+                var format_type = deepseek_json_object_member(
+                    view, format[0], format[1], StringSlice("type")
+                )
+                if format_type[0] >= 0 and not deepseek_json_bounds_is_kind(
+                    view, format_type, 34
+                ):
+                    deepseek_policy_set(output, 11)
+                    return True
+        if deepseek_json_raw_equals(
+            view, kind[0], kind[1], StringSlice("namespace")
+        ):
+            if not deepseek_policy_namespace_tool(
+                view, index, tool_end, output
+            ):
+                return False
+            if output[unsafe_offset=0] != 0:
+                return True
+        if (
+            deepseek_json_raw_equals(view, kind[0], kind[1], StringSlice("mcp"))
+            or deepseek_json_raw_equals(
+                view, kind[0], kind[1], StringSlice("mcp_toolset")
+            )
+        ):
+            var declares = (
+                deepseek_json_object_member(
+                    view, index, tool_end, StringSlice("allowed_tools")
+                )[0] >= 0
+                or deepseek_json_object_member(
+                    view, index, tool_end, StringSlice("configs")
+                )[0] >= 0
+            )
+            if declares:
+                var server = deepseek_json_object_member(
+                    view, index, tool_end, StringSlice("mcp_server_name")
+                )
+                if not deepseek_json_string_nonempty(view, server):
+                    server = deepseek_json_object_member(
+                        view, index, tool_end, StringSlice("server_label")
+                    )
+                if not deepseek_json_string_nonempty(view, server):
+                    server = deepseek_json_object_member(
+                        view, index, tool_end, StringSlice("server_name")
+                    )
+                if not deepseek_json_string_nonempty(view, server):
+                    server = deepseek_json_object_member(
+                        view, index, tool_end, StringSlice("name")
+                    )
+                if not deepseek_json_string_nonempty(view, server):
+                    deepseek_policy_set(output, 22)
+                    return True
+                var allowed = deepseek_json_object_member(
+                    view, index, tool_end, StringSlice("allowed_tools")
+                )
+                var configs = deepseek_json_object_member(
+                    view, index, tool_end, StringSlice("configs")
+                )
+                if (
+                    not deepseek_policy_array_has_nonempty_string(view, allowed)
+                    and not deepseek_policy_configs_have_enabled(
+                        view, index, tool_end, configs
+                    )
+                ):
+                    deepseek_policy_set(output, 23, server[0], server[1])
+                    return True
+        elif deepseek_policy_string_starts_with(
+            view, kind, StringSlice("mcp")
+        ):
+            var name = deepseek_policy_tool_name(view, index, tool_end)
+            if name[0] < 0:
+                deepseek_policy_set(output, 20)
+                return True
+            var has_schema = (
+                deepseek_json_object_member(
+                    view, index, tool_end, StringSlice("parameters")
+                )[0] >= 0
+                or deepseek_json_object_member(
+                    view, index, tool_end, StringSlice("parametersJsonSchema")
+                )[0] >= 0
+                or deepseek_json_object_member(
+                    view, index, tool_end, StringSlice("input_schema")
+                )[0] >= 0
+                or deepseek_json_object_member(
+                    view, index, tool_end, StringSlice("schema")
+                )[0] >= 0
+            )
+            if not has_schema:
+                deepseek_policy_set(output, 21, name[0], name[1])
+                return True
+        index = deepseek_json_skip_ws(view, tool_end, tools[1] - 1)
+        if index < tools[1] - 1 and deepseek_json_byte(view, index) == 44:
+            index = deepseek_json_skip_ws(view, index + 1, tools[1] - 1)
+            continue
+        if index == tools[1] - 1:
+            break
+        return False
+    return True
+
 def deepseek_request_policy_v1(
     abi_version: Int64,
     operation: Int64,
@@ -1934,6 +2360,8 @@ def deepseek_request_policy_v1(
         ok = deepseek_web_search_options_plan(view, output)
     elif operation == DEEPSEEK_POLICY_WEB_SEARCH_CONTEXT:
         ok = deepseek_web_search_context_plan(view, output)
+    elif operation == DEEPSEEK_POLICY_TOOLS_SHAPE:
+        ok = deepseek_tools_shape_plan(view, flag == 1, output)
     else:
         return DEEPSEEK_KERNEL_STATUS_INVALID
     return DEEPSEEK_KERNEL_STATUS_OK if ok else DEEPSEEK_KERNEL_STATUS_INVALID

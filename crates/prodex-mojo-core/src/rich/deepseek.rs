@@ -61,6 +61,7 @@ pub enum DeepSeekRequestPolicyOperation {
     ToolChoice = 8,
     WebSearchOptions = 9,
     WebSearchContext = 10,
+    ToolsShape = 11,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

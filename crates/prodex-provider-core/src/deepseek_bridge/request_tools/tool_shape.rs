@@ -1,6 +1,13 @@
 //! DeepSeek top-level tools-array shape validation.
 
+#[cfg(feature = "mojo")]
+use crate::deepseek_bridge::request_policy::{detail, plan_value};
+#[cfg(feature = "mojo")]
+use prodex_mojo_core::rich::DeepSeekRequestPolicyOperation;
+
+#[cfg(not(feature = "mojo"))]
 use super::function_tools::deepseek_provider_core_tool_name_from_tool_object;
+#[cfg(not(feature = "mojo"))]
 use super::shape::{
     deepseek_provider_core_validate_custom_tool_format_shape,
     deepseek_provider_core_validate_mcp_function_tool_shape,
@@ -14,37 +21,127 @@ pub fn deepseek_provider_core_validate_tools_shape(
     gemini_compat: bool,
     provider_label: &str,
 ) -> Result<(), String> {
-    let Some(tools) = value.get("tools") else {
-        return Ok(());
-    };
-    let Some(tools) = tools.as_array() else {
-        return Err(format!("{provider_label} tools must be an array"));
-    };
-    if tools.iter().any(|tool| !tool.is_object()) {
-        return Err(format!("{provider_label} tools entries must be objects"));
+    #[cfg(feature = "mojo")]
+    {
+        let (source, plan) = plan_value(
+            value,
+            DeepSeekRequestPolicyOperation::ToolsShape,
+            gemini_compat,
+        );
+        let detail = || detail(&source, plan).unwrap_or_default();
+        return match plan.tag {
+            0 => Ok(()),
+            1 => Err(format!("{provider_label} tools must be an array")),
+            2 => Err(format!("{provider_label} tools entries must be objects")),
+            3 => Err(format!(
+                "{provider_label} tool type \x60{}\x60 is not supported",
+                detail()
+            )),
+            4 => Err(format!(
+                "{provider_label} tool description must be a string"
+            )),
+            5 => Err(format!(
+                "{provider_label} function description must be a string"
+            )),
+            6 => Err(format!(
+                "{provider_label} function strict must be a boolean"
+            )),
+            7 => Err(format!("{provider_label} tool strict must be a boolean")),
+            8 => Err(format!(
+                "{provider_label} {} tools require a name",
+                detail()
+            )),
+            9 => Err(format!(
+                "{provider_label} custom tools cannot preserve strict=true through the function wrapper"
+            )),
+            10 => Err(format!(
+                "{provider_label} custom tool format must be an object"
+            )),
+            11 => Err(format!(
+                "{provider_label} custom tool format.type must be a string"
+            )),
+            12 => Err(format!("{provider_label} namespace tools require a name")),
+            13 => Err(format!(
+                "{provider_label} namespace tool \x60{}\x60 requires a tools array",
+                detail()
+            )),
+            14 => Err(format!(
+                "{provider_label} namespace tool \x60{}\x60 requires at least one tool",
+                detail()
+            )),
+            15 => Err(format!(
+                "{provider_label} namespace tool \x60{}\x60 entries must be objects",
+                detail()
+            )),
+            16 => Err(format!(
+                "{provider_label} namespace function description must be a string"
+            )),
+            17 => Err(format!(
+                "{provider_label} namespace function strict must be a boolean"
+            )),
+            18 => Err(format!(
+                "{provider_label} namespace tool \x60{}\x60 entries must be function tools",
+                detail()
+            )),
+            19 => Err(format!(
+                "{provider_label} namespace tool \x60{}\x60 function entries require a name",
+                detail()
+            )),
+            20 => Err(format!(
+                "{provider_label} MCP function tools require a name"
+            )),
+            21 => Err(format!(
+                "{provider_label} MCP function tool \x60{}\x60 requires a schema",
+                detail()
+            )),
+            22 => Err(format!(
+                "{provider_label} MCP toolsets require a server name"
+            )),
+            23 => Err(format!(
+                "{provider_label} MCP toolset \x60{}\x60 requires allowed_tools or enabled configs",
+                detail()
+            )),
+            _ => Err(format!(
+                "{provider_label} tools shape validation returned an unknown result"
+            )),
+        };
     }
-    for tool in tools {
-        let Some(object) = tool.as_object() else {
-            continue;
+
+    #[cfg(not(feature = "mojo"))]
+    {
+        let Some(tools) = value.get("tools") else {
+            return Ok(());
         };
-        let Some(tool_type) = object.get("type").and_then(serde_json::Value::as_str) else {
-            continue;
+        let Some(tools) = tools.as_array() else {
+            return Err(format!("{provider_label} tools must be an array"));
         };
-        if deepseek_provider_core_is_supported_tool_type(tool_type, gemini_compat) {
-            deepseek_provider_core_validate_supported_tool_shape(
-                object,
-                tool_type,
-                provider_label,
-            )?;
-            continue;
+        if tools.iter().any(|tool| !tool.is_object()) {
+            return Err(format!("{provider_label} tools entries must be objects"));
+        };
+        for tool in tools {
+            let Some(object) = tool.as_object() else {
+                continue;
+            };
+            let Some(tool_type) = object.get("type").and_then(serde_json::Value::as_str) else {
+                continue;
+            };
+            if deepseek_provider_core_is_supported_tool_type(tool_type, gemini_compat) {
+                deepseek_provider_core_validate_supported_tool_shape(
+                    object,
+                    tool_type,
+                    provider_label,
+                )?;
+                continue;
+            }
+            return Err(format!(
+                "{provider_label} tool type \x60{tool_type}\x60 is not supported"
+            ));
         }
-        return Err(format!(
-            "{provider_label} tool type `{tool_type}` is not supported"
-        ));
+        Ok(())
     }
-    Ok(())
 }
 
+#[cfg(not(feature = "mojo"))]
 fn deepseek_provider_core_is_supported_tool_type(tool_type: &str, gemini_compat: bool) -> bool {
     matches!(
         tool_type,
@@ -61,6 +158,7 @@ fn deepseek_provider_core_is_supported_tool_type(tool_type: &str, gemini_compat:
         || (gemini_compat && deepseek_provider_core_is_gemini_tool_type(tool_type))
 }
 
+#[cfg(not(feature = "mojo"))]
 fn deepseek_provider_core_is_gemini_tool_type(tool_type: &str) -> bool {
     matches!(
         tool_type,
@@ -79,6 +177,7 @@ fn deepseek_provider_core_is_gemini_tool_type(tool_type: &str) -> bool {
         || tool_type.starts_with("computer_")
 }
 
+#[cfg(not(feature = "mojo"))]
 fn deepseek_provider_core_validate_supported_tool_shape(
     object: &serde_json::Map<String, serde_json::Value>,
     tool_type: &str,
