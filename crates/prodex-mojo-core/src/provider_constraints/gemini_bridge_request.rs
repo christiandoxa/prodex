@@ -18,6 +18,7 @@ pub enum GeminiBridgeRequestOperation {
     SimpleRequest = 6,
     ValidateCandidateCount = 7,
     ToolConfig = 8,
+    TextContents = 9,
 }
 
 impl GeminiBridgeRequestOperation {
