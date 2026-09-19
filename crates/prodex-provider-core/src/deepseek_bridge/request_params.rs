@@ -7,7 +7,11 @@ mod reasoning;
 mod reject;
 
 #[cfg(feature = "mojo")]
-use prodex_mojo_core::rich::{DeepSeekKernelInput, DeepSeekKernelOperation};
+use super::request_policy::plan_value;
+#[cfg(feature = "mojo")]
+use prodex_mojo_core::rich::{
+    DeepSeekKernelInput, DeepSeekKernelOperation, DeepSeekRequestPolicyOperation,
+};
 
 #[cfg(feature = "mojo")]
 fn deepseek_provider_core_mojo_value(
@@ -40,30 +44,52 @@ pub fn deepseek_provider_core_stop_from_responses_request(
     value: &serde_json::Value,
     provider_label: &str,
 ) -> Result<Option<serde_json::Value>, String> {
-    let Some(stop) = value
-        .get("stop")
-        .or_else(|| value.get("stop_sequences"))
-        .or_else(|| value.get("stopSequences"))
-    else {
-        return Ok(None);
-    };
-    if stop.as_str().is_some() {
-        return Ok(Some(stop.clone()));
+    #[cfg(feature = "mojo")]
+    {
+        let (_, plan) = plan_value(value, DeepSeekRequestPolicyOperation::Stop, false);
+        let error = match plan.tag {
+            0 => None,
+            1 => Some("stop must be a string or array of strings"),
+            2 => Some("supports at most 16 stop sequences"),
+            3 => Some("stop sequences must be strings"),
+            _ => Some("stop validation returned an unknown result"),
+        };
+        if let Some(error) = error {
+            return Err(format!("{provider_label} {error}"));
+        }
+        return Ok(value
+            .get("stop")
+            .or_else(|| value.get("stop_sequences"))
+            .or_else(|| value.get("stopSequences"))
+            .cloned());
     }
-    let Some(stops) = stop.as_array() else {
-        return Err(format!(
-            "{provider_label} stop must be a string or array of strings"
-        ));
-    };
-    if stops.len() > 16 {
-        return Err(format!(
-            "{provider_label} supports at most 16 stop sequences"
-        ));
+    #[cfg(not(feature = "mojo"))]
+    {
+        let Some(stop) = value
+            .get("stop")
+            .or_else(|| value.get("stop_sequences"))
+            .or_else(|| value.get("stopSequences"))
+        else {
+            return Ok(None);
+        };
+        if stop.as_str().is_some() {
+            return Ok(Some(stop.clone()));
+        }
+        let Some(stops) = stop.as_array() else {
+            return Err(format!(
+                "{provider_label} stop must be a string or array of strings"
+            ));
+        };
+        if stops.len() > 16 {
+            return Err(format!(
+                "{provider_label} supports at most 16 stop sequences"
+            ));
+        }
+        if stops.iter().any(|stop| !stop.is_string()) {
+            return Err(format!("{provider_label} stop sequences must be strings"));
+        }
+        Ok(Some(stop.clone()))
     }
-    if stops.iter().any(|stop| !stop.is_string()) {
-        return Err(format!("{provider_label} stop sequences must be strings"));
-    }
-    Ok(Some(stop.clone()))
 }
 
 pub fn deepseek_provider_core_insert_primitive_request_fields(
@@ -71,26 +97,46 @@ pub fn deepseek_provider_core_insert_primitive_request_fields(
     request: &mut serde_json::Map<String, serde_json::Value>,
     provider_label: &str,
 ) -> Result<(), String> {
-    for field in ["temperature", "top_p"] {
-        if let Some(next) = value.get(field)
-            && !next.is_number()
-        {
-            return Err(format!("{provider_label} {field} must be a number"));
-        }
-    }
-    for field in ["max_output_tokens", "max_tokens", "max_completion_tokens"] {
-        if let Some(next) = value.get(field)
-            && next.as_u64().is_none_or(|count| count == 0)
-        {
-            return Err(format!(
-                "{provider_label} {field} must be a positive integer"
-            ));
-        }
-    }
-    if let Some(logprobs) = value.get("logprobs")
-        && !logprobs.is_boolean()
+    #[cfg(feature = "mojo")]
     {
-        return Err(format!("{provider_label} logprobs must be a boolean"));
+        let (_, plan) = plan_value(value, DeepSeekRequestPolicyOperation::PrimitiveCore, false);
+        let error = match plan.tag {
+            0 => None,
+            1 => Some("temperature must be a number"),
+            2 => Some("top_p must be a number"),
+            3 => Some("max_output_tokens must be a positive integer"),
+            4 => Some("max_tokens must be a positive integer"),
+            5 => Some("max_completion_tokens must be a positive integer"),
+            6 => Some("logprobs must be a boolean"),
+            _ => Some("request validation returned an unknown result"),
+        };
+        if let Some(error) = error {
+            return Err(format!("{provider_label} {error}"));
+        }
+    }
+    #[cfg(not(feature = "mojo"))]
+    {
+        for field in ["temperature", "top_p"] {
+            if let Some(next) = value.get(field)
+                && !next.is_number()
+            {
+                return Err(format!("{provider_label} {field} must be a number"));
+            }
+        }
+        for field in ["max_output_tokens", "max_tokens", "max_completion_tokens"] {
+            if let Some(next) = value.get(field)
+                && next.as_u64().is_none_or(|count| count == 0)
+            {
+                return Err(format!(
+                    "{provider_label} {field} must be a positive integer"
+                ));
+            }
+        }
+        if let Some(logprobs) = value.get("logprobs")
+            && !logprobs.is_boolean()
+        {
+            return Err(format!("{provider_label} logprobs must be a boolean"));
+        }
     }
     #[cfg(feature = "mojo")]
     {
@@ -137,21 +183,39 @@ pub fn deepseek_provider_core_top_logprobs_from_responses_request(
     value: &serde_json::Value,
     provider_label: &str,
 ) -> Result<Option<serde_json::Value>, String> {
-    let Some(top_logprobs) = value.get("top_logprobs") else {
-        return Ok(None);
-    };
-    let Some(count) = top_logprobs.as_u64() else {
-        return Err(format!("{provider_label} top_logprobs must be an integer"));
-    };
-    if count > 20 {
-        return Err(format!("{provider_label} top_logprobs must be <= 20"));
+    #[cfg(feature = "mojo")]
+    {
+        let (_, plan) = plan_value(value, DeepSeekRequestPolicyOperation::TopLogprobs, false);
+        let error = match plan.tag {
+            0 => None,
+            1 => Some("top_logprobs must be an integer"),
+            2 => Some("top_logprobs must be <= 20"),
+            3 => Some("top_logprobs requires logprobs=true"),
+            _ => Some("top_logprobs validation returned an unknown result"),
+        };
+        if let Some(error) = error {
+            return Err(format!("{provider_label} {error}"));
+        }
+        return Ok(value.get("top_logprobs").cloned());
     }
-    if value.get("logprobs").and_then(serde_json::Value::as_bool) != Some(true) {
-        return Err(format!(
-            "{provider_label} top_logprobs requires logprobs=true"
-        ));
+    #[cfg(not(feature = "mojo"))]
+    {
+        let Some(top_logprobs) = value.get("top_logprobs") else {
+            return Ok(None);
+        };
+        let Some(count) = top_logprobs.as_u64() else {
+            return Err(format!("{provider_label} top_logprobs must be an integer"));
+        };
+        if count > 20 {
+            return Err(format!("{provider_label} top_logprobs must be <= 20"));
+        }
+        if value.get("logprobs").and_then(serde_json::Value::as_bool) != Some(true) {
+            return Err(format!(
+                "{provider_label} top_logprobs requires logprobs=true"
+            ));
+        }
+        Ok(Some(top_logprobs.clone()))
     }
-    Ok(Some(top_logprobs.clone()))
 }
 
 pub fn deepseek_provider_core_user_id_from_responses_request(

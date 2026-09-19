@@ -1013,6 +1013,12 @@ comptime DEEPSEEK_POLICY_REQUEST_FIELDS: Int64 = 1
 comptime DEEPSEEK_POLICY_BETA_FIELDS: Int64 = 2
 comptime DEEPSEEK_POLICY_REASONING_SHAPE: Int64 = 3
 comptime DEEPSEEK_POLICY_SIMPLE_REQUEST: Int64 = 4
+comptime DEEPSEEK_POLICY_PRIMITIVE_CORE: Int64 = 5
+comptime DEEPSEEK_POLICY_TOP_LOGPROBS: Int64 = 6
+comptime DEEPSEEK_POLICY_STOP: Int64 = 7
+comptime DEEPSEEK_POLICY_TOOL_CHOICE: Int64 = 8
+comptime DEEPSEEK_POLICY_WEB_SEARCH_OPTIONS: Int64 = 9
+comptime DEEPSEEK_POLICY_WEB_SEARCH_CONTEXT: Int64 = 10
 
 
 def deepseek_policy_set(
@@ -1123,6 +1129,48 @@ def deepseek_policy_array_all_text(
             break
         return False
     return True
+
+def deepseek_policy_json_number(
+    view: ProdexRichStringView, bounds: InlineArray[Int64, 2]
+) -> Bool:
+    if bounds[0] < 0 or bounds[1] <= bounds[0]:
+        return False
+    var first = deepseek_json_byte(view, bounds[0])
+    return first == 45 or (first >= 48 and first <= 57)
+
+
+def deepseek_policy_positive_integer(
+    view: ProdexRichStringView, bounds: InlineArray[Int64, 2]
+) -> Bool:
+    if bounds[0] < 0 or bounds[1] <= bounds[0]:
+        return False
+    var any_nonzero = False
+    for index in range(bounds[0], bounds[1]):
+        var value = deepseek_json_byte(view, index)
+        if value < 48 or value > 57:
+            return False
+        if value != 48:
+            any_nonzero = True
+    return any_nonzero
+
+
+def deepseek_policy_small_uint(
+    view: ProdexRichStringView,
+    bounds: InlineArray[Int64, 2],
+    maximum: Int64,
+) -> Int64:
+    if bounds[0] < 0 or bounds[1] <= bounds[0]:
+        return -1
+    var result: Int64 = 0
+    for index in range(bounds[0], bounds[1]):
+        var value = deepseek_json_byte(view, index)
+        if value < 48 or value > 57:
+            return -1
+        result = result * 10 + Int64(value - 48)
+        if result > maximum:
+            return maximum + 1
+    return result
+
 
 def deepseek_request_fields_plan(
     view: ProdexRichStringView, output: Pointer[mut=True, Int64, _]
@@ -1516,6 +1564,333 @@ def deepseek_simple_request_plan(
     return True
 
 
+def deepseek_primitive_core_plan(
+    view: ProdexRichStringView, output: Pointer[mut=True, Int64, _]
+) -> Bool:
+    var root = deepseek_input_object_bounds(view)
+    if root[0] < 0:
+        return False
+    var temperature = deepseek_json_object_member(
+        view, root[0], root[1], StringSlice("temperature")
+    )
+    if temperature[0] >= 0 and not deepseek_policy_json_number(view, temperature):
+        deepseek_policy_set(output, 1)
+        return True
+    var top_p = deepseek_json_object_member(
+        view, root[0], root[1], StringSlice("top_p")
+    )
+    if top_p[0] >= 0 and not deepseek_policy_json_number(view, top_p):
+        deepseek_policy_set(output, 2)
+        return True
+    var tag: Int64 = 3
+    for key in [
+        StringSlice("max_output_tokens"),
+        StringSlice("max_tokens"),
+        StringSlice("max_completion_tokens"),
+    ]:
+        var value = deepseek_json_object_member(view, root[0], root[1], key)
+        if value[0] >= 0 and not deepseek_policy_positive_integer(view, value):
+            deepseek_policy_set(output, tag)
+            return True
+        tag += 1
+    var logprobs = deepseek_json_object_member(
+        view, root[0], root[1], StringSlice("logprobs")
+    )
+    if logprobs[0] >= 0 and not deepseek_json_is_bool(view, logprobs):
+        deepseek_policy_set(output, 6)
+    return True
+
+
+def deepseek_top_logprobs_plan(
+    view: ProdexRichStringView, output: Pointer[mut=True, Int64, _]
+) -> Bool:
+    var root = deepseek_input_object_bounds(view)
+    if root[0] < 0:
+        return False
+    var top = deepseek_json_object_member(
+        view, root[0], root[1], StringSlice("top_logprobs")
+    )
+    if top[0] < 0:
+        return True
+    var count = deepseek_policy_small_uint(view, top, 20)
+    if count < 0:
+        deepseek_policy_set(output, 1)
+        return True
+    if count > 20:
+        deepseek_policy_set(output, 2)
+        return True
+    var logprobs = deepseek_json_object_member(
+        view, root[0], root[1], StringSlice("logprobs")
+    )
+    if not deepseek_json_is_true(view, logprobs):
+        deepseek_policy_set(output, 3)
+    return True
+
+
+def deepseek_stop_plan(
+    view: ProdexRichStringView, output: Pointer[mut=True, Int64, _]
+) -> Bool:
+    var root = deepseek_input_object_bounds(view)
+    if root[0] < 0:
+        return False
+    var stop = deepseek_json_object_member(
+        view, root[0], root[1], StringSlice("stop")
+    )
+    if stop[0] < 0:
+        stop = deepseek_json_object_member(
+            view, root[0], root[1], StringSlice("stop_sequences")
+        )
+    if stop[0] < 0:
+        stop = deepseek_json_object_member(
+            view, root[0], root[1], StringSlice("stopSequences")
+        )
+    if stop[0] < 0 or deepseek_json_bounds_is_kind(view, stop, 34):
+        return True
+    if not deepseek_json_bounds_is_kind(view, stop, 91):
+        deepseek_policy_set(output, 1)
+        return True
+    var count: Int64 = 0
+    var index = deepseek_json_skip_ws(view, stop[0] + 1, stop[1] - 1)
+    while index < stop[1] - 1:
+        var value_end = deepseek_json_value_end(view, index, stop[1] - 1, 0)
+        if value_end < 0:
+            return False
+        count += 1
+        if count > 16:
+            deepseek_policy_set(output, 2)
+            return True
+        if deepseek_json_byte(view, index) != 34:
+            deepseek_policy_set(output, 3)
+            return True
+        index = deepseek_json_skip_ws(view, value_end, stop[1] - 1)
+        if index < stop[1] - 1 and deepseek_json_byte(view, index) == 44:
+            index = deepseek_json_skip_ws(view, index + 1, stop[1] - 1)
+            continue
+        if index == stop[1] - 1:
+            break
+        return False
+    return True
+
+
+def deepseek_tool_choice_plan(
+    view: ProdexRichStringView,
+    thinking_enabled: Bool,
+    output: Pointer[mut=True, Int64, _],
+) -> Bool:
+    if thinking_enabled:
+        return True
+    var root = deepseek_input_object_bounds(view)
+    if root[0] < 0:
+        return False
+    var choice = deepseek_json_object_member(
+        view, root[0], root[1], StringSlice("tool_choice")
+    )
+    if choice[0] < 0:
+        return True
+    if deepseek_json_bounds_is_kind(view, choice, 34):
+        if (
+            deepseek_json_raw_equals(
+                view, choice[0], choice[1], StringSlice("auto")
+            )
+            or deepseek_json_raw_equals(
+                view, choice[0], choice[1], StringSlice("none")
+            )
+            or deepseek_json_raw_equals(
+                view, choice[0], choice[1], StringSlice("required")
+            )
+        ):
+            return True
+        deepseek_policy_set(output, 1, choice[0], choice[1])
+        return True
+    if not deepseek_json_bounds_is_kind(view, choice, 123):
+        deepseek_policy_set(output, 2)
+        return True
+    var choice_type = deepseek_json_object_member(
+        view, choice[0], choice[1], StringSlice("type")
+    )
+    var function_type = deepseek_json_raw_equals(
+        view, choice_type[0], choice_type[1], StringSlice("function")
+    )
+    var mcp_type = False
+    if deepseek_json_bounds_is_kind(view, choice_type, 34):
+        var ptr = rich_view_ptr(view)
+        var start = choice_type[0] + 1
+        var end = choice_type[1] - 1
+        if end - start >= 3:
+            mcp_type = (
+                ptr[unsafe_offset=start] == 109
+                and ptr[unsafe_offset=start + 1] == 99
+                and ptr[unsafe_offset=start + 2] == 112
+            )
+    if function_type or mcp_type:
+        var name = deepseek_json_object_member(
+            view, choice[0], choice[1], StringSlice("name")
+        )
+        if name[0] < 0:
+            var function = deepseek_json_object_member(
+                view, choice[0], choice[1], StringSlice("function")
+            )
+            if deepseek_json_bounds_is_kind(view, function, 123):
+                name = deepseek_json_object_member(
+                    view, function[0], function[1], StringSlice("name")
+                )
+        if not deepseek_json_string_nonempty(view, name):
+            deepseek_policy_set(output, 3)
+        return True
+    deepseek_policy_set(
+        output, 4, choice_type[0], choice_type[1]
+    )
+    return True
+
+
+def deepseek_web_search_options_plan(
+    view: ProdexRichStringView, output: Pointer[mut=True, Int64, _]
+) -> Bool:
+    var root = deepseek_input_object_bounds(view)
+    if root[0] < 0:
+        return False
+    var size = deepseek_json_object_member(
+        view, root[0], root[1], StringSlice("search_context_size")
+    )
+    if size[0] >= 0 and not (
+        deepseek_json_raw_equals(view, size[0], size[1], StringSlice("low"))
+        or deepseek_json_raw_equals(view, size[0], size[1], StringSlice("medium"))
+        or deepseek_json_raw_equals(view, size[0], size[1], StringSlice("high"))
+    ):
+        deepseek_policy_set(output, 2)
+        return True
+    var field_tag: Int64 = 3
+    for key in [StringSlice("allowed_domains"), StringSlice("blocked_domains")]:
+        var domains = deepseek_json_object_member(
+            view, root[0], root[1], key
+        )
+        if domains[0] >= 0:
+            if not deepseek_json_bounds_is_kind(view, domains, 91):
+                deepseek_policy_set(output, field_tag)
+                return True
+            var index = deepseek_json_skip_ws(
+                view, domains[0] + 1, domains[1] - 1
+            )
+            while index < domains[1] - 1:
+                var value_end = deepseek_json_value_end(
+                    view, index, domains[1] - 1, 0
+                )
+                if value_end < 0:
+                    return False
+                var value = InlineArray[Int64, 2](fill=-1)
+                value[0] = index
+                value[1] = value_end
+                if not deepseek_json_string_nonempty(view, value):
+                    deepseek_policy_set(output, field_tag + 1)
+                    return True
+                index = deepseek_json_skip_ws(
+                    view, value_end, domains[1] - 1
+                )
+                if (
+                    index < domains[1] - 1
+                    and deepseek_json_byte(view, index) == 44
+                ):
+                    index = deepseek_json_skip_ws(
+                        view, index + 1, domains[1] - 1
+                    )
+                    continue
+                if index == domains[1] - 1:
+                    break
+                return False
+        field_tag += 2
+    var max_uses = deepseek_json_object_member(
+        view, root[0], root[1], StringSlice("max_uses")
+    )
+    if max_uses[0] >= 0 and not deepseek_policy_positive_integer(
+        view, max_uses
+    ):
+        deepseek_policy_set(output, 7)
+        return True
+    var location = deepseek_json_object_member(
+        view, root[0], root[1], StringSlice("user_location")
+    )
+    if location[0] >= 0 and not deepseek_json_bounds_is_kind(
+        view, location, 123
+    ):
+        deepseek_policy_set(output, 8)
+    return True
+
+
+def deepseek_web_search_context_plan(
+    view: ProdexRichStringView, output: Pointer[mut=True, Int64, _]
+) -> Bool:
+    var root = deepseek_input_object_bounds(view)
+    if root[0] < 0:
+        return False
+    var tools = deepseek_json_object_member(
+        view, root[0], root[1], StringSlice("tools")
+    )
+    if tools[0] < 0 or not deepseek_json_bounds_is_kind(view, tools, 91):
+        return True
+    var index = deepseek_json_skip_ws(view, tools[0] + 1, tools[1] - 1)
+    while index < tools[1] - 1:
+        var tool_end = deepseek_json_value_end(
+            view, index, tools[1] - 1, 0
+        )
+        if tool_end < 0:
+            return False
+        if deepseek_json_byte(view, index) == 123:
+            var kind = deepseek_json_object_member(
+                view, index, tool_end, StringSlice("type")
+            )
+            var is_web = (
+                deepseek_json_raw_equals(
+                    view, kind[0], kind[1], StringSlice("web_search")
+                )
+                or deepseek_json_raw_equals(
+                    view, kind[0], kind[1], StringSlice("web_search_preview")
+                )
+            )
+            if not is_web and deepseek_json_bounds_is_kind(view, kind, 34):
+                var ptr = rich_view_ptr(view)
+                var start = kind[0] + 1
+                var end = kind[1] - 1
+                if end - start >= 19:
+                    is_web = True
+                    var expected = StringSlice("web_search_preview_")
+                    var expected_ptr = expected.unsafe_ptr()
+                    for offset in range(19):
+                        if ptr[unsafe_offset=start + Int64(offset)] != expected_ptr[unsafe_offset=offset]:
+                            is_web = False
+                            break
+            if is_web:
+                var size = deepseek_json_object_member(
+                    view, index, tool_end, StringSlice("search_context_size")
+                )
+                if size[0] < 0:
+                    size = deepseek_json_object_member(
+                        view, index, tool_end, StringSlice("context_size")
+                    )
+                if size[0] >= 0 and not (
+                    deepseek_json_raw_equals(
+                        view, size[0], size[1], StringSlice("low")
+                    )
+                    or deepseek_json_raw_equals(
+                        view, size[0], size[1], StringSlice("medium")
+                    )
+                    or deepseek_json_raw_equals(
+                        view, size[0], size[1], StringSlice("high")
+                    )
+                ):
+                    deepseek_policy_set(output, 1)
+                    return True
+        index = deepseek_json_skip_ws(view, tool_end, tools[1] - 1)
+        if index < tools[1] - 1 and deepseek_json_byte(view, index) == 44:
+            index = deepseek_json_skip_ws(
+                view, index + 1, tools[1] - 1
+            )
+            continue
+        if index == tools[1] - 1:
+            break
+        return False
+    return True
+
+
 def deepseek_request_policy_v1(
     abi_version: Int64,
     operation: Int64,
@@ -1547,6 +1922,18 @@ def deepseek_request_policy_v1(
         ok = deepseek_reasoning_shape_plan(view, output)
     elif operation == DEEPSEEK_POLICY_SIMPLE_REQUEST:
         ok = deepseek_simple_request_plan(view, flag == 1, output)
+    elif operation == DEEPSEEK_POLICY_PRIMITIVE_CORE:
+        ok = deepseek_primitive_core_plan(view, output)
+    elif operation == DEEPSEEK_POLICY_TOP_LOGPROBS:
+        ok = deepseek_top_logprobs_plan(view, output)
+    elif operation == DEEPSEEK_POLICY_STOP:
+        ok = deepseek_stop_plan(view, output)
+    elif operation == DEEPSEEK_POLICY_TOOL_CHOICE:
+        ok = deepseek_tool_choice_plan(view, flag == 1, output)
+    elif operation == DEEPSEEK_POLICY_WEB_SEARCH_OPTIONS:
+        ok = deepseek_web_search_options_plan(view, output)
+    elif operation == DEEPSEEK_POLICY_WEB_SEARCH_CONTEXT:
+        ok = deepseek_web_search_context_plan(view, output)
     else:
         return DEEPSEEK_KERNEL_STATUS_INVALID
     return DEEPSEEK_KERNEL_STATUS_OK if ok else DEEPSEEK_KERNEL_STATUS_INVALID

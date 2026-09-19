@@ -55,6 +55,12 @@ pub enum DeepSeekRequestPolicyOperation {
     BetaFields = 2,
     ReasoningShape = 3,
     SimpleRequest = 4,
+    PrimitiveCore = 5,
+    TopLogprobs = 6,
+    Stop = 7,
+    ToolChoice = 8,
+    WebSearchOptions = 9,
+    WebSearchContext = 10,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
