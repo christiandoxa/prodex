@@ -135,6 +135,26 @@ pub fn runtime_profile_backoff_sort_key(
         .copied()
         .filter(|until| *until > now);
 
+    #[cfg(feature = "mojo")]
+    {
+        return prodex_mojo_core::runtime::profile_backoff_sort_key(
+            circuit_until,
+            transport_until,
+            retry_until,
+            now,
+        )
+        .unwrap_or_else(|error| panic!("Mojo profile backoff sort key failed: {error:?}"));
+    }
+    #[cfg(not(feature = "mojo"))]
+    runtime_profile_backoff_sort_key_rust(circuit_until, transport_until, retry_until)
+}
+
+#[cfg(any(not(feature = "mojo"), test))]
+fn runtime_profile_backoff_sort_key_rust(
+    circuit_until: Option<i64>,
+    transport_until: Option<i64>,
+    retry_until: Option<i64>,
+) -> (usize, i64, i64, i64) {
     match (circuit_until, transport_until, retry_until) {
         (None, None, None) => (0, 0, 0, 0),
         (Some(circuit_until), None, None) => (1, circuit_until, 0, 0),
@@ -172,6 +192,32 @@ pub fn runtime_soften_persisted_backoff_map_for_startup(
     now: i64,
     max_future_seconds: i64,
 ) -> bool {
+    #[cfg(feature = "mojo")]
+    {
+        let mut changed = false;
+        backoffs.retain(|_, until| {
+            let softened = prodex_mojo_core::runtime::profile_soften_backoff_until(
+                *until,
+                now,
+                max_future_seconds,
+            )
+            .unwrap_or_else(|error| panic!("Mojo profile backoff softening failed: {error:?}"));
+            changed |= softened.changed;
+            *until = softened.until;
+            softened.keep
+        });
+        return changed;
+    }
+    #[cfg(not(feature = "mojo"))]
+    runtime_soften_persisted_backoff_map_for_startup_rust(backoffs, now, max_future_seconds)
+}
+
+#[cfg(any(not(feature = "mojo"), test))]
+fn runtime_soften_persisted_backoff_map_for_startup_rust(
+    backoffs: &mut BTreeMap<String, i64>,
+    now: i64,
+    max_future_seconds: i64,
+) -> bool {
     let max_until = now.saturating_add(max_future_seconds.max(0));
     let mut changed = false;
     backoffs.retain(|_, until| {
@@ -190,6 +236,22 @@ pub fn runtime_soften_persisted_backoff_map_for_startup(
 }
 
 pub fn runtime_profile_circuit_half_open_probe_seconds(score: u32) -> i64 {
+    #[cfg(feature = "mojo")]
+    {
+        return prodex_mojo_core::runtime::profile_circuit_half_open_seconds(
+            score,
+            RUNTIME_PROFILE_CIRCUIT_OPEN_THRESHOLD,
+            RUNTIME_PROFILE_CIRCUIT_HALF_OPEN_PROBE_SECONDS,
+            RUNTIME_PROFILE_CIRCUIT_HALF_OPEN_PROBE_MAX_SECONDS,
+        )
+        .unwrap_or_else(|error| panic!("Mojo half-open circuit timing failed: {error:?}"));
+    }
+    #[cfg(not(feature = "mojo"))]
+    runtime_profile_circuit_half_open_probe_seconds_rust(score)
+}
+
+#[cfg(any(not(feature = "mojo"), test))]
+fn runtime_profile_circuit_half_open_probe_seconds_rust(score: u32) -> i64 {
     let multiplier = 1_i64
         .checked_shl(
             score
@@ -203,6 +265,24 @@ pub fn runtime_profile_circuit_half_open_probe_seconds(score: u32) -> i64 {
 }
 
 pub fn runtime_profile_circuit_open_seconds(score: u32, reopen_stage: u32) -> i64 {
+    #[cfg(feature = "mojo")]
+    {
+        return prodex_mojo_core::runtime::profile_circuit_open_seconds(
+            score,
+            reopen_stage,
+            RUNTIME_PROFILE_CIRCUIT_OPEN_THRESHOLD,
+            RUNTIME_PROFILE_CIRCUIT_REOPEN_MAX_STAGE,
+            RUNTIME_PROFILE_CIRCUIT_OPEN_SECONDS,
+            RUNTIME_PROFILE_CIRCUIT_OPEN_MAX_SECONDS,
+        )
+        .unwrap_or_else(|error| panic!("Mojo circuit-open timing failed: {error:?}"));
+    }
+    #[cfg(not(feature = "mojo"))]
+    runtime_profile_circuit_open_seconds_rust(score, reopen_stage)
+}
+
+#[cfg(any(not(feature = "mojo"), test))]
+fn runtime_profile_circuit_open_seconds_rust(score: u32, reopen_stage: u32) -> i64 {
     let multiplier = 1_i64
         .checked_shl(
             score
@@ -279,4 +359,72 @@ pub fn runtime_soften_persisted_backoffs_for_startup<T: RuntimeProfileHealthEntr
         now,
     ) || changed;
     changed
+}
+
+#[cfg(all(test, feature = "mojo"))]
+mod mojo_parity_tests {
+    use super::*;
+
+    #[test]
+    fn backoff_sort_key_matches_rust_oracle() {
+        let now = 100_i64;
+        for circuit in [None, Some(90), Some(110), Some(150)] {
+            for transport in [None, Some(80), Some(120), Some(160)] {
+                for retry in [None, Some(70), Some(130), Some(170)] {
+                    let active_circuit = circuit.filter(|until| *until > now);
+                    let active_transport = transport.filter(|until| *until > now);
+                    let active_retry = retry.filter(|until| *until > now);
+                    assert_eq!(
+                        prodex_mojo_core::runtime::profile_backoff_sort_key(
+                            circuit, transport, retry, now,
+                        )
+                        .unwrap(),
+                        runtime_profile_backoff_sort_key_rust(
+                            active_circuit,
+                            active_transport,
+                            active_retry,
+                        )
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn circuit_timings_match_rust_oracle() {
+        for score in [0_u32, RUNTIME_PROFILE_CIRCUIT_OPEN_THRESHOLD, 10, u32::MAX] {
+            assert_eq!(
+                runtime_profile_circuit_half_open_probe_seconds(score),
+                runtime_profile_circuit_half_open_probe_seconds_rust(score),
+            );
+            for stage in [0_u32, 1, RUNTIME_PROFILE_CIRCUIT_REOPEN_MAX_STAGE, u32::MAX] {
+                assert_eq!(
+                    runtime_profile_circuit_open_seconds(score, stage),
+                    runtime_profile_circuit_open_seconds_rust(score, stage),
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn persisted_softening_matches_rust_oracle() {
+        for now in [-10_i64, 0, 100, i64::MAX - 20] {
+            for max_future in [-5_i64, 0, 10, 60] {
+                let source = BTreeMap::from([
+                    ("past".to_string(), now.saturating_sub(1)),
+                    ("near".to_string(), now.saturating_add(1)),
+                    ("far".to_string(), now.saturating_add(10_000)),
+                ]);
+                let mut mojo = source.clone();
+                let mut rust = source;
+                assert_eq!(
+                    runtime_soften_persisted_backoff_map_for_startup(&mut mojo, now, max_future,),
+                    runtime_soften_persisted_backoff_map_for_startup_rust(
+                        &mut rust, now, max_future,
+                    )
+                );
+                assert_eq!(mojo, rust);
+            }
+        }
+    }
 }
