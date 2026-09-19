@@ -357,3 +357,224 @@ def prodex_mojo_runtime_doctor_marker_known_v1(
     var known = Pointer[mut=True, Int64, MutUntrackedOrigin](unsafe_from_address=Int(known_address))
     known[] = 1 if runtime_doctor_marker_known(marker) else 0
     return 0
+
+comptime RUNTIME_DOCTOR_MARKER_PHASE_NONE: Int64 = 0
+comptime RUNTIME_DOCTOR_MARKER_PHASE_SELECTION: Int64 = 1
+comptime RUNTIME_DOCTOR_MARKER_PHASE_PRE_SEND: Int64 = 2
+comptime RUNTIME_DOCTOR_MARKER_PHASE_UPSTREAM: Int64 = 3
+comptime RUNTIME_DOCTOR_MARKER_PHASE_COMMIT: Int64 = 4
+comptime RUNTIME_DOCTOR_MARKER_PHASE_FAIL: Int64 = 5
+
+comptime RUNTIME_DOCTOR_MARKER_SELECTION_NONE: Int64 = 0
+comptime RUNTIME_DOCTOR_MARKER_SELECTION_PICKED: Int64 = 1
+comptime RUNTIME_DOCTOR_MARKER_SELECTION_KEPT: Int64 = 2
+comptime RUNTIME_DOCTOR_MARKER_SELECTION_SKIPPED: Int64 = 3
+comptime RUNTIME_DOCTOR_MARKER_SELECTION_BLOCKED: Int64 = 4
+
+comptime RUNTIME_DOCTOR_MARKER_ROUTE_NONE: Int64 = 0
+comptime RUNTIME_DOCTOR_MARKER_ROUTE_SELECTED: Int64 = 1
+comptime RUNTIME_DOCTOR_MARKER_ROUTE_SELECTION_SKIP: Int64 = 2
+comptime RUNTIME_DOCTOR_MARKER_ROUTE_BLOCKED: Int64 = 3
+comptime RUNTIME_DOCTOR_MARKER_ROUTE_HEALTH: Int64 = 4
+comptime RUNTIME_DOCTOR_MARKER_ROUTE_TRANSPORT_HEALTH: Int64 = 5
+comptime RUNTIME_DOCTOR_MARKER_ROUTE_TRANSPORT_FAILURE: Int64 = 6
+comptime RUNTIME_DOCTOR_MARKER_ROUTE_QUOTA: Int64 = 7
+
+def runtime_doctor_marker_timeline_phase(view: ProdexRichStringView) -> Int64:
+    if (
+        rich_view_matches_literal["selection_keep_affinity"](view, False)
+        or rich_view_matches_literal["selection_keep_current"](view, False)
+        or rich_view_matches_literal["selection_plan"](view, False)
+        or rich_view_matches_literal["selection_pick"](view, False)
+        or rich_view_matches_literal["selection_skip_current"](view, False)
+        or rich_view_matches_literal["selection_skip_affinity"](view, False)
+        or rich_view_matches_literal["selection_skip_sync_probe"](view, False)
+        or rich_view_matches_literal["local_selection_blocked"](view, False)
+    ):
+        return RUNTIME_DOCTOR_MARKER_PHASE_SELECTION
+    if (
+        rich_view_matches_literal["responses_pre_send_skip"](view, False)
+        or rich_view_matches_literal["websocket_pre_send_skip"](view, False)
+        or rich_view_matches_literal["quota_critical_floor_before_send"](view, False)
+        or rich_view_matches_literal["compact_pre_send_allow_quota_exhausted"](view, False)
+    ):
+        return RUNTIME_DOCTOR_MARKER_PHASE_PRE_SEND
+    if (
+        rich_view_matches_literal["upstream_connect_timeout"](view, False)
+        or rich_view_matches_literal["upstream_connect_dns_error"](view, False)
+        or rich_view_matches_literal["upstream_tls_handshake_error"](view, False)
+        or rich_view_matches_literal["upstream_connect_error"](view, False)
+        or rich_view_matches_literal["upstream_connect_http"](view, False)
+        or rich_view_matches_literal["upstream_overload_passthrough"](view, False)
+        or rich_view_matches_literal["upstream_overloaded"](view, False)
+        or rich_view_matches_literal["upstream_read_error"](view, False)
+        or rich_view_matches_literal["upstream_send_error"](view, False)
+        or rich_view_matches_literal["upstream_stream_error"](view, False)
+        or rich_view_matches_literal["upstream_close_before_completed"](view, False)
+        or rich_view_matches_literal["upstream_connection_closed"](view, False)
+        or rich_view_matches_literal["upstream_usage_limit_passthrough"](view, False)
+        or rich_view_matches_literal["first_upstream_chunk"](view, False)
+    ):
+        return RUNTIME_DOCTOR_MARKER_PHASE_UPSTREAM
+    if (
+        rich_view_matches_literal["first_local_chunk"](view, False)
+        or rich_view_matches_literal["previous_response_owner"](view, False)
+        or rich_view_matches_literal["compact_committed"](view, False)
+        or rich_view_matches_literal["compact_committed_owner"](view, False)
+        or rich_view_matches_literal["compact_followup_owner"](view, False)
+        or rich_view_matches_literal["compact_exit_committed"](view, False)
+        or rich_view_matches_literal["compact_exit_committed_owner"](view, False)
+        or rich_view_matches_literal["compact_exit_followup_owner"](view, False)
+    ):
+        return RUNTIME_DOCTOR_MARKER_PHASE_COMMIT
+    if (
+        rich_view_matches_literal["runtime_proxy_queue_overloaded"](view, False)
+        or rich_view_matches_literal["runtime_proxy_active_limit_reached"](view, False)
+        or rich_view_matches_literal["runtime_proxy_lane_limit_reached"](view, False)
+        or rich_view_matches_literal["runtime_proxy_overload_backoff"](view, False)
+        or rich_view_matches_literal["runtime_proxy_admission_wait_exhausted"](view, False)
+        or rich_view_matches_literal["runtime_proxy_queue_wait_exhausted"](view, False)
+        or rich_view_matches_literal["profile_inflight_saturated"](view, False)
+        or rich_view_matches_literal["precommit_budget_exhausted"](view, False)
+        or rich_view_matches_literal["profile_retry_backoff"](view, False)
+        or rich_view_matches_literal["profile_transport_backoff"](view, False)
+        or rich_view_matches_literal["profile_transport_failure"](view, False)
+        or rich_view_matches_literal["profile_circuit_open"](view, False)
+        or rich_view_matches_literal["profile_bad_pairing"](view, False)
+        or rich_view_matches_literal["profile_auth_recovery_failed"](view, False)
+        or rich_view_matches_literal["previous_response_not_found"](view, False)
+        or rich_view_matches_literal["previous_response_negative_cache"](view, False)
+        or rich_view_matches_literal["previous_response_fresh_fallback_blocked"](view, False)
+        or rich_view_matches_literal["compact_fresh_fallback_blocked"](view, False)
+        or rich_view_matches_literal["compact_pressure_shed"](view, False)
+        or rich_view_matches_literal["compact_precommit_budget_exhausted"](view, False)
+        or rich_view_matches_literal["compact_candidate_exhausted"](view, False)
+        or rich_view_matches_literal["compact_retryable_failure"](view, False)
+        or rich_view_matches_literal["compact_transport_failure"](view, False)
+        or rich_view_matches_literal["compact_final_failure"](view, False)
+        or rich_view_matches_literal["compact_exit_fresh_fallback_blocked"](view, False)
+        or rich_view_matches_literal["compact_exit_pressure_shed"](view, False)
+        or rich_view_matches_literal["compact_exit_precommit_budget_exhausted"](view, False)
+        or rich_view_matches_literal["compact_exit_candidate_exhausted"](view, False)
+        or rich_view_matches_literal["compact_exit_retryable_failure"](view, False)
+        or rich_view_matches_literal["websocket_precommit_frame_timeout"](view, False)
+        or rich_view_matches_literal["websocket_precommit_hold_timeout"](view, False)
+        or rich_view_matches_literal["websocket_dns_resolve_timeout"](view, False)
+        or rich_view_matches_literal["websocket_dns_overflow_reject"](view, False)
+        or rich_view_matches_literal["websocket_connect_overflow_reject"](view, False)
+        or rich_view_matches_literal["websocket_connect_overflow_rejected"](view, False)
+        or rich_view_matches_literal["stream_read_error"](view, False)
+        or rich_view_matches_literal["local_writer_error"](view, False)
+        or rich_view_matches_literal["chain_dead_upstream_confirmed"](view, False)
+        or rich_view_matches_literal["stale_continuation"](view, False)
+        or rich_view_matches_literal["quota_blocked"](view, False)
+    ):
+        return RUNTIME_DOCTOR_MARKER_PHASE_FAIL
+    return RUNTIME_DOCTOR_MARKER_PHASE_NONE
+
+def runtime_doctor_marker_selection_bucket(view: ProdexRichStringView) -> Int64:
+    if rich_view_matches_literal["selection_pick"](view, False):
+        return RUNTIME_DOCTOR_MARKER_SELECTION_PICKED
+    if (
+        rich_view_matches_literal["selection_keep_affinity"](view, False)
+        or rich_view_matches_literal["selection_keep_current"](view, False)
+    ):
+        return RUNTIME_DOCTOR_MARKER_SELECTION_KEPT
+    if (
+        rich_view_matches_literal["selection_skip_current"](view, False)
+        or rich_view_matches_literal["selection_skip_affinity"](view, False)
+        or rich_view_matches_literal["selection_skip_sync_probe"](view, False)
+    ):
+        return RUNTIME_DOCTOR_MARKER_SELECTION_SKIPPED
+    if (
+        rich_view_matches_literal["local_selection_blocked"](view, False)
+        or rich_view_matches_literal["responses_pre_send_skip"](view, False)
+        or rich_view_matches_literal["websocket_pre_send_skip"](view, False)
+        or rich_view_matches_literal["quota_critical_floor_before_send"](view, False)
+        or rich_view_matches_literal["precommit_budget_exhausted"](view, False)
+        or rich_view_matches_literal["compact_precommit_budget_exhausted"](view, False)
+        or rich_view_matches_literal["compact_candidate_exhausted"](view, False)
+    ):
+        return RUNTIME_DOCTOR_MARKER_SELECTION_BLOCKED
+    return RUNTIME_DOCTOR_MARKER_SELECTION_NONE
+
+def runtime_doctor_marker_route_action(view: ProdexRichStringView) -> Int64:
+    if (
+        rich_view_matches_literal["selection_keep_affinity"](view, False)
+        or rich_view_matches_literal["selection_keep_current"](view, False)
+        or rich_view_matches_literal["selection_pick"](view, False)
+    ):
+        return RUNTIME_DOCTOR_MARKER_ROUTE_SELECTED
+    if (
+        rich_view_matches_literal["selection_skip_current"](view, False)
+        or rich_view_matches_literal["selection_skip_affinity"](view, False)
+        or rich_view_matches_literal["selection_skip_sync_probe"](view, False)
+    ):
+        return RUNTIME_DOCTOR_MARKER_ROUTE_SELECTION_SKIP
+    if (
+        rich_view_matches_literal["local_selection_blocked"](view, False)
+        or rich_view_matches_literal["responses_pre_send_skip"](view, False)
+        or rich_view_matches_literal["websocket_pre_send_skip"](view, False)
+        or rich_view_matches_literal["quota_critical_floor_before_send"](view, False)
+    ):
+        return RUNTIME_DOCTOR_MARKER_ROUTE_BLOCKED
+    if (
+        rich_view_matches_literal["profile_health"](view, False)
+        or rich_view_matches_literal["profile_latency"](view, False)
+        or rich_view_matches_literal["profile_bad_pairing"](view, False)
+    ):
+        return RUNTIME_DOCTOR_MARKER_ROUTE_HEALTH
+    if (
+        rich_view_matches_literal["profile_transport_backoff"](view, False)
+        or rich_view_matches_literal["profile_transport_failure"](view, False)
+        or rich_view_matches_literal["profile_circuit_open"](view, False)
+        or rich_view_matches_literal["profile_circuit_half_open_probe"](view, False)
+    ):
+        return RUNTIME_DOCTOR_MARKER_ROUTE_TRANSPORT_HEALTH
+    if (
+        rich_view_matches_literal["stream_read_error"](view, False)
+        or rich_view_matches_literal["upstream_connect_timeout"](view, False)
+        or rich_view_matches_literal["upstream_connect_dns_error"](view, False)
+        or rich_view_matches_literal["upstream_tls_handshake_error"](view, False)
+        or rich_view_matches_literal["upstream_connect_error"](view, False)
+        or rich_view_matches_literal["upstream_connect_http"](view, False)
+        or rich_view_matches_literal["upstream_close_before_completed"](view, False)
+        or rich_view_matches_literal["upstream_connection_closed"](view, False)
+        or rich_view_matches_literal["upstream_read_error"](view, False)
+        or rich_view_matches_literal["upstream_send_error"](view, False)
+        or rich_view_matches_literal["upstream_stream_error"](view, False)
+        or rich_view_matches_literal["compact_transport_failure"](view, False)
+        or rich_view_matches_literal["websocket_precommit_frame_timeout"](view, False)
+        or rich_view_matches_literal["websocket_precommit_hold_timeout"](view, False)
+    ):
+        return RUNTIME_DOCTOR_MARKER_ROUTE_TRANSPORT_FAILURE
+    if (
+        rich_view_matches_literal["quota_blocked"](view, False)
+        or rich_view_matches_literal["profile_retry_backoff"](view, False)
+        or rich_view_matches_literal["profile_quota_quarantine"](view, False)
+        or rich_view_matches_literal["compact_retryable_failure"](view, False)
+        or rich_view_matches_literal["compact_quota_unclassified"](view, False)
+    ):
+        return RUNTIME_DOCTOR_MARKER_ROUTE_QUOTA
+    return RUNTIME_DOCTOR_MARKER_ROUTE_NONE
+
+@export("prodex_mojo_runtime_doctor_marker_semantics_v1")
+def prodex_mojo_runtime_doctor_marker_semantics_v1(
+    abi_version: Int64,
+    marker_address: UInt,
+    output_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != RUNTIME_DOCTOR_MARKER_ABI_VERSION or marker_address == 0 or output_address == 0:
+        return 1
+    var marker = Pointer[mut=False, ProdexRichStringView, ImmUntrackedOrigin](
+        unsafe_from_address=Int(marker_address)
+    )[].copy()
+    if not rich_view_valid(marker, RUNTIME_DOCTOR_MARKER_MAX_BYTES):
+        return 2
+    var output = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    output[unsafe_offset=0] = runtime_doctor_marker_timeline_phase(marker)
+    output[unsafe_offset=1] = runtime_doctor_marker_selection_bucket(marker)
+    output[unsafe_offset=2] = runtime_doctor_marker_route_action(marker)
+    return 0

@@ -18,7 +18,28 @@ fn runtime_doctor_request_id(fields: &BTreeMap<String, String>) -> Option<String
         .cloned()
 }
 
+#[cfg(feature = "mojo")]
 fn runtime_doctor_request_timeline_phase(marker: &str) -> Option<&'static str> {
+    let semantics = prodex_mojo_core::rich::runtime_doctor_marker_semantics(marker)
+        .expect("Mojo runtime-doctor marker semantics returned invalid output");
+    match semantics.timeline_phase {
+        prodex_mojo_core::rich::RUNTIME_DOCTOR_MARKER_PHASE_SELECTION => Some("selection"),
+        prodex_mojo_core::rich::RUNTIME_DOCTOR_MARKER_PHASE_PRE_SEND => Some("pre_send"),
+        prodex_mojo_core::rich::RUNTIME_DOCTOR_MARKER_PHASE_UPSTREAM => Some("upstream"),
+        prodex_mojo_core::rich::RUNTIME_DOCTOR_MARKER_PHASE_COMMIT => Some("commit"),
+        prodex_mojo_core::rich::RUNTIME_DOCTOR_MARKER_PHASE_FAIL => Some("fail"),
+        prodex_mojo_core::rich::RUNTIME_DOCTOR_MARKER_PHASE_NONE => None,
+        _ => unreachable!("validated Mojo timeline phase"),
+    }
+}
+
+#[cfg(not(feature = "mojo"))]
+fn runtime_doctor_request_timeline_phase(marker: &str) -> Option<&'static str> {
+    runtime_doctor_request_timeline_phase_rust(marker)
+}
+
+#[cfg(any(not(feature = "mojo"), test))]
+fn runtime_doctor_request_timeline_phase_rust(marker: &str) -> Option<&'static str> {
     match marker {
         "selection_keep_affinity"
         | "selection_keep_current"
@@ -181,4 +202,26 @@ pub(super) fn runtime_doctor_set_latest_request_timeline(
     };
     summary.latest_request_id = Some(request_id);
     summary.latest_request_timeline = builder.events;
+}
+
+#[cfg(all(test, feature = "mojo"))]
+mod mojo_semantics_parity_tests {
+    use super::*;
+    use crate::markers::RuntimeDoctorMarker;
+
+    #[test]
+    fn timeline_phase_matches_rust_oracle_for_every_marker() {
+        for marker in RuntimeDoctorMarker::ALL {
+            let marker = marker.as_str();
+            assert_eq!(
+                runtime_doctor_request_timeline_phase(marker),
+                runtime_doctor_request_timeline_phase_rust(marker),
+                "{marker}"
+            );
+        }
+        assert_eq!(
+            runtime_doctor_request_timeline_phase("unknown_marker"),
+            None
+        );
+    }
 }
