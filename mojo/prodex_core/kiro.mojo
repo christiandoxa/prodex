@@ -10,6 +10,13 @@ from rich_text import (
     rich_view_valid,
 )
 from rich_types import ProdexRichStringView
+from json_view import (
+    deepseek_json_byte,
+    deepseek_json_object_member,
+    deepseek_json_raw_equals,
+    deepseek_json_skip_ws,
+    deepseek_json_value_end,
+)
 
 
 comptime PRODEX_RICH_ABI_VERSION: Int64 = 6
@@ -1907,4 +1914,461 @@ def kiro_kernel_v1(
             return KIRO_KERNEL_STATUS_CAPACITY
         return KIRO_KERNEL_STATUS_INVALID
     written[] = writer.written
+    return KIRO_KERNEL_STATUS_OK
+
+# Raw JSON request validation. This removes Rust fact-extraction from the
+# production Mojo path while preserving the same ordered policy plan.
+def kiro_raw_root(view: ProdexRichStringView) -> InlineArray[Int64, 2]:
+    var result = InlineArray[Int64, 2](fill=-1)
+    var start = deepseek_json_skip_ws(view, 0, Int64(view.len))
+    if start >= Int64(view.len) or deepseek_json_byte(view, start) != 123:
+        return result^
+    var end = deepseek_json_value_end(view, start, Int64(view.len), 0)
+    if end < 0 or deepseek_json_skip_ws(view, end, Int64(view.len)) != Int64(view.len):
+        return result^
+    result[0] = start
+    result[1] = end
+    return result^
+
+def kiro_raw_present(bounds: InlineArray[Int64, 2]) -> Bool:
+    return bounds[0] >= 0 and bounds[1] > bounds[0]
+
+def kiro_raw_is_literal(
+    view: ProdexRichStringView,
+    bounds: InlineArray[Int64, 2],
+    literal: StringSlice,
+) -> Bool:
+    if not kiro_raw_present(bounds):
+        return False
+    if deepseek_json_byte(view, bounds[0]) == 34:
+        return deepseek_json_raw_equals(view, bounds[0], bounds[1], literal)
+    var length = Int64(literal.byte_length())
+    if bounds[1] - bounds[0] != length:
+        return False
+    var actual = rich_view_ptr(view)
+    var expected = literal.unsafe_ptr()
+    for index in range(length):
+        if actual[unsafe_offset=bounds[0] + index] != expected[unsafe_offset=index]:
+            return False
+    return True
+
+def kiro_raw_is_null(view: ProdexRichStringView, bounds: InlineArray[Int64, 2]) -> Bool:
+    return kiro_raw_is_literal(view, bounds, StringSlice("null"))
+
+def kiro_raw_is_true(view: ProdexRichStringView, bounds: InlineArray[Int64, 2]) -> Bool:
+    return kiro_raw_is_literal(view, bounds, StringSlice("true"))
+
+def kiro_raw_is_false(view: ProdexRichStringView, bounds: InlineArray[Int64, 2]) -> Bool:
+    return kiro_raw_is_literal(view, bounds, StringSlice("false"))
+
+def kiro_raw_nonempty_string(
+    view: ProdexRichStringView, bounds: InlineArray[Int64, 2]
+) -> Bool:
+    if not kiro_raw_present(bounds) or deepseek_json_byte(view, bounds[0]) != 34:
+        return False
+    # JSON "" is the only empty string spelling after parsing.
+    return bounds[1] - bounds[0] > 2
+
+def kiro_raw_number_default(
+    view: ProdexRichStringView,
+    bounds: InlineArray[Int64, 2],
+    default_one: Bool,
+) -> Bool:
+    if not kiro_raw_present(bounds):
+        return False
+    var ptr = rich_view_ptr(view)
+    var index = bounds[0]
+    var end = bounds[1]
+    var negative = False
+    if index < end and ptr[unsafe_offset=index] == 45:
+        negative = True
+        index += 1
+    if index >= end:
+        return False
+
+    var digit_index: Int64 = 0
+    var integer_digits: Int64 = 0
+    var one_index: Int64 = -1
+    var nonzero_count: Int64 = 0
+    var saw_digit = False
+    while index < end and ptr[unsafe_offset=index] >= 48 and ptr[unsafe_offset=index] <= 57:
+        var digit = ptr[unsafe_offset=index]
+        if digit != 48:
+            nonzero_count += 1
+            if digit == 49:
+                one_index = digit_index
+        digit_index += 1
+        integer_digits += 1
+        saw_digit = True
+        index += 1
+    if index < end and ptr[unsafe_offset=index] == 46:
+        index += 1
+        var fraction_digits: Int64 = 0
+        while index < end and ptr[unsafe_offset=index] >= 48 and ptr[unsafe_offset=index] <= 57:
+            var digit = ptr[unsafe_offset=index]
+            if digit != 48:
+                nonzero_count += 1
+                if digit == 49:
+                    one_index = digit_index
+            digit_index += 1
+            fraction_digits += 1
+            saw_digit = True
+            index += 1
+        if fraction_digits == 0:
+            return False
+    if not saw_digit:
+        return False
+
+    var exponent: Int64 = 0
+    if index < end and (ptr[unsafe_offset=index] == 101 or ptr[unsafe_offset=index] == 69):
+        index += 1
+        var exponent_negative = False
+        if index < end and (ptr[unsafe_offset=index] == 43 or ptr[unsafe_offset=index] == 45):
+            exponent_negative = ptr[unsafe_offset=index] == 45
+            index += 1
+        var exponent_digits: Int64 = 0
+        while index < end and ptr[unsafe_offset=index] >= 48 and ptr[unsafe_offset=index] <= 57:
+            exponent_digits += 1
+            if exponent < 1_000_000:
+                exponent = exponent * 10 + Int64(ptr[unsafe_offset=index] - 48)
+            index += 1
+        if exponent_digits == 0:
+            return False
+        if exponent_negative:
+            exponent = -exponent
+    if index != end:
+        return False
+
+    if not default_one:
+        return nonzero_count == 0
+    if negative or nonzero_count != 1 or one_index < 0:
+        return False
+    return integer_digits - 1 - one_index + exponent == 0
+
+def kiro_raw_positive_u64_integer(
+    view: ProdexRichStringView, bounds: InlineArray[Int64, 2]
+) -> Bool:
+    if not kiro_raw_present(bounds):
+        return False
+    var ptr = rich_view_ptr(view)
+    var index = bounds[0]
+    var value: UInt64 = 0
+    var digits: Int64 = 0
+    while index < bounds[1]:
+        var byte = ptr[unsafe_offset=index]
+        if byte < 48 or byte > 57:
+            return False
+        var digit = UInt64(byte - 48)
+        if value > 1844674407370955161 or (
+            value == 1844674407370955161 and digit > 5
+        ):
+            return False
+        value = value * 10 + digit
+        digits += 1
+        index += 1
+    return digits > 0 and value > 0
+
+def kiro_raw_stop_requested(
+    view: ProdexRichStringView, bounds: InlineArray[Int64, 2]
+) -> Bool:
+    if not kiro_raw_present(bounds) or kiro_raw_is_null(view, bounds):
+        return False
+    var opening = deepseek_json_byte(view, bounds[0])
+    if opening == 34:
+        return kiro_raw_nonempty_string(view, bounds)
+    if opening != 91:
+        return True
+    var cursor = deepseek_json_skip_ws(view, bounds[0] + 1, bounds[1] - 1)
+    while cursor < bounds[1] - 1:
+        var value_end = deepseek_json_value_end(view, cursor, bounds[1] - 1, 0)
+        if value_end < 0:
+            return True
+        var item = InlineArray[Int64, 2](fill=-1)
+        item[0] = cursor
+        item[1] = value_end
+        if deepseek_json_byte(view, cursor) != 34 or kiro_raw_nonempty_string(view, item):
+            return True
+        cursor = deepseek_json_skip_ws(view, value_end, bounds[1] - 1)
+        if cursor < bounds[1] - 1 and deepseek_json_byte(view, cursor) == 44:
+            cursor = deepseek_json_skip_ws(view, cursor + 1, bounds[1] - 1)
+            continue
+        break
+    return False
+
+def kiro_raw_supported_response_format(
+    view: ProdexRichStringView, bounds: InlineArray[Int64, 2]
+) -> Bool:
+    if not kiro_raw_present(bounds) or kiro_raw_is_null(view, bounds):
+        return True
+    if deepseek_json_byte(view, bounds[0]) != 123:
+        return False
+    var kind = deepseek_json_object_member(
+        view, bounds[0], bounds[1], StringSlice("type")
+    )
+    return kiro_raw_is_literal(view, kind, StringSlice("text"))
+
+def kiro_raw_token_limit(
+    view: ProdexRichStringView,
+    root: InlineArray[Int64, 2],
+) -> InlineArray[Int64, 3]:
+    # present, field-index, positive
+    var result = InlineArray[Int64, 3](fill=0)
+    var field_index: Int64 = 0
+    for key in [
+        StringSlice("max_output_tokens"),
+        StringSlice("max_tokens"),
+        StringSlice("max_completion_tokens"),
+    ]:
+        var bounds = deepseek_json_object_member(view, root[0], root[1], key)
+        if kiro_raw_present(bounds) and not kiro_raw_is_null(view, bounds):
+            result[0] = 1
+            result[1] = field_index
+            result[2] = Int64(kiro_raw_positive_u64_integer(view, bounds))
+            return result^
+        field_index += 1
+    return result^
+
+def kiro_raw_response_format_supported(
+    view: ProdexRichStringView,
+    root: InlineArray[Int64, 2],
+) -> Bool:
+    var direct = deepseek_json_object_member(
+        view, root[0], root[1], StringSlice("response_format")
+    )
+    if kiro_raw_present(direct) and not kiro_raw_supported_response_format(view, direct):
+        return False
+    var text = deepseek_json_object_member(
+        view, root[0], root[1], StringSlice("text")
+    )
+    if kiro_raw_present(text) and deepseek_json_byte(view, text[0]) == 123:
+        var nested = deepseek_json_object_member(
+            view, text[0], text[1], StringSlice("format")
+        )
+        if kiro_raw_present(nested) and not kiro_raw_supported_response_format(view, nested):
+            return False
+    return True
+
+def kiro_raw_array_empty(
+    view: ProdexRichStringView, bounds: InlineArray[Int64, 2]
+) -> Bool:
+    if not kiro_raw_present(bounds) or deepseek_json_byte(view, bounds[0]) != 91:
+        return False
+    return deepseek_json_skip_ws(view, bounds[0] + 1, bounds[1] - 1) == bounds[1] - 1
+
+def kiro_raw_reasoning_effort_supported(
+    view: ProdexRichStringView, bounds: InlineArray[Int64, 2]
+) -> Bool:
+    if not kiro_raw_present(bounds) or deepseek_json_byte(view, bounds[0]) != 34:
+        return True
+    return (
+        kiro_raw_is_literal(view, bounds, StringSlice("none"))
+        or kiro_raw_is_literal(view, bounds, StringSlice("low"))
+        or kiro_raw_is_literal(view, bounds, StringSlice("medium"))
+        or kiro_raw_is_literal(view, bounds, StringSlice("high"))
+        or kiro_raw_is_literal(view, bounds, StringSlice("xhigh"))
+        or kiro_raw_is_literal(view, bounds, StringSlice("max"))
+    )
+
+def kiro_raw_validation_flags(
+    view: ProdexRichStringView,
+    mode: Int64,
+    detail_out: Pointer[mut=True, Int64, _],
+) -> UInt64:
+    var root = kiro_raw_root(view)
+    if root[0] < 0:
+        detail_out[] = -2
+        return 0
+    var flags: UInt64 = 0
+    var token = kiro_raw_token_limit(view, root)
+    detail_out[] = -1
+
+    if mode == KIRO_REQUEST_VALIDATION_CHAT:
+        var response_format = deepseek_json_object_member(
+            view, root[0], root[1], StringSlice("response_format")
+        )
+        if kiro_raw_present(response_format) and not kiro_raw_supported_response_format(view, response_format):
+            flags |= UInt64(KIRO_REQUEST_FLAG_CHAT_RESPONSE_FORMAT)
+        var n = deepseek_json_object_member(view, root[0], root[1], StringSlice("n"))
+        if kiro_raw_present(n) and not kiro_raw_is_null(view, n):
+            if not kiro_raw_positive_u64_integer(view, n) or not kiro_raw_is_literal(view, n, StringSlice("1")):
+                flags |= UInt64(KIRO_REQUEST_FLAG_CHAT_CHOICE_COUNT)
+        var stop = deepseek_json_object_member(view, root[0], root[1], StringSlice("stop"))
+        if kiro_raw_stop_requested(view, stop):
+            flags |= UInt64(KIRO_REQUEST_FLAG_CHAT_STOP)
+        var temperature = deepseek_json_object_member(view, root[0], root[1], StringSlice("temperature"))
+        if kiro_raw_present(temperature) and not kiro_raw_is_null(view, temperature) and not kiro_raw_number_default(view, temperature, True):
+            flags |= UInt64(KIRO_REQUEST_FLAG_CHAT_TEMPERATURE)
+        var top_p = deepseek_json_object_member(view, root[0], root[1], StringSlice("top_p"))
+        if kiro_raw_present(top_p) and not kiro_raw_is_null(view, top_p) and not kiro_raw_number_default(view, top_p, True):
+            flags |= UInt64(KIRO_REQUEST_FLAG_CHAT_TOP_P)
+        var presence = deepseek_json_object_member(view, root[0], root[1], StringSlice("presence_penalty"))
+        if kiro_raw_present(presence) and not kiro_raw_is_null(view, presence) and not kiro_raw_number_default(view, presence, False):
+            flags |= UInt64(KIRO_REQUEST_FLAG_CHAT_PRESENCE_PENALTY)
+        var frequency = deepseek_json_object_member(view, root[0], root[1], StringSlice("frequency_penalty"))
+        if kiro_raw_present(frequency) and not kiro_raw_is_null(view, frequency) and not kiro_raw_number_default(view, frequency, False):
+            flags |= UInt64(KIRO_REQUEST_FLAG_CHAT_FREQUENCY_PENALTY)
+        var seed = deepseek_json_object_member(view, root[0], root[1], StringSlice("seed"))
+        if kiro_raw_present(seed) and not kiro_raw_is_null(view, seed):
+            flags |= UInt64(KIRO_REQUEST_FLAG_CHAT_SEED)
+        var parallel = deepseek_json_object_member(view, root[0], root[1], StringSlice("parallel_tool_calls"))
+        if kiro_raw_present(parallel) and not kiro_raw_is_null(view, parallel) and not kiro_raw_is_true(view, parallel):
+            flags |= UInt64(KIRO_REQUEST_FLAG_CHAT_PARALLEL_TOOL_CALLS)
+        if token[0] == 1:
+            flags |= UInt64(KIRO_REQUEST_FLAG_TOKEN_LIMIT)
+            if token[2] == 0:
+                flags |= UInt64(KIRO_REQUEST_FLAG_TOKEN_LIMIT_INVALID)
+            detail_out[] = token[1]
+        return flags
+
+    for detail_index in range(Int64(3)):
+        var key = StringSlice("temperature")
+        if detail_index == 1:
+            key = StringSlice("top_p")
+        elif detail_index == 2:
+            key = StringSlice("seed")
+        var bounds = deepseek_json_object_member(view, root[0], root[1], key)
+        if detail_out[] < 0 and kiro_raw_present(bounds) and not kiro_raw_is_null(view, bounds):
+            flags |= UInt64(KIRO_REQUEST_FLAG_GENERATION_CONTROL)
+            detail_out[] = detail_index
+
+    if token[0] == 1:
+        flags |= UInt64(KIRO_REQUEST_FLAG_TOKEN_LIMIT)
+        if token[2] == 0:
+            flags |= UInt64(KIRO_REQUEST_FLAG_TOKEN_LIMIT_INVALID)
+        if detail_out[] < 0:
+            detail_out[] = token[1]
+
+    for key in [StringSlice("stop"), StringSlice("stop_sequences"), StringSlice("stopSequences")]:
+        if kiro_raw_stop_requested(
+            view, deepseek_json_object_member(view, root[0], root[1], key)
+        ):
+            flags |= UInt64(KIRO_REQUEST_FLAG_RESPONSE_STOP)
+
+    var logprobs = deepseek_json_object_member(view, root[0], root[1], StringSlice("logprobs"))
+    if kiro_raw_present(logprobs) and not kiro_raw_is_null(view, logprobs) and not kiro_raw_is_false(view, logprobs):
+        if kiro_raw_is_true(view, logprobs):
+            flags |= UInt64(KIRO_REQUEST_FLAG_LOGPROBS_UNSUPPORTED)
+        else:
+            flags |= UInt64(KIRO_REQUEST_FLAG_LOGPROBS_INVALID)
+
+    var top_logprobs = deepseek_json_object_member(view, root[0], root[1], StringSlice("top_logprobs"))
+    if kiro_raw_present(top_logprobs) and not kiro_raw_is_null(view, top_logprobs):
+        flags |= UInt64(KIRO_REQUEST_FLAG_TOP_LOGPROBS)
+
+    if not kiro_raw_response_format_supported(view, root):
+        flags |= UInt64(KIRO_REQUEST_FLAG_RESPONSE_FORMAT)
+
+    var tool_choice = deepseek_json_object_member(view, root[0], root[1], StringSlice("tool_choice"))
+    if kiro_raw_present(tool_choice) and not kiro_raw_is_null(view, tool_choice) and not kiro_raw_is_literal(view, tool_choice, StringSlice("auto")):
+        flags |= UInt64(KIRO_REQUEST_FLAG_TOOL_CHOICE)
+
+    var tools = deepseek_json_object_member(view, root[0], root[1], StringSlice("tools"))
+    if kiro_raw_present(tools) and not kiro_raw_is_null(view, tools):
+        if deepseek_json_byte(view, tools[0]) != 91 or not kiro_raw_array_empty(view, tools):
+            flags |= UInt64(KIRO_REQUEST_FLAG_TOOLS)
+
+    if kiro_raw_present(deepseek_json_object_member(view, root[0], root[1], StringSlice("web_search_options"))):
+        flags |= UInt64(KIRO_REQUEST_FLAG_WEB_SEARCH)
+
+    var effort = InlineArray[Int64, 2](fill=-1)
+    var reasoning = deepseek_json_object_member(view, root[0], root[1], StringSlice("reasoning"))
+    if kiro_raw_present(reasoning) and deepseek_json_byte(view, reasoning[0]) == 123:
+        effort = deepseek_json_object_member(view, reasoning[0], reasoning[1], StringSlice("effort"))
+    if not kiro_raw_present(effort):
+        effort = deepseek_json_object_member(view, root[0], root[1], StringSlice("reasoning_effort"))
+    if not kiro_raw_reasoning_effort_supported(view, effort):
+        flags |= UInt64(KIRO_REQUEST_FLAG_REASONING_EFFORT)
+    return flags
+
+def kiro_raw_apply_validation(
+    mode: Int64,
+    flags: UInt64,
+    detail: Int64,
+    allow_token_limit: Int64,
+    output: Pointer[mut=True, Int64, _],
+):
+    output[unsafe_offset=0] = KIRO_REQUEST_VALIDATION_NONE
+    output[unsafe_offset=1] = -1
+    output[unsafe_offset=2] = 0
+    if mode == KIRO_REQUEST_VALIDATION_CHAT:
+        if flags & UInt64(KIRO_REQUEST_FLAG_CHAT_RESPONSE_FORMAT) != 0:
+            output[unsafe_offset=0] = KIRO_REQUEST_VALIDATION_CHAT_RESPONSE_FORMAT
+        elif flags & UInt64(KIRO_REQUEST_FLAG_CHAT_CHOICE_COUNT) != 0:
+            output[unsafe_offset=0] = KIRO_REQUEST_VALIDATION_CHAT_CHOICE_COUNT
+        elif flags & UInt64(KIRO_REQUEST_FLAG_CHAT_STOP) != 0:
+            output[unsafe_offset=0] = KIRO_REQUEST_VALIDATION_CHAT_STOP
+        elif flags & UInt64(KIRO_REQUEST_FLAG_CHAT_TEMPERATURE) != 0:
+            output[unsafe_offset=0] = KIRO_REQUEST_VALIDATION_CHAT_TEMPERATURE
+        elif flags & UInt64(KIRO_REQUEST_FLAG_CHAT_TOP_P) != 0:
+            output[unsafe_offset=0] = KIRO_REQUEST_VALIDATION_CHAT_TOP_P
+        elif flags & UInt64(KIRO_REQUEST_FLAG_CHAT_PRESENCE_PENALTY) != 0:
+            output[unsafe_offset=0] = KIRO_REQUEST_VALIDATION_CHAT_PRESENCE_PENALTY
+        elif flags & UInt64(KIRO_REQUEST_FLAG_CHAT_FREQUENCY_PENALTY) != 0:
+            output[unsafe_offset=0] = KIRO_REQUEST_VALIDATION_CHAT_FREQUENCY_PENALTY
+        elif flags & UInt64(KIRO_REQUEST_FLAG_CHAT_SEED) != 0:
+            output[unsafe_offset=0] = KIRO_REQUEST_VALIDATION_CHAT_SEED
+        elif flags & UInt64(KIRO_REQUEST_FLAG_CHAT_PARALLEL_TOOL_CALLS) != 0:
+            output[unsafe_offset=0] = KIRO_REQUEST_VALIDATION_CHAT_PARALLEL_TOOL_CALLS
+        elif flags & UInt64(KIRO_REQUEST_FLAG_TOKEN_LIMIT) != 0:
+            output[unsafe_offset=0] = KIRO_REQUEST_VALIDATION_TOKEN_LIMIT
+            output[unsafe_offset=1] = detail
+            output[unsafe_offset=2] = Int64(flags & UInt64(KIRO_REQUEST_FLAG_TOKEN_LIMIT_INVALID) != 0)
+        return
+
+    if flags & UInt64(KIRO_REQUEST_FLAG_GENERATION_CONTROL) != 0:
+        output[unsafe_offset=0] = KIRO_REQUEST_VALIDATION_GENERATION_CONTROL
+        output[unsafe_offset=1] = detail
+    elif allow_token_limit == 0 and flags & UInt64(KIRO_REQUEST_FLAG_TOKEN_LIMIT) != 0:
+        output[unsafe_offset=0] = KIRO_REQUEST_VALIDATION_TOKEN_LIMIT
+        output[unsafe_offset=1] = detail
+        output[unsafe_offset=2] = Int64(flags & UInt64(KIRO_REQUEST_FLAG_TOKEN_LIMIT_INVALID) != 0)
+    elif flags & UInt64(KIRO_REQUEST_FLAG_RESPONSE_STOP) != 0:
+        output[unsafe_offset=0] = KIRO_REQUEST_VALIDATION_RESPONSE_STOP
+    elif flags & UInt64(KIRO_REQUEST_FLAG_LOGPROBS_UNSUPPORTED | KIRO_REQUEST_FLAG_LOGPROBS_INVALID) != 0:
+        output[unsafe_offset=0] = KIRO_REQUEST_VALIDATION_LOGPROBS
+        output[unsafe_offset=2] = Int64(flags & UInt64(KIRO_REQUEST_FLAG_LOGPROBS_INVALID) != 0)
+    elif flags & UInt64(KIRO_REQUEST_FLAG_TOP_LOGPROBS) != 0:
+        output[unsafe_offset=0] = KIRO_REQUEST_VALIDATION_TOP_LOGPROBS
+    elif flags & UInt64(KIRO_REQUEST_FLAG_RESPONSE_FORMAT) != 0:
+        output[unsafe_offset=0] = KIRO_REQUEST_VALIDATION_RESPONSE_FORMAT
+    elif flags & UInt64(KIRO_REQUEST_FLAG_TOOL_CHOICE) != 0:
+        output[unsafe_offset=0] = KIRO_REQUEST_VALIDATION_TOOL_CHOICE
+    elif flags & UInt64(KIRO_REQUEST_FLAG_TOOLS) != 0:
+        output[unsafe_offset=0] = KIRO_REQUEST_VALIDATION_TOOLS
+    elif flags & UInt64(KIRO_REQUEST_FLAG_WEB_SEARCH) != 0:
+        output[unsafe_offset=0] = KIRO_REQUEST_VALIDATION_WEB_SEARCH
+    elif flags & UInt64(KIRO_REQUEST_FLAG_REASONING_EFFORT) != 0:
+        output[unsafe_offset=0] = KIRO_REQUEST_VALIDATION_REASONING_EFFORT
+
+def kiro_request_validation_json_v1(
+    abi_version: Int64,
+    mode: Int64,
+    input_address: UInt,
+    input_length: Int64,
+    allow_token_limit: Int64,
+    output_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != PRODEX_RICH_ABI_VERSION:
+        return KIRO_KERNEL_STATUS_ABI
+    if (
+        mode < KIRO_REQUEST_VALIDATION_CHAT
+        or mode > KIRO_REQUEST_VALIDATION_RESPONSES
+        or not kiro_flag_valid(allow_token_limit)
+        or input_length < 0
+        or input_length > KIRO_KERNEL_MAX_BYTES
+        or input_address == 0
+        or output_address == 0
+    ):
+        return KIRO_KERNEL_STATUS_INVALID
+    var view = ProdexRichStringView(input_address, UInt(input_length))
+    if not rich_view_valid(view, KIRO_KERNEL_MAX_BYTES):
+        return KIRO_KERNEL_STATUS_UTF8
+    var detail: Int64 = -1
+    var flags = kiro_raw_validation_flags(view, mode, Pointer(to=detail))
+    if detail == -2:
+        return KIRO_KERNEL_STATUS_INVALID
+    var output = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    kiro_raw_apply_validation(mode, flags, detail, allow_token_limit, output)
     return KIRO_KERNEL_STATUS_OK

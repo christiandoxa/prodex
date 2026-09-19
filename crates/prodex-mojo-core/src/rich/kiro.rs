@@ -268,6 +268,14 @@ unsafe extern "C" {
         written: u64,
     ) -> i64;
     fn prodex_mojo_kiro_request_validation_v1(abi_version: i64, input: u64, output: u64) -> i64;
+    fn prodex_mojo_kiro_request_validation_json_v1(
+        abi_version: i64,
+        mode: i64,
+        input_address: u64,
+        input_length: i64,
+        allow_token_limit: i64,
+        output: u64,
+    ) -> i64;
 }
 
 const KIRO_KERNEL_MAX_BYTES: usize = 4 * 1024 * 1024;
@@ -453,6 +461,49 @@ pub fn kiro_kernel(input: KiroKernelInput<'_>) -> Result<Vec<u8>, MojoError> {
 }
 
 /// Apply the authoritative Kiro request capability policy in Mojo.
+pub fn kiro_validate_request_json(
+    mode: KiroRequestValidationMode,
+    input: &str,
+    allow_token_limit: bool,
+) -> Result<KiroRequestValidationPlan, MojoError> {
+    ensure_rich_abi()?;
+    if input.len() > KIRO_KERNEL_MAX_BYTES {
+        return Err(MojoError::InvalidInput);
+    }
+    let mut output = [0_i64; 3];
+    let status = unsafe {
+        prodex_mojo_kiro_request_validation_json_v1(
+            RICH_ABI_VERSION,
+            mode as i64,
+            input.as_ptr() as u64,
+            i64::try_from(input.len()).map_err(|_| MojoError::InvalidInput)?,
+            i64::from(allow_token_limit),
+            mojo_mut_pointer_address(output.as_mut_ptr()),
+        )
+    };
+    if status != 0 {
+        return Err(match status {
+            1 => MojoError::InvalidInput,
+            2 => MojoError::InvalidInput,
+            4 => MojoError::AbiMismatch,
+            _ => MojoError::InvalidOutput,
+        });
+    }
+    if !(KiroRequestValidationPlan::REASON_NONE
+        ..=KiroRequestValidationPlan::REASON_REASONING_EFFORT)
+        .contains(&output[0])
+        || !(-1..=2).contains(&output[1])
+        || !(0..=1).contains(&output[2])
+    {
+        return Err(MojoError::InvalidOutput);
+    }
+    Ok(KiroRequestValidationPlan {
+        reason: output[0],
+        detail: output[1],
+        detail_is_invalid: output[2] == 1,
+    })
+}
+
 pub fn kiro_validate_request(
     input: KiroRequestValidationInput,
 ) -> Result<KiroRequestValidationPlan, MojoError> {

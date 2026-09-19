@@ -1,20 +1,24 @@
 //! Mojo-backed Kiro request capability validation.
 
+#[cfg(any(not(feature = "mojo"), test))]
+use super::controls::{
+    kiro_provider_core_has_requested_sampling_value,
+    kiro_provider_core_supported_chat_response_format,
+};
 use super::{
     KiroProviderCoreRequestError,
     controls::{
         kiro_provider_core_has_requested_nondefault_number,
         kiro_provider_core_has_requested_parallel_tool_calls_control,
-        kiro_provider_core_has_requested_sampling_value,
         kiro_provider_core_has_requested_stop_sequences,
-        kiro_provider_core_supported_chat_response_format,
     },
 };
-use prodex_mojo_core::rich::{
-    KiroRequestValidationInput, KiroRequestValidationMode, KiroRequestValidationPlan,
-};
+use prodex_mojo_core::rich::KiroRequestValidationPlan;
+#[cfg(any(not(feature = "mojo"), test))]
+use prodex_mojo_core::rich::{KiroRequestValidationInput, KiroRequestValidationMode};
 use serde_json::{Map, Value};
 
+#[cfg(any(not(feature = "mojo"), test))]
 fn token_limit(object: &Map<String, Value>) -> Option<(u8, bool)> {
     ["max_output_tokens", "max_tokens", "max_completion_tokens"]
         .into_iter()
@@ -28,6 +32,7 @@ fn token_limit(object: &Map<String, Value>) -> Option<(u8, bool)> {
         })
 }
 
+#[cfg(any(not(feature = "mojo"), test))]
 pub(super) fn chat_input(object: &Map<String, Value>) -> KiroRequestValidationInput {
     let token_limit = token_limit(object);
     let mut flags = 0;
@@ -99,6 +104,7 @@ pub(super) fn chat_input(object: &Map<String, Value>) -> KiroRequestValidationIn
     }
 }
 
+#[cfg(any(not(feature = "mojo"), test))]
 pub(super) fn response_input(
     object: &Map<String, Value>,
     allow_token_limit: bool,
@@ -152,6 +158,7 @@ pub(super) fn response_input(
     }
 }
 
+#[cfg(any(not(feature = "mojo"), test))]
 fn response_flags(
     object: &Map<String, Value>,
     token_limit: Option<(u8, bool)>,
@@ -402,5 +409,108 @@ pub(super) fn remove_chat_defaults(object: &mut Map<String, Value>) {
         .is_some_and(|value| !kiro_provider_core_has_requested_parallel_tool_calls_control(value))
     {
         object.remove("parallel_tool_calls");
+    }
+}
+
+#[cfg(all(test, feature = "mojo"))]
+mod raw_json_parity_tests {
+    use super::*;
+    use prodex_mojo_core::rich::{
+        KiroRequestValidationMode, kiro_validate_request, kiro_validate_request_json,
+    };
+    use serde_json::{Value, json};
+
+    fn assert_chat(value: Value) {
+        let object = value.as_object().expect("fixture object");
+        let typed = kiro_validate_request(chat_input(object)).expect("typed plan");
+        let raw = kiro_validate_request_json(
+            KiroRequestValidationMode::ChatCompletions,
+            &serde_json::to_string(&value).unwrap(),
+            false,
+        )
+        .expect("raw plan");
+        assert_eq!(raw, typed, "fixture={value}");
+    }
+
+    fn assert_responses(value: Value, allow_token_limit: bool) {
+        let object = value.as_object().expect("fixture object");
+        let typed =
+            kiro_validate_request(response_input(object, allow_token_limit)).expect("typed plan");
+        let raw = kiro_validate_request_json(
+            KiroRequestValidationMode::Responses,
+            &serde_json::to_string(&value).unwrap(),
+            allow_token_limit,
+        )
+        .expect("raw plan");
+        assert_eq!(raw, typed, "fixture={value}");
+    }
+
+    #[test]
+    fn raw_chat_validation_matches_typed_oracle() {
+        for value in [
+            json!({}),
+            json!({"response_format":{"type":"text"}}),
+            json!({"response_format":{"type":"json_object"}}),
+            json!({"n":1}),
+            json!({"n":2}),
+            json!({"stop":""}),
+            json!({"stop":["", "end"]}),
+            json!({"temperature":1.0}),
+            json!({"temperature":0.9}),
+            json!({"top_p":1.0}),
+            json!({"top_p":0.5}),
+            json!({"presence_penalty":0.0}),
+            json!({"presence_penalty":0.5}),
+            json!({"frequency_penalty":-0.0}),
+            json!({"frequency_penalty":1.0}),
+            json!({"seed":null}),
+            json!({"seed":1}),
+            json!({"parallel_tool_calls":true}),
+            json!({"parallel_tool_calls":false}),
+            json!({"max_output_tokens":1}),
+            json!({"max_tokens":0}),
+        ] {
+            assert_chat(value);
+        }
+        for raw in [
+            r#"{"temperature":1e0}"#,
+            r#"{"temperature":10e-1}"#,
+            r#"{"top_p":0.1e1}"#,
+            r#"{"presence_penalty":-0.0}"#,
+        ] {
+            let value: Value = serde_json::from_str(raw).unwrap();
+            assert_chat(value);
+        }
+    }
+
+    #[test]
+    fn raw_responses_validation_matches_typed_oracle() {
+        for value in [
+            json!({}),
+            json!({"temperature":1}),
+            json!({"top_p":1}),
+            json!({"seed":1}),
+            json!({"max_output_tokens":1}),
+            json!({"stop":"end"}),
+            json!({"logprobs":false}),
+            json!({"logprobs":true}),
+            json!({"logprobs":"bad"}),
+            json!({"top_logprobs":1}),
+            json!({"response_format":{"type":"text"}}),
+            json!({"response_format":{"type":"json_object"}}),
+            json!({"text":{"format":{"type":"text"}}}),
+            json!({"tool_choice":"auto"}),
+            json!({"tool_choice":"none"}),
+            json!({"tools":[]}),
+            json!({"tools":[{"type":"function"}]}),
+            json!({"web_search_options":null}),
+            json!({"reasoning":{"effort":"high"}}),
+            json!({"reasoning":{"effort":"ultra"}}),
+            json!({"reasoning_effort":"max"}),
+            json!({"reasoning_effort":"ultra"}),
+        ] {
+            assert_responses(value.clone(), false);
+            assert_responses(value, true);
+        }
     }
 }

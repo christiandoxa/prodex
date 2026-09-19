@@ -4,6 +4,7 @@
 use super::KiroProviderCoreRequestError;
 use serde_json::Value;
 
+#[cfg(any(not(feature = "mojo"), test))]
 pub(super) fn kiro_provider_core_supported_chat_response_format(value: &Value) -> bool {
     value.is_null()
         || value
@@ -24,6 +25,7 @@ pub(super) fn kiro_provider_core_has_requested_stop_sequences(value: &Value) -> 
     }
 }
 
+#[cfg(any(not(feature = "mojo"), test))]
 pub(super) fn kiro_provider_core_has_requested_sampling_value(value: &Value) -> bool {
     !matches!(value, Value::Null)
 }
