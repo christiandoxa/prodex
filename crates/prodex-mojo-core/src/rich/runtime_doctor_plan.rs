@@ -466,6 +466,9 @@ pub const RUNTIME_DOCTOR_STATE_STATUS_UNKNOWN: i64 = 4;
 pub const RUNTIME_DOCTOR_STATE_CIRCUIT_CLOSED: i64 = 0;
 pub const RUNTIME_DOCTOR_STATE_CIRCUIT_HALF_OPEN: i64 = 1;
 pub const RUNTIME_DOCTOR_STATE_CIRCUIT_OPEN: i64 = 2;
+pub const RUNTIME_DOCTOR_ROUTE_FRESHNESS_MISSING: i64 = 0;
+pub const RUNTIME_DOCTOR_ROUTE_FRESHNESS_FRESH: i64 = 1;
+pub const RUNTIME_DOCTOR_ROUTE_FRESHNESS_STALE: i64 = 2;
 
 #[repr(C)]
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -497,9 +500,54 @@ pub struct RuntimeDoctorStatePlan {
     pub circuit_state: i64,
 }
 
+#[repr(C)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct RuntimeDoctorRoutePlanInput {
+    pub route_kind: i64,
+    pub now: i64,
+    pub snapshot_present: i64,
+    pub checked_at: i64,
+    pub five_hour_status: i64,
+    pub five_hour_reset_at: i64,
+    pub weekly_status: i64,
+    pub weekly_reset_at: i64,
+    pub stale_grace_seconds: i64,
+    pub health_score: i64,
+    pub health_updated_at: i64,
+    pub health_decay_seconds: i64,
+    pub bad_pairing_score: i64,
+    pub bad_pairing_updated_at: i64,
+    pub bad_pairing_decay_seconds: i64,
+    pub performance_score: i64,
+    pub performance_updated_at: i64,
+    pub performance_decay_seconds: i64,
+    pub circuit_until: i64,
+    pub route_transport_until: i64,
+    pub profile_transport_until: i64,
+}
+
+#[repr(C)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct RuntimeDoctorRoutePlan {
+    pub abi_version: i64,
+    pub freshness: i64,
+    pub quota_age_seconds: i64,
+    pub five_hour_status: i64,
+    pub weekly_status: i64,
+    pub route_band: i64,
+    pub circuit_state: i64,
+    pub health_score: i64,
+    pub bad_pairing_score: i64,
+    pub performance_score: i64,
+    pub transport_backoff_present: i64,
+    pub transport_backoff_until: i64,
+}
+
 const _: () = {
     assert!(std::mem::size_of::<RuntimeDoctorStatePlanInput>() == 13 * 8);
     assert!(std::mem::size_of::<RuntimeDoctorStatePlan>() == 7 * 8);
+    assert!(std::mem::size_of::<RuntimeDoctorRoutePlanInput>() == 21 * 8);
+    assert!(std::mem::size_of::<RuntimeDoctorRoutePlan>() == 12 * 8);
 };
 
 unsafe extern "C" {
@@ -509,6 +557,11 @@ unsafe extern "C" {
         output: u64,
     ) -> i64;
     fn prodex_mojo_rich_runtime_doctor_state_plan_v1(
+        abi_version: i64,
+        input: u64,
+        output: u64,
+    ) -> i64;
+    fn prodex_mojo_rich_runtime_doctor_route_plan_v1(
         abi_version: i64,
         input: u64,
         output: u64,
@@ -639,6 +692,65 @@ pub fn runtime_doctor_state_plan(
         return Err(summary_plan_status_error(status));
     }
     state_plan_output_is_valid(&output)
+        .then_some(output)
+        .ok_or(MojoError::InvalidOutput)
+}
+
+fn route_plan_input_is_valid(input: &RuntimeDoctorRoutePlanInput) -> bool {
+    (RUNTIME_DOCTOR_STATE_ROUTE_RESPONSES..=RUNTIME_DOCTOR_STATE_ROUTE_STANDARD)
+        .contains(&input.route_kind)
+        && matches!(input.snapshot_present, 0 | 1)
+        && (RUNTIME_DOCTOR_STATE_STATUS_READY..=RUNTIME_DOCTOR_STATE_STATUS_UNKNOWN)
+            .contains(&input.five_hour_status)
+        && (RUNTIME_DOCTOR_STATE_STATUS_READY..=RUNTIME_DOCTOR_STATE_STATUS_UNKNOWN)
+            .contains(&input.weekly_status)
+        && input.stale_grace_seconds >= 0
+        && input.health_score >= 0
+        && input.bad_pairing_score >= 0
+        && input.performance_score >= 0
+        && input.health_decay_seconds > 0
+        && input.bad_pairing_decay_seconds > 0
+        && input.performance_decay_seconds > 0
+        && input.circuit_until >= -1
+}
+
+fn route_plan_output_is_valid(output: &RuntimeDoctorRoutePlan) -> bool {
+    output.abi_version == 1
+        && (RUNTIME_DOCTOR_ROUTE_FRESHNESS_MISSING..=RUNTIME_DOCTOR_ROUTE_FRESHNESS_STALE)
+            .contains(&output.freshness)
+        && (RUNTIME_DOCTOR_STATE_STATUS_READY..=RUNTIME_DOCTOR_STATE_STATUS_UNKNOWN)
+            .contains(&output.five_hour_status)
+        && (RUNTIME_DOCTOR_STATE_STATUS_READY..=RUNTIME_DOCTOR_STATE_STATUS_UNKNOWN)
+            .contains(&output.weekly_status)
+        && (RUNTIME_DOCTOR_STATE_STATUS_READY..=RUNTIME_DOCTOR_STATE_STATUS_UNKNOWN)
+            .contains(&output.route_band)
+        && (RUNTIME_DOCTOR_STATE_CIRCUIT_CLOSED..=RUNTIME_DOCTOR_STATE_CIRCUIT_OPEN)
+            .contains(&output.circuit_state)
+        && output.health_score >= 0
+        && output.bad_pairing_score >= 0
+        && output.performance_score >= 0
+        && matches!(output.transport_backoff_present, 0 | 1)
+}
+
+pub fn runtime_doctor_route_plan(
+    input: RuntimeDoctorRoutePlanInput,
+) -> Result<RuntimeDoctorRoutePlan, MojoError> {
+    ensure_rich_abi()?;
+    if !route_plan_input_is_valid(&input) {
+        return Err(MojoError::InvalidInput);
+    }
+    let mut output = RuntimeDoctorRoutePlan::default();
+    let status = unsafe {
+        prodex_mojo_rich_runtime_doctor_route_plan_v1(
+            1,
+            mojo_pointer_address(&input),
+            mojo_mut_pointer_address(&mut output),
+        )
+    };
+    if status != 0 {
+        return Err(summary_plan_status_error(status));
+    }
+    route_plan_output_is_valid(&output)
         .then_some(output)
         .ok_or(MojoError::InvalidOutput)
 }

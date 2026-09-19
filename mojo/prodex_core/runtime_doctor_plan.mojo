@@ -1716,3 +1716,192 @@ def prodex_mojo_rich_runtime_doctor_state_plan_v1(
         else:
             output[].circuit_state = STATE_CIRCUIT_HALF_OPEN
     return 0
+
+comptime RUNTIME_DOCTOR_ROUTE_PLAN_ABI_VERSION: Int64 = 1
+comptime RUNTIME_DOCTOR_ROUTE_FRESHNESS_MISSING: Int64 = 0
+comptime RUNTIME_DOCTOR_ROUTE_FRESHNESS_FRESH: Int64 = 1
+comptime RUNTIME_DOCTOR_ROUTE_FRESHNESS_STALE: Int64 = 2
+
+@fieldwise_init
+struct ProdexRuntimeDoctorRoutePlanInput(Copyable):
+    var route_kind: Int64
+    var now: Int64
+    var snapshot_present: Int64
+    var checked_at: Int64
+    var five_hour_status: Int64
+    var five_hour_reset_at: Int64
+    var weekly_status: Int64
+    var weekly_reset_at: Int64
+    var stale_grace_seconds: Int64
+    var health_score: Int64
+    var health_updated_at: Int64
+    var health_decay_seconds: Int64
+    var bad_pairing_score: Int64
+    var bad_pairing_updated_at: Int64
+    var bad_pairing_decay_seconds: Int64
+    var performance_score: Int64
+    var performance_updated_at: Int64
+    var performance_decay_seconds: Int64
+    var circuit_until: Int64
+    var route_transport_until: Int64
+    var profile_transport_until: Int64
+
+@fieldwise_init
+struct ProdexRuntimeDoctorRoutePlan(Copyable):
+    var abi_version: Int64
+    var freshness: Int64
+    var quota_age_seconds: Int64
+    var five_hour_status: Int64
+    var weekly_status: Int64
+    var route_band: Int64
+    var circuit_state: Int64
+    var health_score: Int64
+    var bad_pairing_score: Int64
+    var performance_score: Int64
+    var transport_backoff_present: Int64
+    var transport_backoff_until: Int64
+
+def runtime_doctor_route_saturating_sub(left: Int64, right: Int64) -> Int64:
+    if right < 0 and left > STATE_INT64_MAX + right:
+        return STATE_INT64_MAX
+    if right > 0 and left < -STATE_INT64_MAX - 1 + right:
+        return -STATE_INT64_MAX - 1
+    return left - right
+
+def runtime_doctor_route_effective_score(
+    score: Int64,
+    updated_at: Int64,
+    now: Int64,
+    decay_seconds: Int64,
+) -> Int64:
+    if now <= updated_at:
+        return score
+    var elapsed = runtime_doctor_route_saturating_sub(now, updated_at)
+    var decay = elapsed / max(decay_seconds, 1)
+    return max(score - decay, 0)
+
+def runtime_doctor_route_plan_valid(
+    input: ProdexRuntimeDoctorRoutePlanInput,
+) -> Bool:
+    return (
+        input.route_kind >= STATE_ROUTE_RESPONSES
+        and input.route_kind <= STATE_ROUTE_STANDARD
+        and input.snapshot_present >= 0
+        and input.snapshot_present <= 1
+        and runtime_doctor_state_status_valid(input.five_hour_status)
+        and runtime_doctor_state_status_valid(input.weekly_status)
+        and input.stale_grace_seconds >= 0
+        and input.health_score >= 0
+        and input.bad_pairing_score >= 0
+        and input.performance_score >= 0
+        and input.health_decay_seconds > 0
+        and input.bad_pairing_decay_seconds > 0
+        and input.performance_decay_seconds > 0
+        and input.circuit_until >= -1
+    )
+
+@export("prodex_mojo_rich_runtime_doctor_route_plan_v1")
+def prodex_mojo_rich_runtime_doctor_route_plan_v1(
+    abi_version: Int64,
+    input_address: UInt,
+    output_address: UInt,
+) abi("C") -> Int64:
+    if (
+        abi_version != RUNTIME_DOCTOR_ROUTE_PLAN_ABI_VERSION
+        or input_address == 0
+        or output_address == 0
+    ):
+        return 1
+    var input_pointer = Pointer[
+        mut=False, ProdexRuntimeDoctorRoutePlanInput, ImmUntrackedOrigin
+    ](unsafe_from_address=Int(input_address))
+    var input = input_pointer[].copy()
+    if not runtime_doctor_route_plan_valid(input):
+        return 1
+    var output = Pointer[
+        mut=True, ProdexRuntimeDoctorRoutePlan, MutUntrackedOrigin
+    ](unsafe_from_address=Int(output_address))
+    output[].abi_version = RUNTIME_DOCTOR_ROUTE_PLAN_ABI_VERSION
+    output[].freshness = RUNTIME_DOCTOR_ROUTE_FRESHNESS_MISSING
+    output[].quota_age_seconds = STATE_INT64_MAX
+    output[].five_hour_status = STATE_STATUS_UNKNOWN
+    output[].weekly_status = STATE_STATUS_UNKNOWN
+    output[].route_band = STATE_STATUS_UNKNOWN
+    output[].circuit_state = STATE_CIRCUIT_CLOSED
+    output[].health_score = runtime_doctor_route_effective_score(
+        input.health_score,
+        input.health_updated_at,
+        input.now,
+        input.health_decay_seconds,
+    )
+    output[].bad_pairing_score = runtime_doctor_route_effective_score(
+        input.bad_pairing_score,
+        input.bad_pairing_updated_at,
+        input.now,
+        input.bad_pairing_decay_seconds,
+    )
+    output[].performance_score = runtime_doctor_route_effective_score(
+        input.performance_score,
+        input.performance_updated_at,
+        input.now,
+        input.performance_decay_seconds,
+    )
+    output[].transport_backoff_present = 0
+    output[].transport_backoff_until = 0
+
+    if input.snapshot_present == 1:
+        var state_input = ProdexRuntimeDoctorStatePlanInput(
+            operation=STATE_OP_QUOTA,
+            route_kind=input.route_kind,
+            now=input.now,
+            checked_at=input.checked_at,
+            five_hour_status=input.five_hour_status,
+            five_hour_reset_at=input.five_hour_reset_at,
+            weekly_status=input.weekly_status,
+            weekly_reset_at=input.weekly_reset_at,
+            stale_grace_seconds=input.stale_grace_seconds,
+            score=0,
+            updated_at=0,
+            decay_seconds=1,
+            circuit_until=-1,
+        )
+        var five_hour = runtime_doctor_state_reset_status(
+            input.five_hour_status, input.five_hour_reset_at, input.now
+        )
+        var weekly = runtime_doctor_state_reset_status(
+            input.weekly_status, input.weekly_reset_at, input.now
+        )
+        output[].freshness = (
+            RUNTIME_DOCTOR_ROUTE_FRESHNESS_FRESH
+            if runtime_doctor_state_freshness(state_input) == STATE_STATUS_READY
+            else RUNTIME_DOCTOR_ROUTE_FRESHNESS_STALE
+        )
+        output[].quota_age_seconds = runtime_doctor_route_saturating_sub(
+            input.now, input.checked_at
+        )
+        output[].five_hour_status = five_hour
+        output[].weekly_status = weekly
+        output[].route_band = runtime_doctor_state_route_band(
+            state_input, five_hour, weekly
+        )
+
+    if input.circuit_until < 0:
+        output[].circuit_state = STATE_CIRCUIT_CLOSED
+    elif input.circuit_until > input.now:
+        output[].circuit_state = STATE_CIRCUIT_OPEN
+    else:
+        output[].circuit_state = STATE_CIRCUIT_HALF_OPEN
+
+    var route_transport_active = input.route_transport_until > input.now
+    var profile_transport_active = input.profile_transport_until > input.now
+    if route_transport_active or profile_transport_active:
+        output[].transport_backoff_present = 1
+        if route_transport_active and profile_transport_active:
+            output[].transport_backoff_until = max(
+                input.route_transport_until, input.profile_transport_until
+            )
+        elif route_transport_active:
+            output[].transport_backoff_until = input.route_transport_until
+        else:
+            output[].transport_backoff_until = input.profile_transport_until
+    return 0
