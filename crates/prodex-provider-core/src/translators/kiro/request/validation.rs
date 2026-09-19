@@ -1,17 +1,13 @@
 //! Mojo-backed Kiro request capability validation.
 
+use super::KiroProviderCoreRequestError;
 #[cfg(any(not(feature = "mojo"), test))]
 use super::controls::{
+    kiro_provider_core_has_requested_nondefault_number,
+    kiro_provider_core_has_requested_parallel_tool_calls_control,
     kiro_provider_core_has_requested_sampling_value,
+    kiro_provider_core_has_requested_stop_sequences,
     kiro_provider_core_supported_chat_response_format,
-};
-use super::{
-    KiroProviderCoreRequestError,
-    controls::{
-        kiro_provider_core_has_requested_nondefault_number,
-        kiro_provider_core_has_requested_parallel_tool_calls_control,
-        kiro_provider_core_has_requested_stop_sequences,
-    },
 };
 use prodex_mojo_core::rich::KiroRequestValidationPlan;
 #[cfg(any(not(feature = "mojo"), test))]
@@ -381,35 +377,6 @@ pub(super) fn error(
         }
     };
     Err(KiroProviderCoreRequestError::new(error.0, error.1))
-}
-
-pub(super) fn remove_chat_defaults(object: &mut Map<String, Value>) {
-    if object
-        .get("stop")
-        .is_some_and(|value| !kiro_provider_core_has_requested_stop_sequences(value))
-    {
-        object.remove("stop");
-    }
-    for (field, default) in [("temperature", 1.0), ("top_p", 1.0)] {
-        if object.get(field).is_some_and(|value| {
-            !kiro_provider_core_has_requested_nondefault_number(value, default)
-        }) {
-            object.remove(field);
-        }
-    }
-    for (field, default) in [("presence_penalty", 0.0), ("frequency_penalty", 0.0)] {
-        if object.get(field).is_some_and(|value| {
-            !kiro_provider_core_has_requested_nondefault_number(value, default)
-        }) {
-            object.remove(field);
-        }
-    }
-    if object
-        .get("parallel_tool_calls")
-        .is_some_and(|value| !kiro_provider_core_has_requested_parallel_tool_calls_control(value))
-    {
-        object.remove("parallel_tool_calls");
-    }
 }
 
 #[cfg(all(test, feature = "mojo"))]

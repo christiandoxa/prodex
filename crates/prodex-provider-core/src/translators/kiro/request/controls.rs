@@ -2,6 +2,7 @@
 
 #[cfg(not(feature = "mojo"))]
 use super::KiroProviderCoreRequestError;
+#[cfg(any(not(feature = "mojo"), test))]
 use serde_json::Value;
 
 #[cfg(any(not(feature = "mojo"), test))]
@@ -13,6 +14,7 @@ pub(super) fn kiro_provider_core_supported_chat_response_format(value: &Value) -
             .is_some_and(|kind| matches!(kind, "text"))
 }
 
+#[cfg(any(not(feature = "mojo"), test))]
 pub(super) fn kiro_provider_core_has_requested_stop_sequences(value: &Value) -> bool {
     match value {
         Value::Null => false,
@@ -30,6 +32,7 @@ pub(super) fn kiro_provider_core_has_requested_sampling_value(value: &Value) -> 
     !matches!(value, Value::Null)
 }
 
+#[cfg(any(not(feature = "mojo"), test))]
 pub(super) fn kiro_provider_core_has_requested_nondefault_number(
     value: &Value,
     default: f64,
@@ -43,6 +46,7 @@ pub(super) fn kiro_provider_core_has_requested_nondefault_number(
     }
 }
 
+#[cfg(any(not(feature = "mojo"), test))]
 pub(super) fn kiro_provider_core_has_requested_parallel_tool_calls_control(value: &Value) -> bool {
     match value {
         Value::Null => false,
