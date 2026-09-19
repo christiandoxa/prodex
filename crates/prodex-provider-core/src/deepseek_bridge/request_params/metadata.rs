@@ -1,17 +1,33 @@
 //! DeepSeek response-format metadata and degraded JSON-mode notes.
 
 #[cfg(feature = "mojo")]
-fn mojo_metadata_value(
+struct MojoMetadataRequest<'a> {
     existing: serde_json::Map<String, serde_json::Value>,
-    provider_label: &str,
-    provider_key: &str,
-    client_metadata: Option<&serde_json::Value>,
-    prompt_cache_key: Option<&str>,
-    prompt_cache_retention: Option<&str>,
-    degraded_from: Option<&str>,
-    tool_choice: Option<&serde_json::Value>,
+    provider_label: &'a str,
+    provider_key: &'a str,
+    client_metadata: Option<&'a serde_json::Value>,
+    prompt_cache_key: Option<&'a str>,
+    prompt_cache_retention: Option<&'a str>,
+    degraded_from: Option<&'a str>,
+    tool_choice: Option<&'a serde_json::Value>,
     thinking_enabled: bool,
+}
+
+#[cfg(feature = "mojo")]
+fn mojo_metadata_value(
+    request: MojoMetadataRequest<'_>,
 ) -> Result<Option<serde_json::Value>, String> {
+    let MojoMetadataRequest {
+        existing,
+        provider_label,
+        provider_key,
+        client_metadata,
+        prompt_cache_key,
+        prompt_cache_retention,
+        degraded_from,
+        tool_choice,
+        thinking_enabled,
+    } = request;
     let mut base = existing;
     let provider = base
         .remove(provider_key)
@@ -154,17 +170,17 @@ pub fn deepseek_provider_core_response_metadata_from_responses_request(
 
     #[cfg(feature = "mojo")]
     {
-        mojo_metadata_value(
-            metadata,
+        mojo_metadata_value(MojoMetadataRequest {
+            existing: metadata,
             provider_label,
             provider_key,
             client_metadata,
             prompt_cache_key,
             prompt_cache_retention,
             degraded_from,
-            None,
-            false,
-        )
+            tool_choice: None,
+            thinking_enabled: false,
+        })
     }
     #[cfg(not(feature = "mojo"))]
     {
@@ -227,17 +243,17 @@ pub fn deepseek_provider_core_note_thinking_tool_choice_omission(
             .and_then(serde_json::Value::as_object)
             .cloned()
             .unwrap_or_default();
-        *response_metadata = mojo_metadata_value(
+        *response_metadata = mojo_metadata_value(MojoMetadataRequest {
             existing,
             provider_label,
             provider_key,
-            None,
-            None,
-            None,
-            None,
-            Some(tool_choice),
-            true,
-        )
+            client_metadata: None,
+            prompt_cache_key: None,
+            prompt_cache_retention: None,
+            degraded_from: None,
+            tool_choice: Some(tool_choice),
+            thinking_enabled: true,
+        })
         .unwrap_or_else(|error| panic!("Mojo DeepSeek metadata omission failed: {error}"));
     }
     #[cfg(not(feature = "mojo"))]

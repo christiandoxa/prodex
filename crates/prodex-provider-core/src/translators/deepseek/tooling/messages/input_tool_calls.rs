@@ -1,10 +1,11 @@
 //! Responses input tool-call item shaping for DeepSeek chat messages.
 
+use super::super::thought_signature::deepseek_tool_call_thought_signature;
 use super::chat_items::deepseek_message_content_text;
-use super::thought_signature::deepseek_tool_call_thought_signature;
 use super::{deepseek_raw_tool_message, deepseek_tool_call_message};
 use serde_json::{Value, json};
 
+#[cfg(any(not(feature = "mojo"), test))]
 pub(super) fn deepseek_input_function_call_message(item: &Value) -> Option<Value> {
     let call_id = item
         .get("call_id")
@@ -38,6 +39,7 @@ pub(super) fn deepseek_input_function_call_message(item: &Value) -> Option<Value
     ))
 }
 
+#[cfg(any(not(feature = "mojo"), test))]
 pub(super) fn deepseek_input_custom_tool_call_message(item: &Value) -> Option<Value> {
     let call_id = item
         .get("call_id")
@@ -66,6 +68,7 @@ pub(super) fn deepseek_input_custom_tool_call_message(item: &Value) -> Option<Va
     ))
 }
 
+#[cfg(any(not(feature = "mojo"), test))]
 pub(super) fn deepseek_input_mcp_call_messages(item: &Value) -> Option<Vec<Value>> {
     let assistant = deepseek_input_function_call_message(item)?;
     let mut messages = vec![assistant];
@@ -84,6 +87,7 @@ pub(super) fn deepseek_input_mcp_call_messages(item: &Value) -> Option<Vec<Value
     Some(messages)
 }
 
+#[cfg(any(not(feature = "mojo"), test))]
 fn deepseek_stringified_arguments(value: &Value) -> String {
     value
         .as_str()
@@ -91,6 +95,7 @@ fn deepseek_stringified_arguments(value: &Value) -> String {
         .unwrap_or_else(|| value.to_string())
 }
 
+#[cfg(any(not(feature = "mojo"), test))]
 pub(super) fn deepseek_tool_output_value(item: &Value) -> Value {
     item.get("output")
         .or_else(|| item.get("content"))
@@ -100,6 +105,7 @@ pub(super) fn deepseek_tool_output_value(item: &Value) -> Value {
         .unwrap_or_else(|| Value::String(String::new()))
 }
 
+#[cfg(any(not(feature = "mojo"), test))]
 fn deepseek_mcp_call_has_result(item: &Value) -> bool {
     item.get("output").is_some()
         || item.get("content").is_some()

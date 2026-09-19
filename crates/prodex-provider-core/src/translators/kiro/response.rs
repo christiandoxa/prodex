@@ -18,9 +18,9 @@ pub fn kiro_provider_core_chat_completion_value_from_response(
             serde_json::to_string(response).expect("Kiro response canonical JSON serializes");
         let body = prodex_mojo_core::rich::kiro_rewrite_chat_response_json(&canonical, request_id)
             .unwrap_or_else(|error| panic!("Mojo Kiro raw response rewrite failed: {error:?}"));
-        return serde_json::from_slice(&body).unwrap_or_else(|error| {
+        serde_json::from_slice(&body).unwrap_or_else(|error| {
             panic!("Mojo Kiro raw response rewrite returned invalid JSON: {error}")
-        });
+        })
     }
 
     #[cfg(not(feature = "mojo"))]

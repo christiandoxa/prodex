@@ -6,9 +6,6 @@ mod chat_items;
 mod input_tool_calls;
 #[path = "messages/local_shell.rs"]
 mod local_shell;
-#[path = "messages/thought_signature.rs"]
-mod thought_signature;
-
 use crate::deepseek_provider_core_responses_content_text;
 use chat_items::{deepseek_message_content_text, deepseek_message_tool_calls};
 use input_tool_calls::{
@@ -22,9 +19,9 @@ use serde_json::json;
 
 #[cfg(feature = "mojo")]
 use prodex_mojo_core::rich::{DeepSeekKernelInput, DeepSeekKernelOperation};
-pub(crate) use thought_signature::deepseek_tool_call_thought_signature_object;
 
 #[cfg(feature = "mojo")]
+#[cfg(any(not(feature = "mojo"), test))]
 fn deepseek_mojo_message(
     role: &str,
     content: &str,
@@ -39,6 +36,7 @@ fn deepseek_mojo_message(
     super::super::deepseek_mojo_value(input)
 }
 
+#[cfg(any(not(feature = "mojo"), test))]
 fn deepseek_message(role: &str, content: &str) -> Value {
     #[cfg(feature = "mojo")]
     return deepseek_mojo_message(role, content, None, None);
@@ -46,6 +44,7 @@ fn deepseek_message(role: &str, content: &str) -> Value {
     json!({"role": role, "content": content})
 }
 
+#[cfg(any(not(feature = "mojo"), test))]
 pub(super) fn deepseek_tool_call_message(
     call_id: &str,
     name: &str,
@@ -87,6 +86,7 @@ pub(super) fn deepseek_tool_call_message(
     }
 }
 
+#[cfg(any(not(feature = "mojo"), test))]
 pub(super) fn deepseek_tool_message(call_id: &str, content: &str) -> Value {
     #[cfg(feature = "mojo")]
     {
@@ -103,6 +103,7 @@ pub(super) fn deepseek_tool_message(call_id: &str, content: &str) -> Value {
     })
 }
 
+#[cfg(any(not(feature = "mojo"), test))]
 pub(super) fn deepseek_raw_tool_message(call_id: &str, content: &Value) -> Value {
     #[cfg(feature = "mojo")]
     {
@@ -120,10 +121,12 @@ pub(super) fn deepseek_raw_tool_message(call_id: &str, content: &Value) -> Value
     })
 }
 
+#[cfg(any(not(feature = "mojo"), test))]
 fn deepseek_empty_assistant_message() -> Value {
     deepseek_message("assistant", "")
 }
 
+#[cfg(any(not(feature = "mojo"), test))]
 pub(crate) fn deepseek_messages_from_request(value: &Value) -> Vec<Value> {
     let mut messages = if let Some(messages) = value.get("messages").and_then(Value::as_array) {
         messages.clone()
@@ -149,6 +152,7 @@ pub(crate) fn deepseek_messages_from_request(value: &Value) -> Vec<Value> {
     messages
 }
 
+#[cfg(any(not(feature = "mojo"), test))]
 fn deepseek_messages_from_input_item(item: &Value) -> Vec<Value> {
     match item.get("type").and_then(Value::as_str) {
         Some("function_call") => {
@@ -227,6 +231,7 @@ fn deepseek_messages_from_input_item(item: &Value) -> Vec<Value> {
     )]
 }
 
+#[cfg(any(not(feature = "mojo"), test))]
 fn deepseek_mojo_or_rust_message(
     role: &str,
     content: &str,
@@ -259,6 +264,7 @@ fn deepseek_mojo_or_rust_message(
     }
 }
 
+#[cfg(any(not(feature = "mojo"), test))]
 fn deepseek_tool_output_call_id(item: &Value) -> Option<String> {
     item.get("call_id")
         .or_else(|| item.get("tool_call_id"))
@@ -267,6 +273,7 @@ fn deepseek_tool_output_call_id(item: &Value) -> Option<String> {
         .map(str::to_string)
 }
 
+#[cfg(any(not(feature = "mojo"), test))]
 fn deepseek_tool_output_content(item: &Value) -> String {
     item.get("output")
         .or_else(|| item.get("content"))

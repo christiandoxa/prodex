@@ -2,8 +2,11 @@ use self::params::{
     deepseek_insert_primitive_request_fields, deepseek_stop_from_request,
     deepseek_top_logprobs_from_request, deepseek_user_id_from_request,
 };
+#[cfg(not(feature = "mojo"))]
 use super::tooling::deepseek_messages_from_request;
-use serde_json::{Value, json};
+use serde_json::Value;
+#[cfg(not(feature = "mojo"))]
+use serde_json::json;
 use std::collections::BTreeMap;
 
 #[cfg(feature = "mojo")]
@@ -14,6 +17,7 @@ mod params;
 
 type DeepSeekRequestBody = (Vec<u8>, Option<BTreeMap<String, Value>>);
 
+#[cfg(not(feature = "mojo"))]
 pub(super) fn deepseek_tool_choice_from_request(value: &Value) -> Option<Value> {
     let choice = value.get("tool_choice")?;
     if let Some(choice) = choice.as_str() {
@@ -44,53 +48,6 @@ pub(super) fn deepseek_tool_choice_from_request(value: &Value) -> Option<Value> 
             "name": name,
         },
     }))
-}
-
-#[cfg(feature = "mojo")]
-fn deepseek_mojo_request_shape_supported(value: &Value) -> bool {
-    if value.get("messages").and_then(Value::as_array).is_some() {
-        return true;
-    }
-    let Some(input) = value.get("input") else {
-        return true;
-    };
-    let Value::Array(items) = input else {
-        return true;
-    };
-    items.iter().all(deepseek_mojo_input_item_supported)
-}
-
-#[cfg(feature = "mojo")]
-fn deepseek_mojo_input_item_supported(item: &Value) -> bool {
-    let Some(object) = item.as_object() else {
-        return false;
-    };
-    let item_type = object.get("type").and_then(Value::as_str);
-    if matches!(item_type, Some("custom_tool_call" | "local_shell_call")) {
-        return false;
-    }
-    if object.get("tool_calls").is_some() {
-        return false;
-    }
-    if matches!(
-        item_type,
-        Some(
-            "function_call_output"
-                | "custom_tool_call_output"
-                | "mcp_tool_result"
-                | "mcp_call_output"
-        )
-    ) {
-        let output = object
-            .get("output")
-            .or_else(|| object.get("content"))
-            .or_else(|| object.get("result"))
-            .or_else(|| object.get("error"));
-        if output.is_some_and(Value::is_array) {
-            return false;
-        }
-    }
-    true
 }
 
 #[cfg(feature = "mojo")]
@@ -151,9 +108,20 @@ pub(super) fn deepseek_request_body_from_responses(
     value: &Value,
 ) -> Result<DeepSeekRequestBody, String> {
     #[cfg(feature = "mojo")]
-    if deepseek_mojo_request_shape_supported(value) {
-        return deepseek_common_request_body_from_responses_mojo(obj, value);
+    {
+        deepseek_common_request_body_from_responses_mojo(obj, value)
     }
+    #[cfg(not(feature = "mojo"))]
+    {
+        deepseek_request_body_from_responses_rust(obj, value)
+    }
+}
+
+#[cfg(not(feature = "mojo"))]
+fn deepseek_request_body_from_responses_rust(
+    obj: &serde_json::Map<String, Value>,
+    value: &Value,
+) -> Result<DeepSeekRequestBody, String> {
     let mut request = serde_json::Map::new();
     request.insert(
         "model".to_string(),
