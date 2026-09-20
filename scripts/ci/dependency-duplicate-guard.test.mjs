@@ -37,23 +37,11 @@ cpufeatures v0.2.17
 cpufeatures v0.3.0
     sha2 v0.11.0
 
-const-oid v0.9.6
-    x509-cert v0.2.5
-
-const-oid v0.10.2
-    digest v0.11.3
-
 crypto-common v0.1.7
     digest v0.10.7
 
 crypto-common v0.2.1
     digest v0.11.3
-
-cfg_aliases v0.1.1
-    nix v0.28.0
-
-cfg_aliases v0.2.1
-    nix v0.31.3
 
 cipher v0.4.4
     secret-service v5.1.0
@@ -65,23 +53,11 @@ digest v0.10.7 (*)
 
 digest v0.11.3 (*)
 
-fallible-iterator v0.2.0
-    rusqlite v0.40.0
-
-fallible-iterator v0.3.0
-    der v0.8.0
-
 getrandom v0.2.17
     legacy-crypto v0.1.0
 
 getrandom v0.4.3
     tempfile v3.27.0
-
-hashbrown v0.16.1
-    kasuari v0.4.12
-
-hashbrown v0.17.1
-    hashlink v0.12.0
 
 hmac v0.12.1
     secret-service v5.1.0
@@ -95,18 +71,6 @@ inout v0.1.4
 inout v0.2.2
     cipher v0.5.2
 
-itertools v0.13.0
-    criterion v0.8.2
-
-itertools v0.14.0
-    ratatui-core v0.1.2
-
-nix v0.28.0
-    portable-pty v0.9.0
-
-nix v0.31.3
-    os_info v3.15.0
-
 sha2 v0.10.9
     secret-service v5.1.0
 
@@ -118,24 +82,6 @@ syn v2.0.119
 
 syn v3.0.0
     serde_derive v1.0.229
-
-thiserror v1.0.69
-    filedescriptor v0.8.3
-
-thiserror v2.0.18
-    tungstenite v0.29.0
-
-thiserror-impl v1.0.69
-    thiserror v1.0.69
-
-thiserror-impl v2.0.18
-    thiserror v2.0.18
-
-untrusted v0.7.1
-    webpki v0.22.4
-
-untrusted v0.9.0
-    aws-lc-rs v1.15.0
 `;
 
 test("default budget accepts current duplicate families", () => {
@@ -150,24 +96,15 @@ test("default budget accepts current duplicate families", () => {
       ["aes", 2],
       ["base64", 2],
       ["block-buffer", 2],
-      ["cfg_aliases", 2],
       ["cipher", 2],
-      ["const-oid", 2],
       ["cpufeatures", 2],
       ["crypto-common", 2],
       ["digest", 2],
-      ["fallible-iterator", 2],
       ["getrandom", 2],
-      ["hashbrown", 2],
       ["hmac", 2],
       ["inout", 2],
-      ["itertools", 2],
-      ["nix", 2],
       ["sha2", 2],
       ["syn", 2],
-      ["thiserror", 2],
-      ["thiserror-impl", 2],
-      ["untrusted", 2],
     ],
   );
   assert.equal(summary.duplicateFamilyBudget, DEFAULT_DUPLICATE_BUDGET.length);

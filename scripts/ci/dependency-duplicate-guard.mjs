@@ -26,19 +26,9 @@ export const DEFAULT_DUPLICATE_BUDGET = Object.freeze([
     reason: "sha1 and sha2 currently resolve through different cpufeatures lines.",
   },
   {
-    name: "const-oid",
-    maxVersions: 2,
-    reason: "tokio-postgres-rustls ASN.1 verification and digest 0.11 currently resolve const-oid 0.9 and 0.10.",
-  },
-  {
     name: "crypto-common",
     maxVersions: 2,
     reason: "digest 0.10 and 0.11 pull different crypto-common lines.",
-  },
-  {
-    name: "cfg_aliases",
-    maxVersions: 2,
-    reason: "Codex-compatible os_info metadata pulls nix 0.31 build tooling while portable PTY dependencies still use cfg_aliases 0.1.",
   },
   {
     name: "cipher",
@@ -51,19 +41,9 @@ export const DEFAULT_DUPLICATE_BUDGET = Object.freeze([
     reason: "tungstenite/sha1 and export crypto use different digest major lines.",
   },
   {
-    name: "fallible-iterator",
-    maxVersions: 2,
-    reason: "gateway SQLite usage and crypto ASN.1 dependencies currently resolve different fallible-iterator lines.",
-  },
-  {
     name: "getrandom",
     maxVersions: 2,
     reason: "legacy crypto and current rand/tempfile resolve getrandom 0.2 and 0.4.",
-  },
-  {
-    name: "hashbrown",
-    maxVersions: 2,
-    reason: "ratatui-core/kasuari and rusqlite/hashlink currently resolve separate hashbrown minor lines.",
   },
   {
     name: "hmac",
@@ -76,16 +56,6 @@ export const DEFAULT_DUPLICATE_BUDGET = Object.freeze([
     reason: "The Secret Service and aes-gcm-siv cipher lines currently use inout 0.1 and 0.2.",
   },
   {
-    name: "itertools",
-    maxVersions: 2,
-    reason: "ratatui-core/unicode-truncate and criterion benchmark tooling currently resolve separate itertools minor lines.",
-  },
-  {
-    name: "nix",
-    maxVersions: 2,
-    reason: "Codex-compatible os_info metadata uses nix 0.31 while portable PTY support still resolves nix 0.28.",
-  },
-  {
     name: "sha2",
     maxVersions: 2,
     reason: "the native Secret Service keyring backend and current application/storage crypto resolve sha2 0.10 and 0.11.",
@@ -94,21 +64,6 @@ export const DEFAULT_DUPLICATE_BUDGET = Object.freeze([
     name: "syn",
     maxVersions: 2,
     reason: "serde_derive uses syn 3 while the remaining proc-macro ecosystem still resolves syn 2.",
-  },
-  {
-    name: "thiserror",
-    maxVersions: 2,
-    reason: "portable PTY support pulls filedescriptor on thiserror 1 while tungstenite uses thiserror 2.",
-  },
-  {
-    name: "thiserror-impl",
-    maxVersions: 2,
-    reason: "thiserror macro versions follow the portable PTY/filedescriptor and tungstenite split.",
-  },
-  {
-    name: "untrusted",
-    maxVersions: 2,
-    reason: "rustls/webpki and JWT AWS-LC support currently resolve separate untrusted versions.",
   },
 ]);
 

@@ -6,7 +6,7 @@ test("fuzz smoke keeps every target and runs with bounded parallelism", () => {
   const steps = fuzzSmokeSteps();
 
   assert.equal(FUZZ_SMOKE_JOBS, 4);
-  assert.equal(FUZZ_TARGETS.length, 6);
+  assert.deepEqual(FUZZ_TARGETS, ["profile_export_envelope"]);
   assert.equal(new Set(FUZZ_TARGETS).size, FUZZ_TARGETS.length);
   assert.deepEqual(
     steps.map((step) => step.args[3]),
