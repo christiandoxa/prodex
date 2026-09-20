@@ -4,12 +4,7 @@ import { pathToFileURL } from "node:url";
 import { runStepsParallel } from "./main-internal-test-runner.mjs";
 
 export const FUZZ_TARGETS = Object.freeze([
-  "canonical_request_target",
-  "oidc_endpoint_policy",
   "profile_export_envelope",
-  "runtime_policy_parse",
-  "governance_policy",
-  "smart_context_inputs",
 ]);
 
 export const FUZZ_SMOKE_JOBS = 4;

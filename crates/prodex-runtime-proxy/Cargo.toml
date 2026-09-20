@@ -6,6 +6,9 @@ description = "Runtime proxy boundary primitives for prodex"
 license.workspace = true
 repository.workspace = true
 
+[package.metadata.cargo-machete]
+ignored = ["prodex_provider_core"]
+
 [lib]
 name = "runtime_proxy"
 path = "src/lib.rs"

@@ -599,8 +599,8 @@ jobs:
             runtime_kiro_streaming_command_forwards_model_and_effort \
             external_provider_catalog_args_use_imported_kiro_models \
             effort_suggestions_fall_back_for_dynamic_models \
-            native_kiro_resolution_does_not_inject_the_codex_bridge_provider \
-            native_kiro_cli_maps_resume_session_id
+            native_kiro_resolution_preserves_explicit_provider_without_prompt \
+            run_strategy_auto_routes_kiro_resume_sessions_to_provider_bridge
           do
             if ! run_targeted_test "macOS Kiro test ${filter}" cargo test --locked -q -p prodex-app --lib \
               "${filter}" -- --test-threads=1; then
