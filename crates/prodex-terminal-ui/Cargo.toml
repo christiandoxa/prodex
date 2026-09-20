@@ -12,7 +12,6 @@ path = "src/lib.rs"
 
 [dependencies]
 crossterm = { workspace = true }
-libc = { workspace = true }
 unicode-width = { workspace = true }
 
 [lints]
