@@ -77,6 +77,7 @@ fn add_cleanup_counts(summary: &mut ProdexCleanupSummary, counts: ProdexCleanupC
 
 pub(crate) fn command_runs_auto_runtime_housekeeping(command: &Commands) -> bool {
     !crate::command_dispatch::command_is_super_dry_run(command)
+        && !crate::command_dispatch::command_uses_native_agy(command)
         && !matches!(
             command,
             Commands::RuntimeBroker(_)

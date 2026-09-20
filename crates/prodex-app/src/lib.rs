@@ -367,7 +367,8 @@ fn run_command(command: Commands) -> Result<()> {
 }
 
 fn command_uses_minimal_startup(command: &Commands) -> bool {
-    matches!(command, Commands::McpJsonlBridge(_) | Commands::Ping(_))
+    command_dispatch::command_uses_native_agy(command)
+        || matches!(command, Commands::McpJsonlBridge(_) | Commands::Ping(_))
         || matches!(
             command,
             Commands::Doctor(args)
@@ -391,16 +392,20 @@ mod minimal_startup_tests {
         let bridge =
             parse_cli_command_from(["prodex", "__mcp-jsonl-bridge", "mcp-server"]).unwrap();
         let ping = parse_cli_command_from(["prodex", "ping", "openai"]).unwrap();
+        let antigravity =
+            parse_cli_command_from(["prodex", "s", "gemini", "--cli", "agy", "--no-presidio"])
+                .unwrap();
 
         assert!(command_uses_minimal_startup(&install));
         assert!(command_uses_minimal_startup(&bridge));
         assert!(command_uses_minimal_startup(&ping));
+        assert!(command_uses_minimal_startup(&antigravity));
         assert!(!command_uses_minimal_startup(&combined));
     }
 }
 
 fn validate_command_runtime_policy(command: &Commands) -> Result<()> {
-    if command.launches_runtime() {
+    if command.launches_runtime() && !command_dispatch::command_uses_native_agy(command) {
         ensure_runtime_policy_valid()?;
     }
     Ok(())
