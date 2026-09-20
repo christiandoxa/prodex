@@ -8,6 +8,8 @@ mod messages;
 #[path = "request/validation.rs"]
 mod validation;
 
+#[cfg(not(feature = "mojo"))]
+use self::controls::kiro_provider_core_reject_token_limit_controls;
 pub use messages::{
     kiro_provider_core_prompt_from_chat_messages,
     kiro_provider_core_responses_items_from_chat_message,
@@ -351,6 +353,9 @@ pub fn kiro_provider_core_chat_completions_request_body(
             "invalid_request_body",
         ));
     };
+
+    #[cfg(not(feature = "mojo"))]
+    let _ = object;
 
     #[cfg(feature = "mojo")]
     {
