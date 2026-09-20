@@ -158,9 +158,9 @@ test("push CI reuses the disjoint prodex-app library partitions", () => {
   assert.match(job, /save-if: \$\{\{ matrix\.save_cache \}\}/);
   assert.match(job, /PRODEX_APP_FILTER/);
   assert.match(job, /Test temp-backed state with a symlinked TMPDIR[\s\S]*?if: matrix\.suite == 'remainder'/);
-  for (const dependency of ["prodex-app-lib", "redis-integration", "backup-restore-drill"]) {
-    assert.match(telemetry, new RegExp(`- ${dependency}`));
-  }
+  assert.match(telemetry, /- prodex-app-lib/);
+  assert.doesNotMatch(workflow, /\n  redis-integration:/);
+  assert.doesNotMatch(workflow, /\n  backup-restore-drill:/);
 });
 
 test("direct targeted workflow lanes reject zero-test matches", () => {
@@ -173,7 +173,6 @@ test("direct targeted workflow lanes reject zero-test matches", () => {
     ["macos-workspace", "smart-context-evidence", "Run native macOS broker recovery tests"],
     ["macos-workspace", "smart-context-evidence", "Run native macOS Kiro selector and resume tests"],
     ["profile-commands-internal", "main-internal-core", "Run profile command internal tests"],
-    ["redis-integration", "backup-restore-drill", "Run Redis-backed atomicity tests"],
   ]) {
     const job = workflow.match(new RegExp(`\\n  ${jobName}:\\n([\\s\\S]*?)\\n  ${nextJob}:`))?.[1];
     assert.ok(job, `${jobName} job missing`);
@@ -291,31 +290,25 @@ test("runtime proxy matrix is generated before fan-out without a runner barrier"
   assert.doesNotMatch(workflow, /\n  runtime-proxy-shard-matrix:/);
 });
 
-test("independent runtime benchmarks run in parallel with one cache writer", () => {
+test("runtime proxy benchmark remains independently gated with one cache writer", () => {
   const workflow = readFileSync(".github/workflows/ci.yml", "utf8");
   const runtimeProxy = workflow.match(
-    /\n  runtime-proxy-bench-smoke:\n([\s\S]*?)\n  runtime-governance-bench-smoke:/,
-  )?.[1];
-  const governance = workflow.match(
-    /\n  runtime-governance-bench-smoke:\n([\s\S]*?)\n  runtime-load-smoke:/,
+    /\n  runtime-proxy-bench-smoke:\n([\s\S]*?)\n  runtime-load-smoke:/,
   )?.[1];
   const telemetry = workflow.match(/\n  ci-duration-telemetry:\n([\s\S]*)/)?.[1];
 
   assert.ok(runtimeProxy, "runtime proxy benchmark job missing");
-  assert.ok(governance, "governance benchmark job missing");
   assert.ok(telemetry, "CI duration telemetry job missing");
   assert.match(runtimeProxy, /PRODEX_RUNTIME_PROXY_BENCH_CHECK/);
   assert.match(runtimeProxy, /runtime_proxy_hot_paths/);
   assert.doesNotMatch(runtimeProxy, /governance_hot_paths/);
-  assert.match(governance, /needs\.changes\.outputs\.runtime_bench == 'true'/);
-  assert.match(governance, /github\.event_name == 'schedule'/);
-  assert.match(governance, /github\.event_name == 'workflow_dispatch'/);
-  assert.match(governance, /governance_hot_paths/);
-  assert.equal(runtimeProxy.match(/save-if: \$\{\{ github\.job == 'runtime-proxy-bench-smoke' \}\}/g)?.length, 1);
-  assert.equal(governance.match(/save-if: \$\{\{ github\.job == 'runtime-proxy-bench-smoke' \}\}/g)?.length, 1);
-  for (const dependency of ["runtime-proxy-bench-smoke", "runtime-governance-bench-smoke"]) {
-    assert.match(telemetry, new RegExp(`- ${dependency}`));
-  }
+  assert.equal(
+    runtimeProxy.match(/save-if: \$\{\{ github\.job == 'runtime-proxy-bench-smoke' \}\}/g)?.length,
+    1,
+  );
+  assert.match(telemetry, /- runtime-proxy-bench-smoke/);
+  assert.doesNotMatch(workflow, /\n  runtime-governance-bench-smoke:/);
+  assert.doesNotMatch(telemetry, /- runtime-governance-bench-smoke/);
 });
 
 test("runtime proxy logical suites pack without losing filters", () => {
@@ -353,7 +346,7 @@ test("runtime proxy logical suites pack without losing filters", () => {
   );
   const admissionAffinityPack = matrix.include.find((entry) =>
     entry.filters.includes(
-      "|main_internal_tests::runtime_proxy_selection_and_pressure::admission::cli_mount::",
+      "|main_internal_tests::runtime_proxy_selection_and_pressure::admission::response_affinity::",
     ),
   );
   assert.ok(admissionCorePack, "admission core filter missing from runtime matrix");

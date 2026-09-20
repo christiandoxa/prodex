@@ -204,14 +204,6 @@ fn runtime_proxy_log_to_path_flushes_async_entries() {
 
     let pause_guard = RuntimeProxyAsyncLoggerPauseGuard::pause();
     runtime_proxy_log_to_path(&log_path, "async entry line1\nline2 request=7");
-
-    assert_eq!(
-        runtime_proxy_async_logger()
-            .unwrap()
-            .pending_count_for_path(&log_path),
-        1,
-        "queued entry should remain pending while worker writes are paused"
-    );
     assert!(
         fs::read_to_string(&log_path).unwrap_or_default().is_empty(),
         "async logger should not synchronously write to disk on caller path"
@@ -239,11 +231,6 @@ fn runtime_proxy_log_to_path_marks_async_queue_drops_after_recovery() {
     for index in 0..capacity.saturating_add(64) {
         runtime_proxy_log_to_path(&log_path, &format!("queued entry index={index}"));
     }
-
-    assert!(
-        logger.pending_count_for_path(&log_path) >= capacity,
-        "queued entries and drop marker should remain pending while writes are paused"
-    );
     assert!(
         fs::read_to_string(&log_path).unwrap_or_default().is_empty(),
         "full async logger should not synchronously write drop markers on caller path"

@@ -228,29 +228,3 @@ fn quota_runtime_log_ignores_unknown_profiles() {
         None
     );
 }
-
-#[test]
-fn quota_runtime_auth_backoff_profiles_follow_runtime_log_clear() {
-    let log_path = test_runtime_log_path("prodex-runtime-auth-test.log");
-    let mut log = fs::File::create(&log_path).unwrap();
-    writeln!(
-            log,
-            "[2026-06-22 16:00:00.000 +07:00] profile_auth_backoff profile=main route=responses status=401 score=100 seconds=300"
-        )
-        .unwrap();
-    writeln!(
-            log,
-            "[2026-06-22 16:00:01.000 +07:00] profile_auth_backoff profile=second route=responses status=401 score=100 seconds=300"
-        )
-        .unwrap();
-    writeln!(
-            log,
-            "[2026-06-22 16:00:02.000 +07:00] profile_auth_backoff_cleared profile=main reason=auth_changed"
-        )
-        .unwrap();
-
-    let profiles = quota_runtime_auth_backoff_profiles_from_paths(vec![log_path]);
-
-    assert!(!profiles.contains("main"));
-    assert!(profiles.contains("second"));
-}

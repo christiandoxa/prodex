@@ -187,7 +187,3 @@ pub(crate) fn runtime_broker_metrics_snapshot(
         }),
     )
 }
-
-#[cfg(test)]
-#[path = "../../tests/src/runtime_broker/metrics.rs"]
-mod tests;

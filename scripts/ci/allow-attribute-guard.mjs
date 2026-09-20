@@ -7,23 +7,19 @@ import { repoRoot } from "../npm/common.mjs";
 
 export const ALLOW_ATTRIBUTE_CAPS = Object.freeze({
   dead_code: 0,
-  "unused_imports": 3,
-  "clippy::large_enum_variant": 10,
-  "clippy::result_large_err": 3,
-  "clippy::too_many_arguments": 41,
+  "unused_imports": 0,
+  "clippy::large_enum_variant": 9,
+  "clippy::result_large_err": 2,
+  "clippy::too_many_arguments": 20,
   "clippy::type_complexity": 1,
 });
 
 export const TEST_ONLY_DEAD_CODE_ALLOW_CAP = 0;
 
 export const ALLOW_ATTRIBUTE_LOCATION_KEYS = Object.freeze([
-  "unused_imports|crates/prodex-app/src/runtime_anthropic.rs|pub(super) use anthropic::{",
-  "unused_imports|crates/prodex-app/src/runtime_claude/config.rs|pub(crate) use prodex_runtime_claude::{",
-  "unused_imports|crates/prodex-app/src/runtime_claude/state_merge.rs|pub(crate) use prodex_runtime_claude::{",
   "clippy::large_enum_variant|crates/prodex-app/src/runtime_proxy_shared.rs|pub(super) enum RuntimeResponsesReply {",
   "clippy::large_enum_variant|crates/prodex-app/src/runtime_proxy_shared.rs|pub(super) enum RuntimeUpstreamFailureResponse {",
   "clippy::large_enum_variant|crates/prodex-app/src/runtime_proxy_shared.rs|pub(super) enum RuntimeWebsocketConnectResult {",
-  "clippy::large_enum_variant|crates/prodex-runtime-anthropic/src/lib.rs|pub enum RuntimeResponsesReply {",
   "clippy::large_enum_variant|crates/prodex-runtime-state/src/background.rs|pub enum RuntimeStateSavePayload<S, Shared> {",
   // ponytail: keep transport outcomes unboxed on the streaming boundary; revisit if measured stack pressure appears.
   "clippy::large_enum_variant|crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_gemini_send.rs|enum RuntimeGeminiModelAttempt {",
@@ -34,53 +30,31 @@ export const ALLOW_ATTRIBUTE_LOCATION_KEYS = Object.freeze([
   "clippy::result_large_err|crates/prodex-app/src/runtime_proxy/lifecycle.rs|pub(crate) fn enqueue_runtime_proxy_long_lived_request_with_wait(",
   "clippy::result_large_err|crates/prodex-app/tests/support/main_internal/runtime_proxy_backend/websocket/handler/accepted.rs|pub(super) fn accept_runtime_proxy_backend_websocket(",
   // tungstenite fixes the server callback error shape to an unboxed HTTP response.
-  "clippy::result_large_err|crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_gemini_live.rs|fn handle_runtime_gemini_live_tcp_stream(",
   "clippy::too_many_arguments|crates/prodex-app/src/runtime_launch/proxy_startup/deepseek_rewrite/response.rs|pub(in crate::runtime_launch::proxy_startup) fn runtime_deepseek_chat_buffered_response_parts(",
   "clippy::too_many_arguments|crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_kiro/stream.rs|pub(super) fn runtime_kiro_stream_notification(",
   "clippy::too_many_arguments|crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_kiro/stream.rs|fn runtime_kiro_stream_text(",
   "clippy::too_many_arguments|crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_kiro/stream.rs|fn runtime_kiro_stream_tool_activity(",
   "clippy::too_many_arguments|crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_response_copilot.rs|pub(super) fn respond_runtime_copilot_rewrite(",
   "clippy::too_many_arguments|crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_response_passthrough.rs|pub(super) fn respond_runtime_passthrough_rewrite(",
-  "clippy::too_many_arguments|crates/prodex-app/src/runtime_launch/proxy_startup/provider_bridge_spend.rs|pub(super) fn runtime_provider_gateway_response_spend_event_from_tokens(",
-  "clippy::too_many_arguments|crates/prodex-app/src/runtime_launch/proxy_startup/provider_bridge_spend.rs|pub(super) fn runtime_provider_gateway_response_spend_event(",
-  "clippy::too_many_arguments|crates/prodex-app/src/runtime_launch/proxy_startup/provider_bridge_spend.rs|pub(super) fn runtime_provider_gateway_spend_event(",
-  "clippy::too_many_arguments|crates/prodex-domain/src/governance/approval.rs|pub fn pending(",
   "clippy::too_many_arguments|crates/prodex-provider-core/src/gemini_bridge/request.rs|pub fn gemini_provider_core_generate_content_request(",
   "clippy::too_many_arguments|crates/prodex-provider-core/src/translators/gemini/response/build.rs|pub(super) fn gemini_build_response_value(",
   "clippy::too_many_arguments|crates/prodex-provider-core/src/translators/kiro/acp.rs|pub fn kiro_provider_core_acp_metadata(",
   "clippy::too_many_arguments|crates/prodex-provider-core/src/translators/kiro/stream.rs|pub fn kiro_provider_core_acp_responses_tool_call_item(",
-  "clippy::too_many_arguments|crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_application_data_plane.rs|fn runtime_gateway_mandatory_governance_audit(",
-  "clippy::too_many_arguments|crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_application_data_plane.rs|fn runtime_gateway_obligation_execution(",
-  "clippy::too_many_arguments|crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_gateway_admin_policies/activation.rs|pub(super) fn activation_response(",
-  "clippy::too_many_arguments|crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_gateway_admin_policies/break_glass.rs|pub(super) fn vote_response(",
   // ponytail: keep security/audit inputs explicit; add a request context if this endpoint family grows again.
-  "clippy::too_many_arguments|crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_gateway_admin_policies/audit_retention.rs|pub(super) fn audit_retention_response(",
-  "clippy::too_many_arguments|crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_gateway_admin_policies/break_glass.rs|fn break_glass_transition_response(",
-  "clippy::too_many_arguments|crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_gemini_live/session.rs|fn runtime_gemini_live_drain_upstream<S>(",
-  "clippy::too_many_arguments|crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_governance_session.rs|pub(super) fn remember(",
   "clippy::too_many_arguments|crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_response_dispatch.rs|pub(super) fn respond_runtime_local_rewrite_live_response(",
   // ponytail: provider send inputs stay explicit at the retry boundary; add a request context only if another caller appears.
   "clippy::too_many_arguments|crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_deepseek_send.rs|fn send_runtime_deepseek_passthrough_request(",
   "clippy::too_many_arguments|crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_deepseek_send.rs|fn send_runtime_deepseek_responses_request(",
-  "clippy::too_many_arguments|crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_gateway_ledger.rs|fn assert_sqlite_reconciliation_conflict_unchanged(",
   "clippy::too_many_arguments|crates/prodex-app/src/runtime_proxy/lineage/remember/compact.rs|fn remember_runtime_compact_binding(",
   "clippy::too_many_arguments|crates/prodex-app/src/runtime_proxy/presidio/http.rs|fn runtime_apply_external_http_redaction(",
-  "clippy::too_many_arguments|crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_tests/gateway_admin_policy_lifecycle/artifacts.rs|pub(super) fn activate(",
-  "clippy::too_many_arguments|crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_tests/gateway_admin_policy_lifecycle/artifacts.rs|pub(super) fn vote(",
   "clippy::too_many_arguments|crates/prodex-app/src/runtime_proxy/presidio/http.rs|pub(crate) fn apply_runtime_presidio_redaction_to_request_with_rules(",
   "clippy::too_many_arguments|crates/prodex-app/src/runtime_proxy/presidio/websocket.rs|pub(crate) fn apply_runtime_presidio_redaction_to_websocket_text_with_rules<'a>(",
-  "clippy::too_many_arguments|crates/prodex-storage-sqlite-runtime/src/governance_repository/revisions.rs|pub(super) fn store_pointer(",
-  "clippy::too_many_arguments|crates/prodex-storage-sqlite-runtime/tests/governance_repository.rs|fn activation_request(",
-  "clippy::too_many_arguments|crates/prodex-storage-sqlite-runtime/tests/governance_repository.rs|fn prepare_approval_for_existing(",
-  "clippy::too_many_arguments|crates/prodex-storage-sqlite-runtime/tests/governance_repository.rs|fn prepare_approved_revision(",
   // ponytail: keep the Mojo ABI adapter explicit; use an input struct only if another caller appears.
   "clippy::too_many_arguments|crates/prodex-mojo-core/src/runtime/quota_decisions.rs|pub fn precommit_budget_plan(",
   // ponytail: keep production and test-oracle signatures identical for parity checks.
   "clippy::too_many_arguments|crates/prodex-runtime-proxy/src/selection_policy/mojo.rs|pub(super) fn allows_direct_current_profile_fallback(",
-  "clippy::too_many_arguments|crates/prodex-runtime-proxy/src/selection_policy/rust_oracles.rs|pub(super) fn allows_direct_current_profile_fallback(",
+  "clippy::too_many_arguments|crates/prodex-runtime-proxy/src/selection_policy/rust_oracles.rs|pub(crate) fn allows_direct_current_profile_fallback(",
   // ponytail: immutable live-reload inputs stay explicit; add a watcher context when another consumer appears.
-  "clippy::too_many_arguments|src/enterprise_serve.rs|fn deliver_live_config_publications(",
-  "clippy::too_many_arguments|src/enterprise_serve.rs|fn spawn_live_config_publication_watcher(",
   "clippy::type_complexity|crates/prodex-bench-support/src/lib.rs|pub fn run_runtime_proxy_hot_path_case_suite<",
 ]);
 

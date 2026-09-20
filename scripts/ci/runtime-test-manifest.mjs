@@ -63,38 +63,7 @@ export const RUNTIME_SMOKE_TESTS = [
 ];
 
 export const RUNTIME_CI_WORKFLOW_SHARDS = [
-  {
-    suite: "root",
-    label: "root proxy helpers",
-    filters: [
-      {
-        id: "root-broker",
-        filter: "main_internal_tests::info_and_broker::runtime_proxy_broker_",
-        label: "broker",
-      },
-      {
-        id: "root-log-paths",
-        filter: "main_internal_tests::info_and_broker::runtime_proxy_log_paths_",
-        label: "log-paths",
-      },
-      {
-        id: "root-endpoint-child",
-        filter: "main_internal_tests::runtime_broker_tuning::runtime_proxy_endpoint_child_",
-        label: "endpoint-child",
-      },
-      {
-        id: "root-claude-launch",
-        filter: "main_internal_tests::claude_launch::runtime_proxy_claude_launch_",
-        label: "claude-launch-root",
-      },
-      {
-        id: "root-claude-optional-tool",
-        filter: "main_internal_tests::claude_launch::missing_external_caveman_",
-        label: "claude-optional-tool-root",
-      },
-    ],
-  },
-  {
+    {
     suite: "selection",
     label: "selection and quota",
     filters: [
@@ -167,12 +136,7 @@ export const RUNTIME_CI_WORKFLOW_SHARDS = [
     suite: "admission-affinity",
     label: "admission guards and affinity",
     filters: [
-      {
-        id: "admission-cli-mount",
-        filter: `${ADMISSION_PREFIX}cli_mount::`,
-        label: "admission-cli-mount",
-      },
-      {
+            {
         id: "admission-guards",
         filter: `${ADMISSION_PREFIX}guards::`,
         label: "admission-guards",
@@ -226,23 +190,7 @@ export const RUNTIME_CI_WORKFLOW_SHARDS = [
       },
     ],
   },
-  {
-    suite: "doctor-summary-guidance",
-    label: "doctor summary and guidance",
-    filters: [
-      {
-        id: "doctor-summary-fields",
-        filter: "main_internal_tests::runtime_proxy_selection_and_pressure::doctor::summary_fields::",
-        label: "summary-fields",
-      },
-      {
-        id: "doctor-finalize-guidance",
-        filter: "main_internal_tests::runtime_proxy_selection_and_pressure::doctor::finalize_guidance::",
-        label: "finalize-guidance",
-      },
-    ],
-  },
-  {
+    {
     suite: "doctor-state-runtime",
     label: "doctor state runtime",
     filters: [
@@ -270,19 +218,7 @@ export const RUNTIME_CI_WORKFLOW_SHARDS = [
           "main_internal_tests::runtime_proxy_selection_and_pressure::doctor::state_collect::runtime_doctor_collect_state_surfaces_unreachable_live_broker_health",
         label: "state-unreachable-health",
       },
-      {
-        id: "doctor-state-unproven-identity",
-        filter:
-          "main_internal_tests::runtime_proxy_selection_and_pressure::doctor::broker_security::runtime_doctor_does_not_probe_registry_without_process_identity",
-        label: "state-unproven-identity",
-      },
-      {
-        id: "doctor-state-unproven-metrics",
-        filter:
-          "main_internal_tests::runtime_proxy_selection_and_pressure::doctor::broker_security::live_broker_metrics_skip_registry_without_process_identity",
-        label: "state-unproven-metrics",
-      },
-    ],
+                ],
   },
   {
     suite: "doctor-state-persistence",
@@ -511,56 +447,7 @@ export const RUNTIME_CI_WORKFLOW_SHARDS = [
       },
     ],
   },
-  {
-    suite: "anthropic-launch",
-    label: "anthropic launch",
-    filters: [
-      {
-        id: "anthropic-lane-and-launch",
-        filter: "main_internal_tests::runtime_proxy_claude_and_anthropic::lane_and_launch::",
-        label: "lane-and-launch",
-      },
-      {
-        id: "anthropic-launch-config",
-        filter: "main_internal_tests::runtime_proxy_claude_and_anthropic::launch_config::",
-        label: "launch-config",
-      },
-    ],
-  },
-  {
-    suite: "anthropic-request",
-    label: "anthropic request translation",
-    filters: [
-      {
-        id: "anthropic-request-translation",
-        filter: "main_internal_tests::runtime_proxy_claude_and_anthropic::request_translation::",
-        label: "request-translation",
-      },
-    ],
-  },
-  {
-    suite: "anthropic-response",
-    label: "anthropic response translation",
-    filters: [
-      {
-        id: "anthropic-response-translation",
-        filter: "main_internal_tests::runtime_proxy_claude_and_anthropic::response_translation::",
-        label: "response-translation",
-      },
-    ],
-  },
-  {
-    suite: "anthropic-runtime",
-    label: "anthropic runtime behavior",
-    filters: [
-      {
-        id: "anthropic-runtime-behavior",
-        filter: "main_internal_tests::runtime_proxy_claude_and_anthropic::runtime_proxy_behavior::",
-        label: "runtime-behavior",
-      },
-    ],
-  },
-];
+        ];
 
 export const RUNTIME_CI_BROAD_SHARD_FILTERS = RUNTIME_CI_WORKFLOW_SHARDS.flatMap(
   (shard) => shard.filters,
@@ -577,11 +464,7 @@ export const RUNTIME_STRESS_WEIGHT_HINTS = Object.freeze([
     filter: "main_internal_tests::runtime_proxy_continuations::",
     weightSeconds: 5,
   },
-  {
-    filter: "main_internal_tests::runtime_proxy_claude_and_anthropic::runtime_proxy_behavior::",
-    weightSeconds: 5,
-  },
-  {
+    {
     filter: "main_internal_tests::runtime_proxy_selection_and_pressure::admission::compact::",
     weightSeconds: 5,
   },
@@ -605,27 +488,7 @@ export const RUNTIME_STRESS_WEIGHT_HINTS = Object.freeze([
     filter: "main_internal_tests::runtime_proxy_selection_and_pressure::health::",
     weightSeconds: 2,
   },
-  {
-    filter: "main_internal_tests::runtime_proxy_claude_and_anthropic::launch_config::",
-    weightSeconds: 2,
-  },
-  {
-    filter: "main_internal_tests::runtime_proxy_claude_and_anthropic::request_translation::",
-    weightSeconds: 2,
-  },
-  {
-    filter: "main_internal_tests::runtime_proxy_claude_and_anthropic::response_translation::",
-    weightSeconds: 2,
-  },
-  {
-    name: "runtime_doctor_fields_surface_queue_lag_and_failure_classes",
-    weightSeconds: 6,
-  },
-  {
-    name: "runtime_doctor_json_value_includes_selection_markers",
-    weightSeconds: 6,
-  },
-  {
+            {
     name: "runtime_doctor_summary_counts_recent_runtime_markers",
     weightSeconds: 7,
   },
@@ -645,27 +508,11 @@ export const RUNTIME_STRESS_WEIGHT_HINTS = Object.freeze([
     name: "runtime_state_save_scheduler_persists_latest_snapshot",
     weightSeconds: 4,
   },
-  {
-    name: "translate_runtime_anthropic_messages_request_maps_tools_and_tool_results",
-    weightSeconds: 4,
-  },
-  {
-    name: "translate_runtime_anthropic_messages_request_keeps_versioned_builtin_client_tools",
-    weightSeconds: 6,
-  },
-  {
-    name: "perform_prodex_cleanup_removes_safe_local_artifacts",
-    weightSeconds: 5,
-  },
-  {
+        {
     name: "runtime_affinity_touch_lookups_do_not_requeue_persistence_before_interval",
     weightSeconds: 3,
   },
-  {
-    name: "perform_prodex_cleanup_deduplicates_profiles_by_email",
-    weightSeconds: 6,
-  },
-  {
+    {
     name: "runtime_previous_response_not_found_decision_matrix_stays_consistent",
     weightSeconds: 8,
   },
@@ -673,15 +520,7 @@ export const RUNTIME_STRESS_WEIGHT_HINTS = Object.freeze([
     name: "auto_runtime_housekeeping_removes_runtime_garbage_without_touching_user_state",
     weightSeconds: 4,
   },
-  {
-    name: "runtime_proxy_anthropic_messages_retries_tool_result_transcript_on_another_profile",
-    weightSeconds: 5,
-  },
-  {
-    name: "runtime_proxy_continues_anthropic_web_search_server_tool_responses",
-    weightSeconds: 8,
-  },
-  {
+      {
     name: "previous_response_negative_cache_boundary_matrix_respects_threshold_and_expiry",
     weightSeconds: 5,
   },
@@ -712,73 +551,7 @@ export const RUNTIME_CI_TEST_CASES = [
     name: "fresh_responses_keep_recovering_after_multiple_provider_overload_sweeps",
     tags: SERIALIZED_TAGS,
   },
-  {
-    id: "anthropic-request-translation",
-    filter: "main_internal_tests::runtime_proxy_claude_and_anthropic::request_translation::",
-    label: "parallel-safe-anthropic-request-translation",
-    tags: [TAGS.parallelSafe],
-  },
-  {
-    id: "anthropic-response-translation",
-    filter: "main_internal_tests::runtime_proxy_claude_and_anthropic::response_translation::",
-    label: "parallel-safe-anthropic-response-translation",
-    tags: [TAGS.parallelSafe],
-  },
-  {
-    id: "claude-env-filter",
-    filter: "main_internal_tests::runtime_proxy_claude_",
-    label: "env-sensitive-claude",
-    tags: ENV_PARALLEL_TAGS,
-  },
-  {
-    name: "runtime_proxy_claude_launch_env_uses_foundry_compat_with_profile_config_dir",
-    tags: SERIALIZED_TAGS,
-  },
-  {
-    name: "runtime_proxy_claude_launch_env_honors_model_override",
-    tags: SERIALIZED_TAGS,
-  },
-  {
-    name: "runtime_proxy_claude_launch_env_keeps_custom_picker_entry_for_unknown_override",
-    tags: SERIALIZED_TAGS,
-  },
-  {
-    name: "runtime_proxy_claude_launch_env_uses_codex_config_model_by_default",
-    tags: SERIALIZED_TAGS,
-  },
-  {
-    name: "runtime_proxy_claude_launch_env_maps_alias_backed_override_to_builtin_picker_value",
-    tags: SERIALIZED_TAGS,
-  },
-  {
-    name: "runtime_proxy_claude_target_model_maps_builtin_aliases_to_pinned_gpt_models",
-    tags: SERIALIZED_TAGS,
-  },
-  {
-    name: "runtime_proxy_claude_reasoning_effort_override_normalizes_env",
-    tags: SERIALIZED_TAGS,
-  },
-  {
-    name: "runtime_proxy_claude_reasoning_effort_override_ignores_invalid_env",
-    tags: SERIALIZED_TAGS,
-  },
-  {
-    name: "runtime_proxy_broker_health_endpoint_reports_registered_metadata",
-    tags: SERIALIZED_TAGS,
-  },
-  {
-    name: "runtime_broker_capability_operations_reject_missing_identity_before_http",
-    tags: SERIALIZED_TAGS,
-  },
-  {
-    name: "runtime_proxy_waits_for_anthropic_inflight_relief_then_succeeds",
-    tags: SERIALIZED_TAGS,
-  },
-  {
-    name: "runtime_proxy_waits_for_one_responses_slot_then_succeeds_past_soft_limit",
-    tags: SERIALIZED_TAGS,
-  },
-  {
+                                {
     name: "responses_wait_past_old_admission_window_for_healthy_saturated_profile",
     tags: SERIALIZED_TAGS,
   },
@@ -786,19 +559,7 @@ export const RUNTIME_CI_TEST_CASES = [
     name: "responses_wait_for_any_saturated_profile_and_reselect_after_release",
     tags: SERIALIZED_TAGS,
   },
-  {
-    name: "runtime_proxy_responses_inflight_relief_times_out_without_relief",
-    tags: SERIALIZED_TAGS,
-  },
-  {
-    name: "runtime_proxy_wait_scopes_to_session_owner_relief",
-    tags: SERIALIZED_TAGS,
-  },
-  {
-    name: "runtime_proxy_returns_anthropic_overloaded_error_when_interactive_capacity_is_full",
-    tags: SERIALIZED_TAGS,
-  },
-  {
+        {
     name: "runtime_proxy_pressure_mode_sheds_fresh_compact_requests_before_upstream",
     tags: SERIALIZED_TAGS,
   },
@@ -842,19 +603,7 @@ export const RUNTIME_CI_TEST_CASES = [
     name: "websocket_reuse_watchdog_fresh_fallback_stays_blocked_for_locked_affinity",
     tags: SERIALIZED_TAGS,
   },
-  {
-    name: "runtime_proxy_streams_anthropic_mcp_messages_without_buffering",
-    tags: SERIALIZED_TAGS,
-  },
-  {
-    name: "runtime_proxy_translates_anthropic_messages_to_responses_and_back",
-    tags: SERIALIZED_TAGS,
-  },
-  {
-    name: "runtime_proxy_streams_anthropic_messages_from_buffered_responses",
-    tags: SERIALIZED_TAGS,
-  },
-  {
+        {
     name: "runtime_proxy_websocket_previous_response_not_found_after_commit_passes_through",
     tags: CONTINUATION_TAGS,
   },

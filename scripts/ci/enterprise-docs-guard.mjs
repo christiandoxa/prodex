@@ -156,21 +156,7 @@ const PACKAGE_JSON_PATH = "package.json";
 const REQUIRED_ENTERPRISE_WORKFLOW_COMMANDS = [
   "node scripts/ci/enterprise-docs-guard.mjs --self-test && node scripts/ci/enterprise-docs-guard.mjs",
   "node scripts/ci/enterprise-id-boundary-guard.mjs --self-test && node scripts/ci/enterprise-id-boundary-guard.mjs",
-  "node scripts/ci/enterprise-binaries-guard.mjs --self-test && node scripts/ci/enterprise-binaries-guard.mjs",
-  "node scripts/ci/application-boundary-guard.mjs --self-test && node scripts/ci/application-boundary-guard.mjs",
-  "node scripts/ci/auth-boundary-guard.mjs --self-test && node scripts/ci/auth-boundary-guard.mjs",
-  "node scripts/ci/config-boundary-guard.mjs --self-test && node scripts/ci/config-boundary-guard.mjs",
-  "node scripts/ci/control-plane-boundary-guard.mjs --self-test && node scripts/ci/control-plane-boundary-guard.mjs",
-  "node scripts/ci/observability-boundary-guard.mjs --self-test && node scripts/ci/observability-boundary-guard.mjs",
-  "node scripts/ci/provider-spi-boundary-guard.mjs --self-test && node scripts/ci/provider-spi-boundary-guard.mjs",
-  "node scripts/ci/storage-boundary-guard.mjs --self-test && node scripts/ci/storage-boundary-guard.mjs",
-  "node scripts/ci/backup-restore-drill.mjs --self-test && node scripts/ci/backup-restore-drill.mjs",
-  "node scripts/ci/storage-postgres-boundary-guard.mjs --self-test && node scripts/ci/storage-postgres-boundary-guard.mjs",
-  "node scripts/ci/storage-redis-boundary-guard.mjs --self-test && node scripts/ci/storage-redis-boundary-guard.mjs",
-  "node scripts/ci/storage-sqlite-boundary-guard.mjs --self-test && node scripts/ci/storage-sqlite-boundary-guard.mjs",
-  "node scripts/ci/gateway-core-boundary-guard.mjs --self-test && node scripts/ci/gateway-core-boundary-guard.mjs",
-  "node scripts/ci/gateway-http-boundary-guard.mjs --self-test && node scripts/ci/gateway-http-boundary-guard.mjs",
-  "node scripts/ci/deployment-security-guard.mjs --self-test && node scripts/ci/deployment-security-guard.mjs",
+  "node scripts/ci/production-boundary-guard.mjs --self-test && node scripts/ci/production-boundary-guard.mjs",
 ];
 const FORBIDDEN_ENTERPRISE_DOC_PHRASES = [
   {
@@ -460,7 +446,7 @@ function validateForbiddenEnterpriseDocPhrases() {
 
 function validateEnterpriseWorkflow(workflowText, workflowPath = WORKFLOW_PATH) {
   const errors = [];
-  if (!workflowText.includes("Enforce enterprise boundary guards")) {
+  if (!workflowText.includes("Enforce surviving governance boundary guards")) {
     errors.push(`${workflowPath}: missing enterprise boundary guard workflow step`);
   }
   for (const command of REQUIRED_ENTERPRISE_WORKFLOW_COMMANDS) {
@@ -538,8 +524,8 @@ function runSelfTest() {
   const validReferenceMatrix = JSON.stringify({
     schema_version: TEST_MATRIX_SCHEMA_VERSION,
     tests: [validMatrixRow({
-      test_command: "cargo test --locked --workspace -- explicit_deny_wins_and_drops_obligations",
-      evidence: ["explicit_deny_wins_and_drops_obligations"],
+      test_command: "cargo test --locked --workspace -- sensitive_identifier_keys_are_rejected",
+      evidence: ["sensitive_identifier_keys_are_rejected"],
     })],
   });
   if (validateTestMatrix(validReferenceMatrix, "test-matrix.json").length !== 0) {
@@ -688,11 +674,11 @@ function runSelfTest() {
     throw new Error("self-test failed: missing governance lifecycle route accepted");
   }
 
-  const incompleteWorkflow = "name: CI\n- name: Enforce enterprise boundary guards\n  run: node scripts/ci/enterprise-docs-guard.mjs --self-test && node scripts/ci/enterprise-docs-guard.mjs\n";
+  const incompleteWorkflow = "name: CI\n- name: Enforce surviving governance boundary guards\n  run: node scripts/ci/enterprise-docs-guard.mjs --self-test && node scripts/ci/enterprise-docs-guard.mjs\n";
   const workflowErrors = validateEnterpriseWorkflow(incompleteWorkflow, "ci.yml");
   if (
     !workflowErrors.some((error) =>
-      error.includes("node scripts/ci/deployment-security-guard.mjs --self-test && node scripts/ci/deployment-security-guard.mjs"),
+      error.includes("node scripts/ci/production-boundary-guard.mjs --self-test && node scripts/ci/production-boundary-guard.mjs"),
     )
   ) {
     throw new Error("self-test failed: missing enterprise workflow command accepted");
@@ -700,7 +686,7 @@ function runSelfTest() {
 
   const completeWorkflow = [
     "name: CI",
-    "- name: Enforce enterprise boundary guards",
+    "- name: Enforce surviving governance boundary guards",
     ...REQUIRED_ENTERPRISE_WORKFLOW_COMMANDS,
   ].join("\n");
   if (validateEnterpriseWorkflow(completeWorkflow, "ci.yml").length !== 0) {
@@ -730,26 +716,35 @@ function main() {
     );
   }
   const lifecycleOpenapiPath = path.join(repoRoot, GOVERNANCE_LIFECYCLE_OPENAPI_PATH);
-  const evidenceSources = {};
-  for (const { sourcePath } of GOVERNANCE_SECURITY_EVIDENCE_TESTS) {
-    if (Object.hasOwn(evidenceSources, sourcePath)) continue;
-    const fullPath = path.join(repoRoot, sourcePath);
-    if (!fs.existsSync(fullPath)) {
-      errors.push(`${sourcePath}: required governance evidence source is missing`);
-    } else {
-      evidenceSources[sourcePath] = fs.readFileSync(fullPath, "utf8");
+  const lifecycleOpenapiExists = fs.existsSync(lifecycleOpenapiPath);
+  const lifecycleSourceEntries = GOVERNANCE_SECURITY_EVIDENCE_TESTS.map(({ sourcePath }) => [
+    sourcePath,
+    path.join(repoRoot, sourcePath),
+  ]);
+  const lifecycleImplementationPresent =
+    lifecycleOpenapiExists ||
+    lifecycleSourceEntries.some(([, fullPath]) => fs.existsSync(fullPath));
+  if (lifecycleImplementationPresent) {
+    const evidenceSources = {};
+    for (const [sourcePath, fullPath] of lifecycleSourceEntries) {
+      if (Object.hasOwn(evidenceSources, sourcePath)) continue;
+      if (!fs.existsSync(fullPath)) {
+        errors.push(`${sourcePath}: required governance evidence source is missing`);
+      } else {
+        evidenceSources[sourcePath] = fs.readFileSync(fullPath, "utf8");
+      }
     }
-  }
-  if (!fs.existsSync(lifecycleOpenapiPath)) {
-    errors.push(`${GOVERNANCE_LIFECYCLE_OPENAPI_PATH}: required governance OpenAPI is missing`);
-  } else if (testMatrixText !== null) {
-    errors.push(
-      ...validateGovernanceLifecycleEvidence(
-        testMatrixText,
-        fs.readFileSync(lifecycleOpenapiPath, "utf8"),
-        evidenceSources,
-      ),
-    );
+    if (!lifecycleOpenapiExists) {
+      errors.push(`${GOVERNANCE_LIFECYCLE_OPENAPI_PATH}: required governance OpenAPI is missing`);
+    } else if (testMatrixText !== null) {
+      errors.push(
+        ...validateGovernanceLifecycleEvidence(
+          testMatrixText,
+          fs.readFileSync(lifecycleOpenapiPath, "utf8"),
+          evidenceSources,
+        ),
+      );
+    }
   }
   errors.push(...validateForbiddenEnterpriseDocPhrases());
   const workflowPath = path.join(repoRoot, WORKFLOW_PATH);

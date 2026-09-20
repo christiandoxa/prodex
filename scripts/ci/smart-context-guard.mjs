@@ -84,8 +84,12 @@ export function validateSmartContext(sources) {
 
   const artifact = sources[paths.artifact] ?? "";
   const insert = section(artifact, "pub(crate) fn insert_text", "pub(crate) fn get_text");
-  if (!insert.includes("next_artifact_order") || /request_id|\.sequence/u.test(insert)) {
-    errors.push("artifact ordering must use its persisted order counter, never request IDs");
+  const monotonicPersistedOrder =
+    insert.includes("artifact.order") &&
+    insert.includes(".max()") &&
+    insert.includes(".saturating_add(1)");
+  if (!monotonicPersistedOrder || /request_id|\.sequence/u.test(insert)) {
+    errors.push("artifact ordering must derive monotonically from persisted artifact order, never request IDs");
   }
 
   const hash = sources[paths.hash] ?? "";
@@ -129,6 +133,13 @@ function selfTest() {
     validateSmartContext({ ...valid, [paths.manifest]: 'json!({"role": "user"})' }).some((error) =>
       error.includes("synthesize a user"),
     ),
+  );
+  assert(
+    validateSmartContext({
+      ...valid,
+      [paths.artifact]:
+        "pub(crate) fn insert_text(&mut self, request_id: u64) { let order = request_id; }\npub(crate) fn get_text() {}",
+    }).some((error) => error.includes("persisted artifact order")),
   );
 }
 

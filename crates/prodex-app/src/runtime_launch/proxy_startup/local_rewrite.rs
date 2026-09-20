@@ -13,8 +13,6 @@ pub(super) use self::context::{
     RuntimeLocalRewriteRequestContext,
 };
 use self::listener_worker::spawn_runtime_local_rewrite_listener_worker;
-#[cfg(test)]
-pub(crate) use super::local_rewrite_constraints::start_runtime_local_rewrite_proxy;
 pub(crate) use super::local_rewrite_constraints::start_runtime_local_rewrite_proxy;
 use super::local_rewrite_copilot::runtime_copilot_oauth_pool_from_provider;
 use super::local_rewrite_gemini::runtime_gemini_oauth_pool_from_provider;
@@ -239,12 +237,6 @@ pub(super) fn start_runtime_local_rewrite_proxy_with_file_access(
         request_sequence: Arc::clone(&shared.runtime_shared.request_sequence),
         #[cfg(test)]
         lane_admission: shared.runtime_shared.lane_admission.clone(),
-        #[cfg(test)]
-        gateway_route_load: None,
-        #[cfg(test)]
-        gateway_usage: None,
-        #[cfg(test)]
-        gateway_side_effect_snapshot: None,
         owner_lock: None,
         _live_log_source: None,
         _marker_guard: marker_guard,

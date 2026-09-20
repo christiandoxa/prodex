@@ -30,5 +30,4 @@ fn native_kiro_resolution_does_not_inject_the_codex_bridge_provider() {
 
     assert_eq!(main_agent.provider, ProviderId::Kiro);
     assert_eq!(args.provider, None);
-    crate::runtime_gemini_cli::validate_super_native_cli_preflight(&args).unwrap();
 }

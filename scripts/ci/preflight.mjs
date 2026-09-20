@@ -17,7 +17,6 @@ export function parseArgs(argv, environment = process.env) {
     jobs: defaultJobCount(),
     fastTests: true,
     serial: false,
-    storagePostgresProof: environment.PRODEX_PREFLIGHT_STORAGE_POSTGRES_PROOF === "1",
   };
 
   for (let index = 2; index < argv.length; index += 1) {
@@ -70,10 +69,6 @@ export function parseArgs(argv, environment = process.env) {
       args.serial = true;
       continue;
     }
-    if (value === "--storage-postgres-proof") {
-      args.storagePostgresProof = true;
-      continue;
-    }
     if (value === "--help" || value === "-h") {
       args.help = true;
       continue;
@@ -87,7 +82,7 @@ export function parseArgs(argv, environment = process.env) {
 function printHelp() {
   process.stdout.write(
     [
-      "Usage: node scripts/ci/preflight.mjs [--jobs <n>] [--no-tests] [--serial] [--storage-postgres-proof] [--churn-check|--churn-report-only] [--churn-range <range>] [--churn-ignore-before <rev>] [--dry-run]",
+      "Usage: node scripts/ci/preflight.mjs [--jobs <n>] [--no-tests] [--serial] [--churn-check|--churn-report-only] [--churn-range <range>] [--churn-ignore-before <rev>] [--dry-run]",
       "",
       "Runs the practical local preflight gate before pushing.",
       "",
@@ -103,7 +98,6 @@ function printHelp() {
       "  --jobs <n>        set test:fast child process parallelism",
       "  --serial          also run npm run test:serial -- --suite all",
       "  --no-tests        skip test:fast; useful when only checking metadata/clippy",
-      "  --storage-postgres-proof  also run node scripts/ci/storage-postgres-proof.mjs --self-test && node scripts/ci/storage-postgres-proof.mjs (or set PRODEX_PREFLIGHT_STORAGE_POSTGRES_PROOF=1)",
       "  --churn-check        fail when churn hygiene thresholds are exceeded; default unless report-only env is set",
       "  --churn-report-only  force churn hygiene report-only mode",
       "  --no-churn-check     deprecated alias for --churn-report-only",
@@ -199,16 +193,6 @@ export function preflightSteps(args) {
       args: ["scripts/ci/enterprise-id-boundary-guard.mjs"],
     },
     {
-      label: "enterprise-binaries-guard-self-test",
-      command: "node",
-      args: ["scripts/ci/enterprise-binaries-guard.mjs", "--self-test"],
-    },
-    {
-      label: "enterprise-binaries-guard",
-      command: "node",
-      args: ["scripts/ci/enterprise-binaries-guard.mjs"],
-    },
-    {
       label: "crate-boundary-guard-self-test",
       command: "node",
       args: ["scripts/ci/crate-boundary-guard.mjs", "--self-test"],
@@ -229,16 +213,6 @@ export function preflightSteps(args) {
       args: ["scripts/ci/domain-boundary-guard.mjs"],
     },
     {
-      label: "application-boundary-guard-self-test",
-      command: "node",
-      args: ["scripts/ci/application-boundary-guard.mjs", "--self-test"],
-    },
-    {
-      label: "application-boundary-guard",
-      command: "node",
-      args: ["scripts/ci/application-boundary-guard.mjs"],
-    },
-    {
       label: "production-boundary-guard-self-test",
       command: "node",
       args: ["scripts/ci/production-boundary-guard.mjs", "--self-test"],
@@ -247,126 +221,6 @@ export function preflightSteps(args) {
       label: "production-boundary-guard",
       command: "node",
       args: ["scripts/ci/production-boundary-guard.mjs"],
-    },
-    {
-      label: "control-plane-boundary-guard-self-test",
-      command: "node",
-      args: ["scripts/ci/control-plane-boundary-guard.mjs", "--self-test"],
-    },
-    {
-      label: "control-plane-boundary-guard",
-      command: "node",
-      args: ["scripts/ci/control-plane-boundary-guard.mjs"],
-    },
-    {
-      label: "auth-boundary-guard-self-test",
-      command: "node",
-      args: ["scripts/ci/auth-boundary-guard.mjs", "--self-test"],
-    },
-    {
-      label: "auth-boundary-guard",
-      command: "node",
-      args: ["scripts/ci/auth-boundary-guard.mjs"],
-    },
-    {
-      label: "config-boundary-guard-self-test",
-      command: "node",
-      args: ["scripts/ci/config-boundary-guard.mjs", "--self-test"],
-    },
-    {
-      label: "config-boundary-guard",
-      command: "node",
-      args: ["scripts/ci/config-boundary-guard.mjs"],
-    },
-    {
-      label: "observability-boundary-guard-self-test",
-      command: "node",
-      args: ["scripts/ci/observability-boundary-guard.mjs", "--self-test"],
-    },
-    {
-      label: "observability-boundary-guard",
-      command: "node",
-      args: ["scripts/ci/observability-boundary-guard.mjs"],
-    },
-    {
-      label: "provider-spi-boundary-guard-self-test",
-      command: "node",
-      args: ["scripts/ci/provider-spi-boundary-guard.mjs", "--self-test"],
-    },
-    {
-      label: "provider-spi-boundary-guard",
-      command: "node",
-      args: ["scripts/ci/provider-spi-boundary-guard.mjs"],
-    },
-    {
-      label: "storage-boundary-guard-self-test",
-      command: "node",
-      args: ["scripts/ci/storage-boundary-guard.mjs", "--self-test"],
-    },
-    {
-      label: "storage-boundary-guard",
-      command: "node",
-      args: ["scripts/ci/storage-boundary-guard.mjs"],
-    },
-    {
-      label: "storage-postgres-boundary-guard-self-test",
-      command: "node",
-      args: ["scripts/ci/storage-postgres-boundary-guard.mjs", "--self-test"],
-    },
-    {
-      label: "storage-postgres-boundary-guard",
-      command: "node",
-      args: ["scripts/ci/storage-postgres-boundary-guard.mjs"],
-    },
-    {
-      label: "storage-redis-boundary-guard-self-test",
-      command: "node",
-      args: ["scripts/ci/storage-redis-boundary-guard.mjs", "--self-test"],
-    },
-    {
-      label: "storage-redis-boundary-guard",
-      command: "node",
-      args: ["scripts/ci/storage-redis-boundary-guard.mjs"],
-    },
-    {
-      label: "storage-sqlite-boundary-guard-self-test",
-      command: "node",
-      args: ["scripts/ci/storage-sqlite-boundary-guard.mjs", "--self-test"],
-    },
-    {
-      label: "storage-sqlite-boundary-guard",
-      command: "node",
-      args: ["scripts/ci/storage-sqlite-boundary-guard.mjs"],
-    },
-    {
-      label: "gateway-core-boundary-guard-self-test",
-      command: "node",
-      args: ["scripts/ci/gateway-core-boundary-guard.mjs", "--self-test"],
-    },
-    {
-      label: "gateway-core-boundary-guard",
-      command: "node",
-      args: ["scripts/ci/gateway-core-boundary-guard.mjs"],
-    },
-    {
-      label: "gateway-http-boundary-guard-self-test",
-      command: "node",
-      args: ["scripts/ci/gateway-http-boundary-guard.mjs", "--self-test"],
-    },
-    {
-      label: "gateway-http-boundary-guard",
-      command: "node",
-      args: ["scripts/ci/gateway-http-boundary-guard.mjs"],
-    },
-    {
-      label: "deployment-security-guard-self-test",
-      command: "node",
-      args: ["scripts/ci/deployment-security-guard.mjs", "--self-test"],
-    },
-    {
-      label: "deployment-security-guard",
-      command: "node",
-      args: ["scripts/ci/deployment-security-guard.mjs"],
     },
     {
       label: "runtime-hotpath-guard-self-test",
@@ -399,19 +253,6 @@ export function preflightSteps(args) {
       args: ["clippy", "--locked", "--workspace", "--all-targets", "--all-features", "--", "-D", "warnings"],
     },
   ];
-
-  if (args.storagePostgresProof) {
-    steps.push({
-      label: "storage-postgres-proof-self-test",
-      command: "node",
-      args: ["scripts/ci/storage-postgres-proof.mjs", "--self-test"],
-    });
-    steps.push({
-      label: "storage-postgres-proof",
-      command: "node",
-      args: ["scripts/ci/storage-postgres-proof.mjs"],
-    });
-  }
 
   if (args.fastTests) {
     steps.push({

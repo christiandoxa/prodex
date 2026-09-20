@@ -424,20 +424,6 @@ const fn local_placeholder(_kind: FindingKind) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use prodex_runtime_policy::RuntimePolicyInspectionPattern;
-    use uuid::Uuid;
-
-    fn tenant(value: u128) -> TenantId {
-        TenantId::from_uuid(Uuid::from_u128(value))
-    }
-
-    fn pattern(tenant_id: TenantId, id: &str, pattern: &str) -> RuntimePolicyInspectionPattern {
-        RuntimePolicyInspectionPattern {
-            tenant_id,
-            id: id.to_string(),
-            pattern: pattern.to_string(),
-        }
-    }
 
     #[test]
     fn local_inspection_masks_supported_nested_content_and_preserves_structure() {
@@ -504,61 +490,5 @@ mod tests {
 
         assert!(!rendered.contains("malformed-secret-without-footer"));
         assert!(rendered.contains("<redacted>"));
-    }
-
-    #[test]
-    fn tenant_patterns_are_isolated_and_support_unicode_interior_globs() {
-        let first = tenant(1);
-        let second = tenant(2);
-        let patterns = RuntimeTenantDetectorPatterns::compile(&[
-            pattern(first, "customer-code", "顧客-*秘密"),
-            pattern(second, "other-code", "other-secret"),
-        ])
-        .unwrap();
-        let body = "prefix 顧客-東京秘密 suffix other-secret"
-            .as_bytes()
-            .to_vec();
-
-        let inspected =
-            runtime_local_inspect_and_mask_for_tenant(body, &patterns, Some(first)).unwrap();
-        let rendered = String::from_utf8(inspected.body).unwrap();
-
-        assert_eq!(rendered, "prefix <redacted> suffix other-secret");
-        assert_eq!(inspected.findings.len(), 1);
-        assert_eq!(inspected.findings[0].kind(), FindingKind::TenantSensitive);
-    }
-
-    #[test]
-    fn tenant_pattern_compilation_and_matches_are_bounded() {
-        let tenant_id = tenant(1);
-        assert!(
-            RuntimeTenantDetectorPatterns::compile(&[pattern(tenant_id, "unbounded", "*secret")])
-                .is_err()
-        );
-        let too_many = (0..=MAX_TENANT_PATTERNS_PER_TENANT)
-            .map(|index| {
-                pattern(
-                    tenant_id,
-                    &format!("id-{index}"),
-                    &format!("secret-{index}"),
-                )
-            })
-            .collect::<Vec<_>>();
-        assert!(RuntimeTenantDetectorPatterns::compile(&too_many).is_err());
-
-        let patterns =
-            RuntimeTenantDetectorPatterns::compile(&[pattern(tenant_id, "flood", "tenant-secret")])
-                .unwrap();
-        let flood = std::iter::repeat_n("tenant-secret", MAX_INSPECTION_FINDINGS + 1)
-            .collect::<Vec<_>>()
-            .join(" ");
-        assert!(
-            runtime_local_inspect_and_mask_for_tenant(
-                flood.into_bytes(),
-                &patterns,
-                Some(tenant_id)
-            )
-            .is_err()
-        );
     }
 }

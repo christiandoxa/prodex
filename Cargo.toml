@@ -192,10 +192,6 @@ name = "runtime_proxy_hot_paths"
 harness = false
 required-features = ["bench-support"]
 
-[[bench]]
-name = "governance_hot_paths"
-harness = false
-
 [workspace.lints.rust]
 unsafe_op_in_unsafe_fn = "deny"
 

@@ -16,11 +16,6 @@ const CI_WORKFLOW_PATH = ".github/workflows/ci.yml";
 const MAIN_INTERNAL_RUNTIME_PROXY_PREFIX = "main_internal_tests::runtime_proxy_";
 const MAIN_INTERNAL_RUNTIME_CI_PREFIXES = Object.freeze([
   MAIN_INTERNAL_RUNTIME_PROXY_PREFIX,
-  "main_internal_tests::info_and_broker::runtime_proxy_broker_",
-  "main_internal_tests::info_and_broker::runtime_proxy_log_paths_",
-  "main_internal_tests::runtime_broker_tuning::runtime_proxy_",
-  "main_internal_tests::claude_launch::runtime_proxy_claude_launch_",
-  "main_internal_tests::claude_launch::missing_external_caveman_",
 ]);
 const RUNTIME_PROXY_WORKFLOW_JOB = "main-internal-runtime-proxy";
 const KNOWN_RUNTIME_TAGS = new Set(Object.values(RUNTIME_TEST_TAGS));

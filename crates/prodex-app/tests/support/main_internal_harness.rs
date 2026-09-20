@@ -74,7 +74,6 @@ fn next_runtime_response_candidate(
 }
 
 include!("main_internal_body.rs");
-include!("claude_model_selector_body.rs");
 
 #[test]
 fn runtime_profile_usage_auth_uses_warm_cache_without_disk_access() {

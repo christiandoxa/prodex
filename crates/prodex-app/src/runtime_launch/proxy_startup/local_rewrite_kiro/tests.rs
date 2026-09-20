@@ -1,5 +1,4 @@
 use super::*;
-use crate::runtime_anthropic::translate_runtime_anthropic_messages_request;
 use crate::runtime_launch::proxy_startup::chat_compatible_rewrite::runtime_provider_chat_compatible_request_body;
 use crate::runtime_launch::proxy_startup::provider_bridge::RuntimeProviderBridgeKind;
 use serde_json::{Value, json};
@@ -328,100 +327,6 @@ fn kiro_responses_stream_preserves_terminal_status() {
     }
 }
 
-fn test_kiro_anthropic_request() -> RuntimeAnthropicMessagesRequest {
-    translate_runtime_anthropic_messages_request(&RuntimeProxyRequest {
-        method: "POST".to_string(),
-        path_and_query: "/v1/messages".to_string(),
-        headers: vec![("anthropic-version".to_string(), "2023-06-01".to_string())],
-        body: serde_json::to_vec(&json!({
-            "model": "claude-sonnet-4",
-            "max_tokens": 128,
-            "stream": false,
-            "messages": [{"role": "user", "content": "hello"}]
-        }))
-        .unwrap(),
-    })
-    .expect("Anthropic request should translate")
-}
-
-fn test_kiro_anthropic_response(value: Value) -> RuntimeLocalRewriteUpstreamResponse {
-    RuntimeLocalRewriteUpstreamResponse::Buffered(RuntimeHeapTrimmedBufferedResponseParts {
-        status: 200,
-        headers: vec![("content-type".to_string(), b"application/json".to_vec())],
-        body: serde_json::to_vec(&value).unwrap().into(),
-    })
-}
-
-#[test]
-fn kiro_anthropic_buffered_translation_preserves_terminal_status() {
-    let request = test_kiro_anthropic_request();
-    let cases = [
-        (
-            json!({
-                "status": "failed",
-                "error": {"code": "-1", "message": "ACP failed"}
-            }),
-            502,
-            Some("ACP failed"),
-            None,
-        ),
-        (
-            json!({
-                "status": "incomplete",
-                "incomplete_details": {
-                    "reason": "cancelled",
-                    "message": "ACP stopped early"
-                }
-            }),
-            502,
-            Some("ACP stopped early"),
-            None,
-        ),
-        (
-            json!({
-                "status": "incomplete",
-                "incomplete_details": {
-                    "reason": "max_output_tokens",
-                    "message": "ACP reached the token limit"
-                },
-                "output": [{
-                    "type": "message",
-                    "content": [{"type": "output_text", "text": "limited"}]
-                }]
-            }),
-            200,
-            None,
-            Some("max_tokens"),
-        ),
-        (
-            json!({
-                "status": "completed",
-                "output": [{
-                    "type": "message",
-                    "content": [{"type": "output_text", "text": "done"}]
-                }]
-            }),
-            200,
-            None,
-            Some("end_turn"),
-        ),
-    ];
-
-    for (value, expected_status, error_message, stop_reason) in cases {
-        let response = test_kiro_anthropic_response(value);
-        let parts = runtime_kiro_anthropic_message_parts_from_response(&response, &request);
-        assert_eq!(parts.status, expected_status);
-        let body: Value = serde_json::from_slice(&parts.body).expect("Anthropic body should parse");
-        if let Some(error_message) = error_message {
-            assert_eq!(body["type"], "error");
-            assert_eq!(body["error"]["message"], error_message);
-        } else {
-            assert_eq!(body["type"], "message");
-            assert_eq!(body["stop_reason"], stop_reason.unwrap());
-        }
-    }
-}
-
 fn write_fake_kiro_compact_agent(root: &Path) -> std::path::PathBuf {
     crate::test_support::write_test_python_executable(
         root,
@@ -488,45 +393,6 @@ fn kiro_chat_legacy_function_role_maps_to_function_call_output() {
     assert_eq!(items[0]["type"], "function_call_output");
     assert_eq!(items[0]["call_id"], "read_file");
     assert_eq!(items[0]["output"], "ok");
-}
-
-#[test]
-fn kiro_messages_translation_preserves_anthropic_user_text() {
-    let request = crate::RuntimeProxyRequest {
-        method: "POST".to_string(),
-        path_and_query: "/v1/messages".to_string(),
-        headers: vec![("anthropic-version".to_string(), "2023-06-01".to_string())],
-        body: serde_json::to_vec(&json!({
-            "model": "claude-sonnet-4",
-            "max_tokens": 128,
-            "stream": false,
-            "messages": [{
-                "role": "user",
-                "content": "start tool"
-            }]
-        }))
-        .unwrap(),
-    };
-    let translated_request =
-        translate_runtime_anthropic_messages_request(&request).expect("anthropic request");
-    let conversations = RuntimeDeepSeekConversationStore::default();
-    let translated = runtime_provider_chat_compatible_request_body(
-        &translated_request.translated_request.body,
-        &conversations,
-        RuntimeProviderBridgeKind::Kiro,
-        "",
-        false,
-        Default::default(),
-    )
-    .expect("kiro translated request");
-    let request_body = String::from_utf8(translated_request.translated_request.body.clone())
-        .expect("translated request should be utf8");
-    let messages_json = serde_json::to_string(&translated.messages).unwrap();
-    assert!(
-        messages_json.contains("start tool"),
-        "{request_body}\n{messages_json}"
-    );
-    assert!(runtime_kiro_prompt_from_messages(&translated.messages).contains("start tool"));
 }
 
 #[test]

@@ -1,13 +1,11 @@
 use super::{
     RuntimeLaunchDryRunChild, join_thread_with_timeout, profile_openai_compatible_dry_run_child,
-    runtime_launch_dry_run_tui_text, runtime_launch_dry_run_value_color,
 };
 #[cfg(unix)]
 use super::{
     configure_child_process_group, terminate_child_process_group_best_effort,
     terminate_child_process_tree,
 };
-use ratatui::style::Color;
 use std::fs;
 use std::path::Path;
 #[cfg(unix)]
@@ -23,44 +21,6 @@ fn app_paths(root: &Path) -> crate::AppPaths {
         shared_codex_root: root.join("shared"),
         legacy_shared_codex_root: root.join("legacy-shared"),
     }
-}
-
-#[test]
-fn runtime_launch_dry_run_tui_text_keeps_report_content() {
-    let text = runtime_launch_dry_run_tui_text(
-        "Command: codex\nRuntime proxy: enabled\nPresidio redaction: disabled\n",
-    );
-    let rendered = text
-        .lines
-        .iter()
-        .map(|line| {
-            line.spans
-                .iter()
-                .map(|span| span.content.as_ref())
-                .collect::<String>()
-        })
-        .collect::<Vec<_>>()
-        .join("\n");
-
-    assert!(rendered.contains("Command: codex"));
-    assert!(rendered.contains("Runtime proxy: enabled"));
-    assert!(rendered.contains("Presidio redaction: disabled"));
-}
-
-#[test]
-fn runtime_launch_dry_run_value_color_highlights_status() {
-    assert_eq!(
-        runtime_launch_dry_run_value_color("Runtime proxy", "enabled"),
-        Color::Green
-    );
-    assert_eq!(
-        runtime_launch_dry_run_value_color("Presidio redaction", "disabled"),
-        Color::Red
-    );
-    assert_eq!(
-        runtime_launch_dry_run_value_color("Command", "codex"),
-        Color::Cyan
-    );
 }
 
 #[test]

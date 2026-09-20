@@ -6,7 +6,6 @@ import test from "node:test";
 const WINDOWS_TEST_SUITES = Object.freeze([
   "members-foundation",
   "members-runtime",
-  "members-storage",
   "root-0",
   "root-1",
   "root-tests",
@@ -61,19 +60,18 @@ test("Windows CI partitions tests and installer work with one cache writer", () 
   assert.deepEqual(suites, WINDOWS_TEST_SUITES);
   assert.equal(new Set(suites).size, WINDOWS_TEST_SUITES.length);
   assert.equal(block.match(/save_cache: true/g)?.length, 1);
-  assert.equal(block.match(/save_cache: false/g)?.length, 6);
+  assert.equal(block.match(/save_cache: false/g)?.length, 5);
   assert.match(block, /CARGO_INCREMENTAL: "0"/);
   assert.match(block, /CARGO_PROFILE_TEST_DEBUG: "0"/);
-  assert.equal(block.match(/shell: bash/g)?.length, 4);
+  assert.equal(block.match(/shell: bash/g)?.length, 3);
   assert.match(block, /--workspace --exclude prodex --exclude prodex-app/);
   assert.match(
     block,
-    /-p prodex --lib --bins --examples --test dashboard_control_plane --test enterprise_binaries --test internal_commands/,
+    /-p prodex --lib --bins --examples --test dashboard_control_plane --test internal_commands/,
   );
   assert.doesNotMatch(block, /-p prodex --all-features -- --test-threads/);
-  assert.match(block, /--workspace --exclude prodex --exclude prodex-app --exclude 'prodex-runtime-\*' --exclude 'prodex-storage\*' -- --test-threads/);
+  assert.match(block, /--workspace --exclude prodex --exclude prodex-app --exclude 'prodex-runtime-\*' -- --test-threads/);
   assert.match(block, /-p 'prodex-runtime-\*' -- --test-threads/);
-  assert.match(block, /-p 'prodex-storage\*' -- --test-threads/);
   assert.doesNotMatch(block, /Run Windows prodex-app tests/);
   assert.match(block, /Run Windows non-sharded root tests\n\s+if: matrix\.suite == 'root-tests'/);
   assert.match(

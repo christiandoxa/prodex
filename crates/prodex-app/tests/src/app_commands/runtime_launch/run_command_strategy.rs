@@ -2,8 +2,6 @@ use super::*;
 
 #[path = "run_command_strategy/live_goal_resume.rs"]
 mod live_goal_resume;
-#[path = "run_command_strategy/model_resume.rs"]
-mod model_resume;
 #[path = "run_command_strategy/session_binding.rs"]
 mod session_binding;
 #[path = "run_command_strategy/workflow_recovery.rs"]

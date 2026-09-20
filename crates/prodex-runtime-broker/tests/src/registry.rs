@@ -6,16 +6,16 @@ fn registry_builds_admin_urls_and_matches_launch_config() {
     let registry = test_registry();
 
     assert_eq!(
-        RuntimeBrokerAdminRoute::from_path("/__prodex/runtime/metrics/prometheus"),
-        Some(RuntimeBrokerAdminRoute::MetricsPrometheus)
+        RuntimeBrokerAdminRoute::from_path("/__prodex/runtime/metrics"),
+        Some(RuntimeBrokerAdminRoute::Metrics)
     );
     assert_eq!(
         registry.health_url(),
         "http://127.0.0.1:4567/__prodex/runtime/health"
     );
     assert_eq!(
-        registry.metrics_prometheus_url(),
-        "http://127.0.0.1:4567/__prodex/runtime/metrics/prometheus"
+        registry.metrics_url(),
+        "http://127.0.0.1:4567/__prodex/runtime/metrics"
     );
     assert_eq!(
         registry.release_session_affinity_url(),

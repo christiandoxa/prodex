@@ -1,4 +1,4 @@
-#[cfg(test)]
+#[cfg(any(test, feature = "bench-support"))]
 use super::super::{
     RuntimeSmartContextArtifact, RuntimeSmartContextArtifactChunkIndex,
     RuntimeSmartContextArtifactLineIndex, runtime_smart_context_artifact_chunk_index,
@@ -11,7 +11,7 @@ use super::RuntimeSmartContextStaticFingerprintMetadata;
 use super::types::RuntimeSmartContextStaticFingerprintMetadata;
 
 impl RuntimeSmartContextArtifactStore {
-    #[cfg(test)]
+    #[cfg(any(test, feature = "bench-support"))]
     pub(crate) fn insert_text(
         &mut self,
         text: &str,
