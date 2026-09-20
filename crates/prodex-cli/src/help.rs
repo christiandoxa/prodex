@@ -47,7 +47,7 @@ Notes:
   A leading non-option argument selects the profile; `status` remains Codex login status.
   Use --profile when selecting a profile literally named `status`.
   OpenAI/Codex, Claude, and API-key login paths create or update Prodex profiles.
-  Google Gemini OAuth is unsupported. Use a Gemini API key for the Codex bridge, or native `prodex s gemini --cli gemini` for supported Vertex AI authentication.
+  Google Gemini OAuth profiles are unsupported. Use a Gemini API key with `prodex s gemini`; native Antigravity remains available through `prodex s gemini --cli agy`.
   Antigravity login delegates to `agy auth login` and does not create a Prodex profile.";
 pub const CLI_QUOTA_AFTER_HELP: &str = "\
 Best practice:
@@ -98,9 +98,9 @@ Examples:
   prodex super --url http://127.0.0.1:8131
   prodex super deepseek --model deepseek-v4-pro
   prodex super gemini
-  prodex super gemini --cli gemini
-  prodex super --provider copilot --cli copilot
-  prodex super --cli kiro --profile kiro-main
+  prodex super gemini
+  prodex super --provider copilot
+  prodex super --provider kiro --profile kiro-main
   prodex super gemini --cli agy
   prodex super --sub-agent --sub-agent-provider openai --sub-agent-model gpt-5.3-codex
   prodex super --sub-agent --sub-agent-model-reasoning-effort xhigh
@@ -124,12 +124,12 @@ Notes:
   When `--url` is set, Prodex injects a temporary `prodex-local` model provider, skips quota/rotation, and uses a local Smart Context rewrite proxy.
   Use `--provider anthropic` to route through Anthropic's OpenAI-compatible Chat Completions API. Sign in with `prodex login --with-claude`, or supply `--api-key`, ANTHROPIC_API_KEY, or ANTHROPIC_API_KEYS.
   Use `--provider copilot` to keep Codex/Super and route through a local Responses-to-Copilot adapter. Import Copilot profiles first for account routing/rotation, or supply `--api-key`, GITHUB_COPILOT_API_KEY, or GITHUB_COPILOT_API_KEYS.
-  Add `--cli copilot` with `--provider copilot` to launch GitHub Copilot CLI through the same Prodex Responses proxy. Override the binary with PRODEX_COPILOT_BIN.
+  Use `--provider copilot` for the GitHub Copilot provider bridge.
   Use `deepseek` or `--provider deepseek` to keep Codex/Super and route through a local Responses-to-DeepSeek adapter. Supply `--api-key`, DEEPSEEK_API_KEY, or DEEPSEEK_API_KEYS.
   Use `gemini` or `--provider gemini` to route Codex through Gemini with `--api-key`, GEMINI_API_KEY, GEMINI_API_KEYS, GOOGLE_API_KEY, or GOOGLE_API_KEYS.
   Google Gemini OAuth profile routing is unsupported and disabled. Existing OAuth profiles remain readable for migration diagnostics but cannot launch.
-  Add `--cli gemini` to launch the native Gemini CLI with authentication, including supported Vertex AI configuration, owned by that CLI or its environment. Prodex does not inject or reuse the removed OAuth client. Override the binary with PRODEX_GEMINI_BIN.
-  Add `--cli kiro` to launch Kiro CLI from an imported Kiro profile snapshot through an authenticated loopback CONNECT tunnel. Kiro's TLS payload stays opaque; `--provider kiro` is the application-level Codex-to-Kiro ACP bridge. Override the binary with PRODEX_KIRO_BIN.
+  Use `--provider gemini` or positional `gemini` with a Gemini API key for the Gemini provider bridge.
+  Use `--provider kiro --profile <name>` with an imported Kiro profile for the application-level Codex-to-Kiro ACP bridge.
   Add `--cli agy` to launch Antigravity CLI with `--dangerously-skip-permissions`. Antigravity owns its keyring auth and currently cannot use Prodex account rotation. Override the binary with PRODEX_AGY_BIN.
   Local mode defaults to a 16k context window; use `--context-window` and `--auto-compact-token-limit` if your server is configured larger.
   --sub-agent explicitly enables sub-agents; --no-sub-agent explicitly disables them.

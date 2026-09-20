@@ -20,7 +20,7 @@ pub(crate) fn resolve_gemini_runtime_launch_profile_name(
         state,
         requested,
         |provider| matches!(provider, ProfileProvider::Gemini { .. }),
-        "`prodex s --provider gemini` requires --api-key / GEMINI_API_KEY(S) / GOOGLE_API_KEY(S); Google Gemini OAuth profiles are disabled. Use `prodex s gemini --cli gemini` for supported native Vertex AI authentication",
+        "`prodex s --provider gemini` requires --api-key / GEMINI_API_KEY(S) / GOOGLE_API_KEY(S); Google Gemini OAuth profiles are disabled. Use `prodex s gemini` with API-key authentication",
     )
 }
 
@@ -56,7 +56,7 @@ pub(crate) fn resolve_kiro_runtime_launch_profile_name(
         state,
         requested,
         |provider| matches!(provider, ProfileProvider::Kiro { .. }),
-        "`prodex super --cli kiro` requires an imported Kiro profile from `prodex profile import kiro`",
+        "`prodex super --provider kiro` requires an imported Kiro profile from `prodex profile import kiro`",
     )
 }
 

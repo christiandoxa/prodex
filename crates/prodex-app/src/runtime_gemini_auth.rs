@@ -13,7 +13,7 @@ use std::fmt;
 use std::path::{Path, PathBuf};
 
 pub(crate) const GEMINI_OAUTH_SECRET_FILE: &str = "gemini_oauth.json";
-pub(crate) const GEMINI_OAUTH_DISABLED_GUIDANCE: &str = "Google Gemini OAuth profiles are unsupported and disabled. For Codex-fronted Gemini, migrate to a Gemini API key (`--api-key`, `GEMINI_API_KEY`, or `GOOGLE_API_KEY`). For supported Vertex AI authentication, use the native Gemini CLI path (`prodex s gemini --cli gemini`), which owns its authentication.";
+pub(crate) const GEMINI_OAUTH_DISABLED_GUIDANCE: &str = "Google Gemini OAuth profiles are unsupported and disabled. For Codex-fronted Gemini, migrate to a Gemini API key (`--api-key`, `GEMINI_API_KEY`, or `GOOGLE_API_KEY`). Native Gemini CLI compatibility was retired; use the Gemini provider bridge with API-key authentication.";
 
 #[derive(Clone, Serialize, Deserialize)]
 pub(crate) struct GeminiOAuthSecret {
