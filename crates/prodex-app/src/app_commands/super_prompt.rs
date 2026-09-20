@@ -368,38 +368,54 @@ pub(super) fn prompt_super_choice(
     }
     let selected = selected.min(choices.len() - 1);
     loop {
-        let mut stderr = io::stderr().lock();
-        writeln!(stderr, "{title}:")?;
-        for (index, choice) in choices.iter().enumerate() {
-            let marker = if index == selected { "*" } else { " " };
-            writeln!(stderr, "  {marker} {}. {choice}", index + 1)?;
-        }
-        write!(stderr, "Select [{}]: ", selected + 1)?;
-        stderr.flush()?;
-        drop(stderr);
+        render_super_choice_prompt(title, choices, selected)?;
 
         let mut input = String::new();
         io::stdin().read_line(&mut input)?;
-        let value = input.trim();
-        if value.is_empty() {
-            return Ok(selected);
-        }
-        if matches!(
-            value.to_ascii_lowercase().as_str(),
-            "q" | "quit" | "cancel" | "esc"
-        ) {
-            if escape_selects_last {
-                return Ok(choices.len() - 1);
-            }
-            bail!("Prodex Super prompt cancelled");
-        }
-        if let Ok(choice) = value.parse::<usize>()
-            && (1..=choices.len()).contains(&choice)
+        if let Some(choice) =
+            parse_super_choice_input(input.trim(), choices.len(), selected, escape_selects_last)?
         {
-            return Ok(choice - 1);
+            return Ok(choice);
         }
         writeln!(io::stderr(), "Enter a number from 1 to {}.", choices.len())?;
     }
+}
+
+fn render_super_choice_prompt(title: &str, choices: &[String], selected: usize) -> Result<()> {
+    let mut stderr = io::stderr().lock();
+    writeln!(stderr, "{title}:")?;
+    for (index, choice) in choices.iter().enumerate() {
+        let marker = if index == selected { "*" } else { " " };
+        writeln!(stderr, "  {marker} {}. {choice}", index + 1)?;
+    }
+    write!(stderr, "Select [{}]: ", selected + 1)?;
+    stderr.flush()?;
+    Ok(())
+}
+
+fn parse_super_choice_input(
+    value: &str,
+    choice_count: usize,
+    selected: usize,
+    escape_selects_last: bool,
+) -> Result<Option<usize>> {
+    if value.is_empty() {
+        return Ok(Some(selected));
+    }
+    if matches!(
+        value.to_ascii_lowercase().as_str(),
+        "q" | "quit" | "cancel" | "esc"
+    ) {
+        if escape_selects_last {
+            return Ok(Some(choice_count - 1));
+        }
+        bail!("Prodex Super prompt cancelled");
+    }
+    Ok(value
+        .parse::<usize>()
+        .ok()
+        .filter(|choice| (1..=choice_count).contains(choice))
+        .map(|choice| choice - 1))
 }
 
 pub(super) fn prompt_super_text(title: &str, initial: &str) -> Result<String> {
