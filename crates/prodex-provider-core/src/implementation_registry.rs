@@ -16,7 +16,11 @@ use crate::{
 };
 use std::sync::LazyLock;
 
+#[cfg(feature = "mojo")]
 #[path = "implementation_registry/mojo.rs"]
+mod mojo;
+#[cfg(not(feature = "mojo"))]
+#[path = "implementation_registry/rust.rs"]
 mod mojo;
 
 pub const PROVIDER_IMPLEMENTATION_ORDER: &[ProviderId] = &[

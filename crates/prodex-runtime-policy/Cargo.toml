@@ -12,12 +12,12 @@ path = "src/lib.rs"
 
 [features]
 default = []
-mojo = []
+mojo = ["dep:prodex_mojo_core", "prodex_mojo_core/mojo-runtime", "prodex_mojo_core/mojo-rich"]
 
 [dependencies]
 anyhow = { workspace = true }
 prodex_core = { workspace = true }
-prodex_mojo_core = { workspace = true, features = ["mojo-runtime", "mojo-rich"] }
+prodex_mojo_core = { workspace = true, optional = true }
 secret_store = { workspace = true }
 serde = { workspace = true }
 toml = { workspace = true }

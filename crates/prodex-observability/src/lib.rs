@@ -5,12 +5,20 @@
 //! the typed boundary consumed by the runtime and validates the resulting
 //! bounded metric labels.
 
+#[cfg(feature = "mojo")]
 mod mojo;
+#[cfg(not(feature = "mojo"))]
+mod rust;
 
 use prodex_domain::{TelemetryAttribute, TelemetryAttributeError};
 
 fn metric_name(plan: usize, slot: usize) -> &'static str {
-    mojo::metric_name(plan, slot)
+    #[cfg(feature = "mojo")]
+    {
+        return mojo::metric_name(plan, slot);
+    }
+    #[cfg(not(feature = "mojo"))]
+    rust::metric_name(plan, slot)
 }
 
 fn planned_metric_label(
@@ -18,13 +26,20 @@ fn planned_metric_label(
     slot: usize,
     value: i64,
 ) -> Result<TelemetryAttribute, TelemetryAttributeError> {
-    let spec = prodex_mojo_core::observability::plan_label_spec(plan as i64, slot as i64)
-        .expect("Mojo observability plan-label metadata returned invalid output");
-    let key = mojo::label_key(
-        usize::try_from(spec.key).expect("Mojo observability label-key index is non-negative"),
-    );
-    let value = prodex_mojo_core::observability::label(spec.kind, value)
-        .expect("Mojo observability plan-label value returned invalid output");
+    #[cfg(feature = "mojo")]
+    let (key, value) = {
+        let spec = prodex_mojo_core::observability::plan_label_spec(plan as i64, slot as i64)
+            .expect("Mojo observability plan-label metadata returned invalid output");
+        let key = mojo::label_key(
+            usize::try_from(spec.key).expect("Mojo observability label-key index is non-negative"),
+        );
+        let value = prodex_mojo_core::observability::label(spec.kind, value)
+            .expect("Mojo observability plan-label value returned invalid output");
+        (key, value)
+    };
+    #[cfg(not(feature = "mojo"))]
+    let (key, value) = rust::planned_metric_label(plan, slot, value);
+
     let label = TelemetryAttribute::metric_label(key, value);
     label.as_metric_label()?;
     Ok(label)
