@@ -500,6 +500,16 @@ pub(super) fn kiro_provider_core_responses_request_body(
     deepseek_provider_core_reject_unsupported_request_fields(&value, "Kiro")
         .map_err(kiro_invalid_request)?;
     #[cfg(feature = "mojo")]
+    if allow_token_limit && object.contains_key("messages") && !object.contains_key("input") {
+        let canonical =
+            serde_json::to_string(&value).expect("Kiro Anthropic Messages request serializes");
+        let mut input_value = KiroKernelInput::new(
+            prodex_mojo_core::rich::KiroKernelOperation::AnthropicRequestRewrite,
+        );
+        input_value.input = Some(&canonical);
+        return Ok(kiro_mojo_body(input_value));
+    }
+    #[cfg(feature = "mojo")]
     {
         let model = object.get("model").and_then(Value::as_str);
         let input = object

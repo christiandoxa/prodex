@@ -76,6 +76,7 @@ comptime KIRO_MODEL_NOT_FOUND: Int64 = 45
 comptime KIRO_INVALID_REQUEST_ERROR: Int64 = 46
 comptime KIRO_UNSUPPORTED_PATH_ERROR: Int64 = 47
 comptime KIRO_REQUEST_VALIDATION_ERROR: Int64 = 48
+comptime KIRO_ANTHROPIC_REQUEST_REWRITE: Int64 = 49
 
 comptime KIRO_REQUEST_VALIDATION_CHAT: Int64 = 1
 comptime KIRO_REQUEST_VALIDATION_RESPONSES: Int64 = 2
@@ -1154,6 +1155,10 @@ def kiro_write_operation(
     var operation = input.operation
     if operation == KIRO_REQUEST_VALIDATION_ERROR:
         return kiro_write_request_validation_error(writer, input)
+    if operation == KIRO_ANTHROPIC_REQUEST_REWRITE:
+        if input.input_present != 1:
+            return False
+        return kiro_raw_rewrite_anthropic_request(writer, input.input)
     if operation == KIRO_STREAM_CONTENT_TEXT:
         if input.input_present == 0:
             return False
@@ -3320,3 +3325,208 @@ def kiro_chat_response_rewrite_v1(
         return KIRO_KERNEL_STATUS_INVALID
     written[] = writer.written
     return KIRO_KERNEL_STATUS_OK
+
+
+def kiro_raw_put_anthropic_message_text_item(
+    writer: Pointer[mut=True, KiroResponseWriter, _],
+    view: ProdexRichStringView,
+    role: InlineArray[Int64, 2],
+    text: InlineArray[Int64, 2],
+    first: Pointer[mut=True, Int64, _],
+) -> Bool:
+    if not kiro_raw_present(text) or deepseek_json_byte(view, text[0]) != 34:
+        return True
+    if not kiro_raw_item_prefix(writer, first):
+        return False
+    return (
+        kiro_put_literal(writer, StringSlice('{"type":"message","role":'))
+        and kiro_raw_put_default_or_string(writer, view, role, StringSlice('"user"'))
+        and kiro_put_literal(writer, StringSlice(',"content":[{"type":"input_text","text":'))
+        and kiro_put_view_range(writer, view, text[0], text[1])
+        and kiro_put_literal(writer, StringSlice("}]}"))
+    )
+
+def kiro_raw_put_anthropic_tool_use_item(
+    writer: Pointer[mut=True, KiroResponseWriter, _],
+    view: ProdexRichStringView,
+    block: InlineArray[Int64, 2],
+    first: Pointer[mut=True, Int64, _],
+) -> Bool:
+    var call_id = kiro_raw_member(view, block, StringSlice("id"))
+    var name = kiro_raw_member(view, block, StringSlice("name"))
+    var arguments = kiro_raw_member(view, block, StringSlice("input"))
+    if not kiro_raw_item_prefix(writer, first):
+        return False
+    if (
+        not kiro_put_literal(writer, StringSlice('{"type":"function_call","call_id":'))
+        or not kiro_raw_put_default_or_string(writer, view, call_id, StringSlice('"call_kiro"'))
+        or not kiro_put_literal(writer, StringSlice(',"name":'))
+        or not kiro_raw_put_default_or_string(writer, view, name, StringSlice('"tool_call"'))
+        or not kiro_put_literal(writer, StringSlice(',"arguments":'))
+    ):
+        return False
+    if kiro_raw_present(arguments):
+        var fragment = ProdexRichStringView(
+            view.ptr + UInt(arguments[0]), UInt(arguments[1] - arguments[0])
+        )
+        if not kiro_put_json_string(writer, fragment):
+            return False
+    elif not kiro_put_literal(writer, StringSlice('"{}"')):
+        return False
+    return kiro_put_byte(writer, 125)
+
+def kiro_raw_put_anthropic_tool_result_item(
+    writer: Pointer[mut=True, KiroResponseWriter, _],
+    view: ProdexRichStringView,
+    block: InlineArray[Int64, 2],
+    first: Pointer[mut=True, Int64, _],
+) -> Bool:
+    var call_id = kiro_raw_member(view, block, StringSlice("tool_use_id"))
+    var content = kiro_raw_member(view, block, StringSlice("content"))
+    if not kiro_raw_item_prefix(writer, first):
+        return False
+    if (
+        not kiro_put_literal(writer, StringSlice('{"type":"function_call_output","call_id":'))
+        or not kiro_raw_put_default_or_string(writer, view, call_id, StringSlice('"call_kiro"'))
+        or not kiro_put_literal(writer, StringSlice(',"output":'))
+    ):
+        return False
+    var saved = writer[].written
+    var result = kiro_raw_put_text_json_string(writer, view, content)
+    if result == 0:
+        writer[].written = saved
+        if not kiro_put_literal(writer, StringSlice('""')):
+            return False
+    elif result < 0:
+        return False
+    return kiro_put_byte(writer, 125)
+
+def kiro_raw_put_anthropic_content(
+    writer: Pointer[mut=True, KiroResponseWriter, _],
+    view: ProdexRichStringView,
+    role: InlineArray[Int64, 2],
+    content: InlineArray[Int64, 2],
+    first: Pointer[mut=True, Int64, _],
+) -> Bool:
+    if not kiro_raw_present(content):
+        return True
+    if deepseek_json_byte(view, content[0]) == 34:
+        return kiro_raw_put_anthropic_message_text_item(writer, view, role, content, first)
+    if deepseek_json_byte(view, content[0]) != 91:
+        return True
+    var cursor = deepseek_json_skip_ws(view, content[0] + 1, content[1] - 1)
+    while cursor < content[1] - 1:
+        var block_end = deepseek_json_value_end(view, cursor, content[1] - 1, 0)
+        if block_end < 0:
+            return False
+        if deepseek_json_byte(view, cursor) == 123:
+            var block = InlineArray[Int64, 2](fill=-1)
+            block[0] = cursor
+            block[1] = block_end
+            var kind = kiro_raw_member(view, block, StringSlice("type"))
+            if kiro_raw_present(kind) and deepseek_json_raw_equals(
+                view, kind[0], kind[1], StringSlice("text")
+            ):
+                var text = kiro_raw_member(view, block, StringSlice("text"))
+                if not kiro_raw_put_anthropic_message_text_item(
+                    writer, view, role, text, first
+                ):
+                    return False
+            elif kiro_raw_present(kind) and deepseek_json_raw_equals(
+                view, kind[0], kind[1], StringSlice("tool_use")
+            ):
+                if not kiro_raw_put_anthropic_tool_use_item(writer, view, block, first):
+                    return False
+            elif kiro_raw_present(kind) and deepseek_json_raw_equals(
+                view, kind[0], kind[1], StringSlice("tool_result")
+            ):
+                if not kiro_raw_put_anthropic_tool_result_item(writer, view, block, first):
+                    return False
+        cursor = deepseek_json_skip_ws(view, block_end, content[1] - 1)
+        if cursor < content[1] - 1 and deepseek_json_byte(view, cursor) == 44:
+            cursor = deepseek_json_skip_ws(view, cursor + 1, content[1] - 1)
+            continue
+        if cursor != content[1] - 1:
+            return False
+        break
+    return True
+
+def kiro_raw_rewrite_anthropic_request(
+    writer: Pointer[mut=True, KiroResponseWriter, _],
+    view: ProdexRichStringView,
+) -> Bool:
+    var root = kiro_raw_root(view)
+    if root[0] < 0:
+        return False
+    var model = kiro_raw_member(view, root, StringSlice("model"))
+    var stream = kiro_raw_member(view, root, StringSlice("stream"))
+    var system = kiro_raw_member(view, root, StringSlice("system"))
+    var messages = kiro_raw_member(view, root, StringSlice("messages"))
+    if not kiro_put_byte(writer, 123):
+        return False
+    var has_field = False
+    if kiro_raw_present(model):
+        if (
+            not kiro_put_literal(writer, StringSlice('"model":'))
+            or not kiro_put_view_range(writer, view, model[0], model[1])
+        ):
+            return False
+        has_field = True
+    if kiro_raw_present(stream):
+        if has_field and not kiro_put_byte(writer, 44):
+            return False
+        if (
+            not kiro_put_literal(writer, StringSlice('"stream":'))
+            or not kiro_put_view_range(writer, view, stream[0], stream[1])
+        ):
+            return False
+        has_field = True
+    if has_field and not kiro_put_byte(writer, 44):
+        return False
+    if not kiro_put_literal(writer, StringSlice('"input":[')):
+        return False
+    var first: Int64 = 1
+    var first_ptr = Pointer(to=first)
+    if kiro_raw_present(system):
+        var system_role = InlineArray[Int64, 2](fill=-1)
+        if not kiro_raw_item_prefix(writer, first_ptr):
+            return False
+        if not kiro_put_literal(
+            writer,
+            StringSlice('{"type":"message","role":"system","content":[{"type":"input_text","text":')
+        ):
+            return False
+        var saved = writer[].written
+        var text_result = kiro_raw_put_text_json_string(writer, view, system)
+        if text_result == 0:
+            writer[].written = saved
+            if not kiro_put_literal(writer, StringSlice('""')):
+                return False
+        elif text_result < 0:
+            return False
+        if not kiro_put_literal(writer, StringSlice("}]}")):
+            return False
+    if kiro_raw_present(messages) and deepseek_json_byte(view, messages[0]) == 91:
+        var cursor = deepseek_json_skip_ws(view, messages[0] + 1, messages[1] - 1)
+        while cursor < messages[1] - 1:
+            var message_end = deepseek_json_value_end(view, cursor, messages[1] - 1, 0)
+            if message_end < 0:
+                return False
+            if deepseek_json_byte(view, cursor) == 123:
+                var message = InlineArray[Int64, 2](fill=-1)
+                message[0] = cursor
+                message[1] = message_end
+                var role = kiro_raw_member(view, message, StringSlice("role"))
+                var content = kiro_raw_member(view, message, StringSlice("content"))
+                if not kiro_raw_put_anthropic_content(
+                    writer, view, role, content, first_ptr
+                ):
+                    return False
+            cursor = deepseek_json_skip_ws(view, message_end, messages[1] - 1)
+            if cursor < messages[1] - 1 and deepseek_json_byte(view, cursor) == 44:
+                cursor = deepseek_json_skip_ws(view, cursor + 1, messages[1] - 1)
+                continue
+            if cursor != messages[1] - 1:
+                return False
+            break
+    return kiro_put_literal(writer, StringSlice("]}"))
