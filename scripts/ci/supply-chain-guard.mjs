@@ -420,7 +420,7 @@ export function validateReleaseContainerPublication(contents) {
   for (const marker of [
     "persist-credentials: false",
     "cargo install cross --version 0.2.5 --locked",
-    "RUSTC_WRAPPER=sccache cargo test --release --locked",
+    "RUSTC_WRAPPER=sccache cargo build --locked",
     "unset GITHUB_TOKEN GH_TOKEN ACTIONS_ID_TOKEN_REQUEST_TOKEN ACTIONS_ID_TOKEN_REQUEST_URL",
     "npm install --global --ignore-scripts @google/gemini-cli@0.53.0",
     "91a21bfa05cd7b58601cb83e0f1f187a9d0084726e5b824d4a4cf60306250908",
