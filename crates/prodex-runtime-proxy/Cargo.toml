@@ -31,7 +31,7 @@ sha2 = { workspace = true }
 tiktoken-rs = { workspace = true }
 
 [dev-dependencies]
-prodex_provider_core = { workspace = true, features = ["mojo"] }
+prodex_provider_core = { workspace = true }
 
 [lints]
 workspace = true

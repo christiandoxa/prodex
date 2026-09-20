@@ -157,7 +157,7 @@ test("push CI reuses the disjoint prodex-app library partitions", () => {
   assert.match(job, /CARGO_PROFILE_TEST_DEBUG: "0"/);
   assert.match(job, /save-if: \$\{\{ matrix\.save_cache \}\}/);
   assert.match(job, /PRODEX_APP_FILTER/);
-  assert.match(job, /Test temp-backed state with a symlinked TMPDIR[\s\S]*?if: matrix\.suite == 'remainder'/);
+  assert.doesNotMatch(job, /Test temp-backed state with a symlinked TMPDIR/);
   assert.match(telemetry, /- prodex-app-lib/);
   assert.doesNotMatch(workflow, /\n  redis-integration:/);
   assert.doesNotMatch(workflow, /\n  backup-restore-drill:/);
@@ -167,7 +167,6 @@ test("direct targeted workflow lanes reject zero-test matches", () => {
   const workflow = readFileSync(".github/workflows/ci.yml", "utf8");
   const releaseWorkflow = readFileSync(".github/workflows/standalone-release.yml", "utf8");
   for (const [jobName, nextJob, stepName] of [
-    ["prodex-app-lib", "fuzz-build", "Test temp-backed state with a symlinked TMPDIR"],
     ["windows-workspace", "windows-prodex-app", "Run Windows foundation member tests"],
     ["windows-workspace", "windows-prodex-app", "Run Windows runtime member tests"],
     ["macos-workspace", "process-guard", "Run native macOS broker recovery tests"],

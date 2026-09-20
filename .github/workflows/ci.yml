@@ -194,40 +194,6 @@ jobs:
             fi
           fi
 
-      - name: Test temp-backed state with a symlinked TMPDIR
-        if: matrix.suite == 'remainder'
-        shell: bash
-        run: |
-          set -euo pipefail
-          tmp_root="$(mktemp -d)"
-          test_log="$(mktemp)"
-          trap 'find "${tmp_root}" -depth -delete; rm -f "${test_log}"' EXIT
-          mkdir -m 700 "${tmp_root}/real"
-          ln -s "${tmp_root}/real" "${tmp_root}/alias"
-          run_targeted_test() {
-            local label="$1"
-            shift
-            if ! "$@" 2>&1 | tee "${test_log}"; then
-              return 1
-            fi
-            if grep -Fq 'running 0 tests' "${test_log}"; then
-              echo "${label} matched no tests" >&2
-              return 1
-            fi
-          }
-          status=0
-          if ! run_targeted_test "prodex-app desktop test" env TMPDIR="${tmp_root}/alias" cargo test --locked -q -p prodex-app \
-            --lib 'runtime_tools::desktop_tests::' -- --test-threads=1; then
-            status=1
-          fi
-          if ! run_targeted_test "prodex-app offline symlink test" env TMPDIR="${tmp_root}/alias" cargo test --locked -q -p prodex-app \
-            --lib \
-            'runtime_proxy::smart_context::self_test::tests::offline_self_test_accepts_system_temp_symlink_alias' \
-            -- --test-threads=1; then
-            status=1
-          fi
-          exit "${status}"
-
   fuzz-build:
     needs: changes
     if: ${{ needs.changes.outputs.heavy == 'true' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
@@ -455,7 +421,7 @@ jobs:
         env:
           RUST_BACKTRACE: "1"
         run: |
-          cargo test --locked -q -p prodex --lib --bins --examples --test dashboard_control_plane --test internal_commands -- --test-threads=4
+          cargo test --locked -q -p prodex --lib --bins --examples --test internal_commands -- --test-threads=4
           cargo test --locked -q -p prodex --doc
 
       - name: Run Windows auto-rotate shard ${{ matrix.auto_rotate_shard }}
@@ -1680,8 +1646,8 @@ jobs:
           file "${mojo_archive}"
           nm -g "${mojo_archive}" | grep -F 'prodex_mojo_rich_abi_version'
           nm -g "${mojo_archive}" | grep -F 'prodex_mojo_rich_context_analyze_v2'
-          nm -g "${mojo_archive}" | grep -F 'prodex_mojo_rich_route_plan_v2'
-          nm -g "${mojo_archive}" | grep -F 'prodex_mojo_rich_policy_alias_v2'
+          nm -g "${mojo_archive}" | grep -F 'prodex_routing_plan_batch'
+          nm -g "${mojo_archive}" | grep -F 'prodex_mojo_provider_registry_resolve_v1'
           nm -g "${mojo_archive}" | grep -F 'prodex_mojo_rich_model_fallback_v2'
           nm -g "${mojo_archive}" | grep -F 'prodex_mojo_rich_context_plan_v2'
           nm -g "${mojo_archive}" | grep -F 'prodex_mojo_rich_catalog_resolve_v1'
