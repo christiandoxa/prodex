@@ -6,6 +6,7 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 
 ### Runtime
 
+- Preserve overload backoff across second boundary (`cf95260`)
 - Restore final provider and prompt behavior (`4edab45`)
 - Own runtime doctor route summaries (`a92255d`)
 - Own runtime doctor marker semantics (`840ff88`)
