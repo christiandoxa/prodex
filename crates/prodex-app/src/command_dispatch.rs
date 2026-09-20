@@ -151,16 +151,19 @@ mod tests {
 
     #[test]
     fn super_dry_run_skips_startup_side_effects() {
-        let native = parse_cli_command_from(["prodex", "super", "--cli", "gemini", "--dry-run"])
-            .expect("native dry-run should parse");
+        let native =
+            parse_cli_command_from(["prodex", "super", "gemini", "--cli", "agy", "--dry-run"])
+                .expect("native dry-run should parse");
         let codex = parse_cli_command_from(["prodex", "super", "--dry-run"])
             .expect("Codex dry-run should parse");
         let native_tail = parse_cli_command_from([
             "prodex",
             "super",
             "019c9e3d-45a0-7ad0-a6ee-b194ac2d44f9",
-            "--cli",
+            "--provider",
             "gemini",
+            "--cli",
+            "agy",
             "--dry-run",
         ])
         .expect("native tail dry-run should parse");
