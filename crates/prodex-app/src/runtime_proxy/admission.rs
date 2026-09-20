@@ -70,9 +70,17 @@ fn runtime_proxy_response_with_retry_after(
     response
 }
 
+fn runtime_proxy_local_overload_deadline_seconds(now_millis: i64, backoff_seconds: i64) -> u64 {
+    let now_millis = now_millis.max(0) as u64;
+    let delay_millis = (backoff_seconds.max(1) as u64).saturating_mul(1_000);
+    now_millis.saturating_add(delay_millis).div_ceil(1_000)
+}
+
 pub(crate) fn mark_runtime_proxy_local_overload(shared: &RuntimeRotationProxyShared, reason: &str) {
-    let now = Local::now().timestamp().max(0) as u64;
-    let until = now.saturating_add(RUNTIME_PROXY_LOCAL_OVERLOAD_BACKOFF_SECONDS.max(1) as u64);
+    let until = runtime_proxy_local_overload_deadline_seconds(
+        Local::now().timestamp_millis(),
+        RUNTIME_PROXY_LOCAL_OVERLOAD_BACKOFF_SECONDS,
+    );
     let current = shared.local_overload_backoff_until.load(Ordering::SeqCst);
     if until > current {
         shared
