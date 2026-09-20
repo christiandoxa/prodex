@@ -3788,6 +3788,30 @@ def deepseek_raw_put_nested_string_from_json_string(
     return True
 
 
+def deepseek_raw_put_nested_raw_json_token(
+    writer: Pointer[mut=True, DeepSeekResponseWriter, _],
+    view: ProdexRichStringView,
+    bounds: InlineArray[Int64, 2],
+) -> Bool:
+    if not deepseek_raw_present(bounds):
+        return True
+    var ptr = rich_view_ptr(view)
+    for index in range(bounds[0], bounds[1]):
+        var value = ptr[unsafe_offset=index]
+        if value == 34:
+            if (
+                not deepseek_put_backslashes(writer, 1)
+                or not deepseek_put_byte(writer, 34)
+            ):
+                return False
+        elif value == 92:
+            if not deepseek_put_backslashes(writer, 2):
+                return False
+        elif not deepseek_put_byte(writer, value):
+            return False
+    return True
+
+
 def deepseek_raw_put_nested_string_from_raw_json(
     writer: Pointer[mut=True, DeepSeekResponseWriter, _],
     view: ProdexRichStringView,
@@ -3978,7 +4002,7 @@ def deepseek_raw_put_nested_shell_optional(
     return (
         deepseek_put_byte(writer, 44)
         and deepseek_raw_put_nested_key(writer, key)
-        and deepseek_raw_put_nested_string_from_raw_json(
+        and deepseek_raw_put_nested_raw_json_token(
             writer, view, value
         )
     )

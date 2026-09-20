@@ -155,16 +155,20 @@ test("release operation overrides evolve an entry without rewriting the frozen b
   );
 });
 
-test("log reachability follows the extracted Mojo adapter", () => {
-  const result = calculateOwnership(releaseManifest(), BASE_SHA, "WORKTREE");
-  const operation = result.authoritative_operations.find(
+test("retired log event classification stays explicitly deleted", () => {
+  const manifest = releaseManifest();
+  const deleted = manifest.deleted_authoritative_operations.find(
     (candidate) => candidate.name === "log_event_classification",
   );
-  assert.equal(
-    operation.production_reachability_test,
-    "crates/prodex-app/src/app_commands/log_event_source.rs",
+  assert.ok(deleted, "log event classification deletion record missing");
+  assert.match(deleted.reason, /historical Mojo event-classification operation/);
+  const result = calculateOwnership(manifest, BASE_SHA, "WORKTREE");
+  assert.ok(
+    result.authoritative_operations.some(
+      (candidate) => candidate.name === "runtime_log_level_classification",
+    ),
+    "runtime log-level Mojo ownership must remain declared",
   );
-  assert.match(fs.readFileSync(operation.production_reachability_test, "utf8"), /prodex_mojo_core/u);
 });
 
 test("Rust reductions are traceable in both baseline and release source", () => {

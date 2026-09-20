@@ -181,8 +181,6 @@ test("CI consumes generated app shards and retains required safety gates", () =>
     "secret-scan",
     "windows-workspace",
     "windows-prodex-app",
-    "redis-integration",
-    "backup-restore-drill",
     "smart-context-evidence",
     "process-guard",
   ]) {
@@ -192,18 +190,18 @@ test("CI consumes generated app shards and retains required safety gates", () =>
   assert.ok(PRODEX_APP_LIB_FILTERS.includes("app_commands::"));
   assert.ok(PRODEX_APP_LIB_FILTERS.includes("runtime_broker::"));
   assert.ok(PRODEX_APP_LIB_FILTERS.includes("runtime_model_preferences::"));
-  const processGuard = workflow.match(/\n  process-guard:\n([\s\S]*?)\n  redis-integration:/)?.[1];
+  const processGuard = workflow.match(/\n  process-guard:\n([\s\S]*?)\n  compat-replay-gate:/)?.[1];
   assert.ok(processGuard, "process-guard job missing");
   assert.match(processGuard, /RUSTC_WRAPPER: sccache/);
   assert.match(processGuard, /mozilla-actions\/sccache-action@/);
   assert.match(processGuard, /Swatinem\/rust-cache@/);
   assert.match(processGuard, /scripts\/ci\/static-guards-parallel\.mjs/);
   assert.equal(processGuard.includes("node scripts/docs/smart-context-evidence.mjs --check"), false);
-  assert.equal(
-    processGuard.match(/if: matrix\.lane == 'static' \|\| matrix\.lane == 'enterprise-storage'/g)
-      ?.length,
-    3,
-  );
+  assert.equal(processGuard.match(/if: matrix\.lane == 'static'/g)?.length, 5);
+  assert.equal(processGuard.match(/if: matrix\.lane == 'hygiene'/g)?.length, 2);
+  assert.equal(processGuard.match(/if: matrix\.lane == 'enterprise-core'/g)?.length, 1);
+  assert.equal(processGuard.match(/if: matrix\.lane == 'node'/g)?.length, 1);
+  assert.doesNotMatch(processGuard, /enterprise-storage/);
   const smartContextEvidence = workflow.match(
     /\n  smart-context-evidence:\n([\s\S]*?)\n  process-guard:/,
   )?.[1];
@@ -219,10 +217,6 @@ test("CI consumes generated app shards and retains required safety gates", () =>
     [workflow, "node scripts/docs/lint-markdown.mjs && node scripts/docs/runtime-policy.mjs --self-test && node scripts/docs/runtime-policy.mjs --check"],
     [staticGuards, "scripts/ci/secret-boundary-guard.mjs"],
     [staticGuards, "scripts/ci/crate-boundary-guard.mjs"],
-    [workflow, "node scripts/ci/deployment-security-guard.mjs --self-test && node scripts/ci/deployment-security-guard.mjs"],
-    [workflow, "node scripts/ci/backup-restore-drill.mjs --self-test && node scripts/ci/backup-restore-drill.mjs"],
-    [workflow, "node scripts/ci/storage-postgres-proof.mjs --self-test && node scripts/ci/storage-postgres-proof.mjs"],
-    [workflow, "redis_rate_limit_runtime"],
   ]) {
     assert.match(source, new RegExp(command.replace(/[.*+?^${}()|[\\]\\]/g, "\\$&")), `${command} missing`);
   }

@@ -31,7 +31,6 @@
       "mojo_source": "mojo/prodex_core/context_critical_signal.mojo"
     },
     "log_event_classification": {
-      "production_reachability_test": "crates/prodex-app/src/app_commands/log_event_source.rs",
       "expanded_in": "0.427.0"
     },
     "critical_signal_text_grouping": {
@@ -1620,7 +1619,7 @@
   "deleted_authoritative_operations": [
     {
       "name": "log_event_classification",
-      "reason": "Deleted the non-core runtime log command/event-classification feature and its production consumer."
+      "reason": "Deleted the historical Mojo event-classification operation and its retired adapter; current prodex log remains on the runtime log parser/renderer path, while runtime log-level classification stays authoritative."
     },
     {
       "name": "governed_provider_route_plan",

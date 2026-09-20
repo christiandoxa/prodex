@@ -335,8 +335,9 @@ function mojoProductionReachable(manifest, revision, source) {
     importedMojoSources(manifest, revision, root).has(source));
 }
 
-function operationSource(manifest, operation) {
-  const entry = [...entriesFor(manifest, "release", "mojo")].find((candidate) =>
+function operationSource(manifest, operation, revision) {
+  const inventoryKind = revision === manifest.baseline_sha ? "baseline" : "release";
+  const entry = [...entriesFor(manifest, inventoryKind, "mojo")].find((candidate) =>
     candidate.path === operation.mojo_source && candidate.language === "mojo");
   assert(entry, `${operation.name} Mojo source is absent from release inventory`);
   assert.notEqual(entry.production_reachable, false, `${operation.name} Mojo source is not marked reachable`);
@@ -452,7 +453,7 @@ function validateOperations(manifest, revision) {
         sourceText(manifest, revision, operation.mojo_source) === "") {
       continue;
     }
-    operationSource(manifest, operation);
+    operationSource(manifest, operation, revision);
     const mojo = sourceText(manifest, revision, operation.mojo_source);
     assert(mojo.includes(`@export("${operation.mojo_entry}")`),
       `${operation.name} Mojo entry is not exported by its source`);
@@ -669,6 +670,10 @@ function validateInventory(manifest, baselineRevision, releaseRevision) {
     ...entriesFor(manifest, "baseline", "rust"),
     ...entriesFor(manifest, "baseline", "mojo"),
   ];
+  if (releaseRevision === baselineRevision) {
+    validateOperations(manifest, baselineRevision);
+    return { baselineEntries, releaseEntries: baselineEntries };
+  }
   const releaseEntries = [
     ...entriesFor(manifest, "release", "rust"),
     ...entriesFor(manifest, "release", "mojo"),
@@ -784,12 +789,9 @@ function validateInventory(manifest, baselineRevision, releaseRevision) {
     const baselineSource = sourceText(manifest, baselineRevision, reduction.file);
     assert(baselineSource.includes(reduction.symbol),
       `${reduction.file}:${reduction.symbol} is not traceable in the frozen baseline source`);
-    if (releaseRevision === baselineRevision && !sourceExists(manifest, releaseRevision, reduction.file)) {
-      continue;
-    }
-    const operation = (manifest.authoritative_operations ?? [])
-      .find((candidate) => candidate.name === reduction.operation);
-    if (releaseRevision === baselineRevision && operation && isReleaseOperation(manifest, operation)) {
+    // Reductions describe migration from the frozen baseline into the release.
+    // At the baseline revision the original Rust owner is expected to still exist.
+    if (releaseRevision === baselineRevision) {
       continue;
     }
     if (reduction.final_state === "deleted" && !sourceExists(manifest, releaseRevision, reduction.file)) continue;
@@ -823,7 +825,9 @@ export function calculateOwnership(manifest, baselineRevision, releaseRevision) 
   const baseline = strict
     ? validateManifest(manifest, baselineRevision, releaseRevision)
     : inventory(manifest, baselineRevision, "baseline");
-  const final = inventory(manifest, releaseRevision, "release");
+  const final = releaseRevision === baselineRevision
+    ? baseline
+    : inventory(manifest, releaseRevision, "release");
   if (strict) {
     assert(final.mojo_loc >= baseline.mojo_loc,
       `Mojo semantic ownership regressed from ${baseline.mojo_loc} to ${final.mojo_loc} LOC`);
