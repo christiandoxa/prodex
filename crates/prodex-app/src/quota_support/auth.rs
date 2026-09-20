@@ -4,6 +4,8 @@ use super::codex_openai_auth::{
     codex_openai_auth_headers, codex_openai_auth_originator,
     codex_openai_auth_user_agent_for_version, parse_codex_cli_version_output,
 };
+#[cfg(feature = "mojo-quota")]
+use super::rate_limit_reset_credit_consume_url;
 use super::{
     CHATGPT_AUTH_REFRESH_CLIENT_ID, CHATGPT_AUTH_REFRESH_EXPIRY_SKEW_SECONDS,
     CHATGPT_AUTH_REFRESH_INTERVAL_DAYS, CHATGPT_AUTH_REFRESH_URL,
