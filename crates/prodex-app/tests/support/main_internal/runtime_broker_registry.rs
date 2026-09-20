@@ -443,7 +443,7 @@ fn wait_for_existing_runtime_broker_recovery_or_exit_yields_mismatched_live_brok
     let script_path = temp_dir.path.join("busy-mismatched-broker.sh");
     fs::write(
         &script_path,
-        "#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then\n  echo 'prodex 0.0.1'\n  exit 0\nfi\nsleep 30\n",
+        "#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then\n  echo 'prodex 0.0.1'\n  exit 0\nfi\nsleep 30\n:\n",
     )
     .expect("busy mismatched broker script should write");
     let mut permissions = fs::metadata(&script_path)
