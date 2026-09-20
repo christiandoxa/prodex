@@ -7,7 +7,7 @@ use serde_json::{Value, json};
 use std::collections::BTreeMap;
 use std::io::{Read, Write};
 use std::path::PathBuf;
-use std::process::{Child, Command, Stdio};
+use std::process::{Child, ChildStderr, ChildStdin, ChildStdout, Command, ExitStatus, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -192,118 +192,75 @@ impl RunManager {
         cancel: Arc<AtomicBool>,
         child_slot: Arc<Mutex<Option<Child>>>,
     ) {
-        let executable = match std::env::current_exe() {
-            Ok(executable) => executable,
-            Err(error) => {
-                self.inner.audit.event(
-                    "super_expose_run_start_failed",
-                    [
-                        crate::runtime_proxy_log_field("run_id", run_id.clone()),
-                        crate::runtime_proxy_log_field("stage", "current_exe"),
-                    ],
-                );
-                self.finish_start_failed(&run_id, &format!("current executable: {error}"));
+        let command = match self.child_command(&args) {
+            Ok(command) => command,
+            Err(message) => {
+                self.record_start_failure(&run_id, "current_exe", &message);
                 return;
             }
         };
-        let mut command = Command::new(executable);
-        command
-            .args(build_child_args(&args))
-            .current_dir(&self.inner.workspace)
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped());
-        if let Some((name, value)) = api_key_env(&args) {
-            command.env(name, value);
-        }
-        configure_child_process_group(&mut command, true);
+        let pipes = match spawn_registered_child(command, &child_slot) {
+            Ok(handles) => handles,
+            Err(message) => {
+                self.record_start_failure(&run_id, "spawn", &message);
+                return;
+            }
+        };
 
-        let mut child = match command.spawn() {
-            Ok(child) => child,
-            Err(error) => {
-                self.inner.audit.event(
-                    "super_expose_run_start_failed",
-                    [
-                        crate::runtime_proxy_log_field("run_id", run_id.clone()),
-                        crate::runtime_proxy_log_field("stage", "spawn"),
-                    ],
-                );
-                self.finish_start_failed(&run_id, &format!("spawn: {error}"));
-                return;
-            }
-        };
-        let stdout = child.stdout.take();
-        let stderr = child.stderr.take();
-        let mut stdin = child.stdin.take();
-        {
-            let Ok(mut slot) = child_slot.lock() else {
-                let _ = terminate_child_process_tree(&mut child, true);
-                self.finish_start_failed(&run_id, "child state unavailable");
-                return;
-            };
-            *slot = Some(child);
-        }
         self.mark_running(&run_id);
         self.inner.audit.event(
             "super_expose_run_started",
             [crate::runtime_proxy_log_field("run_id", run_id.clone())],
         );
+        let readers = spawn_child_readers(self.clone(), &run_id, pipes.stdout, pipes.stderr);
+        write_child_task(pipes.stdin, &task, &cancel);
+        let status = poll_child_status(&child_slot, &cancel);
+        clear_child_slot(&child_slot);
+        join_child_readers(readers);
+        self.finish_run(&run_id, &cancel, status);
+    }
 
-        let stdout_reader = stdout.map(|reader| spawn_reader(self.clone(), run_id.clone(), reader));
-        let stderr_reader = stderr.map(|reader| spawn_reader(self.clone(), run_id.clone(), reader));
-        if let Some(mut stdin) = stdin.take()
-            && (stdin.write_all(task.as_bytes()).is_err() || stdin.flush().is_err())
-        {
-            cancel.store(true, Ordering::SeqCst);
+    fn child_command(&self, args: &SuperArgs) -> std::result::Result<Command, String> {
+        let executable =
+            std::env::current_exe().map_err(|error| format!("current executable: {error}"))?;
+        let mut command = Command::new(executable);
+        command
+            .args(build_child_args(args))
+            .current_dir(&self.inner.workspace)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+        if let Some((name, value)) = api_key_env(args) {
+            command.env(name, value);
         }
+        configure_child_process_group(&mut command, true);
+        Ok(command)
+    }
 
-        let status = loop {
-            if cancel.load(Ordering::SeqCst)
-                && let Ok(mut slot) = child_slot.lock()
-                && let Some(child) = slot.as_mut()
-            {
-                let _ = terminate_child_process_tree(child, true);
-            }
-            let polled = child_slot
-                .lock()
-                .ok()
-                .and_then(|mut slot| slot.as_mut().map(Child::try_wait));
-            match polled {
-                Some(Ok(Some(status))) => break Some(status),
-                Some(Ok(None)) => thread::sleep(Duration::from_millis(25)),
-                Some(Err(_)) | None => break None,
-            }
-        };
-        if let Ok(mut slot) = child_slot.lock() {
-            slot.take();
-        }
-        for reader in [stdout_reader, stderr_reader].into_iter().flatten() {
-            let _ = reader.join();
-        }
+    fn record_start_failure(&self, run_id: &str, stage: &'static str, message: &str) {
+        self.inner.audit.event(
+            "super_expose_run_start_failed",
+            [
+                crate::runtime_proxy_log_field("run_id", run_id.to_string()),
+                crate::runtime_proxy_log_field("stage", stage),
+            ],
+        );
+        self.finish_start_failed(run_id, message);
+    }
 
+    fn finish_run(&self, run_id: &str, cancel: &AtomicBool, status: Option<ExitStatus>) {
         let Ok(mut runs) = self.inner.runs.lock() else {
             return;
         };
-        let Some(record) = runs.get_mut(&run_id) else {
+        let Some(record) = runs.get_mut(run_id) else {
             return;
         };
         record.finished_at = Some(now_millis());
-        if cancel.load(Ordering::SeqCst) {
-            record.state = RunState::Cancelled;
-        } else if let Some(status) = status {
-            record.exit_status = status.code();
-            record.state = if status.success() {
-                RunState::Succeeded
-            } else {
-                RunState::Failed
-            };
-        } else {
-            record.state = RunState::StartFailed;
-        }
+        apply_run_terminal_state(record, cancel.load(Ordering::SeqCst), status);
         self.inner.audit.event(
             "super_expose_run_completed",
             [
-                crate::runtime_proxy_log_field("run_id", run_id.clone()),
+                crate::runtime_proxy_log_field("run_id", run_id.to_string()),
                 crate::runtime_proxy_log_field("state", record.state.as_str()),
                 crate::runtime_proxy_log_field(
                     "exit_code",
@@ -346,6 +303,113 @@ impl RunManager {
             append_output(record, bytes);
         }
     }
+}
+
+struct SpawnedChildPipes {
+    stdout: Option<ChildStdout>,
+    stderr: Option<ChildStderr>,
+    stdin: Option<ChildStdin>,
+}
+
+fn spawn_registered_child(
+    mut command: Command,
+    child_slot: &Arc<Mutex<Option<Child>>>,
+) -> std::result::Result<SpawnedChildPipes, String> {
+    let mut child = command.spawn().map_err(|error| format!("spawn: {error}"))?;
+    let stdout = child.stdout.take();
+    let stderr = child.stderr.take();
+    let stdin = child.stdin.take();
+    let Ok(mut slot) = child_slot.lock() else {
+        let _ = terminate_child_process_tree(&mut child, true);
+        return Err("child state unavailable".to_string());
+    };
+    *slot = Some(child);
+    Ok(SpawnedChildPipes {
+        stdout,
+        stderr,
+        stdin,
+    })
+}
+
+fn spawn_child_readers(
+    manager: RunManager,
+    run_id: &str,
+    stdout: Option<ChildStdout>,
+    stderr: Option<ChildStderr>,
+) -> Vec<thread::JoinHandle<()>> {
+    [
+        stdout.map(|reader| spawn_reader(manager.clone(), run_id.to_string(), reader)),
+        stderr.map(|reader| spawn_reader(manager, run_id.to_string(), reader)),
+    ]
+    .into_iter()
+    .flatten()
+    .collect()
+}
+
+fn write_child_task(mut stdin: Option<ChildStdin>, task: &str, cancel: &AtomicBool) {
+    let Some(mut stdin) = stdin.take() else {
+        return;
+    };
+    if stdin.write_all(task.as_bytes()).is_err() || stdin.flush().is_err() {
+        cancel.store(true, Ordering::SeqCst);
+    }
+}
+
+fn poll_child_status(
+    child_slot: &Arc<Mutex<Option<Child>>>,
+    cancel: &AtomicBool,
+) -> Option<ExitStatus> {
+    loop {
+        if cancel.load(Ordering::SeqCst) {
+            terminate_registered_child(child_slot);
+        }
+        let polled = child_slot
+            .lock()
+            .ok()
+            .and_then(|mut slot| slot.as_mut().map(Child::try_wait));
+        match polled {
+            Some(Ok(Some(status))) => return Some(status),
+            Some(Ok(None)) => thread::sleep(Duration::from_millis(25)),
+            Some(Err(_)) | None => return None,
+        }
+    }
+}
+
+fn terminate_registered_child(child_slot: &Arc<Mutex<Option<Child>>>) {
+    if let Ok(mut slot) = child_slot.lock()
+        && let Some(child) = slot.as_mut()
+    {
+        let _ = terminate_child_process_tree(child, true);
+    }
+}
+
+fn clear_child_slot(child_slot: &Arc<Mutex<Option<Child>>>) {
+    if let Ok(mut slot) = child_slot.lock() {
+        slot.take();
+    }
+}
+
+fn join_child_readers(readers: Vec<thread::JoinHandle<()>>) {
+    for reader in readers {
+        let _ = reader.join();
+    }
+}
+
+fn apply_run_terminal_state(record: &mut RunRecord, cancelled: bool, status: Option<ExitStatus>) {
+    if cancelled {
+        record.state = RunState::Cancelled;
+        return;
+    }
+    let Some(status) = status else {
+        record.state = RunState::StartFailed;
+        return;
+    };
+    record.exit_status = status.code();
+    record.state = if status.success() {
+        RunState::Succeeded
+    } else {
+        RunState::Failed
+    };
 }
 
 fn spawn_reader(

@@ -26,6 +26,63 @@ const BODY_MAX_BYTES: u64 = 1024 * 1024;
 static CLOCK_SEQUENCE: AtomicU64 = AtomicU64::new(1);
 
 pub(crate) fn handle_super_expose(mut expose: SuperExposeArgs) -> Result<()> {
+    let (openai_tunnel_id, listen) = prepare_super_expose(&mut expose)?;
+    if expose.super_args.dry_run {
+        print_super_expose_dry_run(&expose, openai_tunnel_id.as_deref());
+        return Ok(());
+    }
+
+    let workspace = std::env::current_dir()
+        .context("failed to resolve expose workspace")?
+        .canonicalize()
+        .context("failed to canonicalize expose workspace")?;
+    let audit = logging::ExposeAuditLog::new()?;
+    audit.event(
+        "super_expose_starting",
+        [
+            crate::runtime_proxy_log_field("mode", expose.mode.as_str()),
+            crate::runtime_proxy_log_field("bind", "loopback"),
+        ],
+    );
+    let token = capability_token()?;
+    let server = Server::http(listen)
+        .map_err(|error| anyhow::anyhow!("failed to bind Super expose: {error}"))?;
+    let address = server
+        .server_addr()
+        .to_ip()
+        .context("Super expose did not bind an IP address")?;
+    let endpoint = format!("http://{address}/mcp/{token}");
+    let display_name = expose_display_name(&expose, &workspace);
+
+    let mut openai_tunnel_rx =
+        start_openai_tunnel_async(&expose, openai_tunnel_id.as_deref(), &endpoint, &audit)?;
+    let mut openai_tunnel = None;
+    announce_super_expose(&expose, display_name, &endpoint, address.port(), &audit)?;
+
+    let manager = run::RunManager::new(workspace.clone(), expose.super_args, audit.clone());
+    let expected_path = format!("/mcp/{token}");
+    loop {
+        poll_openai_tunnel(&mut openai_tunnel_rx, &mut openai_tunnel, &audit)?;
+        check_openai_tunnel_exit(openai_tunnel.as_mut(), &audit)?;
+
+        let request = server
+            .recv_timeout(Duration::from_millis(100))
+            .map_err(|error| anyhow::anyhow!("Super expose receive failed: {error}"))?;
+        let Some(request) = request else {
+            continue;
+        };
+        handle_super_expose_request(
+            request,
+            &expected_path,
+            &manager,
+            &workspace,
+            expose.mode,
+            &audit,
+        );
+    }
+}
+
+fn prepare_super_expose(expose: &mut SuperExposeArgs) -> Result<(Option<String>, SocketAddr)> {
     if expose.tunnel {
         bail!(
             "legacy --tunnel mode is not part of the lean 0.430 expose surface; use --openai-tunnel-id for OpenAI Secure MCP Tunnel or omit tunnel flags for local-only access"
@@ -52,214 +109,215 @@ pub(crate) fn handle_super_expose(mut expose: SuperExposeArgs) -> Result<()> {
     if !listen.ip().is_loopback() {
         bail!("Super expose only binds loopback addresses in 0.430");
     }
-    if expose.super_args.dry_run {
-        let label = if expose.mode.exec_only() {
-            "Prodex Super expose exec"
-        } else {
-            "Prodex Super expose"
-        };
-        if let Some(tunnel_id) = openai_tunnel_id.as_deref() {
-            println!(
-                "{label}: OpenAI Secure MCP Tunnel {tunnel_id} -> local MCP on {}",
-                expose.listen
-            );
-        } else {
-            println!("{label}: local MCP on {}", expose.listen);
-        }
-        return Ok(());
-    }
+    Ok((openai_tunnel_id, listen))
+}
 
-    let workspace = std::env::current_dir()
-        .context("failed to resolve expose workspace")?
-        .canonicalize()
-        .context("failed to canonicalize expose workspace")?;
-    let audit = logging::ExposeAuditLog::new()?;
-    audit.event(
-        "super_expose_starting",
-        [
-            crate::runtime_proxy_log_field("mode", expose.mode.as_str()),
-            crate::runtime_proxy_log_field("bind", "loopback"),
-        ],
-    );
-    let token = capability_token()?;
-    let server = Server::http(expose.listen.as_str())
-        .map_err(|error| anyhow::anyhow!("failed to bind Super expose: {error}"))?;
-    let address = server
-        .server_addr()
-        .to_ip()
-        .context("Super expose did not bind an IP address")?;
-    let endpoint = format!("http://{address}/mcp/{token}");
-    let display_name = expose
+fn print_super_expose_dry_run(expose: &SuperExposeArgs, tunnel_id: Option<&str>) {
+    let label = expose_label(expose);
+    match tunnel_id {
+        Some(tunnel_id) => println!(
+            "{label}: OpenAI Secure MCP Tunnel {tunnel_id} -> local MCP on {}",
+            expose.listen
+        ),
+        None => println!("{label}: local MCP on {}", expose.listen),
+    }
+}
+
+fn expose_label(expose: &SuperExposeArgs) -> &'static str {
+    if expose.mode.exec_only() {
+        "Prodex Super expose exec"
+    } else {
+        "Prodex Super expose"
+    }
+}
+
+fn expose_display_name<'a>(expose: &'a SuperExposeArgs, workspace: &'a std::path::Path) -> &'a str {
+    expose
         .name
         .as_deref()
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .or_else(|| workspace.file_name().and_then(|name| name.to_str()))
-        .unwrap_or("workspace");
+        .unwrap_or("workspace")
+}
 
-    let mut openai_tunnel_rx = None;
-    let mut openai_tunnel = None;
-    if let Some(tunnel_id) = openai_tunnel_id.as_deref() {
-        audit.event(
-            "super_expose_openai_tunnel_starting",
-            [
-                crate::runtime_proxy_log_field("mode", expose.mode.as_str()),
-                crate::runtime_proxy_log_field("provider", "openai"),
-            ],
-        );
-        let client_version = openai_tunnel::ensure_openai_tunnel_available(tunnel_id)?;
-        let credentials = openai_tunnel::openai_tunnel_credentials_from_env(tunnel_id)?;
-        let local_endpoint = endpoint.clone();
-        let (sender, receiver) = mpsc::sync_channel(1);
-        thread::Builder::new()
-            .name("prodex-openai-tunnel-start".to_string())
-            .spawn(move || {
-                let result = openai_tunnel::start_openai_tunnel(
-                    &local_endpoint,
-                    credentials,
-                    client_version,
-                    &|| false,
-                );
-                let _ = sender.send(result);
-            })
-            .context("failed to start OpenAI tunnel supervisor")?;
-        openai_tunnel_rx = Some(receiver);
-        eprintln!("OpenAI Secure MCP Tunnel starting for {tunnel_id}.");
-    }
-
-    let label = if expose.mode.exec_only() {
-        "Prodex Super expose exec"
-    } else {
-        "Prodex Super expose"
+fn start_openai_tunnel_async(
+    expose: &SuperExposeArgs,
+    tunnel_id: Option<&str>,
+    endpoint: &str,
+    audit: &logging::ExposeAuditLog,
+) -> Result<Option<mpsc::Receiver<Result<openai_tunnel::OpenAiTunnel>>>> {
+    let Some(tunnel_id) = tunnel_id else {
+        return Ok(None);
     };
-    println!("{label} ({display_name}): {endpoint}");
+    audit.event(
+        "super_expose_openai_tunnel_starting",
+        [
+            crate::runtime_proxy_log_field("mode", expose.mode.as_str()),
+            crate::runtime_proxy_log_field("provider", "openai"),
+        ],
+    );
+    let client_version = openai_tunnel::ensure_openai_tunnel_available(tunnel_id)?;
+    let credentials = openai_tunnel::openai_tunnel_credentials_from_env(tunnel_id)?;
+    let local_endpoint = endpoint.to_string();
+    let (sender, receiver) = mpsc::sync_channel(1);
+    thread::Builder::new()
+        .name("prodex-openai-tunnel-start".to_string())
+        .spawn(move || {
+            let result = openai_tunnel::start_openai_tunnel(
+                &local_endpoint,
+                credentials,
+                client_version,
+                &|| false,
+            );
+            let _ = sender.send(result);
+        })
+        .context("failed to start OpenAI tunnel supervisor")?;
+    eprintln!("OpenAI Secure MCP Tunnel starting for {tunnel_id}.");
+    Ok(Some(receiver))
+}
+
+fn announce_super_expose(
+    expose: &SuperExposeArgs,
+    display_name: &str,
+    endpoint: &str,
+    port: u16,
+    audit: &logging::ExposeAuditLog,
+) -> Result<()> {
+    println!("{} ({display_name}): {endpoint}", expose_label(expose));
     eprintln!("Capability URL: keep it secret; Ctrl-C stops the endpoint.");
     audit.event(
         "super_expose_started",
         [
             crate::runtime_proxy_log_field("mode", expose.mode.as_str()),
             crate::runtime_proxy_log_field("bind", "loopback"),
-            crate::runtime_proxy_log_field("port", address.port().to_string()),
+            crate::runtime_proxy_log_field("port", port.to_string()),
         ],
     );
-    audit.flush()?;
+    audit.flush()
+}
 
-    let manager = run::RunManager::new(workspace.clone(), expose.super_args, audit.clone());
-    let expected_path = format!("/mcp/{token}");
-    loop {
-        if let Some(receiver) = openai_tunnel_rx.as_ref() {
-            match receiver.try_recv() {
-                Ok(Ok(tunnel)) => {
-                    audit.event(
-                        "super_expose_openai_tunnel_ready",
-                        [
-                            crate::runtime_proxy_log_field("provider", "openai"),
-                            crate::runtime_proxy_log_field(
-                                "client_version",
-                                tunnel.status.client_version.clone(),
-                            ),
-                        ],
-                    );
-                    eprintln!(
-                        "OpenAI Secure MCP Tunnel ready: {} (client {}).",
-                        tunnel.status.tunnel_id, tunnel.status.client_version
-                    );
-                    openai_tunnel = Some(tunnel);
-                    openai_tunnel_rx = None;
-                    audit.flush()?;
-                }
-                Ok(Err(error)) => {
-                    audit.event(
-                        "super_expose_openai_tunnel_failed",
-                        [
-                            crate::runtime_proxy_log_field("provider", "openai"),
-                            crate::runtime_proxy_log_field("reason", "startup_failed"),
-                        ],
-                    );
-                    audit.flush()?;
-                    return Err(error);
-                }
-                Err(TryRecvError::Empty) => {}
-                Err(TryRecvError::Disconnected) => {
-                    bail!("OpenAI tunnel supervisor stopped before reporting readiness");
-                }
-            }
-        }
-        if let Some(tunnel) = openai_tunnel.as_mut()
-            && let Some(status) = tunnel.exited()
-        {
+fn poll_openai_tunnel(
+    receiver: &mut Option<mpsc::Receiver<Result<openai_tunnel::OpenAiTunnel>>>,
+    tunnel: &mut Option<openai_tunnel::OpenAiTunnel>,
+    audit: &logging::ExposeAuditLog,
+) -> Result<()> {
+    let Some(active_receiver) = receiver.as_ref() else {
+        return Ok(());
+    };
+    match active_receiver.try_recv() {
+        Ok(Ok(ready)) => {
             audit.event(
-                "super_expose_openai_tunnel_exited",
+                "super_expose_openai_tunnel_ready",
                 [
                     crate::runtime_proxy_log_field("provider", "openai"),
                     crate::runtime_proxy_log_field(
-                        "exit_code",
-                        status
-                            .code()
-                            .map_or_else(|| "signal".to_string(), |code| code.to_string()),
+                        "client_version",
+                        ready.status.client_version.clone(),
                     ),
                 ],
             );
+            eprintln!(
+                "OpenAI Secure MCP Tunnel ready: {} (client {}).",
+                ready.status.tunnel_id, ready.status.client_version
+            );
+            *tunnel = Some(ready);
+            *receiver = None;
             audit.flush()?;
-            bail!("OpenAI tunnel-client exited unexpectedly");
+            Ok(())
         }
-
-        let Some(mut request) = server
-            .recv_timeout(Duration::from_millis(100))
-            .map_err(|error| anyhow::anyhow!("Super expose receive failed: {error}"))?
-        else {
-            continue;
-        };
-        if request.url().split('?').next() != Some(expected_path.as_str()) {
+        Ok(Err(error)) => {
             audit.event(
-                "super_expose_http_rejected",
-                [crate::runtime_proxy_log_field("reason", "not_found")],
-            );
-            let _ = request.respond(protocol::json_response(404, json!({"error":"not_found"})));
-            continue;
-        }
-        if request.method() != &Method::Post {
-            audit.event(
-                "super_expose_http_rejected",
-                [crate::runtime_proxy_log_field(
-                    "reason",
-                    "method_not_allowed",
-                )],
-            );
-            let _ = request.respond(protocol::json_response(
-                405,
-                json!({"error":"method_not_allowed"}),
-            ));
-            continue;
-        }
-
-        let mut body = Vec::new();
-        let read = request
-            .as_reader()
-            .take(BODY_MAX_BYTES.saturating_add(1))
-            .read_to_end(&mut body);
-        if read.is_err() || body.len() as u64 > BODY_MAX_BYTES {
-            audit.event(
-                "super_expose_http_rejected",
+                "super_expose_openai_tunnel_failed",
                 [
-                    crate::runtime_proxy_log_field("reason", "invalid_body"),
-                    crate::runtime_proxy_log_field("body_bytes", body.len().to_string()),
+                    crate::runtime_proxy_log_field("provider", "openai"),
+                    crate::runtime_proxy_log_field("reason", "startup_failed"),
                 ],
             );
-            let _ = request.respond(protocol::json_response(
-                400,
-                json!({"jsonrpc":"2.0","id":null,"error":{"code":-32600,"message":"request body is invalid or too large"}}),
-            ));
-            continue;
+            audit.flush()?;
+            Err(error)
         }
-        let _ = request.respond(protocol::dispatch(
-            &body,
-            &manager,
-            &workspace,
-            expose.mode,
-            &audit,
-        ));
+        Err(TryRecvError::Empty) => Ok(()),
+        Err(TryRecvError::Disconnected) => {
+            bail!("OpenAI tunnel supervisor stopped before reporting readiness")
+        }
     }
+}
+
+fn check_openai_tunnel_exit(
+    tunnel: Option<&mut openai_tunnel::OpenAiTunnel>,
+    audit: &logging::ExposeAuditLog,
+) -> Result<()> {
+    let Some(status) = tunnel.and_then(openai_tunnel::OpenAiTunnel::exited) else {
+        return Ok(());
+    };
+    audit.event(
+        "super_expose_openai_tunnel_exited",
+        [
+            crate::runtime_proxy_log_field("provider", "openai"),
+            crate::runtime_proxy_log_field(
+                "exit_code",
+                status
+                    .code()
+                    .map_or_else(|| "signal".to_string(), |code| code.to_string()),
+            ),
+        ],
+    );
+    audit.flush()?;
+    bail!("OpenAI tunnel-client exited unexpectedly")
+}
+
+fn handle_super_expose_request(
+    mut request: tiny_http::Request,
+    expected_path: &str,
+    manager: &run::RunManager,
+    workspace: &std::path::Path,
+    mode: prodex_cli::SuperExposeMode,
+    audit: &logging::ExposeAuditLog,
+) {
+    if request.url().split('?').next() != Some(expected_path) {
+        audit.event(
+            "super_expose_http_rejected",
+            [crate::runtime_proxy_log_field("reason", "not_found")],
+        );
+        let _ = request.respond(protocol::json_response(404, json!({"error":"not_found"})));
+        return;
+    }
+    if request.method() != &Method::Post {
+        audit.event(
+            "super_expose_http_rejected",
+            [crate::runtime_proxy_log_field(
+                "reason",
+                "method_not_allowed",
+            )],
+        );
+        let _ = request.respond(protocol::json_response(
+            405,
+            json!({"error":"method_not_allowed"}),
+        ));
+        return;
+    }
+
+    let mut body = Vec::new();
+    let read = request
+        .as_reader()
+        .take(BODY_MAX_BYTES.saturating_add(1))
+        .read_to_end(&mut body);
+    if read.is_err() || body.len() as u64 > BODY_MAX_BYTES {
+        audit.event(
+            "super_expose_http_rejected",
+            [
+                crate::runtime_proxy_log_field("reason", "invalid_body"),
+                crate::runtime_proxy_log_field("body_bytes", body.len().to_string()),
+            ],
+        );
+        let _ = request.respond(protocol::json_response(
+            400,
+            json!({"jsonrpc":"2.0","id":null,"error":{"code":-32600,"message":"request body is invalid or too large"}}),
+        ));
+        return;
+    }
+    let _ = request.respond(protocol::dispatch(&body, manager, workspace, mode, audit));
 }
 
 fn capability_token() -> Result<String> {
