@@ -183,14 +183,11 @@ test("direct targeted workflow lanes reject zero-test matches", () => {
 
   const releaseBuild = releaseWorkflow.match(/\n  build:\n([\s\S]*?)\n  attest-binaries:/)?.[1];
   assert.ok(releaseBuild, "standalone release build job missing");
-  const releaseStepOffset = releaseBuild.indexOf("- name: Test native desktop launcher");
-  assert.ok(releaseStepOffset >= 0, "native desktop launcher test step missing");
-  const releaseStep = releaseBuild.slice(releaseStepOffset);
-  assert.match(releaseStep, /grep -Fq 'running 0 tests'/);
-  assert.match(
-    releaseStep,
-    /if \[ "\$\{\{ matrix\.use-cross \}\}" = "true" \]; then[\s\S]*CARGO_TARGET_DIR=.*target\/native-test/,
-  );
+  assert.doesNotMatch(releaseBuild, /Test native desktop launcher/);
+  assert.doesNotMatch(releaseBuild, /runtime_desktop::tests::/);
+  assert.match(releaseBuild, /- name: Build prodex/);
+  assert.match(releaseBuild, /cargo build --locked/);
+
 });
 
 test("release hygiene does not inherit an unavailable Rust compiler wrapper", () => {
