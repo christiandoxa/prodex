@@ -20,7 +20,7 @@ pub(crate) fn resolve_gemini_runtime_launch_profile_name(
         state,
         requested,
         |provider| matches!(provider, ProfileProvider::Gemini { .. }),
-        "`prodex s --provider gemini` requires --api-key / GEMINI_API_KEY(S) / GOOGLE_API_KEY(S); Google Gemini OAuth profiles are disabled. Use `prodex s gemini` with API-key authentication",
+        "`prodex s --provider gemini` requires --api-key / GEMINI_API_KEY(S) / GOOGLE_API_KEY(S); Google Gemini OAuth profiles are disabled. Use `prodex s gemini` with API-key authentication; native Gemini CLI / Vertex AI compatibility is retired",
     )
 }
 
