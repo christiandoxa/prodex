@@ -58,6 +58,59 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 - Move output classification and truncation to Mojo (`d18d85c`)
 - Plan operational health responses (`9321be2`)
 - Own application data-plane plans (`1d92475`)
+# Prodex 0.430.0
+
+## New Features
+
+- Move the audited production Mojo share above 20% while keeping Mojo as the
+  single semantic authority for migrated deterministic policy and translation
+  paths.
+- Add prodex s expose exec, an exec-only MCP exposure mode that advertises and
+  accepts only prodex_super_exec.
+- Support prodex s expose exec --openai-tunnel-id <tunnel_id> through the
+  pinned OpenAI Secure MCP tunnel client without widening the exposed MCP tool
+  surface.
+- Record redacted prodex s expose lifecycle, RPC, run, and direct-exec metadata
+  in the canonical runtime log so it is visible through prodex log.
+- Restore and preserve prodex info, prodex ping openai, prodex quota, prodex
+  log, all optional tools, multi-provider routing, auto-rotation, and the
+  existing prodex s / prodex s expose surfaces.
+
+## Bug Fixes
+
+- Preserve Anthropic Messages compatibility, including Kiro Messages
+  request/response and streaming translation.
+- Preserve native Antigravity profileless compatibility while keeping retired
+  Gemini OAuth and Vertex AI compatibility disabled with explicit migration
+  guidance.
+- Keep profile export/import round trips working for plain and encrypted
+  bundles, refresh tokens, OAuth provider secret files, Copilot metadata, and
+  Kiro metadata.
+- Keep runtime broker replacement ownership-safe when a mismatched live broker
+  still has active requests.
+- Align cloud CI, release archive verification, provider-contract reporting,
+  optional-tool freshness, and platform test matrices with the current
+  production surface.
+
+## Safety
+
+- Keep prodex s expose exec audit logs metadata-only: capability URLs,
+  environment values, stdin contents, and stdout/stderr payloads are not
+  written to the runtime log.
+- Keep hard affinity and no-mid-stream-rotation boundaries unchanged while
+  migrating deterministic policy to Mojo.
+- Keep profile bundle secret handling and private-file validation intact during
+  export/import.
+
+## Changelog
+
+- Baseline Codex compatibility is aligned with rust-v0.155.1.
+- Optional-tool pins are current for Codebase Memory MCP 0.11.2, Caveman 2.8.0,
+  Gemini CLI 0.53.0, Playwright MCP 0.0.82, Ponytail 4.11.0, and RTK 0.28.3.
+- Release verification checks the current Mojo ABI exports and retired release
+  smoke tests no longer gate removed subsystems.
+
+Full Changelog: [0.429.4...0.430.0](https://github.com/christiandoxa/prodex/compare/0.429.4...0.430.0)
 
 ## 0.429.4 - 2026-09-16
 
