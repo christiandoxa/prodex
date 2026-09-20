@@ -486,7 +486,7 @@ mod tests {
         let catalog_path = codex_home.join(GEMINI_MODEL_CATALOG_FILE);
         fs::write(&target, "do not touch").unwrap();
         std::os::unix::fs::symlink(&target, &catalog_path).unwrap();
-        let resolution = RuntimeGeminiModelResolution::default();
+        let resolution = RuntimeGeminiModelResolution;
 
         write_gemini_model_catalog(&codex_home, "auto", &resolution, 100_000, 90_000).unwrap();
 

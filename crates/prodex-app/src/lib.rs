@@ -153,22 +153,6 @@ mod runtime_proxy_contract_tests;
 #[path = "../tests/src/lib.rs"]
 mod test_env_guard_tests;
 
-#[cfg(test)]
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct RuntimeGatewaySideEffectSnapshot {
-    runtime_state_fingerprint: u64,
-    model_memory_fingerprint: u64,
-    api_key_cursor: usize,
-    credential_fingerprint: [u8; 32],
-    oidc_cache_entries: usize,
-    pending_usage_deltas: usize,
-    usage_request_ids: usize,
-    usage_typed_request_ids: usize,
-    usage_call_ids: usize,
-    usage_ledger_scopes: usize,
-    usage_durable_reservations: usize,
-}
-
 struct RuntimeRotationProxy {
     runtime_config: Arc<RuntimeConfig>,
     server: Arc<TinyServer>,
@@ -181,10 +165,6 @@ struct RuntimeRotationProxy {
     realtime_ws_model: Option<String>,
     log_path: PathBuf,
     active_request_count: Arc<AtomicUsize>,
-    #[cfg(test)]
-    request_sequence: Arc<AtomicU64>,
-    #[cfg(test)]
-    lane_admission: prodex_runtime_state::RuntimeProxyLaneAdmission,
     owner_lock: Option<StateFileLock>,
     _live_log_source: Option<RuntimeLiveLogSourceGuard>,
     _marker_guard: RuntimeProxyMarkerGuard,

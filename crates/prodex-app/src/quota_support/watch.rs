@@ -31,22 +31,6 @@ pub(crate) fn render_profile_quota_watch_output(
     }
 }
 
-#[cfg(test)]
-pub(crate) fn render_all_quota_watch_output(
-    _updated: &str,
-    state_result: std::result::Result<AppState, String>,
-    base_url: Option<&str>,
-    detail: bool,
-) -> String {
-    let snapshot = load_all_quota_watch_snapshot(
-        state_result,
-        base_url,
-        &QuotaAuthFilter::All,
-        QuotaProviderFilter::All,
-    );
-    render_all_quota_watch_snapshot(&snapshot, detail, QuotaReportSort::Current)
-}
-
 pub(crate) fn watch_quota(
     profile_name: &str,
     provider: &ProfileProvider,

@@ -41,20 +41,6 @@ pub(crate) fn runtime_profile_inflight_wait_outcome_label(
     }
 }
 
-#[cfg(test)]
-pub(crate) fn runtime_profile_inflight_wait_outcome_since(
-    shared: &RuntimeRotationProxyShared,
-    timeout: Duration,
-    observed_revision: u64,
-) -> RuntimeProfileInFlightWaitOutcome {
-    runtime_profile_inflight_wait_outcome_since_with_selection_revision(
-        shared,
-        timeout,
-        observed_revision,
-        shared.lane_admission.selection_change_revision(),
-    )
-}
-
 pub(crate) fn runtime_profile_inflight_wait_outcome_since_with_selection_revision(
     shared: &RuntimeRotationProxyShared,
     timeout: Duration,
@@ -122,18 +108,6 @@ pub(crate) fn runtime_probe_refresh_wait_outcome_since(
     } else {
         RuntimeProfileInFlightWaitOutcome::OtherNotify
     }
-}
-
-#[cfg(test)]
-pub(crate) fn wait_for_runtime_profile_inflight_relief_since(
-    shared: &RuntimeRotationProxyShared,
-    timeout: Duration,
-    observed_revision: u64,
-) -> bool {
-    matches!(
-        runtime_profile_inflight_wait_outcome_since(shared, timeout, observed_revision),
-        RuntimeProfileInFlightWaitOutcome::InflightRelease
-    )
 }
 
 #[cfg(test)]

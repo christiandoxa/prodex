@@ -20,8 +20,6 @@ pub(super) use profile::{
 };
 #[cfg(test)]
 pub(super) use proxy_args::normalize_run_codex_args;
-#[cfg(test)]
-pub(super) use proxy_args::{runtime_proxy_codex_args, runtime_proxy_codex_args_with_mount_path};
 pub(super) use proxy_args::{
     runtime_proxy_codex_passthrough_args, runtime_proxy_force_http_responses,
 };

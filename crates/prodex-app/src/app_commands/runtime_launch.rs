@@ -11,8 +11,6 @@ mod run_command_strategy;
 mod selection;
 mod session_delete;
 mod usage_limit_recovery;
-#[cfg(test)]
-use command_server::prepare_codex_command_server_runtime_launch;
 use command_server::{
     RunLaunchRoute, execute_codex_command_server_managed_runtime, run_launch_route,
 };

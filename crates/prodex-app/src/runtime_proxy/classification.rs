@@ -57,12 +57,3 @@ pub(crate) fn runtime_proxy_long_lived_queue_wait_budget_with_config(
         base_budget_ms,
     ))
 }
-
-#[cfg(test)]
-pub(crate) fn runtime_proxy_admission_wait_budget(path: &str, pressure_mode: bool) -> Duration {
-    runtime_proxy_admission_wait_budget_with_config(
-        path,
-        pressure_mode,
-        &RuntimeConfig::compatibility_current(),
-    )
-}

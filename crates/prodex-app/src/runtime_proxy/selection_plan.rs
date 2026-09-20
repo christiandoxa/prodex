@@ -344,14 +344,6 @@ where
     }
 }
 
-#[cfg(test)]
-pub(crate) fn runtime_prompt_cache_affinity_sort_key(
-    prompt_cache_key: Option<&str>,
-    profile_name: &str,
-) -> u64 {
-    runtime_proxy_crate::runtime_prompt_cache_affinity_sort_key(prompt_cache_key, profile_name)
-}
-
 fn runtime_response_planned_candidate_from_proxy(
     candidate: runtime_proxy_crate::RuntimeResponsePlannedCandidate,
     quota_summaries: &BTreeMap<(String, usize), RuntimeQuotaSummary>,

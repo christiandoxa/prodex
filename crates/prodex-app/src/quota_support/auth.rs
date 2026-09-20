@@ -8,8 +8,7 @@ use super::{
     CHATGPT_AUTH_REFRESH_CLIENT_ID, CHATGPT_AUTH_REFRESH_EXPIRY_SKEW_SECONDS,
     CHATGPT_AUTH_REFRESH_INTERVAL_DAYS, CHATGPT_AUTH_REFRESH_URL,
     CODEX_REFRESH_TOKEN_URL_OVERRIDE_ENV, build_upstream_blocking_http_client,
-    format_response_body, quota_base_url, rate_limit_reset_credit_consume_url, read_auth_json_text,
-    usage_url,
+    format_response_body, quota_base_url, read_auth_json_text, usage_url,
 };
 use crate::{
     RUNTIME_PROXY_BUFFERED_RESPONSE_MAX_BYTES, read_blocking_response_body_with_limit,
@@ -56,6 +55,7 @@ impl Drop for ChatgptRefreshRequest {
     }
 }
 
+#[cfg(any(feature = "mojo-quota", test))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) enum RateLimitResetCreditConsumeOutcome {
@@ -65,6 +65,7 @@ pub(crate) enum RateLimitResetCreditConsumeOutcome {
     AlreadyRedeemed,
 }
 
+#[cfg(any(feature = "mojo-quota", test))]
 #[derive(Debug, serde::Deserialize)]
 pub(crate) struct RateLimitResetCreditConsumeResponse {
     #[serde(default = "default_rate_limit_reset_credit_consume_outcome")]
@@ -77,15 +78,18 @@ pub(crate) struct ChatgptWorkspaceSummary {
     pub(crate) name: Option<String>,
 }
 
+#[cfg(any(feature = "mojo-quota", test))]
 fn default_rate_limit_reset_credit_consume_outcome() -> RateLimitResetCreditConsumeOutcome {
     RateLimitResetCreditConsumeOutcome::Reset
 }
 
+#[cfg(feature = "mojo-quota")]
 #[derive(Debug, Serialize)]
 struct RateLimitResetCreditConsumeRequest<'a> {
     redeem_request_id: &'a str,
 }
 
+#[cfg(feature = "mojo-quota")]
 pub(crate) struct RateLimitResetCreditConsumeFlow<'a> {
     codex_home: &'a Path,
     consume_url: String,
@@ -102,6 +106,7 @@ pub(super) struct UsageFetchFlow<'a> {
     upstream_no_proxy: bool,
 }
 
+#[cfg(feature = "mojo-quota")]
 impl<'a> RateLimitResetCreditConsumeFlow<'a> {
     pub(crate) fn new_with_proxy_policy(
         codex_home: &'a Path,
@@ -579,6 +584,7 @@ fn refresh_usage_auth_from_disk_with_proxy_policy(
     ))
 }
 
+#[cfg(feature = "mojo-quota")]
 fn send_rate_limit_reset_credit_consume_request(
     client: &Client,
     codex_home: &Path,

@@ -233,10 +233,6 @@ pub(super) fn start_runtime_local_rewrite_proxy_with_file_access(
         realtime_ws_model: None,
         log_path,
         active_request_count: Arc::clone(&shared.runtime_shared.active_request_count),
-        #[cfg(test)]
-        request_sequence: Arc::clone(&shared.runtime_shared.request_sequence),
-        #[cfg(test)]
-        lane_admission: shared.runtime_shared.lane_admission.clone(),
         owner_lock: None,
         _live_log_source: None,
         _marker_guard: marker_guard,

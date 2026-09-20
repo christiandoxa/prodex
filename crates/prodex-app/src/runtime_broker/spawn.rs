@@ -1,10 +1,5 @@
 use super::*;
 
-#[cfg(test)]
-pub(crate) fn runtime_broker_process_args() -> Vec<OsString> {
-    prodex_runtime_broker::runtime_broker_process_args()
-}
-
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct RuntimeBrokerSmartContextOptions {
     pub(crate) enabled: bool,

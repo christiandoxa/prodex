@@ -17,16 +17,6 @@ pub(crate) fn runtime_proxy_record_continuity_failure_reason(
     );
 }
 
-#[cfg(test)]
-pub(crate) fn clear_all_runtime_proxy_continuity_failure_reason_metrics() {
-    prodex_runtime_broker_log::clear_all_runtime_proxy_continuity_failure_reason_metrics_for_test();
-}
-
-#[cfg(test)]
-pub(crate) fn runtime_proxy_continuity_failure_reason_metrics_store_entry_count() -> usize {
-    prodex_runtime_broker_log::runtime_proxy_continuity_failure_reason_metrics_store_entry_count_for_test()
-}
-
 pub(crate) use runtime_proxy_crate::RuntimeProxyChainLog;
 
 pub(crate) fn runtime_proxy_log_chain_retried_owner(

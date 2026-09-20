@@ -1,6 +1,4 @@
 use anyhow::{Context, Result};
-#[cfg(test)]
-use chrono::Local;
 use redaction::redaction_redact_secret_like_text;
 use std::collections::BTreeMap;
 use std::thread;
@@ -11,15 +9,9 @@ use crate::{
     RunProfileProbeJob, RunProfileProbeReport, RuntimeProfileUsageSnapshot,
     fetch_usage_with_proxy_policy,
 };
-#[cfg(test)]
-use crate::{MainWindowSnapshot, UsageResponse};
 
 #[cfg(test)]
 pub(crate) use prodex_runtime_quota::ready_profile_sort_key;
-#[cfg(test)]
-pub(crate) use prodex_runtime_quota::run_profile_probe_is_ready;
-#[cfg(test)]
-pub(crate) use prodex_runtime_quota::schedule_ready_profile_candidates_with_view;
 pub(crate) use prodex_runtime_quota::{
     ProfileSelectionView, RuntimeProfileSelectionCatalog, RuntimeRouteSelectionCatalog,
     RuntimeRouteSelectionCatalogView, RuntimeRouteSelectionEntry, RuntimeSelectionProfileEntry,
@@ -124,24 +116,6 @@ fn selection_probe_error(err: &anyhow::Error) -> String {
     redaction_redact_secret_like_text(&err.to_string())
 }
 
-#[cfg(test)]
-pub(crate) fn ready_profile_candidates(
-    reports: &[RunProfileProbeReport],
-    include_code_review: bool,
-    preferred_profile: Option<&str>,
-    state: &AppState,
-    persisted_usage_snapshots: Option<&BTreeMap<String, RuntimeProfileUsageSnapshot>>,
-) -> Vec<ReadyProfileCandidate> {
-    ready_profile_candidates_for_model(
-        reports,
-        include_code_review,
-        preferred_profile,
-        state,
-        persisted_usage_snapshots,
-        None,
-    )
-}
-
 pub(crate) fn ready_profile_candidates_for_model(
     reports: &[RunProfileProbeReport],
     include_code_review: bool,
@@ -159,27 +133,6 @@ pub(crate) fn ready_profile_candidates_for_model(
         RUNTIME_PROFILE_USAGE_CACHE_STALE_GRACE_SECONDS,
         requested_model,
     )
-}
-
-#[cfg(test)]
-pub(crate) fn schedule_ready_profile_candidates(
-    candidates: Vec<ReadyProfileCandidate>,
-    state: &AppState,
-    preferred_profile: Option<&str>,
-) -> Vec<ReadyProfileCandidate> {
-    schedule_ready_profile_candidates_with_view(
-        candidates,
-        app_state_profile_selection_view(state),
-        preferred_profile,
-    )
-}
-
-#[cfg(test)]
-pub(crate) fn required_main_window_snapshot(
-    usage: &UsageResponse,
-    label: &str,
-) -> Option<MainWindowSnapshot> {
-    prodex_runtime_quota::required_main_window_snapshot_at(usage, label, Local::now().timestamp())
 }
 
 pub(crate) fn active_profile_selection_order(

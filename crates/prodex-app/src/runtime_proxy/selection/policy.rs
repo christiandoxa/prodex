@@ -7,7 +7,6 @@ pub(crate) use runtime_proxy_crate::{
 pub(crate) use runtime_proxy_crate::{
     RuntimePreviousResponseNotFoundFallbackRequest, RuntimePreviousResponseStaleContinuationPolicy,
     runtime_previous_response_not_found_fallback_policy,
-    runtime_quota_blocked_previous_response_fresh_fallback_allowed,
     runtime_websocket_previous_response_not_found_requires_stale_continuation,
 };
 #[cfg(any(test, feature = "bench-support"))]
@@ -25,29 +24,6 @@ pub(crate) struct RuntimeCandidateAffinity<'a> {
     pub(crate) turn_state_profile: Option<&'a str>,
     pub(crate) session_profile: Option<&'a str>,
     pub(crate) trusted_previous_response_affinity: bool,
-}
-
-#[cfg(test)]
-impl<'a> RuntimeCandidateAffinity<'a> {
-    pub(crate) fn new(
-        route_kind: RuntimeRouteKind,
-        candidate_name: &'a str,
-        strict_affinity_profile: Option<&'a str>,
-        pinned_profile: Option<&'a str>,
-        turn_state_profile: Option<&'a str>,
-        session_profile: Option<&'a str>,
-        trusted_previous_response_affinity: bool,
-    ) -> Self {
-        Self {
-            route_kind,
-            candidate_name,
-            strict_affinity_profile,
-            pinned_profile,
-            turn_state_profile,
-            session_profile,
-            trusted_previous_response_affinity,
-        }
-    }
 }
 
 fn runtime_candidate_affinity_to_proxy(

@@ -20,9 +20,7 @@ pub(crate) use runtime_proxy_crate::{
 };
 
 #[cfg(test)]
-pub(crate) use runtime_proxy_crate::{
-    extract_runtime_response_ids_from_payload, parse_runtime_sse_payload,
-};
+pub(crate) use runtime_proxy_crate::extract_runtime_response_ids_from_payload;
 
 pub(crate) fn extract_runtime_proxy_quota_message_from_response_reply(
     response: &RuntimeResponsesReply,

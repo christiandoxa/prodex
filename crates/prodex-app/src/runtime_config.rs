@@ -38,11 +38,6 @@ impl RuntimeConfig {
         self.governance.inspection != prodex_config::GovernanceRolloutMode::Off
     }
 
-    #[cfg(test)]
-    pub(crate) fn offline_default(paths: &prodex_core::AppPaths) -> Result<Self, ConfigErrors> {
-        Self::from_environment(paths, RuntimeConfigEnvironment::default())
-    }
-
     #[cfg(any(test, feature = "bench-support"))]
     pub(crate) fn compatibility_current() -> Self {
         let paths = prodex_core::AppPaths::discover()
