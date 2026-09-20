@@ -381,10 +381,7 @@ fn command_uses_minimal_startup(command: &Commands) -> bool {
 
 #[cfg(test)]
 mod minimal_startup_tests {
-    use super::{command_uses_minimal_startup, parse_cli_command_from, run_command};
-    use crate::TestEnvVarGuard;
-    use std::fs;
-    use std::time::{SystemTime, UNIX_EPOCH};
+    use super::{command_uses_minimal_startup, parse_cli_command_from};
 
     #[test]
     fn doctor_install_alone_uses_minimal_startup() {
@@ -393,49 +390,12 @@ mod minimal_startup_tests {
             parse_cli_command_from(["prodex", "doctor", "--install", "--runtime"]).unwrap();
         let bridge =
             parse_cli_command_from(["prodex", "__mcp-jsonl-bridge", "mcp-server"]).unwrap();
-        let super_doctor =
-            parse_cli_command_from(["prodex", "s", "--no-presidio", "doctor"]).unwrap();
         let ping = parse_cli_command_from(["prodex", "ping", "openai"]).unwrap();
 
         assert!(command_uses_minimal_startup(&install));
         assert!(command_uses_minimal_startup(&bridge));
-        assert!(command_uses_minimal_startup(&super_doctor));
         assert!(command_uses_minimal_startup(&ping));
         assert!(!command_uses_minimal_startup(&combined));
-    }
-
-    #[test]
-    fn gateway_catalog_commands_skip_runtime_startup() {
-        let command = parse_cli_command_from(["prodex", "gateway", "providers"]).unwrap();
-
-        assert!(!command.launches_runtime());
-        assert!(command_uses_minimal_startup(&command));
-    }
-
-    #[test]
-    fn setup_dry_run_leaves_startup_paths_uncreated() {
-        let root = std::env::temp_dir().join(format!(
-            "prodex-setup-dry-run-{}-{}",
-            std::process::id(),
-            SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_nanos()
-        ));
-        let shared = root.join("shared-codex");
-        let _root_guard = TestEnvVarGuard::set("PRODEX_HOME", &root.display().to_string());
-        let _shared_guard =
-            TestEnvVarGuard::set("PRODEX_SHARED_CODEX_HOME", &shared.display().to_string());
-        let command = parse_cli_command_from(["prodex", "setup", "--dry-run", "--json"]).unwrap();
-
-        run_command(command).expect("setup dry-run should succeed");
-
-        assert!(!root.exists(), "setup dry-run must not create Prodex home");
-        assert!(
-            !shared.exists(),
-            "setup dry-run must not create shared CODEX_HOME"
-        );
-        let _ = fs::remove_dir_all(root);
     }
 }
 

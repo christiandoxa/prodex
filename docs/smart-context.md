@@ -85,48 +85,21 @@ more than `max(128 tokens, 3% of the original request)`. Unknown tokenizers and
 low-confidence estimates decline rewriting. Provider-observed usage,
 tokenizer-counted values, and estimates remain separately labeled.
 
-## Deterministic Evidence
+## Deterministic Verification
 
-The inputs-only corpus is
-[smart_context_replay_corpus.json](../crates/prodex-runtime-proxy/tests/fixtures/smart_context_replay_corpus.json).
-It contains 18 scenarios, including a 31-turn continuation, four context-window
-sizes, HTTP and WebSocket, exact/shadow/canary/active modes, process restart,
-concurrent isolated proxy instances, route rejection, missing artifacts,
-build/runtime failures, large diffs, repository navigation, changing
-instructions, corrective turns, binary-like output, and duplicate tool output.
-
-Run strict machine-readable evidence:
+The old offline `context replay-report` surface was retired after Smart Context production
+ownership moved to Mojo. Release verification now targets the production path directly:
 
 ```bash
-cargo run --locked -q --bin prodex -- context replay-report crates/prodex-runtime-proxy/tests/fixtures/smart_context_replay_corpus.json --json --strict
+node scripts/ci/smart-context-guard.mjs --self-test
+node scripts/ci/smart-context-guard.mjs
+PRODEX_MOJO_REQUIRED=1 PRODEX_MOJO_VERSION=1.0.0 \
+  cargo test --locked -q -p prodex-runtime-proxy --features mojo --lib -- smart_context --test-threads=1
 ```
 
-Regenerate or verify checked evidence:
-
-```bash
-node scripts/docs/smart-context-evidence.mjs --write
-node scripts/docs/smart-context-evidence.mjs --check
-```
-
-The current [raw report](generated/smart-context-replay-report.json) and
-[summary](generated/smart-context-replay-report.md) carry their source commit,
-toolchain, tokenizer, token counts, and scenario outcomes as generated
-provenance. Those figures describe only the checked corpus. They are not a
-universal reduction target, latency claim, or live-model quality claim.
-
-Evidence levels are separate:
-
-1. deterministic correctness replay: required in CI;
-2. tokenizer/performance benchmarks: deterministic, machine-sensitive, and
-   reported with provenance;
-3. optional live-model evaluation: non-deterministic and never treated as CI
-   proof.
-
-When the report advertises allocation counts, the evidence checker validates
-that each `allocation_bytes` value is a non-negative integer. Allocation counts
-are machine- and allocator-dependent, so the checker does not require exact
-byte-for-byte equality across runs. Reports without allocation support must use
-`null` for those fields.
+The checked input corpus remains useful for parser and limit regression tests, but generated
+replay reports are no longer a release artifact. Performance benchmarks and optional live-model
+evaluation remain separate from deterministic correctness gates.
 
 ## Migration
 

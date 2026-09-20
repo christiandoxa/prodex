@@ -60,9 +60,8 @@ export function validateWindowsSecurityJob(contents) {
     violations.push(".github/workflows/ci.yml: windows-security duplicates windows-prodex-app coverage");
   }
   for (const marker of [
-    "cargo test --locked -q --workspace --exclude prodex --exclude prodex-app --exclude 'prodex-runtime-*' --exclude 'prodex-storage*' --",
-    "cargo test --locked -q -p 'prodex-runtime-*' --",
-    "cargo test --locked -q -p 'prodex-storage*' --",
+    "cargo test --locked -q --workspace --exclude prodex --exclude prodex-app --exclude 'prodex-runtime-*' -- --test-threads=4",
+    "cargo test --locked -q -p 'prodex-runtime-*' -- --test-threads=4",
     "- name: Build Windows installer fixture binary",
     "- name: Test Windows installer",
   ]) {
@@ -697,9 +696,8 @@ function selfTest() {
   const windowsJobs = `jobs:
   windows-workspace:
     steps:
-      - run: cargo test --locked -q --workspace --exclude prodex --exclude prodex-app --exclude 'prodex-runtime-*' --exclude 'prodex-storage*' --
-      - run: cargo test --locked -q -p 'prodex-runtime-*' --
-      - run: cargo test --locked -q -p 'prodex-storage*' --
+      - run: cargo test --locked -q --workspace --exclude prodex --exclude prodex-app --exclude 'prodex-runtime-*' -- --test-threads=4
+      - run: cargo test --locked -q -p 'prodex-runtime-*' -- --test-threads=4
       - name: Build Windows installer fixture binary
       - name: Test Windows installer
   windows-prodex-app:

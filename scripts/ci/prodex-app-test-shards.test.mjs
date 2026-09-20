@@ -181,7 +181,6 @@ test("CI consumes generated app shards and retains required safety gates", () =>
     "secret-scan",
     "windows-workspace",
     "windows-prodex-app",
-    "smart-context-evidence",
     "process-guard",
   ]) {
     assert.match(workflow, new RegExp(`^  ${job}:`, "m"), `${job} job missing`);
@@ -202,17 +201,7 @@ test("CI consumes generated app shards and retains required safety gates", () =>
   assert.equal(processGuard.match(/if: matrix\.lane == 'enterprise-core'/g)?.length, 1);
   assert.equal(processGuard.match(/if: matrix\.lane == 'node'/g)?.length, 1);
   assert.doesNotMatch(processGuard, /enterprise-storage/);
-  const smartContextEvidence = workflow.match(
-    /\n  smart-context-evidence:\n([\s\S]*?)\n  process-guard:/,
-  )?.[1];
-  assert.ok(smartContextEvidence, "smart-context-evidence job missing");
-  assert.match(smartContextEvidence, /actions\/setup-node@/);
-  assert.match(smartContextEvidence, /dtolnay\/rust-toolchain@/);
-  assert.match(smartContextEvidence, /mozilla-actions\/sccache-action@/);
-  assert.match(smartContextEvidence, /Swatinem\/rust-cache@/);
-  assert.ok(smartContextEvidence.includes("node scripts/docs/smart-context-evidence.mjs --check"));
   const telemetry = workflow.match(/\n  ci-duration-telemetry:\n([\s\S]*)$/)?.[1];
-  assert.match(telemetry, /- smart-context-evidence/);
   for (const [source, command] of [
     [workflow, "node scripts/docs/lint-markdown.mjs && node scripts/docs/runtime-policy.mjs --self-test && node scripts/docs/runtime-policy.mjs --check"],
     [staticGuards, "scripts/ci/secret-boundary-guard.mjs"],

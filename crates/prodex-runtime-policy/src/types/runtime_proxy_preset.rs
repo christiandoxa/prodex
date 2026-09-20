@@ -135,7 +135,7 @@ impl RuntimePolicyProxyPreset {
             };
             let values = prodex_mojo_core::runtime::runtime_tuning_proxy_preset_defaults(preset_id)
                 .expect("valid runtime-proxy preset must have Mojo defaults");
-            return RuntimePolicyProxySettings {
+            RuntimePolicyProxySettings {
                 preset,
                 worker_count: values.worker_count,
                 long_lived_worker_count: values.long_lived_worker_count,
@@ -157,7 +157,7 @@ impl RuntimePolicyProxyPreset {
                 websocket_dns_overflow_capacity: values.websocket_dns_overflow_capacity,
                 startup_sync_probe_warm_limit: values.startup_sync_probe_warm_limit,
                 ..RuntimePolicyProxySettings::default()
-            };
+            }
         }
 
         #[cfg(not(feature = "mojo"))]

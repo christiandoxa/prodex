@@ -15,7 +15,6 @@ const contractCatalog = runCheckedJson(
   { cwd: root, timeoutMs: 120_000 },
 );
 const contracts = contractCatalog.providers;
-const harnessModes = contractCatalog.harness_modes;
 const catalog = runCheckedJson(
   process.execPath,
   ["scripts/catalog/provider-catalog-check.mjs", "--json"],
@@ -136,7 +135,7 @@ function render() {
   const lines = [
     "# Provider Capabilities",
     "",
-    "Generated from `prodex_provider_core::provider_contract_catalog()`, `crates/prodex-provider-core/tests/fixtures/provider_conformance_cases.json`, and `crates/prodex-provider-core/catalog/models.json`.",
+    "Generated from the current prodex_provider_core implementation registry and translator metadata, crates/prodex-provider-core/tests/fixtures/provider_conformance_cases.json, and crates/prodex-provider-core/catalog/models.json.",
     "",
     "| Provider | Models | Transform | Streaming | Fallback | Fixtures req/resp/stream | " + endpointColumns.join(" | ") + " |",
     "|---|---:|---|---|---|---|" + endpointColumns.map(() => "---").join("|") + "|",
@@ -162,16 +161,6 @@ function render() {
   lines.push("Fixture summary counts are `request/response/stream-event` conformance cases per provider.");
   lines.push("");
   lines.push("Model counts cover deterministic offline built-ins. Imported or provider-discovered runtime routes may augment them, and Super accepts an explicit non-empty custom child model ID without requiring live discovery.");
-  lines.push("");
-  lines.push("## Harness modes");
-  lines.push("");
-  lines.push(`Default mode: \`${contractCatalog.default_harness_mode}\`. Resolved mode for this catalog: \`${contractCatalog.resolved_harness_mode}\`.`);
-  lines.push("");
-  lines.push("| Mode | Label | Selectable | Default effective | Canonical request routes | Request shaping | Response shaping | Stream shaping | Description |");
-  lines.push("|---|---|---|---|---|---|---|---|---|");
-  for (const mode of harnessModes) {
-    lines.push(`| ${mode.id} | ${mode.display_label} | ${mode.selectable} | ${mode.default_effective_mode} | ${mode.supported_canonical_request_routes.join(", ")} | ${mode.request_shaping} | ${mode.response_shaping} | ${mode.stream_shaping} | ${mode.description} |`);
-  }
   lines.push("");
   const translatedLimitations = contracts
     .map((contract) => {

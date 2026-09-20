@@ -23,12 +23,12 @@ pub fn deepseek_provider_core_simple_request(
             .and_then(serde_json::Value::as_str)
             .filter(|id| !id.trim().is_empty())
             .is_some_and(&mut has_stored_previous_response_id);
-        return super::request_policy::plan_bytes(
+        super::request_policy::plan_bytes(
             body,
             prodex_mojo_core::rich::DeepSeekRequestPolicyOperation::SimpleRequest,
             previous_response_bound,
         )
-        .is_some_and(|plan| plan.tag == 0);
+        .is_some_and(|plan| plan.tag == 0)
     }
 
     #[cfg(not(feature = "mojo"))]

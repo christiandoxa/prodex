@@ -443,37 +443,21 @@ The six live provider combinations (old/new Prodex x Codex 0.147/0.148/0.149.1) 
 not run in CI because they require credentials and incur provider cost; any
 live A/B run must use disposable homes and explicit authorization.
 
-## Smart Context Evidence
+## Smart Context Verification
 
-Run the production engine against the inputs-only deterministic corpus:
-
-```bash
-cargo run --locked -q --bin prodex -- context replay-report crates/prodex-runtime-proxy/tests/fixtures/smart_context_replay_corpus.json --json --strict
-node scripts/docs/smart-context-evidence.mjs --check
-```
-
-Regenerate checked JSON and Markdown only after reviewing corpus or engine
-changes:
+The offline replay-report CLI was retired with the superseded Rust replay surface. Current Smart
+Context verification exercises the production Mojo-owned runtime directly:
 
 ```bash
-node scripts/docs/smart-context-evidence.mjs --write
+node scripts/ci/smart-context-guard.mjs --self-test
+node scripts/ci/smart-context-guard.mjs
+PRODEX_MOJO_REQUIRED=1 PRODEX_MOJO_VERSION=1.0.0 \
+  cargo test --locked -q -p prodex-runtime-proxy --features mojo --lib -- smart_context --test-threads=1
 ```
 
-Collect 50 machine-specific performance samples per case and render the raw
-JSON/Markdown report:
-
-```bash
-cargo bench --locked --features bench-support --bench runtime_proxy_hot_paths -- \
-  runtime_smart_context_ --noplot --warm-up-time 1 --measurement-time 2 --sample-size 50
-node scripts/bench/smart-context-performance-report.mjs
-```
-
-CI runs the correctness guard and evidence check. The raw report separates
-tokenizer-counted values from estimates, includes per-turn transformations,
-validation, reference blocking, state mutations, hashes, duration, and
-optimized-turn allocation bytes from the opt-in counting allocator.
-Live-model evaluation is optional non-deterministic evidence and must not be
-reported as deterministic CI proof.
+Use the runtime hot-path guard for request-path safety and focused HTTP/WebSocket runtime tests for
+end-to-end integration. Machine-specific performance evidence remains benchmark-only and is not a
+release correctness oracle.
 
 Compat capture input should usually be JSONL, one record per line. Supported record `type` values are `request`, `response`, `event`, `websocket_message`, and `sse_stream`. Request records may include `method`, `url` or `path_and_query`, `headers`, and `body`. Response and event records may include `status`, `headers`, `body`, `payload`, or `data`. WebSocket records may include `direction` and `message`. SSE records may include `stream`, `text`, `body`, or `data`.
 
