@@ -43,7 +43,6 @@ mojo-core = [
 anyhow = { workspace = true }
 arc-swap = { workspace = true }
 base64 = { workspace = true }
-aws-lc-rs = { workspace = true }
 bytes = { workspace = true }
 chrono = { workspace = true }
 clap = { workspace = true }
@@ -51,9 +50,7 @@ crossterm = { workspace = true }
 dirs = { workspace = true }
 fs2 = { workspace = true }
 getrandom = { workspace = true }
-http-body-util = { workspace = true }
 libc = { workspace = true }
-portable-pty = { workspace = true }
 os_info = { workspace = true }
 prodex_bench_support = { workspace = true, optional = true }
 codex_config = { workspace = true }
@@ -75,11 +72,8 @@ prodex_provider_spi = { workspace = true }
 prodex_quota = { workspace = true }
 prodex_runtime_quota = { workspace = true }
 prodex_runtime_state = { workspace = true }
-postgres = { workspace = true, features = ["with-uuid-1"] }
 redaction = { workspace = true }
-redis = { workspace = true }
 reqwest = { workspace = true, features = ["blocking", "form", "json", "rustls", "system-proxy", "socks"] }
-ratatui = { workspace = true }
 rpassword = { workspace = true }
 rusqlite = { workspace = true }
 prodex_runtime_doctor = { workspace = true }
@@ -109,13 +103,8 @@ tiny_http = { workspace = true }
 tokio = { workspace = true, features = ["io-std", "io-util", "net", "process", "signal", "sync"] }
 toml = { workspace = true }
 tungstenite = { workspace = true, features = ["rustls-tls-native-roots", "url"] }
-jsonwebtoken = { version = "11.0.0", features = ["aws_lc_rs"] }
 
 [dev-dependencies]
-rmcp = { version = "=3.3.0", default-features = false, features = [
-    "client",
-    "transport-streamable-http-client-reqwest",
-] }
 zstd = { workspace = true }
 
 [target.'cfg(windows)'.dependencies]

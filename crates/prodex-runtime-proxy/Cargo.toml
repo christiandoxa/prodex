@@ -17,13 +17,11 @@ mojo = [
     "prodex_mojo_core/mojo-quota",
     "prodex_mojo_core/mojo-runtime",
     "prodex_mojo_core/mojo-rich",
-    "prodex_provider_core/mojo",
 ]
 
 [dependencies]
 base64 = { workspace = true }
 prodex_mojo_core = { workspace = true, optional = true }
-prodex_provider_core = { workspace = true }
 prodex_runtime_tuning = { workspace = true }
 prodex_runtime_state = { workspace = true }
 redaction = { workspace = true }
@@ -31,6 +29,9 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 sha2 = { workspace = true }
 tiktoken-rs = { workspace = true }
+
+[dev-dependencies]
+prodex_provider_core = { workspace = true, features = ["mojo"] }
 
 [lints]
 workspace = true
