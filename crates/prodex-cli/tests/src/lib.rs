@@ -664,3 +664,36 @@ fn super_profile_named_expose_is_not_rewritten_as_expose_command() {
     };
     assert_eq!(args.profile.as_deref(), Some("expose"));
 }
+
+#[test]
+fn super_expose_exec_openai_tunnel_alias_parses() {
+    let Commands::SuperExpose(args) = parse_cli_command_from([
+        "prodex",
+        "s",
+        "expose",
+        "exec",
+        "--openai-tunnel-id",
+        "tunnel_0123456789abcdef0123456789abcdef",
+        "--no-presidio",
+    ])
+    .expect("exec-only OpenAI tunnel expose should parse") else {
+        panic!("expected SuperExpose");
+    };
+    assert_eq!(args.mode, SuperExposeMode::Exec);
+    assert_eq!(
+        args.openai_tunnel_id.as_deref(),
+        Some("tunnel_0123456789abcdef0123456789abcdef")
+    );
+    assert!(
+        parse_cli_command_from([
+            "prodex",
+            "s",
+            "expose",
+            "exec",
+            "--openai-tunnel-id",
+            "tunnel_0123456789abcdef0123456789abcdef",
+            "--no-tunnel",
+        ])
+        .is_err()
+    );
+}

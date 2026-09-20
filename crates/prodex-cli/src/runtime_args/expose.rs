@@ -35,6 +35,13 @@ pub struct SuperExposeArgs {
     /// Public tunnel compatibility flag. The lean 0.430 expose surface is local-only.
     #[arg(long, conflicts_with = "no_tunnel")]
     pub tunnel: bool,
+    /// Pre-created OpenAI Secure MCP Tunnel id. Supplying it enables the official tunnel client.
+    #[arg(
+        long,
+        value_name = "ID",
+        conflicts_with_all = ["no_tunnel", "tunnel"]
+    )]
+    pub openai_tunnel_id: Option<String>,
     /// Optional display name for this workspace endpoint.
     #[arg(long, value_name = "NAME")]
     pub name: Option<String>,

@@ -1,6 +1,6 @@
 from std.memory import Pointer
 
-from rich_text import rich_view_matches_literal, rich_view_valid
+from rich_text import rich_view_matches_literal, rich_view_ptr, rich_view_valid
 from rich_types import ProdexRichStringView
 
 comptime SUPER_EXPOSE_ABI_VERSION: Int64 = 1
@@ -120,4 +120,142 @@ def prodex_mojo_super_expose_tool_allowed_v1(
         output[] = 1 if tool_kind == SUPER_EXPOSE_TOOL_EXEC else 0
     else:
         output[] = 1 if tool_kind != SUPER_EXPOSE_TOOL_UNKNOWN else 0
+    return 0
+
+
+comptime SUPER_EXPOSE_TUNNEL_ID_BYTES: Int64 = 39
+comptime SUPER_EXPOSE_TUNNEL_PREFIX_BYTES: Int64 = 7
+
+def super_expose_tunnel_id_valid(view: ProdexRichStringView) -> Bool:
+    if Int64(view.len) != SUPER_EXPOSE_TUNNEL_ID_BYTES or view.ptr == 0:
+        return False
+    var ptr = rich_view_ptr(view)
+    var prefix = StringSlice("tunnel_").unsafe_ptr()
+    for index in range(SUPER_EXPOSE_TUNNEL_PREFIX_BYTES):
+        if ptr[unsafe_offset=index] != prefix[unsafe_offset=index]:
+            return False
+    for index in range(SUPER_EXPOSE_TUNNEL_PREFIX_BYTES, SUPER_EXPOSE_TUNNEL_ID_BYTES):
+        var byte = ptr[unsafe_offset=index]
+        var lowercase = byte >= 97 and byte <= 122
+        var digit = byte >= 48 and byte <= 57
+        if not lowercase and not digit:
+            return False
+    return True
+
+@export("prodex_mojo_super_expose_tunnel_id_valid_v1")
+def prodex_mojo_super_expose_tunnel_id_valid_v1(
+    abi_version: Int64,
+    value_address: UInt,
+    value_length: Int64,
+    output_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != SUPER_EXPOSE_ABI_VERSION:
+        return 4
+    if (
+        value_length < 0
+        or value_length > SUPER_EXPOSE_MAX_NAME_BYTES
+        or output_address == 0
+        or (value_length > 0 and value_address == 0)
+    ):
+        return 1
+    var value = ProdexRichStringView(value_address, UInt(value_length))
+    if not rich_view_valid(value, SUPER_EXPOSE_MAX_NAME_BYTES):
+        return 2
+    var output = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    output[] = 1 if super_expose_tunnel_id_valid(value) else 0
+    return 0
+
+
+
+def super_expose_ascii_trim_bounds(
+    view: ProdexRichStringView,
+    start: Int64,
+    end: Int64,
+) -> InlineArray[Int64, 2]:
+    var left = start
+    var right = end
+    var ptr = rich_view_ptr(view)
+    while left < right:
+        var byte = ptr[unsafe_offset=left]
+        if byte == 9 or byte == 10 or byte == 13 or byte == 32:
+            left += 1
+        else:
+            break
+    while right > left:
+        var byte = ptr[unsafe_offset=right - 1]
+        if byte == 9 or byte == 10 or byte == 13 or byte == 32:
+            right -= 1
+        else:
+            break
+    var bounds = InlineArray[Int64, 2](fill=0)
+    bounds[0] = left
+    bounds[1] = right
+    return bounds^
+
+def super_expose_range_matches_literal(
+    view: ProdexRichStringView,
+    start: Int64,
+    end: Int64,
+    literal: StringSlice,
+) -> Bool:
+    var length = end - start
+    if length != Int64(literal.byte_length()) or start < 0:
+        return False
+    var ptr = rich_view_ptr(view)
+    var expected = literal.unsafe_ptr()
+    for index in range(length):
+        if ptr[unsafe_offset=start + index] != expected[unsafe_offset=index]:
+            return False
+    return True
+
+def super_expose_tunnel_client_version_output_valid(
+    view: ProdexRichStringView,
+) -> Bool:
+    var length = Int64(view.len)
+    var line_start: Int64 = 0
+    var cursor: Int64 = 0
+    while cursor <= length:
+        if cursor == length or rich_view_ptr(view)[unsafe_offset=cursor] == 10:
+            var bounds = super_expose_ascii_trim_bounds(view, line_start, cursor)
+            if super_expose_range_matches_literal(
+                view,
+                bounds[0],
+                bounds[1],
+                StringSlice(
+                    "0.0.14+0f870e50a973fa820d4c409000059e181e8d242b "
+                    "(git sha: 0f870e50a973fa820d4c409000059e181e8d242b)"
+                ),
+            ):
+                return True
+            line_start = cursor + 1
+        cursor += 1
+    return False
+
+@export("prodex_mojo_super_expose_tunnel_client_version_valid_v1")
+def prodex_mojo_super_expose_tunnel_client_version_valid_v1(
+    abi_version: Int64,
+    value_address: UInt,
+    value_length: Int64,
+    output_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != SUPER_EXPOSE_ABI_VERSION:
+        return 4
+    if (
+        value_length < 0
+        or value_length > 16_384
+        or output_address == 0
+        or (value_length > 0 and value_address == 0)
+    ):
+        return 1
+    var value = ProdexRichStringView(value_address, UInt(value_length))
+    if not rich_view_valid(value, 16_384):
+        return 2
+    var output = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    output[] = (
+        1 if super_expose_tunnel_client_version_output_valid(value) else 0
+    )
     return 0

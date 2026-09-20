@@ -6,13 +6,17 @@ use serde_json::json;
 use std::io::Read;
 use std::net::SocketAddr;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::sync::mpsc::{self, TryRecvError};
+use std::thread;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tiny_http::{Method, Server};
 
 #[path = "super_expose/exec.rs"]
 mod exec;
 #[path = "super_expose/logging.rs"]
 mod logging;
+#[path = "super_expose/openai_tunnel.rs"]
+mod openai_tunnel;
 #[path = "super_expose/protocol.rs"]
 mod protocol;
 #[path = "super_expose/run.rs"]
@@ -24,9 +28,14 @@ static CLOCK_SEQUENCE: AtomicU64 = AtomicU64::new(1);
 pub(crate) fn handle_super_expose(mut expose: SuperExposeArgs) -> Result<()> {
     if expose.tunnel {
         bail!(
-            "public --tunnel mode is not part of the lean 0.430 expose surface; use local prodex s expose or --no-tunnel"
+            "legacy --tunnel mode is not part of the lean 0.430 expose surface; use --openai-tunnel-id for OpenAI Secure MCP Tunnel or omit tunnel flags for local-only access"
         );
     }
+    let openai_tunnel_id = expose
+        .openai_tunnel_id
+        .as_deref()
+        .map(|value| openai_tunnel::resolve_openai_tunnel_id(Some(value)))
+        .transpose()?;
     expose
         .super_args
         .extract_provider_overrides_from_codex_args()
@@ -49,7 +58,14 @@ pub(crate) fn handle_super_expose(mut expose: SuperExposeArgs) -> Result<()> {
         } else {
             "Prodex Super expose"
         };
-        println!("{label}: local MCP on {}", expose.listen);
+        if let Some(tunnel_id) = openai_tunnel_id.as_deref() {
+            println!(
+                "{label}: OpenAI Secure MCP Tunnel {tunnel_id} -> local MCP on {}",
+                expose.listen
+            );
+        } else {
+            println!("{label}: local MCP on {}", expose.listen);
+        }
         return Ok(());
     }
 
@@ -81,6 +97,36 @@ pub(crate) fn handle_super_expose(mut expose: SuperExposeArgs) -> Result<()> {
         .or_else(|| workspace.file_name().and_then(|name| name.to_str()))
         .unwrap_or("workspace");
 
+    let mut openai_tunnel_rx = None;
+    let mut openai_tunnel = None;
+    if let Some(tunnel_id) = openai_tunnel_id.as_deref() {
+        audit.event(
+            "super_expose_openai_tunnel_starting",
+            [
+                crate::runtime_proxy_log_field("mode", expose.mode.as_str()),
+                crate::runtime_proxy_log_field("provider", "openai"),
+            ],
+        );
+        let client_version = openai_tunnel::ensure_openai_tunnel_available(tunnel_id)?;
+        let credentials = openai_tunnel::openai_tunnel_credentials_from_env(tunnel_id)?;
+        let local_endpoint = endpoint.clone();
+        let (sender, receiver) = mpsc::sync_channel(1);
+        thread::Builder::new()
+            .name("prodex-openai-tunnel-start".to_string())
+            .spawn(move || {
+                let result = openai_tunnel::start_openai_tunnel(
+                    &local_endpoint,
+                    credentials,
+                    client_version,
+                    &|| false,
+                );
+                let _ = sender.send(result);
+            })
+            .context("failed to start OpenAI tunnel supervisor")?;
+        openai_tunnel_rx = Some(receiver);
+        eprintln!("OpenAI Secure MCP Tunnel starting for {tunnel_id}.");
+    }
+
     let label = if expose.mode.exec_only() {
         "Prodex Super expose exec"
     } else {
@@ -99,8 +145,71 @@ pub(crate) fn handle_super_expose(mut expose: SuperExposeArgs) -> Result<()> {
     audit.flush()?;
 
     let manager = run::RunManager::new(workspace.clone(), expose.super_args, audit.clone());
-    for mut request in server.incoming_requests() {
-        let expected_path = format!("/mcp/{token}");
+    let expected_path = format!("/mcp/{token}");
+    loop {
+        if let Some(receiver) = openai_tunnel_rx.as_ref() {
+            match receiver.try_recv() {
+                Ok(Ok(tunnel)) => {
+                    audit.event(
+                        "super_expose_openai_tunnel_ready",
+                        [
+                            crate::runtime_proxy_log_field("provider", "openai"),
+                            crate::runtime_proxy_log_field(
+                                "client_version",
+                                tunnel.status.client_version.clone(),
+                            ),
+                        ],
+                    );
+                    eprintln!(
+                        "OpenAI Secure MCP Tunnel ready: {} (client {}).",
+                        tunnel.status.tunnel_id, tunnel.status.client_version
+                    );
+                    openai_tunnel = Some(tunnel);
+                    openai_tunnel_rx = None;
+                    audit.flush()?;
+                }
+                Ok(Err(error)) => {
+                    audit.event(
+                        "super_expose_openai_tunnel_failed",
+                        [
+                            crate::runtime_proxy_log_field("provider", "openai"),
+                            crate::runtime_proxy_log_field("reason", "startup_failed"),
+                        ],
+                    );
+                    audit.flush()?;
+                    return Err(error);
+                }
+                Err(TryRecvError::Empty) => {}
+                Err(TryRecvError::Disconnected) => {
+                    bail!("OpenAI tunnel supervisor stopped before reporting readiness");
+                }
+            }
+        }
+        if let Some(tunnel) = openai_tunnel.as_mut()
+            && let Some(status) = tunnel.exited()
+        {
+            audit.event(
+                "super_expose_openai_tunnel_exited",
+                [
+                    crate::runtime_proxy_log_field("provider", "openai"),
+                    crate::runtime_proxy_log_field(
+                        "exit_code",
+                        status
+                            .code()
+                            .map_or_else(|| "signal".to_string(), |code| code.to_string()),
+                    ),
+                ],
+            );
+            audit.flush()?;
+            bail!("OpenAI tunnel-client exited unexpectedly");
+        }
+
+        let Some(mut request) = server
+            .recv_timeout(Duration::from_millis(100))
+            .map_err(|error| anyhow::anyhow!("Super expose receive failed: {error}"))?
+        else {
+            continue;
+        };
         if request.url().split('?').next() != Some(expected_path.as_str()) {
             audit.event(
                 "super_expose_http_rejected",
@@ -151,7 +260,6 @@ pub(crate) fn handle_super_expose(mut expose: SuperExposeArgs) -> Result<()> {
             &audit,
         ));
     }
-    Ok(())
 }
 
 fn capability_token() -> Result<String> {
@@ -199,6 +307,29 @@ mod tests {
     fn public_tunnel_is_explicitly_rejected_in_0430() {
         let error = handle_super_expose(expose_args(&["--tunnel"]))
             .expect_err("public tunnel should not be silently enabled");
-        assert!(error.to_string().contains("public --tunnel mode"));
+        assert!(error.to_string().contains("legacy --tunnel mode"));
+    }
+
+    #[test]
+    fn exec_openai_tunnel_dry_run_accepts_explicit_tunnel_id() {
+        let args = expose_args(&[
+            "exec",
+            "--openai-tunnel-id",
+            "tunnel_0123456789abcdef0123456789abcdef",
+        ]);
+        assert_eq!(args.mode, prodex_cli::SuperExposeMode::Exec);
+        assert_eq!(
+            args.openai_tunnel_id.as_deref(),
+            Some("tunnel_0123456789abcdef0123456789abcdef")
+        );
+        handle_super_expose(args).expect("OpenAI tunnel dry-run should validate without spawning");
+    }
+
+    #[test]
+    fn openai_tunnel_id_rejects_invalid_values_before_spawn() {
+        let error =
+            handle_super_expose(expose_args(&["exec", "--openai-tunnel-id", "tunnel_short"]))
+                .expect_err("invalid tunnel id should fail");
+        assert!(error.to_string().contains("OpenAI tunnel id"));
     }
 }
