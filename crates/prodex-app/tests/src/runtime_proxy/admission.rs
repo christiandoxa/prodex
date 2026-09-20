@@ -12,3 +12,10 @@ fn local_overload_response_includes_retry_after_hint() {
 
     assert!(text.contains("\r\nRetry-After: 1\r\n"));
 }
+
+#[test]
+fn local_overload_deadline_preserves_full_backoff_across_second_boundary() {
+    assert_eq!(runtime_proxy_local_overload_deadline_seconds(1_000, 1), 2);
+    assert_eq!(runtime_proxy_local_overload_deadline_seconds(1_999, 1), 3);
+    assert_eq!(runtime_proxy_local_overload_deadline_seconds(1_001, 3), 5);
+}
