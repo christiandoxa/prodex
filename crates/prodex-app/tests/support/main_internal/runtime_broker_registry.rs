@@ -440,25 +440,13 @@ fn wait_for_existing_runtime_broker_recovery_or_exit_yields_mismatched_live_brok
         legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
     };
     let broker_key = "defer-version-mismatch";
-    let script_path = temp_dir.path.join("busy-mismatched-broker.sh");
-    fs::write(
-        &script_path,
-        "#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then\n  echo 'prodex 0.0.1'\n  exit 0\nfi\nsleep 30\n:\n",
-    )
-    .expect("busy mismatched broker script should write");
-    let mut permissions = fs::metadata(&script_path)
-        .expect("busy mismatched broker script metadata should load")
-        .permissions();
-    permissions.set_mode(0o755);
-    fs::set_permissions(&script_path, permissions)
-        .expect("busy mismatched broker script permissions should update");
-
-    let mut child = Command::new(&script_path)
+    let mut child = Command::new("sleep")
+        .arg("30")
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .spawn()
-        .expect("busy mismatched broker script should spawn");
+        .expect("busy mismatched broker process should spawn");
     let child_pid = child.id();
     wait_for_runtime_process_alive(child_pid);
     let child_executable_path = runtime_process_executable_path(child_pid)
