@@ -79,6 +79,9 @@ pub fn deepseek_provider_core_reject_unsupported_request_fields(
 ) -> Result<(), String> {
     #[cfg(feature = "mojo")]
     {
+        if !value.is_object() {
+            return Ok(());
+        }
         let (source, plan) = super::super::request_policy::plan_value(
             value,
             prodex_mojo_core::rich::DeepSeekRequestPolicyOperation::RequestFields,
@@ -96,6 +99,9 @@ pub fn deepseek_provider_core_reject_beta_completion_fields(
 ) -> Result<(), String> {
     #[cfg(feature = "mojo")]
     {
+        if !value.is_object() {
+            return Ok(());
+        }
         let (_source, plan) = super::super::request_policy::plan_value(
             value,
             prodex_mojo_core::rich::DeepSeekRequestPolicyOperation::BetaFields,

@@ -1,5 +1,5 @@
 use super::resolve_super_launch_decisions_with_prompts;
-use prodex_cli::SuperArgs;
+use prodex_cli::{SuperArgs, SuperExternalProvider};
 use prodex_provider_core::ProviderId;
 
 fn super_args(values: &[&str]) -> SuperArgs {
@@ -16,8 +16,8 @@ fn super_args(values: &[&str]) -> SuperArgs {
 }
 
 #[test]
-fn native_kiro_resolution_does_not_inject_the_codex_bridge_provider() {
-    let mut args = super_args(&["--cli", "kiro", "--no-sub-agent"]);
+fn native_kiro_resolution_preserves_explicit_provider_without_prompt() {
+    let mut args = super_args(&["--provider", "kiro", "--no-sub-agent"]);
     let (_, main_agent, _) = resolve_super_launch_decisions_with_prompts(
         &mut args,
         false,
@@ -29,5 +29,5 @@ fn native_kiro_resolution_does_not_inject_the_codex_bridge_provider() {
     .unwrap();
 
     assert_eq!(main_agent.provider, ProviderId::Kiro);
-    assert_eq!(args.provider, None);
+    assert_eq!(args.provider, Some(SuperExternalProvider::Kiro));
 }
