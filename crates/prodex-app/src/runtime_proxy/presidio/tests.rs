@@ -7,7 +7,6 @@ use super::findings::{
     runtime_presidio_inspection_source,
 };
 use super::json_body::PresidioJsonString;
-use super::local::RuntimeTenantDetectorPatterns;
 use super::registry::{
     MAX_RUNTIME_PRESIDIO_REGISTRY_ENTRIES, RuntimePresidioRedactionState,
     register_runtime_presidio_redaction_proxy_state,
@@ -23,7 +22,6 @@ use crate::{
     RuntimeProxyLaneAdmission, RuntimeProxyLaneLimits, RuntimeProxyRequest,
     RuntimeRotationProxyShared, RuntimeRotationState,
 };
-use prodex_domain::TenantId;
 use prodex_observability::{
     InspectionCoverageClass, InspectionFindingCategory, InspectionMaskingAction, InspectionOutcome,
     InspectionStage, plan_inspection_metric,

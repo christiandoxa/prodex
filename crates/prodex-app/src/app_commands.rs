@@ -166,21 +166,13 @@ fn resolve_super_presidio_choice(
 }
 
 #[cfg(test)]
-pub(crate) fn resolve_runtime_launch_profile_name(
-    state: &AppState,
-    requested: Option<&str>,
-) -> Result<String> {
-    runtime_launch::resolve_runtime_launch_profile_name(state, requested)
-}
-
-#[cfg(test)]
 mod sub_agent_prompt_tests {
     use super::super_prompt::{
         SuperSubAgentPromptStep, run_super_sub_agent_prompt_steps,
         super_sub_agent_concurrency_choices, super_sub_agent_prompt_steps,
     };
     use super::{
-        ResolvedMainAgentConfig, SUB_AGENT_RECURSION_MARKER, codex_cli_config_override_value,
+        ResolvedMainAgentConfig, codex_cli_config_override_value,
         resolve_super_launch_decisions_with_prompts, resolve_super_sub_agent,
     };
     use prodex_cli::{SubAgentConfig, SubAgentReasoningEffort, SuperLaunchTarget};

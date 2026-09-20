@@ -495,10 +495,6 @@ pub(crate) fn start_runtime_rotation_proxy_with_options(
         realtime_ws_model: None,
         log_path,
         active_request_count: Arc::clone(&shared.active_request_count),
-        #[cfg(test)]
-        request_sequence: Arc::clone(&shared.request_sequence),
-        #[cfg(test)]
-        lane_admission: shared.lane_admission.clone(),
         owner_lock,
         _live_log_source: None,
         _marker_guard: marker_guard,

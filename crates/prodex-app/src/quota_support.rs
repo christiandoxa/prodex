@@ -28,8 +28,7 @@ pub(crate) use prodex_quota::{
 #[cfg(test)]
 pub(crate) use prodex_quota::{
     format_main_reset_summary, format_precise_reset_time, format_window_status,
-    format_window_status_compact, render_quota_reports_window_with_layout,
-    render_quota_reports_with_layout, sorted_quota_report_indexes, window_label,
+    format_window_status_compact, window_label,
 };
 use prodex_runtime_doctor::read_runtime_log_tail;
 use redaction::redaction_redact_secret_like_text;
@@ -510,6 +509,7 @@ pub(crate) fn usage_url(base_url: &str) -> String {
     prodex_quota::usage_url(base_url)
 }
 
+#[cfg(any(feature = "mojo-quota", test))]
 pub(crate) fn rate_limit_reset_credit_consume_url(base_url: &str) -> String {
     let base_url = base_url.trim_end_matches('/');
     if base_url.contains("/backend-api") {

@@ -38,9 +38,4 @@ impl ExposeAuditLog {
             .flush_path(&self.path)
             .context("failed to flush expose audit log")
     }
-
-    #[cfg(test)]
-    pub(super) fn path(&self) -> &std::path::Path {
-        &self.path
-    }
 }

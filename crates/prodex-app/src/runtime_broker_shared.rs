@@ -7,8 +7,6 @@ use anyhow::Result;
 use std::fs;
 use std::path::PathBuf;
 
-#[cfg(test)]
-pub(super) use prodex_runtime_broker::RuntimeBrokerMetrics;
 pub(super) use prodex_runtime_broker::{
     RuntimeBrokerHealth, RuntimeBrokerMetadata, RuntimeBrokerRegistry,
     RuntimeBrokerVersionGuardOutcome, RuntimeProdexBinaryIdentity, parse_prodex_version_output,

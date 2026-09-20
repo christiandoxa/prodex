@@ -332,6 +332,7 @@ fn ping_status_from_mojo(value: i64) -> PingStatus {
     }
 }
 
+#[cfg(feature = "mojo-core")]
 fn ping_status_detail(status: PingStatus) -> &'static str {
     match status {
         PingStatus::Pass => "valid model response received",
@@ -372,6 +373,7 @@ fn validate_ping_output(output: &Output) -> std::result::Result<(), PingValidati
     validate_ping_output_rust(output)
 }
 
+#[cfg(feature = "mojo-core")]
 fn ping_structured_failure_detail(text: &str) -> Option<String> {
     text.lines().find_map(|line| {
         let event: Value = serde_json::from_str(line).ok()?;

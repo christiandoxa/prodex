@@ -23,7 +23,6 @@ pub(crate) use self::policy::{
 pub(crate) use self::policy::{
     RuntimePreviousResponseNotFoundFallbackRequest, RuntimePreviousResponseStaleContinuationPolicy,
     runtime_previous_response_not_found_fallback_policy,
-    runtime_quota_blocked_previous_response_fresh_fallback_allowed,
     runtime_websocket_previous_response_not_found_requires_stale_continuation,
 };
 #[cfg(any(test, feature = "bench-support"))]

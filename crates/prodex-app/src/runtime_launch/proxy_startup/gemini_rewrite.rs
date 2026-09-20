@@ -1,8 +1,6 @@
 use super::deepseek_rewrite::{
     RuntimeDeepSeekConversationStore, runtime_deepseek_store_conversation,
 };
-#[cfg(test)]
-use super::gemini_thought_signatures::runtime_gemini_harden_tool_call_thought_signatures;
 use super::provider_bridge::{
     RuntimeProviderBridgeKind, runtime_provider_log_response_conformance,
     runtime_provider_response_conformance_result,
@@ -13,8 +11,6 @@ use crate::{
 };
 use anyhow::{Context, Result};
 use prodex_domain::{CallId, RequestId};
-#[cfg(test)]
-use prodex_provider_core::gemini_provider_core_runtime_responses_value_with_fallback_ids;
 use prodex_provider_core::{
     gemini_provider_core_buffered_responses_value_with_fallback_ids,
     gemini_provider_core_chat_assistant_messages, gemini_provider_core_normalized_response_value,

@@ -2,10 +2,6 @@ use super::*;
 
 mod state;
 
-#[cfg(test)]
-pub(crate) use prodex_runtime_doctor::RuntimeDoctorRequestTimelineEvent;
-#[cfg(test)]
-pub(crate) use prodex_runtime_doctor::RuntimeDoctorRouteSummary;
 pub(crate) use prodex_runtime_doctor::{
     RuntimeDoctorProfileSummary, RuntimeDoctorSummary, runtime_doctor_fields_for_summary,
     runtime_doctor_json_value, runtime_doctor_policy_suggestion_lines,
@@ -19,7 +15,7 @@ pub(crate) use prodex_runtime_doctor::diagnosis::{
 #[cfg(test)]
 pub(crate) use prodex_runtime_doctor::summarize_runtime_log_tail;
 #[cfg(test)]
-pub(crate) use state::{collect_runtime_doctor_state, runtime_doctor_degraded_routes};
+pub(crate) use state::collect_runtime_doctor_state;
 
 fn runtime_doctor_tuning_snapshot(
     config: &RuntimeConfig,

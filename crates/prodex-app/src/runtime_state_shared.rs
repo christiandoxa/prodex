@@ -92,11 +92,6 @@ impl RuntimeRotationProxyShared {
     pub(crate) fn runtime_state_lock_wait_metrics(&self) -> RuntimeStateLockWaitMetrics {
         self.runtime_state_lock_wait_counters.snapshot()
     }
-
-    #[cfg(test)]
-    pub(crate) fn reset_runtime_state_lock_wait_metrics_for_test(&self) {
-        self.runtime_state_lock_wait_counters.reset();
-    }
 }
 
 const RUNTIME_SMART_CONTEXT_MAX_ARTIFACTS: usize = 128;

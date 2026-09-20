@@ -78,15 +78,6 @@ pub(crate) struct RuntimeWebsocketEnvironment {
 }
 
 impl RuntimeWebsocketEnvironment {
-    #[cfg(test)]
-    pub(crate) fn direct() -> Self {
-        Self {
-            https_proxy: None,
-            http_proxy: None,
-            no_proxy: Vec::new(),
-        }
-    }
-
     pub(crate) fn proxy_url(&self, scheme: &str) -> Option<reqwest::Url> {
         if matches!(scheme, "wss" | "https") {
             self.https_proxy.clone()

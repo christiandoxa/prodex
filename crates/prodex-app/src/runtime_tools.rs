@@ -25,8 +25,6 @@ mod super_trust;
 #[path = "runtime_tools/usage_limit_recovery.rs"]
 mod usage_limit_recovery;
 pub(super) use child_env::{clear_rtk_auto_wrap_control_env, prepend_child_path};
-#[cfg(test)]
-pub(super) use overlay::prepare_prodex_overlay_home;
 pub(crate) use overlay::{
     project_in_app_resume_model_settings, resolve_runtime_optional_tool_plan,
 };

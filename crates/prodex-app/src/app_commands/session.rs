@@ -191,19 +191,3 @@ fn handle_session_resume(args: SessionResumeArgs) -> Result<()> {
         codex_args: vec![OsString::from("resume"), OsString::from(report.id.clone())],
     })
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn test_session_report(id: &str) -> SessionReport {
-        let mut report = SessionReport::from_path(Path::new(&format!("/tmp/{id}.jsonl")), 0);
-        prodex_session_store::apply_session_json_line(
-            &mut report,
-            r#"{"timestamp":"2026-06-26T10:00:00Z","type":"session_meta","payload":{"thread_name":"Build UI","cwd":"/tmp/prodex"}}"#,
-        );
-        report.set_profile(Some("main".to_string()));
-        report.set_model_provider(Some("openai".to_string()));
-        report
-    }
-}

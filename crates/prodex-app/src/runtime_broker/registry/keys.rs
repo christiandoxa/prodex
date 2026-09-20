@@ -3,23 +3,6 @@ use crate::{
     runtime_current_prodex_binary_identity, runtime_prodex_binary_identity_key,
 };
 
-#[cfg(test)]
-pub(crate) fn runtime_broker_key_for_binary_identity(
-    upstream_base_url: &str,
-    include_code_review: bool,
-    upstream_no_proxy: bool,
-    binary_identity_key: &str,
-) -> String {
-    runtime_broker_key_for_binary_identity_with_smart_context(
-        upstream_base_url,
-        include_code_review,
-        upstream_no_proxy,
-        false,
-        None,
-        binary_identity_key,
-    )
-}
-
 pub(crate) fn runtime_broker_key_for_binary_identity_with_smart_context(
     upstream_base_url: &str,
     include_code_review: bool,
@@ -41,21 +24,6 @@ pub(crate) fn runtime_broker_key_for_binary_identity_with_smart_context(
 
 pub(crate) fn runtime_broker_current_binary_identity_key() -> String {
     runtime_prodex_binary_identity_key(&runtime_current_prodex_binary_identity())
-}
-
-#[cfg(test)]
-pub(crate) fn runtime_broker_key(
-    upstream_base_url: &str,
-    include_code_review: bool,
-    upstream_no_proxy: bool,
-) -> String {
-    runtime_broker_key_with_smart_context(
-        upstream_base_url,
-        include_code_review,
-        upstream_no_proxy,
-        false,
-        None,
-    )
 }
 
 pub(crate) fn runtime_broker_key_with_smart_context(

@@ -1,8 +1,8 @@
 use anyhow::Result;
 
-pub(crate) use prodex_core::{absolutize, default_codex_home};
 #[cfg(test)]
-pub(crate) use prodex_core::{same_path, select_default_codex_home};
+pub(crate) use prodex_core::select_default_codex_home;
+pub(crate) use prodex_core::{absolutize, default_codex_home};
 
 pub(crate) fn audit_log_event(
     _component: &str,
