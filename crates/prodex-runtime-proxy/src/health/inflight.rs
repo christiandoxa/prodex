@@ -12,11 +12,11 @@ pub fn runtime_profile_inflight_sort_key(
 pub fn runtime_profile_inflight_weight(context: &str) -> usize {
     #[cfg(feature = "mojo")]
     {
-        return prodex_mojo_core::runtime::profile_inflight_weight(matches!(
+        prodex_mojo_core::runtime::profile_inflight_weight(matches!(
             context,
             "websocket_session" | "responses_http"
         ))
-        .unwrap_or_else(|error| panic!("Mojo inflight weight failed: {error:?}"));
+        .unwrap_or_else(|error| panic!("Mojo inflight weight failed: {error:?}"))
     }
     #[cfg(not(feature = "mojo"))]
     runtime_profile_inflight_weight_rust(context)
@@ -36,11 +36,11 @@ pub fn runtime_profile_inflight_effective_hard_limit(
 ) -> usize {
     #[cfg(feature = "mojo")]
     {
-        return prodex_mojo_core::runtime::profile_inflight_effective_hard_limit(
+        prodex_mojo_core::runtime::profile_inflight_effective_hard_limit(
             configured_limit,
             runtime_profile_inflight_weight(context),
         )
-        .unwrap_or_else(|error| panic!("Mojo inflight hard limit failed: {error:?}"));
+        .unwrap_or_else(|error| panic!("Mojo inflight hard limit failed: {error:?}"))
     }
     #[cfg(not(feature = "mojo"))]
     configured_limit.max(runtime_profile_inflight_weight_rust(context))
@@ -59,12 +59,12 @@ pub fn runtime_profile_inflight_soft_limit(
             RuntimeRouteKind::Websocket => 2,
             RuntimeRouteKind::Standard => 3,
         };
-        return prodex_mojo_core::runtime::profile_inflight_soft_limit(
+        prodex_mojo_core::runtime::profile_inflight_soft_limit(
             route_kind,
             pressure_mode,
             base_limit,
         )
-        .unwrap_or_else(|error| panic!("Mojo inflight soft limit failed: {error:?}"));
+        .unwrap_or_else(|error| panic!("Mojo inflight soft limit failed: {error:?}"))
     }
     #[cfg(not(feature = "mojo"))]
     runtime_profile_inflight_soft_limit_rust(route_kind, pressure_mode, base_limit)

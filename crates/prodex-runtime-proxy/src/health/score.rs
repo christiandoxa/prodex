@@ -24,13 +24,13 @@ pub fn runtime_profile_effective_score<T: RuntimeProfileHealthEntry>(
 ) -> u32 {
     #[cfg(feature = "mojo")]
     {
-        return prodex_mojo_core::runtime::profile_health_effective_score(
+        prodex_mojo_core::runtime::profile_health_effective_score(
             entry.runtime_profile_health_score(),
             entry.runtime_profile_health_updated_at(),
             now,
             decay_seconds,
         )
-        .unwrap_or_else(|error| panic!("Mojo profile effective health score failed: {error:?}"));
+        .unwrap_or_else(|error| panic!("Mojo profile effective health score failed: {error:?}"))
     }
     #[cfg(not(feature = "mojo"))]
     runtime_profile_effective_score_rust(entry, now, decay_seconds)
@@ -161,7 +161,7 @@ pub fn runtime_profile_route_coupling_score_from_map<T: RuntimeProfileHealthEntr
 ) -> u32 {
     #[cfg(feature = "mojo")]
     {
-        return runtime_route_coupled_kinds(route_kind)
+        runtime_route_coupled_kinds(route_kind)
             .iter()
             .copied()
             .map(|coupled_kind| {
@@ -200,7 +200,7 @@ pub fn runtime_profile_route_coupling_score_from_map<T: RuntimeProfileHealthEntr
                 )
                 .unwrap_or_else(|error| panic!("Mojo profile coupling score failed: {error:?}"))
             })
-            .fold(0, u32::saturating_add);
+            .fold(0, u32::saturating_add)
     }
     #[cfg(not(feature = "mojo"))]
     runtime_profile_route_coupling_score_from_map_rust(
@@ -251,7 +251,7 @@ where
 {
     #[cfg(feature = "mojo")]
     {
-        return runtime_route_coupled_kinds(route_kind)
+        runtime_route_coupled_kinds(route_kind)
             .iter()
             .copied()
             .map(|coupled_kind| {
@@ -278,7 +278,7 @@ where
                 )
                 .unwrap_or_else(|error| panic!("Mojo profile coupling score failed: {error:?}"))
             })
-            .fold(0, u32::saturating_add);
+            .fold(0, u32::saturating_add)
     }
     #[cfg(not(feature = "mojo"))]
     runtime_profile_route_coupling_score_by_key_rust(health_entry, profile_name, now, route_kind)
@@ -352,7 +352,7 @@ pub fn runtime_profile_route_performance_score<T: RuntimeProfileHealthEntry>(
                 )
             })
             .unwrap_or_default();
-        return prodex_mojo_core::runtime::profile_health_performance_score(
+        prodex_mojo_core::runtime::profile_health_performance_score(
             route.0,
             route.1,
             coupled.0,
@@ -360,7 +360,7 @@ pub fn runtime_profile_route_performance_score<T: RuntimeProfileHealthEntry>(
             now,
             RUNTIME_PROFILE_PERFORMANCE_DECAY_SECONDS,
         )
-        .unwrap_or_else(|error| panic!("Mojo profile performance score failed: {error:?}"));
+        .unwrap_or_else(|error| panic!("Mojo profile performance score failed: {error:?}"))
     }
     #[cfg(not(feature = "mojo"))]
     runtime_profile_route_performance_score_rust(profile_health, profile_name, now, route_kind)
@@ -422,7 +422,7 @@ where
         ))
         .map(|entry| (entry.score, entry.updated_at))
         .unwrap_or_default();
-        return prodex_mojo_core::runtime::profile_health_performance_score(
+        prodex_mojo_core::runtime::profile_health_performance_score(
             route.0,
             route.1,
             coupled.0,
@@ -430,7 +430,7 @@ where
             now,
             RUNTIME_PROFILE_PERFORMANCE_DECAY_SECONDS,
         )
-        .unwrap_or_else(|error| panic!("Mojo profile performance score failed: {error:?}"));
+        .unwrap_or_else(|error| panic!("Mojo profile performance score failed: {error:?}"))
     }
     #[cfg(not(feature = "mojo"))]
     runtime_profile_route_performance_score_by_key_rust(health_entry, profile_name, now, route_kind)

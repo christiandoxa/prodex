@@ -391,7 +391,7 @@ fn ping_structured_failure_detail(text: &str) -> Option<String> {
     })
 }
 
-#[cfg(any(not(feature = "mojo-core"), test))]
+#[cfg(not(feature = "mojo-core"))]
 #[derive(Default)]
 struct PingValidationState {
     thread_started: bool,
@@ -401,7 +401,7 @@ struct PingValidationState {
     final_message: Option<String>,
 }
 
-#[cfg(any(not(feature = "mojo-core"), test))]
+#[cfg(not(feature = "mojo-core"))]
 impl PingValidationState {
     fn finish(self) -> std::result::Result<(), PingValidationFailure> {
         if !self.thread_started || !self.turn_started || !self.turn_completed {
@@ -425,7 +425,7 @@ impl PingValidationState {
     }
 }
 
-#[cfg(any(not(feature = "mojo-core"), test))]
+#[cfg(not(feature = "mojo-core"))]
 fn validate_ping_output_rust(output: &Output) -> std::result::Result<(), PingValidationFailure> {
     let mut state = PingValidationState::default();
     for line in String::from_utf8_lossy(&output.stdout).lines() {
@@ -438,7 +438,7 @@ fn validate_ping_output_rust(output: &Output) -> std::result::Result<(), PingVal
     state.finish()
 }
 
-#[cfg(any(not(feature = "mojo-core"), test))]
+#[cfg(not(feature = "mojo-core"))]
 fn validate_ping_event_rust(
     event: &Value,
     state: &mut PingValidationState,
@@ -500,7 +500,7 @@ fn validate_ping_event_rust(
     Ok(())
 }
 
-#[cfg(any(not(feature = "mojo-core"), test))]
+#[cfg(not(feature = "mojo-core"))]
 fn is_ping_item_event_rust(event_type: &str) -> bool {
     matches!(
         event_type,
@@ -508,7 +508,7 @@ fn is_ping_item_event_rust(event_type: &str) -> bool {
     )
 }
 
-#[cfg(any(not(feature = "mojo-core"), test))]
+#[cfg(not(feature = "mojo-core"))]
 fn ping_turn_failure_rust(event: &Value) -> std::result::Result<(), PingValidationFailure> {
     let message = ping_event_failure_text(event, "turn failed");
     let status = classify_failure_text_rust(&message).0;
@@ -522,7 +522,7 @@ fn ping_turn_failure_rust(event: &Value) -> std::result::Result<(), PingValidati
     })
 }
 
-#[cfg(any(not(feature = "mojo-core"), test))]
+#[cfg(not(feature = "mojo-core"))]
 fn ping_event_failure_rust(event: &Value) -> std::result::Result<(), PingValidationFailure> {
     let message = ping_event_failure_text(event, "Codex error");
     Err(PingValidationFailure {
@@ -558,7 +558,7 @@ fn ping_event_failure_text(event: &Value, fallback: &str) -> String {
     }
 }
 
-#[cfg(any(not(feature = "mojo-core"), test))]
+#[cfg(not(feature = "mojo-core"))]
 fn validate_ping_item_rust(
     event_type: &str,
     event: &Value,
@@ -610,12 +610,12 @@ fn classify_failure_text(text: &str) -> (PingStatus, &'static str) {
     classify_failure_text_rust(text)
 }
 
-#[cfg(any(not(feature = "mojo-core"), test))]
+#[cfg(not(feature = "mojo-core"))]
 type PingFailureMatcher = fn(&str) -> bool;
-#[cfg(any(not(feature = "mojo-core"), test))]
+#[cfg(not(feature = "mojo-core"))]
 type PingFailureRule = (PingFailureMatcher, PingStatus, &'static str);
 
-#[cfg(any(not(feature = "mojo-core"), test))]
+#[cfg(not(feature = "mojo-core"))]
 const PING_FAILURE_RULES: &[PingFailureRule] = &[
     (
         is_overload_failure_rust,
@@ -664,7 +664,7 @@ const PING_FAILURE_RULES: &[PingFailureRule] = &[
     ),
 ];
 
-#[cfg(any(not(feature = "mojo-core"), test))]
+#[cfg(not(feature = "mojo-core"))]
 fn classify_failure_text_rust(text: &str) -> (PingStatus, &'static str) {
     let lower = text.to_ascii_lowercase();
     if contains_any_rust(
@@ -701,12 +701,12 @@ fn classify_failure_text_rust(text: &str) -> (PingStatus, &'static str) {
         .unwrap_or((PingStatus::ProcessFailed, "Codex diagnostic process failed"))
 }
 
-#[cfg(any(not(feature = "mojo-core"), test))]
+#[cfg(not(feature = "mojo-core"))]
 fn contains_any_rust(text: &str, needles: &[&str]) -> bool {
     needles.iter().any(|needle| text.contains(needle))
 }
 
-#[cfg(any(not(feature = "mojo-core"), test))]
+#[cfg(not(feature = "mojo-core"))]
 fn is_quota_failure_rust(text: &str) -> bool {
     contains_any_rust(
         text,
@@ -729,7 +729,7 @@ fn is_quota_failure_rust(text: &str) -> bool {
         ))
 }
 
-#[cfg(any(not(feature = "mojo-core"), test))]
+#[cfg(not(feature = "mojo-core"))]
 fn is_auth_failure_rust(text: &str) -> bool {
     contains_any_rust(
         text,
@@ -737,12 +737,12 @@ fn is_auth_failure_rust(text: &str) -> bool {
     )
 }
 
-#[cfg(any(not(feature = "mojo-core"), test))]
+#[cfg(not(feature = "mojo-core"))]
 fn is_rate_limit_failure_rust(text: &str) -> bool {
     contains_any_rust(text, &["429", "rate_limit", "rate limit"])
 }
 
-#[cfg(any(not(feature = "mojo-core"), test))]
+#[cfg(not(feature = "mojo-core"))]
 fn is_overload_failure_rust(text: &str) -> bool {
     contains_any_rust(
         text,
@@ -750,7 +750,7 @@ fn is_overload_failure_rust(text: &str) -> bool {
     )
 }
 
-#[cfg(any(not(feature = "mojo-core"), test))]
+#[cfg(not(feature = "mojo-core"))]
 fn is_dns_failure_rust(text: &str) -> bool {
     contains_any_rust(
         text,
@@ -758,22 +758,22 @@ fn is_dns_failure_rust(text: &str) -> bool {
     )
 }
 
-#[cfg(any(not(feature = "mojo-core"), test))]
+#[cfg(not(feature = "mojo-core"))]
 fn is_tls_failure_rust(text: &str) -> bool {
     contains_any_rust(text, &["tls", "certificate", "handshake"])
 }
 
-#[cfg(any(not(feature = "mojo-core"), test))]
+#[cfg(not(feature = "mojo-core"))]
 fn is_model_failure_rust(text: &str) -> bool {
     contains_any_rust(text, &["unsupported model", "model_not_found"])
 }
 
-#[cfg(any(not(feature = "mojo-core"), test))]
+#[cfg(not(feature = "mojo-core"))]
 fn is_cancelled_failure_rust(text: &str) -> bool {
     text.contains("cancel")
 }
 
-#[cfg(any(not(feature = "mojo-core"), test))]
+#[cfg(not(feature = "mojo-core"))]
 fn is_timeout_failure_rust(text: &str) -> bool {
     contains_any_rust(text, &["timeout", "timed out"])
 }

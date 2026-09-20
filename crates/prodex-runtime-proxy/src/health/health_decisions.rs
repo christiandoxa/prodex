@@ -26,12 +26,12 @@ pub fn runtime_profile_selection_jitter(
 pub fn runtime_profile_bad_pairing_next_score(current_score: u32, delta: u32) -> u32 {
     #[cfg(feature = "mojo")]
     {
-        return prodex_mojo_core::runtime::profile_bad_pairing_next_score(
+        prodex_mojo_core::runtime::profile_bad_pairing_next_score(
             current_score,
             delta,
             RUNTIME_PROFILE_HEALTH_MAX_SCORE,
         )
-        .unwrap_or_else(|error| panic!("Mojo bad-pairing score failed: {error:?}"));
+        .unwrap_or_else(|error| panic!("Mojo bad-pairing score failed: {error:?}"))
     }
     #[cfg(not(feature = "mojo"))]
     runtime_profile_bad_pairing_next_score_rust(current_score, delta)
@@ -73,11 +73,11 @@ pub fn runtime_profile_health_bump_decision(
             },
         )
         .unwrap_or_else(|error| panic!("Mojo profile health bump failed: {error:?}"));
-        return RuntimeProfileHealthBumpDecision {
+        RuntimeProfileHealthBumpDecision {
             next_score: plan.next_score,
             circuit_reopen_stage: plan.circuit_reopen_stage,
             circuit_open_seconds: plan.circuit_open_seconds,
-        };
+        }
     }
     #[cfg(not(feature = "mojo"))]
     runtime_profile_health_bump_decision_rust(
@@ -144,10 +144,10 @@ pub fn runtime_profile_health_recovery_decision(
             RUNTIME_PROFILE_HEALTH_SUCCESS_RECOVERY_SCORE,
         )
         .unwrap_or_else(|error| panic!("Mojo profile health recovery failed: {error:?}"));
-        return RuntimeProfileHealthRecoveryDecision {
+        RuntimeProfileHealthRecoveryDecision {
             next_score: plan.next_score,
             next_success_streak: plan.next_success_streak,
-        };
+        }
     }
     #[cfg(not(feature = "mojo"))]
     runtime_profile_health_recovery_decision_rust(current_score, current_success_streak)

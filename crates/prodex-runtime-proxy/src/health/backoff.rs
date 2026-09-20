@@ -137,13 +137,13 @@ pub fn runtime_profile_backoff_sort_key(
 
     #[cfg(feature = "mojo")]
     {
-        return prodex_mojo_core::runtime::profile_backoff_sort_key(
+        prodex_mojo_core::runtime::profile_backoff_sort_key(
             circuit_until,
             transport_until,
             retry_until,
             now,
         )
-        .unwrap_or_else(|error| panic!("Mojo profile backoff sort key failed: {error:?}"));
+        .unwrap_or_else(|error| panic!("Mojo profile backoff sort key failed: {error:?}"))
     }
     #[cfg(not(feature = "mojo"))]
     runtime_profile_backoff_sort_key_rust(circuit_until, transport_until, retry_until)
@@ -206,7 +206,7 @@ pub fn runtime_soften_persisted_backoff_map_for_startup(
             *until = softened.until;
             softened.keep
         });
-        return changed;
+        changed
     }
     #[cfg(not(feature = "mojo"))]
     runtime_soften_persisted_backoff_map_for_startup_rust(backoffs, now, max_future_seconds)
@@ -238,13 +238,13 @@ fn runtime_soften_persisted_backoff_map_for_startup_rust(
 pub fn runtime_profile_circuit_half_open_probe_seconds(score: u32) -> i64 {
     #[cfg(feature = "mojo")]
     {
-        return prodex_mojo_core::runtime::profile_circuit_half_open_seconds(
+        prodex_mojo_core::runtime::profile_circuit_half_open_seconds(
             score,
             RUNTIME_PROFILE_CIRCUIT_OPEN_THRESHOLD,
             RUNTIME_PROFILE_CIRCUIT_HALF_OPEN_PROBE_SECONDS,
             RUNTIME_PROFILE_CIRCUIT_HALF_OPEN_PROBE_MAX_SECONDS,
         )
-        .unwrap_or_else(|error| panic!("Mojo half-open circuit timing failed: {error:?}"));
+        .unwrap_or_else(|error| panic!("Mojo half-open circuit timing failed: {error:?}"))
     }
     #[cfg(not(feature = "mojo"))]
     runtime_profile_circuit_half_open_probe_seconds_rust(score)
@@ -267,7 +267,7 @@ fn runtime_profile_circuit_half_open_probe_seconds_rust(score: u32) -> i64 {
 pub fn runtime_profile_circuit_open_seconds(score: u32, reopen_stage: u32) -> i64 {
     #[cfg(feature = "mojo")]
     {
-        return prodex_mojo_core::runtime::profile_circuit_open_seconds(
+        prodex_mojo_core::runtime::profile_circuit_open_seconds(
             score,
             reopen_stage,
             RUNTIME_PROFILE_CIRCUIT_OPEN_THRESHOLD,
@@ -275,7 +275,7 @@ pub fn runtime_profile_circuit_open_seconds(score: u32, reopen_stage: u32) -> i6
             RUNTIME_PROFILE_CIRCUIT_OPEN_SECONDS,
             RUNTIME_PROFILE_CIRCUIT_OPEN_MAX_SECONDS,
         )
-        .unwrap_or_else(|error| panic!("Mojo circuit-open timing failed: {error:?}"));
+        .unwrap_or_else(|error| panic!("Mojo circuit-open timing failed: {error:?}"))
     }
     #[cfg(not(feature = "mojo"))]
     runtime_profile_circuit_open_seconds_rust(score, reopen_stage)
