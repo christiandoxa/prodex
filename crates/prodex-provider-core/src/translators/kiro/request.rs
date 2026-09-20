@@ -196,6 +196,149 @@ mod rust_oracle {
         Ok(())
     }
 
+    pub(super) fn kiro_rewrite_anthropic_messages_request(
+        value: &Value,
+    ) -> Result<Vec<u8>, KiroProviderCoreRequestError> {
+        let object = value.as_object().ok_or_else(|| {
+            KiroProviderCoreRequestError::new(
+                "Kiro Messages request body must be a JSON object",
+                "invalid_request_body",
+            )
+        })?;
+        let mut rewritten = serde_json::Map::new();
+        if let Some(model) = object.get("model") {
+            rewritten.insert("model".to_string(), model.clone());
+        }
+        if let Some(stream) = object.get("stream") {
+            rewritten.insert("stream".to_string(), stream.clone());
+        }
+
+        let mut input = Vec::new();
+        if let Some(system) = object.get("system") {
+            input.push(serde_json::json!({
+                "type": "message",
+                "role": "system",
+                "content": [{
+                    "type": "input_text",
+                    "text": kiro_anthropic_text(system).unwrap_or_default(),
+                }],
+            }));
+        }
+        if let Some(messages) = object.get("messages").and_then(Value::as_array) {
+            for message in messages {
+                let Some(message) = message.as_object() else {
+                    continue;
+                };
+                let role = message
+                    .get("role")
+                    .and_then(Value::as_str)
+                    .unwrap_or("user");
+                let Some(content) = message.get("content") else {
+                    continue;
+                };
+                match content {
+                    Value::String(text) => input.push(serde_json::json!({
+                        "type": "message",
+                        "role": role,
+                        "content": [{
+                            "type": "input_text",
+                            "text": text,
+                        }],
+                    })),
+                    Value::Array(blocks) => {
+                        for block in blocks {
+                            let Some(block) = block.as_object() else {
+                                continue;
+                            };
+                            match block.get("type").and_then(Value::as_str) {
+                                Some("text") => {
+                                    if let Some(text) = block.get("text").and_then(Value::as_str) {
+                                        input.push(serde_json::json!({
+                                            "type": "message",
+                                            "role": role,
+                                            "content": [{
+                                                "type": "input_text",
+                                                "text": text,
+                                            }],
+                                        }));
+                                    }
+                                }
+                                Some("tool_use") => {
+                                    let arguments = block
+                                        .get("input")
+                                        .map(serde_json::to_string)
+                                        .transpose()
+                                        .map_err(|_| {
+                                            KiroProviderCoreRequestError::new(
+                                                "failed to serialize Kiro tool input",
+                                                "invalid_request_body",
+                                            )
+                                        })?
+                                        .unwrap_or_else(|| "{}".to_string());
+                                    input.push(serde_json::json!({
+                                        "type": "function_call",
+                                        "call_id": block
+                                            .get("id")
+                                            .and_then(Value::as_str)
+                                            .unwrap_or("call_kiro"),
+                                        "name": block
+                                            .get("name")
+                                            .and_then(Value::as_str)
+                                            .unwrap_or("tool_call"),
+                                        "arguments": arguments,
+                                    }));
+                                }
+                                Some("tool_result") => {
+                                    input.push(serde_json::json!({
+                                        "type": "function_call_output",
+                                        "call_id": block
+                                            .get("tool_use_id")
+                                            .and_then(Value::as_str)
+                                            .unwrap_or("call_kiro"),
+                                        "output": block
+                                            .get("content")
+                                            .and_then(kiro_anthropic_text)
+                                            .unwrap_or_default(),
+                                    }));
+                                }
+                                _ => {}
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+        rewritten.insert("input".to_string(), Value::Array(input));
+        serde_json::to_vec(&Value::Object(rewritten)).map_err(|_| {
+            KiroProviderCoreRequestError::new(
+                "failed to serialize rewritten Kiro Messages body",
+                "invalid_request_body",
+            )
+        })
+    }
+
+    fn kiro_anthropic_text(value: &Value) -> Option<String> {
+        match value {
+            Value::String(text) => Some(text.clone()),
+            Value::Array(items) => {
+                let text = items
+                    .iter()
+                    .filter_map(kiro_anthropic_text)
+                    .collect::<Vec<_>>()
+                    .join("\n");
+                (!text.is_empty()).then_some(text)
+            }
+            Value::Object(object) => object
+                .get("text")
+                .and_then(Value::as_str)
+                .map(str::to_string)
+                .or_else(|| object.get("content").and_then(kiro_anthropic_text))
+                .or_else(|| object.get("output").and_then(kiro_anthropic_text)),
+            _ => None,
+        }
+    }
+
     pub(super) fn kiro_validate_serialized_chat_body(
         value: &Value,
     ) -> Result<Vec<u8>, KiroProviderCoreRequestError> {
@@ -536,6 +679,9 @@ pub(super) fn kiro_provider_core_responses_request_body(
     }
     #[cfg(not(feature = "mojo"))]
     {
+        if allow_token_limit && object.contains_key("messages") && !object.contains_key("input") {
+            return rust_oracle::kiro_rewrite_anthropic_messages_request(&value);
+        }
         Ok(body.to_vec())
     }
 }
