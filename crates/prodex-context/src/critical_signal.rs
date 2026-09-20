@@ -103,7 +103,7 @@ pub fn count_critical_signals(input: &str) -> CriticalSignalCounts {
     {
         let analysis = prodex_mojo_core::rich::analyze_context(input)
             .expect("Mojo context analysis returned invalid structured output");
-        return CriticalSignalCounts {
+        CriticalSignalCounts {
             errors: analysis.counts[0],
             file_locations: analysis.counts[1],
             diff_hunks: analysis.counts[2],
@@ -111,7 +111,7 @@ pub fn count_critical_signals(input: &str) -> CriticalSignalCounts {
             exit_codes: analysis.counts[4],
             stack_markers: analysis.counts[5],
             rust_diagnostics: analysis.counts[6],
-        };
+        }
     }
     #[cfg(not(feature = "mojo"))]
     rust_oracle::count_critical_signals(input)
@@ -161,7 +161,7 @@ pub fn critical_signal_lost_line_ranges_with_options(
     {
         let (before_rows, mut after_available, line_count) =
             critical_signal_rows(before, after).expect("critical-signal rows fit the Mojo ABI");
-        return prodex_mojo_core::context::lost_line_ranges_batch(
+        prodex_mojo_core::context::lost_line_ranges_batch(
             &before_rows,
             &mut after_available,
             &check.lost.values(),
@@ -182,7 +182,7 @@ pub fn critical_signal_lost_line_ranges_with_options(
         })
         .into_iter()
         .map(|(start, end)| CriticalSignalLineRange { start, end })
-        .collect();
+        .collect()
     }
     #[cfg(not(feature = "mojo"))]
     rust_oracle::lost_line_ranges(before, after, check.lost, options)

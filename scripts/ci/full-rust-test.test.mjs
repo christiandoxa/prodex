@@ -170,8 +170,8 @@ test("direct targeted workflow lanes reject zero-test matches", () => {
     ["prodex-app-lib", "fuzz-build", "Test temp-backed state with a symlinked TMPDIR"],
     ["windows-workspace", "windows-prodex-app", "Run Windows foundation member tests"],
     ["windows-workspace", "windows-prodex-app", "Run Windows runtime member tests"],
-    ["macos-workspace", "smart-context-evidence", "Run native macOS broker recovery tests"],
-    ["macos-workspace", "smart-context-evidence", "Run native macOS Kiro selector and resume tests"],
+    ["macos-workspace", "process-guard", "Run native macOS broker recovery tests"],
+    ["macos-workspace", "process-guard", "Run native macOS Kiro selector and resume tests"],
     ["profile-commands-internal", "main-internal-core", "Run profile command internal tests"],
   ]) {
     const job = workflow.match(new RegExp(`\\n  ${jobName}:\\n([\\s\\S]*?)\\n  ${nextJob}:`))?.[1];

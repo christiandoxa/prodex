@@ -1,6 +1,6 @@
 # Provider Capabilities
 
-Generated from `prodex_provider_core::provider_contract_catalog()`, `crates/prodex-provider-core/tests/fixtures/provider_conformance_cases.json`, and `crates/prodex-provider-core/catalog/models.json`.
+Generated from the current prodex_provider_core implementation registry and translator metadata, crates/prodex-provider-core/tests/fixtures/provider_conformance_cases.json, and crates/prodex-provider-core/catalog/models.json.
 
 | Provider | Models | Transform | Streaming | Fallback | Fixtures req/resp/stream | responses | responses/compact | chat-completions | messages | models | embeddings | images | audio | batches | rerank | a2a |
 |---|---:|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
@@ -18,22 +18,12 @@ Fixture summary counts are `request/response/stream-event` conformance cases per
 
 Model counts cover deterministic offline built-ins. Imported or provider-discovered runtime routes may augment them, and Super accepts an explicit non-empty custom child model ID without requiring live discovery.
 
-## Harness modes
-
-Default mode: `native`. Resolved mode for this catalog: `native`.
-
-| Mode | Label | Selectable | Default effective | Canonical request routes | Request shaping | Response shaping | Stream shaping | Description |
-|---|---|---|---|---|---|---|---|---|
-| native | Native | true | native | responses, responses/compact, chat-completions, messages, models, embeddings, images, audio, batches, rerank, a2a | false | false | false | Preserves existing bridge behavior without harness shaping. |
-| minimal | Minimal | true | minimal | responses | true | false | false | Prepends the minimal/v1 instruction block to canonical Responses requests. |
-| evaluated | Evaluated | true | evaluated | responses | true | true | true | Applies only provider/model policies backed by the versioned evaluation catalog. |
-
 ## Declared Responses parameter limitations
 
-- `anthropic`: `input[*].content[type!=text]`, `response_format.type`, `reasoning`, `text.format`, `n>1`, `metadata`, `safety_identifier`, `web_search_options`, `input[type=custom_tool_call|tool_search_call]`, `messages`, `tools[type!=function]`, `tool_choice[type!=function]`, `parallel_tool_calls=false`, `logprobs/top_logprobs`, `stop_sequences`, `previous_response_id`
-- `deepseek`: `parallel_tool_calls=false`, `web_search_options`, `safety_identifier`, `tools[type!=function]`, `input[*].content[type!=text]`
+- `anthropic`: `input[*].content[type!=text]`, `input[type=custom_tool_call|tool_search_call]`, `logprobs/top_logprobs`, `messages`, `metadata`, `n>1`, `parallel_tool_calls=false`, `previous_response_id`, `reasoning`, `response_format.type`, `safety_identifier`, `stop_sequences`, `text.format`, `tool_choice[type!=function]`, `tools[type!=function]`, `web_search_options`
+- `deepseek`: `input[*].content[type!=text]`, `parallel_tool_calls=false`, `safety_identifier`, `tools[type!=function]`, `web_search_options`
 - `gemini`: `response_format.type`
-- `kiro`: `temperature/top_p`, `stop/stop_sequences`, `logprobs/top_logprobs`, `response_format/text.format[type!=text]`, `tool_choice!=auto`, `tools/web_search_options`, `parallel_tool_calls=false`, `input[*].content[type!=text]`, `max_output_tokens/max_tokens/max_completion_tokens`
+- `kiro`: `input[*].content[type!=text]`, `logprobs/top_logprobs`, `max_output_tokens/max_tokens/max_completion_tokens`, `parallel_tool_calls=false`, `response_format/text.format[type!=text]`, `stop/stop_sequences`, `temperature/top_p`, `tool_choice!=auto`, `tools/web_search_options`
 
 ## Semantic compact observability
 

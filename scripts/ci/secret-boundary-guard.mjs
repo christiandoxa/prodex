@@ -36,9 +36,17 @@ const PATH_ALLOWLIST = new Map([
   [
     "crates/prodex-app/src/expose/mcp.rs",
     {
-      match: '"{}/pdx/v1/{capability}',
+      matches: ['"{}/pdx/v1/{capability}'],
       maxHits: 1,
       reason: "the one intentional initial ChatGPT capability URL constructor; the capability is already digest-only everywhere else",
+    },
+  ],
+  [
+    "crates/prodex-app/src/super_expose.rs",
+    {
+      matches: ['"http://{address}/mcp/{token}', '"/mcp/{token}'],
+      maxHits: 2,
+      reason: "the exec/full Super expose endpoint and matching loopback request path use one ephemeral capability token; audit logging never records it",
     },
   ],
 ]);
@@ -62,9 +70,9 @@ const RUNTIME_GATEWAY_SECRET_BOUNDARIES = new Map([
   [
     "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_options.rs",
     [
-      "DevelopmentCompatibility(SecretMaterial)",
-      "credential: RuntimeProjectedProviderCredential",
-      "source: Arc<RuntimeGatewaySecretSource>",
+      "RuntimeAnthropicProviderAuth",
+      "RuntimeGeminiProviderAuth",
+      "RuntimeKiroProfileAuth",
     ],
   ],
   [
@@ -214,7 +222,7 @@ export function validateFiles(files) {
         if (
           pattern === PATH_CAPABILITY &&
           pathAllowance &&
-          match[0] === pathAllowance.match &&
+          pathAllowance.matches.includes(match[0]) &&
           allowedPathHits < pathAllowance.maxHits
         ) {
           allowedPathHits += 1;

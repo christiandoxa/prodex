@@ -15,7 +15,7 @@ use prodex_domain::{TelemetryAttribute, TelemetryAttributeError};
 fn metric_name(plan: usize, slot: usize) -> &'static str {
     #[cfg(feature = "mojo")]
     {
-        return mojo::metric_name(plan, slot);
+        mojo::metric_name(plan, slot)
     }
     #[cfg(not(feature = "mojo"))]
     rust::metric_name(plan, slot)

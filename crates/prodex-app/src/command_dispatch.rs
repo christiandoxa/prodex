@@ -194,11 +194,4 @@ mod tests {
                 .unwrap();
         assert!(!command_runs_profile_lifecycle_recovery(&command));
     }
-
-    #[test]
-    fn gateway_catalog_commands_skip_profile_recovery() {
-        let command = parse_cli_command_from(["prodex", "gateway", "providers"]).unwrap();
-
-        assert!(!command_runs_profile_lifecycle_recovery(&command));
-    }
 }

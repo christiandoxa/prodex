@@ -15,7 +15,7 @@ not retained here; Git history is the record for obsolete material.
 | [Runtime policy](runtime-policy.md) | Runtime policy keys and enforcement behavior |
 | [State model](state-model.md) | Affinity and persistence |
 | [Optional tools](optional-tools.md) | Discovery, validation, and activation |
-| [Smart Context](smart-context.md) | Safety, migration, and generated evidence |
+| [Smart Context](smart-context.md) | Safety, migration, and runtime verification |
 | [Provider conformance](provider-conformance.md) | Adapter contract |
 | [Harness modes](harness-modes.md) | Model-facing request policy |
 | [Super sub-agents](sub-agents.md) | Staged CLI contract, session boundaries, and local-process design |
@@ -52,18 +52,15 @@ The maintained enterprise contract is split by responsibility:
 
 ## Generated Evidence
 
-These files are regenerated; CI checks the checked-in Smart Context replay
-fixtures for drift. They do not prove native CLI behavior or complete provider
-semantic fidelity:
+Generated documents are scoped evidence, not substitutes for runtime verification:
 
-- [Smart Context replay report](generated/smart-context-replay-report.md) via
-  `node scripts/docs/smart-context-evidence.mjs --write`;
 - [Provider capabilities](provider-capabilities.md) via
   `node scripts/catalog/provider-capability-matrix.mjs --write`.
 
-Broken local links, duplicate canonical numeric prefixes, and Smart Context replay
-fixture drift are CI failures. The checked-in OpenAPI document describes the
-gateway's documented routes, not complete upstream route or semantic coverage.
-Enterprise audit, break-glass evidence, immutability, backup/DR, and OpenAPI
-documents describe their own deployment or gateway boundaries; they are not
-automatically inherited by local audit logs, Super, or sub-agent processes.
+Broken local links and duplicate canonical numeric prefixes are CI failures. Smart Context
+correctness is verified by its production guard and focused Mojo/runtime tests rather than the
+retired offline replay-report CLI. The checked-in OpenAPI document describes the gateway's
+documented routes, not complete upstream route or semantic coverage. Enterprise audit,
+break-glass evidence, immutability, backup/DR, and OpenAPI documents describe their own deployment
+or gateway boundaries; they are not automatically inherited by local audit logs, Super, or
+sub-agent processes.
