@@ -345,6 +345,19 @@ pub fn profile_bad_pairing_next_score(
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ProfileHealthBumpInput {
+    pub current_score: u32,
+    pub delta: u32,
+    pub max_score: u32,
+    pub circuit_open_threshold: u32,
+    pub circuit_already_open: bool,
+    pub current_reopen_stage: u32,
+    pub max_reopen_stage: u32,
+    pub circuit_open_seconds: i64,
+    pub circuit_open_max_seconds: i64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ProfileHealthBumpPlan {
     pub next_score: u32,
     pub circuit_reopen_stage: Option<u32>,
@@ -352,28 +365,20 @@ pub struct ProfileHealthBumpPlan {
 }
 
 pub fn profile_health_bump_plan(
-    current_score: u32,
-    delta: u32,
-    max_score: u32,
-    circuit_open_threshold: u32,
-    circuit_already_open: bool,
-    current_reopen_stage: u32,
-    max_reopen_stage: u32,
-    circuit_open_seconds: i64,
-    circuit_open_max_seconds: i64,
+    input: ProfileHealthBumpInput,
 ) -> Result<ProfileHealthBumpPlan, crate::MojoError> {
     let output = runtime_health_policy::<9, 5>(
         RUNTIME_HEALTH_POLICY_BUMP_DECISION,
         [
-            i64::from(current_score),
-            i64::from(delta),
-            i64::from(max_score),
-            i64::from(circuit_open_threshold),
-            i64::from(circuit_already_open),
-            i64::from(current_reopen_stage),
-            i64::from(max_reopen_stage),
-            circuit_open_seconds,
-            circuit_open_max_seconds,
+            i64::from(input.current_score),
+            i64::from(input.delta),
+            i64::from(input.max_score),
+            i64::from(input.circuit_open_threshold),
+            i64::from(input.circuit_already_open),
+            i64::from(input.current_reopen_stage),
+            i64::from(input.max_reopen_stage),
+            input.circuit_open_seconds,
+            input.circuit_open_max_seconds,
         ],
     )?;
     if !matches!(output[1], 0 | 1) || !matches!(output[3], 0 | 1) {

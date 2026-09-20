@@ -60,15 +60,17 @@ pub fn runtime_profile_health_bump_decision(
     #[cfg(feature = "mojo")]
     {
         let plan = prodex_mojo_core::runtime::profile_health_bump_plan(
-            current_score,
-            delta,
-            RUNTIME_PROFILE_HEALTH_MAX_SCORE,
-            RUNTIME_PROFILE_CIRCUIT_OPEN_THRESHOLD,
-            circuit_already_open,
-            current_circuit_reopen_stage,
-            RUNTIME_PROFILE_CIRCUIT_REOPEN_MAX_STAGE,
-            super::RUNTIME_PROFILE_CIRCUIT_OPEN_SECONDS,
-            super::RUNTIME_PROFILE_CIRCUIT_OPEN_MAX_SECONDS,
+            prodex_mojo_core::runtime::ProfileHealthBumpInput {
+                current_score,
+                delta,
+                max_score: RUNTIME_PROFILE_HEALTH_MAX_SCORE,
+                circuit_open_threshold: RUNTIME_PROFILE_CIRCUIT_OPEN_THRESHOLD,
+                circuit_already_open,
+                current_reopen_stage: current_circuit_reopen_stage,
+                max_reopen_stage: RUNTIME_PROFILE_CIRCUIT_REOPEN_MAX_STAGE,
+                circuit_open_seconds: super::RUNTIME_PROFILE_CIRCUIT_OPEN_SECONDS,
+                circuit_open_max_seconds: super::RUNTIME_PROFILE_CIRCUIT_OPEN_MAX_SECONDS,
+            },
         )
         .unwrap_or_else(|error| panic!("Mojo profile health bump failed: {error:?}"));
         return RuntimeProfileHealthBumpDecision {

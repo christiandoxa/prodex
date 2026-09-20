@@ -14,8 +14,8 @@ pub use auto_redeem::{
     auto_redeem_plan_self_test,
 };
 pub use profile_health::{
-    ProfileBackoffSoftening, ProfileHealthBumpPlan, ProfileHealthRecoveryPlan,
-    ProfileHealthScoreInput, RUNTIME_PROFILE_HEALTH_SCORE_FIELD_COUNT,
+    ProfileBackoffSoftening, ProfileHealthBumpInput, ProfileHealthBumpPlan,
+    ProfileHealthRecoveryPlan, ProfileHealthScoreInput, RUNTIME_PROFILE_HEALTH_SCORE_FIELD_COUNT,
     RUNTIME_PROFILE_HEALTH_SCORE_MAX_COUNT, profile_backoff_sort_key,
     profile_bad_pairing_next_score, profile_circuit_half_open_seconds,
     profile_circuit_open_seconds, profile_health_bump_plan, profile_health_coupling_score,
