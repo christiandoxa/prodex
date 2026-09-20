@@ -9,6 +9,7 @@ use prodex_mojo_core::provider_constraints::{
     GeminiToolCallIndexBinding, GeminiToolCallIndexRecord, gemini_tool_call_index,
 };
 use prodex_provider_core::{
+    gemini_provider_core_canonical_output_tool_name,
     gemini_provider_core_function_call_arguments_delta_event,
     gemini_provider_core_function_call_arguments_delta_event_with_thought_signature,
     gemini_provider_core_output_item_added_event, gemini_provider_core_output_item_done_event,
@@ -55,7 +56,7 @@ impl RuntimeGeminiSseState {
     ) -> Vec<String> {
         let function_call_delta = gemini_provider_core_stream_function_call_delta(value);
         let explicit_call_id = function_call_delta.explicit_call_id;
-        let name = function_call_delta.name;
+        let name = gemini_provider_core_canonical_output_tool_name(&function_call_delta.name);
         let index = self.function_call_index(part_index, explicit_call_id.as_deref(), &name);
         let args = function_call_delta.arguments;
         let mut events = Vec::new();

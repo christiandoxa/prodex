@@ -5,6 +5,15 @@ use crate::{
     resolve_super_launch_target, resolve_super_sub_agent_config, sub_agent_recursion_policy,
 };
 use anyhow::{Result, bail};
+use crossterm::{
+    cursor::{Hide, MoveTo, Show},
+    event::{self, Event, KeyCode, KeyEventKind, KeyModifiers},
+    execute,
+    terminal::{
+        Clear, ClearType, EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode,
+        enable_raw_mode,
+    },
+};
 use prodex_cli::{
     DEFAULT_SUB_AGENT_MAX_CONCURRENCY, HARD_MAX_SUB_AGENT_CONCURRENCY, SubAgentConfig,
     SubAgentMaxConcurrency, SubAgentPreference, SuperArgs,
@@ -12,6 +21,47 @@ use prodex_cli::{
 use std::io::{self, IsTerminal, Write};
 
 const SUPER_PROMPT_MAX_TEXT_CHARS: usize = 256;
+
+struct PresidioPromptTerminal {
+    stderr: io::Stderr,
+}
+
+impl PresidioPromptTerminal {
+    fn new() -> Result<Self> {
+        enable_raw_mode()?;
+        let mut stderr = io::stderr();
+        if let Err(error) = execute!(
+            stderr,
+            EnterAlternateScreen,
+            Hide,
+            MoveTo(0, 0),
+            Clear(ClearType::All)
+        ) {
+            let _ = disable_raw_mode();
+            return Err(error.into());
+        }
+        Ok(Self { stderr })
+    }
+
+    fn render(&mut self) -> Result<()> {
+        execute!(self.stderr, MoveTo(0, 0), Clear(ClearType::All))?;
+        let panel = terminal_ui::render_text_panel(
+            "Presidio opt-in",
+            "Use Presidio for data safety?\n\nDetected sensitive data is redacted from request bodies before upstream delivery.\n\ny enable · n skip · enter skip · esc skip",
+        );
+        write!(self.stderr, "{panel}")?;
+        self.stderr.flush()?;
+        Ok(())
+    }
+}
+
+impl Drop for PresidioPromptTerminal {
+    fn drop(&mut self) {
+        let _ = disable_raw_mode();
+        let _ = execute!(self.stderr, Show, LeaveAlternateScreen);
+        let _ = self.stderr.flush();
+    }
+}
 
 pub(super) fn prompt_super_main_agent_configuration(
     args: &SuperArgs,
@@ -404,15 +454,25 @@ pub(crate) fn prompt_super_presidio_opt_in() -> Result<bool> {
     if !io::stdin().is_terminal() || !io::stderr().is_terminal() {
         return Ok(false);
     }
-    write!(
-        io::stderr(),
-        "Use Presidio for data safety? Sensitive data is redacted before upstream delivery. [y/N]: "
-    )?;
-    io::stderr().flush()?;
-    let mut input = String::new();
-    io::stdin().read_line(&mut input)?;
-    Ok(matches!(
-        input.trim().to_ascii_lowercase().as_str(),
-        "y" | "yes"
-    ))
+
+    let mut tui = PresidioPromptTerminal::new()?;
+    tui.render()?;
+    loop {
+        if let Event::Key(key) = event::read()?
+            && key.kind == KeyEventKind::Press
+        {
+            match key.code {
+                KeyCode::Char('y') | KeyCode::Char('Y') => return Ok(true),
+                KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Enter | KeyCode::Esc => {
+                    return Ok(false);
+                }
+                KeyCode::Char('c') | KeyCode::Char('z')
+                    if key.modifiers.contains(KeyModifiers::CONTROL) =>
+                {
+                    bail!("Presidio prompt cancelled");
+                }
+                _ => {}
+            }
+        }
+    }
 }

@@ -272,6 +272,7 @@ fn quota_all_detail_sorts_by_status_then_nearest_main_reset() {
         .enumerate()
         .filter_map(|(index, line)| {
             let trimmed = line.trim_start();
+            let trimmed = trimmed.strip_prefix("* ").unwrap_or(trimmed);
             if trimmed.starts_with("second") {
                 Some(("second", index))
             } else if trimmed.starts_with("third") {

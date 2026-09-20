@@ -108,7 +108,7 @@ pub use self::response_state::{
 };
 pub use self::tooling::{
     gemini_provider_core_apply_gemini3_tool_declaration_overrides,
-    gemini_provider_core_blocked_tool_call_item,
+    gemini_provider_core_blocked_tool_call_item, gemini_provider_core_canonical_output_tool_name,
     gemini_provider_core_conversation_requests_command_output_only,
     gemini_provider_core_forced_command_output, gemini_provider_core_gemini3_tool_description,
     gemini_provider_core_model_uses_gemini3_toolset,

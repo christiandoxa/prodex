@@ -111,7 +111,7 @@ pub use gemini_bridge::{
     gemini_provider_core_bool_str, gemini_provider_core_bool_value,
     gemini_provider_core_buffered_responses_value,
     gemini_provider_core_buffered_responses_value_with_fallback_ids,
-    gemini_provider_core_chat_assistant_messages,
+    gemini_provider_core_canonical_output_tool_name, gemini_provider_core_chat_assistant_messages,
     gemini_provider_core_chat_assistant_tool_call_item, gemini_provider_core_citation_text,
     gemini_provider_core_collect_input_texts, gemini_provider_core_collect_media_parts,
     gemini_provider_core_collect_path_values, gemini_provider_core_collect_string_values,
