@@ -27,8 +27,22 @@ pub(crate) fn command_exit_error(code: i32, message: impl Into<String>) -> anyho
     })
 }
 
+pub(crate) fn command_uses_native_agy(command: &Commands) -> bool {
+    let Commands::Super(args) = command else {
+        return false;
+    };
+    if args.cli == Some(prodex_cli::SuperCliAgent::Agy) {
+        return true;
+    }
+    let mut args = (**args).clone();
+    args.extract_super_overrides_from_codex_args_for_native_preflight()
+        .is_ok()
+        && args.cli == Some(prodex_cli::SuperCliAgent::Agy)
+}
+
 pub(crate) fn command_should_show_update_notice(command: &Commands) -> bool {
     !command_is_super_dry_run(command)
+        && !command_uses_native_agy(command)
         && !matches!(
             command,
             Commands::RuntimeBroker(_)
@@ -87,6 +101,7 @@ pub(crate) fn execute_command(command: Commands) -> Result<()> {
 
 fn command_runs_profile_lifecycle_recovery(command: &Commands) -> bool {
     !command_is_super_dry_run(command)
+        && !command_uses_native_agy(command)
         && !matches!(
             command,
             Commands::Profile(ProfileCommands::Remove(_))
@@ -146,7 +161,7 @@ mod tests {
 
     use super::{
         command_is_super_dry_run, command_runs_profile_lifecycle_recovery,
-        command_should_show_update_notice, parse_cli_command_from,
+        command_should_show_update_notice, command_uses_native_agy, parse_cli_command_from,
     };
 
     #[test]
@@ -199,5 +214,30 @@ mod tests {
             parse_cli_command_from(["prodex", "__mcp-jsonl-bridge", "codebase-memory-mcp"])
                 .unwrap();
         assert!(!command_runs_profile_lifecycle_recovery(&command));
+    }
+
+    #[test]
+    fn native_antigravity_skips_profile_startup_surfaces() {
+        let direct =
+            parse_cli_command_from(["prodex", "s", "gemini", "--cli", "agy", "--no-presidio"])
+                .expect("native Antigravity should parse");
+        let tail = parse_cli_command_from([
+            "prodex",
+            "s",
+            "019c9e3d-45a0-7ad0-a6ee-b194ac2d44f9",
+            "--provider",
+            "gemini",
+            "--cli",
+            "agy",
+            "--no-presidio",
+        ])
+        .expect("native Antigravity tail overrides should parse");
+
+        for command in [&direct, &tail] {
+            assert!(command_uses_native_agy(command));
+            assert!(!command_runs_profile_lifecycle_recovery(command));
+            assert!(!command_should_show_update_notice(command));
+            assert!(!crate::housekeeping::command_runs_auto_runtime_housekeeping(command));
+        }
     }
 }
