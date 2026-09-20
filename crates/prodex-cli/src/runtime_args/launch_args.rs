@@ -218,6 +218,9 @@ pub struct SuperArgs {
     /// External provider preset to use through Codex/Super.
     #[arg(long, value_name = "PROVIDER", value_parser = parse_super_external_provider)]
     pub provider: Option<SuperExternalProvider>,
+    /// Compatibility native CLI. Prodex 0.430 retains Antigravity (agy) only.
+    #[arg(long, value_name = "CLI", value_enum)]
+    pub cli: Option<SuperCliAgent>,
     /// API key for --provider. Prefer the provider-specific environment variable for shells/history.
     #[arg(long = "api-key", value_name = "KEY", requires = "provider")]
     pub api_key: Option<String>,
@@ -279,6 +282,7 @@ impl fmt::Debug for SuperArgs {
             .field("required_tools", &self.required_tools)
             .field("url_configured", &self.url.is_some())
             .field("provider", &self.provider)
+            .field("cli", &self.cli)
             .field("api_key", &self.api_key.as_ref().map(|_| "<redacted>"))
             .field("local_model", &self.local_model)
             .field("local_context_window", &self.local_context_window)
@@ -290,6 +294,11 @@ impl fmt::Debug for SuperArgs {
             .field("codex_args_count", &self.codex_args.len())
             .finish()
     }
+}
+
+#[derive(clap::ValueEnum, Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SuperCliAgent {
+    Agy,
 }
 
 pub(super) fn parse_runtime_base_url(url: &str) -> std::result::Result<String, String> {

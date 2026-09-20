@@ -1,4 +1,5 @@
 use super::*;
+mod agy_compat;
 mod broker;
 mod child_process;
 mod doctor;
@@ -24,6 +25,7 @@ mod super_config;
 mod super_main_prompt;
 mod super_prompt;
 
+pub(crate) use self::agy_compat::*;
 pub(crate) use self::broker::*;
 pub(crate) use self::child_process::*;
 pub(crate) use self::doctor::*;

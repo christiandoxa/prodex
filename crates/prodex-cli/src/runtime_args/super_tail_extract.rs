@@ -1,7 +1,8 @@
 use std::ffi::OsString;
 
 use super::{
-    SuperArgs, parse_runtime_base_url, parse_super_external_provider, parse_super_local_url,
+    SuperArgs, SuperCliAgent, parse_runtime_base_url, parse_super_external_provider,
+    parse_super_local_url,
 };
 use crate::{
     CodexCurrentTimeClockSource, CodexWebSearchMode, SubAgentMaxConcurrency,
@@ -17,6 +18,7 @@ struct ScannedValue<'a> {
 
 enum SuperOverride {
     Provider(super::SuperExternalProvider),
+    Cli(SuperCliAgent),
     ApiKey(String),
     LocalModel(String),
     Profile(String),
@@ -110,9 +112,6 @@ fn scan_override(args: &[OsString], index: usize) -> Result<ScanOutcome, String>
     let Some(argument) = args[index].to_str() else {
         return Ok(ScanOutcome::Unknown);
     };
-    if argument == "--cli" || argument.starts_with("--cli=") {
-        return Err("--cli was removed; use --provider gemini|copilot|kiro instead".to_string());
-    }
     if let Some(outcome) = scan_identity_override(args, index) {
         return outcome;
     }
@@ -138,6 +137,19 @@ fn scan_identity_override(args: &[OsString], index: usize) -> Option<Result<Scan
             parse_super_external_provider,
             SuperOverride::Provider,
             "--provider",
+        ));
+    }
+    if let Some(scanned) = scan_value(args, index, &["--cli"]) {
+        return Some(parse_required(
+            scanned,
+            |value| {
+                match value {
+                "agy" => Ok(SuperCliAgent::Agy),
+                _ => Err("only --cli agy is retained; use --provider gemini|copilot|kiro for other providers".to_string()),
+            }
+            },
+            SuperOverride::Cli,
+            "--cli",
         ));
     }
     if let Some(scanned) = scan_value(args, index, &["--api-key"]) {
@@ -406,6 +418,7 @@ fn apply(consumed_count: usize, value: SuperOverride) -> ScanOutcome {
 fn apply_override(args: &mut SuperArgs, value: SuperOverride) {
     match value {
         SuperOverride::Provider(value) => args.provider = Some(value),
+        SuperOverride::Cli(value) => args.cli = Some(value),
         SuperOverride::ApiKey(value) => args.api_key = Some(value),
         SuperOverride::LocalModel(value) => args.local_model = Some(value),
         SuperOverride::Profile(value) if args.profile.is_none() => args.profile = Some(value),
@@ -495,6 +508,7 @@ fn is_known_super_flag(value: &str) -> bool {
     matches!(
         name,
         "--provider"
+            | "--cli"
             | "--api-key"
             | "--sub-agent-provider"
             | "--sub-agent-model"
