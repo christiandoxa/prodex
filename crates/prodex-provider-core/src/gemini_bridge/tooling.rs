@@ -49,6 +49,13 @@ pub fn gemini_provider_core_tool_aliases(name: &str) -> BTreeSet<String> {
     aliases
 }
 
+pub fn gemini_provider_core_canonical_output_tool_name(name: &str) -> String {
+    match gemini_provider_core_normalize_tool_name(name).as_str() {
+        "run_shell_command" => "exec_command".to_string(),
+        _ => name.to_string(),
+    }
+}
+
 pub fn gemini_provider_core_normalize_tool_name(name: &str) -> String {
     let mut name = name.trim().to_ascii_lowercase().replace('-', "_");
     if let Some(suffix) = name.rsplit('.').next() {
