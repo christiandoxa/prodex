@@ -2,10 +2,62 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.430.0 - 2026-09-20
+
+### Runtime
+
+- Restore final provider and prompt behavior (`4edab45`)
+- Own runtime doctor route summaries (`a92255d`)
+- Own runtime doctor marker semantics (`840ff88`)
+- Own runtime health decision policy (`9a28bae`)
+- Own runtime health backoff policy (`8cc944d`)
+- Restore runtime log command (`c641193`)
+
+### CLI
+
+- Gate reset-credit URL with Mojo quota (`4d07c35`)
+- Add exec-only expose surface (`17b40fa`)
+- Restore local expose endpoint (`6d4766c`)
+- Restore OpenAI application ping (`8e3d256`)
+- Restore prodex info summary (`488fe17`)
+
+### Claude
+
+- Restore Anthropic Messages compatibility (`94c8c5a`)
+- Supervise OpenAI Secure MCP tunnel client (`6ca80f9`)
+
+### Misc
+
+- Own Gemini request policy and assembly (`e563934`)
+- Own DeepSeek tool shape validation (`c26c825`)
+- Own DeepSeek request policy validation (`d59f787`)
+- Own DeepSeek bridge input shaping (`49c6c4c`)
+- Own common Gemini text transforms (`3f2e361`)
+- Complete DeepSeek request shaping (`6e244f4`)
+- Own DeepSeek request metadata (`f91fd90`)
+- Own DeepSeek input array shaping (`19206b4`)
+- Own common DeepSeek request shaping (`fd313e7`)
+- Own Kiro chat response rewrite (`7e84ecc`)
+- Own Kiro chat request rewrite (`d6fc0e1`)
+- Own Kiro raw request validation (`c07ee4d`)
+- Own OpenAI ping protocol (`15c8283`)
+- Move success command classification to Mojo (`a913132`)
+- Move stable metric semantics to Mojo (`cec29dc`)
+- Move intent diff selection to Mojo (`e5ee955`)
+- Satisfy Mojo classifier lint (`c44682d`)
+- Move git diff compaction to Mojo (`d5132fc`)
+- Move output classification and truncation to Mojo (`d18d85c`)
+- Plan operational health responses (`9321be2`)
+- Own application data-plane plans (`1d92475`)
+
 ## 0.429.4 - 2026-09-16
 
 ### Runtime
 
+- Route Luna Reserve through model-aware preflight (`856af3d`)
+- Accept explicit Luna Reserve bucket (`a910c77`)
+- Restore Reserve safety contract (`7d52c45`)
+- Preserve Reserve identity and websocket routing (`2649e4a`)
 - Gate compatibility helper (`463b5cc`)
 - Route Luna Reserve requests (`dfaa176`)
 - Route runtime error policy through Mojo (`1fd5eb1`)
@@ -27,6 +79,10 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 
 ### Misc
 
+- Update rustls handshake checks (`ca6feda`)
+- Upgrade rustls past TLS advisory (`49fef54`)
+- Revert "fix(ci): restore pure domain and historical guard evidence" (`ae6878a`)
+- Preserve frozen ownership baseline (`42c8de3`)
 - Sync critical signal ownership (`c347a97`)
 - Plan registry bootstrap in Mojo (`ab75ab4`)
 - Move command output normalization to Mojo (`7376d2c`)
@@ -39,35 +95,6 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 - Finish OpenAI response shaping (`fa84ef0`)
 - Migrate health and gateway policy kernels (`f42f56d`)
 - Route domain accounting arithmetic (`c266c60`)
-# Prodex 0.429.4
-
-## New Features
-
-- None.
-
-## Bug Fixes
-
-- Advertise Luna Reserve capability on OpenAI usage reads and preserve the
-  backend's authoritative Reserve banner, model mapping, and account identity.
-- Route eligible `gpt-5.6-luna` requests through the hidden `gpt-reserve`
-  upstream model only after profile selection, while keeping the requested
-  model unchanged for affinity, selection, logs, and public metadata.
-- Keep reused WebSocket sessions and continuations on their existing route so
-  Reserve recovery cannot replay committed output or tool effects.
-- Keep Luna Reserve activation independent from reset-credit redemption.
-
-## Safety
-
-- Fail closed when Reserve metadata is missing, regular usage remains allowed,
-  the Reserve bucket is denied or exhausted, or backend and authenticated
-  account identities conflict.
-
-## Changelog
-
-- Synchronize release metadata and generated changelog for the Luna Reserve
-  routing fix.
-
-Full Changelog: [0.429.3...0.429.4](https://github.com/christiandoxa/prodex/compare/0.429.3...0.429.4)
 
 ## 0.429.3 - 2026-09-13
 
