@@ -47,7 +47,7 @@ Notes:
   A leading non-option argument selects the profile; `status` remains Codex login status.
   Use --profile when selecting a profile literally named `status`.
   OpenAI/Codex, Claude, and API-key login paths create or update Prodex profiles.
-  Google Gemini OAuth profiles are unsupported. Use a Gemini API key with `prodex s gemini`; native Antigravity remains available through `prodex s gemini --cli agy`.
+  Google Gemini OAuth profiles are unsupported; native Gemini CLI / Vertex AI compatibility is retired. Use a Gemini API key with `prodex s gemini`; native Antigravity remains available through `prodex s gemini --cli agy`.
   Antigravity login delegates to `agy auth login` and does not create a Prodex profile.";
 pub const CLI_QUOTA_AFTER_HELP: &str = "\
 Best practice:

@@ -128,7 +128,7 @@ fn resolve_gemini_quota_project_id(
         return Ok(project_id);
     }
     bail!(
-        "Gemini OAuth quota is disabled. The Codex-fronted Gemini bridge accepts API keys; native Gemini CLI compatibility is retired and does not use this OAuth quota route"
+        "Gemini OAuth quota is disabled. The Codex-fronted Gemini bridge accepts API keys; native Gemini CLI / Vertex AI compatibility is retired and does not use this OAuth quota route"
     )
 }
 
