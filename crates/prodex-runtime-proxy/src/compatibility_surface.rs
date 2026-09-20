@@ -47,19 +47,36 @@ pub fn runtime_detect_request_compatibility_surface(
 ) -> RuntimeRequestCompatibilitySurface {
     let route = route_label(request);
     let mut surface = RuntimeRequestCompatibilitySurface::new(stage, route, transport);
+    classify_client_surface(&mut surface, request, route, transport);
+    populate_request_metadata(&mut surface, request, transport);
+
+    let value = serde_json::from_slice::<serde_json::Value>(&request.body).ok();
+    surface.stream = stream_label(request, value.as_ref(), transport);
+    surface.continuation = continuation_label(request);
+    populate_tool_surface(&mut surface, value.as_ref());
+    append_request_compatibility_warnings(&mut surface, request, transport);
+    surface
+}
+
+fn classify_client_surface(
+    surface: &mut RuntimeRequestCompatibilitySurface,
+    request: &RuntimeProxyRequest,
+    route: &str,
+    transport: &str,
+) {
     let user_agent = runtime_proxy_request_header_value(&request.headers, "user-agent")
         .map(str::to_ascii_lowercase);
     let codex_headers = runtime_proxy_request_header_value(&request.headers, "x-codex-turn-state")
         .is_some()
         || runtime_proxy_request_header_value(&request.headers, "x-openai-subagent").is_some()
         || runtime_proxy_request_header_value(&request.headers, "session-id").is_some();
-
-    if codex_headers
+    let codex_client = codex_headers
         || transport == "websocket"
         || user_agent
             .as_deref()
-            .is_some_and(|agent| agent.contains("codex"))
-    {
+            .is_some_and(|agent| agent.contains("codex"));
+
+    if codex_client {
         surface.family = "codex";
         surface.client = if runtime_proxy_request_header_value(
             &request.headers,
@@ -71,17 +88,25 @@ pub fn runtime_detect_request_compatibility_surface(
         } else {
             "codex_cli"
         };
-    } else if matches!(route, "responses" | "compact" | "chat_completions") {
+        return;
+    }
+    if matches!(route, "responses" | "compact" | "chat_completions") {
         surface.family = "openai_compatible";
         surface.client = if route == "chat_completions" {
             "chat_completions_client"
         } else {
             "responses_client"
         };
-    } else {
-        surface.warnings.push("unknown_client_family");
+        return;
     }
+    surface.warnings.push("unknown_client_family");
+}
 
+fn populate_request_metadata(
+    surface: &mut RuntimeRequestCompatibilitySurface,
+    request: &RuntimeProxyRequest,
+    _transport: &str,
+) {
     surface.user_agent = runtime_proxy_request_header_value(&request.headers, "user-agent")
         .map(str::trim)
         .filter(|value| !value.is_empty())
@@ -92,18 +117,26 @@ pub fn runtime_detect_request_compatibility_surface(
     } else {
         "external"
     };
+}
 
-    let value = serde_json::from_slice::<serde_json::Value>(&request.body).ok();
-    surface.stream = stream_label(request, value.as_ref(), transport);
-    surface.continuation = continuation_label(request);
-    let tools = tool_flags(value.as_ref());
+fn populate_tool_surface(
+    surface: &mut RuntimeRequestCompatibilitySurface,
+    value: Option<&serde_json::Value>,
+) {
+    let tools = tool_flags(value);
     surface.approval = tools.contains("approval");
     surface.tool_surface = if tools.is_empty() {
         "none".to_string()
     } else {
         tools.iter().copied().collect::<Vec<_>>().join("+")
     };
+}
 
+fn append_request_compatibility_warnings(
+    surface: &mut RuntimeRequestCompatibilitySurface,
+    request: &RuntimeProxyRequest,
+    transport: &str,
+) {
     if transport == "websocket"
         && runtime_request_previous_response_id(request).is_some()
         && runtime_request_turn_state(request).is_none()
@@ -112,7 +145,6 @@ pub fn runtime_detect_request_compatibility_surface(
             .warnings
             .push("websocket_previous_response_without_turn_state");
     }
-    surface
 }
 
 fn route_label(request: &RuntimeProxyRequest) -> &'static str {

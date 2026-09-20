@@ -55,54 +55,27 @@ pub fn render_quota_reports_window_with_sort(
     let sorted = sort_quota_reports_for_display_with_sort(reports, sort);
     let total_profiles = sorted.len();
     let start_profile = start_profile.min(total_profiles.saturating_sub(1));
-    let header = if total_width < 60 {
-        "PROFILE · AUTH · STATUS"
-    } else {
-        "PROFILE · AUTH · ACCOUNT · PLAN · STATUS · REMAINING"
-    };
-    let mut lines = vec![
-        section_header_with_width("Quota Overview", total_width),
-        header.to_string(),
-    ];
-    for (label, value) in quota_pool_summary_fields(reports) {
-        lines.extend(wrap_text(&format!("{label}: {value}"), total_width.max(1)));
-    }
-
+    let mut lines = quota_report_header_lines(reports, total_width);
     let header_lines = lines.len();
-    let mut shown_profiles = 0usize;
-    for report in sorted.iter().skip(start_profile) {
-        let section = render_quota_report_section(report, detail, total_width);
-        let reserve_notice =
-            usize::from(start_profile > 0 || start_profile + shown_profiles + 1 < total_profiles);
-        if max_lines.is_some_and(|limit| {
-            lines
-                .len()
-                .saturating_add(section.len())
-                .saturating_add(reserve_notice)
-                > limit
-        }) {
-            break;
-        }
-        lines.extend(section);
-        shown_profiles += 1;
-    }
-
+    let shown_profiles = append_quota_profile_sections(
+        &mut lines,
+        &sorted,
+        detail,
+        max_lines,
+        total_width,
+        start_profile,
+    );
     let hidden_before = start_profile;
     let hidden_after = total_profiles.saturating_sub(start_profile.saturating_add(shown_profiles));
-    if (hidden_before > 0 || hidden_after > 0) && max_lines.is_none_or(|limit| lines.len() < limit)
-    {
-        lines.push(if interactive_scroll_hint {
-            format!(
-                "profiles {}-{} of {total_profiles}; {hidden_before} above, {hidden_after} below",
-                start_profile.saturating_add(1),
-                start_profile.saturating_add(shown_profiles)
-            )
-        } else {
-            format!(
-                "showing {shown_profiles} of {total_profiles} profile(s) due to terminal height"
-            )
-        });
-    }
+
+    append_quota_visibility_notice(
+        &mut lines,
+        max_lines,
+        interactive_scroll_hint,
+        total_profiles,
+        start_profile,
+        shown_profiles,
+    );
     if lines.len() == header_lines && total_profiles == 0 {
         lines.push("No quota profiles.".to_string());
     }
@@ -118,6 +91,79 @@ pub fn render_quota_reports_window_with_sort(
         hidden_before,
         hidden_after,
     }
+}
+
+fn quota_report_header_lines(reports: &[QuotaReport], total_width: usize) -> Vec<String> {
+    let header = if total_width < 60 {
+        "PROFILE · AUTH · STATUS"
+    } else {
+        "PROFILE · AUTH · ACCOUNT · PLAN · STATUS · REMAINING"
+    };
+    let mut lines = vec![
+        section_header_with_width("Quota Overview", total_width),
+        header.to_string(),
+    ];
+    for (label, value) in quota_pool_summary_fields(reports) {
+        lines.extend(wrap_text(&format!("{label}: {value}"), total_width.max(1)));
+    }
+    lines
+}
+
+fn append_quota_profile_sections(
+    lines: &mut Vec<String>,
+    sorted: &[&QuotaReport],
+    detail: bool,
+    max_lines: Option<usize>,
+    total_width: usize,
+    start_profile: usize,
+) -> usize {
+    let total_profiles = sorted.len();
+    let mut shown_profiles = 0usize;
+    for report in sorted.iter().skip(start_profile) {
+        let section = render_quota_report_section(report, detail, total_width);
+        let reserve_notice =
+            usize::from(start_profile > 0 || start_profile + shown_profiles + 1 < total_profiles);
+        let would_overflow = max_lines.is_some_and(|limit| {
+            lines
+                .len()
+                .saturating_add(section.len())
+                .saturating_add(reserve_notice)
+                > limit
+        });
+        if would_overflow {
+            break;
+        }
+        lines.extend(section);
+        shown_profiles += 1;
+    }
+    shown_profiles
+}
+
+fn append_quota_visibility_notice(
+    lines: &mut Vec<String>,
+    max_lines: Option<usize>,
+    interactive_scroll_hint: bool,
+    total_profiles: usize,
+    start_profile: usize,
+    shown_profiles: usize,
+) {
+    let hidden_before = start_profile;
+    let hidden_after = total_profiles.saturating_sub(start_profile.saturating_add(shown_profiles));
+    let has_hidden = hidden_before > 0 || hidden_after > 0;
+    let has_room = max_lines.is_none_or(|limit| lines.len() < limit);
+    if !has_hidden || !has_room {
+        return;
+    }
+    let notice = if interactive_scroll_hint {
+        format!(
+            "profiles {}-{} of {total_profiles}; {hidden_before} above, {hidden_after} below",
+            start_profile.saturating_add(1),
+            start_profile.saturating_add(shown_profiles)
+        )
+    } else {
+        format!("showing {shown_profiles} of {total_profiles} profile(s) due to terminal height")
+    };
+    lines.push(notice);
 }
 
 fn render_quota_report_section(
