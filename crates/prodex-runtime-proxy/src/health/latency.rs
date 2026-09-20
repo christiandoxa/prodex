@@ -20,13 +20,13 @@ pub fn runtime_profile_latency_penalty(
             "connect" => 2,
             _ => 0,
         };
-        return prodex_mojo_core::runtime::profile_latency_penalty(
+        prodex_mojo_core::runtime::profile_latency_penalty(
             elapsed_ms,
             route_kind,
             stage_kind,
             RUNTIME_PROFILE_LATENCY_PENALTY_MAX,
         )
-        .unwrap_or_else(|error| panic!("Mojo latency penalty failed: {error:?}"));
+        .unwrap_or_else(|error| panic!("Mojo latency penalty failed: {error:?}"))
     }
     #[cfg(not(feature = "mojo"))]
     runtime_profile_latency_penalty_rust(elapsed_ms, route_kind, stage)
@@ -63,8 +63,8 @@ pub fn runtime_profile_latency_observation_next_score(
     let observed = runtime_profile_latency_penalty(elapsed_ms, route_kind, stage);
     #[cfg(feature = "mojo")]
     {
-        return prodex_mojo_core::runtime::profile_latency_next_score(current_score, observed)
-            .unwrap_or_else(|error| panic!("Mojo latency next score failed: {error:?}"));
+        prodex_mojo_core::runtime::profile_latency_next_score(current_score, observed)
+            .unwrap_or_else(|error| panic!("Mojo latency next score failed: {error:?}"))
     }
     #[cfg(not(feature = "mojo"))]
     runtime_profile_latency_observation_next_score_rust(current_score, observed)
@@ -82,12 +82,12 @@ fn runtime_profile_latency_observation_next_score_rust(current_score: u32, obser
 pub fn runtime_profile_latency_failure_next_score(current_score: u32) -> u32 {
     #[cfg(feature = "mojo")]
     {
-        return prodex_mojo_core::runtime::profile_latency_failure_score(
+        prodex_mojo_core::runtime::profile_latency_failure_score(
             current_score,
             crate::RUNTIME_PROFILE_TRANSPORT_FAILURE_HEALTH_PENALTY,
             RUNTIME_PROFILE_LATENCY_PENALTY_MAX,
         )
-        .unwrap_or_else(|error| panic!("Mojo latency failure score failed: {error:?}"));
+        .unwrap_or_else(|error| panic!("Mojo latency failure score failed: {error:?}"))
     }
     #[cfg(not(feature = "mojo"))]
     runtime_profile_latency_failure_next_score_rust(current_score)

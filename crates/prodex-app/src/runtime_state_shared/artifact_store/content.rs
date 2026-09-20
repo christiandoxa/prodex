@@ -1,9 +1,10 @@
 #[cfg(any(test, feature = "bench-support"))]
 use super::super::{
-    RuntimeSmartContextArtifact, RuntimeSmartContextArtifactChunkIndex,
-    RuntimeSmartContextArtifactLineIndex, runtime_smart_context_artifact_chunk_index,
+    RuntimeSmartContextArtifact, runtime_smart_context_artifact_chunk_index,
     runtime_smart_context_artifact_line_index,
 };
+#[cfg(test)]
+use super::super::{RuntimeSmartContextArtifactChunkIndex, RuntimeSmartContextArtifactLineIndex};
 use super::RuntimeSmartContextArtifactStore;
 #[cfg(test)]
 use super::RuntimeSmartContextStaticFingerprintMetadata;
