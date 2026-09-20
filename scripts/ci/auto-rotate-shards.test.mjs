@@ -67,7 +67,7 @@ test("Windows CI partitions tests and installer work with one cache writer", () 
   assert.match(block, /--workspace --exclude prodex --exclude prodex-app/);
   assert.match(
     block,
-    /-p prodex --lib --bins --examples --test dashboard_control_plane --test internal_commands/,
+    /-p prodex --lib --bins --examples --test internal_commands/,
   );
   assert.doesNotMatch(block, /-p prodex --all-features -- --test-threads/);
   assert.match(block, /--workspace --exclude prodex --exclude prodex-app --exclude 'prodex-runtime-\*' -- --test-threads/);

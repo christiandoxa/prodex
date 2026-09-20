@@ -22,7 +22,7 @@ function runPlanner(...args) {
 test("prodex-app shard manifest is disjoint and remainder-complete", () => {
   assert.deepEqual(validateShards(), []);
   assert.deepEqual(validateShards(PRODEX_APP_FULL_TEST_SHARDS), []);
-  assert.equal(PRODEX_APP_LIB_SHARDS.length, 13);
+  assert.equal(PRODEX_APP_LIB_SHARDS.length, 11);
   assert.equal(
     PRODEX_APP_FULL_TEST_SHARDS.filter((shard) => shard.filters?.length > 1).length,
     0,
@@ -33,14 +33,14 @@ test("prodex-app shard manifest is disjoint and remainder-complete", () => {
   );
   assert.deepEqual(PRODEX_APP_LIB_SHARDS.at(-1).skipFilters, PRODEX_APP_LIB_FILTERS);
   assert.equal(PRODEX_APP_LIB_SHARDS.find((shard) => shard.suite === "admission-core").filters.length, 8);
-  assert.equal(PRODEX_APP_LIB_SHARDS.find((shard) => shard.suite === "admission-affinity").filters.length, 6);
+  assert.equal(PRODEX_APP_LIB_SHARDS.find((shard) => shard.suite === "admission-affinity").filters.length, 5);
 
   const appMatrix = githubMatrix();
   const ciMatrix = ciGithubMatrix();
   const fullMatrix = githubMatrix({ includeWorkspace: true });
   const windowsMatrix = windowsGithubMatrix();
-  assert.equal(appMatrix.include.length, 13);
-  assert.equal(ciMatrix.include.length, 9);
+  assert.equal(appMatrix.include.length, 11);
+  assert.equal(ciMatrix.include.length, 8);
   assert.equal(fullMatrix.include.length, PRODEX_APP_FULL_TEST_SHARDS.length + 1);
   assert.equal(windowsMatrix.include.length, 5);
   assert.equal(appMatrix.include.filter((entry) => entry.save_cache).length, 1);
@@ -106,7 +106,7 @@ test("prodex-app shard manifest is disjoint and remainder-complete", () => {
 test("shard planner dry-run and matrix output are compile-free", () => {
   const check = runPlanner("--check");
   assert.equal(check.status, 0, check.stderr);
-  assert.match(check.stdout, /13 app shard\(s\), one cache writer/);
+  assert.match(check.stdout, /11 app shard\(s\), one cache writer/);
 
   const dryRun = runPlanner("--dry-run");
   assert.equal(dryRun.status, 0, dryRun.stderr);
@@ -188,7 +188,7 @@ test("CI consumes generated app shards and retains required safety gates", () =>
   assert.doesNotMatch(workflow, /^  windows-security:/m);
   assert.ok(PRODEX_APP_LIB_FILTERS.includes("app_commands::"));
   assert.ok(PRODEX_APP_LIB_FILTERS.includes("runtime_broker::"));
-  assert.ok(PRODEX_APP_LIB_FILTERS.includes("runtime_model_preferences::"));
+  assert.ok(PRODEX_APP_LIB_FILTERS.includes("runtime_gemini_config::"));
   const processGuard = workflow.match(/\n  process-guard:\n([\s\S]*?)\n  compat-replay-gate:/)?.[1];
   assert.ok(processGuard, "process-guard job missing");
   assert.match(processGuard, /RUSTC_WRAPPER: sccache/);

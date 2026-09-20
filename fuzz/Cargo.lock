@@ -919,7 +919,6 @@ name = "prodex-domain"
 version = "0.430.0"
 dependencies = [
  "serde",
- "sha2",
  "uuid",
  "zeroize",
 ]

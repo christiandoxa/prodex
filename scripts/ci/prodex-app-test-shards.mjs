@@ -31,7 +31,6 @@ const TARGETED_SHARDS = Object.freeze([
     suite: "admission-affinity",
     label: "prodex-app admission guards and affinity",
     filters: [
-      `${ADMISSION_PREFIX}cli_mount::`,
       `${ADMISSION_PREFIX}guards::`,
       `${ADMISSION_PREFIX}pre_send::`,
       `${ADMISSION_PREFIX}previous_response::`,
@@ -48,11 +47,6 @@ const TARGETED_SHARDS = Object.freeze([
     suite: "launch-gemini",
     label: "prodex-app Gemini runtime",
     filters: [`${LAUNCH_PREFIX}gemini`, `${LAUNCH_PREFIX}local_rewrite_gemini`],
-  },
-  {
-    suite: "launch-gateway",
-    label: "prodex-app gateway runtime",
-    filters: [`${LAUNCH_PREFIX}local_rewrite_gateway`],
   },
   {
     suite: "launch-providers",
@@ -84,14 +78,6 @@ const TARGETED_SHARDS = Object.freeze([
     filters: ["profile_commands::"],
   },
   {
-    suite: "brokers",
-    label: "prodex-app brokers",
-    filters: [
-      "main_internal_tests::app_server_broker::",
-      "main_internal_tests::runtime_proxy_claude_and_anthropic::",
-    ],
-  },
-  {
     suite: "support",
     label: "prodex-app support modules",
     filters: [
@@ -99,10 +85,8 @@ const TARGETED_SHARDS = Object.freeze([
       "runtime_state_shared::",
       "runtime_broker::",
       "runtime_tools::",
-      "runtime_model_preferences::",
-      "runtime_gemini_cli::",
+      "runtime_gemini_config::",
       "runtime_kiro_acp::",
-      "runtime_config::",
       "expose::",
       "runtime_gemini_auth::",
     ],
@@ -172,12 +156,12 @@ const WINDOWS_SHARD_GROUPS = Object.freeze([
   {
     suite: "local-brokers-profiles",
     label: "prodex-app local rewrite, brokers, and profiles",
-    members: ["launch-local", "brokers", "profiles"],
+    members: ["launch-local", "profiles"],
   },
   {
     suite: "gateway-support-affinity",
     label: "prodex-app gateway, support, and affinity",
-    members: ["launch-gateway", "support", "admission-affinity"],
+    members: ["support", "admission-affinity"],
   },
   {
     suite: "selection-providers-runtime",

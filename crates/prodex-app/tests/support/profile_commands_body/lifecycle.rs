@@ -195,10 +195,10 @@ fn native_dry_run_leaves_pending_profile_lifecycle_untouched() {
     let command = parse_cli_command_from([
         "prodex",
         "super",
-        "--cli",
-        "gemini",
         "--provider",
         "gemini",
+        "--api-key",
+        "test-api-key",
         "--dry-run",
     ])
     .expect("native dry-run should parse");
