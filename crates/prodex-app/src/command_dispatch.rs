@@ -124,6 +124,9 @@ fn execute_super(mut args: SuperArgs) -> Result<()> {
     args.extract_provider_overrides_from_codex_args()
         .map_err(anyhow::Error::msg)?;
     args.validate_urls().map_err(anyhow::Error::msg)?;
+    if super_uses_native_agy(&args) {
+        return handle_super_native_agy(args);
+    }
     if args.dry_run || prodex_dry_run_requested(&args.codex_args) {
         let use_presidio = match args.presidio_preference() {
             Some(use_presidio) => use_presidio,
