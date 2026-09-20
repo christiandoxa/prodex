@@ -99,84 +99,109 @@ pub fn deepseek_provider_core_insert_primitive_request_fields(
 ) -> Result<(), String> {
     #[cfg(feature = "mojo")]
     {
-        let (_, plan) = plan_value(value, DeepSeekRequestPolicyOperation::PrimitiveCore, false);
-        let error = match plan.tag {
-            0 => None,
-            1 => Some("temperature must be a number"),
-            2 => Some("top_p must be a number"),
-            3 => Some("max_output_tokens must be a positive integer"),
-            4 => Some("max_tokens must be a positive integer"),
-            5 => Some("max_completion_tokens must be a positive integer"),
-            6 => Some("logprobs must be a boolean"),
-            _ => Some("request validation returned an unknown result"),
-        };
-        if let Some(error) = error {
-            return Err(format!("{provider_label} {error}"));
-        }
+        validate_primitive_request_fields_mojo(value, provider_label)?;
+        insert_primitive_request_fields_mojo(value, request, provider_label)
     }
     #[cfg(not(feature = "mojo"))]
     {
-        for field in ["temperature", "top_p"] {
-            if let Some(next) = value.get(field)
-                && !next.is_number()
-            {
-                return Err(format!("{provider_label} {field} must be a number"));
-            }
-        }
-        for field in ["max_output_tokens", "max_tokens", "max_completion_tokens"] {
-            if let Some(next) = value.get(field)
-                && next.as_u64().is_none_or(|count| count == 0)
-            {
-                return Err(format!(
-                    "{provider_label} {field} must be a positive integer"
-                ));
-            }
-        }
-        if let Some(logprobs) = value.get("logprobs")
-            && !logprobs.is_boolean()
-        {
-            return Err(format!("{provider_label} logprobs must be a boolean"));
-        }
-    }
-    #[cfg(feature = "mojo")]
-    {
-        let source = serde_json::to_string(value)
-            .map_err(|error| format!("{provider_label} request serialization failed: {error}"))?;
-        let mut input = DeepSeekKernelInput::new(DeepSeekKernelOperation::PrimitiveRequestFields);
-        input.input = Some(&source);
-        let fields = deepseek_provider_core_mojo_value(input).map_err(|error| {
-            format!("{provider_label} primitive request fields could not be normalized: {error}")
-        })?;
-        let Some(fields) = fields.as_object() else {
-            return Err(format!(
-                "{provider_label} primitive request fields normalization returned a non-object"
-            ));
-        };
-        request.extend(
-            fields
-                .iter()
-                .map(|(key, value)| (key.clone(), value.clone())),
-        );
+        validate_primitive_request_fields_rust(value, provider_label)?;
+        insert_primitive_request_fields_rust(value, request);
         Ok(())
     }
-    #[cfg(not(feature = "mojo"))]
-    {
-        for field in ["temperature", "top_p"] {
-            if let Some(next) = value.get(field) {
-                request.insert(field.to_string(), next.clone());
-            }
-        }
-        for field in ["max_output_tokens", "max_tokens", "max_completion_tokens"] {
-            if let Some(next) = value.get(field) {
-                request.insert("max_tokens".to_string(), next.clone());
-            }
-        }
-        if let Some(logprobs) = value.get("logprobs") {
-            request.insert("logprobs".to_string(), logprobs.clone());
+}
+
+#[cfg(feature = "mojo")]
+fn validate_primitive_request_fields_mojo(
+    value: &serde_json::Value,
+    provider_label: &str,
+) -> Result<(), String> {
+    let (_, plan) = plan_value(value, DeepSeekRequestPolicyOperation::PrimitiveCore, false);
+    let error = match plan.tag {
+        0 => None,
+        1 => Some("temperature must be a number"),
+        2 => Some("top_p must be a number"),
+        3 => Some("max_output_tokens must be a positive integer"),
+        4 => Some("max_tokens must be a positive integer"),
+        5 => Some("max_completion_tokens must be a positive integer"),
+        6 => Some("logprobs must be a boolean"),
+        _ => Some("request validation returned an unknown result"),
+    };
+    match error {
+        Some(error) => Err(format!("{provider_label} {error}")),
+        None => Ok(()),
+    }
+}
+
+#[cfg(feature = "mojo")]
+fn insert_primitive_request_fields_mojo(
+    value: &serde_json::Value,
+    request: &mut serde_json::Map<String, serde_json::Value>,
+    provider_label: &str,
+) -> Result<(), String> {
+    let source = serde_json::to_string(value)
+        .map_err(|error| format!("{provider_label} request serialization failed: {error}"))?;
+    let mut input = DeepSeekKernelInput::new(DeepSeekKernelOperation::PrimitiveRequestFields);
+    input.input = Some(&source);
+    let fields = deepseek_provider_core_mojo_value(input).map_err(|error| {
+        format!("{provider_label} primitive request fields could not be normalized: {error}")
+    })?;
+    let Some(fields) = fields.as_object() else {
+        return Err(format!(
+            "{provider_label} primitive request fields normalization returned a non-object"
+        ));
+    };
+    request.extend(
+        fields
+            .iter()
+            .map(|(key, value)| (key.clone(), value.clone())),
+    );
+    Ok(())
+}
+
+#[cfg(not(feature = "mojo"))]
+fn validate_primitive_request_fields_rust(
+    value: &serde_json::Value,
+    provider_label: &str,
+) -> Result<(), String> {
+    for field in ["temperature", "top_p"] {
+        if value.get(field).is_some_and(|next| !next.is_number()) {
+            return Err(format!("{provider_label} {field} must be a number"));
         }
     }
-    #[cfg(not(feature = "mojo"))]
+    for field in ["max_output_tokens", "max_tokens", "max_completion_tokens"] {
+        if value
+            .get(field)
+            .is_some_and(|next| next.as_u64().is_none_or(|count| count == 0))
+        {
+            return Err(format!(
+                "{provider_label} {field} must be a positive integer"
+            ));
+        }
+    }
+    if value.get("logprobs").is_some_and(|next| !next.is_boolean()) {
+        return Err(format!("{provider_label} logprobs must be a boolean"));
+    }
     Ok(())
+}
+
+#[cfg(not(feature = "mojo"))]
+fn insert_primitive_request_fields_rust(
+    value: &serde_json::Value,
+    request: &mut serde_json::Map<String, serde_json::Value>,
+) {
+    for field in ["temperature", "top_p"] {
+        if let Some(next) = value.get(field) {
+            request.insert(field.to_string(), next.clone());
+        }
+    }
+    for field in ["max_output_tokens", "max_tokens", "max_completion_tokens"] {
+        if let Some(next) = value.get(field) {
+            request.insert("max_tokens".to_string(), next.clone());
+        }
+    }
+    if let Some(logprobs) = value.get("logprobs") {
+        request.insert("logprobs".to_string(), logprobs.clone());
+    }
 }
 
 pub fn deepseek_provider_core_top_logprobs_from_responses_request(
