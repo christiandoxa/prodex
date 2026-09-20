@@ -267,10 +267,6 @@ pub(super) fn runtime_gemini_native_request_body(
 }
 
 #[cfg(test)]
-#[path = "gemini_rewrite_custom_tool_tests.rs"]
-mod gemini_rewrite_custom_tool_tests;
-
-#[cfg(test)]
 mod native_url_tests {
     use super::*;
 
@@ -335,47 +331,3 @@ mod native_url_tests {
         );
     }
 }
-
-#[cfg(test)]
-#[path = "gemini_rewrite_command_output_tests.rs"]
-mod gemini_rewrite_command_output_tests;
-
-#[cfg(test)]
-#[path = "gemini_rewrite_context_tests.rs"]
-mod gemini_rewrite_context_tests;
-
-#[cfg(test)]
-#[path = "gemini_rewrite_history_tests.rs"]
-mod gemini_rewrite_history_tests;
-
-#[cfg(test)]
-#[path = "gemini_rewrite_leak_tests.rs"]
-mod gemini_rewrite_leak_tests;
-
-#[cfg(test)]
-#[path = "gemini_rewrite_media_tests.rs"]
-mod gemini_rewrite_media_tests;
-
-#[cfg(test)]
-#[path = "gemini_rewrite_optional_tool_tests.rs"]
-mod gemini_rewrite_optional_tool_tests;
-
-#[cfg(test)]
-#[path = "gemini_rewrite_status_tests.rs"]
-mod gemini_rewrite_status_tests;
-
-#[cfg(test)]
-#[path = "gemini_rewrite_thought_and_native_tool_tests.rs"]
-mod gemini_rewrite_thought_and_native_tool_tests;
-
-#[cfg(test)]
-#[path = "gemini_rewrite_tool_output_history_tests.rs"]
-mod gemini_rewrite_tool_output_history_tests;
-
-#[cfg(test)]
-#[path = "gemini_rewrite_test_support.rs"]
-mod gemini_rewrite_test_support;
-
-#[cfg(test)]
-#[path = "gemini_rewrite_tests.rs"]
-mod gemini_rewrite_tests;

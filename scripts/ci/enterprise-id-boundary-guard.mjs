@@ -7,21 +7,11 @@ const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(scriptDir, "..", "..");
 
 const ENTERPRISE_BOUNDARY_CRATES = Object.freeze([
-  "prodex-application",
-  "prodex-authn",
-  "prodex-authz",
   "prodex-config",
-  "prodex-control-plane",
   "prodex-domain",
-  "prodex-gateway-core",
-  "prodex-gateway-http",
   "prodex-observability",
   "prodex-provider-core",
   "prodex-provider-spi",
-  "prodex-storage",
-  "prodex-storage-postgres",
-  "prodex-storage-redis",
-  "prodex-storage-sqlite",
 ]);
 
 const FORBIDDEN_ID_GENERATOR_PATTERNS = Object.freeze([
@@ -87,6 +77,14 @@ function runSelfTest() {
   assertSelfTest(
     ENTERPRISE_BOUNDARY_CRATES.includes("prodex-provider-core"),
     "provider core must be scanned for process-local identifiers",
+  );
+  assertSelfTest(
+    ENTERPRISE_BOUNDARY_CRATES.includes("prodex-domain"),
+    "domain typed-ID owner must be scanned",
+  );
+  assertSelfTest(
+    !ENTERPRISE_BOUNDARY_CRATES.includes("prodex-application"),
+    "retired application boundary must not remain in the active scan list",
   );
   const validIds = `
 macro_rules! domain_id {

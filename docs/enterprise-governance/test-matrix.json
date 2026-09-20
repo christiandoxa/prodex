@@ -1,7 +1,7 @@
 {
   "schema_version": 2,
-  "artifact_status": "source-release-evidence-matrix",
-  "scope": "This matrix verifies checked-in source controls. Target-environment IdP, PKI, pager, SIEM, CNI, managed failover, capacity, SLO, and recovery acceptance is tracked by deployment owners.",
+  "artifact_status": "surviving-source-governance-contract-matrix",
+  "scope": "This matrix records governance contracts that remain implemented and testable in the current source tree after retirement of the former enterprise gateway/control-plane implementation. The enterprise-governance documents and ADRs remain design/reference material; rows marked tested here must resolve to present repository evidence.",
   "status_definitions": {
     "tested": "The named implementation evidence passed the focused control asserted by this row.",
     "implemented": "Production behavior exists and named focused evidence is present, but a broader backend, integration, or release gate remains.",
@@ -11,669 +11,74 @@
   },
   "tests": [
     {
-      "id": "SEC-ID-001",
-      "test_command": "cargo test --locked --workspace -- edge_security_rejects_forwarding_spoof_and_host_origin_csrf_mismatch",
-      "evidence_artifact": "evidence/enterprise-test-matrix/SEC-ID-001/",
-      "owner": "prodex-gateway",
-      "phase": 5,
-      "threat": "Caller forges forwarded identity, role, tenant, or client address headers.",
-      "control": "Exact expected Host, trusted-proxy canonicalization, forwarding-header stripping and server-side identity/tenant binding.",
-      "modes": ["enterprise_observe", "enterprise_enforce", "bank_enforce"],
-      "test_type": "integration_security",
-      "expected": "Non-loopback listeners require an exact expected Host; untrusted forwarding headers reject and trusted forwarding metadata is stripped before application dispatch.",
-      "implementation_status": "tested",
-      "evidence_required": "Gateway tests through trusted and untrusted proxy hops with duplicate and conflicting headers.",
-      "evidence": [
-        "edge_security_rejects_forwarding_spoof_and_host_origin_csrf_mismatch",
-        "production_edge_security_uses_peer_trust_and_rejects_host_origin_csrf_spoofing",
-        "non_loopback_server_requires_explicit_expected_host",
-        "validated_peer_metadata_maps_to_low_cardinality_governance_zone",
-        "principal_evidence_enforces_required_scope_and_anonymous_policy",
-        "auth-boundary-guard.mjs"
-      ]
-    },
-    {
-      "id": "SEC-ID-002",
-      "test_command": "node scripts/ci/storage-postgres-proof.mjs",
-      "evidence_artifact": "evidence/enterprise-test-matrix/SEC-ID-002/",
-      "owner": "prodex-storage",
-      "phase": 5,
-      "threat": "Authenticated principal crosses tenant boundaries or exploits missing database isolation.",
-      "control": "Single tenant binding plus PostgreSQL RLS and transaction-local tenant context.",
-      "modes": ["enterprise_enforce", "bank_enforce"],
-      "test_type": "postgresql_integration_security",
-      "expected": "Cross-tenant reads and writes fail through every API and direct repository operation.",
-      "implementation_status": "tested",
-      "evidence_required": "Multi-tenant API and PostgreSQL RLS suite using synthetic tenants.",
-      "evidence": [
-        "node scripts/ci/storage-postgres-proof.mjs --self-test && node scripts/ci/storage-postgres-proof.mjs",
-        "external: deployment PostgreSQL/RLS cross-tenant and governance lifecycle proof"
-      ]
-    },
-    {
-      "id": "SEC-ID-003",
-      "test_command": "cargo test --locked --workspace -- session_context_propagates_age_idle_classification_and_affinity",
-      "evidence_artifact": "evidence/enterprise-test-matrix/SEC-ID-003/",
-      "owner": "prodex-session",
-      "phase": 5,
-      "threat": "Session fixation, replay, stale privilege, or incomplete multi-replica revocation.",
-      "control": "Opaque bound sessions, rotation, expiry, credential/policy epochs, and durable revocation.",
-      "modes": ["enterprise_observe", "enterprise_enforce", "bank_enforce"],
-      "test_type": "integration_security",
-      "expected": "Fixed, expired, revoked, replayed, or privilege-stale sessions are rejected on every replica.",
-      "implementation_status": "tested",
-      "evidence_required": "Clock-controlled fixation, expiry, revocation, and shared-authority cache invalidation tests.",
-      "evidence": [
-        "session_context_propagates_age_idle_classification_and_affinity",
-        "session_reuse_with_another_principal_is_revoked",
-        "configured_timeouts_and_concurrency_fail_closed",
-        "governance_sessions_are_monotonic_bounded_and_revocable",
-        "gateway_policy_http_revocation_invalidates_cache_and_lkg",
-        "cross_replica_revocation_epoch_invalidates_cached_sessions_promptly"
-      ]
-    },
-    {
       "id": "SEC-INS-001",
-      "test_command": "cargo test --locked --workspace -- walker_inspects_supported_nested_fields_without_retaining_argument_keys",
+      "test_command": "cargo test --locked --workspace -- inspection_result_is_bounded_deterministic_and_content_free",
       "evidence_artifact": "evidence/enterprise-test-matrix/SEC-INS-001/",
-      "owner": "prodex-inspection",
+      "owner": "prodex-domain",
       "phase": 1,
-      "threat": "Unicode detector offsets are applied as bytes incorrectly, masking the wrong content.",
-      "control": "Per-field Unicode-scalar to UTF-8 byte-range conversion with bounded typed findings.",
-      "modes": ["enterprise_observe", "enterprise_enforce", "bank_enforce"],
-      "test_type": "unit_property",
-      "expected": "Finding locations and masking remain correct for multibyte prefixes and nested tool arguments.",
-      "implementation_status": "tested",
-      "evidence_required": "Focused Presidio adapter Unicode and nested-argument regression tests.",
-      "evidence": [
-        "walker_inspects_supported_nested_fields_without_retaining_argument_keys",
-        "tenant_patterns_are_isolated_and_support_unicode_interior_globs",
-        "incremental_inspector_handles_unicode_split_inside_codepoint"
-      ]
-    },
-    {
-      "id": "SEC-INS-002",
-      "test_command": "cargo test --locked --workspace -- walker_reports_unsupported_modalities_and_depth_limits",
-      "evidence_artifact": "evidence/enterprise-test-matrix/SEC-INS-002/",
-      "owner": "prodex-inspection",
-      "phase": 1,
-      "threat": "Adversarial JSON causes unbounded inspection work or false full coverage.",
-      "control": "Depth, value, byte, finding, detector, reason and tag limits with explicit coverage.",
-      "modes": ["enterprise_observe", "enterprise_enforce", "bank_enforce"],
-      "test_type": "unit_fuzz",
-      "expected": "Work remains bounded and truncated/opaque inputs never report full coverage.",
-      "implementation_status": "tested",
-      "evidence_required": "Limit boundary tests plus retained parser/walker fuzz corpus.",
-      "evidence": [
-        "walker_reports_unsupported_modalities_and_depth_limits",
-        "walker_bounds_value_count_and_total_text",
-        "local_inspection_rejects_deep_and_match_flood_inputs",
-        "application_inspection_rejects_unbounded_detector_sources"
-      ]
-    },
-    {
-      "id": "SEC-INS-003",
-      "test_command": "cargo test --locked --workspace -- application_inspection_is_unsupported_without_detector_evidence",
-      "evidence_artifact": "evidence/enterprise-test-matrix/SEC-INS-003/",
-      "owner": "prodex-inspection",
-      "phase": 2,
-      "threat": "Unsupported modality or unavailable detector silently bypasses sensitive-data controls.",
-      "control": "Explicit partial/unsupported coverage with mode- and policy-specific enforcement.",
-      "modes": ["enterprise_observe", "enterprise_enforce", "bank_enforce"],
-      "test_type": "integration_security",
-      "expected": "Observe records would-deny; enforce constrains/denies; bank denies required unresolved inspection.",
-      "implementation_status": "tested",
-      "evidence_required": "Text, image, audio, file, non-UTF8, timeout and detector-outage matrix.",
-      "evidence": [
-        "application_inspection_is_unsupported_without_detector_evidence",
-        "bank_response_inspection_requires_full_coverage",
-        "walker_reports_unsupported_modalities_and_depth_limits",
-        "runtime_presidio_detector_failure_matrix_is_bounded_and_content_preserving",
-        "inspection_failure_mode_matrix_preserves_shadow_and_fail_closed_semantics",
-        "gateway_presidio_redaction_failure_is_audited_without_payload_or_endpoint_leakage"
-      ]
-    },
-    {
-      "id": "SEC-INS-004",
-      "test_command": "cargo test --locked --workspace -- incremental_inspector_finds_every_chunk_boundary",
-      "evidence_artifact": "evidence/enterprise-test-matrix/SEC-INS-004/",
-      "owner": "prodex-inspection",
-      "phase": 2,
-      "threat": "Sensitive output spans stream chunks and escapes a per-chunk detector.",
-      "control": "Incremental bounded literal inspection with overlap, plus bounded full precommit inspection for bank text/SSE.",
-      "modes": ["enterprise_enforce", "bank_enforce"],
-      "test_type": "deterministic_stream_corpus",
-      "expected": "Boundary-spanning literals are detected under both transport-equivalent chunk models; bank text/SSE requiring full inspection is buffered and masked before release; direct unsupported transports are not reported as Full.",
-      "implementation_status": "tested",
-      "evidence_required": "Deterministic randomized shared-inspector corpus plus bounded full-stream masking and coverage-selection regressions.",
-      "evidence": [
-        "incremental_inspector_finds_every_chunk_boundary",
-        "incremental_inspector_finds_unicode_across_three_chunks",
-        "incremental_inspector_randomized_sse_and_websocket_chunk_corpus",
-        "incremental_inspector_commit_outcome_is_stable_across_transport_chunking",
-        "gateway_streaming_response_guardrail_blocked_output_is_audited_without_value_leakage",
-        "bank_text_streams_use_full_bounded_inspection_without_upgrading_websockets",
-        "full_stream_inspection_buffers_and_masks_before_release"
-      ]
-    },
-    {
-      "id": "SEC-POL-001",
-      "test_command": "cargo test --locked --workspace -- explicit_deny_wins_and_drops_obligations",
-      "evidence_artifact": "evidence/enterprise-test-matrix/SEC-POL-001/",
-      "owner": "prodex-policy",
-      "phase": 3,
-      "threat": "Policy result changes with rule order, hash-map iteration, or missing attributes.",
-      "control": "Pure deterministic typed PDP with stable precedence and reason codes.",
-      "modes": ["enterprise_observe", "enterprise_enforce", "bank_enforce"],
-      "test_type": "golden_property",
-      "expected": "Equivalent inputs produce identical effect, obligations and reason codes; mandatory unknowns fail safely.",
-      "implementation_status": "tested",
-      "evidence_required": "Golden vectors and randomized rule/input permutation properties.",
-      "evidence": [
-        "explicit_deny_wins_and_drops_obligations",
-        "missing_or_cross_tenant_attributes_fail_closed",
-        "policy_compilation_is_bounded_and_rejects_duplicate_ids",
-        "typed_attribute_selectors_match_and_missing_values_fail_closed",
-        "scim_policy_attributes_require_one_active_same_tenant_identity",
-        "serialized_organization_selectors_map_to_domain_policy"
-      ]
-    },
-    {
-      "id": "SEC-POL-002",
-      "test_command": "cargo test --locked --workspace -- allow_tool_obligations_form_one_allow_set",
-      "evidence_artifact": "evidence/enterprise-test-matrix/SEC-POL-002/",
-      "owner": "prodex-policy",
-      "phase": 3,
-      "threat": "Conflicting obligations weaken a deny, region, retention, tool, audit, or provider constraint.",
-      "control": "Most-restrictive effect precedence and typed obligation conflict resolution.",
-      "modes": ["enterprise_enforce", "bank_enforce"],
-      "test_type": "unit_property",
-      "expected": "Deny is absorbing and unresolved mandatory conflicts deny rather than choose a weaker value.",
-      "implementation_status": "tested",
-      "evidence_required": "Pairwise and generated obligation merge properties.",
-      "evidence": [
-        "allow_tool_obligations_form_one_allow_set",
-        "obligation_matrix_preserves_classification_and_observe_enforce_semantics",
-        "request_and_session_obligations_return_stable_typed_violations"
-      ]
-    },
-    {
-      "id": "SEC-POL-003",
-      "test_command": "cargo test --locked --workspace -- malformed_active_snapshot_keeps_lkg_and_rollback_is_atomic",
-      "evidence_artifact": "evidence/enterprise-test-matrix/SEC-POL-003/",
-      "owner": "prodex-policy",
-      "phase": 3,
-      "threat": "Invalid, stale or revoked policy snapshot is served from cache or LKG.",
-      "control": "Checksum validation, atomic activation, revisioned cache keys and invalidation precedence.",
-      "modes": ["enterprise_observe", "enterprise_enforce", "bank_enforce"],
-      "test_type": "integration_chaos",
-      "expected": "Invalid snapshots never activate; revocation beats cache/LKG; bank denies without valid mandatory state.",
-      "implementation_status": "tested",
-      "evidence_required": "Corruption, refresh race, activation acknowledgement, invalidation and LKG outage suite.",
-      "evidence": [
-        "malformed_active_snapshot_keeps_lkg_and_rollback_is_atomic",
-        "gateway_policy_http_revocation_invalidates_cache_and_lkg",
-        "gateway_governance_artifacts_use_generic_maker_checker_lifecycle",
-        "external: live PostgreSQL governance lifecycle run",
-        "governance_invalidation_notification_is_delivered_only_after_commit",
-        "governance_invalidation_outbox_is_bounded_tenant_scoped_and_transactional",
-        "notify_payload_is_only_a_bounded_wakeup_hint",
-        "durable_event_is_acknowledged_only_after_refresh",
-        "governance_invalidation_outbox_converges_replicas_and_compacts_safely"
-      ]
-    },
-    {
-      "id": "SEC-POL-004",
-      "test_command": "cargo test --locked --workspace -- detached_signature_binds_artifact_and_identity",
-      "evidence_artifact": "evidence/enterprise-test-matrix/SEC-POL-004/",
-      "owner": "prodex-governance",
-      "phase": 3,
-      "threat": "A valid governance artifact is replaced, replayed for another tenant/revision/kind, or published by an untrusted actor.",
-      "control": "Detached Ed25519 authenticity binds tenant, artifact kind, revision ID, and SHA-256 checksum to a locally configured verifier key.",
-      "modes": ["enterprise_enforce", "bank_enforce"],
-      "test_type": "cryptographic_integration_security",
-      "expected": "Unsigned, malformed, unknown-key, cross-context, and tampered artifacts fail before creation, activation, startup hydration, refresh, or LKG use.",
-      "implementation_status": "tested",
-      "evidence_required": "Real Ed25519 signing/tamper tests plus SQLite/PostgreSQL persistence and lifecycle revalidation.",
-      "evidence": [
-        "detached_signature_binds_artifact_and_identity",
-        "unsigned_artifacts_are_legacy_only",
-        "artifact_authenticity_round_trips_through_activation_and_snapshot_validation",
-        "gateway_policy_http_revocation_invalidates_cache_and_lkg",
-        "external: PostgreSQL authenticity callback validation"
-      ]
-    },
-    {
-      "id": "SEC-APR-001",
-      "test_command": "cargo test --locked --workspace -- maker_checker_quorum_and_activation_are_enforced",
-      "evidence_artifact": "evidence/enterprise-test-matrix/SEC-APR-001/",
-      "owner": "prodex-approvals",
-      "phase": 3,
-      "threat": "Maker self-approves, replays, races, or approves a changed policy revision.",
-      "control": "Independent quorum bound to immutable checksum with transactional activation.",
-      "modes": ["enterprise_enforce", "bank_enforce"],
-      "test_type": "state_machine_concurrency",
-      "expected": "Self, stale, replayed, expired and conflicting approvals fail; one valid activation is audited.",
-      "implementation_status": "tested",
-      "evidence_required": "Model/state-machine and real-database concurrency tests.",
-      "evidence": [
-        "maker_checker_quorum_and_activation_are_enforced",
-        "approval_replay_is_idempotent_and_stale_versions_fail",
-        "concurrent_activation_uses_etag_compare_and_swap",
-        "gateway_governance_artifacts_use_generic_maker_checker_lifecycle",
-        "postgres_governance_lifecycle_supports_all_artifact_kinds"
-      ]
-    },
-    {
-      "id": "SEC-APR-002",
-      "test_command": "cargo test --locked --workspace -- execution_fingerprint_is_stable_and_bound_to_the_request_context",
-      "evidence_artifact": "evidence/enterprise-test-matrix/SEC-APR-002/",
-      "owner": "prodex-approvals",
-      "phase": 3,
-      "threat": "Execution approval is replayed for a changed request, tenant, policy, provider or operation.",
-      "control": "Decision/input/revision-bound approval with atomic expiry/use/idempotency consumption.",
-      "modes": ["enterprise_enforce", "bank_enforce"],
-      "test_type": "integration_security",
-      "expected": "Mismatched, revoked, expired or exhausted approval denies and cannot expand policy eligibility.",
-      "implementation_status": "tested",
-      "evidence_required": "Mutation/replay/race matrix matching sample 05.",
-      "evidence": [
-        "execution_fingerprint_is_stable_and_bound_to_the_request_context",
-        "execution_approval_is_policy_selected_quorum_gated_and_one_use",
-        "gateway_execution_approval_http_lists_shows_and_reviews_without_payloads"
-      ]
-    },
-    {
-      "id": "SEC-APR-003",
-      "test_command": "cargo test --locked --workspace -- break_glass_requires_separate_scope_reason_expiry_and_audit",
-      "evidence_artifact": "evidence/enterprise-test-matrix/SEC-APR-003/",
-      "owner": "prodex-approvals",
-      "phase": 3,
-      "threat": "Break-glass becomes a broad persistent bypass or exceeds its retention scope.",
-      "control": "Retention-purge-only independent approval with a one-hour TTL ceiling, explicit revocation, bounded purge batches and mandatory audit.",
-      "modes": ["enterprise_enforce", "bank_enforce"],
-      "test_type": "state_machine_security",
-      "expected": "Non-active, expired, revoked or out-of-scope approvals deny; tenant, credential-scope, retention and audit invariants remain enforced.",
-      "implementation_status": "tested",
-      "evidence_required": "Approval lifecycle, exact scope/expiry authorization, durable storage and mandatory-audit tests.",
-      "evidence": [
-        "break_glass_requires_separate_scope_reason_expiry_and_audit",
-        "application_break_glass_action_selects_append_only_audit_storage_plan",
-        "application_break_glass_denial_is_audited_when_expired",
-        "break_glass_approval_round_trips_as_non_revision_approval",
-        "resource_action_authorization_denies_break_glass_scope_bypass",
-        "gateway_break_glass_http_enforces_scope_expiry_revocation_and_audit"
-      ]
-    },
-    {
-      "id": "SEC-RTE-001",
-      "test_command": "cargo test --locked --workspace -- governed_routing_enforces_every_hard_eligibility_gate",
-      "evidence_artifact": "evidence/enterprise-test-matrix/SEC-RTE-001/",
-      "owner": "prodex-routing",
-      "phase": 4,
-      "threat": "A high soft score restores a provider excluded by classification, region, retention or approval.",
-      "control": "Hard compliance filter before deterministic eligible-set-only scoring.",
-      "modes": ["enterprise_enforce", "bank_enforce"],
-      "test_type": "unit_property",
-      "expected": "Ineligible providers are never scored or selected under any soft input.",
-      "implementation_status": "tested",
-      "evidence_required": "Generated provider/constraint sets and seven synthetic scenario assertions.",
-      "evidence": [
-        "governed_routing_enforces_every_hard_eligibility_gate",
-        "governed_routing_never_places_ineligible_or_cross_tenant_routes_in_fallbacks",
-        "governed_routing_runtime_signals_change_selection_and_keep_only_eligible_fallbacks",
-        "provider_registry_resolves_selected_heterogeneous_projected_adapter"
-      ]
-    },
-    {
-      "id": "SEC-RTE-002",
-      "test_command": "cargo test --locked --workspace -- governed_routing_scores_in_fixed_point_and_breaks_ties_by_provider",
-      "evidence_artifact": "evidence/enterprise-test-matrix/SEC-RTE-002/",
-      "owner": "prodex-routing",
-      "phase": 4,
-      "threat": "Floating-point, iteration or replica variance makes routing unauditable.",
-      "control": "Bounded integer/fixed-point components and stable tie-break ordering.",
-      "modes": ["enterprise_observe", "enterprise_enforce", "bank_enforce"],
-      "test_type": "golden_property",
-      "expected": "The same eligible snapshot/input produces byte-stable score components and selection across replicas.",
-      "implementation_status": "tested",
-      "evidence_required": "Cross-process golden vectors and permutation properties.",
-      "evidence": [
-        "governed_routing_scores_in_fixed_point_and_breaks_ties_by_provider",
-        "cargo bench --locked --bench governance_hot_paths"
-      ]
-    },
-    {
-      "id": "SEC-RTE-003",
-      "test_command": "cargo test --locked --workspace -- governed_routing_keeps_hard_affinity_across_temporary_runtime_degradation",
-      "evidence_artifact": "evidence/enterprise-test-matrix/SEC-RTE-003/",
-      "owner": "prodex-routing",
-      "phase": 4,
-      "threat": "Load, transport backoff or health heuristics break a hard continuation binding.",
-      "control": "Hard affinity precedes fresh heuristics; explicit revocation alone overrides eligibility.",
-      "modes": ["personal", "enterprise_observe", "enterprise_enforce", "bank_enforce"],
-      "test_type": "runtime_regression",
-      "expected": "Existing owner remains selected under local heuristics; tenant mismatch/revocation fails safely.",
-      "implementation_status": "tested",
-      "evidence_required": "Existing runtime affinity regressions extended with tenant and governance epochs.",
-      "evidence": [
-        "governed_routing_keeps_hard_affinity_across_temporary_runtime_degradation",
-        "governed_routing_rejects_when_the_bound_affinity_route_is_revoked",
-        "explicit_provider_revocation_overrides_continuation_affinity"
-      ]
-    },
-    {
-      "id": "SEC-RTE-004",
-      "test_command": "cargo test --locked --workspace -- explicit_quota_codes_rotate_only_before_commit",
-      "evidence_artifact": "evidence/enterprise-test-matrix/SEC-RTE-004/",
-      "owner": "prodex-runtime",
-      "phase": 4,
-      "threat": "Proxy retries or rotates after model output has begun.",
-      "control": "One response commitment boundary and no postcommit retry/rotation.",
-      "modes": ["personal", "enterprise_observe", "enterprise_enforce", "bank_enforce"],
-      "test_type": "stream_runtime_regression",
-      "expected": "Postcommit failure is surfaced naturally; no second upstream target receives the continuation.",
-      "implementation_status": "tested",
-      "evidence_required": "HTTP/SSE/WebSocket fault injection before and after first committed chunk.",
-      "evidence": [
-        "explicit_quota_codes_rotate_only_before_commit",
-        "transient_5xx_retries_only_before_commit",
-        "provider_retry_boundary_marks_irreversible_stages_committed",
-        "provider_fallback_requires_explicit_rate_limit_or_retryable_precommit_error",
-        "enterprise_sse_postcommit_audit_failure_degrades_without_retry_and_recovers"
-      ]
-    },
-    {
-      "id": "SEC-AUD-001",
-      "test_command": "cargo test --locked --workspace -- audit_failure_rolls_back_activation_fail_closed",
-      "evidence_artifact": "evidence/enterprise-test-matrix/SEC-AUD-001/",
-      "owner": "prodex-audit",
-      "phase": 5,
-      "threat": "Governance mutation succeeds while its mandatory audit or SIEM outbox record is lost.",
-      "control": "One database transaction for business state, audit chain head/event and outbox.",
-      "modes": ["enterprise_enforce", "bank_enforce"],
-      "test_type": "database_fault_injection",
-      "expected": "Failure at every statement/commit boundary rolls back all state and returns no success.",
-      "implementation_status": "tested",
-      "evidence_required": "SQLite and PostgreSQL transactional fault matrix.",
-      "evidence": [
-        "audit_failure_rolls_back_activation_fail_closed",
-        "external: SQLite and live PostgreSQL transactional fault evidence",
-        "node scripts/ci/storage-postgres-proof.mjs --self-test && node scripts/ci/storage-postgres-proof.mjs"
-      ]
-    },
-    {
-      "id": "SEC-AUD-002",
-      "test_command": "cargo test --locked --workspace -- audit_chain_digest_matches_canonical_vector",
-      "evidence_artifact": "evidence/enterprise-test-matrix/SEC-AUD-002/",
-      "owner": "prodex-audit",
-      "phase": 5,
-      "threat": "Audit events are deleted, reordered, altered, forked or contain raw sensitive data.",
-      "control": "Versioned content-free schema, per-partition hash chain and deterministic verification.",
-      "modes": ["enterprise_observe", "enterprise_enforce", "bank_enforce"],
-      "test_type": "unit_integration_security",
-      "expected": "Tamper/fork is detected at the first affected event and synthetic content canaries never appear.",
-      "implementation_status": "tested",
-      "evidence_required": "Existing audit-log tests extended to governance schemas, concurrent heads and canary scan.",
-      "evidence": [
-        "audit_chain_digest_matches_canonical_vector",
-        "audit_integrity_health_detects_missing_same_tenant_parent",
-        "decision_context_is_bounded_explainable_and_content_free",
-        "external: bounded tenant audit export acceptance evidence",
-        "gateway_presidio_redaction_failure_is_audited_without_payload_or_endpoint_leakage"
-      ]
-    },
-    {
-      "id": "SEC-AUD-003",
-      "test_command": "cargo test --locked --workspace -- outbox_retries_with_stable_id_then_dead_letters",
-      "evidence_artifact": "evidence/enterprise-test-matrix/SEC-AUD-003/",
-      "owner": "prodex-audit",
-      "phase": 5,
-      "threat": "SIEM retries duplicate, lose, poison or indefinitely lease events.",
-      "control": "Transactional outbox, idempotent event IDs, bounded leases/retries and visible dead-letter state.",
-      "modes": ["enterprise_observe", "enterprise_enforce", "bank_enforce"],
-      "test_type": "integration_chaos",
-      "expected": "Every committed event is retained and eventually delivered or visibly dead-lettered without hot-path SIEM calls.",
-      "implementation_status": "tested",
-      "evidence_required": "Sink outage, duplicate ack, worker crash, lease expiry, poison and backlog-capacity suite.",
-      "evidence": [
-        "outbox_retries_with_stable_id_then_dead_letters",
-        "outbox_worker_delivers_through_the_bounded_exporter_port",
-        "outbox_worker_claims_once_across_repository_instances",
-        "expired_outbox_claim_is_reclaimed_and_stale_finalize_is_rejected",
-        "external: PostgreSQL claim-token lease and separate finalize transactions",
-        "external: SQLite exporter outage, retry and dead-letter evidence"
-      ]
-    },
-    {
-      "id": "SEC-AUD-004",
-      "test_command": "cargo test --locked --workspace -- enterprise_sse_postcommit_audit_failure_degrades_without_retry_and_recovers",
-      "evidence_artifact": "evidence/enterprise-test-matrix/SEC-AUD-004/",
-      "owner": "prodex-audit",
-      "phase": 5,
-      "threat": "A committed response loses its mandatory outcome audit while the gateway continues admitting unauditable work or retries the provider.",
-      "control": "Bounded durable reconciliation with an availability latch that degrades readiness and fails new governed data-plane admission closed; reconciliation overflow stays poisoned until restart.",
-      "modes": ["enterprise_enforce", "bank_enforce"],
-      "test_type": "stream_fault_injection",
-      "expected": "Committed output is never retried or rotated; failed audit is reconciled before readiness and admission recover, and overflow never reports false recovery.",
-      "implementation_status": "tested",
-      "evidence_required": "Committed SSE failure/recovery, bounded-overflow and WebSocket audit-context regressions.",
-      "evidence": [
-        "enterprise_sse_postcommit_audit_failure_degrades_without_retry_and_recovers",
-        "reconciliation_queue_overflow_never_reports_recovery",
-        "websocket_guardrail_preserves_authorized_audit_context"
-      ]
-    },
-    {
-      "id": "SEC-SEC-001",
-      "test_command": "cargo test --locked --workspace -- governed_routing_debug_output_contains_no_tenant_region_revision_or_secret_reference",
-      "evidence_artifact": "evidence/enterprise-test-matrix/SEC-SEC-001/",
-      "owner": "prodex-security",
-      "phase": 5,
-      "threat": "Secret values enter config, policy, logs, audit, errors or diagnostics.",
-      "control": "Opaque secret references, redacted types and repository/runtime canary scans.",
-      "modes": ["enterprise_observe", "enterprise_enforce", "bank_enforce"],
-      "test_type": "static_dynamic_security",
-      "expected": "Raw canary values are rejected at boundaries and absent from every captured artifact.",
-      "implementation_status": "tested",
-      "evidence_required": "Existing redaction/secret-store tests plus end-to-end canary scan.",
-      "evidence": [
-        "governed_routing_debug_output_contains_no_tenant_region_revision_or_secret_reference",
-        "guardrail_webhook_policy_reason_is_stable_and_content_free",
-        "local_rewrite_rejects_url_secret_before_log_or_listener_setup",
-        "gateway_release_secret_canaries_only_reach_the_authorized_upstream"
-      ]
-    },
-    {
-      "id": "SEC-SEC-002",
-      "test_command": "cargo test --locked --workspace -- production_projected_provider_is_external_versioned_and_rotation_aware",
-      "evidence_artifact": "evidence/enterprise-test-matrix/SEC-SEC-002/",
-      "owner": "prodex-secrets",
-      "phase": 5,
-      "threat": "A projected secret escapes its configured provider namespace, survives a requested-version mismatch, or is read through an unsafe filesystem path.",
-      "control": "Purpose-owned configuration selects the provider namespace; the bounded projected-secret adapter enforces provider name, exact version, anchored private files and atomic projection generations.",
-      "modes": ["enterprise_enforce", "bank_enforce"],
-      "test_type": "integration_security",
-      "expected": "Provider mismatch, traversal, symlink escape, unsafe permissions and stale versions deny; atomic injector rotation is observed without restart.",
-      "implementation_status": "tested",
-      "evidence_required": "Projected-secret namespace, version rotation and filesystem-boundary tests.",
-      "evidence": [
-        "production_projected_provider_is_external_versioned_and_rotation_aware",
-        "projected_provider_rejects_traversal_and_provider_mismatch",
-        "projected_provider_rejects_symlink_escape_and_world_readable_files",
-        "projected_provider_follows_atomic_kubernetes_projection_rotation",
-        "projected_provider_anchors_value_and_version_to_one_kubernetes_generation"
-      ]
-    },
-    {
-      "id": "SEC-STO-001",
-      "test_command": "cargo test --locked --workspace -- all_governance_artifact_kinds_use_revisioned_authority",
-      "evidence_artifact": "evidence/enterprise-test-matrix/SEC-STO-001/",
-      "owner": "prodex-storage",
-      "phase": 5,
-      "threat": "Migration or rollback mixes incompatible schemas or loses tenant/audit/policy state.",
-      "control": "Versioned migrations plus authenticated AES-256-GCM backup, isolated restore and governance-link verification.",
-      "modes": ["enterprise_observe", "enterprise_enforce", "bank_enforce"],
-      "test_type": "migration_restore_integration",
-      "expected": "Old/new supported images interoperate and an isolated logical restore preserves isolation, hashes and pointers; deployment PITR remains separately validated.",
-      "implementation_status": "partial",
-      "evidence_required": "SQLite/PostgreSQL forward/back compatibility and encrypted logical dump/restore evidence. Target-environment WAL/PITR and approved RPO evidence remain required.",
-      "evidence": [
-        "all_governance_artifact_kinds_use_revisioned_authority",
-        "external: governance migration catalog acceptance evidence",
-        "postgres_validation_migration_is_append_only_and_complete",
-        "postgres_migrations_can_be_applied_twice_without_duplicate_rls_policies",
-        "postgres_migrator_fails_closed_before_recording_constraint_validation",
-        "node scripts/ci/backup-restore-drill.mjs --self-test && node scripts/ci/backup-restore-drill.mjs"
-      ]
-    },
-    {
-      "id": "SEC-STO-002",
-      "test_command": "cargo test --locked --workspace -- two_repositories_reserve_and_reconcile_idempotently",
-      "evidence_artifact": "evidence/enterprise-test-matrix/SEC-STO-002/",
-      "owner": "prodex-storage",
-      "phase": 5,
-      "threat": "Replica race or Redis loss creates split-brain activation, approval use or session state.",
-      "control": "PostgreSQL durable authority, optimistic concurrency/leases and rebuildable Redis coordination.",
-      "modes": ["enterprise_enforce", "bank_enforce"],
-      "test_type": "multi_replica_storage_integration",
-      "expected": "One authoritative mutation wins; independent repositories/executors share durable state without limit overshoot.",
-      "implementation_status": "tested",
-      "evidence_required": "Concurrent activation, accounting, revocation, and two-executor Redis coordination tests.",
-      "evidence": [
-        "concurrent_activation_uses_etag_compare_and_swap",
-        "two_repositories_reserve_and_reconcile_idempotently",
-        "cross_replica_revocation_epoch_invalidates_cached_sessions_promptly",
-        "external: CI Redis service two-executor atomic request and dual request/token limit proof"
-      ]
-    },
-    {
-      "id": "SEC-GWY-001",
-      "test_command": "cargo test --locked --workspace -- provider_route_mapping_covers_forwarded_data_plane_routes",
-      "evidence_artifact": "evidence/enterprise-test-matrix/SEC-GWY-001/",
-      "owner": "prodex-gateway",
-      "phase": 5,
-      "threat": "HTTP, SSE, WebSocket, compatibility or Gemini paths bypass governed inspection/policy/audit.",
-      "control": "One application admission/decision boundary plus architecture dependency guards.",
-      "modes": ["enterprise_observe", "enterprise_enforce", "bank_enforce"],
-      "test_type": "architecture_integration",
-      "expected": "Every supported channel records the same required stage/revision evidence before provider dispatch.",
-      "implementation_status": "tested",
-      "evidence_required": "Channel parity tests and CI guard forbidding direct provider dispatch from adapters.",
-      "evidence": [
-        "provider_route_mapping_covers_forwarded_data_plane_routes",
-        "anonymous_compatibility_owns_typed_provider_dispatch",
-        "runtime_proxy_passthrough_args_force_governed_responses_to_http",
-        "command_server_managed_stdio_routes_model_traffic_through_runtime_proxy",
-        "response_governance_forces_runtime_proxy_for_single_profile",
-        "production-boundary-guard.mjs",
-        "application-boundary-guard.mjs"
-      ]
-    },
-    {
-      "id": "SEC-GWY-002",
-      "test_command": "cargo test --locked --workspace -- generic_429_passes_through_without_explicit_quota_code",
-      "evidence_artifact": "evidence/enterprise-test-matrix/SEC-GWY-002/",
-      "owner": "prodex-runtime",
-      "phase": 5,
-      "threat": "Local proxy converts upstream errors into misleading quota/governance errors.",
-      "control": "Pass-through after upstream response; local stable errors only for pre-upstream local failure.",
-      "modes": ["personal", "enterprise_observe", "enterprise_enforce", "bank_enforce"],
-      "test_type": "runtime_regression",
-      "expected": "Generic upstream 429/status/body/stream is preserved; local precommit exhaustion is a local service-unavailable result.",
-      "implementation_status": "tested",
-      "evidence_required": "Existing runtime quota/transport transparency regressions plus governed precommit failures.",
-      "evidence": [
-        "generic_429_passes_through_without_explicit_quota_code",
-        "only_successful_streaming_responses_are_governed",
-        "codex_content_policy_errors_pass_through_without_quota_rotation",
-        "transient_5xx_retries_only_before_commit"
-      ]
-    },
-    {
-      "id": "SEC-OBS-001",
-      "test_command": "cargo test --locked --workspace -- prometheus_text_aggregates_keys_without_high_cardinality_labels",
-      "evidence_artifact": "evidence/enterprise-test-matrix/SEC-OBS-001/",
-      "owner": "prodex-observability",
-      "phase": 5,
-      "threat": "Caller-controlled tenant, key, epoch, route or content values create unbounded metrics cardinality or leak identifiers.",
-      "control": "Aggregate gateway counters with fixed metric names and no caller-controlled labels.",
-      "modes": ["personal", "enterprise_observe", "enterprise_enforce", "bank_enforce"],
+      "threat": "Inspection findings retain content or become nondeterministic.",
+      "control": "Bounded typed findings preserve classification metadata without retaining inspected payloads.",
+      "modes": [
+        "personal",
+        "enterprise_observe",
+        "enterprise_enforce",
+        "bank_enforce"
+      ],
       "test_type": "unit_security",
-      "expected": "Metrics aggregate usage without key, tenant, epoch or content labels.",
+      "expected": "Inspection evidence is deterministic, bounded, and content-free.",
       "implementation_status": "tested",
-      "evidence_required": "Focused metric rendering test plus production exporter/alert acceptance.",
+      "evidence_required": "Checked-in source test or deterministic guard evidence for the surviving governance contract.",
       "evidence": [
-        "prometheus_text_aggregates_keys_without_high_cardinality_labels",
-        "registry_renders_closed_labels_as_prometheus_counters",
-        "external: deployment observability dashboard and alert acceptance"
+        "inspection_result_is_bounded_deterministic_and_content_free",
+        "inspection_result_rejects_weak_classification_and_excess_findings",
+        "classification_and_coverage_only_move_conservatively"
+      ]
+    },
+    {
+      "id": "SEC-CLS-001",
+      "test_command": "cargo test --locked --workspace -- classification_and_coverage_only_move_conservatively",
+      "evidence_artifact": "evidence/enterprise-test-matrix/SEC-CLS-001/",
+      "owner": "prodex-domain",
+      "phase": 1,
+      "threat": "Classification changes with ordering or incomplete coverage weakens prior classification.",
+      "control": "Deterministic monotonic classification with explicit incomplete-coverage floors.",
+      "modes": [
+        "enterprise_observe",
+        "enterprise_enforce",
+        "bank_enforce"
+      ],
+      "test_type": "unit_property",
+      "expected": "Classification and coverage only move conservatively within the surviving bounded inspection contract.",
+      "implementation_status": "tested",
+      "evidence_required": "Checked-in source test or deterministic guard evidence for the surviving governance contract.",
+      "evidence": [
+        "classification_and_coverage_only_move_conservatively",
+        "inspection_result_is_bounded_deterministic_and_content_free",
+        "inspection_result_rejects_weak_classification_and_excess_findings"
       ]
     },
     {
       "id": "SEC-BNK-001",
-      "test_command": "cargo test --locked --workspace -- bank_governance_deployment_matrix_fails_closed",
+      "test_command": "cargo test --locked --workspace -- personal_compatible_defaults_remain_stable",
       "evidence_artifact": "evidence/enterprise-test-matrix/SEC-BNK-001/",
-      "owner": "prodex-bank-mode",
-      "phase": 5,
-      "threat": "Bank label starts with a public listener, bypass, missing mandatory dependency, raw secret or broad egress.",
-      "control": "Typed bank startup validator and deployment security policy.",
-      "modes": ["bank_enforce"],
-      "test_type": "configuration_deployment_security",
-      "expected": "Every insecure combination rejects startup with a stable content-free reason.",
+      "owner": "prodex-config",
+      "phase": 4,
+      "threat": "Governance configuration accidentally changes personal-mode compatibility or lets bank mode fail open.",
+      "control": "Mode configuration keeps personal compatibility explicit and bank enforcement fail-closed.",
+      "modes": [
+        "personal",
+        "enterprise_observe",
+        "enterprise_enforce",
+        "bank_enforce"
+      ],
+      "test_type": "config_boundary",
+      "expected": "Personal compatibility and typed enforcing/observe governance modes remain stable in the surviving minimal configuration surface.",
       "implementation_status": "tested",
-      "evidence_required": "Generated configuration matrix plus Compose/Kubernetes/container policy tests.",
+      "evidence_required": "Checked-in source test or deterministic guard evidence for the surviving governance contract.",
       "evidence": [
-        "bank_governance_deployment_matrix_fails_closed",
-        "bank_control_plane_uses_transport_mtls_and_projected_maker_checker",
-        "control_plane_accepts_only_transport_mtls_workload_identity",
-        "gateway_admin_tokens_config_rejects_duplicate_credential_values",
-        "bank_runtime_listener_guard_rejects_public_or_wildcard_addresses",
-        "non_loopback_server_requires_explicit_expected_host",
-        "deployment-security-guard.mjs"
-      ]
-    },
-    {
-      "id": "SEC-BNK-002",
-      "test_command": "cargo test --locked --workspace -- bank_snapshot_denies_unsupported_inspection",
-      "evidence_artifact": "evidence/enterprise-test-matrix/SEC-BNK-002/",
-      "owner": "prodex-bank-mode",
-      "phase": 5,
-      "threat": "Bank runtime fails open when identity, inspection, policy, registry, audit or secret dependencies fail.",
-      "control": "Mandatory fail-closed runtime matrix with no generic break-glass override.",
-      "modes": ["bank_enforce"],
-      "test_type": "end_to_end_chaos_security",
-      "expected": "Each missing mandatory dependency denies before upstream commit and emits bounded durable evidence when possible.",
-      "implementation_status": "tested",
-      "evidence_required": "Configuration and request-path fault matrix for every mandatory bank dependency.",
-      "evidence": [
-        "bank_snapshot_denies_unsupported_inspection",
-        "bank_response_inspection_requires_full_coverage",
-        "bank_text_streams_use_full_bounded_inspection_without_upgrading_websockets",
-        "full_stream_inspection_buffers_and_masks_before_release",
-        "mtls_workload_evidence_authorizes_strength_three_data_plane_boundary",
-        "bank_governance_deployment_matrix_fails_closed",
-        "enforcing_governance_rejects_missing_snapshot_or_provider_revision",
-        "mandatory_transform_audit_writer_failure_is_fail_closed_and_content_free",
-        "production_policy_rejects_environment_secret_sources"
-      ]
-    },
-    {
-      "id": "SEC-DEP-001",
-      "test_command": "cargo test --locked --workspace -- hardened_container_and_complete_artifacts_are_compliant",
-      "evidence_artifact": "evidence/enterprise-test-matrix/SEC-DEP-001/",
-      "owner": "prodex-release",
-      "phase": 5,
-      "threat": "Container privilege, writable root, public bind or unrestricted egress bypasses application controls.",
-      "control": "Non-root/read-only runtime, private exposure, least privilege and allow-listed provider/secret/SIEM egress.",
-      "modes": ["enterprise_enforce", "bank_enforce"],
-      "test_type": "deployment_static_integration",
-      "expected": "CI rejects insecure manifests and release automation rejects unproven or vulnerable artifacts.",
-      "implementation_status": "tested",
-      "evidence_required": "Manifest policy, image/provenance/vulnerability scan, and deny-default egress rule validation.",
-      "evidence": [
-        "hardened_container_and_complete_artifacts_are_compliant",
-        "deployment-security-guard.mjs",
-        "external: standalone release vulnerability and attestation scan evidence"
+        "personal_compatible_defaults_remain_stable",
+        "enforcing_modes_and_minimal_governance_fields_remain_typed",
+        "observe_mode_is_non_enforcing"
       ]
     },
     {
@@ -682,18 +87,17 @@
       "evidence_artifact": "evidence/enterprise-test-matrix/SEC-PERF-001/",
       "owner": "prodex-performance",
       "phase": 5,
-      "threat": "Governance creates unbounded latency, allocation, cardinality or concurrency pressure.",
-      "control": "Immutable local snapshots, bounded stages/admission/labels and declared p99 budgets.",
-      "modes": ["personal", "enterprise_observe", "enterprise_enforce", "bank_enforce"],
-      "test_type": "benchmark_load_soak",
-      "expected": "Disabled regression is at most 5%; governed local overhead at most 5 ms p99; PDP at most 1 ms; routing at most 2 ms.",
+      "threat": "Runtime proxy changes introduce unbounded concurrency or load regressions.",
+      "control": "Bounded deterministic runtime load smoke remains part of release evidence.",
+      "modes": [
+        "personal"
+      ],
+      "test_type": "load_smoke",
+      "expected": "The maintained runtime load smoke completes within its bounded acceptance criteria.",
       "implementation_status": "tested",
-      "evidence_required": "Criterion statistical samples plus bounded load and stress gates on the release candidate.",
+      "evidence_required": "Checked-in source test or deterministic guard evidence for the surviving governance contract.",
       "evidence": [
-        "cargo bench --locked --bench governance_hot_paths",
-        "node tests/load/mock-upstream.mjs --self-test && node tests/load/runtime-proxy-load.mjs --self-test && node scripts/ci/runtime-load-smoke.mjs",
-        "node scripts/ci/runtime-stress.mjs",
-        "external: bounded histogram, queue, admission, and cardinality acceptance evidence"
+        "runtime-load-smoke.mjs"
       ]
     }
   ]

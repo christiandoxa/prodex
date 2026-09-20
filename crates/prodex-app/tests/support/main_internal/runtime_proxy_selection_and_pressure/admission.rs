@@ -1,7 +1,5 @@
 use super::*;
 
-#[path = "admission/cli_mount.rs"]
-mod cli_mount;
 #[path = "admission/compact.rs"]
 mod compact;
 #[path = "admission/responses_overload_recovery.rs"]

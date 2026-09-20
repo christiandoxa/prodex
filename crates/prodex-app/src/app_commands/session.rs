@@ -206,15 +206,4 @@ mod tests {
         report.set_model_provider(Some("openai".to_string()));
         report
     }
-
-    #[test]
-    fn session_report_tui_item_contains_key_fields() {
-        let report = test_session_report("session-1");
-        let item = session_report_tui_item(&report);
-        let text = format!("{item:?}");
-        assert!(text.contains("session-1"));
-        assert!(text.contains("Build UI"));
-        assert!(text.contains("main"));
-        assert!(text.contains("openai"));
-    }
 }

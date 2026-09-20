@@ -8,55 +8,52 @@ fn real_mojo_quota_smoke_calls_exported_c_abi() {
 
 #[test]
 fn gemini_renderer_uses_normalized_batch_results() {
-    let amount_only = GeminiQuotaBucket {
+    let info = |bucket: GeminiQuotaBucket| GeminiQuotaInfo {
+        email: None,
+        plan: None,
+        project_id: None,
+        buckets: vec![bucket],
+    };
+
+    let amount_only = info(GeminiQuotaBucket {
         remaining_amount: Some("50".to_string()),
         remaining_fraction: None,
         reset_time: None,
         token_type: None,
         model_id: Some("models/gemini-test".to_string()),
-    };
-    assert_eq!(format_gemini_bucket_summary(&amount_only), "gemini-test 50");
+    });
     assert_eq!(
-        format_gemini_main_quota(&GeminiQuotaInfo {
-            email: None,
-            plan: None,
-            project_id: None,
-            buckets: vec![amount_only],
-        }),
-        "gemini 50"
+        format_gemini_bucket_summaries(&amount_only),
+        vec!["gemini-test 50".to_string()]
     );
+    assert_eq!(format_gemini_main_quota(&amount_only), "gemini 50");
 
-    let invalid_amount_with_fraction = GeminiQuotaBucket {
+    let invalid_amount_with_fraction = info(GeminiQuotaBucket {
         remaining_amount: Some("not-a-number".to_string()),
         remaining_fraction: Some(0.5),
         reset_time: None,
         token_type: None,
         model_id: Some("models/gemini-test".to_string()),
-    };
+    });
     assert_eq!(
-        format_gemini_bucket_summary(&invalid_amount_with_fraction),
-        "gemini-test quota unknown"
+        format_gemini_bucket_summaries(&invalid_amount_with_fraction),
+        vec!["gemini-test quota unknown".to_string()]
     );
     assert_eq!(
-        format_gemini_main_quota(&GeminiQuotaInfo {
-            email: None,
-            plan: None,
-            project_id: None,
-            buckets: vec![invalid_amount_with_fraction],
-        }),
+        format_gemini_main_quota(&invalid_amount_with_fraction),
         "gemini 50%"
     );
 
-    let fraction_only = GeminiQuotaBucket {
+    let fraction_only = info(GeminiQuotaBucket {
         remaining_amount: None,
         remaining_fraction: Some(0.5),
         reset_time: None,
         token_type: None,
         model_id: Some("models/gemini-test".to_string()),
-    };
+    });
     assert_eq!(
-        format_gemini_bucket_summary(&fraction_only),
-        "gemini-test 50/100"
+        format_gemini_bucket_summaries(&fraction_only),
+        vec!["gemini-test 50/100".to_string()]
     );
 }
 

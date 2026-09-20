@@ -28,7 +28,6 @@ use prodex_observability::{
     InspectionCoverageClass, InspectionFindingCategory, InspectionMaskingAction, InspectionOutcome,
     InspectionStage, plan_inspection_metric,
 };
-use prodex_runtime_policy::RuntimePolicyInspectionPattern;
 use std::net::TcpListener;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -753,32 +752,6 @@ fn local_enforcement_does_not_require_an_unconfigured_external_service() {
         &test_detector_revision(),
     );
     assert!(result.is_ok());
-
-    let tenant_id = TenantId::new();
-    let patterns = RuntimeTenantDetectorPatterns::compile(&[RuntimePolicyInspectionPattern {
-        tenant_id,
-        id: "tenant-secret".to_string(),
-        pattern: "tenant-secret".to_string(),
-    }])
-    .unwrap();
-    let shared = presidio_test_shared("missing-presidio-tenant", governance);
-    let mut request = test_request("tenant-secret");
-    let result = super::http::apply_runtime_presidio_redaction_to_request_with_rules(
-        1,
-        &mut request,
-        &shared,
-        false,
-        Some(tenant_id),
-        &governance,
-        &patterns,
-        &test_detector_revision(),
-    );
-    assert!(result.is_ok());
-    assert!(
-        !String::from_utf8(request.body)
-            .unwrap()
-            .contains("tenant-secret")
-    );
 }
 
 #[test]

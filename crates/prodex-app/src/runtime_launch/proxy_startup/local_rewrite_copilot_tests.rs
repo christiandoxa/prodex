@@ -125,7 +125,6 @@ fn selected_auth(
         api_key: api_key.to_string(),
         api_url: api_url.map(str::to_string),
         hard_affinity: false,
-        projected: false,
     }
 }
 

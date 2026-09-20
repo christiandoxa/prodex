@@ -10,8 +10,6 @@ use std::path::Path;
 use std::time::Duration;
 mod deepseek;
 mod model_memory;
-#[cfg(unix)]
-mod projected_provider;
 mod provider_routes;
 mod support;
 use support::*;

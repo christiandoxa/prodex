@@ -185,15 +185,6 @@ struct RuntimeRotationProxy {
     request_sequence: Arc<AtomicU64>,
     #[cfg(test)]
     lane_admission: prodex_runtime_state::RuntimeProxyLaneAdmission,
-    #[cfg(test)]
-    gateway_route_load:
-        Option<Arc<Mutex<BTreeMap<String, runtime_proxy_crate::RuntimeGatewayRouteModelState>>>>,
-    #[cfg(test)]
-    gateway_usage:
-        Option<Arc<Mutex<BTreeMap<String, runtime_proxy_crate::RuntimeGatewayVirtualKeyUsage>>>>,
-    #[cfg(test)]
-    gateway_side_effect_snapshot:
-        Option<Arc<dyn Fn() -> RuntimeGatewaySideEffectSnapshot + Send + Sync>>,
     owner_lock: Option<StateFileLock>,
     _live_log_source: Option<RuntimeLiveLogSourceGuard>,
     _marker_guard: RuntimeProxyMarkerGuard,
@@ -578,7 +569,3 @@ mod kiro_bin_tests {
 #[cfg(test)]
 #[path = "../tests/support/main_internal_harness.rs"]
 mod main_internal_tests;
-
-#[cfg(test)]
-#[path = "../tests/support/compat_replay_body.rs"]
-mod compat_replay_tests;

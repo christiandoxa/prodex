@@ -41,8 +41,10 @@ const FORBIDDEN_SOURCE_PATTERNS = Object.freeze([
   { name: "provider SDK", pattern: /\b(openai|anthropic|gemini|copilot)\s*::/u },
 ]);
 const REQUIRED_OBSERVABILITY_SNIPPETS = Object.freeze([
-  "pub fn tenant_trace_attribute(tenant_id: TenantId) -> TelemetryAttribute",
-  "TelemetryAttribute::tenant_id(tenant_id)",
+  "pub fn metric_label(key: impl Into<String>, value: impl Into<String>) -> Self",
+  "pub fn as_metric_label(&self) -> Result<(&str, &str), TelemetryAttributeError>",
+  '"tenant_id"',
+  "uuid || hex_id",
 ]);
 const REQUIRED_HEALTH_SNIPPETS = Object.freeze([
   "pub active_policy_revision: Option<PolicyRevisionId>",
@@ -54,7 +56,7 @@ const REQUIRED_SECRET_SNIPPETS = Object.freeze([
   "fn secret_ref_part_is_well_formed(value: &str) -> bool",
   'f.write_str("<redacted-secret-ref>")',
 ]);
-const REQUIRED_LIB_SNIPPETS = Object.freeze(["#![forbid(unsafe_code)]", "tenant_trace_attribute"]);
+const REQUIRED_LIB_SNIPPETS = Object.freeze(["#![forbid(unsafe_code)]", "pub use observability::*;"]);
 
 function sorted(values) {
   return [...values].sort((left, right) => left.localeCompare(right));
@@ -204,19 +206,23 @@ serde_json = { workspace = true }
   assertSelfTest(
     validateDomainRequiredContracts(
       `
-pub fn tenant_trace_attribute(tenant_id: TenantId) -> TelemetryAttribute {
-    TelemetryAttribute::tenant_id(tenant_id)
+impl TelemetryAttribute {
+    pub fn metric_label(key: impl Into<String>, value: impl Into<String>) -> Self { todo!() }
+    pub fn as_metric_label(&self) -> Result<(&str, &str), TelemetryAttributeError> { todo!() }
 }
+fn invalid_label_key(key: &str) -> bool { ["tenant_id"].contains(&key) }
+fn invalid_label_value(value: &str) -> bool { let uuid = false; let hex_id = false; uuid || hex_id }
 `,
       DOMAIN_OBSERVABILITY,
     ).length === 0,
-    "tenant trace contract rejected",
+    "metric-label cardinality contract rejected",
   );
   assertSelfTest(
-    validateDomainRequiredContracts("pub fn tenant_trace_attribute() {}", DOMAIN_OBSERVABILITY).some((error) =>
-      error.includes("tenant_id"),
-    ),
-    "missing tenant trace-only contract accepted",
+    validateDomainRequiredContracts(
+      "pub fn metric_label(key: impl Into<String>, value: impl Into<String>) -> Self { todo!() }",
+      DOMAIN_OBSERVABILITY,
+    ).some((error) => error.includes("tenant_id")),
+    "missing tenant identifier metric-label guard accepted",
   );
   assertSelfTest(
     validateDomainRequiredContracts(
@@ -264,13 +270,13 @@ impl fmt::Display for SecretRef {
   );
   assertSelfTest(
     validateDomainRequiredContracts(
-      "#![forbid(unsafe_code)]\npub use observability::{ tenant_trace_attribute };",
+      "#![forbid(unsafe_code)]\npub use observability::*;",
       DOMAIN_LIB,
     ).length === 0,
-    "tenant trace export rejected",
+    "observability export rejected",
   );
   assertSelfTest(
-    validateDomainRequiredContracts("pub use observability::{ tenant_trace_attribute };", DOMAIN_LIB).some((error) =>
+    validateDomainRequiredContracts("pub use observability::*;", DOMAIN_LIB).some((error) =>
       error.includes("forbid(unsafe_code)"),
     ),
     "missing domain unsafe forbid accepted",

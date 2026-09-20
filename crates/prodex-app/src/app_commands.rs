@@ -176,8 +176,8 @@ pub(crate) fn resolve_runtime_launch_profile_name(
 #[cfg(test)]
 mod sub_agent_prompt_tests {
     use super::super_prompt::{
-        SuperSubAgentPromptStep, bounded_tui_text, run_super_sub_agent_prompt_steps,
-        super_sub_agent_concurrency_choices, super_sub_agent_prompt_steps, visible_choice_range,
+        SuperSubAgentPromptStep, run_super_sub_agent_prompt_steps,
+        super_sub_agent_concurrency_choices, super_sub_agent_prompt_steps,
     };
     use super::{
         ResolvedMainAgentConfig, SUB_AGENT_RECURSION_MARKER, codex_cli_config_override_value,
@@ -200,16 +200,6 @@ mod sub_agent_prompt_tests {
         args.extract_super_overrides_from_codex_args()
             .expect("Super tail should extract");
         *args
-    }
-
-    #[test]
-    fn choice_window_stays_bounded_and_keeps_selection_visible() {
-        assert_eq!(visible_choice_range(3, 6, 10), 0..6);
-        assert_eq!(visible_choice_range(0, 20, 4), 0..4);
-        assert_eq!(visible_choice_range(19, 20, 4), 16..20);
-        assert_eq!(visible_choice_range(10, 20, 4), 8..12);
-        assert_eq!(visible_choice_range(10, 20, 1), 10..11);
-        assert_eq!(visible_choice_range(19, 20, 30), 0..20);
     }
 
     #[test]
@@ -371,14 +361,6 @@ mod sub_agent_prompt_tests {
                 prodex_provider_core::ProviderModelChoice::Model(model) if model == expected
             )));
         }
-    }
-
-    #[test]
-    fn choice_text_is_bounded_to_terminal_width() {
-        assert_eq!(bounded_tui_text("abcdef", 1), ".");
-        assert_eq!(bounded_tui_text("abcdef", 4), "a...");
-        assert_eq!(bounded_tui_text("abc", 4), "abc");
-        assert_eq!(bounded_tui_text("界界界", 5), "界...");
     }
 
     #[test]

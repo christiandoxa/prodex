@@ -8,8 +8,6 @@ mod http_error_policy;
 mod previous_response_policy;
 #[path = "selection/prompt_cache.rs"]
 mod prompt_cache;
-#[path = "selection/sync_probe.rs"]
-mod sync_probe;
 
 struct RuntimeResponsesRequestBuilder {
     previous_response_id: Option<&'static str>,

@@ -314,7 +314,6 @@ Redis/SQLite boundary, backup/restore, multi-replica, load, stress, and
 benchmark commands. Existing local performance entry points include:
 
 ```bash
-cargo bench --locked --bench governance_hot_paths
 cargo bench --locked --features bench-support --bench runtime_proxy_hot_paths
 PRODEX_RUNTIME_PROXY_BENCH_CHECK=1 \
   cargo bench --locked --features bench-support --bench runtime_proxy_hot_paths

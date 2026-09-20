@@ -499,12 +499,6 @@ pub(crate) fn start_runtime_rotation_proxy_with_options(
         request_sequence: Arc::clone(&shared.request_sequence),
         #[cfg(test)]
         lane_admission: shared.lane_admission.clone(),
-        #[cfg(test)]
-        gateway_route_load: None,
-        #[cfg(test)]
-        gateway_usage: None,
-        #[cfg(test)]
-        gateway_side_effect_snapshot: None,
         owner_lock,
         _live_log_source: None,
         _marker_guard: marker_guard,
@@ -567,7 +561,6 @@ mod url_boundary_tests {
                     label: "chatgpt".to_string(),
                     quota_compatible: true,
                 },
-                provider: ProfileProvider::Openai,
                 workspace_id: None,
                 workspace_name: None,
                 result: Ok(ProviderQuotaSnapshot::OpenAi(UsageResponse {

@@ -723,5 +723,5 @@ fn runtime_launch_effective_gemini_thinking_budget_tokens(
 }
 
 #[cfg(test)]
-#[path = "../../tests/src/app_commands/runtime_launch.rs"]
+#[path = "../../tests/src/app_commands/runtime_launch_current.rs"]
 mod tests;

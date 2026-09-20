@@ -75,7 +75,3 @@ pub(crate) use test_compat::{
     runtime_proxy_profile_inflight_hard_limit, runtime_proxy_profile_inflight_soft_limit,
     runtime_proxy_stream_idle_timeout_ms, runtime_proxy_websocket_precommit_progress_timeout_ms,
 };
-
-#[cfg(test)]
-#[path = "../tests/src/runtime_config.rs"]
-mod tests;

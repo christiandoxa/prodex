@@ -359,9 +359,6 @@ jobs:
           - suite: members-runtime
             label: workspace runtime members
             save_cache: false
-          - suite: members-storage
-            label: workspace storage members
-            save_cache: false
           - suite: root-0
             label: root shard 1 of 2
             auto_rotate_shard: 0
@@ -422,7 +419,7 @@ jobs:
               return 1
             fi
           }
-          cargo test --locked -q --workspace --exclude prodex --exclude prodex-app --exclude 'prodex-runtime-*' --exclude 'prodex-storage*' -- --test-threads=4 --skip login:: --skip quota_doctor:: --skip run:: --skip shared_state:: --skip super_mode:: --skip rtk::tests::
+          cargo test --locked -q --workspace --exclude prodex --exclude prodex-app --exclude 'prodex-runtime-*' -- --test-threads=4 --skip login:: --skip quota_doctor:: --skip run:: --skip shared_state:: --skip super_mode:: --skip rtk::tests::
           run_targeted_test "Windows optional-tools rtk tests" cargo test --locked -q -p prodex-optional-tools --lib rtk::tests:: -- --test-threads=1
 
       - name: Run Windows runtime member tests
@@ -448,13 +445,6 @@ jobs:
           cargo test --locked -q -p 'prodex-runtime-*' -- --test-threads=4 --skip continuity_failure_reason_metrics_
           run_targeted_test "Windows broker-log continuity tests" cargo test --locked -q -p prodex-runtime-broker-log --lib continuity_failure_reason_metrics_ -- --test-threads=1
 
-      - name: Run Windows storage member tests
-        if: matrix.suite == 'members-storage'
-        shell: bash
-        env:
-          RUST_BACKTRACE: "1"
-        run: cargo test --locked -q -p 'prodex-storage*' -- --test-threads=4
-
       - name: Prebuild Windows auto-rotate tests
         if: matrix.suite == 'root-0' || matrix.suite == 'root-1'
         run: cargo test --locked --test auto_rotate --no-run
@@ -465,7 +455,7 @@ jobs:
         env:
           RUST_BACKTRACE: "1"
         run: |
-          cargo test --locked -q -p prodex --lib --bins --examples --test dashboard_control_plane --test enterprise_binaries --test internal_commands -- --test-threads=4
+          cargo test --locked -q -p prodex --lib --bins --examples --test dashboard_control_plane --test internal_commands -- --test-threads=4
           cargo test --locked -q -p prodex --doc
 
       - name: Run Windows auto-rotate shard ${{ matrix.auto_rotate_shard }}
@@ -699,8 +689,6 @@ jobs:
           - hygiene
           - static
           - enterprise-core
-          - enterprise-storage
-          - enterprise-edge
           - node
     env:
       CARGO_PROFILE_DEV_DEBUG: "0"
@@ -720,17 +708,17 @@ jobs:
           package-manager-cache: false
 
       - name: Install Rust toolchain
-        if: matrix.lane == 'static' || matrix.lane == 'enterprise-storage'
+        if: matrix.lane == 'static'
         uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
         with:
           toolchain: 1.98.0
 
       - name: Install sccache
-        if: matrix.lane == 'static' || matrix.lane == 'enterprise-storage'
+        if: matrix.lane == 'static'
         uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
 
       - name: Cache Rust dependencies
-        if: matrix.lane == 'static' || matrix.lane == 'enterprise-storage'
+        if: matrix.lane == 'static'
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
         with:
           cache-bin: false
@@ -786,40 +774,14 @@ jobs:
         if: matrix.lane == 'static'
         run: node scripts/ci/static-guards-parallel.mjs
 
-      - name: Enforce enterprise boundary guards (core)
+      - name: Enforce surviving governance boundary guards
         if: matrix.lane == 'enterprise-core'
         shell: bash
         run: |
           set -euo pipefail
           node scripts/ci/enterprise-docs-guard.mjs --self-test && node scripts/ci/enterprise-docs-guard.mjs
           node scripts/ci/enterprise-id-boundary-guard.mjs --self-test && node scripts/ci/enterprise-id-boundary-guard.mjs
-          node scripts/ci/enterprise-binaries-guard.mjs --self-test && node scripts/ci/enterprise-binaries-guard.mjs
-          node scripts/ci/application-boundary-guard.mjs --self-test && node scripts/ci/application-boundary-guard.mjs
           node scripts/ci/production-boundary-guard.mjs --self-test && node scripts/ci/production-boundary-guard.mjs
-          node scripts/ci/auth-boundary-guard.mjs --self-test && node scripts/ci/auth-boundary-guard.mjs
-
-      - name: Enforce enterprise storage boundary guards
-        if: matrix.lane == 'enterprise-storage'
-        shell: bash
-        run: |
-          set -euo pipefail
-          node scripts/ci/config-boundary-guard.mjs --self-test && node scripts/ci/config-boundary-guard.mjs
-          node scripts/ci/control-plane-boundary-guard.mjs --self-test && node scripts/ci/control-plane-boundary-guard.mjs
-          node scripts/ci/observability-boundary-guard.mjs --self-test && node scripts/ci/observability-boundary-guard.mjs
-          node scripts/ci/provider-spi-boundary-guard.mjs --self-test && node scripts/ci/provider-spi-boundary-guard.mjs
-          node scripts/ci/storage-boundary-guard.mjs --self-test && node scripts/ci/storage-boundary-guard.mjs
-          node scripts/ci/storage-postgres-boundary-guard.mjs --self-test && node scripts/ci/storage-postgres-boundary-guard.mjs
-
-      - name: Enforce enterprise edge boundary guards
-        if: matrix.lane == 'enterprise-edge'
-        shell: bash
-        run: |
-          set -euo pipefail
-          node scripts/ci/storage-redis-boundary-guard.mjs --self-test && node scripts/ci/storage-redis-boundary-guard.mjs
-          node scripts/ci/storage-sqlite-boundary-guard.mjs --self-test && node scripts/ci/storage-sqlite-boundary-guard.mjs
-          node scripts/ci/gateway-core-boundary-guard.mjs --self-test && node scripts/ci/gateway-core-boundary-guard.mjs
-          node scripts/ci/gateway-http-boundary-guard.mjs --self-test && node scripts/ci/gateway-http-boundary-guard.mjs
-          node scripts/ci/deployment-security-guard.mjs --self-test && node scripts/ci/deployment-security-guard.mjs
 
       - name: Enforce dependency duplicate budget
         if: matrix.lane == 'static'
@@ -828,103 +790,6 @@ jobs:
       - name: Run all Node.js tests
         if: matrix.lane == 'node'
         run: npm run test:node
-
-  redis-integration:
-    name: Redis atomic integration tests
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    env:
-      CARGO_INCREMENTAL: "0"
-      PRODEX_TEST_REDIS_URL: redis://127.0.0.1:6379/0
-      RUSTC_WRAPPER: sccache
-    services:
-      redis:
-        image: redis:7.4.5-alpine@sha256:bb186d083732f669da90be8b0f975a37812b15e913465bb14d845db72a4e3e08
-        ports:
-          - 6379:6379
-        options: >-
-          --health-cmd "redis-cli ping"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
-        with:
-          toolchain: 1.98.0
-
-      - name: Install sccache
-        uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
-
-      - name: Cache Rust dependencies
-        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
-        with:
-          cache-bin: false
-
-      - name: Run Redis-backed atomicity tests
-        shell: bash
-        run: |
-          set -euo pipefail
-          test_log="$(mktemp)"
-          trap 'rm -f "${test_log}"' EXIT
-          if ! cargo test --locked -q -p prodex-storage-redis-runtime --test redis_rate_limit_runtime -- --ignored --test-threads=1 2>&1 | tee "${test_log}"; then
-            exit 1
-          fi
-          if grep -Fq 'running 0 tests' "${test_log}"; then
-            echo "Redis-backed atomicity tests matched no tests" >&2
-            exit 1
-          fi
-
-  backup-restore-drill:
-    needs: changes
-    if: needs.changes.outputs.heavy == 'true'
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    env:
-      RUSTC_WRAPPER: sccache
-
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-
-      - name: Install Node.js
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
-        with:
-          node-version: 22
-          package-manager-cache: false
-
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
-        with:
-          toolchain: 1.98.0
-
-      - name: Install sccache
-        uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
-
-      - name: Cache Rust dependencies
-        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
-
-      - name: Install PostgreSQL client
-        run: sudo apt-get update && sudo apt-get install --yes postgresql-client
-
-      - name: Run PostgreSQL accounting concurrency proof
-        run: node scripts/ci/storage-postgres-proof.mjs --self-test && node scripts/ci/storage-postgres-proof.mjs
-
-      - name: Run PostgreSQL backup and restore drill
-        run: node scripts/ci/backup-restore-drill.mjs --self-test && node scripts/ci/backup-restore-drill.mjs
-
-      - name: Upload redacted backup and restore evidence
-        if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
-        with:
-          name: backup-restore-drill-${{ github.run_id }}-${{ github.run_attempt }}
-          path: target/backup-restore-drill/evidence.json
-          if-no-files-found: error
-          retention-days: 14
 
   compat-replay-gate:
     runs-on: ubuntu-latest
@@ -1629,34 +1494,6 @@ jobs:
           PRODEX_RUNTIME_PROXY_BENCH_THRESHOLD_FILE: scripts/ci/runtime-proxy-bench-thresholds.json
         run: cargo bench --locked --features bench-support --bench runtime_proxy_hot_paths
 
-  runtime-governance-bench-smoke:
-    needs: changes
-    if: needs.changes.outputs.runtime_bench == 'true' && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    env:
-      RUSTC_WRAPPER: sccache
-
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
-        with:
-          toolchain: 1.98.0
-
-      - name: Install sccache
-        uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
-
-      - name: Restore Rust dependencies
-        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
-        with:
-          save-if: ${{ github.job == 'runtime-proxy-bench-smoke' }}
-
-      - name: Measure bounded governance hot paths
-        run: cargo bench --locked --bench governance_hot_paths
-
   runtime-load-smoke:
     needs: changes
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || needs.changes.outputs.heavy == 'true'
@@ -1980,8 +1817,6 @@ jobs:
       - macos-workspace
       - smart-context-evidence
       - process-guard
-      - redis-integration
-      - backup-restore-drill
       - compat-replay-gate
       - optional-tools-freshness
       - rust-quality
@@ -1996,7 +1831,6 @@ jobs:
       - env-sensitive-parallel-guard
       - main-internal-runtime-proxy
       - runtime-proxy-bench-smoke
-      - runtime-governance-bench-smoke
       - runtime-load-smoke
       - runtime-stress
       - real-mojo

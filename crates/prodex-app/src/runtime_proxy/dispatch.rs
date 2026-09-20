@@ -532,8 +532,6 @@ mod tests {
         for message in [
             RUNTIME_PROXY_REQUEST_CAPTURE_FAILED_MESSAGE,
             RUNTIME_PROXY_REQUEST_REWRITE_FAILED_MESSAGE,
-            RUNTIME_PROXY_ANTHROPIC_REQUEST_TRANSLATION_FAILED_MESSAGE,
-            RUNTIME_PROXY_ANTHROPIC_REQUEST_FAILED_MESSAGE,
         ] {
             assert!(!message.contains("token"));
             assert!(!message.contains("Authorization"));
@@ -549,14 +547,6 @@ mod tests {
         assert_eq!(
             RUNTIME_PROXY_REQUEST_REWRITE_FAILED_MESSAGE,
             "proxied request could not be prepared"
-        );
-        assert_eq!(
-            RUNTIME_PROXY_ANTHROPIC_REQUEST_TRANSLATION_FAILED_MESSAGE,
-            "Anthropic request could not be translated"
-        );
-        assert_eq!(
-            RUNTIME_PROXY_ANTHROPIC_REQUEST_FAILED_MESSAGE,
-            "Anthropic request failed"
         );
     }
 
