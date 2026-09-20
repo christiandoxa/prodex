@@ -28,6 +28,7 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 
 ### Misc
 
+- Preserve Messages parity without Mojo (`ce669e4`)
 - Own Gemini request policy and assembly (`e563934`)
 - Own DeepSeek tool shape validation (`c26c825`)
 - Own DeepSeek request policy validation (`d59f787`)
