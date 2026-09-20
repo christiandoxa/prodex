@@ -108,11 +108,11 @@ fn smart_context_rewrite_telemetry_budget_decision_rust(
         100
     } else {
         recent.iter().fold(0usize, |total, sample| {
-            let ratio = if sample.body_bytes_before == 0 {
-                100
-            } else {
-                sample.body_bytes_after.saturating_mul(100) / sample.body_bytes_before
-            };
+            let ratio = sample
+                .body_bytes_after
+                .saturating_mul(100)
+                .checked_div(sample.body_bytes_before)
+                .unwrap_or(100);
             total.saturating_add(ratio)
         }) / recent.len()
     };
