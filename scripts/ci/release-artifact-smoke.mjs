@@ -186,60 +186,82 @@ async function waitForRegistry(pathname, broker) {
   throw new Error(`timed out waiting for runtime broker registry: ${broker.stderr}`);
 }
 
-async function runTui(binary, env, cwd) {
+async function readUsageFromLogStream(binary, env, cwd) {
   return new Promise((resolve, reject) => {
-    const child = spawn(
-      "script",
-      ["-qefc", 'stty cols 100 rows 32; exec "$PRODEX_SMOKE_BINARY" log stream', "/dev/null"],
-      { cwd, env: { ...env, PRODEX_SMOKE_BINARY: binary }, stdio: ["pipe", "pipe", "pipe"] },
-    );
-    let stdout = "";
+    const child = spawn(binary, ["log", "stream", "--json"], {
+      cwd,
+      env,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    let pending = "";
     let stderr = "";
+    let settled = false;
+    let timer;
+    const finish = (error, event) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      if (child.exitCode === null) child.kill("SIGTERM");
+      if (error) reject(error);
+      else resolve(event);
+    };
+    const inspect = (line) => {
+      if (!line.trim()) return;
+      let event;
+      try {
+        event = JSON.parse(line);
+      } catch {
+        return;
+      }
+      const fields = event.fields ?? {};
+      if (event.event !== "token_usage" || Number(fields.output_tokens) !== 20) return;
+      finish(null, {
+        generation_ms: Number(fields.generation_ms),
+        output_tokens: Number(fields.output_tokens),
+        output_tokens_per_second: Number(fields.output_tokens_per_second),
+        profile: fields.profile,
+        source: fields.source,
+      });
+    };
     child.stdout.setEncoding("utf8");
     child.stderr.setEncoding("utf8");
     child.stdout.on("data", (chunk) => {
-      stdout += chunk;
+      pending += chunk;
+      const lines = pending.split(/\r?\n/u);
+      pending = lines.pop() ?? "";
+      for (const line of lines) inspect(line);
     });
     child.stderr.on("data", (chunk) => {
       stderr += chunk;
     });
-    const quitTimer = setTimeout(() => child.stdin.write("q"), 1_200);
-    const killTimer = setTimeout(() => child.kill("SIGKILL"), 8_000);
-    child.on("error", reject);
+    child.on("error", (error) => finish(error));
     child.on("close", (code, signal) => {
-      clearTimeout(quitTimer);
-      clearTimeout(killTimer);
-      resolve({ code, signal, stderr, stdout });
+      if (!settled) {
+        finish(
+          new Error(
+            "prodex log stream exited before token usage: code=" +
+              String(code) +
+              " signal=" +
+              String(signal) +
+              " stderr=" +
+              stderr,
+          ),
+        );
+      }
     });
+    timer = setTimeout(
+      () => finish(new Error("timed out waiting for token usage from prodex log stream: " + stderr)),
+      10_000,
+    );
   });
 }
 
-async function readUsageFromLogLast(binary, env, cwd) {
-  const deadline = Date.now() + 10_000;
-  let last;
-  while (Date.now() < deadline) {
-    const result = await run(binary, ["log", "last", "--json"], { cwd, env });
-    last = result;
-    if (result.code === 0) {
-      for (const line of result.stdout.trim().split(/\r?\n/u).filter(Boolean)) {
-        try {
-          const event = JSON.parse(line);
-          if (event.output_tokens === 20) return event;
-        } catch {
-          // Retry while the runtime logger finishes its bounded write.
-        }
-      }
-    }
-    await sleep(100);
-  }
-  throw new Error(`timed out waiting for parsed token usage: ${last?.stderr || last?.stdout || "no output"}`);
-}
-
-function stripAnsi(value) {
-  return value
-    .replace(/\u001b\][^\u0007]*(?:\u0007|\u001b\\)/gu, "")
-    .replace(/\u001b\[[0-?]*[ -/]*[@-~]/gu, "")
-    .replaceAll("\r", "");
+async function readLastLogLine(binary, env, cwd) {
+  const result = await run(binary, ["log", "last", "--json"], { cwd, env });
+  assert.equal(result.code, 0, result.stderr || result.stdout);
+  const lines = result.stdout.trim().split(/\r?\n/u).filter(Boolean);
+  assert.equal(lines.length, 1, result.stdout);
+  return JSON.parse(lines[0]);
 }
 
 async function main() {
@@ -371,6 +393,7 @@ printf '%s\\n' '{"type":"turn.completed","usage":{"input_tokens":10,"output_toke
       PRODEX_HOME: prodexHome,
       PRODEX_RUNTIME_LOG_RECORD: "1",
       PRODEX_RUNTIME_LOG_DIR: runtimeLogDir,
+      PRODEX_RUNTIME_LOG_FORMAT: "json",
       SMOKE_CODEX_ARGS: fakeCodexArgs,
       TERM: "xterm-256color",
     };
@@ -459,18 +482,16 @@ printf '%s\\n' '{"type":"turn.completed","usage":{"input_tokens":10,"output_toke
     assert.match(response.body, /response\.completed/);
     assert.equal(upstream.state.responses, 1);
 
-    const usage = await readUsageFromLogLast(args.binary, env, smokeRoot);
+    const usage = await readUsageFromLogStream(args.binary, env, smokeRoot);
+    assert.equal(usage.output_tokens, 20);
     assert.equal(usage.profile, "main");
     assert.equal(usage.source, "responses_sse");
     assert.ok(usage.generation_ms > 0, JSON.stringify(usage));
     assert.ok(usage.output_tokens_per_second > 0, JSON.stringify(usage));
 
-    const tui = await runTui(args.binary, env, smokeRoot);
-    const tuiText = stripAnsi(`${tui.stdout}${tui.stderr}`);
-    assert.equal(tui.code, 0, tuiText);
-    assert.match(tuiText, /Prodex Log/);
-    assert.match(tuiText, /output\s+20/u);
-    assert.match(tuiText, /\d+(?:\.\d+)? t\/s/u);
+    const last = await readLastLogLine(args.binary, env, smokeRoot);
+    assert.equal(typeof last.event, "string", JSON.stringify(last));
+    assert.ok(last.event.length > 0, JSON.stringify(last));
     process.stdout.write("release artifact smoke passed\n");
   } finally {
     await stop(broker?.child);

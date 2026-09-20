@@ -48,6 +48,14 @@ test("standalone release runs the downloaded artifact smoke before SBOM preparat
   assert.doesNotMatch(source, /target\/(?:debug|release)/u);
 });
 
+test("artifact smoke follows current prodex log contracts", () => {
+  const source = readFileSync(script, "utf8");
+  assert.match(source, /\["log", "stream", "--json"\]/u);
+  assert.match(source, /\["log", "last", "--json"\]/u);
+  assert.match(source, /PRODEX_RUNTIME_LOG_FORMAT: "json"/u);
+  assert.doesNotMatch(source, /readUsageFromLogLast|Prodex Log/u);
+});
+
 test("release manifest, checksums, and SBOM accept Prodex assets only", () => {
   const renderer = readFileSync("scripts/release/render-release-manifest.mjs", "utf8");
   const workflow = readFileSync(".github/workflows/standalone-release.yml", "utf8");
