@@ -1,16 +1,11 @@
 use crate::AppPaths;
-use jsonwebtoken::{Algorithm, EncodingKey, Header, encode};
-use reqwest::{IntoUrl, blocking::RequestBuilder};
-use std::collections::VecDeque;
 use std::fs;
-use std::io::{Cursor, Read};
 use std::net::SocketAddr;
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
-use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{Arc, mpsc};
+use std::sync::mpsc;
 use std::thread;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{SystemTime, UNIX_EPOCH};
 use tiny_http::{Header as TinyHeader, Response as TinyResponse, Server as TinyServer};
 
 pub(super) struct TestUpstream {
@@ -127,150 +122,5 @@ pub(super) fn app_paths_for_root(root: std::path::PathBuf) -> AppPaths {
         shared_codex_root: root.join("shared-codex"),
         legacy_shared_codex_root: root.join("shared"),
         root,
-    }
-}
-
-pub(super) fn wait_for_usage_file(path: &std::path::Path) -> serde_json::Value {
-    wait_for_json_file(path)
-}
-
-const PERSISTENCE_WAIT_ATTEMPTS: usize = 250;
-
-pub(super) fn wait_for_sqlite_usage_total(path: &std::path::Path, key_name: &str, expected: u64) {
-    for _ in 0..PERSISTENCE_WAIT_ATTEMPTS {
-        if let Ok(conn) = rusqlite::Connection::open(path) {
-            let total = conn
-                .query_row(
-                    "SELECT requests_total FROM prodex_gateway_virtual_key_usage WHERE key_name = ?1",
-                    [key_name],
-                    |row| row.get::<_, i64>(0),
-                )
-                .ok()
-                .and_then(|value| u64::try_from(value).ok());
-            if total == Some(expected) {
-                return;
-            }
-        }
-        thread::sleep(Duration::from_millis(20));
-    }
-    panic!(
-        "sqlite usage total for {key_name} did not reach {expected} at {}",
-        path.display()
-    );
-}
-
-pub(super) fn wait_for_ledger_file_key_response_status(
-    path: &std::path::Path,
-    key_name: &str,
-    expected: u16,
-) {
-    for _ in 0..PERSISTENCE_WAIT_ATTEMPTS {
-        if let Ok(bytes) = fs::read(path) {
-            for line in String::from_utf8_lossy(&bytes).lines() {
-                if let Ok(value) = serde_json::from_str::<serde_json::Value>(line)
-                    && value["key_name"] == key_name
-                    && value["response_status"] == expected
-                {
-                    return;
-                }
-            }
-        }
-        thread::sleep(Duration::from_millis(20));
-    }
-    panic!(
-        "ledger response status for key {key_name} did not reach {expected} at {}",
-        path.display()
-    );
-}
-
-pub(super) fn wait_for_sqlite_ledger_key_response_status(
-    path: &std::path::Path,
-    key_name: &str,
-    expected: u16,
-) {
-    for _ in 0..PERSISTENCE_WAIT_ATTEMPTS {
-        if let Ok(conn) = rusqlite::Connection::open(path) {
-            let status = conn
-                .query_row(
-                    "SELECT response_status FROM prodex_gateway_billing_ledger WHERE key_name = ?1",
-                    [key_name],
-                    |row| row.get::<_, Option<i64>>(0),
-                )
-                .ok()
-                .flatten()
-                .and_then(|value| u16::try_from(value).ok());
-            if status == Some(expected) {
-                return;
-            }
-        }
-        thread::sleep(Duration::from_millis(20));
-    }
-    panic!(
-        "sqlite ledger response status for key {key_name} did not reach {expected} at {}",
-        path.display()
-    );
-}
-
-pub(super) fn wait_for_json_file(path: &std::path::Path) -> serde_json::Value {
-    for _ in 0..PERSISTENCE_WAIT_ATTEMPTS {
-        if let Ok(bytes) = fs::read(path)
-            && let Ok(value) = serde_json::from_slice::<serde_json::Value>(&bytes)
-        {
-            return value;
-        }
-        thread::sleep(Duration::from_millis(20));
-    }
-    panic!("usage file was not written at {}", path.display());
-}
-
-pub(super) fn wait_for_text_file(path: &std::path::Path) -> String {
-    let mut last_error = None;
-    for _ in 0..PERSISTENCE_WAIT_ATTEMPTS {
-        match fs::read_to_string(path) {
-            Ok(contents) => return contents,
-            Err(error) => last_error = Some(error),
-        }
-        thread::sleep(Duration::from_millis(20));
-    }
-    panic!(
-        "text file was not readable at {}: {}",
-        path.display(),
-        last_error.expect("a failed read should record an error")
-    );
-}
-
-pub(super) struct TestGuardrailWebhook {
-    pub(super) addr: SocketAddr,
-    _thread: thread::JoinHandle<()>,
-}
-
-impl TestGuardrailWebhook {
-    pub(super) fn start_deny(reason: &'static str) -> Self {
-        let server = TinyServer::http("127.0.0.1:0").expect("test webhook should bind");
-        let addr = server
-            .server_addr()
-            .to_ip()
-            .expect("test webhook should expose TCP addr");
-        let thread = thread::spawn(move || {
-            for _ in 0..16 {
-                let Ok(mut request) = server.recv() else {
-                    break;
-                };
-                let mut body = Vec::new();
-                let _ = request.as_reader().read_to_end(&mut body);
-                let mut response = TinyResponse::from_string(format!(
-                    r#"{{"allow":false,"reason":"{reason}","message":"do-not-log-webhook-message"}}"#
-                ))
-                .with_status_code(200);
-                response.add_header(
-                    TinyHeader::from_bytes("content-type", "application/json").unwrap(),
-                );
-                let _ = request.respond(response);
-            }
-        });
-        Self {
-            addr,
-            _thread: thread,
-        }
     }
 }
