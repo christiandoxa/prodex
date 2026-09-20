@@ -1114,7 +1114,6 @@ prodex doctor --runtime
 prodex doctor --bundle ./prodex-doctor.json --redacted
 prodex doctor --repair-session-index
 prodex setup --dry-run
-prodex capability list
 prodex context audit
 prodex context export 00000000-0000-7000-8000-000000000042
 prodex context compress ~/.codex/AGENTS.md --dry-run
@@ -1132,7 +1131,6 @@ git diff | prodex context compact-output --kind git-diff
 | `prodex doctor --bundle PATH --redacted` | Writes a shareable JSON diagnostic bundle without stored auth tokens or headers. |
 | `prodex doctor --repair-session-index` | Explicitly performs full active and archived Codex session-index repair. |
 | `prodex setup --dry-run` | Shows setup reconciliation actions without changing files. |
-| `prodex capability list` | Lists built-in and optional Prodex capabilities with availability status. |
 | `prodex context audit` | Reports approximate token weight for shared instruction and memory files. |
 | `prodex context export` | Exports a selected shared Codex session transcript/context into a Markdown file. |
 | `prodex context compress` | Compresses Markdown/text context files and writes an `.original.md` backup. |

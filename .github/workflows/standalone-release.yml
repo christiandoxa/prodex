@@ -719,16 +719,6 @@ jobs:
           done
           prodex_binary="target/${{ matrix.target }}/release/${{ matrix.binary-name }}"
           chmod 0755 "${prodex_binary}"
-          PRODEX_HOME="${RUNNER_TEMP}/prodex-capability" "${prodex_binary}" capability list --json > "${RUNNER_TEMP}/capabilities.json"
-          CAPABILITIES="${RUNNER_TEMP}/capabilities.json" python - <<'PY'
-          import json
-          import os
-
-          with open(os.environ["CAPABILITIES"], encoding="utf-8") as handle:
-              rows = {row["name"]: row for row in json.load(handle)}
-          for name in ("gemini", "kiro", "copilot", "claude"):
-              assert rows[name]["status"] == "available", rows[name]
-          PY
           copilot --model gpt-5.6-luna --effort max --help > "${RUNNER_TEMP}/copilot-luna-help.txt"
           grep -q -- "GitHub Copilot CLI" "${RUNNER_TEMP}/copilot-luna-help.txt"
           smoke_root="${RUNNER_TEMP}/prodex-sub-agent-smoke"

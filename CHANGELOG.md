@@ -2,7 +2,7 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
-## 0.430.0 - 2026-09-20
+## 0.430.0 - 2026-09-21
 
 ### Runtime
 
@@ -16,6 +16,8 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 
 ### CLI
 
+- Keep native Antigravity profileless (`0e9aafd`)
+- Retain Antigravity CLI compatibility (`aa9b86b`)
 - Gate reset-credit URL with Mojo quota (`4d07c35`)
 - Add exec-only expose surface (`17b40fa`)
 - Restore local expose endpoint (`6d4766c`)
@@ -27,8 +29,13 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 - Restore Anthropic Messages compatibility (`94c8c5a`)
 - Supervise OpenAI Secure MCP tunnel client (`6ca80f9`)
 
+### Docs
+
+- Align native provider compatibility guidance (`9daf777`)
+
 ### Misc
 
+- Restore migration guidance wording (`43ba4a3`)
 - Preserve Messages parity without Mojo (`ce669e4`)
 - Own Gemini request policy and assembly (`e563934`)
 - Own DeepSeek tool shape validation (`c26c825`)
