@@ -1,3 +1,4 @@
+use crate::audit_log::append_audit_event;
 use anyhow::Result;
 use ratatui::Terminal;
 use ratatui::backend::CrosstermBackend;
@@ -10,11 +11,14 @@ pub(crate) use prodex_core::select_default_codex_home;
 pub(crate) use prodex_core::{absolutize, default_codex_home};
 
 pub(crate) fn audit_log_event(
-    _component: &str,
-    _action: &str,
-    _outcome: &str,
-    _details: serde_json::Value,
+    component: &str,
+    action: &str,
+    outcome: &str,
+    details: serde_json::Value,
 ) -> Result<()> {
+    if append_audit_event(component, action, outcome, details).is_err() {
+        eprintln!("Warning: failed to persist local audit event {component}/{action}.");
+    }
     Ok(())
 }
 

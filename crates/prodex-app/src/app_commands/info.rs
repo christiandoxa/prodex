@@ -278,7 +278,7 @@ pub(crate) fn format_runtime_proxy_contract_summary() -> String {
 }
 
 pub(crate) fn format_audit_logs_summary() -> String {
-    "not configured (audit persistence unavailable in this build)".to_string()
+    crate::audit_log::format_audit_logs_summary()
 }
 
 pub(crate) fn format_info_prodex_version(paths: &AppPaths) -> Result<String> {
@@ -347,5 +347,36 @@ pub(crate) fn secret_backend_json_value() -> serde_json::Value {
             let error = redaction_redact_secret_like_text(&err.to_string());
             crate::reports::secret_backend_json_value_parts(None, None, Some(&error))
         }
+    }
+}
+
+#[cfg(test)]
+mod parity_tests {
+    use super::*;
+
+    #[test]
+    fn audit_logs_summary_reports_the_real_configured_path_and_existence() {
+        let root = crate::test_support::test_temp_root()
+            .join(format!("prodex-info-audit-parity-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).expect("audit directory");
+        let _guard = crate::test_support::TestEnvVarGuard::set(
+            "PRODEX_AUDIT_LOG_DIR",
+            &root.to_string_lossy(),
+        );
+        let path = root.join("prodex-audit.log");
+
+        assert_eq!(
+            format_audit_logs_summary(),
+            format!("{} (missing)", path.display())
+        );
+
+        std::fs::write(&path, b"audit\n").expect("audit log");
+        assert_eq!(
+            format_audit_logs_summary(),
+            format!("{} (exists)", path.display())
+        );
+
+        let _ = std::fs::remove_dir_all(&root);
     }
 }

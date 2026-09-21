@@ -51,7 +51,7 @@ pub(crate) fn handle_super_native_agy(args: SuperArgs) -> Result<()> {
     }
 }
 
-fn validate_native_agy_args(args: &SuperArgs) -> Result<()> {
+pub(crate) fn validate_native_agy_args(args: &SuperArgs) -> Result<()> {
     if args.provider != Some(prodex_cli::SuperExternalProvider::Gemini) {
         bail!("--cli agy requires --provider gemini; use prodex s gemini --cli agy");
     }

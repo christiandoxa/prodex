@@ -12,6 +12,7 @@ comptime SUPER_EXPOSE_METHOD_PING: Int64 = 2
 comptime SUPER_EXPOSE_METHOD_TOOLS_LIST: Int64 = 3
 comptime SUPER_EXPOSE_METHOD_TOOLS_CALL: Int64 = 4
 comptime SUPER_EXPOSE_METHOD_NOTIFICATION: Int64 = 5
+comptime SUPER_EXPOSE_METHOD_SERVER_DISCOVER: Int64 = 6
 
 comptime SUPER_EXPOSE_TOOL_UNKNOWN: Int64 = 0
 comptime SUPER_EXPOSE_TOOL_START: Int64 = 1
@@ -20,8 +21,14 @@ comptime SUPER_EXPOSE_TOOL_RESULT: Int64 = 3
 comptime SUPER_EXPOSE_TOOL_CANCEL: Int64 = 4
 comptime SUPER_EXPOSE_TOOL_LIST: Int64 = 5
 comptime SUPER_EXPOSE_TOOL_EXEC: Int64 = 6
+comptime SUPER_EXPOSE_TOOL_EVENTS: Int64 = 7
+comptime SUPER_EXPOSE_TOOL_SESSION_PROMPT_WRITE: Int64 = 8
+comptime SUPER_EXPOSE_TOOL_SESSION_PREEMPT: Int64 = 9
+comptime SUPER_EXPOSE_TOOL_SESSION_OUTPUT_READ: Int64 = 10
 
 def super_expose_method(view: ProdexRichStringView) -> Int64:
+    if rich_view_matches_literal["server/discover"](view, False):
+        return SUPER_EXPOSE_METHOD_SERVER_DISCOVER
     if rich_view_matches_literal["initialize"](view, False):
         return SUPER_EXPOSE_METHOD_INITIALIZE
     if rich_view_matches_literal["ping"](view, False):
@@ -50,6 +57,14 @@ def super_expose_tool(view: ProdexRichStringView) -> Int64:
         return SUPER_EXPOSE_TOOL_LIST
     if rich_view_matches_literal["prodex_super_exec"](view, False):
         return SUPER_EXPOSE_TOOL_EXEC
+    if rich_view_matches_literal["prodex_super_events"](view, False):
+        return SUPER_EXPOSE_TOOL_EVENTS
+    if rich_view_matches_literal["prodex_session_prompt_write"](view, False):
+        return SUPER_EXPOSE_TOOL_SESSION_PROMPT_WRITE
+    if rich_view_matches_literal["prodex_session_preempt"](view, False):
+        return SUPER_EXPOSE_TOOL_SESSION_PREEMPT
+    if rich_view_matches_literal["prodex_session_output_read"](view, False):
+        return SUPER_EXPOSE_TOOL_SESSION_OUTPUT_READ
     return SUPER_EXPOSE_TOOL_UNKNOWN
 
 @export("prodex_mojo_super_expose_route_v1")

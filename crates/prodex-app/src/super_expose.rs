@@ -8,9 +8,11 @@ use std::net::SocketAddr;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::{self, TryRecvError};
 use std::thread;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tiny_http::{Method, Server};
 
+#[path = "super_expose/app_server_control.rs"]
+mod app_server_control;
 #[path = "super_expose/exec.rs"]
 mod exec;
 #[path = "super_expose/logging.rs"]
@@ -21,11 +23,47 @@ mod openai_tunnel;
 mod protocol;
 #[path = "super_expose/run.rs"]
 mod run;
+#[cfg(test)]
+#[path = "super_expose/session_preempt_tests.rs"]
+mod session_preempt_tests;
+#[path = "super_expose/session_prompt_write.rs"]
+mod session_prompt_write;
+#[cfg(test)]
+#[path = "super_expose/session_prompt_write_tests.rs"]
+mod session_prompt_write_tests;
 #[path = "super_expose_ui.rs"]
 mod super_expose_ui;
 
 const BODY_MAX_BYTES: u64 = 1024 * 1024;
+const MCP_RATE_LIMIT: usize = 120;
+const MCP_RATE_WINDOW: Duration = Duration::from_secs(1);
 static CLOCK_SEQUENCE: AtomicU64 = AtomicU64::new(1);
+
+struct McpRateLimit {
+    started: Instant,
+    requests: usize,
+}
+
+impl McpRateLimit {
+    fn new() -> Self {
+        Self {
+            started: Instant::now(),
+            requests: 0,
+        }
+    }
+
+    fn admit(&mut self) -> bool {
+        if self.started.elapsed() >= MCP_RATE_WINDOW {
+            self.started = Instant::now();
+            self.requests = 0;
+        }
+        if self.requests >= MCP_RATE_LIMIT {
+            return false;
+        }
+        self.requests += 1;
+        true
+    }
+}
 
 pub(crate) fn handle_super_expose(mut expose: SuperExposeArgs) -> Result<()> {
     let (openai_tunnel_id, listen) = prepare_super_expose(&mut expose)?;
@@ -50,6 +88,7 @@ pub(crate) fn handle_super_expose(mut expose: SuperExposeArgs) -> Result<()> {
         ],
     );
     let token = capability_token()?;
+    let instance_id = expose_instance_id()?;
     let server = Server::http(listen)
         .map_err(|error| anyhow::anyhow!("failed to bind Super expose: {error}"))?;
     let address = server
@@ -57,15 +96,23 @@ pub(crate) fn handle_super_expose(mut expose: SuperExposeArgs) -> Result<()> {
         .to_ip()
         .context("Super expose did not bind an IP address")?;
     let endpoint = format!("http://{address}/mcp/{token}");
-    let display_name = expose_display_name(&expose, &workspace);
+    let display_name = expose_display_name(&expose, &workspace).to_string();
 
     let mut openai_tunnel_rx =
         start_openai_tunnel_async(&expose, openai_tunnel_id.as_deref(), &endpoint, &audit)?;
     let mut openai_tunnel = None;
-    announce_super_expose(&expose, display_name, &endpoint, address.port(), &audit)?;
+    announce_super_expose(&expose, &display_name, &endpoint, address.port(), &audit)?;
 
-    let manager = run::RunManager::new(workspace.clone(), expose.super_args, audit.clone());
+    let manager = run::RunManager::new(
+        workspace.clone(),
+        expose.super_args,
+        audit.clone(),
+        instance_id.clone(),
+    );
+    let session_prompt_write = session_prompt_write::SessionPromptWriteService::default();
     let expected_path = format!("/mcp/{token}");
+    let expected_host = format!("{}:{}", address.ip(), address.port());
+    let mut rate = McpRateLimit::new();
     loop {
         poll_openai_tunnel(&mut openai_tunnel_rx, &mut openai_tunnel, &audit)?;
         check_openai_tunnel_exit(openai_tunnel.as_mut(), &audit)?;
@@ -79,7 +126,12 @@ pub(crate) fn handle_super_expose(mut expose: SuperExposeArgs) -> Result<()> {
         handle_super_expose_request(
             request,
             &expected_path,
+            &expected_host,
+            &mut rate,
             &manager,
+            &session_prompt_write,
+            &instance_id,
+            &display_name,
             &workspace,
             expose.mode,
             &audit,
@@ -275,7 +327,12 @@ fn check_openai_tunnel_exit(
 fn handle_super_expose_request(
     mut request: tiny_http::Request,
     expected_path: &str,
+    expected_host: &str,
+    rate: &mut McpRateLimit,
     manager: &run::RunManager,
+    session_prompt_write: &session_prompt_write::SessionPromptWriteService,
+    instance_id: &str,
+    display_name: &str,
     workspace: &std::path::Path,
     mode: prodex_cli::SuperExposeMode,
     audit: &logging::ExposeAuditLog,
@@ -303,6 +360,56 @@ fn handle_super_expose_request(
         return;
     }
 
+    if !rate.admit() {
+        audit.event(
+            "super_expose_http_rejected",
+            [crate::runtime_proxy_log_field("reason", "rate_limit")],
+        );
+        let _ = request.respond(protocol::mcp_error_response(
+            429,
+            None,
+            -32029,
+            "request rate limit exceeded",
+        ));
+        return;
+    }
+    if !protocol::mcp_content_type_allowed(request_header_unique(&request, "Content-Type")) {
+        let _ = request.respond(protocol::mcp_error_response(
+            415,
+            None,
+            -32600,
+            "content type must be application/json",
+        ));
+        return;
+    }
+    if !protocol::mcp_accept_allowed(request_header_unique(&request, "Accept")) {
+        let _ = request.respond(protocol::mcp_error_response(
+            406,
+            None,
+            -32600,
+            "accept must include application/json",
+        ));
+        return;
+    }
+    let origin_count = request_header_count(&request, "Origin");
+    let origin = request_header_unique(&request, "Origin");
+    let host = request_header_unique(&request, "Host").unwrap_or(expected_host);
+    if origin_count > 1 || !protocol::mcp_origin_allowed(host, origin) {
+        let _ = request.respond(protocol::mcp_error_response(
+            403,
+            None,
+            -32003,
+            "origin rejected",
+        ));
+        return;
+    }
+    let headers = protocol::McpRequestHeaders {
+        protocol_version: request_header_unique(&request, "MCP-Protocol-Version")
+            .map(str::to_string),
+        mcp_method: request_header_unique(&request, "Mcp-Method").map(str::to_string),
+        mcp_name: request_header_unique(&request, "Mcp-Name").map(str::to_string),
+    };
+
     let mut body = Vec::new();
     let read = request
         .as_reader()
@@ -322,7 +429,48 @@ fn handle_super_expose_request(
         ));
         return;
     }
-    let _ = request.respond(protocol::dispatch(&body, manager, workspace, mode, audit));
+    let _ = request.respond(protocol::dispatch(
+        &body,
+        &headers,
+        manager,
+        session_prompt_write,
+        instance_id,
+        display_name,
+        workspace,
+        mode,
+        audit,
+    ));
+}
+
+fn request_header_count(request: &tiny_http::Request, name: &'static str) -> usize {
+    request
+        .headers()
+        .iter()
+        .filter(|header| header.field.equiv(name))
+        .count()
+}
+
+fn request_header_unique<'a>(
+    request: &'a tiny_http::Request,
+    name: &'static str,
+) -> Option<&'a str> {
+    let mut values = request
+        .headers()
+        .iter()
+        .filter(|header| header.field.equiv(name))
+        .map(|header| header.value.as_str().trim())
+        .filter(|value| !value.is_empty());
+    let value = values.next()?;
+    values.next().is_none().then_some(value)
+}
+
+fn expose_instance_id() -> Result<String> {
+    let mut bytes = [0_u8; 16];
+    getrandom::fill(&mut bytes).context("failed to generate expose instance id")?;
+    Ok(format!(
+        "pdxi_{}",
+        base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(bytes)
+    ))
 }
 
 fn capability_token() -> Result<String> {
@@ -341,8 +489,19 @@ pub(super) fn now_millis() -> u64 {
 }
 
 pub(super) fn bounded_redacted_text(bytes: &[u8], max_bytes: usize) -> String {
-    let bytes = &bytes[..bytes.len().min(max_bytes)];
-    redaction_redact_secret_like_text(&String::from_utf8_lossy(bytes))
+    let redacted = redaction_redact_secret_like_text(&String::from_utf8_lossy(bytes));
+    bounded_text(&redacted, max_bytes)
+}
+
+fn bounded_text(text: &str, max_bytes: usize) -> String {
+    if text.len() <= max_bytes {
+        return text.to_string();
+    }
+    let mut end = max_bytes.min(text.len());
+    while !text.is_char_boundary(end) {
+        end = end.saturating_sub(1);
+    }
+    text[..end].to_string()
 }
 
 #[cfg(test)]
