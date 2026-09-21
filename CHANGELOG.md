@@ -19,6 +19,10 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 - Restore the `prodex-audit-log` workspace component so preserved profile,
   doctor, broker, and other current audit call sites persist checksummed,
   private, redacted JSONL records again.
+- Restore manual `prodex redeem PROFILE` parity from 0.429.4, including
+  the Ratatui near-reset confirmation and result panels, OpenAI/Codex profile
+  validation, quota precheck, `--yes` / `--base-url` / `--no-proxy`
+  behavior, UUIDv7 redeem request IDs, and reset-credit consume outcomes.
 
 ## Bug Fixes
 
@@ -51,8 +55,9 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 ## Changelog
 
 - Revalidated preserved Ratatui/TUI flows for info, status, quota, log,
-  session, doctor, profile management, login, Super prompts, and usage-limit
-  recovery, plus the restored 0.429.4 session/output/direct-exec contracts.
+  session, doctor, profile management, login, manual redeem, Super prompts, and
+  usage-limit recovery, plus the restored 0.429.4 session/output/direct-exec
+  contracts.
 - Static size/ownership/boundary guards, supply-chain checks, duplicate
   dependency budgets, and Optional Tools freshness checks pass.
 - Optional Tools remain at the current stable versions audited for 0.430.1:
