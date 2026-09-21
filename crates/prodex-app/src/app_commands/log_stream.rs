@@ -67,10 +67,55 @@ pub(crate) fn log_stream_item_json(event: &LogStreamItem) -> Result<String> {
         LogStreamItem::Transcript(event) => serde_json::to_string(event),
         LogStreamItem::LoadObservation(event) => serde_json::to_string(&event.event),
         LogStreamItem::LoadAggregate(event) => serde_json::to_string(&event.as_transcript()),
-        LogStreamItem::TokenUsage(event) => serde_json::to_string(event),
+        LogStreamItem::TokenUsage(event) => serde_json::to_string(&token_usage_json_value(event)),
         LogStreamItem::UpstreamPayload(event) => serde_json::to_string(event),
     }
     .context("failed to serialize JSON log event")
+}
+
+fn token_usage_json_value(event: &InfoTokenUsageEvent) -> serde_json::Value {
+    let mut value = serde_json::to_value(event).unwrap_or_else(|_| serde_json::json!({}));
+    value["event"] = serde_json::Value::String("token_usage".to_string());
+    let mut fields = serde_json::Map::new();
+    if let Some(request) = event.request {
+        fields.insert(
+            "request".to_string(),
+            serde_json::json!(request.to_string()),
+        );
+    }
+    fields.insert("transport".to_string(), serde_json::json!(event.transport));
+    fields.insert("profile".to_string(), serde_json::json!(event.profile));
+    fields.insert("source".to_string(), serde_json::json!(event.source));
+    fields.insert(
+        "input_tokens".to_string(),
+        serde_json::json!(event.input_tokens),
+    );
+    fields.insert(
+        "cached_input_tokens".to_string(),
+        serde_json::json!(event.cached_input_tokens),
+    );
+    fields.insert(
+        "output_tokens".to_string(),
+        serde_json::json!(event.output_tokens),
+    );
+    fields.insert(
+        "reasoning_tokens".to_string(),
+        serde_json::json!(event.reasoning_tokens),
+    );
+    if let Some(generation_ms) = event.generation_ms {
+        fields.insert(
+            "generation_ms".to_string(),
+            serde_json::json!(generation_ms),
+        );
+    }
+    if let Some(rate) = event.output_tokens_per_second {
+        fields.insert(
+            "output_tokens_per_second".to_string(),
+            serde_json::json!(rate),
+        );
+    }
+    value["fields"] = serde_json::Value::Object(fields);
+    value
 }
 
 #[cfg(test)]
