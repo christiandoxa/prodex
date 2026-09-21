@@ -240,3 +240,31 @@ impl fmt::Debug for QuotaArgs {
             .finish()
     }
 }
+
+#[derive(Args)]
+pub struct RedeemArgs {
+    /// OpenAI/Codex profile whose reset credit should be redeemed.
+    #[arg(value_name = "PROFILE")]
+    pub profile: String,
+    /// Skip the near-reset confirmation prompt.
+    #[arg(short = 'y', long)]
+    pub yes: bool,
+    /// Override the ChatGPT backend base URL used for the redeem request.
+    #[arg(long, value_name = "URL")]
+    pub base_url: Option<String>,
+    /// Bypass proxy environment variables for the upstream redeem request.
+    #[arg(long)]
+    pub no_proxy: bool,
+}
+
+impl fmt::Debug for RedeemArgs {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("RedeemArgs")
+            .field("profile_configured", &!self.profile.is_empty())
+            .field("yes", &self.yes)
+            .field("base_url_configured", &self.base_url.is_some())
+            .field("no_proxy", &self.no_proxy)
+            .finish()
+    }
+}

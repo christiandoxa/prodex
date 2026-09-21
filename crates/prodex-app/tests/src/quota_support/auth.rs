@@ -65,6 +65,95 @@ fn reset_credit_consume_response_preserves_explicit_outcome() {
 }
 
 #[test]
+fn reset_credit_consume_request_matches_preserved_backend_contract() {
+    let root = temp_dir("reset-credit-consume");
+    fs::create_dir_all(&root).unwrap();
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let address = listener.local_addr().unwrap();
+    let server = thread::spawn(move || {
+        let (mut stream, _) = listener.accept().unwrap();
+        let mut request = Vec::new();
+        let mut content_length = None;
+        loop {
+            let mut buffer = [0_u8; 1024];
+            let read = stream.read(&mut buffer).unwrap();
+            if read == 0 {
+                break;
+            }
+            request.extend_from_slice(&buffer[..read]);
+            if content_length.is_none()
+                && let Some(header_end) =
+                    request.windows(4).position(|window| window == b"\r\n\r\n")
+            {
+                let headers = String::from_utf8_lossy(&request[..header_end]);
+                content_length = headers.lines().find_map(|line| {
+                    let (name, value) = line.split_once(':')?;
+                    name.eq_ignore_ascii_case("content-length")
+                        .then(|| value.trim().parse::<usize>().ok())
+                        .flatten()
+                });
+                if let Some(length) = content_length
+                    && request.len() >= header_end + 4 + length
+                {
+                    break;
+                }
+            } else if let Some(length) = content_length
+                && let Some(header_end) =
+                    request.windows(4).position(|window| window == b"\r\n\r\n")
+                && request.len() >= header_end + 4 + length
+            {
+                break;
+            }
+        }
+        let body = br#"{"outcome":"alreadyRedeemed"}"#;
+        write!(
+            stream,
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+            body.len()
+        )
+        .unwrap();
+        stream.write_all(body).unwrap();
+        String::from_utf8(request).unwrap()
+    });
+    let client = Client::builder().no_proxy().build().unwrap();
+    let auth = UsageAuth {
+        access_token: "reset-credit-access".to_string(),
+        account_id: Some("acct-reset".to_string()),
+        refresh_token: None,
+        expires_at: None,
+        last_refresh: None,
+    };
+
+    let (status, body) = send_rate_limit_reset_credit_consume_request(
+        &client,
+        &root,
+        &format!("http://{address}/api/codex/rate-limit-reset-credits/consume"),
+        &auth,
+        "prodex-manual-redeem-test",
+    )
+    .unwrap();
+
+    assert_eq!(status.as_u16(), 200);
+    let parsed: RateLimitResetCreditConsumeResponse = serde_json::from_slice(&body).unwrap();
+    assert_eq!(
+        parsed.outcome,
+        RateLimitResetCreditConsumeOutcome::AlreadyRedeemed
+    );
+    let request = server.join().unwrap();
+    assert!(request.starts_with("POST /api/codex/rate-limit-reset-credits/consume HTTP/1.1\r\n"));
+    assert!(request.lines().any(|line| {
+        let lower = line.to_ascii_lowercase();
+        lower.starts_with("authorization:") && lower.contains("bearer ")
+    }));
+    assert!(
+        request
+            .lines()
+            .any(|line| line.to_ascii_lowercase().starts_with("chatgpt-account-id:"))
+    );
+    assert!(request.contains(r#"{"redeem_request_id":"prodex-manual-redeem-test"}"#));
+}
+
+#[test]
 fn accounts_response_extracts_workspace_names() {
     let list: ChatgptAccountsResponse = serde_json::from_str(
         r#"{"accounts":[{"id":"acct_personal","structure":"personal"},{"id":"acct_team","name":"Team Workspace","structure":"workspace"}]}"#,

@@ -88,6 +88,7 @@ pub(crate) fn execute_command(command: Commands) -> Result<()> {
         Commands::Logout(args) => handle_codex_logout(args),
         Commands::Update(args) => handle_prodex_update(args),
         Commands::Quota(args) => handle_quota(args),
+        Commands::Redeem(args) => handle_redeem(args),
         Commands::Ping(command) => handle_ping(command),
         Commands::Run(args) => app_commands::runtime_launch::handle_run(args),
         Commands::Super(args) => execute_super(*args),

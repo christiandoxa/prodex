@@ -20,6 +20,7 @@ mod ping;
 mod presidio;
 mod prodex_update;
 mod quota;
+mod redeem;
 pub(crate) mod runtime_launch;
 mod selection;
 mod session;
@@ -48,6 +49,7 @@ pub(crate) use self::presidio::{
 };
 pub(crate) use self::prodex_update::*;
 pub(crate) use self::quota::*;
+pub(crate) use self::redeem::*;
 pub(crate) use self::selection::*;
 pub(crate) use self::session::*;
 pub(crate) use self::shared::*;

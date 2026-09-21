@@ -98,6 +98,11 @@ pub enum Commands {
     )]
     Quota(QuotaArgs),
     #[command(
+        about = "Redeem one reset credit manually for a named OpenAI/Codex profile.",
+        after_help = CLI_REDEEM_AFTER_HELP
+    )]
+    Redeem(RedeemArgs),
+    #[command(
         subcommand,
         about = "Send lightweight prompt checks through ready profiles."
     )]
@@ -153,6 +158,7 @@ impl Commands {
             Self::Logout(_) => "logout",
             Self::Update(_) => "update",
             Self::Quota(_) => "quota",
+            Self::Redeem(_) => "redeem",
             Self::Ping(_) => "ping",
             Self::Run(_) => "run",
             Self::Super(_) => "super",
@@ -379,6 +385,7 @@ pub fn should_default_cli_invocation_to_run(args: &[OsString]) -> bool {
             | "logout"
             | "update"
             | "quota"
+            | "redeem"
             | "ping"
             | "run"
             | "super"

@@ -12,6 +12,7 @@ Examples:
   prodex profile list
   prodex status
   prodex quota
+  prodex redeem main
   prodex run --profile main";
 pub const CLI_PROFILE_AFTER_HELP: &str = "\
 Examples:
@@ -71,6 +72,17 @@ Notes:
   Use `--auth` to filter the default pool view by auth label or compatibility, for example `no-auth` or `quota-compatible`.
   Explicit `--all` without `--detail` preserves the compact aggregate view.
   If a profile's `config.toml` sets `model_provider` to a non-OpenAI backend such as `amazon-bedrock` or `amazon-bedrock-runtime`, prodex shows a provider snapshot instead of failing the quota view.";
+pub const CLI_REDEEM_AFTER_HELP: &str = "\
+Examples:
+  prodex redeem main
+  prodex redeem user_example.com
+  prodex redeem main --yes
+  prodex redeem main --base-url https://chatgpt.com/backend-api
+
+Notes:
+  Manual redeem sends one explicit reset-credit consume request for the named OpenAI/Codex profile.
+  If the 5h or weekly quota window resets within 1 hour, prodex asks before consuming a credit; pass `--yes` to skip that prompt.
+  The backend decides whether a credit can be applied and may return nothing-to-reset, no-credit, or already-redeemed.";
 pub const CLI_RUN_AFTER_HELP: &str = "\
 Examples:
   prodex
