@@ -621,7 +621,6 @@ pub(crate) fn usage_url(base_url: &str) -> String {
     prodex_quota::usage_url(base_url)
 }
 
-#[cfg(any(feature = "mojo-quota", test))]
 pub(crate) fn rate_limit_reset_credit_consume_url(base_url: &str) -> String {
     let base_url = base_url.trim_end_matches('/');
     if base_url.contains("/backend-api") {

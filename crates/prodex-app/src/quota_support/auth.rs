@@ -4,7 +4,6 @@ use super::codex_openai_auth::{
     codex_openai_auth_headers, codex_openai_auth_originator,
     codex_openai_auth_user_agent_for_version, parse_codex_cli_version_output,
 };
-#[cfg(feature = "mojo-quota")]
 use super::rate_limit_reset_credit_consume_url;
 use super::{
     CHATGPT_AUTH_REFRESH_CLIENT_ID, CHATGPT_AUTH_REFRESH_EXPIRY_SKEW_SECONDS,
@@ -57,7 +56,6 @@ impl Drop for ChatgptRefreshRequest {
     }
 }
 
-#[cfg(any(feature = "mojo-quota", test))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) enum RateLimitResetCreditConsumeOutcome {
@@ -67,7 +65,6 @@ pub(crate) enum RateLimitResetCreditConsumeOutcome {
     AlreadyRedeemed,
 }
 
-#[cfg(any(feature = "mojo-quota", test))]
 #[derive(Debug, serde::Deserialize)]
 pub(crate) struct RateLimitResetCreditConsumeResponse {
     #[serde(default = "default_rate_limit_reset_credit_consume_outcome")]
@@ -80,18 +77,15 @@ pub(crate) struct ChatgptWorkspaceSummary {
     pub(crate) name: Option<String>,
 }
 
-#[cfg(any(feature = "mojo-quota", test))]
 fn default_rate_limit_reset_credit_consume_outcome() -> RateLimitResetCreditConsumeOutcome {
     RateLimitResetCreditConsumeOutcome::Reset
 }
 
-#[cfg(feature = "mojo-quota")]
 #[derive(Debug, Serialize)]
 struct RateLimitResetCreditConsumeRequest<'a> {
     redeem_request_id: &'a str,
 }
 
-#[cfg(feature = "mojo-quota")]
 pub(crate) struct RateLimitResetCreditConsumeFlow<'a> {
     codex_home: &'a Path,
     consume_url: String,
@@ -108,7 +102,6 @@ pub(super) struct UsageFetchFlow<'a> {
     upstream_no_proxy: bool,
 }
 
-#[cfg(feature = "mojo-quota")]
 impl<'a> RateLimitResetCreditConsumeFlow<'a> {
     pub(crate) fn new_with_proxy_policy(
         codex_home: &'a Path,
@@ -586,7 +579,6 @@ fn refresh_usage_auth_from_disk_with_proxy_policy(
     ))
 }
 
-#[cfg(feature = "mojo-quota")]
 fn send_rate_limit_reset_credit_consume_request(
     client: &Client,
     codex_home: &Path,
