@@ -572,8 +572,12 @@ fn profile_scroll_tui_allowed() -> bool {
 
 fn terminal_height() -> usize {
     terminal::size()
-        .map(|(_, height)| usize::from(height))
+        .map(|(_, height)| normalized_terminal_height(height))
         .unwrap_or(24)
+}
+
+fn normalized_terminal_height(height: u16) -> usize {
+    if height == 0 { 24 } else { usize::from(height) }
 }
 
 fn profile_scroll_body_height(terminal_height: u16) -> usize {
@@ -599,7 +603,7 @@ fn profile_scroll_footer(scroll_offset: usize, max_scroll: usize) -> String {
 fn profile_tui_height(panels: &[ProfilePanel]) -> u16 {
     let rows = profile_tui_lines(panels).len().saturating_add(4).max(4);
     let terminal_height = terminal::size()
-        .map(|(_, height)| usize::from(height))
+        .map(|(_, height)| normalized_terminal_height(height))
         .unwrap_or(24);
     rows.min(terminal_height).max(1) as u16
 }
@@ -703,6 +707,12 @@ mod tests {
             Color::Red
         );
         assert_eq!(profile_value_color("Provider", "OpenAI"), Color::Cyan);
+    }
+
+    #[test]
+    fn zero_height_terminal_uses_sane_profile_tui_fallback() {
+        assert_eq!(normalized_terminal_height(0), 24);
+        assert_eq!(normalized_terminal_height(10), 10);
     }
 
     #[test]
