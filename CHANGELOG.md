@@ -2,6 +2,65 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.430.2 - 2026-09-21
+
+### Misc
+
+- Restore preserved 0.429.4 behavior (`7122191`)
+# Prodex 0.430.2
+
+## New Features
+
+- Restore the complete preserved `prodex s expose` full-mode contract from
+  0.429.4: `prodex_super_start`, `prodex_super_status`,
+  `prodex_super_events`, `prodex_super_result`, `prodex_super_cancel`,
+  `prodex_super_list`, `prodex_super_exec`, `prodex_session_prompt_write`,
+  `prodex_session_preempt`, and `prodex_session_output_read`.
+- Restore the `prodex-audit-log` workspace component so preserved profile,
+  doctor, broker, and other current audit call sites persist checksummed,
+  private, redacted JSONL records again.
+
+## Bug Fixes
+
+- Keep `prodex s expose exec` intentionally restricted to
+  `prodex_super_exec` while full mode regains the missing session/event tools.
+- Restore the fail-closed existing-session bridge for prompt delivery,
+  preemption, and bounded rollout output reads, including process/thread
+  identity checks, queue verification, stable cursors, output-source
+  validation, and no-replay behavior after ambiguous writes.
+- Restore 0.429.4 run-manager behavior for the preserved expose surface:
+  four active runs, sixteen queued runs, bounded terminal retention,
+  monotonic bounded event pages, provider/model/effort metadata, safe
+  cancellation, and full child argument forwarding for supported current
+  Super options.
+- Restore the bounded structured direct-exec result contract, including
+  cwd/env/stdin handling, timeout/process-tree termination, redacted bounded
+  stdout/stderr, exit/signal metadata, and truncation flags.
+- Make `prodex info` report the real configured audit-log path and existence
+  again instead of the 0.430.1 placeholder; audit persistence remains
+  best-effort for user operations.
+
+## Safety
+
+- Keep local loopback-only Super expose defaults and explicit OpenAI Secure
+  MCP Tunnel support.
+- Do not restore retired Cloudflare/public browser expose, dashboard/broker
+  browser surfaces, container/Kubernetes publication, or other intentionally
+  pruned legacy CLI surfaces.
+
+## Changelog
+
+- Revalidated preserved Ratatui/TUI flows for info, status, quota, log,
+  session, doctor, profile management, login, Super prompts, and usage-limit
+  recovery, plus the restored 0.429.4 session/output/direct-exec contracts.
+- Static size/ownership/boundary guards, supply-chain checks, duplicate
+  dependency budgets, and Optional Tools freshness checks pass.
+- Optional Tools remain at the current stable versions audited for 0.430.1:
+  Caveman 2.7.0, RTK 0.49.0, Codebase Memory MCP 0.11.0, Playwright MCP
+  0.0.82, Ponytail 4.10.0, and Presidio 2.2.364.
+
+Full Changelog: [0.430.1...0.430.2](https://github.com/christiandoxa/prodex/compare/0.430.1...0.430.2)
+
 ## 0.430.1 - 2026-09-21
 
 ### CLI
@@ -13,55 +72,6 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 - Preserve token usage json envelope (`1faf08a`)
 - Restore remaining interactive prompts (`ef861e9`)
 - Restore 0.429.4 terminal surfaces (`f5fc368`)
-# Prodex 0.430.1
-
-## New Features
-
-- Restore the rich `prodex info` report, including quota pools and runway,
-  token usage (`--tokens`), runtime tuning/load, provider routes, and filtered
-  Prodex process reporting.
-- Restore the Ratatui `prodex status` dashboard with quota/resource/token views,
-  resize handling, refresh, quit controls, and deterministic non-TTY/`--once`
-  output.
-- Restore current-API Ratatui presentation for quota one-shot/watch views,
-  log transcript/tool/token/upstream views, Super prompts, Presidio opt-in,
-  login text input, session/profile lists, doctor, import progress, update
-  notices, and launch dry-runs.
-
-## Bug Fixes
-
-- Preserve OpenAI/local-only Super expose semantics while restoring full/exec
-  presentation, option-before-`expose` alias parsing, bounded expose run
-  retention, and safe cancellation behavior.
-- Keep quota provider filtering visible for failed and non-OpenAI reports,
-  retain previous snapshots during refresh, and recognize auth-backoff clear
-  markers.
-- Fix `prodex info` process counts to include only classified Prodex processes,
-  not every `/proc` row.
-- Update Dependabot #93's clap 4.6.7 dependency and Dependabot #94's pinned
-  SonarQube action 8.2.2 without weakening supply-chain policy.
-- Preserve the structured `event`/`fields` envelope for token-usage entries in
-  `prodex log --json` instead of emitting a one-off token-only JSON shape.
-
-## Safety
-
-- Retain local loopback-only Super expose defaults and explicit OpenAI Secure
-  MCP Tunnel support; retired Cloudflare/public expose behavior is not restored.
-- Retain bounded redacted runtime/log output, hard continuation affinity, and
-  no-mid-stream rotation boundaries.
-- Standalone releases publish binary/installer, checksum, SBOM, and provenance
-  assets; container/Kubernetes publication remains retired.
-
-## Changelog
-
-- Optional Tools were re-audited at the stable versions used by this release:
-  Caveman 2.7.0, RTK 0.49.0, Codebase Memory MCP 0.11.0, Playwright MCP
-  0.0.82, Ponytail 4.10.0, and Presidio 2.2.364. No fabricated bumps are
-  included.
-- Compatibility and UI restorations were validated against exact tag 0.429.4
-  with focused TestBackend and non-TTY coverage.
-
-Full Changelog: [0.430.0...0.430.1](https://github.com/christiandoxa/prodex/compare/0.430.0...0.430.1)
 
 ## 0.430.0 - 2026-09-21
 
