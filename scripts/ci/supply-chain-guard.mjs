@@ -321,11 +321,10 @@ export function validateReleaseContainerPublication(contents) {
   const verify = workflowJob(contents, "verify-ci");
   const build = workflowJob(contents, "build");
   const attestBinaries = workflowJob(contents, "attest-binaries");
-  const container = workflowJob(contents, "publish-container");
   const prepare = workflowJob(contents, "prepare-release");
   const syncDocs = workflowJob(contents, "sync-release-docs");
   const release = workflowJob(contents, "publish-github-release");
-  if (!verify || !build || !attestBinaries || !container || !prepare || !syncDocs || !release) {
+  if (!verify || !build || !attestBinaries || !prepare || !syncDocs || !release) {
     return [".github/workflows/standalone-release.yml: missing required release job"];
   }
   const violations = [];
@@ -379,7 +378,6 @@ export function validateReleaseContainerPublication(contents) {
   for (const [name, job] of [
     ["verify-ci", verify],
     ["build", build],
-    ["publish-container", container],
     ["prepare-release", prepare],
     ["sync-release-docs", syncDocs],
     ["publish-github-release", release],
@@ -445,33 +443,12 @@ export function validateReleaseContainerPublication(contents) {
     );
   }
   for (const marker of [
-    "- build",
-    "packages: write",
-    "docker push",
-    "docker.io/aquasec/trivy:0.72.0@sha256:",
-    "--severity HIGH,CRITICAL --exit-code 1 --format json",
-    "prodex-container-vulnerability-${VERSION}.json",
-    "subject-digest: ${{ steps.image.outputs.digest }}",
-    "push-to-registry: true",
-    "sed \"s/PRODEX_IMAGE_DIGEST/",
-    "name: kubernetes-manifest",
-  ]) {
-    if (!container.includes(marker)) {
-      violations.push(`.github/workflows/standalone-release.yml: container publication missing ${marker}`);
-    }
-  }
-  for (const marker of [
-    "- publish-container",
     "- sync-release-docs",
-    "name: kubernetes-manifest",
-    "cp artifacts/kubernetes-manifest/prodex-* release-assets/",
     "subject-path: release-assets/SHA256SUMS",
     "find release-assets -maxdepth 1 -type f -print0",
     'git tag "${version}" "${TARGET_SHA}"',
     'push origin "refs/tags/${version}"',
     "--checkpoint P --release-sha",
-    "docker buildx imagetools create",
-    "refusing to move it",
     "refusing to overwrite it",
   ]) {
     if (!release.includes(marker)) {
@@ -592,13 +569,11 @@ export function validateReleaseCodexExclusion(contents) {
     violations.push(".github/workflows/standalone-release.yml: release asset scope must be explicit");
   }
   const artifactSmoke = workflowJob(contents, "artifact-smoke") ?? "";
-  const container = workflowJob(contents, "publish-container") ?? "";
   const prepare = workflowJob(contents, "prepare-release") ?? "";
   const release = workflowJob(contents, "publish-github-release") ?? "";
   for (const [surface, job, marker] of [
     ["artifact and installer", artifactSmoke, "codex-purity-guard.mjs package-lock.json install.sh install.ps1 artifact"],
     ["staged npm package", artifactSmoke, "npm-package-smoke.mjs --binary-dir artifact"],
-    ["container filesystem", container, 'codex-purity-guard.mjs "${container_rootfs}"'],
     ["SBOM input", prepare, "codex-purity-guard.mjs sbom-input"],
     ["SBOM output", prepare, "codex-purity-guard.mjs release-sbom.spdx.json"],
     ["GitHub release assets", release, "codex-purity-guard.mjs release-assets"],
@@ -677,8 +652,6 @@ function selfTest() {
   artifact-smoke:
     run: node scripts/ci/codex-purity-guard.mjs package-lock.json install.sh install.ps1 artifact
     npm: node scripts/ci/npm-package-smoke.mjs --binary-dir artifact
-  publish-container:
-    run: node scripts/ci/codex-purity-guard.mjs "\${container_rootfs}"
   prepare-release:
     input: node scripts/ci/codex-purity-guard.mjs sbom-input
     output: node scripts/ci/codex-purity-guard.mjs release-sbom.spdx.json
