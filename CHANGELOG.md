@@ -2,69 +2,63 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.430.3 - 2026-09-21
+
+### Misc
+
+- Revalidate latest tool trees (`b2ac0c8`)
+- Support tunnel-client 0.0.13 (`b19c2c3`)
+# Prodex 0.430.3
+
+## New Features
+
+- No new MCP tool is added in this patch release. Full expose keeps its
+  preserved ten-tool contract, while `prodex s expose exec` remains
+  intentionally restricted to `prodex_super_exec`.
+
+## Bug Fixes
+
+- Make `prodex s expose exec --openai-tunnel-id ...` accept the official
+  OpenAI `tunnel-client` v0.0.13 release in addition to the preferred latest
+  v0.0.14 release. Both releases remain pinned to their exact upstream release
+  commit metadata, while unvetted versions or mismatched commits still fail
+  closed.
+- Revalidate the latest stable Caveman 2.7.0 and Ponytail 4.10.0 trees from
+  clean official tags and correct the vetted full-tree SHA-256 values.
+- Accept the prior known `prodex-tool.json` tree-digest metadata for those
+  exact vetted version/commit pairs so installations produced with the older
+  metadata remain usable. Prodex still recomputes the complete tree and
+  requires it to match the corrected current digest before activation.
+
+## Safety
+
+- OpenAI Secure MCP Tunnel continues to prefer v0.0.14, while compatibility
+  with the official v0.0.13 build is narrowly pinned to its upstream release
+  commit rather than accepting arbitrary version strings.
+- Optional-tool legacy manifest compatibility is limited to the previously
+  emitted digest for the same vetted version and commit. The actual tree must
+  still match the newly revalidated digest before activation.
+
+## Changelog
+
+- Optional Tools remain on the current stable release inventory: Caveman
+  2.7.0, RTK 0.49.0, Codebase Memory MCP 0.11.0, Playwright MCP 0.0.82,
+  Ponytail 4.10.0, and Presidio 2.2.364.
+- Added regression coverage for accepted official tunnel-client v0.0.14 and
+  v0.0.13 builds, rejection of an unvetted build, corrected Optional Tools
+  manifest compatibility, and release-pinned Mojo 1.0.0 policy compilation.
+- Source CI, including Real Mojo/parity, is required green before the release
+  metadata commit and standalone publication workflow.
+
+Full Changelog: [0.430.2...0.430.3](https://github.com/christiandoxa/prodex/compare/0.430.2...0.430.3)
+
 ## 0.430.2 - 2026-09-21
 
 ### Misc
 
+- Restore Windows session bridge portability (`9403127`)
+- Restore manual redeem command (`154876f`)
 - Restore preserved 0.429.4 behavior (`7122191`)
-# Prodex 0.430.2
-
-## New Features
-
-- Restore the complete preserved `prodex s expose` full-mode contract from
-  0.429.4: `prodex_super_start`, `prodex_super_status`,
-  `prodex_super_events`, `prodex_super_result`, `prodex_super_cancel`,
-  `prodex_super_list`, `prodex_super_exec`, `prodex_session_prompt_write`,
-  `prodex_session_preempt`, and `prodex_session_output_read`.
-- Restore the `prodex-audit-log` workspace component so preserved profile,
-  doctor, broker, and other current audit call sites persist checksummed,
-  private, redacted JSONL records again.
-- Restore manual `prodex redeem PROFILE` parity from 0.429.4, including
-  the Ratatui near-reset confirmation and result panels, OpenAI/Codex profile
-  validation, quota precheck, `--yes` / `--base-url` / `--no-proxy`
-  behavior, UUIDv7 redeem request IDs, and reset-credit consume outcomes.
-
-## Bug Fixes
-
-- Keep `prodex s expose exec` intentionally restricted to
-  `prodex_super_exec` while full mode regains the missing session/event tools.
-- Restore the fail-closed existing-session bridge for prompt delivery,
-  preemption, and bounded rollout output reads, including process/thread
-  identity checks, queue verification, stable cursors, output-source
-  validation, and no-replay behavior after ambiguous writes.
-- Restore 0.429.4 run-manager behavior for the preserved expose surface:
-  four active runs, sixteen queued runs, bounded terminal retention,
-  monotonic bounded event pages, provider/model/effort metadata, safe
-  cancellation, and full child argument forwarding for supported current
-  Super options.
-- Restore the bounded structured direct-exec result contract, including
-  cwd/env/stdin handling, timeout/process-tree termination, redacted bounded
-  stdout/stderr, exit/signal metadata, and truncation flags.
-- Make `prodex info` report the real configured audit-log path and existence
-  again instead of the 0.430.1 placeholder; audit persistence remains
-  best-effort for user operations.
-
-## Safety
-
-- Keep local loopback-only Super expose defaults and explicit OpenAI Secure
-  MCP Tunnel support.
-- Do not restore retired Cloudflare/public browser expose, dashboard/broker
-  browser surfaces, container/Kubernetes publication, or other intentionally
-  pruned legacy CLI surfaces.
-
-## Changelog
-
-- Revalidated preserved Ratatui/TUI flows for info, status, quota, log,
-  session, doctor, profile management, login, manual redeem, Super prompts, and
-  usage-limit recovery, plus the restored 0.429.4 session/output/direct-exec
-  contracts.
-- Static size/ownership/boundary guards, supply-chain checks, duplicate
-  dependency budgets, and Optional Tools freshness checks pass.
-- Optional Tools remain at the current stable versions audited for 0.430.1:
-  Caveman 2.7.0, RTK 0.49.0, Codebase Memory MCP 0.11.0, Playwright MCP
-  0.0.82, Ponytail 4.10.0, and Presidio 2.2.364.
-
-Full Changelog: [0.430.1...0.430.2](https://github.com/christiandoxa/prodex/compare/0.430.1...0.430.2)
 
 ## 0.430.1 - 2026-09-21
 
