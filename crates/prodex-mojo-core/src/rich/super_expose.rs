@@ -7,6 +7,7 @@ const SUPER_EXPOSE_MAX_NAME_BYTES: usize = 128;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SuperExposeMethod {
     Unknown,
+    ServerDiscover,
     Initialize,
     Ping,
     ToolsList,
@@ -23,6 +24,10 @@ pub enum SuperExposeTool {
     Cancel,
     List,
     Exec,
+    Events,
+    SessionPromptWrite,
+    SessionPreempt,
+    SessionOutputRead,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -87,6 +92,7 @@ pub fn super_expose_route(method: &str, tool: Option<&str>) -> Result<SuperExpos
     }
     Ok(SuperExposeRoute {
         method: match output[0] {
+            6 => SuperExposeMethod::ServerDiscover,
             1 => SuperExposeMethod::Initialize,
             2 => SuperExposeMethod::Ping,
             3 => SuperExposeMethod::ToolsList,
@@ -102,6 +108,10 @@ pub fn super_expose_route(method: &str, tool: Option<&str>) -> Result<SuperExpos
             4 => SuperExposeTool::Cancel,
             5 => SuperExposeTool::List,
             6 => SuperExposeTool::Exec,
+            7 => SuperExposeTool::Events,
+            8 => SuperExposeTool::SessionPromptWrite,
+            9 => SuperExposeTool::SessionPreempt,
+            10 => SuperExposeTool::SessionOutputRead,
             0 => SuperExposeTool::Unknown,
             _ => return Err(MojoError::InvalidOutput),
         },

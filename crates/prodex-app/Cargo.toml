@@ -53,6 +53,7 @@ getrandom = { workspace = true }
 libc = { workspace = true }
 os_info = { workspace = true }
 prodex_bench_support = { workspace = true, optional = true }
+prodex_audit_log = { workspace = true }
 codex_config = { workspace = true }
 prodex_optional_tools = { workspace = true }
 prodex_cli = { workspace = true }

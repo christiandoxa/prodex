@@ -2,23 +2,38 @@ use super::{bounded_redacted_text, logging::ExposeAuditLog, now_millis};
 use crate::{configure_child_process_group, terminate_child_process_tree};
 use anyhow::{Context, Result};
 use base64::Engine as _;
-use prodex_cli::{SuperArgs, SuperExternalProvider};
+use prodex_cli::SuperArgs;
 use serde_json::{Value, json};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, VecDeque};
 use std::io::{Read, Write};
 use std::path::PathBuf;
 use std::process::{Child, ChildStderr, ChildStdin, ChildStdout, Command, ExitStatus, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
-use std::thread;
+use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
 const MAX_ACTIVE_RUNS: usize = 4;
+const MAX_QUEUED_RUNS: usize = 16;
 const MAX_RETAINED_TERMINAL_RUNS: usize = 32;
 const OUTPUT_MAX_BYTES: usize = 256 * 1024;
+const MAX_RUN_EVENTS: usize = 256;
+const MAX_RUN_EVENT_TEXT_BYTES: usize = 8 * 1024;
+
+#[path = "run/child_args.rs"]
+mod child_args;
+#[path = "run/config.rs"]
+mod config;
+#[path = "run/helpers.rs"]
+mod helpers;
+
+use child_args::{api_key_env, build_child_args};
+use config::{apply_overrides, main_provider, validate_run_configuration};
+use helpers::*;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum RunState {
+    Queued,
     Starting,
     Running,
     Succeeded,
@@ -30,6 +45,7 @@ enum RunState {
 impl RunState {
     fn as_str(self) -> &'static str {
         match self {
+            Self::Queued => "queued",
             Self::Starting => "starting",
             Self::Running => "running",
             Self::Succeeded => "succeeded",
@@ -56,7 +72,38 @@ struct RunManagerInner {
     workspace: PathBuf,
     base_args: SuperArgs,
     audit: ExposeAuditLog,
-    runs: Mutex<BTreeMap<String, RunRecord>>,
+    instance_id: String,
+    workspace_name: String,
+    state: Mutex<RunManagerState>,
+    threads: Mutex<Vec<JoinHandle<()>>>,
+}
+
+struct RunManagerState {
+    runs: BTreeMap<String, RunRecord>,
+    queue: VecDeque<QueuedRun>,
+    active_runs: usize,
+    shutting_down: bool,
+}
+
+struct QueuedRun {
+    run_id: String,
+    task: String,
+    args: SuperArgs,
+    cancel: Arc<AtomicBool>,
+    child: Arc<Mutex<Option<Child>>>,
+}
+
+#[derive(Clone, Debug)]
+pub(super) struct RunEvent {
+    pub(super) seq: u64,
+    pub(super) event_type: String,
+    pub(super) text: String,
+}
+
+pub(super) struct RunEvents {
+    pub(super) events: Vec<RunEvent>,
+    pub(super) next_seq: u64,
+    pub(super) truncated: bool,
 }
 
 struct RunRecord {
@@ -67,18 +114,42 @@ struct RunRecord {
     exit_status: Option<i32>,
     output: String,
     output_truncated: bool,
+    events: VecDeque<RunEvent>,
+    next_seq: u64,
     cancel: Arc<AtomicBool>,
     child: Arc<Mutex<Option<Child>>>,
+    provider: Option<String>,
+    model: Option<String>,
+    reasoning_effort: Option<String>,
 }
 
 impl RunManager {
-    pub(super) fn new(workspace: PathBuf, base_args: SuperArgs, audit: ExposeAuditLog) -> Self {
+    pub(super) fn new(
+        workspace: PathBuf,
+        base_args: SuperArgs,
+        audit: ExposeAuditLog,
+        instance_id: String,
+    ) -> Self {
+        let workspace_name = workspace
+            .file_name()
+            .and_then(|name| name.to_str())
+            .filter(|name| !name.is_empty())
+            .unwrap_or("workspace")
+            .to_string();
         Self {
             inner: Arc::new(RunManagerInner {
                 workspace,
                 base_args,
                 audit,
-                runs: Mutex::new(BTreeMap::new()),
+                instance_id,
+                workspace_name,
+                state: Mutex::new(RunManagerState {
+                    runs: BTreeMap::new(),
+                    queue: VecDeque::new(),
+                    active_runs: 0,
+                    shutting_down: false,
+                }),
+                threads: Mutex::new(Vec::new()),
             }),
         }
     }
@@ -88,67 +159,86 @@ impl RunManager {
         task: String,
         overrides: &Value,
     ) -> std::result::Result<Value, String> {
+        self.reap_finished_threads();
         if task.trim().is_empty() || task.len() > 65_536 {
             return Err("task is empty or too large".to_string());
         }
         let mut args = self.inner.base_args.clone();
         apply_overrides(&mut args, overrides)?;
-        args.validate_urls().map_err(|error| error.to_string())?;
+        validate_run_configuration(&args)?;
 
         let run_id = new_run_id().map_err(|error| error.to_string())?;
         let cancel = Arc::new(AtomicBool::new(false));
         let child = Arc::new(Mutex::new(None));
+        let provider = Some(main_provider(&args).label().to_string());
+        let model = args
+            .local_model
+            .clone()
+            .or_else(|| crate::codex_cli_config_override_value(&args.codex_args, "model"));
+        let reasoning_effort =
+            crate::codex_cli_config_override_value(&args.codex_args, "model_reasoning_effort");
+
         {
-            let mut runs = self
+            let mut state = self
                 .inner
-                .runs
+                .state
                 .lock()
                 .map_err(|_| "run manager unavailable".to_string())?;
-            if runs.values().filter(|run| !run.state.terminal()).count() >= MAX_ACTIVE_RUNS {
+            if state.shutting_down {
+                return Err("run manager is stopping".to_string());
+            }
+            if state.queue.len() >= MAX_QUEUED_RUNS && state.active_runs >= MAX_ACTIVE_RUNS {
                 self.inner.audit.event(
                     "super_expose_run_rejected",
-                    [crate::runtime_proxy_log_field("reason", "active_limit")],
+                    [crate::runtime_proxy_log_field("reason", "queue_full")],
                 );
-                return Err(format!(
-                    "active run limit reached ({MAX_ACTIVE_RUNS}); wait for a run to finish"
-                ));
+                return Err("run queue is full".to_string());
             }
-            runs.insert(
-                run_id.clone(),
-                RunRecord {
-                    state: RunState::Starting,
-                    created_at: now_millis(),
-                    started_at: None,
-                    finished_at: None,
-                    exit_status: None,
-                    output: String::new(),
-                    output_truncated: false,
-                    cancel: cancel.clone(),
-                    child: child.clone(),
-                },
-            );
+            let mut record = RunRecord {
+                state: RunState::Queued,
+                created_at: now_millis(),
+                started_at: None,
+                finished_at: None,
+                exit_status: None,
+                output: String::new(),
+                output_truncated: false,
+                events: VecDeque::new(),
+                next_seq: 0,
+                cancel: cancel.clone(),
+                child: child.clone(),
+                provider,
+                model,
+                reasoning_effort,
+            };
+            push_event(&mut record, "run_queued", "");
+            state.runs.insert(run_id.clone(), record);
+            state.queue.push_back(QueuedRun {
+                run_id: run_id.clone(),
+                task,
+                args,
+                cancel,
+                child,
+            });
+            self.dispatch_locked(&mut state);
         }
 
         self.inner.audit.event(
             "super_expose_run_created",
             [crate::runtime_proxy_log_field("run_id", run_id.clone())],
         );
-        let manager = self.clone();
-        let thread_run_id = run_id.clone();
-        thread::spawn(move || manager.execute(thread_run_id, task, args, cancel, child));
         self.status(&run_id)
             .ok_or_else(|| "run manager lost new run".to_string())
     }
 
     pub(super) fn status(&self, run_id: &str) -> Option<Value> {
-        let runs = self.inner.runs.lock().ok()?;
-        let record = runs.get(run_id)?;
+        let state = self.inner.state.lock().ok()?;
+        let record = state.runs.get(run_id)?;
         Some(summary_json(run_id, record))
     }
 
     pub(super) fn result(&self, run_id: &str) -> Option<Value> {
-        let runs = self.inner.runs.lock().ok()?;
-        let record = runs.get(run_id)?;
+        let state = self.inner.state.lock().ok()?;
+        let record = state.runs.get(run_id)?;
         let mut result = summary_json(run_id, record);
         result["output"] = Value::String(record.output.clone());
         result["output_truncated"] = Value::Bool(record.output_truncated);
@@ -156,51 +246,159 @@ impl RunManager {
     }
 
     pub(super) fn list(&self) -> Vec<Value> {
-        let Ok(runs) = self.inner.runs.lock() else {
+        let Ok(state) = self.inner.state.lock() else {
             return Vec::new();
         };
-        runs.iter()
+        state
+            .runs
+            .iter()
             .map(|(run_id, record)| summary_json(run_id, record))
             .collect()
     }
 
+    pub(super) fn events(&self, run_id: &str, after_seq: u64, limit: usize) -> Option<RunEvents> {
+        let state = self.inner.state.lock().ok()?;
+        let record = state.runs.get(run_id)?;
+        Some(events_page(record, after_seq, limit))
+    }
+
     pub(super) fn cancel(&self, run_id: &str) -> Option<Value> {
-        let child = {
-            let mut runs = self.inner.runs.lock().ok()?;
-            let record = runs.get_mut(run_id)?;
-            if record.state.terminal() {
-                return Some(summary_json(run_id, record));
-            }
-            record.cancel.store(true, Ordering::SeqCst);
+        let (child, queued) = {
+            let mut state = self.inner.state.lock().ok()?;
+            let (child, queued) = {
+                let record = state.runs.get_mut(run_id)?;
+                if record.state.terminal() {
+                    return Some(summary_json(run_id, record));
+                }
+                record.cancel.store(true, Ordering::SeqCst);
+                (record.child.clone(), record.state == RunState::Queued)
+            };
             self.inner.audit.event(
                 "super_expose_run_cancel_requested",
                 [crate::runtime_proxy_log_field("run_id", run_id.to_string())],
             );
-            record.child.clone()
+            if queued {
+                state.queue.retain(|job| job.run_id != run_id);
+                if let Some(record) = state.runs.get_mut(run_id) {
+                    record.state = RunState::Cancelled;
+                    record.finished_at = Some(now_millis());
+                    push_event(record, "run_cancelled", "");
+                }
+                prune_terminal_runs(&mut state.runs);
+                self.dispatch_locked(&mut state);
+            }
+            (child, queued)
         };
-        if let Ok(mut child) = child.lock()
+        if !queued
+            && let Ok(mut child) = child.lock()
             && let Some(child) = child.as_mut()
         {
             let _ = terminate_child_process_tree(child, true);
         }
         self.status(run_id)
     }
-    fn execute(
-        &self,
-        run_id: String,
-        task: String,
-        args: SuperArgs,
-        cancel: Arc<AtomicBool>,
-        child_slot: Arc<Mutex<Option<Child>>>,
-    ) {
-        let command = match self.child_command(&args) {
+
+    fn dispatch_locked(&self, state: &mut RunManagerState) {
+        if state.shutting_down {
+            return;
+        }
+        while state.active_runs < MAX_ACTIVE_RUNS && !state.queue.is_empty() {
+            let Some(job) = state.queue.pop_front() else {
+                break;
+            };
+            let Some(record) = state.runs.get_mut(&job.run_id) else {
+                continue;
+            };
+            if record.state != RunState::Queued {
+                continue;
+            }
+            state.active_runs += 1;
+            record.state = RunState::Starting;
+            record.started_at = Some(now_millis());
+            push_event(record, "run_started", "");
+            let manager = self.clone();
+            let handle = thread::spawn(move || manager.execute(job));
+            if let Ok(mut threads) = self.inner.threads.lock() {
+                threads.push(handle);
+            }
+        }
+    }
+
+    fn reap_finished_threads(&self) {
+        let Ok(mut threads) = self.inner.threads.lock() else {
+            return;
+        };
+        let mut active = Vec::with_capacity(threads.len());
+        for handle in threads.drain(..) {
+            if handle.is_finished() {
+                let _ = handle.join();
+            } else {
+                active.push(handle);
+            }
+        }
+        *threads = active;
+    }
+
+    fn shutdown(&self) {
+        let children = {
+            let Ok(mut state) = self.inner.state.lock() else {
+                return;
+            };
+            if state.shutting_down {
+                Vec::new()
+            } else {
+                state.shutting_down = true;
+                state.queue.clear();
+                let now = now_millis();
+                let mut children = Vec::new();
+                for record in state.runs.values_mut() {
+                    if record.state.terminal() {
+                        continue;
+                    }
+                    record.cancel.store(true, Ordering::SeqCst);
+                    if record.state == RunState::Queued {
+                        record.state = RunState::Cancelled;
+                        record.finished_at = Some(now);
+                        push_event(record, "run_cancelled", "");
+                    } else {
+                        children.push(record.child.clone());
+                    }
+                }
+                children
+            }
+        };
+        for child in children {
+            terminate_registered_child(&child);
+        }
+        let handles = self
+            .inner
+            .threads
+            .lock()
+            .map(|mut threads| threads.drain(..).collect::<Vec<_>>())
+            .unwrap_or_default();
+        for handle in handles {
+            let _ = crate::join_thread_with_timeout(
+                handle,
+                Duration::from_secs(2),
+                "expose run worker",
+            );
+        }
+    }
+
+    fn execute(&self, job: QueuedRun) {
+        let run_id = job.run_id.clone();
+        if job.cancel.load(Ordering::SeqCst) {
+            self.finish_cancelled(&run_id);
+            return;
+        }
+        let command = match self.child_command(&job.args) {
             Ok(command) => command,
             Err(message) => {
                 self.record_start_failure(&run_id, "current_exe", &message);
                 return;
             }
         };
-        let pipes = match spawn_registered_child(command, &child_slot) {
+        let pipes = match spawn_registered_child(command, &job.child) {
             Ok(handles) => handles,
             Err(message) => {
                 self.record_start_failure(&run_id, "spawn", &message);
@@ -214,11 +412,11 @@ impl RunManager {
             [crate::runtime_proxy_log_field("run_id", run_id.clone())],
         );
         let readers = spawn_child_readers(self.clone(), &run_id, pipes.stdout, pipes.stderr);
-        write_child_task(pipes.stdin, &task, &cancel);
-        let status = poll_child_status(&child_slot, &cancel);
-        clear_child_slot(&child_slot);
+        write_child_task(pipes.stdin, &job.task, &job.cancel);
+        let status = poll_child_status(&job.child, &job.cancel);
+        clear_child_slot(&job.child);
         join_child_readers(readers);
-        self.finish_run(&run_id, &cancel, status);
+        self.finish_run(&run_id, &job.cancel, status);
     }
 
     fn child_command(&self, args: &SuperArgs) -> std::result::Result<Command, String> {
@@ -230,11 +428,15 @@ impl RunManager {
             .current_dir(&self.inner.workspace)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
-            .stderr(Stdio::piped());
+            .stderr(Stdio::piped())
+            .env("PRODEX_EXPOSE_INSTANCE_ID", &self.inner.instance_id)
+            .env("PRODEX_EXPOSE_WORKSPACE_NAME", &self.inner.workspace_name)
+            .env_remove("CONTROL_PLANE_API_KEY");
         if let Some((name, value)) = api_key_env(args) {
             command.env(name, value);
         }
         configure_child_process_group(&mut command, true);
+        crate::configure_child_parent_death(&mut command);
         Ok(command)
     }
 
@@ -250,15 +452,29 @@ impl RunManager {
     }
 
     fn finish_run(&self, run_id: &str, cancel: &AtomicBool, status: Option<ExitStatus>) {
-        let Ok(mut runs) = self.inner.runs.lock() else {
+        let Ok(mut state) = self.inner.state.lock() else {
             return;
         };
-        let (state, exit_code, output_bytes, output_truncated) = {
-            let Some(record) = runs.get_mut(run_id) else {
+        let (run_state, exit_code, output_bytes, output_truncated) = {
+            let Some(record) = state.runs.get_mut(run_id) else {
                 return;
             };
+            if record.state.terminal() {
+                return;
+            }
             record.finished_at = Some(now_millis());
             apply_run_terminal_state(record, cancel.load(Ordering::SeqCst), status);
+            push_event(
+                record,
+                match record.state {
+                    RunState::Succeeded => "run_succeeded",
+                    RunState::Failed => "run_failed",
+                    RunState::Cancelled => "run_cancelled",
+                    RunState::StartFailed => "run_start_failed",
+                    RunState::Queued | RunState::Starting | RunState::Running => "run_failed",
+                },
+                "",
+            );
             (
                 record.state,
                 record.exit_status,
@@ -266,12 +482,15 @@ impl RunManager {
                 record.output_truncated,
             )
         };
-        prune_terminal_runs(&mut runs);
+        state.active_runs = state.active_runs.saturating_sub(1);
+        prune_terminal_runs(&mut state.runs);
+        self.dispatch_locked(&mut state);
+        drop(state);
         self.inner.audit.event(
             "super_expose_run_completed",
             [
                 crate::runtime_proxy_log_field("run_id", run_id.to_string()),
-                crate::runtime_proxy_log_field("state", state.as_str()),
+                crate::runtime_proxy_log_field("state", run_state.as_str()),
                 crate::runtime_proxy_log_field(
                     "exit_code",
                     exit_code.map_or_else(|| "none".to_string(), |code| code.to_string()),
@@ -282,363 +501,103 @@ impl RunManager {
         );
     }
 
+    fn finish_cancelled(&self, run_id: &str) {
+        let Ok(mut state) = self.inner.state.lock() else {
+            return;
+        };
+        if let Some(record) = state.runs.get_mut(run_id)
+            && !record.state.terminal()
+        {
+            record.state = RunState::Cancelled;
+            record.finished_at = Some(now_millis());
+            push_event(record, "run_cancelled", "");
+            state.active_runs = state.active_runs.saturating_sub(1);
+            prune_terminal_runs(&mut state.runs);
+            self.dispatch_locked(&mut state);
+        }
+    }
+
     fn mark_running(&self, run_id: &str) {
-        if let Ok(mut runs) = self.inner.runs.lock()
-            && let Some(record) = runs.get_mut(run_id)
+        if let Ok(mut state) = self.inner.state.lock()
+            && let Some(record) = state.runs.get_mut(run_id)
+            && record.state == RunState::Starting
         {
             record.state = RunState::Running;
-            record.started_at = Some(now_millis());
         }
     }
 
     fn finish_start_failed(&self, run_id: &str, message: &str) {
-        if let Ok(mut runs) = self.inner.runs.lock() {
-            if let Some(record) = runs.get_mut(run_id) {
-                record.state = RunState::StartFailed;
+        if let Ok(mut state) = self.inner.state.lock() {
+            if let Some(record) = state.runs.get_mut(run_id)
+                && !record.state.terminal()
+            {
+                record.state = if record.cancel.load(Ordering::SeqCst) {
+                    RunState::Cancelled
+                } else {
+                    RunState::StartFailed
+                };
                 record.finished_at = Some(now_millis());
-                append_output(record, message.as_bytes());
-            }
-            prune_terminal_runs(&mut runs);
-        }
-    }
-
-    fn append(&self, run_id: &str, bytes: &[u8]) {
-        if let Ok(mut runs) = self.inner.runs.lock()
-            && let Some(record) = runs.get_mut(run_id)
-        {
-            append_output(record, bytes);
-        }
-    }
-}
-
-fn prune_terminal_runs(runs: &mut BTreeMap<String, RunRecord>) {
-    while runs.values().filter(|run| run.state.terminal()).count() > MAX_RETAINED_TERMINAL_RUNS {
-        let Some(oldest_id) = runs
-            .iter()
-            .filter(|(_, run)| run.state.terminal())
-            .min_by_key(|(_, run)| (run.finished_at.unwrap_or(run.created_at), run.created_at))
-            .map(|(run_id, _)| run_id.clone())
-        else {
-            break;
-        };
-        runs.remove(&oldest_id);
-    }
-}
-
-struct SpawnedChildPipes {
-    stdout: Option<ChildStdout>,
-    stderr: Option<ChildStderr>,
-    stdin: Option<ChildStdin>,
-}
-
-fn spawn_registered_child(
-    mut command: Command,
-    child_slot: &Arc<Mutex<Option<Child>>>,
-) -> std::result::Result<SpawnedChildPipes, String> {
-    let mut child = command.spawn().map_err(|error| format!("spawn: {error}"))?;
-    let stdout = child.stdout.take();
-    let stderr = child.stderr.take();
-    let stdin = child.stdin.take();
-    let Ok(mut slot) = child_slot.lock() else {
-        let _ = terminate_child_process_tree(&mut child, true);
-        return Err("child state unavailable".to_string());
-    };
-    *slot = Some(child);
-    Ok(SpawnedChildPipes {
-        stdout,
-        stderr,
-        stdin,
-    })
-}
-
-fn spawn_child_readers(
-    manager: RunManager,
-    run_id: &str,
-    stdout: Option<ChildStdout>,
-    stderr: Option<ChildStderr>,
-) -> Vec<thread::JoinHandle<()>> {
-    [
-        stdout.map(|reader| spawn_reader(manager.clone(), run_id.to_string(), reader)),
-        stderr.map(|reader| spawn_reader(manager, run_id.to_string(), reader)),
-    ]
-    .into_iter()
-    .flatten()
-    .collect()
-}
-
-fn write_child_task(mut stdin: Option<ChildStdin>, task: &str, cancel: &AtomicBool) {
-    let Some(mut stdin) = stdin.take() else {
-        return;
-    };
-    if stdin.write_all(task.as_bytes()).is_err() || stdin.flush().is_err() {
-        cancel.store(true, Ordering::SeqCst);
-    }
-}
-
-fn poll_child_status(
-    child_slot: &Arc<Mutex<Option<Child>>>,
-    cancel: &AtomicBool,
-) -> Option<ExitStatus> {
-    loop {
-        if cancel.load(Ordering::SeqCst) {
-            terminate_registered_child(child_slot);
-        }
-        let polled = child_slot
-            .lock()
-            .ok()
-            .and_then(|mut slot| slot.as_mut().map(Child::try_wait));
-        match polled {
-            Some(Ok(Some(status))) => return Some(status),
-            Some(Ok(None)) => thread::sleep(Duration::from_millis(25)),
-            Some(Err(_)) | None => return None,
-        }
-    }
-}
-
-fn terminate_registered_child(child_slot: &Arc<Mutex<Option<Child>>>) {
-    if let Ok(mut slot) = child_slot.lock()
-        && let Some(child) = slot.as_mut()
-    {
-        let _ = terminate_child_process_tree(child, true);
-    }
-}
-
-fn clear_child_slot(child_slot: &Arc<Mutex<Option<Child>>>) {
-    if let Ok(mut slot) = child_slot.lock() {
-        slot.take();
-    }
-}
-
-fn join_child_readers(readers: Vec<thread::JoinHandle<()>>) {
-    for reader in readers {
-        let _ = reader.join();
-    }
-}
-
-fn apply_run_terminal_state(record: &mut RunRecord, cancelled: bool, status: Option<ExitStatus>) {
-    if cancelled {
-        record.state = RunState::Cancelled;
-        return;
-    }
-    let Some(status) = status else {
-        record.state = RunState::StartFailed;
-        return;
-    };
-    record.exit_status = status.code();
-    record.state = if status.success() {
-        RunState::Succeeded
-    } else {
-        RunState::Failed
-    };
-}
-
-fn spawn_reader(
-    manager: RunManager,
-    run_id: String,
-    mut reader: impl Read + Send + 'static,
-) -> thread::JoinHandle<()> {
-    thread::spawn(move || {
-        let mut buffer = [0_u8; 4096];
-        loop {
-            match reader.read(&mut buffer) {
-                Ok(0) => break,
-                Ok(size) => manager.append(&run_id, &buffer[..size]),
-                Err(_) => break,
-            }
-        }
-    })
-}
-
-fn append_output(record: &mut RunRecord, bytes: &[u8]) {
-    let text = bounded_redacted_text(bytes, OUTPUT_MAX_BYTES);
-    let remaining = OUTPUT_MAX_BYTES.saturating_sub(record.output.len());
-    if remaining == 0 {
-        record.output_truncated = true;
-        return;
-    }
-    let mut end = text.len().min(remaining);
-    while !text.is_char_boundary(end) {
-        end = end.saturating_sub(1);
-    }
-    record.output.push_str(&text[..end]);
-    record.output_truncated |= end < text.len();
-}
-
-fn summary_json(run_id: &str, record: &RunRecord) -> Value {
-    json!({
-        "run_id": run_id,
-        "state": record.state.as_str(),
-        "created_at": record.created_at,
-        "started_at": record.started_at,
-        "finished_at": record.finished_at,
-        "exit_status": record.exit_status,
-        "cancellation_requested": record.cancel.load(Ordering::SeqCst),
-    })
-}
-
-fn new_run_id() -> Result<String> {
-    let mut bytes = [0_u8; 12];
-    getrandom::fill(&mut bytes).context("failed to generate expose run id")?;
-    Ok(format!(
-        "spr_{}",
-        base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(bytes)
-    ))
-}
-
-fn apply_overrides(args: &mut SuperArgs, values: &Value) -> std::result::Result<(), String> {
-    if let Some(profile) = optional_string(values, "profile")? {
-        args.profile = Some(profile.to_string());
-    }
-    if let Some(model) = optional_string(values, "model")? {
-        args.local_model = Some(model.to_string());
-    }
-    if let Some(effort) = optional_string(values, "reasoning_effort")? {
-        args.codex_args.extend([
-            "-c".into(),
-            format!("model_reasoning_effort={}", toml_string(effort)).into(),
-        ]);
-    }
-    if let Some(provider) = optional_string(values, "provider")? {
-        let provider = prodex_provider_core::ProviderId::parse(provider)
-            .ok_or_else(|| "provider is unsupported".to_string())?;
-        args.url = None;
-        args.api_key = None;
-        args.provider = match provider {
-            prodex_provider_core::ProviderId::OpenAi => None,
-            prodex_provider_core::ProviderId::Local => {
-                return Err(
-                    "local provider override requires --url on the exposed base command"
-                        .to_string(),
+                append_output(record, "stderr", message.as_bytes());
+                push_event(
+                    record,
+                    if record.state == RunState::Cancelled {
+                        "run_cancelled"
+                    } else {
+                        "run_start_failed"
+                    },
+                    if record.state == RunState::Cancelled {
+                        ""
+                    } else {
+                        "Super child could not start"
+                    },
                 );
+                state.active_runs = state.active_runs.saturating_sub(1);
+                prune_terminal_runs(&mut state.runs);
+                self.dispatch_locked(&mut state);
             }
-            provider => SuperExternalProvider::from_provider_id(provider),
-        };
-        if provider != prodex_provider_core::ProviderId::OpenAi && args.provider.is_none() {
-            return Err("provider is unsupported".to_string());
         }
     }
-    if let Some(sub_agents) = values.get("sub_agents").and_then(Value::as_bool) {
-        args.sub_agent = sub_agents;
-        args.no_sub_agent = !sub_agents;
-    }
-    Ok(())
-}
 
-fn optional_string<'a>(
-    values: &'a Value,
-    name: &str,
-) -> std::result::Result<Option<&'a str>, String> {
-    let Some(value) = values.get(name) else {
-        return Ok(None);
-    };
-    if value.is_null() {
-        return Ok(None);
-    }
-    value
-        .as_str()
-        .map(Some)
-        .ok_or_else(|| format!("{name} must be a string"))
-}
-
-fn toml_string(value: &str) -> String {
-    format!(
-        "\"{}\"",
-        value
-            .replace('\\', "\\\\")
-            .replace('"', "\\\"")
-            .replace('\n', "\\n")
-    )
-}
-
-pub(super) fn build_child_args(args: &SuperArgs) -> Vec<std::ffi::OsString> {
-    let mut output = vec!["s".into(), "--full-access".into()];
-    push_option(&mut output, "--profile", args.profile.as_deref());
-    if args.no_auto_rotate {
-        output.push("--no-auto-rotate".into());
-    }
-    if args.auto_redeem {
-        output.push("--auto-redeem".into());
-    }
-    if args.skip_quota_check {
-        output.push("--skip-quota-check".into());
-    }
-    push_option(&mut output, "--base-url", args.base_url.as_deref());
-    if args.no_proxy {
-        output.push("--no-proxy".into());
-    }
-    if args.presidio {
-        output.push("--presidio".into());
-    } else {
-        output.push("--no-presidio".into());
-    }
-    if args.sub_agent {
-        output.push("--sub-agent".into());
-        push_option(
-            &mut output,
-            "--sub-agent-provider",
-            args.sub_agent_provider.map(|provider| provider.label()),
-        );
-        push_option(
-            &mut output,
-            "--sub-agent-model",
-            args.sub_agent_model.as_deref(),
-        );
-        if let Some(effort) = args.sub_agent_model_reasoning_effort {
-            push_option(
-                &mut output,
-                "--sub-agent-model-reasoning-effort",
-                Some(effort.as_str()),
-            );
+    fn append(&self, run_id: &str, event_type: &'static str, bytes: &[u8]) {
+        if let Ok(mut state) = self.inner.state.lock()
+            && let Some(record) = state.runs.get_mut(run_id)
+        {
+            append_output(record, event_type, bytes);
         }
-    } else if args.no_sub_agent {
-        output.push("--no-sub-agent".into());
-    }
-    for tool in &args.tools {
-        output.extend(["--tool".into(), tool.to_string().into()]);
-    }
-    for tool in &args.required_tools {
-        output.extend(["--require-tool".into(), tool.to_string().into()]);
-    }
-    push_option(&mut output, "--url", args.url.as_deref());
-    if let Some(provider) = args.provider {
-        push_option(&mut output, "--provider", Some(provider.as_str()));
-    }
-    push_option(&mut output, "--model", args.local_model.as_deref());
-    if let Some(value) = args.local_context_window {
-        output.extend(["--context-window".into(), value.to_string().into()]);
-    }
-    if let Some(value) = args.local_auto_compact_token_limit {
-        output.extend([
-            "--auto-compact-token-limit".into(),
-            value.to_string().into(),
-        ]);
-    }
-    output.extend(args.codex_features.to_codex_config_args());
-    output.extend(args.codex_args.iter().cloned());
-    output.extend(["exec".into(), "-".into()]);
-    output
-}
-
-fn push_option(output: &mut Vec<std::ffi::OsString>, name: &str, value: Option<&str>) {
-    if let Some(value) = value.filter(|value| !value.is_empty()) {
-        output.extend([name.into(), value.into()]);
     }
 }
 
-fn api_key_env(args: &SuperArgs) -> Option<(&'static str, &str)> {
-    let key = args.api_key.as_deref()?;
-    Some(match args.provider? {
-        SuperExternalProvider::Anthropic => ("ANTHROPIC_API_KEY", key),
-        SuperExternalProvider::Copilot => ("GITHUB_COPILOT_API_KEY", key),
-        SuperExternalProvider::DeepSeek => ("DEEPSEEK_API_KEY", key),
-        SuperExternalProvider::Gemini => ("GEMINI_API_KEY", key),
-        SuperExternalProvider::Kiro => return None,
-    })
+impl Drop for RunManager {
+    fn drop(&mut self) {
+        if Arc::strong_count(&self.inner) == 1 {
+            self.shutdown();
+        }
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::ffi::OsString;
+
+    fn record() -> RunRecord {
+        RunRecord {
+            state: RunState::Queued,
+            created_at: 1,
+            started_at: None,
+            finished_at: None,
+            exit_status: None,
+            output: String::new(),
+            output_truncated: false,
+            events: VecDeque::new(),
+            next_seq: 0,
+            cancel: Arc::new(AtomicBool::new(false)),
+            child: Arc::new(Mutex::new(None)),
+            provider: Some("openai".to_string()),
+            model: Some("gpt-test".to_string()),
+            reasoning_effort: Some("high".to_string()),
+        }
+    }
 
     #[test]
     fn child_args_use_normal_super_exec_lifecycle() {
@@ -659,5 +618,150 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec!["-".to_string(), "exec".to_string()]
         );
+    }
+
+    #[test]
+    fn native_agy_child_args_do_not_receive_codex_exec_or_generated_config() {
+        let prodex_cli::Commands::Super(mut args) = prodex_cli::parse_cli_command_from([
+            "prodex",
+            "s",
+            "gemini",
+            "--cli",
+            "agy",
+            "--no-presidio",
+        ])
+        .unwrap() else {
+            panic!("expected super args");
+        };
+        args.codex_args = vec![
+            OsString::from("-c"),
+            OsString::from("model_provider=\"gemini\""),
+            OsString::from("--config"),
+            OsString::from("model_reasoning_effort=\"max\""),
+            OsString::from("--prompt"),
+            OsString::from("review"),
+        ];
+        let child = build_child_args(&args);
+        assert!(child.iter().any(|value| value == "--cli"));
+        assert!(child.iter().any(|value| value == "agy"));
+        assert!(child.iter().any(|value| value == "--prompt"));
+        assert!(child.iter().any(|value| value == "review"));
+        assert!(!child.iter().any(|value| value == "exec" || value == "-"));
+        assert!(!child.iter().any(|value| {
+            let value = value.to_string_lossy();
+            value.contains("model_provider") || value.contains("model_reasoning_effort")
+        }));
+    }
+
+    #[test]
+    fn sub_agent_url_and_concurrency_are_forwarded() {
+        let prodex_cli::Commands::Super(args) = prodex_cli::parse_cli_command_from([
+            "prodex",
+            "s",
+            "--sub-agent",
+            "--sub-agent-provider",
+            "openai",
+            "--sub-agent-url",
+            "http://127.0.0.1:8787/v1",
+            "--sub-agent-max-concurrency",
+            "3",
+            "--no-presidio",
+        ])
+        .unwrap() else {
+            panic!("expected super args");
+        };
+        let child = build_child_args(&args);
+        let rendered = child
+            .iter()
+            .map(|value| value.to_string_lossy().into_owned())
+            .collect::<Vec<_>>();
+        assert!(
+            rendered
+                .windows(2)
+                .any(|pair| pair == ["--sub-agent-url", "http://127.0.0.1:8787/v1"])
+        );
+        assert!(
+            rendered
+                .windows(2)
+                .any(|pair| pair == ["--sub-agent-max-concurrency", "3"])
+        );
+    }
+
+    #[test]
+    fn run_ids_match_the_04294_opaque_shape() {
+        let one = new_run_id().expect("first run id");
+        let two = new_run_id().expect("second run id");
+        assert_ne!(one, two);
+        assert!(one.starts_with("spr_"));
+        assert_eq!(one.len(), 26);
+        assert!(
+            one.bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-'))
+        );
+    }
+
+    #[test]
+    fn run_limits_match_04294() {
+        assert_eq!(MAX_ACTIVE_RUNS, 4);
+        assert_eq!(MAX_QUEUED_RUNS, 16);
+        assert_eq!(MAX_RETAINED_TERMINAL_RUNS, 32);
+        assert_eq!(MAX_RUN_EVENTS, 256);
+        assert_eq!(MAX_RUN_EVENT_TEXT_BYTES, 8 * 1024);
+        assert_eq!(OUTPUT_MAX_BYTES, 256 * 1024);
+    }
+
+    #[test]
+    fn event_retention_and_pagination_match_04294() {
+        let mut record = record();
+        for index in 0..300 {
+            push_event(&mut record, "stdout", &format!("event-{index}"));
+        }
+        assert_eq!(record.events.len(), 256);
+        assert_eq!(record.events.front().map(|event| event.seq), Some(44));
+        assert_eq!(record.next_seq, 300);
+
+        let page = events_page(&record, 0, 64);
+        assert_eq!(page.events.len(), 64);
+        assert_eq!(page.events.first().map(|event| event.seq), Some(44));
+        assert_eq!(page.events.last().map(|event| event.seq), Some(107));
+        assert_eq!(page.next_seq, 300);
+        assert!(page.truncated);
+
+        let next = events_page(&record, 107, 64);
+        assert_eq!(next.events.first().map(|event| event.seq), Some(108));
+        assert!(!next.truncated);
+    }
+
+    #[test]
+    fn stdout_events_continue_after_aggregate_output_is_truncated() {
+        let mut record = record();
+        record.output = "x".repeat(OUTPUT_MAX_BYTES);
+        append_output(&mut record, "stdout", b"later-output");
+        assert_eq!(record.output.len(), OUTPUT_MAX_BYTES);
+        assert!(record.output_truncated);
+        assert!(
+            record
+                .events
+                .iter()
+                .any(|event| event.event_type == "stdout" && event.text == "later-output")
+        );
+        assert_eq!(
+            record
+                .events
+                .iter()
+                .filter(|event| event.event_type == "output_truncated")
+                .count(),
+            1
+        );
+    }
+
+    #[test]
+    fn summary_keeps_provider_model_and_effort_metadata() {
+        let record = record();
+        let summary = summary_json("spr_fixture", &record);
+        assert_eq!(summary["provider"], "openai");
+        assert_eq!(summary["model"], "gpt-test");
+        assert_eq!(summary["reasoning_effort"], "high");
+        assert_eq!(summary["state"], "queued");
     }
 }

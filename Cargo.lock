@@ -2521,6 +2521,7 @@ dependencies = [
  "getrandom 0.4.3",
  "libc",
  "os_info",
+ "prodex-audit-log",
  "prodex-bench-support",
  "prodex-cli",
  "prodex-codex-config",
@@ -2575,6 +2576,19 @@ dependencies = [
  "windows-sys 0.61.2",
  "zeroize",
  "zstd",
+]
+
+[[package]]
+name = "prodex-audit-log"
+version = "0.430.1"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "libc",
+ "prodex-redaction",
+ "serde",
+ "serde_json",
+ "sha2 0.11.0",
 ]
 
 [[package]]
