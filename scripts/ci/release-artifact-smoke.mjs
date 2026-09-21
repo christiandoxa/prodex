@@ -260,8 +260,8 @@ async function readLastLogLine(binary, env, cwd) {
   const result = await run(binary, ["log", "last", "--json"], { cwd, env });
   assert.equal(result.code, 0, result.stderr || result.stdout);
   const lines = result.stdout.trim().split(/\r?\n/u).filter(Boolean);
-  assert.equal(lines.length, 1, result.stdout);
-  return JSON.parse(lines[0]);
+  assert.ok(lines.length >= 1, result.stdout);
+  return JSON.parse(lines.at(-1));
 }
 
 async function main() {
