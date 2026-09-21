@@ -24,16 +24,19 @@ const MCP_MAX_OUTPUT_EVENTS: usize = 200;
 const MCP_MAX_OUTPUT_WAIT_MS: u64 = 10_000;
 const MCP_MAX_CURSOR_BYTES: usize = 16 * 1024;
 
+#[path = "protocol/dispatch.rs"]
+mod dispatch;
 #[path = "protocol/tool_contract.rs"]
 mod tool_contract;
 #[path = "protocol/validation.rs"]
 mod validation;
 
+pub(super) use dispatch::dispatch;
 use tool_contract::*;
 pub(super) use validation::{
     mcp_accept_allowed, mcp_content_type_allowed, mcp_error_response, mcp_origin_allowed,
 };
-use validation::{mcp_json_nesting_within_limit, validate_mcp_request_headers};
+use validation::{mcp_json_nesting_within_limit, request_id, validate_mcp_request_headers};
 const MCP_MAX_JSON_NESTING: usize = 64;
 const MCP_ERROR_UNSUPPORTED_VERSION: i64 = -32022;
 const MCP_ERROR_HEADER_MISMATCH: i64 = -32020;
@@ -194,208 +197,6 @@ pub(super) struct DispatchContext<'a> {
     pub(super) workspace: &'a Path,
     pub(super) mode: SuperExposeMode,
     pub(super) audit: &'a ExposeAuditLog,
-}
-
-pub(super) fn dispatch(
-    body: &[u8],
-    headers: &McpRequestHeaders,
-    context: &DispatchContext<'_>,
-) -> Response<std::io::Cursor<Vec<u8>>> {
-    let instance_id = context.instance_id;
-    let display_name = context.display_name;
-    let workspace = context.workspace;
-    let mode = context.mode;
-    let audit = context.audit;
-    if !mcp_json_nesting_within_limit(body, MCP_MAX_JSON_NESTING) {
-        return error(None, -32700, "parse error");
-    }
-    let value: Value = match serde_json::from_slice(body) {
-        Ok(value) => value,
-        Err(_) => {
-            audit.event(
-                "super_expose_rpc_rejected",
-                [
-                    crate::runtime_proxy_log_field("mode", mode.as_str()),
-                    crate::runtime_proxy_log_field("reason", "parse_error"),
-                ],
-            );
-            return error(None, -32700, "parse error");
-        }
-    };
-    let Some(object) = value.as_object() else {
-        audit.event(
-            "super_expose_rpc_rejected",
-            [
-                crate::runtime_proxy_log_field("mode", mode.as_str()),
-                crate::runtime_proxy_log_field("reason", "invalid_request"),
-            ],
-        );
-        return error(
-            None,
-            -32600,
-            if value.is_array() {
-                "batch requests are unsupported"
-            } else {
-                "parse error"
-            },
-        );
-    };
-    let id = object
-        .get("id")
-        .filter(|id| id.is_number() || id.is_string())
-        .cloned();
-    if object.get("jsonrpc").and_then(Value::as_str) != Some("2.0") {
-        return error(id, -32600, "invalid request");
-    }
-    let Some(method) = object.get("method").and_then(Value::as_str) else {
-        return error(id, -32600, "method is required");
-    };
-    let params = object.get("params").cloned().unwrap_or(Value::Null);
-    let tool_name = params
-        .as_object()
-        .and_then(|params| params.get("name"))
-        .and_then(Value::as_str);
-    if let Some(response) = validate_mcp_request_headers(object, method, headers) {
-        return response;
-    }
-    if !object.contains_key("id") {
-        return if matches!(
-            method,
-            "notifications/initialized" | "notifications/cancelled"
-        ) {
-            json_response(202, Value::Null)
-        } else {
-            error(None, -32601, "notification is unsupported")
-        };
-    }
-    if id.is_none() {
-        return error(None, -32600, "invalid request id");
-    }
-
-    let (method_kind, tool_kind) = expose_route(method, tool_name);
-    audit.event(
-        "super_expose_rpc",
-        [
-            crate::runtime_proxy_log_field("mode", mode.as_str()),
-            crate::runtime_proxy_log_field("method", method_kind.as_str()),
-            crate::runtime_proxy_log_field("tool", tool_kind.as_str()),
-            crate::runtime_proxy_log_field("body_bytes", body.len().to_string()),
-        ],
-    );
-    if method_kind == ExposeMethod::Initialize {
-        let Some(params_object) = params.as_object() else {
-            return mcp_error_response(400, id, -32602, "initialize params are required");
-        };
-        if params_object
-            .get("protocolVersion")
-            .and_then(Value::as_str)
-            .is_none()
-        {
-            return mcp_error_response(400, id, -32602, "protocolVersion is required");
-        }
-    }
-    if method_kind == ExposeMethod::ToolsCall {
-        let Some(params_object) = params.as_object() else {
-            return mcp_error_response(400, id, -32602, "tool parameters are required");
-        };
-        let Some(name) = params_object.get("name").and_then(Value::as_str) else {
-            return mcp_error_response(400, id, -32602, "tool name is required");
-        };
-        let empty_arguments = Value::Object(Default::default());
-        let arguments = params_object.get("arguments").unwrap_or(&empty_arguments);
-        if !arguments.is_object() {
-            return mcp_error_response(400, id, -32602, "tool arguments must be an object");
-        }
-        if let Err(message) = validate_tool_arguments(name, arguments) {
-            return mcp_error_response(400, id, -32602, &message);
-        }
-    }
-
-    let server_name = format!("Prodex Super — {display_name}");
-    let instructions = expose_instructions(workspace, instance_id, mode);
-    let result = match method_kind {
-        ExposeMethod::ServerDiscover => Ok(json!({
-            "resultType": "complete",
-            "supportedVersions": [MCP_CURRENT_PROTOCOL_VERSION],
-            "capabilities": {"tools": {"listChanged": false}},
-            "instructions": instructions,
-            "ttlMs": 300_000,
-            "cacheScope": "private",
-            "_meta": {"io.modelcontextprotocol/serverInfo": {
-                "name": server_name,
-                "version": env!("CARGO_PKG_VERSION")
-            }}
-        })),
-        ExposeMethod::Initialize => initialize_result(&params, &server_name, &instructions),
-        ExposeMethod::Ping => Ok(json!({})),
-        ExposeMethod::ToolsList => Ok(json!({
-            "resultType": "complete",
-            "tools": tools(mode),
-            "ttlMs": 300_000,
-            "cacheScope": "private",
-            "_meta": {"io.modelcontextprotocol/serverInfo": {
-                "name": server_name,
-                "version": env!("CARGO_PKG_VERSION")
-            }}
-        })),
-        ExposeMethod::ToolsCall => tool_call(&params, tool_kind, context),
-        ExposeMethod::Notification => {
-            audit.event(
-                "super_expose_rpc_completed",
-                [
-                    crate::runtime_proxy_log_field("mode", mode.as_str()),
-                    crate::runtime_proxy_log_field("method", method_kind.as_str()),
-                    crate::runtime_proxy_log_field("tool", tool_kind.as_str()),
-                    crate::runtime_proxy_log_field("success", "true"),
-                ],
-            );
-            return json_response(202, Value::Null);
-        }
-        ExposeMethod::Unknown => {
-            audit.event(
-                "super_expose_rpc_rejected",
-                [
-                    crate::runtime_proxy_log_field("mode", mode.as_str()),
-                    crate::runtime_proxy_log_field("reason", "method_not_found"),
-                ],
-            );
-            return mcp_error_response(404, id, -32601, "method not found");
-        }
-    };
-    match result {
-        Ok(result) => {
-            audit.event(
-                "super_expose_rpc_completed",
-                [
-                    crate::runtime_proxy_log_field("mode", mode.as_str()),
-                    crate::runtime_proxy_log_field("method", method_kind.as_str()),
-                    crate::runtime_proxy_log_field("tool", tool_kind.as_str()),
-                    crate::runtime_proxy_log_field("success", "true"),
-                ],
-            );
-            rpc_result(id, result)
-        }
-        Err(message) => {
-            audit.event(
-                "super_expose_rpc_completed",
-                [
-                    crate::runtime_proxy_log_field("mode", mode.as_str()),
-                    crate::runtime_proxy_log_field("method", method_kind.as_str()),
-                    crate::runtime_proxy_log_field("tool", tool_kind.as_str()),
-                    crate::runtime_proxy_log_field("success", "false"),
-                ],
-            );
-            rpc_result(
-                id,
-                json!({
-                    "resultType": "complete",
-                    "content":[{"type":"text","text":serde_json::to_string(&json!({"error": message})).unwrap_or_else(|_| "{}".to_string())}],
-                    "structuredContent":{"error":message},
-                    "isError":true
-                }),
-            )
-        }
-    }
 }
 
 fn tool_call(
