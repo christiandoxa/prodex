@@ -11,6 +11,27 @@ use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 #[cfg(unix)]
+fn run_isolated_fd_test(test_name: &str, env_key: &'static str) -> bool {
+    if std::env::var_os(env_key).is_some() {
+        return true;
+    }
+    let output =
+        Command::new(std::env::current_exe().expect("test executable should be available"))
+            .arg(test_name)
+            .arg("--nocapture")
+            .env(env_key, "1")
+            .output()
+            .expect("isolated descriptor regression subprocess should start");
+    assert!(
+        output.status.success(),
+        "isolated descriptor child failed: {}{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    false
+}
+
+#[cfg(unix)]
 fn open_fd_count() -> usize {
     fs::read_dir("/proc/self/fd")
         .expect("the test process should expose /proc/self/fd")
@@ -71,6 +92,13 @@ fn exercise_combined_follow_budget(root: &std::path::Path, _assert_low_rlimit: b
 
 #[test]
 fn runtime_log_follow_is_bounded_across_repeated_reads() {
+    #[cfg(unix)]
+    if !run_isolated_fd_test(
+        "runtime_log_follow_is_bounded_across_repeated_reads",
+        "PRODEX_LOG_FD_RUNTIME_CHILD",
+    ) {
+        return;
+    }
     let root = std::env::temp_dir().join(format!(
         "prodex-log-descriptor-regression-{}-{}",
         std::process::id(),
@@ -120,6 +148,13 @@ fn runtime_log_follow_is_bounded_across_repeated_reads() {
 
 #[test]
 fn runtime_and_session_followers_share_one_descriptor_budget() {
+    #[cfg(unix)]
+    if !run_isolated_fd_test(
+        "runtime_and_session_followers_share_one_descriptor_budget",
+        "PRODEX_LOG_FD_COMBINED_CHILD",
+    ) {
+        return;
+    }
     let root = std::env::temp_dir().join(format!(
         "prodex-log-combined-descriptor-regression-{}-{}",
         std::process::id(),
@@ -139,7 +174,7 @@ fn combined_follow_budget_low_rlimit_subprocess() {
     let output = Command::new("sh")
         .args([
             "-c",
-            "ulimit -n 64; exec \"$1\" combined_follow_budget_low_rlimit_child --nocapture",
+            "ulimit -n 64; PRODEX_LOG_LOW_RLIMIT_CHILD=1 exec \"$1\" combined_follow_budget_low_rlimit_child --nocapture",
             "prodex-log-fd-regression",
         ])
         .arg(std::env::current_exe().expect("test executable should be available"))
@@ -156,6 +191,9 @@ fn combined_follow_budget_low_rlimit_subprocess() {
 #[cfg(unix)]
 #[test]
 fn combined_follow_budget_low_rlimit_child() {
+    if std::env::var_os("PRODEX_LOG_LOW_RLIMIT_CHILD").is_none() {
+        return;
+    }
     let root = std::env::temp_dir().join(format!(
         "prodex-log-low-rlimit-regression-{}-{}",
         std::process::id(),

@@ -46,7 +46,7 @@ export const RUNTIME_SMOKE_TESTS = [
   },
   {
     label: "selection-hard-affinity",
-    filter: "response_selection_preserves_bound_previous_response_affinity_despite_quota",
+    filter: "responses_hard_affinity_reaches_upstream_despite_persisted_exhaustion",
   },
   {
     label: "stale-continuation-guard",

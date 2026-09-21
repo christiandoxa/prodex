@@ -186,17 +186,26 @@ fn tool_allowed(mode: SuperExposeMode, tool_name: &str) -> bool {
     )
 }
 
+pub(super) struct DispatchContext<'a> {
+    pub(super) manager: &'a RunManager,
+    pub(super) session_prompt_write: &'a dyn ExistingSessionPromptWrite,
+    pub(super) instance_id: &'a str,
+    pub(super) display_name: &'a str,
+    pub(super) workspace: &'a Path,
+    pub(super) mode: SuperExposeMode,
+    pub(super) audit: &'a ExposeAuditLog,
+}
+
 pub(super) fn dispatch(
     body: &[u8],
     headers: &McpRequestHeaders,
-    manager: &RunManager,
-    session_prompt_write: &dyn ExistingSessionPromptWrite,
-    instance_id: &str,
-    display_name: &str,
-    workspace: &Path,
-    mode: SuperExposeMode,
-    audit: &ExposeAuditLog,
+    context: &DispatchContext<'_>,
 ) -> Response<std::io::Cursor<Vec<u8>>> {
+    let instance_id = context.instance_id;
+    let display_name = context.display_name;
+    let workspace = context.workspace;
+    let mode = context.mode;
+    let audit = context.audit;
     if !mcp_json_nesting_within_limit(body, MCP_MAX_JSON_NESTING) {
         return error(None, -32700, "parse error");
     }
@@ -329,16 +338,7 @@ pub(super) fn dispatch(
                 "version": env!("CARGO_PKG_VERSION")
             }}
         })),
-        ExposeMethod::ToolsCall => tool_call(
-            &params,
-            tool_kind,
-            manager,
-            session_prompt_write,
-            instance_id,
-            workspace,
-            mode,
-            audit,
-        ),
+        ExposeMethod::ToolsCall => tool_call(&params, tool_kind, context),
         ExposeMethod::Notification => {
             audit.event(
                 "super_expose_rpc_completed",
@@ -401,13 +401,14 @@ pub(super) fn dispatch(
 fn tool_call(
     params: &Value,
     tool_kind: ExposeTool,
-    manager: &RunManager,
-    session_prompt_write: &dyn ExistingSessionPromptWrite,
-    instance_id: &str,
-    workspace: &Path,
-    mode: SuperExposeMode,
-    audit: &ExposeAuditLog,
+    context: &DispatchContext<'_>,
 ) -> std::result::Result<Value, String> {
+    let manager = context.manager;
+    let session_prompt_write = context.session_prompt_write;
+    let instance_id = context.instance_id;
+    let workspace = context.workspace;
+    let mode = context.mode;
+    let audit = context.audit;
     let object = params
         .as_object()
         .ok_or_else(|| "tool parameters are required".to_string())?;
