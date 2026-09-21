@@ -11,6 +11,7 @@ use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tiny_http::{Method, Server};
 
+#[cfg(unix)]
 #[path = "super_expose/app_server_control.rs"]
 mod app_server_control;
 #[path = "super_expose/exec.rs"]

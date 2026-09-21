@@ -1,5 +1,8 @@
-use super::{PROCESS_ANCESTRY_LIMIT, SessionPromptWriteError, TARGET_ENV_KEYS};
+#[cfg(target_os = "linux")]
+use super::TARGET_ENV_KEYS;
+use super::{PROCESS_ANCESTRY_LIMIT, SessionPromptWriteError};
 use std::collections::{BTreeMap, HashMap};
+#[cfg(target_os = "linux")]
 use std::fs;
 use std::path::{Path, PathBuf};
 #[derive(Clone, Debug, PartialEq, Eq)]
