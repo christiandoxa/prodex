@@ -6,18 +6,42 @@ pub(super) fn validate_mcp_request_headers(
     headers: &McpRequestHeaders,
 ) -> Option<Response<std::io::Cursor<Vec<u8>>>> {
     let params = message.get("params").and_then(Value::as_object);
-    let body_version = if method == "initialize" {
-        params
-            .and_then(|params| params.get("protocolVersion"))
-            .and_then(Value::as_str)
-    } else {
-        params
-            .and_then(|params| params.get("_meta"))
-            .and_then(Value::as_object)
-            .and_then(|meta| meta.get("io.modelcontextprotocol/protocolVersion"))
-            .and_then(Value::as_str)
-    };
+    let body_version = request_body_protocol_version(method, params);
     let header_version = headers.protocol_version.as_deref();
+    if let Some(response) = validate_protocol_version(message, header_version, body_version) {
+        return Some(response);
+    }
+    validate_current_protocol_metadata(
+        message,
+        method,
+        headers,
+        params,
+        header_version,
+        body_version,
+    )
+}
+
+fn request_body_protocol_version<'a>(
+    method: &str,
+    params: Option<&'a serde_json::Map<String, Value>>,
+) -> Option<&'a str> {
+    if method == "initialize" {
+        return params
+            .and_then(|params| params.get("protocolVersion"))
+            .and_then(Value::as_str);
+    }
+    params
+        .and_then(|params| params.get("_meta"))
+        .and_then(Value::as_object)
+        .and_then(|meta| meta.get("io.modelcontextprotocol/protocolVersion"))
+        .and_then(Value::as_str)
+}
+
+fn validate_protocol_version(
+    message: &serde_json::Map<String, Value>,
+    header_version: Option<&str>,
+    body_version: Option<&str>,
+) -> Option<Response<std::io::Cursor<Vec<u8>>>> {
     if let Some(version) = header_version.or(body_version)
         && !MCP_PROTOCOL_VERSIONS.contains(&version)
     {
@@ -40,51 +64,60 @@ pub(super) fn validate_mcp_request_headers(
             "protocol version header mismatch",
         ));
     }
+    None
+}
+
+fn validate_current_protocol_metadata(
+    message: &serde_json::Map<String, Value>,
+    method: &str,
+    headers: &McpRequestHeaders,
+    params: Option<&serde_json::Map<String, Value>>,
+    header_version: Option<&str>,
+    body_version: Option<&str>,
+) -> Option<Response<std::io::Cursor<Vec<u8>>>> {
     let current = header_version == Some(MCP_CURRENT_PROTOCOL_VERSION)
         || body_version == Some(MCP_CURRENT_PROTOCOL_VERSION);
-    if current {
-        if header_version != Some(MCP_CURRENT_PROTOCOL_VERSION)
-            || body_version != Some(MCP_CURRENT_PROTOCOL_VERSION)
-        {
-            return Some(mcp_error_response(
-                400,
-                request_id(message),
-                MCP_ERROR_HEADER_MISMATCH,
-                "protocol version metadata is required",
-            ));
-        }
-        if headers.mcp_method.as_deref() != Some(method) {
-            return Some(mcp_error_response(
-                400,
-                request_id(message),
-                MCP_ERROR_HEADER_MISMATCH,
-                "Mcp-Method header mismatch",
-            ));
-        }
-        if method == "tools/call" {
-            let body_name = params
-                .and_then(|params| params.get("name"))
-                .and_then(Value::as_str);
-            if headers.mcp_name.as_deref() != body_name {
-                return Some(mcp_error_response(
-                    400,
-                    request_id(message),
-                    MCP_ERROR_HEADER_MISMATCH,
-                    "Mcp-Name header mismatch",
-                ));
-            }
-        }
-    } else if let Some(header) = headers.mcp_method.as_deref()
-        && header != method
+    if !current {
+        return validate_legacy_method_header(message, method, headers);
+    }
+    if header_version != Some(MCP_CURRENT_PROTOCOL_VERSION)
+        || body_version != Some(MCP_CURRENT_PROTOCOL_VERSION)
     {
-        return Some(mcp_error_response(
-            400,
-            request_id(message),
-            MCP_ERROR_HEADER_MISMATCH,
-            "Mcp-Method header mismatch",
+        return Some(header_mismatch(
+            message,
+            "protocol version metadata is required",
         ));
     }
-    None
+    if headers.mcp_method.as_deref() != Some(method) {
+        return Some(header_mismatch(message, "Mcp-Method header mismatch"));
+    }
+    if method != "tools/call" {
+        return None;
+    }
+    let body_name = params
+        .and_then(|params| params.get("name"))
+        .and_then(Value::as_str);
+    (headers.mcp_name.as_deref() != body_name)
+        .then(|| header_mismatch(message, "Mcp-Name header mismatch"))
+}
+
+fn validate_legacy_method_header(
+    message: &serde_json::Map<String, Value>,
+    method: &str,
+    headers: &McpRequestHeaders,
+) -> Option<Response<std::io::Cursor<Vec<u8>>>> {
+    headers
+        .mcp_method
+        .as_deref()
+        .is_some_and(|header| header != method)
+        .then(|| header_mismatch(message, "Mcp-Method header mismatch"))
+}
+
+fn header_mismatch(
+    message: &serde_json::Map<String, Value>,
+    detail: &str,
+) -> Response<std::io::Cursor<Vec<u8>>> {
+    mcp_error_response(400, request_id(message), MCP_ERROR_HEADER_MISMATCH, detail)
 }
 
 pub(crate) fn mcp_origin_allowed(host: &str, origin: Option<&str>) -> bool {
