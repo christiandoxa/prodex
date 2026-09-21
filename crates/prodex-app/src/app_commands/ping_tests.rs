@@ -1,6 +1,6 @@
-#[cfg(unix)]
-use super::ping_process::run_ping_child;
 use super::ping_process::{PING_ERROR_DETAIL_MAX_BYTES, ping_command_args};
+#[cfg(unix)]
+use super::ping_process::{run_ping_child, run_ping_child_in_test_cwd};
 use super::{
     PING_PROMPT, PingOpenaiArgs, PingProbeOptions, PingStatus, classify_failure_text,
     ping_result_from_output, validate_ping_output,
@@ -260,29 +260,16 @@ fn ping_timeout_cleans_diagnostic_directory_and_child_process() {
             .as_nanos(),
     ));
     fs::create_dir_all(&root).unwrap();
+    let diagnostic = root.join("diagnostic");
+    fs::create_dir(&diagnostic).unwrap();
     let plan = ChildProcessPlan::new(OsString::from("sh"), root.clone())
         .with_args(vec![OsString::from("-c"), OsString::from("sleep 30")]);
-    let temp_entries = || {
-        std::env::temp_dir()
-            .read_dir()
-            .unwrap()
-            .flatten()
-            .filter_map(|entry| {
-                entry
-                    .file_name()
-                    .to_str()
-                    .filter(|name| name.starts_with("prodex-ping-"))
-                    .map(str::to_owned)
-            })
-            .collect::<Vec<_>>()
-    };
-    let before = temp_entries();
     let started = Instant::now();
-    let result = run_ping_child(&plan, Duration::from_millis(100));
+    let result = run_ping_child_in_test_cwd(&plan, Duration::from_millis(100), &diagnostic);
 
     assert!(result.unwrap_err().to_string().contains("timed out"));
     assert!(started.elapsed() < Duration::from_secs(2));
-    assert_eq!(temp_entries(), before);
+    assert!(!diagnostic.exists());
     fs::remove_dir_all(root).unwrap();
 }
 

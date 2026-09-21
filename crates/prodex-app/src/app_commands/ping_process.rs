@@ -111,14 +111,22 @@ pub(super) fn run_ping_child(
     plan: &ChildProcessPlan,
     timeout: Duration,
 ) -> Result<ObservedCommandOutput> {
-    crate::validate_selected_codex_binary(&plan.binary)?;
     let cwd = create_ping_cwd()?;
+    run_ping_child_in_cwd(plan, timeout, &cwd)
+}
+
+fn run_ping_child_in_cwd(
+    plan: &ChildProcessPlan,
+    timeout: Duration,
+    cwd: &Path,
+) -> Result<ObservedCommandOutput> {
+    crate::validate_selected_codex_binary(&plan.binary)?;
     let result = {
         let mut command = Command::new(&plan.binary);
         command
             .args(&plan.args)
             .env("CODEX_HOME", &plan.codex_home)
-            .current_dir(&cwd);
+            .current_dir(cwd);
         for key in &plan.removed_env {
             command.env_remove(key);
         }
@@ -133,7 +141,7 @@ pub(super) fn run_ping_child(
             Some(ping_stdout_line_is_model_response),
         )
     };
-    let cleanup = cleanup_ping_cwd(&cwd);
+    let cleanup = cleanup_ping_cwd(cwd);
     match (result, cleanup) {
         (Ok(output), Ok(())) => Ok(output),
         (Err(error), Ok(())) => Err(error),
@@ -142,6 +150,15 @@ pub(super) fn run_ping_child(
             "failed to clean the diagnostic directory: {cleanup_error}"
         )),
     }
+}
+
+#[cfg(test)]
+pub(super) fn run_ping_child_in_test_cwd(
+    plan: &ChildProcessPlan,
+    timeout: Duration,
+    cwd: &Path,
+) -> Result<ObservedCommandOutput> {
+    run_ping_child_in_cwd(plan, timeout, cwd)
 }
 
 fn ping_stdout_line_is_model_response(line: &[u8]) -> bool {
