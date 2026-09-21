@@ -202,3 +202,35 @@ pub fn super_expose_tunnel_client_version_output_valid(value: &str) -> Result<bo
         _ => Err(MojoError::InvalidOutput),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn tunnel_client_version_policy_accepts_latest_and_compat_release() {
+        assert!(
+            super_expose_tunnel_client_version_output_valid(
+                "0.0.14+0f870e50a973fa820d4c409000059e181e8d242b (git sha: 0f870e50a973fa820d4c409000059e181e8d242b)"
+            )
+            .unwrap()
+        );
+        assert!(
+            super_expose_tunnel_client_version_output_valid(
+                "0.0.13+4b5267f823be0b046bb883aacb51603cfde3a0ea (git sha: 4b5267f823be0b046bb883aacb51603cfde3a0ea)"
+            )
+            .unwrap()
+        );
+    }
+
+    #[test]
+    fn tunnel_client_version_policy_rejects_unvetted_builds() {
+        assert!(
+            !super_expose_tunnel_client_version_output_valid(
+                "0.0.13+0000000000000000000000000000000000000000 (git sha: 0000000000000000000000000000000000000000)"
+            )
+            .unwrap()
+        );
+        assert!(!super_expose_tunnel_client_version_output_valid("0.0.12").unwrap());
+    }
+}

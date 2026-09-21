@@ -14,6 +14,15 @@ use zeroize::Zeroizing;
 const OPENAI_TUNNEL_CLIENT_RELEASE: &str = "v0.0.14";
 const OPENAI_TUNNEL_CLIENT_VERSION: &str = "0.0.14";
 const OPENAI_TUNNEL_CLIENT_COMMIT: &str = "0f870e50a973fa820d4c409000059e181e8d242b";
+const OPENAI_TUNNEL_CLIENT_COMPAT_VERSION: &str = "0.0.13";
+const OPENAI_TUNNEL_CLIENT_COMPAT_COMMIT: &str = "4b5267f823be0b046bb883aacb51603cfde3a0ea";
+const OPENAI_TUNNEL_CLIENT_SUPPORTED_RELEASES: [(&str, &str); 2] = [
+    (OPENAI_TUNNEL_CLIENT_VERSION, OPENAI_TUNNEL_CLIENT_COMMIT),
+    (
+        OPENAI_TUNNEL_CLIENT_COMPAT_VERSION,
+        OPENAI_TUNNEL_CLIENT_COMPAT_COMMIT,
+    ),
+];
 const OPENAI_TUNNEL_CLIENT_READY_TIMEOUT: Duration = if cfg!(all(test, windows)) {
     Duration::from_secs(10)
 } else if cfg!(test) {
@@ -185,7 +194,8 @@ pub(super) fn ensure_openai_tunnel_available(tunnel_id: &str) -> Result<String> 
             "tunnel-client --version failed; install the official openai/tunnel-client {OPENAI_TUNNEL_CLIENT_RELEASE} release"
         )
     }
-    safe_client_version(&output).context("tunnel-client did not report a supported version")
+    safe_client_version(&output)
+        .context("tunnel-client did not report a supported official version (v0.0.14 or v0.0.13)")
 }
 
 pub(super) fn openai_tunnel_credentials_from_env(
@@ -407,21 +417,34 @@ fn safe_client_version(output: &Output) -> Option<String> {
         String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr)
     );
+    let version = supported_client_version_from_text(&text)?;
     #[cfg(feature = "mojo-core")]
-    let valid = prodex_mojo_core::rich::super_expose_tunnel_client_version_output_valid(&text)
-        .unwrap_or_else(|error| panic!("Mojo tunnel-client version policy failed: {error:?}"));
-    #[cfg(not(feature = "mojo-core"))]
-    let valid = {
-        let expected = format!(
-            "{OPENAI_TUNNEL_CLIENT_VERSION}+{OPENAI_TUNNEL_CLIENT_COMMIT} (git sha: {OPENAI_TUNNEL_CLIENT_COMMIT})"
-        );
-        text.lines().any(|line| line.trim() == expected)
-    };
-    valid.then_some(OPENAI_TUNNEL_CLIENT_VERSION.to_owned())
+    {
+        let valid = prodex_mojo_core::rich::super_expose_tunnel_client_version_output_valid(&text)
+            .unwrap_or_else(|error| panic!("Mojo tunnel-client version policy failed: {error:?}"));
+        if !valid {
+            return None;
+        }
+    }
+    Some(version.to_owned())
+}
+
+fn supported_client_version_from_text(text: &str) -> Option<&'static str> {
+    OPENAI_TUNNEL_CLIENT_SUPPORTED_RELEASES
+        .into_iter()
+        .find_map(|(version, commit)| {
+            let expected = format!("{version}+{commit} (git sha: {commit})");
+            text.lines()
+                .any(|line| line.trim() == expected)
+                .then_some(version)
+        })
 }
 
 fn safe_version_label(value: &str) -> String {
-    if value == OPENAI_TUNNEL_CLIENT_VERSION {
+    if OPENAI_TUNNEL_CLIENT_SUPPORTED_RELEASES
+        .iter()
+        .any(|(version, _)| *version == value)
+    {
         value.to_owned()
     } else {
         "unknown".to_string()
