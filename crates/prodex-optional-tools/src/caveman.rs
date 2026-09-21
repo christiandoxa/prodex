@@ -5,7 +5,10 @@ use crate::optional_tools::{
     optional_tool_descriptor,
 };
 use crate::tree::{path_exists, read_bounded_file, tree_sha256};
-use crate::{CAVEMAN_VETTED_COMMIT, CAVEMAN_VETTED_TREE_SHA256, CAVEMAN_VETTED_VERSION};
+use crate::{
+    CAVEMAN_LEGACY_MANIFEST_TREE_SHA256, CAVEMAN_VETTED_COMMIT, CAVEMAN_VETTED_TREE_SHA256,
+    CAVEMAN_VETTED_VERSION,
+};
 use anyhow::{Context, Result, bail, ensure};
 use serde::Deserialize;
 use std::fs;
@@ -187,8 +190,12 @@ fn validate_caveman_install(
         "Caveman commit does not match vetted metadata"
     );
     ensure!(
-        manifest.tree_sha256 == expected_tree_sha256,
-        "Caveman manifest tree digest does not match vetted metadata"
+        crate::optional_tools::manifest_tree_sha256_supported(
+            &manifest.tree_sha256,
+            expected_tree_sha256,
+            CAVEMAN_LEGACY_MANIFEST_TREE_SHA256,
+        ),
+        "Caveman manifest tree digest does not match current or compatible vetted metadata"
     );
 
     validate_required_files(&candidate)?;

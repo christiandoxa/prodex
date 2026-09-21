@@ -12,7 +12,7 @@
       "commit": "8b0c1d3699b8d83e87fe4605b378da20c41555e0",
       "git_tree": "4e8aa5e191457ba9ebd34b4a7eee6a7bd246ccff",
       "source_archive_sha256": "0f8b833ef65be67b565573d075264b7acab645e80241cfdae016421211d41147",
-      "prodex_tree_sha256": "26d587fc179e79f76f4e2b42edec0266a7af40cf08bf15eb4609de310fabd8fb",
+      "prodex_tree_sha256": "09127915a13a493146ed0392b6895bbbd5f620d276dda9f4e68a6722f96df950",
       "license": "MIT",
       "runtime": "Node.js >=18; externally managed immutable checkout",
       "platforms": [
@@ -21,7 +21,7 @@
         "windows"
       ],
       "decision": "ADOPT_PACKAGE",
-      "notes": "v2.7.0 is the latest stable release; the exact commit, Git tree, source archive, and complete Prodex tree digest are pinned."
+      "notes": "v2.7.0 is the latest stable release; the exact commit, Git tree, source archive, and complete Prodex tree digest were revalidated from a clean tagged checkout. Prodex 0.430.3 also accepts the legacy manifest digest while always recomputing and enforcing this corrected tree digest."
     },
     {
       "id": "rtk",
@@ -103,7 +103,7 @@
       "release": "v4.10.0",
       "commit": "1d95ff7d39de12d87014ea40d4e22201bddc501b",
       "git_tree": "1e6313c25542d1762ea60ec62f6ff220ac835f92",
-      "prodex_tree_sha256": "5443a5ee4a7248adcb59e1e102dd5bbd14af3083a9c3b4f271dd86790ac88c9c",
+      "prodex_tree_sha256": "05fe532f2a310cc7d12a60d6b51d1638a7d1465598d82ffa9f6a3d4cbf970f48",
       "license": "MIT",
       "runtime": "Node.js plugin; externally managed immutable checkout",
       "platforms": [
@@ -112,7 +112,7 @@
         "windows"
       ],
       "decision": "ADOPT_PACKAGE",
-      "notes": "Latest stable release revalidated for Codex hooks, sub-agent scoping, and Windows behavior."
+      "notes": "Latest stable release revalidated from a clean v4.10.0 checkout for Codex hooks, sub-agent scoping, Windows behavior, and the complete Prodex tree digest. Prodex 0.430.3 accepts the legacy manifest digest while always recomputing and enforcing this corrected tree digest."
     },
     {
       "id": "presidio",

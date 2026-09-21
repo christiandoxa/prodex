@@ -36,6 +36,14 @@ struct ToolInstallManifest {
     tree_sha256: String,
 }
 
+pub(crate) fn manifest_tree_sha256_supported(
+    value: &str,
+    vetted: &str,
+    legacy_manifest: &str,
+) -> bool {
+    value == vetted || value == legacy_manifest
+}
+
 #[derive(Debug, Deserialize)]
 struct CodexPluginManifest {
     name: String,
@@ -581,8 +589,12 @@ fn validate_ponytail_install(allowed_root: &Path, candidate: &Path) -> Result<Re
         "Ponytail commit does not match vetted metadata"
     );
     anyhow::ensure!(
-        manifest.tree_sha256 == crate::PONYTAIL_VETTED_TREE_SHA256,
-        "Ponytail manifest tree digest does not match vetted metadata"
+        manifest_tree_sha256_supported(
+            &manifest.tree_sha256,
+            crate::PONYTAIL_VETTED_TREE_SHA256,
+            crate::PONYTAIL_LEGACY_MANIFEST_TREE_SHA256,
+        ),
+        "Ponytail manifest tree digest does not match current or compatible vetted metadata"
     );
 
     let plugin_path = candidate.join(".codex-plugin/plugin.json");
@@ -705,5 +717,18 @@ mod tests {
 
         assert_eq!(health.status, ToolHealthStatus::Missing);
         assert!(health.detail.contains("Node.js was not found"));
+    }
+
+    #[test]
+    fn manifest_tree_digest_accepts_current_and_legacy_metadata_only() {
+        assert!(manifest_tree_sha256_supported(
+            "current", "current", "legacy"
+        ));
+        assert!(manifest_tree_sha256_supported(
+            "legacy", "current", "legacy"
+        ));
+        assert!(!manifest_tree_sha256_supported(
+            "other", "current", "legacy"
+        ));
     }
 }
