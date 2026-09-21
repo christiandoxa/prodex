@@ -527,34 +527,33 @@ impl RunManager {
     }
 
     fn finish_start_failed(&self, run_id: &str, message: &str) {
-        if let Ok(mut state) = self.inner.state.lock() {
-            if let Some(record) = state.runs.get_mut(run_id)
-                && !record.state.terminal()
-            {
-                record.state = if record.cancel.load(Ordering::SeqCst) {
-                    RunState::Cancelled
+        if let Ok(mut state) = self.inner.state.lock()
+            && let Some(record) = state.runs.get_mut(run_id)
+            && !record.state.terminal()
+        {
+            record.state = if record.cancel.load(Ordering::SeqCst) {
+                RunState::Cancelled
+            } else {
+                RunState::StartFailed
+            };
+            record.finished_at = Some(now_millis());
+            append_output(record, "stderr", message.as_bytes());
+            push_event(
+                record,
+                if record.state == RunState::Cancelled {
+                    "run_cancelled"
                 } else {
-                    RunState::StartFailed
-                };
-                record.finished_at = Some(now_millis());
-                append_output(record, "stderr", message.as_bytes());
-                push_event(
-                    record,
-                    if record.state == RunState::Cancelled {
-                        "run_cancelled"
-                    } else {
-                        "run_start_failed"
-                    },
-                    if record.state == RunState::Cancelled {
-                        ""
-                    } else {
-                        "Super child could not start"
-                    },
-                );
-                state.active_runs = state.active_runs.saturating_sub(1);
-                prune_terminal_runs(&mut state.runs);
-                self.dispatch_locked(&mut state);
-            }
+                    "run_start_failed"
+                },
+                if record.state == RunState::Cancelled {
+                    ""
+                } else {
+                    "Super child could not start"
+                },
+            );
+            state.active_runs = state.active_runs.saturating_sub(1);
+            prune_terminal_runs(&mut state.runs);
+            self.dispatch_locked(&mut state);
         }
     }
 

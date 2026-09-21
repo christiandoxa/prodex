@@ -70,3 +70,54 @@ pub(crate) use test_compat::{
     runtime_proxy_profile_inflight_hard_limit, runtime_proxy_profile_inflight_soft_limit,
     runtime_proxy_stream_idle_timeout_ms, runtime_proxy_websocket_precommit_progress_timeout_ms,
 };
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    #[test]
+    fn runtime_tuning_snapshot_reports_effective_policy_and_env_values() {
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("clock should be after epoch")
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!(
+            "prodex-runtime-tuning-smoke-{}-{nonce}",
+            std::process::id()
+        ));
+        fs::create_dir_all(&root).expect("test root should be created");
+        fs::write(
+            root.join("policy.toml"),
+            r#"
+version = 1
+
+[runtime_proxy]
+worker_count = 8
+responses_active_limit = 9
+"#,
+        )
+        .expect("policy should be written");
+
+        let paths = prodex_core::AppPaths {
+            root: root.clone(),
+            state_file: root.join("state.json"),
+            managed_profiles_root: root.join("profiles"),
+            shared_codex_root: root.join("shared-codex"),
+            legacy_shared_codex_root: root.join("legacy-shared-codex"),
+        };
+        let _worker_guard = crate::TestEnvVarGuard::set("PRODEX_RUNTIME_PROXY_WORKER_COUNT", "12");
+        let _responses_guard =
+            crate::TestEnvVarGuard::unset("PRODEX_RUNTIME_PROXY_RESPONSES_ACTIVE_LIMIT");
+
+        let config =
+            RuntimeConfig::from_env_policy_and_cli(&paths).expect("runtime config should load");
+        let snapshot = collect_runtime_tuning_snapshot(&config);
+
+        assert_eq!(snapshot.worker_count, 12);
+        assert_eq!(snapshot.lane_limits.responses, 9);
+
+        let _ = fs::remove_dir_all(root);
+    }
+}

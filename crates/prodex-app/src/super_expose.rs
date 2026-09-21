@@ -125,16 +125,18 @@ pub(crate) fn handle_super_expose(mut expose: SuperExposeArgs) -> Result<()> {
         };
         handle_super_expose_request(
             request,
-            &expected_path,
-            &expected_host,
-            &mut rate,
-            &manager,
-            &session_prompt_write,
-            &instance_id,
-            &display_name,
-            &workspace,
-            expose.mode,
-            &audit,
+            SuperExposeRequestContext {
+                expected_path: &expected_path,
+                expected_host: &expected_host,
+                rate: &mut rate,
+                manager: &manager,
+                session_prompt_write: &session_prompt_write,
+                instance_id: &instance_id,
+                display_name: &display_name,
+                workspace: &workspace,
+                mode: expose.mode,
+                audit: &audit,
+            },
         );
     }
 }
@@ -324,19 +326,35 @@ fn check_openai_tunnel_exit(
     bail!("OpenAI tunnel-client exited unexpectedly")
 }
 
+struct SuperExposeRequestContext<'a> {
+    expected_path: &'a str,
+    expected_host: &'a str,
+    rate: &'a mut McpRateLimit,
+    manager: &'a run::RunManager,
+    session_prompt_write: &'a session_prompt_write::SessionPromptWriteService,
+    instance_id: &'a str,
+    display_name: &'a str,
+    workspace: &'a std::path::Path,
+    mode: prodex_cli::SuperExposeMode,
+    audit: &'a logging::ExposeAuditLog,
+}
+
 fn handle_super_expose_request(
     mut request: tiny_http::Request,
-    expected_path: &str,
-    expected_host: &str,
-    rate: &mut McpRateLimit,
-    manager: &run::RunManager,
-    session_prompt_write: &session_prompt_write::SessionPromptWriteService,
-    instance_id: &str,
-    display_name: &str,
-    workspace: &std::path::Path,
-    mode: prodex_cli::SuperExposeMode,
-    audit: &logging::ExposeAuditLog,
+    context: SuperExposeRequestContext<'_>,
 ) {
+    let SuperExposeRequestContext {
+        expected_path,
+        expected_host,
+        rate,
+        manager,
+        session_prompt_write,
+        instance_id,
+        display_name,
+        workspace,
+        mode,
+        audit,
+    } = context;
     if request.url().split('?').next() != Some(expected_path) {
         audit.event(
             "super_expose_http_rejected",
@@ -429,9 +447,7 @@ fn handle_super_expose_request(
         ));
         return;
     }
-    let _ = request.respond(protocol::dispatch(
-        &body,
-        &headers,
+    let dispatch_context = protocol::DispatchContext {
         manager,
         session_prompt_write,
         instance_id,
@@ -439,7 +455,8 @@ fn handle_super_expose_request(
         workspace,
         mode,
         audit,
-    ));
+    };
+    let _ = request.respond(protocol::dispatch(&body, &headers, &dispatch_context));
 }
 
 fn request_header_count(request: &tiny_http::Request, name: &'static str) -> usize {
