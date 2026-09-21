@@ -5,15 +5,7 @@ use crate::{
     resolve_super_launch_target, resolve_super_sub_agent_config, sub_agent_recursion_policy,
 };
 use anyhow::{Result, bail};
-use crossterm::{
-    cursor::{Hide, MoveTo, Show},
-    event::{self, Event, KeyCode, KeyEventKind, KeyModifiers},
-    execute,
-    terminal::{
-        Clear, ClearType, EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode,
-        enable_raw_mode,
-    },
-};
+use crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
 use prodex_cli::{
     DEFAULT_SUB_AGENT_MAX_CONCURRENCY, HARD_MAX_SUB_AGENT_CONCURRENCY, SubAgentConfig,
     SubAgentMaxConcurrency, SubAgentPreference, SuperArgs,
@@ -22,7 +14,7 @@ use ratatui::layout::{Constraint, Direction, Layout};
 use ratatui::style::Modifier;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
-use std::io::{self, IsTerminal, Write};
+use std::io::{self, IsTerminal};
 use terminal_ui::{
     fit_cell, tui_border_style, tui_connected_footer_block, tui_connected_header_block,
     tui_detail_style, tui_hint_style, tui_primary_style, tui_secondary_style, tui_success_style,
@@ -30,47 +22,6 @@ use terminal_ui::{
 };
 
 const SUPER_PROMPT_MAX_TEXT_CHARS: usize = 256;
-
-struct PresidioPromptTerminal {
-    stderr: io::Stderr,
-}
-
-impl PresidioPromptTerminal {
-    fn new() -> Result<Self> {
-        enable_raw_mode()?;
-        let mut stderr = io::stderr();
-        if let Err(error) = execute!(
-            stderr,
-            EnterAlternateScreen,
-            Hide,
-            MoveTo(0, 0),
-            Clear(ClearType::All)
-        ) {
-            let _ = disable_raw_mode();
-            return Err(error.into());
-        }
-        Ok(Self { stderr })
-    }
-
-    fn render(&mut self) -> Result<()> {
-        execute!(self.stderr, MoveTo(0, 0), Clear(ClearType::All))?;
-        let panel = terminal_ui::render_text_panel(
-            "Presidio opt-in",
-            "Use Presidio for data safety?\n\nDetected sensitive data is redacted from request bodies before upstream delivery.\n\ny enable · n skip · enter skip · esc skip",
-        );
-        write!(self.stderr, "{panel}")?;
-        self.stderr.flush()?;
-        Ok(())
-    }
-}
-
-impl Drop for PresidioPromptTerminal {
-    fn drop(&mut self) {
-        let _ = disable_raw_mode();
-        let _ = execute!(self.stderr, Show, LeaveAlternateScreen);
-        let _ = self.stderr.flush();
-    }
-}
 
 pub(super) fn prompt_super_main_agent_configuration(
     args: &SuperArgs,
@@ -608,9 +559,58 @@ pub(crate) fn prompt_super_presidio_opt_in() -> Result<bool> {
         return Ok(false);
     }
 
-    let mut tui = PresidioPromptTerminal::new()?;
-    tui.render()?;
+    let mut tui = terminal_ui::AlternateScreenTerminal::stderr("Presidio prompt TUI")?;
     loop {
+        tui.terminal.draw(|frame| {
+            let chunks = Layout::default()
+                .direction(Direction::Vertical)
+                .constraints([
+                    Constraint::Length(3),
+                    Constraint::Min(1),
+                    Constraint::Length(3),
+                ])
+                .split(frame.area());
+            let header = Paragraph::new(Line::from(vec![
+                Span::styled("Prodex Super", tui_title_style()),
+                Span::raw("  "),
+                Span::styled("Presidio opt-in", tui_detail_style()),
+            ]))
+            .block(tui_connected_header_block(tui_border_style()));
+            frame.render_widget(header, chunks[0]);
+
+            let body = Paragraph::new(vec![
+                Line::from(Span::styled(
+                    "Use Presidio for data safety?",
+                    tui_primary_style().add_modifier(Modifier::BOLD),
+                )),
+                Line::raw(""),
+                Line::from(Span::styled(
+                    "Detected sensitive data is redacted from request bodies before upstream delivery.",
+                    tui_secondary_style(),
+                )),
+            ])
+            .block(
+                Block::default()
+                    .borders(Borders::LEFT | Borders::RIGHT)
+                    .border_style(tui_border_style()),
+            )
+            .wrap(Wrap { trim: false });
+            frame.render_widget(body, chunks[1]);
+
+            let footer = Paragraph::new(Line::from(vec![
+                Span::styled("y", tui_success_style()),
+                Span::raw(" enable  "),
+                Span::styled("n", tui_hint_style()),
+                Span::raw(" skip  "),
+                Span::styled("enter", tui_hint_style()),
+                Span::raw(" skip  "),
+                Span::styled("esc", tui_hint_style()),
+                Span::raw(" skip"),
+            ]))
+            .block(tui_connected_footer_block(tui_border_style()));
+            frame.render_widget(footer, chunks[2]);
+        })?;
+
         if let Event::Key(key) = event::read()?
             && key.kind == KeyEventKind::Press
         {
