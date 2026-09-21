@@ -2,6 +2,62 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.430.1 - 2026-09-21
+
+### CLI
+
+- Handle zero-height profile terminals (`b5ff2d8`)
+
+### Misc
+
+- Restore 0.429.4 terminal surfaces (`f5fc368`)
+# Prodex 0.430.1
+
+## New Features
+
+- Restore the rich `prodex info` report, including quota pools and runway,
+  token usage (`--tokens`), runtime tuning/load, provider routes, and filtered
+  Prodex process reporting.
+- Restore the Ratatui `prodex status` dashboard with quota/resource/token views,
+  resize handling, refresh, quit controls, and deterministic non-TTY/`--once`
+  output.
+- Restore current-API Ratatui presentation for quota one-shot/watch views,
+  log transcript/tool/token/upstream views, Super prompts, session/profile
+  lists, doctor, import progress, update notices, and launch dry-runs.
+
+## Bug Fixes
+
+- Preserve OpenAI/local-only Super expose semantics while restoring full/exec
+  presentation, option-before-`expose` alias parsing, bounded expose run
+  retention, and safe cancellation behavior.
+- Keep quota provider filtering visible for failed and non-OpenAI reports,
+  retain previous snapshots during refresh, and recognize auth-backoff clear
+  markers.
+- Fix `prodex info` process counts to include only classified Prodex processes,
+  not every `/proc` row.
+- Update Dependabot #93's clap 4.6.7 dependency and Dependabot #94's pinned
+  SonarQube action 8.2.2 without weakening supply-chain policy.
+
+## Safety
+
+- Retain local loopback-only Super expose defaults and explicit OpenAI Secure
+  MCP Tunnel support; retired Cloudflare/public expose behavior is not restored.
+- Retain bounded redacted runtime/log output, hard continuation affinity, and
+  no-mid-stream rotation boundaries.
+- Standalone releases publish binary/installer, checksum, SBOM, and provenance
+  assets; container/Kubernetes publication remains retired.
+
+## Changelog
+
+- Optional Tools were re-audited at the stable versions used by this release:
+  Caveman 2.7.0, RTK 0.49.0, Codebase Memory MCP 0.11.0, Playwright MCP
+  0.0.82, Ponytail 4.10.0, and Presidio 2.2.364. No fabricated bumps are
+  included.
+- Compatibility and UI restorations were validated against exact tag 0.429.4
+  with focused TestBackend and non-TTY coverage.
+
+Full Changelog: [0.430.0...0.430.1](https://github.com/christiandoxa/prodex/compare/0.430.0...0.430.1)
+
 ## 0.430.0 - 2026-09-21
 
 ### Runtime
@@ -58,59 +114,6 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 - Move output classification and truncation to Mojo (`d18d85c`)
 - Plan operational health responses (`9321be2`)
 - Own application data-plane plans (`1d92475`)
-# Prodex 0.430.0
-
-## New Features
-
-- Move the audited production Mojo share above 20% while keeping Mojo as the
-  single semantic authority for migrated deterministic policy and translation
-  paths.
-- Add prodex s expose exec, an exec-only MCP exposure mode that advertises and
-  accepts only prodex_super_exec.
-- Support prodex s expose exec --openai-tunnel-id <tunnel_id> through the
-  pinned OpenAI Secure MCP tunnel client without widening the exposed MCP tool
-  surface.
-- Record redacted prodex s expose lifecycle, RPC, run, and direct-exec metadata
-  in the canonical runtime log so it is visible through prodex log.
-- Restore and preserve prodex info, prodex ping openai, prodex quota, prodex
-  log, all optional tools, multi-provider routing, auto-rotation, and the
-  existing prodex s / prodex s expose surfaces.
-
-## Bug Fixes
-
-- Preserve Anthropic Messages compatibility, including Kiro Messages
-  request/response and streaming translation.
-- Preserve native Antigravity profileless compatibility while keeping retired
-  Gemini OAuth and Vertex AI compatibility disabled with explicit migration
-  guidance.
-- Keep profile export/import round trips working for plain and encrypted
-  bundles, refresh tokens, OAuth provider secret files, Copilot metadata, and
-  Kiro metadata.
-- Keep runtime broker replacement ownership-safe when a mismatched live broker
-  still has active requests.
-- Align cloud CI, release archive verification, provider-contract reporting,
-  optional-tool freshness, and platform test matrices with the current
-  production surface.
-
-## Safety
-
-- Keep prodex s expose exec audit logs metadata-only: capability URLs,
-  environment values, stdin contents, and stdout/stderr payloads are not
-  written to the runtime log.
-- Keep hard affinity and no-mid-stream-rotation boundaries unchanged while
-  migrating deterministic policy to Mojo.
-- Keep profile bundle secret handling and private-file validation intact during
-  export/import.
-
-## Changelog
-
-- Baseline Codex compatibility is aligned with rust-v0.155.1.
-- Optional-tool pins are current for Codebase Memory MCP 0.11.2, Caveman 2.8.0,
-  Gemini CLI 0.53.0, Playwright MCP 0.0.82, Ponytail 4.11.0, and RTK 0.28.3.
-- Release verification checks the current Mojo ABI exports and retired release
-  smoke tests no longer gate removed subsystems.
-
-Full Changelog: [0.429.4...0.430.0](https://github.com/christiandoxa/prodex/compare/0.429.4...0.430.0)
 
 ## 0.429.4 - 2026-09-16
 
@@ -125,59 +128,6 @@ Full Changelog: [0.429.4...0.430.0](https://github.com/christiandoxa/prodex/comp
 - Route runtime error policy through Mojo (`1fd5eb1`)
 - Migrate Kiro and proxy error kernels (`d5dcbb2`)
 - Migrate runtime doctor summary planning (`05f6166`)
-
-### CLI
-
-- Revert "feat(mojo): migrate profile health scoring" (`b7ef44c`)
-- Migrate profile health scoring (`d033915`)
-
-### Docs
-
-- Document Luna Reserve routing (`a908be3`)
-
-### Deps
-
-- Synchronize Dependabot cargo updates (`2227a42`)
-
-### Misc
-
-- Update rustls handshake checks (`ca6feda`)
-- Upgrade rustls past TLS advisory (`49fef54`)
-- Revert "fix(ci): restore pure domain and historical guard evidence" (`ae6878a`)
-- Preserve frozen ownership baseline (`42c8de3`)
-- Sync critical signal ownership (`c347a97`)
-- Plan registry bootstrap in Mojo (`ab75ab4`)
-- Move command output normalization to Mojo (`7376d2c`)
-- Move admin registry policy into Mojo (`1e7dcd9`)
-- Move endpoint shapes to Mojo (`d75b030`)
-- Move ACP shaping to Mojo (`e9846fb`)
-- Preserve git status Mojo parity (`82f5f04`)
-- Migrate DeepSeek stream shaping (`d0d51a8`)
-- Migrate gateway admin and provider registry plans (`8d38034`)
-- Finish OpenAI response shaping (`fa84ef0`)
-- Migrate health and gateway policy kernels (`f42f56d`)
-- Route domain accounting arithmetic (`c266c60`)
-
-## 0.429.3 - 2026-09-13
-
-### Docs
-
-- Remove obsolete ownership baseline (`1429b14`)
-- Remove completed integration ledger (`3cb24f7`)
-- Pin final main audit SHA (`1f1ada0`)
-- Finalize audit evidence (`09e683b`)
-- Record complete integration ledger (`8d28c11`)
-
-## 0.429.2 - 2026-09-13
-
-### CLI
-
-- Propagate hook trust bypass to every launch (`efcaff4`)
-
-## 0.429.1 - 2026-09-13
-
-### Runtime
-
 - Pin patched libpcre2 runtime package (`0cc96c9`)
 - Gate runtime window observations (`94e336b`)
 - Restore safe sidecar cleanup (`9650102`)
@@ -191,32 +141,6 @@ Full Changelog: [0.429.4...0.430.0](https://github.com/christiandoxa/prodex/comp
 - Keep auto-redeem guard feature-safe (`daacc68`)
 - Remove retired Spark fallback (`e1a950b`)
 - Use catalog model context (`bc9decb`)
-
-### CLI
-
-- Bound profile count (`21276bd`)
-- Retire Spark capacity lane (`7a8ec4c`)
-
-### Claude
-
-- Bound aggregate framing metadata (`e61caf7`)
-- Preserve safe Codex metadata headers (`6c28de0`)
-
-### Misc
-
-- Drain ACP output after agent exit (`979f82a`)
-- Repair Max-Age and Expires (`db2c78e`)
-- Tighten Codex 0.154 evidence (`a4db8a9`)
-- Keep catalog tests after production items (`54a53fa`)
-- Preserve catalog ordering and health (`9d6e65d`)
-- Reject inverted analyzer ranges (`a7dbfe4`)
-- Enforce session preempt boundary (`c59295a`)
-- Retire Spark catalog entry (`29aaff5`)
-
-## 0.429.0 - 2026-09-11
-
-### Runtime
-
 - Bound precommit and log resources (`61b9825`)
 - Preserve projected Super child arguments (`c3a590d`)
 - Keep fresh Super config projection cross-platform (`cd2ea99`)
@@ -369,6 +293,11 @@ Full Changelog: [0.429.4...0.430.0](https://github.com/christiandoxa/prodex/comp
 
 ### CLI
 
+- Revert "feat(mojo): migrate profile health scoring" (`b7ef44c`)
+- Migrate profile health scoring (`d033915`)
+- Propagate hook trust bypass to every launch (`efcaff4`)
+- Bound profile count (`21276bd`)
+- Retire Spark capacity lane (`7a8ec4c`)
 - Require explicit Luna reserve evidence (`e69dfa0`)
 - Isolate model-specific capacity (`a87e7cb`)
 - Preserve Luna reserve capacity (`028c1e2`)
@@ -449,6 +378,8 @@ Full Changelog: [0.429.4...0.430.0](https://github.com/christiandoxa/prodex/comp
 
 ### Claude
 
+- Bound aggregate framing metadata (`e61caf7`)
+- Preserve safe Codex metadata headers (`6c28de0`)
 - Avoid copying ambiguous Claude state (`811cad0`)
 - Isolate OAuth and send hello (`14a4191`)
 - Reject unsafe external credential files (`190e699`)
@@ -470,6 +401,12 @@ Full Changelog: [0.429.4...0.430.0](https://github.com/christiandoxa/prodex/comp
 
 ### Docs
 
+- Document Luna Reserve routing (`a908be3`)
+- Remove obsolete ownership baseline (`1429b14`)
+- Remove completed integration ledger (`3cb24f7`)
+- Pin final main audit SHA (`1f1ada0`)
+- Finalize audit evidence (`09e683b`)
+- Record complete integration ledger (`8d28c11`)
 - Describe session preempt control flow (`44bf39d`)
 - Describe official Codex baseline (`3e5b904`)
 - Explain gaps and idle throughput (`cfaf689`)
@@ -526,6 +463,7 @@ Full Changelog: [0.429.4...0.430.0](https://github.com/christiandoxa/prodex/comp
 
 ### Deps
 
+- Synchronize Dependabot cargo updates (`2227a42`)
 - Bump toml (`6112ed0`)
 - Bump the cargo group with 5 updates (`0e31f2a`)
 - Bump argon2 in /fuzz in the fuzz-cargo group (`6674044`)
@@ -564,6 +502,30 @@ Full Changelog: [0.429.4...0.430.0](https://github.com/christiandoxa/prodex/comp
 
 ### Misc
 
+- Update rustls handshake checks (`ca6feda`)
+- Upgrade rustls past TLS advisory (`49fef54`)
+- Revert "fix(ci): restore pure domain and historical guard evidence" (`ae6878a`)
+- Preserve frozen ownership baseline (`42c8de3`)
+- Sync critical signal ownership (`c347a97`)
+- Plan registry bootstrap in Mojo (`ab75ab4`)
+- Move command output normalization to Mojo (`7376d2c`)
+- Move admin registry policy into Mojo (`1e7dcd9`)
+- Move endpoint shapes to Mojo (`d75b030`)
+- Move ACP shaping to Mojo (`e9846fb`)
+- Preserve git status Mojo parity (`82f5f04`)
+- Migrate DeepSeek stream shaping (`d0d51a8`)
+- Migrate gateway admin and provider registry plans (`8d38034`)
+- Finish OpenAI response shaping (`fa84ef0`)
+- Migrate health and gateway policy kernels (`f42f56d`)
+- Route domain accounting arithmetic (`c266c60`)
+- Drain ACP output after agent exit (`979f82a`)
+- Repair Max-Age and Expires (`db2c78e`)
+- Tighten Codex 0.154 evidence (`a4db8a9`)
+- Keep catalog tests after production items (`54a53fa`)
+- Preserve catalog ordering and health (`9d6e65d`)
+- Reject inverted analyzer ranges (`a7dbfe4`)
+- Enforce session preempt boundary (`c59295a`)
+- Retire Spark catalog entry (`29aaff5`)
 - Share descriptor budget across sources (`729a044`)
 - Satisfy executor complexity gate (`0835ed3`)
 - Add standalone exec and shorten companion socket (`6c77d95`)
