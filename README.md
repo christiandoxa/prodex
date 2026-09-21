@@ -38,7 +38,7 @@ Use `prodex` if you want to:
 - launch Codex/Super against non-OpenAI providers without changing front ends
 - keep profile `auth.json` account credentials separated
 - keep sessions attached to the profile that created them
-- run Codex, Caveman mode, Super mode, and Claude Code through the same wrapper
+- run Codex and Super mode through the supported wrapper
 
 If you only use one Codex account and do not need quota rotation, you probably do not need `prodex`.
 
@@ -51,10 +51,9 @@ For OpenAI/Codex quota-aware routing, you need at least one logged-in Prodex pro
 
 | Tool | Used by |
 |---|---|
-| Codex CLI | `prodex`, `prodex run`, `prodex caveman`, `prodex playwright`, `prodex super` |
-| Claude Code | `prodex claude` |
-| RTK | `rtk` variants and `prodex s` / `prodex super` |
-| Node.js 18+ with `npx` | `prodex playwright` and Playwright MCP in `prodex s` / `prodex super` |
+| Codex CLI | `prodex`, `prodex run`, `prodex super` |
+| RTK | external `rtk`, or the Super `--tool rtk` option |
+| Node.js 18+ with `npx` | Playwright MCP when selected by Super |
 
 </details>
 
@@ -543,6 +542,14 @@ launcher, concurrency, resume-affinity, and isolation contracts.
 
 ## Commands
 
+The current CLI intentionally keeps only the supported profile, quota, session,
+diagnostic, run, Super, gateway, and ping surfaces. Retired top-level
+`setup`, `capability`, `audit`, `context`, `cleanup`, `gui`, `dashboard`,
+`caveman`, `rtk`, `playwright`, `ponytail`, `presidio`, `redeem`, `claude`, and
+standalone/public expose paths are not compatibility aliases and must not be
+resurrected. Optional tools are selected through Super's typed `--tool` and
+`--require-tool` flags.
+
 <details>
 <summary>Most used commands</summary>
 
@@ -600,9 +607,6 @@ prodex quota --all --auth no-auth --once
 prodex quota --all --provider deepseek --once
 prodex quota --all --provider local --base-url http://127.0.0.1:8131/v1 --once
 prodex quota --all --provider agy --once
-prodex redeem main
-prodex gui
-prodex s gui
 prodex status
 ```
 
@@ -612,14 +616,9 @@ Bare `prodex quota` opens the detailed live view across every profile, equivalen
 
 The detailed live pool view (`prodex quota` or `prodex quota --all --detail`) accepts `s` to cycle sort modes and `f` to cycle the provider filter through `all`, `openai`, `gemini`, `anthropic`, `copilot`, `kiro`, `deepseek`, `local`, and `agy`. Add `--provider openai`, `--provider gemini`, `--provider anthropic`, `--provider copilot`, `--provider kiro`, `--provider deepseek`, `--provider local`, or `--provider agy` to start locked to a single provider. The table compacts to the current terminal width while preserving status and remaining-quota visibility; its live height keeps the sorted top rows and reports how many profiles are hidden.
 
-For OpenAI/Codex profiles, quota views also show earned rate-limit reset credits when the upstream usage API reports them. Use `prodex redeem <profile>` when you explicitly want to redeem one reset credit on a named profile, even if the 5h and weekly quota windows still have remaining quota. If either quota window resets within 1 hour, Prodex asks before consuming the credit; pass `--yes` to skip that prompt. Add `--auto-redeem` to a runtime launch when you want Prodex to consider a guarded automatic redeem after every OpenAI/Codex profile is weekly-exhausted.
-
-`prodex gui` launches the Codex Desktop interface shown in the [OpenCodex demo](https://github.com/lidge-jun/opencodex/blob/main/assets/demo.gif) through a temporary, profile-scoped `CODEX_HOME` and the Prodex runtime proxy. Chat sessions and the Desktop SQLite index stay shared across all managed Prodex profiles, and launch preflight repairs rollout metadata before Desktop performs its DB-only history query. Existing CLI/Super chats therefore appear regardless of the selected starting profile, and new Desktop chats persist. Source profile configuration and authentication files are not modified. `prodex s gui` launches the same desktop app with the Super/Caveman optimizer overlay and full-access policy. Examples: `prodex gui --profile main` and `prodex s --profile main --no-presidio gui`.
-
-- **macOS and Windows:** run `codex app` and complete installation of the official Codex app. Close any running Codex app before launching it through Prodex so the isolated environment is applied.
-- **Linux:** install the `codex-desktop` command from [codex-desktop-linux](https://github.com/ilysenko/codex-desktop-linux). Prodex launches it with `--new-instance`.
-
-Prodex does not download, build, or redistribute either desktop app. Keep the launching terminal open while the GUI runs; that process owns the temporary profile overlay and local proxy.
+Reset-credit redemption, desktop GUI, and other retired paths are intentionally
+not part of the 0.430.x CLI. Use the quota/status views and normal Codex/Super
+launches instead.
 
 </details>
 
@@ -761,26 +760,17 @@ prodex exec "review this repo"
 </details>
 
 <details>
-<summary>Caveman mode — runs Codex with Caveman enabled</summary>
+<summary>Optional tools — selected by Super</summary>
 
 ```bash
-prodex caveman
-prodex rtk
-prodex playwright
-prodex ponytail
-prodex caveman --dry-run
-prodex s doctor
-prodex s doctor --json --strict
-prodex caveman --profile main
-prodex caveman exec "review this repo in caveman mode"
-prodex caveman 00000000-0000-7000-8000-000000000042
+prodex doctor --install
+prodex super --tool rtk --tool ponytail
+prodex super --require-tool rtk --dry-run
 ```
 
-`prodex caveman` runs Codex with Caveman mode active in a temporary Prodex overlay `CODEX_HOME`, so the base profile home stays unchanged after the session ends.
-
-Use `--tool rtk`, `--tool playwright`, or `--tool ponytail` to add a session surface. Use `--presidio` for redaction. The `prodex rtk`, `prodex playwright`, and `prodex ponytail` compatibility shortcuts translate to typed selections; tool-like words inside Codex arguments are not removed.
-
-RTK is still an external binary. Install it separately if `rtk gain` is unavailable.
+Optional tools remain external and are activated only for the Super invocation.
+Use `prodex doctor --install` for bounded prerequisite checks; standalone
+optimizer commands are retired.
 
 </details>
 
@@ -808,7 +798,7 @@ either bridge option, it selects that provider's model.
 
 This is my daily mode. It enables validated tools that are installed and launches Codex with Super's approval, sandbox, hook-trust, and workspace-trust bypasses for that invocation.
 
-Playwright MCP is enabled by default in Super when Node.js 18+ and `npx` pass launch-time path validation. Install the pinned package and browser with the commands in [Optional tools](#optional-tools), then use `prodex capability super-doctor` or `--require-tool playwright` for the full offline package probe. Codex Apps are disabled by default in Super; pass a later `-c features.apps=true` override when needed.
+Playwright MCP is available to Super when Node.js 18+ and `npx` pass launch-time path validation. Use `prodex doctor --install` or `--require-tool playwright` for an offline probe. Codex Apps are disabled by default in Super; pass a later `-c features.apps=true` override when needed.
 
 Super also enables Smart Context Autopilot on the Codex/provider-bridge path;
 native opaque CLIs are not automatically rewritten.
@@ -1113,11 +1103,8 @@ prodex doctor --install
 prodex doctor --runtime
 prodex doctor --bundle ./prodex-doctor.json --redacted
 prodex doctor --repair-session-index
-prodex setup --dry-run
-prodex context audit
-prodex context export 00000000-0000-7000-8000-000000000042
-prodex context compress ~/.codex/AGENTS.md --dry-run
-git diff | prodex context compact-output --kind git-diff
+prodex doctor --install
+prodex doctor --runtime --json
 ```
 
 | Command | Description |
@@ -1130,11 +1117,7 @@ git diff | prodex context compact-output --kind git-diff
 | `prodex doctor --runtime` | Runs runtime diagnostics. |
 | `prodex doctor --bundle PATH --redacted` | Writes a shareable JSON diagnostic bundle without stored auth tokens or headers. |
 | `prodex doctor --repair-session-index` | Explicitly performs full active and archived Codex session-index repair. |
-| `prodex setup --dry-run` | Shows setup reconciliation actions without changing files. |
-| `prodex context audit` | Reports approximate token weight for shared instruction and memory files. |
-| `prodex context export` | Exports a selected shared Codex session transcript/context into a Markdown file. |
-| `prodex context compress` | Compresses Markdown/text context files and writes an `.original.md` backup. |
-| `prodex context compact-output` | Compacts copied command output such as `git status`, `git diff`, `rg`, `grep`, `find`, `tree`, or long logs. |
+| Retired setup/context/capability paths | Not available in the current CLI; use the supported doctor/info/log surfaces. |
 
 For full policy keys, environment overrides, and runtime log path resolution, see [docs/runtime-policy.md](./docs/runtime-policy.md).
 

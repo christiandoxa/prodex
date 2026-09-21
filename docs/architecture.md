@@ -48,12 +48,17 @@ Common command edit points:
 
 ## ChatGPT Expose Composition
 
+The supported expose product is `prodex s expose` with local loopback access or
+an explicit OpenAI Secure MCP Tunnel. Retired Cloudflare/public expose,
+standalone `prodex expose`, and legacy optimizer command paths are not part of
+this architecture.
+
 ## Runtime Proxy Hot Path
 
 Runtime launch and proxy flow:
 
 ```text
-prodex run / prodex caveman / prodex claude
+prodex run / prodex super
   -> prodex-app runtime_launch
   -> prodex-runtime-launch plans child process and env
   -> prodex-app runtime_proxy owns live transport orchestration

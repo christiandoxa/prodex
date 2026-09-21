@@ -1,4 +1,16 @@
 [  {
+    "id": "audited-prodex-0.430.1-ui-preservation-train",
+    "requiredSubjects": [
+      "feat(ui): restore 0.429.4 terminal surfaces"
+    ],
+    "caps": {
+      "maxFiles": 110,
+      "maxBehaviorFiles": 90,
+      "maxLines": 20000,
+      "maxFileLines": 800
+    },
+    "reason": "Reviewed the exact 0.429.4-to-0.430.x preservation train: rich info/status, log/quota TUI, Super prompt and expose presentation, session/profile/doctor/import/update/dry-run panels, current OpenAI Secure MCP Tunnel safety semantics, and their deterministic tests. Exact-tag source comparison, 1,850 prodex-app tests, strict workspace Clippy, docs, supply-chain, optional-tools, size, boundary, compatibility, runtime manifest/hotpath, Mojo, cargo-deny, and release-fixture gates remain mandatory; global churn thresholds are unchanged."
+  },  {
     "id": "audited-prodex-refactor-integration-20260913",
     "requiredSubjects": [
       "refactor(application): share control-plane route errors",

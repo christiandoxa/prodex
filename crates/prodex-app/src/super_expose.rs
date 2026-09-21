@@ -21,6 +21,8 @@ mod openai_tunnel;
 mod protocol;
 #[path = "super_expose/run.rs"]
 mod run;
+#[path = "super_expose_ui.rs"]
+mod super_expose_ui;
 
 const BODY_MAX_BYTES: u64 = 1024 * 1024;
 static CLOCK_SEQUENCE: AtomicU64 = AtomicU64::new(1);
@@ -29,6 +31,9 @@ pub(crate) fn handle_super_expose(mut expose: SuperExposeArgs) -> Result<()> {
     let (openai_tunnel_id, listen) = prepare_super_expose(&mut expose)?;
     if expose.super_args.dry_run {
         print_super_expose_dry_run(&expose, openai_tunnel_id.as_deref());
+        return Ok(());
+    }
+    if super_expose_ui::should_confirm_from_tui() && !super_expose_ui::confirm(&expose)? {
         return Ok(());
     }
 

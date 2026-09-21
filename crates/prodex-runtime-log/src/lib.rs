@@ -35,6 +35,10 @@ pub fn runtime_log_recording_enabled() -> bool {
     retention::runtime_log_recording_enabled()
 }
 
+pub fn decode_zstd_bounded(payload: &[u8], max_bytes: usize) -> io::Result<Vec<u8>> {
+    zstd::bulk::decompress(payload, max_bytes)
+}
+
 /// Returns whether a runtime message is routine capacity telemetry rather than a user-facing
 /// operational event. Human renderers may filter these after JSON/live capture.
 pub fn runtime_log_message_is_routine_load(message: &str) -> bool {

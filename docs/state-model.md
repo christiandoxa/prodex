@@ -88,10 +88,10 @@ update the runtime doctor marker registry and tests so diagnostics remain typed.
 
 ## Setup And Optional-Tool State
 
-`prodex setup` is a local reconciler for install surfaces. It may ensure Prodex
-directories exist and validate externally installed optional tools. It must not
-download tools or mutate profile auth, shared Codex history, runtime bindings,
-or user-managed tool installations.
+The retired `prodex setup` command is not part of the current CLI. Install and
+optional-tool inspection use `prodex doctor --install`; it must not download
+tools or mutate profile auth, shared Codex history, runtime bindings, or
+user-managed tool installations.
 
 Optional-tool activation is limited to the temporary launch overlay. Version,
 source, commit, and digest metadata in each managed installation must match the

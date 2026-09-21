@@ -13,7 +13,6 @@ const VALID_SUITES = new Set(["core", "runtime", "runtime-smoke", "stress", "all
 // Keep background-worker state from crossing the same module boundaries used by CI.
 const MAIN_INTERNAL_RUNTIME_PROXY_SHARDS = Object.freeze([
   ["backend", "main_internal_tests::runtime_proxy_backend::"],
-  ["claude", "main_internal_tests::runtime_proxy_claude_and_anthropic::"],
   ["continuations", "main_internal_tests::runtime_proxy_continuations::"],
   ["selection", "main_internal_tests::runtime_proxy_selection_and_pressure::"],
 ]);

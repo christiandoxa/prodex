@@ -15,6 +15,19 @@ use reqwest::blocking::Client;
 use reqwest::header::HeaderValue;
 use std::time::Duration;
 
+#[derive(Debug, serde::Deserialize)]
+struct RuntimeBrokerLogSnapshotEntry {
+    sequence: u64,
+    line: String,
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct RuntimeBrokerLogSnapshotResponse {
+    cursor: u64,
+    dropped: u64,
+    entries: Vec<RuntimeBrokerLogSnapshotEntry>,
+}
+
 pub(crate) fn runtime_broker_registry_admission(registry: &RuntimeBrokerRegistry) -> Result<()> {
     anyhow::ensure!(
         prodex_runtime_broker::runtime_broker_listen_addr_is_loopback(&registry.listen_addr),
@@ -64,8 +77,66 @@ pub(crate) fn runtime_broker_metrics_url(registry: &RuntimeBrokerRegistry) -> St
     prodex_runtime_broker::runtime_broker_metrics_url(registry)
 }
 
+pub(crate) fn runtime_broker_metrics_prometheus_url(registry: &RuntimeBrokerRegistry) -> String {
+    prodex_runtime_broker::runtime_broker_metrics_url(registry)
+}
+
 pub(crate) fn runtime_broker_activate_url(registry: &RuntimeBrokerRegistry) -> String {
     prodex_runtime_broker::runtime_broker_activate_url(registry)
+}
+
+pub(crate) fn runtime_broker_log_snapshot_url(registry: &RuntimeBrokerRegistry) -> String {
+    registry.log_snapshot_url()
+}
+
+pub(crate) fn probe_runtime_broker_log_snapshot(
+    client: &Client,
+    paths: &AppPaths,
+    broker_key: &str,
+    registry: &RuntimeBrokerRegistry,
+    after: u64,
+) -> Result<Option<runtime_log::RuntimeLiveLogSnapshot>> {
+    let Ok(admin_header) = runtime_broker_admin_header(paths, broker_key, registry) else {
+        return Ok(None);
+    };
+    let url = format!(
+        "{}?after={after}&limit={}",
+        runtime_broker_log_snapshot_url(registry),
+        runtime_log::DEFAULT_RUNTIME_LIVE_LOG_MAX_ENTRIES
+    );
+    let response = match client
+        .get(url)
+        .header(
+            prodex_runtime_broker::RUNTIME_BROKER_ADMIN_TOKEN_HEADER,
+            admin_header,
+        )
+        .send()
+    {
+        Ok(response) => response,
+        Err(_) => return Ok(None),
+    };
+    if !response.status().is_success() {
+        return Ok(None);
+    }
+    let body = read_blocking_response_body_with_limit(
+        response,
+        RUNTIME_PROXY_BUFFERED_RESPONSE_MAX_BYTES,
+        "failed to read runtime broker log snapshot response",
+    )?;
+    let snapshot = serde_json::from_slice::<RuntimeBrokerLogSnapshotResponse>(&body)
+        .context("failed to decode runtime broker log snapshot response")?;
+    Ok(Some(runtime_log::RuntimeLiveLogSnapshot {
+        cursor: snapshot.cursor,
+        dropped: snapshot.dropped,
+        entries: snapshot
+            .entries
+            .into_iter()
+            .map(|entry| runtime_log::RuntimeLiveLogEntry {
+                sequence: entry.sequence,
+                line: entry.line,
+            })
+            .collect(),
+    }))
 }
 
 pub(crate) fn runtime_broker_release_session_affinity_url(
@@ -170,6 +241,24 @@ pub(crate) fn collect_live_runtime_broker_observations(
         });
     }
     observations
+}
+
+pub(crate) fn collect_runtime_broker_metrics_targets(paths: &AppPaths) -> Vec<String> {
+    let mut targets = Vec::new();
+    for broker_key in runtime_broker_registry_keys(paths) {
+        let Ok(Some(registry)) = load_runtime_broker_registry(paths, &broker_key) else {
+            continue;
+        };
+        if runtime_broker_registry_admission(&registry).is_err() {
+            continue;
+        }
+        targets.push(runtime_broker_metrics_prometheus_url(&registry));
+    }
+    targets
+}
+
+pub(crate) fn format_runtime_broker_metrics_targets(targets: &[String]) -> String {
+    prodex_runtime_broker::format_runtime_broker_metrics_targets(targets)
 }
 
 pub(crate) fn activate_runtime_broker_profile(

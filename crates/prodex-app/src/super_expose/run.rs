@@ -14,6 +14,7 @@ use std::thread;
 use std::time::Duration;
 
 const MAX_ACTIVE_RUNS: usize = 4;
+const MAX_RETAINED_TERMINAL_RUNS: usize = 32;
 const OUTPUT_MAX_BYTES: usize = 256 * 1024;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -252,27 +253,31 @@ impl RunManager {
         let Ok(mut runs) = self.inner.runs.lock() else {
             return;
         };
-        let Some(record) = runs.get_mut(run_id) else {
-            return;
+        let (state, exit_code, output_bytes, output_truncated) = {
+            let Some(record) = runs.get_mut(run_id) else {
+                return;
+            };
+            record.finished_at = Some(now_millis());
+            apply_run_terminal_state(record, cancel.load(Ordering::SeqCst), status);
+            (
+                record.state,
+                record.exit_status,
+                record.output.len(),
+                record.output_truncated,
+            )
         };
-        record.finished_at = Some(now_millis());
-        apply_run_terminal_state(record, cancel.load(Ordering::SeqCst), status);
+        prune_terminal_runs(&mut runs);
         self.inner.audit.event(
             "super_expose_run_completed",
             [
                 crate::runtime_proxy_log_field("run_id", run_id.to_string()),
-                crate::runtime_proxy_log_field("state", record.state.as_str()),
+                crate::runtime_proxy_log_field("state", state.as_str()),
                 crate::runtime_proxy_log_field(
                     "exit_code",
-                    record
-                        .exit_status
-                        .map_or_else(|| "none".to_string(), |code| code.to_string()),
+                    exit_code.map_or_else(|| "none".to_string(), |code| code.to_string()),
                 ),
-                crate::runtime_proxy_log_field("output_bytes", record.output.len().to_string()),
-                crate::runtime_proxy_log_field(
-                    "output_truncated",
-                    record.output_truncated.to_string(),
-                ),
+                crate::runtime_proxy_log_field("output_bytes", output_bytes.to_string()),
+                crate::runtime_proxy_log_field("output_truncated", output_truncated.to_string()),
             ],
         );
     }
@@ -287,12 +292,13 @@ impl RunManager {
     }
 
     fn finish_start_failed(&self, run_id: &str, message: &str) {
-        if let Ok(mut runs) = self.inner.runs.lock()
-            && let Some(record) = runs.get_mut(run_id)
-        {
-            record.state = RunState::StartFailed;
-            record.finished_at = Some(now_millis());
-            append_output(record, message.as_bytes());
+        if let Ok(mut runs) = self.inner.runs.lock() {
+            if let Some(record) = runs.get_mut(run_id) {
+                record.state = RunState::StartFailed;
+                record.finished_at = Some(now_millis());
+                append_output(record, message.as_bytes());
+            }
+            prune_terminal_runs(&mut runs);
         }
     }
 
@@ -302,6 +308,20 @@ impl RunManager {
         {
             append_output(record, bytes);
         }
+    }
+}
+
+fn prune_terminal_runs(runs: &mut BTreeMap<String, RunRecord>) {
+    while runs.values().filter(|run| run.state.terminal()).count() > MAX_RETAINED_TERMINAL_RUNS {
+        let Some(oldest_id) = runs
+            .iter()
+            .filter(|(_, run)| run.state.terminal())
+            .min_by_key(|(_, run)| (run.finished_at.unwrap_or(run.created_at), run.created_at))
+            .map(|(run_id, _)| run_id.clone())
+        else {
+            break;
+        };
+        runs.remove(&oldest_id);
     }
 }
 

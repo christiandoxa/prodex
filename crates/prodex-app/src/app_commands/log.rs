@@ -1,185 +1,154 @@
-use crate::{LogArgs, LogMode};
-use anyhow::{Context, Result};
-use std::collections::BTreeMap;
-use std::fs::File;
-use std::io::{Read, Seek, SeekFrom, Write};
+pub(crate) use self::log_command_tui::handle_log;
+#[cfg(test)]
+use self::log_command_tui::{log_snapshot_items, log_stream_tui_text};
+pub(crate) use self::log_follow::{
+    FollowedLog, FollowedLogPaths, collect_new_followed_lines, followed_log_map,
+    retain_followed_logs,
+};
+pub(crate) use self::log_live::{LiveRuntimeLogSource, collect_live_log_items};
+pub(crate) use self::log_load::{LogLoadAggregate, LogLoadObservation, is_routine_load_event};
+use self::log_paths::recent_session_log_paths;
+#[cfg(test)]
+use self::log_stream::log_stream_item_json;
+pub(crate) use self::log_stream::{
+    LogStreamItem, collect_new_runtime_log_stream_items,
+    collect_new_runtime_log_stream_items_for_tui_with_throughput,
+    collect_new_runtime_log_stream_items_with_throughput, local_token_usage_event, log_event_label,
+    print_log_stream_item, print_token_usage_event, print_transcript_event,
+    print_upstream_payload_event,
+};
+pub(crate) use self::log_transcript::TranscriptEvent;
+#[cfg(test)]
+use self::log_transcript::transcript_events_from_session_line;
+#[cfg(test)]
+use crate::app_commands::log_format::local_log_timestamp;
+#[cfg(test)]
+use crate::reports::InfoTokenUsageEvent;
+use anyhow::Result;
+use std::collections::BTreeSet;
+#[cfg(test)]
+use std::collections::VecDeque;
+#[cfg(test)]
+use std::env;
+use std::fs;
+#[cfg(test)]
+use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::thread;
-use std::time::Duration;
+use std::time::{SystemTime, UNIX_EPOCH};
 
-const LOG_INITIAL_TAIL_BYTES: u64 = 64 * 1024;
-const LOG_LAST_TAIL_BYTES: usize = 256 * 1024;
-const LOG_FOLLOW_FILE_LIMIT: usize = 16;
-const LOG_POLL_INTERVAL: Duration = Duration::from_millis(250);
+#[cfg(test)]
+#[path = "log_completeness_tests.rs"]
+mod completeness_tests;
+#[cfg(test)]
+#[path = "log_descriptor_tests.rs"]
+mod descriptor_tests;
+#[path = "log_command_tui.rs"]
+mod log_command_tui;
+#[path = "log_follow.rs"]
+mod log_follow;
+#[path = "log_live.rs"]
+mod log_live;
+#[path = "log_load.rs"]
+mod log_load;
+#[path = "log_paths.rs"]
+mod log_paths;
+#[path = "log_stream.rs"]
+mod log_stream;
+#[path = "log_transcript.rs"]
+mod log_transcript;
+#[path = "log_transcript_text.rs"]
+mod log_transcript_text;
+#[cfg(test)]
+#[path = "log_tests.rs"]
+mod tests;
+#[cfg(test)]
+#[path = "log_throughput_tests.rs"]
+mod throughput_tests;
 
-#[derive(Debug, Default)]
-struct LogCursor {
-    offset: u64,
-    pending: Vec<u8>,
-    initialized: bool,
+const LOG_SNAPSHOT_TAIL_BYTES: usize = 1024 * 1024;
+const SESSION_SNAPSHOT_TAIL_BYTES: usize = 2 * 1024 * 1024;
+// ponytail: one shared 32-file budget across runtime and session followers; raise only with
+// measured low-RLIMIT headroom.
+pub(super) const LOG_FOLLOW_MAX_FILES: usize = 32;
+
+pub(super) fn runtime_log_paths_for_follow() -> Vec<std::path::PathBuf> {
+    super::collect_recent_runtime_log_paths(LOG_FOLLOW_MAX_FILES)
 }
 
-pub(crate) fn handle_log(args: LogArgs) -> Result<()> {
-    match args.mode {
-        LogMode::Last => print_latest_log_line(args.json),
-        LogMode::Stream | LogMode::Upstream => follow_runtime_logs(args.mode, args.json),
-    }
-}
-
-fn print_latest_log_line(json: bool) -> Result<()> {
-    let Some(line) = latest_matching_line(LogMode::Stream)? else {
-        println!("No runtime logs found.");
-        return Ok(());
-    };
-    print_log_line(&line, json)
-}
-
-fn latest_matching_line(mode: LogMode) -> Result<Option<String>> {
-    for path in super::collect_recent_runtime_log_paths(LOG_FOLLOW_FILE_LIMIT) {
-        let tail = prodex_runtime_doctor::read_runtime_log_tail(&path, LOG_LAST_TAIL_BYTES)
-            .with_context(|| format!("failed to read runtime log {}", path.display()))?;
-        if let Some(line) = String::from_utf8_lossy(&tail)
-            .lines()
-            .rev()
-            .find(|line| log_line_matches(mode, line))
-        {
-            return Ok(Some(line.to_string()));
-        }
-    }
-    Ok(None)
-}
-
-fn follow_runtime_logs(mode: LogMode, json: bool) -> Result<()> {
-    let mut cursors = BTreeMap::<PathBuf, LogCursor>::new();
-    let mut announced_wait = false;
-    loop {
-        let paths = super::collect_recent_runtime_log_paths(LOG_FOLLOW_FILE_LIMIT);
-        if paths.is_empty() {
-            if !announced_wait {
-                eprintln!("Waiting for Prodex runtime logs...");
-                announced_wait = true;
-            }
-            thread::sleep(LOG_POLL_INTERVAL);
-            continue;
-        }
-        announced_wait = false;
-        cursors.retain(|path, _| paths.contains(path));
-        for path in paths.iter().rev() {
-            let cursor = cursors.entry(path.clone()).or_default();
-            for line in read_new_log_lines(path, cursor)? {
-                if log_line_matches(mode, &line) {
-                    print_log_line(&line, json)?;
-                }
-            }
-        }
-        thread::sleep(LOG_POLL_INTERVAL);
-    }
-}
-
-fn read_new_log_lines(path: &Path, cursor: &mut LogCursor) -> Result<Vec<String>> {
-    let mut file = File::open(path)
-        .with_context(|| format!("failed to open runtime log {}", path.display()))?;
-    let len = file
-        .metadata()
-        .with_context(|| format!("failed to inspect runtime log {}", path.display()))?
-        .len();
-
-    if !cursor.initialized || len < cursor.offset {
-        cursor.offset = len.saturating_sub(LOG_INITIAL_TAIL_BYTES);
-        cursor.pending.clear();
-        cursor.initialized = true;
+pub(super) fn bounded_followed_log_paths(
+    runtime_paths: &[PathBuf],
+    session_paths: &[PathBuf],
+) -> (Vec<PathBuf>, Vec<PathBuf>) {
+    if runtime_paths.len() + session_paths.len() <= LOG_FOLLOW_MAX_FILES {
+        return (runtime_paths.to_vec(), session_paths.to_vec());
     }
 
-    let started_mid_file = cursor.offset > 0 && cursor.pending.is_empty();
-    file.seek(SeekFrom::Start(cursor.offset))
-        .with_context(|| format!("failed to seek runtime log {}", path.display()))?;
-    let mut bytes = Vec::new();
-    file.read_to_end(&mut bytes)
-        .with_context(|| format!("failed to read runtime log {}", path.display()))?;
-    cursor.offset = cursor.offset.saturating_add(bytes.len() as u64);
-
-    if bytes.is_empty() {
-        return Ok(Vec::new());
-    }
-    if started_mid_file {
-        if let Some(newline) = bytes.iter().position(|byte| *byte == b'\n') {
-            bytes.drain(..=newline);
-        } else {
-            return Ok(Vec::new());
-        }
-    }
-
-    if !cursor.pending.is_empty() {
-        let mut combined = std::mem::take(&mut cursor.pending);
-        combined.extend_from_slice(&bytes);
-        bytes = combined;
-    }
-
-    let complete_len = bytes
+    let mut candidates = runtime_paths
         .iter()
-        .rposition(|byte| *byte == b'\n')
-        .map(|index| index + 1)
-        .unwrap_or(0);
-    if complete_len < bytes.len() {
-        cursor.pending.extend_from_slice(&bytes[complete_len..]);
-    }
-
-    Ok(String::from_utf8_lossy(&bytes[..complete_len])
-        .lines()
-        .filter(|line| !line.trim().is_empty())
-        .map(str::to_string)
-        .collect())
-}
-
-fn log_line_matches(mode: LogMode, line: &str) -> bool {
-    match mode {
-        LogMode::Stream | LogMode::Last => true,
-        LogMode::Upstream => {
-            if let Ok(value) = serde_json::from_str::<serde_json::Value>(line)
-                && value
-                    .get("event")
-                    .and_then(serde_json::Value::as_str)
-                    .is_some_and(|event| event.contains("upstream"))
-            {
-                return true;
-            }
-            line.to_ascii_lowercase().contains("upstream")
+        .cloned()
+        .map(|path| (path_modified_time(&path), path, 0_u8))
+        .chain(
+            session_paths
+                .iter()
+                .cloned()
+                .map(|path| (path_modified_time(&path), path, 1_u8)),
+        )
+        .collect::<Vec<_>>();
+    candidates.sort_by(
+        |(left_modified, left_path, left_source), (right_modified, right_path, right_source)| {
+            right_modified
+                .cmp(left_modified)
+                .then_with(|| left_path.cmp(right_path))
+                .then_with(|| left_source.cmp(right_source))
+        },
+    );
+    let minimums = [
+        if session_paths.is_empty() {
+            LOG_FOLLOW_MAX_FILES
+        } else {
+            LOG_FOLLOW_MAX_FILES.div_ceil(2)
+        },
+        if runtime_paths.is_empty() {
+            LOG_FOLLOW_MAX_FILES
+        } else {
+            LOG_FOLLOW_MAX_FILES / 2
+        },
+    ];
+    let mut selected = BTreeSet::new();
+    let mut selected_counts = [0; 2];
+    for (_, path, source) in &candidates {
+        if selected_counts[*source as usize] < minimums[*source as usize]
+            && selected.insert((*source, path.clone()))
+        {
+            selected_counts[*source as usize] += 1;
         }
     }
-}
-
-fn print_log_line(line: &str, json: bool) -> Result<()> {
-    let rendered = if json {
-        match serde_json::from_str::<serde_json::Value>(line) {
-            Ok(value) => serde_json::to_string(&value),
-            Err(_) => serde_json::to_string(&serde_json::json!({"line": line})),
+    for (_, path, source) in candidates {
+        if selected.len() >= LOG_FOLLOW_MAX_FILES {
+            break;
         }
-        .context("failed to render runtime log JSON")?
-    } else {
-        line.to_string()
+        selected.insert((source, path));
+    }
+    let select = |paths: &[PathBuf], source: u8| {
+        paths
+            .iter()
+            .filter(|path| selected.contains(&(source, (*path).clone())))
+            .cloned()
+            .collect()
     };
-    let mut stdout = std::io::stdout().lock();
-    writeln!(stdout, "{rendered}")?;
-    stdout.flush().context("failed to flush runtime log output")
+    (select(runtime_paths, 0), select(session_paths, 1))
+}
+
+fn path_modified_time(path: &Path) -> SystemTime {
+    fs::metadata(path)
+        .and_then(|metadata| metadata.modified())
+        .unwrap_or(UNIX_EPOCH)
+}
+
+pub(crate) fn no_color_requested() -> bool {
+    std::env::var_os("NO_COLOR").is_some()
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn upstream_mode_filters_text_and_json_events() {
-        assert!(log_line_matches(
-            LogMode::Upstream,
-            "[2026-01-01] upstream_response status=200"
-        ));
-        assert!(log_line_matches(
-            LogMode::Upstream,
-            r#"{"event":"upstream_payload","message":"redacted"}"#
-        ));
-        assert!(!log_line_matches(
-            LogMode::Upstream,
-            r#"{"event":"selection_plan"}"#
-        ));
-    }
-}
+pub(crate) use self::log_transcript::read_new_transcript_events;
+pub(crate) use self::log_transcript::{collect_new_transcript_events, latest_transcript_event};

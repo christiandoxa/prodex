@@ -96,10 +96,10 @@ after another profile fails. `--profile NAME` limits the check to one profile;
 `--json` emits the aggregate per-profile result. A valid completed response is
 enough; exact `PONG` wording is not required. This is an application-level
 probe, not a DNS or server-health probe. For expose modes, use
-`prodex s expose` for local-only browser/MCP access, `--tunnel` for the
-Cloudflare Quick Tunnel, or `--tunnel-provider openai` for MCP-only OpenAI
-Secure Tunnel access; the browser remains loopback-local in OpenAI mode, and
-tunnel-client readiness does not by itself verify ChatGPT connector creation.
+`prodex s expose` for local-only browser/MCP access, or
+`--openai-tunnel-id <tunnel_id>` for an explicit OpenAI Secure MCP Tunnel;
+the browser remains loopback-local in OpenAI mode. Retired Cloudflare/public
+tunnel flags are rejected.
 
 ## 5. Use Super/YOLO mode
 
@@ -107,7 +107,7 @@ Inspect the plan first:
 
 ```bash
 prodex s --dry-run
-prodex capability super-doctor
+prodex doctor --install
 ```
 
 Then launch:
@@ -136,15 +136,10 @@ prodex super --tool rtk --tool ponytail
 prodex super --require-tool caveman
 ```
 
-Missing tools are skipped unless required. Caveman is external, never embedded
-or downloaded at launch. Follow [Optional Tools](docs/optional-tools.md) before
-using:
-
-```bash
-prodex caveman --dry-run
-prodex caveman
-prodex claude caveman
-```
+Missing tools are skipped unless required. Optional tools are external, never
+embedded or downloaded at launch. Use `prodex doctor --install` to inspect the
+current prerequisites; retired standalone optimizer commands are not part of
+the current CLI.
 
 Super sub-agents accept fresh and resumed Codex targets:
 
@@ -180,11 +175,10 @@ From the workspace you want to expose:
 prodex s expose
 ```
 
-Interactive setup asks for the main agent, main model, model-aware reasoning
-effort, and optional sub-agent model/effort configuration before starting any
-listener or Cloudflare process. In a headless shell, use existing options such
-as `--model` and `-c 'model_reasoning_effort="max"'`; explicit values win and
-stdin is never read indefinitely.
+Local expose starts with the current Super configuration and asks for safe
+confirmation in an interactive terminal. In a headless shell, use explicit
+options such as `--model` and `-c 'model_reasoning_effort="max"'`; stdin is
+never read indefinitely.
 
 After MCP readiness is verified, paste the printed URL into ChatGPT:
 
@@ -225,14 +219,7 @@ RPC/tool calls, run state transitions, and exec completion. Capability URLs,
 task/input text, environment values, stdin, and captured stdout/stderr are not
 copied into those audit lines.
 
-Cloudflare mode prints a public URL ending in `/mcp` and containing a fresh
-ephemeral full-Super capability.
-Anyone with the full URL can control that expose process, so treat it as a
-credential. This is not OAuth and is for personal development only. No
-Cloudflare account or initialization is required for Quick Tunnel mode, but
-`cloudflared` must be installed. Quick Tunnel prefers QUIC over outbound
-UDP/7844 and falls back to HTTP/2 over TCP/7844. Local mode has no external
-tunnel. OpenAI mode requires a pre-created tunnel ID, the
+Local mode has no external tunnel. OpenAI mode requires a pre-created tunnel ID, the
 `CONTROL_PLANE_API_KEY` runtime key, and the official `tunnel-client`; it uses
 outbound HTTPS/TCP 443 and provides MCP connectivity only. The browser remains
 local in OpenAI mode. Stop the process with Ctrl+C to revoke access.
@@ -286,7 +273,7 @@ profile affinity and pre-commit rotation stay Prodex-owned.
 prodex doctor --runtime
 prodex doctor --runtime --json
 prodex doctor --bundle ./prodex-doctor.json --redacted
-prodex audit --tail 20
+prodex log last
 ```
 
 Use `log_path` from the JSON output to inspect an explicitly recorded runtime
@@ -294,8 +281,9 @@ log. Live `prodex log stream` and `prodex log upstream` use the bounded
 authenticated live runtime sources, including direct and broker-backed
 proxies, by default, so normal observability does not grow
 a raw disk journal. Runtime notices are never printed over the Codex TUI.
-`prodex audit` exposes local events; it is not immutable compliance retention or
-a disaster-recovery plan.
+Retired audit/context/setup/capability/cleanup and GUI paths are intentionally
+absent; use `prodex doctor`, `prodex info`, and `prodex log` for supported local
+diagnostics.
 
 If Prodex returns `409 stale_continuation`, resume with the original profile or
 start a new prompt. Prodex refuses an ambiguous cross-profile replay.
@@ -303,8 +291,7 @@ start a new prompt. Prodex refuses an ambiguous cross-profile replay.
 If an optional tool is missing:
 
 ```bash
-prodex capability super-doctor
-prodex capability super-doctor --strict
+prodex doctor --install
 ```
 
 If a launch choice is unclear:
@@ -312,7 +299,7 @@ If a launch choice is unclear:
 ```bash
 prodex run --help
 prodex super --help
-prodex claude --help
+prodex s expose --help
 ```
 
 ## Next references

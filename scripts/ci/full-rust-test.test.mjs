@@ -24,7 +24,7 @@ test("full Rust runner includes the explicitly disabled prodex-app lib target", 
     result.stdout,
     /prodex-app:runtime-proxy-selection: cargo test --locked -q -p prodex-app --lib main_internal_tests::runtime_proxy_selection_and_pressure:: -- --test-threads=1/,
   );
-  assert.match(result.stdout, /dry-run: 9 parallel step\(s\), jobs=4/);
+  assert.match(result.stdout, /dry-run: 8 parallel step\(s\), jobs=4/);
   assert.match(result.stdout, /dry-run: 1 parallel step\(s\), jobs=4/);
   assert.ok(
     result.stdout.indexOf("prodex-app:runtime-proxy-selection:") <

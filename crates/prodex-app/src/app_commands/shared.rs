@@ -1,4 +1,9 @@
 use anyhow::Result;
+use ratatui::Terminal;
+use ratatui::backend::CrosstermBackend;
+use std::cell::RefCell;
+use std::env;
+use std::io::{self, IsTerminal};
 
 #[cfg(test)]
 pub(crate) use prodex_core::select_default_codex_home;
@@ -14,7 +19,94 @@ pub(crate) fn audit_log_event(
 }
 
 pub(crate) fn print_launch_status(message: &str) {
-    eprintln!("Prodex launch: {message}");
+    LAUNCH_STATUS_TUI.with(|state| {
+        let mut state = state.borrow_mut();
+        match state.render(message) {
+            Ok(()) => {}
+            Err(_) => eprintln!("Prodex launch: {message}"),
+        }
+    });
+}
+
+pub(crate) fn try_inline_stdout_terminal(
+    height: u16,
+) -> Option<Terminal<CrosstermBackend<io::Stdout>>> {
+    if !inline_tui_allowed() || !io::stdout().is_terminal() {
+        return None;
+    }
+    Terminal::with_options(
+        CrosstermBackend::new(io::stdout()),
+        ratatui::TerminalOptions {
+            viewport: ratatui::Viewport::Inline(height),
+        },
+    )
+    .ok()
+}
+
+pub(crate) fn try_inline_stderr_terminal(
+    height: u16,
+) -> Option<Terminal<CrosstermBackend<io::Stderr>>> {
+    if !inline_tui_allowed() || !io::stderr().is_terminal() {
+        return None;
+    }
+    Terminal::with_options(
+        CrosstermBackend::new(io::stderr()),
+        ratatui::TerminalOptions {
+            viewport: ratatui::Viewport::Inline(height),
+        },
+    )
+    .ok()
+}
+
+fn inline_tui_allowed() -> bool {
+    if env::var_os("PRODEX_FORCE_TUI").is_some() {
+        return true;
+    }
+    env::var_os("CODEX_CI").is_none()
+        && env::var("PRODEX_TUI_STRICT")
+            .map(|value| {
+                !matches!(
+                    value.trim().to_ascii_lowercase().as_str(),
+                    "1" | "true" | "yes"
+                )
+            })
+            .unwrap_or(true)
+}
+
+thread_local! {
+    static LAUNCH_STATUS_TUI: RefCell<LaunchStatusTui> = RefCell::new(LaunchStatusTui::default());
+}
+
+#[derive(Default)]
+struct LaunchStatusTui {
+    terminal: Option<Terminal<CrosstermBackend<io::Stderr>>>,
+    disabled: bool,
+}
+
+impl LaunchStatusTui {
+    fn render(&mut self, message: &str) -> Result<()> {
+        if self.disabled {
+            anyhow::bail!("launch status TUI disabled");
+        }
+        if self.terminal.is_none() {
+            self.terminal = try_inline_stderr_terminal(3);
+        }
+        let Some(terminal) = self.terminal.as_mut() else {
+            self.disabled = true;
+            anyhow::bail!("stderr is not an inline-capable terminal");
+        };
+        if let Err(error) = terminal_ui::draw_status_panel_terminal(
+            terminal,
+            "Prodex Launch",
+            "preflight",
+            "Status",
+            message,
+        ) {
+            self.disabled = true;
+            return Err(error);
+        }
+        Ok(())
+    }
 }
 
 #[cfg(test)]

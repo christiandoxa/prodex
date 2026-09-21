@@ -46,6 +46,11 @@ export const DEFAULT_DUPLICATE_BUDGET = Object.freeze([
     reason: "legacy crypto and current rand/tempfile resolve getrandom 0.2 and 0.4.",
   },
   {
+    name: "hashbrown",
+    maxVersions: 2,
+    reason: "ratatui-core/kasuari and rusqlite/hashlink currently resolve separate hashbrown minor lines.",
+  },
+  {
     name: "hmac",
     maxVersions: 2,
     reason: "the native Secret Service keyring backend and current export/PostgreSQL crypto resolve hmac 0.12 and 0.13.",
@@ -54,6 +59,11 @@ export const DEFAULT_DUPLICATE_BUDGET = Object.freeze([
     name: "inout",
     maxVersions: 2,
     reason: "The Secret Service and aes-gcm-siv cipher lines currently use inout 0.1 and 0.2.",
+  },
+  {
+    name: "itertools",
+    maxVersions: 2,
+    reason: "ratatui-core/unicode-truncate and criterion benchmark tooling currently resolve separate itertools minor lines.",
   },
   {
     name: "sha2",

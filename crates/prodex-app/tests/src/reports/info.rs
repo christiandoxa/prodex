@@ -113,8 +113,8 @@ fn process_classification_uses_canonical_cli_semantics() {
     assert!(processes[1].runtime);
     assert_eq!(processes[2].command, "super");
     assert!(processes[2].runtime);
-    assert_eq!(processes[3].command, "capability");
-    assert!(!processes[3].runtime);
+    assert_eq!(processes[3].command, "super");
+    assert!(processes[3].runtime);
     assert_eq!(processes[4].command, "info");
     assert!(!processes[4].runtime);
 }

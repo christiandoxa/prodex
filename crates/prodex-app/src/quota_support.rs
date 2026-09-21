@@ -4,31 +4,31 @@ mod adaptive_refresh;
 mod auth;
 mod codex_openai_auth;
 mod external_provider;
+mod render;
 mod virtual_provider;
 mod watch;
 
 pub(super) use self::adaptive_refresh::*;
 pub(super) use self::auth::*;
-pub(crate) use self::codex_openai_auth::parse_codex_cli_version_output;
+pub(crate) use self::codex_openai_auth::{codex_cli_version, parse_codex_cli_version_output};
 use self::external_provider::{
     custom_model_provider_quota_info, fetch_agy_quota_info, fetch_anthropic_quota_info,
     fetch_kiro_quota_info,
 };
+pub(crate) use self::render::*;
+#[cfg(test)]
+pub(crate) use self::render::{
+    format_main_reset_summary, format_precise_reset_time, format_window_status,
+    format_window_status_compact, window_label,
+};
 use self::virtual_provider::collect_virtual_quota_reports;
 pub(super) use self::watch::*;
 pub(crate) use prodex_core::format_binary_resolution;
+#[cfg(test)]
+pub(crate) use prodex_quota::GeminiQuotaInfo;
 pub(crate) use prodex_quota::{
     AuthSummary, ExternalQuotaDetail, ExternalQuotaInfo, ProviderQuotaSnapshot, QuotaAuthFilter,
-    QuotaReport, QuotaReportSort, UsageAuth, collect_blocked_limits, first_line_of_error,
-    format_blocked_limits, format_copilot_main_quota, format_copilot_quota_status,
-    format_copilot_reset_summary, format_gemini_main_quota, format_gemini_quota_status,
-    format_gemini_reset_summary, format_main_windows, render_profile_quota_snapshot_with_detail,
-    render_quota_reports, render_quota_reports_window_with_sort,
-};
-#[cfg(test)]
-pub(crate) use prodex_quota::{
-    format_main_reset_summary, format_precise_reset_time, format_window_status,
-    format_window_status_compact, window_label,
+    QuotaReport, UsageAuth,
 };
 use prodex_runtime_doctor::read_runtime_log_tail;
 use redaction::redaction_redact_secret_like_text;
@@ -75,6 +75,71 @@ impl QuotaProviderFilter {
             Self::Kiro => matches!(provider, ProfileProvider::Kiro { .. }),
             Self::Agy => matches!(provider, ProfileProvider::Agy { .. }),
             Self::DeepSeek | Self::Local => false,
+        }
+    }
+
+    pub(crate) fn next(self) -> Self {
+        match self {
+            Self::All => Self::OpenAi,
+            Self::OpenAi => Self::Gemini,
+            Self::Gemini => Self::Anthropic,
+            Self::Anthropic => Self::Copilot,
+            Self::Copilot => Self::Kiro,
+            Self::Kiro => Self::DeepSeek,
+            Self::DeepSeek => Self::Local,
+            Self::Local => Self::Agy,
+            Self::Agy => Self::All,
+        }
+    }
+
+    pub(crate) fn label(self) -> &'static str {
+        match self {
+            Self::All => "all",
+            Self::OpenAi => "openai",
+            Self::Gemini => "gemini",
+            Self::Anthropic => "anthropic",
+            Self::Copilot => "copilot",
+            Self::Kiro => "kiro",
+            Self::DeepSeek => "deepseek",
+            Self::Local => "local",
+            Self::Agy => "agy",
+        }
+    }
+
+    pub(crate) fn matches_report(self, report: &QuotaReport) -> bool {
+        if self == Self::All {
+            return true;
+        }
+        if self.matches_report_provider(report) {
+            return true;
+        }
+        match self {
+            Self::OpenAi => report.auth.label.eq_ignore_ascii_case("chatgpt"),
+            Self::Gemini => report.auth.label.eq_ignore_ascii_case("gemini"),
+            Self::Anthropic => report.auth.label.eq_ignore_ascii_case("anthropic"),
+            Self::Copilot => report.auth.label.eq_ignore_ascii_case("copilot"),
+            Self::Kiro => report.auth.label.eq_ignore_ascii_case("kiro"),
+            Self::DeepSeek => report.auth.label.eq_ignore_ascii_case("deepseek-key"),
+            Self::Local => report.auth.label.eq_ignore_ascii_case("local"),
+            _ => false,
+        }
+    }
+
+    fn matches_report_provider(self, report: &QuotaReport) -> bool {
+        let Ok(snapshot) = &report.result else {
+            return false;
+        };
+        match (self, snapshot) {
+            (Self::OpenAi, ProviderQuotaSnapshot::OpenAi(_))
+            | (Self::Gemini, ProviderQuotaSnapshot::Gemini(_))
+            | (Self::Copilot, ProviderQuotaSnapshot::Copilot(_)) => true,
+            (Self::DeepSeek, ProviderQuotaSnapshot::External(info)) => {
+                info.provider.eq_ignore_ascii_case("DeepSeek")
+            }
+            (Self::Local, ProviderQuotaSnapshot::External(info)) => info
+                .provider
+                .eq_ignore_ascii_case("Local OpenAI-compatible"),
+            _ => false,
         }
     }
 
@@ -214,6 +279,53 @@ pub(crate) fn collect_quota_reports_with_filters(
 
 const QUOTA_RUNTIME_LOG_TAIL_BYTES: usize = 1024 * 1024;
 const QUOTA_RUNTIME_PROFILE_EVENTS: &[&str] = &["token_usage", "profile_commit"];
+const QUOTA_RUNTIME_AUTH_BACKOFF_EVENTS: &[&str] = &[
+    "profile_auth_backoff",
+    "profile_auth_recovered",
+    "profile_auth_backoff_cleared",
+];
+
+pub(crate) fn quota_runtime_auth_backoff_profiles() -> std::collections::BTreeSet<String> {
+    let mut profiles = std::collections::BTreeSet::new();
+    for path in prodex_runtime_log_paths_in_dir(&runtime_proxy_log_dir()) {
+        let Ok(tail) = read_runtime_log_tail(&path, QUOTA_RUNTIME_LOG_TAIL_BYTES) else {
+            continue;
+        };
+        for line in String::from_utf8_lossy(&tail).lines() {
+            let parsed = serde_json::from_str::<serde_json::Value>(line).ok();
+            let event = parsed
+                .as_ref()
+                .and_then(|value| value.get("event"))
+                .and_then(serde_json::Value::as_str)
+                .or_else(|| {
+                    line.split_once("] ")
+                        .and_then(|(_, message)| message.split_whitespace().next())
+                });
+            let Some(event) = event else { continue };
+            if !QUOTA_RUNTIME_AUTH_BACKOFF_EVENTS.contains(&event) {
+                continue;
+            }
+            let profile = parsed
+                .as_ref()
+                .and_then(|value| value.get("fields"))
+                .and_then(|fields| fields.get("profile"))
+                .and_then(serde_json::Value::as_str)
+                .map(str::to_string)
+                .or_else(|| {
+                    line.split_whitespace()
+                        .find_map(|field| field.strip_prefix("profile=").map(str::to_string))
+                });
+            let Some(profile) = profile else { continue };
+            if event == "profile_auth_backoff" {
+                profiles.insert(profile);
+            } else {
+                profiles.remove(&profile);
+            }
+        }
+    }
+    profiles
+}
+
 fn quota_current_profile_name(state: &AppState) -> Option<String> {
     quota_current_runtime_profile_name(state).or_else(|| quota_state_current_profile_name(state))
 }

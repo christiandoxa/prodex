@@ -590,6 +590,7 @@ fn info_parses_as_read_only_summary_command() {
         panic!("expected info command");
     };
     assert!(!default.json);
+    assert!(!default.tokens);
 
     let Commands::Info(json) =
         parse_cli_command_from(["prodex", "info", "--json"]).expect("info json should parse")
@@ -597,6 +598,13 @@ fn info_parses_as_read_only_summary_command() {
         panic!("expected info command");
     };
     assert!(json.json);
+
+    let Commands::Info(tokens) =
+        parse_cli_command_from(["prodex", "info", "--tokens"]).expect("info tokens should parse")
+    else {
+        panic!("expected info command");
+    };
+    assert!(tokens.tokens);
 }
 
 #[test]
@@ -626,6 +634,29 @@ fn super_expose_alias_parses_local_endpoint() {
             .tools
             .contains(&prodex_optional_tools::OptionalToolId::Rtk)
     );
+}
+
+#[test]
+fn super_expose_alias_accepts_super_options_before_expose() {
+    let command = parse_cli_command_from([
+        "prodex",
+        "s",
+        "--no-presidio",
+        "--model",
+        "model-before-expose",
+        "expose",
+        "--no-tunnel",
+    ])
+    .expect("options before expose should parse");
+    let Commands::SuperExpose(args) = command else {
+        panic!("expected hidden super expose command");
+    };
+    assert!(args.super_args.no_presidio);
+    assert_eq!(
+        args.super_args.local_model.as_deref(),
+        Some("model-before-expose")
+    );
+    assert!(args.no_tunnel);
 }
 
 #[test]

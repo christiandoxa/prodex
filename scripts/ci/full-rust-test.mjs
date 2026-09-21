@@ -229,7 +229,6 @@ function autoRotateStep(args) {
 
 const PRODEX_APP_RUNTIME_PROXY_SHARDS = Object.freeze([
   ["backend", "main_internal_tests::runtime_proxy_backend::"],
-  ["claude", "main_internal_tests::runtime_proxy_claude_and_anthropic::"],
   ["continuations", "main_internal_tests::runtime_proxy_continuations::"],
   ["selection", "main_internal_tests::runtime_proxy_selection_and_pressure::"],
 ]);

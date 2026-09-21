@@ -1,0 +1,532 @@
+use super::collect_recent_runtime_log_paths;
+use super::log::{
+    FollowedLog, FollowedLogPaths, LiveRuntimeLogSource, LogStreamItem, bounded_followed_log_paths,
+    collect_live_log_items, collect_new_runtime_log_stream_items_with_throughput, followed_log_map,
+    retain_followed_logs, runtime_log_paths_for_follow,
+};
+use super::log_format::render_log_block;
+use super::log_tui::{
+    LOG_TUI_TITLE, LogTuiHeaderDetail, LogTuiInput, LogTuiState, LogTuiTerminal, OutputThroughput,
+    OutputThroughputDisplay, contains_ignore_ascii_case, log_tui_header_detail,
+    log_tui_header_next_refresh_at, visible_text,
+};
+use super::log_upstream_payload::{
+    UpstreamPayloadEvent, render_upstream_payload_lines, upstream_payload_event_from_runtime_line,
+};
+use anyhow::{Context, Result};
+use crossterm::event::{self, Event, KeyEventKind};
+use prodex_runtime_doctor::read_runtime_log_tail;
+use ratatui::layout::{Constraint, Direction, Layout};
+use ratatui::text::{Line, Span, Text};
+use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
+use std::collections::VecDeque;
+#[cfg(test)]
+use std::env;
+use std::io::{self, IsTerminal, Write};
+use std::path::Path;
+use std::thread;
+use std::time::{Duration, Instant};
+#[cfg(test)]
+use std::time::{SystemTime, UNIX_EPOCH};
+use terminal_ui::{
+    tui_border_style, tui_connected_footer_block, tui_connected_header_block, tui_hint_style,
+    tui_primary_style, tui_secondary_style, tui_success_style, tui_title_style,
+};
+
+const LOG_STREAM_POLL_INTERVAL: Duration = Duration::from_millis(100);
+const LOG_SNAPSHOT_TAIL_BYTES: usize = 1024 * 1024;
+const UPSTREAM_TUI_EVENT_LIMIT: usize = 100;
+
+pub(super) fn stream_upstream_payload_events(json: bool) -> Result<()> {
+    if !json
+        && !super::no_color_requested()
+        && io::stdout().is_terminal()
+        && io::stdin().is_terminal()
+    {
+        return stream_upstream_payload_events_tui();
+    }
+
+    if let Some(event) = latest_upstream_payload_event() {
+        print_upstream_payload_event(&event, json)?;
+    } else {
+        eprintln!("Waiting for processed upstream payload events...");
+    }
+    let mut live_source = LiveRuntimeLogSource::new();
+    for event in live_upstream_payload_events_with_throughput(&mut live_source, None)? {
+        print_upstream_payload_event(&event, json)?;
+    }
+
+    let mut runtime_paths = FollowedLogPaths::new(runtime_log_paths_for_follow());
+    let (initial_runtime_paths, _) =
+        bounded_followed_log_paths(runtime_paths.refresh(runtime_log_paths_for_follow), &[]);
+    let mut followed_runtime_logs = followed_log_map(&initial_runtime_paths);
+
+    loop {
+        let (current_runtime_paths, _) =
+            bounded_followed_log_paths(runtime_paths.refresh(runtime_log_paths_for_follow), &[]);
+        retain_followed_logs(&mut followed_runtime_logs, &current_runtime_paths);
+        for event in live_upstream_payload_events_with_throughput(&mut live_source, None)? {
+            print_upstream_payload_event(&event, json)?;
+        }
+        for path in &current_runtime_paths {
+            let state = followed_runtime_logs
+                .entry(path.clone())
+                .or_insert_with(|| FollowedLog::at_end(path));
+            for event in collect_new_upstream_payload_events(path, state)? {
+                print_upstream_payload_event(&event, json)?;
+            }
+        }
+        thread::sleep(LOG_STREAM_POLL_INTERVAL);
+    }
+}
+
+fn stream_upstream_payload_events_tui() -> Result<()> {
+    let mut tui = LogTuiTerminal::stdout("upstream payload TUI")?;
+    let mut view = LogTuiState::default();
+    let mut events = VecDeque::<UpstreamPayloadEvent>::new();
+    let mut live_source = LiveRuntimeLogSource::new();
+    let mut throughput = OutputThroughput::default();
+    super::log_tui::seed_output_throughput_from_history(&mut throughput);
+    if let Some(event) = latest_upstream_payload_event() {
+        push_upstream_payload_event(&mut events, event);
+    }
+    for event in
+        live_upstream_payload_events_with_throughput(&mut live_source, Some(&mut throughput))?
+    {
+        push_upstream_payload_event(&mut events, event);
+    }
+    let mut header_profile = throughput
+        .active_profile()
+        .or_else(|| latest_upstream_payload_profile(&events).map(str::to_string));
+    let mut header_detail = log_tui_header_detail(header_profile.as_deref());
+    let mut header_refresh_at =
+        log_tui_header_next_refresh_at(header_detail.as_ref(), Instant::now());
+    let mut runtime_paths = FollowedLogPaths::new(runtime_log_paths_for_follow());
+    let (initial_runtime_paths, _) =
+        bounded_followed_log_paths(runtime_paths.refresh(runtime_log_paths_for_follow), &[]);
+    let mut followed_runtime_logs = followed_log_map(&initial_runtime_paths);
+
+    loop {
+        let (current_runtime_paths, _) =
+            bounded_followed_log_paths(runtime_paths.refresh(runtime_log_paths_for_follow), &[]);
+        retain_followed_logs(&mut followed_runtime_logs, &current_runtime_paths);
+        for event in
+            live_upstream_payload_events_with_throughput(&mut live_source, Some(&mut throughput))?
+        {
+            push_upstream_payload_event(&mut events, event);
+        }
+        for path in &current_runtime_paths {
+            let state = followed_runtime_logs
+                .entry(path.clone())
+                .or_insert_with(|| FollowedLog::at_end(path));
+            for event in collect_new_upstream_payload_events_with_throughput(
+                path,
+                state,
+                Some(&mut throughput),
+            )? {
+                push_upstream_payload_event(&mut events, event);
+            }
+        }
+        let latest_profile = throughput
+            .active_profile()
+            .or_else(|| latest_upstream_payload_profile(&events).map(str::to_string));
+        let now = Instant::now();
+        if latest_profile != header_profile || now >= header_refresh_at {
+            header_profile = latest_profile;
+            header_detail = log_tui_header_detail(header_profile.as_deref());
+            header_refresh_at = log_tui_header_next_refresh_at(header_detail.as_ref(), now);
+        }
+        tui.terminal.draw(|frame| {
+            render_upstream_payload_tui(
+                frame,
+                &events,
+                &view,
+                header_detail.as_ref(),
+                throughput.display_for_profile(now, header_profile.as_deref()),
+            );
+        })?;
+        if event::poll(LOG_STREAM_POLL_INTERVAL)?
+            && let Event::Key(key) = event::read()?
+            && key.kind == KeyEventKind::Press
+            && view.apply_key(key) == LogTuiInput::Quit
+        {
+            return Ok(());
+        }
+    }
+}
+
+fn push_upstream_payload_event(
+    events: &mut VecDeque<UpstreamPayloadEvent>,
+    event: UpstreamPayloadEvent,
+) {
+    events.push_back(event);
+    while events.len() > UPSTREAM_TUI_EVENT_LIMIT {
+        events.pop_front();
+    }
+}
+
+fn live_upstream_payload_events_with_throughput(
+    live_source: &mut Option<LiveRuntimeLogSource>,
+    throughput: Option<&mut OutputThroughput>,
+) -> Result<Vec<UpstreamPayloadEvent>> {
+    Ok(collect_live_log_items(live_source, false, throughput)?
+        .into_iter()
+        .filter_map(|item| match item {
+            LogStreamItem::UpstreamPayload(event) => Some(event),
+            _ => None,
+        })
+        .collect())
+}
+
+fn latest_upstream_payload_profile(events: &VecDeque<UpstreamPayloadEvent>) -> Option<&str> {
+    events.back().map(|event| event.profile.as_str())
+}
+
+fn collect_new_upstream_payload_events(
+    path: &Path,
+    state: &mut FollowedLog,
+) -> Result<Vec<UpstreamPayloadEvent>> {
+    collect_new_upstream_payload_events_with_throughput(path, state, None)
+}
+
+fn collect_new_upstream_payload_events_with_throughput(
+    path: &Path,
+    state: &mut FollowedLog,
+    throughput: Option<&mut OutputThroughput>,
+) -> Result<Vec<UpstreamPayloadEvent>> {
+    let mut events = Vec::new();
+    for item in
+        collect_new_runtime_log_stream_items_with_throughput(path, state, false, throughput)?
+    {
+        if let LogStreamItem::UpstreamPayload(event) = item {
+            events.push(event);
+        }
+    }
+    Ok(events)
+}
+
+pub(crate) fn print_upstream_payload_event(event: &UpstreamPayloadEvent, json: bool) -> Result<()> {
+    if json {
+        println!("{}", serde_json::to_string(event)?);
+    } else {
+        let request = event
+            .request
+            .map(|request| request.to_string())
+            .unwrap_or_else(|| "-".to_string());
+        let width = terminal_ui::current_cli_width();
+        let meta = [
+            ("profile", event.profile.clone()),
+            ("request", request),
+            ("transport", event.transport.clone()),
+            ("route", event.route.clone()),
+            ("bytes", event.bytes.to_string()),
+            ("logged", event.logged_bytes.to_string()),
+            ("truncated", event.truncated.to_string()),
+            (
+                "snapshot",
+                if event.truncated {
+                    "truncated at configured cap".to_string()
+                } else {
+                    "complete".to_string()
+                },
+            ),
+        ];
+        let body = render_upstream_payload_lines(&event.payload, width);
+        for line in render_log_block(&event.timestamp, "UPSTREAM", &meta, &body, width) {
+            println!("{line}");
+        }
+    }
+    io::stdout()
+        .flush()
+        .context("failed to flush upstream log output")
+}
+
+fn render_upstream_payload_tui(
+    frame: &mut ratatui::Frame<'_>,
+    events: &VecDeque<UpstreamPayloadEvent>,
+    state: &LogTuiState,
+    header_detail: Option<&LogTuiHeaderDetail>,
+    throughput_display: Option<OutputThroughputDisplay>,
+) {
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(3),
+            Constraint::Min(1),
+            Constraint::Length(3),
+        ])
+        .split(frame.area());
+    let matches = matching_upstream_payload_events(events, state.query()).len();
+    let count = match state.query() {
+        Some(_) => format!("{matches}/{} match(es)", events.len()),
+        None => format!("{} event(s)", events.len()),
+    };
+    let header = Paragraph::new(Line::styled(
+        crate::app_commands::log_tui::render_log_header_with_display(
+            LOG_TUI_TITLE,
+            &count,
+            header_detail,
+            throughput_display,
+            chunks[0].width as usize,
+        ),
+        tui_title_style(),
+    ))
+    .block(tui_connected_header_block(tui_border_style()));
+    frame.render_widget(header, chunks[0]);
+
+    let width = chunks[1].width.saturating_sub(4).max(24) as usize;
+    let body = Paragraph::new(upstream_payload_tui_text(
+        events,
+        width,
+        usize::from(chunks[1].height),
+        state.query(),
+        state.scroll_from_bottom(),
+    ))
+    .block(
+        Block::default()
+            .borders(Borders::LEFT | Borders::RIGHT)
+            .border_style(tui_border_style()),
+    )
+    .wrap(Wrap { trim: false });
+    frame.render_widget(body, chunks[1]);
+
+    let footer = Paragraph::new(Line::styled(
+        state.footer_text("q quit esc close"),
+        tui_title_style(),
+    ))
+    .block(tui_connected_footer_block(tui_border_style()));
+    frame.render_widget(footer, chunks[2]);
+}
+
+fn upstream_payload_tui_text(
+    events: &VecDeque<UpstreamPayloadEvent>,
+    width: usize,
+    max_lines: usize,
+    query: Option<&str>,
+    scroll_from_bottom: usize,
+) -> Text<'static> {
+    if events.is_empty() {
+        return Text::from(Line::from(Span::styled(
+            "Waiting for processed upstream payload events...",
+            tui_secondary_style(),
+        )));
+    }
+
+    let matching = matching_upstream_payload_events(events, query);
+    if matching.is_empty() {
+        return Text::from(Line::from(Span::styled(
+            "No upstream payload events match search.",
+            tui_secondary_style(),
+        )));
+    }
+
+    let mut lines = Vec::new();
+    for (index, event) in matching.iter().enumerate() {
+        if index > 0 {
+            lines.push(Line::raw(""));
+        }
+        let request = event
+            .request
+            .map(|request| request.to_string())
+            .unwrap_or_else(|| "-".to_string());
+        lines.push(Line::from(vec![
+            Span::styled(event.timestamp.clone(), tui_secondary_style()),
+            Span::raw(" "),
+            Span::styled("UPSTREAM", tui_title_style()),
+        ]));
+        lines.push(Line::from(vec![
+            Span::styled("profile=", tui_secondary_style()),
+            Span::styled(event.profile.clone(), tui_success_style()),
+            Span::raw(" "),
+            Span::styled("request=", tui_secondary_style()),
+            Span::raw(request),
+            Span::raw(" "),
+            Span::styled("transport=", tui_secondary_style()),
+            Span::raw(event.transport.clone()),
+            Span::raw(" "),
+            Span::styled("route=", tui_secondary_style()),
+            Span::raw(event.route.clone()),
+        ]));
+        lines.push(Line::from(vec![
+            Span::styled("bytes=", tui_secondary_style()),
+            Span::raw(event.bytes.to_string()),
+            Span::raw(" "),
+            Span::styled("logged=", tui_secondary_style()),
+            Span::raw(event.logged_bytes.to_string()),
+            Span::raw(" "),
+            Span::styled("truncated=", tui_secondary_style()),
+            Span::styled(
+                event.truncated.to_string(),
+                if event.truncated {
+                    tui_hint_style()
+                } else {
+                    tui_primary_style()
+                },
+            ),
+        ]));
+        if event.truncated {
+            lines.push(Line::styled(
+                "snapshot truncated at configured cap",
+                tui_hint_style(),
+            ));
+        }
+        for line in render_upstream_payload_lines(&event.payload, width) {
+            lines.push(Line::raw(line));
+        }
+    }
+    visible_text(lines, max_lines, scroll_from_bottom)
+}
+
+fn matching_upstream_payload_events<'a>(
+    events: &'a VecDeque<UpstreamPayloadEvent>,
+    query: Option<&str>,
+) -> Vec<&'a UpstreamPayloadEvent> {
+    events
+        .iter()
+        .filter(|event| query.is_none_or(|query| upstream_payload_event_matches(event, query)))
+        .collect()
+}
+
+fn upstream_payload_event_matches(event: &UpstreamPayloadEvent, query: &str) -> bool {
+    let request = event
+        .request
+        .map(|request| request.to_string())
+        .unwrap_or_default();
+    contains_ignore_ascii_case(
+        &format!(
+            "{} {} {} {} {} {} {} {} {}",
+            event.timestamp,
+            event.profile,
+            request,
+            event.transport,
+            event.route,
+            event.bytes,
+            event.logged_bytes,
+            event.truncated,
+            event.payload
+        ),
+        query,
+    )
+}
+
+pub(crate) fn latest_upstream_payload_event() -> Option<UpstreamPayloadEvent> {
+    let mut latest = None;
+    for path in collect_recent_runtime_log_paths(32) {
+        let tail = match read_runtime_log_tail(&path, LOG_SNAPSHOT_TAIL_BYTES) {
+            Ok(tail) => tail,
+            Err(_) => continue,
+        };
+        for line in String::from_utf8_lossy(&tail).lines() {
+            let Some(event) = upstream_payload_event_from_runtime_line(line) else {
+                continue;
+            };
+            if latest
+                .as_ref()
+                .is_none_or(|current: &UpstreamPayloadEvent| event.timestamp >= current.timestamp)
+            {
+                latest = Some(event);
+            }
+        }
+    }
+    latest
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        FollowedLog, SystemTime, UNIX_EPOCH, UpstreamPayloadEvent,
+        collect_new_upstream_payload_events, env, upstream_payload_tui_text,
+    };
+    use crate::app_commands::log_upstream_payload::BASE64_STANDARD;
+    use base64::Engine;
+    use ratatui::text::Text;
+    use std::collections::VecDeque;
+    use std::fs;
+    use std::io::Write;
+
+    fn rendered(text: Text<'static>) -> String {
+        text.lines
+            .iter()
+            .map(|line| {
+                line.spans
+                    .iter()
+                    .map(|span| span.content.as_ref())
+                    .collect::<String>()
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    #[test]
+    fn follows_only_complete_upstream_payload_lines() {
+        let root = env::temp_dir().join(format!(
+            "prodex-upstream-follow-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::create_dir_all(&root).unwrap();
+        let path = root.join("runtime.log");
+        let encoded = BASE64_STANDARD.encode(br#"{"input":"hello"}"#);
+        fs::write(
+            &path,
+            format!(
+                "[2026-06-20 12:00:00.000 +07:00] upstream_payload request=9 transport=http route=responses profile=main bytes=17 logged_bytes=17 truncated=false payload_b64={encoded}"
+            ),
+        )
+        .unwrap();
+        let mut state = FollowedLog::default();
+        let events = collect_new_upstream_payload_events(&path, &mut state).unwrap();
+        assert!(events.is_empty());
+        assert!(!state.pending.is_empty());
+        fs::OpenOptions::new()
+            .append(true)
+            .open(&path)
+            .unwrap()
+            .write_all(b"\n")
+            .unwrap();
+        let events = collect_new_upstream_payload_events(&path, &mut state).unwrap();
+        assert_eq!(events.len(), 1);
+        assert!(state.pending.is_empty());
+        drop(state);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn upstream_tui_text_can_filter_and_scroll() {
+        let events = VecDeque::from([
+            UpstreamPayloadEvent {
+                timestamp: "2026-07-06 10:00:00".to_string(),
+                request: Some(1),
+                transport: "http".to_string(),
+                route: "responses".to_string(),
+                profile: "main".to_string(),
+                bytes: 5,
+                logged_bytes: 5,
+                truncated: false,
+                payload: "alpha payload".to_string(),
+            },
+            UpstreamPayloadEvent {
+                timestamp: "2026-07-06 10:00:01".to_string(),
+                request: Some(2),
+                transport: "websocket".to_string(),
+                route: "websocket".to_string(),
+                profile: "second".to_string(),
+                bytes: 4,
+                logged_bytes: 4,
+                truncated: false,
+                payload: "beta payload".to_string(),
+            },
+        ]);
+
+        let filtered = rendered(upstream_payload_tui_text(&events, 80, 20, Some("beta"), 0));
+        assert!(!filtered.contains("alpha payload"));
+        assert!(filtered.contains("beta payload"));
+
+        let scrolled = rendered(upstream_payload_tui_text(&events, 80, 4, None, usize::MAX));
+        assert!(scrolled.contains("alpha payload"));
+        assert!(!scrolled.contains("beta payload"));
+    }
+}

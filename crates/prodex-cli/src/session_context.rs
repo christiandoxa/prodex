@@ -84,6 +84,9 @@ pub struct InfoArgs {
     /// Emit machine-readable JSON.
     #[arg(long)]
     pub json: bool,
+    /// Include token usage totals parsed from recent runtime logs.
+    #[arg(long)]
+    pub tokens: bool,
 }
 
 #[derive(Args, Debug)]

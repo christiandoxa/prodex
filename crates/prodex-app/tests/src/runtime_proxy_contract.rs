@@ -9,9 +9,13 @@ fn runtime_proxy_contract_summary_maps_to_current_facets() {
     assert_eq!(
         facets,
         vec![
-            "bounded retry",
-            "quota/transport separation",
+            "scoped gateway",
+            "policy-visible selection",
+            "bounded precommit retry",
+            "cheap hot path",
+            "quota/transport split",
             "structured observability",
+            "connection reuse",
             "profile-isolated secrets",
         ]
     );

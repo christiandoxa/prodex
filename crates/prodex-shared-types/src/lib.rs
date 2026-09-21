@@ -1,7 +1,9 @@
+mod info;
 mod persistence;
 mod probe;
 mod process;
 
+pub use info::*;
 pub use persistence::*;
 pub use probe::*;
 pub use process::*;

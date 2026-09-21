@@ -1,5 +1,17 @@
 use anyhow::{Context, Result, bail};
+use crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
+use crossterm::terminal;
+use ratatui::layout::{Constraint, Direction, Layout};
+use ratatui::style::{Color, Modifier, Style};
+use ratatui::text::{Line, Span, Text};
+use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
+use std::env;
+use std::io::{self, IsTerminal};
 use std::path::Path;
+use terminal_ui::{
+    tui_border_style, tui_connected_footer_block, tui_connected_header_block, tui_hint_style,
+    tui_secondary_style, tui_title_style,
+};
 
 use super::import_export::{
     ProfileAuthUpdate, acquire_profile_lifecycle_lock, cleanup_profile_lifecycle_and_auth_journal,
@@ -405,10 +417,242 @@ pub(super) fn print_profile_panel(title: &str, fields: &[(String, String)]) -> R
 }
 
 fn print_profile_panels(panels: &[ProfilePanel]) -> Result<()> {
-    for panel in panels {
-        print_panel(&panel.title, &panel.fields)?;
+    if profile_tui_should_scroll(panels)
+        && let Ok(()) = print_profile_panels_scrollable(panels)
+    {
+        return Ok(());
     }
+
+    let height = profile_tui_height(panels);
+    let Some(mut terminal) = crate::try_inline_stdout_terminal(height) else {
+        for panel in panels {
+            print_panel(&panel.title, &panel.fields)?;
+        }
+        return Ok(());
+    };
+    terminal.draw(|frame| {
+        let chunks = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([Constraint::Length(3), Constraint::Min(1)])
+            .split(frame.area());
+        let header = Paragraph::new(Line::from(vec![
+            Span::styled("Prodex Profiles", tui_title_style()),
+            Span::raw("  "),
+            Span::styled(format!("{} panel(s)", panels.len()), tui_secondary_style()),
+        ]))
+        .block(tui_connected_header_block(tui_border_style()));
+        frame.render_widget(header, chunks[0]);
+
+        let body = Paragraph::new(profile_tui_text(panels))
+            .block(
+                Block::default()
+                    .borders(Borders::LEFT | Borders::RIGHT | Borders::BOTTOM)
+                    .border_style(tui_border_style()),
+            )
+            .wrap(Wrap { trim: false });
+        frame.render_widget(body, chunks[1]);
+    })?;
+    let _ = terminal.show_cursor();
     Ok(())
+}
+
+type ProfilePanelsTui = terminal_ui::AlternateScreenTerminal<io::Stdout>;
+
+fn print_profile_panels_scrollable(panels: &[ProfilePanel]) -> Result<()> {
+    let mut tui = ProfilePanelsTui::stdout("profile list")?;
+    let mut scroll_offset = 0usize;
+    loop {
+        let total_lines = profile_tui_lines(panels).len();
+        let size = tui.terminal.size()?;
+        let body_height = profile_scroll_body_height(size.height);
+        let max_scroll = profile_scroll_max_offset(total_lines, body_height);
+        scroll_offset = scroll_offset.min(max_scroll);
+        tui.terminal
+            .draw(|frame| render_profile_panels_scroll_tui(frame, panels, scroll_offset))
+            .context("failed to draw profile list TUI")?;
+
+        if let Event::Key(key) = event::read().context("failed to read profile list input")?
+            && key.kind == KeyEventKind::Press
+        {
+            match key.code {
+                KeyCode::Char('q') | KeyCode::Esc | KeyCode::Enter => return Ok(()),
+                KeyCode::Char('c') | KeyCode::Char('z')
+                    if key.modifiers.contains(KeyModifiers::CONTROL) =>
+                {
+                    return Ok(());
+                }
+                KeyCode::Char('j') | KeyCode::Down => {
+                    scroll_offset = scroll_offset.saturating_add(1).min(max_scroll);
+                }
+                KeyCode::Char('k') | KeyCode::Up => {
+                    scroll_offset = scroll_offset.saturating_sub(1);
+                }
+                KeyCode::PageDown => {
+                    scroll_offset = scroll_offset.saturating_add(body_height).min(max_scroll);
+                }
+                KeyCode::PageUp => {
+                    scroll_offset = scroll_offset.saturating_sub(body_height);
+                }
+                KeyCode::Home => scroll_offset = 0,
+                KeyCode::End => scroll_offset = max_scroll,
+                _ => {}
+            }
+        }
+    }
+}
+
+fn render_profile_panels_scroll_tui(
+    frame: &mut ratatui::Frame<'_>,
+    panels: &[ProfilePanel],
+    scroll_offset: usize,
+) {
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(3),
+            Constraint::Min(1),
+            Constraint::Length(3),
+        ])
+        .split(frame.area());
+
+    let header = Paragraph::new(Line::from(vec![
+        Span::styled("Prodex Profiles", tui_title_style()),
+        Span::raw("  "),
+        Span::styled(format!("{} panel(s)", panels.len()), tui_secondary_style()),
+    ]))
+    .block(tui_connected_header_block(tui_border_style()));
+    frame.render_widget(header, chunks[0]);
+
+    let total_lines = profile_tui_lines(panels);
+    let body_height = usize::from(chunks[1].height).max(1);
+    let body = Paragraph::new(Text::from(
+        total_lines
+            .iter()
+            .skip(scroll_offset)
+            .take(body_height)
+            .cloned()
+            .collect::<Vec<_>>(),
+    ))
+    .block(
+        Block::default()
+            .borders(Borders::LEFT | Borders::RIGHT)
+            .border_style(tui_border_style()),
+    )
+    .wrap(Wrap { trim: false });
+    frame.render_widget(body, chunks[1]);
+
+    let max_scroll = profile_scroll_max_offset(total_lines.len(), body_height);
+    let footer = Paragraph::new(Line::styled(
+        profile_scroll_footer(scroll_offset, max_scroll),
+        tui_hint_style().add_modifier(Modifier::BOLD),
+    ))
+    .block(tui_connected_footer_block(tui_border_style()));
+    frame.render_widget(footer, chunks[2]);
+}
+
+fn profile_tui_should_scroll(panels: &[ProfilePanel]) -> bool {
+    if !profile_scroll_tui_allowed() {
+        return false;
+    }
+    profile_tui_lines(panels).len().saturating_add(6) > terminal_height()
+}
+
+fn profile_scroll_tui_allowed() -> bool {
+    io::stdout().is_terminal()
+        && env::var_os("CODEX_CI").is_none()
+        && env::var("CI")
+            .map(|value| {
+                !matches!(
+                    value.trim().to_ascii_lowercase().as_str(),
+                    "1" | "true" | "yes"
+                )
+            })
+            .unwrap_or(true)
+}
+
+fn terminal_height() -> usize {
+    terminal::size()
+        .map(|(_, height)| usize::from(height))
+        .unwrap_or(24)
+}
+
+fn profile_scroll_body_height(terminal_height: u16) -> usize {
+    usize::from(terminal_height).saturating_sub(6).max(1)
+}
+
+fn profile_scroll_max_offset(total_lines: usize, body_height: usize) -> usize {
+    total_lines.saturating_sub(body_height.max(1))
+}
+
+fn profile_scroll_footer(scroll_offset: usize, max_scroll: usize) -> String {
+    if max_scroll == 0 {
+        "q close".to_string()
+    } else {
+        format!(
+            "j/k scroll | pgup/pgdn page | home/end | q close | line {}/{}",
+            scroll_offset.saturating_add(1),
+            max_scroll.saturating_add(1)
+        )
+    }
+}
+
+fn profile_tui_height(panels: &[ProfilePanel]) -> u16 {
+    let rows = profile_tui_lines(panels).len().saturating_add(4).max(4);
+    let terminal_height = terminal::size()
+        .map(|(_, height)| usize::from(height))
+        .unwrap_or(24);
+    rows.min(terminal_height).max(1) as u16
+}
+
+fn profile_tui_text(panels: &[ProfilePanel]) -> Text<'static> {
+    Text::from(profile_tui_lines(panels))
+}
+
+fn profile_tui_lines(panels: &[ProfilePanel]) -> Vec<Line<'static>> {
+    let mut lines = Vec::new();
+    for panel in panels {
+        lines.push(Line::styled(panel.title.clone(), tui_title_style()));
+        let label_width = panel
+            .fields
+            .iter()
+            .map(|(label, _)| terminal_ui::text_width(label))
+            .max()
+            .unwrap_or(0)
+            .min(22);
+        for (label, value) in &panel.fields {
+            lines.push(Line::from(vec![
+                Span::styled(
+                    format!(
+                        "{label}{} ",
+                        " ".repeat(label_width.saturating_sub(terminal_ui::text_width(label)))
+                    ),
+                    tui_secondary_style().add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(
+                    value.clone(),
+                    Style::default().fg(profile_value_color(label, value)),
+                ),
+            ]));
+        }
+    }
+    lines
+}
+
+fn profile_value_color(label: &str, value: &str) -> Color {
+    let lower = value.to_ascii_lowercase();
+    if lower.contains("no active") || lower.contains("missing") || lower.contains("error") {
+        Color::Red
+    } else if lower.contains("active") || lower == "yes" || label == "Active" {
+        Color::Green
+    } else if label == "Provider"
+        || label == "Auth"
+        || label == "Runtime route"
+        || label == "Identity"
+    {
+        Color::Cyan
+    } else {
+        Color::Reset
+    }
 }
 
 #[cfg(test)]
@@ -416,6 +660,66 @@ mod tests {
     use super::*;
     use std::fs;
     use std::time::{SystemTime, UNIX_EPOCH};
+
+    #[test]
+    fn profile_tui_text_contains_panel_fields() {
+        let panels = vec![ProfilePanel {
+            title: "Profiles".to_string(),
+            fields: vec![
+                ("Active".to_string(), "main".to_string()),
+                ("Provider".to_string(), "OpenAI".to_string()),
+            ],
+        }];
+        let text = format!("{:?}", profile_tui_text(&panels));
+        assert!(text.contains("Profiles"));
+        assert!(text.contains("main"));
+        assert!(text.contains("OpenAI"));
+    }
+
+    #[test]
+    fn profile_tui_lines_do_not_pad_between_panels() {
+        let panels = vec![
+            ProfilePanel {
+                title: "One".to_string(),
+                fields: vec![("Active".to_string(), "main".to_string())],
+            },
+            ProfilePanel {
+                title: "Two".to_string(),
+                fields: vec![("Provider".to_string(), "OpenAI".to_string())],
+            },
+        ];
+
+        let lines = profile_tui_lines(&panels);
+        assert_eq!(lines.len(), 4);
+        assert!(!format!("{:?}", lines[2]).contains("\"\""));
+        assert!(format!("{:?}", lines[2]).contains("Two"));
+    }
+
+    #[test]
+    fn profile_value_color_highlights_status() {
+        assert_eq!(profile_value_color("Active", "main"), Color::Green);
+        assert_eq!(
+            profile_value_color("Status", "No active profile."),
+            Color::Red
+        );
+        assert_eq!(profile_value_color("Provider", "OpenAI"), Color::Cyan);
+    }
+
+    #[test]
+    fn profile_scroll_bounds_allow_full_overflow_range() {
+        assert_eq!(profile_scroll_body_height(10), 4);
+        assert_eq!(profile_scroll_max_offset(20, 4), 16);
+        assert_eq!(profile_scroll_max_offset(4, 4), 0);
+        assert_eq!(profile_scroll_max_offset(3, 4), 0);
+    }
+
+    #[test]
+    fn profile_scroll_footer_reports_current_line() {
+        assert_eq!(profile_scroll_footer(0, 0), "q close");
+        let footer = profile_scroll_footer(2, 8);
+        assert!(footer.contains("j/k scroll"));
+        assert!(footer.contains("line 3/9"));
+    }
 
     #[test]
     fn copy_source_identity_read_errors_are_propagated() {
