@@ -55,7 +55,7 @@ external release below:
 | Version | `2.7.0` |
 | Source | `https://github.com/JuliusBrussee/caveman` |
 | Commit | `8b0c1d3699b8d83e87fe4605b378da20c41555e0` |
-| Prodex tree SHA-256 | `26d587fc179e79f76f4e2b42edec0266a7af40cf08bf15eb4609de310fabd8fb` |
+| Prodex tree SHA-256 | `09127915a13a493146ed0392b6895bbbd5f620d276dda9f4e68a6722f96df950` |
 
 Install the exact checked-out tree at:
 
@@ -74,7 +74,7 @@ manifest as `prodex-tool.json`:
   "version": "2.7.0",
   "source": "https://github.com/JuliusBrussee/caveman",
   "commit": "8b0c1d3699b8d83e87fe4605b378da20c41555e0",
-  "tree_sha256": "26d587fc179e79f76f4e2b42edec0266a7af40cf08bf15eb4609de310fabd8fb"
+  "tree_sha256": "09127915a13a493146ed0392b6895bbbd5f620d276dda9f4e68a6722f96df950"
 }
 ```
 
@@ -85,6 +85,13 @@ finished tree. Standalone optimizer and Claude-plugin command paths are retired;
 Unversioned managed directories are rejected. Installations must use the exact
 versioned path shown above.
 
+Prodex recomputes the complete tree digest before activation and treats that
+recomputed digest as authoritative. Prodex 0.430.3 also accepts the legacy
+prodex-tool.json digest written by earlier installers for the same exact
+vetted version and commit, so a clean official checkout is not rejected solely
+because its manifest was generated with stale digest metadata. The actual tree
+must still match the current vetted digest above.
+
 ## Ponytail
 
 Ponytail uses the same manifest and tree-validation contract at
@@ -92,7 +99,11 @@ Ponytail uses the same manifest and tree-validation contract at
 
 - source: `https://github.com/DietrichGebert/ponytail`
 - commit: `1d95ff7d39de12d87014ea40d4e22201bddc501b`
-- tree SHA-256: `5443a5ee4a7248adcb59e1e102dd5bbd14af3083a9c3b4f271dd86790ac88c9c`
+- tree SHA-256: `05fe532f2a310cc7d12a60d6b51d1638a7d1465598d82ffa9f6a3d4cbf970f48`
+
+The same legacy-manifest compatibility rule applies to Ponytail 4.10.0: the
+manifest may contain the prior known digest, but activation still requires the
+recomputed tree to match the corrected digest above.
 
 RTK `0.49.0` is the latest stable release validated for this Prodex release; it remains
 externally managed and version-compatible rather than latest-only. Codebase Memory MCP
