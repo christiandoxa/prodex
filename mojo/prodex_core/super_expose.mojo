@@ -244,6 +244,16 @@ def super_expose_tunnel_client_version_output_valid(
                 ),
             ):
                 return True
+            if super_expose_range_matches_literal(
+                view,
+                bounds[0],
+                bounds[1],
+                StringSlice(
+                    "0.0.13+4b5267f823be0b046bb883aacb51603cfde3a0ea "
+                    "(git sha: 4b5267f823be0b046bb883aacb51603cfde3a0ea)"
+                ),
+            ):
+                return True
             line_start = cursor + 1
         cursor += 1
     return False
