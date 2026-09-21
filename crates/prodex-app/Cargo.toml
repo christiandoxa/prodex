@@ -96,6 +96,7 @@ serde_json = { workspace = true }
 sha2 = { workspace = true }
 terminal_ui = { workspace = true }
 prodex_update_notice = { workspace = true }
+ratatui = { workspace = true }
 uuid = { workspace = true }
 url = { workspace = true }
 zeroize = { workspace = true }

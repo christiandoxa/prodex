@@ -244,27 +244,27 @@ baseline with:
   `prodex` namespace start with no ingress or egress until a workload-specific
   allow policy is added.
 - an intentionally non-deployable `PRODEX_IMAGE_DIGEST` source placeholder.
-  Every standalone release publishes a rendered `prodex-gateway-<version>.yaml`
-  asset whose three workload references use the exact attested GHCR image
-  digest. The source template is for review and release rendering only; do not
-  apply it.
+  Standalone releases do not publish a container image or rendered Kubernetes
+  asset. Build and attest the deployment image through the deployment supply
+  chain, substitute its immutable digest, and review the rendered manifest
+  before applying it.
 
-The release manifest creates and targets the dedicated `prodex` namespace.
-Download and verify the release asset, then apply it as a unit so the namespace
-labels, policies, and namespaced resources are installed together:
+Render the reviewed template with your deployment image digest, then apply it
+as a unit so the namespace labels, policies, and namespaced resources are
+installed together:
 
 ```bash
-version=0.409.0
-release_url="https://github.com/christiandoxa/prodex/releases/download/${version}"
+version=0.430.1
+image_digest="sha256:<attested-deployment-image-digest>"
 manifest="prodex-gateway-${version}.yaml"
-curl -fsSLo "${manifest}" "${release_url}/${manifest}"
-curl -fsSLo SHA256SUMS "${release_url}/SHA256SUMS"
-grep " ${manifest}$" SHA256SUMS | sha256sum --check --strict
+sed "s|PRODEX_IMAGE_DIGEST|${image_digest}|g" \
+  deploy/kubernetes/prodex-gateway.yaml >"${manifest}"
 kubectl apply -f "${manifest}"
 ```
 
-Verify the release asset's provenance before applying it. Never replace the
-rendered digest with a tag or apply `deploy/kubernetes/prodex-gateway.yaml`.
+Verify the deployment image's provenance before applying the rendered manifest.
+Never replace the rendered digest with a tag or apply
+`deploy/kubernetes/prodex-gateway.yaml` directly.
 
 The migration Job has an immutable pod template. On an upgrade, wait for the
 previous migration to complete successfully, delete only that completed Job,

@@ -196,15 +196,72 @@ fn rewrite_super_expose_alias(args: &[OsString]) -> Vec<OsString> {
     if !matches!(
         args.get(1).and_then(|arg| arg.to_str()),
         Some("super" | "s")
-    ) || args.get(2).and_then(|arg| arg.to_str()) != Some("expose")
-    {
+    ) {
         return args.to_vec();
     }
+
+    let mut index = 2;
+    let mut expose_index = None;
+    while index < args.len() {
+        let Some(value) = args[index].to_str() else {
+            break;
+        };
+        if value == "--" {
+            break;
+        }
+        if value == "expose" {
+            expose_index = Some(index);
+            break;
+        }
+        if !value.starts_with('-') {
+            break;
+        }
+        if super_option_takes_value(value) && !value.contains('=') {
+            index = index.saturating_add(2);
+        } else {
+            index = index.saturating_add(1);
+        }
+    }
+    let Some(expose_index) = expose_index else {
+        return args.to_vec();
+    };
+
     let mut rewritten = Vec::with_capacity(args.len().saturating_sub(1));
     rewritten.push(args[0].clone());
     rewritten.push(OsString::from("__super-expose"));
-    rewritten.extend(args.iter().skip(3).cloned());
+    rewritten.extend(
+        args.iter()
+            .enumerate()
+            .skip(1)
+            .filter(|(position, _)| *position != 1 && *position != expose_index)
+            .map(|(_, arg)| arg.clone()),
+    );
     rewritten
+}
+
+fn super_option_takes_value(value: &str) -> bool {
+    matches!(
+        value,
+        "-p" | "--profile"
+            | "--base-url"
+            | "--sub-agent-provider"
+            | "--sub-agent-model"
+            | "--sub-agent-model-reasoning-effort"
+            | "--sub-agent-url"
+            | "--sub-agent-max-concurrency"
+            | "--tool"
+            | "--require-tool"
+            | "--url"
+            | "--provider"
+            | "--api-key"
+            | "--model"
+            | "--local-model"
+            | "--context-window"
+            | "--local-context-window"
+            | "--auto-compact-token-limit"
+            | "--local-auto-compact-token-limit"
+            | "-c"
+    )
 }
 
 fn rewrite_positioned_super_alias(

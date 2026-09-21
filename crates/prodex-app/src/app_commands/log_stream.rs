@@ -1,0 +1,636 @@
+use super::log_follow::{FollowedLog, collect_new_followed_lines};
+use super::log_load::{LogLoadAggregate, LogLoadObservation, is_routine_load_event};
+use super::log_transcript::TranscriptEvent;
+use crate::app_commands::log_format::{
+    human_event_name, local_log_timestamp, render_log_block, render_text_body,
+};
+use crate::app_commands::log_throughput::OutputThroughput;
+use crate::app_commands::log_tui::format_output_tokens_per_second;
+use crate::app_commands::log_upstream;
+use crate::app_commands::log_upstream_payload;
+use crate::app_commands::log_upstream_payload::UpstreamPayloadEvent;
+use crate::app_commands::log_upstream_payload::parse_runtime_log_line;
+use crate::reports::{InfoTokenUsageEvent, info_token_usage_event_from_line};
+use anyhow::{Context, Result};
+use std::collections::BTreeMap;
+use std::io::{self, Write};
+use std::path::Path;
+use std::time::Instant;
+
+#[path = "log_event_source.rs"]
+mod event_source;
+#[path = "log_stream/operational.rs"]
+mod operational;
+use event_source::operational_event_source;
+
+#[derive(Debug, Clone)]
+pub(crate) enum LogStreamItem {
+    Transcript(TranscriptEvent),
+    LoadObservation(LogLoadObservation),
+    LoadAggregate(LogLoadAggregate),
+    TokenUsage(InfoTokenUsageEvent),
+    UpstreamPayload(UpstreamPayloadEvent),
+}
+
+pub(crate) fn print_log_stream_item(event: &LogStreamItem, json: bool) -> Result<()> {
+    if !json && matches!(event, LogStreamItem::Transcript(event) if event.source == "load") {
+        return Ok(());
+    }
+    if json {
+        println!("{}", log_stream_item_json(event)?);
+        return io::stdout()
+            .flush()
+            .context("failed to flush JSON log output");
+    }
+    match event {
+        LogStreamItem::Transcript(event) => print_transcript_event(event),
+        LogStreamItem::LoadObservation(event) if !is_routine_load_event(&event.event_name) => {
+            print_transcript_event(&event.event)
+        }
+        LogStreamItem::LoadAggregate(event)
+            if !event
+                .key
+                .split('\u{1f}')
+                .next()
+                .is_some_and(is_routine_load_event) =>
+        {
+            print_transcript_event(&event.as_transcript())
+        }
+        LogStreamItem::LoadObservation(_) | LogStreamItem::LoadAggregate(_) => Ok(()),
+        LogStreamItem::TokenUsage(event) => print_token_usage_event(event, false),
+        LogStreamItem::UpstreamPayload(event) => print_upstream_payload_event(event),
+    }
+}
+
+pub(crate) fn log_stream_item_json(event: &LogStreamItem) -> Result<String> {
+    match event {
+        LogStreamItem::Transcript(event) => serde_json::to_string(event),
+        LogStreamItem::LoadObservation(event) => serde_json::to_string(&event.event),
+        LogStreamItem::LoadAggregate(event) => serde_json::to_string(&event.as_transcript()),
+        LogStreamItem::TokenUsage(event) => serde_json::to_string(event),
+        LogStreamItem::UpstreamPayload(event) => serde_json::to_string(event),
+    }
+    .context("failed to serialize JSON log event")
+}
+
+#[cfg(test)]
+pub(crate) fn read_new_token_usage_events(
+    path: &Path,
+    state: &mut FollowedLog,
+    json: bool,
+) -> Result<()> {
+    for event in collect_new_runtime_log_stream_items(path, state, !json)? {
+        if let LogStreamItem::TokenUsage(event) = event {
+            print_token_usage_event(&event, json)?;
+        }
+    }
+    Ok(())
+}
+
+pub(crate) fn collect_new_runtime_log_stream_items(
+    path: &Path,
+    state: &mut FollowedLog,
+    include_operational_insights: bool,
+) -> Result<Vec<LogStreamItem>> {
+    collect_new_runtime_log_stream_items_with_throughput(
+        path,
+        state,
+        include_operational_insights,
+        None,
+    )
+}
+
+pub(crate) fn collect_new_runtime_log_stream_items_with_throughput(
+    path: &Path,
+    state: &mut FollowedLog,
+    include_operational_insights: bool,
+    throughput: Option<&mut OutputThroughput>,
+) -> Result<Vec<LogStreamItem>> {
+    collect_new_runtime_log_stream_items_internal(
+        path,
+        state,
+        include_operational_insights,
+        throughput,
+        false,
+    )
+}
+
+pub(crate) fn collect_new_runtime_log_stream_items_for_tui_with_throughput(
+    path: &Path,
+    state: &mut FollowedLog,
+    include_operational_insights: bool,
+    throughput: Option<&mut OutputThroughput>,
+) -> Result<Vec<LogStreamItem>> {
+    collect_new_runtime_log_stream_items_internal(
+        path,
+        state,
+        include_operational_insights,
+        throughput,
+        true,
+    )
+}
+
+fn collect_new_runtime_log_stream_items_internal(
+    path: &Path,
+    state: &mut FollowedLog,
+    include_operational_insights: bool,
+    mut throughput: Option<&mut OutputThroughput>,
+    coalesce_load: bool,
+) -> Result<Vec<LogStreamItem>> {
+    let mut items = Vec::new();
+    for line in collect_new_followed_lines(path, state)? {
+        items.extend(collect_runtime_log_line(
+            path,
+            &line,
+            include_operational_insights,
+            throughput.as_deref_mut(),
+            coalesce_load,
+        )?);
+    }
+    Ok(items)
+}
+
+pub(crate) fn collect_runtime_log_line(
+    path: &Path,
+    line: &str,
+    include_operational_insights: bool,
+    mut throughput: Option<&mut OutputThroughput>,
+    coalesce_load: bool,
+) -> Result<Vec<LogStreamItem>> {
+    let mut items = operational::log_items(line, include_operational_insights, coalesce_load)?;
+    if let Some(event) = stream_payload_event_from_runtime_line(line) {
+        items.push(LogStreamItem::Transcript(event));
+    }
+    if let Some(event) = log_upstream_payload::upstream_payload_event_from_runtime_line(line) {
+        items.push(LogStreamItem::UpstreamPayload(event));
+    }
+    operational::observe_token_usage_progress(path, line, throughput.as_deref_mut());
+    if let Some(event) = info_token_usage_event_from_line(line) {
+        let event = local_token_usage_event(event);
+        if let Some(throughput) = throughput {
+            throughput.observe_token_usage(path, &event, Instant::now());
+            throughput.finish(path, &event);
+        }
+        items.push(LogStreamItem::TokenUsage(event));
+    }
+    Ok(items)
+}
+
+struct ParsedOperationalEvent {
+    transcript: TranscriptEvent,
+    load: Option<LogLoadObservation>,
+}
+
+fn operational_event_from_runtime_line(line: &str) -> Result<Option<ParsedOperationalEvent>> {
+    let Some(parsed) = parse_runtime_log_line(line) else {
+        return Ok(None);
+    };
+    let Some(event) = parsed.event.as_deref() else {
+        return Ok(None);
+    };
+    if matches!(
+        event,
+        "stream_payload" | "upstream_payload" | "token_usage" | "token_usage_progress"
+    ) {
+        return Ok(None);
+    }
+    if !operational_event_is_interesting(event, &parsed.fields) {
+        return Ok(None);
+    }
+    let Some(source) = operational_event_source(event, &parsed.fields)? else {
+        return Ok(None);
+    };
+    let source = if source == "load" && !is_routine_load_event(event) {
+        "error"
+    } else {
+        source
+    };
+    if source == "route"
+        && event == "profile_commit"
+        && parsed.fields.get("switched").map(String::as_str) != Some("true")
+    {
+        return Ok(None);
+    }
+    let request = parsed
+        .fields
+        .get("request")
+        .and_then(|value| value.parse().ok());
+    let correlation = request
+        .map(short_request_id)
+        .unwrap_or_else(|| "-".to_string());
+    let summary = operational_event_summary(event, source, &parsed.fields);
+    let transcript = TranscriptEvent {
+        timestamp: local_log_timestamp(&parsed.timestamp),
+        source: source.to_string(),
+        text: format!("{correlation}  {summary}"),
+    };
+    let load = (source == "load").then(|| LogLoadObservation {
+        event: transcript.clone(),
+        event_name: event.to_string(),
+        fields: parsed
+            .fields
+            .iter()
+            .filter(|(key, _)| {
+                matches!(
+                    key.as_str(),
+                    "profile"
+                        | "route"
+                        | "lane"
+                        | "transport"
+                        | "context"
+                        | "provider"
+                        | "model"
+                        | "path"
+                        | "limit"
+                        | "hard_limit"
+                        | "reason"
+                )
+            })
+            .map(|(key, value)| {
+                (
+                    key.clone(),
+                    if key == "path" {
+                        safe_endpoint(value)
+                    } else {
+                        value.clone()
+                    },
+                )
+            })
+            .collect(),
+        run_id: request.map(short_request_id),
+    });
+    Ok(Some(ParsedOperationalEvent { transcript, load }))
+}
+
+fn operational_event_is_interesting(event: &str, fields: &BTreeMap<String, String>) -> bool {
+    if event == "compat_request_surface" {
+        let tool_surface = fields.get("tool_surface").map(String::as_str);
+        return tool_surface.is_some_and(|value| value != "none")
+            || fields
+                .get("continuation")
+                .is_some_and(|value| value != "none")
+            || fields.get("family").is_some_and(|value| value != "codex");
+    }
+    if event == "smart_context_prepare_fallback" {
+        return fields
+            .get("decision")
+            .is_none_or(|decision| decision != "pass_through");
+    }
+    true
+}
+
+fn short_request_id(request: u64) -> String {
+    format!("r{:04x}", request & 0xffff)
+}
+
+fn operational_event_summary(
+    event: &str,
+    source: &str,
+    fields: &BTreeMap<String, String>,
+) -> String {
+    let mut details = Vec::new();
+    match source {
+        "request" | "model" | "route" | "mcp" | "agent" | "tool" | "event" => {
+            add_log_detail(&mut details, fields, "profile", "profile");
+            add_log_detail(&mut details, fields, "route", "route");
+            add_log_detail(&mut details, fields, "provider", "provider");
+            add_log_detail(&mut details, fields, "model", "model");
+            add_log_detail(&mut details, fields, "from_model", "from");
+            add_log_detail(&mut details, fields, "to_model", "to");
+            add_log_detail(&mut details, fields, "effort", "effort");
+            add_log_detail(&mut details, fields, "transport", "transport");
+            add_log_detail(&mut details, fields, "method", "method");
+            add_log_endpoint_detail(&mut details, fields, "path", "path");
+            add_log_endpoint_detail(&mut details, fields, "url", "path");
+            add_log_detail(&mut details, fields, "tool_surface", "tools");
+            add_log_detail(&mut details, fields, "continuation", "continuation");
+            add_log_detail(&mut details, fields, "status", "status");
+            add_log_detail(&mut details, fields, "class", "class");
+            add_log_detail(&mut details, fields, "event_type", "event");
+            add_log_detail(&mut details, fields, "state", "state");
+            add_log_detail(&mut details, fields, "code", "code");
+            add_log_detail(&mut details, fields, "reason", "reason");
+            add_log_detail(&mut details, fields, "elapsed_ms", "latency_ms");
+            add_log_detail(&mut details, fields, "exit_code", "exit");
+            add_log_detail(&mut details, fields, "exit_status", "exit");
+            add_log_detail(&mut details, fields, "outcome", "outcome");
+            add_log_detail(&mut details, fields, "active", "active");
+            add_log_detail(&mut details, fields, "limit", "limit");
+            add_log_detail(&mut details, fields, "count", "count");
+            add_log_detail(&mut details, fields, "dropped", "dropped");
+        }
+        "quota" => {
+            add_log_detail(&mut details, fields, "profile", "profile");
+            add_log_detail(&mut details, fields, "route", "route");
+            add_log_detail(&mut details, fields, "quota_band", "band");
+            add_log_percent_detail(&mut details, fields, "five_hour_remaining", "5h");
+            add_log_percent_detail(&mut details, fields, "weekly_remaining", "week");
+            add_log_detail(&mut details, fields, "reason", "reason");
+            add_log_detail(&mut details, fields, "until", "until");
+        }
+        "retry" | "backoff" => {
+            add_log_detail(&mut details, fields, "profile", "profile");
+            add_log_detail(&mut details, fields, "route", "route");
+            add_log_detail(&mut details, fields, "provider", "provider");
+            add_log_detail(&mut details, fields, "reason", "reason");
+            add_log_detail(&mut details, fields, "class", "class");
+            add_log_detail(&mut details, fields, "attempt", "attempt");
+            add_log_detail(&mut details, fields, "retry_index", "retry");
+            add_log_detail(&mut details, fields, "seconds", "backoff_s");
+            add_log_detail(&mut details, fields, "until", "until");
+        }
+        "health" => {
+            add_log_detail(&mut details, fields, "profile", "profile");
+            add_log_detail(&mut details, fields, "route", "route");
+            add_log_detail(&mut details, fields, "score", "score");
+            add_log_detail(&mut details, fields, "delta", "delta");
+            add_log_detail(&mut details, fields, "reason", "reason");
+        }
+        "upstream" => {
+            add_log_detail(&mut details, fields, "profile", "profile");
+            add_log_detail(&mut details, fields, "route", "route");
+            add_log_detail(&mut details, fields, "transport", "transport");
+            add_log_detail(&mut details, fields, "method", "method");
+            add_log_endpoint_detail(&mut details, fields, "url", "path");
+            add_log_detail(&mut details, fields, "status", "status");
+            add_log_detail(&mut details, fields, "elapsed_ms", "latency_ms");
+            add_log_detail(&mut details, fields, "reason", "reason");
+        }
+        "stream" | "response" => {
+            add_log_detail(&mut details, fields, "profile", "profile");
+            add_log_detail(&mut details, fields, "route", "route");
+            add_log_detail(&mut details, fields, "transport", "transport");
+            if event == "first_local_chunk" {
+                add_log_detail(&mut details, fields, "elapsed_ms", "ttft_ms");
+            } else {
+                add_log_detail(&mut details, fields, "elapsed_ms", "latency_ms");
+            }
+            add_log_detail(&mut details, fields, "chunks", "chunks");
+            add_log_detail(&mut details, fields, "bytes", "bytes");
+            add_log_detail(&mut details, fields, "status", "status");
+            add_log_detail(&mut details, fields, "event_type", "event");
+        }
+        "smart" => {
+            add_log_detail(&mut details, fields, "profile", "profile");
+            add_log_detail(&mut details, fields, "route", "route");
+            add_log_detail(&mut details, fields, "decision", "decision");
+            add_log_detail(&mut details, fields, "tier", "tier");
+            add_log_detail(&mut details, fields, "rewrite_kind", "rewrite");
+            add_log_detail(&mut details, fields, "tokens_before", "tokens_before");
+            add_log_detail(&mut details, fields, "tokens_after", "tokens_after");
+            add_log_detail(&mut details, fields, "body_bytes_saved", "bytes_saved");
+            add_log_percent_detail(&mut details, fields, "rewrite_ratio_percent", "rewrite");
+            add_log_detail(
+                &mut details,
+                fields,
+                "tool_outputs_condensed",
+                "tools_condensed",
+            );
+            add_log_detail(&mut details, fields, "rehydrated_refs", "rehydrated");
+            add_log_detail(&mut details, fields, "pressure_band", "pressure");
+            add_log_detail(&mut details, fields, "self_check", "check");
+            add_log_detail(&mut details, fields, "reason", "reason");
+        }
+        "compact" => {
+            add_log_detail(&mut details, fields, "profile", "profile");
+            add_log_detail(&mut details, fields, "route", "route");
+            add_log_detail(&mut details, fields, "provider", "provider");
+            add_log_detail(&mut details, fields, "status", "status");
+            add_log_detail(&mut details, fields, "decision", "decision");
+            add_log_detail(&mut details, fields, "exit", "exit");
+            add_log_detail(&mut details, fields, "reason", "reason");
+            add_log_detail(&mut details, fields, "attempts", "attempts");
+            add_log_detail(&mut details, fields, "elapsed_ms", "latency_ms");
+        }
+        "load" => {
+            add_log_detail(&mut details, fields, "route", "route");
+            add_log_detail(&mut details, fields, "lane", "lane");
+            add_log_detail(&mut details, fields, "profile", "profile");
+            add_log_detail(&mut details, fields, "active", "active");
+            add_log_detail(&mut details, fields, "limit", "limit");
+            add_log_detail(&mut details, fields, "hard_limit", "limit");
+            add_log_detail(&mut details, fields, "reason", "reason");
+        }
+        "terminal" | "error" => {
+            add_log_detail(&mut details, fields, "profile", "profile");
+            add_log_detail(&mut details, fields, "route", "route");
+            add_log_detail(&mut details, fields, "transport", "transport");
+            add_log_detail(&mut details, fields, "stage", "stage");
+            add_log_detail(&mut details, fields, "event_type", "event");
+            add_log_detail(&mut details, fields, "status", "status");
+            add_log_detail(&mut details, fields, "class", "class");
+            add_log_detail(&mut details, fields, "reason", "reason");
+            add_log_detail(&mut details, fields, "outcome", "outcome");
+            add_log_detail(&mut details, fields, "exit_code", "exit");
+            add_log_detail(&mut details, fields, "exit_status", "exit");
+            add_log_detail(&mut details, fields, "dropped", "dropped");
+        }
+        _ => {}
+    }
+    join_log_details(&human_event_name(event), details)
+}
+
+fn display_log_field<'a>(fields: &'a BTreeMap<String, String>, key: &str) -> Option<&'a str> {
+    fields
+        .get(key)
+        .map(String::as_str)
+        .filter(|value| !value.is_empty() && value.chars().all(|character| !character.is_control()))
+}
+
+fn add_log_detail(
+    details: &mut Vec<String>,
+    fields: &BTreeMap<String, String>,
+    key: &str,
+    label: &str,
+) {
+    if let Some(value) = display_log_field(fields, key) {
+        let value = runtime_proxy_crate::runtime_proxy_redact_log_field_value(key, value);
+        if !value.is_empty() && value != "-" {
+            details.push(format!("{label}={}", bounded_log_value(&value, 192)));
+        }
+    }
+}
+
+fn add_log_percent_detail(
+    details: &mut Vec<String>,
+    fields: &BTreeMap<String, String>,
+    key: &str,
+    label: &str,
+) {
+    if let Some(value) = display_log_field(fields, key) {
+        let value = runtime_proxy_crate::runtime_proxy_redact_log_field_value(key, value);
+        details.push(format!("{label}={}%", bounded_log_value(&value, 32)));
+    }
+}
+
+fn add_log_endpoint_detail(
+    details: &mut Vec<String>,
+    fields: &BTreeMap<String, String>,
+    key: &str,
+    label: &str,
+) {
+    if let Some(value) = display_log_field(fields, key) {
+        details.push(format!(
+            "{label}={}",
+            bounded_log_value(&safe_endpoint(value), 192)
+        ));
+    }
+}
+
+fn join_log_details(event: &str, details: Vec<String>) -> String {
+    if details.is_empty() {
+        event.to_string()
+    } else {
+        format!("{event}  {}", details.join(" · "))
+    }
+}
+
+fn bounded_log_value(value: &str, max_chars: usize) -> String {
+    let mut bounded = value.chars().take(max_chars).collect::<String>();
+    if value.chars().nth(max_chars).is_some() {
+        bounded.push('…');
+    }
+    bounded
+}
+
+fn safe_endpoint(url: &str) -> String {
+    if url.starts_with('/') {
+        return url.split(['?', '#']).next().unwrap_or(url).to_string();
+    }
+    reqwest::Url::parse(url)
+        .ok()
+        .and_then(|url| (!url.path().is_empty()).then(|| url.path().to_string()))
+        .unwrap_or_else(|| "upstream".to_string())
+}
+
+pub(crate) fn stream_payload_event_from_runtime_line(line: &str) -> Option<TranscriptEvent> {
+    if !line.contains("stream_payload") {
+        return None;
+    }
+    let parsed = parse_runtime_log_line(line)?;
+    if parsed.event.as_deref() != Some("stream_payload") {
+        return None;
+    }
+    let source = parsed.fields.get("source")?.clone();
+    let text = parsed
+        .fields
+        .get("stream")
+        .or_else(|| parsed.fields.get("message"))
+        .cloned()?;
+    (!source.trim().is_empty() && !text.trim().is_empty()).then(|| TranscriptEvent {
+        timestamp: local_log_timestamp(&parsed.timestamp),
+        source,
+        text,
+    })
+}
+
+pub(crate) fn print_token_usage_event(event: &InfoTokenUsageEvent, json: bool) -> Result<()> {
+    if json {
+        println!("{}", serde_json::to_string(event)?);
+    } else {
+        let request = event
+            .request
+            .map(|request| request.to_string())
+            .unwrap_or_else(|| "-".to_string());
+        let meta = [
+            ("profile", event.profile.clone()),
+            ("request", request),
+            ("transport", event.transport.clone()),
+            ("source", event.source.clone()),
+            ("input", event.input_tokens.to_string()),
+            ("cache", event.cached_input_tokens.to_string()),
+            ("output", event.output_tokens.to_string()),
+            ("reasoning", event.reasoning_tokens.to_string()),
+            (
+                "generation",
+                event
+                    .generation_ms
+                    .map(|duration| format!("{duration}ms"))
+                    .unwrap_or_else(|| "unavailable".to_string()),
+            ),
+            (
+                "avg_output",
+                event
+                    .generation_ms
+                    .filter(|duration| *duration > 0)
+                    .and(event.output_tokens_per_second)
+                    .map(|rate| format_output_tokens_per_second(Some(rate)))
+                    .unwrap_or_else(|| format_output_tokens_per_second(None)),
+            ),
+        ];
+        for line in render_log_block(
+            &event.timestamp,
+            "TOKENS",
+            &meta,
+            &[],
+            terminal_ui::current_cli_width(),
+        ) {
+            println!("{line}");
+        }
+    }
+    io::stdout()
+        .flush()
+        .context("failed to flush token log output")
+}
+
+pub(crate) fn local_token_usage_event(mut event: InfoTokenUsageEvent) -> InfoTokenUsageEvent {
+    event.timestamp = local_log_timestamp(&event.timestamp);
+    event
+}
+
+pub(crate) fn print_transcript_event(event: &TranscriptEvent) -> Result<()> {
+    let width = terminal_ui::current_cli_width();
+    let body = render_text_body(&event.text, width);
+    for line in render_log_block(
+        &event.timestamp,
+        &log_event_label(&event.source),
+        &[],
+        &body,
+        width,
+    ) {
+        println!("{line}");
+    }
+    io::stdout()
+        .flush()
+        .context("failed to flush transcript log output")
+}
+
+pub(crate) fn log_event_label(source: &str) -> String {
+    match source {
+        "request" => "REQUEST".to_string(),
+        "route" => "ROUTE".to_string(),
+        "quota" => "QUOTA".to_string(),
+        "retry" => "RETRY".to_string(),
+        "backoff" => "BACKOFF".to_string(),
+        "health" => "HEALTH".to_string(),
+        "upstream" => "UPSTREAM".to_string(),
+        "stream" => "STREAM".to_string(),
+        "response" => "RESPONSE".to_string(),
+        "tokens" => "TOKENS".to_string(),
+        "smart" => "SMART".to_string(),
+        "compact" => "COMPACT".to_string(),
+        "model" => "MODEL".to_string(),
+        "tool" => "TOOL".to_string(),
+        "agent" => "AGENT".to_string(),
+        "mcp" => "MCP".to_string(),
+        "hook" => "HOOK".to_string(),
+        "load" => "LOAD".to_string(),
+        "event" => "EVENT".to_string(),
+        "ws" => "WEBSOCKET".to_string(),
+        "terminal" => "TERMINAL".to_string(),
+        "error" => "ERROR".to_string(),
+        "user" => "USER".to_string(),
+        "assistant" => "ASSISTANT".to_string(),
+        "reasoning" => "REASONING".to_string(),
+        "turn-context" => "MODEL".to_string(),
+        "session-context" => "SESSION".to_string(),
+        "prompt-engineering" => "PROMPT".to_string(),
+        "tool-output" => "TOOL RESULT".to_string(),
+        source if source.starts_with("tool-call:") => "TOOL CALL".to_string(),
+        _ => format!("stream {source}"),
+    }
+}
+
+pub(crate) fn print_upstream_payload_event(event: &UpstreamPayloadEvent) -> Result<()> {
+    log_upstream::print_upstream_payload_event(event, false)
+}

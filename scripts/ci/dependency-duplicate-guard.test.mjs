@@ -59,6 +59,12 @@ getrandom v0.2.17
 getrandom v0.4.3
     tempfile v3.27.0
 
+hashbrown v0.16.1
+    kasuari v0.4.12
+
+hashbrown v0.17.1
+    hashlink v0.12.1
+
 hmac v0.12.1
     secret-service v5.1.0
 
@@ -70,6 +76,12 @@ inout v0.1.4
 
 inout v0.2.2
     cipher v0.5.2
+
+itertools v0.13.0
+    criterion v0.8.2
+
+itertools v0.14.0
+    ratatui-core v0.1.2
 
 sha2 v0.10.9
     secret-service v5.1.0
@@ -101,8 +113,10 @@ test("default budget accepts current duplicate families", () => {
       ["crypto-common", 2],
       ["digest", 2],
       ["getrandom", 2],
+      ["hashbrown", 2],
       ["hmac", 2],
       ["inout", 2],
+      ["itertools", 2],
       ["sha2", 2],
       ["syn", 2],
     ],

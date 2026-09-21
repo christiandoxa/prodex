@@ -53,7 +53,7 @@ refs:
 | `astral-sh/setup-uv` | `v10.0.1` | `20cfd1bf945f4377ade1205e4dbc17946fc9a30d` |
 | `Swatinem/rust-cache` | `v2` | `6323deb102c322ba6fcbdcafc7e3dddab59af2b6` |
 | `mozilla-actions/sccache-action` | `v0.0.11` | `fc920bf0ec8de6ee65d409111f7ec508035751ba` |
-| `SonarSource/sonarqube-scan-action` | `v8.2.1` | `22918119ff8e1ca75a623e15c8296b6ea4fbe28f` |
+| `SonarSource/sonarqube-scan-action` | `v8.2.2` | `ba9859eae8dd6bd29e412f25ddbbef3d032000f4` |
 | `hugoalh/scan-virus-ghaction/clamav` | `v0.20.1` | `99c81e8991ad1074a14e5f22a21bce9be035e14e` |
 
 Docker Official Image manifest-list digests were resolved from the registry
@@ -64,12 +64,13 @@ SonarQube Community Build `26.7.0.124771-community` at manifest digest
 `sha256:160bd2f6a3485bd09b655ef22dd63c02bd1fa7ba82aa5d9973fd010b8bcca0b3`.
 The KICS gate uses `v2.1.20` at manifest digest
 `sha256:3e5a268eb8adda2e5a483c9359ddfc4cd520ab856a7076dc0b1d8784a37e2602`.
-Dependabot owns Dockerfile and Compose refreshes. The release workflow scans
-the locally built image with digest-pinned Trivy 0.72.0, failing on fixable
-high/critical vulnerabilities, then publishes an attested GHCR image and
-renders the Kubernetes release asset from that exact registry digest. The
-checked-in manifest keeps a non-deployable digest placeholder so an old digest
-cannot be mistaken for the current release.
+Dependabot owns Dockerfile and Compose refreshes. The supply-chain guard keeps
+container inputs pinned, while standalone releases publish binaries,
+installers, the SBOM, and checksums only; they do not build or publish a
+deployment container image or rendered Kubernetes release asset. The
+checked-in manifest keeps a non-deployable digest placeholder, so an operator
+must substitute the digest from the separately governed deployment image
+before applying it.
 
 Primary pin sources:
 
@@ -140,9 +141,8 @@ The release workflow:
 3. attests every binary in checkout-free jobs and attests the SPDX JSON SBOM;
 4. downloads the staged assets and verifies their GitHub attestations;
 5. generates, verifies, and attests `SHA256SUMS`; and
-6. scans and attests the GHCR image, renders the Kubernetes manifest with its
-   registry digest, and publishes that manifest plus the vulnerability report
-   with the binaries, SBOM, and checksum file.
+6. malware-scans the final release assets before the tag and public release
+   are created.
 
 Run the local policy checks with:
 

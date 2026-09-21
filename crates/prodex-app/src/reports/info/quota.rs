@@ -1,0 +1,107 @@
+//! Quota aggregation for info reports.
+
+use super::{
+    BTreeMap, InfoQuotaAggregate, InfoQuotaSource, RunProfileProbeReport,
+    RuntimeProfileUsageSnapshot, required_main_window_snapshot_at,
+    runtime_usage_snapshot_is_usable, usage_from_runtime_usage_snapshot,
+};
+
+pub fn build_info_quota_aggregate(
+    reports: &[RunProfileProbeReport],
+    persisted_usage_snapshots: &BTreeMap<String, RuntimeProfileUsageSnapshot>,
+    now: i64,
+    stale_grace_seconds: i64,
+) -> InfoQuotaAggregate {
+    let mut aggregate = InfoQuotaAggregate {
+        quota_compatible_profiles: reports
+            .iter()
+            .filter(|report| report.auth.quota_compatible)
+            .count(),
+        live_profiles: 0,
+        snapshot_profiles: 0,
+        unavailable_profiles: 0,
+        five_hour_profiles_with_data: 0,
+        weekly_profiles_with_data: 0,
+        five_hour_pool_remaining: 0,
+        weekly_pool_remaining: 0,
+        earliest_five_hour_reset_at: None,
+        earliest_weekly_reset_at: None,
+    };
+
+    for report in reports {
+        update_info_quota_aggregate(
+            &mut aggregate,
+            report,
+            persisted_usage_snapshots,
+            now,
+            stale_grace_seconds,
+        );
+    }
+
+    aggregate
+}
+
+fn update_info_quota_aggregate(
+    aggregate: &mut InfoQuotaAggregate,
+    report: &RunProfileProbeReport,
+    persisted_usage_snapshots: &BTreeMap<String, RuntimeProfileUsageSnapshot>,
+    now: i64,
+    stale_grace_seconds: i64,
+) {
+    if !report.auth.quota_compatible {
+        return;
+    }
+
+    let usage = match &report.result {
+        Ok(usage) => Some((usage.clone(), InfoQuotaSource::LiveProbe)),
+        Err(_) => persisted_usage_snapshots
+            .get(&report.name)
+            .filter(|snapshot| runtime_usage_snapshot_is_usable(snapshot, now, stale_grace_seconds))
+            .map(|snapshot| {
+                (
+                    usage_from_runtime_usage_snapshot(snapshot),
+                    InfoQuotaSource::PersistedSnapshot,
+                )
+            }),
+    };
+    let Some((usage, source)) = usage else {
+        aggregate.unavailable_profiles += 1;
+        return;
+    };
+
+    let five_hour = required_main_window_snapshot_at(&usage, "5h", now);
+    let weekly = required_main_window_snapshot_at(&usage, "weekly", now);
+    if five_hour.is_none() && weekly.is_none() {
+        aggregate.unavailable_profiles += 1;
+        return;
+    }
+
+    match source {
+        InfoQuotaSource::LiveProbe => aggregate.live_profiles += 1,
+        InfoQuotaSource::PersistedSnapshot => aggregate.snapshot_profiles += 1,
+    }
+    if let Some(five_hour) = five_hour {
+        aggregate.five_hour_profiles_with_data += 1;
+        aggregate.five_hour_pool_remaining += five_hour.remaining_percent;
+        if five_hour.reset_at != i64::MAX {
+            aggregate.earliest_five_hour_reset_at = Some(
+                aggregate
+                    .earliest_five_hour_reset_at
+                    .map_or(five_hour.reset_at, |current| {
+                        current.min(five_hour.reset_at)
+                    }),
+            );
+        }
+    }
+    if let Some(weekly) = weekly {
+        aggregate.weekly_profiles_with_data += 1;
+        aggregate.weekly_pool_remaining += weekly.remaining_percent;
+        if weekly.reset_at != i64::MAX {
+            aggregate.earliest_weekly_reset_at = Some(
+                aggregate
+                    .earliest_weekly_reset_at
+                    .map_or(weekly.reset_at, |current| current.min(weekly.reset_at)),
+            );
+        }
+    }
+}

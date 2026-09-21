@@ -60,6 +60,12 @@ pub(crate) fn runtime_broker_registry_keys(paths: &AppPaths) -> Vec<String> {
     })
 }
 
+pub(crate) fn runtime_live_log_source_registry_keys(paths: &AppPaths) -> Vec<String> {
+    runtime_registry_keys(paths, |key| {
+        key.starts_with(RUNTIME_LIVE_LOG_SOURCE_KEY_PREFIX)
+    })
+}
+
 fn runtime_registry_keys(paths: &AppPaths, include: impl Fn(&str) -> bool) -> Vec<String> {
     let Ok(entries) = fs::read_dir(&paths.root) else {
         return Vec::new();

@@ -12,6 +12,10 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 pub(crate) const ALL_QUOTA_WATCH_FAST_INTERVAL_SECONDS: u64 = 10;
+pub(crate) const ALL_QUOTA_WATCH_IMMINENT_INTERVAL_SECONDS: u64 = 5;
+pub(crate) const ALL_QUOTA_WATCH_DETAIL_STABLE_INTERVAL_SECONDS: u64 = 45;
+pub(crate) const ALL_QUOTA_WATCH_IMMINENT_RESET_SECONDS: i64 = 2 * 60;
+pub(crate) const ALL_QUOTA_WATCH_NEAR_RESET_SECONDS: i64 = 15 * 60;
 const QUOTA_WATCH_RUNTIME_USAGE_CACHE_FILE: &str = "quota-watch-runtime-usage-cache.json";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -23,6 +27,13 @@ struct QuotaWatchRuntimeUsageCache {
 
 pub(crate) struct LiveQuotaWatchRuntimeUsageCache {
     pub(crate) snapshots: BTreeMap<String, RuntimeProfileUsageSnapshot>,
+    alive_until: i64,
+}
+
+impl LiveQuotaWatchRuntimeUsageCache {
+    pub(crate) fn refresh_interval_at(&self, now: i64) -> Duration {
+        Duration::from_secs(u64::try_from(self.alive_until.saturating_sub(now).max(1)).unwrap_or(1))
+    }
 }
 
 pub(crate) fn save_quota_watch_runtime_usage_cache(
@@ -125,7 +136,40 @@ pub(crate) fn load_live_quota_watch_runtime_usage_cache(
         .into_iter()
         .filter(|(name, _)| profiles.contains_key(name))
         .collect::<BTreeMap<_, _>>();
-    Some(LiveQuotaWatchRuntimeUsageCache { snapshots })
+    Some(LiveQuotaWatchRuntimeUsageCache {
+        snapshots,
+        alive_until: cache.alive_until,
+    })
+}
+
+pub(crate) fn quota_watch_detail_refresh_interval_for_cached_openai(
+    reset_windows: &[i64],
+    watch: bool,
+    profile_count: usize,
+    now: i64,
+) -> Duration {
+    let base = if watch {
+        ALL_QUOTA_WATCH_FAST_INTERVAL_SECONDS
+    } else if reset_windows
+        .iter()
+        .any(|reset| *reset <= now.saturating_add(ALL_QUOTA_WATCH_IMMINENT_RESET_SECONDS))
+    {
+        ALL_QUOTA_WATCH_IMMINENT_INTERVAL_SECONDS
+    } else if reset_windows
+        .iter()
+        .any(|reset| *reset <= now.saturating_add(ALL_QUOTA_WATCH_NEAR_RESET_SECONDS))
+    {
+        ALL_QUOTA_WATCH_FAST_INTERVAL_SECONDS
+    } else {
+        ALL_QUOTA_WATCH_DETAIL_STABLE_INTERVAL_SECONDS
+    };
+    Duration::from_secs(
+        base.max(
+            u64::try_from(profile_count)
+                .unwrap_or(u64::MAX)
+                .saturating_mul(2),
+        ),
+    )
 }
 
 fn quota_watch_runtime_usage_cache_path(paths: &AppPaths) -> PathBuf {

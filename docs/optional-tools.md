@@ -3,7 +3,7 @@
 Prodex discovers optional tools without modifying them. Normal interactive
 launches use bounded path/root resolution and activate only the temporary
 overlay; version, daemon, and package health checks remain available through
-`prodex capability super-doctor` and are still required for `--require-tool`.
+`prodex doctor --install` and are still required for `--require-tool`.
 Normal launches do not download, clone, update, trust, or grant extra
 permissions to a tool.
 
@@ -28,8 +28,7 @@ oversized files, oversized trees, and invalid manifests are rejected.
 Run this bounded, offline check:
 
 ```bash
-prodex capability super-doctor
-prodex capability super-doctor --json
+prodex doctor --install
 ```
 
 Missing optional tools do not fail the general doctor or `prodex super`. Use a
@@ -80,10 +79,8 @@ manifest as `prodex-tool.json`:
 ```
 
 Fetch and installation are explicit user operations. Prodex only validates the
-finished tree. `prodex caveman` fails before the TUI when Caveman is missing or
-invalid. `prodex super` skips it unless `--require-tool caveman` is present.
-`prodex claude caveman` resolves the same installation through its Claude plugin
-entry point.
+finished tree. Standalone optimizer and Claude-plugin command paths are retired;
+`prodex super` skips an optional tool unless `--require-tool <tool>` is present.
 
 Unversioned managed directories are rejected. Installations must use the exact
 versioned path shown above.
@@ -116,7 +113,7 @@ server's `disabledTools` list because Kiro/Bedrock rejects its top-level JSON
 Schema composition; all other Codebase Memory tools remain available.
 Playwright MCP requires validated Node.js 18+, `npx`, and the pinned
 `@playwright/mcp@0.0.82` package to pass an offline probe; install the package
-and browser before launching Super, then use `prodex capability super-doctor`
+and browser before launching Super, then use `prodex doctor --install`
 to verify it explicitly.
 Presidio remains an explicit service selection and is checked by its existing
 doctor path. `--require-tool presidio` additionally requires healthy services
@@ -138,13 +135,14 @@ explicit Presidio redaction through its local provider bridge.
 ## Security And Launch Semantics
 
 Tool selection remains independent of provider and permissions for the
-individual `caveman`, `rtk`, `playwright`, and `ponytail` commands. The
+individual typed Super tool flags. The
 `prodex s` / `prodex super` shortcut is intentionally different: it is the YOLO
 entrypoint, adds Codex's approval/sandbox and hook-trust bypass flags, and marks
 the current workspace trusted only for that invocation. It does not persist the
 trust override. Interactive launches ask about Presidio unless `--presidio` or
 `--no-presidio` supplies the choice.
 
-The aliases `prodex caveman`, `prodex rtk`, `prodex playwright`, `prodex
-ponytail`, and `prodex s` translate to typed tool selections. Tool-like words
-in the Codex argument list are passed through unchanged.
+The aliases `prodex caveman`, `prodex rtk`, `prodex playwright`, and `prodex
+ponytail` are retired. Select tools through `prodex super --tool <tool>` or
+`--require-tool <tool>`; tool-like words in the Codex argument list are passed
+through unchanged.

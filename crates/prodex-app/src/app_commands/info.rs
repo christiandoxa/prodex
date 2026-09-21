@@ -1,61 +1,156 @@
 use super::*;
+use prodex_runtime_doctor::read_runtime_log_tail;
+pub(crate) use prodex_update_notice::format_info_codex_version;
 
-pub(crate) fn handle_info(args: InfoArgs) -> Result<()> {
-    let paths = AppPaths::discover()?;
-    let state = AppState::load(&paths)?;
-    let policy = runtime_policy_summary().ok().flatten();
-    let process_count = collect_process_rows().len();
+pub(crate) use crate::reports::{
+    InfoTokenUsageSummary, classify_prodex_process_row,
+    collect_info_runtime_load_summary_from_texts, collect_info_token_usage_summary_from_texts,
+    format_info_pool_remaining, format_info_process_summary, format_info_quota_data_summary,
+    format_info_runway, format_info_token_usage_summary, format_runtime_tuning_budgets,
+    format_runtime_tuning_transport, format_runtime_tuning_workers, parse_ps_process_rows,
+    select_active_runtime_log_paths_with_prefix, select_recent_runtime_log_paths,
+};
 
-    if args.json {
-        let value = serde_json::json!({
-            "version": env!("CARGO_PKG_VERSION"),
-            "active_profile": state.active_profile,
-            "profile_count": state.profiles.len(),
-            "runtime_policy": runtime_policy_json_value(policy.as_ref()),
-            "runtime_logs": runtime_logs_json_value(),
-            "secret_backend": secret_backend_json_value(),
-            "process_count": process_count,
-        });
-        println!("{}", serde_json::to_string_pretty(&value)?);
-        return Ok(());
+pub(crate) fn collect_info_quota_aggregate(
+    paths: &AppPaths,
+    state: &AppState,
+    now: i64,
+) -> InfoQuotaAggregate {
+    let codex_runtime_profiles = state
+        .profiles
+        .iter()
+        .filter(|(_, profile)| profile.provider.supports_codex_runtime())
+        .map(|(name, _)| name.clone())
+        .collect::<Vec<_>>();
+
+    if codex_runtime_profiles.is_empty() {
+        return InfoQuotaAggregate {
+            quota_compatible_profiles: 0,
+            live_profiles: 0,
+            snapshot_profiles: 0,
+            unavailable_profiles: 0,
+            five_hour_profiles_with_data: 0,
+            weekly_profiles_with_data: 0,
+            five_hour_pool_remaining: 0,
+            weekly_pool_remaining: 0,
+            earliest_five_hour_reset_at: None,
+            earliest_weekly_reset_at: None,
+        };
     }
 
-    let fields = vec![
-        ("Version".to_string(), env!("CARGO_PKG_VERSION").to_string()),
-        (
-            "Active profile".to_string(),
-            state.active_profile.unwrap_or_else(|| "-".to_string()),
-        ),
-        ("Profiles".to_string(), state.profiles.len().to_string()),
-        (
-            "Runtime policy".to_string(),
-            format_runtime_policy_summary(policy.as_ref()),
-        ),
-        ("Runtime logs".to_string(), format_runtime_logs_summary()),
-        (
-            "Secret backend".to_string(),
-            format_secret_backend_summary(),
-        ),
-        ("Prodex processes".to_string(), process_count.to_string()),
-    ];
-    terminal_ui::print_panel("Info", &fields)?;
-    Ok(())
+    let persisted_usage_snapshots =
+        load_runtime_usage_snapshots(paths, &state.profiles).unwrap_or_default();
+    let reports = collect_run_profile_reports(state, codex_runtime_profiles, None, false);
+    build_info_quota_aggregate(&reports, &persisted_usage_snapshots, now)
+}
+
+pub(crate) fn format_info_provider_summary(profiles: &BTreeMap<String, ProfileEntry>) -> String {
+    if profiles.is_empty() {
+        return "none".to_string();
+    }
+
+    let mut counts = BTreeMap::<&'static str, usize>::new();
+    for profile in profiles.values() {
+        *counts.entry(profile.provider.label()).or_default() += 1;
+    }
+
+    counts
+        .into_iter()
+        .map(|(provider, count)| format!("{provider}={count}"))
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+pub(crate) fn format_info_provider_capabilities_summary(
+    profiles: &BTreeMap<String, ProfileEntry>,
+) -> String {
+    if profiles.is_empty() {
+        return "none".to_string();
+    }
+
+    let mut native = 0;
+    let mut adapter = 0;
+    let mut external_cli = 0;
+    let mut unsupported = 0;
+    let mut openai_format = 0;
+    let mut quota_shapes = BTreeMap::<&'static str, usize>::new();
+
+    for profile in profiles.values() {
+        let capabilities = profile.provider.capabilities();
+        if capabilities.uses_openai_client_format {
+            openai_format += 1;
+        }
+        match capabilities.runtime_route_policy {
+            prodex_state::RuntimeRoutePolicy::NativeCodex => native += 1,
+            prodex_state::RuntimeRoutePolicy::ResponsesAdapter => adapter += 1,
+            prodex_state::RuntimeRoutePolicy::ExternalCli => external_cli += 1,
+            prodex_state::RuntimeRoutePolicy::Unsupported => unsupported += 1,
+        }
+        *quota_shapes
+            .entry(capabilities.quota_shape.label())
+            .or_default() += 1;
+    }
+
+    let quota_shapes = quota_shapes
+        .into_iter()
+        .map(|(shape, count)| format!("{shape}={count}"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    format!(
+        "routes native={native}, adapter={adapter}, external-cli={external_cli}, unsupported={unsupported}; openai-format={openai_format}; quota {quota_shapes}"
+    )
+}
+
+pub(crate) fn build_info_quota_aggregate(
+    reports: &[RunProfileProbeReport],
+    persisted_usage_snapshots: &BTreeMap<String, RuntimeProfileUsageSnapshot>,
+    now: i64,
+) -> InfoQuotaAggregate {
+    crate::reports::build_info_quota_aggregate(
+        reports,
+        persisted_usage_snapshots,
+        now,
+        RUNTIME_PROFILE_USAGE_CACHE_STALE_GRACE_SECONDS,
+    )
+}
+
+pub(crate) fn collect_prodex_processes() -> Vec<ProdexProcessInfo> {
+    try_collect_prodex_processes().unwrap_or_default()
+}
+
+pub(crate) fn try_collect_prodex_processes() -> Result<Vec<ProdexProcessInfo>> {
+    let current_pid = std::process::id();
+    let current_basename = std::env::current_exe().ok().and_then(|path| {
+        path.file_name()
+            .and_then(|name| name.to_str())
+            .map(ToOwned::to_owned)
+    });
+
+    let mut processes = try_collect_process_rows()?
+        .into_iter()
+        .filter_map(|row| {
+            classify_prodex_process_row(row, current_pid, current_basename.as_deref())
+        })
+        .collect::<Vec<_>>();
+    processes.sort_by_key(|process| process.pid);
+    Ok(processes)
 }
 
 pub(crate) fn collect_process_rows() -> Vec<ProcessRow> {
     try_collect_process_rows().unwrap_or_default()
 }
 
-fn try_collect_process_rows() -> Result<Vec<ProcessRow>> {
+pub(crate) fn try_collect_process_rows() -> Result<Vec<ProcessRow>> {
     match collect_process_rows_from_proc() {
         Some(rows) if !rows.is_empty() => Ok(rows),
         _ => collect_process_rows_from_ps(),
     }
 }
 
-fn collect_process_rows_from_proc() -> Option<Vec<ProcessRow>> {
+pub(crate) fn collect_process_rows_from_proc() -> Option<Vec<ProcessRow>> {
     let mut rows = Vec::new();
-    for entry in fs::read_dir("/proc").ok()?.flatten() {
+    let entries = fs::read_dir("/proc").ok()?;
+    for entry in entries.flatten() {
         let Ok(pid) = entry.file_name().to_string_lossy().parse::<u32>() else {
             continue;
         };
@@ -71,15 +166,19 @@ fn collect_process_rows_from_proc() -> Option<Vec<ProcessRow>> {
         };
         let args = args_bytes
             .split(|byte| *byte == 0)
-            .filter(|chunk| !chunk.is_empty())
-            .filter_map(|chunk| String::from_utf8(chunk.to_vec()).ok())
+            .filter_map(|chunk| {
+                if chunk.is_empty() {
+                    return None;
+                }
+                String::from_utf8(chunk.to_vec()).ok()
+            })
             .collect::<Vec<_>>();
         rows.push(ProcessRow { pid, command, args });
     }
     Some(rows)
 }
 
-fn collect_process_rows_from_ps() -> Result<Vec<ProcessRow>> {
+pub(crate) fn collect_process_rows_from_ps() -> Result<Vec<ProcessRow>> {
     let mut command = Command::new("ps");
     command.args(["-Ao", "pid=,comm=,args="]);
     let output = crate::command_probe_output(&mut command, "process listing")
@@ -88,11 +187,37 @@ fn collect_process_rows_from_ps() -> Result<Vec<ProcessRow>> {
         bail!("ps returned exit status {}", output.status);
     }
     let text = String::from_utf8(output.stdout).context("ps output was not valid UTF-8")?;
-    Ok(crate::reports::parse_ps_process_rows(&text))
+    Ok(parse_ps_process_rows(&text))
+}
+
+pub(crate) fn collect_active_runtime_log_paths(processes: &[ProdexProcessInfo]) -> Vec<PathBuf> {
+    select_active_runtime_log_paths_with_prefix(
+        processes,
+        prodex_runtime_log_paths_in_dir(&runtime_proxy_log_dir()),
+        RUNTIME_PROXY_LOG_FILE_PREFIX,
+    )
+}
+
+pub(crate) fn collect_info_runtime_load_summary(
+    log_paths: &[PathBuf],
+    now: i64,
+) -> InfoRuntimeLoadSummary {
+    let tails = log_paths.iter().filter_map(|path| {
+        read_runtime_log_tail(path, INFO_RUNTIME_LOG_TAIL_BYTES)
+            .ok()
+            .map(|tail| String::from_utf8_lossy(&tail).into_owned())
+    });
+    collect_info_runtime_load_summary_from_texts(
+        log_paths.len(),
+        tails,
+        now,
+        INFO_RECENT_LOAD_WINDOW_SECONDS,
+        INFO_FORECAST_LOOKBACK_SECONDS,
+    )
 }
 
 pub(crate) fn collect_recent_runtime_log_paths(limit: usize) -> Vec<PathBuf> {
-    crate::reports::select_recent_runtime_log_paths(
+    select_recent_runtime_log_paths(
         prodex_runtime_log_paths_in_dir(&runtime_proxy_log_dir())
             .into_iter()
             .map(|path| {
@@ -102,6 +227,41 @@ pub(crate) fn collect_recent_runtime_log_paths(limit: usize) -> Vec<PathBuf> {
                 (path, modified)
             }),
         limit,
+    )
+}
+
+pub(crate) fn collect_info_token_usage_summary(log_paths: &[PathBuf]) -> InfoTokenUsageSummary {
+    let tails = log_paths.iter().filter_map(|path| {
+        read_runtime_log_tail(path, INFO_RUNTIME_LOG_TAIL_BYTES)
+            .ok()
+            .map(|tail| String::from_utf8_lossy(&tail).into_owned())
+    });
+    collect_info_token_usage_summary_from_texts(log_paths.len(), tails)
+}
+
+pub(crate) fn estimate_info_runway(
+    observations: &[InfoRuntimeQuotaObservation],
+    window: InfoQuotaWindow,
+    current_remaining: i64,
+    now: i64,
+) -> Option<InfoRunwayEstimate> {
+    crate::reports::estimate_info_runway(
+        observations,
+        window,
+        current_remaining,
+        now,
+        INFO_FORECAST_MIN_SPAN_SECONDS,
+    )
+}
+
+pub(crate) fn format_info_load_summary(
+    summary: &InfoRuntimeLoadSummary,
+    runtime_process_count: usize,
+) -> String {
+    crate::reports::format_info_load_summary(
+        summary,
+        runtime_process_count,
+        INFO_RECENT_LOAD_WINDOW_SECONDS,
     )
 }
 
@@ -115,6 +275,31 @@ pub(crate) fn format_runtime_policy_summary(summary: Option<&RuntimePolicySummar
 
 pub(crate) fn format_runtime_proxy_contract_summary() -> String {
     crate::reports::format_runtime_proxy_contract_summary()
+}
+
+pub(crate) fn format_audit_logs_summary() -> String {
+    "not configured (audit persistence unavailable in this build)".to_string()
+}
+
+pub(crate) fn format_info_prodex_version(paths: &AppPaths) -> Result<String> {
+    let current = prodex_update_notice::current_prodex_version();
+    Ok(match prodex_update_notice::prodex_version_status(paths)? {
+        prodex_update_notice::ProdexVersionStatus::UpToDate => {
+            format!("{current} (up to date)")
+        }
+        prodex_update_notice::ProdexVersionStatus::UpdateAvailable(latest) => {
+            format!("{current} (update available: {latest})")
+        }
+        prodex_update_notice::ProdexVersionStatus::Unknown => {
+            format!("{current} (update check unavailable)")
+        }
+    })
+}
+
+pub(crate) fn format_runtime_proxy_preset() -> String {
+    runtime_policy_proxy()
+        .and_then(|policy| policy.preset().map(|preset| preset.as_str().to_string()))
+        .unwrap_or_else(|| "default".to_string())
 }
 
 pub(crate) fn format_runtime_logs_summary() -> String {
