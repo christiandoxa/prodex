@@ -76,24 +76,23 @@ test("release manifest, checksums, and SBOM accept Prodex assets only", () => {
   assert.match(release, /codex-purity-guard\.mjs release-assets/u);
 });
 
-test("release stages immutable artifacts and waits before public version mutations", () => {
+test("release stages immutable binary artifacts and waits before public version mutations", () => {
   const workflow = readFileSync(".github/workflows/standalone-release.yml", "utf8");
-  const container = workflow.match(/\n  publish-container:\n([\s\S]*?)\n  prepare-release:/u)?.[1];
   const publish = workflow.match(/\n  publish-github-release:\n([\s\S]*?)\n  publish-duration-telemetry:/u)?.[1];
 
-  assert.ok(container, "container staging job missing");
   assert.ok(publish, "release publication job missing");
   assert.match(workflow, /publish_at:/u);
-  assert.match(container, /candidate_tag="sha-\$\{TARGET_SHA\}"/u);
-  assert.match(container, /existing SHA-tagged candidate does not match/u);
-  assert.match(container, /org\.opencontainers\.image\.revision/u);
-  assert.match(container, /docker export/u);
-  assert.match(container, /codex-purity-guard\.mjs "\$\{container_rootfs\}"/u);
-  assert.doesNotMatch(container, /docker push "\$\{image\}:\$\{VERSION\}"/u);
+  assert.doesNotMatch(workflow, /\n  publish-container:/u);
+  assert.doesNotMatch(
+    publish,
+    /needs\.publish-container|kubernetes-manifest|Publish the verified container version tag/u,
+  );
+  assert.doesNotMatch(
+    publish,
+    /docker buildx imagetools create|ghcr\.io\/christiandoxa\/prodex/u,
+  );
   assert.match(publish, /--checkpoint P --release-sha/u);
-  assert.match(publish, /docker buildx imagetools create/u);
-  assert.match(publish, /--prefer-index=false/u);
-  assert.match(publish, /refusing to move it/u);
+  assert.match(publish, /refusing to overwrite it/u);
   assert.doesNotMatch(publish, /--clobber|gh release edit/u);
   assert.ok(
     publish.indexOf("Wait for the absolute publication target") <
