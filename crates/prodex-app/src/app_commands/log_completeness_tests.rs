@@ -3,6 +3,7 @@ use super::{
     FollowedLog, LogStreamItem, TranscriptEvent, collect_new_transcript_events,
     local_log_timestamp, transcript_events_from_session_line,
 };
+use crate::reports::InfoTokenUsageEvent;
 use std::time::{SystemTime, UNIX_EPOCH};
 use std::{env, fs};
 
@@ -83,6 +84,22 @@ fn structured_runtime_fields_decode_scalar_values_once() {
     assert!(json.contains("r0007"));
     assert!(json.contains("profile=main"));
     assert!(json.contains("status=200"));
+}
+
+#[test]
+fn token_usage_json_preserves_runtime_event_envelope() {
+    let item = LogStreamItem::TokenUsage(InfoTokenUsageEvent {
+        profile: "main".to_string(),
+        source: "responses_sse".to_string(),
+        output_tokens: 20,
+        ..InfoTokenUsageEvent::default()
+    });
+    let value: serde_json::Value =
+        serde_json::from_str(&super::log_stream::log_stream_item_json(&item).unwrap())
+            .expect("token usage JSON should parse");
+    assert_eq!(value["event"], "token_usage");
+    assert_eq!(value["fields"]["output_tokens"], 20);
+    assert_eq!(value["fields"]["profile"], "main");
 }
 
 #[test]
