@@ -217,15 +217,14 @@ pub(super) fn openai_tunnel_client_command() -> Result<Command> {
     Ok(Command::new(binary))
 }
 
-pub(super) fn start_openai_tunnel(
+pub(super) fn spawn_openai_tunnel(
     client_mcp_url: &str,
     credentials: OpenAiTunnelCredentials,
     client_version: String,
-    cancelled: &dyn Fn() -> bool,
 ) -> Result<OpenAiTunnel> {
     let tunnel_id = credentials.tunnel_id().to_owned();
     validate_openai_tunnel_id(&tunnel_id)?;
-    let mut files = OpenAiTunnelFiles::create(client_mcp_url, &tunnel_id)?;
+    let files = OpenAiTunnelFiles::create(client_mcp_url, &tunnel_id)?;
     let config_path = files
         .config
         .to_str()
@@ -252,31 +251,7 @@ pub(super) fn start_openai_tunnel(
         .stderr(Stdio::null());
     crate::configure_child_process_group(&mut command, true);
     crate::configure_child_parent_death(&mut command);
-    let mut child = command.spawn().context("failed to spawn tunnel-client")?;
-    match wait_for_openai_tunnel_ready(&mut child, &files.health_url, cancelled) {
-        Ok(_) => {}
-        Err(error) => {
-            stop_child(&mut child);
-            files.cleanup();
-            return Err(error);
-        }
-    };
-    let status = match child.try_wait() {
-        Ok(status) => status,
-        Err(error) => {
-            stop_child(&mut child);
-            files.cleanup();
-            return Err(error).context("failed to inspect tunnel-client after readiness");
-        }
-    };
-    if let Some(status) = status {
-        stop_child(&mut child);
-        files.cleanup();
-        bail!(
-            "tunnel-client exited before local readiness completed (status {})",
-            exit_status_label(status)
-        )
-    }
+    let child = command.spawn().context("failed to spawn tunnel-client")?;
     Ok(OpenAiTunnel {
         child,
         status: OpenAiTunnelStatus {
@@ -286,6 +261,25 @@ pub(super) fn start_openai_tunnel(
         files,
         shut_down: false,
     })
+}
+
+pub(super) fn wait_openai_tunnel_ready(
+    mut tunnel: OpenAiTunnel,
+    cancelled: &dyn Fn() -> bool,
+) -> Result<OpenAiTunnel> {
+    let health_url_path = tunnel.files.health_url.clone();
+    wait_for_openai_tunnel_ready(&mut tunnel.child, &health_url_path, cancelled)?;
+    let status = tunnel
+        .child
+        .try_wait()
+        .context("failed to inspect tunnel-client after readiness")?;
+    if let Some(status) = status {
+        bail!(
+            "tunnel-client exited before local readiness completed (status {})",
+            exit_status_label(status)
+        )
+    }
+    Ok(tunnel)
 }
 
 impl OpenAiTunnel {
