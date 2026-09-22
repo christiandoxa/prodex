@@ -37,6 +37,7 @@ mojo-core = [
     "prodex_mojo_core/mojo-core",
     "prodex_runtime_quota/mojo",
     "prodex_runtime_doctor/mojo",
+    "prodex_runtime_launch/mojo",
 ]
 
 [dependencies]

@@ -59,3 +59,30 @@ Mojo while Rust retains `OsString`, socket formatting and external process calls
 Preserve non-UTF-8 arguments byte-for-byte, separator behavior, option-value
 pairing, session retargeting, configuration precedence and existing full-access
 semantics. Expand only after parity is demonstrated at the public launch API.
+
+## Launch argument wave
+
+`mojo/prodex_core/launch_args.mojo` and `launch_args_common.mojo` now own
+command/model discovery, resume retargeting, profile normalization, dry-run
+extraction, launch preparation and configuration scope ordering. The active
+consumer is `crates/prodex-runtime-launch/src/args_mojo.rs`, enabled through
+`prodex-app/mojo-core -> prodex-runtime-launch/mojo`. The original Rust source
+was first moved byte-for-byte and then restricted to feature-off/test builds.
+
+Validation before activation: 64 strict Mojo launch unit tests, including 5,000
+seeded differential argument vectors; 60 feature-off tests; four raw ABI,
+Unicode-whitespace and reentrancy tests; focused Clippy with warnings denied;
+crate-boundary, size, authority and no-fallback guards. Non-UTF-8 OS arguments
+are passed as opaque records and preserved by original index. Unicode whitespace
+matches Rust `str::trim`, including the distinction from Python U+001C..U+001F.
+
+The new kernel compiled to objects for all six release target triples using the
+pinned 1.0.0 compiler. Linux x86_64 tests execute the compiled kernel; object
+creation is not native macOS/Windows runtime proof. Its object also compiles with
+the locally installed 1.1.0 compiler, but a whole-tree 1.1.0 build exposed an
+existing `InlineArray` import incompatibility outside this migration. The pinned
+compiler is isolated for validation; the global installation and release pin
+are unchanged. Real-Mojo CI now explicitly runs the launch package parity suite.
+
+These are development checkpoints, not completion of the 75% objective. Run the
+canonical report for the current measured share.

@@ -10,7 +10,12 @@ repository.workspace = true
 name = "prodex_runtime_launch"
 path = "src/lib.rs"
 
+[features]
+default = []
+mojo = ["dep:prodex_mojo_core", "prodex_mojo_core/mojo-runtime"]
+
 [dependencies]
+prodex_mojo_core = { workspace = true, optional = true }
 anyhow = { workspace = true }
 codex_config = { workspace = true }
 prodex_quota = { workspace = true }
