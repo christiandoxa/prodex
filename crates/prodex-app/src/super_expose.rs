@@ -219,20 +219,19 @@ fn start_openai_tunnel_async(
     );
     let client_version = openai_tunnel::ensure_openai_tunnel_available(tunnel_id)?;
     let credentials = openai_tunnel::openai_tunnel_credentials_from_env(tunnel_id)?;
-    let local_endpoint = endpoint.to_string();
+    // Spawn the child on the long-lived expose thread. On Linux, PR_SET_PDEATHSIG
+    // is associated with the thread that creates the child; spawning from the
+    // short-lived readiness worker would SIGTERM tunnel-client as soon as that
+    // worker returned after reporting ready.
+    let starting = openai_tunnel::spawn_openai_tunnel(endpoint, credentials, client_version)?;
     let (sender, receiver) = mpsc::sync_channel(1);
     thread::Builder::new()
         .name("prodex-openai-tunnel-start".to_string())
         .spawn(move || {
-            let result = openai_tunnel::start_openai_tunnel(
-                &local_endpoint,
-                credentials,
-                client_version,
-                &|| false,
-            );
+            let result = openai_tunnel::wait_openai_tunnel_ready(starting, &|| false);
             let _ = sender.send(result);
         })
-        .context("failed to start OpenAI tunnel supervisor")?;
+        .context("failed to start OpenAI tunnel readiness worker")?;
     eprintln!("OpenAI Secure MCP Tunnel starting for {tunnel_id}.");
     Ok(Some(receiver))
 }
