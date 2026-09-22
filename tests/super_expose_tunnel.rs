@@ -1,20 +1,22 @@
 #[cfg(unix)]
 use std::fs;
-#[cfg(unix)]
+#[cfg(target_os = "linux")]
 use std::fs::File;
-#[cfg(unix)]
+#[cfg(target_os = "linux")]
 use std::io::{Read, Write};
-#[cfg(unix)]
+#[cfg(target_os = "linux")]
 use std::net::TcpListener;
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
 #[cfg(unix)]
-use std::process::{Command, Stdio};
-#[cfg(unix)]
+use std::process::Command;
+#[cfg(target_os = "linux")]
+use std::process::Stdio;
+#[cfg(target_os = "linux")]
 use std::sync::mpsc;
-#[cfg(unix)]
+#[cfg(target_os = "linux")]
 use std::thread;
-#[cfg(unix)]
+#[cfg(target_os = "linux")]
 use std::time::{Duration, Instant};
 
 #[cfg(unix)]
@@ -49,7 +51,7 @@ exit 97
     path
 }
 
-#[cfg(unix)]
+#[cfg(target_os = "linux")]
 fn long_lived_fake_tunnel_client(
     root: &TestDir,
     version_line: &str,
@@ -110,7 +112,7 @@ fn probe_expose(version_line: &str) -> std::process::Output {
         .expect("prodex expose exec should run")
 }
 
-#[cfg(unix)]
+#[cfg(target_os = "linux")]
 fn start_health_server() -> (String, mpsc::Sender<()>, thread::JoinHandle<()>) {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     listener.set_nonblocking(true).unwrap();
@@ -179,7 +181,7 @@ fn expose_exec_rejects_unvetted_tunnel_client_metadata() {
     );
 }
 
-#[cfg(unix)]
+#[cfg(target_os = "linux")]
 #[test]
 fn expose_exec_keeps_ready_tunnel_client_alive_after_startup_handoff() {
     let root = TestDir::new();
