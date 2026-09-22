@@ -1,4 +1,5 @@
-mod args;
+mod args_oracle;
+use args_oracle as args;
 mod args_resume;
 mod child;
 mod dry_run;
