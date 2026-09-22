@@ -41,3 +41,33 @@ pub(super) fn plan(
         .collect();
     (output, plan.flag)
 }
+
+pub(super) fn rewrite_config(
+    args: &[OsString],
+    overrides: &[(String, String)],
+) -> (Vec<OsString>, Vec<bool>) {
+    use prodex_mojo_core::launch_config::{LaunchConfigArgument, plan_launch_config};
+    let views = args.iter().map(|arg| arg.to_str()).collect::<Vec<_>>();
+    let keys = overrides
+        .iter()
+        .map(|(key, _)| key.as_str())
+        .collect::<Vec<_>>();
+    let plan = plan_launch_config(&views, &keys)
+        .expect("Mojo Codex config planning returned invalid output");
+    let output = plan
+        .arguments
+        .into_iter()
+        .zip(args)
+        .map(|(item, original)| {
+            let (prefix, index) = match item {
+                LaunchConfigArgument::Original => return original.clone(),
+                LaunchConfigArgument::Separate(index) => ("", index),
+                LaunchConfigArgument::LongInline(index) => ("--config=", index),
+                LaunchConfigArgument::ShortInline(index) => ("-c", index),
+            };
+            let (key, value) = &overrides[index];
+            OsString::from(format!("{prefix}{key}={value}"))
+        })
+        .collect();
+    (output, plan.replaced)
+}

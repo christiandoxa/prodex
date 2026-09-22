@@ -215,3 +215,48 @@ fn launch_plans_preserve_unpaired_utf16_os_arguments() {
         "resume".into(),
     ]);
 }
+
+#[test]
+fn config_overrides_preserve_native_values_and_provider_precedence() {
+    let cases = [
+        vec![
+            "exec",
+            "--config",
+            " model_providers.test.base_url =\"https://example.com\"",
+            "resume",
+            "--last",
+        ],
+        vec![
+            "-cmodel_providers.test.base_url=old",
+            "--config=model_providers.test.base_url=second",
+            "hello",
+        ],
+        vec![
+            "--config=\u{2003}experimental_realtime_ws_model\u{00a0}=old",
+            "exec",
+            "--",
+            "--config=experimental_realtime_ws_model=literal",
+        ],
+        vec![
+            "--config=\u{001c}experimental_realtime_ws_model=keep",
+            "exec",
+        ],
+        vec!["-c", "--", "--config=experimental_realtime_ws_base_url=old"],
+        vec![
+            "--config",
+            "--config=experimental_realtime_ws_model=not-an-assignment",
+        ],
+    ];
+    for case in cases {
+        compare(&case.into_iter().map(OsString::from).collect::<Vec<_>>());
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::ffi::OsStringExt;
+        compare(&[
+            "-c".into(),
+            OsString::from_vec(vec![0xff, b'=']),
+            "--config=experimental_realtime_ws_model=old".into(),
+        ]);
+    }
+}

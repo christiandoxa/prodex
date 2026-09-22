@@ -115,3 +115,6 @@ pub mod runtime_decisions;
 
 #[cfg(feature = "mojo-runtime")]
 pub mod launch;
+
+#[cfg(feature = "mojo-runtime")]
+pub mod launch_config;
