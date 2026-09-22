@@ -16,8 +16,8 @@ use std::{
 };
 
 #[cfg(feature = "mojo")]
-#[path = "messages/request_builder.rs"]
-mod request_builder;
+#[path = "messages/mojo_request.rs"]
+mod mojo_request;
 #[cfg(any(not(feature = "mojo"), test))]
 #[path = "messages/request_fallback.rs"]
 mod request_fallback;
@@ -25,22 +25,20 @@ mod request_fallback;
 mod response;
 #[path = "messages/stream.rs"]
 mod stream;
-#[cfg(feature = "mojo")]
-#[path = "messages/tool_shapes.rs"]
-mod tool_shapes;
 #[path = "messages/web_search.rs"]
 mod web_search;
 
 pub(super) use stream::translate_anthropic_stream_event_to_responses;
 #[cfg(any(not(feature = "mojo"), test))]
 use web_search::anthropic_tool_usage;
-use web_search::{
-    anthropic_web_search_call, anthropic_web_search_tool, merge_anthropic_web_search_result,
-};
+#[cfg(any(not(feature = "mojo"), test))]
+use web_search::anthropic_web_search_tool;
+use web_search::{anthropic_web_search_call, merge_anthropic_web_search_result};
 
 #[cfg(any(not(feature = "mojo"), test))]
 use request_fallback::{build_anthropic_chat_request_rust, validate_anthropic_chat_fields};
 
+#[cfg(any(not(feature = "mojo"), test))]
 type AnthropicChatRequest = (Map<String, Value>, BTreeMap<String, Value>);
 
 pub(super) fn translate_responses_request_to_anthropic(
@@ -84,7 +82,8 @@ pub(super) fn translate_responses_request_to_anthropic(
     result
 }
 
-pub(super) fn translate_chat_request_to_anthropic(
+#[cfg(any(not(feature = "mojo"), test))]
+fn translate_chat_request_to_anthropic_rust(
     input: ProviderTransformInput,
 ) -> ProviderTransformResult {
     if input.endpoint != ProviderEndpoint::Responses {
@@ -105,21 +104,18 @@ pub(super) fn translate_chat_request_to_anthropic(
     let Some(chat) = chat.as_object() else {
         return rejected_chat("translated request body must be a JSON object");
     };
-    #[cfg(not(feature = "mojo"))]
     if let Err(reason) = validate_anthropic_chat_fields(chat) {
         return rejected_chat(reason);
     }
-
     let (system, messages) = match anthropic_messages(chat.get("messages")) {
         Ok(messages) => messages,
         Err(reason) => return rejected_chat(reason),
     };
-    let (request, degradation_details) = match build_anthropic_chat_request(&system, messages, chat)
-    {
-        Ok(request) => request,
-        Err(reason) => return rejected_chat(reason),
-    };
-
+    let (request, degradation_details) =
+        match build_anthropic_chat_request_rust(&system, messages, chat) {
+            Ok(request) => request,
+            Err(reason) => return rejected_chat(reason),
+        };
     let body = serde_json::to_vec(&Value::Object(request)).expect("Anthropic request serializes");
     if degradation_details.is_empty() {
         ProviderTransformResult::lossless(
@@ -143,21 +139,67 @@ pub(super) fn translate_chat_request_to_anthropic(
 }
 
 #[cfg(not(feature = "mojo"))]
-fn build_anthropic_chat_request(
-    system: &[String],
-    messages: Vec<Value>,
-    chat: &Map<String, Value>,
-) -> Result<AnthropicChatRequest, String> {
-    build_anthropic_chat_request_rust(system, messages, chat)
+pub(super) fn translate_chat_request_to_anthropic(
+    input: ProviderTransformInput,
+) -> ProviderTransformResult {
+    translate_chat_request_to_anthropic_rust(input)
+}
+
+#[cfg(feature = "mojo")]
+pub(super) fn translate_chat_request_to_anthropic(
+    input: ProviderTransformInput,
+) -> ProviderTransformResult {
+    if input.endpoint != ProviderEndpoint::Responses {
+        return ProviderTransformResult::unsupported(
+            ProviderId::Anthropic,
+            input.endpoint,
+            ProviderWireFormat::OpenAiChatCompletions,
+            ProviderWireFormat::AnthropicMessages,
+            "native Messages translation only supports responses",
+        );
+    }
+    let chat: Value = match serde_json::from_slice(&input.body) {
+        Ok(value) => value,
+        Err(error) => {
+            return rejected_chat(format!("failed to parse translated request JSON: {error}"));
+        }
+    };
+    match mojo_request::transform(&chat) {
+        prodex_mojo_core::json::AnthropicChatRequestTransform::Body(body) => {
+            ProviderTransformResult::lossless(
+                ProviderId::Anthropic,
+                ProviderEndpoint::Responses,
+                ProviderWireFormat::OpenAiChatCompletions,
+                ProviderWireFormat::AnthropicMessages,
+                body,
+            )
+        }
+        prodex_mojo_core::json::AnthropicChatRequestTransform::Degraded { body, context_size } => {
+            let mut details = BTreeMap::new();
+            details.insert(
+                "web_search_options.search_context_size".to_string(),
+                serde_json::json!({"from": context_size, "to": "provider_default"}),
+            );
+            ProviderTransformResult::degraded(
+                ProviderId::Anthropic,
+                ProviderEndpoint::Responses,
+                ProviderWireFormat::OpenAiChatCompletions,
+                ProviderWireFormat::AnthropicMessages,
+                body,
+                "Anthropic Messages uses the provider default web-search context size",
+                details,
+            )
+        }
+        prodex_mojo_core::json::AnthropicChatRequestTransform::Rejected(reason) => {
+            rejected_chat(reason)
+        }
+    }
 }
 
 #[cfg(feature = "mojo")]
 fn json_fragment(value: &Value) -> Result<String, String> {
     serde_json::to_string(value).map_err(|error| format!("Anthropic JSON fragment failed: {error}"))
 }
-
-#[cfg(feature = "mojo")]
-use request_builder::build_anthropic_chat_request;
 
 pub(super) fn translate_anthropic_response_to_responses(
     input: ProviderTransformInput,
@@ -336,6 +378,7 @@ fn anthropic_tool_use_item(block: &Value) -> Result<Value, String> {
     anthropic_mojo_value(input)
 }
 
+#[cfg(any(not(feature = "mojo"), test))]
 fn anthropic_messages(value: Option<&Value>) -> Result<(Vec<String>, Vec<Value>), String> {
     let Some(messages) = value.and_then(Value::as_array) else {
         return Err("translated Responses request must contain messages".to_string());
@@ -351,6 +394,7 @@ fn anthropic_messages(value: Option<&Value>) -> Result<(Vec<String>, Vec<Value>)
     Ok((system, translated))
 }
 
+#[cfg(any(not(feature = "mojo"), test))]
 fn append_anthropic_message(
     message: &Value,
     system: &mut Vec<String>,
@@ -373,15 +417,12 @@ fn append_anthropic_message(
     };
     let blocks = anthropic_message_blocks(object)?;
     if !blocks.is_empty() {
-        #[cfg(feature = "mojo")]
-        append_message(translated, role, blocks)?;
-        #[cfg(not(feature = "mojo"))]
         append_message(translated, role, blocks);
     }
     Ok(())
 }
 
-#[cfg(not(feature = "mojo"))]
+#[cfg(any(not(feature = "mojo"), test))]
 fn anthropic_message_blocks(object: &Map<String, Value>) -> Result<Vec<Value>, String> {
     let mut blocks = Vec::new();
     if object.get("role").and_then(Value::as_str) != Some("tool")
@@ -403,45 +444,7 @@ fn anthropic_message_blocks(object: &Map<String, Value>) -> Result<Vec<Value>, S
     Ok(blocks)
 }
 
-#[cfg(feature = "mojo")]
-fn anthropic_message_blocks(object: &Map<String, Value>) -> Result<Vec<Value>, String> {
-    let mut blocks = Vec::new();
-    if object.get("role").and_then(Value::as_str) != Some("tool")
-        && let Some(text) = object.get("content").and_then(Value::as_str)
-        && !text.is_empty()
-    {
-        let content = json_fragment(&Value::String(text.to_string()))?;
-        let mut input =
-            AnthropicRequestKernelInput::new(AnthropicRequestKernelOperation::TextBlock);
-        input.content = Some(&content);
-        blocks.push(anthropic_mojo_value(input)?);
-    }
-    if let Some(tool_calls) = object.get("tool_calls").and_then(Value::as_array) {
-        blocks.extend(anthropic_tool_call_blocks(object, tool_calls)?);
-    }
-    if object.get("role").and_then(Value::as_str) == Some("tool") {
-        let tool_use_id = object
-            .get("tool_call_id")
-            .and_then(Value::as_str)
-            .unwrap_or("call_prodex");
-        let tool_use_id = json_fragment(&Value::String(tool_use_id.to_string()))?;
-        let content = json_fragment(&Value::String(
-            object
-                .get("content")
-                .and_then(Value::as_str)
-                .unwrap_or("")
-                .to_string(),
-        ))?;
-        let mut input =
-            AnthropicRequestKernelInput::new(AnthropicRequestKernelOperation::ToolResultBlock);
-        input.tool_use_id = Some(&tool_use_id);
-        input.content = Some(&content);
-        blocks.push(anthropic_mojo_value(input)?);
-    }
-    Ok(blocks)
-}
-
-#[cfg(not(feature = "mojo"))]
+#[cfg(any(not(feature = "mojo"), test))]
 fn anthropic_tool_call_blocks(
     object: &Map<String, Value>,
     tool_calls: &[Value],
@@ -452,18 +455,7 @@ fn anthropic_tool_call_blocks(
         .collect()
 }
 
-#[cfg(feature = "mojo")]
-fn anthropic_tool_call_blocks(
-    object: &Map<String, Value>,
-    tool_calls: &[Value],
-) -> Result<Vec<Value>, String> {
-    tool_calls
-        .iter()
-        .map(|tool_call| anthropic_tool_call_block(object, tool_call))
-        .collect()
-}
-
-#[cfg(not(feature = "mojo"))]
+#[cfg(any(not(feature = "mojo"), test))]
 fn anthropic_tool_call_block(
     object: &Map<String, Value>,
     tool_call: &Value,
@@ -494,54 +486,7 @@ fn anthropic_tool_call_block(
     }))
 }
 
-#[cfg(feature = "mojo")]
-fn anthropic_tool_call_block(
-    object: &Map<String, Value>,
-    tool_call: &Value,
-) -> Result<Value, String> {
-    let function = tool_call
-        .get("function")
-        .and_then(Value::as_object)
-        .ok_or_else(|| "function call must contain function".to_string())?;
-    let name = function
-        .get("name")
-        .and_then(Value::as_str)
-        .ok_or_else(|| "function call must contain name".to_string())?;
-    let namespace = object
-        .get("namespace")
-        .and_then(Value::as_str)
-        .filter(|namespace| !namespace.is_empty());
-    let arguments = function
-        .get("arguments")
-        .and_then(Value::as_str)
-        .unwrap_or("{}");
-    let input: Value = serde_json::from_str(arguments)
-        .map_err(|_| "function call arguments must be valid JSON".to_string())?;
-    if !input.is_object() {
-        return Err("function call arguments must be a JSON object".to_string());
-    }
-    let id = json_fragment(&Value::String(
-        tool_call
-            .get("id")
-            .and_then(Value::as_str)
-            .unwrap_or("call_prodex")
-            .to_string(),
-    ))?;
-    let name = json_fragment(&Value::String(name.to_string()))?;
-    let namespace = namespace
-        .map(|namespace| json_fragment(&Value::String(namespace.to_string())))
-        .transpose()?;
-    let input_value = json_fragment(&input)?;
-    let mut kernel =
-        AnthropicRequestKernelInput::new(AnthropicRequestKernelOperation::ToolUseBlock);
-    kernel.id = Some(&id);
-    kernel.name = Some(&name);
-    kernel.namespace = namespace.as_deref();
-    kernel.input = Some(&input_value);
-    anthropic_mojo_value(kernel)
-}
-
-#[cfg(not(feature = "mojo"))]
+#[cfg(any(not(feature = "mojo"), test))]
 fn append_message(messages: &mut Vec<Value>, role: &str, blocks: Vec<Value>) {
     if let Some(previous) = messages.last_mut()
         && previous.get("role").and_then(Value::as_str) == Some(role)
@@ -566,24 +511,6 @@ fn append_message(messages: &mut Vec<Value>, role: &str, blocks: Vec<Value>) {
         return;
     }
     messages.push(json!({"role": role, "content": blocks}));
-}
-
-#[cfg(feature = "mojo")]
-fn append_message(messages: &mut Vec<Value>, role: &str, blocks: Vec<Value>) -> Result<(), String> {
-    let existing = json_fragment(&Value::Array(std::mem::take(messages)))?;
-    let role = json_fragment(&Value::String(role.to_string()))?;
-    let blocks = json_fragment(&Value::Array(blocks))?;
-    let mut input =
-        AnthropicRequestKernelInput::new(AnthropicRequestKernelOperation::AppendMessage);
-    input.messages = Some(&existing);
-    input.role = Some(&role);
-    input.blocks = Some(&blocks);
-    let output = anthropic_mojo_value(input)?;
-    *messages = output
-        .as_array()
-        .cloned()
-        .ok_or_else(|| "Anthropic append-message kernel returned a non-array".to_string())?;
-    Ok(())
 }
 
 #[cfg(any(not(feature = "mojo"), test))]
@@ -748,6 +675,10 @@ fn unix_now_secs() -> u64 {
         .map(|duration| duration.as_secs())
         .unwrap_or(0)
 }
+
+#[cfg(all(test, feature = "mojo"))]
+#[path = "messages/mojo_request_tests.rs"]
+mod mojo_request_tests;
 
 #[cfg(test)]
 #[path = "messages_tests.rs"]
