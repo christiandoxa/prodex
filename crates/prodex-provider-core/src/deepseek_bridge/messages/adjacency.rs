@@ -2,7 +2,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use super::deepseek_provider_core_normalize_assistant_tool_call_content;
+use super::deepseek_provider_core_normalize_assistant_tool_call_content_rust as deepseek_provider_core_normalize_assistant_tool_call_content;
 
 pub fn deepseek_provider_core_repair_tool_call_adjacency(messages: &mut Vec<serde_json::Value>) {
     let tool_outputs = deepseek_provider_core_tool_output_messages(messages);

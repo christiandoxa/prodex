@@ -2,13 +2,23 @@
 //!
 //! Pure message shaping only; transport, retry, and runtime state stay outside provider-core.
 
+#[cfg(any(not(feature = "mojo"), test))]
 mod adjacency;
+#[cfg(feature = "mojo")]
+mod mojo;
 
+#[cfg(not(feature = "mojo"))]
 pub use self::adjacency::deepseek_provider_core_repair_tool_call_adjacency;
+
+#[cfg(feature = "mojo")]
+pub fn deepseek_provider_core_repair_tool_call_adjacency(messages: &mut Vec<serde_json::Value>) {
+    mojo::repair_adjacency(messages)
+}
 
 use super::deepseek_provider_core_rtk_wrapped_tool_arguments;
 
-pub fn deepseek_provider_core_normalize_thinking_tool_call_messages(
+#[cfg(any(not(feature = "mojo"), test))]
+fn deepseek_provider_core_normalize_thinking_tool_call_messages_rust(
     messages: &mut [serde_json::Value],
 ) {
     for message in messages {
@@ -37,7 +47,8 @@ pub fn deepseek_provider_core_normalize_thinking_tool_call_messages(
     }
 }
 
-pub fn deepseek_provider_core_normalize_assistant_tool_call_content(
+#[cfg(any(not(feature = "mojo"), test))]
+fn deepseek_provider_core_normalize_assistant_tool_call_content_rust(
     mut message: serde_json::Value,
 ) -> serde_json::Value {
     let is_assistant = message.get("role").and_then(serde_json::Value::as_str) == Some("assistant");
@@ -101,7 +112,8 @@ pub fn deepseek_provider_core_chat_assistant_messages_from_response_value(
     vec![assistant]
 }
 
-pub fn deepseek_provider_core_merge_response_metadata(
+#[cfg(any(not(feature = "mojo"), test))]
+fn deepseek_provider_core_merge_response_metadata_rust(
     response: &mut serde_json::Value,
     metadata: Option<serde_json::Value>,
 ) {
@@ -172,3 +184,45 @@ fn deepseek_provider_core_rtk_wrapped_chat_tool_calls(
     }
     tool_calls
 }
+
+#[cfg(feature = "mojo")]
+pub fn deepseek_provider_core_normalize_thinking_tool_call_messages(
+    messages: &mut [serde_json::Value],
+) {
+    mojo::normalize_thinking(messages)
+}
+#[cfg(not(feature = "mojo"))]
+pub fn deepseek_provider_core_normalize_thinking_tool_call_messages(
+    messages: &mut [serde_json::Value],
+) {
+    deepseek_provider_core_normalize_thinking_tool_call_messages_rust(messages)
+}
+#[cfg(feature = "mojo")]
+pub fn deepseek_provider_core_normalize_assistant_tool_call_content(
+    message: serde_json::Value,
+) -> serde_json::Value {
+    mojo::normalize_content(message)
+}
+#[cfg(not(feature = "mojo"))]
+pub fn deepseek_provider_core_normalize_assistant_tool_call_content(
+    message: serde_json::Value,
+) -> serde_json::Value {
+    deepseek_provider_core_normalize_assistant_tool_call_content_rust(message)
+}
+#[cfg(feature = "mojo")]
+pub fn deepseek_provider_core_merge_response_metadata(
+    response: &mut serde_json::Value,
+    metadata: Option<serde_json::Value>,
+) {
+    mojo::merge_metadata(response, metadata)
+}
+#[cfg(not(feature = "mojo"))]
+pub fn deepseek_provider_core_merge_response_metadata(
+    response: &mut serde_json::Value,
+    metadata: Option<serde_json::Value>,
+) {
+    deepseek_provider_core_merge_response_metadata_rust(response, metadata)
+}
+
+#[cfg(all(test, feature = "mojo"))]
+mod mojo_tests;
