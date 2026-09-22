@@ -2,6 +2,7 @@
 
 use super::super::super::Value;
 
+#[cfg(any(not(feature = "mojo"), test))]
 pub(super) fn responses_input_has_custom_tool_or_tool_search(value: &Value) -> bool {
     match value {
         Value::Array(items) => items
@@ -19,6 +20,7 @@ pub(super) fn responses_input_has_custom_tool_or_tool_search(value: &Value) -> b
     }
 }
 
+#[cfg(any(not(feature = "mojo"), test))]
 pub(super) fn responses_input_has_non_text_content(value: &Value) -> bool {
     match value {
         Value::Array(items) => items.iter().any(responses_input_has_non_text_content),
@@ -44,6 +46,7 @@ pub(super) fn responses_input_has_non_text_content(value: &Value) -> bool {
     }
 }
 
+#[cfg(any(not(feature = "mojo"), test))]
 fn responses_content_has_non_text_parts(value: &Value) -> bool {
     match value {
         Value::String(_) => false,

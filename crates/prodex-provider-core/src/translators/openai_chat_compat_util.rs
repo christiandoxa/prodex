@@ -83,6 +83,7 @@ pub(super) fn value_to_text(value: &Value) -> Option<String> {
     }
 }
 
+#[cfg(any(not(feature = "mojo"), test))]
 pub(super) fn copy_if_present(
     source: &serde_json::Map<String, Value>,
     target: &mut serde_json::Map<String, Value>,
@@ -95,6 +96,7 @@ pub(super) fn copy_if_present(
     }
 }
 
+#[cfg(any(not(feature = "mojo"), test))]
 pub(super) fn copy_first_if_present(
     source: &serde_json::Map<String, Value>,
     target: &mut serde_json::Map<String, Value>,
