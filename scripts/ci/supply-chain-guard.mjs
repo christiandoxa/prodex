@@ -421,7 +421,7 @@ export function validateReleaseContainerPublication(contents) {
     "RUSTC_WRAPPER=sccache cargo build --locked",
     "unset GITHUB_TOKEN GH_TOKEN ACTIONS_ID_TOKEN_REQUEST_TOKEN ACTIONS_ID_TOKEN_REQUEST_URL",
     "npm install --global --ignore-scripts @google/gemini-cli@0.53.0",
-    "91a21bfa05cd7b58601cb83e0f1f187a9d0084726e5b824d4a4cf60306250908",
+    "d8dd659c11c156002942f09443b6cb7904959004d4e7f1f73777fdbb2d909b54",
     "00efcc2e196f0793d097935d6230062fc66e8247dc01334d2ac3eae4e26a1c7f",
     "3a68d3406cf674e17bed1733a4dcf37805e2e47d87417700007d7e1aa766a944",
     "VERSION=v1.0.77",
