@@ -86,3 +86,18 @@ are unchanged. Real-Mojo CI now explicitly runs the launch package parity suite.
 
 These are development checkpoints, not completion of the 75% objective. Run the
 canonical report for the current measured share.
+
+## Configuration override wave
+
+The live launch adapters now delegate option-form classification, Unicode key
+trimming, exact first-key matching, duplicate override precedence, separator
+handling and replacement selection to `launch_config.mojo`. Only override keys
+cross this decision boundary; replacement values stay with the Rust owner.
+The returned plan is checked against argument/key counts, valid tags and the
+observed replacement bitmap before reconstruction.
+
+Validation: 10,000 seeded differential vectors inside three configuration ABI
+integration tests, 65 public launch tests, focused Clippy for both the caller and
+ABI test, the boundary/size/authority/no-fallback guards, and new-kernel object
+compilation on all six release triples. Native target runtime validation remains
+separate from cross-target object compilation.

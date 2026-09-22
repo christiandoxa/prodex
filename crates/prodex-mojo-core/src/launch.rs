@@ -50,7 +50,7 @@ pub struct LaunchArgumentInspection<'a> {
 
 #[repr(C)]
 #[derive(Clone, Copy)]
-struct ArgumentView {
+pub(super) struct ArgumentView {
     address: u64,
     length: u64,
     valid_utf8: i64,
@@ -86,7 +86,7 @@ unsafe extern "C" {
     ) -> i64;
 }
 
-fn views(arguments: &[Option<&str>]) -> Result<Vec<ArgumentView>, MojoError> {
+pub(super) fn views(arguments: &[Option<&str>]) -> Result<Vec<ArgumentView>, MojoError> {
     if arguments.len() > (i64::MAX as usize / 24).saturating_sub(3) {
         return Err(MojoError::InvalidInput);
     }
@@ -107,7 +107,7 @@ fn views(arguments: &[Option<&str>]) -> Result<Vec<ArgumentView>, MojoError> {
         .collect()
 }
 
-fn status(value: i64) -> Result<(), MojoError> {
+pub(super) fn status(value: i64) -> Result<(), MojoError> {
     match value {
         0 => Ok(()),
         1 | 2 => Err(MojoError::InvalidInput),
@@ -117,7 +117,7 @@ fn status(value: i64) -> Result<(), MojoError> {
     }
 }
 
-fn index(value: i64, count: usize) -> Result<usize, MojoError> {
+pub(super) fn index(value: i64, count: usize) -> Result<usize, MojoError> {
     usize::try_from(value)
         .ok()
         .filter(|&value| value < count)
@@ -132,7 +132,7 @@ fn optional_index(value: i64, count: usize) -> Result<Option<usize>, MojoError> 
     }
 }
 
-fn boolean(value: i64) -> Result<bool, MojoError> {
+pub(super) fn boolean(value: i64) -> Result<bool, MojoError> {
     match value {
         0 => Ok(false),
         1 => Ok(true),

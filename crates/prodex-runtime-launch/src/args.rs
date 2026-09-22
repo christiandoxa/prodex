@@ -218,119 +218,15 @@ fn runtime_proxy_realtime_codex_args(
     args
 }
 
-enum CodexConfigArg<'a> {
-    Stop,
-    Separate(&'a OsString),
-    LongInline(&'a str),
-    ShortInline(&'a str),
-    Other,
-}
-
-fn codex_config_arg(args: &[OsString], index: usize) -> CodexConfigArg<'_> {
-    let Some(arg) = args[index].to_str() else {
-        return CodexConfigArg::Other;
-    };
-    if arg == "--" {
-        return CodexConfigArg::Stop;
-    }
-    if matches!(arg, "-c" | "--config")
-        && let Some(value) = args.get(index + 1)
-    {
-        return CodexConfigArg::Separate(value);
-    }
-    if let Some(value) = arg.strip_prefix("--config=") {
-        return CodexConfigArg::LongInline(value);
-    }
-    if let Some(value) = arg.strip_prefix("-c")
-        && !value.is_empty()
-        && value.contains('=')
-    {
-        return CodexConfigArg::ShortInline(value);
-    }
-    CodexConfigArg::Other
-}
-
 fn rewrite_codex_config_overrides(
     user_args: &[OsString],
     overrides: &[(String, String)],
 ) -> (Vec<OsString>, Vec<bool>) {
-    let mut args = Vec::with_capacity(user_args.len() + (overrides.len() * 2));
-    let mut replaced = vec![false; overrides.len()];
-    let mut index = 0;
-    while index < user_args.len() {
-        match codex_config_arg(user_args, index) {
-            CodexConfigArg::Stop => {
-                args.extend(user_args[index..].iter().cloned());
-                break;
-            }
-            CodexConfigArg::Separate(value) => {
-                args.push(user_args[index].clone());
-                args.push(rewrite_codex_config_assignment(
-                    value.to_str(),
-                    overrides,
-                    &mut replaced,
-                    "",
-                    value,
-                ));
-                index += 2;
-            }
-            CodexConfigArg::LongInline(value) => {
-                args.push(rewrite_codex_config_assignment(
-                    Some(value),
-                    overrides,
-                    &mut replaced,
-                    "--config=",
-                    &user_args[index],
-                ));
-                index += 1;
-            }
-            CodexConfigArg::ShortInline(value) => {
-                args.push(rewrite_codex_config_assignment(
-                    Some(value),
-                    overrides,
-                    &mut replaced,
-                    "-c",
-                    &user_args[index],
-                ));
-                index += 1;
-            }
-            CodexConfigArg::Other => {
-                args.push(user_args[index].clone());
-                index += 1;
-            }
-        }
-    }
-    (args, replaced)
-}
-
-fn rewrite_codex_config_assignment(
-    assignment: Option<&str>,
-    overrides: &[(String, String)],
-    replaced: &mut [bool],
-    prefix: &str,
-    fallback: &OsString,
-) -> OsString {
-    let Some((index, value)) = runtime_proxy_matching_config_override(assignment, overrides) else {
-        return fallback.clone();
-    };
-    replaced[index] = true;
-    OsString::from(format!("{prefix}{value}"))
+    super::args_mojo::rewrite_config(user_args, overrides)
 }
 
 fn codex_config_override_insertion_index(args: &[OsString]) -> usize {
     super::args_mojo::inspect(args).config_insertion
-}
-
-fn runtime_proxy_matching_config_override(
-    assignment: Option<&str>,
-    overrides: &[(String, String)],
-) -> Option<(usize, String)> {
-    let key = config_assignment_key(assignment)?;
-    overrides
-        .iter()
-        .enumerate()
-        .find(|(_, (override_key, _))| override_key == key)
-        .map(|(index, (key, value))| (index, format!("{key}={value}")))
 }
 
 fn normalize_mount_path(mount_path: &str) -> String {
@@ -339,13 +235,6 @@ fn normalize_mount_path(mount_path: &str) -> String {
         return String::new();
     }
     format!("/{}", trimmed.trim_matches('/'))
-}
-
-fn config_assignment_key(assignment: Option<&str>) -> Option<&str> {
-    assignment
-        .and_then(|assignment| assignment.split_once('='))
-        .map(|(key, _)| key.trim())
-        .filter(|key| !key.is_empty())
 }
 
 pub fn prepare_codex_launch_args(
