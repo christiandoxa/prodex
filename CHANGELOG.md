@@ -51,6 +51,8 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
   supported tunnel-client release set or the exposed MCP tool contract.
 - Keep v0.0.14 as the preferred release and v0.0.13 as the exact pinned
   compatibility release.
+- Refresh the standalone-release Kiro CLI freshness pin to stable 2.23.0;
+  this is release tooling only and does not change Prodex runtime behavior.
 
 Full Changelog: [0.430.3...0.430.4](https://github.com/christiandoxa/prodex/compare/0.430.3...0.430.4)
 
