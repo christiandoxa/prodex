@@ -210,3 +210,99 @@ fn raw_json_boundary_rejects_invalid_abi_and_records_before_writes() {
     assert_eq!(status, 1);
     assert_eq!(metadata, [33; 2]);
 }
+
+#[test]
+fn measured_json_sink_respects_every_declared_output_capacity() {
+    let namespace = "mcp__x";
+    let name = "quote\"slash\\line\nnul\0🦀";
+    let empty = View { ptr: 0, len: 0 };
+    let view = |value: &str| View {
+        ptr: value.as_ptr() as u64,
+        len: value.len() as u64,
+    };
+    let nodes = [
+        Node {
+            kind: 5,
+            child: 1,
+            next: -1,
+            parent: -1,
+            key: empty,
+            text: empty,
+            start: 0,
+            length: 2,
+        },
+        Node {
+            kind: 4,
+            child: -1,
+            next: 2,
+            parent: 0,
+            key: empty,
+            text: view(namespace),
+            start: 0,
+            length: 0,
+        },
+        Node {
+            kind: 4,
+            child: -1,
+            next: -1,
+            parent: 0,
+            key: empty,
+            text: view(name),
+            start: 0,
+            length: 0,
+        },
+    ];
+    let expected = r#""mcp__x__quote\"slash\\line\nnul\u0000🦀""#.as_bytes();
+    let mut scratch = [empty; 3];
+    let mut metadata = [-1_i64; 2];
+    let status = unsafe {
+        prodex_mojo_chat_tools_v1(
+            1,
+            4,
+            0,
+            nodes.as_ptr() as u64,
+            3,
+            b"[]".as_ptr() as u64,
+            2,
+            scratch.as_mut_ptr() as u64,
+            3,
+            1,
+            0,
+            0,
+            metadata.as_mut_ptr() as u64,
+        )
+    };
+    assert_eq!(status, 0);
+    assert_eq!(metadata, [1, expected.len() as i64]);
+    for capacity in 0..=expected.len() {
+        let mut guarded = vec![0xa5_u8; capacity + 32];
+        metadata = [-1; 2];
+        let status = unsafe {
+            prodex_mojo_chat_tools_v1(
+                1,
+                4,
+                0,
+                nodes.as_ptr() as u64,
+                3,
+                b"[]".as_ptr() as u64,
+                2,
+                scratch.as_mut_ptr() as u64,
+                3,
+                0,
+                guarded.as_mut_ptr().add(16) as u64,
+                capacity as i64,
+                metadata.as_mut_ptr() as u64,
+            )
+        };
+        assert!(guarded[..16].iter().all(|&byte| byte == 0xa5));
+        assert!(guarded[16 + capacity..].iter().all(|&byte| byte == 0xa5));
+        if capacity == expected.len() {
+            assert_eq!(status, 0);
+            assert_eq!(&guarded[16..16 + capacity], expected);
+            assert_eq!(metadata, [1, capacity as i64]);
+        } else {
+            assert_eq!(status, 3);
+            assert_eq!(metadata, [-1, -1]);
+        }
+    }
+}

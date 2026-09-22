@@ -29,21 +29,38 @@ def js_byte(sink: Pointer[mut=True, JsonSink, _], value: UInt8):
 
 
 def js_view(sink: Pointer[mut=True, JsonSink, _], view: ProdexRichStringView):
-    var ptr = rich_view_ptr(view)
-    for index in range(Int64(view.len)):
-        js_byte(sink, ptr[unsafe_offset=index])
+    if sink[].failed:
+        return
+    if view.len > UInt(0x7FFFFFFFFFFFFFFF) or Int64(view.len) > 0x7FFFFFFFFFFFFFFF - sink[].written:
+        sink[].failed = True
+        return
+    var length = Int64(view.len)
+    var start = sink[].written
+    if not sink[].measuring:
+        if length > sink[].capacity - start:
+            sink[].failed = True
+            return
+        var source = rich_view_ptr(view)
+        # One capacity check for the entire validated, non-overlapping span.
+        # Keeping accounting outside this loop permits the compiler's bulk copy.
+        for index in range(length):
+            sink[].output[unsafe_offset=start + index] = source[unsafe_offset=index]
+    sink[].written += length
 
 
 def js_literal(sink: Pointer[mut=True, JsonSink, _], text: StringSlice):
-    var ptr = text.unsafe_ptr()
-    for index in range(Int64(text.byte_length())):
-        js_byte(sink, ptr[unsafe_offset=index])
+    js_view(sink, ProdexRichStringView(UInt(Int(text.unsafe_ptr())), UInt(text.byte_length())))
 
 
 def js_escaped(sink: Pointer[mut=True, JsonSink, _], view: ProdexRichStringView):
     var ptr = rich_view_ptr(view)
+    var run_start: Int64 = 0
     for index in range(Int64(view.len)):
         var byte = ptr[unsafe_offset=index]
+        if byte != 34 and byte != 92 and byte >= 32:
+            continue
+        js_view(sink, ProdexRichStringView(view.ptr + UInt(run_start), UInt(index - run_start)))
+        run_start = index + 1
         if byte == 34 or byte == 92:
             js_byte(sink, 92)
             js_byte(sink, byte)
@@ -57,14 +74,13 @@ def js_escaped(sink: Pointer[mut=True, JsonSink, _], view: ProdexRichStringView)
             js_literal(sink, StringSlice("\\f"))
         elif byte == 13:
             js_literal(sink, StringSlice("\\r"))
-        elif byte < 32:
+        else:
             js_literal(sink, StringSlice("\\u00"))
             var high = byte >> 4
             var low = byte & 15
             js_byte(sink, high + UInt8(48 if high < 10 else 87))
             js_byte(sink, low + UInt8(48 if low < 10 else 87))
-        else:
-            js_byte(sink, byte)
+    js_view(sink, ProdexRichStringView(view.ptr + UInt(run_start), view.len - UInt(run_start)))
 
 
 def js_string(sink: Pointer[mut=True, JsonSink, _], view: ProdexRichStringView):
