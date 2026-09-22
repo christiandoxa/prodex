@@ -2,55 +2,64 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.430.4 - 2026-09-22
+
+### Misc
+
+- Keep tunnel client alive after readiness (`c315b54`)
+# Prodex 0.430.4
+
+## New Features
+
+- No new MCP tool or expose surface is added in this patch release.
+
+## Bug Fixes
+
+- Keep the supervised OpenAI `tunnel-client` alive after local readiness is
+  reported by spawning the child from the long-lived expose thread before
+  handing readiness monitoring to the startup worker.
+- Fix the regression where `prodex s expose --openai-tunnel-id ...` could print
+  `OpenAI Secure MCP Tunnel ready` and then immediately fail with
+  `OpenAI tunnel-client exited unexpectedly`.
+- The lifecycle fix applies to both the preferred official `tunnel-client`
+  v0.0.14 release and the compatible official v0.0.13 release.
+
+## Safety
+
+- Preserve Linux parent-death signaling and private process-group cleanup for
+  the supervised tunnel process; the fix changes which Prodex thread creates
+  the child rather than weakening process cleanup.
+- Keep the existing exact official version/commit allowlist. v0.0.14 remains
+  preferred, v0.0.13 remains a narrowly pinned compatibility release, and
+  unvetted or mismatched builds continue to fail closed.
+- Tunnel-client output remains disconnected from the terminal so capability
+  URLs and control-plane details are not exposed through child logs.
+
+## Validation
+
+- Added a Linux end-to-end lifecycle regression that reproduces the former
+  ready-then-exit handoff and verifies the tunnel child remains alive.
+- Re-ran the complete `super_expose` unit-test subset and the tunnel integration
+  suite, including accepted v0.0.14/v0.0.13 metadata and rejection of an
+  unvetted build.
+- Smoke-tested the installed official v0.0.13 binary through the fixed path and
+  verified it remains running after readiness until externally stopped.
+
+## Changelog
+
+- Fix the Linux OpenAI tunnel-client startup handoff without changing the
+  supported tunnel-client release set or the exposed MCP tool contract.
+- Keep v0.0.14 as the preferred release and v0.0.13 as the exact pinned
+  compatibility release.
+
+Full Changelog: [0.430.3...0.430.4](https://github.com/christiandoxa/prodex/compare/0.430.3...0.430.4)
+
 ## 0.430.3 - 2026-09-21
 
 ### Misc
 
 - Revalidate latest tool trees (`b2ac0c8`)
 - Support tunnel-client 0.0.13 (`b19c2c3`)
-# Prodex 0.430.3
-
-## New Features
-
-- No new MCP tool is added in this patch release. Full expose keeps its
-  preserved ten-tool contract, while `prodex s expose exec` remains
-  intentionally restricted to `prodex_super_exec`.
-
-## Bug Fixes
-
-- Make `prodex s expose exec --openai-tunnel-id ...` accept the official
-  OpenAI `tunnel-client` v0.0.13 release in addition to the preferred latest
-  v0.0.14 release. Both releases remain pinned to their exact upstream release
-  commit metadata, while unvetted versions or mismatched commits still fail
-  closed.
-- Revalidate the latest stable Caveman 2.7.0 and Ponytail 4.10.0 trees from
-  clean official tags and correct the vetted full-tree SHA-256 values.
-- Accept the prior known `prodex-tool.json` tree-digest metadata for those
-  exact vetted version/commit pairs so installations produced with the older
-  metadata remain usable. Prodex still recomputes the complete tree and
-  requires it to match the corrected current digest before activation.
-
-## Safety
-
-- OpenAI Secure MCP Tunnel continues to prefer v0.0.14, while compatibility
-  with the official v0.0.13 build is narrowly pinned to its upstream release
-  commit rather than accepting arbitrary version strings.
-- Optional-tool legacy manifest compatibility is limited to the previously
-  emitted digest for the same vetted version and commit. The actual tree must
-  still match the newly revalidated digest before activation.
-
-## Changelog
-
-- Optional Tools remain on the current stable release inventory: Caveman
-  2.7.0, RTK 0.49.0, Codebase Memory MCP 0.11.0, Playwright MCP 0.0.82,
-  Ponytail 4.10.0, and Presidio 2.2.364.
-- Added regression coverage for accepted official tunnel-client v0.0.14 and
-  v0.0.13 builds, rejection of an unvetted build, corrected Optional Tools
-  manifest compatibility, and release-pinned Mojo 1.0.0 policy compilation.
-- Source CI, including Real Mojo/parity, is required green before the release
-  metadata commit and standalone publication workflow.
-
-Full Changelog: [0.430.2...0.430.3](https://github.com/christiandoxa/prodex/compare/0.430.2...0.430.3)
 
 ## 0.430.2 - 2026-09-21
 

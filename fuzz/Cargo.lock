@@ -916,7 +916,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-domain"
-version = "0.430.3"
+version = "0.430.4"
 dependencies = [
  "serde",
  "uuid",
@@ -934,7 +934,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-profile-export"
-version = "0.430.3"
+version = "0.430.4"
 dependencies = [
  "aes-gcm-siv",
  "anyhow",
@@ -951,7 +951,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-secret-store"
-version = "0.430.3"
+version = "0.430.4"
 dependencies = [
  "aes-gcm-siv",
  "getrandom",
