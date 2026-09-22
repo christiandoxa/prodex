@@ -171,3 +171,17 @@ exclude stale incremental-archive artifacts from this validation.
 Provider replay initially rejected Kiro secret fixtures because the campaign's
 own TMPDIR had mode 775. Making that one owned directory private (700) allowed
 the unchanged 499-test replay suite to pass. No secret-store policy was relaxed.
+
+
+## Complete Responses-to-chat request planning
+
+The shared OpenAI Responses-to-Chat request bridge now has one production-authoritative
+Mojo transform over the caller-owned parsed JSON arena. Mojo owns rejection precedence,
+text/history message planning, function-call and function-output mapping, model precedence,
+forwarded request controls, and the final chat request object. Rust retains Serde parsing,
+the ProviderTransformResult host contract, and a test/Rust-only oracle.
+
+Validation includes explicit empty/wrong-type precedence fixtures plus 5,000 deterministic
+generated requests. The Mojo boundary also has raw ABI, malformed-tree, and reentrancy tests.
+The kernel compiles with pinned Mojo 1.0.0 for all six release target triples. No production
+Rust recomputation is selected after a Mojo error.

@@ -34,6 +34,69 @@ impl<'a> Document<'a> {
         self.nodes[0].raw_length = self.raw.len();
     }
 
+    pub(crate) fn openai_chat_request_context(
+        &mut self,
+        request: &'a Value,
+        provider: &'a str,
+        default_model: &'a str,
+        input_model: Option<&'a str>,
+    ) {
+        self.nodes.push(JsonNode {
+            kind: JsonKind::Object,
+            first_child: None,
+            next_sibling: None,
+            parent: None,
+            key: "",
+            text: "",
+            raw_start: 0,
+            raw_length: 0,
+        });
+        self.raw.push(b'{');
+        let mut previous = None;
+        for (key, text) in [
+            ("provider", Some(provider)),
+            ("default_model", Some(default_model)),
+            ("input_model", input_model),
+        ] {
+            let Some(text) = text else {
+                continue;
+            };
+            if previous.is_some() {
+                self.raw.push(b',');
+            }
+            serde_json::to_writer(&mut self.raw, key).expect("in-memory JSON key serialization");
+            self.raw.push(b':');
+            let child = self.push_string(text, Some(0), key);
+            self.link(0, &mut previous, child);
+        }
+        if previous.is_some() {
+            self.raw.push(b',');
+        }
+        serde_json::to_writer(&mut self.raw, "request").expect("in-memory JSON key serialization");
+        self.raw.push(b':');
+        let child = self.push(request, Some(0), "request");
+        self.link(0, &mut previous, child);
+        self.raw.push(b'}');
+        self.nodes[0].raw_length = self.raw.len();
+    }
+
+    fn push_string(&mut self, text: &'a str, parent: Option<usize>, key: &'a str) -> usize {
+        let index = self.nodes.len();
+        let start = self.raw.len();
+        serde_json::to_writer(&mut self.raw, text).expect("in-memory JSON string serialization");
+        self.nodes.push(JsonNode {
+            kind: JsonKind::String,
+            first_child: None,
+            next_sibling: None,
+            parent,
+            key,
+            text,
+            raw_start: start,
+            raw_length: self.raw.len() - start,
+        });
+        index
+    }
+
     pub(crate) fn member(&mut self, value: &'a Value, key: &'a str) {
         self.nodes.push(JsonNode {
             kind: JsonKind::Object,

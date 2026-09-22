@@ -4,13 +4,21 @@ use serde_json::{Value, json};
 
 #[path = "openai_chat_compat_params.rs"]
 mod openai_chat_compat_params;
+#[cfg(any(not(feature = "mojo"), test))]
 #[path = "openai_chat_compat_request.rs"]
 mod openai_chat_compat_request;
+#[cfg(feature = "mojo")]
+#[path = "openai_chat_compat_request_mojo.rs"]
+mod openai_chat_compat_request_mojo;
+#[cfg(all(test, feature = "mojo"))]
+#[path = "openai_chat_compat_request_mojo_tests.rs"]
+mod openai_chat_compat_request_mojo_tests;
 #[path = "openai_chat_compat_response.rs"]
 mod openai_chat_compat_response;
 #[path = "openai_chat_compat_util.rs"]
 mod openai_chat_compat_util;
 pub(crate) use self::openai_chat_compat_params::responses_chat_compat_supported_params;
+#[cfg(any(not(feature = "mojo"), test))]
 use self::openai_chat_compat_request::{
     responses_messages_to_chat_messages, validate_responses_chat_compat_request,
 };
@@ -18,12 +26,14 @@ pub(crate) use self::openai_chat_compat_response::{
     translate_chat_response_to_responses, translate_chat_stream_event_to_responses,
 };
 use self::openai_chat_compat_util::{
-    chat_usage_to_responses_usage, copy_first_if_present, copy_if_present,
-    message_content_to_output_content, rtk_wrapped_tool_arguments, split_flat_namespace_tool_name,
-    stringify_arguments, value_to_text,
+    chat_usage_to_responses_usage, message_content_to_output_content, rtk_wrapped_tool_arguments,
+    split_flat_namespace_tool_name, stringify_arguments,
 };
+#[cfg(any(not(feature = "mojo"), test))]
+use self::openai_chat_compat_util::{copy_first_if_present, copy_if_present, value_to_text};
 
-pub fn translate_responses_request_to_chat(
+#[cfg(any(not(feature = "mojo"), test))]
+fn translate_responses_request_to_chat_rust(
     provider: ProviderId,
     input: ProviderTransformInput,
     default_model: &str,
@@ -136,4 +146,66 @@ pub fn translate_responses_request_to_chat(
         ProviderWireFormat::OpenAiChatCompletions,
         serde_json::to_vec(&Value::Object(request)).expect("chat compatibility request serializes"),
     )
+}
+
+#[cfg(not(feature = "mojo"))]
+pub fn translate_responses_request_to_chat(
+    provider: ProviderId,
+    input: ProviderTransformInput,
+    default_model: &str,
+) -> ProviderTransformResult {
+    translate_responses_request_to_chat_rust(provider, input, default_model)
+}
+
+#[cfg(feature = "mojo")]
+pub fn translate_responses_request_to_chat(
+    provider: ProviderId,
+    input: ProviderTransformInput,
+    default_model: &str,
+) -> ProviderTransformResult {
+    if input.endpoint != ProviderEndpoint::Responses {
+        return ProviderTransformResult::unsupported(
+            provider,
+            input.endpoint,
+            ProviderWireFormat::OpenAiResponses,
+            ProviderWireFormat::OpenAiChatCompletions,
+            format!(
+                "{} translator only translates responses requests",
+                provider.label()
+            ),
+        );
+    }
+    let value: Value = match serde_json::from_slice(&input.body) {
+        Ok(value) => value,
+        Err(error) => {
+            return ProviderTransformResult::rejected(
+                provider,
+                input.endpoint,
+                ProviderWireFormat::OpenAiResponses,
+                ProviderWireFormat::OpenAiChatCompletions,
+                format!("failed to parse Responses request JSON: {error}"),
+            );
+        }
+    };
+    match openai_chat_compat_request_mojo::transform(
+        provider,
+        &value,
+        input.model.as_deref(),
+        default_model,
+    ) {
+        Ok(body) => ProviderTransformResult::lossless(
+            provider,
+            input.endpoint,
+            ProviderWireFormat::OpenAiResponses,
+            ProviderWireFormat::OpenAiChatCompletions,
+            body,
+        ),
+        Err(reason) => ProviderTransformResult::rejected(
+            provider,
+            input.endpoint,
+            ProviderWireFormat::OpenAiResponses,
+            ProviderWireFormat::OpenAiChatCompletions,
+            reason,
+        ),
+    }
 }
