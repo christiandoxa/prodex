@@ -145,3 +145,33 @@ PRODEX_MOJO_REQUIRED=1 PRODEX_MOJO_VERSION=1.0.0 \
 The manual timing test is excluded from ordinary correctness runs, and was
 executed explicitly for the measurements above. The compiler/archive environment
 must use the same pinned release-compatible Mojo build as the correctness suite.
+
+## Shared-arena refinement and DeepSeek message boundary
+
+After the shared writer switched to bulk span copying and unescaped runs, the
+two manual boundary probes were rerun with `--test-threads=1` so they do not
+compete with each other. The tools probe retains its nine batches of 25 calls.
+The message probe uses seven batches of ten calls, includes the same input clone
+on both paths, and checks complete adjacency repair plus output materialization.
+
+| Operation / fixture | Rust oracle | Current Mojo boundary |
+| --- | ---: | ---: |
+| 0 function tools | 10 ns | 182 ns |
+| 8 function tools | 16,016 ns | 34,377 ns |
+| 64 function tools | 157,943 ns | 299,685 ns |
+| Adjacency: 8 call/output pairs, 64-byte outputs | 12,973 ns | 45,801 ns |
+| Adjacency: 64 pairs, 64-byte outputs | 143,136 ns | 394,244 ns |
+| Adjacency: 64 pairs, 4,096-byte outputs | 183,095 ns | 1,801,497 ns |
+
+The initial, pre-optimization message probe measured 2,333,427 ns on the last
+fixture. The refinement reduces that cost, but Mojo still adds about 1.62 ms
+relative to Rust for this 256 KiB of tool-output text. These measurements do not
+establish endpoint throughput or tail latency, and allocation count was not
+instrumented. Further performance work should avoid unnecessary JSON round trips
+without returning semantic decisions to Rust.
+
+```bash
+PRODEX_MOJO_REQUIRED=1 PRODEX_MOJO_VERSION=1.0.0 \
+  cargo test --locked --release -p prodex-provider-core --features mojo --lib \
+  complete_ -- --ignored --nocapture --test-threads=1
+```

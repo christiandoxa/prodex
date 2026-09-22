@@ -124,3 +124,29 @@ migration, **not a speedup**: the 64-tool fixture adds about 178 microseconds.
 The measured cost includes Serde acquisition/materialization, allocation and FFI;
 future batching and direct structured output should target that overhead.
 See `migration/benchmarks.md` for the reproducible command and scope.
+
+## DeepSeek message wave and shared arena refinement
+
+The same checked JSON ABI and one shared Serde acquisition module now support
+complete thinking-message normalization, assistant tool-call content shaping,
+tool-call/output adjacency repair and two-level response-metadata merging.
+Mojo owns first-output lookup, global single emission, unanswered-call removal,
+content-presence rules and the historical no-valid-output special case. The
+lookup uses a stable index sort and binary searches over caller-owned scratch;
+Rust retains only value acquisition/materialization and feature-off/test oracles.
+
+The new differential corpus contains 10,000 generated histories and metadata
+merges, plus explicit first-output/global-emission, Unicode, scalar/object merge
+and 2,048-call out-of-order cases. The provider suite passes 235 tests with two
+manual benchmark tests excluded from ordinary correctness runs; both benchmarks
+were separately run successfully. The new message ABI adds two negative/empty
+shape tests. Shared JSON capacity coverage now sweeps every output capacity for
+an escaped Unicode fixture with prefix/suffix canaries.
+
+The shared writer was improved to measure/copy complete validated spans and
+unescaped runs rather than repeat a capacity check for every byte. Latest
+serialized benchmark runs measured 299,685 ns for 64 function tools against
+157,943 ns for the Rust oracle. DeepSeek adjacency at 64 call/output pairs with
+4,096-byte contents measured 1,801,497 ns against 183,095 ns. Those are real
+complete-boundary costs, not speedup claims; see the benchmark record for scope.
+The writer and both JSON kernels compile to objects on all six release triples.

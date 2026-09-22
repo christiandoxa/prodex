@@ -223,3 +223,19 @@ When a rule fires, prefer one of these fixes:
 - Keep app-specific report rendering in `prodex-app::reports`; keep generic terminal layout in `prodex-terminal-ui`.
 - Call orchestration upward from `prodex-app`, not from helper crates.
 - Keep hot-path runtime proxy helpers side-effect-free in `prodex-runtime-proxy`.
+
+## Mojo-first provider and launch ownership
+
+The 75% production-source migration campaign is tracked in
+[`migration/mojo-75-campaign.md`](../migration/mojo-75-campaign.md). Its target is
+separate from the historical release floor and does not change source-counting
+rules or existing release guarantees.
+
+`prodex-runtime-launch/mojo` delegates Codex argument/configuration plans through
+versioned borrowed OS-string views, retaining native ownership in Rust. Provider
+JSON transformations use a shared Serde acquisition module, parent-checked
+borrowed JSON records, caller-owned scratch and an exactly measured output arena.
+Mojo owns complete tool shaping and DeepSeek message/adjacency/metadata semantics;
+Rust owns JSON compatibility parsing and materialization. A validation error does
+not trigger a Rust semantic fallback. Transport, affinity, process supervision,
+credentials and durable state remain outside these pure transformation calls.
