@@ -101,3 +101,26 @@ integration tests, 65 public launch tests, focused Clippy for both the caller an
 ABI test, the boundary/size/authority/no-fallback guards, and new-kernel object
 compilation on all six release triples. Native target runtime validation remains
 separate from cross-target object compilation.
+
+## Complete provider tool-shape wave
+
+The existing `prodex-provider-core/mojo` feature now selects complete Mojo
+ownership of function/custom/namespace/MCP/tool-search expansion, choice
+precedence, namespace naming and web-search extraction/removal. Serde acquires
+only the relevant request member into a borrowed, parent-checked JSON arena;
+replacement output is capacity-measured in Mojo and materialized by Serde.
+No external dependency, dynamic Mojo runtime or new MCP surface was added.
+
+The provider suite passes 231 tests with one explicitly manual benchmark ignored
+by the normal correctness run. New coverage includes 5,000 seeded JSON trees,
+Unicode and control characters, first-key precedence, MCP sort/dedup, 1,024
+custom tools and 2,048 MCP names. Three additional core ABI/graph/reentrancy
+tests pass, as do focused Clippy and object builds for all six release targets.
+
+The optimized local complete-boundary benchmark was also run explicitly. Median
+nanoseconds for Rust versus the new Mojo boundary were 9/204 at zero tools,
+16,278/39,372 at eight tools and 155,977/333,660 at 64 tools. This is an ownership
+migration, **not a speedup**: the 64-tool fixture adds about 178 microseconds.
+The measured cost includes Serde acquisition/materialization, allocation and FFI;
+future batching and direct structured output should target that overhead.
+See `migration/benchmarks.md` for the reproducible command and scope.

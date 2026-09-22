@@ -2,14 +2,22 @@
 //!
 //! Pure provider translation only: no runtime state, auth, or transport.
 
+#[cfg(any(not(feature = "mojo"), test))]
 mod tool_choice;
+#[cfg(any(not(feature = "mojo"), test))]
 mod tools;
+#[cfg(any(not(feature = "mojo"), test))]
 mod util;
+#[cfg(any(not(feature = "mojo"), test))]
 mod web_search;
 
+#[cfg(not(feature = "mojo"))]
 pub use self::tool_choice::provider_core_chat_tool_choice_from_responses_request;
+#[cfg(not(feature = "mojo"))]
 pub use self::tools::provider_core_chat_tools_from_responses_request;
+#[cfg(not(feature = "mojo"))]
 pub use self::util::provider_core_flatten_namespace_tool_name;
+#[cfg(not(feature = "mojo"))]
 pub use self::web_search::{
     provider_core_chat_request_body_without_web_search_options,
     provider_core_chat_web_search_options_from_responses_request,
@@ -132,3 +140,13 @@ mod tests {
         );
     }
 }
+
+#[cfg(feature = "mojo")]
+mod entry;
+#[cfg(feature = "mojo")]
+mod mojo;
+#[cfg(feature = "mojo")]
+pub use entry::*;
+
+#[cfg(all(test, feature = "mojo"))]
+mod mojo_tests;

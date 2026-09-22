@@ -115,3 +115,33 @@ PRODEX_MOJO_REQUIRED=1 PRODEX_MOJO_VERSION=1.0.0 \
 ```
 
 These are local architecture measurements, not cross-machine release thresholds.
+
+## Mojo-first complete provider tool boundary
+
+This campaign migrates the full Responses-to-chat tool pipeline rather than a
+single inner predicate. Local release-profile measurements include relevant-field
+Serde acquisition, parent-checked borrowed JSON records, two-pass exact output
+sizing/writing, FFI and Serde output materialization. Each number is the median
+of nine batches of 25 calls on the same machine, not an endpoint latency claim.
+
+| Function tools | Rust oracle | Mojo complete boundary |
+| ---: | ---: | ---: |
+| 0 | 9 ns | 204 ns |
+| 8 | 16,278 ns | 39,372 ns |
+| 64 | 155,977 ns | 333,660 ns |
+
+The measured boundary is slower, with about 178 microseconds of additional work
+for this 64-tool fixture. Promotion is based on verified complete semantic
+ownership and compatibility with the Mojo-first campaign, not an inner-loop
+speed claim. Input acquisition excludes unrelated prompt/message content.
+Allocations and endpoint startup were not instrumented in this probe.
+
+```bash
+PRODEX_MOJO_REQUIRED=1 PRODEX_MOJO_VERSION=1.0.0 \
+  cargo test --locked --release -p prodex-provider-core --features mojo --lib \
+  complete_provider_tool_boundary_benchmark -- --ignored --nocapture
+```
+
+The manual timing test is excluded from ordinary correctness runs, and was
+executed explicitly for the measurements above. The compiler/archive environment
+must use the same pinned release-compatible Mojo build as the correctness suite.
