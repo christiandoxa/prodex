@@ -2,7 +2,7 @@
   "codex": {
     "compatibility": {
       "upstream_repository": "https://github.com/openai/codex",
-      "baseline_source": "openai/codex rust-v0.155.1 release",
+      "baseline_source": "openai/codex rust-v0.156.0 release",
       "guard_command": "node scripts/compat/check-upstream-baseline.mjs",
       "format_version": 2,
       "critical_files": [
@@ -10,7 +10,6 @@
           "path": "codex-rs/core/src/client.rs",
           "reason": "Owns Responses request metadata/header construction, websocket client metadata, and auth-owner cache invalidation used by Prodex affinity.",
           "required_contains": [
-            "ResponsesEndpoint::Responses",
             "build_responses_headers",
             "build_responses_compatibility_headers",
             "build_ws_client_metadata",
@@ -52,7 +51,10 @@
             "responses_request_properties_match",
             "auth_owner_generation",
             "take_cached_websocket_session",
-            "build_responses_request"
+            "build_responses_request",
+            "responses_session_id",
+            "session_source.is_non_root_agent()",
+            "prompt_cache_key(metadata)"
           ]
         },
         {
@@ -77,7 +79,7 @@
           "required_contains": [
             "ResponseItem::CompactionTrigger {}",
             "CompactionTurnMetadata",
-            "CodexResponsesRequestKind::Compaction",
+            "compaction_responses_metadata",
             "responses_metadata",
             "run_remote_compaction_request_v2"
           ]
@@ -328,19 +330,24 @@
             "ResponseEvent::SafetyBuffering",
             "treatment_from_headers",
             "SafetyBufferingTreatment",
-            "with_treatment"
+            "with_treatment",
+            "credit_balance_exhausted",
+            "organization_spend_limit_exceeded",
+            "project_spend_limit_exceeded",
+            "slow_down",
+            "server_is_overloaded"
           ]
         },
         {
           "path": "codex-rs/codex-api/src/endpoint/responses.rs",
           "reason": "Owns the provider-relative /responses path, HTTP session headers, and turn-state capture shared by ordinary and compaction-v2 Responses streams.",
           "required_contains": [
-            "pub enum ResponsesEndpoint",
-            "Self::Responses => \"/responses\"",
+            "ResponsesClient",
             "ResponsesOptions",
             "turn_state",
             "stream_request",
-            "self.endpoint.path()",
+            "stream_encoded_json_with",
+            "\"/responses\"",
             "spawn_response_stream"
           ]
         },
@@ -349,7 +356,7 @@
           "reason": "Owns websocket Responses connection setup, request header merging, stream completion boundary, rate limit events, and wrapped websocket errors.",
           "required_contains": [
             "ResponsesWebsocketConnection",
-            "websocket_url_for_path(self.endpoint.path())",
+            "websocket_url_for_path(\"/responses\")",
             "merge_request_headers",
             "add_auth_headers",
             "x-codex-turn-state",
@@ -759,7 +766,7 @@
         "/responses",
         "alpha/search",
         "/memories/trace_summarize",
-        "websocket_url_for_path(self.endpoint.path())",
+        "websocket_url_for_path(\"/responses\")",
         "/realtime/calls"
       ],
       "expected_stream_events": [
@@ -781,12 +788,12 @@
           "id": "responses.http-route",
           "kind": "route",
           "file": "codex-rs/codex-api/src/endpoint/responses.rs",
-          "reason": "The canonical Responses path is now owned by codex-api and is shared by normal and compaction-v2 streaming.",
+          "reason": "Codex 0.156 fixes the canonical HTTP Responses route at /responses; normal and compaction-v2 streaming share this path without an endpoint enum.",
           "file_contains_all": [
-            "pub enum ResponsesEndpoint",
-            "Self::Responses => \"/responses\"",
+            "ResponsesClient",
             "stream_request",
-            "self.endpoint.path()"
+            "stream_encoded_json_with",
+            "\"/responses\""
           ],
           "expected_routes_all": [
             "/responses"
@@ -844,10 +851,10 @@
           "id": "compact.trigger-request",
           "kind": "metadata_group",
           "file": "codex-rs/core/src/compact_remote_v2_attempt.rs",
-          "reason": "Codex 0.155 compaction appends a CompactionTrigger and derives compaction-specific Responses metadata before normal /responses streaming.",
+          "reason": "Codex 0.156 compaction appends a CompactionTrigger and obtains compaction-specific Responses metadata before normal /responses streaming.",
           "file_contains_all": [
             "ResponseItem::CompactionTrigger {}",
-            "CodexResponsesRequestKind::Compaction",
+            "compaction_responses_metadata",
             "responses_metadata",
             "run_remote_compaction_request_v2"
           ],
@@ -1170,10 +1177,15 @@
           "id": "sse.quota-codes",
           "kind": "co_occurrence",
           "file": "codex-rs/codex-api/src/sse/responses.rs",
-          "reason": "Quota rotation must remain tied to explicit upstream quota and rate-limit codes.",
+          "reason": "Codex 0.156 classifies explicit balance/spend-limit codes as quota, slow_down as rate-limit, and server_is_overloaded separately.",
           "file_contains_all": [
             "insufficient_quota",
-            "rate_limit_exceeded"
+            "credit_balance_exhausted",
+            "organization_spend_limit_exceeded",
+            "project_spend_limit_exceeded",
+            "rate_limit_exceeded",
+            "slow_down",
+            "server_is_overloaded"
           ]
         },
         {
@@ -1209,13 +1221,13 @@
           "id": "websocket.responses-route",
           "kind": "route",
           "file": "codex-rs/codex-api/src/endpoint/responses_websocket.rs",
-          "reason": "Websocket sessions must keep the upstream Responses websocket route.",
+          "reason": "Codex 0.156 removes ResponsesEndpoint selection and connects WebSocket sessions directly to the fixed /responses route.",
           "file_contains_all": [
             "ResponsesWebsocketConnection",
-            "websocket_url_for_path(self.endpoint.path())"
+            "websocket_url_for_path(\"/responses\")"
           ],
           "expected_routes_all": [
-            "websocket_url_for_path(self.endpoint.path())"
+            "websocket_url_for_path(\"/responses\")"
           ]
         },
         {
@@ -1225,7 +1237,7 @@
           "reason": "Websocket sessions must preserve upstream route selection, request metadata merge behavior, turn-state affinity, lifecycle events, and wrapped error handling.",
           "file_contains_all": [
             "ResponsesWebsocketConnection",
-            "websocket_url_for_path(self.endpoint.path())",
+            "websocket_url_for_path(\"/responses\")",
             "merge_request_headers",
             "add_auth_headers",
             "x-codex-turn-state",
@@ -1243,7 +1255,7 @@
             "safety_buffering(treatment)"
           ],
           "expected_routes_all": [
-            "websocket_url_for_path(self.endpoint.path())"
+            "websocket_url_for_path(\"/responses\")"
           ],
           "expected_headers_all": [
             "x-codex-turn-state"
@@ -1573,7 +1585,7 @@
           ]
         }
       ],
-      "tested_codex_release": "rust-v0.155.1",
+      "tested_codex_release": "rust-v0.156.0",
       "patch_deltas": [
         {
           "from": "rust-v0.150.0",
@@ -1727,6 +1739,23 @@
           ],
           "prodex_action": "Keep Prodex provider bridges explicit with model_reasoning_summary=none, preserve ordinary Codex passthrough semantics, and make no runtime proxy or compatibility rewrite for 0.155.1.",
           "compatibility_evidence": "Exact 0.155.0 and 0.155.1 source archives, official release metadata and Linux binary digests, isolated app-server initialize smoke, provider-bridge reasoning-summary regression, and offline baseline guard are recorded in migration/codex-rust-v0.155.1-audit.md."
+        },
+        {
+          "from": "rust-v0.155.1",
+          "to": "rust-v0.156.0",
+          "upstream_commit": "fe74a774532af67b5a4a3dec03ce9469e17f89af",
+          "upstream_tag_object": "476ac1aae33835e6e4c2d311c254b9b6ce9b2f4c",
+          "upstream_release_date": "2026-09-22T19:51:01Z",
+          "tree_comparison": "exact tagged source archives; 3631 changed files, 228742 additions, 61996 deletions",
+          "runtime_changes": [
+            "Responses HTTP and WebSocket clients now use the fixed /responses path directly; the ResponsesEndpoint selector is removed.",
+            "Root-agent Responses session_id headers now use prompt-cache affinity while turn metadata retains the actual session identity; non-root agents keep the actual session id.",
+            "Remote compaction v2 can retry with the current model after an eligible previous-model compaction failure, while continuing to send CompactionTrigger through /responses.",
+            "Responses failed-event classification adds credit_balance_exhausted, organization_spend_limit_exceeded, and project_spend_limit_exceeded as quota codes and treats slow_down as rate limiting rather than overload.",
+            "App-server, daemon, provider routing, workspace routing, OAuth, TUI, voice, plugin, sandbox, and model-catalog surfaces expand upstream; Prodex preserves additive protocol fields and does not duplicate those services."
+          ],
+          "prodex_action": "Align explicit quota/rate classification with Codex 0.156, preserve /responses and WebSocket payload/header transparency, treat session_id as an opaque affinity key, retain legacy /responses/compact support for older clients, and keep upstream daemon/workspace/provider semantics external.",
+          "compatibility_evidence": "Exact 0.155.1 and 0.156.0 tagged source archives, official release/tag metadata, critical-file assertion replay, official Linux binary smoke, upstream baseline guard, capture replay, and focused runtime/provider compatibility tests are recorded in migration/codex-rust-v0.156.0-audit.md."
         }
       ],
       "app_server_protocol": {
@@ -1749,18 +1778,18 @@
       }
     },
     "latestRelease": {
-      "tag_name": "rust-v0.155.1",
-      "name": "0.155.1",
-      "published_at": "2026-09-18T20:03:04Z",
-      "html_url": "https://github.com/openai/codex/releases/tag/rust-v0.155.1",
+      "tag_name": "rust-v0.156.0",
+      "name": "0.156.0",
+      "published_at": "2026-09-22T19:51:01Z",
+      "html_url": "https://github.com/openai/codex/releases/tag/rust-v0.156.0",
       "body_head": [
-        "## Bug Fixes",
+        "## New Features",
         "",
-        "- New local TUI sessions now leave reasoning summaries disabled by default, fixing request rejection by providers that do not support them. Explicit reasoning-summary settings remain respected. (#46467)",
-        "",
-        "## Changelog",
-        "",
-        "Full Changelog: https://github.com/openai/codex/compare/rust-v0.155.0...rust-v0.155.1"
+        "- Choose an optional fullscreen UI with `/tui` for your next launch, including transcript search, mouse selection, and right-click copying. (#46732, #46734, #46883, #46895)",
+        "- Voice conversations are enabled by default, with an F8 toggle, a `/voice settings` picker, and bundled audio runtimes for Linux and Windows. (#44921, #46071, #44622, #44714, #44922)",
+        "- Explore account usage, token totals, and plugin and skill activity through the `/usage` analytics dashboard. (#45764, #45769)",
+        "- Filter tasks by status and create worktree sessions from the agent command center; worktree support is now enabled by default. (#46839, #45276, #44870)",
+        "- Customize the terminal with six new themes and view supported Mermaid diagrams and display equations directly in responses. (#46504, #46054, #45612)"
       ]
     }
   },

@@ -39,6 +39,10 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 use tokio::sync::mpsc::{self, Receiver};
 
+#[path = "local_rewrite_upstream/error_class.rs"]
+mod error_class;
+use error_class::runtime_local_rewrite_native_first_event_error_class;
+
 const RUNTIME_LOCAL_REWRITE_STREAM_CHUNK_BYTES: usize = 64 * 1024;
 
 pub(super) struct RuntimeLocalRewriteUpstreamResult {
@@ -389,7 +393,7 @@ fn runtime_local_rewrite_inspect_native_chunk(
             *event_start = prefix.len();
             continue;
         }
-        let decision = runtime_local_rewrite_native_first_event_error_class(provider, event_body)
+        let decision = runtime_local_rewrite_native_first_event_error_class(event_body)
             .map(RuntimeLocalRewriteNativeFirstEvent::Retry)
             .unwrap_or(RuntimeLocalRewriteNativeFirstEvent::Commit);
         if appended_until < chunk.len() {
@@ -421,43 +425,6 @@ fn runtime_local_rewrite_finish_native_prefetch(
     }
     live.set_sse_continuation(prefetch);
     decision
-}
-
-fn runtime_local_rewrite_native_first_event_error_class(
-    _provider: RuntimeProviderBridgeKind,
-    event: &[u8],
-) -> Option<ProviderErrorClass> {
-    let payload = event
-        .split(|byte| *byte == b'\n')
-        .filter_map(|line| line.strip_prefix(b"data:"))
-        .filter_map(|line| std::str::from_utf8(line).ok())
-        .map(str::trim_start)
-        .collect::<Vec<_>>()
-        .join("\n");
-    let value = serde_json::from_str::<Value>(&payload).ok()?;
-    let is_error =
-        value.get("type").and_then(Value::as_str) == Some("error") || value.get("error").is_some();
-    if !is_error {
-        return None;
-    }
-    let code = value
-        .pointer("/error/type")
-        .and_then(Value::as_str)
-        .or_else(|| value.pointer("/error/code").and_then(Value::as_str))
-        .or_else(|| value.get("code").and_then(Value::as_str))
-        .map(str::to_ascii_lowercase);
-    match code.as_deref() {
-        Some("rate_limit_error" | "rate_limit_exceeded" | "rate_limit_exceeded_error") => {
-            Some(ProviderErrorClass::RateLimit)
-        }
-        Some("overloaded_error" | "server_is_overloaded") => Some(ProviderErrorClass::Transient),
-        Some("not_found_error" | "model_not_supported") => Some(ProviderErrorClass::NotFound),
-        Some("authentication_error") | Some("invalid_api_key") => Some(ProviderErrorClass::Auth),
-        Some(
-            "insufficient_quota" | "quota_exhausted" | "quota_exceeded" | "resource_exhausted",
-        ) => Some(ProviderErrorClass::Quota),
-        _ => None,
-    }
 }
 
 impl RuntimeLocalRewriteSsePrefetch {
@@ -1647,6 +1614,20 @@ mod tests {
 "#
                 .to_vec(),
                 RuntimeLocalRewriteNativeFirstEvent::Retry(ProviderErrorClass::RateLimit),
+            ),
+            (
+                br#"data: {"type":"error","error":{"type":"slow_down"}}
+
+"#
+                .to_vec(),
+                RuntimeLocalRewriteNativeFirstEvent::Retry(ProviderErrorClass::RateLimit),
+            ),
+            (
+                br#"data: {"type":"error","error":{"code":"credit_balance_exhausted"}}
+
+"#
+                .to_vec(),
+                RuntimeLocalRewriteNativeFirstEvent::Retry(ProviderErrorClass::Quota),
             ),
             (
                 br#"data: {"type":"error","error":{"type":"overloaded_error"}}

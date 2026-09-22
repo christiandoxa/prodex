@@ -38,7 +38,13 @@ pub fn classify_provider_error(
     }
     if matches!(
         normalized_code.as_str(),
-        "insufficient_quota" | "quota_exhausted" | "quota_exceeded" | "resource_exhausted"
+        "insufficient_quota"
+            | "credit_balance_exhausted"
+            | "organization_spend_limit_exceeded"
+            | "project_spend_limit_exceeded"
+            | "quota_exhausted"
+            | "quota_exceeded"
+            | "resource_exhausted"
     ) {
         return ProviderErrorClassification {
             class: ProviderErrorClass::Quota,
@@ -47,7 +53,7 @@ pub fn classify_provider_error(
     }
     if matches!(
         normalized_code.as_str(),
-        "rate_limit_exceeded" | "rate_limit_exceeded_error"
+        "rate_limit_exceeded" | "rate_limit_exceeded_error" | "slow_down"
     ) {
         return ProviderErrorClassification {
             class: ProviderErrorClass::RateLimit,
@@ -266,15 +272,35 @@ mod tests {
     }
 
     #[test]
-    fn structured_rate_limit_code_still_classifies_a_429_as_rotatable() {
-        let classified = classify_provider_error_body(
-            429,
-            br#"{"error":{"code":"rate_limit_exceeded"}}"#,
-            classify_provider_error,
-        );
+    fn structured_rate_limit_codes_still_classify_a_429_as_rotatable() {
+        for code in ["rate_limit_exceeded", "slow_down"] {
+            let body = serde_json::to_vec(&serde_json::json!({
+                "error": {"code": code}
+            }))
+            .unwrap();
+            let classified = classify_provider_error_body(429, &body, classify_provider_error);
 
-        assert_eq!(classified.class, ProviderErrorClass::RateLimit);
-        assert_eq!(classified.cooldown_ms, 60_000);
+            assert_eq!(classified.class, ProviderErrorClass::RateLimit, "{code}");
+            assert_eq!(classified.cooldown_ms, 60_000, "{code}");
+        }
+    }
+
+    #[test]
+    fn codex_0156_spend_limit_codes_classify_as_quota() {
+        for code in [
+            "credit_balance_exhausted",
+            "organization_spend_limit_exceeded",
+            "project_spend_limit_exceeded",
+        ] {
+            let body = serde_json::to_vec(&serde_json::json!({
+                "error": {"code": code}
+            }))
+            .unwrap();
+            let classified = classify_provider_error_body(429, &body, classify_provider_error);
+
+            assert_eq!(classified.class, ProviderErrorClass::Quota, "{code}");
+            assert_eq!(classified.cooldown_ms, 300_000, "{code}");
+        }
     }
 
     #[test]

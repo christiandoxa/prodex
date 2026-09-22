@@ -156,6 +156,18 @@ const RUNTIME_PAYLOAD_CODE_RULES: &[RuntimePayloadCodeRule] = &[
         signal: RuntimeHttpErrorSignal::ExplicitQuota,
     },
     RuntimePayloadCodeRule {
+        code: "credit_balance_exhausted",
+        signal: RuntimeHttpErrorSignal::ExplicitQuota,
+    },
+    RuntimePayloadCodeRule {
+        code: "organization_spend_limit_exceeded",
+        signal: RuntimeHttpErrorSignal::ExplicitQuota,
+    },
+    RuntimePayloadCodeRule {
+        code: "project_spend_limit_exceeded",
+        signal: RuntimeHttpErrorSignal::ExplicitQuota,
+    },
+    RuntimePayloadCodeRule {
         code: "quota_exhausted",
         signal: RuntimeHttpErrorSignal::ExplicitQuota,
     },
@@ -197,7 +209,7 @@ const RUNTIME_PAYLOAD_CODE_RULES: &[RuntimePayloadCodeRule] = &[
     },
     RuntimePayloadCodeRule {
         code: "slow_down",
-        signal: RuntimeHttpErrorSignal::ExplicitOverload,
+        signal: RuntimeHttpErrorSignal::ExplicitRateLimit,
     },
 ];
 

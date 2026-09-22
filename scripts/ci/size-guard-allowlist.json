@@ -56,8 +56,8 @@
   },
   {
     "file": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_upstream.rs",
-    "maxLines": 1944,
-    "reason": "Upstream transport remains capped at the current audited size after compatibility and gateway cleanup reduced the transport boundary."
+    "maxLines": 1925,
+    "reason": "Upstream transport remains capped at the current audited size after extracting native first-event error classification into a focused sibling."
   },
   {
     "file": "crates/prodex-app/src/runtime_proxy/presidio/tests.rs",
