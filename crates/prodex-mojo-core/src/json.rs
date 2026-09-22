@@ -84,6 +84,22 @@ unsafe extern "C" {
         capacity: i64,
         metadata: u64,
     ) -> i64;
+    fn prodex_mojo_openai_chat_request_v1(
+        abi: i64,
+        operation: i64,
+        flag: i64,
+        nodes: u64,
+        count: i64,
+        raw: u64,
+        raw_length: i64,
+        scratch: u64,
+        scratch_count: i64,
+        measuring: i64,
+        output: u64,
+        capacity: i64,
+        metadata: u64,
+    ) -> i64;
+
 }
 
 fn signed(value: usize) -> Result<i64, MojoError> {
@@ -204,4 +220,28 @@ pub(super) fn transform_json(
     }
     std::str::from_utf8(&output).map_err(|_| MojoError::InvalidOutput)?;
     Ok(Some(output))
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum OpenAiChatRequestTransform {
+    Body(Vec<u8>),
+    Rejected(String),
+}
+
+pub fn transform_openai_chat_request(
+    nodes: &[JsonNode<'_>],
+    raw: &str,
+) -> Result<OpenAiChatRequestTransform, MojoError> {
+    let output = transform_json(nodes, raw, 0, false, prodex_mojo_openai_chat_request_v1)?
+        .ok_or(MojoError::InvalidOutput)?;
+    let Some((&tag, payload)) = output.split_first() else {
+        return Err(MojoError::InvalidOutput);
+    };
+    match tag {
+        b'S' => Ok(OpenAiChatRequestTransform::Body(payload.to_vec())),
+        b'E' => String::from_utf8(payload.to_vec())
+            .map(OpenAiChatRequestTransform::Rejected)
+            .map_err(|_| MojoError::InvalidOutput),
+        _ => Err(MojoError::InvalidOutput),
+    }
 }
