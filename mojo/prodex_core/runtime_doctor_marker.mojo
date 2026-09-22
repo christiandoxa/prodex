@@ -352,10 +352,12 @@ def prodex_mojo_runtime_doctor_marker_known_v1(
     var marker = Pointer[mut=False, ProdexRichStringView, ImmUntrackedOrigin](
         unsafe_from_address=Int(marker_address)
     )[].copy()
-    if not rich_view_valid(marker, RUNTIME_DOCTOR_MARKER_MAX_BYTES):
+    if not rich_view_valid(marker, 0x7FFFFFFFFFFFFFFF):
         return 2
     var known = Pointer[mut=True, Int64, MutUntrackedOrigin](unsafe_from_address=Int(known_address))
-    known[] = 1 if runtime_doctor_marker_known(marker) else 0
+    # A parser event can be a long unknown token. The catalog bound limits
+    # matching work, not valid input length; unknown text must not crash doctor.
+    known[] = 1 if marker.len <= UInt(RUNTIME_DOCTOR_MARKER_MAX_BYTES) and runtime_doctor_marker_known(marker) else 0
     return 0
 
 comptime RUNTIME_DOCTOR_MARKER_PHASE_NONE: Int64 = 0
@@ -569,11 +571,16 @@ def prodex_mojo_runtime_doctor_marker_semantics_v1(
     var marker = Pointer[mut=False, ProdexRichStringView, ImmUntrackedOrigin](
         unsafe_from_address=Int(marker_address)
     )[].copy()
-    if not rich_view_valid(marker, RUNTIME_DOCTOR_MARKER_MAX_BYTES):
+    if not rich_view_valid(marker, 0x7FFFFFFFFFFFFFFF):
         return 2
     var output = Pointer[mut=True, Int64, MutUntrackedOrigin](
         unsafe_from_address=Int(output_address)
     )
+    if marker.len > UInt(RUNTIME_DOCTOR_MARKER_MAX_BYTES):
+        output[unsafe_offset=0] = RUNTIME_DOCTOR_MARKER_PHASE_NONE
+        output[unsafe_offset=1] = RUNTIME_DOCTOR_MARKER_SELECTION_NONE
+        output[unsafe_offset=2] = RUNTIME_DOCTOR_MARKER_ROUTE_NONE
+        return 0
     output[unsafe_offset=0] = runtime_doctor_marker_timeline_phase(marker)
     output[unsafe_offset=1] = runtime_doctor_marker_selection_bucket(marker)
     output[unsafe_offset=2] = runtime_doctor_marker_route_action(marker)

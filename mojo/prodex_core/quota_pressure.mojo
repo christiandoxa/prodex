@@ -85,16 +85,16 @@ def prodex_runtime_quota_snapshot_plan_v1(
         or five_hour_status > 4
         or weekly_status < 0
         or weekly_status > 4
-        or five_hour_remaining < 0
-        or five_hour_remaining > 100
-        or weekly_remaining < 0
-        or weekly_remaining > 100
         or route_kind < 0
         or route_kind > 3
         or stale_grace_seconds < 0
     ):
         return 1
 
+    # Remaining values are raw signed observations. The typed status and reset
+    # determine usability; rejecting a 300-percent fixture here used to panic
+    # before the caller could report inflight saturation. Do not clamp or
+    # reclassify the observation: the feature-off snapshot path preserves it.
     runtime_quota_snapshot_window(
         five_hour_status,
         five_hour_remaining,

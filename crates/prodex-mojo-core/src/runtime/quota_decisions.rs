@@ -141,11 +141,12 @@ pub fn precommit_budget_plan(
     })
 }
 
+/// Snapshot values are already classified observations, not percentage-policy
+/// inputs. Preserve signed remaining values exactly until an expired or unknown
+/// window becomes neutral, matching the existing Rust snapshot contract.
 pub fn quota_snapshot_plan(input: QuotaSnapshotPlanInput) -> Result<QuotaSnapshotPlan, MojoError> {
     if !(0..=4).contains(&input.five_hour_status)
         || !(0..=4).contains(&input.weekly_status)
-        || !(0..=100).contains(&input.five_hour_remaining)
-        || !(0..=100).contains(&input.weekly_remaining)
         || !(0..=3).contains(&input.route_kind)
         || input.stale_grace_seconds < 0
     {
@@ -169,9 +170,7 @@ pub fn quota_snapshot_plan(input: QuotaSnapshotPlanInput) -> Result<QuotaSnapsho
     };
     if status != 0
         || !(0..=4).contains(&output[0])
-        || !(0..=100).contains(&output[1])
         || !(0..=4).contains(&output[3])
-        || !(0..=100).contains(&output[4])
         || !(0..=4).contains(&output[6])
         || output[7..=9].iter().any(|value| !matches!(value, 0 | 1))
     {
