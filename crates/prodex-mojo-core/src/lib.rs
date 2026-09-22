@@ -118,3 +118,6 @@ pub mod launch;
 
 #[cfg(feature = "mojo-runtime")]
 pub mod launch_config;
+
+#[cfg(feature = "mojo-rich")]
+pub mod json;

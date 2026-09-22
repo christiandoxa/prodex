@@ -26,6 +26,7 @@ fn main() {
 
 fn emit_cargo_directives() {
     println!("cargo:rerun-if-env-changed=PRODEX_MOJO");
+
     println!("cargo:rerun-if-env-changed=PRODEX_MOJO_REQUIRED");
     println!("cargo:rerun-if-env-changed=AR");
     println!("cargo:rerun-if-env-changed=PRODEX_MOJO_TARGET");
@@ -37,6 +38,20 @@ fn emit_cargo_directives() {
 }
 
 fn emit_source_rerun_directives(sources: &[&str], manifest_dir: &Path) {
+    for source in [
+        "parsed_json.mojo",
+        "json_sink.mojo",
+        "chat_tool_names.mojo",
+        "chat_tool_shapes.mojo",
+    ] {
+        println!(
+            "cargo:rerun-if-changed={}",
+            manifest_dir
+                .join("../../mojo/prodex_core")
+                .join(source)
+                .display()
+        );
+    }
     for source in sources {
         println!(
             "cargo:rerun-if-changed={}",
@@ -300,6 +315,7 @@ fn selected_sources() -> Vec<&'static str> {
     {
         sources.push("../../mojo/prodex_core/smart_context_normalization.mojo");
         sources.push("../../mojo/prodex_core/rich_abi.mojo");
+        sources.push("../../mojo/prodex_core/chat_tools.mojo");
         sources.push("../../mojo/prodex_core/rich_context_v2.mojo");
         sources.push("../../mojo/prodex_core/rich_route.mojo");
         sources.push("../../mojo/prodex_core/rich_fallback.mojo");
