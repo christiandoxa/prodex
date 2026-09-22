@@ -150,3 +150,24 @@ serialized benchmark runs measured 299,685 ns for 64 function tools against
 4,096-byte contents measured 1,801,497 ns against 183,095 ns. Those are real
 complete-boundary costs, not speedup claims; see the benchmark record for scope.
 The writer and both JSON kernels compile to objects on all six release triples.
+
+## Broader integration findings
+
+The complete Mojo app library was exercised as two disjoint partitions. The
+1,540 non-main-internal tests passed. The initial 408-test main-internal run
+found two previously unexercised Mojo contract mismatches: raw quota snapshot
+observations above 100 were rejected before inflight admission, and long unknown
+doctor log tokens were treated as invalid instead of unrecognized markers.
+
+Quota snapshot planning now preserves signed remaining observations exactly as
+the Rust snapshot path does; status, route and grace validation remain intact.
+Doctor still validates complete UTF-8 input, but limits catalog matching rather
+than rejecting a valid long token. New tests cover extreme signed observations,
+reset/hold semantics, long Unicode text and malformed UTF-8. Both original app
+regressions pass without changing their fixtures or selecting a Rust fallback.
+The complete 40-root Mojo archive was freshly compiled from current sources to
+exclude stale incremental-archive artifacts from this validation.
+
+Provider replay initially rejected Kiro secret fixtures because the campaign's
+own TMPDIR had mode 775. Making that one owned directory private (700) allowed
+the unchanged 499-test replay suite to pass. No secret-store policy was relaxed.
