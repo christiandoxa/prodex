@@ -2820,6 +2820,7 @@ dependencies = [
  "anyhow",
  "prodex-codex-config",
  "prodex-core",
+ "prodex-mojo-core",
  "prodex-quota",
  "prodex-redaction",
  "prodex-runtime-proxy",

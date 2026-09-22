@@ -3,14 +3,22 @@ use runtime_proxy_crate as runtime_proxy;
 use std::ffi::OsString;
 use std::net::SocketAddr;
 
+#[cfg(any(not(feature = "mojo"), test))]
 const PRODEX_CODEX_FULL_ACCESS_ARG: &str = "--full-access";
+#[cfg(any(not(feature = "mojo"), test))]
 const PRODEX_DRY_RUN_ARG: &str = "--dry-run";
+#[cfg(any(not(feature = "mojo"), test))]
 const CODEX_BYPASS_APPROVALS_AND_SANDBOX_ARG: &str = "--dangerously-bypass-approvals-and-sandbox";
+#[cfg(any(not(feature = "mojo"), test))]
 const CODEX_PROFILE_ARG: &str = "--profile";
+#[cfg(any(not(feature = "mojo"), test))]
 const CODEX_LEGACY_PROFILE_V2_ARG: &str = "--profile-v2";
+#[cfg(any(not(feature = "mojo"), test))]
 const CODEX_THREAD_SOURCE_ARG: &str = "--thread-source";
+#[cfg(any(not(feature = "mojo"), test))]
 const PRODEX_GOVERNED_HTTP_PROVIDER_ID: &str = "prodex-openai-governed-http";
 
+#[cfg(any(not(feature = "mojo"), test))]
 pub fn runtime_proxy_codex_passthrough_args(
     runtime_proxy: Option<RuntimeProxyCodexEndpoint<'_>>,
     user_args: &[OsString],
@@ -48,6 +56,7 @@ pub fn runtime_proxy_codex_passthrough_args(
         .unwrap_or_else(|| user_args.to_vec())
 }
 
+#[cfg(any(not(feature = "mojo"), test))]
 fn runtime_proxy_governed_http_codex_args(
     listen_addr: SocketAddr,
     openai_mount_path: &str,
@@ -92,6 +101,7 @@ fn runtime_proxy_governed_http_codex_args(
     args
 }
 
+#[cfg(any(not(feature = "mojo"), test))]
 fn governed_http_config_insertion_index(args: &[OsString]) -> usize {
     let Some(command_index) = first_codex_positional_arg_index(args) else {
         return args.len();
@@ -115,6 +125,7 @@ fn governed_http_config_insertion_index(args: &[OsString]) -> usize {
     nested
 }
 
+#[cfg(any(not(feature = "mojo"), test))]
 pub fn normalize_run_codex_args(codex_args: &[OsString]) -> Vec<OsString> {
     let Some(index) = first_codex_positional_arg_index(codex_args) else {
         return codex_args.to_vec();
@@ -133,6 +144,7 @@ pub fn normalize_run_codex_args(codex_args: &[OsString]) -> Vec<OsString> {
     normalized
 }
 
+#[cfg(any(not(feature = "mojo"), test))]
 pub fn codex_resume_session_id(codex_args: &[OsString]) -> Option<&str> {
     let resume_index = codex_resume_command_index(codex_args)?;
     let resume_args = &codex_args[(resume_index + 1)..];
@@ -146,10 +158,12 @@ pub fn codex_resume_session_id(codex_args: &[OsString]) -> Option<&str> {
     resume_args.get(target_index)?.to_str()
 }
 
+#[cfg(any(not(feature = "mojo"), test))]
 pub fn codex_resume_requested(codex_args: &[OsString]) -> bool {
     codex_resume_command_index(codex_args).is_some()
 }
 
+#[cfg(any(not(feature = "mojo"), test))]
 pub fn retarget_codex_tui_resume_args(codex_args: &[OsString], session_id: &str) -> Vec<OsString> {
     let positional_index = first_codex_positional_arg_index(codex_args);
     let command_index = positional_index
@@ -170,6 +184,7 @@ pub fn retarget_codex_tui_resume_args(codex_args: &[OsString], session_id: &str)
     args
 }
 
+#[cfg(any(not(feature = "mojo"), test))]
 fn codex_resume_command_index(codex_args: &[OsString]) -> Option<usize> {
     let command_index = first_codex_positional_arg_index(codex_args)?;
     match codex_args.get(command_index)?.to_str()? {
@@ -184,6 +199,7 @@ fn codex_resume_command_index(codex_args: &[OsString]) -> Option<usize> {
     }
 }
 
+#[cfg(any(not(feature = "mojo"), test))]
 pub(crate) fn first_codex_positional_arg_index(codex_args: &[OsString]) -> Option<usize> {
     let mut index = 0;
     while index < codex_args.len() {
@@ -209,6 +225,7 @@ pub(crate) fn first_codex_positional_arg_index(codex_args: &[OsString]) -> Optio
     None
 }
 
+#[cfg(any(not(feature = "mojo"), test))]
 pub fn is_codex_exec_invocation(codex_args: &[OsString]) -> bool {
     first_codex_positional_arg_index(codex_args)
         .and_then(|index| codex_args.get(index))
@@ -216,6 +233,7 @@ pub fn is_codex_exec_invocation(codex_args: &[OsString]) -> bool {
         == Some("exec")
 }
 
+#[cfg(any(not(feature = "mojo"), test))]
 pub fn runtime_launch_cli_model(args: &[OsString]) -> Option<String> {
     let mut index = 0;
     while index < args.len() {
@@ -241,6 +259,7 @@ pub fn runtime_launch_cli_model(args: &[OsString]) -> Option<String> {
     None
 }
 
+#[cfg(any(not(feature = "mojo"), test))]
 fn codex_option_takes_separate_value(arg: &str) -> bool {
     matches!(
         arg,
@@ -272,6 +291,7 @@ fn codex_option_takes_separate_value(arg: &str) -> bool {
     )
 }
 
+#[cfg(any(not(feature = "mojo"), test))]
 pub(crate) fn extend_without_codex_thread_source(output: &mut Vec<OsString>, args: &[OsString]) {
     let mut index = 0;
     while index < args.len() {
@@ -293,6 +313,7 @@ pub(crate) fn extend_without_codex_thread_source(output: &mut Vec<OsString>, arg
     }
 }
 
+#[cfg(any(not(feature = "mojo"), test))]
 pub(crate) fn extend_without_codex_positionals(output: &mut Vec<OsString>, args: &[OsString]) {
     let mut index = 0;
     while index < args.len() {
@@ -311,6 +332,7 @@ pub(crate) fn extend_without_codex_positionals(output: &mut Vec<OsString>, args:
     }
 }
 
+#[cfg(any(not(feature = "mojo"), test))]
 fn codex_option_with_inline_value(arg: &str) -> bool {
     if arg.starts_with("--") {
         return arg.contains('=');
@@ -320,6 +342,7 @@ fn codex_option_with_inline_value(arg: &str) -> bool {
         .any(|prefix| arg.starts_with(prefix) && arg.len() > prefix.len())
 }
 
+#[cfg(any(not(feature = "mojo"), test))]
 fn codex_flag_option(arg: &str) -> bool {
     matches!(
         arg,
@@ -344,6 +367,7 @@ fn codex_flag_option(arg: &str) -> bool {
     )
 }
 
+#[cfg(any(not(feature = "mojo"), test))]
 fn looks_like_codex_session_id(value: &str) -> bool {
     let parts = value.split('-').collect::<Vec<_>>();
     if parts.len() != 5 {
@@ -355,6 +379,7 @@ fn looks_like_codex_session_id(value: &str) -> bool {
     })
 }
 
+#[cfg(any(not(feature = "mojo"), test))]
 pub fn runtime_proxy_codex_args(listen_addr: SocketAddr, user_args: &[OsString]) -> Vec<OsString> {
     runtime_proxy_codex_args_with_mount_path(
         listen_addr,
@@ -363,6 +388,7 @@ pub fn runtime_proxy_codex_args(listen_addr: SocketAddr, user_args: &[OsString])
     )
 }
 
+#[cfg(any(not(feature = "mojo"), test))]
 pub fn runtime_proxy_codex_args_with_mount_path(
     listen_addr: SocketAddr,
     openai_mount_path: &str,
@@ -390,6 +416,7 @@ pub fn runtime_proxy_codex_args_with_mount_path(
     args
 }
 
+#[cfg(any(not(feature = "mojo"), test))]
 pub fn runtime_proxy_local_model_provider_codex_args(
     listen_addr: SocketAddr,
     mount_path: &str,
@@ -413,6 +440,7 @@ pub fn runtime_proxy_local_model_provider_codex_args(
     args
 }
 
+#[cfg(any(not(feature = "mojo"), test))]
 fn runtime_proxy_realtime_codex_args(
     realtime_ws_base_url: Option<&str>,
     realtime_ws_model: Option<&str>,
@@ -452,6 +480,7 @@ fn runtime_proxy_realtime_codex_args(
     args
 }
 
+#[cfg(any(not(feature = "mojo"), test))]
 enum CodexConfigArg<'a> {
     Stop,
     Separate(&'a OsString),
@@ -460,6 +489,7 @@ enum CodexConfigArg<'a> {
     Other,
 }
 
+#[cfg(any(not(feature = "mojo"), test))]
 fn codex_config_arg(args: &[OsString], index: usize) -> CodexConfigArg<'_> {
     let Some(arg) = args[index].to_str() else {
         return CodexConfigArg::Other;
@@ -484,6 +514,7 @@ fn codex_config_arg(args: &[OsString], index: usize) -> CodexConfigArg<'_> {
     CodexConfigArg::Other
 }
 
+#[cfg(any(not(feature = "mojo"), test))]
 fn rewrite_codex_config_overrides(
     user_args: &[OsString],
     overrides: &[(String, String)],
@@ -537,6 +568,7 @@ fn rewrite_codex_config_overrides(
     (args, replaced)
 }
 
+#[cfg(any(not(feature = "mojo"), test))]
 fn rewrite_codex_config_assignment(
     assignment: Option<&str>,
     overrides: &[(String, String)],
@@ -551,12 +583,14 @@ fn rewrite_codex_config_assignment(
     OsString::from(format!("{prefix}{value}"))
 }
 
+#[cfg(any(not(feature = "mojo"), test))]
 fn codex_config_override_insertion_index(args: &[OsString]) -> usize {
     first_codex_positional_arg_index(args)
         .or_else(|| args.iter().position(|arg| arg == "--"))
         .unwrap_or(args.len())
 }
 
+#[cfg(any(not(feature = "mojo"), test))]
 fn runtime_proxy_matching_config_override(
     assignment: Option<&str>,
     overrides: &[(String, String)],
@@ -569,6 +603,7 @@ fn runtime_proxy_matching_config_override(
         .map(|(index, (key, value))| (index, format!("{key}={value}")))
 }
 
+#[cfg(any(not(feature = "mojo"), test))]
 fn normalize_mount_path(mount_path: &str) -> String {
     let trimmed = mount_path.trim();
     if trimmed.is_empty() || trimmed == "/" {
@@ -577,6 +612,7 @@ fn normalize_mount_path(mount_path: &str) -> String {
     format!("/{}", trimmed.trim_matches('/'))
 }
 
+#[cfg(any(not(feature = "mojo"), test))]
 fn config_assignment_key(assignment: Option<&str>) -> Option<&str> {
     assignment
         .and_then(|assignment| assignment.split_once('='))
@@ -584,6 +620,7 @@ fn config_assignment_key(assignment: Option<&str>) -> Option<&str> {
         .filter(|key| !key.is_empty())
 }
 
+#[cfg(any(not(feature = "mojo"), test))]
 pub fn prepare_codex_launch_args(
     codex_args: &[OsString],
     full_access_requested: bool,
@@ -599,11 +636,13 @@ pub fn prepare_codex_launch_args(
     (codex_args, include_code_review)
 }
 
+#[cfg(any(not(feature = "mojo"), test))]
 pub fn scope_codex_exec_config_args(codex_args: &[OsString]) -> Vec<OsString> {
     let codex_args = scope_codex_exec_config_args_to_exec(codex_args);
     scope_codex_exec_resume_config_args_to_resume(&codex_args)
 }
 
+#[cfg(any(not(feature = "mojo"), test))]
 fn scope_codex_exec_config_args_to_exec(codex_args: &[OsString]) -> Vec<OsString> {
     let Some(exec_index) = first_codex_positional_arg_index(codex_args) else {
         return codex_args.to_vec();
@@ -651,6 +690,7 @@ fn scope_codex_exec_config_args_to_exec(codex_args: &[OsString]) -> Vec<OsString
     args
 }
 
+#[cfg(any(not(feature = "mojo"), test))]
 fn scope_codex_exec_resume_config_args_to_resume(codex_args: &[OsString]) -> Vec<OsString> {
     let Some(exec_index) = first_codex_positional_arg_index(codex_args) else {
         return codex_args.to_vec();
@@ -709,6 +749,7 @@ fn scope_codex_exec_resume_config_args_to_resume(codex_args: &[OsString]) -> Vec
     args
 }
 
+#[cfg(any(not(feature = "mojo"), test))]
 pub fn normalize_codex_profile_args(codex_args: &[OsString]) -> Vec<OsString> {
     let mut after_separator = false;
     codex_args
@@ -735,6 +776,7 @@ pub fn normalize_codex_profile_args(codex_args: &[OsString]) -> Vec<OsString> {
         .collect()
 }
 
+#[cfg(any(not(feature = "mojo"), test))]
 pub fn extract_prodex_dry_run_flag(codex_args: &[OsString]) -> (bool, Vec<OsString>) {
     let mut dry_run = false;
     let mut after_separator = false;
@@ -751,6 +793,7 @@ pub fn extract_prodex_dry_run_flag(codex_args: &[OsString]) -> (bool, Vec<OsStri
     (dry_run, filtered)
 }
 
+#[cfg(any(not(feature = "mojo"), test))]
 pub fn prodex_dry_run_requested(codex_args: &[OsString]) -> bool {
     codex_args
         .iter()
@@ -758,12 +801,14 @@ pub fn prodex_dry_run_requested(codex_args: &[OsString]) -> bool {
         .any(|arg| arg == PRODEX_DRY_RUN_ARG)
 }
 
+#[cfg(any(not(feature = "mojo"), test))]
 pub fn is_review_invocation(args: &[OsString]) -> bool {
     args.iter()
         .take_while(|arg| *arg != "--")
         .any(|arg| arg == "review")
 }
 
+#[cfg(any(not(feature = "mojo"), test))]
 fn extract_prodex_full_access_flag(codex_args: &[OsString]) -> (bool, Vec<OsString>) {
     let mut full_access = false;
     let mut after_separator = false;
@@ -780,12 +825,14 @@ fn extract_prodex_full_access_flag(codex_args: &[OsString]) -> (bool, Vec<OsStri
     (full_access, filtered)
 }
 
+#[cfg(any(not(feature = "mojo"), test))]
 fn is_inline_config_override_arg(arg: &str) -> bool {
     arg.strip_prefix("--config=")
         .or_else(|| arg.strip_prefix("-c"))
         .is_some_and(|value| value.contains('='))
 }
 
+#[cfg(any(not(feature = "mojo"), test))]
 fn codex_launch_args_with_full_access(codex_args: &[OsString], full_access: bool) -> Vec<OsString> {
     if !full_access {
         return codex_args.to_vec();
@@ -797,6 +844,7 @@ fn codex_launch_args_with_full_access(codex_args: &[OsString], full_access: bool
     args
 }
 
+#[cfg(any(not(feature = "mojo"), test))]
 fn toml_string_literal(value: &str) -> String {
     format!("\"{}\"", value.replace('\\', "\\\\").replace('"', "\\\""))
 }
