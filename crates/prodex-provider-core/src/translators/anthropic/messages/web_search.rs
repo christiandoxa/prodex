@@ -4,9 +4,11 @@ use super::super::anthropic_mojo_value;
 use super::json_fragment;
 #[cfg(feature = "mojo")]
 use prodex_mojo_core::rich::{AnthropicRequestKernelInput, AnthropicRequestKernelOperation};
-use serde_json::{Map, Value, json};
+#[cfg(any(not(feature = "mojo"), test))]
+use serde_json::Map;
+use serde_json::{Value, json};
 
-#[cfg(not(feature = "mojo"))]
+#[cfg(any(not(feature = "mojo"), test))]
 pub(super) fn anthropic_web_search_tool(value: &Value) -> Result<(Value, Option<Value>), String> {
     let Some(options) = value.as_object() else {
         return Err("web_search_options must be an object".to_string());
@@ -32,34 +34,7 @@ pub(super) fn anthropic_web_search_tool(value: &Value) -> Result<(Value, Option<
     Ok((Value::Object(tool), ignored_context_size))
 }
 
-#[cfg(feature = "mojo")]
-pub(super) fn anthropic_web_search_tool(value: &Value) -> Result<(Value, Option<Value>), String> {
-    let Some(options) = value.as_object() else {
-        return Err("web_search_options must be an object".to_string());
-    };
-    let ignored_context_size = validate_anthropic_web_search_options(options)?;
-    let allowed_domains = options
-        .get("allowed_domains")
-        .map(json_fragment)
-        .transpose()?;
-    let blocked_domains = options
-        .get("blocked_domains")
-        .map(json_fragment)
-        .transpose()?;
-    let user_location = options
-        .get("user_location")
-        .map(json_fragment)
-        .transpose()?;
-    let max_uses = options.get("max_uses").map(json_fragment).transpose()?;
-    let mut input =
-        AnthropicRequestKernelInput::new(AnthropicRequestKernelOperation::WebSearchTool);
-    input.allowed_domains = allowed_domains.as_deref();
-    input.blocked_domains = blocked_domains.as_deref();
-    input.user_location = user_location.as_deref();
-    input.max_uses = max_uses.as_deref();
-    Ok((anthropic_mojo_value(input)?, ignored_context_size))
-}
-
+#[cfg(any(not(feature = "mojo"), test))]
 fn validate_anthropic_web_search_options(
     options: &Map<String, Value>,
 ) -> Result<Option<Value>, String> {

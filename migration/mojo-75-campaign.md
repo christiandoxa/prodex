@@ -185,3 +185,22 @@ Validation includes explicit empty/wrong-type precedence fixtures plus 5,000 det
 generated requests. The Mojo boundary also has raw ABI, malformed-tree, and reentrancy tests.
 The kernel compiles with pinned Mojo 1.0.0 for all six release target triples. No production
 Rust recomputation is selected after a Mojo error.
+
+## Complete Anthropic Messages request wave
+
+The Anthropic chat-to-Messages request bridge now has one authoritative Mojo
+transform over the shared caller-owned JSON arena. Mojo validates accepted chat
+fields, message/tool-call structure, web-search options and tool-choice shape,
+merges adjacent roles, converts system/developer messages, normalizes tool names,
+constructs tool-use/tool-result blocks, applies request defaults, and records the
+existing web-search context-size degradation contract. Rust retains Serde JSON
+acquisition/materialization, provider result DTOs, time, transport, and the
+feature-off/test oracle only.
+
+The production path no longer composes the former per-fragment Mojo request
+builder or Rust-side tool-shape decisions. Focused evidence includes four raw
+ABI tests, explicit edge fixtures, 5,000 generated differential chat requests,
+18 existing Anthropic Mojo tests, 13 feature-off Anthropic tests, the complete
+provider Mojo suite (238 passed, two manual benchmarks ignored), focused
+all-target Clippy, and object compilation for all six release triples with the
+pinned Mojo 1.0.0 compiler. No speedup is claimed.
