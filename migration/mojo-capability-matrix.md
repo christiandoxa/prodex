@@ -101,7 +101,7 @@ production paths and Mojo sources reachable from the `mojo-core` build roots con
 denominator. The current audited tree measures 26,420 reachable Mojo LOC out of 366,913 total
 production LOC (`7.200617040006759%`).
 
-The general release floor is `7.0%`; the long-term project target remains `10.0%`. The report
+The general release floor is `7.0%`; the long-term project target is now `75.0%`. The report
 exposes separate floor and target fields/statuses, and `--check` requires the floor plus
 non-regression of the pinned reachable-Mojo baseline. A missing or newly unselected baseline
 source fails unless an explicit, reasoned production removal/rearchitecture record is added to

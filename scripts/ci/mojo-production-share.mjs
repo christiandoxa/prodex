@@ -14,7 +14,7 @@ const REQUIRED_BASELINE_SHA = "2531c7a345f1607a18aa926e204b4d02cc322167";
 const REQUIRED_MOJO_NON_REGRESSION_BASELINE_SHA = "731d7a776527ac65c72384cc68459200715d8793";
 const REQUIRED_HISTORICAL_RELEASE_TARGET = "0.421.0";
 const REQUIRED_RELEASE_FLOOR_PERCENT = 7;
-const REQUIRED_PROJECT_TARGET_PERCENT = 10;
+const REQUIRED_PROJECT_TARGET_PERCENT = 75;
 const REQUIRED_PRODUCTION_BUILD_FEATURE = "mojo-core";
 const DEFAULT_SNAPSHOT_PATH = "migration/mojo-production-share-baseline-0.419.2.json";
 const EXCLUDED_COMPONENTS = /^(?:tests?|benches|examples|fixtures?|snapshots|generated|vendor|target|fuzz|test-support|bench_support|prodex-bench-support)$/iu;
@@ -800,7 +800,7 @@ function selfTest() {
       ...policy,
       project_target_percent: REQUIRED_PROJECT_TARGET_PERCENT - 0.01,
     }),
-    /project target must remain 10%/u,
+    /project target must remain 75%/u,
   );
   assert.deepEqual(
     selectedMojoSourcesFromBuild([

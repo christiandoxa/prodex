@@ -27,7 +27,7 @@ function manifest(overrides = {}) {
     baseline_snapshot: "migration/mojo-production-share-baseline-0.419.2.json",
     counting_rules_version: 1,
     release_floor_percent: 7,
-    project_target_percent: 10,
+    project_target_percent: 75,
     mojo_non_regression: {
       baseline_sha: NON_REGRESSION_BASELINE_SHA,
       baseline_source_inventory_sha256: "48cddc617b019666bd72efa5c2fb91c2e1b40400ded1dfeee73877240662c27e",
@@ -46,7 +46,7 @@ function share(mojoLoc, overrides = {}) {
       broad_total_production_loc: 10_000,
     },
     release_floor_percent: 7,
-    project_target_percent: 10,
+    project_target_percent: 75,
     mojo_non_regression_met: true,
     ...overrides,
   };
@@ -89,14 +89,14 @@ test("manifest separates general release floor, project target, and frozen polic
   const current = manifest();
   assert.equal(validateManifestMetadata(current), current);
   assert.equal(current.release_floor_percent, 7);
-  assert.equal(current.project_target_percent, 10);
+  assert.equal(current.project_target_percent, 75);
   assert.throws(
     () => validateManifestMetadata({ ...current, release_floor_percent: 6.99 }),
     /release floor must remain 7%/u,
   );
   assert.throws(
-    () => validateManifestMetadata({ ...current, project_target_percent: 9.99 }),
-    /project target must remain 10%/u,
+    () => validateManifestMetadata({ ...current, project_target_percent: 74.99 }),
+    /project target must remain 75%/u,
   );
   assert.throws(
     () => validateManifestMetadata({
@@ -120,7 +120,9 @@ test("release floor and project target thresholds are exact", async (t) => {
     ["7.00%", 700, true, false, true],
     ["7.200617%", 720, true, false, true],
     ["9.99%", 999, true, false, true],
-    ["10.00%", 1_000, true, true, true],
+    ["10.00%", 1_000, true, false, true],
+    ["74.99%", 7_499, true, false, true],
+    ["75.00%", 7_500, true, true, true],
   ];
   for (const [label, mojoLoc, floorMet, targetMet, releaseMet] of cases) {
     await t.test(`threshold ${label}`, () => {
@@ -237,11 +239,11 @@ test("canonical report exposes separate statuses and --check enforces only floor
     report.final.broad_mojo_production_loc + report.final.broad_rust_production_loc,
   );
   assert.ok(report.final.broad_mojo_production_loc >= 26_420);
-  const projectTargetMet = inventory.mojo_production_loc * 100 >= inventory.total_production_loc * 10;
+  const projectTargetMet = inventory.mojo_production_loc * 100 >= inventory.total_production_loc * 75;
   assert.equal(report.release_floor_percent, 7);
   assert.equal(report.release_floor_met, true);
   assert.equal(report.release_floor_status, "PASS");
-  assert.equal(report.project_target_percent, 10);
+  assert.equal(report.project_target_percent, 75);
   assert.equal(report.project_target_met, projectTargetMet);
   assert.equal(report.project_target_status, projectTargetMet ? "MET" : "NOT_YET_MET");
   assert.equal(report.mojo_non_regression_met, true);
