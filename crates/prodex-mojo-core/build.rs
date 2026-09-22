@@ -43,6 +43,10 @@ fn emit_source_rerun_directives(sources: &[&str], manifest_dir: &Path) {
         "json_sink.mojo",
         "chat_tool_names.mojo",
         "chat_tool_shapes.mojo",
+        "deepseek_message_index.mojo",
+        "deepseek_message_common.mojo",
+        "deepseek_message_adjacency.mojo",
+        "deepseek_message_metadata.mojo",
     ] {
         println!(
             "cargo:rerun-if-changed={}",
@@ -316,6 +320,7 @@ fn selected_sources() -> Vec<&'static str> {
         sources.push("../../mojo/prodex_core/smart_context_normalization.mojo");
         sources.push("../../mojo/prodex_core/rich_abi.mojo");
         sources.push("../../mojo/prodex_core/chat_tools.mojo");
+        sources.push("../../mojo/prodex_core/deepseek_messages.mojo");
         sources.push("../../mojo/prodex_core/rich_context_v2.mojo");
         sources.push("../../mojo/prodex_core/rich_route.mojo");
         sources.push("../../mojo/prodex_core/rich_fallback.mojo");

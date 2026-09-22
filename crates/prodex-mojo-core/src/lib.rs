@@ -121,3 +121,6 @@ pub mod launch_config;
 
 #[cfg(feature = "mojo-rich")]
 pub mod json;
+
+#[cfg(feature = "mojo-rich")]
+pub mod deepseek_messages;

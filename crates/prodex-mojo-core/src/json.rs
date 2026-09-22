@@ -112,6 +112,25 @@ pub fn transform_chat_tools(
     operation: ChatToolOperation,
     thinking: bool,
 ) -> Result<Option<Vec<u8>>, MojoError> {
+    transform_json(
+        nodes,
+        raw,
+        operation as i64,
+        thinking,
+        prodex_mojo_chat_tools_v1,
+    )
+}
+
+pub(super) type JsonKernel =
+    unsafe extern "C" fn(i64, i64, i64, u64, i64, u64, i64, u64, i64, i64, u64, i64, u64) -> i64;
+
+pub(super) fn transform_json(
+    nodes: &[JsonNode<'_>],
+    raw: &str,
+    operation: i64,
+    flag: bool,
+    kernel: JsonKernel,
+) -> Result<Option<Vec<u8>>, MojoError> {
     if nodes.is_empty() || nodes.len() > i64::MAX as usize / 80 {
         return Err(MojoError::InvalidInput);
     }
@@ -147,10 +166,10 @@ pub fn transform_chat_tools(
         // caller-owned output/scratch/meta allocations for the synchronous call.
         // The kernel validates indices and parent relationships before traversal.
         status(unsafe {
-            prodex_mojo_chat_tools_v1(
+            kernel(
                 1,
-                operation as i64,
-                i64::from(thinking),
+                operation,
+                i64::from(flag),
                 input.as_ptr() as u64,
                 signed(input.len())?,
                 raw.as_ptr() as u64,
