@@ -558,10 +558,10 @@ def runtime_error_code_class(
     end: Int64,
     mode: Int64,
 ) -> Int64:
-    var quota = runtime_error_range_matches(ptr, start, end, StringSlice("insufficient_quota"), True) or runtime_error_range_matches(ptr, start, end, StringSlice("quota_exhausted"), True) or runtime_error_range_matches(ptr, start, end, StringSlice("quota_exceeded"), True) or runtime_error_range_matches(ptr, start, end, StringSlice("resource_exhausted"), True) or runtime_error_range_matches(ptr, start, end, StringSlice("usage_limit_reached"), True) or runtime_error_range_matches(ptr, start, end, StringSlice("usage_not_included"), True) or runtime_error_range_matches(ptr, start, end, StringSlice("workspace_member_credits_depleted"), True)
-    var rate = runtime_error_range_matches(ptr, start, end, StringSlice("rate_limit_exceeded"), True) or runtime_error_range_matches(ptr, start, end, StringSlice("rate_limit_exceeded_error"), True)
+    var quota = runtime_error_range_matches(ptr, start, end, StringSlice("insufficient_quota"), True) or runtime_error_range_matches(ptr, start, end, StringSlice("credit_balance_exhausted"), True) or runtime_error_range_matches(ptr, start, end, StringSlice("organization_spend_limit_exceeded"), True) or runtime_error_range_matches(ptr, start, end, StringSlice("project_spend_limit_exceeded"), True) or runtime_error_range_matches(ptr, start, end, StringSlice("quota_exhausted"), True) or runtime_error_range_matches(ptr, start, end, StringSlice("quota_exceeded"), True) or runtime_error_range_matches(ptr, start, end, StringSlice("resource_exhausted"), True) or runtime_error_range_matches(ptr, start, end, StringSlice("usage_limit_reached"), True) or runtime_error_range_matches(ptr, start, end, StringSlice("usage_not_included"), True) or runtime_error_range_matches(ptr, start, end, StringSlice("workspace_member_credits_depleted"), True)
+    var rate = runtime_error_range_matches(ptr, start, end, StringSlice("rate_limit_exceeded"), True) or runtime_error_range_matches(ptr, start, end, StringSlice("rate_limit_exceeded_error"), True) or runtime_error_range_matches(ptr, start, end, StringSlice("slow_down"), True)
     var profile = runtime_error_range_matches(ptr, start, end, StringSlice("deactivated_workspace"), True)
-    var overload = runtime_error_range_matches(ptr, start, end, StringSlice("server_is_overloaded"), True) or runtime_error_range_matches(ptr, start, end, StringSlice("slow_down"), True)
+    var overload = runtime_error_range_matches(ptr, start, end, StringSlice("server_is_overloaded"), True)
     if mode == RUNTIME_ERROR_MODE_CODE_QUOTA:
         if quota:
             return RUNTIME_ERROR_CLASS_QUOTA

@@ -131,6 +131,15 @@ fn codex_content_policy_errors_pass_through_without_quota_rotation() {
 fn explicit_quota_payload_corpus_rotates_only_before_commit_for_supported_statuses() {
     for (code, message) in [
         ("insufficient_quota", "Quota exhausted"),
+        ("credit_balance_exhausted", "Credit balance exhausted"),
+        (
+            "organization_spend_limit_exceeded",
+            "Organization spend limit exceeded",
+        ),
+        (
+            "project_spend_limit_exceeded",
+            "Project spend limit exceeded",
+        ),
         ("quota_exhausted", "Quota exhausted"),
         ("quota_exceeded", "Quota exceeded"),
         ("resource_exhausted", "Resource exhausted"),
@@ -367,7 +376,13 @@ fn usage_limit_message_rotates_before_commit_only_for_non_429_quota_statuses() {
 
 #[test]
 fn explicit_quota_codes_rotate_only_before_commit() {
-    for code in ["insufficient_quota", "usage_not_included"] {
+    for code in [
+        "insufficient_quota",
+        "credit_balance_exhausted",
+        "organization_spend_limit_exceeded",
+        "project_spend_limit_exceeded",
+        "usage_not_included",
+    ] {
         let body = json_body(serde_json::json!({
             "error": {
                 "code": code,
@@ -485,6 +500,11 @@ fn streaming_retry_requires_a_structured_explicit_code() {
     for (code, expected_class, expected_action) in [
         (
             "rate_limit_exceeded",
+            RuntimeHttpErrorClass::RateLimited,
+            RuntimeHttpErrorAction::RetryProfile,
+        ),
+        (
+            "slow_down",
             RuntimeHttpErrorClass::RateLimited,
             RuntimeHttpErrorAction::RetryProfile,
         ),

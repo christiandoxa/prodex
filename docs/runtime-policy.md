@@ -654,7 +654,7 @@ shared-state integration around those operations.
 - An available weekly quota window remains eligible when the 5-hour window is absent or unknown; explicit exhaustion still blocks selection.
 - OpenAI `additional_rate_limits` are preserved as independent backend buckets, including their
   explicit `allowed`, `limit_reached`, `ordinaryUsageAllowed`, `normalModelSlug`, and unknown
-  future fields. The pinned Codex `rust-v0.155.1` contract exposes backend admission and model
+  future fields. The pinned Codex `rust-v0.156.0` contract exposes backend admission and model
   mapping metadata. Reserve-aware usage reads advertise
   `x-openai-codex-luna-reserve: 1`. Prodex requires `ordinaryUsageAllowed=false`,
   `normalModelSlug=gpt-5.6-luna`, and a usable explicitly mapped `gpt-reserve` bucket before

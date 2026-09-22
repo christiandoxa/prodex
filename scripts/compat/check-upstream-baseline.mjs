@@ -4,7 +4,7 @@ import path from "node:path";
 import { repoRoot } from "../npm/common.mjs";
 
 const DEFAULT_BASELINE_PATH = path.join(repoRoot, "scripts/compat/upstream-baseline.json");
-const EXPECTED_CODEX_RELEASE = "rust-v0.155.1";
+const EXPECTED_CODEX_RELEASE = "rust-v0.156.0";
 
 const REQUIRED_CRITICAL_FILES = [
   "codex-rs/core/src/client.rs",
@@ -58,7 +58,6 @@ const REQUIRED_CRITICAL_FILES = [
 
 const REQUIRED_FILE_CONTAINS = {
   "codex-rs/core/src/client.rs": [
-    "ResponsesEndpoint::Responses",
     "build_responses_headers",
     "build_responses_compatibility_headers",
     "build_ws_client_metadata",
@@ -99,6 +98,9 @@ const REQUIRED_FILE_CONTAINS = {
     "client_metadata",
     "prepare_response_items_for_request",
     "responses_request_properties_match",
+    "responses_session_id",
+    "session_source.is_non_root_agent()",
+    "prompt_cache_key(metadata)",
   ],
   "codex-rs/core/src/compact_remote_v2.rs": [
     "run_remote_compact_task",
@@ -115,7 +117,7 @@ const REQUIRED_FILE_CONTAINS = {
   "codex-rs/core/src/compact_remote_v2_attempt.rs": [
     "ResponseItem::CompactionTrigger {}",
     "CompactionTurnMetadata",
-    "CodexResponsesRequestKind::Compaction",
+    "compaction_responses_metadata",
     "responses_metadata",
     "run_remote_compaction_request_v2",
   ],
@@ -306,20 +308,25 @@ const REQUIRED_FILE_CONTAINS = {
     "safety_buffering",
     "ResponseEvent::SafetyBuffering",
     "insufficient_quota",
+    "credit_balance_exhausted",
+    "organization_spend_limit_exceeded",
+    "project_spend_limit_exceeded",
     "rate_limit_exceeded",
+    "slow_down",
+    "server_is_overloaded",
   ],
   "codex-rs/codex-api/src/endpoint/responses.rs": [
-    "pub enum ResponsesEndpoint",
-    "Self::Responses => \"/responses\"",
+    "ResponsesClient",
     "ResponsesOptions",
     "turn_state",
     "stream_request",
-    "self.endpoint.path()",
+    "stream_encoded_json_with",
+    "\"/responses\"",
     "spawn_response_stream",
   ],
   "codex-rs/codex-api/src/endpoint/responses_websocket.rs": [
     "ResponsesWebsocketConnection",
-    "websocket_url_for_path(self.endpoint.path())",
+    "websocket_url_for_path(\"/responses\")",
     "merge_request_headers",
     "add_auth_headers",
     "treatment_from_headers",
@@ -616,7 +623,7 @@ const REQUIRED_EXPECTED_ROUTES = [
   "/realtime/calls",
   "alpha/search",
   "/memories/trace_summarize",
-  "websocket_url_for_path(self.endpoint.path())",
+  "websocket_url_for_path(\"/responses\")",
 ];
 
 const REQUIRED_APP_SERVER_METHODS = [
@@ -654,10 +661,10 @@ const REQUIRED_SEMANTIC_CHECKS = [
     kind: "route",
     file: "codex-rs/codex-api/src/endpoint/responses.rs",
     file_contains_all: [
-      "pub enum ResponsesEndpoint",
-      "Self::Responses => \"/responses\"",
+      "ResponsesClient",
       "stream_request",
-      "self.endpoint.path()",
+      "stream_encoded_json_with",
+      "\"/responses\"",
     ],
     expected_routes_all: ["/responses"],
   },
@@ -720,7 +727,7 @@ const REQUIRED_SEMANTIC_CHECKS = [
     file: "codex-rs/core/src/compact_remote_v2_attempt.rs",
     file_contains_all: [
       "ResponseItem::CompactionTrigger {}",
-      "CodexResponsesRequestKind::Compaction",
+      "compaction_responses_metadata",
       "responses_metadata",
       "run_remote_compaction_request_v2",
     ],
@@ -982,7 +989,15 @@ const REQUIRED_SEMANTIC_CHECKS = [
     id: "sse.quota-codes",
     kind: "co_occurrence",
     file: "codex-rs/codex-api/src/sse/responses.rs",
-    file_contains_all: ["insufficient_quota", "rate_limit_exceeded"],
+    file_contains_all: [
+      "insufficient_quota",
+      "credit_balance_exhausted",
+      "organization_spend_limit_exceeded",
+      "project_spend_limit_exceeded",
+      "rate_limit_exceeded",
+      "slow_down",
+      "server_is_overloaded",
+    ],
   },
   {
     id: "web-search.custom-provider-capability",
@@ -1008,8 +1023,8 @@ const REQUIRED_SEMANTIC_CHECKS = [
     id: "websocket.responses-route",
     kind: "route",
     file: "codex-rs/codex-api/src/endpoint/responses_websocket.rs",
-    file_contains_all: ["ResponsesWebsocketConnection", "websocket_url_for_path(self.endpoint.path())"],
-    expected_routes_all: ["websocket_url_for_path(self.endpoint.path())"],
+    file_contains_all: ["ResponsesWebsocketConnection", "websocket_url_for_path(\"/responses\")"],
+    expected_routes_all: ["websocket_url_for_path(\"/responses\")"],
   },
   {
     id: "websocket.session-behavior",
@@ -1017,7 +1032,7 @@ const REQUIRED_SEMANTIC_CHECKS = [
     file: "codex-rs/codex-api/src/endpoint/responses_websocket.rs",
     file_contains_all: [
       "ResponsesWebsocketConnection",
-      "websocket_url_for_path(self.endpoint.path())",
+      "websocket_url_for_path(\"/responses\")",
       "merge_request_headers",
       "add_auth_headers",
       "treatment_from_headers",
@@ -1034,7 +1049,7 @@ const REQUIRED_SEMANTIC_CHECKS = [
       "previous_response_not_found",
       "PREVIOUS_RESPONSE_NOT_FOUND_MESSAGE",
     ],
-    expected_routes_all: ["websocket_url_for_path(self.endpoint.path())"],
+    expected_routes_all: ["websocket_url_for_path(\"/responses\")"],
     expected_headers_all: ["x-codex-turn-state"],
     expected_stream_events_all: [
       "response.created",
