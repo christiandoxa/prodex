@@ -65,6 +65,12 @@ fn emit_source_rerun_directives(sources: &[&str], manifest_dir: &Path) {
     println!(
         "cargo:rerun-if-changed={}",
         manifest_dir
+            .join("../../mojo/prodex_core/launch_args_common.mojo")
+            .display()
+    );
+    println!(
+        "cargo:rerun-if-changed={}",
+        manifest_dir
             .join("../../mojo/prodex_core/runtime_math.mojo")
             .display()
     );
@@ -273,6 +279,7 @@ fn selected_sources() -> Vec<&'static str> {
         sources.push("../../mojo/prodex_core/candidate_decision.mojo");
         sources.push("../../mojo/prodex_core/smart_context_rehydrate.mojo");
         sources.push("../../mojo/prodex_core/runtime_tuning.mojo");
+        sources.push("../../mojo/prodex_core/launch_args.mojo");
         sources.push("../../mojo/prodex_core/smart_context.mojo");
         sources.push("../../mojo/prodex_core/smart_context_policy.mojo");
         sources.push("../../mojo/prodex_core/policy_validation.mojo");
