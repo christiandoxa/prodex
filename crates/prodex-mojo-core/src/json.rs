@@ -99,6 +99,21 @@ unsafe extern "C" {
         capacity: i64,
         metadata: u64,
     ) -> i64;
+    fn prodex_mojo_anthropic_chat_request_v1(
+        abi: i64,
+        operation: i64,
+        flag: i64,
+        nodes: u64,
+        count: i64,
+        raw: u64,
+        raw_length: i64,
+        scratch: u64,
+        scratch_count: i64,
+        measuring: i64,
+        output: u64,
+        capacity: i64,
+        metadata: u64,
+    ) -> i64;
 
 }
 
@@ -241,6 +256,46 @@ pub fn transform_openai_chat_request(
         b'S' => Ok(OpenAiChatRequestTransform::Body(payload.to_vec())),
         b'E' => String::from_utf8(payload.to_vec())
             .map(OpenAiChatRequestTransform::Rejected)
+            .map_err(|_| MojoError::InvalidOutput),
+        _ => Err(MojoError::InvalidOutput),
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AnthropicChatRequestTransform {
+    Body(Vec<u8>),
+    Degraded {
+        body: Vec<u8>,
+        context_size: &'static str,
+    },
+    Rejected(String),
+}
+
+pub fn transform_anthropic_chat_request(
+    nodes: &[JsonNode<'_>],
+    raw: &str,
+) -> Result<AnthropicChatRequestTransform, MojoError> {
+    let output = transform_json(nodes, raw, 0, false, prodex_mojo_anthropic_chat_request_v1)?
+        .ok_or(MojoError::InvalidOutput)?;
+    let Some((&tag, payload)) = output.split_first() else {
+        return Err(MojoError::InvalidOutput);
+    };
+    match tag {
+        b'S' => Ok(AnthropicChatRequestTransform::Body(payload.to_vec())),
+        b'D' if payload.len() >= 2 => {
+            let context_size = match payload[0] {
+                b'1' => "low",
+                b'2' => "medium",
+                b'3' => "high",
+                _ => return Err(MojoError::InvalidOutput),
+            };
+            Ok(AnthropicChatRequestTransform::Degraded {
+                body: payload[1..].to_vec(),
+                context_size,
+            })
+        }
+        b'E' => String::from_utf8(payload.to_vec())
+            .map(AnthropicChatRequestTransform::Rejected)
             .map_err(|_| MojoError::InvalidOutput),
         _ => Err(MojoError::InvalidOutput),
     }

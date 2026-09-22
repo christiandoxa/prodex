@@ -9,10 +9,11 @@ from parsed_json import (
     pj_field,
     pj_string_field,
     pj_text,
+    pj_literal,
     pj_valid,
 )
 from json_sink import JsonSink, js_byte, js_literal, js_string, js_raw
-from openai_chat_request_validation import ocr_validate
+from openai_chat_request_validation import ocr_validate, ocr_error_literal
 from openai_chat_request_messages import ocr_message_count, ocr_write_messages
 
 comptime OPENAI_CHAT_REQUEST_ABI: Int64 = 1
