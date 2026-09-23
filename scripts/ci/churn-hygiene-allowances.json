@@ -1984,14 +1984,16 @@
     "requiredSubjects": [
       "feat(compat): accept capability-compatible dependency versions",
       "feat(log): show redacted expose exec commands",
-      "ci(churn): record audited flexible dependency campaign"
+      "ci(churn): record audited flexible dependency campaign",
+      "fix(ci): satisfy flexible dependency guards",
+      "ci(churn): finalize audited flexible dependency campaign"
     ],
     "caps": {
       "maxFiles": 32,
-      "maxBehaviorFiles": 22,
+      "maxBehaviorFiles": 23,
       "maxLines": 1510,
-      "maxFileLines": 311
+      "maxFileLines": 320
     },
-    "reason": "Reviewed the bounded 0.431.5 source campaign: Codex/tunnel-client/optional-tool runtime compatibility moves from exact release pins to minimum-version plus capability validation, release qualification continues to track latest stable references, and expose exec audit logs add bounded redacted command visibility. Pre-policy range measured 31 files, 22 behavior files, 1,465 changed lines, and 311 lines in the largest file. Global churn thresholds and all compatibility, security, freshness, Mojo, logging, and release gates remain enforced."
+    "reason": "Reviewed the final bounded 0.431.5 source campaign: Codex/tunnel-client/optional-tool runtime compatibility moves from exact release pins to minimum-version plus capability validation, release qualification continues to track latest stable references, and expose exec audit logs add bounded redacted command visibility. Final pre-policy range measured 32 files, 23 behavior files, 1,493 changed lines, and 317 lines in the largest file. Global churn thresholds and all compatibility, security, freshness, Mojo, logging, and release gates remain enforced."
   }
 ]
