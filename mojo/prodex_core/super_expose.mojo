@@ -276,7 +276,8 @@ def super_expose_tunnel_client_version_line_valid(
     for index in range(40):
         if cursor >= end or not super_expose_ascii_hex(ptr[unsafe_offset=cursor]):
             return False
-        if ptr[unsafe_offset=first_sha + index] != ptr[unsafe_offset=second_sha + index]:
+        var sha_index = Int64(index)
+        if ptr[unsafe_offset=first_sha + sha_index] != ptr[unsafe_offset=second_sha + sha_index]:
             return False
         cursor += 1
     if cursor >= end or ptr[unsafe_offset=cursor] != 41:
