@@ -531,7 +531,7 @@ fn resolve_optional_tool_plan(
         resolve_runtime_optional_tool_plan(&strategy.args.selected_tool_set(), &required_tools)?;
     let skipped_incompatible = optional_tool_skip_messages(&tool_plan, &required_tools);
     if !skipped_incompatible.is_empty() {
-        prodex_terminal_ui::print_stderr_panel("Optional Tools", &skipped_incompatible)?;
+        crate::print_stderr_panel("Optional Tools", &skipped_incompatible)?;
     }
     let required_presidio =
         required_tools.contains(prodex_optional_tools::OptionalToolId::Presidio);
