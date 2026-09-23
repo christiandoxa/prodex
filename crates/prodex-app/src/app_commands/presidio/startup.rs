@@ -158,6 +158,9 @@ pub(super) fn wait_for_presidio_services(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::app_commands::presidio::docker::{
+        PRESIDIO_ANALYZER_IMAGE, PRESIDIO_ANONYMIZER_IMAGE,
+    };
 
     #[test]
     fn presidio_startup_errors_fail_open_only_when_optional() {
