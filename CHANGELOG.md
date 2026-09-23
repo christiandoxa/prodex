@@ -2,6 +2,98 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.431.3 - 2026-09-23
+
+### CLI
+
+- Trust hooks by hash before launch (`1942397`)
+# Prodex 0.431.3
+
+## New Features
+
+- Use Codex's native per-hook trust state for Super launches on Codex 0.156.1.
+  Prodex discovers active hooks with `hooks/list`, records each current hook
+  hash under `hooks.state.<key>.trusted_hash`, and verifies trust before the
+  interactive TUI starts.
+- Keep the existing Super workspace projection
+  `projects.<cwd>.trust_level="trusted"`, so folder trust remains automatic
+  for `prodex s`.
+- Keep the stable toolchain baseline at Rust 1.98.1 and Mojo 1.1.0.
+- Keep the current stable optional-tool set: Caveman 2.7.0, RTK 0.49.0,
+  Codebase Memory MCP 0.11.0, Playwright MCP 0.0.82, Ponytail 4.10.0, and
+  Presidio 2.2.364.
+
+## Bug Fixes
+
+- Remove the automatic `--dangerously-bypass-hook-trust` flag from normal
+  Super launches on modern Codex. Codex 0.156.1 intentionally shows a startup
+  warning whenever that global bypass is enabled.
+- Preserve zero-prompt hook trust without the warning by trusting the exact
+  discovered hook hashes before TUI startup.
+- Keep a compatibility fallback to the legacy bypass flag only when an older
+  Codex reports that the hook-trust RPC methods are unavailable.
+- Keep the persisted Super app-server companion free of the global hook-bypass
+  flag unless that legacy fallback is actually required.
+- Preserve explicit user-provided `--dangerously-bypass-hook-trust` arguments
+  unchanged.
+
+## Super Runtime Contract
+
+- A real pseudo-TTY launch using the patched Prodex binary and the official
+  Codex 0.156.1 binary reached the Codex TUI in YOLO mode with **zero startup
+  warnings**, **no folder-trust prompt**, and **no hook-review prompt**.
+- The live launch trusted three Ponytail hooks by their current SHA-256-backed
+  hook hashes before the TUI started.
+- Neither the TUI Codex process nor its app-server companion carried the global
+  `--dangerously-bypass-hook-trust` flag.
+- Caveman 2.7.0 awareness was present in the generated overlay.
+- The live RTK wrapper resolved to `/home/doxa/.local/bin/rtk` and reported
+  RTK 0.49.0 under the user's login-shell PATH.
+- Codebase Memory MCP 0.11.0 and Playwright MCP 0.0.82 were both running as
+  live child processes of the Codex session.
+- Ponytail 4.10.0 was enabled and its hook set was trusted by hash.
+- Presidio behavior is unchanged: default OFF, interactive opt-in when no
+  explicit preference is supplied, and `--presidio` / `--no-presidio`
+  remain explicit overrides.
+
+## Safety
+
+- Hook trust is scoped to the temporary Prodex overlay used for the Super
+  invocation; the user's shared Codex config is not rewritten with global
+  hook-bypass state.
+- Hook trust is granted only to the exact hook hashes returned by Codex. A
+  modified hook receives a new hash and therefore requires a new Super
+  preflight trust write.
+- Folder trust remains scoped to the temporary launch overlay.
+- No MCP surface, expose protocol, credential format, provider routing policy,
+  tunnel-client pin, or Presidio default is changed by this patch.
+
+## Validation
+
+- The published 0.431.2 binary was exercised interactively against official
+  Codex 0.156.1 and reproduced the remaining startup warning exactly:
+  `--dangerously-bypass-hook-trust is enabled. Enabled hooks may run without
+  review for this invocation.`
+- The 0.431.3 candidate was then exercised in the same real pseudo-TTY flow
+  without sending any model prompt and completed the Super startup contract
+  with zero warnings and zero trust prompts.
+- Live overlay inspection confirmed project trust, five default Super optional
+  tools, Ponytail hook trust hashes, and the absence of obsolete config keys.
+- The launch left no patched Prodex/Codex child processes behind after
+  graceful shutdown.
+- Rust 1.98.1, Mojo 1.1.0, and all optional-tool stable pins remain unchanged
+  from their previously qualified versions.
+
+## Changelog
+
+- Trust Super hooks through Codex's native trusted-hash state instead of a
+  global bypass warning.
+- Keep `prodex s` zero-prompt for folder and hook trust on Codex 0.156.1.
+- Preserve all latest-stable optional tools and the existing Presidio opt-in
+  flow.
+
+Full Changelog: [0.431.2...0.431.3](https://github.com/christiandoxa/prodex/compare/0.431.2...0.431.3)
+
 ## 0.431.2 - 2026-09-23
 
 ### CLI
@@ -11,73 +103,6 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 ### Docs
 
 - Record stable 1.1 compiler baseline (`1c04046`)
-# Prodex 0.431.2
-
-## New Features
-
-- Keep Prodex on the latest stable compiler baseline verified on 2026-09-23:
-  Rust 1.98.1 and Mojo 1.1.0.
-- Revalidate all six Prodex optional tools against their latest stable releases:
-  Caveman 2.7.0, RTK 0.49.0, Codebase Memory MCP 0.11.0,
-  Playwright MCP 0.0.82, Ponytail 4.10.0, and Presidio 2.2.364.
-- Preserve Super-mode zero-prompt trust behavior on Codex 0.156.1:
-  the active workspace is marked trusted and hook trust is bypassed for the
-  invocation.
-
-## Bug Fixes
-
-- Fix `prodex s` startup warnings caused by projecting
-  `bypass_hook_trust=true` into temporary `config.toml`. Codex 0.156.1
-  treats hook-trust bypass as a session/CLI override, so Prodex now keeps
-  `--dangerously-bypass-hook-trust` on the command line only.
-- Remove the deprecated/unknown `marketplaces.ponytail.version` setting from
-  the overlay config while keeping Ponytail installed, enabled, and versioned
-  in the managed plugin cache.
-- Keep the existing trusted-project projection
-  `projects.<cwd>.trust_level="trusted"`, so Codex does not show the
-  "Trust this folder?" onboarding prompt for `prodex s`.
-- Preserve Super full-access behavior and the existing approval/sandbox bypass
-  semantics.
-
-## Safety
-
-- Hook trust bypass remains explicit and scoped to the Super invocation; it is
-  not persisted as an unsupported user config key.
-- Folder trust is written only into the temporary Prodex launch overlay and
-  does not mutate the user's shared Codex config.
-- Ponytail keeps the supported Codex 0.156.1 marketplace fields
-  `source_type` and `source`, with the plugin still enabled under
-  `plugins."ponytail@ponytail"`.
-- No optional-tool pin was advanced without a stable-release freshness check.
-- No new MCP tool, expose surface, credential format, or tunnel-client release
-  is introduced.
-
-## Validation
-
-- Official Codex 0.156.1 A/B startup smoke reproduced the old warning exactly:
-  one `configWarning` containing the two ignored keys
-  `bypass_hook_trust` and `marketplaces.ponytail.version`.
-- The new overlay with CLI hook bypass and trusted project state initialized
-  successfully with **zero strict-config warnings**.
-- Codex 0.156.1 source confirms the TUI trust screen is shown only when
-  `active_project.trust_level` is undecided; Prodex Super supplies
-  `trusted`.
-- `prodex-optional-tools`: 52/52 tests passed.
-- Focused Super overlay and workspace-trust regressions passed.
-- Clippy, optional-tools guard, freshness guard, size guard, crate-boundary
-  guard, and exact-SHA CI passed.
-- Stable compiler qualification for Rust 1.98.1 + Mojo 1.1.0 passed the real
-  Mojo/parity and platform CI matrix before this patch.
-
-## Changelog
-
-- Make `prodex s` trust handling CLI/session-correct for Codex 0.156.1.
-- Remove obsolete startup-config keys while preserving automatic trust and
-  Super access.
-- Revalidate all optional tools at latest stable releases.
-- Ship with the latest stable Rust and Mojo compiler baseline.
-
-Full Changelog: [0.431.1...0.431.2](https://github.com/christiandoxa/prodex/compare/0.431.1...0.431.2)
 
 ## 0.431.1 - 2026-09-23
 
