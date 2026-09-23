@@ -7,21 +7,33 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 ### CLI
 
 - Preserve Codex workspace bootstrap URL (`98a7beb`)
+
+### Misc
+
+- Align with Codex 0.156.1 (`6e1605d`)
 # Prodex 0.431.1
 
 ## New Features
 
-- No new product features. This patch release is limited to Codex 0.156.0 workspace-routing compatibility.
+- Target the official Codex `rust-v0.156.1` release.
+- Accommodate the newly visible GPT-6 Sol and GPT-6 Luna models from Codex
+  0.156.1.
+- Recognize GPT-6 Sol/Luna as 872,000-token models when Prodex derives runtime
+  context and Smart Context budgets from the upstream model catalog.
+- Preserve the upstream GPT-6 reasoning contracts: Sol supports
+  Low/Medium/High/XHigh/Max/Ultra; Luna supports Low/Medium/High/XHigh/Max.
+- Keep Codex-owned model picker and rate-limit-switch presentation opaque,
+  including the new GPT-6 Luna recommendation.
 
 ## Bug Fixes
 
-- Fix `prodex s` failing during Codex 0.156.0 TUI bootstrap with
+- Fix `prodex s` failing during Codex 0.156.x TUI bootstrap with
   `account/read failed: workspace backend must use an HTTPS origin without credentials`.
 - Stop replacing Codex's ChatGPT workspace bootstrap URL with the local HTTP
-  runtime proxy. Codex 0.156.0 requires that workspace-routing origin to remain
-  credential-free HTTPS.
-- Route OpenAI model traffic through Prodex using the existing authenticated
-  `prodex-openai-governed-http` custom provider instead, preserving normal
+  runtime proxy. Codex 0.156.0 and 0.156.1 both require that workspace-routing
+  origin to remain credential-free HTTPS.
+- Route OpenAI model traffic through Prodex using the authenticated
+  `prodex-openai-governed-http` custom provider while preserving normal
   Responses and WebSocket proxying.
 - Keep forced-HTTP/sub-agent launches on the same governed provider with
   WebSockets disabled.
@@ -30,30 +42,35 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 
 - Preserve `requires_openai_auth=true` so the local model provider continues
   to use Codex's first-party authentication path.
-- Preserve user-supplied HTTPS `chatgpt_base_url` overrides rather than
-  replacing them with a loopback URL.
+- Preserve user-supplied HTTPS `chatgpt_base_url` overrides.
 - Extend `NO_PROXY` discovery to the internal Prodex provider base URL so
   loopback model traffic cannot be redirected through a corporate proxy.
+- Do not map GPT-6 Luna onto the legacy GPT-5.6 Luna reserve quota bucket
+  without independent upstream evidence.
 - No new MCP tool, expose surface, credential format, or tunnel-client release
   is introduced. The existing exact tunnel-client allowlist is unchanged.
 
 ## Validation
 
-- Reproduced the 0.431.0 failure exactly with the official Codex 0.156.0 Linux
-  binary, synthetic ChatGPT auth, and a local mock workspace backend; the old
-  projection returns JSON-RPC `-32603` with the same HTTPS-origin error.
+- Compared exact Codex 0.156.0 and 0.156.1 tagged source archives: 21 changed
+  files, 461 additions, and 77 deletions.
+- Only one of Prodex's 50 pinned critical files changed:
+  `codex-rs/models-manager/models.json`.
+- Verified the official Codex 0.156.1 Linux musl asset checksum and
+  `codex-cli 0.156.1`.
+- An isolated official `model/list` smoke returned visible GPT-6 Sol and
+  GPT-6 Luna with the expected reasoning effort sets.
+- Reproduced the workspace bootstrap failure against the official 0.156.1
+  binary with synthetic ChatGPT auth and the former HTTP-loopback projection;
+  it still returns JSON-RPC `-32603` with the same HTTPS-origin error.
 - Runtime-launch regression tests cover both the feature-off Rust oracle and
   the release-pinned Mojo 1.0.0 production path.
-- Verified the new projection omits loopback `chatgpt_base_url` and
-  `openai_base_url`, selects the authenticated Prodex provider, preserves
-  explicit HTTPS workspace bootstrap configuration, and retains the loopback
-  port in `NO_PROXY`.
-- Expanded the Codex 0.156 compatibility baseline from 49 to 50 critical source
-  files to pin the workspace-routing HTTPS validation contract.
+- GPT-6 runtime context tests verify the upstream 872k maximum context contract.
 
 ## Changelog
 
-- Restore `prodex s` compatibility with Codex 0.156.0 workspace routing.
+- Restore `prodex s` compatibility with Codex 0.156.x workspace routing.
+- Add Codex 0.156.1 GPT-6 Sol/Luna runtime context compatibility.
 - Keep workspace bootstrap HTTPS while retaining Prodex model routing,
   rotation, WebSocket handling, and proxy safety boundaries.
 
