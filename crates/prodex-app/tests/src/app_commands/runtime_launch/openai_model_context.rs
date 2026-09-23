@@ -81,6 +81,41 @@ fn runtime_launch_injects_cached_openai_gpt5_context_metadata() {
 }
 
 #[test]
+fn runtime_launch_uses_cached_gpt6_max_context_metadata() {
+    let root = temp_dir("openai-gpt6-context-cache");
+    fs::create_dir_all(&root).unwrap();
+    fs::write(
+        root.join("models_cache.json"),
+        r#"{"models":[
+            {"slug":"gpt-6-sol","context_window":272000,"max_context_window":872000},
+            {"slug":"gpt-6-luna","context_window":272000,"max_context_window":872000}
+        ]}"#,
+    )
+    .unwrap();
+
+    for model in ["gpt-6-sol", "gpt-6-luna"] {
+        let args = runtime_launch_openai_model_context_codex_args(
+            &root,
+            &[OsString::from("--model"), OsString::from(model)],
+        )
+        .unwrap();
+        let rendered = args
+            .iter()
+            .map(|arg| arg.to_string_lossy().into_owned())
+            .collect::<Vec<_>>();
+
+        assert!(
+            rendered.contains(&"model_context_window=872000".to_string()),
+            "{model}"
+        );
+        assert!(
+            rendered.contains(&"model_auto_compact_token_limit=784800".to_string()),
+            "{model}"
+        );
+    }
+}
+
+#[test]
 fn runtime_launch_does_not_inject_openai_model_defaults_for_copilot_provider() {
     let root = temp_dir("copilot-model-context-defaults");
     fs::create_dir_all(&root).unwrap();
