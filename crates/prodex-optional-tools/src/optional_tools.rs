@@ -454,24 +454,17 @@ fn playwright_tool_status() -> ToolHealth {
 
 pub(super) fn playwright_probe_failure(error: anyhow::Error) -> ToolHealth {
     let detail = error.to_string();
-    let normalized = detail.to_ascii_lowercase();
-    if normalized.contains("npx canceled due to missing packages")
-        || normalized.contains("package is not installed")
-        || normalized.contains("could not determine executable to run")
-        || normalized.contains("health check timed out after")
-        || normalized.contains("version check timed out after")
-        || normalized.contains("failed to execute")
-    {
-        return ToolHealth::missing(
-            OptionalToolId::PlaywrightMcp,
-            format!(
-                "Playwright MCP is not installed; install @playwright/mcp {} or newer (latest stable reference: {})",
-                crate::PLAYWRIGHT_MCP_MINIMUM_SUPPORTED_VERSION,
-                crate::PLAYWRIGHT_MCP_LATEST_STABLE_REFERENCE,
-            ),
-        );
+    if detail.to_ascii_lowercase().contains(" is too old") {
+        return invalid_tool(OptionalToolId::PlaywrightMcp, error);
     }
-    invalid_tool(OptionalToolId::PlaywrightMcp, error)
+    ToolHealth::missing(
+        OptionalToolId::PlaywrightMcp,
+        format!(
+            "Playwright MCP is not installed or is currently unavailable; install/update @playwright/mcp {} or newer (latest stable reference: {})",
+            crate::PLAYWRIGHT_MCP_MINIMUM_SUPPORTED_VERSION,
+            crate::PLAYWRIGHT_MCP_LATEST_STABLE_REFERENCE,
+        ),
+    )
 }
 
 fn find_path_command(command: &str) -> Option<PathBuf> {

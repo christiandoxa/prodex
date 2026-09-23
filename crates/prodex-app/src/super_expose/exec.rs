@@ -226,6 +226,7 @@ fn exec_log_argument(value: &str, quote: bool) -> String {
     }
 }
 
+#[cfg(test)]
 pub(super) fn execute_tool(
     arguments: &Value,
     shutdown: &Arc<AtomicBool>,
