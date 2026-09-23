@@ -43,31 +43,48 @@ pub(crate) fn resolve_runtime_optional_tool_plan(
         .filter(|tool| *tool != prodex_optional_tools::OptionalToolId::Presidio)
         .collect();
     let plan = prodex_optional_tools::resolve_optional_tools_for_launch(&selected, &required);
-    if let Some(incompatible) = plan
-        .unavailable
-        .iter()
-        .find(|health| health.status == prodex_optional_tools::ToolHealthStatus::Invalid)
-    {
-        bail!(
-            "installed optional tool {} is incompatible: {}; update it to the latest stable release (minimum supported: {}, release-qualified reference: {}) or remove the incompatible installation",
-            incompatible.id,
-            redaction_redact_secret_like_text(&incompatible.detail),
-            prodex_optional_tools::optional_tool_minimum_supported_version(incompatible.id),
-            prodex_optional_tools::optional_tool_recommended_version(incompatible.id),
-        );
-    }
-    if let Some(unavailable) = plan
-        .unavailable
-        .iter()
-        .find(|health| required.contains(health.id))
-    {
-        bail!(
-            "required optional tool {} is unavailable: {}; run `prodex doctor --install`",
-            unavailable.id,
-            redaction_redact_secret_like_text(&unavailable.detail)
-        );
+    if let Some(message) = required_optional_tool_error(&plan, &required) {
+        bail!("{message}");
     }
     Ok(plan)
+}
+
+fn required_optional_tool_error(
+    plan: &prodex_optional_tools::ToolActivationPlan,
+    required: &prodex_optional_tools::OptionalToolSet,
+) -> Option<String> {
+    plan.unavailable
+        .iter()
+        .find(|health| required.contains(health.id))
+        .map(|unavailable| {
+            format!(
+                "required optional tool {} is unavailable: {}; run `prodex doctor --install`",
+                unavailable.id,
+                redaction_redact_secret_like_text(&unavailable.detail)
+            )
+        })
+}
+
+fn optional_tool_skip_messages(
+    plan: &prodex_optional_tools::ToolActivationPlan,
+    required: &prodex_optional_tools::OptionalToolSet,
+) -> Vec<String> {
+    plan.unavailable
+        .iter()
+        .filter(|health| {
+            health.status == prodex_optional_tools::ToolHealthStatus::Invalid
+                && !required.contains(health.id)
+        })
+        .map(|health| {
+            format!(
+                "{}: skipped for this launch; {}. Update when convenient (minimum supported: {}, release-qualified reference: {}).",
+                health.id,
+                redaction_redact_secret_like_text(&health.detail),
+                prodex_optional_tools::optional_tool_minimum_supported_version(health.id),
+                prodex_optional_tools::optional_tool_recommended_version(health.id),
+            )
+        })
+        .collect()
 }
 
 fn configure_overlay_codex_home(
@@ -509,14 +526,15 @@ fn resolve_optional_tool_plan(
     strategy: &RuntimeToolLaunchStrategy,
     prepared: &PreparedRuntimeLaunch,
 ) -> Result<prodex_optional_tools::ToolActivationPlan> {
-    let tool_plan = resolve_runtime_optional_tool_plan(
-        &strategy.args.selected_tool_set(),
-        &strategy.args.required_tool_set(),
-    )?;
-    let required_presidio = strategy
-        .args
-        .required_tool_set()
-        .contains(prodex_optional_tools::OptionalToolId::Presidio);
+    let required_tools = strategy.args.required_tool_set();
+    let tool_plan =
+        resolve_runtime_optional_tool_plan(&strategy.args.selected_tool_set(), &required_tools)?;
+    let skipped_incompatible = optional_tool_skip_messages(&tool_plan, &required_tools);
+    if !skipped_incompatible.is_empty() {
+        prodex_terminal_ui::print_stderr_panel("Optional Tools", &skipped_incompatible)?;
+    }
+    let required_presidio =
+        required_tools.contains(prodex_optional_tools::OptionalToolId::Presidio);
     if required_presidio {
         ensure_required_presidio_services_for_super_launch(&prepared.paths)?;
     } else if strategy.presidio_enabled {
@@ -560,6 +578,39 @@ mod overlay_tests {
             .unwrap_or_default()
             .as_nanos();
         std::env::temp_dir().join(format!("prodex-{name}-{}-{stamp}", std::process::id()))
+    }
+
+    #[test]
+    fn optional_incompatible_tool_is_informational_unless_required() {
+        let invalid_rtk = prodex_optional_tools::ToolHealth {
+            id: prodex_optional_tools::OptionalToolId::Rtk,
+            status: prodex_optional_tools::ToolHealthStatus::Invalid,
+            source: Some(prodex_optional_tools::ToolDiscoverySource::Path),
+            path: Some(PathBuf::from("/tmp/rtk")),
+            version: Some("0.45.0".to_string()),
+            digest: None,
+            can_activate: false,
+            detail: "rtk 0.45.0 is too old; Prodex requires 0.46.0 or newer".to_string(),
+        };
+        let plan = prodex_optional_tools::ToolActivationPlan {
+            activations: Vec::new(),
+            unavailable: vec![invalid_rtk],
+        };
+
+        let optional_required = prodex_optional_tools::OptionalToolSet::default();
+        assert!(required_optional_tool_error(&plan, &optional_required).is_none());
+        let messages = optional_tool_skip_messages(&plan, &optional_required);
+        assert_eq!(messages.len(), 1);
+        assert!(messages[0].contains("rtk: skipped for this launch"));
+        assert!(messages[0].contains("Update when convenient"));
+        assert!(messages[0].contains("minimum supported: 0.46.0"));
+
+        let required = [prodex_optional_tools::OptionalToolId::Rtk]
+            .into_iter()
+            .collect::<prodex_optional_tools::OptionalToolSet>();
+        let error = required_optional_tool_error(&plan, &required)
+            .expect("required incompatible RTK must remain fatal");
+        assert!(error.contains("required optional tool rtk is unavailable"));
     }
 
     #[test]
