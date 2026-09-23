@@ -185,6 +185,60 @@ pub fn inspect_launch_arguments<'a>(
     })
 }
 
+fn launch_argument_piece_index(
+    piece: &ArgumentPiece,
+    input_len: usize,
+    seen: &mut [bool],
+) -> Result<Option<usize>, MojoError> {
+    if matches!(piece.kind, 0 | 2) {
+        let index = index(piece.index, input_len)?;
+        if std::mem::replace(&mut seen[index], true) {
+            return Err(MojoError::InvalidOutput);
+        }
+        return Ok(Some(index));
+    }
+    if piece.index != -1 || piece.offset != 0 {
+        return Err(MojoError::InvalidOutput);
+    }
+    Ok(None)
+}
+
+fn decode_launch_argument(
+    piece: &ArgumentPiece,
+    operation: LaunchArgumentOperation,
+    arguments: &[Option<&str>],
+    argument_index: Option<usize>,
+) -> Result<LaunchArgument, MojoError> {
+    use LaunchArgumentOperation as Op;
+
+    match piece.kind {
+        0 if piece.offset == 0 => Ok(LaunchArgument::Original(
+            argument_index.ok_or(MojoError::InvalidOutput)?,
+        )),
+        1 if matches!(operation, Op::NormalizeProfile | Op::Prepare) => Ok(LaunchArgument::Profile),
+        2 if matches!(operation, Op::NormalizeProfile | Op::Prepare) => {
+            let index = argument_index.ok_or(MojoError::InvalidOutput)?;
+            let offset = usize::try_from(piece.offset).map_err(|_| MojoError::InvalidOutput)?;
+            let value = arguments[index].ok_or(MojoError::InvalidOutput)?;
+            if offset != "--profile-v2=".len() || value.get(offset..).is_none() {
+                return Err(MojoError::InvalidOutput);
+            }
+            Ok(LaunchArgument::ProfileInline { index, offset })
+        }
+        3 if matches!(
+            operation,
+            Op::NormalizeRun | Op::RetargetTui | Op::RetargetExec | Op::Prepare
+        ) =>
+        {
+            Ok(LaunchArgument::Resume)
+        }
+        4 if operation == Op::RetargetExec => Ok(LaunchArgument::Exec),
+        5 if matches!(operation, Op::RetargetTui | Op::RetargetExec) => Ok(LaunchArgument::Session),
+        6 if operation == Op::Prepare => Ok(LaunchArgument::FullAccess),
+        _ => Err(MojoError::InvalidOutput),
+    }
+}
+
 pub fn plan_launch_arguments(
     arguments: &[Option<&str>],
     operation: LaunchArgumentOperation,
@@ -215,51 +269,8 @@ pub fn plan_launch_arguments(
     let arguments = output[..written]
         .iter()
         .map(|piece| {
-            use LaunchArgumentOperation as Op;
-            let needs_index = matches!(piece.kind, 0 | 2);
-            let argument_index = if needs_index {
-                let i = index(piece.index, input.len())?;
-                if std::mem::replace(&mut seen[i], true) {
-                    return Err(MojoError::InvalidOutput);
-                }
-                i
-            } else {
-                if piece.index != -1 || piece.offset != 0 {
-                    return Err(MojoError::InvalidOutput);
-                }
-                0
-            };
-            Ok(match piece.kind {
-                0 if piece.offset == 0 => LaunchArgument::Original(argument_index),
-                1 if matches!(operation, Op::NormalizeProfile | Op::Prepare) => {
-                    LaunchArgument::Profile
-                }
-                2 if matches!(operation, Op::NormalizeProfile | Op::Prepare) => {
-                    let offset =
-                        usize::try_from(piece.offset).map_err(|_| MojoError::InvalidOutput)?;
-                    let value = arguments[argument_index].ok_or(MojoError::InvalidOutput)?;
-                    if offset != "--profile-v2=".len() || value.get(offset..).is_none() {
-                        return Err(MojoError::InvalidOutput);
-                    }
-                    LaunchArgument::ProfileInline {
-                        index: argument_index,
-                        offset,
-                    }
-                }
-                3 if matches!(
-                    operation,
-                    Op::NormalizeRun | Op::RetargetTui | Op::RetargetExec | Op::Prepare
-                ) =>
-                {
-                    LaunchArgument::Resume
-                }
-                4 if operation == Op::RetargetExec => LaunchArgument::Exec,
-                5 if matches!(operation, Op::RetargetTui | Op::RetargetExec) => {
-                    LaunchArgument::Session
-                }
-                6 if operation == Op::Prepare => LaunchArgument::FullAccess,
-                _ => return Err(MojoError::InvalidOutput),
-            })
+            let argument_index = launch_argument_piece_index(piece, input.len(), &mut seen)?;
+            decode_launch_argument(piece, operation, arguments, argument_index)
         })
         .collect::<Result<Vec<_>, _>>()?;
     Ok(LaunchArgumentPlan {
