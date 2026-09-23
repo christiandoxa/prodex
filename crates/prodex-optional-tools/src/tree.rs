@@ -9,14 +9,6 @@ const MAX_TREE_FILES: usize = 4_096;
 const MAX_TREE_BYTES: u64 = 64 * 1024 * 1024;
 const MAX_FILE_BYTES: u64 = 16 * 1024 * 1024;
 
-pub(crate) fn path_exists(path: &Path) -> Result<bool> {
-    match fs::symlink_metadata(path) {
-        Ok(_) => Ok(true),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
-        Err(error) => Err(error).with_context(|| format!("failed to inspect {}", path.display())),
-    }
-}
-
 pub(crate) fn tree_sha256(root: &Path, digest_domain: &[u8]) -> Result<String> {
     let mut files = Vec::new();
     collect_tree_files(root, root, &mut files)?;

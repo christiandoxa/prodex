@@ -187,6 +187,8 @@ mod tests {
         let error = start_presidio_containers_with(
             &analyzer,
             &anonymizer,
+            PRESIDIO_ANALYZER_IMAGE,
+            PRESIDIO_ANONYMIZER_IMAGE,
             |_name, _image, _port| {
                 ensure_calls += 1;
                 if ensure_calls == 1 {
