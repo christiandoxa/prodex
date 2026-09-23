@@ -95,12 +95,6 @@ fn configure_overlay_codex_home(
             toml::from_str("approval_policy = \"never\"\nsandbox_mode = \"danger-full-access\"\n")?,
         );
     }
-    if codex_args
-        .iter()
-        .any(|arg| arg == "--dangerously-bypass-hook-trust")
-    {
-        merge_overlay_toml(&mut config, toml::from_str("bypass_hook_trust = true\n")?);
-    }
     let rendered = toml::to_string_pretty(&config).context("failed to render overlay config")?;
     std::fs::write(&config_path, rendered)
         .with_context(|| format!("failed to write {}", config_path.display()))
@@ -211,7 +205,6 @@ fn project_fresh_super_config(
 ) -> Result<()> {
     let mut projected_args = Vec::with_capacity(runtime_args.len());
     let mut config_args = Vec::new();
-    let mut bypass_hook_trust = false;
     let mut index = 0;
     while index < runtime_args.len() {
         let argument = runtime_args[index].to_string_lossy();
@@ -238,7 +231,6 @@ fn project_fresh_super_config(
                 }
             }
             "--dangerously-bypass-hook-trust" => {
-                bypass_hook_trust = true;
                 projected_args.push(runtime_args[index].clone());
                 index += 1;
                 continue;
@@ -256,12 +248,6 @@ fn project_fresh_super_config(
         }
         projected_args.push(runtime_args[index].clone());
         index += 1;
-    }
-    if bypass_hook_trust {
-        config_args.extend([
-            std::ffi::OsString::from("-c"),
-            std::ffi::OsString::from("bypass_hook_trust=true"),
-        ]);
     }
     if crate::codex_cli_config_override_value(runtime_args, "disable_paste_burst").is_none() {
         config_args.extend([
@@ -510,4 +496,48 @@ pub(crate) fn prepare_prodex_overlay_home(
         &paths.managed_profiles_root,
         base_codex_home,
     )
+}
+
+#[cfg(test)]
+mod overlay_tests {
+    use super::*;
+    use std::ffi::OsString;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn temp_overlay(name: &str) -> PathBuf {
+        let stamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos();
+        std::env::temp_dir().join(format!("prodex-{name}-{}-{stamp}", std::process::id()))
+    }
+
+    #[test]
+    fn hook_trust_bypass_stays_cli_only_in_overlay_config() {
+        let root = temp_overlay("hook-trust-overlay");
+        std::fs::create_dir_all(&root).unwrap();
+        let args = vec![
+            OsString::from("--dangerously-bypass-hook-trust"),
+            OsString::from("-c"),
+            OsString::from("disable_paste_burst=true"),
+        ];
+
+        configure_overlay_codex_home(&root, &args, false).unwrap();
+
+        let rendered = std::fs::read_to_string(root.join("config.toml")).unwrap();
+        let config: toml::Value = toml::from_str(&rendered).unwrap();
+        assert!(config.get("bypass_hook_trust").is_none());
+        assert_eq!(
+            config
+                .get("disable_paste_burst")
+                .and_then(toml::Value::as_bool),
+            Some(true)
+        );
+        assert!(
+            args.iter()
+                .any(|arg| arg == "--dangerously-bypass-hook-trust")
+        );
+
+        let _ = std::fs::remove_dir_all(root);
+    }
 }

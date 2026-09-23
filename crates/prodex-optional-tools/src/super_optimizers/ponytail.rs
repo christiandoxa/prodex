@@ -45,7 +45,7 @@ pub(super) fn install_ponytail_plugin(codex_home: &Path, tool: &ResolvedTool) ->
     remove_existing_dir_path(&plugin_cache_base)
         .with_context(|| format!("failed to clear {}", plugin_cache_base.display()))?;
     copy_ponytail_checkout(checkout, &plugin_cache_base.join(&plugin_version))?;
-    configure_ponytail_plugin_config(codex_home, &marketplace_root, &plugin_version)?;
+    configure_ponytail_plugin_config(codex_home, &marketplace_root)?;
     Ok(())
 }
 
@@ -74,11 +74,7 @@ fn write_local_marketplace_manifest(marketplace_root: &Path) -> Result<()> {
     )
 }
 
-fn configure_ponytail_plugin_config(
-    codex_home: &Path,
-    marketplace_root: &Path,
-    plugin_version: &str,
-) -> Result<()> {
+fn configure_ponytail_plugin_config(codex_home: &Path, marketplace_root: &Path) -> Result<()> {
     let config_path = codex_home.join("config.toml");
     let contents = read_text_file_limited(&config_path)?.unwrap_or_default();
     let mut table = if contents.trim().is_empty() {
@@ -106,11 +102,6 @@ fn configure_ponytail_plugin_config(
         "source".to_string(),
         toml::Value::String(marketplace_root.display().to_string()),
     );
-    ponytail_marketplace.insert(
-        "version".to_string(),
-        toml::Value::String(plugin_version.to_string()),
-    );
-
     let plugins = ensure_child_table(&mut table, "plugins")?;
     let ponytail_plugin = ensure_child_table(plugins, PLUGIN_ID)?;
     ponytail_plugin.insert("enabled".to_string(), toml::Value::Boolean(true));
@@ -237,13 +228,26 @@ mod tests {
         .unwrap();
         let checkout = codex_home.join("ponytail");
 
-        configure_ponytail_plugin_config(&codex_home, &checkout, "1.2.3").unwrap();
+        configure_ponytail_plugin_config(&codex_home, &checkout).unwrap();
 
         let config = fs::read_to_string(codex_home.join("config.toml")).unwrap();
         let config: toml::Value = toml::from_str(&config).unwrap();
         assert_eq!(
             config["marketplaces"][MARKETPLACE_NAME]["source_type"].as_str(),
             Some("local")
+        );
+        assert_eq!(
+            config["marketplaces"][MARKETPLACE_NAME]["source"].as_str(),
+            Some(checkout.to_string_lossy().as_ref())
+        );
+        assert!(
+            config["marketplaces"][MARKETPLACE_NAME]
+                .get("version")
+                .is_none()
+        );
+        assert_eq!(
+            config["plugins"][PLUGIN_ID]["enabled"].as_bool(),
+            Some(true)
         );
         let _ = fs::remove_dir_all(codex_home);
     }
