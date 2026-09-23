@@ -94,14 +94,15 @@ fn fast_playwright_tool_status() -> ToolHealth {
     let Some(npx) = find_path_command("npx") else {
         return ToolHealth::missing(id, "npx was not found on PATH");
     };
-    resolved_command_tool(
+    match resolved_command_tool(
         id,
         npx,
         ToolDiscoverySource::Path,
         &PLAYWRIGHT_MCP_PROBE_ARGS,
-    )
-    .map(ToolHealth::installed)
-    .unwrap_or_else(|error| invalid_tool(id, error))
+    ) {
+        Ok(tool) => ToolHealth::installed(tool),
+        Err(error) => playwright_probe_failure(error),
+    }
 }
 
 fn fast_resolved_managed_command(
