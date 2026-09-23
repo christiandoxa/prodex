@@ -112,27 +112,27 @@ cargo test --locked -p prodex-provider-spi --features mojo
 
 For a strict real-Mojo check, install the pinned stable Mojo package from the
 [official Mojo installation instructions](https://docs.modular.com/mojo/manual/install/)
-(`mojo==1.0.0` via `uv`), then run:
+(`mojo==1.1.0` via `uv`), then run:
 
 ```bash
-PRODEX_MOJO_REQUIRED=1 PRODEX_MOJO_VERSION=1.0.0 \
+PRODEX_MOJO_REQUIRED=1 PRODEX_MOJO_VERSION=1.1.0 \
   cargo build --locked --features mojo-core --bin prodex
-PRODEX_MOJO_REQUIRED=1 PRODEX_MOJO_VERSION=1.0.0 \
+PRODEX_MOJO_REQUIRED=1 PRODEX_MOJO_VERSION=1.1.0 \
   cargo test --locked -p prodex-quota --features mojo -- --test-threads=1
-PRODEX_MOJO_REQUIRED=1 PRODEX_MOJO_VERSION=1.0.0 \
+PRODEX_MOJO_REQUIRED=1 PRODEX_MOJO_VERSION=1.1.0 \
   cargo test --locked -p prodex-runtime-proxy --features mojo -- --test-threads=1
-PRODEX_MOJO_REQUIRED=1 PRODEX_MOJO_VERSION=1.0.0 \
+PRODEX_MOJO_REQUIRED=1 PRODEX_MOJO_VERSION=1.1.0 \
   cargo test --locked -p prodex-runtime-quota --features mojo -- --test-threads=1
-PRODEX_MOJO_REQUIRED=1 PRODEX_MOJO_VERSION=1.0.0 \
+PRODEX_MOJO_REQUIRED=1 PRODEX_MOJO_VERSION=1.1.0 \
   cargo test --locked -p prodex-provider-spi --features mojo -- --test-threads=1
-PRODEX_MOJO_REQUIRED=1 PRODEX_MOJO_VERSION=1.0.0 \
+PRODEX_MOJO_REQUIRED=1 PRODEX_MOJO_VERSION=1.1.0 \
   cargo test --locked -p prodex-context --features mojo -- --test-threads=1
-PRODEX_MOJO_REQUIRED=1 PRODEX_MOJO_VERSION=1.0.0 \
+PRODEX_MOJO_REQUIRED=1 PRODEX_MOJO_VERSION=1.1.0 \
   cargo test --locked -p prodex-mojo-core --features mojo-core -- --test-threads=1
 
-PRODEX_MOJO_REQUIRED=1 PRODEX_MOJO_VERSION=1.0.0 \
+PRODEX_MOJO_REQUIRED=1 PRODEX_MOJO_VERSION=1.1.0 \
   cargo test --locked -p prodex-provider-core --features mojo -- --test-threads=1
-PRODEX_MOJO_REQUIRED=1 PRODEX_MOJO_VERSION=1.0.0 \
+PRODEX_MOJO_REQUIRED=1 PRODEX_MOJO_VERSION=1.1.0 \
   cargo test --locked -p prodex-runtime-policy --features mojo -- --test-threads=1
 
 target/debug/prodex doctor --runtime --json
@@ -451,7 +451,7 @@ Context verification exercises the production Mojo-owned runtime directly:
 ```bash
 node scripts/ci/smart-context-guard.mjs --self-test
 node scripts/ci/smart-context-guard.mjs
-PRODEX_MOJO_REQUIRED=1 PRODEX_MOJO_VERSION=1.0.0 \
+PRODEX_MOJO_REQUIRED=1 PRODEX_MOJO_VERSION=1.1.0 \
   cargo test --locked -q -p prodex-runtime-proxy --features mojo --lib -- smart_context --test-threads=1
 ```
 
