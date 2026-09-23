@@ -30,7 +30,6 @@ fn super_dry_run_presidio_flag_reports_redaction_enabled() {
     );
     for expected in [
         "--dangerously-bypass-approvals-and-sandbox",
-        "--dangerously-bypass-hook-trust",
         "trust_level",
     ] {
         assert!(
@@ -38,6 +37,10 @@ fn super_dry_run_presidio_flag_reports_redaction_enabled() {
             "Super dry-run should expose {expected}, stdout: {stdout}"
         );
     }
+    assert!(
+        !stdout.contains("--dangerously-bypass-hook-trust"),
+        "Super should pre-trust discovered hooks by hash instead of using the global hook bypass, stdout: {stdout}"
+    );
     assert!(
         !stderr.contains("Use Presidio for data safety?"),
         "explicit --presidio should skip prompt, stderr: {stderr}"
