@@ -62,43 +62,12 @@ fn runtime_proxy_governed_http_codex_args(
     openai_mount_path: &str,
     user_args: &[OsString],
 ) -> Vec<OsString> {
-    let mut args = scope_codex_exec_config_args(&runtime_proxy_codex_args_with_mount_path(
+    runtime_proxy_openai_provider_codex_args(
         listen_addr,
         openai_mount_path,
         user_args,
-    ));
-    let proxy_openai_base = format!(
-        "http://{listen_addr}{}",
-        normalize_mount_path(openai_mount_path)
-    );
-    let overrides = [
-        format!(
-            "model_provider={}",
-            toml_string_literal(PRODEX_GOVERNED_HTTP_PROVIDER_ID)
-        ),
-        format!(
-            "model_providers.{PRODEX_GOVERNED_HTTP_PROVIDER_ID}.name={}",
-            toml_string_literal("OpenAI through Prodex governance")
-        ),
-        format!(
-            "model_providers.{PRODEX_GOVERNED_HTTP_PROVIDER_ID}.base_url={}",
-            toml_string_literal(&proxy_openai_base)
-        ),
-        format!("model_providers.{PRODEX_GOVERNED_HTTP_PROVIDER_ID}.wire_api=\"responses\""),
-        format!("model_providers.{PRODEX_GOVERNED_HTTP_PROVIDER_ID}.requires_openai_auth=true"),
-        format!("model_providers.{PRODEX_GOVERNED_HTTP_PROVIDER_ID}.supports_websockets=false"),
-        format!(
-            "model_providers.{PRODEX_GOVERNED_HTTP_PROVIDER_ID}.supports_standalone_web_search=true"
-        ),
-    ];
-    let insert_at = governed_http_config_insertion_index(&args);
-    args.splice(
-        insert_at..insert_at,
-        overrides
-            .into_iter()
-            .flat_map(|value| [OsString::from("-c"), OsString::from(value)]),
-    );
-    args
+        /*supports_websockets*/ false,
+    )
 }
 
 #[cfg(any(not(feature = "mojo"), test))]
@@ -394,25 +363,56 @@ pub fn runtime_proxy_codex_args_with_mount_path(
     openai_mount_path: &str,
     user_args: &[OsString],
 ) -> Vec<OsString> {
-    let proxy_chatgpt_base = format!("http://{listen_addr}/backend-api");
-    let proxy_openai_base = format!("http://{listen_addr}{openai_mount_path}");
+    runtime_proxy_openai_provider_codex_args(
+        listen_addr,
+        openai_mount_path,
+        user_args,
+        /*supports_websockets*/ true,
+    )
+}
+
+#[cfg(any(not(feature = "mojo"), test))]
+fn runtime_proxy_openai_provider_codex_args(
+    listen_addr: SocketAddr,
+    openai_mount_path: &str,
+    user_args: &[OsString],
+    supports_websockets: bool,
+) -> Vec<OsString> {
+    // Keep Codex 0.156 account/read bootstrap HTTPS; proxy only model traffic here.
+    let mut args = scope_codex_exec_config_args(user_args);
+    let proxy_openai_base = format!(
+        "http://{listen_addr}{}",
+        normalize_mount_path(openai_mount_path)
+    );
     let overrides = [
         format!(
-            "chatgpt_base_url={}",
-            toml_string_literal(&proxy_chatgpt_base)
+            "model_provider={}",
+            toml_string_literal(PRODEX_GOVERNED_HTTP_PROVIDER_ID)
         ),
         format!(
-            "openai_base_url={}",
-            toml_string_literal(&proxy_openai_base),
+            "model_providers.{PRODEX_GOVERNED_HTTP_PROVIDER_ID}.name={}",
+            toml_string_literal("OpenAI through Prodex governance")
+        ),
+        format!(
+            "model_providers.{PRODEX_GOVERNED_HTTP_PROVIDER_ID}.base_url={}",
+            toml_string_literal(&proxy_openai_base)
+        ),
+        format!("model_providers.{PRODEX_GOVERNED_HTTP_PROVIDER_ID}.wire_api=\"responses\""),
+        format!("model_providers.{PRODEX_GOVERNED_HTTP_PROVIDER_ID}.requires_openai_auth=true"),
+        format!(
+            "model_providers.{PRODEX_GOVERNED_HTTP_PROVIDER_ID}.supports_websockets={supports_websockets}"
+        ),
+        format!(
+            "model_providers.{PRODEX_GOVERNED_HTTP_PROVIDER_ID}.supports_standalone_web_search=true"
         ),
     ];
-
-    let mut args = Vec::with_capacity((overrides.len() * 2) + user_args.len());
-    for override_entry in overrides {
-        args.push(OsString::from("-c"));
-        args.push(OsString::from(override_entry));
-    }
-    args.extend(user_args.iter().cloned());
+    let insert_at = governed_http_config_insertion_index(&args);
+    args.splice(
+        insert_at..insert_at,
+        overrides
+            .into_iter()
+            .flat_map(|value| [OsString::from("-c"), OsString::from(value)]),
+    );
     args
 }
 

@@ -1,5 +1,4 @@
 use super::*;
-use runtime_proxy_crate as runtime_proxy;
 
 #[test]
 fn runtime_launch_cli_model_accepts_inline_and_short_forms() {
@@ -14,7 +13,7 @@ fn runtime_launch_cli_model_accepts_inline_and_short_forms() {
 }
 
 #[test]
-fn runtime_proxy_codex_args_preserve_user_overrides_after_proxy_overrides() {
+fn runtime_proxy_codex_args_keep_workspace_bootstrap_codex_owned() {
     let args = runtime_proxy_codex_args(
         "127.0.0.1:4455".parse().expect("socket addr"),
         &[
@@ -29,28 +28,51 @@ fn runtime_proxy_codex_args_preserve_user_overrides_after_proxy_overrides() {
     .map(|arg| arg.to_string_lossy().into_owned())
     .collect::<Vec<_>>();
 
-    assert_eq!(args[0], "-c");
-    assert_eq!(
-        args[1],
-        "chatgpt_base_url=\"http://127.0.0.1:4455/backend-api\""
+    assert!(!args.iter().any(|arg| {
+        arg.starts_with("chatgpt_base_url=") || arg.starts_with("openai_base_url=")
+    }));
+    assert!(
+        args.iter()
+            .any(|arg| { arg == "model_provider=\"prodex-openai-governed-http\"" })
     );
-    assert_eq!(args[2], "-c");
-    assert_eq!(
-        args[3],
-        format!(
-            "openai_base_url=\"http://127.0.0.1:4455{}\"",
-            runtime_proxy::RUNTIME_PROXY_OPENAI_MOUNT_PATH
-        )
+    assert!(args.iter().any(|arg| {
+        arg == "model_providers.prodex-openai-governed-http.base_url=\"http://127.0.0.1:4455/backend-api/prodex\""
+    }));
+    assert!(args.iter().any(|arg| {
+        arg == "model_providers.prodex-openai-governed-http.requires_openai_auth=true"
+    }));
+    assert!(args.iter().any(|arg| {
+        arg == "model_providers.prodex-openai-governed-http.supports_websockets=true"
+    }));
+    assert!(args.iter().any(|arg| arg == "service_tier=null"));
+    assert!(
+        args.iter()
+            .any(|arg| arg == "--config=notice.fast_default_opt_out=true")
     );
-    assert_eq!(
-        &args[4..],
-        [
-            "exec",
-            "-c",
-            "service_tier=null",
-            "--config=notice.fast_default_opt_out=true",
-            "hello"
-        ]
+    assert_eq!(args.last().map(String::as_str), Some("hello"));
+}
+
+#[test]
+fn runtime_proxy_codex_args_preserve_user_https_chatgpt_bootstrap() {
+    let args = runtime_proxy_codex_args(
+        "127.0.0.1:4455".parse().expect("socket addr"),
+        &[
+            OsString::from("-c"),
+            OsString::from("chatgpt_base_url=\"https://workspace.example\""),
+        ],
+    )
+    .into_iter()
+    .map(|arg| arg.to_string_lossy().into_owned())
+    .collect::<Vec<_>>();
+
+    assert!(
+        args.iter()
+            .any(|arg| { arg == "chatgpt_base_url=\"https://workspace.example\"" })
+    );
+    assert!(
+        !args
+            .iter()
+            .any(|arg| { arg == "chatgpt_base_url=\"http://127.0.0.1:4455/backend-api\"" })
     );
 }
 

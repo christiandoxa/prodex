@@ -315,9 +315,9 @@ fn codex_child_plan_adds_local_provider_host_to_proxy_bypass_env() {
 fn codex_child_plan_adds_runtime_proxy_ports_to_proxy_bypass_env() {
     let args = vec![
         OsString::from("-c"),
-        OsString::from("chatgpt_base_url=\"http://127.0.0.1:64550/backend-api\""),
-        OsString::from("-c"),
-        OsString::from("openai_base_url=\"http://127.0.0.1:64550/backend-api/prodex\""),
+        OsString::from(
+            "model_providers.prodex-openai-governed-http.base_url=\"http://127.0.0.1:64550/backend-api/prodex\"",
+        ),
     ];
 
     let plan = codex_child_plan_with_env(

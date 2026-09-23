@@ -5,6 +5,8 @@ use std::path::PathBuf;
 
 const LOCAL_PROXY_BYPASS_ENV_KEYS: [&str; 2] = ["NO_PROXY", "no_proxy"];
 const LOCAL_PROXY_BYPASS_HOSTS: [&str; 3] = ["127.0.0.1", "localhost", "::1"];
+const PRODEX_OPENAI_PROXY_BASE_URL_KEY: &str =
+    "model_providers.prodex-openai-governed-http.base_url";
 const CODEX_TUI_DISABLE_KEYBOARD_ENHANCEMENT_ENV: &str = "CODEX_TUI_DISABLE_KEYBOARD_ENHANCEMENT";
 const CODEX_TUI_DISABLE_PASTE_BURST_KEY: &str = "disable_paste_burst";
 const CODEX_TUI_DISABLE_PASTE_BURST_OVERRIDE: &str = "disable_paste_burst=true";
@@ -208,6 +210,7 @@ fn local_proxy_bypass_hosts_from_args(args: &[OsString], local_provider_id: &str
     for key in [
         "chatgpt_base_url",
         "openai_base_url",
+        PRODEX_OPENAI_PROXY_BASE_URL_KEY,
         local_provider_key.as_str(),
     ] {
         if let Some(base_url) = codex_config::codex_cli_config_override_value(args, key) {

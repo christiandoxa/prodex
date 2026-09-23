@@ -53,6 +53,7 @@ const REQUIRED_CRITICAL_FILES = [
   "codex-rs/app-server/src/request_processors/thread_processor.rs",
   "codex-rs/app-server/src/request_processors/turn_processor.rs",
   "codex-rs/app-server/src/request_processors/mcp_event_stream.rs",
+  "codex-rs/app-server/src/request_processors/account_processor/workspace_routing.rs",
   "codex-rs/app-server/src/request_serialization.rs",
 ];
 
@@ -379,6 +380,18 @@ const REQUIRED_FILE_CONTAINS = {
     "MCP_EVENT_STREAM_STARTUP_TIMEOUT",
     "McpEventStreams",
     "McpServerEventStreamStartParams",
+  ],
+  "codex-rs/app-server/src/request_processors/account_processor/workspace_routing.rs": [
+    "workspace backend must use an HTTPS origin without credentials",
+    "effective_chatgpt_base_url",
+    "config.chatgpt_base_url.clone()",
+    "get_accounts_check",
+    "workspace_backend_origin",
+    "resolve_routing",
+    "parse_backend_url",
+    "url.scheme() != \"https\"",
+    "!url.username().is_empty()",
+    "url.password().is_some()",
   ],
   "codex-rs/http-client/src/outbound_proxy.rs": [
     "OutboundProxyPolicy",
@@ -1240,6 +1253,23 @@ const REQUIRED_SEMANTIC_CHECKS = [
       "ThreadStarted => \"thread/started\"",
       "ThreadQueueChanged => \"thread/queue/changed\"",
       "TurnStarted => \"turn/started\"",
+    ],
+  },
+  {
+    id: "app-server.workspace-routing-https-bootstrap",
+    kind: "security_boundary",
+    file: "codex-rs/app-server/src/request_processors/account_processor/workspace_routing.rs",
+    file_contains_all: [
+      "workspace backend must use an HTTPS origin without credentials",
+      "effective_chatgpt_base_url",
+      "config.chatgpt_base_url.clone()",
+      "get_accounts_check",
+      "workspace_backend_origin",
+      "resolve_routing",
+      "parse_backend_url",
+      "url.scheme() != \"https\"",
+      "!url.username().is_empty()",
+      "url.password().is_some()",
     ],
   },
   {
