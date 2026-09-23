@@ -1979,5 +1979,20 @@
       "maxFileLines": 850
     },
     "reason": "Reviewed the exact 0.430.4-to-0.431.0 source promotion carried as individually policy-compliant checkpoints: Mojo launch/provider ownership waves, their parity and ABI coverage, the Codex rust-v0.156.0 compatibility repair, and curated release notes. The pre-record push measured 92 files, 55 behavior files, 10,096 changed lines, and an 850-line largest changed file. These narrow subject and measured caps cover only this promotion plus its policy record; global churn thresholds and all correctness, security, compatibility, and release gates remain enforced."
+  },
+  {
+    "id": "audited-stable-rust-1.98.1-mojo-1.1.0-promotion",
+    "requiredSubjects": [
+      "chore(toolchain): adopt Rust 1.98.1 and Mojo 1.1.0",
+      "docs(mojo): record stable 1.1 compiler baseline",
+      "ci(churn): record audited stable compiler promotion"
+    ],
+    "caps": {
+      "maxFiles": 40,
+      "maxBehaviorFiles": 8,
+      "maxLines": 920,
+      "maxFileLines": 200
+    },
+    "reason": "Reviewed the exact post-0.431.1 stable compiler promotion: Rust 1.98.1 pins, Mojo 1.1.0 pins, the mechanical fixed-size InlineArray-to-std.collections.Array/Tuple compatibility migration, release/CI supply-chain metadata, and compiler-baseline documentation. The pre-policy range measured 37 files, 6 behavior files, 864 changed lines, and 176 lines in the largest file. These caps provide only narrow headroom for this exact policy record; global churn thresholds and all correctness, parity, no-fallback, size, supply-chain, CI, and release gates remain enforced."
   }
 ]
