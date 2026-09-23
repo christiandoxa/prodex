@@ -2,88 +2,112 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
-## 0.430.4 - 2026-09-22
+## 0.431.0 - 2026-09-23
 
-### Misc
+### Runtime
 
-- Keep tunnel client alive after readiness (`c315b54`)
-# Prodex 0.430.4
-
-## New Features
-
-- No new MCP tool or expose surface is added in this patch release.
-
-## Bug Fixes
-
-- Keep the supervised OpenAI `tunnel-client` alive after local readiness is
-  reported by spawning the child from the long-lived expose thread before
-  handing readiness monitoring to the startup worker.
-- Fix the regression where `prodex s expose --openai-tunnel-id ...` could print
-  `OpenAI Secure MCP Tunnel ready` and then immediately fail with
-  `OpenAI tunnel-client exited unexpectedly`.
-- The lifecycle fix applies to both the preferred official `tunnel-client`
-  v0.0.14 release and the compatible official v0.0.13 release.
-
-## Safety
-
-- Preserve Linux parent-death signaling and private process-group cleanup for
-  the supervised tunnel process; the fix changes which Prodex thread creates
-  the child rather than weakening process cleanup.
-- Keep the existing exact official version/commit allowlist. v0.0.14 remains
-  preferred, v0.0.13 remains a narrowly pinned compatibility release, and
-  unvetted or mismatched builds continue to fail closed.
-- Tunnel-client output remains disconnected from the terminal so capability
-  URLs and control-plane details are not exposed through child logs.
-
-## Validation
-
-- Added a Linux end-to-end lifecycle regression that reproduces the former
-  ready-then-exit handoff and verifies the tunnel child remains alive.
-- Re-ran the complete `super_expose` unit-test subset and the tunnel integration
-  suite, including accepted v0.0.14/v0.0.13 metadata and rejection of an
-  unvetted build.
-- Smoke-tested the installed official v0.0.13 binary through the fixed path and
-  verified it remains running after readiness until externally stopped.
-
-## Changelog
-
-- Fix the Linux OpenAI tunnel-client startup handoff without changing the
-  supported tunnel-client release set or the exposed MCP tool contract.
-- Keep v0.0.14 as the preferred release and v0.0.13 as the exact pinned
-  compatibility release.
-- Refresh the standalone-release Kiro CLI freshness pin to stable 2.23.0;
-  this is release tooling only and does not change Prodex runtime behavior.
-
-Full Changelog: [0.430.3...0.430.4](https://github.com/christiandoxa/prodex/compare/0.430.3...0.430.4)
-
-## 0.430.3 - 2026-09-21
-
-### Misc
-
-- Revalidate latest tool trees (`b2ac0c8`)
-- Support tunnel-client 0.0.13 (`b19c2c3`)
-
-## 0.430.2 - 2026-09-21
-
-### Misc
-
-- Restore Windows session bridge portability (`9403127`)
-- Restore manual redeem command (`154876f`)
-- Restore preserved 0.429.4 behavior (`7122191`)
-
-## 0.430.1 - 2026-09-21
+- Remove obsolete native event provider argument (`033dbe5`)
 
 ### CLI
 
-- Handle zero-height profile terminals (`b5ff2d8`)
+- Preserve quota observations and accept unknown log tokens (`af60a49`)
+- Move config override matching into Mojo (`e362aea`)
+- Make Mojo authoritative for Codex argument plans (`e7a63eb`)
+
+### Claude
+
+- Move Anthropic Messages request shaping into Mojo (`dbbd8d7`)
+- Add complete Anthropic Messages request kernel (`b6a9147`)
 
 ### Misc
 
-- Preserve token usage json envelope (`1faf08a`)
-- Restore remaining interactive prompts (`ef861e9`)
-- Restore 0.429.4 terminal surfaces (`f5fc368`)
+- Align with Codex 0.156.0 (`d42c691`)
+- Move complete Responses chat request planning to Mojo (`6fad0fb`)
+- Add complete Responses chat request kernel (`9002804`)
+- Move DeepSeek message semantics into Mojo (`2a2fd41`)
+- Add complete DeepSeek message normalization and adjacency (`02daf98`)
+- Copy validated JSON arena spans in bulk (`70a1aeb`)
+- Make Mojo authoritative for complete tool shaping (`c892781`)
+- Add complete provider tool transformation kernel (`17db154`)
+- Add versioned Codex argument planning kernel (`efef200`)
+# Prodex 0.431.0
 
-## 0.430.0 - 2026-09-21
+## New Features
+
+- Update the pinned upstream compatibility baseline from Codex
+  `rust-v0.155.1` to the official `rust-v0.156.0` release.
+- Preserve the upstream fixed `/responses` HTTP and WebSocket route after
+  Codex removed the previous Responses endpoint selector.
+- Treat the Responses `session_id` header as an opaque upstream affinity key.
+  Codex 0.156.0 may use prompt-cache affinity there for root agents while the
+  actual session identity remains in turn metadata and history.
+- Preserve remote compaction v2 through the normal Responses stream, including
+  `CompactionTrigger`, compaction metadata, and Codex-owned current-model
+  fallback behavior.
+- Move Codex launch argument planning and configuration-override matching into
+  authoritative Mojo kernels while preserving non-UTF-8 OS arguments in Rust.
+- Move complete Responses-to-chat request planning and provider tool shaping
+  into Mojo-backed production paths with Rust retained as the Serde/ABI host.
+- Move DeepSeek message normalization, tool-call adjacency, and response
+  metadata merging into Mojo.
+- Move complete Anthropic Messages request shaping into Mojo, including message
+  blocks, tools, web-search options, tool choice, request defaults, and the
+  existing degradation contract.
+- Keep Rust feature-off implementations as compatibility/test oracles rather
+  than silent production fallbacks.
+
+## Bug Fixes
+
+- Align explicit error classification with Codex 0.156.0:
+  `credit_balance_exhausted`, `organization_spend_limit_exceeded`, and
+  `project_spend_limit_exceeded` are quota failures, while `slow_down` is a
+  rate-limit signal rather than server overload.
+- Preserve quota snapshot observations beyond percentage-shaped values while
+  retaining validated status, route, and grace contracts.
+- Allow long valid runtime-doctor log tokens to classify as unknown markers
+  instead of failing the Mojo boundary.
+- Keep the existing OpenAI Secure MCP tunnel lifecycle fix and exact official
+  `tunnel-client` allowlist unchanged: v0.0.14 remains preferred and v0.0.13
+  remains the pinned compatibility release.
+
+## Safety
+
+- No new MCP tool or expose surface is added in 0.431.0.
+- Runtime rotation remains pre-commit only for explicit account quota failures;
+  generic HTTP 429 responses remain pass-through unless a structured supported
+  code is present.
+- `slow_down` retries the same profile as rate limiting and is not treated as
+  account quota.
+- Process, filesystem, credential, secret-store, transport, persistence, and
+  OS lifecycle ownership remains in Rust where those host boundaries are
+  required.
+
+## Validation
+
+- Audited the exact Codex 0.155.1 and 0.156.0 tagged source trees. All 49
+  Prodex critical-file assertions match the updated 0.156.0 contract.
+- Verified the official Codex 0.156.0 Linux musl release asset checksum and
+  `codex-cli 0.156.0`, and completed an isolated app-server initialize smoke.
+- Added focused quota/rate classifier coverage for the new 0.156.0 error codes
+  in both active Mojo and feature-off Rust paths.
+- Differential and boundary coverage for the Mojo ownership waves includes
+  generated launch/config, provider-tool, OpenAI chat-request, DeepSeek message,
+  and Anthropic request corpora.
+- Provider, runtime-proxy, app integration, source guards, cross-target Mojo
+  object compilation, docs lint, and compatibility replay gates were exercised
+  during development.
+
+## Changelog
+
+- Support the official Codex `rust-v0.156.0` compatibility contract.
+- Align quota and rate-limit classification with Codex 0.156.0.
+- Promote additional launch and provider semantics to authoritative Mojo
+  kernels without expanding the MCP surface.
+- Preserve existing tunnel-client compatibility and runtime safety boundaries.
+
+Full Changelog: [0.430.4...0.431.0](https://github.com/christiandoxa/prodex/compare/0.430.4...0.431.0)
+
+## 0.430.4 - 2026-09-22
 
 ### Runtime
 
@@ -97,6 +121,7 @@ Full Changelog: [0.430.3...0.430.4](https://github.com/christiandoxa/prodex/comp
 
 ### CLI
 
+- Handle zero-height profile terminals (`b5ff2d8`)
 - Keep native Antigravity profileless (`0e9aafd`)
 - Retain Antigravity CLI compatibility (`aa9b86b`)
 - Gate reset-credit URL with Mojo quota (`4d07c35`)
@@ -116,6 +141,15 @@ Full Changelog: [0.430.3...0.430.4](https://github.com/christiandoxa/prodex/comp
 
 ### Misc
 
+- Keep tunnel client alive after readiness (`c315b54`)
+- Revalidate latest tool trees (`b2ac0c8`)
+- Support tunnel-client 0.0.13 (`b19c2c3`)
+- Restore Windows session bridge portability (`9403127`)
+- Restore manual redeem command (`154876f`)
+- Restore preserved 0.429.4 behavior (`7122191`)
+- Preserve token usage json envelope (`1faf08a`)
+- Restore remaining interactive prompts (`ef861e9`)
+- Restore 0.429.4 terminal surfaces (`f5fc368`)
 - Restore migration guidance wording (`43ba4a3`)
 - Preserve Messages parity without Mojo (`ce669e4`)
 - Own Gemini request policy and assembly (`e563934`)
