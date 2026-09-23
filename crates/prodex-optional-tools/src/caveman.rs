@@ -1,4 +1,4 @@
-use crate::discovery::managed_optimizer_roots;
+use crate::discovery::{managed_optimizer_roots, newest_stable_managed_version};
 use crate::localization::ensure_agents_reference;
 use crate::optional_tools::{
     OptionalToolId, ResolvedTool, ToolDiscoverySource, ToolHealth, ToolHealthStatus,
@@ -109,54 +109,7 @@ fn caveman_candidate() -> Result<Option<(PathBuf, PathBuf)>> {
     let minimum = Version::parse(CAVEMAN_MINIMUM_SUPPORTED_VERSION)
         .context("invalid Caveman minimum supported version")?;
     for root in managed_optimizer_roots() {
-        let metadata = match fs::symlink_metadata(&root) {
-            Ok(metadata) => metadata,
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
-            Err(error) => {
-                return Err(error).with_context(|| format!("failed to inspect {}", root.display()));
-            }
-        };
-        ensure!(
-            metadata.is_dir() && !metadata.file_type().is_symlink(),
-            "optional-tool root {} must be a real directory",
-            root.display()
-        );
-        let tool_root = root.join("caveman");
-        let entries = match fs::read_dir(&tool_root) {
-            Ok(entries) => entries,
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
-            Err(error) => {
-                return Err(error)
-                    .with_context(|| format!("failed to read {}", tool_root.display()));
-            }
-        };
-        let mut newest: Option<(Version, PathBuf)> = None;
-        for entry in entries {
-            let entry = entry
-                .with_context(|| format!("failed to read entry in {}", tool_root.display()))?;
-            let file_type = entry
-                .file_type()
-                .with_context(|| format!("failed to inspect {}", entry.path().display()))?;
-            if !file_type.is_dir() || file_type.is_symlink() {
-                continue;
-            }
-            let Some(name) = entry.file_name().to_str().map(str::to_owned) else {
-                continue;
-            };
-            let Ok(version) = Version::parse(&name) else {
-                continue;
-            };
-            if !version.pre.is_empty() {
-                continue;
-            }
-            if newest
-                .as_ref()
-                .is_none_or(|(current, _)| version > *current)
-            {
-                newest = Some((version, entry.path()));
-            }
-        }
-        let Some((version, candidate)) = newest else {
+        let Some((version, candidate)) = newest_stable_managed_version(&root, "caveman")? else {
             continue;
         };
         ensure!(
