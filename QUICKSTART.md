@@ -215,13 +215,18 @@ In this mode tools/list advertises only prodex_super_exec, and guessed calls to
 the run/session tools are rejected. Both full and exec-only expose modes write
 bounded redacted activity metadata to the normal Prodex runtime-log set, so
 prodex log, prodex log last, and prodex log --json can show expose lifecycle,
-RPC/tool calls, run state transitions, and exec completion. Capability URLs,
-task/input text, environment values, stdin, and captured stdout/stderr are not
-copied into those audit lines.
+RPC/tool calls, run state transitions, and direct exec start/completion. Exec
+entries include a bounded redacted command preview, cwd, argument/environment
+counts, stdin byte count, timeout, duration, and exit status. Environment
+values, stdin contents, captured stdout/stderr, capability URLs, and secret flag
+values are never copied into those audit lines.
 
 Local mode has no external tunnel. OpenAI mode requires a pre-created tunnel ID, the
-`CONTROL_PLANE_API_KEY` runtime key, and the official `tunnel-client`; it uses
-outbound HTTPS/TCP 443 and provides MCP connectivity only. The browser remains
+`CONTROL_PLANE_API_KEY` runtime key, and an official compatible `tunnel-client`; it uses
+outbound HTTPS/TCP 443 and provides MCP connectivity only. Prodex accepts stable
+tunnel-client 0.0.13 or newer when the official version format and required
+`run` capability are present; release qualification tracks the latest stable
+reference (0.0.14 at the 0.431.5 release cut). The browser remains
 local in OpenAI mode. Stop the process with Ctrl+C to revoke access.
 
 To use parallel workspaces, create separate worktrees and run one process in

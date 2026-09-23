@@ -345,6 +345,12 @@ fn operational_event_summary(
             add_log_detail(&mut details, fields, "effort", "effort");
             add_log_detail(&mut details, fields, "transport", "transport");
             add_log_detail(&mut details, fields, "method", "method");
+            add_log_detail(&mut details, fields, "command", "command");
+            add_log_detail(&mut details, fields, "cwd", "cwd");
+            add_log_detail(&mut details, fields, "arg_count", "args");
+            add_log_detail(&mut details, fields, "env_count", "env");
+            add_log_detail(&mut details, fields, "stdin_bytes", "stdin_bytes");
+            add_log_detail(&mut details, fields, "timeout_ms", "timeout_ms");
             add_log_endpoint_detail(&mut details, fields, "path", "path");
             add_log_endpoint_detail(&mut details, fields, "url", "path");
             add_log_detail(&mut details, fields, "tool_surface", "tools");
@@ -356,6 +362,7 @@ fn operational_event_summary(
             add_log_detail(&mut details, fields, "code", "code");
             add_log_detail(&mut details, fields, "reason", "reason");
             add_log_detail(&mut details, fields, "elapsed_ms", "latency_ms");
+            add_log_detail(&mut details, fields, "duration_ms", "duration_ms");
             add_log_detail(&mut details, fields, "exit_code", "exit");
             add_log_detail(&mut details, fields, "exit_status", "exit");
             add_log_detail(&mut details, fields, "outcome", "outcome");
