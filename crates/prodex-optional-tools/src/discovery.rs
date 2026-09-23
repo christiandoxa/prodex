@@ -1,5 +1,9 @@
 use std::env;
+use std::fs;
 use std::path::{Path, PathBuf};
+
+use anyhow::{Context, Result};
+use semver::Version;
 
 use crate::PRODEX_OPTIMIZERS_HOME_ENV;
 
@@ -31,6 +35,69 @@ pub(crate) fn managed_optimizer_roots() -> Vec<PathBuf> {
         );
     }
     roots
+}
+
+pub(crate) fn newest_stable_managed_version(
+    root: &Path,
+    tool: &str,
+) -> Result<Option<(Version, PathBuf)>> {
+    let metadata = match fs::symlink_metadata(root) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => {
+            return Err(error).with_context(|| format!("failed to inspect {}", root.display()));
+        }
+    };
+    anyhow::ensure!(
+        metadata.is_dir() && !metadata.file_type().is_symlink(),
+        "optional-tool root {} must be a real directory",
+        root.display()
+    );
+    newest_stable_version_directory(&root.join(tool))
+}
+
+fn newest_stable_version_directory(tool_root: &Path) -> Result<Option<(Version, PathBuf)>> {
+    let entries = match fs::read_dir(tool_root) {
+        Ok(entries) => entries,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => {
+            return Err(error).with_context(|| format!("failed to read {}", tool_root.display()));
+        }
+    };
+    let mut newest: Option<(Version, PathBuf)> = None;
+    for entry in entries {
+        let entry =
+            entry.with_context(|| format!("failed to read entry in {}", tool_root.display()))?;
+        let Some(candidate) = stable_version_directory_entry(&entry)? else {
+            continue;
+        };
+        if newest
+            .as_ref()
+            .is_none_or(|(current, _)| candidate.0 > *current)
+        {
+            newest = Some(candidate);
+        }
+    }
+    Ok(newest)
+}
+
+fn stable_version_directory_entry(entry: &fs::DirEntry) -> Result<Option<(Version, PathBuf)>> {
+    let file_type = entry
+        .file_type()
+        .with_context(|| format!("failed to inspect {}", entry.path().display()))?;
+    if !file_type.is_dir() || file_type.is_symlink() {
+        return Ok(None);
+    }
+    let Some(name) = entry.file_name().to_str().map(str::to_owned) else {
+        return Ok(None);
+    };
+    let Ok(version) = Version::parse(&name) else {
+        return Ok(None);
+    };
+    if !version.pre.is_empty() {
+        return Ok(None);
+    }
+    Ok(Some((version, entry.path())))
 }
 
 pub(crate) fn managed_optimizer_command_candidates(root: &Path, command: &str) -> Vec<PathBuf> {

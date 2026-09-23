@@ -2,7 +2,7 @@ use super::{
     OptionalToolId, ResolvedTool, TOOL_PROBE_TIMEOUT, ToolDiscoverySource, ToolHealth,
     find_path_command, invalid_tool, manifest_tree_sha256_supported, optional_tool_descriptor,
 };
-use crate::discovery::managed_optimizer_roots;
+use crate::discovery::{managed_optimizer_roots, newest_stable_managed_version};
 use anyhow::{Context, Result};
 use semver::Version;
 use serde::Deserialize;
@@ -68,54 +68,7 @@ fn candidate() -> Result<Option<(PathBuf, PathBuf)>> {
     let minimum = Version::parse(crate::PONYTAIL_MINIMUM_SUPPORTED_VERSION)
         .context("invalid Ponytail minimum supported version")?;
     for root in managed_optimizer_roots() {
-        let metadata = match fs::symlink_metadata(&root) {
-            Ok(metadata) => metadata,
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
-            Err(error) => {
-                return Err(error).with_context(|| format!("failed to inspect {}", root.display()));
-            }
-        };
-        anyhow::ensure!(
-            metadata.is_dir() && !metadata.file_type().is_symlink(),
-            "optional-tool root {} must be a real directory",
-            root.display()
-        );
-        let tool_root = root.join("ponytail");
-        let entries = match fs::read_dir(&tool_root) {
-            Ok(entries) => entries,
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
-            Err(error) => {
-                return Err(error)
-                    .with_context(|| format!("failed to read {}", tool_root.display()));
-            }
-        };
-        let mut newest: Option<(Version, PathBuf)> = None;
-        for entry in entries {
-            let entry = entry
-                .with_context(|| format!("failed to read entry in {}", tool_root.display()))?;
-            let file_type = entry
-                .file_type()
-                .with_context(|| format!("failed to inspect {}", entry.path().display()))?;
-            if !file_type.is_dir() || file_type.is_symlink() {
-                continue;
-            }
-            let Some(name) = entry.file_name().to_str().map(str::to_owned) else {
-                continue;
-            };
-            let Ok(version) = Version::parse(&name) else {
-                continue;
-            };
-            if !version.pre.is_empty() {
-                continue;
-            }
-            if newest
-                .as_ref()
-                .is_none_or(|(current, _)| version > *current)
-            {
-                newest = Some((version, entry.path()));
-            }
-        }
-        let Some((version, candidate)) = newest else {
+        let Some((version, candidate)) = newest_stable_managed_version(&root, "ponytail")? else {
             continue;
         };
         anyhow::ensure!(
