@@ -204,3 +204,19 @@ ABI tests, explicit edge fixtures, 5,000 generated differential chat requests,
 provider Mojo suite (238 passed, two manual benchmarks ignored), focused
 all-target Clippy, and object compilation for all six release triples with the
 pinned Mojo 1.0.0 compiler. No speedup is claimed.
+
+## Stable compiler baseline after 0.431.1
+
+The post-0.431.1 Mojo campaign uses Rust 1.98.1 and Mojo 1.1.0, the latest
+stable releases verified on 2026-09-23. CI, standalone release targets,
+supply-chain policy, install tests, and documentation use those exact pins.
+
+Mojo 1.1.0 removes the old implicit `InlineArray` surface. Prodex migrated
+fixed-size semantic buffers to `std.collections.Array` and the two-value trim
+bounds helper to a fixed `Tuple`; this is a representation-only compiler
+compatibility change and does not change the caller-owned C ABI.
+
+Upgrade evidence before promotion included the complete `prodex-mojo-core`
+suite, runtime-launch Mojo tests, provider-core Mojo tests, all-feature Clippy
+for the core runtime/provider/app consumers, a compiled-in root binary, and all
+Mojo authority/no-fallback/source-size/supply-chain guards.

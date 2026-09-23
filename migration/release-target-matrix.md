@@ -12,7 +12,7 @@ manifest is rendered from that file and is published beside `SHA256SUMS`.
 | `x86_64-pc-windows-msvc` | `windows-latest` | Mojo archive + native Rust link | Linux-hosted Windows COFF `x86-64` archive, native MSVC link and smoke | Release workflow fails closed if cross archive or native Mojo doctor evidence is missing | `MOJO_RELEASE_SUPPORTED` |
 | `aarch64-pc-windows-msvc` | `windows-latest` | Mojo archive + native Rust link | Linux-hosted Windows ARM64 `generic` archive, native MSVC link, and strict archive/dependency verification; the hosted x64 runner cannot execute the ARM64 PE | Release workflow fails closed if the cross archive, native link, or static Mojo evidence is missing | `MOJO_RELEASE_SUPPORTED` |
 
-The current Mojo compiler (`1.0.0`) accepts target-aware object generation for
+The current Mojo compiler (`1.1.0`) accepts target-aware object generation for
 the listed triples. Object generation alone does not promote a target. Linux
 x86_64 and aarch64 Linux have passed the cross-container final-link, GLIBC,
 runtime dependency, and clean-machine evidence locally. The aarch64 lane runs

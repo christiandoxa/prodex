@@ -93,7 +93,7 @@ ownership moved to Mojo. Release verification now targets the production path di
 ```bash
 node scripts/ci/smart-context-guard.mjs --self-test
 node scripts/ci/smart-context-guard.mjs
-PRODEX_MOJO_REQUIRED=1 PRODEX_MOJO_VERSION=1.0.0 \
+PRODEX_MOJO_REQUIRED=1 PRODEX_MOJO_VERSION=1.1.0 \
   cargo test --locked -q -p prodex-runtime-proxy --features mojo --lib -- smart_context --test-threads=1
 ```
 
