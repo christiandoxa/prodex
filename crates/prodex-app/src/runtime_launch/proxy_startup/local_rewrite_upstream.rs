@@ -276,7 +276,6 @@ impl RuntimeLocalRewriteLiveResponse {
 
 pub(super) fn runtime_local_rewrite_precommit_native_first_event(
     live: &mut RuntimeLocalRewriteLiveResponse,
-    provider: RuntimeProviderBridgeKind,
     lookahead_timeout_ms: u64,
     prefetch_slots: &Arc<tokio::sync::Semaphore>,
 ) -> Result<RuntimeLocalRewriteNativeFirstEvent> {
@@ -316,7 +315,6 @@ pub(super) fn runtime_local_rewrite_precommit_native_first_event(
             Ok(RuntimeLocalRewritePrefetchChunk::Data(chunk)) => {
                 if let Some(decision) = runtime_local_rewrite_inspect_native_chunk(
                     &mut prefetch,
-                    provider,
                     &mut prefix,
                     &mut line,
                     &mut data_lines,
@@ -364,7 +362,6 @@ pub(super) fn runtime_local_rewrite_precommit_native_first_event(
 
 fn runtime_local_rewrite_inspect_native_chunk(
     prefetch: &mut RuntimeLocalRewriteSsePrefetch,
-    provider: RuntimeProviderBridgeKind,
     prefix: &mut Vec<u8>,
     line: &mut Vec<u8>,
     data_lines: &mut Vec<String>,
@@ -1650,7 +1647,6 @@ mod tests {
                 RuntimeLocalRewriteLiveResponse::with_native_anthropic_messages(response);
             let outcome = runtime_local_rewrite_precommit_native_first_event(
                 &mut live,
-                RuntimeProviderBridgeKind::Anthropic,
                 50,
                 &Arc::new(tokio::sync::Semaphore::new(1)),
             )
@@ -1679,7 +1675,6 @@ mod tests {
 
         let outcome = runtime_local_rewrite_precommit_native_first_event(
             &mut live,
-            RuntimeProviderBridgeKind::DeepSeek,
             50,
             &Arc::new(tokio::sync::Semaphore::new(1)),
         )
@@ -1709,7 +1704,6 @@ data: {"type":"error","error":{"type":"overloaded_error"}}
 
         let outcome = runtime_local_rewrite_precommit_native_first_event(
             &mut live,
-            RuntimeProviderBridgeKind::Anthropic,
             50,
             &Arc::new(tokio::sync::Semaphore::new(1)),
         )
@@ -1738,7 +1732,6 @@ data: {"type":"message_start","message":{"id":"msg_example"}}
         let mut live = RuntimeLocalRewriteLiveResponse::with_native_anthropic_messages(response);
         let outcome = runtime_local_rewrite_precommit_native_first_event(
             &mut live,
-            RuntimeProviderBridgeKind::Anthropic,
             50,
             &Arc::new(tokio::sync::Semaphore::new(1)),
         )

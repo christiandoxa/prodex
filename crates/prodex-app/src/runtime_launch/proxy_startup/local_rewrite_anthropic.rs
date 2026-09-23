@@ -494,7 +494,6 @@ fn send_anthropic_attempt(
             if native_messages {
                 match runtime_local_rewrite_precommit_native_first_event(
                     &mut live_response,
-                    RuntimeProviderBridgeKind::Anthropic,
                     context
                         .shared
                         .runtime_shared
