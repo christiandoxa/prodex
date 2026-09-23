@@ -1,4 +1,6 @@
 use anyhow::{Context, Result, bail};
+use semver::Version;
+use std::env;
 use std::process::Command;
 use std::time::Duration;
 
@@ -6,6 +8,8 @@ pub(super) const PRESIDIO_ANALYZER_CONTAINER: &str = "presidio-analyzer";
 pub(super) const PRESIDIO_ANONYMIZER_CONTAINER: &str = "presidio-anonymizer";
 pub(super) const PRESIDIO_ANALYZER_IMAGE: &str = "ghcr.io/data-privacy-stack/presidio-analyzer:2.2.364@sha256:ae8f6f111ac2f04e3fec552f7f80edd0dcbfa2dd69ee1b9e030475be31669885";
 pub(super) const PRESIDIO_ANONYMIZER_IMAGE: &str = "ghcr.io/data-privacy-stack/presidio-anonymizer:2.2.364@sha256:e567013893ebc80994e3799f6f55c86aa1f0b0fadb779571ab346f0ec45365c1";
+pub(super) const PRESIDIO_ANALYZER_IMAGE_ENV: &str = "PRODEX_PRESIDIO_ANALYZER_IMAGE";
+pub(super) const PRESIDIO_ANONYMIZER_IMAGE_ENV: &str = "PRODEX_PRESIDIO_ANONYMIZER_IMAGE";
 const PRESIDIO_MANAGED_LABEL: &str = "com.prodex.presidio.managed";
 const PRESIDIO_SERVICE_LABEL: &str = "com.prodex.presidio.service";
 const PRESIDIO_DOCKER_TIMEOUT: Duration = Duration::from_secs(300);
@@ -15,6 +19,58 @@ const PRESIDIO_DOCKER_OUTPUT_MAX_BYTES: usize = 1024 * 1024;
 pub(super) enum PresidioContainerChange {
     Started,
     Created,
+}
+
+pub(super) fn presidio_analyzer_image() -> Result<String> {
+    resolve_presidio_image(
+        PRESIDIO_ANALYZER_IMAGE_ENV,
+        "analyzer",
+        PRESIDIO_ANALYZER_IMAGE,
+    )
+}
+
+pub(super) fn presidio_anonymizer_image() -> Result<String> {
+    resolve_presidio_image(
+        PRESIDIO_ANONYMIZER_IMAGE_ENV,
+        "anonymizer",
+        PRESIDIO_ANONYMIZER_IMAGE,
+    )
+}
+
+fn resolve_presidio_image(variable: &str, service: &str, default: &str) -> Result<String> {
+    let image = env::var(variable).unwrap_or_else(|_| default.to_string());
+    validate_presidio_image(&image, service)?;
+    Ok(image)
+}
+
+fn validate_presidio_image(image: &str, service: &str) -> Result<Version> {
+    let prefix = format!("ghcr.io/data-privacy-stack/presidio-{service}:");
+    let tagged = image.strip_prefix(&prefix).with_context(|| {
+        format!("Presidio {service} image must use the official {prefix}<version> image")
+    })?;
+    let version_text = tagged
+        .split_once('@')
+        .map_or(tagged, |(version, _)| version);
+    let version = Version::parse(version_text)
+        .with_context(|| format!("Presidio {service} image has invalid version {version_text}"))?;
+    let minimum = Version::parse(prodex_optional_tools::PRESIDIO_MINIMUM_SUPPORTED_VERSION)
+        .context("invalid Prodex Presidio minimum supported version")?;
+    if !version.pre.is_empty() || version < minimum {
+        bail!(
+            "Presidio {service} {version} is incompatible; Prodex requires {} or newer. Update Presidio to the latest stable release (release-qualified reference: {})",
+            prodex_optional_tools::PRESIDIO_MINIMUM_SUPPORTED_VERSION,
+            prodex_optional_tools::PRESIDIO_LATEST_STABLE_REFERENCE,
+        )
+    }
+    if let Some((_, digest)) = tagged.split_once('@') {
+        let Some(hex) = digest.strip_prefix("sha256:") else {
+            bail!("Presidio {service} image digest must use sha256")
+        };
+        if hex.len() != 64 || !hex.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+            bail!("Presidio {service} image digest must be a 64-character SHA-256")
+        }
+    }
+    Ok(version)
 }
 
 pub(super) fn docker_available() -> bool {
@@ -30,7 +86,7 @@ pub(super) fn ensure_presidio_container(
     host_port: &str,
 ) -> Result<Option<PresidioContainerChange>> {
     if let Some(container) = inspect_presidio_container(name)? {
-        validate_presidio_container(&container, name, image, host_port)?;
+        validate_presidio_container(&container, name, host_port)?;
         if container
             .pointer("/State/Running")
             .and_then(serde_json::Value::as_bool)
@@ -136,7 +192,6 @@ fn inspect_presidio_container(name: &str) -> Result<Option<serde_json::Value>> {
 fn validate_presidio_container(
     container: &serde_json::Value,
     name: &str,
-    image: &str,
     host_port: &str,
 ) -> Result<()> {
     let labels = container.pointer("/Config/Labels");
@@ -148,10 +203,17 @@ fn validate_presidio_container(
         .and_then(|labels| labels.get(PRESIDIO_SERVICE_LABEL))
         .and_then(serde_json::Value::as_str)
         == Some(name);
+    let service_kind = match name {
+        PRESIDIO_ANALYZER_CONTAINER => "analyzer",
+        PRESIDIO_ANONYMIZER_CONTAINER => "anonymizer",
+        _ => {
+            bail!("unknown Prodex-managed Presidio container {name}")
+        }
+    };
     let image_matches = container
         .pointer("/Config/Image")
         .and_then(serde_json::Value::as_str)
-        == Some(image);
+        .is_some_and(|image| validate_presidio_image(image, service_kind).is_ok());
     let bindings = container.pointer("/HostConfig/PortBindings");
     let port_matches = bindings
         .and_then(|bindings| bindings.as_object())
@@ -166,7 +228,7 @@ fn validate_presidio_container(
         });
     if !managed || !service || !image_matches || !port_matches {
         bail!(
-            "refusing existing Presidio container {name}: Prodex ownership, image, or port configuration does not match"
+            "refusing existing Presidio container {name}: Prodex ownership, compatible official image version, or port configuration does not match"
         );
     }
     Ok(())
@@ -204,13 +266,7 @@ mod tests {
                 }
             }
         });
-        validate_presidio_container(
-            &container,
-            PRESIDIO_ANALYZER_CONTAINER,
-            PRESIDIO_ANALYZER_IMAGE,
-            "5002",
-        )
-        .unwrap();
+        validate_presidio_container(&container, PRESIDIO_ANALYZER_CONTAINER, "5002").unwrap();
         for image in [PRESIDIO_ANALYZER_IMAGE, PRESIDIO_ANONYMIZER_IMAGE] {
             assert!(image.contains("@sha256:"));
             assert!(!image.contains(":latest"));
@@ -235,15 +291,32 @@ mod tests {
             let (parent, key) = path.rsplit_once('/').unwrap();
             invalid.pointer_mut(parent).unwrap()[key] = value;
             assert!(
-                validate_presidio_container(
-                    &invalid,
-                    PRESIDIO_ANALYZER_CONTAINER,
-                    PRESIDIO_ANALYZER_IMAGE,
-                    "5002",
-                )
-                .is_err(),
+                validate_presidio_container(&invalid, PRESIDIO_ANALYZER_CONTAINER, "5002").is_err(),
                 "container mutation {path} must be rejected"
             );
         }
+    }
+
+    #[test]
+    fn presidio_image_policy_accepts_newer_official_versions_and_rejects_old_or_foreign() {
+        assert!(
+            validate_presidio_image(
+                "ghcr.io/data-privacy-stack/presidio-analyzer:2.2.365",
+                "analyzer"
+            )
+            .is_ok()
+        );
+        assert!(validate_presidio_image(
+            "ghcr.io/data-privacy-stack/presidio-anonymizer:3.0.0@sha256:1111111111111111111111111111111111111111111111111111111111111111",
+            "anonymizer"
+        ).is_ok());
+        assert!(
+            validate_presidio_image(
+                "ghcr.io/data-privacy-stack/presidio-analyzer:2.2.363",
+                "analyzer"
+            )
+            .is_err()
+        );
+        assert!(validate_presidio_image("example.com/presidio:3.0.0", "analyzer").is_err());
     }
 }

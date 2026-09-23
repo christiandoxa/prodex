@@ -177,7 +177,7 @@ Prodex Super keeps a deliberately small optional stack:
 - [Ponytail](https://github.com/DietrichGebert/ponytail) for minimal-implementation guidance.
 - [Presidio](https://github.com/data-privacy-stack/presidio) for opt-in PII redaction.
 
-Caveman is externally installed and validated; Smart Context is built into the Codex runtime proxy, not guaranteed for native opaque CLIs. Every default Codex-based `prodex s` or `prodex playwright` launch adds a pinned Playwright MCP server to its temporary overlay when Node.js 18+ and `npx` pass launch-time path validation. Prodex runs without every external tool above; missing tools are skipped instead of blocking Super. See [Optional Tools](docs/optional-tools.md) for pinned Caveman/Ponytail metadata, managed paths, validation, and strict launch behavior.
+Caveman is externally installed and validated; Smart Context is built into the Codex runtime proxy, not guaranteed for native opaque CLIs. Every default Codex-based `prodex s` or `prodex playwright` launch adds the installed compatible Playwright MCP package to its temporary overlay when Node.js 18+ and `npx` pass launch-time validation. Prodex does not require one exact optional-tool version at runtime: missing tools are skipped, compatible releases at or above each minimum are accepted, and an installed-but-incompatible tool fails with an upgrade instruction. Release qualification still tracks the latest stable references. See [Optional Tools](docs/optional-tools.md) for minimum versions, latest-stable references, managed paths, and validation rules.
 
 <details>
 <summary>Install and verify the Super tools</summary>
@@ -254,13 +254,14 @@ heavy indexing work are skipped unless updated. Prodex leaves `CBM_CACHE_DIR` un
 sub-agent sessions join the account-wide canonical daemon; an explicit user override is inherited
 unchanged and must stay consistent across every CBM client.
 
-Playwright MCP (latest stable, pinned `@playwright/mcp@0.0.82`):
+Playwright MCP (minimum supported `0.0.79`; current latest-stable reference `0.0.82`):
 
 ```bash
 node --version
 npx --version
-npx -y @playwright/mcp@0.0.82 install-browser chrome
-npx -y @playwright/mcp@0.0.82 --version
+npm install -g @playwright/mcp@latest
+npx --no-install @playwright/mcp install-browser chrome
+npx --no-install @playwright/mcp --version
 prodex capability super-doctor
 prodex playwright --dry-run
 ```

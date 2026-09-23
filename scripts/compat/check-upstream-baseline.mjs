@@ -4,7 +4,6 @@ import path from "node:path";
 import { repoRoot } from "../npm/common.mjs";
 
 const DEFAULT_BASELINE_PATH = path.join(repoRoot, "scripts/compat/upstream-baseline.json");
-const EXPECTED_CODEX_RELEASE = "rust-v0.156.1";
 
 const REQUIRED_CRITICAL_FILES = [
   "codex-rs/core/src/client.rs",
@@ -1693,14 +1692,28 @@ function validateBaseline(baseline) {
     warnings.push("codex.compatibility.guard_command should document the offline guard command");
   }
 
-  if (compat.tested_codex_release !== EXPECTED_CODEX_RELEASE) {
-    errors.push(
-      `codex.compatibility.tested_codex_release must match tested official Codex ${EXPECTED_CODEX_RELEASE}`,
-    );
+  const testedCodexRelease = compat.tested_codex_release;
+  const latestCodexRelease = baseline?.codex?.latestRelease?.tag_name;
+  if (
+    typeof testedCodexRelease !== "string" ||
+    !/^rust-v\d+\.\d+\.\d+$/u.test(testedCodexRelease)
+  ) {
+    errors.push("codex.compatibility.tested_codex_release must be a stable rust-vX.Y.Z release tag");
   }
-
-  if (baseline?.codex?.latestRelease?.tag_name !== EXPECTED_CODEX_RELEASE) {
-    errors.push(`codex.latestRelease.tag_name must match tested official Codex ${EXPECTED_CODEX_RELEASE}`);
+  if (
+    typeof latestCodexRelease !== "string" ||
+    !/^rust-v\d+\.\d+\.\d+$/u.test(latestCodexRelease)
+  ) {
+    errors.push("codex.latestRelease.tag_name must be a stable rust-vX.Y.Z release tag");
+  }
+  if (
+    typeof testedCodexRelease === "string" &&
+    typeof latestCodexRelease === "string" &&
+    testedCodexRelease !== latestCodexRelease
+  ) {
+    errors.push(
+      "codex.compatibility.tested_codex_release must match codex.latestRelease.tag_name",
+    );
   }
 
   const appServerProtocol = compat.app_server_protocol;
@@ -1767,12 +1780,12 @@ function renderReport(report) {
 function buildSelfTestBaseline() {
   return {
     codex: {
-      latestRelease: { tag_name: EXPECTED_CODEX_RELEASE },
+      latestRelease: { tag_name: "rust-v9.8.7" },
       compatibility: {
         upstream_repository: "self-test",
         guard_command: "node scripts/compat/check-upstream-baseline.mjs --self-test",
         format_version: COMPAT_FORMAT_VERSION_WITH_SEMANTIC_CHECKS,
-        tested_codex_release: EXPECTED_CODEX_RELEASE,
+        tested_codex_release: "rust-v9.8.7",
         app_server_protocol: {
           schema_command: "codex app-server generate-json-schema --out DIR",
           schema_hash: null,
@@ -1829,17 +1842,18 @@ function runSelfTest() {
   assertSelfTestError({
     name: "mismatched bundled release",
     mutate: (compat) => {
-      compat.tested_codex_release = "rust-v0.0.0";
+      compat.tested_codex_release = "rust-v9.8.6";
     },
-    expectedMessage: `codex.compatibility.tested_codex_release must match tested official Codex ${EXPECTED_CODEX_RELEASE}`,
+    expectedMessage:
+      "codex.compatibility.tested_codex_release must match codex.latestRelease.tag_name",
   });
 
   assertSelfTestError({
-    name: "mismatched latest release",
+    name: "invalid latest release",
     mutate: (_compat, baseline) => {
-      baseline.codex.latestRelease.tag_name = "rust-v0.0.0";
+      baseline.codex.latestRelease.tag_name = "not-a-release";
     },
-    expectedMessage: `codex.latestRelease.tag_name must match tested official Codex ${EXPECTED_CODEX_RELEASE}`,
+    expectedMessage: "codex.latestRelease.tag_name must be a stable rust-vX.Y.Z release tag",
   });
 
   assertSelfTestError({

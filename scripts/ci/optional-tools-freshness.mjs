@@ -66,21 +66,21 @@ function normalizeVersion(value) {
   return match?.[1] ?? null;
 }
 
-export function runtimePinnedVersions(source) {
+export function runtimeReferenceVersions(source) {
   const constants = new Map([
-    ["caveman", ["CAVEMAN_VETTED_VERSION", ""]],
-    ["rtk", ["RTK_RECOMMENDED_VERSION", ""]],
-    ["codebase-memory-mcp", ["CODEBASE_MEMORY_RECOMMENDED_VERSION", ""]],
-    ["playwright-mcp", ["PLAYWRIGHT_MCP_PACKAGE", "@playwright/mcp@"]],
-    ["ponytail", ["PONYTAIL_VETTED_VERSION", ""]],
-    ["presidio", ["PRESIDIO_RECOMMENDED_VERSION", ""]],
+    ["caveman", ["CAVEMAN_LATEST_STABLE_REFERENCE", ""]],
+    ["rtk", ["RTK_LATEST_STABLE_REFERENCE", ""]],
+    ["codebase-memory-mcp", ["CODEBASE_MEMORY_LATEST_STABLE_REFERENCE", ""]],
+    ["playwright-mcp", ["PLAYWRIGHT_MCP_LATEST_STABLE_REFERENCE", ""]],
+    ["ponytail", ["PONYTAIL_LATEST_STABLE_REFERENCE", ""]],
+    ["presidio", ["PRESIDIO_LATEST_STABLE_REFERENCE", ""]],
   ]);
   return Object.fromEntries([...constants].map(([id, [name, prefix]]) => {
     const match = source.match(
       new RegExp(`^pub(?:\\(crate\\))? const ${name}: &str = "([^"]+)";`, "mu"),
     );
     if (!match || !match[1].startsWith(prefix)) {
-      throw new Error(`runtime optional-tool inventory is missing ${name}`);
+      throw new Error(`runtime optional-tool latest-stable reference inventory is missing ${name}`);
     }
     return [id, match[1].slice(prefix.length)];
   }));
@@ -111,20 +111,20 @@ export function latestStableReleaseTag(releases, componentPrefix = null) {
   );
 }
 
-export function compareFreshness(audit, observed, pinned) {
+export function compareFreshness(audit, observed, references) {
   if (!Array.isArray(audit?.tools)) throw new Error("optional-tool audit tools must be an array");
   if (!observed || typeof observed !== "object" || Array.isArray(observed)) {
     throw new Error("optional-tool observations must be an object");
   }
-  if (!pinned || typeof pinned !== "object" || Array.isArray(pinned)) {
-    throw new Error("runtime optional-tool pins must be an object");
+  if (!references || typeof references !== "object" || Array.isArray(references)) {
+    throw new Error("runtime optional-tool latest-stable references must be an object");
   }
   return audit.tools.map((tool) => {
     const actual = Object.hasOwn(observed, tool.id) ? observed[tool.id] : undefined;
     const expected = normalizeVersion(tool.latest_stable);
     const versions = Array.isArray(actual) ? actual : actual == null ? [] : [actual];
     const normalized = versions.map(normalizeVersion);
-    const runtimePin = normalizeVersion(pinned[tool.id]);
+    const runtimeReference = normalizeVersion(references[tool.id]);
     const consistent =
       normalized.length > 0 &&
       normalized.every((version) => version !== null && version === normalized[0]);
@@ -132,9 +132,9 @@ export function compareFreshness(audit, observed, pinned) {
       id: tool.id,
       expected,
       observed: normalized,
-      pinned: runtimePin,
+      reference: runtimeReference,
       status:
-        consistent && normalized[0] === expected && runtimePin === expected ? "latest" : "drift",
+        consistent && normalized[0] === expected && runtimeReference === expected ? "latest" : "drift",
     };
   });
 }
@@ -260,10 +260,10 @@ export async function runFreshnessCheck({
   if (json && checkpoint === null) {
     throw new Error("--json requires --checkpoint and --release-sha");
   }
-  const pinned = runtimePinnedVersions(
+  const references = runtimeReferenceVersions(
     inventorySource ?? await fs.readFile(runtimeInventoryPath, "utf8"),
   );
-  const results = compareFreshness(audit, await fetchLatest(audit), pinned);
+  const results = compareFreshness(audit, await fetchLatest(audit), references);
   const evidence = {
     schema_version: FRESHNESS_SCHEMA_VERSION,
     checkpoint,
@@ -306,14 +306,14 @@ function selfTest() {
         id: "one",
         expected: "1.2.3",
         observed: ["1.2.3"],
-        pinned: "1.2.3",
+        reference: "1.2.3",
         status: "latest",
       },
       {
         id: "two",
         expected: "0.4.5",
         observed: ["0.4.5", "0.4.5"],
-        pinned: "0.4.5",
+        reference: "0.4.5",
         status: "latest",
       },
     ],

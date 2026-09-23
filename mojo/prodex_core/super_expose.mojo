@@ -227,6 +227,63 @@ def super_expose_range_matches_literal(
             return False
     return True
 
+def super_expose_ascii_digit(byte: UInt8) -> Bool:
+    return byte >= 48 and byte <= 57
+
+def super_expose_ascii_hex(byte: UInt8) -> Bool:
+    return (
+        (byte >= 48 and byte <= 57)
+        or (byte >= 97 and byte <= 102)
+        or (byte >= 65 and byte <= 70)
+    )
+
+def super_expose_tunnel_client_version_line_valid(
+    view: ProdexRichStringView,
+    start: Int64,
+    end: Int64,
+) -> Bool:
+    if start < 0 or end <= start:
+        return False
+    var ptr = rich_view_ptr(view)
+    var cursor = start
+    for component in range(3):
+        var digits: Int64 = 0
+        while cursor < end and super_expose_ascii_digit(ptr[unsafe_offset=cursor]):
+            cursor += 1
+            digits += 1
+        if digits == 0:
+            return False
+        if component < 2:
+            if cursor >= end or ptr[unsafe_offset=cursor] != 46:
+                return False
+            cursor += 1
+    if cursor >= end or ptr[unsafe_offset=cursor] != 43:
+        return False
+    cursor += 1
+    var first_sha = cursor
+    for _ in range(40):
+        if cursor >= end or not super_expose_ascii_hex(ptr[unsafe_offset=cursor]):
+            return False
+        cursor += 1
+    var marker = StringSlice(" (git sha: ")
+    var marker_len = Int64(marker.byte_length())
+    if not super_expose_range_matches_literal(
+        view, cursor, cursor + marker_len, marker
+    ):
+        return False
+    cursor += marker_len
+    var second_sha = cursor
+    for index in range(40):
+        if cursor >= end or not super_expose_ascii_hex(ptr[unsafe_offset=cursor]):
+            return False
+        if ptr[unsafe_offset=first_sha + index] != ptr[unsafe_offset=second_sha + index]:
+            return False
+        cursor += 1
+    if cursor >= end or ptr[unsafe_offset=cursor] != 41:
+        return False
+    cursor += 1
+    return cursor == end
+
 def super_expose_tunnel_client_version_output_valid(
     view: ProdexRichStringView,
 ) -> Bool:
@@ -236,24 +293,8 @@ def super_expose_tunnel_client_version_output_valid(
     while cursor <= length:
         if cursor == length or rich_view_ptr(view)[unsafe_offset=cursor] == 10:
             var bounds = super_expose_ascii_trim_bounds(view, line_start, cursor)
-            if super_expose_range_matches_literal(
-                view,
-                bounds[0],
-                bounds[1],
-                StringSlice(
-                    "0.0.14+0f870e50a973fa820d4c409000059e181e8d242b "
-                    "(git sha: 0f870e50a973fa820d4c409000059e181e8d242b)"
-                ),
-            ):
-                return True
-            if super_expose_range_matches_literal(
-                view,
-                bounds[0],
-                bounds[1],
-                StringSlice(
-                    "0.0.13+4b5267f823be0b046bb883aacb51603cfde3a0ea "
-                    "(git sha: 4b5267f823be0b046bb883aacb51603cfde3a0ea)"
-                ),
+            if super_expose_tunnel_client_version_line_valid(
+                view, bounds[0], bounds[1]
             ):
                 return True
             line_start = cursor + 1

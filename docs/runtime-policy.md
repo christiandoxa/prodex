@@ -19,7 +19,7 @@ order without including configured values. Rust callers that need structured
 diagnostics can downcast the error to `RuntimePolicyValidationErrors`.
 
 Relative `runtime.log_dir` values are resolved under the Prodex root. `PRODEX_RUNTIME_LOG_DIR` is used as provided.
-Live `prodex log stream` and `prodex log upstream` data is published through the authenticated runtime broker and retained only in a bounded in-memory window by default. Raw runtime-log recording is opt-in with `PRODEX_RUNTIME_LOG_RECORD=1`; recorded files remain byte-, count-, total-size-, and age-bounded. `prodex s expose` is the narrow exception: it always records bounded redacted expose activity metadata into the same runtime-log directory so `prodex log` can account for endpoint actions even when raw proxy recording is disabled. Expose audit lines never store the capability URL/token, task or request payload text, environment values, stdin, or captured stdout/stderr.
+Live `prodex log stream` and `prodex log upstream` data is published through the authenticated runtime broker and retained only in a bounded in-memory window by default. Raw runtime-log recording is opt-in with `PRODEX_RUNTIME_LOG_RECORD=1`; recorded files remain byte-, count-, total-size-, and age-bounded. `prodex s expose` is the narrow exception: it always records bounded redacted expose activity metadata into the same runtime-log directory so `prodex log` can account for endpoint actions even when raw proxy recording is disabled. Expose audit lines never store the capability URL/token, task or request payload text, environment values, stdin contents, or captured stdout/stderr. Direct `prodex_super_exec` audit events do include a bounded redacted command preview, cwd, argument/environment counts, stdin byte count, timeout, duration, status, and exit metadata so `prodex log` shows what was executed without exposing secret-bearing values.
 Use `prodex info` for effective tuning values and `prodex doctor --runtime --json` for the resolved runtime log directory, format, and current `log_path` when recording is enabled.
 
 ```bash
@@ -654,7 +654,7 @@ shared-state integration around those operations.
 - An available weekly quota window remains eligible when the 5-hour window is absent or unknown; explicit exhaustion still blocks selection.
 - OpenAI `additional_rate_limits` are preserved as independent backend buckets, including their
   explicit `allowed`, `limit_reached`, `ordinaryUsageAllowed`, `normalModelSlug`, and unknown
-  future fields. The pinned Codex `rust-v0.156.1` contract exposes backend admission and model
+  future fields. The release-qualified Codex reference currently uses `rust-v0.156.1`; runtime compatibility is capability-based and accepts Codex 0.153.2 or newer when required app-server surfaces are present. That reference exposes backend admission and model
   mapping metadata. Reserve-aware usage reads advertise
   `x-openai-codex-luna-reserve: 1`. Prodex requires `ordinaryUsageAllowed=false`,
   `normalModelSlug=gpt-5.6-luna`, and a usable explicitly mapped `gpt-reserve` bucket before
@@ -677,7 +677,10 @@ shared-state integration around those operations.
   exits non-zero when any requested profile fails while separately reporting whether any profile
   remains usable.
 - OpenAI Secure MCP Tunnel readiness remains layered: local MCP/browser checks and tunnel-client
-  `/healthz`/`/readyz` prove local runtime readiness only. Prodex must not report ChatGPT
+  `/healthz`/`/readyz` prove local runtime readiness only. Runtime compatibility accepts official
+  stable tunnel-client 0.0.13 or newer when its version metadata is self-consistent and the required
+  `run` capability probe succeeds; release qualification tracks the latest stable reference rather
+  than maintaining an exact runtime allowlist. Prodex must not report ChatGPT
   connector readiness without observed remote connector traffic; workspace association and
   Tunnels Read + Use permissions remain external control-plane requirements.
 - Resume launches preserve the session's last model unless the user supplies an explicit model override.
