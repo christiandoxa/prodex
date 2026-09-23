@@ -80,93 +80,105 @@ pub(super) fn trust_super_hooks(
         }
     });
 
-    let result = (|| -> Result<HookTrustPreflight> {
-        expect_rpc_result(
-            rpc_request(
-                &mut stdin,
-                &receiver,
-                1,
-                "initialize",
-                json!({
-                    "clientInfo": {
-                        "name": "prodex-hook-trust",
-                        "version": env!("CARGO_PKG_VERSION"),
-                    },
-                    "capabilities": {
-                        "experimentalApi": true,
-                    },
-                }),
-            )?,
-            "initialize",
-        )?;
-
-        let workspace = workspace.to_string_lossy().into_owned();
-        let listed = match rpc_request(
-            &mut stdin,
-            &receiver,
-            2,
-            "hooks/list",
-            json!({ "cwds": [workspace] }),
-        )? {
-            RpcReply::Error {
-                code: METHOD_NOT_FOUND,
-                ..
-            } => {
-                return Ok(HookTrustPreflight::LegacyBypass);
-            }
-            reply => expect_rpc_result(reply, "hooks/list")?,
-        };
-        let updates = hook_trust_updates(&listed)?;
-
-        if !updates.is_empty() {
-            let written = match rpc_request(
-                &mut stdin,
-                &receiver,
-                3,
-                "config/batchWrite",
-                json!({
-                    "edits": [{
-                        "keyPath": "hooks.state",
-                        "value": Value::Object(updates),
-                        "mergeStrategy": "upsert",
-                    }],
-                    "filePath": null,
-                    "expectedVersion": null,
-                    "reloadUserConfig": true,
-                }),
-            )? {
-                RpcReply::Error {
-                    code: METHOD_NOT_FOUND,
-                    ..
-                } => {
-                    return Ok(HookTrustPreflight::LegacyBypass);
-                }
-                reply => expect_rpc_result(reply, "config/batchWrite")?,
-            };
-            if written.get("status").and_then(Value::as_str) != Some("ok") {
-                bail!("Codex hook-trust config write did not report status=ok");
-            }
-        }
-
-        let verified = expect_rpc_result(
-            rpc_request(
-                &mut stdin,
-                &receiver,
-                4,
-                "hooks/list",
-                json!({ "cwds": [workspace] }),
-            )?,
-            "hooks/list verification",
-        )?;
-        verify_hooks_trusted(&verified)?;
-        Ok(HookTrustPreflight::Trusted)
-    })();
+    let result = run_hook_trust_preflight(&mut stdin, &receiver, workspace);
 
     drop(stdin);
     let _ = child.kill();
     let _ = child.wait();
     let _ = reader.join();
     result
+}
+
+fn run_hook_trust_preflight(
+    stdin: &mut impl Write,
+    receiver: &mpsc::Receiver<std::result::Result<String, String>>,
+    workspace: &Path,
+) -> Result<HookTrustPreflight> {
+    expect_rpc_result(
+        rpc_request(
+            stdin,
+            receiver,
+            1,
+            "initialize",
+            json!({
+                "clientInfo": {
+                    "name": "prodex-hook-trust",
+                    "version": env!("CARGO_PKG_VERSION"),
+                },
+                "capabilities": {
+                    "experimentalApi": true,
+                },
+            }),
+        )?,
+        "initialize",
+    )?;
+
+    let workspace = workspace.to_string_lossy().into_owned();
+    let Some(listed) = rpc_result_or_legacy(
+        rpc_request(
+            stdin,
+            receiver,
+            2,
+            "hooks/list",
+            json!({ "cwds": [workspace] }),
+        )?,
+        "hooks/list",
+    )?
+    else {
+        return Ok(HookTrustPreflight::LegacyBypass);
+    };
+    let updates = hook_trust_updates(&listed)?;
+
+    if !updates.is_empty() {
+        let Some(written) = rpc_result_or_legacy(
+            rpc_request(
+                stdin,
+                receiver,
+                3,
+                "config/batchWrite",
+                json!({
+                    "edits": [{
+                        "keyPath": "hooks.state",
+                        "value": updates,
+                        "mergeStrategy": "upsert",
+                    }],
+                    "filePath": null,
+                    "expectedVersion": null,
+                    "reloadUserConfig": true,
+                }),
+            )?,
+            "config/batchWrite",
+        )?
+        else {
+            return Ok(HookTrustPreflight::LegacyBypass);
+        };
+        if written.get("status").and_then(Value::as_str) != Some("ok") {
+            bail!("Codex hook-trust config write did not report status=ok");
+        }
+    }
+
+    let verified = expect_rpc_result(
+        rpc_request(
+            stdin,
+            receiver,
+            4,
+            "hooks/list",
+            json!({ "cwds": [workspace] }),
+        )?,
+        "hooks/list verification",
+    )?;
+    verify_hooks_trusted(&verified)?;
+    Ok(HookTrustPreflight::Trusted)
+}
+
+fn rpc_result_or_legacy(reply: RpcReply, operation: &str) -> Result<Option<Value>> {
+    match reply {
+        RpcReply::Error {
+            code: METHOD_NOT_FOUND,
+            ..
+        } => Ok(None),
+        reply => expect_rpc_result(reply, operation).map(Some),
+    }
 }
 
 fn app_server_config_args(runtime_args: &[OsString]) -> Vec<OsString> {
