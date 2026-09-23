@@ -52,14 +52,15 @@ The official Linux musl asset is 107,345,927 bytes and the extracted binary is
 | Explicit quota errors | `credit_balance_exhausted`, `organization_spend_limit_exceeded`, and `project_spend_limit_exceeded` join `insufficient_quota`. | Classify all four as explicit quota; rotate only before commit, pass through after commit. |
 | `slow_down` | Moved from server-overload handling to rate-limit handling, including retry-after parsing. | Classify as rate limit and retry the same profile pre-commit; do not rotate it as account quota. |
 | `server_is_overloaded` | Remains server overload. | Keep transient same-profile retry behavior. |
-| App-server / daemon / workspace routing | The release adds and expands upstream-owned daemon, workspace routing, remote-control, provider, OAuth, plugin, and UI behavior. | Preserve additive protocol fields and capability-probed behavior. Do not duplicate these services in Prodex. |
+| App-server workspace routing | `account/read` uses the effective `chatgpt_base_url` while discovering the selected workspace and rejects any resolved backend that is not a credential-free HTTPS origin. | Keep `chatgpt_base_url` Codex-owned/HTTPS. Route local Prodex model traffic through an authenticated custom model provider instead of replacing the ChatGPT bootstrap URL. |
+| App-server / daemon / other workspace surfaces | The release adds and expands upstream-owned daemon, workspace routing, remote-control, provider, OAuth, plugin, and UI behavior. | Preserve additive protocol fields and capability-probed behavior. Do not duplicate these services in Prodex. |
 
 ## Verification
 
 - Downloaded and SHA-256 verified exact `rust-v0.155.1` and
   `rust-v0.156.0` tagged source archives.
-- Compared the exact tagged trees and replayed all 49 Prodex critical-file
-  assertions against the 0.156.0 source; all 49 pass after updating the
+- Compared the exact tagged trees and replayed all 50 Prodex critical-file
+  assertions against the 0.156.0 source; all 50 pass after updating the
   intentional fixed-route and compaction-metadata assertions.
 - Verified the GitHub release metadata and annotated/peeled tag identities.
 - Downloaded the official Linux musl asset; its size and SHA-256 match the
@@ -86,3 +87,38 @@ credentials, or live orchestrator.
 This audit supersedes the 0.155.1 compatibility pin for the Prodex 0.431
 release train. Prodex keeps upstream-owned Codex behavior external and limits
 the compatibility repair to classification and pinned contract metadata.
+
+## Prodex 0.431.1 workspace-routing hotfix
+
+The 0.431.0 launch projection still replaced `chatgpt_base_url` with the local
+HTTP runtime proxy. Codex 0.156.0 now consumes that value during TUI
+`account/read` workspace bootstrap and validates it with `parse_backend_url`,
+which requires HTTPS, a host, and no embedded credentials. The resulting user
+failure was:
+
+`account/read failed: workspace backend must use an HTTPS origin without credentials`
+
+Prodex 0.431.1 no longer rewrites `chatgpt_base_url` or `openai_base_url` for
+ordinary OpenAI runtime-proxy launches. Instead it selects the existing
+`prodex-openai-governed-http` custom provider, points that provider's model
+`base_url` at the loopback Prodex proxy, keeps `requires_openai_auth=true`, and
+retains WebSocket support for ordinary TUI launches. Forced HTTP/sub-agent
+launches use the same provider with WebSockets disabled.
+
+The child `NO_PROXY` projection also recognizes the internal provider base URL
+so loopback model traffic cannot be accidentally sent through a corporate
+proxy.
+
+Validation added for this hotfix:
+
+- The official Codex 0.156.0 Linux binary and a synthetic ChatGPT auth/mock
+  backend reproduce the old projection failure exactly with JSON-RPC code
+  `-32603`.
+- The runtime-launch regression requires the new projection to omit loopback
+  `chatgpt_base_url`/`openai_base_url`, preserve an explicit user HTTPS
+  `chatgpt_base_url`, select the authenticated Prodex provider, and preserve the
+  loopback port in `NO_PROXY`.
+- Runtime-launch passes both the feature-off Rust oracle and the release-pinned
+  Mojo 1.0.0 production path.
+- The compatibility baseline now pins the exact upstream workspace-routing
+  HTTPS validation source, increasing the critical-file replay set to 50.

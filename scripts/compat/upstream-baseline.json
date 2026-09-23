@@ -720,6 +720,21 @@
           ]
         },
         {
+          "path": "codex-rs/app-server/src/request_processors/account_processor/workspace_routing.rs",
+          "required_contains": [
+            "workspace backend must use an HTTPS origin without credentials",
+            "effective_chatgpt_base_url",
+            "config.chatgpt_base_url.clone()",
+            "get_accounts_check",
+            "workspace_backend_origin",
+            "resolve_routing",
+            "parse_backend_url",
+            "url.scheme() != \"https\"",
+            "!url.username().is_empty()",
+            "url.password().is_some()"
+          ]
+        },
+        {
           "path": "codex-rs/app-server/src/request_serialization.rs",
           "reason": "Owns app-server request serialization scopes, including thread and thread-path queues.",
           "required_contains": [
@@ -1500,6 +1515,24 @@
           ]
         },
         {
+          "id": "app-server.workspace-routing-https-bootstrap",
+          "kind": "security_boundary",
+          "file": "codex-rs/app-server/src/request_processors/account_processor/workspace_routing.rs",
+          "reason": "Codex 0.156 account/read workspace discovery uses the effective ChatGPT bootstrap URL and requires every resolved backend to be a credential-free HTTPS origin; Prodex must not replace chatgpt_base_url with its HTTP loopback model proxy.",
+          "file_contains_all": [
+            "workspace backend must use an HTTPS origin without credentials",
+            "effective_chatgpt_base_url",
+            "config.chatgpt_base_url.clone()",
+            "get_accounts_check",
+            "workspace_backend_origin",
+            "resolve_routing",
+            "parse_backend_url",
+            "url.scheme() != \"https\"",
+            "!url.username().is_empty()",
+            "url.password().is_some()"
+          ]
+        },
+        {
           "id": "app-server.mcp-event-stream",
           "kind": "experimental_jsonrpc_methods",
           "file": "codex-rs/app-server/src/request_processors/mcp_event_stream.rs",
@@ -1752,10 +1785,11 @@
             "Root-agent Responses session_id headers now use prompt-cache affinity while turn metadata retains the actual session identity; non-root agents keep the actual session id.",
             "Remote compaction v2 can retry with the current model after an eligible previous-model compaction failure, while continuing to send CompactionTrigger through /responses.",
             "Responses failed-event classification adds credit_balance_exhausted, organization_spend_limit_exceeded, and project_spend_limit_exceeded as quota codes and treats slow_down as rate limiting rather than overload.",
-            "App-server, daemon, provider routing, workspace routing, OAuth, TUI, voice, plugin, sandbox, and model-catalog surfaces expand upstream; Prodex preserves additive protocol fields and does not duplicate those services."
+            "App-server, daemon, provider routing, workspace routing, OAuth, TUI, voice, plugin, sandbox, and model-catalog surfaces expand upstream; Prodex preserves additive protocol fields and does not duplicate those services.",
+            "App-server account/read workspace routing validates the effective ChatGPT bootstrap URL as a credential-free HTTPS origin before returning workspace routing."
           ],
-          "prodex_action": "Align explicit quota/rate classification with Codex 0.156, preserve /responses and WebSocket payload/header transparency, treat session_id as an opaque affinity key, retain legacy /responses/compact support for older clients, and keep upstream daemon/workspace/provider semantics external.",
-          "compatibility_evidence": "Exact 0.155.1 and 0.156.0 tagged source archives, official release/tag metadata, critical-file assertion replay, official Linux binary smoke, upstream baseline guard, capture replay, and focused runtime/provider compatibility tests are recorded in migration/codex-rust-v0.156.0-audit.md."
+          "prodex_action": "Align explicit quota/rate classification with Codex 0.156, preserve /responses and WebSocket payload/header transparency, treat session_id as an opaque affinity key, keep chatgpt_base_url Codex-owned and HTTPS for account/read workspace routing, route Prodex model traffic through an authenticated custom model provider, retain legacy /responses/compact support for older clients, and keep upstream daemon/workspace/provider semantics external.",
+          "compatibility_evidence": "Exact 0.155.1 and 0.156.0 tagged source archives, official release/tag metadata, 50 critical-file assertion replay checks including the workspace-routing HTTPS boundary, an exact official-0.156 synthetic account/read reproduction of the former HTTP-origin failure, official Linux binary smoke, upstream baseline guard, capture replay, and focused runtime/provider compatibility tests are recorded in migration/codex-rust-v0.156.0-audit.md."
         }
       ],
       "app_server_protocol": {
