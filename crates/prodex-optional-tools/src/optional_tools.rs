@@ -441,14 +441,34 @@ fn playwright_tool_status() -> ToolHealth {
     let Some(npx) = find_path_command("npx") else {
         return ToolHealth::missing(id, "npx was not found on PATH");
     };
-    resolved_command_tool(
+    match resolved_command_tool(
         id,
         npx,
         ToolDiscoverySource::Path,
         &PLAYWRIGHT_MCP_PROBE_ARGS,
-    )
-    .map(ToolHealth::installed)
-    .unwrap_or_else(|error| invalid_tool(id, error))
+    ) {
+        Ok(tool) => ToolHealth::installed(tool),
+        Err(error) => playwright_probe_failure(error),
+    }
+}
+
+pub(super) fn playwright_probe_failure(error: anyhow::Error) -> ToolHealth {
+    let detail = error.to_string();
+    let normalized = detail.to_ascii_lowercase();
+    if normalized.contains("npx canceled due to missing packages")
+        || normalized.contains("package is not installed")
+        || normalized.contains("could not determine executable to run")
+    {
+        return ToolHealth::missing(
+            OptionalToolId::PlaywrightMcp,
+            format!(
+                "Playwright MCP is not installed; install @playwright/mcp {} or newer (latest stable reference: {})",
+                crate::PLAYWRIGHT_MCP_MINIMUM_SUPPORTED_VERSION,
+                crate::PLAYWRIGHT_MCP_LATEST_STABLE_REFERENCE,
+            ),
+        );
+    }
+    invalid_tool(OptionalToolId::PlaywrightMcp, error)
 }
 
 fn find_path_command(command: &str) -> Option<PathBuf> {
@@ -650,6 +670,19 @@ mod tests {
         assert!(!manifest_tree_sha256_supported(
             "other", "current", "legacy"
         ));
+    }
+
+    #[test]
+    fn missing_playwright_package_is_optional_but_incompatible_install_is_invalid() {
+        let missing = playwright_probe_failure(anyhow::anyhow!(
+            "playwright-mcp health check exited with exit status: 1: npm error npx canceled due to missing packages and no YES option"
+        ));
+        assert_eq!(missing.status, ToolHealthStatus::Missing);
+        assert!(missing.detail.contains("Playwright MCP is not installed"));
+
+        let incompatible =
+            playwright_probe_failure(anyhow::anyhow!("playwright-mcp 0.0.78 is too old"));
+        assert_eq!(incompatible.status, ToolHealthStatus::Invalid);
     }
 
     #[test]
