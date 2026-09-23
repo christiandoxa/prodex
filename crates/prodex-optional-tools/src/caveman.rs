@@ -6,8 +6,8 @@ use crate::optional_tools::{
 };
 use crate::tree::{read_bounded_file, tree_sha256};
 use crate::{
-    CAVEMAN_LEGACY_MANIFEST_TREE_SHA256, CAVEMAN_LATEST_STABLE_COMMIT,
-    CAVEMAN_LATEST_STABLE_REFERENCE, CAVEMAN_LATEST_STABLE_TREE_SHA256,
+    CAVEMAN_LATEST_STABLE_COMMIT, CAVEMAN_LATEST_STABLE_REFERENCE,
+    CAVEMAN_LATEST_STABLE_TREE_SHA256, CAVEMAN_LEGACY_MANIFEST_TREE_SHA256,
     CAVEMAN_MINIMUM_SUPPORTED_VERSION,
 };
 use anyhow::{Context, Result, bail, ensure};
@@ -149,7 +149,10 @@ fn caveman_candidate() -> Result<Option<(PathBuf, PathBuf)>> {
             if !version.pre.is_empty() {
                 continue;
             }
-            if newest.as_ref().is_none_or(|(current, _)| version > *current) {
+            if newest
+                .as_ref()
+                .is_none_or(|(current, _)| version > *current)
+            {
                 newest = Some((version, entry.path()));
             }
         }
@@ -198,8 +201,14 @@ fn validate_caveman_install(allowed_root: &Path, candidate: &Path) -> Result<Res
     let manifest: CavemanInstallManifest =
         serde_json::from_slice(&read_bounded_file(&manifest_path, 64 * 1024)?)
             .with_context(|| format!("failed to parse {}", manifest_path.display()))?;
-    ensure!(manifest.schema_version == 1, "unsupported Caveman manifest schema");
-    ensure!(manifest.id == "caveman", "Caveman manifest id must be caveman");
+    ensure!(
+        manifest.schema_version == 1,
+        "unsupported Caveman manifest schema"
+    );
+    ensure!(
+        manifest.id == "caveman",
+        "Caveman manifest id must be caveman"
+    );
 
     let version = Version::parse(&manifest.version)
         .with_context(|| format!("invalid Caveman version {}", manifest.version))?;
@@ -217,7 +226,10 @@ fn validate_caveman_install(allowed_root: &Path, candidate: &Path) -> Result<Res
         "Caveman version directory does not match manifest version {}",
         manifest.version
     );
-    ensure!(manifest.source == CAVEMAN_SOURCE, "unexpected Caveman source");
+    ensure!(
+        manifest.source == CAVEMAN_SOURCE,
+        "unexpected Caveman source"
+    );
     ensure!(
         valid_git_sha(&manifest.commit),
         "Caveman manifest commit must be a 40-character Git SHA"
@@ -350,9 +362,10 @@ mod tests {
 
         fs::write(candidate.join("skills/caveman/SKILL.md"), "changed\n").unwrap();
         assert!(
-            validate_caveman_install(&allowed_root, &candidate)\n                .unwrap_err()
-            .to_string()
-            .contains("tree digest mismatch")
+            validate_caveman_install(&allowed_root, &candidate)
+                .unwrap_err()
+                .to_string()
+                .contains("tree digest mismatch")
         );
         let _ = fs::remove_dir_all(allowed_root);
     }
