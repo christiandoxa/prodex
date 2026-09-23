@@ -7,7 +7,9 @@ const PROBE_TIMEOUT: Duration = Duration::from_secs(5);
 pub(super) fn validate_version(version_line: &str) -> anyhow::Result<()> {
     anyhow::ensure!(
         has_shared_daemon(version_line),
-        "codebase-memory-mcp lacks shared daemon coordination; Prodex requires {crate::CODEBASE_MEMORY_MINIMUM_SUPPORTED_VERSION} or newer. Update to the latest stable release (release-qualified reference: {crate::CODEBASE_MEMORY_LATEST_STABLE_REFERENCE})"
+        "codebase-memory-mcp lacks shared daemon coordination; Prodex requires {} or newer. Update to the latest stable release (release-qualified reference: {})",
+        crate::CODEBASE_MEMORY_MINIMUM_SUPPORTED_VERSION,
+        crate::CODEBASE_MEMORY_LATEST_STABLE_REFERENCE,
     );
     Ok(())
 }
